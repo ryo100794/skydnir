@@ -2042,6 +2042,12 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(descriptor_marker, source)
         self.assertIn("VK_IMAGE_ASPECT_COLOR_BIT", source)
+        self.assertIn("vulkan_format_has_depth_aspect", source)
+        self.assertIn("vulkan_format_has_stencil_aspect", source)
+        self.assertIn("vulkan_image_single_aspect_supported_for_format", source)
+        self.assertIn("vulkan_image_single_aspect_supported_for_format(image->format, required)", source)
+        self.assertIn("format == VK_FORMAT_D16_UNORM || format == VK_FORMAT_D32_SFLOAT", source)
+        self.assertIn("format == VK_FORMAT_S8_UINT", source)
         self.assertGreaterEqual(source.count("vulkan_graphics_merge_image_copy_range_for_aspect("), 5)
         self.assertEqual(source.count("vulkan_graphics_merge_attachment_copy_range("), 3)
         self.assertEqual(source.count("vulkan_graphics_merge_descriptor_image_copy_range("), 2)
@@ -2162,6 +2168,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "vkCmdCopyImageToBuffer(command_buffer",
             "vkCmdCopyImage(command_buffer",
             "vulkan_graphics_v610_buffer_image_copy_span",
+            "vulkan_format_bytes_per_pixel_for_aspect((VkFormat)image->format, (VkImageAspectFlags)copy->aspect_mask)",
+            "vulkan_graphics_v610_image_subresource_range_valid",
+            "entry->src_aspect_mask != entry->dst_aspect_mask",
         ]:
             self.assertIn(marker, executor)
         for marker in [
@@ -4927,6 +4936,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("case PDOCKER_VK_COMMAND_IMAGE_COPY:", icd)
         self.assertIn("MAP_PROC(vkCmdCopyBufferToImage);", icd)
         self.assertIn("MAP_PROC(vkCmdCopyImageToBuffer);", icd)
+        self.assertIn("pdocker_vk_image_single_aspect_supported_for_format", icd)
+        self.assertIn("copy__->image->format, copy__->region.imageSubresource.aspectMask", icd)
+        self.assertIn("format == VK_FORMAT_D16_UNORM || format == VK_FORMAT_D32_SFLOAT", icd)
+        self.assertIn("format == VK_FORMAT_S8_UINT", icd)
 
     def test_vulkan_icd_records_image_to_image_copy_commands(self):
         icd = VULKAN_ICD.read_text()
@@ -4939,6 +4952,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("image_ptr(op->src", icd)
         self.assertIn("image_ptr(op->dst", icd)
         self.assertIn("MAP_PROC(vkCmdCopyImage);", icd)
+        self.assertIn("copy__->src->format, copy__->region.srcSubresource.aspectMask", icd)
+        self.assertIn("copy__->dst->format, copy__->region.dstSubresource.aspectMask", icd)
+        self.assertIn("copy__->region.srcSubresource.aspectMask != copy__->region.dstSubresource.aspectMask", icd)
 
     def test_vulkan_icd_exposes_tight_image_subresource_layout(self):
         icd = VULKAN_ICD.read_text()

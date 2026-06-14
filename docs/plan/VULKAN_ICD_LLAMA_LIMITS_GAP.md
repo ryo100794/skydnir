@@ -28,7 +28,28 @@ llama.cpp is not modified by this plan.
 | unsupported | `shaderInt16`, `shaderFloat64`, default `shaderInt64` | Base `shaderInt16=false`, `shaderFloat64=false`; `shaderInt64` is opt-in via `PDOCKER_VULKAN_ENABLE_INT64`, default false. | ggml-vulkan records `shader_int64`; some shader variants can be gated by these scalar capabilities. | Conservative defaults avoid selecting unvalidated wide-scalar Q6 support code. | Leave off unless a specific llama shader requires it and Android evidence supports it. |
 | unsupported | Buffer device address and Vulkan memory model | Vulkan 1.2 `bufferDeviceAddress=false`, `vulkanMemoryModel=false`. | ggml-vulkan records both fields for shader/runtime capability decisions. | Avoids exposing pointer-style or stronger memory-model paths that the bridge does not implement. | Keep unsupported; add only with explicit bridge protocol support. |
 | unsupported | Advanced optional extensions/properties | No subgroup-size-control, integer-dot-product, cooperative-matrix, bfloat16, external-memory-host, memory-budget, memory-priority, pipeline-robustness, or pipeline-executable-properties surface is currently advertised. | ggml-vulkan probes these to enable architecture-specific fast paths, memory budgeting, imported host pointer paths, and pipeline introspection. | Prevents Q6 from entering unimplemented fast paths; limits performance diagnostics and available memory telemetry. | Add one extension at a time only when the executor and compare artifacts can validate the full path. |
-| unsupported | Format/image/sparse support | Format properties are zero; image format queries return `VK_ERROR_FORMAT_NOT_SUPPORTED`; sparse-image property count is zero. | ggml-vulkan compute-buffer inference does not need image/sparse paths for llama Q6. | No expected Q6 impact unless upstream starts using image-backed kernels. | Keep unsupported and fail closed. |
+| implemented-bounded | Format/image/sparse support | The ICD no longer reports a zero image surface for the graphics path: it advertises a conservative single-sample optimal-tiling color/depth/stencil subset where transfer/sample/color/depth-stencil/storage use is implemented, while linear tiling, sparse images, compressed/multiplanar/SRGB/YCbCr promises, unsupported create flags, and unsupported blit/filter paths remain fail-closed.  V6.10 image-copy replay is aspect-aware for fd-backed single-aspect color, pure depth, and pure stencil copies; packed dual-aspect depth/stencil, copy2 pNext payloads, and unsupported image classes remain fail-closed. | ggml-vulkan compute-buffer inference still should not depend on graphics images for llama Q6, but external Vulkan graphics probes can now observe nonzero image/format capability and bounded image-copy replay. | Q6 compute impact remains indirect; optimistic image/format claims must not be used as inference correctness evidence. | Keep advertised image/format caps tied to executor replay coverage, and add new caps only with matching ABI and host/device evidence. |
+
+## Vulkan graphics pass-through cross-note (2026-06-14)
+
+This document is still the llama.cpp/ggml-vulkan advertised-limits gap, not the
+full graphics handoff.  For graphics pass-through planning, keep it aligned
+with `LLAMA_GPU_BRIDGE_NEXT_STEPS.md`:
+
+- V6.10 image-copy replay is no longer color-only.  It covers fd-backed
+  single-aspect color, pure depth, and pure stencil subresources for
+  buffer-image, image-buffer, and image-image copies, with matching
+  source/destination aspects required for image-image copies.
+- V6.14-V6.23 are no longer omitted from the planning status: V6.14 resolve
+  image, V6.15 blit image, V6.16 clear attachments, V6.17/V6.18 query and
+  copy-query results, V6.19/V6.21 submit sync and submit2 metadata, V6.20 image
+  layout ranges, V6.22 multisample state, and V6.23 tessellation state are the
+  current append-only graphics ABI chain after V6.13.
+- Residual graphics gaps remain fail-closed: packed dual-aspect depth/stencil
+  copy layout, copy2 pNext payloads, compressed/multiplanar images,
+  resolve/blit inside dynamic rendering, unresolved MSAA store/readback, true
+  cross-family ownership transfer, dispatch+graphics mixing, and broader
+  synchronization.
 
 ## Q6 / llama GPU bridge summary
 

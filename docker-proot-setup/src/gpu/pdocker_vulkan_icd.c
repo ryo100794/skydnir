@@ -1559,6 +1559,23 @@ static bool pdocker_vk_format_has_stencil(VkFormat format) {
     }
 }
 
+static bool pdocker_vk_image_single_aspect_supported_for_format(
+        VkFormat format,
+        VkImageAspectFlags aspect_mask) {
+    if (aspect_mask == VK_IMAGE_ASPECT_COLOR_BIT) {
+        return !pdocker_vk_format_has_depth(format) &&
+               !pdocker_vk_format_has_stencil(format) &&
+               conservative_format_bytes_per_pixel(format) != 0;
+    }
+    if (aspect_mask == VK_IMAGE_ASPECT_DEPTH_BIT) {
+        return format == VK_FORMAT_D16_UNORM || format == VK_FORMAT_D32_SFLOAT;
+    }
+    if (aspect_mask == VK_IMAGE_ASPECT_STENCIL_BIT) {
+        return format == VK_FORMAT_S8_UINT;
+    }
+    return false;
+}
+
 static bool pdocker_vk_format_is_depth_stencil(VkFormat format) {
     return pdocker_vk_format_has_depth(format) ||
            pdocker_vk_format_has_stencil(format);
@@ -5275,7 +5292,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame(
                 } \
                 const PdockerVkImageCopyOp *copy__ = &cmd->image_copy_ops[op__->index]; \
                 if (!copy__->buffer || !copy__->image || !copy__->buffer->memory || !copy__->image->memory || \
-                    copy__->region.imageSubresource.aspectMask != VK_IMAGE_ASPECT_COLOR_BIT || \
+                    !pdocker_vk_image_single_aspect_supported_for_format(copy__->image->format, copy__->region.imageSubresource.aspectMask) || \
                     copy__->region.imageSubresource.layerCount == 0 || \
                     copy__->region.imageExtent.width == 0 || copy__->region.imageExtent.height == 0 || \
                     copy__->region.imageExtent.depth == 0 || copy__->region.imageOffset.x < 0 || \
@@ -5346,8 +5363,9 @@ static int send_recorded_vulkan_graphics_v6_1_frame(
                 } \
                 const PdockerVkImageToImageCopyOp *copy__ = &cmd->image_to_image_copy_ops[op__->index]; \
                 if (!copy__->src || !copy__->dst || !copy__->src->memory || !copy__->dst->memory || \
-                    copy__->region.srcSubresource.aspectMask != VK_IMAGE_ASPECT_COLOR_BIT || \
-                    copy__->region.dstSubresource.aspectMask != VK_IMAGE_ASPECT_COLOR_BIT || \
+                    !pdocker_vk_image_single_aspect_supported_for_format(copy__->src->format, copy__->region.srcSubresource.aspectMask) || \
+                    !pdocker_vk_image_single_aspect_supported_for_format(copy__->dst->format, copy__->region.dstSubresource.aspectMask) || \
+                    copy__->region.srcSubresource.aspectMask != copy__->region.dstSubresource.aspectMask || \
                     copy__->region.srcSubresource.layerCount == 0 || \
                     copy__->region.srcSubresource.layerCount != copy__->region.dstSubresource.layerCount || \
                     copy__->region.extent.width == 0 || copy__->region.extent.height == 0 || \

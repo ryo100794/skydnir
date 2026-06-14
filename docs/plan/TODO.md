@@ -13,6 +13,25 @@ source of context, but update this board first when work starts, gets blocked,
 or closes.
 
 
+### Vulkan pass-through docs sync 2026-06-14
+
+- [done] **image-aspect docs audit**: The Vulkan graphics handoff now states
+  that V6.10 image-copy replay is no longer color-only; it covers fd-backed
+  single-aspect color, pure depth, and pure stencil copy regions while keeping
+  packed dual-aspect depth/stencil, compressed/multiplanar images, copy2 pNext,
+  and broader synchronization fail-closed.
+- [done] **V6.14-V6.23 status sync**: The handoff and advertised-limits gap now
+  call out the post-V6.13 graphics ABI chain: resolve image, blit image, clear
+  attachments, query/copy-query, submit sync/submit2, image-layout ranges,
+  multisample state, and tessellation state.
+- [planned] **residual graphics evidence gaps**: Do not promote full Vulkan
+  pass-through until remaining fail-closed lanes have explicit ABI/evidence:
+  packed depth+stencil copy layout, copy2 pNext payloads,
+  multiplanar/compressed images, resolve/blit inside dynamic rendering,
+  unresolved MSAA store/readback, true cross-family ownership transfer,
+  dispatch+graphics mixing, and broader synchronization.
+
+
 ### TermPort F-Droid Native Payload Preparation 2026-06-06
 
 - [doing] **TermPort Skydnir payload build ownership**: TermPort now carries the Skydnir native sources it needs and wires Gradle `preBuild` through a local `buildSkydnirNative` task plus daemon asset sync, instead of relying only on manually staged APK payloads. Acceptance: `scripts/verify-native-rebuild-release.sh` dry-run and `scripts/verify-native-payloads.py` freshness verifier remain green for both normal and no-crane packaging modes.

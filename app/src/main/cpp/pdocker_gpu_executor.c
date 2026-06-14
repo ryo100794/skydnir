@@ -2759,6 +2759,31 @@ static uint32_t vulkan_format_bytes_per_pixel_for_aspect(
     return 0;
 }
 
+static int vulkan_format_has_depth_aspect(VkFormat format) {
+    return vulkan_format_bytes_per_pixel_for_aspect(format, VK_IMAGE_ASPECT_DEPTH_BIT) != 0;
+}
+
+static int vulkan_format_has_stencil_aspect(VkFormat format) {
+    return vulkan_format_bytes_per_pixel_for_aspect(format, VK_IMAGE_ASPECT_STENCIL_BIT) != 0;
+}
+
+static int vulkan_image_single_aspect_supported_for_format(
+        VkFormat format,
+        VkImageAspectFlags aspect_mask) {
+    if (aspect_mask == VK_IMAGE_ASPECT_COLOR_BIT) {
+        return !vulkan_format_has_depth_aspect(format) &&
+               !vulkan_format_has_stencil_aspect(format) &&
+               vulkan_format_bytes_per_pixel_for_aspect(format, aspect_mask) != 0;
+    }
+    if (aspect_mask == VK_IMAGE_ASPECT_DEPTH_BIT) {
+        return format == VK_FORMAT_D16_UNORM || format == VK_FORMAT_D32_SFLOAT;
+    }
+    if (aspect_mask == VK_IMAGE_ASPECT_STENCIL_BIT) {
+        return format == VK_FORMAT_S8_UINT;
+    }
+    return 0;
+}
+
 static int vulkan_image_mip_extent(
         const VulkanDispatchImageObject *image,
         uint32_t mip_level,
@@ -19524,7 +19549,7 @@ static int vulkan_graphics_v610_image_subresource_range_valid(
         uint32_t extent_width,
         uint32_t extent_height,
         uint32_t extent_depth) {
-    if (!image || aspect_mask != VK_IMAGE_ASPECT_COLOR_BIT || layer_count == 0 ||
+    if (!image || !vulkan_image_single_aspect_supported_for_format((VkFormat)image->format, (VkImageAspectFlags)aspect_mask) || layer_count == 0 ||
         extent_width == 0 || extent_height == 0 || extent_depth == 0 ||
         offset_x < 0 || offset_y < 0 || offset_z < 0 ||
         mip_level >= image->mip_levels || base_array_layer >= image->array_layers ||
@@ -19591,7 +19616,7 @@ static int vulkan_graphics_v610_buffer_image_copy_span(
     if (!copy || !image || !out_offset || !out_size) return -EINVAL;
     if (copy->image_extent_width == 0 || copy->image_extent_height == 0 ||
         copy->image_extent_depth == 0 || copy->layer_count == 0) return -EINVAL;
-    const uint32_t bpp = vulkan_format_bytes_per_pixel_conservative((VkFormat)image->format);
+    const uint32_t bpp = vulkan_format_bytes_per_pixel_for_aspect((VkFormat)image->format, (VkImageAspectFlags)copy->aspect_mask);
     if (bpp == 0) return -EOPNOTSUPP;
     const uint64_t row_texels = copy->buffer_row_length ? copy->buffer_row_length : copy->image_extent_width;
     const uint64_t image_rows = copy->buffer_image_height ? copy->buffer_image_height : copy->image_extent_height;
@@ -21009,6 +21034,7 @@ static int validate_vulkan_graphics_v6_frame_content(
             const PdockerGpuVulkanDispatchV5ImageEntry *dst_image = &images[entry->dst_image_index];
             if (!(src_image->usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) ||
                 !(dst_image->usage & VK_IMAGE_USAGE_TRANSFER_DST_BIT) ||
+                entry->src_aspect_mask != entry->dst_aspect_mask ||
                 vulkan_graphics_v610_image_subresource_range_valid(
                     src_image, entry->src_aspect_mask, entry->src_mip_level,
                     entry->src_base_array_layer, entry->layer_count,
@@ -23032,7 +23058,7 @@ static int vulkan_graphics_merge_image_copy_range_for_aspect(
         const VkImageSubresourceRange *range,
         VkImageAspectFlags required) {
     if (!image || !range) return -EINVAL;
-    if (!required ||
+    if (!vulkan_image_single_aspect_supported_for_format(image->format, required) ||
         range->aspectMask != required ||
         range->levelCount == 0 ||
         range->layerCount == 0 ||
@@ -23406,7 +23432,7 @@ static int materialize_vulkan_graphics_v6_attachments(
                 .layerCount = copy->layer_count,
             };
             int range_rc = vulkan_graphics_merge_image_copy_range_for_aspect(
-                image, &range, VK_IMAGE_ASPECT_COLOR_BIT);
+                image, &range, (VkImageAspectFlags)copy->aspect_mask);
             if (range_rc != 0) return range_rc;
             if (copy->direction == PDOCKER_GPU_GRAPHICS_V610_BUFFER_IMAGE_COPY_DIRECTION_BUFFER_TO_IMAGE) {
                 image->writeback_needed = 1;
@@ -23441,8 +23467,8 @@ static int materialize_vulkan_graphics_v6_attachments(
                 .baseArrayLayer = copy->dst_base_array_layer,
                 .layerCount = copy->layer_count,
             };
-            int src_rc = vulkan_graphics_merge_image_copy_range_for_aspect(src_image, &src_range, VK_IMAGE_ASPECT_COLOR_BIT);
-            int dst_rc = vulkan_graphics_merge_image_copy_range_for_aspect(dst_image, &dst_range, VK_IMAGE_ASPECT_COLOR_BIT);
+            int src_rc = vulkan_graphics_merge_image_copy_range_for_aspect(src_image, &src_range, (VkImageAspectFlags)copy->src_aspect_mask);
+            int dst_rc = vulkan_graphics_merge_image_copy_range_for_aspect(dst_image, &dst_range, (VkImageAspectFlags)copy->dst_aspect_mask);
             if (src_rc != 0) return src_rc;
             if (dst_rc != 0) return dst_rc;
             src_image->descriptor_layout = (VkImageLayout)copy->src_layout;
