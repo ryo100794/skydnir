@@ -4506,9 +4506,12 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_VK_FEATURE_SYNCHRONIZATION_2",
             "PDOCKER_VK_FEATURE_DYNAMIC_RENDERING",
             "PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE",
+            "PDOCKER_VK_FEATURE_TESSELLATION_SHADER",
             "if (p->synchronization2) mask |= PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;",
             "if (p->dynamicRendering) mask |= PDOCKER_VK_FEATURE_DYNAMIC_RENDERING;",
             "if (p->extendedDynamicState) mask |= PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE;",
+            "if (features->tessellationShader) mask |= PDOCKER_VK_FEATURE_TESSELLATION_SHADER;",
+            "if (caps->features.tessellationShader) mask |= PDOCKER_VK_FEATURE_TESSELLATION_SHADER;",
             "if (advertised_synchronization2()) mask |= PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;",
             "if (advertised_dynamic_rendering()) mask |= PDOCKER_VK_FEATURE_DYNAMIC_RENDERING;",
         ]:
@@ -5700,8 +5703,16 @@ class GpuAbiContractTest(unittest.TestCase):
             "pTessellationState",
             "patchControlPoints",
             "VK_PRIMITIVE_TOPOLOGY_PATCH_LIST",
+            "pipeline->requested_feature_mask =",
+            "PDOCKER_VK_FEATURE_TESSELLATION_SHADER",
         ]:
             self.assertIn(marker, icd)
+        graphics_create_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines", 1)[1].split(
+            "VKAPI_ATTR void VKAPI_CALL vkDestroyPipeline", 1
+        )[0]
+        self.assertNotIn("(void)device;", graphics_create_body)
+        self.assertIn("device ? ((PdockerVkDevice *)device)->requested_feature_mask : 0", graphics_create_body)
+        self.assertIn("pipeline->requested_feature_mask & PDOCKER_VK_FEATURE_TESSELLATION_SHADER", graphics_create_body)
 
         for marker in [
             "PDOCKER_GPU_VULKAN_GRAPHICS_V623_ABI_MINOR",
@@ -9532,6 +9543,7 @@ class GpuAbiContractTest(unittest.TestCase):
         for marker in [
             "write_android_vulkan_enabled_features_report",
             '\\"android_vulkan_enabled_features\\":{',
+            '\\"tessellationShader\\":%u',
             '\\"chain_compat_feature_structs\\":%u',
             "enabled_ext_16bit_storage",
             "enabled_ext_8bit_storage",
@@ -9573,6 +9585,7 @@ class GpuAbiContractTest(unittest.TestCase):
             '\\"limits\\":{',
             '\\"maxStorageBufferRange\\":%u',
             '\\"physical_features\\":{',
+            '\\"tessellationShader\\":%u',
             '\\"storage16\\":{',
             '\\"storage8\\":{',
             '\\"float16_int8\\":{',
@@ -9607,6 +9620,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "storage16.storageBuffer16BitAccess",
             "storage8.storageBuffer8BitAccess",
             "float16_int8.shaderInt8",
+            "features.tessellationShader",
+            "tessellationShader:%u",
             "multiview",
             "subgroup.supportedOperations",
             "timeline_semaphore",
@@ -9622,6 +9637,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "advertised_timeline_semaphore",
             "advertised_synchronization2",
             "advertised_dynamic_rendering",
+            "advertised_tessellation_shader",
             "advertised_draw_indirect_count",
             "advertised_draw_indexed_indirect_count",
             "advertised_draw_indirect_count_khr",
@@ -9672,6 +9688,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("p->synchronization2 = advertised_synchronization2();", pnext_body)
         self.assertIn("p->dynamicRendering = advertised_dynamic_rendering();", pnext_body)
         self.assertIn("p->multiview = caps->multiview;", pnext_body)
+        self.assertIn("pFeatures->tessellationShader = advertised_tessellation_shader();", icd)
         self.assertIn("p->extendedDynamicState = advertised_extended_dynamic_state();", pnext_body)
         extension_body = icd.split("vkEnumerateDeviceExtensionProperties", 1)[1].split(
             "#undef ADD_DEVICE_EXTENSION", 1

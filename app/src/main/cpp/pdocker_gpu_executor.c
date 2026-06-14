@@ -72,6 +72,7 @@
 #define PDOCKER_VK_FEATURE_STORAGE_PUSH_CONSTANT_8      (1ull << 8)
 #define PDOCKER_VK_FEATURE_SHADER_FLOAT16               (1ull << 9)
 #define PDOCKER_VK_FEATURE_SHADER_INT8                  (1ull << 10)
+#define PDOCKER_VK_FEATURE_TESSELLATION_SHADER        (1ull << 21)
 
 #ifndef GL_COMPUTE_SHADER
 #define GL_COMPUTE_SHADER 0x91B9
@@ -1738,7 +1739,7 @@ static void log_vulkan_feature_trace(const VulkanRuntime *rt) {
     if (!rt) return;
     fprintf(stderr,
             "pdocker-gpu-executor: Android Vulkan features build_marker=%s api=%u.%u device=\"%s\" vendor=0x%04x device=0x%04x "
-            "shaderInt64=%u "
+            "shaderInt64=%u tessellationShader=%u "
             "storage16={ssbo:%u,ubo_ssbo:%u,push:%u,io:%u} "
             "storage8={ssbo:%u,ubo_ssbo:%u,push:%u} "
             "float16=%u int8=%u indexTypeUint8=%u "
@@ -1753,6 +1754,7 @@ static void log_vulkan_feature_trace(const VulkanRuntime *rt) {
             rt->physical_properties.vendorID,
             rt->physical_properties.deviceID,
             rt->physical_features.shaderInt64,
+            rt->physical_features.tessellationShader,
             rt->physical_storage16.storageBuffer16BitAccess,
             rt->physical_storage16.uniformAndStorageBuffer16BitAccess,
             rt->physical_storage16.storagePushConstant16,
@@ -1793,7 +1795,7 @@ static void log_vulkan_enabled_feature_trace(
         const VkPhysicalDeviceShaderFloat16Int8Features *float16_int8,
         const VkPhysicalDeviceIndexTypeUint8FeaturesEXT *index_type_uint8) {
     fprintf(stderr,
-            "pdocker-gpu-executor: Android Vulkan enabled features build_marker=%s shaderInt64=%u "
+            "pdocker-gpu-executor: Android Vulkan enabled features build_marker=%s shaderInt64=%u tessellationShader=%u "
             "storage16={ssbo:%u,ubo_ssbo:%u,push:%u,io:%u} "
             "storage8={ssbo:%u,ubo_ssbo:%u,push:%u} "
             "float16=%u int8=%u indexTypeUint8=%u "
@@ -1801,6 +1803,7 @@ static void log_vulkan_enabled_feature_trace(
             "core12_storage8={ssbo:%u,ubo_ssbo:%u,push:%u,float16:%u,int8:%u}\n",
             PDOCKER_GPU_EXECUTOR_BUILD_MARKER,
             features ? features->shaderInt64 : 0,
+            features ? features->tessellationShader : 0,
             storage16 ? storage16->storageBuffer16BitAccess : 0,
             storage16 ? storage16->uniformAndStorageBuffer16BitAccess : 0,
             storage16 ? storage16->storagePushConstant16 : 0,
@@ -1828,6 +1831,7 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
     fprintf(out,
             "\"android_vulkan_enabled_features\":{"
             "\"shaderInt64\":%u,"
+            "\"tessellationShader\":%u,"
             "\"storageBuffer16BitAccess\":%u,"
             "\"uniformAndStorageBuffer16BitAccess\":%u,"
             "\"storagePushConstant16\":%u,"
@@ -1871,6 +1875,7 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             "\"VK_EXT_extended_dynamic_state\":%u,"
             "\"VK_EXT_index_type_uint8\":%u}}",
             rt ? rt->enabled_features.shaderInt64 : 0,
+            rt ? rt->enabled_features.tessellationShader : 0,
             rt ? rt->enabled_storage16.storageBuffer16BitAccess : 0,
             rt ? rt->enabled_storage16.uniformAndStorageBuffer16BitAccess : 0,
             rt ? rt->enabled_storage16.storagePushConstant16 : 0,
@@ -2029,6 +2034,7 @@ static void write_feature_mask_names(FILE *out, uint64_t mask) {
     WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_STORAGE_PUSH_CONSTANT_8, "storagePushConstant8");
     WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_SHADER_FLOAT16, "shaderFloat16");
     WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_SHADER_INT8, "shaderInt8");
+    WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_TESSELLATION_SHADER, "tessellationShader");
 #undef WRITE_FEATURE_NAME
 }
 
@@ -16093,6 +16099,7 @@ cleanup:
         fprintf(json_out(),
                 ",\"android_vulkan_features\":{"
                 "\"shaderInt64\":%u,"
+                "\"tessellationShader\":%u,"
                 "\"storageBuffer16BitAccess\":%u,"
                 "\"uniformAndStorageBuffer16BitAccess\":%u,"
                 "\"storagePushConstant16\":%u,"
@@ -16103,6 +16110,7 @@ cleanup:
                 "\"shaderInt8\":%u,"
                 "\"indexTypeUint8\":%u},",
                 rt ? rt->physical_features.shaderInt64 : 0,
+                rt ? rt->physical_features.tessellationShader : 0,
                 rt ? rt->physical_storage16.storageBuffer16BitAccess : 0,
                 rt ? rt->physical_storage16.uniformAndStorageBuffer16BitAccess : 0,
                 rt ? rt->physical_storage16.storagePushConstant16 : 0,
@@ -16290,6 +16298,7 @@ static void print_capabilities(const char *transport) {
             "\"android_vulkan_features\":{"
             "\"api_major\":%u,\"api_minor\":%u,"
             "\"shaderInt64\":%u,"
+            "\"tessellationShader\":%u,"
             "\"storageBuffer16BitAccess\":%u,"
             "\"uniformAndStorageBuffer16BitAccess\":%u,"
             "\"storagePushConstant16\":%u,"
@@ -16327,6 +16336,7 @@ static void print_capabilities(const char *transport) {
             rt ? VK_API_VERSION_MAJOR(rt->api_version) : 0,
             rt ? VK_API_VERSION_MINOR(rt->api_version) : 0,
             rt ? rt->physical_features.shaderInt64 : 0,
+            rt ? rt->physical_features.tessellationShader : 0,
             rt ? rt->physical_storage16.storageBuffer16BitAccess : 0,
             rt ? rt->physical_storage16.uniformAndStorageBuffer16BitAccess : 0,
             rt ? rt->physical_storage16.storagePushConstant16 : 0,
@@ -16406,6 +16416,7 @@ static void print_vulkan_advertisement_caps(const char *transport) {
     fprintf(out,
             "\"physical_features\":{"
             "\"shaderInt64\":%u,"
+            "\"tessellationShader\":%u,"
             "\"storage16\":{"
             "\"storageBuffer16BitAccess\":%u,"
             "\"uniformAndStorageBuffer16BitAccess\":%u,"
@@ -16421,6 +16432,7 @@ static void print_vulkan_advertisement_caps(const char *transport) {
             "\"indexTypeUint8\":%u,"
             "\"extendedDynamicState\":%u},",
             rt ? rt->physical_features.shaderInt64 : 0,
+            rt ? rt->physical_features.tessellationShader : 0,
             rt ? rt->physical_storage16.storageBuffer16BitAccess : 0,
             rt ? rt->physical_storage16.uniformAndStorageBuffer16BitAccess : 0,
             rt ? rt->physical_storage16.storagePushConstant16 : 0,

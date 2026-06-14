@@ -182,6 +182,7 @@ static uint64_t g_generic_dispatch_sequence = 0;
 #define PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE       (1ull << 18)
 #define PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT          (1ull << 19)
 #define PDOCKER_VK_FEATURE_MULTIVIEW                    (1ull << 20)
+#define PDOCKER_VK_FEATURE_TESSELLATION_SHADER        (1ull << 21)
 
 struct PdockerVkMemory {
     size_t size;
@@ -9402,6 +9403,7 @@ static bool parse_executor_advertisement_caps_json(
     json_read_u32_array3(json, "maxComputeWorkGroupCount", caps->limits.maxComputeWorkGroupCount);
 
     json_read_u32(json, "shaderInt64", &caps->features.shaderInt64);
+    json_read_u32(json, "tessellationShader", &caps->features.tessellationShader);
     json_read_u32(json, "multiview", &caps->multiview);
     json_read_u32(json, "storageBuffer16BitAccess", &caps->storage16.storageBuffer16BitAccess);
     json_read_u32(json, "uniformAndStorageBuffer16BitAccess", &caps->storage16.uniformAndStorageBuffer16BitAccess);
@@ -9526,6 +9528,11 @@ static VkBool32 advertised_timeline_semaphore(void) {
     return (caps && caps->timeline_semaphore && caps->ext_timeline_semaphore) ? VK_TRUE : VK_FALSE;
 }
 
+static VkBool32 advertised_tessellation_shader(void) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+    return (caps && caps->features.tessellationShader) ? VK_TRUE : VK_FALSE;
+}
+
 static VkBool32 advertised_synchronization2(void) {
     const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
     return (caps && caps->synchronization2 && caps->ext_synchronization2) ? VK_TRUE : VK_FALSE;
@@ -9591,7 +9598,7 @@ static void trace_executor_advertisement_caps_once(void) {
         fprintf(stderr,
                 "pdocker-vulkan-icd: executor advertisement caps shadow: "
                 "api=0x%08x device=\"%s\" vendor=0x%04x device_id=0x%04x "
-                "type=%u storage16=%u storage8=%u int8=%u indexTypeUint8=%u subgroup={size:%u,ops:0x%x}\n",
+                "type=%u storage16=%u storage8=%u int8=%u indexTypeUint8=%u tessellationShader=%u subgroup={size:%u,ops:0x%x}\n",
                 caps->api_version,
                 caps->device_name,
                 caps->vendor_id,
@@ -9601,6 +9608,7 @@ static void trace_executor_advertisement_caps_once(void) {
                 caps->storage8.storageBuffer8BitAccess,
                 caps->float16_int8.shaderInt8,
                 caps->index_type_uint8.indexTypeUint8,
+                caps->features.tessellationShader,
                 caps->subgroup.subgroupSize,
                 caps->subgroup.supportedOperations);
     } else {
@@ -9858,6 +9866,7 @@ static void fill_physical_device_features(VkPhysicalDeviceFeatures *pFeatures) {
     if (!pFeatures) return;
     memset(pFeatures, 0, sizeof(*pFeatures));
     pFeatures->shaderInt64 = advertised_shader_int64();
+    pFeatures->tessellationShader = advertised_tessellation_shader();
 }
 
 static void fill_pnext_features(void *pNext) {
@@ -10018,6 +10027,7 @@ static uint64_t feature_mask_from_base_features(const VkPhysicalDeviceFeatures *
     if (features->shaderInt64) mask |= PDOCKER_VK_FEATURE_SHADER_INT64;
     if (features->shaderInt16) mask |= PDOCKER_VK_FEATURE_SHADER_INT16;
     if (features->shaderFloat64) mask |= PDOCKER_VK_FEATURE_SHADER_FLOAT64;
+    if (features->tessellationShader) mask |= PDOCKER_VK_FEATURE_TESSELLATION_SHADER;
     return mask;
 }
 
@@ -10175,6 +10185,7 @@ static uint64_t advertised_feature_mask(void) {
             mask |= PDOCKER_VK_FEATURE_INDEX_TYPE_UINT8;
         }
         if (caps->multiview) mask |= PDOCKER_VK_FEATURE_MULTIVIEW;
+        if (caps->features.tessellationShader) mask |= PDOCKER_VK_FEATURE_TESSELLATION_SHADER;
     } else {
         if (advertised_storage16()) mask |= PDOCKER_VK_FEATURE_STORAGE_BUFFER_16;
         if (advertised_storage8()) {
@@ -10209,21 +10220,23 @@ static void trace_device_create_features(const VkDeviceCreateInfo *pCreateInfo) 
     if (!pCreateInfo || !(trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG"))) return;
     const VkPhysicalDeviceFeatures *features = pCreateInfo->pEnabledFeatures;
     fprintf(stderr,
-            "pdocker-vulkan-icd: create-device extensions=%u base_features={shaderInt64:%u,shaderInt16:%u,shaderFloat64:%u}\n",
+            "pdocker-vulkan-icd: create-device extensions=%u base_features={shaderInt64:%u,shaderInt16:%u,shaderFloat64:%u,tessellationShader:%u}\n",
             pCreateInfo->enabledExtensionCount,
             features ? features->shaderInt64 : 0,
             features ? features->shaderInt16 : 0,
-            features ? features->shaderFloat64 : 0);
+            features ? features->shaderFloat64 : 0,
+            features ? features->tessellationShader : 0);
     for (const void *node = pCreateInfo->pNext; node;) {
         PdockerVkStructHeader header = read_vk_struct_header(node);
         switch (header.sType) {
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2: {
                 const VkPhysicalDeviceFeatures2 *p = (const VkPhysicalDeviceFeatures2 *)node;
                 fprintf(stderr,
-                        "pdocker-vulkan-icd: create-device features2={shaderInt64:%u,shaderInt16:%u,shaderFloat64:%u}\n",
+                        "pdocker-vulkan-icd: create-device features2={shaderInt64:%u,shaderInt16:%u,shaderFloat64:%u,tessellationShader:%u}\n",
                         p->features.shaderInt64,
                         p->features.shaderInt16,
-                        p->features.shaderFloat64);
+                        p->features.shaderFloat64,
+                        p->features.tessellationShader);
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES: {
@@ -12165,9 +12178,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateComputePipelines(
         const VkComputePipelineCreateInfo *pCreateInfos,
         const VkAllocationCallbacks *pAllocator,
         VkPipeline *pPipelines) {
-    (void)device;
     (void)pipelineCache;
-    (void)pCreateInfos;
     (void)pAllocator;
     if (!pPipelines) return VK_ERROR_INITIALIZATION_FAILED;
     for (uint32_t i = 0; i < createInfoCount; ++i) {
@@ -12335,7 +12346,6 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
         const VkGraphicsPipelineCreateInfo *pCreateInfos,
         const VkAllocationCallbacks *pAllocator,
         VkPipeline *pPipelines) {
-    (void)device;
     (void)pipelineCache;
     (void)pAllocator;
     if (!pPipelines || (createInfoCount > 0 && !pCreateInfos)) {
@@ -12346,6 +12356,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
         if (!pipeline) return VK_ERROR_OUT_OF_HOST_MEMORY;
         pipeline->graphics = true;
         pipeline->graphics_unsupported = false;
+        pipeline->requested_feature_mask =
+            device ? ((PdockerVkDevice *)device)->requested_feature_mask : 0;
         pipeline->line_width = 1.0f;
         const VkGraphicsPipelineCreateInfo *ci = &pCreateInfos[i];
         if (ci->flags != 0 || ci->basePipelineHandle != VK_NULL_HANDLE ||
@@ -12578,6 +12590,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
                 pipeline->topology != VK_PRIMITIVE_TOPOLOGY_PATCH_LIST) {
                 pipeline->graphics_unsupported = true;
             } else {
+                if ((pipeline->requested_feature_mask & PDOCKER_VK_FEATURE_TESSELLATION_SHADER) == 0) {
+                    pipeline->graphics_unsupported = true;
+                }
                 pipeline->tessellation_state_present = true;
                 pipeline->patch_control_points = ts->patchControlPoints;
             }

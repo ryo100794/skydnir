@@ -144,6 +144,13 @@
       "modes": [
         "vulkan"
       ]
+    },
+    {
+      "env": "PDOCKER_VULKAN_ADVERTISEMENT_SOURCE",
+      "default": "executor",
+      "modes": [
+        "vulkan"
+      ]
     }
   ],
   "ui_compose_runtime_env_defaults": [
