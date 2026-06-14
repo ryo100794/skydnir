@@ -4746,6 +4746,8 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         self.assertIn("if (info->pNext) return unsupported_image_pnext_result", image_validate_body)
         self.assertIn("vkGetPhysicalDeviceImageFormatProperties", image_validate_body)
+        self.assertIn("if ((info->samples & props.sampleCounts) == 0)", image_validate_body)
+        self.assertIn("return VK_ERROR_FORMAT_NOT_SUPPORTED;", image_validate_body)
         create_image_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateImage", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkDestroyImage", 1
         )[0]
@@ -4934,6 +4936,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("return VK_ERROR_FORMAT_NOT_SUPPORTED;\n}", image_props)
         self.assertNotIn("VK_FORMAT_FEATURE_UNIFORM_TEXEL_BUFFER_BIT", format_props)
         self.assertNotIn("VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_BIT", format_props)
+        self.assertNotIn("VK_FORMAT_FEATURE_BLIT_SRC_BIT", format_props)
+        self.assertNotIn("VK_FORMAT_FEATURE_BLIT_DST_BIT", format_props)
+        self.assertNotIn("VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT", format_props)
         self.assertIn("VK_FORMAT_D32_SFLOAT", icd)
         self.assertIn("VK_FORMAT_D32_SFLOAT_S8_UINT", icd)
         self.assertNotIn("case VK_FORMAT_D16_UNORM_S8_UINT:\n            return true;", icd)

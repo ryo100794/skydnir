@@ -1835,6 +1835,7 @@ static const char *syscall_name(long nr) {
         case 48: return "faccessat";
         case 49: return "chdir";
         case 50: return "fchdir";
+        case 51: return "chroot";
         case 53: return "fchmodat";
         case 54: return "fchownat";
         case 55: return "fchown";
@@ -1970,6 +1971,13 @@ static int syscall_emulate_success(long nr) {
 }
 
 static int syscall_emulate_errno(long nr, int *err) {
+    if (nr == 51) {
+        /* The direct executor does not change the process root.  Return the
+         * normal unprivileged Linux failure instead of allowing Android
+         * seccomp to surface SIGSYS/"Bad system call" or ENOSYS. */
+        if (err) *err = EPERM;
+        return 1;
+    }
     if ((nr >= 194 && nr <= 197) || (nr >= 235 && nr <= 239) || nr == 450) {
         /* Android app seccomp commonly blocks SysV shared memory and NUMA policy
          * syscalls. Container workloads should treat these like unavailable
@@ -2041,6 +2049,7 @@ static int install_selective_seccomp_trace_filter(void) {
     ADD_TRACE_SYSCALL(43);   /* statfs */
     ADD_TRACE_SYSCALL(48);   /* faccessat */
     ADD_TRACE_SYSCALL(49);   /* chdir */
+    ADD_ERRNO_SYSCALL(51, EPERM);   /* chroot: unsupported in app domain, fail like unprivileged Linux. */
     ADD_TRACE_SYSCALL(53);   /* fchmodat */
     ADD_TRACE_SYSCALL(54);   /* fchownat */
     ADD_TRACE_SYSCALL(55);   /* fchown */

@@ -1263,6 +1263,10 @@ Temporary behavior:
   helper symlinks in rootfs state. Android device evidence for self,
   thread-self, and pid-specific proc exe paths remains required before closing
   the Direct syscall Phase 2 device lane.
+- Direct `chroot(2)` syscall 51 now fails closed as `EPERM` in both the
+  selective seccomp filter and ptrace errno-emulation path. The broader procfs,
+  mount, and process-list isolation evidence remains open before the Phase 2
+  proc/mount/chroot lane can close.
 - `faccessat2` is now handled in user-space mediation for apt-key. Replace the
   current minimal path probing with full flags/errno parity.
 - `linkat` currently uses a file-copy fallback, including a dpkg

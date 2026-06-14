@@ -10792,7 +10792,7 @@ static VkResult validate_image_create_info_for_transport(const VkImageCreateInfo
     if (!info) return VK_ERROR_INITIALIZATION_FAILED;
     if (info->pNext) return unsupported_image_pnext_result("vkCreateImage", info->pNext);
     VkImageFormatProperties props;
-    return vkGetPhysicalDeviceImageFormatProperties(
+    VkResult rc = vkGetPhysicalDeviceImageFormatProperties(
         (VkPhysicalDevice)&g_device,
         info->format,
         info->imageType,
@@ -10800,6 +10800,11 @@ static VkResult validate_image_create_info_for_transport(const VkImageCreateInfo
         info->usage,
         info->flags,
         &props);
+    if (rc != VK_SUCCESS) return rc;
+    if ((info->samples & props.sampleCounts) == 0) {
+        return VK_ERROR_FORMAT_NOT_SUPPORTED;
+    }
+    return VK_SUCCESS;
 }
 
 static VkResult validate_image_view_create_info_for_transport(const VkImageViewCreateInfo *info) {
