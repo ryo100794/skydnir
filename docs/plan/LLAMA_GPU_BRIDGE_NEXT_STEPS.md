@@ -106,11 +106,35 @@ current handoff:
   per-subresource initial layouts instead of guessing a single image layout.
 - **V6.22/V6.23** carry multisample and tessellation pipeline state metadata.
 
-Residual graphics gaps remain explicit: packed dual-aspect depth/stencil copy
-layout, multiplanar/compressed images, copy2 pNext payloads, resolve/blit while
-inside dynamic rendering, unresolved MSAA store/readback, true cross-family
-ownership transfer, dispatch+graphics mixing, and broader synchronization are
-still fail-closed until they have their own ABI/evidence lanes.
+Residual graphics gaps remain explicit: V6.1 image-barrier
+`VK_REMAINING_MIP_LEVELS`/`VK_REMAINING_ARRAY_LAYERS` normalization and
+image-barrier aspect validation, packed dual-aspect depth/stencil copy layout,
+multiplanar/compressed images, copy2 pNext payloads, resolve/blit while inside
+dynamic rendering, unresolved MSAA store/readback, true cross-family ownership
+transfer, dispatch+graphics mixing, and broader synchronization are still
+fail-closed until they have their own ABI/evidence lanes.
+
+Next active implementation slice after the V6.10 pure-aspect copy work and
+V6.23 tessellation metadata is the V6.1 explicit image-barrier lane. Acceptance
+checks for that slice:
+
+- Producer serialization normalizes `VK_REMAINING_MIP_LEVELS` and
+  `VK_REMAINING_ARRAY_LAYERS` to concrete mip/layer counts before emitting V6.1
+  image-barrier metadata; the executor rejects any unnormalized sentinel value
+  that reaches replay.
+- Barrier1 and barrier2 fixtures cover fd-backed color, pure-depth, and
+  pure-stencil images with aspect masks that are valid for each serialized
+  format, and reject empty, out-of-bounds, or overflowed subresource ranges.
+- Negative fixtures keep metadata/plane aspects, compressed/multiplanar images,
+  invalid color-vs-depth/stencil masks, and ambiguous packed depth+stencil
+  ranges fail-closed until their own ABI/evidence lanes exist.
+- Same-family/ignored queue-family behavior remains limited to the existing
+  normalization rules; true cross-family ownership transfer and broader
+  synchronization remain explicit non-goals for this slice.
+- Host acceptance after the future code change is
+  `python3 -m unittest tests.test_gpu_abi_contract tests.test_llama_gpu_env_parity`,
+  plus synchronized ABI headers/native payload freshness checks whenever the
+  implementation touches the graphics ABI or executor payloads.
 
 
 Do not claim GPU inference correctness or performance for `ngl>=1` from served

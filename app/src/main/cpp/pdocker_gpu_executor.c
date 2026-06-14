@@ -2784,6 +2784,25 @@ static int vulkan_image_single_aspect_supported_for_format(
     return 0;
 }
 
+static int vulkan_image_aspect_mask_valid_for_format(
+        VkFormat format,
+        VkImageAspectFlags aspect_mask) {
+    const VkImageAspectFlags supported =
+        VK_IMAGE_ASPECT_COLOR_BIT |
+        VK_IMAGE_ASPECT_DEPTH_BIT |
+        VK_IMAGE_ASPECT_STENCIL_BIT;
+    if (aspect_mask == 0 || (aspect_mask & ~supported) != 0) return 0;
+    const int has_depth = vulkan_format_has_depth_aspect(format);
+    const int has_stencil = vulkan_format_has_stencil_aspect(format);
+    if (has_depth || has_stencil) {
+        VkImageAspectFlags allowed = 0;
+        if (has_depth) allowed |= VK_IMAGE_ASPECT_DEPTH_BIT;
+        if (has_stencil) allowed |= VK_IMAGE_ASPECT_STENCIL_BIT;
+        return (aspect_mask & ~allowed) == 0;
+    }
+    return aspect_mask == VK_IMAGE_ASPECT_COLOR_BIT;
+}
+
 static int vulkan_image_mip_extent(
         const VulkanDispatchImageObject *image,
         uint32_t mip_level,
@@ -20761,7 +20780,12 @@ static int validate_vulkan_graphics_v6_frame_content(
             if (barrier->image_index >= header->image_count) return -EPROTO;
             if (barrier->aspect_mask == 0 || barrier->level_count == 0 || barrier->layer_count == 0) return -EINVAL;
             const PdockerGpuVulkanDispatchV5ImageEntry *image = &images[barrier->image_index];
-            if (barrier->base_mip_level >= image->mip_levels ||
+            if (barrier->level_count == VK_REMAINING_MIP_LEVELS ||
+                barrier->layer_count == VK_REMAINING_ARRAY_LAYERS) {
+                return -EPROTO;
+            }
+            if (!vulkan_graphics_v620_image_aspect_valid(image, (VkImageAspectFlags)barrier->aspect_mask) ||
+                barrier->base_mip_level >= image->mip_levels ||
                 barrier->level_count > image->mip_levels - barrier->base_mip_level ||
                 barrier->base_array_layer >= image->array_layers ||
                 barrier->layer_count > image->array_layers - barrier->base_array_layer) {
@@ -26619,6 +26643,18 @@ static int record_vulkan_graphics_v6_command_buffer(
                         barrier->image_index >= attachments->image_count ||
                         !attachments->images[barrier->image_index].image) {
                         rc = -EPROTO;
+                        goto cleanup;
+                    }
+                    VulkanDispatchImageObject *barrier_image = &attachments->images[barrier->image_index];
+                    if (barrier->level_count == VK_REMAINING_MIP_LEVELS ||
+                        barrier->layer_count == VK_REMAINING_ARRAY_LAYERS ||
+                        !vulkan_image_aspect_mask_valid_for_format(
+                            barrier_image->format, (VkImageAspectFlags)barrier->aspect_mask) ||
+                        barrier->base_mip_level >= barrier_image->mip_levels ||
+                        barrier->level_count > barrier_image->mip_levels - barrier->base_mip_level ||
+                        barrier->base_array_layer >= barrier_image->array_layers ||
+                        barrier->layer_count > barrier_image->array_layers - barrier->base_array_layer) {
+                        rc = -ERANGE;
                         goto cleanup;
                     }
                     VkImageSubresourceRange barrier_range = {

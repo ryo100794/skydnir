@@ -2606,6 +2606,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "commands[barrier->command_index].command_type != PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER",
             "barrier->resource_index >= header->resource_count",
             "barrier->src_stage_mask == 0",
+            "barrier->level_count == VK_REMAINING_MIP_LEVELS",
+            "barrier->layer_count == VK_REMAINING_ARRAY_LAYERS",
+            "vulkan_graphics_v620_image_aspect_valid(image, (VkImageAspectFlags)barrier->aspect_mask)",
             "vulkan_graphics_barrier_queue_family_replayable",
             "descriptor->dynamic_offset != 0",
             "dynamic_descriptor_count != command->dynamic_offset_count",
@@ -2638,6 +2641,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("srcStageMask = (VkPipelineStageFlags2)barrier->src_stage_mask", recorder)
         self.assertNotIn("vkCmdPipelineBarrier(command_buffer,\n                                     src_stages", recorder)
         self.assertIn("attachments->images[barrier->image_index].current_layout", recorder)
+        self.assertIn("vulkan_image_aspect_mask_valid_for_format", executor)
+        self.assertIn("barrier->level_count == VK_REMAINING_MIP_LEVELS", recorder)
+        self.assertIn("barrier->layer_count == VK_REMAINING_ARRAY_LAYERS", recorder)
+        self.assertIn("barrier_image->format, (VkImageAspectFlags)barrier->aspect_mask", recorder)
         self.assertIn("vulkan_graphics_barrier_queue_family_replayable", preflight)
         self.assertIn("graphics cross-queue-family barrier replay is not implemented", preflight)
         self.assertIn("vulkan_graphics_replay_queue_family_index", recorder)
@@ -2717,6 +2724,16 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("sizeof(image_barriers[0]) * image_barrier_count", icd)
         self.assertIn("sizeof(memory_barriers[0]) * memory_barrier_count", icd)
         self.assertIn("sizeof(buffer_barriers[0]) * buffer_barrier_count", icd)
+        self.assertIn("normalize_image_subresource_range(src->image, &src->range, &normalized_range)", icd)
+        self.assertIn("dst->level_count = normalized_range.levelCount", icd)
+        self.assertIn("dst->layer_count = normalized_range.layerCount", icd)
+        serializer_body = icd.split("const PdockerVkImageBarrierOp *src = &cmd->image_barrier_ops[op_index];", 1)[1].split(
+            "dst->src_access_mask", 1
+        )[0]
+        self.assertNotIn("src->range.levelCount", serializer_body)
+        self.assertNotIn("src->range.layerCount", serializer_body)
+        self.assertIn("image-barrier-invalid-range", icd)
+        self.assertIn("pdocker_vk_image_aspect_mask_valid_for_format", icd)
         clear_body = icd.split("static void clear_recorded_command_ops", 1)[1].split(
             "static bool append_command_op", 1
         )[0]

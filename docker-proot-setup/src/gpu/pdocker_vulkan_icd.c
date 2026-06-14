@@ -1576,6 +1576,25 @@ static bool pdocker_vk_image_single_aspect_supported_for_format(
     return false;
 }
 
+static bool pdocker_vk_image_aspect_mask_valid_for_format(
+        VkFormat format,
+        VkImageAspectFlags aspect_mask) {
+    const VkImageAspectFlags supported =
+        VK_IMAGE_ASPECT_COLOR_BIT |
+        VK_IMAGE_ASPECT_DEPTH_BIT |
+        VK_IMAGE_ASPECT_STENCIL_BIT;
+    if (aspect_mask == 0 || (aspect_mask & ~supported) != 0) return false;
+    const bool has_depth = pdocker_vk_format_has_depth(format);
+    const bool has_stencil = pdocker_vk_format_has_stencil(format);
+    if (has_depth || has_stencil) {
+        VkImageAspectFlags allowed = 0;
+        if (has_depth) allowed |= VK_IMAGE_ASPECT_DEPTH_BIT;
+        if (has_stencil) allowed |= VK_IMAGE_ASPECT_STENCIL_BIT;
+        return (aspect_mask & ~allowed) == 0;
+    }
+    return aspect_mask == VK_IMAGE_ASPECT_COLOR_BIT;
+}
+
 static bool pdocker_vk_format_is_depth_stencil(VkFormat format) {
     return pdocker_vk_format_has_depth(format) ||
            pdocker_vk_format_has_stencil(format);
@@ -3537,6 +3556,10 @@ static int validate_descriptor_transport_shape(
 static bool image_mip_extent(const PdockerVkImage *image,
                              uint32_t mip_level,
                              VkExtent3D *out);
+static bool normalize_image_subresource_range(
+        const PdockerVkImage *image,
+        const VkImageSubresourceRange *range,
+        VkImageSubresourceRange *out);
 
 static int collect_graphics_image_entry(
         PdockerGpuVulkanDispatchV5ImageEntry *image_entries,
@@ -5658,16 +5681,21 @@ static int send_recorded_vulkan_graphics_v6_1_frame(
                     resources, &resource_count, memory_objects, memory_resource_indices, &memory_count,
                     fds, &fd_count, src->image, submit_id);
                 if (image_index < 0) { rc = image_index; goto cleanup; }
+                VkImageSubresourceRange normalized_range;
+                if (!normalize_image_subresource_range(src->image, &src->range, &normalized_range)) {
+                    rc = -ERANGE;
+                    goto cleanup;
+                }
                 PdockerGpuVulkanGraphicsV61ImageBarrierEntry *dst = &image_barriers[image_barrier_count++];
                 dst->command_index = (uint32_t)command_count;
                 dst->image_index = (uint32_t)image_index;
                 dst->old_layout = (uint32_t)src->old_layout;
                 dst->new_layout = (uint32_t)src->new_layout;
-                dst->aspect_mask = (uint32_t)src->range.aspectMask;
-                dst->base_mip_level = src->range.baseMipLevel;
-                dst->level_count = src->range.levelCount;
-                dst->base_array_layer = src->range.baseArrayLayer;
-                dst->layer_count = src->range.layerCount;
+                dst->aspect_mask = (uint32_t)normalized_range.aspectMask;
+                dst->base_mip_level = normalized_range.baseMipLevel;
+                dst->level_count = normalized_range.levelCount;
+                dst->base_array_layer = normalized_range.baseArrayLayer;
+                dst->layer_count = normalized_range.layerCount;
                 dst->src_access_mask = (uint64_t)src->src_access_mask;
                 dst->dst_access_mask = (uint64_t)src->dst_access_mask;
                 dst->src_stage_mask = (uint64_t)src->src_stage_mask;
@@ -15191,6 +15219,9 @@ static bool normalize_image_subresource_range(
         VkImageSubresourceRange *out) {
     if (!image || !range || !out) return false;
     *out = *range;
+    if (!pdocker_vk_image_aspect_mask_valid_for_format(image->format, out->aspectMask)) {
+        return false;
+    }
     if (out->baseMipLevel >= image->mip_levels ||
         out->baseArrayLayer >= image->array_layers) {
         return false;
@@ -15364,13 +15395,25 @@ static void record_image_barrier_op(
         }
         return;
     }
+    VkImageSubresourceRange normalized_range;
+    if (!normalize_image_subresource_range(image, &range, &normalized_range)) {
+        cmd->graphics_unsupported = true;
+        command_buffer_mark_recording_failed(cmd, "image-barrier-invalid-range");
+        if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
+            fprintf(stderr,
+                    "pdocker-vulkan-icd: image-barrier invalid range aspect=0x%x mip=%u levels=%u layer=%u layers=%u; submit will fail closed\n",
+                    range.aspectMask, range.baseMipLevel, range.levelCount,
+                    range.baseArrayLayer, range.layerCount);
+        }
+        return;
+    }
     uint32_t op_index = cmd->image_barrier_op_count++;
     PdockerVkImageBarrierOp *op = &cmd->image_barrier_ops[op_index];
     memset(op, 0, sizeof(*op));
     op->image = image;
     op->old_layout = oldLayout;
     op->new_layout = newLayout;
-    op->range = range;
+    op->range = normalized_range;
     op->src_access_mask = srcAccessMask;
     op->dst_access_mask = dstAccessMask;
     op->src_stage_mask = srcStageMask;
