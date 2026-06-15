@@ -16320,6 +16320,10 @@ static size_t vulkan_graphics_runtime_format_bridge_count(void);
 static VkFormat vulkan_graphics_runtime_format_bridge_at(size_t index);
 static VkFormatFeatureFlags vulkan_graphics_transport_format_features(VkFormat format);
 static VkFormatFeatureFlags vulkan_graphics_legacy_format_features(VkFormat format);
+static VkSampleCountFlags vulkan_graphics_runtime_format_sample_counts(
+        const VulkanRuntime *rt,
+        VkFormat format,
+        VkFormatFeatureFlags features);
 
 static void print_capabilities(const char *transport) {
     int vulkan_ready = init_vulkan_runtime(&g_vulkan_runtime) == 0;
@@ -16417,15 +16421,17 @@ static void write_vulkan_image_format_caps_report(FILE *out, const VulkanRuntime
     for (size_t i = 0; i < vulkan_graphics_runtime_format_bridge_count(); ++i) {
         VkFormat format = vulkan_graphics_runtime_format_bridge_at(i);
         VkFormatFeatureFlags features = 0;
+        VkSampleCountFlags sample_counts = 0;
         if (rt && rt->ready && rt->physical_device != VK_NULL_HANDLE) {
             VkFormatProperties props;
             memset(&props, 0, sizeof(props));
             vkGetPhysicalDeviceFormatProperties(rt->physical_device, format, &props);
             features = props.optimalTilingFeatures & vulkan_graphics_transport_format_features(format);
+            sample_counts = vulkan_graphics_runtime_format_sample_counts(rt, format, features);
         }
         fprintf(out, "%s\"fmt%dOptimalFeatures\":%u,\"fmt%dSampleCounts\":%u",
                 i ? "," : "", (int)format, (unsigned)features,
-                (int)format, (unsigned)VK_SAMPLE_COUNT_1_BIT);
+                (int)format, (unsigned)sample_counts);
     }
     fprintf(out, "},");
 }
@@ -19750,31 +19756,57 @@ static VkFormatFeatureFlags vulkan_graphics_runtime_format_features(VkFormat for
     return props.optimalTilingFeatures & transport;
 }
 
-static int vulkan_graphics_runtime_advertises_multisample_image_support(void) {
-    return 0;
+static VkSampleCountFlags vulkan_graphics_supported_sample_count_mask(void) {
+    return VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_2_BIT | VK_SAMPLE_COUNT_4_BIT |
+           VK_SAMPLE_COUNT_8_BIT | VK_SAMPLE_COUNT_16_BIT |
+           VK_SAMPLE_COUNT_32_BIT | VK_SAMPLE_COUNT_64_BIT;
+}
+
+static VkSampleCountFlags vulkan_graphics_runtime_query_sample_counts(
+        const VulkanRuntime *rt,
+        VkFormat format,
+        VkImageUsageFlags usage) {
+    if (!rt || !rt->ready || rt->physical_device == VK_NULL_HANDLE || !usage) return 0;
+    VkImageFormatProperties props;
+    memset(&props, 0, sizeof(props));
+    VkResult rc = vkGetPhysicalDeviceImageFormatProperties(
+        rt->physical_device,
+        format,
+        VK_IMAGE_TYPE_2D,
+        VK_IMAGE_TILING_OPTIMAL,
+        usage,
+        0,
+        &props);
+    if (rc != VK_SUCCESS) return 0;
+    return props.sampleCounts & vulkan_graphics_supported_sample_count_mask();
+}
+
+static VkSampleCountFlags vulkan_graphics_runtime_format_sample_counts(
+        const VulkanRuntime *rt,
+        VkFormat format,
+        VkFormatFeatureFlags features) {
+    if (!rt || !rt->ready || rt->physical_device == VK_NULL_HANDLE || !features) return 0;
+    VkSampleCountFlags counts = VK_SAMPLE_COUNT_1_BIT;
+    if (!vulkan_format_has_depth_aspect(format) &&
+        !vulkan_format_has_stencil_aspect(format) &&
+        (features & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT)) {
+        VkSampleCountFlags color_counts = vulkan_graphics_runtime_query_sample_counts(
+            rt, format, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
+        if (color_counts) counts = color_counts;
+    }
+    return counts & vulkan_graphics_supported_sample_count_mask();
 }
 
 static int vulkan_graphics_v614_resolve_runtime_eligible(
         const PdockerGpuVulkanDispatchV5ImageEntry *src_image,
         const PdockerGpuVulkanDispatchV5ImageEntry *dst_image,
         const PdockerGpuVulkanGraphicsV614ResolveImageEntry *entry) {
-    if (!src_image || !dst_image || !entry) return 0;
-    if (!vulkan_graphics_runtime_advertises_multisample_image_support()) return 0;
-    if (!(src_image->usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) ||
-        !(dst_image->usage & VK_IMAGE_USAGE_TRANSFER_DST_BIT) ||
-        src_image->format != dst_image->format ||
-        src_image->samples == VK_SAMPLE_COUNT_1_BIT ||
-        dst_image->samples != VK_SAMPLE_COUNT_1_BIT ||
-        entry->src_aspect_mask != VK_IMAGE_ASPECT_COLOR_BIT ||
-        entry->dst_aspect_mask != VK_IMAGE_ASPECT_COLOR_BIT ||
-        entry->layer_count == 0 ||
-        entry->extent_width == 0 || entry->extent_height == 0 || entry->extent_depth == 0) {
-        return 0;
-    }
-    const VkFormatFeatureFlags features =
-        vulkan_graphics_runtime_format_features((VkFormat)src_image->format);
-    return (features & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT) != 0;
+    (void)src_image;
+    (void)dst_image;
+    (void)entry;
+    return 0;
 }
+
 
 static int vulkan_graphics_v615_blit_runtime_eligible(
         const PdockerGpuVulkanDispatchV5ImageEntry *src_image,
@@ -21934,6 +21966,22 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                         continue;
                     }
                     const uint32_t attachment_index = command->attachment_first + a;
+                    const uint32_t effective_load_op =
+                        attachment->attachment_role == PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_STENCIL
+                            ? attachment->stencil_load_op
+                            : attachment->load_op;
+                    if (attachment->samples != VK_SAMPLE_COUNT_1_BIT) {
+                        if (attachment->attachment_role != PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR) {
+                            reason = "multisample replay is only enabled for color attachments";
+                            if (reason_out) *reason_out = reason;
+                            return -EOPNOTSUPP;
+                        }
+                        if (effective_load_op == VK_ATTACHMENT_LOAD_OP_LOAD) {
+                            reason = "multisample attachment load replay is not implemented";
+                            if (reason_out) *reason_out = reason;
+                            return -EOPNOTSUPP;
+                        }
+                    }
                     if (attachment->resolve_image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE) {
                         const PdockerGpuVulkanGraphicsV64ResolveAttachmentEntry *resolve =
                             find_vulkan_graphics_v64_resolve_attachment(view, attachment_index);
@@ -22000,6 +22048,19 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                     reason = "invalid graphics pipeline multisample count";
                     if (reason_out) *reason_out = reason;
                     return -EOPNOTSUPP;
+                }
+                if (rendering_active && active_rendering_command) {
+                    for (uint32_t a = 0; a < active_rendering_command->attachment_count; ++a) {
+                        const PdockerGpuVulkanGraphicsV6AttachmentEntry *attachment =
+                            &view->attachments[active_rendering_command->attachment_first + a];
+                        if (attachment->flags & PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_UNUSED_SLOT) continue;
+                        if (attachment->samples != VK_SAMPLE_COUNT_1_BIT &&
+                            pipeline->rasterization_samples != attachment->samples) {
+                            reason = "graphics pipeline multisample count does not match active attachment";
+                            if (reason_out) *reason_out = reason;
+                            return -EOPNOTSUPP;
+                        }
+                    }
                 }
                 VkShaderStageFlags pipeline_stage_flags = 0;
                 for (uint32_t stage_i = 0;
@@ -23641,7 +23702,8 @@ static int materialize_vulkan_graphics_v6_attachments(
             int range_rc = vulkan_graphics_merge_attachment_copy_range(
                 writeback_image, &writeback_view->range, attachment->attachment_role);
             if (range_rc != 0) return range_rc;
-            if (effective_store_op == VK_ATTACHMENT_STORE_OP_STORE) {
+            if (effective_store_op == VK_ATTACHMENT_STORE_OP_STORE ||
+                attachment->resolve_image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE) {
                 writeback_image->writeback_needed = 1;
             }
             vulkan_graphics_planning_set_image_layout(

@@ -2502,7 +2502,6 @@ class GpuAbiContractTest(unittest.TestCase):
         executor = GPU_EXECUTOR.read_text()
 
         for marker in [
-            "pdocker_vk_advertises_multisample_image_support",
             "pdocker_vk_resolve_image_executor_eligible",
             "pdocker_vk_blit_image_executor_eligible",
         ]:
@@ -2518,7 +2517,8 @@ class GpuAbiContractTest(unittest.TestCase):
         )[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceSparseImageFormatProperties", 1
         )[0]
-        self.assertIn("pImageFormatProperties->sampleCounts = VK_SAMPLE_COUNT_1_BIT;", image_props)
+        self.assertIn("VkSampleCountFlags sample_counts = pdocker_vk_image_sample_counts_for_request(", image_props)
+        self.assertIn("pImageFormatProperties->sampleCounts = sample_counts;", image_props)
         self.assertNotIn("VK_FORMAT_FEATURE_BLIT_SRC_BIT", format_props)
         self.assertNotIn("VK_FORMAT_FEATURE_BLIT_DST_BIT", format_props)
         self.assertNotIn("VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT", format_props)
@@ -2566,7 +2566,6 @@ class GpuAbiContractTest(unittest.TestCase):
         for marker in [
             "vulkan_graphics_runtime_format_bridge_supported",
             "vulkan_graphics_runtime_format_features",
-            "vulkan_graphics_runtime_advertises_multisample_image_support",
             "vulkan_graphics_v614_resolve_runtime_eligible",
             "vulkan_graphics_v615_blit_runtime_eligible",
         ]:
@@ -2590,7 +2589,7 @@ class GpuAbiContractTest(unittest.TestCase):
         runtime_format = executor.split(
             "static VkFormatFeatureFlags vulkan_graphics_runtime_format_features(VkFormat format) {", 1
         )[1].split(
-            "static int vulkan_graphics_runtime_advertises_multisample_image_support", 1
+            "static VkSampleCountFlags vulkan_graphics_supported_sample_count_mask", 1
         )[0]
         self.assertIn("vkGetPhysicalDeviceFormatProperties(g_vulkan_runtime.physical_device, format, &props);", runtime_format)
         self.assertIn("return props.optimalTilingFeatures & transport;", runtime_format)
@@ -5108,8 +5107,10 @@ class GpuAbiContractTest(unittest.TestCase):
             "maxImageDimension2D = 4096",
             "maxImageDimension3D = 256",
             "maxImageArrayLayers = 256",
-            "sampledImageColorSampleCounts = VK_SAMPLE_COUNT_1_BIT",
-            "storageImageSampleCounts = VK_SAMPLE_COUNT_1_BIT",
+            "PDOCKER_VK_SUPPORTED_SAMPLE_COUNTS",
+            "pdocker_vk_advertised_sample_counts",
+            "pdocker_vk_image_sample_counts_for_request",
+            "pdocker_vk_advertised_color_attachment_sample_counts",
             "maxSampleMaskWords = 1",
             "vulkan_min_resource_size",
             "max_resource < vulkan_min_resource_size",
@@ -5155,8 +5156,19 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         self.assertIn("pdocker_vk_sample_count_value(info->samples) == 0", validate_image_body)
         self.assertIn("(info->samples & props.sampleCounts) == 0", validate_image_body)
+        self.assertIn("VkSampleCountFlags sample_counts = pdocker_vk_image_sample_counts_for_request(", image_props)
+        self.assertIn("if (!sample_counts) return VK_ERROR_FORMAT_NOT_SUPPORTED;", image_props)
+        self.assertIn("pImageFormatProperties->sampleCounts = sample_counts;", image_props)
+        physical_props_body = icd.split("static void fill_physical_device_properties", 1)[1].split(
+            "static VkSubgroupFeatureFlags advertised_subgroup_operations", 1
+        )[0]
+        self.assertIn("framebufferColorSampleCounts =", physical_props_body)
+        self.assertIn("pdocker_vk_advertised_color_attachment_sample_counts()", physical_props_body)
+        self.assertIn("framebufferDepthSampleCounts = VK_SAMPLE_COUNT_1_BIT", physical_props_body)
+        self.assertIn("sampledImageColorSampleCounts = VK_SAMPLE_COUNT_1_BIT", physical_props_body)
+        self.assertIn("storageImageSampleCounts = VK_SAMPLE_COUNT_1_BIT", physical_props_body)
         legacy_features = icd.split("static VkFormatFeatureFlags pdocker_vk_format_image_features", 1)[1].split(
-            "static bool pdocker_vk_advertises_multisample_image_support", 1
+            "static bool pdocker_vk_resolve_image_executor_eligible", 1
         )[0]
         self.assertIn("features &= ~(VK_FORMAT_FEATURE_BLIT_SRC_BIT", legacy_features)
 
@@ -9856,9 +9868,29 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('\\"fmt%dOptimalFeatures\\":%u', format_caps_body)
         self.assertIn('\\"fmt%dSampleCounts\\":%u', format_caps_body)
         self.assertIn("VkFormatFeatureFlags features = 0;", format_caps_body)
+        self.assertIn("VkSampleCountFlags sample_counts = 0;", format_caps_body)
         self.assertIn("vkGetPhysicalDeviceFormatProperties(rt->physical_device, format, &props);", format_caps_body)
         self.assertIn("features = props.optimalTilingFeatures & vulkan_graphics_transport_format_features(format);", format_caps_body)
+        self.assertIn("sample_counts = vulkan_graphics_runtime_format_sample_counts(rt, format, features);", format_caps_body)
         self.assertNotIn("features = vulkan_graphics_legacy_format_features(format);", format_caps_body)
+        sample_query_body = source.split("static VkSampleCountFlags vulkan_graphics_runtime_query_sample_counts", 1)[1].split(
+            "static VkSampleCountFlags vulkan_graphics_runtime_format_sample_counts", 1
+        )[0]
+        self.assertIn("vkGetPhysicalDeviceImageFormatProperties", sample_query_body)
+        sample_format_body = source.rsplit("static VkSampleCountFlags vulkan_graphics_runtime_format_sample_counts", 1)[1].split(
+            "static int vulkan_graphics_v614_resolve_runtime_eligible", 1
+        )[0]
+        self.assertIn("VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT", sample_format_body)
+        self.assertIn("!vulkan_format_has_depth_aspect(format)", sample_format_body)
+        self.assertIn("!vulkan_format_has_stencil_aspect(format)", sample_format_body)
+        self.assertIn("VkSampleCountFlags counts = VK_SAMPLE_COUNT_1_BIT;", sample_format_body)
+        self.assertNotIn("VK_IMAGE_USAGE_SAMPLED_BIT", sample_format_body)
+        self.assertNotIn("VK_IMAGE_USAGE_STORAGE_BIT", sample_format_body)
+        self.assertNotIn("VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT", sample_format_body)
+        explicit_resolve_body = source.split("static int vulkan_graphics_v614_resolve_runtime_eligible", 1)[1].split(
+            "static int vulkan_graphics_v615_blit_runtime_eligible", 1
+        )[0]
+        self.assertIn("return 0;", explicit_resolve_body)
         enabled_body = source.split("static void write_android_vulkan_enabled_features_report", 1)[1].split(
             "static void log_vulkan_feature_gap", 1
         )[0]
@@ -9934,7 +9966,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("!json_read_u32(json, key, &optimal_features)", parse_body)
         self.assertIn("!json_read_u32(json, key, &sample_counts)", parse_body)
         self.assertIn("optimal_features & pdocker_vk_transport_image_features(format)", parse_body)
-        self.assertIn("sample_counts & VK_SAMPLE_COUNT_1_BIT", parse_body)
+        self.assertIn("sample_counts & PDOCKER_VK_SUPPORTED_SAMPLE_COUNTS", parse_body)
         self.assertIn("caps->image_format_cap_count == expected_format_cap_count", parse_body)
         query_body = icd.split("static int query_executor_advertisement_caps_line", 1)[1].split(
             "static const PdockerVkAdvertisedCaps *pdocker_vk_advertised_caps", 1
@@ -9942,13 +9974,26 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("bool saw_newline = false;", query_body)
         self.assertIn("!saw_newline && off + 1 >= line_cap", query_body)
         self.assertIn("-EOVERFLOW", query_body)
-        advertised_image_body = icd.split("static VkFormatFeatureFlags pdocker_vk_advertised_image_features", 1)[1].split(
-            "static VkBool32 executor_advertised_shader_int64_or", 1
+        advertised_image_body = icd.split("static VkFormatFeatureFlags pdocker_vk_advertised_image_features(VkFormat format) {", 1)[1].split(
+            "static VkSampleCountFlags pdocker_vk_advertised_sample_counts", 1
         )[0]
         self.assertIn("if (executor_advertisement_source_enabled())", advertised_image_body)
         self.assertIn("if (!caps || !caps->executor_valid) return 0;", advertised_image_body)
         self.assertIn("if (!cap) return 0;", advertised_image_body)
         self.assertIn("return pdocker_vk_format_image_features(format);", advertised_image_body)
+        advertised_sample_body = icd.split("static VkSampleCountFlags pdocker_vk_advertised_sample_counts(VkFormat format) {", 1)[1].split(
+            "static VkBool32 executor_advertised_shader_int64_or", 1
+        )[0]
+        self.assertIn("if (executor_advertisement_source_enabled())", advertised_sample_body)
+        self.assertIn("if (!caps || !caps->executor_valid) return 0;", advertised_sample_body)
+        self.assertIn("if (!cap) return 0;", advertised_sample_body)
+        self.assertIn("return cap->sample_counts & PDOCKER_VK_SUPPORTED_SAMPLE_COUNTS;", advertised_sample_body)
+        self.assertIn("return VK_SAMPLE_COUNT_1_BIT;", advertised_sample_body)
+        self.assertIn("pdocker_vk_msaa_color_attachment_request", advertised_sample_body)
+        self.assertIn("usage == VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT", advertised_sample_body)
+        self.assertIn("pdocker_vk_image_sample_counts_for_request", advertised_sample_body)
+        self.assertIn("pdocker_vk_advertised_color_attachment_sample_counts", advertised_sample_body)
+        self.assertIn("counts ? counts : VK_SAMPLE_COUNT_1_BIT", advertised_sample_body)
         self.assertIn("trace_executor_advertisement_caps_once", icd)
         self.assertIn("executor advertisement caps shadow", icd)
         fill_props = icd.split("static void fill_physical_device_properties", 1)[1].split(

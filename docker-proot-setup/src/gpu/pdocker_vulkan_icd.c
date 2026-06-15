@@ -1652,7 +1652,13 @@ static bool pdocker_vk_format_bridge_supported(VkFormat format) {
     return false;
 }
 
+#define PDOCKER_VK_SUPPORTED_SAMPLE_COUNTS \
+    (VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_2_BIT | VK_SAMPLE_COUNT_4_BIT | \
+     VK_SAMPLE_COUNT_8_BIT | VK_SAMPLE_COUNT_16_BIT | \
+     VK_SAMPLE_COUNT_32_BIT | VK_SAMPLE_COUNT_64_BIT)
+
 static VkFormatFeatureFlags pdocker_vk_advertised_image_features(VkFormat format);
+static VkSampleCountFlags pdocker_vk_advertised_sample_counts(VkFormat format);
 
 static VkFormatFeatureFlags pdocker_vk_format_buffer_features(VkFormat format) {
     if (!pdocker_vk_format_bridge_supported(format) ||
@@ -1687,30 +1693,11 @@ static VkFormatFeatureFlags pdocker_vk_format_image_features(VkFormat format) {
     return features;
 }
 
-static bool pdocker_vk_advertises_multisample_image_support(void) {
+static bool pdocker_vk_resolve_image_executor_eligible(const PdockerVkImageResolveOp *op) {
+    (void)op;
     return false;
 }
 
-static bool pdocker_vk_resolve_image_executor_eligible(const PdockerVkImageResolveOp *op) {
-    if (!op || !op->src || !op->dst || !op->src->memory || !op->dst->memory) return false;
-    if (!pdocker_vk_advertises_multisample_image_support()) return false;
-    if (op->src->format != op->dst->format ||
-        op->src->samples == VK_SAMPLE_COUNT_1_BIT ||
-        op->dst->samples != VK_SAMPLE_COUNT_1_BIT ||
-        op->region.srcSubresource.aspectMask != VK_IMAGE_ASPECT_COLOR_BIT ||
-        op->region.dstSubresource.aspectMask != VK_IMAGE_ASPECT_COLOR_BIT ||
-        op->region.srcSubresource.layerCount == 0 ||
-        op->region.srcSubresource.layerCount != op->region.dstSubresource.layerCount ||
-        op->region.extent.width == 0 ||
-        op->region.extent.height == 0 ||
-        op->region.extent.depth == 0 ||
-        !(op->src->usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) ||
-        !(op->dst->usage & VK_IMAGE_USAGE_TRANSFER_DST_BIT)) {
-        return false;
-    }
-    const VkFormatFeatureFlags features = pdocker_vk_advertised_image_features(op->src->format);
-    return (features & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT) != 0;
-}
 
 static bool pdocker_vk_blit_image_executor_eligible(const PdockerVkImageBlitOp *op) {
     if (!op || !op->src || !op->dst || !op->src->memory || !op->dst->memory) return false;
@@ -9655,8 +9642,7 @@ static bool parse_executor_advertisement_caps_json(
         cap->format = format;
         cap->optimal_features =
             (VkFormatFeatureFlags)optimal_features & pdocker_vk_transport_image_features(format);
-        cap->sample_counts = (VkSampleCountFlags)sample_counts & VK_SAMPLE_COUNT_1_BIT;
-        if (!cap->sample_counts) cap->sample_counts = VK_SAMPLE_COUNT_1_BIT;
+        cap->sample_counts = (VkSampleCountFlags)sample_counts & PDOCKER_VK_SUPPORTED_SAMPLE_COUNTS;
     }
     return caps->api_version != 0 &&
            caps->image_format_cap_count == expected_format_cap_count;
@@ -9747,6 +9733,55 @@ static VkFormatFeatureFlags pdocker_vk_advertised_image_features(VkFormat format
         return cap->optimal_features & pdocker_vk_transport_image_features(format);
     }
     return pdocker_vk_format_image_features(format);
+}
+
+static VkSampleCountFlags pdocker_vk_advertised_sample_counts(VkFormat format) {
+    if (executor_advertisement_source_enabled()) {
+        const PdockerVkAdvertisedCaps *caps = pdocker_vk_advertised_caps();
+        if (!caps || !caps->executor_valid) return 0;
+        const PdockerVkAdvertisedFormatCaps *cap =
+            pdocker_vk_find_advertised_format_caps(caps, format);
+        if (!cap) return 0;
+        return cap->sample_counts & PDOCKER_VK_SUPPORTED_SAMPLE_COUNTS;
+    }
+    return VK_SAMPLE_COUNT_1_BIT;
+}
+
+static bool pdocker_vk_msaa_color_attachment_request(
+        VkFormat format,
+        VkImageType type,
+        VkImageUsageFlags usage,
+        VkImageCreateFlags flags) {
+    if (pdocker_vk_format_is_depth_stencil(format)) return false;
+    if (type != VK_IMAGE_TYPE_2D) return false;
+    if (flags & VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT) return false;
+    return usage == VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+}
+
+static VkSampleCountFlags pdocker_vk_image_sample_counts_for_request(
+        VkFormat format,
+        VkImageType type,
+        VkImageUsageFlags usage,
+        VkImageCreateFlags flags) {
+    VkSampleCountFlags advertised = pdocker_vk_advertised_sample_counts(format);
+    if (!advertised) return 0;
+    if (pdocker_vk_msaa_color_attachment_request(format, type, usage, flags)) {
+        return advertised & PDOCKER_VK_SUPPORTED_SAMPLE_COUNTS;
+    }
+    return VK_SAMPLE_COUNT_1_BIT;
+}
+
+static VkSampleCountFlags pdocker_vk_advertised_color_attachment_sample_counts(void) {
+    VkSampleCountFlags counts = 0;
+    for (size_t i = 0; i < pdocker_vk_bridge_format_count(); ++i) {
+        VkFormat format = pdocker_vk_bridge_format_at(i);
+        if (pdocker_vk_format_is_depth_stencil(format)) continue;
+        VkFormatFeatureFlags features = pdocker_vk_advertised_image_features(format);
+        if ((features & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT) == 0) continue;
+        counts |= pdocker_vk_advertised_sample_counts(format);
+    }
+    counts &= PDOCKER_VK_SUPPORTED_SAMPLE_COUNTS;
+    return counts ? counts : VK_SAMPLE_COUNT_1_BIT;
 }
 
 static VkBool32 executor_advertised_shader_int64_or(VkBool32 legacy) {
@@ -9953,7 +9988,8 @@ static void fill_physical_device_properties(VkPhysicalDeviceProperties *pPropert
     pProperties->limits.maxFramebufferWidth = 4096;
     pProperties->limits.maxFramebufferHeight = 4096;
     pProperties->limits.maxFramebufferLayers = 256;
-    pProperties->limits.framebufferColorSampleCounts = VK_SAMPLE_COUNT_1_BIT;
+    pProperties->limits.framebufferColorSampleCounts =
+        pdocker_vk_advertised_color_attachment_sample_counts();
     pProperties->limits.framebufferDepthSampleCounts = VK_SAMPLE_COUNT_1_BIT;
     pProperties->limits.framebufferStencilSampleCounts = VK_SAMPLE_COUNT_1_BIT;
     pProperties->limits.framebufferNoAttachmentsSampleCounts = VK_SAMPLE_COUNT_1_BIT;
@@ -10744,7 +10780,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceImageFormatProperties(
     pImageFormatProperties->maxExtent = max_extent;
     pImageFormatProperties->maxMipLevels = pdocker_vk_image_max_mip_levels(max_extent);
     pImageFormatProperties->maxArrayLayers = max_layers;
-    pImageFormatProperties->sampleCounts = VK_SAMPLE_COUNT_1_BIT;
+    VkSampleCountFlags sample_counts = pdocker_vk_image_sample_counts_for_request(
+        format, type, usage, flags);
+    if (!sample_counts) return VK_ERROR_FORMAT_NOT_SUPPORTED;
+    pImageFormatProperties->sampleCounts = sample_counts;
     VkDeviceSize max_buffer = pdocker_vulkan_max_buffer_size();
     VkDeviceSize heap = pdocker_vulkan_heap_size();
     VkDeviceSize max_resource = max_buffer < heap ? max_buffer : heap;

@@ -58,14 +58,22 @@ or closes.
   detects truncated caps JSON, and fails closed to zero advertised image
   features if the executor caps are missing or malformed. Image-format-property
   usage checks now derive support from the same advertised feature bits.
-  `fmt%dSampleCounts` is still clamped to `VK_SAMPLE_COUNT_1_BIT`; MSAA/resolve
-  widening remains a separate planned lane.
+- [done] **color-attachment-scoped MSAA advertisement**: `fmt%dSampleCounts` is
+  now treated as color-attachment-scoped capability evidence, not a general
+  per-format promise. The ICD returns multisample counts only for exact 2D
+  non-depth/stencil `VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT` image-format queries;
+  sampled, storage, transfer, depth/stencil, cube-compatible, and combined
+  usages remain single-sample. Physical-device limits expose wider counts only
+  through `framebufferColorSampleCounts`; sampled/storage/depth/stencil/no-
+  attachment limits remain `VK_SAMPLE_COUNT_1_BIT`. Explicit `vkCmdResolveImage`
+  transfer resolve remains fail-closed.
 - [done] **MSAA image allocation safety prerequisite**: Before widening
   advertised sample counts, ICD image requirement sizing now converts
   `VkSampleCountFlagBits` to an exact sample count, rejects invalid/multiple-bit
   sample-count values, and multiplies image memory requirements by the sample
-  count. This prevents future multisample image transport from under-allocating
-  backing memory. It does not yet advertise MSAA or enable resolve.
+  count. Executor preflight also rejects unresolved MSAA, MSAA attachment
+  `LOAD`, and graphics-pipeline sample-count mismatches, and writeback follows
+  the single-sample resolve attachment instead of the multisample source.
 - [planned] **residual graphics evidence gaps**: Do not promote full Vulkan
   pass-through until remaining fail-closed lanes have explicit ABI/evidence:
   V6.1 image-barrier range/aspect normalization, packed depth+stencil copy
