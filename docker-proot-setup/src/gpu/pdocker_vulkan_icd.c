@@ -1662,6 +1662,57 @@ static VkFormatFeatureFlags pdocker_vk_format_image_features(VkFormat format) {
     return features;
 }
 
+static bool pdocker_vk_advertises_multisample_image_support(void) {
+    return false;
+}
+
+static bool pdocker_vk_resolve_image_executor_eligible(const PdockerVkImageResolveOp *op) {
+    if (!op || !op->src || !op->dst || !op->src->memory || !op->dst->memory) return false;
+    if (!pdocker_vk_advertises_multisample_image_support()) return false;
+    if (op->src->format != op->dst->format ||
+        op->src->samples == VK_SAMPLE_COUNT_1_BIT ||
+        op->dst->samples != VK_SAMPLE_COUNT_1_BIT ||
+        op->region.srcSubresource.aspectMask != VK_IMAGE_ASPECT_COLOR_BIT ||
+        op->region.dstSubresource.aspectMask != VK_IMAGE_ASPECT_COLOR_BIT ||
+        op->region.srcSubresource.layerCount == 0 ||
+        op->region.srcSubresource.layerCount != op->region.dstSubresource.layerCount ||
+        op->region.extent.width == 0 ||
+        op->region.extent.height == 0 ||
+        op->region.extent.depth == 0 ||
+        !(op->src->usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) ||
+        !(op->dst->usage & VK_IMAGE_USAGE_TRANSFER_DST_BIT)) {
+        return false;
+    }
+    const VkFormatFeatureFlags features = pdocker_vk_format_image_features(op->src->format);
+    return (features & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT) != 0;
+}
+
+static bool pdocker_vk_blit_image_executor_eligible(const PdockerVkImageBlitOp *op) {
+    if (!op || !op->src || !op->dst || !op->src->memory || !op->dst->memory) return false;
+    if (op->src->samples != VK_SAMPLE_COUNT_1_BIT ||
+        op->dst->samples != VK_SAMPLE_COUNT_1_BIT ||
+        op->region.srcSubresource.aspectMask != VK_IMAGE_ASPECT_COLOR_BIT ||
+        op->region.dstSubresource.aspectMask != VK_IMAGE_ASPECT_COLOR_BIT ||
+        op->region.srcSubresource.layerCount == 0 ||
+        op->region.srcSubresource.layerCount != op->region.dstSubresource.layerCount ||
+        !(op->src->usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) ||
+        !(op->dst->usage & VK_IMAGE_USAGE_TRANSFER_DST_BIT) ||
+        (op->filter != VK_FILTER_NEAREST && op->filter != VK_FILTER_LINEAR)) {
+        return false;
+    }
+    const VkFormatFeatureFlags src_features = pdocker_vk_format_image_features(op->src->format);
+    const VkFormatFeatureFlags dst_features = pdocker_vk_format_image_features(op->dst->format);
+    if ((src_features & VK_FORMAT_FEATURE_BLIT_SRC_BIT) == 0 ||
+        (dst_features & VK_FORMAT_FEATURE_BLIT_DST_BIT) == 0) {
+        return false;
+    }
+    if (op->filter == VK_FILTER_LINEAR &&
+        (src_features & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT) == 0) {
+        return false;
+    }
+    return true;
+}
+
 static bool pdocker_vk_image_usage_supported_by_format(
         VkFormat format,
         VkImageUsageFlags usage) {
@@ -5139,7 +5190,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame(
                 const PdockerVkImageResolveOp *resolve__ = &cmd->image_resolve_ops[op__->index]; \
                 VkExtent3D src_extent__; \
                 VkExtent3D dst_extent__; \
-                if (!resolve__->src || !resolve__->dst || !resolve__->src->memory || !resolve__->dst->memory || \
+                if (!pdocker_vk_resolve_image_executor_eligible(resolve__) || \
                     resolve__->src->format != resolve__->dst->format || \
                     resolve__->src->samples == VK_SAMPLE_COUNT_1_BIT || \
                     resolve__->dst->samples != VK_SAMPLE_COUNT_1_BIT || \
@@ -5220,7 +5271,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame(
                 const PdockerVkImageBlitOp *blit__ = &cmd->image_blit_ops[op__->index]; \
                 VkExtent3D src_extent__; \
                 VkExtent3D dst_extent__; \
-                if (!blit__->src || !blit__->dst || !blit__->src->memory || !blit__->dst->memory || \
+                if (!pdocker_vk_blit_image_executor_eligible(blit__) || \
                     blit__->src->samples != VK_SAMPLE_COUNT_1_BIT || \
                     blit__->dst->samples != VK_SAMPLE_COUNT_1_BIT || \
                     blit__->region.srcSubresource.aspectMask != VK_IMAGE_ASPECT_COLOR_BIT || \
@@ -8862,7 +8913,7 @@ static void execute_recorded_clear_color_image_op(
 static void execute_recorded_resolve_image_op(
         PdockerVkImageResolveOp *op,
         PdockerVkCopyStats *stats) {
-    if (!op || !op->src || !op->dst || !op->src->memory || !op->dst->memory ||
+    if (!pdocker_vk_resolve_image_executor_eligible(op) ||
         op->region.srcSubresource.aspectMask != VK_IMAGE_ASPECT_COLOR_BIT ||
         op->region.dstSubresource.aspectMask != VK_IMAGE_ASPECT_COLOR_BIT ||
         op->region.srcSubresource.layerCount == 0 ||
@@ -8964,7 +9015,7 @@ static int32_t blit_axis_sample(int32_t src0,
 static void execute_recorded_blit_image_op(
         PdockerVkImageBlitOp *op,
         PdockerVkCopyStats *stats) {
-    if (!op || !op->src || !op->dst || !op->src->memory || !op->dst->memory ||
+    if (!pdocker_vk_blit_image_executor_eligible(op) ||
         op->region.srcSubresource.aspectMask != VK_IMAGE_ASPECT_COLOR_BIT ||
         op->region.dstSubresource.aspectMask != VK_IMAGE_ASPECT_COLOR_BIT ||
         op->region.srcSubresource.layerCount == 0 ||

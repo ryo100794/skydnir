@@ -19634,6 +19634,117 @@ static int vulkan_graphics_v615_image_blit_subresource_valid(
     return 0;
 }
 
+static int vulkan_graphics_runtime_format_bridge_supported(VkFormat format) {
+    switch (format) {
+        case VK_FORMAT_R8_UNORM:
+        case VK_FORMAT_R8_SNORM:
+        case VK_FORMAT_R8_UINT:
+        case VK_FORMAT_R8_SINT:
+        case VK_FORMAT_R8G8_UNORM:
+        case VK_FORMAT_R8G8_SNORM:
+        case VK_FORMAT_R8G8_UINT:
+        case VK_FORMAT_R8G8_SINT:
+        case VK_FORMAT_R16_SFLOAT:
+        case VK_FORMAT_R16_UINT:
+        case VK_FORMAT_R16_SINT:
+        case VK_FORMAT_R8G8B8A8_UNORM:
+        case VK_FORMAT_R8G8B8A8_SNORM:
+        case VK_FORMAT_R8G8B8A8_UINT:
+        case VK_FORMAT_R8G8B8A8_SINT:
+        case VK_FORMAT_B8G8R8A8_UNORM:
+        case VK_FORMAT_R16G16_SFLOAT:
+        case VK_FORMAT_R32_SFLOAT:
+        case VK_FORMAT_R32_UINT:
+        case VK_FORMAT_R32_SINT:
+        case VK_FORMAT_R16G16B16A16_SFLOAT:
+        case VK_FORMAT_R32G32_SFLOAT:
+        case VK_FORMAT_R32G32_UINT:
+        case VK_FORMAT_R32G32_SINT:
+        case VK_FORMAT_R32G32B32A32_SFLOAT:
+        case VK_FORMAT_R32G32B32A32_UINT:
+        case VK_FORMAT_R32G32B32A32_SINT:
+        case VK_FORMAT_S8_UINT:
+        case VK_FORMAT_D16_UNORM:
+        case VK_FORMAT_D24_UNORM_S8_UINT:
+        case VK_FORMAT_D32_SFLOAT:
+        case VK_FORMAT_D32_SFLOAT_S8_UINT:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static VkFormatFeatureFlags vulkan_graphics_runtime_format_features(VkFormat format) {
+    if (!vulkan_graphics_runtime_format_bridge_supported(format)) return 0;
+    VkFormatFeatureFlags features = VK_FORMAT_FEATURE_TRANSFER_SRC_BIT |
+                                    VK_FORMAT_FEATURE_TRANSFER_DST_BIT |
+                                    VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
+    if (vulkan_format_has_depth_aspect(format) ||
+        vulkan_format_has_stencil_aspect(format)) {
+        features |= VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT;
+    } else {
+        features |= VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT |
+                    VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT;
+    }
+    return features;
+}
+
+static int vulkan_graphics_runtime_advertises_multisample_image_support(void) {
+    return 0;
+}
+
+static int vulkan_graphics_v614_resolve_runtime_eligible(
+        const PdockerGpuVulkanDispatchV5ImageEntry *src_image,
+        const PdockerGpuVulkanDispatchV5ImageEntry *dst_image,
+        const PdockerGpuVulkanGraphicsV614ResolveImageEntry *entry) {
+    if (!src_image || !dst_image || !entry) return 0;
+    if (!vulkan_graphics_runtime_advertises_multisample_image_support()) return 0;
+    if (!(src_image->usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) ||
+        !(dst_image->usage & VK_IMAGE_USAGE_TRANSFER_DST_BIT) ||
+        src_image->format != dst_image->format ||
+        src_image->samples == VK_SAMPLE_COUNT_1_BIT ||
+        dst_image->samples != VK_SAMPLE_COUNT_1_BIT ||
+        entry->src_aspect_mask != VK_IMAGE_ASPECT_COLOR_BIT ||
+        entry->dst_aspect_mask != VK_IMAGE_ASPECT_COLOR_BIT ||
+        entry->layer_count == 0 ||
+        entry->extent_width == 0 || entry->extent_height == 0 || entry->extent_depth == 0) {
+        return 0;
+    }
+    const VkFormatFeatureFlags features =
+        vulkan_graphics_runtime_format_features((VkFormat)src_image->format);
+    return (features & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT) != 0;
+}
+
+static int vulkan_graphics_v615_blit_runtime_eligible(
+        const PdockerGpuVulkanDispatchV5ImageEntry *src_image,
+        const PdockerGpuVulkanDispatchV5ImageEntry *dst_image,
+        const PdockerGpuVulkanGraphicsV615BlitImageEntry *entry) {
+    if (!src_image || !dst_image || !entry) return 0;
+    if (!(src_image->usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) ||
+        !(dst_image->usage & VK_IMAGE_USAGE_TRANSFER_DST_BIT) ||
+        src_image->samples != VK_SAMPLE_COUNT_1_BIT ||
+        dst_image->samples != VK_SAMPLE_COUNT_1_BIT ||
+        entry->src_aspect_mask != VK_IMAGE_ASPECT_COLOR_BIT ||
+        entry->dst_aspect_mask != VK_IMAGE_ASPECT_COLOR_BIT ||
+        entry->layer_count == 0 ||
+        (entry->filter != VK_FILTER_NEAREST && entry->filter != VK_FILTER_LINEAR)) {
+        return 0;
+    }
+    const VkFormatFeatureFlags src_features =
+        vulkan_graphics_runtime_format_features((VkFormat)src_image->format);
+    const VkFormatFeatureFlags dst_features =
+        vulkan_graphics_runtime_format_features((VkFormat)dst_image->format);
+    if ((src_features & VK_FORMAT_FEATURE_BLIT_SRC_BIT) == 0 ||
+        (dst_features & VK_FORMAT_FEATURE_BLIT_DST_BIT) == 0) {
+        return 0;
+    }
+    if (entry->filter == VK_FILTER_LINEAR &&
+        (src_features & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT) == 0) {
+        return 0;
+    }
+    return 1;
+}
+
 static int vulkan_graphics_v610_buffer_image_copy_span(
         const PdockerGpuVulkanGraphicsV610BufferImageCopyEntry *copy,
         const PdockerGpuVulkanDispatchV5ImageEntry *image,
@@ -21107,12 +21218,10 @@ static int validate_vulkan_graphics_v6_frame_content(
             seen_resolve_command[entry->command_index] = 1;
             const PdockerGpuVulkanDispatchV5ImageEntry *src_image = &images[entry->src_image_index];
             const PdockerGpuVulkanDispatchV5ImageEntry *dst_image = &images[entry->dst_image_index];
-            if (!(src_image->usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) ||
-                !(dst_image->usage & VK_IMAGE_USAGE_TRANSFER_DST_BIT) ||
-                src_image->format != dst_image->format ||
-                src_image->samples == VK_SAMPLE_COUNT_1_BIT ||
-                dst_image->samples != VK_SAMPLE_COUNT_1_BIT ||
-                vulkan_graphics_v610_image_subresource_range_valid(
+            if (!vulkan_graphics_v614_resolve_runtime_eligible(src_image, dst_image, entry)) {
+                return -EOPNOTSUPP;
+            }
+            if (vulkan_graphics_v610_image_subresource_range_valid(
                     src_image, entry->src_aspect_mask, entry->src_mip_level,
                     entry->src_base_array_layer, entry->layer_count,
                     entry->src_offset_x, entry->src_offset_y, entry->src_offset_z,
@@ -21150,11 +21259,10 @@ static int validate_vulkan_graphics_v6_frame_content(
             seen_blit_command[entry->command_index] = 1;
             const PdockerGpuVulkanDispatchV5ImageEntry *src_image = &images[entry->src_image_index];
             const PdockerGpuVulkanDispatchV5ImageEntry *dst_image = &images[entry->dst_image_index];
-            if (!(src_image->usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) ||
-                !(dst_image->usage & VK_IMAGE_USAGE_TRANSFER_DST_BIT) ||
-                src_image->samples != VK_SAMPLE_COUNT_1_BIT ||
-                dst_image->samples != VK_SAMPLE_COUNT_1_BIT ||
-                vulkan_graphics_v615_image_blit_subresource_valid(
+            if (!vulkan_graphics_v615_blit_runtime_eligible(src_image, dst_image, entry)) {
+                return -EOPNOTSUPP;
+            }
+            if (vulkan_graphics_v615_image_blit_subresource_valid(
                     src_image, entry->src_aspect_mask, entry->src_mip_level,
                     entry->src_base_array_layer, entry->layer_count,
                     entry->src_offset0_x, entry->src_offset0_y, entry->src_offset0_z,
@@ -23541,8 +23649,10 @@ static int materialize_vulkan_graphics_v6_attachments(
             VulkanDispatchImageObject *src_image = &out->images[resolve->src_image_index];
             VulkanDispatchImageObject *dst_image = &out->images[resolve->dst_image_index];
             if (!src_image->image || !dst_image->image ||
-                !(src_image->usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) ||
-                !(dst_image->usage & VK_IMAGE_USAGE_TRANSFER_DST_BIT)) return -EOPNOTSUPP;
+                !vulkan_graphics_v614_resolve_runtime_eligible(
+                    &view->images[src_image->source_index],
+                    &view->images[dst_image->source_index],
+                    resolve)) return -EOPNOTSUPP;
             VkImageSubresourceRange src_range = {
                 .aspectMask = (VkImageAspectFlags)resolve->src_aspect_mask,
                 .baseMipLevel = resolve->src_mip_level,
@@ -23580,8 +23690,10 @@ static int materialize_vulkan_graphics_v6_attachments(
             VulkanDispatchImageObject *src_image = &out->images[blit->src_image_index];
             VulkanDispatchImageObject *dst_image = &out->images[blit->dst_image_index];
             if (!src_image->image || !dst_image->image ||
-                !(src_image->usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) ||
-                !(dst_image->usage & VK_IMAGE_USAGE_TRANSFER_DST_BIT)) return -EOPNOTSUPP;
+                !vulkan_graphics_v615_blit_runtime_eligible(
+                    &view->images[src_image->source_index],
+                    &view->images[dst_image->source_index],
+                    blit)) return -EOPNOTSUPP;
             VkImageSubresourceRange src_range = {
                 .aspectMask = (VkImageAspectFlags)blit->src_aspect_mask,
                 .baseMipLevel = blit->src_mip_level,
@@ -26449,6 +26561,10 @@ static int record_vulkan_graphics_v6_command_buffer(
                 VulkanDispatchImageObject *src_image = &attachments->images[resolve->src_image_index];
                 VulkanDispatchImageObject *dst_image = &attachments->images[resolve->dst_image_index];
                 if (!src_image->image || !dst_image->image) { rc = -EPROTO; goto cleanup; }
+                if (!vulkan_graphics_v614_resolve_runtime_eligible(
+                        &view->images[src_image->source_index],
+                        &view->images[dst_image->source_index],
+                        resolve)) { rc = -EOPNOTSUPP; goto cleanup; }
                 rc = record_vulkan_graphics_v6_staged_image_uploads(command_buffer, attachments);
                 if (rc != 0) goto cleanup;
                 VkImageResolve region = {
@@ -26505,6 +26621,10 @@ static int record_vulkan_graphics_v6_command_buffer(
                 VulkanDispatchImageObject *src_image = &attachments->images[blit->src_image_index];
                 VulkanDispatchImageObject *dst_image = &attachments->images[blit->dst_image_index];
                 if (!src_image->image || !dst_image->image) { rc = -EPROTO; goto cleanup; }
+                if (!vulkan_graphics_v615_blit_runtime_eligible(
+                        &view->images[src_image->source_index],
+                        &view->images[dst_image->source_index],
+                        blit)) { rc = -EOPNOTSUPP; goto cleanup; }
                 rc = record_vulkan_graphics_v6_staged_image_uploads(command_buffer, attachments);
                 if (rc != 0) goto cleanup;
                 VkImageBlit region = {

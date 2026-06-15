@@ -2417,6 +2417,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "VK_IMAGE_USAGE_TRANSFER_SRC_BIT",
             "VK_IMAGE_USAGE_TRANSFER_DST_BIT",
             "vkCmdResolveImage(command_buffer",
+            "vulkan_graphics_v614_resolve_runtime_eligible",
             "resolve image inside dynamic rendering is not supported",
             "graphics resolve image requires V6.14 metadata",
             "resolve->src_aspect_mask",
@@ -2432,6 +2433,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "PdockerGpuVulkanGraphicsV614ResolveImageEntry",
             "PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESOLVE_IMAGE",
             "execute_recorded_resolve_image_op",
+            "pdocker_vk_resolve_image_executor_eligible",
             "VK_IMAGE_USAGE_TRANSFER_SRC_BIT",
             "VK_IMAGE_USAGE_TRANSFER_DST_BIT",
             "image_mip_extent(resolve__->src",
@@ -2470,6 +2472,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "VK_IMAGE_USAGE_TRANSFER_SRC_BIT",
             "VK_IMAGE_USAGE_TRANSFER_DST_BIT",
             "vkCmdBlitImage(command_buffer",
+            "vulkan_graphics_v615_blit_runtime_eligible",
             "blit image inside dynamic rendering is not supported",
             "graphics blit image requires V6.15 metadata",
             "blit->src_offset0_x",
@@ -2486,12 +2489,136 @@ class GpuAbiContractTest(unittest.TestCase):
             "PdockerGpuVulkanGraphicsV615BlitImageEntry",
             "PDOCKER_GPU_GRAPHICS_V6_COMMAND_BLIT_IMAGE",
             "execute_recorded_blit_image_op",
+            "pdocker_vk_blit_image_executor_eligible",
             "VK_IMAGE_USAGE_TRANSFER_SRC_BIT",
             "VK_IMAGE_USAGE_TRANSFER_DST_BIT",
             "image_mip_extent(blit__->src",
             "blit_image_table_hash",
         ]:
             self.assertIn(marker, icd)
+
+    def test_vulkan_graphics_v614_v615_replay_is_gated_by_advertised_caps(self):
+        icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
+
+        for marker in [
+            "pdocker_vk_advertises_multisample_image_support",
+            "pdocker_vk_resolve_image_executor_eligible",
+            "pdocker_vk_blit_image_executor_eligible",
+        ]:
+            self.assertIn(marker, icd)
+
+        format_props = icd.split(
+            "VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceFormatProperties", 1
+        )[1].split(
+            "VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceImageFormatProperties", 1
+        )[0]
+        image_props = icd.split(
+            "VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceImageFormatProperties", 1
+        )[1].split(
+            "VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceSparseImageFormatProperties", 1
+        )[0]
+        self.assertIn("pImageFormatProperties->sampleCounts = VK_SAMPLE_COUNT_1_BIT;", image_props)
+        self.assertNotIn("VK_FORMAT_FEATURE_BLIT_SRC_BIT", format_props)
+        self.assertNotIn("VK_FORMAT_FEATURE_BLIT_DST_BIT", format_props)
+        self.assertNotIn("VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT", format_props)
+
+        resolve_collect = icd.split(
+            "if (op__->type == PDOCKER_VK_COMMAND_RESOLVE_IMAGE)", 1
+        )[1].split(
+            "if (op__->type == PDOCKER_VK_COMMAND_BLIT_IMAGE)", 1
+        )[0]
+        self.assertIn("!pdocker_vk_resolve_image_executor_eligible(resolve__)", resolve_collect)
+        self.assertNotIn("pdocker_vk_blit_image_executor_eligible", resolve_collect)
+
+        blit_collect = icd.split(
+            "if (op__->type == PDOCKER_VK_COMMAND_BLIT_IMAGE)", 1
+        )[1].split(
+            "PdockerGpuVulkanGraphicsV6CommandEntry *blit_command__", 1
+        )[0]
+        self.assertIn("!pdocker_vk_blit_image_executor_eligible(blit__)", blit_collect)
+        self.assertNotIn("pdocker_vk_resolve_image_executor_eligible", blit_collect)
+
+        copy_exec = icd.split(
+            "static void execute_recorded_image_to_image_copy_op", 1
+        )[1].split(
+            "static void execute_recorded_resolve_image_op", 1
+        )[0]
+        self.assertNotIn("pdocker_vk_resolve_image_executor_eligible", copy_exec)
+        self.assertNotIn("pdocker_vk_blit_image_executor_eligible", copy_exec)
+
+        resolve_exec = icd.split(
+            "static void execute_recorded_resolve_image_op", 1
+        )[1].split(
+            "static uint32_t blit_axis_extent", 1
+        )[0]
+        self.assertIn("!pdocker_vk_resolve_image_executor_eligible(op)", resolve_exec)
+        self.assertNotIn("pdocker_vk_blit_image_executor_eligible", resolve_exec)
+
+        blit_exec = icd.split(
+            "static void execute_recorded_blit_image_op", 1
+        )[1].split(
+            "static void execute_recorded_clear_depth_stencil_image_op", 1
+        )[0]
+        self.assertIn("!pdocker_vk_blit_image_executor_eligible(op)", blit_exec)
+        self.assertNotIn("pdocker_vk_resolve_image_executor_eligible", blit_exec)
+
+        for marker in [
+            "vulkan_graphics_runtime_format_bridge_supported",
+            "vulkan_graphics_runtime_format_features",
+            "vulkan_graphics_runtime_advertises_multisample_image_support",
+            "vulkan_graphics_v614_resolve_runtime_eligible",
+            "vulkan_graphics_v615_blit_runtime_eligible",
+        ]:
+            self.assertIn(marker, executor)
+
+        runtime_format = executor.split(
+            "static VkFormatFeatureFlags vulkan_graphics_runtime_format_features", 1
+        )[1].split(
+            "static int vulkan_graphics_runtime_advertises_multisample_image_support", 1
+        )[0]
+        self.assertIn("if (!vulkan_graphics_runtime_format_bridge_supported(format)) return 0;", runtime_format)
+        self.assertNotIn("VK_FORMAT_FEATURE_BLIT_SRC_BIT", runtime_format)
+        self.assertNotIn("VK_FORMAT_FEATURE_BLIT_DST_BIT", runtime_format)
+        self.assertNotIn("VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT", runtime_format)
+
+        validation_body = executor.split(
+            "static int validate_vulkan_graphics_v6_frame_content", 1
+        )[1].split(
+            "static int append_vulkan_graphics_replay_buffer", 1
+        )[0]
+        self.assertIn("if (!vulkan_graphics_v614_resolve_runtime_eligible(src_image, dst_image, entry))", validation_body)
+        self.assertIn("return -EOPNOTSUPP;", validation_body)
+        self.assertIn("if (!vulkan_graphics_v615_blit_runtime_eligible(src_image, dst_image, entry))", validation_body)
+
+        record_body = executor.split(
+            "static int record_vulkan_graphics_v6_command_buffer", 1
+        )[1].split(
+            "case PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT:", 1
+        )[0]
+        copy_image_case = record_body.split(
+            "case PDOCKER_GPU_GRAPHICS_V6_COMMAND_COPY_IMAGE:", 1
+        )[1].split(
+            "case PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESOLVE_IMAGE:", 1
+        )[0]
+        self.assertNotIn("vulkan_graphics_v614_resolve_runtime_eligible", copy_image_case)
+        self.assertNotIn("vulkan_graphics_v615_blit_runtime_eligible", copy_image_case)
+
+        resolve_case = record_body.split(
+            "case PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESOLVE_IMAGE:", 1
+        )[1].split(
+            "case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BLIT_IMAGE:", 1
+        )[0]
+        self.assertIn("vulkan_graphics_v614_resolve_runtime_eligible", resolve_case)
+        self.assertNotIn("vulkan_graphics_v615_blit_runtime_eligible", resolve_case)
+        self.assertNotIn("blit))", resolve_case)
+
+        blit_case = record_body.split(
+            "case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BLIT_IMAGE:", 1
+        )[1]
+        self.assertIn("vulkan_graphics_v615_blit_runtime_eligible", blit_case)
+        self.assertNotIn("vulkan_graphics_v614_resolve_runtime_eligible", blit_case)
+        self.assertNotIn("resolve))", blit_case)
 
     def test_vulkan_graphics_v616_clear_attachments_abi_is_append_only(self):
         abi = APP_HEADER.read_text()

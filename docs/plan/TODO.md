@@ -29,16 +29,29 @@ or closes.
   `VK_REMAINING_ARRAY_LAYERS` before serialization, validate image-barrier
   aspect masks against image format on both producer and executor sides, and
   reject unsupported or ambiguous ranges fail-closed.
-- [doing] **graphics descriptor image aspect-aware upload slice**: Executor P6
-  is being widened from color-only descriptor upload to bounded single-aspect
-  color, pure depth (`D16`/`D32`), and pure stencil (`S8`) sampled/combined/input
-  descriptors.  Keep storage images color-only and packed dual-aspect
+- [done] **graphics descriptor image aspect-aware upload slice**: Executor P6
+  is widened from color-only descriptor upload to bounded single-aspect color,
+  pure depth (`D16`/`D32`), and pure stencil (`S8`) sampled/combined/input
+  descriptors. Storage images remain color-only and packed dual-aspect
   depth/stencil descriptors fail-closed until the copy-range model can represent
-  them explicitly. Acceptance: descriptor copy-range helper derives the aspect
-  from image-view range, staged upload uses `_for_aspect` offset/copy-size
-  helpers with bounds checks, descriptor bind barriers use aspect-derived
-  source access/stage masks, and `tests.test_gpu_abi_contract` plus native/APK
-  gates remain green.
+  them explicitly. The descriptor copy-range helper derives the aspect from the
+  image-view range, staged upload uses `_for_aspect` offset/copy-size helpers
+  with bounds checks, and descriptor bind barriers use aspect-derived source
+  access/stage masks.
+- [done] **V6.14/V6.15 advertised-cap fail-closed slice**: `vkCmdResolveImage`
+  and `vkCmdBlitImage` replay are accepted only when the same capabilities that
+  the ICD advertises can support the operation. Current advertised caps are
+  single-sample only and intentionally omit `VK_FORMAT_FEATURE_BLIT_SRC_BIT`,
+  `VK_FORMAT_FEATURE_BLIT_DST_BIT`, and
+  `VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT`; therefore V6.14 resolve
+  and V6.15 blit fail closed at producer collection, executor validation,
+  executor materialization/replay, and ICD fallback emulation. Block-scoped
+  tests prove resolve helpers are used only in resolve blocks, blit helpers only
+  in blit blocks, and copy-image replay is not touched by broad replacement.
+- [planned] **executor-derived image capability advertisement**: Replace
+  hard-coded conservative resolve/blit gating with executor-reported
+  format/sample/blit/filter caps. Only after the executor advertisement contract
+  exists may the ICD advertise MSAA resolve, blit, or linear-filter support.
 - [planned] **residual graphics evidence gaps**: Do not promote full Vulkan
   pass-through until remaining fail-closed lanes have explicit ABI/evidence:
   V6.1 image-barrier range/aspect normalization, packed depth+stencil copy
