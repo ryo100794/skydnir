@@ -4930,7 +4930,8 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         self.assertIn("if (info->pNext) return unsupported_image_pnext_result", image_validate_body)
         self.assertIn("vkGetPhysicalDeviceImageFormatProperties", image_validate_body)
-        self.assertIn("if ((info->samples & props.sampleCounts) == 0)", image_validate_body)
+        self.assertIn("pdocker_vk_sample_count_value(info->samples) == 0", image_validate_body)
+        self.assertIn("(info->samples & props.sampleCounts) == 0", image_validate_body)
         self.assertIn("return VK_ERROR_FORMAT_NOT_SUPPORTED;", image_validate_body)
         create_image_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateImage", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkDestroyImage", 1
@@ -5091,6 +5092,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "pdocker_vk_image_usage_required_features",
             "pdocker_vk_image_usage_supported_by_format",
             "pdocker_vk_image_max_mip_levels",
+            "pdocker_vk_sample_count_value",
             "pFormatProperties->linearTilingFeatures = 0;",
             "pFormatProperties->optimalTilingFeatures = pdocker_vk_advertised_image_features(format);",
             "VK_FORMAT_FEATURE_TRANSFER_SRC_BIT",
@@ -5137,6 +5139,22 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT", usage_body)
         self.assertIn("VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT", usage_body)
         self.assertIn("return required != 0 && (advertised & required) == required;", usage_body)
+        sample_count_body = icd.split("static uint32_t pdocker_vk_sample_count_value", 1)[1].split(
+            "static VkDeviceSize estimate_image_requirement_size", 1
+        )[0]
+        for sample in ["1", "2", "4", "8", "16", "32", "64"]:
+            self.assertIn(f"return {sample}u;", sample_count_body)
+        estimate_body = icd.split("static VkDeviceSize estimate_image_requirement_size", 1)[1].split(
+            "static VkDeviceSize pdocker_vulkan_max_buffer_size", 1
+        )[0]
+        self.assertIn("const uint32_t sample_count = pdocker_vk_sample_count_value(info->samples);", estimate_body)
+        self.assertIn("if (sample_count == 0) return 0;", estimate_body)
+        self.assertIn("checked_mul_u64(pixels, sample_count, &pixels)", estimate_body)
+        validate_image_body = icd.split("static VkResult validate_image_create_info_for_transport", 1)[1].split(
+            "static VkResult validate_image_view_create_info_for_transport", 1
+        )[0]
+        self.assertIn("pdocker_vk_sample_count_value(info->samples) == 0", validate_image_body)
+        self.assertIn("(info->samples & props.sampleCounts) == 0", validate_image_body)
         legacy_features = icd.split("static VkFormatFeatureFlags pdocker_vk_format_image_features", 1)[1].split(
             "static bool pdocker_vk_advertises_multisample_image_support", 1
         )[0]

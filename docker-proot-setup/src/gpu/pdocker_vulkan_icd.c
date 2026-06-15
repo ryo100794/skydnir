@@ -1974,8 +1974,23 @@ static void encode_clear_color_pixel(
 #undef COPY_BYTES
 }
 
+static uint32_t pdocker_vk_sample_count_value(VkSampleCountFlagBits samples) {
+    switch (samples) {
+        case VK_SAMPLE_COUNT_1_BIT: return 1u;
+        case VK_SAMPLE_COUNT_2_BIT: return 2u;
+        case VK_SAMPLE_COUNT_4_BIT: return 4u;
+        case VK_SAMPLE_COUNT_8_BIT: return 8u;
+        case VK_SAMPLE_COUNT_16_BIT: return 16u;
+        case VK_SAMPLE_COUNT_32_BIT: return 32u;
+        case VK_SAMPLE_COUNT_64_BIT: return 64u;
+        default: return 0u;
+    }
+}
+
 static VkDeviceSize estimate_image_requirement_size(const VkImageCreateInfo *info) {
     if (!info) return 0;
+    const uint32_t sample_count = pdocker_vk_sample_count_value(info->samples);
+    if (sample_count == 0) return 0;
     uint64_t pixels = 0;
     if (!checked_mul_u64(info->extent.width ? info->extent.width : 1, info->extent.height ? info->extent.height : 1, &pixels)) {
         return 0;
@@ -1986,6 +2001,7 @@ static VkDeviceSize estimate_image_requirement_size(const VkImageCreateInfo *inf
     uint32_t bytes_per_pixel = conservative_format_bytes_per_pixel(info->format);
     if (bytes_per_pixel == 0) return 0;
     if (!checked_mul_u64(pixels, bytes_per_pixel, &pixels)) return 0;
+    if (!checked_mul_u64(pixels, sample_count, &pixels)) return 0;
     return align_device_size((VkDeviceSize)pixels, PDOCKER_VK_REQUIREMENT_ALIGNMENT);
 }
 
@@ -10992,7 +11008,8 @@ static VkResult validate_image_create_info_for_transport(const VkImageCreateInfo
         info->flags,
         &props);
     if (rc != VK_SUCCESS) return rc;
-    if ((info->samples & props.sampleCounts) == 0) {
+    if (pdocker_vk_sample_count_value(info->samples) == 0 ||
+        (info->samples & props.sampleCounts) == 0) {
         return VK_ERROR_FORMAT_NOT_SUPPORTED;
     }
     return VK_SUCCESS;
