@@ -1600,45 +1600,59 @@ static bool pdocker_vk_format_is_depth_stencil(VkFormat format) {
            pdocker_vk_format_has_stencil(format);
 }
 
-static bool pdocker_vk_format_bridge_supported(VkFormat format) {
-    switch (format) {
-        case VK_FORMAT_R8_UNORM:
-        case VK_FORMAT_R8_SNORM:
-        case VK_FORMAT_R8_UINT:
-        case VK_FORMAT_R8_SINT:
-        case VK_FORMAT_R8G8_UNORM:
-        case VK_FORMAT_R8G8_SNORM:
-        case VK_FORMAT_R8G8_UINT:
-        case VK_FORMAT_R8G8_SINT:
-        case VK_FORMAT_R16_SFLOAT:
-        case VK_FORMAT_R16_UINT:
-        case VK_FORMAT_R16_SINT:
-        case VK_FORMAT_R8G8B8A8_UNORM:
-        case VK_FORMAT_R8G8B8A8_SNORM:
-        case VK_FORMAT_R8G8B8A8_UINT:
-        case VK_FORMAT_R8G8B8A8_SINT:
-        case VK_FORMAT_B8G8R8A8_UNORM:
-        case VK_FORMAT_R16G16_SFLOAT:
-        case VK_FORMAT_R32_SFLOAT:
-        case VK_FORMAT_R32_UINT:
-        case VK_FORMAT_R32_SINT:
-        case VK_FORMAT_R16G16B16A16_SFLOAT:
-        case VK_FORMAT_R32G32_SFLOAT:
-        case VK_FORMAT_R32G32_UINT:
-        case VK_FORMAT_R32G32_SINT:
-        case VK_FORMAT_R32G32B32A32_SFLOAT:
-        case VK_FORMAT_R32G32B32A32_UINT:
-        case VK_FORMAT_R32G32B32A32_SINT:
-        case VK_FORMAT_S8_UINT:
-        case VK_FORMAT_D16_UNORM:
-        case VK_FORMAT_D24_UNORM_S8_UINT:
-        case VK_FORMAT_D32_SFLOAT:
-        case VK_FORMAT_D32_SFLOAT_S8_UINT:
-            return true;
-        default:
-            return false;
-    }
+static const VkFormat PDOCKER_VK_BRIDGE_FORMATS[] = {
+    VK_FORMAT_R8_UNORM,
+    VK_FORMAT_R8_SNORM,
+    VK_FORMAT_R8_UINT,
+    VK_FORMAT_R8_SINT,
+    VK_FORMAT_R8G8_UNORM,
+    VK_FORMAT_R8G8_SNORM,
+    VK_FORMAT_R8G8_UINT,
+    VK_FORMAT_R8G8_SINT,
+    VK_FORMAT_R16_SFLOAT,
+    VK_FORMAT_R16_UINT,
+    VK_FORMAT_R16_SINT,
+    VK_FORMAT_R8G8B8A8_UNORM,
+    VK_FORMAT_R8G8B8A8_SNORM,
+    VK_FORMAT_R8G8B8A8_UINT,
+    VK_FORMAT_R8G8B8A8_SINT,
+    VK_FORMAT_B8G8R8A8_UNORM,
+    VK_FORMAT_R16G16_SFLOAT,
+    VK_FORMAT_R32_SFLOAT,
+    VK_FORMAT_R32_UINT,
+    VK_FORMAT_R32_SINT,
+    VK_FORMAT_R16G16B16A16_SFLOAT,
+    VK_FORMAT_R32G32_SFLOAT,
+    VK_FORMAT_R32G32_UINT,
+    VK_FORMAT_R32G32_SINT,
+    VK_FORMAT_R32G32B32A32_SFLOAT,
+    VK_FORMAT_R32G32B32A32_UINT,
+    VK_FORMAT_R32G32B32A32_SINT,
+    VK_FORMAT_S8_UINT,
+    VK_FORMAT_D16_UNORM,
+    VK_FORMAT_D24_UNORM_S8_UINT,
+    VK_FORMAT_D32_SFLOAT,
+    VK_FORMAT_D32_SFLOAT_S8_UINT,
+};
+
+static size_t pdocker_vk_bridge_format_count(void) {
+    return sizeof(PDOCKER_VK_BRIDGE_FORMATS) / sizeof(PDOCKER_VK_BRIDGE_FORMATS[0]);
 }
+
+static VkFormat pdocker_vk_bridge_format_at(size_t index) {
+    return index < pdocker_vk_bridge_format_count()
+        ? PDOCKER_VK_BRIDGE_FORMATS[index]
+        : VK_FORMAT_UNDEFINED;
+}
+
+static bool pdocker_vk_format_bridge_supported(VkFormat format) {
+    for (size_t i = 0; i < pdocker_vk_bridge_format_count(); ++i) {
+        if (PDOCKER_VK_BRIDGE_FORMATS[i] == format) return true;
+    }
+    return false;
+}
+
+static VkFormatFeatureFlags pdocker_vk_advertised_image_features(VkFormat format);
 
 static VkFormatFeatureFlags pdocker_vk_format_buffer_features(VkFormat format) {
     if (!pdocker_vk_format_bridge_supported(format) ||
@@ -1648,7 +1662,7 @@ static VkFormatFeatureFlags pdocker_vk_format_buffer_features(VkFormat format) {
     return VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT;
 }
 
-static VkFormatFeatureFlags pdocker_vk_format_image_features(VkFormat format) {
+static VkFormatFeatureFlags pdocker_vk_transport_image_features(VkFormat format) {
     if (!pdocker_vk_format_bridge_supported(format)) return 0;
     VkFormatFeatureFlags features = VK_FORMAT_FEATURE_TRANSFER_SRC_BIT |
                                     VK_FORMAT_FEATURE_TRANSFER_DST_BIT |
@@ -1657,8 +1671,19 @@ static VkFormatFeatureFlags pdocker_vk_format_image_features(VkFormat format) {
         features |= VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT;
     } else {
         features |= VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT |
-                    VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT;
+                    VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT |
+                    VK_FORMAT_FEATURE_BLIT_SRC_BIT |
+                    VK_FORMAT_FEATURE_BLIT_DST_BIT |
+                    VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
     }
+    return features;
+}
+
+static VkFormatFeatureFlags pdocker_vk_format_image_features(VkFormat format) {
+    VkFormatFeatureFlags features = pdocker_vk_transport_image_features(format);
+    features &= ~(VK_FORMAT_FEATURE_BLIT_SRC_BIT |
+                  VK_FORMAT_FEATURE_BLIT_DST_BIT |
+                  VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT);
     return features;
 }
 
@@ -1683,7 +1708,7 @@ static bool pdocker_vk_resolve_image_executor_eligible(const PdockerVkImageResol
         !(op->dst->usage & VK_IMAGE_USAGE_TRANSFER_DST_BIT)) {
         return false;
     }
-    const VkFormatFeatureFlags features = pdocker_vk_format_image_features(op->src->format);
+    const VkFormatFeatureFlags features = pdocker_vk_advertised_image_features(op->src->format);
     return (features & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT) != 0;
 }
 
@@ -1700,8 +1725,8 @@ static bool pdocker_vk_blit_image_executor_eligible(const PdockerVkImageBlitOp *
         (op->filter != VK_FILTER_NEAREST && op->filter != VK_FILTER_LINEAR)) {
         return false;
     }
-    const VkFormatFeatureFlags src_features = pdocker_vk_format_image_features(op->src->format);
-    const VkFormatFeatureFlags dst_features = pdocker_vk_format_image_features(op->dst->format);
+    const VkFormatFeatureFlags src_features = pdocker_vk_advertised_image_features(op->src->format);
+    const VkFormatFeatureFlags dst_features = pdocker_vk_advertised_image_features(op->dst->format);
     if ((src_features & VK_FORMAT_FEATURE_BLIT_SRC_BIT) == 0 ||
         (dst_features & VK_FORMAT_FEATURE_BLIT_DST_BIT) == 0) {
         return false;
@@ -1713,22 +1738,58 @@ static bool pdocker_vk_blit_image_executor_eligible(const PdockerVkImageBlitOp *
     return true;
 }
 
+static VkFormatFeatureFlags pdocker_vk_image_usage_required_features(
+        VkFormat format,
+        VkImageUsageFlags usage) {
+    if (!pdocker_vk_format_bridge_supported(format) || usage == 0) return 0;
+    const bool depth_stencil = pdocker_vk_format_is_depth_stencil(format);
+    VkFormatFeatureFlags required = 0;
+    if (usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) {
+        required |= VK_FORMAT_FEATURE_TRANSFER_SRC_BIT;
+    }
+    if (usage & VK_IMAGE_USAGE_TRANSFER_DST_BIT) {
+        required |= VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
+    }
+    if (usage & VK_IMAGE_USAGE_SAMPLED_BIT) {
+        required |= VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
+    }
+    if (usage & VK_IMAGE_USAGE_STORAGE_BIT) {
+        required |= VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT;
+    }
+    if (usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) {
+        required |= VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT;
+    }
+    if (usage & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) {
+        required |= VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT;
+    }
+    if (usage & VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT) {
+        required |= depth_stencil
+            ? VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT
+            : VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT;
+    }
+    return required;
+}
+
 static bool pdocker_vk_image_usage_supported_by_format(
         VkFormat format,
         VkImageUsageFlags usage) {
-    if (!pdocker_vk_format_bridge_supported(format)) return false;
-    const bool depth_stencil = pdocker_vk_format_is_depth_stencil(format);
-    const VkImageUsageFlags common = VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                                     VK_IMAGE_USAGE_TRANSFER_DST_BIT |
-                                     VK_IMAGE_USAGE_SAMPLED_BIT |
-                                     VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
-    const VkImageUsageFlags color = common |
-                                    VK_IMAGE_USAGE_STORAGE_BIT |
-                                    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-    const VkImageUsageFlags ds = common |
-                                 VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-    const VkImageUsageFlags supported = depth_stencil ? ds : color;
-    return usage != 0 && (usage & ~supported) == 0;
+    const VkImageUsageFlags supported_usage =
+        VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+        VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+        VK_IMAGE_USAGE_SAMPLED_BIT |
+        VK_IMAGE_USAGE_STORAGE_BIT |
+        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
+        VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
+    if (!pdocker_vk_format_bridge_supported(format) || usage == 0 ||
+        (usage & ~supported_usage) != 0) {
+        return false;
+    }
+    const VkFormatFeatureFlags required =
+        pdocker_vk_image_usage_required_features(format, usage);
+    const VkFormatFeatureFlags advertised =
+        pdocker_vk_advertised_image_features(format);
+    return required != 0 && (advertised & required) == required;
 }
 
 static uint32_t pdocker_vk_image_max_mip_levels(VkExtent3D extent) {
@@ -9380,6 +9441,16 @@ static void copy_extension_properties(
     *pPropertyCount = count;
 }
 
+#define PDOCKER_VK_ADVERTISED_FORMAT_CAP_MAX 64u
+#define PDOCKER_VK_ADVERTISEMENT_CAPS_LINE_MAX 32768u
+
+typedef struct {
+    bool valid;
+    VkFormat format;
+    VkFormatFeatureFlags optimal_features;
+    VkSampleCountFlags sample_counts;
+} PdockerVkAdvertisedFormatCaps;
+
 typedef struct {
     bool loaded;
     bool executor_valid;
@@ -9412,6 +9483,8 @@ typedef struct {
     bool ext_draw_indirect_count_amd;
     bool ext_extended_dynamic_state;
     bool ext_index_type_uint8;
+    uint32_t image_format_cap_count;
+    PdockerVkAdvertisedFormatCaps image_format_caps[PDOCKER_VK_ADVERTISED_FORMAT_CAP_MAX];
 } PdockerVkAdvertisedCaps;
 
 static const char *json_find_value(const char *json, const char *key) {
@@ -9481,6 +9554,15 @@ static bool parse_executor_advertisement_caps_json(
     caps->loaded = true;
     caps->executor_valid = true;
     uint32_t value = 0;
+    uint32_t format_caps_schema = 0;
+    uint32_t expected_format_cap_count = 0;
+    if (!json_read_u32(json, "format_caps_schema", &format_caps_schema) ||
+        format_caps_schema != 1 ||
+        !json_read_u32(json, "format_caps_count", &expected_format_cap_count) ||
+        expected_format_cap_count != (uint32_t)pdocker_vk_bridge_format_count() ||
+        expected_format_cap_count > PDOCKER_VK_ADVERTISED_FORMAT_CAP_MAX) {
+        return false;
+    }
     if (json_read_u32(json, "apiVersion", &value)) caps->api_version = value;
     if (json_read_u32(json, "vendorID", &value)) caps->vendor_id = value;
     if (json_read_u32(json, "deviceID", &value)) caps->device_id = value;
@@ -9532,7 +9614,36 @@ static bool parse_executor_advertisement_caps_json(
     if (json_read_u32(json, "VK_AMD_draw_indirect_count", &value)) caps->ext_draw_indirect_count_amd = value != 0;
     if (json_read_u32(json, "VK_EXT_extended_dynamic_state", &value)) caps->ext_extended_dynamic_state = value != 0;
     if (json_read_u32(json, "VK_EXT_index_type_uint8", &value)) caps->ext_index_type_uint8 = value != 0;
-    return caps->api_version != 0;
+
+    caps->image_format_cap_count = 0;
+    for (size_t i = 0; i < pdocker_vk_bridge_format_count() &&
+                       caps->image_format_cap_count < PDOCKER_VK_ADVERTISED_FORMAT_CAP_MAX; ++i) {
+        VkFormat format = pdocker_vk_bridge_format_at(i);
+        char key[64];
+        uint32_t optimal_features = 0;
+        int n = snprintf(key, sizeof(key), "fmt%dOptimalFeatures", (int)format);
+        if (n <= 0 || (size_t)n >= sizeof(key) ||
+            !json_read_u32(json, key, &optimal_features)) {
+            return false;
+        }
+        uint32_t sample_counts = 0;
+        n = snprintf(key, sizeof(key), "fmt%dSampleCounts", (int)format);
+        if (n <= 0 || (size_t)n >= sizeof(key) ||
+            !json_read_u32(json, key, &sample_counts)) {
+            return false;
+        }
+        PdockerVkAdvertisedFormatCaps *cap =
+            &caps->image_format_caps[caps->image_format_cap_count++];
+        memset(cap, 0, sizeof(*cap));
+        cap->valid = true;
+        cap->format = format;
+        cap->optimal_features =
+            (VkFormatFeatureFlags)optimal_features & pdocker_vk_transport_image_features(format);
+        cap->sample_counts = (VkSampleCountFlags)sample_counts & VK_SAMPLE_COUNT_1_BIT;
+        if (!cap->sample_counts) cap->sample_counts = VK_SAMPLE_COUNT_1_BIT;
+    }
+    return caps->api_version != 0 &&
+           caps->image_format_cap_count == expected_format_cap_count;
 }
 
 static int query_executor_advertisement_caps_line(char *line, size_t line_cap) {
@@ -9547,15 +9658,20 @@ static int query_executor_advertisement_caps_line(char *line, size_t line_cap) {
         rc = sent < 0 ? -errno : -EIO;
     } else {
         size_t off = 0;
+        bool saw_newline = false;
         while (off + 1 < line_cap) {
             char ch;
             ssize_t r = read(socket_fd, &ch, 1);
             if (r <= 0) break;
             line[off++] = ch;
-            if (ch == '\n') break;
+            if (ch == '\n') {
+                saw_newline = true;
+                break;
+            }
         }
         line[off] = '\0';
         if (off == 0) rc = -EIO;
+        if (rc == 0 && !saw_newline && off + 1 >= line_cap) rc = -EOVERFLOW;
         if (rc == 0 && strstr(line, "\"schema\":\"skydnir-vulkan-advertisement-caps-v1\"") == NULL) {
             rc = -EPROTO;
         }
@@ -9569,7 +9685,7 @@ static const PdockerVkAdvertisedCaps *pdocker_vk_advertised_caps(void) {
     static bool queried = false;
     if (queried) return &caps;
     queried = true;
-    char line[8192];
+    char line[PDOCKER_VK_ADVERTISEMENT_CAPS_LINE_MAX];
     int rc = query_executor_advertisement_caps_line(line, sizeof(line));
     if (rc == 0 && parse_executor_advertisement_caps_json(line, &caps)) {
         caps.loaded = true;
@@ -9591,6 +9707,30 @@ static const PdockerVkAdvertisedCaps *executor_advertisement_caps_if_enabled(voi
     if (!executor_advertisement_source_enabled()) return NULL;
     const PdockerVkAdvertisedCaps *caps = pdocker_vk_advertised_caps();
     return caps && caps->executor_valid ? caps : NULL;
+}
+
+static const PdockerVkAdvertisedFormatCaps *pdocker_vk_find_advertised_format_caps(
+        const PdockerVkAdvertisedCaps *caps,
+        VkFormat format) {
+    if (!caps) return NULL;
+    for (uint32_t i = 0; i < caps->image_format_cap_count &&
+                         i < PDOCKER_VK_ADVERTISED_FORMAT_CAP_MAX; ++i) {
+        const PdockerVkAdvertisedFormatCaps *cap = &caps->image_format_caps[i];
+        if (cap->valid && cap->format == format) return cap;
+    }
+    return NULL;
+}
+
+static VkFormatFeatureFlags pdocker_vk_advertised_image_features(VkFormat format) {
+    if (executor_advertisement_source_enabled()) {
+        const PdockerVkAdvertisedCaps *caps = pdocker_vk_advertised_caps();
+        if (!caps || !caps->executor_valid) return 0;
+        const PdockerVkAdvertisedFormatCaps *cap =
+            pdocker_vk_find_advertised_format_caps(caps, format);
+        if (!cap) return 0;
+        return cap->optimal_features & pdocker_vk_transport_image_features(format);
+    }
+    return pdocker_vk_format_image_features(format);
 }
 
 static VkBool32 executor_advertised_shader_int64_or(VkBool32 legacy) {
@@ -10544,7 +10684,7 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceFormatProperties(
     if (!pdocker_vk_format_bridge_supported(format)) return;
     pFormatProperties->bufferFeatures = pdocker_vk_format_buffer_features(format);
     pFormatProperties->linearTilingFeatures = 0;
-    pFormatProperties->optimalTilingFeatures = pdocker_vk_format_image_features(format);
+    pFormatProperties->optimalTilingFeatures = pdocker_vk_advertised_image_features(format);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceImageFormatProperties(

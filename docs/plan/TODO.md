@@ -40,23 +40,32 @@ or closes.
   access/stage masks.
 - [done] **V6.14/V6.15 advertised-cap fail-closed slice**: `vkCmdResolveImage`
   and `vkCmdBlitImage` replay are accepted only when the same capabilities that
-  the ICD advertises can support the operation. Current advertised caps are
-  single-sample only and intentionally omit `VK_FORMAT_FEATURE_BLIT_SRC_BIT`,
+  the ICD advertises can support the operation. The conservative fallback
+  remains single-sample only and omits `VK_FORMAT_FEATURE_BLIT_SRC_BIT`,
   `VK_FORMAT_FEATURE_BLIT_DST_BIT`, and
-  `VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT`; therefore V6.14 resolve
-  and V6.15 blit fail closed at producer collection, executor validation,
-  executor materialization/replay, and ICD fallback emulation. Block-scoped
-  tests prove resolve helpers are used only in resolve blocks, blit helpers only
-  in blit blocks, and copy-image replay is not touched by broad replacement.
-- [planned] **executor-derived image capability advertisement**: Replace
-  hard-coded conservative resolve/blit gating with executor-reported
-  format/sample/blit/filter caps. Only after the executor advertisement contract
-  exists may the ICD advertise MSAA resolve, blit, or linear-filter support.
+  `VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT`, so resolve/blit still
+  fail closed unless executor advertisement explicitly widens the relevant
+  format features. Block-scoped tests prove resolve helpers are used only in
+  resolve blocks, blit helpers only in blit blocks, and copy-image replay is not
+  touched by broad replacement.
+- [done] **executor-derived image capability advertisement**: The Android
+  executor now reports a per-format optimal-image feature table through the
+  `VULKAN_ADVERTISEMENT_CAPS` JSON schema
+  (`format_caps_schema`, `format_caps_count`, `fmt%dOptimalFeatures`,
+  `fmt%dSampleCounts`). The ICD parses that table only when
+  `PDOCKER_VULKAN_ADVERTISEMENT_SOURCE=executor`, requires all bridge formats
+  to be present, masks every feature set by the transport-supported bits,
+  detects truncated caps JSON, and fails closed to zero advertised image
+  features if the executor caps are missing or malformed. Image-format-property
+  usage checks now derive support from the same advertised feature bits.
+  `fmt%dSampleCounts` is still clamped to `VK_SAMPLE_COUNT_1_BIT`; MSAA/resolve
+  widening remains a separate planned lane.
 - [planned] **residual graphics evidence gaps**: Do not promote full Vulkan
   pass-through until remaining fail-closed lanes have explicit ABI/evidence:
   V6.1 image-barrier range/aspect normalization, packed depth+stencil copy
-  layout, copy2 pNext payloads, multiplanar/compressed images, resolve/blit
-  inside dynamic rendering, unresolved MSAA store/readback, true cross-family
+  layout, copy2 pNext payloads, multiplanar/compressed images, MSAA/sampleCount
+  widening for resolve, resolve/blit inside dynamic rendering, unresolved MSAA
+  store/readback, true cross-family
   ownership transfer, dispatch+graphics mixing, and broader synchronization.
 
 

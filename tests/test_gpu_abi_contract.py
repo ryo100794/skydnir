@@ -2572,24 +2572,38 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, executor)
 
+        transport_format = executor.split(
+            "static VkFormatFeatureFlags vulkan_graphics_transport_format_features(VkFormat format) {", 1
+        )[1].split(
+            "static VkFormatFeatureFlags vulkan_graphics_legacy_format_features(VkFormat format) {", 1
+        )[0]
+        self.assertIn("if (!vulkan_graphics_runtime_format_bridge_supported(format)) return 0;", transport_format)
+        self.assertIn("VK_FORMAT_FEATURE_BLIT_SRC_BIT", transport_format)
+        self.assertIn("VK_FORMAT_FEATURE_BLIT_DST_BIT", transport_format)
+        self.assertIn("VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT", transport_format)
+        legacy_format = executor.split(
+            "static VkFormatFeatureFlags vulkan_graphics_legacy_format_features(VkFormat format) {", 1
+        )[1].split(
+            "static VkFormatFeatureFlags vulkan_graphics_runtime_format_features(VkFormat format) {", 1
+        )[0]
+        self.assertIn("features &= ~(VK_FORMAT_FEATURE_BLIT_SRC_BIT", legacy_format)
         runtime_format = executor.split(
-            "static VkFormatFeatureFlags vulkan_graphics_runtime_format_features", 1
+            "static VkFormatFeatureFlags vulkan_graphics_runtime_format_features(VkFormat format) {", 1
         )[1].split(
             "static int vulkan_graphics_runtime_advertises_multisample_image_support", 1
         )[0]
-        self.assertIn("if (!vulkan_graphics_runtime_format_bridge_supported(format)) return 0;", runtime_format)
-        self.assertNotIn("VK_FORMAT_FEATURE_BLIT_SRC_BIT", runtime_format)
-        self.assertNotIn("VK_FORMAT_FEATURE_BLIT_DST_BIT", runtime_format)
-        self.assertNotIn("VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT", runtime_format)
+        self.assertIn("vkGetPhysicalDeviceFormatProperties(g_vulkan_runtime.physical_device, format, &props);", runtime_format)
+        self.assertIn("return props.optimalTilingFeatures & transport;", runtime_format)
 
         validation_body = executor.split(
             "static int validate_vulkan_graphics_v6_frame_content", 1
         )[1].split(
-            "static int append_vulkan_graphics_replay_buffer", 1
+            "static int vulkan_graphics_v6_frame_needs_dynamic_rendering", 1
         )[0]
-        self.assertIn("if (!vulkan_graphics_v614_resolve_runtime_eligible(src_image, dst_image, entry))", validation_body)
-        self.assertIn("return -EOPNOTSUPP;", validation_body)
-        self.assertIn("if (!vulkan_graphics_v615_blit_runtime_eligible(src_image, dst_image, entry))", validation_body)
+        self.assertNotIn("vulkan_graphics_v614_resolve_runtime_eligible", validation_body)
+        self.assertNotIn("vulkan_graphics_v615_blit_runtime_eligible", validation_body)
+        self.assertNotIn("vkGetPhysicalDeviceFormatProperties", validation_body)
+        self.assertNotIn("init_vulkan_runtime", validation_body)
 
         record_body = executor.split(
             "static int record_vulkan_graphics_v6_command_buffer", 1
@@ -5074,10 +5088,11 @@ class GpuAbiContractTest(unittest.TestCase):
         for marker in [
             "pdocker_vk_format_bridge_supported",
             "pdocker_vk_format_image_features",
+            "pdocker_vk_image_usage_required_features",
             "pdocker_vk_image_usage_supported_by_format",
             "pdocker_vk_image_max_mip_levels",
             "pFormatProperties->linearTilingFeatures = 0;",
-            "pFormatProperties->optimalTilingFeatures = pdocker_vk_format_image_features(format);",
+            "pFormatProperties->optimalTilingFeatures = pdocker_vk_advertised_image_features(format);",
             "VK_FORMAT_FEATURE_TRANSFER_SRC_BIT",
             "VK_FORMAT_FEATURE_TRANSFER_DST_BIT",
             "VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT",
@@ -5114,6 +5129,18 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("case VK_FORMAT_D16_UNORM_S8_UINT:\n            return true;", icd)
         self.assertIn("Unknown/block-compressed/vendor formats are not byte-linear", icd)
         self.assertIn("return VK_ERROR_FORMAT_NOT_SUPPORTED;", image_props)
+        self.assertIn("pdocker_vk_image_usage_supported_by_format(format, usage)", image_props)
+        usage_body = icd.split("static VkFormatFeatureFlags pdocker_vk_image_usage_required_features", 1)[1].split(
+            "static uint32_t pdocker_vk_image_max_mip_levels", 1
+        )[0]
+        self.assertIn("VK_IMAGE_USAGE_STORAGE_BIT", usage_body)
+        self.assertIn("VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT", usage_body)
+        self.assertIn("VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT", usage_body)
+        self.assertIn("return required != 0 && (advertised & required) == required;", usage_body)
+        legacy_features = icd.split("static VkFormatFeatureFlags pdocker_vk_format_image_features", 1)[1].split(
+            "static bool pdocker_vk_advertises_multisample_image_support", 1
+        )[0]
+        self.assertIn("features &= ~(VK_FORMAT_FEATURE_BLIT_SRC_BIT", legacy_features)
 
     def test_vulkan_icd_records_buffer_image_copy_commands_before_dispatch(self):
         icd = VULKAN_ICD.read_text()
@@ -9802,6 +9829,18 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, body)
         self.assertIn("write_json_string_literal(out, rt ? rt->physical_properties.deviceName : \"offline\")", body)
+        format_caps_body = source.split("static void write_vulkan_image_format_caps_report", 1)[1].split(
+            "static void print_vulkan_advertisement_caps", 1
+        )[0]
+        self.assertIn('\\"format_caps_schema\\":1', format_caps_body)
+        self.assertIn('\\"format_caps_count\\":%zu', format_caps_body)
+        self.assertIn('\\"image_format_caps\\":{', format_caps_body)
+        self.assertIn('\\"fmt%dOptimalFeatures\\":%u', format_caps_body)
+        self.assertIn('\\"fmt%dSampleCounts\\":%u', format_caps_body)
+        self.assertIn("VkFormatFeatureFlags features = 0;", format_caps_body)
+        self.assertIn("vkGetPhysicalDeviceFormatProperties(rt->physical_device, format, &props);", format_caps_body)
+        self.assertIn("features = props.optimalTilingFeatures & vulkan_graphics_transport_format_features(format);", format_caps_body)
+        self.assertNotIn("features = vulkan_graphics_legacy_format_features(format);", format_caps_body)
         enabled_body = source.split("static void write_android_vulkan_enabled_features_report", 1)[1].split(
             "static void log_vulkan_feature_gap", 1
         )[0]
@@ -9863,8 +9902,35 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, icd)
         self.assertIn("query_executor_advertisement_caps_line", icd)
+        self.assertIn("PDOCKER_VK_ADVERTISEMENT_CAPS_LINE_MAX 32768u", icd)
+        self.assertIn("char line[PDOCKER_VK_ADVERTISEMENT_CAPS_LINE_MAX];", icd)
         self.assertIn('const char command[] = "VULKAN_ADVERTISEMENT_CAPS\\n";', icd)
+        self.assertIn("pFormatProperties->optimalTilingFeatures = pdocker_vk_advertised_image_features(format);", icd)
         self.assertIn('\\"schema\\":\\"skydnir-vulkan-advertisement-caps-v1\\"', icd)
+        parse_body = icd.split("static bool parse_executor_advertisement_caps_json", 1)[1].split(
+            "static int query_executor_advertisement_caps_line", 1
+        )[0]
+        self.assertIn("format_caps_schema != 1", parse_body)
+        self.assertIn("expected_format_cap_count != (uint32_t)pdocker_vk_bridge_format_count()", parse_body)
+        self.assertIn("expected_format_cap_count > PDOCKER_VK_ADVERTISED_FORMAT_CAP_MAX", parse_body)
+        self.assertIn("!json_read_u32(json, key, &optimal_features)", parse_body)
+        self.assertIn("!json_read_u32(json, key, &sample_counts)", parse_body)
+        self.assertIn("optimal_features & pdocker_vk_transport_image_features(format)", parse_body)
+        self.assertIn("sample_counts & VK_SAMPLE_COUNT_1_BIT", parse_body)
+        self.assertIn("caps->image_format_cap_count == expected_format_cap_count", parse_body)
+        query_body = icd.split("static int query_executor_advertisement_caps_line", 1)[1].split(
+            "static const PdockerVkAdvertisedCaps *pdocker_vk_advertised_caps", 1
+        )[0]
+        self.assertIn("bool saw_newline = false;", query_body)
+        self.assertIn("!saw_newline && off + 1 >= line_cap", query_body)
+        self.assertIn("-EOVERFLOW", query_body)
+        advertised_image_body = icd.split("static VkFormatFeatureFlags pdocker_vk_advertised_image_features", 1)[1].split(
+            "static VkBool32 executor_advertised_shader_int64_or", 1
+        )[0]
+        self.assertIn("if (executor_advertisement_source_enabled())", advertised_image_body)
+        self.assertIn("if (!caps || !caps->executor_valid) return 0;", advertised_image_body)
+        self.assertIn("if (!cap) return 0;", advertised_image_body)
+        self.assertIn("return pdocker_vk_format_image_features(format);", advertised_image_body)
         self.assertIn("trace_executor_advertisement_caps_once", icd)
         self.assertIn("executor advertisement caps shadow", icd)
         fill_props = icd.split("static void fill_physical_device_properties", 1)[1].split(

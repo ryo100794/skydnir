@@ -16316,6 +16316,11 @@ static int run_registered_vector_add(RegisteredVectorBuffer *buffer) {
     return run_vector_add_arrays_best(a, b, out, buffer->n, "unix-socket-registered-shared-buffer", GPU_API_AUTO);
 }
 
+static size_t vulkan_graphics_runtime_format_bridge_count(void);
+static VkFormat vulkan_graphics_runtime_format_bridge_at(size_t index);
+static VkFormatFeatureFlags vulkan_graphics_transport_format_features(VkFormat format);
+static VkFormatFeatureFlags vulkan_graphics_legacy_format_features(VkFormat format);
+
 static void print_capabilities(const char *transport) {
     int vulkan_ready = init_vulkan_runtime(&g_vulkan_runtime) == 0;
     VulkanRuntime *rt = vulkan_ready ? &g_vulkan_runtime : NULL;
@@ -16403,6 +16408,26 @@ static void print_capabilities(const char *transport) {
     write_android_vulkan_enabled_features_report(json_out(), rt);
     fprintf(json_out(), ",\"process_exec\":true}\n");
     fflush(json_out());
+}
+
+static void write_vulkan_image_format_caps_report(FILE *out, const VulkanRuntime *rt) {
+    if (!out) return;
+    fprintf(out, "\"format_caps_schema\":1,\"format_caps_count\":%zu,\"image_format_caps\":{",
+            vulkan_graphics_runtime_format_bridge_count());
+    for (size_t i = 0; i < vulkan_graphics_runtime_format_bridge_count(); ++i) {
+        VkFormat format = vulkan_graphics_runtime_format_bridge_at(i);
+        VkFormatFeatureFlags features = 0;
+        if (rt && rt->ready && rt->physical_device != VK_NULL_HANDLE) {
+            VkFormatProperties props;
+            memset(&props, 0, sizeof(props));
+            vkGetPhysicalDeviceFormatProperties(rt->physical_device, format, &props);
+            features = props.optimalTilingFeatures & vulkan_graphics_transport_format_features(format);
+        }
+        fprintf(out, "%s\"fmt%dOptimalFeatures\":%u,\"fmt%dSampleCounts\":%u",
+                i ? "," : "", (int)format, (unsigned)features,
+                (int)format, (unsigned)VK_SAMPLE_COUNT_1_BIT);
+    }
+    fprintf(out, "},");
 }
 
 static void print_vulkan_advertisement_caps(const char *transport) {
@@ -16503,6 +16528,7 @@ static void print_vulkan_advertisement_caps(const char *transport) {
             rt ? rt->subgroup_properties.subgroupSize : 0,
             rt ? rt->subgroup_properties.supportedStages : 0,
             rt ? rt->subgroup_properties.supportedOperations : 0);
+    write_vulkan_image_format_caps_report(out, rt);
     write_android_vulkan_enabled_features_report(out, rt);
     fprintf(out, "}\n");
     fflush(out);
@@ -19634,47 +19660,59 @@ static int vulkan_graphics_v615_image_blit_subresource_valid(
     return 0;
 }
 
-static int vulkan_graphics_runtime_format_bridge_supported(VkFormat format) {
-    switch (format) {
-        case VK_FORMAT_R8_UNORM:
-        case VK_FORMAT_R8_SNORM:
-        case VK_FORMAT_R8_UINT:
-        case VK_FORMAT_R8_SINT:
-        case VK_FORMAT_R8G8_UNORM:
-        case VK_FORMAT_R8G8_SNORM:
-        case VK_FORMAT_R8G8_UINT:
-        case VK_FORMAT_R8G8_SINT:
-        case VK_FORMAT_R16_SFLOAT:
-        case VK_FORMAT_R16_UINT:
-        case VK_FORMAT_R16_SINT:
-        case VK_FORMAT_R8G8B8A8_UNORM:
-        case VK_FORMAT_R8G8B8A8_SNORM:
-        case VK_FORMAT_R8G8B8A8_UINT:
-        case VK_FORMAT_R8G8B8A8_SINT:
-        case VK_FORMAT_B8G8R8A8_UNORM:
-        case VK_FORMAT_R16G16_SFLOAT:
-        case VK_FORMAT_R32_SFLOAT:
-        case VK_FORMAT_R32_UINT:
-        case VK_FORMAT_R32_SINT:
-        case VK_FORMAT_R16G16B16A16_SFLOAT:
-        case VK_FORMAT_R32G32_SFLOAT:
-        case VK_FORMAT_R32G32_UINT:
-        case VK_FORMAT_R32G32_SINT:
-        case VK_FORMAT_R32G32B32A32_SFLOAT:
-        case VK_FORMAT_R32G32B32A32_UINT:
-        case VK_FORMAT_R32G32B32A32_SINT:
-        case VK_FORMAT_S8_UINT:
-        case VK_FORMAT_D16_UNORM:
-        case VK_FORMAT_D24_UNORM_S8_UINT:
-        case VK_FORMAT_D32_SFLOAT:
-        case VK_FORMAT_D32_SFLOAT_S8_UINT:
-            return 1;
-        default:
-            return 0;
-    }
+static const VkFormat VULKAN_GRAPHICS_BRIDGE_FORMATS[] = {
+    VK_FORMAT_R8_UNORM,
+    VK_FORMAT_R8_SNORM,
+    VK_FORMAT_R8_UINT,
+    VK_FORMAT_R8_SINT,
+    VK_FORMAT_R8G8_UNORM,
+    VK_FORMAT_R8G8_SNORM,
+    VK_FORMAT_R8G8_UINT,
+    VK_FORMAT_R8G8_SINT,
+    VK_FORMAT_R16_SFLOAT,
+    VK_FORMAT_R16_UINT,
+    VK_FORMAT_R16_SINT,
+    VK_FORMAT_R8G8B8A8_UNORM,
+    VK_FORMAT_R8G8B8A8_SNORM,
+    VK_FORMAT_R8G8B8A8_UINT,
+    VK_FORMAT_R8G8B8A8_SINT,
+    VK_FORMAT_B8G8R8A8_UNORM,
+    VK_FORMAT_R16G16_SFLOAT,
+    VK_FORMAT_R32_SFLOAT,
+    VK_FORMAT_R32_UINT,
+    VK_FORMAT_R32_SINT,
+    VK_FORMAT_R16G16B16A16_SFLOAT,
+    VK_FORMAT_R32G32_SFLOAT,
+    VK_FORMAT_R32G32_UINT,
+    VK_FORMAT_R32G32_SINT,
+    VK_FORMAT_R32G32B32A32_SFLOAT,
+    VK_FORMAT_R32G32B32A32_UINT,
+    VK_FORMAT_R32G32B32A32_SINT,
+    VK_FORMAT_S8_UINT,
+    VK_FORMAT_D16_UNORM,
+    VK_FORMAT_D24_UNORM_S8_UINT,
+    VK_FORMAT_D32_SFLOAT,
+    VK_FORMAT_D32_SFLOAT_S8_UINT,
+};
+
+static size_t vulkan_graphics_runtime_format_bridge_count(void) {
+    return sizeof(VULKAN_GRAPHICS_BRIDGE_FORMATS) / sizeof(VULKAN_GRAPHICS_BRIDGE_FORMATS[0]);
 }
 
-static VkFormatFeatureFlags vulkan_graphics_runtime_format_features(VkFormat format) {
+static VkFormat vulkan_graphics_runtime_format_bridge_at(size_t index) {
+    return index < vulkan_graphics_runtime_format_bridge_count()
+        ? VULKAN_GRAPHICS_BRIDGE_FORMATS[index]
+        : VK_FORMAT_UNDEFINED;
+}
+
+static int vulkan_graphics_runtime_format_bridge_supported(VkFormat format) {
+    for (size_t i = 0; i < vulkan_graphics_runtime_format_bridge_count(); ++i) {
+        if (VULKAN_GRAPHICS_BRIDGE_FORMATS[i] == format) return 1;
+    }
+    return 0;
+}
+
+static VkFormatFeatureFlags vulkan_graphics_transport_format_features(VkFormat format) {
     if (!vulkan_graphics_runtime_format_bridge_supported(format)) return 0;
     VkFormatFeatureFlags features = VK_FORMAT_FEATURE_TRANSFER_SRC_BIT |
                                     VK_FORMAT_FEATURE_TRANSFER_DST_BIT |
@@ -19684,9 +19722,32 @@ static VkFormatFeatureFlags vulkan_graphics_runtime_format_features(VkFormat for
         features |= VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT;
     } else {
         features |= VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT |
-                    VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT;
+                    VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT |
+                    VK_FORMAT_FEATURE_BLIT_SRC_BIT |
+                    VK_FORMAT_FEATURE_BLIT_DST_BIT |
+                    VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
     }
     return features;
+}
+
+static VkFormatFeatureFlags vulkan_graphics_legacy_format_features(VkFormat format) {
+    VkFormatFeatureFlags features = vulkan_graphics_transport_format_features(format);
+    features &= ~(VK_FORMAT_FEATURE_BLIT_SRC_BIT |
+                  VK_FORMAT_FEATURE_BLIT_DST_BIT |
+                  VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT);
+    return features;
+}
+
+static VkFormatFeatureFlags vulkan_graphics_runtime_format_features(VkFormat format) {
+    const VkFormatFeatureFlags transport = vulkan_graphics_transport_format_features(format);
+    if (!transport) return 0;
+    if (!g_vulkan_runtime.ready || g_vulkan_runtime.physical_device == VK_NULL_HANDLE) {
+        return vulkan_graphics_legacy_format_features(format);
+    }
+    VkFormatProperties props;
+    memset(&props, 0, sizeof(props));
+    vkGetPhysicalDeviceFormatProperties(g_vulkan_runtime.physical_device, format, &props);
+    return props.optimalTilingFeatures & transport;
 }
 
 static int vulkan_graphics_runtime_advertises_multisample_image_support(void) {
@@ -21218,7 +21279,11 @@ static int validate_vulkan_graphics_v6_frame_content(
             seen_resolve_command[entry->command_index] = 1;
             const PdockerGpuVulkanDispatchV5ImageEntry *src_image = &images[entry->src_image_index];
             const PdockerGpuVulkanDispatchV5ImageEntry *dst_image = &images[entry->dst_image_index];
-            if (!vulkan_graphics_v614_resolve_runtime_eligible(src_image, dst_image, entry)) {
+            if (!(src_image->usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) ||
+                !(dst_image->usage & VK_IMAGE_USAGE_TRANSFER_DST_BIT) ||
+                src_image->format != dst_image->format ||
+                src_image->samples == VK_SAMPLE_COUNT_1_BIT ||
+                dst_image->samples != VK_SAMPLE_COUNT_1_BIT) {
                 return -EOPNOTSUPP;
             }
             if (vulkan_graphics_v610_image_subresource_range_valid(
@@ -21259,7 +21324,10 @@ static int validate_vulkan_graphics_v6_frame_content(
             seen_blit_command[entry->command_index] = 1;
             const PdockerGpuVulkanDispatchV5ImageEntry *src_image = &images[entry->src_image_index];
             const PdockerGpuVulkanDispatchV5ImageEntry *dst_image = &images[entry->dst_image_index];
-            if (!vulkan_graphics_v615_blit_runtime_eligible(src_image, dst_image, entry)) {
+            if (!(src_image->usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) ||
+                !(dst_image->usage & VK_IMAGE_USAGE_TRANSFER_DST_BIT) ||
+                src_image->samples != VK_SAMPLE_COUNT_1_BIT ||
+                dst_image->samples != VK_SAMPLE_COUNT_1_BIT) {
                 return -EOPNOTSUPP;
             }
             if (vulkan_graphics_v615_image_blit_subresource_valid(
