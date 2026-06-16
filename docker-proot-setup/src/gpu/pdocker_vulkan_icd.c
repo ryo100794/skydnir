@@ -17350,6 +17350,44 @@ static bool command_op_is_graphics_side_submit_op(PdockerVkCommandOpType type) {
            command_op_is_executor_compute_op(type);
 }
 
+static bool graphics_sequence_inside_active_rendering(
+        const PdockerVkCommandBuffer *cmd,
+        uint32_t command_op_sequence) {
+    if (!cmd) return false;
+    bool rendering_active = false;
+    uint32_t rendering_begin_sequence = UINT32_MAX;
+    for (uint32_t i = 0; i < cmd->graphics_command_op_count; ++i) {
+        const PdockerVkGraphicsCommandRecord *record = &cmd->graphics_command_ops[i];
+        if (record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_RENDERING) {
+            if (rendering_active &&
+                command_op_sequence >= rendering_begin_sequence &&
+                command_op_sequence < record->command_op_sequence) {
+                return true;
+            }
+            rendering_active = true;
+            rendering_begin_sequence = record->command_op_sequence;
+        } else if (record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_RENDERING) {
+            if (rendering_active &&
+                command_op_sequence >= rendering_begin_sequence &&
+                command_op_sequence < record->command_op_sequence) {
+                return true;
+            }
+            rendering_active = false;
+            rendering_begin_sequence = UINT32_MAX;
+        }
+    }
+    return rendering_active &&
+           command_op_sequence >= rendering_begin_sequence;
+}
+
+static const char *graphics_mixed_dispatch_inside_frame_reason(
+        const PdockerVkCommandBuffer *cmd,
+        uint32_t command_op_sequence) {
+    return graphics_sequence_inside_active_rendering(cmd, command_op_sequence)
+        ? "graphics-mixed-dispatch-inside-rendering-unimplemented"
+        : "graphics-mixed-dispatch-between-render-scopes-unimplemented";
+}
+
 static VkResult execute_recorded_dispatch_command_op(
         PdockerVkCommandBuffer *cmd,
         const PdockerVkCommandOp *op,
@@ -17541,7 +17579,7 @@ static bool graphics_mixed_submit_plan(
         if (inside_gpu_frame && !interleaved_between_draws) {
             if (reason_out) {
                 *reason_out = command_op_is_executor_compute_op(type)
-                    ? "graphics-mixed-dispatch-inside-gpu-frame-unimplemented"
+                    ? graphics_mixed_dispatch_inside_frame_reason(cmd, op_index)
                     : ((first_draw != UINT32_MAX && op_index > first_draw && op_index < last_draw)
                         ? "graphics-mixed-transfer-between-draws-unimplemented"
                         : "graphics-mixed-host-op-inside-gpu-frame-unimplemented");

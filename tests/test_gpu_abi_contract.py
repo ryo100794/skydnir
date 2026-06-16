@@ -7400,11 +7400,15 @@ class GpuAbiContractTest(unittest.TestCase):
             "command_op_is_executor_compute_op",
             "command_op_is_graphics_side_submit_op",
             "execute_recorded_dispatch_command_op",
-            "graphics-mixed-dispatch-inside-gpu-frame-unimplemented",
+            "graphics_mixed_dispatch_inside_frame_reason",
+            "graphics_sequence_inside_active_rendering",
+            "graphics-mixed-dispatch-inside-rendering-unimplemented",
+            "graphics-mixed-dispatch-between-render-scopes-unimplemented",
         ]:
             self.assertIn(marker, icd)
         self.assertIn("!command_op_is_graphics_side_submit_op(type)", plan_body)
         self.assertIn("command_op_is_executor_compute_op(type)", plan_body)
+        self.assertIn("graphics_mixed_dispatch_inside_frame_reason(cmd, op_index)", plan_body)
         self.assertNotIn("!command_op_is_executor_compute_op(type)) {\n            continue;\n        }\n        if (first_gpu_op == UINT32_MAX", plan_body)
         before_body = icd.split("static bool command_buffer_has_host_side_ops_before", 1)[1].split(
             "static bool command_buffer_has_host_side_ops_after", 1
@@ -7426,6 +7430,31 @@ class GpuAbiContractTest(unittest.TestCase):
             mixed_body.rindex("execute_graphics_mixed_host_side_ops("),
             mixed_body.index("send_vulkan_submit_sync_only_frame(\n                    deferred_completion_sync_entries, deferred_completion_sync_count)"),
         )
+
+    def test_vulkan_graphics_dispatch_inside_frame_has_render_scope_diagnostics(self):
+        icd = VULKAN_ICD.read_text()
+        classifier = icd.split("static bool graphics_sequence_inside_active_rendering", 1)[1].split(
+            "static const char *graphics_mixed_dispatch_inside_frame_reason", 1
+        )[0]
+        reason = icd.split("static const char *graphics_mixed_dispatch_inside_frame_reason", 1)[1].split(
+            "static VkResult execute_recorded_dispatch_command_op", 1
+        )[0]
+        for marker in [
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_RENDERING",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_RENDERING",
+            "rendering_active = true",
+            "rendering_active = false",
+            "command_op_sequence >= rendering_begin_sequence",
+            "command_op_sequence < record->command_op_sequence",
+        ]:
+            self.assertIn(marker, classifier)
+        self.assertIn('"graphics-mixed-dispatch-inside-rendering-unimplemented"', reason)
+        self.assertIn('"graphics-mixed-dispatch-between-render-scopes-unimplemented"', reason)
+        plan_body = icd.split("static bool graphics_mixed_submit_plan", 1)[1].split(
+            "static VkResult execute_graphics_mixed_host_side_ops", 1
+        )[0]
+        self.assertIn("graphics_mixed_dispatch_inside_frame_reason(cmd, op_index)", plan_body)
+        self.assertNotIn("graphics-mixed-dispatch-inside-gpu-frame-unimplemented", plan_body)
 
     def test_vulkan_compute_push_constants_do_not_create_graphics_frame(self):
         icd = VULKAN_ICD.read_text()
