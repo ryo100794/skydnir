@@ -11054,11 +11054,51 @@ static VkResult validate_image_create_info_for_transport(const VkImageCreateInfo
     return VK_SUCCESS;
 }
 
-static VkResult validate_image_view_create_info_for_transport(const VkImageViewCreateInfo *info) {
+static bool normalize_image_view_subresource_range_for_transport(
+        const PdockerVkImage *image,
+        const VkImageSubresourceRange *range,
+        VkImageSubresourceRange *out) {
+    if (!image || !range || !out) return false;
+    *out = *range;
+    if (!pdocker_vk_image_aspect_mask_valid_for_format(image->format, out->aspectMask)) {
+        return false;
+    }
+    if (out->baseMipLevel >= image->mip_levels ||
+        out->baseArrayLayer >= image->array_layers) {
+        return false;
+    }
+    if (out->levelCount == VK_REMAINING_MIP_LEVELS) {
+        out->levelCount = image->mip_levels - out->baseMipLevel;
+    }
+    if (out->layerCount == VK_REMAINING_ARRAY_LAYERS) {
+        out->layerCount = image->array_layers - out->baseArrayLayer;
+    }
+    if (out->levelCount == 0 ||
+        out->levelCount > image->mip_levels - out->baseMipLevel ||
+        out->layerCount == 0 ||
+        out->layerCount > image->array_layers - out->baseArrayLayer) {
+        return false;
+    }
+    return true;
+}
+
+static VkResult validate_image_view_create_info_for_transport(
+        const VkImageViewCreateInfo *info,
+        VkImageSubresourceRange *normalized_range_out) {
     if (!info) return VK_ERROR_INITIALIZATION_FAILED;
     if (info->pNext) return unsupported_image_pnext_result("vkCreateImageView", info->pNext);
     if (info->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;
-    if (!pdocker_vk_format_bridge_supported(info->format)) return VK_ERROR_FORMAT_NOT_SUPPORTED;
+    PdockerVkImage *image = (PdockerVkImage *)info->image;
+    if (!image) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!pdocker_vk_format_bridge_supported(info->format) || info->format != image->format) {
+        return VK_ERROR_FORMAT_NOT_SUPPORTED;
+    }
+    VkImageSubresourceRange normalized_range;
+    if (!normalize_image_view_subresource_range_for_transport(
+            image, &info->subresourceRange, &normalized_range)) {
+        return VK_ERROR_FORMAT_NOT_SUPPORTED;
+    }
+    if (normalized_range_out) *normalized_range_out = normalized_range;
     return VK_SUCCESS;
 }
 
@@ -11277,17 +11317,18 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateImageView(
     if (!vulkan_v5_object_transport_enabled()) {
         return unsupported_image_transport_result("vkCreateImageView");
     }
-    VkResult validate_rc = validate_image_view_create_info_for_transport(pCreateInfo);
+    VkImageSubresourceRange normalized_range;
+    VkResult validate_rc = validate_image_view_create_info_for_transport(
+        pCreateInfo, &normalized_range);
     if (validate_rc != VK_SUCCESS) return validate_rc;
     PdockerVkImage *image = (PdockerVkImage *)pCreateInfo->image;
-    if (!image) return VK_ERROR_INITIALIZATION_FAILED;
     PdockerVkImageView *view = pdocker_alloc_handle(sizeof(*view));
     if (!view) return VK_ERROR_OUT_OF_HOST_MEMORY;
     view->image = image;
     view->view_type = pCreateInfo->viewType;
     view->format = pCreateInfo->format;
     view->components = pCreateInfo->components;
-    view->subresource_range = pCreateInfo->subresourceRange;
+    view->subresource_range = normalized_range;
     view->generation = next_vulkan_object_generation();
     *pView = (VkImageView)view;
     return VK_SUCCESS;

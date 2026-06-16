@@ -92,10 +92,18 @@ or closes.
   `vkCmdCopyImage2`, `vkCmdCopyBufferToImage2`, `vkCmdCopyImageToBuffer2`,
   `vkCmdBlitImage2`, and `vkCmdResolveImage2` reject unsupported top-level and
   per-region `pNext` payloads rather than silently dropping extension data.
+- [done] **image format/view fail-closed audit**: The container ICD and
+  Android executor now reject unsupported image formats before they can be
+  treated as byte-linear payloads. Unknown, compressed, multiplanar, YCbCr,
+  mutable-format image views, plane aspects, and out-of-range mip/layer views
+  fail closed. `VK_REMAINING_MIP_LEVELS` and `VK_REMAINING_ARRAY_LAYERS` are
+  normalized by the producer-side ICD before image-view serialization, while
+  the executor accepts only concrete bounded ranges.
 - [planned] **residual graphics evidence gaps**: Do not promote full Vulkan
   pass-through until remaining fail-closed lanes have explicit ABI/evidence:
-  packed depth+stencil copy layout, multiplanar/compressed images,
-  unresolved MSAA store/readback, true cross-family ownership transfer,
+  packed depth+stencil copy layout, explicit compressed/multiplanar image
+  support beyond the current fail-closed gate, unresolved MSAA store/readback,
+  true cross-family ownership transfer,
   dispatch+graphics mixing, and broader synchronization.
 
 

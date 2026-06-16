@@ -3059,12 +3059,20 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("vulkan_image_create_initial_layout_for_transport", executor)
         self.assertIn("vulkan_dispatch_msaa_image_allowed", executor)
         self.assertIn("vulkan_dispatch_sample_count_supported", executor)
+        format_bpp_body = executor.split("static uint32_t vulkan_format_bytes_per_pixel_conservative", 1)[1].split(
+            "static uint32_t vulkan_format_bytes_per_pixel_for_aspect", 1
+        )[0]
+        self.assertIn("return 0;", format_bpp_body)
+        self.assertIn("vulkan_dispatch_image_usage_supported_by_format", executor)
+        self.assertIn("vulkan_dispatch_image_view_range_valid", executor)
         msaa_helper_body = executor.split("static int vulkan_dispatch_msaa_image_allowed", 1)[1].split(
             "static int materialize_vulkan_dispatch_images", 1
         )[0]
         materialize_body = executor.split("static int materialize_vulkan_dispatch_images", 1)[1].split("static int run_vulkan_dispatch_fd", 1)[0]
         self.assertIn("const unsigned char *msaa_image_allowed", materialize_body)
         self.assertIn("!vulkan_dispatch_msaa_image_allowed(", materialize_body)
+        self.assertIn("!vulkan_dispatch_image_usage_supported_by_format(", materialize_body)
+        self.assertIn("!vulkan_dispatch_image_view_range_valid(src_image, src)", materialize_body)
         self.assertIn("dst->direct_host_upload_needed = src->tiling == VK_IMAGE_TILING_LINEAR", materialize_body)
         self.assertIn("if (dst->direct_host_upload_needed)", materialize_body)
         self.assertIn("memory->requires_device_local = 1;", materialize_body)
@@ -4964,6 +4972,20 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         self.assertIn("if (info->pNext) return unsupported_image_pnext_result", image_view_validate_body)
         self.assertIn("if (info->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;", image_view_validate_body)
+        self.assertIn("PdockerVkImage *image = (PdockerVkImage *)info->image;", image_view_validate_body)
+        self.assertIn("info->format != image->format", image_view_validate_body)
+        self.assertIn("normalize_image_view_subresource_range_for_transport", image_view_validate_body)
+        normalize_view_body = icd.split("static bool normalize_image_view_subresource_range_for_transport", 1)[1].split(
+            "static VkResult validate_image_view_create_info_for_transport", 1
+        )[0]
+        self.assertIn("pdocker_vk_image_aspect_mask_valid_for_format", normalize_view_body)
+        self.assertIn("VK_REMAINING_MIP_LEVELS", normalize_view_body)
+        self.assertIn("VK_REMAINING_ARRAY_LAYERS", normalize_view_body)
+        create_view_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateImageView", 1)[1].split(
+            "VKAPI_ATTR void VKAPI_CALL vkDestroyImageView", 1
+        )[0]
+        self.assertIn("VkImageSubresourceRange normalized_range;", create_view_body)
+        self.assertIn("view->subresource_range = normalized_range;", create_view_body)
         sampler_validate_body = icd.split("static VkResult validate_sampler_create_info_for_transport", 1)[1].split(
             "VKAPI_ATTR VkResult VKAPI_CALL vkCreateImage", 1
         )[0]

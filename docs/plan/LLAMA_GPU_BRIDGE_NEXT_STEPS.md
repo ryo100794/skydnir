@@ -86,6 +86,7 @@ Confirmed facts:
 | 2026-06-07 Vulkan dynamic whole-size descriptor lane | Dynamic buffer descriptors whose original range is `VK_WHOLE_SIZE` no longer fail closed when a nonzero dynamic offset is supplied.  The ICD now preserves the original whole-size range, applies the dynamic offset to the effective VkBuffer coordinate, and lets the existing VkBuffer-scoped descriptor validation derive the remaining buffer tail after the dynamic offset.  This removes a generic Vulkan descriptor compatibility gap without widening descriptor ranges to the backing allocation tail.  Overflow, missing dynamic offsets, empty effective ranges, non-fd-backed memory, and out-of-buffer/out-of-memory ranges still fail closed. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; host tests `tests.test_gpu_abi_contract tests.test_llama_gpu_env_parity`; native build `scripts/build-gpu-shim.sh`; pending APK gates `:app:verifyPackagedPayloadFresh :app:assembleCompatDebug`; pending payload check `scripts/verify-native-payloads.py`; no llama.cpp changes |
 | 2026-06-15 color-attachment-scoped MSAA advertisement lane | Executor-derived `fmt%dSampleCounts` is now scoped to color-attachment usage only. The ICD advertises wider counts only for exact 2D non-depth/stencil color-attachment image-format queries and keeps sampled/storage/transfer/depth/stencil/combined usages single-sample. Explicit `vkCmdResolveImage` remains fail-closed; only in-render color resolve is being opened behind replay validation. Executor preflight rejects unresolved MSAA, MSAA `LOAD`, and pipeline/attachment sample-count mismatches, and resolve writeback targets the single-sample resolve image. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; `app/src/main/cpp/pdocker_gpu_executor.c`; host tests `tests.test_gpu_abi_contract tests.test_llama_gpu_env_parity`; no llama.cpp/Dockerfile/model/prompt changes |
 | 2026-06-15 MSAA materialization gate lane | Executor materialization now enforces the same MSAA scope it advertises. Generic V5 image dispatch rejects every non-single-sample image before Vulkan runtime setup. Graphics V6 allows multisample images only when command-ordered dynamic rendering metadata proves a V6.4 color attachment with a single-sample resolve target, matching image/view formats, color aspects, and bounded attachment ranges; all other MSAA table entries fail closed. The materializer also separates optimal single-sample staging from linear direct host upload so allowed MSAA render targets stay off the HOST_VISIBLE fd-upload path. | `app/src/main/cpp/pdocker_gpu_executor.c`; host tests `tests.test_gpu_abi_contract tests.test_llama_gpu_env_parity`; no llama.cpp/Dockerfile/model/prompt changes |
+| 2026-06-15 image format/view fail-closed lane | The ICD and executor now share a conservative image transport boundary: unknown formats are no longer assigned a guessed 16-byte pixel size, image materialization rejects unsupported format/usage combinations, image views must match the source image format, plane aspects and mutable-format views are unsupported, and mip/layer ranges must be concrete and in bounds. The ICD normalizes `VK_REMAINING_MIP_LEVELS`/`VK_REMAINING_ARRAY_LAYERS` for image views before storing them; the executor rejects any remaining sentinel in transported tables. Compressed, multiplanar, YCbCr, and mutable-format image support remains fail-closed instead of being silently byte-linearized. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; `app/src/main/cpp/pdocker_gpu_executor.c`; host tests `tests.test_gpu_abi_contract tests.test_llama_gpu_env_parity`; native builds `scripts/build-gpu-shim.sh`, `scripts/build-native-android-ndk.sh`; no llama.cpp/Dockerfile/model/prompt changes |
 
 
 ### Vulkan graphics image-aspect/V6.14-V6.23 status (2026-06-14 docs audit)
@@ -114,18 +115,16 @@ current handoff:
   per-subresource initial layouts instead of guessing a single image layout.
 - **V6.22/V6.23** carry multisample and tessellation pipeline state metadata.
 
-Residual graphics gaps remain explicit: V6.1 image-barrier
-`VK_REMAINING_MIP_LEVELS`/`VK_REMAINING_ARRAY_LAYERS` normalization and
-image-barrier aspect validation, packed dual-aspect depth/stencil copy layout,
-multiplanar/compressed images, copy2 pNext payloads, MSAA/sampleCount
-widening for resolve, resolve/blit while inside dynamic rendering, unresolved
-MSAA store/readback, true cross-family ownership transfer,
-dispatch+graphics mixing, and broader synchronization are still fail-closed
-until they have their own ABI/evidence lanes.
+Residual graphics gaps remain explicit: packed dual-aspect depth/stencil
+copy layout, explicit compressed/multiplanar image support beyond the current
+fail-closed gate, unresolved MSAA store/readback, true cross-family ownership
+transfer, dispatch+graphics mixing, and broader synchronization are still
+fail-closed until they have their own ABI/evidence lanes.  The V6.1
+image-barrier range/aspect and copy2 pNext gaps have been audited closed.
 
-Next active implementation slice after the V6.10 pure-aspect copy work and
-V6.23 tessellation metadata is the V6.1 explicit image-barrier lane. Acceptance
-checks for that slice:
+Next active implementation slices should reduce the remaining residuals without
+weakening the fail-closed boundary. Acceptance checks for any image/barrier
+slice:
 
 - Producer serialization normalizes `VK_REMAINING_MIP_LEVELS` and
   `VK_REMAINING_ARRAY_LAYERS` to concrete mip/layer counts before emitting V6.1
@@ -136,7 +135,9 @@ checks for that slice:
   format, and reject empty, out-of-bounds, or overflowed subresource ranges.
 - Negative fixtures keep metadata/plane aspects, compressed/multiplanar images,
   invalid color-vs-depth/stencil masks, and ambiguous packed depth+stencil
-  ranges fail-closed until their own ABI/evidence lanes exist.
+  ranges fail-closed. Plane/compressed/multiplanar support requires a future
+  explicit ABI lane; the current bridge must not reinterpret them as
+  byte-linear color images.
 - Same-family/ignored queue-family behavior remains limited to the existing
   normalization rules; true cross-family ownership transfer and broader
   synchronization remain explicit non-goals for this slice.

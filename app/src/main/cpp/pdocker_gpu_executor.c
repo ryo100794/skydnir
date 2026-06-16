@@ -2730,7 +2730,7 @@ static uint32_t vulkan_format_bytes_per_pixel_conservative(VkFormat format) {
         case VK_FORMAT_R32G32B32A32_SINT:
             return 16;
         default:
-            return 16;
+            return 0;
     }
 }
 
@@ -2776,6 +2776,34 @@ static int vulkan_format_has_stencil_aspect(VkFormat format) {
     return vulkan_format_bytes_per_pixel_for_aspect(format, VK_IMAGE_ASPECT_STENCIL_BIT) != 0;
 }
 
+static int vulkan_dispatch_image_format_supported(VkFormat format) {
+    return vulkan_format_bytes_per_pixel_conservative(format) != 0 ||
+           vulkan_format_has_depth_aspect(format) ||
+           vulkan_format_has_stencil_aspect(format);
+}
+
+static int vulkan_dispatch_image_usage_supported_by_format(
+        VkFormat format,
+        VkImageUsageFlags usage) {
+    if (!vulkan_dispatch_image_format_supported(format) || usage == 0) return 0;
+    const int depth_stencil = vulkan_format_has_depth_aspect(format) ||
+                              vulkan_format_has_stencil_aspect(format);
+    if ((usage & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) && !depth_stencil) return 0;
+    if ((usage & (VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                  VK_IMAGE_USAGE_STORAGE_BIT |
+                  VK_IMAGE_USAGE_SAMPLED_BIT)) && depth_stencil) return 0;
+    if ((usage & ~(VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                   VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                   VK_IMAGE_USAGE_SAMPLED_BIT |
+                   VK_IMAGE_USAGE_STORAGE_BIT |
+                   VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                   VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
+                   VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT)) != 0) {
+        return 0;
+    }
+    return 1;
+}
+
 static int vulkan_image_single_aspect_supported_for_format(
         VkFormat format,
         VkImageAspectFlags aspect_mask) {
@@ -2810,6 +2838,29 @@ static int vulkan_image_aspect_mask_valid_for_format(
         return (aspect_mask & ~allowed) == 0;
     }
     return aspect_mask == VK_IMAGE_ASPECT_COLOR_BIT;
+}
+
+static int vulkan_dispatch_image_view_range_valid(
+        const PdockerGpuVulkanDispatchV5ImageEntry *image,
+        const PdockerGpuVulkanDispatchV5ImageViewEntry *view) {
+    if (!image || !view) return 0;
+    if ((VkFormat)view->format != (VkFormat)image->format) return 0;
+    if (view->level_count == 0 || view->layer_count == 0 ||
+        view->level_count == VK_REMAINING_MIP_LEVELS ||
+        view->layer_count == VK_REMAINING_ARRAY_LAYERS) {
+        return 0;
+    }
+    if (!vulkan_image_aspect_mask_valid_for_format((VkFormat)image->format,
+                                                   (VkImageAspectFlags)view->aspect_mask)) {
+        return 0;
+    }
+    if (view->base_mip_level >= image->mip_levels ||
+        view->level_count > image->mip_levels - view->base_mip_level ||
+        view->base_array_layer >= image->array_layers ||
+        view->layer_count > image->array_layers - view->base_array_layer) {
+        return 0;
+    }
+    return 1;
 }
 
 static int vulkan_image_mip_extent(
@@ -3104,6 +3155,10 @@ static int materialize_vulkan_dispatch_images(
             src->tiling != VK_IMAGE_TILING_LINEAR) {
             return -ENOTSUP;
         }
+        if (!vulkan_dispatch_image_usage_supported_by_format(
+                (VkFormat)src->format, (VkImageUsageFlags)src->usage)) {
+            return -EOPNOTSUPP;
+        }
         if (!vulkan_dispatch_msaa_image_allowed(
                 src, i, msaa_image_allowed, msaa_image_allowed_count)) {
             return -EOPNOTSUPP;
@@ -3276,6 +3331,11 @@ static int materialize_vulkan_dispatch_images(
     for (size_t i = 0; i < object_tables->image_view_count; ++i) {
         const PdockerGpuVulkanDispatchV5ImageViewEntry *src = &object_tables->image_views[i];
         if (src->image_index >= *image_count) return -EPROTO;
+        const PdockerGpuVulkanDispatchV5ImageEntry *src_image =
+            &object_tables->images[images[src->image_index].source_index];
+        if (!vulkan_dispatch_image_view_range_valid(src_image, src)) {
+            return -EOPNOTSUPP;
+        }
         if (*view_count >= PDOCKER_GPU_MAX_VULKAN_BINDINGS) return -E2BIG;
         VulkanDispatchImageViewObject *dst = &views[(*view_count)++];
         memset(dst, 0, sizeof(*dst));
