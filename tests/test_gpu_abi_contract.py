@@ -7393,6 +7393,32 @@ class GpuAbiContractTest(unittest.TestCase):
             mixed_body.index("send_recorded_vulkan_graphics_v6_1_frame(\n                    cmd, frame_submit_sync_entries, frame_submit_sync_count)"),
             mixed_body.rindex("execute_graphics_mixed_host_side_ops("),
         )
+        for marker in [
+            "command_op_is_executor_compute_op",
+            "command_op_is_graphics_side_submit_op",
+            "execute_recorded_dispatch_command_op",
+            "graphics-mixed-dispatch-inside-gpu-frame-unimplemented",
+        ]:
+            self.assertIn(marker, icd)
+        self.assertIn("!command_op_is_graphics_side_submit_op(type)", plan_body)
+        self.assertIn("command_op_is_executor_compute_op(type)", plan_body)
+        self.assertNotIn("!command_op_is_executor_compute_op(type)) {\n            continue;\n        }\n        if (first_gpu_op == UINT32_MAX", plan_body)
+        before_body = icd.split("static bool command_buffer_has_host_side_ops_before", 1)[1].split(
+            "static bool command_buffer_has_host_side_ops_after", 1
+        )[0]
+        after_body = icd.split("static bool command_buffer_has_host_side_ops_after", 1)[1].split(
+            "static bool graphics_mixed_submit_plan", 1
+        )[0]
+        self.assertIn("command_op_is_graphics_side_submit_op", before_body)
+        self.assertIn("command_op_is_graphics_side_submit_op", after_body)
+        side_exec_body = icd.split("static VkResult execute_graphics_mixed_host_side_ops", 1)[1].split(
+            "VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit", 1
+        )[0]
+        self.assertIn("execute_recorded_dispatch_command_op(cmd, op, NULL)", side_exec_body)
+        ordered_submit_body = submit_body.split("if (cmd->command_op_count > 0)", 1)[1].split(
+            "execute_recorded_copy_ops(cmd);", 1
+        )[0]
+        self.assertIn("execute_recorded_dispatch_command_op(cmd, op, &dispatches)", ordered_submit_body)
         self.assertLess(
             mixed_body.rindex("execute_graphics_mixed_host_side_ops("),
             mixed_body.index("send_vulkan_submit_sync_only_frame(\n                    deferred_completion_sync_entries, deferred_completion_sync_count)"),
@@ -7483,7 +7509,11 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(marker, source)
         submit_body = source.split("VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit", 1)[1].split("VKAPI_ATTR VkResult VKAPI_CALL vkWaitForFences", 1)[0]
         self.assertIn("cmd->command_op_count > 0", submit_body)
-        self.assertIn("send_generic_vulkan_dispatch_op(dispatch)", submit_body)
+        self.assertIn("execute_recorded_dispatch_command_op(cmd, op, &dispatches)", submit_body)
+        dispatch_helper_body = source.split("static VkResult execute_recorded_dispatch_command_op", 1)[1].split(
+            "static bool submit_sync_entries_include_wait", 1
+        )[0]
+        self.assertIn("send_generic_vulkan_dispatch_op(dispatch)", dispatch_helper_body)
         self.assertIn("cmd->dispatch_op_count > 0", submit_body)
         self.assertIn("send_generic_vulkan_dispatch_op(op)", submit_body)
 

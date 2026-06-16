@@ -16830,6 +16830,7 @@ static void clear_submit2_metadata_override(void) {
 
 static bool command_op_is_graphics_frame_op(PdockerVkCommandOpType type);
 static bool command_op_is_graphics_interleavable_transfer_op(PdockerVkCommandOpType type);
+static bool command_op_is_executor_compute_op(PdockerVkCommandOpType type);
 
 static bool command_buffer_needs_graphics_submit_sync_frame(const PdockerVkCommandBuffer *cmd) {
     if (!cmd) return false;
@@ -17315,6 +17316,49 @@ static bool command_op_is_graphics_interleavable_transfer_op(PdockerVkCommandOpT
     }
 }
 
+static bool command_op_is_executor_compute_op(PdockerVkCommandOpType type) {
+    return type == PDOCKER_VK_COMMAND_DISPATCH;
+}
+
+static bool command_op_is_graphics_side_submit_op(PdockerVkCommandOpType type) {
+    return command_op_is_host_transfer_or_layout_op(type) ||
+           command_op_is_executor_compute_op(type);
+}
+
+static VkResult execute_recorded_dispatch_command_op(
+        PdockerVkCommandBuffer *cmd,
+        const PdockerVkCommandOp *op,
+        uint32_t *dispatches) {
+    if (!cmd || !op || op->type != PDOCKER_VK_COMMAND_DISPATCH) return VK_SUCCESS;
+    if (op->index >= cmd->dispatch_op_count) return VK_SUCCESS;
+    PdockerVkDispatchOp *dispatch = &cmd->dispatch_ops[op->index];
+    if (!dispatch->pipeline || !dispatch->pipeline->shader ||
+        dispatch->pipeline->shader->code_size <= sizeof(uint32_t)) {
+        trace_icd_runtime_failure("dispatch-missing-shader", VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    int generic_rc = send_generic_vulkan_dispatch_op(dispatch);
+    if (generic_rc != 0) {
+        trace_icd_runtime_failure("generic-dispatch-op", generic_rc);
+        if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
+            fprintf(stderr,
+                    "pdocker-vulkan-icd: generic SPIR-V dispatch failed rc=%d op=%u/%u code_size=%zu first_word=0x%08x dispatch=%u,%u,%u push=%u\n",
+                    generic_rc,
+                    op->index + 1,
+                    cmd->dispatch_op_count,
+                    dispatch->pipeline->shader->code_size,
+                    dispatch->pipeline->shader->first_word,
+                    dispatch->dispatch_x,
+                    dispatch->dispatch_y,
+                    dispatch->dispatch_z,
+                    dispatch->push_constant_size);
+        }
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    if (dispatches) (*dispatches)++;
+    return VK_SUCCESS;
+}
+
 static bool submit_sync_entries_include_wait(
         const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *entries,
         size_t entry_count) {
@@ -17408,7 +17452,7 @@ static bool command_buffer_has_host_side_ops_before(
         uint32_t first_gpu_op) {
     if (!cmd || first_gpu_op == UINT32_MAX) return false;
     for (uint32_t i = 0; i < cmd->command_op_count && i < first_gpu_op; ++i) {
-        if (command_op_is_host_transfer_or_layout_op(cmd->command_ops[i].type)) {
+        if (command_op_is_graphics_side_submit_op(cmd->command_ops[i].type)) {
             return true;
         }
     }
@@ -17420,7 +17464,7 @@ static bool command_buffer_has_host_side_ops_after(
         uint32_t last_gpu_op) {
     if (!cmd || last_gpu_op == UINT32_MAX) return false;
     for (uint32_t i = last_gpu_op + 1u; i < cmd->command_op_count; ++i) {
-        if (command_op_is_host_transfer_or_layout_op(cmd->command_ops[i].type)) {
+        if (command_op_is_graphics_side_submit_op(cmd->command_ops[i].type)) {
             return true;
         }
     }
@@ -17460,7 +17504,7 @@ static bool graphics_mixed_submit_plan(
     for (uint32_t op_index = 0; op_index < cmd->command_op_count; ++op_index) {
         PdockerVkCommandOpType type = cmd->command_ops[op_index].type;
         if (command_op_is_graphics_frame_op(type)) continue;
-        if (!command_op_is_host_transfer_or_layout_op(type)) {
+        if (!command_op_is_graphics_side_submit_op(type)) {
             if (reason_out) *reason_out = "graphics-mixed-submit-unimplemented";
             return false;
         }
@@ -17471,9 +17515,11 @@ static bool graphics_mixed_submit_plan(
                                          command_op_is_graphics_interleavable_transfer_op(type);
         if (inside_gpu_frame && !interleaved_between_draws) {
             if (reason_out) {
-                *reason_out = (first_draw != UINT32_MAX && op_index > first_draw && op_index < last_draw)
-                    ? "graphics-mixed-transfer-between-draws-unimplemented"
-                    : "graphics-mixed-host-op-inside-gpu-frame-unimplemented";
+                *reason_out = command_op_is_executor_compute_op(type)
+                    ? "graphics-mixed-dispatch-inside-gpu-frame-unimplemented"
+                    : ((first_draw != UINT32_MAX && op_index > first_draw && op_index < last_draw)
+                        ? "graphics-mixed-transfer-between-draws-unimplemented"
+                        : "graphics-mixed-host-op-inside-gpu-frame-unimplemented");
             }
             return false;
         }
@@ -17492,7 +17538,7 @@ static VkResult execute_graphics_mixed_host_side_ops(
     if (!cmd) return VK_SUCCESS;
     for (uint32_t op_index = 0; op_index < cmd->command_op_count; ++op_index) {
         PdockerVkCommandOp *op = &cmd->command_ops[op_index];
-        if (!command_op_is_host_transfer_or_layout_op(op->type)) continue;
+        if (!command_op_is_graphics_side_submit_op(op->type)) continue;
         bool run = false;
         if (first_draw == UINT32_MAX) {
             run = before_graphics;
@@ -17502,7 +17548,9 @@ static VkResult execute_graphics_mixed_host_side_ops(
             run = op_index > last_draw;
         }
         if (run) {
-            VkResult rc = execute_recorded_host_transfer_or_layout_op(cmd, op, stats);
+            VkResult rc = command_op_is_executor_compute_op(op->type)
+                ? execute_recorded_dispatch_command_op(cmd, op, NULL)
+                : execute_recorded_host_transfer_or_layout_op(cmd, op, stats);
             if (rc != VK_SUCCESS) return rc;
         }
     }
@@ -17802,35 +17850,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                         case PDOCKER_VK_COMMAND_UPDATE:
                             execute_recorded_update_op(op);
                             break;
-                        case PDOCKER_VK_COMMAND_DISPATCH:
-                            if (op->index < cmd->dispatch_op_count) {
-                                PdockerVkDispatchOp *dispatch = &cmd->dispatch_ops[op->index];
-                                if (!dispatch->pipeline || !dispatch->pipeline->shader ||
-                                    dispatch->pipeline->shader->code_size <= sizeof(uint32_t)) {
-                                    trace_icd_runtime_failure("dispatch-missing-shader", VK_ERROR_FEATURE_NOT_PRESENT);
-                                    return VK_ERROR_FEATURE_NOT_PRESENT;
-                                }
-                                int generic_rc = send_generic_vulkan_dispatch_op(dispatch);
-                                if (generic_rc != 0) {
-                                    trace_icd_runtime_failure("generic-dispatch-op", generic_rc);
-                                    if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
-                                        fprintf(stderr,
-                                                "pdocker-vulkan-icd: generic SPIR-V dispatch failed rc=%d op=%u/%u code_size=%zu first_word=0x%08x dispatch=%u,%u,%u push=%u\n",
-                                                generic_rc,
-                                                op->index + 1,
-                                                cmd->dispatch_op_count,
-                                                dispatch->pipeline->shader->code_size,
-                                                dispatch->pipeline->shader->first_word,
-                                                dispatch->dispatch_x,
-                                                dispatch->dispatch_y,
-                                                dispatch->dispatch_z,
-                                                dispatch->push_constant_size);
-                                    }
-                                    return VK_ERROR_FEATURE_NOT_PRESENT;
-                                }
-                                dispatches++;
-                            }
+                        case PDOCKER_VK_COMMAND_DISPATCH: {
+                            VkResult dispatch_rc = execute_recorded_dispatch_command_op(cmd, op, &dispatches);
+                            if (dispatch_rc != VK_SUCCESS) return dispatch_rc;
                             break;
+                        }
                         case PDOCKER_VK_COMMAND_BARRIER:
                             break;
                     }

@@ -88,6 +88,7 @@ Confirmed facts:
 | 2026-06-15 MSAA materialization gate lane | Executor materialization now enforces the same MSAA scope it advertises. Generic V5 image dispatch rejects every non-single-sample image before Vulkan runtime setup. Graphics V6 allows multisample images only when command-ordered dynamic rendering metadata proves a V6.4 color attachment with a single-sample resolve target, matching image/view formats, color aspects, and bounded attachment ranges; all other MSAA table entries fail closed. The materializer also separates optimal single-sample staging from linear direct host upload so allowed MSAA render targets stay off the HOST_VISIBLE fd-upload path. | `app/src/main/cpp/pdocker_gpu_executor.c`; host tests `tests.test_gpu_abi_contract tests.test_llama_gpu_env_parity`; no llama.cpp/Dockerfile/model/prompt changes |
 | 2026-06-16 unresolved MSAA writeback guard lane | Materialized executor image objects now preserve sample count through replay. Attachment writeback command recording and fd writeback both reject `writeback_needed` images whose sample count is not `VK_SAMPLE_COUNT_1_BIT`, so unresolved MSAA store/readback cannot accidentally flow through the single-sample copy path. The supported in-render MSAA path still writes back the single-sample V6.4 resolve target. | `app/src/main/cpp/pdocker_gpu_executor.c`; host tests `tests.test_gpu_abi_contract tests.test_llama_gpu_env_parity`; no llama.cpp/Dockerfile/model/prompt changes |
 | 2026-06-16 single-virtual-queue ownership gate lane | The advertised Vulkan device still exposes a single graphics/compute/transfer queue family. Producer-side `vkCmdPipelineBarrier`/`vkCmdPipelineBarrier2` recording now rejects buffer and image barriers whose queue-family indices request a true cross-family ownership transfer, before those barriers are serialized into the graphics frame. Same-family and `IGNORED/IGNORED` barriers remain accepted and executor replay still normalizes them to `VK_QUEUE_FAMILY_IGNORED`. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; host tests `tests.test_gpu_abi_contract tests.test_llama_gpu_env_parity`; native build `scripts/build-gpu-shim.sh`; no llama.cpp/Dockerfile/model/prompt changes |
+| 2026-06-16 bounded dispatch+graphics mixed-submit lane | Generic compute dispatch commands are now accepted as side work before or after a graphics replay frame in the same submitted command buffer. The submit path reuses the generic SPIR-V dispatch transport for those side dispatches, splits wait sync before pre-graphics side work, defers completion sync until post-graphics side work finishes, and still rejects dispatch commands inside the graphics-frame interval with a deterministic `graphics-mixed-dispatch-inside-gpu-frame-unimplemented` reason. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; host tests `tests.test_gpu_abi_contract tests.test_llama_gpu_env_parity`; native build `scripts/build-gpu-shim.sh`; no llama.cpp/Dockerfile/model/prompt changes |
 | 2026-06-15 image format/view fail-closed lane | The ICD and executor now share a conservative image transport boundary: unknown formats are no longer assigned a guessed 16-byte pixel size, image materialization rejects unsupported format/usage combinations, image views must match the source image format, plane aspects and mutable-format views are unsupported, and mip/layer ranges must be concrete and in bounds. The ICD normalizes `VK_REMAINING_MIP_LEVELS`/`VK_REMAINING_ARRAY_LAYERS` for image views before storing them; the executor rejects any remaining sentinel in transported tables. Compressed, multiplanar, YCbCr, and mutable-format image support remains fail-closed instead of being silently byte-linearized. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; `app/src/main/cpp/pdocker_gpu_executor.c`; host tests `tests.test_gpu_abi_contract tests.test_llama_gpu_env_parity`; native builds `scripts/build-gpu-shim.sh`, `scripts/build-native-android-ndk.sh`; no llama.cpp/Dockerfile/model/prompt changes |
 
 
@@ -120,7 +121,7 @@ current handoff:
 Residual graphics gaps remain explicit: packed dual-aspect depth/stencil
 copy layout, explicit compressed/multiplanar image support beyond the current
 fail-closed gate, unresolved MSAA store/readback, true cross-family ownership
-transfer, dispatch+graphics mixing, and broader synchronization are still
+transfer, dispatch inside the graphics-frame interval, and broader synchronization are still
 fail-closed until they have their own ABI/evidence lanes.  The V6.1
 image-barrier range/aspect and copy2 pNext gaps have been audited closed.
 
@@ -305,8 +306,9 @@ subset, including writable storage-buffer and storage-image descriptors;
 input-attachment descriptors are also replayed when they are image-view-only and
 use a validated read-only/general input layout.  Copy+draw mixed submit
 semantics outside the serialized V6.9-V6.16 lanes, true cross-family ownership
-transfer, unresolved MSAA store/readback, packed dual-aspect depth/stencil
-copies, and broader synchronization remain fail-closed.  It must not be
+transfer, dispatch inside the graphics-frame interval, unresolved MSAA
+store/readback, packed dual-aspect depth/stencil copies, and broader
+synchronization remain fail-closed.  It must not be
 mixed with llama
 Q6 correctness claims, served-HTTP readiness, or benchmark claims until a
 dedicated correctness artifact exercises the graphics writeback path.

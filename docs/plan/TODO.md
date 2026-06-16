@@ -90,8 +90,15 @@ or closes.
 - [done] **single-virtual-queue ownership gate**: The ICD advertises one
   graphics/compute/transfer queue family, so real cross-family ownership
   transfer is outside the current exposed device model. Producer-side buffer and
-  image barrier recording now rejects non-ignored source/destination queue-family mismatches before serialization and records a deterministic failure
-  reason, matching the executor's same-family/ignored-only replay contract.
+  image barrier recording now rejects non-ignored source/destination
+  queue-family mismatches before serialization and records a deterministic
+  failure reason, matching the executor's same-family/ignored-only replay contract.
+- [done] **bounded dispatch+graphics mixed-submit lane**: Command buffers may now
+  contain generic compute dispatch side work before or after a graphics replay
+  frame. Submit wait sync is split before pre-graphics dispatches, completion
+  sync is deferred until post-graphics dispatches finish, and dispatches inside
+  the graphics-frame interval still fail closed because cross-queue in-frame
+  ordering is not yet represented.
 - [done] **image-barrier range/aspect normalization audit**: The producer ICD
   normalizes image-barrier `VK_REMAINING_MIP_LEVELS` and
   `VK_REMAINING_ARRAY_LAYERS` to concrete ranges before V6.1 serialization, and
@@ -115,7 +122,7 @@ or closes.
   packed depth+stencil copy layout, explicit compressed/multiplanar image
   support beyond the current fail-closed gate, unresolved MSAA store/readback,
   true cross-family ownership transfer,
-  dispatch+graphics mixing, and broader synchronization.
+  dispatch inside the graphics-frame interval, and broader synchronization.
 
 
 ### TermPort F-Droid Native Payload Preparation 2026-06-06
