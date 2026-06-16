@@ -15621,6 +15621,16 @@ static void update_image_layout_range_cache(
     entry->generation = image->layout_generation;
 }
 
+static bool pdocker_vk_queue_family_barrier_replayable(
+        uint32_t src_queue_family_index,
+        uint32_t dst_queue_family_index) {
+    if (src_queue_family_index == VK_QUEUE_FAMILY_IGNORED &&
+        dst_queue_family_index == VK_QUEUE_FAMILY_IGNORED) {
+        return true;
+    }
+    return src_queue_family_index == dst_queue_family_index;
+}
+
 static void execute_recorded_image_barrier_op(PdockerVkImageBarrierOp *op) {
     if (!op || !op->image) return;
     if (op->old_layout != VK_IMAGE_LAYOUT_UNDEFINED &&
@@ -15634,14 +15644,13 @@ static void execute_recorded_image_barrier_op(PdockerVkImageBarrierOp *op) {
                 (unsigned)op->new_layout,
                 (unsigned long long)op->image->layout_generation);
     }
-    if (op->src_queue_family_index != VK_QUEUE_FAMILY_IGNORED ||
-        op->dst_queue_family_index != VK_QUEUE_FAMILY_IGNORED) {
-        if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
-            fprintf(stderr,
-                    "pdocker-vulkan-icd: image barrier queue-family ownership transfer is traced only src=%u dst=%u\n",
-                    op->src_queue_family_index,
-                    op->dst_queue_family_index);
-        }
+    if (!pdocker_vk_queue_family_barrier_replayable(
+            op->src_queue_family_index, op->dst_queue_family_index) &&
+        (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG"))) {
+        fprintf(stderr,
+                "pdocker-vulkan-icd: image barrier queue-family ownership transfer is not replayable src=%u dst=%u\n",
+                op->src_queue_family_index,
+                op->dst_queue_family_index);
     }
     op->image->layout_generation = next_vulkan_object_generation();
     VkImageSubresourceRange normalized_range = op->range;
@@ -15685,6 +15694,17 @@ static void record_image_barrier_op(
             fprintf(stderr,
                     "pdocker-vulkan-icd: image-barrier command buffer full max=%u; submit will fail closed\n",
                     PDOCKER_VK_MAX_COPY_OPS);
+        }
+        return;
+    }
+    if (!pdocker_vk_queue_family_barrier_replayable(srcQueueFamilyIndex, dstQueueFamilyIndex)) {
+        cmd->graphics_unsupported = true;
+        command_buffer_mark_recording_failed(cmd, "image-barrier-cross-queue-family");
+        if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
+            fprintf(stderr,
+                    "pdocker-vulkan-icd: image-barrier cross-queue-family src=%u dst=%u; submit will fail closed\n",
+                    srcQueueFamilyIndex,
+                    dstQueueFamilyIndex);
         }
         return;
     }
@@ -15755,17 +15775,31 @@ static void record_buffer_barrier_op(
     if (!cmd || !buffer) return;
     if (cmd->buffer_barrier_op_count >= PDOCKER_VK_MAX_COPY_OPS) {
         cmd->graphics_unsupported = true;
+        command_buffer_mark_recording_failed(cmd, "buffer-barrier-record-overflow");
+        return;
+    }
+    if (!pdocker_vk_queue_family_barrier_replayable(srcQueueFamilyIndex, dstQueueFamilyIndex)) {
+        cmd->graphics_unsupported = true;
+        command_buffer_mark_recording_failed(cmd, "buffer-barrier-cross-queue-family");
+        if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
+            fprintf(stderr,
+                    "pdocker-vulkan-icd: buffer-barrier cross-queue-family src=%u dst=%u; submit will fail closed\n",
+                    srcQueueFamilyIndex,
+                    dstQueueFamilyIndex);
+        }
         return;
     }
     if (size == VK_WHOLE_SIZE) {
         if (offset > buffer->size) {
             cmd->graphics_unsupported = true;
+            command_buffer_mark_recording_failed(cmd, "buffer-barrier-invalid-range");
             return;
         }
         size = buffer->size - offset;
     }
     if (offset > buffer->size || size > buffer->size - offset) {
         cmd->graphics_unsupported = true;
+        command_buffer_mark_recording_failed(cmd, "buffer-barrier-invalid-range");
         return;
     }
     PdockerVkBufferBarrierOp *op = &cmd->buffer_barrier_ops[cmd->buffer_barrier_op_count++];

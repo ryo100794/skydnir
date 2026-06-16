@@ -87,6 +87,11 @@ or closes.
   `VK_SAMPLE_COUNT_1_BIT`. This keeps unresolved MSAA store/readback
   fail-closed while preserving the supported in-render resolve path, where the
   writeback target is the single-sample resolve image.
+- [done] **single-virtual-queue ownership gate**: The ICD advertises one
+  graphics/compute/transfer queue family, so real cross-family ownership
+  transfer is outside the current exposed device model. Producer-side buffer and
+  image barrier recording now rejects non-ignored source/destination queue-family mismatches before serialization and records a deterministic failure
+  reason, matching the executor's same-family/ignored-only replay contract.
 - [done] **image-barrier range/aspect normalization audit**: The producer ICD
   normalizes image-barrier `VK_REMAINING_MIP_LEVELS` and
   `VK_REMAINING_ARRAY_LAYERS` to concrete ranges before V6.1 serialization, and

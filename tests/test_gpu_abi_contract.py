@@ -2922,6 +2922,26 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("src->range.layerCount", serializer_body)
         self.assertIn("image-barrier-invalid-range", icd)
         self.assertIn("pdocker_vk_image_aspect_mask_valid_for_format", icd)
+        self.assertIn("static bool pdocker_vk_queue_family_barrier_replayable", icd)
+        self.assertIn("src_queue_family_index == VK_QUEUE_FAMILY_IGNORED", icd)
+        self.assertIn("return src_queue_family_index == dst_queue_family_index", icd)
+        self.assertIn("image-barrier-cross-queue-family", icd)
+        self.assertIn("buffer-barrier-cross-queue-family", icd)
+        self.assertIn("buffer-barrier-invalid-range", icd)
+        image_record_body = icd.split("static void record_image_barrier_op", 2)[2].split(
+            "static void record_memory_barrier_op", 1
+        )[0]
+        self.assertLess(
+            image_record_body.index("pdocker_vk_queue_family_barrier_replayable"),
+            image_record_body.index("normalize_image_subresource_range"),
+        )
+        buffer_record_body = icd.split("static void record_buffer_barrier_op", 1)[1].split(
+            "VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier", 1
+        )[0]
+        self.assertLess(
+            buffer_record_body.index("pdocker_vk_queue_family_barrier_replayable"),
+            buffer_record_body.index("if (size == VK_WHOLE_SIZE)"),
+        )
         clear_body = icd.split("static void clear_recorded_command_ops", 1)[1].split(
             "static bool append_command_op", 1
         )[0]
