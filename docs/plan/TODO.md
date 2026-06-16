@@ -81,13 +81,22 @@ or closes.
   linear direct host upload. Allowed MSAA color sources no longer fall into the
   HOST_VISIBLE fd-upload path and cannot share a materialized memory object with
   direct host-upload images.
+- [done] **image-barrier range/aspect normalization audit**: The producer ICD
+  normalizes image-barrier `VK_REMAINING_MIP_LEVELS` and
+  `VK_REMAINING_ARRAY_LAYERS` to concrete ranges before V6.1 serialization, and
+  rejects invalid aspect masks for the image format. The executor continues to
+  reject any unnormalized remaining-count sentinel, validates aspect/range
+  bounds against the materialized image, and records only concrete
+  `VkImageSubresourceRange` values.
+- [done] **copy2 pNext fail-closed audit**: `vkCmdCopyBuffer2`,
+  `vkCmdCopyImage2`, `vkCmdCopyBufferToImage2`, `vkCmdCopyImageToBuffer2`,
+  `vkCmdBlitImage2`, and `vkCmdResolveImage2` reject unsupported top-level and
+  per-region `pNext` payloads rather than silently dropping extension data.
 - [planned] **residual graphics evidence gaps**: Do not promote full Vulkan
   pass-through until remaining fail-closed lanes have explicit ABI/evidence:
-  V6.1 image-barrier range/aspect normalization, packed depth+stencil copy
-  layout, copy2 pNext payloads, multiplanar/compressed images, MSAA/sampleCount
-  widening for resolve, resolve/blit inside dynamic rendering, unresolved MSAA
-  store/readback, true cross-family
-  ownership transfer, dispatch+graphics mixing, and broader synchronization.
+  packed depth+stencil copy layout, multiplanar/compressed images,
+  unresolved MSAA store/readback, true cross-family ownership transfer,
+  dispatch+graphics mixing, and broader synchronization.
 
 
 ### TermPort F-Droid Native Payload Preparation 2026-06-06
