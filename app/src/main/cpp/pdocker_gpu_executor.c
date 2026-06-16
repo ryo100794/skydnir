@@ -2513,6 +2513,7 @@ typedef struct {
     uint32_t memory_type_bits;
     uint32_t memory_type_index;
     int needs_host_map;
+    int requires_device_local;
     VkDeviceMemory memory;
     void *map;
 } VulkanDispatchImageMemoryObject;
@@ -2552,6 +2553,7 @@ typedef struct {
     VulkanVectorBuffer staging;
     int descriptor_layout_seen;
     int requires_staging;
+    int direct_host_upload_needed;
     int upload_pending;
     int writeback_needed;
 } VulkanDispatchImageObject;
@@ -2991,12 +2993,62 @@ static void destroy_vulkan_dispatch_image_objects(
     }
 }
 
+static int vulkan_dispatch_sample_count_supported(uint32_t samples) {
+    return samples == VK_SAMPLE_COUNT_1_BIT ||
+           samples == VK_SAMPLE_COUNT_2_BIT ||
+           samples == VK_SAMPLE_COUNT_4_BIT ||
+           samples == VK_SAMPLE_COUNT_8_BIT ||
+           samples == VK_SAMPLE_COUNT_16_BIT ||
+           samples == VK_SAMPLE_COUNT_32_BIT ||
+           samples == VK_SAMPLE_COUNT_64_BIT;
+}
+
+static int vulkan_dispatch_msaa_image_allowed(
+        const PdockerGpuVulkanDispatchV5ImageEntry *src,
+        size_t image_index,
+        const unsigned char *msaa_image_allowed,
+        size_t msaa_image_allowed_count) {
+    if (!src) return 0;
+    if (src->samples == VK_SAMPLE_COUNT_1_BIT) return 1;
+    if (!vulkan_dispatch_sample_count_supported(src->samples)) return 0;
+    if (!msaa_image_allowed || image_index >= msaa_image_allowed_count ||
+        !msaa_image_allowed[image_index]) {
+        return 0;
+    }
+    if (src->image_type != VK_IMAGE_TYPE_2D ||
+        src->tiling != VK_IMAGE_TILING_OPTIMAL ||
+        src->mip_levels != 1 ||
+        src->extent_depth != 1 ||
+        (src->create_flags & VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT) != 0) {
+        return 0;
+    }
+    if (vulkan_format_has_depth_aspect((VkFormat)src->format) ||
+        vulkan_format_has_stencil_aspect((VkFormat)src->format)) {
+        return 0;
+    }
+    return src->usage == VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+}
+
+static int validate_vulkan_dispatch_v5_image_samples_for_generic_dispatch(
+        const VulkanDispatchV5ObjectTables *object_tables) {
+    if (!object_tables || object_tables->image_count == 0) return 0;
+    if (!object_tables->images) return -EINVAL;
+    for (size_t i = 0; i < object_tables->image_count; ++i) {
+        if (object_tables->images[i].samples != VK_SAMPLE_COUNT_1_BIT) {
+            return -EOPNOTSUPP;
+        }
+    }
+    return 0;
+}
+
 static int materialize_vulkan_dispatch_images(
         VkPhysicalDevice physical_device,
         VkDevice device,
         const VulkanDispatchImageDescriptor *image_descriptors,
         size_t image_descriptor_count,
         const VulkanDispatchV5ObjectTables *object_tables,
+        const unsigned char *msaa_image_allowed,
+        size_t msaa_image_allowed_count,
         VulkanDispatchImageMemoryObject *memories,
         size_t *memory_count,
         VulkanDispatchImageObject *images,
@@ -3052,6 +3104,10 @@ static int materialize_vulkan_dispatch_images(
             src->tiling != VK_IMAGE_TILING_LINEAR) {
             return -ENOTSUP;
         }
+        if (!vulkan_dispatch_msaa_image_allowed(
+                src, i, msaa_image_allowed, msaa_image_allowed_count)) {
+            return -EOPNOTSUPP;
+        }
         VkImageLayout create_initial_layout =
             vulkan_image_create_initial_layout_for_transport(
                 (VkImageTiling)src->tiling,
@@ -3089,7 +3145,10 @@ static int materialize_vulkan_dispatch_images(
         dst->usage = (VkImageUsageFlags)src->usage;
         dst->array_layers = src->array_layers;
         dst->mip_levels = src->mip_levels;
-        dst->requires_staging = src->tiling == VK_IMAGE_TILING_OPTIMAL;
+        dst->requires_staging = src->tiling == VK_IMAGE_TILING_OPTIMAL &&
+                                src->samples == VK_SAMPLE_COUNT_1_BIT;
+        dst->direct_host_upload_needed = src->tiling == VK_IMAGE_TILING_LINEAR &&
+                                         src->samples == VK_SAMPLE_COUNT_1_BIT;
         dst->upload_pending = dst->requires_staging;
         VkImageCreateInfo ici = {
             .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
@@ -3131,8 +3190,12 @@ static int materialize_vulkan_dispatch_images(
         if ((size_t)native_end > memory->allocation_size) {
             memory->allocation_size = (size_t)native_end;
         }
-        if (!dst->requires_staging) {
+        if (dst->direct_host_upload_needed) {
+            if (memory->requires_device_local) return -EOPNOTSUPP;
             memory->needs_host_map = 1;
+        } else if (!dst->requires_staging) {
+            if (memory->needs_host_map) return -EOPNOTSUPP;
+            memory->requires_device_local = 1;
         }
     }
 
@@ -3200,7 +3263,7 @@ static int materialize_vulkan_dispatch_images(
                               fd_offset) != 0) {
                 return -EIO;
             }
-        } else {
+        } else if (image->direct_host_upload_needed) {
             if (!memory->map) return -EIO;
             if (read_fd_exact(memory->fd,
                               (unsigned char *)memory->map + image->memory_offset,
@@ -12429,6 +12492,11 @@ static int run_vulkan_dispatch_fd(
         json_fail("vulkan-dispatch", "invalid image descriptor metadata");
         return 64;
     }
+    int generic_sample_rc = validate_vulkan_dispatch_v5_image_samples_for_generic_dispatch(object_tables);
+    if (generic_sample_rc != 0) {
+        json_fail("vulkan-dispatch", "unsupported multisample image in generic dispatch");
+        return 64;
+    }
     if (!entry_name || !entry_name[0]) entry_name = "main";
     const int was_ready = g_vulkan_runtime.ready;
     if (init_vulkan_runtime(&g_vulkan_runtime) != 0) return -21;
@@ -13745,6 +13813,8 @@ static int run_vulkan_dispatch_fd(
             image_descriptors,
             image_descriptor_count,
             object_tables,
+            NULL,
+            0,
             image_memories,
             &image_memory_count,
             dispatch_images,
@@ -23569,6 +23639,79 @@ static int materialize_vulkan_graphics_v620_image_layout_ranges(
     return 0;
 }
 
+static int validate_vulkan_graphics_v6_msaa_images_are_v64_color_resolves(
+        const VulkanGraphicsV6FrameView *view,
+        unsigned char *allowed_msaa_images,
+        size_t allowed_msaa_image_count) {
+    if (!view || !view->header || !allowed_msaa_images) return -EINVAL;
+    const PdockerGpuVulkanGraphicsV6FrameHeader *header = view->header;
+    if (header->image_count > allowed_msaa_image_count ||
+        header->image_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS) {
+        return -E2BIG;
+    }
+    memset(allowed_msaa_images, 0, allowed_msaa_image_count);
+    if (header->image_count > 0 && !view->images) return -EPROTO;
+    if (header->command_count > 0 && !view->commands) return -EPROTO;
+
+    for (uint32_t c = 0; c < header->command_count; ++c) {
+        const PdockerGpuVulkanGraphicsV6CommandEntry *command = &view->commands[c];
+        if (command->command_type != PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_RENDERING) continue;
+        if (command->attachment_first > header->attachment_count ||
+            command->attachment_count > header->attachment_count - command->attachment_first) {
+            return -EPROTO;
+        }
+        if (command->attachment_count > 0 && !view->attachments) return -EPROTO;
+        for (uint32_t a = 0; a < command->attachment_count; ++a) {
+            const uint32_t attachment_index = command->attachment_first + a;
+            const PdockerGpuVulkanGraphicsV6AttachmentEntry *attachment =
+                &view->attachments[attachment_index];
+            if (attachment->flags & PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_UNUSED_SLOT) continue;
+            if (attachment->image_view_index == PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE ||
+                attachment->image_view_index >= header->image_view_count ||
+                !view->image_views) {
+                return -EPROTO;
+            }
+            const PdockerGpuVulkanDispatchV5ImageViewEntry *src_view =
+                &view->image_views[attachment->image_view_index];
+            if (src_view->image_index >= header->image_count) return -EPROTO;
+            const PdockerGpuVulkanDispatchV5ImageEntry *src_image =
+                &view->images[src_view->image_index];
+            if (src_image->samples == VK_SAMPLE_COUNT_1_BIT) continue;
+            if (attachment->attachment_role != PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR ||
+                src_image->samples != attachment->samples ||
+                attachment->resolve_image_view_index == PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE ||
+                attachment->resolve_image_view_index >= header->image_view_count) {
+                return -EOPNOTSUPP;
+            }
+            const PdockerGpuVulkanGraphicsV64ResolveAttachmentEntry *resolve_meta =
+                find_vulkan_graphics_v64_resolve_attachment(view, attachment_index);
+            if (!resolve_meta || resolve_meta->resolve_mode == VK_RESOLVE_MODE_NONE) {
+                return -EOPNOTSUPP;
+            }
+            const PdockerGpuVulkanDispatchV5ImageViewEntry *resolve_view =
+                &view->image_views[attachment->resolve_image_view_index];
+            if (resolve_view->image_index >= header->image_count) return -EPROTO;
+            const PdockerGpuVulkanDispatchV5ImageEntry *resolve_image =
+                &view->images[resolve_view->image_index];
+            if (resolve_image->samples != VK_SAMPLE_COUNT_1_BIT ||
+                src_image->format != resolve_image->format ||
+                src_view->format != resolve_view->format ||
+                src_view->aspect_mask != VK_IMAGE_ASPECT_COLOR_BIT ||
+                resolve_view->aspect_mask != VK_IMAGE_ASPECT_COLOR_BIT) {
+                return -EOPNOTSUPP;
+            }
+            allowed_msaa_images[src_view->image_index] = 1;
+        }
+    }
+
+    for (uint32_t i = 0; i < header->image_count; ++i) {
+        if (view->images[i].samples != VK_SAMPLE_COUNT_1_BIT && !allowed_msaa_images[i]) {
+            return -EOPNOTSUPP;
+        }
+    }
+    return 0;
+}
+
 static void vulkan_graphics_planning_set_image_layout(
         VulkanDispatchImageObject *image,
         VkImageLayout layout) {
@@ -23582,6 +23725,10 @@ static int materialize_vulkan_graphics_v6_attachments(
         VulkanGraphicsReplayAttachments *out) {
     if (!rt || !view || !view->header || !out) return -EINVAL;
     memset(out, 0, sizeof(*out));
+    unsigned char msaa_image_allowed[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+    int msaa_rc = validate_vulkan_graphics_v6_msaa_images_are_v64_color_resolves(
+        view, msaa_image_allowed, sizeof(msaa_image_allowed));
+    if (msaa_rc != 0) return msaa_rc;
     VulkanDispatchV5ObjectTables object_tables = {
         .resources = view->resources,
         .resource_count = view->header->resource_count,
@@ -23600,6 +23747,8 @@ static int materialize_vulkan_graphics_v6_attachments(
         NULL,
         0,
         &object_tables,
+        msaa_image_allowed,
+        view->header->image_count,
         out->memories,
         &out->memory_count,
         out->images,

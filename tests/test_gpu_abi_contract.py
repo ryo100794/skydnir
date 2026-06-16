@@ -3052,7 +3052,24 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn(".baseArrayLayer = image->copy_base_layer", executor)
         self.assertIn(".layerCount = image->copy_layer_count", executor)
         self.assertIn("vulkan_image_create_initial_layout_for_transport", executor)
+        self.assertIn("vulkan_dispatch_msaa_image_allowed", executor)
+        self.assertIn("vulkan_dispatch_sample_count_supported", executor)
+        msaa_helper_body = executor.split("static int vulkan_dispatch_msaa_image_allowed", 1)[1].split(
+            "static int materialize_vulkan_dispatch_images", 1
+        )[0]
         materialize_body = executor.split("static int materialize_vulkan_dispatch_images", 1)[1].split("static int run_vulkan_dispatch_fd", 1)[0]
+        self.assertIn("const unsigned char *msaa_image_allowed", materialize_body)
+        self.assertIn("!vulkan_dispatch_msaa_image_allowed(", materialize_body)
+        self.assertIn("dst->direct_host_upload_needed = src->tiling == VK_IMAGE_TILING_LINEAR", materialize_body)
+        self.assertIn("if (dst->direct_host_upload_needed)", materialize_body)
+        self.assertIn("memory->requires_device_local = 1;", materialize_body)
+        self.assertIn("} else if (image->direct_host_upload_needed) {", materialize_body)
+        self.assertIn("dst->upload_pending = dst->requires_staging;", materialize_body)
+        self.assertIn("src->samples == VK_SAMPLE_COUNT_1_BIT", msaa_helper_body)
+        self.assertIn("src->usage == VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT", msaa_helper_body)
+        self.assertIn("src->mip_levels != 1", msaa_helper_body)
+        self.assertIn("vulkan_format_has_depth_aspect((VkFormat)src->format)", msaa_helper_body)
+        self.assertIn("vulkan_format_has_stencil_aspect((VkFormat)src->format)", msaa_helper_body)
         self.assertIn("create_initial_layout =", materialize_body)
         self.assertIn(".initialLayout = create_initial_layout", materialize_body)
         self.assertIn("dst->current_layout = create_initial_layout;", materialize_body)
@@ -4975,6 +4992,56 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("descriptor_array_transport_required || image_descriptor_count > 0", icd)
         self.assertIn("V5.1 frame required but disabled for this dispatch", icd)
         self.assertIn("because PDOCKER_VULKAN_ALIAS_COPIES is active", icd)
+
+
+    def test_vulkan_graphics_msaa_materialization_is_masked_to_resolved_color_attachments(self):
+        executor = GPU_EXECUTOR.read_text()
+        generic_helper = executor.split(
+            "static int validate_vulkan_dispatch_v5_image_samples_for_generic_dispatch", 1
+        )[1].split("static int materialize_vulkan_dispatch_images", 1)[0]
+        self.assertIn("object_tables->images[i].samples != VK_SAMPLE_COUNT_1_BIT", generic_helper)
+        self.assertIn("return -EOPNOTSUPP;", generic_helper)
+        run_body = executor.split("static int run_vulkan_dispatch_fd", 1)[1].split(
+            "static void clear_registered_vector_buffer", 1
+        )[0]
+        self.assertIn("validate_vulkan_dispatch_v5_image_samples_for_generic_dispatch(object_tables)", run_body)
+        self.assertLess(
+            run_body.index("validate_vulkan_dispatch_v5_image_samples_for_generic_dispatch(object_tables)"),
+            run_body.index("materialize_vulkan_dispatch_images("),
+        )
+
+        graphics_helper = executor.split(
+            "static int validate_vulkan_graphics_v6_msaa_images_are_v64_color_resolves", 1
+        )[1].split("static int materialize_vulkan_graphics_v6_attachments", 1)[0]
+        self.assertIn("unsigned char *allowed_msaa_images", graphics_helper)
+        self.assertIn("header->image_count > allowed_msaa_image_count", graphics_helper)
+        self.assertIn("PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_RENDERING", graphics_helper)
+        self.assertIn("PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_UNUSED_SLOT", graphics_helper)
+        self.assertIn("command->attachment_first > header->attachment_count", graphics_helper)
+        self.assertIn("attachment->attachment_role != PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR", graphics_helper)
+        self.assertIn("src_image->samples != attachment->samples", graphics_helper)
+        self.assertIn("attachment->resolve_image_view_index == PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE", graphics_helper)
+        self.assertIn("find_vulkan_graphics_v64_resolve_attachment(view, attachment_index)", graphics_helper)
+        self.assertIn("resolve_meta->resolve_mode == VK_RESOLVE_MODE_NONE", graphics_helper)
+        self.assertIn("resolve_image->samples != VK_SAMPLE_COUNT_1_BIT", graphics_helper)
+        self.assertIn("src_image->format != resolve_image->format", graphics_helper)
+        self.assertIn("src_view->format != resolve_view->format", graphics_helper)
+        self.assertIn("src_view->aspect_mask != VK_IMAGE_ASPECT_COLOR_BIT", graphics_helper)
+        self.assertIn("resolve_view->aspect_mask != VK_IMAGE_ASPECT_COLOR_BIT", graphics_helper)
+        self.assertIn("allowed_msaa_images[src_view->image_index] = 1;", graphics_helper)
+        self.assertIn("view->images[i].samples != VK_SAMPLE_COUNT_1_BIT && !allowed_msaa_images[i]", graphics_helper)
+
+        graphics_body = executor.split("static int materialize_vulkan_graphics_v6_attachments", 1)[1].split(
+            "static int record_vulkan_graphics_v6_attachment_writeback_commands", 1
+        )[0]
+        self.assertIn("unsigned char msaa_image_allowed[PDOCKER_GPU_MAX_VULKAN_BINDINGS];", graphics_body)
+        self.assertIn("validate_vulkan_graphics_v6_msaa_images_are_v64_color_resolves(", graphics_body)
+        self.assertIn("msaa_image_allowed,", graphics_body)
+        generic_body = executor.split("failed to materialize V5.1 image objects", 1)[0].rsplit(
+            "materialize_vulkan_dispatch_images(", 1
+        )[1]
+        self.assertIn("NULL,", generic_body)
+        self.assertIn("0,", generic_body)
 
     def test_vulkan_executor_has_storage_image_roundtrip_probe(self):
         src = GPU_EXECUTOR.read_text()

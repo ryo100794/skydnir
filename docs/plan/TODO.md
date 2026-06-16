@@ -74,6 +74,13 @@ or closes.
   count. Executor preflight also rejects unresolved MSAA, MSAA attachment
   `LOAD`, and graphics-pipeline sample-count mismatches, and writeback follows
   the single-sample resolve attachment instead of the multisample source.
+- [done] **MSAA materialization gate**: Executor image materialization now rejects
+  multisample images in generic V5 dispatch, allows them only when the graphics
+  V6 frame proves a V6.4 in-render color resolve path, rejects unreferenced or
+  mismatched MSAA image tables, and separates optimal single-sample staging from
+  linear direct host upload. Allowed MSAA color sources no longer fall into the
+  HOST_VISIBLE fd-upload path and cannot share a materialized memory object with
+  direct host-upload images.
 - [planned] **residual graphics evidence gaps**: Do not promote full Vulkan
   pass-through until remaining fail-closed lanes have explicit ABI/evidence:
   V6.1 image-barrier range/aspect normalization, packed depth+stencil copy
