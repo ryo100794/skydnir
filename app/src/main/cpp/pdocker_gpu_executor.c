@@ -2543,6 +2543,7 @@ typedef struct {
     VkFormat format;
     VkImageTiling tiling;
     VkImageUsageFlags usage;
+    VkSampleCountFlagBits samples;
     uint32_t array_layers;
     uint32_t mip_levels;
     VkImageAspectFlags copy_aspect_mask;
@@ -3198,6 +3199,7 @@ static int materialize_vulkan_dispatch_images(
         dst->format = (VkFormat)src->format;
         dst->tiling = (VkImageTiling)src->tiling;
         dst->usage = (VkImageUsageFlags)src->usage;
+        dst->samples = (VkSampleCountFlagBits)src->samples;
         dst->array_layers = src->array_layers;
         dst->mip_levels = src->mip_levels;
         dst->requires_staging = src->tiling == VK_IMAGE_TILING_OPTIMAL &&
@@ -24121,6 +24123,7 @@ static int record_vulkan_graphics_v6_attachment_writeback_commands(
     for (size_t i = 0; i < attachments->image_count; ++i) {
         VulkanDispatchImageObject *image = &attachments->images[i];
         if (!image->writeback_needed) continue;
+        if (image->samples != VK_SAMPLE_COUNT_1_BIT) return -EOPNOTSUPP;
         if (!image->copy_aspect_mask || image->copy_level_count == 0 ||
             image->copy_layer_count == 0) {
             return -EINVAL;
@@ -24243,6 +24246,7 @@ static int writeback_vulkan_graphics_v6_attachments(
     for (size_t i = 0; i < attachments->image_count; ++i) {
         const VulkanDispatchImageObject *image = &attachments->images[i];
         if (!image->writeback_needed) continue;
+        if (image->samples != VK_SAMPLE_COUNT_1_BIT) return -EOPNOTSUPP;
         if (image->memory_object_index >= attachments->memory_count) return -EINVAL;
         const VulkanDispatchImageMemoryObject *memory =
             &attachments->memories[image->memory_object_index];

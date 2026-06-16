@@ -81,6 +81,12 @@ or closes.
   linear direct host upload. Allowed MSAA color sources no longer fall into the
   HOST_VISIBLE fd-upload path and cannot share a materialized memory object with
   direct host-upload images.
+- [done] **unresolved MSAA writeback guard**: Materialized image objects now
+  carry their sample count through replay. Attachment writeback recording and
+  fd writeback reject any `writeback_needed` image whose sample count is not
+  `VK_SAMPLE_COUNT_1_BIT`. This keeps unresolved MSAA store/readback
+  fail-closed while preserving the supported in-render resolve path, where the
+  writeback target is the single-sample resolve image.
 - [done] **image-barrier range/aspect normalization audit**: The producer ICD
   normalizes image-barrier `VK_REMAINING_MIP_LEVELS` and
   `VK_REMAINING_ARRAY_LAYERS` to concrete ranges before V6.1 serialization, and

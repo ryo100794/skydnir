@@ -3073,8 +3073,12 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("!vulkan_dispatch_msaa_image_allowed(", materialize_body)
         self.assertIn("!vulkan_dispatch_image_usage_supported_by_format(", materialize_body)
         self.assertIn("!vulkan_dispatch_image_view_range_valid(src_image, src)", materialize_body)
+        self.assertIn("dst->samples = (VkSampleCountFlagBits)src->samples;", materialize_body)
+        self.assertIn("dst->requires_staging = src->tiling == VK_IMAGE_TILING_OPTIMAL", materialize_body)
         self.assertIn("dst->direct_host_upload_needed = src->tiling == VK_IMAGE_TILING_LINEAR", materialize_body)
+        self.assertIn("src->samples == VK_SAMPLE_COUNT_1_BIT", materialize_body)
         self.assertIn("if (dst->direct_host_upload_needed)", materialize_body)
+        self.assertIn("if (memory->requires_device_local) return -EOPNOTSUPP;", materialize_body)
         self.assertIn("memory->requires_device_local = 1;", materialize_body)
         self.assertIn("} else if (image->direct_host_upload_needed) {", materialize_body)
         self.assertIn("dst->upload_pending = dst->requires_staging;", materialize_body)
@@ -5064,6 +5068,37 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("unsigned char msaa_image_allowed[PDOCKER_GPU_MAX_VULKAN_BINDINGS];", graphics_body)
         self.assertIn("validate_vulkan_graphics_v6_msaa_images_are_v64_color_resolves(", graphics_body)
         self.assertIn("msaa_image_allowed,", graphics_body)
+        self.assertIn("attachment->samples != VK_SAMPLE_COUNT_1_BIT", graphics_body)
+        self.assertIn("return -EOPNOTSUPP;", graphics_body)
+        self.assertLess(
+            graphics_body.index("attachment->samples != VK_SAMPLE_COUNT_1_BIT"),
+            graphics_body.index("writeback_image->writeback_needed = 1;"),
+        )
+        self.assertIn("writeback_image = resolve_image;", graphics_body)
+        self.assertLess(
+            graphics_body.index("writeback_image = resolve_image;"),
+            graphics_body.index("writeback_image->writeback_needed = 1;"),
+        )
+        writeback_record_body = executor.split("static int record_vulkan_graphics_v6_attachment_writeback_commands", 1)[1].split(
+            "static int writeback_vulkan_graphics_v6_attachments", 1
+        )[0]
+        self.assertIn("if (image->samples != VK_SAMPLE_COUNT_1_BIT) return -EOPNOTSUPP;", writeback_record_body)
+        self.assertLess(
+            writeback_record_body.index("if (image->samples != VK_SAMPLE_COUNT_1_BIT) return -EOPNOTSUPP;"),
+            writeback_record_body.index("vkCmdCopyImageToBuffer"),
+        )
+        writeback_body = executor.split("static int writeback_vulkan_graphics_v6_attachments", 1)[1].split(
+            "typedef struct VulkanGraphicsReplayBuffer", 1
+        )[0]
+        self.assertIn("if (image->samples != VK_SAMPLE_COUNT_1_BIT) return -EOPNOTSUPP;", writeback_body)
+        self.assertLess(
+            writeback_body.index("if (image->samples != VK_SAMPLE_COUNT_1_BIT) return -EOPNOTSUPP;"),
+            writeback_body.index("if (image->requires_staging)"),
+        )
+        self.assertLess(
+            writeback_body.index("if (image->samples != VK_SAMPLE_COUNT_1_BIT) return -EOPNOTSUPP;"),
+            writeback_body.index("write_fd_exact"),
+        )
         generic_body = executor.split("failed to materialize V5.1 image objects", 1)[0].rsplit(
             "materialize_vulkan_dispatch_images(", 1
         )[1]
