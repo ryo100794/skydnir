@@ -2808,18 +2808,11 @@ static int vulkan_dispatch_image_usage_supported_by_format(
 static int vulkan_image_single_aspect_supported_for_format(
         VkFormat format,
         VkImageAspectFlags aspect_mask) {
-    if (aspect_mask == VK_IMAGE_ASPECT_COLOR_BIT) {
-        return !vulkan_format_has_depth_aspect(format) &&
-               !vulkan_format_has_stencil_aspect(format) &&
-               vulkan_format_bytes_per_pixel_for_aspect(format, aspect_mask) != 0;
-    }
-    if (aspect_mask == VK_IMAGE_ASPECT_DEPTH_BIT) {
-        return format == VK_FORMAT_D16_UNORM || format == VK_FORMAT_D32_SFLOAT;
-    }
-    if (aspect_mask == VK_IMAGE_ASPECT_STENCIL_BIT) {
-        return format == VK_FORMAT_S8_UINT;
-    }
-    return 0;
+    if ((aspect_mask & (aspect_mask - 1u)) != 0) return 0;
+    return vulkan_format_bytes_per_pixel_for_aspect(format, aspect_mask) != 0 &&
+           (aspect_mask != VK_IMAGE_ASPECT_COLOR_BIT ||
+            (!vulkan_format_has_depth_aspect(format) &&
+             !vulkan_format_has_stencil_aspect(format)));
 }
 
 static int vulkan_image_aspect_mask_valid_for_format(

@@ -17,8 +17,9 @@ or closes.
 
 - [done] **image-aspect docs audit**: The Vulkan graphics handoff now states
   that V6.10 image-copy replay is no longer color-only; it covers fd-backed
-  single-aspect color, pure depth, and pure stencil copy regions while keeping
-  packed dual-aspect depth/stencil, compressed/multiplanar images, copy2 pNext,
+  single-aspect color/depth/stencil copy regions, including packed
+  depth/stencil formats when exactly one aspect is selected, while keeping
+  dual-aspect depth/stencil, compressed/multiplanar images, copy2 pNext,
   and broader synchronization fail-closed.
 - [done] **V6.14-V6.23 status sync**: The handoff and advertised-limits gap now
   call out the post-V6.13 graphics ABI chain: resolve image, blit image, clear
@@ -31,8 +32,9 @@ or closes.
   reject unsupported or ambiguous ranges fail-closed.
 - [done] **graphics descriptor image aspect-aware upload slice**: Executor P6
   is widened from color-only descriptor upload to bounded single-aspect color,
-  pure depth (`D16`/`D32`), and pure stencil (`S8`) sampled/combined/input
-  descriptors. Storage images remain color-only and packed dual-aspect
+  single-aspect depth/stencil, including packed `D24S8`/`D32S8` depth or
+  stencil views, sampled/combined/input descriptors. Storage images remain
+  color-only and dual-aspect
   depth/stencil descriptors fail-closed until the copy-range model can represent
   them explicitly. The descriptor copy-range helper derives the aspect from the
   image-view range, staged upload uses `_for_aspect` offset/copy-size helpers
@@ -99,6 +101,12 @@ or closes.
   sync is deferred until post-graphics dispatches finish, and dispatches inside
   the graphics-frame interval still fail closed because cross-queue in-frame
   ordering is not yet represented.
+- [done] **packed single-aspect depth/stencil copy lane**: The ICD and executor
+  now accept packed `D24S8`/`D32S8` images when a copy, sampled, combined, or
+  input-attachment view selects exactly one depth or stencil aspect. The
+  transport still rejects dual-aspect depth/stencil ranges and any attempt to
+  merge two different aspects onto the same image copy range, so no packed
+  memory layout is guessed.
 - [done] **image-barrier range/aspect normalization audit**: The producer ICD
   normalizes image-barrier `VK_REMAINING_MIP_LEVELS` and
   `VK_REMAINING_ARRAY_LAYERS` to concrete ranges before V6.1 serialization, and
@@ -119,7 +127,7 @@ or closes.
   the executor accepts only concrete bounded ranges.
 - [planned] **residual graphics evidence gaps**: Do not promote full Vulkan
   pass-through until remaining fail-closed lanes have explicit ABI/evidence:
-  packed depth+stencil copy layout, explicit compressed/multiplanar image
+  dual-aspect depth+stencil copy layout, explicit compressed/multiplanar image
   support beyond the current fail-closed gate, unresolved MSAA store/readback,
   true cross-family ownership transfer,
   dispatch inside the graphics-frame interval, and broader synchronization.

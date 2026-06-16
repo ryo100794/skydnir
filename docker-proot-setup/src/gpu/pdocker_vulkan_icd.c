@@ -1559,21 +1559,46 @@ static bool pdocker_vk_format_has_stencil(VkFormat format) {
     }
 }
 
-static bool pdocker_vk_image_single_aspect_supported_for_format(
+static uint32_t conservative_format_bytes_per_pixel_for_aspect(
         VkFormat format,
         VkImageAspectFlags aspect_mask) {
     if (aspect_mask == VK_IMAGE_ASPECT_COLOR_BIT) {
-        return !pdocker_vk_format_has_depth(format) &&
-               !pdocker_vk_format_has_stencil(format) &&
-               conservative_format_bytes_per_pixel(format) != 0;
+        if (pdocker_vk_format_has_depth(format) ||
+            pdocker_vk_format_has_stencil(format)) {
+            return 0;
+        }
+        return conservative_format_bytes_per_pixel(format);
     }
     if (aspect_mask == VK_IMAGE_ASPECT_DEPTH_BIT) {
-        return format == VK_FORMAT_D16_UNORM || format == VK_FORMAT_D32_SFLOAT;
+        switch (format) {
+            case VK_FORMAT_D16_UNORM:
+                return 2;
+            case VK_FORMAT_D24_UNORM_S8_UINT:
+            case VK_FORMAT_D32_SFLOAT:
+            case VK_FORMAT_D32_SFLOAT_S8_UINT:
+                return 4;
+            default:
+                return 0;
+        }
     }
     if (aspect_mask == VK_IMAGE_ASPECT_STENCIL_BIT) {
-        return format == VK_FORMAT_S8_UINT;
+        switch (format) {
+            case VK_FORMAT_S8_UINT:
+            case VK_FORMAT_D24_UNORM_S8_UINT:
+            case VK_FORMAT_D32_SFLOAT_S8_UINT:
+                return 1;
+            default:
+                return 0;
+        }
     }
-    return false;
+    return 0;
+}
+
+static bool pdocker_vk_image_single_aspect_supported_for_format(
+        VkFormat format,
+        VkImageAspectFlags aspect_mask) {
+    if ((aspect_mask & (aspect_mask - 1u)) != 0) return false;
+    return conservative_format_bytes_per_pixel_for_aspect(format, aspect_mask) != 0;
 }
 
 static bool pdocker_vk_image_aspect_mask_valid_for_format(
