@@ -17800,8 +17800,8 @@ static int execute_graphics_mixed_gpu_sequence(
 
 static VkResult execute_graphics_mixed_host_side_ops(
         PdockerVkCommandBuffer *cmd,
-        uint32_t first_draw,
-        uint32_t last_draw,
+        uint32_t first_gpu_op,
+        uint32_t last_gpu_op,
         bool before_graphics,
         PdockerVkCopyStats *stats) {
     if (!cmd) return VK_SUCCESS;
@@ -17809,12 +17809,12 @@ static VkResult execute_graphics_mixed_host_side_ops(
         PdockerVkCommandOp *op = &cmd->command_ops[op_index];
         if (!command_op_is_graphics_side_submit_op(op->type)) continue;
         bool run = false;
-        if (first_draw == UINT32_MAX) {
+        if (first_gpu_op == UINT32_MAX) {
             run = before_graphics;
         } else if (before_graphics) {
-            run = op_index < first_draw;
+            run = op_index < first_gpu_op;
         } else {
-            run = op_index > last_draw;
+            run = op_index > last_gpu_op;
         }
         if (run) {
             VkResult rc = command_op_is_executor_compute_op(op->type)
