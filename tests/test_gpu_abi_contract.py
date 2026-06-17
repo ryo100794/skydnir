@@ -6417,7 +6417,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "filter_submit_sync_entries_for_graphics_frame",
             "frame_submit_sync_entries",
             "send_recorded_vulkan_graphics_v6_1_frame(\n                        cmd, frame_submit_sync_entries, frame_submit_sync_count)",
-            "send_recorded_vulkan_graphics_v6_1_frame(\n                    cmd, frame_submit_sync_entries, frame_submit_sync_count)",
+            "execute_graphics_mixed_gpu_sequence(\n                    cmd, first_graphics_gpu_op, last_graphics_gpu_op,",
             "submit-sync-metadata-overflow",
             "VULKAN_GRAPHICS_V6.19",
             "need_v619_submit_sync",
@@ -7386,20 +7386,26 @@ class GpuAbiContractTest(unittest.TestCase):
         )
         self.assertLess(
             mixed_body.index("filter_submit_sync_entries_without_completion("),
-            mixed_body.index("send_recorded_vulkan_graphics_v6_1_frame("),
+            mixed_body.index("execute_graphics_mixed_gpu_sequence("),
         )
         self.assertLess(
             mixed_body.index("send_vulkan_submit_sync_only_frame(\n                    pre_wait_sync_entries, pre_wait_sync_count)"),
             mixed_body.index("execute_graphics_mixed_host_side_ops("),
         )
         self.assertLess(
-            mixed_body.index("send_recorded_vulkan_graphics_v6_1_frame(\n                    cmd, frame_submit_sync_entries, frame_submit_sync_count)"),
+            mixed_body.index("execute_graphics_mixed_gpu_sequence(\n                    cmd, first_graphics_gpu_op, last_graphics_gpu_op,"),
             mixed_body.rindex("execute_graphics_mixed_host_side_ops("),
         )
         for marker in [
             "command_op_is_executor_compute_op",
             "command_op_is_graphics_side_submit_op",
             "execute_recorded_dispatch_command_op",
+            "send_recorded_vulkan_graphics_v6_1_frame_range",
+            "graphics_record_should_serialize_for_range",
+            "graphics_record_is_state_preamble_command",
+            "execute_graphics_mixed_gpu_sequence",
+            "count_graphics_sequence_segments_split_by_dispatch",
+            "send_graphics_sequence_segment",
             "graphics_mixed_dispatch_inside_frame_reason",
             "graphics_sequence_inside_active_rendering",
             "graphics-mixed-dispatch-inside-rendering-unimplemented",
@@ -7409,6 +7415,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("!command_op_is_graphics_side_submit_op(type)", plan_body)
         self.assertIn("command_op_is_executor_compute_op(type)", plan_body)
         self.assertIn("graphics_mixed_dispatch_inside_frame_reason(cmd, op_index)", plan_body)
+        self.assertIn("continue;", plan_body)
         self.assertNotIn("!command_op_is_executor_compute_op(type)) {\n            continue;\n        }\n        if (first_gpu_op == UINT32_MAX", plan_body)
         before_body = icd.split("static bool command_buffer_has_host_side_ops_before", 1)[1].split(
             "static bool command_buffer_has_host_side_ops_after", 1
@@ -7455,6 +7462,67 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         self.assertIn("graphics_mixed_dispatch_inside_frame_reason(cmd, op_index)", plan_body)
         self.assertNotIn("graphics-mixed-dispatch-inside-gpu-frame-unimplemented", plan_body)
+
+    def test_vulkan_graphics_between_render_dispatch_uses_range_split_with_state_preamble(self):
+        icd = VULKAN_ICD.read_text()
+        range_body = icd.split("static int send_recorded_vulkan_graphics_v6_1_frame_range", 1)[1].split(
+            "static int send_recorded_vulkan_graphics_v6_1_frame", 1
+        )[0]
+        preamble_body = icd.split("static bool graphics_record_is_state_preamble_command", 1)[1].split(
+            "static bool graphics_record_should_serialize_for_range", 1
+        )[0]
+        should_body = icd.split("static bool graphics_record_should_serialize_for_range", 1)[1].split(
+            "static bool command_buffer_has_graphics_records_in_sequence_range", 1
+        )[0]
+        segment_body = icd.split("static uint32_t count_graphics_sequence_segments_split_by_dispatch", 1)[1].split(
+            "static VkResult execute_graphics_mixed_host_side_ops", 1
+        )[0]
+        for marker in [
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_PIPELINE",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_DESCRIPTOR_SETS",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_PUSH_CONSTANTS",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_VERTEX_BUFFERS",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_INDEX_BUFFER",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_DYNAMIC_STATE",
+        ]:
+            self.assertIn(marker, preamble_body)
+        for marker in [
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_RENDERING",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_RENDERING",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW_INDEXED",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_COPY_BUFFER",
+        ]:
+            self.assertNotIn(marker, preamble_body)
+        self.assertIn("include_state_preamble", range_body)
+        self.assertIn("graphics_record_should_serialize_for_range", range_body)
+        self.assertIn("record->command_op_sequence < sequence_begin", should_body)
+        self.assertIn("graphics_record_is_state_preamble_command(record->command_type)", should_body)
+        draw_interval_body = range_body.split("uint32_t first_graphics_draw_sequence = UINT32_MAX;", 1)[1].split(
+            "uint32_t next_command_op_for_graphics = sequence_begin;", 1
+        )[0]
+        self.assertNotIn("command_op_sequence_in_range", draw_interval_body)
+        self.assertIn("next_command_op_for_graphics = sequence_begin", range_body)
+        self.assertIn("next_command_op_for_graphics < sequence_end", range_body)
+        count_body = segment_body.split("static int send_graphics_sequence_segment", 1)[0]
+        execute_body = segment_body.split("static int execute_graphics_mixed_gpu_sequence", 1)[1]
+        send_segment_body = segment_body.split("static int send_graphics_sequence_segment", 1)[1].split(
+            "static int execute_graphics_mixed_gpu_sequence", 1
+        )[0]
+        self.assertIn("cmd, segment_begin, op_index + 1u", count_body)
+        self.assertIn("cmd, segment_begin, op_index + 1u", execute_body)
+        self.assertLess(
+            execute_body.index("send_graphics_sequence_segment("),
+            execute_body.index("execute_recorded_dispatch_command_op(cmd, op, NULL)"),
+        )
+        self.assertLess(
+            execute_body.index("execute_recorded_dispatch_command_op(cmd, op, NULL)"),
+            execute_body.index("segment_begin = op_index + 1u"),
+        )
+        self.assertIn("filter_submit_sync_entries_for_graphics_frame", send_segment_body)
+        self.assertIn("first_segment, last_segment, segment_sync_entries", send_segment_body)
+        self.assertIn("!first_segment", send_segment_body)
+        self.assertIn("last_gpu_op == UINT32_MAX", segment_body)
 
     def test_vulkan_compute_push_constants_do_not_create_graphics_frame(self):
         icd = VULKAN_ICD.read_text()
