@@ -7309,8 +7309,10 @@ class GpuAbiContractTest(unittest.TestCase):
             "execute_recorded_update_op(op)",
         ]:
             self.assertIn(marker, icd)
+        self.assertIn("static VkResult execute_graphics_mixed_host_side_ops", icd)
+        self.assertNotIn("static void execute_graphics_mixed_host_side_ops", icd)
         plan_body = icd.split("static bool graphics_mixed_submit_plan", 1)[1].split(
-            "static void execute_graphics_mixed_host_side_ops", 1
+            "static VkResult execute_graphics_mixed_host_side_ops", 1
         )[0]
         self.assertIn("command_op_is_graphics_interleavable_transfer_op", icd)
         self.assertIn("cmd->graphics_command_ops[record_index].command_op_sequence", plan_body)
