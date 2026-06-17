@@ -16940,10 +16940,15 @@ static bool command_op_is_executor_compute_op(PdockerVkCommandOpType type);
 
 static bool command_buffer_needs_graphics_submit_sync_frame(const PdockerVkCommandBuffer *cmd) {
     if (!cmd) return false;
+    bool has_graphics_submit_frame = false;
     for (uint32_t i = 0; i < cmd->graphics_command_op_count; ++i) {
         if (graphics_record_requires_submit_frame(cmd->graphics_command_ops[i].command_type)) {
-            return true;
+            has_graphics_submit_frame = true;
+            break;
         }
+    }
+    if (!has_graphics_submit_frame) {
+        return false;
     }
     for (uint32_t i = 0; i < cmd->command_op_count; ++i) {
         PdockerVkCommandOpType type = cmd->command_ops[i].type;
@@ -16952,7 +16957,7 @@ static bool command_buffer_needs_graphics_submit_sync_frame(const PdockerVkComma
             return true;
         }
     }
-    return false;
+    return true;
 }
 
 static void graphics_submit_sync_frame_bounds(
@@ -17664,6 +17669,12 @@ static bool graphics_mixed_submit_plan(
                                          op_index > first_draw && op_index < last_draw &&
                                          command_op_is_graphics_interleavable_transfer_op(type);
         if (command_op_is_graphics_interleavable_transfer_op(type)) {
+            if (inside_gpu_frame && graphics_sequence_inside_active_rendering(cmd, op_index)) {
+                if (reason_out) {
+                    *reason_out = "graphics-mixed-transfer-inside-rendering-unimplemented";
+                }
+                return false;
+            }
             if (inside_gpu_frame && !interleaved_between_draws) {
                 if (reason_out) {
                     *reason_out = "graphics-mixed-host-op-inside-gpu-frame-unimplemented";

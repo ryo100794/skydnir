@@ -1933,6 +1933,16 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         self.assertIn('\\"stage\\":\\"vulkan-graphics-v6-queue-submit\\"', run_body)
         for marker in [
+            "const int sync_only_submit",
+            "view->header_v619->v619.submit_sync_count > 0",
+            "view->header->command_count == 0 && !sync_only_submit",
+        ]:
+            self.assertIn(marker, run_body)
+        self.assertLess(
+            run_body.index("const int sync_only_submit"),
+            run_body.index("preflight_vulkan_graphics_v6_runtime_supported"),
+        )
+        for marker in [
             'VulkanGraphicsSubmitDiag submit_diag',
             '\\"submit_stage\\"',
             '\\"vk_result\\"',
@@ -7471,6 +7481,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "static VkResult execute_graphics_mixed_host_side_ops", 1
         )[0]
         self.assertIn("graphics_mixed_dispatch_inside_frame_reason(cmd, op_index)", plan_body)
+        self.assertIn("graphics-mixed-transfer-inside-rendering-unimplemented", plan_body)
+        self.assertIn("graphics_sequence_inside_active_rendering(cmd, op_index)", plan_body)
         self.assertNotIn("graphics-mixed-dispatch-inside-gpu-frame-unimplemented", plan_body)
 
     def test_vulkan_graphics_between_render_dispatch_uses_range_split_with_state_preamble(self):
@@ -7561,6 +7573,13 @@ class GpuAbiContractTest(unittest.TestCase):
         needs_body = icd.split("static bool command_buffer_needs_graphics_submit_sync_frame", 1)[1].split(
             "static void graphics_submit_sync_frame_bounds", 1
         )[0]
+        self.assertIn("bool has_graphics_submit_frame = false", needs_body)
+        self.assertIn("if (!has_graphics_submit_frame) {", needs_body)
+        self.assertIn("return false;", needs_body)
+        self.assertLess(
+            needs_body.index("if (!has_graphics_submit_frame) {"),
+            needs_body.index("for (uint32_t i = 0; i < cmd->command_op_count; ++i)"),
+        )
         self.assertIn("cmd->command_op_count", needs_body)
         self.assertIn("command_op_is_graphics_frame_op(type)", needs_body)
         self.assertIn("command_op_is_graphics_interleavable_transfer_op(type)", needs_body)

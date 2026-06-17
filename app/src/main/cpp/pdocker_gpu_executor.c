@@ -28185,7 +28185,9 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
         fflush(out);
         return rc;
     }
-    if (view && view->header && view->header->command_count == 0) {
+    const int sync_only_submit = view && view->is_v619 && view->header_v619 &&
+        view->header_v619->v619.submit_sync_count > 0;
+    if (view && view->header && view->header->command_count == 0 && !sync_only_submit) {
         FILE *out = json_out();
         fprintf(out,
                 "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
