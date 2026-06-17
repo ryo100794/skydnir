@@ -17422,6 +17422,17 @@ static bool command_op_is_graphics_interleavable_transfer_op(PdockerVkCommandOpT
     }
 }
 
+static bool command_op_should_extend_graphics_gpu_frame(
+        PdockerVkCommandOpType type,
+        uint32_t op_index,
+        uint32_t first_draw,
+        uint32_t last_draw) {
+    if (command_op_is_graphics_interleavable_transfer_op(type)) {
+        return first_draw != UINT32_MAX && op_index > first_draw && op_index < last_draw;
+    }
+    return command_op_is_graphics_frame_op(type);
+}
+
 static bool command_op_is_executor_compute_op(PdockerVkCommandOpType type) {
     return type == PDOCKER_VK_COMMAND_DISPATCH;
 }
@@ -17638,8 +17649,8 @@ static bool graphics_mixed_submit_plan(
     }
     for (uint32_t op_index = 0; op_index < cmd->command_op_count; ++op_index) {
         PdockerVkCommandOpType type = cmd->command_ops[op_index].type;
-        if (!command_op_is_graphics_frame_op(type) &&
-            !command_op_is_graphics_interleavable_transfer_op(type)) {
+        if (!command_op_should_extend_graphics_gpu_frame(
+                type, op_index, first_draw, last_draw)) {
             continue;
         }
         if (first_gpu_op == UINT32_MAX || op_index < first_gpu_op) first_gpu_op = op_index;
@@ -17647,16 +17658,25 @@ static bool graphics_mixed_submit_plan(
     }
     for (uint32_t op_index = 0; op_index < cmd->command_op_count; ++op_index) {
         PdockerVkCommandOpType type = cmd->command_ops[op_index].type;
-        if (command_op_is_graphics_frame_op(type)) continue;
-        if (!command_op_is_graphics_side_submit_op(type)) {
-            if (reason_out) *reason_out = "graphics-mixed-submit-unimplemented";
-            return false;
-        }
         bool inside_gpu_frame = first_gpu_op != UINT32_MAX &&
                                 op_index >= first_gpu_op && op_index <= last_gpu_op;
         bool interleaved_between_draws = first_draw != UINT32_MAX &&
                                          op_index > first_draw && op_index < last_draw &&
                                          command_op_is_graphics_interleavable_transfer_op(type);
+        if (command_op_is_graphics_interleavable_transfer_op(type)) {
+            if (inside_gpu_frame && !interleaved_between_draws) {
+                if (reason_out) {
+                    *reason_out = "graphics-mixed-host-op-inside-gpu-frame-unimplemented";
+                }
+                return false;
+            }
+            continue;
+        }
+        if (command_op_is_graphics_frame_op(type)) continue;
+        if (!command_op_is_graphics_side_submit_op(type)) {
+            if (reason_out) *reason_out = "graphics-mixed-submit-unimplemented";
+            return false;
+        }
         if (inside_gpu_frame && command_op_is_executor_compute_op(type)) {
             if (graphics_sequence_inside_active_rendering(cmd, op_index)) {
                 if (reason_out) {

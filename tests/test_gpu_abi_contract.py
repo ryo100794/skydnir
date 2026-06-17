@@ -7299,6 +7299,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "execute_graphics_mixed_host_side_ops",
             "first_graphics_gpu_op",
             "last_graphics_gpu_op",
+            "command_op_should_extend_graphics_gpu_frame",
             "graphics-mixed-transfer-between-draws-unimplemented",
             "graphics V6.1 mixed submit rc=%d prepost_ops=%zu bytes=%llu",
             "execute_recorded_copy_op(&cmd->copy_ops[op->index], stats)",
@@ -7313,8 +7314,9 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         self.assertIn("command_op_is_graphics_interleavable_transfer_op", icd)
         self.assertIn("cmd->graphics_command_ops[record_index].command_op_sequence", plan_body)
-        self.assertIn("!command_op_is_graphics_frame_op(type)", plan_body)
-        self.assertIn("!command_op_is_graphics_interleavable_transfer_op(type)", plan_body)
+        self.assertIn("command_op_should_extend_graphics_gpu_frame(", plan_body)
+        self.assertNotIn("!command_op_is_graphics_frame_op(type) &&", plan_body)
+        self.assertNotIn("!command_op_is_graphics_interleavable_transfer_op(type)", plan_body)
         self.assertIn("first_gpu_op == UINT32_MAX || op_index < first_gpu_op", plan_body)
         self.assertIn("op_index > last_gpu_op", plan_body)
         self.assertIn("graphics-mixed-host-op-inside-gpu-frame-unimplemented", plan_body)
@@ -7336,6 +7338,12 @@ class GpuAbiContractTest(unittest.TestCase):
             "case PDOCKER_VK_COMMAND_QUERY_TIMESTAMP:",
         ]:
             self.assertNotIn(host_side_only, interleavable_body)
+        gpu_frame_extent_body = icd.split("static bool command_op_should_extend_graphics_gpu_frame", 1)[1].split(
+            "static bool command_op_is_executor_compute_op", 1
+        )[0]
+        self.assertIn("command_op_is_graphics_interleavable_transfer_op(type)", gpu_frame_extent_body)
+        self.assertIn("first_draw != UINT32_MAX && op_index > first_draw && op_index < last_draw", gpu_frame_extent_body)
+        self.assertIn("return command_op_is_graphics_frame_op(type);", gpu_frame_extent_body)
         submit_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit", 1)[1].split(
             "VKAPI_ATTR VkResult VKAPI_CALL vkWaitForFences", 1
         )[0]
