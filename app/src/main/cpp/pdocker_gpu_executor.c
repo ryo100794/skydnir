@@ -2871,9 +2871,21 @@ static int vulkan_image_mip_extent(
     return 1;
 }
 
+static VkImageLayout vulkan_replay_layout_for_executor(VkImageLayout transported_layout) {
+    /* Headless swapchain images are memfd-backed offscreen images in the executor.
+     * PRESENT_SRC_KHR is a container-side logical layout, not a valid final layout
+     * for the temporary Android-side image replay path. Keep ownership semantics in
+     * the ICD and replay the underlying image as GENERAL. */
+    if (transported_layout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
+        return VK_IMAGE_LAYOUT_GENERAL;
+    }
+    return transported_layout;
+}
+
 static VkImageLayout vulkan_image_create_initial_layout_for_transport(
         VkImageTiling tiling,
         VkImageLayout transported_layout) {
+    transported_layout = vulkan_replay_layout_for_executor(transported_layout);
     if (tiling == VK_IMAGE_TILING_LINEAR &&
         transported_layout == VK_IMAGE_LAYOUT_PREINITIALIZED) {
         return VK_IMAGE_LAYOUT_PREINITIALIZED;
@@ -3189,7 +3201,7 @@ static int materialize_vulkan_dispatch_images(
         dst->memory_object_index = (size_t)mem_index;
         dst->memory_offset = (VkDeviceSize)src->memory_offset;
         dst->memory_size = (VkDeviceSize)src->memory_size;
-        dst->current_layout = create_initial_layout;
+        dst->current_layout = vulkan_replay_layout_for_executor(create_initial_layout);
         dst->extent = (VkExtent3D){
             .width = src->extent_width,
             .height = src->extent_height,
@@ -23743,7 +23755,7 @@ static int materialize_vulkan_graphics_v620_image_layout_ranges(
         VulkanReplayImageLayoutRange *dst = &image->layout_ranges[image->layout_range_count++];
         memset(dst, 0, sizeof(*dst));
         dst->range = range;
-        dst->layout = (VkImageLayout)src->layout;
+        dst->layout = vulkan_replay_layout_for_executor((VkImageLayout)src->layout);
         dst->generation = src->layout_generation;
         image->has_layout_ranges = 1;
     }
@@ -23850,7 +23862,7 @@ static void vulkan_graphics_planning_set_image_layout(
         VulkanDispatchImageObject *image,
         VkImageLayout layout) {
     if (!image || image->has_layout_ranges) return;
-    image->current_layout = layout;
+    image->current_layout = vulkan_replay_layout_for_executor(layout);
 }
 
 static int materialize_vulkan_graphics_v6_attachments(
@@ -24011,9 +24023,9 @@ static int materialize_vulkan_graphics_v6_attachments(
             if (copy->direction == PDOCKER_GPU_GRAPHICS_V610_BUFFER_IMAGE_COPY_DIRECTION_BUFFER_TO_IMAGE) {
                 image->writeback_needed = 1;
                 vulkan_graphics_planning_set_image_layout(
-                    image, (VkImageLayout)copy->image_layout);
+                    image, vulkan_replay_layout_for_executor((VkImageLayout)copy->image_layout));
             } else if (copy->direction == PDOCKER_GPU_GRAPHICS_V610_BUFFER_IMAGE_COPY_DIRECTION_IMAGE_TO_BUFFER) {
-                image->descriptor_layout = (VkImageLayout)copy->image_layout;
+                image->descriptor_layout = vulkan_replay_layout_for_executor((VkImageLayout)copy->image_layout);
                 image->descriptor_layout_seen = 1;
                 vulkan_graphics_planning_set_image_layout(
                     image, (VkImageLayout)view->images[image->source_index].initial_layout);
@@ -24045,13 +24057,13 @@ static int materialize_vulkan_graphics_v6_attachments(
             int dst_rc = vulkan_graphics_merge_image_copy_range_for_aspect(dst_image, &dst_range, (VkImageAspectFlags)copy->dst_aspect_mask);
             if (src_rc != 0) return src_rc;
             if (dst_rc != 0) return dst_rc;
-            src_image->descriptor_layout = (VkImageLayout)copy->src_layout;
+            src_image->descriptor_layout = vulkan_replay_layout_for_executor((VkImageLayout)copy->src_layout);
             src_image->descriptor_layout_seen = 1;
             vulkan_graphics_planning_set_image_layout(
                 src_image, (VkImageLayout)view->images[src_image->source_index].initial_layout);
             dst_image->writeback_needed = 1;
             vulkan_graphics_planning_set_image_layout(
-                dst_image, (VkImageLayout)copy->dst_layout);
+                dst_image, vulkan_replay_layout_for_executor((VkImageLayout)copy->dst_layout));
         }
     }
     if (view->is_v614 && view->header_v614) {
@@ -24086,13 +24098,13 @@ static int materialize_vulkan_graphics_v6_attachments(
                 dst_image, &dst_range, VK_IMAGE_ASPECT_COLOR_BIT);
             if (src_rc != 0) return src_rc;
             if (dst_rc != 0) return dst_rc;
-            src_image->descriptor_layout = (VkImageLayout)resolve->src_layout;
+            src_image->descriptor_layout = vulkan_replay_layout_for_executor((VkImageLayout)resolve->src_layout);
             src_image->descriptor_layout_seen = 1;
             vulkan_graphics_planning_set_image_layout(
                 src_image, (VkImageLayout)view->images[src_image->source_index].initial_layout);
             dst_image->writeback_needed = 1;
             vulkan_graphics_planning_set_image_layout(
-                dst_image, (VkImageLayout)resolve->dst_layout);
+                dst_image, vulkan_replay_layout_for_executor((VkImageLayout)resolve->dst_layout));
         }
     }
     if (view->is_v615 && view->header_v615) {
@@ -24127,13 +24139,13 @@ static int materialize_vulkan_graphics_v6_attachments(
                 dst_image, &dst_range, VK_IMAGE_ASPECT_COLOR_BIT);
             if (src_rc != 0) return src_rc;
             if (dst_rc != 0) return dst_rc;
-            src_image->descriptor_layout = (VkImageLayout)blit->src_layout;
+            src_image->descriptor_layout = vulkan_replay_layout_for_executor((VkImageLayout)blit->src_layout);
             src_image->descriptor_layout_seen = 1;
             vulkan_graphics_planning_set_image_layout(
                 src_image, (VkImageLayout)view->images[src_image->source_index].initial_layout);
             dst_image->writeback_needed = 1;
             vulkan_graphics_planning_set_image_layout(
-                dst_image, (VkImageLayout)blit->dst_layout);
+                dst_image, vulkan_replay_layout_for_executor((VkImageLayout)blit->dst_layout));
         }
     }
     if (view->is_v612 && view->header_v612) {
@@ -24154,7 +24166,7 @@ static int materialize_vulkan_graphics_v6_attachments(
             if (range_rc != 0) return range_rc;
             image->writeback_needed = 1;
             vulkan_graphics_planning_set_image_layout(
-                image, (VkImageLayout)clear->image_layout);
+                image, vulkan_replay_layout_for_executor((VkImageLayout)clear->image_layout));
         }
     }
     if (view->is_v613 && view->header_v613) {
@@ -24179,7 +24191,7 @@ static int materialize_vulkan_graphics_v6_attachments(
             if (range_rc != 0) return range_rc;
             image->writeback_needed = 1;
             vulkan_graphics_planning_set_image_layout(
-                image, (VkImageLayout)clear->image_layout);
+                image, vulkan_replay_layout_for_executor((VkImageLayout)clear->image_layout));
         }
     }
     return 0;
@@ -25668,6 +25680,7 @@ static int vulkan_replay_image_set_layout_for_range(
         const VkImageSubresourceRange *range,
         VkImageLayout layout) {
     if (!image || !range) return -EINVAL;
+    layout = vulkan_replay_layout_for_executor(layout);
     if (!image->layout_ranges_active) {
         image->current_layout = layout;
         return 0;
@@ -26692,12 +26705,12 @@ static int record_vulkan_graphics_v6_command_buffer(
                 };
                 vkCmdClearColorImage(command_buffer,
                                      image->image,
-                                     (VkImageLayout)clear->image_layout,
+                                     vulkan_replay_layout_for_executor((VkImageLayout)clear->image_layout),
                                      &color,
                                      1,
                                      &range);
                 rc = vulkan_replay_image_set_layout_for_range(
-                    image, &range, (VkImageLayout)clear->image_layout);
+                    image, &range, vulkan_replay_layout_for_executor((VkImageLayout)clear->image_layout));
                 if (rc != 0) goto cleanup;
                 break;
             }
@@ -26728,12 +26741,12 @@ static int record_vulkan_graphics_v6_command_buffer(
                 };
                 vkCmdClearDepthStencilImage(command_buffer,
                                             image->image,
-                                            (VkImageLayout)clear->image_layout,
+                                            vulkan_replay_layout_for_executor((VkImageLayout)clear->image_layout),
                                             &value,
                                             1,
                                             &range);
                 rc = vulkan_replay_image_set_layout_for_range(
-                    image, &range, (VkImageLayout)clear->image_layout);
+                    image, &range, vulkan_replay_layout_for_executor((VkImageLayout)clear->image_layout));
                 if (rc != 0) goto cleanup;
                 break;
             }
@@ -26894,7 +26907,7 @@ static int record_vulkan_graphics_v6_command_buffer(
                     vkCmdCopyBufferToImage(command_buffer,
                                            replay_buffer->buffer.buffer,
                                            image->image,
-                                           (VkImageLayout)copy->image_layout,
+                                           vulkan_replay_layout_for_executor((VkImageLayout)copy->image_layout),
                                            1,
                                            &region);
                 } else {
@@ -26902,13 +26915,13 @@ static int record_vulkan_graphics_v6_command_buffer(
                     if (rc != 0) goto cleanup;
                     vkCmdCopyImageToBuffer(command_buffer,
                                            image->image,
-                                           (VkImageLayout)copy->image_layout,
+                                           vulkan_replay_layout_for_executor((VkImageLayout)copy->image_layout),
                                            replay_buffer->buffer.buffer,
                                            1,
                                            &region);
                 }
                 rc = vulkan_replay_image_set_layout_for_range(
-                    image, &image_range, (VkImageLayout)copy->image_layout);
+                    image, &image_range, vulkan_replay_layout_for_executor((VkImageLayout)copy->image_layout));
                 if (rc != 0) goto cleanup;
                 break;
             }
@@ -26941,9 +26954,9 @@ static int record_vulkan_graphics_v6_command_buffer(
                 };
                 vkCmdCopyImage(command_buffer,
                                src_image->image,
-                               (VkImageLayout)copy->src_layout,
+                               vulkan_replay_layout_for_executor((VkImageLayout)copy->src_layout),
                                dst_image->image,
-                               (VkImageLayout)copy->dst_layout,
+                               vulkan_replay_layout_for_executor((VkImageLayout)copy->dst_layout),
                                1,
                                &region);
                 VkImageSubresourceRange src_range = {
@@ -26961,10 +26974,10 @@ static int record_vulkan_graphics_v6_command_buffer(
                     .layerCount = copy->layer_count,
                 };
                 rc = vulkan_replay_image_set_layout_for_range(
-                    src_image, &src_range, (VkImageLayout)copy->src_layout);
+                    src_image, &src_range, vulkan_replay_layout_for_executor((VkImageLayout)copy->src_layout));
                 if (rc != 0) goto cleanup;
                 rc = vulkan_replay_image_set_layout_for_range(
-                    dst_image, &dst_range, (VkImageLayout)copy->dst_layout);
+                    dst_image, &dst_range, vulkan_replay_layout_for_executor((VkImageLayout)copy->dst_layout));
                 if (rc != 0) goto cleanup;
                 break;
             }
@@ -27001,9 +27014,9 @@ static int record_vulkan_graphics_v6_command_buffer(
                 };
                 vkCmdResolveImage(command_buffer,
                                   src_image->image,
-                                  (VkImageLayout)resolve->src_layout,
+                                  vulkan_replay_layout_for_executor((VkImageLayout)resolve->src_layout),
                                   dst_image->image,
-                                  (VkImageLayout)resolve->dst_layout,
+                                  vulkan_replay_layout_for_executor((VkImageLayout)resolve->dst_layout),
                                   1,
                                   &region);
                 VkImageSubresourceRange src_range = {
@@ -27021,10 +27034,10 @@ static int record_vulkan_graphics_v6_command_buffer(
                     .layerCount = resolve->layer_count,
                 };
                 rc = vulkan_replay_image_set_layout_for_range(
-                    src_image, &src_range, (VkImageLayout)resolve->src_layout);
+                    src_image, &src_range, vulkan_replay_layout_for_executor((VkImageLayout)resolve->src_layout));
                 if (rc != 0) goto cleanup;
                 rc = vulkan_replay_image_set_layout_for_range(
-                    dst_image, &dst_range, (VkImageLayout)resolve->dst_layout);
+                    dst_image, &dst_range, vulkan_replay_layout_for_executor((VkImageLayout)resolve->dst_layout));
                 if (rc != 0) goto cleanup;
                 break;
             }
@@ -27066,9 +27079,9 @@ static int record_vulkan_graphics_v6_command_buffer(
                 };
                 vkCmdBlitImage(command_buffer,
                                src_image->image,
-                               (VkImageLayout)blit->src_layout,
+                               vulkan_replay_layout_for_executor((VkImageLayout)blit->src_layout),
                                dst_image->image,
-                               (VkImageLayout)blit->dst_layout,
+                               vulkan_replay_layout_for_executor((VkImageLayout)blit->dst_layout),
                                1,
                                &region,
                                (VkFilter)blit->filter);
@@ -27087,10 +27100,10 @@ static int record_vulkan_graphics_v6_command_buffer(
                     .layerCount = blit->layer_count,
                 };
                 rc = vulkan_replay_image_set_layout_for_range(
-                    src_image, &src_range, (VkImageLayout)blit->src_layout);
+                    src_image, &src_range, vulkan_replay_layout_for_executor((VkImageLayout)blit->src_layout));
                 if (rc != 0) goto cleanup;
                 rc = vulkan_replay_image_set_layout_for_range(
-                    dst_image, &dst_range, (VkImageLayout)blit->dst_layout);
+                    dst_image, &dst_range, vulkan_replay_layout_for_executor((VkImageLayout)blit->dst_layout));
                 if (rc != 0) goto cleanup;
                 break;
             }
@@ -27247,8 +27260,8 @@ static int record_vulkan_graphics_v6_command_buffer(
                         .srcAccessMask = (VkAccessFlags2)barrier->src_access_mask,
                         .dstStageMask = (VkPipelineStageFlags2)barrier->dst_stage_mask,
                         .dstAccessMask = (VkAccessFlags2)barrier->dst_access_mask,
-                        .oldLayout = (VkImageLayout)barrier->old_layout,
-                        .newLayout = (VkImageLayout)barrier->new_layout,
+                        .oldLayout = vulkan_replay_layout_for_executor((VkImageLayout)barrier->old_layout),
+                        .newLayout = vulkan_replay_layout_for_executor((VkImageLayout)barrier->new_layout),
                         .srcQueueFamilyIndex = vulkan_graphics_replay_queue_family_index(
                             barrier->src_queue_family_index, barrier->dst_queue_family_index),
                         .dstQueueFamilyIndex = vulkan_graphics_replay_queue_family_index(

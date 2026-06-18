@@ -1200,6 +1200,30 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(marker, present_body)
         self.assertRegex(present_body, r"(pResults|swapchainCount)")
 
+    def test_vulkan_headless_present_layout_is_not_replayed_raw_to_executor(self):
+        executor = GPU_EXECUTOR.read_text()
+        helper_body = c_function_body(executor, "vulkan_replay_layout_for_executor")
+        self.assertIn("VK_IMAGE_LAYOUT_PRESENT_SRC_KHR", helper_body)
+        self.assertIn("VK_IMAGE_LAYOUT_GENERAL", helper_body)
+
+        materialize_ranges_body = c_function_body(executor, "materialize_vulkan_graphics_v620_image_layout_ranges")
+        self.assertIn("vulkan_replay_layout_for_executor((VkImageLayout)src->layout)", materialize_ranges_body)
+
+        planning_body = c_function_body(executor, "vulkan_graphics_planning_set_image_layout")
+        self.assertIn("vulkan_replay_layout_for_executor(layout)", planning_body)
+
+        set_layout_body = c_function_body(executor, "vulkan_replay_image_set_layout_for_range")
+        self.assertIn("layout = vulkan_replay_layout_for_executor(layout);", set_layout_body)
+
+        recorder_body = c_function_body(executor, "record_vulkan_graphics_v6_command_buffer")
+        for marker in [
+            "vulkan_replay_layout_for_executor((VkImageLayout)barrier->old_layout)",
+            "vulkan_replay_layout_for_executor((VkImageLayout)barrier->new_layout)",
+            "vulkan_replay_layout_for_executor((VkImageLayout)copy->image_layout)",
+            "vulkan_replay_layout_for_executor((VkImageLayout)clear->image_layout)",
+        ]:
+            self.assertIn(marker, recorder_body)
+
     def test_vulkan_render_pass_captures_subpass_attachment_refs(self):
         icd = VULKAN_ICD.read_text()
         for marker in [
@@ -3372,7 +3396,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("vulkan_format_has_stencil_aspect((VkFormat)src->format)", msaa_helper_body)
         self.assertIn("create_initial_layout =", materialize_body)
         self.assertIn(".initialLayout = create_initial_layout", materialize_body)
-        self.assertIn("dst->current_layout = create_initial_layout;", materialize_body)
+        self.assertIn("dst->current_layout = vulkan_replay_layout_for_executor(create_initial_layout);", materialize_body)
         self.assertNotIn("src->initial_layout != VK_IMAGE_LAYOUT_UNDEFINED", materialize_body)
         self.assertNotIn("src->initial_layout != VK_IMAGE_LAYOUT_PREINITIALIZED", materialize_body)
         self.assertIn("checked_u64_add3(memory->external_offset", executor)
@@ -5293,7 +5317,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("vulkan_image_create_initial_layout_for_transport", executor)
         materialize = executor.split("static int materialize_vulkan_dispatch_images", 1)[1].split("static int run_vulkan_dispatch_fd", 1)[0]
         self.assertIn("create_initial_layout =", materialize)
-        self.assertIn("dst->current_layout = create_initial_layout;", materialize)
+        self.assertIn("dst->current_layout = vulkan_replay_layout_for_executor(create_initial_layout);", materialize)
         self.assertIn(".initialLayout = create_initial_layout", materialize)
         self.assertNotIn("src->initial_layout != VK_IMAGE_LAYOUT_UNDEFINED", materialize)
         self.assertNotIn("src->initial_layout == VK_IMAGE_LAYOUT_PREINITIALIZED", materialize)
