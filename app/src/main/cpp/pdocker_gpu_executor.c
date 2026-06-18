@@ -19941,7 +19941,13 @@ static int vulkan_graphics_v614_resolve_runtime_eligible(
         entry->src_aspect_mask != VK_IMAGE_ASPECT_COLOR_BIT ||
         entry->dst_aspect_mask != VK_IMAGE_ASPECT_COLOR_BIT ||
         entry->layer_count == 0 ||
-        entry->extent_width == 0 || entry->extent_height == 0 || entry->extent_depth == 0) {
+        entry->extent_width == 0 || entry->extent_height == 0 || entry->extent_depth == 0 ||
+        src_image->tiling != VK_IMAGE_TILING_OPTIMAL ||
+        dst_image->tiling != VK_IMAGE_TILING_OPTIMAL ||
+        (entry->src_layout != VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL &&
+         entry->src_layout != VK_IMAGE_LAYOUT_GENERAL) ||
+        (entry->dst_layout != VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL &&
+         entry->dst_layout != VK_IMAGE_LAYOUT_GENERAL)) {
         return 0;
     }
     VkFormat format = (VkFormat)src_image->format;
@@ -19951,9 +19957,11 @@ static int vulkan_graphics_v614_resolve_runtime_eligible(
         return 0;
     }
     const VkFormatFeatureFlags features = vulkan_graphics_runtime_format_features(format);
-    if ((features & (VK_FORMAT_FEATURE_TRANSFER_SRC_BIT |
+    if ((features & (VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT |
+                     VK_FORMAT_FEATURE_TRANSFER_SRC_BIT |
                      VK_FORMAT_FEATURE_TRANSFER_DST_BIT)) !=
-        (VK_FORMAT_FEATURE_TRANSFER_SRC_BIT |
+        (VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT |
+         VK_FORMAT_FEATURE_TRANSFER_SRC_BIT |
          VK_FORMAT_FEATURE_TRANSFER_DST_BIT)) {
         return 0;
     }
@@ -20591,6 +20599,11 @@ static int validate_vulkan_graphics_v6_frame_content(
                  entry->command_buffer_device_mask != 0)) {
                 return -EPROTO;
             }
+            if (entry->submit_kind == PDOCKER_GPU_GRAPHICS_V621_SUBMIT_KIND_SUBMIT2 &&
+                (entry->submit_flags != 0 ||
+                 entry->command_buffer_device_mask != 0)) {
+                return -EOPNOTSUPP;
+            }
         }
         for (uint32_t m = 0; m < header_v621->v621.submit_sync_info_count; ++m) {
             const PdockerGpuVulkanGraphicsV621SubmitSyncInfoEntry *entry = &view.submit_sync_infos[m];
@@ -20598,6 +20611,7 @@ static int validate_vulkan_graphics_v6_frame_content(
                 entry->reserved0 != 0 || entry->reserved1 != 0) {
                 return -EPROTO;
             }
+            if (entry->device_index != 0) return -EOPNOTSUPP;
         }
     }
     if (is_v622) {

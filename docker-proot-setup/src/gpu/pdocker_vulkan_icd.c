@@ -17229,6 +17229,11 @@ static VkResult validate_submit2_wait_semaphores(
                                       VK_ERROR_FEATURE_NOT_PRESENT);
             return VK_ERROR_FEATURE_NOT_PRESENT;
         }
+        if (info->deviceIndex != 0) {
+            trace_icd_runtime_failure("submit2-wait-device-index-unsupported",
+                                      VK_ERROR_FEATURE_NOT_PRESENT);
+            return VK_ERROR_FEATURE_NOT_PRESENT;
+        }
         PdockerVkSemaphore *sem = info ? (PdockerVkSemaphore *)info->semaphore : NULL;
         uint64_t required_value = sem && sem->timeline ? info->value : 0;
         if (!semaphore_wait_satisfied(sem, required_value)) {
@@ -17253,6 +17258,11 @@ static VkResult validate_submit2_signal_semaphores(const VkSubmitInfo2 *submit) 
                                       VK_ERROR_FEATURE_NOT_PRESENT);
             return VK_ERROR_FEATURE_NOT_PRESENT;
         }
+        if (info->deviceIndex != 0) {
+            trace_icd_runtime_failure("submit2-signal-device-index-unsupported",
+                                      VK_ERROR_FEATURE_NOT_PRESENT);
+            return VK_ERROR_FEATURE_NOT_PRESENT;
+        }
     }
     return VK_SUCCESS;
 }
@@ -17264,6 +17274,11 @@ static VkResult validate_submit2_command_buffers(const VkSubmitInfo2 *submit) {
         if (!info) return VK_ERROR_INITIALIZATION_FAILED;
         if (info->pNext) {
             trace_icd_runtime_failure("submit2-command-pnext-unsupported",
+                                      VK_ERROR_FEATURE_NOT_PRESENT);
+            return VK_ERROR_FEATURE_NOT_PRESENT;
+        }
+        if (info->deviceMask != 0) {
+            trace_icd_runtime_failure("submit2-command-device-mask-unsupported",
                                       VK_ERROR_FEATURE_NOT_PRESENT);
             return VK_ERROR_FEATURE_NOT_PRESENT;
         }

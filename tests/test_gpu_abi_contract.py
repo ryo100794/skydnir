@@ -4713,7 +4713,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "info->deviceIndex != 0",
             "info->deviceMask != 0",
         ]:
-            self.assertNotIn(marker, icd)
+            self.assertIn(marker, icd)
         self.assertIn("uint64_t required_value = sem && sem->timeline ? info->value : 0;", icd)
         self.assertIn("src->pSignalSemaphoreInfos", queue_submit2_body)
         self.assertIn("collect_submit2_submit_sync_entries(src, submit2_fence", queue_submit2_body)
@@ -5091,6 +5091,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("resolve_image->samples != VK_SAMPLE_COUNT_1_BIT", graphics_helper)
         self.assertIn("vulkan_graphics_v614_resolve_runtime_eligible(", graphics_helper)
         self.assertIn("allowed_msaa_images[resolve->src_image_index] = 1;", graphics_helper)
+        self.assertLess(
+            graphics_helper.index("attachment->resolve_image_view_index == PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE"),
+            graphics_helper.index("allowed_msaa_images[resolve->src_image_index] = 1;"),
+        )
         self.assertIn("src_image->format != resolve_image->format", graphics_helper)
         self.assertIn("src_view->format != resolve_view->format", graphics_helper)
         self.assertIn("src_view->aspect_mask != VK_IMAGE_ASPECT_COLOR_BIT", graphics_helper)
@@ -6240,6 +6244,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_GPU_GRAPHICS_V621_SUBMIT_KIND_SUBMIT2",
             "submit_info->command_buffer_device_mask",
             ".flags = submit_info ? submit_info->submit_flags : 0",
+            "entry->submit_kind == PDOCKER_GPU_GRAPHICS_V621_SUBMIT_KIND_SUBMIT2",
+            "entry->device_index != 0",
         ]:
             self.assertIn(marker, executor)
 
@@ -10206,6 +10212,11 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("(void)src_image", explicit_resolve_body)
         self.assertIn("src_image->samples == VK_SAMPLE_COUNT_1_BIT", explicit_resolve_body)
         self.assertIn("dst_image->samples != VK_SAMPLE_COUNT_1_BIT", explicit_resolve_body)
+        self.assertIn("src_image->tiling != VK_IMAGE_TILING_OPTIMAL", explicit_resolve_body)
+        self.assertIn("dst_image->tiling != VK_IMAGE_TILING_OPTIMAL", explicit_resolve_body)
+        self.assertIn("entry->src_layout != VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL", explicit_resolve_body)
+        self.assertIn("entry->dst_layout != VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL", explicit_resolve_body)
+        self.assertIn("VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT", explicit_resolve_body)
         self.assertIn("VK_FORMAT_FEATURE_TRANSFER_SRC_BIT", explicit_resolve_body)
         self.assertIn("VK_FORMAT_FEATURE_TRANSFER_DST_BIT", explicit_resolve_body)
         self.assertIn("vulkan_graphics_v610_image_subresource_range_valid", explicit_resolve_body)
