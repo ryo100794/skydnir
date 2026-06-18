@@ -3071,7 +3071,13 @@ static int vulkan_dispatch_msaa_image_allowed(
         vulkan_format_has_stencil_aspect((VkFormat)src->format)) {
         return 0;
     }
-    return src->usage == VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    const VkImageUsageFlags accepted_msaa_usage =
+        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+        VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+        VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    return (src->usage & ~accepted_msaa_usage) == 0 &&
+           (src->usage & (VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                          VK_IMAGE_USAGE_TRANSFER_SRC_BIT)) != 0;
 }
 
 static int validate_vulkan_dispatch_v5_image_samples_for_generic_dispatch(
@@ -19926,10 +19932,46 @@ static int vulkan_graphics_v614_resolve_runtime_eligible(
         const PdockerGpuVulkanDispatchV5ImageEntry *src_image,
         const PdockerGpuVulkanDispatchV5ImageEntry *dst_image,
         const PdockerGpuVulkanGraphicsV614ResolveImageEntry *entry) {
-    (void)src_image;
-    (void)dst_image;
-    (void)entry;
-    return 0;
+    if (!src_image || !dst_image || !entry) return 0;
+    if (!(src_image->usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) ||
+        !(dst_image->usage & VK_IMAGE_USAGE_TRANSFER_DST_BIT) ||
+        src_image->format != dst_image->format ||
+        src_image->samples == VK_SAMPLE_COUNT_1_BIT ||
+        dst_image->samples != VK_SAMPLE_COUNT_1_BIT ||
+        entry->src_aspect_mask != VK_IMAGE_ASPECT_COLOR_BIT ||
+        entry->dst_aspect_mask != VK_IMAGE_ASPECT_COLOR_BIT ||
+        entry->layer_count == 0 ||
+        entry->extent_width == 0 || entry->extent_height == 0 || entry->extent_depth == 0) {
+        return 0;
+    }
+    VkFormat format = (VkFormat)src_image->format;
+    if (vulkan_format_has_depth_aspect(format) ||
+        vulkan_format_has_stencil_aspect(format) ||
+        vulkan_format_bytes_per_pixel_for_aspect(format, VK_IMAGE_ASPECT_COLOR_BIT) == 0) {
+        return 0;
+    }
+    const VkFormatFeatureFlags features = vulkan_graphics_runtime_format_features(format);
+    if ((features & (VK_FORMAT_FEATURE_TRANSFER_SRC_BIT |
+                     VK_FORMAT_FEATURE_TRANSFER_DST_BIT)) !=
+        (VK_FORMAT_FEATURE_TRANSFER_SRC_BIT |
+         VK_FORMAT_FEATURE_TRANSFER_DST_BIT)) {
+        return 0;
+    }
+    if (vulkan_graphics_v610_image_subresource_range_valid(
+            src_image, entry->src_aspect_mask, entry->src_mip_level,
+            entry->src_base_array_layer, entry->layer_count,
+            entry->src_offset_x, entry->src_offset_y, entry->src_offset_z,
+            entry->extent_width, entry->extent_height, entry->extent_depth) != 0) {
+        return 0;
+    }
+    if (vulkan_graphics_v610_image_subresource_range_valid(
+            dst_image, entry->dst_aspect_mask, entry->dst_mip_level,
+            entry->dst_base_array_layer, entry->layer_count,
+            entry->dst_offset_x, entry->dst_offset_y, entry->dst_offset_z,
+            entry->extent_width, entry->extent_height, entry->extent_depth) != 0) {
+        return 0;
+    }
+    return 1;
 }
 
 
@@ -23756,6 +23798,29 @@ static int validate_vulkan_graphics_v6_msaa_images_are_v64_color_resolves(
                 return -EOPNOTSUPP;
             }
             allowed_msaa_images[src_view->image_index] = 1;
+        }
+    }
+    if (view->is_v614 && view->header_v614) {
+        if (view->header_v614->v614.resolve_image_count > 0 && !view->resolve_images) return -EPROTO;
+        for (uint32_t r = 0; r < view->header_v614->v614.resolve_image_count; ++r) {
+            const PdockerGpuVulkanGraphicsV614ResolveImageEntry *resolve =
+                &view->resolve_images[r];
+            if (resolve->src_image_index >= header->image_count ||
+                resolve->dst_image_index >= header->image_count ||
+                resolve->command_index >= header->command_count) {
+                return -EPROTO;
+            }
+            const PdockerGpuVulkanDispatchV5ImageEntry *src_image =
+                &view->images[resolve->src_image_index];
+            const PdockerGpuVulkanDispatchV5ImageEntry *dst_image =
+                &view->images[resolve->dst_image_index];
+            if (view->commands[resolve->command_index].command_type !=
+                    PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESOLVE_IMAGE ||
+                !vulkan_graphics_v614_resolve_runtime_eligible(
+                    src_image, dst_image, resolve)) {
+                return -EOPNOTSUPP;
+            }
+            allowed_msaa_images[resolve->src_image_index] = 1;
         }
     }
 

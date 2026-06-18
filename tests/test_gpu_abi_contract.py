@@ -3114,7 +3114,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("} else if (image->direct_host_upload_needed) {", materialize_body)
         self.assertIn("dst->upload_pending = dst->requires_staging;", materialize_body)
         self.assertIn("src->samples == VK_SAMPLE_COUNT_1_BIT", msaa_helper_body)
-        self.assertIn("src->usage == VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT", msaa_helper_body)
+        self.assertIn("const VkImageUsageFlags accepted_msaa_usage", msaa_helper_body)
+        self.assertIn("src->usage & ~accepted_msaa_usage", msaa_helper_body)
+        self.assertIn("VK_IMAGE_USAGE_TRANSFER_SRC_BIT", msaa_helper_body)
+        self.assertIn("VK_IMAGE_USAGE_TRANSFER_DST_BIT", msaa_helper_body)
         self.assertIn("src->mip_levels != 1", msaa_helper_body)
         self.assertIn("vulkan_format_has_depth_aspect((VkFormat)src->format)", msaa_helper_body)
         self.assertIn("vulkan_format_has_stencil_aspect((VkFormat)src->format)", msaa_helper_body)
@@ -5086,6 +5089,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("find_vulkan_graphics_v64_resolve_attachment(view, attachment_index)", graphics_helper)
         self.assertIn("resolve_meta->resolve_mode == VK_RESOLVE_MODE_NONE", graphics_helper)
         self.assertIn("resolve_image->samples != VK_SAMPLE_COUNT_1_BIT", graphics_helper)
+        self.assertIn("vulkan_graphics_v614_resolve_runtime_eligible(", graphics_helper)
+        self.assertIn("allowed_msaa_images[resolve->src_image_index] = 1;", graphics_helper)
         self.assertIn("src_image->format != resolve_image->format", graphics_helper)
         self.assertIn("src_view->format != resolve_view->format", graphics_helper)
         self.assertIn("src_view->aspect_mask != VK_IMAGE_ASPECT_COLOR_BIT", graphics_helper)
@@ -10198,7 +10203,13 @@ class GpuAbiContractTest(unittest.TestCase):
         explicit_resolve_body = source.split("static int vulkan_graphics_v614_resolve_runtime_eligible", 1)[1].split(
             "static int vulkan_graphics_v615_blit_runtime_eligible", 1
         )[0]
-        self.assertIn("return 0;", explicit_resolve_body)
+        self.assertNotIn("(void)src_image", explicit_resolve_body)
+        self.assertIn("src_image->samples == VK_SAMPLE_COUNT_1_BIT", explicit_resolve_body)
+        self.assertIn("dst_image->samples != VK_SAMPLE_COUNT_1_BIT", explicit_resolve_body)
+        self.assertIn("VK_FORMAT_FEATURE_TRANSFER_SRC_BIT", explicit_resolve_body)
+        self.assertIn("VK_FORMAT_FEATURE_TRANSFER_DST_BIT", explicit_resolve_body)
+        self.assertIn("vulkan_graphics_v610_image_subresource_range_valid", explicit_resolve_body)
+        self.assertIn("return 1;", explicit_resolve_body)
         enabled_body = source.split("static void write_android_vulkan_enabled_features_report", 1)[1].split(
             "static void log_vulkan_feature_gap", 1
         )[0]
