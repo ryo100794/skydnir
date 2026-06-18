@@ -13605,9 +13605,14 @@ static bool pdocker_vk_headless_present_mode_supported(VkPresentModeKHR present_
 }
 
 static bool pdocker_vk_headless_swapchain_usage_supported(VkImageUsageFlags usage) {
+    /* Headless swapchain images are regular memfd-backed bridge images.  Sampling
+     * is supported when the image is transitioned to a shader-readable layout and
+     * transported through the existing image-view/sampler descriptor path.  Do not
+     * widen this to storage/input/depth usage without matching executor coverage. */
     const VkImageUsageFlags supported = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
                                        VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                                       VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+                                       VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                                       VK_IMAGE_USAGE_SAMPLED_BIT;
     return usage != 0 && (usage & ~supported) == 0;
 }
 
@@ -13693,7 +13698,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
     pSurfaceCapabilities->supportedCompositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
     pSurfaceCapabilities->supportedUsageFlags = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
                                                 VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                                                VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+                                                VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                                                VK_IMAGE_USAGE_SAMPLED_BIT;
     return VK_SUCCESS;
 }
 

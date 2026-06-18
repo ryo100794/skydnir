@@ -1135,7 +1135,11 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(marker, create_body)
         self.assertRegex(create_body, r"(PdockerVkSwapchain|swapchain->)")
         self.assertRegex(create_body, r"(calloc|pdocker_alloc_handle|malloc)")
-        self.assertNotIn("VK_IMAGE_USAGE_SAMPLED_BIT", c_function_body(icd, "pdocker_vk_headless_swapchain_usage_supported"))
+        usage_body = c_function_body(icd, "pdocker_vk_headless_swapchain_usage_supported")
+        self.assertIn("VK_IMAGE_USAGE_SAMPLED_BIT", usage_body)
+        self.assertNotIn("VK_IMAGE_USAGE_STORAGE_BIT", usage_body)
+        self.assertNotIn("VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT", usage_body)
+        self.assertIn("VK_IMAGE_USAGE_SAMPLED_BIT", c_function_body(icd, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR"))
         self.assertIn("bool acquired[PDOCKER_VK_MAX_SWAPCHAIN_IMAGES];", icd)
         self.assertIn("bool swapchain_owned;", icd)
 
