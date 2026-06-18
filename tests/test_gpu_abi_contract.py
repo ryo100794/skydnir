@@ -215,6 +215,26 @@ def vulkan_dispatch_option_envs(path):
     }
 
 
+def c_function_body(source, name):
+    signature = re.search(
+        rf"(?m)^(?:VKAPI_ATTR\s+)?[A-Za-z_][A-Za-z0-9_\s\*]*?"
+        rf"(?:VKAPI_CALL\s+)?{re.escape(name)}\s*\([^;]*?\)\s*\{{",
+        source,
+        re.S,
+    )
+    assert signature is not None, name
+    start = signature.end() - 1
+    depth = 0
+    for index in range(start, len(source)):
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return source[start + 1:index]
+    raise AssertionError(f"unterminated function body: {name}")
+
+
 class GpuAbiContractTest(unittest.TestCase):
     def test_container_and_apk_gpu_abi_headers_stay_in_sync(self):
         self.assertEqual(CONTAINER_HEADER.read_text(), APP_HEADER.read_text())
@@ -644,6 +664,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "vkCreateFramebuffer",
             "vkDestroyFramebuffer",
             "vkGetRenderAreaGranularity",
+            "vkCreateHeadlessSurfaceEXT",
             "vkCmdBeginRendering",
             "vkCmdEndRendering",
             "vkCmdBeginRenderPass",
@@ -945,11 +966,239 @@ class GpuAbiContractTest(unittest.TestCase):
             "graphics-command-unimplemented",
             "VK_ERROR_EXTENSION_NOT_PRESENT",
             "pProperties->apiVersion > VK_API_VERSION_1_2",
-            "surface-unimplemented",
-            "swapchain-unimplemented",
         ]:
             self.assertIn(marker, icd)
-        self.assertNotIn("ADD_DEVICE_EXTENSION(VK_KHR_SWAPCHAIN_EXTENSION_NAME", icd)
+        self.assertIn("VK_KHR_SWAPCHAIN_EXTENSION_NAME", icd)
+
+    def test_vulkan_wsi_headless_and_swapchain_extensions_are_advertised(self):
+        icd = VULKAN_ICD.read_text()
+
+        instance_extension_body = c_function_body(icd, "vkEnumerateInstanceExtensionProperties")
+        for marker in [
+            "VK_KHR_SURFACE_EXTENSION_NAME",
+            "VK_KHR_SURFACE_SPEC_VERSION",
+            "VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME",
+            "VK_EXT_HEADLESS_SURFACE_SPEC_VERSION",
+            "copy_extension_properties",
+            "available_count",
+        ]:
+            self.assertIn(marker, instance_extension_body)
+
+        create_instance_body = c_function_body(icd, "vkCreateInstance")
+        instance_validation_scope = create_instance_body
+        if "instance_extension_advertised_name" in icd:
+            instance_validation_scope += c_function_body(icd, "instance_extension_advertised_name")
+        if "validate_instance_extensions" in icd:
+            instance_validation_scope += c_function_body(icd, "validate_instance_extensions")
+        for marker in [
+            "VK_KHR_SURFACE_EXTENSION_NAME",
+            "VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME",
+        ]:
+            self.assertIn(marker, instance_validation_scope)
+        self.assertIn("VK_ERROR_EXTENSION_NOT_PRESENT", create_instance_body + instance_validation_scope)
+        self.assertRegex(
+            create_instance_body,
+            r"(validate_instance_extensions|instance_extension_advertised_name|VK_KHR_SURFACE_EXTENSION_NAME)",
+        )
+
+        device_extension_body = c_function_body(icd, "vkEnumerateDeviceExtensionProperties")
+        for marker in [
+            "VK_KHR_SWAPCHAIN_EXTENSION_NAME",
+            "VK_KHR_SWAPCHAIN_SPEC_VERSION",
+            "ADD_DEVICE_EXTENSION",
+        ]:
+            self.assertIn(marker, device_extension_body)
+
+        device_validation_body = c_function_body(icd, "device_extension_advertised_name")
+        self.assertIn("VK_KHR_SWAPCHAIN_EXTENSION_NAME", device_validation_body)
+        self.assertRegex(
+            device_validation_body,
+            r"VK_KHR_SWAPCHAIN_EXTENSION_NAME[\s\S]{0,240}return\s+(?:true|VK_TRUE|advertised_[A-Za-z0-9_]+\(\))",
+        )
+        self.assertIn(
+            "validate_device_extensions(pCreateInfo)",
+            c_function_body(icd, "vkCreateDevice"),
+        )
+
+    def test_vulkan_wsi_headless_and_swapchain_procaddr_is_not_hidden(self):
+        icd = VULKAN_ICD.read_text()
+        proc_gate_body = c_function_body(icd, "proc_address_hidden_by_advertisement")
+        proc_body = c_function_body(icd, "proc_address")
+        self.assertIn("proc_address_hidden_by_advertisement(pName)", proc_body)
+
+        wsi_proc_names = [
+            "vkCreateHeadlessSurfaceEXT",
+            "vkDestroySurfaceKHR",
+            "vkGetPhysicalDeviceSurfaceSupportKHR",
+            "vkGetPhysicalDeviceSurfaceCapabilitiesKHR",
+            "vkGetPhysicalDeviceSurfaceFormatsKHR",
+            "vkGetPhysicalDeviceSurfacePresentModesKHR",
+            "vkCreateSwapchainKHR",
+            "vkDestroySwapchainKHR",
+            "vkGetSwapchainImagesKHR",
+            "vkAcquireNextImageKHR",
+            "vkAcquireNextImage2KHR",
+            "vkQueuePresentKHR",
+        ]
+        for name in wsi_proc_names:
+            self.assertRegex(icd, rf"VKAPI_ATTR\s+[\w\s\*]+VKAPI_CALL\s+{name}\s*\(")
+            self.assertIn(f"MAP_PROC({name});", proc_body)
+            self.assertNotIn(f'strcmp(pName, "{name}") == 0', proc_gate_body)
+
+    def test_vulkan_headless_surface_functions_fail_closed_and_have_success_paths(self):
+        icd = VULKAN_ICD.read_text()
+        self.assertNotIn('trace_icd_runtime_failure("surface-unimplemented"', icd)
+
+        create_body = c_function_body(icd, "vkCreateHeadlessSurfaceEXT")
+        for marker in [
+            "!pCreateInfo",
+            "!pSurface",
+            "VK_ERROR_INITIALIZATION_FAILED",
+            "VK_ERROR_OUT_OF_HOST_MEMORY",
+            "*pSurface",
+            "VK_SUCCESS",
+        ]:
+            self.assertIn(marker, create_body)
+        self.assertRegex(create_body, r"(pdocker_alloc_handle|calloc|malloc)")
+
+        destroy_body = c_function_body(icd, "vkDestroySurfaceKHR")
+        self.assertRegex(destroy_body, r"(free|pdocker_free)")
+
+        support_body = c_function_body(icd, "vkGetPhysicalDeviceSurfaceSupportKHR")
+        self.assertIn("!pSupported", support_body)
+        self.assertIn("VK_ERROR_INITIALIZATION_FAILED", support_body)
+        self.assertIn("VK_TRUE", support_body)
+        self.assertIn("VK_SUCCESS", support_body)
+
+        capabilities_body = c_function_body(icd, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR")
+        for marker in [
+            "!pSurfaceCapabilities",
+            "VK_ERROR_INITIALIZATION_FAILED",
+            "minImageCount",
+            "maxImageCount",
+            "currentExtent",
+            "supportedUsageFlags",
+            "VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT",
+            "VK_SUCCESS",
+        ]:
+            self.assertIn(marker, capabilities_body)
+
+        formats_body = c_function_body(icd, "vkGetPhysicalDeviceSurfaceFormatsKHR")
+        for marker in [
+            "!pSurfaceFormatCount",
+            "VK_ERROR_INITIALIZATION_FAILED",
+            "pSurfaceFormats",
+            "VK_FORMAT_",
+            "VK_COLOR_SPACE_SRGB_NONLINEAR_KHR",
+            "VK_SUCCESS",
+        ]:
+            self.assertIn(marker, formats_body)
+        self.assertRegex(formats_body, r"(VK_INCOMPLETE|copy_extension_properties|memcpy)")
+
+        present_modes_body = c_function_body(icd, "vkGetPhysicalDeviceSurfacePresentModesKHR")
+        for marker in [
+            "!pPresentModeCount",
+            "VK_ERROR_INITIALIZATION_FAILED",
+            "pPresentModes",
+            "VK_PRESENT_MODE_FIFO_KHR",
+            "VK_SUCCESS",
+        ]:
+            self.assertIn(marker, present_modes_body)
+        self.assertRegex(present_modes_body, r"(VK_INCOMPLETE|memcpy|pPresentModes\[)")
+
+    def test_vulkan_minimal_swapchain_functions_fail_closed_and_have_success_paths(self):
+        icd = VULKAN_ICD.read_text()
+        self.assertNotIn('trace_icd_runtime_failure("swapchain-unimplemented"', icd)
+
+        create_body = c_function_body(icd, "vkCreateSwapchainKHR")
+        for marker in [
+            "!pCreateInfo",
+            "!pSwapchain",
+            "VK_ERROR_INITIALIZATION_FAILED",
+            "pCreateInfo->surface",
+            "pCreateInfo->sType != VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR",
+            "pCreateInfo->pNext",
+            "swapchain-pnext-unsupported",
+            "pCreateInfo->flags != 0",
+            "swapchain-flags-unsupported",
+            "oldSwapchain",
+            "minImageCount",
+            "imageFormat",
+            "imageExtent",
+            "presentMode",
+            "pdocker_vk_headless_swapchain_usage_supported",
+            "VK_ERROR_OUT_OF_HOST_MEMORY",
+            "swapchain_owned = true",
+            "*pSwapchain",
+            "VK_SUCCESS",
+        ]:
+            self.assertIn(marker, create_body)
+        self.assertRegex(create_body, r"(PdockerVkSwapchain|swapchain->)")
+        self.assertRegex(create_body, r"(calloc|pdocker_alloc_handle|malloc)")
+        self.assertNotIn("VK_IMAGE_USAGE_SAMPLED_BIT", c_function_body(icd, "pdocker_vk_headless_swapchain_usage_supported"))
+        self.assertIn("bool acquired[PDOCKER_VK_MAX_SWAPCHAIN_IMAGES];", icd)
+        self.assertIn("bool swapchain_owned;", icd)
+
+        destroy_body = c_function_body(icd, "vkDestroySwapchainKHR")
+        self.assertRegex(destroy_body, r"(free|pdocker_free)")
+        self.assertIn("pdocker_vk_destroy_swapchain_images", destroy_body)
+        destroy_image_body = c_function_body(icd, "vkDestroyImage")
+        self.assertIn("swapchain_owned", destroy_image_body)
+        self.assertIn("swapchain-image-destroy-ignored", destroy_image_body)
+        bind_image_body = c_function_body(icd, "vkBindImageMemory")
+        self.assertIn("swapchain_owned", bind_image_body)
+        self.assertIn("swapchain-image-bind-rejected", bind_image_body)
+
+        get_images_body = c_function_body(icd, "vkGetSwapchainImagesKHR")
+        for marker in [
+            "!pSwapchainImageCount",
+            "VK_ERROR_INITIALIZATION_FAILED",
+            "pSwapchainImages",
+            "VK_INCOMPLETE",
+            "VK_SUCCESS",
+        ]:
+            self.assertIn(marker, get_images_body)
+        self.assertRegex(get_images_body, r"(memcpy|pSwapchainImages\[)")
+
+        acquire_body = c_function_body(icd, "vkAcquireNextImageKHR")
+        for marker in [
+            "!pImageIndex",
+            "VK_ERROR_INITIALIZATION_FAILED",
+            "*pImageIndex",
+            "sc->acquired[index] = true",
+            "VK_NOT_READY",
+            "VK_TIMEOUT",
+            "VK_SUCCESS",
+        ]:
+            self.assertIn(marker, acquire_body)
+        self.assertRegex(acquire_body, r"(swapchain|current_image|next_image|image_index)")
+
+        acquire2_body = c_function_body(icd, "vkAcquireNextImage2KHR")
+        for marker in [
+            "!pAcquireInfo",
+            "VK_ERROR_INITIALIZATION_FAILED",
+            "pAcquireInfo->swapchain",
+            "pImageIndex",
+        ]:
+            self.assertIn(marker, acquire2_body)
+        self.assertRegex(acquire2_body, r"(vkAcquireNextImageKHR|VK_SUCCESS|\*pImageIndex)")
+
+        present_body = c_function_body(icd, "vkQueuePresentKHR")
+        for marker in [
+            "!pPresentInfo",
+            "VK_ERROR_INITIALIZATION_FAILED",
+            "pPresentInfo->pNext",
+            "queue-present-pnext-unsupported",
+            "queue-present-wait-semaphore-unsignaled",
+            "semaphore_wait_satisfied",
+            "swapchainCount",
+            "pSwapchains",
+            "sc->acquired[image_index] = false",
+            "VK_NOT_READY",
+            "VK_SUCCESS",
+        ]:
+            self.assertIn(marker, present_body)
+        self.assertRegex(present_body, r"(pResults|swapchainCount)")
 
     def test_vulkan_render_pass_captures_subpass_attachment_refs(self):
         icd = VULKAN_ICD.read_text()
@@ -10411,7 +10660,6 @@ class GpuAbiContractTest(unittest.TestCase):
             "vkCmdSetViewportWithCountEXT",
             "vkCmdSetScissorWithCountEXT",
             "vkCmdSetCullModeEXT",
-            "vkCreateSwapchainKHR",
         ]:
             self.assertIn(marker, proc_gate_body)
         self.assertIn("advertised_draw_indirect_count() && advertised_draw_indexed_indirect_count()", proc_gate_body)

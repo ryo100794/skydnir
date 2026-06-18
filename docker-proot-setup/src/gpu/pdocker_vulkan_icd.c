@@ -61,6 +61,21 @@
 #define VK_KHR_DYNAMIC_RENDERING_SPEC_VERSION 1
 #endif
 
+#ifndef VK_KHR_SURFACE_EXTENSION_NAME
+#define VK_KHR_SURFACE_EXTENSION_NAME "VK_KHR_surface"
+#define VK_KHR_SURFACE_SPEC_VERSION 25
+#endif
+
+#ifndef VK_KHR_SWAPCHAIN_EXTENSION_NAME
+#define VK_KHR_SWAPCHAIN_EXTENSION_NAME "VK_KHR_swapchain"
+#define VK_KHR_SWAPCHAIN_SPEC_VERSION 70
+#endif
+
+#ifndef VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME
+#define VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME "VK_EXT_headless_surface"
+#define VK_EXT_HEADLESS_SURFACE_SPEC_VERSION 1
+#endif
+
 typedef struct {
     VK_LOADER_DATA loader;
 } PdockerVkInstance;
@@ -94,6 +109,8 @@ typedef struct PdockerVkEvent PdockerVkEvent;
 typedef struct PdockerVkQueryPool PdockerVkQueryPool;
 typedef struct PdockerVkRenderPass PdockerVkRenderPass;
 typedef struct PdockerVkFramebuffer PdockerVkFramebuffer;
+typedef struct PdockerVkSurface PdockerVkSurface;
+typedef struct PdockerVkSwapchain PdockerVkSwapchain;
 
 #define PDOCKER_VK_MAX_STORAGE_BUFFERS 16
 #define PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS PDOCKER_VK_MAX_STORAGE_BUFFERS
@@ -111,6 +128,15 @@ typedef struct PdockerVkFramebuffer PdockerVkFramebuffer;
 #define PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDINGS 16
 #define PDOCKER_VK_MAX_GRAPHICS_VERTEX_ATTRIBUTES 32
 #define PDOCKER_VK_MAX_GRAPHICS_DYNAMIC_STATES 64
+#define PDOCKER_VK_MAX_SWAPCHAIN_IMAGES 4u
+#define PDOCKER_VK_HEADLESS_SURFACE_MIN_WIDTH 1u
+#define PDOCKER_VK_HEADLESS_SURFACE_MIN_HEIGHT 1u
+#define PDOCKER_VK_HEADLESS_SURFACE_MAX_WIDTH 4096u
+#define PDOCKER_VK_HEADLESS_SURFACE_MAX_HEIGHT 4096u
+
+typedef enum {
+    PDOCKER_VK_SURFACE_HEADLESS = 1,
+} PdockerVkSurfaceKind;
 
 static uint32_t pdocker_vk_graphics_dynamic_state_bit_index(VkDynamicState state) {
     switch (state) {
@@ -244,6 +270,7 @@ struct PdockerVkImage {
     uint32_t memory_type_bits;
     PdockerVkMemory *memory;
     VkDeviceSize memory_offset;
+    bool swapchain_owned;
     uint64_t generation;
 };
 
@@ -253,6 +280,29 @@ struct PdockerVkImageView {
     VkFormat format;
     VkComponentMapping components;
     VkImageSubresourceRange subresource_range;
+    uint64_t generation;
+};
+
+struct PdockerVkSurface {
+    PdockerVkSurfaceKind kind;
+    VkExtent2D default_extent;
+    uint64_t generation;
+};
+
+struct PdockerVkSwapchain {
+    PdockerVkSurface *surface;
+    VkFormat image_format;
+    VkColorSpaceKHR image_color_space;
+    VkExtent2D image_extent;
+    VkImageUsageFlags image_usage;
+    VkPresentModeKHR present_mode;
+    VkCompositeAlphaFlagBitsKHR composite_alpha;
+    VkSurfaceTransformFlagBitsKHR pre_transform;
+    uint32_t image_count;
+    uint32_t next_image;
+    PdockerVkImage *images[PDOCKER_VK_MAX_SWAPCHAIN_IMAGES];
+    PdockerVkMemory *memories[PDOCKER_VK_MAX_SWAPCHAIN_IMAGES];
+    bool acquired[PDOCKER_VK_MAX_SWAPCHAIN_IMAGES];
     uint64_t generation;
 };
 
@@ -10720,13 +10770,30 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceExtensionProperties(
         uint32_t *pPropertyCount,
         VkExtensionProperties *pProperties) {
     (void)pLayerName;
+    VkExtensionProperties available[2];
+    uint32_t available_count = 0;
+#define ADD_INSTANCE_EXTENSION(name, version) do { \
+        if (available_count < (uint32_t)(sizeof(available) / sizeof(available[0]))) { \
+            memset(&available[available_count], 0, sizeof(available[available_count])); \
+            snprintf(available[available_count].extensionName, \
+                     sizeof(available[available_count].extensionName), "%s", (name)); \
+            available[available_count].specVersion = (version); \
+            available_count++; \
+        } \
+    } while (0)
+    ADD_INSTANCE_EXTENSION(VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_SURFACE_SPEC_VERSION);
+    ADD_INSTANCE_EXTENSION(VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME, VK_EXT_HEADLESS_SURFACE_SPEC_VERSION);
+#undef ADD_INSTANCE_EXTENSION
     if (!pPropertyCount) return VK_ERROR_INITIALIZATION_FAILED;
-    if (!pProperties) {
-        *pPropertyCount = 0;
-        return VK_SUCCESS;
-    }
-    *pPropertyCount = 0;
+    copy_extension_properties(available, available_count, pPropertyCount, pProperties);
     return VK_SUCCESS;
+}
+
+static bool instance_extension_advertised_name(const char *name) {
+    if (!name) return false;
+    if (strcmp(name, VK_KHR_SURFACE_EXTENSION_NAME) == 0) return true;
+    if (strcmp(name, VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME) == 0) return true;
+    return false;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceLayerProperties(
@@ -10752,13 +10819,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateInstance(
             const char *name = pCreateInfo->ppEnabledExtensionNames
                 ? pCreateInfo->ppEnabledExtensionNames[i]
                 : NULL;
-            if (name && name[0]) {
+            if (!instance_extension_advertised_name(name)) {
                 trace_icd_runtime_failure("instance-extension-not-present",
                                           VK_ERROR_EXTENSION_NOT_PRESENT);
                 if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
                     fprintf(stderr,
                             "pdocker-vulkan-icd: instance extension unsupported: %s\n",
-                            name);
+                            name ? name : "<null>");
                 }
                 return VK_ERROR_EXTENSION_NOT_PRESENT;
             }
@@ -11279,7 +11346,12 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyImage(
         const VkAllocationCallbacks *pAllocator) {
     (void)device;
     (void)pAllocator;
-    free((void *)image);
+    PdockerVkImage *img = (PdockerVkImage *)image;
+    if (img && img->swapchain_owned) {
+        trace_icd_runtime_failure("swapchain-image-destroy-ignored", VK_ERROR_INITIALIZATION_FAILED);
+        return;
+    }
+    free(img);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkGetImageMemoryRequirements(
@@ -11376,6 +11448,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkBindImageMemory(
     PdockerVkImage *img = (PdockerVkImage *)image;
     PdockerVkMemory *mem = (PdockerVkMemory *)memory;
     if (!img || !mem) return VK_ERROR_INITIALIZATION_FAILED;
+    if (img->swapchain_owned) {
+        trace_icd_runtime_failure("swapchain-image-bind-rejected", VK_ERROR_INITIALIZATION_FAILED);
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
     VkDeviceSize alignment = img->requirements_alignment ? img->requirements_alignment : PDOCKER_VK_REQUIREMENT_ALIGNMENT;
     VkDeviceSize needed = img->requirements_size;
     if ((memoryOffset % alignment) != 0 ||
@@ -11841,7 +11917,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(
         VkExtensionProperties *pProperties) {
     (void)physicalDevice;
     (void)pLayerName;
-    VkExtensionProperties available[15];
+    VkExtensionProperties available[16];
     uint32_t available_count = 0;
 #define ADD_DEVICE_EXTENSION(name, version) do { \
         if (available_count < (uint32_t)(sizeof(available) / sizeof(available[0]))) { \
@@ -11905,6 +11981,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(
                              VK_EXT_INDEX_TYPE_UINT8_SPEC_VERSION);
     }
 #endif
+    ADD_DEVICE_EXTENSION(VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_SWAPCHAIN_SPEC_VERSION);
 #undef ADD_DEVICE_EXTENSION
     copy_extension_properties(available, available_count, pPropertyCount, pProperties);
     return VK_SUCCESS;
@@ -11954,6 +12031,7 @@ static bool device_extension_advertised_name(const char *name) {
         return caps && caps->ext_index_type_uint8 && caps->index_type_uint8.indexTypeUint8;
     }
 #endif
+    if (strcmp(name, VK_KHR_SWAPCHAIN_EXTENSION_NAME) == 0) return true;
     return false;
 }
 
@@ -13509,13 +13587,73 @@ VKAPI_ATTR void VKAPI_CALL vkGetRenderAreaGranularity(
     }
 }
 
+static bool semaphore_wait_satisfied(const PdockerVkSemaphore *sem, uint64_t value);
+static void semaphore_complete_wait(PdockerVkSemaphore *sem);
+static void semaphore_complete_signal(PdockerVkSemaphore *sem, uint64_t value);
+
+static bool pdocker_vk_headless_surface_valid(const PdockerVkSurface *surface) {
+    return surface && surface->kind == PDOCKER_VK_SURFACE_HEADLESS;
+}
+
+static bool pdocker_vk_headless_surface_format_supported(VkFormat format, VkColorSpaceKHR color_space) {
+    if (color_space != VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) return false;
+    return format == VK_FORMAT_R8G8B8A8_UNORM || format == VK_FORMAT_B8G8R8A8_UNORM;
+}
+
+static bool pdocker_vk_headless_present_mode_supported(VkPresentModeKHR present_mode) {
+    return present_mode == VK_PRESENT_MODE_FIFO_KHR;
+}
+
+static bool pdocker_vk_headless_swapchain_usage_supported(VkImageUsageFlags usage) {
+    const VkImageUsageFlags supported = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                                       VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                       VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    return usage != 0 && (usage & ~supported) == 0;
+}
+
+static bool pdocker_vk_headless_extent_supported(VkExtent2D extent) {
+    return extent.width >= PDOCKER_VK_HEADLESS_SURFACE_MIN_WIDTH &&
+           extent.height >= PDOCKER_VK_HEADLESS_SURFACE_MIN_HEIGHT &&
+           extent.width <= PDOCKER_VK_HEADLESS_SURFACE_MAX_WIDTH &&
+           extent.height <= PDOCKER_VK_HEADLESS_SURFACE_MAX_HEIGHT;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkCreateHeadlessSurfaceEXT(
+        VkInstance instance,
+        const VkHeadlessSurfaceCreateInfoEXT *pCreateInfo,
+        const VkAllocationCallbacks *pAllocator,
+        VkSurfaceKHR *pSurface) {
+    (void)instance;
+    (void)pAllocator;
+    if (!pCreateInfo || !pSurface) return VK_ERROR_INITIALIZATION_FAILED;
+    *pSurface = VK_NULL_HANDLE;
+    if (pCreateInfo->sType != VK_STRUCTURE_TYPE_HEADLESS_SURFACE_CREATE_INFO_EXT) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    if (pCreateInfo->pNext) {
+        trace_icd_runtime_failure("headless-surface-pnext-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    if (pCreateInfo->flags != 0) {
+        trace_icd_runtime_failure("headless-surface-flags-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    PdockerVkSurface *surface = pdocker_alloc_handle(sizeof(*surface));
+    if (!surface) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    surface->kind = PDOCKER_VK_SURFACE_HEADLESS;
+    surface->default_extent = (VkExtent2D){640u, 480u};
+    surface->generation = next_vulkan_object_generation();
+    *pSurface = (VkSurfaceKHR)surface;
+    return VK_SUCCESS;
+}
+
 VKAPI_ATTR void VKAPI_CALL vkDestroySurfaceKHR(
         VkInstance instance,
         VkSurfaceKHR surface,
         const VkAllocationCallbacks *pAllocator) {
     (void)instance;
-    (void)surface;
     (void)pAllocator;
+    free((void *)surface);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceSupportKHR(
@@ -13524,10 +13662,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceSupportKHR(
         VkSurfaceKHR surface,
         VkBool32 *pSupported) {
     (void)physicalDevice;
-    (void)queueFamilyIndex;
-    (void)surface;
     if (!pSupported) return VK_ERROR_INITIALIZATION_FAILED;
-    *pSupported = VK_FALSE;
+    *pSupported = (pdocker_vk_headless_surface_valid((PdockerVkSurface *)surface) &&
+                   queueFamilyIndex < PDOCKER_VK_ADVERTISED_QUEUE_FAMILY_COUNT)
+        ? VK_TRUE
+        : VK_FALSE;
     return VK_SUCCESS;
 }
 
@@ -13536,10 +13675,26 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
         VkSurfaceKHR surface,
         VkSurfaceCapabilitiesKHR *pSurfaceCapabilities) {
     (void)physicalDevice;
-    (void)surface;
-    (void)pSurfaceCapabilities;
-    trace_icd_runtime_failure("surface-unimplemented", VK_ERROR_FEATURE_NOT_PRESENT);
-    return VK_ERROR_FEATURE_NOT_PRESENT;
+    if (!pSurfaceCapabilities) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!pdocker_vk_headless_surface_valid((PdockerVkSurface *)surface)) {
+        return VK_ERROR_SURFACE_LOST_KHR;
+    }
+    memset(pSurfaceCapabilities, 0, sizeof(*pSurfaceCapabilities));
+    pSurfaceCapabilities->minImageCount = 2u;
+    pSurfaceCapabilities->maxImageCount = PDOCKER_VK_MAX_SWAPCHAIN_IMAGES;
+    pSurfaceCapabilities->currentExtent = (VkExtent2D){UINT32_MAX, UINT32_MAX};
+    pSurfaceCapabilities->minImageExtent = (VkExtent2D){PDOCKER_VK_HEADLESS_SURFACE_MIN_WIDTH,
+                                                        PDOCKER_VK_HEADLESS_SURFACE_MIN_HEIGHT};
+    pSurfaceCapabilities->maxImageExtent = (VkExtent2D){PDOCKER_VK_HEADLESS_SURFACE_MAX_WIDTH,
+                                                        PDOCKER_VK_HEADLESS_SURFACE_MAX_HEIGHT};
+    pSurfaceCapabilities->maxImageArrayLayers = 1u;
+    pSurfaceCapabilities->supportedTransforms = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+    pSurfaceCapabilities->currentTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+    pSurfaceCapabilities->supportedCompositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    pSurfaceCapabilities->supportedUsageFlags = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                                                VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                                VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    return VK_SUCCESS;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceFormatsKHR(
@@ -13548,12 +13703,24 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceFormatsKHR(
         uint32_t *pSurfaceFormatCount,
         VkSurfaceFormatKHR *pSurfaceFormats) {
     (void)physicalDevice;
-    (void)surface;
-    (void)pSurfaceFormats;
     if (!pSurfaceFormatCount) return VK_ERROR_INITIALIZATION_FAILED;
-    *pSurfaceFormatCount = 0;
-    trace_icd_runtime_failure("surface-unimplemented", VK_ERROR_FEATURE_NOT_PRESENT);
-    return VK_ERROR_FEATURE_NOT_PRESENT;
+    if (!pdocker_vk_headless_surface_valid((PdockerVkSurface *)surface)) {
+        *pSurfaceFormatCount = 0;
+        return VK_ERROR_SURFACE_LOST_KHR;
+    }
+    const VkSurfaceFormatKHR formats[] = {
+        { VK_FORMAT_R8G8B8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR },
+        { VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR },
+    };
+    const uint32_t available_count = (uint32_t)(sizeof(formats) / sizeof(formats[0]));
+    if (!pSurfaceFormats) {
+        *pSurfaceFormatCount = available_count;
+        return VK_SUCCESS;
+    }
+    uint32_t count = *pSurfaceFormatCount < available_count ? *pSurfaceFormatCount : available_count;
+    for (uint32_t i = 0; i < count; ++i) pSurfaceFormats[i] = formats[i];
+    *pSurfaceFormatCount = count;
+    return count < available_count ? VK_INCOMPLETE : VK_SUCCESS;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfacePresentModesKHR(
@@ -13562,12 +13729,36 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfacePresentModesKHR(
         uint32_t *pPresentModeCount,
         VkPresentModeKHR *pPresentModes) {
     (void)physicalDevice;
-    (void)surface;
-    (void)pPresentModes;
     if (!pPresentModeCount) return VK_ERROR_INITIALIZATION_FAILED;
-    *pPresentModeCount = 0;
-    trace_icd_runtime_failure("surface-unimplemented", VK_ERROR_FEATURE_NOT_PRESENT);
-    return VK_ERROR_FEATURE_NOT_PRESENT;
+    if (!pdocker_vk_headless_surface_valid((PdockerVkSurface *)surface)) {
+        *pPresentModeCount = 0;
+        return VK_ERROR_SURFACE_LOST_KHR;
+    }
+    const VkPresentModeKHR modes[] = { VK_PRESENT_MODE_FIFO_KHR };
+    const uint32_t available_count = (uint32_t)(sizeof(modes) / sizeof(modes[0]));
+    if (!pPresentModes) {
+        *pPresentModeCount = available_count;
+        return VK_SUCCESS;
+    }
+    uint32_t count = *pPresentModeCount < available_count ? *pPresentModeCount : available_count;
+    for (uint32_t i = 0; i < count; ++i) pPresentModes[i] = modes[i];
+    *pPresentModeCount = count;
+    return count < available_count ? VK_INCOMPLETE : VK_SUCCESS;
+}
+
+static void pdocker_vk_destroy_swapchain_images(VkDevice device, PdockerVkSwapchain *swapchain) {
+    if (!swapchain) return;
+    for (uint32_t i = 0; i < swapchain->image_count && i < PDOCKER_VK_MAX_SWAPCHAIN_IMAGES; ++i) {
+        if (swapchain->images[i]) {
+            swapchain->images[i]->swapchain_owned = false;
+            free(swapchain->images[i]);
+            swapchain->images[i] = NULL;
+        }
+        if (swapchain->memories[i]) {
+            vkFreeMemory(device, (VkDeviceMemory)swapchain->memories[i], NULL);
+            swapchain->memories[i] = NULL;
+        }
+    }
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateSwapchainKHR(
@@ -13575,21 +13766,140 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSwapchainKHR(
         const VkSwapchainCreateInfoKHR *pCreateInfo,
         const VkAllocationCallbacks *pAllocator,
         VkSwapchainKHR *pSwapchain) {
-    (void)device;
-    (void)pCreateInfo;
     (void)pAllocator;
-    if (pSwapchain) *pSwapchain = VK_NULL_HANDLE;
-    trace_icd_runtime_failure("swapchain-unimplemented", VK_ERROR_FEATURE_NOT_PRESENT);
-    return VK_ERROR_FEATURE_NOT_PRESENT;
+    if (!pCreateInfo || !pSwapchain) return VK_ERROR_INITIALIZATION_FAILED;
+    *pSwapchain = VK_NULL_HANDLE;
+    if (pCreateInfo->sType != VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    if (!vulkan_v5_object_transport_enabled()) {
+        return unsupported_image_transport_result("vkCreateSwapchainKHR");
+    }
+    if (pCreateInfo->pNext) {
+        trace_icd_runtime_failure("swapchain-pnext-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    if (pCreateInfo->flags != 0 || pCreateInfo->oldSwapchain != VK_NULL_HANDLE) {
+        trace_icd_runtime_failure("swapchain-flags-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    PdockerVkSurface *surface = (PdockerVkSurface *)pCreateInfo->surface;
+    if (!pdocker_vk_headless_surface_valid(surface)) return VK_ERROR_SURFACE_LOST_KHR;
+    if (!pdocker_vk_headless_surface_format_supported(pCreateInfo->imageFormat,
+                                                      pCreateInfo->imageColorSpace)) {
+        trace_icd_runtime_failure("swapchain-format-unsupported", VK_ERROR_FORMAT_NOT_SUPPORTED);
+        return VK_ERROR_FORMAT_NOT_SUPPORTED;
+    }
+    if (!pdocker_vk_headless_present_mode_supported(pCreateInfo->presentMode)) {
+        trace_icd_runtime_failure("swapchain-present-mode-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    if (!pdocker_vk_headless_swapchain_usage_supported(pCreateInfo->imageUsage)) {
+        trace_icd_runtime_failure("swapchain-image-usage-unsupported", VK_ERROR_FORMAT_NOT_SUPPORTED);
+        return VK_ERROR_FORMAT_NOT_SUPPORTED;
+    }
+    if (!pdocker_vk_headless_extent_supported(pCreateInfo->imageExtent) ||
+        pCreateInfo->imageArrayLayers != 1u ||
+        pCreateInfo->preTransform != VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR ||
+        pCreateInfo->compositeAlpha != VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    if (pCreateInfo->imageSharingMode == VK_SHARING_MODE_CONCURRENT) {
+        if (pCreateInfo->queueFamilyIndexCount == 0 || !pCreateInfo->pQueueFamilyIndices) {
+            return VK_ERROR_INITIALIZATION_FAILED;
+        }
+        for (uint32_t i = 0; i < pCreateInfo->queueFamilyIndexCount; ++i) {
+            if (pCreateInfo->pQueueFamilyIndices[i] >= PDOCKER_VK_ADVERTISED_QUEUE_FAMILY_COUNT) {
+                return VK_ERROR_INITIALIZATION_FAILED;
+            }
+        }
+    } else if (pCreateInfo->imageSharingMode != VK_SHARING_MODE_EXCLUSIVE) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    uint32_t image_count = pCreateInfo->minImageCount < 2u ? 2u : pCreateInfo->minImageCount;
+    if (image_count > PDOCKER_VK_MAX_SWAPCHAIN_IMAGES) return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+    PdockerVkSwapchain *swapchain = pdocker_alloc_handle(sizeof(*swapchain));
+    if (!swapchain) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    memset(swapchain, 0, sizeof(*swapchain));
+    swapchain->surface = surface;
+    swapchain->image_format = pCreateInfo->imageFormat;
+    swapchain->image_color_space = pCreateInfo->imageColorSpace;
+    swapchain->image_extent = pCreateInfo->imageExtent;
+    swapchain->image_usage = pCreateInfo->imageUsage;
+    swapchain->present_mode = pCreateInfo->presentMode;
+    swapchain->composite_alpha = pCreateInfo->compositeAlpha;
+    swapchain->pre_transform = pCreateInfo->preTransform;
+    swapchain->image_count = image_count;
+    swapchain->next_image = 0;
+    swapchain->generation = next_vulkan_object_generation();
+    for (uint32_t i = 0; i < image_count; ++i) {
+        VkImageCreateInfo image_info;
+        memset(&image_info, 0, sizeof(image_info));
+        image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        image_info.imageType = VK_IMAGE_TYPE_2D;
+        image_info.format = pCreateInfo->imageFormat;
+        image_info.extent = (VkExtent3D){pCreateInfo->imageExtent.width,
+                                         pCreateInfo->imageExtent.height,
+                                         1u};
+        image_info.mipLevels = 1u;
+        image_info.arrayLayers = pCreateInfo->imageArrayLayers;
+        image_info.samples = VK_SAMPLE_COUNT_1_BIT;
+        image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+        image_info.usage = pCreateInfo->imageUsage;
+        image_info.sharingMode = pCreateInfo->imageSharingMode;
+        image_info.queueFamilyIndexCount = pCreateInfo->queueFamilyIndexCount;
+        image_info.pQueueFamilyIndices = pCreateInfo->pQueueFamilyIndices;
+        image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        VkImage image = VK_NULL_HANDLE;
+        VkResult rc = vkCreateImage(device, &image_info, NULL, &image);
+        if (rc != VK_SUCCESS) {
+            pdocker_vk_destroy_swapchain_images(device, swapchain);
+            free(swapchain);
+            return rc;
+        }
+        VkMemoryRequirements req;
+        vkGetImageMemoryRequirements(device, image, &req);
+        VkMemoryAllocateInfo alloc_info;
+        memset(&alloc_info, 0, sizeof(alloc_info));
+        alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        alloc_info.allocationSize = req.size;
+        alloc_info.memoryTypeIndex = 0u;
+        VkDeviceMemory memory = VK_NULL_HANDLE;
+        rc = vkAllocateMemory(device, &alloc_info, NULL, &memory);
+        if (rc != VK_SUCCESS) {
+            vkDestroyImage(device, image, NULL);
+            pdocker_vk_destroy_swapchain_images(device, swapchain);
+            free(swapchain);
+            return rc;
+        }
+        rc = vkBindImageMemory(device, image, memory, 0);
+        if (rc != VK_SUCCESS) {
+            vkFreeMemory(device, memory, NULL);
+            vkDestroyImage(device, image, NULL);
+            pdocker_vk_destroy_swapchain_images(device, swapchain);
+            free(swapchain);
+            return rc;
+        }
+        PdockerVkImage *pd_image = (PdockerVkImage *)image;
+        pd_image->swapchain_owned = true;
+        pd_image->current_layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        pd_image->layout_generation = next_vulkan_object_generation();
+        swapchain->images[i] = pd_image;
+        swapchain->memories[i] = (PdockerVkMemory *)memory;
+    }
+    *pSwapchain = (VkSwapchainKHR)swapchain;
+    return VK_SUCCESS;
 }
 
 VKAPI_ATTR void VKAPI_CALL vkDestroySwapchainKHR(
         VkDevice device,
         VkSwapchainKHR swapchain,
         const VkAllocationCallbacks *pAllocator) {
-    (void)device;
-    (void)swapchain;
     (void)pAllocator;
+    PdockerVkSwapchain *sc = (PdockerVkSwapchain *)swapchain;
+    if (!sc) return;
+    pdocker_vk_destroy_swapchain_images(device, sc);
+    free(sc);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkGetSwapchainImagesKHR(
@@ -13598,12 +13908,20 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetSwapchainImagesKHR(
         uint32_t *pSwapchainImageCount,
         VkImage *pSwapchainImages) {
     (void)device;
-    (void)swapchain;
-    (void)pSwapchainImages;
+    PdockerVkSwapchain *sc = (PdockerVkSwapchain *)swapchain;
     if (!pSwapchainImageCount) return VK_ERROR_INITIALIZATION_FAILED;
-    *pSwapchainImageCount = 0;
-    trace_icd_runtime_failure("swapchain-unimplemented", VK_ERROR_FEATURE_NOT_PRESENT);
-    return VK_ERROR_FEATURE_NOT_PRESENT;
+    if (!sc) {
+        *pSwapchainImageCount = 0;
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    if (!pSwapchainImages) {
+        *pSwapchainImageCount = sc->image_count;
+        return VK_SUCCESS;
+    }
+    uint32_t count = *pSwapchainImageCount < sc->image_count ? *pSwapchainImageCount : sc->image_count;
+    for (uint32_t i = 0; i < count; ++i) pSwapchainImages[i] = (VkImage)sc->images[i];
+    *pSwapchainImageCount = count;
+    return count < sc->image_count ? VK_INCOMPLETE : VK_SUCCESS;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkAcquireNextImageKHR(
@@ -13614,33 +13932,94 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAcquireNextImageKHR(
         VkFence fence,
         uint32_t *pImageIndex) {
     (void)device;
-    (void)swapchain;
     (void)timeout;
-    (void)semaphore;
-    (void)fence;
-    if (pImageIndex) *pImageIndex = 0;
-    trace_icd_runtime_failure("swapchain-unimplemented", VK_ERROR_FEATURE_NOT_PRESENT);
-    return VK_ERROR_FEATURE_NOT_PRESENT;
+    PdockerVkSwapchain *sc = (PdockerVkSwapchain *)swapchain;
+    if (!sc || !pImageIndex || sc->image_count == 0) return VK_ERROR_INITIALIZATION_FAILED;
+    uint32_t index = UINT32_MAX;
+    for (uint32_t attempt = 0; attempt < sc->image_count; ++attempt) {
+        uint32_t candidate = (sc->next_image + attempt) % sc->image_count;
+        if (!sc->acquired[candidate]) {
+            index = candidate;
+            break;
+        }
+    }
+    if (index == UINT32_MAX) {
+        return timeout == 0 ? VK_NOT_READY : VK_TIMEOUT;
+    }
+    sc->acquired[index] = true;
+    sc->next_image = (index + 1u) % sc->image_count;
+    *pImageIndex = index;
+    semaphore_complete_signal((PdockerVkSemaphore *)semaphore, 0);
+    PdockerVkFence *f = (PdockerVkFence *)fence;
+    if (f) f->signaled = true;
+    return VK_SUCCESS;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkAcquireNextImage2KHR(
         VkDevice device,
         const VkAcquireNextImageInfoKHR *pAcquireInfo,
         uint32_t *pImageIndex) {
-    (void)device;
-    (void)pAcquireInfo;
-    if (pImageIndex) *pImageIndex = 0;
-    trace_icd_runtime_failure("swapchain-unimplemented", VK_ERROR_FEATURE_NOT_PRESENT);
-    return VK_ERROR_FEATURE_NOT_PRESENT;
+    if (!pAcquireInfo) return VK_ERROR_INITIALIZATION_FAILED;
+    if (pAcquireInfo->sType != VK_STRUCTURE_TYPE_ACQUIRE_NEXT_IMAGE_INFO_KHR) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    if (pAcquireInfo->pNext) {
+        trace_icd_runtime_failure("acquire-next-image2-pnext-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    if (pAcquireInfo->deviceMask != 0 && pAcquireInfo->deviceMask != 1u) {
+        trace_icd_runtime_failure("acquire-next-image2-device-mask-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    return vkAcquireNextImageKHR(device,
+                                 pAcquireInfo->swapchain,
+                                 pAcquireInfo->timeout,
+                                 pAcquireInfo->semaphore,
+                                 pAcquireInfo->fence,
+                                 pImageIndex);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkQueuePresentKHR(
         VkQueue queue,
         const VkPresentInfoKHR *pPresentInfo) {
     (void)queue;
-    (void)pPresentInfo;
-    trace_icd_runtime_failure("swapchain-unimplemented", VK_ERROR_FEATURE_NOT_PRESENT);
-    return VK_ERROR_FEATURE_NOT_PRESENT;
+    if (!pPresentInfo) return VK_ERROR_INITIALIZATION_FAILED;
+    if (pPresentInfo->pNext) {
+        trace_icd_runtime_failure("queue-present-pnext-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    if (pPresentInfo->waitSemaphoreCount > 0 && !pPresentInfo->pWaitSemaphores) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    for (uint32_t i = 0; i < pPresentInfo->waitSemaphoreCount; ++i) {
+        PdockerVkSemaphore *sem = (PdockerVkSemaphore *)pPresentInfo->pWaitSemaphores[i];
+        if (!sem || sem->timeline || !semaphore_wait_satisfied(sem, 0)) {
+            trace_icd_runtime_failure("queue-present-wait-semaphore-unsignaled", VK_NOT_READY);
+            return VK_NOT_READY;
+        }
+        semaphore_complete_wait(sem);
+    }
+    if (pPresentInfo->swapchainCount > 0 &&
+        (!pPresentInfo->pSwapchains || !pPresentInfo->pImageIndices)) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    VkResult aggregate = VK_SUCCESS;
+    for (uint32_t i = 0; i < pPresentInfo->swapchainCount; ++i) {
+        PdockerVkSwapchain *sc = (PdockerVkSwapchain *)pPresentInfo->pSwapchains[i];
+        VkResult rc = VK_ERROR_OUT_OF_DATE_KHR;
+        if (sc && pPresentInfo->pImageIndices[i] < sc->image_count) {
+            uint32_t image_index = pPresentInfo->pImageIndices[i];
+            if (sc->acquired[image_index]) {
+                sc->acquired[image_index] = false;
+                rc = VK_SUCCESS;
+            } else {
+                rc = VK_NOT_READY;
+            }
+        }
+        if (pPresentInfo->pResults) pPresentInfo->pResults[i] = rc;
+        if (aggregate == VK_SUCCESS && rc != VK_SUCCESS) aggregate = rc;
+    }
+    return aggregate;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateCommandPool(
@@ -19401,19 +19780,6 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance instan
 
 static bool proc_address_hidden_by_advertisement(const char *pName) {
     if (!pName) return true;
-    if (strcmp(pName, "vkDestroySurfaceKHR") == 0 ||
-        strcmp(pName, "vkGetPhysicalDeviceSurfaceSupportKHR") == 0 ||
-        strcmp(pName, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR") == 0 ||
-        strcmp(pName, "vkGetPhysicalDeviceSurfaceFormatsKHR") == 0 ||
-        strcmp(pName, "vkGetPhysicalDeviceSurfacePresentModesKHR") == 0 ||
-        strcmp(pName, "vkCreateSwapchainKHR") == 0 ||
-        strcmp(pName, "vkDestroySwapchainKHR") == 0 ||
-        strcmp(pName, "vkGetSwapchainImagesKHR") == 0 ||
-        strcmp(pName, "vkAcquireNextImageKHR") == 0 ||
-        strcmp(pName, "vkAcquireNextImage2KHR") == 0 ||
-        strcmp(pName, "vkQueuePresentKHR") == 0) {
-        return true;
-    }
     if (strcmp(pName, "vkGetPhysicalDeviceProperties2KHR") == 0 ||
         strcmp(pName, "vkGetPhysicalDeviceFeatures2KHR") == 0 ||
         strcmp(pName, "vkGetPhysicalDeviceQueueFamilyProperties2KHR") == 0 ||
@@ -19632,6 +19998,7 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_PROC(vkCreateFramebuffer);
     MAP_PROC(vkDestroyFramebuffer);
     MAP_PROC(vkGetRenderAreaGranularity);
+    MAP_PROC(vkCreateHeadlessSurfaceEXT);
     MAP_PROC(vkDestroySurfaceKHR);
     MAP_PROC(vkGetPhysicalDeviceSurfaceSupportKHR);
     MAP_PROC(vkGetPhysicalDeviceSurfaceCapabilitiesKHR);
