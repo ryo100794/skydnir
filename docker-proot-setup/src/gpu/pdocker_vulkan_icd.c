@@ -1651,6 +1651,22 @@ static bool pdocker_vk_image_single_aspect_supported_for_format(
     return conservative_format_bytes_per_pixel_for_aspect(format, aspect_mask) != 0;
 }
 
+static bool pdocker_vk_image_to_image_depth_stencil_split_supported(
+        VkFormat src_format,
+        VkFormat dst_format,
+        VkImageAspectFlags src_aspect_mask,
+        VkImageAspectFlags dst_aspect_mask) {
+    const VkImageAspectFlags depth_stencil =
+        VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+    return src_format == dst_format &&
+           src_aspect_mask == depth_stencil &&
+           dst_aspect_mask == depth_stencil &&
+           conservative_format_bytes_per_pixel_for_aspect(src_format, VK_IMAGE_ASPECT_DEPTH_BIT) != 0 &&
+           conservative_format_bytes_per_pixel_for_aspect(src_format, VK_IMAGE_ASPECT_STENCIL_BIT) != 0 &&
+           conservative_format_bytes_per_pixel_for_aspect(dst_format, VK_IMAGE_ASPECT_DEPTH_BIT) != 0 &&
+           conservative_format_bytes_per_pixel_for_aspect(dst_format, VK_IMAGE_ASPECT_STENCIL_BIT) != 0;
+}
+
 static bool pdocker_vk_image_aspect_mask_valid_for_format(
         VkFormat format,
         VkImageAspectFlags aspect_mask) {
@@ -5639,16 +5655,14 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
                 continue; \
             } \
             if (op__->type == PDOCKER_VK_COMMAND_IMAGE_TO_IMAGE_COPY) { \
-                if (op__->index >= cmd->image_to_image_copy_op_count || \
-                    command_count >= PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS || \
-                    image_copy_count >= PDOCKER_GPU_VULKAN_GRAPHICS_V610_MAX_IMAGE_COPIES) { \
+                if (op__->index >= cmd->image_to_image_copy_op_count) { \
                     rc = -E2BIG; \
                     goto cleanup; \
                 } \
                 const PdockerVkImageToImageCopyOp *copy__ = &cmd->image_to_image_copy_ops[op__->index]; \
+                VkImageAspectFlags split_aspects__[2] = {0, 0}; \
+                uint32_t copy_aspect_count__ = 0; \
                 if (!copy__->src || !copy__->dst || !copy__->src->memory || !copy__->dst->memory || \
-                    !pdocker_vk_image_single_aspect_supported_for_format(copy__->src->format, copy__->region.srcSubresource.aspectMask) || \
-                    !pdocker_vk_image_single_aspect_supported_for_format(copy__->dst->format, copy__->region.dstSubresource.aspectMask) || \
                     copy__->region.srcSubresource.aspectMask != copy__->region.dstSubresource.aspectMask || \
                     copy__->region.srcSubresource.layerCount == 0 || \
                     copy__->region.srcSubresource.layerCount != copy__->region.dstSubresource.layerCount || \
@@ -5662,6 +5676,29 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
                     copy__->region.dstSubresource.baseArrayLayer >= copy__->dst->array_layers || \
                     copy__->region.dstSubresource.layerCount > copy__->dst->array_layers - copy__->region.dstSubresource.baseArrayLayer) { \
                     rc = -EOPNOTSUPP; \
+                    goto cleanup; \
+                } \
+                if (pdocker_vk_image_single_aspect_supported_for_format( \
+                        copy__->src->format, copy__->region.srcSubresource.aspectMask) && \
+                    pdocker_vk_image_single_aspect_supported_for_format( \
+                        copy__->dst->format, copy__->region.dstSubresource.aspectMask)) { \
+                    split_aspects__[0] = copy__->region.srcSubresource.aspectMask; \
+                    copy_aspect_count__ = 1; \
+                } else if (pdocker_vk_image_to_image_depth_stencil_split_supported( \
+                               copy__->src->format, copy__->dst->format, \
+                               copy__->region.srcSubresource.aspectMask, \
+                               copy__->region.dstSubresource.aspectMask)) { \
+                    split_aspects__[0] = VK_IMAGE_ASPECT_DEPTH_BIT; \
+                    split_aspects__[1] = VK_IMAGE_ASPECT_STENCIL_BIT; \
+                    copy_aspect_count__ = 2; \
+                } else { \
+                    rc = -EOPNOTSUPP; \
+                    goto cleanup; \
+                } \
+                if (copy_aspect_count__ == 0 || \
+                    command_count > PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS - copy_aspect_count__ || \
+                    image_copy_count > PDOCKER_GPU_VULKAN_GRAPHICS_V610_MAX_IMAGE_COPIES - copy_aspect_count__) { \
+                    rc = -E2BIG; \
                     goto cleanup; \
                 } \
                 VkExtent3D src_extent__; \
@@ -5693,35 +5730,37 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
                     memory_objects, memory_resource_indices, &memory_count, fds, &fd_count, \
                     copy__->dst, submit_id); \
                 if (dst_index__ < 0) { rc = dst_index__; goto cleanup; } \
-                PdockerGpuVulkanGraphicsV6CommandEntry *copy_command__ = &commands[command_count]; \
-                copy_command__->command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_COPY_IMAGE; \
-                copy_command__->pipeline_index = UINT32_MAX; \
-                copy_command__->descriptor_first_set = UINT32_MAX; \
-                copy_command__->index_buffer_resource_index = UINT32_MAX; \
-                PdockerGpuVulkanGraphicsV610ImageCopyEntry *copy_entry__ = &image_copies[image_copy_count++]; \
-                copy_entry__->command_index = (uint32_t)command_count; \
-                copy_entry__->src_image_index = (uint32_t)src_index__; \
-                copy_entry__->dst_image_index = (uint32_t)dst_index__; \
-                copy_entry__->src_layout = (uint32_t)copy__->src_layout; \
-                copy_entry__->dst_layout = (uint32_t)copy__->dst_layout; \
-                copy_entry__->src_aspect_mask = (uint32_t)copy__->region.srcSubresource.aspectMask; \
-                copy_entry__->src_mip_level = copy__->region.srcSubresource.mipLevel; \
-                copy_entry__->src_base_array_layer = copy__->region.srcSubresource.baseArrayLayer; \
-                copy_entry__->dst_aspect_mask = (uint32_t)copy__->region.dstSubresource.aspectMask; \
-                copy_entry__->dst_mip_level = copy__->region.dstSubresource.mipLevel; \
-                copy_entry__->dst_base_array_layer = copy__->region.dstSubresource.baseArrayLayer; \
-                copy_entry__->layer_count = copy__->region.srcSubresource.layerCount; \
-                copy_entry__->src_offset_x = copy__->region.srcOffset.x; \
-                copy_entry__->src_offset_y = copy__->region.srcOffset.y; \
-                copy_entry__->src_offset_z = copy__->region.srcOffset.z; \
-                copy_entry__->dst_offset_x = copy__->region.dstOffset.x; \
-                copy_entry__->dst_offset_y = copy__->region.dstOffset.y; \
-                copy_entry__->dst_offset_z = copy__->region.dstOffset.z; \
-                copy_entry__->extent_width = copy__->region.extent.width; \
-                copy_entry__->extent_height = copy__->region.extent.height; \
-                copy_entry__->extent_depth = copy__->region.extent.depth; \
+                for (uint32_t copy_aspect_i__ = 0; copy_aspect_i__ < copy_aspect_count__; ++copy_aspect_i__) { \
+                    PdockerGpuVulkanGraphicsV6CommandEntry *copy_command__ = &commands[command_count]; \
+                    copy_command__->command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_COPY_IMAGE; \
+                    copy_command__->pipeline_index = UINT32_MAX; \
+                    copy_command__->descriptor_first_set = UINT32_MAX; \
+                    copy_command__->index_buffer_resource_index = UINT32_MAX; \
+                    PdockerGpuVulkanGraphicsV610ImageCopyEntry *copy_entry__ = &image_copies[image_copy_count++]; \
+                    copy_entry__->command_index = (uint32_t)command_count; \
+                    copy_entry__->src_image_index = (uint32_t)src_index__; \
+                    copy_entry__->dst_image_index = (uint32_t)dst_index__; \
+                    copy_entry__->src_layout = (uint32_t)copy__->src_layout; \
+                    copy_entry__->dst_layout = (uint32_t)copy__->dst_layout; \
+                    copy_entry__->src_aspect_mask = (uint32_t)split_aspects__[copy_aspect_i__]; \
+                    copy_entry__->src_mip_level = copy__->region.srcSubresource.mipLevel; \
+                    copy_entry__->src_base_array_layer = copy__->region.srcSubresource.baseArrayLayer; \
+                    copy_entry__->dst_aspect_mask = (uint32_t)split_aspects__[copy_aspect_i__]; \
+                    copy_entry__->dst_mip_level = copy__->region.dstSubresource.mipLevel; \
+                    copy_entry__->dst_base_array_layer = copy__->region.dstSubresource.baseArrayLayer; \
+                    copy_entry__->layer_count = copy__->region.srcSubresource.layerCount; \
+                    copy_entry__->src_offset_x = copy__->region.srcOffset.x; \
+                    copy_entry__->src_offset_y = copy__->region.srcOffset.y; \
+                    copy_entry__->src_offset_z = copy__->region.srcOffset.z; \
+                    copy_entry__->dst_offset_x = copy__->region.dstOffset.x; \
+                    copy_entry__->dst_offset_y = copy__->region.dstOffset.y; \
+                    copy_entry__->dst_offset_z = copy__->region.dstOffset.z; \
+                    copy_entry__->extent_width = copy__->region.extent.width; \
+                    copy_entry__->extent_height = copy__->region.extent.height; \
+                    copy_entry__->extent_depth = copy__->region.extent.depth; \
+                    command_count++; \
+                } \
                 need_v610_image_copy = true; \
-                command_count++; \
                 continue; \
             } \
         } \

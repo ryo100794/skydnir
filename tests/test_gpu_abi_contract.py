@@ -2387,7 +2387,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("vulkan_image_tight_subresource_offset_for_aspect", staged_body)
         self.assertIn("vulkan_image_tight_copy_size_for_aspect", staged_body)
         self.assertIn("copy_size > (uint64_t)image->staging.size - buffer_offset", staged_body)
-        self.assertIn(".aspectMask = image->copy_aspect_mask", staged_body)
+        self.assertIn(".aspectMask = copy_aspect", staged_body)
 
         self.assertIn("vulkan_graphics_attachment_writeback_access_mask(view_obj->range.aspectMask)", bind_body)
         self.assertIn("vulkan_graphics_attachment_writeback_stage_mask(view_obj->range.aspectMask)", bind_body)
@@ -2419,7 +2419,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("vulkan_image_tight_subresource_offset_for_aspect", writeback)
         self.assertIn("vulkan_image_tight_copy_size_for_aspect", writeback)
         self.assertIn("copy_size > (uint64_t)image->staging.size - buffer_offset", writeback)
-        self.assertIn("image->copy_aspect_mask, &copy_size", writeback)
+        self.assertIn("copy_aspect, &copy_size", writeback)
 
     def test_vulkan_graphics_v62_specialization_metadata_is_append_only(self):
         abi = APP_HEADER.read_text()
@@ -2520,6 +2520,65 @@ class GpuAbiContractTest(unittest.TestCase):
             "vkCmdCopyImage",
         ]:
             self.assertIn(marker, icd)
+
+    def test_vulkan_graphics_v610_depth_stencil_copy_has_explicit_plane_staging_boundary(self):
+        executor = GPU_EXECUTOR.read_text()
+        icd = VULKAN_ICD.read_text()
+        # Vulkan buffer<->image copy is single-aspect by valid usage; do not
+        # split packed depth/stencil buffer traffic without explicit repacking.
+        self.assertIn(
+            "!pdocker_vk_image_single_aspect_supported_for_format(copy__->image->format, copy__->region.imageSubresource.aspectMask)",
+            icd,
+        )
+        # Image<->image D|S is now producer-split into per-aspect V6.10
+        # COPY_IMAGE commands.  This is generic Vulkan image-copy handling, not
+        # a llama-specific shader workaround.
+        self.assertIn("pdocker_vk_image_to_image_depth_stencil_split_supported", icd)
+        copy_collect = icd.split(
+            "if (op__->type == PDOCKER_VK_COMMAND_IMAGE_TO_IMAGE_COPY)", 1
+        )[1].split("} \\n        } \\n    } while (0)", 1)[0]
+        self.assertIn("VkImageAspectFlags split_aspects__[2]", copy_collect)
+        self.assertIn("copy_aspect_count__", copy_collect)
+        self.assertIn("split_aspects__[0] = VK_IMAGE_ASPECT_DEPTH_BIT", copy_collect)
+        self.assertIn("split_aspects__[1] = VK_IMAGE_ASPECT_STENCIL_BIT", copy_collect)
+        self.assertIn(
+            "command_count > PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS - copy_aspect_count__",
+            copy_collect,
+        )
+        self.assertIn(
+            "image_copy_count > PDOCKER_GPU_VULKAN_GRAPHICS_V610_MAX_IMAGE_COPIES - copy_aspect_count__",
+            copy_collect,
+        )
+        self.assertIn("for (uint32_t copy_aspect_i__", copy_collect)
+        self.assertIn(
+            "copy_entry__->src_aspect_mask = (uint32_t)split_aspects__[copy_aspect_i__]",
+            copy_collect,
+        )
+        self.assertIn(
+            "copy_entry__->dst_aspect_mask = (uint32_t)split_aspects__[copy_aspect_i__]",
+            copy_collect,
+        )
+        merge_body = executor.split(
+            "static int vulkan_graphics_merge_image_copy_range_for_aspect", 1
+        )[1].split("static int vulkan_graphics_merge_attachment_copy_range", 1)[0]
+        self.assertIn("image->copy_aspect_mask |= required", merge_body)
+        self.assertIn("!vulkan_format_is_packed_depth_stencil(image->format)", merge_body)
+        self.assertNotIn("image->copy_aspect_mask != required", merge_body)
+        self.assertIn("vulkan_image_staging_allocation_size", executor)
+        self.assertIn("vulkan_image_unpack_packed_depth_stencil_to_planes", executor)
+        self.assertIn("vulkan_image_pack_packed_depth_stencil_from_planes", executor)
+        self.assertIn("vulkan_image_copy_aspect_list", executor)
+        staged_body = executor.split(
+            "static int record_vulkan_graphics_v6_staged_image_uploads", 1
+        )[1].split("static int graphics_push_metadata_for_command", 1)[0]
+        writeback_body = executor.split(
+            "static int record_vulkan_graphics_v6_attachment_writeback_commands", 1
+        )[1].split("static int writeback_vulkan_graphics_v6_attachments", 1)[0]
+        for body in [staged_body, writeback_body]:
+            self.assertIn("VkImageAspectFlags copy_aspects[3]", body)
+            self.assertIn("VkImageAspectFlags copy_aspect = copy_aspects[aspect_i]", body)
+            self.assertIn(".aspectMask = copy_aspect", body)
+            self.assertIn(".size = (VkDeviceSize)image->staging.size", body)
 
     def test_vulkan_graphics_v611_fill_update_buffer_metadata_is_append_only(self):
         abi = APP_HEADER.read_text()
