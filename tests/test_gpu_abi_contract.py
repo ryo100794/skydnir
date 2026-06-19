@@ -2530,6 +2530,10 @@ class GpuAbiContractTest(unittest.TestCase):
             "!pdocker_vk_image_single_aspect_supported_for_format(copy__->image->format, copy__->region.imageSubresource.aspectMask)",
             icd,
         )
+        self.assertNotIn("pdocker_vk_buffer_image_depth_stencil_pack_supported", icd)
+        self.assertNotIn("vulkan_graphics_v610_buffer_image_copy_is_packed_depth_stencil", executor)
+        self.assertNotIn("packed_depth_stencil_scratch", executor)
+        self.assertNotIn("vulkan-graphics-v6-packed-depth-stencil-buffer-pack", executor)
         # Image<->image D|S is now producer-split into per-aspect V6.10
         # COPY_IMAGE commands.  This is generic Vulkan image-copy handling, not
         # a llama-specific shader workaround.
