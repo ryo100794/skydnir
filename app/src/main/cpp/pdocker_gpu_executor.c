@@ -1332,6 +1332,7 @@ typedef struct {
     PFN_vkCmdSetRasterizerDiscardEnableEXT cmd_set_rasterizer_discard_enable;
     PFN_vkCmdSetDepthBiasEnableEXT cmd_set_depth_bias_enable;
     PFN_vkCmdSetPrimitiveRestartEnableEXT cmd_set_primitive_restart_enable;
+    PFN_vkCmdSetLogicOpEXT cmd_set_logic_op;
     PFN_vkCmdSetDepthTestEnableEXT cmd_set_depth_test_enable;
     PFN_vkCmdSetDepthWriteEnableEXT cmd_set_depth_write_enable;
     PFN_vkCmdSetDepthCompareOpEXT cmd_set_depth_compare_op;
@@ -1377,6 +1378,7 @@ static uint32_t vulkan_graphics_dynamic_state_bit_index(uint32_t state_type) {
         case VK_DYNAMIC_STATE_RASTERIZER_DISCARD_ENABLE: return 20u;
         case VK_DYNAMIC_STATE_DEPTH_BIAS_ENABLE: return 21u;
         case VK_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE: return 22u;
+        case VK_DYNAMIC_STATE_LOGIC_OP_EXT: return 23u;
         case VK_DYNAMIC_STATE_LINE_WIDTH: return 2u;
         case VK_DYNAMIC_STATE_CULL_MODE: return 3u;
         case VK_DYNAMIC_STATE_FRONT_FACE: return 4u;
@@ -1435,6 +1437,8 @@ static int vulkan_graphics_dynamic_state_payload_supported(
         case VK_DYNAMIC_STATE_DEPTH_BIAS_ENABLE:
         case VK_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE:
             return (state->first_index == 0 && state->count == 1 && state->data_size == sizeof(VkBool32)) ? 0 : -EPROTO;
+        case VK_DYNAMIC_STATE_LOGIC_OP_EXT:
+            return (state->first_index == 0 && state->count == 1 && state->data_size == sizeof(VkLogicOp)) ? 0 : -EPROTO;
         case VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK:
         case VK_DYNAMIC_STATE_STENCIL_WRITE_MASK:
         case VK_DYNAMIC_STATE_STENCIL_REFERENCE:
@@ -1879,6 +1883,7 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             "\"core12_shaderInt8\":%u,"
             "\"extendedDynamicState\":%u,"
             "\"extendedDynamicState2\":%u,"
+            "\"extendedDynamicState2LogicOp\":%u,"
             "\"indexTypeUint8\":%u,"
             "\"extension_count\":%u,"
             "\"chain_compat_feature_structs\":%u,"
@@ -1925,6 +1930,7 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             rt ? rt->enabled_vulkan12.shaderInt8 : 0,
             rt ? rt->enabled_extended_dynamic_state.extendedDynamicState : 0,
             rt ? rt->enabled_extended_dynamic_state2.extendedDynamicState2 : 0,
+            rt ? rt->enabled_extended_dynamic_state2.extendedDynamicState2LogicOp : 0,
             rt ? rt->enabled_index_type_uint8.indexTypeUint8 : 0,
             rt ? rt->enabled_extension_count : 0,
             rt ? rt->enabled_chain_compat_feature_structs : 0,
@@ -11683,7 +11689,9 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     enabled_dynamic_rendering.dynamicRendering = rt->physical_dynamic_rendering.dynamicRendering;
     enabled_extended_dynamic_state.extendedDynamicState = rt->physical_extended_dynamic_state.extendedDynamicState;
     enabled_extended_dynamic_state2.extendedDynamicState2 = rt->physical_extended_dynamic_state2.extendedDynamicState2;
-    enabled_extended_dynamic_state2.extendedDynamicState2LogicOp = VK_FALSE;
+    enabled_extended_dynamic_state2.extendedDynamicState2LogicOp =
+        rt->physical_extended_dynamic_state2.extendedDynamicState2 &&
+        rt->physical_extended_dynamic_state2.extendedDynamicState2LogicOp;
     enabled_extended_dynamic_state2.extendedDynamicState2PatchControlPoints = VK_FALSE;
     enabled_index_type_uint8.indexTypeUint8 = rt->physical_index_type_uint8.indexTypeUint8;
     enabled_float16_int8.shaderFloat16 = rt->physical_float16_int8.shaderFloat16;
@@ -12066,6 +12074,8 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
         rt->cmd_set_primitive_restart_enable =
             (PFN_vkCmdSetPrimitiveRestartEnableEXT)vkGetDeviceProcAddr(rt->device, "vkCmdSetPrimitiveRestartEnableEXT");
     }
+    rt->cmd_set_logic_op =
+        (PFN_vkCmdSetLogicOpEXT)vkGetDeviceProcAddr(rt->device, "vkCmdSetLogicOpEXT");
     rt->cmd_set_depth_test_enable =
         (PFN_vkCmdSetDepthTestEnableEXT)vkGetDeviceProcAddr(rt->device, "vkCmdSetDepthTestEnable");
     if (!rt->cmd_set_depth_test_enable) {
@@ -17080,7 +17090,8 @@ static void print_vulkan_advertisement_caps(const char *transport) {
             "\"shaderInt8\":%u},"
             "\"indexTypeUint8\":%u,"
             "\"extendedDynamicState\":%u,"
-            "\"extendedDynamicState2\":%u},",
+            "\"extendedDynamicState2\":%u,"
+            "\"extendedDynamicState2LogicOp\":%u},",
             rt ? rt->physical_features.shaderInt64 : 0,
             rt ? rt->physical_features.tessellationShader : 0,
             rt ? rt->physical_storage16.storageBuffer16BitAccess : 0,
@@ -17094,7 +17105,8 @@ static void print_vulkan_advertisement_caps(const char *transport) {
             rt ? rt->physical_float16_int8.shaderInt8 : 0,
             rt ? rt->physical_index_type_uint8.indexTypeUint8 : 0,
             rt ? rt->physical_extended_dynamic_state.extendedDynamicState : 0,
-            rt ? rt->physical_extended_dynamic_state2.extendedDynamicState2 : 0);
+            rt ? rt->physical_extended_dynamic_state2.extendedDynamicState2 : 0,
+            rt ? rt->physical_extended_dynamic_state2.extendedDynamicState2LogicOp : 0);
     fprintf(out,
             "\"subgroup\":{"
             "\"subgroupSize\":%u,"
@@ -23825,6 +23837,7 @@ static int materialize_vulkan_graphics_v6_pipelines(
             vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_RASTERIZER_DISCARD_ENABLE) |
             vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_DEPTH_BIAS_ENABLE) |
             vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE) |
+            vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_LOGIC_OP_EXT) |
             vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_LINE_WIDTH) |
             vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_CULL_MODE) |
             vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_FRONT_FACE) |
@@ -23849,6 +23862,7 @@ static int materialize_vulkan_graphics_v6_pipelines(
         ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_RASTERIZER_DISCARD_ENABLE);
         ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_DEPTH_BIAS_ENABLE);
         ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE);
+        ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_LOGIC_OP_EXT);
         ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_LINE_WIDTH);
         ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_CULL_MODE);
         ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_FRONT_FACE);
@@ -26644,6 +26658,17 @@ static int record_vulkan_graphics_v6_command_buffer(
                             VkBool32 value = VK_FALSE;
                             memcpy(&value, data, sizeof(value));
                             rt->cmd_set_primitive_restart_enable(command_buffer, value);
+                            break;
+                        }
+                        case VK_DYNAMIC_STATE_LOGIC_OP_EXT: {
+                            if (!rt->enabled_extended_dynamic_state2.extendedDynamicState2LogicOp ||
+                                !rt->cmd_set_logic_op) {
+                                rc = -EOPNOTSUPP;
+                                goto cleanup;
+                            }
+                            VkLogicOp value = VK_LOGIC_OP_COPY;
+                            memcpy(&value, data, sizeof(value));
+                            rt->cmd_set_logic_op(command_buffer, value);
                             break;
                         }
                         case VK_DYNAMIC_STATE_DEPTH_BIAS: {

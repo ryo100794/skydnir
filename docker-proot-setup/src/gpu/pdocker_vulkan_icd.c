@@ -147,6 +147,7 @@ static uint32_t pdocker_vk_graphics_dynamic_state_bit_index(VkDynamicState state
         case VK_DYNAMIC_STATE_RASTERIZER_DISCARD_ENABLE: return 20u;
         case VK_DYNAMIC_STATE_DEPTH_BIAS_ENABLE: return 21u;
         case VK_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE: return 22u;
+        case VK_DYNAMIC_STATE_LOGIC_OP_EXT: return 23u;
         case VK_DYNAMIC_STATE_LINE_WIDTH: return 2u;
         case VK_DYNAMIC_STATE_CULL_MODE: return 3u;
         case VK_DYNAMIC_STATE_FRONT_FACE: return 4u;
@@ -9834,6 +9835,7 @@ static bool parse_executor_advertisement_caps_json(
     if (json_read_u32(json, "VK_AMD_draw_indirect_count", &value)) caps->ext_draw_indirect_count_amd = value != 0;
     if (json_read_u32(json, "VK_EXT_extended_dynamic_state", &value)) caps->ext_extended_dynamic_state = value != 0;
     if (json_read_u32(json, "extendedDynamicState2", &value)) caps->extended_dynamic_state2.extendedDynamicState2 = value != 0;
+    if (json_read_u32(json, "extendedDynamicState2LogicOp", &value)) caps->extended_dynamic_state2.extendedDynamicState2LogicOp = value != 0;
     if (json_read_u32(json, "VK_EXT_extended_dynamic_state2", &value)) caps->ext_extended_dynamic_state2 = value != 0;
     if (json_read_u32(json, "VK_EXT_index_type_uint8", &value)) caps->ext_index_type_uint8 = value != 0;
 
@@ -10090,6 +10092,17 @@ static VkBool32 advertised_extended_dynamic_state2(void) {
 #ifdef VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME
     return (caps && caps->ext_extended_dynamic_state2 &&
             caps->extended_dynamic_state2.extendedDynamicState2) ? VK_TRUE : VK_FALSE;
+#else
+    return VK_FALSE;
+#endif
+}
+
+static VkBool32 advertised_extended_dynamic_state2_logic_op(void) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+#ifdef VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME
+    return (caps && caps->ext_extended_dynamic_state2 &&
+            caps->extended_dynamic_state2.extendedDynamicState2 &&
+            caps->extended_dynamic_state2.extendedDynamicState2LogicOp) ? VK_TRUE : VK_FALSE;
 #else
     return VK_FALSE;
 #endif
@@ -10519,7 +10532,7 @@ static void fill_pnext_features(void *pNext) {
                 VkPhysicalDeviceExtendedDynamicState2FeaturesEXT *p = (VkPhysicalDeviceExtendedDynamicState2FeaturesEXT *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
                 p->extendedDynamicState2 = advertised_extended_dynamic_state2();
-                p->extendedDynamicState2LogicOp = VK_FALSE;
+                p->extendedDynamicState2LogicOp = advertised_extended_dynamic_state2_logic_op();
                 p->extendedDynamicState2PatchControlPoints = VK_FALSE;
                 break;
             }
@@ -13000,7 +13013,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
             }
             for (uint32_t d = 0; d < ci->pDynamicState->dynamicStateCount; ++d) {
                 VkDynamicState state = ci->pDynamicState->pDynamicStates[d];
-                captured_dynamic_state_mask |= pdocker_vk_graphics_dynamic_state_bit(state);
+                uint64_t state_bit = pdocker_vk_graphics_dynamic_state_bit(state);
+                if (state_bit == 0) {
+                    pipeline->graphics_unsupported = true;
+                }
+                captured_dynamic_state_mask |= state_bit;
             }
         }
         pipeline->dynamic_state_mask = captured_dynamic_state_mask;
@@ -15454,6 +15471,14 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetPrimitiveRestartEnable(
     record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
                                         VK_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE,
                                         0, 1, &primitiveRestartEnable, sizeof(primitiveRestartEnable));
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdSetLogicOpEXT(
+        VkCommandBuffer commandBuffer,
+        VkLogicOp logicOp) {
+    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+                                        VK_DYNAMIC_STATE_LOGIC_OP_EXT,
+                                        0, 1, &logicOp, sizeof(logicOp));
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdSetDepthTestEnable(
@@ -20035,6 +20060,10 @@ static bool proc_address_hidden_by_advertisement(const char *pName) {
         !advertised_extended_dynamic_state2()) {
         return true;
     }
+    if (strcmp(pName, "vkCmdSetLogicOpEXT") == 0 &&
+        !advertised_extended_dynamic_state2_logic_op()) {
+        return true;
+    }
     if ((strcmp(pName, "vkCmdDrawIndirectCount") == 0 ||
          strcmp(pName, "vkCmdDrawIndexedIndirectCount") == 0) &&
         !(advertised_draw_indirect_count() && advertised_draw_indexed_indirect_count())) {
@@ -20221,6 +20250,7 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_ALIAS("vkCmdSetDepthBiasEnableEXT", vkCmdSetDepthBiasEnable);
     MAP_PROC(vkCmdSetPrimitiveRestartEnable);
     MAP_ALIAS("vkCmdSetPrimitiveRestartEnableEXT", vkCmdSetPrimitiveRestartEnable);
+    MAP_PROC(vkCmdSetLogicOpEXT);
     MAP_PROC(vkCmdSetDepthTestEnable);
     MAP_ALIAS("vkCmdSetDepthTestEnableEXT", vkCmdSetDepthTestEnable);
     MAP_PROC(vkCmdSetDepthWriteEnable);
