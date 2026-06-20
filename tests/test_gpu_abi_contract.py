@@ -5266,9 +5266,14 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("allow_executor_tracked_queue_waits", submit_body)
         self.assertIn("validate_submit_wait_semaphores(\n            &pSubmits[i], timeline_submit, allow_executor_tracked_queue_waits)", submit_body)
         self.assertIn("complete_submit_semaphores(&pSubmits[i], timeline_submit);", submit_body)
+        self.assertIn("if (submitCount > 0 && !pSubmits) return VK_ERROR_INITIALIZATION_FAILED;", submit_body)
         self.assertIn("submit_fence->signaled = false;", submit_body)
         self.assertIn("submit_fence->signaled = true;", submit_body)
         self.assertIn("send_executor_fence_signal(submit_fence)", submit_body)
+        self.assertLess(
+            submit_body.index("if (submitCount > 0 && !pSubmits) return VK_ERROR_INITIALIZATION_FAILED;"),
+            submit_body.index("submit_fence->signaled = false;"),
+        )
         create_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateSemaphore", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkDestroySemaphore", 1
         )[0]

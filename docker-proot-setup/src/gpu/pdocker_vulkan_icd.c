@@ -18743,10 +18743,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
         const VkSubmitInfo *pSubmits,
         VkFence fence) {
     (void)queue;
+    if (submitCount > 0 && !pSubmits) return VK_ERROR_INITIALIZATION_FAILED;
     PdockerVkFence *submit_fence = (PdockerVkFence *)fence;
     if (submit_fence) submit_fence->signaled = false;
     for (uint32_t i = 0; i < submitCount; ++i) {
-        if (!pSubmits) return VK_ERROR_INITIALIZATION_FAILED;
         bool unsupported_submit_pnext = false;
         const VkTimelineSemaphoreSubmitInfo *timeline_submit =
             submit_timeline_info_from_pnext(pSubmits[i].pNext, &unsupported_submit_pnext);
