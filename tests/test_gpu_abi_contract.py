@@ -711,6 +711,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "vkGetPhysicalDeviceSurfaceCapabilitiesKHR",
             "vkGetPhysicalDeviceSurfaceFormatsKHR",
             "vkGetPhysicalDeviceSurfacePresentModesKHR",
+            "vkGetPhysicalDeviceSurfaceCapabilities2KHR",
+            "vkGetPhysicalDeviceSurfaceFormats2KHR",
             "vkCreateSwapchainKHR",
             "vkDestroySwapchainKHR",
             "vkGetSwapchainImagesKHR",
@@ -979,6 +981,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "VK_KHR_SURFACE_SPEC_VERSION",
             "VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME",
             "VK_EXT_HEADLESS_SURFACE_SPEC_VERSION",
+            "VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME",
+            "VK_KHR_GET_SURFACE_CAPABILITIES_2_SPEC_VERSION",
             "copy_extension_properties",
             "available_count",
         ]:
@@ -993,6 +997,7 @@ class GpuAbiContractTest(unittest.TestCase):
         for marker in [
             "VK_KHR_SURFACE_EXTENSION_NAME",
             "VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME",
+            "VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME",
         ]:
             self.assertIn(marker, instance_validation_scope)
         self.assertIn("VK_ERROR_EXTENSION_NOT_PRESENT", create_instance_body + instance_validation_scope)
@@ -1033,6 +1038,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "vkGetPhysicalDeviceSurfaceCapabilitiesKHR",
             "vkGetPhysicalDeviceSurfaceFormatsKHR",
             "vkGetPhysicalDeviceSurfacePresentModesKHR",
+            "vkGetPhysicalDeviceSurfaceCapabilities2KHR",
+            "vkGetPhysicalDeviceSurfaceFormats2KHR",
             "vkCreateSwapchainKHR",
             "vkDestroySwapchainKHR",
             "vkGetSwapchainImagesKHR",
@@ -1044,6 +1051,33 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertRegex(icd, rf"VKAPI_ATTR\s+[\w\s\*]+VKAPI_CALL\s+{name}\s*\(")
             self.assertIn(f"MAP_PROC({name});", proc_body)
             self.assertNotIn(f'strcmp(pName, "{name}") == 0', proc_gate_body)
+
+    def test_vulkan_surface_capabilities2_wraps_headless_wsi_queries(self):
+        icd = VULKAN_ICD.read_text()
+        self.assertRegex(icd, r"VKAPI_ATTR\s+VkResult\s+VKAPI_CALL\s+vkGetPhysicalDeviceSurfaceCapabilities2KHR\s*\([^)]*VkPhysicalDeviceSurfaceInfo2KHR")
+        self.assertRegex(icd, r"VKAPI_ATTR\s+VkResult\s+VKAPI_CALL\s+vkGetPhysicalDeviceSurfaceFormats2KHR\s*\([^)]*VkPhysicalDeviceSurfaceInfo2KHR")
+        caps2_body = c_function_body(icd, "vkGetPhysicalDeviceSurfaceCapabilities2KHR")
+        for marker in [
+            "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SURFACE_INFO_2_KHR",
+            "VK_STRUCTURE_TYPE_SURFACE_CAPABILITIES_2_KHR",
+            "surface-capabilities2-pnext-unsupported",
+            "vkGetPhysicalDeviceSurfaceCapabilitiesKHR",
+            "pSurfaceInfo->surface",
+            "surfaceCapabilities",
+        ]:
+            self.assertIn(marker, caps2_body)
+
+        formats2_body = c_function_body(icd, "vkGetPhysicalDeviceSurfaceFormats2KHR")
+        for marker in [
+            "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SURFACE_INFO_2_KHR",
+            "VK_STRUCTURE_TYPE_SURFACE_FORMAT_2_KHR",
+            "surface-formats2-pnext-unsupported",
+            "surface-formats2-output-pnext-unsupported",
+            "vkGetPhysicalDeviceSurfaceFormatsKHR",
+            "pSurfaceInfo->surface",
+            "surfaceFormat",
+        ]:
+            self.assertIn(marker, formats2_body)
 
     def test_vulkan_headless_surface_functions_fail_closed_and_have_success_paths(self):
         icd = VULKAN_ICD.read_text()

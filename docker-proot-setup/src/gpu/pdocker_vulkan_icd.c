@@ -76,6 +76,11 @@
 #define VK_EXT_HEADLESS_SURFACE_SPEC_VERSION 1
 #endif
 
+#ifndef VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME
+#define VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME "VK_KHR_get_surface_capabilities2"
+#define VK_KHR_GET_SURFACE_CAPABILITIES_2_SPEC_VERSION 1
+#endif
+
 typedef struct {
     VK_LOADER_DATA loader;
 } PdockerVkInstance;
@@ -10995,7 +11000,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceExtensionProperties(
         uint32_t *pPropertyCount,
         VkExtensionProperties *pProperties) {
     (void)pLayerName;
-    VkExtensionProperties available[2];
+    VkExtensionProperties available[3];
     uint32_t available_count = 0;
 #define ADD_INSTANCE_EXTENSION(name, version) do { \
         if (available_count < (uint32_t)(sizeof(available) / sizeof(available[0]))) { \
@@ -11008,6 +11013,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceExtensionProperties(
     } while (0)
     ADD_INSTANCE_EXTENSION(VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_SURFACE_SPEC_VERSION);
     ADD_INSTANCE_EXTENSION(VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME, VK_EXT_HEADLESS_SURFACE_SPEC_VERSION);
+    ADD_INSTANCE_EXTENSION(VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME,
+                           VK_KHR_GET_SURFACE_CAPABILITIES_2_SPEC_VERSION);
 #undef ADD_INSTANCE_EXTENSION
     if (!pPropertyCount) return VK_ERROR_INITIALIZATION_FAILED;
     copy_extension_properties(available, available_count, pPropertyCount, pProperties);
@@ -11018,6 +11025,7 @@ static bool instance_extension_advertised_name(const char *name) {
     if (!name) return false;
     if (strcmp(name, VK_KHR_SURFACE_EXTENSION_NAME) == 0) return true;
     if (strcmp(name, VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME) == 0) return true;
+    if (strcmp(name, VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME) == 0) return true;
     return false;
 }
 
@@ -13990,6 +13998,68 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfacePresentModesKHR(
     for (uint32_t i = 0; i < count; ++i) pPresentModes[i] = modes[i];
     *pPresentModeCount = count;
     return count < available_count ? VK_INCOMPLETE : VK_SUCCESS;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceCapabilities2KHR(
+        VkPhysicalDevice physicalDevice,
+        const VkPhysicalDeviceSurfaceInfo2KHR *pSurfaceInfo,
+        VkSurfaceCapabilities2KHR *pSurfaceCapabilities) {
+    if (!pSurfaceInfo || !pSurfaceCapabilities) return VK_ERROR_INITIALIZATION_FAILED;
+    if (pSurfaceInfo->sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SURFACE_INFO_2_KHR ||
+        pSurfaceCapabilities->sType != VK_STRUCTURE_TYPE_SURFACE_CAPABILITIES_2_KHR) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    if (pSurfaceInfo->pNext || pSurfaceCapabilities->pNext) {
+        trace_icd_runtime_failure("surface-capabilities2-pnext-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    return vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice,
+                                                     pSurfaceInfo->surface,
+                                                     &pSurfaceCapabilities->surfaceCapabilities);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceFormats2KHR(
+        VkPhysicalDevice physicalDevice,
+        const VkPhysicalDeviceSurfaceInfo2KHR *pSurfaceInfo,
+        uint32_t *pSurfaceFormatCount,
+        VkSurfaceFormat2KHR *pSurfaceFormats) {
+    if (!pSurfaceInfo || !pSurfaceFormatCount) return VK_ERROR_INITIALIZATION_FAILED;
+    if (pSurfaceInfo->sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SURFACE_INFO_2_KHR) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    if (pSurfaceInfo->pNext) {
+        trace_icd_runtime_failure("surface-formats2-pnext-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    if (!pSurfaceFormats) {
+        return vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice,
+                                                    pSurfaceInfo->surface,
+                                                    pSurfaceFormatCount,
+                                                    NULL);
+    }
+    const uint32_t requested_count = *pSurfaceFormatCount;
+    for (uint32_t i = 0; i < requested_count; ++i) {
+        if (pSurfaceFormats[i].sType != VK_STRUCTURE_TYPE_SURFACE_FORMAT_2_KHR) {
+            return VK_ERROR_INITIALIZATION_FAILED;
+        }
+        if (pSurfaceFormats[i].pNext) {
+            trace_icd_runtime_failure("surface-formats2-output-pnext-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
+            return VK_ERROR_FEATURE_NOT_PRESENT;
+        }
+    }
+    VkSurfaceFormatKHR formats[4];
+    uint32_t count = requested_count < (uint32_t)(sizeof(formats) / sizeof(formats[0]))
+        ? requested_count
+        : (uint32_t)(sizeof(formats) / sizeof(formats[0]));
+    VkResult rc = vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice,
+                                                       pSurfaceInfo->surface,
+                                                       &count,
+                                                       formats);
+    for (uint32_t i = 0; i < count; ++i) {
+        pSurfaceFormats[i].surfaceFormat = formats[i];
+    }
+    *pSurfaceFormatCount = count;
+    return rc;
 }
 
 static bool pdocker_vk_headless_swapchain_valid(const PdockerVkSwapchain *swapchain) {
@@ -20396,6 +20466,8 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_PROC(vkGetPhysicalDeviceSurfaceCapabilitiesKHR);
     MAP_PROC(vkGetPhysicalDeviceSurfaceFormatsKHR);
     MAP_PROC(vkGetPhysicalDeviceSurfacePresentModesKHR);
+    MAP_PROC(vkGetPhysicalDeviceSurfaceCapabilities2KHR);
+    MAP_PROC(vkGetPhysicalDeviceSurfaceFormats2KHR);
     MAP_PROC(vkCreateSwapchainKHR);
     MAP_PROC(vkDestroySwapchainKHR);
     MAP_PROC(vkGetSwapchainImagesKHR);
