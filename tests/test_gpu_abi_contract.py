@@ -3248,7 +3248,6 @@ class GpuAbiContractTest(unittest.TestCase):
             "extension_hash = fnv1a64_update(extension_hash, buffer_barriers",
             "commands[barrier->command_index].command_type != PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER",
             "barrier->resource_index >= header->resource_count",
-            "barrier->src_stage_mask == 0",
             "barrier->level_count == VK_REMAINING_MIP_LEVELS",
             "barrier->layer_count == VK_REMAINING_ARRAY_LAYERS",
             "vulkan_graphics_v620_image_aspect_valid(image, (VkImageAspectFlags)barrier->aspect_mask)",
@@ -3259,6 +3258,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "metadata_count != 1",
         ]:
             self.assertIn(marker, content_validator)
+        self.assertNotIn("barrier->src_stage_mask == 0 || barrier->dst_stage_mask == 0", content_validator)
 
     def test_vulkan_graphics_v61_image_barrier_replay_is_reachable(self):
         executor = GPU_EXECUTOR.read_text()
@@ -7214,7 +7214,15 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("pDependencyInfo->pImageMemoryBarriers", barrier2_body)
         self.assertIn("const VkImageMemoryBarrier2 *b", barrier2_body)
         self.assertIn("record_image_barrier_op(commandBuffer", barrier2_body)
+        self.assertIn("legacy_pipeline_barrier_inputs_unsupported", icd)
+        self.assertIn("command_buffer_mark_recording_failed(cmd, \"legacy-pipeline-barrier-unsupported\")", barrier_body)
+        self.assertIn("srcStageMask == 0 || dstStageMask == 0", icd)
+        self.assertIn("pMemoryBarriers[i].pNext", icd)
+        self.assertIn("pBufferMemoryBarriers[i].pNext", icd)
+        self.assertIn("pImageMemoryBarriers[i].pNext", icd)
         self.assertIn("dependency_info_has_unsupported_pnext", icd)
+        self.assertIn("sync2_stage_access_pair_invalid", icd)
+        self.assertIn("VK_PIPELINE_STAGE_2_NONE", icd)
         self.assertIn("if (info->pNext) return true;", icd)
         self.assertIn("info->memoryBarrierCount && !info->pMemoryBarriers", icd)
         self.assertIn("info->bufferMemoryBarrierCount && !info->pBufferMemoryBarriers", icd)

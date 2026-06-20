@@ -16586,6 +16586,31 @@ static void record_buffer_barrier_op(
     op->dst_queue_family_index = dstQueueFamilyIndex;
 }
 
+static bool legacy_pipeline_barrier_inputs_unsupported(
+        VkPipelineStageFlags srcStageMask,
+        VkPipelineStageFlags dstStageMask,
+        uint32_t memoryBarrierCount,
+        const VkMemoryBarrier *pMemoryBarriers,
+        uint32_t bufferMemoryBarrierCount,
+        const VkBufferMemoryBarrier *pBufferMemoryBarriers,
+        uint32_t imageMemoryBarrierCount,
+        const VkImageMemoryBarrier *pImageMemoryBarriers) {
+    if (srcStageMask == 0 || dstStageMask == 0) return true;
+    if (memoryBarrierCount && !pMemoryBarriers) return true;
+    for (uint32_t i = 0; pMemoryBarriers && i < memoryBarrierCount; ++i) {
+        if (pMemoryBarriers[i].pNext) return true;
+    }
+    if (bufferMemoryBarrierCount && !pBufferMemoryBarriers) return true;
+    for (uint32_t i = 0; pBufferMemoryBarriers && i < bufferMemoryBarrierCount; ++i) {
+        if (pBufferMemoryBarriers[i].pNext) return true;
+    }
+    if (imageMemoryBarrierCount && !pImageMemoryBarriers) return true;
+    for (uint32_t i = 0; pImageMemoryBarriers && i < imageMemoryBarrierCount; ++i) {
+        if (pImageMemoryBarriers[i].pNext) return true;
+    }
+    return false;
+}
+
 VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier(
         VkCommandBuffer commandBuffer,
         VkPipelineStageFlags srcStageMask,
@@ -16599,6 +16624,18 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier(
         const VkImageMemoryBarrier *pImageMemoryBarriers) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     if (cmd) {
+        if (legacy_pipeline_barrier_inputs_unsupported(srcStageMask,
+                                                       dstStageMask,
+                                                       memoryBarrierCount,
+                                                       pMemoryBarriers,
+                                                       bufferMemoryBarrierCount,
+                                                       pBufferMemoryBarriers,
+                                                       imageMemoryBarrierCount,
+                                                       pImageMemoryBarriers)) {
+            cmd->graphics_unsupported = true;
+            command_buffer_mark_recording_failed(cmd, "legacy-pipeline-barrier-unsupported");
+            return;
+        }
         if ((dependencyFlags & ~VK_DEPENDENCY_BY_REGION_BIT) != 0) {
             cmd->graphics_unsupported = true;
         }
@@ -19223,6 +19260,16 @@ VKAPI_ATTR void VKAPI_CALL vkCmdWaitEvents(
                          pImageMemoryBarriers);
 }
 
+static bool sync2_stage_access_pair_invalid(
+        VkPipelineStageFlags2 srcStageMask,
+        VkAccessFlags2 srcAccessMask,
+        VkPipelineStageFlags2 dstStageMask,
+        VkAccessFlags2 dstAccessMask) {
+    if (srcStageMask == VK_PIPELINE_STAGE_2_NONE && srcAccessMask != 0) return true;
+    if (dstStageMask == VK_PIPELINE_STAGE_2_NONE && dstAccessMask != 0) return true;
+    return false;
+}
+
 static bool dependency_info_has_unsupported_pnext(const VkDependencyInfo *info) {
     if (!info) return false;
     if (info->pNext) return true;
@@ -19230,18 +19277,30 @@ static bool dependency_info_has_unsupported_pnext(const VkDependencyInfo *info) 
     if (info->pMemoryBarriers) {
         for (uint32_t i = 0; i < info->memoryBarrierCount; ++i) {
             if (info->pMemoryBarriers[i].pNext) return true;
+            if (sync2_stage_access_pair_invalid(info->pMemoryBarriers[i].srcStageMask,
+                                                info->pMemoryBarriers[i].srcAccessMask,
+                                                info->pMemoryBarriers[i].dstStageMask,
+                                                info->pMemoryBarriers[i].dstAccessMask)) return true;
         }
     }
     if (info->bufferMemoryBarrierCount && !info->pBufferMemoryBarriers) return true;
     if (info->pBufferMemoryBarriers) {
         for (uint32_t i = 0; i < info->bufferMemoryBarrierCount; ++i) {
             if (info->pBufferMemoryBarriers[i].pNext) return true;
+            if (sync2_stage_access_pair_invalid(info->pBufferMemoryBarriers[i].srcStageMask,
+                                                info->pBufferMemoryBarriers[i].srcAccessMask,
+                                                info->pBufferMemoryBarriers[i].dstStageMask,
+                                                info->pBufferMemoryBarriers[i].dstAccessMask)) return true;
         }
     }
     if (info->imageMemoryBarrierCount && !info->pImageMemoryBarriers) return true;
     if (info->pImageMemoryBarriers) {
         for (uint32_t i = 0; i < info->imageMemoryBarrierCount; ++i) {
             if (info->pImageMemoryBarriers[i].pNext) return true;
+            if (sync2_stage_access_pair_invalid(info->pImageMemoryBarriers[i].srcStageMask,
+                                                info->pImageMemoryBarriers[i].srcAccessMask,
+                                                info->pImageMemoryBarriers[i].dstStageMask,
+                                                info->pImageMemoryBarriers[i].dstAccessMask)) return true;
         }
     }
     return false;

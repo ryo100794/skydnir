@@ -21611,7 +21611,6 @@ static int validate_vulkan_graphics_v6_frame_content(
             if (barrier->reserved0 != 0) return -EPROTO;
             if (barrier->command_index >= header->command_count) return -EPROTO;
             if (commands[barrier->command_index].command_type != PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER) return -EPROTO;
-            if (barrier->src_stage_mask == 0 || barrier->dst_stage_mask == 0) return -EINVAL;
         }
         for (uint32_t i = 0; i < header_v61->v61.buffer_barrier_count; ++i) {
             const PdockerGpuVulkanGraphicsV61BufferBarrierEntry *barrier = &buffer_barriers[i];
@@ -21626,7 +21625,6 @@ static int validate_vulkan_graphics_v6_frame_content(
             if (!vulkan_graphics_barrier_queue_family_replayable(
                     barrier->src_queue_family_index,
                     barrier->dst_queue_family_index)) return -EOPNOTSUPP;
-            if (barrier->src_stage_mask == 0 || barrier->dst_stage_mask == 0) return -EINVAL;
         }
         for (uint32_t i = 0; i < header_v61->v61.image_barrier_count; ++i) {
             const PdockerGpuVulkanGraphicsV61ImageBarrierEntry *barrier = &image_barriers[i];
@@ -21652,7 +21650,6 @@ static int validate_vulkan_graphics_v6_frame_content(
                     barrier->dst_queue_family_index)) {
                 return -EOPNOTSUPP;
             }
-            if (barrier->src_stage_mask == 0 || barrier->dst_stage_mask == 0) return -EINVAL;
         }
     }
     for (uint32_t i = 0; i < header->command_count; ++i) {
