@@ -1697,6 +1697,10 @@ static bool pdocker_vk_format_is_depth_stencil(VkFormat format) {
            pdocker_vk_format_has_stencil(format);
 }
 
+static bool image_mip_extent(const PdockerVkImage *image,
+                             uint32_t mip_level,
+                             VkExtent3D *out);
+
 static const VkFormat PDOCKER_VK_BRIDGE_FORMATS[] = {
     VK_FORMAT_R8_UNORM,
     VK_FORMAT_R8_SNORM,
@@ -1791,10 +1795,79 @@ static VkFormatFeatureFlags pdocker_vk_format_image_features(VkFormat format) {
 }
 
 static bool pdocker_vk_resolve_image_executor_eligible(const PdockerVkImageResolveOp *op) {
+    if (!op || !op->src || !op->dst || !op->src->memory || !op->dst->memory) return false;
+    if (op->src->format != op->dst->format ||
+        op->src->samples == VK_SAMPLE_COUNT_1_BIT ||
+        op->dst->samples != VK_SAMPLE_COUNT_1_BIT ||
+        op->region.srcSubresource.aspectMask != VK_IMAGE_ASPECT_COLOR_BIT ||
+        op->region.dstSubresource.aspectMask != VK_IMAGE_ASPECT_COLOR_BIT ||
+        op->region.srcSubresource.layerCount == 0 ||
+        op->region.srcSubresource.layerCount != op->region.dstSubresource.layerCount ||
+        op->region.extent.width == 0 ||
+        op->region.extent.height == 0 ||
+        op->region.extent.depth == 0 ||
+        !(op->src->usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) ||
+        !(op->dst->usage & VK_IMAGE_USAGE_TRANSFER_DST_BIT) ||
+        (op->src_layout != VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL &&
+         op->src_layout != VK_IMAGE_LAYOUT_GENERAL) ||
+        (op->dst_layout != VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL &&
+         op->dst_layout != VK_IMAGE_LAYOUT_GENERAL)) {
+        return false;
+    }
+    if (pdocker_vk_format_is_depth_stencil(op->src->format) ||
+        conservative_format_bytes_per_pixel_for_aspect(op->src->format, VK_IMAGE_ASPECT_COLOR_BIT) == 0) {
+        return false;
+    }
+    const VkFormatFeatureFlags features = pdocker_vk_advertised_image_features(op->src->format);
+    if ((features & (VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT |
+                     VK_FORMAT_FEATURE_TRANSFER_SRC_BIT |
+                     VK_FORMAT_FEATURE_TRANSFER_DST_BIT)) !=
+        (VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT |
+         VK_FORMAT_FEATURE_TRANSFER_SRC_BIT |
+         VK_FORMAT_FEATURE_TRANSFER_DST_BIT)) {
+        return false;
+    }
+    VkExtent3D src_extent;
+    VkExtent3D dst_extent;
+    if (!image_mip_extent(op->src, op->region.srcSubresource.mipLevel, &src_extent) ||
+        !image_mip_extent(op->dst, op->region.dstSubresource.mipLevel, &dst_extent)) {
+        return false;
+    }
+    if (op->region.srcSubresource.baseArrayLayer >= op->src->array_layers ||
+        op->region.srcSubresource.layerCount >
+            op->src->array_layers - op->region.srcSubresource.baseArrayLayer ||
+        op->region.dstSubresource.baseArrayLayer >= op->dst->array_layers ||
+        op->region.dstSubresource.layerCount >
+            op->dst->array_layers - op->region.dstSubresource.baseArrayLayer ||
+        op->region.srcOffset.x < 0 || op->region.srcOffset.y < 0 || op->region.srcOffset.z < 0 ||
+        op->region.dstOffset.x < 0 || op->region.dstOffset.y < 0 || op->region.dstOffset.z < 0 ||
+        (uint32_t)op->region.srcOffset.x > src_extent.width ||
+        op->region.extent.width > src_extent.width - (uint32_t)op->region.srcOffset.x ||
+        (uint32_t)op->region.srcOffset.y > src_extent.height ||
+        op->region.extent.height > src_extent.height - (uint32_t)op->region.srcOffset.y ||
+        (uint32_t)op->region.srcOffset.z > src_extent.depth ||
+        op->region.extent.depth > src_extent.depth - (uint32_t)op->region.srcOffset.z ||
+        (uint32_t)op->region.dstOffset.x > dst_extent.width ||
+        op->region.extent.width > dst_extent.width - (uint32_t)op->region.dstOffset.x ||
+        (uint32_t)op->region.dstOffset.y > dst_extent.height ||
+        op->region.extent.height > dst_extent.height - (uint32_t)op->region.dstOffset.y ||
+        (uint32_t)op->region.dstOffset.z > dst_extent.depth ||
+        op->region.extent.depth > dst_extent.depth - (uint32_t)op->region.dstOffset.z) {
+        return false;
+    }
+    return true;
+}
+
+static bool pdocker_vk_resolve_image_host_fallback_eligible(const PdockerVkImageResolveOp *op) {
+    /*
+     * Vulkan image resolve is sample reduction, not a byte copy.  Keep the
+     * host fallback closed; eligible resolves must go through the native
+     * executor path so multisample semantics stay owned by the real Vulkan
+     * driver.
+     */
     (void)op;
     return false;
 }
-
 
 static bool pdocker_vk_blit_image_executor_eligible(const PdockerVkImageBlitOp *op) {
     if (!op || !op->src || !op->dst || !op->src->memory || !op->dst->memory) return false;
@@ -3765,9 +3838,6 @@ static int validate_descriptor_transport_shape(
         uint32_t set_index,
         uint32_t binding_index,
         size_t *effective_size);
-static bool image_mip_extent(const PdockerVkImage *image,
-                             uint32_t mip_level,
-                             VkExtent3D *out);
 static bool normalize_image_subresource_range(
         const PdockerVkImage *image,
         const VkImageSubresourceRange *range,
@@ -4391,6 +4461,37 @@ static bool command_buffer_has_graphics_records_in_sequence_range(
     return false;
 }
 
+static bool command_op_requires_graphics_executor_frame(
+        const PdockerVkCommandBuffer *cmd,
+        uint32_t op_index) {
+    if (!cmd || op_index >= cmd->command_op_count) return false;
+    const PdockerVkCommandOp *op = &cmd->command_ops[op_index];
+    switch (op->type) {
+        case PDOCKER_VK_COMMAND_RESOLVE_IMAGE:
+            return op->index < cmd->image_resolve_op_count &&
+                   pdocker_vk_resolve_image_executor_eligible(&cmd->image_resolve_ops[op->index]);
+        default:
+            return false;
+    }
+}
+
+static bool command_buffer_has_executor_frame_content_in_sequence_range(
+        const PdockerVkCommandBuffer *cmd,
+        uint32_t sequence_begin,
+        uint32_t sequence_end) {
+    if (!cmd || sequence_begin > sequence_end) return false;
+    if (command_buffer_has_graphics_records_in_sequence_range(cmd, sequence_begin, sequence_end)) {
+        return true;
+    }
+    for (uint32_t op_index = 0; op_index < cmd->command_op_count; ++op_index) {
+        if (!command_op_sequence_in_range(op_index, sequence_begin, sequence_end)) continue;
+        if (command_op_requires_graphics_executor_frame(cmd, op_index)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static int send_recorded_vulkan_graphics_v6_1_frame_range(
         const PdockerVkCommandBuffer *cmd,
         const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *submit_sync_entries,
@@ -4399,10 +4500,10 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
         uint32_t sequence_end,
         bool include_state_preamble) {
     if (sequence_begin > sequence_end) return -EINVAL;
-    bool has_graphics_records_in_range =
-        command_buffer_has_graphics_records_in_sequence_range(
+    bool has_executor_frame_content_in_range =
+        command_buffer_has_executor_frame_content_in_sequence_range(
             cmd, sequence_begin, sequence_end);
-    if (!cmd || (!has_graphics_records_in_range && submit_sync_count == 0)) {
+    if (!cmd || (!has_executor_frame_content_in_range && submit_sync_count == 0)) {
         return send_empty_vulkan_graphics_v6_1_validation_frame();
     }
     int socket_fd = connect_queue();
@@ -9194,7 +9295,7 @@ static void execute_recorded_clear_color_image_op(
 static void execute_recorded_resolve_image_op(
         PdockerVkImageResolveOp *op,
         PdockerVkCopyStats *stats) {
-    if (!pdocker_vk_resolve_image_executor_eligible(op) ||
+    if (!pdocker_vk_resolve_image_host_fallback_eligible(op) ||
         op->region.srcSubresource.aspectMask != VK_IMAGE_ASPECT_COLOR_BIT ||
         op->region.dstSubresource.aspectMask != VK_IMAGE_ASPECT_COLOR_BIT ||
         op->region.srcSubresource.layerCount == 0 ||
@@ -17508,7 +17609,14 @@ static bool command_buffer_needs_graphics_submit_sync_frame(const PdockerVkComma
             break;
         }
     }
-    if (!has_graphics_submit_frame) {
+    bool has_executor_frame_command = false;
+    for (uint32_t op_index = 0; op_index < cmd->command_op_count; ++op_index) {
+        if (command_op_requires_graphics_executor_frame(cmd, op_index)) {
+            has_executor_frame_command = true;
+            break;
+        }
+    }
+    if (!has_graphics_submit_frame && !has_executor_frame_command) {
         return false;
     }
     for (uint32_t i = 0; i < cmd->command_op_count; ++i) {
@@ -18230,7 +18338,8 @@ static bool graphics_mixed_submit_plan(
     }
     for (uint32_t op_index = 0; op_index < cmd->command_op_count; ++op_index) {
         PdockerVkCommandOpType type = cmd->command_ops[op_index].type;
-        if (!command_op_should_extend_graphics_gpu_frame(
+        if (!command_op_requires_graphics_executor_frame(cmd, op_index) &&
+            !command_op_should_extend_graphics_gpu_frame(
                 type, op_index, first_draw, last_draw)) {
             continue;
         }
@@ -18244,6 +18353,7 @@ static bool graphics_mixed_submit_plan(
         bool interleaved_between_draws = first_draw != UINT32_MAX &&
                                          op_index > first_draw && op_index < last_draw &&
                                          command_op_is_graphics_interleavable_transfer_op(type);
+        bool executor_frame_command = command_op_requires_graphics_executor_frame(cmd, op_index);
         if (command_op_is_graphics_interleavable_transfer_op(type)) {
             if (inside_gpu_frame && graphics_sequence_inside_active_rendering(cmd, op_index)) {
                 if (reason_out) {
@@ -18251,7 +18361,7 @@ static bool graphics_mixed_submit_plan(
                 }
                 return false;
             }
-            if (inside_gpu_frame && !interleaved_between_draws) {
+            if (inside_gpu_frame && !interleaved_between_draws && !executor_frame_command) {
                 if (reason_out) {
                     *reason_out = "graphics-mixed-host-op-inside-gpu-frame-unimplemented";
                 }
@@ -18304,13 +18414,13 @@ static uint32_t count_graphics_sequence_segments_split_by_dispatch(
          ++op_index) {
         const PdockerVkCommandOp *op = &cmd->command_ops[op_index];
         if (!command_op_is_executor_compute_op(op->type)) continue;
-        if (command_buffer_has_graphics_records_in_sequence_range(
+        if (command_buffer_has_executor_frame_content_in_sequence_range(
                 cmd, segment_begin, op_index + 1u)) {
             segment_count++;
         }
         segment_begin = op_index + 1u;
     }
-    if (command_buffer_has_graphics_records_in_sequence_range(
+    if (command_buffer_has_executor_frame_content_in_sequence_range(
             cmd, segment_begin, sequence_end)) {
         segment_count++;
     }
@@ -18360,7 +18470,7 @@ static int execute_graphics_mixed_gpu_sequence(
                 VK_ERROR_FEATURE_NOT_PRESENT);
             return -EOPNOTSUPP;
         }
-        if (command_buffer_has_graphics_records_in_sequence_range(
+        if (command_buffer_has_executor_frame_content_in_sequence_range(
                 cmd, segment_begin, op_index + 1u)) {
             segment_index++;
             int graphics_rc = send_graphics_sequence_segment(
@@ -18373,7 +18483,7 @@ static int execute_graphics_mixed_gpu_sequence(
         if (dispatch_rc != VK_SUCCESS) return -EOPNOTSUPP;
         segment_begin = op_index + 1u;
     }
-    if (command_buffer_has_graphics_records_in_sequence_range(
+    if (command_buffer_has_executor_frame_content_in_sequence_range(
             cmd, segment_begin, sequence_end)) {
         segment_index++;
         int graphics_rc = send_graphics_sequence_segment(
