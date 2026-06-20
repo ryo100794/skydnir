@@ -19181,6 +19181,37 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2(
         VkFence fence) {
     if (submitCount == 0) return vkQueueSubmit(queue, 0, NULL, fence);
     if (!pSubmits) return VK_ERROR_INITIALIZATION_FAILED;
+    for (uint32_t validate_i = 0; validate_i < submitCount; ++validate_i) {
+        const VkSubmitInfo2 *src = &pSubmits[validate_i];
+        if (src->flags != 0) {
+            trace_icd_runtime_failure("submit2-flags-unsupported",
+                                      VK_ERROR_FEATURE_NOT_PRESENT);
+            return VK_ERROR_FEATURE_NOT_PRESENT;
+        }
+        if (src->waitSemaphoreInfoCount > 0 && !src->pWaitSemaphoreInfos) {
+            return VK_ERROR_INITIALIZATION_FAILED;
+        }
+        VkResult validate_rc = validate_submit2_wait_semaphores(src, bridge_available());
+        if (validate_rc != VK_SUCCESS) return validate_rc;
+        if (src->commandBufferInfoCount > 0 && !src->pCommandBufferInfos) {
+            return VK_ERROR_INITIALIZATION_FAILED;
+        }
+        validate_rc = validate_submit2_command_buffers(src);
+        if (validate_rc != VK_SUCCESS) return validate_rc;
+        if (src->signalSemaphoreInfoCount > 0 && !src->pSignalSemaphoreInfos) {
+            return VK_ERROR_INITIALIZATION_FAILED;
+        }
+        validate_rc = validate_submit2_signal_semaphores(src);
+        if (validate_rc != VK_SUCCESS) return validate_rc;
+        PdockerGpuVulkanGraphicsV619SubmitSyncEntry validate_entries[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+        size_t validate_entry_count = 0;
+        VkFence validate_fence = (validate_i + 1u == submitCount) ? fence : VK_NULL_HANDLE;
+        if (!collect_submit2_submit_sync_entries(src, validate_fence,
+                                                 validate_entries, &validate_entry_count)) {
+            trace_icd_runtime_failure("submit2-sync-metadata-overflow", VK_ERROR_FEATURE_NOT_PRESENT);
+            return VK_ERROR_FEATURE_NOT_PRESENT;
+        }
+    }
     PdockerVkFence *submit_fence = (PdockerVkFence *)fence;
     if (submit_fence) submit_fence->signaled = false;
     for (uint32_t i = 0; i < submitCount; ++i) {

@@ -5321,10 +5321,19 @@ class GpuAbiContractTest(unittest.TestCase):
         queue_submit2_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2", 1)[1].split(
             "VKAPI_ATTR VkResult VKAPI_CALL vkQueueWaitIdle", 1
         )[0]
+        self.assertIn("for (uint32_t validate_i = 0; validate_i < submitCount; ++validate_i)", queue_submit2_body)
+        self.assertIn("VkResult validate_rc = validate_submit2_wait_semaphores(src, bridge_available());", queue_submit2_body)
+        self.assertIn("validate_rc = validate_submit2_command_buffers(src);", queue_submit2_body)
+        self.assertIn("validate_rc = validate_submit2_signal_semaphores(src);", queue_submit2_body)
+        self.assertIn("collect_submit2_submit_sync_entries(src, validate_fence", queue_submit2_body)
         self.assertIn("validate_submit2_wait_semaphores(src, bridge_available())", queue_submit2_body)
         self.assertIn("validate_submit2_command_buffers(src)", queue_submit2_body)
         self.assertIn("validate_submit2_signal_semaphores(src)", queue_submit2_body)
         self.assertIn("complete_submit2_semaphores(src)", queue_submit2_body)
+        self.assertLess(
+            queue_submit2_body.index("for (uint32_t validate_i = 0; validate_i < submitCount; ++validate_i)"),
+            queue_submit2_body.index("submit_fence->signaled = false;"),
+        )
         for marker in [
             "submit2-pnext-unsupported",
             "submit2-wait-pnext-unsupported",
