@@ -14118,6 +14118,26 @@ static VkResult pdocker_vk_present_image_result(
     return VK_SUCCESS;
 }
 
+static bool pdocker_vk_present_target_duplicate(
+        const VkPresentInfoKHR *present_info,
+        uint32_t target_index) {
+    if (!present_info ||
+        !present_info->pSwapchains ||
+        !present_info->pImageIndices ||
+        target_index >= present_info->swapchainCount) {
+        return true;
+    }
+    VkSwapchainKHR swapchain = present_info->pSwapchains[target_index];
+    uint32_t image_index = present_info->pImageIndices[target_index];
+    for (uint32_t i = 0; i < target_index; ++i) {
+        if (present_info->pSwapchains[i] == swapchain &&
+            present_info->pImageIndices[i] == image_index) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static void pdocker_vk_destroy_swapchain_images(VkDevice device, PdockerVkSwapchain *swapchain) {
     if (!swapchain) return;
     for (uint32_t i = 0; i < swapchain->image_count && i < PDOCKER_VK_MAX_SWAPCHAIN_IMAGES; ++i) {
@@ -14402,6 +14422,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueuePresentKHR(
     for (uint32_t i = 0; i < pPresentInfo->swapchainCount; ++i) {
         PdockerVkSwapchain *sc = (PdockerVkSwapchain *)pPresentInfo->pSwapchains[i];
         VkResult rc = pdocker_vk_present_image_result(sc, pPresentInfo->pImageIndices[i]);
+        if (rc == VK_SUCCESS && pdocker_vk_present_target_duplicate(pPresentInfo, i)) {
+            trace_icd_runtime_failure("queue-present-duplicate-target", VK_ERROR_OUT_OF_DATE_KHR);
+            rc = VK_ERROR_OUT_OF_DATE_KHR;
+        }
         if (pPresentInfo->pResults) pPresentInfo->pResults[i] = rc;
         if (aggregate == VK_SUCCESS && rc != VK_SUCCESS) aggregate = rc;
     }

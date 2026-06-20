@@ -1215,6 +1215,14 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, present_image_body)
 
+        duplicate_body = c_function_body(icd, "pdocker_vk_present_target_duplicate")
+        for marker in [
+            "target_index >= present_info->swapchainCount",
+            "present_info->pSwapchains[i] == swapchain",
+            "present_info->pImageIndices[i] == image_index",
+        ]:
+            self.assertIn(marker, duplicate_body)
+
         get_images_body = c_function_body(icd, "vkGetSwapchainImagesKHR")
         for marker in [
             "!pSwapchainImageCount",
@@ -1271,6 +1279,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "swapchainCount == 0",
             "pSwapchains",
             "pdocker_vk_present_image_result",
+            "pdocker_vk_present_target_duplicate",
+            "queue-present-duplicate-target",
             "if (aggregate != VK_SUCCESS) return aggregate",
             "semaphore_complete_wait",
             "sc->acquired[image_index] = false",
@@ -1279,6 +1289,14 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, present_body)
         self.assertRegex(present_body, r"(pResults|swapchainCount)")
+        self.assertLess(
+            present_body.index("pdocker_vk_present_target_duplicate"),
+            present_body.index("semaphore_complete_wait"),
+        )
+        self.assertLess(
+            present_body.index("pdocker_vk_present_target_duplicate"),
+            present_body.index("sc->acquired[image_index] = false"),
+        )
 
     def test_vulkan_headless_present_layout_is_not_replayed_raw_to_executor(self):
         executor = GPU_EXECUTOR.read_text()
