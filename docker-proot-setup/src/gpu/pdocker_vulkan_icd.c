@@ -154,6 +154,7 @@ static uint32_t pdocker_vk_graphics_dynamic_state_bit_index(VkDynamicState state
         case VK_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE: return 22u;
         case VK_DYNAMIC_STATE_LOGIC_OP_EXT: return 23u;
         case VK_DYNAMIC_STATE_PATCH_CONTROL_POINTS_EXT: return 24u;
+        case VK_DYNAMIC_STATE_VERTEX_INPUT_BINDING_STRIDE: return 25u;
         case VK_DYNAMIC_STATE_LINE_WIDTH: return 2u;
         case VK_DYNAMIC_STATE_CULL_MODE: return 3u;
         case VK_DYNAMIC_STATE_FRONT_FACE: return 4u;
@@ -15337,6 +15338,7 @@ static void record_vertex_buffer_bindings(
     PdockerVkGraphicsCommandRecord record;
     memset(&record, 0, sizeof(record));
     record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_VERTEX_BUFFERS;
+    record.flags = pStrides ? PDOCKER_GPU_GRAPHICS_V6_COMMAND_VERTEX_STRIDES_PRESENT : 0u;
     record.vertex_binding_first = firstBinding;
     record.vertex_binding_count = bindingCount;
     (void)append_graphics_command_record(cmd, &record);

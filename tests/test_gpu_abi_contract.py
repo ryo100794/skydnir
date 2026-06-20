@@ -1732,6 +1732,58 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, executor)
 
+
+    def test_vulkan_dynamic_vertex_input_binding_stride_is_replayed(self):
+        icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
+        app_abi = APP_HEADER.read_text()
+        container_abi = CONTAINER_HEADER.read_text()
+
+        self.assertIn("#define PDOCKER_GPU_GRAPHICS_V6_COMMAND_VERTEX_STRIDES_PRESENT 0x00000001u", app_abi)
+        self.assertIn("#define PDOCKER_GPU_GRAPHICS_V6_COMMAND_VERTEX_STRIDES_PRESENT 0x00000001u", container_abi)
+
+        icd_bit = c_function_body(icd, "pdocker_vk_graphics_dynamic_state_bit_index")
+        executor_bit = c_function_body(executor, "vulkan_graphics_dynamic_state_bit_index")
+        for body in [icd_bit, executor_bit]:
+            self.assertIn("case VK_DYNAMIC_STATE_VERTEX_INPUT_BINDING_STRIDE: return 25u;", body)
+
+        record_body = c_function_body(icd, "record_vertex_buffer_bindings")
+        for marker in [
+            "binding->stride = pStrides ? pStrides[i] : 0;",
+            "record.flags = pStrides ? PDOCKER_GPU_GRAPHICS_V6_COMMAND_VERTEX_STRIDES_PRESENT : 0u;",
+        ]:
+            self.assertIn(marker, record_body)
+
+        self.assertIn("PFN_vkCmdBindVertexBuffers2 cmd_bind_vertex_buffers2;", executor)
+        self.assertIn('vkGetDeviceProcAddr(rt->device, "vkCmdBindVertexBuffers2")', executor)
+        self.assertIn('vkGetDeviceProcAddr(rt->device, "vkCmdBindVertexBuffers2EXT")', executor)
+
+        pipeline_body = executor.split("VkDynamicState dynamic_states[32];", 1)[1].split(
+            "VkPipelineDynamicStateCreateInfo dsci", 1
+        )[0]
+        self.assertIn("vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_VERTEX_INPUT_BINDING_STRIDE)", pipeline_body)
+        self.assertIn("ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_VERTEX_INPUT_BINDING_STRIDE);", pipeline_body)
+
+        validation_body = executor.split("static int validate_vulkan_graphics_v6_frame_content", 1)[1].split(
+            "static const PdockerGpuVulkanGraphicsV63DepthStencilStateEntry", 1
+        )[0]
+        self.assertIn("PDOCKER_GPU_GRAPHICS_V6_COMMAND_VERTEX_STRIDES_PRESENT", validation_body)
+        self.assertIn("command->flags & ~supported_flags", validation_body)
+
+        replay_body = executor.rsplit("case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_VERTEX_BUFFERS:", 1)[1].split(
+            "case PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW:", 1
+        )[0]
+        for marker in [
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_VERTEX_STRIDES_PRESENT",
+            "VkDeviceSize strides[PDOCKER_GPU_GRAPHICS_REPLAY_MAX_BUFFERS]",
+            "strides[b] = (VkDeviceSize)binding->stride;",
+            "if (!rt->enabled_ext_extended_dynamic_state || !rt->cmd_bind_vertex_buffers2)",
+            "rt->cmd_bind_vertex_buffers2(command_buffer, first_binding",
+            "vk_buffers, offsets, NULL, stride_ptr",
+            "vkCmdBindVertexBuffers(command_buffer, first_binding",
+        ]:
+            self.assertIn(marker, replay_body)
+
     def test_vulkan_graphics_pipeline_static_viewport_scissor_is_serialized(self):
         icd = VULKAN_ICD.read_text()
         body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines", 1)[1].split(

@@ -1340,6 +1340,7 @@ typedef struct {
     PFN_vkCmdSetDepthBoundsTestEnableEXT cmd_set_depth_bounds_test_enable;
     PFN_vkCmdSetStencilTestEnableEXT cmd_set_stencil_test_enable;
     PFN_vkCmdSetStencilOpEXT cmd_set_stencil_op;
+    PFN_vkCmdBindVertexBuffers2 cmd_bind_vertex_buffers2;
     PFN_vkCmdDrawIndirectCount cmd_draw_indirect_count;
     PFN_vkCmdDrawIndexedIndirectCount cmd_draw_indexed_indirect_count;
     PFN_vkCmdDispatchBase cmd_dispatch_base;
@@ -1381,6 +1382,7 @@ static uint32_t vulkan_graphics_dynamic_state_bit_index(uint32_t state_type) {
         case VK_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE: return 22u;
         case VK_DYNAMIC_STATE_LOGIC_OP_EXT: return 23u;
         case VK_DYNAMIC_STATE_PATCH_CONTROL_POINTS_EXT: return 24u;
+        case VK_DYNAMIC_STATE_VERTEX_INPUT_BINDING_STRIDE: return 25u;
         case VK_DYNAMIC_STATE_LINE_WIDTH: return 2u;
         case VK_DYNAMIC_STATE_CULL_MODE: return 3u;
         case VK_DYNAMIC_STATE_FRONT_FACE: return 4u;
@@ -12122,6 +12124,12 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
         rt->cmd_set_stencil_op =
             (PFN_vkCmdSetStencilOpEXT)vkGetDeviceProcAddr(rt->device, "vkCmdSetStencilOpEXT");
     }
+    rt->cmd_bind_vertex_buffers2 =
+        (PFN_vkCmdBindVertexBuffers2)vkGetDeviceProcAddr(rt->device, "vkCmdBindVertexBuffers2");
+    if (!rt->cmd_bind_vertex_buffers2) {
+        rt->cmd_bind_vertex_buffers2 =
+            (PFN_vkCmdBindVertexBuffers2)vkGetDeviceProcAddr(rt->device, "vkCmdBindVertexBuffers2EXT");
+    }
     rt->cmd_draw_indirect_count =
         (PFN_vkCmdDrawIndirectCount)vkGetDeviceProcAddr(rt->device, "vkCmdDrawIndirectCount");
     if (!rt->cmd_draw_indirect_count) {
@@ -21701,6 +21709,9 @@ static int validate_vulkan_graphics_v6_frame_content(
              command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW_INDEXED) &&
             command->pipeline_index == UINT32_MAX) return -EPROTO;
         if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_VERTEX_BUFFERS) {
+            const uint32_t supported_flags =
+                PDOCKER_GPU_GRAPHICS_V6_COMMAND_VERTEX_STRIDES_PRESENT;
+            if ((command->flags & ~supported_flags) != 0) return -EPROTO;
             for (uint32_t b = 0; b < command->vertex_binding_count; ++b) {
                 const PdockerGpuVulkanGraphicsV6VertexBindingEntry *binding =
                     &vertex_bindings[command->vertex_binding_first + b];
@@ -23879,6 +23890,7 @@ static int materialize_vulkan_graphics_v6_pipelines(
             vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE) |
             vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_LOGIC_OP_EXT) |
             vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_PATCH_CONTROL_POINTS_EXT) |
+            vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_VERTEX_INPUT_BINDING_STRIDE) |
             vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_LINE_WIDTH) |
             vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_CULL_MODE) |
             vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_FRONT_FACE) |
@@ -23905,6 +23917,7 @@ static int materialize_vulkan_graphics_v6_pipelines(
         ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE);
         ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_LOGIC_OP_EXT);
         ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_PATCH_CONTROL_POINTS_EXT);
+        ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_VERTEX_INPUT_BINDING_STRIDE);
         ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_LINE_WIDTH);
         ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_CULL_MODE);
         ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_FRONT_FACE);
@@ -26904,8 +26917,17 @@ static int record_vulkan_graphics_v6_command_buffer(
                     rc = -E2BIG;
                     goto cleanup;
                 }
+                const uint32_t supported_flags =
+                    PDOCKER_GPU_GRAPHICS_V6_COMMAND_VERTEX_STRIDES_PRESENT;
+                if ((command->flags & ~supported_flags) != 0) {
+                    rc = -EPROTO;
+                    goto cleanup;
+                }
                 VkBuffer vk_buffers[PDOCKER_GPU_GRAPHICS_REPLAY_MAX_BUFFERS];
                 VkDeviceSize offsets[PDOCKER_GPU_GRAPHICS_REPLAY_MAX_BUFFERS];
+                VkDeviceSize strides[PDOCKER_GPU_GRAPHICS_REPLAY_MAX_BUFFERS];
+                const VkDeviceSize *stride_ptr =
+                    (command->flags & PDOCKER_GPU_GRAPHICS_V6_COMMAND_VERTEX_STRIDES_PRESENT) ? strides : NULL;
                 uint32_t first_binding = UINT32_MAX;
                 for (uint32_t b = 0; b < command->vertex_binding_count; ++b) {
                     const PdockerGpuVulkanGraphicsV6VertexBindingEntry *binding =
@@ -26932,11 +26954,22 @@ static int record_vulkan_graphics_v6_command_buffer(
                     }
                     vk_buffers[b] = replay_buffer->buffer.buffer;
                     offsets[b] = (VkDeviceSize)(binding->offset - replay_buffer->upload_base);
+                    strides[b] = (VkDeviceSize)binding->stride;
                 }
                 if (command->vertex_binding_count > 0) {
-                    vkCmdBindVertexBuffers(command_buffer, first_binding,
-                                           command->vertex_binding_count,
-                                           vk_buffers, offsets);
+                    if (stride_ptr) {
+                        if (!rt->enabled_ext_extended_dynamic_state || !rt->cmd_bind_vertex_buffers2) {
+                            rc = -EOPNOTSUPP;
+                            goto cleanup;
+                        }
+                        rt->cmd_bind_vertex_buffers2(command_buffer, first_binding,
+                                                     command->vertex_binding_count,
+                                                     vk_buffers, offsets, NULL, stride_ptr);
+                    } else {
+                        vkCmdBindVertexBuffers(command_buffer, first_binding,
+                                               command->vertex_binding_count,
+                                               vk_buffers, offsets);
+                    }
                 }
                 break;
             }
