@@ -144,6 +144,9 @@ static uint32_t pdocker_vk_graphics_dynamic_state_bit_index(VkDynamicState state
         case VK_DYNAMIC_STATE_SCISSOR: return 1u;
         case VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT: return 18u;
         case VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT: return 19u;
+        case VK_DYNAMIC_STATE_RASTERIZER_DISCARD_ENABLE: return 20u;
+        case VK_DYNAMIC_STATE_DEPTH_BIAS_ENABLE: return 21u;
+        case VK_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE: return 22u;
         case VK_DYNAMIC_STATE_LINE_WIDTH: return 2u;
         case VK_DYNAMIC_STATE_CULL_MODE: return 3u;
         case VK_DYNAMIC_STATE_FRONT_FACE: return 4u;
@@ -207,6 +210,7 @@ static uint64_t g_generic_dispatch_sequence = 0;
 #define PDOCKER_VK_FEATURE_DYNAMIC_RENDERING            (1ull << 17)
 #define PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE       (1ull << 18)
 #define PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT          (1ull << 19)
+#define PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2     (1ull << 22)
 #define PDOCKER_VK_FEATURE_MULTIVIEW                    (1ull << 20)
 #define PDOCKER_VK_FEATURE_TESSELLATION_SHADER        (1ull << 21)
 
@@ -4871,11 +4875,27 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
             ds->max_depth_bounds_bits = float_bits_u32(pipeline->max_depth_bounds);
             need_v63_depth_stencil = true;
         }
+        const bool primitive_restart_dynamic =
+            (pipeline->dynamic_state_mask & pdocker_vk_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE)) != 0;
+        const bool rasterizer_discard_dynamic =
+            (pipeline->dynamic_state_mask & pdocker_vk_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_RASTERIZER_DISCARD_ENABLE)) != 0;
+        const bool depth_bias_enable_dynamic =
+            (pipeline->dynamic_state_mask & pdocker_vk_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_DEPTH_BIAS_ENABLE)) != 0;
+        const bool depth_bias_values_dynamic =
+            (pipeline->dynamic_state_mask & pdocker_vk_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_DEPTH_BIAS)) != 0;
+        const bool depth_bias_factors_present =
+            !depth_bias_values_dynamic &&
+            ((pipeline->depth_bias_enable && !depth_bias_enable_dynamic) ||
+             depth_bias_enable_dynamic ||
+             pipeline->depth_bias_constant_factor != 0.0f ||
+             pipeline->depth_bias_clamp != 0.0f ||
+             pipeline->depth_bias_slope_factor != 0.0f);
         uint32_t static_pipeline_flags =
-            (pipeline->primitive_restart_enable ? PDOCKER_GPU_GRAPHICS_V65_STATIC_PRIMITIVE_RESTART_ENABLE : 0u) |
+            (pipeline->primitive_restart_enable && !primitive_restart_dynamic ? PDOCKER_GPU_GRAPHICS_V65_STATIC_PRIMITIVE_RESTART_ENABLE : 0u) |
             (pipeline->depth_clamp_enable ? PDOCKER_GPU_GRAPHICS_V65_STATIC_DEPTH_CLAMP_ENABLE : 0u) |
-            (pipeline->rasterizer_discard_enable ? PDOCKER_GPU_GRAPHICS_V65_STATIC_RASTERIZER_DISCARD_ENABLE : 0u) |
-            (pipeline->depth_bias_enable ? PDOCKER_GPU_GRAPHICS_V65_STATIC_DEPTH_BIAS_ENABLE : 0u);
+            (pipeline->rasterizer_discard_enable && !rasterizer_discard_dynamic ? PDOCKER_GPU_GRAPHICS_V65_STATIC_RASTERIZER_DISCARD_ENABLE : 0u) |
+            (pipeline->depth_bias_enable && !depth_bias_enable_dynamic ? PDOCKER_GPU_GRAPHICS_V65_STATIC_DEPTH_BIAS_ENABLE : 0u) |
+            (depth_bias_factors_present ? PDOCKER_GPU_GRAPHICS_V65_STATIC_DEPTH_BIAS_FACTORS_PRESENT : 0u);
         if ((pipeline->dynamic_state_mask & pdocker_vk_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_LINE_WIDTH)) == 0 &&
             pipeline->line_width != 1.0f) {
             static_pipeline_flags |= PDOCKER_GPU_GRAPHICS_V65_STATIC_LINE_WIDTH_PRESENT;
@@ -4889,13 +4909,13 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
                 &static_pipeline_states[static_pipeline_state_count++];
             sp->pipeline_index = (uint32_t)pipeline_count;
             sp->flags = static_pipeline_flags;
-            sp->depth_bias_constant_factor_bits = pipeline->depth_bias_enable
+            sp->depth_bias_constant_factor_bits = depth_bias_factors_present
                 ? float_bits_u32(pipeline->depth_bias_constant_factor)
                 : 0u;
-            sp->depth_bias_clamp_bits = pipeline->depth_bias_enable
+            sp->depth_bias_clamp_bits = depth_bias_factors_present
                 ? float_bits_u32(pipeline->depth_bias_clamp)
                 : 0u;
-            sp->depth_bias_slope_factor_bits = pipeline->depth_bias_enable
+            sp->depth_bias_slope_factor_bits = depth_bias_factors_present
                 ? float_bits_u32(pipeline->depth_bias_slope_factor)
                 : 0u;
             sp->line_width_bits = (static_pipeline_flags & PDOCKER_GPU_GRAPHICS_V65_STATIC_LINE_WIDTH_PRESENT)
@@ -9680,6 +9700,8 @@ typedef struct {
     bool ext_draw_indirect_count_khr;
     bool ext_draw_indirect_count_amd;
     bool ext_extended_dynamic_state;
+    bool ext_extended_dynamic_state2;
+    VkPhysicalDeviceExtendedDynamicState2FeaturesEXT extended_dynamic_state2;
     bool ext_index_type_uint8;
     uint32_t image_format_cap_count;
     PdockerVkAdvertisedFormatCaps image_format_caps[PDOCKER_VK_ADVERTISED_FORMAT_CAP_MAX];
@@ -9811,6 +9833,8 @@ static bool parse_executor_advertisement_caps_json(
     if (json_read_u32(json, "VK_KHR_draw_indirect_count", &value)) caps->ext_draw_indirect_count_khr = value != 0;
     if (json_read_u32(json, "VK_AMD_draw_indirect_count", &value)) caps->ext_draw_indirect_count_amd = value != 0;
     if (json_read_u32(json, "VK_EXT_extended_dynamic_state", &value)) caps->ext_extended_dynamic_state = value != 0;
+    if (json_read_u32(json, "extendedDynamicState2", &value)) caps->extended_dynamic_state2.extendedDynamicState2 = value != 0;
+    if (json_read_u32(json, "VK_EXT_extended_dynamic_state2", &value)) caps->ext_extended_dynamic_state2 = value != 0;
     if (json_read_u32(json, "VK_EXT_index_type_uint8", &value)) caps->ext_index_type_uint8 = value != 0;
 
     caps->image_format_cap_count = 0;
@@ -10056,6 +10080,16 @@ static VkBool32 advertised_extended_dynamic_state(void) {
     const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
 #ifdef VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME
     return (caps && caps->ext_extended_dynamic_state) ? VK_TRUE : VK_FALSE;
+#else
+    return VK_FALSE;
+#endif
+}
+
+static VkBool32 advertised_extended_dynamic_state2(void) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+#ifdef VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME
+    return (caps && caps->ext_extended_dynamic_state2 &&
+            caps->extended_dynamic_state2.extendedDynamicState2) ? VK_TRUE : VK_FALSE;
 #else
     return VK_FALSE;
 #endif
@@ -10480,6 +10514,16 @@ static void fill_pnext_features(void *pNext) {
                 break;
             }
 #endif
+#ifdef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_2_FEATURES_EXT
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_2_FEATURES_EXT: {
+                VkPhysicalDeviceExtendedDynamicState2FeaturesEXT *p = (VkPhysicalDeviceExtendedDynamicState2FeaturesEXT *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                p->extendedDynamicState2 = advertised_extended_dynamic_state2();
+                p->extendedDynamicState2LogicOp = VK_FALSE;
+                p->extendedDynamicState2PatchControlPoints = VK_FALSE;
+                break;
+            }
+#endif
 #ifdef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INDEX_TYPE_UINT8_FEATURES_EXT
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INDEX_TYPE_UINT8_FEATURES_EXT: {
                 VkPhysicalDeviceIndexTypeUint8FeaturesEXT *p = (VkPhysicalDeviceIndexTypeUint8FeaturesEXT *)node;
@@ -10611,6 +10655,13 @@ static uint64_t feature_mask_from_pnext_chain(const void *pNext) {
                 break;
             }
 #endif
+#ifdef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_2_FEATURES_EXT
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_2_FEATURES_EXT: {
+                const VkPhysicalDeviceExtendedDynamicState2FeaturesEXT *p = (const VkPhysicalDeviceExtendedDynamicState2FeaturesEXT *)node;
+                if (p->extendedDynamicState2) mask |= PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2;
+                break;
+            }
+#endif
 #ifdef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES: {
                 const VkPhysicalDeviceMaintenance4Features *p = (const VkPhysicalDeviceMaintenance4Features *)node;
@@ -10689,6 +10740,11 @@ static uint64_t advertised_feature_mask(void) {
 #ifdef VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME
     if (advertised_extended_dynamic_state()) {
         mask |= PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE;
+    }
+#endif
+#ifdef VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME
+    if (advertised_extended_dynamic_state2()) {
+        mask |= PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2;
     }
 #endif
     return mask;
@@ -12014,6 +12070,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(
                              VK_EXT_EXTENDED_DYNAMIC_STATE_SPEC_VERSION);
     }
 #endif
+#ifdef VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME
+    if (advertised_extended_dynamic_state2()) {
+        ADD_DEVICE_EXTENSION(VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME,
+                             VK_EXT_EXTENDED_DYNAMIC_STATE_2_SPEC_VERSION);
+    }
+#endif
 #ifdef VK_EXT_INDEX_TYPE_UINT8_EXTENSION_NAME
     if (caps && caps->ext_index_type_uint8 && caps->index_type_uint8.indexTypeUint8) {
         ADD_DEVICE_EXTENSION(VK_EXT_INDEX_TYPE_UINT8_EXTENSION_NAME,
@@ -12063,6 +12125,11 @@ static bool device_extension_advertised_name(const char *name) {
 #ifdef VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME
     if (strcmp(name, VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME) == 0) {
         return advertised_extended_dynamic_state();
+    }
+#endif
+#ifdef VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME
+    if (strcmp(name, VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME) == 0) {
+        return advertised_extended_dynamic_state2();
     }
 #endif
 #ifdef VK_EXT_INDEX_TYPE_UINT8_EXTENSION_NAME
@@ -15363,6 +15430,30 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetPrimitiveTopology(
     record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
                                         VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY,
                                         0, 1, &primitiveTopology, sizeof(primitiveTopology));
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdSetRasterizerDiscardEnable(
+        VkCommandBuffer commandBuffer,
+        VkBool32 rasterizerDiscardEnable) {
+    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+                                        VK_DYNAMIC_STATE_RASTERIZER_DISCARD_ENABLE,
+                                        0, 1, &rasterizerDiscardEnable, sizeof(rasterizerDiscardEnable));
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdSetDepthBiasEnable(
+        VkCommandBuffer commandBuffer,
+        VkBool32 depthBiasEnable) {
+    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+                                        VK_DYNAMIC_STATE_DEPTH_BIAS_ENABLE,
+                                        0, 1, &depthBiasEnable, sizeof(depthBiasEnable));
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdSetPrimitiveRestartEnable(
+        VkCommandBuffer commandBuffer,
+        VkBool32 primitiveRestartEnable) {
+    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+                                        VK_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE,
+                                        0, 1, &primitiveRestartEnable, sizeof(primitiveRestartEnable));
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdSetDepthTestEnable(
@@ -19851,6 +19942,9 @@ static bool proc_address_hidden_by_advertisement(const char *pName) {
          strcmp(pName, "vkCmdSetCullMode") == 0 ||
          strcmp(pName, "vkCmdSetFrontFace") == 0 ||
          strcmp(pName, "vkCmdSetPrimitiveTopology") == 0 ||
+         strcmp(pName, "vkCmdSetRasterizerDiscardEnable") == 0 ||
+         strcmp(pName, "vkCmdSetDepthBiasEnable") == 0 ||
+         strcmp(pName, "vkCmdSetPrimitiveRestartEnable") == 0 ||
          strcmp(pName, "vkCmdSetDepthTestEnable") == 0 ||
          strcmp(pName, "vkCmdSetDepthWriteEnable") == 0 ||
          strcmp(pName, "vkCmdSetDepthCompareOp") == 0 ||
@@ -19930,6 +20024,15 @@ static bool proc_address_hidden_by_advertisement(const char *pName) {
          strcmp(pName, "vkCmdSetStencilOp") == 0 ||
          strcmp(pName, "vkCmdSetStencilOpEXT") == 0) &&
         !advertised_extended_dynamic_state()) {
+        return true;
+    }
+    if ((strcmp(pName, "vkCmdSetRasterizerDiscardEnable") == 0 ||
+         strcmp(pName, "vkCmdSetRasterizerDiscardEnableEXT") == 0 ||
+         strcmp(pName, "vkCmdSetDepthBiasEnable") == 0 ||
+         strcmp(pName, "vkCmdSetDepthBiasEnableEXT") == 0 ||
+         strcmp(pName, "vkCmdSetPrimitiveRestartEnable") == 0 ||
+         strcmp(pName, "vkCmdSetPrimitiveRestartEnableEXT") == 0) &&
+        !advertised_extended_dynamic_state2()) {
         return true;
     }
     if ((strcmp(pName, "vkCmdDrawIndirectCount") == 0 ||
@@ -20112,6 +20215,12 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_ALIAS("vkCmdSetFrontFaceEXT", vkCmdSetFrontFace);
     MAP_PROC(vkCmdSetPrimitiveTopology);
     MAP_ALIAS("vkCmdSetPrimitiveTopologyEXT", vkCmdSetPrimitiveTopology);
+    MAP_PROC(vkCmdSetRasterizerDiscardEnable);
+    MAP_ALIAS("vkCmdSetRasterizerDiscardEnableEXT", vkCmdSetRasterizerDiscardEnable);
+    MAP_PROC(vkCmdSetDepthBiasEnable);
+    MAP_ALIAS("vkCmdSetDepthBiasEnableEXT", vkCmdSetDepthBiasEnable);
+    MAP_PROC(vkCmdSetPrimitiveRestartEnable);
+    MAP_ALIAS("vkCmdSetPrimitiveRestartEnableEXT", vkCmdSetPrimitiveRestartEnable);
     MAP_PROC(vkCmdSetDepthTestEnable);
     MAP_ALIAS("vkCmdSetDepthTestEnableEXT", vkCmdSetDepthTestEnable);
     MAP_PROC(vkCmdSetDepthWriteEnable);

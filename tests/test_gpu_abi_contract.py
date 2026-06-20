@@ -1495,6 +1495,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "cmd_set_cull_mode",
             "cmd_set_front_face",
             "cmd_set_primitive_topology",
+            "cmd_set_rasterizer_discard_enable",
+            "cmd_set_depth_bias_enable",
+            "cmd_set_primitive_restart_enable",
             "cmd_set_depth_test_enable",
             "cmd_set_depth_write_enable",
             "cmd_set_depth_compare_op",
@@ -1504,6 +1507,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_CULL_MODE)",
             "vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_FRONT_FACE)",
             "vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY)",
+            "vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_RASTERIZER_DISCARD_ENABLE)",
+            "vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_DEPTH_BIAS_ENABLE)",
+            "vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE)",
             "vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_DEPTH_BIAS)",
             "vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_BLEND_CONSTANTS)",
             "vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_DEPTH_BOUNDS)",
@@ -1533,6 +1539,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "rt->cmd_set_cull_mode(command_buffer, value);",
             "rt->cmd_set_front_face(command_buffer, value);",
             "rt->cmd_set_primitive_topology(command_buffer, value);",
+            "rt->cmd_set_rasterizer_discard_enable(command_buffer, value);",
+            "rt->cmd_set_depth_bias_enable(command_buffer, value);",
+            "rt->cmd_set_primitive_restart_enable(command_buffer, value);",
             "rt->cmd_set_depth_test_enable(command_buffer, value);",
             "rt->cmd_set_depth_write_enable(command_buffer, value);",
             "rt->cmd_set_depth_compare_op(command_buffer, value);",
@@ -1562,6 +1571,9 @@ class GpuAbiContractTest(unittest.TestCase):
         for marker in [
             "case VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT: return 18u;",
             "case VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT: return 19u;",
+            "case VK_DYNAMIC_STATE_RASTERIZER_DISCARD_ENABLE: return 20u;",
+            "case VK_DYNAMIC_STATE_DEPTH_BIAS_ENABLE: return 21u;",
+            "case VK_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE: return 22u;",
             "VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT,",
             "VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT,",
             "pViewports ? (size_t)viewportCount * sizeof(VkViewport) : 0",
@@ -1579,20 +1591,44 @@ class GpuAbiContractTest(unittest.TestCase):
         for marker in [
             "case VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT: return 18u;",
             "case VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT: return 19u;",
+            "case VK_DYNAMIC_STATE_RASTERIZER_DISCARD_ENABLE: return 20u;",
+            "case VK_DYNAMIC_STATE_DEPTH_BIAS_ENABLE: return 21u;",
+            "case VK_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE: return 22u;",
             "PFN_vkCmdSetViewportWithCountEXT cmd_set_viewport_with_count;",
             "PFN_vkCmdSetScissorWithCountEXT cmd_set_scissor_with_count;",
+            "PFN_vkCmdSetRasterizerDiscardEnableEXT cmd_set_rasterizer_discard_enable;",
+            "PFN_vkCmdSetDepthBiasEnableEXT cmd_set_depth_bias_enable;",
+            "PFN_vkCmdSetPrimitiveRestartEnableEXT cmd_set_primitive_restart_enable;",
             'vkGetDeviceProcAddr(rt->device, "vkCmdSetViewportWithCount")',
             'vkGetDeviceProcAddr(rt->device, "vkCmdSetViewportWithCountEXT")',
             'vkGetDeviceProcAddr(rt->device, "vkCmdSetScissorWithCount")',
             'vkGetDeviceProcAddr(rt->device, "vkCmdSetScissorWithCountEXT")',
+            'vkGetDeviceProcAddr(rt->device, "vkCmdSetRasterizerDiscardEnable")',
+            'vkGetDeviceProcAddr(rt->device, "vkCmdSetRasterizerDiscardEnableEXT")',
+            'vkGetDeviceProcAddr(rt->device, "vkCmdSetDepthBiasEnable")',
+            'vkGetDeviceProcAddr(rt->device, "vkCmdSetDepthBiasEnableEXT")',
+            'vkGetDeviceProcAddr(rt->device, "vkCmdSetPrimitiveRestartEnable")',
+            'vkGetDeviceProcAddr(rt->device, "vkCmdSetPrimitiveRestartEnableEXT")',
             "case VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT:",
             "rt->cmd_set_viewport_with_count(command_buffer, state->count",
             "case VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT:",
             "rt->cmd_set_scissor_with_count(command_buffer, state->count",
+            "case VK_DYNAMIC_STATE_RASTERIZER_DISCARD_ENABLE:",
+            "rt->cmd_set_rasterizer_discard_enable(command_buffer, value);",
+            "case VK_DYNAMIC_STATE_DEPTH_BIAS_ENABLE:",
+            "rt->cmd_set_depth_bias_enable(command_buffer, value);",
+            "case VK_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE:",
+            "rt->cmd_set_primitive_restart_enable(command_buffer, value);",
             "vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT)",
             "vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT)",
+            "vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_RASTERIZER_DISCARD_ENABLE)",
+            "vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_DEPTH_BIAS_ENABLE)",
+            "vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE)",
             "ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT);",
             "ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT);",
+            "ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_RASTERIZER_DISCARD_ENABLE);",
+            "ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_DEPTH_BIAS_ENABLE);",
+            "ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE);",
         ]:
             self.assertIn(marker, executor)
 
@@ -2028,7 +2064,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "VkPhysicalDeviceIndexTypeUint8FeaturesEXT enabled_index_type_uint8",
             "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INDEX_TYPE_UINT8_FEATURES_EXT",
             "VK_EXT_INDEX_TYPE_UINT8_EXTENSION_NAME",
-            "rt->physical_extended_dynamic_state.pNext = &rt->physical_index_type_uint8",
+            "rt->physical_extended_dynamic_state.pNext = &rt->physical_extended_dynamic_state2",
+            "rt->physical_extended_dynamic_state2.pNext = &rt->physical_index_type_uint8",
             "enabled_index_type_uint8.pNext = device_features_pnext",
             "rt->enabled_ext_index_type_uint8",
             "case VK_INDEX_TYPE_UINT8_EXT:",
@@ -5123,10 +5160,12 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_VK_FEATURE_SYNCHRONIZATION_2",
             "PDOCKER_VK_FEATURE_DYNAMIC_RENDERING",
             "PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE",
+            "PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2",
             "PDOCKER_VK_FEATURE_TESSELLATION_SHADER",
             "if (p->synchronization2) mask |= PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;",
             "if (p->dynamicRendering) mask |= PDOCKER_VK_FEATURE_DYNAMIC_RENDERING;",
             "if (p->extendedDynamicState) mask |= PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE;",
+            "if (p->extendedDynamicState2) mask |= PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2;",
             "if (features->tessellationShader) mask |= PDOCKER_VK_FEATURE_TESSELLATION_SHADER;",
             "if (caps->features.tessellationShader) mask |= PDOCKER_VK_FEATURE_TESSELLATION_SHADER;",
             "if (advertised_synchronization2()) mask |= PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;",
@@ -10697,6 +10736,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("p->multiview = caps->multiview;", pnext_body)
         self.assertIn("pFeatures->tessellationShader = advertised_tessellation_shader();", icd)
         self.assertIn("p->extendedDynamicState = advertised_extended_dynamic_state();", pnext_body)
+        self.assertIn("p->extendedDynamicState2 = advertised_extended_dynamic_state2();", pnext_body)
+        self.assertIn("p->extendedDynamicState2LogicOp = VK_FALSE;", pnext_body)
+        self.assertIn("p->extendedDynamicState2PatchControlPoints = VK_FALSE;", pnext_body)
         extension_body = icd.split("vkEnumerateDeviceExtensionProperties", 1)[1].split(
             "#undef ADD_DEVICE_EXTENSION", 1
         )[0]
@@ -10708,6 +10750,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("advertised_synchronization2()", extension_body)
         self.assertIn("advertised_dynamic_rendering()", extension_body)
         self.assertIn("advertised_extended_dynamic_state()", extension_body)
+        self.assertIn("advertised_extended_dynamic_state2()", extension_body)
         self.assertIn("VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME", extension_body)
         self.assertIn("VK_AMD_DRAW_INDIRECT_COUNT_EXTENSION_NAME", extension_body)
         self.assertIn("advertised_draw_indirect_count_khr()", extension_body)
@@ -10721,6 +10764,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("return (caps && caps->draw_indirect_count) ? VK_TRUE : VK_FALSE;", icd)
         self.assertIn("return (caps && caps->draw_indexed_indirect_count) ? VK_TRUE : VK_FALSE;", icd)
         self.assertIn("return (caps && caps->ext_extended_dynamic_state) ? VK_TRUE : VK_FALSE;", icd)
+        self.assertIn("caps->ext_extended_dynamic_state2", icd)
+        self.assertIn("caps->extended_dynamic_state2.extendedDynamicState2", icd)
         self.assertNotIn("!caps || caps->ext_extended_dynamic_state", icd)
         proc_gate_body = icd.split("static bool proc_address_hidden_by_advertisement", 1)[1].split(
             "static PFN_vkVoidFunction proc_address", 1
