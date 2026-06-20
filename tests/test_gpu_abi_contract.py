@@ -3506,7 +3506,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("record.flags = dependencyFlags & VK_DEPENDENCY_BY_REGION_BIT", icd)
         self.assertIn("record.flags = dependency_flags & VK_DEPENDENCY_BY_REGION_BIT", icd)
         self.assertIn("for (uint32_t i = 0; i < eventCount; ++i)", icd)
-        self.assertIn("vkCmdPipelineBarrier2(commandBuffer, &pDependencyInfos[i])", icd)
+        self.assertIn("event-wait2-barrier-payload-unsupported", icd)
+        self.assertNotIn("vkCmdPipelineBarrier2(commandBuffer, &pDependencyInfos[i])", icd)
         self.assertNotIn("eventCount > 1", icd)
         self.assertIn("command_op_is_graphics_frame_op", icd)
         self.assertIn("case PDOCKER_VK_COMMAND_IMAGE_BARRIER:", icd)
@@ -6124,6 +6125,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("op->event->signaled = op->event_signaled", replay_body)
         self.assertIn("execute_recorded_event_wait_op(op)", replay_body)
         self.assertIn("record_event_wait_command(commandBuffer, pEvents[i],", icd)
+        self.assertIn("event-wait-barrier-payload-unsupported", icd)
         self.assertIn("event-wait-unsignaled", icd)
 
     def test_vulkan_event_commands_are_graphics_v6_replayable(self):
@@ -6276,19 +6278,27 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("dependency_info_has_unsupported_pnext(pDependencyInfo)", set_event2_body)
         self.assertIn("cmd->graphics_unsupported = true", set_event2_body)
         self.assertIn("dependency_info_has_supported_barrier_payload(pDependencyInfo)", set_event2_body)
+        self.assertIn("event-set2-barrier-payload-unsupported", set_event2_body)
+        self.assertIn("command_buffer_mark_recording_failed", set_event2_body)
         self.assertIn("dependency_info_src_stage_mask", icd)
         self.assertIn("dependency_info_dst_stage_mask", icd)
-        self.assertIn("vkCmdPipelineBarrier2(commandBuffer, pDependencyInfo)", set_event2_body)
-        self.assertLess(set_event2_body.index("vkCmdPipelineBarrier2(commandBuffer, pDependencyInfo)"), set_event2_body.index("record_event_command(commandBuffer, event, true, dependency_info_src_stage_mask(pDependencyInfo))"))
+        self.assertNotIn("vkCmdPipelineBarrier2(commandBuffer, pDependencyInfo)", set_event2_body)
         wait_events2_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdWaitEvents2", 1)[1].split(
             "static bool query_range_valid", 1
         )[0]
         self.assertIn("eventCount > 0 && (!pEvents || !pDependencyInfos)", wait_events2_body)
         self.assertIn("for (uint32_t i = 0; i < eventCount; ++i)", wait_events2_body)
         self.assertIn("if (!pEvents[i])", wait_events2_body)
+        self.assertIn("dependency_info_has_unsupported_pnext(&pDependencyInfos[i])", wait_events2_body)
+        self.assertIn("dependency_info_has_supported_barrier_payload(&pDependencyInfos[i])", wait_events2_body)
+        self.assertIn("event-wait2-barrier-payload-unsupported", wait_events2_body)
         self.assertIn("dependency_info_src_stage_mask(&pDependencyInfos[i])", wait_events2_body)
         self.assertIn("dependency_info_dst_stage_mask(&pDependencyInfos[i])", wait_events2_body)
-        self.assertIn("vkCmdPipelineBarrier2(commandBuffer, &pDependencyInfos[i])", wait_events2_body)
+        self.assertNotIn("vkCmdPipelineBarrier2(commandBuffer, &pDependencyInfos[i])", wait_events2_body)
+        self.assertLess(
+            wait_events2_body.index("dependency_info_has_supported_barrier_payload(&pDependencyInfos[i])"),
+            wait_events2_body.index("record_event_wait_command(commandBuffer, pEvents[i],"),
+        )
         self.assertNotIn("eventCount > 1", wait_events2_body)
 
     def test_vulkan_graphics_v617_query_timestamp_abi_is_append_only(self):

@@ -19441,12 +19441,16 @@ VKAPI_ATTR void VKAPI_CALL vkCmdWaitEvents(
         const VkImageMemoryBarrier *pImageMemoryBarriers) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     if (eventCount > 0 && !pEvents) {
-        if (cmd) cmd->graphics_unsupported = true;
+        if (cmd) command_buffer_mark_recording_failed(cmd, "event-wait-events-missing-events");
+        return;
+    }
+    if (memoryBarrierCount || bufferMemoryBarrierCount || imageMemoryBarrierCount) {
+        if (cmd) command_buffer_mark_recording_failed(cmd, "event-wait-barrier-payload-unsupported");
         return;
     }
     for (uint32_t i = 0; i < eventCount; ++i) {
         if (!pEvents[i]) {
-            if (cmd) cmd->graphics_unsupported = true;
+            if (cmd) command_buffer_mark_recording_failed(cmd, "event-wait-null-event");
             return;
         }
         record_event_wait_command(commandBuffer, pEvents[i],
@@ -19649,7 +19653,8 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetEvent2(
         return;
     }
     if (dependency_info_has_supported_barrier_payload(pDependencyInfo)) {
-        vkCmdPipelineBarrier2(commandBuffer, pDependencyInfo);
+        if (cmd) command_buffer_mark_recording_failed(cmd, "event-set2-barrier-payload-unsupported");
+        return;
     }
     record_event_command(commandBuffer, event, true, dependency_info_src_stage_mask(pDependencyInfo));
 }
@@ -19668,18 +19673,27 @@ VKAPI_ATTR void VKAPI_CALL vkCmdWaitEvents2(
         const VkDependencyInfo *pDependencyInfos) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     if (eventCount > 0 && (!pEvents || !pDependencyInfos)) {
-        if (cmd) cmd->graphics_unsupported = true;
+        if (cmd) command_buffer_mark_recording_failed(cmd, "event-wait2-missing-arrays");
         return;
     }
     for (uint32_t i = 0; i < eventCount; ++i) {
         if (!pEvents[i]) {
-            if (cmd) cmd->graphics_unsupported = true;
+            if (cmd) command_buffer_mark_recording_failed(cmd, "event-wait2-null-event");
             return;
         }
+        if (dependency_info_has_unsupported_pnext(&pDependencyInfos[i])) {
+            if (cmd) command_buffer_mark_recording_failed(cmd, "event-wait2-pnext-unsupported");
+            return;
+        }
+        if (dependency_info_has_supported_barrier_payload(&pDependencyInfos[i])) {
+            if (cmd) command_buffer_mark_recording_failed(cmd, "event-wait2-barrier-payload-unsupported");
+            return;
+        }
+    }
+    for (uint32_t i = 0; i < eventCount; ++i) {
         record_event_wait_command(commandBuffer, pEvents[i],
                                   dependency_info_src_stage_mask(&pDependencyInfos[i]),
                                   dependency_info_dst_stage_mask(&pDependencyInfos[i]));
-        vkCmdPipelineBarrier2(commandBuffer, &pDependencyInfos[i]);
     }
 }
 
