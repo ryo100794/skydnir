@@ -2997,6 +2997,16 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("pdocker_vk_resolve_image_executor_eligible(op)", resolve_exec)
         self.assertNotIn("pdocker_vk_blit_image_executor_eligible", resolve_exec)
 
+        executor_frame_body = icd.split(
+            "static bool command_op_requires_graphics_executor_frame", 1
+        )[1].split(
+            "static bool command_buffer_has_executor_frame_content_in_sequence_range", 1
+        )[0]
+        self.assertIn("case PDOCKER_VK_COMMAND_RESOLVE_IMAGE:", executor_frame_body)
+        self.assertIn("pdocker_vk_resolve_image_executor_eligible(&cmd->image_resolve_ops[op->index])", executor_frame_body)
+        self.assertIn("case PDOCKER_VK_COMMAND_BLIT_IMAGE:", executor_frame_body)
+        self.assertIn("pdocker_vk_blit_image_executor_eligible(&cmd->image_blit_ops[op->index])", executor_frame_body)
+
         frame_content_body = icd.split(
             "static bool command_buffer_has_executor_frame_content_in_sequence_range", 1
         )[1].split(
@@ -5887,6 +5897,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("vkCmdBlitImage", icd)
         self.assertIn("record_blit_image_op", icd)
         self.assertIn("execute_recorded_blit_image_op", icd)
+        self.assertIn("pdocker_vk_blit_image_executor_eligible", icd)
+        self.assertIn("command_op_requires_graphics_executor_frame", icd)
         self.assertIn("blit_axis_sample", icd)
         self.assertIn("case PDOCKER_VK_COMMAND_BLIT_IMAGE:", icd)
         self.assertIn("MAP_PROC(vkCmdBlitImage);", icd)

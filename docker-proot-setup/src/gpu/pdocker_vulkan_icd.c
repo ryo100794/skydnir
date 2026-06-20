@@ -4470,6 +4470,9 @@ static bool command_op_requires_graphics_executor_frame(
         case PDOCKER_VK_COMMAND_RESOLVE_IMAGE:
             return op->index < cmd->image_resolve_op_count &&
                    pdocker_vk_resolve_image_executor_eligible(&cmd->image_resolve_ops[op->index]);
+        case PDOCKER_VK_COMMAND_BLIT_IMAGE:
+            return op->index < cmd->image_blit_op_count &&
+                   pdocker_vk_blit_image_executor_eligible(&cmd->image_blit_ops[op->index]);
         default:
             return false;
     }
