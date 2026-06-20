@@ -14069,6 +14069,54 @@ static bool pdocker_vk_headless_swapchain_valid(const PdockerVkSwapchain *swapch
            swapchain->image_count <= PDOCKER_VK_MAX_SWAPCHAIN_IMAGES;
 }
 
+static bool pdocker_vk_headless_swapchain_runtime_valid(const PdockerVkSwapchain *swapchain) {
+    if (!pdocker_vk_headless_swapchain_valid(swapchain)) return false;
+    for (uint32_t i = 0; i < swapchain->image_count; ++i) {
+        const PdockerVkImage *image = swapchain->images[i];
+        const PdockerVkMemory *memory = swapchain->memories[i];
+        if (!image || !memory) return false;
+        if (!image->swapchain_owned) return false;
+        if (image->memory != memory) return false;
+    }
+    return true;
+}
+
+static bool pdocker_vk_swapchain_image_index_valid(
+        const PdockerVkSwapchain *swapchain,
+        uint32_t image_index) {
+    return pdocker_vk_headless_swapchain_runtime_valid(swapchain) &&
+           image_index < swapchain->image_count;
+}
+
+static bool pdocker_vk_acquire_sync_valid(VkSemaphore semaphore, VkFence fence) {
+    if (semaphore == VK_NULL_HANDLE && fence == VK_NULL_HANDLE) return false;
+    if (semaphore != VK_NULL_HANDLE) {
+        const PdockerVkSemaphore *sem = (const PdockerVkSemaphore *)semaphore;
+        if (!sem || sem->timeline || sem->signaled) return false;
+    }
+    if (fence != VK_NULL_HANDLE) {
+        const PdockerVkFence *f = (const PdockerVkFence *)fence;
+        if (!f || f->signaled) return false;
+    }
+    return true;
+}
+
+static VkResult pdocker_vk_present_image_result(
+        const PdockerVkSwapchain *swapchain,
+        uint32_t image_index) {
+    if (!pdocker_vk_swapchain_image_index_valid(swapchain, image_index)) {
+        return VK_ERROR_OUT_OF_DATE_KHR;
+    }
+    if (!swapchain->acquired[image_index]) return VK_NOT_READY;
+    const PdockerVkImage *image = swapchain->images[image_index];
+    if (image->layout_mixed || image->layout_range_overflow ||
+        image->current_layout != VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
+        trace_icd_runtime_failure("queue-present-image-layout-not-present-src", VK_ERROR_OUT_OF_DATE_KHR);
+        return VK_ERROR_OUT_OF_DATE_KHR;
+    }
+    return VK_SUCCESS;
+}
+
 static void pdocker_vk_destroy_swapchain_images(VkDevice device, PdockerVkSwapchain *swapchain) {
     if (!swapchain) return;
     for (uint32_t i = 0; i < swapchain->image_count && i < PDOCKER_VK_MAX_SWAPCHAIN_IMAGES; ++i) {
@@ -14244,9 +14292,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetSwapchainImagesKHR(
     (void)device;
     PdockerVkSwapchain *sc = (PdockerVkSwapchain *)swapchain;
     if (!pSwapchainImageCount) return VK_ERROR_INITIALIZATION_FAILED;
-    if (!sc) {
+    if (!pdocker_vk_headless_swapchain_runtime_valid(sc)) {
         *pSwapchainImageCount = 0;
-        return VK_ERROR_INITIALIZATION_FAILED;
+        trace_icd_runtime_failure("swapchain-images-invalid", VK_ERROR_OUT_OF_DATE_KHR);
+        return VK_ERROR_OUT_OF_DATE_KHR;
     }
     if (!pSwapchainImages) {
         *pSwapchainImageCount = sc->image_count;
@@ -14268,7 +14317,15 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAcquireNextImageKHR(
     (void)device;
     (void)timeout;
     PdockerVkSwapchain *sc = (PdockerVkSwapchain *)swapchain;
-    if (!sc || !pImageIndex || sc->image_count == 0) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!pImageIndex) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!pdocker_vk_headless_swapchain_runtime_valid(sc)) {
+        trace_icd_runtime_failure("acquire-next-image-swapchain-invalid", VK_ERROR_OUT_OF_DATE_KHR);
+        return VK_ERROR_OUT_OF_DATE_KHR;
+    }
+    if (!pdocker_vk_acquire_sync_valid(semaphore, fence)) {
+        trace_icd_runtime_failure("acquire-next-image-sync-invalid", VK_ERROR_INITIALIZATION_FAILED);
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
     uint32_t index = UINT32_MAX;
     for (uint32_t attempt = 0; attempt < sc->image_count; ++attempt) {
         uint32_t candidate = (sc->next_image + attempt) % sc->image_count;
@@ -14318,6 +14375,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueuePresentKHR(
         const VkPresentInfoKHR *pPresentInfo) {
     (void)queue;
     if (!pPresentInfo) return VK_ERROR_INITIALIZATION_FAILED;
+    if (pPresentInfo->sType != VK_STRUCTURE_TYPE_PRESENT_INFO_KHR) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
     if (pPresentInfo->pNext) {
         trace_icd_runtime_failure("queue-present-pnext-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
         return VK_ERROR_FEATURE_NOT_PRESENT;
@@ -14331,29 +14391,29 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueuePresentKHR(
             trace_icd_runtime_failure("queue-present-wait-semaphore-unsignaled", VK_NOT_READY);
             return VK_NOT_READY;
         }
-        semaphore_complete_wait(sem);
     }
     if (pPresentInfo->swapchainCount > 0 &&
         (!pPresentInfo->pSwapchains || !pPresentInfo->pImageIndices)) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
+    if (pPresentInfo->swapchainCount == 0) return VK_ERROR_INITIALIZATION_FAILED;
     VkResult aggregate = VK_SUCCESS;
     for (uint32_t i = 0; i < pPresentInfo->swapchainCount; ++i) {
         PdockerVkSwapchain *sc = (PdockerVkSwapchain *)pPresentInfo->pSwapchains[i];
-        VkResult rc = VK_ERROR_OUT_OF_DATE_KHR;
-        if (sc && pPresentInfo->pImageIndices[i] < sc->image_count) {
-            uint32_t image_index = pPresentInfo->pImageIndices[i];
-            if (sc->acquired[image_index]) {
-                sc->acquired[image_index] = false;
-                rc = VK_SUCCESS;
-            } else {
-                rc = VK_NOT_READY;
-            }
-        }
+        VkResult rc = pdocker_vk_present_image_result(sc, pPresentInfo->pImageIndices[i]);
         if (pPresentInfo->pResults) pPresentInfo->pResults[i] = rc;
         if (aggregate == VK_SUCCESS && rc != VK_SUCCESS) aggregate = rc;
     }
-    return aggregate;
+    if (aggregate != VK_SUCCESS) return aggregate;
+    for (uint32_t i = 0; i < pPresentInfo->waitSemaphoreCount; ++i) {
+        semaphore_complete_wait((PdockerVkSemaphore *)pPresentInfo->pWaitSemaphores[i]);
+    }
+    for (uint32_t i = 0; i < pPresentInfo->swapchainCount; ++i) {
+        PdockerVkSwapchain *sc = (PdockerVkSwapchain *)pPresentInfo->pSwapchains[i];
+        uint32_t image_index = pPresentInfo->pImageIndices[i];
+        sc->acquired[image_index] = false;
+    }
+    return VK_SUCCESS;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateCommandPool(

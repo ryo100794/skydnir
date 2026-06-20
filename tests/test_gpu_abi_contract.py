@@ -1192,10 +1192,36 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("swapchain_owned", bind_image_body)
         self.assertIn("swapchain-image-bind-rejected", bind_image_body)
 
+        runtime_valid_body = c_function_body(icd, "pdocker_vk_headless_swapchain_runtime_valid")
+        for marker in [
+            "pdocker_vk_headless_swapchain_valid",
+            "swapchain->images[i]",
+            "swapchain->memories[i]",
+            "swapchain_owned",
+            "image->memory != memory",
+        ]:
+            self.assertIn(marker, runtime_valid_body)
+
+        present_image_body = c_function_body(icd, "pdocker_vk_present_image_result")
+        for marker in [
+            "pdocker_vk_swapchain_image_index_valid",
+            "swapchain->acquired",
+            "layout_mixed",
+            "layout_range_overflow",
+            "VK_IMAGE_LAYOUT_PRESENT_SRC_KHR",
+            "queue-present-image-layout-not-present-src",
+            "VK_ERROR_OUT_OF_DATE_KHR",
+            "VK_NOT_READY",
+        ]:
+            self.assertIn(marker, present_image_body)
+
         get_images_body = c_function_body(icd, "vkGetSwapchainImagesKHR")
         for marker in [
             "!pSwapchainImageCount",
             "VK_ERROR_INITIALIZATION_FAILED",
+            "pdocker_vk_headless_swapchain_runtime_valid",
+            "swapchain-images-invalid",
+            "VK_ERROR_OUT_OF_DATE_KHR",
             "pSwapchainImages",
             "VK_INCOMPLETE",
             "VK_SUCCESS",
@@ -1207,6 +1233,12 @@ class GpuAbiContractTest(unittest.TestCase):
         for marker in [
             "!pImageIndex",
             "VK_ERROR_INITIALIZATION_FAILED",
+            "pdocker_vk_headless_swapchain_runtime_valid",
+            "acquire-next-image-swapchain-invalid",
+            "pdocker_vk_acquire_sync_valid",
+            "acquire-next-image-sync-invalid",
+            "semaphore_complete_signal",
+            "VK_ERROR_OUT_OF_DATE_KHR",
             "*pImageIndex",
             "sc->acquired[index] = true",
             "VK_NOT_READY",
@@ -1230,12 +1262,17 @@ class GpuAbiContractTest(unittest.TestCase):
         for marker in [
             "!pPresentInfo",
             "VK_ERROR_INITIALIZATION_FAILED",
+            "pPresentInfo->sType != VK_STRUCTURE_TYPE_PRESENT_INFO_KHR",
             "pPresentInfo->pNext",
             "queue-present-pnext-unsupported",
             "queue-present-wait-semaphore-unsignaled",
             "semaphore_wait_satisfied",
             "swapchainCount",
+            "swapchainCount == 0",
             "pSwapchains",
+            "pdocker_vk_present_image_result",
+            "if (aggregate != VK_SUCCESS) return aggregate",
+            "semaphore_complete_wait",
             "sc->acquired[image_index] = false",
             "VK_NOT_READY",
             "VK_SUCCESS",
