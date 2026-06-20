@@ -1333,6 +1333,7 @@ typedef struct {
     PFN_vkCmdSetDepthBiasEnableEXT cmd_set_depth_bias_enable;
     PFN_vkCmdSetPrimitiveRestartEnableEXT cmd_set_primitive_restart_enable;
     PFN_vkCmdSetLogicOpEXT cmd_set_logic_op;
+    PFN_vkCmdSetPatchControlPointsEXT cmd_set_patch_control_points;
     PFN_vkCmdSetDepthTestEnableEXT cmd_set_depth_test_enable;
     PFN_vkCmdSetDepthWriteEnableEXT cmd_set_depth_write_enable;
     PFN_vkCmdSetDepthCompareOpEXT cmd_set_depth_compare_op;
@@ -1379,6 +1380,7 @@ static uint32_t vulkan_graphics_dynamic_state_bit_index(uint32_t state_type) {
         case VK_DYNAMIC_STATE_DEPTH_BIAS_ENABLE: return 21u;
         case VK_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE: return 22u;
         case VK_DYNAMIC_STATE_LOGIC_OP_EXT: return 23u;
+        case VK_DYNAMIC_STATE_PATCH_CONTROL_POINTS_EXT: return 24u;
         case VK_DYNAMIC_STATE_LINE_WIDTH: return 2u;
         case VK_DYNAMIC_STATE_CULL_MODE: return 3u;
         case VK_DYNAMIC_STATE_FRONT_FACE: return 4u;
@@ -1439,6 +1441,8 @@ static int vulkan_graphics_dynamic_state_payload_supported(
             return (state->first_index == 0 && state->count == 1 && state->data_size == sizeof(VkBool32)) ? 0 : -EPROTO;
         case VK_DYNAMIC_STATE_LOGIC_OP_EXT:
             return (state->first_index == 0 && state->count == 1 && state->data_size == sizeof(VkLogicOp)) ? 0 : -EPROTO;
+        case VK_DYNAMIC_STATE_PATCH_CONTROL_POINTS_EXT:
+            return (state->first_index == 0 && state->count == 1 && state->data_size == sizeof(uint32_t)) ? 0 : -EPROTO;
         case VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK:
         case VK_DYNAMIC_STATE_STENCIL_WRITE_MASK:
         case VK_DYNAMIC_STATE_STENCIL_REFERENCE:
@@ -1884,6 +1888,7 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             "\"extendedDynamicState\":%u,"
             "\"extendedDynamicState2\":%u,"
             "\"extendedDynamicState2LogicOp\":%u,"
+            "\"extendedDynamicState2PatchControlPoints\":%u,"
             "\"indexTypeUint8\":%u,"
             "\"extension_count\":%u,"
             "\"chain_compat_feature_structs\":%u,"
@@ -1931,6 +1936,7 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             rt ? rt->enabled_extended_dynamic_state.extendedDynamicState : 0,
             rt ? rt->enabled_extended_dynamic_state2.extendedDynamicState2 : 0,
             rt ? rt->enabled_extended_dynamic_state2.extendedDynamicState2LogicOp : 0,
+            rt ? rt->enabled_extended_dynamic_state2.extendedDynamicState2PatchControlPoints : 0,
             rt ? rt->enabled_index_type_uint8.indexTypeUint8 : 0,
             rt ? rt->enabled_extension_count : 0,
             rt ? rt->enabled_chain_compat_feature_structs : 0,
@@ -11692,7 +11698,9 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     enabled_extended_dynamic_state2.extendedDynamicState2LogicOp =
         rt->physical_extended_dynamic_state2.extendedDynamicState2 &&
         rt->physical_extended_dynamic_state2.extendedDynamicState2LogicOp;
-    enabled_extended_dynamic_state2.extendedDynamicState2PatchControlPoints = VK_FALSE;
+    enabled_extended_dynamic_state2.extendedDynamicState2PatchControlPoints =
+        rt->physical_extended_dynamic_state2.extendedDynamicState2 &&
+        rt->physical_extended_dynamic_state2.extendedDynamicState2PatchControlPoints;
     enabled_index_type_uint8.indexTypeUint8 = rt->physical_index_type_uint8.indexTypeUint8;
     enabled_float16_int8.shaderFloat16 = rt->physical_float16_int8.shaderFloat16;
     enabled_float16_int8.shaderInt8 = rt->physical_float16_int8.shaderInt8;
@@ -12076,6 +12084,8 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     }
     rt->cmd_set_logic_op =
         (PFN_vkCmdSetLogicOpEXT)vkGetDeviceProcAddr(rt->device, "vkCmdSetLogicOpEXT");
+    rt->cmd_set_patch_control_points =
+        (PFN_vkCmdSetPatchControlPointsEXT)vkGetDeviceProcAddr(rt->device, "vkCmdSetPatchControlPointsEXT");
     rt->cmd_set_depth_test_enable =
         (PFN_vkCmdSetDepthTestEnableEXT)vkGetDeviceProcAddr(rt->device, "vkCmdSetDepthTestEnable");
     if (!rt->cmd_set_depth_test_enable) {
@@ -17091,7 +17101,8 @@ static void print_vulkan_advertisement_caps(const char *transport) {
             "\"indexTypeUint8\":%u,"
             "\"extendedDynamicState\":%u,"
             "\"extendedDynamicState2\":%u,"
-            "\"extendedDynamicState2LogicOp\":%u},",
+            "\"extendedDynamicState2LogicOp\":%u,"
+            "\"extendedDynamicState2PatchControlPoints\":%u},",
             rt ? rt->physical_features.shaderInt64 : 0,
             rt ? rt->physical_features.tessellationShader : 0,
             rt ? rt->physical_storage16.storageBuffer16BitAccess : 0,
@@ -17106,7 +17117,8 @@ static void print_vulkan_advertisement_caps(const char *transport) {
             rt ? rt->physical_index_type_uint8.indexTypeUint8 : 0,
             rt ? rt->physical_extended_dynamic_state.extendedDynamicState : 0,
             rt ? rt->physical_extended_dynamic_state2.extendedDynamicState2 : 0,
-            rt ? rt->physical_extended_dynamic_state2.extendedDynamicState2LogicOp : 0);
+            rt ? rt->physical_extended_dynamic_state2.extendedDynamicState2LogicOp : 0,
+            rt ? rt->physical_extended_dynamic_state2.extendedDynamicState2PatchControlPoints : 0);
     fprintf(out,
             "\"subgroup\":{"
             "\"subgroupSize\":%u,"
@@ -22542,8 +22554,11 @@ static int preflight_vulkan_graphics_v6_replay_supported(
     int rendering_active = 0;
     int pipeline_bound = 0;
     int dynamic_primitive_topology_valid = 0;
+    int dynamic_patch_control_points_valid = 0;
+    uint32_t dynamic_patch_control_points = 0;
     int bound_pipeline_tessellated = 0;
     int bound_pipeline_dynamic_primitive_topology = 0;
+    int bound_pipeline_dynamic_patch_control_points = 0;
     VkPrimitiveTopology dynamic_primitive_topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     VkPrimitiveTopology bound_pipeline_static_topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     int rc = 0;
@@ -22749,6 +22764,9 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                 bound_pipeline_dynamic_primitive_topology =
                     (pipeline->dynamic_state_mask &
                      vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY)) != 0;
+                bound_pipeline_dynamic_patch_control_points =
+                    (pipeline->dynamic_state_mask &
+                     vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_PATCH_CONTROL_POINTS_EXT)) != 0;
                 break;
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_DYNAMIC_STATE:
                 for (uint32_t d = 0; d < command->dynamic_state_count; ++d) {
@@ -22779,6 +22797,17 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                         dynamic_primitive_topology = dynamic_topology;
                         dynamic_primitive_topology_valid = 1;
                     }
+                    if (state->state_type == VK_DYNAMIC_STATE_PATCH_CONTROL_POINTS_EXT) {
+                        uint32_t value = 0;
+                        memcpy(&value, view->frame + state->data_offset, sizeof(value));
+                        if (value == 0) {
+                            reason = "invalid dynamic patch-control point count";
+                            if (reason_out) *reason_out = reason;
+                            return -EINVAL;
+                        }
+                        dynamic_patch_control_points = value;
+                        dynamic_patch_control_points_valid = 1;
+                    }
                 }
                 break;
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_VERTEX_BUFFERS:
@@ -22806,6 +22835,13 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                     if (reason_out) *reason_out = reason;
                     return -EOPNOTSUPP;
                 }
+                if (bound_pipeline_tessellated &&
+                    bound_pipeline_dynamic_patch_control_points &&
+                    (!dynamic_patch_control_points_valid || dynamic_patch_control_points == 0)) {
+                    reason = "tessellation draw requires dynamic patch-control points";
+                    if (reason_out) *reason_out = reason;
+                    return -EOPNOTSUPP;
+                }
                 break;
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW_INDEXED:
                 if (!rendering_active) {
@@ -22825,6 +22861,13 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                      (!bound_pipeline_dynamic_primitive_topology &&
                       bound_pipeline_static_topology != VK_PRIMITIVE_TOPOLOGY_PATCH_LIST))) {
                     reason = "tessellation indexed draw requires patch-list primitive topology";
+                    if (reason_out) *reason_out = reason;
+                    return -EOPNOTSUPP;
+                }
+                if (bound_pipeline_tessellated &&
+                    bound_pipeline_dynamic_patch_control_points &&
+                    (!dynamic_patch_control_points_valid || dynamic_patch_control_points == 0)) {
+                    reason = "tessellation indexed draw requires dynamic patch-control points";
                     if (reason_out) *reason_out = reason;
                     return -EOPNOTSUPP;
                 }
@@ -23838,6 +23881,7 @@ static int materialize_vulkan_graphics_v6_pipelines(
             vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_DEPTH_BIAS_ENABLE) |
             vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE) |
             vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_LOGIC_OP_EXT) |
+            vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_PATCH_CONTROL_POINTS_EXT) |
             vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_LINE_WIDTH) |
             vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_CULL_MODE) |
             vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_FRONT_FACE) |
@@ -23863,6 +23907,7 @@ static int materialize_vulkan_graphics_v6_pipelines(
         ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_DEPTH_BIAS_ENABLE);
         ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE);
         ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_LOGIC_OP_EXT);
+        ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_PATCH_CONTROL_POINTS_EXT);
         ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_LINE_WIDTH);
         ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_CULL_MODE);
         ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_FRONT_FACE);
@@ -26276,8 +26321,11 @@ static int record_vulkan_graphics_v6_command_buffer(
 
     uint32_t bound_pipeline_index = UINT32_MAX;
     int dynamic_primitive_topology_valid = 0;
+    int dynamic_patch_control_points_valid = 0;
+    uint32_t dynamic_patch_control_points = 0;
     int bound_pipeline_tessellated = 0;
     int bound_pipeline_dynamic_primitive_topology = 0;
+    int bound_pipeline_dynamic_patch_control_points = 0;
     VkPrimitiveTopology dynamic_primitive_topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     VkPrimitiveTopology bound_pipeline_static_topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     for (uint32_t ci = 0; ci < view->header->command_count; ++ci) {
@@ -26524,6 +26572,9 @@ static int record_vulkan_graphics_v6_command_buffer(
                 bound_pipeline_dynamic_primitive_topology =
                     (bound_pipeline_src->dynamic_state_mask &
                      vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY)) != 0;
+                bound_pipeline_dynamic_patch_control_points =
+                    (bound_pipeline_src->dynamic_state_mask &
+                     vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_PATCH_CONTROL_POINTS_EXT)) != 0;
                 bound_pipeline_tessellated =
                     (vulkan_graphics_v6_pipeline_stage_flags(view, bound_pipeline_src) &
                      (VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT |
@@ -26669,6 +26720,24 @@ static int record_vulkan_graphics_v6_command_buffer(
                             VkLogicOp value = VK_LOGIC_OP_COPY;
                             memcpy(&value, data, sizeof(value));
                             rt->cmd_set_logic_op(command_buffer, value);
+                            break;
+                        }
+                        case VK_DYNAMIC_STATE_PATCH_CONTROL_POINTS_EXT: {
+                            if (!rt->enabled_extended_dynamic_state2.extendedDynamicState2PatchControlPoints ||
+                                !rt->cmd_set_patch_control_points) {
+                                rc = -EOPNOTSUPP;
+                                goto cleanup;
+                            }
+                            uint32_t value = 0;
+                            memcpy(&value, data, sizeof(value));
+                            if (value == 0 ||
+                                value > rt->physical_properties.limits.maxTessellationPatchSize) {
+                                rc = -EINVAL;
+                                goto cleanup;
+                            }
+                            dynamic_patch_control_points = value;
+                            dynamic_patch_control_points_valid = 1;
+                            rt->cmd_set_patch_control_points(command_buffer, value);
                             break;
                         }
                         case VK_DYNAMIC_STATE_DEPTH_BIAS: {
@@ -26889,6 +26958,12 @@ static int record_vulkan_graphics_v6_command_buffer(
                     rc = -EOPNOTSUPP;
                     goto cleanup;
                 }
+                if (bound_pipeline_tessellated &&
+                    bound_pipeline_dynamic_patch_control_points &&
+                    (!dynamic_patch_control_points_valid || dynamic_patch_control_points == 0)) {
+                    rc = -EOPNOTSUPP;
+                    goto cleanup;
+                }
                 const PdockerGpuVulkanGraphicsV68IndirectDrawEntry *indirect =
                     find_vulkan_graphics_v68_indirect_draw(view, ci);
                 if (indirect) {
@@ -26955,6 +27030,12 @@ static int record_vulkan_graphics_v6_command_buffer(
                        dynamic_primitive_topology != VK_PRIMITIVE_TOPOLOGY_PATCH_LIST)) ||
                      (!bound_pipeline_dynamic_primitive_topology &&
                       bound_pipeline_static_topology != VK_PRIMITIVE_TOPOLOGY_PATCH_LIST))) {
+                    rc = -EOPNOTSUPP;
+                    goto cleanup;
+                }
+                if (bound_pipeline_tessellated &&
+                    bound_pipeline_dynamic_patch_control_points &&
+                    (!dynamic_patch_control_points_valid || dynamic_patch_control_points == 0)) {
                     rc = -EOPNOTSUPP;
                     goto cleanup;
                 }
