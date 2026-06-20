@@ -2807,8 +2807,7 @@ static int vulkan_dispatch_image_usage_supported_by_format(
                               vulkan_format_has_stencil_aspect(format);
     if ((usage & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) && !depth_stencil) return 0;
     if ((usage & (VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                  VK_IMAGE_USAGE_STORAGE_BIT |
-                  VK_IMAGE_USAGE_SAMPLED_BIT)) && depth_stencil) return 0;
+                  VK_IMAGE_USAGE_STORAGE_BIT)) && depth_stencil) return 0;
     if ((usage & ~(VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
                    VK_IMAGE_USAGE_TRANSFER_DST_BIT |
                    VK_IMAGE_USAGE_SAMPLED_BIT |
@@ -2829,6 +2828,81 @@ static int vulkan_image_single_aspect_supported_for_format(
            (aspect_mask != VK_IMAGE_ASPECT_COLOR_BIT ||
             (!vulkan_format_has_depth_aspect(format) &&
              !vulkan_format_has_stencil_aspect(format)));
+}
+
+static int vulkan_format_is_packed_depth_stencil(VkFormat format);
+
+static int vulkan_dispatch_merge_image_copy_range_for_aspect(
+        VulkanDispatchImageObject *image,
+        const VkImageSubresourceRange *range,
+        VkImageAspectFlags required) {
+    if (!image || !range) return -EINVAL;
+    if (!vulkan_image_single_aspect_supported_for_format(image->format, required) ||
+        range->aspectMask != required ||
+        range->levelCount == 0 ||
+        range->layerCount == 0 ||
+        range->baseMipLevel >= image->mip_levels ||
+        range->levelCount > image->mip_levels - range->baseMipLevel ||
+        range->baseArrayLayer >= image->array_layers ||
+        range->layerCount > image->array_layers - range->baseArrayLayer) {
+        return -EOPNOTSUPP;
+    }
+    if (image->copy_aspect_mask &&
+        (image->copy_base_mip != range->baseMipLevel ||
+         image->copy_level_count != range->levelCount ||
+         image->copy_base_layer != range->baseArrayLayer ||
+         image->copy_layer_count != range->layerCount)) {
+        return -EOPNOTSUPP;
+    }
+    if (image->copy_aspect_mask &&
+        (image->copy_aspect_mask & required) == 0 &&
+        !vulkan_format_is_packed_depth_stencil(image->format)) {
+        return -EOPNOTSUPP;
+    }
+    image->copy_aspect_mask |= required;
+    image->copy_base_mip = range->baseMipLevel;
+    image->copy_level_count = range->levelCount;
+    image->copy_base_layer = range->baseArrayLayer;
+    image->copy_layer_count = range->layerCount;
+    return 0;
+}
+
+static int vulkan_dispatch_descriptor_image_aspect_supported(
+        const VulkanDispatchImageObject *image,
+        const VkImageSubresourceRange *range,
+        VkDescriptorType descriptor_type,
+        VkImageAspectFlags *out_aspect) {
+    if (!image || !range || !out_aspect) return 0;
+    VkImageAspectFlags aspect = range->aspectMask;
+    if (!vulkan_image_single_aspect_supported_for_format(image->format, aspect)) {
+        return 0;
+    }
+    if (descriptor_type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE &&
+        aspect != VK_IMAGE_ASPECT_COLOR_BIT) {
+        return 0;
+    }
+    switch (descriptor_type) {
+        case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
+        case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
+        case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
+        case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:
+            *out_aspect = aspect;
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static int vulkan_dispatch_merge_descriptor_image_copy_range(
+        VulkanDispatchImageObject *image,
+        const VkImageSubresourceRange *range,
+        VkDescriptorType descriptor_type) {
+    VkImageAspectFlags aspect = 0;
+    if (!vulkan_dispatch_descriptor_image_aspect_supported(
+            image, range, descriptor_type, &aspect)) {
+        return -EOPNOTSUPP;
+    }
+    return vulkan_dispatch_merge_image_copy_range_for_aspect(image, range, aspect);
 }
 
 static int vulkan_image_aspect_mask_valid_for_format(
@@ -3727,38 +3801,21 @@ static int materialize_vulkan_dispatch_images(
                 images[image_index].descriptor_layout != d->image_layout) {
                 return -EOPNOTSUPP;
             }
-            if (images[image_index].copy_aspect_mask &&
-                images[image_index].copy_aspect_mask != views[d->image_view_index].range.aspectMask) {
+            const VkImageSubresourceRange *range =
+                &views[d->image_view_index].range;
+            VkImageAspectFlags descriptor_aspect = 0;
+            if (!vulkan_dispatch_descriptor_image_aspect_supported(
+                    &images[image_index], range, descriptor_type, &descriptor_aspect)) {
                 return -EOPNOTSUPP;
             }
-            if (images[image_index].requires_staging) {
-                const VkImageSubresourceRange *range =
-                    &views[d->image_view_index].range;
-                if (range->aspectMask != VK_IMAGE_ASPECT_COLOR_BIT ||
-                    range->levelCount == 0 ||
-                    range->layerCount == 0 ||
-                    range->baseMipLevel >= images[image_index].mip_levels ||
-                    range->levelCount >
-                        images[image_index].mip_levels - range->baseMipLevel ||
-                    range->baseArrayLayer >= images[image_index].array_layers ||
-                    range->layerCount >
-                        images[image_index].array_layers - range->baseArrayLayer) {
-                    return -ENOTSUP;
-                }
-                if (images[image_index].copy_level_count &&
-                    (images[image_index].copy_base_mip != range->baseMipLevel ||
-                     images[image_index].copy_level_count != range->levelCount ||
-                     images[image_index].copy_base_layer != range->baseArrayLayer ||
-                     images[image_index].copy_layer_count != range->layerCount)) {
-                    return -EOPNOTSUPP;
-                }
-                images[image_index].copy_base_mip = range->baseMipLevel;
-                images[image_index].copy_level_count = range->levelCount;
-                images[image_index].copy_base_layer = range->baseArrayLayer;
-                images[image_index].copy_layer_count = range->layerCount;
+            (void)descriptor_aspect;
+            if (images[image_index].requires_staging ||
+                descriptor_type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ||
+                (d->access_flags & PDOCKER_GPU_V5_ACCESS_WRITE)) {
+                int range_rc = vulkan_dispatch_merge_descriptor_image_copy_range(
+                    &images[image_index], range, descriptor_type);
+                if (range_rc != 0) return range_rc;
             }
-            images[image_index].copy_aspect_mask =
-                views[d->image_view_index].range.aspectMask;
             images[image_index].descriptor_layout = d->image_layout;
             images[image_index].descriptor_layout_seen = 1;
             if (d->access_flags & PDOCKER_GPU_V5_ACCESS_WRITE) {
@@ -14937,7 +14994,7 @@ static int run_vulkan_dispatch_fd(
                 .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
                 .buffer = image->staging.buffer,
                 .offset = 0,
-                .size = (VkDeviceSize)image->memory_size,
+                .size = (VkDeviceSize)image->staging.size,
             };
         image_upload_barriers[image_upload_barrier_count++] =
             (VkImageMemoryBarrier){
@@ -14976,40 +15033,53 @@ static int run_vulkan_dispatch_fd(
             !image->copy_aspect_mask) {
             continue;
         }
-        for (uint32_t mip = image->copy_base_mip;
-             mip < image->copy_base_mip + image->copy_level_count;
-             ++mip) {
-            uint64_t buffer_offset = 0;
-            VkExtent3D mip_extent;
-            if (!vulkan_image_tight_subresource_offset(
-                    image,
-                    mip,
-                    image->copy_base_layer,
-                    &buffer_offset) ||
-                !vulkan_image_mip_extent(image, mip, &mip_extent) ||
-                buffer_offset > (uint64_t)image->staging.size) {
-                io_rc = -EINVAL;
-                goto cleanup;
+        VkImageAspectFlags copy_aspects[3];
+        uint32_t copy_aspect_count = 0;
+        if (!vulkan_image_copy_aspect_list(
+                image->copy_aspect_mask, copy_aspects, &copy_aspect_count)) {
+            io_rc = -EINVAL;
+            goto cleanup;
+        }
+        for (uint32_t aspect_i = 0; aspect_i < copy_aspect_count; ++aspect_i) {
+            VkImageAspectFlags copy_aspect = copy_aspects[aspect_i];
+            for (uint32_t mip = image->copy_base_mip;
+                 mip < image->copy_base_mip + image->copy_level_count;
+                 ++mip) {
+                uint64_t buffer_offset = 0;
+                uint64_t copy_size = 0;
+                VkExtent3D mip_extent;
+                if (!vulkan_image_tight_subresource_offset_for_aspect(
+                        image, mip, image->copy_base_layer,
+                        copy_aspect, &buffer_offset) ||
+                    !vulkan_image_tight_copy_size_for_aspect(
+                        image, mip, image->copy_layer_count,
+                        copy_aspect, &copy_size) ||
+                    !vulkan_image_mip_extent(image, mip, &mip_extent) ||
+                    buffer_offset > (uint64_t)image->staging.size ||
+                    copy_size > (uint64_t)image->staging.size - buffer_offset) {
+                    io_rc = -EINVAL;
+                    goto cleanup;
+                }
+                VkBufferImageCopy region = {
+                    .bufferOffset = (VkDeviceSize)buffer_offset,
+                    .bufferRowLength = 0,
+                    .bufferImageHeight = 0,
+                    .imageSubresource = {
+                        .aspectMask = copy_aspect,
+                        .mipLevel = mip,
+                        .baseArrayLayer = image->copy_base_layer,
+                        .layerCount = image->copy_layer_count,
+                    },
+                    .imageOffset = {0, 0, 0},
+                    .imageExtent = mip_extent,
+                };
+                vkCmdCopyBufferToImage(command_buffer,
+                                       image->staging.buffer,
+                                       image->image,
+                                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                       1,
+                                       &region);
             }
-            VkBufferImageCopy region = {
-                .bufferOffset = (VkDeviceSize)buffer_offset,
-                .bufferRowLength = 0,
-                .bufferImageHeight = 0,
-                .imageSubresource = {
-                    .aspectMask = image->copy_aspect_mask,
-                    .mipLevel = mip,
-                    .baseArrayLayer = image->copy_base_layer,
-                    .layerCount = image->copy_layer_count,
-                },
-                .imageOffset = {0, 0, 0},
-                .imageExtent = mip_extent,
-            };
-            vkCmdCopyBufferToImage(command_buffer,
-                                   image->staging.buffer,
-                                   image->image,
-                                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                                   1,
-                                   &region);
         }
         VkImageSubresourceRange upload_range = {
             .aspectMask = image->copy_aspect_mask,
@@ -15192,40 +15262,53 @@ static int run_vulkan_dispatch_fd(
             !image->staging.buffer || !image->copy_aspect_mask) {
             continue;
         }
-        for (uint32_t mip = image->copy_base_mip;
-             mip < image->copy_base_mip + image->copy_level_count;
-             ++mip) {
-            uint64_t buffer_offset = 0;
-            VkExtent3D mip_extent;
-            if (!vulkan_image_tight_subresource_offset(
-                    image,
-                    mip,
-                    image->copy_base_layer,
-                    &buffer_offset) ||
-                !vulkan_image_mip_extent(image, mip, &mip_extent) ||
-                buffer_offset > (uint64_t)image->staging.size) {
-                io_rc = -EINVAL;
-                goto cleanup;
+        VkImageAspectFlags copy_aspects[3];
+        uint32_t copy_aspect_count = 0;
+        if (!vulkan_image_copy_aspect_list(
+                image->copy_aspect_mask, copy_aspects, &copy_aspect_count)) {
+            io_rc = -EINVAL;
+            goto cleanup;
+        }
+        for (uint32_t aspect_i = 0; aspect_i < copy_aspect_count; ++aspect_i) {
+            VkImageAspectFlags copy_aspect = copy_aspects[aspect_i];
+            for (uint32_t mip = image->copy_base_mip;
+                 mip < image->copy_base_mip + image->copy_level_count;
+                 ++mip) {
+                uint64_t buffer_offset = 0;
+                uint64_t copy_size = 0;
+                VkExtent3D mip_extent;
+                if (!vulkan_image_tight_subresource_offset_for_aspect(
+                        image, mip, image->copy_base_layer,
+                        copy_aspect, &buffer_offset) ||
+                    !vulkan_image_tight_copy_size_for_aspect(
+                        image, mip, image->copy_layer_count,
+                        copy_aspect, &copy_size) ||
+                    !vulkan_image_mip_extent(image, mip, &mip_extent) ||
+                    buffer_offset > (uint64_t)image->staging.size ||
+                    copy_size > (uint64_t)image->staging.size - buffer_offset) {
+                    io_rc = -EINVAL;
+                    goto cleanup;
+                }
+                VkBufferImageCopy region = {
+                    .bufferOffset = (VkDeviceSize)buffer_offset,
+                    .bufferRowLength = 0,
+                    .bufferImageHeight = 0,
+                    .imageSubresource = {
+                        .aspectMask = copy_aspect,
+                        .mipLevel = mip,
+                        .baseArrayLayer = image->copy_base_layer,
+                        .layerCount = image->copy_layer_count,
+                    },
+                    .imageOffset = {0, 0, 0},
+                    .imageExtent = mip_extent,
+                };
+                vkCmdCopyImageToBuffer(command_buffer,
+                                       image->image,
+                                       VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                       image->staging.buffer,
+                                       1,
+                                       &region);
             }
-            VkBufferImageCopy region = {
-                .bufferOffset = (VkDeviceSize)buffer_offset,
-                .bufferRowLength = 0,
-                .bufferImageHeight = 0,
-                .imageSubresource = {
-                    .aspectMask = image->copy_aspect_mask,
-                    .mipLevel = mip,
-                    .baseArrayLayer = image->copy_base_layer,
-                    .layerCount = image->copy_layer_count,
-                },
-                .imageOffset = {0, 0, 0},
-                .imageExtent = mip_extent,
-            };
-            vkCmdCopyImageToBuffer(command_buffer,
-                                   image->image,
-                                   VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                                   image->staging.buffer,
-                                   1,
-                                   &region);
         }
         if (image_staging_download_count >= PDOCKER_GPU_MAX_VULKAN_BINDINGS) {
             io_rc = -E2BIG;
@@ -15240,7 +15323,7 @@ static int run_vulkan_dispatch_fd(
                 .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
                 .buffer = image->staging.buffer,
                 .offset = 0,
-                .size = (VkDeviceSize)image->memory_size,
+                .size = (VkDeviceSize)image->staging.size,
             };
     }
     if (image_staging_download_count) {
@@ -15763,6 +15846,11 @@ static int run_vulkan_dispatch_fd(
             if (!dispatch_images[i].staging.map ||
                 dispatch_images[i].staging.size < dispatch_images[i].memory_size) {
                 io_rc = -EINVAL;
+                goto cleanup;
+            }
+            int pack_rc = vulkan_image_pack_packed_depth_stencil_from_planes(&dispatch_images[i]);
+            if (pack_rc != 0) {
+                io_rc = pack_rc;
                 goto cleanup;
             }
             image_writeback_ptr = (const unsigned char *)dispatch_images[i].staging.map;

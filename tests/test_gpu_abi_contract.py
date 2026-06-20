@@ -2387,6 +2387,12 @@ class GpuAbiContractTest(unittest.TestCase):
             source,
             flags=re.S,
         )
+        bodyless = re.sub(
+            r"static int vulkan_dispatch_merge_image_copy_range_for_aspect\(.*?\n}\n\n",
+            "",
+            bodyless,
+            flags=re.S,
+        )
         self.assertNotIn("vulkan_graphics_merge_color_copy_range", source)
         self.assertNotIn("vulkan_graphics_attachment_range_supported", source)
         self.assertNotIn("range->levelCount > image->mip_levels - range->baseMipLevel", bodyless)
@@ -3515,6 +3521,38 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("writes[write_count].pImageInfo = &image_infos[write_count];", executor)
         self.assertIn("VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER", executor)
         self.assertIn("VK_DESCRIPTOR_TYPE_STORAGE_IMAGE", executor)
+
+    def test_vulkan_dispatch_v5_sampled_depth_stencil_images_are_aspect_aware(self):
+        executor = GPU_EXECUTOR.read_text()
+        usage_body = executor.split(
+            "static int vulkan_dispatch_image_usage_supported_by_format", 1
+        )[1].split("static int vulkan_image_single_aspect_supported_for_format", 1)[0]
+        helper_body = executor.split(
+            "static int vulkan_dispatch_descriptor_image_aspect_supported", 1
+        )[1].split("static int vulkan_dispatch_merge_descriptor_image_copy_range", 1)[0]
+        materialize_body = executor.split(
+            "static int materialize_vulkan_dispatch_images", 1
+        )[1].split("static void destroy_strict_vulkan_object_graph", 1)[0]
+        run_body = executor.split(
+            "static int run_vulkan_dispatch_fd", 1
+        )[1].split("static void write_vulkan_image_format_caps_report", 1)[0]
+
+        self.assertIn("VK_IMAGE_USAGE_SAMPLED_BIT", usage_body)
+        self.assertIn("VK_IMAGE_USAGE_STORAGE_BIT)) && depth_stencil", usage_body)
+        self.assertNotIn("VK_IMAGE_USAGE_SAMPLED_BIT)) && depth_stencil", usage_body)
+        self.assertIn("vulkan_image_single_aspect_supported_for_format(image->format, aspect)", helper_body)
+        self.assertIn("case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:", helper_body)
+        self.assertIn("case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:", helper_body)
+        self.assertIn("descriptor_type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE", helper_body)
+        self.assertIn("aspect != VK_IMAGE_ASPECT_COLOR_BIT", helper_body)
+        self.assertIn("vulkan_dispatch_descriptor_image_aspect_supported", materialize_body)
+        self.assertIn("vulkan_dispatch_merge_descriptor_image_copy_range", materialize_body)
+        self.assertNotIn("range->aspectMask != VK_IMAGE_ASPECT_COLOR_BIT", materialize_body)
+        self.assertIn("vulkan_image_copy_aspect_list", run_body)
+        self.assertIn("vulkan_image_tight_subresource_offset_for_aspect", run_body)
+        self.assertIn("vulkan_image_tight_copy_size_for_aspect", run_body)
+        self.assertIn(".size = (VkDeviceSize)image->staging.size", run_body)
+        self.assertIn("vulkan_image_pack_packed_depth_stencil_from_planes(&dispatch_images[i])", run_body)
 
     def test_graphics_storage_image_write_descriptor_is_not_rejected_at_materialize(self):
         executor = GPU_EXECUTOR.read_text()
