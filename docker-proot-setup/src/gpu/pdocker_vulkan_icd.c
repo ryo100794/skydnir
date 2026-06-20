@@ -13992,6 +13992,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfacePresentModesKHR(
     return count < available_count ? VK_INCOMPLETE : VK_SUCCESS;
 }
 
+static bool pdocker_vk_headless_swapchain_valid(const PdockerVkSwapchain *swapchain) {
+    return swapchain &&
+           pdocker_vk_headless_surface_valid(swapchain->surface) &&
+           swapchain->image_count >= 2u &&
+           swapchain->image_count <= PDOCKER_VK_MAX_SWAPCHAIN_IMAGES;
+}
+
 static void pdocker_vk_destroy_swapchain_images(VkDevice device, PdockerVkSwapchain *swapchain) {
     if (!swapchain) return;
     for (uint32_t i = 0; i < swapchain->image_count && i < PDOCKER_VK_MAX_SWAPCHAIN_IMAGES; ++i) {
@@ -14025,12 +14032,23 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSwapchainKHR(
         trace_icd_runtime_failure("swapchain-pnext-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }
-    if (pCreateInfo->flags != 0 || pCreateInfo->oldSwapchain != VK_NULL_HANDLE) {
+    if (pCreateInfo->flags != 0) {
         trace_icd_runtime_failure("swapchain-flags-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }
     PdockerVkSurface *surface = (PdockerVkSurface *)pCreateInfo->surface;
     if (!pdocker_vk_headless_surface_valid(surface)) return VK_ERROR_SURFACE_LOST_KHR;
+    if (pCreateInfo->oldSwapchain != VK_NULL_HANDLE) {
+        PdockerVkSwapchain *old_swapchain = (PdockerVkSwapchain *)pCreateInfo->oldSwapchain;
+        if (!pdocker_vk_headless_swapchain_valid(old_swapchain)) {
+            trace_icd_runtime_failure("swapchain-old-swapchain-invalid", VK_ERROR_INITIALIZATION_FAILED);
+            return VK_ERROR_INITIALIZATION_FAILED;
+        }
+        if (old_swapchain->surface != surface) {
+            trace_icd_runtime_failure("swapchain-old-surface-mismatch", VK_ERROR_SURFACE_LOST_KHR);
+            return VK_ERROR_SURFACE_LOST_KHR;
+        }
+    }
     if (!pdocker_vk_headless_surface_format_supported(pCreateInfo->imageFormat,
                                                       pCreateInfo->imageColorSpace)) {
         trace_icd_runtime_failure("swapchain-format-unsupported", VK_ERROR_FORMAT_NOT_SUPPORTED);

@@ -1122,6 +1122,10 @@ class GpuAbiContractTest(unittest.TestCase):
             "pCreateInfo->flags != 0",
             "swapchain-flags-unsupported",
             "oldSwapchain",
+            "pdocker_vk_headless_swapchain_valid",
+            "swapchain-old-swapchain-invalid",
+            "swapchain-old-surface-mismatch",
+            "old_swapchain->surface != surface",
             "minImageCount",
             "imageFormat",
             "imageExtent",
@@ -1134,6 +1138,7 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, create_body)
         self.assertRegex(create_body, r"(PdockerVkSwapchain|swapchain->)")
+        self.assertNotIn("pCreateInfo->flags != 0 || pCreateInfo->oldSwapchain", create_body)
         self.assertRegex(create_body, r"(calloc|pdocker_alloc_handle|malloc)")
         usage_body = c_function_body(icd, "pdocker_vk_headless_swapchain_usage_supported")
         self.assertIn("VK_IMAGE_USAGE_SAMPLED_BIT", usage_body)
