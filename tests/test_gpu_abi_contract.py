@@ -4395,9 +4395,19 @@ class GpuAbiContractTest(unittest.TestCase):
             set(manifest["compare_forward_env_keys"]),
         )
         self.assertIn("PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC", manifest_options["bool"])
-        self.assertIn("PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC", {
-            item["env"] for item in manifest["config_propagation_env_fields"]
-        })
+        config_fields = {item["env"]: item for item in manifest["config_propagation_env_fields"]}
+        self.assertIn("PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC", config_fields)
+        self.assertEqual(
+            "callsite_gated",
+            config_fields["PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS"]["evidence_policy"],
+        )
+        for q6_env in [
+            "PDOCKER_GPU_Q6K_SAFE_KERNEL",
+            "PDOCKER_GPU_Q6K_ORACLE_WRITEBACK",
+            "PDOCKER_GPU_Q6K_COMPAT_REWRITES",
+            "PDOCKER_GPU_Q6K_READONLY_OVERLAP_SNAPSHOT",
+        ]:
+            self.assertEqual("q6_callsite_gated", config_fields[q6_env]["evidence_policy"])
         self.assertIn("PDOCKER_GPU_SPIRV_PROBE_DEBUG_BINDING", manifest_options["size"])
         self.assertIn("PDOCKER_GPU_SPIRV_PROBE_DEBUG_BINDING", manifest["compare_probe_env_keys"])
         q6_overlay = manifest["q6_required_env_overlay"]
@@ -4853,6 +4863,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('"evidence_policy": "q4k_callsite_gated"', LLAMA_GPU_ENV_MANIFEST.read_text())
         self.assertIn('evidence_policy == "q4k_callsite_gated"', compare)
         self.assertNotIn("callsite_gated_config_envs", compare)
+        self.assertNotIn("Q6_CALLSITE_GATED_CONFIG_ENVS", compare)
         self.assertIn('"PDOCKER_GPU_Q4K_PIPELINE_RETRY_LADDER"', LLAMA_GPU_ENV_MANIFEST.read_text())
         self.assertIn('observed_event_values(executor_events, "q4k_callsite_detected")', compare)
         self.assertIn("FORCED_VULKAN_WAIT_SERVER_TIMEOUT_SEC", compare)
@@ -7659,6 +7670,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("dim,", body)
         self.assertIn("specialized BuiltIn WorkgroupSize value", source)
         self.assertIn("does not replace kernels", source)
+        self.assertIn("value > 1024", body)
+        self.assertIn("invocation_count > 1024", body)
+        self.assertNotIn("local_size[0] != 32", body)
         summarize = re.search(
             r"static SpirvTraceSummary summarize_spirv\(.*?\n}\n\nstatic void log_vulkan_feature_trace",
             source,
@@ -7867,19 +7881,33 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("the stale default gl_WorkGroupSize value", source)
         self.assertIn("materialize_specialization_env", source)
         self.assertIn("? (materialize_specialization_env", source)
-        self.assertIn("materialize_specialization_q6_scope", source)
+        self.assertNotIn("materialize_specialization_q6_scope", source)
         self.assertIn("Do not globally fold specialization constants", source)
-        self.assertIn("is_q6k_matvec_hash(options->source_spirv_hash)", source)
+        self.assertIn("structural rather than hash-specific", source)
+        self.assertIn("materialize_specialization_requested && local_size_patched", source)
         self.assertIn("Materialize after LocalSize legalization", source)
         self.assertLess(
             source.index("local_size_patched = patch_spirv_literal_local_size_from_spec"),
             source.index("specialization_materialized = materialize_spirv_specialization_constants"),
         )
         manifest = (ROOT / "scripts" / "llama-gpu-env-manifest.json").read_text()
-        self.assertIn('"evidence_policy": "q6_callsite_gated"', manifest)
+        manifest_data = json.loads(manifest)
+        policy_by_env = {
+            item["env"]: item.get("evidence_policy", "always")
+            for item in manifest_data["config_propagation_env_fields"]
+        }
+        self.assertEqual(
+            "callsite_gated",
+            policy_by_env["PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS"],
+        )
+        self.assertNotEqual(
+            "q6_callsite_gated",
+            policy_by_env["PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS"],
+        )
         compare = LLAMA_COMPARE.read_text()
-        self.assertIn('"q6_callsite_gated"', compare)
+        self.assertIn('"callsite_gated"', compare)
         self.assertIn('"cpu_oracle.kernel_hint"', compare)
+        self.assertNotIn("Q6_CALLSITE_GATED_CONFIG_ENVS", compare)
         self.assertIn("Strict passthrough preserves descriptor object identity", source)
         self.assertIn("strict_passthrough;", source)
 

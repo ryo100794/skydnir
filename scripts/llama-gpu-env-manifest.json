@@ -264,7 +264,7 @@
     {
       "env": "PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS",
       "executor_field": "materialize_specialization",
-      "evidence_policy": "q6_callsite_gated"
+      "evidence_policy": "callsite_gated"
     },
     {
       "env": "PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION",
@@ -301,12 +301,12 @@
     {
       "env": "PDOCKER_GPU_Q6K_SAFE_KERNEL",
       "executor_field": "q6k_safe_kernel",
-      "evidence_policy": "callsite_gated"
+      "evidence_policy": "q6_callsite_gated"
     },
     {
       "env": "PDOCKER_GPU_Q6K_ORACLE_WRITEBACK",
       "executor_field": "cpu_oracle.oracle_writeback",
-      "evidence_policy": "callsite_gated"
+      "evidence_policy": "q6_callsite_gated"
     },
     {
       "env": "PDOCKER_GPU_Q4K_SAFE_KERNEL",
@@ -341,11 +341,13 @@
     },
     {
       "env": "PDOCKER_GPU_Q6K_COMPAT_REWRITES",
-      "executor_field": "q6_compat_rewrites"
+      "executor_field": "q6_compat_rewrites",
+      "evidence_policy": "q6_callsite_gated"
     },
     {
       "env": "PDOCKER_GPU_Q6K_READONLY_OVERLAP_SNAPSHOT",
-      "executor_field": "readonly_overlap_snapshot_policy.q6_auto"
+      "executor_field": "readonly_overlap_snapshot_policy.q6_auto",
+      "evidence_policy": "q6_callsite_gated"
     }
   ],
   "abi_dispatch_option_env_fields": [

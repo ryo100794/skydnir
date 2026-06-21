@@ -6038,10 +6038,14 @@ static int patch_spirv_literal_local_size_from_spec(
     if (!summary.valid || summary.truncated) return 0;
     /*
      * This is a narrow Android-driver compatibility lowering, not a general
-     * SPIR-V optimizer.  The llama.cpp Q6_K module carries a literal
-     * LocalSize 1,1,1 but also publishes the intended X lane count through
-     * BuiltIn WorkgroupSize.x / SpecId 0.  Legalize only that broken literal
-     * form and only when the runtime specialization asks for 32 x-lanes.
+     * SPIR-V optimizer.  Some ggml Vulkan modules carry a literal LocalSize
+     * 1,1,1 while also publishing the intended workgroup shape through
+     * BuiltIn WorkgroupSize specialization constants.  Android drivers do not
+     * consistently treat that combination as an execution-shape
+     * specialization.  Legalize only that broken literal form from the
+     * application-provided specialization evidence, without changing
+     * descriptor bytes, push constants, buffer identities, or the SPIR-V
+     * algorithm.
      */
     if (summary.local_size[0] != 1 ||
         summary.local_size[1] != 1 ||
@@ -6087,7 +6091,11 @@ static int patch_spirv_literal_local_size_from_spec(
         }
     }
     if (!found_local_size_spec) return 0;
-    if (local_size[0] != 32 || local_size[1] != 1 || local_size[2] != 1) return 0;
+    if (local_size[0] == summary.local_size[0] &&
+        local_size[1] == summary.local_size[1] &&
+        local_size[2] == summary.local_size[2]) {
+        return 0;
+    }
     const uint64_t invocation_count = local_size[0] * local_size[1] * local_size[2];
     if (invocation_count <= 1 || invocation_count > 1024) return 0;
     for (size_t i = 5; i < words;) {
@@ -13563,21 +13571,16 @@ static int run_vulkan_dispatch_fd(
                 ? env_truthy("PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS", 0)
                 : 0)
             : env_truthy("PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS", 0);
-    const int materialize_specialization_q6_scope =
-        is_q6k_matvec_hash(original_spirv_hash) ||
-        (options && options->has_source_spirv_hash &&
-         is_q6k_matvec_hash(options->source_spirv_hash));
     /*
-     * Do not globally fold specialization constants.  The Q6_K Android
-     * compatibility path needs specialization materialization only after the
-     * literal LocalSize / BuiltIn WorkgroupSize mismatch has been legalized;
-     * applying it to unrelated ggml shaders can change driver compilation
-     * behaviour and has produced VK_ERROR_DEVICE_LOST before Q6 is reached.
-     * Keep strict passthrough byte-for-byte for every non-Q6 dispatch unless a
-     * future call-site explicitly earns its own scoped gate.
+     * Do not globally fold specialization constants.  Materialization is used
+     * only after this executor has corrected the literal LocalSize /
+     * BuiltIn WorkgroupSize mismatch for the same module.  That makes the gate
+     * structural rather than hash-specific: unrelated SPIR-V stays byte-for-
+     * byte strict-passthrough, while any ggml module with the same Vulkan ABI
+     * inconsistency gets a consistent execution shape and shader-visible
+     * WorkgroupSize.
      */
-    const int materialize_specialization_constants =
-        materialize_specialization_requested && materialize_specialization_q6_scope;
+    int materialize_specialization_constants = 0;
     const char *legalize_workgroup_env =
         getenv("PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC");
     const int legalize_workgroup_size_from_spec =
@@ -13612,8 +13615,8 @@ static int run_vulkan_dispatch_fd(
             specialization_data_size);
     }
     /*
-     * Materialize after LocalSize legalization, not before.  The Q6_K module
-     * has both a literal OpExecutionMode LocalSize and a BuiltIn WorkgroupSize
+     * Materialize after LocalSize legalization, not before.  These modules have
+     * both a literal OpExecutionMode LocalSize and a BuiltIn WorkgroupSize
      * specialization subtree.  Folding specialization constants first sees the
      * still-inconsistent LocalSize 1,1,1 shape and intentionally preserves the
      * WorkgroupSize subtree; if we then patch only LocalSize, shader code that
@@ -13621,6 +13624,8 @@ static int run_vulkan_dispatch_fd(
      * fold so both execution shape and shader-visible WorkgroupSize are the
      * same Vulkan-specialized value.
      */
+    materialize_specialization_constants =
+        materialize_specialization_requested && local_size_patched;
     if (materialize_specialization_constants) {
         specialization_materialized = materialize_spirv_specialization_constants(
             shader_code,

@@ -2893,13 +2893,6 @@ spirv_hashes = sorted(set(spirv_hashes) | {e.get("spirv_hash") for e in executor
 config_expectations_raw = env_manifest.get("config_propagation_env_fields")
 if not isinstance(config_expectations_raw, list) or not config_expectations_raw:
     raise SystemExit(f"invalid config_propagation_env_fields in llama GPU env manifest: {manifest_path}")
-Q6_CALLSITE_GATED_CONFIG_ENVS = {
-    "PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS",
-    "PDOCKER_GPU_Q6K_COMPAT_REWRITES",
-    "PDOCKER_GPU_Q6K_ORACLE_WRITEBACK",
-    "PDOCKER_GPU_Q6K_READONLY_OVERLAP_SNAPSHOT",
-    "PDOCKER_GPU_Q6K_SAFE_KERNEL",
-}
 q6_config_callsite_detected = any(
     str(value) == "mul-mat-vec-q6-k-large"
     for value in observed_event_values(executor_events, "cpu_oracle.kernel_hint")
@@ -2910,8 +2903,6 @@ for item in config_expectations_raw:
         raise SystemExit(f"invalid config_propagation_env_fields entry in llama GPU env manifest: {manifest_path}")
     env_name = str(item["env"])
     evidence_policy = str(item.get("evidence_policy") or "always")
-    if env_name in Q6_CALLSITE_GATED_CONFIG_ENVS and evidence_policy in {"always", "callsite_gated"}:
-        evidence_policy = "q6_callsite_gated"
     if evidence_policy not in {"always", "callsite_gated", "q4k_callsite_gated", "q6_callsite_gated"}:
         raise SystemExit(f"invalid evidence_policy for {item['env']} in llama GPU env manifest: {manifest_path}")
     config_expectations.append((env_name, str(item["executor_field"]), evidence_policy))
