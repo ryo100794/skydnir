@@ -10424,11 +10424,7 @@ static VkSubgroupFeatureFlags advertised_subgroup_operations(void) {
            VK_SUBGROUP_FEATURE_VOTE_BIT;
 }
 
-static uint32_t advertised_subgroup_size(void) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
-    if (caps && caps->subgroup.subgroupSize) {
-        return caps->subgroup.subgroupSize;
-    }
+static uint32_t parsed_env_subgroup_size(void) {
     const char *value = getenv("PDOCKER_VULKAN_SUBGROUP_SIZE");
     if (value && value[0]) {
         char *end = NULL;
@@ -10437,7 +10433,33 @@ static uint32_t advertised_subgroup_size(void) {
             return (uint32_t)parsed;
         }
     }
+    return 0;
+}
+
+static uint32_t advertised_subgroup_size(void) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+    const uint32_t env_size = parsed_env_subgroup_size();
+    if (caps && caps->subgroup.subgroupSize) {
+        /*
+         * Executor caps are the upper bound from the real Android driver.
+         * The env knob is a narrowing override only; never use it to widen
+         * advertised subgroup behavior beyond the executor-observed device.
+         */
+        if (env_size && env_size < caps->subgroup.subgroupSize) return env_size;
+        return caps->subgroup.subgroupSize;
+    }
+    if (env_size) return env_size;
     return 32;
+}
+
+static VkShaderStageFlags advertised_subgroup_stages(void) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+    if (caps && caps->subgroup.supportedStages) {
+        return caps->subgroup.supportedStages & VK_SHADER_STAGE_COMPUTE_BIT
+            ? caps->subgroup.supportedStages
+            : VK_SHADER_STAGE_COMPUTE_BIT;
+    }
+    return VK_SHADER_STAGE_COMPUTE_BIT;
 }
 
 static uint32_t pdocker_vk_max_per_set_descriptors(void) {
@@ -10467,7 +10489,7 @@ static void fill_pnext_properties(void *pNext) {
                 VkPhysicalDeviceSubgroupProperties *p = (VkPhysicalDeviceSubgroupProperties *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
                 p->subgroupSize = advertised_subgroup_size();
-                p->supportedStages = VK_SHADER_STAGE_COMPUTE_BIT;
+                p->supportedStages = advertised_subgroup_stages();
                 p->supportedOperations = advertised_subgroup_operations();
                 p->quadOperationsInAllStages = VK_FALSE;
                 break;
@@ -10488,7 +10510,7 @@ static void fill_pnext_properties(void *pNext) {
                 VkPhysicalDeviceVulkan11Properties *p = (VkPhysicalDeviceVulkan11Properties *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
                 p->subgroupSize = advertised_subgroup_size();
-                p->subgroupSupportedStages = VK_SHADER_STAGE_COMPUTE_BIT;
+                p->subgroupSupportedStages = advertised_subgroup_stages();
                 p->subgroupSupportedOperations = advertised_subgroup_operations();
                 p->subgroupQuadOperationsInAllStages = VK_FALSE;
                 p->maxMultiviewViewCount = 1;

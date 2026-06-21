@@ -4827,10 +4827,35 @@ class GpuAbiContractTest(unittest.TestCase):
             re.S,
         ).group("body")
         q6_body = re.search(
-            r"static int is_q6k_matvec_hash\(uint64_t spirv_hash\) \{(?P<body>.*?)\n}\n\nstatic int is_q4k_matvec_hash",
+            r"static int is_q6k_matvec_hash\(uint64_t spirv_hash\) \{(?P<body>.*?)\n}\n\nstatic int is_q6k_matvec_oracle_hash",
             source,
             re.S,
         ).group("body")
+        q6_oracle_body = re.search(
+            r"static int is_q6k_matvec_oracle_hash\(uint64_t spirv_hash\) \{(?P<body>.*?)\n}\n\nstatic int is_q4k_matvec_hash",
+            source,
+            re.S,
+        ).group("body")
+        self.assertIn("is_q6k_matvec_hash(spirv_hash)", q6_oracle_body)
+        self.assertIn("0x9cfc45ae24ba71d8ull", q6_oracle_body)
+        self.assertNotIn("0x9cfc45ae24ba71d8ull", q6_body)
+        self.assertIn("Diagnostic-only Q6_K oracle enrollment", source)
+        self.assertIn("that function gates functional rewrite", source)
+        self.assertIn("is_q6k_matvec_oracle_hash(spirv_hash)", source)
+        self.assertIn("is_q6k_matvec_oracle_hash(cpu_oracle_spirv_hash)", source)
+        oracle_calls = [line.strip() for line in source.splitlines() if "is_q6k_matvec_oracle_hash(" in line]
+        allowed_oracle_call_fragments = [
+            "static int is_q6k_matvec_oracle_hash(uint64_t spirv_hash)",
+            "if (is_q6k_matvec_oracle_hash(spirv_hash))",
+            "} else if (is_q6k_matvec_oracle_hash(cpu_oracle_spirv_hash)) {",
+            "if (profile_response && is_q6k_matvec_oracle_hash(cpu_oracle_spirv_hash)) {",
+        ]
+        unexpected_oracle_calls = [
+            line for line in oracle_calls
+            if not any(fragment in line for fragment in allowed_oracle_call_fragments)
+        ]
+        self.assertEqual([], unexpected_oracle_calls)
+        self.assertEqual(2, source.count("0x9cfc45ae24ba71d8ull"))
         for q4_hash in [
             "0xf3cd7d18f0276b42ull",
             "0x853c49b4900eed3cull",
@@ -7570,7 +7595,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("uint64_t cpu_oracle_spirv_hash = original_spirv_hash;", source)
         self.assertIn("cpu_oracle_spirv_hash_source = \"received\"", source)
         self.assertIn('*oracle_spirv_hash_source = "probe-source-identity"', source)
-        self.assertIn("is_q6k_matvec_hash(cpu_oracle_spirv_hash)", source)
+        self.assertIn("is_q6k_matvec_oracle_hash(cpu_oracle_spirv_hash)", source)
+        self.assertIn("static int is_q6k_matvec_oracle_hash", source)
+        self.assertIn("is_q6k_matvec_hash(spirv_hash)", source)
         self.assertIn("run_cpu_oracle_q6k_matvec_sample(&cpu_oracle_report,\n                                         cpu_oracle_spirv_hash", source)
         self.assertIn("resolve_spirv_local_size(&spirv_summary", source)
         self.assertNotIn("} else if (is_q6k_matvec_hash(spirv_summary.hash))", source)
@@ -9484,16 +9511,21 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("remove_container >/dev/null 2>&1 || true", compare)
         self.assertIn("q6_workgroup_diagnostics", compare)
         self.assertIn("workgroup_shape_blocker", compare)
-        self.assertIn("q6_expected_local_size = [1, 1, 1] if q6_safe_kernel_used else [32, 1, 1]", compare)
-        self.assertIn("constant_id=1 is NUM_ROWS, not WorkGroupSizeY", compare)
+        self.assertIn("q6_expected_local_size", compare)
+        self.assertNotIn("q6_expected_local_size = [1, 1, 1] if q6_safe_kernel_used else [32, 1, 1]", compare)
+        self.assertIn("constant_id=1 is NUM_ROWS, not", compare)
         self.assertIn("q6_workgroup_specialization_interpretation", compare)
         self.assertIn("do_not_patch_local_size_y_from_spec_id_1", compare)
         self.assertIn("q6-final-store-workgroup-barrier-visibility", compare)
-        self.assertIn("local_size_resolved=[32,1,1]", compare)
+        self.assertIn("local_size_resolved=reported-q6-local-size", compare)
         self.assertIn("fix Q6_K local-size/NUM_ROWS separation", compare)
         self.assertIn("lower_q6k_storage16_loads_to_storage8", executor)
         self.assertIn("q6_storage16_loads_lowered", executor)
         self.assertIn("q6_storage16_loads_lowered_count", executor)
+        self.assertIn("local_invocations_x / 16u", executor)
+        self.assertIn("q6k_accumulate_tid_partial_shader_like", executor)
+        self.assertNotIn("const uint32_t it_size = 32u / 16u;", executor)
+        self.assertIn("(uint32_t)report->q6_local_size[0]", executor)
         self.assertIn("lower_q6k_u32_to_u8vec4_bitcasts", executor)
         self.assertIn("q6_u32_to_u8vec4_bitcasts_lowered", executor)
         self.assertIn("q6_u32_to_u8vec4_bitcasts_lowered_count", executor)
@@ -9687,7 +9719,13 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("if (next_cap < line_cap)", icd)
         self.assertIn("rc = -EOVERFLOW", icd)
         self.assertIn("advertised_subgroup_size", icd)
+        self.assertIn("parsed_env_subgroup_size", icd)
         self.assertIn("PDOCKER_VULKAN_SUBGROUP_SIZE", icd)
+        self.assertIn("narrowing override only", icd)
+        self.assertIn("never use it to widen", icd)
+        self.assertIn("advertised_subgroup_stages", icd)
+        self.assertIn("supportedStages = advertised_subgroup_stages()", icd)
+        self.assertIn("subgroupSupportedStages = advertised_subgroup_stages()", icd)
         self.assertIn("subgroupSize = advertised_subgroup_size()", icd)
 
     def test_llama_gpu_compare_classifies_executor_feature_mismatches(self):

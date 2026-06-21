@@ -8053,7 +8053,8 @@ static int cpu_oracle_known_llama_hash(uint64_t spirv_hash) {
            spirv_hash == 0x09c4622d92c6acb9ull ||
            spirv_hash == 0x498c69a047eb3b2full ||
            spirv_hash == 0xe5cd19682257a368ull ||
-           spirv_hash == 0x7ec0292e948c9b41ull;
+           spirv_hash == 0x7ec0292e948c9b41ull ||
+           spirv_hash == 0x9cfc45ae24ba71d8ull;
 }
 
 static int is_q6k_matvec_hash(uint64_t spirv_hash) {
@@ -8065,6 +8066,19 @@ static int is_q6k_matvec_hash(uint64_t spirv_hash) {
            spirv_hash == 0x498c69a047eb3b2full ||
            spirv_hash == 0xe5cd19682257a368ull ||
            spirv_hash == 0x7ec0292e948c9b41ull;
+}
+
+static int is_q6k_matvec_oracle_hash(uint64_t spirv_hash) {
+    if (is_q6k_matvec_hash(spirv_hash)) return 1;
+    /*
+     * Diagnostic-only Q6_K oracle enrollment.  This source SPIR-V has the
+     * q6_K block layout by inspection: binding 0 contains duplicate typed
+     * views of a 210-byte block (ql/qh/scales/d), binding 1 is vec4<f32>,
+     * binding 2 is f32 output, and bindings 3/4 are f32 accumulators.  Do not
+     * add it to is_q6k_matvec_hash(); that function gates functional rewrite
+     * paths, while this oracle gate only records numeric evidence.
+     */
+    return spirv_hash == 0x9cfc45ae24ba71d8ull;
 }
 
 static int is_q4k_matvec_hash(uint64_t spirv_hash) {
@@ -8105,7 +8119,7 @@ static const char *cpu_oracle_kernel_hint(uint64_t spirv_hash) {
         spirv_hash == 0x53c67d2aebf48739ull) {
         return "rms-norm-rope-fused";
     }
-    if (is_q6k_matvec_hash(spirv_hash)) {
+    if (is_q6k_matvec_oracle_hash(spirv_hash)) {
         return "mul-mat-vec-q6-k-large";
     }
     if (is_q4k_matvec_hash(spirv_hash)) {
@@ -9757,14 +9771,16 @@ static int q6k_accumulate_tid_partial_shader_like(
         uint32_t row,
         uint32_t tid,
         uint32_t ncols,
+        uint32_t local_invocations_x,
         uint64_t weight_base_blocks,
         uint64_t vector_base_elements,
         double *out_sum) {
-    if (!weight_binding || !vector_binding || !out_sum || ncols == 0 || (ncols % 256u) != 0) {
+    if (!weight_binding || !vector_binding || !out_sum || ncols == 0 || (ncols % 256u) != 0 ||
+        local_invocations_x == 0 || (local_invocations_x % 16u) != 0) {
         return 0;
     }
     const uint32_t num_blocks_per_row = ncols / 256u;
-    const uint32_t it_size = 32u / 16u;
+    const uint32_t it_size = local_invocations_x / 16u;
     const uint32_t itid = tid % 16u;
     const uint32_t ix = tid / 16u;
     const uint32_t v_im = itid / 8u;
@@ -10792,6 +10808,7 @@ static void run_cpu_oracle_q6k_matvec_sample(
                                                        row,
                                                        tid,
                                                        ncols,
+                                                       (uint32_t)report->q6_local_size[0],
                                                        sample_weight_base_blocks,
                                                        vector_base_elements,
                                                        &shader_like_partials[tid])) {
@@ -10822,6 +10839,7 @@ static void run_cpu_oracle_q6k_matvec_sample(
                                                        row,
                                                        tid,
                                                        ncols,
+                                                       (uint32_t)report->q6_local_size[0],
                                                        sample_weight_base_blocks,
                                                        vector_base_elements,
                                                        &shader_like_partials64[tid])) {
@@ -15764,7 +15782,7 @@ static int run_vulkan_dispatch_fd(
                                          binding_write_needed,
                                          push,
                                          push_size);
-    } else if (is_q6k_matvec_hash(cpu_oracle_spirv_hash)) {
+    } else if (is_q6k_matvec_oracle_hash(cpu_oracle_spirv_hash)) {
         const int q6k_oracle_writeback =
             options && options->has_q6k_oracle_writeback
                 ? options->q6k_oracle_writeback
@@ -15836,7 +15854,7 @@ static int run_vulkan_dispatch_fd(
         ret = 76;
         goto cleanup;
     }
-    if (profile_response && is_q6k_matvec_hash(cpu_oracle_spirv_hash)) {
+    if (profile_response && is_q6k_matvec_oracle_hash(cpu_oracle_spirv_hash)) {
         /*
          * Q6_K is the current llama GPU bridge split point.  The normal
          * profile response intentionally carries a rich full-dispatch record,

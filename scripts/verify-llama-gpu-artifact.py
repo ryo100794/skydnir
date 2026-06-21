@@ -1773,12 +1773,21 @@ def _q6_safe_kernel_enabled(q6: Any) -> bool:
     )
 
 
-def _q6_expected_local_size(q6: Any) -> list[int]:
-    return [1, 1, 1] if _q6_safe_kernel_enabled(q6) else [32, 1, 1]
+def _q6_expected_local_size(q6: Any) -> list[int] | None:
+    if not isinstance(q6, dict):
+        return None
+    if _q6_safe_kernel_enabled(q6):
+        return [1, 1, 1]
+    q6_local_size = _integer_list(q6.get("q6_local_size"))
+    if q6_local_size is not None:
+        return q6_local_size
+    return _q6_local_size_resolved(q6)
 
 
 def _q6_required_local_size_clear(q6: Any) -> bool:
-    return _q6_local_size_resolved(q6) == _q6_expected_local_size(q6)
+    local_size = _q6_local_size_resolved(q6)
+    expected = _q6_expected_local_size(q6)
+    return local_size is not None and expected is not None and local_size == expected
 
 
 def _q6_workgroup_shape_blocked(q6: Any) -> bool:
@@ -1787,6 +1796,8 @@ def _q6_workgroup_shape_blocked(q6: Any) -> bool:
     if q6.get("local_size_consistent") is False:
         return True
     local_size = _q6_local_size_resolved(q6)
+    if local_size is None:
+        return True
     q6_local_size = _integer_list(q6.get("q6_local_size"))
     if q6_local_size is not None and local_size is not None and q6_local_size != local_size:
         return True
@@ -1870,10 +1881,11 @@ def _q6_probe_writeback_cleared_oracle_missing(q6: Any, q6_writeback_evidence: d
 def _q6_shader_like_interpretation(q6: Any) -> dict[str, Any]:
     """Explain whether the Q6 shader-like CPU oracle cleared.
 
-    For the observed llama.cpp b9030 Q6_K kernel, local_size=[32,1,1].
-    specialization constant_id=1 is NUM_ROWS, not WorkGroupSizeY, so the
-    flattened 64-lane diagnostic is useful context but is not a fail-closed
-    requirement for clearing CPU-side arithmetic.
+    For observed llama.cpp Q6_K kernels, WorkGroupSize may be a literal or
+    may be materialized from specialization constants. The verifier must use
+    the resolved local size reported by the executor instead of assuming a
+    fixed [32,1,1] shape; specialization constant_id=1 is NUM_ROWS, not
+    WorkGroupSizeY.
     """
 
     if not isinstance(q6, dict):
@@ -1901,7 +1913,7 @@ def _q6_shader_like_interpretation(q6: Any) -> dict[str, Any]:
             ])
         else:
             basis.extend([
-                "local_size_resolved=[32,1,1]",
+                "local_size_resolved=reported-q6-local-size",
                 "q6_shader_like_64_abs_delta=diagnostic-only",
             ])
     elif sixty_four_clear:
@@ -2188,6 +2200,28 @@ def _claim_base(
 
 
 def classify(data: dict[str, Any]) -> dict[str, Any]:
+    if data.get("schema") == "pdocker.llama.gpu.compare.failure.v1":
+        exit_code = data.get("exit_code")
+        classification = "early-compare-timeout" if exit_code == 124 else "early-compare-failure"
+        return _claim_base(
+            classification,
+            next_action=(
+                data.get("next_action")
+                or "inspect the compare failure artifact, daemon socket state, Android memory, and adb state before rerunning"
+            ),
+            memory=data.get("memory") or {},
+            pdocker_memory_diagnostics=data.get("pdocker_diagnostics") or {},
+            responsibility_boundary="compare-driver",
+        ) | {
+            "schema": data.get("schema"),
+            "exit_code": exit_code,
+            "stage": data.get("stage") or "unknown",
+            "failure_class": data.get("failure_class") or "early_compare_failure",
+            "message": data.get("message") or "compare failed before a full artifact was produced",
+            "adb_state": data.get("adb_state") or {},
+            "runtime_env_record": data.get("runtime_env_record") or {},
+        }
+
     error = str(data.get("error") or "")
     if error in MEMORY_ERRORS:
         return _claim_base(
@@ -2871,6 +2905,8 @@ def main(argv: list[str]) -> int:
         return 0 if args.allow_memory_blocker else 20
     if classification == "readiness-blocked":
         return 21
+    if classification in {"early-compare-failure", "early-compare-timeout"}:
+        return 23
     if classification in {
         "container-exited-before-readiness",
         "llama-completion-timeout",

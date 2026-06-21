@@ -5133,7 +5133,15 @@ q6_store_index_model_required = (
     }
 )
 q6_safe_kernel_used = q6_latest.get("q6k_safe_kernel") is True
-q6_expected_local_size = [1, 1, 1] if q6_safe_kernel_used else [32, 1, 1]
+q6_local_size_resolved = q6_latest.get("spirv_local_size_resolved")
+q6_partial_local_size = q6_latest_partial.get("q6_local_size")
+q6_expected_local_size = (
+    [1, 1, 1]
+    if q6_safe_kernel_used
+    else q6_partial_local_size
+    if isinstance(q6_partial_local_size, list)
+    else q6_local_size_resolved
+)
 q6_workgroup_shape_blocker = bool(
     q6_latest
     and (
@@ -5145,7 +5153,6 @@ q6_workgroup_shape_blocker = bool(
         )
     )
 )
-q6_local_size_resolved = q6_latest.get("spirv_local_size_resolved")
 q6_shader_like_64_required = (not q6_safe_kernel_used) and q6_local_size_resolved != [32, 1, 1]
 q6_shader_like_64_interpretation = (
     "diagnostic-only-for-q6k-safe-kernel; single-invocation replacement is an explicit bridge diagnostic"
@@ -5156,7 +5163,7 @@ q6_shader_like_64_interpretation = (
     else "required-for-non-32x1x1-local-size"
 )
 q6_workgroup_specialization_interpretation = {
-    "local_size_target": [32, 1, 1],
+    "local_size_target": q6_expected_local_size,
     "spec_id_0": "WorkgroupSize.x / Q6 lane count",
     "spec_id_1": "Q6 row-count/data-loop dimension; not WorkgroupSize.y",
     "spec_id_2": "Q6 column/count dimension; not WorkgroupSize.z",
@@ -5184,7 +5191,7 @@ if not q6_shader_like_64_required:
         ])
     else:
         q6_shader_like_clear_basis.extend([
-            "local_size_resolved=[32,1,1]",
+            "local_size_resolved=reported-q6-local-size",
             "q6_shader_like_64_abs_delta=diagnostic-only",
         ])
 elif numeric_close_to_zero(q6_latest_partial.get("q6_shader_like_64_abs_delta")):

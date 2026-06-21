@@ -352,6 +352,29 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         self.assertFalse(report["correctness_claim_allowed"])
         self.assertFalse(report["benchmark_claim_allowed"])
 
+    def test_early_compare_failure_artifact_is_not_misclassified_as_runtime_freshness(self):
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.failure.v1",
+            "exit_code": 124,
+            "stage": "forced Vulkan",
+            "failure_class": "early_compare_failure",
+            "message": "forced Vulkan failed before the full llama GPU compare artifact was produced",
+            "adb_state": {"adb_wifi_enabled": "1", "adb_enabled": "0"},
+            "memory": {"mem_available_mb": 729, "swap_free_mb": 0},
+            "pdocker_diagnostics": {"pdockerd_socket": "present"},
+        }
+        result = self.run_verifier(payload)
+        self.assertEqual(result.returncode, 23, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "early-compare-timeout")
+        self.assertEqual(report["responsibility_boundary"], "compare-driver")
+        self.assertEqual(report["stage"], "forced Vulkan")
+        self.assertEqual(report["adb_state"]["adb_enabled"], "0")
+        self.assertEqual(report["memory"]["swap_free_mb"], 0)
+        self.assertNotEqual(report["classification"], "executor-marker-not-observed")
+        self.assertFalse(report["correctness_claim_allowed"])
+        self.assertFalse(report["benchmark_claim_allowed"])
+
     def test_memory_blocker_is_structured_and_optionally_allowed(self):
         payload = {
             "error": "insufficient_memory",
@@ -2290,6 +2313,8 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                         "workgroup_shape_blocker": False,
                         "latest_status": "mismatch",
                         "local_size_resolved": [64, 1, 1],
+                        "q6_local_size": [32, 1, 1],
+                        "local_size_consistent": False,
                         "q6_shader_like_abs_delta": 0.0,
                         "q6_shader_like_64_abs_delta": 0.0,
                         "q6_shader_like_oracle_cleared": True,
@@ -2301,7 +2326,6 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
             "cpu": {"tokens_per_second": 0.1},
             **speedup_sections(speedup=0.5, target_met=False, cpu_tps=0.1, gpu_tps=0.05),
         }
-        payload["gpu"]["diagnostics"]["q6_workgroup_diagnostics"]["local_size_resolved"] = [64, 1, 1]
         result = self.run_verifier(payload, "--require-q6-workgroup-clear")
         self.assertEqual(result.returncode, 31, result.stdout)
         report = json.loads(result.stdout)
@@ -2899,6 +2923,8 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                     "q6_workgroup_diagnostics": {
                         "workgroup_shape_blocker": True,
                         "latest_status": "mismatch",
+                        "local_size_resolved": [64, 1, 1],
+                        "q6_local_size": [32, 1, 1],
                     },
                 },
                 "correctness": gpu_correctness_report("fail", required_failures=1, passed=False, content="4"),
