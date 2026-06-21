@@ -59,6 +59,7 @@
 #define PDOCKER_GPU_STRICT_GRAPH_CACHE_SLOTS 8
 #define PDOCKER_GPU_RESIDENT_CACHE_DEFAULT_THRESHOLD (64u * 1024u * 1024u)
 #define PDOCKER_GPU_MUTABLE_BUFFER_CACHE_DEFAULT_MAX_BYTES (32u * 1024u * 1024u)
+#define PDOCKER_GPU_STRICT_GRAPH_CACHE_DEFAULT_MAX_BYTES (512ull * 1024ull * 1024ull)
 #define PDOCKER_GPU_WRITEONLY_DIRTY_PROBE_DEFAULT_MIN_BYTES (16u * 1024u * 1024u)
 #define PDOCKER_GPU_WRITEBACK_FULL_HASH_DEFAULT_MAX_BYTES (64u * 1024u * 1024u)
 #define PDOCKER_GPU_WRITEONLY_DIRTY_PROBE_SENTINEL 0xA5u
@@ -1136,6 +1137,8 @@ typedef struct {
     size_t resident_cache_min_bytes;
     int has_strict_graph_cache;
     int strict_graph_cache;
+    int has_strict_graph_cache_max_bytes;
+    size_t strict_graph_cache_max_bytes;
     int has_profile_response;
     int profile_response;
     int has_strict_passthrough;
@@ -1144,6 +1147,8 @@ typedef struct {
     int strict_reconciliation;
     int has_strict_device_local_staging;
     int strict_device_local_staging;
+    int has_strict_device_local_staging_max_transfer_bytes;
+    size_t strict_device_local_staging_max_transfer_bytes;
     int has_strict_duplicate_descriptor_normalization;
     int strict_duplicate_descriptor_normalization;
     int has_rewrite_duplicate_descriptors;
@@ -2522,6 +2527,9 @@ typedef struct {
     uint64_t memory_id;
     size_t memory_index;
     VkDeviceSize memory_offset;
+    size_t api_buffer_size;
+    size_t transport_buffer_size;
+    int descriptor_window_compacted;
     VkBuffer buffer;
     VkMemoryRequirements requirements;
     VkBuffer staging_buffer;
@@ -3874,6 +3882,68 @@ static void destroy_strict_vulkan_object_graph(
     }
 }
 
+static int strict_descriptor_window_compaction_enabled(
+        const VulkanDispatchBinding *bindings,
+        size_t binding_count,
+        const uint8_t *active_bindings,
+        int device_local_staged) {
+    if (!bindings || !active_bindings || !device_local_staged) return 0;
+    for (size_t i = 0; i < binding_count; ++i) {
+        if (!active_bindings[i]) continue;
+        const VulkanDispatchBinding *b = &bindings[i];
+        if (b->api_memory_id == 0 || b->api_buffer_id == 0 ||
+            b->api_buffer_size == 0 || b->api_memory_size == 0 ||
+            b->api_memory_offset != 0 || b->api_offset < 0) {
+            return 0;
+        }
+        const size_t descriptor_range = vulkan_binding_descriptor_range(b, 1);
+        if (descriptor_range == 0) return 0;
+        if ((uint64_t)b->api_offset > UINT64_MAX - (uint64_t)descriptor_range) return 0;
+        const uint64_t range_end = (uint64_t)b->api_offset + (uint64_t)descriptor_range;
+        if (range_end > (uint64_t)b->api_buffer_size) return 0;
+        for (size_t j = 0; j < i; ++j) {
+            if (!active_bindings[j]) continue;
+            if (bindings[j].api_memory_id == b->api_memory_id &&
+                bindings[j].api_buffer_id != b->api_buffer_id) {
+                return 0;
+            }
+        }
+    }
+    return 1;
+}
+
+static size_t strict_device_local_staging_max_transfer_bytes(const VulkanDispatchOptions *options) {
+    if (options && options->has_strict_device_local_staging_max_transfer_bytes) {
+        return options->strict_device_local_staging_max_transfer_bytes;
+    }
+    const char *value = getenv("PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING_MAX_TRANSFER_BYTES");
+    if (value && value[0]) {
+        char *end = NULL;
+        unsigned long long parsed = strtoull(value, &end, 10);
+        if (end && *end == '\0') return (size_t)parsed;
+    }
+    return 64ull * 1024ull * 1024ull;
+}
+
+static size_t strict_memory_staging_transfer_bytes(
+        const VulkanStrictBufferObject *buffers,
+        size_t buffer_count,
+        size_t memory_index) {
+    size_t total = 0;
+    if (!buffers) return 0;
+    for (size_t i = 0; i < buffer_count; ++i) {
+        if (buffers[i].memory_index != memory_index ||
+            buffers[i].staging_base == SIZE_MAX ||
+            buffers[i].staging_end <= buffers[i].staging_base) {
+            continue;
+        }
+        const size_t bytes = buffers[i].staging_end - buffers[i].staging_base;
+        if (SIZE_MAX - total < bytes) return SIZE_MAX;
+        total += bytes;
+    }
+    return total;
+}
+
 static int create_strict_vulkan_object_graph(
         VkPhysicalDevice physical_device,
         VkDevice device,
@@ -3889,22 +3959,29 @@ static int create_strict_vulkan_object_graph(
         size_t *buffer_count,
         VulkanVectorBuffer **vk_buffers,
         int device_local_staged,
+        const VulkanDispatchOptions *options,
         VulkanStrictGraphTiming *timing) {
     if (!buffer_fds || !bindings || !active_bindings || !binding_read_needed ||
         !binding_write_needed || !memories || !memory_count || !buffers ||
         !buffer_count || !vk_buffers) {
         return -EINVAL;
     }
+    const int compact_descriptor_window = strict_descriptor_window_compaction_enabled(
+        bindings, binding_count, active_bindings, device_local_staged);
     *memory_count = 0;
     *buffer_count = 0;
     for (size_t i = 0; i < binding_count; ++i) {
         if (!active_bindings[i]) continue;
+        const size_t descriptor_range = vulkan_binding_descriptor_range(&bindings[i], 1);
         if (bindings[i].api_memory_id == 0 || bindings[i].api_buffer_id == 0 ||
             bindings[i].api_buffer_size == 0 || bindings[i].api_memory_size == 0 ||
             bindings[i].api_memory_offset < 0 || bindings[i].api_offset < 0 ||
+            descriptor_range == 0 ||
             (uint64_t)bindings[i].api_memory_offset + (uint64_t)bindings[i].api_buffer_size >
                 (uint64_t)bindings[i].api_memory_size ||
             (uint64_t)bindings[i].api_offset + (uint64_t)bindings[i].size >
+                (uint64_t)bindings[i].api_buffer_size ||
+            (uint64_t)bindings[i].api_offset + (uint64_t)descriptor_range >
                 (uint64_t)bindings[i].api_buffer_size) {
             return -EINVAL;
         }
@@ -3914,10 +3991,10 @@ static int create_strict_vulkan_object_graph(
             mem_index = (int)(*memory_count)++;
             memories[mem_index].memory_id = bindings[i].api_memory_id;
             memories[mem_index].fd = buffer_fds[i];
-            memories[mem_index].size = bindings[i].api_memory_size;
+            memories[mem_index].size = compact_descriptor_window ? 0 : bindings[i].api_memory_size;
             memories[mem_index].memory_type_bits = UINT32_MAX;
         } else {
-            if (memories[mem_index].size < bindings[i].api_memory_size) {
+            if (!compact_descriptor_window && memories[mem_index].size < bindings[i].api_memory_size) {
                 memories[mem_index].size = bindings[i].api_memory_size;
             }
         }
@@ -3929,43 +4006,31 @@ static int create_strict_vulkan_object_graph(
             buffers[buffer_index].buffer_id = bindings[i].api_buffer_id;
             buffers[buffer_index].memory_id = bindings[i].api_memory_id;
             buffers[buffer_index].memory_index = (size_t)mem_index;
-            buffers[buffer_index].memory_offset = (VkDeviceSize)bindings[i].api_memory_offset;
+            buffers[buffer_index].memory_offset = compact_descriptor_window
+                ? 0
+                : (VkDeviceSize)bindings[i].api_memory_offset;
+            buffers[buffer_index].api_buffer_size = bindings[i].api_buffer_size;
+            buffers[buffer_index].transport_buffer_size = compact_descriptor_window
+                ? 0
+                : bindings[i].api_buffer_size;
+            buffers[buffer_index].descriptor_window_compacted = compact_descriptor_window;
             buffers[buffer_index].staging_base = SIZE_MAX;
             buffers[buffer_index].staging_end = 0;
-            VkBufferCreateInfo bci = {
-                .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-                .size = (VkDeviceSize)bindings[i].api_buffer_size,
-                .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                         VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-                         VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-                         VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
-                .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-            };
-            double op_start = now_ms();
-            VkResult rc = vkCreateBuffer(device, &bci, NULL, &buffers[buffer_index].buffer);
-            if (timing) {
-                timing->create_buffer_ms += now_ms() - op_start;
-                timing->created_buffer_bytes += bindings[i].api_buffer_size;
-            }
-            if (rc != VK_SUCCESS) return -EIO;
-            op_start = now_ms();
-            vkGetBufferMemoryRequirements(device,
-                                          buffers[buffer_index].buffer,
-                                          &buffers[buffer_index].requirements);
-            if (timing) timing->get_requirements_ms += now_ms() - op_start;
-            memories[mem_index].memory_type_bits &= buffers[buffer_index].requirements.memoryTypeBits;
-            if ((buffers[buffer_index].memory_offset % buffers[buffer_index].requirements.alignment) != 0) {
-                return -EINVAL;
-            }
-            uint64_t required_end =
-                (uint64_t)buffers[buffer_index].memory_offset +
-                (uint64_t)buffers[buffer_index].requirements.size;
-            if (required_end > memories[mem_index].size) {
-                memories[mem_index].size = (size_t)required_end;
-            }
         } else if (buffers[buffer_index].memory_id != bindings[i].api_memory_id ||
-                   buffers[buffer_index].memory_offset != (VkDeviceSize)bindings[i].api_memory_offset) {
+                   buffers[buffer_index].memory_index != (size_t)mem_index ||
+                   buffers[buffer_index].api_buffer_size != bindings[i].api_buffer_size ||
+                   (!compact_descriptor_window &&
+                    buffers[buffer_index].memory_offset != (VkDeviceSize)bindings[i].api_memory_offset)) {
             return -EINVAL;
+        }
+
+        if (compact_descriptor_window) {
+            const uint64_t descriptor_end =
+                (uint64_t)bindings[i].api_offset + (uint64_t)descriptor_range;
+            if (descriptor_end > (uint64_t)SIZE_MAX) return -EOVERFLOW;
+            if ((size_t)descriptor_end > buffers[buffer_index].transport_buffer_size) {
+                buffers[buffer_index].transport_buffer_size = (size_t)descriptor_end;
+            }
         }
         if (binding_read_needed[i] || binding_write_needed[i]) {
             const uint64_t range_start = (uint64_t)bindings[i].api_offset;
@@ -3980,14 +4045,60 @@ static int create_strict_vulkan_object_graph(
         }
     }
 
+    for (size_t b = 0; b < *buffer_count; ++b) {
+        const VkDeviceSize create_size = (VkDeviceSize)(
+            buffers[b].descriptor_window_compacted
+                ? buffers[b].transport_buffer_size
+                : buffers[b].api_buffer_size);
+        if (create_size == 0) return -EINVAL;
+        VkBufferCreateInfo bci = {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+            .size = create_size,
+            .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                     VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                     VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                     VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
+            .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        };
+        double op_start = now_ms();
+        VkResult rc = vkCreateBuffer(device, &bci, NULL, &buffers[b].buffer);
+        if (timing) {
+            timing->create_buffer_ms += now_ms() - op_start;
+            timing->created_buffer_bytes += (size_t)create_size;
+        }
+        if (rc != VK_SUCCESS) return -EIO;
+        op_start = now_ms();
+        vkGetBufferMemoryRequirements(device, buffers[b].buffer, &buffers[b].requirements);
+        if (timing) timing->get_requirements_ms += now_ms() - op_start;
+        VulkanStrictMemoryObject *memory = &memories[buffers[b].memory_index];
+        memory->memory_type_bits &= buffers[b].requirements.memoryTypeBits;
+        if (buffers[b].requirements.alignment != 0 &&
+            (buffers[b].memory_offset % buffers[b].requirements.alignment) != 0) {
+            return -EINVAL;
+        }
+        uint64_t required_end =
+            (uint64_t)buffers[b].memory_offset + (uint64_t)buffers[b].requirements.size;
+        if (required_end > (uint64_t)SIZE_MAX) return -EOVERFLOW;
+        if (required_end > memory->size) {
+            memory->size = (size_t)required_end;
+        }
+    }
+
     for (size_t m = 0; m < *memory_count; ++m) {
+        if (memories[m].size == 0) return -EINVAL;
+        const size_t staging_transfer_bytes = strict_memory_staging_transfer_bytes(
+            buffers, *buffer_count, m);
+        const size_t staging_transfer_limit = strict_device_local_staging_max_transfer_bytes(options);
+        const int stage_device_local_for_memory =
+            device_local_staged &&
+            (staging_transfer_limit == 0 || staging_transfer_bytes <= staging_transfer_limit);
         uint32_t memory_type = find_vulkan_memory_type(
             physical_device,
             memories[m].memory_type_bits,
-            device_local_staged
+            stage_device_local_for_memory
                 ? VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
                 : (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT));
-        if (memory_type == UINT32_MAX && device_local_staged) {
+        if (memory_type == UINT32_MAX && stage_device_local_for_memory) {
             /*
              * Device-local staging is a correctness/performance probe, not a
              * semantic requirement.  Some Android implementations expose only
@@ -4001,7 +4112,7 @@ static int create_strict_vulkan_object_graph(
                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
             memories[m].device_local_staged = 0;
         } else {
-            memories[m].device_local_staged = device_local_staged ? 1 : 0;
+            memories[m].device_local_staged = stage_device_local_for_memory ? 1 : 0;
         }
         if (memory_type == UINT32_MAX) return -ENOTSUP;
         memories[m].memory_type_index = memory_type;
@@ -4758,11 +4869,69 @@ static uint64_t fnv1a64_update(uint64_t hash, const void *data, size_t size) {
 }
 
 
+static void destroy_strict_graph_cache_entry(VkDevice device, VulkanStrictGraphCacheEntry *entry);
+
 static int strict_graph_cache_enabled(const VulkanDispatchOptions *options) {
     if (options && options->has_strict_graph_cache) {
         return options->strict_graph_cache ? 1 : 0;
     }
     return env_truthy("PDOCKER_GPU_STRICT_GRAPH_CACHE", 1);
+}
+
+static size_t strict_graph_cache_max_bytes(const VulkanDispatchOptions *options) {
+    if (options && options->has_strict_graph_cache_max_bytes) {
+        return options->strict_graph_cache_max_bytes;
+    }
+    const char *value = getenv("PDOCKER_GPU_STRICT_GRAPH_CACHE_MAX_BYTES");
+    if (value && value[0]) {
+        char *end = NULL;
+        unsigned long long parsed = strtoull(value, &end, 10);
+        if (end && *end == '\0') return (size_t)parsed;
+    }
+    return (size_t)PDOCKER_GPU_STRICT_GRAPH_CACHE_DEFAULT_MAX_BYTES;
+}
+
+static size_t strict_graph_cache_total_bytes(VkDevice device) {
+    size_t total = 0;
+    for (size_t i = 0; i < PDOCKER_GPU_STRICT_GRAPH_CACHE_SLOTS; ++i) {
+        const VulkanStrictGraphCacheEntry *entry = &g_vulkan_strict_graph_cache[i];
+        if (!entry->valid || entry->device != device) continue;
+        if (SIZE_MAX - total < entry->bytes) return SIZE_MAX;
+        total += entry->bytes;
+    }
+    return total;
+}
+
+static int evict_one_strict_graph_cache_lru(VkDevice device) {
+    int victim = -1;
+    for (size_t i = 0; i < PDOCKER_GPU_STRICT_GRAPH_CACHE_SLOTS; ++i) {
+        const VulkanStrictGraphCacheEntry *entry = &g_vulkan_strict_graph_cache[i];
+        if (!entry->valid || entry->in_use || entry->device != device) continue;
+        if (victim < 0 || entry->last_used < g_vulkan_strict_graph_cache[(size_t)victim].last_used) {
+            victim = (int)i;
+        }
+    }
+    if (victim < 0) return 0;
+    destroy_strict_graph_cache_entry(device, &g_vulkan_strict_graph_cache[(size_t)victim]);
+    return 1;
+}
+
+static int strict_graph_cache_admission_allowed(size_t graph_bytes, const VulkanDispatchOptions *options) {
+    const size_t max_bytes = strict_graph_cache_max_bytes(options);
+    return max_bytes > 0 && graph_bytes > 0 && graph_bytes <= max_bytes;
+}
+
+static void enforce_strict_graph_cache_budget(VkDevice device, size_t incoming_bytes, const VulkanDispatchOptions *options) {
+    const size_t max_bytes = strict_graph_cache_max_bytes(options);
+    if (max_bytes == 0 || incoming_bytes > max_bytes) {
+        while (evict_one_strict_graph_cache_lru(device)) {}
+        return;
+    }
+    while (1) {
+        const size_t total = strict_graph_cache_total_bytes(device);
+        if (total <= max_bytes && incoming_bytes <= max_bytes - total) break;
+        if (!evict_one_strict_graph_cache_lru(device)) break;
+    }
 }
 
 static uint64_t strict_graph_cache_key(
@@ -5043,7 +5212,10 @@ static uint64_t reconcile_dispatch_hash(
         uint32_t gz,
         uint32_t base_x,
         uint32_t base_y,
-        uint32_t base_z) {
+        uint32_t base_z,
+        uint32_t dispatch_indirect,
+        uint64_t dispatch_indirect_buffer_id,
+        uint64_t dispatch_indirect_offset) {
     uint64_t hash = 1469598103934665603ull;
     hash = fnv1a64_update(hash, &gx, sizeof(gx));
     hash = fnv1a64_update(hash, &gy, sizeof(gy));
@@ -5051,7 +5223,37 @@ static uint64_t reconcile_dispatch_hash(
     hash = fnv1a64_update(hash, &base_x, sizeof(base_x));
     hash = fnv1a64_update(hash, &base_y, sizeof(base_y));
     hash = fnv1a64_update(hash, &base_z, sizeof(base_z));
+    hash = fnv1a64_update(hash, &dispatch_indirect, sizeof(dispatch_indirect));
+    hash = fnv1a64_update(hash, &dispatch_indirect_buffer_id, sizeof(dispatch_indirect_buffer_id));
+    hash = fnv1a64_update(hash, &dispatch_indirect_offset, sizeof(dispatch_indirect_offset));
     return hash;
+}
+
+static uint64_t reconcile_dispatch_hash_for_options(
+        uint32_t gx,
+        uint32_t gy,
+        uint32_t gz,
+        uint32_t base_x,
+        uint32_t base_y,
+        uint32_t base_z,
+        const VulkanDispatchOptions *options) {
+    /*
+     * The sender-side VULKAN_DISPATCH_V4 evidence hashes the dispatch shape
+     * plus the indirect-dispatch discriminator fields.  The generic V4 path
+     * uses direct dispatch for llama warmup/Q6 checkpoints, so the indirect
+     * identity is intentionally zero here.  Indirect dispatch is transported
+     * by the V5 object frame, where the sender hash is carried by the frame
+     * header rather than the V4 reconciliation token stream.
+     */
+    const uint32_t dispatch_indirect =
+        (options && options->has_dispatch_indirect) ? 1u : 0u;
+    const uint64_t dispatch_indirect_buffer_id = 0;
+    const uint64_t dispatch_indirect_offset =
+        dispatch_indirect ? options->dispatch_indirect_offset : 0;
+    return reconcile_dispatch_hash(
+        gx, gy, gz, base_x, base_y, base_z,
+        dispatch_indirect, dispatch_indirect_buffer_id,
+        dispatch_indirect_offset);
 }
 
 static const char *json_match_or_null(int present, int matched) {
@@ -5113,7 +5315,8 @@ static int strict_reconciliation_has_mismatch(
         return 1;
     }
     if (sender->has_dispatch_hash &&
-        sender->dispatch_hash != reconcile_dispatch_hash(gx, gy, gz, base_x, base_y, base_z)) {
+        sender->dispatch_hash != reconcile_dispatch_hash_for_options(
+            gx, gy, gz, base_x, base_y, base_z, options)) {
         if (field_name) *field_name = "dispatch_hash";
         return 1;
     }
@@ -5182,7 +5385,8 @@ static int strict_reconciliation_has_required_transport_match(
         return 0;
     }
     if (!sender->has_dispatch_hash ||
-        sender->dispatch_hash != reconcile_dispatch_hash(gx, gy, gz, base_x, base_y, base_z)) {
+        sender->dispatch_hash != reconcile_dispatch_hash_for_options(
+            gx, gy, gz, base_x, base_y, base_z, options)) {
         if (field_name) *field_name = "dispatch_hash";
         return 0;
     }
@@ -5219,7 +5423,8 @@ static void write_vulkan_reconciliation_report(
         specialization_count,
         specialization_data,
         specialization_data_size);
-    const uint64_t dispatch_hash = reconcile_dispatch_hash(gx, gy, gz, base_x, base_y, base_z);
+    const uint64_t dispatch_hash = reconcile_dispatch_hash_for_options(
+        gx, gy, gz, base_x, base_y, base_z, options);
     fprintf(out,
             "\"reconciliation\":{"
             "\"receive\":{"
@@ -13071,6 +13276,7 @@ static int run_vulkan_dispatch_fd(
     uint64_t strict_object_graph_cache_key = 0;
     uint64_t strict_object_graph_cache_active_mask = 0;
     size_t strict_object_graph_cache_bytes = 0;
+    size_t strict_object_graph_cache_budget_bytes = strict_graph_cache_max_bytes(options);
     VulkanStrictGraphCacheEntry *strict_object_graph_cache_entry = NULL;
     size_t strict_readonly_overlap_snapshot_count = 0;
     size_t strict_readonly_overlap_snapshot_bytes = 0;
@@ -14105,6 +14311,9 @@ static int run_vulkan_dispatch_fd(
             }
         }
         if (!strict_object_graph_cache_hit) {
+            if (strict_object_graph_cache_enabled && strict_object_graph_cache_key != 0) {
+                enforce_strict_graph_cache_budget(rt->device, strict_object_graph_cache_bytes, options);
+            }
             int graph_rc = create_strict_vulkan_object_graph(
                 rt->physical_device,
                 rt->device,
@@ -14120,6 +14329,7 @@ static int run_vulkan_dispatch_fd(
                 &strict_buffer_count,
                 vk_buffers,
                 strict_device_local_staging,
+                options,
                 &strict_object_graph_timing);
             if (graph_rc != 0) {
                 io_rc = graph_rc;
@@ -15930,6 +16140,31 @@ static int run_vulkan_dispatch_fd(
     for (size_t i = 0; i < strict_memory_count; ++i) {
         if (strict_memories[i].device_local_staged) strict_staged_memory_count++;
     }
+    size_t strict_descriptor_window_compacted_buffers = 0;
+    size_t strict_descriptor_window_api_buffer_bytes = 0;
+    size_t strict_descriptor_window_transport_buffer_bytes = 0;
+    for (size_t i = 0; i < strict_buffer_count; ++i) {
+        if (SIZE_MAX - strict_descriptor_window_api_buffer_bytes < strict_buffers[i].api_buffer_size) {
+            strict_descriptor_window_api_buffer_bytes = SIZE_MAX;
+        } else {
+            strict_descriptor_window_api_buffer_bytes += strict_buffers[i].api_buffer_size;
+        }
+        if (SIZE_MAX - strict_descriptor_window_transport_buffer_bytes < strict_buffers[i].transport_buffer_size) {
+            strict_descriptor_window_transport_buffer_bytes = SIZE_MAX;
+        } else {
+            strict_descriptor_window_transport_buffer_bytes += strict_buffers[i].transport_buffer_size;
+        }
+        if (strict_buffers[i].descriptor_window_compacted) {
+            strict_descriptor_window_compacted_buffers++;
+        }
+    }
+    size_t strict_descriptor_window_avoided_buffer_bytes = 0;
+    if (strict_descriptor_window_api_buffer_bytes != SIZE_MAX &&
+        strict_descriptor_window_transport_buffer_bytes != SIZE_MAX &&
+        strict_descriptor_window_api_buffer_bytes > strict_descriptor_window_transport_buffer_bytes) {
+        strict_descriptor_window_avoided_buffer_bytes =
+            strict_descriptor_window_api_buffer_bytes - strict_descriptor_window_transport_buffer_bytes;
+    }
     uint64_t resolved_local_size[3];
     resolve_spirv_local_size(&spirv_summary,
                              specializations,
@@ -15945,7 +16180,9 @@ static int run_vulkan_dispatch_fd(
                                     specialization_data_size);
     if (strict_object_graph_used && !strict_object_graph_cache_hit &&
         strict_object_graph_cache_enabled && strict_object_graph_cache_key != 0 &&
+        strict_graph_cache_admission_allowed(strict_object_graph_cache_bytes, options) &&
         strict_memory_count > 0 && strict_buffer_count > 0) {
+        enforce_strict_graph_cache_budget(rt->device, strict_object_graph_cache_bytes, options);
         VulkanStrictGraphCacheEntry *slot = select_strict_graph_cache_slot(rt->device);
         if (slot) {
             memset(slot, 0, sizeof(*slot));
@@ -15977,13 +16214,18 @@ static int run_vulkan_dispatch_fd(
                 "\"requested_feature_mask_present\":%s,"
                 "\"strict_object_graph\":{\"used\":%s,\"memories\":%zu,\"buffers\":%zu,"
                 "\"device_local_staging_requested\":%s,\"device_local_staged_memories\":%zu,"
+                "\"descriptor_window_compacted_buffers\":%zu,"
+                "\"descriptor_window_api_buffer_bytes\":%zu,"
+                "\"descriptor_window_transport_buffer_bytes\":%zu,"
+                "\"descriptor_window_avoided_buffer_bytes\":%zu,"
                 "\"staging_upload_copies\":%zu,\"staging_upload_bytes\":%zu,"
                 "\"staging_download_copies\":%zu,\"staging_download_bytes\":%zu,"
                 "\"readonly_overlap_snapshots\":%zu,"
                 "\"readonly_overlap_snapshot_bytes\":%zu,"
                 "\"cache_enabled\":%s,\"cache_hit\":%s,"
                 "\"cache_adopted\":%s,\"cache_key\":\"0x%016llx\","
-                "\"cache_bytes\":%zu,\"cache_disabled_reason\":\"%s\","
+                "\"cache_bytes\":%zu,\"cache_budget_bytes\":%zu,"
+                "\"cache_disabled_reason\":\"%s\","
                 "\"cold_phase_timing_ms\":{\"create_buffer\":%.4f,"
                 "\"get_requirements\":%.4f,\"allocate_memory\":%.4f,"
                 "\"map_memory\":%.4f,\"bind_buffer\":%.4f,"
@@ -16062,6 +16304,10 @@ static int run_vulkan_dispatch_fd(
                 strict_buffer_count,
                 strict_device_local_staging ? "true" : "false",
                 strict_staged_memory_count,
+                strict_descriptor_window_compacted_buffers,
+                strict_descriptor_window_api_buffer_bytes,
+                strict_descriptor_window_transport_buffer_bytes,
+                strict_descriptor_window_avoided_buffer_bytes,
                 strict_staging_upload_copies,
                 strict_staging_upload_bytes,
                 strict_staging_download_copies,
@@ -16073,6 +16319,7 @@ static int run_vulkan_dispatch_fd(
                 strict_object_graph_cache_adopted ? "true" : "false",
                 (unsigned long long)strict_object_graph_cache_key,
                 strict_object_graph_cache_bytes,
+                strict_object_graph_cache_budget_bytes,
                 strict_object_graph_cache_disabled_reason ? strict_object_graph_cache_disabled_reason : "",
                 strict_object_graph_timing.create_buffer_ms,
                 strict_object_graph_timing.get_requirements_ms,
@@ -16238,13 +16485,18 @@ static int run_vulkan_dispatch_fd(
             "\"requested_feature_mask_present\":%s,"
             "\"strict_object_graph\":{\"used\":%s,\"memories\":%zu,\"buffers\":%zu,"
             "\"device_local_staging_requested\":%s,\"device_local_staged_memories\":%zu,"
+                "\"descriptor_window_compacted_buffers\":%zu,"
+                "\"descriptor_window_api_buffer_bytes\":%zu,"
+                "\"descriptor_window_transport_buffer_bytes\":%zu,"
+                "\"descriptor_window_avoided_buffer_bytes\":%zu,"
             "\"staging_upload_copies\":%zu,\"staging_upload_bytes\":%zu,"
             "\"staging_download_copies\":%zu,\"staging_download_bytes\":%zu,"
             "\"readonly_overlap_snapshots\":%zu,"
             "\"readonly_overlap_snapshot_bytes\":%zu,"
             "\"cache_enabled\":%s,\"cache_hit\":%s,"
             "\"cache_adopted\":%s,\"cache_key\":\"0x%016llx\","
-            "\"cache_bytes\":%zu,\"cache_disabled_reason\":\"%s\","
+            "\"cache_bytes\":%zu,\"cache_budget_bytes\":%zu,"
+            "\"cache_disabled_reason\":\"%s\","
             "\"cold_phase_timing_ms\":{\"create_buffer\":%.4f,"
             "\"get_requirements\":%.4f,\"allocate_memory\":%.4f,"
             "\"map_memory\":%.4f,\"bind_buffer\":%.4f,"
@@ -16331,6 +16583,10 @@ static int run_vulkan_dispatch_fd(
             strict_buffer_count,
             strict_device_local_staging ? "true" : "false",
             strict_staged_memory_count,
+            strict_descriptor_window_compacted_buffers,
+            strict_descriptor_window_api_buffer_bytes,
+            strict_descriptor_window_transport_buffer_bytes,
+            strict_descriptor_window_avoided_buffer_bytes,
             strict_staging_upload_copies,
             strict_staging_upload_bytes,
             strict_staging_download_copies,
@@ -16342,6 +16598,7 @@ static int run_vulkan_dispatch_fd(
             strict_object_graph_cache_adopted ? "true" : "false",
             (unsigned long long)strict_object_graph_cache_key,
             strict_object_graph_cache_bytes,
+            strict_object_graph_cache_budget_bytes,
             strict_object_graph_cache_disabled_reason ? strict_object_graph_cache_disabled_reason : "",
             strict_object_graph_timing.create_buffer_ms,
             strict_object_graph_timing.get_requirements_ms,
@@ -16819,7 +17076,9 @@ cleanup:
     if (strict_object_graph_used && !strict_object_graph_cache_hit) {
         if (ret == 0 && !strict_object_graph_cache_adopted &&
             strict_object_graph_cache_enabled && strict_object_graph_cache_key != 0 &&
+            strict_graph_cache_admission_allowed(strict_object_graph_cache_bytes, options) &&
             strict_memory_count > 0 && strict_buffer_count > 0) {
+            enforce_strict_graph_cache_budget(rt->device, strict_object_graph_cache_bytes, options);
             VulkanStrictGraphCacheEntry *slot = select_strict_graph_cache_slot(rt->device);
             if (slot) {
                 memset(slot, 0, sizeof(*slot));

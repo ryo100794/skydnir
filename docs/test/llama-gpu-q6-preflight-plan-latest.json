@@ -1,7 +1,7 @@
 {
   "adb_policy": "do not connect until the user says the Android device is prepared",
-  "artifact_path": "docs/test/llama-gpu-ngl1-q6-workgroup-192_168_179_21_36763-20260603Tprobe-final-barrier.json",
-  "created_utc": "2026-06-03T05:27:39Z",
+  "artifact_path": "docs/test/llama-gpu-ngl1-q6-midpoint-hostvisible-adb35875-20260621T060055Z.json",
+  "created_utc": "2026-06-21T06:00:57Z",
   "fail_branches": [
     {
       "action": "extend the SPIR-V materializer only for the reported specialization expression",
@@ -52,7 +52,7 @@
   "git_commit_expected_at_run_time": "record with git rev-parse HEAD immediately before run",
   "inputs": {
     "cpu_ctx": 512,
-    "cpu_tps": "0.47024489566506034",
+    "cpu_tps": "0.04702448956650603",
     "dockerfile_may_change": false,
     "gpu_ctx": 512,
     "gpu_layers": 1,
@@ -61,7 +61,7 @@
     "predict": 4,
     "prompt_may_change": false,
     "repeat": 1,
-    "serial": "192.168.179.21:36763"
+    "serial": "192.168.179.21:35875"
   },
   "must_not_report_complete_until": [
     "artifact exists",
@@ -125,7 +125,7 @@
     "writeback_matches_final_store"
   ],
   "runner": "scripts/android-llama-gpu-q6-workgroup-run.sh",
-  "runner_command": "ANDROID_SERIAL=192.168.179.21:36763 scripts/android-llama-gpu-q6-workgroup-run.sh --out docs/test/llama-gpu-ngl1-q6-workgroup-192_168_179_21_36763-20260603Tprobe-final-barrier.json --cpu-tps 0.47024489566506034 --cpu-ctx 512 --gpu-ctx 512 --gpu-layers 1 --predict 4 --repeat 1",
+  "runner_command": "ANDROID_SERIAL=192.168.179.21:35875 scripts/android-llama-gpu-q6-workgroup-run.sh --out docs/test/llama-gpu-ngl1-q6-midpoint-hostvisible-adb35875-20260621T060055Z.json --cpu-tps 0.04702448956650603 --cpu-ctx 512 --gpu-ctx 512 --gpu-layers 1 --predict 4 --repeat 1",
   "runner_step_contract": [
     {
       "command": "scripts/plan-llama-gpu-q6-run.py",

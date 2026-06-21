@@ -11421,6 +11421,52 @@ static VkResult unsupported_create_info_pnext_result(const char *api_name, const
     return VK_ERROR_FEATURE_NOT_PRESENT;
 }
 
+#ifndef VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO
+#define VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO ((VkStructureType)1000161000)
+#endif
+
+typedef struct PdockerVkDescriptorSetLayoutBindingFlagsCreateInfoCompat {
+    VkStructureType sType;
+    const void *pNext;
+    uint32_t bindingCount;
+    const VkFlags *pBindingFlags;
+} PdockerVkDescriptorSetLayoutBindingFlagsCreateInfoCompat;
+
+static VkResult validate_descriptor_set_layout_pnext(
+        const VkDescriptorSetLayoutCreateInfo *pCreateInfo) {
+    for (const void *node = pCreateInfo ? pCreateInfo->pNext : NULL; node;) {
+        PdockerVkStructHeader header = read_vk_struct_header(node);
+        switch (header.sType) {
+            case VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO: {
+                const PdockerVkDescriptorSetLayoutBindingFlagsCreateInfoCompat *flags =
+                    (const PdockerVkDescriptorSetLayoutBindingFlagsCreateInfoCompat *)node;
+                if (flags->bindingCount != pCreateInfo->bindingCount) {
+                    trace_icd_runtime_failure("descriptor-set-layout-binding-flags-count-mismatch",
+                                              VK_ERROR_FEATURE_NOT_PRESENT);
+                    return VK_ERROR_FEATURE_NOT_PRESENT;
+                }
+                if (flags->bindingCount > 0 && !flags->pBindingFlags) {
+                    trace_icd_runtime_failure("descriptor-set-layout-binding-flags-missing",
+                                              VK_ERROR_FEATURE_NOT_PRESENT);
+                    return VK_ERROR_FEATURE_NOT_PRESENT;
+                }
+                for (uint32_t i = 0; i < flags->bindingCount; ++i) {
+                    if (flags->pBindingFlags[i] != 0) {
+                        trace_icd_runtime_failure("descriptor-set-layout-binding-flags-unsupported",
+                                                  VK_ERROR_FEATURE_NOT_PRESENT);
+                        return VK_ERROR_FEATURE_NOT_PRESENT;
+                    }
+                }
+                break;
+            }
+            default:
+                return unsupported_create_info_pnext_result("vkCreateDescriptorSetLayout", node);
+        }
+        node = header.pNext;
+    }
+    return VK_SUCCESS;
+}
+
 static VkResult unsupported_image_transport_result(const char *api_name) {
     if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
         fprintf(stderr,
@@ -12496,9 +12542,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorSetLayout(
     (void)device;
     (void)pAllocator;
     if (!pCreateInfo || !pSetLayout) return VK_ERROR_INITIALIZATION_FAILED;
-    if (pCreateInfo->pNext) {
-        return unsupported_create_info_pnext_result("vkCreateDescriptorSetLayout", pCreateInfo->pNext);
-    }
+    VkResult pnext_rc = validate_descriptor_set_layout_pnext(pCreateInfo);
+    if (pnext_rc != VK_SUCCESS) return pnext_rc;
     if (pCreateInfo->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;
     PdockerVkDescriptorSetLayout *layout = pdocker_alloc_handle(sizeof(*layout));
     if (!layout) return VK_ERROR_OUT_OF_HOST_MEMORY;

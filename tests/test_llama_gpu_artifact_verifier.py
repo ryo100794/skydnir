@@ -60,6 +60,17 @@ def q6_env_gap_config_propagation():
     return cfg
 
 
+def q6_only_config_propagation_failure():
+    cfg = passing_config_propagation()
+    cfg["summary"] = "fail"
+    for check in cfg["checks"]:
+        if check["env"] == "PDOCKER_GPU_Q6K_COMPAT_REWRITES":
+            check.update({"expected": True, "observed_values": [False], "status": "mismatch"})
+        elif check["env"] == "PDOCKER_GPU_Q6K_READONLY_OVERLAP_SNAPSHOT":
+            check.update({"expected": True, "observed_values": [], "status": "missing-evidence"})
+    return cfg
+
+
 def gpu_correctness_report(correctness="pass", required_failures=0, passed=True, content="5"):
     return {
         "schema": "pdocker.llama.correctness.v1.compare",
@@ -853,6 +864,61 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
             "0xac41e8033a67af4a",
             json.dumps(report["generic_spirv_cpu_oracle_mismatches"]),
         )
+
+    def test_pre_q6_generic_spirv_mismatch_not_shadowed_by_q6_only_config_checks(self):
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": q6_only_config_propagation_failure(),
+                    "generic_spirv_dispatch": {
+                        "valid_android_vulkan_events": [
+                            generic_spirv_cpu_oracle_event(status="mismatch")
+                        ],
+                    },
+                    "q6_workgroup_diagnostics": {
+                        "event_count": 0,
+                        "q6_dispatch_seen": False,
+                        "q6_dispatch_event_count": 0,
+                        "blocker_class": "not-reached",
+                        "diagnostic_interpretation": "no-q6-callsite-before-generic-dispatch-blocker",
+                    },
+                },
+            },
+        }
+        result = self.run_verifier(payload)
+        self.assertEqual(result.returncode, 47, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "generic-spirv-cpu-oracle-mismatch")
+        self.assertEqual(report["responsibility_boundary"], "generic-spirv-cpu-oracle")
+        self.assertEqual(report["config_propagation"]["summary"], "fail")
+        self.assert_claims_blocked(report)
+
+    def test_q6_only_config_mismatch_fails_after_q6_dispatch_seen(self):
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": q6_only_config_propagation_failure(),
+                    "q6_workgroup_diagnostics": {
+                        "event_count": 0,
+                        "q6_dispatch_seen": True,
+                        "q6_dispatch_event_count": 1,
+                        "blocker_class": "q6-oracle-capture-missing",
+                        "diagnostic_interpretation": "q6-dispatch-seen-without-oracle-response",
+                    },
+                },
+            },
+        }
+        result = self.run_verifier(payload)
+        self.assertEqual(result.returncode, 35, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "config-propagation-mismatch")
+        self.assertTrue(report["config_propagation_q6_callsite_reached"])
+        self.assertIn("PDOCKER_GPU_Q6K_COMPAT_REWRITES", report["q6_callsite_gated_config_envs"])
+        self.assert_claims_blocked(report)
 
     def test_generic_spirv_cpu_oracle_match_does_not_trip_mismatch_gate(self):
         payload = {

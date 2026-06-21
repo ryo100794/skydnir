@@ -5547,7 +5547,6 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("unsupported_create_info_pnext_result", icd)
         for api in [
             "vkCreateBuffer",
-            "vkCreateDescriptorSetLayout",
             "vkCreatePipelineLayout",
             "vkCreateDescriptorPool",
             "vkAllocateDescriptorSets",
@@ -5564,7 +5563,22 @@ class GpuAbiContractTest(unittest.TestCase):
             "VKAPI_ATTR void VKAPI_CALL vkDestroyDescriptorSetLayout", 1
         )[0]
         self.assertIn("if (!pCreateInfo || !pSetLayout)", descriptor_layout_body)
+        self.assertIn("validate_descriptor_set_layout_pnext(pCreateInfo)", descriptor_layout_body)
         self.assertIn("if (pCreateInfo->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;", descriptor_layout_body)
+        descriptor_layout_pnext_body = icd.split("static VkResult validate_descriptor_set_layout_pnext", 1)[1].split(
+            "static VkResult unsupported_image_transport_result", 1
+        )[0]
+        self.assertIn("VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO", descriptor_layout_pnext_body)
+        self.assertIn("#define VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO ((VkStructureType)1000161000)", icd)
+        self.assertIn("PdockerVkDescriptorSetLayoutBindingFlagsCreateInfoCompat", descriptor_layout_pnext_body)
+        self.assertNotIn("#ifdef VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO", descriptor_layout_pnext_body)
+        self.assertIn("flags->bindingCount != pCreateInfo->bindingCount", descriptor_layout_pnext_body)
+        self.assertIn("descriptor-set-layout-binding-flags-count-mismatch", descriptor_layout_pnext_body)
+        self.assertIn("flags->bindingCount > 0 && !flags->pBindingFlags", descriptor_layout_pnext_body)
+        self.assertIn("descriptor-set-layout-binding-flags-missing", descriptor_layout_pnext_body)
+        self.assertIn("flags->pBindingFlags[i] != 0", descriptor_layout_pnext_body)
+        self.assertIn("descriptor-set-layout-binding-flags-unsupported", descriptor_layout_pnext_body)
+        self.assertIn('unsupported_create_info_pnext_result("vkCreateDescriptorSetLayout", node)', descriptor_layout_pnext_body)
         pipeline_layout_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreatePipelineLayout", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkDestroyPipelineLayout", 1
         )[0]
@@ -7675,6 +7689,60 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("binding_aliases[i].rewritten_binding + 1", source)
         self.assertIn("set_binding_counts[alias_set] = needed;", source)
         self.assertIn("writes[write_count].dstSet = descriptor_sets[binding_aliases[i].descriptor_set];", source)
+
+    def test_vulkan_reconciliation_dispatch_hash_matches_icd_shape(self):
+        executor = GPU_EXECUTOR.read_text()
+        icd = VULKAN_ICD.read_text()
+        self.assertIn("dispatch_hash = fnv1a64_update_u32(dispatch_hash, op->dispatch_indirect ? 1u : 0u);", icd)
+        self.assertIn("dispatch_hash = fnv1a64_update_u64(dispatch_hash, (uint64_t)(uintptr_t)op->dispatch_indirect_buffer);", icd)
+        self.assertIn("dispatch_hash = fnv1a64_update_u64(dispatch_hash, (uint64_t)op->dispatch_indirect_offset);", icd)
+        self.assertIn("static uint64_t reconcile_dispatch_hash_for_options", executor)
+        self.assertIn("uint32_t dispatch_indirect", executor)
+        self.assertIn("uint64_t dispatch_indirect_buffer_id", executor)
+        self.assertIn("uint64_t dispatch_indirect_offset", executor)
+        self.assertIn("hash = fnv1a64_update(hash, &dispatch_indirect, sizeof(dispatch_indirect));", executor)
+        self.assertIn("hash = fnv1a64_update(hash, &dispatch_indirect_buffer_id, sizeof(dispatch_indirect_buffer_id));", executor)
+        self.assertIn("hash = fnv1a64_update(hash, &dispatch_indirect_offset, sizeof(dispatch_indirect_offset));", executor)
+        self.assertIn("VULKAN_DISPATCH_V4 evidence hashes the dispatch shape", executor)
+        self.assertIn("sender->dispatch_hash != reconcile_dispatch_hash_for_options", executor)
+
+    def test_strict_graph_cache_is_budgeted_before_large_allocations(self):
+        source = GPU_EXECUTOR.read_text()
+        self.assertIn("PDOCKER_GPU_STRICT_GRAPH_CACHE_DEFAULT_MAX_BYTES", source)
+        self.assertIn("PDOCKER_GPU_STRICT_GRAPH_CACHE_MAX_BYTES", source)
+        self.assertIn("static void enforce_strict_graph_cache_budget", source)
+        self.assertIn("evict_one_strict_graph_cache_lru", source)
+        self.assertIn("strict_graph_cache_admission_allowed(strict_object_graph_cache_bytes, options)", source)
+        self.assertIn("enforce_strict_graph_cache_budget(rt->device, strict_object_graph_cache_bytes, options);", source)
+        self.assertIn('cache_budget_bytes', source)
+        create_pos = source.index("enforce_strict_graph_cache_budget(rt->device, strict_object_graph_cache_bytes, options);")
+        alloc_pos = source.index("create_strict_vulkan_object_graph", create_pos)
+        self.assertLess(create_pos, alloc_pos)
+
+    def test_strict_graph_uses_descriptor_window_for_device_local_dispatches(self):
+        source = GPU_EXECUTOR.read_text()
+        self.assertIn("static int strict_descriptor_window_compaction_enabled", source)
+        self.assertIn("descriptor_window_compacted", source)
+        self.assertIn("transport_buffer_size", source)
+        self.assertIn("descriptor_window_transport_buffer_bytes", source)
+        self.assertIn("descriptor_window_avoided_buffer_bytes", source)
+        self.assertIn("const VkDeviceSize create_size = (VkDeviceSize)(", source)
+        self.assertIn("? buffers[b].transport_buffer_size", source)
+        self.assertIn(": buffers[b].api_buffer_size", source)
+        self.assertIn("memories[mem_index].size = compact_descriptor_window ? 0 : bindings[i].api_memory_size;", source)
+        self.assertIn("buffers[buffer_index].memory_offset = compact_descriptor_window", source)
+        self.assertIn("? 0", source)
+        self.assertNotIn("VkMemoryRequirements staging_req;\n                VkMemoryRequirements staging_req;", source)
+
+    def test_large_strict_staging_transfer_uses_host_visible_memory(self):
+        source = GPU_EXECUTOR.read_text()
+        self.assertIn("PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING_MAX_TRANSFER_BYTES", source)
+        self.assertIn("static size_t strict_device_local_staging_max_transfer_bytes", source)
+        self.assertIn("static size_t strict_memory_staging_transfer_bytes", source)
+        self.assertIn("staging_transfer_bytes <= staging_transfer_limit", source)
+        self.assertIn("stage_device_local_for_memory", source)
+        self.assertIn("VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT", source)
+        self.assertIn("memories[m].device_local_staged = stage_device_local_for_memory ? 1 : 0;", source)
 
     def test_vulkan_feature_contract_matches_android_subset(self):
         icd = VULKAN_ICD.read_text()

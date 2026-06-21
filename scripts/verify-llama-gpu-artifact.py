@@ -110,6 +110,26 @@ def _manifest_env_field_tuple(manifest: dict[str, Any], key: str) -> tuple[tuple
     return tuple(fields)
 
 
+def _manifest_env_policy_map(manifest: dict[str, Any], key: str) -> dict[str, str]:
+    values = manifest.get(key)
+    if not isinstance(values, list) or not values:
+        raise RuntimeError(f"llama GPU env manifest field {key!r} must be a non-empty list")
+    policies: dict[str, str] = {}
+    for item in values:
+        if not isinstance(item, dict):
+            raise RuntimeError(f"llama GPU env manifest field {key!r} contains a non-object entry")
+        env_name = item.get("env")
+        if not isinstance(env_name, str) or not env_name:
+            raise RuntimeError(f"llama GPU env manifest field {key!r} contains an invalid env")
+        policy = str(item.get("evidence_policy") or "always")
+        if policy not in {"always", "callsite_gated", "q4k_callsite_gated", "q6_callsite_gated"}:
+            raise RuntimeError(
+                f"llama GPU env manifest field {key!r} contains invalid evidence_policy for {env_name}"
+            )
+        policies[env_name] = policy
+    return policies
+
+
 LLAMA_GPU_ENV_MANIFEST = _load_env_manifest()
 
 # Shared llama GPU environment manifest.  The compare driver and verifier both
@@ -122,6 +142,14 @@ LLAMA_GPU_COMPARE_FORWARD_ENV_KEYS = _manifest_string_tuple(
 )
 LLAMA_GPU_CONFIG_PROPAGATION_ENV_FIELDS = _manifest_env_field_tuple(
     LLAMA_GPU_ENV_MANIFEST, "config_propagation_env_fields"
+)
+LLAMA_GPU_CONFIG_PROPAGATION_EVIDENCE_POLICIES = _manifest_env_policy_map(
+    LLAMA_GPU_ENV_MANIFEST, "config_propagation_env_fields"
+)
+Q6_CALLSITE_GATED_CONFIG_ENVS = frozenset(
+    env_name
+    for env_name, policy in LLAMA_GPU_CONFIG_PROPAGATION_EVIDENCE_POLICIES.items()
+    if policy == "q6_callsite_gated" or env_name.startswith("PDOCKER_GPU_Q6K_")
 )
 UNSUPPORTED_GPU_WORK_TOKENS = _manifest_string_tuple(LLAMA_GPU_ENV_MANIFEST, "unsupported_gpu_work_tokens")
 REQUIRED_API_PROMPT_PROBES = {"addition": {"prompt": "2+3=", "expected_prefixes": ("5",)}}
@@ -360,7 +388,38 @@ def _config_propagation_missing(data: dict[str, Any], config_propagation: dict[s
     return not isinstance(checks, list) or not checks
 
 
-def _config_propagation_manifest_misses(config_propagation: dict[str, Any]) -> list[str]:
+def _q6_callsite_reached(q6: Any) -> bool:
+    if not isinstance(q6, dict):
+        return False
+    for key in ("event_count", "q6_probe_event_count", "q6_dispatch_event_count"):
+        try:
+            if int(q6.get(key, 0) or 0) > 0:
+                return True
+        except (TypeError, ValueError):
+            pass
+    return (
+        q6.get("q6_dispatch_seen") is True
+        or q6.get("q6_oracle_capture_missing") is True
+        or str(q6.get("latest_status") or "") in {"match", "mismatch"}
+        or str(q6.get("blocker_class") or "")
+        in {"q6-oracle-capture-missing", "q6-probe-writeback-cleared-oracle-missing"}
+    )
+
+
+def _config_check_is_q6_callsite_gated(check: dict[str, Any]) -> bool:
+    env_name = str(check.get("env") or "")
+    policy = str(
+        check.get("evidence_policy")
+        or LLAMA_GPU_CONFIG_PROPAGATION_EVIDENCE_POLICIES.get(env_name, "always")
+    )
+    return policy == "q6_callsite_gated" or env_name in Q6_CALLSITE_GATED_CONFIG_ENVS
+
+
+def _config_propagation_manifest_misses(
+    config_propagation: dict[str, Any],
+    *,
+    q6_callsite_reached: bool = True,
+) -> list[str]:
     checks = config_propagation.get("checks") or []
     if not isinstance(checks, list):
         return []
@@ -369,20 +428,32 @@ def _config_propagation_manifest_misses(config_propagation: dict[str, Any]) -> l
         env_name
         for env_name, _field_name in LLAMA_GPU_CONFIG_PROPAGATION_ENV_FIELDS
         if env_name not in observed
+        and (q6_callsite_reached or env_name not in Q6_CALLSITE_GATED_CONFIG_ENVS)
     )
 
 
-def _config_propagation_failed(config_propagation: dict[str, Any]) -> bool:
-    if config_propagation.get("summary") == "fail":
-        return True
+def _config_propagation_failed(
+    config_propagation: dict[str, Any],
+    *,
+    q6_callsite_reached: bool = True,
+) -> bool:
     checks = config_propagation.get("checks") or []
     if not isinstance(checks, list):
-        return False
-    if config_propagation and _config_propagation_manifest_misses(config_propagation):
+        return config_propagation.get("summary") == "fail"
+    if config_propagation and _config_propagation_manifest_misses(
+        config_propagation,
+        q6_callsite_reached=q6_callsite_reached,
+    ):
         return True
+    summary_failed = config_propagation.get("summary") == "fail"
+    saw_deferred_check = False
     for check in checks:
         if not isinstance(check, dict):
             return True
+        q6_deferred = (not q6_callsite_reached) and _config_check_is_q6_callsite_gated(check)
+        if q6_deferred:
+            saw_deferred_check = True
+            continue
         if not check.get("env") or not check.get("executor_field"):
             return True
         if check.get("status") in {"missing-evidence", "mismatch"}:
@@ -393,7 +464,7 @@ def _config_propagation_failed(config_propagation: dict[str, Any]) -> bool:
                 return True
             if check.get("status") != "pass":
                 return True
-    return False
+    return summary_failed and not saw_deferred_check
 
 
 def _unsupported_gpu_work_evidence(data: Any, path: str = "$") -> list[dict[str, str]]:
@@ -2145,6 +2216,7 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
 
     diagnostics = nested(data, "gpu", "diagnostics") or {}
     q6 = diagnostics.get("q6_workgroup_diagnostics") or {}
+    q6_callsite_reached = _q6_callsite_reached(q6)
     correctness_summary = nested(data, "gpu", "correctness", "summary") or {}
     correctness = correctness_summary.get("correctness", "not-run")
     comparison = data.get("comparison") or {}
@@ -2364,8 +2436,14 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
 
     config_propagation = _config_propagation(data)
     config_propagation_missing = _config_propagation_missing(data, config_propagation)
-    if config_propagation_missing or _config_propagation_failed(config_propagation):
-        manifest_misses = _config_propagation_manifest_misses(config_propagation)
+    if config_propagation_missing or _config_propagation_failed(
+        config_propagation,
+        q6_callsite_reached=q6_callsite_reached,
+    ):
+        manifest_misses = _config_propagation_manifest_misses(
+            config_propagation,
+            q6_callsite_reached=q6_callsite_reached,
+        )
         return _claim_base(
             "config-propagation-mismatch",
             next_action=(
@@ -2379,6 +2457,8 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
             "config_propagation": config_propagation,
             "config_propagation_missing": config_propagation_missing,
             "config_propagation_manifest_misses": manifest_misses,
+            "config_propagation_q6_callsite_reached": q6_callsite_reached,
+            "q6_callsite_gated_config_envs": sorted(Q6_CALLSITE_GATED_CONFIG_ENVS),
             "required_config_propagation_envs": [
                 env_name for env_name, _field_name in LLAMA_GPU_CONFIG_PROPAGATION_ENV_FIELDS
             ],

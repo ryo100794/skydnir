@@ -199,6 +199,14 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
         self.assertIn("vulkan_dispatch_v4_size_option", compare)
         self.assertIn("executor getenv is not trusted for the audit", compare)
         self.assertIn("partial SPIR-V probe env is unsafe; set all or none", compare)
+        self.assertIn("Q6_CALLSITE_GATED_CONFIG_ENVS", compare)
+        self.assertIn("q6_config_callsite_detected", compare)
+        self.assertIn('evidence_policy = "q6_callsite_gated"', compare)
+        for key in [
+            "PDOCKER_GPU_Q6K_COMPAT_REWRITES",
+            "PDOCKER_GPU_Q6K_READONLY_OVERLAP_SNAPSHOT",
+        ]:
+            self.assertIn(key, compare)
         for key in [
             "PDOCKER_GPU_SPIRV_PROBE_MANIFEST",
             "PDOCKER_GPU_SPIRV_PROBE_SHADER",
