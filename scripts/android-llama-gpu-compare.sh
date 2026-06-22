@@ -6,7 +6,12 @@ ADB="${ADB:-adb}"
 PKG="${SKYDNIR_PACKAGE:-${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker.compat}}"
 CLASS_PREFIX="io.github.ryo100794.pdocker"
 ACTION_PREFIX="io.github.ryo100794.pdocker"
+CONTAINER_EXPLICIT=0
+if [[ -n "${SKYDNIR_LLAMA_CONTAINER+x}" || -n "${PDOCKER_LLAMA_CONTAINER+x}" ]]; then
+  CONTAINER_EXPLICIT=1
+fi
 CONTAINER="${SKYDNIR_LLAMA_CONTAINER:-${PDOCKER_LLAMA_CONTAINER:-skydnir-llama-cpp}}"
+LEGACY_CONTAINER_NAMES="${PDOCKER_LLAMA_LEGACY_CONTAINERS:-pdocker-llama-cpp}"
 IMAGE_EXPLICIT=0
 if [[ -n "${SKYDNIR_LLAMA_IMAGE+x}" || -n "${PDOCKER_LLAMA_IMAGE+x}" ]]; then
   IMAGE_EXPLICIT=1
@@ -532,12 +537,15 @@ stop_stale_target_if_engine_alive() {
   if [[ "$STOP_STALE_TARGET_BEFORE_PREFLIGHT" != "1" ]]; then
     return 0
   fi
-  local encoded
-  encoded="$(urlencode "$CONTAINER")"
   # Narrow cleanup only: if a previous compare left the target llama container
   # alive, stop that Engine object before measuring headroom.  Do not start
   # pdockerd here; the preflight must remain a low-impact device safety gate.
-  run_as "cd files && test -S pdocker/pdockerd.sock && { printf 'POST /containers/$encoded/stop HTTP/1.1\r\nHost: pdocker\r\nContent-Length: 0\r\nConnection: close\r\n\r\n'; } | toybox nc -U -W 3 pdocker/pdockerd.sock >/dev/null 2>&1 || true" >/dev/null 2>&1 || true
+  local target encoded
+  while IFS= read -r target; do
+    [[ -n "$target" ]] || continue
+    encoded="$(urlencode "$target")"
+    run_as "cd files && test -S pdocker/pdockerd.sock && { printf 'POST /containers/$encoded/stop HTTP/1.1\r\nHost: pdocker\r\nContent-Length: 0\r\nConnection: close\r\n\r\n'; } | toybox nc -U -W 3 pdocker/pdockerd.sock >/dev/null 2>&1 || true" >/dev/null 2>&1 || true
+  done < <(target_container_names)
 }
 
 wait_for_engine() {
@@ -1662,6 +1670,34 @@ container_ref() {
   printf "%s" "${CURRENT_CONTAINER_ID:-$CONTAINER}"
 }
 
+target_container_names() {
+  local seen=" $CONTAINER " name
+  printf "%s\n" "$CONTAINER"
+  if [[ "$CONTAINER_EXPLICIT" == "1" ]]; then
+    return 0
+  fi
+  for name in $LEGACY_CONTAINER_NAMES; do
+    [[ -n "$name" ]] || continue
+    if [[ "$seen" == *" $name "* ]]; then
+      continue
+    fi
+    seen+="$name "
+    printf "%s\n" "$name"
+  done
+}
+
+container_status_from_body() {
+  python3 -c 'import json, sys
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    raise SystemExit(1)
+state = data.get("State") if isinstance(data.get("State"), dict) else {}
+status = state.get("Status")
+if isinstance(status, str):
+    print(status.strip().lower())'
+}
+
 container_logs() {
   local ref raw emitted
   ref="$(container_ref)"
@@ -1827,7 +1863,11 @@ PY
 }
 
 remove_container() {
-  engine_request_with_host_timeout "$ENGINE_CLEANUP_TIMEOUT_SEC" DELETE "/containers/$(urlencode "$CONTAINER")?force=true" >/dev/null || true
+  local target
+  while IFS= read -r target; do
+    [[ -n "$target" ]] || continue
+    engine_request_with_host_timeout "$ENGINE_CLEANUP_TIMEOUT_SEC" DELETE "/containers/$(urlencode "$target")?force=true" >/dev/null || true
+  done < <(target_container_names)
   CURRENT_CONTAINER_ID=""
 }
 
@@ -1838,43 +1878,56 @@ inspect_container_body() {
 
 poll_container_after_create_timeout() {
   local mode="$1"
-  local deadline now body start elapsed=0
+  local deadline now body start elapsed=0 status
   start="$(date +%s)"
   deadline=$(( start + ENGINE_CREATE_SETTLE_TIMEOUT_SEC ))
   while :; do
     body="$(inspect_container_body "$CONTAINER")"
     if [[ -n "$body" ]] && printf "%s" "$body" | engine_body_has_id; then
-      echo "[pdocker llama compare] $mode: delayed create became inspectable after ${elapsed}s" >&2
-      printf "%s" "$body"
-      return 0
+      status="$(printf "%s" "$body" | container_status_from_body 2>/dev/null || true)"
+      if [[ "$status" == "creating" ]]; then
+        echo "[pdocker llama compare] $mode: delayed create is inspectable but still creating after ${elapsed}s" >&2
+      else
+        echo "[pdocker llama compare] $mode: delayed create became inspectable after ${elapsed}s status=${status:-unknown}" >&2
+        printf "%s" "$body"
+        return 0
+      fi
     fi
     now="$(date +%s)"
     if (( now >= deadline )); then
       break
     fi
     elapsed=$(( now - start ))
-    echo "[pdocker llama compare] $mode: waiting for delayed create visibility (${elapsed}/${ENGINE_CREATE_SETTLE_TIMEOUT_SEC}s)" >&2
+    echo "[pdocker llama compare] $mode: waiting for delayed create completion (${elapsed}/${ENGINE_CREATE_SETTLE_TIMEOUT_SEC}s)" >&2
     sleep "$ENGINE_CREATE_POLL_INTERVAL_SEC"
   done
   return 1
 }
 
 wait_container_absent() {
-  local deadline now body start elapsed=0
+  local deadline now body start elapsed=0 target present
   start="$(date +%s)"
   deadline=$(( start + ENGINE_CLEANUP_TIMEOUT_SEC ))
   while :; do
-    body="$(inspect_container_body "$CONTAINER")"
-    if [[ -z "$body" ]] || ! printf "%s" "$body" | engine_body_has_id; then
+    present=""
+    while IFS= read -r target; do
+      [[ -n "$target" ]] || continue
+      body="$(inspect_container_body "$target")"
+      if [[ -n "$body" ]] && printf "%s" "$body" | engine_body_has_id; then
+        present="$target"
+        break
+      fi
+    done < <(target_container_names)
+    if [[ -z "$present" ]]; then
       return 0
     fi
     now="$(date +%s)"
     if (( now >= deadline )); then
-      echo "[pdocker llama compare] stale target container still inspectable after ${ENGINE_CLEANUP_TIMEOUT_SEC}s" >&2
+      echo "[pdocker llama compare] stale target container '$present' still inspectable after ${ENGINE_CLEANUP_TIMEOUT_SEC}s" >&2
       return 1
     fi
     elapsed=$(( now - start ))
-    echo "[pdocker llama compare] waiting for stale target removal (${elapsed}/${ENGINE_CLEANUP_TIMEOUT_SEC}s)" >&2
+    echo "[pdocker llama compare] waiting for stale target removal (${elapsed}/${ENGINE_CLEANUP_TIMEOUT_SEC}s target=$present)" >&2
     sleep "$ENGINE_CREATE_POLL_INTERVAL_SEC"
   done
 }
@@ -1908,7 +1961,7 @@ start_container_mode() {
   local mode="$1"
   local ctx="$2"
   local gpu_layers="${3:-}"
-  local payload create_body cid
+  local payload create_body cid create_status
   echo "[pdocker llama compare] $mode: waiting for engine" >&2
   wait_for_engine
   echo "[pdocker llama compare] $mode: checking memory headroom" >&2
@@ -1938,6 +1991,15 @@ start_container_mode() {
     fi
   fi
   cid="$(printf "%s" "$create_body" | parse_engine_id)"
+  create_status="$(printf "%s" "$create_body" | container_status_from_body 2>/dev/null || true)"
+  if [[ "$create_status" == "creating" ]]; then
+    echo "[pdocker llama compare] $mode: create is still in progress after settle timeout; refusing to start partial container" >&2
+    return 124
+  fi
+  if [[ "$create_status" == "exited" || "$create_status" == "dead" || "$create_status" == "removing" ]]; then
+    echo "[pdocker llama compare] $mode: create finalized in non-startable state: $create_status" >&2
+    return 1
+  fi
   CURRENT_CONTAINER_ID="$cid"
   echo "[pdocker llama compare] $mode: starting container ${cid:0:12}" >&2
   if ! engine_request_with_host_timeout "$ENGINE_START_TIMEOUT_SEC" POST "/containers/$cid/start" "" >/dev/null; then

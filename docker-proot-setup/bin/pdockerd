@@ -5291,25 +5291,97 @@ def create_container(config, name=None):
     cdir = os.path.join(CONTAINERS_DIR, cid)
     os.makedirs(cdir, exist_ok=True)
 
+    created_at = time.strftime("%Y-%m-%dT%H:%M:%S.000000000Z", time.gmtime())
+
     # Prepare rootfs. Default path materializes an overlayfs-like merged tree
     # with libcow break-on-write. Experimental cow_bind mode keeps the image
     # rootfs read-only and supplies an upperdir to the runtime at start time.
     dst_rootfs = os.path.join(cdir, "rootfs")
     img_d = image_dir(norm_img)
     img_rootfs = os.path.join(img_d, "rootfs")
+    # Persist an inspectable "creating" state before potentially expensive
+    # rootfs materialization. Large images can take longer than the Engine
+    # client timeout on Android; without this state the caller cannot tell
+    # whether create is still progressing, failed, or was never accepted.
+    provisional_state = {
+        "Id": cid,
+        "Name": "/" + (name or f"c_{cid[:12]}"),
+        "Image": norm_img,
+        "ImageId": image_id(norm_img),
+        "Cmd": [],
+        "Entrypoint": [],
+        "Env": [],
+        "WorkingDir": "/",
+        "Labels": config.get("Labels") or {},
+        "Volumes": {},
+        "HostConfig": config.get("HostConfig") or {},
+        "Storage": {"Mode": "creating", "Rootfs": dst_rootfs},
+        "PdockerCreate": {
+            "Phase": "rootfs-materialize",
+            "StartedAt": created_at,
+            "CompletedAt": "",
+            "Error": "",
+        },
+        "State": {
+            "Status": "creating",
+            "Running": False,
+            "Paused": False,
+            "Restarting": False,
+            "OOMKilled": False,
+            "Dead": False,
+            "Pid": 0,
+            "PidStartTime": "",
+            "ExitCode": 0,
+            "PdockerRawReturnCode": 0,
+            "PdockerSignal": 0,
+            "Error": "",
+            "StartedAt": "0001-01-01T00:00:00Z",
+            "FinishedAt": "0001-01-01T00:00:00Z",
+        },
+        "Created": created_at,
+        "Config": {
+            "Hostname": name or cid[:12],
+            "Image": image,
+            "Cmd": [],
+            "Entrypoint": [],
+            "Env": [],
+            "WorkingDir": "/",
+            "Labels": config.get("Labels") or {},
+        },
+        "NetworkSettings": {"IPAddress": "", "Ports": {}, "Networks": {}},
+    }
+    save_container_state(cid, provisional_state)
+
     storage = {"Mode": "libcow", "Rootfs": dst_rootfs}
-    if COW_BIND_AVAILABLE:
-        upper = os.path.join(cdir, "upper")
-        os.makedirs(upper, exist_ok=True)
-        storage = {"Mode": "cow_bind", "LowerDir": img_rootfs, "UpperDir": upper}
-    else:
-        diff_ids = _load_image_manifest(img_d)
-        if diff_ids:
-            materialize_container_rootfs(dst_rootfs, diff_ids)
+    try:
+        if COW_BIND_AVAILABLE:
+            upper = os.path.join(cdir, "upper")
+            os.makedirs(upper, exist_ok=True)
+            storage = {"Mode": "cow_bind", "LowerDir": img_rootfs, "UpperDir": upper}
         else:
-            # Fallback: legacy flatten path (image pulled before Phase 2 or
-            # produced by build without per-layer snapshotting)
-            clone_image_rootfs(img_rootfs, dst_rootfs)
+            diff_ids = _load_image_manifest(img_d)
+            if diff_ids:
+                materialize_container_rootfs(dst_rootfs, diff_ids)
+            else:
+                # Fallback: legacy flatten path (image pulled before Phase 2 or
+                # produced by build without per-layer snapshotting)
+                clone_image_rootfs(img_rootfs, dst_rootfs)
+    except Exception as exc:
+        failed = load_container_state(cid) or provisional_state
+        failed_state = failed.setdefault("State", {})
+        failed_state["Status"] = "exited"
+        failed_state["Running"] = False
+        failed_state["Dead"] = True
+        failed_state["ExitCode"] = 1
+        failed_state["PdockerRawReturnCode"] = 1
+        failed_state["Error"] = f"container create failed during rootfs preparation: {exc}"
+        failed_state["FinishedAt"] = time.strftime("%Y-%m-%dT%H:%M:%S.000000000Z", time.gmtime())
+        create_info = failed.setdefault("PdockerCreate", {})
+        create_info["Phase"] = "failed"
+        create_info["CompletedAt"] = failed_state["FinishedAt"]
+        create_info["Error"] = failed_state["Error"]
+        save_container_state(cid, failed)
+        raise RuntimeError(failed_state["Error"]) from exc
 
     runtime_root = storage.get("UpperDir") or dst_rootfs
     for sub in ["proc", "sys", "dev", "tmp", "etc"]:
@@ -5396,7 +5468,13 @@ def create_container(config, name=None):
             "StartedAt": "0001-01-01T00:00:00Z",
             "FinishedAt": "0001-01-01T00:00:00Z",
         },
-        "Created": time.strftime("%Y-%m-%dT%H:%M:%S.000000000Z", time.gmtime()),
+        "PdockerCreate": {
+            "Phase": "created",
+            "StartedAt": created_at,
+            "CompletedAt": time.strftime("%Y-%m-%dT%H:%M:%S.000000000Z", time.gmtime()),
+            "Error": "",
+        },
+        "Created": created_at,
         "Config": {
             "Hostname": name or cid[:12],
             "Image": image,
@@ -6471,6 +6549,8 @@ def list_containers(all_=False, filters=None, size=False):
             docker_status = f"Up ({health_status})" if health_status else "Up"
         elif status == "created":
             docker_status = "Created"
+        elif status == "creating":
+            docker_status = "Creating"
         else:
             docker_status = f"Exited ({st.get('ExitCode', 0)})"
         summary = {
@@ -8435,6 +8515,9 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
             except ValueError as e:
                 self._send_json(409, {"message": str(e)})
                 return
+            except RuntimeError as e:
+                self._send_json(500, {"message": str(e)})
+                return
             self._send_json(201, {"Id": state["Id"], "Warnings": state.get("Warnings", [])})
             return
 
@@ -8507,6 +8590,9 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
             state = find_container(cid)
             if not state:
                 self._send_json(404, {"message": f"No such container: {cid}"})
+                return
+            if (state.get("State") or {}).get("Status") == "creating":
+                self._send_json(409, {"message": f"Container {cid} is still being created"})
                 return
             try:
                 start_container(state["Id"])
