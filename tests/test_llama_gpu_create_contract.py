@@ -68,5 +68,36 @@ class LlamaGpuCreateContractTest(unittest.TestCase):
         self.assertIn("create finalized in non-startable state", script)
 
 
+class LlamaGpuCompletionDiagnosticsContractTest(unittest.TestCase):
+    def _compare(self):
+        return COMPARE.read_text(encoding="utf-8")
+
+    def test_completion_timeout_collects_process_port_and_engine_evidence(self):
+        script = self._compare()
+        self.assertIn("port_listener_snapshot_json()", script)
+        self.assertIn("pdocker.llama.port-listener-snapshot.v1", script)
+        self.assertIn("completion_timeout_diagnostics_json()", script)
+        self.assertIn("pdocker.llama.completion-timeout-diagnostics.v1", script)
+        self.assertIn("container_state > \"$state_path\"", script)
+        self.assertIn("container_logs_full \"$log_path\" || container_logs > \"$log_path\"", script)
+        self.assertIn("pdocker_memory_diagnostics_json > \"$process_path\"", script)
+        self.assertIn("proc_wait=", script)
+        self.assertIn('"wchan": wchan or None', script)
+        self.assertIn('"threads": int(threads)', script)
+        self.assertIn('"wchan_samples"', script)
+        self.assertIn("port_listener_snapshot_json > \"$listener_path\"", script)
+        self.assertIn("/containers/$(urlencode \"$ref\")/stats?stream=0", script)
+        self.assertIn("/system/memory-pressure?container=$(urlencode \"$ref\")", script)
+
+    def test_completion_timeout_diagnostics_are_attached_to_readiness_report(self):
+        script = self._compare()
+        self.assertIn("attach_service_readiness_diagnostics()", script)
+        self.assertIn('readiness["completion_timeout_diagnostics"] = diagnostics', script)
+        self.assertIn('summary["completion_timeout_diagnostics"] = "present" if diagnostics else "missing"', script)
+        self.assertIn('COMPLETION_TIMEOUT_DIAG_JSON="$TMP/completion-timeout-diagnostics.json"', script)
+        self.assertIn('completion_timeout_diagnostics_json "vulkan-forced-ngl-$GPU_LAYERS" "$COMPLETION_TIMEOUT_DIAG_JSON"', script)
+        self.assertIn('attach_service_readiness_diagnostics "$SERVICE_READINESS_JSON" "$COMPLETION_TIMEOUT_DIAG_JSON"', script)
+
+
 if __name__ == "__main__":
     unittest.main()

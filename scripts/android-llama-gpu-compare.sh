@@ -882,19 +882,20 @@ PY
 }
 
 pdocker_memory_diagnostics_json() {
-  local raw_ps app_ps socket_state commands cleanup_commands
+  local raw_ps app_ps proc_wait socket_state commands cleanup_commands
   raw_ps="$("$ADB" shell "ps -A -o PID,PPID,RSS,VSZ,NAME,ARGS 2>/dev/null || ps -A 2>/dev/null" 2>/dev/null || true)"
   app_ps="$(run_as "ps -A -o PID,PPID,RSS,VSZ,NAME,ARGS 2>/dev/null || ps -A 2>/dev/null" 2>/dev/null || true)"
+  proc_wait="$(run_as 'for p in /proc/[0-9]*; do pid=${p##*/}; cmd=$(cat "$p/cmdline" 2>/dev/null | tr "\000" " " || true); case "$cmd" in *pdocker*|*llama*) wchan=$(cat "$p/wchan" 2>/dev/null || true); threads=$(grep -m1 "^Threads:" "$p/status" 2>/dev/null | awk "{print \$2}"); printf "%s|%s|%s|%s\n" "$pid" "$wchan" "$threads" "$cmd";; esac; done' 2>/dev/null || true)"
   socket_state="$(run_as "cd files 2>/dev/null && if test -S pdocker/pdockerd.sock; then echo present; else echo absent; fi" 2>/dev/null | tr -d '\r' || true)"
   commands="$(memory_diagnostic_commands_json || printf '[]')"
   cleanup_commands="$(memory_cleanup_commands_json || printf '[]')"
-  python3 - "$PKG" "$CONTAINER" "$raw_ps" "$app_ps" "$socket_state" "$commands" "$cleanup_commands" <<'PY'
+  python3 - "$PKG" "$CONTAINER" "$raw_ps" "$app_ps" "$proc_wait" "$socket_state" "$commands" "$cleanup_commands" <<'PY'
 import json
 import re
 import sys
 from datetime import datetime, timezone
 
-pkg, container, raw_ps, app_ps, socket_state, commands_s, cleanup_commands_s = sys.argv[1:8]
+pkg, container, raw_ps, app_ps, proc_wait, socket_state, commands_s, cleanup_commands_s = sys.argv[1:9]
 try:
     commands = json.loads(commands_s)
 except Exception:
@@ -993,6 +994,22 @@ for item in parse_rows(app_ps, "run-as-ps"):
     if item["raw"] not in seen:
         seen.add(item["raw"])
         processes.append(item)
+wait_by_pid = {}
+for line in proc_wait.splitlines():
+    pid_s, wchan, threads, cmd = (line.split("|", 3) + ["", "", "", ""])[:4]
+    try:
+        pid_key = int(pid_s)
+    except Exception:
+        continue
+    wait_by_pid[pid_key] = {
+        "wchan": wchan or None,
+        "threads": int(threads) if str(threads).isdigit() else None,
+        "cmdline": cmd[:500],
+    }
+for item in processes:
+    pid = item.get("pid")
+    if isinstance(pid, int) and pid in wait_by_pid:
+        item.update(wait_by_pid[pid])
 
 top_rss_processes = sorted(
     processes,
@@ -1018,6 +1035,224 @@ report = {
     "note": "Best-effort snapshot only; the compare preflight did not force-stop user apps.",
 }
 print(json.dumps(report, separators=(",", ":")))
+PY
+}
+
+
+port_listener_snapshot_json() {
+  local raw_net raw_fd
+  raw_net="$($ADB shell 'cat /proc/net/tcp /proc/net/tcp6 2>/dev/null' 2>/dev/null || true)"
+  raw_fd="$(run_as 'for p in /proc/[0-9]*; do pid=${p##*/}; cmd=$(cat "$p/cmdline" 2>/dev/null | tr "\000" " " || true); case "$cmd" in *pdocker*|*llama*) for fd in "$p"/fd/*; do target=$(readlink "$fd" 2>/dev/null || true); case "$target" in socket:\[*\]) printf "%s|%s|%s|%s\n" "$pid" "${fd##*/}" "$target" "$cmd";; esac; done;; esac; done' 2>/dev/null || true)"
+  python3 - "$REMOTE_PORT" "$raw_net" "$raw_fd" <<'PYPORT'
+import json
+import re
+import sys
+from datetime import datetime, timezone
+
+port_s, raw_net, raw_fd = sys.argv[1:4]
+try:
+    port = int(port_s)
+except Exception:
+    port = 0
+port_hex = f"{port:04X}"
+inodes = set()
+listeners = []
+for line in raw_net.splitlines():
+    parts = line.split()
+    if len(parts) < 10 or ":" not in parts[1]:
+        continue
+    local = parts[1]
+    state = parts[3]
+    inode = parts[9]
+    try:
+        _, local_port = local.rsplit(":", 1)
+    except ValueError:
+        continue
+    if local_port.upper() != port_hex:
+        continue
+    item = {
+        "local_address": local,
+        "state_hex": state,
+        "state": "LISTEN" if state == "0A" else state,
+        "inode": inode,
+    }
+    listeners.append(item)
+    inodes.add(inode)
+owners = []
+for line in raw_fd.splitlines():
+    pid, fd, target, cmd = (line.split("|", 3) + ["", "", "", ""])[:4]
+    m = re.match(r"socket:\[([0-9]+)\]", target.strip())
+    inode = m.group(1) if m else ""
+    if inode and inode in inodes:
+        owners.append({
+            "pid": int(pid) if pid.isdigit() else pid,
+            "fd": fd,
+            "inode": inode,
+            "cmdline": cmd[:500],
+        })
+print(json.dumps({
+    "schema": "pdocker.llama.port-listener-snapshot.v1",
+    "timestamp_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    "port": port,
+    "listener_count": len(listeners),
+    "owner_count": len(owners),
+    "listeners": listeners,
+    "owners": owners,
+    "raw_net_bytes": len(raw_net.encode("utf-8", "ignore")),
+    "raw_fd_bytes": len(raw_fd.encode("utf-8", "ignore")),
+}, separators=(",", ":")))
+PYPORT
+}
+
+
+container_logs_full() {
+  local out="$1"
+  local cid
+  cid="$CURRENT_CONTAINER_ID"
+  if [[ -z "$cid" ]]; then
+    cid="$(printf "%s" "$(container_state 2>/dev/null || true)" | parse_engine_id 2>/dev/null || true)"
+  fi
+  run_as "cd files/pdocker 2>/dev/null || exit 0
+cid=$(remote_quote "$cid")
+workspace=$(remote_quote "${DEVICE_WORKSPACE_HOST:-}")
+if test -n "\$cid" && test -f logs/\$cid.log; then
+  printf '%s\n' '--- full container engine log ---'
+  cat logs/\$cid.log
+fi
+if test -n "\$workspace" && test -f "\$workspace/logs/llama-server.log"; then
+  printf '%s\n' '--- full workspace llama-server.log ---'
+  cat "\$workspace/logs/llama-server.log"
+fi" > "$out"
+  test -s "$out"
+}
+
+completion_timeout_diagnostics_json() {
+  local mode="$1"
+  local out="$2"
+  local dir ref state_path log_path memory_path process_path listener_path inspect_path stats_path pressure_path
+  dir="$(compare_artifact_dir)/completion-timeout-$(date -u +%Y%m%dT%H%M%SZ)"
+  mkdir -p "$dir"
+  ref="$(container_ref)"
+  state_path="$dir/container-state.json"
+  log_path="$dir/container-logs.txt"
+  memory_path="$dir/memory.json"
+  process_path="$dir/processes.json"
+  listener_path="$dir/port-listener.json"
+  inspect_path="$dir/engine-inspect.json"
+  stats_path="$dir/engine-stats.json"
+  pressure_path="$dir/memory-pressure.json"
+  container_state > "$state_path" || true
+  container_logs_full "$log_path" || container_logs > "$log_path" || true
+  memory_snapshot_json > "$memory_path" || true
+  pdocker_memory_diagnostics_json > "$process_path" || true
+  port_listener_snapshot_json > "$listener_path" || true
+  if [[ -n "$ref" ]]; then
+    engine_request_with_host_timeout "$RUN_AS_TIMEOUT_SEC" GET "/containers/$(urlencode "$ref")/json" | http_body > "$inspect_path" 2>/dev/null || true
+    engine_request_with_host_timeout "$RUN_AS_TIMEOUT_SEC" GET "/containers/$(urlencode "$ref")/stats?stream=0" | http_body > "$stats_path" 2>/dev/null || true
+    engine_request_with_host_timeout "$RUN_AS_TIMEOUT_SEC" GET "/system/memory-pressure?container=$(urlencode "$ref")" | http_body > "$pressure_path" 2>/dev/null || true
+  fi
+  python3 - "$mode" "$ref" "$dir" "$out" "$state_path" "$log_path" "$memory_path" "$process_path" "$listener_path" "$inspect_path" "$stats_path" "$pressure_path" <<'PY'
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+mode, ref, directory, out = sys.argv[1:5]
+paths = [Path(p) for p in sys.argv[5:]]
+keys = [
+    "container_state",
+    "container_logs",
+    "memory",
+    "processes",
+    "port_listener",
+    "engine_inspect",
+    "engine_stats",
+    "memory_pressure",
+]
+
+def read_json(path: Path):
+    try:
+        if path.is_file() and path.stat().st_size:
+            return json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return {"parse_error": str(exc), "path": str(path)}
+    return {}
+
+files = {}
+for key, path in zip(keys, paths):
+    files[key] = {
+        "path": str(path),
+        "exists": path.exists(),
+        "bytes": path.stat().st_size if path.exists() else 0,
+    }
+log_tail = ""
+log_path = paths[1]
+try:
+    if log_path.is_file():
+        text = log_path.read_text(encoding="utf-8", errors="replace")
+        log_tail = text[-4000:]
+except Exception:
+    log_tail = ""
+listener = read_json(paths[4])
+processes = read_json(paths[3])
+state = read_json(paths[0])
+diag = {
+    "schema": "pdocker.llama.completion-timeout-diagnostics.v1",
+    "timestamp_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    "mode": mode,
+    "container_ref": ref,
+    "artifact_dir": directory,
+    "files": files,
+    "port_listener": listener,
+    "process_summary": {
+        "process_count": processes.get("process_count"),
+        "process_rss_mb_total": processes.get("process_rss_mb_total"),
+        "pdockerd_socket": processes.get("pdockerd_socket"),
+        "top_rss_processes": processes.get("top_rss_processes", [])[:5],
+        "wchan_samples": [p for p in processes.get("process_sample", []) if p.get("wchan")][:8],
+    },
+    "container_state_summary": {
+        "id": state.get("Id") or state.get("ID"),
+        "name": state.get("Name"),
+        "state": state.get("State") if isinstance(state.get("State"), dict) else {},
+    },
+    "log_tail": log_tail,
+    "next_checks": [
+        f"verify port_listener.owners maps port {listener.get('port') or 'unknown'} to the current Engine container process",
+        "compare process_summary top RSS/wchan with pdocker-gpu-executor and llama-server state",
+        "inspect full files in artifact_dir before changing Dockerfile/model/prompt",
+    ],
+}
+Path(out).write_text(json.dumps(diag, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+print(json.dumps(diag, separators=(",", ":")))
+PY
+}
+
+attach_service_readiness_diagnostics() {
+  local readiness="$1"
+  local diagnostics="$2"
+  python3 - "$readiness" "$diagnostics" <<'PY' || true
+import json
+import os
+import sys
+from pathlib import Path
+
+readiness_path = Path(sys.argv[1])
+diagnostics_path = Path(sys.argv[2])
+try:
+    readiness = json.loads(readiness_path.read_text(encoding="utf-8"))
+except Exception:
+    readiness = {}
+try:
+    diagnostics = json.loads(diagnostics_path.read_text(encoding="utf-8"))
+except Exception as exc:
+    diagnostics = {"schema": "pdocker.llama.completion-timeout-diagnostics.v1", "parse_error": str(exc), "path": str(diagnostics_path)}
+readiness["completion_timeout_diagnostics"] = diagnostics
+summary = readiness.setdefault("summary", {})
+summary["completion_timeout_diagnostics"] = "present" if diagnostics else "missing"
+tmp = readiness_path.with_suffix(readiness_path.suffix + ".tmp")
+tmp.write_text(json.dumps(readiness, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+os.replace(tmp, readiness_path)
 PY
 }
 
@@ -2415,6 +2650,9 @@ if wait_server "$FORCED_VULKAN_WAIT_SERVER_TIMEOUT_SEC" "Forced Vulkan"; then
     fi
   else
     operation_notify "running" "Forced Vulkan liveness passed but completion did not finish; collecting evidence"
+    COMPLETION_TIMEOUT_DIAG_JSON="$TMP/completion-timeout-diagnostics.json"
+    completion_timeout_diagnostics_json "vulkan-forced-ngl-$GPU_LAYERS" "$COMPLETION_TIMEOUT_DIAG_JSON" >/dev/null || true
+    attach_service_readiness_diagnostics "$SERVICE_READINESS_JSON" "$COMPLETION_TIMEOUT_DIAG_JSON" || true
   fi
   gpu_served=1
 else
