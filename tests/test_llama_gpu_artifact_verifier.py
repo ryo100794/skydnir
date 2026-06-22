@@ -1164,6 +1164,37 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         self.assertFalse(report["correctness_claim_allowed"])
         self.assertFalse(report["benchmark_claim_allowed"])
 
+    def test_q6_num_rows_in_local_size_y_fails_closed_as_workgroup_shape(self):
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": passing_config_propagation(),
+                    "q6_workgroup_diagnostics": {
+                        "event_count": 2,
+                        "workgroup_shape_blocker": False,
+                        "latest_status": "mismatch",
+                        "local_size_resolved": [32, 64, 1],
+                        "q6_local_size": [32, 64, 1],
+                        "q6_num_rows": 64,
+                        "q6_num_cols": 4,
+                        **q6_verified_writeback(),
+                    },
+                },
+                "correctness": gpu_correctness_report("fail", required_failures=1, passed=False, content="4"),
+            },
+            "cpu": {"tokens_per_second": 0.1},
+            **speedup_sections(speedup=0.0, target_met=False, cpu_tps=0.1, gpu_tps=0.0),
+        }
+        result = self.run_verifier(payload)
+        self.assertEqual(result.returncode, 32, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "q6-workgroup-shape-blocker")
+        self.assertEqual(report["responsibility_boundary"], "q6-local-size")
+        self.assertFalse(report["correctness_claim_allowed"])
+        self.assertFalse(report["benchmark_claim_allowed"])
+
     def test_q6_safe_kernel_match_is_diagnostic_only_not_correctness_claim(self):
         payload = {
             "schema": "pdocker.llama.gpu.compare.v1",

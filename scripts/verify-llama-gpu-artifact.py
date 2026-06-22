@@ -1858,6 +1858,27 @@ def _q6_required_local_size_clear(q6: Any) -> bool:
     return local_size is not None and expected is not None and local_size == expected
 
 
+def _q6_local_size_looks_contaminated_by_q6_shape(q6: Any) -> bool:
+    if not isinstance(q6, dict) or _q6_safe_kernel_enabled(q6):
+        return False
+    local_size = _q6_local_size_resolved(q6)
+    if not (isinstance(local_size, list) and len(local_size) == 3):
+        return False
+    q6_num_rows = q6.get("q6_num_rows")
+    q6_num_cols = q6.get("q6_num_cols")
+    rows_match_y = (
+        isinstance(q6_num_rows, int)
+        and q6_num_rows > 1
+        and local_size[1] == q6_num_rows
+    )
+    cols_match_z = (
+        isinstance(q6_num_cols, int)
+        and q6_num_cols > 1
+        and local_size[2] == q6_num_cols
+    )
+    return bool(rows_match_y or cols_match_z)
+
+
 def _q6_workgroup_shape_blocked(q6: Any) -> bool:
     if not isinstance(q6, dict):
         return False
@@ -1865,6 +1886,8 @@ def _q6_workgroup_shape_blocked(q6: Any) -> bool:
         return True
     local_size = _q6_local_size_resolved(q6)
     if local_size is None:
+        return True
+    if _q6_local_size_looks_contaminated_by_q6_shape(q6):
         return True
     q6_local_size = _integer_list(q6.get("q6_local_size"))
     if q6_local_size is not None and local_size is not None and q6_local_size != local_size:

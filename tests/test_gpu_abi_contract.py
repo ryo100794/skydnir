@@ -7709,6 +7709,65 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("calloc", summarize.group(0))
         self.assertNotIn("free(", summarize.group(0))
 
+    def test_q6_spec_ids_1_2_are_rows_cols_not_workgroup_yz(self):
+        executor = GPU_EXECUTOR.read_text()
+        compare = LLAMA_COMPARE.read_text()
+        artifact_verifier = LLAMA_GPU_ARTIFACT_VERIFIER.read_text()
+        q6_planner = LLAMA_Q6_PREFLIGHT_PLANNER.read_text()
+        q6_plan_verifier = LLAMA_Q6_PLAN_VERIFIER.read_text()
+
+        patch_function = re.search(
+            r"static int patch_spirv_literal_local_size_from_spec\(.*?\n}\n\nstatic int spirv_has_capability",
+            executor,
+            re.S,
+        )
+        self.assertIsNotNone(patch_function)
+        patch_body = patch_function.group(0)
+        self.assertIn("summary.workgroup_size_spec_id_valid[dim]", patch_body)
+        self.assertIn("summary.workgroup_size_spec_id[dim]", patch_body)
+        self.assertNotRegex(
+            patch_body,
+            r"specialization_value_for_id\([^;]*(?:,\s*1\s*,|,\s*2\s*,)",
+        )
+        self.assertNotIn("local_size[1] = resolved_spec1", patch_body)
+        self.assertNotIn("local_size[2] = resolved_spec2", patch_body)
+        self.assertNotIn("code[i + 4] = (uint32_t)resolved_spec1", patch_body)
+        self.assertNotIn("code[i + 5] = (uint32_t)resolved_spec2", patch_body)
+
+        self.assertIn(
+            "const uint32_t q6_num_rows = q6k_specialization_or_default_u32(\n"
+            "        specializations, specialization_count, specialization_data, specialization_data_size,\n"
+            "        1, 1u);",
+            executor,
+        )
+        self.assertIn(
+            "const uint32_t q6_num_cols = q6k_specialization_or_default_u32(\n"
+            "        specializations, specialization_count, specialization_data, specialization_data_size,\n"
+            "        2, 1u);",
+            executor,
+        )
+        self.assertIn('\\"q6_num_rows\\":%llu', executor)
+        self.assertIn('\\"q6_num_cols\\":%llu', executor)
+
+        self.assertIn("q6_workgroup_specialization_interpretation", compare)
+        self.assertIn('"spec_id_1": "Q6 row-count/data-loop dimension; not WorkgroupSize.y"', compare)
+        self.assertIn('"spec_id_2": "Q6 column/count dimension; not WorkgroupSize.z"', compare)
+        self.assertIn('"do_not_patch_local_size_y_from_spec_id_1": True', compare)
+        self.assertIn('"do_not_patch_local_size_z_from_spec_id_2": True', compare)
+
+        for evidence in (
+            "q6_workgroup_specialization_interpretation",
+            "q6_num_rows",
+            "q6_num_cols",
+        ):
+            self.assertIn(f'"{evidence}"', q6_planner)
+        self.assertIn("def missing_evidence_fields", q6_plan_verifier)
+        self.assertIn("evidence_field_present(data, field)", q6_plan_verifier)
+        self.assertIn('q6_num_rows = q6.get("q6_num_rows")', artifact_verifier)
+        self.assertIn('q6_num_cols = q6.get("q6_num_cols")', artifact_verifier)
+        self.assertIn("local_size[1] == q6_num_rows", artifact_verifier)
+        self.assertIn("local_size[2] == q6_num_cols", artifact_verifier)
+
     def test_vulkan_duplicate_binding_rewrite_avoids_passed_bindings(self):
         source = GPU_EXECUTOR.read_text()
         self.assertIn("const VulkanDispatchBinding *bindings", source)
@@ -9958,6 +10017,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("specialization_materialize_report", plan["required_evidence_fields"])
         self.assertIn("reconciliation", plan["required_evidence_fields"])
         self.assertIn("q6_final_store_boundary", plan["required_evidence_fields"])
+        self.assertIn("q6_workgroup_specialization_interpretation", plan["required_evidence_fields"])
+        self.assertIn("q6_local_size", plan["required_evidence_fields"])
+        self.assertIn("q6_num_rows", plan["required_evidence_fields"])
+        self.assertIn("q6_num_cols", plan["required_evidence_fields"])
         self.assertIn("q6_debug_binding_alias_safety", plan["required_evidence_fields"])
         self.assertIn("debug_probe_binding", plan["required_evidence_fields"])
         self.assertIn("descriptor_alias_map", plan["required_evidence_fields"])
@@ -10036,6 +10099,14 @@ class GpuAbiContractTest(unittest.TestCase):
                                     "local_size_resolved": [32, 1, 1],
                                     "local_size_consistent": True,
                                     "q6_local_size": [32, 1, 1],
+                                    "q6_local_invocations": 32,
+                                    "q6_workgroup_specialization_interpretation": {
+                                        "spec_id_0": "WorkgroupSize.x / Q6 lane count",
+                                        "spec_id_1": "Q6 row-count/data-loop dimension; not WorkgroupSize.y",
+                                        "spec_id_2": "Q6 column/count dimension; not WorkgroupSize.z",
+                                        "do_not_patch_local_size_y_from_spec_id_1": True,
+                                        "do_not_patch_local_size_z_from_spec_id_2": True,
+                                    },
                                     "q6_writeback_verified_all": True,
                                     "q6_row_indexed_sample_indices": [0],
                                     "q6_row_indexed_writeback_verified": True,
