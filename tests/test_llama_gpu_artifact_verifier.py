@@ -453,6 +453,88 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         self.assertEqual(report["responsibility_boundary"], "service-readiness")
         self.assertFalse(report["service_readiness"]["post_completion_health_ok"])
 
+    def test_completion_timeout_reports_captured_evidence_without_claims(self):
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "served": True,
+                "service_readiness": {
+                    "schema": "pdocker.llama.service-readiness.v1",
+                    "summary": {
+                        "health": "pass",
+                        "models": "pass",
+                        "completion": "fail",
+                        "ready": False,
+                        "reason": "completion-timeout-after-liveness",
+                    },
+                    "health": {"ok": True, "status": "pass", "duration_ms": 12},
+                    "models": {"ok": True, "status": "pass", "duration_ms": 14},
+                    "completion": {
+                        "ok": False,
+                        "status": "fail",
+                        "error": "TimeoutError: timed out waiting for /completion",
+                        "timeout_sec": 180,
+                        "duration_ms": 180000,
+                    },
+                    "completion_timeout_diagnostics": {
+                        "schema": "pdocker.llama.completion-timeout-diagnostics.v1",
+                        "artifact_dir": "/sdcard/Documents/skydnir/completion-timeout-20260622T000000Z",
+                        "container_ref": "skydnir-llama-cpp",
+                        "files": {
+                            "container_state": {"path": "container-state.json", "exists": True, "bytes": 128},
+                            "container_logs": {"path": "container-logs.txt", "exists": True, "bytes": 4096},
+                            "memory": {"path": "memory.json", "exists": True, "bytes": 512},
+                            "processes": {"path": "processes.json", "exists": True, "bytes": 1024},
+                            "port_listener": {"path": "port-listener.json", "exists": True, "bytes": 256},
+                            "engine_inspect": {"path": "engine-inspect.json", "exists": True, "bytes": 2048},
+                        },
+                        "port_listener": {
+                            "port": 18081,
+                            "listener_count": 1,
+                            "owner_count": 1,
+                            "owners": [{"pid": 1234, "fd": "7", "cmdline": "llama-server"}],
+                        },
+                        "process_summary": {
+                            "process_count": 2,
+                            "process_rss_mb_total": 512.5,
+                            "pdockerd_socket": True,
+                            "wchan_samples": [{"pid": 1234, "wchan": "futex_wait_queue"}],
+                        },
+                        "container_state_summary": {"Status": "running", "Running": True},
+                        "log_tail": ["slot launch", "waiting for batch"],
+                        "next_checks": ["inspect port listener owner"],
+                    },
+                },
+                "diagnostics": {"runtime_freshness": runtime_marker()},
+            },
+        }
+        result = self.run_verifier(payload)
+        self.assertEqual(result.returncode, 22, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "llama-completion-timeout")
+        self.assertEqual(report["responsibility_boundary"], "service-readiness")
+        evidence = report["completion_timeout_diagnostics"]
+        self.assertTrue(evidence["present"])
+        self.assertEqual(evidence["schema"], "pdocker.llama.completion-timeout-diagnostics.v1")
+        self.assertEqual(evidence["port_listener"]["port"], 18081)
+        self.assertEqual(evidence["port_listener"]["owner_count"], 1)
+        self.assertEqual(evidence["process_summary"]["wchan_samples"][0]["wchan"], "futex_wait_queue")
+        self.assertEqual(evidence["files"]["container_logs"]["bytes"], 4096)
+        self.assertFalse(report["correctness_claim_allowed"])
+        self.assertFalse(report["benchmark_claim_allowed"])
+
+    def test_completion_timeout_diagnostics_do_not_override_wrong_output(self):
+        payload = wrong_completion_payload(api_executor_reconciliation())
+        payload["gpu"]["service_readiness"]["completion_timeout_diagnostics"] = {
+            "schema": "pdocker.llama.completion-timeout-diagnostics.v1",
+            "port_listener": {"port": 18081, "listener_count": 1},
+        }
+        result = self.run_verifier(payload)
+        self.assertEqual(result.returncode, 22, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "llama-completion-wrong-output")
+        self.assertNotIn("completion_timeout_diagnostics", report)
+
     def test_completion_wrong_output_requires_api_executor_reconciliation(self):
         payload = wrong_completion_payload()
         result = self.run_verifier(payload)

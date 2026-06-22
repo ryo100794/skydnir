@@ -1333,6 +1333,74 @@ def _service_completion_timeout(data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _completion_timeout_diagnostics_summary(data: dict[str, Any]) -> dict[str, Any]:
+    readiness = nested(data, "gpu", "service_readiness")
+    if not isinstance(readiness, dict) or not readiness:
+        return {"present": False}
+    diagnostics = readiness.get("completion_timeout_diagnostics")
+    if not isinstance(diagnostics, dict) or not diagnostics:
+        return {"present": False}
+    files = diagnostics.get("files") if isinstance(diagnostics.get("files"), dict) else {}
+    port_listener = (
+        diagnostics.get("port_listener")
+        if isinstance(diagnostics.get("port_listener"), dict)
+        else {}
+    )
+    process_summary = (
+        diagnostics.get("process_summary")
+        if isinstance(diagnostics.get("process_summary"), dict)
+        else {}
+    )
+    file_summary: dict[str, Any] = {}
+    for key in (
+        "container_state",
+        "container_logs",
+        "memory",
+        "processes",
+        "port_listener",
+        "engine_inspect",
+        "engine_stats",
+        "memory_pressure",
+    ):
+        item = files.get(key) if isinstance(files, dict) else None
+        if isinstance(item, dict):
+            file_summary[key] = {
+                "path": item.get("path"),
+                "exists": item.get("exists"),
+                "bytes": item.get("bytes"),
+            }
+    return {
+        "present": True,
+        "schema": diagnostics.get("schema"),
+        "artifact_dir": diagnostics.get("artifact_dir"),
+        "container_ref": diagnostics.get("container_ref"),
+        "files": file_summary,
+        "port_listener": {
+            "port": port_listener.get("port"),
+            "listener_count": port_listener.get("listener_count"),
+            "owner_count": port_listener.get("owner_count"),
+            "owners": (
+                port_listener.get("owners")[:4]
+                if isinstance(port_listener.get("owners"), list)
+                else []
+            ),
+        },
+        "process_summary": {
+            "process_count": process_summary.get("process_count"),
+            "process_rss_mb_total": process_summary.get("process_rss_mb_total"),
+            "pdockerd_socket": process_summary.get("pdockerd_socket"),
+            "wchan_samples": (
+                process_summary.get("wchan_samples")[:8]
+                if isinstance(process_summary.get("wchan_samples"), list)
+                else []
+            ),
+        },
+        "container_state_summary": diagnostics.get("container_state_summary"),
+        "log_tail": diagnostics.get("log_tail"),
+        "next_checks": diagnostics.get("next_checks"),
+    }
+
+
 def _service_readiness_summary(data: dict[str, Any]) -> dict[str, Any]:
     readiness = nested(data, "gpu", "service_readiness")
     if not isinstance(readiness, dict) or not readiness:
@@ -2274,6 +2342,7 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
             responsibility_boundary="service-readiness",
         ) | {
             "service_readiness": completion_readiness,
+            "completion_timeout_diagnostics": _completion_timeout_diagnostics_summary(data),
             "runtime_env": nested(data, "gpu", "runtime_env") or {},
         }
 
