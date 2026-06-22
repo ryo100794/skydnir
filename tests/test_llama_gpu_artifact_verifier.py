@@ -1122,6 +1122,48 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
             interpretation["q6_shader_like_clear_basis"],
         )
 
+    def test_q6_num_rows_and_cols_do_not_override_resolved_local_size(self):
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": passing_config_propagation(),
+                    "q6_workgroup_diagnostics": {
+                        "event_count": 2,
+                        "workgroup_shape_blocker": False,
+                        "latest_status": "mismatch",
+                        "local_size_resolved": [32, 1, 1],
+                        "q6_local_size": [32, 1, 1],
+                        "q6_num_rows": 64,
+                        "q6_num_cols": 4,
+                        "q6_shader_like_abs_delta": 1.0e-7,
+                        "q6_shader_like_64_abs_delta": 5.0,
+                        **q6_verified_writeback(),
+                    },
+                },
+                "correctness": gpu_correctness_report("fail", required_failures=1, passed=False, content="4"),
+            },
+            "cpu": {"tokens_per_second": 0.1},
+            **speedup_sections(speedup=0.5, target_met=False, cpu_tps=0.1, gpu_tps=0.05),
+        }
+        result = self.run_verifier(payload, "--require-q6-workgroup-clear")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "q6-workgroup-cleared-but-oracle-mismatch")
+        self.assertNotEqual(report["classification"], "q6-workgroup-shape-blocker")
+        self.assertEqual(report["q6_workgroup_diagnostics"]["q6_local_size"], [32, 1, 1])
+        self.assertEqual(report["q6_workgroup_diagnostics"]["q6_num_rows"], 64)
+        self.assertEqual(report["q6_workgroup_diagnostics"]["q6_num_cols"], 4)
+        interpretation = report["q6_shader_like_interpretation"]
+        self.assertFalse(interpretation["q6_shader_like_64_required"])
+        self.assertIn(
+            "local_size_resolved=reported-q6-local-size",
+            interpretation["q6_shader_like_clear_basis"],
+        )
+        self.assertFalse(report["correctness_claim_allowed"])
+        self.assertFalse(report["benchmark_claim_allowed"])
+
     def test_q6_safe_kernel_match_is_diagnostic_only_not_correctness_claim(self):
         payload = {
             "schema": "pdocker.llama.gpu.compare.v1",
