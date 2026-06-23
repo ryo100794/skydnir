@@ -98,6 +98,20 @@ class LlamaGpuCompletionDiagnosticsContractTest(unittest.TestCase):
         self.assertIn('completion_timeout_diagnostics_json "vulkan-forced-ngl-$GPU_LAYERS" "$COMPLETION_TIMEOUT_DIAG_JSON"', script)
         self.assertIn('attach_service_readiness_diagnostics "$SERVICE_READINESS_JSON" "$COMPLETION_TIMEOUT_DIAG_JSON"', script)
 
+    def test_prompt_sanity_failure_is_not_recorded_as_completion_timeout(self):
+        script = self._compare()
+        self.assertIn('if report["health"]["ok"] and report["models"]["ok"] and report["completion"]["ok"]:', script)
+        self.assertIn('raise SystemExit(2)', script)
+        self.assertIn('readiness_rc=0', script)
+        self.assertIn('probe_service_readiness "vulkan-forced-ngl-$GPU_LAYERS" "$SERVICE_READINESS_JSON" >/dev/null || readiness_rc=$?', script)
+        self.assertIn('elif [[ "$readiness_rc" -eq 2 ]]; then', script)
+        self.assertIn('completion returned but prompt sanity failed', script)
+        prompt_fail_branch = script.split('elif [[ "$readiness_rc" -eq 2 ]]; then', 1)[1].split('else', 1)[0]
+        self.assertIn('bench_http "vulkan-forced-ngl-$GPU_LAYERS" "$GPU_JSON"', prompt_fail_branch)
+        self.assertNotIn('completion_timeout_diagnostics_json', prompt_fail_branch)
+        timeout_branch = script.split('else\n    operation_notify "running" "Forced Vulkan liveness passed but completion did not finish; collecting evidence"', 1)[1]
+        self.assertIn('completion_timeout_diagnostics_json', timeout_branch)
+
 
 if __name__ == "__main__":
     unittest.main()

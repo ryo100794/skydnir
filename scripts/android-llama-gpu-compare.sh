@@ -2554,7 +2554,11 @@ with open(out_path, "w", encoding="utf-8") as f:
     json.dump(report, f, indent=2, ensure_ascii=False)
     f.write("\n")
 print(json.dumps(report["summary"], indent=2))
-raise SystemExit(0 if report["summary"]["ready"] else 1)
+if report["summary"]["ready"]:
+    raise SystemExit(0)
+if report["health"]["ok"] and report["models"]["ok"] and report["completion"]["ok"]:
+    raise SystemExit(2)
+raise SystemExit(1)
 PY
 }
 
@@ -2641,13 +2645,18 @@ SERVICE_READINESS_JSON="$TMP/service-readiness.json"
 STARTUP_JSON="$TMP/llama-startup.json"
 if wait_server "$FORCED_VULKAN_WAIT_SERVER_TIMEOUT_SEC" "Forced Vulkan"; then
   operation_notify "running" "Forced Vulkan liveness passed; checking completion readiness"
-  if probe_service_readiness "vulkan-forced-ngl-$GPU_LAYERS" "$SERVICE_READINESS_JSON" >/dev/null; then
+  readiness_rc=0
+  probe_service_readiness "vulkan-forced-ngl-$GPU_LAYERS" "$SERVICE_READINESS_JSON" >/dev/null || readiness_rc=$?
+  if [[ "$readiness_rc" -eq 0 ]]; then
     operation_notify "running" "Forced Vulkan completion ready; recording HTTP benchmark"
     bench_http "vulkan-forced-ngl-$GPU_LAYERS" "$GPU_JSON" >/dev/null || true
     if [[ "$CORRECTNESS" != "0" ]]; then
       operation_notify "running" "Forced Vulkan served; checking arithmetic correctness"
       probe_http_correctness "vulkan-forced-ngl-$GPU_LAYERS" "$CORRECTNESS_JSON" >/dev/null || true
     fi
+  elif [[ "$readiness_rc" -eq 2 ]]; then
+    operation_notify "running" "Forced Vulkan completion returned but prompt sanity failed; recording diagnostic benchmark"
+    bench_http "vulkan-forced-ngl-$GPU_LAYERS" "$GPU_JSON" >/dev/null || true
   else
     operation_notify "running" "Forced Vulkan liveness passed but completion did not finish; collecting evidence"
     COMPLETION_TIMEOUT_DIAG_JSON="$TMP/completion-timeout-diagnostics.json"
