@@ -9939,7 +9939,13 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("--dry-run", runner)
         self.assertIn("dry-run complete; no ADB", runner)
         self.assertIn("refreshing default probe bundle", runner)
+        self.assertIn("--probe-source-spv", runner)
+        self.assertIn("--probe-source-hash", runner)
+        self.assertIn("PDOCKER_Q6K_ALLOW_ARCHIVED_PROBE_SOURCE", runner)
+        self.assertIn("refusing to refresh the default probe bundle from the archived fixture", runner)
+        self.assertIn("probe env hash mismatch", runner)
         self.assertIn("scripts/prepare-q6k-noop-probe.sh", runner)
+        self.assertIn("--expected-hash", runner)
         self.assertIn("--probe-writes", runner)
         self.assertIn("instrument-spirv-noop-probe.py", runner)
         self.assertIn("llama-gpu-env-manifest.json", runner)
@@ -9987,6 +9993,26 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertEqual(plan_data["q6_required_env_overlay"], compare_step["required_env_overlay"])
             self.assertEqual(manifest_overlay, plan_data["q6_required_env_overlay"])
             self.assertEqual(manifest_overlay, compare_step["required_env_overlay"])
+
+    def test_q6_probe_prepare_and_compare_fail_closed_for_stale_hashes(self):
+        runner = (ROOT / "scripts" / "android-llama-gpu-q6-workgroup-run.sh").read_text()
+        prepare = (ROOT / "scripts" / "prepare-q6k-noop-probe.sh").read_text()
+        compare = LLAMA_COMPARE.read_text()
+
+        self.assertIn("--expected-hash", prepare)
+        self.assertIn("Q6 probe source hash mismatch", prepare)
+        self.assertIn("expected_source_spirv_hash", prepare)
+        self.assertIn("--probe-source-spv", runner)
+        self.assertIn("--probe-source-hash", runner)
+        self.assertIn("PDOCKER_Q6K_ALLOW_ARCHIVED_PROBE_SOURCE", runner)
+        self.assertIn("refusing to refresh the default probe bundle from the archived fixture", runner)
+        self.assertIn("--expected-hash", runner)
+
+        self.assertIn("stale-target-hash", compare)
+        self.assertIn("actual_q6_source_hashes", compare)
+        self.assertIn("skipped_non_target_actual_hashes", compare)
+        self.assertIn("stale_target_hash", compare)
+        self.assertIn('cpu_oracle.get("kernel_hint") == "mul-mat-vec-q6-k-large"', compare)
 
     def test_q6_preflight_planner_names_evidence_and_branches_before_adb(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -10054,6 +10080,86 @@ class GpuAbiContractTest(unittest.TestCase):
         )
         self.assertEqual(plan["q6_required_env_overlay"], compare_step["required_env_overlay"])
         self.assertIn("--require-q6-workgroup-clear", json.dumps(plan["runner_step_contract"]))
+        self.assertIn("required_evidence_alternatives", plan)
+        self.assertIn("q6-final-store-or-native-split-boundary", json.dumps(plan["required_evidence_alternatives"]))
+        self.assertIn("descriptor-usage-or-binding-details", json.dumps(plan["required_evidence_alternatives"]))
+
+    def test_q6_plan_verifier_accepts_native_split_evidence_alternative(self):
+        verifier = load_llama_q6_plan_verifier()
+        plan = {
+            "required_evidence_fields": [
+                "descriptor_usage",
+                "final_store_value_f32",
+                "final_store_matches_expected",
+                "writeback_matches_final_store",
+            ],
+            "required_evidence_alternatives": [
+                {
+                    "name": "descriptor-usage-or-binding-details",
+                    "covers": ["descriptor_usage"],
+                    "any_of": [
+                        ["descriptor_usage"],
+                        ["binding_details", "binding_descriptor_offset", "api_range"],
+                    ],
+                },
+                {
+                    "name": "q6-final-store-or-native-split-boundary",
+                    "covers": [
+                        "final_store_value_f32",
+                        "final_store_matches_expected",
+                        "writeback_matches_final_store",
+                    ],
+                    "any_of": [
+                        [
+                            "final_store_value_f32",
+                            "final_store_matches_expected",
+                            "writeback_matches_final_store",
+                        ],
+                        [
+                            "q6_native_vs_writeback_split",
+                            "native_gpu_at_dst",
+                            "native_matches_expected",
+                            "writeback_matches_expected",
+                            "writeback_matches_native",
+                        ],
+                    ],
+                },
+            ],
+        }
+        artifact = {
+            "gpu": {
+                "diagnostics": {
+                    "generic_spirv_dispatch": [
+                        {
+                            "binding_details": [
+                                {
+                                    "binding_descriptor_offset": 0,
+                                    "api_range": 65536,
+                                }
+                            ]
+                        }
+                    ],
+                    "q6_workgroup_diagnostics": {
+                        "q6_native_vs_writeback_split": {
+                            "summary": "native-final-store-or-readback",
+                            "samples": [
+                                {
+                                    "native_gpu_at_dst": 5.0,
+                                    "native_matches_expected": False,
+                                    "writeback_matches_expected": False,
+                                    "writeback_matches_native": True,
+                                }
+                            ],
+                        }
+                    },
+                }
+            }
+        }
+        self.assertEqual([], verifier.missing_evidence_fields(artifact, plan))
+        artifact["gpu"]["diagnostics"]["q6_workgroup_diagnostics"]["q6_native_vs_writeback_split"]["samples"][0].pop(
+            "native_gpu_at_dst"
+        )
+        self.assertIn("final_store_value_f32", verifier.missing_evidence_fields(artifact, plan))
 
     def test_q6_plan_verifier_selects_next_action_from_collected_evidence(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -10489,6 +10595,80 @@ class GpuAbiContractTest(unittest.TestCase):
         )
         self.assertEqual("Q6 descriptor/debug evidence gate", missing_debug_alias["owner"])
 
+        wrong_output_stale_probe = verifier.select_branch(
+            {"classification": "llama-completion-wrong-output"},
+            {
+                "gpu": {
+                    "diagnostics": {
+                        "spirv_probe_env_audit": {
+                            "summary": "stale-target-hash",
+                            "expected_source_hash": "0x1bf751845c5dce75",
+                            "actual_q6_source_hashes": ["0x9cfc45ae24ba71d8"],
+                        },
+                        "q6_workgroup_diagnostics": {
+                            "q6_final_store_boundary": {
+                                "summary": "not-run",
+                                "reason": "missing-executed-final-store-trace",
+                            }
+                        },
+                    }
+                }
+            },
+            plan,
+        )
+        self.assertEqual(
+            "spirv_probe_env_audit.summary == stale-target-hash",
+            wrong_output_stale_probe["condition"],
+        )
+        self.assertEqual("Q6 final-store trace probe arming", wrong_output_stale_probe["owner"])
+
+        wrong_output_probe_unarmed = verifier.select_branch(
+            {"classification": "llama-completion-wrong-output"},
+            {
+                "gpu": {
+                    "diagnostics": {
+                        "spirv_probe_env_audit": {"icd": {"matching_armed_count": 0}},
+                        "q6_workgroup_diagnostics": {
+                            "q6_final_store_boundary": {
+                                "summary": "not-run",
+                                "reason": "missing-executed-final-store-trace",
+                            },
+                            "q6_native_vs_writeback_split": {
+                                "summary": "native-final-store-or-readback"
+                            },
+                        },
+                    }
+                }
+            },
+            plan,
+        )
+        self.assertEqual(
+            "spirv_probe_env_audit.icd.matching_armed_count == 0 and q6_final_store_boundary.reason == missing-executed-final-store-trace",
+            wrong_output_probe_unarmed["condition"],
+        )
+        self.assertEqual("Q6 final-store trace probe arming", wrong_output_probe_unarmed["owner"])
+
+        wrong_output_native_split = verifier.select_branch(
+            {"classification": "llama-completion-wrong-output"},
+            {
+                "gpu": {
+                    "diagnostics": {
+                        "q6_workgroup_diagnostics": {
+                            "q6_native_vs_writeback_split": {
+                                "summary": "native-final-store-or-readback"
+                            }
+                        }
+                    }
+                }
+            },
+            plan,
+        )
+        self.assertEqual(
+            "q6_native_vs_writeback_split.summary == native-final-store-or-readback",
+            wrong_output_native_split["condition"],
+        )
+        self.assertEqual("native Q6 final-store/readback path", wrong_output_native_split["owner"])
+
     def test_q6_plan_verifier_selects_terminal_and_pre_q6_branches(self):
         verifier = load_llama_q6_plan_verifier()
         pass_branch = {
@@ -10904,6 +11084,86 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertTrue(report["service_readiness"]["health_ok"])
         self.assertTrue(report["service_readiness"]["models_ok"])
         self.assertEqual("fail", report["service_readiness"]["completion_status"])
+
+    def test_llama_gpu_artifact_verifier_preserves_q6_evidence_on_wrong_output(self):
+        verifier = load_llama_gpu_artifact_verifier()
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "served": True,
+                "runtime_env": {"PDOCKER_GPU_MODE": "vulkan-raw"},
+                "service_readiness": {
+                    "schema": "pdocker.llama.service-readiness.v1",
+                    "summary": {"health": "pass", "models": "pass", "completion": "pass"},
+                    "health": {"ok": True, "status": "pass"},
+                    "models": {"ok": True, "status": "pass"},
+                    "completion": {
+                        "ok": True,
+                        "status": "pass",
+                        "passed": False,
+                        "content_excerpt": " Marvel",
+                    },
+                },
+                "diagnostics": {
+                    "runtime_freshness": {
+                        "summary": "pass",
+                        "expected_executor_marker": "gpu-executor-q6-readonly-snapshot-20260531",
+                        "observed_executor_markers": ["gpu-executor-q6-readonly-snapshot-20260531"],
+                        "expected_icd_marker": "vulkan-icd-feature-chain-marker-20260518",
+                        "observed_icd_markers": ["vulkan-icd-feature-chain-marker-20260518"],
+                    },
+                    "api_executor_reconciliation": {
+                        "summary": "diagnostic",
+                        "proof_strength": "diagnostic",
+                        "dispatches": [
+                            {
+                                "match_status": "diagnostic-match",
+                                "matches": {
+                                    "core_command_hash_comparable": True,
+                                    "core_command_hash": True,
+                                    "spirv_hash": True,
+                                    "descriptor_hash": True,
+                                    "push_hash": True,
+                                    "spec_hash": True,
+                                    "dispatch_hash": True,
+                                },
+                                "transport": {"msg_trunc": False, "msg_ctrunc": False},
+                            }
+                        ],
+                    },
+                    "q6_workgroup_diagnostics": {
+                        "latest_status": "mismatch",
+                        "blocker_class": "native-q6-final-store-or-readback",
+                        "q6_final_store_boundary": {
+                            "summary": "not-run",
+                            "reason": "missing-executed-final-store-trace",
+                        },
+                        "q6_native_vs_writeback_split": {
+                            "summary": "native-final-store-or-readback",
+                            "samples": [
+                                {
+                                    "native_gpu_at_dst": 5.0,
+                                    "expected": 10.0,
+                                    "fd_after_writeback": 5.0,
+                                    "native_matches_expected": False,
+                                    "writeback_matches_expected": False,
+                                    "writeback_matches_native": True,
+                                }
+                            ],
+                        },
+                    },
+                },
+            },
+        }
+        report = verifier.classify(payload)
+        self.assertEqual("llama-completion-wrong-output", report["classification"])
+        self.assertEqual("native-q6-final-store-or-readback", report["q6_effective_blocker_class"])
+        self.assertEqual(
+            "native-final-store-or-readback",
+            report["q6_native_vs_writeback_split"]["summary"],
+        )
+        self.assertIn("q6_workgroup_diagnostics", report)
+        self.assertEqual("pass", report["api_executor_reconciliation"]["summary"])
 
     def test_llama_gpu_artifact_verifier_requires_health_and_models_for_completion_timeout(self):
         verifier = load_llama_gpu_artifact_verifier()

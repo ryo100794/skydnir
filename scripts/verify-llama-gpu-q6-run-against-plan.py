@@ -14,6 +14,39 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 ARTIFACT_VERIFIER = ROOT / "scripts" / "verify-llama-gpu-artifact.py"
 
+DEFAULT_REQUIRED_EVIDENCE_ALTERNATIVES: list[dict[str, Any]] = [
+    {
+        "name": "descriptor-usage-or-binding-details",
+        "covers": ["descriptor_usage"],
+        "any_of": [
+            ["descriptor_usage"],
+            ["binding_details", "binding_descriptor_offset", "api_range"],
+        ],
+    },
+    {
+        "name": "q6-final-store-or-native-split-boundary",
+        "covers": [
+            "final_store_value_f32",
+            "final_store_matches_expected",
+            "writeback_matches_final_store",
+        ],
+        "any_of": [
+            [
+                "final_store_value_f32",
+                "final_store_matches_expected",
+                "writeback_matches_final_store",
+            ],
+            [
+                "q6_native_vs_writeback_split",
+                "native_gpu_at_dst",
+                "native_matches_expected",
+                "writeback_matches_expected",
+                "writeback_matches_native",
+            ],
+        ],
+    },
+]
+
 
 def load_artifact_verifier():
     spec = importlib.util.spec_from_file_location("llama_gpu_artifact_verifier", ARTIFACT_VERIFIER)
@@ -55,6 +88,29 @@ def evidence_field_present(data: dict[str, Any], field: str) -> bool:
     return False
 
 
+def evidence_field_set_present(data: dict[str, Any], fields: list[Any]) -> bool:
+    return all(isinstance(field, str) and evidence_field_present(data, field) for field in fields)
+
+
+def evidence_alternative_covers(data: dict[str, Any], plan: dict[str, Any], field: str) -> bool:
+    alternatives = plan.get("required_evidence_alternatives")
+    if not isinstance(alternatives, list):
+        alternatives = DEFAULT_REQUIRED_EVIDENCE_ALTERNATIVES
+    for alternative in alternatives:
+        if not isinstance(alternative, dict):
+            continue
+        covers = alternative.get("covers")
+        if not isinstance(covers, list) or field not in covers:
+            continue
+        any_of = alternative.get("any_of")
+        if not isinstance(any_of, list):
+            continue
+        for field_set in any_of:
+            if isinstance(field_set, list) and evidence_field_set_present(data, field_set):
+                return True
+    return False
+
+
 def missing_evidence_fields(data: dict[str, Any], plan: dict[str, Any]) -> list[str]:
     required = plan.get("required_evidence_fields")
     if not isinstance(required, list):
@@ -63,7 +119,7 @@ def missing_evidence_fields(data: dict[str, Any], plan: dict[str, Any]) -> list[
     for field in required:
         if not isinstance(field, str) or not field:
             missing.append("<invalid-required-field>")
-        elif not evidence_field_present(data, field):
+        elif not evidence_field_present(data, field) and not evidence_alternative_covers(data, plan, field):
             missing.append(field)
     return missing
 
@@ -91,6 +147,29 @@ def runtime_env_manifest_record(data: dict[str, Any]) -> dict[str, Any]:
             return value
     value = data.get("runtime_env_manifest")
     return value if isinstance(value, dict) else {}
+
+
+def nested_dict(value: dict[str, Any], *keys: str) -> dict[str, Any]:
+    current: Any = value
+    for key in keys:
+        if not isinstance(current, dict):
+            return {}
+        current = current.get(key)
+    return current if isinstance(current, dict) else {}
+
+
+def artifact_q6_diagnostics(artifact: dict[str, Any]) -> dict[str, Any]:
+    q6 = nested_dict(artifact, "gpu", "diagnostics", "q6_workgroup_diagnostics")
+    if q6:
+        return q6
+    return nested_dict(artifact, "q6_workgroup_diagnostics")
+
+
+def artifact_spirv_probe_env_audit(artifact: dict[str, Any]) -> dict[str, Any]:
+    audit = nested_dict(artifact, "gpu", "diagnostics", "spirv_probe_env_audit")
+    if audit:
+        return audit
+    return nested_dict(artifact, "spirv_probe_env_audit")
 
 
 def required_env_mismatches(data: dict[str, Any], plan: dict[str, Any]) -> list[dict[str, Any]]:
@@ -133,8 +212,11 @@ def required_env_mismatches(data: dict[str, Any], plan: dict[str, Any]) -> list[
 def select_branch(report: dict[str, Any], artifact: dict[str, Any], plan: dict[str, Any]) -> dict[str, Any]:
     classification = str(report.get("classification") or "")
     q6 = report.get("q6_workgroup_diagnostics")
+    if not isinstance(q6, dict) or not q6:
+        q6 = artifact_q6_diagnostics(artifact)
     if not isinstance(q6, dict):
         q6 = {}
+    probe_audit = artifact_spirv_probe_env_audit(artifact)
     materialize_report = None
     for value in walk_values(artifact):
         if isinstance(value, dict) and isinstance(value.get("specialization_materialize_report"), dict):
@@ -189,7 +271,44 @@ def select_branch(report: dict[str, Any], artifact: dict[str, Any], plan: dict[s
             "action": "inspect native Q6 final-store arithmetic/dataflow with descriptor coordinates preserved; do not blame executor writeback",
             "owner": "native Q6 final-store path",
         }
+    if classification == "q6-native-final-store-or-readback":
+        return {
+            "condition": "q6_native_vs_writeback_split.summary == native-final-store-or-readback",
+            "action": "inspect native Q6 final-store/readback boundary; writeback equals native GPU memory but both differ from the CPU oracle",
+            "owner": "native Q6 final-store/readback path",
+        }
     boundary = q6.get("q6_final_store_boundary")
+    if (
+        classification == "llama-completion-wrong-output"
+        and probe_audit.get("summary") == "stale-target-hash"
+    ):
+        return {
+            "condition": "spirv_probe_env_audit.summary == stale-target-hash",
+            "action": "rebuild the Q6 final-store probe from the actual runtime Q6 source SPIR-V hash; keep image/model/prompt unchanged",
+            "owner": "Q6 final-store trace probe arming",
+        }
+    if (
+        classification == "llama-completion-wrong-output"
+        and isinstance(boundary, dict)
+        and boundary.get("reason") == "missing-executed-final-store-trace"
+        and nested_dict(probe_audit, "icd").get("matching_armed_count") == 0
+    ):
+        return {
+            "condition": "spirv_probe_env_audit.icd.matching_armed_count == 0 and q6_final_store_boundary.reason == missing-executed-final-store-trace",
+            "action": "fix Q6 SPIR-V probe expected/effective hash arming so final-store trace evidence is collected; keep image/model/prompt unchanged",
+            "owner": "Q6 final-store trace probe arming",
+        }
+    native_split = q6.get("q6_native_vs_writeback_split")
+    if (
+        classification == "llama-completion-wrong-output"
+        and isinstance(native_split, dict)
+        and native_split.get("summary") == "native-final-store-or-readback"
+    ):
+        return {
+            "condition": "q6_native_vs_writeback_split.summary == native-final-store-or-readback",
+            "action": "inspect native Q6 final-store/readback boundary; writeback equals native GPU memory but both differ from the CPU oracle",
+            "owner": "native Q6 final-store/readback path",
+        }
     if isinstance(boundary, dict) and boundary.get("summary") == "inconclusive":
         return {
             "condition": "q6_final_store_boundary.summary == inconclusive",

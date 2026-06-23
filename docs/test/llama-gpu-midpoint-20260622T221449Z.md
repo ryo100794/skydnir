@@ -26,6 +26,8 @@ The JSON artifacts are ignored by `.gitignore` (`docs/test/llama-gpu-*.json`) an
 | Q6 workgroup shape blocker | false |
 | Q6 writeback verified | true |
 | Overall verifier classification | `llama-completion-wrong-output` |
+| Plan-verdict missing required evidence | none after Q6 alternative-evidence handling |
+| Selected next branch | `Q6 final-store trace probe arming` |
 
 ## Key Q6 evidence
 
@@ -41,11 +43,13 @@ The JSON artifacts are ignored by `.gitignore` (`docs/test/llama-gpu-*.json`) an
 
 The midpoint is reached: the fixed llama container starts, the Vulkan path is active, the server is reachable, and `/completion` returns. Correctness is not reached because the deterministic prompt check returns the wrong token. The next P0 remains the GPU numeric/final-store boundary, not container startup.
 
-The run also exposed a compare-script classification issue: prompt-sanity failure was being routed through the completion-timeout diagnostics branch. This was fixed in commit `c2c7b49e` so future runs distinguish:
+The run also exposed two evidence-routing issues now fixed in the verifier/plan layer:
 
-- completion transport timeout/failure, and
-- completion HTTP success with wrong prompt content.
+- prompt-sanity failure was being routed through completion-timeout diagnostics; commit `c2c7b49e` separates HTTP success with wrong prompt content from transport timeout/failure.
+- wrong-output reports now preserve Q6 diagnostics, and plan-verdict accepts the native-vs-writeback split as a valid alternative when executed final-store trace is unavailable. This keeps the next branch anchored to Q6 evidence instead of generic service-readiness failure.
+
+The refreshed plan-verdict has no missing required evidence fields. It selects `Q6 final-store trace probe arming` because `spirv_probe_env_audit.icd.matching_armed_count == 0` while `q6_final_store_boundary.reason == missing-executed-final-store-trace`. Static review then identified the direct cause: the default runner could reuse or regenerate `/tmp/q6write10-bundle` from the archived `0x1bf751845c5dce75` SPIR-V fixture while the runtime Q6 source hash was `0x9cfc45ae24ba71d8`. The runner now refuses to refresh the default probe from the archived fixture unless explicitly allowed for fixture/regression runs, and `prepare-q6k-noop-probe.sh` can guard the source hash with `--expected-hash`.
 
 ## Next action
 
-Keep image/model/prompt fixed. Inspect Q6 final-store/readback evidence for `native-q6-final-store-or-readback`, with focus on descriptor usage and final-store boundary fields.
+Keep image/model/prompt fixed. Before the next device run, provide an actual runtime Q6 source SPIR-V dump and run the Q6 runner with `--probe-source-spv` and `--probe-source-hash`; do not use the archived fixture for the midpoint. The next successful run must collect executed final-store trace for runtime hash `0x9cfc45ae24ba71d8` or report `stale-target-hash` explicitly.

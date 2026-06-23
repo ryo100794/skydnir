@@ -3902,6 +3902,13 @@ def build_spirv_probe_env_audit():
         return True
 
     matching_armed = [event for event in icd_events if armed_matches(event)]
+    skipped_actual_hashes = sorted({
+        normalized_spirv_hash(event.get("actual"))
+        for event in icd_events
+        if isinstance(event, dict) and event.get("event") == "skipped_non_target"
+        and normalized_spirv_hash(event.get("actual"))
+    })
+    actual_q6_source_hashes = []
     executor_probe_events = []
     executor_debug_binding_events = []
     for event_index, event in enumerate(executor_events):
@@ -3909,6 +3916,9 @@ def build_spirv_probe_env_audit():
             continue
         event_source = normalized_spirv_hash(event.get("source_spirv_hash"))
         event_effective = normalized_spirv_hash(event.get("effective_spirv_hash"))
+        cpu_oracle = event.get("cpu_oracle") if isinstance(event.get("cpu_oracle"), dict) else {}
+        if cpu_oracle.get("kernel_hint") == "mul-mat-vec-q6-k-large" and event_source:
+            actual_q6_source_hashes.append(event_source)
         source_matches = not expected_source or event_source == expected_source
         effective_matches = not expected_effective or event_effective == expected_effective
         has_debug_binding = False
@@ -3922,6 +3932,15 @@ def build_spirv_probe_env_audit():
             executor_probe_events.append(event_index)
             if has_debug_binding:
                 executor_debug_binding_events.append(event_index)
+    actual_q6_source_hashes = sorted(set(actual_q6_source_hashes))
+    actual_q6_or_skipped_hashes = actual_q6_source_hashes or skipped_actual_hashes
+    stale_target_hash = bool(
+        requested_any
+        and expected_source
+        and not matching_armed
+        and actual_q6_or_skipped_hashes
+        and expected_source not in actual_q6_or_skipped_hashes
+    )
     host_to_container_missing = sorted(key for key in requested if key not in observed)
     summary = (
         "not-requested"
@@ -3930,6 +3949,8 @@ def build_spirv_probe_env_audit():
         if host_to_container_missing
         else "pass"
         if matching_armed and executor_debug_binding_events
+        else "stale-target-hash"
+        if stale_target_hash
         else "partial"
     )
     return {
@@ -3949,6 +3970,11 @@ def build_spirv_probe_env_audit():
         "host_requested": requested,
         "planned_container": planned,
         "runtime_observed": observed,
+        "expected_source_hash": expected_source,
+        "expected_effective_hash": expected_effective,
+        "actual_q6_source_hashes": actual_q6_source_hashes,
+        "skipped_non_target_actual_hashes": skipped_actual_hashes[-16:],
+        "stale_target_hash": stale_target_hash,
         "host_to_container": {
             "summary": "not-requested" if not requested else "fail" if host_to_container_missing else "pass",
             "missing": host_to_container_missing,

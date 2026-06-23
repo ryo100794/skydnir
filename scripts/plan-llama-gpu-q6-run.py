@@ -59,6 +59,48 @@ REQUIRED_EVIDENCE_FIELDS = [
     "writeback_matches_final_store",
 ]
 
+REQUIRED_EVIDENCE_ALTERNATIVES = [
+    {
+        "name": "descriptor-usage-or-binding-details",
+        "covers": ["descriptor_usage"],
+        "any_of": [
+            ["descriptor_usage"],
+            ["binding_details", "binding_descriptor_offset", "api_range"],
+        ],
+        "reason": (
+            "Older Q6 artifacts may record descriptor use through binding_details "
+            "without a descriptor_usage summary object."
+        ),
+    },
+    {
+        "name": "q6-final-store-or-native-split-boundary",
+        "covers": [
+            "final_store_value_f32",
+            "final_store_matches_expected",
+            "writeback_matches_final_store",
+        ],
+        "any_of": [
+            [
+                "final_store_value_f32",
+                "final_store_matches_expected",
+                "writeback_matches_final_store",
+            ],
+            [
+                "q6_native_vs_writeback_split",
+                "native_gpu_at_dst",
+                "native_matches_expected",
+                "writeback_matches_expected",
+                "writeback_matches_native",
+            ],
+        ],
+        "reason": (
+            "If executed final-store trace is unavailable, the native-vs-writeback "
+            "split still proves whether readback equals native GPU memory and both "
+            "differ from the CPU oracle."
+        ),
+    },
+]
+
 def load_q6_required_env_overlay() -> dict[str, str]:
     manifest = json.loads(ENV_MANIFEST.read_text(encoding="utf-8"))
     overlay = manifest.get("q6_required_env_overlay")
@@ -241,6 +283,7 @@ def build_plan(args: argparse.Namespace) -> dict:
         "runner_step_contract": RUNNER_STEP_CONTRACT,
         "q6_required_env_overlay": Q6_REQUIRED_ENV_OVERLAY,
         "required_evidence_fields": REQUIRED_EVIDENCE_FIELDS,
+        "required_evidence_alternatives": REQUIRED_EVIDENCE_ALTERNATIVES,
         "pass_branch": PASS_BRANCH,
         "fail_branches": FAIL_BRANCHES,
         "must_not_report_complete_until": [

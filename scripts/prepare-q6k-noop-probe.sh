@@ -7,10 +7,11 @@ OUT_DIR="$ROOT/docs/test/q6k-noop-probe-latest"
 DEBUG_BYTES="${PDOCKER_Q6K_PROBE_DEBUG_BYTES:-65536}"
 TARGET_ENV="${PDOCKER_Q6K_PROBE_TARGET_ENV:-vulkan1.2}"
 PROBE_WRITES=0
+EXPECTED_HASH=""
 
 usage() {
   cat <<'EOF'
-usage: scripts/prepare-q6k-noop-probe.sh [--spv PATH] [--out-dir DIR] [--probe-writes]
+usage: scripts/prepare-q6k-noop-probe.sh [--spv PATH] [--out-dir DIR] [--expected-hash HASH] [--probe-writes]
 
 Prepare a deterministic Q6K no-op SPIR-V probe bundle.  This does not rebuild
 the llama image, does not modify llama.cpp/Dockerfile/model/prompt, and does not
@@ -28,6 +29,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --out-dir)
       OUT_DIR="$2"
+      shift 2
+      ;;
+    --expected-hash)
+      EXPECTED_HASH="$2"
       shift 2
       ;;
     --probe-writes)
@@ -69,6 +74,22 @@ python3 "$ROOT/scripts/analyze-spirv.py" "$SPV" \
   --json-out "$OUT_DIR/native-q6.analysis.json" \
   --disassemble-dir "$OUT_DIR/disasm" >/dev/null
 
+if [[ -n "$EXPECTED_HASH" ]]; then
+  python3 - "$MANIFEST" "$EXPECTED_HASH" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+manifest = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+expected = str(sys.argv[2]).strip().lower()
+actual = str((manifest.get("basis") or {}).get("module_hash") or "").strip().lower()
+if not expected.startswith("0x"):
+    raise SystemExit(f"expected hash must be hex with 0x prefix: {expected!r}")
+if actual != expected:
+    raise SystemExit(f"Q6 probe source hash mismatch: expected {expected}, got {actual}")
+PY
+fi
+
 python3 "$ROOT/scripts/verify-spirv-probe-manifest.py" "$MANIFEST" \
   --json-out "$VERIFY_SOURCE_JSON" >/dev/null
 
@@ -87,7 +108,7 @@ python3 "${INSTRUMENT_ARGS[@]}" >"$INSTRUMENTATION_JSON"
 python3 "$ROOT/scripts/verify-spirv-probe-manifest.py" "$NOOP_MANIFEST" \
   --json-out "$VERIFY_NOOP_JSON" >/dev/null
 
-python3 - "$MANIFEST" "$NOOP_MANIFEST" "$INSTRUMENTATION_JSON" "$ENV_FILE" "$SUMMARY_JSON" "$NOOP_SPV" "$DEBUG_BYTES" <<'PY'
+python3 - "$MANIFEST" "$NOOP_MANIFEST" "$INSTRUMENTATION_JSON" "$ENV_FILE" "$SUMMARY_JSON" "$NOOP_SPV" "$DEBUG_BYTES" "$EXPECTED_HASH" <<'PY'
 import json
 import shlex
 import sys
@@ -100,6 +121,7 @@ env_path = Path(sys.argv[4])
 summary_path = Path(sys.argv[5])
 noop_spv = Path(sys.argv[6])
 debug_bytes = int(sys.argv[7])
+expected_hash = str(sys.argv[8]).strip().lower()
 
 manifest = json.loads(manifest_path.read_text())
 noop_manifest = json.loads(noop_manifest_path.read_text())
@@ -130,6 +152,7 @@ summary = {
     "env_file": str(env_path),
     "debug_bytes": debug_bytes,
     "source_spirv_hash": source_hash,
+    "expected_source_spirv_hash": expected_hash or None,
     "instrumented_spirv_hash": effective_hash,
     "debug_descriptor": {
         "set": debug["set"],

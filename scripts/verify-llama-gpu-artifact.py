@@ -2475,6 +2475,17 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
                 "api_executor_reconciliation": api_executor_reconciliation,
                 "runtime_env": nested(data, "gpu", "runtime_env") or {},
             }
+        completion_q6_final_store_boundary = _q6_final_store_boundary(q6)
+        completion_q6_native_vs_writeback_split = (
+            q6.get("q6_native_vs_writeback_split")
+            if isinstance(q6.get("q6_native_vs_writeback_split"), dict)
+            else {}
+        )
+        completion_q6_effective_blocker_class = str(q6.get("blocker_class") or "")
+        if completion_q6_native_vs_writeback_split.get("summary") == "native-final-store-or-readback":
+            completion_q6_effective_blocker_class = "native-q6-final-store-or-readback"
+        elif completion_q6_final_store_boundary.get("reason") == "missing-executed-final-store-trace":
+            completion_q6_effective_blocker_class = "q6-final-store-trace-missing"
         return _claim_base(
             "llama-completion-wrong-output",
             next_action="keep the current image/model/prompt fixed and inspect GPU numeric/layout/readback evidence; deterministic /completion returned an HTTP response but failed the required prompt check and API-to-executor reconciliation passed",
@@ -2484,6 +2495,11 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
         ) | {
             "service_readiness": completion_readiness,
             "api_executor_reconciliation": api_executor_reconciliation,
+            "observed_service_failure": "llama-completion-wrong-output",
+            "q6_workgroup_diagnostics": q6,
+            "q6_final_store_boundary": completion_q6_final_store_boundary,
+            "q6_native_vs_writeback_split": completion_q6_native_vs_writeback_split,
+            "q6_effective_blocker_class": completion_q6_effective_blocker_class,
             "runtime_env": nested(data, "gpu", "runtime_env") or {},
         }
 
