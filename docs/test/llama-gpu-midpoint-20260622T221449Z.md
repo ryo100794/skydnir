@@ -53,3 +53,19 @@ The refreshed plan-verdict has no missing required evidence fields. It selects `
 ## Next action
 
 Keep image/model/prompt fixed. Before the next device run, provide an actual runtime Q6 source SPIR-V dump and run the Q6 runner with `--probe-source-spv` and `--probe-source-hash`; do not use the archived fixture for the midpoint. The next successful run must collect executed final-store trace for runtime hash `0x9cfc45ae24ba71d8` or report `stale-target-hash` explicitly.
+
+## 2026-06-23 follow-up: source SPIR-V locator
+
+The follow-up implementation adds `scripts/locate-q6-source-spirv-dump.py` as the host-only bridge between a diagnostic dump run and the next Q6 probe run.  It scans `PDOCKER_GPU_SPIRV_DUMP_DIR` output for a validated `pdocker-spirv-original-<dispatch>-<hash>.spv`, verifies the SPIR-V magic, file size, FNV-1a64 hash, and paired `pdocker.spirv.dump.v1` metadata, then emits:
+
+- `prepare_args` for `scripts/prepare-q6k-noop-probe.sh --spv ... --expected-hash ... --probe-writes`;
+- `runner_args` for `scripts/android-llama-gpu-q6-workgroup-run.sh --probe-source-spv ... --probe-source-hash ...`.
+
+This keeps the next device run fail-closed: effective-phase dumps are not accepted as source dumps unless explicitly requested, stale fixture hashes are rejected, and ambiguous byte content for one target hash is rejected.
+
+Next runtime sequence:
+
+1. Run a diagnostic compare with `PDOCKER_GPU_SPIRV_DUMP_DIR` enabled.
+2. Run `scripts/locate-q6-source-spirv-dump.py --dump-dir <dump-dir> --artifact <compare-artifact> --out docs/test/q6-source-spirv-locator-latest.json --print-prepare-command`.
+3. Use the emitted `runner_args` in the next Q6 workgroup runner invocation.
+4. Accept the next midpoint only if the final-store trace is armed for the actual runtime Q6 source hash, or if the artifact explicitly reports `stale-target-hash`.
