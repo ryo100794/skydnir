@@ -14,6 +14,7 @@ SPV="$DEFAULT_SPV"
 PROBE_ENV="$DEFAULT_PROBE_ENV"
 PROBE_SOURCE_SPV=""
 PROBE_SOURCE_HASH=""
+PROBE_LOCATOR=""
 ALLOW_ARCHIVED_PROBE_SOURCE="${PDOCKER_Q6K_ALLOW_ARCHIVED_PROBE_SOURCE:-0}"
 CPU_TPS="0.04702448956650603"
 CPU_CTX="512"
@@ -39,6 +40,7 @@ Options:
                         Actual native Q6 source SPIR-V dump used to build a fresh probe bundle.
   --probe-source-hash HASH
                         Expected source hash for --probe-source-spv and generated probe env.
+  --probe-locator PATH  JSON from scripts/locate-q6-source-spirv-dump.py; fills --probe-source-spv/hash.
   --cpu-tps VALUE       CPU baseline tokens/sec to reuse.
   --cpu-ctx N           CPU baseline context size recorded in the plan and passed to compare.
   --gpu-ctx N           GPU context size recorded in the plan and passed to compare.
@@ -90,6 +92,7 @@ while [[ $# -gt 0 ]]; do
     --probe-env) PROBE_ENV="${2:?missing probe env path}"; shift 2 ;;
     --probe-source-spv) PROBE_SOURCE_SPV="${2:?missing probe source spv path}"; shift 2 ;;
     --probe-source-hash) PROBE_SOURCE_HASH="${2:?missing probe source hash}"; shift 2 ;;
+    --probe-locator) PROBE_LOCATOR="${2:?missing probe locator path}"; shift 2 ;;
     --cpu-tps) CPU_TPS="${2:?missing cpu tps}"; shift 2 ;;
     --cpu-ctx) CPU_CTX="${2:?missing cpu ctx}"; shift 2 ;;
     --gpu-ctx) GPU_CTX="${2:?missing gpu ctx}"; shift 2 ;;
@@ -103,6 +106,38 @@ while [[ $# -gt 0 ]]; do
     *) echo "unknown argument: $1" >&2; usage >&2; exit 2 ;;
   esac
 done
+
+if [[ -n "$PROBE_LOCATOR" ]]; then
+  LOCATOR_TEXT="$(python3 - "$PROBE_LOCATOR" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+data = json.loads(path.read_text(encoding="utf-8"))
+if data.get("schema") != "pdocker.q6k.source-spirv-dump-locator.v1":
+    raise SystemExit(f"unsupported probe locator schema: {data.get('schema')}")
+if data.get("valid") is not True:
+    raise SystemExit(f"probe locator is not valid: {data.get('reason')}")
+selected = data.get("selected") if isinstance(data.get("selected"), dict) else {}
+spv = selected.get("spv")
+hash_value = data.get("target_hash")
+if not isinstance(spv, str) or not spv:
+    raise SystemExit("probe locator selected.spv is missing")
+if not isinstance(hash_value, str) or not hash_value.startswith("0x"):
+    raise SystemExit("probe locator target_hash is missing")
+print(spv)
+print(hash_value)
+PY
+  )"
+  mapfile -t LOCATOR_VALUES <<<"$LOCATOR_TEXT"
+  if [[ "${#LOCATOR_VALUES[@]}" -ne 2 ]]; then
+    echo "probe locator did not produce source spv/hash: $PROBE_LOCATOR" >&2
+    exit 2
+  fi
+  PROBE_SOURCE_SPV="${LOCATOR_VALUES[0]}"
+  PROBE_SOURCE_HASH="${LOCATOR_VALUES[1]}"
+fi
 
 if [[ -z "$OUT" ]]; then
   OUT="docs/test/llama-gpu-ngl${GPU_LAYERS}-q6-workgroup-legalized-$(date -u +%Y%m%dT%H%M%SZ).json"
@@ -154,6 +189,11 @@ if [[ "$SPV" == "$DEFAULT_SPV" && "$PROBE_ENV" == "$DEFAULT_PROBE_ENV" ]]; then
           "$PROBE_ENV" -ot "$ROOT/scripts/prepare-q6k-noop-probe.sh" ||
           "$PROBE_ENV" -ot "$SOURCE_SPV" ) ]]; then
     NEED_PREPARE=1
+  elif [[ -n "$PROBE_SOURCE_HASH" ]]; then
+    CURRENT_PROBE_HASH="$(set -a; . "$PROBE_ENV"; printf '%s' "${PDOCKER_GPU_SPIRV_PROBE_EXPECTED_HASH:-}")"
+    if [[ "${CURRENT_PROBE_HASH,,}" != "${PROBE_SOURCE_HASH,,}" ]]; then
+      NEED_PREPARE=1
+    fi
   fi
   if [[ "$NEED_PREPARE" -eq 1 ]]; then
     if [[ -z "$SOURCE_SPV" ]]; then
