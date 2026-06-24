@@ -8480,6 +8480,39 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
         if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
         off += (size_t)n;
     }
+    typedef struct {
+        const char *env;
+        const char *option;
+    } PdockerVkStringBridgeOption;
+    static const PdockerVkStringBridgeOption string_bridge_options[] = {
+#define PDOCKER_VK_STRING_BRIDGE_OPTION(env_name, option_name, has_field, value_field) \
+        {#env_name, #option_name},
+        PDOCKER_GPU_VULKAN_STRING_DISPATCH_OPTIONS(PDOCKER_VK_STRING_BRIDGE_OPTION)
+#undef PDOCKER_VK_STRING_BRIDGE_OPTION
+    };
+    for (size_t i = 0; i < sizeof(string_bridge_options) / sizeof(string_bridge_options[0]); ++i) {
+        const PdockerVkStringBridgeOption *option = &string_bridge_options[i];
+        const char *value = getenv(option->env);
+        if (!value || !value[0]) continue;
+        const size_t value_len = strlen(value);
+        if (value_len >= PDOCKER_GPU_VULKAN_STRING_DISPATCH_OPTION_MAX_BYTES ||
+            strpbrk(value, "\r\n") != NULL) {
+            fprintf(stderr,
+                    "pdocker-vulkan-icd: generic dispatch rejected: invalid %s dispatch_id=%llu\n",
+                    option->env,
+                    (unsigned long long)dispatch_id);
+            close_spirv_probe_replay(&probe);
+            return -EINVAL;
+        }
+        char value_hex[PDOCKER_GPU_VULKAN_STRING_DISPATCH_OPTION_MAX_BYTES * 2u + 1u];
+        hex_encode((const uint8_t *)value, value_len, value_hex, sizeof(value_hex));
+        n = snprintf(command + off, sizeof(command) - off,
+                     " %s_hex=%s",
+                     option->option,
+                     value_hex);
+        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-string-option");
+        off += (size_t)n;
+    }
     if (trace_allocations() || env_truthy_default("PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE", false)) {
         n = snprintf(command + off, sizeof(command) - off, " profile=1");
         if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");

@@ -484,7 +484,7 @@
       "type": "size"
     },
     {
-      "env": "PDOCKER_GPU_STRICT_GRAPH_CACHE_MAX_BYTES",
+      "env": "PDOCKER_GPU_SPIRV_PROBE_DEBUG_BINDING",
       "type": "size"
     },
     {
@@ -492,12 +492,20 @@
       "type": "size"
     },
     {
-      "env": "PDOCKER_GPU_SPIRV_PROBE_DEBUG_BINDING",
+      "env": "PDOCKER_GPU_STRICT_GRAPH_CACHE_MAX_BYTES",
       "type": "size"
     },
     {
       "env": "PDOCKER_GPU_WRITEONLY_DIRTY_PROBE_MIN_BYTES",
       "type": "size"
+    },
+    {
+      "env": "PDOCKER_GPU_FAILED_SPIRV_DIR",
+      "type": "string"
+    },
+    {
+      "env": "PDOCKER_GPU_SPIRV_DUMP_DIR",
+      "type": "string"
     }
   ],
   "env_bridge_classifications": {
@@ -506,7 +514,6 @@
       "GGML_VK_FORCE_MAX_BUFFER_SIZE",
       "GGML_VK_SUBALLOCATION_BLOCK_SIZE",
       "LLAMA_ARG_N_GPU_LAYERS",
-      "PDOCKER_GPU_SPIRV_DUMP_DIR",
       "PDOCKER_GPU_VIRTUAL_MEMORY",
       "PDOCKER_GPU_VIRTUAL_MEMORY_MIN_BYTES",
       "PDOCKER_VULKAN_ADVERTISEMENT_SOURCE",
@@ -566,7 +573,10 @@
       "PDOCKER_GPU_SPIRV_PROBE_DEBUG_BINDING",
       "PDOCKER_GPU_WRITEONLY_DIRTY_PROBE_MIN_BYTES"
     ],
-    "icd_to_executor_string_option": [],
+    "icd_to_executor_string_option": [
+      "PDOCKER_GPU_FAILED_SPIRV_DIR",
+      "PDOCKER_GPU_SPIRV_DUMP_DIR"
+    ],
     "app_process_only": [
       "PDOCKER_ANDROID_OPENCL_LIBRARY",
       "PDOCKER_GPU_DISABLE_ANDROID_OPENCL",
@@ -576,7 +586,6 @@
     "needs_bridge": [
       "PDOCKER_GPU_CHAIN_COMPAT_FEATURE_STRUCTS",
       "PDOCKER_GPU_DISPATCH_PROFILE_LOG",
-      "PDOCKER_GPU_FAILED_SPIRV_DIR",
       "PDOCKER_GPU_RETRY_MATERIALIZE_SPECIALIZATION",
       "PDOCKER_GPU_UNSAFE_DIRTY_WRITEBACK_CACHE",
       "PDOCKER_GPU_WRITEBACK_FULL_HASH_MAX_BYTES"

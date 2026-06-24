@@ -151,6 +151,13 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
             },
             set(classifications["icd_to_executor_size_option"]),
         )
+        self.assertEqual(
+            {
+                item["env"] for item in manifest["abi_dispatch_option_env_fields"]
+                if item["type"] == "string"
+            },
+            set(classifications["icd_to_executor_string_option"]),
+        )
 
     def test_compare_pdockerd_and_ui_compose_env_surfaces_match_manifest(self):
         manifest = load_manifest()

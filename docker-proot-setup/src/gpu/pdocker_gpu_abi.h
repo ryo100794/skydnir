@@ -67,6 +67,11 @@
     X(PDOCKER_GPU_WRITEONLY_DIRTY_PROBE_MIN_BYTES, dirty_probe_min, has_dirty_probe_min_bytes, dirty_probe_min_bytes) \
     X(PDOCKER_GPU_SPIRV_PROBE_DEBUG_BINDING, spirv_probe_debug_binding, has_spirv_probe_debug_binding, spirv_probe_debug_binding)
 
+#define PDOCKER_GPU_VULKAN_STRING_DISPATCH_OPTION_MAX_BYTES 512u
+#define PDOCKER_GPU_VULKAN_STRING_DISPATCH_OPTIONS(X) \
+    X(PDOCKER_GPU_SPIRV_DUMP_DIR, spirv_dump_dir, has_spirv_dump_dir, spirv_dump_dir) \
+    X(PDOCKER_GPU_FAILED_SPIRV_DIR, failed_spirv_dir, has_failed_spirv_dir, failed_spirv_dir)
+
 /*
  * Positional VULKAN_DISPATCH_V4 binding payload schema.
  *

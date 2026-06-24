@@ -3786,9 +3786,10 @@ def q6_probe_equivalent_hashes():
     still-valid module.  The event therefore carries the probe hash, not the
     original llama.cpp Q6 hash.  Treating that as "not Q6" makes the evidence
     disappear from the Q6 diagnostics even though the manifest explicitly says
-    it is a probe for the Q6 source shader.  This mapping is fail-closed: it is
-    enabled only when the runtime env records an original hash that is already
-    in the Q6 allow-list and a concrete effective probe hash.
+    it is a probe for the Q6 source shader.  This mapping is diagnostic-only:
+    it is enabled only when the runtime env carries both the original target
+    hash and the concrete probe-module hash.  It never changes the dispatched
+    shader or executor behaviour.
     """
 
     env = globals().get("effective_runtime_env", {})
@@ -3796,9 +3797,20 @@ def q6_probe_equivalent_hashes():
         return {}
     expected = normalized_spirv_hash(env.get("PDOCKER_GPU_SPIRV_PROBE_EXPECTED_HASH"))
     effective = normalized_spirv_hash(env.get("PDOCKER_GPU_SPIRV_PROBE_EFFECTIVE_HASH"))
-    if expected in Q6_K_MATVEC_SPIRV_HASHES and effective:
+    if expected and effective:
         return {effective: expected}
     return {}
+
+def q6_probe_identity_hashes():
+    env = globals().get("effective_runtime_env", {})
+    if not isinstance(env, dict):
+        return set()
+    expected = normalized_spirv_hash(env.get("PDOCKER_GPU_SPIRV_PROBE_EXPECTED_HASH"))
+    effective = normalized_spirv_hash(env.get("PDOCKER_GPU_SPIRV_PROBE_EFFECTIVE_HASH"))
+    target_only = str(env.get("PDOCKER_GPU_SPIRV_PROBE_TARGET_ONLY", "")).strip().lower()
+    if expected and effective and target_only in ("1", "true", "yes", "on"):
+        return {expected, effective}
+    return set()
 
 def event_spirv_identity_hashes(event):
     hashes = []
@@ -3814,7 +3826,9 @@ def event_spirv_identity_hashes(event):
     return hashes
 
 def event_has_q6_matvec_identity(event):
-    return any(value in Q6_K_MATVEC_SPIRV_HASHES for value in event_spirv_identity_hashes(event))
+    hashes = event_spirv_identity_hashes(event)
+    probe_hashes = q6_probe_identity_hashes()
+    return any(value in Q6_K_MATVEC_SPIRV_HASHES or value in probe_hashes for value in hashes)
 
 valid_spirv_events = [
     e for e in executor_events
@@ -3919,8 +3933,16 @@ def build_spirv_probe_env_audit():
         cpu_oracle = event.get("cpu_oracle") if isinstance(event.get("cpu_oracle"), dict) else {}
         if cpu_oracle.get("kernel_hint") == "mul-mat-vec-q6-k-large" and event_source:
             actual_q6_source_hashes.append(event_source)
-        source_matches = not expected_source or event_source == expected_source
-        effective_matches = not expected_effective or event_effective == expected_effective
+        source_matches = (
+            not expected_source
+            or event_source == expected_source
+            or (expected_effective and event_source == expected_effective)
+        )
+        effective_matches = (
+            not expected_effective
+            or event_effective == expected_effective
+            or (expected_effective and event_source == expected_effective)
+        )
         has_debug_binding = False
         for detail in event.get("binding_details") or []:
             if not isinstance(detail, dict):
@@ -3934,12 +3956,13 @@ def build_spirv_probe_env_audit():
                 executor_debug_binding_events.append(event_index)
     actual_q6_source_hashes = sorted(set(actual_q6_source_hashes))
     actual_q6_or_skipped_hashes = actual_q6_source_hashes or skipped_actual_hashes
+    target_or_probe_hashes = {value for value in (expected_source, expected_effective) if value}
     stale_target_hash = bool(
         requested_any
         and expected_source
         and not matching_armed
         and actual_q6_or_skipped_hashes
-        and expected_source not in actual_q6_or_skipped_hashes
+        and not any(value in actual_q6_or_skipped_hashes for value in target_or_probe_hashes)
     )
     host_to_container_missing = sorted(key for key in requested if key not in observed)
     summary = (

@@ -212,6 +212,7 @@ def vulkan_dispatch_option_envs(path):
             | macro_envs("PDOCKER_GPU_VULKAN_BOOL_DISPATCH_OPTIONS_NO_HAS")
         ),
         "size": macro_envs("PDOCKER_GPU_VULKAN_SIZE_DISPATCH_OPTIONS"),
+        "string": macro_envs("PDOCKER_GPU_VULKAN_STRING_DISPATCH_OPTIONS"),
     }
 
 
@@ -4373,13 +4374,14 @@ class GpuAbiContractTest(unittest.TestCase):
         container_options = vulkan_dispatch_option_envs(CONTAINER_HEADER)
         self.assertEqual(app_options, container_options)
 
-        manifest_options = {"bool": set(), "size": set()}
+        manifest_options = {"bool": set(), "size": set(), "string": set()}
         for item in manifest["abi_dispatch_option_env_fields"]:
             self.assertIn(item["type"], manifest_options)
             manifest_options[item["type"]].add(item["env"])
         expected_options = {
             "bool": app_options["bool"] | {"PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE"},
             "size": app_options["size"],
+            "string": app_options["string"],
         }
         self.assertEqual(expected_options, manifest_options)
         self.assertEqual(
@@ -4389,6 +4391,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertEqual(
             app_options["size"],
             set(manifest["env_bridge_classifications"]["icd_to_executor_size_option"]),
+        )
+        self.assertEqual(
+            app_options["string"],
+            set(manifest["env_bridge_classifications"]["icd_to_executor_string_option"]),
         )
         self.assertLessEqual(
             set(manifest["config_propagation_env_fields"][i]["env"] for i in range(len(manifest["config_propagation_env_fields"]))),
@@ -8509,12 +8515,30 @@ class GpuAbiContractTest(unittest.TestCase):
             "memory_instruction_count",
             "arithmetic_instruction_count",
             "PDOCKER_GPU_SPIRV_DUMP_DIR",
+            "has_spirv_dump_dir",
+            "has_failed_spirv_dir",
+            "PDOCKER_GPU_VULKAN_STRING_DISPATCH_OPTIONS",
+            "parse_hex_string_token_value",
+            "_hex=",
             "dump_spirv_if_requested(\"original\"",
             "dump_spirv_if_requested(\"effective\"",
             "spirv_instruction_count",
             "spirv_op_class_counts",
         ]:
             self.assertIn(marker, source)
+        icd = VULKAN_ICD.read_text()
+        self.assertIn("PDOCKER_GPU_VULKAN_STRING_DISPATCH_OPTIONS", icd)
+        self.assertIn("%s_hex=%s", icd)
+        self.assertIn("invalid %s dispatch_id", icd)
+        manifest = json.loads(LLAMA_GPU_ENV_MANIFEST.read_text())
+        self.assertIn(
+            "PDOCKER_GPU_SPIRV_DUMP_DIR",
+            manifest["env_bridge_classifications"]["icd_to_executor_string_option"],
+        )
+        self.assertIn(
+            "PDOCKER_GPU_FAILED_SPIRV_DIR",
+            manifest["env_bridge_classifications"]["icd_to_executor_string_option"],
+        )
         analyzer = SPIRV_ANALYZER.read_text()
         for marker in [
             "pdocker.spirv.analysis.v1",
@@ -10018,6 +10042,11 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("actual_q6_source_hashes", compare)
         self.assertIn("skipped_non_target_actual_hashes", compare)
         self.assertIn("stale_target_hash", compare)
+        self.assertIn("def q6_probe_identity_hashes()", compare)
+        self.assertIn("event_source == expected_effective", compare)
+        self.assertIn("target_or_probe_hashes", compare)
+        self.assertIn("not any(value in actual_q6_or_skipped_hashes for value in target_or_probe_hashes)", compare)
+        self.assertNotIn("expected in Q6_K_MATVEC_SPIRV_HASHES and effective", compare)
         self.assertIn('cpu_oracle.get("kernel_hint") == "mul-mat-vec-q6-k-large"', compare)
 
     def test_q6_preflight_planner_names_evidence_and_branches_before_adb(self):

@@ -1119,6 +1119,10 @@ typedef struct {
     size_t dirty_probe_min_bytes;
     int has_spirv_probe_debug_binding;
     size_t spirv_probe_debug_binding;
+    int has_spirv_dump_dir;
+    char spirv_dump_dir[PDOCKER_GPU_VULKAN_STRING_DISPATCH_OPTION_MAX_BYTES];
+    int has_failed_spirv_dir;
+    char failed_spirv_dir[PDOCKER_GPU_VULKAN_STRING_DISPATCH_OPTION_MAX_BYTES];
     int has_source_spirv_hash;
     uint64_t source_spirv_hash;
     int has_effective_spirv_hash;
@@ -4593,6 +4597,24 @@ static int parse_u64_token_value(const char *value, uint64_t *out) {
     return 0;
 }
 
+static int parse_hex_string_token_value(const char *value, char *out, size_t out_size) {
+    if (!value || !out || out_size == 0) return -1;
+    size_t len = strlen(value);
+    if ((len % 2) != 0 || len / 2 >= out_size) return -1;
+    for (size_t i = 0; i < len / 2; ++i) {
+        char hi = value[i * 2];
+        char lo = value[i * 2 + 1];
+        int hv = (hi >= '0' && hi <= '9') ? hi - '0' : (hi >= 'a' && hi <= 'f') ? hi - 'a' + 10 : (hi >= 'A' && hi <= 'F') ? hi - 'A' + 10 : -1;
+        int lv = (lo >= '0' && lo <= '9') ? lo - '0' : (lo >= 'a' && lo <= 'f') ? lo - 'a' + 10 : (lo >= 'A' && lo <= 'F') ? lo - 'A' + 10 : -1;
+        if (hv < 0 || lv < 0) return -1;
+        char decoded = (char)((hv << 4) | lv);
+        if (decoded == '\0' || decoded == '\r' || decoded == '\n') return -1;
+        out[i] = decoded;
+    }
+    out[len / 2] = '\0';
+    return len == 0 ? -1 : 0;
+}
+
 static int parse_vulkan_dispatch_option(VulkanDispatchOptions *options, const char *token) {
     if (!options || !token || !token[0]) return -1;
     if (strncmp(token, "reconcile_dispatch_id=", 22) == 0 ||
@@ -4653,6 +4675,34 @@ static int parse_vulkan_dispatch_option(VulkanDispatchOptions *options, const ch
         const char *value = strchr(token, '=');
         if (!value || parse_u64_token_value(value + 1, &options->effective_spirv_hash) != 0) return -1;
         options->has_effective_spirv_hash = 1;
+        return 0;
+    }
+    typedef struct {
+        const char *name;
+        int *has_field;
+        char *value_field;
+        size_t value_size;
+    } VulkanStringDispatchOption;
+    VulkanStringDispatchOption string_options[] = {
+#define PDOCKER_EXEC_STRING_DISPATCH_OPTION(env_name, option_name, has_field, value_field) \
+        {#option_name, &options->has_field, options->value_field, sizeof(options->value_field)},
+        PDOCKER_GPU_VULKAN_STRING_DISPATCH_OPTIONS(PDOCKER_EXEC_STRING_DISPATCH_OPTION)
+#undef PDOCKER_EXEC_STRING_DISPATCH_OPTION
+    };
+    for (size_t i = 0; i < sizeof(string_options) / sizeof(string_options[0]); ++i) {
+        const VulkanStringDispatchOption *option = &string_options[i];
+        const size_t name_len = strlen(option->name);
+        const size_t suffix_len = 5;
+        if (strncmp(token, option->name, name_len) != 0 ||
+            strncmp(token + name_len, "_hex=", suffix_len) != 0) {
+            continue;
+        }
+        if (parse_hex_string_token_value(token + name_len + suffix_len,
+                                         option->value_field,
+                                         option->value_size) != 0) {
+            return -1;
+        }
+        *option->has_field = 1;
         return 0;
     }
     if (strncmp(token, "sender_descriptor_hash=", 23) == 0 ||
@@ -13049,8 +13099,11 @@ static void dump_failed_spirv_if_requested(
         const char *fail_stage,
         const uint32_t *shader_code,
         size_t shader_size,
-        uint64_t spirv_hash) {
-    const char *dir = getenv("PDOCKER_GPU_FAILED_SPIRV_DIR");
+        uint64_t spirv_hash,
+        const VulkanDispatchOptions *options) {
+    const char *dir = (options && options->has_failed_spirv_dir && options->failed_spirv_dir[0])
+            ? options->failed_spirv_dir
+            : getenv("PDOCKER_GPU_FAILED_SPIRV_DIR");
     if (!dir || !dir[0] || !shader_code || shader_size == 0) return;
     char path[PATH_MAX];
     snprintf(path, sizeof(path),
@@ -13069,8 +13122,11 @@ static void dump_spirv_if_requested(
         uint64_t dispatch_id,
         const uint32_t *shader_code,
         size_t shader_size,
-        const SpirvTraceSummary *summary) {
-    const char *dir = getenv("PDOCKER_GPU_SPIRV_DUMP_DIR");
+        const SpirvTraceSummary *summary,
+        const VulkanDispatchOptions *options) {
+    const char *dir = (options && options->has_spirv_dump_dir && options->spirv_dump_dir[0])
+            ? options->spirv_dump_dir
+            : getenv("PDOCKER_GPU_SPIRV_DUMP_DIR");
     if (!dir || !dir[0] || !shader_code || shader_size == 0) return;
     const uint64_t hash = summary ? summary->hash : summarize_spirv(shader_code, shader_size).hash;
     char safe_phase[48];
@@ -13578,7 +13634,7 @@ static int run_vulkan_dispatch_fd(
     const uint64_t original_spirv_hash = requested_spirv_summary.hash;
     uint64_t cpu_oracle_spirv_hash = original_spirv_hash;
     const char *cpu_oracle_spirv_hash_source = "received";
-    dump_spirv_if_requested("original", dispatch_lifecycle_id, shader_code, shader_size, &requested_spirv_summary);
+    dump_spirv_if_requested("original", dispatch_lifecycle_id, shader_code, shader_size, &requested_spirv_summary, options);
     const char *materialize_specialization_env =
         getenv("PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS");
     const int materialize_specialization_requested =
@@ -13947,7 +14003,7 @@ static int run_vulkan_dispatch_fd(
         strict_passthrough);
     spirv_summary = summarize_spirv(shader_code, shader_size);
     have_spirv_summary = 1;
-    dump_spirv_if_requested("effective", dispatch_lifecycle_id, shader_code, shader_size, &spirv_summary);
+    dump_spirv_if_requested("effective", dispatch_lifecycle_id, shader_code, shader_size, &spirv_summary, options);
     const char *source_identity_fail_reason = NULL;
     if (resolve_cpu_oracle_spirv_identity(options,
                                           original_spirv_hash,
@@ -16829,7 +16885,7 @@ cleanup:
             log_spirv_trace(&spirv_summary, bindings, binding_count, push_size,
                             gx, gy, gz, base_x, base_y, base_z);
         }
-        dump_failed_spirv_if_requested(fail_stage, shader_code, shader_size, spirv_summary.hash);
+        dump_failed_spirv_if_requested(fail_stage, shader_code, shader_size, spirv_summary.hash, options);
         uint64_t resolved_spec0 = 0;
         uint64_t resolved_spec1 = 0;
         uint64_t resolved_spec2 = 0;
