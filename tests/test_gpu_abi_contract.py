@@ -8522,6 +8522,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "_hex=",
             "dump_spirv_if_requested(\"original\"",
             "dump_spirv_if_requested(\"effective\"",
+            "generic dispatch pre-submit",
+            "no_access_binding_count",
+            "strict_graph_cache_bytes",
             "spirv_instruction_count",
             "spirv_op_class_counts",
         ]:
@@ -8530,6 +8533,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("PDOCKER_GPU_VULKAN_STRING_DISPATCH_OPTIONS", icd)
         self.assertIn("%s_hex=%s", icd)
         self.assertIn("invalid %s dispatch_id", icd)
+        self.assertIn("generic dispatch response status", icd)
+        self.assertIn("response_errno", icd)
+        self.assertIn("line_bytes", icd)
         manifest = json.loads(LLAMA_GPU_ENV_MANIFEST.read_text())
         self.assertIn(
             "PDOCKER_GPU_SPIRV_DUMP_DIR",

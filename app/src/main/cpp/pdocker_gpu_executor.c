@@ -15728,6 +15728,67 @@ static int run_vulkan_dispatch_fd(
                 (unsigned long long)dispatch_lifecycle_spirv_hash);
         fflush(stderr);
     }
+    size_t submit_active_binding_count = 0;
+    size_t submit_read_binding_count = 0;
+    size_t submit_write_binding_count = 0;
+    size_t submit_no_access_binding_count = 0;
+    size_t submit_no_access_api_buffer_bytes = 0;
+    size_t submit_no_access_range_bytes = 0;
+    for (size_t i = 0; i < binding_count; ++i) {
+        if (!active_bindings[i]) continue;
+        submit_active_binding_count++;
+        if (binding_read_needed[i]) submit_read_binding_count++;
+        if (binding_write_needed[i]) submit_write_binding_count++;
+        if (!binding_read_needed[i] && !binding_write_needed[i]) {
+            submit_no_access_binding_count++;
+            if (SIZE_MAX - submit_no_access_api_buffer_bytes < bindings[i].api_buffer_size) {
+                submit_no_access_api_buffer_bytes = SIZE_MAX;
+            } else {
+                submit_no_access_api_buffer_bytes += bindings[i].api_buffer_size;
+            }
+            if (SIZE_MAX - submit_no_access_range_bytes < bindings[i].size) {
+                submit_no_access_range_bytes = SIZE_MAX;
+            } else {
+                submit_no_access_range_bytes += bindings[i].size;
+            }
+        }
+    }
+    if (dispatch_lifecycle_log || profile_response ||
+        getenv("PDOCKER_GPU_DISPATCH_PROFILE_LOG")) {
+        fprintf(stderr,
+                "pdocker-gpu-executor: generic dispatch pre-submit: "
+                "{\"component\":\"executor\",\"event\":\"pre-submit\","
+                "\"dispatch_id\":%llu,\"spirv_hash\":\"0x%016llx\","
+                "\"dispatch\":[%u,%u,%u],\"bindings\":%zu,"
+                "\"active_bindings\":%zu,\"read_bindings\":%zu,"
+                "\"write_bindings\":%zu,\"no_access_binding_count\":%zu,"
+                "\"no_access_api_buffer_bytes\":%zu,"
+                "\"no_access_range_bytes\":%zu,"
+                "\"strict_object_graph_used\":%s,"
+                "\"strict_memories\":%zu,\"strict_buffers\":%zu,"
+                "\"strict_graph_cache_enabled\":%s,"
+                "\"strict_graph_cache_hit\":%s,"
+                "\"strict_graph_cache_bytes\":%zu,"
+                "\"strict_graph_cache_budget_bytes\":%zu}\n",
+                (unsigned long long)dispatch_lifecycle_id,
+                (unsigned long long)dispatch_lifecycle_spirv_hash,
+                gx, gy, gz,
+                binding_count,
+                submit_active_binding_count,
+                submit_read_binding_count,
+                submit_write_binding_count,
+                submit_no_access_binding_count,
+                submit_no_access_api_buffer_bytes,
+                submit_no_access_range_bytes,
+                strict_object_graph_used ? "true" : "false",
+                strict_memory_count,
+                strict_buffer_count,
+                strict_object_graph_cache_enabled ? "true" : "false",
+                strict_object_graph_cache_hit ? "true" : "false",
+                strict_object_graph_cache_bytes,
+                strict_object_graph_cache_budget_bytes);
+        fflush(stderr);
+    }
     double queue_submit_start = now_ms();
     rc = vkQueueSubmit(rt->queue, 1, &submit, fence);
     timing_queue_submit_ms = now_ms() - queue_submit_start;

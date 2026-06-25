@@ -8740,6 +8740,9 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
         size_t line_off = 0;
         char *heap_line = NULL;
         char *line = stack_line;
+        ssize_t response_last_read = 0;
+        int response_errno = 0;
+        size_t response_read_calls = 0;
         while (line_off + 1 < max_response) {
             if (line_off + 1 >= line_cap) {
                 size_t next_cap = line_cap * 2;
@@ -8761,6 +8764,9 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
             }
             char ch;
             ssize_t r = read(socket_fd, &ch, 1);
+            response_read_calls++;
+            response_last_read = r;
+            if (r < 0) response_errno = errno;
             if (r <= 0) break;
             line[line_off++] = ch;
             if (ch == '\n') break;
@@ -8773,6 +8779,26 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
             if (line_off == 0 || line[line_off - 1] != '\n') fprintf(stderr, "\n");
         }
         if (rc == 0 && strstr(line, "\"valid\":true") == NULL) rc = -EIO;
+        if (line_off == 0 || rc != 0 || getenv("PDOCKER_VULKAN_ICD_DEBUG") ||
+            env_truthy_default("PDOCKER_GPU_DISPATCH_PROFILE_LOG", false)) {
+            fprintf(stderr,
+                    "pdocker-vulkan-icd: generic dispatch response status: "
+                    "{\"component\":\"icd\",\"event\":\"response-status\","
+                    "\"dispatch_id\":%llu,\"spirv_hash\":\"0x%016llx\","
+                    "\"rc\":%d,\"line_bytes\":%zu,\"read_calls\":%zu,"
+                    "\"last_read\":%zd,\"response_errno\":%d,"
+                    "\"raw_command_len\":%zu,\"raw_command_hash\":\"0x%016llx\"}\n",
+                    (unsigned long long)dispatch_id,
+                    (unsigned long long)shader_hash,
+                    rc,
+                    line_off,
+                    response_read_calls,
+                    response_last_read,
+                    response_errno,
+                    raw_command_len,
+                    (unsigned long long)raw_command_hash);
+            fflush(stderr);
+        }
         free(heap_line);
     }
     if (lifecycle_log) {
