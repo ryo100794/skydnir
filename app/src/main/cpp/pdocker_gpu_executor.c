@@ -5004,6 +5004,8 @@ static uint64_t strict_graph_cache_key(
         if (disabled_reason) *disabled_reason = "invalid-arguments";
         return 0;
     }
+    const int compact_descriptor_window = strict_descriptor_window_compaction_enabled(
+        bindings, binding_count, active_bindings, device_local_staging);
     hash = fnv1a64_update(hash, &binding_count, sizeof(binding_count));
     hash = fnv1a64_update(hash, &device_local_staging, sizeof(device_local_staging));
     for (size_t i = 0; i < binding_count; ++i) {
@@ -5032,13 +5034,22 @@ static uint64_t strict_graph_cache_key(
         u64 = b->api_buffer_id; hash = fnv1a64_update(hash, &u64, sizeof(u64));
         u32 = binding_read_needed[i]; hash = fnv1a64_update(hash, &u32, sizeof(u32));
         u32 = binding_write_needed[i]; hash = fnv1a64_update(hash, &u32, sizeof(u32));
+        size_t cache_memory_bytes = b->api_memory_size;
+        if (compact_descriptor_window) {
+            const uint64_t descriptor_end = (uint64_t)b->api_offset + (uint64_t)descriptor_range;
+            if (descriptor_end > (uint64_t)SIZE_MAX) {
+                if (disabled_reason) *disabled_reason = "descriptor-window-too-large";
+                return 0;
+            }
+            cache_memory_bytes = (size_t)descriptor_end;
+        }
         int seen_memory = 0;
         for (size_t m = 0; m < byte_memory_count; ++m) {
             if (byte_memory_ids[m] == b->api_memory_id) {
                 seen_memory = 1;
-                if (byte_memory_sizes[m] < b->api_memory_size) {
+                if (byte_memory_sizes[m] < cache_memory_bytes) {
                     bytes -= byte_memory_sizes[m];
-                    byte_memory_sizes[m] = b->api_memory_size;
+                    byte_memory_sizes[m] = cache_memory_bytes;
                     bytes += byte_memory_sizes[m];
                 }
                 break;
@@ -5046,9 +5057,9 @@ static uint64_t strict_graph_cache_key(
         }
         if (!seen_memory && byte_memory_count < PDOCKER_GPU_MAX_VULKAN_BINDINGS) {
             byte_memory_ids[byte_memory_count] = b->api_memory_id;
-            byte_memory_sizes[byte_memory_count] = b->api_memory_size;
+            byte_memory_sizes[byte_memory_count] = cache_memory_bytes;
             byte_memory_count++;
-            bytes += b->api_memory_size;
+            bytes += cache_memory_bytes;
         }
     }
     if (active_mask) *active_mask = mask;
