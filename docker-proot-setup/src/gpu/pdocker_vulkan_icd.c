@@ -407,6 +407,7 @@ static uint64_t pdocker_vk_sampler_object_id(const PdockerVkSampler *sampler) {
     return sampler ? sampler->object_id : 0;
 }
 
+
 struct PdockerVkDescriptorBinding {
     PdockerVkBuffer *buffer;
     PdockerVkImageView *image_view;
@@ -470,6 +471,7 @@ struct PdockerVkPipelineLayout {
 };
 
 struct PdockerVkPipeline {
+    uint64_t object_id;
     PdockerVkShaderModule *shader;
     PdockerVkPipelineLayout *layout;
     uint64_t requested_feature_mask;
@@ -631,6 +633,7 @@ typedef struct {
 } PdockerVkRenderingAttachmentState;
 
 struct PdockerVkRenderPass {
+    uint64_t object_id;
     uint32_t attachment_count;
     uint32_t subpass_count;
     PdockerVkRenderPassAttachmentState attachments[PDOCKER_VK_MAX_STORAGE_BUFFERS];
@@ -642,6 +645,14 @@ struct PdockerVkRenderPass {
     bool subpass_overflow;
     uint64_t generation;
 };
+
+static uint64_t pdocker_vk_pipeline_object_id(const PdockerVkPipeline *pipeline) {
+    return pipeline ? pipeline->object_id : 0;
+}
+
+static uint64_t pdocker_vk_render_pass_object_id(const PdockerVkRenderPass *render_pass) {
+    return render_pass ? render_pass->object_id : 0;
+}
 
 struct PdockerVkFramebuffer {
     PdockerVkRenderPass *render_pass;
@@ -5180,9 +5191,9 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
             goto cleanup;
         }
         PdockerGpuVulkanGraphicsV6PipelineEntry *pipeline_entry = &pipelines[pipeline_count];
-        pipeline_entry->pipeline_id = (uint64_t)(uintptr_t)pipeline;
+        pipeline_entry->pipeline_id = pdocker_vk_pipeline_object_id(pipeline);
         pipeline_entry->layout_id = pipeline->layout ? pipeline->layout->layout_id : 0;
-        pipeline_entry->render_pass_id = (uint64_t)(uintptr_t)pipeline->render_pass;
+        pipeline_entry->render_pass_id = pdocker_vk_render_pass_object_id(pipeline->render_pass);
         pipeline_entry->shader_stage_first = (uint32_t)shader_stage_count;
         pipeline_entry->shader_stage_count = pipeline->shader_stage_count;
         pipeline_entry->topology = pipeline->topology;
@@ -13629,6 +13640,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateComputePipelines(
     for (uint32_t i = 0; i < createInfoCount; ++i) {
         PdockerVkPipeline *pipeline = pdocker_alloc_handle(sizeof(*pipeline));
         if (!pipeline) return VK_ERROR_OUT_OF_HOST_MEMORY;
+        pipeline->object_id = next_vulkan_object_generation();
         pipeline->shader = pdocker_vk_shader_module_from_handle(pCreateInfos[i].stage.module);
         pipeline->layout = pdocker_vk_pipeline_layout_from_handle(pCreateInfos[i].layout);
         pipeline->requested_feature_mask =
@@ -13799,6 +13811,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
     for (uint32_t i = 0; i < createInfoCount; ++i) {
         PdockerVkPipeline *pipeline = pdocker_alloc_handle(sizeof(*pipeline));
         if (!pipeline) return VK_ERROR_OUT_OF_HOST_MEMORY;
+        pipeline->object_id = next_vulkan_object_generation();
         pipeline->graphics = true;
         pipeline->graphics_unsupported = false;
         pipeline->requested_feature_mask =
@@ -14394,7 +14407,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateRenderPass(
         capture_render_pass_dependencies(
             rp, pCreateInfo->dependencyCount, pCreateInfo->pDependencies);
     }
-    rp->generation = next_vulkan_object_generation();
+    rp->object_id = next_vulkan_object_generation();
+    rp->generation = rp->object_id;
     *pRenderPass = pdocker_vk_render_pass_to_handle(rp);
     return VK_SUCCESS;
 }
@@ -14450,7 +14464,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateRenderPass2(
         capture_render_pass_dependencies2(
             rp, pCreateInfo->dependencyCount, pCreateInfo->pDependencies);
     }
-    rp->generation = next_vulkan_object_generation();
+    rp->object_id = next_vulkan_object_generation();
+    rp->generation = rp->object_id;
     *pRenderPass = pdocker_vk_render_pass_to_handle(rp);
     return VK_SUCCESS;
 }

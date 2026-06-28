@@ -8363,12 +8363,18 @@ class GpuAbiContractTest(unittest.TestCase):
             "static uint64_t pdocker_vk_image_object_id",
             "static uint64_t pdocker_vk_image_view_object_id",
             "static uint64_t pdocker_vk_sampler_object_id",
+            "static uint64_t pdocker_vk_pipeline_object_id",
+            "static uint64_t pdocker_vk_render_pass_object_id",
             "return sampler ? sampler->object_id : 0;",
+            "return pipeline ? pipeline->object_id : 0;",
+            "return render_pass ? render_pass->object_id : 0;",
             "memory->object_id = next_vulkan_object_generation();",
             "buffer->object_id = next_vulkan_object_generation();",
             "image->object_id = next_vulkan_object_generation();",
             "view->object_id = next_vulkan_object_generation();",
             "sampler->object_id = next_vulkan_object_generation();",
+            "pipeline->object_id = next_vulkan_object_generation();",
+            "rp->object_id = next_vulkan_object_generation();",
             "entry->resource_id = pdocker_vk_memory_object_id(memory);",
             "entry->resource_id = pdocker_vk_buffer_object_id(buffer);",
             "entry->image_id = pdocker_vk_image_object_id(image);",
@@ -8382,6 +8388,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "const uint64_t *api_buffer_ids",
             "uint64_t probe_memory_id =",
             "uint64_t probe_buffer_id =",
+            "pipeline_entry->pipeline_id = pdocker_vk_pipeline_object_id(pipeline);",
+            "pipeline_entry->render_pass_id = pdocker_vk_render_pass_object_id(pipeline->render_pass);",
         ]:
             self.assertIn(marker, source)
         for forbidden in [
@@ -8412,6 +8420,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "sampler_entries[i].sampler_id = (uint64_t)(uintptr_t)sampler;",
             "descriptor->resource_id = (uint64_t)(uintptr_t)binding->buffer;",
             "resource_id = (uint64_t)(uintptr_t)src->image_view;",
+            "pipeline_entry->pipeline_id = (uint64_t)(uintptr_t)pipeline;",
+            "pipeline_entry->render_pass_id = (uint64_t)(uintptr_t)pipeline->render_pass;",
         ]:
             self.assertNotIn(direct_core_transport_id, source)
 
