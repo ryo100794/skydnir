@@ -265,10 +265,11 @@ Implementation note:
 - The debug binding is set `0`, binding `5`, transported as a normal
   `VULKAN_DISPATCH_V4` storage-buffer binding.  This is diagnostic transport,
   not a new command ABI.
-- `scripts/parse-q6k-probe-u32.py` parses the resulting
-  `u32_after_dispatch` / `u32_after_writeback` records.  A passing parse means
-  the six expected Q6 probe sites wrote their candidate/role metadata to the
-  debug SSBO; it does not by itself prove numeric correctness.
+- Fresh Q6 probe evidence is parsed by the manifest-driven logic in
+  `scripts/android-llama-gpu-compare.sh`, using `instrumentation.probe_writes`
+  as the expected metadata source.  `scripts/parse-q6k-probe-u32.py` remains
+  only for archived fixed-layout fixtures and is not authoritative for current
+  Q6 probe runs.
 - `docs/test/llama-gpu-ngl1-q6-write-probe-abiopt-adb42493-20260524T003258Z.json`
   reached the executable write-probe shader (`0xfd2949c11ffa33e9`).  The
   parsed u32 evidence shows the tail branch was not executed for that dispatch,

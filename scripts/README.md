@@ -155,7 +155,7 @@ remain gitignored and intentionally absent from the inventory.
 | `scripts/container-direct-probe.sh` | `device-helper` | Android/device, GPU, llama, or runtime benchmark/smoke helper. |
 | `scripts/gguf-tensor-range-index.py` | `developer-helper` | Generate GGUF tensor/range diagnostic indexes for memory-pager and MoE residency investigations. |
 | `scripts/instrument-spirv-noop-probe.py` | `test-helper` | Create valid whole-module SPIR-V no-op or Q6K probe instrumentation without mutating the Vulkan dispatch ABI. |
-| `scripts/parse-q6k-probe-u32.py` | `test-helper` | Parse deterministic Q6_K debug-SSBO u32 probe records from llama GPU artifacts. |
+| `scripts/parse-q6k-probe-u32.py` | `test-helper` | Legacy fixed-layout Q6_K debug-SSBO parser for archived artifacts; live runs use `android-llama-gpu-compare.sh`. |
 | `scripts/skydnir-test-driver.py` | `stable-entrypoint` | Host-side verification/test driver or static contract gate. |
 | `scripts/plan-llama-gpu-q6-run.py` | `test-helper` | Create a Q6 Vulkan bridge pre-flight run plan without touching ADB. |
 | `scripts/prepare-q6k-noop-probe.sh` | `test-helper` | Prepare deterministic Q6K no-op/probe SPIR-V bundles for the next device run. |

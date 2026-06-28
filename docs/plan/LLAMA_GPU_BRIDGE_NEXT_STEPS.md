@@ -589,9 +589,10 @@ For Q6_K executable probe writes, `scripts/prepare-q6k-noop-probe.sh
 --probe-writes` produces a module with debug-SSBO records and leaves the
 V4 schema unchanged.  The executor now emits `debug_probe_binding`,
 `u32_after_dispatch`, and `u32_after_writeback` samples for the configured
-debug binding.  The next device-side evidence run should inspect those u32
-records with `scripts/parse-q6k-probe-u32.py` before adding more shader
-substitutions.
+debug binding.  Fresh device-side evidence must be interpreted by the
+manifest-driven parser embedded in `scripts/android-llama-gpu-compare.sh`;
+`scripts/parse-q6k-probe-u32.py` is retained only for archived fixed-layout
+fixtures.
 `scripts/analyze-spirv.py` also emits a control-flow graph with function,
 basic-block, successor, store-site, and probe-candidate inventories.  Do not
 try to submit arbitrary SPIR-V fragments to Vulkan: the valid-module boundary
@@ -1920,18 +1921,10 @@ not `WorkgroupSize.y/z`; the final lane-0 store loops over both Q6 row slots.
 Do not patch `SpecId 1` into LocalSize.y.
 
 The compare parser now treats the existing Q6 debug binding as a staged trace,
-not only as a final-store trace.  The known instrumented slots are:
-
-- candidate 39 / role 1: tail pre-reduction store;
-- candidate 49 / role 2: tail reduction store;
-- candidate 61 / role 3: tail accumulator-A add store;
-- candidate 63 / role 3: tail accumulator-B add store;
-- candidate 64 / role 4: tail final store;
-- candidate 105 / role 1: full pre-reduction store;
-- candidate 115 / role 2: full reduction store;
-- candidate 127 / role 3: full accumulator-A add store;
-- candidate 129 / role 3: full accumulator-B add store;
-- candidate 130 / role 4: full final store.
+not only as a final-store trace.  Active runs must take candidate, role, slot,
+and lane-trace layout from `instrumentation.probe_writes` in the effective
+probe manifest.  The older fixed-slot candidate list is historical evidence
+only and must not be used as the authoritative decoder for new runs.
 
 The next fresh run should use this staged trace to decide whether the first
 device divergence is present before reduction, during reduction, or only at the
@@ -1940,9 +1933,10 @@ replacement and it does not modify llama.cpp, Dockerfile, model, prompt, or
 tensor bytes.
 
 Offline guard:
-`scripts/maintenance/analyze-q6-stage-trace-spvasm.py` statically checks the
-instrumented SPIR-V disassembly for these debug binding-5 stage slots.  The
-latest offline result
+`scripts/maintenance/analyze-q6-stage-trace-spvasm.py` is a legacy fixed-layout
+static analyzer for archived disassemblies.  Live Q6 probe validation should
+use the effective probe manifest and compare artifact instead.  The latest
+offline historical result
 `docs/test/q6-stage-trace-static-analysis-latest.json` passes for
 `/tmp/q6-effective-barrier.spvasm`: all ten expected stage records are present.
 Non-final stage records carry candidate/role/value fields only; final-store

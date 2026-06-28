@@ -257,6 +257,9 @@ def parse_spvasm(text: str) -> dict[str, Any]:
 
     return {
         "schema": "skydnir.q6.stage-trace-spvasm.v1",
+        "expectation_source": "legacy-fixed-layout",
+        "legacy_only": True,
+        "authoritative_for_live_q6_probe": False,
         "debug_binding_variable_ids": sorted(k for k, v in bindings.items() if v == 5),
         "debug_store_count": len(stores),
         "dynamic_debug_store_count": len(dynamic_stores),

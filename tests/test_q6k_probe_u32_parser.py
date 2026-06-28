@@ -90,6 +90,9 @@ class Q6KProbeU32ParserTest(unittest.TestCase):
         result, report = self.run_parser(payload)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(report["schema"], "pdocker.q6k.debug-u32-probe-report.v2")
+        self.assertEqual(report["expectation_source"], "legacy-fixed-layout")
+        self.assertTrue(report["legacy_only"])
+        self.assertFalse(report["authoritative_for_live_q6_probe"])
         self.assertEqual(report["summary"], "pass")
         self.assertEqual(report["debug_binding_count"], 1)
         records = report["bindings"][0]["records"]

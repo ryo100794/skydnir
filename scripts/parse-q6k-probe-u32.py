@@ -432,6 +432,9 @@ def parse_artifact(data: Any) -> dict[str, Any]:
         failures.append("no debug_probe_binding with u32_after_dispatch was found")
     return {
         "schema": "pdocker.q6k.debug-u32-probe-report.v2",
+        "expectation_source": "legacy-fixed-layout",
+        "legacy_only": True,
+        "authoritative_for_live_q6_probe": False,
         "debug_binding_count": len(bindings),
         "expected_record_count": len(EXPECTED_RECORDS),
         "bindings": parsed,
