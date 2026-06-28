@@ -8118,6 +8118,35 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("return (char *)buffer->memory->map + (size_t)absolute;", buffer_ptr)
         self.assertNotIn("buffer->memory->map + buffer->memory_offset + offset", buffer_ptr)
 
+    def test_vulkan_icd_copy_alias_offsets_are_overflow_guarded(self):
+        source = VULKAN_ICD.read_text()
+        dispatch_body = source.split("static int send_generic_vulkan_dispatch_op", 1)[1].split(
+            "static int send_generic_vulkan_dispatch", 1
+        )[0]
+        overlap_body = source.split("static bool ranges_overlap", 1)[1].split(
+            "static bool resolve_copy_alias", 1
+        )[0]
+        resolve_body = source.split("static bool resolve_copy_alias", 1)[1].split(
+            "static void invalidate_copy_aliases", 1
+        )[0]
+        add_alias_body = source.split("static void add_copy_alias", 1)[1].split(
+            "static bool copy_alias_candidate", 1
+        )[0]
+        copy_body = source.split("static void execute_recorded_copy_op", 1)[1].split(
+            "static void execute_recorded_image_copy_op", 1
+        )[0]
+        self.assertIn("descriptor absolute offset overflow", dispatch_body)
+        self.assertIn("checked_add_u64((uint64_t)binding->buffer->memory_offset", dispatch_body)
+        self.assertNotIn("binding->buffer->memory_offset + binding->offset", dispatch_body)
+        self.assertIn("return true;", overlap_body)
+        self.assertIn("!checked_add_u64((uint64_t)a_offset", overlap_body)
+        self.assertIn("!checked_add_u64((uint64_t)alias->src_offset", resolve_body)
+        self.assertIn("resolved_offset > (uint64_t)alias->src_memory->size", resolve_body)
+        self.assertIn("size > (VkDeviceSize)src_memory->size - src_offset", add_alias_body)
+        self.assertIn("alias_memory = NULL;", copy_body)
+        self.assertIn("checked_add_u64((uint64_t)op->src->memory_offset", copy_body)
+        self.assertNotIn("op->src->memory_offset + op->region.srcOffset", copy_body)
+
     def test_vulkan_dynamic_whole_size_descriptor_uses_effective_vkbuffer_tail(self):
         source = VULKAN_ICD.read_text()
         self.assertIn("VK_WHOLE_SIZE is evaluated after applying the", source)

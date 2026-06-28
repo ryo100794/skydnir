@@ -7895,6 +7895,7 @@ static bool image_mip_extent(const PdockerVkImage *image,
 static bool descriptor_type_supported_by_v5_object_transport(VkDescriptorType type);
 static VkSubgroupFeatureFlags advertised_subgroup_operations(void);
 static uint32_t advertised_subgroup_size(void);
+static bool checked_add_u64(uint64_t a, uint64_t b, uint64_t *out);
 static bool resolve_copy_alias(PdockerVkBuffer *buffer,
                                VkDeviceSize offset,
                                VkDeviceSize size,
@@ -8097,7 +8098,21 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
                 api_descriptor_array_elements[binding_count] = array_element;
                 bindings[binding_count] = i;
                 PdockerVkMemory *dispatch_memory = binding->buffer->memory;
-                VkDeviceSize dispatch_offset = binding->buffer->memory_offset + binding->offset;
+                uint64_t dispatch_offset_u64 = 0;
+                if (!checked_add_u64((uint64_t)binding->buffer->memory_offset,
+                                     (uint64_t)binding->offset,
+                                     &dispatch_offset_u64)) {
+                    fprintf(stderr,
+                            "pdocker-vulkan-icd: generic dispatch rejected: descriptor absolute offset overflow dispatch_id=%llu set=%u binding=%u array=%u memory_offset=%llu offset=%llu\n",
+                            (unsigned long long)dispatch_id,
+                            set_index,
+                            i,
+                            array_element,
+                            (unsigned long long)binding->buffer->memory_offset,
+                            (unsigned long long)binding->offset);
+                    return -EOVERFLOW;
+                }
+                VkDeviceSize dispatch_offset = (VkDeviceSize)dispatch_offset_u64;
                 bool alias_hit = false;
                 if (copy_alias_enabled()) {
                     alias_hit = resolve_copy_alias(binding->buffer, binding->offset, bytes,
@@ -8975,7 +8990,13 @@ static void *image_ptr(PdockerVkImage *image,
 static bool ranges_overlap(VkDeviceSize a_offset, VkDeviceSize a_size,
                            VkDeviceSize b_offset, VkDeviceSize b_size) {
     if (a_size == 0 || b_size == 0) return false;
-    return a_offset < b_offset + b_size && b_offset < a_offset + a_size;
+    uint64_t a_end = 0;
+    uint64_t b_end = 0;
+    if (!checked_add_u64((uint64_t)a_offset, (uint64_t)a_size, &a_end) ||
+        !checked_add_u64((uint64_t)b_offset, (uint64_t)b_size, &b_end)) {
+        return true;
+    }
+    return (uint64_t)a_offset < b_end && (uint64_t)b_offset < a_end;
 }
 
 static bool resolve_copy_alias(PdockerVkBuffer *buffer,
@@ -8990,8 +9011,16 @@ static bool resolve_copy_alias(PdockerVkBuffer *buffer,
         if (offset < alias->dst_offset) continue;
         VkDeviceSize delta = offset - alias->dst_offset;
         if (delta > alias->size || size > alias->size - delta) continue;
+        uint64_t resolved_offset = 0;
+        if (!checked_add_u64((uint64_t)alias->src_offset,
+                             (uint64_t)delta,
+                             &resolved_offset) ||
+            resolved_offset > (uint64_t)alias->src_memory->size ||
+            (uint64_t)size > (uint64_t)alias->src_memory->size - resolved_offset) {
+            continue;
+        }
         *src_memory = alias->src_memory;
-        *src_offset = alias->src_offset + delta;
+        *src_offset = (VkDeviceSize)resolved_offset;
         return true;
     }
     return false;
@@ -9018,6 +9047,13 @@ static void add_copy_alias(PdockerVkBuffer *dst,
                            PdockerVkMemory *src_memory,
                            VkDeviceSize src_offset) {
     if (!dst || !src_memory || size == 0) return;
+    if (dst_offset > (VkDeviceSize)dst->size ||
+        size > (VkDeviceSize)dst->size - dst_offset ||
+        src_offset > (VkDeviceSize)src_memory->size ||
+        size > (VkDeviceSize)src_memory->size - src_offset) {
+        invalidate_copy_aliases(dst, dst_offset, size);
+        return;
+    }
     invalidate_copy_aliases(dst, dst_offset, size);
     if (dst->alias_count >= PDOCKER_VK_MAX_COPY_ALIASES) {
         memmove(&dst->aliases[0], &dst->aliases[1],
@@ -9060,9 +9096,19 @@ static void execute_recorded_copy_op(PdockerVkCopyOp *op, PdockerVkCopyStats *st
         return;
     }
     PdockerVkMemory *alias_memory = op->src->memory;
-    VkDeviceSize alias_offset = op->src->memory_offset + op->region.srcOffset;
-    (void)resolve_copy_alias(op->src, op->region.srcOffset, op->region.size,
-                             &alias_memory, &alias_offset);
+    uint64_t alias_offset_u64 = 0;
+    VkDeviceSize alias_offset = 0;
+    if (!checked_add_u64((uint64_t)op->src->memory_offset,
+                         (uint64_t)op->region.srcOffset,
+                         &alias_offset_u64) ||
+        alias_offset_u64 > (uint64_t)op->src->memory->size ||
+        (uint64_t)op->region.size > (uint64_t)op->src->memory->size - alias_offset_u64) {
+        alias_memory = NULL;
+    } else {
+        alias_offset = (VkDeviceSize)alias_offset_u64;
+        (void)resolve_copy_alias(op->src, op->region.srcOffset, op->region.size,
+                                 &alias_memory, &alias_offset);
+    }
     if (copy_alias_candidate(alias_memory)) {
         add_copy_alias(op->dst, op->region.dstOffset, op->region.size,
                        alias_memory, alias_offset);
