@@ -3517,9 +3517,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("eventCount > 1", icd)
         self.assertIn("command_op_is_graphics_frame_op", icd)
         self.assertIn("case PDOCKER_VK_COMMAND_IMAGE_BARRIER:", icd)
-        self.assertIn("sizeof(image_barriers[0]) * image_barrier_count", icd)
-        self.assertIn("sizeof(memory_barriers[0]) * memory_barrier_count", icd)
-        self.assertIn("sizeof(buffer_barriers[0]) * buffer_barrier_count", icd)
+        self.assertIn("(size_t)frame_header->v61.image_barrier_table_size", icd)
+        self.assertIn("(size_t)frame_header->v61.memory_barrier_table_size", icd)
+        self.assertIn("(size_t)frame_header->v61.buffer_barrier_table_size", icd)
         self.assertIn("normalize_image_subresource_range(src->image, &src->range, &normalized_range)", icd)
         self.assertIn("dst->level_count = normalized_range.levelCount", icd)
         self.assertIn("dst->layer_count = normalized_range.layerCount", icd)
@@ -8248,6 +8248,7 @@ class GpuAbiContractTest(unittest.TestCase):
         v51_body = source.split("static int send_generic_vulkan_dispatch_v5_1_op", 1)[1].split("static size_t descriptor_binding_size", 1)[0]
         capacity_block = v51_body.split("size_t resource_table_bytes = 0;", 1)[1].split("unsigned char *frame", 1)[0]
         v51_hash_append_block = v51_body.split("header->resource_hash = fnv1a64_bytes(resources,", 1)[1].split("rc = send_vulkan_dispatch_v5_frame_with_fds", 1)[0]
+        graphics_hash_block = graphics_body.split("#undef APPEND_GRAPHICS_TABLE", 1)[1].split("header->frame_size = cursor;", 1)[0]
 
         self.assertIn("if (a > SIZE_MAX - b) return false;", helpers)
         self.assertIn("if (a != 0 && b > SIZE_MAX / a) return false;", helpers)
@@ -8276,6 +8277,18 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(marker, v51_hash_append_block)
         self.assertNotIn("sizeof(resources[0]) * resource_count", v51_hash_append_block)
         self.assertNotIn("sizeof(descriptors[0]) * descriptor_count", v51_hash_append_block)
+
+        for marker in [
+            "(size_t)frame_header->v61.dynamic_offset_table_size",
+            "(size_t)frame_header->v61.push_constant_metadata_table_size",
+            "(size_t)frame_header_v66->v66.color_blend_state_table_size",
+            "(size_t)frame_header_v610->v610.buffer_image_copy_table_size",
+            "(size_t)frame_header_v616->v616.clear_attachments_command_table_size",
+            "(size_t)frame_header_v621->v621.submit_info_table_size",
+            "(size_t)frame_header_v623->v623.tessellation_state_table_size",
+        ]:
+            self.assertIn(marker, graphics_hash_block)
+        self.assertNotRegex(graphics_hash_block, r"sizeof\([^\n]+?\) \* [A-Za-z0-9_]+_count")
 
     def test_vulkan_copy_query_results_destination_range_is_guarded(self):
         source = VULKAN_ICD.read_text()

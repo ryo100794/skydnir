@@ -7164,108 +7164,108 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     frame_header->v61.extension_hash = 1469598103934665603ull;
     frame_header->v61.extension_hash = fnv1a64_update_bytes(
         frame_header->v61.extension_hash, dynamic_offsets,
-        sizeof(dynamic_offsets[0]) * dynamic_offset_count);
+        (size_t)frame_header->v61.dynamic_offset_table_size);
     frame_header->v61.extension_hash = fnv1a64_update_bytes(
         frame_header->v61.extension_hash, push_metadata,
-        sizeof(push_metadata[0]) * push_metadata_count);
+        (size_t)frame_header->v61.push_constant_metadata_table_size);
     frame_header->v61.extension_hash = fnv1a64_update_bytes(
         frame_header->v61.extension_hash, image_barriers,
-        sizeof(image_barriers[0]) * image_barrier_count);
+        (size_t)frame_header->v61.image_barrier_table_size);
     frame_header->v61.extension_hash = fnv1a64_update_bytes(
         frame_header->v61.extension_hash, memory_barriers,
-        sizeof(memory_barriers[0]) * memory_barrier_count);
+        (size_t)frame_header->v61.memory_barrier_table_size);
     frame_header->v61.extension_hash = fnv1a64_update_bytes(
         frame_header->v61.extension_hash, buffer_barriers,
-        sizeof(buffer_barriers[0]) * buffer_barrier_count);
+        (size_t)frame_header->v61.buffer_barrier_table_size);
     if (need_v62_specialization || need_v63_depth_stencil || need_v64_resolve_attachment || need_v65_static_pipeline_state || need_v66_color_blend_state || need_v67_viewport_scissor_state || need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v62->v62.specialization_entry_table_hash = fnv1a64_bytes(
-            specialization_entries, sizeof(specialization_entries[0]) * specialization_entry_count);
+            specialization_entries, (size_t)frame_header_v62->v62.specialization_entry_table_size);
         frame_header_v62->v62.extension_hash = frame_header_v62->v62.specialization_entry_table_hash;
     }
     if (need_v63_depth_stencil || need_v64_resolve_attachment || need_v65_static_pipeline_state || need_v66_color_blend_state || need_v67_viewport_scissor_state || need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v63->v63.depth_stencil_state_table_hash = fnv1a64_bytes(
-            depth_stencil_states, sizeof(depth_stencil_states[0]) * depth_stencil_state_count);
+            depth_stencil_states, (size_t)frame_header_v63->v63.depth_stencil_state_table_size);
         frame_header_v63->v63.extension_hash = frame_header_v63->v63.depth_stencil_state_table_hash;
     }
     if (need_v64_resolve_attachment || need_v65_static_pipeline_state || need_v66_color_blend_state || need_v67_viewport_scissor_state || need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v64->v64.resolve_attachment_table_hash = fnv1a64_bytes(
-            resolve_attachments, sizeof(resolve_attachments[0]) * resolve_attachment_count);
+            resolve_attachments, (size_t)frame_header_v64->v64.resolve_attachment_table_size);
         frame_header_v64->v64.extension_hash = frame_header_v64->v64.resolve_attachment_table_hash;
     }
     if (need_v65_static_pipeline_state || need_v66_color_blend_state || need_v67_viewport_scissor_state || need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v65->v65.static_pipeline_state_table_hash = fnv1a64_bytes(
-            static_pipeline_states, sizeof(static_pipeline_states[0]) * static_pipeline_state_count);
+            static_pipeline_states, (size_t)frame_header_v65->v65.static_pipeline_state_table_size);
         frame_header_v65->v65.extension_hash = frame_header_v65->v65.static_pipeline_state_table_hash;
     }
     if (need_v66_color_blend_state || need_v67_viewport_scissor_state || need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v66->v66.color_blend_state_table_hash = fnv1a64_bytes(
-            color_blend_states, sizeof(color_blend_states[0]) * color_blend_state_count);
+            color_blend_states, (size_t)frame_header_v66->v66.color_blend_state_table_size);
         frame_header_v66->v66.color_blend_attachment_table_hash = fnv1a64_bytes(
-            color_blend_attachments, sizeof(color_blend_attachments[0]) * color_blend_attachment_count);
+            color_blend_attachments, (size_t)frame_header_v66->v66.color_blend_attachment_table_size);
         frame_header_v66->v66.extension_hash = 1469598103934665603ull;
         frame_header_v66->v66.extension_hash = fnv1a64_update_bytes(
             frame_header_v66->v66.extension_hash, color_blend_states,
-            sizeof(color_blend_states[0]) * color_blend_state_count);
+            (size_t)frame_header_v66->v66.color_blend_state_table_size);
         frame_header_v66->v66.extension_hash = fnv1a64_update_bytes(
             frame_header_v66->v66.extension_hash, color_blend_attachments,
-            sizeof(color_blend_attachments[0]) * color_blend_attachment_count);
+            (size_t)frame_header_v66->v66.color_blend_attachment_table_size);
     }
     if (need_v67_viewport_scissor_state || need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v67->v67.viewport_scissor_state_table_hash = fnv1a64_bytes(
-            viewport_scissor_states, sizeof(viewport_scissor_states[0]) * viewport_scissor_state_count);
+            viewport_scissor_states, (size_t)frame_header_v67->v67.viewport_scissor_state_table_size);
         frame_header_v67->v67.viewport_table_hash = fnv1a64_bytes(
-            viewport_entries, sizeof(viewport_entries[0]) * viewport_entry_count);
+            viewport_entries, (size_t)frame_header_v67->v67.viewport_table_size);
         frame_header_v67->v67.scissor_table_hash = fnv1a64_bytes(
-            scissor_entries, sizeof(scissor_entries[0]) * scissor_entry_count);
+            scissor_entries, (size_t)frame_header_v67->v67.scissor_table_size);
         frame_header_v67->v67.extension_hash = 1469598103934665603ull;
         frame_header_v67->v67.extension_hash = fnv1a64_update_bytes(
             frame_header_v67->v67.extension_hash, viewport_scissor_states,
-            sizeof(viewport_scissor_states[0]) * viewport_scissor_state_count);
+            (size_t)frame_header_v67->v67.viewport_scissor_state_table_size);
         frame_header_v67->v67.extension_hash = fnv1a64_update_bytes(
             frame_header_v67->v67.extension_hash, viewport_entries,
-            sizeof(viewport_entries[0]) * viewport_entry_count);
+            (size_t)frame_header_v67->v67.viewport_table_size);
         frame_header_v67->v67.extension_hash = fnv1a64_update_bytes(
             frame_header_v67->v67.extension_hash, scissor_entries,
-            sizeof(scissor_entries[0]) * scissor_entry_count);
+            (size_t)frame_header_v67->v67.scissor_table_size);
     }
     if (need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v68->v68.indirect_draw_table_hash = fnv1a64_bytes(
-            indirect_draws, sizeof(indirect_draws[0]) * indirect_draw_count);
+            indirect_draws, (size_t)frame_header_v68->v68.indirect_draw_table_size);
         frame_header_v68->v68.extension_hash = frame_header_v68->v68.indirect_draw_table_hash;
     }
     if (need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v69->v69.buffer_copy_table_hash = fnv1a64_bytes(
-            buffer_copies, sizeof(buffer_copies[0]) * buffer_copy_count);
+            buffer_copies, (size_t)frame_header_v69->v69.buffer_copy_table_size);
         frame_header_v69->v69.extension_hash = frame_header_v69->v69.buffer_copy_table_hash;
     }
     if (need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v610->v610.buffer_image_copy_table_hash = fnv1a64_bytes(
-            buffer_image_copies, sizeof(buffer_image_copies[0]) * buffer_image_copy_count);
+            buffer_image_copies, (size_t)frame_header_v610->v610.buffer_image_copy_table_size);
         frame_header_v610->v610.image_copy_table_hash = fnv1a64_bytes(
-            image_copies, sizeof(image_copies[0]) * image_copy_count);
+            image_copies, (size_t)frame_header_v610->v610.image_copy_table_size);
         frame_header_v610->v610.extension_hash = 1469598103934665603ull;
         frame_header_v610->v610.extension_hash = fnv1a64_update_bytes(
             frame_header_v610->v610.extension_hash, buffer_image_copies,
-            sizeof(buffer_image_copies[0]) * buffer_image_copy_count);
+            (size_t)frame_header_v610->v610.buffer_image_copy_table_size);
         frame_header_v610->v610.extension_hash = fnv1a64_update_bytes(
             frame_header_v610->v610.extension_hash, image_copies,
-            sizeof(image_copies[0]) * image_copy_count);
+            (size_t)frame_header_v610->v610.image_copy_table_size);
     }
     if (need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v611->v611.fill_buffer_table_hash = fnv1a64_bytes(
-            fill_buffers, sizeof(fill_buffers[0]) * fill_buffer_count);
+            fill_buffers, (size_t)frame_header_v611->v611.fill_buffer_table_size);
         frame_header_v611->v611.update_buffer_table_hash = fnv1a64_bytes(
-            update_buffers, sizeof(update_buffers[0]) * update_buffer_count);
+            update_buffers, (size_t)frame_header_v611->v611.update_buffer_table_size);
         frame_header_v611->v611.update_payload_data_hash = update_payload_data_size
             ? fnv1a64_bytes(frame + update_payload_data_offset, (size_t)update_payload_data_size)
             : 1469598103934665603ull;
         frame_header_v611->v611.extension_hash = 1469598103934665603ull;
         frame_header_v611->v611.extension_hash = fnv1a64_update_bytes(
             frame_header_v611->v611.extension_hash, fill_buffers,
-            sizeof(fill_buffers[0]) * fill_buffer_count);
+            (size_t)frame_header_v611->v611.fill_buffer_table_size);
         frame_header_v611->v611.extension_hash = fnv1a64_update_bytes(
             frame_header_v611->v611.extension_hash, update_buffers,
-            sizeof(update_buffers[0]) * update_buffer_count);
+            (size_t)frame_header_v611->v611.update_buffer_table_size);
         if (update_payload_data_size) {
             frame_header_v611->v611.extension_hash = fnv1a64_update_bytes(
                 frame_header_v611->v611.extension_hash, frame + update_payload_data_offset,
@@ -7274,83 +7274,83 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     }
     if (need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v612->v612.clear_color_image_table_hash = fnv1a64_bytes(
-            clear_color_images, sizeof(clear_color_images[0]) * clear_color_image_count);
+            clear_color_images, (size_t)frame_header_v612->v612.clear_color_image_table_size);
         frame_header_v612->v612.extension_hash = frame_header_v612->v612.clear_color_image_table_hash;
     }
     if (need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v613->v613.clear_depth_stencil_image_table_hash = fnv1a64_bytes(
-            clear_depth_stencil_images, sizeof(clear_depth_stencil_images[0]) * clear_depth_stencil_image_count);
+            clear_depth_stencil_images, (size_t)frame_header_v613->v613.clear_depth_stencil_image_table_size);
         frame_header_v613->v613.extension_hash = frame_header_v613->v613.clear_depth_stencil_image_table_hash;
     }
     if (need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v614->v614.resolve_image_table_hash = fnv1a64_bytes(
-            resolve_images, sizeof(resolve_images[0]) * resolve_image_count);
+            resolve_images, (size_t)frame_header_v614->v614.resolve_image_table_size);
         frame_header_v614->v614.extension_hash = frame_header_v614->v614.resolve_image_table_hash;
     }
     if (need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v615->v615.blit_image_table_hash = fnv1a64_bytes(
-            blit_images, sizeof(blit_images[0]) * blit_image_count);
+            blit_images, (size_t)frame_header_v615->v615.blit_image_table_size);
         frame_header_v615->v615.extension_hash = frame_header_v615->v615.blit_image_table_hash;
     }
     if (need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v616->v616.clear_attachments_command_table_hash = fnv1a64_bytes(
-            clear_attachments_commands, sizeof(clear_attachments_commands[0]) * clear_attachments_command_count);
+            clear_attachments_commands, (size_t)frame_header_v616->v616.clear_attachments_command_table_size);
         frame_header_v616->v616.clear_attachment_table_hash = fnv1a64_bytes(
-            clear_attachments, sizeof(clear_attachments[0]) * clear_attachment_count);
+            clear_attachments, (size_t)frame_header_v616->v616.clear_attachment_table_size);
         frame_header_v616->v616.clear_rect_table_hash = fnv1a64_bytes(
-            clear_rects, sizeof(clear_rects[0]) * clear_rect_count);
+            clear_rects, (size_t)frame_header_v616->v616.clear_rect_table_size);
         frame_header_v616->v616.extension_hash = 1469598103934665603ull;
         frame_header_v616->v616.extension_hash = fnv1a64_update_bytes(
             frame_header_v616->v616.extension_hash, clear_attachments_commands,
-            sizeof(clear_attachments_commands[0]) * clear_attachments_command_count);
+            (size_t)frame_header_v616->v616.clear_attachments_command_table_size);
         frame_header_v616->v616.extension_hash = fnv1a64_update_bytes(
             frame_header_v616->v616.extension_hash, clear_attachments,
-            sizeof(clear_attachments[0]) * clear_attachment_count);
+            (size_t)frame_header_v616->v616.clear_attachment_table_size);
         frame_header_v616->v616.extension_hash = fnv1a64_update_bytes(
             frame_header_v616->v616.extension_hash, clear_rects,
-            sizeof(clear_rects[0]) * clear_rect_count);
+            (size_t)frame_header_v616->v616.clear_rect_table_size);
     }
     if (need_v617_query || need_v619_submit_sync) {
         frame_header_v617->v617.query_command_table_hash = fnv1a64_bytes(
-            query_commands, sizeof(query_commands[0]) * query_command_count);
+            query_commands, (size_t)frame_header_v617->v617.query_command_table_size);
         frame_header_v617->v617.extension_hash = frame_header_v617->v617.query_command_table_hash;
     }
     if (need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v618->v618.copy_query_result_table_hash = fnv1a64_bytes(
-            copy_query_results, sizeof(copy_query_results[0]) * copy_query_result_count);
+            copy_query_results, (size_t)frame_header_v618->v618.copy_query_result_table_size);
         frame_header_v618->v618.extension_hash = frame_header_v618->v618.copy_query_result_table_hash;
     }
     if (need_v619_submit_sync) {
         frame_header_v619->v619.submit_sync_table_hash = fnv1a64_bytes(
-            submit_syncs, sizeof(submit_syncs[0]) * submit_sync_count);
+            submit_syncs, (size_t)frame_header_v619->v619.submit_sync_table_size);
         frame_header_v619->v619.extension_hash = frame_header_v619->v619.submit_sync_table_hash;
     }
     if (need_v620_image_layout_range) {
         frame_header_v620->v620.image_layout_range_table_hash = fnv1a64_bytes(
-            image_layout_ranges, sizeof(image_layout_ranges[0]) * image_layout_range_count);
+            image_layout_ranges, (size_t)frame_header_v620->v620.image_layout_range_table_size);
         frame_header_v620->v620.extension_hash = frame_header_v620->v620.image_layout_range_table_hash;
     }
     if (need_v621_submit2_metadata) {
         frame_header_v621->v621.submit_info_table_hash = fnv1a64_bytes(
-            submit_infos, sizeof(submit_infos[0]) * submit_info_count);
+            submit_infos, (size_t)frame_header_v621->v621.submit_info_table_size);
         frame_header_v621->v621.submit_sync_info_table_hash = fnv1a64_bytes(
-            submit_sync_infos, sizeof(submit_sync_infos[0]) * submit_sync_info_count);
+            submit_sync_infos, (size_t)frame_header_v621->v621.submit_sync_info_table_size);
         frame_header_v621->v621.extension_hash = 1469598103934665603ull;
         frame_header_v621->v621.extension_hash = fnv1a64_update_bytes(
             frame_header_v621->v621.extension_hash, submit_infos,
-            sizeof(submit_infos[0]) * submit_info_count);
+            (size_t)frame_header_v621->v621.submit_info_table_size);
         frame_header_v621->v621.extension_hash = fnv1a64_update_bytes(
             frame_header_v621->v621.extension_hash, submit_sync_infos,
-            sizeof(submit_sync_infos[0]) * submit_sync_info_count);
+            (size_t)frame_header_v621->v621.submit_sync_info_table_size);
     }
     if (need_v622_multisample_state) {
         frame_header_v622->v622.multisample_state_table_hash = fnv1a64_bytes(
-            multisample_states, sizeof(multisample_states[0]) * multisample_state_count);
+            multisample_states, (size_t)frame_header_v622->v622.multisample_state_table_size);
         frame_header_v622->v622.extension_hash = frame_header_v622->v622.multisample_state_table_hash;
     }
     if (need_v623_tessellation_state) {
         frame_header_v623->v623.tessellation_state_table_hash = fnv1a64_bytes(
-            tessellation_states, sizeof(tessellation_states[0]) * tessellation_state_count);
+            tessellation_states, (size_t)frame_header_v623->v623.tessellation_state_table_size);
         frame_header_v623->v623.extension_hash = frame_header_v623->v623.tessellation_state_table_hash;
     }
     header->frame_size = cursor;
