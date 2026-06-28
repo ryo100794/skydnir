@@ -8181,6 +8181,22 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("offset64 > (uint64_t)SIZE_MAX", query_body)
         self.assertNotIn("(size_t)i * (size_t)stride", query_body)
 
+    def test_vulkan_copy_query_results_destination_range_is_guarded(self):
+        source = VULKAN_ICD.read_text()
+        helper_body = source.split("static bool query_result_copy_buffer_range", 1)[1].split("static void reset_query_range", 1)[0]
+        graphics_body = source.split("PDOCKER_GPU_GRAPHICS_V6_COMMAND_COPY_QUERY_POOL_RESULTS", 1)[1].split("PdockerGpuVulkanGraphicsV618CopyQueryResultEntry", 1)[0]
+        record_body = source.split("static void record_copy_query_results_command", 1)[1].split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateQueryPool", 1)[0]
+        self.assertIn("queryCount == 0 || stride == 0", helper_body)
+        self.assertIn("VK_QUERY_RESULT_WITH_AVAILABILITY_BIT", helper_body)
+        self.assertIn("checked_mul_u64((uint64_t)(queryCount - 1u), (uint64_t)stride, &last_offset)", helper_body)
+        self.assertIn("checked_add_u64(last_offset, item_size, &bytes)", helper_body)
+        self.assertIn("bytes > UINT64_MAX - (uint64_t)dstOffset", helper_body)
+        self.assertIn("bytes > (uint64_t)SIZE_MAX", helper_body)
+        self.assertIn("query_result_copy_buffer_range(op->query_result_flags, op->query_count", graphics_body)
+        self.assertIn("validate_buffer_byte_range(op->query_dst_buffer, op->query_dst_offset, query_copy_bytes)", graphics_body)
+        self.assertIn("query_result_copy_buffer_range(flags, queryCount, dstOffset, stride, &copy_bytes)", record_body)
+        self.assertIn("validate_buffer_byte_range(dst, dstOffset, copy_bytes)", record_body)
+
     def test_vulkan_graphics_buffer_resources_and_image_copy_footprint_are_guarded(self):
         source = VULKAN_ICD.read_text()
         backing_body = source.split("static bool validate_buffer_backing_range", 1)[1].split("static bool validate_buffer_byte_range", 1)[0]

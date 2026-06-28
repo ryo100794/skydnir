@@ -999,6 +999,11 @@ static bool query_range_valid(
         const PdockerVkQueryPool *pool,
         uint32_t firstQuery,
         uint32_t queryCount);
+static bool query_result_copy_buffer_range(VkQueryResultFlags flags,
+                                           uint32_t queryCount,
+                                           VkDeviceSize dstOffset,
+                                           VkDeviceSize stride,
+                                           VkDeviceSize *out_bytes);
 static void execute_recorded_query_op(PdockerVkCommandOp *op);
 static void trace_image_layout_mismatch(
         const char *stage,
@@ -6378,9 +6383,14 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
                 goto cleanup;
             }
             const PdockerVkCommandOp *op = &cmd->command_ops[record->command_op_sequence];
+            VkDeviceSize query_copy_bytes = 0;
             if (op->type != PDOCKER_VK_COMMAND_COPY_QUERY_RESULTS ||
                 !op->query_pool || op->query_pool->result_fd < 0 ||
-                !op->query_dst_buffer || !query_range_valid(op->query_pool, op->query_index, op->query_count)) {
+                !op->query_dst_buffer || !query_range_valid(op->query_pool, op->query_index, op->query_count) ||
+                !query_result_copy_buffer_range(op->query_result_flags, op->query_count,
+                                                op->query_dst_offset, op->query_stride,
+                                                &query_copy_bytes) ||
+                !validate_buffer_byte_range(op->query_dst_buffer, op->query_dst_offset, query_copy_bytes)) {
                 rc = -EPROTO;
                 goto cleanup;
             }
@@ -20005,6 +20015,29 @@ static bool query_range_valid(
            queryCount <= pool->query_count - firstQuery;
 }
 
+static bool query_result_copy_buffer_range(VkQueryResultFlags flags,
+                                           uint32_t queryCount,
+                                           VkDeviceSize dstOffset,
+                                           VkDeviceSize stride,
+                                           VkDeviceSize *out_bytes) {
+    if (queryCount == 0 || stride == 0 || !out_bytes) return false;
+    const uint64_t scalar_size = (flags & VK_QUERY_RESULT_64_BIT) ? sizeof(uint64_t) : sizeof(uint32_t);
+    const uint64_t item_size = scalar_size + ((flags & VK_QUERY_RESULT_WITH_AVAILABILITY_BIT) ? scalar_size : 0u);
+    if (queryCount > 1 && (uint64_t)stride < item_size) return false;
+    uint64_t last_offset = 0;
+    if (!checked_mul_u64((uint64_t)(queryCount - 1u), (uint64_t)stride, &last_offset)) {
+        return false;
+    }
+    uint64_t bytes = 0;
+    if (!checked_add_u64(last_offset, item_size, &bytes) ||
+        bytes > UINT64_MAX - (uint64_t)dstOffset ||
+        bytes > (uint64_t)SIZE_MAX) {
+        return false;
+    }
+    *out_bytes = (VkDeviceSize)bytes;
+    return true;
+}
+
 static void reset_query_range(
         PdockerVkQueryPool *pool,
         uint32_t firstQuery,
@@ -20117,7 +20150,12 @@ static void record_copy_query_results_command(
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     PdockerVkQueryPool *pool = (PdockerVkQueryPool *)queryPool;
     PdockerVkBuffer *dst = (PdockerVkBuffer *)dstBuffer;
-    if (!cmd || !dst || !query_range_valid(pool, firstQuery, queryCount) || queryCount == 0 || stride == 0) return;
+    VkDeviceSize copy_bytes = 0;
+    if (!cmd || !dst || !query_range_valid(pool, firstQuery, queryCount) ||
+        !query_result_copy_buffer_range(flags, queryCount, dstOffset, stride, &copy_bytes) ||
+        !validate_buffer_byte_range(dst, dstOffset, copy_bytes)) {
+        return;
+    }
     PdockerVkCommandOp op;
     memset(&op, 0, sizeof(op));
     op.type = PDOCKER_VK_COMMAND_COPY_QUERY_RESULTS;
