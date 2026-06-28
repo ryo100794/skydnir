@@ -8318,6 +8318,28 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("specializations[i].offset + specializations[i].size > specialization_data_size", source)
         self.assertNotIn("bindings[i].offset + (off_t)bindings[i].size", source)
 
+    def test_vulkan_executor_range_helpers_avoid_truncation_and_wrap(self):
+        source = GPU_EXECUTOR.read_text()
+        descriptor_offset_body = source.split("static int vulkan_binding_descriptor_offset_equals_api_offset", 1)[1].split("static int vulkan_binding_gpu_offset_equals_memory_plus_api_offset", 1)[0]
+        gpu_offset_body = source.split("static int vulkan_binding_gpu_offset_equals_memory_plus_api_offset", 1)[1].split("static int vulkan_binding_descriptor_range_matches_api_range", 1)[0]
+        spec_value_body = c_function_body(source, "specialization_value_u64")
+        overlap_body = c_function_body(source, "ranges_overlap_off_size")
+        absolute_range_body = c_function_body(source, "vulkan_binding_api_absolute_range")
+        frame_range_body = c_function_body(source, "frame_ranges_do_not_overlap")
+        self.assertIn("(uint64_t)binding->api_offset > (uint64_t)SIZE_MAX", descriptor_offset_body)
+        self.assertIn("const uint64_t gpu_offset = memory_offset + api_offset", gpu_offset_body)
+        self.assertIn("gpu_offset > (uint64_t)SIZE_MAX", gpu_offset_body)
+        self.assertIn("specialization->size > specialization_data_size - specialization->offset", spec_value_body)
+        self.assertIn("checked_u64_add3(a_start, (uint64_t)a_size", overlap_body)
+        self.assertIn("checked_u64_add3(b_start, (uint64_t)b_size", overlap_body)
+        self.assertIn("checked_u64_add3(memory_offset, api_offset, 0, &s)", absolute_range_body)
+        self.assertIn("checked_u64_add3(s, (uint64_t)binding->size, 0, &e)", absolute_range_body)
+        self.assertIn("checked_u64_add3(ranges[i].offset, ranges[i].size, 0, &a1)", frame_range_body)
+        self.assertIn("checked_u64_add3(ranges[j].offset, ranges[j].size, 0, &b1)", frame_range_body)
+        self.assertNotIn("specialization->offset + specialization->size > specialization_data_size", source)
+        self.assertNotIn("uint64_t a1 = ranges[i].offset + ranges[i].size", source)
+        self.assertNotIn("uint64_t b1 = ranges[j].offset + ranges[j].size", source)
+
     def test_vulkan_graphics_v69_buffer_copy_mixed_submit(self):
         icd = VULKAN_ICD.read_text()
         executor = GPU_EXECUTOR.read_text()

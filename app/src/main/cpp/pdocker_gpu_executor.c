@@ -1050,7 +1050,8 @@ static int vulkan_binding_offset_equals_memory_plus_api_offset(
 static int vulkan_binding_descriptor_offset_equals_api_offset(
         const VulkanDispatchBinding *binding,
         size_t binding_descriptor_offset) {
-    if (!binding || binding->api_offset < 0) return 0;
+    if (!binding || binding->api_offset < 0 ||
+        (uint64_t)binding->api_offset > (uint64_t)SIZE_MAX) return 0;
     return binding_descriptor_offset == (size_t)binding->api_offset;
 }
 
@@ -1063,7 +1064,9 @@ static int vulkan_binding_gpu_offset_equals_memory_plus_api_offset(
     const uint64_t memory_offset = (uint64_t)binding->api_memory_offset;
     const uint64_t api_offset = (uint64_t)binding->api_offset;
     if (memory_offset > UINT64_MAX - api_offset) return 0;
-    return binding_gpu_offset == (size_t)(memory_offset + api_offset);
+    const uint64_t gpu_offset = memory_offset + api_offset;
+    if (gpu_offset > (uint64_t)SIZE_MAX) return 0;
+    return binding_gpu_offset == (size_t)gpu_offset;
 }
 
 static int vulkan_binding_descriptor_range_matches_api_range(
@@ -5774,7 +5777,7 @@ static uint64_t specialization_value_u64(
     if (!specialization || !specialization_data) return 0;
     if (specialization->offset >= specialization_data_size) return 0;
     if (specialization->size == 0 ||
-        specialization->offset + specialization->size > specialization_data_size) {
+        specialization->size > specialization_data_size - specialization->offset) {
         return 0;
     }
     uint64_t value = 0;
@@ -7898,9 +7901,10 @@ static int ranges_overlap_off_size(
     if (a_offset < 0 || b_offset < 0) return 0;
     uint64_t a_start = (uint64_t)a_offset;
     uint64_t b_start = (uint64_t)b_offset;
-    uint64_t a_end = a_start + (uint64_t)a_size;
-    uint64_t b_end = b_start + (uint64_t)b_size;
-    if (a_end < a_start || b_end < b_start) return 0;
+    uint64_t a_end = 0;
+    uint64_t b_end = 0;
+    if (checked_u64_add3(a_start, (uint64_t)a_size, 0, &a_end) != 0 ||
+        checked_u64_add3(b_start, (uint64_t)b_size, 0, &b_end) != 0) return 0;
     if (a_end <= b_start || b_end <= a_start) return 0;
     uint64_t start = a_start > b_start ? a_start : b_start;
     uint64_t end = a_end < b_end ? a_end : b_end;
@@ -7919,10 +7923,10 @@ static int vulkan_binding_api_absolute_range(
     }
     const uint64_t memory_offset = (uint64_t)binding->api_memory_offset;
     const uint64_t api_offset = (uint64_t)binding->api_offset;
-    if (memory_offset > UINT64_MAX - api_offset) return 0;
-    const uint64_t s = memory_offset + api_offset;
-    if ((uint64_t)binding->size > UINT64_MAX - s) return 0;
-    const uint64_t e = s + (uint64_t)binding->size;
+    uint64_t s = 0;
+    uint64_t e = 0;
+    if (checked_u64_add3(memory_offset, api_offset, 0, &s) != 0 ||
+        checked_u64_add3(s, (uint64_t)binding->size, 0, &e) != 0) return 0;
     if (start) *start = s;
     if (end) *end = e;
     return e > s;
@@ -18807,13 +18811,13 @@ static int frame_ranges_do_not_overlap(const FrameRange *ranges, size_t count) {
     for (size_t i = 0; i < count; ++i) {
         if (ranges[i].size == 0) continue;
         uint64_t a0 = ranges[i].offset;
-        uint64_t a1 = ranges[i].offset + ranges[i].size;
-        if (a1 < a0) return 0;
+        uint64_t a1 = 0;
+        if (checked_u64_add3(ranges[i].offset, ranges[i].size, 0, &a1) != 0) return 0;
         for (size_t j = i + 1; j < count; ++j) {
             if (ranges[j].size == 0) continue;
             uint64_t b0 = ranges[j].offset;
-            uint64_t b1 = ranges[j].offset + ranges[j].size;
-            if (b1 < b0) return 0;
+            uint64_t b1 = 0;
+            if (checked_u64_add3(ranges[j].offset, ranges[j].size, 0, &b1) != 0) return 0;
             if (a0 < b1 && b0 < a1) return 0;
         }
     }
