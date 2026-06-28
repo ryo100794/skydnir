@@ -19103,22 +19103,34 @@ static int convert_vulkan_dispatch_v5_to_v4_bindings(
             return -EOPNOTSUPP;
         }
         (void)descriptor_type;
+        if (d->resource_id != 0 && d->resource_id != buffer->resource_id) {
+            return -EPROTO;
+        }
+        uint64_t api_offset = 0;
+        if (checked_u64_add3(d->buffer_offset, d->dynamic_offset, 0, &api_offset) != 0) {
+            return -EOVERFLOW;
+        }
+        uint64_t api_range = 0;
         if (d->range == UINT64_MAX) {
-            if (d->buffer_offset > buffer->size) return -ERANGE;
-        } else if (d->buffer_offset > buffer->size || d->range > buffer->size - d->buffer_offset) {
-            return -ERANGE;
+            if (api_offset > buffer->size) return -ERANGE;
+            api_range = buffer->size - api_offset;
+        } else {
+            if (api_offset > buffer->size || d->range > buffer->size - api_offset) {
+                return -ERANGE;
+            }
+            api_range = d->range;
         }
         if (d->transfer_offset > buffer->size || d->transfer_size > buffer->size - d->transfer_offset) {
+            return -ERANGE;
+        }
+        if (d->transfer_offset < api_offset ||
+            d->transfer_size > api_range - (d->transfer_offset - api_offset)) {
             return -ERANGE;
         }
         if (buffer_descriptor_count >= binding_capacity) return -E2BIG;
         uint64_t fd_offset = 0;
         if (checked_u64_add3(memory->external_offset, buffer->memory_offset,
                              d->transfer_offset, &fd_offset) != 0) {
-            return -EOVERFLOW;
-        }
-        uint64_t api_offset = 0;
-        if (checked_u64_add3(d->buffer_offset, d->dynamic_offset, 0, &api_offset) != 0) {
             return -EOVERFLOW;
         }
         VulkanDispatchBinding *binding = &bindings[buffer_descriptor_count];
@@ -19129,9 +19141,7 @@ static int convert_vulkan_dispatch_v5_to_v4_bindings(
         binding->offset = (off_t)fd_offset;
         binding->size = (size_t)d->transfer_size;
         binding->api_offset = (off_t)api_offset;
-        binding->api_range = d->range == UINT64_MAX
-            ? (size_t)(buffer->size - d->buffer_offset)
-            : (size_t)d->range;
+        binding->api_range = (size_t)api_range;
         binding->api_buffer_size = (size_t)buffer->size;
         binding->api_descriptor_type = d->descriptor_type;
         binding->api_dynamic = (d->descriptor_flags & PDOCKER_GPU_V5_DESCRIPTOR_FLAG_DYNAMIC) ? 1 : 0;
