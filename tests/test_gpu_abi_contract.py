@@ -902,11 +902,11 @@ class GpuAbiContractTest(unittest.TestCase):
             "cmd->index_buffer_bound",
             "PdockerVkVertexBindingState",
             "record_vertex_buffer_bindings",
-            "binding->buffer = (PdockerVkBuffer *)pBuffers[i];",
+            "binding->buffer = pdocker_vk_buffer_from_handle(pBuffers[i]);",
             "binding->offset = pOffsets[i];",
             "binding->size = pSizes ? pSizes[i] : VK_WHOLE_SIZE;",
             "binding->stride = pStrides ? pStrides[i] : 0;",
-            "cmd->index_buffer = (PdockerVkBuffer *)buffer;",
+            "cmd->index_buffer = pdocker_vk_buffer_from_handle(buffer);",
             "cmd->index_offset = offset;",
             "cmd->index_type = indexType;",
             "op.draw_first_vertex = firstVertex;",
@@ -5786,7 +5786,7 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         self.assertIn("if (info->pNext) return unsupported_image_pnext_result", image_view_validate_body)
         self.assertIn("if (info->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;", image_view_validate_body)
-        self.assertIn("PdockerVkImage *image = (PdockerVkImage *)info->image;", image_view_validate_body)
+        self.assertIn("PdockerVkImage *image = pdocker_vk_image_from_handle(info->image);", image_view_validate_body)
         self.assertIn("info->format != image->format", image_view_validate_body)
         self.assertIn("normalize_image_view_subresource_range_for_transport", image_view_validate_body)
         normalize_view_body = icd.split("static bool normalize_image_view_subresource_range_for_transport", 1)[1].split(
@@ -8171,6 +8171,38 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("buffer->memory_offset > UINT64_MAX - (uint64_t)offset", buffer_ptr)
         self.assertIn("return (char *)buffer->memory->map + (size_t)absolute;", buffer_ptr)
         self.assertNotIn("buffer->memory->map + buffer->memory_offset + offset", buffer_ptr)
+
+    def test_vulkan_core_resource_handles_use_typed_converters(self):
+        source = VULKAN_ICD.read_text()
+        for marker in [
+            "PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS",
+            "pdocker_vk_memory_from_handle",
+            "pdocker_vk_buffer_from_handle",
+            "pdocker_vk_image_from_handle",
+            "pdocker_vk_image_view_from_handle",
+            "pdocker_vk_sampler_from_handle",
+            "Non-dispatchable Vulkan handles are pointer-like on 64-bit builds",
+            "transport-visible object identity",
+        ]:
+            self.assertIn(marker, source)
+        for forbidden in [
+            "(PdockerVkMemory *)memory",
+            "(PdockerVkBuffer *)buffer",
+            "(PdockerVkImage *)image",
+            "(PdockerVkImage *)info->image",
+            "(PdockerVkImageView *)src->imageView",
+            "(PdockerVkImageView *)info->imageView",
+            "(PdockerVkSampler *)info->sampler",
+            "*pBuffer = (VkBuffer)buffer",
+            "*pImage = (VkImage)image",
+            "*pView = (VkImageView)view",
+            "*pSampler = (VkSampler)sampler",
+            "*pMemory = (VkDeviceMemory)memory",
+            "free((void *)buffer)",
+            "free((void *)imageView)",
+            "free((void *)sampler)",
+        ]:
+            self.assertNotIn(forbidden, source)
 
     def test_vulkan_icd_copy_alias_offsets_are_overflow_guarded(self):
         source = VULKAN_ICD.read_text()

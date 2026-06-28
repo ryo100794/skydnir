@@ -117,6 +117,31 @@ typedef struct PdockerVkFramebuffer PdockerVkFramebuffer;
 typedef struct PdockerVkSurface PdockerVkSurface;
 typedef struct PdockerVkSwapchain PdockerVkSwapchain;
 
+#if defined(VK_USE_64_BIT_PTR_DEFINES) && (VK_USE_64_BIT_PTR_DEFINES == 1)
+#define PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(prefix, VkType, CType) \
+    static VkType prefix##_to_handle(CType *ptr) { return (VkType)ptr; } \
+    static CType *prefix##_from_handle(VkType handle) { return (CType *)handle; }
+#else
+#define PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(prefix, VkType, CType) \
+    static VkType prefix##_to_handle(CType *ptr) { return (VkType)(uintptr_t)ptr; } \
+    static CType *prefix##_from_handle(VkType handle) { \
+        if ((uint64_t)handle > (uint64_t)UINTPTR_MAX) return NULL; \
+        return (CType *)(uintptr_t)(uint64_t)handle; \
+    }
+#endif
+
+/*
+ * Non-dispatchable Vulkan handles are pointer-like on 64-bit builds and
+ * uint64_t tokens on 32-bit builds.  Keep every API-bound conversion behind
+ * typed helpers so the bridge does not accidentally bake C pointer casts into
+ * transport-visible object identity.
+ */
+PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_memory, VkDeviceMemory, PdockerVkMemory)
+PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_buffer, VkBuffer, PdockerVkBuffer)
+PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_image, VkImage, PdockerVkImage)
+PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_image_view, VkImageView, PdockerVkImageView)
+PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_sampler, VkSampler, PdockerVkSampler)
+
 #define PDOCKER_VK_MAX_STORAGE_BUFFERS 16
 #define PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS PDOCKER_VK_MAX_STORAGE_BUFFERS
 #define PDOCKER_VK_MAX_DESCRIPTOR_SETS 8
@@ -1116,9 +1141,9 @@ static bool copy_rendering_attachment_state(
     memset(dst, 0, sizeof(*dst));
     if (!src) return true;
     if (src->pNext) return false;
-    dst->image_view = (PdockerVkImageView *)src->imageView;
+    dst->image_view = pdocker_vk_image_view_from_handle(src->imageView);
     dst->image_layout = src->imageLayout;
-    dst->resolve_image_view = (PdockerVkImageView *)src->resolveImageView;
+    dst->resolve_image_view = pdocker_vk_image_view_from_handle(src->resolveImageView);
     dst->resolve_image_layout = src->resolveImageLayout;
     dst->resolve_mode = src->resolveMode;
     dst->load_op = src->loadOp;
@@ -11793,7 +11818,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateBuffer(
                 (unsigned)pCreateInfo->usage,
                 (unsigned)pCreateInfo->sharingMode);
     }
-    *pBuffer = (VkBuffer)buffer;
+    *pBuffer = pdocker_vk_buffer_to_handle(buffer);
     return VK_SUCCESS;
 }
 
@@ -11803,7 +11828,7 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyBuffer(
         const VkAllocationCallbacks *pAllocator) {
     (void)device;
     (void)pAllocator;
-    free((void *)buffer);
+    free(pdocker_vk_buffer_from_handle(buffer));
 }
 
 static VkResult unsupported_create_info_pnext_result(const char *api_name, const void *pNext) {
@@ -11951,7 +11976,7 @@ static VkResult validate_image_view_create_info_for_transport(
     if (!info) return VK_ERROR_INITIALIZATION_FAILED;
     if (info->pNext) return unsupported_image_pnext_result("vkCreateImageView", info->pNext);
     if (info->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;
-    PdockerVkImage *image = (PdockerVkImage *)info->image;
+    PdockerVkImage *image = pdocker_vk_image_from_handle(info->image);
     if (!image) return VK_ERROR_INITIALIZATION_FAILED;
     if (!pdocker_vk_format_bridge_supported(info->format) || info->format != image->format) {
         return VK_ERROR_FORMAT_NOT_SUPPORTED;
@@ -12026,7 +12051,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateImage(
                 (unsigned long long)image->requirements_size,
                 (unsigned long long)image->generation);
     }
-    *pImage = (VkImage)image;
+    *pImage = pdocker_vk_image_to_handle(image);
     return VK_SUCCESS;
 }
 
@@ -12036,7 +12061,7 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyImage(
         const VkAllocationCallbacks *pAllocator) {
     (void)device;
     (void)pAllocator;
-    PdockerVkImage *img = (PdockerVkImage *)image;
+    PdockerVkImage *img = pdocker_vk_image_from_handle(image);
     if (img && img->swapchain_owned) {
         trace_icd_runtime_failure("swapchain-image-destroy-ignored", VK_ERROR_INITIALIZATION_FAILED);
         return;
@@ -12050,7 +12075,7 @@ VKAPI_ATTR void VKAPI_CALL vkGetImageMemoryRequirements(
         VkMemoryRequirements *pMemoryRequirements) {
     (void)device;
     if (!pMemoryRequirements) return;
-    PdockerVkImage *img = (PdockerVkImage *)image;
+    PdockerVkImage *img = pdocker_vk_image_from_handle(image);
     memset(pMemoryRequirements, 0, sizeof(*pMemoryRequirements));
     pMemoryRequirements->size = img ? img->requirements_size : 0;
     pMemoryRequirements->alignment =
@@ -12100,7 +12125,7 @@ VKAPI_ATTR void VKAPI_CALL vkGetImageSubresourceLayout(
     (void)device;
     if (!pLayout) return;
     memset(pLayout, 0, sizeof(*pLayout));
-    PdockerVkImage *img = (PdockerVkImage *)image;
+    PdockerVkImage *img = pdocker_vk_image_from_handle(image);
     if (!img || !pSubresource ||
         pSubresource->aspectMask != VK_IMAGE_ASPECT_COLOR_BIT ||
         pSubresource->mipLevel >= img->mip_levels ||
@@ -12135,8 +12160,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkBindImageMemory(
         VkDeviceMemory memory,
         VkDeviceSize memoryOffset) {
     (void)device;
-    PdockerVkImage *img = (PdockerVkImage *)image;
-    PdockerVkMemory *mem = (PdockerVkMemory *)memory;
+    PdockerVkImage *img = pdocker_vk_image_from_handle(image);
+    PdockerVkMemory *mem = pdocker_vk_memory_from_handle(memory);
     if (!img || !mem) return VK_ERROR_INITIALIZATION_FAILED;
     if (img->swapchain_owned) {
         trace_icd_runtime_failure("swapchain-image-bind-rejected", VK_ERROR_INITIALIZATION_FAILED);
@@ -12193,7 +12218,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateImageView(
     VkResult validate_rc = validate_image_view_create_info_for_transport(
         pCreateInfo, &normalized_range);
     if (validate_rc != VK_SUCCESS) return validate_rc;
-    PdockerVkImage *image = (PdockerVkImage *)pCreateInfo->image;
+    PdockerVkImage *image = pdocker_vk_image_from_handle(pCreateInfo->image);
     PdockerVkImageView *view = pdocker_alloc_handle(sizeof(*view));
     if (!view) return VK_ERROR_OUT_OF_HOST_MEMORY;
     view->image = image;
@@ -12202,7 +12227,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateImageView(
     view->components = pCreateInfo->components;
     view->subresource_range = normalized_range;
     view->generation = next_vulkan_object_generation();
-    *pView = (VkImageView)view;
+    *pView = pdocker_vk_image_view_to_handle(view);
     return VK_SUCCESS;
 }
 
@@ -12212,7 +12237,7 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyImageView(
         const VkAllocationCallbacks *pAllocator) {
     (void)device;
     (void)pAllocator;
-    free((void *)imageView);
+    free(pdocker_vk_image_view_from_handle(imageView));
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateSampler(
@@ -12247,7 +12272,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSampler(
     sampler->border_color = pCreateInfo->borderColor;
     sampler->unnormalized_coordinates = pCreateInfo->unnormalizedCoordinates;
     sampler->generation = next_vulkan_object_generation();
-    *pSampler = (VkSampler)sampler;
+    *pSampler = pdocker_vk_sampler_to_handle(sampler);
     return VK_SUCCESS;
 }
 
@@ -12257,7 +12282,7 @@ VKAPI_ATTR void VKAPI_CALL vkDestroySampler(
         const VkAllocationCallbacks *pAllocator) {
     (void)device;
     (void)pAllocator;
-    free((void *)sampler);
+    free(pdocker_vk_sampler_from_handle(sampler));
 }
 
 VKAPI_ATTR void VKAPI_CALL vkGetBufferMemoryRequirements(
@@ -12266,7 +12291,7 @@ VKAPI_ATTR void VKAPI_CALL vkGetBufferMemoryRequirements(
         VkMemoryRequirements *pMemoryRequirements) {
     (void)device;
     if (!pMemoryRequirements) return;
-    PdockerVkBuffer *b = (PdockerVkBuffer *)buffer;
+    PdockerVkBuffer *b = pdocker_vk_buffer_from_handle(buffer);
     memset(pMemoryRequirements, 0, sizeof(*pMemoryRequirements));
     pMemoryRequirements->size = b ? b->requirements_size : 0;
     pMemoryRequirements->alignment = b && b->requirements_alignment ? b->requirements_alignment : PDOCKER_VK_REQUIREMENT_ALIGNMENT;
@@ -12461,7 +12486,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateMemory(
                     memory->page_count);
         }
     }
-    *pMemory = (VkDeviceMemory)memory;
+    *pMemory = pdocker_vk_memory_to_handle(memory);
     return VK_SUCCESS;
 }
 
@@ -12471,7 +12496,7 @@ VKAPI_ATTR void VKAPI_CALL vkFreeMemory(
         const VkAllocationCallbacks *pAllocator) {
     (void)device;
     (void)pAllocator;
-    PdockerVkMemory *m = (PdockerVkMemory *)memory;
+    PdockerVkMemory *m = pdocker_vk_memory_from_handle(memory);
     if (!m) return;
     unregister_guarded_memory(m);
     if (m->map && m->map != MAP_FAILED) munmap(m->map, m->size);
@@ -12491,7 +12516,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkMapMemory(
     (void)device;
     (void)flags;
     if (!memory || !ppData) return VK_ERROR_MEMORY_MAP_FAILED;
-    PdockerVkMemory *m = (PdockerVkMemory *)memory;
+    PdockerVkMemory *m = pdocker_vk_memory_from_handle(memory);
     if (offset > (VkDeviceSize)m->size || offset > (VkDeviceSize)SIZE_MAX) {
         return VK_ERROR_MEMORY_MAP_FAILED;
     }
@@ -12530,7 +12555,7 @@ VKAPI_ATTR void VKAPI_CALL vkGetDeviceMemoryCommitment(
         VkDeviceMemory memory,
         VkDeviceSize *pCommittedMemoryInBytes) {
     (void)device;
-    PdockerVkMemory *m = (PdockerVkMemory *)memory;
+    PdockerVkMemory *m = pdocker_vk_memory_from_handle(memory);
     if (pCommittedMemoryInBytes) *pCommittedMemoryInBytes = m ? (VkDeviceSize)m->size : 0;
 }
 
@@ -12560,9 +12585,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkBindBufferMemory(
         VkDeviceMemory memory,
         VkDeviceSize memoryOffset) {
     (void)device;
-    PdockerVkBuffer *b = (PdockerVkBuffer *)buffer;
+    PdockerVkBuffer *b = pdocker_vk_buffer_from_handle(buffer);
     if (!b || !memory) return VK_ERROR_INITIALIZATION_FAILED;
-    PdockerVkMemory *m = (PdockerVkMemory *)memory;
+    PdockerVkMemory *m = pdocker_vk_memory_from_handle(memory);
     VkDeviceSize alignment = b->requirements_alignment ? b->requirements_alignment : PDOCKER_VK_REQUIREMENT_ALIGNMENT;
     VkDeviceSize needed = b->requirements_size ? b->requirements_size : align_device_size((VkDeviceSize)b->size, alignment);
     if ((memoryOffset % alignment) != 0 ||
@@ -13279,8 +13304,8 @@ VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets(
                     &set->storage_buffers[binding][array_element];
                 const VkDescriptorImageInfo *info = &w->pImageInfo[j];
                 slot->buffer = NULL;
-                slot->image_view = (PdockerVkImageView *)info->imageView;
-                slot->sampler = (PdockerVkSampler *)info->sampler;
+                slot->image_view = pdocker_vk_image_view_from_handle(info->imageView);
+                slot->sampler = pdocker_vk_sampler_from_handle(info->sampler);
                 slot->image_layout = info->imageLayout;
                 slot->base_offset = 0;
                 slot->dynamic_offset = 0;
@@ -13328,7 +13353,7 @@ VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets(
             }
             PdockerVkDescriptorBinding *slot =
                 &set->storage_buffers[binding][array_element];
-            slot->buffer = (PdockerVkBuffer *)w->pBufferInfo[j].buffer;
+            slot->buffer = pdocker_vk_buffer_from_handle(w->pBufferInfo[j].buffer);
             slot->image_view = NULL;
             slot->sampler = NULL;
             slot->image_layout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -14392,7 +14417,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateFramebuffer(
     }
     for (uint32_t i = 0; i < fb->attachment_count; ++i) {
         fb->attachments[i] = pCreateInfo->pAttachments
-            ? (PdockerVkImageView *)pCreateInfo->pAttachments[i]
+            ? pdocker_vk_image_view_from_handle(pCreateInfo->pAttachments[i])
             : NULL;
     }
     fb->width = pCreateInfo->width;
@@ -14735,7 +14760,7 @@ static void pdocker_vk_destroy_swapchain_images(VkDevice device, PdockerVkSwapch
             swapchain->images[i] = NULL;
         }
         if (swapchain->memories[i]) {
-            vkFreeMemory(device, (VkDeviceMemory)swapchain->memories[i], NULL);
+            vkFreeMemory(device, pdocker_vk_memory_to_handle(swapchain->memories[i]), NULL);
             swapchain->memories[i] = NULL;
         }
     }
@@ -14871,12 +14896,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSwapchainKHR(
             free(swapchain);
             return rc;
         }
-        PdockerVkImage *pd_image = (PdockerVkImage *)image;
+        PdockerVkImage *pd_image = pdocker_vk_image_from_handle(image);
         pd_image->swapchain_owned = true;
         pd_image->current_layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
         pd_image->layout_generation = next_vulkan_object_generation();
         swapchain->images[i] = pd_image;
-        swapchain->memories[i] = (PdockerVkMemory *)memory;
+        swapchain->memories[i] = pdocker_vk_memory_from_handle(memory);
     }
     *pSwapchain = (VkSwapchainKHR)swapchain;
     return VK_SUCCESS;
@@ -14911,7 +14936,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetSwapchainImagesKHR(
         return VK_SUCCESS;
     }
     uint32_t count = *pSwapchainImageCount < sc->image_count ? *pSwapchainImageCount : sc->image_count;
-    for (uint32_t i = 0; i < count; ++i) pSwapchainImages[i] = (VkImage)sc->images[i];
+    for (uint32_t i = 0; i < count; ++i) pSwapchainImages[i] = pdocker_vk_image_to_handle(sc->images[i]);
     *pSwapchainImageCount = count;
     return count < sc->image_count ? VK_INCOMPLETE : VK_SUCCESS;
 }
@@ -15939,7 +15964,7 @@ static void record_vertex_buffer_bindings(
     for (uint32_t i = 0; i < bindingCount; ++i) {
         uint32_t slot = firstBinding + i;
         PdockerVkVertexBindingState *binding = &cmd->vertex_bindings[slot];
-        binding->buffer = (PdockerVkBuffer *)pBuffers[i];
+        binding->buffer = pdocker_vk_buffer_from_handle(pBuffers[i]);
         binding->offset = pOffsets[i];
         binding->size = pSizes ? pSizes[i] : VK_WHOLE_SIZE;
         binding->stride = pStrides ? pStrides[i] : 0;
@@ -15983,7 +16008,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindIndexBuffer(
         VkIndexType indexType) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     if (!cmd) return;
-    cmd->index_buffer = (PdockerVkBuffer *)buffer;
+    cmd->index_buffer = pdocker_vk_buffer_from_handle(buffer);
     cmd->index_offset = offset;
     cmd->index_type = indexType;
     cmd->index_buffer_bound = true;
@@ -16073,9 +16098,9 @@ static void record_graphics_draw_command(
     snapshot->vertex_offset = vertexOffset;
     snapshot->indexed = indexed;
     snapshot->indirect = indirect;
-    snapshot->indirect_buffer = (PdockerVkBuffer *)indirectBuffer;
+    snapshot->indirect_buffer = pdocker_vk_buffer_from_handle(indirectBuffer);
     snapshot->indirect_offset = indirectOffset;
-    snapshot->count_buffer = (PdockerVkBuffer *)countBuffer;
+    snapshot->count_buffer = pdocker_vk_buffer_from_handle(countBuffer);
     snapshot->count_offset = countOffset;
     snapshot->indirect_stride = stride;
     PdockerVkGraphicsCommandRecord graphics_record;
@@ -16106,9 +16131,9 @@ static void record_graphics_draw_command(
     op.draw_vertex_offset = vertexOffset;
     op.draw_indexed = indexed;
     op.draw_indirect = indirect;
-    op.draw_indirect_buffer = (PdockerVkBuffer *)indirectBuffer;
+    op.draw_indirect_buffer = pdocker_vk_buffer_from_handle(indirectBuffer);
     op.draw_indirect_offset = indirectOffset;
-    op.draw_count_buffer = (PdockerVkBuffer *)countBuffer;
+    op.draw_count_buffer = pdocker_vk_buffer_from_handle(countBuffer);
     op.draw_count_offset = countOffset;
     op.draw_indirect_stride = stride;
     (void)append_command_op(cmd, &op);
@@ -16937,7 +16962,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdDispatchIndirect(
         VkBuffer buffer,
         VkDeviceSize offset) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
-    PdockerVkBuffer *indirect_buffer = (PdockerVkBuffer *)buffer;
+    PdockerVkBuffer *indirect_buffer = pdocker_vk_buffer_from_handle(buffer);
     if (cmd) {
         cmd->dispatch_x = 0;
         cmd->dispatch_y = 0;
@@ -17423,7 +17448,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier(
         for (uint32_t i = 0; pBufferMemoryBarriers && i < bufferMemoryBarrierCount; ++i) {
             const VkBufferMemoryBarrier *b = &pBufferMemoryBarriers[i];
             record_buffer_barrier_op(commandBuffer,
-                                     (PdockerVkBuffer *)b->buffer,
+                                     pdocker_vk_buffer_from_handle(b->buffer),
                                      b->offset,
                                      b->size,
                                      (VkAccessFlags2)b->srcAccessMask,
@@ -17436,7 +17461,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier(
         for (uint32_t i = 0; pImageMemoryBarriers && i < imageMemoryBarrierCount; ++i) {
             const VkImageMemoryBarrier *b = &pImageMemoryBarriers[i];
             record_image_barrier_op(commandBuffer,
-                                    (PdockerVkImage *)b->image,
+                                    pdocker_vk_image_from_handle(b->image),
                                     b->oldLayout,
                                     b->newLayout,
                                     b->subresourceRange,
@@ -17477,8 +17502,8 @@ VKAPI_ATTR void VKAPI_CALL vkCmdCopyBuffer(
         uint32_t regionCount,
         const VkBufferCopy *pRegions) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
-    PdockerVkBuffer *src = (PdockerVkBuffer *)srcBuffer;
-    PdockerVkBuffer *dst = (PdockerVkBuffer *)dstBuffer;
+    PdockerVkBuffer *src = pdocker_vk_buffer_from_handle(srcBuffer);
+    PdockerVkBuffer *dst = pdocker_vk_buffer_from_handle(dstBuffer);
     if (!cmd || !src || !dst || !src->memory || !dst->memory || !pRegions) return;
     for (uint32_t i = 0; i < regionCount; ++i) {
         const VkBufferCopy *r = &pRegions[i];
@@ -17569,8 +17594,8 @@ VKAPI_ATTR void VKAPI_CALL vkCmdCopyBufferToImage(
         uint32_t regionCount,
         const VkBufferImageCopy *pRegions) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
-    PdockerVkBuffer *src = (PdockerVkBuffer *)srcBuffer;
-    PdockerVkImage *dst = (PdockerVkImage *)dstImage;
+    PdockerVkBuffer *src = pdocker_vk_buffer_from_handle(srcBuffer);
+    PdockerVkImage *dst = pdocker_vk_image_from_handle(dstImage);
     if (!cmd || !src || !dst || !src->memory || !dst->memory || !pRegions) return;
     for (uint32_t i = 0; i < regionCount; ++i) {
         record_image_copy_op(cmd,
@@ -17590,8 +17615,8 @@ VKAPI_ATTR void VKAPI_CALL vkCmdCopyImageToBuffer(
         uint32_t regionCount,
         const VkBufferImageCopy *pRegions) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
-    PdockerVkImage *src = (PdockerVkImage *)srcImage;
-    PdockerVkBuffer *dst = (PdockerVkBuffer *)dstBuffer;
+    PdockerVkImage *src = pdocker_vk_image_from_handle(srcImage);
+    PdockerVkBuffer *dst = pdocker_vk_buffer_from_handle(dstBuffer);
     if (!cmd || !src || !dst || !src->memory || !dst->memory || !pRegions) return;
     for (uint32_t i = 0; i < regionCount; ++i) {
         record_image_copy_op(cmd,
@@ -17656,8 +17681,8 @@ VKAPI_ATTR void VKAPI_CALL vkCmdCopyImage(
         uint32_t regionCount,
         const VkImageCopy *pRegions) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
-    PdockerVkImage *src = (PdockerVkImage *)srcImage;
-    PdockerVkImage *dst = (PdockerVkImage *)dstImage;
+    PdockerVkImage *src = pdocker_vk_image_from_handle(srcImage);
+    PdockerVkImage *dst = pdocker_vk_image_from_handle(dstImage);
     if (!cmd || !src || !dst || !src->memory || !dst->memory || !pRegions) return;
     for (uint32_t i = 0; i < regionCount; ++i) {
         record_image_to_image_copy_op(cmd, src, dst, srcImageLayout, dstImageLayout, &pRegions[i]);
@@ -17716,7 +17741,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdClearColorImage(
         uint32_t rangeCount,
         const VkImageSubresourceRange *pRanges) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
-    PdockerVkImage *img = (PdockerVkImage *)image;
+    PdockerVkImage *img = pdocker_vk_image_from_handle(image);
     if (!cmd || !img || !img->memory || !pColor || !pRanges) return;
     for (uint32_t i = 0; i < rangeCount; ++i) {
         record_clear_color_image_op(cmd, img, imageLayout, pColor, &pRanges[i]);
@@ -17774,8 +17799,8 @@ VKAPI_ATTR void VKAPI_CALL vkCmdResolveImage(
         uint32_t regionCount,
         const VkImageResolve *pRegions) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
-    PdockerVkImage *src = (PdockerVkImage *)srcImage;
-    PdockerVkImage *dst = (PdockerVkImage *)dstImage;
+    PdockerVkImage *src = pdocker_vk_image_from_handle(srcImage);
+    PdockerVkImage *dst = pdocker_vk_image_from_handle(dstImage);
     if (!cmd || !src || !dst || !src->memory || !dst->memory || !pRegions) return;
     for (uint32_t i = 0; i < regionCount; ++i) {
         record_resolve_image_op(cmd, src, dst, srcImageLayout, dstImageLayout, &pRegions[i]);
@@ -17846,8 +17871,8 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBlitImage(
         const VkImageBlit *pRegions,
         VkFilter filter) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
-    PdockerVkImage *src = (PdockerVkImage *)srcImage;
-    PdockerVkImage *dst = (PdockerVkImage *)dstImage;
+    PdockerVkImage *src = pdocker_vk_image_from_handle(srcImage);
+    PdockerVkImage *dst = pdocker_vk_image_from_handle(dstImage);
     if (!cmd || !src || !dst || !src->memory || !dst->memory || !pRegions) return;
     for (uint32_t i = 0; i < regionCount; ++i) {
         record_blit_image_op(cmd, src, dst, srcImageLayout, dstImageLayout, &pRegions[i], filter);
@@ -17905,7 +17930,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdClearDepthStencilImage(
         uint32_t rangeCount,
         const VkImageSubresourceRange *pRanges) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
-    PdockerVkImage *img = (PdockerVkImage *)image;
+    PdockerVkImage *img = pdocker_vk_image_from_handle(image);
     if (!cmd || !img || !img->memory || !pDepthStencil || !pRanges) return;
     for (uint32_t i = 0; i < rangeCount; ++i) {
         record_clear_depth_stencil_image_op(cmd, img, imageLayout, pDepthStencil, &pRanges[i]);
@@ -17949,8 +17974,8 @@ VKAPI_ATTR void VKAPI_CALL vkCmdCopyBuffer2(
                                                 pCopyBufferInfo->regionCount,
                                                 sizeof(pCopyBufferInfo->pRegions[0]),
                                                 "copy-buffer2-pnext-unsupported")) return;
-    PdockerVkBuffer *src = (PdockerVkBuffer *)pCopyBufferInfo->srcBuffer;
-    PdockerVkBuffer *dst = (PdockerVkBuffer *)pCopyBufferInfo->dstBuffer;
+    PdockerVkBuffer *src = pdocker_vk_buffer_from_handle(pCopyBufferInfo->srcBuffer);
+    PdockerVkBuffer *dst = pdocker_vk_buffer_from_handle(pCopyBufferInfo->dstBuffer);
     if (!cmd || !src || !dst || !src->memory || !dst->memory) return;
     for (uint32_t i = 0; i < pCopyBufferInfo->regionCount; ++i) {
         const VkBufferCopy2 *r2 = &pCopyBufferInfo->pRegions[i];
@@ -18119,7 +18144,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdFillBuffer(
         VkDeviceSize size,
         uint32_t data) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
-    PdockerVkBuffer *dst = (PdockerVkBuffer *)dstBuffer;
+    PdockerVkBuffer *dst = pdocker_vk_buffer_from_handle(dstBuffer);
     if (!dst || !dst->memory) return;
     size_t available = buffer_available(dst, dstOffset);
     size_t bytes = size == VK_WHOLE_SIZE ? available : (size_t)size;
@@ -18151,7 +18176,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdUpdateBuffer(
         VkDeviceSize dataSize,
         const void *pData) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
-    PdockerVkBuffer *dst = (PdockerVkBuffer *)dstBuffer;
+    PdockerVkBuffer *dst = pdocker_vk_buffer_from_handle(dstBuffer);
     if (!dst || !dst->memory || !pData) return;
     size_t available = buffer_available(dst, dstOffset);
     size_t bytes = (size_t)dataSize < available ? (size_t)dataSize : available;
@@ -20141,7 +20166,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier2(
         for (uint32_t i = 0; i < pDependencyInfo->bufferMemoryBarrierCount; ++i) {
             const VkBufferMemoryBarrier2 *b = &pDependencyInfo->pBufferMemoryBarriers[i];
             record_buffer_barrier_op(commandBuffer,
-                                     (PdockerVkBuffer *)b->buffer,
+                                     pdocker_vk_buffer_from_handle(b->buffer),
                                      b->offset,
                                      b->size,
                                      b->srcAccessMask,
@@ -20156,7 +20181,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier2(
         for (uint32_t i = 0; i < pDependencyInfo->imageMemoryBarrierCount; ++i) {
             const VkImageMemoryBarrier2 *b = &pDependencyInfo->pImageMemoryBarriers[i];
             record_image_barrier_op(commandBuffer,
-                                    (PdockerVkImage *)b->image,
+                                    pdocker_vk_image_from_handle(b->image),
                                     b->oldLayout,
                                     b->newLayout,
                                     b->subresourceRange,
@@ -20436,7 +20461,7 @@ static void record_copy_query_results_command(
         VkQueryResultFlags flags) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     PdockerVkQueryPool *pool = (PdockerVkQueryPool *)queryPool;
-    PdockerVkBuffer *dst = (PdockerVkBuffer *)dstBuffer;
+    PdockerVkBuffer *dst = pdocker_vk_buffer_from_handle(dstBuffer);
     VkDeviceSize copy_bytes = 0;
     if (!cmd || !dst || !query_range_valid(pool, firstQuery, queryCount) ||
         !query_result_copy_buffer_range(flags, queryCount, dstOffset, stride, &copy_bytes) ||
