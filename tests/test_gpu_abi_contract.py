@@ -8526,6 +8526,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "dump_spirv_if_requested(\"original\"",
             "dump_spirv_if_requested(\"effective\"",
             "generic dispatch pre-submit",
+            "strict graph cache plan",
+            "strict-graph-cache-plan",
             "no_access_binding_count",
             "strict_graph_cache_bytes",
             "spirv_instruction_count",

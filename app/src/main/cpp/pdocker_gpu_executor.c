@@ -14364,6 +14364,28 @@ static int run_vulkan_dispatch_fd(
                 &strict_object_graph_cache_bytes,
                 &strict_object_graph_cache_disabled_reason);
         }
+        if ((dispatch_lifecycle_log || profile_response ||
+             getenv("PDOCKER_GPU_DISPATCH_PROFILE_LOG")) && strict_object_graph_cache_enabled) {
+            fprintf(stderr,
+                    "pdocker-gpu-executor: strict graph cache plan: "
+                    "{\"component\":\"executor\",\"event\":\"strict-graph-cache-plan\","
+                    "\"dispatch_id\":%llu,\"spirv_hash\":\"0x%016llx\","
+                    "\"cache_enabled\":%s,\"cache_key\":\"0x%016llx\","
+                    "\"active_mask\":\"0x%016llx\",\"cache_bytes\":%zu,"
+                    "\"cache_budget_bytes\":%zu,\"device_local_staging\":%s,"
+                    "\"disabled_reason\":\"%s\"}\n",
+                    (unsigned long long)dispatch_lifecycle_id,
+                    (unsigned long long)dispatch_lifecycle_spirv_hash,
+                    strict_object_graph_cache_enabled ? "true" : "false",
+                    (unsigned long long)strict_object_graph_cache_key,
+                    (unsigned long long)strict_object_graph_cache_active_mask,
+                    strict_object_graph_cache_bytes,
+                    strict_object_graph_cache_budget_bytes,
+                    strict_device_local_staging ? "true" : "false",
+                    strict_object_graph_cache_disabled_reason ?
+                        strict_object_graph_cache_disabled_reason : "");
+            fflush(stderr);
+        }
         double graph_start = now_ms();
         if (strict_object_graph_cache_enabled && strict_object_graph_cache_key != 0) {
             strict_object_graph_cache_entry = find_strict_graph_cache_entry(
