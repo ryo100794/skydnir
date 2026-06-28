@@ -478,7 +478,7 @@ class GpuAbiContractTest(unittest.TestCase):
                 "role": "partial_to_workgroup_candidate",
                 "phase": "full",
                 "slot_base": 68,
-                "lane_trace_layout": {"slot_base": 144, "lane_count": 32, "words_per_lane": 8},
+                "lane_trace_layout": {"slot_base": 144, "lane_count": 64, "words_per_lane": 8},
             },
             {
                 "candidate_id": 215,
@@ -486,7 +486,7 @@ class GpuAbiContractTest(unittest.TestCase):
                 "role": "reduction_candidate",
                 "phase": "full",
                 "slot_base": 80,
-                "lane_trace_layout": {"slot_base": 400, "lane_count": 32, "words_per_lane": 8},
+                "lane_trace_layout": {"slot_base": 656, "lane_count": 64, "words_per_lane": 8},
             },
             {
                 "candidate_id": 227,
@@ -531,10 +531,10 @@ class GpuAbiContractTest(unittest.TestCase):
         parser = namespace["parse_q6_final_store_trace_v2"]
         values = {
             128: 1,
-            129: 32,
+            129: 64,
             130: 8,
             131: 144,
-            132: 400,
+            132: 656,
         }
         for record, value_bits in [
             (probe_writes[0], 0x3f500000),
@@ -558,7 +558,7 @@ class GpuAbiContractTest(unittest.TestCase):
                 values[base + 10] = 2
         for lane_base, candidate_id, value_bits in [
             (144 + 3 * 8, 205, 0x3fa00000),
-            (400 + 3 * 8, 215, 0x40200000),
+            (656 + 3 * 8, 215, 0x40200000),
         ]:
             values[lane_base] = 3
             values[lane_base + 1] = value_bits
@@ -588,6 +588,24 @@ class GpuAbiContractTest(unittest.TestCase):
             [205, 215],
             [phase["expected_candidate_id"] for phase in lane_trace["phases"]],
         )
+
+    def test_gpu_executor_scans_q6_final_store_debug_records_by_schema(self):
+        source = GPU_EXECUTOR.read_text()
+        for marker in [
+            "PDOCKER_GPU_Q6_DEBUG_PROBE_RECORD_SCHEMA_VERSION 2u",
+            "PDOCKER_GPU_Q6_DEBUG_PROBE_ROLE_FINAL_OUTPUT_STORE 4u",
+            "PDOCKER_GPU_Q6_DEBUG_PROBE_MAX_U32_INDEX 1216u",
+            "PDOCKER_GPU_Q6_DEBUG_PROBE_RECORD_WORDS 11u",
+            "base + PDOCKER_GPU_Q6_DEBUG_PROBE_RECORD_WORDS <= scan_u32_count",
+            "role != PDOCKER_GPU_Q6_DEBUG_PROBE_ROLE_FINAL_OUTPUT_STORE",
+            "schema != PDOCKER_GPU_Q6_DEBUG_PROBE_RECORD_SCHEMA_VERSION",
+            "(uint64_t)out_index >= output_float_count",
+            "candidate == 0u",
+            "PDOCKER_GPU_Q6_DEBUG_PROBE_MAX_U32_INDEX);",
+        ]:
+            self.assertIn(marker, source)
+        self.assertNotIn("{56u, 64u, 4u}", source)
+        self.assertNotIn("{116u, 130u, 4u}", source)
 
     def test_q6_stage_trace_parser_accepts_nonfinal_stage_records(self):
         parser = load_q6_stage_trace_parser()
@@ -9830,7 +9848,7 @@ class GpuAbiContractTest(unittest.TestCase):
             ],
         )
         self.assertTrue(
-            all(item["lane_trace_layout"]["lane_count"] == 32 for item in lane_probe_writes)
+            all(item["lane_trace_layout"]["lane_count"] == 64 for item in lane_probe_writes)
         )
         self.assertEqual(
             [item["role"] for item in instrumentation["probe_writes"]],

@@ -7596,6 +7596,11 @@ static void write_f32_fd_sample_array_at_indices(
     fprintf(out, "]");
 }
 
+#define PDOCKER_GPU_Q6_DEBUG_PROBE_RECORD_SCHEMA_VERSION 2u
+#define PDOCKER_GPU_Q6_DEBUG_PROBE_ROLE_FINAL_OUTPUT_STORE 4u
+#define PDOCKER_GPU_Q6_DEBUG_PROBE_MAX_U32_INDEX 1216u
+#define PDOCKER_GPU_Q6_DEBUG_PROBE_RECORD_WORDS 11u
+
 typedef struct {
     uint64_t output_index;
     uint32_t workgroup_x;
@@ -7831,10 +7836,10 @@ static void write_vulkan_binding_report(
                 out,
                 (const unsigned char *)vk_buffers[i]->map + binding_gpu_offset[i],
                 local_size,
-                704);
+                PDOCKER_GPU_Q6_DEBUG_PROBE_MAX_U32_INDEX);
             if (buffer_fds && buffer_fds[i] >= 0 && fd_after_hash && fd_after_hash[i] != 0) {
                 fprintf(out, ",\"u32_after_writeback\":");
-                write_u32_fd_sample_array_prefix(out, buffer_fds[i], bindings[i].offset, local_size, 704);
+                write_u32_fd_sample_array_prefix(out, buffer_fds[i], bindings[i].offset, local_size, PDOCKER_GPU_Q6_DEBUG_PROBE_MAX_U32_INDEX);
             }
         }
         fprintf(out, "}");
@@ -8576,21 +8581,25 @@ static size_t append_q6_final_store_output_indices_from_debug_probe(
     const unsigned char *debug_base =
         (const unsigned char *)vk_buffers[debug_index]->map + binding_gpu_offset[debug_index];
     const uint64_t output_float_count = bindings[output_index].size / sizeof(float);
-    const struct {
-        size_t slot_base;
-        uint32_t candidate_id;
-        uint32_t role_code;
-    } records[] = {
-        {56u, 64u, 4u},
-        {116u, 130u, 4u},
-    };
+    if (output_float_count == 0) {
+        return 0;
+    }
+    const size_t debug_u32_count = debug_size / sizeof(uint32_t);
+    size_t scan_u32_count = debug_u32_count;
+    if (scan_u32_count > PDOCKER_GPU_Q6_DEBUG_PROBE_MAX_U32_INDEX) {
+        scan_u32_count = PDOCKER_GPU_Q6_DEBUG_PROBE_MAX_U32_INDEX;
+    }
     size_t final_count = 0;
-    for (size_t ri = 0; ri < sizeof(records) / sizeof(records[0]); ++ri) {
+    if (scan_u32_count < PDOCKER_GPU_Q6_DEBUG_PROBE_RECORD_WORDS) {
+        return 0;
+    }
+    for (size_t base = 0;
+         base + PDOCKER_GPU_Q6_DEBUG_PROBE_RECORD_WORDS <= scan_u32_count;
+         ++base) {
         int ok_candidate = 0;
         int ok_role = 0;
         int ok_output = 0;
         int ok_schema = 0;
-        const size_t base = records[ri].slot_base;
         const uint32_t candidate =
             sample_u32_at(debug_base, debug_size, base, &ok_candidate);
         const uint32_t role =
@@ -8600,9 +8609,9 @@ static size_t append_q6_final_store_output_indices_from_debug_probe(
         const uint32_t schema =
             sample_u32_at(debug_base, debug_size, base + 10u, &ok_schema);
         if (!ok_candidate || !ok_role || !ok_output || !ok_schema ||
-            candidate != records[ri].candidate_id ||
-            role != records[ri].role_code ||
-            schema != 2u ||
+            candidate == 0u ||
+            role != PDOCKER_GPU_Q6_DEBUG_PROBE_ROLE_FINAL_OUTPUT_STORE ||
+            schema != PDOCKER_GPU_Q6_DEBUG_PROBE_RECORD_SCHEMA_VERSION ||
             (uint64_t)out_index >= output_float_count) {
             continue;
         }
@@ -11743,10 +11752,10 @@ static void write_vulkan_binding_compact_report(
                     out,
                     (const unsigned char *)vk_buffers[i]->map + binding_gpu_offset[i],
                     local_size,
-                    704);
+                    PDOCKER_GPU_Q6_DEBUG_PROBE_MAX_U32_INDEX);
                 if (buffer_fds && buffer_fds[i] >= 0 && fd_after_hash && fd_after_hash[i] != 0) {
                     fprintf(out, ",\"u32_after_writeback\":");
-                    write_u32_fd_sample_array_prefix(out, buffer_fds[i], bindings[i].offset, local_size, 704);
+                    write_u32_fd_sample_array_prefix(out, buffer_fds[i], bindings[i].offset, local_size, PDOCKER_GPU_Q6_DEBUG_PROBE_MAX_U32_INDEX);
                 }
             } else {
                 fprintf(out, ",\"f32_after_dispatch\":");
