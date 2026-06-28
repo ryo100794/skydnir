@@ -8320,12 +8320,15 @@ class GpuAbiContractTest(unittest.TestCase):
 
     def test_vulkan_executor_range_helpers_avoid_truncation_and_wrap(self):
         source = GPU_EXECUTOR.read_text()
-        descriptor_offset_body = source.split("static int vulkan_binding_descriptor_offset_equals_api_offset", 1)[1].split("static int vulkan_binding_gpu_offset_equals_memory_plus_api_offset", 1)[0]
-        gpu_offset_body = source.split("static int vulkan_binding_gpu_offset_equals_memory_plus_api_offset", 1)[1].split("static int vulkan_binding_descriptor_range_matches_api_range", 1)[0]
+        offset_equals_body = c_function_body(source, "vulkan_binding_offset_equals_memory_plus_api_offset")
+        descriptor_offset_body = c_function_body(source, "vulkan_binding_descriptor_offset_equals_api_offset")
+        gpu_offset_body = c_function_body(source, "vulkan_binding_gpu_offset_equals_memory_plus_api_offset")
         spec_value_body = c_function_body(source, "specialization_value_u64")
         overlap_body = c_function_body(source, "ranges_overlap_off_size")
         absolute_range_body = c_function_body(source, "vulkan_binding_api_absolute_range")
         frame_range_body = c_function_body(source, "frame_ranges_do_not_overlap")
+        self.assertIn("binding->offset < 0", offset_equals_body)
+        self.assertIn("checked_u64_add3(memory_offset, api_offset, 0, &expected_offset)", offset_equals_body)
         self.assertIn("(uint64_t)binding->api_offset > (uint64_t)SIZE_MAX", descriptor_offset_body)
         self.assertIn("const uint64_t gpu_offset = memory_offset + api_offset", gpu_offset_body)
         self.assertIn("gpu_offset > (uint64_t)SIZE_MAX", gpu_offset_body)

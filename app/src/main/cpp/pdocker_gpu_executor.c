@@ -1026,6 +1026,8 @@ static VkImageUsageFlags vulkan_required_usage_for_image_descriptor(VkDescriptor
     }
 }
 
+static int checked_u64_add3(uint64_t a, uint64_t b, uint64_t c, uint64_t *out);
+
 static size_t vulkan_binding_descriptor_range(
         const VulkanDispatchBinding *binding,
         int strict_passthrough) {
@@ -1038,13 +1040,15 @@ static size_t vulkan_binding_descriptor_range(
 
 static int vulkan_binding_offset_equals_memory_plus_api_offset(
         const VulkanDispatchBinding *binding) {
-    if (!binding || binding->api_memory_offset < 0 || binding->api_offset < 0) {
+    if (!binding || binding->offset < 0 ||
+        binding->api_memory_offset < 0 || binding->api_offset < 0) {
         return 0;
     }
     const uint64_t memory_offset = (uint64_t)binding->api_memory_offset;
     const uint64_t api_offset = (uint64_t)binding->api_offset;
-    if (memory_offset > UINT64_MAX - api_offset) return 0;
-    return (uint64_t)binding->offset == memory_offset + api_offset;
+    uint64_t expected_offset = 0;
+    if (checked_u64_add3(memory_offset, api_offset, 0, &expected_offset) != 0) return 0;
+    return (uint64_t)binding->offset == expected_offset;
 }
 
 static int vulkan_binding_descriptor_offset_equals_api_offset(
@@ -2709,8 +2713,6 @@ static int find_strict_buffer_object(
     }
     return -1;
 }
-
-static int checked_u64_add3(uint64_t a, uint64_t b, uint64_t c, uint64_t *out);
 
 static int checked_u64_to_off_t(uint64_t value, off_t *out) {
     if (!out) return -EINVAL;
