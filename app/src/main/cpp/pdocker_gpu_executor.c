@@ -21985,6 +21985,10 @@ static int validate_vulkan_graphics_v6_frame_content(
             if (!u64_range_within_size(descriptor->transfer_offset, descriptor->transfer_size, buffer->size)) {
                 return -ERANGE;
             }
+            if (descriptor->transfer_offset < effective_offset) return -ERANGE;
+            uint64_t transfer_delta = descriptor->transfer_offset - effective_offset;
+            if (transfer_delta > effective_range ||
+                descriptor->transfer_size > effective_range - transfer_delta) return -ERANGE;
             continue;
         }
         if (vulkan_dispatch_image_descriptor_type_from_api(descriptor->descriptor_type, &descriptor_type) != 0) {
@@ -22403,6 +22407,10 @@ static int validate_vulkan_graphics_v6_frame_content(
                     effective_range = buffer->size - effective_offset;
                 }
                 if (!u64_range_within_size(effective_offset, effective_range, buffer->size)) return -ERANGE;
+                if (descriptor->transfer_offset < effective_offset) return -ERANGE;
+                uint64_t transfer_delta = descriptor->transfer_offset - effective_offset;
+                if (transfer_delta > effective_range ||
+                    descriptor->transfer_size > effective_range - transfer_delta) return -ERANGE;
                 dynamic_descriptor_count++;
             }
             if (dynamic_descriptor_count != command->dynamic_offset_count) return -EPROTO;
