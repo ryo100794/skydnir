@@ -1538,11 +1538,26 @@ static VkDeviceSize pdocker_vulkan_heap_size(void) {
     return min_heap;
 }
 
-static VkDeviceSize align_device_size(VkDeviceSize value, VkDeviceSize alignment) {
-    if (alignment == 0) return value;
+static bool align_device_size_checked(VkDeviceSize value, VkDeviceSize alignment, VkDeviceSize *out) {
+    if (!out) return false;
+    if (alignment == 0) {
+        *out = value;
+        return true;
+    }
     VkDeviceSize rem = value % alignment;
-    if (rem == 0) return value;
-    return value + alignment - rem;
+    if (rem == 0) {
+        *out = value;
+        return true;
+    }
+    VkDeviceSize add = alignment - rem;
+    if (value > UINT64_MAX - add) return false;
+    *out = value + add;
+    return true;
+}
+
+static VkDeviceSize align_device_size(VkDeviceSize value, VkDeviceSize alignment) {
+    VkDeviceSize out = 0;
+    return align_device_size_checked(value, alignment, &out) ? out : 0;
 }
 
 static bool checked_mul_u64(uint64_t a, uint64_t b, uint64_t *out) {
@@ -2170,7 +2185,9 @@ static VkDeviceSize estimate_image_requirement_size(const VkImageCreateInfo *inf
     if (bytes_per_pixel == 0) return 0;
     if (!checked_mul_u64(pixels, bytes_per_pixel, &pixels)) return 0;
     if (!checked_mul_u64(pixels, sample_count, &pixels)) return 0;
-    return align_device_size((VkDeviceSize)pixels, PDOCKER_VK_REQUIREMENT_ALIGNMENT);
+    VkDeviceSize aligned = 0;
+    if (!align_device_size_checked((VkDeviceSize)pixels, PDOCKER_VK_REQUIREMENT_ALIGNMENT, &aligned)) return 0;
+    return aligned;
 }
 
 static VkDeviceSize pdocker_vulkan_max_buffer_size(void) {
@@ -11818,6 +11835,19 @@ static VkResult validate_image_create_info_for_transport(const VkImageCreateInfo
     if (pdocker_vk_sample_count_value(info->samples) == 0 ||
         (info->samples & props.sampleCounts) == 0) {
         return VK_ERROR_FORMAT_NOT_SUPPORTED;
+    }
+    if (info->extent.width == 0 || info->extent.height == 0 || info->extent.depth == 0 ||
+        info->mipLevels == 0 || info->arrayLayers == 0 ||
+        info->extent.width > props.maxExtent.width ||
+        info->extent.height > props.maxExtent.height ||
+        info->extent.depth > props.maxExtent.depth ||
+        info->mipLevels > props.maxMipLevels ||
+        info->arrayLayers > props.maxArrayLayers) {
+        return VK_ERROR_FORMAT_NOT_SUPPORTED;
+    }
+    VkDeviceSize requirements_size = estimate_image_requirement_size(info);
+    if (requirements_size == 0 || requirements_size > props.maxResourceSize) {
+        return VK_ERROR_OUT_OF_DEVICE_MEMORY;
     }
     return VK_SUCCESS;
 }

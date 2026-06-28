@@ -6056,17 +6056,26 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         for sample in ["1", "2", "4", "8", "16", "32", "64"]:
             self.assertIn(f"return {sample}u;", sample_count_body)
+        align_body = icd.split("static bool align_device_size_checked", 1)[1].split(
+            "static VkDeviceSize align_device_size", 1
+        )[0]
         estimate_body = icd.split("static VkDeviceSize estimate_image_requirement_size", 1)[1].split(
             "static VkDeviceSize pdocker_vulkan_max_buffer_size", 1
         )[0]
+        self.assertIn("if (value > UINT64_MAX - add) return false;", align_body)
         self.assertIn("const uint32_t sample_count = pdocker_vk_sample_count_value(info->samples);", estimate_body)
         self.assertIn("if (sample_count == 0) return 0;", estimate_body)
         self.assertIn("checked_mul_u64(pixels, sample_count, &pixels)", estimate_body)
+        self.assertIn("align_device_size_checked((VkDeviceSize)pixels", estimate_body)
         validate_image_body = icd.split("static VkResult validate_image_create_info_for_transport", 1)[1].split(
             "static VkResult validate_image_view_create_info_for_transport", 1
         )[0]
         self.assertIn("pdocker_vk_sample_count_value(info->samples) == 0", validate_image_body)
         self.assertIn("(info->samples & props.sampleCounts) == 0", validate_image_body)
+        self.assertIn("info->extent.width > props.maxExtent.width", validate_image_body)
+        self.assertIn("info->mipLevels > props.maxMipLevels", validate_image_body)
+        self.assertIn("info->arrayLayers > props.maxArrayLayers", validate_image_body)
+        self.assertIn("requirements_size == 0 || requirements_size > props.maxResourceSize", validate_image_body)
         self.assertIn("VkSampleCountFlags sample_counts = pdocker_vk_image_sample_counts_for_request(", image_props)
         self.assertIn("if (!sample_counts) return VK_ERROR_FORMAT_NOT_SUPPORTED;", image_props)
         self.assertIn("pImageFormatProperties->sampleCounts = sample_counts;", image_props)
