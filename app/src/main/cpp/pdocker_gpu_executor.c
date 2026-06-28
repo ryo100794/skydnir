@@ -13446,6 +13446,47 @@ static int run_vulkan_dispatch_fd(
                     "index=%zu field=%s\n",
                     strict_binding_index,
                     strict_binding_field ? strict_binding_field : "unknown");
+            if (strict_binding_index < binding_count) {
+                const VulkanDispatchBinding *b = &bindings[strict_binding_index];
+                uint64_t expected_offset = 0;
+                int expected_offset_valid = 0;
+                if (b->api_memory_offset >= 0 && b->api_offset >= 0) {
+                    uint64_t memory_offset = (uint64_t)b->api_memory_offset;
+                    uint64_t descriptor_offset = (uint64_t)b->api_offset;
+                    if (memory_offset <= UINT64_MAX - descriptor_offset) {
+                        expected_offset = memory_offset + descriptor_offset;
+                        expected_offset_valid = 1;
+                    }
+                }
+                fprintf(stderr,
+                        "pdocker-gpu-executor: strict binding contract detail: "
+                        "{\"binding_index\":%zu,\"field\":\"%s\","
+                        "\"descriptor_set\":%u,\"binding\":%u,"
+                        "\"array_element\":%u,\"offset\":%lld,"
+                        "\"expected_offset_valid\":%s,"
+                        "\"expected_offset\":%llu,"
+                        "\"api_memory_offset\":%lld,\"api_offset\":%lld,"
+                        "\"transfer_size\":%zu,\"api_range\":%zu,"
+                        "\"api_buffer_size\":%zu,\"api_memory_size\":%zu,"
+                        "\"api_memory_id\":\"0x%016llx\","
+                        "\"api_buffer_id\":\"0x%016llx\"}\n",
+                        strict_binding_index,
+                        strict_binding_field ? strict_binding_field : "unknown",
+                        b->descriptor_set,
+                        b->binding,
+                        b->api_array_element,
+                        (long long)b->offset,
+                        expected_offset_valid ? "true" : "false",
+                        (unsigned long long)expected_offset,
+                        (long long)b->api_memory_offset,
+                        (long long)b->api_offset,
+                        b->size,
+                        b->api_range,
+                        b->api_buffer_size,
+                        b->api_memory_size,
+                        (unsigned long long)b->api_memory_id,
+                        (unsigned long long)b->api_buffer_id);
+            }
             json_fail("vulkan-dispatch", "strict binding contract mismatch");
             return 64;
         }

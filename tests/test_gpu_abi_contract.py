@@ -8528,6 +8528,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "generic dispatch pre-submit",
             "strict graph cache plan",
             "strict-graph-cache-plan",
+            "strict binding contract detail",
+            "expected_offset_valid",
             "no_access_binding_count",
             "strict_graph_cache_bytes",
             "spirv_instruction_count",
