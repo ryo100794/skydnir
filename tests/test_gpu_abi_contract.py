@@ -4074,6 +4074,12 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("vkCmdDrawIndirect", executor)
         self.assertIn("vkCmdDrawIndexedIndirect", executor)
         self.assertIn("find_vulkan_graphics_v68_indirect_draw", executor)
+        self.assertIn("vulkan_graphics_replay_buffer_vk_offset_for_indirect_draw", executor)
+        self.assertIn("vulkan_graphics_replay_buffer_vk_offset_for_range", executor)
+        self.assertIn("sizeof(VkDrawIndirectCommand)", executor)
+        self.assertIn("sizeof(VkDrawIndexedIndirectCommand)", executor)
+        self.assertNotIn("(VkDeviceSize)(indirect->indirect_offset - indirect_buffer->upload_base)", executor)
+        self.assertNotIn("(VkDeviceSize)(indirect->count_offset - count_buffer->upload_base)", executor)
         self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V68_ABI_MINOR", executor)
 
     def test_vulkan_graphics_v6_field_macros_match_packed_structs(self):

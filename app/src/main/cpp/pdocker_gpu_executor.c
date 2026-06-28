@@ -25474,6 +25474,58 @@ static void destroy_vulkan_graphics_replay_buffers(
     memset(buffers, 0, sizeof(*buffers));
 }
 
+static int vulkan_graphics_indirect_draw_span(
+        uint32_t draw_count,
+        uint32_t stride,
+        uint64_t command_size,
+        uint64_t *out_size) {
+    if (!out_size || command_size == 0) return -EINVAL;
+    if (draw_count == 0 || (stride % 4u) != 0 ||
+        (uint64_t)stride < command_size) {
+        return -EPROTO;
+    }
+    uint64_t last_offset = 0;
+    if (!checked_mul_u64_executor((uint64_t)(draw_count - 1u),
+                                  (uint64_t)stride,
+                                  &last_offset) ||
+        checked_u64_add3(last_offset, command_size, 0, out_size) != 0) {
+        return -EOVERFLOW;
+    }
+    return 0;
+}
+
+static int vulkan_graphics_replay_buffer_vk_offset_for_range(
+        const VulkanGraphicsReplayBuffer *buffer,
+        uint64_t offset,
+        uint64_t size,
+        VkDeviceSize *out_offset) {
+    if (!buffer || !out_offset || !buffer->buffer.buffer || size == 0) {
+        return -EINVAL;
+    }
+    if (offset < buffer->upload_base ||
+        offset > buffer->upload_end ||
+        size > buffer->upload_end - offset) {
+        return -ERANGE;
+    }
+    *out_offset = (VkDeviceSize)(offset - buffer->upload_base);
+    return 0;
+}
+
+static int vulkan_graphics_replay_buffer_vk_offset_for_indirect_draw(
+        const VulkanGraphicsReplayBuffer *buffer,
+        uint64_t offset,
+        uint32_t draw_count,
+        uint32_t stride,
+        uint64_t command_size,
+        VkDeviceSize *out_offset) {
+    uint64_t span = 0;
+    int rc = vulkan_graphics_indirect_draw_span(
+        draw_count, stride, command_size, &span);
+    if (rc != 0) return rc;
+    return vulkan_graphics_replay_buffer_vk_offset_for_range(
+        buffer, offset, span, out_offset);
+}
+
 
 typedef struct VulkanGraphicsReplayQueryPool {
     uint64_t query_pool_id;
@@ -27560,16 +27612,25 @@ static int record_vulkan_graphics_v6_command_buffer(
                         buffers, indirect->indirect_resource_index);
                     if (indirect_index < 0) { rc = indirect_index; goto cleanup; }
                     const VulkanGraphicsReplayBuffer *indirect_buffer = &buffers->buffers[(uint32_t)indirect_index];
-                    VkDeviceSize indirect_offset = (VkDeviceSize)(indirect->indirect_offset - indirect_buffer->upload_base);
+                    VkDeviceSize indirect_offset = 0;
+                    rc = vulkan_graphics_replay_buffer_vk_offset_for_indirect_draw(
+                        indirect_buffer, indirect->indirect_offset, indirect->draw_count,
+                        indirect->stride, (uint64_t)sizeof(VkDrawIndirectCommand),
+                        &indirect_offset);
+                    if (rc != 0) goto cleanup;
                     if (indirect->flags & PDOCKER_GPU_GRAPHICS_V68_INDIRECT_DRAW_COUNT_BUFFER_PRESENT) {
                         if (!rt->cmd_draw_indirect_count) { rc = -EOPNOTSUPP; goto cleanup; }
                         int count_index = find_vulkan_graphics_replay_buffer(
                             buffers, indirect->count_resource_index);
                         if (count_index < 0) { rc = count_index; goto cleanup; }
                         const VulkanGraphicsReplayBuffer *count_buffer = &buffers->buffers[(uint32_t)count_index];
+                        VkDeviceSize count_offset = 0;
+                        rc = vulkan_graphics_replay_buffer_vk_offset_for_range(
+                            count_buffer, indirect->count_offset, sizeof(uint32_t),
+                            &count_offset);
+                        if (rc != 0) goto cleanup;
                         rt->cmd_draw_indirect_count(command_buffer, indirect_buffer->buffer.buffer, indirect_offset,
-                                                    count_buffer->buffer.buffer,
-                                                    (VkDeviceSize)(indirect->count_offset - count_buffer->upload_base),
+                                                    count_buffer->buffer.buffer, count_offset,
                                                     indirect->draw_count, indirect->stride);
                     } else {
                         vkCmdDrawIndirect(command_buffer, indirect_buffer->buffer.buffer, indirect_offset,
@@ -27668,16 +27729,25 @@ static int record_vulkan_graphics_v6_command_buffer(
                         buffers, indirect->indirect_resource_index);
                     if (indirect_index < 0) { rc = indirect_index; goto cleanup; }
                     const VulkanGraphicsReplayBuffer *indirect_buffer = &buffers->buffers[(uint32_t)indirect_index];
-                    VkDeviceSize indirect_offset = (VkDeviceSize)(indirect->indirect_offset - indirect_buffer->upload_base);
+                    VkDeviceSize indirect_offset = 0;
+                    rc = vulkan_graphics_replay_buffer_vk_offset_for_indirect_draw(
+                        indirect_buffer, indirect->indirect_offset, indirect->draw_count,
+                        indirect->stride, (uint64_t)sizeof(VkDrawIndexedIndirectCommand),
+                        &indirect_offset);
+                    if (rc != 0) goto cleanup;
                     if (indirect->flags & PDOCKER_GPU_GRAPHICS_V68_INDIRECT_DRAW_COUNT_BUFFER_PRESENT) {
                         if (!rt->cmd_draw_indexed_indirect_count) { rc = -EOPNOTSUPP; goto cleanup; }
                         int count_index = find_vulkan_graphics_replay_buffer(
                             buffers, indirect->count_resource_index);
                         if (count_index < 0) { rc = count_index; goto cleanup; }
                         const VulkanGraphicsReplayBuffer *count_buffer = &buffers->buffers[(uint32_t)count_index];
+                        VkDeviceSize count_offset = 0;
+                        rc = vulkan_graphics_replay_buffer_vk_offset_for_range(
+                            count_buffer, indirect->count_offset, sizeof(uint32_t),
+                            &count_offset);
+                        if (rc != 0) goto cleanup;
                         rt->cmd_draw_indexed_indirect_count(command_buffer, indirect_buffer->buffer.buffer, indirect_offset,
-                                                            count_buffer->buffer.buffer,
-                                                            (VkDeviceSize)(indirect->count_offset - count_buffer->upload_base),
+                                                            count_buffer->buffer.buffer, count_offset,
                                                             indirect->draw_count, indirect->stride);
                     } else {
                         vkCmdDrawIndexedIndirect(command_buffer, indirect_buffer->buffer.buffer, indirect_offset,
