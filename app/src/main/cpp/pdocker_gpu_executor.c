@@ -1087,6 +1087,7 @@ typedef struct {
     uint64_t core_command_hash;
     int msg_flags;
     size_t scm_rights_fd_count_copied;
+    size_t scm_rights_fd_count_seen;
     int msg_trunc;
     int msg_ctrunc;
 } PdockerReceiveEvidence;
@@ -5546,7 +5547,7 @@ static void write_vulkan_reconciliation_report(
             (unsigned long long)(rx ? rx->core_command_hash : 0),
             (rx && rx->core_command_hash_comparable) ? "true" : "false",
             rx ? rx->scm_rights_fd_count_copied : 0,
-            rx ? rx->scm_rights_fd_count_copied : 0,
+            rx ? rx->scm_rights_fd_count_seen : 0,
             rx ? rx->msg_flags : 0,
             (rx && rx->msg_trunc) ? "true" : "false",
             (rx && rx->msg_ctrunc) ? "true" : "false",
@@ -29999,6 +30000,7 @@ static int recv_command_with_fds(
             cmsg->cmsg_len >= CMSG_LEN(sizeof(int))) {
             size_t bytes = cmsg->cmsg_len - CMSG_LEN(0);
             size_t count = bytes / sizeof(int);
+            if (evidence) evidence->scm_rights_fd_count_seen += count;
             int *received = (int *)CMSG_DATA(cmsg);
             size_t copy = count;
             if (copy > max_fds) copy = max_fds;

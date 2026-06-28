@@ -8539,6 +8539,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("generic dispatch response status", icd)
         self.assertIn("response_errno", icd)
         self.assertIn("line_bytes", icd)
+        self.assertIn("scm_rights_fd_count_seen", source)
         manifest = json.loads(LLAMA_GPU_ENV_MANIFEST.read_text())
         self.assertIn(
             "PDOCKER_GPU_SPIRV_DUMP_DIR",
