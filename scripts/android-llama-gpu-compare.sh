@@ -4311,18 +4311,95 @@ def f32_sample_values(samples):
     return values
 
 
-Q6_FINAL_STORE_TRACE_EXPECTED_RECORDS = (
+Q6_LEGACY_FINAL_STORE_TRACE_EXPECTED_RECORDS = (
     {"probe": 0, "slot_base": 8, "phase": "tail", "stage": "pre-reduction-store", "candidate_id": 39, "role_code": 1},
     {"probe": 1, "slot_base": 20, "phase": "tail", "stage": "reduction-store", "candidate_id": 49, "role_code": 2},
     {"probe": 2, "slot_base": 32, "phase": "tail", "stage": "accumulator-a-store", "candidate_id": 61, "role_code": 3},
     {"probe": 3, "slot_base": 44, "phase": "tail", "stage": "accumulator-b-store", "candidate_id": 63, "role_code": 3},
-    {"probe": 4, "slot_base": 56, "phase": "tail", "candidate_id": 64, "role_code": 4},
+    {"probe": 4, "slot_base": 56, "phase": "tail", "stage": "final-store", "candidate_id": 64, "role_code": 4},
     {"probe": 5, "slot_base": 68, "phase": "full", "stage": "pre-reduction-store", "candidate_id": 105, "role_code": 1},
     {"probe": 6, "slot_base": 80, "phase": "full", "stage": "reduction-store", "candidate_id": 115, "role_code": 2},
     {"probe": 7, "slot_base": 92, "phase": "full", "stage": "accumulator-a-store", "candidate_id": 127, "role_code": 3},
     {"probe": 8, "slot_base": 104, "phase": "full", "stage": "accumulator-b-store", "candidate_id": 129, "role_code": 3},
-    {"probe": 9, "slot_base": 116, "phase": "full", "candidate_id": 130, "role_code": 4},
+    {"probe": 9, "slot_base": 116, "phase": "full", "stage": "final-store", "candidate_id": 130, "role_code": 4},
 )
+
+Q6_PROBE_ROLE_STAGE = {
+    "partial_to_workgroup_candidate": "pre-reduction-store",
+    "reduction_candidate": "reduction-store",
+    "post_reduction_workgroup_candidate": "accumulator-store",
+    "final_output_store": "final-store",
+}
+
+
+def q6_probe_expected_records_from_manifest():
+    paths = []
+    for env_map in (globals().get("manifest_requested_env", {}), globals().get("effective_runtime_env", {})):
+        if isinstance(env_map, dict):
+            value = env_map.get("PDOCKER_GPU_SPIRV_PROBE_MANIFEST")
+            if isinstance(value, str) and value:
+                paths.append(value)
+    errors = []
+    for raw_path in paths:
+        path = Path(raw_path)
+        if not path.is_file():
+            errors.append({"path": raw_path, "error": "not-local-file"})
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:  # pragma: no cover - artifact evidence path
+            errors.append({"path": raw_path, "error": type(exc).__name__, "message": str(exc)})
+            continue
+        instrumentation = payload.get("instrumentation") if isinstance(payload, dict) else None
+        writes = instrumentation.get("probe_writes") if isinstance(instrumentation, dict) else None
+        if not isinstance(writes, list) or not writes:
+            errors.append({"path": raw_path, "error": "missing-instrumentation-probe-writes"})
+            continue
+        records = []
+        for index, item in enumerate(writes):
+            if not isinstance(item, dict):
+                continue
+            try:
+                candidate_id = int(item["candidate_id"])
+                role_code = int(item["role_code"])
+                slot_base = int(item["slot_base"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            role = str(item.get("role") or "")
+            record = {
+                "probe": index,
+                "slot_base": slot_base,
+                "phase": str(item.get("phase") or ""),
+                "stage": Q6_PROBE_ROLE_STAGE.get(role, role or "unknown"),
+                "role": role,
+                "candidate_id": candidate_id,
+                "role_code": role_code,
+            }
+            lane_trace_layout = item.get("lane_trace_layout")
+            if isinstance(lane_trace_layout, dict):
+                record["lane_trace_layout"] = lane_trace_layout
+            records.append(record)
+        if records:
+            return {
+                "schema": "pdocker.q6k.debug-probe-expectations.v1",
+                "source": "manifest",
+                "path": raw_path,
+                "record_count": len(records),
+                "records": records,
+                "errors": errors,
+            }
+        errors.append({"path": raw_path, "error": "no-usable-probe-records"})
+    return {
+        "schema": "pdocker.q6k.debug-probe-expectations.v1",
+        "source": "legacy-fallback",
+        "record_count": len(Q6_LEGACY_FINAL_STORE_TRACE_EXPECTED_RECORDS),
+        "records": [dict(item) for item in Q6_LEGACY_FINAL_STORE_TRACE_EXPECTED_RECORDS],
+        "errors": errors,
+    }
+
+
+Q6_PROBE_EXPECTATION_REPORT = q6_probe_expected_records_from_manifest()
+Q6_FINAL_STORE_TRACE_EXPECTED_RECORDS = tuple(Q6_PROBE_EXPECTATION_REPORT["records"])
 
 
 def q6_u32_samples_to_map(samples):
@@ -4376,10 +4453,29 @@ def parse_q6_lane_trace_v1(dispatch, writeback):
     phases = []
     failures = []
     header_present = any(value not in (None, 0) for value in header.values())
-    for name, slot_base, expected_candidate in [
-        ("pre-reduction-lanes", Q6_LANE_TRACE_PRE_REDUCTION_BASE, 105),
-        ("reduction-lanes", Q6_LANE_TRACE_REDUCTION_BASE, 115),
-    ]:
+    lane_expectations = []
+    for expected in Q6_FINAL_STORE_TRACE_EXPECTED_RECORDS:
+        layout = expected.get("lane_trace_layout") if isinstance(expected, dict) else None
+        if not isinstance(layout, dict):
+            continue
+        slot_base_value = layout.get("slot_base")
+        candidate_value = expected.get("candidate_id")
+        if not isinstance(slot_base_value, int) or not isinstance(candidate_value, int):
+            continue
+        role = str(expected.get("role") or expected.get("stage") or "")
+        if role == "partial_to_workgroup_candidate" or expected.get("stage") == "pre-reduction-store":
+            name = "pre-reduction-lanes"
+        elif role == "reduction_candidate" or expected.get("stage") == "reduction-store":
+            name = "reduction-lanes"
+        else:
+            continue
+        lane_expectations.append((name, slot_base_value, candidate_value))
+    if not lane_expectations:
+        lane_expectations = [
+            ("pre-reduction-lanes", Q6_LANE_TRACE_PRE_REDUCTION_BASE, 105),
+            ("reduction-lanes", Q6_LANE_TRACE_REDUCTION_BASE, 115),
+        ]
+    for name, slot_base, expected_candidate in lane_expectations:
         records = []
         observed_lane_count = 0
         for lane in range(Q6_LANE_TRACE_LANE_COUNT):
@@ -5712,6 +5808,7 @@ q6_workgroup_diagnostics = {
     "q6_native_vs_writeback_split": q6_native_vs_writeback_split,
     "q6_final_store_boundary": q6_final_store_boundary,
     "q6_debug_binding_alias_safety": q6_debug_binding_alias_safety,
+    "q6_debug_probe_expectations": Q6_PROBE_EXPECTATION_REPORT,
     "q6_debug_u32_probe": q6_debug_u32_probe,
     "q6_debug_u32_probe_blocker": q6_debug_u32_probe_blocker,
     "q6_output_layout_probe": q6_output_layout_probe,

@@ -101,13 +101,28 @@ def load_q6_output_index_probe_classifier():
     return namespace["classify_q6_output_index_probe"]
 
 
-def load_q6_stage_trace_parser():
+def load_q6_stage_trace_namespace(probe_manifest_path=None):
     source = LLAMA_COMPARE.read_text()
-    start = source.index("Q6_FINAL_STORE_TRACE_EXPECTED_RECORDS = (")
+    start = source.index("Q6_LEGACY_FINAL_STORE_TRACE_EXPECTED_RECORDS = (")
     end = source.index("\n\ndef q6_oracle_sample_indices", start)
-    namespace = {"struct": __import__("struct")}
+    probe_env = (
+        {"PDOCKER_GPU_SPIRV_PROBE_MANIFEST": str(probe_manifest_path)}
+        if probe_manifest_path is not None
+        else {}
+    )
+    namespace = {
+        "json": json,
+        "Path": Path,
+        "struct": __import__("struct"),
+        "manifest_requested_env": probe_env,
+        "effective_runtime_env": {},
+    }
     exec(compile(source[start:end], str(LLAMA_COMPARE), "exec"), namespace)
-    return namespace["parse_q6_final_store_trace_v2"]
+    return namespace
+
+
+def load_q6_stage_trace_parser():
+    return load_q6_stage_trace_namespace()["parse_q6_final_store_trace_v2"]
 
 
 def load_q6_stage_trace_spvasm_analyzer():
@@ -453,6 +468,125 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertLess(
             verifier.index("elif _q6_debug_alias_evidence_missing("),
             verifier.index("elif q6_debug_u32_probe_blocker:"),
+        )
+
+    def test_q6_stage_trace_parser_uses_probe_manifest_expectations(self):
+        probe_writes = [
+            {
+                "candidate_id": 205,
+                "role_code": 1,
+                "role": "partial_to_workgroup_candidate",
+                "phase": "full",
+                "slot_base": 68,
+                "lane_trace_layout": {"slot_base": 144, "lane_count": 32, "words_per_lane": 8},
+            },
+            {
+                "candidate_id": 215,
+                "role_code": 2,
+                "role": "reduction_candidate",
+                "phase": "full",
+                "slot_base": 80,
+                "lane_trace_layout": {"slot_base": 400, "lane_count": 32, "words_per_lane": 8},
+            },
+            {
+                "candidate_id": 227,
+                "role_code": 3,
+                "role": "post_reduction_workgroup_candidate",
+                "phase": "full",
+                "slot_base": 92,
+            },
+            {
+                "candidate_id": 229,
+                "role_code": 3,
+                "role": "post_reduction_workgroup_candidate",
+                "phase": "full",
+                "slot_base": 104,
+            },
+            {
+                "candidate_id": 230,
+                "role_code": 4,
+                "role": "final_output_store",
+                "phase": "full",
+                "slot_base": 116,
+            },
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest_path = Path(tmp) / "q6.write.instrumentation.json"
+            manifest_path.write_text(
+                json.dumps({"instrumentation": {"probe_writes": probe_writes}}),
+                encoding="utf-8",
+            )
+            namespace = load_q6_stage_trace_namespace(manifest_path)
+
+        expectation_report = namespace["Q6_PROBE_EXPECTATION_REPORT"]
+        self.assertEqual("manifest", expectation_report["source"])
+        self.assertEqual(
+            [205, 215, 227, 229, 230],
+            [record["candidate_id"] for record in namespace["Q6_FINAL_STORE_TRACE_EXPECTED_RECORDS"]],
+        )
+        self.assertNotIn(
+            105,
+            [record["candidate_id"] for record in namespace["Q6_FINAL_STORE_TRACE_EXPECTED_RECORDS"]],
+        )
+        parser = namespace["parse_q6_final_store_trace_v2"]
+        values = {
+            128: 1,
+            129: 32,
+            130: 8,
+            131: 144,
+            132: 400,
+        }
+        for record, value_bits in [
+            (probe_writes[0], 0x3f500000),
+            (probe_writes[1], 0x3f600000),
+            (probe_writes[2], 0x3f700000),
+            (probe_writes[3], 0x3f800000),
+            (probe_writes[4], 0x3f900000),
+        ]:
+            base = record["slot_base"]
+            values[base] = record["candidate_id"]
+            values[base + 1] = record["role_code"]
+            values[base + 2] = value_bits
+            if record["role_code"] == 4:
+                values[base + 3] = 151935
+                values[base + 4] = 1186
+                values[base + 5] = 0
+                values[base + 6] = 63
+                values[base + 7] = 0
+                values[base + 8] = 0
+                values[base + 9] = 0
+                values[base + 10] = 2
+        for lane_base, candidate_id, value_bits in [
+            (144 + 3 * 8, 205, 0x3fa00000),
+            (400 + 3 * 8, 215, 0x40200000),
+        ]:
+            values[lane_base] = 3
+            values[lane_base + 1] = value_bits
+            values[lane_base + 2] = 1186
+            values[lane_base + 3] = 0
+            values[lane_base + 4] = 63
+            values[lane_base + 5] = candidate_id
+            values[lane_base + 6] = 0
+            values[lane_base + 7] = 1
+        samples = [{"index": index, "value": value} for index, value in sorted(values.items())]
+        report = parser([
+            {
+                "binding": 5,
+                "set": 0,
+                "size": 65536,
+                "debug_probe_binding": True,
+                "u32_after_dispatch": samples,
+                "u32_after_writeback": samples,
+            }
+        ])
+        self.assertEqual("pass", report["summary"])
+        self.assertEqual(5, report["bindings"][0]["executed_stage_trace_v2_count"])
+        self.assertEqual(1, report["bindings"][0]["executed_final_trace_v2_count"])
+        lane_trace = report["bindings"][0]["lane_trace_v1"]
+        self.assertEqual("pass", lane_trace["summary"])
+        self.assertEqual(
+            [205, 215],
+            [phase["expected_candidate_id"] for phase in lane_trace["phases"]],
         )
 
     def test_q6_stage_trace_parser_accepts_nonfinal_stage_records(self):
