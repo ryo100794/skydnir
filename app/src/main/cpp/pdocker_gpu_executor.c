@@ -4306,19 +4306,27 @@ static int create_strict_vulkan_object_graph(
         int buffer_index = find_strict_buffer_object(buffers, *buffer_count, bindings[i].api_buffer_id);
         if (buffer_index < 0) return -EINVAL;
         VulkanStrictMemoryObject *memory = &memories[buffers[buffer_index].memory_index];
-        uint64_t descriptor_absolute =
-            (uint64_t)bindings[i].api_memory_offset + (uint64_t)bindings[i].api_offset;
+        uint64_t descriptor_absolute = 0;
+        uint64_t descriptor_end = 0;
+        if (bindings[i].api_memory_offset < 0 || bindings[i].api_offset < 0 ||
+            checked_u64_add3((uint64_t)bindings[i].api_memory_offset,
+                             (uint64_t)bindings[i].api_offset, 0, &descriptor_absolute) != 0 ||
+            checked_u64_add3(descriptor_absolute, (uint64_t)bindings[i].size, 0, &descriptor_end) != 0 ||
+            descriptor_absolute > (uint64_t)SIZE_MAX) {
+            return -EOVERFLOW;
+        }
         if (!binding_read_needed[i]) {
             vk_buffers[i] = &buffers[buffer_index].view;
             continue;
         }
         size_t upload_offset = (size_t)descriptor_absolute;
         if (memory->device_local_staged) {
-            if (vulkan_vector_staging_offset(&buffers[buffer_index].view,
+            if ((uint64_t)bindings[i].api_offset > (uint64_t)SIZE_MAX ||
+                vulkan_vector_staging_offset(&buffers[buffer_index].view,
                                              (size_t)bindings[i].api_offset,
                                              bindings[i].size,
                                              &upload_offset) != 0) return -EINVAL;
-        } else if (descriptor_absolute + (uint64_t)bindings[i].size > (uint64_t)memory->size) {
+        } else if (descriptor_end > (uint64_t)memory->size) {
             return -EINVAL;
         }
         vk_buffers[i] = &buffers[buffer_index].view;
@@ -5124,8 +5132,9 @@ static uint64_t strict_graph_cache_key(
         u32 = binding_write_needed[i]; hash = fnv1a64_update(hash, &u32, sizeof(u32));
         size_t cache_memory_bytes = b->api_memory_size;
         if (compact_descriptor_window) {
-            const uint64_t descriptor_end = (uint64_t)b->api_offset + (uint64_t)descriptor_range;
-            if (descriptor_end > (uint64_t)SIZE_MAX) {
+            uint64_t descriptor_end = 0;
+            if (checked_u64_add3((uint64_t)b->api_offset, (uint64_t)descriptor_range, 0, &descriptor_end) != 0 ||
+                descriptor_end > (uint64_t)SIZE_MAX) {
                 if (disabled_reason) *disabled_reason = "descriptor-window-too-large";
                 return 0;
             }
@@ -14846,7 +14855,8 @@ static int run_vulkan_dispatch_fd(
 
     if (specialization_count > 0) {
         for (size_t i = 0; i < specialization_count; ++i) {
-            if (specializations[i].offset + specializations[i].size > specialization_data_size) {
+            if (specializations[i].offset > specialization_data_size ||
+                specializations[i].size > specialization_data_size - specializations[i].offset) {
                 json_fail("vulkan-dispatch", "invalid specialization range");
                 ret = 64;
                 goto cleanup;

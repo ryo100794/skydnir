@@ -8300,6 +8300,24 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, source)
 
+    def test_strict_executor_range_arithmetic_is_checked_locally(self):
+        source = GPU_EXECUTOR.read_text()
+        graph_body = source.split("static int create_strict_vulkan_object_graph", 1)[1].split("static int validate_strict_vulkan_binding_contract", 1)[0]
+        cache_key_body = source.split("static uint64_t strict_graph_cache_key", 1)[1].split("static int upload_strict_graph_bindings", 1)[0]
+        upload_body = source.split("static int upload_strict_graph_bindings", 1)[1].split("static uint64_t pipeline_specialization_hash", 1)[0]
+        dispatch_body = source.split("static int run_vulkan_dispatch_fd", 1)[1].split("static int run_vector_add", 1)[0]
+        self.assertIn("validate_strict_binding_local_range(&bindings[i], descriptor_range)", graph_body)
+        self.assertIn("checked_u64_add3((uint64_t)bindings[i].api_offset", graph_body)
+        self.assertIn("checked_u64_add3(range_start, (uint64_t)bindings[i].size", graph_body)
+        self.assertIn("checked_u64_add3((uint64_t)buffers[b].memory_offset", graph_body)
+        self.assertIn("checked_u64_add3((uint64_t)b->api_offset, (uint64_t)descriptor_range", cache_key_body)
+        self.assertIn("checked_u64_add3((uint64_t)bindings[i].api_memory_offset", upload_body)
+        self.assertIn("checked_u64_add3(descriptor_absolute, (uint64_t)bindings[i].size", upload_body)
+        self.assertIn("specializations[i].size > specialization_data_size - specializations[i].offset", dispatch_body)
+        self.assertNotIn("descriptor_absolute + (uint64_t)bindings[i].size", source)
+        self.assertNotIn("specializations[i].offset + specializations[i].size > specialization_data_size", source)
+        self.assertNotIn("bindings[i].offset + (off_t)bindings[i].size", source)
+
     def test_vulkan_graphics_v69_buffer_copy_mixed_submit(self):
         icd = VULKAN_ICD.read_text()
         executor = GPU_EXECUTOR.read_text()
