@@ -1977,3 +1977,18 @@ output as Q6 evidence.  The next device run must therefore either keep the
 target container running or fail before prompt/evidence collection.
 
 - 2026-06-03: Graphics V6.1 ABI now carries explicit dynamic-rendering replay data needed to avoid heuristic reconstruction: render area, layer count, view mask, pipeline dynamic-rendering attachment formats, descriptor `firstSet`, and command pipeline-layout id.  Producer fills these fields; executor validation distinguishes static pipeline vertex input bindings from actual bound vertex buffers.
+
+### 2026-06-28 V5/V5.1 compute frame integrity lane
+
+V5/V5.1 compute dispatch frames now fail closed at the executor boundary for
+truncated ancillary-data receives, corrupt frame/table/payload ranges,
+overlapping payload regions, resource/descriptor/push/option/object/frame hash
+mismatches, shader FD hash mismatches, and V5 `dispatch_hash` mismatches.  The
+V5 handler also preserves parsed `base_group_x/y/z` when calling the native
+Vulkan dispatch path instead of collapsing `vkCmdDispatchBase*` to zero.
+
+`specialization_hash` is intentionally not promoted to a hard V5 frame gate yet:
+the current sender and executor canonical specialization hash both include a
+native `size_t` field width.  A future ABI-compatible lane must introduce or
+accept a fixed-width specialization semantic hash before this can be enforced
+without false mismatches across 64-bit ICD and 32-bit executor builds.

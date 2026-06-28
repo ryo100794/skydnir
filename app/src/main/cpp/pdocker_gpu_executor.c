@@ -30446,6 +30446,33 @@ static int handle_vulkan_dispatch_v5_frame(int cfd) {
             }
         }
     }
+    uint64_t dispatch_indirect_buffer_id = 0;
+    if (options.has_dispatch_indirect) {
+        if (!object_tables.resources ||
+            options.dispatch_indirect_resource_index >= object_tables.resource_count) {
+            json_fail("vulkan-dispatch-v5", "invalid dispatch hash payload");
+            goto cleanup;
+        }
+        const PdockerGpuVulkanDispatchV5ResourceEntry *indirect_resource =
+            &object_tables.resources[options.dispatch_indirect_resource_index];
+        if (indirect_resource->resource_type != PDOCKER_GPU_V5_RESOURCE_TYPE_BUFFER) {
+            json_fail("vulkan-dispatch-v5", "invalid dispatch hash payload");
+            goto cleanup;
+        }
+        dispatch_indirect_buffer_id = indirect_resource->resource_id;
+    }
+    const uint64_t v5_dispatch_hash = reconcile_dispatch_hash(
+        header.gx, header.gy, header.gz,
+        options.has_base_group ? options.base_group_x : 0,
+        options.has_base_group ? options.base_group_y : 0,
+        options.has_base_group ? options.base_group_z : 0,
+        options.has_dispatch_indirect ? 1u : 0u,
+        dispatch_indirect_buffer_id,
+        options.has_dispatch_indirect ? options.dispatch_indirect_offset : 0);
+    if (header.dispatch_hash != 0 && v5_dispatch_hash != header.dispatch_hash) {
+        json_fail("vulkan-dispatch-v5", "dispatch hash mismatch");
+        goto cleanup;
+    }
     (void)run_vulkan_dispatch_fd(
         passed_fds[header.shader_fd_index], binding_fds, bindings, binding_count,
         image_descriptors, image_descriptor_count, &object_tables,

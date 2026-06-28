@@ -3782,6 +3782,17 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("zero_frame_hash", validator)
         self.assertIn("frame_hash != header->frame_hash", validator)
 
+        handler = executor.split("static int handle_vulkan_dispatch_v5_frame", 1)[1].split(
+            "static int recv_command_with_fds", 1
+        )[0]
+        self.assertIn("const uint64_t v5_dispatch_hash = reconcile_dispatch_hash(", handler)
+        self.assertIn("options.has_base_group ? options.base_group_x : 0", handler)
+        self.assertIn("dispatch_indirect_buffer_id", handler)
+        self.assertIn("options.dispatch_indirect_resource_index >= object_tables.resource_count", handler)
+        self.assertIn("indirect_resource->resource_type != PDOCKER_GPU_V5_RESOURCE_TYPE_BUFFER", handler)
+        self.assertIn("v5_dispatch_hash != header.dispatch_hash", handler)
+        self.assertIn('json_fail("vulkan-dispatch-v5", "dispatch hash mismatch")', handler)
+
     def test_vulkan_dispatch_v5_0_header_compatibility_survives_v5_1_objects(self):
         executor = GPU_EXECUTOR.read_text()
         validator = executor.split("static int validate_vulkan_dispatch_v5_header", 1)[1].split(
