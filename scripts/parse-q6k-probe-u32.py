@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Parse Q6_K debug-SSBO u32 probe records from a llama GPU artifact.
 
-The probe write module is a valid-module SPIR-V diagnostic: it appends one
-debug storage buffer through the existing VULKAN_DISPATCH_V4 path and writes a
-small fixed u32 record at selected Q6_K store sites.  This parser keeps the
-device evidence interpretation deterministic so humans do not have to eyeball
-large binding diagnostics.
+Legacy fixture parser for the original fixed-slot Q6_K debug probe layout.
+
+Current llama GPU bridge runs use the manifest-driven parser embedded in
+scripts/android-llama-gpu-compare.sh.  Keep this tool for archived artifacts
+and standalone regression fixtures only; do not use it as the authoritative
+parser for newly instrumented Q6 probes.
 """
 
 from __future__ import annotations

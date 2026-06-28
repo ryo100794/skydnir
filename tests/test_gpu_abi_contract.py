@@ -470,6 +470,17 @@ class GpuAbiContractTest(unittest.TestCase):
             verifier.index("elif q6_debug_u32_probe_blocker:"),
         )
 
+    def test_legacy_q6_fixed_layout_tools_are_marked_non_authoritative(self):
+        standalone = (ROOT / "scripts" / "parse-q6k-probe-u32.py").read_text()
+        analyzer = (ROOT / "scripts" / "maintenance" / "analyze-q6-stage-trace-spvasm.py").read_text()
+        for source in [standalone, analyzer]:
+            self.assertIn("Legacy", source)
+            self.assertIn("fixed", source)
+        self.assertIn("manifest-driven parser embedded in", standalone)
+        self.assertIn("not use it as the authoritative", standalone)
+        self.assertIn("instrumentation.probe_writes", analyzer)
+        self.assertIn("only for archived fixed-layout fixtures", analyzer)
+
     def test_q6_stage_trace_parser_uses_probe_manifest_expectations(self):
         probe_writes = [
             {

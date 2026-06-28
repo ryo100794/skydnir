@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Statically inspect Q6_K debug stage trace stores in SPIR-V assembly.
 
-The script does not execute Vulkan. It reads `spirv-dis` output and finds stores
-into the Q6 debug SSBO (binding 5). It is used to verify that the instrumented
-module contains the expected staged trace records before an ADB run.
+Legacy static analyzer for the original fixed-slot Q6 debug stage trace.
+
+The live llama GPU bridge path now records probe expectations from
+instrumentation.probe_writes and decodes them in android-llama-gpu-compare.sh.
+Use this maintenance script only for archived fixed-layout fixtures unless it is
+extended to accept a probe manifest.
 """
 
 from __future__ import annotations
