@@ -8080,6 +8080,17 @@ class GpuAbiContractTest(unittest.TestCase):
         descriptor_size = source.split("static size_t descriptor_binding_size(const PdockerVkDescriptorBinding *binding) {", 1)[1].split("\n}", 1)[0]
         self.assertNotIn("buffer_available(binding->buffer, binding->offset)", descriptor_size)
 
+    def test_vulkan_buffer_pointer_arithmetic_is_overflow_guarded(self):
+        source = VULKAN_ICD.read_text()
+        buffer_available = source.split("static size_t buffer_available", 1)[1].split("static void *buffer_ptr", 1)[0]
+        buffer_ptr = source.split("static void *buffer_ptr", 1)[1].split("static bool checked_add_u64", 1)[0]
+        self.assertIn("buffer->memory_offset > UINT64_MAX - (uint64_t)offset", buffer_available)
+        self.assertIn("const uint64_t absolute", buffer_available)
+        self.assertIn("absolute > (uint64_t)buffer->memory->size", buffer_available)
+        self.assertIn("buffer->memory_offset > UINT64_MAX - (uint64_t)offset", buffer_ptr)
+        self.assertIn("return (char *)buffer->memory->map + (size_t)absolute;", buffer_ptr)
+        self.assertNotIn("buffer->memory->map + buffer->memory_offset + offset", buffer_ptr)
+
     def test_vulkan_dynamic_whole_size_descriptor_uses_effective_vkbuffer_tail(self):
         source = VULKAN_ICD.read_text()
         self.assertIn("VK_WHOLE_SIZE is evaluated after applying the", source)

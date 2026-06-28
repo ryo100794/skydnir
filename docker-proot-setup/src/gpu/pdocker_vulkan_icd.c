@@ -8843,8 +8843,9 @@ static int send_generic_vulkan_dispatch(PdockerVkCommandBuffer *cmd) {
 static size_t buffer_available(const PdockerVkBuffer *buffer, VkDeviceSize offset) {
     if (!buffer || !buffer->memory) return 0;
     if (offset > buffer->size) return 0;
-    VkDeviceSize absolute = buffer->memory_offset + offset;
-    if (absolute > buffer->memory->size) return 0;
+    if ((uint64_t)buffer->memory_offset > UINT64_MAX - (uint64_t)offset) return 0;
+    const uint64_t absolute = (uint64_t)buffer->memory_offset + (uint64_t)offset;
+    if (absolute > (uint64_t)buffer->memory->size) return 0;
     size_t allocation_available = buffer->memory->size - (size_t)absolute;
     size_t buffer_available_bytes = buffer->size - (size_t)offset;
     return allocation_available < buffer_available_bytes
@@ -8856,7 +8857,10 @@ static void *buffer_ptr(PdockerVkBuffer *buffer, VkDeviceSize offset, VkDeviceSi
     if (!buffer || !buffer->memory) return NULL;
     size_t available = buffer_available(buffer, offset);
     if ((size_t)bytes > available) return NULL;
-    return (char *)buffer->memory->map + buffer->memory_offset + offset;
+    if ((uint64_t)buffer->memory_offset > UINT64_MAX - (uint64_t)offset) return NULL;
+    const uint64_t absolute = (uint64_t)buffer->memory_offset + (uint64_t)offset;
+    if (absolute > (uint64_t)buffer->memory->size) return NULL;
+    return (char *)buffer->memory->map + (size_t)absolute;
 }
 
 static bool checked_add_u64(uint64_t a, uint64_t b, uint64_t *out) {
