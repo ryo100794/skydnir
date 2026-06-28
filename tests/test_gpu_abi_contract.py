@@ -3726,8 +3726,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("descriptor_layout_seen", executor)
         self.assertIn("d->resource_id != views[d->image_view_index].view_id", executor)
         self.assertIn("d->resource_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE", executor)
-        self.assertIn("const uint64_t replay_descriptor_delta", executor)
-        self.assertIn("const uint64_t replay_descriptor_tail", executor)
+        self.assertIn("VkDeviceSize descriptor_offset = 0;", executor)
+        self.assertIn("vulkan_graphics_replay_buffer_vk_offset_for_range", executor)
         self.assertIn("d->resource_id != samplers[d->sampler_index].sampler_id", executor)
         self.assertIn("VkDescriptorImageInfo image_infos", executor)
         self.assertIn("writes[write_count].pImageInfo = &image_infos[write_count];", executor)
@@ -4081,6 +4081,33 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("(VkDeviceSize)(indirect->indirect_offset - indirect_buffer->upload_base)", executor)
         self.assertNotIn("(VkDeviceSize)(indirect->count_offset - count_buffer->upload_base)", executor)
         self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V68_ABI_MINOR", executor)
+
+    def test_vulkan_graphics_replay_offsets_use_checked_windows(self):
+        executor = GPU_EXECUTOR.read_text()
+        record_body = executor.split("static int record_vulkan_graphics_v6_command_buffer", 1)[1].split(
+            "static int submit_vulkan_graphics_v6_command_buffer", 1
+        )[0]
+        materialize_body = executor.split("static int materialize_vulkan_graphics_v6_buffers", 1)[1].split(
+            "typedef struct VulkanGraphicsReplayDescriptorBind", 1
+        )[0]
+        helper_body = executor.split("static int vulkan_graphics_replay_buffer_vk_offset_for_range", 1)[1].split(
+            "static int vulkan_graphics_replay_buffer_vk_offset_for_indirect_draw", 1
+        )[0]
+        self.assertIn("if (!buffer || !out_offset || !buffer->buffer.buffer)", helper_body)
+        self.assertNotIn("size == 0", helper_body)
+        self.assertIn("vulkan_graphics_replay_buffer_vk_offset_for_range", record_body)
+        self.assertIn("index_bind_span", record_body)
+        self.assertIn("range_offset = command->index_offset;", materialize_body)
+        self.assertIn("!checked_add_u64_executor(first_index_bytes, index_span, &range_size)", materialize_body)
+        for forbidden in [
+            "- replay_buffer->upload_base",
+            "- src_buffer->upload_base",
+            "- dst_buffer->upload_base",
+            "- dst->upload_base",
+            "- indirect_buffer->upload_base",
+            "- count_buffer->upload_base",
+        ]:
+            self.assertNotIn(forbidden, record_body)
 
     def test_vulkan_graphics_v6_field_macros_match_packed_structs(self):
         schemas = [

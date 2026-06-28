@@ -25499,7 +25499,7 @@ static int vulkan_graphics_replay_buffer_vk_offset_for_range(
         uint64_t offset,
         uint64_t size,
         VkDeviceSize *out_offset) {
-    if (!buffer || !out_offset || !buffer->buffer.buffer || size == 0) {
+    if (!buffer || !out_offset || !buffer->buffer.buffer) {
         return -EINVAL;
     }
     if (offset < buffer->upload_base ||
@@ -25949,11 +25949,11 @@ static int materialize_vulkan_graphics_v6_buffers(
             }
             if (!checked_mul_u64_executor(command->first_index, index_stride, &first_index_bytes) ||
                 !checked_mul_u64_executor(command->index_count, index_stride, &index_span) ||
-                checked_u64_add3(command->index_offset, first_index_bytes, 0, &range_offset) != 0) {
+                !checked_add_u64_executor(first_index_bytes, index_span, &range_size)) {
                 destroy_vulkan_graphics_replay_buffers(rt->device, out);
                 return -EOVERFLOW;
             }
-            range_size = index_span;
+            range_offset = command->index_offset;
             rc = add_vulkan_graphics_replay_buffer_range(
                 view, out, command->index_buffer_resource_index, range_offset, range_size,
                 VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
@@ -26248,12 +26248,12 @@ static int record_vulkan_graphics_v6_buffer_writeback_barriers(
     for (uint32_t i = 0; i < buffers->buffer_count; ++i) {
         const VulkanGraphicsReplayBuffer *src = &buffers->buffers[i];
         if (!src->writeback_needed) continue;
-        if (!src->buffer.buffer ||
-            src->writeback_end <= src->writeback_base ||
-            src->writeback_base < src->upload_base ||
-            src->writeback_end > src->upload_end) {
-            return -EPROTO;
-        }
+        if (src->writeback_end <= src->writeback_base) return -EPROTO;
+        VkDeviceSize writeback_offset = 0;
+        int rc = vulkan_graphics_replay_buffer_vk_offset_for_range(
+            src, src->writeback_base, src->writeback_end - src->writeback_base,
+            &writeback_offset);
+        if (rc != 0) return rc;
         if (barrier_count >= PDOCKER_GPU_GRAPHICS_REPLAY_MAX_BUFFERS) return -E2BIG;
         barriers[barrier_count++] = (VkBufferMemoryBarrier){
             .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
@@ -26262,7 +26262,7 @@ static int record_vulkan_graphics_v6_buffer_writeback_barriers(
             .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .buffer = src->buffer.buffer,
-            .offset = (VkDeviceSize)(src->writeback_base - src->upload_base),
+            .offset = writeback_offset,
             .size = (VkDeviceSize)(src->writeback_end - src->writeback_base),
         };
     }
@@ -26293,9 +26293,7 @@ static int writeback_vulkan_graphics_v6_storage_buffers(
         if (!src->writeback_needed) continue;
         if (src->resource_index >= view->header->resource_count ||
             !src->buffer.map ||
-            src->writeback_end <= src->writeback_base ||
-            src->writeback_base < src->upload_base ||
-            src->writeback_end > src->upload_end) {
+            src->writeback_end <= src->writeback_base) {
             return -EPROTO;
         }
         const PdockerGpuVulkanDispatchV5ResourceEntry *buffer =
@@ -26321,9 +26319,12 @@ static int writeback_vulkan_graphics_v6_storage_buffers(
             checked_u64_to_off_t(fd_offset_u64, &fd_offset) != 0) {
             return -EOVERFLOW;
         }
+        VkDeviceSize writeback_offset = 0;
+        int replay_rc = vulkan_graphics_replay_buffer_vk_offset_for_range(
+            src, src->writeback_base, bytes_u64, &writeback_offset);
+        if (replay_rc != 0) return replay_rc;
         const unsigned char *ptr =
-            (const unsigned char *)src->buffer.map +
-            (size_t)(src->writeback_base - src->upload_base);
+            (const unsigned char *)src->buffer.map + (size_t)writeback_offset;
         if (write_fd_exact(view->passed_fds[memory->fd_index],
                            ptr, (size_t)bytes_u64, fd_offset) != 0) {
             return -EIO;
@@ -26541,21 +26542,13 @@ static int materialize_vulkan_graphics_v6_descriptors(
                 if (buffer_index < 0) return buffer_index;
                 const VulkanGraphicsReplayBuffer *replay_buffer =
                     &buffers->buffers[(uint32_t)buffer_index];
-                if (!replay_buffer->buffer.buffer ||
-                    effective_offset < replay_buffer->upload_base ||
-                    effective_offset > replay_buffer->upload_end) {
-                    return -ERANGE;
-                }
-                const uint64_t replay_descriptor_delta =
-                    effective_offset - replay_buffer->upload_base;
-                const uint64_t replay_descriptor_tail =
-                    replay_buffer->upload_end - effective_offset;
-                if (range > replay_descriptor_tail) {
-                    return -ERANGE;
-                }
+                VkDeviceSize descriptor_offset = 0;
+                rc = vulkan_graphics_replay_buffer_vk_offset_for_range(
+                    replay_buffer, effective_offset, range, &descriptor_offset);
+                if (rc != 0) return rc;
                 infos[d] = (VkDescriptorBufferInfo){
                     .buffer = replay_buffer->buffer.buffer,
-                    .offset = (VkDeviceSize)replay_descriptor_delta,
+                    .offset = descriptor_offset,
                     .range = (VkDeviceSize)range,
                 };
                 writes[d].pBufferInfo = &infos[d];
@@ -27556,15 +27549,12 @@ static int record_vulkan_graphics_v6_command_buffer(
                     }
                     const VulkanGraphicsReplayBuffer *replay_buffer =
                         &buffers->buffers[(uint32_t)buffer_index];
-                    if (!replay_buffer->buffer.buffer ||
-                        binding->offset < replay_buffer->upload_base ||
-                        binding->offset > replay_buffer->upload_end ||
-                        binding->size > replay_buffer->upload_end - binding->offset) {
-                        rc = -ERANGE;
-                        goto cleanup;
-                    }
+                    VkDeviceSize binding_offset = 0;
+                    rc = vulkan_graphics_replay_buffer_vk_offset_for_range(
+                        replay_buffer, binding->offset, binding->size, &binding_offset);
+                    if (rc != 0) goto cleanup;
                     vk_buffers[b] = replay_buffer->buffer.buffer;
-                    offsets[b] = (VkDeviceSize)(binding->offset - replay_buffer->upload_base);
+                    offsets[b] = binding_offset;
                     strides[b] = (VkDeviceSize)binding->stride;
                 }
                 if (command->vertex_binding_count > 0) {
@@ -27657,15 +27647,12 @@ static int record_vulkan_graphics_v6_command_buffer(
                 }
                 const VulkanGraphicsReplayBuffer *replay_buffer =
                     &buffers->buffers[(uint32_t)buffer_index];
-                if (!replay_buffer->buffer.buffer ||
-                    command->index_offset < replay_buffer->upload_base ||
-                    command->index_offset > replay_buffer->upload_end) {
-                    rc = -ERANGE;
-                    goto cleanup;
-                }
+                VkDeviceSize index_offset = 0;
+                rc = vulkan_graphics_replay_buffer_vk_offset_for_range(
+                    replay_buffer, command->index_offset, 0, &index_offset);
+                if (rc != 0) goto cleanup;
                 vkCmdBindIndexBuffer(command_buffer, replay_buffer->buffer.buffer,
-                                     (VkDeviceSize)(command->index_offset - replay_buffer->upload_base),
-                                     (VkIndexType)command->index_type);
+                                     index_offset, (VkIndexType)command->index_type);
                 break;
             }
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW_INDEXED: {
@@ -27692,16 +27679,14 @@ static int record_vulkan_graphics_v6_command_buffer(
                 uint64_t index_stride = 0;
                 uint64_t first_index_bytes = 0;
                 uint64_t index_span = 0;
-                uint64_t draw_range_offset = 0;
-                uint64_t draw_range_end = 0;
+                uint64_t index_bind_span = 0;
                 rc = vulkan_graphics_index_stride(command->index_type, &index_stride);
                 if (rc != 0) goto cleanup;
                 rc = vulkan_graphics_index_type_supported_by_runtime(rt, command->index_type);
                 if (rc != 0) goto cleanup;
                 if (!checked_mul_u64_executor(command->first_index, index_stride, &first_index_bytes) ||
                     !checked_mul_u64_executor(command->index_count, index_stride, &index_span) ||
-                    checked_u64_add3(command->index_offset, first_index_bytes, 0, &draw_range_offset) != 0 ||
-                    checked_u64_add3(draw_range_offset, index_span, 0, &draw_range_end) != 0) {
+                    !checked_add_u64_executor(first_index_bytes, index_span, &index_bind_span)) {
                     rc = -EOVERFLOW;
                     goto cleanup;
                 }
@@ -27713,15 +27698,12 @@ static int record_vulkan_graphics_v6_command_buffer(
                 }
                 const VulkanGraphicsReplayBuffer *replay_buffer =
                     &buffers->buffers[(uint32_t)buffer_index];
-                if (!replay_buffer->buffer.buffer ||
-                    draw_range_offset < replay_buffer->upload_base ||
-                    draw_range_end > replay_buffer->upload_end) {
-                    rc = -ERANGE;
-                    goto cleanup;
-                }
+                VkDeviceSize index_offset = 0;
+                rc = vulkan_graphics_replay_buffer_vk_offset_for_range(
+                    replay_buffer, command->index_offset, index_bind_span, &index_offset);
+                if (rc != 0) goto cleanup;
                 vkCmdBindIndexBuffer(command_buffer, replay_buffer->buffer.buffer,
-                                     (VkDeviceSize)(command->index_offset - replay_buffer->upload_base),
-                                     (VkIndexType)command->index_type);
+                                     index_offset, (VkIndexType)command->index_type);
                 const PdockerGpuVulkanGraphicsV68IndirectDrawEntry *indirect =
                     find_vulkan_graphics_v68_indirect_draw(view, ci);
                 if (indirect) {
@@ -27873,19 +27855,17 @@ static int record_vulkan_graphics_v6_command_buffer(
                 if (dst_index < 0) { rc = dst_index; goto cleanup; }
                 const VulkanGraphicsReplayBuffer *src_buffer = &buffers->buffers[(uint32_t)src_index];
                 const VulkanGraphicsReplayBuffer *dst_buffer = &buffers->buffers[(uint32_t)dst_index];
-                if (!src_buffer->buffer.buffer || !dst_buffer->buffer.buffer ||
-                    copy->src_offset < src_buffer->upload_base ||
-                    copy->src_offset > src_buffer->upload_end ||
-                    copy->size > src_buffer->upload_end - copy->src_offset ||
-                    copy->dst_offset < dst_buffer->upload_base ||
-                    copy->dst_offset > dst_buffer->upload_end ||
-                    copy->size > dst_buffer->upload_end - copy->dst_offset) {
-                    rc = -ERANGE;
-                    goto cleanup;
-                }
+                VkDeviceSize src_offset = 0;
+                VkDeviceSize dst_offset = 0;
+                rc = vulkan_graphics_replay_buffer_vk_offset_for_range(
+                    src_buffer, copy->src_offset, copy->size, &src_offset);
+                if (rc != 0) goto cleanup;
+                rc = vulkan_graphics_replay_buffer_vk_offset_for_range(
+                    dst_buffer, copy->dst_offset, copy->size, &dst_offset);
+                if (rc != 0) goto cleanup;
                 VkBufferCopy region = {
-                    .srcOffset = (VkDeviceSize)(copy->src_offset - src_buffer->upload_base),
-                    .dstOffset = (VkDeviceSize)(copy->dst_offset - dst_buffer->upload_base),
+                    .srcOffset = src_offset,
+                    .dstOffset = dst_offset,
                     .size = (VkDeviceSize)copy->size,
                 };
                 vkCmdCopyBuffer(command_buffer, src_buffer->buffer.buffer,
@@ -27899,16 +27879,12 @@ static int record_vulkan_graphics_v6_command_buffer(
                 int dst_index = find_vulkan_graphics_replay_buffer(buffers, fill->dst_resource_index);
                 if (dst_index < 0) { rc = dst_index; goto cleanup; }
                 const VulkanGraphicsReplayBuffer *dst_buffer = &buffers->buffers[(uint32_t)dst_index];
-                if (!dst_buffer->buffer.buffer ||
-                    fill->dst_offset < dst_buffer->upload_base ||
-                    fill->dst_offset > dst_buffer->upload_end ||
-                    fill->size > dst_buffer->upload_end - fill->dst_offset) {
-                    rc = -ERANGE;
-                    goto cleanup;
-                }
+                VkDeviceSize dst_offset = 0;
+                rc = vulkan_graphics_replay_buffer_vk_offset_for_range(
+                    dst_buffer, fill->dst_offset, fill->size, &dst_offset);
+                if (rc != 0) goto cleanup;
                 vkCmdFillBuffer(command_buffer, dst_buffer->buffer.buffer,
-                                (VkDeviceSize)(fill->dst_offset - dst_buffer->upload_base),
-                                (VkDeviceSize)fill->size, fill->data);
+                                dst_offset, (VkDeviceSize)fill->size, fill->data);
                 break;
             }
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_UPDATE_BUFFER: {
@@ -27921,16 +27897,12 @@ static int record_vulkan_graphics_v6_command_buffer(
                 int dst_index = find_vulkan_graphics_replay_buffer(buffers, update->dst_resource_index);
                 if (dst_index < 0) { rc = dst_index; goto cleanup; }
                 const VulkanGraphicsReplayBuffer *dst_buffer = &buffers->buffers[(uint32_t)dst_index];
-                if (!dst_buffer->buffer.buffer ||
-                    update->dst_offset < dst_buffer->upload_base ||
-                    update->dst_offset > dst_buffer->upload_end ||
-                    update->data_size > dst_buffer->upload_end - update->dst_offset) {
-                    rc = -ERANGE;
-                    goto cleanup;
-                }
+                VkDeviceSize dst_offset = 0;
+                rc = vulkan_graphics_replay_buffer_vk_offset_for_range(
+                    dst_buffer, update->dst_offset, update->data_size, &dst_offset);
+                if (rc != 0) goto cleanup;
                 vkCmdUpdateBuffer(command_buffer, dst_buffer->buffer.buffer,
-                                  (VkDeviceSize)(update->dst_offset - dst_buffer->upload_base),
-                                  (VkDeviceSize)update->data_size,
+                                  dst_offset, (VkDeviceSize)update->data_size,
                                   view->frame + update->payload_offset);
                 break;
             }
@@ -28053,14 +28025,17 @@ static int record_vulkan_graphics_v6_command_buffer(
                 uint64_t copy_size = 0;
                 rc = vulkan_graphics_v618_copy_query_result_span(copy, &copy_size);
                 if (rc != 0) goto cleanup;
-                if (!pool->pool || !dst->buffer.buffer || copy->dst_offset < dst->upload_base ||
-                    copy->dst_offset > dst->upload_end || copy_size > dst->upload_end - copy->dst_offset ||
+                VkDeviceSize dst_offset = 0;
+                rc = vulkan_graphics_replay_buffer_vk_offset_for_range(
+                    dst, copy->dst_offset, copy_size, &dst_offset);
+                if (rc != 0) goto cleanup;
+                if (!pool->pool ||
                     copy->first_query > pool->query_count || copy->query_count > pool->query_count - copy->first_query) {
                     rc = -EPROTO;
                     goto cleanup;
                 }
                 vkCmdCopyQueryPoolResults(command_buffer, pool->pool, copy->first_query, copy->query_count,
-                                          dst->buffer.buffer, copy->dst_offset - dst->upload_base,
+                                          dst->buffer.buffer, dst_offset,
                                           copy->stride, (VkQueryResultFlags)copy->flags);
                 break;
             }
@@ -28134,15 +28109,16 @@ static int record_vulkan_graphics_v6_command_buffer(
                 rc = vulkan_graphics_v610_buffer_image_copy_span(
                     copy, &view->images[copy->image_index], &copy_offset, &copy_size);
                 if (rc != 0) goto cleanup;
-                if (!replay_buffer->buffer.buffer || !image->image ||
-                    copy_offset < replay_buffer->upload_base ||
-                    copy_offset > replay_buffer->upload_end ||
-                    copy_size > replay_buffer->upload_end - copy_offset) {
-                    rc = -ERANGE;
+                VkDeviceSize buffer_offset = 0;
+                rc = vulkan_graphics_replay_buffer_vk_offset_for_range(
+                    replay_buffer, copy_offset, copy_size, &buffer_offset);
+                if (rc != 0) goto cleanup;
+                if (!image->image) {
+                    rc = -EPROTO;
                     goto cleanup;
                 }
                 VkBufferImageCopy region = {
-                    .bufferOffset = (VkDeviceSize)(copy->buffer_offset - replay_buffer->upload_base),
+                    .bufferOffset = buffer_offset,
                     .bufferRowLength = copy->buffer_row_length,
                     .bufferImageHeight = copy->buffer_image_height,
                     .imageSubresource = {
@@ -28462,13 +28438,10 @@ static int record_vulkan_graphics_v6_command_buffer(
                     int buffer_index = find_vulkan_graphics_replay_buffer(buffers, barrier->resource_index);
                     if (buffer_index < 0) { rc = buffer_index; goto cleanup; }
                     const VulkanGraphicsReplayBuffer *replay_buffer = &buffers->buffers[(uint32_t)buffer_index];
-                    if (!replay_buffer->buffer.buffer ||
-                        barrier->offset < replay_buffer->upload_base ||
-                        barrier->offset > replay_buffer->upload_end ||
-                        barrier->size > replay_buffer->upload_end - barrier->offset) {
-                        rc = -ERANGE;
-                        goto cleanup;
-                    }
+                    VkDeviceSize barrier_offset = 0;
+                    rc = vulkan_graphics_replay_buffer_vk_offset_for_range(
+                        replay_buffer, barrier->offset, barrier->size, &barrier_offset);
+                    if (rc != 0) goto cleanup;
                     buffer_barriers_to_record[buffer_barrier_count++] = (VkBufferMemoryBarrier2){
                         .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
                         .srcStageMask = (VkPipelineStageFlags2)barrier->src_stage_mask,
@@ -28480,7 +28453,7 @@ static int record_vulkan_graphics_v6_command_buffer(
                         .dstQueueFamilyIndex = vulkan_graphics_replay_queue_family_index(
                             barrier->src_queue_family_index, barrier->dst_queue_family_index),
                         .buffer = replay_buffer->buffer.buffer,
-                        .offset = (VkDeviceSize)(barrier->offset - replay_buffer->upload_base),
+                        .offset = barrier_offset,
                         .size = (VkDeviceSize)barrier->size,
                     };
                 }
