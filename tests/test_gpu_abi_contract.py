@@ -8394,6 +8394,20 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("(uint32_t)meta->range_offset, (uint32_t)meta->range_size", record_body)
         self.assertNotIn("meta->range_offset, meta->range_size,", record_body)
 
+    def test_vulkan_graphics_push_metadata_matches_command_before_replay(self):
+        source = GPU_EXECUTOR.read_text()
+        validate_body = c_function_body(source, "validate_vulkan_graphics_v6_frame_content")
+        record_body = c_function_body(source, "record_vulkan_graphics_v6_command_buffer")
+        self.assertIn("meta->layout_id != command->pipeline_layout_id", validate_body)
+        self.assertIn("meta->stage_flags != command->flags", validate_body)
+        self.assertIn("meta->range_size != command->push_size", validate_body)
+        self.assertIn("push_hash != command->push_hash", validate_body)
+        self.assertLess(
+            validate_body.index("meta->layout_id != command->pipeline_layout_id"),
+            validate_body.index("metadata_count++"),
+        )
+        self.assertIn("vkCmdPushConstants(command_buffer", record_body)
+
     def test_vulkan_graphics_v69_buffer_copy_mixed_submit(self):
         icd = VULKAN_ICD.read_text()
         executor = GPU_EXECUTOR.read_text()

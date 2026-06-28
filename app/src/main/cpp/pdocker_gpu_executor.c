@@ -22481,6 +22481,8 @@ static int validate_vulkan_graphics_v6_frame_content(
             for (uint32_t m = 0; m < header_v61->v61.push_constant_metadata_count; ++m) {
                 const PdockerGpuVulkanGraphicsV61PushConstantMetadataEntry *meta = &push_metadata[m];
                 if (meta->command_index != i) continue;
+                if (meta->layout_id != command->pipeline_layout_id) return -EPROTO;
+                if (meta->stage_flags != command->flags) return -EPROTO;
                 if (meta->range_size != command->push_size) return -EPROTO;
                 if (!payload_range_valid(command->push_offset, command->push_size, header->frame_size)) return -EPROTO;
                 uint64_t push_hash = fnv1a64_update(1469598103934665603ull,
