@@ -7890,7 +7890,7 @@ class GpuAbiContractTest(unittest.TestCase):
         executor = GPU_EXECUTOR.read_text()
         icd = VULKAN_ICD.read_text()
         self.assertIn("dispatch_hash = fnv1a64_update_u32(dispatch_hash, op->dispatch_indirect ? 1u : 0u);", icd)
-        self.assertIn("dispatch_hash = fnv1a64_update_u64(dispatch_hash, (uint64_t)(uintptr_t)op->dispatch_indirect_buffer);", icd)
+        self.assertIn("dispatch_hash = fnv1a64_update_u64(dispatch_hash, pdocker_vk_buffer_object_id(op->dispatch_indirect_buffer));", icd)
         self.assertIn("dispatch_hash = fnv1a64_update_u64(dispatch_hash, (uint64_t)op->dispatch_indirect_offset);", icd)
         self.assertIn("static uint64_t reconcile_dispatch_hash_for_options", executor)
         self.assertIn("uint32_t dispatch_indirect", executor)
@@ -8203,6 +8203,67 @@ class GpuAbiContractTest(unittest.TestCase):
             "free((void *)sampler)",
         ]:
             self.assertNotIn(forbidden, source)
+
+    def test_vulkan_core_transport_ids_are_stable_64bit_object_ids(self):
+        source = VULKAN_ICD.read_text()
+        for marker in [
+            "uint64_t object_id;",
+            "static uint64_t pdocker_vk_memory_object_id",
+            "static uint64_t pdocker_vk_buffer_object_id",
+            "static uint64_t pdocker_vk_image_object_id",
+            "static uint64_t pdocker_vk_image_view_object_id",
+            "static uint64_t pdocker_vk_sampler_object_id",
+            "return sampler ? sampler->object_id : 0;",
+            "memory->object_id = next_vulkan_object_generation();",
+            "buffer->object_id = next_vulkan_object_generation();",
+            "image->object_id = next_vulkan_object_generation();",
+            "view->object_id = next_vulkan_object_generation();",
+            "sampler->object_id = next_vulkan_object_generation();",
+            "entry->resource_id = pdocker_vk_memory_object_id(memory);",
+            "entry->resource_id = pdocker_vk_buffer_object_id(buffer);",
+            "entry->image_id = pdocker_vk_image_object_id(image);",
+            "entry->view_id = pdocker_vk_image_view_object_id(view);",
+            "entry->sampler_id = pdocker_vk_sampler_object_id(sampler);",
+            "api_memory_ids[binding_count] = pdocker_vk_memory_object_id(dispatch_memory);",
+            "api_buffer_ids[binding_count] = pdocker_vk_buffer_object_id(binding->buffer);",
+            "uint64_t api_memory_ids[PDOCKER_VK_MAX_STORAGE_BUFFERS];",
+            "uint64_t api_buffer_ids[PDOCKER_VK_MAX_STORAGE_BUFFERS];",
+            "const uint64_t *api_memory_ids",
+            "const uint64_t *api_buffer_ids",
+            "uint64_t probe_memory_id =",
+            "uint64_t probe_buffer_id =",
+        ]:
+            self.assertIn(marker, source)
+        for forbidden in [
+            "uintptr_t api_memory_ids",
+            "uintptr_t api_buffer_ids",
+            "const uintptr_t *api_memory_ids",
+            "const uintptr_t *api_buffer_ids",
+            "uintptr_t probe_memory_id",
+            "uintptr_t probe_buffer_id",
+            "api_memory_ids[binding_count] = (uintptr_t)dispatch_memory;",
+            "api_buffer_ids[binding_count] = (uintptr_t)binding->buffer;",
+            "api_buffer_ids[i] == (uintptr_t)dispatch_indirect_buffer",
+            "dispatch_hash = fnv1a64_update_u64(dispatch_hash, (uint64_t)(uintptr_t)op->dispatch_indirect_buffer);",
+            "return sampler ? (uint64_t)-1 : 0;",
+        ]:
+            self.assertNotIn(forbidden, source)
+        for direct_core_transport_id in [
+            "entry->resource_id = (uint64_t)(uintptr_t)memory;",
+            "entry->resource_id = (uint64_t)(uintptr_t)buffer;",
+            "entry->image_id = (uint64_t)(uintptr_t)image;",
+            "entry->view_id = (uint64_t)(uintptr_t)view;",
+            "entry->sampler_id = (uint64_t)(uintptr_t)sampler;",
+            "resources[memory_index].resource_id = (uint64_t)(uintptr_t)image->memory;",
+            "image_entries[i].image_id = (uint64_t)(uintptr_t)image;",
+            "resources[memory_index].resource_id = (uint64_t)(uintptr_t)memory;",
+            "resources[buffer_index].resource_id = (uint64_t)(uintptr_t)dispatch_indirect_buffer;",
+            "image_view_entries[i].view_id = (uint64_t)(uintptr_t)view;",
+            "sampler_entries[i].sampler_id = (uint64_t)(uintptr_t)sampler;",
+            "descriptor->resource_id = (uint64_t)(uintptr_t)binding->buffer;",
+            "resource_id = (uint64_t)(uintptr_t)src->image_view;",
+        ]:
+            self.assertNotIn(direct_core_transport_id, source)
 
     def test_vulkan_icd_copy_alias_offsets_are_overflow_guarded(self):
         source = VULKAN_ICD.read_text()

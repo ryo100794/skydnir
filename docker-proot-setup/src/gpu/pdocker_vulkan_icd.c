@@ -248,6 +248,7 @@ static uint64_t g_generic_dispatch_sequence = 0;
 #define PDOCKER_VK_FEATURE_TESSELLATION_SHADER        (1ull << 21)
 
 struct PdockerVkMemory {
+    uint64_t object_id;
     size_t size;
     uint32_t memory_type_index;
     VkMemoryPropertyFlags property_flags;
@@ -275,6 +276,7 @@ typedef struct {
 } PdockerVkImageLayoutRange;
 
 struct PdockerVkBuffer {
+    uint64_t object_id;
     size_t size;
     VkDeviceSize requirements_size;
     VkDeviceSize requirements_alignment;
@@ -285,6 +287,7 @@ struct PdockerVkBuffer {
 };
 
 struct PdockerVkImage {
+    uint64_t object_id;
     VkImageCreateFlags flags;
     VkImageType image_type;
     VkFormat format;
@@ -312,6 +315,7 @@ struct PdockerVkImage {
 };
 
 struct PdockerVkImageView {
+    uint64_t object_id;
     PdockerVkImage *image;
     VkImageViewType view_type;
     VkFormat format;
@@ -344,6 +348,7 @@ struct PdockerVkSwapchain {
 };
 
 struct PdockerVkSampler {
+    uint64_t object_id;
     VkFilter mag_filter;
     VkFilter min_filter;
     VkSamplerMipmapMode mipmap_mode;
@@ -361,6 +366,26 @@ struct PdockerVkSampler {
     VkBool32 unnormalized_coordinates;
     uint64_t generation;
 };
+
+static uint64_t pdocker_vk_memory_object_id(const PdockerVkMemory *memory) {
+    return memory ? memory->object_id : 0;
+}
+
+static uint64_t pdocker_vk_buffer_object_id(const PdockerVkBuffer *buffer) {
+    return buffer ? buffer->object_id : 0;
+}
+
+static uint64_t pdocker_vk_image_object_id(const PdockerVkImage *image) {
+    return image ? image->object_id : 0;
+}
+
+static uint64_t pdocker_vk_image_view_object_id(const PdockerVkImageView *view) {
+    return view ? view->object_id : 0;
+}
+
+static uint64_t pdocker_vk_sampler_object_id(const PdockerVkSampler *sampler) {
+    return sampler ? sampler->object_id : 0;
+}
 
 struct PdockerVkDescriptorBinding {
     PdockerVkBuffer *buffer;
@@ -3575,8 +3600,8 @@ static void trace_vulkan_reconcile_evidence(
         const VkDeviceSize *api_dynamic_offsets,
         const VkDeviceSize *api_memory_offsets,
         const size_t *api_memory_sizes,
-        const uintptr_t *api_memory_ids,
-        const uintptr_t *api_buffer_ids) {
+        const uint64_t *api_memory_ids,
+        const uint64_t *api_buffer_ids) {
     if (!reconcile_api_evidence_log_enabled()) return;
     fprintf(stderr,
             "pdocker-vulkan-icd: reconcile api trace: "
@@ -3856,7 +3881,7 @@ static int collect_graphics_memory_resource(
     entry->resource_type = PDOCKER_GPU_V5_RESOURCE_TYPE_MEMORY;
     entry->resource_flags = PDOCKER_GPU_V5_RESOURCE_FLAG_HOST_FD_BACKED |
                             PDOCKER_GPU_V5_RESOURCE_FLAG_MUTABLE;
-    entry->resource_id = (uint64_t)(uintptr_t)memory;
+    entry->resource_id = pdocker_vk_memory_object_id(memory);
     entry->parent_resource_index = PDOCKER_GPU_V5_RESOURCE_PARENT_NONE;
     entry->fd_index = (uint32_t)(*fd_count);
     entry->size = (uint64_t)memory->size;
@@ -4033,7 +4058,7 @@ static int collect_graphics_buffer_resource(
     memset(entry, 0, sizeof(*entry));
     entry->resource_type = PDOCKER_GPU_V5_RESOURCE_TYPE_BUFFER;
     entry->resource_flags = PDOCKER_GPU_V5_RESOURCE_FLAG_MUTABLE;
-    entry->resource_id = (uint64_t)(uintptr_t)buffer;
+    entry->resource_id = pdocker_vk_buffer_object_id(buffer);
     entry->parent_resource_index = (uint32_t)memory_index;
     entry->fd_index = PDOCKER_GPU_V5_RESOURCE_FD_NONE;
     entry->memory_offset = (uint64_t)buffer->memory_offset;
@@ -4116,7 +4141,7 @@ static int collect_graphics_image_entry(
         ((image->flags & VK_IMAGE_CREATE_ALIAS_BIT)
             ? PDOCKER_GPU_V5_IMAGE_FLAG_ALIAS : 0u);
     entry->image_type = image->image_type;
-    entry->image_id = (uint64_t)(uintptr_t)image;
+    entry->image_id = pdocker_vk_image_object_id(image);
     entry->memory_resource_index = (uint32_t)memory_index;
     entry->memory_offset = (uint64_t)image->memory_offset;
     entry->memory_size = (uint64_t)image->requirements_size;
@@ -4173,7 +4198,7 @@ static int collect_graphics_image_view_entry(
     PdockerGpuVulkanDispatchV5ImageViewEntry *entry = &image_view_entries[index];
     memset(entry, 0, sizeof(*entry));
     entry->view_type = view->view_type;
-    entry->view_id = (uint64_t)(uintptr_t)view;
+    entry->view_id = pdocker_vk_image_view_object_id(view);
     entry->image_index = (uint32_t)image_index;
     entry->format = view->format;
     entry->component_r = view->components.r;
@@ -4255,7 +4280,7 @@ static int collect_graphics_sampler_entry(
     uint32_t index = (uint32_t)(*sampler_count)++;
     PdockerGpuVulkanDispatchV5SamplerEntry *entry = &sampler_entries[index];
     memset(entry, 0, sizeof(*entry));
-    entry->sampler_id = (uint64_t)(uintptr_t)sampler;
+    entry->sampler_id = pdocker_vk_sampler_object_id(sampler);
     entry->mag_filter = sampler->mag_filter;
     entry->min_filter = sampler->min_filter;
     entry->mipmap_mode = sampler->mipmap_mode;
@@ -4342,7 +4367,7 @@ static int append_graphics_attachment_entry(
             memory_count, fds, fd_count, src->image_view, generation);
         if (collected_view < 0) return collected_view;
         view_index = (uint32_t)collected_view;
-        resource_id = (uint64_t)(uintptr_t)src->image_view;
+        resource_id = pdocker_vk_image_view_object_id(src->image_view);
         format = src->image_view->format;
         samples = src->image_view->image ? src->image_view->image->samples : VK_SAMPLE_COUNT_1_BIT;
     }
@@ -4572,8 +4597,8 @@ static int collect_graphics_descriptor_entries(
                     descriptor->image_layout = binding->image_layout;
                     descriptor->resource_id =
                         view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE
-                            ? (uint64_t)(uintptr_t)image_view_objects[view_index]
-                            : (uint64_t)(uintptr_t)sampler_objects[sampler_index];
+                            ? pdocker_vk_image_view_object_id(image_view_objects[view_index])
+                            : pdocker_vk_sampler_object_id(sampler_objects[sampler_index]);
                     continue;
                 }
                 if (!descriptor_type_supported_by_v4_transport(binding->descriptor_type)) {
@@ -4612,7 +4637,7 @@ static int collect_graphics_descriptor_entries(
                 descriptor->image_view_index = PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE;
                 descriptor->sampler_index = PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE;
                 descriptor->image_layout = 0;
-                descriptor->resource_id = (uint64_t)(uintptr_t)binding->buffer;
+                descriptor->resource_id = pdocker_vk_buffer_object_id(binding->buffer);
                 descriptor->buffer_offset = (uint64_t)binding->base_offset;
                 descriptor->range = (uint64_t)binding->range;
                 descriptor->transfer_offset = (uint64_t)binding->offset;
@@ -7576,8 +7601,8 @@ static int send_generic_vulkan_dispatch_v5_1_op(
         const VkDeviceSize *api_dynamic_offsets,
         const VkDeviceSize *api_memory_offsets,
         const size_t *api_memory_sizes,
-        const uintptr_t *api_memory_ids,
-        const uintptr_t *api_buffer_ids,
+        const uint64_t *api_memory_ids,
+        const uint64_t *api_buffer_ids,
         const uint32_t *image_descriptor_sets,
         const uint32_t *image_descriptor_bindings,
         const uint32_t *image_descriptor_array_elements,
@@ -7653,7 +7678,7 @@ static int send_generic_vulkan_dispatch_v5_1_op(
             return -ERANGE;
         }
         for (size_t i = 0; i < binding_count; ++i) {
-            if (api_buffer_ids[i] == (uintptr_t)dispatch_indirect_buffer) {
+            if (api_buffer_ids[i] == pdocker_vk_buffer_object_id(dispatch_indirect_buffer)) {
                 dispatch_indirect_resource_index = (uint32_t)(i * 2u + 1u);
                 break;
             }
@@ -7821,7 +7846,7 @@ static int send_generic_vulkan_dispatch_v5_1_op(
         resources[memory_index].resource_flags =
             PDOCKER_GPU_V5_RESOURCE_FLAG_HOST_FD_BACKED |
             PDOCKER_GPU_V5_RESOURCE_FLAG_MUTABLE;
-        resources[memory_index].resource_id = (uint64_t)(uintptr_t)image->memory;
+        resources[memory_index].resource_id = pdocker_vk_memory_object_id(image->memory);
         resources[memory_index].parent_resource_index = PDOCKER_GPU_V5_RESOURCE_PARENT_NONE;
         resources[memory_index].fd_index = (uint32_t)fd_index;
         resources[memory_index].size = (uint64_t)image->memory->size;
@@ -7838,7 +7863,7 @@ static int send_generic_vulkan_dispatch_v5_1_op(
             ((image->flags & VK_IMAGE_CREATE_ALIAS_BIT)
                 ? PDOCKER_GPU_V5_IMAGE_FLAG_ALIAS : 0u);
         image_entries[i].image_type = image->image_type;
-        image_entries[i].image_id = (uint64_t)(uintptr_t)image;
+        image_entries[i].image_id = pdocker_vk_image_object_id(image);
         image_entries[i].memory_resource_index = memory_index;
         image_entries[i].memory_offset = (uint64_t)image->memory_offset;
         image_entries[i].memory_size = (uint64_t)image->requirements_size;
@@ -7869,7 +7894,7 @@ static int send_generic_vulkan_dispatch_v5_1_op(
         resources[memory_index].resource_flags =
             PDOCKER_GPU_V5_RESOURCE_FLAG_HOST_FD_BACKED |
             PDOCKER_GPU_V5_RESOURCE_FLAG_MUTABLE;
-        resources[memory_index].resource_id = (uint64_t)(uintptr_t)memory;
+        resources[memory_index].resource_id = pdocker_vk_memory_object_id(memory);
         resources[memory_index].parent_resource_index = PDOCKER_GPU_V5_RESOURCE_PARENT_NONE;
         resources[memory_index].fd_index = (uint32_t)fd_index;
         resources[memory_index].memory_offset = 0;
@@ -7881,7 +7906,7 @@ static int send_generic_vulkan_dispatch_v5_1_op(
 
         resources[buffer_index].resource_type = PDOCKER_GPU_V5_RESOURCE_TYPE_BUFFER;
         resources[buffer_index].resource_flags = PDOCKER_GPU_V5_RESOURCE_FLAG_MUTABLE;
-        resources[buffer_index].resource_id = (uint64_t)(uintptr_t)dispatch_indirect_buffer;
+        resources[buffer_index].resource_id = pdocker_vk_buffer_object_id(dispatch_indirect_buffer);
         resources[buffer_index].parent_resource_index = memory_index;
         resources[buffer_index].fd_index = PDOCKER_GPU_V5_RESOURCE_FD_NONE;
         resources[buffer_index].memory_offset = (uint64_t)dispatch_indirect_buffer->memory_offset;
@@ -7912,7 +7937,7 @@ static int send_generic_vulkan_dispatch_v5_1_op(
             return -EINVAL;
         }
         image_view_entries[i].view_type = view->view_type;
-        image_view_entries[i].view_id = (uint64_t)(uintptr_t)view;
+        image_view_entries[i].view_id = pdocker_vk_image_view_object_id(view);
         image_view_entries[i].image_index = (uint32_t)image_index;
         image_view_entries[i].format = view->format;
         image_view_entries[i].component_r = view->components.r;
@@ -7935,7 +7960,7 @@ static int send_generic_vulkan_dispatch_v5_1_op(
                     i);
             return -EINVAL;
         }
-        sampler_entries[i].sampler_id = (uint64_t)(uintptr_t)sampler;
+        sampler_entries[i].sampler_id = pdocker_vk_sampler_object_id(sampler);
         sampler_entries[i].mag_filter = sampler->mag_filter;
         sampler_entries[i].min_filter = sampler->min_filter;
         sampler_entries[i].mipmap_mode = sampler->mipmap_mode;
@@ -7994,8 +8019,8 @@ static int send_generic_vulkan_dispatch_v5_1_op(
         descriptors[descriptor_index].image_layout = image_descriptor_layouts[i];
         descriptors[descriptor_index].resource_id =
             image_descriptor_view_indices[i] != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE
-                ? (uint64_t)(uintptr_t)image_view_objects[image_descriptor_view_indices[i]]
-                : (uint64_t)(uintptr_t)sampler_objects[image_descriptor_sampler_indices[i]];
+                ? pdocker_vk_image_view_object_id(image_view_objects[image_descriptor_view_indices[i]])
+                : pdocker_vk_sampler_object_id(sampler_objects[image_descriptor_sampler_indices[i]]);
     }
     for (uint32_t i = 0; i < specialization_entry_count; ++i) {
         specs[i].constant_id = specialization_entries[i].constantID;
@@ -8226,8 +8251,8 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
     VkDeviceSize api_dynamic_offsets[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     VkDeviceSize api_memory_offsets[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     size_t api_memory_sizes[PDOCKER_VK_MAX_STORAGE_BUFFERS];
-    uintptr_t api_memory_ids[PDOCKER_VK_MAX_STORAGE_BUFFERS];
-    uintptr_t api_buffer_ids[PDOCKER_VK_MAX_STORAGE_BUFFERS];
+    uint64_t api_memory_ids[PDOCKER_VK_MAX_STORAGE_BUFFERS];
+    uint64_t api_buffer_ids[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     uint32_t api_descriptor_sets[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     uint32_t api_descriptor_array_elements[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     uint32_t image_descriptor_sets[PDOCKER_VK_MAX_STORAGE_BUFFERS];
@@ -8424,8 +8449,8 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
                 api_dynamic_offsets[binding_count] = binding->dynamic_offset;
                 api_memory_offsets[binding_count] = binding->buffer ? binding->buffer->memory_offset : 0;
                 api_memory_sizes[binding_count] = dispatch_memory ? dispatch_memory->size : 0;
-                api_memory_ids[binding_count] = (uintptr_t)dispatch_memory;
-                api_buffer_ids[binding_count] = (uintptr_t)binding->buffer;
+                api_memory_ids[binding_count] = pdocker_vk_memory_object_id(dispatch_memory);
+                api_buffer_ids[binding_count] = pdocker_vk_buffer_object_id(binding->buffer);
                 fds[1 + binding_count] = dispatch_memory->fd;
                 trace_guarded_binding(i, dispatch_memory, dispatch_offset, bytes);
                 if (alias_hit && trace_allocations()) {
@@ -8538,12 +8563,12 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
         fds[0] = probe.shader_fd;
         shader_size_to_send = probe.shader_size;
         shader_hash_to_send = probe.effective_shader_hash;
-        uintptr_t probe_memory_id =
-            (uintptr_t)0x5044513600000000ull ^ (uintptr_t)dispatch_id;
-        uintptr_t probe_buffer_id =
-            (uintptr_t)0x5044513600000001ull ^ ((uintptr_t)dispatch_id << 1);
-        if (probe_memory_id == 0) probe_memory_id = (uintptr_t)0x50445136u;
-        if (probe_buffer_id == 0) probe_buffer_id = (uintptr_t)0x50445137u;
+        uint64_t probe_memory_id =
+            0x5044513600000000ull ^ dispatch_id;
+        uint64_t probe_buffer_id =
+            0x5044513600000001ull ^ (dispatch_id << 1);
+        if (probe_memory_id == 0) probe_memory_id = 0x50445136ull;
+        if (probe_buffer_id == 0) probe_buffer_id = 0x50445137ull;
         api_descriptor_sets[binding_count] = probe.debug_set;
         api_descriptor_array_elements[binding_count] = 0;
         bindings[binding_count] = probe.debug_binding;
@@ -8661,7 +8686,7 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
     dispatch_hash = fnv1a64_update_u32(dispatch_hash, op->base_group_y);
     dispatch_hash = fnv1a64_update_u32(dispatch_hash, op->base_group_z);
     dispatch_hash = fnv1a64_update_u32(dispatch_hash, op->dispatch_indirect ? 1u : 0u);
-    dispatch_hash = fnv1a64_update_u64(dispatch_hash, (uint64_t)(uintptr_t)op->dispatch_indirect_buffer);
+    dispatch_hash = fnv1a64_update_u64(dispatch_hash, pdocker_vk_buffer_object_id(op->dispatch_indirect_buffer));
     dispatch_hash = fnv1a64_update_u64(dispatch_hash, (uint64_t)op->dispatch_indirect_offset);
     uint64_t descriptor_hash = 1469598103934665603ull;
     descriptor_hash = fnv1a64_update_u64(descriptor_hash, (uint64_t)binding_count);
@@ -11808,6 +11833,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateBuffer(
     }
     PdockerVkBuffer *buffer = pdocker_alloc_handle(sizeof(*buffer));
     if (!buffer) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    buffer->object_id = next_vulkan_object_generation();
     buffer->size = (size_t)pCreateInfo->size;
     buffer->requirements_alignment = PDOCKER_VK_REQUIREMENT_ALIGNMENT;
     buffer->requirements_size = align_device_size(pCreateInfo->size, buffer->requirements_alignment);
@@ -12017,6 +12043,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateImage(
     }
     PdockerVkImage *image = pdocker_alloc_handle(sizeof(*image));
     if (!image) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    image->object_id = next_vulkan_object_generation();
     image->flags = pCreateInfo->flags;
     image->image_type = pCreateInfo->imageType;
     image->format = pCreateInfo->format;
@@ -12221,6 +12248,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateImageView(
     PdockerVkImage *image = pdocker_vk_image_from_handle(pCreateInfo->image);
     PdockerVkImageView *view = pdocker_alloc_handle(sizeof(*view));
     if (!view) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    view->object_id = next_vulkan_object_generation();
     view->image = image;
     view->view_type = pCreateInfo->viewType;
     view->format = pCreateInfo->format;
@@ -12256,6 +12284,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSampler(
     if (validate_rc != VK_SUCCESS) return validate_rc;
     PdockerVkSampler *sampler = pdocker_alloc_handle(sizeof(*sampler));
     if (!sampler) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    sampler->object_id = next_vulkan_object_generation();
     sampler->mag_filter = pCreateInfo->magFilter;
     sampler->min_filter = pCreateInfo->minFilter;
     sampler->mipmap_mode = pCreateInfo->mipmapMode;
@@ -12417,6 +12446,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateMemory(
     }
     PdockerVkMemory *memory = pdocker_alloc_handle(sizeof(*memory));
     if (!memory) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    memory->object_id = next_vulkan_object_generation();
     memory->size = (size_t)pAllocateInfo->allocationSize;
     memory->memory_type_index = pAllocateInfo->memoryTypeIndex;
     memory->property_flags = memory->memory_type_index == 0
