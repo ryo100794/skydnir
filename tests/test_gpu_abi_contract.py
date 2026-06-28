@@ -2486,6 +2486,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "vertex_bindings[i].buffer_resource_index >= header->resource_count",
             "!u64_range_within_size(vertex_bindings[i].offset, vertex_bindings[i].size, buffer->size)",
             "attachment->image_view_index >= header->image_view_count",
+            "image_views[i].image_index >= header->image_count",
+            "!vulkan_dispatch_image_view_range_valid(image, &image_views[i])",
             "attachment->resolve_image_view_index >= header->image_view_count",
             "payload_range_valid(attachment->clear_value_offset, attachment->clear_value_size",
             "range_add_u32(command->attachment_first, command->attachment_count, header->attachment_count)",
@@ -3695,7 +3697,12 @@ class GpuAbiContractTest(unittest.TestCase):
         msaa_helper_body = executor.split("static int vulkan_dispatch_msaa_image_allowed", 1)[1].split(
             "static int materialize_vulkan_dispatch_images", 1
         )[0]
+        convert_body = executor.split("static int convert_vulkan_dispatch_v5_to_v4_bindings", 1)[1].split(
+            "static int recv_vulkan_dispatch_v5_header_with_fds", 1
+        )[0]
         materialize_body = executor.split("static int materialize_vulkan_dispatch_images", 1)[1].split("static int run_vulkan_dispatch_fd", 1)[0]
+        self.assertIn("image_views[i].image_index >= image_count", convert_body)
+        self.assertIn("!vulkan_dispatch_image_view_range_valid(image, &image_views[i])", convert_body)
         self.assertIn("const unsigned char *msaa_image_allowed", materialize_body)
         self.assertIn("!vulkan_dispatch_msaa_image_allowed(", materialize_body)
         self.assertIn("!vulkan_dispatch_image_usage_supported_by_format(", materialize_body)

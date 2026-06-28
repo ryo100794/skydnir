@@ -19059,6 +19059,9 @@ static int convert_vulkan_dispatch_v5_to_v4_bindings(
         }
         for (size_t i = 0; i < image_view_count; ++i) {
             if (image_views[i].image_index >= image_count) return -EPROTO;
+            const PdockerGpuVulkanDispatchV5ImageEntry *image =
+                &images[image_views[i].image_index];
+            if (!vulkan_dispatch_image_view_range_valid(image, &image_views[i])) return -ERANGE;
         }
         if (object_tables_out) {
             object_tables_out->resources = resources;
@@ -21958,6 +21961,9 @@ static int validate_vulkan_graphics_v6_frame_content(
     }
     for (uint32_t i = 0; i < header->image_view_count; ++i) {
         if (image_views[i].image_index >= header->image_count) return -EPROTO;
+        const PdockerGpuVulkanDispatchV5ImageEntry *image =
+            &images[image_views[i].image_index];
+        if (!vulkan_dispatch_image_view_range_valid(image, &image_views[i])) return -ERANGE;
     }
     for (uint32_t i = 0; i < header->descriptor_count; ++i) {
         const PdockerGpuVulkanDispatchV5DescriptorObjectEntry *descriptor = &descriptors[i];
