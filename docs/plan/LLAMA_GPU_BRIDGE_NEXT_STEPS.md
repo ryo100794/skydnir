@@ -1987,8 +1987,9 @@ mismatches, shader FD hash mismatches, and V5 `dispatch_hash` mismatches.  The
 V5 handler also preserves parsed `base_group_x/y/z` when calling the native
 Vulkan dispatch path instead of collapsing `vkCmdDispatchBase*` to zero.
 
-`specialization_hash` is intentionally not promoted to a hard V5 frame gate yet:
-the current sender and executor canonical specialization hash both include a
-native `size_t` field width.  A future ABI-compatible lane must introduce or
-accept a fixed-width specialization semantic hash before this can be enforced
-without false mismatches across 64-bit ICD and 32-bit executor builds.
+`specialization_hash` is now a hard V5 frame gate after normalizing the
+canonical specialization semantic hash to fixed-width `uint64_t` entry-count
+and entry-size fields on both the container ICD and Android executor sides.
+This avoids false mismatches across 64-bit ICD and 32-bit executor builds while
+still hashing the Vulkan-visible `(constantID, size, referenced bytes)`
+semantics rather than raw struct padding or unused specialization data bytes.

@@ -5311,12 +5311,14 @@ static uint64_t pipeline_specialization_hash(
      * only the mapped constant IDs and their referenced bytes participate.
      */
     uint64_t hash = 1469598103934665603ull;
-    hash = fnv1a64_update(hash, &specialization_count, sizeof(specialization_count));
+    const uint64_t specialization_count64 = (uint64_t)specialization_count;
+    hash = fnv1a64_update(hash, &specialization_count64, sizeof(specialization_count64));
     for (size_t i = 0; i < specialization_count; ++i) {
         const uint32_t constant_id = specializations[i].constant_id;
+        const uint64_t size64 = (uint64_t)specializations[i].size;
         const size_t size = specializations[i].size;
         hash = fnv1a64_update(hash, &constant_id, sizeof(constant_id));
-        hash = fnv1a64_update(hash, &size, sizeof(size));
+        hash = fnv1a64_update(hash, &size64, sizeof(size64));
         if (specialization_data &&
             specializations[i].offset <= specialization_data_size &&
             size <= specialization_data_size - specializations[i].offset) {
@@ -30423,6 +30425,13 @@ static int handle_vulkan_dispatch_v5_frame(int cfd) {
         specs[i].constant_id = v5_specs[i].constant_id;
         specs[i].offset = v5_specs[i].offset;
         specs[i].size = (size_t)v5_specs[i].size;
+    }
+    const uint64_t v5_specialization_hash = pipeline_specialization_hash(
+        specs, header.specialization_count,
+        specialization_data, (size_t)header.specialization_data_size);
+    if (v5_specialization_hash != header.specialization_hash) {
+        json_fail("vulkan-dispatch-v5", "specialization hash mismatch");
+        goto cleanup;
     }
     VulkanDispatchOptions options;
     memset(&options, 0, sizeof(options));

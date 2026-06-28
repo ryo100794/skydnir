@@ -3551,12 +3551,14 @@ static uint64_t fnv1a64_specialization_hash(
         const void *data,
         size_t data_size) {
     uint64_t hash = 1469598103934665603ull;
-    hash = fnv1a64_update_bytes(hash, &entry_count, sizeof(entry_count));
+    const uint64_t entry_count64 = (uint64_t)entry_count;
+    hash = fnv1a64_update_bytes(hash, &entry_count64, sizeof(entry_count64));
     for (size_t i = 0; i < entry_count; ++i) {
         const uint32_t constant_id = entries[i].constantID;
+        const uint64_t size64 = (uint64_t)entries[i].size;
         const size_t size = entries[i].size;
         hash = fnv1a64_update_bytes(hash, &constant_id, sizeof(constant_id));
-        hash = fnv1a64_update_bytes(hash, &size, sizeof(size));
+        hash = fnv1a64_update_bytes(hash, &size64, sizeof(size64));
         if (data &&
             entries[i].offset <= data_size &&
             size <= data_size - entries[i].offset) {

@@ -3782,9 +3782,32 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("zero_frame_hash", validator)
         self.assertIn("frame_hash != header->frame_hash", validator)
 
+        sender_spec_hash = icd.split("static uint64_t fnv1a64_specialization_hash", 1)[1].split(
+            "static bool dispatch_lifecycle_log_enabled", 1
+        )[0]
+        executor_spec_hash = executor.split("static uint64_t pipeline_specialization_hash", 1)[1].split(
+            "static uint64_t reconcile_dispatch_hash", 1
+        )[0]
+        self.assertIn("const uint64_t entry_count64 = (uint64_t)entry_count;", sender_spec_hash)
+        self.assertIn("fnv1a64_update_bytes(hash, &entry_count64, sizeof(entry_count64))", sender_spec_hash)
+        self.assertIn("const uint64_t size64 = (uint64_t)entries[i].size;", sender_spec_hash)
+        self.assertIn("fnv1a64_update_bytes(hash, &size64, sizeof(size64))", sender_spec_hash)
+        self.assertNotIn("&entry_count, sizeof(entry_count)", sender_spec_hash)
+        self.assertNotIn("&size, sizeof(size)", sender_spec_hash)
+        self.assertIn("const uint64_t specialization_count64 = (uint64_t)specialization_count;", executor_spec_hash)
+        self.assertIn("fnv1a64_update(hash, &specialization_count64, sizeof(specialization_count64))", executor_spec_hash)
+        self.assertIn("const uint64_t size64 = (uint64_t)specializations[i].size;", executor_spec_hash)
+        self.assertIn("fnv1a64_update(hash, &size64, sizeof(size64))", executor_spec_hash)
+        self.assertNotIn("&specialization_count, sizeof(specialization_count)", executor_spec_hash)
+        self.assertNotIn("&size, sizeof(size)", executor_spec_hash)
+
         handler = executor.split("static int handle_vulkan_dispatch_v5_frame", 1)[1].split(
             "static int recv_command_with_fds", 1
         )[0]
+        self.assertIn("const uint64_t v5_specialization_hash = pipeline_specialization_hash(", handler)
+        self.assertIn("v5_specialization_hash != header.specialization_hash", handler)
+        self.assertNotIn("header.specialization_hash != 0", handler)
+        self.assertIn('json_fail("vulkan-dispatch-v5", "specialization hash mismatch")', handler)
         self.assertIn("const uint64_t v5_dispatch_hash = reconcile_dispatch_hash(", handler)
         self.assertIn("options.has_base_group ? options.base_group_x : 0", handler)
         self.assertIn("dispatch_indirect_buffer_id", handler)
