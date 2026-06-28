@@ -2261,10 +2261,14 @@ static void guarded_sigsegv_handler(int sig, siginfo_t *info, void *context) {
         PdockerVkMemory *memory = g_guarded_memories[i];
         if (!memory || !memory->guarded || !memory->map || !memory->page_size) continue;
         uintptr_t start = (uintptr_t)memory->map;
-        uintptr_t end = start + memory->size;
+        if (memory->size > (size_t)(UINTPTR_MAX - start)) continue;
+        uintptr_t end = start + (uintptr_t)memory->size;
         if (fault < start || fault >= end) continue;
         size_t page = (fault - start) / memory->page_size;
-        uintptr_t page_addr = start + page * memory->page_size;
+        if (page > (size_t)(UINTPTR_MAX / memory->page_size)) break;
+        uintptr_t page_delta = (uintptr_t)(page * memory->page_size);
+        if (page_delta > UINTPTR_MAX - start) break;
+        uintptr_t page_addr = start + page_delta;
         if (mprotect((void *)page_addr, memory->page_size, PROT_READ | PROT_WRITE) == 0) {
             if (page < memory->page_count) {
                 memory->resident_pages[page] = 1;
@@ -5249,7 +5253,8 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
                 }
                 const VkSpecializationMapEntry *src_spec =
                     &pipeline->graphics_stage_specialization_entries[stage_i][spec_i];
-                if ((uint64_t)src_spec->offset + (uint64_t)src_spec->size > stage->specialization_size) {
+                if ((uint64_t)src_spec->offset > stage->specialization_size ||
+                    (uint64_t)src_spec->size > stage->specialization_size - (uint64_t)src_spec->offset) {
                     rc = -ERANGE;
                     goto cleanup;
                 }
@@ -6038,7 +6043,8 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
                 goto cleanup;
             }
             const PdockerVkPushConstantOpSnapshot *push = &cmd->push_constant_ops[record->push_op_index];
-            if ((uint64_t)push->offset + (uint64_t)push->size > cmd->push_constant_size ||
+            if ((uint64_t)push->offset > cmd->push_constant_size ||
+                (uint64_t)push->size > cmd->push_constant_size - (uint64_t)push->offset ||
                 push->size > PDOCKER_VK_MAX_PUSH_BYTES) {
                 rc = -ERANGE;
                 goto cleanup;
@@ -12100,6 +12106,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateMemory(
     if (!pAllocateInfo || !pMemory) return VK_ERROR_INITIALIZATION_FAILED;
     if (pAllocateInfo->memoryTypeIndex >= 2) return VK_ERROR_FEATURE_NOT_PRESENT;
     if (pAllocateInfo->allocationSize == 0 ||
+        pAllocateInfo->allocationSize > (VkDeviceSize)SIZE_MAX ||
         pAllocateInfo->allocationSize > pdocker_vulkan_max_buffer_size()) {
         if (trace_allocations()) {
             fprintf(stderr,
@@ -12128,6 +12135,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateMemory(
     const bool guarded = guarded_memory_enabled(memory->size, memory->property_flags);
     if (guarded) {
         memory->page_size = guarded_page_size();
+        if (memory->page_size == 0 || memory->size > SIZE_MAX - (memory->page_size - 1)) {
+            free(memory);
+            return VK_ERROR_OUT_OF_HOST_MEMORY;
+        }
         memory->page_count = (memory->size + memory->page_size - 1) / memory->page_size;
         memory->resident_pages = calloc(memory->page_count, 1);
         memory->dirty_pages = calloc(memory->page_count, 1);
@@ -12208,10 +12219,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkMapMemory(
     (void)flags;
     if (!memory || !ppData) return VK_ERROR_MEMORY_MAP_FAILED;
     PdockerVkMemory *m = (PdockerVkMemory *)memory;
-    if ((size_t)offset > m->size) return VK_ERROR_MEMORY_MAP_FAILED;
+    if (offset > (VkDeviceSize)m->size || offset > (VkDeviceSize)SIZE_MAX) {
+        return VK_ERROR_MEMORY_MAP_FAILED;
+    }
     if (size != VK_WHOLE_SIZE) {
-        if ((VkDeviceSize)offset > (VkDeviceSize)m->size ||
-            size > (VkDeviceSize)m->size - offset) {
+        if (size > (VkDeviceSize)m->size - offset) {
             return VK_ERROR_MEMORY_MAP_FAILED;
         }
     }
@@ -12231,7 +12243,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkMapMemory(
                 (unsigned long long)size,
                 m->size);
     }
-    *ppData = (char *)m->map + offset;
+    *ppData = (char *)m->map + (size_t)offset;
     return VK_SUCCESS;
 }
 
@@ -12750,12 +12762,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreatePipelineLayout(
     }
     for (uint32_t i = 0; pCreateInfo && i < pCreateInfo->pushConstantRangeCount; ++i) {
         const VkPushConstantRange *range = &pCreateInfo->pPushConstantRanges[i];
-        uint64_t end64 = (uint64_t)range->offset + (uint64_t)range->size;
-        if (end64 > UINT32_MAX) {
+        if ((uint64_t)range->size > UINT32_MAX - (uint64_t)range->offset) {
             free(layout);
             return VK_ERROR_OUT_OF_HOST_MEMORY;
         }
-        uint32_t end = (uint32_t)end64;
+        uint32_t end = range->offset + range->size;
         if (end > layout->push_constant_size) layout->push_constant_size = end;
         if (layout->push_constant_range_count < PDOCKER_VK_MAX_PUSH_CONSTANT_RANGES) {
             PdockerVkPushConstantRangeSnapshot *snapshot =
@@ -16179,10 +16190,12 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
                         PDOCKER_VK_MAX_DESCRIPTOR_SETS);
             }
         }
-        if (firstSet + descriptorSetCount > PDOCKER_VK_MAX_DESCRIPTOR_SETS) {
+        bool descriptor_set_range_overflow = firstSet > PDOCKER_VK_MAX_DESCRIPTOR_SETS ||
+            descriptorSetCount > PDOCKER_VK_MAX_DESCRIPTOR_SETS - firstSet;
+        if (descriptor_set_range_overflow) {
             cmd->unsupported_descriptor_set_layout = true;
         }
-        if (firstSet + descriptorSetCount > PDOCKER_VK_MAX_DESCRIPTOR_SETS &&
+        if (descriptor_set_range_overflow &&
             (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG"))) {
             fprintf(stderr,
                     "pdocker-vulkan-icd: descriptor sets firstSet=%u count=%u exceed passthrough limit=%u; rejecting instead of flattening\n",
@@ -16192,7 +16205,8 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
         }
         uint32_t dynamic_index = 0;
         for (uint32_t set_i = 0; set_i < descriptorSetCount; ++set_i) {
-            if (firstSet + set_i >= PDOCKER_VK_MAX_DESCRIPTOR_SETS) break;
+            if (firstSet >= PDOCKER_VK_MAX_DESCRIPTOR_SETS ||
+                set_i >= PDOCKER_VK_MAX_DESCRIPTOR_SETS - firstSet) break;
             PdockerVkDescriptorSet *set = (PdockerVkDescriptorSet *)pDescriptorSets[set_i];
             if (!set) continue;
             uint32_t target_set = firstSet + set_i;
@@ -16574,10 +16588,12 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPushConstants(
     (void)layout;
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     if (!cmd || !pValues || offset >= PDOCKER_VK_MAX_PUSH_BYTES) return;
-    uint64_t end64 = (uint64_t)offset + (uint64_t)size;
-    if (end64 > PDOCKER_VK_MAX_PUSH_BYTES) size = PDOCKER_VK_MAX_PUSH_BYTES - offset;
+    if ((uint64_t)size > PDOCKER_VK_MAX_PUSH_BYTES - offset) {
+        size = PDOCKER_VK_MAX_PUSH_BYTES - offset;
+    }
     memcpy(cmd->push_constants + offset, pValues, size);
-    if (offset + size > cmd->push_constant_size) cmd->push_constant_size = offset + size;
+    uint32_t end = offset + size;
+    if (end > cmd->push_constant_size) cmd->push_constant_size = end;
     if (cmd->push_constant_op_count < PDOCKER_VK_MAX_PUSH_CONSTANT_OPS) {
         PdockerVkPushConstantOpSnapshot *op =
             &cmd->push_constant_ops[cmd->push_constant_op_count++];
@@ -20203,9 +20219,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetQueryPoolResults(
     uint8_t *bytes = (uint8_t *)pData;
     VkResult rc = VK_SUCCESS;
     for (uint32_t i = 0; i < queryCount; ++i) {
-        size_t offset = (size_t)i * (size_t)stride;
-        if ((VkDeviceSize)offset != (VkDeviceSize)i * stride ||
-            offset > dataSize || item_size > dataSize - offset) {
+        uint64_t offset64 = 0;
+        if (!checked_mul_u64((uint64_t)i, (uint64_t)stride, &offset64) ||
+            offset64 > (uint64_t)SIZE_MAX) {
+            return VK_INCOMPLETE;
+        }
+        size_t offset = (size_t)offset64;
+        if (offset > dataSize || item_size > dataSize - offset) {
             return VK_INCOMPLETE;
         }
         uint32_t q = firstQuery + i;

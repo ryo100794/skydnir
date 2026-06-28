@@ -8147,6 +8147,40 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("checked_add_u64((uint64_t)op->src->memory_offset", copy_body)
         self.assertNotIn("op->src->memory_offset + op->region.srcOffset", copy_body)
 
+    def test_vulkan_icd_size_and_index_ranges_are_overflow_guarded(self):
+        source = VULKAN_ICD.read_text()
+        guarded_body = source.split("static void guarded_sigsegv_handler", 1)[1].split("static bool install_guarded_sigsegv_handler", 1)[0]
+        graphics_body = source.split("static int send_recorded_vulkan_graphics_v6_1_frame_range", 1)[1].split("static int send_recorded_vulkan_graphics_v6_1_frame(", 1)[0]
+        allocate_body = source.split("VKAPI_ATTR VkResult VKAPI_CALL vkAllocateMemory", 1)[1].split("VKAPI_ATTR void VKAPI_CALL vkFreeMemory", 1)[0]
+        map_body = source.split("VKAPI_ATTR VkResult VKAPI_CALL vkMapMemory", 1)[1].split("VKAPI_ATTR void VKAPI_CALL vkUnmapMemory", 1)[0]
+        pipeline_layout_body = source.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreatePipelineLayout", 1)[1].split("VKAPI_ATTR void VKAPI_CALL vkDestroyPipelineLayout", 1)[0]
+        bind_body = source.split("VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets", 1)[1].split("VKAPI_ATTR void VKAPI_CALL vkCmdPushConstants", 1)[0]
+        push_constants_body = source.split("VKAPI_ATTR void VKAPI_CALL vkCmdPushConstants", 1)[1].split("static VkImageAspectFlags image_format_full_aspect_mask", 1)[0]
+        query_body = source.split("VKAPI_ATTR VkResult VKAPI_CALL vkGetQueryPoolResults", 1)[1].split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateFence", 1)[0]
+        self.assertIn("memory->size > (size_t)(UINTPTR_MAX - start)", guarded_body)
+        self.assertIn("page_delta > UINTPTR_MAX - start", guarded_body)
+        self.assertIn("(uint64_t)src_spec->offset > stage->specialization_size", graphics_body)
+        self.assertIn("stage->specialization_size - (uint64_t)src_spec->offset", graphics_body)
+        self.assertNotIn("src_spec->offset + (uint64_t)src_spec->size", graphics_body)
+        self.assertIn("(uint64_t)push->offset > cmd->push_constant_size", graphics_body)
+        self.assertIn("cmd->push_constant_size - (uint64_t)push->offset", graphics_body)
+        self.assertIn("pAllocateInfo->allocationSize > (VkDeviceSize)SIZE_MAX", allocate_body)
+        self.assertIn("memory->size > SIZE_MAX - (memory->page_size - 1)", allocate_body)
+        self.assertIn("offset > (VkDeviceSize)m->size || offset > (VkDeviceSize)SIZE_MAX", map_body)
+        self.assertIn("*ppData = (char *)m->map + (size_t)offset;", map_body)
+        self.assertIn("range->size > UINT32_MAX - (uint64_t)range->offset", pipeline_layout_body)
+        self.assertNotIn("range->offset > UINT32_MAX", pipeline_layout_body)
+        self.assertIn("uint32_t end = range->offset + range->size;", pipeline_layout_body)
+        self.assertIn("if ((uint64_t)size > PDOCKER_VK_MAX_PUSH_BYTES - offset)", push_constants_body)
+        self.assertIn("uint32_t end = offset + size;", push_constants_body)
+        self.assertIn("bool descriptor_set_range_overflow = firstSet > PDOCKER_VK_MAX_DESCRIPTOR_SETS", bind_body)
+        self.assertIn("descriptorSetCount > PDOCKER_VK_MAX_DESCRIPTOR_SETS - firstSet", bind_body)
+        self.assertIn("set_i >= PDOCKER_VK_MAX_DESCRIPTOR_SETS - firstSet", bind_body)
+        self.assertNotIn("firstSet + descriptorSetCount > PDOCKER_VK_MAX_DESCRIPTOR_SETS", bind_body)
+        self.assertIn("checked_mul_u64((uint64_t)i, (uint64_t)stride, &offset64)", query_body)
+        self.assertIn("offset64 > (uint64_t)SIZE_MAX", query_body)
+        self.assertNotIn("(size_t)i * (size_t)stride", query_body)
+
     def test_vulkan_dynamic_whole_size_descriptor_uses_effective_vkbuffer_tail(self):
         source = VULKAN_ICD.read_text()
         self.assertIn("VK_WHOLE_SIZE is evaluated after applying the", source)
