@@ -19234,19 +19234,31 @@ static int convert_vulkan_dispatch_v5_to_v4_bindings(
                              d->transfer_offset, &fd_offset) != 0) {
             return -EOVERFLOW;
         }
+        off_t fd_offset_checked = 0;
+        off_t api_offset_checked = 0;
+        off_t memory_offset_checked = 0;
+        if (checked_u64_to_off_t(fd_offset, &fd_offset_checked) != 0 ||
+            checked_u64_to_off_t(api_offset, &api_offset_checked) != 0 ||
+            checked_u64_to_off_t(buffer->memory_offset, &memory_offset_checked) != 0 ||
+            d->transfer_size > (uint64_t)SIZE_MAX ||
+            api_range > (uint64_t)SIZE_MAX ||
+            buffer->size > (uint64_t)SIZE_MAX ||
+            memory->size > (uint64_t)SIZE_MAX) {
+            return -EOVERFLOW;
+        }
         VulkanDispatchBinding *binding = &bindings[buffer_descriptor_count];
         memset(binding, 0, sizeof(*binding));
         binding->descriptor_set = d->descriptor_set;
         binding->binding = d->binding;
         binding->api_array_element = d->array_element;
-        binding->offset = (off_t)fd_offset;
+        binding->offset = fd_offset_checked;
         binding->size = (size_t)d->transfer_size;
-        binding->api_offset = (off_t)api_offset;
+        binding->api_offset = api_offset_checked;
         binding->api_range = (size_t)api_range;
         binding->api_buffer_size = (size_t)buffer->size;
         binding->api_descriptor_type = d->descriptor_type;
         binding->api_dynamic = (d->descriptor_flags & PDOCKER_GPU_V5_DESCRIPTOR_FLAG_DYNAMIC) ? 1 : 0;
-        binding->api_memory_offset = (off_t)buffer->memory_offset;
+        binding->api_memory_offset = memory_offset_checked;
         binding->api_memory_size = (size_t)memory->size;
         binding->api_memory_id = memory->resource_id;
         binding->api_buffer_id = buffer->resource_id;
@@ -22258,7 +22270,9 @@ static int validate_vulkan_graphics_v6_frame_content(
             if (commands[meta->command_index].command_type != PDOCKER_GPU_GRAPHICS_V6_COMMAND_PUSH_CONSTANTS) return -EPROTO;
             if (meta->stage_flags == 0) return -EPROTO;
             if ((meta->range_offset & 3u) != 0 || (meta->range_size & 3u) != 0) return -EINVAL;
+            if (meta->range_offset > UINT32_MAX || meta->range_size > UINT32_MAX) return -EOVERFLOW;
             if (checked_u64_add3(meta->range_offset, meta->range_size, 0, &push_end) != 0) return -EOVERFLOW;
+            if (push_end > PDOCKER_GPU_MAX_PUSH_BYTES) return -ERANGE;
         }
         for (uint32_t i = 0; i < header_v61->v61.memory_barrier_count; ++i) {
             const PdockerGpuVulkanGraphicsV61MemoryBarrierEntry *barrier = &memory_barriers[i];
@@ -22755,8 +22769,11 @@ static int validate_vulkan_graphics_v6_frame_content(
             } else {
                 return -EPROTO;
             }
-            uint64_t last_offset = entry->result_offset + (uint64_t)(entry->query_count - 1u) * (uint64_t)entry->result_stride;
-            if (last_offset < entry->result_offset ||
+            uint64_t result_delta = 0;
+            uint64_t last_offset = 0;
+            if (!checked_mul_u64_executor((uint64_t)(entry->query_count - 1u),
+                                          (uint64_t)entry->result_stride, &result_delta) ||
+                checked_u64_add3(entry->result_offset, result_delta, 0, &last_offset) != 0 ||
                 last_offset > UINT64_MAX - sizeof(PdockerGpuVulkanGraphicsV617QueryResultEntry)) return -EOVERFLOW;
             seen_query_command[entry->command_index] = 1;
         }
@@ -23997,10 +24014,11 @@ static int collect_graphics_push_ranges_for_layout(
             &view->push_constant_metadata[i];
         if (meta->layout_id != layout_id) continue;
         if (*range_count >= PDOCKER_GPU_GRAPHICS_REPLAY_MAX_PUSH_RANGES) return -E2BIG;
+        if (meta->range_offset > UINT32_MAX || meta->range_size > UINT32_MAX) return -EOVERFLOW;
         ranges[*range_count] = (VkPushConstantRange){
             .stageFlags = (VkShaderStageFlags)meta->stage_flags,
-            .offset = meta->range_offset,
-            .size = meta->range_size,
+            .offset = (uint32_t)meta->range_offset,
+            .size = (uint32_t)meta->range_size,
         };
         (*range_count)++;
     }
@@ -25721,8 +25739,9 @@ static int materialize_vulkan_graphics_v617_queries(
                 return -EPROTO;
             }
         }
-        uint64_t needed = (uint64_t)entry->first_query + (uint64_t)entry->query_count;
-        if (needed > UINT32_MAX || needed > PDOCKER_GPU_VULKAN_GRAPHICS_V617_MAX_QUERY_COMMANDS) return -E2BIG;
+        uint64_t needed = 0;
+        if (checked_u64_add3((uint64_t)entry->first_query, (uint64_t)entry->query_count, 0, &needed) != 0 ||
+            needed > UINT32_MAX || needed > PDOCKER_GPU_VULKAN_GRAPHICS_V617_MAX_QUERY_COMMANDS) return -E2BIG;
         if ((uint32_t)needed > pool->query_count) pool->query_count = (uint32_t)needed;
     }
     if (view->is_v618 && view->header_v618 && view->copy_query_results) {
@@ -25743,8 +25762,9 @@ static int materialize_vulkan_graphics_v617_queries(
                 if (pool->query_type != VK_QUERY_TYPE_MAX_ENUM && pool->query_type != (VkQueryType)entry->query_type) return -EPROTO;
                 pool->query_type = (VkQueryType)entry->query_type;
             }
-            uint64_t needed = (uint64_t)entry->first_query + (uint64_t)entry->query_count;
-            if (needed > UINT32_MAX || needed > PDOCKER_GPU_VULKAN_GRAPHICS_V617_MAX_QUERY_COMMANDS) return -E2BIG;
+            uint64_t needed = 0;
+            if (checked_u64_add3((uint64_t)entry->first_query, (uint64_t)entry->query_count, 0, &needed) != 0 ||
+                needed > UINT32_MAX || needed > PDOCKER_GPU_VULKAN_GRAPHICS_V617_MAX_QUERY_COMMANDS) return -E2BIG;
             if ((uint32_t)needed > pool->query_count) pool->query_count = (uint32_t)needed;
         }
     }
@@ -25784,7 +25804,10 @@ static int writeback_vulkan_graphics_v617_query_results(
         for (uint32_t q = 0; q < entry->query_count; ++q) {
             PdockerGpuVulkanGraphicsV617QueryResultEntry result;
             memset(&result, 0, sizeof(result));
-            uint32_t query = entry->first_query + q;
+            uint64_t query_u64 = 0;
+            if (checked_u64_add3((uint64_t)entry->first_query, (uint64_t)q, 0, &query_u64) != 0 ||
+                query_u64 > UINT32_MAX) return -EOVERFLOW;
+            uint32_t query = (uint32_t)query_u64;
             if (entry->op == PDOCKER_GPU_GRAPHICS_V617_QUERY_OP_WRITE_TIMESTAMP ||
                 entry->op == PDOCKER_GPU_GRAPHICS_V617_QUERY_OP_END) {
                 uint64_t value = 0;
@@ -25802,7 +25825,10 @@ static int writeback_vulkan_graphics_v617_query_results(
             } else {
                 return -EPROTO;
             }
-            uint64_t dst_offset_u64 = entry->result_offset + (uint64_t)q * (uint64_t)entry->result_stride;
+            uint64_t dst_delta = 0;
+            uint64_t dst_offset_u64 = 0;
+            if (!checked_mul_u64_executor((uint64_t)q, (uint64_t)entry->result_stride, &dst_delta) ||
+                checked_u64_add3(entry->result_offset, dst_delta, 0, &dst_offset_u64) != 0) return -EOVERFLOW;
             off_t dst_offset = 0;
             if (checked_u64_to_off_t(dst_offset_u64, &dst_offset) != 0) return -EOVERFLOW;
             if (write_fd_exact(view->passed_fds[entry->result_fd_index], &result, sizeof(result), dst_offset) != 0) return -EIO;
@@ -27604,9 +27630,13 @@ static int record_vulkan_graphics_v6_command_buffer(
                 const PdockerGpuVulkanGraphicsV61PushConstantMetadataEntry *meta = NULL;
                 rc = graphics_push_metadata_for_command(view, ci, &meta);
                 if (rc != 0) goto cleanup;
+                if (meta->range_offset > UINT32_MAX || meta->range_size > UINT32_MAX) {
+                    rc = -EOVERFLOW;
+                    goto cleanup;
+                }
                 vkCmdPushConstants(command_buffer, pipelines[bound_pipeline_index].layout,
                                    (VkShaderStageFlags)meta->stage_flags,
-                                   meta->range_offset, meta->range_size,
+                                   (uint32_t)meta->range_offset, (uint32_t)meta->range_size,
                                    view->frame + command->push_offset);
                 break;
             }
