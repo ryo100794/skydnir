@@ -8672,7 +8672,11 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("if (a > SIZE_MAX - b) return false;", helpers)
         self.assertIn("if (a != 0 && b > SIZE_MAX / a) return false;", helpers)
         self.assertIn("checked_add_size(value, 7u, &padded)", helpers)
+        self.assertIn("if (!checked_align_size_8(*capacity, &aligned)) return false;", helpers)
+        self.assertNotIn("checked_align_size_8(bytes, &aligned)", helpers)
+        self.assertIn("return checked_add_size(aligned, bytes, capacity);", helpers)
         self.assertIn("checked_align_size_8(*cursor, &aligned)", append_body)
+        self.assertIn("if (size > 0 && !data) return -EINVAL;", append_body)
         self.assertIn("checked_add_size(aligned, size, &end)", append_body)
         self.assertNotIn("align_size_8(*cursor)", append_body)
 
@@ -8682,7 +8686,8 @@ class GpuAbiContractTest(unittest.TestCase):
 
         self.assertIn("checked_mul_size(binding_count, 2u, &resource_count)", v51_body)
         self.assertIn("frame_capacity_add_aligned_table(&frame_capacity", capacity_block)
-        self.assertIn("checked_add_size(frame_capacity, 64u, &frame_capacity)", capacity_block)
+        self.assertNotIn("checked_add_size(frame_capacity, 64u, &frame_capacity)", capacity_block)
+        self.assertNotIn("64u", capacity_block)
         self.assertNotIn("align_size_8(sizeof", capacity_block)
         self.assertNotIn("sizeof(PdockerGpuVulkanDispatchV5ResourceEntry) * resource_count", capacity_block)
         for marker in [
@@ -8696,6 +8701,14 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(marker, v51_hash_append_block)
         self.assertNotIn("sizeof(resources[0]) * resource_count", v51_hash_append_block)
         self.assertNotIn("sizeof(descriptors[0]) * descriptor_count", v51_hash_append_block)
+        for marker in [
+            "header->resource_hash = fnv1a64_bytes(resources, resource_table_bytes);",
+            "header->descriptor_hash = fnv1a64_bytes(descriptors, descriptor_table_bytes);",
+            "object_hash = fnv1a64_update_bytes(object_hash, image_entries, image_table_bytes);",
+            "object_hash = fnv1a64_update_bytes(object_hash, image_view_entries, image_view_table_bytes);",
+            "object_hash = fnv1a64_update_bytes(object_hash, sampler_entries, sampler_table_bytes);",
+        ]:
+            self.assertIn(marker, v51_body)
 
         for marker in [
             "(size_t)frame_header->v61.dynamic_offset_table_size",

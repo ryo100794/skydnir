@@ -2677,8 +2677,8 @@ static bool checked_align_size_8(size_t value, size_t *out) {
 static bool frame_capacity_add_aligned_bytes(size_t *capacity, size_t bytes) {
     size_t aligned = 0;
     if (!capacity) return false;
-    if (!checked_align_size_8(bytes, &aligned)) return false;
-    return checked_add_size(*capacity, aligned, capacity);
+    if (!checked_align_size_8(*capacity, &aligned)) return false;
+    return checked_add_size(aligned, bytes, capacity);
 }
 
 static bool frame_capacity_add_aligned_table(size_t *capacity,
@@ -3716,13 +3716,14 @@ static int frame_append_bytes(unsigned char *frame,
                               size_t size,
                               uint64_t *offset_out) {
     if (!frame || !cursor || !offset_out) return -EINVAL;
+    if (size > 0 && !data) return -EINVAL;
     size_t aligned = 0;
     size_t end = 0;
     if (!checked_align_size_8(*cursor, &aligned)) return -EMSGSIZE;
     if (aligned > frame_capacity || size > frame_capacity - aligned) return -EMSGSIZE;
     if (!checked_add_size(aligned, size, &end)) return -EMSGSIZE;
     *offset_out = (uint64_t)aligned;
-    if (size > 0 && data) memcpy(frame + aligned, data, size);
+    if (size > 0) memcpy(frame + aligned, data, size);
     *cursor = end;
     return 0;
 }
@@ -8111,8 +8112,7 @@ static int send_generic_vulkan_dispatch_v5_1_op(
         !frame_capacity_add_aligned_bytes(&frame_capacity, specialization_data_size) ||
         !frame_capacity_add_aligned_bytes(&frame_capacity, push_size) ||
         !frame_capacity_add_aligned_bytes(&frame_capacity, entry_name_size) ||
-        !frame_capacity_add_aligned_bytes(&frame_capacity, effective_option_text_size) ||
-        !checked_add_size(frame_capacity, 64u, &frame_capacity)) {
+        !frame_capacity_add_aligned_bytes(&frame_capacity, effective_option_text_size)) {
         return -EMSGSIZE;
     }
     if (frame_capacity > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FRAME_BYTES) return -EMSGSIZE;
