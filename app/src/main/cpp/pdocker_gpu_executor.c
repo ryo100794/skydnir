@@ -2716,6 +2716,45 @@ static int checked_u64_to_off_t(uint64_t value, off_t *out) {
     return 0;
 }
 
+static int checked_off_t_add_size(off_t base, size_t size, off_t *out) {
+    if (!out) return -EINVAL;
+    if (base < 0) return -EINVAL;
+    uint64_t sum = 0;
+    if (checked_u64_add3((uint64_t)base, (uint64_t)size, 0, &sum) != 0) {
+        return -EOVERFLOW;
+    }
+    return checked_u64_to_off_t(sum, out);
+}
+
+static int validate_strict_binding_local_range(
+        const VulkanDispatchBinding *binding,
+        size_t descriptor_range) {
+    if (!binding) return -EINVAL;
+    if (binding->api_memory_id == 0 || binding->api_buffer_id == 0 ||
+        binding->api_buffer_size == 0 || binding->api_memory_size == 0 ||
+        binding->api_memory_offset < 0 || binding->api_offset < 0 ||
+        descriptor_range == 0) {
+        return -EINVAL;
+    }
+    uint64_t memory_end = 0;
+    uint64_t transfer_end = 0;
+    uint64_t descriptor_end = 0;
+    if (checked_u64_add3((uint64_t)binding->api_memory_offset,
+                         (uint64_t)binding->api_buffer_size, 0, &memory_end) != 0 ||
+        checked_u64_add3((uint64_t)binding->api_offset,
+                         (uint64_t)binding->size, 0, &transfer_end) != 0 ||
+        checked_u64_add3((uint64_t)binding->api_offset,
+                         (uint64_t)descriptor_range, 0, &descriptor_end) != 0) {
+        return -EOVERFLOW;
+    }
+    if (memory_end > (uint64_t)binding->api_memory_size ||
+        transfer_end > (uint64_t)binding->api_buffer_size ||
+        descriptor_end > (uint64_t)binding->api_buffer_size) {
+        return -ERANGE;
+    }
+    return 0;
+}
+
 static int find_image_memory_object(
         const VulkanDispatchImageMemoryObject *objects,
         size_t count,
@@ -4022,17 +4061,9 @@ static int create_strict_vulkan_object_graph(
     for (size_t i = 0; i < binding_count; ++i) {
         if (!active_bindings[i]) continue;
         const size_t descriptor_range = vulkan_binding_descriptor_range(&bindings[i], 1);
-        if (bindings[i].api_memory_id == 0 || bindings[i].api_buffer_id == 0 ||
-            bindings[i].api_buffer_size == 0 || bindings[i].api_memory_size == 0 ||
-            bindings[i].api_memory_offset < 0 || bindings[i].api_offset < 0 ||
-            descriptor_range == 0 ||
-            (uint64_t)bindings[i].api_memory_offset + (uint64_t)bindings[i].api_buffer_size >
-                (uint64_t)bindings[i].api_memory_size ||
-            (uint64_t)bindings[i].api_offset + (uint64_t)bindings[i].size >
-                (uint64_t)bindings[i].api_buffer_size ||
-            (uint64_t)bindings[i].api_offset + (uint64_t)descriptor_range >
-                (uint64_t)bindings[i].api_buffer_size) {
-            return -EINVAL;
+        int range_rc = validate_strict_binding_local_range(&bindings[i], descriptor_range);
+        if (range_rc != 0) {
+            return range_rc;
         }
         int mem_index = find_strict_memory_object(memories, *memory_count, bindings[i].api_memory_id);
         if (mem_index < 0) {
@@ -4074,17 +4105,23 @@ static int create_strict_vulkan_object_graph(
         }
 
         if (compact_descriptor_window) {
-            const uint64_t descriptor_end =
-                (uint64_t)bindings[i].api_offset + (uint64_t)descriptor_range;
-            if (descriptor_end > (uint64_t)SIZE_MAX) return -EOVERFLOW;
+            uint64_t descriptor_end = 0;
+            if (checked_u64_add3((uint64_t)bindings[i].api_offset,
+                                 (uint64_t)descriptor_range, 0, &descriptor_end) != 0 ||
+                descriptor_end > (uint64_t)SIZE_MAX) {
+                return -EOVERFLOW;
+            }
             if ((size_t)descriptor_end > buffers[buffer_index].transport_buffer_size) {
                 buffers[buffer_index].transport_buffer_size = (size_t)descriptor_end;
             }
         }
         if (binding_read_needed[i] || binding_write_needed[i]) {
             const uint64_t range_start = (uint64_t)bindings[i].api_offset;
-            const uint64_t range_end = range_start + (uint64_t)bindings[i].size;
-            if (range_end > (uint64_t)SIZE_MAX) return -EOVERFLOW;
+            uint64_t range_end = 0;
+            if (checked_u64_add3(range_start, (uint64_t)bindings[i].size, 0, &range_end) != 0 ||
+                range_end > (uint64_t)SIZE_MAX) {
+                return -EOVERFLOW;
+            }
             if (range_start < buffers[buffer_index].staging_base) {
                 buffers[buffer_index].staging_base = (size_t)range_start;
             }
@@ -4125,9 +4162,12 @@ static int create_strict_vulkan_object_graph(
             (buffers[b].memory_offset % buffers[b].requirements.alignment) != 0) {
             return -EINVAL;
         }
-        uint64_t required_end =
-            (uint64_t)buffers[b].memory_offset + (uint64_t)buffers[b].requirements.size;
-        if (required_end > (uint64_t)SIZE_MAX) return -EOVERFLOW;
+        uint64_t required_end = 0;
+        if (checked_u64_add3((uint64_t)buffers[b].memory_offset,
+                             (uint64_t)buffers[b].requirements.size, 0, &required_end) != 0 ||
+            required_end > (uint64_t)SIZE_MAX) {
+            return -EOVERFLOW;
+        }
         if (required_end > memory->size) {
             memory->size = (size_t)required_end;
         }
@@ -4493,10 +4533,13 @@ static int strict_readonly_resident_cache_candidate(
     }
     const VulkanDispatchBinding *b = &bindings[index];
     if (!resident_cache_candidate(options, 1, b->size)) return 0;
-    if (b->api_offset < 0 || b->api_memory_offset < 0 ||
-        (uint64_t)b->api_memory_offset + (uint64_t)b->api_offset !=
-            (uint64_t)b->offset ||
-        (uint64_t)b->api_offset + (uint64_t)b->size > SIZE_MAX) {
+    uint64_t expected_offset = 0;
+    uint64_t cache_span = 0;
+    if (b->api_offset < 0 || b->api_memory_offset < 0 || b->offset < 0 ||
+        checked_u64_add3((uint64_t)b->api_memory_offset, (uint64_t)b->api_offset, 0, &expected_offset) != 0 ||
+        expected_offset != (uint64_t)b->offset ||
+        checked_u64_add3((uint64_t)b->api_offset, (uint64_t)b->size, 0, &cache_span) != 0 ||
+        cache_span > (uint64_t)SIZE_MAX) {
         return 0;
     }
     /*
@@ -5209,15 +5252,23 @@ static int upload_strict_graph_bindings(
         int buffer_index = find_strict_buffer_object(buffers, buffer_count, bindings[i].api_buffer_id);
         if (buffer_index < 0) return -EINVAL;
         VulkanStrictMemoryObject *memory = &memories[buffers[buffer_index].memory_index];
-        uint64_t descriptor_absolute =
-            (uint64_t)bindings[i].api_memory_offset + (uint64_t)bindings[i].api_offset;
+        uint64_t descriptor_absolute = 0;
+        uint64_t descriptor_end = 0;
+        if (bindings[i].api_memory_offset < 0 || bindings[i].api_offset < 0 ||
+            checked_u64_add3((uint64_t)bindings[i].api_memory_offset,
+                             (uint64_t)bindings[i].api_offset, 0, &descriptor_absolute) != 0 ||
+            checked_u64_add3(descriptor_absolute, (uint64_t)bindings[i].size, 0, &descriptor_end) != 0 ||
+            descriptor_absolute > (uint64_t)SIZE_MAX) {
+            return -EOVERFLOW;
+        }
         size_t upload_offset = (size_t)descriptor_absolute;
         if (memory->device_local_staged) {
-            if (vulkan_vector_staging_offset(&buffers[buffer_index].view,
+            if (bindings[i].api_offset < 0 || (uint64_t)bindings[i].api_offset > (uint64_t)SIZE_MAX ||
+                vulkan_vector_staging_offset(&buffers[buffer_index].view,
                                              (size_t)bindings[i].api_offset,
                                              bindings[i].size,
                                              &upload_offset) != 0) return -EINVAL;
-        } else if (descriptor_absolute + (uint64_t)bindings[i].size > (uint64_t)memory->size) {
+        } else if (descriptor_end > (uint64_t)memory->size) {
             return -EINVAL;
         }
         vk_buffers[i] = &buffers[buffer_index].view;
@@ -14290,17 +14341,27 @@ static int run_vulkan_dispatch_fd(
          * the descriptor offset relative to that staged object.
          */
         off_t object_base = bindings[i].offset;
-        off_t object_end = bindings[i].offset + (off_t)bindings[i].size;
+        off_t object_end = 0;
+        if (checked_off_t_add_size(bindings[i].offset, bindings[i].size, &object_end) != 0) {
+            fail_binding = (int)i;
+            fail_stage = "binding-object-range";
+            json_fail("vulkan-dispatch", "binding object range overflow");
+            ret = 64;
+            goto cleanup;
+        }
         if (strict_passthrough &&
-            bindings[i].api_buffer_size > 0 &&
-            bindings[i].api_offset >= 0 &&
-            bindings[i].api_memory_offset >= 0 &&
-            (uint64_t)bindings[i].api_offset + (uint64_t)bindings[i].size <=
-                (uint64_t)bindings[i].api_buffer_size &&
-            (uint64_t)bindings[i].api_memory_offset + (uint64_t)bindings[i].api_buffer_size <=
-                (uint64_t)LLONG_MAX) {
+            validate_strict_binding_local_range(&bindings[i], vulkan_binding_descriptor_range(&bindings[i], 1)) == 0) {
+            uint64_t strict_object_end = 0;
+            if (checked_u64_add3((uint64_t)bindings[i].api_memory_offset,
+                                 (uint64_t)bindings[i].api_buffer_size, 0, &strict_object_end) != 0 ||
+                checked_u64_to_off_t(strict_object_end, &object_end) != 0) {
+                fail_binding = (int)i;
+                fail_stage = "strict-binding-object-range";
+                json_fail("vulkan-dispatch", "strict binding object range overflow");
+                ret = 64;
+                goto cleanup;
+            }
             object_base = bindings[i].api_memory_offset;
-            object_end = bindings[i].api_memory_offset + (off_t)bindings[i].api_buffer_size;
         }
         binding_object_base[i] = object_base;
         binding_object_end[i] = object_end;
@@ -14318,10 +14379,10 @@ static int run_vulkan_dispatch_fd(
             if (!active_bindings[i] || !binding_fd_ino[i]) continue;
             for (size_t j = 0; j < i; ++j) {
                 if (!active_bindings[j] || !binding_fd_ino[j]) continue;
-                const off_t i0 = strict_passthrough ? binding_object_base[i] : bindings[i].offset;
-                const off_t i1 = strict_passthrough ? binding_object_end[i] : bindings[i].offset + (off_t)bindings[i].size;
-                const off_t j0 = strict_passthrough ? binding_object_base[j] : bindings[j].offset;
-                const off_t j1 = strict_passthrough ? binding_object_end[j] : bindings[j].offset + (off_t)bindings[j].size;
+                const off_t i0 = binding_object_base[i];
+                const off_t i1 = binding_object_end[i];
+                const off_t j0 = binding_object_base[j];
+                const off_t j1 = binding_object_end[j];
                 if (binding_fd_dev[i] == binding_fd_dev[j] &&
                     binding_fd_ino[i] == binding_fd_ino[j] &&
                     i0 < j1 && j0 < i1) {
@@ -14344,8 +14405,8 @@ static int run_vulkan_dispatch_fd(
         if (!active_bindings[i]) continue;
         size_t rep = binding_alias_rep[i];
         if (rep >= binding_count) continue;
-        const off_t start = strict_passthrough ? binding_object_base[i] : bindings[i].offset;
-        const off_t end = strict_passthrough ? binding_object_end[i] : bindings[i].offset + (off_t)bindings[i].size;
+        const off_t start = binding_object_base[i];
+        const off_t end = binding_object_end[i];
         if (!binding_group_span_seen[rep] || start < binding_group_base[rep]) {
             binding_group_base[rep] = start;
         }
@@ -14363,10 +14424,17 @@ static int run_vulkan_dispatch_fd(
         off_t descriptor_absolute = bindings[i].offset;
         if (strict_passthrough &&
             bindings[i].api_memory_offset >= 0 &&
-            bindings[i].api_offset >= 0 &&
-            (uint64_t)bindings[i].api_memory_offset + (uint64_t)bindings[i].api_offset <=
-                (uint64_t)LLONG_MAX) {
-            descriptor_absolute = bindings[i].api_memory_offset + bindings[i].api_offset;
+            bindings[i].api_offset >= 0) {
+            uint64_t descriptor_absolute_u64 = 0;
+            if (checked_u64_add3((uint64_t)bindings[i].api_memory_offset,
+                                 (uint64_t)bindings[i].api_offset, 0, &descriptor_absolute_u64) != 0 ||
+                checked_u64_to_off_t(descriptor_absolute_u64, &descriptor_absolute) != 0) {
+                fail_binding = (int)i;
+                fail_stage = "strict-descriptor-absolute";
+                json_fail("vulkan-dispatch", "strict descriptor absolute overflow");
+                ret = 64;
+                goto cleanup;
+            }
         }
         if (rep < binding_count && descriptor_absolute >= binding_group_base[rep]) {
             binding_gpu_offset[i] = (size_t)(descriptor_absolute - binding_group_base[rep]);
@@ -14398,9 +14466,19 @@ static int run_vulkan_dispatch_fd(
             fail_stage = "strict-readonly-resident-cache";
             double binding_start = now_ms();
             VulkanDispatchBinding cache_binding = bindings[i];
-            cache_binding.offset = bindings[i].api_memory_offset;
-            cache_binding.size = (size_t)((uint64_t)bindings[i].api_offset +
-                                          (uint64_t)bindings[i].size);
+            uint64_t cache_binding_size = 0;
+            if (bindings[i].api_memory_offset < 0 || bindings[i].api_offset < 0 ||
+                checked_u64_to_off_t((uint64_t)bindings[i].api_memory_offset, &cache_binding.offset) != 0 ||
+                checked_u64_add3((uint64_t)bindings[i].api_offset,
+                                 (uint64_t)bindings[i].size, 0, &cache_binding_size) != 0 ||
+                cache_binding_size > (uint64_t)SIZE_MAX) {
+                fail_binding = (int)i;
+                fail_stage = "strict-readonly-resident-cache-range";
+                json_fail("vulkan-dispatch", "strict readonly resident cache range overflow");
+                ret = 64;
+                goto cleanup;
+            }
+            cache_binding.size = (size_t)cache_binding_size;
             vk_buffers[i] = acquire_dispatch_buffer(
                 rt->physical_device,
                 rt->device,
