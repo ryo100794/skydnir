@@ -3887,34 +3887,78 @@ static void destroy_strict_vulkan_object_graph(
     }
 }
 
-static int strict_descriptor_window_compaction_enabled(
+static int strict_descriptor_window_compaction_status(
         const VulkanDispatchBinding *bindings,
         size_t binding_count,
         const uint8_t *active_bindings,
-        int device_local_staged) {
-    if (!bindings || !active_bindings || !device_local_staged) return 0;
+        int device_local_staged,
+        const char **disabled_reason,
+        size_t *disabled_binding_index) {
+    if (disabled_reason) *disabled_reason = NULL;
+    if (disabled_binding_index) *disabled_binding_index = 0;
+    if (!bindings || !active_bindings) {
+        if (disabled_reason) *disabled_reason = "invalid-arguments";
+        return 0;
+    }
+    if (!device_local_staged) {
+        if (disabled_reason) *disabled_reason = "device-local-staging-disabled";
+        return 0;
+    }
     for (size_t i = 0; i < binding_count; ++i) {
         if (!active_bindings[i]) continue;
         const VulkanDispatchBinding *b = &bindings[i];
-        if (b->api_memory_id == 0 || b->api_buffer_id == 0 ||
-            b->api_buffer_size == 0 || b->api_memory_size == 0 ||
-            b->api_memory_offset != 0 || b->api_offset < 0) {
+        const char *reason = NULL;
+        if (b->api_memory_id == 0 || b->api_buffer_id == 0) {
+            reason = "missing-api-identity";
+        } else if (b->api_buffer_size == 0 || b->api_memory_size == 0) {
+            reason = "missing-api-size";
+        } else if (b->api_memory_offset != 0) {
+            reason = "nonzero-api-memory-offset";
+        } else if (b->api_offset < 0) {
+            reason = "negative-api-offset";
+        }
+        if (reason) {
+            if (disabled_reason) *disabled_reason = reason;
+            if (disabled_binding_index) *disabled_binding_index = i;
             return 0;
         }
         const size_t descriptor_range = vulkan_binding_descriptor_range(b, 1);
-        if (descriptor_range == 0) return 0;
-        if ((uint64_t)b->api_offset > UINT64_MAX - (uint64_t)descriptor_range) return 0;
+        if (descriptor_range == 0) {
+            if (disabled_reason) *disabled_reason = "zero-descriptor-range";
+            if (disabled_binding_index) *disabled_binding_index = i;
+            return 0;
+        }
+        if ((uint64_t)b->api_offset > UINT64_MAX - (uint64_t)descriptor_range) {
+            if (disabled_reason) *disabled_reason = "descriptor-range-overflow";
+            if (disabled_binding_index) *disabled_binding_index = i;
+            return 0;
+        }
         const uint64_t range_end = (uint64_t)b->api_offset + (uint64_t)descriptor_range;
-        if (range_end > (uint64_t)b->api_buffer_size) return 0;
+        if (range_end > (uint64_t)b->api_buffer_size) {
+            if (disabled_reason) *disabled_reason = "descriptor-range-outside-buffer";
+            if (disabled_binding_index) *disabled_binding_index = i;
+            return 0;
+        }
         for (size_t j = 0; j < i; ++j) {
             if (!active_bindings[j]) continue;
             if (bindings[j].api_memory_id == b->api_memory_id &&
                 bindings[j].api_buffer_id != b->api_buffer_id) {
+                if (disabled_reason) *disabled_reason = "memory-shared-by-different-buffer";
+                if (disabled_binding_index) *disabled_binding_index = i;
                 return 0;
             }
         }
     }
     return 1;
+}
+
+static int strict_descriptor_window_compaction_enabled(
+        const VulkanDispatchBinding *bindings,
+        size_t binding_count,
+        const uint8_t *active_bindings,
+        int device_local_staged) {
+    return strict_descriptor_window_compaction_status(
+        bindings, binding_count, active_bindings, device_local_staged, NULL, NULL);
 }
 
 static size_t strict_device_local_staging_max_transfer_bytes(const VulkanDispatchOptions *options) {
@@ -13367,6 +13411,9 @@ static int run_vulkan_dispatch_fd(
     int strict_object_graph_cache_hit = 0;
     int strict_object_graph_cache_adopted = 0;
     const char *strict_object_graph_cache_disabled_reason = NULL;
+    int strict_descriptor_window_compaction_planned = 0;
+    const char *strict_descriptor_window_compaction_disabled_reason = NULL;
+    size_t strict_descriptor_window_compaction_disabled_binding = 0;
     uint64_t strict_object_graph_cache_key = 0;
     uint64_t strict_object_graph_cache_active_mask = 0;
     size_t strict_object_graph_cache_bytes = 0;
@@ -14393,6 +14440,13 @@ static int run_vulkan_dispatch_fd(
     if (strict_passthrough) {
         fail_stage = "create-strict-vulkan-object-graph";
         strict_object_graph_cache_enabled = strict_graph_cache_enabled(options);
+        strict_descriptor_window_compaction_planned = strict_descriptor_window_compaction_status(
+            bindings,
+            binding_count,
+            strict_graph_active_bindings,
+            strict_device_local_staging,
+            &strict_descriptor_window_compaction_disabled_reason,
+            &strict_descriptor_window_compaction_disabled_binding);
         if (strict_object_graph_cache_enabled) {
             strict_object_graph_cache_key = strict_graph_cache_key(
                 bindings,
@@ -14414,6 +14468,9 @@ static int run_vulkan_dispatch_fd(
                     "\"cache_enabled\":%s,\"cache_key\":\"0x%016llx\","
                     "\"active_mask\":\"0x%016llx\",\"cache_bytes\":%zu,"
                     "\"cache_budget_bytes\":%zu,\"device_local_staging\":%s,"
+                    "\"descriptor_window_compaction_planned\":%s,"
+                    "\"descriptor_window_compaction_disabled_reason\":\"%s\","
+                    "\"descriptor_window_compaction_disabled_binding\":%zu,"
                     "\"disabled_reason\":\"%s\"}\n",
                     (unsigned long long)dispatch_lifecycle_id,
                     (unsigned long long)dispatch_lifecycle_spirv_hash,
@@ -14423,6 +14480,10 @@ static int run_vulkan_dispatch_fd(
                     strict_object_graph_cache_bytes,
                     strict_object_graph_cache_budget_bytes,
                     strict_device_local_staging ? "true" : "false",
+                    strict_descriptor_window_compaction_planned ? "true" : "false",
+                    strict_descriptor_window_compaction_disabled_reason ?
+                        strict_descriptor_window_compaction_disabled_reason : "",
+                    strict_descriptor_window_compaction_disabled_binding,
                     strict_object_graph_cache_disabled_reason ?
                         strict_object_graph_cache_disabled_reason : "");
             fflush(stderr);
