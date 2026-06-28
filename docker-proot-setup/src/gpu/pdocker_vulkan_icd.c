@@ -141,6 +141,11 @@ PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_buffer, VkBuffer
 PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_image, VkImage, PdockerVkImage)
 PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_image_view, VkImageView, PdockerVkImageView)
 PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_sampler, VkSampler, PdockerVkSampler)
+PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_descriptor_set_layout, VkDescriptorSetLayout, PdockerVkDescriptorSetLayout)
+PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_descriptor_set, VkDescriptorSet, PdockerVkDescriptorSet)
+PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_shader_module, VkShaderModule, PdockerVkShaderModule)
+PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_pipeline_layout, VkPipelineLayout, PdockerVkPipelineLayout)
+PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_pipeline, VkPipeline, PdockerVkPipeline)
 
 #define PDOCKER_VK_MAX_STORAGE_BUFFERS 16
 #define PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS PDOCKER_VK_MAX_STORAGE_BUFFERS
@@ -13049,7 +13054,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorSetLayout(
             layout->storage_binding_counts[binding->binding] = binding->descriptorCount;
         }
     }
-    *pSetLayout = (VkDescriptorSetLayout)layout;
+    *pSetLayout = pdocker_vk_descriptor_set_layout_to_handle(layout);
     return VK_SUCCESS;
 }
 
@@ -13059,7 +13064,7 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyDescriptorSetLayout(
         const VkAllocationCallbacks *pAllocator) {
     (void)device;
     (void)pAllocator;
-    free((void *)descriptorSetLayout);
+    free(pdocker_vk_descriptor_set_layout_from_handle(descriptorSetLayout));
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkCreatePipelineLayout(
@@ -13084,7 +13089,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreatePipelineLayout(
         for (uint32_t i = 0; i < layout->set_layout_count; ++i) {
             layout->set_layouts[i] =
                 pCreateInfo->pSetLayouts
-                    ? (PdockerVkDescriptorSetLayout *)pCreateInfo->pSetLayouts[i]
+                    ? pdocker_vk_descriptor_set_layout_from_handle(pCreateInfo->pSetLayouts[i])
                     : NULL;
         }
     }
@@ -13110,7 +13115,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreatePipelineLayout(
         free(layout);
         return VK_ERROR_OUT_OF_HOST_MEMORY;
     }
-    *pPipelineLayout = (VkPipelineLayout)layout;
+    *pPipelineLayout = pdocker_vk_pipeline_layout_to_handle(layout);
     return VK_SUCCESS;
 }
 
@@ -13120,7 +13125,7 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyPipelineLayout(
         const VkAllocationCallbacks *pAllocator) {
     (void)device;
     (void)pAllocator;
-    free((void *)pipelineLayout);
+    free(pdocker_vk_pipeline_layout_from_handle(pipelineLayout));
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorPool(
@@ -13169,9 +13174,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateDescriptorSets(
         PdockerVkDescriptorSet *set = pdocker_alloc_handle(sizeof(*set));
         if (!set) return VK_ERROR_OUT_OF_HOST_MEMORY;
         if (pAllocateInfo->pSetLayouts) {
-            set->layout = (PdockerVkDescriptorSetLayout *)pAllocateInfo->pSetLayouts[i];
+            set->layout = pdocker_vk_descriptor_set_layout_from_handle(pAllocateInfo->pSetLayouts[i]);
         }
-        pDescriptorSets[i] = (VkDescriptorSet)set;
+        pDescriptorSets[i] = pdocker_vk_descriptor_set_to_handle(set);
     }
     return VK_SUCCESS;
 }
@@ -13184,7 +13189,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkFreeDescriptorSets(
     (void)device;
     (void)descriptorPool;
     for (uint32_t i = 0; i < descriptorSetCount; ++i) {
-        free((void *)pDescriptorSets[i]);
+        free(pdocker_vk_descriptor_set_from_handle(pDescriptorSets[i]));
     }
     return VK_SUCCESS;
 }
@@ -13263,7 +13268,7 @@ VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets(
 
     for (uint32_t i = 0; i < descriptorWriteCount; ++i) {
         const VkWriteDescriptorSet *w = &pDescriptorWrites[i];
-        PdockerVkDescriptorSet *live_set = (PdockerVkDescriptorSet *)w->dstSet;
+        PdockerVkDescriptorSet *live_set = pdocker_vk_descriptor_set_from_handle(w->dstSet);
         PdockerVkDescriptorSet *set = NULL;
         if (!live_set) {
             update_rc = -EINVAL;
@@ -13411,8 +13416,8 @@ VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets(
 
     for (uint32_t i = 0; i < descriptorCopyCount; ++i) {
         const VkCopyDescriptorSet *c = &pDescriptorCopies[i];
-        PdockerVkDescriptorSet *src_live = c ? (PdockerVkDescriptorSet *)c->srcSet : NULL;
-        PdockerVkDescriptorSet *dst_live = c ? (PdockerVkDescriptorSet *)c->dstSet : NULL;
+        PdockerVkDescriptorSet *src_live = c ? pdocker_vk_descriptor_set_from_handle(c->srcSet) : NULL;
+        PdockerVkDescriptorSet *dst_live = c ? pdocker_vk_descriptor_set_from_handle(c->dstSet) : NULL;
         PdockerVkDescriptorSet *src = NULL;
         PdockerVkDescriptorSet *dst = NULL;
         if (!src_live || !dst_live) {
@@ -13565,7 +13570,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateShaderModule(
         return VK_ERROR_MEMORY_MAP_FAILED;
     }
     memcpy(shader->code_map, pCreateInfo->pCode, shader->code_size);
-    *pShaderModule = (VkShaderModule)shader;
+    *pShaderModule = pdocker_vk_shader_module_to_handle(shader);
     return *pShaderModule ? VK_SUCCESS : VK_ERROR_OUT_OF_HOST_MEMORY;
 }
 
@@ -13575,7 +13580,7 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyShaderModule(
         const VkAllocationCallbacks *pAllocator) {
     (void)device;
     (void)pAllocator;
-    PdockerVkShaderModule *shader = (PdockerVkShaderModule *)shaderModule;
+    PdockerVkShaderModule *shader = pdocker_vk_shader_module_from_handle(shaderModule);
     if (!shader) return;
     if (shader->code_map && shader->code_map != MAP_FAILED) munmap(shader->code_map, shader->code_size);
     if (shader->code_fd >= 0) close(shader->code_fd);
@@ -13595,8 +13600,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateComputePipelines(
     for (uint32_t i = 0; i < createInfoCount; ++i) {
         PdockerVkPipeline *pipeline = pdocker_alloc_handle(sizeof(*pipeline));
         if (!pipeline) return VK_ERROR_OUT_OF_HOST_MEMORY;
-        pipeline->shader = (PdockerVkShaderModule *)pCreateInfos[i].stage.module;
-        pipeline->layout = (PdockerVkPipelineLayout *)pCreateInfos[i].layout;
+        pipeline->shader = pdocker_vk_shader_module_from_handle(pCreateInfos[i].stage.module);
+        pipeline->layout = pdocker_vk_pipeline_layout_from_handle(pCreateInfos[i].layout);
         pipeline->requested_feature_mask =
             device ? ((PdockerVkDevice *)device)->requested_feature_mask : 0;
         if (env_truthy_default("PDOCKER_GPU_ADD_FLOAT16_CAPABILITY_FOR_STORAGE16", false)) {
@@ -13628,7 +13633,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateComputePipelines(
                 }
             }
         }
-        pPipelines[i] = (VkPipeline)pipeline;
+        pPipelines[i] = pdocker_vk_pipeline_to_handle(pipeline);
     }
     return VK_SUCCESS;
 }
@@ -13790,7 +13795,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
             }
         }
         pipeline->dynamic_state_mask = captured_dynamic_state_mask;
-        pipeline->layout = (PdockerVkPipelineLayout *)ci->layout;
+        pipeline->layout = pdocker_vk_pipeline_layout_from_handle(ci->layout);
         pipeline->render_pass = (PdockerVkRenderPass *)ci->renderPass;
         pipeline->shader_stage_count = ci->stageCount;
         if (ci->stageCount > 0 && !ci->pStages) {
@@ -13807,7 +13812,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
             }
             pipeline->shader_stage_flags |= stage ? stage->stage : 0;
             pipeline->graphics_stage_flags[stage_i] = stage ? stage->stage : 0;
-            pipeline->graphics_stage_modules[stage_i] = stage ? (PdockerVkShaderModule *)stage->module : NULL;
+            pipeline->graphics_stage_modules[stage_i] = stage ? pdocker_vk_shader_module_from_handle(stage->module) : NULL;
             safe_copy_cstr(pipeline->graphics_stage_entry_names[stage_i],
                            sizeof(pipeline->graphics_stage_entry_names[stage_i]),
                            stage ? stage->pName : NULL);
@@ -14064,7 +14069,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
                 pipeline->vertex_attributes[a] = ci->pVertexInputState->pVertexAttributeDescriptions[a];
             }
         }
-        pPipelines[i] = (VkPipeline)pipeline;
+        pPipelines[i] = pdocker_vk_pipeline_to_handle(pipeline);
     }
     return VK_SUCCESS;
 }
@@ -14075,7 +14080,7 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyPipeline(
         const VkAllocationCallbacks *pAllocator) {
     (void)device;
     (void)pAllocator;
-    free((void *)pipeline);
+    free(pdocker_vk_pipeline_from_handle(pipeline));
 }
 
 static void capture_render_pass_subpass_state(
@@ -15232,10 +15237,10 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindPipeline(
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     if (!cmd) return;
     if (pipelineBindPoint == VK_PIPELINE_BIND_POINT_COMPUTE) {
-        cmd->compute_pipeline = (PdockerVkPipeline *)pipeline;
+        cmd->compute_pipeline = pdocker_vk_pipeline_from_handle(pipeline);
         cmd->pipeline = cmd->compute_pipeline;
     } else if (pipelineBindPoint == VK_PIPELINE_BIND_POINT_GRAPHICS) {
-        cmd->graphics_pipeline = (PdockerVkPipeline *)pipeline;
+        cmd->graphics_pipeline = pdocker_vk_pipeline_from_handle(pipeline);
         PdockerVkGraphicsCommandRecord record;
         memset(&record, 0, sizeof(record));
         record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_PIPELINE;
@@ -16608,7 +16613,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
         const VkDescriptorSet *pDescriptorSets,
         uint32_t dynamicOffsetCount,
         const uint32_t *pDynamicOffsets) {
-    PdockerVkPipelineLayout *pipeline_layout = (PdockerVkPipelineLayout *)layout;
+    PdockerVkPipelineLayout *pipeline_layout = pdocker_vk_pipeline_layout_from_handle(layout);
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     if (cmd && descriptorSetCount > 0 && pDescriptorSets) {
         PdockerVkDescriptorSet **target_set_handles = NULL;
@@ -16663,7 +16668,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
         for (uint32_t set_i = 0; set_i < descriptorSetCount; ++set_i) {
             if (firstSet >= PDOCKER_VK_MAX_DESCRIPTOR_SETS ||
                 set_i >= PDOCKER_VK_MAX_DESCRIPTOR_SETS - firstSet) break;
-            PdockerVkDescriptorSet *set = (PdockerVkDescriptorSet *)pDescriptorSets[set_i];
+            PdockerVkDescriptorSet *set = pdocker_vk_descriptor_set_from_handle(pDescriptorSets[set_i]);
             if (!set) continue;
             uint32_t target_set = firstSet + set_i;
             if (pipeline_layout &&
@@ -17059,7 +17064,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPushConstants(
         op->stage_flags = stageFlags;
         op->offset = offset;
         op->size = size;
-        PdockerVkPipelineLayout *captured_layout = (PdockerVkPipelineLayout *)layout;
+        PdockerVkPipelineLayout *captured_layout = pdocker_vk_pipeline_layout_from_handle(layout);
         op->layout_id = captured_layout ? captured_layout->layout_id : 0;
         op->value_hash = fnv1a64_bytes(pValues, size);
         if (shader_stage_flags_include_graphics(stageFlags)) {

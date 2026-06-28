@@ -775,8 +775,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "cmd->graphics_dynamic_offset_count = 0;",
             "pipelineBindPoint == VK_PIPELINE_BIND_POINT_COMPUTE",
             "pipelineBindPoint == VK_PIPELINE_BIND_POINT_GRAPHICS",
-            "cmd->compute_pipeline = (PdockerVkPipeline *)pipeline;",
-            "cmd->graphics_pipeline = (PdockerVkPipeline *)pipeline;",
+            "cmd->compute_pipeline = pdocker_vk_pipeline_from_handle(pipeline);",
+            "cmd->graphics_pipeline = pdocker_vk_pipeline_from_handle(pipeline);",
             "send_vulkan_graphics_v6_frame_with_fds",
             "send_empty_vulkan_graphics_v6_1_validation_frame",
             "send_recorded_vulkan_graphics_v6_1_frame",
@@ -8201,6 +8201,51 @@ class GpuAbiContractTest(unittest.TestCase):
             "free((void *)buffer)",
             "free((void *)imageView)",
             "free((void *)sampler)",
+        ]:
+            self.assertNotIn(forbidden, source)
+
+    def test_vulkan_compute_handles_use_typed_converters(self):
+        source = VULKAN_ICD.read_text()
+        for marker in [
+            "pdocker_vk_descriptor_set_layout_from_handle",
+            "pdocker_vk_descriptor_set_from_handle",
+            "pdocker_vk_shader_module_from_handle",
+            "pdocker_vk_pipeline_layout_from_handle",
+            "pdocker_vk_pipeline_from_handle",
+            "*pSetLayout = pdocker_vk_descriptor_set_layout_to_handle(layout);",
+            "set->layout = pdocker_vk_descriptor_set_layout_from_handle(pAllocateInfo->pSetLayouts[i]);",
+            "pDescriptorSets[i] = pdocker_vk_descriptor_set_to_handle(set);",
+            "*pShaderModule = pdocker_vk_shader_module_to_handle(shader);",
+            "pipeline->shader = pdocker_vk_shader_module_from_handle(pCreateInfos[i].stage.module);",
+            "pipeline->layout = pdocker_vk_pipeline_layout_from_handle(pCreateInfos[i].layout);",
+            "pPipelines[i] = pdocker_vk_pipeline_to_handle(pipeline);",
+            "cmd->compute_pipeline = pdocker_vk_pipeline_from_handle(pipeline);",
+            "PdockerVkPipelineLayout *pipeline_layout = pdocker_vk_pipeline_layout_from_handle(layout);",
+            "PdockerVkDescriptorSet *set = pdocker_vk_descriptor_set_from_handle(pDescriptorSets[set_i]);",
+        ]:
+            self.assertIn(marker, source)
+        for forbidden in [
+            "*pSetLayout = (VkDescriptorSetLayout)layout;",
+            "free((void *)descriptorSetLayout);",
+            "? (PdockerVkDescriptorSetLayout *)pCreateInfo->pSetLayouts[i]",
+            "*pPipelineLayout = (VkPipelineLayout)layout;",
+            "free((void *)pipelineLayout);",
+            "set->layout = (PdockerVkDescriptorSetLayout *)pAllocateInfo->pSetLayouts[i];",
+            "pDescriptorSets[i] = (VkDescriptorSet)set;",
+            "free((void *)pDescriptorSets[i]);",
+            "PdockerVkDescriptorSet *live_set = (PdockerVkDescriptorSet *)w->dstSet;",
+            "PdockerVkDescriptorSet *src_live = c ? (PdockerVkDescriptorSet *)c->srcSet : NULL;",
+            "PdockerVkDescriptorSet *dst_live = c ? (PdockerVkDescriptorSet *)c->dstSet : NULL;",
+            "*pShaderModule = (VkShaderModule)shader;",
+            "PdockerVkShaderModule *shader = (PdockerVkShaderModule *)shaderModule;",
+            "pipeline->shader = (PdockerVkShaderModule *)pCreateInfos[i].stage.module;",
+            "pipeline->layout = (PdockerVkPipelineLayout *)pCreateInfos[i].layout;",
+            "pPipelines[i] = (VkPipeline)pipeline;",
+            "free((void *)pipeline);",
+            "cmd->compute_pipeline = (PdockerVkPipeline *)pipeline;",
+            "PdockerVkPipelineLayout *pipeline_layout = (PdockerVkPipelineLayout *)layout;",
+            "PdockerVkDescriptorSet *set = (PdockerVkDescriptorSet *)pDescriptorSets[set_i];",
+            "PdockerVkPipelineLayout *captured_layout = (PdockerVkPipelineLayout *)layout;",
         ]:
             self.assertNotIn(forbidden, source)
 
