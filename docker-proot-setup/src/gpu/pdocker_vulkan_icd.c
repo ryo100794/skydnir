@@ -3805,6 +3805,58 @@ static bool validate_buffer_byte_range(const PdockerVkBuffer *buffer,
     return true;
 }
 
+static bool vulkan_index_element_size(VkIndexType index_type, uint64_t *out_size) {
+    if (!out_size) return false;
+    switch (index_type) {
+        case VK_INDEX_TYPE_UINT16:
+            *out_size = sizeof(uint16_t);
+            return true;
+        case VK_INDEX_TYPE_UINT32:
+            *out_size = sizeof(uint32_t);
+            return true;
+#ifdef VK_EXT_INDEX_TYPE_UINT8_EXTENSION_NAME
+        case VK_INDEX_TYPE_UINT8_EXT:
+            *out_size = sizeof(uint8_t);
+            return true;
+#endif
+        default:
+            return false;
+    }
+}
+
+static bool validate_index_buffer_draw_range(const PdockerVkBuffer *buffer,
+                                             VkDeviceSize index_offset,
+                                             VkIndexType index_type,
+                                             uint32_t first_index,
+                                             uint32_t index_count) {
+    uint64_t element_size = 0;
+    if (!vulkan_index_element_size(index_type, &element_size)) return false;
+    uint64_t first_bytes = 0;
+    uint64_t draw_bytes = 0;
+    if (!checked_mul_u64((uint64_t)first_index, element_size, &first_bytes) ||
+        !checked_mul_u64((uint64_t)index_count, element_size, &draw_bytes) ||
+        first_bytes > UINT64_MAX - (uint64_t)index_offset) {
+        return false;
+    }
+    const uint64_t byte_offset = (uint64_t)index_offset + first_bytes;
+    return validate_buffer_byte_range(buffer, (VkDeviceSize)byte_offset, (VkDeviceSize)draw_bytes);
+}
+
+static bool validate_vertex_binding_byte_range(const PdockerVkVertexBindingState *binding,
+                                               uint64_t *out_size) {
+    if (!binding || !binding->bound || !binding->buffer || !out_size) return false;
+    if (binding->stride > UINT32_MAX) return false;
+    if (binding->size == VK_WHOLE_SIZE) {
+        if (!validate_buffer_backing_range(binding->buffer)) return false;
+        if (binding->offset > (VkDeviceSize)binding->buffer->size) return false;
+        *out_size = (uint64_t)((VkDeviceSize)binding->buffer->size - binding->offset);
+        return true;
+    }
+    if (!validate_buffer_byte_range(binding->buffer, binding->offset, binding->size)) return false;
+    *out_size = (uint64_t)binding->size;
+    return true;
+}
+
 static bool image_copy_buffer_footprint(const PdockerVkImageCopyOp *op,
                                         VkDeviceSize *out_offset,
                                         VkDeviceSize *out_bytes) {
@@ -6097,16 +6149,16 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
                     goto cleanup;
                 }
                 const PdockerVkVertexBindingState *binding = &cmd->vertex_bindings[slot];
+                uint64_t binding_size = 0;
+                if (!validate_vertex_binding_byte_range(binding, &binding_size)) {
+                    rc = -ERANGE;
+                    goto cleanup;
+                }
                 int buffer_index = collect_graphics_buffer_resource(
                     resources, &resource_count, memory_objects, memory_resource_indices, &memory_count,
                     buffer_objects, buffer_resource_indices, &buffer_count, fds, &fd_count,
                     binding->buffer, submit_id);
                 if (buffer_index < 0) { rc = buffer_index; goto cleanup; }
-                uint64_t binding_size = (uint64_t)binding->size;
-                if (binding->size == VK_WHOLE_SIZE) {
-                    if (binding->offset > binding->buffer->size) { rc = -ERANGE; goto cleanup; }
-                    binding_size = (uint64_t)(binding->buffer->size - binding->offset);
-                }
                 PdockerGpuVulkanGraphicsV6VertexBindingEntry *entry =
                     &vertex_bindings[vertex_binding_count++];
                 entry->binding = slot;
@@ -6118,7 +6170,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
             }
         } else if (record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_INDEX_BUFFER) {
             PdockerVkBuffer *index_buffer = cmd->index_buffer;
-            if (!index_buffer) { rc = -EPROTO; goto cleanup; }
+            if (!index_buffer || !validate_buffer_backing_range(index_buffer)) { rc = -EPROTO; goto cleanup; }
             int buffer_index = collect_graphics_buffer_resource(
                 resources, &resource_count, memory_objects, memory_resource_indices, &memory_count,
                 buffer_objects, buffer_resource_indices, &buffer_count, fds, &fd_count,
@@ -6440,7 +6492,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
             const PdockerVkGraphicsDrawSnapshot *draw =
                 &cmd->graphics_draw_ops[record->draw_snapshot_index];
             if (draw->indirect) {
-                if (!draw->indirect_buffer || !draw->indirect_buffer->memory ||
+                if (!draw->indirect_buffer ||
                     indirect_draw_count >= PDOCKER_GPU_VULKAN_GRAPHICS_V68_MAX_INDIRECT_DRAWS) {
                     rc = -EPROTO;
                     goto cleanup;
@@ -6462,8 +6514,8 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
                     goto cleanup;
                 }
                 indirect_bytes = last_offset + command_size;
-                if (draw->indirect_offset > draw->indirect_buffer->size ||
-                    indirect_bytes > (uint64_t)draw->indirect_buffer->size - draw->indirect_offset) {
+                if (indirect_bytes > (uint64_t)SIZE_MAX ||
+                    !validate_buffer_byte_range(draw->indirect_buffer, draw->indirect_offset, (VkDeviceSize)indirect_bytes)) {
                     rc = -ERANGE;
                     goto cleanup;
                 }
@@ -6475,8 +6527,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
                 uint32_t count_buffer_index = PDOCKER_GPU_GRAPHICS_V68_INDEX_NONE;
                 uint32_t indirect_flags = 0;
                 if (draw->count_buffer) {
-                    if (!draw->count_buffer->memory || draw->count_offset > draw->count_buffer->size ||
-                        (uint64_t)sizeof(uint32_t) > (uint64_t)draw->count_buffer->size - draw->count_offset) {
+                    if (!validate_buffer_byte_range(draw->count_buffer, draw->count_offset, sizeof(uint32_t))) {
                         rc = -ERANGE;
                         goto cleanup;
                     }
@@ -6501,6 +6552,16 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
             }
             if (draw->index_buffer_bound) {
                 if (!draw->index_buffer) { rc = -EPROTO; goto cleanup; }
+                if (draw->indexed && !draw->indirect) {
+                    if (!validate_index_buffer_draw_range(draw->index_buffer, draw->index_offset, draw->index_type,
+                                                          draw->first_index, draw->index_count)) {
+                        rc = -ERANGE;
+                        goto cleanup;
+                    }
+                } else if (!validate_buffer_backing_range(draw->index_buffer)) {
+                    rc = -ERANGE;
+                    goto cleanup;
+                }
                 int buffer_index = collect_graphics_buffer_resource(
                     resources, &resource_count, memory_objects, memory_resource_indices, &memory_count,
                     buffer_objects, buffer_resource_indices, &buffer_count, fds, &fd_count,

@@ -8197,6 +8197,24 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("query_result_copy_buffer_range(flags, queryCount, dstOffset, stride, &copy_bytes)", record_body)
         self.assertIn("validate_buffer_byte_range(dst, dstOffset, copy_bytes)", record_body)
 
+    def test_vulkan_graphics_draw_buffer_ranges_are_guarded(self):
+        source = VULKAN_ICD.read_text()
+        vertex_helper = source.split("static bool validate_vertex_binding_byte_range", 1)[1].split("static bool image_copy_buffer_footprint", 1)[0]
+        index_helper = source.split("static bool validate_index_buffer_draw_range", 1)[1].split("static bool validate_vertex_binding_byte_range", 1)[0]
+        graphics_body = source.split("static int send_recorded_vulkan_graphics_v6_1_frame_range", 1)[1].split("static int send_recorded_vulkan_compute_v5_1_frame", 1)[0]
+        self.assertIn("binding->stride > UINT32_MAX", vertex_helper)
+        self.assertIn("binding->size == VK_WHOLE_SIZE", vertex_helper)
+        self.assertIn("validate_buffer_byte_range(binding->buffer, binding->offset, binding->size)", vertex_helper)
+        self.assertIn("vulkan_index_element_size(index_type, &element_size)", index_helper)
+        self.assertIn("checked_mul_u64((uint64_t)first_index, element_size, &first_bytes)", index_helper)
+        self.assertIn("checked_mul_u64((uint64_t)index_count, element_size, &draw_bytes)", index_helper)
+        self.assertIn("first_bytes > UINT64_MAX - (uint64_t)index_offset", index_helper)
+        self.assertIn("validate_vertex_binding_byte_range(binding, &binding_size)", graphics_body)
+        self.assertIn("validate_buffer_backing_range(index_buffer)", graphics_body)
+        self.assertIn("validate_buffer_byte_range(draw->indirect_buffer, draw->indirect_offset", graphics_body)
+        self.assertIn("validate_buffer_byte_range(draw->count_buffer, draw->count_offset, sizeof(uint32_t))", graphics_body)
+        self.assertIn("validate_index_buffer_draw_range(draw->index_buffer, draw->index_offset, draw->index_type", graphics_body)
+
     def test_vulkan_graphics_buffer_resources_and_image_copy_footprint_are_guarded(self):
         source = VULKAN_ICD.read_text()
         backing_body = source.split("static bool validate_buffer_backing_range", 1)[1].split("static bool validate_buffer_byte_range", 1)[0]
