@@ -13134,6 +13134,57 @@ VKAPI_ATTR VkResult VKAPI_CALL vkFreeDescriptorSets(
     return VK_SUCCESS;
 }
 
+typedef struct {
+    PdockerVkDescriptorSet *live;
+    PdockerVkDescriptorSet shadow;
+} PdockerVkDescriptorUpdateTarget;
+
+static PdockerVkDescriptorSet *descriptor_update_find_shadow(
+        PdockerVkDescriptorUpdateTarget *targets,
+        size_t target_count,
+        PdockerVkDescriptorSet *live) {
+    if (!targets || !live) return NULL;
+    for (size_t i = 0; i < target_count; ++i) {
+        if (targets[i].live == live) return &targets[i].shadow;
+    }
+    return NULL;
+}
+
+static int descriptor_update_get_shadow(
+        PdockerVkDescriptorUpdateTarget **targets,
+        size_t *target_count,
+        size_t *target_capacity,
+        PdockerVkDescriptorSet *live,
+        PdockerVkDescriptorSet **shadow_out) {
+    if (!targets || !target_count || !target_capacity || !live || !shadow_out) return -EINVAL;
+    PdockerVkDescriptorSet *existing = descriptor_update_find_shadow(*targets, *target_count, live);
+    if (existing) {
+        *shadow_out = existing;
+        return 0;
+    }
+    if (*target_count == *target_capacity) {
+        size_t new_capacity = 4u;
+        size_t bytes = 0;
+        if (*target_capacity &&
+            !checked_mul_size(*target_capacity, 2u, &new_capacity)) {
+            return -EMSGSIZE;
+        }
+        if (!checked_mul_size(new_capacity, sizeof(**targets), &bytes)) {
+            return -EMSGSIZE;
+        }
+        void *new_targets = realloc(*targets, bytes);
+        if (!new_targets) return -ENOMEM;
+        *targets = (PdockerVkDescriptorUpdateTarget *)new_targets;
+        *target_capacity = new_capacity;
+    }
+    PdockerVkDescriptorUpdateTarget *target = &(*targets)[*target_count];
+    target->live = live;
+    target->shadow = *live;
+    *shadow_out = &target->shadow;
+    (*target_count)++;
+    return 0;
+}
+
 VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets(
         VkDevice device,
         uint32_t descriptorWriteCount,
@@ -13141,21 +13192,44 @@ VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets(
         uint32_t descriptorCopyCount,
         const VkCopyDescriptorSet *pDescriptorCopies) {
     (void)device;
+    if ((descriptorWriteCount > 0 && !pDescriptorWrites) ||
+        (descriptorCopyCount > 0 && !pDescriptorCopies)) {
+        fprintf(stderr,
+                "pdocker-vulkan-icd: descriptor update rejected: null write/copy array writes=%u copies=%u\n",
+                descriptorWriteCount,
+                descriptorCopyCount);
+        return;
+    }
+
+    PdockerVkDescriptorUpdateTarget *targets = NULL;
+    size_t target_count = 0;
+    size_t target_capacity = 0;
+    int update_rc = 0;
+
     for (uint32_t i = 0; i < descriptorWriteCount; ++i) {
         const VkWriteDescriptorSet *w = &pDescriptorWrites[i];
-        PdockerVkDescriptorSet *set = (PdockerVkDescriptorSet *)w->dstSet;
-        if (!set) continue;
+        PdockerVkDescriptorSet *live_set = (PdockerVkDescriptorSet *)w->dstSet;
+        PdockerVkDescriptorSet *set = NULL;
+        if (!live_set) {
+            update_rc = -EINVAL;
+            goto fail_closed;
+        }
+        update_rc = descriptor_update_get_shadow(
+            &targets, &target_count, &target_capacity, live_set, &set);
+        if (update_rc != 0) goto fail_closed;
+
         bool v4_descriptor = descriptor_type_supported_by_v4_transport(w->descriptorType);
         bool v5_object_descriptor =
             vulkan_v5_object_transport_enabled() &&
             descriptor_type_supported_by_v5_object_transport(w->descriptorType);
         if (!v4_descriptor && !v5_object_descriptor) {
             set->unsupported_descriptor_type = true;
+            update_rc = -EINVAL;
             fprintf(stderr,
                     "pdocker-vulkan-icd: descriptor write binding=%u type=%u is unsupported by current transport; rejecting instead of ignoring\n",
                     w->dstBinding,
                     w->descriptorType);
-            continue;
+            goto fail_closed;
         }
         bool descriptor_write_valid = true;
         for (uint32_t j = 0; j < w->descriptorCount; ++j) {
@@ -13174,22 +13248,32 @@ VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets(
         }
         if (!descriptor_write_valid) {
             set->unsupported_descriptor_array = true;
+            update_rc = -ERANGE;
             fprintf(stderr,
                     "pdocker-vulkan-icd: descriptor linear write binding=%u array=%u count=%u exceeds transport/layout shape\n",
                     w->dstBinding,
                     w->dstArrayElement,
                     w->descriptorCount);
-            continue;
+            goto fail_closed;
         }
         if (v5_object_descriptor) {
-            if (!w->pImageInfo) continue;
+            if (!w->pImageInfo) {
+                set->unsupported_descriptor_type = true;
+                update_rc = -EINVAL;
+                fprintf(stderr,
+                        "pdocker-vulkan-icd: descriptor image write missing pImageInfo binding=%u count=%u\n",
+                        w->dstBinding,
+                        w->descriptorCount);
+                goto fail_closed;
+            }
             for (uint32_t j = 0; j < w->descriptorCount; ++j) {
                 uint32_t binding = 0;
                 uint32_t array_element = 0;
                 if (!descriptor_linear_slot(set->layout, w->dstBinding, w->dstArrayElement,
                                             j, &binding, &array_element)) {
                     set->unsupported_descriptor_array = true;
-                    break;
+                    update_rc = -ERANGE;
+                    goto fail_closed;
                 }
                 PdockerVkDescriptorBinding *slot =
                     &set->storage_buffers[binding][array_element];
@@ -13224,14 +13308,23 @@ VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets(
             }
             continue;
         }
-        if (!w->pBufferInfo) continue;
+        if (!w->pBufferInfo) {
+            set->unsupported_descriptor_type = true;
+            update_rc = -EINVAL;
+            fprintf(stderr,
+                    "pdocker-vulkan-icd: descriptor buffer write missing pBufferInfo binding=%u count=%u\n",
+                    w->dstBinding,
+                    w->descriptorCount);
+            goto fail_closed;
+        }
         for (uint32_t j = 0; j < w->descriptorCount; ++j) {
             uint32_t binding = 0;
             uint32_t array_element = 0;
             if (!descriptor_linear_slot(set->layout, w->dstBinding, w->dstArrayElement,
                                         j, &binding, &array_element)) {
                 set->unsupported_descriptor_array = true;
-                break;
+                update_rc = -ERANGE;
+                goto fail_closed;
             }
             PdockerVkDescriptorBinding *slot =
                 &set->storage_buffers[binding][array_element];
@@ -13260,22 +13353,35 @@ VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets(
             }
         }
     }
+
     for (uint32_t i = 0; i < descriptorCopyCount; ++i) {
         const VkCopyDescriptorSet *c = &pDescriptorCopies[i];
-        PdockerVkDescriptorSet *src = c ? (PdockerVkDescriptorSet *)c->srcSet : NULL;
-        PdockerVkDescriptorSet *dst = c ? (PdockerVkDescriptorSet *)c->dstSet : NULL;
-        if (!src || !dst) continue;
+        PdockerVkDescriptorSet *src_live = c ? (PdockerVkDescriptorSet *)c->srcSet : NULL;
+        PdockerVkDescriptorSet *dst_live = c ? (PdockerVkDescriptorSet *)c->dstSet : NULL;
+        PdockerVkDescriptorSet *src = NULL;
+        PdockerVkDescriptorSet *dst = NULL;
+        if (!src_live || !dst_live) {
+            update_rc = -EINVAL;
+            goto fail_closed;
+        }
+        src = descriptor_update_find_shadow(targets, target_count, src_live);
+        if (!src) src = src_live;
+        update_rc = descriptor_update_get_shadow(
+            &targets, &target_count, &target_capacity, dst_live, &dst);
+        if (update_rc != 0) goto fail_closed;
+
         if (src->unsupported_descriptor_array || dst->unsupported_descriptor_array ||
             src->unsupported_descriptor_type || dst->unsupported_descriptor_type ||
             (src->layout && src->layout->unsupported_descriptor_type) ||
             (dst->layout && dst->layout->unsupported_descriptor_type)) {
             dst->unsupported_descriptor_array = true;
+            update_rc = -EINVAL;
             fprintf(stderr,
                     "pdocker-vulkan-icd: descriptor copy rejected because source or destination set is already unsupported src_binding=%u dst_binding=%u count=%u\n",
                     c->srcBinding,
                     c->dstBinding,
                     c->descriptorCount);
-            continue;
+            goto fail_closed;
         }
         bool descriptor_copy_valid = true;
         bool descriptor_copy_type_valid = true;
@@ -13299,6 +13405,7 @@ VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets(
         }
         if (!descriptor_copy_valid) {
             dst->unsupported_descriptor_array = true;
+            update_rc = -ERANGE;
             fprintf(stderr,
                     "pdocker-vulkan-icd: descriptor linear copy src_binding=%u src_array=%u dst_binding=%u dst_array=%u count=%u exceeds transport/layout shape\n",
                     c->srcBinding,
@@ -13306,10 +13413,11 @@ VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets(
                     c->dstBinding,
                     c->dstArrayElement,
                     c->descriptorCount);
-            continue;
+            goto fail_closed;
         }
         if (!descriptor_copy_type_valid) {
             dst->unsupported_descriptor_type = true;
+            update_rc = -EINVAL;
             fprintf(stderr,
                     "pdocker-vulkan-icd: descriptor copy type/object mismatch src_binding=%u src_array=%u dst_binding=%u dst_array=%u count=%u\n",
                     c->srcBinding,
@@ -13317,7 +13425,7 @@ VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets(
                     c->dstBinding,
                     c->dstArrayElement,
                     c->descriptorCount);
-            continue;
+            goto fail_closed;
         }
         for (uint32_t j = 0; j < c->descriptorCount; ++j) {
             uint32_t src_binding = 0;
@@ -13329,7 +13437,8 @@ VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets(
                 !descriptor_linear_slot(dst->layout, c->dstBinding, c->dstArrayElement,
                                         j, &dst_binding, &dst_array)) {
                 dst->unsupported_descriptor_array = true;
-                break;
+                update_rc = -ERANGE;
+                goto fail_closed;
             }
             dst->storage_buffers[dst_binding][dst_array] =
                 src->storage_buffers[src_binding][src_array];
@@ -13348,6 +13457,25 @@ VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets(
             }
         }
     }
+
+    for (size_t i = 0; i < target_count; ++i) {
+        *targets[i].live = targets[i].shadow;
+    }
+    free(targets);
+    return;
+
+fail_closed:
+    for (size_t i = 0; i < target_count; ++i) {
+        targets[i].live->unsupported_descriptor_array |= targets[i].shadow.unsupported_descriptor_array;
+        targets[i].live->unsupported_descriptor_type |= targets[i].shadow.unsupported_descriptor_type;
+    }
+    fprintf(stderr,
+            "pdocker-vulkan-icd: descriptor update prevalidation failed before commit rc=%d writes=%u copies=%u targets=%zu; no descriptor slot changes committed\n",
+            update_rc,
+            descriptorWriteCount,
+            descriptorCopyCount,
+            target_count);
+    free(targets);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateShaderModule(

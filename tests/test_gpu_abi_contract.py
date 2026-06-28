@@ -5063,6 +5063,40 @@ class GpuAbiContractTest(unittest.TestCase):
             update_body.index("dst->storage_buffers[dst_binding][dst_array] ="),
         )
 
+    def test_vulkan_descriptor_updates_stage_before_commit(self):
+        icd = VULKAN_ICD.read_text()
+        update_body = icd.split(
+            "VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets", 1
+        )[1].split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateShaderModule", 1)[0]
+        for marker in [
+            "PdockerVkDescriptorUpdateTarget",
+            "descriptor_update_find_shadow",
+            "descriptor_update_get_shadow",
+            "target->shadow = *live;",
+        ]:
+            self.assertIn(marker, icd)
+        self.assertIn("descriptor_update_get_shadow(", update_body)
+        self.assertIn("src = descriptor_update_find_shadow(targets, target_count, src_live);", update_body)
+        self.assertIn("*targets[i].live = targets[i].shadow;", update_body)
+        self.assertIn("goto fail_closed;", update_body)
+        self.assertIn("no descriptor slot changes committed", update_body)
+        self.assertIn("targets[i].live->unsupported_descriptor_array |=", update_body)
+        self.assertIn("targets[i].live->unsupported_descriptor_type |=", update_body)
+        self.assertNotIn("if (!w->pImageInfo) continue;", update_body)
+        self.assertNotIn("if (!w->pBufferInfo) continue;", update_body)
+        self.assertLess(
+            update_body.index("descriptor_update_get_shadow("),
+            update_body.index("*targets[i].live = targets[i].shadow;"),
+        )
+        self.assertLess(
+            update_body.index("descriptor_copy_slot_compatible(src, src_binding, src_array"),
+            update_body.index("dst->storage_buffers[dst_binding][dst_array] ="),
+        )
+        self.assertLess(
+            update_body.index("fail_closed:"),
+            update_body.index("no descriptor slot changes committed"),
+        )
+
     def test_graphics_uniform_buffer_descriptors_are_read_only(self):
         icd = VULKAN_ICD.read_text()
         collect_body = icd.split("static int collect_graphics_descriptor_entries", 1)[1].split(
