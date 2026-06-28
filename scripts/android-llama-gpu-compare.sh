@@ -2850,10 +2850,13 @@ startup_env = startup_diagnostics.get("env") if isinstance(startup_diagnostics.g
 planned_env = runtime_env_record.get("planned_container_env") if isinstance(runtime_env_record, dict) else {}
 if not isinstance(planned_env, dict):
     planned_env = {}
-effective_runtime_env = dict(runtime_env)
-effective_runtime_env.update({str(name): str(value) for name, value in planned_env.items()})
+observed_runtime_env = {str(name): str(value) for name, value in runtime_env.items()}
 for name, value in startup_env.items():
-    effective_runtime_env[str(name)] = str(value)
+    observed_runtime_env[str(name)] = str(value)
+# Keep the historical name for existing artifact consumers, but never mix the
+# Engine create payload into this map.  Planned env proves intent only; runtime
+# observation must come from container inspect/startup diagnostics/executor logs.
+effective_runtime_env = observed_runtime_env
 manifest_forward_env_keys = env_manifest.get("compare_forward_env_keys")
 if not isinstance(manifest_forward_env_keys, list):
     manifest_forward_env_keys = []
@@ -2876,6 +2879,21 @@ runtime_forward_env_keys = [
 runtime_app_process_only_env_keys = [
     str(key) for key in manifest_app_process_only_env_keys if isinstance(key, str)
 ]
+requested_or_planned_env = {str(k): str(v) for k, v in manifest_requested_env.items()}
+requested_or_planned_env.update({str(k): str(v) for k, v in planned_env.items()})
+manifest_runtime_keys = set(runtime_forward_env_keys) | {str(key) for key in manifest_probe_env_keys if isinstance(key, str)}
+config_fields_for_intent = env_manifest.get("config_propagation_env_fields")
+if isinstance(config_fields_for_intent, list):
+    manifest_runtime_keys.update(
+        str(item.get("env"))
+        for item in config_fields_for_intent
+        if isinstance(item, dict) and isinstance(item.get("env"), str) and item.get("env")
+    )
+intended_runtime_env = {
+    str(key): str(value)
+    for key, value in requested_or_planned_env.items()
+    if str(key) in manifest_runtime_keys
+}
 runtime_env_manifest = {
     "schema": "pdocker.llama.gpu.runtime-env-artifact.v1",
     "record_schema": runtime_env_record.get("schema") if isinstance(runtime_env_record, dict) else None,
@@ -2888,6 +2906,10 @@ runtime_env_manifest = {
         key for key in runtime_app_process_only_env_keys if key not in runtime_forward_env_keys
     ),
     "host_requested_env": {str(k): str(v) for k, v in sorted(manifest_requested_env.items())},
+    "planned_container_env": {str(k): str(v) for k, v in sorted(planned_env.items())},
+    "requested_or_planned_env": dict(sorted(requested_or_planned_env.items())),
+    "intended_runtime_env": dict(sorted(intended_runtime_env.items())),
+    "observed_runtime_env": dict(sorted(observed_runtime_env.items())),
     "host_echo_recorded": bool(runtime_env_record.get("echoed_to_log")) if isinstance(runtime_env_record, dict) else False,
     "planned_container_mode": runtime_env_record.get("planned_container_mode") if isinstance(runtime_env_record, dict) else None,
     "planned_container_env_keys": sorted(str(key) for key in planned_env),
@@ -2897,6 +2919,18 @@ runtime_env_manifest = {
     ),
     "requested_env_missing_from_runtime": sorted(
         str(key) for key in manifest_requested_env if str(key) not in effective_runtime_env
+    ),
+    "requested_or_planned_env_observed_keys": sorted(
+        key for key in requested_or_planned_env if str(key) in observed_runtime_env
+    ),
+    "requested_or_planned_env_missing_from_runtime": sorted(
+        str(key) for key in requested_or_planned_env if str(key) not in observed_runtime_env
+    ),
+    "intended_env_observed_keys": sorted(
+        key for key in intended_runtime_env if str(key) in observed_runtime_env
+    ),
+    "intended_env_missing_from_runtime": sorted(
+        str(key) for key in intended_runtime_env if str(key) not in observed_runtime_env
     ),
 }
 
@@ -3005,8 +3039,15 @@ executor_backends = sorted(set(re.findall(r'"backend_impl"\s*:\s*"([^"]+)"', log
 executor_errors = sorted(set(re.findall(r'"error"\s*:\s*"([^"]+)"', log)))
 spirv_hashes = sorted(set(re.findall(r'"spirv_hash"\s*:\s*"([^"]+)"', log)))
 
+def requested_runtime_env_value(name):
+    name = str(name)
+    for mapping in (intended_runtime_env, manifest_requested_env):
+        if isinstance(mapping, dict) and name in mapping:
+            return str(mapping[name])
+    return os.environ.get(name)
+
 def env_bool(name):
-    value = os.environ.get(name)
+    value = requested_runtime_env_value(name)
     if value is None:
         return None
     return str(value).strip().lower() in {"1", "true", "yes", "on"}

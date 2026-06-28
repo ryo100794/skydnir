@@ -1303,6 +1303,35 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
             set(report["q6_workgroup_env_gap"]["missing_requested_envs"]),
         )
 
+    def test_q6_workgroup_env_gap_accepts_manifest_overlay_planned_env(self):
+        verifier = load_verifier_module()
+        required = {
+            "PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC",
+            "PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS",
+        }
+        cfg = q6_env_gap_config_propagation()
+        cfg["summary"] = "pass"
+        for check in cfg["checks"]:
+            if check["env"] in required:
+                check["expected"] = True
+                check["observed_values"] = [True]
+                check["status"] = "pass"
+        runtime_env_manifest = {
+            "host_requested_env": {"PDOCKER_GPU_CPU_ORACLE": "1"},
+            "planned_container_env": {name: "1" for name in required},
+            "requested_or_planned_env": {name: "1" for name in required},
+            "intended_runtime_env": {name: "1" for name in required},
+            "observed_runtime_env": {},
+        }
+        gap = verifier._q6_workgroup_env_gap(runtime_env_manifest, cfg)
+        self.assertEqual(gap["summary"], "pass")
+        self.assertEqual(gap["missing_requested_envs"], [])
+        self.assertEqual(gap["not_requested_checks"], [])
+        self.assertEqual(
+            gap["requested_env_sources"],
+            ["intended_runtime_env", "requested_or_planned_env", "planned_container_env", "host_requested_env"],
+        )
+
     def test_q6_native_output_layout_probe_gets_specific_classification(self):
         payload = {
             "schema": "pdocker.llama.gpu.compare.v1",

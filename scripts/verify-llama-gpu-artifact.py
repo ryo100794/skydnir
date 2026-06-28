@@ -1906,8 +1906,23 @@ def _q6_workgroup_env_gap(
     host_requested = runtime_env_manifest.get("host_requested_env")
     if not isinstance(host_requested, dict):
         host_requested = {}
+    planned = runtime_env_manifest.get("planned_container_env")
+    if not isinstance(planned, dict):
+        planned = {}
+    requested_or_planned = runtime_env_manifest.get("requested_or_planned_env")
+    if not isinstance(requested_or_planned, dict):
+        requested_or_planned = {}
+    intended = runtime_env_manifest.get("intended_runtime_env")
+    if not isinstance(intended, dict):
+        intended = {}
+    def env_requested_true(name: str) -> bool:
+        for mapping in (intended, requested_or_planned, planned, host_requested):
+            value = mapping.get(name)
+            if str(value).strip().lower() in {"1", "true", "yes", "on"}:
+                return True
+        return False
     missing_requested = [
-        name for name in required if str(host_requested.get(name, "")).strip() != "1"
+        name for name in required if not env_requested_true(name)
     ]
     checks = config_propagation.get("checks")
     if not isinstance(checks, list):
@@ -1920,6 +1935,7 @@ def _q6_workgroup_env_gap(
     not_requested = [name for name in required if statuses.get(name) == "not-requested"]
     return {
         "required_envs": required,
+        "requested_env_sources": ["intended_runtime_env", "requested_or_planned_env", "planned_container_env", "host_requested_env"],
         "missing_requested_envs": missing_requested,
         "not_requested_checks": not_requested,
         "summary": "fail" if missing_requested or not_requested else "pass",
