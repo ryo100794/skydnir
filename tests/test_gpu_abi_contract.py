@@ -8181,6 +8181,30 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("offset64 > (uint64_t)SIZE_MAX", query_body)
         self.assertNotIn("(size_t)i * (size_t)stride", query_body)
 
+    def test_vulkan_graphics_buffer_resources_and_image_copy_footprint_are_guarded(self):
+        source = VULKAN_ICD.read_text()
+        backing_body = source.split("static bool validate_buffer_backing_range", 1)[1].split("static bool validate_buffer_byte_range", 1)[0]
+        byte_range_body = source.split("static bool validate_buffer_byte_range", 1)[1].split("static bool image_copy_buffer_footprint", 1)[0]
+        footprint_body = source.split("static bool image_copy_buffer_footprint", 1)[1].split("static int collect_graphics_buffer_resource", 1)[0]
+        collect_body = source.split("static int collect_graphics_buffer_resource", 1)[1].split("static int find_image_table_index", 1)[0]
+        graphics_body = source.split("static int send_recorded_vulkan_graphics_v6_1_frame_range", 1)[1].split("static int send_recorded_vulkan_graphics_v6_1_frame(", 1)[0]
+        host_copy_body = source.split("static void execute_recorded_image_copy_op", 1)[1].split("static void execute_recorded_image_to_image_copy_op", 1)[0]
+        self.assertIn("buffer->memory_offset > (VkDeviceSize)buffer->memory->size", backing_body)
+        self.assertIn("buffer->size > (VkDeviceSize)buffer->memory->size - buffer->memory_offset", backing_body)
+        self.assertIn("offset > (VkDeviceSize)buffer->size", byte_range_body)
+        self.assertIn("bytes > (VkDeviceSize)buffer->size - offset", byte_range_body)
+        self.assertIn("bufferRowLength < op->region.imageExtent.width", footprint_body)
+        self.assertIn("bufferImageHeight < op->region.imageExtent.height", footprint_body)
+        self.assertIn("checked_mul_u64(slice_bytes, op->region.imageExtent.depth, &layer_stride)", footprint_body)
+        self.assertIn("checked_mul_u64(last_layer, layer_stride, &delta)", footprint_body)
+        self.assertIn("offset > UINT64_MAX - (delta + row_copy_bytes)", footprint_body)
+        self.assertIn("!validate_buffer_backing_range(buffer)", collect_body)
+        self.assertIn("image_copy_buffer_footprint(copy__, &buffer_footprint_offset__, &buffer_footprint_bytes__)", graphics_body)
+        self.assertIn("validate_buffer_byte_range(copy__->buffer, buffer_footprint_offset__, buffer_footprint_bytes__)", graphics_body)
+        self.assertIn("checked_mul_u64(buffer_slice_bytes, op->region.imageExtent.depth, &buffer_layer_stride)", host_copy_body)
+        self.assertIn("checked_mul_u64((uint64_t)layer, buffer_layer_stride, &layer_bytes)", host_copy_body)
+        self.assertNotIn("checked_mul_u64((uint64_t)layer, buffer_slice_bytes, &layer_bytes)", host_copy_body)
+
     def test_vulkan_dynamic_whole_size_descriptor_uses_effective_vkbuffer_tail(self):
         source = VULKAN_ICD.read_text()
         self.assertIn("VK_WHOLE_SIZE is evaluated after applying the", source)

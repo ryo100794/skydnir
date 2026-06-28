@@ -3784,6 +3784,85 @@ static int collect_graphics_memory_resource(
     return (int)index;
 }
 
+static bool validate_buffer_backing_range(const PdockerVkBuffer *buffer) {
+    if (!buffer || !buffer->memory || buffer->size == 0) return false;
+    if (buffer->memory_offset > (VkDeviceSize)buffer->memory->size) return false;
+    if ((VkDeviceSize)buffer->size > (VkDeviceSize)buffer->memory->size - buffer->memory_offset) return false;
+    return true;
+}
+
+static bool validate_buffer_byte_range(const PdockerVkBuffer *buffer,
+                                       VkDeviceSize offset,
+                                       VkDeviceSize bytes) {
+    if (!validate_buffer_backing_range(buffer)) return false;
+    if (offset > (VkDeviceSize)buffer->size) return false;
+    if (bytes > (VkDeviceSize)buffer->size - offset) return false;
+    return true;
+}
+
+static bool image_copy_buffer_footprint(const PdockerVkImageCopyOp *op,
+                                        VkDeviceSize *out_offset,
+                                        VkDeviceSize *out_bytes) {
+    if (!op || !op->buffer || !op->image || !out_offset || !out_bytes) return false;
+    if (op->region.imageSubresource.layerCount == 0 ||
+        op->region.imageExtent.width == 0 ||
+        op->region.imageExtent.height == 0 ||
+        op->region.imageExtent.depth == 0) {
+        return false;
+    }
+    if (op->region.bufferRowLength != 0 &&
+        op->region.bufferRowLength < op->region.imageExtent.width) {
+        return false;
+    }
+    if (op->region.bufferImageHeight != 0 &&
+        op->region.bufferImageHeight < op->region.imageExtent.height) {
+        return false;
+    }
+    uint64_t bpp = conservative_format_bytes_per_pixel(op->image->format);
+    uint64_t row_texels = op->region.bufferRowLength
+        ? op->region.bufferRowLength
+        : op->region.imageExtent.width;
+    uint64_t image_rows = op->region.bufferImageHeight
+        ? op->region.bufferImageHeight
+        : op->region.imageExtent.height;
+    uint64_t row_bytes = 0;
+    uint64_t slice_bytes = 0;
+    uint64_t layer_stride = 0;
+    uint64_t row_copy_bytes = 0;
+    if (!checked_mul_u64(row_texels, bpp, &row_bytes) ||
+        !checked_mul_u64(row_bytes, image_rows, &slice_bytes) ||
+        !checked_mul_u64(slice_bytes, op->region.imageExtent.depth, &layer_stride) ||
+        !checked_mul_u64(op->region.imageExtent.width, bpp, &row_copy_bytes)) {
+        return false;
+    }
+    uint64_t last_layer = op->region.imageSubresource.layerCount - 1u;
+    uint64_t last_z = op->region.imageExtent.depth - 1u;
+    uint64_t last_y = op->region.imageExtent.height - 1u;
+    uint64_t offset = (uint64_t)op->region.bufferOffset;
+    uint64_t delta = 0;
+    uint64_t tmp = 0;
+    if (!checked_mul_u64(last_layer, layer_stride, &delta) ||
+        !checked_mul_u64(last_z, slice_bytes, &tmp) || tmp > UINT64_MAX - delta) {
+        return false;
+    }
+    delta += tmp;
+    if (!checked_mul_u64(last_y, row_bytes, &tmp) || tmp > UINT64_MAX - delta) {
+        return false;
+    }
+    delta += tmp;
+    if (delta > UINT64_MAX - row_copy_bytes ||
+        offset > UINT64_MAX - (delta + row_copy_bytes)) {
+        return false;
+    }
+    uint64_t bytes = delta + row_copy_bytes;
+    if (offset > (uint64_t)UINTPTR_MAX || bytes > (uint64_t)UINTPTR_MAX) {
+        return false;
+    }
+    *out_offset = (VkDeviceSize)offset;
+    *out_bytes = (VkDeviceSize)bytes;
+    return true;
+}
+
 static int collect_graphics_buffer_resource(
         PdockerGpuVulkanDispatchV5ResourceEntry *resources,
         size_t *resource_count,
@@ -3798,7 +3877,7 @@ static int collect_graphics_buffer_resource(
         PdockerVkBuffer *buffer,
         uint64_t generation) {
     if (!resources || !resource_count || !buffer_objects || !buffer_resource_indices ||
-        !buffer_count || !buffer || !buffer->memory || buffer->size == 0) {
+        !buffer_count || !validate_buffer_backing_range(buffer)) {
         return -EINVAL;
     }
     int existing = find_graphics_buffer_resource_index(
@@ -5747,6 +5826,13 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
                     copy__->region.imageExtent.height > extent__.height - (uint32_t)copy__->region.imageOffset.y || \
                     (uint32_t)copy__->region.imageOffset.z > extent__.depth || \
                     copy__->region.imageExtent.depth > extent__.depth - (uint32_t)copy__->region.imageOffset.z) { \
+                    rc = -ERANGE; \
+                    goto cleanup; \
+                } \
+                VkDeviceSize buffer_footprint_offset__ = 0; \
+                VkDeviceSize buffer_footprint_bytes__ = 0; \
+                if (!image_copy_buffer_footprint(copy__, &buffer_footprint_offset__, &buffer_footprint_bytes__) || \
+                    !validate_buffer_byte_range(copy__->buffer, buffer_footprint_offset__, buffer_footprint_bytes__)) { \
                     rc = -ERANGE; \
                     goto cleanup; \
                 } \
@@ -9163,14 +9249,35 @@ static void execute_recorded_image_copy_op(PdockerVkImageCopyOp *op, PdockerVkCo
         if (stats) stats->skipped_ops++;
         return;
     }
+    if (op->region.imageOffset.x < 0 || op->region.imageOffset.y < 0 || op->region.imageOffset.z < 0 ||
+        op->region.imageSubresource.baseArrayLayer > op->image->array_layers ||
+        op->region.imageSubresource.layerCount > op->image->array_layers - op->region.imageSubresource.baseArrayLayer ||
+        (uint32_t)op->region.imageOffset.x > mip_extent.width ||
+        op->region.imageExtent.width > mip_extent.width - (uint32_t)op->region.imageOffset.x ||
+        (uint32_t)op->region.imageOffset.y > mip_extent.height ||
+        op->region.imageExtent.height > mip_extent.height - (uint32_t)op->region.imageOffset.y ||
+        (uint32_t)op->region.imageOffset.z > mip_extent.depth ||
+        op->region.imageExtent.depth > mip_extent.depth - (uint32_t)op->region.imageOffset.z) {
+        if (stats) stats->skipped_ops++;
+        return;
+    }
+    VkDeviceSize footprint_offset = 0;
+    VkDeviceSize footprint_bytes = 0;
+    if (!image_copy_buffer_footprint(op, &footprint_offset, &footprint_bytes) ||
+        !validate_buffer_byte_range(op->buffer, footprint_offset, footprint_bytes)) {
+        if (stats) stats->skipped_ops++;
+        return;
+    }
     const uint64_t buffer_row_texels =
         op->region.bufferRowLength ? op->region.bufferRowLength : op->region.imageExtent.width;
     const uint64_t buffer_image_rows =
         op->region.bufferImageHeight ? op->region.bufferImageHeight : op->region.imageExtent.height;
     uint64_t buffer_row_bytes = 0;
     uint64_t buffer_slice_bytes = 0;
+    uint64_t buffer_layer_stride = 0;
     if (!checked_mul_u64(buffer_row_texels, bpp, &buffer_row_bytes) ||
-        !checked_mul_u64(buffer_row_bytes, buffer_image_rows, &buffer_slice_bytes)) {
+        !checked_mul_u64(buffer_row_bytes, buffer_image_rows, &buffer_slice_bytes) ||
+        !checked_mul_u64(buffer_slice_bytes, op->region.imageExtent.depth, &buffer_layer_stride)) {
         if (stats) stats->skipped_ops++;
         return;
     }
@@ -9194,7 +9301,7 @@ static void execute_recorded_image_copy_op(PdockerVkImageCopyOp *op, PdockerVkCo
                 uint64_t z_bytes = 0;
                 uint64_t y_bytes = 0;
                 uint64_t row_copy_bytes = 0;
-                if (!checked_mul_u64((uint64_t)layer, buffer_slice_bytes, &layer_bytes) ||
+                if (!checked_mul_u64((uint64_t)layer, buffer_layer_stride, &layer_bytes) ||
                     !checked_mul_u64((uint64_t)z, buffer_slice_bytes, &z_bytes) ||
                     !checked_mul_u64((uint64_t)y, buffer_row_bytes, &y_bytes) ||
                     !checked_mul_u64(op->region.imageExtent.width, bpp, &row_copy_bytes) ||
