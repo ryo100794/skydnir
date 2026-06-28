@@ -8205,6 +8205,44 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("offset64 > (uint64_t)SIZE_MAX", query_body)
         self.assertNotIn("(size_t)i * (size_t)stride", query_body)
 
+    def test_vulkan_frame_size_arithmetic_is_checked_before_materialization(self):
+        source = VULKAN_ICD.read_text()
+        helpers = source.split("static bool checked_add_size", 1)[1].split("static int write_exact_fd", 1)[0]
+        append_body = source.split("static int frame_append_bytes", 1)[1].split("static int send_vulkan_dispatch_v5_frame_with_fds", 1)[0]
+        graphics_body = source.split("static int send_recorded_vulkan_graphics_v6_1_frame_range", 1)[1].split("static int send_recorded_vulkan_graphics_v6_1_frame(", 1)[0]
+        append_macro = graphics_body.split("#define APPEND_GRAPHICS_TABLE", 1)[1].split("#undef APPEND_GRAPHICS_TABLE", 1)[0]
+        v51_body = source.split("static int send_generic_vulkan_dispatch_v5_1_op", 1)[1].split("static size_t descriptor_binding_size", 1)[0]
+        capacity_block = v51_body.split("size_t resource_table_bytes = 0;", 1)[1].split("unsigned char *frame", 1)[0]
+        v51_hash_append_block = v51_body.split("header->resource_hash = fnv1a64_bytes(resources,", 1)[1].split("rc = send_vulkan_dispatch_v5_frame_with_fds", 1)[0]
+
+        self.assertIn("if (a > SIZE_MAX - b) return false;", helpers)
+        self.assertIn("if (a != 0 && b > SIZE_MAX / a) return false;", helpers)
+        self.assertIn("checked_add_size(value, 7u, &padded)", helpers)
+        self.assertIn("checked_align_size_8(*cursor, &aligned)", append_body)
+        self.assertIn("checked_add_size(aligned, size, &end)", append_body)
+        self.assertNotIn("align_size_8(*cursor)", append_body)
+
+        self.assertIn("checked_mul_size((entry_size_), (count_), &table_bytes_)", append_macro)
+        self.assertIn("table_bytes_", append_macro)
+        self.assertNotIn("(entry_size_) * (count_)", append_macro)
+
+        self.assertIn("checked_mul_size(binding_count, 2u, &resource_count)", v51_body)
+        self.assertIn("frame_capacity_add_aligned_table(&frame_capacity", capacity_block)
+        self.assertIn("checked_add_size(frame_capacity, 64u, &frame_capacity)", capacity_block)
+        self.assertNotIn("align_size_8(sizeof", capacity_block)
+        self.assertNotIn("sizeof(PdockerGpuVulkanDispatchV5ResourceEntry) * resource_count", capacity_block)
+        for marker in [
+            "resource_table_bytes",
+            "descriptor_table_bytes",
+            "image_table_bytes",
+            "image_view_table_bytes",
+            "sampler_table_bytes",
+            "specialization_table_bytes",
+        ]:
+            self.assertIn(marker, v51_hash_append_block)
+        self.assertNotIn("sizeof(resources[0]) * resource_count", v51_hash_append_block)
+        self.assertNotIn("sizeof(descriptors[0]) * descriptor_count", v51_hash_append_block)
+
     def test_vulkan_copy_query_results_destination_range_is_guarded(self):
         source = VULKAN_ICD.read_text()
         helper_body = source.split("static bool query_result_copy_buffer_range", 1)[1].split("static void reset_query_range", 1)[0]

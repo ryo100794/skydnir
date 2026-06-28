@@ -2559,8 +2559,43 @@ static bool vulkan_v5_frame_enabled(void) {
     return env_truthy_default("PDOCKER_VULKAN_USE_V5_FRAME", false);
 }
 
-static size_t align_size_8(size_t value) {
-    return (value + 7u) & ~(size_t)7u;
+static bool checked_add_size(size_t a, size_t b, size_t *out) {
+    if (!out) return false;
+    if (a > SIZE_MAX - b) return false;
+    *out = a + b;
+    return true;
+}
+
+static bool checked_mul_size(size_t a, size_t b, size_t *out) {
+    if (!out) return false;
+    if (a != 0 && b > SIZE_MAX / a) return false;
+    *out = a * b;
+    return true;
+}
+
+static bool checked_align_size_8(size_t value, size_t *out) {
+    size_t padded = 0;
+    if (!out) return false;
+    if (!checked_add_size(value, 7u, &padded)) return false;
+    *out = padded & ~(size_t)7u;
+    return true;
+}
+
+static bool frame_capacity_add_aligned_bytes(size_t *capacity, size_t bytes) {
+    size_t aligned = 0;
+    if (!capacity) return false;
+    if (!checked_align_size_8(bytes, &aligned)) return false;
+    return checked_add_size(*capacity, aligned, capacity);
+}
+
+static bool frame_capacity_add_aligned_table(size_t *capacity,
+                                             size_t entry_size,
+                                             size_t count,
+                                             size_t *table_bytes_out) {
+    size_t table_bytes = 0;
+    if (!checked_mul_size(entry_size, count, &table_bytes)) return false;
+    if (table_bytes_out) *table_bytes_out = table_bytes;
+    return frame_capacity_add_aligned_bytes(capacity, table_bytes);
 }
 
 static int write_exact_fd(int fd, const void *data, size_t size) {
@@ -3588,11 +3623,14 @@ static int frame_append_bytes(unsigned char *frame,
                               size_t size,
                               uint64_t *offset_out) {
     if (!frame || !cursor || !offset_out) return -EINVAL;
-    size_t aligned = align_size_8(*cursor);
+    size_t aligned = 0;
+    size_t end = 0;
+    if (!checked_align_size_8(*cursor, &aligned)) return -EMSGSIZE;
     if (aligned > frame_capacity || size > frame_capacity - aligned) return -EMSGSIZE;
+    if (!checked_add_size(aligned, size, &end)) return -EMSGSIZE;
     *offset_out = (uint64_t)aligned;
     if (size > 0 && data) memcpy(frame + aligned, data, size);
-    *cursor = aligned + size;
+    *cursor = end;
     return 0;
 }
 
@@ -6908,10 +6946,15 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
 #define APPEND_GRAPHICS_TABLE(data_, count_, entry_size_, offset_field_, size_field_) \
     do { \
         if ((count_) > 0) { \
+            size_t table_bytes_ = 0; \
+            if (!checked_mul_size((entry_size_), (count_), &table_bytes_)) { \
+                rc = -EMSGSIZE; \
+                goto cleanup; \
+            } \
             rc = frame_append_bytes(frame, PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_FRAME_BYTES, \
-                                    &cursor, (data_), (entry_size_) * (count_), &(offset_field_)); \
+                                    &cursor, (data_), table_bytes_, &(offset_field_)); \
             if (rc != 0) goto cleanup; \
-            (size_field_) = (uint64_t)((entry_size_) * (count_)); \
+            (size_field_) = (uint64_t)table_bytes_; \
         } \
     } while (0)
     APPEND_GRAPHICS_TABLE(resources, resource_count, sizeof(resources[0]),
@@ -7596,9 +7639,18 @@ static int send_generic_vulkan_dispatch_v5_1_op(
     }
     const size_t hidden_dispatch_indirect_resources = append_dispatch_indirect_resource ? 2u : 0u;
     const size_t hidden_dispatch_indirect_fds = append_dispatch_indirect_resource ? 1u : 0u;
-    const size_t resource_count = binding_count * 2u + image_count + hidden_dispatch_indirect_resources;
-    const size_t descriptor_count = binding_count + image_descriptor_count;
-    const size_t fd_count = 1u + binding_count + image_count + hidden_dispatch_indirect_fds;
+    size_t resource_count = 0;
+    size_t descriptor_count = 0;
+    size_t fd_count = 0;
+    if (!checked_mul_size(binding_count, 2u, &resource_count) ||
+        !checked_add_size(resource_count, image_count, &resource_count) ||
+        !checked_add_size(resource_count, hidden_dispatch_indirect_resources, &resource_count) ||
+        !checked_add_size(binding_count, image_descriptor_count, &descriptor_count) ||
+        !checked_add_size(1u, binding_count, &fd_count) ||
+        !checked_add_size(fd_count, image_count, &fd_count) ||
+        !checked_add_size(fd_count, hidden_dispatch_indirect_fds, &fd_count)) {
+        return -EMSGSIZE;
+    }
     if (resource_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_RESOURCES ||
         descriptor_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS ||
         fd_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS) {
@@ -7944,19 +7996,32 @@ static int send_generic_vulkan_dispatch_v5_1_op(
         effective_option_text_size = (size_t)n;
     }
 
-    size_t frame_capacity =
-        sizeof(PdockerGpuVulkanDispatchV5ObjectFrameHeader) +
-        align_size_8(sizeof(PdockerGpuVulkanDispatchV5ResourceEntry) * resource_count) +
-        align_size_8(sizeof(PdockerGpuVulkanDispatchV5DescriptorObjectEntry) * descriptor_count) +
-        align_size_8(sizeof(PdockerGpuVulkanDispatchV5ImageEntry) * image_count) +
-        align_size_8(sizeof(PdockerGpuVulkanDispatchV5ImageViewEntry) * image_view_count) +
-        align_size_8(sizeof(PdockerGpuVulkanDispatchV5SamplerEntry) * sampler_count) +
-        align_size_8(sizeof(PdockerGpuVulkanDispatchV5SpecializationEntry) * specialization_entry_count) +
-        align_size_8(specialization_data_size) +
-        align_size_8(push_size) +
-        align_size_8(entry_name_size) +
-        align_size_8(effective_option_text_size) +
-        64u;
+    size_t resource_table_bytes = 0;
+    size_t descriptor_table_bytes = 0;
+    size_t image_table_bytes = 0;
+    size_t image_view_table_bytes = 0;
+    size_t sampler_table_bytes = 0;
+    size_t specialization_table_bytes = 0;
+    size_t frame_capacity = sizeof(PdockerGpuVulkanDispatchV5ObjectFrameHeader);
+    if (!frame_capacity_add_aligned_table(&frame_capacity, sizeof(resources[0]),
+                                          resource_count, &resource_table_bytes) ||
+        !frame_capacity_add_aligned_table(&frame_capacity, sizeof(descriptors[0]),
+                                          descriptor_count, &descriptor_table_bytes) ||
+        !frame_capacity_add_aligned_table(&frame_capacity, sizeof(image_entries[0]),
+                                          image_count, &image_table_bytes) ||
+        !frame_capacity_add_aligned_table(&frame_capacity, sizeof(image_view_entries[0]),
+                                          image_view_count, &image_view_table_bytes) ||
+        !frame_capacity_add_aligned_table(&frame_capacity, sizeof(sampler_entries[0]),
+                                          sampler_count, &sampler_table_bytes) ||
+        !frame_capacity_add_aligned_table(&frame_capacity, sizeof(specs[0]),
+                                          specialization_entry_count, &specialization_table_bytes) ||
+        !frame_capacity_add_aligned_bytes(&frame_capacity, specialization_data_size) ||
+        !frame_capacity_add_aligned_bytes(&frame_capacity, push_size) ||
+        !frame_capacity_add_aligned_bytes(&frame_capacity, entry_name_size) ||
+        !frame_capacity_add_aligned_bytes(&frame_capacity, effective_option_text_size) ||
+        !checked_add_size(frame_capacity, 64u, &frame_capacity)) {
+        return -EMSGSIZE;
+    }
     if (frame_capacity > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FRAME_BYTES) return -EMSGSIZE;
     unsigned char *frame = (unsigned char *)calloc(1, frame_capacity);
     if (!frame) return -ENOMEM;
@@ -7990,8 +8055,8 @@ static int send_generic_vulkan_dispatch_v5_1_op(
     header->entry_name_size = entry_name_size;
     header->option_text_size = effective_option_text_size;
     header->option_hash = fnv1a64_bytes(effective_option_text, effective_option_text_size);
-    header->resource_hash = fnv1a64_bytes(resources, sizeof(resources[0]) * resource_count);
-    header->descriptor_hash = fnv1a64_bytes(descriptors, sizeof(descriptors[0]) * descriptor_count);
+    header->resource_hash = fnv1a64_bytes(resources, resource_table_bytes);
+    header->descriptor_hash = fnv1a64_bytes(descriptors, descriptor_table_bytes);
     header->dispatch_hash = dispatch_hash;
 
     object_header->objects.image_count = (uint32_t)image_count;
@@ -8005,44 +8070,44 @@ static int send_generic_vulkan_dispatch_v5_1_op(
     object_header->objects.sampler_schema_hash = PDOCKER_GPU_VULKAN_DISPATCH_V5_SAMPLER_SCHEMA_HASH;
     uint64_t object_hash = 1469598103934665603ull;
     object_hash = fnv1a64_update_u64(object_hash, image_count);
-    object_hash = fnv1a64_update_bytes(object_hash, image_entries, sizeof(image_entries[0]) * image_count);
+    object_hash = fnv1a64_update_bytes(object_hash, image_entries, image_table_bytes);
     object_hash = fnv1a64_update_u64(object_hash, image_view_count);
-    object_hash = fnv1a64_update_bytes(object_hash, image_view_entries, sizeof(image_view_entries[0]) * image_view_count);
+    object_hash = fnv1a64_update_bytes(object_hash, image_view_entries, image_view_table_bytes);
     object_hash = fnv1a64_update_u64(object_hash, sampler_count);
-    object_hash = fnv1a64_update_bytes(object_hash, sampler_entries, sizeof(sampler_entries[0]) * sampler_count);
+    object_hash = fnv1a64_update_bytes(object_hash, sampler_entries, sampler_table_bytes);
     object_header->objects.object_hash = object_hash;
 
     size_t cursor = sizeof(PdockerGpuVulkanDispatchV5ObjectFrameHeader);
     int rc = frame_append_bytes(frame, frame_capacity, &cursor,
-                                resources, sizeof(resources[0]) * resource_count,
+                                resources, resource_table_bytes,
                                 &header->resource_table_offset);
     if (rc != 0) goto cleanup;
-    header->resource_table_size = sizeof(resources[0]) * resource_count;
+    header->resource_table_size = resource_table_bytes;
     rc = frame_append_bytes(frame, frame_capacity, &cursor,
-                            descriptors, sizeof(descriptors[0]) * descriptor_count,
+                            descriptors, descriptor_table_bytes,
                             &header->descriptor_table_offset);
     if (rc != 0) goto cleanup;
-    header->descriptor_table_size = sizeof(descriptors[0]) * descriptor_count;
+    header->descriptor_table_size = descriptor_table_bytes;
     rc = frame_append_bytes(frame, frame_capacity, &cursor,
-                            image_entries, sizeof(image_entries[0]) * image_count,
+                            image_entries, image_table_bytes,
                             &object_header->objects.image_table_offset);
     if (rc != 0) goto cleanup;
-    object_header->objects.image_table_size = sizeof(image_entries[0]) * image_count;
+    object_header->objects.image_table_size = image_table_bytes;
     rc = frame_append_bytes(frame, frame_capacity, &cursor,
-                            image_view_entries, sizeof(image_view_entries[0]) * image_view_count,
+                            image_view_entries, image_view_table_bytes,
                             &object_header->objects.image_view_table_offset);
     if (rc != 0) goto cleanup;
-    object_header->objects.image_view_table_size = sizeof(image_view_entries[0]) * image_view_count;
+    object_header->objects.image_view_table_size = image_view_table_bytes;
     rc = frame_append_bytes(frame, frame_capacity, &cursor,
-                            sampler_entries, sizeof(sampler_entries[0]) * sampler_count,
+                            sampler_entries, sampler_table_bytes,
                             &object_header->objects.sampler_table_offset);
     if (rc != 0) goto cleanup;
-    object_header->objects.sampler_table_size = sizeof(sampler_entries[0]) * sampler_count;
+    object_header->objects.sampler_table_size = sampler_table_bytes;
     rc = frame_append_bytes(frame, frame_capacity, &cursor,
-                            specs, sizeof(specs[0]) * specialization_entry_count,
+                            specs, specialization_table_bytes,
                             &header->specialization_table_offset);
     if (rc != 0) goto cleanup;
-    header->specialization_table_size = sizeof(specs[0]) * specialization_entry_count;
+    header->specialization_table_size = specialization_table_bytes;
     rc = frame_append_bytes(frame, frame_capacity, &cursor,
                             specialization_data, specialization_data_size,
                             &header->specialization_data_offset);
