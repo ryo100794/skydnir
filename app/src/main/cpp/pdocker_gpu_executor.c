@@ -26491,12 +26491,19 @@ static int materialize_vulkan_graphics_v6_descriptors(
                     &buffers->buffers[(uint32_t)buffer_index];
                 if (!replay_buffer->buffer.buffer ||
                     effective_offset < replay_buffer->upload_base ||
-                    range > replay_buffer->upload_end - effective_offset) {
+                    effective_offset > replay_buffer->upload_end) {
+                    return -ERANGE;
+                }
+                const uint64_t replay_descriptor_delta =
+                    effective_offset - replay_buffer->upload_base;
+                const uint64_t replay_descriptor_tail =
+                    replay_buffer->upload_end - effective_offset;
+                if (range > replay_descriptor_tail) {
                     return -ERANGE;
                 }
                 infos[d] = (VkDescriptorBufferInfo){
                     .buffer = replay_buffer->buffer.buffer,
-                    .offset = (VkDeviceSize)(effective_offset - replay_buffer->upload_base),
+                    .offset = (VkDeviceSize)replay_descriptor_delta,
                     .range = (VkDeviceSize)range,
                 };
                 writes[d].pBufferInfo = &infos[d];
