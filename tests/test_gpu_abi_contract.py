@@ -8249,6 +8249,49 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertNotIn(forbidden, source)
 
+    def test_vulkan_sync_event_query_handles_use_typed_converters(self):
+        source = VULKAN_ICD.read_text()
+        for marker in [
+            "typedef struct PdockerVkSemaphore PdockerVkSemaphore;",
+            "pdocker_vk_fence_from_handle",
+            "pdocker_vk_semaphore_from_handle",
+            "pdocker_vk_event_from_handle",
+            "pdocker_vk_query_pool_from_handle",
+            "*pFence = pdocker_vk_fence_to_handle(fence);",
+            "*pSemaphore = pdocker_vk_semaphore_to_handle(sem);",
+            "*pEvent = pdocker_vk_event_to_handle(event);",
+            "*pQueryPool = pdocker_vk_query_pool_to_handle(pool);",
+            "PdockerVkFence *submit_fence = pdocker_vk_fence_from_handle(fence);",
+            "PdockerVkSemaphore *sem = pdocker_vk_semaphore_from_handle(pSignalInfo->semaphore);",
+            "PdockerVkEvent *e = pdocker_vk_event_from_handle(event);",
+            "PdockerVkQueryPool *pool = pdocker_vk_query_pool_from_handle(queryPool);",
+            "reset_query_range(pdocker_vk_query_pool_from_handle(queryPool), firstQuery, queryCount);",
+        ]:
+            self.assertIn(marker, source)
+        for forbidden in [
+            "(PdockerVkFence *)pFences[i]",
+            "(const PdockerVkFence *)pFences[i]",
+            "(PdockerVkFence *)fence",
+            "(const PdockerVkFence *)fence",
+            "(PdockerVkSemaphore *)pWaitInfo->pSemaphores[i]",
+            "(PdockerVkSemaphore *)submit->pWaitSemaphores[i]",
+            "(PdockerVkSemaphore *)submit->pSignalSemaphores[i]",
+            "(const PdockerVkSemaphore *)submit->pWaitSemaphores[i]",
+            "(const PdockerVkSemaphore *)submit->pSignalSemaphores[i]",
+            "(PdockerVkSemaphore *)info->semaphore",
+            "(PdockerVkSemaphore *)pSignalInfo->semaphore",
+            "(VkFence)fence",
+            "(VkSemaphore)sem",
+            "(VkEvent)event",
+            "(VkQueryPool)pool",
+            "(PdockerVkEvent *)event",
+            "(PdockerVkQueryPool *)queryPool",
+            "free((void *)fence)",
+            "free((void *)semaphore)",
+            "free((void *)event)",
+        ]:
+            self.assertNotIn(forbidden, source)
+
     def test_vulkan_core_transport_ids_are_stable_64bit_object_ids(self):
         source = VULKAN_ICD.read_text()
         for marker in [
