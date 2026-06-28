@@ -16765,10 +16765,13 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPushConstants(
         const void *pValues) {
     (void)layout;
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
-    if (!cmd || !pValues || offset >= PDOCKER_VK_MAX_PUSH_BYTES) return;
-    if ((uint64_t)size > PDOCKER_VK_MAX_PUSH_BYTES - offset) {
-        size = PDOCKER_VK_MAX_PUSH_BYTES - offset;
+    if (!cmd || !pValues) return;
+    if (offset > PDOCKER_VK_MAX_PUSH_BYTES ||
+        (uint64_t)size > (uint64_t)PDOCKER_VK_MAX_PUSH_BYTES - (uint64_t)offset) {
+        cmd->graphics_unsupported = true;
+        return;
     }
+    if (size == 0) return;
     memcpy(cmd->push_constants + offset, pValues, size);
     uint32_t end = offset + size;
     if (end > cmd->push_constant_size) cmd->push_constant_size = end;
