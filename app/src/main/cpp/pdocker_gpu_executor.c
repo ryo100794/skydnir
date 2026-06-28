@@ -19050,6 +19050,9 @@ static int convert_vulkan_dispatch_v5_to_v4_bindings(
             if (header->abi_minor != PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_OBJECTS) {
                 return -EPROTO;
             }
+            if (d->resource_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE) {
+                return -EPROTO;
+            }
             if (vulkan_descriptor_type_requires_image_view(image_descriptor_type)) {
                 if (d->image_view_index == PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE ||
                     d->image_view_index >= image_view_count) return -EPROTO;

@@ -3725,6 +3725,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("vulkan_required_usage_for_image_descriptor(descriptor_type)", executor)
         self.assertIn("descriptor_layout_seen", executor)
         self.assertIn("d->resource_id != views[d->image_view_index].view_id", executor)
+        self.assertIn("d->resource_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE", executor)
         self.assertIn("d->resource_id != samplers[d->sampler_index].sampler_id", executor)
         self.assertIn("VkDescriptorImageInfo image_infos", executor)
         self.assertIn("writes[write_count].pImageInfo = &image_infos[write_count];", executor)
