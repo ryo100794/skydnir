@@ -19126,8 +19126,12 @@ static int convert_vulkan_dispatch_v5_to_v4_bindings(
         if (d->transfer_offset > buffer->size || d->transfer_size > buffer->size - d->transfer_offset) {
             return -ERANGE;
         }
-        if (d->transfer_offset < api_offset ||
-            d->transfer_size > api_range - (d->transfer_offset - api_offset)) {
+        if (d->transfer_offset < api_offset) {
+            return -ERANGE;
+        }
+        const uint64_t transfer_delta = d->transfer_offset - api_offset;
+        if (transfer_delta > api_range ||
+            d->transfer_size > api_range - transfer_delta) {
             return -ERANGE;
         }
         if (buffer_descriptor_count >= binding_capacity) return -E2BIG;

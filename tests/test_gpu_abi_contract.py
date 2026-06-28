@@ -8534,6 +8534,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "memory-shared-by-different-buffer",
             "d->resource_id != 0 && d->resource_id != buffer->resource_id",
             "d->transfer_offset < api_offset",
+            "const uint64_t transfer_delta = d->transfer_offset - api_offset;",
+            "transfer_delta > api_range",
             "binding->api_range = (size_t)api_range;",
             "strict binding contract detail",
             "expected_offset_valid",
