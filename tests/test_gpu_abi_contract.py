@@ -3729,7 +3729,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("header_out->header_size > sizeof(*header_out)", executor)
         self.assertIn("extension_bytes = (size_t)(header_out->header_size - sizeof(*header_out))", executor)
         self.assertIn("read_exact_bytes(cfd, frame + sizeof(*header_out), extension_bytes)", executor)
-        self.assertIn("validate_vulkan_dispatch_v5_object_extension(frame, header_out)", executor)
+        self.assertIn("validate_vulkan_dispatch_v5_frame_content(frame, passed_fds, *fd_count)", executor)
+        self.assertIn("validate_vulkan_dispatch_v5_object_extension(frame, header)", executor)
         self.assertIn("header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_OBJECTS", executor)
         self.assertIn("header->header_size != sizeof(PdockerGpuVulkanDispatchV5ObjectFrameHeader)", executor)
         self.assertIn("header->descriptor_entry_size != sizeof(PdockerGpuVulkanDispatchV5DescriptorObjectEntry)", executor)
@@ -3746,6 +3747,40 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("objects->image_table_offset, objects->image_table_size", executor)
         self.assertIn("objects->image_view_table_offset, objects->image_view_table_size", executor)
         self.assertIn("objects->sampler_table_offset, objects->sampler_table_size", executor)
+
+    def test_vulkan_dispatch_v5_frame_hashes_are_fail_closed(self):
+        icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
+        validator = executor.split("static int validate_vulkan_dispatch_v5_frame_content", 1)[1].split(
+            "static int checked_u64_add3", 1
+        )[0]
+        recv_body = executor.split("static int recv_vulkan_dispatch_v5_frame", 1)[1].split(
+            "static int connection_starts_with_v5_magic", 1
+        )[0]
+        for marker in [
+            "header->option_hash =",
+            "header->resource_hash =",
+            "header->descriptor_hash =",
+            "object_header->objects.object_hash =",
+            "header->frame_hash = fnv1a64_bytes(frame, cursor)",
+        ]:
+            self.assertIn(marker, icd)
+        self.assertIn("validate_vulkan_dispatch_v5_frame_content(frame, passed_fds, *fd_count)", recv_body)
+        self.assertIn("v5_table_range_valid", validator)
+        self.assertIn("table_range_valid(offset, size, count, entry_size, entry_alignment, frame_size, header_size)", executor)
+        self.assertIn("v5_payload_range_valid", validator)
+        self.assertIn("payload_range_valid(offset, size, frame_size)", executor)
+        self.assertIn("frame_ranges_do_not_overlap(ranges, range_count)", validator)
+        self.assertIn("resource_hash", validator)
+        self.assertIn("descriptor_hash", validator)
+        self.assertIn("push_hash", validator)
+        self.assertIn("option_hash", validator)
+        self.assertIn("v5_object_extension_hash(frame, header, objects) != objects->object_hash", validator)
+        self.assertIn("full_fd_hash(passed_fds[header->shader_fd_index]", validator)
+        self.assertIn("shader_hash != header->shader_hash", validator)
+        self.assertIn("offsetof(PdockerGpuVulkanDispatchV5FrameHeader, frame_hash)", validator)
+        self.assertIn("zero_frame_hash", validator)
+        self.assertIn("frame_hash != header->frame_hash", validator)
 
     def test_vulkan_dispatch_v5_0_header_compatibility_survives_v5_1_objects(self):
         executor = GPU_EXECUTOR.read_text()
@@ -3993,7 +4028,13 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("header->descriptor_schema_hash != PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_SCHEMA_HASH", executor)
         self.assertIn("resource_bytes != header->resource_table_size", executor)
         self.assertIn("descriptor_bytes != header->descriptor_table_size", executor)
-        self.assertIn("MSG_TRUNC | MSG_CTRUNC", executor)
+        v5_recv_body = executor.split("static int recv_vulkan_dispatch_v5_header_with_fds", 1)[1].split(
+            "static int recv_vulkan_dispatch_v5_frame", 1
+        )[0]
+        self.assertIn("MSG_TRUNC | MSG_CTRUNC", v5_recv_body)
+        self.assertIn("(size_t)n != sizeof(*header)", v5_recv_body)
+        self.assertIn("close(passed_fds[i]);", v5_recv_body)
+        self.assertIn("*fd_count = 0;", v5_recv_body)
         text_recv = executor.split("static int recv_command_with_fds", 1)[1].split(
             "static int serve_socket", 1
         )[0]
@@ -5383,6 +5424,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("vkCmdDispatchIndirect(command_buffer", executor)
         self.assertIn("dispatch indirect cannot be combined with base group", executor)
         self.assertIn("base_group_x", executor)
+        self.assertNotIn("header.gx, header.gy, header.gz, 0, 0, 0", executor)
+        self.assertIn("options.has_base_group ? options.base_group_x : 0", executor)
+        self.assertIn("options.has_base_group ? options.base_group_y : 0", executor)
+        self.assertIn("options.has_base_group ? options.base_group_z : 0", executor)
         self.assertIn("cmd_dispatch_base", executor)
         self.assertIn("vkCmdDispatchBase is unavailable", executor)
         push_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdPushConstants", 1)[1].split(
