@@ -8249,6 +8249,68 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertNotIn(forbidden, source)
 
+    def test_vulkan_wsi_graphics_pool_handles_use_typed_converters(self):
+        source = VULKAN_ICD.read_text()
+        for marker in [
+            "typedef struct PdockerVkDescriptorPool PdockerVkDescriptorPool;",
+            "typedef struct PdockerVkPipelineCache PdockerVkPipelineCache;",
+            "typedef struct PdockerVkCommandPool PdockerVkCommandPool;",
+            "pdocker_vk_descriptor_pool_from_handle",
+            "pdocker_vk_pipeline_cache_from_handle",
+            "pdocker_vk_command_pool_from_handle",
+            "pdocker_vk_render_pass_from_handle",
+            "pdocker_vk_framebuffer_from_handle",
+            "pdocker_vk_surface_from_handle",
+            "pdocker_vk_swapchain_from_handle",
+            "*pDescriptorPool = pdocker_vk_descriptor_pool_to_handle(pool);",
+            "free(pdocker_vk_descriptor_pool_from_handle(descriptorPool));",
+            "*pPipelineCache = pdocker_vk_pipeline_cache_to_handle(cache);",
+            "free(pdocker_vk_pipeline_cache_from_handle(pipelineCache));",
+            "*pCommandPool = pdocker_vk_command_pool_to_handle(pool);",
+            "free(pdocker_vk_command_pool_from_handle(commandPool));",
+            "*pRenderPass = pdocker_vk_render_pass_to_handle(rp);",
+            "pipeline->render_pass = pdocker_vk_render_pass_from_handle(ci->renderPass);",
+            "fb->render_pass = pdocker_vk_render_pass_from_handle(pCreateInfo->renderPass);",
+            "*pFramebuffer = pdocker_vk_framebuffer_to_handle(fb);",
+            "free(pdocker_vk_framebuffer_from_handle(framebuffer));",
+            "*pSurface = pdocker_vk_surface_to_handle(surface);",
+            "pdocker_vk_headless_surface_valid(pdocker_vk_surface_from_handle(surface))",
+            "PdockerVkSurface *surface = pdocker_vk_surface_from_handle(pCreateInfo->surface);",
+            "*pSwapchain = pdocker_vk_swapchain_to_handle(swapchain);",
+            "PdockerVkSwapchain *old_swapchain = pdocker_vk_swapchain_from_handle(pCreateInfo->oldSwapchain);",
+            "PdockerVkSwapchain *sc = pdocker_vk_swapchain_from_handle(pPresentInfo->pSwapchains[i]);",
+        ]:
+            self.assertIn(marker, source)
+        for forbidden in [
+            "(VkDescriptorPool)",
+            "(VkPipelineCache)",
+            "(VkCommandPool)",
+            "(VkRenderPass)rp",
+            "(VkFramebuffer)fb",
+            "(VkSurfaceKHR)surface",
+            "(VkSwapchainKHR)swapchain",
+            "(PdockerVkRenderPass *)ci->renderPass",
+            "(PdockerVkRenderPass *)inherit->renderPass",
+            "(PdockerVkRenderPass *)pCreateInfo->renderPass",
+            "(PdockerVkRenderPass *)begin->renderPass",
+            "(PdockerVkRenderPass *)pRenderPassBegin->renderPass",
+            "(PdockerVkFramebuffer *)begin->framebuffer",
+            "(PdockerVkFramebuffer *)pRenderPassBegin->framebuffer",
+            "(PdockerVkSurface *)surface",
+            "(PdockerVkSurface *)pCreateInfo->surface",
+            "(PdockerVkSwapchain *)pCreateInfo->oldSwapchain",
+            "(PdockerVkSwapchain *)swapchain",
+            "(PdockerVkSwapchain *)pPresentInfo->pSwapchains[i]",
+            "free((void *)descriptorPool)",
+            "free((void *)pipelineCache)",
+            "free((void *)commandPool)",
+            "free((void *)renderPass)",
+            "free((void *)framebuffer)",
+            "free((void *)surface)",
+            "free((void *)swapchain)",
+        ]:
+            self.assertNotIn(forbidden, source)
+
     def test_vulkan_sync_event_query_handles_use_typed_converters(self):
         source = VULKAN_ICD.read_text()
         for marker in [

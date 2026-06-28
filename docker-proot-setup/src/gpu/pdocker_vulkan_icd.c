@@ -101,11 +101,14 @@ typedef struct {
 typedef struct PdockerVkMemory PdockerVkMemory;
 typedef struct PdockerVkBuffer PdockerVkBuffer;
 typedef struct PdockerVkDescriptorBinding PdockerVkDescriptorBinding;
+typedef struct PdockerVkDescriptorPool PdockerVkDescriptorPool;
 typedef struct PdockerVkDescriptorSetLayout PdockerVkDescriptorSetLayout;
 typedef struct PdockerVkDescriptorSet PdockerVkDescriptorSet;
 typedef struct PdockerVkShaderModule PdockerVkShaderModule;
 typedef struct PdockerVkPipelineLayout PdockerVkPipelineLayout;
+typedef struct PdockerVkPipelineCache PdockerVkPipelineCache;
 typedef struct PdockerVkPipeline PdockerVkPipeline;
+typedef struct PdockerVkCommandPool PdockerVkCommandPool;
 typedef struct PdockerVkFence PdockerVkFence;
 typedef struct PdockerVkSemaphore PdockerVkSemaphore;
 typedef struct PdockerVkImage PdockerVkImage;
@@ -151,6 +154,13 @@ PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_fence, VkFence, 
 PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_semaphore, VkSemaphore, PdockerVkSemaphore)
 PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_event, VkEvent, PdockerVkEvent)
 PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_query_pool, VkQueryPool, PdockerVkQueryPool)
+PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_descriptor_pool, VkDescriptorPool, PdockerVkDescriptorPool)
+PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_pipeline_cache, VkPipelineCache, PdockerVkPipelineCache)
+PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_command_pool, VkCommandPool, PdockerVkCommandPool)
+PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_render_pass, VkRenderPass, PdockerVkRenderPass)
+PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_framebuffer, VkFramebuffer, PdockerVkFramebuffer)
+PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_surface, VkSurfaceKHR, PdockerVkSurface)
+PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_swapchain, VkSwapchainKHR, PdockerVkSwapchain)
 
 #define PDOCKER_VK_MAX_STORAGE_BUFFERS 16
 #define PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS PDOCKER_VK_MAX_STORAGE_BUFFERS
@@ -1044,6 +1054,18 @@ typedef struct {
 typedef struct {
     int unused;
 } PdockerHandle;
+
+struct PdockerVkDescriptorPool {
+    int unused;
+};
+
+struct PdockerVkPipelineCache {
+    int unused;
+};
+
+struct PdockerVkCommandPool {
+    int unused;
+};
 
 static PdockerVkPhysicalDevice g_device;
 static PdockerVkQueue g_queue;
@@ -13145,8 +13167,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorPool(
     if ((pCreateInfo->flags & ~VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT) != 0) {
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }
-    *pDescriptorPool = (VkDescriptorPool)pdocker_alloc_handle(sizeof(PdockerHandle));
-    return *pDescriptorPool ? VK_SUCCESS : VK_ERROR_OUT_OF_HOST_MEMORY;
+    PdockerVkDescriptorPool *pool = pdocker_alloc_handle(sizeof(*pool));
+    if (!pool) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    *pDescriptorPool = pdocker_vk_descriptor_pool_to_handle(pool);
+    return VK_SUCCESS;
 }
 
 VKAPI_ATTR void VKAPI_CALL vkDestroyDescriptorPool(
@@ -13155,7 +13179,7 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyDescriptorPool(
         const VkAllocationCallbacks *pAllocator) {
     (void)device;
     (void)pAllocator;
-    free((void *)descriptorPool);
+    free(pdocker_vk_descriptor_pool_from_handle(descriptorPool));
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkResetDescriptorPool(
@@ -13801,7 +13825,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
         }
         pipeline->dynamic_state_mask = captured_dynamic_state_mask;
         pipeline->layout = pdocker_vk_pipeline_layout_from_handle(ci->layout);
-        pipeline->render_pass = (PdockerVkRenderPass *)ci->renderPass;
+        pipeline->render_pass = pdocker_vk_render_pass_from_handle(ci->renderPass);
         pipeline->shader_stage_count = ci->stageCount;
         if (ci->stageCount > 0 && !ci->pStages) {
             pipeline->graphics_unsupported = true;
@@ -14279,7 +14303,7 @@ static bool command_buffer_begin_inheritance_supported(
         return false;
     }
     if (inherit->renderPass) {
-        PdockerVkRenderPass *rp = (PdockerVkRenderPass *)inherit->renderPass;
+        PdockerVkRenderPass *rp = pdocker_vk_render_pass_from_handle(inherit->renderPass);
         if (!render_pass_subpass_can_normalize_to_dynamic_rendering(rp, inherit->subpass)) {
             return false;
         }
@@ -14371,7 +14395,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateRenderPass(
             rp, pCreateInfo->dependencyCount, pCreateInfo->pDependencies);
     }
     rp->generation = next_vulkan_object_generation();
-    *pRenderPass = (VkRenderPass)rp;
+    *pRenderPass = pdocker_vk_render_pass_to_handle(rp);
     return VK_SUCCESS;
 }
 
@@ -14427,7 +14451,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateRenderPass2(
             rp, pCreateInfo->dependencyCount, pCreateInfo->pDependencies);
     }
     rp->generation = next_vulkan_object_generation();
-    *pRenderPass = (VkRenderPass)rp;
+    *pRenderPass = pdocker_vk_render_pass_to_handle(rp);
     return VK_SUCCESS;
 }
 
@@ -14437,7 +14461,7 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyRenderPass(
         const VkAllocationCallbacks *pAllocator) {
     (void)device;
     (void)pAllocator;
-    free((void *)renderPass);
+    free(pdocker_vk_render_pass_from_handle(renderPass));
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateFramebuffer(
@@ -14450,7 +14474,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateFramebuffer(
     if (!pCreateInfo || !pFramebuffer) return VK_ERROR_INITIALIZATION_FAILED;
     PdockerVkFramebuffer *fb = pdocker_alloc_handle(sizeof(*fb));
     if (!fb) return VK_ERROR_OUT_OF_HOST_MEMORY;
-    fb->render_pass = (PdockerVkRenderPass *)pCreateInfo->renderPass;
+    fb->render_pass = pdocker_vk_render_pass_from_handle(pCreateInfo->renderPass);
     fb->attachment_count = pCreateInfo->attachmentCount;
     if (fb->attachment_count > PDOCKER_VK_MAX_STORAGE_BUFFERS) {
         fb->attachment_count = PDOCKER_VK_MAX_STORAGE_BUFFERS;
@@ -14464,7 +14488,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateFramebuffer(
     fb->height = pCreateInfo->height;
     fb->layers = pCreateInfo->layers;
     fb->generation = next_vulkan_object_generation();
-    *pFramebuffer = (VkFramebuffer)fb;
+    *pFramebuffer = pdocker_vk_framebuffer_to_handle(fb);
     return VK_SUCCESS;
 }
 
@@ -14474,7 +14498,7 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyFramebuffer(
         const VkAllocationCallbacks *pAllocator) {
     (void)device;
     (void)pAllocator;
-    free((void *)framebuffer);
+    free(pdocker_vk_framebuffer_from_handle(framebuffer));
 }
 
 VKAPI_ATTR void VKAPI_CALL vkGetRenderAreaGranularity(
@@ -14550,7 +14574,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateHeadlessSurfaceEXT(
     surface->kind = PDOCKER_VK_SURFACE_HEADLESS;
     surface->default_extent = (VkExtent2D){640u, 480u};
     surface->generation = next_vulkan_object_generation();
-    *pSurface = (VkSurfaceKHR)surface;
+    *pSurface = pdocker_vk_surface_to_handle(surface);
     return VK_SUCCESS;
 }
 
@@ -14560,7 +14584,7 @@ VKAPI_ATTR void VKAPI_CALL vkDestroySurfaceKHR(
         const VkAllocationCallbacks *pAllocator) {
     (void)instance;
     (void)pAllocator;
-    free((void *)surface);
+    free(pdocker_vk_surface_from_handle(surface));
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceSupportKHR(
@@ -14570,7 +14594,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceSupportKHR(
         VkBool32 *pSupported) {
     (void)physicalDevice;
     if (!pSupported) return VK_ERROR_INITIALIZATION_FAILED;
-    *pSupported = (pdocker_vk_headless_surface_valid((PdockerVkSurface *)surface) &&
+    *pSupported = (pdocker_vk_headless_surface_valid(pdocker_vk_surface_from_handle(surface)) &&
                    queueFamilyIndex < PDOCKER_VK_ADVERTISED_QUEUE_FAMILY_COUNT)
         ? VK_TRUE
         : VK_FALSE;
@@ -14583,7 +14607,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
         VkSurfaceCapabilitiesKHR *pSurfaceCapabilities) {
     (void)physicalDevice;
     if (!pSurfaceCapabilities) return VK_ERROR_INITIALIZATION_FAILED;
-    if (!pdocker_vk_headless_surface_valid((PdockerVkSurface *)surface)) {
+    if (!pdocker_vk_headless_surface_valid(pdocker_vk_surface_from_handle(surface))) {
         return VK_ERROR_SURFACE_LOST_KHR;
     }
     memset(pSurfaceCapabilities, 0, sizeof(*pSurfaceCapabilities));
@@ -14612,7 +14636,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceFormatsKHR(
         VkSurfaceFormatKHR *pSurfaceFormats) {
     (void)physicalDevice;
     if (!pSurfaceFormatCount) return VK_ERROR_INITIALIZATION_FAILED;
-    if (!pdocker_vk_headless_surface_valid((PdockerVkSurface *)surface)) {
+    if (!pdocker_vk_headless_surface_valid(pdocker_vk_surface_from_handle(surface))) {
         *pSurfaceFormatCount = 0;
         return VK_ERROR_SURFACE_LOST_KHR;
     }
@@ -14638,7 +14662,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfacePresentModesKHR(
         VkPresentModeKHR *pPresentModes) {
     (void)physicalDevice;
     if (!pPresentModeCount) return VK_ERROR_INITIALIZATION_FAILED;
-    if (!pdocker_vk_headless_surface_valid((PdockerVkSurface *)surface)) {
+    if (!pdocker_vk_headless_surface_valid(pdocker_vk_surface_from_handle(surface))) {
         *pPresentModeCount = 0;
         return VK_ERROR_SURFACE_LOST_KHR;
     }
@@ -14828,10 +14852,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSwapchainKHR(
         trace_icd_runtime_failure("swapchain-flags-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }
-    PdockerVkSurface *surface = (PdockerVkSurface *)pCreateInfo->surface;
+    PdockerVkSurface *surface = pdocker_vk_surface_from_handle(pCreateInfo->surface);
     if (!pdocker_vk_headless_surface_valid(surface)) return VK_ERROR_SURFACE_LOST_KHR;
     if (pCreateInfo->oldSwapchain != VK_NULL_HANDLE) {
-        PdockerVkSwapchain *old_swapchain = (PdockerVkSwapchain *)pCreateInfo->oldSwapchain;
+        PdockerVkSwapchain *old_swapchain = pdocker_vk_swapchain_from_handle(pCreateInfo->oldSwapchain);
         if (!pdocker_vk_headless_swapchain_valid(old_swapchain)) {
             trace_icd_runtime_failure("swapchain-old-swapchain-invalid", VK_ERROR_INITIALIZATION_FAILED);
             return VK_ERROR_INITIALIZATION_FAILED;
@@ -14943,7 +14967,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSwapchainKHR(
         swapchain->images[i] = pd_image;
         swapchain->memories[i] = pdocker_vk_memory_from_handle(memory);
     }
-    *pSwapchain = (VkSwapchainKHR)swapchain;
+    *pSwapchain = pdocker_vk_swapchain_to_handle(swapchain);
     return VK_SUCCESS;
 }
 
@@ -14952,7 +14976,7 @@ VKAPI_ATTR void VKAPI_CALL vkDestroySwapchainKHR(
         VkSwapchainKHR swapchain,
         const VkAllocationCallbacks *pAllocator) {
     (void)pAllocator;
-    PdockerVkSwapchain *sc = (PdockerVkSwapchain *)swapchain;
+    PdockerVkSwapchain *sc = pdocker_vk_swapchain_from_handle(swapchain);
     if (!sc) return;
     pdocker_vk_destroy_swapchain_images(device, sc);
     free(sc);
@@ -14964,7 +14988,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetSwapchainImagesKHR(
         uint32_t *pSwapchainImageCount,
         VkImage *pSwapchainImages) {
     (void)device;
-    PdockerVkSwapchain *sc = (PdockerVkSwapchain *)swapchain;
+    PdockerVkSwapchain *sc = pdocker_vk_swapchain_from_handle(swapchain);
     if (!pSwapchainImageCount) return VK_ERROR_INITIALIZATION_FAILED;
     if (!pdocker_vk_headless_swapchain_runtime_valid(sc)) {
         *pSwapchainImageCount = 0;
@@ -14990,7 +15014,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAcquireNextImageKHR(
         uint32_t *pImageIndex) {
     (void)device;
     (void)timeout;
-    PdockerVkSwapchain *sc = (PdockerVkSwapchain *)swapchain;
+    PdockerVkSwapchain *sc = pdocker_vk_swapchain_from_handle(swapchain);
     if (!pImageIndex) return VK_ERROR_INITIALIZATION_FAILED;
     if (!pdocker_vk_headless_swapchain_runtime_valid(sc)) {
         trace_icd_runtime_failure("acquire-next-image-swapchain-invalid", VK_ERROR_OUT_OF_DATE_KHR);
@@ -15073,7 +15097,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueuePresentKHR(
     if (pPresentInfo->swapchainCount == 0) return VK_ERROR_INITIALIZATION_FAILED;
     VkResult aggregate = VK_SUCCESS;
     for (uint32_t i = 0; i < pPresentInfo->swapchainCount; ++i) {
-        PdockerVkSwapchain *sc = (PdockerVkSwapchain *)pPresentInfo->pSwapchains[i];
+        PdockerVkSwapchain *sc = pdocker_vk_swapchain_from_handle(pPresentInfo->pSwapchains[i]);
         VkResult rc = pdocker_vk_present_image_result(sc, pPresentInfo->pImageIndices[i]);
         if (rc == VK_SUCCESS && pdocker_vk_present_target_duplicate(pPresentInfo, i)) {
             trace_icd_runtime_failure("queue-present-duplicate-target", VK_ERROR_OUT_OF_DATE_KHR);
@@ -15087,7 +15111,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueuePresentKHR(
         semaphore_complete_wait(pdocker_vk_semaphore_from_handle(pPresentInfo->pWaitSemaphores[i]));
     }
     for (uint32_t i = 0; i < pPresentInfo->swapchainCount; ++i) {
-        PdockerVkSwapchain *sc = (PdockerVkSwapchain *)pPresentInfo->pSwapchains[i];
+        PdockerVkSwapchain *sc = pdocker_vk_swapchain_from_handle(pPresentInfo->pSwapchains[i]);
         uint32_t image_index = pPresentInfo->pImageIndices[i];
         sc->acquired[image_index] = false;
     }
@@ -15103,8 +15127,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateCommandPool(
     (void)pCreateInfo;
     (void)pAllocator;
     if (!pCommandPool) return VK_ERROR_INITIALIZATION_FAILED;
-    *pCommandPool = (VkCommandPool)pdocker_alloc_handle(sizeof(PdockerHandle));
-    return *pCommandPool ? VK_SUCCESS : VK_ERROR_OUT_OF_HOST_MEMORY;
+    PdockerVkCommandPool *pool = pdocker_alloc_handle(sizeof(*pool));
+    if (!pool) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    *pCommandPool = pdocker_vk_command_pool_to_handle(pool);
+    return VK_SUCCESS;
 }
 
 VKAPI_ATTR void VKAPI_CALL vkDestroyCommandPool(
@@ -15113,7 +15139,7 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyCommandPool(
         const VkAllocationCallbacks *pAllocator) {
     (void)device;
     (void)pAllocator;
-    free((void *)commandPool);
+    free(pdocker_vk_command_pool_from_handle(commandPool));
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkResetCommandPool(
@@ -15833,8 +15859,8 @@ static bool append_normalized_render_pass_begin(
         const VkRenderPassBeginInfo *begin,
         VkSubpassContents contents) {
     if (!cmd || !begin) return false;
-    PdockerVkRenderPass *rp = (PdockerVkRenderPass *)begin->renderPass;
-    PdockerVkFramebuffer *fb = (PdockerVkFramebuffer *)begin->framebuffer;
+    PdockerVkRenderPass *rp = pdocker_vk_render_pass_from_handle(begin->renderPass);
+    PdockerVkFramebuffer *fb = pdocker_vk_framebuffer_from_handle(begin->framebuffer);
     cmd->active_render_pass = rp;
     cmd->active_framebuffer = fb;
     memset(cmd->active_render_pass_attachment_views, 0, sizeof(cmd->active_render_pass_attachment_views));
@@ -15880,10 +15906,10 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBeginRenderPass(
         cmd->render_pass_active = true;
         cmd->dynamic_rendering_active = false;
         cmd->active_render_pass = pRenderPassBegin
-            ? (PdockerVkRenderPass *)pRenderPassBegin->renderPass
+            ? pdocker_vk_render_pass_from_handle(pRenderPassBegin->renderPass)
             : NULL;
         cmd->active_framebuffer = pRenderPassBegin
-            ? (PdockerVkFramebuffer *)pRenderPassBegin->framebuffer
+            ? pdocker_vk_framebuffer_from_handle(pRenderPassBegin->framebuffer)
             : NULL;
         cmd->active_subpass = 0;
         cmd->active_subpass_contents = contents;
@@ -21000,8 +21026,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreatePipelineCache(
     (void)pCreateInfo;
     (void)pAllocator;
     if (!pPipelineCache) return VK_ERROR_INITIALIZATION_FAILED;
-    *pPipelineCache = (VkPipelineCache)pdocker_alloc_handle(sizeof(PdockerHandle));
-    return *pPipelineCache ? VK_SUCCESS : VK_ERROR_OUT_OF_HOST_MEMORY;
+    PdockerVkPipelineCache *cache = pdocker_alloc_handle(sizeof(*cache));
+    if (!cache) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    *pPipelineCache = pdocker_vk_pipeline_cache_to_handle(cache);
+    return VK_SUCCESS;
 }
 
 VKAPI_ATTR void VKAPI_CALL vkDestroyPipelineCache(
@@ -21010,7 +21038,7 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyPipelineCache(
         const VkAllocationCallbacks *pAllocator) {
     (void)device;
     (void)pAllocator;
-    free((void *)pipelineCache);
+    free(pdocker_vk_pipeline_cache_from_handle(pipelineCache));
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkGetPipelineCacheData(
