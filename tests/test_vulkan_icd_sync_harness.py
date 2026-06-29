@@ -139,6 +139,96 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+
+    def test_image_layout_range_cache_splits_partial_overlaps_without_overflow(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            static int find_range(PdockerVkImage *image,
+                                  VkImageLayout layout,
+                                  uint32_t base_mip,
+                                  uint32_t level_count,
+                                  uint32_t base_layer,
+                                  uint32_t layer_count) {{
+                for (uint32_t i = 0; i < image->layout_range_count; ++i) {{
+                    PdockerVkImageLayoutRange *entry = &image->layout_ranges[i];
+                    if (entry->layout == layout &&
+                        entry->range.aspectMask == VK_IMAGE_ASPECT_COLOR_BIT &&
+                        entry->range.baseMipLevel == base_mip &&
+                        entry->range.levelCount == level_count &&
+                        entry->range.baseArrayLayer == base_layer &&
+                        entry->range.layerCount == layer_count) {{
+                        return 1;
+                    }}
+                }}
+                return 0;
+            }}
+
+            int main(void) {{
+                PdockerVkImage image;
+                memset(&image, 0, sizeof(image));
+                image.format = VK_FORMAT_R8G8B8A8_UNORM;
+                image.mip_levels = 4;
+                image.array_layers = 4;
+                image.layout_generation = 1;
+
+                VkImageSubresourceRange full = {{
+                    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                    .baseMipLevel = 0,
+                    .levelCount = 4,
+                    .baseArrayLayer = 0,
+                    .layerCount = 4,
+                }};
+                update_image_layout_range_cache(&image, &full, VK_IMAGE_LAYOUT_GENERAL);
+                if (image.layout_range_overflow || image.layout_range_count != 1) {{
+                    fprintf(stderr, "initial full-image range was not cached count=%u overflow=%d\\n",
+                            image.layout_range_count, image.layout_range_overflow ? 1 : 0);
+                    return 2;
+                }}
+
+                image.layout_generation = 2;
+                VkImageSubresourceRange center = {{
+                    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                    .baseMipLevel = 1,
+                    .levelCount = 2,
+                    .baseArrayLayer = 1,
+                    .layerCount = 2,
+                }};
+                update_image_layout_range_cache(&image, &center, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                if (image.layout_range_overflow) {{
+                    fprintf(stderr, "partial overlap incorrectly overflowed\\n");
+                    return 3;
+                }}
+                if (!find_range(&image, VK_IMAGE_LAYOUT_GENERAL, 0, 1, 0, 4) ||
+                    !find_range(&image, VK_IMAGE_LAYOUT_GENERAL, 3, 1, 0, 4) ||
+                    !find_range(&image, VK_IMAGE_LAYOUT_GENERAL, 1, 2, 0, 1) ||
+                    !find_range(&image, VK_IMAGE_LAYOUT_GENERAL, 1, 2, 3, 1) ||
+                    !find_range(&image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1, 2, 1, 2)) {{
+                    fprintf(stderr, "split range table missing expected remainders count=%u\\n",
+                            image.layout_range_count);
+                    return 4;
+                }}
+
+                image.layout_generation = 3;
+                update_image_layout_range_cache(&image, &center, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+                if (image.layout_range_overflow ||
+                    !find_range(&image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, 1, 2, 1, 2) ||
+                    find_range(&image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1, 2, 1, 2)) {{
+                    fprintf(stderr, "exact replacement did not update center range count=%u overflow=%d\\n",
+                            image.layout_range_count, image.layout_range_overflow ? 1 : 0);
+                    return 5;
+                }}
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_compute_only_barrier_and_query_do_not_mark_command_buffer_as_graphics(self):
         source = textwrap.dedent(
             f"""

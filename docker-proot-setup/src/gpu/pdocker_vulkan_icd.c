@@ -17399,6 +17399,169 @@ static bool image_layout_ranges_equal(
            a->layerCount == b->layerCount;
 }
 
+static bool image_layout_range_append(
+        PdockerVkImageLayoutRange *ranges,
+        uint32_t *count,
+        const VkImageSubresourceRange *range,
+        VkImageLayout layout,
+        uint64_t generation) {
+    if (!ranges || !count || !range ||
+        range->aspectMask == 0 ||
+        range->levelCount == 0 ||
+        range->layerCount == 0) {
+        return true;
+    }
+    for (uint32_t i = 0; i < *count; ++i) {
+        PdockerVkImageLayoutRange *entry = &ranges[i];
+        if (entry->layout != layout || entry->generation != generation) continue;
+        if (entry->range.baseMipLevel == range->baseMipLevel &&
+            entry->range.levelCount == range->levelCount &&
+            entry->range.baseArrayLayer == range->baseArrayLayer &&
+            entry->range.layerCount == range->layerCount &&
+            (entry->range.aspectMask & range->aspectMask) == 0) {
+            entry->range.aspectMask |= range->aspectMask;
+            return true;
+        }
+        if (entry->range.aspectMask == range->aspectMask &&
+            entry->range.baseArrayLayer == range->baseArrayLayer &&
+            entry->range.layerCount == range->layerCount) {
+            uint32_t entry_level_end = entry->range.baseMipLevel + entry->range.levelCount;
+            uint32_t range_level_end = range->baseMipLevel + range->levelCount;
+            if (entry_level_end == range->baseMipLevel) {
+                entry->range.levelCount += range->levelCount;
+                return true;
+            }
+            if (range_level_end == entry->range.baseMipLevel) {
+                entry->range.baseMipLevel = range->baseMipLevel;
+                entry->range.levelCount += range->levelCount;
+                return true;
+            }
+        }
+        if (entry->range.aspectMask == range->aspectMask &&
+            entry->range.baseMipLevel == range->baseMipLevel &&
+            entry->range.levelCount == range->levelCount) {
+            uint32_t entry_layer_end = entry->range.baseArrayLayer + entry->range.layerCount;
+            uint32_t range_layer_end = range->baseArrayLayer + range->layerCount;
+            if (entry_layer_end == range->baseArrayLayer) {
+                entry->range.layerCount += range->layerCount;
+                return true;
+            }
+            if (range_layer_end == entry->range.baseArrayLayer) {
+                entry->range.baseArrayLayer = range->baseArrayLayer;
+                entry->range.layerCount += range->layerCount;
+                return true;
+            }
+        }
+    }
+    if (*count >= PDOCKER_VK_MAX_COPY_OPS) return false;
+    PdockerVkImageLayoutRange *entry = &ranges[(*count)++];
+    memset(entry, 0, sizeof(*entry));
+    entry->range = *range;
+    entry->layout = layout;
+    entry->generation = generation;
+    return true;
+}
+
+static bool append_image_layout_range_remainder(
+        PdockerVkImageLayoutRange *ranges,
+        uint32_t *count,
+        const PdockerVkImageLayoutRange *old_entry,
+        const VkImageSubresourceRange *replacement) {
+    if (!ranges || !count || !old_entry || !replacement) return false;
+    if (!image_layout_ranges_overlap(&old_entry->range, replacement)) {
+        return image_layout_range_append(
+            ranges, count, &old_entry->range, old_entry->layout, old_entry->generation);
+    }
+
+    const VkImageAspectFlags old_aspects = old_entry->range.aspectMask;
+    const VkImageAspectFlags overlap_aspects = old_aspects & replacement->aspectMask;
+    const VkImageAspectFlags old_aspects_not_replaced = old_aspects & ~replacement->aspectMask;
+    if (old_aspects_not_replaced) {
+        VkImageSubresourceRange kept = old_entry->range;
+        kept.aspectMask = old_aspects_not_replaced;
+        if (!image_layout_range_append(
+                ranges, count, &kept, old_entry->layout, old_entry->generation)) {
+            return false;
+        }
+    }
+    if (!overlap_aspects) return true;
+
+    const uint32_t old_level_begin = old_entry->range.baseMipLevel;
+    const uint32_t old_level_end = old_entry->range.baseMipLevel + old_entry->range.levelCount;
+    const uint32_t new_level_begin = replacement->baseMipLevel;
+    const uint32_t new_level_end = replacement->baseMipLevel + replacement->levelCount;
+    const uint32_t intersection_level_begin =
+        old_level_begin > new_level_begin ? old_level_begin : new_level_begin;
+    const uint32_t intersection_level_end =
+        old_level_end < new_level_end ? old_level_end : new_level_end;
+
+    const uint32_t old_layer_begin = old_entry->range.baseArrayLayer;
+    const uint32_t old_layer_end = old_entry->range.baseArrayLayer + old_entry->range.layerCount;
+    const uint32_t new_layer_begin = replacement->baseArrayLayer;
+    const uint32_t new_layer_end = replacement->baseArrayLayer + replacement->layerCount;
+    const uint32_t intersection_layer_begin =
+        old_layer_begin > new_layer_begin ? old_layer_begin : new_layer_begin;
+    const uint32_t intersection_layer_end =
+        old_layer_end < new_layer_end ? old_layer_end : new_layer_end;
+
+    if (intersection_level_begin > old_level_begin) {
+        VkImageSubresourceRange before_levels = {
+            .aspectMask = overlap_aspects,
+            .baseMipLevel = old_level_begin,
+            .levelCount = intersection_level_begin - old_level_begin,
+            .baseArrayLayer = old_layer_begin,
+            .layerCount = old_entry->range.layerCount,
+        };
+        if (!image_layout_range_append(
+                ranges, count, &before_levels, old_entry->layout, old_entry->generation)) {
+            return false;
+        }
+    }
+    if (old_level_end > intersection_level_end) {
+        VkImageSubresourceRange after_levels = {
+            .aspectMask = overlap_aspects,
+            .baseMipLevel = intersection_level_end,
+            .levelCount = old_level_end - intersection_level_end,
+            .baseArrayLayer = old_layer_begin,
+            .layerCount = old_entry->range.layerCount,
+        };
+        if (!image_layout_range_append(
+                ranges, count, &after_levels, old_entry->layout, old_entry->generation)) {
+            return false;
+        }
+    }
+
+    const uint32_t middle_level_count = intersection_level_end - intersection_level_begin;
+    if (middle_level_count == 0) return true;
+    if (intersection_layer_begin > old_layer_begin) {
+        VkImageSubresourceRange before_layers = {
+            .aspectMask = overlap_aspects,
+            .baseMipLevel = intersection_level_begin,
+            .levelCount = middle_level_count,
+            .baseArrayLayer = old_layer_begin,
+            .layerCount = intersection_layer_begin - old_layer_begin,
+        };
+        if (!image_layout_range_append(
+                ranges, count, &before_layers, old_entry->layout, old_entry->generation)) {
+            return false;
+        }
+    }
+    if (old_layer_end > intersection_layer_end) {
+        VkImageSubresourceRange after_layers = {
+            .aspectMask = overlap_aspects,
+            .baseMipLevel = intersection_level_begin,
+            .levelCount = middle_level_count,
+            .baseArrayLayer = intersection_layer_end,
+            .layerCount = old_layer_end - intersection_layer_end,
+        };
+        if (!image_layout_range_append(
+                ranges, count, &after_layers, old_entry->layout, old_entry->generation)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 static void update_image_layout_range_cache(
         PdockerVkImage *image,
         const VkImageSubresourceRange *normalized_range,
@@ -17412,28 +17575,24 @@ static void update_image_layout_range_cache(
             return;
         }
     }
+    PdockerVkImageLayoutRange rebuilt[PDOCKER_VK_MAX_COPY_OPS];
+    uint32_t rebuilt_count = 0;
+    memset(rebuilt, 0, sizeof(rebuilt));
     for (uint32_t i = 0; i < image->layout_range_count; ++i) {
         PdockerVkImageLayoutRange *entry = &image->layout_ranges[i];
-        if (image_layout_ranges_overlap(&entry->range, normalized_range)) {
-            /*
-             * Splitting partially-overlapping layout ranges is required for a
-             * lossless transport table.  Until that splitter is implemented,
-             * keep the precise-cache invalid rather than replacing a range and
-             * silently lying about uncovered subresources.
-             */
+        if (!append_image_layout_range_remainder(
+                rebuilt, &rebuilt_count, entry, normalized_range)) {
             image->layout_range_overflow = true;
             return;
         }
     }
-    if (image->layout_range_count >= PDOCKER_VK_MAX_COPY_OPS) {
+    if (!image_layout_range_append(
+            rebuilt, &rebuilt_count, normalized_range, layout, image->layout_generation)) {
         image->layout_range_overflow = true;
         return;
     }
-    PdockerVkImageLayoutRange *entry = &image->layout_ranges[image->layout_range_count++];
-    memset(entry, 0, sizeof(*entry));
-    entry->range = *normalized_range;
-    entry->layout = layout;
-    entry->generation = image->layout_generation;
+    memcpy(image->layout_ranges, rebuilt, sizeof(rebuilt));
+    image->layout_range_count = rebuilt_count;
 }
 
 static bool pdocker_vk_queue_family_barrier_replayable(

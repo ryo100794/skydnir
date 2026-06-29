@@ -212,15 +212,15 @@
     {
       "abi": "arm64-v8a",
       "exists": true,
-      "file": "/root/tl/pdocker-android/app/src/main/jniLibs/arm64-v8a/libpdockervulkanicd.so: ELF 64-bit LSB shared object, ARM aarch64, version 1 (SYSV), dynamically linked, BuildID[sha1]=f1a0fabc4de6f599242a00f70e8caa2bae236915, not stripped",
+      "file": "/root/tl/pdocker-android/app/src/main/jniLibs/arm64-v8a/libpdockervulkanicd.so: ELF 64-bit LSB shared object, ARM aarch64, version 1 (SYSV), dynamically linked, BuildID[sha1]=2358f043f83b831cae72d1b95932b0b956a40f02, not stripped",
       "has_android_linker": false,
       "has_glibc_loader": false,
       "name": "libpdockervulkanicd.so",
       "path": "app/src/main/jniLibs/arm64-v8a/libpdockervulkanicd.so",
       "readelf_header_has_machine": true,
       "role": "linux-glibc-container",
-      "sha256": "b672d5cba58a488e04be0b01230c368e5d419f457dd73c8e3e0abebee92f6384",
-      "size": 354672
+      "sha256": "49616e7fe44b732b8c91d221a9e2ec1ec444bf9a85072cd64c2f2e13ff02132c",
+      "size": 354792
     },
     {
       "abi": "arm64-v8a",
@@ -251,15 +251,15 @@
     {
       "abi": "armeabi-v7a",
       "exists": true,
-      "file": "/root/tl/pdocker-android/app/src/main/jniLibs/armeabi-v7a/libpdockervulkanicd.so: ELF 32-bit LSB shared object, ARM, EABI5 version 1 (SYSV), dynamically linked, BuildID[sha1]=60772ac0c04de8e1057c1599973c7db898a84319, not stripped",
+      "file": "/root/tl/pdocker-android/app/src/main/jniLibs/armeabi-v7a/libpdockervulkanicd.so: ELF 32-bit LSB shared object, ARM, EABI5 version 1 (SYSV), dynamically linked, BuildID[sha1]=b4040b9b5b2cb1ed4b7ace05ea1a4a5f7c1810a9, not stripped",
       "has_android_linker": false,
       "has_glibc_loader": false,
       "name": "libpdockervulkanicd.so",
       "path": "app/src/main/jniLibs/armeabi-v7a/libpdockervulkanicd.so",
       "readelf_header_has_machine": true,
       "role": "linux-glibc-container-experimental",
-      "sha256": "cd4fdefc3f41efa3a0f201f6eee234b5c15c3c4d8090c9c574babaedda006878",
-      "size": 293772
+      "sha256": "9be697673ec22fe28744b8375688b9d81961b32d36d621ff6e70477f004b5431",
+      "size": 293904
     },
     {
       "abi": "armeabi-v7a",
