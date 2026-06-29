@@ -265,6 +265,7 @@ extension boundary starts with the selected `/system/*` routes below.
 | `GET /system/documents/status`, `POST /system/documents/sync-to-tree`, `POST /system/documents/sync-from-tree` | SAF/Documents mediator status and explicit synchronization control. |
 | `GET /system/media` | Camera/audio/media bridge capability inventory and permission/control-plane status. |
 | `PdockerNetwork`, `PdockerGpu`, `PdockerMedia`, `PdockerWarnings` in container inspect | Container-specific network truth, GPU bridge request/result metadata, media bridge metadata, and explicit limitation warnings. |
+| `PdockerCreate` in container state/inspect records | Container-create diagnostics, including fail-closed creation errors and the selected image/config path, used by UI/service-truth debugging. |
 | `PdockerWarning` in network responses | Host-network limitation warning for Compose-compatible network stubs. |
 | `PdockerHome`, `PdockerOperationId` | Host/operation diagnostics used by the Android UI and long-running operation records. |
 | `State.PdockerRawReturnCode`, `State.PdockerSignal`, `State.PdockerMemory`, `State.PdockerTeardown` | Android executor return-code, signal, memory, and teardown diagnostics that Docker does not normally expose. |

@@ -1,3 +1,4 @@
+import hashlib
 import json
 import importlib.util
 import subprocess
@@ -11,6 +12,73 @@ SWEEP = ROOT / "scripts" / "maintenance" / "summarize-llama-gpu-artifacts.py"
 LATEST = ROOT / "docs" / "test" / "llama-gpu-artifact-sweep-latest.json"
 VERIFIER = ROOT / "scripts" / "verify-llama-gpu-artifact.py"
 
+
+
+def sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def bridge_binary_identity(abi: str = "arm64-v8a"):
+    executor = ROOT / "app" / "src" / "main" / "jniLibs" / abi / "libpdockergpuexecutor.so"
+    icd = ROOT / "app" / "src" / "main" / "jniLibs" / abi / "libpdockervulkanicd.so"
+    executor_sha = sha256_file(executor)
+    icd_sha = sha256_file(icd)
+    return {
+        "schema": "pdocker.llama.gpu.bridge-binary-identity.v1",
+        "hash_algorithm": "sha256",
+        "abi": abi,
+        "device_abi": abi,
+        "package": "io.github.ryo100794.pdocker.compat",
+        "checked_out_jni": {
+            "gpu_executor": {
+                "path": str(executor.relative_to(ROOT)),
+                "sha256": executor_sha,
+                "size": executor.stat().st_size,
+            },
+            "vulkan_icd": {
+                "path": str(icd.relative_to(ROOT)),
+                "sha256": icd_sha,
+                "size": icd.stat().st_size,
+            },
+        },
+        "installed": {
+            "gpu_executor": {
+                "path": "pdocker-runtime/gpu/pdocker-gpu-executor",
+                "target": "/data/app/libpdockergpuexecutor.so",
+                "sha256": executor_sha,
+                "size": executor.stat().st_size,
+            },
+            "vulkan_icd": {
+                "path": "pdocker-runtime/lib/pdocker-vulkan-icd.so",
+                "target": "/data/app/libpdockervulkanicd.so",
+                "sha256": icd_sha,
+                "size": icd.stat().st_size,
+            },
+        },
+        "runtime": {"gpu_executor": [], "vulkan_icd": []},
+        "missing": [],
+        "mismatches": [],
+        "unparsed": [],
+        "summary": "pass",
+    }
+
+
+def runtime_freshness_pass():
+    return {
+        "summary": "pass",
+        "marker_summary": "pass",
+        "bridge_binary_summary": "pass",
+        "expected_executor_marker": "gpu-executor-q6-readonly-snapshot-20260531",
+        "observed_executor_markers": ["gpu-executor-q6-readonly-snapshot-20260531"],
+        "expected_icd_marker": "vulkan-icd-feature-chain-marker-20260518",
+        "observed_icd_markers": ["vulkan-icd-feature-chain-marker-20260518"],
+        "executor_event_count": 1,
+        "bridge_binary_identity": bridge_binary_identity(),
+    }
 
 def passing_config_propagation():
     spec = importlib.util.spec_from_file_location("llama_gpu_artifact_verifier", VERIFIER)
@@ -156,14 +224,7 @@ class LlamaGpuArtifactSweepTest(unittest.TestCase):
                                 "summary": {"correctness": "pass", "required_failures": 0},
                             },
                             "diagnostics": {
-                                "runtime_freshness": {
-                                    "summary": "pass",
-                                    "expected_executor_marker": "gpu-executor-q6-readonly-snapshot-20260531",
-                                    "observed_executor_markers": ["gpu-executor-q6-readonly-snapshot-20260531"],
-                                    "expected_icd_marker": "vulkan-icd-feature-chain-marker-20260518",
-                                    "observed_icd_markers": ["vulkan-icd-feature-chain-marker-20260518"],
-                                    "executor_event_count": 1,
-                                },
+                                "runtime_freshness": runtime_freshness_pass(),
                                 "config_propagation": passing_config_propagation(),
                                 "q6_workgroup_diagnostics": {
                                     "event_count": 1,
@@ -282,14 +343,7 @@ class LlamaGpuArtifactSweepTest(unittest.TestCase):
                                 "summary": {"correctness": "pass", "required_failures": 0},
                             },
                             "diagnostics": {
-                                "runtime_freshness": {
-                                    "summary": "pass",
-                                    "expected_executor_marker": "gpu-executor-q6-readonly-snapshot-20260531",
-                                    "observed_executor_markers": ["gpu-executor-q6-readonly-snapshot-20260531"],
-                                    "expected_icd_marker": "vulkan-icd-feature-chain-marker-20260518",
-                                    "observed_icd_markers": ["vulkan-icd-feature-chain-marker-20260518"],
-                                    "executor_event_count": 1,
-                                },
+                                "runtime_freshness": runtime_freshness_pass(),
                                 "config_propagation": passing_config_propagation(),
                                 "q6_workgroup_diagnostics": {
                                     "event_count": 0,
@@ -337,14 +391,7 @@ class LlamaGpuArtifactSweepTest(unittest.TestCase):
                         "gpu": {
                             "served": False,
                             "diagnostics": {
-                                "runtime_freshness": {
-                                    "summary": "pass",
-                                    "expected_executor_marker": "gpu-executor-q6-readonly-snapshot-20260531",
-                                    "observed_executor_markers": ["gpu-executor-q6-readonly-snapshot-20260531"],
-                                    "expected_icd_marker": "vulkan-icd-feature-chain-marker-20260518",
-                                    "observed_icd_markers": ["vulkan-icd-feature-chain-marker-20260518"],
-                                    "executor_event_count": 1,
-                                },
+                                "runtime_freshness": runtime_freshness_pass(),
                                 "config_propagation": passing_config_propagation(),
                                 "q6_workgroup_diagnostics": {
                                     "event_count": 1,

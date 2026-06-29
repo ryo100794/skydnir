@@ -595,6 +595,20 @@
       "heavy_case": "android.direct.numa-fallback"
     },
     {
+      "id": "direct.chroot-eperm-isolation",
+      "tier": "fast-static",
+      "areas": [
+        "proc_mount_chroot_isolation",
+        "syscall_errno_parity"
+      ],
+      "syscalls": [
+        "chroot"
+      ],
+      "contract": "The chroot syscall is deliberately intercepted at the seccomp boundary and returns EPERM, matching unprivileged Linux behavior instead of leaking ENOSYS, SIGSYS, or Bad system call to container workloads.",
+      "fast_check": "Static verifier checks the ADD_ERRNO_SYSCALL(51, EPERM) hook and chroot diagnostic name.",
+      "heavy_case": "android.direct.proc-mount-chroot-isolation"
+    },
+    {
       "id": "direct.memory-trace-and-guard",
       "tier": "fast-static",
       "areas": [

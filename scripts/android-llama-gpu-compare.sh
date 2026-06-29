@@ -137,6 +137,7 @@ TMP="$(mktemp -d)"
 CURRENT_STAGE="initializing"
 RUNTIME_ABORT_JSON="$TMP/runtime-memory-abort.json"
 RUNTIME_ENV_RECORD_JSON="$TMP/runtime-env-record.json"
+BRIDGE_BINARY_IDENTITY_JSON="$TMP/bridge-binary-identity.json"
 
 compare_artifact_dir() {
   if [[ -n "$COMPARE_ARTIFACT_DIR" ]]; then
@@ -445,6 +446,156 @@ run_as() {
     "$ADB" shell "rm -f $device_tmp; run-as $PKG rm -f $device_script" >/dev/null 2>&1 || true
   fi
   return "$rc"
+}
+
+
+record_bridge_binary_identity() {
+  local out="$1"
+  local device_abi abi raw
+  device_abi="$($ADB shell getprop ro.product.cpu.abi 2>/dev/null | tr -d '\r' | head -n 1 || true)"
+  case "$device_abi" in
+    *arm64-v8a*) abi="arm64-v8a" ;;
+    *armeabi-v7a*|*armeabi*) abi="armeabi-v7a" ;;
+    *) abi="arm64-v8a" ;;
+  esac
+  raw="$(run_as 'cd files || exit 0
+hash_one() {
+  p="$1"
+  sha256sum "$p" 2>/dev/null | cut -d " " -f 1 || toybox sha256sum "$p" 2>/dev/null | cut -d " " -f 1 || true
+}
+emit_file() {
+  kind="$1"; component="$2"; path="$3"
+  if test -e "$path"; then
+    target=$(readlink "$path" 2>/dev/null || printf %s "$path")
+    size=$(wc -c < "$path" 2>/dev/null || printf 0)
+    sha=$(hash_one "$path")
+    printf "%s|%s|%s|%s|%s|%s\n" "$kind" "$component" "$path" "$target" "$size" "$sha"
+  else
+    printf "missing|%s|%s\n" "$component" "$path"
+  fi
+}
+emit_file installed gpu_executor pdocker-runtime/gpu/pdocker-gpu-executor
+emit_file installed vulkan_icd pdocker-runtime/lib/pdocker-vulkan-icd.so
+for p in /proc/[0-9]*; do
+  pid=${p##*/}
+  cmd=$(cat "$p/cmdline" 2>/dev/null | tr "\000" " " || true)
+  case "$cmd" in
+    *pdocker-gpu-executor*)
+      target=$(readlink "$p/exe" 2>/dev/null || true)
+      size=$(wc -c < "$p/exe" 2>/dev/null || printf 0)
+      sha=$(hash_one "$p/exe")
+      printf "runtime|gpu_executor|pid:%s|%s|%s|%s\n" "$pid" "$target" "$size" "$sha"
+      ;;
+  esac
+  case "$cmd" in
+    *pdocker*|*llama*)
+      grep "pdocker-vulkan-icd.so" "$p/maps" 2>/dev/null | cut -d " " -f 6 | sort -u | while read -r map_path; do
+        test -n "$map_path" || continue
+        size=$(wc -c < "$map_path" 2>/dev/null || printf 0)
+        sha=$(hash_one "$map_path")
+        printf "runtime|vulkan_icd|pid:%s|%s|%s|%s\n" "$pid" "$map_path" "$size" "$sha"
+      done
+      ;;
+  esac
+done' 2>/dev/null || true)"
+  python3 - "$ROOT" "$out" "$abi" "$device_abi" "$PKG" "$raw" <<'PY'
+import hashlib
+import json
+import re
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+out = Path(sys.argv[2])
+abi = sys.argv[3]
+device_abi = sys.argv[4]
+pkg = sys.argv[5]
+raw = sys.argv[6]
+components = {
+    "gpu_executor": root / "app" / "src" / "main" / "jniLibs" / abi / "libpdockergpuexecutor.so",
+    "vulkan_icd": root / "app" / "src" / "main" / "jniLibs" / abi / "libpdockervulkanicd.so",
+}
+
+def rel(path: Path) -> str:
+    try:
+        return str(path.relative_to(root))
+    except ValueError:
+        return str(path)
+
+def sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+def file_record(path: Path) -> dict:
+    return {
+        "path": rel(path),
+        "sha256": sha256_file(path) if path.is_file() else "",
+        "size": path.stat().st_size if path.is_file() else 0,
+    }
+
+checked_out = {name: file_record(path) for name, path in components.items()}
+installed = {}
+runtime = {"gpu_executor": [], "vulkan_icd": []}
+missing = []
+unparsed = []
+for line in raw.splitlines():
+    line = line.strip().replace("\r", "")
+    if not line:
+        continue
+    fields = line.split("|")
+    if fields[0] == "missing" and len(fields) >= 3:
+        missing.append({"component": fields[1], "path": fields[2]})
+        continue
+    if len(fields) < 6:
+        unparsed.append(line)
+        continue
+    kind, component, path, target, size_s, digest = fields[:6]
+    if component not in checked_out or not re.fullmatch(r"[0-9a-fA-F]{64}", digest or ""):
+        unparsed.append(line)
+        continue
+    record = {"path": path, "target": target, "size": int(size_s) if str(size_s).isdigit() else 0, "sha256": digest.lower()}
+    if kind == "installed":
+        installed[component] = record
+    elif kind == "runtime":
+        runtime.setdefault(component, []).append(record)
+    else:
+        unparsed.append(line)
+
+mismatches = []
+for component, expected in checked_out.items():
+    exp_sha = expected.get("sha256") or ""
+    inst = installed.get(component) or {}
+    inst_sha = inst.get("sha256") or ""
+    if not exp_sha:
+        missing.append({"component": component, "path": expected.get("path"), "reason": "checked-out-jni-missing"})
+    elif not inst_sha:
+        missing.append({"component": component, "path": component, "reason": "installed-runtime-hash-missing"})
+    elif inst_sha != exp_sha:
+        mismatches.append({"component": component, "scope": "installed", "expected_sha256": exp_sha, "observed_sha256": inst_sha})
+    for rec in runtime.get(component) or []:
+        run_sha = rec.get("sha256") or ""
+        if run_sha and exp_sha and run_sha != exp_sha:
+            mismatches.append({"component": component, "scope": "runtime", "expected_sha256": exp_sha, "observed_sha256": run_sha, "path": rec.get("path"), "target": rec.get("target")})
+summary = "pass" if not missing and not mismatches and not unparsed else "fail"
+record = {
+    "schema": "pdocker.llama.gpu.bridge-binary-identity.v1",
+    "hash_algorithm": "sha256",
+    "abi": abi,
+    "device_abi": device_abi,
+    "package": pkg,
+    "checked_out_jni": checked_out,
+    "installed": installed,
+    "runtime": runtime,
+    "missing": missing,
+    "mismatches": mismatches,
+    "unparsed": unparsed[-8:],
+    "summary": summary,
+}
+out.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+PY
 }
 
 adb_transport_state() {
@@ -2672,8 +2823,10 @@ memory_snapshot_json > "$GPU_POST_READINESS_MEMORY_JSON" || true
 container_state > "$GPU_STATE"
 container_archive_file "/workspace/logs/llama-startup.json" "$STARTUP_JSON"
 container_logs > "$GPU_LOG"
+record_bridge_binary_identity "$BRIDGE_BINARY_IDENTITY_JSON" || true
 
 PDOCKER_LLAMA_RUNTIME_ABORT_JSON="$RUNTIME_ABORT_JSON" \
+PDOCKER_LLAMA_BRIDGE_BINARY_IDENTITY_JSON="$BRIDGE_BINARY_IDENTITY_JSON" \
 PDOCKER_LLAMA_POST_READINESS_MEMORY_JSON="$GPU_POST_READINESS_MEMORY_JSON" \
 python3 - "$CPU_JSON" "$CPU_CORRECTNESS_JSON" "$GPU_JSON" "$GPU_LOG" "$GPU_STATE" "$CORRECTNESS_JSON" "$SERVICE_READINESS_JSON" "$STARTUP_JSON" "$RUNTIME_ENV_RECORD_JSON" "$OUT" "$gpu_served" "$GPU_LAYERS" "$GPU_CTX" "$PREDICT" "$REPEAT" "$WARMUP_DISCARD" "$TRACE_ALLOC" "$MODEL_PATH" "$MODEL_URL" "$ROOT/scripts/llama-gpu-env-manifest.json" <<'PY'
 import json
@@ -2730,6 +2883,13 @@ if runtime_abort_path and Path(runtime_abort_path).is_file() and Path(runtime_ab
         runtime_abort = json.load(open(runtime_abort_path, encoding="utf-8"))
     except Exception:
         runtime_abort = {}
+bridge_binary_identity = {}
+bridge_binary_identity_path = os.environ.get("PDOCKER_LLAMA_BRIDGE_BINARY_IDENTITY_JSON", "")
+if bridge_binary_identity_path and Path(bridge_binary_identity_path).is_file() and Path(bridge_binary_identity_path).stat().st_size:
+    try:
+        bridge_binary_identity = json.load(open(bridge_binary_identity_path, encoding="utf-8"))
+    except Exception:
+        bridge_binary_identity = {"schema": "pdocker.llama.gpu.bridge-binary-identity.v1", "summary": "fail", "error": "invalid bridge binary identity JSON"}
 post_readiness_memory = {}
 post_readiness_memory_path = os.environ.get("PDOCKER_LLAMA_POST_READINESS_MEMORY_JSON", "")
 if post_readiness_memory_path and Path(post_readiness_memory_path).is_file() and Path(post_readiness_memory_path).stat().st_size:
@@ -3321,22 +3481,33 @@ observed_executor_markers = sorted({
     if e.get("executor_build_marker")
 } | set(re.findall(r"build_marker=([^\s,}]+)", log)))
 observed_icd_markers = sorted(set(re.findall(r"runtime_marker=([^\s,}]+)", log)))
+runtime_marker_summary = (
+    "pass"
+    if (
+        (not expected_executor_marker or expected_executor_marker in observed_executor_markers) and
+        (not expected_icd_marker or expected_icd_marker in observed_icd_markers)
+    )
+    else "not-requested"
+    if not expected_executor_marker and not expected_icd_marker
+    else "fail"
+)
+bridge_binary_summary = bridge_binary_identity.get("summary") if isinstance(bridge_binary_identity, dict) else None
 runtime_freshness = {
     "summary": (
         "pass"
-        if (
-            (not expected_executor_marker or expected_executor_marker in observed_executor_markers) and
-            (not expected_icd_marker or expected_icd_marker in observed_icd_markers)
-        )
+        if runtime_marker_summary in {"pass", "not-requested"} and bridge_binary_summary in {None, "pass"}
         else "not-requested"
-        if not expected_executor_marker and not expected_icd_marker
+        if runtime_marker_summary == "not-requested" and bridge_binary_summary is None
         else "fail"
     ),
+    "marker_summary": runtime_marker_summary,
+    "bridge_binary_summary": bridge_binary_summary,
     "expected_executor_marker": expected_executor_marker,
     "expected_icd_marker": expected_icd_marker,
     "observed_executor_markers": observed_executor_markers[-8:],
     "observed_icd_markers": observed_icd_markers[-8:],
     "executor_event_count": len(executor_events),
+    "bridge_binary_identity": bridge_binary_identity,
 }
 api_trace_binding_samples = []
 api_trace_missing = 0

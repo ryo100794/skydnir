@@ -10,6 +10,7 @@ classification that can be used by humans, CI, and future refactors.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import re
@@ -35,6 +36,7 @@ DEFAULT_MEMORY_CLEANUP_COMMANDS = (
     "adb shell \"run-as io.github.ryo100794.pdocker.compat sh -c 'cd files && test -S pdocker/pdockerd.sock && printf '\\''DELETE /containers/skydnir-llama-cpp?force=true HTTP/1.1\\r\\nHost: pdocker\\r\\nContent-Length: 0\\r\\nConnection: close\\r\\n\\r\\n'\\'' | toybox nc -U -W 3 pdocker/pdockerd.sock >/dev/null || true'\"",
     "adb shell \"run-as io.github.ryo100794.pdocker.compat sh -c 'pkill -x pdocker-gpu-executor 2>/dev/null; pkill -x pdocker-media-executor 2>/dev/null; true'\"",
 )
+ROOT = Path(__file__).resolve().parents[1]
 ENV_MANIFEST_PATH = Path(__file__).resolve().with_name("llama-gpu-env-manifest.json")
 COMPACT_HASH_RE = re.compile(r"^0x[0-9a-fA-F]{16}$")
 ZERO_COMPACT_HASH = "0x0000000000000000"
@@ -338,6 +340,87 @@ def _fresh_feature_chain_icd(runtime_freshness: dict[str, Any]) -> bool:
     values = [str(runtime_freshness.get("expected_icd_marker") or "")]
     values.extend(str(marker) for marker in markers if str(marker))
     return "vulkan-icd-feature-chain-marker-20260518" in values
+
+
+BRIDGE_BINARY_COMPONENTS = {
+    "gpu_executor": "libpdockergpuexecutor.so",
+    "vulkan_icd": "libpdockervulkanicd.so",
+}
+
+
+def _sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _expected_bridge_binary_hashes(abi: str) -> dict[str, dict[str, Any]]:
+    if abi not in {"arm64-v8a", "armeabi-v7a"}:
+        abi = "arm64-v8a"
+    result: dict[str, dict[str, Any]] = {}
+    for component, filename in BRIDGE_BINARY_COMPONENTS.items():
+        path = ROOT / "app" / "src" / "main" / "jniLibs" / abi / filename
+        result[component] = {
+            "path": str(path.relative_to(ROOT)),
+            "sha256": _sha256_file(path) if path.is_file() else "",
+            "size": path.stat().st_size if path.is_file() else 0,
+        }
+    return result
+
+
+def _bridge_binary_identity(runtime_freshness: dict[str, Any]) -> dict[str, Any]:
+    value = runtime_freshness.get("bridge_binary_identity")
+    return value if isinstance(value, dict) else {}
+
+
+def _bridge_binary_identity_problems(runtime_freshness: dict[str, Any]) -> list[dict[str, Any]]:
+    identity = _bridge_binary_identity(runtime_freshness)
+    problems: list[dict[str, Any]] = []
+    if not identity:
+        return [{"scope": "bridge_binary_identity", "reason": "missing"}]
+    if identity.get("schema") != "pdocker.llama.gpu.bridge-binary-identity.v1":
+        problems.append({"scope": "bridge_binary_identity", "reason": "unsupported-schema", "value": identity.get("schema")})
+    if identity.get("hash_algorithm") != "sha256":
+        problems.append({"scope": "bridge_binary_identity", "reason": "unsupported-hash", "value": identity.get("hash_algorithm")})
+    if identity.get("summary") != "pass":
+        problems.append({"scope": "bridge_binary_identity", "reason": "summary-not-pass", "value": identity.get("summary")})
+    abi = str(identity.get("abi") or "arm64-v8a")
+    expected = _expected_bridge_binary_hashes(abi)
+    checked_out = identity.get("checked_out_jni") if isinstance(identity.get("checked_out_jni"), dict) else {}
+    installed = identity.get("installed") if isinstance(identity.get("installed"), dict) else {}
+    runtime = identity.get("runtime") if isinstance(identity.get("runtime"), dict) else {}
+    for component, exp in expected.items():
+        exp_sha = str(exp.get("sha256") or "")
+        if not exp_sha:
+            problems.append({"component": component, "scope": "checkout", "reason": "expected-jni-missing", "path": exp.get("path")})
+            continue
+        co = checked_out.get(component) if isinstance(checked_out.get(component), dict) else {}
+        co_sha = str(co.get("sha256") or "")
+        if co_sha != exp_sha:
+            problems.append({"component": component, "scope": "checked_out_jni", "reason": "sha256-mismatch", "expected_sha256": exp_sha, "observed_sha256": co_sha})
+        inst = installed.get(component) if isinstance(installed.get(component), dict) else {}
+        inst_sha = str(inst.get("sha256") or "")
+        if inst_sha != exp_sha:
+            problems.append({"component": component, "scope": "installed", "reason": "sha256-mismatch", "expected_sha256": exp_sha, "observed_sha256": inst_sha})
+        runtime_entries = runtime.get(component) if isinstance(runtime.get(component), list) else []
+        for entry in runtime_entries:
+            if not isinstance(entry, dict):
+                problems.append({"component": component, "scope": "runtime", "reason": "malformed-entry"})
+                continue
+            run_sha = str(entry.get("sha256") or "")
+            if run_sha and run_sha != exp_sha:
+                problems.append({"component": component, "scope": "runtime", "reason": "sha256-mismatch", "expected_sha256": exp_sha, "observed_sha256": run_sha, "path": entry.get("path"), "target": entry.get("target")})
+    for key in ("missing", "mismatches", "unparsed"):
+        value = identity.get(key)
+        if isinstance(value, list) and value:
+            problems.append({"scope": "bridge_binary_identity", "reason": key, "items": value[:8]})
+    return problems
+
+
+def _bridge_binary_identity_ok(runtime_freshness: dict[str, Any]) -> bool:
+    return not _bridge_binary_identity_problems(runtime_freshness)
 
 
 def _readiness_false(data: dict[str, Any]) -> bool:
@@ -2491,6 +2574,22 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
                 "api_executor_reconciliation": api_executor_reconciliation,
                 "runtime_env": nested(data, "gpu", "runtime_env") or {},
             }
+        bridge_binary_problems = _bridge_binary_identity_problems(runtime_freshness)
+        if bridge_binary_problems:
+            return _claim_base(
+                "gpu-bridge-binary-freshness-mismatch",
+                next_action="install the APK built from the current checkout and rerun compare; reconciled wrong-output claims require matching GPU executor and Vulkan ICD binary hashes",
+                runtime_freshness=runtime_freshness,
+                runtime_env_manifest=runtime_env_manifest,
+                responsibility_boundary="runtime-freshness",
+            ) | {
+                "observed_service_failure": "llama-completion-wrong-output",
+                "service_readiness": completion_readiness,
+                "api_executor_reconciliation": api_executor_reconciliation,
+                "bridge_binary_identity": _bridge_binary_identity(runtime_freshness),
+                "bridge_binary_identity_problems": bridge_binary_problems,
+                "runtime_env": nested(data, "gpu", "runtime_env") or {},
+            }
         completion_q6_final_store_boundary = _q6_final_store_boundary(q6)
         completion_q6_native_vs_writeback_split = (
             q6.get("q6_native_vs_writeback_split")
@@ -2556,6 +2655,19 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
             runtime_env_manifest=runtime_env_manifest,
             responsibility_boundary="runtime-freshness",
         )
+
+    bridge_binary_problems = _bridge_binary_identity_problems(runtime_freshness)
+    if bridge_binary_problems:
+        return _claim_base(
+            "gpu-bridge-binary-freshness-mismatch",
+            next_action="install the APK built from the current checkout and rerun compare; compare, correctness, and benchmark claims require matching GPU executor and Vulkan ICD binary hashes",
+            runtime_freshness=runtime_freshness,
+            runtime_env_manifest=runtime_env_manifest,
+            responsibility_boundary="runtime-freshness",
+        ) | {
+            "bridge_binary_identity": _bridge_binary_identity(runtime_freshness),
+            "bridge_binary_identity_problems": bridge_binary_problems,
+        }
 
     pre_http_gpu_blocker = _pre_http_gpu_blocker(data, diagnostics)
     if pre_http_gpu_blocker:
@@ -3049,6 +3161,8 @@ def main(argv: list[str]) -> int:
         return 34
     if classification == "icd-marker-not-observed":
         return 42
+    if classification == "gpu-bridge-binary-freshness-mismatch":
+        return 51
     if classification == "vulkan-pipeline-feature-evidence-missing":
         return 43
     if classification == "config-propagation-mismatch":

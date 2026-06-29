@@ -58,6 +58,7 @@ run it, and where the latest result is stored.
 | [`LLAMA_GPU_PERFORMANCE_20260507.md`](LLAMA_GPU_PERFORMANCE_20260507.md) | 2026-05-07 llama GPU performance investigation snapshot |
 | [`LLAMA_GPU_NON_PROMOTING_ARTIFACT_NEGATIVES.md`](LLAMA_GPU_NON_PROMOTING_ARTIFACT_NEGATIVES.md) | Negative examples for GPU/Q6/memory artifacts that cannot promote benchmark or correctness claims |
 | [`LLAMA_GPU_Q6_LANE_TRACE_20260601.md`](LLAMA_GPU_Q6_LANE_TRACE_20260601.md) | 2026-06-01 Q6 lane trace evidence and investigation notes for non-promoting llama GPU diagnostics |
+| [`llama-gpu-midpoint-20260622T221449Z.md`](llama-gpu-midpoint-20260622T221449Z.md) | 2026-06-22 llama GPU midpoint evidence for Q6 source SPIR-V locator and next-run probe workflow |
 | [`LLAMA_Q6_FINAL_STORE_STATIC_20260530.md`](LLAMA_Q6_FINAL_STORE_STATIC_20260530.md) | Static Q6 final-store dataflow evidence and verifier context |
 | [`llama-gpu-bridge-root-cause-20260509.md`](llama-gpu-bridge-root-cause-20260509.md) | 2026-05-09 llama GPU bridge root-cause analysis snapshot |
 

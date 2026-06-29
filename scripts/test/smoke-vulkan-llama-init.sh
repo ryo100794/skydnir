@@ -112,11 +112,28 @@ int main(void) {
         return 9;
     }
 
-    float priorities[2] = { 1.0f, 1.0f };
+    uint32_t queue_family_count = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(phys, &queue_family_count, NULL);
+    if (queue_family_count < 1) return 13;
+    VkQueueFamilyProperties queue_families[8];
+    uint32_t queue_family_capacity = queue_family_count > 8 ? 8 : queue_family_count;
+    vkGetPhysicalDeviceQueueFamilyProperties(phys, &queue_family_capacity, queue_families);
+    uint32_t queue_family_index = UINT32_MAX;
+    uint32_t queue_count = 0;
+    for (uint32_t i = 0; i < queue_family_capacity; ++i) {
+        if ((queue_families[i].queueFlags & VK_QUEUE_COMPUTE_BIT) && queue_families[i].queueCount > 0) {
+            queue_family_index = i;
+            queue_count = queue_families[i].queueCount;
+            break;
+        }
+    }
+    if (queue_family_index == UINT32_MAX || queue_count == 0) return 14;
+
+    float priorities[1] = { 1.0f };
     VkDeviceQueueCreateInfo qci = {
         .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
-        .queueFamilyIndex = 0,
-        .queueCount = 2,
+        .queueFamilyIndex = queue_family_index,
+        .queueCount = 1,
         .pQueuePriorities = priorities,
     };
     const char *device_exts[] = { VK_KHR_16BIT_STORAGE_EXTENSION_NAME };
@@ -132,8 +149,8 @@ int main(void) {
     CHECK(vkCreateDevice(phys, &dci, NULL, &dev), "vkCreateDevice");
     VkQueue compute = VK_NULL_HANDLE;
     VkQueue transfer = VK_NULL_HANDLE;
-    vkGetDeviceQueue(dev, 0, 0, &compute);
-    vkGetDeviceQueue(dev, 0, 1, &transfer);
+    vkGetDeviceQueue(dev, queue_family_index, 0, &compute);
+    transfer = compute;
     if (!compute || !transfer) return 10;
 
     printf("api=%u.%u device=%s ext16=1 subgroup=%u maxAlloc=%llu\n",

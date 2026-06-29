@@ -25,7 +25,7 @@ Every inventory entry now also carries a `migration` object with a proposed dest
 |---|---:|---|
 | `runtime-package-needed` | 1 | Needed to stage runtime/APK payloads or otherwise part of packaging flow. |
 | `build-developer` | 8 | Build, setup, fetch, or developer environment helper. |
-| `test-verification` | 89 | Test, smoke, benchmark, contract, or device verification helper. |
+| `test-verification` | 90 | Test, smoke, benchmark, contract, or device verification helper. |
 | `generated-maintenance` | 3 | Generated-doc/evidence maintenance or manifest data. |
 | `obsolete-suspect` | 1 | Unreferenced or weakly referenced candidate; not deleted without audit. |
 
@@ -155,6 +155,7 @@ remain gitignored and intentionally absent from the inventory.
 | `scripts/container-direct-probe.sh` | `device-helper` | Android/device, GPU, llama, or runtime benchmark/smoke helper. |
 | `scripts/gguf-tensor-range-index.py` | `developer-helper` | Generate GGUF tensor/range diagnostic indexes for memory-pager and MoE residency investigations. |
 | `scripts/instrument-spirv-noop-probe.py` | `test-helper` | Create valid whole-module SPIR-V no-op or Q6K probe instrumentation without mutating the Vulkan dispatch ABI. |
+| `scripts/locate-q6-source-spirv-dump.py` | `test-helper` | Locate validated runtime Q6 source SPIR-V dumps and emit deterministic probe preparation arguments for llama GPU bridge diagnostics. |
 | `scripts/parse-q6k-probe-u32.py` | `test-helper` | Legacy fixed-layout Q6_K debug-SSBO parser for archived artifacts; live runs use `android-llama-gpu-compare.sh`. |
 | `scripts/skydnir-test-driver.py` | `stable-entrypoint` | Host-side verification/test driver or static contract gate. |
 | `scripts/plan-llama-gpu-q6-run.py` | `test-helper` | Create a Q6 Vulkan bridge pre-flight run plan without touching ADB. |

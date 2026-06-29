@@ -526,7 +526,8 @@ def validate_static_contract_markers(source: str) -> None:
             "addr.sun_family != AF_UNIX",
             "case 200: /* bind(sockfd, addr, addrlen) */",
             "ADD_TRACE_SYSCALL(200)",
-            "regs->regs[2] = (unsigned long long)(offsetof(struct sockaddr_un, sun_path) + strlen(rewritten) + 1)",
+            "size_t rewritten_len = offsetof(struct sockaddr_un, sun_path) + strlen(rewritten) + 1",
+            "regs->regs[2] = (unsigned long long)rewritten_len",
         ],
     )
     require_contains(

@@ -1,3 +1,4 @@
+import hashlib
 import json
 import importlib.util
 import re
@@ -38,6 +39,73 @@ def load_llama_gpu_artifact_verifier():
     assert spec.loader is not None
     spec.loader.exec_module(verifier)
     return verifier
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def llama_bridge_binary_identity(abi: str = "arm64-v8a"):
+    executor = ROOT / "app" / "src" / "main" / "jniLibs" / abi / "libpdockergpuexecutor.so"
+    icd = ROOT / "app" / "src" / "main" / "jniLibs" / abi / "libpdockervulkanicd.so"
+    executor_sha = sha256_file(executor)
+    icd_sha = sha256_file(icd)
+    return {
+        "schema": "pdocker.llama.gpu.bridge-binary-identity.v1",
+        "hash_algorithm": "sha256",
+        "abi": abi,
+        "device_abi": abi,
+        "package": "io.github.ryo100794.pdocker.compat",
+        "checked_out_jni": {
+            "gpu_executor": {
+                "path": str(executor.relative_to(ROOT)),
+                "sha256": executor_sha,
+                "size": executor.stat().st_size,
+            },
+            "vulkan_icd": {
+                "path": str(icd.relative_to(ROOT)),
+                "sha256": icd_sha,
+                "size": icd.stat().st_size,
+            },
+        },
+        "installed": {
+            "gpu_executor": {
+                "path": "pdocker-runtime/gpu/pdocker-gpu-executor",
+                "target": "/data/app/libpdockergpuexecutor.so",
+                "sha256": executor_sha,
+                "size": executor.stat().st_size,
+            },
+            "vulkan_icd": {
+                "path": "pdocker-runtime/lib/pdocker-vulkan-icd.so",
+                "target": "/data/app/libpdockervulkanicd.so",
+                "sha256": icd_sha,
+                "size": icd.stat().st_size,
+            },
+        },
+        "runtime": {"gpu_executor": [], "vulkan_icd": []},
+        "missing": [],
+        "mismatches": [],
+        "unparsed": [],
+        "summary": "pass",
+    }
+
+
+def llama_runtime_freshness_pass():
+    return {
+        "summary": "pass",
+        "marker_summary": "pass",
+        "bridge_binary_summary": "pass",
+        "expected_executor_marker": "gpu-executor-q6-readonly-snapshot-20260531",
+        "observed_executor_markers": ["gpu-executor-q6-readonly-snapshot-20260531"],
+        "expected_icd_marker": "vulkan-icd-feature-chain-marker-20260518",
+        "observed_icd_markers": ["vulkan-icd-feature-chain-marker-20260518"],
+        "executor_event_count": 1,
+        "bridge_binary_identity": llama_bridge_binary_identity(),
+    }
 
 
 def load_llama_q6_plan_verifier():
@@ -11133,12 +11201,7 @@ class GpuAbiContractTest(unittest.TestCase):
                 json.dumps(
                     {
                         "schema": "pdocker.llama.gpu.compare.v1",
-                        "runtime_freshness": {
-                            "observed_executor_markers": ["gpu-executor-q6-readonly-snapshot-20260531"],
-                            "expected_executor_marker": "gpu-executor-q6-readonly-snapshot-20260531",
-                            "observed_icd_markers": ["vulkan-icd-feature-chain-marker-20260518"],
-                            "expected_icd_marker": "vulkan-icd-feature-chain-marker-20260518",
-                        },
+                        "runtime_freshness": llama_runtime_freshness_pass(),
                         "gpu": {
                             "runtime_env_manifest": q6_required_runtime_env_manifest(plan),
                             "diagnostics": {
@@ -11446,12 +11509,7 @@ class GpuAbiContractTest(unittest.TestCase):
                 json.dumps(
                     {
                         "schema": "pdocker.llama.gpu.compare.v1",
-                        "runtime_freshness": {
-                            "observed_executor_markers": ["gpu-executor-q6-readonly-snapshot-20260531"],
-                            "expected_executor_marker": "gpu-executor-q6-readonly-snapshot-20260531",
-                            "observed_icd_markers": ["vulkan-icd-feature-chain-marker-20260518"],
-                            "expected_icd_marker": "vulkan-icd-feature-chain-marker-20260518",
-                        },
+                        "runtime_freshness": llama_runtime_freshness_pass(),
                         "gpu": {"diagnostics": {"q6_workgroup_diagnostics": {"event_count": 0}}},
                     }
                 ),
@@ -11901,11 +11959,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "schema": "pdocker.llama.gpu.compare.v1",
             "gpu": {
                 "diagnostics": {
-                    "runtime_freshness": {
-                        "summary": "pass",
-                        "expected_executor_marker": "gpu-executor-q6-readonly-snapshot-20260531",
-                        "observed_executor_markers": ["gpu-executor-q6-readonly-snapshot-20260531"],
-                    },
+                    "runtime_freshness": llama_runtime_freshness_pass(),
                     "config_propagation": {
                         "summary": "fail",
                         "checks": [
@@ -12055,13 +12109,7 @@ class GpuAbiContractTest(unittest.TestCase):
                     },
                 },
                 "diagnostics": {
-                    "runtime_freshness": {
-                        "summary": "pass",
-                        "expected_executor_marker": "gpu-executor-q6-readonly-snapshot-20260531",
-                        "observed_executor_markers": ["gpu-executor-q6-readonly-snapshot-20260531"],
-                        "expected_icd_marker": "vulkan-icd-feature-chain-marker-20260518",
-                        "observed_icd_markers": ["vulkan-icd-feature-chain-marker-20260518"],
-                    },
+                    "runtime_freshness": llama_runtime_freshness_pass(),
                     "api_executor_reconciliation": {
                         "summary": "diagnostic",
                         "proof_strength": "diagnostic",
@@ -12165,8 +12213,12 @@ class GpuAbiContractTest(unittest.TestCase):
                     "blocker_detail": "Android Vulkan rejected a ggml generic SPIR-V compute pipeline with VK_ERROR_FEATURE_NOT_PRESENT",
                     "runtime_freshness": {
                         "summary": "pass",
+                        "marker_summary": "pass",
+                        "bridge_binary_summary": "pass",
                         "expected_executor_marker": "gpu-executor-q6-readonly-snapshot-20260531",
                         "observed_executor_markers": ["gpu-executor-q6-readonly-snapshot-20260531"],
+                        "executor_event_count": 1,
+                        "bridge_binary_identity": llama_bridge_binary_identity(),
                     },
                     "config_propagation": {"summary": "pass", "checks": []},
                 },

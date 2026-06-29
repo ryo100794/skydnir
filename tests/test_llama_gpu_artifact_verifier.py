@@ -1,3 +1,4 @@
+import hashlib
 import importlib.util
 import json
 import subprocess
@@ -10,14 +11,83 @@ ROOT = Path(__file__).resolve().parents[1]
 VERIFIER = ROOT / "scripts" / "verify-llama-gpu-artifact.py"
 
 
+def sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def bridge_binary_identity(
+    *,
+    abi: str = "arm64-v8a",
+    installed_executor_sha256: str | None = None,
+    installed_icd_sha256: str | None = None,
+    summary: str = "pass",
+):
+    executor = ROOT / "app" / "src" / "main" / "jniLibs" / abi / "libpdockergpuexecutor.so"
+    icd = ROOT / "app" / "src" / "main" / "jniLibs" / abi / "libpdockervulkanicd.so"
+    executor_sha = sha256_file(executor)
+    icd_sha = sha256_file(icd)
+    checked_out = {
+        "gpu_executor": {
+            "path": str(executor.relative_to(ROOT)),
+            "sha256": executor_sha,
+            "size": executor.stat().st_size,
+        },
+        "vulkan_icd": {
+            "path": str(icd.relative_to(ROOT)),
+            "sha256": icd_sha,
+            "size": icd.stat().st_size,
+        },
+    }
+    installed = {
+        "gpu_executor": {
+            "path": "pdocker-runtime/gpu/pdocker-gpu-executor",
+            "target": "/data/app/libpdockergpuexecutor.so",
+            "sha256": installed_executor_sha256 or executor_sha,
+            "size": executor.stat().st_size,
+        },
+        "vulkan_icd": {
+            "path": "pdocker-runtime/lib/pdocker-vulkan-icd.so",
+            "target": "/data/app/libpdockervulkanicd.so",
+            "sha256": installed_icd_sha256 or icd_sha,
+            "size": icd.stat().st_size,
+        },
+    }
+    mismatches = []
+    if installed["gpu_executor"]["sha256"] != executor_sha:
+        mismatches.append({"component": "gpu_executor", "scope": "installed"})
+    if installed["vulkan_icd"]["sha256"] != icd_sha:
+        mismatches.append({"component": "vulkan_icd", "scope": "installed"})
+    return {
+        "schema": "pdocker.llama.gpu.bridge-binary-identity.v1",
+        "hash_algorithm": "sha256",
+        "abi": abi,
+        "device_abi": abi,
+        "package": "io.github.ryo100794.pdocker.compat",
+        "checked_out_jni": checked_out,
+        "installed": installed,
+        "runtime": {"gpu_executor": [], "vulkan_icd": []},
+        "missing": [],
+        "mismatches": mismatches,
+        "unparsed": [],
+        "summary": summary if not mismatches else "fail",
+    }
+
+
 def runtime_marker():
     return {
         "summary": "pass",
+        "marker_summary": "pass",
+        "bridge_binary_summary": "pass",
         "expected_executor_marker": "gpu-executor-q6-readonly-snapshot-20260531",
         "observed_executor_markers": ["gpu-executor-q6-readonly-snapshot-20260531"],
         "expected_icd_marker": "vulkan-icd-feature-chain-marker-20260518",
         "observed_icd_markers": ["vulkan-icd-feature-chain-marker-20260518"],
         "executor_event_count": 1,
+        "bridge_binary_identity": bridge_binary_identity(),
     }
 
 
@@ -874,6 +944,64 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         self.assertEqual(report["classification"], "q6-workgroup-shape-blocker")
         self.assertEqual(report["responsibility_boundary"], "q6-local-size")
         self.assertEqual(report["q6_writeback_evidence"]["summary"], "mismatch")
+        self.assertFalse(report["correctness_claim_allowed"])
+        self.assertFalse(report["benchmark_claim_allowed"])
+
+    def test_missing_bridge_binary_identity_blocks_compare_and_benchmark_claims(self):
+        freshness = runtime_marker()
+        freshness.pop("bridge_binary_identity")
+        freshness["bridge_binary_summary"] = None
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "diagnostics": {
+                    "runtime_freshness": freshness,
+                    "config_propagation": passing_config_propagation(),
+                    "q6_workgroup_diagnostics": {
+                        "workgroup_shape_blocker": False,
+                        "latest_status": "match",
+                        "q6_writeback_verified_all": True,
+                    },
+                },
+                "correctness": {"summary": {"correctness": "pass"}},
+            },
+            "cpu": {"tokens_per_second": 0.1},
+            "comparison": {"speedup": 2.0, "target_met": True},
+        }
+        result = self.run_verifier(payload)
+        self.assertEqual(result.returncode, 51, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "gpu-bridge-binary-freshness-mismatch")
+        self.assertFalse(report["correctness_claim_allowed"])
+        self.assertFalse(report["benchmark_claim_allowed"])
+
+    def test_bridge_binary_identity_mismatch_blocks_compare_and_benchmark_claims(self):
+        freshness = runtime_marker()
+        freshness["bridge_binary_identity"] = bridge_binary_identity(installed_executor_sha256="0" * 64)
+        freshness["bridge_binary_summary"] = "fail"
+        freshness["summary"] = "fail"
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "diagnostics": {
+                    "runtime_freshness": freshness,
+                    "config_propagation": passing_config_propagation(),
+                    "q6_workgroup_diagnostics": {
+                        "workgroup_shape_blocker": False,
+                        "latest_status": "match",
+                        "q6_writeback_verified_all": True,
+                    },
+                },
+                "correctness": {"summary": {"correctness": "pass"}},
+            },
+            "cpu": {"tokens_per_second": 0.1},
+            "comparison": {"speedup": 2.0, "target_met": True},
+        }
+        result = self.run_verifier(payload)
+        self.assertEqual(result.returncode, 51, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "gpu-bridge-binary-freshness-mismatch")
+        self.assertIn("installed", json.dumps(report["bridge_binary_identity_problems"]))
         self.assertFalse(report["correctness_claim_allowed"])
         self.assertFalse(report["benchmark_claim_allowed"])
 

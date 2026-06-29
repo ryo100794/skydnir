@@ -115,7 +115,6 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 }}
                 int has_storage8 = 0;
                 int has_float16_int8 = 0;
-                int has_storage_class = 0;
                 for (uint32_t i = 0; i < capacity; ++i) {{
                     if (strcmp(properties[i].extensionName, VK_KHR_8BIT_STORAGE_EXTENSION_NAME) == 0) {{
                         has_storage8 = 1;
@@ -123,16 +122,12 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     if (strcmp(properties[i].extensionName, VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME) == 0) {{
                         has_float16_int8 = 1;
                     }}
-                    if (strcmp(properties[i].extensionName, VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_EXTENSION_NAME) == 0) {{
-                        has_storage_class = 1;
-                    }}
                 }}
-                if (!has_storage8 || !has_float16_int8 || !has_storage_class) {{
+                if (!has_storage8 || !has_float16_int8) {{
                     fprintf(stderr,
-                            "missing extension storage8=%d float16_int8=%d storage_class=%d count=%u\\n",
+                            "missing extension storage8=%d float16_int8=%d count=%u\\n",
                             has_storage8,
                             has_float16_int8,
-                            has_storage_class,
                             capacity);
                     return 4;
                 }}

@@ -660,6 +660,19 @@
       }
     },
     {
+      "path": "scripts/locate-q6-source-spirv-dump.py",
+      "category": "test-verification",
+      "stability": "test-helper",
+      "role": "Locate validated runtime Q6 source SPIR-V dumps and emit deterministic probe preparation arguments for llama GPU bridge diagnostics.",
+      "migration": {
+        "target_dir": "scripts/test",
+        "candidate_path": "scripts/test/locate-q6-source-spirv-dump.py",
+        "phase": "phase-1-test-helpers-after-manifest-update",
+        "action": "candidate-move-behind-wrapper",
+        "compat_wrapper": "stable verification entrypoints keep wrappers; helper wrappers remain until test manifests and docs stop referencing top-level paths"
+      }
+    },
+    {
       "path": "scripts/parse-q6k-probe-u32.py",
       "category": "test-verification",
       "stability": "test-helper",
@@ -670,19 +683,6 @@
         "phase": "phase-1-test-helpers-after-manifest-update",
         "action": "candidate-move-behind-wrapper",
         "compat_wrapper": "stable verification entrypoints keep wrappers; helper wrappers remain until test manifests and docs stop referencing top-level paths"
-      }
-    },
-    {
-      "path": "scripts/skydnir-test-driver.py",
-      "category": "test-verification",
-      "stability": "stable-entrypoint",
-      "role": "Canonical Skydnir test-driver manifest executor and artifact writer.",
-      "migration": {
-        "target_dir": "scripts/test",
-        "candidate_path": "scripts/test/skydnir-test-driver.py",
-        "phase": "phase-1-test-helpers-after-manifest-update",
-        "action": "candidate-move-behind-wrapper",
-        "compat_wrapper": "wrapper required; permanent or long-lived stable entrypoint compatibility path"
       }
     },
     {
@@ -787,6 +787,19 @@
         "phase": "phase-2-build-after-callsite-audit",
         "action": "candidate-move-behind-wrapper",
         "compat_wrapper": "stable entrypoints keep wrappers; developer helpers keep temporary wrappers while docs/CI references migrate"
+      }
+    },
+    {
+      "path": "scripts/skydnir-test-driver.py",
+      "category": "test-verification",
+      "stability": "stable-entrypoint",
+      "role": "Canonical Skydnir test-driver manifest executor and artifact writer.",
+      "migration": {
+        "target_dir": "scripts/test",
+        "candidate_path": "scripts/test/skydnir-test-driver.py",
+        "phase": "phase-1-test-helpers-after-manifest-update",
+        "action": "candidate-move-behind-wrapper",
+        "compat_wrapper": "wrapper required; permanent or long-lived stable entrypoint compatibility path"
       }
     },
     {

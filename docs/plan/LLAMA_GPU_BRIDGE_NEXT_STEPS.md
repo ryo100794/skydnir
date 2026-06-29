@@ -1993,3 +1993,20 @@ and entry-size fields on both the container ICD and Android executor sides.
 This avoids false mismatches across 64-bit ICD and 32-bit executor builds while
 still hashing the Vulkan-visible `(constantID, size, referenced bytes)`
 semantics rather than raw struct padding or unused specialization data bytes.
+
+### 2026-06-28 Runtime bridge binary identity gate
+
+The llama GPU compare artifact now records a `bridge_binary_identity` object
+inside `gpu.diagnostics.runtime_freshness`.  The compare driver hashes the
+checked-out JNI `libpdockergpuexecutor.so` and `libpdockervulkanicd.so`, then
+collects the installed app runtime payload hashes from
+`files/pdocker-runtime/gpu/pdocker-gpu-executor` and
+`files/pdocker-runtime/lib/pdocker-vulkan-icd.so`.  If active executor or ICD
+process mappings are visible, their hashes are recorded as additional runtime
+evidence.
+
+The verifier recomputes the expected checkout hashes and fails closed with
+`gpu-bridge-binary-freshness-mismatch` when checked-out, installed, or visible
+runtime bridge binaries disagree.  This prevents stale APK/native payloads from
+being promoted as llama GPU correctness or performance evidence even when older
+marker strings are present in logs.
