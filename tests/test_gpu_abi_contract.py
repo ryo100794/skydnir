@@ -319,6 +319,20 @@ def c_function_body(source, name):
     raise AssertionError(f"unterminated function body: {name}")
 
 
+def c_block_from(source, needle):
+    start = source.index(needle)
+    brace = source.index("{", start)
+    depth = 0
+    for index in range(brace, len(source)):
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return source[brace + 1:index]
+    raise AssertionError(f"unterminated C block after: {needle}")
+
+
 class GpuAbiContractTest(unittest.TestCase):
     def test_container_and_apk_gpu_abi_headers_stay_in_sync(self):
         self.assertEqual(CONTAINER_HEADER.read_text(), APP_HEADER.read_text())
@@ -3907,7 +3921,11 @@ class GpuAbiContractTest(unittest.TestCase):
             "static const void *v5_frame_range", 1
         )[0]
         self.assertIn(
-            "if (header->abi_minor != PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_OBJECTS) return 0;",
+            "header->abi_minor != PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_OBJECTS &&",
+            object_validator,
+        )
+        self.assertIn(
+            "header->abi_minor != PDOCKER_GPU_VULKAN_DISPATCH_V52_ABI_MINOR) return 0;",
             object_validator,
         )
 
@@ -3933,6 +3951,264 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VulkanDispatchImageDescriptor", converter)
         self.assertIn("image_descriptors[image_descriptor_count++]", converter)
         self.assertIn("vulkan_dispatch_image_descriptor_type_from_api", converter)
+
+    def test_vulkan_dispatch_v5_2_image_layout_range_abi_scaffold(self):
+        abi = APP_HEADER.read_text()
+        container_abi = CONTAINER_HEADER.read_text()
+        expected_extension_fields = [
+            ("image_layout_range_count", "u32"),
+            ("image_layout_range_entry_size", "u32"),
+            ("image_layout_range_table_offset", "u64"),
+            ("image_layout_range_table_size", "u64"),
+            ("image_layout_range_schema_hash", "u64"),
+            ("image_layout_range_table_hash", "u64"),
+            ("extension_hash", "u64"),
+        ]
+        expected_range_fields = [
+            ("image_index", "u32"),
+            ("aspect_mask", "u32"),
+            ("base_mip_level", "u32"),
+            ("level_count", "u32"),
+            ("base_array_layer", "u32"),
+            ("layer_count", "u32"),
+            ("layout", "u32"),
+            ("reserved0", "u32"),
+            ("layout_generation", "u64"),
+        ]
+        for header_path, source in [(APP_HEADER, abi), (CONTAINER_HEADER, container_abi)]:
+            with self.subTest(header=str(header_path)):
+                self.assertIn("PDOCKER_GPU_VULKAN_DISPATCH_V52_ABI_MINOR 2u", source)
+                self.assertIn("PdockerGpuVulkanDispatchV52HeaderExtension", source)
+                self.assertIn("PdockerGpuVulkanDispatchV52FrameHeader", source)
+                self.assertIn("PdockerGpuVulkanDispatchV52ImageLayoutRangeEntry", source)
+                self.assertIn("PDOCKER_GPU_VULKAN_DISPATCH_V52_HEADER_EXTENSION_FIELDS", source)
+                self.assertIn("PDOCKER_GPU_VULKAN_DISPATCH_V52_IMAGE_LAYOUT_RANGE_FIELDS", source)
+                self.assertIn("PDOCKER_GPU_VULKAN_DISPATCH_V52_MAX_IMAGE_LAYOUT_RANGES", source)
+                header_fields, header_count, _, computed_header_hash = vulkan_dispatch_v5_schema(
+                    header_path,
+                    "PDOCKER_GPU_VULKAN_DISPATCH_V52_HEADER_EXTENSION_FIELDS",
+                    "PDOCKER_GPU_VULKAN_DISPATCH_V52_HEADER_EXTENSION_FIELD_COUNT",
+                )
+                range_fields, range_count, declared_range_hash, computed_range_hash = vulkan_dispatch_v5_schema(
+                    header_path,
+                    "PDOCKER_GPU_VULKAN_DISPATCH_V52_IMAGE_LAYOUT_RANGE_FIELDS",
+                    "PDOCKER_GPU_VULKAN_DISPATCH_V52_IMAGE_LAYOUT_RANGE_FIELD_COUNT",
+                    "PDOCKER_GPU_VULKAN_DISPATCH_V52_IMAGE_LAYOUT_RANGE_SCHEMA_HASH",
+                )
+                self.assertEqual(expected_extension_fields, header_fields)
+                self.assertEqual(expected_range_fields, range_fields)
+                self.assertEqual(7, header_count)
+                self.assertEqual(9, range_count)
+                self.assertEqual(schema_hash(expected_extension_fields), computed_header_hash)
+                self.assertEqual(declared_range_hash, computed_range_hash)
+                self.assertEqual(
+                    [name for name, _ in expected_extension_fields],
+                    c_struct_field_names(header_path, "PdockerGpuVulkanDispatchV52HeaderExtension"),
+                )
+                self.assertEqual(
+                    [name for name, _ in expected_range_fields],
+                    c_struct_field_names(header_path, "PdockerGpuVulkanDispatchV52ImageLayoutRangeEntry"),
+                )
+                v52_frame_fields = c_struct_field_names(header_path, "PdockerGpuVulkanDispatchV52FrameHeader")
+                self.assertIn(
+                    v52_frame_fields,
+                    [
+                        c_struct_field_names(header_path, "PdockerGpuVulkanDispatchV5ObjectFrameHeader") + ["v52"],
+                        ["v51", "v52"],
+                    ],
+                )
+
+        self.assertEqual(
+            vulkan_dispatch_v5_schema(
+                APP_HEADER,
+                "PDOCKER_GPU_VULKAN_DISPATCH_V52_HEADER_EXTENSION_FIELDS",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V52_HEADER_EXTENSION_FIELD_COUNT",
+            ),
+            vulkan_dispatch_v5_schema(
+                CONTAINER_HEADER,
+                "PDOCKER_GPU_VULKAN_DISPATCH_V52_HEADER_EXTENSION_FIELDS",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V52_HEADER_EXTENSION_FIELD_COUNT",
+            ),
+        )
+        self.assertEqual(
+            vulkan_dispatch_v5_schema(
+                APP_HEADER,
+                "PDOCKER_GPU_VULKAN_DISPATCH_V52_IMAGE_LAYOUT_RANGE_FIELDS",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V52_IMAGE_LAYOUT_RANGE_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V52_IMAGE_LAYOUT_RANGE_SCHEMA_HASH",
+            ),
+            vulkan_dispatch_v5_schema(
+                CONTAINER_HEADER,
+                "PDOCKER_GPU_VULKAN_DISPATCH_V52_IMAGE_LAYOUT_RANGE_FIELDS",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V52_IMAGE_LAYOUT_RANGE_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V52_IMAGE_LAYOUT_RANGE_SCHEMA_HASH",
+            ),
+        )
+
+    def test_vulkan_dispatch_v5_2_icd_transports_mixed_image_layout_ranges(self):
+        icd = VULKAN_ICD.read_text()
+        sender = c_function_body(icd, "send_generic_vulkan_dispatch_v5_1_op")
+        collector_name = (
+            "collect_v5_image_layout_range_entries"
+            if "collect_v5_image_layout_range_entries" in icd
+            else "collect_dispatch_image_layout_range_entries"
+        )
+        collector = c_function_body(icd, collector_name)
+        for marker in [
+            "PdockerGpuVulkanDispatchV52FrameHeader",
+            "PdockerGpuVulkanDispatchV52ImageLayoutRangeEntry",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V52_MAX_IMAGE_LAYOUT_RANGES",
+            collector_name,
+            "image_layout_range_count",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V52_ABI_MINOR",
+            "image_layout_range_entry_size = sizeof(PdockerGpuVulkanDispatchV52ImageLayoutRangeEntry)",
+            "image_layout_range_schema_hash = PDOCKER_GPU_VULKAN_DISPATCH_V52_IMAGE_LAYOUT_RANGE_SCHEMA_HASH",
+            "image_layout_range_table_hash = fnv1a64_bytes",
+            "image_layout_range_table_bytes",
+            "sizeof(PdockerGpuVulkanDispatchV52FrameHeader)",
+        ]:
+            self.assertIn(marker, sender)
+        self.assertIn("layout_mixed", collector)
+        self.assertIn("image->layout_ranges", collector)
+        for match in re.finditer("layout_mixed", sender):
+            reject_window = sender[max(0, match.start() - 120):match.end() + 300]
+            self.assertNotIn("return -EOPNOTSUPP;", reject_window)
+        self.assertNotIn("mixed subresource layouts require per-subresource layout ABI", sender)
+
+    def test_vulkan_dispatch_v5_2_icd_gates_layout_ranges_on_executor_capability(self):
+        icd = VULKAN_ICD.read_text()
+        sender = c_function_body(icd, "send_generic_vulkan_dispatch_v5_1_op")
+        capability_markers = [
+            "executor_supports_vulkan_dispatch_v52_image_layout_ranges",
+            "executor_vulkan_dispatch_v52_image_layout_ranges_supported",
+            "vulkan_dispatch_v52_image_layout_ranges_supported",
+        ]
+        capability_marker = next((marker for marker in capability_markers if marker in sender), None)
+        self.assertIsNotNone(
+            capability_marker,
+            "ICD must prove executor V5.2 image-layout-range support before sending abi_minor 2",
+        )
+        abi_minor_assignment = "header->abi_minor = need_v52_image_layout_ranges"
+        self.assertIn(abi_minor_assignment, sender)
+        self.assertLess(sender.index(capability_marker), sender.index(abi_minor_assignment))
+        self.assertRegex(
+            sender,
+            r"need_v52_image_layout_ranges\s*&&\s*!.*v52.*image_layout.*range.*support",
+        )
+        self.assertRegex(sender, r"return\s+-(?:EOPNOTSUPP|EPROTO|EINVAL);")
+
+    def test_vulkan_dispatch_v5_2_icd_layout_range_table_is_not_stack_sized_when_heap_backed(self):
+        icd = VULKAN_ICD.read_text()
+        sender = c_function_body(icd, "send_generic_vulkan_dispatch_v5_1_op")
+        self.assertNotRegex(
+            sender,
+            r"PdockerGpuVulkanDispatchV52ImageLayoutRangeEntry\s+\w+\s*"
+            r"\[\s*PDOCKER_GPU_VULKAN_DISPATCH_V52_MAX_IMAGE_LAYOUT_RANGES\s*\]",
+        )
+        self.assertRegex(
+            sender,
+            r"PdockerGpuVulkanDispatchV52ImageLayoutRangeEntry\s*\*\s*image_layout_ranges",
+        )
+        self.assertRegex(sender, r"(?:calloc|malloc)\s*\([^;]*image_layout_range")
+        self.assertIn("free(image_layout_ranges)", sender)
+
+    def test_vulkan_dispatch_v5_2_executor_validates_and_materializes_layout_ranges(self):
+        executor = GPU_EXECUTOR.read_text()
+        converter = c_function_body(executor, "convert_vulkan_dispatch_v5_to_v4_bindings")
+        materializer = c_function_body(executor, "materialize_vulkan_dispatch_images")
+        runner = c_function_body(executor, "run_vulkan_dispatch_fd")
+        frame_validator = c_function_body(executor, "validate_vulkan_dispatch_v5_frame_content")
+        for marker in [
+            "PDOCKER_GPU_VULKAN_DISPATCH_V52_ABI_MINOR",
+            "sizeof(PdockerGpuVulkanDispatchV52FrameHeader)",
+            "PdockerGpuVulkanDispatchV52ImageLayoutRangeEntry",
+            "const PdockerGpuVulkanDispatchV52ImageLayoutRangeEntry *image_layout_ranges;",
+            "size_t image_layout_range_count;",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V52_MAX_IMAGE_LAYOUT_RANGES",
+        ]:
+            self.assertIn(marker, executor)
+        for marker in [
+            "ext->image_layout_range_entry_size != sizeof(PdockerGpuVulkanDispatchV52ImageLayoutRangeEntry)",
+            "ext->image_layout_range_schema_hash != PDOCKER_GPU_VULKAN_DISPATCH_V52_IMAGE_LAYOUT_RANGE_SCHEMA_HASH",
+            "ext->image_layout_range_table_offset",
+            "ext->image_layout_range_table_size",
+            "ext->image_layout_range_count",
+            "ext->image_layout_range_table_hash",
+            "ext->extension_hash != ext->image_layout_range_table_hash",
+            "__alignof__(PdockerGpuVulkanDispatchV52ImageLayoutRangeEntry)",
+        ]:
+            self.assertIn(marker, frame_validator)
+        for marker in [
+            "PDOCKER_GPU_VULKAN_DISPATCH_V52_ABI_MINOR",
+            "PdockerGpuVulkanDispatchV52FrameHeader",
+            "header_v52->v52.image_layout_range_count",
+            "header_v52->v52.image_layout_range_table_offset",
+            "header_v52->v52.image_layout_range_table_size",
+            "object_tables_out->image_layout_ranges =",
+            "object_tables_out->image_layout_range_count =",
+        ]:
+            self.assertIn(marker, converter)
+        self.assertTrue(
+            "object_tables->image_layout_ranges" in materializer
+            or "materialize_vulkan_dispatch_v52_image_layout_ranges" in runner
+        )
+        layout_materializer = materializer
+        if "static int materialize_vulkan_dispatch_v52_image_layout_ranges" in executor:
+            layout_materializer += c_function_body(executor, "materialize_vulkan_dispatch_v52_image_layout_ranges")
+        self.assertIn("record_vulkan_dispatch_v52_initial_image_layout_ranges", runner)
+        for marker in [
+            "object_tables->image_layout_ranges",
+            "object_tables->image_layout_range_count",
+            "const PdockerGpuVulkanDispatchV52ImageLayoutRangeEntry *src",
+            "vulkan_replay_layout_for_executor((VkImageLayout)src->layout)",
+            "vulkan_replay_image_layout_range_valid",
+            "image->layout_range_count",
+            "image->has_layout_ranges = 1",
+            "PDOCKER_GPU_MAX_VULKAN_IMAGE_LAYOUT_RANGES_PER_IMAGE",
+        ]:
+            self.assertIn(marker, layout_materializer)
+
+    def test_vulkan_dispatch_v5_2_executor_materializes_layout_ranges_without_image_descriptors(self):
+        executor = GPU_EXECUTOR.read_text()
+        runner = c_function_body(executor, "run_vulkan_dispatch_fd")
+        materialize_call = "materialize_vulkan_dispatch_v52_image_layout_ranges("
+        self.assertIn(materialize_call, runner)
+        descriptor_block = c_block_from(runner, "if (image_descriptor_count > 0)")
+        self.assertNotIn(
+            materialize_call,
+            descriptor_block,
+            "V5.2 layout ranges must be validated/materialized even when there are no image descriptors",
+        )
+        self.assertRegex(
+            runner,
+            r"object_tables(?:->|\.)image_layout_range_count\s*>\s*0",
+        )
+
+    def test_vulkan_dispatch_v5_2_executor_rejects_invalid_layout_range_entries(self):
+        executor = GPU_EXECUTOR.read_text()
+        materializer = c_function_body(executor, "materialize_vulkan_dispatch_v52_image_layout_ranges")
+        validation = materializer
+        for helper in [
+            "vulkan_dispatch_v52_layout_value_valid",
+            "vulkan_dispatch_v52_image_aspect_valid",
+            "vulkan_dispatch_v52_image_layout_ranges_overlap",
+        ]:
+            if f"static int {helper}" in executor:
+                validation += c_function_body(executor, helper)
+        for marker in [
+            "src->reserved0 != 0",
+            "src->image_index >= object_tables->image_count",
+            "vulkan_replay_image_layout_range_valid",
+            "baseMipLevel",
+            "levelCount",
+            "baseArrayLayer",
+            "layerCount",
+            "vulkan_dispatch_subresource_ranges_overlap",
+        ]:
+            self.assertIn(marker, validation)
+        self.assertRegex(validation, r"(?:aspect_mask|aspectMask).*==\s*0")
+        self.assertRegex(validation, r"(?:layout_value_valid|layout_valid|image_layout_valid)")
+        self.assertRegex(validation, r"return\s+-E(?:PROTO|RANGE|OPNOTSUPP);")
 
     def test_vulkan_dispatch_v5_tables_convert_to_existing_v4_semantics(self):
         executor = GPU_EXECUTOR.read_text()
@@ -6126,9 +6402,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("entry->initial_layout = image->initial_layout;", icd)
         self.assertIn("image_entries[i].initial_layout = image->current_layout;", icd)
         self.assertNotIn("image_entries[i].initial_layout = image->initial_layout;", icd)
-        self.assertIn("mixed subresource layouts require per-subresource layout ABI", icd)
-        self.assertIn("if (image->layout_mixed)", icd)
-        self.assertIn("return -EOPNOTSUPP;", icd)
+        self.assertIn("collect_v5_image_layout_range_entries", icd)
+        self.assertIn("need_v52_image_layout_ranges", icd)
+        self.assertIn("PDOCKER_GPU_VULKAN_DISPATCH_V52_ABI_MINOR", icd)
+        self.assertNotIn("mixed subresource layouts require per-subresource layout ABI", icd)
         executor = GPU_EXECUTOR.read_text()
         self.assertIn("vulkan_image_create_initial_layout_for_transport", executor)
         materialize = executor.split("static int materialize_vulkan_dispatch_images", 1)[1].split("static int run_vulkan_dispatch_fd", 1)[0]

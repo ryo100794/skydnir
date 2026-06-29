@@ -934,6 +934,8 @@ typedef struct {
     size_t image_view_count;
     const PdockerGpuVulkanDispatchV5SamplerEntry *samplers;
     size_t sampler_count;
+    const PdockerGpuVulkanDispatchV52ImageLayoutRangeEntry *image_layout_ranges;
+    size_t image_layout_range_count;
 } VulkanDispatchV5ObjectTables;
 
 
@@ -2609,6 +2611,17 @@ typedef struct {
     int writeback_needed;
 } VulkanDispatchImageObject;
 
+static int vulkan_dispatch_v52_layout_value_valid(
+        const PdockerGpuVulkanDispatchV5ImageEntry *image,
+        VkImageLayout layout);
+static int validate_vulkan_dispatch_v52_image_layout_ranges(
+        const PdockerGpuVulkanDispatchV52ImageLayoutRangeEntry *ranges,
+        uint32_t range_count,
+        const PdockerGpuVulkanDispatchV5ImageEntry *images,
+        uint32_t image_count);
+static int vulkan_replay_image_layout_range_valid(
+        const VulkanDispatchImageObject *image,
+        const VkImageSubresourceRange *range);
 static int vulkan_replay_image_layout_for_range(
         const VulkanDispatchImageObject *image,
         const VkImageSubresourceRange *range,
@@ -3903,6 +3916,144 @@ static int materialize_vulkan_dispatch_images(
             d->resource_id != samplers[d->sampler_index].sampler_id) {
             return -EPROTO;
         }
+    }
+    return 0;
+}
+
+static int vulkan_dispatch_subresource_ranges_overlap(
+        const VkImageSubresourceRange *a,
+        const VkImageSubresourceRange *b) {
+    if (!a || !b || (a->aspectMask & b->aspectMask) == 0) return 0;
+    uint32_t a_level_end = a->baseMipLevel + a->levelCount;
+    uint32_t b_level_end = b->baseMipLevel + b->levelCount;
+    uint32_t a_layer_end = a->baseArrayLayer + a->layerCount;
+    uint32_t b_layer_end = b->baseArrayLayer + b->layerCount;
+    if (a_level_end < a->baseMipLevel || b_level_end < b->baseMipLevel ||
+        a_layer_end < a->baseArrayLayer || b_layer_end < b->baseArrayLayer) {
+        return 1;
+    }
+    return a->baseMipLevel < b_level_end && b->baseMipLevel < a_level_end &&
+           a->baseArrayLayer < b_layer_end && b->baseArrayLayer < a_layer_end;
+}
+
+static int vulkan_dispatch_subresource_ranges_equal(
+        const VkImageSubresourceRange *a,
+        const VkImageSubresourceRange *b) {
+    return a && b &&
+           a->aspectMask == b->aspectMask &&
+           a->baseMipLevel == b->baseMipLevel &&
+           a->levelCount == b->levelCount &&
+           a->baseArrayLayer == b->baseArrayLayer &&
+           a->layerCount == b->layerCount;
+}
+
+static VulkanDispatchImageObject *vulkan_dispatch_image_by_source_index(
+        VulkanDispatchImageObject *images,
+        size_t image_count,
+        uint32_t source_index) {
+    if (!images) return NULL;
+    for (size_t i = 0; i < image_count; ++i) {
+        if (images[i].source_index == source_index) return &images[i];
+    }
+    return NULL;
+}
+
+static int materialize_vulkan_dispatch_v52_image_layout_ranges(
+        const VulkanDispatchV5ObjectTables *object_tables,
+        VulkanDispatchImageObject *images,
+        size_t image_count) {
+    if (!object_tables || object_tables->image_layout_range_count == 0) return 0;
+    if (!object_tables->image_layout_ranges || !images) return -EINVAL;
+    for (size_t i = 0; i < object_tables->image_layout_range_count; ++i) {
+        const PdockerGpuVulkanDispatchV52ImageLayoutRangeEntry *src =
+            &object_tables->image_layout_ranges[i];
+        if (src->reserved0 != 0 || src->image_index >= object_tables->image_count) {
+            return -EPROTO;
+        }
+        VulkanDispatchImageObject *image =
+            vulkan_dispatch_image_by_source_index(images, image_count, src->image_index);
+        if (!image) return -EPROTO;
+        if (image->layout_range_count >= PDOCKER_GPU_MAX_VULKAN_IMAGE_LAYOUT_RANGES_PER_IMAGE) {
+            return -E2BIG;
+        }
+        VkImageSubresourceRange range = {
+            .aspectMask = (VkImageAspectFlags)src->aspect_mask,
+            .baseMipLevel = src->base_mip_level,
+            .levelCount = src->level_count,
+            .baseArrayLayer = src->base_array_layer,
+            .layerCount = src->layer_count,
+        };
+        if (!vulkan_replay_image_layout_range_valid(image, &range) ||
+            !vulkan_image_aspect_mask_valid_for_format(image->format, range.aspectMask) ||
+            !vulkan_dispatch_v52_layout_value_valid(&object_tables->images[src->image_index],
+                                                    (VkImageLayout)src->layout)) {
+            return -ERANGE;
+        }
+        VkImageLayout layout = vulkan_replay_layout_for_executor((VkImageLayout)src->layout);
+        int duplicate = 0;
+        for (uint32_t existing = 0; existing < image->layout_range_count; ++existing) {
+            VulkanReplayImageLayoutRange *entry = &image->layout_ranges[existing];
+            if (!vulkan_dispatch_subresource_ranges_overlap(&entry->range, &range)) continue;
+            if (!vulkan_dispatch_subresource_ranges_equal(&entry->range, &range)) {
+                return -EOPNOTSUPP;
+            }
+            if (entry->layout != layout) return -EOPNOTSUPP;
+            duplicate = 1;
+        }
+        if (duplicate) continue;
+        VulkanReplayImageLayoutRange *dst = &image->layout_ranges[image->layout_range_count++];
+        memset(dst, 0, sizeof(*dst));
+        dst->range = range;
+        dst->layout = layout;
+        dst->generation = src->layout_generation;
+        image->has_layout_ranges = 1;
+    }
+    return 0;
+}
+
+static int record_vulkan_dispatch_v52_initial_image_layout_ranges(
+        VkCommandBuffer command_buffer,
+        VulkanDispatchImageObject *images,
+        size_t image_count) {
+    if (!command_buffer || !images) return -EINVAL;
+    VkImageMemoryBarrier barriers[PDOCKER_GPU_MAX_VULKAN_IMAGE_LAYOUT_RANGES_PER_IMAGE];
+    uint32_t barrier_count = 0;
+    memset(barriers, 0, sizeof(barriers));
+    for (size_t image_index = 0; image_index < image_count; ++image_index) {
+        VulkanDispatchImageObject *image = &images[image_index];
+        if (!image->has_layout_ranges) continue;
+        for (uint32_t range_index = 0; range_index < image->layout_range_count; ++range_index) {
+            VulkanReplayImageLayoutRange *range = &image->layout_ranges[range_index];
+            if (range->layout == image->current_layout) continue;
+            if (barrier_count >= PDOCKER_GPU_MAX_VULKAN_IMAGE_LAYOUT_RANGES_PER_IMAGE) {
+                vkCmdPipelineBarrier(command_buffer,
+                                     VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                                     VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                                     0, 0, NULL, 0, NULL,
+                                     barrier_count, barriers);
+                barrier_count = 0;
+                memset(barriers, 0, sizeof(barriers));
+            }
+            barriers[barrier_count++] = (VkImageMemoryBarrier){
+                .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                .srcAccessMask = 0,
+                .dstAccessMask = 0,
+                .oldLayout = image->current_layout,
+                .newLayout = range->layout,
+                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .image = image->image,
+                .subresourceRange = range->range,
+            };
+        }
+        image->layout_ranges_active = 1;
+    }
+    if (barrier_count) {
+        vkCmdPipelineBarrier(command_buffer,
+                             VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                             VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                             0, 0, NULL, 0, NULL,
+                             barrier_count, barriers);
     }
     return 0;
 }
@@ -14828,7 +14979,13 @@ static int run_vulkan_dispatch_fd(
     fail_binding = -1;
     double upload_ms = now_ms() - upload_start;
 
+    const int needs_vulkan_image_objects =
+        image_descriptor_count > 0 ||
+        (object_tables && object_tables->image_layout_range_count > 0);
     if (image_descriptor_count > 0) {
+        fail_stage = "materialize-vulkan-image-objects";
+    }
+    if (needs_vulkan_image_objects) {
         fail_stage = "materialize-vulkan-image-objects";
         int image_rc = materialize_vulkan_dispatch_images(
             rt->physical_device,
@@ -14848,6 +15005,16 @@ static int run_vulkan_dispatch_fd(
             &dispatch_sampler_count);
         if (image_rc != 0) {
             json_fail("vulkan-dispatch", "failed to materialize V5.1 image objects");
+            ret = image_rc == -ENOMEM ? 75 : 64;
+            goto cleanup;
+        }
+    }
+    if (object_tables && object_tables->image_layout_range_count > 0) {
+        fail_stage = "materialize-vulkan-v52-image-layout-ranges";
+        int image_rc = materialize_vulkan_dispatch_v52_image_layout_ranges(
+            object_tables, dispatch_images, dispatch_image_count);
+        if (image_rc != 0) {
+            json_fail("vulkan-dispatch", "failed to materialize V5.2 image layout ranges");
             ret = image_rc == -ENOMEM ? 75 : 64;
             goto cleanup;
         }
@@ -15462,6 +15629,9 @@ static int run_vulkan_dispatch_fd(
     VkCommandBufferBeginInfo cbi = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     rc = vkBeginCommandBuffer(command_buffer, &cbi);
     if (rc != VK_SUCCESS) { fail_stage = "begin-generic-command-buffer"; goto cleanup; }
+    int initial_layout_rc = record_vulkan_dispatch_v52_initial_image_layout_ranges(
+        command_buffer, dispatch_images, dispatch_image_count);
+    if (initial_layout_rc != 0) { io_rc = initial_layout_rc; goto cleanup; }
     vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
     vkCmdBindDescriptorSets(command_buffer,
                             VK_PIPELINE_BIND_POINT_COMPUTE,
@@ -15554,23 +15724,28 @@ static int run_vulkan_dispatch_fd(
                 .offset = 0,
                 .size = (VkDeviceSize)image->staging.size,
             };
+        VkImageSubresourceRange upload_barrier_range = {
+            .aspectMask = image->copy_aspect_mask,
+            .baseMipLevel = image->copy_base_mip,
+            .levelCount = image->copy_level_count,
+            .baseArrayLayer = image->copy_base_layer,
+            .layerCount = image->copy_layer_count,
+        };
+        VkImageLayout upload_old_layout = image->current_layout;
+        int upload_layout_rc = vulkan_replay_image_layout_for_range(
+            image, &upload_barrier_range, &upload_old_layout);
+        if (upload_layout_rc != 0) { io_rc = upload_layout_rc; goto cleanup; }
         image_upload_barriers[image_upload_barrier_count++] =
             (VkImageMemoryBarrier){
                 .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
                 .srcAccessMask = 0,
                 .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
-                .oldLayout = image->current_layout,
+                .oldLayout = upload_old_layout,
                 .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                 .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
                 .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
                 .image = image->image,
-                .subresourceRange = {
-                    .aspectMask = image->copy_aspect_mask,
-                    .baseMipLevel = image->copy_base_mip,
-                    .levelCount = image->copy_level_count,
-                    .baseArrayLayer = image->copy_base_layer,
-                    .layerCount = image->copy_layer_count,
-                },
+                .subresourceRange = upload_barrier_range,
             };
     }
     if (image_upload_barrier_count || image_staging_upload_barrier_count) {
@@ -15695,6 +15870,10 @@ static int run_vulkan_dispatch_fd(
         VulkanDispatchImageViewObject *view = &dispatch_image_views[d->image_view_index];
         if (view->image_index >= dispatch_image_count) continue;
         VulkanDispatchImageObject *image = &dispatch_images[view->image_index];
+        VkImageLayout old_descriptor_layout = image->current_layout;
+        int descriptor_layout_rc = vulkan_replay_image_layout_for_range(
+            image, &view->range, &old_descriptor_layout);
+        if (descriptor_layout_rc != 0) { io_rc = descriptor_layout_rc; goto cleanup; }
         image_pre_barriers[image_pre_barrier_count++] = (VkImageMemoryBarrier){
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
             .srcAccessMask = image->requires_staging
@@ -15703,14 +15882,16 @@ static int run_vulkan_dispatch_fd(
             .dstAccessMask = (d->access_flags & PDOCKER_GPU_V5_ACCESS_WRITE)
                 ? (VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT)
                 : VK_ACCESS_SHADER_READ_BIT,
-            .oldLayout = image->current_layout,
+            .oldLayout = old_descriptor_layout,
             .newLayout = d->image_layout,
             .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .image = image->image,
             .subresourceRange = view->range,
         };
-        image->current_layout = d->image_layout;
+        descriptor_layout_rc = vulkan_replay_image_set_layout_for_range(
+            image, &view->range, d->image_layout);
+        if (descriptor_layout_rc != 0) { io_rc = descriptor_layout_rc; goto cleanup; }
     }
     if (image_pre_barrier_count) {
         vkCmdPipelineBarrier(command_buffer,
@@ -15784,24 +15965,29 @@ static int run_vulkan_dispatch_fd(
         VulkanDispatchImageViewObject *view = &dispatch_image_views[d->image_view_index];
         if (view->image_index >= dispatch_image_count) continue;
         VulkanDispatchImageObject *image = &dispatch_images[view->image_index];
+        VkImageLayout post_old_layout = image->current_layout;
+        int post_layout_rc = vulkan_replay_image_layout_for_range(
+            image, &view->range, &post_old_layout);
+        if (post_layout_rc != 0) { io_rc = post_layout_rc; goto cleanup; }
+        VkImageLayout post_new_layout = image->requires_staging
+            ? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+            : post_old_layout;
         image_post_barriers[image_post_barrier_count++] = (VkImageMemoryBarrier){
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
             .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
             .dstAccessMask = image->requires_staging
                 ? VK_ACCESS_TRANSFER_READ_BIT
                 : VK_ACCESS_HOST_READ_BIT,
-            .oldLayout = image->current_layout,
-            .newLayout = image->requires_staging
-                ? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
-                : image->current_layout,
+            .oldLayout = post_old_layout,
+            .newLayout = post_new_layout,
             .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .image = image->image,
             .subresourceRange = view->range,
         };
-        if (image->requires_staging) {
-            image->current_layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-        }
+        post_layout_rc = vulkan_replay_image_set_layout_for_range(
+            image, &view->range, post_new_layout);
+        if (post_layout_rc != 0) { io_rc = post_layout_rc; goto cleanup; }
     }
     if (image_post_barrier_count) {
         vkCmdPipelineBarrier(command_buffer,
@@ -17576,7 +17762,9 @@ static void print_capabilities(const char *transport) {
             "\"vulkan_dispatch_v5_frame\":true,"
             "\"vulkan_dispatch_v5\":{"
             "\"abi_major\":%u,\"abi_minor\":%u,"
-            "\"abi_minor_objects\":%u,\"supported_minors\":[0,1],"
+            "\"abi_minor_objects\":%u,\"abi_minor_image_layout_ranges\":%u,\"supported_minors\":[0,1,2],"
+            "\"image_layout_range_schema_hash\":\"0x%016llx\","
+            "\"max_image_layout_ranges\":%u,"
             "\"command_dispatch\":%u,"
             "\"frame_header_schema_hash\":\"0x%016llx\","
             "\"resource_schema_hash\":\"0x%016llx\","
@@ -17611,6 +17799,9 @@ static void print_capabilities(const char *transport) {
             PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MAJOR,
             PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR,
             PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_OBJECTS,
+            PDOCKER_GPU_VULKAN_DISPATCH_V52_ABI_MINOR,
+            (unsigned long long)PDOCKER_GPU_VULKAN_DISPATCH_V52_IMAGE_LAYOUT_RANGE_SCHEMA_HASH,
+            PDOCKER_GPU_VULKAN_DISPATCH_V52_MAX_IMAGE_LAYOUT_RANGES,
             PDOCKER_GPU_VULKAN_DISPATCH_V5_COMMAND_DISPATCH,
             (unsigned long long)PDOCKER_GPU_VULKAN_DISPATCH_V5_FRAME_HEADER_SCHEMA_HASH,
             (unsigned long long)PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_SCHEMA_HASH,
@@ -17684,12 +17875,19 @@ static void print_vulkan_advertisement_caps(const char *transport) {
             "\"schema\":\"skydnir-vulkan-advertisement-caps-v1\","
             "\"transport\":\"%s\","
             "\"vulkan_ready\":%s,"
-            "\"executor_build_marker\":\"%s\",",
+            "\"executor_build_marker\":\"%s\","
+            "\"vulkan_dispatch_v5_frame\":true,"
+            "\"vulkan_dispatch_v5_abi_minor_image_layout_ranges\":%u,"
+            "\"vulkan_dispatch_v5_image_layout_range_schema_hash\":\"0x%016llx\","
+            "\"vulkan_dispatch_v5_max_image_layout_ranges\":%u,",
             PDOCKER_GPU_COMMAND_API,
             PDOCKER_GPU_ABI_VERSION,
             transport ? transport : "unix-socket-command-queue",
             vulkan_ready ? "true" : "false",
-            PDOCKER_GPU_EXECUTOR_BUILD_MARKER);
+            PDOCKER_GPU_EXECUTOR_BUILD_MARKER,
+            PDOCKER_GPU_VULKAN_DISPATCH_V52_ABI_MINOR,
+            (unsigned long long)PDOCKER_GPU_VULKAN_DISPATCH_V52_IMAGE_LAYOUT_RANGE_SCHEMA_HASH,
+            PDOCKER_GPU_VULKAN_DISPATCH_V52_MAX_IMAGE_LAYOUT_RANGES);
     fprintf(out,
             "\"device\":{"
             "\"apiVersion\":%u,"
@@ -18856,6 +19054,10 @@ static int validate_vulkan_dispatch_v5_header(
         if (header->header_size != sizeof(PdockerGpuVulkanDispatchV5ObjectFrameHeader)) {
             return -EPROTO;
         }
+    } else if (header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V52_ABI_MINOR) {
+        if (header->header_size != sizeof(PdockerGpuVulkanDispatchV52FrameHeader)) {
+            return -EPROTO;
+        }
     } else {
         return -EPROTO;
     }
@@ -18920,8 +19122,9 @@ static int validate_vulkan_dispatch_v5_object_extension(
         const unsigned char *frame,
         const PdockerGpuVulkanDispatchV5FrameHeader *header) {
     if (!frame || !header) return -EINVAL;
-    if (header->abi_minor != PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_OBJECTS) return 0;
-    if (header->header_size != sizeof(PdockerGpuVulkanDispatchV5ObjectFrameHeader)) {
+    if (header->abi_minor != PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_OBJECTS &&
+        header->abi_minor != PDOCKER_GPU_VULKAN_DISPATCH_V52_ABI_MINOR) return 0;
+    if (header->header_size < sizeof(PdockerGpuVulkanDispatchV5ObjectFrameHeader)) {
         return -EPROTO;
     }
     if (!range_within_frame(0, sizeof(PdockerGpuVulkanDispatchV5ObjectFrameHeader), header->frame_size)) {
@@ -19062,7 +19265,7 @@ static int validate_vulkan_dispatch_v5_frame_content(
         return -EBADF;
     }
 
-    FrameRange ranges[12];
+    FrameRange ranges[13];
     size_t range_count = 0;
 #define V5_RECORD_RANGE(offset_, size_) \
     do { \
@@ -19105,7 +19308,8 @@ static int validate_vulkan_dispatch_v5_frame_content(
 
     rc = validate_vulkan_dispatch_v5_object_extension(frame, header);
     if (rc != 0) return rc;
-    if (header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_OBJECTS) {
+    if (header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_OBJECTS ||
+        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V52_ABI_MINOR) {
         const PdockerGpuVulkanDispatchV5ObjectFrameHeader *object_header =
             (const PdockerGpuVulkanDispatchV5ObjectFrameHeader *)frame;
         const PdockerGpuVulkanDispatchV5ObjectHeaderExtension *objects = &object_header->objects;
@@ -19127,6 +19331,36 @@ static int validate_vulkan_dispatch_v5_frame_content(
         V5_RECORD_RANGE(objects->image_view_table_offset, objects->image_view_table_size);
         V5_RECORD_RANGE(objects->sampler_table_offset, objects->sampler_table_size);
         if (objects->object_hash != 0 && v5_object_extension_hash(frame, header, objects) != objects->object_hash) {
+            return -EPROTO;
+        }
+    }
+    if (header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V52_ABI_MINOR) {
+        const PdockerGpuVulkanDispatchV52FrameHeader *header_v52 =
+            (const PdockerGpuVulkanDispatchV52FrameHeader *)frame;
+        const PdockerGpuVulkanDispatchV52HeaderExtension *ext = &header_v52->v52;
+        if (ext->image_layout_range_count > PDOCKER_GPU_VULKAN_DISPATCH_V52_MAX_IMAGE_LAYOUT_RANGES ||
+            (ext->image_layout_range_count > 0 &&
+             ext->image_layout_range_entry_size != sizeof(PdockerGpuVulkanDispatchV52ImageLayoutRangeEntry)) ||
+            (ext->image_layout_range_count > 0 &&
+             ext->image_layout_range_schema_hash != PDOCKER_GPU_VULKAN_DISPATCH_V52_IMAGE_LAYOUT_RANGE_SCHEMA_HASH)) {
+            return -EPROTO;
+        }
+        uint64_t layout_range_bytes =
+            (uint64_t)ext->image_layout_range_count * ext->image_layout_range_entry_size;
+        if (layout_range_bytes != ext->image_layout_range_table_size) return -EPROTO;
+        if (!v5_table_range_valid(ext->image_layout_range_table_offset,
+                                  ext->image_layout_range_table_size,
+                                  ext->image_layout_range_count,
+                                  ext->image_layout_range_entry_size,
+                                  __alignof__(PdockerGpuVulkanDispatchV52ImageLayoutRangeEntry),
+                                  header->frame_size, header->header_size)) {
+            return -EPROTO;
+        }
+        V5_RECORD_RANGE(ext->image_layout_range_table_offset, ext->image_layout_range_table_size);
+        if (!v5_hash_matches(frame, header, ext->image_layout_range_table_offset,
+                             ext->image_layout_range_table_size,
+                             ext->image_layout_range_table_hash) ||
+            ext->extension_hash != ext->image_layout_range_table_hash) {
             return -EPROTO;
         }
     }
@@ -19200,14 +19434,19 @@ static int convert_vulkan_dispatch_v5_to_v4_bindings(
             ? (const PdockerGpuVulkanDispatchV5DescriptorEntry *)v5_frame_range(
                   frame, header, header->descriptor_table_offset, header->descriptor_table_size)
             : NULL;
+    const int has_object_extension =
+        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_OBJECTS ||
+        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V52_ABI_MINOR;
+    const int has_v52_layout_ranges =
+        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V52_ABI_MINOR;
     const PdockerGpuVulkanDispatchV5DescriptorObjectEntry *object_descriptors =
-        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_OBJECTS
+        has_object_extension
             ? (const PdockerGpuVulkanDispatchV5DescriptorObjectEntry *)v5_frame_range(
                   frame, header, header->descriptor_table_offset, header->descriptor_table_size)
             : NULL;
     if (!resources ||
         (header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR && !descriptors) ||
-        (header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_OBJECTS && !object_descriptors)) {
+        (has_object_extension && !object_descriptors)) {
         return -EPROTO;
     }
     const PdockerGpuVulkanDispatchV5ImageEntry *images = NULL;
@@ -19216,7 +19455,7 @@ static int convert_vulkan_dispatch_v5_to_v4_bindings(
     size_t image_count = 0;
     size_t image_view_count = 0;
     size_t sampler_count = 0;
-    if (header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_OBJECTS) {
+    if (has_object_extension) {
         const PdockerGpuVulkanDispatchV5ObjectFrameHeader *object_header =
             (const PdockerGpuVulkanDispatchV5ObjectFrameHeader *)frame;
         const PdockerGpuVulkanDispatchV5ObjectHeaderExtension *objects = &object_header->objects;
@@ -19266,6 +19505,27 @@ static int convert_vulkan_dispatch_v5_to_v4_bindings(
             object_tables_out->image_view_count = image_view_count;
             object_tables_out->samplers = samplers;
             object_tables_out->sampler_count = sampler_count;
+            if (has_v52_layout_ranges) {
+                const PdockerGpuVulkanDispatchV52FrameHeader *header_v52 =
+                    (const PdockerGpuVulkanDispatchV52FrameHeader *)frame;
+                object_tables_out->image_layout_range_count = header_v52->v52.image_layout_range_count;
+                object_tables_out->image_layout_ranges =
+                    header_v52->v52.image_layout_range_count
+                        ? (const PdockerGpuVulkanDispatchV52ImageLayoutRangeEntry *)v5_frame_range(
+                              frame, header, header_v52->v52.image_layout_range_table_offset,
+                              header_v52->v52.image_layout_range_table_size)
+                        : NULL;
+                if (object_tables_out->image_layout_range_count &&
+                    !object_tables_out->image_layout_ranges) {
+                    return -EPROTO;
+                }
+                int range_rc = validate_vulkan_dispatch_v52_image_layout_ranges(
+                    object_tables_out->image_layout_ranges,
+                    (uint32_t)object_tables_out->image_layout_range_count,
+                    images,
+                    (uint32_t)image_count);
+                if (range_rc != 0) return range_rc;
+            }
         }
     }
     size_t buffer_descriptor_count = 0;
@@ -19304,7 +19564,7 @@ static int convert_vulkan_dispatch_v5_to_v4_bindings(
     for (uint32_t i = 0; i < header->descriptor_count; ++i) {
         PdockerGpuVulkanDispatchV5DescriptorObjectEntry object_copy;
         const PdockerGpuVulkanDispatchV5DescriptorObjectEntry *d = NULL;
-        if (header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_OBJECTS) {
+        if (has_object_extension) {
             d = &object_descriptors[i];
         } else {
             const PdockerGpuVulkanDispatchV5DescriptorEntry *legacy = &descriptors[i];
@@ -19336,7 +19596,7 @@ static int convert_vulkan_dispatch_v5_to_v4_bindings(
                                                                &image_descriptor_type) != 0) {
                 return -EOPNOTSUPP;
             }
-            if (header->abi_minor != PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_OBJECTS) {
+            if (!has_object_extension) {
                 return -EPROTO;
             }
             if (d->resource_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE) {
@@ -21475,6 +21735,65 @@ static int vulkan_graphics_v620_image_aspect_valid(
         return 0;
     }
     return 1;
+}
+
+static int vulkan_dispatch_v52_layout_value_valid(
+        const PdockerGpuVulkanDispatchV5ImageEntry *image,
+        VkImageLayout layout) {
+    return vulkan_graphics_v620_layout_value_valid(image, layout);
+}
+
+static int vulkan_dispatch_v52_image_aspect_valid(
+        const PdockerGpuVulkanDispatchV5ImageEntry *image,
+        VkImageAspectFlags aspect_mask) {
+    return vulkan_graphics_v620_image_aspect_valid(image, aspect_mask);
+}
+
+static int vulkan_dispatch_v52_image_layout_ranges_overlap(
+        const PdockerGpuVulkanDispatchV52ImageLayoutRangeEntry *a,
+        const PdockerGpuVulkanDispatchV52ImageLayoutRangeEntry *b) {
+    if (!a || !b || a->image_index != b->image_index) return 0;
+    if ((a->aspect_mask & b->aspect_mask) == 0) return 0;
+    const uint64_t a_mip_end = (uint64_t)a->base_mip_level + a->level_count;
+    const uint64_t b_mip_end = (uint64_t)b->base_mip_level + b->level_count;
+    const uint64_t a_layer_end = (uint64_t)a->base_array_layer + a->layer_count;
+    const uint64_t b_layer_end = (uint64_t)b->base_array_layer + b->layer_count;
+    return (uint64_t)a->base_mip_level < b_mip_end &&
+           (uint64_t)b->base_mip_level < a_mip_end &&
+           (uint64_t)a->base_array_layer < b_layer_end &&
+           (uint64_t)b->base_array_layer < a_layer_end;
+}
+
+static int validate_vulkan_dispatch_v52_image_layout_ranges(
+        const PdockerGpuVulkanDispatchV52ImageLayoutRangeEntry *ranges,
+        uint32_t range_count,
+        const PdockerGpuVulkanDispatchV5ImageEntry *images,
+        uint32_t image_count) {
+    if (range_count && (!ranges || !images)) return -EPROTO;
+    for (uint32_t i = 0; i < range_count; ++i) {
+        const PdockerGpuVulkanDispatchV52ImageLayoutRangeEntry *entry = &ranges[i];
+        if (entry->reserved0 != 0 || entry->image_index >= image_count ||
+            entry->aspect_mask == 0 || entry->level_count == 0 || entry->layer_count == 0) {
+            return -EPROTO;
+        }
+        const PdockerGpuVulkanDispatchV5ImageEntry *image = &images[entry->image_index];
+        if (!vulkan_dispatch_v52_image_aspect_valid(image, (VkImageAspectFlags)entry->aspect_mask) ||
+            !vulkan_dispatch_v52_layout_value_valid(image, (VkImageLayout)entry->layout) ||
+            entry->base_mip_level >= image->mip_levels ||
+            entry->level_count > image->mip_levels - entry->base_mip_level ||
+            entry->base_array_layer >= image->array_layers ||
+            entry->layer_count > image->array_layers - entry->base_array_layer) {
+            return -ERANGE;
+        }
+        for (uint32_t j = i + 1; j < range_count; ++j) {
+            const PdockerGpuVulkanDispatchV52ImageLayoutRangeEntry *other = &ranges[j];
+            if (vulkan_dispatch_v52_image_layout_ranges_overlap(entry, other) &&
+                entry->layout != other->layout) {
+                return -EOPNOTSUPP;
+            }
+        }
+    }
+    return 0;
 }
 
 static int vulkan_graphics_v620_image_layout_ranges_overlap(
@@ -25278,6 +25597,8 @@ static int materialize_vulkan_graphics_v6_attachments(
         .image_view_count = view->header->image_view_count,
         .samplers = view->samplers,
         .sampler_count = view->header->sampler_count,
+        .image_layout_ranges = NULL,
+        .image_layout_range_count = 0,
     };
     int rc = materialize_vulkan_dispatch_images(
         rt->physical_device,
@@ -26939,6 +27260,9 @@ static int materialize_vulkan_graphics_v6_descriptors(
     return 0;
 }
 
+static int vulkan_replay_image_layout_range_valid(
+        const VulkanDispatchImageObject *image,
+        const VkImageSubresourceRange *range);
 static int vulkan_replay_image_layout_for_range(
         const VulkanDispatchImageObject *image,
         const VkImageSubresourceRange *range,
