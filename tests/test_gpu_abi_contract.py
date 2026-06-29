@@ -6254,6 +6254,18 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("for (void *node = pMemoryRequirements->pNext", buffer_body)
 
 
+    def test_vulkan_bind_memory2_rejects_unsupported_pnext_and_null_arrays(self):
+        icd = VULKAN_ICD.read_text()
+        self.assertIn("static VkResult validate_bind_memory_info_pnext", icd)
+        self.assertIn("unsupported_create_info_pnext_result(api_name, pNext)", icd)
+        buffer_body = c_function_body(icd, "vkBindBufferMemory2")
+        image_body = c_function_body(icd, "vkBindImageMemory2")
+        for body, api in [(buffer_body, "vkBindBufferMemory2"), (image_body, "vkBindImageMemory2")]:
+            self.assertIn("if (bindInfoCount > 0 && !pBindInfos) return VK_ERROR_INITIALIZATION_FAILED;", body)
+            self.assertIn(f'validate_bind_memory_info_pnext("{api}", pBindInfos[i].pNext)', body)
+            self.assertIn("if (pnext_rc != VK_SUCCESS) return pnext_rc;", body)
+
+
     def test_vulkan_core_create_infos_reject_unsupported_pnext_and_flags(self):
         icd = VULKAN_ICD.read_text()
         self.assertIn("unsupported_create_info_pnext_result", icd)

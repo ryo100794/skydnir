@@ -12425,12 +12425,19 @@ VKAPI_ATTR VkResult VKAPI_CALL vkBindImageMemory(
     return VK_SUCCESS;
 }
 
+static VkResult validate_bind_memory_info_pnext(const char *api_name, const void *pNext) {
+    if (!pNext) return VK_SUCCESS;
+    return unsupported_create_info_pnext_result(api_name, pNext);
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL vkBindImageMemory2(
         VkDevice device,
         uint32_t bindInfoCount,
         const VkBindImageMemoryInfo *pBindInfos) {
     if (bindInfoCount > 0 && !pBindInfos) return VK_ERROR_INITIALIZATION_FAILED;
     for (uint32_t i = 0; i < bindInfoCount; ++i) {
+        VkResult pnext_rc = validate_bind_memory_info_pnext("vkBindImageMemory2", pBindInfos[i].pNext);
+        if (pnext_rc != VK_SUCCESS) return pnext_rc;
         VkResult rc = vkBindImageMemory(device,
                                         pBindInfos[i].image,
                                         pBindInfos[i].memory,
@@ -12861,7 +12868,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkBindBufferMemory2(
         VkDevice device,
         uint32_t bindInfoCount,
         const VkBindBufferMemoryInfo *pBindInfos) {
+    if (bindInfoCount > 0 && !pBindInfos) return VK_ERROR_INITIALIZATION_FAILED;
     for (uint32_t i = 0; i < bindInfoCount; ++i) {
+        VkResult pnext_rc = validate_bind_memory_info_pnext("vkBindBufferMemory2", pBindInfos[i].pNext);
+        if (pnext_rc != VK_SUCCESS) return pnext_rc;
         VkResult rc = vkBindBufferMemory(
             device,
             pBindInfos[i].buffer,

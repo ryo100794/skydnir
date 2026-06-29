@@ -140,6 +140,66 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
+
+    def test_bind_memory2_rejects_null_arrays_and_unsupported_pnext(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            typedef struct DummyPnext {{
+                VkStructureType sType;
+                const void *pNext;
+            }} DummyPnext;
+
+            int main(void) {{
+                if (vkBindBufferMemory2(VK_NULL_HANDLE, 0, NULL) != VK_SUCCESS) {{
+                    fprintf(stderr, "zero-count buffer bind should accept null array\\n");
+                    return 2;
+                }}
+                if (vkBindImageMemory2(VK_NULL_HANDLE, 0, NULL) != VK_SUCCESS) {{
+                    fprintf(stderr, "zero-count image bind should accept null array\\n");
+                    return 3;
+                }}
+                if (vkBindBufferMemory2(VK_NULL_HANDLE, 1, NULL) != VK_ERROR_INITIALIZATION_FAILED) {{
+                    fprintf(stderr, "buffer bind did not reject missing array\\n");
+                    return 4;
+                }}
+                if (vkBindImageMemory2(VK_NULL_HANDLE, 1, NULL) != VK_ERROR_INITIALIZATION_FAILED) {{
+                    fprintf(stderr, "image bind did not reject missing array\\n");
+                    return 5;
+                }}
+
+                DummyPnext unsupported;
+                memset(&unsupported, 0, sizeof(unsupported));
+                unsupported.sType = (VkStructureType)1000060013;
+
+                VkBindBufferMemoryInfo buffer_info;
+                memset(&buffer_info, 0, sizeof(buffer_info));
+                buffer_info.sType = VK_STRUCTURE_TYPE_BIND_BUFFER_MEMORY_INFO;
+                buffer_info.pNext = &unsupported;
+                if (vkBindBufferMemory2(VK_NULL_HANDLE, 1, &buffer_info) != VK_ERROR_FEATURE_NOT_PRESENT) {{
+                    fprintf(stderr, "buffer bind did not fail closed on unsupported pNext\\n");
+                    return 6;
+                }}
+
+                VkBindImageMemoryInfo image_info;
+                memset(&image_info, 0, sizeof(image_info));
+                image_info.sType = VK_STRUCTURE_TYPE_BIND_IMAGE_MEMORY_INFO;
+                image_info.pNext = &unsupported;
+                if (vkBindImageMemory2(VK_NULL_HANDLE, 1, &image_info) != VK_ERROR_FEATURE_NOT_PRESENT) {{
+                    fprintf(stderr, "image bind did not fail closed on unsupported pNext\\n");
+                    return 7;
+                }}
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_image_layout_range_cache_splits_partial_overlaps_without_overflow(self):
         source = textwrap.dedent(
             f"""
