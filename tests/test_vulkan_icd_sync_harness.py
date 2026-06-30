@@ -17,24 +17,31 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             src = Path(tmpdir) / "icd_sync_harness.c"
             exe = Path(tmpdir) / "icd_sync_harness"
             src.write_text(source, encoding="utf-8")
-            subprocess.run(
-                [
-                    "gcc",
-                    "-O2",
-                    "-Wall",
-                    "-Wextra",
-                    "-Wno-unused-function",
-                    "-Wno-missing-field-initializers",
-                    "-o",
-                    str(exe),
-                    str(src),
-                ],
-                cwd=ROOT,
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                check=True,
-            )
+            try:
+                subprocess.run(
+                    [
+                        "gcc",
+                        "-O2",
+                        "-Wall",
+                        "-Wextra",
+                        "-Wno-unused-function",
+                        "-Wno-missing-field-initializers",
+                        "-o",
+                        str(exe),
+                        str(src),
+                    ],
+                    cwd=ROOT,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    check=True,
+                )
+            except subprocess.CalledProcessError as exc:
+                self.fail(
+                    "gcc failed while compiling ICD sync harness\n"
+                    + (exc.stdout or "")
+                    + (exc.stderr or "")
+                )
             return subprocess.run(
                 [str(exe)],
                 cwd=ROOT,
@@ -189,15 +196,63 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 }}
 
                 memset(cmd, 0, sizeof(*cmd));
+                VkMemoryBarrier2 memory_barrier;
+                memset(&memory_barrier, 0, sizeof(memory_barrier));
+                memory_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
                 memset(&dependency, 0, sizeof(dependency));
                 dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-                dependency.dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+                dependency.memoryBarrierCount = 1;
+                dependency.pMemoryBarriers = &memory_barrier;
                 vkCmdSetEvent2((VkCommandBuffer)cmd, VK_NULL_HANDLE, &dependency);
                 if (!expect_reason(cmd, "event-set2-barrier-payload-unsupported")) return 4;
                 if (cmd->command_op_count != 0 || cmd->graphics_command_op_count != 0) {{
                     fprintf(stderr, "barrier-payload set-event2 still recorded commands\\n");
                     return 5;
                 }}
+
+                memset(cmd, 0, sizeof(*cmd));
+                VkEventCreateInfo create_info;
+                memset(&create_info, 0, sizeof(create_info));
+                create_info.sType = VK_STRUCTURE_TYPE_EVENT_CREATE_INFO;
+                VkEvent event = VK_NULL_HANDLE;
+                if (vkCreateEvent(VK_NULL_HANDLE, &create_info, NULL, &event) != VK_SUCCESS || !event) return 6;
+                memset(&dependency, 0, sizeof(dependency));
+                dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+                dependency.dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+                vkCmdSetEvent2((VkCommandBuffer)cmd, event, &dependency);
+                if (cmd->recording_failed) {{
+                    fprintf(stderr, "by-region set-event2 unexpectedly failed: %s\\n",
+                            cmd->recording_failure_reason ? cmd->recording_failure_reason : "<null>");
+                    return 7;
+                }}
+                if (cmd->command_op_count != 1 || cmd->graphics_command_op_count != 1 ||
+                    cmd->command_ops[0].type != PDOCKER_VK_COMMAND_EVENT ||
+                    cmd->graphics_command_ops[0].command_type != PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT ||
+                    cmd->graphics_command_ops[0].flags != VK_DEPENDENCY_BY_REGION_BIT) {{
+                    fprintf(stderr, "by-region set-event2 was not captured as event flags ops=%u graphics=%u flags=%u\\n",
+                            cmd->command_op_count, cmd->graphics_command_op_count,
+                            cmd->graphics_command_op_count ? cmd->graphics_command_ops[0].flags : 0);
+                    return 8;
+                }}
+
+                memset(cmd, 0, sizeof(*cmd));
+                VkEvent events[1] = {{ event }};
+                vkCmdWaitEvents2((VkCommandBuffer)cmd, 1, events, &dependency);
+                if (cmd->recording_failed) {{
+                    fprintf(stderr, "by-region wait-events2 unexpectedly failed: %s\\n",
+                            cmd->recording_failure_reason ? cmd->recording_failure_reason : "<null>");
+                    return 9;
+                }}
+                if (cmd->command_op_count != 1 || cmd->graphics_command_op_count != 1 ||
+                    cmd->command_ops[0].type != PDOCKER_VK_COMMAND_EVENT_WAIT ||
+                    cmd->graphics_command_ops[0].command_type != PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT ||
+                    cmd->graphics_command_ops[0].flags != VK_DEPENDENCY_BY_REGION_BIT) {{
+                    fprintf(stderr, "by-region wait-events2 was not captured as event flags ops=%u graphics=%u flags=%u\\n",
+                            cmd->command_op_count, cmd->graphics_command_op_count,
+                            cmd->graphics_command_op_count ? cmd->graphics_command_ops[0].flags : 0);
+                    return 10;
+                }}
+                vkDestroyEvent(VK_NULL_HANDLE, event, NULL);
                 free(cmd);
                 return 0;
             }}

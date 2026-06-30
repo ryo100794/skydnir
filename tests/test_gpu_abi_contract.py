@@ -6899,8 +6899,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "command->push_hash = (uint64_t)op->event_dst_stage_mask",
             "op.event_src_stage_mask = stage_mask",
             "op.event_dst_stage_mask = dst_stage_mask",
+            "record.flags = dependency_flags & VK_DEPENDENCY_BY_REGION_BIT",
             "normalize_event_stage_mask((VkPipelineStageFlags2)srcStageMask)",
-            "record_event_command(commandBuffer, event, false, stageMask)",
+            "record_event_command(commandBuffer, event, false, stageMask, 0)",
         ]:
             self.assertIn(marker, icd)
         plan_body = icd.split("static bool graphics_mixed_submit_plan", 1)[1].split(
@@ -6921,7 +6922,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "rt->cmd_wait_events2",
             "const VkPipelineStageFlags2 src_stage_mask2",
             "const int legacy_stage_masks",
+            "command->flags == 0",
             "command->index_offset != 0",
+            "dependencyFlags = command->flags & VK_DEPENDENCY_BY_REGION_BIT",
             "memoryBarrierCount = src_stage_mask2 ? 1u : 0u",
             "memoryBarrierCount = (src_stage_mask2 || dst_stage_mask2) ? 1u : 0u",
             "vkCmdSetEvent(command_buffer, entry->event, (VkPipelineStageFlags)command->index_offset)",
@@ -7027,7 +7030,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("event-set2-dependency-info-unsupported", set_event2_body)
         self.assertIn("command_buffer_mark_recording_failed(cmd, \"event-set2-dependency-info-unsupported\")", set_event2_body)
         self.assertNotIn("if (cmd) cmd->graphics_unsupported = true", set_event2_body)
-        self.assertIn("dependency_info_has_supported_barrier_payload(pDependencyInfo)", set_event2_body)
+        self.assertIn("dependency_flags_unsupported(dependency_flags)", set_event2_body)
+        self.assertIn("event-set2-dependency-flags-unsupported", set_event2_body)
+        self.assertIn("dependency_info_has_event_barrier_payload(pDependencyInfo)", set_event2_body)
         self.assertIn("event-set2-barrier-payload-unsupported", set_event2_body)
         self.assertIn("command_buffer_mark_recording_failed", set_event2_body)
         self.assertIn("dependency_info_src_stage_mask", icd)
@@ -7040,13 +7045,15 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("for (uint32_t i = 0; i < eventCount; ++i)", wait_events2_body)
         self.assertIn("if (!pEvents[i])", wait_events2_body)
         self.assertIn("dependency_info_has_unsupported_pnext(&pDependencyInfos[i])", wait_events2_body)
-        self.assertIn("dependency_info_has_supported_barrier_payload(&pDependencyInfos[i])", wait_events2_body)
+        self.assertIn("dependency_flags_unsupported(dependency_flags)", wait_events2_body)
+        self.assertIn("event-wait2-dependency-flags-unsupported", wait_events2_body)
+        self.assertIn("dependency_info_has_event_barrier_payload(&pDependencyInfos[i])", wait_events2_body)
         self.assertIn("event-wait2-barrier-payload-unsupported", wait_events2_body)
         self.assertIn("dependency_info_src_stage_mask(&pDependencyInfos[i])", wait_events2_body)
         self.assertIn("dependency_info_dst_stage_mask(&pDependencyInfos[i])", wait_events2_body)
         self.assertNotIn("vkCmdPipelineBarrier2(commandBuffer, &pDependencyInfos[i])", wait_events2_body)
         self.assertLess(
-            wait_events2_body.index("dependency_info_has_supported_barrier_payload(&pDependencyInfos[i])"),
+            wait_events2_body.index("dependency_info_has_event_barrier_payload(&pDependencyInfos[i])"),
             wait_events2_body.index("record_event_wait_command(commandBuffer, pEvents[i],"),
         )
         self.assertNotIn("eventCount > 1", wait_events2_body)

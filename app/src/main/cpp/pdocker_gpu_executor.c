@@ -22994,7 +22994,8 @@ static int validate_vulkan_graphics_v6_frame_content(
              command->descriptor_count != 0 || command->vertex_binding_count != 0 ||
              command->attachment_count != 0 || command->dynamic_state_count != 0 ||
              command->push_size != 0 || command->index_buffer_resource_index != UINT32_MAX ||
-             command->pipeline_layout_id == 0)) return -EPROTO;
+             command->pipeline_layout_id == 0 ||
+             (command->flags & ~VK_DEPENDENCY_BY_REGION_BIT) != 0)) return -EPROTO;
         if ((command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT ||
              command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_EVENT) &&
             command->push_hash != 0) return -EPROTO;
@@ -24263,6 +24264,11 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                     reason = "invalid graphics event command metadata";
                     if (reason_out) *reason_out = reason;
                     return -EPROTO;
+                }
+                if ((command->flags & ~VK_DEPENDENCY_BY_REGION_BIT) != 0) {
+                    reason = "graphics event dependency flags are not supported";
+                    if (reason_out) *reason_out = reason;
+                    return -EOPNOTSUPP;
                 }
                 if ((command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT ||
                      command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_EVENT) &&
@@ -29019,6 +29025,7 @@ static int record_vulkan_graphics_v6_command_buffer(
                 const VkPipelineStageFlags2 src_stage_mask2 = (VkPipelineStageFlags2)command->index_offset;
                 const VkPipelineStageFlags2 dst_stage_mask2 = (VkPipelineStageFlags2)command->push_hash;
                 const int legacy_stage_masks =
+                    command->flags == 0 &&
                     command->index_offset != 0 &&
                     command->index_offset <= UINT32_MAX &&
                     command->push_hash <= UINT32_MAX;
@@ -29037,6 +29044,7 @@ static int record_vulkan_graphics_v6_command_buffer(
                         };
                         VkDependencyInfo dependency = {
                             .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                            .dependencyFlags = command->flags & VK_DEPENDENCY_BY_REGION_BIT,
                             .memoryBarrierCount = src_stage_mask2 ? 1u : 0u,
                             .pMemoryBarriers = src_stage_mask2 ? &event_scope : NULL,
                         };
@@ -29070,6 +29078,7 @@ static int record_vulkan_graphics_v6_command_buffer(
                         };
                         VkDependencyInfo dependency = {
                             .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                            .dependencyFlags = command->flags & VK_DEPENDENCY_BY_REGION_BIT,
                             .memoryBarrierCount = (src_stage_mask2 || dst_stage_mask2) ? 1u : 0u,
                             .pMemoryBarriers = (src_stage_mask2 || dst_stage_mask2) ? &event_scope : NULL,
                         };

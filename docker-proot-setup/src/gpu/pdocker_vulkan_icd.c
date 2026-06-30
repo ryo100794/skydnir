@@ -20410,7 +20410,8 @@ static VkPipelineStageFlags2 normalize_event_stage_mask(VkPipelineStageFlags2 st
 static void record_event_command(VkCommandBuffer commandBuffer,
                                  VkEvent event,
                                  bool signaled,
-                                 VkPipelineStageFlags2 stage_mask) {
+                                 VkPipelineStageFlags2 stage_mask,
+                                 VkDependencyFlags dependency_flags) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     PdockerVkEvent *e = pdocker_vk_event_from_handle(event);
     if (!cmd || !e) return;
@@ -20425,6 +20426,7 @@ static void record_event_command(VkCommandBuffer commandBuffer,
     record.command_type = signaled
         ? PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT
         : PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_EVENT;
+    record.flags = dependency_flags & VK_DEPENDENCY_BY_REGION_BIT;
     if (!append_graphics_command_record(cmd, &record)) return;
     (void)append_command_op(cmd, &op);
 }
@@ -20432,7 +20434,8 @@ static void record_event_command(VkCommandBuffer commandBuffer,
 static void record_event_wait_command(VkCommandBuffer commandBuffer,
                                       VkEvent event,
                                       VkPipelineStageFlags2 src_stage_mask,
-                                      VkPipelineStageFlags2 dst_stage_mask) {
+                                      VkPipelineStageFlags2 dst_stage_mask,
+                                      VkDependencyFlags dependency_flags) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     PdockerVkEvent *e = pdocker_vk_event_from_handle(event);
     if (!cmd || !e) {
@@ -20448,6 +20451,7 @@ static void record_event_wait_command(VkCommandBuffer commandBuffer,
     PdockerVkGraphicsCommandRecord record;
     memset(&record, 0, sizeof(record));
     record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT;
+    record.flags = dependency_flags & VK_DEPENDENCY_BY_REGION_BIT;
     if (!append_graphics_command_record(cmd, &record)) return;
     (void)append_command_op(cmd, &op);
 }
@@ -20456,14 +20460,14 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetEvent(
         VkCommandBuffer commandBuffer,
         VkEvent event,
         VkPipelineStageFlags stageMask) {
-    record_event_command(commandBuffer, event, true, normalize_event_stage_mask((VkPipelineStageFlags2)stageMask));
+    record_event_command(commandBuffer, event, true, normalize_event_stage_mask((VkPipelineStageFlags2)stageMask), 0);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdResetEvent(
         VkCommandBuffer commandBuffer,
         VkEvent event,
         VkPipelineStageFlags stageMask) {
-    record_event_command(commandBuffer, event, false, normalize_event_stage_mask((VkPipelineStageFlags2)stageMask));
+    record_event_command(commandBuffer, event, false, normalize_event_stage_mask((VkPipelineStageFlags2)stageMask), 0);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdWaitEvents(
@@ -20494,7 +20498,8 @@ VKAPI_ATTR void VKAPI_CALL vkCmdWaitEvents(
         }
         record_event_wait_command(commandBuffer, pEvents[i],
                                   normalize_event_stage_mask((VkPipelineStageFlags2)srcStageMask),
-                                  normalize_event_stage_mask((VkPipelineStageFlags2)dstStageMask));
+                                  normalize_event_stage_mask((VkPipelineStageFlags2)dstStageMask),
+                                  0);
     }
     vkCmdPipelineBarrier(commandBuffer,
                          srcStageMask,
@@ -20633,9 +20638,12 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier2(
     (void)append_command_op(cmd, &op);
 }
 
-static bool dependency_info_has_supported_barrier_payload(const VkDependencyInfo *info) {
-    return info && (info->dependencyFlags != 0 ||
-                    info->memoryBarrierCount != 0 ||
+static bool dependency_flags_unsupported(VkDependencyFlags dependency_flags) {
+    return (dependency_flags & ~VK_DEPENDENCY_BY_REGION_BIT) != 0;
+}
+
+static bool dependency_info_has_event_barrier_payload(const VkDependencyInfo *info) {
+    return info && (info->memoryBarrierCount != 0 ||
                     info->bufferMemoryBarrierCount != 0 ||
                     info->imageMemoryBarrierCount != 0);
 }
@@ -20691,18 +20699,23 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetEvent2(
         if (cmd) command_buffer_mark_recording_failed(cmd, "event-set2-dependency-info-unsupported");
         return;
     }
-    if (dependency_info_has_supported_barrier_payload(pDependencyInfo)) {
+    const VkDependencyFlags dependency_flags = pDependencyInfo ? pDependencyInfo->dependencyFlags : 0;
+    if (dependency_flags_unsupported(dependency_flags)) {
+        if (cmd) command_buffer_mark_recording_failed(cmd, "event-set2-dependency-flags-unsupported");
+        return;
+    }
+    if (dependency_info_has_event_barrier_payload(pDependencyInfo)) {
         if (cmd) command_buffer_mark_recording_failed(cmd, "event-set2-barrier-payload-unsupported");
         return;
     }
-    record_event_command(commandBuffer, event, true, dependency_info_src_stage_mask(pDependencyInfo));
+    record_event_command(commandBuffer, event, true, dependency_info_src_stage_mask(pDependencyInfo), dependency_flags);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdResetEvent2(
         VkCommandBuffer commandBuffer,
         VkEvent event,
         VkPipelineStageFlags2 stageMask) {
-    record_event_command(commandBuffer, event, false, stageMask);
+    record_event_command(commandBuffer, event, false, stageMask, 0);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdWaitEvents2(
@@ -20724,7 +20737,12 @@ VKAPI_ATTR void VKAPI_CALL vkCmdWaitEvents2(
             if (cmd) command_buffer_mark_recording_failed(cmd, "event-wait2-pnext-unsupported");
             return;
         }
-        if (dependency_info_has_supported_barrier_payload(&pDependencyInfos[i])) {
+        const VkDependencyFlags dependency_flags = pDependencyInfos[i].dependencyFlags;
+        if (dependency_flags_unsupported(dependency_flags)) {
+            if (cmd) command_buffer_mark_recording_failed(cmd, "event-wait2-dependency-flags-unsupported");
+            return;
+        }
+        if (dependency_info_has_event_barrier_payload(&pDependencyInfos[i])) {
             if (cmd) command_buffer_mark_recording_failed(cmd, "event-wait2-barrier-payload-unsupported");
             return;
         }
@@ -20732,7 +20750,8 @@ VKAPI_ATTR void VKAPI_CALL vkCmdWaitEvents2(
     for (uint32_t i = 0; i < eventCount; ++i) {
         record_event_wait_command(commandBuffer, pEvents[i],
                                   dependency_info_src_stage_mask(&pDependencyInfos[i]),
-                                  dependency_info_dst_stage_mask(&pDependencyInfos[i]));
+                                  dependency_info_dst_stage_mask(&pDependencyInfos[i]),
+                                  pDependencyInfos[i].dependencyFlags);
     }
 }
 
