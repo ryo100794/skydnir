@@ -7024,7 +7024,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "VKAPI_ATTR void VKAPI_CALL vkCmdResetEvent2", 1
         )[0]
         self.assertIn("dependency_info_has_unsupported_pnext(pDependencyInfo)", set_event2_body)
-        self.assertIn("cmd->graphics_unsupported = true", set_event2_body)
+        self.assertIn("event-set2-dependency-info-unsupported", set_event2_body)
+        self.assertIn("command_buffer_mark_recording_failed(cmd, \"event-set2-dependency-info-unsupported\")", set_event2_body)
+        self.assertNotIn("if (cmd) cmd->graphics_unsupported = true", set_event2_body)
         self.assertIn("dependency_info_has_supported_barrier_payload(pDependencyInfo)", set_event2_body)
         self.assertIn("event-set2-barrier-payload-unsupported", set_event2_body)
         self.assertIn("command_buffer_mark_recording_failed", set_event2_body)

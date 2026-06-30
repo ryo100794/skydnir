@@ -20688,7 +20688,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetEvent2(
         const VkDependencyInfo *pDependencyInfo) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     if (dependency_info_has_unsupported_pnext(pDependencyInfo)) {
-        if (cmd) cmd->graphics_unsupported = true;
+        if (cmd) command_buffer_mark_recording_failed(cmd, "event-set2-dependency-info-unsupported");
         return;
     }
     if (dependency_info_has_supported_barrier_payload(pDependencyInfo)) {

@@ -141,6 +141,71 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
 
 
 
+
+    def test_set_event2_records_precise_unsupported_dependency_reasons(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include <stdlib.h>
+            #include "{ICD_SOURCE}"
+
+            typedef struct DummyPnext {{
+                VkStructureType sType;
+                const void *pNext;
+            }} DummyPnext;
+
+            static int expect_reason(PdockerVkCommandBuffer *cmd, const char *reason) {{
+                if (!cmd->recording_failed) {{
+                    fprintf(stderr, "command buffer did not record failure\\n");
+                    return 0;
+                }}
+                if (!cmd->recording_failure_reason || strcmp(cmd->recording_failure_reason, reason) != 0) {{
+                    fprintf(stderr, "unexpected reason got=%s want=%s\\n",
+                            cmd->recording_failure_reason ? cmd->recording_failure_reason : "<null>", reason);
+                    return 0;
+                }}
+                return 1;
+            }}
+
+            int main(void) {{
+                PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)calloc(1, sizeof(*cmd));
+                if (!cmd) return 9;
+
+                DummyPnext unsupported;
+                memset(&unsupported, 0, sizeof(unsupported));
+                unsupported.sType = (VkStructureType)1000060013;
+
+                VkDependencyInfo dependency;
+                memset(&dependency, 0, sizeof(dependency));
+                dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+                dependency.pNext = &unsupported;
+                vkCmdSetEvent2((VkCommandBuffer)cmd, VK_NULL_HANDLE, &dependency);
+                if (!expect_reason(cmd, "event-set2-dependency-info-unsupported")) return 2;
+                if (cmd->command_op_count != 0 || cmd->graphics_command_op_count != 0) {{
+                    fprintf(stderr, "unsupported set-event2 still recorded commands\\n");
+                    return 3;
+                }}
+
+                memset(cmd, 0, sizeof(*cmd));
+                memset(&dependency, 0, sizeof(dependency));
+                dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+                dependency.dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+                vkCmdSetEvent2((VkCommandBuffer)cmd, VK_NULL_HANDLE, &dependency);
+                if (!expect_reason(cmd, "event-set2-barrier-payload-unsupported")) return 4;
+                if (cmd->command_op_count != 0 || cmd->graphics_command_op_count != 0) {{
+                    fprintf(stderr, "barrier-payload set-event2 still recorded commands\\n");
+                    return 5;
+                }}
+                free(cmd);
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_bind_memory2_rejects_null_arrays_and_unsupported_pnext(self):
         source = textwrap.dedent(
             f"""
