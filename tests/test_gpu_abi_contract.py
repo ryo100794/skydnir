@@ -6739,6 +6739,60 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         self.assertIn("features &= ~(VK_FORMAT_FEATURE_BLIT_SRC_BIT", legacy_features)
 
+    def test_vulkan_format_properties2_queries_reuse_legacy_caps(self):
+        icd = VULKAN_ICD.read_text()
+        format2_body = c_function_body(icd, "vkGetPhysicalDeviceFormatProperties2")
+        pnext_body = c_function_body(icd, "fill_format_properties2_pnext")
+        proc_body = icd.split("static PFN_vkVoidFunction proc_address", 1)[1].split(
+            "VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr", 1
+        )[0]
+
+        self.assertIn("zero_vk_out_struct_preserve_chain(pFormatProperties", format2_body)
+        self.assertIn("vkGetPhysicalDeviceFormatProperties(physicalDevice, format, &pFormatProperties->formatProperties);", format2_body)
+        self.assertIn("fill_format_properties2_pnext((void *)header.pNext, &pFormatProperties->formatProperties);", format2_body)
+        self.assertIn("VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_3", pnext_body)
+        self.assertIn("p->linearTilingFeatures = legacy->linearTilingFeatures;", pnext_body)
+        self.assertIn("p->optimalTilingFeatures = legacy->optimalTilingFeatures;", pnext_body)
+        self.assertIn("p->bufferFeatures = legacy->bufferFeatures;", pnext_body)
+        self.assertIn("VK_STRUCTURE_TYPE_DRM_FORMAT_MODIFIER_PROPERTIES_LIST_EXT", pnext_body)
+        self.assertIn("VK_STRUCTURE_TYPE_DRM_FORMAT_MODIFIER_PROPERTIES_LIST_2_EXT", pnext_body)
+        self.assertIn("p->drmFormatModifierCount = 0;", pnext_body)
+        self.assertNotIn("p->pDrmFormatModifierProperties = NULL", pnext_body)
+        self.assertIn("MAP_PROC(vkGetPhysicalDeviceFormatProperties2)", proc_body)
+        self.assertIn('MAP_ALIAS("vkGetPhysicalDeviceFormatProperties2KHR", vkGetPhysicalDeviceFormatProperties2)', proc_body)
+
+    def test_vulkan_image_format_properties2_queries_reuse_legacy_caps(self):
+        icd = VULKAN_ICD.read_text()
+        image2_body = c_function_body(icd, "vkGetPhysicalDeviceImageFormatProperties2")
+        input_pnext_body = c_function_body(icd, "image_format_info2_has_unsupported_pnext")
+        output_pnext_body = c_function_body(icd, "fill_image_format_properties2_pnext")
+        proc_body = icd.split("static PFN_vkVoidFunction proc_address", 1)[1].split(
+            "VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr", 1
+        )[0]
+
+        self.assertIn("zero_vk_out_struct_preserve_chain(pImageFormatProperties", image2_body)
+        self.assertIn("image_format_info2_has_unsupported_pnext(pImageFormatInfo->pNext)", image2_body)
+        self.assertIn("return VK_ERROR_FORMAT_NOT_SUPPORTED;", image2_body)
+        self.assertIn("vkGetPhysicalDeviceImageFormatProperties(", image2_body)
+        for field in [
+            "pImageFormatInfo->format",
+            "pImageFormatInfo->type",
+            "pImageFormatInfo->tiling",
+            "pImageFormatInfo->usage",
+            "pImageFormatInfo->flags",
+            "&pImageFormatProperties->imageFormatProperties",
+        ]:
+            self.assertIn(field, image2_body)
+        self.assertIn("fill_image_format_properties2_pnext((void *)header.pNext);", image2_body)
+        self.assertIn("trace_icd_runtime_failure", input_pnext_body)
+        self.assertIn("VK_ERROR_FORMAT_NOT_SUPPORTED", input_pnext_body)
+        self.assertIn("VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_IMAGE_FORMAT_PROPERTIES", output_pnext_body)
+        self.assertIn("combinedImageSamplerDescriptorCount = 1", output_pnext_body)
+        self.assertIn("VK_STRUCTURE_TYPE_EXTERNAL_IMAGE_FORMAT_PROPERTIES", output_pnext_body)
+        self.assertIn("VK_STRUCTURE_TYPE_FILTER_CUBIC_IMAGE_VIEW_IMAGE_FORMAT_PROPERTIES_EXT", output_pnext_body)
+        self.assertIn("MAP_PROC(vkGetPhysicalDeviceImageFormatProperties2)", proc_body)
+        self.assertIn('MAP_ALIAS("vkGetPhysicalDeviceImageFormatProperties2KHR", vkGetPhysicalDeviceImageFormatProperties2)', proc_body)
+
     def test_vulkan_icd_records_buffer_image_copy_commands_before_dispatch(self):
         icd = VULKAN_ICD.read_text()
         self.assertIn("PdockerVkImageCopyOp image_copy_ops[PDOCKER_VK_MAX_COPY_OPS];", icd)

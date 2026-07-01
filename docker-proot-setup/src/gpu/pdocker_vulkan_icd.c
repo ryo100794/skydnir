@@ -11833,6 +11833,102 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceFormatProperties(
     pFormatProperties->optimalTilingFeatures = pdocker_vk_advertised_image_features(format);
 }
 
+static void fill_format_properties2_pnext(void *pNext, const VkFormatProperties *legacy) {
+    (void)legacy;
+    for (void *node = pNext; node;) {
+        PdockerVkStructHeader header = read_vk_struct_header(node);
+        switch (header.sType) {
+#ifdef VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_3
+            case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_3: {
+                VkFormatProperties3 *p = (VkFormatProperties3 *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                if (legacy) {
+                    p->linearTilingFeatures = legacy->linearTilingFeatures;
+                    p->optimalTilingFeatures = legacy->optimalTilingFeatures;
+                    p->bufferFeatures = legacy->bufferFeatures;
+                }
+                break;
+            }
+#endif
+#ifdef VK_STRUCTURE_TYPE_DRM_FORMAT_MODIFIER_PROPERTIES_LIST_EXT
+            case VK_STRUCTURE_TYPE_DRM_FORMAT_MODIFIER_PROPERTIES_LIST_EXT: {
+                VkDrmFormatModifierPropertiesListEXT *p = (VkDrmFormatModifierPropertiesListEXT *)node;
+                p->drmFormatModifierCount = 0;
+                break;
+            }
+#endif
+#ifdef VK_STRUCTURE_TYPE_DRM_FORMAT_MODIFIER_PROPERTIES_LIST_2_EXT
+            case VK_STRUCTURE_TYPE_DRM_FORMAT_MODIFIER_PROPERTIES_LIST_2_EXT: {
+                VkDrmFormatModifierPropertiesList2EXT *p = (VkDrmFormatModifierPropertiesList2EXT *)node;
+                p->drmFormatModifierCount = 0;
+                break;
+            }
+#endif
+            default:
+                break;
+        }
+        node = (void *)header.pNext;
+    }
+}
+
+VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceFormatProperties2(
+        VkPhysicalDevice physicalDevice,
+        VkFormat format,
+        VkFormatProperties2 *pFormatProperties) {
+    if (!pFormatProperties) return;
+    PdockerVkStructHeader header = read_vk_struct_header(pFormatProperties);
+    zero_vk_out_struct_preserve_chain(pFormatProperties, sizeof(*pFormatProperties), header);
+    vkGetPhysicalDeviceFormatProperties(physicalDevice, format, &pFormatProperties->formatProperties);
+    fill_format_properties2_pnext((void *)header.pNext, &pFormatProperties->formatProperties);
+}
+
+static bool image_format_info2_has_unsupported_pnext(const void *pNext) {
+    const void *node = pNext;
+    while (node) {
+        PdockerVkStructHeader header = read_vk_struct_header(node);
+        (void)header;
+        trace_icd_runtime_failure("image-format-properties2-input-pnext-unsupported",
+                                  VK_ERROR_FORMAT_NOT_SUPPORTED);
+        return true;
+    }
+    return false;
+}
+
+static void fill_image_format_properties2_pnext(void *pNext) {
+    for (void *node = pNext; node;) {
+        PdockerVkStructHeader header = read_vk_struct_header(node);
+        switch (header.sType) {
+#ifdef VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_IMAGE_FORMAT_PROPERTIES
+            case VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_IMAGE_FORMAT_PROPERTIES: {
+                VkSamplerYcbcrConversionImageFormatProperties *p =
+                    (VkSamplerYcbcrConversionImageFormatProperties *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                p->combinedImageSamplerDescriptorCount = 1;
+                break;
+            }
+#endif
+#ifdef VK_STRUCTURE_TYPE_EXTERNAL_IMAGE_FORMAT_PROPERTIES
+            case VK_STRUCTURE_TYPE_EXTERNAL_IMAGE_FORMAT_PROPERTIES: {
+                VkExternalImageFormatProperties *p = (VkExternalImageFormatProperties *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                break;
+            }
+#endif
+#ifdef VK_STRUCTURE_TYPE_FILTER_CUBIC_IMAGE_VIEW_IMAGE_FORMAT_PROPERTIES_EXT
+            case VK_STRUCTURE_TYPE_FILTER_CUBIC_IMAGE_VIEW_IMAGE_FORMAT_PROPERTIES_EXT: {
+                VkFilterCubicImageViewImageFormatPropertiesEXT *p =
+                    (VkFilterCubicImageViewImageFormatPropertiesEXT *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                break;
+            }
+#endif
+            default:
+                break;
+        }
+        node = (void *)header.pNext;
+    }
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceImageFormatProperties(
         VkPhysicalDevice physicalDevice,
         VkFormat format,
@@ -11886,6 +11982,29 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceImageFormatProperties(
         return VK_ERROR_FORMAT_NOT_SUPPORTED;
     }
     pImageFormatProperties->maxResourceSize = max_resource;
+    return VK_SUCCESS;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceImageFormatProperties2(
+        VkPhysicalDevice physicalDevice,
+        const VkPhysicalDeviceImageFormatInfo2 *pImageFormatInfo,
+        VkImageFormatProperties2 *pImageFormatProperties) {
+    if (!pImageFormatInfo || !pImageFormatProperties) return VK_ERROR_FORMAT_NOT_SUPPORTED;
+    PdockerVkStructHeader header = read_vk_struct_header(pImageFormatProperties);
+    zero_vk_out_struct_preserve_chain(pImageFormatProperties, sizeof(*pImageFormatProperties), header);
+    if (image_format_info2_has_unsupported_pnext(pImageFormatInfo->pNext)) {
+        return VK_ERROR_FORMAT_NOT_SUPPORTED;
+    }
+    VkResult rc = vkGetPhysicalDeviceImageFormatProperties(
+        physicalDevice,
+        pImageFormatInfo->format,
+        pImageFormatInfo->type,
+        pImageFormatInfo->tiling,
+        pImageFormatInfo->usage,
+        pImageFormatInfo->flags,
+        &pImageFormatProperties->imageFormatProperties);
+    if (rc != VK_SUCCESS) return rc;
+    fill_image_format_properties2_pnext((void *)header.pNext);
     return VK_SUCCESS;
 }
 
@@ -21674,7 +21793,11 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_PROC(vkGetPhysicalDeviceFeatures2);
     MAP_ALIAS("vkGetPhysicalDeviceFeatures2KHR", vkGetPhysicalDeviceFeatures2);
     MAP_PROC(vkGetPhysicalDeviceFormatProperties);
+    MAP_PROC(vkGetPhysicalDeviceFormatProperties2);
+    MAP_ALIAS("vkGetPhysicalDeviceFormatProperties2KHR", vkGetPhysicalDeviceFormatProperties2);
     MAP_PROC(vkGetPhysicalDeviceImageFormatProperties);
+    MAP_PROC(vkGetPhysicalDeviceImageFormatProperties2);
+    MAP_ALIAS("vkGetPhysicalDeviceImageFormatProperties2KHR", vkGetPhysicalDeviceImageFormatProperties2);
     MAP_PROC(vkGetPhysicalDeviceSparseImageFormatProperties);
     MAP_PROC(vkGetPhysicalDeviceQueueFamilyProperties);
     MAP_PROC(vkGetPhysicalDeviceQueueFamilyProperties2);

@@ -62,13 +62,17 @@ or closes.
   usage checks now derive support from the same advertised feature bits.
 - [done] **color-attachment-scoped MSAA advertisement**: `fmt%dSampleCounts` is
   now treated as color-attachment-scoped capability evidence, not a general
-  per-format promise. The ICD returns multisample counts only for exact 2D
-  non-depth/stencil `VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT` image-format queries;
-  sampled, storage, transfer, depth/stencil, cube-compatible, and combined
+  per-format promise. The ICD returns multisample counts only for bounded 2D
+  non-depth/stencil color attachment image-format queries, including the
+  explicit-resolve source usage
+  `VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT`;
+  sampled, storage, transfer-only, depth/stencil, cube-compatible, and combined
   usages remain single-sample. Physical-device limits expose wider counts only
   through `framebufferColorSampleCounts`; sampled/storage/depth/stencil/no-
-  attachment limits remain `VK_SAMPLE_COUNT_1_BIT`. Explicit `vkCmdResolveImage`
-  transfer resolve remains fail-closed.
+  attachment limits remain `VK_SAMPLE_COUNT_1_BIT`. Explicit
+  `vkCmdResolveImage` color MSAA sources are now reachable only through the
+  same advertised bounded resolve subset and still fail closed for unsupported
+  layouts, formats, or unresolved MSAA writeback.
 - [done] **MSAA image allocation safety prerequisite**: Before widening
   advertised sample counts, ICD image requirement sizing now converts
   `VkSampleCountFlagBits` to an exact sample count, rejects invalid/multiple-bit
