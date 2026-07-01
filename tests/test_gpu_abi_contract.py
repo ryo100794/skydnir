@@ -4308,7 +4308,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("const VkImageUsageFlags accepted_msaa_usage", msaa_helper_body)
         self.assertIn("src->usage & ~accepted_msaa_usage", msaa_helper_body)
         self.assertIn("VK_IMAGE_USAGE_TRANSFER_SRC_BIT", msaa_helper_body)
-        self.assertIn("VK_IMAGE_USAGE_TRANSFER_DST_BIT", msaa_helper_body)
+        self.assertNotIn("VK_IMAGE_USAGE_TRANSFER_DST_BIT", msaa_helper_body)
+        self.assertIn("src->usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT", msaa_helper_body)
+        self.assertNotIn("src->usage & (VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |", msaa_helper_body)
         self.assertIn("src->mip_levels != 1", msaa_helper_body)
         self.assertIn("vulkan_format_has_depth_aspect((VkFormat)src->format)", msaa_helper_body)
         self.assertIn("vulkan_format_has_stencil_aspect((VkFormat)src->format)", msaa_helper_body)
@@ -12678,6 +12680,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "static int vulkan_graphics_v614_resolve_runtime_eligible", 1
         )[0]
         self.assertIn("VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT", sample_format_body)
+        self.assertIn("VK_IMAGE_USAGE_TRANSFER_SRC_BIT", sample_format_body)
+        self.assertIn("color_counts & resolve_src_counts", sample_format_body)
         self.assertIn("!vulkan_format_has_depth_aspect(format)", sample_format_body)
         self.assertIn("!vulkan_format_has_stencil_aspect(format)", sample_format_body)
         self.assertIn("VkSampleCountFlags counts = VK_SAMPLE_COUNT_1_BIT;", sample_format_body)
@@ -12688,6 +12692,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "static int vulkan_graphics_v615_blit_runtime_eligible", 1
         )[0]
         self.assertNotIn("(void)src_image", explicit_resolve_body)
+        self.assertIn("src_image->usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT", explicit_resolve_body)
         self.assertIn("src_image->samples == VK_SAMPLE_COUNT_1_BIT", explicit_resolve_body)
         self.assertIn("dst_image->samples != VK_SAMPLE_COUNT_1_BIT", explicit_resolve_body)
         self.assertIn("src_image->tiling != VK_IMAGE_TILING_OPTIMAL", explicit_resolve_body)
@@ -12798,7 +12803,14 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("return cap->sample_counts & PDOCKER_VK_SUPPORTED_SAMPLE_COUNTS;", advertised_sample_body)
         self.assertIn("return VK_SAMPLE_COUNT_1_BIT;", advertised_sample_body)
         self.assertIn("pdocker_vk_msaa_color_attachment_request", advertised_sample_body)
-        self.assertIn("usage == VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT", advertised_sample_body)
+        self.assertIn("const VkImageUsageFlags accepted_msaa_usage", advertised_sample_body)
+        self.assertIn("VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |", advertised_sample_body)
+        self.assertIn("VK_IMAGE_USAGE_TRANSFER_SRC_BIT", advertised_sample_body)
+        self.assertIn("(usage & ~accepted_msaa_usage) != 0", advertised_sample_body)
+        self.assertIn("usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT", advertised_sample_body)
+        self.assertNotIn("usage == VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT", advertised_sample_body)
+        self.assertNotIn("VK_IMAGE_USAGE_SAMPLED_BIT", advertised_sample_body)
+        self.assertNotIn("VK_IMAGE_USAGE_STORAGE_BIT", advertised_sample_body)
         self.assertIn("pdocker_vk_image_sample_counts_for_request", advertised_sample_body)
         self.assertIn("pdocker_vk_advertised_color_attachment_sample_counts", advertised_sample_body)
         self.assertIn("counts ? counts : VK_SAMPLE_COUNT_1_BIT", advertised_sample_body)

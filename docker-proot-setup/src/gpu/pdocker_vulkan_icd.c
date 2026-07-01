@@ -10749,7 +10749,11 @@ static bool pdocker_vk_msaa_color_attachment_request(
     if (pdocker_vk_format_is_depth_stencil(format)) return false;
     if (type != VK_IMAGE_TYPE_2D) return false;
     if (flags & VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT) return false;
-    return usage == VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    const VkImageUsageFlags accepted_msaa_usage =
+        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+        VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    if ((usage & ~accepted_msaa_usage) != 0) return false;
+    return (usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) != 0;
 }
 
 static VkSampleCountFlags pdocker_vk_image_sample_counts_for_request(

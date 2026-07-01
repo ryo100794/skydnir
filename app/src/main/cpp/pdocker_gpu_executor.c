@@ -3524,11 +3524,9 @@ static int vulkan_dispatch_msaa_image_allowed(
     }
     const VkImageUsageFlags accepted_msaa_usage =
         VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-        VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-        VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     return (src->usage & ~accepted_msaa_usage) == 0 &&
-           (src->usage & (VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                          VK_IMAGE_USAGE_TRANSFER_SRC_BIT)) != 0;
+           (src->usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) != 0;
 }
 
 static int validate_vulkan_dispatch_v5_image_samples_for_generic_dispatch(
@@ -21517,7 +21515,10 @@ static VkSampleCountFlags vulkan_graphics_runtime_format_sample_counts(
         (features & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT)) {
         VkSampleCountFlags color_counts = vulkan_graphics_runtime_query_sample_counts(
             rt, format, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
-        if (color_counts) counts = color_counts;
+        VkSampleCountFlags resolve_src_counts = vulkan_graphics_runtime_query_sample_counts(
+            rt, format,
+            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
+        if (color_counts && resolve_src_counts) counts = color_counts & resolve_src_counts;
     }
     return counts & vulkan_graphics_supported_sample_count_mask();
 }
@@ -21527,7 +21528,8 @@ static int vulkan_graphics_v614_resolve_runtime_eligible(
         const PdockerGpuVulkanDispatchV5ImageEntry *dst_image,
         const PdockerGpuVulkanGraphicsV614ResolveImageEntry *entry) {
     if (!src_image || !dst_image || !entry) return 0;
-    if (!(src_image->usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) ||
+    if (!(src_image->usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) ||
+        !(src_image->usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) ||
         !(dst_image->usage & VK_IMAGE_USAGE_TRANSFER_DST_BIT) ||
         src_image->format != dst_image->format ||
         src_image->samples == VK_SAMPLE_COUNT_1_BIT ||
