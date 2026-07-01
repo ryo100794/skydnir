@@ -965,6 +965,15 @@ typedef struct {
 } PdockerVkGraphicsCommandRecord;
 
 typedef struct {
+    uint32_t memory_first;
+    uint32_t memory_count;
+    uint32_t buffer_first;
+    uint32_t buffer_count;
+    uint32_t image_first;
+    uint32_t image_count;
+} PdockerVkBarrierOpRange;
+
+typedef struct {
     VK_LOADER_DATA loader;
     PdockerVkPipeline *pipeline;
     PdockerVkPipeline *compute_pipeline;
@@ -1460,6 +1469,8 @@ static bool append_secondary_command_buffer(
                 record.push_op_index += push_op_base;
                 break;
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER:
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT:
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT:
                 record.memory_barrier_op_first += memory_barrier_base;
                 record.buffer_barrier_op_first += buffer_barrier_base;
                 record.image_barrier_op_first += image_barrier_base;
@@ -6443,7 +6454,9 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
             meta->layout_id = push->layout_id;
             meta->range_offset = push->offset;
             meta->range_size = push->size;
-        } else if (record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER) {
+        } else if (record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER ||
+                   record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT ||
+                   record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT) {
             for (uint32_t mi = 0; mi < record->memory_barrier_op_count; ++mi) {
                 uint32_t op_index = record->memory_barrier_op_first + mi;
                 if (op_index >= cmd->memory_barrier_op_count ||
@@ -6524,6 +6537,29 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
                 dst->src_queue_family_index = src->src_queue_family_index;
                 dst->dst_queue_family_index = src->dst_queue_family_index;
             }
+            if (record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT ||
+                record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT) {
+                if (record->command_op_sequence >= cmd->command_op_count) {
+                    rc = -EPROTO;
+                    goto cleanup;
+                }
+                const PdockerVkCommandOp *op = &cmd->command_ops[record->command_op_sequence];
+                const bool is_set_event = record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT;
+                const bool is_wait_event = record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT;
+                if ((is_set_event && op->type != PDOCKER_VK_COMMAND_EVENT) ||
+                    (is_wait_event && op->type != PDOCKER_VK_COMMAND_EVENT_WAIT) ||
+                    !op->event || op->event->event_id == 0) {
+                    rc = -EPROTO;
+                    goto cleanup;
+                }
+                if (is_set_event && !op->event_signaled) {
+                    rc = -EPROTO;
+                    goto cleanup;
+                }
+                command->pipeline_layout_id = op->event->event_id;
+                command->index_offset = (uint64_t)op->event_src_stage_mask;
+                command->push_hash = (uint64_t)op->event_dst_stage_mask;
+            }
         } else if (record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_CLEAR_ATTACHMENTS) {
             if (record->descriptor_bind_snapshot_index >= cmd->clear_attachments_command_op_count) {
                 rc = -EPROTO;
@@ -6578,25 +6614,14 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
                 dst->layer_count = src->layer_count;
             }
             need_v616_clear_attachments = true;
-        } else if (record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT ||
-                   record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_EVENT ||
-                   record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT) {
+        } else if (record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_EVENT) {
             if (record->command_op_sequence >= cmd->command_op_count) {
                 rc = -EPROTO;
                 goto cleanup;
             }
             const PdockerVkCommandOp *op = &cmd->command_ops[record->command_op_sequence];
-            const bool is_set_event = record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT;
-            const bool is_reset_event = record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_EVENT;
-            const bool is_wait_event = record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT;
-            if (((is_set_event || is_reset_event) && op->type != PDOCKER_VK_COMMAND_EVENT) ||
-                (is_wait_event && op->type != PDOCKER_VK_COMMAND_EVENT_WAIT) ||
-                !op->event || op->event->event_id == 0) {
-                rc = -EPROTO;
-                goto cleanup;
-            }
-            if ((is_set_event && !op->event_signaled) ||
-                (is_reset_event && op->event_signaled)) {
+            if (op->type != PDOCKER_VK_COMMAND_EVENT ||
+                !op->event || op->event->event_id == 0 || op->event_signaled) {
                 rc = -EPROTO;
                 goto cleanup;
             }
@@ -20411,10 +20436,15 @@ static void record_event_command(VkCommandBuffer commandBuffer,
                                  VkEvent event,
                                  bool signaled,
                                  VkPipelineStageFlags2 stage_mask,
-                                 VkDependencyFlags dependency_flags) {
+                                 VkDependencyFlags dependency_flags,
+                                 const PdockerVkBarrierOpRange *barriers) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     PdockerVkEvent *e = pdocker_vk_event_from_handle(event);
-    if (!cmd || !e) return;
+    if (!cmd) return;
+    if (!e) {
+        command_buffer_mark_recording_failed(cmd, "event-command-null-event");
+        return;
+    }
     PdockerVkCommandOp op;
     memset(&op, 0, sizeof(op));
     op.type = PDOCKER_VK_COMMAND_EVENT;
@@ -20427,6 +20457,14 @@ static void record_event_command(VkCommandBuffer commandBuffer,
         ? PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT
         : PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_EVENT;
     record.flags = dependency_flags & VK_DEPENDENCY_BY_REGION_BIT;
+    if (barriers) {
+        record.memory_barrier_op_first = barriers->memory_first;
+        record.memory_barrier_op_count = barriers->memory_count;
+        record.buffer_barrier_op_first = barriers->buffer_first;
+        record.buffer_barrier_op_count = barriers->buffer_count;
+        record.image_barrier_op_first = barriers->image_first;
+        record.image_barrier_op_count = barriers->image_count;
+    }
     if (!append_graphics_command_record(cmd, &record)) return;
     (void)append_command_op(cmd, &op);
 }
@@ -20435,7 +20473,8 @@ static void record_event_wait_command(VkCommandBuffer commandBuffer,
                                       VkEvent event,
                                       VkPipelineStageFlags2 src_stage_mask,
                                       VkPipelineStageFlags2 dst_stage_mask,
-                                      VkDependencyFlags dependency_flags) {
+                                      VkDependencyFlags dependency_flags,
+                                      const PdockerVkBarrierOpRange *barriers) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     PdockerVkEvent *e = pdocker_vk_event_from_handle(event);
     if (!cmd || !e) {
@@ -20452,6 +20491,14 @@ static void record_event_wait_command(VkCommandBuffer commandBuffer,
     memset(&record, 0, sizeof(record));
     record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT;
     record.flags = dependency_flags & VK_DEPENDENCY_BY_REGION_BIT;
+    if (barriers) {
+        record.memory_barrier_op_first = barriers->memory_first;
+        record.memory_barrier_op_count = barriers->memory_count;
+        record.buffer_barrier_op_first = barriers->buffer_first;
+        record.buffer_barrier_op_count = barriers->buffer_count;
+        record.image_barrier_op_first = barriers->image_first;
+        record.image_barrier_op_count = barriers->image_count;
+    }
     if (!append_graphics_command_record(cmd, &record)) return;
     (void)append_command_op(cmd, &op);
 }
@@ -20460,14 +20507,14 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetEvent(
         VkCommandBuffer commandBuffer,
         VkEvent event,
         VkPipelineStageFlags stageMask) {
-    record_event_command(commandBuffer, event, true, normalize_event_stage_mask((VkPipelineStageFlags2)stageMask), 0);
+    record_event_command(commandBuffer, event, true, normalize_event_stage_mask((VkPipelineStageFlags2)stageMask), 0, NULL);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdResetEvent(
         VkCommandBuffer commandBuffer,
         VkEvent event,
         VkPipelineStageFlags stageMask) {
-    record_event_command(commandBuffer, event, false, normalize_event_stage_mask((VkPipelineStageFlags2)stageMask), 0);
+    record_event_command(commandBuffer, event, false, normalize_event_stage_mask((VkPipelineStageFlags2)stageMask), 0, NULL);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdWaitEvents(
@@ -20499,7 +20546,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdWaitEvents(
         record_event_wait_command(commandBuffer, pEvents[i],
                                   normalize_event_stage_mask((VkPipelineStageFlags2)srcStageMask),
                                   normalize_event_stage_mask((VkPipelineStageFlags2)dstStageMask),
-                                  0);
+                                  0, NULL);
     }
     vkCmdPipelineBarrier(commandBuffer,
                          srcStageMask,
@@ -20522,6 +20569,11 @@ static bool sync2_stage_access_pair_invalid(
     if (dstStageMask == VK_PIPELINE_STAGE_2_NONE && dstAccessMask != 0) return true;
     return false;
 }
+
+static bool dependency_flags_unsupported(VkDependencyFlags dependency_flags);
+static PdockerVkBarrierOpRange record_dependency_info_barrier_ops(
+        VkCommandBuffer commandBuffer,
+        const VkDependencyInfo *info);
 
 static bool dependency_info_has_unsupported_pnext(const VkDependencyInfo *info) {
     if (!info) return false;
@@ -20572,12 +20624,45 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier2(
     if ((dependency_flags & ~VK_DEPENDENCY_BY_REGION_BIT) != 0) {
         cmd->graphics_unsupported = true;
     }
-    uint32_t memory_barrier_first = cmd->memory_barrier_op_count;
-    uint32_t buffer_barrier_first = cmd->buffer_barrier_op_count;
-    uint32_t image_barrier_first = cmd->image_barrier_op_count;
-    if (pDependencyInfo && pDependencyInfo->pMemoryBarriers) {
-        for (uint32_t i = 0; i < pDependencyInfo->memoryBarrierCount; ++i) {
-            const VkMemoryBarrier2 *b = &pDependencyInfo->pMemoryBarriers[i];
+    PdockerVkBarrierOpRange barriers = record_dependency_info_barrier_ops(commandBuffer, pDependencyInfo);
+    if (cmd->recording_failed) return;
+    if (barriers.memory_count || barriers.buffer_count || barriers.image_count) {
+        PdockerVkGraphicsCommandRecord record;
+        memset(&record, 0, sizeof(record));
+        record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER;
+        record.flags = dependency_flags & VK_DEPENDENCY_BY_REGION_BIT;
+        record.memory_barrier_op_first = barriers.memory_first;
+        record.memory_barrier_op_count = barriers.memory_count;
+        record.buffer_barrier_op_first = barriers.buffer_first;
+        record.buffer_barrier_op_count = barriers.buffer_count;
+        record.image_barrier_op_first = barriers.image_first;
+        record.image_barrier_op_count = barriers.image_count;
+        (void)append_graphics_command_record(cmd, &record);
+    }
+    PdockerVkCommandOp op;
+    memset(&op, 0, sizeof(op));
+    op.type = PDOCKER_VK_COMMAND_BARRIER;
+    (void)append_command_op(cmd, &op);
+}
+
+static bool dependency_flags_unsupported(VkDependencyFlags dependency_flags) {
+    return (dependency_flags & ~VK_DEPENDENCY_BY_REGION_BIT) != 0;
+}
+
+
+static PdockerVkBarrierOpRange record_dependency_info_barrier_ops(
+        VkCommandBuffer commandBuffer,
+        const VkDependencyInfo *info) {
+    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkBarrierOpRange range;
+    memset(&range, 0, sizeof(range));
+    if (!cmd) return range;
+    range.memory_first = cmd->memory_barrier_op_count;
+    range.buffer_first = cmd->buffer_barrier_op_count;
+    range.image_first = cmd->image_barrier_op_count;
+    if (info && info->pMemoryBarriers) {
+        for (uint32_t i = 0; i < info->memoryBarrierCount; ++i) {
+            const VkMemoryBarrier2 *b = &info->pMemoryBarriers[i];
             record_memory_barrier_op(commandBuffer,
                                      b->srcAccessMask,
                                      b->dstAccessMask,
@@ -20585,9 +20670,9 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier2(
                                      b->dstStageMask);
         }
     }
-    if (pDependencyInfo && pDependencyInfo->pBufferMemoryBarriers) {
-        for (uint32_t i = 0; i < pDependencyInfo->bufferMemoryBarrierCount; ++i) {
-            const VkBufferMemoryBarrier2 *b = &pDependencyInfo->pBufferMemoryBarriers[i];
+    if (info && info->pBufferMemoryBarriers) {
+        for (uint32_t i = 0; i < info->bufferMemoryBarrierCount; ++i) {
+            const VkBufferMemoryBarrier2 *b = &info->pBufferMemoryBarriers[i];
             record_buffer_barrier_op(commandBuffer,
                                      pdocker_vk_buffer_from_handle(b->buffer),
                                      b->offset,
@@ -20600,9 +20685,9 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier2(
                                      b->dstQueueFamilyIndex);
         }
     }
-    if (pDependencyInfo && pDependencyInfo->pImageMemoryBarriers) {
-        for (uint32_t i = 0; i < pDependencyInfo->imageMemoryBarrierCount; ++i) {
-            const VkImageMemoryBarrier2 *b = &pDependencyInfo->pImageMemoryBarriers[i];
+    if (info && info->pImageMemoryBarriers) {
+        for (uint32_t i = 0; i < info->imageMemoryBarrierCount; ++i) {
+            const VkImageMemoryBarrier2 *b = &info->pImageMemoryBarriers[i];
             record_image_barrier_op(commandBuffer,
                                     pdocker_vk_image_from_handle(b->image),
                                     b->oldLayout,
@@ -20616,36 +20701,10 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier2(
                                     b->dstQueueFamilyIndex);
         }
     }
-    uint32_t memory_barrier_count = cmd->memory_barrier_op_count - memory_barrier_first;
-    uint32_t buffer_barrier_count = cmd->buffer_barrier_op_count - buffer_barrier_first;
-    uint32_t image_barrier_count = cmd->image_barrier_op_count - image_barrier_first;
-    if (memory_barrier_count || buffer_barrier_count || image_barrier_count) {
-        PdockerVkGraphicsCommandRecord record;
-        memset(&record, 0, sizeof(record));
-        record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER;
-        record.flags = dependency_flags & VK_DEPENDENCY_BY_REGION_BIT;
-        record.memory_barrier_op_first = memory_barrier_first;
-        record.memory_barrier_op_count = memory_barrier_count;
-        record.buffer_barrier_op_first = buffer_barrier_first;
-        record.buffer_barrier_op_count = buffer_barrier_count;
-        record.image_barrier_op_first = image_barrier_first;
-        record.image_barrier_op_count = image_barrier_count;
-        (void)append_graphics_command_record(cmd, &record);
-    }
-    PdockerVkCommandOp op;
-    memset(&op, 0, sizeof(op));
-    op.type = PDOCKER_VK_COMMAND_BARRIER;
-    (void)append_command_op(cmd, &op);
-}
-
-static bool dependency_flags_unsupported(VkDependencyFlags dependency_flags) {
-    return (dependency_flags & ~VK_DEPENDENCY_BY_REGION_BIT) != 0;
-}
-
-static bool dependency_info_has_event_barrier_payload(const VkDependencyInfo *info) {
-    return info && (info->memoryBarrierCount != 0 ||
-                    info->bufferMemoryBarrierCount != 0 ||
-                    info->imageMemoryBarrierCount != 0);
+    range.memory_count = cmd->memory_barrier_op_count - range.memory_first;
+    range.buffer_count = cmd->buffer_barrier_op_count - range.buffer_first;
+    range.image_count = cmd->image_barrier_op_count - range.image_first;
+    return range;
 }
 
 static VkPipelineStageFlags2 dependency_info_src_stage_mask(const VkDependencyInfo *info) {
@@ -20699,23 +20758,25 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetEvent2(
         if (cmd) command_buffer_mark_recording_failed(cmd, "event-set2-dependency-info-unsupported");
         return;
     }
+    if (!event) {
+        if (cmd) command_buffer_mark_recording_failed(cmd, "event-set2-null-event");
+        return;
+    }
     const VkDependencyFlags dependency_flags = pDependencyInfo ? pDependencyInfo->dependencyFlags : 0;
     if (dependency_flags_unsupported(dependency_flags)) {
         if (cmd) command_buffer_mark_recording_failed(cmd, "event-set2-dependency-flags-unsupported");
         return;
     }
-    if (dependency_info_has_event_barrier_payload(pDependencyInfo)) {
-        if (cmd) command_buffer_mark_recording_failed(cmd, "event-set2-barrier-payload-unsupported");
-        return;
-    }
-    record_event_command(commandBuffer, event, true, dependency_info_src_stage_mask(pDependencyInfo), dependency_flags);
+    PdockerVkBarrierOpRange barriers = record_dependency_info_barrier_ops(commandBuffer, pDependencyInfo);
+    if (cmd && cmd->recording_failed) return;
+    record_event_command(commandBuffer, event, true, dependency_info_src_stage_mask(pDependencyInfo), dependency_flags, &barriers);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdResetEvent2(
         VkCommandBuffer commandBuffer,
         VkEvent event,
         VkPipelineStageFlags2 stageMask) {
-    record_event_command(commandBuffer, event, false, stageMask, 0);
+    record_event_command(commandBuffer, event, false, stageMask, 0, NULL);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdWaitEvents2(
@@ -20742,16 +20803,16 @@ VKAPI_ATTR void VKAPI_CALL vkCmdWaitEvents2(
             if (cmd) command_buffer_mark_recording_failed(cmd, "event-wait2-dependency-flags-unsupported");
             return;
         }
-        if (dependency_info_has_event_barrier_payload(&pDependencyInfos[i])) {
-            if (cmd) command_buffer_mark_recording_failed(cmd, "event-wait2-barrier-payload-unsupported");
-            return;
-        }
+
     }
     for (uint32_t i = 0; i < eventCount; ++i) {
+        PdockerVkBarrierOpRange barriers = record_dependency_info_barrier_ops(commandBuffer, &pDependencyInfos[i]);
+        if (cmd && cmd->recording_failed) return;
         record_event_wait_command(commandBuffer, pEvents[i],
                                   dependency_info_src_stage_mask(&pDependencyInfos[i]),
                                   dependency_info_dst_stage_mask(&pDependencyInfos[i]),
-                                  pDependencyInfos[i].dependencyFlags);
+                                  pDependencyInfos[i].dependencyFlags,
+                                  &barriers);
     }
 }
 

@@ -1563,9 +1563,13 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("layout = vulkan_replay_layout_for_executor(layout);", set_layout_body)
 
         recorder_body = c_function_body(executor, "record_vulkan_graphics_v6_command_buffer")
+        dependency_helper_body = c_function_body(executor, "collect_vulkan_graphics_v6_dependency_barriers")
         for marker in [
             "vulkan_replay_layout_for_executor((VkImageLayout)barrier->old_layout)",
             "vulkan_replay_layout_for_executor((VkImageLayout)barrier->new_layout)",
+        ]:
+            self.assertIn(marker, dependency_helper_body)
+        for marker in [
             "vulkan_replay_layout_for_executor((VkImageLayout)copy->image_layout)",
             "vulkan_replay_layout_for_executor((VkImageLayout)clear->image_layout)",
         ]:
@@ -3665,32 +3669,35 @@ class GpuAbiContractTest(unittest.TestCase):
         preflight = executor.split("static int preflight_vulkan_graphics_v6_replay_supported", 1)[1].split(
             "static int preflight_vulkan_graphics_v6_runtime_supported", 1
         )[0]
+        preflight_barrier_helper = c_function_body(executor, "preflight_vulkan_graphics_v6_dependency_barriers")
         recorder = executor.split("static int record_vulkan_graphics_v6_command_buffer", 1)[1].split(
             "static int submit_vulkan_graphics_v6_command_buffer", 1
         )[0]
         self.assertNotIn("graphics barrier replay is not implemented", preflight)
         self.assertNotIn("graphics barrier without memory/buffer/image barriers is not supported", preflight)
         self.assertIn("A synchronization2 dependency with no barrier arrays is a legal no-op", preflight)
-        self.assertIn("graphics barrier batch exceeds replay stack limit", preflight)
-        self.assertIn("matched_memory_barriers > PDOCKER_GPU_MAX_VULKAN_BINDINGS", preflight)
+        self.assertIn("graphics barrier batch exceeds replay stack limit", preflight_barrier_helper)
+        self.assertIn("matched_memory_barriers > PDOCKER_GPU_MAX_VULKAN_BINDINGS", preflight_barrier_helper)
         self.assertIn("PdockerGpuVulkanGraphicsV61ImageBarrierEntry", executor)
         self.assertIn("PFN_vkCmdPipelineBarrier2 cmd_pipeline_barrier2", executor)
         self.assertIn("rt->cmd_pipeline_barrier2(command_buffer, &dependency)", recorder)
         self.assertNotIn("memory_barrier_count == 0 && buffer_barrier_count == 0 && image_barrier_count == 0", recorder)
         self.assertIn("Vulkan permits an empty VkDependencyInfo", recorder)
+        dependency_helper = c_function_body(executor, "collect_vulkan_graphics_v6_dependency_barriers")
         self.assertIn("VkMemoryBarrier2 memory_barriers_to_record", recorder)
         self.assertIn("VkBufferMemoryBarrier2 buffer_barriers_to_record", recorder)
         self.assertIn("VkImageMemoryBarrier2 image_barriers_to_record", recorder)
-        self.assertIn("srcStageMask = (VkPipelineStageFlags2)barrier->src_stage_mask", recorder)
+        self.assertIn("srcStageMask = (VkPipelineStageFlags2)barrier->src_stage_mask", dependency_helper)
         self.assertNotIn("vkCmdPipelineBarrier(command_buffer,\n                                     src_stages", recorder)
-        self.assertIn("attachments->images[barrier->image_index].current_layout", recorder)
+        self.assertIn("vulkan_replay_image_set_layout_for_range(", dependency_helper)
         self.assertIn("vulkan_image_aspect_mask_valid_for_format", executor)
-        self.assertIn("barrier->level_count == VK_REMAINING_MIP_LEVELS", recorder)
-        self.assertIn("barrier->layer_count == VK_REMAINING_ARRAY_LAYERS", recorder)
-        self.assertIn("barrier_image->format, (VkImageAspectFlags)barrier->aspect_mask", recorder)
-        self.assertIn("vulkan_graphics_barrier_queue_family_replayable", preflight)
-        self.assertIn("graphics cross-queue-family barrier replay is not implemented", preflight)
-        self.assertIn("vulkan_graphics_replay_queue_family_index", recorder)
+        self.assertIn("barrier->level_count == VK_REMAINING_MIP_LEVELS", dependency_helper)
+        self.assertIn("barrier->layer_count == VK_REMAINING_ARRAY_LAYERS", dependency_helper)
+        self.assertIn("barrier_image->format, (VkImageAspectFlags)barrier->aspect_mask", dependency_helper)
+        preflight_barrier_helper = c_function_body(executor, "preflight_vulkan_graphics_v6_dependency_barriers")
+        self.assertIn("vulkan_graphics_barrier_queue_family_replayable", preflight_barrier_helper)
+        self.assertIn("graphics cross-queue-family barrier replay is not implemented", preflight_barrier_helper)
+        self.assertIn("vulkan_graphics_replay_queue_family_index", dependency_helper)
         self.assertNotIn("case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER:\n                rc = -EOPNOTSUPP", recorder)
 
     def test_vulkan_graphics_no_attachment_dynamic_rendering_is_replayable(self):
@@ -3734,9 +3741,11 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("return src_queue_family_index == dst_queue_family_index", helper)
         self.assertIn("return VK_QUEUE_FAMILY_IGNORED", normalizer)
         self.assertIn("vulkan_graphics_barrier_queue_family_replayable", validator)
-        self.assertIn("vulkan_graphics_barrier_queue_family_replayable", preflight)
-        self.assertIn("graphics cross-queue-family barrier replay is not implemented", preflight)
-        self.assertEqual(recorder.count("vulkan_graphics_replay_queue_family_index("), 4)
+        preflight_barrier_helper = c_function_body(executor, "preflight_vulkan_graphics_v6_dependency_barriers")
+        self.assertIn("vulkan_graphics_barrier_queue_family_replayable", preflight_barrier_helper)
+        self.assertIn("graphics cross-queue-family barrier replay is not implemented", preflight_barrier_helper)
+        dependency_helper = c_function_body(executor, "collect_vulkan_graphics_v6_dependency_barriers")
+        self.assertEqual(dependency_helper.count("vulkan_graphics_replay_queue_family_index("), 4)
         self.assertNotIn(".srcQueueFamilyIndex = barrier->src_queue_family_index", recorder)
         self.assertNotIn(".dstQueueFamilyIndex = barrier->dst_queue_family_index", recorder)
         self.assertIn("command->flags & VK_DEPENDENCY_BY_REGION_BIT", executor)
@@ -3760,7 +3769,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("record.flags = dependencyFlags & VK_DEPENDENCY_BY_REGION_BIT", icd)
         self.assertIn("record.flags = dependency_flags & VK_DEPENDENCY_BY_REGION_BIT", icd)
         self.assertIn("for (uint32_t i = 0; i < eventCount; ++i)", icd)
-        self.assertIn("event-wait2-barrier-payload-unsupported", icd)
+        self.assertNotIn("event-wait2-barrier-payload-unsupported", icd)
         self.assertNotIn("vkCmdPipelineBarrier2(commandBuffer, &pDependencyInfos[i])", icd)
         self.assertNotIn("eventCount > 1", icd)
         self.assertIn("command_op_is_graphics_frame_op", icd)
@@ -6901,9 +6910,32 @@ class GpuAbiContractTest(unittest.TestCase):
             "op.event_dst_stage_mask = dst_stage_mask",
             "record.flags = dependency_flags & VK_DEPENDENCY_BY_REGION_BIT",
             "normalize_event_stage_mask((VkPipelineStageFlags2)srcStageMask)",
-            "record_event_command(commandBuffer, event, false, stageMask, 0)",
+            "record_event_command(commandBuffer, event, false, stageMask, 0, NULL)",
         ]:
             self.assertIn(marker, icd)
+        serializer_event_payload_body = icd.split(
+            "record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER ||", 1
+        )[1].split(
+            "} else if (record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_CLEAR_ATTACHMENTS)", 1
+        )[0]
+        for marker in [
+            "record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT",
+            "record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT",
+            "record->memory_barrier_op_count",
+            "record->buffer_barrier_op_count",
+            "record->image_barrier_op_count",
+            "dst->command_index = (uint32_t)command_count",
+            "command->pipeline_layout_id = op->event->event_id",
+            "op->type != PDOCKER_VK_COMMAND_EVENT_WAIT",
+        ]:
+            self.assertIn(marker, serializer_event_payload_body)
+        reset_serializer_body = icd.split(
+            "record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_EVENT", 1
+        )[1].split(
+            "} else if (record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_QUERY", 1
+        )[0]
+        self.assertIn("op->type != PDOCKER_VK_COMMAND_EVENT", reset_serializer_body)
+        self.assertNotIn("PDOCKER_VK_COMMAND_EVENT_WAIT", reset_serializer_body)
         plan_body = icd.split("static bool graphics_mixed_submit_plan", 1)[1].split(
             "static VkResult execute_graphics_mixed_host_side_ops", 1
         )[0]
@@ -6925,8 +6957,11 @@ class GpuAbiContractTest(unittest.TestCase):
             "command->flags == 0",
             "command->index_offset != 0",
             "dependencyFlags = command->flags & VK_DEPENDENCY_BY_REGION_BIT",
-            "memoryBarrierCount = src_stage_mask2 ? 1u : 0u",
-            "memoryBarrierCount = (src_stage_mask2 || dst_stage_mask2) ? 1u : 0u",
+            "has_event_barrier_payload",
+            "collect_vulkan_graphics_v6_dependency_barriers",
+            "bufferMemoryBarrierCount = buffer_barrier_count",
+            "imageMemoryBarrierCount = image_barrier_count",
+            "memoryBarrierCount = memory_barrier_count",
             "vkCmdSetEvent(command_buffer, entry->event, (VkPipelineStageFlags)command->index_offset)",
             "vkCmdResetEvent(command_buffer, entry->event, (VkPipelineStageFlags)command->index_offset)",
             "vkCmdWaitEvents(command_buffer, 1, &event,",
@@ -7032,8 +7067,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("if (cmd) cmd->graphics_unsupported = true", set_event2_body)
         self.assertIn("dependency_flags_unsupported(dependency_flags)", set_event2_body)
         self.assertIn("event-set2-dependency-flags-unsupported", set_event2_body)
-        self.assertIn("dependency_info_has_event_barrier_payload(pDependencyInfo)", set_event2_body)
-        self.assertIn("event-set2-barrier-payload-unsupported", set_event2_body)
+        self.assertIn("record_dependency_info_barrier_ops(commandBuffer, pDependencyInfo)", set_event2_body)
+        self.assertIn("record_event_command(commandBuffer, event, true, dependency_info_src_stage_mask(pDependencyInfo), dependency_flags, &barriers)", set_event2_body)
+        self.assertNotIn("event-set2-barrier-payload-unsupported", set_event2_body)
         self.assertIn("command_buffer_mark_recording_failed", set_event2_body)
         self.assertIn("dependency_info_src_stage_mask", icd)
         self.assertIn("dependency_info_dst_stage_mask", icd)
@@ -7047,13 +7083,14 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("dependency_info_has_unsupported_pnext(&pDependencyInfos[i])", wait_events2_body)
         self.assertIn("dependency_flags_unsupported(dependency_flags)", wait_events2_body)
         self.assertIn("event-wait2-dependency-flags-unsupported", wait_events2_body)
-        self.assertIn("dependency_info_has_event_barrier_payload(&pDependencyInfos[i])", wait_events2_body)
-        self.assertIn("event-wait2-barrier-payload-unsupported", wait_events2_body)
+        self.assertIn("record_dependency_info_barrier_ops(commandBuffer, &pDependencyInfos[i])", wait_events2_body)
+        self.assertIn("record_event_wait_command(commandBuffer, pEvents[i],", wait_events2_body)
+        self.assertNotIn("event-wait2-barrier-payload-unsupported", wait_events2_body)
         self.assertIn("dependency_info_src_stage_mask(&pDependencyInfos[i])", wait_events2_body)
         self.assertIn("dependency_info_dst_stage_mask(&pDependencyInfos[i])", wait_events2_body)
         self.assertNotIn("vkCmdPipelineBarrier2(commandBuffer, &pDependencyInfos[i])", wait_events2_body)
         self.assertLess(
-            wait_events2_body.index("dependency_info_has_event_barrier_payload(&pDependencyInfos[i])"),
+            wait_events2_body.index("record_dependency_info_barrier_ops(commandBuffer, &pDependencyInfos[i])"),
             wait_events2_body.index("record_event_wait_command(commandBuffer, pEvents[i],"),
         )
         self.assertNotIn("eventCount > 1", wait_events2_body)
@@ -8148,9 +8185,11 @@ class GpuAbiContractTest(unittest.TestCase):
         barrier2_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier2", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkCmdSetEvent2", 1
         )[0]
-        self.assertIn("pDependencyInfo->pImageMemoryBarriers", barrier2_body)
-        self.assertIn("const VkImageMemoryBarrier2 *b", barrier2_body)
-        self.assertIn("record_image_barrier_op(commandBuffer", barrier2_body)
+        dependency_barrier_body = c_function_body(icd, "record_dependency_info_barrier_ops")
+        self.assertIn("info->pImageMemoryBarriers", dependency_barrier_body)
+        self.assertIn("const VkImageMemoryBarrier2 *b", dependency_barrier_body)
+        self.assertIn("record_image_barrier_op(commandBuffer", dependency_barrier_body)
+        self.assertIn("record_dependency_info_barrier_ops(commandBuffer, pDependencyInfo)", barrier2_body)
         self.assertIn("legacy_pipeline_barrier_inputs_unsupported", icd)
         self.assertIn("command_buffer_mark_recording_failed(cmd, \"legacy-pipeline-barrier-unsupported\")", barrier_body)
         self.assertIn("srcStageMask == 0 || dstStageMask == 0", icd)

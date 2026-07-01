@@ -196,17 +196,13 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 }}
 
                 memset(cmd, 0, sizeof(*cmd));
-                VkMemoryBarrier2 memory_barrier;
-                memset(&memory_barrier, 0, sizeof(memory_barrier));
-                memory_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
                 memset(&dependency, 0, sizeof(dependency));
                 dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-                dependency.memoryBarrierCount = 1;
-                dependency.pMemoryBarriers = &memory_barrier;
                 vkCmdSetEvent2((VkCommandBuffer)cmd, VK_NULL_HANDLE, &dependency);
-                if (!expect_reason(cmd, "event-set2-barrier-payload-unsupported")) return 4;
-                if (cmd->command_op_count != 0 || cmd->graphics_command_op_count != 0) {{
-                    fprintf(stderr, "barrier-payload set-event2 still recorded commands\\n");
+                if (!expect_reason(cmd, "event-set2-null-event")) return 4;
+                if (cmd->command_op_count != 0 || cmd->graphics_command_op_count != 0 ||
+                    cmd->memory_barrier_op_count != 0) {{
+                    fprintf(stderr, "null-event set-event2 still recorded commands\\n");
                     return 5;
                 }}
 
@@ -216,6 +212,40 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 create_info.sType = VK_STRUCTURE_TYPE_EVENT_CREATE_INFO;
                 VkEvent event = VK_NULL_HANDLE;
                 if (vkCreateEvent(VK_NULL_HANDLE, &create_info, NULL, &event) != VK_SUCCESS || !event) return 6;
+
+                VkMemoryBarrier2 memory_barrier;
+                memset(&memory_barrier, 0, sizeof(memory_barrier));
+                memory_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+                memory_barrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+                memory_barrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+                memset(&dependency, 0, sizeof(dependency));
+                dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+                dependency.dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+                dependency.memoryBarrierCount = 1;
+                dependency.pMemoryBarriers = &memory_barrier;
+                vkCmdSetEvent2((VkCommandBuffer)cmd, event, &dependency);
+                if (cmd->recording_failed) {{
+                    fprintf(stderr, "barrier-payload set-event2 unexpectedly failed: %s\\n",
+                            cmd->recording_failure_reason ? cmd->recording_failure_reason : "<null>");
+                    return 7;
+                }}
+                if (cmd->command_op_count != 1 || cmd->graphics_command_op_count != 1 ||
+                    cmd->memory_barrier_op_count != 1 ||
+                    cmd->command_ops[0].type != PDOCKER_VK_COMMAND_EVENT ||
+                    cmd->graphics_command_ops[0].command_type != PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT ||
+                    cmd->graphics_command_ops[0].flags != VK_DEPENDENCY_BY_REGION_BIT ||
+                    cmd->graphics_command_ops[0].memory_barrier_op_first != 0 ||
+                    cmd->graphics_command_ops[0].memory_barrier_op_count != 1) {{
+                    fprintf(stderr, "barrier-payload set-event2 was not captured ops=%u graphics=%u mem=%u flags=%u first=%u count=%u\\n",
+                            cmd->command_op_count, cmd->graphics_command_op_count,
+                            cmd->memory_barrier_op_count,
+                            cmd->graphics_command_op_count ? cmd->graphics_command_ops[0].flags : 0,
+                            cmd->graphics_command_op_count ? cmd->graphics_command_ops[0].memory_barrier_op_first : 0,
+                            cmd->graphics_command_op_count ? cmd->graphics_command_ops[0].memory_barrier_op_count : 0);
+                    return 8;
+                }}
+
+                memset(cmd, 0, sizeof(*cmd));
                 memset(&dependency, 0, sizeof(dependency));
                 dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
                 dependency.dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
@@ -223,7 +253,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 if (cmd->recording_failed) {{
                     fprintf(stderr, "by-region set-event2 unexpectedly failed: %s\\n",
                             cmd->recording_failure_reason ? cmd->recording_failure_reason : "<null>");
-                    return 7;
+                    return 9;
                 }}
                 if (cmd->command_op_count != 1 || cmd->graphics_command_op_count != 1 ||
                     cmd->command_ops[0].type != PDOCKER_VK_COMMAND_EVENT ||
@@ -232,25 +262,36 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                     fprintf(stderr, "by-region set-event2 was not captured as event flags ops=%u graphics=%u flags=%u\\n",
                             cmd->command_op_count, cmd->graphics_command_op_count,
                             cmd->graphics_command_op_count ? cmd->graphics_command_ops[0].flags : 0);
-                    return 8;
+                    return 10;
                 }}
 
                 memset(cmd, 0, sizeof(*cmd));
                 VkEvent events[1] = {{ event }};
+                memset(&dependency, 0, sizeof(dependency));
+                dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+                dependency.dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+                dependency.memoryBarrierCount = 1;
+                dependency.pMemoryBarriers = &memory_barrier;
                 vkCmdWaitEvents2((VkCommandBuffer)cmd, 1, events, &dependency);
                 if (cmd->recording_failed) {{
-                    fprintf(stderr, "by-region wait-events2 unexpectedly failed: %s\\n",
+                    fprintf(stderr, "barrier-payload wait-events2 unexpectedly failed: %s\\n",
                             cmd->recording_failure_reason ? cmd->recording_failure_reason : "<null>");
-                    return 9;
+                    return 11;
                 }}
                 if (cmd->command_op_count != 1 || cmd->graphics_command_op_count != 1 ||
+                    cmd->memory_barrier_op_count != 1 ||
                     cmd->command_ops[0].type != PDOCKER_VK_COMMAND_EVENT_WAIT ||
                     cmd->graphics_command_ops[0].command_type != PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT ||
-                    cmd->graphics_command_ops[0].flags != VK_DEPENDENCY_BY_REGION_BIT) {{
-                    fprintf(stderr, "by-region wait-events2 was not captured as event flags ops=%u graphics=%u flags=%u\\n",
+                    cmd->graphics_command_ops[0].flags != VK_DEPENDENCY_BY_REGION_BIT ||
+                    cmd->graphics_command_ops[0].memory_barrier_op_first != 0 ||
+                    cmd->graphics_command_ops[0].memory_barrier_op_count != 1) {{
+                    fprintf(stderr, "barrier-payload wait-events2 was not captured ops=%u graphics=%u mem=%u flags=%u first=%u count=%u\\n",
                             cmd->command_op_count, cmd->graphics_command_op_count,
-                            cmd->graphics_command_op_count ? cmd->graphics_command_ops[0].flags : 0);
-                    return 10;
+                            cmd->memory_barrier_op_count,
+                            cmd->graphics_command_op_count ? cmd->graphics_command_ops[0].flags : 0,
+                            cmd->graphics_command_op_count ? cmd->graphics_command_ops[0].memory_barrier_op_first : 0,
+                            cmd->graphics_command_op_count ? cmd->graphics_command_ops[0].memory_barrier_op_count : 0);
+                    return 12;
                 }}
                 vkDestroyEvent(VK_NULL_HANDLE, event, NULL);
                 free(cmd);
