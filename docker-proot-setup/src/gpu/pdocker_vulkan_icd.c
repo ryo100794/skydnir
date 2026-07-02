@@ -12863,6 +12863,21 @@ VKAPI_ATTR void VKAPI_CALL vkGetDeviceImageMemoryRequirements(
     fill_memory_requirements2_pnext(pnext);
 }
 
+VKAPI_ATTR void VKAPI_CALL vkGetImageSparseMemoryRequirements2(
+        VkDevice device,
+        const VkImageSparseMemoryRequirementsInfo2 *pInfo,
+        uint32_t *pSparseMemoryRequirementCount,
+        VkSparseImageMemoryRequirements2 *pSparseMemoryRequirements) {
+    (void)device;
+    (void)pInfo;
+    if (!pSparseMemoryRequirementCount) return;
+    if (!pSparseMemoryRequirements) {
+        *pSparseMemoryRequirementCount = 0;
+        return;
+    }
+    *pSparseMemoryRequirementCount = 0;
+}
+
 VKAPI_ATTR void VKAPI_CALL vkGetDeviceImageSparseMemoryRequirements(
         VkDevice device,
         const VkDeviceImageMemoryRequirements *pInfo,
@@ -21850,6 +21865,7 @@ static bool proc_address_hidden_by_advertisement(const char *pName) {
         strcmp(pName, "vkGetPhysicalDeviceExternalFencePropertiesKHR") == 0 ||
         strcmp(pName, "vkGetBufferMemoryRequirements2KHR") == 0 ||
         strcmp(pName, "vkGetImageMemoryRequirements2KHR") == 0 ||
+        strcmp(pName, "vkGetImageSparseMemoryRequirements2KHR") == 0 ||
         strcmp(pName, "vkBindBufferMemory2KHR") == 0 ||
         strcmp(pName, "vkBindImageMemory2KHR") == 0 ||
         strcmp(pName, "vkCreateRenderPass2KHR") == 0 ||
@@ -22050,6 +22066,8 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_PROC(vkGetImageMemoryRequirements);
     MAP_PROC(vkGetImageMemoryRequirements2);
     MAP_ALIAS("vkGetImageMemoryRequirements2KHR", vkGetImageMemoryRequirements2);
+    MAP_PROC(vkGetImageSparseMemoryRequirements2);
+    MAP_ALIAS("vkGetImageSparseMemoryRequirements2KHR", vkGetImageSparseMemoryRequirements2);
     MAP_PROC(vkGetDeviceBufferMemoryRequirements);
     MAP_ALIAS("vkGetDeviceBufferMemoryRequirementsKHR", vkGetDeviceBufferMemoryRequirements);
     MAP_PROC(vkGetDeviceImageMemoryRequirements);

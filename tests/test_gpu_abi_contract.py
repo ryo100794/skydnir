@@ -6136,6 +6136,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_VK_FEATURE_MAINTENANCE_4",
             "vkGetDeviceBufferMemoryRequirements",
             "vkGetDeviceImageMemoryRequirements",
+            "vkGetImageSparseMemoryRequirements2",
             "vkGetDeviceImageSparseMemoryRequirements",
             'MAP_ALIAS("vkGetDeviceBufferMemoryRequirementsKHR", vkGetDeviceBufferMemoryRequirements)',
             'MAP_ALIAS("vkGetDeviceImageMemoryRequirementsKHR", vkGetDeviceImageMemoryRequirements)',
@@ -6201,12 +6202,15 @@ class GpuAbiContractTest(unittest.TestCase):
             "static void fill_image_create_memory_requirements",
             "VKAPI_ATTR void VKAPI_CALL vkGetDeviceBufferMemoryRequirements",
             "VKAPI_ATTR void VKAPI_CALL vkGetDeviceImageMemoryRequirements",
+            "VKAPI_ATTR void VKAPI_CALL vkGetImageSparseMemoryRequirements2",
             "VKAPI_ATTR void VKAPI_CALL vkGetDeviceImageSparseMemoryRequirements",
             "fill_memory_requirements2_pnext(pnext);",
             "pCreateInfo->size > pdocker_vulkan_max_buffer_size()",
             "estimate_image_requirement_size(pCreateInfo)",
             "pInfo->planeAspect == 0",
             "*pSparseMemoryRequirementCount = 0;",
+            'MAP_PROC(vkGetImageSparseMemoryRequirements2)',
+            'MAP_ALIAS("vkGetImageSparseMemoryRequirements2KHR", vkGetImageSparseMemoryRequirements2)',
             'MAP_PROC(vkGetDeviceBufferMemoryRequirements)',
             'MAP_ALIAS("vkGetDeviceBufferMemoryRequirementsKHR", vkGetDeviceBufferMemoryRequirements)',
             'MAP_PROC(vkGetDeviceImageMemoryRequirements)',
@@ -6215,6 +6219,12 @@ class GpuAbiContractTest(unittest.TestCase):
             'MAP_ALIAS("vkGetDeviceImageSparseMemoryRequirementsKHR", vkGetDeviceImageSparseMemoryRequirements)',
         ]:
             self.assertIn(marker, icd)
+        sparse2_body = c_function_body(icd, "vkGetImageSparseMemoryRequirements2")
+        self.assertIn("const VkImageSparseMemoryRequirementsInfo2 *pInfo", icd)
+        self.assertIn("*pSparseMemoryRequirementCount = 0;", sparse2_body)
+        self.assertNotIn("pSparseMemoryRequirements[0]", sparse2_body)
+        hidden_body = c_function_body(icd, "proc_address_hidden_by_advertisement")
+        self.assertIn("vkGetImageSparseMemoryRequirements2KHR", hidden_body)
 
 
     def test_vulkan_proc_table_exposes_khr_aliases_for_advertised_core2_apis(self):
@@ -6235,6 +6245,7 @@ class GpuAbiContractTest(unittest.TestCase):
             '"vkGetPhysicalDeviceExternalSemaphorePropertiesKHR", vkGetPhysicalDeviceExternalSemaphoreProperties',
             '"vkGetPhysicalDeviceExternalFencePropertiesKHR", vkGetPhysicalDeviceExternalFenceProperties',
             '"vkGetBufferMemoryRequirements2KHR", vkGetBufferMemoryRequirements2',
+            '"vkGetImageSparseMemoryRequirements2KHR", vkGetImageSparseMemoryRequirements2',
             '"vkBindBufferMemory2KHR", vkBindBufferMemory2',
         ]:
             self.assertIn(alias, proc_body)
