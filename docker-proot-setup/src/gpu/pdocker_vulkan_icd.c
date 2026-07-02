@@ -12793,7 +12793,8 @@ static void fill_buffer_create_memory_requirements(
         VkMemoryRequirements *pMemoryRequirements) {
     if (!pMemoryRequirements) return;
     memset(pMemoryRequirements, 0, sizeof(*pMemoryRequirements));
-    if (!pCreateInfo || pCreateInfo->size == 0 ||
+    if (!pCreateInfo || pCreateInfo->pNext || pCreateInfo->flags != 0 ||
+        pCreateInfo->size == 0 ||
         pCreateInfo->size > pdocker_vulkan_max_buffer_size()) {
         return;
     }
@@ -12829,6 +12830,12 @@ VKAPI_ATTR void VKAPI_CALL vkGetDeviceBufferMemoryRequirements(
     PdockerVkStructHeader header = read_vk_struct_header(pMemoryRequirements);
     void *pnext = (void *)header.pNext;
     zero_vk_out_struct_preserve_chain(pMemoryRequirements, sizeof(*pMemoryRequirements), header);
+    if (pInfo && pInfo->pNext) {
+        trace_icd_runtime_failure("device-buffer-memory-requirements-pnext-unsupported",
+                                  VK_ERROR_FEATURE_NOT_PRESENT);
+        fill_memory_requirements2_pnext(pnext);
+        return;
+    }
     fill_buffer_create_memory_requirements(pInfo ? pInfo->pCreateInfo : NULL,
                                            &pMemoryRequirements->memoryRequirements);
     fill_memory_requirements2_pnext(pnext);
@@ -12843,6 +12850,12 @@ VKAPI_ATTR void VKAPI_CALL vkGetDeviceImageMemoryRequirements(
     PdockerVkStructHeader header = read_vk_struct_header(pMemoryRequirements);
     void *pnext = (void *)header.pNext;
     zero_vk_out_struct_preserve_chain(pMemoryRequirements, sizeof(*pMemoryRequirements), header);
+    if (pInfo && pInfo->pNext) {
+        trace_icd_runtime_failure("device-image-memory-requirements-pnext-unsupported",
+                                  VK_ERROR_FEATURE_NOT_PRESENT);
+        fill_memory_requirements2_pnext(pnext);
+        return;
+    }
     if (!pInfo || pInfo->planeAspect == 0) {
         fill_image_create_memory_requirements(pInfo ? pInfo->pCreateInfo : NULL,
                                               &pMemoryRequirements->memoryRequirements);
@@ -12865,6 +12878,44 @@ VKAPI_ATTR void VKAPI_CALL vkGetDeviceImageSparseMemoryRequirements(
     *pSparseMemoryRequirementCount = 0;
 }
 
+static VkResult validate_memory_allocate_pnext(const void *pNext) {
+    for (const void *node = pNext; node;) {
+        PdockerVkStructHeader header = read_vk_struct_header(node);
+        switch (header.sType) {
+#ifdef VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO
+            case VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO: {
+                const VkMemoryDedicatedAllocateInfo *info =
+                    (const VkMemoryDedicatedAllocateInfo *)node;
+                bool has_image = info->image != VK_NULL_HANDLE;
+                bool has_buffer = info->buffer != VK_NULL_HANDLE;
+                if (has_image && has_buffer) return VK_ERROR_INITIALIZATION_FAILED;
+                if (has_image && !pdocker_vk_image_from_handle(info->image)) {
+                    return VK_ERROR_INITIALIZATION_FAILED;
+                }
+                if (has_buffer && !pdocker_vk_buffer_from_handle(info->buffer)) {
+                    return VK_ERROR_INITIALIZATION_FAILED;
+                }
+                break;
+            }
+#endif
+#ifdef VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO
+            case VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO: {
+                const VkMemoryAllocateFlagsInfo *info =
+                    (const VkMemoryAllocateFlagsInfo *)node;
+                if (info->flags != 0 || info->deviceMask > 1) {
+                    return unsupported_create_info_pnext_result("vkAllocateMemory", node);
+                }
+                break;
+            }
+#endif
+            default:
+                return unsupported_create_info_pnext_result("vkAllocateMemory", node);
+        }
+        node = header.pNext;
+    }
+    return VK_SUCCESS;
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL vkAllocateMemory(
         VkDevice device,
         const VkMemoryAllocateInfo *pAllocateInfo,
@@ -12873,6 +12924,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateMemory(
     (void)device;
     (void)pAllocator;
     if (!pAllocateInfo || !pMemory) return VK_ERROR_INITIALIZATION_FAILED;
+    *pMemory = VK_NULL_HANDLE;
+    VkResult pnext_rc = validate_memory_allocate_pnext(pAllocateInfo->pNext);
+    if (pnext_rc != VK_SUCCESS) return pnext_rc;
     if (pAllocateInfo->memoryTypeIndex >= 2) return VK_ERROR_FEATURE_NOT_PRESENT;
     if (pAllocateInfo->allocationSize == 0 ||
         pAllocateInfo->allocationSize > (VkDeviceSize)SIZE_MAX ||
@@ -13058,8 +13112,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkBindBufferMemory(
         VkDeviceSize memoryOffset) {
     (void)device;
     PdockerVkBuffer *b = pdocker_vk_buffer_from_handle(buffer);
-    if (!b || !memory) return VK_ERROR_INITIALIZATION_FAILED;
     PdockerVkMemory *m = pdocker_vk_memory_from_handle(memory);
+    if (!b || !m) return VK_ERROR_INITIALIZATION_FAILED;
     VkDeviceSize alignment = b->requirements_alignment ? b->requirements_alignment : PDOCKER_VK_REQUIREMENT_ALIGNMENT;
     VkDeviceSize needed = b->requirements_size ? b->requirements_size : align_device_size((VkDeviceSize)b->size, alignment);
     if ((memoryOffset % alignment) != 0 ||
@@ -13448,6 +13502,59 @@ static bool descriptor_set_layout_compatible(
         }
     }
     return true;
+}
+
+static bool descriptor_set_layout_create_info_supported(
+        const VkDescriptorSetLayoutCreateInfo *pCreateInfo) {
+    if (!pCreateInfo) return false;
+    if (validate_descriptor_set_layout_pnext(pCreateInfo) != VK_SUCCESS) return false;
+    if (pCreateInfo->flags != 0) return false;
+    if (pCreateInfo->bindingCount > 0 && !pCreateInfo->pBindings) return false;
+    for (uint32_t i = 0; i < pCreateInfo->bindingCount; ++i) {
+        const VkDescriptorSetLayoutBinding *binding = &pCreateInfo->pBindings[i];
+        bool v4_descriptor = descriptor_type_supported_by_v4_transport(binding->descriptorType);
+        bool v5_object_descriptor =
+            vulkan_v5_object_transport_enabled() &&
+            descriptor_type_supported_by_v5_object_transport(binding->descriptorType);
+        if (!v4_descriptor && !v5_object_descriptor) return false;
+        if (binding->binding >= PDOCKER_VK_MAX_STORAGE_BUFFERS) return false;
+        if (binding->descriptorCount > PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS) return false;
+    }
+    return true;
+}
+
+static void fill_descriptor_set_layout_support_pnext(void *pNext) {
+    for (void *node = pNext; node;) {
+        PdockerVkStructHeader header = read_vk_struct_header(node);
+        switch (header.sType) {
+#ifdef VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_LAYOUT_SUPPORT
+            case VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_LAYOUT_SUPPORT: {
+                VkDescriptorSetVariableDescriptorCountLayoutSupport *p =
+                    (VkDescriptorSetVariableDescriptorCountLayoutSupport *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                p->maxVariableDescriptorCount = 0;
+                break;
+            }
+#endif
+            default:
+                break;
+        }
+        node = (void *)header.pNext;
+    }
+}
+
+VKAPI_ATTR void VKAPI_CALL vkGetDescriptorSetLayoutSupport(
+        VkDevice device,
+        const VkDescriptorSetLayoutCreateInfo *pCreateInfo,
+        VkDescriptorSetLayoutSupport *pSupport) {
+    (void)device;
+    if (!pSupport) return;
+    PdockerVkStructHeader header = read_vk_struct_header(pSupport);
+    zero_vk_out_struct_preserve_chain(pSupport, sizeof(*pSupport), header);
+    pSupport->supported = descriptor_set_layout_create_info_supported(pCreateInfo)
+        ? VK_TRUE
+        : VK_FALSE;
+    fill_descriptor_set_layout_support_pnext((void *)header.pNext);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorSetLayout(
@@ -21420,6 +21527,15 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateFence(
     (void)device;
     (void)pAllocator;
     if (!pFence) return VK_ERROR_INITIALIZATION_FAILED;
+    *pFence = VK_NULL_HANDLE;
+    if (pCreateInfo && pCreateInfo->pNext) {
+        return unsupported_create_info_pnext_result("vkCreateFence", pCreateInfo->pNext);
+    }
+    if (pCreateInfo && (pCreateInfo->flags & ~VK_FENCE_CREATE_SIGNALED_BIT) != 0) {
+        trace_icd_runtime_failure("fence-flags-unsupported",
+                                  VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
     PdockerVkFence *fence = pdocker_alloc_handle(sizeof(*fence));
     if (!fence) return VK_ERROR_OUT_OF_HOST_MEMORY;
     memset(fence, 0, sizeof(*fence));
@@ -21506,15 +21622,20 @@ VKAPI_ATTR VkResult VKAPI_CALL vkWaitForFences(
 static bool semaphore_create_info_parse_pnext(const void *pNext, bool *timeline, uint64_t *initial_value) {
     if (timeline) *timeline = false;
     if (initial_value) *initial_value = 0;
+    bool seen_type = false;
     for (const void *node = pNext; node;) {
         PdockerVkStructHeader header = read_vk_struct_header(node);
         switch (header.sType) {
             case VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO: {
+                if (seen_type) return false;
+                seen_type = true;
                 const VkSemaphoreTypeCreateInfo *info = (const VkSemaphoreTypeCreateInfo *)node;
                 if (info->semaphoreType == VK_SEMAPHORE_TYPE_TIMELINE) {
                     if (timeline) *timeline = true;
                     if (initial_value) *initial_value = info->initialValue;
-                } else if (info->semaphoreType != VK_SEMAPHORE_TYPE_BINARY) {
+                } else if (info->semaphoreType == VK_SEMAPHORE_TYPE_BINARY) {
+                    if (info->initialValue != 0) return false;
+                } else {
                     return false;
                 }
                 break;
@@ -21546,6 +21667,16 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSemaphore(
         trace_icd_runtime_failure("semaphore-pnext-unsupported",
                                   VK_ERROR_FEATURE_NOT_PRESENT);
         return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    if (timeline) {
+        PdockerVkDevice *dev = (PdockerVkDevice *)device;
+        if (!advertised_timeline_semaphore() ||
+            !dev ||
+            (dev->requested_feature_mask & PDOCKER_VK_FEATURE_TIMELINE_SEMAPHORE) == 0) {
+            trace_icd_runtime_failure("timeline-semaphore-feature-not-enabled",
+                                      VK_ERROR_FEATURE_NOT_PRESENT);
+            return VK_ERROR_FEATURE_NOT_PRESENT;
+        }
     }
     PdockerVkSemaphore *sem = pdocker_alloc_handle(sizeof(*sem));
     if (!sem) return VK_ERROR_OUT_OF_HOST_MEMORY;
@@ -21711,6 +21842,7 @@ static bool proc_address_hidden_by_advertisement(const char *pName) {
         strcmp(pName, "vkGetPhysicalDeviceImageFormatProperties2KHR") == 0 ||
         strcmp(pName, "vkGetPhysicalDeviceQueueFamilyProperties2KHR") == 0 ||
         strcmp(pName, "vkGetPhysicalDeviceMemoryProperties2KHR") == 0 ||
+        strcmp(pName, "vkGetDescriptorSetLayoutSupportKHR") == 0 ||
         strcmp(pName, "vkEnumeratePhysicalDeviceGroupsKHR") == 0 ||
         strcmp(pName, "vkGetPhysicalDeviceSparseImageFormatProperties2KHR") == 0 ||
         strcmp(pName, "vkGetPhysicalDeviceExternalBufferPropertiesKHR") == 0 ||
@@ -21938,6 +22070,8 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_PROC(vkBindImageMemory);
     MAP_PROC(vkBindImageMemory2);
     MAP_ALIAS("vkBindImageMemory2KHR", vkBindImageMemory2);
+    MAP_PROC(vkGetDescriptorSetLayoutSupport);
+    MAP_ALIAS("vkGetDescriptorSetLayoutSupportKHR", vkGetDescriptorSetLayoutSupport);
     MAP_PROC(vkCreateDescriptorSetLayout);
     MAP_PROC(vkDestroyDescriptorSetLayout);
     MAP_PROC(vkCreatePipelineLayout);

@@ -6228,6 +6228,7 @@ class GpuAbiContractTest(unittest.TestCase):
             '"vkGetPhysicalDeviceFeatures2KHR", vkGetPhysicalDeviceFeatures2',
             '"vkGetPhysicalDeviceQueueFamilyProperties2KHR", vkGetPhysicalDeviceQueueFamilyProperties2',
             '"vkGetPhysicalDeviceMemoryProperties2KHR", vkGetPhysicalDeviceMemoryProperties2',
+            '"vkGetDescriptorSetLayoutSupportKHR", vkGetDescriptorSetLayoutSupport',
             '"vkEnumeratePhysicalDeviceGroupsKHR", vkEnumeratePhysicalDeviceGroups',
             '"vkGetPhysicalDeviceSparseImageFormatProperties2KHR", vkGetPhysicalDeviceSparseImageFormatProperties2',
             '"vkGetPhysicalDeviceExternalBufferPropertiesKHR", vkGetPhysicalDeviceExternalBufferProperties',
@@ -6345,6 +6346,80 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn("if (bindInfoCount > 0 && !pBindInfos) return VK_ERROR_INITIALIZATION_FAILED;", body)
             self.assertIn(f'validate_bind_memory_info_pnext("{api}", pBindInfos[i].pNext)', body)
             self.assertIn("if (pnext_rc != VK_SUCCESS) return pnext_rc;", body)
+
+
+    def test_vulkan_descriptor_set_layout_support_is_mapped_and_conservative(self):
+        icd = VULKAN_ICD.read_text()
+        support_body = c_function_body(icd, "vkGetDescriptorSetLayoutSupport")
+        helper_body = c_function_body(icd, "descriptor_set_layout_create_info_supported")
+        pnext_body = c_function_body(icd, "fill_descriptor_set_layout_support_pnext")
+        proc_body = icd.split("static PFN_vkVoidFunction proc_address", 1)[1].split(
+            "VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr", 1
+        )[0]
+        hidden_body = c_function_body(icd, "proc_address_hidden_by_advertisement")
+
+        self.assertIn("zero_vk_out_struct_preserve_chain(pSupport, sizeof(*pSupport), header);", support_body)
+        self.assertIn("descriptor_set_layout_create_info_supported(pCreateInfo)", support_body)
+        self.assertIn("fill_descriptor_set_layout_support_pnext((void *)header.pNext);", support_body)
+        self.assertIn("validate_descriptor_set_layout_pnext(pCreateInfo) != VK_SUCCESS", helper_body)
+        self.assertIn("pCreateInfo->flags != 0", helper_body)
+        self.assertIn("pCreateInfo->bindingCount > 0 && !pCreateInfo->pBindings", helper_body)
+        self.assertIn("descriptor_type_supported_by_v4_transport(binding->descriptorType)", helper_body)
+        self.assertIn("descriptor_type_supported_by_v5_object_transport(binding->descriptorType)", helper_body)
+        self.assertIn("binding->binding >= PDOCKER_VK_MAX_STORAGE_BUFFERS", helper_body)
+        self.assertIn("binding->descriptorCount > PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS", helper_body)
+        self.assertIn("VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_LAYOUT_SUPPORT", pnext_body)
+        self.assertIn("p->maxVariableDescriptorCount = 0;", pnext_body)
+        self.assertIn("MAP_PROC(vkGetDescriptorSetLayoutSupport)", proc_body)
+        self.assertIn('MAP_ALIAS("vkGetDescriptorSetLayoutSupportKHR", vkGetDescriptorSetLayoutSupport)', proc_body)
+        self.assertIn("vkGetDescriptorSetLayoutSupportKHR", hidden_body)
+
+
+    def test_vulkan_external_handle_and_sync_pnext_paths_fail_closed(self):
+        icd = VULKAN_ICD.read_text()
+        alloc_validator = c_function_body(icd, "validate_memory_allocate_pnext")
+        allocate_body = c_function_body(icd, "vkAllocateMemory")
+        fence_body = c_function_body(icd, "vkCreateFence")
+        sem_parse_body = c_function_body(icd, "semaphore_create_info_parse_pnext")
+        sem_create_body = c_function_body(icd, "vkCreateSemaphore")
+        fill_buffer_req_body = c_function_body(icd, "fill_buffer_create_memory_requirements")
+        device_buffer_req_body = c_function_body(icd, "vkGetDeviceBufferMemoryRequirements")
+        device_image_req_body = c_function_body(icd, "vkGetDeviceImageMemoryRequirements")
+        bind_buffer_body = c_function_body(icd, "vkBindBufferMemory")
+
+        self.assertIn("validate_memory_allocate_pnext", icd)
+        self.assertIn("unsupported_create_info_pnext_result(\"vkAllocateMemory\", node)", alloc_validator)
+        self.assertIn("VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO", alloc_validator)
+        self.assertIn("has_image && has_buffer", alloc_validator)
+        self.assertIn("pdocker_vk_image_from_handle(info->image)", alloc_validator)
+        self.assertIn("pdocker_vk_buffer_from_handle(info->buffer)", alloc_validator)
+        self.assertIn("VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO", alloc_validator)
+        self.assertIn("info->flags != 0 || info->deviceMask > 1", alloc_validator)
+        self.assertIn("*pMemory = VK_NULL_HANDLE;", allocate_body)
+        self.assertIn("validate_memory_allocate_pnext(pAllocateInfo->pNext)", allocate_body)
+        self.assertIn("if (pnext_rc != VK_SUCCESS) return pnext_rc;", allocate_body)
+
+        self.assertIn("*pFence = VK_NULL_HANDLE;", fence_body)
+        self.assertIn("unsupported_create_info_pnext_result(\"vkCreateFence\", pCreateInfo->pNext)", fence_body)
+        self.assertIn("pCreateInfo->flags & ~VK_FENCE_CREATE_SIGNALED_BIT", fence_body)
+        self.assertIn("fence->signaled = pCreateInfo && (pCreateInfo->flags & VK_FENCE_CREATE_SIGNALED_BIT);", fence_body)
+
+        self.assertIn("bool seen_type = false;", sem_parse_body)
+        self.assertIn("if (seen_type) return false;", sem_parse_body)
+        self.assertIn("info->semaphoreType == VK_SEMAPHORE_TYPE_BINARY", sem_parse_body)
+        self.assertIn("if (info->initialValue != 0) return false;", sem_parse_body)
+        self.assertIn("advertised_timeline_semaphore()", sem_create_body)
+        self.assertIn("dev->requested_feature_mask & PDOCKER_VK_FEATURE_TIMELINE_SEMAPHORE", sem_create_body)
+        self.assertIn("timeline-semaphore-feature-not-enabled", sem_create_body)
+
+        self.assertIn("pCreateInfo->pNext", fill_buffer_req_body)
+        self.assertIn("pCreateInfo->flags != 0", fill_buffer_req_body)
+        self.assertIn("if (pInfo && pInfo->pNext)", device_buffer_req_body)
+        self.assertIn("device-buffer-memory-requirements-pnext-unsupported", device_buffer_req_body)
+        self.assertIn("if (pInfo && pInfo->pNext)", device_image_req_body)
+        self.assertIn("device-image-memory-requirements-pnext-unsupported", device_image_req_body)
+        self.assertIn("PdockerVkMemory *m = pdocker_vk_memory_from_handle(memory);", bind_buffer_body)
+        self.assertIn("if (!b || !m) return VK_ERROR_INITIALIZATION_FAILED;", bind_buffer_body)
 
 
     def test_vulkan_core_create_infos_reject_unsupported_pnext_and_flags(self):
