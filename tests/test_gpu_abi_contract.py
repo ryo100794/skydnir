@@ -6228,10 +6228,80 @@ class GpuAbiContractTest(unittest.TestCase):
             '"vkGetPhysicalDeviceFeatures2KHR", vkGetPhysicalDeviceFeatures2',
             '"vkGetPhysicalDeviceQueueFamilyProperties2KHR", vkGetPhysicalDeviceQueueFamilyProperties2',
             '"vkGetPhysicalDeviceMemoryProperties2KHR", vkGetPhysicalDeviceMemoryProperties2',
+            '"vkEnumeratePhysicalDeviceGroupsKHR", vkEnumeratePhysicalDeviceGroups',
+            '"vkGetPhysicalDeviceSparseImageFormatProperties2KHR", vkGetPhysicalDeviceSparseImageFormatProperties2',
+            '"vkGetPhysicalDeviceExternalBufferPropertiesKHR", vkGetPhysicalDeviceExternalBufferProperties',
+            '"vkGetPhysicalDeviceExternalSemaphorePropertiesKHR", vkGetPhysicalDeviceExternalSemaphoreProperties',
+            '"vkGetPhysicalDeviceExternalFencePropertiesKHR", vkGetPhysicalDeviceExternalFenceProperties',
             '"vkGetBufferMemoryRequirements2KHR", vkGetBufferMemoryRequirements2',
             '"vkBindBufferMemory2KHR", vkBindBufferMemory2',
         ]:
             self.assertIn(alias, proc_body)
+
+    def test_vulkan_physical_device_group_and_external_property_queries_fail_closed(self):
+        icd = VULKAN_ICD.read_text()
+        group_body = c_function_body(icd, "vkEnumeratePhysicalDeviceGroups")
+        sparse2_body = c_function_body(icd, "vkGetPhysicalDeviceSparseImageFormatProperties2")
+        external_buffer_body = c_function_body(icd, "vkGetPhysicalDeviceExternalBufferProperties")
+        external_semaphore_body = c_function_body(icd, "vkGetPhysicalDeviceExternalSemaphoreProperties")
+        external_fence_body = c_function_body(icd, "vkGetPhysicalDeviceExternalFenceProperties")
+        proc_body = icd.split("static PFN_vkVoidFunction proc_address", 1)[1].split(
+            "VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr", 1
+        )[0]
+        hidden_body = c_function_body(icd, "proc_address_hidden_by_advertisement")
+
+        self.assertIn("*pPhysicalDeviceGroupCount = 1;", group_body)
+        self.assertIn("zero_vk_out_struct_preserve_chain(&pPhysicalDeviceGroupProperties[0]", group_body)
+        self.assertIn("physicalDeviceCount = 1", group_body)
+        self.assertIn("physicalDevices[0] = (VkPhysicalDevice)&g_device", group_body)
+        self.assertIn("subsetAllocation = VK_FALSE", group_body)
+        self.assertIn("return VK_INCOMPLETE", group_body)
+
+        self.assertIn("const VkPhysicalDeviceSparseImageFormatInfo2 *pFormatInfo", icd)
+        self.assertIn("*pPropertyCount = 0;", sparse2_body)
+        self.assertNotIn("pProperties[0]", sparse2_body)
+
+        for body in [external_buffer_body, external_semaphore_body, external_fence_body]:
+            self.assertIn("zero_vk_out_struct_preserve_chain", body)
+            self.assertNotIn("externalMemoryFeatures =", body)
+            self.assertNotIn("externalSemaphoreFeatures =", body)
+            self.assertNotIn("externalFenceFeatures =", body)
+            self.assertNotIn("compatibleHandleTypes = p", body)
+            self.assertNotIn("EXPORTABLE_BIT", body)
+            self.assertNotIn("IMPORTABLE_BIT", body)
+
+        for marker in [
+            "MAP_PROC(vkEnumeratePhysicalDeviceGroups)",
+            'MAP_ALIAS("vkEnumeratePhysicalDeviceGroupsKHR", vkEnumeratePhysicalDeviceGroups)',
+            "MAP_PROC(vkGetPhysicalDeviceSparseImageFormatProperties2)",
+            'MAP_ALIAS("vkGetPhysicalDeviceSparseImageFormatProperties2KHR", vkGetPhysicalDeviceSparseImageFormatProperties2)',
+            "MAP_PROC(vkGetPhysicalDeviceExternalBufferProperties)",
+            'MAP_ALIAS("vkGetPhysicalDeviceExternalBufferPropertiesKHR", vkGetPhysicalDeviceExternalBufferProperties)',
+            "MAP_PROC(vkGetPhysicalDeviceExternalSemaphoreProperties)",
+            'MAP_ALIAS("vkGetPhysicalDeviceExternalSemaphorePropertiesKHR", vkGetPhysicalDeviceExternalSemaphoreProperties)',
+            "MAP_PROC(vkGetPhysicalDeviceExternalFenceProperties)",
+            'MAP_ALIAS("vkGetPhysicalDeviceExternalFencePropertiesKHR", vkGetPhysicalDeviceExternalFenceProperties)',
+        ]:
+            self.assertIn(marker, proc_body)
+        for alias in [
+            "vkEnumeratePhysicalDeviceGroupsKHR",
+            "vkGetPhysicalDeviceSparseImageFormatProperties2KHR",
+            "vkGetPhysicalDeviceExternalBufferPropertiesKHR",
+            "vkGetPhysicalDeviceExternalSemaphorePropertiesKHR",
+            "vkGetPhysicalDeviceExternalFencePropertiesKHR",
+        ]:
+            self.assertIn(alias, hidden_body)
+        for extension in [
+            "VK_KHR_device_group_creation",
+            "VK_KHR_get_physical_device_properties2",
+            "VK_KHR_external_memory_capabilities",
+            "VK_KHR_external_semaphore_capabilities",
+            "VK_KHR_external_fence_capabilities",
+            "VK_KHR_external_memory_fd",
+            "VK_KHR_external_semaphore_fd",
+            "VK_KHR_external_fence_fd",
+        ]:
+            self.assertNotIn(extension, icd)
 
     def test_vulkan_physical_memory_properties2_output_is_fully_initialized(self):
         icd = VULKAN_ICD.read_text()

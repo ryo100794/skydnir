@@ -11785,6 +11785,28 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumeratePhysicalDevices(
     return VK_SUCCESS;
 }
 
+VKAPI_ATTR VkResult VKAPI_CALL vkEnumeratePhysicalDeviceGroups(
+        VkInstance instance,
+        uint32_t *pPhysicalDeviceGroupCount,
+        VkPhysicalDeviceGroupProperties *pPhysicalDeviceGroupProperties) {
+    (void)instance;
+    if (!pPhysicalDeviceGroupCount) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!pPhysicalDeviceGroupProperties) {
+        *pPhysicalDeviceGroupCount = 1;
+        return VK_SUCCESS;
+    }
+    if (*pPhysicalDeviceGroupCount < 1) return VK_INCOMPLETE;
+    PdockerVkStructHeader header = read_vk_struct_header(&pPhysicalDeviceGroupProperties[0]);
+    zero_vk_out_struct_preserve_chain(&pPhysicalDeviceGroupProperties[0],
+                                      sizeof(pPhysicalDeviceGroupProperties[0]),
+                                      header);
+    pPhysicalDeviceGroupProperties[0].physicalDeviceCount = 1;
+    pPhysicalDeviceGroupProperties[0].physicalDevices[0] = (VkPhysicalDevice)&g_device;
+    pPhysicalDeviceGroupProperties[0].subsetAllocation = VK_FALSE;
+    *pPhysicalDeviceGroupCount = 1;
+    return VK_SUCCESS;
+}
+
 VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceProperties(
         VkPhysicalDevice physicalDevice,
         VkPhysicalDeviceProperties *pProperties) {
@@ -12031,6 +12053,21 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceSparseImageFormatProperties(
     *pPropertyCount = 0;
 }
 
+VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceSparseImageFormatProperties2(
+        VkPhysicalDevice physicalDevice,
+        const VkPhysicalDeviceSparseImageFormatInfo2 *pFormatInfo,
+        uint32_t *pPropertyCount,
+        VkSparseImageFormatProperties2 *pProperties) {
+    (void)physicalDevice;
+    (void)pFormatInfo;
+    if (!pPropertyCount) return;
+    if (!pProperties) {
+        *pPropertyCount = 0;
+        return;
+    }
+    *pPropertyCount = 0;
+}
+
 #define PDOCKER_VK_ADVERTISED_QUEUE_FAMILY_COUNT 1u
 #define PDOCKER_VK_ADVERTISED_QUEUE_COUNT 1u
 
@@ -12167,6 +12204,45 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceMemoryProperties2(
     PdockerVkStructHeader header = read_vk_struct_header(pMemoryProperties);
     zero_vk_out_struct_preserve_chain(pMemoryProperties, sizeof(*pMemoryProperties), header);
     vkGetPhysicalDeviceMemoryProperties(physicalDevice, &pMemoryProperties->memoryProperties);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceExternalBufferProperties(
+        VkPhysicalDevice physicalDevice,
+        const VkPhysicalDeviceExternalBufferInfo *pExternalBufferInfo,
+        VkExternalBufferProperties *pExternalBufferProperties) {
+    (void)physicalDevice;
+    (void)pExternalBufferInfo;
+    if (!pExternalBufferProperties) return;
+    PdockerVkStructHeader header = read_vk_struct_header(pExternalBufferProperties);
+    zero_vk_out_struct_preserve_chain(pExternalBufferProperties,
+                                      sizeof(*pExternalBufferProperties),
+                                      header);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceExternalSemaphoreProperties(
+        VkPhysicalDevice physicalDevice,
+        const VkPhysicalDeviceExternalSemaphoreInfo *pExternalSemaphoreInfo,
+        VkExternalSemaphoreProperties *pExternalSemaphoreProperties) {
+    (void)physicalDevice;
+    (void)pExternalSemaphoreInfo;
+    if (!pExternalSemaphoreProperties) return;
+    PdockerVkStructHeader header = read_vk_struct_header(pExternalSemaphoreProperties);
+    zero_vk_out_struct_preserve_chain(pExternalSemaphoreProperties,
+                                      sizeof(*pExternalSemaphoreProperties),
+                                      header);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceExternalFenceProperties(
+        VkPhysicalDevice physicalDevice,
+        const VkPhysicalDeviceExternalFenceInfo *pExternalFenceInfo,
+        VkExternalFenceProperties *pExternalFenceProperties) {
+    (void)physicalDevice;
+    (void)pExternalFenceInfo;
+    if (!pExternalFenceProperties) return;
+    PdockerVkStructHeader header = read_vk_struct_header(pExternalFenceProperties);
+    zero_vk_out_struct_preserve_chain(pExternalFenceProperties,
+                                      sizeof(*pExternalFenceProperties),
+                                      header);
 }
 
 static VkResult unsupported_create_info_pnext_result(const char *api_name, const void *pNext);
@@ -21631,8 +21707,15 @@ static bool proc_address_hidden_by_advertisement(const char *pName) {
     if (!pName) return true;
     if (strcmp(pName, "vkGetPhysicalDeviceProperties2KHR") == 0 ||
         strcmp(pName, "vkGetPhysicalDeviceFeatures2KHR") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceFormatProperties2KHR") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceImageFormatProperties2KHR") == 0 ||
         strcmp(pName, "vkGetPhysicalDeviceQueueFamilyProperties2KHR") == 0 ||
         strcmp(pName, "vkGetPhysicalDeviceMemoryProperties2KHR") == 0 ||
+        strcmp(pName, "vkEnumeratePhysicalDeviceGroupsKHR") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceSparseImageFormatProperties2KHR") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceExternalBufferPropertiesKHR") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceExternalSemaphorePropertiesKHR") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceExternalFencePropertiesKHR") == 0 ||
         strcmp(pName, "vkGetBufferMemoryRequirements2KHR") == 0 ||
         strcmp(pName, "vkGetImageMemoryRequirements2KHR") == 0 ||
         strcmp(pName, "vkBindBufferMemory2KHR") == 0 ||
@@ -21786,6 +21869,8 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_PROC(vkCreateInstance);
     MAP_PROC(vkDestroyInstance);
     MAP_PROC(vkEnumeratePhysicalDevices);
+    MAP_PROC(vkEnumeratePhysicalDeviceGroups);
+    MAP_ALIAS("vkEnumeratePhysicalDeviceGroupsKHR", vkEnumeratePhysicalDeviceGroups);
     MAP_PROC(vkGetPhysicalDeviceProperties);
     MAP_PROC(vkGetPhysicalDeviceProperties2);
     MAP_ALIAS("vkGetPhysicalDeviceProperties2KHR", vkGetPhysicalDeviceProperties2);
@@ -21799,12 +21884,20 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_PROC(vkGetPhysicalDeviceImageFormatProperties2);
     MAP_ALIAS("vkGetPhysicalDeviceImageFormatProperties2KHR", vkGetPhysicalDeviceImageFormatProperties2);
     MAP_PROC(vkGetPhysicalDeviceSparseImageFormatProperties);
+    MAP_PROC(vkGetPhysicalDeviceSparseImageFormatProperties2);
+    MAP_ALIAS("vkGetPhysicalDeviceSparseImageFormatProperties2KHR", vkGetPhysicalDeviceSparseImageFormatProperties2);
     MAP_PROC(vkGetPhysicalDeviceQueueFamilyProperties);
     MAP_PROC(vkGetPhysicalDeviceQueueFamilyProperties2);
     MAP_ALIAS("vkGetPhysicalDeviceQueueFamilyProperties2KHR", vkGetPhysicalDeviceQueueFamilyProperties2);
     MAP_PROC(vkGetPhysicalDeviceMemoryProperties);
     MAP_PROC(vkGetPhysicalDeviceMemoryProperties2);
     MAP_ALIAS("vkGetPhysicalDeviceMemoryProperties2KHR", vkGetPhysicalDeviceMemoryProperties2);
+    MAP_PROC(vkGetPhysicalDeviceExternalBufferProperties);
+    MAP_ALIAS("vkGetPhysicalDeviceExternalBufferPropertiesKHR", vkGetPhysicalDeviceExternalBufferProperties);
+    MAP_PROC(vkGetPhysicalDeviceExternalSemaphoreProperties);
+    MAP_ALIAS("vkGetPhysicalDeviceExternalSemaphorePropertiesKHR", vkGetPhysicalDeviceExternalSemaphoreProperties);
+    MAP_PROC(vkGetPhysicalDeviceExternalFenceProperties);
+    MAP_ALIAS("vkGetPhysicalDeviceExternalFencePropertiesKHR", vkGetPhysicalDeviceExternalFenceProperties);
     MAP_PROC(vkEnumerateDeviceExtensionProperties);
     MAP_PROC(vkEnumerateDeviceLayerProperties);
     MAP_PROC(vkCreateDevice);
