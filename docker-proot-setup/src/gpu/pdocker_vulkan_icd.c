@@ -13442,6 +13442,19 @@ VKAPI_ATTR void VKAPI_CALL vkGetDeviceQueue2(
         : VK_NULL_HANDLE;
 }
 
+VKAPI_ATTR void VKAPI_CALL vkGetDeviceGroupPeerMemoryFeatures(
+        VkDevice device,
+        uint32_t heapIndex,
+        uint32_t localDeviceIndex,
+        uint32_t remoteDeviceIndex,
+        VkPeerMemoryFeatureFlags *pPeerMemoryFeatures) {
+    (void)device;
+    (void)heapIndex;
+    (void)localDeviceIndex;
+    (void)remoteDeviceIndex;
+    if (pPeerMemoryFeatures) *pPeerMemoryFeatures = 0;
+}
+
 static bool descriptor_type_supported_by_v4_transport(VkDescriptorType type) {
     return type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ||
            type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC ||
@@ -17560,6 +17573,16 @@ VKAPI_ATTR void VKAPI_CALL vkCmdDispatchBaseKHR(
     vkCmdDispatchBase(commandBuffer,
                       baseGroupX, baseGroupY, baseGroupZ,
                       groupCountX, groupCountY, groupCountZ);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdSetDeviceMask(
+        VkCommandBuffer commandBuffer,
+        uint32_t deviceMask) {
+    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    if (!cmd) return;
+    if (deviceMask != 1u) {
+        command_buffer_mark_recording_failed(cmd, "device-mask-unsupported");
+    }
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdDispatchIndirect(
@@ -21859,6 +21882,8 @@ static bool proc_address_hidden_by_advertisement(const char *pName) {
         strcmp(pName, "vkGetPhysicalDeviceMemoryProperties2KHR") == 0 ||
         strcmp(pName, "vkGetDescriptorSetLayoutSupportKHR") == 0 ||
         strcmp(pName, "vkEnumeratePhysicalDeviceGroupsKHR") == 0 ||
+        strcmp(pName, "vkGetDeviceGroupPeerMemoryFeaturesKHR") == 0 ||
+        strcmp(pName, "vkCmdSetDeviceMaskKHR") == 0 ||
         strcmp(pName, "vkGetPhysicalDeviceSparseImageFormatProperties2KHR") == 0 ||
         strcmp(pName, "vkGetPhysicalDeviceExternalBufferPropertiesKHR") == 0 ||
         strcmp(pName, "vkGetPhysicalDeviceExternalSemaphorePropertiesKHR") == 0 ||
@@ -22052,6 +22077,8 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_PROC(vkDestroyDevice);
     MAP_PROC(vkGetDeviceQueue);
     MAP_PROC(vkGetDeviceQueue2);
+    MAP_PROC(vkGetDeviceGroupPeerMemoryFeatures);
+    MAP_ALIAS("vkGetDeviceGroupPeerMemoryFeaturesKHR", vkGetDeviceGroupPeerMemoryFeatures);
     MAP_PROC(vkCreateBuffer);
     MAP_PROC(vkDestroyBuffer);
     MAP_PROC(vkCreateImage);
@@ -22237,6 +22264,8 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_PROC(vkCmdDispatch);
     MAP_PROC(vkCmdDispatchBase);
     MAP_ALIAS("vkCmdDispatchBaseKHR", vkCmdDispatchBaseKHR);
+    MAP_PROC(vkCmdSetDeviceMask);
+    MAP_ALIAS("vkCmdSetDeviceMaskKHR", vkCmdSetDeviceMask);
     MAP_PROC(vkCmdDispatchIndirect);
     MAP_PROC(vkQueueSubmit);
     MAP_PROC(vkQueueSubmit2);

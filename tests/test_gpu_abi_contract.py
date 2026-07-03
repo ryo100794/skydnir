@@ -6240,6 +6240,8 @@ class GpuAbiContractTest(unittest.TestCase):
             '"vkGetPhysicalDeviceMemoryProperties2KHR", vkGetPhysicalDeviceMemoryProperties2',
             '"vkGetDescriptorSetLayoutSupportKHR", vkGetDescriptorSetLayoutSupport',
             '"vkEnumeratePhysicalDeviceGroupsKHR", vkEnumeratePhysicalDeviceGroups',
+            '"vkGetDeviceGroupPeerMemoryFeaturesKHR", vkGetDeviceGroupPeerMemoryFeatures',
+            '"vkCmdSetDeviceMaskKHR", vkCmdSetDeviceMask',
             '"vkGetPhysicalDeviceSparseImageFormatProperties2KHR", vkGetPhysicalDeviceSparseImageFormatProperties2',
             '"vkGetPhysicalDeviceExternalBufferPropertiesKHR", vkGetPhysicalDeviceExternalBufferProperties',
             '"vkGetPhysicalDeviceExternalSemaphorePropertiesKHR", vkGetPhysicalDeviceExternalSemaphoreProperties',
@@ -6254,6 +6256,8 @@ class GpuAbiContractTest(unittest.TestCase):
         icd = VULKAN_ICD.read_text()
         group_body = c_function_body(icd, "vkEnumeratePhysicalDeviceGroups")
         sparse2_body = c_function_body(icd, "vkGetPhysicalDeviceSparseImageFormatProperties2")
+        peer_body = c_function_body(icd, "vkGetDeviceGroupPeerMemoryFeatures")
+        device_mask_body = c_function_body(icd, "vkCmdSetDeviceMask")
         external_buffer_body = c_function_body(icd, "vkGetPhysicalDeviceExternalBufferProperties")
         external_semaphore_body = c_function_body(icd, "vkGetPhysicalDeviceExternalSemaphoreProperties")
         external_fence_body = c_function_body(icd, "vkGetPhysicalDeviceExternalFenceProperties")
@@ -6268,6 +6272,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("physicalDevices[0] = (VkPhysicalDevice)&g_device", group_body)
         self.assertIn("subsetAllocation = VK_FALSE", group_body)
         self.assertIn("return VK_INCOMPLETE", group_body)
+        self.assertIn("*pPeerMemoryFeatures = 0;", peer_body)
+        self.assertIn("deviceMask != 1u", device_mask_body)
+        self.assertIn('command_buffer_mark_recording_failed(cmd, "device-mask-unsupported")', device_mask_body)
 
         self.assertIn("const VkPhysicalDeviceSparseImageFormatInfo2 *pFormatInfo", icd)
         self.assertIn("*pPropertyCount = 0;", sparse2_body)
@@ -6285,6 +6292,10 @@ class GpuAbiContractTest(unittest.TestCase):
         for marker in [
             "MAP_PROC(vkEnumeratePhysicalDeviceGroups)",
             'MAP_ALIAS("vkEnumeratePhysicalDeviceGroupsKHR", vkEnumeratePhysicalDeviceGroups)',
+            "MAP_PROC(vkGetDeviceGroupPeerMemoryFeatures)",
+            'MAP_ALIAS("vkGetDeviceGroupPeerMemoryFeaturesKHR", vkGetDeviceGroupPeerMemoryFeatures)',
+            "MAP_PROC(vkCmdSetDeviceMask)",
+            'MAP_ALIAS("vkCmdSetDeviceMaskKHR", vkCmdSetDeviceMask)',
             "MAP_PROC(vkGetPhysicalDeviceSparseImageFormatProperties2)",
             'MAP_ALIAS("vkGetPhysicalDeviceSparseImageFormatProperties2KHR", vkGetPhysicalDeviceSparseImageFormatProperties2)',
             "MAP_PROC(vkGetPhysicalDeviceExternalBufferProperties)",
@@ -6297,6 +6308,8 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(marker, proc_body)
         for alias in [
             "vkEnumeratePhysicalDeviceGroupsKHR",
+            "vkGetDeviceGroupPeerMemoryFeaturesKHR",
+            "vkCmdSetDeviceMaskKHR",
             "vkGetPhysicalDeviceSparseImageFormatProperties2KHR",
             "vkGetPhysicalDeviceExternalBufferPropertiesKHR",
             "vkGetPhysicalDeviceExternalSemaphorePropertiesKHR",
