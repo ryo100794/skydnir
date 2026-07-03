@@ -6328,6 +6328,91 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertNotIn(extension, icd)
 
+    def test_vulkan_core_sparse_template_bda_and_trim_surfaces_fail_closed(self):
+        icd = VULKAN_ICD.read_text()
+        legacy_sparse_body = c_function_body(icd, "vkGetImageSparseMemoryRequirements")
+        queue_sparse_body = c_function_body(icd, "vkQueueBindSparse")
+        buffer_view_body = c_function_body(icd, "vkCreateBufferView")
+        ycbcr_body = c_function_body(icd, "vkCreateSamplerYcbcrConversion")
+        template_create_body = c_function_body(icd, "vkCreateDescriptorUpdateTemplate")
+        template_update_body = c_function_body(icd, "vkUpdateDescriptorSetWithTemplate")
+        bda_body = c_function_body(icd, "vkGetBufferDeviceAddress")
+        opaque_buffer_body = c_function_body(icd, "vkGetBufferOpaqueCaptureAddress")
+        opaque_memory_body = c_function_body(icd, "vkGetDeviceMemoryOpaqueCaptureAddress")
+        trim_body = c_function_body(icd, "vkTrimCommandPool")
+        proc_body = icd.split("static PFN_vkVoidFunction proc_address", 1)[1].split(
+            "VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr", 1
+        )[0]
+        hidden_body = c_function_body(icd, "proc_address_hidden_by_advertisement")
+
+        self.assertIn("VkSparseImageMemoryRequirements *pSparseMemoryRequirements", icd)
+        self.assertIn("*pSparseMemoryRequirementCount = 0;", legacy_sparse_body)
+        self.assertNotIn("pSparseMemoryRequirements[0]", legacy_sparse_body)
+
+        self.assertIn("if (bindInfoCount > 0 && !pBindInfo) return VK_ERROR_INITIALIZATION_FAILED;", queue_sparse_body)
+        self.assertIn("bindInfoCount != 0", queue_sparse_body)
+        self.assertIn("sparse-binding-unsupported", queue_sparse_body)
+        self.assertIn("submit_fence->signaled = true;", queue_sparse_body)
+
+        self.assertIn("*pView = VK_NULL_HANDLE;", buffer_view_body)
+        self.assertIn('unsupported_create_info_pnext_result("vkCreateBufferView", pCreateInfo->pNext)', buffer_view_body)
+        self.assertIn("buffer-view-unsupported", buffer_view_body)
+
+        self.assertIn("*pYcbcrConversion = VK_NULL_HANDLE;", ycbcr_body)
+        self.assertIn('unsupported_create_info_pnext_result("vkCreateSamplerYcbcrConversion", pCreateInfo->pNext)', ycbcr_body)
+        self.assertIn("sampler-ycbcr-conversion-unsupported", ycbcr_body)
+
+        self.assertIn("*pDescriptorUpdateTemplate = VK_NULL_HANDLE;", template_create_body)
+        self.assertIn('unsupported_create_info_pnext_result("vkCreateDescriptorUpdateTemplate", pCreateInfo->pNext)', template_create_body)
+        self.assertIn("descriptor-update-template-unsupported", template_create_body)
+        self.assertIn("descriptor-update-template-unsupported", template_update_body)
+
+        self.assertIn("return 0;", bda_body)
+        self.assertIn("return 0;", opaque_buffer_body)
+        self.assertIn("return 0;", opaque_memory_body)
+        self.assertIn("VkCommandPoolTrimFlags flags", icd)
+
+        for marker in [
+            "MAP_PROC(vkGetImageSparseMemoryRequirements)",
+            "MAP_PROC(vkQueueBindSparse)",
+            "MAP_PROC(vkCreateBufferView)",
+            "MAP_PROC(vkDestroyBufferView)",
+            "MAP_PROC(vkTrimCommandPool)",
+            'MAP_ALIAS("vkTrimCommandPoolKHR", vkTrimCommandPool)',
+            "MAP_PROC(vkCreateSamplerYcbcrConversion)",
+            'MAP_ALIAS("vkCreateSamplerYcbcrConversionKHR", vkCreateSamplerYcbcrConversion)',
+            "MAP_PROC(vkDestroySamplerYcbcrConversion)",
+            'MAP_ALIAS("vkDestroySamplerYcbcrConversionKHR", vkDestroySamplerYcbcrConversion)',
+            "MAP_PROC(vkCreateDescriptorUpdateTemplate)",
+            'MAP_ALIAS("vkCreateDescriptorUpdateTemplateKHR", vkCreateDescriptorUpdateTemplate)',
+            "MAP_PROC(vkDestroyDescriptorUpdateTemplate)",
+            'MAP_ALIAS("vkDestroyDescriptorUpdateTemplateKHR", vkDestroyDescriptorUpdateTemplate)',
+            "MAP_PROC(vkUpdateDescriptorSetWithTemplate)",
+            'MAP_ALIAS("vkUpdateDescriptorSetWithTemplateKHR", vkUpdateDescriptorSetWithTemplate)',
+            "MAP_PROC(vkGetBufferDeviceAddress)",
+            'MAP_ALIAS("vkGetBufferDeviceAddressKHR", vkGetBufferDeviceAddress)',
+            'MAP_ALIAS("vkGetBufferDeviceAddressEXT", vkGetBufferDeviceAddress)',
+            "MAP_PROC(vkGetBufferOpaqueCaptureAddress)",
+            'MAP_ALIAS("vkGetBufferOpaqueCaptureAddressKHR", vkGetBufferOpaqueCaptureAddress)',
+            "MAP_PROC(vkGetDeviceMemoryOpaqueCaptureAddress)",
+            'MAP_ALIAS("vkGetDeviceMemoryOpaqueCaptureAddressKHR", vkGetDeviceMemoryOpaqueCaptureAddress)',
+        ]:
+            self.assertIn(marker, proc_body)
+        for alias in [
+            "vkTrimCommandPoolKHR",
+            "vkCreateSamplerYcbcrConversionKHR",
+            "vkDestroySamplerYcbcrConversionKHR",
+            "vkCreateDescriptorUpdateTemplateKHR",
+            "vkDestroyDescriptorUpdateTemplateKHR",
+            "vkUpdateDescriptorSetWithTemplateKHR",
+            "vkGetBufferDeviceAddressKHR",
+            "vkGetBufferOpaqueCaptureAddressKHR",
+            "vkGetDeviceMemoryOpaqueCaptureAddressKHR",
+            "vkGetBufferDeviceAddressEXT",
+        ]:
+            self.assertIn(alias, hidden_body)
+
+
     def test_vulkan_physical_memory_properties2_output_is_fully_initialized(self):
         icd = VULKAN_ICD.read_text()
         body = icd.split("VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceMemoryProperties2", 1)[1].split(

@@ -12292,6 +12292,34 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyBuffer(
     free(pdocker_vk_buffer_from_handle(buffer));
 }
 
+VKAPI_ATTR VkResult VKAPI_CALL vkCreateBufferView(
+        VkDevice device,
+        const VkBufferViewCreateInfo *pCreateInfo,
+        const VkAllocationCallbacks *pAllocator,
+        VkBufferView *pView) {
+    (void)device;
+    (void)pAllocator;
+    if (!pView) return VK_ERROR_INITIALIZATION_FAILED;
+    *pView = VK_NULL_HANDLE;
+    if (!pCreateInfo) return VK_ERROR_INITIALIZATION_FAILED;
+    if (pCreateInfo->pNext) return unsupported_create_info_pnext_result("vkCreateBufferView", pCreateInfo->pNext);
+    if (pCreateInfo->flags != 0 || !pdocker_vk_buffer_from_handle(pCreateInfo->buffer)) {
+        trace_icd_runtime_failure("buffer-view-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    trace_icd_runtime_failure("buffer-view-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
+    return VK_ERROR_FEATURE_NOT_PRESENT;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkDestroyBufferView(
+        VkDevice device,
+        VkBufferView bufferView,
+        const VkAllocationCallbacks *pAllocator) {
+    (void)device;
+    (void)bufferView;
+    (void)pAllocator;
+}
+
 static VkResult unsupported_create_info_pnext_result(const char *api_name, const void *pNext) {
     if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
         PdockerVkStructHeader header = read_vk_struct_header(pNext);
@@ -12756,6 +12784,30 @@ VKAPI_ATTR void VKAPI_CALL vkDestroySampler(
     free(pdocker_vk_sampler_from_handle(sampler));
 }
 
+VKAPI_ATTR VkResult VKAPI_CALL vkCreateSamplerYcbcrConversion(
+        VkDevice device,
+        const VkSamplerYcbcrConversionCreateInfo *pCreateInfo,
+        const VkAllocationCallbacks *pAllocator,
+        VkSamplerYcbcrConversion *pYcbcrConversion) {
+    (void)device;
+    (void)pAllocator;
+    if (!pYcbcrConversion) return VK_ERROR_INITIALIZATION_FAILED;
+    *pYcbcrConversion = VK_NULL_HANDLE;
+    if (!pCreateInfo) return VK_ERROR_INITIALIZATION_FAILED;
+    if (pCreateInfo->pNext) return unsupported_create_info_pnext_result("vkCreateSamplerYcbcrConversion", pCreateInfo->pNext);
+    trace_icd_runtime_failure("sampler-ycbcr-conversion-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
+    return VK_ERROR_FEATURE_NOT_PRESENT;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkDestroySamplerYcbcrConversion(
+        VkDevice device,
+        VkSamplerYcbcrConversion ycbcrConversion,
+        const VkAllocationCallbacks *pAllocator) {
+    (void)device;
+    (void)ycbcrConversion;
+    (void)pAllocator;
+}
+
 VKAPI_ATTR void VKAPI_CALL vkGetBufferMemoryRequirements(
         VkDevice device,
         VkBuffer buffer,
@@ -12878,6 +12930,21 @@ VKAPI_ATTR void VKAPI_CALL vkGetImageSparseMemoryRequirements2(
     *pSparseMemoryRequirementCount = 0;
 }
 
+VKAPI_ATTR void VKAPI_CALL vkGetImageSparseMemoryRequirements(
+        VkDevice device,
+        VkImage image,
+        uint32_t *pSparseMemoryRequirementCount,
+        VkSparseImageMemoryRequirements *pSparseMemoryRequirements) {
+    (void)device;
+    (void)image;
+    if (!pSparseMemoryRequirementCount) return;
+    if (!pSparseMemoryRequirements) {
+        *pSparseMemoryRequirementCount = 0;
+        return;
+    }
+    *pSparseMemoryRequirementCount = 0;
+}
+
 VKAPI_ATTR void VKAPI_CALL vkGetDeviceImageSparseMemoryRequirements(
         VkDevice device,
         const VkDeviceImageMemoryRequirements *pInfo,
@@ -12891,6 +12958,30 @@ VKAPI_ATTR void VKAPI_CALL vkGetDeviceImageSparseMemoryRequirements(
         return;
     }
     *pSparseMemoryRequirementCount = 0;
+}
+
+VKAPI_ATTR VkDeviceAddress VKAPI_CALL vkGetBufferDeviceAddress(
+        VkDevice device,
+        const VkBufferDeviceAddressInfo *pInfo) {
+    (void)device;
+    (void)pInfo;
+    return 0;
+}
+
+VKAPI_ATTR uint64_t VKAPI_CALL vkGetBufferOpaqueCaptureAddress(
+        VkDevice device,
+        const VkBufferDeviceAddressInfo *pInfo) {
+    (void)device;
+    (void)pInfo;
+    return 0;
+}
+
+VKAPI_ATTR uint64_t VKAPI_CALL vkGetDeviceMemoryOpaqueCaptureAddress(
+        VkDevice device,
+        const VkDeviceMemoryOpaqueCaptureAddressInfo *pInfo) {
+    (void)device;
+    (void)pInfo;
+    return 0;
 }
 
 static VkResult validate_memory_allocate_pnext(const void *pNext) {
@@ -14113,6 +14204,42 @@ fail_closed:
             descriptorCopyCount,
             target_count);
     free(targets);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorUpdateTemplate(
+        VkDevice device,
+        const VkDescriptorUpdateTemplateCreateInfo *pCreateInfo,
+        const VkAllocationCallbacks *pAllocator,
+        VkDescriptorUpdateTemplate *pDescriptorUpdateTemplate) {
+    (void)device;
+    (void)pAllocator;
+    if (!pDescriptorUpdateTemplate) return VK_ERROR_INITIALIZATION_FAILED;
+    *pDescriptorUpdateTemplate = VK_NULL_HANDLE;
+    if (!pCreateInfo) return VK_ERROR_INITIALIZATION_FAILED;
+    if (pCreateInfo->pNext) return unsupported_create_info_pnext_result("vkCreateDescriptorUpdateTemplate", pCreateInfo->pNext);
+    trace_icd_runtime_failure("descriptor-update-template-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
+    return VK_ERROR_FEATURE_NOT_PRESENT;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkDestroyDescriptorUpdateTemplate(
+        VkDevice device,
+        VkDescriptorUpdateTemplate descriptorUpdateTemplate,
+        const VkAllocationCallbacks *pAllocator) {
+    (void)device;
+    (void)descriptorUpdateTemplate;
+    (void)pAllocator;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSetWithTemplate(
+        VkDevice device,
+        VkDescriptorSet descriptorSet,
+        VkDescriptorUpdateTemplate descriptorUpdateTemplate,
+        const void *pData) {
+    (void)device;
+    (void)descriptorSet;
+    (void)descriptorUpdateTemplate;
+    (void)pData;
+    trace_icd_runtime_failure("descriptor-update-template-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateShaderModule(
@@ -15702,6 +15829,15 @@ VKAPI_ATTR VkResult VKAPI_CALL vkResetCommandPool(
     (void)commandPool;
     (void)flags;
     return VK_SUCCESS;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkTrimCommandPool(
+        VkDevice device,
+        VkCommandPool commandPool,
+        VkCommandPoolTrimFlags flags) {
+    (void)device;
+    (void)commandPool;
+    (void)flags;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkAllocateCommandBuffers(
@@ -20145,6 +20281,26 @@ static VkResult execute_graphics_mixed_host_side_ops(
     return VK_SUCCESS;
 }
 
+VKAPI_ATTR VkResult VKAPI_CALL vkQueueBindSparse(
+        VkQueue queue,
+        uint32_t bindInfoCount,
+        const VkBindSparseInfo *pBindInfo,
+        VkFence fence) {
+    (void)queue;
+    if (bindInfoCount > 0 && !pBindInfo) return VK_ERROR_INITIALIZATION_FAILED;
+    if (bindInfoCount != 0) {
+        trace_icd_runtime_failure("sparse-binding-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    PdockerVkFence *submit_fence = pdocker_vk_fence_from_handle(fence);
+    if (fence != VK_NULL_HANDLE && !submit_fence) return VK_ERROR_INITIALIZATION_FAILED;
+    if (submit_fence) {
+        submit_fence->signaled = true;
+        (void)send_executor_fence_signal(submit_fence);
+    }
+    return VK_SUCCESS;
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
         VkQueue queue,
         uint32_t submitCount,
@@ -21891,6 +22047,16 @@ static bool proc_address_hidden_by_advertisement(const char *pName) {
         strcmp(pName, "vkGetBufferMemoryRequirements2KHR") == 0 ||
         strcmp(pName, "vkGetImageMemoryRequirements2KHR") == 0 ||
         strcmp(pName, "vkGetImageSparseMemoryRequirements2KHR") == 0 ||
+        strcmp(pName, "vkTrimCommandPoolKHR") == 0 ||
+        strcmp(pName, "vkCreateDescriptorUpdateTemplateKHR") == 0 ||
+        strcmp(pName, "vkDestroyDescriptorUpdateTemplateKHR") == 0 ||
+        strcmp(pName, "vkUpdateDescriptorSetWithTemplateKHR") == 0 ||
+        strcmp(pName, "vkGetBufferDeviceAddressKHR") == 0 ||
+        strcmp(pName, "vkGetBufferOpaqueCaptureAddressKHR") == 0 ||
+        strcmp(pName, "vkGetDeviceMemoryOpaqueCaptureAddressKHR") == 0 ||
+        strcmp(pName, "vkGetBufferDeviceAddressEXT") == 0 ||
+        strcmp(pName, "vkCreateSamplerYcbcrConversionKHR") == 0 ||
+        strcmp(pName, "vkDestroySamplerYcbcrConversionKHR") == 0 ||
         strcmp(pName, "vkBindBufferMemory2KHR") == 0 ||
         strcmp(pName, "vkBindImageMemory2KHR") == 0 ||
         strcmp(pName, "vkCreateRenderPass2KHR") == 0 ||
@@ -22081,18 +22247,25 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_ALIAS("vkGetDeviceGroupPeerMemoryFeaturesKHR", vkGetDeviceGroupPeerMemoryFeatures);
     MAP_PROC(vkCreateBuffer);
     MAP_PROC(vkDestroyBuffer);
+    MAP_PROC(vkCreateBufferView);
+    MAP_PROC(vkDestroyBufferView);
     MAP_PROC(vkCreateImage);
     MAP_PROC(vkDestroyImage);
     MAP_PROC(vkCreateImageView);
     MAP_PROC(vkDestroyImageView);
     MAP_PROC(vkCreateSampler);
     MAP_PROC(vkDestroySampler);
+    MAP_PROC(vkCreateSamplerYcbcrConversion);
+    MAP_ALIAS("vkCreateSamplerYcbcrConversionKHR", vkCreateSamplerYcbcrConversion);
+    MAP_PROC(vkDestroySamplerYcbcrConversion);
+    MAP_ALIAS("vkDestroySamplerYcbcrConversionKHR", vkDestroySamplerYcbcrConversion);
     MAP_PROC(vkGetBufferMemoryRequirements);
     MAP_PROC(vkGetBufferMemoryRequirements2);
     MAP_ALIAS("vkGetBufferMemoryRequirements2KHR", vkGetBufferMemoryRequirements2);
     MAP_PROC(vkGetImageMemoryRequirements);
     MAP_PROC(vkGetImageMemoryRequirements2);
     MAP_ALIAS("vkGetImageMemoryRequirements2KHR", vkGetImageMemoryRequirements2);
+    MAP_PROC(vkGetImageSparseMemoryRequirements);
     MAP_PROC(vkGetImageSparseMemoryRequirements2);
     MAP_ALIAS("vkGetImageSparseMemoryRequirements2KHR", vkGetImageSparseMemoryRequirements2);
     MAP_PROC(vkGetDeviceBufferMemoryRequirements);
@@ -22101,6 +22274,13 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_ALIAS("vkGetDeviceImageMemoryRequirementsKHR", vkGetDeviceImageMemoryRequirements);
     MAP_PROC(vkGetDeviceImageSparseMemoryRequirements);
     MAP_ALIAS("vkGetDeviceImageSparseMemoryRequirementsKHR", vkGetDeviceImageSparseMemoryRequirements);
+    MAP_PROC(vkGetBufferDeviceAddress);
+    MAP_ALIAS("vkGetBufferDeviceAddressKHR", vkGetBufferDeviceAddress);
+    MAP_ALIAS("vkGetBufferDeviceAddressEXT", vkGetBufferDeviceAddress);
+    MAP_PROC(vkGetBufferOpaqueCaptureAddress);
+    MAP_ALIAS("vkGetBufferOpaqueCaptureAddressKHR", vkGetBufferOpaqueCaptureAddress);
+    MAP_PROC(vkGetDeviceMemoryOpaqueCaptureAddress);
+    MAP_ALIAS("vkGetDeviceMemoryOpaqueCaptureAddressKHR", vkGetDeviceMemoryOpaqueCaptureAddress);
     MAP_PROC(vkGetImageSubresourceLayout);
     MAP_PROC(vkAllocateMemory);
     MAP_PROC(vkFreeMemory);
@@ -22127,6 +22307,12 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_PROC(vkAllocateDescriptorSets);
     MAP_PROC(vkFreeDescriptorSets);
     MAP_PROC(vkUpdateDescriptorSets);
+    MAP_PROC(vkCreateDescriptorUpdateTemplate);
+    MAP_ALIAS("vkCreateDescriptorUpdateTemplateKHR", vkCreateDescriptorUpdateTemplate);
+    MAP_PROC(vkDestroyDescriptorUpdateTemplate);
+    MAP_ALIAS("vkDestroyDescriptorUpdateTemplateKHR", vkDestroyDescriptorUpdateTemplate);
+    MAP_PROC(vkUpdateDescriptorSetWithTemplate);
+    MAP_ALIAS("vkUpdateDescriptorSetWithTemplateKHR", vkUpdateDescriptorSetWithTemplate);
     MAP_PROC(vkCreateShaderModule);
     MAP_PROC(vkDestroyShaderModule);
     MAP_PROC(vkCreatePipelineCache);
@@ -22160,6 +22346,8 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_PROC(vkCreateCommandPool);
     MAP_PROC(vkDestroyCommandPool);
     MAP_PROC(vkResetCommandPool);
+    MAP_PROC(vkTrimCommandPool);
+    MAP_ALIAS("vkTrimCommandPoolKHR", vkTrimCommandPool);
     MAP_PROC(vkAllocateCommandBuffers);
     MAP_PROC(vkFreeCommandBuffers);
     MAP_PROC(vkBeginCommandBuffer);
@@ -22267,6 +22455,7 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_PROC(vkCmdSetDeviceMask);
     MAP_ALIAS("vkCmdSetDeviceMaskKHR", vkCmdSetDeviceMask);
     MAP_PROC(vkCmdDispatchIndirect);
+    MAP_PROC(vkQueueBindSparse);
     MAP_PROC(vkQueueSubmit);
     MAP_PROC(vkQueueSubmit2);
     MAP_ALIAS("vkQueueSubmit2KHR", vkQueueSubmit2);
