@@ -11135,6 +11135,41 @@ static void fill_pnext_properties(void *pNext) {
     for (void *node = pNext; node;) {
         PdockerVkStructHeader header = read_vk_struct_header(node);
         switch (header.sType) {
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES: {
+                VkPhysicalDeviceIDProperties *p = (VkPhysicalDeviceIDProperties *)node;
+                static const uint8_t device_uuid[VK_UUID_SIZE] = {
+                    0x73, 0x6b, 0x79, 0x64, 0x6e, 0x69, 0x72, 0x2d,
+                    0x76, 0x6b, 0x2d, 0x64, 0x65, 0x76, 0x30, 0x31,
+                };
+                static const uint8_t driver_uuid[VK_UUID_SIZE] = {
+                    0x73, 0x6b, 0x79, 0x64, 0x6e, 0x69, 0x72, 0x2d,
+                    0x76, 0x6b, 0x2d, 0x69, 0x63, 0x64, 0x30, 0x31,
+                };
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                memcpy(p->deviceUUID, device_uuid, sizeof(p->deviceUUID));
+                memcpy(p->driverUUID, driver_uuid, sizeof(p->driverUUID));
+                p->deviceLUIDValid = VK_FALSE;
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_POINT_CLIPPING_PROPERTIES: {
+                VkPhysicalDevicePointClippingProperties *p = (VkPhysicalDevicePointClippingProperties *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                p->pointClippingBehavior = VK_POINT_CLIPPING_BEHAVIOR_ALL_CLIP_PLANES;
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_PROPERTIES: {
+                VkPhysicalDeviceMultiviewProperties *p = (VkPhysicalDeviceMultiviewProperties *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                p->maxMultiviewViewCount = 1;
+                p->maxMultiviewInstanceIndex = 1;
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROTECTED_MEMORY_PROPERTIES: {
+                VkPhysicalDeviceProtectedMemoryProperties *p = (VkPhysicalDeviceProtectedMemoryProperties *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                p->protectedNoFault = VK_FALSE;
+                break;
+            }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_3_PROPERTIES: {
                 VkPhysicalDeviceMaintenance3Properties *p = (VkPhysicalDeviceMaintenance3Properties *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
@@ -11194,6 +11229,45 @@ static void fill_pnext_properties(void *pNext) {
                 p->conformanceVersion.minor = 2;
                 p->shaderRoundingModeRTEFloat16 = VK_FALSE;
                 p->shaderRoundingModeRTZFloat16 = VK_FALSE;
+                p->maxUpdateAfterBindDescriptorsInAllPools = 0;
+                p->quadDivergentImplicitLod = VK_FALSE;
+                p->maxTimelineSemaphoreValueDifference = UINT64_MAX;
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES: {
+                VkPhysicalDeviceDescriptorIndexingProperties *p = (VkPhysicalDeviceDescriptorIndexingProperties *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                p->maxUpdateAfterBindDescriptorsInAllPools = 0;
+                p->quadDivergentImplicitLod = VK_FALSE;
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_STENCIL_RESOLVE_PROPERTIES: {
+                VkPhysicalDeviceDepthStencilResolveProperties *p = (VkPhysicalDeviceDepthStencilResolveProperties *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                p->supportedDepthResolveModes = VK_RESOLVE_MODE_NONE;
+                p->supportedStencilResolveModes = VK_RESOLVE_MODE_NONE;
+                p->independentResolveNone = VK_TRUE;
+                p->independentResolve = VK_FALSE;
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_FILTER_MINMAX_PROPERTIES: {
+                VkPhysicalDeviceSamplerFilterMinmaxProperties *p = (VkPhysicalDeviceSamplerFilterMinmaxProperties *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                p->filterMinmaxSingleComponentFormats = VK_FALSE;
+                p->filterMinmaxImageComponentMapping = VK_FALSE;
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT_CONTROLS_PROPERTIES: {
+                VkPhysicalDeviceFloatControlsProperties *p = (VkPhysicalDeviceFloatControlsProperties *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                p->denormBehaviorIndependence = VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE;
+                p->roundingModeIndependence = VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE;
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_PROPERTIES: {
+                VkPhysicalDeviceTimelineSemaphoreProperties *p = (VkPhysicalDeviceTimelineSemaphoreProperties *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                p->maxTimelineSemaphoreValueDifference = UINT64_MAX;
                 break;
             }
             default:

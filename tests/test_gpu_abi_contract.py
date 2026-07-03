@@ -5887,11 +5887,20 @@ class GpuAbiContractTest(unittest.TestCase):
             "static void fill_physical_device_features", 1
         )[0]
         for struct_name in [
+            "VkPhysicalDeviceIDProperties",
+            "VkPhysicalDevicePointClippingProperties",
+            "VkPhysicalDeviceMultiviewProperties",
+            "VkPhysicalDeviceProtectedMemoryProperties",
             "VkPhysicalDeviceMaintenance3Properties",
             "VkPhysicalDeviceSubgroupProperties",
             "VkPhysicalDeviceDriverProperties",
             "VkPhysicalDeviceVulkan11Properties",
             "VkPhysicalDeviceVulkan12Properties",
+            "VkPhysicalDeviceDescriptorIndexingProperties",
+            "VkPhysicalDeviceDepthStencilResolveProperties",
+            "VkPhysicalDeviceSamplerFilterMinmaxProperties",
+            "VkPhysicalDeviceFloatControlsProperties",
+            "VkPhysicalDeviceTimelineSemaphoreProperties",
         ]:
             self.assertIn(f"{struct_name} *p", props_body)
             segment = props_body.split(f"{struct_name} *p", 1)[1].split("break;", 1)[0]
@@ -5899,6 +5908,18 @@ class GpuAbiContractTest(unittest.TestCase):
         if "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_PROPERTIES" in props_body:
             segment = props_body.split("VkPhysicalDeviceMaintenance4Properties *p", 1)[1].split("break;", 1)[0]
             self.assertIn("zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);", segment)
+        for marker in [
+            "memcpy(p->deviceUUID, device_uuid, sizeof(p->deviceUUID));",
+            "p->pointClippingBehavior = VK_POINT_CLIPPING_BEHAVIOR_ALL_CLIP_PLANES;",
+            "p->maxMultiviewViewCount = 1;",
+            "p->protectedNoFault = VK_FALSE;",
+            "p->maxUpdateAfterBindDescriptorsInAllPools = 0;",
+            "p->supportedDepthResolveModes = VK_RESOLVE_MODE_NONE;",
+            "p->filterMinmaxSingleComponentFormats = VK_FALSE;",
+            "p->denormBehaviorIndependence = VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE;",
+            "p->maxTimelineSemaphoreValueDifference = UINT64_MAX;",
+        ]:
+            self.assertIn(marker, props_body)
 
 
     def test_vulkan_physical_device_properties2_and_features2_outputs_are_fully_initialized(self):
