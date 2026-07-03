@@ -137,9 +137,16 @@ int main(void) {
         .pQueuePriorities = priorities,
     };
     const char *device_exts[] = { VK_KHR_16BIT_STORAGE_EXTENSION_NAME };
+    VkPhysicalDevice selected_devices[] = { phys };
+    VkDeviceGroupDeviceCreateInfo group_dci = {
+        .sType = VK_STRUCTURE_TYPE_DEVICE_GROUP_DEVICE_CREATE_INFO,
+        .pNext = &features2,
+        .physicalDeviceCount = 1,
+        .pPhysicalDevices = selected_devices,
+    };
     VkDeviceCreateInfo dci = {
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-        .pNext = &features2,
+        .pNext = &group_dci,
         .queueCreateInfoCount = 1,
         .pQueueCreateInfos = &qci,
         .enabledExtensionCount = 1,

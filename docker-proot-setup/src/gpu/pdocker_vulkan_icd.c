@@ -11648,6 +11648,29 @@ static VkResult unsupported_device_feature_request_result(const char *feature_na
     return VK_ERROR_FEATURE_NOT_PRESENT;
 }
 
+static VkResult unsupported_device_group_request_result(const char *reason) {
+    fprintf(stderr,
+            "pdocker-vulkan-icd: create-device rejected unsupported device group request: %s\n",
+            reason ? reason : "unknown");
+    trace_icd_runtime_failure("create-device-device-group-unsupported", VK_ERROR_INITIALIZATION_FAILED);
+    return VK_ERROR_INITIALIZATION_FAILED;
+}
+
+static VkResult validate_device_group_device_create_info(const VkDeviceGroupDeviceCreateInfo *p) {
+    if (!p) return VK_SUCCESS;
+    if (p->physicalDeviceCount == 0) return VK_SUCCESS;
+    if (p->physicalDeviceCount != 1) {
+        return unsupported_device_group_request_result("physicalDeviceCount must be 0 or 1 for the single-device bridge");
+    }
+    if (!p->pPhysicalDevices) {
+        return unsupported_device_group_request_result("pPhysicalDevices is null for a non-empty device group");
+    }
+    if (p->pPhysicalDevices[0] != (VkPhysicalDevice)&g_device) {
+        return unsupported_device_group_request_result("requested physical device is not the advertised bridge device");
+    }
+    return VK_SUCCESS;
+}
+
 static VkResult validate_device_feature_requests(const VkDeviceCreateInfo *pCreateInfo) {
     if (!pCreateInfo) return VK_ERROR_INITIALIZATION_FAILED;
     const char *unsupported_feature_name = NULL;
@@ -11771,6 +11794,12 @@ static VkResult validate_device_feature_requests(const VkDeviceCreateInfo *pCrea
                 const VkPhysicalDeviceHostQueryResetFeatures *p = (const VkPhysicalDeviceHostQueryResetFeatures *)node;
                 supported = !p->hostQueryReset;
                 if (!supported) unsupported_feature_name = "hostQueryReset";
+                break;
+            }
+            case VK_STRUCTURE_TYPE_DEVICE_GROUP_DEVICE_CREATE_INFO: {
+                VkResult group_rc = validate_device_group_device_create_info((const VkDeviceGroupDeviceCreateInfo *)node);
+                if (group_rc != VK_SUCCESS) return group_rc;
+                supported = true;
                 break;
             }
             case VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO:
@@ -13866,9 +13895,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
         const VkDeviceCreateInfo *pCreateInfo,
         const VkAllocationCallbacks *pAllocator,
         VkDevice *pDevice) {
-    (void)physicalDevice;
     (void)pAllocator;
     if (!pDevice) return VK_ERROR_INITIALIZATION_FAILED;
+    if (physicalDevice != (VkPhysicalDevice)&g_device) return VK_ERROR_INITIALIZATION_FAILED;
     *pDevice = VK_NULL_HANDLE;
     trace_device_create_features(pCreateInfo);
     VkResult extension_rc = validate_device_extensions(pCreateInfo);

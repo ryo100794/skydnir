@@ -6146,6 +6146,11 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("create-device-pnext-unsupported", icd)
         self.assertIn("VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO", icd)
         self.assertIn("Vulkan loader prepends ICD-private loader metadata", icd)
+        self.assertIn("VK_STRUCTURE_TYPE_DEVICE_GROUP_DEVICE_CREATE_INFO", icd)
+        self.assertIn("validate_device_group_device_create_info", icd)
+        self.assertIn("create-device-device-group-unsupported", icd)
+        self.assertIn("physicalDeviceCount != 1", icd)
+        self.assertIn("p->pPhysicalDevices[0] != (VkPhysicalDevice)&g_device", icd)
         self.assertIn("VK_ERROR_FEATURE_NOT_PRESENT", icd)
         for marker in [
             "VK_KHR_MAINTENANCE_4_EXTENSION_NAME",
@@ -6188,6 +6193,7 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         self.assertIn("*pDevice = VK_NULL_HANDLE;", create_body)
         self.assertIn("validate_device_extensions(pCreateInfo)", create_body)
+        self.assertIn("physicalDevice != (VkPhysicalDevice)&g_device", create_body)
         self.assertIn("validate_device_feature_requests(pCreateInfo)", create_body)
         self.assertIn("if (feature_rc != VK_SUCCESS) return feature_rc;", create_body)
         self.assertIn("requested_feature_mask_from_device_create_info(pCreateInfo)", create_body)
