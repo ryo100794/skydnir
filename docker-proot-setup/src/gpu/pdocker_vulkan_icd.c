@@ -11305,39 +11305,30 @@ static void fill_pnext_features(void *pNext) {
                 }
                 break;
             }
-#ifdef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES: {
                 VkPhysicalDeviceSynchronization2Features *p = (VkPhysicalDeviceSynchronization2Features *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
                 p->synchronization2 = advertised_synchronization2();
                 break;
             }
-#endif
-#ifdef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES: {
                 VkPhysicalDeviceTimelineSemaphoreFeatures *p = (VkPhysicalDeviceTimelineSemaphoreFeatures *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
                 p->timelineSemaphore = advertised_timeline_semaphore();
                 break;
             }
-#endif
-#ifdef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES: {
                 VkPhysicalDeviceDynamicRenderingFeatures *p = (VkPhysicalDeviceDynamicRenderingFeatures *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
                 p->dynamicRendering = advertised_dynamic_rendering();
                 break;
             }
-#endif
-#ifdef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT: {
                 VkPhysicalDeviceExtendedDynamicStateFeaturesEXT *p = (VkPhysicalDeviceExtendedDynamicStateFeaturesEXT *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
                 p->extendedDynamicState = advertised_extended_dynamic_state();
                 break;
             }
-#endif
-#ifdef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_2_FEATURES_EXT
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_2_FEATURES_EXT: {
                 VkPhysicalDeviceExtendedDynamicState2FeaturesEXT *p = (VkPhysicalDeviceExtendedDynamicState2FeaturesEXT *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
@@ -11346,8 +11337,6 @@ static void fill_pnext_features(void *pNext) {
                 p->extendedDynamicState2PatchControlPoints = advertised_extended_dynamic_state2_patch_control_points();
                 break;
             }
-#endif
-#ifdef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INDEX_TYPE_UINT8_FEATURES_EXT
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INDEX_TYPE_UINT8_FEATURES_EXT: {
                 VkPhysicalDeviceIndexTypeUint8FeaturesEXT *p = (VkPhysicalDeviceIndexTypeUint8FeaturesEXT *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
@@ -11356,20 +11345,451 @@ static void fill_pnext_features(void *pNext) {
                     : VK_FALSE;
                 break;
             }
-#endif
-#ifdef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES: {
+                VkPhysicalDeviceDescriptorIndexingFeatures *p = (VkPhysicalDeviceDescriptorIndexingFeatures *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SCALAR_BLOCK_LAYOUT_FEATURES: {
+                VkPhysicalDeviceScalarBlockLayoutFeatures *p = (VkPhysicalDeviceScalarBlockLayoutFeatures *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES: {
+                VkPhysicalDeviceBufferDeviceAddressFeatures *p = (VkPhysicalDeviceBufferDeviceAddressFeatures *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES: {
+                VkPhysicalDeviceSamplerYcbcrConversionFeatures *p = (VkPhysicalDeviceSamplerYcbcrConversionFeatures *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES: {
+                VkPhysicalDeviceVulkanMemoryModelFeatures *p = (VkPhysicalDeviceVulkanMemoryModelFeatures *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_UNIFORM_BUFFER_STANDARD_LAYOUT_FEATURES: {
+                VkPhysicalDeviceUniformBufferStandardLayoutFeatures *p = (VkPhysicalDeviceUniformBufferStandardLayoutFeatures *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_SUBGROUP_EXTENDED_TYPES_FEATURES: {
+                VkPhysicalDeviceShaderSubgroupExtendedTypesFeatures *p = (VkPhysicalDeviceShaderSubgroupExtendedTypesFeatures *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SEPARATE_DEPTH_STENCIL_LAYOUTS_FEATURES: {
+                VkPhysicalDeviceSeparateDepthStencilLayoutsFeatures *p = (VkPhysicalDeviceSeparateDepthStencilLayoutsFeatures *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES: {
+                VkPhysicalDeviceHostQueryResetFeatures *p = (VkPhysicalDeviceHostQueryResetFeatures *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                break;
+            }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES: {
                 VkPhysicalDeviceMaintenance4Features *p = (VkPhysicalDeviceMaintenance4Features *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
                 p->maintenance4 = VK_TRUE;
                 break;
             }
-#endif
             default:
                 break;
         }
         node = (void *)header.pNext;
     }
+}
+
+#define PDOCKER_VK_FOR_EACH_BASE_FEATURE(F) \
+    F(robustBufferAccess) \
+    F(fullDrawIndexUint32) \
+    F(imageCubeArray) \
+    F(independentBlend) \
+    F(geometryShader) \
+    F(tessellationShader) \
+    F(sampleRateShading) \
+    F(dualSrcBlend) \
+    F(logicOp) \
+    F(multiDrawIndirect) \
+    F(drawIndirectFirstInstance) \
+    F(depthClamp) \
+    F(depthBiasClamp) \
+    F(fillModeNonSolid) \
+    F(depthBounds) \
+    F(wideLines) \
+    F(largePoints) \
+    F(alphaToOne) \
+    F(multiViewport) \
+    F(samplerAnisotropy) \
+    F(textureCompressionETC2) \
+    F(textureCompressionASTC_LDR) \
+    F(textureCompressionBC) \
+    F(occlusionQueryPrecise) \
+    F(pipelineStatisticsQuery) \
+    F(vertexPipelineStoresAndAtomics) \
+    F(fragmentStoresAndAtomics) \
+    F(shaderTessellationAndGeometryPointSize) \
+    F(shaderImageGatherExtended) \
+    F(shaderStorageImageExtendedFormats) \
+    F(shaderStorageImageMultisample) \
+    F(shaderStorageImageReadWithoutFormat) \
+    F(shaderStorageImageWriteWithoutFormat) \
+    F(shaderUniformBufferArrayDynamicIndexing) \
+    F(shaderSampledImageArrayDynamicIndexing) \
+    F(shaderStorageBufferArrayDynamicIndexing) \
+    F(shaderStorageImageArrayDynamicIndexing) \
+    F(shaderClipDistance) \
+    F(shaderCullDistance) \
+    F(shaderFloat64) \
+    F(shaderInt64) \
+    F(shaderInt16) \
+    F(shaderResourceResidency) \
+    F(shaderResourceMinLod) \
+    F(sparseBinding) \
+    F(sparseResidencyBuffer) \
+    F(sparseResidencyImage2D) \
+    F(sparseResidencyImage3D) \
+    F(sparseResidency2Samples) \
+    F(sparseResidency4Samples) \
+    F(sparseResidency8Samples) \
+    F(sparseResidency16Samples) \
+    F(sparseResidencyAliased) \
+    F(variableMultisampleRate) \
+    F(inheritedQueries)
+
+static uint64_t advertised_feature_mask(void);
+
+static bool base_feature_request_supported(
+        const VkPhysicalDeviceFeatures *requested,
+        const char **unsupported_feature_name) {
+    if (!requested) return true;
+    VkPhysicalDeviceFeatures supported;
+    fill_physical_device_features(&supported);
+#define CHECK_BASE_FEATURE(field) do { \
+        if (requested->field && !supported.field) { \
+            if (unsupported_feature_name) *unsupported_feature_name = #field; \
+            return false; \
+        } \
+    } while (0);
+    PDOCKER_VK_FOR_EACH_BASE_FEATURE(CHECK_BASE_FEATURE)
+#undef CHECK_BASE_FEATURE
+    return true;
+}
+
+#define PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, supported, field) do { \
+        if ((requested)->field && !(supported)->field) { \
+            if (unsupported_feature_name) *unsupported_feature_name = #field; \
+            return false; \
+        } \
+    } while (0)
+
+static bool vulkan11_feature_request_supported(
+        const VkPhysicalDeviceVulkan11Features *requested,
+        const char **unsupported_feature_name) {
+    if (!requested) return true;
+    VkPhysicalDeviceVulkan11Features supported;
+    memset(&supported, 0, sizeof(supported));
+    supported.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
+    fill_pnext_features(&supported);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, storageBuffer16BitAccess);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, uniformAndStorageBuffer16BitAccess);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, storagePushConstant16);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, storageInputOutput16);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, multiview);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, multiviewGeometryShader);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, multiviewTessellationShader);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, variablePointersStorageBuffer);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, variablePointers);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, protectedMemory);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, samplerYcbcrConversion);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, shaderDrawParameters);
+    return true;
+}
+
+static bool storage16_feature_request_supported(
+        const VkPhysicalDevice16BitStorageFeatures *requested,
+        const char **unsupported_feature_name) {
+    if (!requested) return true;
+    VkPhysicalDevice16BitStorageFeatures supported;
+    memset(&supported, 0, sizeof(supported));
+    supported.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES;
+    fill_pnext_features(&supported);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, storageBuffer16BitAccess);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, uniformAndStorageBuffer16BitAccess);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, storagePushConstant16);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, storageInputOutput16);
+    return true;
+}
+
+static bool storage8_feature_request_supported(
+        const VkPhysicalDevice8BitStorageFeatures *requested,
+        const char **unsupported_feature_name) {
+    if (!requested) return true;
+    VkPhysicalDevice8BitStorageFeatures supported;
+    memset(&supported, 0, sizeof(supported));
+    supported.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES;
+    fill_pnext_features(&supported);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, storageBuffer8BitAccess);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, uniformAndStorageBuffer8BitAccess);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, storagePushConstant8);
+    return true;
+}
+
+static bool shader_float16_int8_feature_request_supported(
+        const VkPhysicalDeviceShaderFloat16Int8Features *requested,
+        const char **unsupported_feature_name) {
+    if (!requested) return true;
+    VkPhysicalDeviceShaderFloat16Int8Features supported;
+    memset(&supported, 0, sizeof(supported));
+    supported.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES;
+    fill_pnext_features(&supported);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, shaderFloat16);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, shaderInt8);
+    return true;
+}
+
+static bool vulkan12_feature_request_supported(
+        const VkPhysicalDeviceVulkan12Features *requested,
+        const char **unsupported_feature_name) {
+    if (!requested) return true;
+    VkPhysicalDeviceVulkan12Features supported;
+    memset(&supported, 0, sizeof(supported));
+    supported.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    fill_pnext_features(&supported);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, samplerMirrorClampToEdge);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, drawIndirectCount);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, storageBuffer8BitAccess);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, uniformAndStorageBuffer8BitAccess);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, storagePushConstant8);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, shaderBufferInt64Atomics);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, shaderSharedInt64Atomics);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, shaderFloat16);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, shaderInt8);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, descriptorIndexing);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, shaderInputAttachmentArrayDynamicIndexing);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, shaderUniformTexelBufferArrayDynamicIndexing);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, shaderStorageTexelBufferArrayDynamicIndexing);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, shaderUniformBufferArrayNonUniformIndexing);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, shaderSampledImageArrayNonUniformIndexing);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, shaderStorageBufferArrayNonUniformIndexing);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, shaderStorageImageArrayNonUniformIndexing);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, shaderInputAttachmentArrayNonUniformIndexing);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, shaderUniformTexelBufferArrayNonUniformIndexing);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, shaderStorageTexelBufferArrayNonUniformIndexing);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, descriptorBindingUniformBufferUpdateAfterBind);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, descriptorBindingSampledImageUpdateAfterBind);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, descriptorBindingStorageImageUpdateAfterBind);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, descriptorBindingStorageBufferUpdateAfterBind);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, descriptorBindingUniformTexelBufferUpdateAfterBind);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, descriptorBindingStorageTexelBufferUpdateAfterBind);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, descriptorBindingUpdateUnusedWhilePending);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, descriptorBindingPartiallyBound);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, descriptorBindingVariableDescriptorCount);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, runtimeDescriptorArray);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, samplerFilterMinmax);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, scalarBlockLayout);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, imagelessFramebuffer);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, uniformBufferStandardLayout);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, shaderSubgroupExtendedTypes);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, separateDepthStencilLayouts);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, hostQueryReset);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, timelineSemaphore);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, bufferDeviceAddress);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, bufferDeviceAddressCaptureReplay);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, bufferDeviceAddressMultiDevice);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, vulkanMemoryModel);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, vulkanMemoryModelDeviceScope);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, vulkanMemoryModelAvailabilityVisibilityChains);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, shaderOutputViewportIndex);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, shaderOutputLayer);
+    PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, subgroupBroadcastDynamicId);
+    return true;
+}
+
+static bool descriptor_indexing_feature_request_supported(
+        const VkPhysicalDeviceDescriptorIndexingFeatures *requested,
+        const char **unsupported_feature_name) {
+    if (!requested) return true;
+#define CHECK_DESCRIPTOR_INDEXING_FEATURE(field) PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &(VkPhysicalDeviceDescriptorIndexingFeatures){0}, field)
+    CHECK_DESCRIPTOR_INDEXING_FEATURE(shaderInputAttachmentArrayDynamicIndexing);
+    CHECK_DESCRIPTOR_INDEXING_FEATURE(shaderUniformTexelBufferArrayDynamicIndexing);
+    CHECK_DESCRIPTOR_INDEXING_FEATURE(shaderStorageTexelBufferArrayDynamicIndexing);
+    CHECK_DESCRIPTOR_INDEXING_FEATURE(shaderUniformBufferArrayNonUniformIndexing);
+    CHECK_DESCRIPTOR_INDEXING_FEATURE(shaderSampledImageArrayNonUniformIndexing);
+    CHECK_DESCRIPTOR_INDEXING_FEATURE(shaderStorageBufferArrayNonUniformIndexing);
+    CHECK_DESCRIPTOR_INDEXING_FEATURE(shaderStorageImageArrayNonUniformIndexing);
+    CHECK_DESCRIPTOR_INDEXING_FEATURE(shaderInputAttachmentArrayNonUniformIndexing);
+    CHECK_DESCRIPTOR_INDEXING_FEATURE(shaderUniformTexelBufferArrayNonUniformIndexing);
+    CHECK_DESCRIPTOR_INDEXING_FEATURE(shaderStorageTexelBufferArrayNonUniformIndexing);
+    CHECK_DESCRIPTOR_INDEXING_FEATURE(descriptorBindingUniformBufferUpdateAfterBind);
+    CHECK_DESCRIPTOR_INDEXING_FEATURE(descriptorBindingSampledImageUpdateAfterBind);
+    CHECK_DESCRIPTOR_INDEXING_FEATURE(descriptorBindingStorageImageUpdateAfterBind);
+    CHECK_DESCRIPTOR_INDEXING_FEATURE(descriptorBindingStorageBufferUpdateAfterBind);
+    CHECK_DESCRIPTOR_INDEXING_FEATURE(descriptorBindingUniformTexelBufferUpdateAfterBind);
+    CHECK_DESCRIPTOR_INDEXING_FEATURE(descriptorBindingStorageTexelBufferUpdateAfterBind);
+    CHECK_DESCRIPTOR_INDEXING_FEATURE(descriptorBindingUpdateUnusedWhilePending);
+    CHECK_DESCRIPTOR_INDEXING_FEATURE(descriptorBindingPartiallyBound);
+    CHECK_DESCRIPTOR_INDEXING_FEATURE(descriptorBindingVariableDescriptorCount);
+    CHECK_DESCRIPTOR_INDEXING_FEATURE(runtimeDescriptorArray);
+#undef CHECK_DESCRIPTOR_INDEXING_FEATURE
+    return true;
+}
+
+#undef PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD
+
+static VkResult unsupported_device_feature_request_result(const char *feature_name) {
+    fprintf(stderr,
+            "pdocker-vulkan-icd: create-device rejected unsupported feature %s\n",
+            feature_name ? feature_name : "unknown");
+    trace_icd_runtime_failure("create-device-feature-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
+    return VK_ERROR_FEATURE_NOT_PRESENT;
+}
+
+static VkResult validate_device_feature_requests(const VkDeviceCreateInfo *pCreateInfo) {
+    if (!pCreateInfo) return VK_ERROR_INITIALIZATION_FAILED;
+    const char *unsupported_feature_name = NULL;
+    if (!base_feature_request_supported(pCreateInfo->pEnabledFeatures, &unsupported_feature_name)) {
+        return unsupported_device_feature_request_result(unsupported_feature_name);
+    }
+    for (const void *node = pCreateInfo->pNext; node;) {
+        PdockerVkStructHeader header = read_vk_struct_header(node);
+        bool supported = false;
+        switch (header.sType) {
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2: {
+                const VkPhysicalDeviceFeatures2 *p = (const VkPhysicalDeviceFeatures2 *)node;
+                supported = base_feature_request_supported(&p->features, &unsupported_feature_name);
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES:
+                supported = vulkan11_feature_request_supported((const VkPhysicalDeviceVulkan11Features *)node, &unsupported_feature_name);
+                break;
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES:
+                supported = storage16_feature_request_supported((const VkPhysicalDevice16BitStorageFeatures *)node, &unsupported_feature_name);
+                break;
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES:
+                supported = vulkan12_feature_request_supported((const VkPhysicalDeviceVulkan12Features *)node, &unsupported_feature_name);
+                break;
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES:
+                supported = storage8_feature_request_supported((const VkPhysicalDevice8BitStorageFeatures *)node, &unsupported_feature_name);
+                break;
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES:
+                supported = shader_float16_int8_feature_request_supported((const VkPhysicalDeviceShaderFloat16Int8Features *)node, &unsupported_feature_name);
+                break;
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES: {
+                const VkPhysicalDeviceSynchronization2Features *p = (const VkPhysicalDeviceSynchronization2Features *)node;
+                supported = !p->synchronization2 || advertised_synchronization2();
+                if (!supported) unsupported_feature_name = "synchronization2";
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES: {
+                const VkPhysicalDeviceTimelineSemaphoreFeatures *p = (const VkPhysicalDeviceTimelineSemaphoreFeatures *)node;
+                supported = !p->timelineSemaphore || advertised_timeline_semaphore();
+                if (!supported) unsupported_feature_name = "timelineSemaphore";
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES: {
+                const VkPhysicalDeviceDynamicRenderingFeatures *p = (const VkPhysicalDeviceDynamicRenderingFeatures *)node;
+                supported = !p->dynamicRendering || advertised_dynamic_rendering();
+                if (!supported) unsupported_feature_name = "dynamicRendering";
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT: {
+                const VkPhysicalDeviceExtendedDynamicStateFeaturesEXT *p = (const VkPhysicalDeviceExtendedDynamicStateFeaturesEXT *)node;
+                supported = !p->extendedDynamicState || advertised_extended_dynamic_state();
+                if (!supported) unsupported_feature_name = "extendedDynamicState";
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_2_FEATURES_EXT: {
+                const VkPhysicalDeviceExtendedDynamicState2FeaturesEXT *p = (const VkPhysicalDeviceExtendedDynamicState2FeaturesEXT *)node;
+                supported = (!p->extendedDynamicState2 || advertised_extended_dynamic_state2()) &&
+                            (!p->extendedDynamicState2LogicOp || advertised_extended_dynamic_state2_logic_op()) &&
+                            (!p->extendedDynamicState2PatchControlPoints || advertised_extended_dynamic_state2_patch_control_points());
+                if (!supported) unsupported_feature_name = "extendedDynamicState2";
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INDEX_TYPE_UINT8_FEATURES_EXT: {
+                const VkPhysicalDeviceIndexTypeUint8FeaturesEXT *p = (const VkPhysicalDeviceIndexTypeUint8FeaturesEXT *)node;
+                supported = !p->indexTypeUint8 || (advertised_feature_mask() & PDOCKER_VK_FEATURE_INDEX_TYPE_UINT8) != 0;
+                if (!supported) unsupported_feature_name = "indexTypeUint8";
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES: {
+                const VkPhysicalDeviceMaintenance4Features *p = (const VkPhysicalDeviceMaintenance4Features *)node;
+                supported = !p->maintenance4 || (advertised_feature_mask() & PDOCKER_VK_FEATURE_MAINTENANCE_4) != 0;
+                if (!supported) unsupported_feature_name = "maintenance4";
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES:
+                supported = descriptor_indexing_feature_request_supported((const VkPhysicalDeviceDescriptorIndexingFeatures *)node, &unsupported_feature_name);
+                break;
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SCALAR_BLOCK_LAYOUT_FEATURES: {
+                const VkPhysicalDeviceScalarBlockLayoutFeatures *p = (const VkPhysicalDeviceScalarBlockLayoutFeatures *)node;
+                supported = !p->scalarBlockLayout;
+                if (!supported) unsupported_feature_name = "scalarBlockLayout";
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES: {
+                const VkPhysicalDeviceBufferDeviceAddressFeatures *p = (const VkPhysicalDeviceBufferDeviceAddressFeatures *)node;
+                supported = !p->bufferDeviceAddress && !p->bufferDeviceAddressCaptureReplay && !p->bufferDeviceAddressMultiDevice;
+                if (!supported) unsupported_feature_name = "bufferDeviceAddress";
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES: {
+                const VkPhysicalDeviceSamplerYcbcrConversionFeatures *p = (const VkPhysicalDeviceSamplerYcbcrConversionFeatures *)node;
+                supported = !p->samplerYcbcrConversion;
+                if (!supported) unsupported_feature_name = "samplerYcbcrConversion";
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES: {
+                const VkPhysicalDeviceVulkanMemoryModelFeatures *p = (const VkPhysicalDeviceVulkanMemoryModelFeatures *)node;
+                supported = !p->vulkanMemoryModel && !p->vulkanMemoryModelDeviceScope && !p->vulkanMemoryModelAvailabilityVisibilityChains;
+                if (!supported) unsupported_feature_name = "vulkanMemoryModel";
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_UNIFORM_BUFFER_STANDARD_LAYOUT_FEATURES: {
+                const VkPhysicalDeviceUniformBufferStandardLayoutFeatures *p = (const VkPhysicalDeviceUniformBufferStandardLayoutFeatures *)node;
+                supported = !p->uniformBufferStandardLayout;
+                if (!supported) unsupported_feature_name = "uniformBufferStandardLayout";
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_SUBGROUP_EXTENDED_TYPES_FEATURES: {
+                const VkPhysicalDeviceShaderSubgroupExtendedTypesFeatures *p = (const VkPhysicalDeviceShaderSubgroupExtendedTypesFeatures *)node;
+                supported = !p->shaderSubgroupExtendedTypes;
+                if (!supported) unsupported_feature_name = "shaderSubgroupExtendedTypes";
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SEPARATE_DEPTH_STENCIL_LAYOUTS_FEATURES: {
+                const VkPhysicalDeviceSeparateDepthStencilLayoutsFeatures *p = (const VkPhysicalDeviceSeparateDepthStencilLayoutsFeatures *)node;
+                supported = !p->separateDepthStencilLayouts;
+                if (!supported) unsupported_feature_name = "separateDepthStencilLayouts";
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES: {
+                const VkPhysicalDeviceHostQueryResetFeatures *p = (const VkPhysicalDeviceHostQueryResetFeatures *)node;
+                supported = !p->hostQueryReset;
+                if (!supported) unsupported_feature_name = "hostQueryReset";
+                break;
+            }
+            case VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO:
+                /*
+                 * The desktop Vulkan loader prepends ICD-private loader metadata
+                 * to VkDeviceCreateInfo::pNext before calling the ICD.  It is not
+                 * an application feature request and must be ignored by feature
+                 * validation; the normal chain walk continues through pNext.
+                 */
+                supported = true;
+                break;
+            default:
+                trace_icd_runtime_failure("create-device-pnext-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
+                return VK_ERROR_FEATURE_NOT_PRESENT;
+        }
+        if (!supported) return unsupported_device_feature_request_result(unsupported_feature_name);
+        node = header.pNext;
+    }
+    return VK_SUCCESS;
 }
 
 static uint64_t feature_mask_from_base_features(const VkPhysicalDeviceFeatures *features) {
@@ -11443,55 +11863,41 @@ static uint64_t feature_mask_from_pnext_chain(const void *pNext) {
                 if (p->shaderInt8) mask |= PDOCKER_VK_FEATURE_SHADER_INT8;
                 break;
             }
-#ifdef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INDEX_TYPE_UINT8_FEATURES_EXT
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INDEX_TYPE_UINT8_FEATURES_EXT: {
                 const VkPhysicalDeviceIndexTypeUint8FeaturesEXT *p = (const VkPhysicalDeviceIndexTypeUint8FeaturesEXT *)node;
                 if (p->indexTypeUint8) mask |= PDOCKER_VK_FEATURE_INDEX_TYPE_UINT8;
                 break;
             }
-#endif
-#ifdef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES: {
                 const VkPhysicalDeviceSynchronization2Features *p = (const VkPhysicalDeviceSynchronization2Features *)node;
                 if (p->synchronization2) mask |= PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
                 break;
             }
-#endif
-#ifdef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES: {
                 const VkPhysicalDeviceTimelineSemaphoreFeatures *p = (const VkPhysicalDeviceTimelineSemaphoreFeatures *)node;
                 if (p->timelineSemaphore) mask |= PDOCKER_VK_FEATURE_TIMELINE_SEMAPHORE;
                 break;
             }
-#endif
-#ifdef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES: {
                 const VkPhysicalDeviceDynamicRenderingFeatures *p = (const VkPhysicalDeviceDynamicRenderingFeatures *)node;
                 if (p->dynamicRendering) mask |= PDOCKER_VK_FEATURE_DYNAMIC_RENDERING;
                 break;
             }
-#endif
-#ifdef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT: {
                 const VkPhysicalDeviceExtendedDynamicStateFeaturesEXT *p = (const VkPhysicalDeviceExtendedDynamicStateFeaturesEXT *)node;
                 if (p->extendedDynamicState) mask |= PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE;
                 break;
             }
-#endif
-#ifdef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_2_FEATURES_EXT
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_2_FEATURES_EXT: {
                 const VkPhysicalDeviceExtendedDynamicState2FeaturesEXT *p = (const VkPhysicalDeviceExtendedDynamicState2FeaturesEXT *)node;
                 if (p->extendedDynamicState2) mask |= PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2;
                 break;
             }
-#endif
-#ifdef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES: {
                 const VkPhysicalDeviceMaintenance4Features *p = (const VkPhysicalDeviceMaintenance4Features *)node;
                 if (p->maintenance4) mask |= PDOCKER_VK_FEATURE_MAINTENANCE_4;
                 break;
             }
-#endif
             default:
                 break;
         }
@@ -13469,6 +13875,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
     if (extension_rc != VK_SUCCESS) return extension_rc;
     VkResult queue_rc = validate_device_queue_create_infos(pCreateInfo);
     if (queue_rc != VK_SUCCESS) return queue_rc;
+    VkResult feature_rc = validate_device_feature_requests(pCreateInfo);
+    if (feature_rc != VK_SUCCESS) return feature_rc;
     uint64_t requested_feature_mask = requested_feature_mask_from_device_create_info(pCreateInfo);
     uint64_t supported_feature_mask = advertised_feature_mask();
     uint64_t unsupported_feature_mask = 0;

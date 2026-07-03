@@ -5935,6 +5935,15 @@ class GpuAbiContractTest(unittest.TestCase):
             "VkPhysicalDeviceDynamicRenderingFeatures",
             "VkPhysicalDeviceExtendedDynamicStateFeaturesEXT",
             "VkPhysicalDeviceIndexTypeUint8FeaturesEXT",
+            "VkPhysicalDeviceDescriptorIndexingFeatures",
+            "VkPhysicalDeviceScalarBlockLayoutFeatures",
+            "VkPhysicalDeviceBufferDeviceAddressFeatures",
+            "VkPhysicalDeviceSamplerYcbcrConversionFeatures",
+            "VkPhysicalDeviceVulkanMemoryModelFeatures",
+            "VkPhysicalDeviceUniformBufferStandardLayoutFeatures",
+            "VkPhysicalDeviceShaderSubgroupExtendedTypesFeatures",
+            "VkPhysicalDeviceSeparateDepthStencilLayoutsFeatures",
+            "VkPhysicalDeviceHostQueryResetFeatures",
             "VkPhysicalDeviceMaintenance4Features",
         ]:
             if struct_name not in body:
@@ -6128,7 +6137,15 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VK_ERROR_EXTENSION_NOT_PRESENT", icd)
         self.assertIn("advertised_feature_mask", icd)
         self.assertIn("requested_features_supported", icd)
+        self.assertIn("validate_device_feature_requests", icd)
+        self.assertIn("base_feature_request_supported", icd)
+        self.assertIn("vulkan12_feature_request_supported", icd)
+        self.assertIn("descriptor_indexing_feature_request_supported", icd)
         self.assertIn("create-device rejected unsupported feature_mask", icd)
+        self.assertIn("create-device rejected unsupported feature", icd)
+        self.assertIn("create-device-pnext-unsupported", icd)
+        self.assertIn("VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO", icd)
+        self.assertIn("Vulkan loader prepends ICD-private loader metadata", icd)
         self.assertIn("VK_ERROR_FEATURE_NOT_PRESENT", icd)
         for marker in [
             "VK_KHR_MAINTENANCE_4_EXTENSION_NAME",
@@ -6151,6 +6168,16 @@ class GpuAbiContractTest(unittest.TestCase):
             "if (p->extendedDynamicState) mask |= PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE;",
             "if (p->extendedDynamicState2) mask |= PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2;",
             "if (features->tessellationShader) mask |= PDOCKER_VK_FEATURE_TESSELLATION_SHADER;",
+            "PDOCKER_VK_FOR_EACH_BASE_FEATURE(CHECK_BASE_FEATURE)",
+            "F(samplerAnisotropy)",
+            "F(geometryShader)",
+            "F(sampleRateShading)",
+            "F(alphaToOne)",
+            "PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, descriptorIndexing);",
+            "PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, scalarBlockLayout);",
+            "PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, bufferDeviceAddress);",
+            "supported = !p->samplerYcbcrConversion;",
+            "supported = !p->vulkanMemoryModel && !p->vulkanMemoryModelDeviceScope",
             "if (caps->features.tessellationShader) mask |= PDOCKER_VK_FEATURE_TESSELLATION_SHADER;",
             "if (advertised_synchronization2()) mask |= PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;",
             "if (advertised_dynamic_rendering()) mask |= PDOCKER_VK_FEATURE_DYNAMIC_RENDERING;",
@@ -6161,6 +6188,8 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         self.assertIn("*pDevice = VK_NULL_HANDLE;", create_body)
         self.assertIn("validate_device_extensions(pCreateInfo)", create_body)
+        self.assertIn("validate_device_feature_requests(pCreateInfo)", create_body)
+        self.assertIn("if (feature_rc != VK_SUCCESS) return feature_rc;", create_body)
         self.assertIn("requested_feature_mask_from_device_create_info(pCreateInfo)", create_body)
         self.assertIn("advertised_feature_mask()", create_body)
         self.assertIn("requested_features_supported(requested_feature_mask, supported_feature_mask", create_body)
