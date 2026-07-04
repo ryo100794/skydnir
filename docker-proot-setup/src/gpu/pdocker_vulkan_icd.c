@@ -14197,6 +14197,28 @@ static VkResult validate_device_extensions(const VkDeviceCreateInfo *pCreateInfo
     return VK_SUCCESS;
 }
 
+static VkResult validate_device_queue_create_info_pnext(const void *pNext) {
+    for (const void *node = pNext; node;) {
+        PdockerVkStructHeader header = read_vk_struct_header(node);
+        switch (header.sType) {
+#if defined(VK_VERSION_1_4) || defined(VK_KHR_global_priority) || defined(VK_EXT_global_priority)
+            case VK_STRUCTURE_TYPE_DEVICE_QUEUE_GLOBAL_PRIORITY_CREATE_INFO: {
+                const VkDeviceQueueGlobalPriorityCreateInfo *priority =
+                    (const VkDeviceQueueGlobalPriorityCreateInfo *)node;
+                if (priority->globalPriority != VK_QUEUE_GLOBAL_PRIORITY_MEDIUM) {
+                    return unsupported_create_info_pnext_result("vkCreateDevice.queue", node);
+                }
+                break;
+            }
+#endif
+            default:
+                return unsupported_create_info_pnext_result("vkCreateDevice.queue", node);
+        }
+        node = header.pNext;
+    }
+    return VK_SUCCESS;
+}
+
 static VkResult validate_device_queue_create_infos(const VkDeviceCreateInfo *pCreateInfo) {
     if (!pCreateInfo) return VK_SUCCESS;
     for (uint32_t i = 0; i < pCreateInfo->queueCreateInfoCount; ++i) {
@@ -14216,6 +14238,8 @@ static VkResult validate_device_queue_create_infos(const VkDeviceCreateInfo *pCr
                     PDOCKER_VK_ADVERTISED_QUEUE_COUNT);
             return VK_ERROR_INITIALIZATION_FAILED;
         }
+        VkResult pnext_rc = validate_device_queue_create_info_pnext(qci->pNext);
+        if (pnext_rc != VK_SUCCESS) return pnext_rc;
     }
     return VK_SUCCESS;
 }

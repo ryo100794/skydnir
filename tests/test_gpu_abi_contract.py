@@ -5934,6 +5934,12 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("#define PDOCKER_VK_ADVERTISED_QUEUE_COUNT 1u", icd)
         self.assertIn("pdocker_vk_queue_request_valid", icd)
         self.assertIn("validate_device_queue_create_infos", icd)
+        queue_create_body = c_function_body(icd, "validate_device_queue_create_infos")
+        queue_pnext_body = c_function_body(icd, "validate_device_queue_create_info_pnext")
+        self.assertIn("validate_device_queue_create_info_pnext(qci->pNext)", queue_create_body)
+        self.assertIn("VK_STRUCTURE_TYPE_DEVICE_QUEUE_GLOBAL_PRIORITY_CREATE_INFO", queue_pnext_body)
+        self.assertIn("priority->globalPriority != VK_QUEUE_GLOBAL_PRIORITY_MEDIUM", queue_pnext_body)
+        self.assertIn('unsupported_create_info_pnext_result("vkCreateDevice.queue", node)', queue_pnext_body)
         queue_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkGetDeviceQueue", 1)[1].split(
             "static bool descriptor_type_supported", 1
         )[0]
