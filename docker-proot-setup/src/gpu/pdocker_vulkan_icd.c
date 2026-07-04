@@ -20846,28 +20846,107 @@ static int send_vulkan_submit_sync_only_frame(
     return rc;
 }
 
-static const VkTimelineSemaphoreSubmitInfo *submit_timeline_info_from_pnext(
-        const void *pNext,
-        bool *unsupported_pnext) {
-    if (unsupported_pnext) *unsupported_pnext = false;
+static bool submit_device_indices_are_single_device(
+        uint32_t count,
+        const uint32_t *indices) {
+    if (count == 0) return true;
+    if (!indices) return false;
+    for (uint32_t i = 0; i < count; ++i) {
+        if (indices[i] != 0) return false;
+    }
+    return true;
+}
+
+static bool submit_command_buffer_device_masks_are_single_device(
+        uint32_t count,
+        const uint32_t *masks) {
+    if (count == 0) return true;
+    if (!masks) return false;
+    for (uint32_t i = 0; i < count; ++i) {
+        if (masks[i] != 0 && masks[i] != 1u) return false;
+    }
+    return true;
+}
+
+static VkResult submit_timeline_info_from_pnext(
+        const VkSubmitInfo *submit,
+        const VkTimelineSemaphoreSubmitInfo **out_timeline) {
+    if (out_timeline) *out_timeline = NULL;
+    if (!submit) return VK_ERROR_INITIALIZATION_FAILED;
     const VkTimelineSemaphoreSubmitInfo *timeline = NULL;
-    for (const void *node = pNext; node;) {
+    for (const void *node = submit->pNext; node;) {
         PdockerVkStructHeader header = read_vk_struct_header(node);
         switch (header.sType) {
             case VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO:
                 if (timeline) {
-                    if (unsupported_pnext) *unsupported_pnext = true;
-                    return NULL;
+                    trace_icd_runtime_failure("submit-timeline-pnext-duplicate",
+                                              VK_ERROR_FEATURE_NOT_PRESENT);
+                    return VK_ERROR_FEATURE_NOT_PRESENT;
                 }
                 timeline = (const VkTimelineSemaphoreSubmitInfo *)node;
                 break;
+#if defined(VK_VERSION_1_1) || defined(VK_KHR_device_group)
+            case VK_STRUCTURE_TYPE_DEVICE_GROUP_SUBMIT_INFO: {
+                const VkDeviceGroupSubmitInfo *info =
+                    (const VkDeviceGroupSubmitInfo *)node;
+                if ((info->waitSemaphoreCount != 0 &&
+                     info->waitSemaphoreCount != submit->waitSemaphoreCount) ||
+                    (info->commandBufferCount != 0 &&
+                     info->commandBufferCount != submit->commandBufferCount) ||
+                    (info->signalSemaphoreCount != 0 &&
+                     info->signalSemaphoreCount != submit->signalSemaphoreCount) ||
+                    !submit_device_indices_are_single_device(
+                        info->waitSemaphoreCount,
+                        info->pWaitSemaphoreDeviceIndices) ||
+                    !submit_command_buffer_device_masks_are_single_device(
+                        info->commandBufferCount,
+                        info->pCommandBufferDeviceMasks) ||
+                    !submit_device_indices_are_single_device(
+                        info->signalSemaphoreCount,
+                        info->pSignalSemaphoreDeviceIndices)) {
+                    trace_icd_runtime_failure("submit-device-group-unsupported",
+                                              VK_ERROR_FEATURE_NOT_PRESENT);
+                    return VK_ERROR_FEATURE_NOT_PRESENT;
+                }
+                break;
+            }
+#endif
+#if defined(VK_VERSION_1_1)
+            case VK_STRUCTURE_TYPE_PROTECTED_SUBMIT_INFO: {
+                const VkProtectedSubmitInfo *info =
+                    (const VkProtectedSubmitInfo *)node;
+                if (info->protectedSubmit != VK_FALSE) {
+                    trace_icd_runtime_failure("submit-protected-unsupported",
+                                              VK_ERROR_FEATURE_NOT_PRESENT);
+                    return VK_ERROR_FEATURE_NOT_PRESENT;
+                }
+                break;
+            }
+#endif
             default:
-                if (unsupported_pnext) *unsupported_pnext = true;
-                return NULL;
+                return unsupported_create_info_pnext_result("vkQueueSubmit", node);
         }
         node = header.pNext;
     }
-    return timeline;
+    if (out_timeline) *out_timeline = timeline;
+    return VK_SUCCESS;
+}
+
+static VkResult validate_legacy_submit_info_shape(const VkSubmitInfo *submit) {
+    if (!submit || submit->sType != VK_STRUCTURE_TYPE_SUBMIT_INFO) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    if (submit->waitSemaphoreCount > 0 &&
+        (!submit->pWaitSemaphores || !submit->pWaitDstStageMask)) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    if (submit->commandBufferCount > 0 && !submit->pCommandBuffers) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    if (submit->signalSemaphoreCount > 0 && !submit->pSignalSemaphores) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    return VK_SUCCESS;
 }
 
 static bool submit_uses_timeline_wait(const VkSubmitInfo *submit) {
@@ -21041,7 +21120,7 @@ static VkResult validate_submit2_command_buffers(const VkSubmitInfo2 *submit) {
                                       VK_ERROR_FEATURE_NOT_PRESENT);
             return VK_ERROR_FEATURE_NOT_PRESENT;
         }
-        if (info->deviceMask != 0) {
+        if (info->deviceMask != 0 && info->deviceMask != 1u) {
             trace_icd_runtime_failure("submit2-command-device-mask-unsupported",
                                       VK_ERROR_FEATURE_NOT_PRESENT);
             return VK_ERROR_FEATURE_NOT_PRESENT;
@@ -21645,19 +21724,22 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
         VkFence fence) {
     (void)queue;
     if (submitCount > 0 && !pSubmits) return VK_ERROR_INITIALIZATION_FAILED;
+    for (uint32_t validate_i = 0; validate_i < submitCount; ++validate_i) {
+        VkResult shape_rc = validate_legacy_submit_info_shape(&pSubmits[validate_i]);
+        if (shape_rc != VK_SUCCESS) return shape_rc;
+        const VkTimelineSemaphoreSubmitInfo *validate_timeline = NULL;
+        VkResult pnext_rc = submit_timeline_info_from_pnext(
+            &pSubmits[validate_i], &validate_timeline);
+        if (pnext_rc != VK_SUCCESS) return pnext_rc;
+    }
     PdockerVkFence *submit_fence = pdocker_vk_fence_from_handle(fence);
     if (submit_fence) submit_fence->signaled = false;
     for (uint32_t i = 0; i < submitCount; ++i) {
-        bool unsupported_submit_pnext = false;
-        const VkTimelineSemaphoreSubmitInfo *timeline_submit =
-            submit_timeline_info_from_pnext(pSubmits[i].pNext, &unsupported_submit_pnext);
-        if (unsupported_submit_pnext) {
-            trace_icd_runtime_failure("submit-pnext-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
-            return VK_ERROR_FEATURE_NOT_PRESENT;
-        }
-        if (pSubmits[i].commandBufferCount > 0 && !pSubmits[i].pCommandBuffers) {
-            return VK_ERROR_INITIALIZATION_FAILED;
-        }
+        VkResult shape_rc = validate_legacy_submit_info_shape(&pSubmits[i]);
+        if (shape_rc != VK_SUCCESS) return shape_rc;
+        const VkTimelineSemaphoreSubmitInfo *timeline_submit = NULL;
+        VkResult pnext_rc = submit_timeline_info_from_pnext(&pSubmits[i], &timeline_submit);
+        if (pnext_rc != VK_SUCCESS) return pnext_rc;
         const bool allow_executor_tracked_queue_waits = bridge_available() &&
             (g_submit_sync_override_entries || submit_has_executor_tracked_wait_sync(&pSubmits[i]));
         VkResult semaphore_rc = validate_submit_wait_semaphores(

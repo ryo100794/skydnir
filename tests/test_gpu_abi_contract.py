@@ -6100,8 +6100,15 @@ class GpuAbiContractTest(unittest.TestCase):
             "VKAPI_ATTR VkResult VKAPI_CALL vkQueueWaitIdle", 1
         )[0]
         self.assertNotIn("(void)fence;", submit_body)
-        self.assertIn("submit_timeline_info_from_pnext(pSubmits[i].pNext", submit_body)
-        self.assertIn("submit-pnext-unsupported", submit_body)
+        self.assertIn("submit_timeline_info_from_pnext(&pSubmits[i], &timeline_submit)", submit_body)
+        self.assertIn("validate_legacy_submit_info_shape(&pSubmits[i])", submit_body)
+        self.assertIn("submit_device_indices_are_single_device", icd)
+        self.assertIn("submit_command_buffer_device_masks_are_single_device", icd)
+        self.assertIn("VK_STRUCTURE_TYPE_DEVICE_GROUP_SUBMIT_INFO", icd)
+        self.assertIn("submit-device-group-unsupported", icd)
+        self.assertIn("VK_STRUCTURE_TYPE_PROTECTED_SUBMIT_INFO", icd)
+        self.assertIn("submit-protected-unsupported", icd)
+        self.assertIn('unsupported_create_info_pnext_result("vkQueueSubmit", node)', icd)
         self.assertIn("submit_has_executor_tracked_wait_sync(&pSubmits[i])", submit_body)
         self.assertIn("submit_has_executor_tracked_completion_sync(&pSubmits[i], fence)", submit_body)
         self.assertIn("allow_executor_tracked_queue_waits", submit_body)
@@ -6110,6 +6117,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("if (submitCount > 0 && !pSubmits) return VK_ERROR_INITIALIZATION_FAILED;", submit_body)
         self.assertIn("submit_fence->signaled = false;", submit_body)
         self.assertIn("submit_fence->signaled = true;", submit_body)
+        self.assertLess(
+            submit_body.index("for (uint32_t validate_i = 0; validate_i < submitCount; ++validate_i)"),
+            submit_body.index("submit_fence->signaled = false;"),
+        )
         self.assertIn("send_executor_fence_signal(submit_fence)", submit_body)
         self.assertLess(
             submit_body.index("if (submitCount > 0 && !pSubmits) return VK_ERROR_INITIALIZATION_FAILED;"),
@@ -6153,10 +6164,12 @@ class GpuAbiContractTest(unittest.TestCase):
             "submit_timeline_signal_value",
             "submit_timeline_wait_value(timeline, i)",
             "submit_timeline_signal_value(timeline, i)",
-            "submit-pnext-unsupported",
+            "submit-timeline-pnext-duplicate",
+            "submit-device-group-unsupported",
+            "submit-protected-unsupported",
         ]:
             self.assertIn(marker, icd)
-        self.assertIn("submit_timeline_info_from_pnext(pSubmits[i].pNext", submit_body)
+        self.assertIn("submit_timeline_info_from_pnext(&pSubmits[i], &timeline_submit)", submit_body)
         self.assertIn("validate_submit_wait_semaphores(\n            &pSubmits[i], timeline_submit, allow_executor_tracked_queue_waits)", submit_body)
         self.assertIn("complete_submit_semaphores(&pSubmits[i], timeline_submit)", submit_body)
         queue_submit2_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2", 1)[1].split(
@@ -6188,7 +6201,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "submit2-signal-device-index-unsupported",
             "submit2-command-device-mask-unsupported",
             "info->deviceIndex != 0",
-            "info->deviceMask != 0",
+            "info->deviceMask != 0 && info->deviceMask != 1u",
         ]:
             self.assertIn(marker, icd)
         self.assertIn("uint64_t required_value = sem && sem->timeline ? info->value : 0;", icd)
@@ -6203,6 +6216,48 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("sem->timeline) return sem->value >= value;", icd)
         self.assertIn("if (!sem || sem->timeline) return;", icd)
         self.assertIn("if (sem->value < value) sem->value = value;", icd)
+
+    def test_vulkan_legacy_submit_pnext_and_shape_are_fail_closed(self):
+        icd = VULKAN_ICD.read_text()
+        helper_body = c_function_body(icd, "submit_timeline_info_from_pnext")
+        shape_body = c_function_body(icd, "validate_legacy_submit_info_shape")
+        submit2_command_body = c_function_body(icd, "validate_submit2_command_buffers")
+
+        self.assertIn("static VkResult submit_timeline_info_from_pnext", icd)
+        self.assertIn("const VkSubmitInfo *submit", icd)
+        self.assertIn("const VkTimelineSemaphoreSubmitInfo **out_timeline", icd)
+        self.assertIn("VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO", helper_body)
+        self.assertIn("submit-timeline-pnext-duplicate", helper_body)
+        self.assertIn("VK_STRUCTURE_TYPE_DEVICE_GROUP_SUBMIT_INFO", helper_body)
+        self.assertIn("info->waitSemaphoreCount != submit->waitSemaphoreCount", helper_body)
+        self.assertIn("info->commandBufferCount != submit->commandBufferCount", helper_body)
+        self.assertIn("info->signalSemaphoreCount != submit->signalSemaphoreCount", helper_body)
+        self.assertIn("submit_device_indices_are_single_device", helper_body)
+        self.assertIn("submit_command_buffer_device_masks_are_single_device", helper_body)
+        self.assertIn("submit-device-group-unsupported", helper_body)
+        self.assertIn("VK_STRUCTURE_TYPE_PROTECTED_SUBMIT_INFO", helper_body)
+        self.assertIn("info->protectedSubmit != VK_FALSE", helper_body)
+        self.assertIn("submit-protected-unsupported", helper_body)
+        self.assertIn('unsupported_create_info_pnext_result("vkQueueSubmit", node)', helper_body)
+
+        self.assertIn("submit->sType != VK_STRUCTURE_TYPE_SUBMIT_INFO", shape_body)
+        self.assertIn("!submit->pWaitSemaphores || !submit->pWaitDstStageMask", shape_body)
+        self.assertIn("submit->commandBufferCount > 0 && !submit->pCommandBuffers", shape_body)
+        self.assertIn("submit->signalSemaphoreCount > 0 && !submit->pSignalSemaphores", shape_body)
+
+        submit_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit", 1)[1].split(
+            "VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2", 1
+        )[0]
+        self.assertIn("for (uint32_t validate_i = 0; validate_i < submitCount; ++validate_i)", submit_body)
+        self.assertIn("validate_legacy_submit_info_shape(&pSubmits[validate_i])", submit_body)
+        self.assertIn("submit_timeline_info_from_pnext(\n            &pSubmits[validate_i], &validate_timeline)", submit_body)
+        self.assertLess(
+            submit_body.index("for (uint32_t validate_i = 0; validate_i < submitCount; ++validate_i)"),
+            submit_body.index("submit_fence->signaled = false;"),
+        )
+
+        self.assertIn("info->deviceMask != 0 && info->deviceMask != 1u", submit2_command_body)
+        self.assertIn("submit2-command-device-mask-unsupported", submit2_command_body)
 
     def test_vulkan_wait_apis_honor_timeout_contract(self):
         icd = VULKAN_ICD.read_text()
