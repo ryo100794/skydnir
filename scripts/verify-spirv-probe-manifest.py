@@ -374,8 +374,8 @@ def verify_manifest(payload: dict) -> list[str]:
             else:
                 if debug_flow.get("set") != debug_set or debug_flow.get("binding") != debug_binding:
                     fail(errors, f"{context}.debug_probe_descriptor must match debug_ssbo.descriptor")
-                if available is True and debug_flow.get("binding") != 5:
-                    fail(errors, f"{context}.debug_probe_descriptor.binding must be 5 when Q6 targets are available")
+                if available is True and debug_flow.get("binding") != descriptor.get("binding"):
+                    fail(errors, f"{context}.debug_probe_descriptor.binding must match collision-free debug descriptor")
             stores = flow.get("stores")
             if not isinstance(stores, list):
                 fail(errors, f"{context}.stores must be a list")

@@ -28,6 +28,7 @@ SPIRV_PROBE_MANIFEST_VERIFIER = ROOT / "scripts" / "verify-spirv-probe-manifest.
 SPIRV_NOOP_INSTRUMENTER = ROOT / "scripts" / "instrument-spirv-noop-probe.py"
 SPIRV_DATAFLOW_COMPARE = ROOT / "scripts" / "compare-spirv-dataflow.py"
 SPIRV_EFFECTIVE_RECONSTRUCTOR = ROOT / "scripts" / "reconstruct-q6-effective-spirv.py"
+Q6_FUNCTION_ACCUMULATOR_SPV = ROOT / "docs" / "test" / "spirv-q6k-function-accumulator" / "native-q6-function-accumulator.spv"
 LLAMA_Q6_PREFLIGHT_PLANNER = ROOT / "scripts" / "plan-llama-gpu-q6-run.py"
 LLAMA_Q6_PLAN_VERIFIER = ROOT / "scripts" / "verify-llama-gpu-q6-run-against-plan.py"
 Q6_STAGE_TRACE_SPVASM_ANALYZER = ROOT / "scripts" / "maintenance" / "analyze-q6-stage-trace-spvasm.py"
@@ -10841,6 +10842,60 @@ class GpuAbiContractTest(unittest.TestCase):
             ],
         )
 
+    def test_spirv_analyzer_follows_q6_function_accumulator_final_store_flow(self):
+        self.assertTrue(Q6_FUNCTION_ACCUMULATOR_SPV.exists(), "Q6 Function-accumulator SPIR-V evidence must be preserved")
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            analysis = tmp_path / "function-accumulator.analysis.json"
+            manifest = tmp_path / "function-accumulator.probe.json"
+            subprocess.run(
+                [
+                    "python3",
+                    str(SPIRV_ANALYZER),
+                    str(Q6_FUNCTION_ACCUMULATOR_SPV),
+                    "--json-out",
+                    str(analysis),
+                    "--probe-plan-out",
+                    str(manifest),
+                    "--probe-range",
+                    "0:2",
+                ],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+            )
+            verified = subprocess.run(
+                ["python3", str(SPIRV_PROBE_MANIFEST_VERIFIER), str(manifest)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+            )
+            payload = json.loads(analysis.read_text(encoding="utf-8"))["modules"][0]
+            probe = json.loads(manifest.read_text(encoding="utf-8"))
+        self.assertTrue(json.loads(verified.stdout)["valid"])
+        self.assertEqual(payload["hash"], "0x6ec5d7a41443f157")
+        flow = probe["q6_probe_targets"]["final_store_value_flow"]
+        self.assertTrue(flow["available"])
+        self.assertEqual(flow["valid_store_count"], 2)
+        self.assertEqual([store["word_index"] for store in flow["stores"]], [4053, 7371])
+        self.assertEqual(flow["debug_probe_descriptor"], {"set": 0, "binding": 6})
+        for store in flow["stores"]:
+            stored = store["stored_value"]
+            self.assertTrue(store["valid"])
+            self.assertEqual(stored["root"]["pointer_base"]["storage_class"], "Function")
+            self.assertGreater(len(stored["function_store_expansions"]), 0)
+            self.assertGreater(len(stored["workgroup_loads"]), 0)
+            self.assertIn("OpExtInst", stored["op_histogram"])
+            self.assertFalse(stored["depends_on_debug_probe_binding"])
+            self.assertNotIn(
+                6,
+                [dep["binding"] for dep in stored["descriptor_dependencies"]],
+            )
+
     def test_spirv_analyzer_reports_q6_effective_workgroup_shape_mismatch(self):
         native_spv = ROOT / "docs" / "test" / "spirv-q6k-native-adb45055" / "native-q6-source.spv"
         effective_spv = ROOT / "docs" / "test" / "spirv-q6k-native-adb45055" / "effective-q6-local-size-patched.spv"
@@ -10965,6 +11020,35 @@ class GpuAbiContractTest(unittest.TestCase):
                 check=True,
             )
             valid = json.loads(manifest.read_text())
+
+            declared_bindings = {
+                item["binding"]
+                for item in valid["descriptors"]["declared"]
+                if isinstance(item.get("binding"), int)
+            }
+            original_debug_binding = valid["debug_ssbo"]["descriptor"]["binding"]
+            alternate_debug_binding = next(
+                binding
+                for binding in range(16)
+                if binding not in declared_bindings and binding != original_debug_binding
+            )
+            alternate = json.loads(json.dumps(valid))
+            alternate["debug_ssbo"]["descriptor"]["binding"] = alternate_debug_binding
+            alternate["collision_checks"]["proposed"]["binding"] = alternate_debug_binding
+            flow = alternate["q6_probe_targets"]["final_store_value_flow"]
+            flow["debug_probe_descriptor"]["binding"] = alternate_debug_binding
+            for store in flow["stores"]:
+                store["debug_probe_exclusion"]["binding"] = alternate_debug_binding
+            alternate_path = tmp_path / "alternate-debug-binding.json"
+            alternate_path.write_text(json.dumps(alternate))
+            alternate_result = subprocess.run(
+                ["python3", str(SPIRV_PROBE_MANIFEST_VERIFIER), str(alternate_path)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self.assertEqual(alternate_result.returncode, 0, alternate_result.stdout + alternate_result.stderr)
 
             cases = []
             broken = json.loads(json.dumps(valid))

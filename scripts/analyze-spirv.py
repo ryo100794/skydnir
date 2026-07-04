@@ -25,6 +25,7 @@ SPIRV_MAGIC = 0x07230203
 OP_NAMES = {
     5: "OpName",
     6: "OpMemberName",
+    12: "OpExtInst",
     15: "OpEntryPoint",
     16: "OpExecutionMode",
     17: "OpCapability",
@@ -659,6 +660,65 @@ def build_q6_probe_targets(module: dict, debug_descriptor: dict | None = None) -
             return base
         return pointer
 
+    def expression_signature(expr: object) -> tuple:
+        if not isinstance(expr, dict):
+            return (type(expr).__name__,)
+        kind = expr.get("kind")
+        if kind == "constant":
+            return ("constant", expr.get("value_u32"))
+        if kind == "spec_constant":
+            return ("spec_constant", expr.get("spec_id"), expr.get("default_u32"))
+        if kind == "variable":
+            return ("variable", expr.get("id"), expr.get("storage_class"), expr.get("built_in"))
+        if kind == "load":
+            return ("load", expr.get("id"), pointer_signature(expr.get("pointer")))
+        if kind == "access_chain":
+            return (
+                "access_chain",
+                expr.get("id"),
+                compact_base(expr.get("base")),
+                tuple(expression_signature(item) for item in expr.get("indices") or []),
+            )
+        if kind == "op":
+            return (
+                "op",
+                expr.get("id"),
+                expr.get("op"),
+                tuple(expression_signature(item) for item in expr.get("operands") or []),
+            )
+        return tuple(
+            (key, expr.get(key))
+            for key in ("kind", "id", "op", "value_u32", "default_u32", "spec_id")
+            if key in expr
+        )
+
+    def pointer_signature(pointer: object) -> tuple:
+        if not isinstance(pointer, dict):
+            return ("none",)
+        base = pointer_base(pointer)
+        indices = pointer.get("indices") if isinstance(pointer.get("indices"), list) else []
+        return (
+            base.get("kind"),
+            base.get("id"),
+            base.get("set"),
+            base.get("binding"),
+            base.get("storage_class"),
+            tuple(expression_signature(index.get("expr", index) if isinstance(index, dict) else index) for index in indices),
+        )
+
+    def compact_pointer_signature(pointer: object) -> dict:
+        base = pointer_base(pointer)
+        indices = pointer.get("indices") if isinstance(pointer, dict) and isinstance(pointer.get("indices"), list) else []
+        return {
+            "base": compact_base(base),
+            "index_count": len(indices),
+            "index_signatures": [
+                list(expression_signature(index.get("expr", index) if isinstance(index, dict) else index))
+                for index in indices[:4]
+            ],
+            "truncated_index_count": max(0, len(indices) - 4),
+        }
+
     def summarize_expr_node(expr: dict) -> dict:
         item = {
             key: expr.get(key)
@@ -672,18 +732,28 @@ def build_q6_probe_targets(module: dict, debug_descriptor: dict | None = None) -
             item["index_count"] = len(expr.get("indices") or [])
         return item
 
-    def collect_expression_dependencies(expr: object, max_nodes: int = 64, max_depth: int = 12) -> dict:
+    def collect_expression_dependencies(
+        expr: object,
+        max_nodes: int = 64,
+        max_depth: int = 12,
+        store_word_limit: int | None = None,
+    ) -> dict:
         # The analyzer already builds a bounded expression tree.  This pass keeps
         # only the dependency facts needed for Q6 final-store safety gates.
         nodes: list[dict] = []
         workgroup_loads: list[dict] = []
+        function_loads: list[dict] = []
+        function_store_expansions: list[dict] = []
         descriptor_dependencies: set[tuple[int | None, int]] = set()
         op_histogram: Counter[str] = Counter()
         load_count = 0
         truncated_nodes = 0
         truncated_depth = 0
+        truncated_function_store_expansions = 0
         depends_on_debug_probe_binding = False
         seen_workgroup_loads: set[tuple[int | None, int | None]] = set()
+        seen_function_loads: set[tuple[int | None, int | None, int | None]] = set()
+        seen_function_store_expansions: set[tuple[int, int | None, int]] = set()
 
         def record_descriptor(base: dict) -> None:
             nonlocal depends_on_debug_probe_binding
@@ -704,14 +774,86 @@ def build_q6_probe_targets(module: dict, debug_descriptor: dict | None = None) -
             if summary:
                 nodes.append(summary)
 
-        def visit(value: object, depth: int = 0) -> None:
+        def matching_function_stores(pointer: object, current_word_limit: int | None, max_matches: int = 8) -> tuple[str, list[dict]]:
+            if current_word_limit is None:
+                return "no-store-word-limit", []
+            base = pointer_base(pointer)
+            base_id = base.get("id")
+            if base.get("kind") != "variable" or base.get("storage_class") != "Function" or not isinstance(base_id, int):
+                return "not-function-load", []
+            load_sig = pointer_signature(pointer)
+            base_matches = [
+                store
+                for store in stores
+                if int(store.get("word_index", -1)) < current_word_limit
+                and ((store.get("pointer_origin") or {}).get("base") or store.get("pointer_origin") or {}).get("kind") == "variable"
+                and ((store.get("pointer_origin") or {}).get("base") or store.get("pointer_origin") or {}).get("storage_class") == "Function"
+                and ((store.get("pointer_origin") or {}).get("base") or store.get("pointer_origin") or {}).get("id") == base_id
+            ]
+            exact_matches = [
+                store
+                for store in base_matches
+                if pointer_signature(store.get("pointer_origin")) == load_sig
+            ]
+            selected = exact_matches if exact_matches else base_matches
+            strategy = "pointer-signature" if exact_matches else "function-base-conservative"
+            if len(selected) > max_matches:
+                selected = selected[-max_matches:]
+                strategy += "-latest-window"
+            return strategy, selected
+
+        def expand_function_load(value: dict, pointer: object, base: dict, depth: int, current_word_limit: int | None) -> None:
+            nonlocal truncated_function_store_expansions
+            base_id = base.get("id") if isinstance(base.get("id"), int) else None
+            load_word_limit = value.get("word_index") if isinstance(value.get("word_index"), int) else current_word_limit
+            load_key = (
+                value.get("id") if isinstance(value.get("id"), int) else None,
+                base_id,
+                load_word_limit,
+            )
+            if load_key not in seen_function_loads:
+                seen_function_loads.add(load_key)
+                function_loads.append(
+                    {
+                        "id": value.get("id"),
+                        "pointer": compact_pointer_signature(pointer),
+                        "load_word_index": value.get("word_index"),
+                        "store_word_limit": load_word_limit,
+                    }
+                )
+            strategy, candidate_stores = matching_function_stores(pointer, load_word_limit)
+            for store in candidate_stores:
+                store_word = int(store.get("word_index", -1))
+                expansion_key = (store_word, value.get("id") if isinstance(value.get("id"), int) else None, depth)
+                if expansion_key in seen_function_store_expansions:
+                    continue
+                if len(function_store_expansions) >= 24:
+                    truncated_function_store_expansions += 1
+                    continue
+                seen_function_store_expansions.add(expansion_key)
+                function_store_expansions.append(
+                    {
+                        "load_id": value.get("id"),
+                        "matched_store_word_index": store_word,
+                        "match_strategy": strategy,
+                        "store_pointer_id": store.get("pointer_id"),
+                        "store_object_id": store.get("object_id"),
+                        "store_pointer": compact_pointer_signature(store.get("pointer_origin")),
+                        "store_object_root": summarize_expr_node(store.get("object_expr"))
+                        if isinstance(store.get("object_expr"), dict)
+                        else {"kind": type(store.get("object_expr")).__name__},
+                    }
+                )
+                visit(store.get("object_expr"), depth + 1, store_word)
+
+        def visit(value: object, depth: int = 0, current_word_limit: int | None = store_word_limit) -> None:
             nonlocal load_count, truncated_depth
             if depth > max_depth:
                 truncated_depth += 1
                 return
             if isinstance(value, list):
                 for child in value:
-                    visit(child, depth + 1)
+                    visit(child, depth + 1, current_word_limit)
                 return
             if not isinstance(value, dict):
                 return
@@ -746,11 +888,13 @@ def build_q6_probe_targets(module: dict, debug_descriptor: dict | None = None) -
                                 ),
                             }
                         )
+                elif base.get("kind") == "variable" and base.get("storage_class") == "Function":
+                    expand_function_load(value, pointer, base, depth, current_word_limit)
 
             for key in ("pointer", "indices", "expr", "operands"):
                 child = value.get(key)
                 if child is not None:
-                    visit(child, depth + 1)
+                    visit(child, depth + 1, current_word_limit)
 
         visit(expr)
         return {
@@ -760,6 +904,9 @@ def build_q6_probe_targets(module: dict, debug_descriptor: dict | None = None) -
             "producer_chain": nodes,
             "truncated_node_count": truncated_nodes,
             "truncated_depth_count": truncated_depth,
+            "function_loads": function_loads,
+            "function_store_expansions": function_store_expansions,
+            "truncated_function_store_expansion_count": truncated_function_store_expansions,
             "workgroup_loads": workgroup_loads,
             "reaches_workgroup_load": bool(workgroup_loads),
             "descriptor_dependencies": [
@@ -835,7 +982,7 @@ def build_q6_probe_targets(module: dict, debug_descriptor: dict | None = None) -
         pointer_origin = output_store.get("pointer_origin") or {}
         base = pointer_origin.get("base") or pointer_origin
         output_word = int(output_store.get("word_index", -1))
-        stored_value = collect_expression_dependencies(output_store.get("object_expr"))
+        stored_value = collect_expression_dependencies(output_store.get("object_expr"), store_word_limit=output_word)
         output_index = collect_expression_dependencies([
             index.get("expr", index) if isinstance(index, dict) else index
             for index in pointer_origin.get("indices", [])
@@ -1120,6 +1267,7 @@ def analyze_spirv(path: Path) -> dict:
                     "op": "OpLoad",
                     "result_type": inst[1],
                     "pointer_id": inst[3],
+                    "word_index": _index,
                 }
                 load_events_raw.append(
                     {
@@ -1272,17 +1420,28 @@ def analyze_spirv(path: Path) -> dict:
                     "operands": inst[4:],
                 }
             )
+        elif opcode == 12 and len(inst) >= 6:
+            id_defs[inst[2]] = {
+                "op": "OpExtInst",
+                "result_type": inst[1],
+                "set_id": inst[3],
+                "instruction": inst[4],
+                "operands": inst[5:],
+                "word_index": _index,
+            }
         elif 124 <= opcode <= 190 and len(inst) >= 4:
             id_defs[inst[2]] = {
                 "op": OP_NAMES.get(opcode, f"Op{opcode}"),
                 "result_type": inst[1],
                 "operands": inst[3:],
+                "word_index": _index,
             }
         elif opcode in (80, 81, 82, 83, 84, 86) and len(inst) >= 4:
             id_defs[inst[2]] = {
                 "op": OP_NAMES.get(opcode, f"Op{opcode}"),
                 "result_type": inst[1],
                 "operands": inst[3:],
+                "word_index": _index,
             }
         elif opcode == 245 and len(inst) >= 4:
             id_defs[inst[2]] = {
@@ -1290,6 +1449,7 @@ def analyze_spirv(path: Path) -> dict:
                 "result_type": inst[1],
                 "operands": inst[3::2],
                 "incoming_labels": inst[4::2],
+                "word_index": _index,
             }
 
     member_offsets: dict[int, dict[int, int]] = defaultdict(dict)
@@ -1719,6 +1879,7 @@ def analyze_spirv(path: Path) -> dict:
             return {
                 "kind": "load",
                 "id": value_id,
+                "word_index": definition.get("word_index"),
                 "pointer": pointer_origin(int(definition.get("pointer_id"))),
             }
         if op in ("OpAccessChain", "OpInBoundsAccessChain"):
