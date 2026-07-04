@@ -6611,6 +6611,36 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("vkGetDescriptorSetLayoutSupportKHR", hidden_body)
 
 
+    def test_vulkan_pipeline_creation_feedback_and_compute_pnext_contract(self):
+        icd = VULKAN_ICD.read_text()
+        feedback_body = c_function_body(icd, "validate_and_fill_pipeline_feedback_pnext")
+        compute_body = c_function_body(icd, "vkCreateComputePipelines")
+        graphics_body = c_function_body(icd, "vkCreateGraphicsPipelines")
+
+        self.assertIn("VK_STRUCTURE_TYPE_PIPELINE_CREATION_FEEDBACK_CREATE_INFO", feedback_body)
+        self.assertIn("VK_PIPELINE_CREATION_FEEDBACK_VALID_BIT", feedback_body)
+        self.assertIn("feedback_info->pPipelineCreationFeedback->duration = 0;", feedback_body)
+        self.assertIn("feedback_info->pipelineStageCreationFeedbackCount != stage_count", feedback_body)
+        self.assertIn("pipeline-creation-feedback-stage-count-mismatch", feedback_body)
+        self.assertIn("VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO", feedback_body)
+        self.assertIn("allow_pipeline_rendering_create_info", feedback_body)
+        self.assertIn("unsupported_create_info_pnext_result(api_name, node)", feedback_body)
+
+        self.assertIn('"vkCreateComputePipelines", ci->pNext, 1u, false', compute_body)
+        self.assertIn("ci->sType != VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO", compute_body)
+        self.assertIn("ci->flags != 0", compute_body)
+        self.assertIn("ci->basePipelineHandle != VK_NULL_HANDLE", compute_body)
+        self.assertIn("ci->basePipelineIndex >= 0", compute_body)
+        self.assertIn("ci->stage.sType != VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO", compute_body)
+        self.assertIn("ci->stage.stage != VK_SHADER_STAGE_COMPUTE_BIT", compute_body)
+        self.assertIn("ci->stage.flags != 0", compute_body)
+        self.assertIn("ci->stage.pNext", compute_body)
+        self.assertIn('unsupported_create_info_pnext_result("vkCreateComputePipelines.stage"', compute_body)
+
+        self.assertIn('"vkCreateGraphicsPipelines", ci->pNext, ci->stageCount, true', graphics_body)
+        self.assertIn("VK_STRUCTURE_TYPE_PIPELINE_CREATION_FEEDBACK_CREATE_INFO", graphics_body)
+
+
     def test_vulkan_external_handle_and_sync_pnext_paths_fail_closed(self):
         icd = VULKAN_ICD.read_text()
         alloc_validator = c_function_body(icd, "validate_memory_allocate_pnext")
@@ -9397,8 +9427,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "set->layout = pdocker_vk_descriptor_set_layout_from_handle(pAllocateInfo->pSetLayouts[i]);",
             "pDescriptorSets[i] = pdocker_vk_descriptor_set_to_handle(set);",
             "*pShaderModule = pdocker_vk_shader_module_to_handle(shader);",
-            "pipeline->shader = pdocker_vk_shader_module_from_handle(pCreateInfos[i].stage.module);",
-            "pipeline->layout = pdocker_vk_pipeline_layout_from_handle(pCreateInfos[i].layout);",
+            "pipeline->shader = pdocker_vk_shader_module_from_handle(ci->stage.module);",
+            "pipeline->layout = pdocker_vk_pipeline_layout_from_handle(ci->layout);",
             "pPipelines[i] = pdocker_vk_pipeline_to_handle(pipeline);",
             "cmd->compute_pipeline = pdocker_vk_pipeline_from_handle(pipeline);",
             "PdockerVkPipelineLayout *pipeline_layout = pdocker_vk_pipeline_layout_from_handle(layout);",

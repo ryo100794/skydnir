@@ -15023,6 +15023,62 @@ VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSetWithTemplate(
     trace_icd_runtime_failure("descriptor-update-template-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
 }
 
+
+static VkResult validate_and_fill_pipeline_feedback_pnext(
+        const char *api_name,
+        const void *pNext,
+        uint32_t stage_count,
+        bool allow_pipeline_rendering_create_info) {
+    bool saw_feedback = false;
+    for (const void *node = pNext; node;) {
+        PdockerVkStructHeader header = read_vk_struct_header(node);
+        switch (header.sType) {
+#if defined(VK_VERSION_1_3) || defined(VK_EXT_pipeline_creation_feedback)
+            case VK_STRUCTURE_TYPE_PIPELINE_CREATION_FEEDBACK_CREATE_INFO: {
+                VkPipelineCreationFeedbackCreateInfo *feedback_info =
+                    (VkPipelineCreationFeedbackCreateInfo *)node;
+                if (saw_feedback) {
+                    trace_icd_runtime_failure("pipeline-creation-feedback-duplicate",
+                                              VK_ERROR_FEATURE_NOT_PRESENT);
+                    return VK_ERROR_FEATURE_NOT_PRESENT;
+                }
+                saw_feedback = true;
+                if (feedback_info->pPipelineCreationFeedback) {
+                    feedback_info->pPipelineCreationFeedback->flags =
+                        VK_PIPELINE_CREATION_FEEDBACK_VALID_BIT;
+                    feedback_info->pPipelineCreationFeedback->duration = 0;
+                }
+                if (feedback_info->pipelineStageCreationFeedbackCount != 0) {
+                    if (!feedback_info->pPipelineStageCreationFeedbacks ||
+                        feedback_info->pipelineStageCreationFeedbackCount != stage_count) {
+                        trace_icd_runtime_failure("pipeline-creation-feedback-stage-count-mismatch",
+                                                  VK_ERROR_FEATURE_NOT_PRESENT);
+                        return VK_ERROR_FEATURE_NOT_PRESENT;
+                    }
+                    for (uint32_t i = 0; i < stage_count; ++i) {
+                        feedback_info->pPipelineStageCreationFeedbacks[i].flags =
+                            VK_PIPELINE_CREATION_FEEDBACK_VALID_BIT;
+                        feedback_info->pPipelineStageCreationFeedbacks[i].duration = 0;
+                    }
+                }
+                break;
+            }
+#endif
+#if defined(VK_VERSION_1_3) || defined(VK_KHR_dynamic_rendering)
+            case VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO:
+                if (!allow_pipeline_rendering_create_info) {
+                    return unsupported_create_info_pnext_result(api_name, node);
+                }
+                break;
+#endif
+            default:
+                return unsupported_create_info_pnext_result(api_name, node);
+        }
+        node = header.pNext;
+    }
+    return VK_SUCCESS;
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateShaderModule(
         VkDevice device,
         const VkShaderModuleCreateInfo *pCreateInfo,
@@ -15081,13 +15137,34 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateComputePipelines(
         VkPipeline *pPipelines) {
     (void)pipelineCache;
     (void)pAllocator;
-    if (!pPipelines) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!pPipelines || (createInfoCount > 0 && !pCreateInfos)) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
     for (uint32_t i = 0; i < createInfoCount; ++i) {
+        const VkComputePipelineCreateInfo *ci = &pCreateInfos[i];
+        VkResult pnext_rc = validate_and_fill_pipeline_feedback_pnext(
+            "vkCreateComputePipelines", ci->pNext, 1u, false);
+        if (pnext_rc != VK_SUCCESS) return pnext_rc;
+        if (ci->sType != VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO ||
+            ci->flags != 0 ||
+            ci->basePipelineHandle != VK_NULL_HANDLE ||
+            ci->basePipelineIndex >= 0 ||
+            ci->stage.sType != VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO ||
+            ci->stage.stage != VK_SHADER_STAGE_COMPUTE_BIT ||
+            ci->stage.flags != 0) {
+            trace_icd_runtime_failure("compute-pipeline-create-info-unsupported",
+                                      VK_ERROR_FEATURE_NOT_PRESENT);
+            return VK_ERROR_FEATURE_NOT_PRESENT;
+        }
+        if (ci->stage.pNext) {
+            return unsupported_create_info_pnext_result("vkCreateComputePipelines.stage",
+                                                       ci->stage.pNext);
+        }
         PdockerVkPipeline *pipeline = pdocker_alloc_handle(sizeof(*pipeline));
         if (!pipeline) return VK_ERROR_OUT_OF_HOST_MEMORY;
         pipeline->object_id = next_vulkan_object_generation();
-        pipeline->shader = pdocker_vk_shader_module_from_handle(pCreateInfos[i].stage.module);
-        pipeline->layout = pdocker_vk_pipeline_layout_from_handle(pCreateInfos[i].layout);
+        pipeline->shader = pdocker_vk_shader_module_from_handle(ci->stage.module);
+        pipeline->layout = pdocker_vk_pipeline_layout_from_handle(ci->layout);
         pipeline->requested_feature_mask =
             device ? ((PdockerVkDevice *)device)->requested_feature_mask : 0;
         if (env_truthy_default("PDOCKER_GPU_ADD_FLOAT16_CAPABILITY_FOR_STORAGE16", false)) {
@@ -15101,9 +15178,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateComputePipelines(
             pipeline->requested_feature_mask |= PDOCKER_VK_FEATURE_SHADER_FLOAT16;
         }
         pipeline->local_size_x = 128;
-        const char *entry_name = pCreateInfos[i].stage.pName ? pCreateInfos[i].stage.pName : "main";
+        const char *entry_name = ci->stage.pName ? ci->stage.pName : "main";
         snprintf(pipeline->entry_name, sizeof(pipeline->entry_name), "%s", entry_name);
-        const VkSpecializationInfo *spec = pCreateInfos[i].stage.pSpecializationInfo;
+        const VkSpecializationInfo *spec = ci->stage.pSpecializationInfo;
         if (spec) {
             if (spec->mapEntryCount > PDOCKER_VK_MAX_SPECIALIZATION_ENTRIES ||
                 spec->dataSize > PDOCKER_VK_MAX_SPECIALIZATION_BYTES) {
@@ -15287,6 +15364,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
         pipeline->shader_stage_count = ci->stageCount;
         if (ci->stageCount > 0 && !ci->pStages) {
             pipeline->graphics_unsupported = true;
+        }
+        VkResult pnext_rc = validate_and_fill_pipeline_feedback_pnext(
+            "vkCreateGraphicsPipelines", ci->pNext, ci->stageCount, true);
+        if (pnext_rc != VK_SUCCESS) {
+            free(pipeline);
+            return pnext_rc;
         }
         uint32_t captured_stages = clamp_u32(ci->stageCount, PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDINGS);
         if (ci->stageCount > PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDINGS) {
@@ -15482,6 +15565,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
                 if (rendering->colorAttachmentCount > 0 && !rendering->pColorAttachmentFormats) {
                     pipeline->graphics_unsupported = true;
                 }
+#if defined(VK_VERSION_1_3) || defined(VK_EXT_pipeline_creation_feedback)
+            } else if (chain->sType == VK_STRUCTURE_TYPE_PIPELINE_CREATION_FEEDBACK_CREATE_INFO) {
+                /*
+                 * Already validated and filled before object creation.  It is
+                 * output-only metadata, so it does not change replay semantics.
+                 */
+#endif
             } else {
                 pipeline->graphics_unsupported = true;
             }
