@@ -15677,6 +15677,28 @@ static bool render_pass_subpass_can_normalize_to_dynamic_rendering(
     return !subpass->unsupported;
 }
 
+static bool command_buffer_begin_pnext_supported(const VkCommandBufferBeginInfo *begin) {
+    for (const void *node = begin ? begin->pNext : NULL; node;) {
+        PdockerVkStructHeader header = read_vk_struct_header(node);
+        switch (header.sType) {
+#ifdef VK_STRUCTURE_TYPE_DEVICE_GROUP_COMMAND_BUFFER_BEGIN_INFO
+            case VK_STRUCTURE_TYPE_DEVICE_GROUP_COMMAND_BUFFER_BEGIN_INFO: {
+                const VkDeviceGroupCommandBufferBeginInfo *info =
+                    (const VkDeviceGroupCommandBufferBeginInfo *)node;
+                if (info->deviceMask != 0 && info->deviceMask != 1u) {
+                    return false;
+                }
+                break;
+            }
+#endif
+            default:
+                return false;
+        }
+        node = header.pNext;
+    }
+    return true;
+}
+
 static bool command_buffer_begin_inheritance_supported(
         PdockerVkCommandBuffer *cmd,
         const VkCommandBufferBeginInfo *begin) {
@@ -16634,6 +16656,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkBeginCommandBuffer(
     memset(cmd->dynamic_states, 0, sizeof(cmd->dynamic_states));
     cmd->dynamic_state_count = 0;
     cmd->vertex_buffer_bound = false;
+    if (!command_buffer_begin_pnext_supported(pBeginInfo)) {
+        command_buffer_mark_recording_failed(cmd, "command-buffer-begin-pnext-unsupported");
+    }
     if (!command_buffer_begin_inheritance_supported(cmd, pBeginInfo)) {
         cmd->graphics_unsupported = true;
     }
