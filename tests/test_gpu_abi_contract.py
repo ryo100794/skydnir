@@ -1506,21 +1506,31 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertRegex(acquire_body, r"(swapchain|current_image|next_image|image_index)")
 
         acquire2_body = c_function_body(icd, "vkAcquireNextImage2KHR")
+        acquire2_pnext_body = c_function_body(icd, "acquire_next_image2_pnext_noop")
         for marker in [
             "!pAcquireInfo",
             "VK_ERROR_INITIALIZATION_FAILED",
             "pAcquireInfo->swapchain",
             "pImageIndex",
+            "!acquire_next_image2_pnext_noop(pAcquireInfo)",
+            "acquire-next-image2-pnext-unsupported",
         ]:
             self.assertIn(marker, acquire2_body)
+        for marker in [
+            "VK_STRUCTURE_TYPE_DEVICE_GROUP_ACQUIRE_NEXT_IMAGE_INFO_KHR",
+            "device_group->deviceMask != 0 && device_group->deviceMask != 1u",
+            "device_group->mode != VK_DEVICE_GROUP_PRESENT_MODE_LOCAL_BIT_KHR",
+        ]:
+            self.assertIn(marker, acquire2_pnext_body)
         self.assertRegex(acquire2_body, r"(vkAcquireNextImageKHR|VK_SUCCESS|\*pImageIndex)")
 
         present_body = c_function_body(icd, "vkQueuePresentKHR")
+        present_pnext_body = c_function_body(icd, "present_info_pnext_noop")
         for marker in [
             "!pPresentInfo",
             "VK_ERROR_INITIALIZATION_FAILED",
             "pPresentInfo->sType != VK_STRUCTURE_TYPE_PRESENT_INFO_KHR",
-            "pPresentInfo->pNext",
+            "!present_info_pnext_noop(pPresentInfo)",
             "queue-present-pnext-unsupported",
             "queue-present-wait-semaphore-unsignaled",
             "semaphore_wait_satisfied",
@@ -1537,6 +1547,14 @@ class GpuAbiContractTest(unittest.TestCase):
             "VK_SUCCESS",
         ]:
             self.assertIn(marker, present_body)
+        for marker in [
+            "VK_STRUCTURE_TYPE_DEVICE_GROUP_PRESENT_INFO_KHR",
+            "device_group->swapchainCount != info->swapchainCount",
+            "device_group->swapchainCount > 0 && !device_group->pDeviceMasks",
+            "device_group->mode != VK_DEVICE_GROUP_PRESENT_MODE_LOCAL_BIT_KHR",
+            "device_group->pDeviceMasks[i] != 0",
+        ]:
+            self.assertIn(marker, present_pnext_body)
         self.assertRegex(present_body, r"(pResults|swapchainCount)")
         self.assertLess(
             present_body.index("pdocker_vk_present_target_duplicate"),

@@ -16530,6 +16530,63 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAcquireNextImageKHR(
     return VK_SUCCESS;
 }
 
+static bool acquire_next_image2_pnext_noop(const VkAcquireNextImageInfoKHR *info) {
+    for (const void *node = info ? info->pNext : NULL; node;) {
+        PdockerVkStructHeader header = read_vk_struct_header(node);
+        switch (header.sType) {
+#ifdef VK_STRUCTURE_TYPE_DEVICE_GROUP_ACQUIRE_NEXT_IMAGE_INFO_KHR
+            case VK_STRUCTURE_TYPE_DEVICE_GROUP_ACQUIRE_NEXT_IMAGE_INFO_KHR: {
+                const VkDeviceGroupAcquireNextImageInfoKHR *device_group =
+                    (const VkDeviceGroupAcquireNextImageInfoKHR *)node;
+                if (device_group->deviceMask != 0 && device_group->deviceMask != 1u) {
+                    return false;
+                }
+                if (device_group->mode != VK_DEVICE_GROUP_PRESENT_MODE_LOCAL_BIT_KHR) {
+                    return false;
+                }
+                break;
+            }
+#endif
+            default:
+                return false;
+        }
+        node = header.pNext;
+    }
+    return true;
+}
+
+static bool present_info_pnext_noop(const VkPresentInfoKHR *info) {
+    for (const void *node = info ? info->pNext : NULL; node;) {
+        PdockerVkStructHeader header = read_vk_struct_header(node);
+        switch (header.sType) {
+#ifdef VK_STRUCTURE_TYPE_DEVICE_GROUP_PRESENT_INFO_KHR
+            case VK_STRUCTURE_TYPE_DEVICE_GROUP_PRESENT_INFO_KHR: {
+                const VkDeviceGroupPresentInfoKHR *device_group =
+                    (const VkDeviceGroupPresentInfoKHR *)node;
+                if (!info || device_group->swapchainCount != info->swapchainCount ||
+                    (device_group->swapchainCount > 0 && !device_group->pDeviceMasks)) {
+                    return false;
+                }
+                if (device_group->mode != VK_DEVICE_GROUP_PRESENT_MODE_LOCAL_BIT_KHR) {
+                    return false;
+                }
+                for (uint32_t i = 0; i < device_group->swapchainCount; ++i) {
+                    if (device_group->pDeviceMasks[i] != 0 &&
+                        device_group->pDeviceMasks[i] != 1u) {
+                        return false;
+                    }
+                }
+                break;
+            }
+#endif
+            default:
+                return false;
+        }
+        node = header.pNext;
+    }
+    return true;
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL vkAcquireNextImage2KHR(
         VkDevice device,
         const VkAcquireNextImageInfoKHR *pAcquireInfo,
@@ -16538,7 +16595,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAcquireNextImage2KHR(
     if (pAcquireInfo->sType != VK_STRUCTURE_TYPE_ACQUIRE_NEXT_IMAGE_INFO_KHR) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
-    if (pAcquireInfo->pNext) {
+    if (!acquire_next_image2_pnext_noop(pAcquireInfo)) {
         trace_icd_runtime_failure("acquire-next-image2-pnext-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }
@@ -16562,7 +16619,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueuePresentKHR(
     if (pPresentInfo->sType != VK_STRUCTURE_TYPE_PRESENT_INFO_KHR) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
-    if (pPresentInfo->pNext) {
+    if (!present_info_pnext_noop(pPresentInfo)) {
         trace_icd_runtime_failure("queue-present-pnext-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }
