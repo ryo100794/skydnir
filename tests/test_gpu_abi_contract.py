@@ -1646,6 +1646,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "rp->subpass_dependencies[dst_subpass]",
             "render_pass_create2_pnext_noop(pCreateInfo, &disallow_subpass_merging)",
             "fill_render_pass_create2_feedback(pCreateInfo, pCreateInfo->subpassCount)",
+            "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBPASS_MERGE_FEEDBACK_FEATURES_EXT",
             "VK_STRUCTURE_TYPE_RENDER_PASS_CREATION_CONTROL_EXT",
             "VK_STRUCTURE_TYPE_RENDER_PASS_CREATION_FEEDBACK_CREATE_INFO_EXT",
             "feedback->pRenderPassFeedback->postMergeSubpassCount",
@@ -6233,6 +6234,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("validate_device_group_device_create_info", icd)
         self.assertIn("create-device-device-group-unsupported", icd)
         self.assertIn("physicalDeviceCount != 1", icd)
+        self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBPASS_MERGE_FEEDBACK_FEATURES_EXT", icd)
+        self.assertIn("p->subpassMergeFeedback = VK_FALSE", icd)
+        self.assertIn("supported = !p->subpassMergeFeedback", icd)
+        self.assertIn('unsupported_feature_name = "subpassMergeFeedback"', icd)
         self.assertIn("p->pPhysicalDevices[0] != (VkPhysicalDevice)&g_device", icd)
         self.assertIn("VK_ERROR_FEATURE_NOT_PRESENT", icd)
         for marker in [

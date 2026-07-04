@@ -83,6 +83,7 @@
 
 #ifndef VK_EXT_subpass_merge_feedback
 #define VK_EXT_subpass_merge_feedback 1
+#define VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBPASS_MERGE_FEEDBACK_FEATURES_EXT ((VkStructureType)1000458000)
 #define VK_STRUCTURE_TYPE_RENDER_PASS_CREATION_CONTROL_EXT ((VkStructureType)1000458001)
 #define VK_STRUCTURE_TYPE_RENDER_PASS_CREATION_FEEDBACK_CREATE_INFO_EXT ((VkStructureType)1000458002)
 #define VK_STRUCTURE_TYPE_RENDER_PASS_SUBPASS_FEEDBACK_CREATE_INFO_EXT ((VkStructureType)1000458003)
@@ -93,6 +94,11 @@ typedef enum VkSubpassMergeStatusEXT {
     VK_SUBPASS_MERGE_STATUS_NOT_MERGED_UNSPECIFIED_EXT = 13,
     VK_SUBPASS_MERGE_STATUS_MAX_ENUM_EXT = 0x7FFFFFFF
 } VkSubpassMergeStatusEXT;
+typedef struct VkPhysicalDeviceSubpassMergeFeedbackFeaturesEXT {
+    VkStructureType sType;
+    void *pNext;
+    VkBool32 subpassMergeFeedback;
+} VkPhysicalDeviceSubpassMergeFeedbackFeaturesEXT;
 typedef struct VkRenderPassCreationControlEXT {
     VkStructureType sType;
     const void *pNext;
@@ -11501,6 +11507,15 @@ static void fill_pnext_features(void *pNext) {
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
                 break;
             }
+#ifdef VK_EXT_subpass_merge_feedback
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBPASS_MERGE_FEEDBACK_FEATURES_EXT: {
+                VkPhysicalDeviceSubpassMergeFeedbackFeaturesEXT *p =
+                    (VkPhysicalDeviceSubpassMergeFeedbackFeaturesEXT *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                p->subpassMergeFeedback = VK_FALSE;
+                break;
+            }
+#endif
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES: {
                 VkPhysicalDeviceMaintenance4Features *p = (VkPhysicalDeviceMaintenance4Features *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
@@ -11907,6 +11922,15 @@ static VkResult validate_device_feature_requests(const VkDeviceCreateInfo *pCrea
                 if (!supported) unsupported_feature_name = "hostQueryReset";
                 break;
             }
+#ifdef VK_EXT_subpass_merge_feedback
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBPASS_MERGE_FEEDBACK_FEATURES_EXT: {
+                const VkPhysicalDeviceSubpassMergeFeedbackFeaturesEXT *p =
+                    (const VkPhysicalDeviceSubpassMergeFeedbackFeaturesEXT *)node;
+                supported = !p->subpassMergeFeedback;
+                if (!supported) unsupported_feature_name = "subpassMergeFeedback";
+                break;
+            }
+#endif
             case VK_STRUCTURE_TYPE_DEVICE_GROUP_DEVICE_CREATE_INFO: {
                 VkResult group_rc = validate_device_group_device_create_info((const VkDeviceGroupDeviceCreateInfo *)node);
                 if (group_rc != VK_SUCCESS) return group_rc;
@@ -12206,6 +12230,16 @@ static void trace_device_create_features(const VkDeviceCreateInfo *pCreateInfo) 
                 fprintf(stderr,
                         "pdocker-vulkan-icd: create-device index_type_uint8_features={indexTypeUint8:%u}\n",
                         p->indexTypeUint8);
+                break;
+            }
+#endif
+#ifdef VK_EXT_subpass_merge_feedback
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBPASS_MERGE_FEEDBACK_FEATURES_EXT: {
+                const VkPhysicalDeviceSubpassMergeFeedbackFeaturesEXT *p =
+                    (const VkPhysicalDeviceSubpassMergeFeedbackFeaturesEXT *)node;
+                fprintf(stderr,
+                        "pdocker-vulkan-icd: create-device subpass_merge_feedback_features={subpassMergeFeedback:%u}\n",
+                        p->subpassMergeFeedback);
                 break;
             }
 #endif

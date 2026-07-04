@@ -94,6 +94,49 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_subpass_merge_feedback_feature_is_queryable_but_not_enableable(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            int main(void) {{
+                VkPhysicalDeviceSubpassMergeFeedbackFeaturesEXT feedback;
+                memset(&feedback, 0xff, sizeof(feedback));
+                feedback.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBPASS_MERGE_FEEDBACK_FEATURES_EXT;
+                feedback.pNext = NULL;
+                fill_pnext_features(&feedback);
+                if (feedback.sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBPASS_MERGE_FEEDBACK_FEATURES_EXT) {{
+                    return 2;
+                }}
+                if (feedback.pNext != NULL) {{
+                    return 3;
+                }}
+                if (feedback.subpassMergeFeedback != VK_FALSE) {{
+                    return 4;
+                }}
+
+                VkDeviceCreateInfo create_info;
+                memset(&create_info, 0, sizeof(create_info));
+                create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                feedback.subpassMergeFeedback = VK_TRUE;
+                create_info.pNext = &feedback;
+                if (validate_device_feature_requests(&create_info) == VK_SUCCESS) {{
+                    return 5;
+                }}
+                feedback.subpassMergeFeedback = VK_FALSE;
+                if (validate_device_feature_requests(&create_info) != VK_SUCCESS) {{
+                    return 6;
+                }}
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_advertised_feature_extensions_are_enumerated_together(self):
         source = textwrap.dedent(
             f"""
