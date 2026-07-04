@@ -281,6 +281,25 @@ def q6_store_index_model_reflection():
     }
 
 
+def q6_stage_divergence_final_lane0():
+    return {
+        "schema": "pdocker.q6k.stage-divergence.v1",
+        "summary": "final-lane0-store-mismatch",
+        "manifest_sourced": True,
+        "lane_trace_verified": True,
+        "trace_writeback_verified": True,
+        "pre_reduction_compared": True,
+        "pre_reduction_matches": True,
+        "reduction_compared": True,
+        "reduction_matches": True,
+        "final_store_compared": True,
+        "final_store_matches_expected": False,
+        "first_divergent_stage": "final-store",
+        "final_record_role_code": 4,
+        "final_record_local_invocation_id": [0, 0, 0],
+    }
+
+
 def q6_final_store_boundary(summary, final_value=0.5, expected=1.25, fd_after=0.5):
     return {
         "schema": "pdocker.q6k.final-store-boundary.v1",
@@ -315,6 +334,72 @@ def q6_final_store_boundary(summary, final_value=0.5, expected=1.25, fd_after=0.
                 "layout_from_final_store_trace": True,
             }
         ],
+    }
+
+
+def q6_debug_probe_expectations(source="manifest"):
+    return {
+        "schema": "pdocker.q6k.debug-probe-expectations.v1",
+        "source": source,
+        "path": "/tmp/q6.write.instrumentation.json" if source == "manifest" else None,
+        "record_count": 1,
+        "records": [
+            {
+                "probe": 0,
+                "slot_base": 116,
+                "phase": "full",
+                "stage": "final-store",
+                "role": "final_output_store",
+                "candidate_id": 230,
+                "role_code": 4,
+            }
+        ],
+        "errors": [] if source == "manifest" else [{"error": "legacy-fallback"}],
+    }
+
+
+def q6_debug_u32_probe_pass():
+    return {
+        "schema": "pdocker.q6k.final-store-trace.v2",
+        "summary": "pass",
+        "debug_binding_count": 1,
+        "executed_stage_trace_v2_count": 1,
+        "executed_final_trace_v2_count": 1,
+        "bindings": [
+            {
+                "binding": 5,
+                "debug_probe_binding": True,
+                "executed_stage_trace_v2_count": 1,
+                "executed_final_trace_v2_count": 1,
+                "records": [
+                    {
+                        "probe": 0,
+                        "stage": "final-store",
+                        "candidate_id": 230,
+                        "role_code": 4,
+                    }
+                ],
+            }
+        ],
+        "failures": [],
+    }
+
+
+def q6_debug_binding_alias_safety_pass():
+    return {
+        "schema": "pdocker.q6k.debug-binding-alias-safety.v1",
+        "summary": "pass",
+        "debug_binding_count": 1,
+        "checked_compute_binding_count": 1,
+        "overlap_count": 0,
+    }
+
+
+def q6_stage_trace_claim_evidence():
+    return {
+        "q6_debug_probe_expectations": q6_debug_probe_expectations("manifest"),
+        "q6_debug_u32_probe": q6_debug_u32_probe_pass(),
+        "q6_debug_binding_alias_safety": q6_debug_binding_alias_safety_pass(),
     }
 
 
@@ -1616,6 +1701,8 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                         "local_size_resolved": [32, 1, 1],
                         "q6_shader_like_abs_delta": 1.0e-7,
                         "q6_output_index_probe_summary": "final-store-value",
+                        "q6_stage_divergence": q6_stage_divergence_final_lane0(),
+                        **q6_stage_trace_claim_evidence(),
                         "q6_output_layout_probe": {
                             "summary": "canonical-mismatch-not-found",
                             "samples": [
@@ -2055,7 +2142,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         self.assertEqual(result.returncode, 40, result.stdout)
         self.assertEqual(json.loads(result.stdout)["classification"], "q6-writeback-mismatch")
 
-    def test_q6_final_store_boundary_classifies_native_final_store(self):
+    def test_q6_final_store_boundary_requires_stage_divergence_evidence(self):
         q6 = {
             "event_count": 1,
             "workgroup_shape_blocker": False,
@@ -2087,12 +2174,157 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
             },
         }
         result = self.run_verifier(payload, "--require-q6-workgroup-clear")
+        self.assertEqual(result.returncode, 49, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "q6-stage-divergence-evidence-missing")
+        self.assertEqual(report["responsibility_boundary"], "q6-stage-divergence")
+        self.assertEqual(report["q6_effective_blocker_class"], "q6-stage-divergence-evidence-missing")
+        self.assertEqual(report["q6_stage_divergence"]["summary"], "missing-evidence")
+
+    def test_q6_final_store_boundary_classifies_native_final_store(self):
+        q6 = {
+            "event_count": 1,
+            "workgroup_shape_blocker": False,
+            "latest_status": "mismatch",
+            "local_size_resolved": [32, 1, 1],
+            "q6_output_layout_probe": {
+                "summary": "canonical-mismatch-inconclusive",
+                "samples": [
+                    q6_layout_sample_with_store_model(257, expected=1.25, gpu_at_dst=0.5)
+                ],
+            },
+            "q6_final_store_boundary": q6_final_store_boundary(
+                "native-final-store-mismatch",
+                final_value=0.5,
+                expected=1.25,
+                fd_after=0.5,
+            ),
+            "q6_stage_divergence": q6_stage_divergence_final_lane0(),
+            **q6_stage_trace_claim_evidence(),
+            **q6_store_index_model_reflection(),
+            **q6_verified_writeback(),
+        }
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": passing_config_propagation(),
+                    "q6_workgroup_diagnostics": q6,
+                },
+            },
+        }
+        result = self.run_verifier(payload, "--require-q6-workgroup-clear")
         self.assertEqual(result.returncode, 0, result.stdout)
         report = json.loads(result.stdout)
         self.assertEqual(report["classification"], "q6-native-final-store")
         self.assertEqual(report["responsibility_boundary"], "q6-native-final-store")
         self.assertEqual(report["q6_effective_blocker_class"], "native-q6-final-store")
         self.assertEqual(report["q6_final_store_boundary"]["summary"], "native-final-store-mismatch")
+
+    def test_q6_stage_divergence_fails_closed_without_manifest_probe_expectations(self):
+        q6 = {
+            "event_count": 1,
+            "workgroup_shape_blocker": False,
+            "latest_status": "mismatch",
+            "local_size_resolved": [32, 1, 1],
+            "q6_output_layout_probe": {
+                "summary": "canonical-mismatch-inconclusive",
+                "samples": [
+                    q6_layout_sample_with_store_model(257, expected=1.25, gpu_at_dst=0.5)
+                ],
+            },
+            "q6_final_store_boundary": q6_final_store_boundary(
+                "native-final-store-mismatch",
+                final_value=0.5,
+                expected=1.25,
+                fd_after=0.5,
+            ),
+            "q6_stage_divergence": q6_stage_divergence_final_lane0(),
+            **q6_stage_trace_claim_evidence(),
+            **q6_store_index_model_reflection(),
+            **q6_verified_writeback(),
+        }
+        q6["q6_debug_probe_expectations"] = q6_debug_probe_expectations("legacy-fallback")
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": passing_config_propagation(),
+                    "q6_workgroup_diagnostics": q6,
+                },
+            },
+        }
+        result = self.run_verifier(payload, "--require-q6-workgroup-clear")
+        self.assertEqual(result.returncode, 49, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "q6-stage-divergence-evidence-missing")
+        self.assertEqual(report["responsibility_boundary"], "q6-stage-divergence")
+        self.assertEqual(
+            report["q6_effective_blocker_class"],
+            "q6-stage-divergence-evidence-missing",
+        )
+        self.assertEqual(report["q6_stage_divergence"]["summary"], "missing-evidence")
+        self.assertIn(
+            "q6_debug_probe_expectations.source",
+            report["q6_stage_divergence"].get("missing", []),
+        )
+
+    def test_q6_stage_divergence_fails_closed_when_debug_u32_probe_not_run(self):
+        q6 = {
+            "event_count": 1,
+            "workgroup_shape_blocker": False,
+            "latest_status": "mismatch",
+            "local_size_resolved": [32, 1, 1],
+            "q6_output_layout_probe": {
+                "summary": "canonical-mismatch-inconclusive",
+                "samples": [
+                    q6_layout_sample_with_store_model(257, expected=1.25, gpu_at_dst=0.5)
+                ],
+            },
+            "q6_final_store_boundary": q6_final_store_boundary(
+                "native-final-store-mismatch",
+                final_value=0.5,
+                expected=1.25,
+                fd_after=0.5,
+            ),
+            "q6_stage_divergence": q6_stage_divergence_final_lane0(),
+            **q6_stage_trace_claim_evidence(),
+            **q6_store_index_model_reflection(),
+            **q6_verified_writeback(),
+        }
+        q6["q6_debug_u32_probe"] = {
+            "schema": "pdocker.q6k.final-store-trace.v2",
+            "summary": "not-run",
+            "debug_binding_count": 0,
+            "executed_stage_trace_v2_count": 0,
+            "executed_final_trace_v2_count": 0,
+        }
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": passing_config_propagation(),
+                    "q6_workgroup_diagnostics": q6,
+                },
+            },
+        }
+        result = self.run_verifier(payload, "--require-q6-workgroup-clear")
+        self.assertEqual(result.returncode, 49, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "q6-stage-divergence-evidence-missing")
+        self.assertEqual(report["responsibility_boundary"], "q6-stage-divergence")
+        self.assertEqual(
+            report["q6_effective_blocker_class"],
+            "q6-stage-divergence-evidence-missing",
+        )
+        self.assertEqual(report["q6_stage_divergence"]["summary"], "missing-evidence")
+        self.assertIn(
+            "q6_debug_u32_probe.summary",
+            report["q6_stage_divergence"].get("missing", []),
+        )
 
     def test_q6_final_store_boundary_classifies_executor_writeback(self):
         q6 = {
@@ -2277,6 +2509,8 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                 "samples": [q6_layout_sample_with_store_model(257, expected=1.25, gpu_at_dst=0.5)],
             },
             "q6_final_store_boundary": boundary,
+            "q6_stage_divergence": q6_stage_divergence_final_lane0(),
+            **q6_stage_trace_claim_evidence(),
             **q6_store_index_model_reflection(),
             **q6_verified_writeback(),
         }

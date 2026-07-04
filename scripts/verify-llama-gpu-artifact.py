@@ -48,6 +48,7 @@ Q6_DEBUG_U32_BLOCKERS = {
     "q6-debug-u32-final-store-trace-missing",
     "q6-debug-u32-probe-missing",
     "q6-debug-u32-probe-invalid",
+    "q6-stage-divergence-evidence-missing",
 }
 Q6_WRITEBACK_REQUIRED_FIELDS = (
     "gpu.diagnostics.q6_workgroup_diagnostics.q6_writeback_verified_all",
@@ -1267,6 +1268,88 @@ def _q6_debug_u32_probe_blocker(q6: Any) -> str:
     except (TypeError, ValueError):
         return "q6-debug-u32-probe-invalid"
     return "q6-debug-u32-probe-invalid"
+
+
+def _q6_stage_divergence_evidence(q6: Any) -> dict[str, Any]:
+    """Validate the evidence needed to claim the first Q6 divergence stage.
+
+    A final-store boundary mismatch proves that Android Vulkan produced a value
+    that was faithfully written back to the container. It does not, by itself,
+    prove whether the first bad value appeared before reduction, during
+    reduction, or only at the lane-0 final store. That stronger claim requires
+    a manifest-backed stage trace whose pre-reduction and reduction values have
+    been compared before accepting a final-lane-0 classification.
+    """
+    if not isinstance(q6, dict):
+        return {"schema": "pdocker.q6k.stage-divergence.v1", "summary": "not-run"}
+    raw = q6.get("q6_stage_divergence")
+    if not isinstance(raw, dict):
+        return {
+            "schema": "pdocker.q6k.stage-divergence.v1",
+            "summary": "missing-evidence",
+            "reason": "missing q6_stage_divergence",
+        }
+    summary = str(raw.get("summary") or "")
+    valid_summaries = {
+        "pass",
+        "pre-reduction-mismatch",
+        "reduction-mismatch",
+        "final-lane0-store-mismatch",
+    }
+    if summary not in valid_summaries:
+        return {
+            **raw,
+            "summary": "missing-evidence",
+            "reason": "unsupported q6_stage_divergence.summary",
+        }
+    required_true = (
+        "manifest_sourced",
+        "lane_trace_verified",
+        "trace_writeback_verified",
+    )
+    missing = [field for field in required_true if raw.get(field) is not True]
+    expectations = q6.get("q6_debug_probe_expectations")
+    if not isinstance(expectations, dict) or expectations.get("source") != "manifest":
+        missing.append("q6_debug_probe_expectations.source")
+    probe = q6.get("q6_debug_u32_probe")
+    if not isinstance(probe, dict) or probe.get("summary") != "pass":
+        missing.append("q6_debug_u32_probe.summary")
+    else:
+        try:
+            stage_count = int(probe.get("executed_stage_trace_v2_count") or 0)
+            final_count = int(probe.get("executed_final_trace_v2_count") or 0)
+        except (TypeError, ValueError):
+            stage_count = 0
+            final_count = 0
+        if stage_count <= 0:
+            missing.append("q6_debug_u32_probe.executed_stage_trace_v2_count")
+        if final_count <= 0:
+            missing.append("q6_debug_u32_probe.executed_final_trace_v2_count")
+    if summary == "final-lane0-store-mismatch":
+        required_final_true = (
+            "pre_reduction_compared",
+            "pre_reduction_matches",
+            "reduction_compared",
+            "reduction_matches",
+            "final_store_compared",
+        )
+        missing.extend(field for field in required_final_true if raw.get(field) is not True)
+        if raw.get("final_record_role_code") != 4:
+            missing.append("final_record_role_code")
+        if raw.get("final_record_local_invocation_id") != [0, 0, 0]:
+            missing.append("final_record_local_invocation_id")
+        if raw.get("final_store_matches_expected") is not False:
+            missing.append("final_store_matches_expected")
+        if raw.get("first_divergent_stage") not in {"final-store", "final-lane0-store"}:
+            missing.append("first_divergent_stage")
+    if missing:
+        return {
+            **raw,
+            "summary": "missing-evidence",
+            "missing": missing[:16],
+            "reason": "stage divergence evidence is incomplete",
+        }
+    return raw
 
 
 def _api_prompt_sanity(data: dict[str, Any]) -> dict[str, Any]:
@@ -2837,6 +2920,7 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
     q6_debug_u32_probe = _q6_debug_u32_probe(q6)
     q6_debug_u32_probe_blocker = _q6_debug_u32_probe_blocker(q6)
     q6_final_store_boundary = _q6_final_store_boundary(q6)
+    q6_stage_divergence = _q6_stage_divergence_evidence(q6)
     q6_output_index_probe = _q6_output_index_probe(q6)
     q6_output_index_probe_summary = str(q6_output_index_probe.get("summary") or "not-run")
     q6_workgroup_env_gap = _q6_workgroup_env_gap(runtime_env_manifest, config_propagation)
@@ -2954,16 +3038,26 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
                 responsibility_boundary = "q6-writeback"
                 q6_blocker_class = "executor-final-writeback"
             elif q6_final_store_boundary.get("summary") == "native-final-store-mismatch":
-                classification = "q6-native-final-store"
-                responsibility_boundary = "q6-native-final-store"
-                q6_blocker_class = "native-q6-final-store"
+                if q6_stage_divergence.get("summary") != "final-lane0-store-mismatch":
+                    classification = "q6-stage-divergence-evidence-missing"
+                    responsibility_boundary = "q6-stage-divergence"
+                    q6_blocker_class = "q6-stage-divergence-evidence-missing"
+                else:
+                    classification = "q6-native-final-store"
+                    responsibility_boundary = "q6-native-final-store"
+                    q6_blocker_class = "native-q6-final-store"
             elif (
                 q6_output_index_probe_summary == "final-store-value"
                 and q6_shader_like["q6_shader_like_oracle_cleared"] is True
             ):
-                classification = "q6-native-final-store"
-                responsibility_boundary = "q6-native-final-store"
-                q6_blocker_class = "native-q6-final-store"
+                if q6_stage_divergence.get("summary") != "final-lane0-store-mismatch":
+                    classification = "q6-stage-divergence-evidence-missing"
+                    responsibility_boundary = "q6-stage-divergence"
+                    q6_blocker_class = "q6-stage-divergence-evidence-missing"
+                else:
+                    classification = "q6-native-final-store"
+                    responsibility_boundary = "q6-native-final-store"
+                    q6_blocker_class = "native-q6-final-store"
             elif q6_native_vs_writeback_split.get("summary") == "executor-final-writeback":
                 classification = "q6-writeback-mismatch"
                 responsibility_boundary = "q6-writeback"
@@ -3077,6 +3171,7 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
         "q6_debug_u32_probe": q6_debug_u32_probe,
         "q6_debug_u32_probe_blocker": q6_debug_u32_probe_blocker,
         "q6_final_store_boundary": q6_final_store_boundary,
+        "q6_stage_divergence": q6_stage_divergence,
         "q6_native_vs_writeback_split": q6_native_vs_writeback_split,
         "q6_effective_blocker_class": (
             q6_blocker_class
