@@ -10732,6 +10732,13 @@ class GpuAbiContractTest(unittest.TestCase):
             ],
         )
         self.assertTrue(any("BuiltIn WorkgroupSize" in note for note in module["risk_notes"]))
+        execution_shape = module["workgroup_execution_shape"]
+        self.assertEqual(execution_shape["local_size"], [1, 1, 1])
+        self.assertEqual(execution_shape["workgroup_size_default"], [1, 1, 1])
+        self.assertEqual(execution_shape["workgroup_size_builtin_kind"], "spec_constant_composite")
+        self.assertTrue(execution_shape["has_specialized_workgroup_builtin"])
+        self.assertTrue(execution_shape["literal_matches_workgroup_default"])
+        self.assertTrue(execution_shape["statically_consistent"])
         descriptor_by_binding = {item["binding"]: item for item in module["descriptor_variables"]}
         output_member_type = descriptor_by_binding[2]["pointee_layout"]["members"][0]["type"]
         self.assertEqual(output_member_type["kind"], "runtime_array")
@@ -10832,6 +10839,65 @@ class GpuAbiContractTest(unittest.TestCase):
                 for target in by_phase["full"]["preceding_workgroup_stores"][:2]
             ],
         )
+
+    def test_spirv_analyzer_reports_q6_effective_workgroup_shape_mismatch(self):
+        native_spv = ROOT / "docs" / "test" / "spirv-q6k-native-adb45055" / "native-q6-source.spv"
+        effective_spv = ROOT / "docs" / "test" / "spirv-q6k-native-adb45055" / "effective-q6-local-size-patched.spv"
+        self.assertTrue(native_spv.exists(), "native Q6 source SPIR-V evidence must be preserved")
+        self.assertTrue(effective_spv.exists(), "effective Q6 local-size evidence must be preserved")
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            native_analysis = tmp_path / "native.analysis.json"
+            effective_analysis = tmp_path / "effective.analysis.json"
+            compare_out = tmp_path / "native-vs-effective.json"
+            subprocess.run(
+                ["python3", str(SPIRV_ANALYZER), str(native_spv), "--json-out", str(native_analysis)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+            )
+            subprocess.run(
+                ["python3", str(SPIRV_ANALYZER), str(effective_spv), "--json-out", str(effective_analysis)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+            )
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(SPIRV_DATAFLOW_COMPARE),
+                    str(native_analysis),
+                    str(effective_analysis),
+                    "--json-out",
+                    str(compare_out),
+                ],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self.assertEqual(result.returncode, 2, result.stderr)
+            native_module = json.loads(native_analysis.read_text())["modules"][0]
+            effective_module = json.loads(effective_analysis.read_text())["modules"][0]
+            comparison = json.loads(compare_out.read_text())
+
+        self.assertTrue(native_module["workgroup_execution_shape"]["statically_consistent"])
+        effective_shape = effective_module["workgroup_execution_shape"]
+        self.assertEqual(effective_shape["local_size"], [32, 1, 1])
+        self.assertEqual(effective_shape["workgroup_size_default"], [1, 1, 1])
+        self.assertFalse(effective_shape["literal_matches_workgroup_default"])
+        self.assertFalse(effective_shape["statically_consistent"])
+        self.assertTrue(any("literal LocalSize differs" in note for note in effective_module["risk_notes"]))
+        q6_flow = next(item for item in comparison["comparisons"] if item["name"] == "q6_final_store_value_flow")
+        self.assertTrue(q6_flow["match"])
+        shape = next(item for item in comparison["comparisons"] if item["name"] == "workgroup_execution_shape")
+        self.assertFalse(shape["match"])
+        self.assertIn("workgroup_execution_shape.local_size[0]", shape["diff_paths"])
+        self.assertIn("workgroup_execution_shape.literal_matches_workgroup_default", shape["diff_paths"])
 
     def test_spirv_probe_manifest_verifier_fails_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -11602,6 +11668,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("let the real Vulkan path decide", source)
         self.assertNotIn('fail_stage = "spirv-local-size-inconsistent";', source)
         self.assertNotIn('json_fail("spirv-local-size-inconsistent"', source)
+        self.assertIn("patched LocalSize invariant failed", source)
+        self.assertIn('fail_stage = "spirv-local-size-patch-inconsistent";', source)
+        self.assertIn("local_size_patched) {", source)
         self.assertIn("spirv_local_invocation_count", source)
         self.assertIn("product > UINT64_MAX / local_size[i]", source)
         self.assertIn("invalid-q6-local-size", source)

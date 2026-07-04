@@ -515,6 +515,7 @@ def summarize(module: dict[str, Any]) -> dict[str, Any]:
         "local_size": module.get("local_size"),
         "local_size_id": module.get("local_size_id"),
         "workgroup_size_builtin": workgroup_size_signature(module),
+        "workgroup_execution_shape": module.get("workgroup_execution_shape"),
         "descriptors": descriptor_signature(module),
         "push_constants": push_signature(module),
         "q6_final_store_value_flow": q6_final_store_value_flow_signature(module),
@@ -551,6 +552,11 @@ def main() -> int:
                 "workgroup_size_builtin",
             ),
         },
+        compare_values(
+            "workgroup_execution_shape",
+            left["workgroup_execution_shape"],
+            right["workgroup_execution_shape"],
+        ),
         compare_lists("descriptors", left["descriptors"], right["descriptors"]),
         compare_lists("push_constants", left["push_constants"], right["push_constants"]),
         compare_values(

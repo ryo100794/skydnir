@@ -14330,6 +14330,35 @@ static int run_vulkan_dispatch_fd(
     spirv_summary = summarize_spirv(shader_code, shader_size);
     have_spirv_summary = 1;
     dump_spirv_if_requested("effective", dispatch_lifecycle_id, shader_code, shader_size, &spirv_summary, options);
+    if (local_size_patched) {
+        uint64_t patched_resolved_local_size[3];
+        uint64_t patched_invocations = 0;
+        resolve_spirv_local_size(&spirv_summary,
+                                 specializations,
+                                 specialization_count,
+                                 specialization_data,
+                                 specialization_data_size,
+                                 patched_resolved_local_size);
+        if (!spirv_local_size_consistent(&spirv_summary,
+                                         specializations,
+                                         specialization_count,
+                                         specialization_data,
+                                         specialization_data_size) ||
+            !spirv_local_invocation_count(patched_resolved_local_size,
+                                          &patched_invocations)) {
+            fprintf(stderr,
+                    "pdocker-gpu-executor: patched LocalSize invariant failed "
+                    "dispatch_id=%llu resolved=[%llu,%llu,%llu]\n",
+                    (unsigned long long)dispatch_lifecycle_id,
+                    (unsigned long long)patched_resolved_local_size[0],
+                    (unsigned long long)patched_resolved_local_size[1],
+                    (unsigned long long)patched_resolved_local_size[2]);
+            json_fail("vulkan-dispatch", "patched LocalSize invariant failed");
+            fail_stage = "spirv-local-size-patch-inconsistent";
+            ret = 64;
+            goto cleanup;
+        }
+    }
     const char *source_identity_fail_reason = NULL;
     if (resolve_cpu_oracle_spirv_identity(options,
                                           original_spirv_hash,

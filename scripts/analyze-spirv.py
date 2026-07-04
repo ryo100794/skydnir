@@ -1097,6 +1097,7 @@ def analyze_spirv(path: Path) -> dict:
     variable: dict[int, dict] = {}
     type_scalar: dict[int, dict] = {}
     constants: dict[int, dict] = {}
+    constant_composites: dict[int, dict] = {}
     spec_constants: dict[int, dict] = {}
     spec_constant_composites: dict[int, dict] = {}
     id_defs: dict[int, dict] = {}
@@ -1214,6 +1215,11 @@ def analyze_spirv(path: Path) -> dict:
             constants[inst[2]] = {
                 "result_type": inst[1],
                 "words": inst[3:],
+            }
+        elif opcode == 44 and len(inst) >= 4:
+            constant_composites[inst[2]] = {
+                "result_type": inst[1],
+                "constituents": inst[3:],
             }
         elif opcode == 50 and len(inst) >= 4:
             spec_constants[inst[2]] = {
@@ -1336,6 +1342,15 @@ def analyze_spirv(path: Path) -> dict:
                 "opcode": spec_constants[value_id].get("opcode"),
                 "operands": spec_constants[value_id].get("operands", []),
                 "spec_id": decorations.get(value_id, {}).get("SpecId"),
+            })
+            return item
+        if value_id in constant_composites:
+            item.update({
+                "kind": "constant_composite",
+                "constituents": [
+                    describe_scalar_id(int(member_id))
+                    for member_id in constant_composites[value_id].get("constituents", [])
+                ],
             })
             return item
         if value_id in spec_constant_composites:
@@ -1518,6 +1533,15 @@ def analyze_spirv(path: Path) -> dict:
                 "result_type": var.get("result_type"),
             }
             break
+        if value_id in constant_composites:
+            constituents = constant_composites[value_id].get("constituents", [])
+            workgroup_size_builtin = {
+                "kind": "constant_composite",
+                "id": value_id,
+                "name": names.get(value_id, ""),
+                "components": [describe_scalar_id(int(member_id)) for member_id in constituents],
+            }
+            break
         if value_id in spec_constant_composites:
             constituents = spec_constant_composites[value_id].get("constituents", [])
             workgroup_size_builtin = {
@@ -1527,6 +1551,55 @@ def analyze_spirv(path: Path) -> dict:
                 "components": [describe_scalar_id(int(member_id)) for member_id in constituents],
             }
             break
+
+    def workgroup_component_default_u32(component: object) -> int | None:
+        if not isinstance(component, dict):
+            return None
+        if isinstance(component.get("value_u32"), int):
+            return int(component["value_u32"])
+        if isinstance(component.get("default_u32"), int):
+            return int(component["default_u32"])
+        return None
+
+    def build_workgroup_execution_shape() -> dict:
+        component_defaults = None
+        component_kinds = []
+        has_specialized_workgroup_builtin = False
+        if isinstance(workgroup_size_builtin, dict):
+            components = workgroup_size_builtin.get("components")
+            if isinstance(components, list):
+                defaults = [workgroup_component_default_u32(component) for component in components]
+                if len(defaults) == 3 and all(isinstance(value, int) for value in defaults):
+                    component_defaults = defaults
+                component_kinds = [
+                    component.get("kind") if isinstance(component, dict) else type(component).__name__
+                    for component in components
+                ]
+                has_specialized_workgroup_builtin = any(
+                    isinstance(component, dict) and component.get("kind") in {"spec_constant", "spec_constant_op", "spec_constant_composite"}
+                    for component in components
+                )
+        literal_local_size = local_size if local_size != [0, 0, 0] else None
+        literal_matches_workgroup_default = None
+        if literal_local_size is not None and component_defaults is not None:
+            literal_matches_workgroup_default = literal_local_size == component_defaults
+        statically_consistent = literal_matches_workgroup_default
+        if literal_local_size is None or component_defaults is None:
+            statically_consistent = None
+        return {
+            "local_size": local_size,
+            "local_size_id": local_size_id,
+            "workgroup_size_builtin_kind": (
+                workgroup_size_builtin.get("kind") if isinstance(workgroup_size_builtin, dict) else None
+            ),
+            "workgroup_size_default": component_defaults,
+            "workgroup_size_component_kinds": component_kinds,
+            "has_specialized_workgroup_builtin": has_specialized_workgroup_builtin,
+            "literal_matches_workgroup_default": literal_matches_workgroup_default,
+            "statically_consistent": statically_consistent,
+        }
+
+    workgroup_execution_shape = build_workgroup_execution_shape()
 
     descriptor_by_id = {int(item["id"]): item for item in descriptor_variables}
     push_constant_by_id = {int(item["variable_id"]): item for item in push_constant_blocks}
@@ -1717,6 +1790,8 @@ def analyze_spirv(path: Path) -> dict:
         risk_notes.append("uses specialization-controlled workgroup size; cache keys and validation must include specialization data")
     if workgroup_size_builtin and workgroup_size_builtin.get("kind") == "spec_constant_composite":
         risk_notes.append("declares BuiltIn WorkgroupSize through specialization constants; executor must reconcile literal LocalSize with specialized WorkgroupSize")
+    if workgroup_execution_shape.get("statically_consistent") is False:
+        risk_notes.append("literal LocalSize differs from BuiltIn WorkgroupSize default; executor must materialize or specialize WorkgroupSize consistently before replay")
 
     report = {
         "schema": "pdocker.spirv.analysis.v1",
@@ -1739,6 +1814,7 @@ def analyze_spirv(path: Path) -> dict:
         "local_size": local_size,
         "local_size_id": local_size_id,
         "workgroup_size_builtin": workgroup_size_builtin,
+        "workgroup_execution_shape": workgroup_execution_shape,
         "entry_points": entry_points,
         "capabilities": capability_names,
         "descriptor_variables": descriptor_variables,
