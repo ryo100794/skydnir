@@ -10896,6 +10896,8 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertGreater(len(stored["function_store_expansions"]), 0)
             self.assertGreater(len(stored["workgroup_loads"]), 0)
             self.assertIn("OpExtInst", stored["op_histogram"])
+            self.assertIn("GLSL.std.450.Fma", stored["ext_inst_histogram"])
+            self.assertIn("OpGroupNonUniformFAdd", stored["group_nonuniform_histogram"])
             self.assertFalse(stored["depends_on_debug_probe_binding"])
             self.assertNotIn(
                 6,
@@ -10964,7 +10966,7 @@ class GpuAbiContractTest(unittest.TestCase):
 
         self.assertEqual(payload["hash"], "0x6ec5d7a41443f157")
         self.assertEqual(
-            {"load": 132, "store": 82, "access_chain": 196, "arithmetic": 303, "control": 291, "barrier": 4},
+            {"load": 132, "store": 82, "access_chain": 196, "arithmetic": 305, "control": 291, "barrier": 4},
             payload["op_class_counts"],
         )
         self.assertEqual([2145, 2845, 5260, 6163], [barrier["word_index"] for barrier in payload["barrier_events"]])
@@ -11015,6 +11017,65 @@ class GpuAbiContractTest(unittest.TestCase):
         )
         self.assertTrue(all(window["all_workgroup_stores_have_following_barrier"] for window in windows))
         self.assertTrue(all(window["all_barriers_are_workgroup_acquire_release"] for window in windows))
+
+    def test_spirv_analyzer_reports_q6_named_arithmetic_evidence(self):
+        self.assertTrue(Q6_FUNCTION_ACCUMULATOR_SPV.exists(), "Q6 Function-accumulator SPIR-V evidence must be preserved")
+        with tempfile.TemporaryDirectory() as tmp:
+            analysis = Path(tmp) / "function-accumulator.analysis.json"
+            subprocess.run(
+                ["python3", str(SPIRV_ANALYZER), str(Q6_FUNCTION_ACCUMULATOR_SPV), "--json-out", str(analysis)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+            )
+            payload = json.loads(analysis.read_text(encoding="utf-8"))["modules"][0]
+
+        self.assertEqual(payload["hash"], "0x6ec5d7a41443f157")
+        self.assertEqual(payload["bytes"], 30312)
+        self.assertEqual(payload["words"], 7578)
+        self.assertEqual(payload["bound"], 3511)
+        self.assertEqual(payload["instruction_count"], 1668)
+        self.assertEqual(payload["op_histogram"]["OpExtInstImport"], 1)
+        self.assertEqual(payload["op_histogram"]["OpExtInst"], 80)
+        self.assertEqual(payload["op_histogram"]["OpGroupNonUniformFAdd"], 2)
+        self.assertEqual(payload["ext_inst_imports"], [{"id": 1, "name": "GLSL.std.450"}])
+        self.assertEqual(payload["ext_inst_histogram"], {"GLSL.std.450.Fma": 80})
+        self.assertEqual(payload["group_nonuniform_histogram"], {"OpGroupNonUniformFAdd": 2})
+        self.assertIn("GroupNonUniform", payload["capabilities"])
+        self.assertIn("GroupNonUniformArithmetic", payload["capabilities"])
+
+        flow = payload["q6_probe_targets"]["final_store_value_flow"]
+        self.assertEqual([4053, 7371], [store["word_index"] for store in flow["stores"]])
+        self.assertEqual(
+            [{"GLSL.std.450.Fma": 29}, {"GLSL.std.450.Fma": 14}],
+            [store["stored_value"]["ext_inst_histogram"] for store in flow["stores"]],
+        )
+        self.assertEqual(
+            [{"OpGroupNonUniformFAdd": 2}, {"OpGroupNonUniformFAdd": 2}],
+            [store["stored_value"]["group_nonuniform_histogram"] for store in flow["stores"]],
+        )
+
+        arithmetic = payload["q6_probe_targets"]["q6_arithmetic_window_evidence"]
+        self.assertTrue(arithmetic["available"])
+        self.assertEqual(2, arithmetic["window_count"])
+        self.assertEqual(["tail", "full"], [window["phase"] for window in arithmetic["windows"]])
+        self.assertEqual(
+            [{"GLSL.std.450.Fma": 40}, {"GLSL.std.450.Fma": 40}],
+            [window["ext_inst_histogram"] for window in arithmetic["windows"]],
+        )
+        self.assertEqual(
+            [{"OpGroupNonUniformFAdd": 1}, {"OpGroupNonUniformFAdd": 1}],
+            [window["group_nonuniform_histogram"] for window in arithmetic["windows"]],
+        )
+        self.assertEqual(
+            [
+                {"GLSL.std.450.Fma": 40, "OpGroupNonUniformFAdd": 1},
+                {"GLSL.std.450.Fma": 40, "OpGroupNonUniformFAdd": 1},
+            ],
+            [window["named_arithmetic_histogram"] for window in arithmetic["windows"]],
+        )
 
     def test_spirv_analyzer_reports_q6_function_accumulator_specialization_materialization(self):
         self.assertTrue(Q6_FUNCTION_ACCUMULATOR_SPV.exists(), "Q6 source SPIR-V evidence must be preserved")
@@ -11091,6 +11152,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "q6_barrier_window_evidence.windows[0].barrier_word_indices[0]",
             barrier_compare["first_mismatch_path"],
         )
+        arithmetic_compare = next(item for item in compare["comparisons"] if item["name"] == "q6_arithmetic_window_evidence")
+        self.assertTrue(arithmetic_compare["match"])
 
     def test_spirv_analyzer_reports_q6_effective_workgroup_shape_mismatch(self):
         native_spv = ROOT / "docs" / "test" / "spirv-q6k-native-adb45055" / "native-q6-source.spv"

@@ -25,6 +25,7 @@ SPIRV_MAGIC = 0x07230203
 OP_NAMES = {
     5: "OpName",
     6: "OpMemberName",
+    11: "OpExtInstImport",
     12: "OpExtInst",
     15: "OpEntryPoint",
     16: "OpExecutionMode",
@@ -119,6 +120,18 @@ OP_NAMES = {
     254: "OpReturnValue",
     255: "OpUnreachable",
     331: "OpExecutionModeId",
+    350: "OpGroupNonUniformFAdd",
+}
+
+GLSL_STD_450_NAMES = {
+    50: "Fma",
+}
+
+GROUP_OPERATION_NAMES = {
+    0: "Reduce",
+    1: "InclusiveScan",
+    2: "ExclusiveScan",
+    3: "ClusteredReduce",
 }
 
 TERMINATOR_OPS = {249, 250, 251, 252, 253, 254, 255}
@@ -958,6 +971,9 @@ def build_q6_probe_targets(module: dict, debug_descriptor: dict | None = None) -
         descriptor_load_leaves: list[dict] = []
         unresolved_id_leaves: list[dict] = []
         op_histogram: Counter[str] = Counter()
+        ext_inst_histogram: Counter[str] = Counter()
+        named_arithmetic_histogram: Counter[str] = Counter()
+        group_nonuniform_histogram: Counter[str] = Counter()
         load_count = 0
         truncated_nodes = 0
         truncated_depth = 0
@@ -1168,6 +1184,13 @@ def build_q6_probe_targets(module: dict, debug_descriptor: dict | None = None) -
             op = value.get("op")
             if isinstance(op, str):
                 op_histogram[op] += 1
+                qualified_op = value.get("qualified_op") if isinstance(value.get("qualified_op"), str) else None
+                if op == "OpExtInst" and qualified_op:
+                    ext_inst_histogram[qualified_op] += 1
+                    named_arithmetic_histogram[qualified_op] += 1
+                if op.startswith("OpGroupNonUniform"):
+                    group_nonuniform_histogram[op] += 1
+                    named_arithmetic_histogram[op] += 1
             if any(key in value for key in ("kind", "id", "op")):
                 record_node(value)
                 record_scalar_dependency(value)
@@ -1216,6 +1239,9 @@ def build_q6_probe_targets(module: dict, debug_descriptor: dict | None = None) -
             "root": summarize_expr_node(expr) if isinstance(expr, dict) else {"kind": type(expr).__name__},
             "load_count": load_count,
             "op_histogram": dict(op_histogram.most_common()),
+            "ext_inst_histogram": dict(ext_inst_histogram.most_common()),
+            "named_arithmetic_histogram": dict(named_arithmetic_histogram.most_common()),
+            "group_nonuniform_histogram": dict(group_nonuniform_histogram.most_common()),
             "producer_chain": nodes,
             "truncated_node_count": truncated_nodes,
             "truncated_depth_count": truncated_depth,
@@ -1430,7 +1456,39 @@ def build_q6_probe_targets(module: dict, debug_descriptor: dict | None = None) -
             if key in barrier
         }
 
+    ext_inst_events = sorted(
+        [event for event in module.get("ext_inst_events", []) if isinstance(event, dict)],
+        key=lambda item: int(item.get("word_index", -1)),
+    )
+    group_nonuniform_events = sorted(
+        [event for event in module.get("group_nonuniform_events", []) if isinstance(event, dict)],
+        key=lambda item: int(item.get("word_index", -1)),
+    )
+
+    def arithmetic_window_counts(start_exclusive: int, end_exclusive: int) -> dict:
+        ext_hist = Counter(
+            event.get("qualified_op")
+            for event in ext_inst_events
+            if start_exclusive < int(event.get("word_index", -1)) < end_exclusive
+            and isinstance(event.get("qualified_op"), str)
+        )
+        group_hist = Counter(
+            event.get("op")
+            for event in group_nonuniform_events
+            if start_exclusive < int(event.get("word_index", -1)) < end_exclusive
+            and isinstance(event.get("op"), str)
+        )
+        named = Counter()
+        named.update(ext_hist)
+        named.update(group_hist)
+        return {
+            "ext_inst_histogram": dict(ext_hist.most_common()),
+            "group_nonuniform_histogram": dict(group_hist.most_common()),
+            "named_arithmetic_histogram": dict(named.most_common()),
+        }
+
     q6_barrier_windows = []
+    q6_arithmetic_windows = []
     previous_output_for_barrier_window = -1
     for phase in phases:
         output_store = phase.get("output_store") if isinstance(phase.get("output_store"), dict) else {}
@@ -1463,6 +1521,7 @@ def build_q6_probe_targets(module: dict, debug_descriptor: dict | None = None) -
                     "barrier_word_index": following.get("word_index") if isinstance(following, dict) else None,
                 }
             )
+        arithmetic_counts = arithmetic_window_counts(previous_output_for_barrier_window, output_word)
         q6_barrier_windows.append(
             {
                 "phase": phase.get("name"),
@@ -1483,6 +1542,15 @@ def build_q6_probe_targets(module: dict, debug_descriptor: dict | None = None) -
                     and "WorkgroupMemory" in (barrier.get("memory_semantics_names") or [])
                     for barrier in barriers_in_window
                 ),
+                "arithmetic_window": arithmetic_counts,
+            }
+        )
+        q6_arithmetic_windows.append(
+            {
+                "phase": phase.get("name"),
+                "window_start_exclusive_word_index": previous_output_for_barrier_window,
+                "output_store_word_index": output_word,
+                **arithmetic_counts,
             }
         )
         previous_output_for_barrier_window = output_word
@@ -1497,6 +1565,18 @@ def build_q6_probe_targets(module: dict, debug_descriptor: dict | None = None) -
         "notes": [
             "This is static word-order evidence, not a proof of dynamic execution order.",
             "Barrier semantics are decoded as SPIR-V bit flags; WorkgroupMemory plus AcquireRelease is required for the Q6 workgroup windows.",
+        ],
+    }
+
+    q6_arithmetic_window_evidence = {
+        "schema": "pdocker.spirv.q6-arithmetic-window-evidence.v1",
+        "method": "static-word-order-window-between-final-output-stores",
+        "available": bool(q6_arithmetic_windows),
+        "window_count": len(q6_arithmetic_windows),
+        "windows": q6_arithmetic_windows,
+        "notes": [
+            "This is static word-order evidence for named SPIR-V arithmetic instructions in each Q6 phase window.",
+            "It complements bounded backward slices, which may intentionally truncate deep producer graphs.",
         ],
     }
 
@@ -1527,6 +1607,7 @@ def build_q6_probe_targets(module: dict, debug_descriptor: dict | None = None) -
         "workgroup_store_count": len(workgroup_stores),
         "final_store_value_flow": final_store_value_flow,
         "q6_barrier_window_evidence": q6_barrier_window_evidence,
+        "q6_arithmetic_window_evidence": q6_arithmetic_window_evidence,
         "phases": phases,
         "priority_targets": priority_targets,
         "notes": [
@@ -1723,6 +1804,9 @@ def analyze_spirv(path: Path) -> dict:
     spec_constants: dict[int, dict] = {}
     spec_constant_composites: dict[int, dict] = {}
     id_defs: dict[int, dict] = {}
+    ext_inst_imports_by_id: dict[int, str] = {}
+    ext_inst_events_raw: list[dict] = []
+    group_nonuniform_events_raw: list[dict] = []
     access_chains_raw: list[dict] = []
     load_events_raw: list[dict] = []
     store_events_raw: list[dict] = []
@@ -1778,7 +1862,7 @@ def analyze_spirv(path: Path) -> dict:
                     "raw_operands": inst[1:],
                 }
             )
-        elif 124 <= opcode <= 190:
+        elif 124 <= opcode <= 190 or opcode in (350,):
             arithmetic += 1
         elif 245 <= opcode <= 255:
             control += 1
@@ -1787,6 +1871,8 @@ def analyze_spirv(path: Path) -> dict:
             names[inst[1]] = decode_spirv_string(inst, 2)
         elif opcode == 6 and len(inst) >= 4:
             member_names[inst[1]][inst[2]] = decode_spirv_string(inst, 3)
+        elif opcode == 11 and len(inst) >= 3:
+            ext_inst_imports_by_id[inst[1]] = decode_spirv_string(inst, 2)
         elif opcode == 15 and len(inst) >= 4:
             entry_points.append(
                 {
@@ -1906,14 +1992,35 @@ def analyze_spirv(path: Path) -> dict:
                 }
             )
         elif opcode == 12 and len(inst) >= 6:
+            set_name = ext_inst_imports_by_id.get(inst[3], str(inst[3]))
+            ext_inst_name = GLSL_STD_450_NAMES.get(inst[4], str(inst[4])) if set_name == "GLSL.std.450" else str(inst[4])
+            qualified_op = f"{set_name}.{ext_inst_name}"
             id_defs[inst[2]] = {
                 "op": "OpExtInst",
                 "result_type": inst[1],
+                "ext_inst_set_id": inst[3],
+                "ext_inst_set_name": set_name,
                 "set_id": inst[3],
                 "instruction": inst[4],
+                "ext_inst_instruction": inst[4],
+                "ext_inst_name": ext_inst_name,
+                "qualified_op": qualified_op,
                 "operands": inst[5:],
                 "word_index": _index,
             }
+            ext_inst_events_raw.append(
+                {
+                    "word_index": _index,
+                    "result_id": inst[2],
+                    "result_type": inst[1],
+                    "ext_inst_set_id": inst[3],
+                    "ext_inst_set_name": set_name,
+                    "ext_inst_instruction": inst[4],
+                    "ext_inst_name": ext_inst_name,
+                    "qualified_op": qualified_op,
+                    "operand_ids": inst[5:],
+                }
+            )
         elif 124 <= opcode <= 190 and len(inst) >= 4:
             id_defs[inst[2]] = {
                 "op": OP_NAMES.get(opcode, f"Op{opcode}"),
@@ -1921,6 +2028,30 @@ def analyze_spirv(path: Path) -> dict:
                 "operands": inst[3:],
                 "word_index": _index,
             }
+        elif opcode == 350 and len(inst) >= 6:
+            group_operation = inst[4]
+            id_defs[inst[2]] = {
+                "op": "OpGroupNonUniformFAdd",
+                "result_type": inst[1],
+                "execution_scope_id": inst[3],
+                "group_operation": group_operation,
+                "group_operation_name": GROUP_OPERATION_NAMES.get(group_operation, str(group_operation)),
+                "value_id": inst[5],
+                "operands": inst[5:],
+                "word_index": _index,
+            }
+            group_nonuniform_events_raw.append(
+                {
+                    "word_index": _index,
+                    "op": "OpGroupNonUniformFAdd",
+                    "result_id": inst[2],
+                    "result_type": inst[1],
+                    "execution_scope_id": inst[3],
+                    "group_operation": group_operation,
+                    "group_operation_name": GROUP_OPERATION_NAMES.get(group_operation, str(group_operation)),
+                    "operand_ids": inst[5:],
+                }
+            )
         elif opcode in (80, 81, 82, 83, 84, 86) and len(inst) >= 4:
             id_defs[inst[2]] = {
                 "op": OP_NAMES.get(opcode, f"Op{opcode}"),
@@ -2419,7 +2550,7 @@ def analyze_spirv(path: Path) -> dict:
                 **({"push_member": origin["push_member"]} if isinstance(origin, dict) and "push_member" in origin else {}),
             }
         operands = definition.get("operands", [])
-        return {
+        result = {
             "kind": "op",
             "id": value_id,
             "op": op,
@@ -2429,6 +2560,24 @@ def analyze_spirv(path: Path) -> dict:
             ],
             "truncated_operands": max(0, len(operands) - 6),
         }
+        for key in (
+            "qualified_op",
+            "ext_inst_set_id",
+            "ext_inst_set_name",
+            "ext_inst_instruction",
+            "ext_inst_name",
+            "execution_scope_id",
+            "group_operation",
+            "group_operation_name",
+            "value_id",
+        ):
+            if key in definition:
+                result[key] = definition[key]
+        if isinstance(definition.get("execution_scope_id"), int):
+            scope_value = constant_u32(int(definition["execution_scope_id"]))
+            result["execution_scope_value"] = scope_value
+            result["execution_scope_name"] = decode_scope_name(scope_value)
+        return result
 
     for chain in access_chains:
         for index in chain.get("indices", []):
@@ -2451,6 +2600,14 @@ def analyze_spirv(path: Path) -> dict:
     ]
 
     barrier_events = [decode_barrier_event(raw) for raw in barrier_events_raw]
+    ext_inst_events = list(ext_inst_events_raw)
+    group_nonuniform_events = []
+    for raw in group_nonuniform_events_raw:
+        event = dict(raw)
+        scope_value = constant_u32(int(raw["execution_scope_id"])) if isinstance(raw.get("execution_scope_id"), int) else None
+        event["execution_scope_value"] = scope_value
+        event["execution_scope_name"] = decode_scope_name(scope_value)
+        group_nonuniform_events.append(event)
 
     duplicate_bindings = [
         {"set": set_id, "binding": binding, "variable_ids": ids}
@@ -2463,6 +2620,12 @@ def analyze_spirv(path: Path) -> dict:
         for opcode, count in sorted(op_hist.items(), key=lambda kv: (-kv[1], kv[0]))
     }
     capability_names = [CAPABILITY_NAMES.get(cap, str(cap)) for cap in capabilities]
+    ext_inst_imports = [
+        {"id": import_id, "name": name}
+        for import_id, name in sorted(ext_inst_imports_by_id.items())
+    ]
+    ext_inst_histogram = dict(Counter(event.get("qualified_op") for event in ext_inst_events if event.get("qualified_op")).most_common())
+    group_nonuniform_histogram = dict(Counter(event.get("op") for event in group_nonuniform_events if event.get("op")).most_common())
 
     risk_notes = []
     if any(cap in capabilities for cap in (4448, 4449, 4450)):
@@ -2530,6 +2693,11 @@ def analyze_spirv(path: Path) -> dict:
         "workgroup_execution_shape": workgroup_execution_shape,
         "entry_points": entry_points,
         "capabilities": capability_names,
+        "ext_inst_imports": ext_inst_imports,
+        "ext_inst_events": ext_inst_events,
+        "ext_inst_histogram": ext_inst_histogram,
+        "group_nonuniform_events": group_nonuniform_events,
+        "group_nonuniform_histogram": group_nonuniform_histogram,
         "descriptor_variables": descriptor_variables,
         "push_constant_blocks": push_constant_blocks,
         "spec_constants": spec_constant_list,

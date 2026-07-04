@@ -204,8 +204,36 @@ def q6_dependency_signature(summary: dict[str, Any]) -> dict[str, Any]:
         ],
         "descriptor_load_leaves": q6_descriptor_leaf_signature(summary),
         "descriptor_load_leaf_count": summary.get("descriptor_load_leaf_count"),
+        "ext_inst_histogram": summary.get("ext_inst_histogram") or {},
+        "group_nonuniform_histogram": summary.get("group_nonuniform_histogram") or {},
+        "named_arithmetic_histogram": summary.get("named_arithmetic_histogram") or {},
         "slice_complete": summary.get("slice_complete"),
         "truncation_boundaries": summary.get("truncation_boundaries") or {},
+    }
+
+def q6_arithmetic_window_signature(module: dict[str, Any]) -> dict[str, Any] | None:
+    q6 = module.get("q6_probe_targets")
+    if not isinstance(q6, dict):
+        return None
+    evidence = q6.get("q6_arithmetic_window_evidence")
+    if not isinstance(evidence, dict):
+        return None
+    windows = []
+    for window in evidence.get("windows") or []:
+        if not isinstance(window, dict):
+            continue
+        windows.append(
+            {
+                "phase": window.get("phase"),
+                "ext_inst_histogram": window.get("ext_inst_histogram") or {},
+                "group_nonuniform_histogram": window.get("group_nonuniform_histogram") or {},
+                "named_arithmetic_histogram": window.get("named_arithmetic_histogram") or {},
+            }
+        )
+    return {
+        "available": evidence.get("available"),
+        "window_count": evidence.get("window_count"),
+        "windows": windows,
     }
 
 def q6_barrier_window_signature(module: dict[str, Any]) -> dict[str, Any] | None:
@@ -641,10 +669,14 @@ def summarize(module: dict[str, Any]) -> dict[str, Any]:
         "local_size_id": module.get("local_size_id"),
         "workgroup_size_builtin": workgroup_size_signature(module),
         "workgroup_execution_shape": module.get("workgroup_execution_shape"),
+        "ext_inst_imports": module.get("ext_inst_imports", []),
+        "ext_inst_histogram": module.get("ext_inst_histogram", {}),
+        "group_nonuniform_histogram": module.get("group_nonuniform_histogram", {}),
         "descriptors": descriptor_signature(module),
         "push_constants": push_signature(module),
         "q6_final_store_value_flow": q6_final_store_value_flow_signature(module),
         "q6_barrier_window_evidence": q6_barrier_window_signature(module),
+        "q6_arithmetic_window_evidence": q6_arithmetic_window_signature(module),
         "loads": event_summary(module, "load_events"),
         "stores": event_summary(module, "store_events"),
     }
@@ -683,6 +715,13 @@ def main() -> int:
             left["workgroup_execution_shape"],
             right["workgroup_execution_shape"],
         ),
+        compare_lists("ext_inst_imports", left["ext_inst_imports"], right["ext_inst_imports"]),
+        compare_values("ext_inst_histogram", left["ext_inst_histogram"], right["ext_inst_histogram"]),
+        compare_values(
+            "group_nonuniform_histogram",
+            left["group_nonuniform_histogram"],
+            right["group_nonuniform_histogram"],
+        ),
         compare_lists("descriptors", left["descriptors"], right["descriptors"]),
         compare_lists("push_constants", left["push_constants"], right["push_constants"]),
         compare_values(
@@ -694,6 +733,11 @@ def main() -> int:
             "q6_barrier_window_evidence",
             left["q6_barrier_window_evidence"],
             right["q6_barrier_window_evidence"],
+        ),
+        compare_values(
+            "q6_arithmetic_window_evidence",
+            left["q6_arithmetic_window_evidence"],
+            right["q6_arithmetic_window_evidence"],
         ),
         compare_counts("load_origins", left["loads"], right["loads"]),
         compare_path_counts("load_paths", left["loads"], right["loads"]),
