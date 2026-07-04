@@ -1522,12 +1522,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "acquire-next-image2-pnext-unsupported",
         ]:
             self.assertIn(marker, acquire2_body)
-        for marker in [
-            "VK_STRUCTURE_TYPE_DEVICE_GROUP_ACQUIRE_NEXT_IMAGE_INFO_KHR",
-            "device_group->deviceMask != 0 && device_group->deviceMask != 1u",
-            "device_group->mode != VK_DEVICE_GROUP_PRESENT_MODE_LOCAL_BIT_KHR",
-        ]:
-            self.assertIn(marker, acquire2_pnext_body)
+        self.assertIn("Vulkan has no separate VkDeviceGroupAcquireNextImageInfoKHR", acquire2_pnext_body)
+        self.assertIn("return !info || !info->pNext;", acquire2_pnext_body)
+        self.assertIn("pAcquireInfo->deviceMask != 0 && pAcquireInfo->deviceMask != 1u", acquire2_body)
         self.assertRegex(acquire2_body, r"(vkAcquireNextImageKHR|VK_SUCCESS|\*pImageIndex)")
 
         present_body = c_function_body(icd, "vkQueuePresentKHR")
@@ -6714,9 +6711,12 @@ class GpuAbiContractTest(unittest.TestCase):
             "static VkResult unsupported_image_transport_result", 1
         )[0]
         self.assertIn("VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO", descriptor_layout_pnext_body)
+        self.assertIn("#if !defined(VK_VERSION_1_2) && !defined(VK_EXT_descriptor_indexing)", icd)
         self.assertIn("#define VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO ((VkStructureType)1000161000)", icd)
         self.assertIn("PdockerVkDescriptorSetLayoutBindingFlagsCreateInfoCompat", descriptor_layout_pnext_body)
         self.assertNotIn("#ifdef VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO", descriptor_layout_pnext_body)
+        self.assertNotIn("#ifdef VK_STRUCTURE_TYPE_", icd)
+        self.assertNotIn("#ifndef VK_STRUCTURE_TYPE_", icd)
         self.assertIn("flags->bindingCount != pCreateInfo->bindingCount", descriptor_layout_pnext_body)
         self.assertIn("descriptor-set-layout-binding-flags-count-mismatch", descriptor_layout_pnext_body)
         self.assertIn("flags->bindingCount > 0 && !flags->pBindingFlags", descriptor_layout_pnext_body)

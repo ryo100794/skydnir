@@ -11220,7 +11220,7 @@ static void fill_pnext_properties(void *pNext) {
                 p->maxMemoryAllocationSize = pdocker_vulkan_max_buffer_size();
                 break;
             }
-#ifdef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_PROPERTIES
+#if defined(VK_VERSION_1_3) || defined(VK_KHR_maintenance4)
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_PROPERTIES: {
                 VkPhysicalDeviceMaintenance4Properties *p = (VkPhysicalDeviceMaintenance4Properties *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
@@ -12224,7 +12224,7 @@ static void trace_device_create_features(const VkDeviceCreateInfo *pCreateInfo) 
                         p->shaderInt8);
                 break;
             }
-#ifdef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INDEX_TYPE_UINT8_FEATURES_EXT
+#ifdef VK_EXT_index_type_uint8
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INDEX_TYPE_UINT8_FEATURES_EXT: {
                 const VkPhysicalDeviceIndexTypeUint8FeaturesEXT *p = (const VkPhysicalDeviceIndexTypeUint8FeaturesEXT *)node;
                 fprintf(stderr,
@@ -12440,7 +12440,7 @@ static void fill_format_properties2_pnext(void *pNext, const VkFormatProperties 
     for (void *node = pNext; node;) {
         PdockerVkStructHeader header = read_vk_struct_header(node);
         switch (header.sType) {
-#ifdef VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_3
+#if defined(VK_VERSION_1_3) || defined(VK_KHR_format_feature_flags2)
             case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_3: {
                 VkFormatProperties3 *p = (VkFormatProperties3 *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
@@ -12452,14 +12452,14 @@ static void fill_format_properties2_pnext(void *pNext, const VkFormatProperties 
                 break;
             }
 #endif
-#ifdef VK_STRUCTURE_TYPE_DRM_FORMAT_MODIFIER_PROPERTIES_LIST_EXT
+#ifdef VK_EXT_image_drm_format_modifier
             case VK_STRUCTURE_TYPE_DRM_FORMAT_MODIFIER_PROPERTIES_LIST_EXT: {
                 VkDrmFormatModifierPropertiesListEXT *p = (VkDrmFormatModifierPropertiesListEXT *)node;
                 p->drmFormatModifierCount = 0;
                 break;
             }
 #endif
-#ifdef VK_STRUCTURE_TYPE_DRM_FORMAT_MODIFIER_PROPERTIES_LIST_2_EXT
+#ifdef VK_EXT_image_drm_format_modifier
             case VK_STRUCTURE_TYPE_DRM_FORMAT_MODIFIER_PROPERTIES_LIST_2_EXT: {
                 VkDrmFormatModifierPropertiesList2EXT *p = (VkDrmFormatModifierPropertiesList2EXT *)node;
                 p->drmFormatModifierCount = 0;
@@ -12500,7 +12500,7 @@ static void fill_image_format_properties2_pnext(void *pNext) {
     for (void *node = pNext; node;) {
         PdockerVkStructHeader header = read_vk_struct_header(node);
         switch (header.sType) {
-#ifdef VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_IMAGE_FORMAT_PROPERTIES
+#if defined(VK_VERSION_1_1) || defined(VK_KHR_sampler_ycbcr_conversion)
             case VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_IMAGE_FORMAT_PROPERTIES: {
                 VkSamplerYcbcrConversionImageFormatProperties *p =
                     (VkSamplerYcbcrConversionImageFormatProperties *)node;
@@ -12509,14 +12509,14 @@ static void fill_image_format_properties2_pnext(void *pNext) {
                 break;
             }
 #endif
-#ifdef VK_STRUCTURE_TYPE_EXTERNAL_IMAGE_FORMAT_PROPERTIES
+#ifdef VK_VERSION_1_1
             case VK_STRUCTURE_TYPE_EXTERNAL_IMAGE_FORMAT_PROPERTIES: {
                 VkExternalImageFormatProperties *p = (VkExternalImageFormatProperties *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
                 break;
             }
 #endif
-#ifdef VK_STRUCTURE_TYPE_FILTER_CUBIC_IMAGE_VIEW_IMAGE_FORMAT_PROPERTIES_EXT
+#ifdef VK_EXT_filter_cubic
             case VK_STRUCTURE_TYPE_FILTER_CUBIC_IMAGE_VIEW_IMAGE_FORMAT_PROPERTIES_EXT: {
                 VkFilterCubicImageViewImageFormatPropertiesEXT *p =
                     (VkFilterCubicImageViewImageFormatPropertiesEXT *)node;
@@ -12690,35 +12690,35 @@ static void fill_queue_family_properties2_pnext(void *pNext) {
     for (void *node = pNext; node;) {
         PdockerVkStructHeader header = read_vk_struct_header(node);
         switch (header.sType) {
-#ifdef VK_STRUCTURE_TYPE_QUEUE_FAMILY_GLOBAL_PRIORITY_PROPERTIES
+#ifdef VK_EXT_global_priority_query
             case VK_STRUCTURE_TYPE_QUEUE_FAMILY_GLOBAL_PRIORITY_PROPERTIES: {
                 VkQueueFamilyGlobalPriorityProperties *p = (VkQueueFamilyGlobalPriorityProperties *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
                 break;
             }
 #endif
-#ifdef VK_STRUCTURE_TYPE_QUEUE_FAMILY_VIDEO_PROPERTIES_KHR
+#ifdef VK_KHR_video_queue
             case VK_STRUCTURE_TYPE_QUEUE_FAMILY_VIDEO_PROPERTIES_KHR: {
                 VkQueueFamilyVideoPropertiesKHR *p = (VkQueueFamilyVideoPropertiesKHR *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
                 break;
             }
 #endif
-#ifdef VK_STRUCTURE_TYPE_QUEUE_FAMILY_QUERY_RESULT_STATUS_PROPERTIES_KHR
+#ifdef VK_KHR_video_maintenance1
             case VK_STRUCTURE_TYPE_QUEUE_FAMILY_QUERY_RESULT_STATUS_PROPERTIES_KHR: {
                 VkQueueFamilyQueryResultStatusPropertiesKHR *p = (VkQueueFamilyQueryResultStatusPropertiesKHR *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
                 break;
             }
 #endif
-#ifdef VK_STRUCTURE_TYPE_QUEUE_FAMILY_CHECKPOINT_PROPERTIES_NV
+#ifdef VK_NV_device_diagnostic_checkpoints
             case VK_STRUCTURE_TYPE_QUEUE_FAMILY_CHECKPOINT_PROPERTIES_NV: {
                 VkQueueFamilyCheckpointPropertiesNV *p = (VkQueueFamilyCheckpointPropertiesNV *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
                 break;
             }
 #endif
-#ifdef VK_STRUCTURE_TYPE_QUEUE_FAMILY_CHECKPOINT_PROPERTIES_2_NV
+#ifdef VK_NV_device_diagnostic_checkpoints
             case VK_STRUCTURE_TYPE_QUEUE_FAMILY_CHECKPOINT_PROPERTIES_2_NV: {
                 VkQueueFamilyCheckpointProperties2NV *p = (VkQueueFamilyCheckpointProperties2NV *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
@@ -12977,7 +12977,7 @@ static VkResult unsupported_create_info_pnext_result(const char *api_name, const
     return VK_ERROR_FEATURE_NOT_PRESENT;
 }
 
-#ifndef VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO
+#if !defined(VK_VERSION_1_2) && !defined(VK_EXT_descriptor_indexing)
 #define VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO ((VkStructureType)1000161000)
 #endif
 
@@ -13428,7 +13428,7 @@ static VkResult validate_bind_memory_info_pnext(const char *api_name, const void
     for (const void *node = pNext; node;) {
         PdockerVkStructHeader header = read_vk_struct_header(node);
         switch (header.sType) {
-#ifdef VK_STRUCTURE_TYPE_BIND_BUFFER_MEMORY_DEVICE_GROUP_INFO
+#if defined(VK_VERSION_1_1) || defined(VK_KHR_bind_memory2)
             case VK_STRUCTURE_TYPE_BIND_BUFFER_MEMORY_DEVICE_GROUP_INFO: {
                 const VkBindBufferMemoryDeviceGroupInfo *info =
                     (const VkBindBufferMemoryDeviceGroupInfo *)node;
@@ -13440,7 +13440,7 @@ static VkResult validate_bind_memory_info_pnext(const char *api_name, const void
                 break;
             }
 #endif
-#ifdef VK_STRUCTURE_TYPE_BIND_IMAGE_MEMORY_DEVICE_GROUP_INFO
+#if defined(VK_VERSION_1_1) || defined(VK_KHR_bind_memory2)
             case VK_STRUCTURE_TYPE_BIND_IMAGE_MEMORY_DEVICE_GROUP_INFO: {
                 const VkBindImageMemoryDeviceGroupInfo *info =
                     (const VkBindImageMemoryDeviceGroupInfo *)node;
@@ -13767,7 +13767,7 @@ static VkResult validate_memory_allocate_pnext(const void *pNext) {
     for (const void *node = pNext; node;) {
         PdockerVkStructHeader header = read_vk_struct_header(node);
         switch (header.sType) {
-#ifdef VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO
+#if defined(VK_VERSION_1_1) || defined(VK_KHR_dedicated_allocation)
             case VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO: {
                 const VkMemoryDedicatedAllocateInfo *info =
                     (const VkMemoryDedicatedAllocateInfo *)node;
@@ -13783,7 +13783,7 @@ static VkResult validate_memory_allocate_pnext(const void *pNext) {
                 break;
             }
 #endif
-#ifdef VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO
+#if defined(VK_VERSION_1_1) || defined(VK_KHR_device_group)
             case VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO: {
                 const VkMemoryAllocateFlagsInfo *info =
                     (const VkMemoryAllocateFlagsInfo *)node;
@@ -14427,7 +14427,7 @@ static void fill_descriptor_set_layout_support_pnext(void *pNext) {
     for (void *node = pNext; node;) {
         PdockerVkStructHeader header = read_vk_struct_header(node);
         switch (header.sType) {
-#ifdef VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_LAYOUT_SUPPORT
+#if defined(VK_VERSION_1_2) || defined(VK_EXT_descriptor_indexing)
             case VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_LAYOUT_SUPPORT: {
                 VkDescriptorSetVariableDescriptorCountLayoutSupport *p =
                     (VkDescriptorSetVariableDescriptorCountLayoutSupport *)node;
@@ -15782,7 +15782,7 @@ static bool command_buffer_begin_pnext_supported(const VkCommandBufferBeginInfo 
     for (const void *node = begin ? begin->pNext : NULL; node;) {
         PdockerVkStructHeader header = read_vk_struct_header(node);
         switch (header.sType) {
-#ifdef VK_STRUCTURE_TYPE_DEVICE_GROUP_COMMAND_BUFFER_BEGIN_INFO
+#if defined(VK_VERSION_1_1) || defined(VK_KHR_device_group)
             case VK_STRUCTURE_TYPE_DEVICE_GROUP_COMMAND_BUFFER_BEGIN_INFO: {
                 const VkDeviceGroupCommandBufferBeginInfo *info =
                     (const VkDeviceGroupCommandBufferBeginInfo *)node;
@@ -15848,7 +15848,7 @@ static bool render_pass_create_pnext_noop(const VkRenderPassCreateInfo *info) {
     for (const void *node = info ? info->pNext : NULL; node;) {
         PdockerVkStructHeader header = read_vk_struct_header(node);
         switch (header.sType) {
-#ifdef VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO
+#if defined(VK_VERSION_1_1) || defined(VK_KHR_multiview)
             case VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO: {
                 const VkRenderPassMultiviewCreateInfo *mv =
                     (const VkRenderPassMultiviewCreateInfo *)node;
@@ -15870,7 +15870,7 @@ static bool render_pass_create_pnext_noop(const VkRenderPassCreateInfo *info) {
                 break;
             }
 #endif
-#ifdef VK_STRUCTURE_TYPE_RENDER_PASS_INPUT_ATTACHMENT_ASPECT_CREATE_INFO
+#if defined(VK_VERSION_1_1) || defined(VK_KHR_maintenance2)
             case VK_STRUCTURE_TYPE_RENDER_PASS_INPUT_ATTACHMENT_ASPECT_CREATE_INFO: {
                 const VkRenderPassInputAttachmentAspectCreateInfo *aspect =
                     (const VkRenderPassInputAttachmentAspectCreateInfo *)node;
@@ -16085,7 +16085,7 @@ static VkResult validate_framebuffer_create_pnext(const void *pNext) {
     for (const void *node = pNext; node;) {
         PdockerVkStructHeader header = read_vk_struct_header(node);
         switch (header.sType) {
-#ifdef VK_STRUCTURE_TYPE_FRAMEBUFFER_ATTACHMENTS_CREATE_INFO
+#if defined(VK_VERSION_1_2) || defined(VK_KHR_imageless_framebuffer)
             case VK_STRUCTURE_TYPE_FRAMEBUFFER_ATTACHMENTS_CREATE_INFO: {
                 const VkFramebufferAttachmentsCreateInfo *info =
                     (const VkFramebufferAttachmentsCreateInfo *)node;
@@ -16484,7 +16484,7 @@ static bool swapchain_create_pnext_noop(const VkSwapchainCreateInfoKHR *info) {
     for (const void *node = info ? info->pNext : NULL; node;) {
         PdockerVkStructHeader header = read_vk_struct_header(node);
         switch (header.sType) {
-#ifdef VK_STRUCTURE_TYPE_DEVICE_GROUP_SWAPCHAIN_CREATE_INFO_KHR
+#if defined(VK_VERSION_1_1) || defined(VK_KHR_swapchain)
             case VK_STRUCTURE_TYPE_DEVICE_GROUP_SWAPCHAIN_CREATE_INFO_KHR: {
                 const VkDeviceGroupSwapchainCreateInfoKHR *device_group =
                     (const VkDeviceGroupSwapchainCreateInfoKHR *)node;
@@ -16717,35 +16717,20 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAcquireNextImageKHR(
 }
 
 static bool acquire_next_image2_pnext_noop(const VkAcquireNextImageInfoKHR *info) {
-    for (const void *node = info ? info->pNext : NULL; node;) {
-        PdockerVkStructHeader header = read_vk_struct_header(node);
-        switch (header.sType) {
-#ifdef VK_STRUCTURE_TYPE_DEVICE_GROUP_ACQUIRE_NEXT_IMAGE_INFO_KHR
-            case VK_STRUCTURE_TYPE_DEVICE_GROUP_ACQUIRE_NEXT_IMAGE_INFO_KHR: {
-                const VkDeviceGroupAcquireNextImageInfoKHR *device_group =
-                    (const VkDeviceGroupAcquireNextImageInfoKHR *)node;
-                if (device_group->deviceMask != 0 && device_group->deviceMask != 1u) {
-                    return false;
-                }
-                if (device_group->mode != VK_DEVICE_GROUP_PRESENT_MODE_LOCAL_BIT_KHR) {
-                    return false;
-                }
-                break;
-            }
-#endif
-            default:
-                return false;
-        }
-        node = header.pNext;
-    }
-    return true;
+    /*
+     * VkAcquireNextImageInfoKHR already carries the single-device deviceMask
+     * field.  Vulkan has no separate VkDeviceGroupAcquireNextImageInfoKHR
+     * pNext struct in the headers we target, so every acquire pNext remains
+     * fail-closed instead of being silently ignored.
+     */
+    return !info || !info->pNext;
 }
 
 static bool present_info_pnext_noop(const VkPresentInfoKHR *info) {
     for (const void *node = info ? info->pNext : NULL; node;) {
         PdockerVkStructHeader header = read_vk_struct_header(node);
         switch (header.sType) {
-#ifdef VK_STRUCTURE_TYPE_DEVICE_GROUP_PRESENT_INFO_KHR
+#if defined(VK_VERSION_1_1) || defined(VK_KHR_swapchain)
             case VK_STRUCTURE_TYPE_DEVICE_GROUP_PRESENT_INFO_KHR: {
                 const VkDeviceGroupPresentInfoKHR *device_group =
                     (const VkDeviceGroupPresentInfoKHR *)node;
@@ -17026,7 +17011,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindPipeline(
     }
 }
 
-#ifdef VK_STRUCTURE_TYPE_DEVICE_GROUP_RENDER_PASS_BEGIN_INFO
+#if defined(VK_VERSION_1_1) || defined(VK_KHR_device_group)
 static bool device_group_render_pass_begin_noop(
         const VkDeviceGroupRenderPassBeginInfo *info,
         const VkRect2D *render_area);
@@ -17036,7 +17021,7 @@ static bool rendering_info_pnext_noop(const VkRenderingInfo *info) {
     for (const void *node = info ? info->pNext : NULL; node;) {
         PdockerVkStructHeader header = read_vk_struct_header(node);
         switch (header.sType) {
-#ifdef VK_STRUCTURE_TYPE_DEVICE_GROUP_RENDER_PASS_BEGIN_INFO
+#if defined(VK_VERSION_1_1) || defined(VK_KHR_device_group)
             case VK_STRUCTURE_TYPE_DEVICE_GROUP_RENDER_PASS_BEGIN_INFO: {
                 const VkDeviceGroupRenderPassBeginInfo *device_group =
                     (const VkDeviceGroupRenderPassBeginInfo *)node;
@@ -17651,7 +17636,7 @@ static bool append_normalized_render_pass_begin(
     return true;
 }
 
-#ifdef VK_STRUCTURE_TYPE_DEVICE_GROUP_RENDER_PASS_BEGIN_INFO
+#if defined(VK_VERSION_1_1) || defined(VK_KHR_device_group)
 static bool device_group_render_pass_begin_noop(
         const VkDeviceGroupRenderPassBeginInfo *info,
         const VkRect2D *render_area) {
@@ -17676,7 +17661,7 @@ static bool render_pass_begin_pnext_noop(const VkRenderPassBeginInfo *begin) {
     for (const void *node = begin ? begin->pNext : NULL; node;) {
         PdockerVkStructHeader header = read_vk_struct_header(node);
         switch (header.sType) {
-#ifdef VK_STRUCTURE_TYPE_DEVICE_GROUP_RENDER_PASS_BEGIN_INFO
+#if defined(VK_VERSION_1_1) || defined(VK_KHR_device_group)
             case VK_STRUCTURE_TYPE_DEVICE_GROUP_RENDER_PASS_BEGIN_INFO: {
                 const VkDeviceGroupRenderPassBeginInfo *info =
                     (const VkDeviceGroupRenderPassBeginInfo *)node;
@@ -17686,7 +17671,7 @@ static bool render_pass_begin_pnext_noop(const VkRenderPassBeginInfo *begin) {
                 break;
             }
 #endif
-#ifdef VK_STRUCTURE_TYPE_RENDER_PASS_ATTACHMENT_BEGIN_INFO
+#if defined(VK_VERSION_1_2) || defined(VK_KHR_imageless_framebuffer)
             case VK_STRUCTURE_TYPE_RENDER_PASS_ATTACHMENT_BEGIN_INFO: {
                 const VkRenderPassAttachmentBeginInfo *info =
                     (const VkRenderPassAttachmentBeginInfo *)node;
@@ -17694,7 +17679,7 @@ static bool render_pass_begin_pnext_noop(const VkRenderPassBeginInfo *begin) {
                 break;
             }
 #endif
-#ifdef VK_STRUCTURE_TYPE_RENDER_PASS_SAMPLE_LOCATIONS_BEGIN_INFO_EXT
+#ifdef VK_EXT_sample_locations
             case VK_STRUCTURE_TYPE_RENDER_PASS_SAMPLE_LOCATIONS_BEGIN_INFO_EXT: {
                 const VkRenderPassSampleLocationsBeginInfoEXT *info =
                     (const VkRenderPassSampleLocationsBeginInfoEXT *)node;
@@ -22863,7 +22848,7 @@ static VkResult validate_fence_create_pnext(const void *pNext) {
     for (const void *node = pNext; node;) {
         PdockerVkStructHeader header = read_vk_struct_header(node);
         switch (header.sType) {
-#ifdef VK_STRUCTURE_TYPE_EXPORT_FENCE_CREATE_INFO
+#ifdef VK_KHR_external_fence
             case VK_STRUCTURE_TYPE_EXPORT_FENCE_CREATE_INFO: {
                 const VkExportFenceCreateInfo *info = (const VkExportFenceCreateInfo *)node;
                 if (info->handleTypes != 0) {
@@ -23000,7 +22985,7 @@ static bool semaphore_create_info_parse_pnext(const void *pNext, bool *timeline,
                 }
                 break;
             }
-#ifdef VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO
+#ifdef VK_KHR_external_semaphore
             case VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO: {
                 const VkExportSemaphoreCreateInfo *info = (const VkExportSemaphoreCreateInfo *)node;
                 if (info->handleTypes != 0) return false;
