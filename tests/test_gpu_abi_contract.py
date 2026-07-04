@@ -6688,6 +6688,16 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         self.assertIn("if (pCreateInfo->pNext)", query_pool_body)
         self.assertIn("if (pCreateInfo->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;", query_pool_body)
+        framebuffer_body = c_function_body(icd, "vkCreateFramebuffer")
+        framebuffer_pnext_body = c_function_body(icd, "validate_framebuffer_create_pnext")
+        self.assertIn("validate_framebuffer_create_pnext(pCreateInfo->pNext)", framebuffer_body)
+        self.assertIn("*pFramebuffer = VK_NULL_HANDLE;", framebuffer_body)
+        self.assertIn("pCreateInfo->flags != 0", framebuffer_body)
+        self.assertIn("framebuffer-flags-unsupported", framebuffer_body)
+        self.assertIn("pCreateInfo->attachmentCount > 0 && !pCreateInfo->pAttachments", framebuffer_body)
+        self.assertIn("VK_STRUCTURE_TYPE_FRAMEBUFFER_ATTACHMENTS_CREATE_INFO", framebuffer_pnext_body)
+        self.assertIn("info->attachmentImageInfoCount != 0 || info->pAttachmentImageInfos", framebuffer_pnext_body)
+        self.assertIn('unsupported_create_info_pnext_result("vkCreateFramebuffer", node)', framebuffer_pnext_body)
 
     def test_vulkan_render_pass_accepts_only_noop_legacy_multiview_pnext(self):
         icd = VULKAN_ICD.read_text()

@@ -15917,6 +15917,28 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyRenderPass(
     free(pdocker_vk_render_pass_from_handle(renderPass));
 }
 
+static VkResult validate_framebuffer_create_pnext(const void *pNext) {
+    for (const void *node = pNext; node;) {
+        PdockerVkStructHeader header = read_vk_struct_header(node);
+        switch (header.sType) {
+#ifdef VK_STRUCTURE_TYPE_FRAMEBUFFER_ATTACHMENTS_CREATE_INFO
+            case VK_STRUCTURE_TYPE_FRAMEBUFFER_ATTACHMENTS_CREATE_INFO: {
+                const VkFramebufferAttachmentsCreateInfo *info =
+                    (const VkFramebufferAttachmentsCreateInfo *)node;
+                if (info->attachmentImageInfoCount != 0 || info->pAttachmentImageInfos) {
+                    return unsupported_create_info_pnext_result("vkCreateFramebuffer", node);
+                }
+                break;
+            }
+#endif
+            default:
+                return unsupported_create_info_pnext_result("vkCreateFramebuffer", node);
+        }
+        node = header.pNext;
+    }
+    return VK_SUCCESS;
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateFramebuffer(
         VkDevice device,
         const VkFramebufferCreateInfo *pCreateInfo,
@@ -15925,6 +15947,17 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateFramebuffer(
     (void)device;
     (void)pAllocator;
     if (!pCreateInfo || !pFramebuffer) return VK_ERROR_INITIALIZATION_FAILED;
+    *pFramebuffer = VK_NULL_HANDLE;
+    VkResult pnext_rc = validate_framebuffer_create_pnext(pCreateInfo->pNext);
+    if (pnext_rc != VK_SUCCESS) return pnext_rc;
+    if (pCreateInfo->flags != 0) {
+        trace_icd_runtime_failure("framebuffer-flags-unsupported",
+                                  VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    if (pCreateInfo->attachmentCount > 0 && !pCreateInfo->pAttachments) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
     PdockerVkFramebuffer *fb = pdocker_alloc_handle(sizeof(*fb));
     if (!fb) return VK_ERROR_OUT_OF_HOST_MEMORY;
     fb->render_pass = pdocker_vk_render_pass_from_handle(pCreateInfo->renderPass);
