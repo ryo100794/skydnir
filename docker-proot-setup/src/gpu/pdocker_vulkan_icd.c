@@ -16452,6 +16452,37 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfacePresentModesKHR(
     return count < available_count ? VK_INCOMPLETE : VK_SUCCESS;
 }
 
+static VkResult fill_surface_capabilities2_pnext(void *pNext) {
+    for (void *node = pNext; node;) {
+        PdockerVkStructHeader header = read_vk_struct_header(node);
+        switch (header.sType) {
+#ifdef VK_KHR_surface_protected_capabilities
+            case VK_STRUCTURE_TYPE_SURFACE_PROTECTED_CAPABILITIES_KHR: {
+                VkSurfaceProtectedCapabilitiesKHR *p =
+                    (VkSurfaceProtectedCapabilitiesKHR *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                p->supportsProtected = VK_FALSE;
+                break;
+            }
+#endif
+#ifdef VK_KHR_shared_presentable_image
+            case VK_STRUCTURE_TYPE_SHARED_PRESENT_SURFACE_CAPABILITIES_KHR: {
+                VkSharedPresentSurfaceCapabilitiesKHR *p =
+                    (VkSharedPresentSurfaceCapabilitiesKHR *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                p->sharedPresentSupportedUsageFlags = 0;
+                break;
+            }
+#endif
+            default:
+                return unsupported_create_info_pnext_result(
+                    "vkGetPhysicalDeviceSurfaceCapabilities2KHR", node);
+        }
+        node = (void *)header.pNext;
+    }
+    return VK_SUCCESS;
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceCapabilities2KHR(
         VkPhysicalDevice physicalDevice,
         const VkPhysicalDeviceSurfaceInfo2KHR *pSurfaceInfo,
@@ -16461,10 +16492,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceCapabilities2KHR(
         pSurfaceCapabilities->sType != VK_STRUCTURE_TYPE_SURFACE_CAPABILITIES_2_KHR) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
-    if (pSurfaceInfo->pNext || pSurfaceCapabilities->pNext) {
-        trace_icd_runtime_failure("surface-capabilities2-pnext-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
+    if (pSurfaceInfo->pNext) {
+        trace_icd_runtime_failure("surface-capabilities2-input-pnext-unsupported",
+                                  VK_ERROR_FEATURE_NOT_PRESENT);
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }
+    VkResult pnext_rc = fill_surface_capabilities2_pnext(pSurfaceCapabilities->pNext);
+    if (pnext_rc != VK_SUCCESS) return pnext_rc;
     return vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice,
                                                      pSurfaceInfo->surface,
                                                      &pSurfaceCapabilities->surfaceCapabilities);

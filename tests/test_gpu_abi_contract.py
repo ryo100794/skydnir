@@ -1306,15 +1306,26 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertRegex(icd, r"VKAPI_ATTR\s+VkResult\s+VKAPI_CALL\s+vkGetPhysicalDeviceSurfaceCapabilities2KHR\s*\([^)]*VkPhysicalDeviceSurfaceInfo2KHR")
         self.assertRegex(icd, r"VKAPI_ATTR\s+VkResult\s+VKAPI_CALL\s+vkGetPhysicalDeviceSurfaceFormats2KHR\s*\([^)]*VkPhysicalDeviceSurfaceInfo2KHR")
         caps2_body = c_function_body(icd, "vkGetPhysicalDeviceSurfaceCapabilities2KHR")
+        caps2_pnext_body = c_function_body(icd, "fill_surface_capabilities2_pnext")
         for marker in [
             "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SURFACE_INFO_2_KHR",
             "VK_STRUCTURE_TYPE_SURFACE_CAPABILITIES_2_KHR",
-            "surface-capabilities2-pnext-unsupported",
+            "surface-capabilities2-input-pnext-unsupported",
+            "fill_surface_capabilities2_pnext(pSurfaceCapabilities->pNext)",
             "vkGetPhysicalDeviceSurfaceCapabilitiesKHR",
             "pSurfaceInfo->surface",
             "surfaceCapabilities",
         ]:
             self.assertIn(marker, caps2_body)
+        for marker in [
+            "VK_STRUCTURE_TYPE_SURFACE_PROTECTED_CAPABILITIES_KHR",
+            "p->supportsProtected = VK_FALSE;",
+            "VK_STRUCTURE_TYPE_SHARED_PRESENT_SURFACE_CAPABILITIES_KHR",
+            "p->sharedPresentSupportedUsageFlags = 0;",
+            "zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);",
+            'unsupported_create_info_pnext_result(',
+        ]:
+            self.assertIn(marker, caps2_pnext_body)
 
         formats2_body = c_function_body(icd, "vkGetPhysicalDeviceSurfaceFormats2KHR")
         for marker in [
