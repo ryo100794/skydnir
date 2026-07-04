@@ -12756,6 +12756,70 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceExternalFenceProperties(
 
 static VkResult unsupported_create_info_pnext_result(const char *api_name, const void *pNext);
 
+static VkResult validate_buffer_create_pnext(const VkBufferCreateInfo *info) {
+    if (!info) return VK_ERROR_INITIALIZATION_FAILED;
+    for (const void *node = info->pNext; node;) {
+        PdockerVkStructHeader header = read_vk_struct_header(node);
+        switch (header.sType) {
+            case VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO: {
+                const VkExternalMemoryBufferCreateInfo *external_info =
+                    (const VkExternalMemoryBufferCreateInfo *)node;
+                if (external_info->handleTypes != 0) {
+                    trace_icd_runtime_failure("buffer-external-memory-handle-unsupported",
+                                              VK_ERROR_FEATURE_NOT_PRESENT);
+                    return VK_ERROR_FEATURE_NOT_PRESENT;
+                }
+                break;
+            }
+            case VK_STRUCTURE_TYPE_BUFFER_OPAQUE_CAPTURE_ADDRESS_CREATE_INFO: {
+                const VkBufferOpaqueCaptureAddressCreateInfo *capture_info =
+                    (const VkBufferOpaqueCaptureAddressCreateInfo *)node;
+                if (capture_info->opaqueCaptureAddress != 0) {
+                    trace_icd_runtime_failure("buffer-opaque-capture-address-unsupported",
+                                              VK_ERROR_FEATURE_NOT_PRESENT);
+                    return VK_ERROR_FEATURE_NOT_PRESENT;
+                }
+                break;
+            }
+            case VK_STRUCTURE_TYPE_BUFFER_USAGE_FLAGS_2_CREATE_INFO: {
+                const VkBufferUsageFlags2CreateInfo *usage2_info =
+                    (const VkBufferUsageFlags2CreateInfo *)node;
+                if ((usage2_info->usage & ~(VkBufferUsageFlags2)UINT32_MAX) != 0 ||
+                    (VkBufferUsageFlags)usage2_info->usage != info->usage) {
+                    trace_icd_runtime_failure("buffer-usage2-unsupported",
+                                              VK_ERROR_FEATURE_NOT_PRESENT);
+                    return VK_ERROR_FEATURE_NOT_PRESENT;
+                }
+                break;
+            }
+            case VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_CREATE_INFO_EXT: {
+                const VkBufferDeviceAddressCreateInfoEXT *address_info =
+                    (const VkBufferDeviceAddressCreateInfoEXT *)node;
+                if (address_info->deviceAddress != 0) {
+                    trace_icd_runtime_failure("buffer-device-address-create-unsupported",
+                                              VK_ERROR_FEATURE_NOT_PRESENT);
+                    return VK_ERROR_FEATURE_NOT_PRESENT;
+                }
+                break;
+            }
+            case VK_STRUCTURE_TYPE_DEDICATED_ALLOCATION_BUFFER_CREATE_INFO_NV: {
+                const VkDedicatedAllocationBufferCreateInfoNV *dedicated_info =
+                    (const VkDedicatedAllocationBufferCreateInfoNV *)node;
+                if (dedicated_info->dedicatedAllocation) {
+                    trace_icd_runtime_failure("buffer-dedicated-allocation-nv-unsupported",
+                                              VK_ERROR_FEATURE_NOT_PRESENT);
+                    return VK_ERROR_FEATURE_NOT_PRESENT;
+                }
+                break;
+            }
+            default:
+                return unsupported_create_info_pnext_result("vkCreateBuffer", node);
+        }
+        node = header.pNext;
+    }
+    return VK_SUCCESS;
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateBuffer(
         VkDevice device,
         const VkBufferCreateInfo *pCreateInfo,
@@ -12764,7 +12828,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateBuffer(
     (void)device;
     (void)pAllocator;
     if (!pCreateInfo || !pBuffer) return VK_ERROR_INITIALIZATION_FAILED;
-    if (pCreateInfo->pNext) return unsupported_create_info_pnext_result("vkCreateBuffer", pCreateInfo->pNext);
+    VkResult pnext_rc = validate_buffer_create_pnext(pCreateInfo);
+    if (pnext_rc != VK_SUCCESS) return pnext_rc;
     if (pCreateInfo->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;
     if (pCreateInfo->size == 0 || pCreateInfo->size > pdocker_vulkan_max_buffer_size()) {
         if (trace_allocations()) {

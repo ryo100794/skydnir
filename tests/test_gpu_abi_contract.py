@@ -6602,7 +6602,25 @@ class GpuAbiContractTest(unittest.TestCase):
         create_buffer_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateBuffer", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkDestroyBuffer", 1
         )[0]
-        self.assertIn("if (pCreateInfo->pNext)", create_buffer_body)
+        buffer_pnext_body = icd.split("static VkResult validate_buffer_create_pnext", 1)[1].split(
+            "VKAPI_ATTR VkResult VKAPI_CALL vkCreateBuffer", 1
+        )[0]
+        self.assertIn("validate_buffer_create_pnext(pCreateInfo)", create_buffer_body)
+        self.assertIn("if (pnext_rc != VK_SUCCESS) return pnext_rc;", create_buffer_body)
+        self.assertIn("VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO", buffer_pnext_body)
+        self.assertIn("external_info->handleTypes != 0", buffer_pnext_body)
+        self.assertIn("buffer-external-memory-handle-unsupported", buffer_pnext_body)
+        self.assertIn("VK_STRUCTURE_TYPE_BUFFER_OPAQUE_CAPTURE_ADDRESS_CREATE_INFO", buffer_pnext_body)
+        self.assertIn("capture_info->opaqueCaptureAddress != 0", buffer_pnext_body)
+        self.assertIn("VK_STRUCTURE_TYPE_BUFFER_USAGE_FLAGS_2_CREATE_INFO", buffer_pnext_body)
+        self.assertIn("usage2_info->usage & ~(VkBufferUsageFlags2)UINT32_MAX", buffer_pnext_body)
+        self.assertIn("(VkBufferUsageFlags)usage2_info->usage != info->usage", buffer_pnext_body)
+        self.assertIn("VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_CREATE_INFO_EXT", buffer_pnext_body)
+        self.assertIn("address_info->deviceAddress != 0", buffer_pnext_body)
+        self.assertIn("VK_STRUCTURE_TYPE_DEDICATED_ALLOCATION_BUFFER_CREATE_INFO_NV", buffer_pnext_body)
+        self.assertIn("dedicated_info->dedicatedAllocation", buffer_pnext_body)
+        self.assertIn('unsupported_create_info_pnext_result("vkCreateBuffer", node)', buffer_pnext_body)
+        self.assertIn("node = header.pNext;", buffer_pnext_body)
         self.assertIn("if (pCreateInfo->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;", create_buffer_body)
         descriptor_layout_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorSetLayout", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkDestroyDescriptorSetLayout", 1
