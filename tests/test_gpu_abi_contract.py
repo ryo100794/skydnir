@@ -6734,7 +6734,11 @@ class GpuAbiContractTest(unittest.TestCase):
         sampler_validate_body = icd.split("static VkResult validate_sampler_create_info_for_transport", 1)[1].split(
             "VKAPI_ATTR VkResult VKAPI_CALL vkCreateImage", 1
         )[0]
-        self.assertIn("if (info->pNext) return unsupported_image_pnext_result", sampler_validate_body)
+        self.assertIn("VK_STRUCTURE_TYPE_SAMPLER_REDUCTION_MODE_CREATE_INFO", sampler_validate_body)
+        self.assertIn("VK_SAMPLER_REDUCTION_MODE_WEIGHTED_AVERAGE", sampler_validate_body)
+        self.assertIn("sampler-reduction-mode-unsupported", sampler_validate_body)
+        self.assertIn('unsupported_image_pnext_result("vkCreateSampler", node)', sampler_validate_body)
+        self.assertIn("node = header.pNext;", sampler_validate_body)
         self.assertIn("if (info->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;", sampler_validate_body)
         self.assertIn("return VK_ERROR_FORMAT_NOT_SUPPORTED;", icd)
         self.assertIn("uint32_t bytes_per_pixel = conservative_format_bytes_per_pixel(info->format);", icd)

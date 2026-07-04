@@ -13015,7 +13015,24 @@ static VkResult validate_image_view_create_info_for_transport(
 
 static VkResult validate_sampler_create_info_for_transport(const VkSamplerCreateInfo *info) {
     if (!info) return VK_ERROR_INITIALIZATION_FAILED;
-    if (info->pNext) return unsupported_image_pnext_result("vkCreateSampler", info->pNext);
+    for (const void *node = info->pNext; node;) {
+        PdockerVkStructHeader header = read_vk_struct_header(node);
+        switch (header.sType) {
+            case VK_STRUCTURE_TYPE_SAMPLER_REDUCTION_MODE_CREATE_INFO: {
+                const VkSamplerReductionModeCreateInfo *reduction_info =
+                    (const VkSamplerReductionModeCreateInfo *)node;
+                if (reduction_info->reductionMode != VK_SAMPLER_REDUCTION_MODE_WEIGHTED_AVERAGE) {
+                    trace_icd_runtime_failure("sampler-reduction-mode-unsupported",
+                                              VK_ERROR_FEATURE_NOT_PRESENT);
+                    return VK_ERROR_FEATURE_NOT_PRESENT;
+                }
+                break;
+            }
+            default:
+                return unsupported_image_pnext_result("vkCreateSampler", node);
+        }
+        node = header.pNext;
+    }
     if (info->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;
     return VK_SUCCESS;
 }
