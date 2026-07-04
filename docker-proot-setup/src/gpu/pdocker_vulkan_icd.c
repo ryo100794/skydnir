@@ -15250,11 +15250,16 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateComputePipelines(
         if (pnext_rc != VK_SUCCESS) return pnext_rc;
         if (ci->sType != VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO ||
             ci->flags != 0 ||
-            ci->basePipelineHandle != VK_NULL_HANDLE ||
-            ci->basePipelineIndex >= 0 ||
             ci->stage.sType != VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO ||
             ci->stage.stage != VK_SHADER_STAGE_COMPUTE_BIT ||
             ci->stage.flags != 0) {
+            /*
+             * basePipelineHandle/basePipelineIndex are only meaningful for
+             * derivative pipelines.  Derivative pipeline creation is already
+             * rejected through ci->flags != 0, so do not reject ignored base
+             * fields here.  Several Vulkan clients zero-initialize the create
+             * info and leave basePipelineIndex as 0 for ordinary pipelines.
+             */
             trace_icd_runtime_failure("compute-pipeline-create-info-unsupported",
                                       VK_ERROR_FEATURE_NOT_PRESENT);
             return VK_ERROR_FEATURE_NOT_PRESENT;
@@ -15443,8 +15448,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
             device ? ((PdockerVkDevice *)device)->requested_feature_mask : 0;
         pipeline->line_width = 1.0f;
         const VkGraphicsPipelineCreateInfo *ci = &pCreateInfos[i];
-        if (ci->flags != 0 || ci->basePipelineHandle != VK_NULL_HANDLE ||
-            ci->basePipelineIndex >= 0) {
+        if (ci->flags != 0) {
+            /*
+             * basePipelineHandle/basePipelineIndex are ignored unless
+             * derivative pipeline flags are used.  Keep derivative pipelines
+             * unsupported while accepting ordinary zero-initialized create
+             * infos that leave basePipelineIndex at 0.
+             */
             pipeline->graphics_unsupported = true;
         }
         uint64_t captured_dynamic_state_mask = 0;

@@ -44,3 +44,4 @@ app/src/main/jniLibs/*/libdocker-compose.so
 app/src/main/assets/xterm/xterm.js
 app/src/main/assets/xterm/xterm.css
 app/src/main/assets/xterm/xterm-addon-fit.js
+docs/test/q6-runtime-spv-*/

@@ -1876,8 +1876,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines", 1
         )[1].split("VKAPI_ATTR void VKAPI_CALL vkDestroyPipeline", 1)[0]
         for marker in [
-            "ci->flags != 0 || ci->basePipelineHandle != VK_NULL_HANDLE",
-            "ci->basePipelineIndex >= 0",
+            "if (ci->flags != 0)",
+            "basePipelineHandle/basePipelineIndex are ignored unless",
             "ci->pDynamicState->pNext || ci->pDynamicState->flags != 0",
             "ci->stageCount > 0 && !ci->pStages",
             "!stage || stage->pNext || stage->flags != 0",
@@ -6737,8 +6737,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('"vkCreateComputePipelines", ci->pNext, 1u, false', compute_body)
         self.assertIn("ci->sType != VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO", compute_body)
         self.assertIn("ci->flags != 0", compute_body)
-        self.assertIn("ci->basePipelineHandle != VK_NULL_HANDLE", compute_body)
-        self.assertIn("ci->basePipelineIndex >= 0", compute_body)
+        self.assertIn("basePipelineHandle/basePipelineIndex are only meaningful", compute_body)
+        self.assertNotIn("ci->basePipelineHandle != VK_NULL_HANDLE", compute_body)
+        self.assertNotIn("ci->basePipelineIndex >= 0", compute_body)
         self.assertIn("ci->stage.sType != VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO", compute_body)
         self.assertIn("ci->stage.stage != VK_SHADER_STAGE_COMPUTE_BIT", compute_body)
         self.assertIn("ci->stage.flags != 0", compute_body)
@@ -12369,6 +12370,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("--expected-hash", runner)
 
         self.assertIn("stale-target-hash", compare)
+        self.assertIn("probe-target-unarmed", compare)
+        self.assertIn("probe_effective_seen_but_unarmed", compare)
         self.assertIn("actual_q6_source_hashes", compare)
         self.assertIn("skipped_non_target_actual_hashes", compare)
         self.assertIn("stale_target_hash", compare)
@@ -12972,10 +12975,60 @@ class GpuAbiContractTest(unittest.TestCase):
             plan,
         )
         self.assertEqual(
-            "spirv_probe_env_audit.summary == stale-target-hash",
+            "spirv_probe_env_audit.summary in {stale-target-hash,probe-target-unarmed}",
             wrong_output_stale_probe["condition"],
         )
         self.assertEqual("Q6 final-store trace probe arming", wrong_output_stale_probe["owner"])
+
+        wrong_output_native_final_store_with_probe_noise = verifier.select_branch(
+            {"classification": "llama-completion-wrong-output"},
+            {
+                "gpu": {
+                    "diagnostics": {
+                        "spirv_probe_env_audit": {"summary": "probe-target-unarmed"},
+                        "q6_workgroup_diagnostics": {
+                            "q6_final_store_boundary": {"summary": "native-final-store-mismatch"},
+                            "q6_native_vs_writeback_split": {"summary": "native-final-store-or-readback"},
+                        },
+                    }
+                }
+            },
+            plan,
+        )
+        self.assertEqual(
+            "q6_final_store_boundary.summary == native-final-store-mismatch",
+            wrong_output_native_final_store_with_probe_noise["condition"],
+        )
+        self.assertEqual("native Q6 final-store path", wrong_output_native_final_store_with_probe_noise["owner"])
+
+        wrong_output_probe_effective_unarmed = verifier.select_branch(
+            {"classification": "llama-completion-wrong-output"},
+            {
+                "gpu": {
+                    "diagnostics": {
+                        "spirv_probe_env_audit": {
+                            "summary": "probe-target-unarmed",
+                            "expected_source_hash": "0x9cfc45ae24ba71d8",
+                            "expected_effective_hash": "0x6ec5d7a41443f157",
+                            "actual_q6_source_hashes": ["0x6ec5d7a41443f157"],
+                            "probe_effective_seen_but_unarmed": True,
+                        },
+                        "q6_workgroup_diagnostics": {
+                            "q6_final_store_boundary": {
+                                "summary": "not-run",
+                                "reason": "missing-executed-final-store-trace",
+                            }
+                        },
+                    }
+                }
+            },
+            plan,
+        )
+        self.assertEqual(
+            "spirv_probe_env_audit.summary in {stale-target-hash,probe-target-unarmed}",
+            wrong_output_probe_effective_unarmed["condition"],
+        )
+        self.assertEqual("Q6 final-store trace probe arming", wrong_output_probe_effective_unarmed["owner"])
 
         wrong_output_probe_unarmed = verifier.select_branch(
             {"classification": "llama-completion-wrong-output"},
@@ -13579,6 +13632,14 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VK_ERROR_FEATURE_NOT_PRESENT", report["gpu_blocker_detail"])
         self.assertIn("pre_http_failure_evidence", report)
         self.assertIn("q6_reachability", report["pre_http_failure_evidence"])
+
+    def test_llama_gpu_compare_runtime_identity_does_not_misclassify_direct_executor(self):
+        compare = LLAMA_COMPARE.read_text()
+        body = compare.split('record_bridge_binary_identity() {', 1)[1].split('adb_transport_state() {', 1)[0]
+        gpu_case = body.split('*pdocker-gpu-executor*)', 1)[1].split('printf "runtime|gpu_executor|pid:%s|%s|%s|%s\\n"', 1)[0]
+        self.assertIn('*libpdockergpuexecutor.so|*pdocker-gpu-executor)', gpu_case)
+        self.assertIn('*) continue ;;', gpu_case)
+        self.assertIn('readlink "$p/exe"', gpu_case)
 
     def test_llama_gpu_compare_records_pre_q6_failure_summary(self):
         compare = LLAMA_COMPARE.read_text()

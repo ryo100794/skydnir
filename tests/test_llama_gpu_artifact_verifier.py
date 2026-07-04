@@ -2703,6 +2703,40 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         self.assertEqual(report["q6_effective_blocker_class"], "q6-arithmetic-reduction-or-output-layout")
         self.assertFalse(report["q6_shader_like_interpretation"]["q6_shader_like_oracle_cleared"])
 
+    def test_q6_64x1x1_uses_64_shader_like_delta_as_primary(self):
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": passing_config_propagation(),
+                    "q6_workgroup_diagnostics": {
+                        "event_count": 1,
+                        "workgroup_shape_blocker": False,
+                        "latest_status": "mismatch",
+                        **q6_verified_writeback(),
+                        "local_size_resolved": [64, 1, 1],
+                        "local_size": [64, 1, 1],
+                        "q6_local_size": [64, 1, 1],
+                        "local_size_consistent": True,
+                        "q6_shader_like_abs_delta": 0.5,
+                        "q6_shader_like_64_abs_delta": 0.0,
+                    },
+                },
+                "correctness": gpu_correctness_report("fail", required_failures=1, passed=False, content="4"),
+            },
+            "cpu": {"tokens_per_second": 0.1},
+            **speedup_sections(speedup=0.5, target_met=False, cpu_tps=0.1, gpu_tps=0.05),
+        }
+        result = self.run_verifier(payload, "--require-q6-workgroup-clear")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        report = json.loads(result.stdout)
+        interpretation = report["q6_shader_like_interpretation"]
+        self.assertTrue(interpretation["q6_shader_like_oracle_cleared"])
+        self.assertTrue(interpretation["q6_shader_like_64_required"])
+        self.assertIn("q6_shader_like_64_abs_delta", interpretation["q6_shader_like_clear_basis"])
+        self.assertNotIn("q6_shader_like_abs_delta", interpretation["q6_shader_like_clear_basis"])
+
     def test_q6_descriptor_invariant_mismatch_blocks_native_classification(self):
         q6 = {
             "event_count": 1,

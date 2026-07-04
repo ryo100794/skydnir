@@ -482,6 +482,10 @@ for p in /proc/[0-9]*; do
   case "$cmd" in
     *pdocker-gpu-executor*)
       target=$(readlink "$p/exe" 2>/dev/null || true)
+      case "$target" in
+        *libpdockergpuexecutor.so|*pdocker-gpu-executor) ;;
+        *) continue ;;
+      esac
       size=$(wc -c < "$p/exe" 2>/dev/null || printf 0)
       sha=$(hash_one "$p/exe")
       printf "runtime|gpu_executor|pid:%s|%s|%s|%s\n" "$pid" "$target" "$size" "$sha"
@@ -4169,6 +4173,15 @@ def build_spirv_probe_env_audit():
     actual_q6_source_hashes = sorted(set(actual_q6_source_hashes))
     actual_q6_or_skipped_hashes = actual_q6_source_hashes or skipped_actual_hashes
     target_or_probe_hashes = {value for value in (expected_source, expected_effective) if value}
+    target_only = str(observed.get("PDOCKER_GPU_SPIRV_PROBE_TARGET_ONLY", "")).strip().lower() in ("1", "true", "yes", "on")
+    probe_effective_seen_but_unarmed = bool(
+        requested_any
+        and target_only
+        and expected_effective
+        and not matching_armed
+        and actual_q6_or_skipped_hashes
+        and expected_effective in actual_q6_or_skipped_hashes
+    )
     stale_target_hash = bool(
         requested_any
         and expected_source
@@ -4184,6 +4197,8 @@ def build_spirv_probe_env_audit():
         if host_to_container_missing
         else "pass"
         if matching_armed and executor_debug_binding_events
+        else "probe-target-unarmed"
+        if probe_effective_seen_but_unarmed
         else "stale-target-hash"
         if stale_target_hash
         else "partial"
@@ -4210,6 +4225,8 @@ def build_spirv_probe_env_audit():
         "actual_q6_source_hashes": actual_q6_source_hashes,
         "skipped_non_target_actual_hashes": skipped_actual_hashes[-16:],
         "stale_target_hash": stale_target_hash,
+        "probe_effective_seen_but_unarmed": probe_effective_seen_but_unarmed,
+        "target_only": target_only,
         "host_to_container": {
             "summary": "not-requested" if not requested else "fail" if host_to_container_missing else "pass",
             "missing": host_to_container_missing,
@@ -5837,16 +5854,20 @@ q6_workgroup_specialization_interpretation = {
     "do_not_patch_local_size_z_from_spec_id_2": True,
     "next_static_target": "q6-final-store-workgroup-barrier-visibility",
 }
-q6_shader_like_oracle_cleared = (
-    q6_latest_oracle.get("status") == "mismatch"
-    and numeric_close_to_zero(q6_latest_partial.get("q6_shader_like_abs_delta"))
-    and (
-        not q6_shader_like_64_required
-        or numeric_close_to_zero(q6_latest_partial.get("q6_shader_like_64_abs_delta"))
+q6_shader_like_32_clear = numeric_close_to_zero(q6_latest_partial.get("q6_shader_like_abs_delta"))
+q6_shader_like_64_clear = numeric_close_to_zero(q6_latest_partial.get("q6_shader_like_64_abs_delta"))
+if q6_shader_like_64_required:
+    q6_shader_like_oracle_cleared = (
+        q6_latest_oracle.get("status") == "mismatch"
+        and q6_shader_like_64_clear
     )
-)
+else:
+    q6_shader_like_oracle_cleared = (
+        q6_latest_oracle.get("status") == "mismatch"
+        and q6_shader_like_32_clear
+    )
 q6_shader_like_clear_basis = []
-if numeric_close_to_zero(q6_latest_partial.get("q6_shader_like_abs_delta")):
+if q6_shader_like_32_clear:
     q6_shader_like_clear_basis.append("q6_shader_like_abs_delta")
 if not q6_shader_like_64_required:
     if q6_safe_kernel_used:
@@ -5860,7 +5881,7 @@ if not q6_shader_like_64_required:
             "local_size_resolved=reported-q6-local-size",
             "q6_shader_like_64_abs_delta=diagnostic-only",
         ])
-elif numeric_close_to_zero(q6_latest_partial.get("q6_shader_like_64_abs_delta")):
+elif q6_shader_like_64_clear:
     q6_shader_like_clear_basis.append("q6_shader_like_64_abs_delta")
 
 q6_final_store_boundary["native_reduction_cleared"] = q6_shader_like_oracle_cleared

@@ -2090,9 +2090,10 @@ def _q6_shader_like_interpretation(q6: Any) -> dict[str, Any]:
     sixty_four_required = (not safe_kernel) and local_size != [32, 1, 1]
     thirty_two_clear = _numeric_close_to_zero(q6.get("q6_shader_like_abs_delta"))
     sixty_four_clear = _numeric_close_to_zero(q6.get("q6_shader_like_64_abs_delta"))
-    cleared = q6.get("latest_status") == "mismatch" and thirty_two_clear and (
-        not sixty_four_required or sixty_four_clear
-    )
+    if sixty_four_required:
+        cleared = q6.get("latest_status") == "mismatch" and sixty_four_clear
+    else:
+        cleared = q6.get("latest_status") == "mismatch" and thirty_two_clear
     basis = ["q6_shader_like_abs_delta"] if thirty_two_clear else []
     if not sixty_four_required:
         if safe_kernel:

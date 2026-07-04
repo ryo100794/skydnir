@@ -280,11 +280,21 @@ def select_branch(report: dict[str, Any], artifact: dict[str, Any], plan: dict[s
     boundary = q6.get("q6_final_store_boundary")
     if (
         classification == "llama-completion-wrong-output"
-        and probe_audit.get("summary") == "stale-target-hash"
+        and isinstance(boundary, dict)
+        and boundary.get("summary") == "native-final-store-mismatch"
     ):
         return {
-            "condition": "spirv_probe_env_audit.summary == stale-target-hash",
-            "action": "rebuild the Q6 final-store probe from the actual runtime Q6 source SPIR-V hash; keep image/model/prompt unchanged",
+            "condition": "q6_final_store_boundary.summary == native-final-store-mismatch",
+            "action": "inspect native Q6 final-store arithmetic/dataflow with descriptor coordinates preserved; do not blame executor writeback or probe arming",
+            "owner": "native Q6 final-store path",
+        }
+    if (
+        classification == "llama-completion-wrong-output"
+        and probe_audit.get("summary") in {"stale-target-hash", "probe-target-unarmed"}
+    ):
+        return {
+            "condition": "spirv_probe_env_audit.summary in {stale-target-hash,probe-target-unarmed}",
+            "action": "rebuild or re-arm the Q6 final-store probe from the actual runtime Q6 source/effective SPIR-V hash; keep image/model/prompt unchanged",
             "owner": "Q6 final-store trace probe arming",
         }
     if (

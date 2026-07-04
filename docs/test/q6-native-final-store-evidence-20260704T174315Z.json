@@ -1,0 +1,95 @@
+{
+  "benchmark_claim_allowed": false,
+  "classification": "llama-completion-wrong-output",
+  "correctness_claim_allowed": false,
+  "device_serial": "192.168.179.21:43119",
+  "performance": {
+    "cpu_tokens_per_second": 0.04702448956650603,
+    "gpu_tokens_per_second": 0.06708991232388352,
+    "speedup": 1.426701553644708,
+    "target_met": false
+  },
+  "plan_verdict_local": "docs/test/llama-gpu-ngl1-q6-workgroup-legalized-192_168_179_21_43119-20260704T174315Z-plan-verdict.json",
+  "policy": {
+    "dockerfile_model_prompt_modified": false,
+    "llama_cpp_modified": false,
+    "next_step": "Inspect native Q6 final-store arithmetic/dataflow with descriptor coordinates preserved; do not blame executor writeback or probe arming."
+  },
+  "probe_audit": {
+    "actual_q6_source_hashes": [
+      "0x6ec5d7a41443f157"
+    ],
+    "debug_binding_event_count": 7,
+    "executor_summary": "pass",
+    "expected_effective_hash": "0x6ec5d7a41443f157",
+    "expected_source_hash": "0x9cfc45ae24ba71d8",
+    "icd_summary": "missing-evidence",
+    "matching_armed_count": 0,
+    "summary": "probe-target-unarmed"
+  },
+  "q6": {
+    "effective_spirv_hash": "0x00c3414e5d50b925",
+    "final_store_boundary_summary": "native-final-store-mismatch",
+    "latest_status": "mismatch",
+    "native_reduction_cleared": true,
+    "oracle_spirv_hash": "0x9cfc45ae24ba71d8",
+    "q6_dispatch_event_count": 20,
+    "q6_shader_like_64_abs_delta": 1.85524822e-07,
+    "q6_shader_like_oracle_cleared": true,
+    "sample": [
+      {
+        "binding": 5,
+        "candidate_id": 104,
+        "dst_index": 151935,
+        "effective_spirv_hash": "0x00c3414e5d50b925",
+        "expected": 4.00778103,
+        "expected_store_index": 151935,
+        "fd_after_writeback": 1.53216076,
+        "final_store_matches_expected": false,
+        "final_store_value_f32": 1.532160758972168,
+        "layout_from_final_store_trace": false,
+        "layout_sample_source": "fixed-oracle-window",
+        "output_index": 151935,
+        "probe": 5,
+        "q6_event_dispatch_id": null,
+        "q6_event_effective_spirv_hash": "0x00c3414e5d50b925",
+        "q6_event_oracle_spirv_hash": "0x9cfc45ae24ba71d8",
+        "q6_event_pipeline_spirv_hash": "0x00c3414e5d50b925",
+        "q6_event_source_spirv_hash": "0x6ec5d7a41443f157",
+        "sample_class": "native-final-store-mismatch",
+        "source_spirv_hash": "0x6ec5d7a41443f157",
+        "trace_writeback_mismatch": false,
+        "trace_writeback_mismatch_fields": [],
+        "trace_writeback_verified": true,
+        "writeback_matches_expected": false,
+        "writeback_matches_final_store": true
+      }
+    ],
+    "source_spirv_hash": "0x6ec5d7a41443f157",
+    "store_index_model_valid": true,
+    "writeback_matches_native_gpu_memory": true
+  },
+  "runtime_freshness": {
+    "bridge_binary_summary": "pass",
+    "summary": "pass"
+  },
+  "schema": "skydnir.llama-gpu.q6-native-final-store-evidence.v1",
+  "selected_branch": {
+    "action": "inspect native Q6 final-store arithmetic/dataflow with descriptor coordinates preserved; do not blame executor writeback or probe arming",
+    "condition": "q6_final_store_boundary.summary == native-final-store-mismatch",
+    "owner": "native Q6 final-store path"
+  },
+  "service": {
+    "completion": "pass",
+    "completion_content_excerpt": " Marvel",
+    "completion_passed": false,
+    "health": "pass",
+    "liveness": "pass",
+    "models": "pass",
+    "prompt_sanity": "fail",
+    "ready": false,
+    "served": true
+  },
+  "source_artifact_local": "docs/test/llama-gpu-ngl1-q6-workgroup-legalized-192_168_179_21_43119-20260704T174315Z.json",
+  "timestamp_utc": "2026-07-04T17:43:15Z"
+}
