@@ -16783,6 +16783,35 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindPipeline(
     }
 }
 
+#ifdef VK_STRUCTURE_TYPE_DEVICE_GROUP_RENDER_PASS_BEGIN_INFO
+static bool device_group_render_pass_begin_noop(
+        const VkDeviceGroupRenderPassBeginInfo *info,
+        const VkRect2D *render_area);
+#endif
+
+static bool rendering_info_pnext_noop(const VkRenderingInfo *info) {
+    for (const void *node = info ? info->pNext : NULL; node;) {
+        PdockerVkStructHeader header = read_vk_struct_header(node);
+        switch (header.sType) {
+#ifdef VK_STRUCTURE_TYPE_DEVICE_GROUP_RENDER_PASS_BEGIN_INFO
+            case VK_STRUCTURE_TYPE_DEVICE_GROUP_RENDER_PASS_BEGIN_INFO: {
+                const VkDeviceGroupRenderPassBeginInfo *device_group =
+                    (const VkDeviceGroupRenderPassBeginInfo *)node;
+                if (!device_group_render_pass_begin_noop(
+                        device_group, info ? &info->renderArea : NULL)) {
+                    return false;
+                }
+                break;
+            }
+#endif
+            default:
+                return false;
+        }
+        node = header.pNext;
+    }
+    return true;
+}
+
 VKAPI_ATTR void VKAPI_CALL vkCmdBeginRendering(
         VkCommandBuffer commandBuffer,
         const VkRenderingInfo *pRenderingInfo) {
@@ -16799,7 +16828,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBeginRendering(
         ? pRenderingInfo->colorAttachmentCount
         : 0;
     if (pRenderingInfo) {
-        if (pRenderingInfo->pNext) {
+        if (!rendering_info_pnext_noop(pRenderingInfo)) {
             cmd->graphics_unsupported = true;
         }
         if (pRenderingInfo->flags != 0) {
@@ -17379,6 +17408,27 @@ static bool append_normalized_render_pass_begin(
     return true;
 }
 
+#ifdef VK_STRUCTURE_TYPE_DEVICE_GROUP_RENDER_PASS_BEGIN_INFO
+static bool device_group_render_pass_begin_noop(
+        const VkDeviceGroupRenderPassBeginInfo *info,
+        const VkRect2D *render_area) {
+    if (!info) return false;
+    if (info->deviceMask != 0 && info->deviceMask != 1u) return false;
+    if (info->deviceRenderAreaCount == 0 && !info->pDeviceRenderAreas) {
+        return true;
+    }
+    if (!render_area || info->deviceRenderAreaCount != 1u ||
+        !info->pDeviceRenderAreas) {
+        return false;
+    }
+    const VkRect2D *area = &info->pDeviceRenderAreas[0];
+    return area->offset.x == render_area->offset.x &&
+           area->offset.y == render_area->offset.y &&
+           area->extent.width == render_area->extent.width &&
+           area->extent.height == render_area->extent.height;
+}
+#endif
+
 static bool render_pass_begin_pnext_noop(const VkRenderPassBeginInfo *begin) {
     for (const void *node = begin ? begin->pNext : NULL; node;) {
         PdockerVkStructHeader header = read_vk_struct_header(node);
@@ -17387,19 +17437,7 @@ static bool render_pass_begin_pnext_noop(const VkRenderPassBeginInfo *begin) {
             case VK_STRUCTURE_TYPE_DEVICE_GROUP_RENDER_PASS_BEGIN_INFO: {
                 const VkDeviceGroupRenderPassBeginInfo *info =
                     (const VkDeviceGroupRenderPassBeginInfo *)node;
-                if (info->deviceMask != 0 && info->deviceMask != 1u) return false;
-                if (info->deviceRenderAreaCount == 0 && !info->pDeviceRenderAreas) {
-                    break;
-                }
-                if (!begin || info->deviceRenderAreaCount != 1u ||
-                    !info->pDeviceRenderAreas) {
-                    return false;
-                }
-                const VkRect2D *area = &info->pDeviceRenderAreas[0];
-                if (area->offset.x != begin->renderArea.offset.x ||
-                    area->offset.y != begin->renderArea.offset.y ||
-                    area->extent.width != begin->renderArea.extent.width ||
-                    area->extent.height != begin->renderArea.extent.height) {
+                if (!device_group_render_pass_begin_noop(info, begin ? &begin->renderArea : NULL)) {
                     return false;
                 }
                 break;

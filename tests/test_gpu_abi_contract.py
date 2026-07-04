@@ -1647,6 +1647,8 @@ class GpuAbiContractTest(unittest.TestCase):
         begin_rendering_body = icd.split(
             "VKAPI_ATTR void VKAPI_CALL vkCmdBeginRendering", 1
         )[1].split("VKAPI_ATTR void VKAPI_CALL vkCmdEndRendering", 1)[0]
+        rendering_info_pnext_body = c_function_body(icd, "rendering_info_pnext_noop")
+        device_group_begin_pnext_body = c_function_body(icd, "device_group_render_pass_begin_noop")
         begin_render_pass_body = icd.split(
             "VKAPI_ATTR void VKAPI_CALL vkCmdBeginRenderPass", 1
         )[1].split("VKAPI_ATTR void VKAPI_CALL vkCmdNextSubpass", 1)[0]
@@ -1660,20 +1662,26 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, copy_body)
         for marker in [
-            "if (pRenderingInfo->pNext)",
+            "if (!rendering_info_pnext_noop(pRenderingInfo))",
             "cmd->graphics_unsupported = true;",
             "if (!copy_rendering_attachment_state(&cmd->active_color_attachments[i]",
             "if (!copy_rendering_attachment_state(&cmd->active_depth_attachment",
             "if (!copy_rendering_attachment_state(&cmd->active_stencil_attachment",
         ]:
             self.assertIn(marker, begin_rendering_body)
-        self.assertIn("if (!render_pass_begin_pnext_noop(pRenderPassBegin))", begin_render_pass_body)
+        self.assertIn("VK_STRUCTURE_TYPE_DEVICE_GROUP_RENDER_PASS_BEGIN_INFO", rendering_info_pnext_body)
+        self.assertIn("device_group_render_pass_begin_noop(", rendering_info_pnext_body)
         for marker in [
-            "VK_STRUCTURE_TYPE_DEVICE_GROUP_RENDER_PASS_BEGIN_INFO",
             "info->deviceMask != 0 && info->deviceMask != 1u",
             "info->deviceRenderAreaCount == 0 && !info->pDeviceRenderAreas",
             "info->deviceRenderAreaCount != 1u",
-            "area->extent.width != begin->renderArea.extent.width",
+            "area->extent.width == render_area->extent.width",
+        ]:
+            self.assertIn(marker, device_group_begin_pnext_body)
+        self.assertIn("if (!render_pass_begin_pnext_noop(pRenderPassBegin))", begin_render_pass_body)
+        for marker in [
+            "VK_STRUCTURE_TYPE_DEVICE_GROUP_RENDER_PASS_BEGIN_INFO",
+            "device_group_render_pass_begin_noop(info, begin ? &begin->renderArea : NULL)",
             "VK_STRUCTURE_TYPE_RENDER_PASS_ATTACHMENT_BEGIN_INFO",
             "info->attachmentCount != 0 || info->pAttachments",
             "VK_STRUCTURE_TYPE_RENDER_PASS_SAMPLE_LOCATIONS_BEGIN_INFO_EXT",
