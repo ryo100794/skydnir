@@ -1,7 +1,7 @@
 {
   "adb_policy": "do not connect until the user says the Android device is prepared",
   "artifact_path": "docs/test/llama-gpu-ngl1-q6-stage-trace-manifest-192_168_179_21_43119-20260704T210102Z.json",
-  "created_utc": "2026-07-04T21:01:02Z",
+  "created_utc": "2026-07-04T21:02:01Z",
   "fail_branches": [
     {
       "action": "extend the SPIR-V materializer only for the reported specialization expression",

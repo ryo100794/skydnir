@@ -4665,31 +4665,26 @@ Q6_LANE_TRACE_REDUCTION_BASE = (
 def parse_q6_lane_trace_v1(dispatch, writeback):
     if not isinstance(dispatch, dict) or not dispatch:
         return {"schema": "pdocker.q6k.lane-trace.v1", "summary": "not-run"}
-    header = {
-        "schema_version": dispatch.get(Q6_LANE_TRACE_HEADER_BASE),
-        "lane_count": dispatch.get(Q6_LANE_TRACE_HEADER_BASE + 1),
-        "words_per_lane": dispatch.get(Q6_LANE_TRACE_HEADER_BASE + 2),
-        "pre_reduction_base": dispatch.get(Q6_LANE_TRACE_HEADER_BASE + 3),
-        "reduction_base": dispatch.get(Q6_LANE_TRACE_HEADER_BASE + 4),
-    }
-    header_valid = (
-        header["schema_version"] == Q6_LANE_TRACE_SCHEMA_VERSION
-        and header["lane_count"] == Q6_LANE_TRACE_LANE_COUNT
-        and header["words_per_lane"] == Q6_LANE_TRACE_WORDS_PER_LANE
-        and header["pre_reduction_base"] == Q6_LANE_TRACE_PRE_REDUCTION_BASE
-        and header["reduction_base"] == Q6_LANE_TRACE_REDUCTION_BASE
-    )
-    phases = []
+
+    def int_value(value, default=None):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    def same_or_none(values):
+        values = [value for value in values if value is not None]
+        return values[0] if values and all(value == values[0] for value in values) else None
+
     failures = []
-    header_present = any(value not in (None, 0) for value in header.values())
     lane_expectations = []
     for expected in Q6_FINAL_STORE_TRACE_EXPECTED_RECORDS:
         layout = expected.get("lane_trace_layout") if isinstance(expected, dict) else None
         if not isinstance(layout, dict):
             continue
-        slot_base_value = layout.get("slot_base")
-        candidate_value = expected.get("candidate_id")
-        if not isinstance(slot_base_value, int) or not isinstance(candidate_value, int):
+        slot_base_value = int_value(layout.get("slot_base"))
+        candidate_value = int_value(expected.get("candidate_id"))
+        if slot_base_value is None or candidate_value is None:
             continue
         role = str(expected.get("role") or expected.get("stage") or "")
         if role == "partial_to_workgroup_candidate" or expected.get("stage") == "pre-reduction-store":
@@ -4698,20 +4693,119 @@ def parse_q6_lane_trace_v1(dispatch, writeback):
             name = "reduction-lanes"
         else:
             continue
-        lane_expectations.append((name, slot_base_value, candidate_value))
+        record_layout = layout.get("record_layout") if isinstance(layout.get("record_layout"), dict) else {}
+        lane_expectations.append({
+            "name": name,
+            "slot_base": slot_base_value,
+            "expected_candidate_id": candidate_value,
+            "lane_count": int_value(layout.get("lane_count"), Q6_LANE_TRACE_LANE_COUNT),
+            "words_per_lane": int_value(layout.get("words_per_lane"), Q6_LANE_TRACE_WORDS_PER_LANE),
+            "header_base": int_value(layout.get("header_base"), Q6_LANE_TRACE_HEADER_BASE),
+            "schema_version": int_value(layout.get("schema_version"), Q6_LANE_TRACE_SCHEMA_VERSION),
+            "record_layout": {
+                "local_x": int_value(record_layout.get("local_x"), 0),
+                "value_bits": int_value(record_layout.get("stored_value_bits"), 1),
+                "workgroup_x": int_value(record_layout.get("workgroup_x"), 2),
+                "workgroup_y": int_value(record_layout.get("workgroup_y"), 3),
+                "workgroup_z": int_value(record_layout.get("workgroup_z"), 4),
+                "candidate_id": int_value(record_layout.get("candidate_id"), 5),
+                "col": int_value(record_layout.get("col"), 6),
+                "row": int_value(record_layout.get("row"), 7),
+            },
+        })
     if not lane_expectations:
         lane_expectations = [
-            ("pre-reduction-lanes", Q6_LANE_TRACE_PRE_REDUCTION_BASE, 105),
-            ("reduction-lanes", Q6_LANE_TRACE_REDUCTION_BASE, 115),
+            {
+                "name": "pre-reduction-lanes",
+                "slot_base": Q6_LANE_TRACE_PRE_REDUCTION_BASE,
+                "expected_candidate_id": 105,
+                "lane_count": Q6_LANE_TRACE_LANE_COUNT,
+                "words_per_lane": Q6_LANE_TRACE_WORDS_PER_LANE,
+                "header_base": Q6_LANE_TRACE_HEADER_BASE,
+                "schema_version": Q6_LANE_TRACE_SCHEMA_VERSION,
+                "record_layout": {
+                    "local_x": 0,
+                    "value_bits": 1,
+                    "workgroup_x": 2,
+                    "workgroup_y": 3,
+                    "workgroup_z": 4,
+                    "candidate_id": 5,
+                    "col": 6,
+                    "row": 7,
+                },
+            },
+            {
+                "name": "reduction-lanes",
+                "slot_base": Q6_LANE_TRACE_REDUCTION_BASE,
+                "expected_candidate_id": 115,
+                "lane_count": Q6_LANE_TRACE_LANE_COUNT,
+                "words_per_lane": Q6_LANE_TRACE_WORDS_PER_LANE,
+                "header_base": Q6_LANE_TRACE_HEADER_BASE,
+                "schema_version": Q6_LANE_TRACE_SCHEMA_VERSION,
+                "record_layout": {
+                    "local_x": 0,
+                    "value_bits": 1,
+                    "workgroup_x": 2,
+                    "workgroup_y": 3,
+                    "workgroup_z": 4,
+                    "candidate_id": 5,
+                    "col": 6,
+                    "row": 7,
+                },
+            },
         ]
-    for name, slot_base, expected_candidate in lane_expectations:
+
+    expected_header_base = same_or_none([item["header_base"] for item in lane_expectations]) or Q6_LANE_TRACE_HEADER_BASE
+    expected_schema = same_or_none([item["schema_version"] for item in lane_expectations]) or Q6_LANE_TRACE_SCHEMA_VERSION
+    expected_lane_count = same_or_none([item["lane_count"] for item in lane_expectations])
+    expected_words = same_or_none([item["words_per_lane"] for item in lane_expectations])
+    expected_pre_base = next((item["slot_base"] for item in lane_expectations if item["name"] == "pre-reduction-lanes"), None)
+    expected_reduction_base = next((item["slot_base"] for item in lane_expectations if item["name"] == "reduction-lanes"), None)
+    header = {
+        "schema_version": dispatch.get(expected_header_base),
+        "lane_count": dispatch.get(expected_header_base + 1),
+        "words_per_lane": dispatch.get(expected_header_base + 2),
+        "pre_reduction_base": dispatch.get(expected_header_base + 3),
+        "reduction_base": dispatch.get(expected_header_base + 4),
+        "header_base": expected_header_base,
+        "expected_schema_version": expected_schema,
+        "expected_lane_count": expected_lane_count,
+        "expected_words_per_lane": expected_words,
+        "expected_pre_reduction_base": expected_pre_base,
+        "expected_reduction_base": expected_reduction_base,
+    }
+    header_present = any(header.get(key) not in (None, 0) for key in (
+        "schema_version",
+        "lane_count",
+        "words_per_lane",
+        "pre_reduction_base",
+        "reduction_base",
+    ))
+    header_valid = header["schema_version"] == expected_schema
+    if expected_lane_count is not None:
+        header_valid = header_valid and header["lane_count"] == expected_lane_count
+    if expected_words is not None:
+        header_valid = header_valid and header["words_per_lane"] == expected_words
+    if expected_pre_base is not None:
+        header_valid = header_valid and header["pre_reduction_base"] == expected_pre_base
+    if expected_reduction_base is not None:
+        header_valid = header_valid and header["reduction_base"] == expected_reduction_base
+
+    phases = []
+    for item in lane_expectations:
+        name = item["name"]
+        slot_base = item["slot_base"]
+        expected_candidate = item["expected_candidate_id"]
+        lane_count = item["lane_count"]
+        words_per_lane = item["words_per_lane"]
+        layout = item["record_layout"]
         records = []
         observed_lane_count = 0
-        for lane in range(Q6_LANE_TRACE_LANE_COUNT):
-            base = slot_base + lane * Q6_LANE_TRACE_WORDS_PER_LANE
-            local_x = dispatch.get(base)
-            value_bits = dispatch.get(base + 1)
-            candidate_id = dispatch.get(base + 5)
+        for lane in range(lane_count):
+            base = slot_base + lane * words_per_lane
+            local_x = dispatch.get(base + layout["local_x"])
+            value_bits = dispatch.get(base + layout["value_bits"])
+            candidate_id = dispatch.get(base + layout["candidate_id"])
             unexecuted = (
                 local_x in (None, 0)
                 and value_bits in (None, 0)
@@ -4733,22 +4827,30 @@ def parse_q6_lane_trace_v1(dispatch, writeback):
                 "local_x": local_x,
                 "value_bits": value_bits,
                 "value_f32": q6_bits_to_f32(value_bits),
-                "workgroup_id": [dispatch.get(base + offset) for offset in (2, 3, 4)],
+                "workgroup_id": [
+                    dispatch.get(base + layout["workgroup_x"]),
+                    dispatch.get(base + layout["workgroup_y"]),
+                    dispatch.get(base + layout["workgroup_z"]),
+                ],
                 "candidate_id": candidate_id,
-                "col": dispatch.get(base + 6),
-                "row": dispatch.get(base + 7),
+                "col": dispatch.get(base + layout["col"]),
+                "row": dispatch.get(base + layout["row"]),
                 "status": status,
                 "failures": record_failures,
             }
             if writeback:
                 record.update({
-                    "writeback_local_x": writeback.get(base),
-                    "writeback_value_bits": writeback.get(base + 1),
-                    "writeback_value_f32": q6_bits_to_f32(writeback.get(base + 1)),
-                    "writeback_workgroup_id": [writeback.get(base + offset) for offset in (2, 3, 4)],
-                    "writeback_candidate_id": writeback.get(base + 5),
-                    "writeback_col": writeback.get(base + 6),
-                    "writeback_row": writeback.get(base + 7),
+                    "writeback_local_x": writeback.get(base + layout["local_x"]),
+                    "writeback_value_bits": writeback.get(base + layout["value_bits"]),
+                    "writeback_value_f32": q6_bits_to_f32(writeback.get(base + layout["value_bits"])),
+                    "writeback_workgroup_id": [
+                        writeback.get(base + layout["workgroup_x"]),
+                        writeback.get(base + layout["workgroup_y"]),
+                        writeback.get(base + layout["workgroup_z"]),
+                    ],
+                    "writeback_candidate_id": writeback.get(base + layout["candidate_id"]),
+                    "writeback_col": writeback.get(base + layout["col"]),
+                    "writeback_row": writeback.get(base + layout["row"]),
                 })
             if record_failures:
                 failures.append("%s lane %s: %s" % (name, lane, ",".join(record_failures)))
@@ -4757,6 +4859,8 @@ def parse_q6_lane_trace_v1(dispatch, writeback):
             "name": name,
             "slot_base": slot_base,
             "expected_candidate_id": expected_candidate,
+            "lane_count": lane_count,
+            "words_per_lane": words_per_lane,
             "observed_lane_count": observed_lane_count,
             "executed_lane_count": sum(1 for record in records if record["status"] == "pass"),
             "records": records,

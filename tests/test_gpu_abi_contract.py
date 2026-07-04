@@ -573,7 +573,7 @@ class GpuAbiContractTest(unittest.TestCase):
                 "role": "partial_to_workgroup_candidate",
                 "phase": "full",
                 "slot_base": 68,
-                "lane_trace_layout": {"slot_base": 144, "lane_count": 64, "words_per_lane": 8},
+                "lane_trace_layout": {"header_base": 128, "schema_version": 1, "slot_base": 144, "lane_count": 32, "words_per_lane": 8},
             },
             {
                 "candidate_id": 215,
@@ -581,7 +581,7 @@ class GpuAbiContractTest(unittest.TestCase):
                 "role": "reduction_candidate",
                 "phase": "full",
                 "slot_base": 80,
-                "lane_trace_layout": {"slot_base": 656, "lane_count": 64, "words_per_lane": 8},
+                "lane_trace_layout": {"header_base": 128, "schema_version": 1, "slot_base": 400, "lane_count": 32, "words_per_lane": 8},
             },
             {
                 "candidate_id": 227,
@@ -626,10 +626,10 @@ class GpuAbiContractTest(unittest.TestCase):
         parser = namespace["parse_q6_final_store_trace_v2"]
         values = {
             128: 1,
-            129: 64,
+            129: 32,
             130: 8,
             131: 144,
-            132: 656,
+            132: 400,
         }
         for record, value_bits in [
             (probe_writes[0], 0x3f500000),
@@ -653,7 +653,7 @@ class GpuAbiContractTest(unittest.TestCase):
                 values[base + 10] = 2
         for lane_base, candidate_id, value_bits in [
             (144 + 3 * 8, 205, 0x3fa00000),
-            (656 + 3 * 8, 215, 0x40200000),
+            (400 + 3 * 8, 215, 0x40200000),
         ]:
             values[lane_base] = 3
             values[lane_base + 1] = value_bits
