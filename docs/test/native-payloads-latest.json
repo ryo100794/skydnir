@@ -80,7 +80,7 @@
       },
       {
         "entry": "lib/arm64-v8a/libpdockervulkanicd.so",
-        "sha256": "0fa0adfca2e72bcdfd49e18438db7ec510ba3f9ccb9fbc64a22ff6b77ed58e9a",
+        "sha256": "96b95a6f68c649ce104ee25580e4ae9ff9da8758c67a96ab064fe82f9f3ae119",
         "size": 421976
       }
     ],
@@ -212,14 +212,14 @@
     {
       "abi": "arm64-v8a",
       "exists": true,
-      "file": "/root/tl/pdocker-android/app/src/main/jniLibs/arm64-v8a/libpdockervulkanicd.so: ELF 64-bit LSB shared object, ARM aarch64, version 1 (SYSV), dynamically linked, BuildID[sha1]=dce563b4a9442236eaa87f716e1b60f5ba476a9e, not stripped",
+      "file": "/root/tl/pdocker-android/app/src/main/jniLibs/arm64-v8a/libpdockervulkanicd.so: ELF 64-bit LSB shared object, ARM aarch64, version 1 (SYSV), dynamically linked, BuildID[sha1]=702f37ae677a088be9375e2533ea5dc6bf0a3a84, not stripped",
       "has_android_linker": false,
       "has_glibc_loader": false,
       "name": "libpdockervulkanicd.so",
       "path": "app/src/main/jniLibs/arm64-v8a/libpdockervulkanicd.so",
       "readelf_header_has_machine": true,
       "role": "linux-glibc-container",
-      "sha256": "0fa0adfca2e72bcdfd49e18438db7ec510ba3f9ccb9fbc64a22ff6b77ed58e9a",
+      "sha256": "96b95a6f68c649ce104ee25580e4ae9ff9da8758c67a96ab064fe82f9f3ae119",
       "size": 421976
     },
     {
@@ -251,14 +251,14 @@
     {
       "abi": "armeabi-v7a",
       "exists": true,
-      "file": "/root/tl/pdocker-android/app/src/main/jniLibs/armeabi-v7a/libpdockervulkanicd.so: ELF 32-bit LSB shared object, ARM, EABI5 version 1 (SYSV), dynamically linked, BuildID[sha1]=4fc04d8d8cb4a28baaf1aecb216835ab9d2f6d43, not stripped",
+      "file": "/root/tl/pdocker-android/app/src/main/jniLibs/armeabi-v7a/libpdockervulkanicd.so: ELF 32-bit LSB shared object, ARM, EABI5 version 1 (SYSV), dynamically linked, BuildID[sha1]=81a2e7b553989e10965d801e30924ae7caf66872, not stripped",
       "has_android_linker": false,
       "has_glibc_loader": false,
       "name": "libpdockervulkanicd.so",
       "path": "app/src/main/jniLibs/armeabi-v7a/libpdockervulkanicd.so",
       "readelf_header_has_machine": true,
       "role": "linux-glibc-container-experimental",
-      "sha256": "d133aaf84ebd2a049b9a4902ceffac474b8012cdfd814346618604ad1f393b19",
+      "sha256": "cf316154bd11ff94c5003079ebf09dbc90e3653a109083c31fbb8d0af18ecc4f",
       "size": 296184
     },
     {

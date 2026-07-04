@@ -16316,6 +16316,28 @@ static void pdocker_vk_destroy_swapchain_images(VkDevice device, PdockerVkSwapch
     }
 }
 
+static bool swapchain_create_pnext_noop(const VkSwapchainCreateInfoKHR *info) {
+    for (const void *node = info ? info->pNext : NULL; node;) {
+        PdockerVkStructHeader header = read_vk_struct_header(node);
+        switch (header.sType) {
+#ifdef VK_STRUCTURE_TYPE_DEVICE_GROUP_SWAPCHAIN_CREATE_INFO_KHR
+            case VK_STRUCTURE_TYPE_DEVICE_GROUP_SWAPCHAIN_CREATE_INFO_KHR: {
+                const VkDeviceGroupSwapchainCreateInfoKHR *device_group =
+                    (const VkDeviceGroupSwapchainCreateInfoKHR *)node;
+                if (device_group->modes != VK_DEVICE_GROUP_PRESENT_MODE_LOCAL_BIT_KHR) {
+                    return false;
+                }
+                break;
+            }
+#endif
+            default:
+                return false;
+        }
+        node = header.pNext;
+    }
+    return true;
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateSwapchainKHR(
         VkDevice device,
         const VkSwapchainCreateInfoKHR *pCreateInfo,
@@ -16330,7 +16352,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSwapchainKHR(
     if (!vulkan_v5_object_transport_enabled()) {
         return unsupported_image_transport_result("vkCreateSwapchainKHR");
     }
-    if (pCreateInfo->pNext) {
+    if (!swapchain_create_pnext_noop(pCreateInfo)) {
         trace_icd_runtime_failure("swapchain-pnext-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }

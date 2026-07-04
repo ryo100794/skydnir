@@ -1394,13 +1394,14 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn('trace_icd_runtime_failure("swapchain-unimplemented"', icd)
 
         create_body = c_function_body(icd, "vkCreateSwapchainKHR")
+        swapchain_pnext_body = c_function_body(icd, "swapchain_create_pnext_noop")
         for marker in [
             "!pCreateInfo",
             "!pSwapchain",
             "VK_ERROR_INITIALIZATION_FAILED",
             "pCreateInfo->surface",
             "pCreateInfo->sType != VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR",
-            "pCreateInfo->pNext",
+            "!swapchain_create_pnext_noop(pCreateInfo)",
             "swapchain-pnext-unsupported",
             "pCreateInfo->flags != 0",
             "swapchain-flags-unsupported",
@@ -1420,6 +1421,11 @@ class GpuAbiContractTest(unittest.TestCase):
             "VK_SUCCESS",
         ]:
             self.assertIn(marker, create_body)
+        for marker in [
+            "VK_STRUCTURE_TYPE_DEVICE_GROUP_SWAPCHAIN_CREATE_INFO_KHR",
+            "device_group->modes != VK_DEVICE_GROUP_PRESENT_MODE_LOCAL_BIT_KHR",
+        ]:
+            self.assertIn(marker, swapchain_pnext_body)
         self.assertRegex(create_body, r"(PdockerVkSwapchain|swapchain->)")
         self.assertNotIn("pCreateInfo->flags != 0 || pCreateInfo->oldSwapchain", create_body)
         self.assertRegex(create_body, r"(calloc|pdocker_alloc_handle|malloc)")
