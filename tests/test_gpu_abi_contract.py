@@ -5724,6 +5724,16 @@ class GpuAbiContractTest(unittest.TestCase):
         update_body = icd.split(
             "VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets", 1
         )[1].split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateShaderModule", 1)[0]
+        self.assertIn('unsupported_create_info_pnext_result("vkUpdateDescriptorSets.write", w->pNext)', update_body)
+        self.assertIn('unsupported_create_info_pnext_result("vkUpdateDescriptorSets.copy", c->pNext)', update_body)
+        self.assertLess(
+            update_body.index('unsupported_create_info_pnext_result("vkUpdateDescriptorSets.write"'),
+            update_body.index("descriptor_update_get_shadow("),
+        )
+        self.assertLess(
+            update_body.index('unsupported_create_info_pnext_result("vkUpdateDescriptorSets.copy"'),
+            update_body.index("descriptor_copy_slot_compatible(src, src_binding, src_array"),
+        )
         for marker in [
             "PdockerVkDescriptorUpdateTarget",
             "descriptor_update_find_shadow",

@@ -14717,6 +14717,11 @@ VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets(
 
     for (uint32_t i = 0; i < descriptorWriteCount; ++i) {
         const VkWriteDescriptorSet *w = &pDescriptorWrites[i];
+        if (w->pNext) {
+            unsupported_create_info_pnext_result("vkUpdateDescriptorSets.write", w->pNext);
+            update_rc = -EINVAL;
+            goto fail_closed;
+        }
         PdockerVkDescriptorSet *live_set = pdocker_vk_descriptor_set_from_handle(w->dstSet);
         PdockerVkDescriptorSet *set = NULL;
         if (!live_set) {
@@ -14865,6 +14870,11 @@ VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets(
 
     for (uint32_t i = 0; i < descriptorCopyCount; ++i) {
         const VkCopyDescriptorSet *c = &pDescriptorCopies[i];
+        if (c && c->pNext) {
+            unsupported_create_info_pnext_result("vkUpdateDescriptorSets.copy", c->pNext);
+            update_rc = -EINVAL;
+            goto fail_closed;
+        }
         PdockerVkDescriptorSet *src_live = c ? pdocker_vk_descriptor_set_from_handle(c->srcSet) : NULL;
         PdockerVkDescriptorSet *dst_live = c ? pdocker_vk_descriptor_set_from_handle(c->dstSet) : NULL;
         PdockerVkDescriptorSet *src = NULL;
