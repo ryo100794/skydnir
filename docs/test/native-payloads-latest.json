@@ -80,7 +80,7 @@
       },
       {
         "entry": "lib/arm64-v8a/libpdockervulkanicd.so",
-        "sha256": "20df4b3e3032abc0cf36a3386083601950438363ee94311072179a628e17f32d",
+        "sha256": "5e00d182ec03871447252a5882c33563e2b72f5704fccc32b853ef4ad48a1118",
         "size": 421976
       }
     ],
@@ -219,7 +219,7 @@
       "path": "app/src/main/jniLibs/arm64-v8a/libpdockervulkanicd.so",
       "readelf_header_has_machine": true,
       "role": "linux-glibc-container",
-      "sha256": "20df4b3e3032abc0cf36a3386083601950438363ee94311072179a628e17f32d",
+      "sha256": "5e00d182ec03871447252a5882c33563e2b72f5704fccc32b853ef4ad48a1118",
       "size": 421976
     },
     {
@@ -258,7 +258,7 @@
       "path": "app/src/main/jniLibs/armeabi-v7a/libpdockervulkanicd.so",
       "readelf_header_has_machine": true,
       "role": "linux-glibc-container-experimental",
-      "sha256": "88389e9f1951f0306df2471fec568850698601794e487ebf7b80ee647f06bb41",
+      "sha256": "751495022bc46838c1d5cc32a94eb04de46d76c231be5fe13d79bf7327da3565",
       "size": 296184
     },
     {

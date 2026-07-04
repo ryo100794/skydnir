@@ -1650,6 +1650,7 @@ class GpuAbiContractTest(unittest.TestCase):
         begin_render_pass_body = icd.split(
             "VKAPI_ATTR void VKAPI_CALL vkCmdBeginRenderPass", 1
         )[1].split("VKAPI_ATTR void VKAPI_CALL vkCmdNextSubpass", 1)[0]
+        render_pass_begin_pnext_body = c_function_body(icd, "render_pass_begin_pnext_noop")
         render_pass2_body = icd.split(
             "VKAPI_ATTR void VKAPI_CALL vkCmdBeginRenderPass2", 1
         )[1].split("static void record_vertex_buffer_bindings", 1)[0]
@@ -1666,7 +1667,20 @@ class GpuAbiContractTest(unittest.TestCase):
             "if (!copy_rendering_attachment_state(&cmd->active_stencil_attachment",
         ]:
             self.assertIn(marker, begin_rendering_body)
-        self.assertIn("if (pRenderPassBegin && pRenderPassBegin->pNext)", begin_render_pass_body)
+        self.assertIn("if (!render_pass_begin_pnext_noop(pRenderPassBegin))", begin_render_pass_body)
+        for marker in [
+            "VK_STRUCTURE_TYPE_DEVICE_GROUP_RENDER_PASS_BEGIN_INFO",
+            "info->deviceMask != 0 && info->deviceMask != 1u",
+            "info->deviceRenderAreaCount == 0 && !info->pDeviceRenderAreas",
+            "info->deviceRenderAreaCount != 1u",
+            "area->extent.width != begin->renderArea.extent.width",
+            "VK_STRUCTURE_TYPE_RENDER_PASS_ATTACHMENT_BEGIN_INFO",
+            "info->attachmentCount != 0 || info->pAttachments",
+            "VK_STRUCTURE_TYPE_RENDER_PASS_SAMPLE_LOCATIONS_BEGIN_INFO_EXT",
+            "info->attachmentInitialSampleLocationsCount != 0",
+            "info->postSubpassSampleLocationsCount != 0",
+        ]:
+            self.assertIn(marker, render_pass_begin_pnext_body)
         for marker in [
             "pSubpassBeginInfo && pSubpassBeginInfo->pNext",
             "pSubpassEndInfo && pSubpassEndInfo->pNext",

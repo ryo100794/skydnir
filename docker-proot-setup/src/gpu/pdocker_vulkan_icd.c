@@ -17379,6 +17379,61 @@ static bool append_normalized_render_pass_begin(
     return true;
 }
 
+static bool render_pass_begin_pnext_noop(const VkRenderPassBeginInfo *begin) {
+    for (const void *node = begin ? begin->pNext : NULL; node;) {
+        PdockerVkStructHeader header = read_vk_struct_header(node);
+        switch (header.sType) {
+#ifdef VK_STRUCTURE_TYPE_DEVICE_GROUP_RENDER_PASS_BEGIN_INFO
+            case VK_STRUCTURE_TYPE_DEVICE_GROUP_RENDER_PASS_BEGIN_INFO: {
+                const VkDeviceGroupRenderPassBeginInfo *info =
+                    (const VkDeviceGroupRenderPassBeginInfo *)node;
+                if (info->deviceMask != 0 && info->deviceMask != 1u) return false;
+                if (info->deviceRenderAreaCount == 0 && !info->pDeviceRenderAreas) {
+                    break;
+                }
+                if (!begin || info->deviceRenderAreaCount != 1u ||
+                    !info->pDeviceRenderAreas) {
+                    return false;
+                }
+                const VkRect2D *area = &info->pDeviceRenderAreas[0];
+                if (area->offset.x != begin->renderArea.offset.x ||
+                    area->offset.y != begin->renderArea.offset.y ||
+                    area->extent.width != begin->renderArea.extent.width ||
+                    area->extent.height != begin->renderArea.extent.height) {
+                    return false;
+                }
+                break;
+            }
+#endif
+#ifdef VK_STRUCTURE_TYPE_RENDER_PASS_ATTACHMENT_BEGIN_INFO
+            case VK_STRUCTURE_TYPE_RENDER_PASS_ATTACHMENT_BEGIN_INFO: {
+                const VkRenderPassAttachmentBeginInfo *info =
+                    (const VkRenderPassAttachmentBeginInfo *)node;
+                if (info->attachmentCount != 0 || info->pAttachments) return false;
+                break;
+            }
+#endif
+#ifdef VK_STRUCTURE_TYPE_RENDER_PASS_SAMPLE_LOCATIONS_BEGIN_INFO_EXT
+            case VK_STRUCTURE_TYPE_RENDER_PASS_SAMPLE_LOCATIONS_BEGIN_INFO_EXT: {
+                const VkRenderPassSampleLocationsBeginInfoEXT *info =
+                    (const VkRenderPassSampleLocationsBeginInfoEXT *)node;
+                if (info->attachmentInitialSampleLocationsCount != 0 ||
+                    info->pAttachmentInitialSampleLocations ||
+                    info->postSubpassSampleLocationsCount != 0 ||
+                    info->pPostSubpassSampleLocations) {
+                    return false;
+                }
+                break;
+            }
+#endif
+            default:
+                return false;
+        }
+        node = header.pNext;
+    }
+    return true;
+}
+
 VKAPI_ATTR void VKAPI_CALL vkCmdBeginRenderPass(
         VkCommandBuffer commandBuffer,
         const VkRenderPassBeginInfo *pRenderPassBegin,
@@ -17397,7 +17452,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBeginRenderPass(
     for (uint32_t i = 0; pRenderPassBegin && i < cmd->active_clear_value_count; ++i) {
         cmd->active_clear_values[i] = pRenderPassBegin->pClearValues[i];
     }
-    if (pRenderPassBegin && pRenderPassBegin->pNext) {
+    if (!render_pass_begin_pnext_noop(pRenderPassBegin)) {
         cmd->graphics_unsupported = true;
     }
     if (!append_normalized_render_pass_begin(cmd, pRenderPassBegin, contents)) {
