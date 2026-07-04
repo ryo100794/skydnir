@@ -12968,14 +12968,39 @@ static bool normalize_image_view_subresource_range_for_transport(
     return true;
 }
 
+static VkResult validate_image_view_pnext_for_transport(
+        const VkImageViewCreateInfo *info,
+        const PdockerVkImage *image) {
+    if (!info || !image) return VK_ERROR_INITIALIZATION_FAILED;
+    for (const void *node = info->pNext; node;) {
+        PdockerVkStructHeader header = read_vk_struct_header(node);
+        switch (header.sType) {
+            case VK_STRUCTURE_TYPE_IMAGE_VIEW_USAGE_CREATE_INFO: {
+                const VkImageViewUsageCreateInfo *usage_info = (const VkImageViewUsageCreateInfo *)node;
+                if (usage_info->usage == 0 || (usage_info->usage & ~image->usage) != 0) {
+                    trace_icd_runtime_failure("image-view-usage-pnext-unsupported",
+                                              VK_ERROR_FEATURE_NOT_PRESENT);
+                    return VK_ERROR_FEATURE_NOT_PRESENT;
+                }
+                break;
+            }
+            default:
+                return unsupported_image_pnext_result("vkCreateImageView", node);
+        }
+        node = header.pNext;
+    }
+    return VK_SUCCESS;
+}
+
 static VkResult validate_image_view_create_info_for_transport(
         const VkImageViewCreateInfo *info,
         VkImageSubresourceRange *normalized_range_out) {
     if (!info) return VK_ERROR_INITIALIZATION_FAILED;
-    if (info->pNext) return unsupported_image_pnext_result("vkCreateImageView", info->pNext);
     if (info->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;
     PdockerVkImage *image = pdocker_vk_image_from_handle(info->image);
     if (!image) return VK_ERROR_INITIALIZATION_FAILED;
+    VkResult pnext_rc = validate_image_view_pnext_for_transport(info, image);
+    if (pnext_rc != VK_SUCCESS) return pnext_rc;
     if (!pdocker_vk_format_bridge_supported(info->format) || info->format != image->format) {
         return VK_ERROR_FORMAT_NOT_SUPPORTED;
     }

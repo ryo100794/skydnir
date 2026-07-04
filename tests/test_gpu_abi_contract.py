@@ -6703,12 +6703,21 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         self.assertIn("validate_image_create_info_for_transport(pCreateInfo)", create_image_body)
         self.assertNotIn("if (!pdocker_vk_format_bridge_supported(pCreateInfo->format))", create_image_body)
+        image_view_pnext_body = icd.split("static VkResult validate_image_view_pnext_for_transport", 1)[1].split(
+            "static VkResult validate_image_view_create_info_for_transport", 1
+        )[0]
+        self.assertIn("VK_STRUCTURE_TYPE_IMAGE_VIEW_USAGE_CREATE_INFO", image_view_pnext_body)
+        self.assertIn("usage_info->usage == 0", image_view_pnext_body)
+        self.assertIn("(usage_info->usage & ~image->usage) != 0", image_view_pnext_body)
+        self.assertIn('trace_icd_runtime_failure("image-view-usage-pnext-unsupported"', image_view_pnext_body)
+        self.assertIn('unsupported_image_pnext_result("vkCreateImageView", node)', image_view_pnext_body)
         image_view_validate_body = icd.split("static VkResult validate_image_view_create_info_for_transport", 1)[1].split(
             "static VkResult validate_sampler_create_info_for_transport", 1
         )[0]
-        self.assertIn("if (info->pNext) return unsupported_image_pnext_result", image_view_validate_body)
         self.assertIn("if (info->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;", image_view_validate_body)
         self.assertIn("PdockerVkImage *image = pdocker_vk_image_from_handle(info->image);", image_view_validate_body)
+        self.assertIn("validate_image_view_pnext_for_transport(info, image)", image_view_validate_body)
+        self.assertIn("if (pnext_rc != VK_SUCCESS) return pnext_rc;", image_view_validate_body)
         self.assertIn("info->format != image->format", image_view_validate_body)
         self.assertIn("normalize_image_view_subresource_range_for_transport", image_view_validate_body)
         normalize_view_body = icd.split("static bool normalize_image_view_subresource_range_for_transport", 1)[1].split(
