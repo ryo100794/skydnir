@@ -22448,6 +22448,27 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetQueryPoolResults(
     return rc;
 }
 
+static VkResult validate_fence_create_pnext(const void *pNext) {
+    for (const void *node = pNext; node;) {
+        PdockerVkStructHeader header = read_vk_struct_header(node);
+        switch (header.sType) {
+#ifdef VK_STRUCTURE_TYPE_EXPORT_FENCE_CREATE_INFO
+            case VK_STRUCTURE_TYPE_EXPORT_FENCE_CREATE_INFO: {
+                const VkExportFenceCreateInfo *info = (const VkExportFenceCreateInfo *)node;
+                if (info->handleTypes != 0) {
+                    return unsupported_create_info_pnext_result("vkCreateFence", node);
+                }
+                break;
+            }
+#endif
+            default:
+                return unsupported_create_info_pnext_result("vkCreateFence", node);
+        }
+        node = header.pNext;
+    }
+    return VK_SUCCESS;
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateFence(
         VkDevice device,
         const VkFenceCreateInfo *pCreateInfo,
@@ -22457,9 +22478,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateFence(
     (void)pAllocator;
     if (!pFence) return VK_ERROR_INITIALIZATION_FAILED;
     *pFence = VK_NULL_HANDLE;
-    if (pCreateInfo && pCreateInfo->pNext) {
-        return unsupported_create_info_pnext_result("vkCreateFence", pCreateInfo->pNext);
-    }
+    VkResult pnext_rc = validate_fence_create_pnext(pCreateInfo ? pCreateInfo->pNext : NULL);
+    if (pnext_rc != VK_SUCCESS) return pnext_rc;
     if (pCreateInfo && (pCreateInfo->flags & ~VK_FENCE_CREATE_SIGNALED_BIT) != 0) {
         trace_icd_runtime_failure("fence-flags-unsupported",
                                   VK_ERROR_FEATURE_NOT_PRESENT);
@@ -22569,6 +22589,13 @@ static bool semaphore_create_info_parse_pnext(const void *pNext, bool *timeline,
                 }
                 break;
             }
+#ifdef VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO
+            case VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO: {
+                const VkExportSemaphoreCreateInfo *info = (const VkExportSemaphoreCreateInfo *)node;
+                if (info->handleTypes != 0) return false;
+                break;
+            }
+#endif
             default:
                 return false;
         }
