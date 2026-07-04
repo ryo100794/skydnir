@@ -13354,8 +13354,40 @@ VKAPI_ATTR VkResult VKAPI_CALL vkBindImageMemory(
 }
 
 static VkResult validate_bind_memory_info_pnext(const char *api_name, const void *pNext) {
-    if (!pNext) return VK_SUCCESS;
-    return unsupported_create_info_pnext_result(api_name, pNext);
+    for (const void *node = pNext; node;) {
+        PdockerVkStructHeader header = read_vk_struct_header(node);
+        switch (header.sType) {
+#ifdef VK_STRUCTURE_TYPE_BIND_BUFFER_MEMORY_DEVICE_GROUP_INFO
+            case VK_STRUCTURE_TYPE_BIND_BUFFER_MEMORY_DEVICE_GROUP_INFO: {
+                const VkBindBufferMemoryDeviceGroupInfo *info =
+                    (const VkBindBufferMemoryDeviceGroupInfo *)node;
+                if (info->deviceIndexCount > 1 ||
+                    (info->deviceIndexCount == 1 &&
+                     (!info->pDeviceIndices || info->pDeviceIndices[0] != 0))) {
+                    return unsupported_create_info_pnext_result(api_name, node);
+                }
+                break;
+            }
+#endif
+#ifdef VK_STRUCTURE_TYPE_BIND_IMAGE_MEMORY_DEVICE_GROUP_INFO
+            case VK_STRUCTURE_TYPE_BIND_IMAGE_MEMORY_DEVICE_GROUP_INFO: {
+                const VkBindImageMemoryDeviceGroupInfo *info =
+                    (const VkBindImageMemoryDeviceGroupInfo *)node;
+                if (info->deviceIndexCount > 1 ||
+                    (info->deviceIndexCount == 1 &&
+                     (!info->pDeviceIndices || info->pDeviceIndices[0] != 0)) ||
+                    info->splitInstanceBindRegionCount != 0) {
+                    return unsupported_create_info_pnext_result(api_name, node);
+                }
+                break;
+            }
+#endif
+            default:
+                return unsupported_create_info_pnext_result(api_name, node);
+        }
+        node = header.pNext;
+    }
+    return VK_SUCCESS;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkBindImageMemory2(

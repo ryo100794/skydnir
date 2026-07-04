@@ -6501,10 +6501,17 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("for (void *node = pMemoryRequirements->pNext", buffer_body)
 
 
-    def test_vulkan_bind_memory2_rejects_unsupported_pnext_and_null_arrays(self):
+    def test_vulkan_bind_memory2_accepts_single_device_group_noop_and_rejects_widening(self):
         icd = VULKAN_ICD.read_text()
         self.assertIn("static VkResult validate_bind_memory_info_pnext", icd)
-        self.assertIn("unsupported_create_info_pnext_result(api_name, pNext)", icd)
+        validator_body = c_function_body(icd, "validate_bind_memory_info_pnext")
+        self.assertIn("VK_STRUCTURE_TYPE_BIND_BUFFER_MEMORY_DEVICE_GROUP_INFO", validator_body)
+        self.assertIn("VK_STRUCTURE_TYPE_BIND_IMAGE_MEMORY_DEVICE_GROUP_INFO", validator_body)
+        self.assertIn("info->deviceIndexCount > 1", validator_body)
+        self.assertIn("!info->pDeviceIndices || info->pDeviceIndices[0] != 0", validator_body)
+        self.assertIn("info->splitInstanceBindRegionCount != 0", validator_body)
+        self.assertNotIn("info->pSplitInstanceBindRegions", validator_body)
+        self.assertIn("unsupported_create_info_pnext_result(api_name, node)", validator_body)
         buffer_body = c_function_body(icd, "vkBindBufferMemory2")
         image_body = c_function_body(icd, "vkBindImageMemory2")
         for body, api in [(buffer_body, "vkBindBufferMemory2"), (image_body, "vkBindImageMemory2")]:
