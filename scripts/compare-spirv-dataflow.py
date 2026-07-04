@@ -124,6 +124,43 @@ def push_signature(module: dict[str, Any]) -> list[dict[str, Any]]:
         for member in members
     ]
 
+def q6_descriptor_leaf_signature(summary: dict[str, Any]) -> list[dict[str, Any]]:
+    if not isinstance(summary, dict):
+        return []
+    leaves = []
+    for leaf in summary.get("descriptor_load_leaves") or []:
+        if not isinstance(leaf, dict):
+            continue
+        descriptor = leaf.get("descriptor") if isinstance(leaf.get("descriptor"), dict) else {}
+        byte_offset = leaf.get("byte_offset") if isinstance(leaf.get("byte_offset"), dict) else {}
+        terminal = leaf.get("terminal_type") if isinstance(leaf.get("terminal_type"), dict) else leaf.get("element")
+        leaves.append(
+            {
+                "descriptor": {
+                    "set": descriptor.get("set", leaf.get("set")),
+                    "binding": descriptor.get("binding", leaf.get("binding")),
+                    "variable_id": descriptor.get("variable_id", leaf.get("variable_id")),
+                },
+                "member_path": [
+                    {
+                        "kind": item.get("kind"),
+                        "index": item.get("index"),
+                        "offset": item.get("offset"),
+                        "array_stride": item.get("array_stride"),
+                        "element_type_id": item.get("element_type_id"),
+                    }
+                    for item in leaf.get("member_path") or []
+                    if isinstance(item, dict)
+                ],
+                "byte_offset": {
+                    "static": byte_offset.get("static"),
+                    "dynamic_terms": byte_offset.get("dynamic_terms") or [],
+                },
+                "terminal_type": terminal,
+            }
+        )
+    return leaves
+
 def q6_dependency_signature(summary: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(summary, dict):
         return {}
@@ -165,6 +202,10 @@ def q6_dependency_signature(summary: dict[str, Any]) -> dict[str, Any]:
             for item in summary.get("descriptor_dependencies") or []
             if isinstance(item, dict)
         ],
+        "descriptor_load_leaves": q6_descriptor_leaf_signature(summary),
+        "descriptor_load_leaf_count": summary.get("descriptor_load_leaf_count"),
+        "slice_complete": summary.get("slice_complete"),
+        "truncation_boundaries": summary.get("truncation_boundaries") or {},
     }
 
 def q6_barrier_window_signature(module: dict[str, Any]) -> dict[str, Any] | None:

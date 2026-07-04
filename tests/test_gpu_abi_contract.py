@@ -10884,7 +10884,11 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertEqual(flow["valid_store_count"], 2)
         self.assertEqual([store["word_index"] for store in flow["stores"]], [4053, 7371])
         self.assertEqual(flow["debug_probe_descriptor"], {"set": 0, "binding": 6})
-        for store in flow["stores"]:
+        expected_descriptor_leaves = [
+            [(3920, 2701, 2700, 3, 184, 0, 4), (3991, 2723, 2722, 4, 213, 0, 4)],
+            [(7238, 1742, 1741, 3, 184, 0, 4), (7309, 1764, 1763, 4, 213, 0, 4)],
+        ]
+        for store_index, store in enumerate(flow["stores"]):
             stored = store["stored_value"]
             output_index = store["output_index"]
             self.assertTrue(store["valid"])
@@ -10914,6 +10918,35 @@ class GpuAbiContractTest(unittest.TestCase):
                 [(0, 3), (0, 4)],
                 [(dep["set"], dep["binding"]) for dep in stored["descriptor_dependencies"]],
             )
+            self.assertFalse(stored["slice_complete"])
+            self.assertGreater(stored["truncation_boundaries"]["truncated_node_count"], 0)
+            self.assertEqual(2, stored["descriptor_load_leaf_count"])
+            leaves = stored["descriptor_load_leaves"]
+            self.assertEqual(
+                expected_descriptor_leaves[store_index],
+                [
+                    (
+                        leaf["load_word_index"],
+                        leaf["result_id"],
+                        leaf["pointer_id"],
+                        leaf["descriptor"]["binding"],
+                        leaf["descriptor"]["variable_id"],
+                        leaf["byte_offset"]["static"],
+                        leaf["byte_offset"]["dynamic_terms"][0]["scale"],
+                    )
+                    for leaf in leaves
+                ],
+            )
+            self.assertEqual([(0, 3), (0, 4)], [(leaf["descriptor"]["set"], leaf["descriptor"]["binding"]) for leaf in leaves])
+            self.assertEqual([0, 0], [leaf["member_path"][0]["index"] for leaf in leaves])
+            self.assertEqual(
+                ["runtime_array_element", "runtime_array_element"],
+                [leaf["member_path"][1]["kind"] for leaf in leaves],
+            )
+            self.assertEqual([4, 4], [leaf["member_path"][1]["array_stride"] for leaf in leaves])
+            self.assertEqual(["float", "float"], [leaf["terminal_type"]["kind"] for leaf in leaves])
+            self.assertEqual([32, 32], [leaf["terminal_type"]["bits"] for leaf in leaves])
+            self.assertNotIn(6, [leaf["descriptor"]["binding"] for leaf in leaves])
 
     def test_spirv_analyzer_reports_q6_barrier_window_evidence(self):
         self.assertTrue(Q6_FUNCTION_ACCUMULATOR_SPV.exists(), "Q6 Function-accumulator SPIR-V evidence must be preserved")

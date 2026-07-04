@@ -576,6 +576,11 @@ def build_q6_probe_targets(module: dict, debug_descriptor: dict | None = None) -
         if isinstance(debug_descriptor, dict) and isinstance(debug_descriptor.get("binding"), int)
         else 5
     )
+    descriptor_by_id = {
+        int(item["id"]): item
+        for item in module.get("descriptor_variables", [])
+        if isinstance(item, dict) and isinstance(item.get("id"), int)
+    }
 
     def block_for_word(word_index: int) -> dict | None:
         for function in module.get("control_flow", {}).get("functions", []):
@@ -759,6 +764,167 @@ def build_q6_probe_targets(module: dict, debug_descriptor: dict | None = None) -
             "truncated_index_count": max(0, len(indices) - 4),
         }
 
+    def index_static_u32(index: object) -> int | None:
+        if not isinstance(index, dict):
+            return None
+        if isinstance(index.get("constant_u32"), int):
+            return int(index["constant_u32"])
+        expr = index.get("expr")
+        if isinstance(expr, dict) and expr.get("kind") == "constant" and isinstance(expr.get("value_u32"), int):
+            return int(expr["value_u32"])
+        if index.get("kind") == "constant" and isinstance(index.get("value_u32"), int):
+            return int(index["value_u32"])
+        return None
+
+    def compact_type_leaf(type_info: object) -> dict:
+        if not isinstance(type_info, dict):
+            return {"kind": type(type_info).__name__}
+        kind = type_info.get("kind")
+        item = {"kind": kind, "id": type_info.get("id")}
+        for key in ("bits", "signed", "component_count", "length_u32"):
+            if key in type_info:
+                item[key] = type_info.get(key)
+        if kind == "vector" and isinstance(type_info.get("component"), dict):
+            item["component"] = compact_type_leaf(type_info.get("component"))
+        return item
+
+    def descriptor_access_from_pointer(
+        pointer: object,
+        access_word_index: int | None,
+        op: str,
+        *,
+        result_id: int | None = None,
+        result_type: int | None = None,
+        pointer_id: int | None = None,
+    ) -> dict | None:
+        if not isinstance(pointer, dict):
+            return None
+        base = pointer_base(pointer)
+        if base.get("kind") != "descriptor" or not isinstance(base.get("id"), int):
+            return None
+        descriptor = descriptor_by_id.get(int(base["id"]), {})
+        current = descriptor.get("pointee_layout")
+        indices = pointer.get("indices") if isinstance(pointer.get("indices"), list) else []
+        member_path: list[dict] = []
+        member_indices: list[int] = []
+        static_member_offsets: list[int] = []
+        array_strides: list[int] = []
+        dynamic_indices: list[dict] = []
+        dynamic_terms: list[dict] = []
+        static_byte_offset = 0
+        static_byte_offset_known = True
+        for ordinal, index in enumerate(indices):
+            value = index_static_u32(index)
+            index_id = index.get("id") if isinstance(index, dict) and isinstance(index.get("id"), int) else None
+            if not isinstance(current, dict):
+                dynamic_indices.append({"ordinal": ordinal, "id": index_id, "reason": "unknown-layout"})
+                static_byte_offset_known = False
+                continue
+            kind = current.get("kind")
+            if kind == "struct":
+                members = current.get("members") if isinstance(current.get("members"), list) else []
+                if isinstance(value, int) and 0 <= value < len(members) and isinstance(members[value], dict):
+                    member = members[value]
+                    offset = member.get("offset")
+                    member_indices.append(value)
+                    member_path.append(
+                        {
+                            "kind": "struct_member",
+                            "index": value,
+                            "index_id": index_id,
+                            "offset": offset,
+                            "type_id": member.get("type_id"),
+                        }
+                    )
+                    if isinstance(offset, int):
+                        static_member_offsets.append(offset)
+                        if static_byte_offset_known:
+                            static_byte_offset += offset
+                    else:
+                        static_byte_offset_known = False
+                    current = member.get("type")
+                    continue
+                dynamic_indices.append({"ordinal": ordinal, "id": index_id, "reason": "dynamic-struct-member"})
+                static_byte_offset_known = False
+                continue
+            if kind in {"array", "runtime_array"}:
+                stride = current.get("array_stride")
+                path_item = {
+                    "kind": "runtime_array_element" if kind == "runtime_array" else "array_element",
+                    "index_id": index_id,
+                    "array_stride": stride,
+                    "element_type_id": current.get("element_type"),
+                }
+                if isinstance(value, int):
+                    path_item["static_index"] = value
+                member_path.append(path_item)
+                if isinstance(stride, int):
+                    array_strides.append(stride)
+                    if isinstance(value, int) and static_byte_offset_known:
+                        static_byte_offset += value * stride
+                    elif value is None:
+                        dynamic_terms.append({"index_id": index_id, "scale": stride})
+                else:
+                    static_byte_offset_known = False
+                if value is None:
+                    dynamic_indices.append({"ordinal": ordinal, "id": index_id, "reason": f"dynamic-{kind}-index"})
+                current = current.get("element")
+                continue
+            if kind == "vector":
+                path_item = {"kind": "vector_component", "index_id": index_id}
+                if isinstance(value, int):
+                    path_item["static_index"] = value
+                member_path.append(path_item)
+                if value is None:
+                    dynamic_indices.append({"ordinal": ordinal, "id": index_id, "reason": "dynamic-vector-index"})
+                    static_byte_offset_known = False
+                current = current.get("component")
+                continue
+            dynamic_indices.append({"ordinal": ordinal, "id": index_id, "reason": f"unhandled-{kind}"})
+            static_byte_offset_known = False
+        leaf = compact_type_leaf(current)
+        descriptor_ref = {
+            "set": descriptor.get("set", base.get("set")),
+            "binding": descriptor.get("binding", base.get("binding")),
+            "variable_id": descriptor.get("id", base.get("id")),
+            "storage_class": descriptor.get("storage_class", base.get("storage_class")),
+        }
+        byte_offset = {
+            "static": static_byte_offset if static_byte_offset_known else None,
+            "dynamic_terms": dynamic_terms,
+            "unit": "bytes",
+        }
+        return {
+            "op": op,
+            "access_word_index": access_word_index,
+            "load_word_index": access_word_index if op == "OpLoad" else None,
+            "result_id": result_id,
+            "result_type": result_type,
+            "pointer_id": pointer_id,
+            "set": descriptor_ref.get("set"),
+            "binding": descriptor_ref.get("binding"),
+            "variable_id": descriptor_ref.get("variable_id"),
+            "descriptor": descriptor_ref,
+            "access_chain_result_id": pointer.get("access_chain_result_id"),
+            "member_path": member_path,
+            "member_indices": member_indices,
+            "static_member_offsets": static_member_offsets,
+            "array_strides": array_strides,
+            "dynamic_indices": dynamic_indices,
+            "byte_offset": byte_offset,
+            "static_byte_offset": byte_offset["static"],
+            "element": leaf,
+            "terminal_type": leaf,
+            "layout_fingerprint": {
+                **descriptor_ref,
+                "member_indices": member_indices,
+                "member_path": member_path,
+                "offsets": static_member_offsets,
+                "strides": array_strides,
+                "terminal_type": leaf,
+            },
+        }
+
     def summarize_expr_node(expr: dict) -> dict:
         item = {
             key: expr.get(key)
@@ -789,6 +955,8 @@ def build_q6_probe_targets(module: dict, debug_descriptor: dict | None = None) -
         builtin_dependencies: dict[tuple[int | None, str | None, str | None], dict] = {}
         push_constant_dependencies: dict[tuple[int | None, int | None, int | None], dict] = {}
         descriptor_dependencies: set[tuple[int | None, int]] = set()
+        descriptor_load_leaves: list[dict] = []
+        unresolved_id_leaves: list[dict] = []
         op_histogram: Counter[str] = Counter()
         load_count = 0
         truncated_nodes = 0
@@ -798,6 +966,8 @@ def build_q6_probe_targets(module: dict, debug_descriptor: dict | None = None) -
         seen_workgroup_loads: set[tuple[int | None, int | None]] = set()
         seen_function_loads: set[tuple[int | None, int | None, int | None]] = set()
         seen_function_store_expansions: set[tuple[int, int | None, int]] = set()
+        seen_descriptor_load_leaves: set[tuple] = set()
+        seen_unresolved_id_leaves: set[tuple[int | None, str | None]] = set()
 
         def record_descriptor(base: dict) -> None:
             nonlocal depends_on_debug_probe_binding
@@ -849,6 +1019,41 @@ def build_q6_probe_targets(module: dict, debug_descriptor: dict | None = None) -
                     "member_type": member.get("type") if isinstance(member, dict) else None,
                     "pointer": compact_pointer_signature(pointer),
                 }
+
+        def record_descriptor_load_leaf(value: dict, pointer: object) -> None:
+            access = descriptor_access_from_pointer(
+                pointer,
+                value.get("word_index") if isinstance(value.get("word_index"), int) else None,
+                "OpLoad",
+                result_id=value.get("id") if isinstance(value.get("id"), int) else None,
+                result_type=value.get("result_type") if isinstance(value.get("result_type"), int) else None,
+                pointer_id=value.get("pointer_id") if isinstance(value.get("pointer_id"), int) else None,
+            )
+            if not access:
+                return
+            key = (
+                access.get("access_word_index"),
+                access.get("set"),
+                access.get("binding"),
+                access.get("variable_id"),
+                json.dumps(access.get("member_path") or [], sort_keys=True),
+                tuple(access.get("array_strides") or []),
+                json.dumps(access.get("terminal_type"), sort_keys=True),
+            )
+            if key in seen_descriptor_load_leaves:
+                return
+            seen_descriptor_load_leaves.add(key)
+            descriptor_load_leaves.append(access)
+
+        def record_unresolved_id_leaf(value: dict) -> None:
+            kind = value.get("kind")
+            if kind not in {"id", "max-depth", "cycle"}:
+                return
+            key = (value.get("id") if isinstance(value.get("id"), int) else None, kind)
+            if key in seen_unresolved_id_leaves:
+                return
+            seen_unresolved_id_leaves.add(key)
+            unresolved_id_leaves.append({"id": key[0], "kind": kind, "name": value.get("name", "")})
 
         def record_scalar_dependency(value: dict) -> None:
             kind = value.get("kind")
@@ -966,6 +1171,7 @@ def build_q6_probe_targets(module: dict, debug_descriptor: dict | None = None) -
             if any(key in value for key in ("kind", "id", "op")):
                 record_node(value)
                 record_scalar_dependency(value)
+                record_unresolved_id_leaf(value)
 
             base = value.get("base")
             if isinstance(base, dict):
@@ -980,6 +1186,8 @@ def build_q6_probe_targets(module: dict, debug_descriptor: dict | None = None) -
                 base = pointer_base(pointer)
                 record_descriptor(base)
                 record_pointer_dependency(pointer)
+                if base.get("kind") == "descriptor":
+                    record_descriptor_load_leaf(value, pointer)
                 if base.get("kind") == "variable" and base.get("storage_class") == "Workgroup":
                     key = (value.get("id") if isinstance(value.get("id"), int) else None, base.get("id"))
                     if key not in seen_workgroup_loads:
@@ -1016,6 +1224,20 @@ def build_q6_probe_targets(module: dict, debug_descriptor: dict | None = None) -
             "truncated_function_store_expansion_count": truncated_function_store_expansions,
             "workgroup_loads": workgroup_loads,
             "reaches_workgroup_load": bool(workgroup_loads),
+            "descriptor_load_leaves": descriptor_load_leaves,
+            "descriptor_load_leaf_count": len(descriptor_load_leaves),
+            "unresolved_id_leaves": unresolved_id_leaves,
+            "slice_complete": not (
+                truncated_nodes
+                or truncated_depth
+                or truncated_function_store_expansions
+                or unresolved_id_leaves
+            ),
+            "truncation_boundaries": {
+                "truncated_node_count": truncated_nodes,
+                "truncated_depth_count": truncated_depth,
+                "truncated_function_store_expansion_count": truncated_function_store_expansions,
+            },
             "spec_constant_dependencies": [
                 spec_constant_dependencies[key]
                 for key in sorted(
@@ -2179,6 +2401,8 @@ def analyze_spirv(path: Path) -> dict:
             return {
                 "kind": "load",
                 "id": value_id,
+                "result_type": definition.get("result_type"),
+                "pointer_id": definition.get("pointer_id"),
                 "word_index": definition.get("word_index"),
                 "pointer": pointer_origin(int(definition.get("pointer_id"))),
             }
