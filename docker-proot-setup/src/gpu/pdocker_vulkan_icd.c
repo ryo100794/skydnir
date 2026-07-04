@@ -12972,9 +12972,69 @@ static VkResult unsupported_image_pnext_result(const char *api_name, const void 
     return VK_ERROR_FEATURE_NOT_PRESENT;
 }
 
+static VkResult validate_image_create_pnext_for_transport(const VkImageCreateInfo *info) {
+    if (!info) return VK_ERROR_INITIALIZATION_FAILED;
+    for (const void *node = info->pNext; node;) {
+        PdockerVkStructHeader header = read_vk_struct_header(node);
+        switch (header.sType) {
+            case VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO: {
+                const VkExternalMemoryImageCreateInfo *external_info =
+                    (const VkExternalMemoryImageCreateInfo *)node;
+                if (external_info->handleTypes != 0) {
+                    trace_icd_runtime_failure("image-external-memory-handle-unsupported",
+                                              VK_ERROR_FEATURE_NOT_PRESENT);
+                    return VK_ERROR_FEATURE_NOT_PRESENT;
+                }
+                break;
+            }
+            case VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO_NV: {
+                const VkExternalMemoryImageCreateInfoNV *external_info =
+                    (const VkExternalMemoryImageCreateInfoNV *)node;
+                if (external_info->handleTypes != 0) {
+                    trace_icd_runtime_failure("image-external-memory-nv-handle-unsupported",
+                                              VK_ERROR_FEATURE_NOT_PRESENT);
+                    return VK_ERROR_FEATURE_NOT_PRESENT;
+                }
+                break;
+            }
+            case VK_STRUCTURE_TYPE_IMAGE_STENCIL_USAGE_CREATE_INFO: {
+                const VkImageStencilUsageCreateInfo *stencil_info =
+                    (const VkImageStencilUsageCreateInfo *)node;
+                if (stencil_info->stencilUsage != info->usage) {
+                    trace_icd_runtime_failure("image-stencil-usage-unsupported",
+                                              VK_ERROR_FEATURE_NOT_PRESENT);
+                    return VK_ERROR_FEATURE_NOT_PRESENT;
+                }
+                break;
+            }
+            case VK_STRUCTURE_TYPE_IMAGE_FORMAT_LIST_CREATE_INFO: {
+                const VkImageFormatListCreateInfo *format_list =
+                    (const VkImageFormatListCreateInfo *)node;
+                if (format_list->viewFormatCount > 0 && !format_list->pViewFormats) {
+                    trace_icd_runtime_failure("image-format-list-missing", VK_ERROR_FEATURE_NOT_PRESENT);
+                    return VK_ERROR_FEATURE_NOT_PRESENT;
+                }
+                for (uint32_t i = 0; i < format_list->viewFormatCount; ++i) {
+                    if (format_list->pViewFormats[i] != info->format) {
+                        trace_icd_runtime_failure("image-format-list-unsupported",
+                                                  VK_ERROR_FEATURE_NOT_PRESENT);
+                        return VK_ERROR_FEATURE_NOT_PRESENT;
+                    }
+                }
+                break;
+            }
+            default:
+                return unsupported_image_pnext_result("vkCreateImage", node);
+        }
+        node = header.pNext;
+    }
+    return VK_SUCCESS;
+}
+
 static VkResult validate_image_create_info_for_transport(const VkImageCreateInfo *info) {
     if (!info) return VK_ERROR_INITIALIZATION_FAILED;
-    if (info->pNext) return unsupported_image_pnext_result("vkCreateImage", info->pNext);
+    VkResult pnext_rc = validate_image_create_pnext_for_transport(info);
+    if (pnext_rc != VK_SUCCESS) return pnext_rc;
     VkImageFormatProperties props;
     VkResult rc = vkGetPhysicalDeviceImageFormatProperties(
         (VkPhysicalDevice)&g_device,

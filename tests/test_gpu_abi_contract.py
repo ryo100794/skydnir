@@ -6708,10 +6708,26 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("validate_image_create_info_for_transport", icd)
         self.assertIn("validate_image_view_create_info_for_transport", icd)
         self.assertIn("validate_sampler_create_info_for_transport", icd)
+        image_pnext_body = icd.split("static VkResult validate_image_create_pnext_for_transport", 1)[1].split(
+            "static VkResult validate_image_create_info_for_transport", 1
+        )[0]
         image_validate_body = icd.split("static VkResult validate_image_create_info_for_transport", 1)[1].split(
             "static VkResult validate_image_view_create_info_for_transport", 1
         )[0]
-        self.assertIn("if (info->pNext) return unsupported_image_pnext_result", image_validate_body)
+        self.assertIn("VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO", image_pnext_body)
+        self.assertIn("external_info->handleTypes != 0", image_pnext_body)
+        self.assertIn("image-external-memory-handle-unsupported", image_pnext_body)
+        self.assertIn("VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO_NV", image_pnext_body)
+        self.assertIn("image-external-memory-nv-handle-unsupported", image_pnext_body)
+        self.assertIn("VK_STRUCTURE_TYPE_IMAGE_STENCIL_USAGE_CREATE_INFO", image_pnext_body)
+        self.assertIn("stencil_info->stencilUsage != info->usage", image_pnext_body)
+        self.assertIn("VK_STRUCTURE_TYPE_IMAGE_FORMAT_LIST_CREATE_INFO", image_pnext_body)
+        self.assertIn("format_list->viewFormatCount > 0 && !format_list->pViewFormats", image_pnext_body)
+        self.assertIn("format_list->pViewFormats[i] != info->format", image_pnext_body)
+        self.assertIn('unsupported_image_pnext_result("vkCreateImage", node)', image_pnext_body)
+        self.assertIn("node = header.pNext;", image_pnext_body)
+        self.assertIn("validate_image_create_pnext_for_transport(info)", image_validate_body)
+        self.assertIn("if (pnext_rc != VK_SUCCESS) return pnext_rc;", image_validate_body)
         self.assertIn("vkGetPhysicalDeviceImageFormatProperties", image_validate_body)
         self.assertIn("pdocker_vk_sample_count_value(info->samples) == 0", image_validate_body)
         self.assertIn("(info->samples & props.sampleCounts) == 0", image_validate_body)
