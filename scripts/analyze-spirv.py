@@ -515,7 +515,7 @@ def choose_debug_descriptor(descriptor_variables: list[dict], max_sets: int = 8,
     }
 
 
-def build_q6_probe_targets(module: dict) -> dict:
+def build_q6_probe_targets(module: dict, debug_descriptor: dict | None = None) -> dict:
     """Describe Q6-like final-output and workgroup stores for valid-module probes.
 
     This is intentionally structural rather than hash-targeted: it looks for
@@ -524,6 +524,17 @@ def build_q6_probe_targets(module: dict) -> dict:
     instrumentation fragment; the runtime still has to submit a full, validated
     SPIR-V module.
     """
+
+    debug_probe_set = (
+        int(debug_descriptor.get("set"))
+        if isinstance(debug_descriptor, dict) and isinstance(debug_descriptor.get("set"), int)
+        else 0
+    )
+    debug_probe_binding = (
+        int(debug_descriptor.get("binding"))
+        if isinstance(debug_descriptor, dict) and isinstance(debug_descriptor.get("binding"), int)
+        else 5
+    )
 
     def block_for_word(word_index: int) -> dict | None:
         for function in module.get("control_flow", {}).get("functions", []):
@@ -631,6 +642,136 @@ def build_q6_probe_targets(module: dict) -> dict:
             for value in expr:
                 collect_workgroup_bases(value, out)
 
+    def compact_base(base: object) -> dict:
+        if not isinstance(base, dict):
+            return {}
+        return {
+            key: base.get(key)
+            for key in ("kind", "id", "name", "set", "binding", "storage_class", "built_in")
+            if key in base
+        }
+
+    def pointer_base(pointer: object) -> dict:
+        if not isinstance(pointer, dict):
+            return {}
+        base = pointer.get("base")
+        if isinstance(base, dict):
+            return base
+        return pointer
+
+    def summarize_expr_node(expr: dict) -> dict:
+        item = {
+            key: expr.get(key)
+            for key in ("kind", "id", "op", "value_u32", "default_u32", "spec_id")
+            if key in expr
+        }
+        if expr.get("kind") == "load":
+            item["pointer_base"] = compact_base(pointer_base(expr.get("pointer")))
+        elif expr.get("kind") == "access_chain":
+            item["base"] = compact_base(expr.get("base"))
+            item["index_count"] = len(expr.get("indices") or [])
+        return item
+
+    def collect_expression_dependencies(expr: object, max_nodes: int = 64, max_depth: int = 12) -> dict:
+        # The analyzer already builds a bounded expression tree.  This pass keeps
+        # only the dependency facts needed for Q6 final-store safety gates.
+        nodes: list[dict] = []
+        workgroup_loads: list[dict] = []
+        descriptor_dependencies: set[tuple[int | None, int]] = set()
+        op_histogram: Counter[str] = Counter()
+        load_count = 0
+        truncated_nodes = 0
+        truncated_depth = 0
+        depends_on_debug_probe_binding = False
+        seen_workgroup_loads: set[tuple[int | None, int | None]] = set()
+
+        def record_descriptor(base: dict) -> None:
+            nonlocal depends_on_debug_probe_binding
+            if base.get("kind") != "descriptor" or not isinstance(base.get("binding"), int):
+                return
+            descriptor_set = base.get("set") if isinstance(base.get("set"), int) else None
+            binding = int(base["binding"])
+            descriptor_dependencies.add((descriptor_set, binding))
+            if binding == debug_probe_binding and (descriptor_set is None or descriptor_set == debug_probe_set):
+                depends_on_debug_probe_binding = True
+
+        def record_node(value: dict) -> None:
+            nonlocal truncated_nodes
+            if len(nodes) >= max_nodes:
+                truncated_nodes += 1
+                return
+            summary = summarize_expr_node(value)
+            if summary:
+                nodes.append(summary)
+
+        def visit(value: object, depth: int = 0) -> None:
+            nonlocal load_count, truncated_depth
+            if depth > max_depth:
+                truncated_depth += 1
+                return
+            if isinstance(value, list):
+                for child in value:
+                    visit(child, depth + 1)
+                return
+            if not isinstance(value, dict):
+                return
+
+            op = value.get("op")
+            if isinstance(op, str):
+                op_histogram[op] += 1
+            if any(key in value for key in ("kind", "id", "op")):
+                record_node(value)
+
+            base = value.get("base")
+            if isinstance(base, dict):
+                record_descriptor(base)
+
+            if value.get("kind") == "load":
+                load_count += 1
+                pointer = value.get("pointer")
+                base = pointer_base(pointer)
+                record_descriptor(base)
+                if base.get("kind") == "variable" and base.get("storage_class") == "Workgroup":
+                    key = (value.get("id") if isinstance(value.get("id"), int) else None, base.get("id"))
+                    if key not in seen_workgroup_loads:
+                        seen_workgroup_loads.add(key)
+                        workgroup_loads.append(
+                            {
+                                "id": value.get("id"),
+                                "pointer_base": compact_base(base),
+                                "access_chain_result_id": (
+                                    pointer.get("access_chain_result_id")
+                                    if isinstance(pointer, dict)
+                                    else None
+                                ),
+                            }
+                        )
+
+            for key in ("pointer", "indices", "expr", "operands"):
+                child = value.get(key)
+                if child is not None:
+                    visit(child, depth + 1)
+
+        visit(expr)
+        return {
+            "root": summarize_expr_node(expr) if isinstance(expr, dict) else {"kind": type(expr).__name__},
+            "load_count": load_count,
+            "op_histogram": dict(op_histogram.most_common()),
+            "producer_chain": nodes,
+            "truncated_node_count": truncated_nodes,
+            "truncated_depth_count": truncated_depth,
+            "workgroup_loads": workgroup_loads,
+            "reaches_workgroup_load": bool(workgroup_loads),
+            "descriptor_dependencies": [
+                {"set": descriptor_set, "binding": binding}
+                for descriptor_set, binding in sorted(
+                    descriptor_dependencies,
+                    key=lambda item: (-1 if item[0] is None else item[0], item[1]),
+                )
+            ],
+            "depends_on_debug_probe_binding": depends_on_debug_probe_binding,
+        }
+
     stores = sorted(module.get("store_events", []), key=lambda item: int(item.get("word_index", -1)))
     final_output_stores = []
     workgroup_stores = []
@@ -683,12 +824,87 @@ def build_q6_probe_targets(module: dict) -> dict:
         priority_targets.extend(phase["preceding_workgroup_stores"])
         priority_targets.append(phase["output_store"])
 
+    phase_by_output_word = {
+        int(phase["output_store"]["word_index"]): phase.get("name")
+        for phase in phases
+        if isinstance((phase.get("output_store") or {}).get("word_index"), int)
+    }
+
+    final_store_flows = []
+    for output_store in final_output_stores:
+        pointer_origin = output_store.get("pointer_origin") or {}
+        base = pointer_origin.get("base") or pointer_origin
+        output_word = int(output_store.get("word_index", -1))
+        stored_value = collect_expression_dependencies(output_store.get("object_expr"))
+        output_index = collect_expression_dependencies([
+            index.get("expr", index) if isinstance(index, dict) else index
+            for index in pointer_origin.get("indices", [])
+        ])
+        stored_depends_on_debug = bool(stored_value.get("depends_on_debug_probe_binding"))
+        index_depends_on_debug = bool(output_index.get("depends_on_debug_probe_binding"))
+        final_store_flows.append(
+            {
+                "phase": phase_by_output_word.get(output_word),
+                "word_index": output_word,
+                "pointer_id": output_store.get("pointer_id"),
+                "object_id": output_store.get("object_id"),
+                "output_store": {
+                    "base": compact_base(base),
+                    "required_binding": 2,
+                    "binding_matches_required": base.get("kind") == "descriptor" and base.get("binding") == 2,
+                },
+                "stored_value": stored_value,
+                "output_index": {
+                    **output_index,
+                    "index_ids": [
+                        index.get("id")
+                        for index in pointer_origin.get("indices", [])
+                        if isinstance(index, dict) and isinstance(index.get("id"), int)
+                    ],
+                },
+                "debug_probe_exclusion": {
+                    "set": debug_probe_set,
+                    "binding": debug_probe_binding,
+                    "stored_value_depends_on_debug_probe": stored_depends_on_debug,
+                    "output_index_depends_on_debug_probe": index_depends_on_debug,
+                    "passed": not stored_depends_on_debug and not index_depends_on_debug,
+                },
+                "valid": (
+                    base.get("kind") == "descriptor"
+                    and base.get("binding") == 2
+                    and bool(stored_value.get("reaches_workgroup_load"))
+                    and not stored_depends_on_debug
+                    and not index_depends_on_debug
+                ),
+            }
+        )
+
+    final_store_value_flow = {
+        "schema": "pdocker.spirv.q6-final-store-value-flow.v1",
+        "method": "backward-slice-stored-value-and-output-index",
+        "required_output_descriptor_binding": 2,
+        "debug_probe_descriptor": {
+            "set": debug_probe_set,
+            "binding": debug_probe_binding,
+        },
+        "final_store_count": len(final_store_flows),
+        "valid_store_count": sum(1 for item in final_store_flows if item.get("valid") is True),
+        "available": bool(final_store_flows) and all(item.get("valid") is True for item in final_store_flows),
+        "stores": final_store_flows,
+        "notes": [
+            "Each final output OpStore must target descriptor binding 2.",
+            "The stored value producer chain is expected to reach a Workgroup load for native Q6_K.",
+            "The debug/probe descriptor must not be a dependency of either the stored value or output index.",
+        ],
+    }
+
     return {
         "available": bool(final_output_stores and workgroup_stores),
         "method": "structural-output-descriptor-and-workgroup-store-chain",
         "output_descriptor_binding": 2,
         "final_output_store_count": len(final_output_stores),
         "workgroup_store_count": len(workgroup_stores),
+        "final_store_value_flow": final_store_value_flow,
         "phases": phases,
         "priority_targets": priority_targets,
         "notes": [
@@ -816,7 +1032,7 @@ def build_probe_manifest(module: dict, source_path: Path, probe_range: tuple[int
             "bisect_rounds": probe_plan.get("bisect_rounds", []),
             "candidate_ranges": candidate_ranges,
         },
-        "q6_probe_targets": build_q6_probe_targets(module),
+        "q6_probe_targets": build_q6_probe_targets(module, descriptor_choice),
         "insertion_rules": {
             "block_entry": "insert after contiguous OpPhi instructions",
             "block_exit": "insert before OpLoopMerge/OpSelectionMerge if present, otherwise before terminator",

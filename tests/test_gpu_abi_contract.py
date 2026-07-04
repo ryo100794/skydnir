@@ -6693,6 +6693,32 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("vkGetDescriptorSetLayoutSupportKHR", hidden_body)
 
 
+    def test_vulkan_descriptor_pool_and_allocate_pnext_are_explicit_noop_or_fail_closed(self):
+        icd = VULKAN_ICD.read_text()
+        pool_pnext_body = c_function_body(icd, "validate_descriptor_pool_create_pnext")
+        create_pool_body = c_function_body(icd, "vkCreateDescriptorPool")
+        allocate_pnext_body = c_function_body(icd, "validate_descriptor_set_allocate_pnext")
+        allocate_body = c_function_body(icd, "vkAllocateDescriptorSets")
+
+        self.assertIn("VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_INLINE_UNIFORM_BLOCK_CREATE_INFO", pool_pnext_body)
+        self.assertIn("info->maxInlineUniformBlockBindings != 0", pool_pnext_body)
+        self.assertIn("descriptor-pool-inline-uniform-unsupported", pool_pnext_body)
+        self.assertIn('unsupported_create_info_pnext_result("vkCreateDescriptorPool", node)', pool_pnext_body)
+        self.assertIn("*pDescriptorPool = VK_NULL_HANDLE;", create_pool_body)
+        self.assertIn("pCreateInfo->sType != VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO", create_pool_body)
+        self.assertIn("validate_descriptor_pool_create_pnext(pCreateInfo->pNext)", create_pool_body)
+
+        self.assertIn("VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO", allocate_pnext_body)
+        self.assertIn("counts->descriptorSetCount != info->descriptorSetCount", allocate_pnext_body)
+        self.assertIn("descriptor-allocate-variable-count-mismatch", allocate_pnext_body)
+        self.assertIn("counts->descriptorSetCount != 0 && !counts->pDescriptorCounts", allocate_pnext_body)
+        self.assertIn("counts->pDescriptorCounts[i] != 0", allocate_pnext_body)
+        self.assertIn("descriptor-allocate-variable-count-unsupported", allocate_pnext_body)
+        self.assertIn('unsupported_create_info_pnext_result("vkAllocateDescriptorSets", node)', allocate_pnext_body)
+        self.assertIn("pAllocateInfo->sType != VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO", allocate_body)
+        self.assertIn("validate_descriptor_set_allocate_pnext(pAllocateInfo)", allocate_body)
+
+
     def test_vulkan_pipeline_creation_feedback_and_compute_pnext_contract(self):
         icd = VULKAN_ICD.read_text()
         feedback_body = c_function_body(icd, "validate_and_fill_pipeline_feedback_pnext")
@@ -6844,12 +6870,16 @@ class GpuAbiContractTest(unittest.TestCase):
         descriptor_pool_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorPool", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkDestroyDescriptorPool", 1
         )[0]
-        self.assertIn("if (!pCreateInfo || !pDescriptorPool)", descriptor_pool_body)
+        self.assertIn("if (!pDescriptorPool) return VK_ERROR_INITIALIZATION_FAILED;", descriptor_pool_body)
+        self.assertIn("*pDescriptorPool = VK_NULL_HANDLE;", descriptor_pool_body)
+        self.assertIn("pCreateInfo->sType != VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO", descriptor_pool_body)
+        self.assertIn("validate_descriptor_pool_create_pnext(pCreateInfo->pNext)", descriptor_pool_body)
         self.assertIn("pCreateInfo->flags & ~VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT", descriptor_pool_body)
         allocate_sets_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkAllocateDescriptorSets", 1)[1].split(
             "VKAPI_ATTR VkResult VKAPI_CALL vkFreeDescriptorSets", 1
         )[0]
-        self.assertIn("if (pAllocateInfo->pNext)", allocate_sets_body)
+        self.assertIn("pAllocateInfo->sType != VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO", allocate_sets_body)
+        self.assertIn("validate_descriptor_set_allocate_pnext(pAllocateInfo)", allocate_sets_body)
         shader_module_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateShaderModule", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkDestroyShaderModule", 1
         )[0]
@@ -10673,6 +10703,15 @@ class GpuAbiContractTest(unittest.TestCase):
                 check=True,
             )
             probe_manifest = json.loads(manifest.read_text())
+            verified = subprocess.run(
+                ["python3", str(SPIRV_PROBE_MANIFEST_VERIFIER), str(manifest)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+            )
+        self.assertTrue(json.loads(verified.stdout)["valid"])
         payload = json.loads(result.stdout)
         module = payload["modules"][0]
         self.assertEqual(module["hash"], "0x1bf751845c5dce75")
@@ -10713,6 +10752,35 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertTrue(q6_targets["available"])
         self.assertEqual(q6_targets["final_output_store_count"], 2)
         self.assertEqual(q6_targets["workgroup_store_count"], 12)
+        flow = q6_targets["final_store_value_flow"]
+        self.assertEqual(flow["schema"], "pdocker.spirv.q6-final-store-value-flow.v1")
+        self.assertEqual(flow["required_output_descriptor_binding"], 2)
+        self.assertEqual(flow["debug_probe_descriptor"], {"set": 0, "binding": 5})
+        self.assertTrue(flow["available"])
+        self.assertEqual(flow["final_store_count"], 2)
+        self.assertEqual(flow["valid_store_count"], 2)
+        self.assertEqual([store["word_index"] for store in flow["stores"]], [3789, 6653])
+        for store in flow["stores"]:
+            self.assertTrue(store["valid"])
+            self.assertEqual(store["output_store"]["base"]["binding"], 2)
+            self.assertTrue(store["output_store"]["binding_matches_required"])
+            self.assertTrue(store["stored_value"]["reaches_workgroup_load"])
+            self.assertGreaterEqual(len(store["stored_value"]["workgroup_loads"]), 1)
+            self.assertEqual(
+                store["stored_value"]["workgroup_loads"][0]["pointer_base"]["storage_class"],
+                "Workgroup",
+            )
+            self.assertFalse(store["stored_value"]["depends_on_debug_probe_binding"])
+            self.assertFalse(store["output_index"]["depends_on_debug_probe_binding"])
+            self.assertTrue(store["debug_probe_exclusion"]["passed"])
+            self.assertNotIn(
+                5,
+                [dep["binding"] for dep in store["stored_value"]["descriptor_dependencies"]],
+            )
+            self.assertNotIn(
+                5,
+                [dep["binding"] for dep in store["output_index"]["descriptor_dependencies"]],
+            )
         by_phase = {phase["name"]: phase for phase in q6_targets["phases"]}
         self.assertEqual(by_phase["tail"]["source_workgroup_base_ids"], [143])
         self.assertEqual(by_phase["full"]["source_workgroup_base_ids"], [143])
@@ -10864,6 +10932,10 @@ class GpuAbiContractTest(unittest.TestCase):
                 if target.get("role") != "reduction_candidate"
             ]
             cases.append((broken, "q6_probe_targets.priority_targets must include a reduction_candidate when available"))
+
+            broken = json.loads(json.dumps(valid))
+            broken["q6_probe_targets"]["final_store_value_flow"]["stores"][0]["debug_probe_exclusion"]["output_index_depends_on_debug_probe"] = True
+            cases.append((broken, "debug_probe_exclusion.output_index_depends_on_debug_probe must be false"))
 
             broken = json.loads(json.dumps(valid))
             target = broken["q6_probe_targets"]["priority_targets"][0]

@@ -14599,6 +14599,30 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyPipelineLayout(
     free(pdocker_vk_pipeline_layout_from_handle(pipelineLayout));
 }
 
+static VkResult validate_descriptor_pool_create_pnext(const void *pNext) {
+    for (const void *node = pNext; node;) {
+        PdockerVkStructHeader header = read_vk_struct_header(node);
+        switch (header.sType) {
+#if defined(VK_VERSION_1_3) || defined(VK_EXT_inline_uniform_block)
+            case VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_INLINE_UNIFORM_BLOCK_CREATE_INFO: {
+                const VkDescriptorPoolInlineUniformBlockCreateInfo *info =
+                    (const VkDescriptorPoolInlineUniformBlockCreateInfo *)node;
+                if (info->maxInlineUniformBlockBindings != 0) {
+                    trace_icd_runtime_failure("descriptor-pool-inline-uniform-unsupported",
+                                              VK_ERROR_FEATURE_NOT_PRESENT);
+                    return VK_ERROR_FEATURE_NOT_PRESENT;
+                }
+                break;
+            }
+#endif
+            default:
+                return unsupported_create_info_pnext_result("vkCreateDescriptorPool", node);
+        }
+        node = header.pNext;
+    }
+    return VK_SUCCESS;
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorPool(
         VkDevice device,
         const VkDescriptorPoolCreateInfo *pCreateInfo,
@@ -14606,8 +14630,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorPool(
         VkDescriptorPool *pDescriptorPool) {
     (void)device;
     (void)pAllocator;
-    if (!pCreateInfo || !pDescriptorPool) return VK_ERROR_INITIALIZATION_FAILED;
-    if (pCreateInfo->pNext) return unsupported_create_info_pnext_result("vkCreateDescriptorPool", pCreateInfo->pNext);
+    if (!pDescriptorPool) return VK_ERROR_INITIALIZATION_FAILED;
+    *pDescriptorPool = VK_NULL_HANDLE;
+    if (!pCreateInfo || pCreateInfo->sType != VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    VkResult pnext_rc = validate_descriptor_pool_create_pnext(pCreateInfo->pNext);
+    if (pnext_rc != VK_SUCCESS) return pnext_rc;
     if ((pCreateInfo->flags & ~VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT) != 0) {
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }
@@ -14636,13 +14665,53 @@ VKAPI_ATTR VkResult VKAPI_CALL vkResetDescriptorPool(
     return VK_SUCCESS;
 }
 
+static VkResult validate_descriptor_set_allocate_pnext(
+        const VkDescriptorSetAllocateInfo *info) {
+    for (const void *node = info ? info->pNext : NULL; node;) {
+        PdockerVkStructHeader header = read_vk_struct_header(node);
+        switch (header.sType) {
+#if defined(VK_VERSION_1_2) || defined(VK_EXT_descriptor_indexing)
+            case VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO: {
+                const VkDescriptorSetVariableDescriptorCountAllocateInfo *counts =
+                    (const VkDescriptorSetVariableDescriptorCountAllocateInfo *)node;
+                if (counts->descriptorSetCount != 0 &&
+                    counts->descriptorSetCount != info->descriptorSetCount) {
+                    trace_icd_runtime_failure("descriptor-allocate-variable-count-mismatch",
+                                              VK_ERROR_FEATURE_NOT_PRESENT);
+                    return VK_ERROR_FEATURE_NOT_PRESENT;
+                }
+                if (counts->descriptorSetCount != 0 && !counts->pDescriptorCounts) {
+                    return VK_ERROR_INITIALIZATION_FAILED;
+                }
+                for (uint32_t i = 0; i < counts->descriptorSetCount; ++i) {
+                    if (counts->pDescriptorCounts[i] != 0) {
+                        trace_icd_runtime_failure("descriptor-allocate-variable-count-unsupported",
+                                                  VK_ERROR_FEATURE_NOT_PRESENT);
+                        return VK_ERROR_FEATURE_NOT_PRESENT;
+                    }
+                }
+                break;
+            }
+#endif
+            default:
+                return unsupported_create_info_pnext_result("vkAllocateDescriptorSets", node);
+        }
+        node = header.pNext;
+    }
+    return VK_SUCCESS;
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL vkAllocateDescriptorSets(
         VkDevice device,
         const VkDescriptorSetAllocateInfo *pAllocateInfo,
         VkDescriptorSet *pDescriptorSets) {
     (void)device;
-    if (!pAllocateInfo || !pDescriptorSets) return VK_ERROR_INITIALIZATION_FAILED;
-    if (pAllocateInfo->pNext) return unsupported_create_info_pnext_result("vkAllocateDescriptorSets", pAllocateInfo->pNext);
+    if (!pAllocateInfo || pAllocateInfo->sType != VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO ||
+        !pDescriptorSets) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    VkResult pnext_rc = validate_descriptor_set_allocate_pnext(pAllocateInfo);
+    if (pnext_rc != VK_SUCCESS) return pnext_rc;
     for (uint32_t i = 0; i < pAllocateInfo->descriptorSetCount; ++i) {
         PdockerVkDescriptorSet *set = pdocker_alloc_handle(sizeof(*set));
         if (!set) return VK_ERROR_OUT_OF_HOST_MEMORY;

@@ -311,6 +311,126 @@ def verify_manifest(payload: dict) -> list[str]:
                 if not isinstance(target.get("related_output_store_word_index"), int):
                     fail(errors, f"{context}.related_output_store_word_index must be present for Workgroup probes")
 
+        def descriptor_dependency_has_debug_binding(summary: dict, context: str, debug_set: int | None, debug_binding: int | None) -> bool:
+            matched = False
+            deps = summary.get("descriptor_dependencies")
+            if not isinstance(deps, list):
+                fail(errors, f"{context}.descriptor_dependencies must be a list")
+                return False
+            for dep_index, dep in enumerate(deps):
+                if not isinstance(dep, dict):
+                    fail(errors, f"{context}.descriptor_dependencies[{dep_index}] must be an object")
+                    continue
+                dep_binding = dep.get("binding")
+                dep_set = dep.get("set")
+                if not isinstance(dep_binding, int):
+                    fail(errors, f"{context}.descriptor_dependencies[{dep_index}].binding must be an integer")
+                    continue
+                if debug_binding is not None and dep_binding == debug_binding and (dep_set is None or debug_set is None or dep_set == debug_set):
+                    matched = True
+            return matched
+
+        def validate_dependency_summary(summary: object, context: str, require_workgroup_load: bool, debug_set: int | None, debug_binding: int | None) -> None:
+            if not isinstance(summary, dict):
+                fail(errors, f"{context} must be an object")
+                return
+            if not isinstance(summary.get("producer_chain"), list):
+                fail(errors, f"{context}.producer_chain must be a list")
+            if summary.get("depends_on_debug_probe_binding") is not False:
+                fail(errors, f"{context}.depends_on_debug_probe_binding must be false")
+            if descriptor_dependency_has_debug_binding(summary, context, debug_set, debug_binding):
+                fail(errors, f"{context}.descriptor_dependencies must not include debug/probe descriptor")
+            workgroup_loads = summary.get("workgroup_loads")
+            if require_workgroup_load:
+                if summary.get("reaches_workgroup_load") is not True:
+                    fail(errors, f"{context}.reaches_workgroup_load must be true when Q6 targets are available")
+                if not isinstance(workgroup_loads, list) or not workgroup_loads:
+                    fail(errors, f"{context}.workgroup_loads must be non-empty when Q6 targets are available")
+            if isinstance(workgroup_loads, list):
+                for load_index, load in enumerate(workgroup_loads):
+                    if not isinstance(load, dict):
+                        fail(errors, f"{context}.workgroup_loads[{load_index}] must be an object")
+                        continue
+                    base = load.get("pointer_base")
+                    if not isinstance(base, dict) or base.get("storage_class") != "Workgroup":
+                        fail(errors, f"{context}.workgroup_loads[{load_index}].pointer_base must be Workgroup")
+
+        def validate_final_store_value_flow(flow: object) -> None:
+            context = "q6_probe_targets.final_store_value_flow"
+            if not isinstance(flow, dict):
+                fail(errors, f"{context} must be an object")
+                return
+            if flow.get("schema") != "pdocker.spirv.q6-final-store-value-flow.v1":
+                fail(errors, f"{context}.schema must be pdocker.spirv.q6-final-store-value-flow.v1")
+            if flow.get("method") != "backward-slice-stored-value-and-output-index":
+                fail(errors, f"{context}.method must be backward-slice-stored-value-and-output-index")
+            if flow.get("required_output_descriptor_binding") != 2:
+                fail(errors, f"{context}.required_output_descriptor_binding must be 2")
+            debug_flow = flow.get("debug_probe_descriptor")
+            debug_set = descriptor.get("set") if isinstance(descriptor.get("set"), int) else None
+            debug_binding = descriptor.get("binding") if isinstance(descriptor.get("binding"), int) else None
+            if not isinstance(debug_flow, dict):
+                fail(errors, f"{context}.debug_probe_descriptor must be an object")
+            else:
+                if debug_flow.get("set") != debug_set or debug_flow.get("binding") != debug_binding:
+                    fail(errors, f"{context}.debug_probe_descriptor must match debug_ssbo.descriptor")
+                if available is True and debug_flow.get("binding") != 5:
+                    fail(errors, f"{context}.debug_probe_descriptor.binding must be 5 when Q6 targets are available")
+            stores = flow.get("stores")
+            if not isinstance(stores, list):
+                fail(errors, f"{context}.stores must be a list")
+                stores = []
+            if flow.get("final_store_count") != len(stores):
+                fail(errors, f"{context}.final_store_count must equal stores length")
+            if available is True:
+                if flow.get("available") is not True:
+                    fail(errors, f"{context}.available must be true when Q6 targets are available")
+                if flow.get("valid_store_count") != q6_targets.get("final_output_store_count"):
+                    fail(errors, f"{context}.valid_store_count must equal q6_targets.final_output_store_count when available")
+            phase_output_words = {
+                ((phase.get("output_store") or {}).get("word_index"))
+                for phase in phases
+                if isinstance(phase, dict)
+            }
+            for store_index, store in enumerate(stores):
+                store_context = f"{context}.stores[{store_index}]"
+                if not isinstance(store, dict):
+                    fail(errors, f"{store_context} must be an object")
+                    continue
+                word_index = store.get("word_index")
+                if not isinstance(word_index, int):
+                    fail(errors, f"{store_context}.word_index must be an integer")
+                elif isinstance(module_words, int) and not (0 <= word_index < module_words):
+                    fail(errors, f"{store_context}.word_index is outside module word range")
+                if available is True and word_index not in phase_output_words:
+                    fail(errors, f"{store_context}.word_index must match a phase output_store")
+                output_store = store.get("output_store")
+                if not isinstance(output_store, dict):
+                    fail(errors, f"{store_context}.output_store must be an object")
+                else:
+                    base = output_store.get("base")
+                    if output_store.get("required_binding") != 2 or output_store.get("binding_matches_required") is not True:
+                        fail(errors, f"{store_context}.output_store must require and match binding 2")
+                    if not isinstance(base, dict) or base.get("kind") != "descriptor" or base.get("binding") != 2:
+                        fail(errors, f"{store_context}.output_store.base must be descriptor binding 2")
+                exclusion = store.get("debug_probe_exclusion")
+                if not isinstance(exclusion, dict):
+                    fail(errors, f"{store_context}.debug_probe_exclusion must be an object")
+                else:
+                    if exclusion.get("set") != debug_set or exclusion.get("binding") != debug_binding:
+                        fail(errors, f"{store_context}.debug_probe_exclusion must match debug_ssbo.descriptor")
+                    if exclusion.get("stored_value_depends_on_debug_probe") is not False:
+                        fail(errors, f"{store_context}.debug_probe_exclusion.stored_value_depends_on_debug_probe must be false")
+                    if exclusion.get("output_index_depends_on_debug_probe") is not False:
+                        fail(errors, f"{store_context}.debug_probe_exclusion.output_index_depends_on_debug_probe must be false")
+                    if exclusion.get("passed") is not True:
+                        fail(errors, f"{store_context}.debug_probe_exclusion.passed must be true")
+                require_workgroup = available is True
+                validate_dependency_summary(store.get("stored_value"), f"{store_context}.stored_value", require_workgroup, debug_set, debug_binding)
+                validate_dependency_summary(store.get("output_index"), f"{store_context}.output_index", False, debug_set, debug_binding)
+                if available is True and store.get("valid") is not True:
+                    fail(errors, f"{store_context}.valid must be true when Q6 targets are available")
+
         for phase_index, phase in enumerate(phases):
             if not isinstance(phase, dict):
                 fail(errors, f"q6_probe_targets.phases[{phase_index}] must be an object")
@@ -323,6 +443,10 @@ def verify_manifest(payload: dict) -> list[str]:
             validate_target(phase.get("output_store"), f"q6_probe_targets.phases[{phase_index}].output_store")
             for store_index, target in enumerate(phase.get("preceding_workgroup_stores") or []):
                 validate_target(target, f"q6_probe_targets.phases[{phase_index}].preceding_workgroup_stores[{store_index}]")
+
+        value_flow = q6_targets.get("final_store_value_flow")
+        if value_flow is not None:
+            validate_final_store_value_flow(value_flow)
 
         for target_index, target in enumerate(priority_targets):
             validate_target(target, f"q6_probe_targets.priority_targets[{target_index}]")
