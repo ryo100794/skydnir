@@ -191,14 +191,130 @@ def origin_key(origin: dict[str, Any]) -> str:
     return "unknown"
 
 
+def compact_base_signature(base: Any) -> dict[str, Any]:
+    if not isinstance(base, dict):
+        return {"kind": "unknown"}
+    kind = base.get("kind")
+    if kind == "descriptor":
+        return {
+            "kind": "descriptor",
+            "set": base.get("set"),
+            "binding": base.get("binding"),
+            "storage_class": base.get("storage_class"),
+        }
+    if kind == "variable":
+        return {
+            "kind": "variable",
+            "storage_class": base.get("storage_class"),
+            "built_in": base.get("built_in"),
+        }
+    if kind:
+        return {"kind": kind, "storage_class": base.get("storage_class")}
+    return {"kind": "unknown"}
+
+
+def expression_signature(value: Any, depth: int = 0, max_depth: int = 8) -> Any:
+    if depth > max_depth:
+        return {"kind": "truncated"}
+    if isinstance(value, list):
+        return [expression_signature(item, depth + 1, max_depth) for item in value]
+    if not isinstance(value, dict):
+        return value
+    kind = value.get("kind")
+    op = value.get("op")
+    if kind == "constant":
+        return {"kind": "constant", "value_u32": value.get("value_u32")}
+    if kind == "spec_constant":
+        return {
+            "kind": "spec_constant",
+            "default_u32": value.get("default_u32"),
+            "spec_id": value.get("spec_id"),
+        }
+    if kind == "load":
+        return {
+            "kind": "load",
+            "pointer": pointer_path_signature(value.get("pointer"), depth + 1, max_depth),
+        }
+    if kind == "access_chain":
+        return pointer_path_signature(value, depth + 1, max_depth)
+    result: dict[str, Any] = {"kind": kind or "expr"}
+    if isinstance(op, str):
+        result["op"] = op
+    operands = value.get("operands")
+    if isinstance(operands, list):
+        result["operands"] = [expression_signature(item, depth + 1, max_depth) for item in operands]
+    expr = value.get("expr")
+    if expr is not None:
+        result["expr"] = expression_signature(expr, depth + 1, max_depth)
+    pointer = value.get("pointer")
+    if pointer is not None:
+        result["pointer"] = pointer_path_signature(pointer, depth + 1, max_depth)
+    indices = value.get("indices")
+    if isinstance(indices, list):
+        result["indices"] = [index_path_signature(item, depth + 1, max_depth) for item in indices]
+    if len(result) == 1 and isinstance(value.get("value_u32"), int):
+        result["value_u32"] = value.get("value_u32")
+    return result
+
+
+def index_path_signature(index: Any, depth: int = 0, max_depth: int = 8) -> Any:
+    if not isinstance(index, dict):
+        return {"kind": "literal", "value": index}
+    if index.get("constant_u32") is not None:
+        return {"kind": "constant", "value_u32": index.get("constant_u32")}
+    if "expr" in index:
+        return expression_signature(index.get("expr"), depth + 1, max_depth)
+    return {"kind": "dynamic"}
+
+
+def pointer_path_signature(origin: Any, depth: int = 0, max_depth: int = 8) -> Any:
+    if depth > max_depth:
+        return {"kind": "truncated"}
+    if not isinstance(origin, dict):
+        return {"kind": "unknown"}
+    if origin.get("push_member"):
+        member = origin.get("push_member") or {}
+        member_type = member.get("type") if isinstance(member.get("type"), dict) else {}
+        return {
+            "kind": "push",
+            "member_index": member.get("index"),
+            "offset": member.get("offset"),
+            "type": member_type.get("kind"),
+        }
+    if origin.get("kind") == "access_chain":
+        return {
+            "kind": "access_chain",
+            "base": compact_base_signature(origin.get("base")),
+            "indices": [index_path_signature(item, depth + 1, max_depth) for item in origin.get("indices") or []],
+        }
+    return compact_base_signature(origin)
+
+
+def event_path_signature(event: dict[str, Any], event_key: str) -> dict[str, Any]:
+    event_kind = event_key[:-7] if event_key.endswith("_events") else event_key
+    result: dict[str, Any] = {
+        "event": event_kind,
+        "pointer": pointer_path_signature(event.get("pointer_origin")),
+    }
+    if event_key == "store_events":
+        result["object"] = expression_signature(event.get("object_expr", {"kind": "unavailable"}))
+    return result
+
+
+def canonical_path_key(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
 def event_summary(module: dict[str, Any], event_key: str) -> dict[str, Any]:
     events = module.get(event_key) or []
     counts = Counter(origin_key(event.get("pointer_origin", {})) for event in events)
+    path_counts: Counter[str] = Counter()
     descriptor_counts: Counter[str] = Counter()
     push_counts: Counter[str] = Counter()
     for event in events:
         origin = event.get("pointer_origin", {})
         key = origin_key(origin)
+        path_counts[canonical_path_key(event_path_signature(event, event_key))] += 1
         if key.startswith("descriptor["):
             descriptor_counts[key] += 1
         elif key.startswith("push["):
@@ -206,18 +322,92 @@ def event_summary(module: dict[str, Any], event_key: str) -> dict[str, Any]:
     return {
         "count": len(events),
         "by_origin": dict(sorted(counts.items())),
+        "by_path": dict(sorted(path_counts.items())),
         "descriptor_origins": dict(sorted(descriptor_counts.items())),
         "push_origins": dict(sorted(push_counts.items())),
     }
 
 
-def compare_lists(name: str, left: list[Any], right: list[Any]) -> dict[str, Any]:
+def path_to_string(path: tuple[Any, ...]) -> str:
+    out = ""
+    for part in path:
+        if isinstance(part, int):
+            out += f"[{part}]"
+        elif out:
+            out += f".{part}"
+        else:
+            out = str(part)
+    return out or "$"
+
+
+def diff_values(left: Any, right: Any, path: tuple[Any, ...] = (), max_diffs: int = 64) -> list[dict[str, Any]]:
+    diffs: list[dict[str, Any]] = []
+
+    def add(kind: str, current_path: tuple[Any, ...], left_value: Any, right_value: Any) -> None:
+        if len(diffs) >= max_diffs:
+            return
+        diffs.append(
+            {
+                "path": path_to_string(current_path),
+                "kind": kind,
+                "left": left_value,
+                "right": right_value,
+            }
+        )
+
+    def walk(a: Any, b: Any, current_path: tuple[Any, ...]) -> None:
+        if len(diffs) >= max_diffs:
+            return
+        if type(a) is not type(b):
+            add("type", current_path, type(a).__name__, type(b).__name__)
+            return
+        if isinstance(a, dict):
+            keys = sorted(set(a) | set(b), key=str)
+            for key in keys:
+                if len(diffs) >= max_diffs:
+                    return
+                if key not in a:
+                    add("missing-left", current_path + (key,), None, b.get(key))
+                elif key not in b:
+                    add("missing-right", current_path + (key,), a.get(key), None)
+                else:
+                    walk(a[key], b[key], current_path + (key,))
+            return
+        if isinstance(a, list):
+            common = min(len(a), len(b))
+            for index in range(common):
+                if len(diffs) >= max_diffs:
+                    return
+                walk(a[index], b[index], current_path + (index,))
+            if len(a) != len(b):
+                add("length", current_path, len(a), len(b))
+            return
+        if a != b:
+            add("value", current_path, a, b)
+
+    walk(left, right, path)
+    return diffs
+
+
+def comparison_diff_summary(left: Any, right: Any, root: str) -> dict[str, Any]:
+    diffs = diff_values(left, right, (root,))
     return {
+        "diff_paths": [item["path"] for item in diffs],
+        "first_mismatch_path": diffs[0]["path"] if diffs else None,
+        "path_diffs": diffs,
+        "diff_truncated": len(diffs) >= 64,
+    }
+
+
+def compare_lists(name: str, left: list[Any], right: list[Any]) -> dict[str, Any]:
+    result = {
         "name": name,
         "match": left == right,
         "left": left,
         "right": right,
     }
+    result.update(comparison_diff_summary(left, right, name))
+    return result
 
 
 def compare_counts(name: str, left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
@@ -229,12 +419,40 @@ def compare_counts(name: str, left: dict[str, Any], right: dict[str, Any]) -> di
         for key in keys
         if left_counts.get(key, 0) != right_counts.get(key, 0)
     ]
+    result = {
+        "name": name,
+        "match": not diffs,
+        "left_count": left.get("count"),
+        "right_count": right.get("count"),
+        "diffs": diffs,
+    }
+    result.update(comparison_diff_summary(left_counts, right_counts, f"{name}.by_origin"))
+    return result
+
+
+def compare_path_counts(name: str, left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
+    left_counts = left.get("by_path", {})
+    right_counts = right.get("by_path", {})
+    keys = sorted(set(left_counts) | set(right_counts))
+    diffs = []
+    for key in keys:
+        left_count = left_counts.get(key, 0)
+        right_count = right_counts.get(key, 0)
+        if left_count == right_count:
+            continue
+        try:
+            signature = json.loads(key)
+        except json.JSONDecodeError:
+            signature = key
+        diffs.append({"path": signature, "left": left_count, "right": right_count})
     return {
         "name": name,
         "match": not diffs,
         "left_count": left.get("count"),
         "right_count": right.get("count"),
         "diffs": diffs,
+        "diff_paths": [canonical_path_key(item["path"]) for item in diffs],
+        "first_mismatch_path": canonical_path_key(diffs[0]["path"]) if diffs else None,
     }
 
 
@@ -278,11 +496,18 @@ def main() -> int:
             "match": left["workgroup_size_builtin"] == right["workgroup_size_builtin"],
             "left": left["workgroup_size_builtin"],
             "right": right["workgroup_size_builtin"],
+            **comparison_diff_summary(
+                left["workgroup_size_builtin"],
+                right["workgroup_size_builtin"],
+                "workgroup_size_builtin",
+            ),
         },
         compare_lists("descriptors", left["descriptors"], right["descriptors"]),
         compare_lists("push_constants", left["push_constants"], right["push_constants"]),
         compare_counts("load_origins", left["loads"], right["loads"]),
+        compare_path_counts("load_paths", left["loads"], right["loads"]),
         compare_counts("store_origins", left["stores"], right["stores"]),
+        compare_path_counts("store_paths", left["stores"], right["stores"]),
     ]
     payload = {
         "schema": SCHEMA,

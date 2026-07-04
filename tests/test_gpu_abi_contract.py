@@ -11155,6 +11155,125 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("descriptor[0,2](0,id:357:)", payload["left"]["stores"]["descriptor_origins"])
         self.assertTrue(all(item["match"] for item in payload["comparisons"]))
 
+    def test_spirv_dataflow_compare_reports_exact_mismatch_paths(self):
+        analysis = ROOT / "docs" / "test" / "spirv-q6k-safe-current" / "q6k-safe.analysis.json"
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            mutated = tmp_path / "mutated.analysis.json"
+            out = tmp_path / "compare.json"
+            payload = json.loads(analysis.read_text())
+            module = payload["modules"][0] if payload.get("schema") == "pdocker.spirv.analysis.bundle.v1" else payload
+            module["descriptor_variables"][0]["pointee_layout"]["members"][0]["type"]["array_stride"] = 8
+            module["push_constant_blocks"][0]["members"][0]["offset"] = 4
+            mutated.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+            result = subprocess.run(
+                ["python3", str(SPIRV_DATAFLOW_COMPARE), str(analysis), str(mutated), "--json-out", str(out)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self.assertEqual(result.returncode, 2, result.stderr)
+            report = json.loads(out.read_text())
+
+        self.assertFalse(report["all_match"])
+        descriptor_comparison = next(item for item in report["comparisons"] if item["name"] == "descriptors")
+        self.assertFalse(descriptor_comparison["match"])
+        self.assertIn(
+            "descriptors[0].layout.members[0].type.array_stride",
+            descriptor_comparison["diff_paths"],
+        )
+        self.assertEqual(
+            descriptor_comparison["first_mismatch_path"],
+            "descriptors[0].layout.members[0].type.array_stride",
+        )
+        push_comparison = next(item for item in report["comparisons"] if item["name"] == "push_constants")
+        self.assertFalse(push_comparison["match"])
+        self.assertIn("push_constants[0].offset", push_comparison["diff_paths"])
+        self.assertIn("path_diffs", descriptor_comparison)
+        self.assertEqual(descriptor_comparison["path_diffs"][0]["kind"], "value")
+
+    def test_spirv_dataflow_compare_catches_event_paths_when_origins_match(self):
+        def dynamic_index_expr(op: str) -> dict:
+            return {
+                "id": 2,
+                "name": "",
+                "constant_u32": None,
+                "expr": {
+                    "kind": "op",
+                    "op": op,
+                    "operands": [
+                        {"kind": "constant", "value_u32": 1},
+                        {"kind": "constant", "value_u32": 2},
+                    ],
+                },
+            }
+
+        def descriptor_pointer(binding: int, op: str = "OpIAdd") -> dict:
+            return {
+                "kind": "access_chain",
+                "base": {"kind": "descriptor", "set": 0, "binding": binding, "storage_class": "Uniform"},
+                "indices": [
+                    {"constant_u32": 0},
+                    dynamic_index_expr(op),
+                ],
+            }
+
+        def analysis_payload(op: str, object_binding: int) -> dict:
+            return {
+                "schema": "pdocker.spirv.analysis.v1",
+                "path": "synthetic.spv",
+                "hash": "0xsynthetic",
+                "bytes": 4,
+                "instruction_count": 1,
+                "entry_points": [],
+                "local_size": [1, 1, 1],
+                "local_size_id": [0, 0, 0],
+                "descriptor_variables": [],
+                "push_constant_blocks": [],
+                "load_events": [
+                    {"word_index": 10, "pointer_origin": descriptor_pointer(2, op)},
+                ],
+                "store_events": [
+                    {
+                        "word_index": 20,
+                        "pointer_origin": descriptor_pointer(2, "OpIAdd"),
+                        "object_expr": {"kind": "load", "pointer": descriptor_pointer(object_binding, "OpIAdd")},
+                    }
+                ],
+            }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            left = tmp_path / "left.analysis.json"
+            right = tmp_path / "right.analysis.json"
+            out = tmp_path / "compare.json"
+            left.write_text(json.dumps(analysis_payload("OpIAdd", 0), indent=2, sort_keys=True) + "\n")
+            right.write_text(json.dumps(analysis_payload("OpISub", 1), indent=2, sort_keys=True) + "\n")
+            result = subprocess.run(
+                ["python3", str(SPIRV_DATAFLOW_COMPARE), str(left), str(right), "--json-out", str(out)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self.assertEqual(result.returncode, 2, result.stderr)
+            report = json.loads(out.read_text())
+
+        load_origins = next(item for item in report["comparisons"] if item["name"] == "load_origins")
+        load_paths = next(item for item in report["comparisons"] if item["name"] == "load_paths")
+        store_origins = next(item for item in report["comparisons"] if item["name"] == "store_origins")
+        store_paths = next(item for item in report["comparisons"] if item["name"] == "store_paths")
+        self.assertTrue(load_origins["match"])
+        self.assertFalse(load_paths["match"])
+        self.assertTrue(store_origins["match"])
+        self.assertFalse(store_paths["match"])
+        self.assertIn("OpIAdd", json.dumps(load_paths["diffs"], sort_keys=True))
+        self.assertIn("OpISub", json.dumps(load_paths["diffs"], sort_keys=True))
+        self.assertIn('"binding": 0', json.dumps(store_paths["diffs"], sort_keys=True))
+        self.assertIn('"binding": 1', json.dumps(store_paths["diffs"], sort_keys=True))
+
+
     def test_vulkan_guarded_memory_profile_is_recorded(self):
         source = VULKAN_ICD.read_text()
         for marker in [
