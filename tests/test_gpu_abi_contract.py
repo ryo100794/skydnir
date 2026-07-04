@@ -11193,6 +11193,73 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("path_diffs", descriptor_comparison)
         self.assertEqual(descriptor_comparison["path_diffs"][0]["kind"], "value")
 
+    def test_spirv_dataflow_compare_reports_q6_final_store_flow_paths(self):
+        def flow_payload(op_count: int) -> dict:
+            return {
+                "schema": "pdocker.spirv.analysis.v1",
+                "path": "synthetic.spv",
+                "hash": "0xsynthetic",
+                "bytes": 4,
+                "instruction_count": 1,
+                "entry_points": [],
+                "local_size": [1, 1, 1],
+                "local_size_id": [0, 0, 0],
+                "descriptor_variables": [],
+                "push_constant_blocks": [],
+                "load_events": [],
+                "store_events": [],
+                "q6_probe_targets": {
+                    "final_store_value_flow": {
+                        "available": True,
+                        "final_store_count": 1,
+                        "valid_store_count": 1,
+                        "stores": [
+                            {
+                                "phase": "tail",
+                                "output_store": {
+                                    "base": {"kind": "descriptor", "set": 0, "binding": 2},
+                                    "binding_matches_required": True,
+                                },
+                                "stored_value": {
+                                    "reaches_workgroup_load": True,
+                                    "workgroup_loads": [{"pointer_base": {"storage_class": "Workgroup"}}],
+                                    "op_histogram": {"OpIAdd": op_count},
+                                },
+                                "output_index": {"op_histogram": {"OpIAdd": 1}},
+                                "debug_probe_exclusion": {"passed": True},
+                                "valid": True,
+                            }
+                        ],
+                    }
+                },
+            }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            left = tmp_path / "left.analysis.json"
+            right = tmp_path / "right.analysis.json"
+            out = tmp_path / "compare.json"
+            left.write_text(json.dumps(flow_payload(2), indent=2, sort_keys=True) + "\n")
+            right.write_text(json.dumps(flow_payload(3), indent=2, sort_keys=True) + "\n")
+            result = subprocess.run(
+                ["python3", str(SPIRV_DATAFLOW_COMPARE), str(left), str(right), "--json-out", str(out)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self.assertEqual(result.returncode, 2, result.stderr)
+            report = json.loads(out.read_text())
+
+        q6_flow = next(item for item in report["comparisons"] if item["name"] == "q6_final_store_value_flow")
+        self.assertFalse(q6_flow["match"])
+        self.assertIn(
+            "q6_final_store_value_flow.stores[0].stored_value_op_histogram.OpIAdd",
+            q6_flow["diff_paths"],
+        )
+        self.assertEqual(q6_flow["path_diffs"][0]["kind"], "value")
+
+
     def test_spirv_dataflow_compare_catches_event_paths_when_origins_match(self):
         def dynamic_index_expr(op: str) -> dict:
             return {

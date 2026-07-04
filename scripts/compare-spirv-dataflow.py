@@ -124,6 +124,43 @@ def push_signature(module: dict[str, Any]) -> list[dict[str, Any]]:
         for member in members
     ]
 
+def q6_final_store_value_flow_signature(module: dict[str, Any]) -> dict[str, Any] | None:
+    q6 = module.get("q6_probe_targets")
+    if not isinstance(q6, dict):
+        return None
+    flow = q6.get("final_store_value_flow")
+    if not isinstance(flow, dict):
+        return None
+    stores = []
+    for store in flow.get("stores") or []:
+        if not isinstance(store, dict):
+            continue
+        output_store = store.get("output_store") if isinstance(store.get("output_store"), dict) else {}
+        base = output_store.get("base") if isinstance(output_store.get("base"), dict) else {}
+        stored_value = store.get("stored_value") if isinstance(store.get("stored_value"), dict) else {}
+        output_index = store.get("output_index") if isinstance(store.get("output_index"), dict) else {}
+        debug_exclusion = store.get("debug_probe_exclusion") if isinstance(store.get("debug_probe_exclusion"), dict) else {}
+        stores.append(
+            {
+                "phase": store.get("phase"),
+                "output_binding": base.get("binding"),
+                "binding_matches_required": output_store.get("binding_matches_required"),
+                "stored_value_reaches_workgroup_load": stored_value.get("reaches_workgroup_load"),
+                "stored_value_workgroup_load_count": len(stored_value.get("workgroup_loads") or []),
+                "stored_value_op_histogram": stored_value.get("op_histogram") or {},
+                "output_index_op_histogram": output_index.get("op_histogram") or {},
+                "debug_probe_exclusion_passed": debug_exclusion.get("passed"),
+                "valid": store.get("valid"),
+            }
+        )
+    return {
+        "available": flow.get("available"),
+        "final_store_count": flow.get("final_store_count"),
+        "valid_store_count": flow.get("valid_store_count"),
+        "stores": stores,
+    }
+
+
 def scalar_id_signature(value: Any) -> Any:
     if not isinstance(value, dict):
         return None
@@ -410,6 +447,17 @@ def compare_lists(name: str, left: list[Any], right: list[Any]) -> dict[str, Any
     return result
 
 
+def compare_values(name: str, left: Any, right: Any) -> dict[str, Any]:
+    result = {
+        "name": name,
+        "match": left == right,
+        "left": left,
+        "right": right,
+    }
+    result.update(comparison_diff_summary(left, right, name))
+    return result
+
+
 def compare_counts(name: str, left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
     left_counts = left.get("by_origin", {})
     right_counts = right.get("by_origin", {})
@@ -469,6 +517,7 @@ def summarize(module: dict[str, Any]) -> dict[str, Any]:
         "workgroup_size_builtin": workgroup_size_signature(module),
         "descriptors": descriptor_signature(module),
         "push_constants": push_signature(module),
+        "q6_final_store_value_flow": q6_final_store_value_flow_signature(module),
         "loads": event_summary(module, "load_events"),
         "stores": event_summary(module, "store_events"),
     }
@@ -504,6 +553,11 @@ def main() -> int:
         },
         compare_lists("descriptors", left["descriptors"], right["descriptors"]),
         compare_lists("push_constants", left["push_constants"], right["push_constants"]),
+        compare_values(
+            "q6_final_store_value_flow",
+            left["q6_final_store_value_flow"],
+            right["q6_final_store_value_flow"],
+        ),
         compare_counts("load_origins", left["loads"], right["loads"]),
         compare_path_counts("load_paths", left["loads"], right["loads"]),
         compare_counts("store_origins", left["stores"], right["stores"]),

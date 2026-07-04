@@ -1718,7 +1718,7 @@ def analyze_spirv(path: Path) -> dict:
     if workgroup_size_builtin and workgroup_size_builtin.get("kind") == "spec_constant_composite":
         risk_notes.append("declares BuiltIn WorkgroupSize through specialization constants; executor must reconcile literal LocalSize with specialized WorkgroupSize")
 
-    return {
+    report = {
         "schema": "pdocker.spirv.analysis.v1",
         "path": str(path),
         "hash": f"0x{fnv1a64(data):016x}",
@@ -1753,6 +1753,8 @@ def analyze_spirv(path: Path) -> dict:
         "op_histogram": op_hist_named,
         "risk_notes": risk_notes,
     }
+    report["q6_probe_targets"] = build_q6_probe_targets(report)
+    return report
 
 
 def maybe_disassemble(path: Path, output_dir: Path | None) -> str | None:
