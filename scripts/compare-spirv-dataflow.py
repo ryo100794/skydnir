@@ -124,6 +124,49 @@ def push_signature(module: dict[str, Any]) -> list[dict[str, Any]]:
         for member in members
     ]
 
+def q6_dependency_signature(summary: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(summary, dict):
+        return {}
+    return {
+        "spec_constants": [
+            {
+                "id": item.get("id"),
+                "spec_id": item.get("spec_id"),
+                "default_u32": item.get("default_u32"),
+            }
+            for item in summary.get("spec_constant_dependencies") or []
+            if isinstance(item, dict)
+        ],
+        "constants": [
+            {"id": item.get("id"), "value_u32": item.get("value_u32")}
+            for item in summary.get("constant_dependencies") or []
+            if isinstance(item, dict)
+        ],
+        "builtins": [
+            {
+                "id": item.get("id"),
+                "built_in": item.get("built_in"),
+                "storage_class": item.get("storage_class"),
+            }
+            for item in summary.get("builtin_dependencies") or []
+            if isinstance(item, dict)
+        ],
+        "push_constants": [
+            {
+                "variable_id": item.get("variable_id"),
+                "member_index": item.get("member_index"),
+                "member_offset": item.get("member_offset"),
+            }
+            for item in summary.get("push_constant_dependencies") or []
+            if isinstance(item, dict)
+        ],
+        "descriptors": [
+            {"set": item.get("set"), "binding": item.get("binding")}
+            for item in summary.get("descriptor_dependencies") or []
+            if isinstance(item, dict)
+        ],
+    }
+
 def q6_final_store_value_flow_signature(module: dict[str, Any]) -> dict[str, Any] | None:
     q6 = module.get("q6_probe_targets")
     if not isinstance(q6, dict):
@@ -149,6 +192,8 @@ def q6_final_store_value_flow_signature(module: dict[str, Any]) -> dict[str, Any
                 "stored_value_workgroup_load_count": len(stored_value.get("workgroup_loads") or []),
                 "stored_value_op_histogram": stored_value.get("op_histogram") or {},
                 "output_index_op_histogram": output_index.get("op_histogram") or {},
+                "stored_value_dependencies": q6_dependency_signature(stored_value),
+                "output_index_dependencies": q6_dependency_signature(output_index),
                 "debug_probe_exclusion_passed": debug_exclusion.get("passed"),
                 "valid": store.get("valid"),
             }

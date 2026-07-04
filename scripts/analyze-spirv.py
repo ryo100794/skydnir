@@ -744,6 +744,10 @@ def build_q6_probe_targets(module: dict, debug_descriptor: dict | None = None) -
         workgroup_loads: list[dict] = []
         function_loads: list[dict] = []
         function_store_expansions: list[dict] = []
+        spec_constant_dependencies: dict[int, dict] = {}
+        constant_dependencies: dict[int, dict] = {}
+        builtin_dependencies: dict[tuple[int | None, str | None, str | None], dict] = {}
+        push_constant_dependencies: dict[tuple[int | None, int | None, int | None], dict] = {}
         descriptor_dependencies: set[tuple[int | None, int]] = set()
         op_histogram: Counter[str] = Counter()
         load_count = 0
@@ -764,6 +768,64 @@ def build_q6_probe_targets(module: dict, debug_descriptor: dict | None = None) -
             descriptor_dependencies.add((descriptor_set, binding))
             if binding == debug_probe_binding and (descriptor_set is None or descriptor_set == debug_probe_set):
                 depends_on_debug_probe_binding = True
+
+        def record_base_dependency(base: object) -> None:
+            if not isinstance(base, dict):
+                return
+            built_in = base.get("built_in")
+            if isinstance(built_in, str):
+                key = (
+                    base.get("id") if isinstance(base.get("id"), int) else None,
+                    built_in,
+                    base.get("storage_class") if isinstance(base.get("storage_class"), str) else None,
+                )
+                builtin_dependencies[key] = {
+                    "id": key[0],
+                    "built_in": built_in,
+                    "storage_class": key[2],
+                    "kind": base.get("kind"),
+                }
+
+        def record_pointer_dependency(pointer: object) -> None:
+            if not isinstance(pointer, dict):
+                return
+            base = pointer_base(pointer)
+            record_base_dependency(base)
+            if base.get("kind") == "push_constant":
+                member = pointer.get("push_member") if isinstance(pointer.get("push_member"), dict) else {}
+                member_index = member.get("index") if isinstance(member.get("index"), int) else None
+                member_offset = member.get("offset") if isinstance(member.get("offset"), int) else None
+                key = (
+                    base.get("id") if isinstance(base.get("id"), int) else None,
+                    member_index,
+                    member_offset,
+                )
+                push_constant_dependencies[key] = {
+                    "variable_id": key[0],
+                    "variable_name": base.get("name", ""),
+                    "member_index": member_index,
+                    "member_name": member.get("name", "") if isinstance(member, dict) else "",
+                    "member_offset": member_offset,
+                    "member_type": member.get("type") if isinstance(member, dict) else None,
+                    "pointer": compact_pointer_signature(pointer),
+                }
+
+        def record_scalar_dependency(value: dict) -> None:
+            kind = value.get("kind")
+            value_id = value.get("id") if isinstance(value.get("id"), int) else None
+            if kind == "spec_constant" and value_id is not None:
+                spec_constant_dependencies[value_id] = {
+                    "id": value_id,
+                    "spec_id": value.get("spec_id") if isinstance(value.get("spec_id"), int) else None,
+                    "default_u32": value.get("default_u32") if isinstance(value.get("default_u32"), int) else None,
+                }
+            elif kind == "constant" and value_id is not None:
+                constant_dependencies[value_id] = {
+                    "id": value_id,
+                    "value_u32": value.get("value_u32") if isinstance(value.get("value_u32"), int) else None,
+                }
+            if kind == "variable":
+                record_base_dependency(value)
 
         def record_node(value: dict) -> None:
             nonlocal truncated_nodes
@@ -863,16 +925,21 @@ def build_q6_probe_targets(module: dict, debug_descriptor: dict | None = None) -
                 op_histogram[op] += 1
             if any(key in value for key in ("kind", "id", "op")):
                 record_node(value)
+                record_scalar_dependency(value)
 
             base = value.get("base")
             if isinstance(base, dict):
                 record_descriptor(base)
+                record_base_dependency(base)
+            if value.get("kind") == "access_chain":
+                record_pointer_dependency(value)
 
             if value.get("kind") == "load":
                 load_count += 1
                 pointer = value.get("pointer")
                 base = pointer_base(pointer)
                 record_descriptor(base)
+                record_pointer_dependency(pointer)
                 if base.get("kind") == "variable" and base.get("storage_class") == "Workgroup":
                     key = (value.get("id") if isinstance(value.get("id"), int) else None, base.get("id"))
                     if key not in seen_workgroup_loads:
@@ -909,6 +976,51 @@ def build_q6_probe_targets(module: dict, debug_descriptor: dict | None = None) -
             "truncated_function_store_expansion_count": truncated_function_store_expansions,
             "workgroup_loads": workgroup_loads,
             "reaches_workgroup_load": bool(workgroup_loads),
+            "spec_constant_dependencies": [
+                spec_constant_dependencies[key]
+                for key in sorted(
+                    spec_constant_dependencies,
+                    key=lambda item: (
+                        -1
+                        if spec_constant_dependencies[item].get("spec_id") is None
+                        else spec_constant_dependencies[item].get("spec_id"),
+                        item,
+                    ),
+                )
+            ],
+            "constant_dependencies": [
+                constant_dependencies[key]
+                for key in sorted(
+                    constant_dependencies,
+                    key=lambda item: (
+                        -1
+                        if constant_dependencies[item].get("value_u32") is None
+                        else constant_dependencies[item].get("value_u32"),
+                        item,
+                    ),
+                )
+            ],
+            "builtin_dependencies": [
+                builtin_dependencies[key]
+                for key in sorted(
+                    builtin_dependencies,
+                    key=lambda item: (
+                        "" if item[1] is None else item[1],
+                        -1 if item[0] is None else item[0],
+                    ),
+                )
+            ],
+            "push_constant_dependencies": [
+                push_constant_dependencies[key]
+                for key in sorted(
+                    push_constant_dependencies,
+                    key=lambda item: (
+                        -1 if item[0] is None else item[0],
+                        -1 if item[1] is None else item[1],
+                        -1 if item[2] is None else item[2],
+                    ),
+                )
+            ],
             "descriptor_dependencies": [
                 {"set": descriptor_set, "binding": binding}
                 for descriptor_set, binding in sorted(
@@ -1883,14 +1995,16 @@ def analyze_spirv(path: Path) -> dict:
                 "pointer": pointer_origin(int(definition.get("pointer_id"))),
             }
         if op in ("OpAccessChain", "OpInBoundsAccessChain"):
+            origin = pointer_origin(value_id)
             return {
                 "kind": "access_chain",
                 "id": value_id,
-                "base": describe_base(int(definition.get("base_id"))),
+                "base": origin.get("base") or describe_base(int(definition.get("base_id"))),
                 "indices": [
                     describe_id_expr(int(index_id), depth + 1, set(seen))
                     for index_id in definition.get("index_ids", [])
                 ],
+                **({"push_member": origin["push_member"]} if isinstance(origin, dict) and "push_member" in origin else {}),
             }
         operands = definition.get("operands", [])
         return {

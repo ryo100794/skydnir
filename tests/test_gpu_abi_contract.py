@@ -29,6 +29,7 @@ SPIRV_NOOP_INSTRUMENTER = ROOT / "scripts" / "instrument-spirv-noop-probe.py"
 SPIRV_DATAFLOW_COMPARE = ROOT / "scripts" / "compare-spirv-dataflow.py"
 SPIRV_EFFECTIVE_RECONSTRUCTOR = ROOT / "scripts" / "reconstruct-q6-effective-spirv.py"
 Q6_FUNCTION_ACCUMULATOR_SPV = ROOT / "docs" / "test" / "spirv-q6k-function-accumulator" / "native-q6-function-accumulator.spv"
+Q6_FUNCTION_ACCUMULATOR_EFFECTIVE_SPV = ROOT / "docs" / "test" / "spirv-q6k-function-accumulator" / "effective-q6-function-accumulator.spv"
 LLAMA_Q6_PREFLIGHT_PLANNER = ROOT / "scripts" / "plan-llama-gpu-q6-run.py"
 LLAMA_Q6_PLAN_VERIFIER = ROOT / "scripts" / "verify-llama-gpu-q6-run-against-plan.py"
 Q6_STAGE_TRACE_SPVASM_ANALYZER = ROOT / "scripts" / "maintenance" / "analyze-q6-stage-trace-spvasm.py"
@@ -10885,6 +10886,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertEqual(flow["debug_probe_descriptor"], {"set": 0, "binding": 6})
         for store in flow["stores"]:
             stored = store["stored_value"]
+            output_index = store["output_index"]
             self.assertTrue(store["valid"])
             self.assertEqual(stored["root"]["pointer_base"]["storage_class"], "Function")
             self.assertGreater(len(stored["function_store_expansions"]), 0)
@@ -10895,6 +10897,93 @@ class GpuAbiContractTest(unittest.TestCase):
                 6,
                 [dep["binding"] for dep in stored["descriptor_dependencies"]],
             )
+            self.assertEqual(
+                [{"id": 15, "spec_id": 1, "default_u32": 1}],
+                output_index["spec_constant_dependencies"],
+            )
+            self.assertEqual(
+                {"NumWorkgroups", "WorkgroupId"},
+                {dep["built_in"] for dep in output_index["builtin_dependencies"]},
+            )
+            self.assertEqual(
+                [24, 32],
+                [dep["member_offset"] for dep in output_index["push_constant_dependencies"]],
+            )
+            self.assertEqual([], output_index["descriptor_dependencies"])
+            self.assertEqual(
+                [(0, 3), (0, 4)],
+                [(dep["set"], dep["binding"]) for dep in stored["descriptor_dependencies"]],
+            )
+
+    def test_spirv_analyzer_reports_q6_function_accumulator_specialization_materialization(self):
+        self.assertTrue(Q6_FUNCTION_ACCUMULATOR_SPV.exists(), "Q6 source SPIR-V evidence must be preserved")
+        self.assertTrue(Q6_FUNCTION_ACCUMULATOR_EFFECTIVE_SPV.exists(), "Q6 effective SPIR-V evidence must be preserved")
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source_analysis = tmp_path / "source.analysis.json"
+            effective_analysis = tmp_path / "effective.analysis.json"
+            compare_out = tmp_path / "source-vs-effective.json"
+            for spv, analysis in (
+                (Q6_FUNCTION_ACCUMULATOR_SPV, source_analysis),
+                (Q6_FUNCTION_ACCUMULATOR_EFFECTIVE_SPV, effective_analysis),
+            ):
+                subprocess.run(
+                    ["python3", str(SPIRV_ANALYZER), str(spv), "--json-out", str(analysis)],
+                    cwd=ROOT,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    check=True,
+                )
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(SPIRV_DATAFLOW_COMPARE),
+                    str(source_analysis),
+                    str(effective_analysis),
+                    "--json-out",
+                    str(compare_out),
+                ],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            source = json.loads(source_analysis.read_text(encoding="utf-8"))["modules"][0]
+            effective = json.loads(effective_analysis.read_text(encoding="utf-8"))["modules"][0]
+            compare = json.loads(compare_out.read_text(encoding="utf-8"))
+
+        self.assertEqual(2, result.returncode, result.stdout + result.stderr)
+        self.assertEqual(source["hash"], "0x6ec5d7a41443f157")
+        self.assertEqual(effective["hash"], "0x00c3414e5d50b925")
+        self.assertEqual(effective["local_size"], [64, 1, 1])
+        self.assertEqual([], effective["spec_constants"])
+        source_flow = source["q6_probe_targets"]["final_store_value_flow"]
+        effective_flow = effective["q6_probe_targets"]["final_store_value_flow"]
+        self.assertEqual([4053, 7371], [store["word_index"] for store in source_flow["stores"]])
+        self.assertEqual([4031, 7349], [store["word_index"] for store in effective_flow["stores"]])
+        for store in effective_flow["stores"]:
+            output_index = store["output_index"]
+            self.assertEqual([], output_index["spec_constant_dependencies"])
+            self.assertIn(
+                {"id": 15, "value_u32": 2},
+                output_index["constant_dependencies"],
+            )
+            self.assertEqual(
+                {"NumWorkgroups", "WorkgroupId"},
+                {dep["built_in"] for dep in output_index["builtin_dependencies"]},
+            )
+        q6_compare = next(item for item in compare["comparisons"] if item["name"] == "q6_final_store_value_flow")
+        self.assertFalse(q6_compare["match"])
+        self.assertIn(
+            "q6_final_store_value_flow.stores[0].output_index_dependencies.spec_constants",
+            q6_compare["diff_paths"],
+        )
+        self.assertIn(
+            "q6_final_store_value_flow.stores[0].output_index_dependencies.constants",
+            q6_compare["diff_paths"],
+        )
 
     def test_spirv_analyzer_reports_q6_effective_workgroup_shape_mismatch(self):
         native_spv = ROOT / "docs" / "test" / "spirv-q6k-native-adb45055" / "native-q6-source.spv"
