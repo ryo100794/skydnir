@@ -167,6 +167,45 @@ def q6_dependency_signature(summary: dict[str, Any]) -> dict[str, Any]:
         ],
     }
 
+def q6_barrier_window_signature(module: dict[str, Any]) -> dict[str, Any] | None:
+    q6 = module.get("q6_probe_targets")
+    if not isinstance(q6, dict):
+        return None
+    evidence = q6.get("q6_barrier_window_evidence")
+    if not isinstance(evidence, dict):
+        return None
+    windows = []
+    for window in evidence.get("windows") or []:
+        if not isinstance(window, dict):
+            continue
+        windows.append(
+            {
+                "phase": window.get("phase"),
+                "output_store_word_index": window.get("output_store_word_index"),
+                "workgroup_store_word_indices": window.get("workgroup_store_word_indices") or [],
+                "barrier_word_indices": window.get("barrier_word_indices") or [],
+                "workgroup_store_barrier_pairs": window.get("workgroup_store_barrier_pairs") or [],
+                "all_workgroup_stores_have_following_barrier": window.get("all_workgroup_stores_have_following_barrier"),
+                "all_barriers_are_workgroup_acquire_release": window.get("all_barriers_are_workgroup_acquire_release"),
+                "barrier_semantics": [
+                    {
+                        "op": barrier.get("op"),
+                        "execution_scope": barrier.get("execution_scope_name"),
+                        "memory_scope": barrier.get("memory_scope_name"),
+                        "memory_semantics": barrier.get("memory_semantics_names") or [],
+                    }
+                    for barrier in window.get("barriers") or []
+                    if isinstance(barrier, dict)
+                ],
+            }
+        )
+    return {
+        "available": evidence.get("available"),
+        "window_count": evidence.get("window_count"),
+        "barrier_event_count": evidence.get("barrier_event_count"),
+        "windows": windows,
+    }
+
 def q6_final_store_value_flow_signature(module: dict[str, Any]) -> dict[str, Any] | None:
     q6 = module.get("q6_probe_targets")
     if not isinstance(q6, dict):
@@ -564,6 +603,7 @@ def summarize(module: dict[str, Any]) -> dict[str, Any]:
         "descriptors": descriptor_signature(module),
         "push_constants": push_signature(module),
         "q6_final_store_value_flow": q6_final_store_value_flow_signature(module),
+        "q6_barrier_window_evidence": q6_barrier_window_signature(module),
         "loads": event_summary(module, "load_events"),
         "stores": event_summary(module, "store_events"),
     }
@@ -608,6 +648,11 @@ def main() -> int:
             "q6_final_store_value_flow",
             left["q6_final_store_value_flow"],
             right["q6_final_store_value_flow"],
+        ),
+        compare_values(
+            "q6_barrier_window_evidence",
+            left["q6_barrier_window_evidence"],
+            right["q6_barrier_window_evidence"],
         ),
         compare_counts("load_origins", left["loads"], right["loads"]),
         compare_path_counts("load_paths", left["loads"], right["loads"]),

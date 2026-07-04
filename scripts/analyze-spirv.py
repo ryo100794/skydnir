@@ -184,6 +184,46 @@ EXECUTION_MODEL_NAMES = {
     5: "GLCompute",
 }
 
+SCOPE_NAMES = {
+    0: "CrossDevice",
+    1: "Device",
+    2: "Workgroup",
+    3: "Subgroup",
+    4: "Invocation",
+    5: "QueueFamily",
+}
+
+MEMORY_SEMANTICS_FLAGS = [
+    (0x0002, "Acquire"),
+    (0x0004, "Release"),
+    (0x0008, "AcquireRelease"),
+    (0x0010, "SequentiallyConsistent"),
+    (0x0040, "UniformMemory"),
+    (0x0080, "SubgroupMemory"),
+    (0x0100, "WorkgroupMemory"),
+    (0x0200, "CrossWorkgroupMemory"),
+    (0x0400, "AtomicCounterMemory"),
+    (0x0800, "ImageMemory"),
+    (0x1000, "OutputMemory"),
+    (0x2000, "MakeAvailable"),
+    (0x4000, "MakeVisible"),
+    (0x10000, "Volatile"),
+]
+
+
+def decode_scope_name(value: int | None) -> str | None:
+    if value is None:
+        return None
+    return SCOPE_NAMES.get(value, str(value))
+
+
+def decode_memory_semantics_names(value: int | None) -> list[str]:
+    if value is None:
+        return []
+    if value == 0:
+        return ["None"]
+    return [name for bit, name in MEMORY_SEMANTICS_FLAGS if value & bit]
+
 
 def fnv1a64(data: bytes) -> int:
     value = 1469598103934665603
@@ -1138,6 +1178,106 @@ def build_q6_probe_targets(module: dict, debug_descriptor: dict | None = None) -
             }
         )
 
+    barrier_events = sorted(
+        [barrier for barrier in module.get("barrier_events", []) if isinstance(barrier, dict)],
+        key=lambda item: int(item.get("word_index", -1)),
+    )
+
+    def compact_barrier_event(barrier: dict | None) -> dict | None:
+        if not isinstance(barrier, dict):
+            return None
+        return {
+            key: barrier.get(key)
+            for key in (
+                "word_index",
+                "opcode",
+                "op",
+                "word_count",
+                "raw_operands",
+                "execution_scope_id",
+                "execution_scope_value",
+                "execution_scope_name",
+                "memory_scope_id",
+                "memory_scope_value",
+                "memory_scope_name",
+                "memory_semantics_id",
+                "memory_semantics_value",
+                "memory_semantics_names",
+                "block",
+            )
+            if key in barrier
+        }
+
+    q6_barrier_windows = []
+    previous_output_for_barrier_window = -1
+    for phase in phases:
+        output_store = phase.get("output_store") if isinstance(phase.get("output_store"), dict) else {}
+        output_word = output_store.get("word_index")
+        if not isinstance(output_word, int):
+            continue
+        workgroup_store_words = [
+            store.get("word_index")
+            for store in phase.get("preceding_workgroup_stores", [])
+            if isinstance(store, dict) and isinstance(store.get("word_index"), int)
+        ]
+        barriers_in_window = [
+            barrier
+            for barrier in barrier_events
+            if previous_output_for_barrier_window < int(barrier.get("word_index", -1)) < output_word
+        ]
+        pairs = []
+        for workgroup_word in workgroup_store_words:
+            following = next(
+                (
+                    barrier
+                    for barrier in barriers_in_window
+                    if int(barrier.get("word_index", -1)) > workgroup_word
+                ),
+                None,
+            )
+            pairs.append(
+                {
+                    "workgroup_store_word_index": workgroup_word,
+                    "barrier_word_index": following.get("word_index") if isinstance(following, dict) else None,
+                }
+            )
+        q6_barrier_windows.append(
+            {
+                "phase": phase.get("name"),
+                "window_start_exclusive_word_index": previous_output_for_barrier_window,
+                "output_store_word_index": output_word,
+                "workgroup_store_word_indices": workgroup_store_words,
+                "barrier_word_indices": [barrier.get("word_index") for barrier in barriers_in_window],
+                "barriers": [compact_barrier_event(barrier) for barrier in barriers_in_window],
+                "workgroup_store_barrier_pairs": pairs,
+                "all_workgroup_stores_have_following_barrier": all(
+                    pair.get("barrier_word_index") is not None for pair in pairs
+                ),
+                "all_barriers_are_workgroup_acquire_release": all(
+                    barrier.get("op") == "OpControlBarrier"
+                    and barrier.get("execution_scope_value") == 2
+                    and barrier.get("memory_scope_value") == 2
+                    and "AcquireRelease" in (barrier.get("memory_semantics_names") or [])
+                    and "WorkgroupMemory" in (barrier.get("memory_semantics_names") or [])
+                    for barrier in barriers_in_window
+                ),
+            }
+        )
+        previous_output_for_barrier_window = output_word
+
+    q6_barrier_window_evidence = {
+        "schema": "pdocker.spirv.q6-barrier-window-evidence.v1",
+        "method": "static-word-order-window-between-workgroup-stores-and-final-output-stores",
+        "available": bool(q6_barrier_windows),
+        "window_count": len(q6_barrier_windows),
+        "barrier_event_count": len(barrier_events),
+        "windows": q6_barrier_windows,
+        "notes": [
+            "This is static word-order evidence, not a proof of dynamic execution order.",
+            "Barrier semantics are decoded as SPIR-V bit flags; WorkgroupMemory plus AcquireRelease is required for the Q6 workgroup windows.",
+        ],
+    }
+
     final_store_value_flow = {
         "schema": "pdocker.spirv.q6-final-store-value-flow.v1",
         "method": "backward-slice-stored-value-and-output-index",
@@ -1164,6 +1304,7 @@ def build_q6_probe_targets(module: dict, debug_descriptor: dict | None = None) -
         "final_output_store_count": len(final_output_stores),
         "workgroup_store_count": len(workgroup_stores),
         "final_store_value_flow": final_store_value_flow,
+        "q6_barrier_window_evidence": q6_barrier_window_evidence,
         "phases": phases,
         "priority_targets": priority_targets,
         "notes": [
@@ -1363,6 +1504,7 @@ def analyze_spirv(path: Path) -> dict:
     access_chains_raw: list[dict] = []
     load_events_raw: list[dict] = []
     store_events_raw: list[dict] = []
+    barrier_events_raw: list[dict] = []
     access_chain_count = 0
     workgroup_variable_count = 0
     storage_variables = []
@@ -1405,6 +1547,15 @@ def analyze_spirv(path: Path) -> dict:
             access_chain_count += 1
         elif opcode in (224, 225):
             barriers += 1
+            barrier_events_raw.append(
+                {
+                    "word_index": _index,
+                    "opcode": opcode,
+                    "op": OP_NAMES.get(opcode, f"Op{opcode}"),
+                    "word_count": len(inst),
+                    "raw_operands": inst[1:],
+                }
+            )
         elif 124 <= opcode <= 190:
             arithmetic += 1
         elif 245 <= opcode <= 255:
@@ -1590,6 +1741,43 @@ def analyze_spirv(path: Path) -> dict:
         if not value or "opcode" in value or len(value.get("words", [])) != 1:
             return None
         return int(value["words"][0])
+
+    def decode_barrier_event(raw: dict) -> dict:
+        item = dict(raw)
+        operands = list(raw.get("raw_operands") or [])
+        if raw.get("opcode") == 224 and len(operands) >= 3:
+            execution_scope_id, memory_scope_id, memory_semantics_id = operands[:3]
+            execution_scope_value = constant_u32(execution_scope_id)
+            memory_scope_value = constant_u32(memory_scope_id)
+            memory_semantics_value = constant_u32(memory_semantics_id)
+            item.update(
+                {
+                    "execution_scope_id": execution_scope_id,
+                    "execution_scope_value": execution_scope_value,
+                    "execution_scope_name": decode_scope_name(execution_scope_value),
+                    "memory_scope_id": memory_scope_id,
+                    "memory_scope_value": memory_scope_value,
+                    "memory_scope_name": decode_scope_name(memory_scope_value),
+                    "memory_semantics_id": memory_semantics_id,
+                    "memory_semantics_value": memory_semantics_value,
+                    "memory_semantics_names": decode_memory_semantics_names(memory_semantics_value),
+                }
+            )
+        elif raw.get("opcode") == 225 and len(operands) >= 2:
+            memory_scope_id, memory_semantics_id = operands[:2]
+            memory_scope_value = constant_u32(memory_scope_id)
+            memory_semantics_value = constant_u32(memory_semantics_id)
+            item.update(
+                {
+                    "memory_scope_id": memory_scope_id,
+                    "memory_scope_value": memory_scope_value,
+                    "memory_scope_name": decode_scope_name(memory_scope_value),
+                    "memory_semantics_id": memory_semantics_id,
+                    "memory_semantics_value": memory_semantics_value,
+                    "memory_semantics_names": decode_memory_semantics_names(memory_semantics_value),
+                }
+            )
+        return item
 
     def describe_scalar_id(value_id: int) -> dict:
         item: dict = {
@@ -2038,6 +2226,8 @@ def analyze_spirv(path: Path) -> dict:
         for event in store_events_raw
     ]
 
+    barrier_events = [decode_barrier_event(raw) for raw in barrier_events_raw]
+
     duplicate_bindings = [
         {"set": set_id, "binding": binding, "variable_ids": ids}
         for (set_id, binding), ids in sorted(bindings_seen.items())
@@ -2067,6 +2257,30 @@ def analyze_spirv(path: Path) -> dict:
         risk_notes.append("declares BuiltIn WorkgroupSize through specialization constants; executor must reconcile literal LocalSize with specialized WorkgroupSize")
     if workgroup_execution_shape.get("statically_consistent") is False:
         risk_notes.append("literal LocalSize differs from BuiltIn WorkgroupSize default; executor must materialize or specialize WorkgroupSize consistently before replay")
+
+    control_flow = summarize_cfg(words)
+
+    def block_for_word_in_cfg(word_index: int) -> dict | None:
+        for function in control_flow.get("functions", []):
+            for ordinal, block in enumerate(function.get("blocks", [])):
+                indices = list(block.get("instruction_word_indices") or [])
+                if not indices:
+                    continue
+                start = int(block.get("word_index", min(indices)))
+                end = max(indices + [start])
+                if start <= word_index <= end:
+                    return {
+                        "function_id": function.get("id"),
+                        "block_label": block.get("label"),
+                        "block_ordinal": ordinal,
+                        "block_word_index": block.get("word_index"),
+                    }
+        return None
+
+    for barrier in barrier_events:
+        word_index = barrier.get("word_index")
+        if isinstance(word_index, int):
+            barrier["block"] = block_for_word_in_cfg(word_index) or {}
 
     report = {
         "schema": "pdocker.spirv.analysis.v1",
@@ -2098,9 +2312,10 @@ def analyze_spirv(path: Path) -> dict:
         "access_chains": access_chains,
         "load_events": load_events,
         "store_events": store_events,
+        "barrier_events": barrier_events,
         "duplicate_bindings": duplicate_bindings,
         "workgroup_variable_count": workgroup_variable_count,
-        "control_flow": summarize_cfg(words),
+        "control_flow": control_flow,
         "op_histogram": op_hist_named,
         "risk_notes": risk_notes,
     }

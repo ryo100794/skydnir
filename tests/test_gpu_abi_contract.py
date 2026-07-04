@@ -10915,6 +10915,74 @@ class GpuAbiContractTest(unittest.TestCase):
                 [(dep["set"], dep["binding"]) for dep in stored["descriptor_dependencies"]],
             )
 
+    def test_spirv_analyzer_reports_q6_barrier_window_evidence(self):
+        self.assertTrue(Q6_FUNCTION_ACCUMULATOR_SPV.exists(), "Q6 Function-accumulator SPIR-V evidence must be preserved")
+        with tempfile.TemporaryDirectory() as tmp:
+            analysis = Path(tmp) / "function-accumulator.analysis.json"
+            subprocess.run(
+                ["python3", str(SPIRV_ANALYZER), str(Q6_FUNCTION_ACCUMULATOR_SPV), "--json-out", str(analysis)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+            )
+            payload = json.loads(analysis.read_text(encoding="utf-8"))["modules"][0]
+
+        self.assertEqual(payload["hash"], "0x6ec5d7a41443f157")
+        self.assertEqual(
+            {"load": 132, "store": 82, "access_chain": 196, "arithmetic": 303, "control": 291, "barrier": 4},
+            payload["op_class_counts"],
+        )
+        self.assertEqual([2145, 2845, 5260, 6163], [barrier["word_index"] for barrier in payload["barrier_events"]])
+        for barrier in payload["barrier_events"]:
+            self.assertEqual("OpControlBarrier", barrier["op"])
+            self.assertEqual(224, barrier["opcode"])
+            self.assertEqual(4, barrier["word_count"])
+            self.assertEqual([203, 203, 304], barrier["raw_operands"])
+            self.assertEqual(203, barrier["execution_scope_id"])
+            self.assertEqual(2, barrier["execution_scope_value"])
+            self.assertEqual("Workgroup", barrier["execution_scope_name"])
+            self.assertEqual(203, barrier["memory_scope_id"])
+            self.assertEqual(2, barrier["memory_scope_value"])
+            self.assertEqual("Workgroup", barrier["memory_scope_name"])
+            self.assertEqual(304, barrier["memory_semantics_id"])
+            self.assertEqual(264, barrier["memory_semantics_value"])
+            self.assertEqual(["AcquireRelease", "WorkgroupMemory"], barrier["memory_semantics_names"])
+        self.assertEqual(
+            [(2145, 2011, 17), (2845, 2363, 28), (5260, 1052, 70), (6163, 1404, 81)],
+            [
+                (barrier["word_index"], barrier["block"]["block_label"], barrier["block"]["block_ordinal"])
+                for barrier in payload["barrier_events"]
+            ],
+        )
+
+        evidence = payload["q6_probe_targets"]["q6_barrier_window_evidence"]
+        self.assertTrue(evidence["available"])
+        self.assertEqual(2, evidence["window_count"])
+        self.assertEqual(4, evidence["barrier_event_count"])
+        windows = evidence["windows"]
+        self.assertEqual(["tail", "full"], [window["phase"] for window in windows])
+        self.assertEqual([4053, 7371], [window["output_store_word_index"] for window in windows])
+        self.assertEqual([[2145, 2845], [5260, 6163]], [window["barrier_word_indices"] for window in windows])
+        self.assertEqual([[2111, 2807], [5023, 5922]], [window["workgroup_store_word_indices"] for window in windows])
+        self.assertEqual(
+            [
+                {"workgroup_store_word_index": 2111, "barrier_word_index": 2145},
+                {"workgroup_store_word_index": 2807, "barrier_word_index": 2845},
+            ],
+            windows[0]["workgroup_store_barrier_pairs"],
+        )
+        self.assertEqual(
+            [
+                {"workgroup_store_word_index": 5023, "barrier_word_index": 5260},
+                {"workgroup_store_word_index": 5922, "barrier_word_index": 6163},
+            ],
+            windows[1]["workgroup_store_barrier_pairs"],
+        )
+        self.assertTrue(all(window["all_workgroup_stores_have_following_barrier"] for window in windows))
+        self.assertTrue(all(window["all_barriers_are_workgroup_acquire_release"] for window in windows))
+
     def test_spirv_analyzer_reports_q6_function_accumulator_specialization_materialization(self):
         self.assertTrue(Q6_FUNCTION_ACCUMULATOR_SPV.exists(), "Q6 source SPIR-V evidence must be preserved")
         self.assertTrue(Q6_FUNCTION_ACCUMULATOR_EFFECTIVE_SPV.exists(), "Q6 effective SPIR-V evidence must be preserved")
@@ -10983,6 +11051,12 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn(
             "q6_final_store_value_flow.stores[0].output_index_dependencies.constants",
             q6_compare["diff_paths"],
+        )
+        barrier_compare = next(item for item in compare["comparisons"] if item["name"] == "q6_barrier_window_evidence")
+        self.assertFalse(barrier_compare["match"])
+        self.assertEqual(
+            "q6_barrier_window_evidence.windows[0].barrier_word_indices[0]",
+            barrier_compare["first_mismatch_path"],
         )
 
     def test_spirv_analyzer_reports_q6_effective_workgroup_shape_mismatch(self):
