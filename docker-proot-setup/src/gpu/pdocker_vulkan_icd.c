@@ -15743,6 +15743,48 @@ static bool command_buffer_begin_inheritance_supported(
     return true;
 }
 
+static bool render_pass_create_pnext_noop(const VkRenderPassCreateInfo *info) {
+    for (const void *node = info ? info->pNext : NULL; node;) {
+        PdockerVkStructHeader header = read_vk_struct_header(node);
+        switch (header.sType) {
+#ifdef VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO
+            case VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO: {
+                const VkRenderPassMultiviewCreateInfo *mv =
+                    (const VkRenderPassMultiviewCreateInfo *)node;
+                if (!info || mv->subpassCount != info->subpassCount ||
+                    (mv->subpassCount > 0 && !mv->pViewMasks) ||
+                    (mv->dependencyCount > 0 && !mv->pViewOffsets) ||
+                    (mv->correlationMaskCount > 0 && !mv->pCorrelationMasks)) {
+                    return false;
+                }
+                for (uint32_t i = 0; i < mv->subpassCount; ++i) {
+                    if (mv->pViewMasks[i] != 0) return false;
+                }
+                for (uint32_t i = 0; i < mv->dependencyCount; ++i) {
+                    if (mv->pViewOffsets[i] != 0) return false;
+                }
+                for (uint32_t i = 0; i < mv->correlationMaskCount; ++i) {
+                    if (mv->pCorrelationMasks[i] != 0) return false;
+                }
+                break;
+            }
+#endif
+#ifdef VK_STRUCTURE_TYPE_RENDER_PASS_INPUT_ATTACHMENT_ASPECT_CREATE_INFO
+            case VK_STRUCTURE_TYPE_RENDER_PASS_INPUT_ATTACHMENT_ASPECT_CREATE_INFO: {
+                const VkRenderPassInputAttachmentAspectCreateInfo *aspect =
+                    (const VkRenderPassInputAttachmentAspectCreateInfo *)node;
+                if (aspect->aspectReferenceCount != 0) return false;
+                break;
+            }
+#endif
+            default:
+                return false;
+        }
+        node = header.pNext;
+    }
+    return true;
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateRenderPass(
         VkDevice device,
         const VkRenderPassCreateInfo *pCreateInfo,
@@ -15755,7 +15797,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateRenderPass(
     if (!rp) return VK_ERROR_OUT_OF_HOST_MEMORY;
     rp->attachment_count = pCreateInfo ? pCreateInfo->attachmentCount : 0;
     rp->subpass_count = pCreateInfo ? pCreateInfo->subpassCount : 0;
-    if (pCreateInfo && (pCreateInfo->pNext || pCreateInfo->flags != 0)) {
+    if (pCreateInfo && (pCreateInfo->flags != 0 || !render_pass_create_pnext_noop(pCreateInfo))) {
         rp->subpass_overflow = true;
     }
     if (rp->attachment_count > PDOCKER_VK_MAX_STORAGE_BUFFERS) {

@@ -6689,6 +6689,22 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("if (pCreateInfo->pNext)", query_pool_body)
         self.assertIn("if (pCreateInfo->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;", query_pool_body)
 
+    def test_vulkan_render_pass_accepts_only_noop_legacy_multiview_pnext(self):
+        icd = VULKAN_ICD.read_text()
+        helper_body = c_function_body(icd, "render_pass_create_pnext_noop")
+        create_body = c_function_body(icd, "vkCreateRenderPass")
+        self.assertIn("VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO", helper_body)
+        self.assertIn("mv->subpassCount != info->subpassCount", helper_body)
+        self.assertIn("mv->pViewMasks[i] != 0", helper_body)
+        self.assertIn("mv->pViewOffsets[i] != 0", helper_body)
+        self.assertIn("mv->pCorrelationMasks[i] != 0", helper_body)
+        self.assertIn("VK_STRUCTURE_TYPE_RENDER_PASS_INPUT_ATTACHMENT_ASPECT_CREATE_INFO", helper_body)
+        self.assertIn("aspect->aspectReferenceCount != 0", helper_body)
+        self.assertIn("default:", helper_body)
+        self.assertIn("return false;", helper_body)
+        self.assertIn("pCreateInfo->flags != 0 || !render_pass_create_pnext_noop(pCreateInfo)", create_body)
+        self.assertIn("rp->subpass_overflow = true;", create_body)
+
 
     def test_vulkan_image_sampler_object_apis_are_enabled_by_default_and_tracked_for_v5_object_transport(self):
         icd = VULKAN_ICD.read_text()
