@@ -6822,6 +6822,46 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("rp->subpass_overflow = true;", create_body)
 
 
+    def test_vulkan_command_pool_buffer_and_event_create_infos_fail_closed(self):
+        icd = VULKAN_ICD.read_text()
+        command_pool_validate = c_function_body(icd, "validate_command_pool_create_info")
+        create_pool_body = c_function_body(icd, "vkCreateCommandPool")
+        reset_pool_body = c_function_body(icd, "vkResetCommandPool")
+        trim_pool_body = c_function_body(icd, "vkTrimCommandPool")
+        allocate_body = c_function_body(icd, "vkAllocateCommandBuffers")
+        create_event_body = c_function_body(icd, "vkCreateEvent")
+
+        self.assertIn("pCreateInfo->sType != VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO", command_pool_validate)
+        self.assertIn("pCreateInfo->queueFamilyIndex >= PDOCKER_VK_ADVERTISED_QUEUE_FAMILY_COUNT", command_pool_validate)
+        self.assertIn('unsupported_create_info_pnext_result("vkCreateCommandPool", pCreateInfo->pNext)', command_pool_validate)
+        self.assertIn("VK_COMMAND_POOL_CREATE_TRANSIENT_BIT", command_pool_validate)
+        self.assertIn("VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT", command_pool_validate)
+        self.assertIn("command-pool-flags-unsupported", command_pool_validate)
+        self.assertIn("*pCommandPool = VK_NULL_HANDLE;", create_pool_body)
+        self.assertIn("validate_command_pool_create_info(pCreateInfo)", create_pool_body)
+
+        self.assertIn("pdocker_vk_command_pool_from_handle(commandPool)", reset_pool_body)
+        self.assertIn("flags & ~VK_COMMAND_POOL_RESET_RELEASE_RESOURCES_BIT", reset_pool_body)
+        self.assertIn("command-pool-reset-flags-unsupported", reset_pool_body)
+        self.assertIn("pdocker_vk_command_pool_from_handle(commandPool)", trim_pool_body)
+        self.assertIn("flags != 0", trim_pool_body)
+        self.assertIn("command-pool-trim-flags-unsupported", trim_pool_body)
+
+        self.assertIn("pAllocateInfo->sType != VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO", allocate_body)
+        self.assertIn("pAllocateInfo->pNext", allocate_body)
+        self.assertIn('unsupported_create_info_pnext_result("vkAllocateCommandBuffers"', allocate_body)
+        self.assertIn("pdocker_vk_command_pool_from_handle(pAllocateInfo->commandPool)", allocate_body)
+        self.assertIn("pAllocateInfo->level != VK_COMMAND_BUFFER_LEVEL_PRIMARY", allocate_body)
+        self.assertIn("pAllocateInfo->level != VK_COMMAND_BUFFER_LEVEL_SECONDARY", allocate_body)
+        self.assertIn("command-buffer-level-unsupported", allocate_body)
+
+        self.assertIn("*pEvent = VK_NULL_HANDLE;", create_event_body)
+        self.assertIn("pCreateInfo->sType != VK_STRUCTURE_TYPE_EVENT_CREATE_INFO", create_event_body)
+        self.assertIn('unsupported_create_info_pnext_result("vkCreateEvent", pCreateInfo->pNext)', create_event_body)
+        self.assertIn("pCreateInfo->flags != 0", create_event_body)
+        self.assertIn("event-flags-unsupported", create_event_body)
+
+
     def test_vulkan_image_sampler_object_apis_are_enabled_by_default_and_tracked_for_v5_object_transport(self):
         icd = VULKAN_ICD.read_text()
         for symbol in [

@@ -16956,15 +16956,37 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueuePresentKHR(
     return VK_SUCCESS;
 }
 
+static VkResult validate_command_pool_create_info(const VkCommandPoolCreateInfo *pCreateInfo) {
+    if (!pCreateInfo ||
+        pCreateInfo->sType != VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO ||
+        pCreateInfo->queueFamilyIndex >= PDOCKER_VK_ADVERTISED_QUEUE_FAMILY_COUNT) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    if (pCreateInfo->pNext) {
+        return unsupported_create_info_pnext_result("vkCreateCommandPool", pCreateInfo->pNext);
+    }
+    const VkCommandPoolCreateFlags supported_flags =
+        VK_COMMAND_POOL_CREATE_TRANSIENT_BIT |
+        VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    if ((pCreateInfo->flags & ~supported_flags) != 0) {
+        trace_icd_runtime_failure("command-pool-flags-unsupported",
+                                  VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    return VK_SUCCESS;
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateCommandPool(
         VkDevice device,
         const VkCommandPoolCreateInfo *pCreateInfo,
         const VkAllocationCallbacks *pAllocator,
         VkCommandPool *pCommandPool) {
     (void)device;
-    (void)pCreateInfo;
     (void)pAllocator;
     if (!pCommandPool) return VK_ERROR_INITIALIZATION_FAILED;
+    *pCommandPool = VK_NULL_HANDLE;
+    VkResult validate_rc = validate_command_pool_create_info(pCreateInfo);
+    if (validate_rc != VK_SUCCESS) return validate_rc;
     PdockerVkCommandPool *pool = pdocker_alloc_handle(sizeof(*pool));
     if (!pool) return VK_ERROR_OUT_OF_HOST_MEMORY;
     *pCommandPool = pdocker_vk_command_pool_to_handle(pool);
@@ -16985,8 +17007,14 @@ VKAPI_ATTR VkResult VKAPI_CALL vkResetCommandPool(
         VkCommandPool commandPool,
         VkCommandPoolResetFlags flags) {
     (void)device;
-    (void)commandPool;
-    (void)flags;
+    if (!pdocker_vk_command_pool_from_handle(commandPool)) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    if ((flags & ~VK_COMMAND_POOL_RESET_RELEASE_RESOURCES_BIT) != 0) {
+        trace_icd_runtime_failure("command-pool-reset-flags-unsupported",
+                                  VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
     return VK_SUCCESS;
 }
 
@@ -16995,8 +17023,11 @@ VKAPI_ATTR void VKAPI_CALL vkTrimCommandPool(
         VkCommandPool commandPool,
         VkCommandPoolTrimFlags flags) {
     (void)device;
-    (void)commandPool;
-    (void)flags;
+    if (!pdocker_vk_command_pool_from_handle(commandPool)) return;
+    if (flags != 0) {
+        trace_icd_runtime_failure("command-pool-trim-flags-unsupported",
+                                  VK_ERROR_FEATURE_NOT_PRESENT);
+    }
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkAllocateCommandBuffers(
@@ -17004,7 +17035,24 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateCommandBuffers(
         const VkCommandBufferAllocateInfo *pAllocateInfo,
         VkCommandBuffer *pCommandBuffers) {
     (void)device;
-    if (!pAllocateInfo || !pCommandBuffers) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!pAllocateInfo ||
+        pAllocateInfo->sType != VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO ||
+        (pAllocateInfo->commandBufferCount > 0 && !pCommandBuffers)) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    if (pAllocateInfo->pNext) {
+        return unsupported_create_info_pnext_result("vkAllocateCommandBuffers",
+                                                   pAllocateInfo->pNext);
+    }
+    if (!pdocker_vk_command_pool_from_handle(pAllocateInfo->commandPool)) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    if (pAllocateInfo->level != VK_COMMAND_BUFFER_LEVEL_PRIMARY &&
+        pAllocateInfo->level != VK_COMMAND_BUFFER_LEVEL_SECONDARY) {
+        trace_icd_runtime_failure("command-buffer-level-unsupported",
+                                  VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
     for (uint32_t i = 0; i < pAllocateInfo->commandBufferCount; ++i) {
         PdockerVkCommandBuffer *cmd = pdocker_alloc_handle(sizeof(*cmd));
         if (!cmd) return VK_ERROR_OUT_OF_HOST_MEMORY;
@@ -22112,7 +22160,18 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateEvent(
     (void)device;
     (void)pAllocator;
     if (!pEvent) return VK_ERROR_INITIALIZATION_FAILED;
-    if (pCreateInfo && pCreateInfo->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;
+    *pEvent = VK_NULL_HANDLE;
+    if (!pCreateInfo || pCreateInfo->sType != VK_STRUCTURE_TYPE_EVENT_CREATE_INFO) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    if (pCreateInfo->pNext) {
+        return unsupported_create_info_pnext_result("vkCreateEvent", pCreateInfo->pNext);
+    }
+    if (pCreateInfo->flags != 0) {
+        trace_icd_runtime_failure("event-flags-unsupported",
+                                  VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
     PdockerVkEvent *event = pdocker_alloc_handle(sizeof(*event));
     if (!event) return VK_ERROR_OUT_OF_HOST_MEMORY;
     memset(event, 0, sizeof(*event));
