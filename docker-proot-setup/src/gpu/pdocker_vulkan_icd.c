@@ -81,6 +81,43 @@
 #define VK_KHR_GET_SURFACE_CAPABILITIES_2_SPEC_VERSION 1
 #endif
 
+#ifndef VK_EXT_subpass_merge_feedback
+#define VK_EXT_subpass_merge_feedback 1
+#define VK_STRUCTURE_TYPE_RENDER_PASS_CREATION_CONTROL_EXT ((VkStructureType)1000458001)
+#define VK_STRUCTURE_TYPE_RENDER_PASS_CREATION_FEEDBACK_CREATE_INFO_EXT ((VkStructureType)1000458002)
+#define VK_STRUCTURE_TYPE_RENDER_PASS_SUBPASS_FEEDBACK_CREATE_INFO_EXT ((VkStructureType)1000458003)
+typedef enum VkSubpassMergeStatusEXT {
+    VK_SUBPASS_MERGE_STATUS_MERGED_EXT = 0,
+    VK_SUBPASS_MERGE_STATUS_DISALLOWED_EXT = 1,
+    VK_SUBPASS_MERGE_STATUS_NOT_MERGED_SINGLE_SUBPASS_EXT = 12,
+    VK_SUBPASS_MERGE_STATUS_NOT_MERGED_UNSPECIFIED_EXT = 13,
+    VK_SUBPASS_MERGE_STATUS_MAX_ENUM_EXT = 0x7FFFFFFF
+} VkSubpassMergeStatusEXT;
+typedef struct VkRenderPassCreationControlEXT {
+    VkStructureType sType;
+    const void *pNext;
+    VkBool32 disallowMerging;
+} VkRenderPassCreationControlEXT;
+typedef struct VkRenderPassCreationFeedbackInfoEXT {
+    uint32_t postMergeSubpassCount;
+} VkRenderPassCreationFeedbackInfoEXT;
+typedef struct VkRenderPassCreationFeedbackCreateInfoEXT {
+    VkStructureType sType;
+    const void *pNext;
+    VkRenderPassCreationFeedbackInfoEXT *pRenderPassFeedback;
+} VkRenderPassCreationFeedbackCreateInfoEXT;
+typedef struct VkRenderPassSubpassFeedbackInfoEXT {
+    VkSubpassMergeStatusEXT subpassMergeStatus;
+    char description[VK_MAX_DESCRIPTION_SIZE];
+    uint32_t postMergeIndex;
+} VkRenderPassSubpassFeedbackInfoEXT;
+typedef struct VkRenderPassSubpassFeedbackCreateInfoEXT {
+    VkStructureType sType;
+    const void *pNext;
+    VkRenderPassSubpassFeedbackInfoEXT *pSubpassFeedback;
+} VkRenderPassSubpassFeedbackCreateInfoEXT;
+#endif
+
 typedef struct {
     VK_LOADER_DATA loader;
 } PdockerVkInstance;
@@ -15569,7 +15606,9 @@ static void capture_render_pass_subpass_state(
 static void capture_render_pass_subpass_state2(
         PdockerVkRenderPass *rp,
         uint32_t subpass_index,
-        const VkSubpassDescription2 *subpass) {
+        const VkSubpassDescription2 *subpass,
+        bool render_pass_disallow_merging) {
+    (void)render_pass_disallow_merging;
     VkAttachmentReference color_refs[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     VkAttachmentReference resolve_refs[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     VkAttachmentReference depth_stencil_ref;
@@ -15585,6 +15624,9 @@ static void capture_render_pass_subpass_state2(
     }
     bool unsupported = subpass->flags != 0;
     const VkSubpassDescriptionDepthStencilResolve *depth_stencil_resolve = NULL;
+#ifdef VK_EXT_subpass_merge_feedback
+    const VkRenderPassSubpassFeedbackCreateInfoEXT *subpass_feedback = NULL;
+#endif
     for (const VkBaseInStructure *chain = (const VkBaseInStructure *)subpass->pNext;
          chain;
          chain = (const VkBaseInStructure *)chain->pNext) {
@@ -15596,6 +15638,16 @@ static void capture_render_pass_subpass_state2(
             if (depth_stencil_resolve->pNext) {
                 unsupported = true;
             }
+#ifdef VK_EXT_subpass_merge_feedback
+        } else if (chain->sType == VK_STRUCTURE_TYPE_RENDER_PASS_SUBPASS_FEEDBACK_CREATE_INFO_EXT) {
+            const VkRenderPassSubpassFeedbackCreateInfoEXT *feedback =
+                (const VkRenderPassSubpassFeedbackCreateInfoEXT *)chain;
+            if (subpass_feedback) {
+                unsupported = true;
+            } else {
+                subpass_feedback = feedback;
+            }
+#endif
         } else {
             unsupported = true;
         }
@@ -15663,6 +15715,21 @@ static void capture_render_pass_subpass_state2(
     if (unsupported && rp && subpass_index < PDOCKER_VK_MAX_STORAGE_BUFFERS) {
         rp->subpasses[subpass_index].unsupported = true;
     }
+#ifdef VK_EXT_subpass_merge_feedback
+    if (subpass_feedback && subpass_feedback->pSubpassFeedback) {
+        VkRenderPassSubpassFeedbackInfoEXT *feedback =
+            subpass_feedback->pSubpassFeedback;
+        memset(feedback, 0, sizeof(*feedback));
+        if (render_pass_disallow_merging) {
+            feedback->subpassMergeStatus = VK_SUBPASS_MERGE_STATUS_DISALLOWED_EXT;
+        } else if (rp && rp->subpass_count <= 1) {
+            feedback->subpassMergeStatus = VK_SUBPASS_MERGE_STATUS_NOT_MERGED_SINGLE_SUBPASS_EXT;
+        } else {
+            feedback->subpassMergeStatus = VK_SUBPASS_MERGE_STATUS_NOT_MERGED_UNSPECIFIED_EXT;
+        }
+        feedback->postMergeIndex = subpass_index;
+    }
+#endif
 }
 
 static bool render_pass_subpass_can_normalize_to_dynamic_rendering(
@@ -15785,6 +15852,65 @@ static bool render_pass_create_pnext_noop(const VkRenderPassCreateInfo *info) {
     return true;
 }
 
+static bool render_pass_create2_pnext_noop(
+        const VkRenderPassCreateInfo2 *info,
+        bool *disallow_merging) {
+    if (disallow_merging) *disallow_merging = false;
+    bool saw_creation_control = false;
+    bool saw_creation_feedback = false;
+    for (const void *node = info ? info->pNext : NULL; node;) {
+        PdockerVkStructHeader header = read_vk_struct_header(node);
+        switch (header.sType) {
+#ifdef VK_EXT_subpass_merge_feedback
+            case VK_STRUCTURE_TYPE_RENDER_PASS_CREATION_CONTROL_EXT: {
+                if (saw_creation_control) return false;
+                saw_creation_control = true;
+                const VkRenderPassCreationControlEXT *control =
+                    (const VkRenderPassCreationControlEXT *)node;
+                if (disallow_merging && control->disallowMerging) {
+                    *disallow_merging = true;
+                }
+                break;
+            }
+#endif
+#ifdef VK_EXT_subpass_merge_feedback
+            case VK_STRUCTURE_TYPE_RENDER_PASS_CREATION_FEEDBACK_CREATE_INFO_EXT:
+                if (saw_creation_feedback) return false;
+                saw_creation_feedback = true;
+                break;
+#endif
+            default:
+                return false;
+        }
+        node = header.pNext;
+    }
+    return true;
+}
+
+static void fill_render_pass_create2_feedback(
+        const VkRenderPassCreateInfo2 *info,
+        uint32_t post_merge_subpass_count) {
+    for (const void *node = info ? info->pNext : NULL; node;) {
+        PdockerVkStructHeader header = read_vk_struct_header(node);
+        switch (header.sType) {
+#ifdef VK_EXT_subpass_merge_feedback
+            case VK_STRUCTURE_TYPE_RENDER_PASS_CREATION_FEEDBACK_CREATE_INFO_EXT: {
+                const VkRenderPassCreationFeedbackCreateInfoEXT *feedback =
+                    (const VkRenderPassCreationFeedbackCreateInfoEXT *)node;
+                if (feedback->pRenderPassFeedback) {
+                    feedback->pRenderPassFeedback->postMergeSubpassCount =
+                        post_merge_subpass_count;
+                }
+                break;
+            }
+#endif
+            default:
+                break;
+        }
+        node = header.pNext;
+    }
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateRenderPass(
         VkDevice device,
         const VkRenderPassCreateInfo *pCreateInfo,
@@ -15863,7 +15989,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateRenderPass2(
     if (!rp) return VK_ERROR_OUT_OF_HOST_MEMORY;
     rp->attachment_count = pCreateInfo ? pCreateInfo->attachmentCount : 0;
     rp->subpass_count = pCreateInfo ? pCreateInfo->subpassCount : 0;
-    if (pCreateInfo && (pCreateInfo->pNext || pCreateInfo->flags != 0)) {
+    bool disallow_subpass_merging = false;
+    if (pCreateInfo && (pCreateInfo->flags != 0 ||
+                        !render_pass_create2_pnext_noop(pCreateInfo, &disallow_subpass_merging))) {
         rp->subpass_overflow = true;
     }
     if (rp->attachment_count > PDOCKER_VK_MAX_STORAGE_BUFFERS) {
@@ -15896,11 +16024,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateRenderPass2(
         : 0;
     for (uint32_t sp = 0; pCreateInfo && sp < captured_subpasses; ++sp) {
         capture_render_pass_subpass_state2(
-            rp, sp, pCreateInfo->pSubpasses ? &pCreateInfo->pSubpasses[sp] : NULL);
+            rp, sp, pCreateInfo->pSubpasses ? &pCreateInfo->pSubpasses[sp] : NULL,
+            disallow_subpass_merging);
     }
     if (pCreateInfo) {
         capture_render_pass_dependencies2(
             rp, pCreateInfo->dependencyCount, pCreateInfo->pDependencies);
+        fill_render_pass_create2_feedback(pCreateInfo, pCreateInfo->subpassCount);
     }
     rp->object_id = next_vulkan_object_generation();
     rp->generation = rp->object_id;
