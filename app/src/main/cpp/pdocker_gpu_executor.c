@@ -6506,62 +6506,172 @@ static int add_spirv_capability(
     return 1;
 }
 
+
+static uint32_t spirv_resolve_access_base_id(
+        uint32_t id,
+        const int32_t *access_base_by_id,
+        uint32_t bound) {
+    for (uint32_t depth = 0; depth < 32u && id < bound; ++depth) {
+        const int32_t base = access_base_by_id[id];
+        if (base < 0 || (uint32_t)base >= bound || (uint32_t)base == id) break;
+        id = (uint32_t)base;
+    }
+    return id;
+}
+
 static int insert_q6k_final_store_pre_barrier(
         uint32_t **code,
         size_t *bytes,
         uint64_t source_spirv_hash) {
     /*
-     * Android Vulkan compatibility lowering for the native llama.cpp Q6_K
-     * final-store path.  Device evidence has split the current failure to the
-     * native shader value before executor writeback.  Insert one additional
-     * Workgroup-memory barrier after the reduction loop converges and before
-     * lane 0 reads Workgroup %143 for the final store.  This does not alter
-     * descriptors, buffers, push constants, specialization data, dispatch
-     * dimensions, or llama.cpp code.  It is exact-pattern and hash gated.
+     * Android Vulkan compatibility lowering for Q6_K-style final output
+     * stores.  Device evidence split the current failure to the native shader
+     * value before executor writeback.  Insert one Workgroup-memory barrier
+     * after the reduction region converges and before lane 0 enters the final
+     * descriptor-2 output-store region.  This does not alter descriptors,
+     * buffers, push constants, specialization data, dispatch dimensions, or
+     * llama.cpp code.
+     *
+     * The original version was hash/SSA-id gated for one native module.  The
+     * current probe path legitimately changes hashes and ids through SPIR-V
+     * instrumentation and specialization materialization, so this pass is
+     * structural: it requires the Q6_K final-store topology before changing
+     * the module.
      */
     enum {
         OP_TYPE_BOOL = 20,
         OP_TYPE_INT = 21,
+        OP_TYPE_POINTER = 32,
         OP_CONSTANT = 43,
+        OP_VARIABLE = 59,
+        OP_LOAD = 61,
+        OP_STORE = 62,
+        OP_ACCESS_CHAIN = 65,
+        OP_IN_BOUNDS_ACCESS_CHAIN = 66,
+        OP_DECORATE = 71,
         OP_LABEL = 248,
         OP_I_EQUAL = 170,
         OP_CONTROL_BARRIER = 224,
+        OP_GROUP_NON_UNIFORM_F_ADD = 350,
+        STORAGE_CLASS_INPUT = 1,
+        STORAGE_CLASS_WORKGROUP = 4,
+        STORAGE_CLASS_FUNCTION = 7,
+        DECORATION_BINDING = 33,
+        DECORATION_DESCRIPTOR_SET = 34,
         Q6_FINAL_REDUCTION_EXIT_LABEL_ID = 1806,
         Q6_FINAL_LANE0_COMPARE_ID = 1807,
         Q6_LOCAL_INVOCATION_X_ID = 915,
+        Q6_OUTPUT_BINDING = 2,
+        Q6_MIN_GROUP_REDUCTIONS = 2,
+        Q6_EXPECTED_FINAL_OUTPUT_STORES = 2,
+        Q6_MAX_FINAL_STORE_INSERTS = 4,
     };
     if (!code || !*code || !bytes || *bytes < 20 ||
-        (*bytes % sizeof(uint32_t)) != 0 || (*code)[0] != 0x07230203u ||
-        !is_q6k_matvec_hash(source_spirv_hash)) {
+        (*bytes % sizeof(uint32_t)) != 0 || (*code)[0] != 0x07230203u) {
         return 0;
     }
+    (void)source_spirv_hash;
     const uint32_t *in = *code;
     const size_t words = *bytes / sizeof(uint32_t);
+    const uint32_t bound = in[3];
+    if (bound == 0 || bound > 65536) return 0;
+
     uint32_t bool_type = 0, uint_type = 0;
     uint32_t uint_0 = 0, uint_2 = 0, uint_264 = 0;
-    size_t insert_after = 0;
+    int32_t *binding_by_id = NULL;
+    int32_t *set_by_id = NULL;
+    int32_t *pointer_storage_by_id = NULL;
+    int32_t *variable_storage_by_id = NULL;
+    int32_t *access_base_by_id = NULL;
+    int32_t *load_pointer_by_id = NULL;
+    size_t insert_points[Q6_MAX_FINAL_STORE_INSERTS];
+    size_t insert_count = 0;
+    size_t final_output_store_count = 0;
+    size_t group_fadd_count = 0;
+    size_t binding0_variable_count = 0;
+    size_t binding2_variable_count = 0;
+    size_t last_lane0_compare_index = 0;
+    int changed = 0;
+    memset(insert_points, 0, sizeof(insert_points));
+
+    binding_by_id = (int32_t *)malloc(bound * sizeof(binding_by_id[0]));
+    set_by_id = (int32_t *)malloc(bound * sizeof(set_by_id[0]));
+    pointer_storage_by_id = (int32_t *)malloc(bound * sizeof(pointer_storage_by_id[0]));
+    variable_storage_by_id = (int32_t *)malloc(bound * sizeof(variable_storage_by_id[0]));
+    access_base_by_id = (int32_t *)malloc(bound * sizeof(access_base_by_id[0]));
+    load_pointer_by_id = (int32_t *)malloc(bound * sizeof(load_pointer_by_id[0]));
+    if (!binding_by_id || !set_by_id || !pointer_storage_by_id ||
+        !variable_storage_by_id || !access_base_by_id || !load_pointer_by_id) {
+        goto cleanup;
+    }
+    for (uint32_t id = 0; id < bound; ++id) {
+        binding_by_id[id] = -1;
+        set_by_id[id] = -1;
+        pointer_storage_by_id[id] = -1;
+        variable_storage_by_id[id] = -1;
+        access_base_by_id[id] = -1;
+        load_pointer_by_id[id] = -1;
+    }
+
     for (size_t i = 5; i < words;) {
         const uint32_t inst = in[i];
         const uint16_t word_count = (uint16_t)(inst >> 16);
         const uint16_t op = (uint16_t)(inst & 0xffffu);
-        if (word_count == 0 || i + word_count > words) return 0;
+        if (word_count == 0 || i + word_count > words) goto cleanup;
         if (op == OP_TYPE_BOOL && word_count >= 2) {
             bool_type = in[i + 1];
         } else if (op == OP_TYPE_INT && word_count >= 4 && in[i + 2] == 32 && in[i + 3] == 0) {
             uint_type = in[i + 1];
         } else if (op == OP_CONSTANT && word_count >= 4 && uint_type && in[i + 1] == uint_type) {
-            if (in[i + 3] == 0 && !uint_0) uint_0 = in[i + 2];
-            else if (in[i + 3] == 2 && !uint_2) uint_2 = in[i + 2];
-            else if (in[i + 3] == 264 && !uint_264) uint_264 = in[i + 2];
+            const uint32_t result_id = in[i + 2];
+            if (in[i + 3] == 0 && !uint_0) uint_0 = result_id;
+            else if (in[i + 3] == 2 && !uint_2) uint_2 = result_id;
+            else if (in[i + 3] == 264 && !uint_264) uint_264 = result_id;
+        } else if (op == OP_DECORATE && word_count >= 4 && in[i + 1] < bound) {
+            const uint32_t target = in[i + 1];
+            const uint32_t decoration = in[i + 2];
+            if (decoration == DECORATION_BINDING) {
+                binding_by_id[target] = (int32_t)in[i + 3];
+            } else if (decoration == DECORATION_DESCRIPTOR_SET) {
+                set_by_id[target] = (int32_t)in[i + 3];
+            }
+        } else if (op == OP_TYPE_POINTER && word_count >= 4 && in[i + 1] < bound) {
+            pointer_storage_by_id[in[i + 1]] = (int32_t)in[i + 2];
+        } else if (op == OP_VARIABLE && word_count >= 4 && in[i + 2] < bound) {
+            const uint32_t result_type = in[i + 1];
+            const uint32_t result_id = in[i + 2];
+            if (result_type < bound) {
+                variable_storage_by_id[result_id] = pointer_storage_by_id[result_type];
+            }
+        } else if ((op == OP_ACCESS_CHAIN || op == OP_IN_BOUNDS_ACCESS_CHAIN) &&
+                   word_count >= 4 && in[i + 2] < bound) {
+            access_base_by_id[in[i + 2]] = (int32_t)in[i + 3];
+        } else if (op == OP_LOAD && word_count >= 4 && in[i + 2] < bound) {
+            load_pointer_by_id[in[i + 2]] = (int32_t)in[i + 3];
+        } else if (op == OP_GROUP_NON_UNIFORM_F_ADD) {
+            ++group_fadd_count;
         }
         i += word_count;
     }
-    if (!bool_type || !uint_0 || !uint_2 || !uint_264) return 0;
+    if (!bool_type || !uint_0 || !uint_2 || !uint_264) goto cleanup;
+    for (uint32_t id = 0; id < bound; ++id) {
+        if (set_by_id[id] == 0 && binding_by_id[id] == 0) {
+            ++binding0_variable_count;
+        } else if (set_by_id[id] == 0 && binding_by_id[id] == Q6_OUTPUT_BINDING) {
+            ++binding2_variable_count;
+        }
+    }
+    if (binding0_variable_count == 0 ||
+        binding2_variable_count == 0 ||
+        group_fadd_count < Q6_MIN_GROUP_REDUCTIONS) {
+        goto cleanup;
+    }
+
     for (size_t i = 5; i < words;) {
         const uint32_t inst = in[i];
         const uint16_t word_count = (uint16_t)(inst >> 16);
         const uint16_t op = (uint16_t)(inst & 0xffffu);
-        if (word_count == 0 || i + word_count > words) return 0;
+        if (word_count == 0 || i + word_count > words) goto cleanup;
         if (op == OP_LABEL && word_count == 2 &&
             in[i + 1] == Q6_FINAL_REDUCTION_EXIT_LABEL_ID &&
             i + word_count < words) {
@@ -6574,37 +6684,112 @@ static int insert_q6k_final_store_pre_barrier(
                 in[next + 2] == Q6_FINAL_LANE0_COMPARE_ID &&
                 in[next + 3] == Q6_LOCAL_INVOCATION_X_ID &&
                 in[next + 4] == uint_0) {
-                insert_after = next;
-                break;
+                last_lane0_compare_index = next;
+            }
+        } else if (op == OP_I_EQUAL && word_count == 5 &&
+                   in[i + 1] == bool_type &&
+                   (in[i + 3] == uint_0 || in[i + 4] == uint_0)) {
+            const uint32_t other = in[i + 3] == uint_0 ? in[i + 4] : in[i + 3];
+            if (other < bound && load_pointer_by_id[other] >= 0) {
+                const uint32_t pointer_id = (uint32_t)load_pointer_by_id[other];
+                const uint32_t base_id = spirv_resolve_access_base_id(
+                    pointer_id, access_base_by_id, bound);
+                if (base_id < bound &&
+                    variable_storage_by_id[base_id] == STORAGE_CLASS_INPUT) {
+                    last_lane0_compare_index = i;
+                }
+            }
+        } else if (op == OP_STORE && word_count >= 3 && last_lane0_compare_index) {
+            const uint32_t pointer_id = in[i + 1];
+            const uint32_t object_id = in[i + 2];
+            const uint32_t pointer_base = spirv_resolve_access_base_id(
+                pointer_id, access_base_by_id, bound);
+            int staged_value = 0;
+            if (pointer_base < bound &&
+                set_by_id[pointer_base] == 0 &&
+                binding_by_id[pointer_base] == Q6_OUTPUT_BINDING &&
+                object_id < bound &&
+                load_pointer_by_id[object_id] >= 0) {
+                const uint32_t object_pointer = (uint32_t)load_pointer_by_id[object_id];
+                const uint32_t object_base = spirv_resolve_access_base_id(
+                    object_pointer, access_base_by_id, bound);
+                staged_value = object_base < bound &&
+                    (variable_storage_by_id[object_base] == STORAGE_CLASS_FUNCTION ||
+                     variable_storage_by_id[object_base] == STORAGE_CLASS_WORKGROUP);
+            }
+            if (staged_value) {
+                ++final_output_store_count;
+                int already_recorded = 0;
+                for (size_t j = 0; j < insert_count; ++j) {
+                    if (insert_points[j] == last_lane0_compare_index) {
+                        already_recorded = 1;
+                        break;
+                    }
+                }
+                if (!already_recorded && insert_count < Q6_MAX_FINAL_STORE_INSERTS) {
+                    insert_points[insert_count++] = last_lane0_compare_index;
+                }
             }
         }
         i += word_count;
     }
-    if (!insert_after) return 0;
-    if (insert_after >= 4) {
-        const uint32_t prev = in[insert_after - 4];
-        if (((prev & 0xffffu) == OP_CONTROL_BARRIER) &&
-            ((prev >> 16) == 4u) &&
-            in[insert_after - 3] == uint_2 &&
-            in[insert_after - 2] == uint_2 &&
-            in[insert_after - 1] == uint_264) {
-            return 0;
-        }
+    if (final_output_store_count != Q6_EXPECTED_FINAL_OUTPUT_STORES ||
+        insert_count == 0) {
+        goto cleanup;
     }
-    uint32_t *rewritten = (uint32_t *)malloc((words + 4u) * sizeof(uint32_t));
-    if (!rewritten) return 0;
-    memcpy(rewritten, in, insert_after * sizeof(uint32_t));
-    rewritten[insert_after] = (4u << 16) | OP_CONTROL_BARRIER;
-    rewritten[insert_after + 1] = uint_2;
-    rewritten[insert_after + 2] = uint_2;
-    rewritten[insert_after + 3] = uint_264;
-    memcpy(rewritten + insert_after + 4u,
-           in + insert_after,
-           (words - insert_after) * sizeof(uint32_t));
+
+    size_t active_insert_count = 0;
+    for (size_t i = 0; i < insert_count; ++i) {
+        const size_t insert_at = insert_points[i];
+        if (insert_at >= 4) {
+            const uint32_t prev = in[insert_at - 4];
+            if (((prev & 0xffffu) == OP_CONTROL_BARRIER) &&
+                ((prev >> 16) == 4u) &&
+                in[insert_at - 3] == uint_2 &&
+                in[insert_at - 2] == uint_2 &&
+                in[insert_at - 1] == uint_264) {
+                continue;
+            }
+        }
+        insert_points[active_insert_count++] = insert_at;
+    }
+    insert_count = active_insert_count;
+    if (insert_count == 0) goto cleanup;
+
+    uint32_t *rewritten = (uint32_t *)malloc(
+        (words + (4u * insert_count)) * sizeof(uint32_t));
+    if (!rewritten) goto cleanup;
+    size_t in_pos = 0;
+    size_t out_pos = 0;
+    for (size_t ins = 0; ins < insert_count; ++ins) {
+        const size_t insert_at = insert_points[ins];
+        if (insert_at < in_pos || insert_at > words) {
+            free(rewritten);
+            goto cleanup;
+        }
+        const size_t copy_words = insert_at - in_pos;
+        memcpy(rewritten + out_pos, in + in_pos, copy_words * sizeof(uint32_t));
+        out_pos += copy_words;
+        rewritten[out_pos++] = (4u << 16) | OP_CONTROL_BARRIER;
+        rewritten[out_pos++] = uint_2;
+        rewritten[out_pos++] = uint_2;
+        rewritten[out_pos++] = uint_264;
+        in_pos = insert_at;
+    }
+    memcpy(rewritten + out_pos, in + in_pos, (words - in_pos) * sizeof(uint32_t));
     free(*code);
     *code = rewritten;
-    *bytes = (words + 4u) * sizeof(uint32_t);
-    return 1;
+    *bytes = (words + (4u * insert_count)) * sizeof(uint32_t);
+    changed = 1;
+
+cleanup:
+    free(binding_by_id);
+    free(set_by_id);
+    free(pointer_storage_by_id);
+    free(variable_storage_by_id);
+    free(access_base_by_id);
+    free(load_pointer_by_id);
+    return changed;
 }
 
 
@@ -14124,6 +14309,14 @@ static int run_vulkan_dispatch_fd(
             q6_storage16_lowering_identity_hash);
     } else if (q6_probe_effective_replay && q6_native_callsite_detected &&
                q6k_compat_rewrites_requested) {
+        q6_final_store_pre_barrier_inserted = insert_q6k_final_store_pre_barrier(
+            &shader_code,
+            &shader_size,
+            q6_storage16_lowering_identity_hash);
+    }
+    if (!q6_final_store_pre_barrier_inserted &&
+        !q6k_safe_kernel_requested &&
+        q6k_compat_rewrites_requested) {
         q6_final_store_pre_barrier_inserted = insert_q6k_final_store_pre_barrier(
             &shader_code,
             &shader_size,

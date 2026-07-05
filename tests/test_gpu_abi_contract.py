@@ -12761,6 +12761,23 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("insert_q6k_final_store_pre_barrier", q6_rewrite_block)
         self.assertIn("q6_native_callsite_detected", executor)
         self.assertNotIn("if (q6_native_callsite_detected) {", executor)
+        final_store_rewrite = re.search(
+            r"static int insert_q6k_final_store_pre_barrier\((?P<body>.*?)\n}\n\n\nstatic int lower_q6k_storage16_loads_to_storage8",
+            executor,
+            re.S,
+        ).group("body")
+        self.assertIn("spirv_resolve_access_base_id", final_store_rewrite)
+        self.assertIn("DECORATION_DESCRIPTOR_SET", final_store_rewrite)
+        self.assertIn("Q6_EXPECTED_FINAL_OUTPUT_STORES = 2", final_store_rewrite)
+        self.assertIn("OP_GROUP_NON_UNIFORM_F_ADD", final_store_rewrite)
+        self.assertIn("group_fadd_count < Q6_MIN_GROUP_REDUCTIONS", final_store_rewrite)
+        self.assertIn("binding_by_id[pointer_base] == Q6_OUTPUT_BINDING", final_store_rewrite)
+        self.assertIn("variable_storage_by_id[base_id] == STORAGE_CLASS_INPUT", final_store_rewrite)
+        self.assertIn("variable_storage_by_id[object_base] == STORAGE_CLASS_FUNCTION", final_store_rewrite)
+        self.assertIn("variable_storage_by_id[object_base] == STORAGE_CLASS_WORKGROUP", final_store_rewrite)
+        self.assertIn("final_output_store_count != Q6_EXPECTED_FINAL_OUTPUT_STORES", final_store_rewrite)
+        self.assertNotIn("!is_q6k_matvec_hash(source_spirv_hash)", final_store_rewrite)
+        self.assertIn("if (!q6_final_store_pre_barrier_inserted &&", executor)
         self.assertIn("load + load_wc <= words", executor)
         self.assertIn("q6_accum_mask", compare)
         self.assertIn("q6_base_work_group_y", compare)
