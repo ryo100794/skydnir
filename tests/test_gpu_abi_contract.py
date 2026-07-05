@@ -5934,6 +5934,61 @@ class GpuAbiContractTest(unittest.TestCase):
 
 
 
+    def test_vulkan_immutable_samplers_preserve_descriptor_object_fidelity(self):
+        icd = VULKAN_ICD.read_text()
+        self.assertNotIn("PdockerVkSampler *immutable_samplers", icd)
+        self.assertIn("PdockerVkSampler immutable_samplers", icd)
+        self.assertIn("bool immutable_sampler_valid", icd)
+        self.assertIn("descriptor_layout_immutable_sampler_valid", icd)
+        self.assertIn("descriptor_layout_immutable_sampler", icd)
+        self.assertIn("descriptor_set_apply_immutable_samplers", icd)
+        self.assertIn("layout->immutable_samplers[binding->binding][array_element] = *sampler;", icd)
+        self.assertIn("layout->immutable_sampler_valid[binding->binding][array_element] = true;", icd)
+        self.assertIn("descriptor_set_apply_immutable_samplers(set);", icd)
+        update_body = icd.split(
+            "VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets", 1
+        )[1].split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateShaderModule", 1)[0]
+        self.assertIn("immutable_sampler ? immutable_sampler : pdocker_vk_sampler_from_handle(info->sampler)", update_body)
+        self.assertIn("PdockerVkSampler *immutable_sampler = descriptor_layout_immutable_sampler(", update_body)
+        self.assertIn("set->layout, binding, array_element);", update_body)
+        self.assertIn("requires_view", update_body)
+        self.assertIn("requires_sampler", update_body)
+        self.assertNotIn("slot->sampler = pdocker_vk_sampler_from_handle(info->sampler);", update_body)
+        self.assertIn("descriptor_set_apply_immutable_samplers(dst);", update_body)
+        compat_body = c_function_body(icd, "descriptor_set_layout_compatible")
+        self.assertIn("expected->immutable_sampler_valid[i][array_element]", compat_body)
+        self.assertIn("actual->immutable_sampler_valid[i][array_element]", compat_body)
+        self.assertIn("pdocker_vk_sampler_contents_equal", compat_body)
+        copy_compat_body = c_function_body(icd, "descriptor_copy_slot_compatible")
+        self.assertIn("descriptor_layout_immutable_sampler_valid", copy_compat_body)
+        self.assertIn("pdocker_vk_sampler_contents_equal", copy_compat_body)
+
+    def test_vulkan_generic_dispatch_input_attachments_fail_closed_but_graphics_replays(self):
+        icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
+
+        generic_send = c_function_body(icd, "send_generic_vulkan_dispatch_op")
+        self.assertIn("VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT", generic_send)
+        self.assertIn("generic dispatch rejected: input attachment descriptor", generic_send)
+        self.assertIn("return -EOPNOTSUPP;", generic_send)
+
+        generic_validate = c_function_body(
+            executor,
+            "validate_vulkan_dispatch_v5_image_descriptors_for_generic_dispatch",
+        )
+        self.assertIn("VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT", generic_validate)
+        self.assertIn("return -EOPNOTSUPP;", generic_validate)
+
+        run_body = c_function_body(executor, "run_vulkan_dispatch_fd")
+        self.assertLess(
+            run_body.index("validate_vulkan_dispatch_v5_image_descriptors_for_generic_dispatch"),
+            run_body.index("materialize_vulkan_dispatch_images("),
+        )
+
+        graphics_desc = c_function_body(executor, "materialize_vulkan_graphics_v6_descriptors")
+        self.assertIn("VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT", graphics_desc)
+        self.assertIn(".type = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT", graphics_desc)
+
     def test_vulkan_descriptor_copy_is_typed_and_fail_closed(self):
         icd = VULKAN_ICD.read_text()
         update_body = icd.split(

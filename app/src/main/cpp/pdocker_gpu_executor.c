@@ -3541,6 +3541,24 @@ static int validate_vulkan_dispatch_v5_image_samples_for_generic_dispatch(
     return 0;
 }
 
+static int validate_vulkan_dispatch_v5_image_descriptors_for_generic_dispatch(
+        const VulkanDispatchImageDescriptor *image_descriptors,
+        size_t image_descriptor_count) {
+    if (image_descriptor_count == 0) return 0;
+    if (!image_descriptors) return -EINVAL;
+    for (size_t i = 0; i < image_descriptor_count; ++i) {
+        VkDescriptorType descriptor_type = VK_DESCRIPTOR_TYPE_MAX_ENUM;
+        if (vulkan_dispatch_image_descriptor_type_from_api(
+                image_descriptors[i].api_descriptor_type, &descriptor_type) != 0) {
+            return -EOPNOTSUPP;
+        }
+        if (descriptor_type == VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT) {
+            return -EOPNOTSUPP;
+        }
+    }
+    return 0;
+}
+
 static int materialize_vulkan_dispatch_images(
         VkPhysicalDevice physical_device,
         VkDevice device,
@@ -14128,6 +14146,12 @@ static int run_vulkan_dispatch_fd(
          !object_tables->passed_fds ||
          image_descriptor_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS)) {
         json_fail("vulkan-dispatch", "invalid image descriptor metadata");
+        return 64;
+    }
+    int generic_descriptor_rc = validate_vulkan_dispatch_v5_image_descriptors_for_generic_dispatch(
+        image_descriptors, image_descriptor_count);
+    if (generic_descriptor_rc != 0) {
+        json_fail("vulkan-dispatch", "unsupported image descriptor in generic dispatch");
         return 64;
     }
     int generic_sample_rc = validate_vulkan_dispatch_v5_image_samples_for_generic_dispatch(object_tables);
