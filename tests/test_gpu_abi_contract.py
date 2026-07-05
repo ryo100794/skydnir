@@ -11316,6 +11316,8 @@ class GpuAbiContractTest(unittest.TestCase):
         )
         arithmetic_compare = next(item for item in compare["comparisons"] if item["name"] == "q6_arithmetic_window_evidence")
         self.assertTrue(arithmetic_compare["match"])
+        final_shape_compare = next(item for item in compare["comparisons"] if item["name"] == "q6_final_store_execution_shape")
+        self.assertTrue(final_shape_compare["match"])
 
     def test_spirv_analyzer_reports_q6_effective_workgroup_shape_mismatch(self):
         native_spv = ROOT / "docs" / "test" / "spirv-q6k-native-adb45055" / "native-q6-source.spv"
@@ -11371,6 +11373,16 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertTrue(any("literal LocalSize differs" in note for note in effective_module["risk_notes"]))
         q6_flow = next(item for item in comparison["comparisons"] if item["name"] == "q6_final_store_value_flow")
         self.assertTrue(q6_flow["match"])
+        final_shape = next(item for item in comparison["comparisons"] if item["name"] == "q6_final_store_execution_shape")
+        self.assertFalse(final_shape["match"])
+        self.assertIn(
+            "q6_final_store_execution_shape.local_size_consistent_with_workgroup_size",
+            final_shape["diff_paths"],
+        )
+        self.assertIn(
+            "q6_final_store_execution_shape.literal_matches_workgroup_default",
+            final_shape["diff_paths"],
+        )
         shape = next(item for item in comparison["comparisons"] if item["name"] == "workgroup_execution_shape")
         self.assertFalse(shape["match"])
         self.assertIn("workgroup_execution_shape.local_size[0]", shape["diff_paths"])
@@ -11917,6 +11929,166 @@ class GpuAbiContractTest(unittest.TestCase):
         )
         self.assertEqual(q6_flow["path_diffs"][0]["kind"], "value")
 
+
+    def test_spirv_dataflow_compare_reports_q6_stage_target_support_paths(self):
+        def analysis_payload(
+            support_kind: str,
+            supported: bool = True,
+            descriptor_binding: int = 0,
+            target_base_id: int = 143,
+            load_base_id: int = 143,
+        ) -> dict:
+            return {
+                "schema": "pdocker.spirv.analysis.v1",
+                "path": "synthetic.spv",
+                "hash": "0xsynthetic",
+                "bytes": 4,
+                "instruction_count": 1,
+                "entry_points": [],
+                "local_size": [1, 1, 1],
+                "local_size_id": [0, 0, 0],
+                "descriptor_variables": [],
+                "push_constant_blocks": [],
+                "load_events": [],
+                "store_events": [],
+                "q6_probe_targets": {
+                    "available": True,
+                    "workgroup_store_count": 1,
+                    "final_output_store_count": 1,
+                    "phases": [
+                        {
+                            "name": "full",
+                            "source_workgroup_base_ids": [target_base_id],
+                            "output_store": {"base": {"kind": "descriptor", "set": 0, "binding": 2}},
+                            "preceding_workgroup_stores": [
+                                {
+                                    "role": "reduction_candidate",
+                                    "base": {"kind": "variable", "storage_class": "Workgroup", "id": target_base_id},
+                                    "role_static_support": {
+                                        "schema": "pdocker.spirv.q6-role-static-support.v1",
+                                        "support_kind": support_kind,
+                                        "supported": supported,
+                                        "requires_workgroup_load": support_kind == "same-workgroup-load",
+                                        "stored_value_reaches_workgroup_load": support_kind == "same-workgroup-load",
+                                        "same_workgroup_base_id": support_kind == "same-workgroup-load",
+                                        "store_workgroup_base_id": target_base_id,
+                                        "workgroup_load_base_ids": [load_base_id] if support_kind == "same-workgroup-load" else [],
+                                    },
+                                    "stored_value": {
+                                        "workgroup_loads": [
+                                            {"pointer_base": {"kind": "variable", "storage_class": "Workgroup", "id": load_base_id}}
+                                        ] if support_kind == "same-workgroup-load" else [],
+                                        "descriptor_load_leaf_count": 0 if support_kind == "same-workgroup-load" else 1,
+                                        "descriptor_load_leaves": [] if support_kind == "same-workgroup-load" else [
+                                            {
+                                                "descriptor": {"set": 0, "binding": descriptor_binding},
+                                                "member_path": [
+                                                    {"kind": "struct_member", "index": 0, "offset": 0},
+                                                    {"kind": "runtime_array_element", "array_stride": 4},
+                                                ],
+                                                "byte_offset": {"static": 0, "dynamic_terms": []},
+                                                "terminal_type": {"kind": "float", "bits": 32},
+                                            }
+                                        ],
+                                        "op_histogram": {"OpFAdd": 1},
+                                        "named_arithmetic_histogram": {"OpGroupNonUniformFAdd": 1},
+                                        "slice_complete": True,
+                                        "depends_on_debug_probe_binding": False,
+                                    },
+                                }
+                            ],
+                        }
+                    ],
+                },
+            }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            left = tmp_path / "left.analysis.json"
+            right = tmp_path / "right.analysis.json"
+            out = tmp_path / "compare.json"
+            left.write_text(json.dumps(analysis_payload("same-workgroup-load"), indent=2, sort_keys=True) + "\n")
+            right.write_text(json.dumps(analysis_payload("descriptor-load"), indent=2, sort_keys=True) + "\n")
+            result = subprocess.run(
+                ["python3", str(SPIRV_DATAFLOW_COMPARE), str(left), str(right), "--json-out", str(out)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self.assertEqual(result.returncode, 2, result.stderr)
+            report = json.loads(out.read_text())
+
+        stage_targets = next(item for item in report["comparisons"] if item["name"] == "q6_stage_targets")
+        self.assertFalse(stage_targets["match"])
+        self.assertIn(
+            "q6_stage_targets.phases[0].preceding_workgroup_stores[0].support_kind",
+            stage_targets["diff_paths"],
+        )
+        self.assertIn(
+            "q6_stage_targets.phases[0].preceding_workgroup_stores[0].requires_workgroup_load",
+            stage_targets["diff_paths"],
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            left = tmp_path / "left.analysis.json"
+            right = tmp_path / "right.analysis.json"
+            out = tmp_path / "compare.json"
+            left.write_text(json.dumps(analysis_payload("descriptor-load", descriptor_binding=0), indent=2, sort_keys=True) + "\n")
+            right.write_text(json.dumps(analysis_payload("descriptor-load", descriptor_binding=1), indent=2, sort_keys=True) + "\n")
+            result = subprocess.run(
+                ["python3", str(SPIRV_DATAFLOW_COMPARE), str(left), str(right), "--json-out", str(out)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self.assertEqual(result.returncode, 2, result.stderr)
+            report = json.loads(out.read_text())
+
+        stage_targets = next(item for item in report["comparisons"] if item["name"] == "q6_stage_targets")
+        self.assertFalse(stage_targets["match"])
+        self.assertIn(
+            "q6_stage_targets.phases[0].preceding_workgroup_stores[0].stored_value_descriptor_load_leaves[0].descriptor.binding",
+            stage_targets["diff_paths"],
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            left = tmp_path / "left.analysis.json"
+            right = tmp_path / "right.analysis.json"
+            out = tmp_path / "compare.json"
+            left.write_text(json.dumps(
+                analysis_payload("same-workgroup-load", target_base_id=143, load_base_id=143),
+                indent=2,
+                sort_keys=True,
+            ) + "\n")
+            right.write_text(json.dumps(
+                analysis_payload("same-workgroup-load", target_base_id=143, load_base_id=332),
+                indent=2,
+                sort_keys=True,
+            ) + "\n")
+            result = subprocess.run(
+                ["python3", str(SPIRV_DATAFLOW_COMPARE), str(left), str(right), "--json-out", str(out)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self.assertEqual(result.returncode, 2, result.stderr)
+            report = json.loads(out.read_text())
+
+        stage_targets = next(item for item in report["comparisons"] if item["name"] == "q6_stage_targets")
+        self.assertFalse(stage_targets["match"])
+        self.assertIn(
+            "q6_stage_targets.phases[0].preceding_workgroup_stores[0].role_static_workgroup_load_base_ids[0]",
+            stage_targets["diff_paths"],
+        )
+        self.assertIn(
+            "q6_stage_targets.phases[0].preceding_workgroup_stores[0].stored_value_workgroup_load_bases[0].id",
+            stage_targets["diff_paths"],
+        )
 
     def test_spirv_dataflow_compare_catches_event_paths_when_origins_match(self):
         def dynamic_index_expr(op: str) -> dict:

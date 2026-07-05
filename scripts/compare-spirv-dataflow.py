@@ -211,6 +211,93 @@ def q6_dependency_signature(summary: dict[str, Any]) -> dict[str, Any]:
         "truncation_boundaries": summary.get("truncation_boundaries") or {},
     }
 
+def q6_final_store_execution_shape_signature(module: dict[str, Any]) -> dict[str, Any] | None:
+    q6 = module.get("q6_probe_targets")
+    if not isinstance(q6, dict):
+        return None
+    flow = q6.get("final_store_value_flow")
+    shape = module.get("workgroup_execution_shape")
+    if not isinstance(flow, dict) or not isinstance(shape, dict):
+        return None
+    stores = flow.get("stores") if isinstance(flow.get("stores"), list) else []
+    return {
+        "available": flow.get("available"),
+        "final_store_count": flow.get("final_store_count"),
+        "valid_store_count": flow.get("valid_store_count"),
+        "all_final_stores_valid": all(
+            isinstance(store, dict) and store.get("valid") is True
+            for store in stores
+        ) if stores else False,
+        "local_size_consistent_with_workgroup_size": shape.get("statically_consistent"),
+        "literal_matches_workgroup_default": shape.get("literal_matches_workgroup_default"),
+    }
+
+
+def q6_stage_target_signature(module: dict[str, Any]) -> dict[str, Any] | None:
+    q6 = module.get("q6_probe_targets")
+    if not isinstance(q6, dict):
+        return None
+    phases = []
+    for phase in q6.get("phases") or []:
+        if not isinstance(phase, dict):
+            continue
+        targets = []
+        for target in phase.get("preceding_workgroup_stores") or []:
+            if not isinstance(target, dict):
+                continue
+            base = target.get("base") if isinstance(target.get("base"), dict) else {}
+            role_static = target.get("role_static_support") if isinstance(target.get("role_static_support"), dict) else {}
+            stored_value = target.get("stored_value") if isinstance(target.get("stored_value"), dict) else {}
+            targets.append(
+                {
+                    "role": target.get("role"),
+                    "base": compact_base_signature(base),
+                    "workgroup_base_id": base.get("id") if base.get("storage_class") == "Workgroup" else None,
+                    "support_kind": role_static.get("support_kind"),
+                    "supported": role_static.get("supported"),
+                    "requires_workgroup_load": role_static.get("requires_workgroup_load"),
+                    "stored_value_reaches_workgroup_load": role_static.get("stored_value_reaches_workgroup_load"),
+                    "same_workgroup_base_id": role_static.get("same_workgroup_base_id"),
+                    "role_static_workgroup_load_base_ids": role_static.get("workgroup_load_base_ids") or [],
+                    "role_static_store_workgroup_base_id": role_static.get("store_workgroup_base_id"),
+                    "stored_value_workgroup_load_count": len(stored_value.get("workgroup_loads") or []),
+                    "stored_value_workgroup_load_bases": [
+                        {
+                            "base": compact_base_signature(load.get("pointer_base") if isinstance(load, dict) else None),
+                            "id": (load.get("pointer_base") or {}).get("id")
+                            if isinstance(load, dict) and isinstance(load.get("pointer_base"), dict)
+                            else None,
+                        }
+                        for load in stored_value.get("workgroup_loads") or []
+                    ],
+                    "stored_value_descriptor_load_leaf_count": stored_value.get("descriptor_load_leaf_count"),
+                    "stored_value_descriptor_load_leaves": q6_descriptor_leaf_signature(stored_value),
+                    "stored_value_op_histogram": stored_value.get("op_histogram") or {},
+                    "stored_value_named_arithmetic_histogram": stored_value.get("named_arithmetic_histogram") or {},
+                    "stored_value_slice_complete": stored_value.get("slice_complete"),
+                    "depends_on_debug_probe_binding": stored_value.get("depends_on_debug_probe_binding"),
+                }
+            )
+        output_store = phase.get("output_store") if isinstance(phase.get("output_store"), dict) else {}
+        output_base = output_store.get("base") if isinstance(output_store.get("base"), dict) else {}
+        phases.append(
+            {
+                "name": phase.get("name"),
+                "source_workgroup_base_count": len(phase.get("source_workgroup_base_ids") or []),
+                "output_store_binding": output_base.get("binding"),
+                "preceding_workgroup_store_count": len(targets),
+                "preceding_workgroup_stores": targets,
+            }
+        )
+    return {
+        "available": q6.get("available"),
+        "phase_count": len(phases),
+        "workgroup_store_count": q6.get("workgroup_store_count"),
+        "final_output_store_count": q6.get("final_output_store_count"),
+        "phases": phases,
+    }
+
+
 def q6_arithmetic_window_signature(module: dict[str, Any]) -> dict[str, Any] | None:
     q6 = module.get("q6_probe_targets")
     if not isinstance(q6, dict):
@@ -675,6 +762,8 @@ def summarize(module: dict[str, Any]) -> dict[str, Any]:
         "descriptors": descriptor_signature(module),
         "push_constants": push_signature(module),
         "q6_final_store_value_flow": q6_final_store_value_flow_signature(module),
+        "q6_final_store_execution_shape": q6_final_store_execution_shape_signature(module),
+        "q6_stage_targets": q6_stage_target_signature(module),
         "q6_barrier_window_evidence": q6_barrier_window_signature(module),
         "q6_arithmetic_window_evidence": q6_arithmetic_window_signature(module),
         "loads": event_summary(module, "load_events"),
@@ -728,6 +817,16 @@ def main() -> int:
             "q6_final_store_value_flow",
             left["q6_final_store_value_flow"],
             right["q6_final_store_value_flow"],
+        ),
+        compare_values(
+            "q6_final_store_execution_shape",
+            left["q6_final_store_execution_shape"],
+            right["q6_final_store_execution_shape"],
+        ),
+        compare_values(
+            "q6_stage_targets",
+            left["q6_stage_targets"],
+            right["q6_stage_targets"],
         ),
         compare_values(
             "q6_barrier_window_evidence",
