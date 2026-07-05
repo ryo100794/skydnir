@@ -587,6 +587,42 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn((5 << 16) | 194, lowered)
         self.assertIn((7 << 16) | 80, lowered)
 
+    def test_q6_effective_reconstructor_rejects_bitcast_without_q6_decode_consumer(self):
+        reconstructor = load_spirv_effective_reconstructor()
+        words = reconstructor.read_words(Q6_FUNCTION_ACCUMULATOR_SPV)
+        words, storage_step = reconstructor.lower_q6k_storage16_loads_to_storage8(words)
+        self.assertTrue(storage_step["changed"])
+
+        uint8_type = uchar4_type = 0
+        for _, opcode, word_count, inst in reconstructor.iter_instructions(words):
+            if opcode == 21 and word_count >= 4 and inst[2] == 8 and inst[3] == 0:
+                uint8_type = inst[1]
+            elif opcode == 23 and word_count >= 4 and uint8_type and inst[2] == uint8_type and inst[3] == 4:
+                uchar4_type = inst[1]
+                break
+        self.assertNotEqual(0, uchar4_type)
+
+        first_bitcast_result = None
+        for _, opcode, word_count, inst in reconstructor.iter_instructions(words):
+            if opcode == 124 and word_count == 4 and inst[1] == uchar4_type:
+                first_bitcast_result = inst[2]
+                break
+        self.assertIsNotNone(first_bitcast_result)
+
+        mutated = list(words)
+        for index, opcode, word_count, inst in reconstructor.iter_instructions(mutated):
+            if opcode == 112 and word_count >= 4 and inst[3] == first_bitcast_result:
+                mutated[index] = (word_count << 16) | 113
+                break
+        else:
+            self.fail("expected Q6 bitcast result to feed OpConvertUToF")
+
+        lowered, step = reconstructor.lower_q6k_u32_to_u8vec4_bitcasts(mutated)
+        self.assertFalse(step["changed"])
+        self.assertEqual(step["pattern_count"], 15)
+        self.assertEqual(step["expected_count"], 16)
+        self.assertEqual(lowered, mutated)
+
     def test_q6_effective_reconstructor_inserts_final_store_pre_barrier(self):
         reconstructor = load_spirv_effective_reconstructor()
         words = [
@@ -12783,6 +12819,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("Q6_STORAGE16_EXPECTED_LOADS = 24", executor)
         self.assertIn("Q6_U32_TO_U8VEC4_EXPECTED_BITCASTS = 16", executor)
         self.assertIn("q6_storage16_member_is_byte_lane", executor)
+        self.assertIn("spirv_single_id_user_opcode", executor)
+        self.assertIn("OP_CONVERT_U_TO_F = 112", executor)
+        self.assertIn("OP_BITWISE_OR = 197", executor)
         self.assertNotIn("Q6_STORAGE8_VAR_ID = 346", executor)
         self.assertNotIn("Q6_STORAGE16_VAR_ID = 371", executor)
         self.assertIn("OP_U_CONVERT", executor)

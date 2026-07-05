@@ -6549,7 +6549,6 @@ static int insert_q6k_final_store_pre_barrier(
         OP_ACCESS_CHAIN = 65,
         OP_IN_BOUNDS_ACCESS_CHAIN = 66,
         OP_DECORATE = 71,
-        OP_LABEL = 248,
         OP_I_EQUAL = 170,
         OP_CONTROL_BARRIER = 224,
         OP_GROUP_NON_UNIFORM_F_ADD = 350,
@@ -6558,9 +6557,6 @@ static int insert_q6k_final_store_pre_barrier(
         STORAGE_CLASS_FUNCTION = 7,
         DECORATION_BINDING = 33,
         DECORATION_DESCRIPTOR_SET = 34,
-        Q6_FINAL_REDUCTION_EXIT_LABEL_ID = 1806,
-        Q6_FINAL_LANE0_COMPARE_ID = 1807,
-        Q6_LOCAL_INVOCATION_X_ID = 915,
         Q6_OUTPUT_BINDING = 2,
         Q6_MIN_GROUP_REDUCTIONS = 2,
         Q6_EXPECTED_FINAL_OUTPUT_STORES = 2,
@@ -6672,21 +6668,7 @@ static int insert_q6k_final_store_pre_barrier(
         const uint16_t word_count = (uint16_t)(inst >> 16);
         const uint16_t op = (uint16_t)(inst & 0xffffu);
         if (word_count == 0 || i + word_count > words) goto cleanup;
-        if (op == OP_LABEL && word_count == 2 &&
-            in[i + 1] == Q6_FINAL_REDUCTION_EXIT_LABEL_ID &&
-            i + word_count < words) {
-            const size_t next = i + word_count;
-            const uint32_t next_inst = in[next];
-            const uint16_t next_wc = (uint16_t)(next_inst >> 16);
-            const uint16_t next_op = (uint16_t)(next_inst & 0xffffu);
-            if (next_wc == 5 && next + next_wc <= words && next_op == OP_I_EQUAL &&
-                in[next + 1] == bool_type &&
-                in[next + 2] == Q6_FINAL_LANE0_COMPARE_ID &&
-                in[next + 3] == Q6_LOCAL_INVOCATION_X_ID &&
-                in[next + 4] == uint_0) {
-                last_lane0_compare_index = next;
-            }
-        } else if (op == OP_I_EQUAL && word_count == 5 &&
+        if (op == OP_I_EQUAL && word_count == 5 &&
                    in[i + 1] == bool_type &&
                    (in[i + 3] == uint_0 || in[i + 4] == uint_0)) {
             const uint32_t other = in[i + 3] == uint_0 ? in[i + 4] : in[i + 3];
@@ -7016,6 +6998,37 @@ static size_t spirv_count_id_uses(
         i += word_count;
     }
     return uses;
+}
+
+
+static int spirv_single_id_user_opcode(
+        const uint32_t *in,
+        size_t words,
+        uint32_t target_id,
+        size_t defining_instruction_index,
+        uint16_t *opcode_out) {
+    if (opcode_out) *opcode_out = 0;
+    if (!in || words < 5 || !target_id) return 0;
+    size_t uses = 0;
+    uint16_t user_op = 0;
+    for (size_t i = 5; i < words;) {
+        const uint32_t inst = in[i];
+        const uint16_t word_count = (uint16_t)(inst >> 16);
+        const uint16_t op = (uint16_t)(inst & 0xffffu);
+        if (word_count == 0 || i + word_count > words) return 0;
+        for (uint16_t k = 1; k < word_count; ++k) {
+            if (i == defining_instruction_index && k == 2) continue;
+            if (in[i + k] == target_id) {
+                ++uses;
+                user_op = op;
+                if (uses > 1) return 0;
+            }
+        }
+        i += word_count;
+    }
+    if (uses != 1) return 0;
+    if (opcode_out) *opcode_out = user_op;
+    return 1;
 }
 
 
@@ -7366,9 +7379,11 @@ static int lower_q6k_u32_to_u8vec4_bitcasts(
         OP_TYPE_INT = 21,
         OP_TYPE_VECTOR = 23,
         OP_CONSTANT = 43,
-        OP_BITCAST = 124,
+        OP_CONVERT_U_TO_F = 112,
         OP_U_CONVERT = 113,
+        OP_BITCAST = 124,
         OP_SHIFT_RIGHT_LOGICAL = 194,
+        OP_BITWISE_OR = 197,
         OP_COMPOSITE_CONSTRUCT = 80,
         Q6_U32_TO_U8VEC4_EXPECTED_BITCASTS = 16,
     };
@@ -7428,17 +7443,25 @@ static int lower_q6k_u32_to_u8vec4_bitcasts(
         return 0;
     }
     uint32_t *type_by_id = (uint32_t *)calloc(bound, sizeof(type_by_id[0]));
-    if (!type_by_id) return 0;
+    uint16_t *opcode_by_id = (uint16_t *)calloc(bound, sizeof(opcode_by_id[0]));
+    if (!type_by_id || !opcode_by_id) {
+        free(type_by_id);
+        free(opcode_by_id);
+        return 0;
+    }
     for (size_t i = 5; i < words;) {
         const uint32_t inst = in[i];
         const uint16_t word_count = (uint16_t)(inst >> 16);
+        const uint16_t op = (uint16_t)(inst & 0xffffu);
         if (word_count == 0 || i + word_count > words) {
             free(type_by_id);
+            free(opcode_by_id);
             return 0;
         }
         if (word_count >= 3 && in[i + 2] < bound &&
             (in[i + 1] == uint_type || in[i + 1] == uchar_type || in[i + 1] == uchar4_type)) {
             type_by_id[in[i + 2]] = in[i + 1];
+            opcode_by_id[in[i + 2]] = op;
         }
         i += word_count;
     }
@@ -7450,16 +7473,22 @@ static int lower_q6k_u32_to_u8vec4_bitcasts(
         const uint16_t op = (uint16_t)(inst & 0xffffu);
         if (word_count == 0 || i + word_count > words) {
             free(type_by_id);
+            free(opcode_by_id);
             return 0;
         }
+        uint16_t user_op = 0;
         if (op == OP_BITCAST && word_count == 4 && in[i + 1] == uchar4_type &&
-            in[i + 3] < bound && type_by_id[in[i + 3]] == uint_type) {
+            in[i + 3] < bound && type_by_id[in[i + 3]] == uint_type &&
+            opcode_by_id[in[i + 3]] == OP_BITWISE_OR &&
+            spirv_single_id_user_opcode(in, words, in[i + 2], i, &user_op) &&
+            user_op == OP_CONVERT_U_TO_F) {
             pattern_count++;
         }
         i += word_count;
     }
     if (pattern_count != Q6_U32_TO_U8VEC4_EXPECTED_BITCASTS) {
         free(type_by_id);
+        free(opcode_by_id);
         return 0;
     }
 
@@ -7467,12 +7496,14 @@ static int lower_q6k_u32_to_u8vec4_bitcasts(
     uint32_t new_bound = bound + (uint32_t)(pattern_count * 7u);
     if (new_bound <= bound || new_bound > 65536) {
         free(type_by_id);
+        free(opcode_by_id);
         return 0;
     }
     uint32_t next_id = bound;
     uint32_t *rewritten = (uint32_t *)malloc((words + extra_words) * sizeof(uint32_t));
     if (!rewritten) {
         free(type_by_id);
+        free(opcode_by_id);
         return 0;
     }
     memcpy(rewritten, in, 5 * sizeof(uint32_t));
@@ -7486,11 +7517,16 @@ static int lower_q6k_u32_to_u8vec4_bitcasts(
         const uint16_t op = (uint16_t)(inst & 0xffffu);
         if (word_count == 0 || i + word_count > words) {
             free(type_by_id);
+            free(opcode_by_id);
             free(rewritten);
             return 0;
         }
+        uint16_t user_op = 0;
         if (op == OP_BITCAST && word_count == 4 && in[i + 1] == uchar4_type &&
-            in[i + 3] < bound && type_by_id[in[i + 3]] == uint_type) {
+            in[i + 3] < bound && type_by_id[in[i + 3]] == uint_type &&
+            opcode_by_id[in[i + 3]] == OP_BITWISE_OR &&
+            spirv_single_id_user_opcode(in, words, in[i + 2], i, &user_op) &&
+            user_op == OP_CONVERT_U_TO_F) {
             const uint32_t result = in[i + 2];
             const uint32_t source = in[i + 3];
             const uint32_t b0 = next_id++;

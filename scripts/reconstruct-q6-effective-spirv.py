@@ -462,6 +462,21 @@ def _spirv_count_id_uses(words: list[int], target_id: int, defining_instruction_
     return count
 
 
+def _spirv_single_id_user_opcode(words: list[int], target_id: int, defining_instruction_index: int) -> int | None:
+    user_opcode: int | None = None
+    count = 0
+    for index, opcode, _, inst in iter_instructions(words):
+        for operand_index, operand in enumerate(inst[1:], start=1):
+            if index == defining_instruction_index and operand_index == 2:
+                continue
+            if operand == target_id:
+                count += 1
+                user_opcode = opcode
+                if count > 1:
+                    return None
+    return user_opcode if count == 1 else None
+
+
 def lower_q6k_storage16_loads_to_storage8(words: list[int]) -> tuple[list[int], dict[str, Any]]:
     """Mirror the executor's structural Q6 storage16 duplicate-view lowering."""
     OP_TYPE_INT = 21
@@ -638,9 +653,11 @@ def lower_q6k_u32_to_u8vec4_bitcasts(words: list[int]) -> tuple[list[int], dict[
     OP_TYPE_INT = 21
     OP_TYPE_VECTOR = 23
     OP_CONSTANT = 43
-    OP_BITCAST = 124
+    OP_CONVERT_U_TO_F = 112
     OP_U_CONVERT = 113
+    OP_BITCAST = 124
     OP_SHIFT_RIGHT_LOGICAL = 194
+    OP_BITWISE_OR = 197
     OP_COMPOSITE_CONSTRUCT = 80
     Q6_U32_TO_U8VEC4_EXPECTED_BITCASTS = 16
     if len(words) < 5 or words[0] != SPIRV_MAGIC:
@@ -672,16 +689,20 @@ def lower_q6k_u32_to_u8vec4_bitcasts(words: list[int]) -> tuple[list[int], dict[
     if not all([uint_type, uchar_type, uchar4_type, uint_8, uint_16, uint_24]):
         return list(words), {"phase": "q6-u32-to-u8vec4-bitcasts-lowered", "changed": False, "reason": "missing-required-types-or-constants"}
     type_by_id = [0] * bound
-    for _, _, word_count, inst in iter_instructions(words):
+    opcode_by_id = [0] * bound
+    for _, opcode, word_count, inst in iter_instructions(words):
         if word_count >= 3 and inst[2] < bound and inst[1] in (uint_type, uchar_type, uchar4_type):
             type_by_id[inst[2]] = inst[1]
+            opcode_by_id[inst[2]] = opcode
     pattern_count = sum(
-        1 for _, opcode, word_count, inst in iter_instructions(words)
+        1 for index, opcode, word_count, inst in iter_instructions(words)
         if opcode == OP_BITCAST
         and word_count == 4
         and inst[1] == uchar4_type
         and inst[3] < bound
         and type_by_id[inst[3]] == uint_type
+        and opcode_by_id[inst[3]] == OP_BITWISE_OR
+        and _spirv_single_id_user_opcode(words, inst[2], index) == OP_CONVERT_U_TO_F
     )
     if pattern_count != Q6_U32_TO_U8VEC4_EXPECTED_BITCASTS:
         return list(words), {
@@ -702,7 +723,11 @@ def lower_q6k_u32_to_u8vec4_bitcasts(words: list[int]) -> tuple[list[int], dict[
         if word_count == 0 or i + word_count > len(words):
             raise ValueError(f"truncated SPIR-V instruction at word {i}")
         inst = words[i:i + word_count]
-        if opcode == OP_BITCAST and word_count == 4 and inst[1] == uchar4_type and inst[3] < bound and type_by_id[inst[3]] == uint_type:
+        if (opcode == OP_BITCAST and word_count == 4 and inst[1] == uchar4_type
+                and inst[3] < bound
+                and type_by_id[inst[3]] == uint_type
+                and opcode_by_id[inst[3]] == OP_BITWISE_OR
+                and _spirv_single_id_user_opcode(words, inst[2], i) == OP_CONVERT_U_TO_F):
             result, source = inst[2], inst[3]
             b0 = next_id; next_id += 1
             s1 = next_id; next_id += 1
@@ -773,7 +798,6 @@ def insert_q6k_final_store_pre_barrier(words: list[int]) -> tuple[list[int], dic
     OP_ACCESS_CHAIN = 65
     OP_IN_BOUNDS_ACCESS_CHAIN = 66
     OP_DECORATE = 71
-    OP_LABEL = 248
     OP_I_EQUAL = 170
     OP_CONTROL_BARRIER = 224
     OP_GROUP_NON_UNIFORM_F_ADD = 350
@@ -782,9 +806,6 @@ def insert_q6k_final_store_pre_barrier(words: list[int]) -> tuple[list[int], dic
     STORAGE_CLASS_FUNCTION = 7
     DECORATION_BINDING = 33
     DECORATION_DESCRIPTOR_SET = 34
-    Q6_FINAL_REDUCTION_EXIT_LABEL_ID = 1806
-    Q6_FINAL_LANE0_COMPARE_ID = 1807
-    Q6_LOCAL_INVOCATION_X_ID = 915
     Q6_OUTPUT_BINDING = 2
     Q6_MIN_GROUP_REDUCTIONS = 2
     Q6_EXPECTED_FINAL_OUTPUT_STORES = 2
@@ -855,19 +876,7 @@ def insert_q6k_final_store_pre_barrier(words: list[int]) -> tuple[list[int], dic
     last_lane0_compare_index: int | None = None
     instructions = list(iter_instructions(words))
     for pos, (index, opcode, word_count, inst) in enumerate(instructions):
-        if opcode == OP_LABEL and word_count == 2 and inst[1] == Q6_FINAL_REDUCTION_EXIT_LABEL_ID:
-            if pos + 1 < len(instructions):
-                next_index, next_opcode, next_wc, next_inst = instructions[pos + 1]
-                if (
-                    next_opcode == OP_I_EQUAL
-                    and next_wc == 5
-                    and next_inst[1] == bool_type
-                    and next_inst[2] == Q6_FINAL_LANE0_COMPARE_ID
-                    and next_inst[3] == Q6_LOCAL_INVOCATION_X_ID
-                    and next_inst[4] == uint_0
-                ):
-                    last_lane0_compare_index = next_index
-        elif opcode == OP_I_EQUAL and word_count == 5 and inst[1] == bool_type and (inst[3] == uint_0 or inst[4] == uint_0):
+        if opcode == OP_I_EQUAL and word_count == 5 and inst[1] == bool_type and (inst[3] == uint_0 or inst[4] == uint_0):
             other = inst[4] if inst[3] == uint_0 else inst[3]
             if 0 <= other < bound and load_pointer_by_id[other] >= 0:
                 pointer_id = load_pointer_by_id[other]
