@@ -535,18 +535,74 @@ def lower_q6k_u32_to_u8vec4_bitcasts(words: list[int]) -> tuple[list[int], dict[
     }
 
 
+def _spirv_resolve_access_base_id(
+    object_id: int,
+    access_base_by_id: list[int],
+    bound: int,
+) -> int:
+    for _ in range(32):
+        if not 0 <= object_id < bound:
+            break
+        base = access_base_by_id[object_id]
+        if base < 0 or base >= bound or base == object_id:
+            break
+        object_id = base
+    return object_id
+
+
 def insert_q6k_final_store_pre_barrier(words: list[int]) -> tuple[list[int], dict[str, Any]]:
+    """Mirror the executor's structural Q6 final-store pre-barrier pass.
+
+    The executor no longer gates this pass on one source hash or fixed SSA IDs.
+    It fails closed on the Q6_K final-store topology: descriptor set 0 binding 2
+    output stores, lane-0 input compare, staged Function/Workgroup load source,
+    an input binding-0 view, and subgroup-reduction operations.  This keeps the
+    offline reconstruction authoritative for instrumented/probe SPIR-V modules
+    whose hashes and ids differ from the original native module.
+    """
     OP_TYPE_BOOL = 20
     OP_TYPE_INT = 21
+    OP_TYPE_POINTER = 32
     OP_CONSTANT = 43
+    OP_VARIABLE = 59
+    OP_LOAD = 61
+    OP_STORE = 62
+    OP_ACCESS_CHAIN = 65
+    OP_IN_BOUNDS_ACCESS_CHAIN = 66
+    OP_DECORATE = 71
     OP_LABEL = 248
     OP_I_EQUAL = 170
     OP_CONTROL_BARRIER = 224
+    OP_GROUP_NON_UNIFORM_F_ADD = 350
+    STORAGE_CLASS_INPUT = 1
+    STORAGE_CLASS_WORKGROUP = 4
+    STORAGE_CLASS_FUNCTION = 7
+    DECORATION_BINDING = 33
+    DECORATION_DESCRIPTOR_SET = 34
     Q6_FINAL_REDUCTION_EXIT_LABEL_ID = 1806
     Q6_FINAL_LANE0_COMPARE_ID = 1807
     Q6_LOCAL_INVOCATION_X_ID = 915
+    Q6_OUTPUT_BINDING = 2
+    Q6_MIN_GROUP_REDUCTIONS = 2
+    Q6_EXPECTED_FINAL_OUTPUT_STORES = 2
+    Q6_MAX_FINAL_STORE_INSERTS = 4
+
+    if len(words) < 5 or words[0] != SPIRV_MAGIC:
+        return list(words), {"phase": "q6-final-store-pre-barrier", "changed": False, "reason": "invalid-spv"}
+    bound = words[3]
+    if bound <= 0 or bound > 65536:
+        return list(words), {"phase": "q6-final-store-pre-barrier", "changed": False, "reason": "id-bound-out-of-range"}
+
     bool_type = uint_type = 0
     uint_0 = uint_2 = uint_264 = 0
+    binding_by_id = [-1] * bound
+    set_by_id = [-1] * bound
+    pointer_storage_by_id = [-1] * bound
+    variable_storage_by_id = [-1] * bound
+    access_base_by_id = [-1] * bound
+    load_pointer_by_id = [-1] * bound
+    group_fadd_count = 0
+
     for _, opcode, word_count, inst in iter_instructions(words):
         if opcode == OP_TYPE_BOOL and word_count >= 2:
             bool_type = inst[1]
@@ -559,35 +615,123 @@ def insert_q6k_final_store_pre_barrier(words: list[int]) -> tuple[list[int], dic
                 uint_2 = inst[2]
             elif inst[3] == 264 and not uint_264:
                 uint_264 = inst[2]
+        elif opcode == OP_DECORATE and word_count >= 4 and inst[1] < bound:
+            if inst[2] == DECORATION_BINDING:
+                binding_by_id[inst[1]] = inst[3]
+            elif inst[2] == DECORATION_DESCRIPTOR_SET:
+                set_by_id[inst[1]] = inst[3]
+        elif opcode == OP_TYPE_POINTER and word_count >= 4 and inst[1] < bound:
+            pointer_storage_by_id[inst[1]] = inst[2]
+        elif opcode == OP_VARIABLE and word_count >= 4 and inst[2] < bound:
+            result_type = inst[1]
+            if result_type < bound:
+                variable_storage_by_id[inst[2]] = pointer_storage_by_id[result_type]
+        elif opcode in (OP_ACCESS_CHAIN, OP_IN_BOUNDS_ACCESS_CHAIN) and word_count >= 4 and inst[2] < bound:
+            access_base_by_id[inst[2]] = inst[3]
+        elif opcode == OP_LOAD and word_count >= 4 and inst[2] < bound:
+            load_pointer_by_id[inst[2]] = inst[3]
+        elif opcode == OP_GROUP_NON_UNIFORM_F_ADD:
+            group_fadd_count += 1
+
     if not all([bool_type, uint_0, uint_2, uint_264]):
         return list(words), {"phase": "q6-final-store-pre-barrier", "changed": False, "reason": "missing-ids"}
-    insert_after: int | None = None
+    binding0_variable_count = sum(1 for set_id, binding in zip(set_by_id, binding_by_id) if set_id == 0 and binding == 0)
+    binding2_variable_count = sum(1 for set_id, binding in zip(set_by_id, binding_by_id) if set_id == 0 and binding == Q6_OUTPUT_BINDING)
+    if binding0_variable_count == 0 or binding2_variable_count == 0 or group_fadd_count < Q6_MIN_GROUP_REDUCTIONS:
+        return list(words), {
+            "phase": "q6-final-store-pre-barrier",
+            "changed": False,
+            "reason": "topology-not-q6-final-store",
+            "binding0_variable_count": binding0_variable_count,
+            "binding2_variable_count": binding2_variable_count,
+            "group_fadd_count": group_fadd_count,
+        }
+
+    insert_points: list[int] = []
+    final_output_store_count = 0
+    last_lane0_compare_index: int | None = None
     instructions = list(iter_instructions(words))
     for pos, (index, opcode, word_count, inst) in enumerate(instructions):
-        if opcode != OP_LABEL or word_count != 2 or inst[1] != Q6_FINAL_REDUCTION_EXIT_LABEL_ID:
-            continue
-        if pos + 1 >= len(instructions):
-            continue
-        next_index, next_opcode, next_wc, next_inst = instructions[pos + 1]
-        if (
-            next_opcode == OP_I_EQUAL
-            and next_wc == 5
-            and next_inst[1] == bool_type
-            and next_inst[2] == Q6_FINAL_LANE0_COMPARE_ID
-            and next_inst[3] == Q6_LOCAL_INVOCATION_X_ID
-            and next_inst[4] == uint_0
-        ):
-            insert_after = next_index
-            break
-    if insert_after is None:
-        return list(words), {"phase": "q6-final-store-pre-barrier", "changed": False, "reason": "pattern-not-found"}
+        if opcode == OP_LABEL and word_count == 2 and inst[1] == Q6_FINAL_REDUCTION_EXIT_LABEL_ID:
+            if pos + 1 < len(instructions):
+                next_index, next_opcode, next_wc, next_inst = instructions[pos + 1]
+                if (
+                    next_opcode == OP_I_EQUAL
+                    and next_wc == 5
+                    and next_inst[1] == bool_type
+                    and next_inst[2] == Q6_FINAL_LANE0_COMPARE_ID
+                    and next_inst[3] == Q6_LOCAL_INVOCATION_X_ID
+                    and next_inst[4] == uint_0
+                ):
+                    last_lane0_compare_index = next_index
+        elif opcode == OP_I_EQUAL and word_count == 5 and inst[1] == bool_type and (inst[3] == uint_0 or inst[4] == uint_0):
+            other = inst[4] if inst[3] == uint_0 else inst[3]
+            if 0 <= other < bound and load_pointer_by_id[other] >= 0:
+                pointer_id = load_pointer_by_id[other]
+                base_id = _spirv_resolve_access_base_id(pointer_id, access_base_by_id, bound)
+                if 0 <= base_id < bound and variable_storage_by_id[base_id] == STORAGE_CLASS_INPUT:
+                    last_lane0_compare_index = index
+        elif opcode == OP_STORE and word_count >= 3 and last_lane0_compare_index is not None:
+            pointer_base = _spirv_resolve_access_base_id(inst[1], access_base_by_id, bound)
+            object_id = inst[2]
+            staged_value = False
+            if (
+                0 <= pointer_base < bound
+                and set_by_id[pointer_base] == 0
+                and binding_by_id[pointer_base] == Q6_OUTPUT_BINDING
+                and 0 <= object_id < bound
+                and load_pointer_by_id[object_id] >= 0
+            ):
+                object_pointer = load_pointer_by_id[object_id]
+                object_base = _spirv_resolve_access_base_id(object_pointer, access_base_by_id, bound)
+                staged_value = (
+                    0 <= object_base < bound
+                    and variable_storage_by_id[object_base] in (STORAGE_CLASS_FUNCTION, STORAGE_CLASS_WORKGROUP)
+                )
+            if staged_value:
+                final_output_store_count += 1
+                if last_lane0_compare_index not in insert_points and len(insert_points) < Q6_MAX_FINAL_STORE_INSERTS:
+                    insert_points.append(last_lane0_compare_index)
+
+    if final_output_store_count != Q6_EXPECTED_FINAL_OUTPUT_STORES or not insert_points:
+        return list(words), {
+            "phase": "q6-final-store-pre-barrier",
+            "changed": False,
+            "reason": "final-store-topology-not-found",
+            "final_output_store_count": final_output_store_count,
+            "insert_count": len(insert_points),
+        }
+
     barrier = [(4 << 16) | OP_CONTROL_BARRIER, uint_2, uint_2, uint_264]
-    if insert_after >= 4 and words[insert_after - 4:insert_after] == barrier:
-        return list(words), {"phase": "q6-final-store-pre-barrier", "changed": False, "reason": "already-present"}
-    out = list(words[:insert_after])
-    out += barrier
-    out += words[insert_after:]
-    return out, {"phase": "q6-final-store-pre-barrier", "changed": True}
+    active_insert_points = [
+        point for point in insert_points
+        if not (point >= 4 and words[point - 4:point] == barrier)
+    ]
+    if not active_insert_points:
+        return list(words), {
+            "phase": "q6-final-store-pre-barrier",
+            "changed": False,
+            "reason": "already-present",
+            "final_output_store_count": final_output_store_count,
+            "insert_count": 0,
+        }
+
+    out: list[int] = []
+    cursor = 0
+    for point in active_insert_points:
+        if point < cursor or point > len(words):
+            raise ValueError("Q6 final-store pre-barrier insertion points are not monotonic")
+        out += words[cursor:point]
+        out += barrier
+        cursor = point
+    out += words[cursor:]
+    return out, {
+        "phase": "q6-final-store-pre-barrier",
+        "changed": True,
+        "final_output_store_count": final_output_store_count,
+        "insert_count": len(active_insert_points),
+        "structural": True,
+    }
 
 
 def rewrite_duplicate_descriptor_bindings(

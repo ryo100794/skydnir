@@ -573,19 +573,52 @@ class GpuAbiContractTest(unittest.TestCase):
     def test_q6_effective_reconstructor_inserts_final_store_pre_barrier(self):
         reconstructor = load_spirv_effective_reconstructor()
         words = [
-            0x07230203, 0x00010300, 0, 2000, 0,
-            (2 << 16) | 20, 28,
-            (4 << 16) | 21, 6, 32, 0,
-            (4 << 16) | 43, 6, 52, 0,
-            (4 << 16) | 43, 6, 31, 2,
-            (4 << 16) | 43, 6, 36, 264,
-            (2 << 16) | 248, 1806,
-            (5 << 16) | 170, 28, 1807, 915, 52,
+            0x07230203, 0x00010300, 0, 100, 0,
+            (2 << 16) | 20, 1,
+            (4 << 16) | 21, 2, 32, 0,
+            (4 << 16) | 43, 2, 3, 0,
+            (4 << 16) | 43, 2, 4, 2,
+            (4 << 16) | 43, 2, 5, 264,
+            (4 << 16) | 32, 10, 1, 2,
+            (4 << 16) | 32, 20, 12, 2,
+            (4 << 16) | 32, 30, 7, 2,
+            (4 << 16) | 71, 40, 34, 0,
+            (4 << 16) | 71, 40, 33, 0,
+            (4 << 16) | 71, 21, 34, 0,
+            (4 << 16) | 71, 21, 33, 2,
+            (4 << 16) | 59, 10, 11, 1,
+            (4 << 16) | 59, 20, 40, 12,
+            (4 << 16) | 59, 20, 21, 12,
+            (4 << 16) | 59, 30, 31, 7,
+            (4 << 16) | 61, 2, 12, 11,
+            (5 << 16) | 170, 1, 50, 12, 3,
+            (5 << 16) | 350, 2, 60, 3, 12,
+            (5 << 16) | 350, 2, 61, 3, 12,
+            (4 << 16) | 61, 2, 32, 31,
+            (3 << 16) | 62, 21, 32,
+            (4 << 16) | 61, 2, 13, 11,
+            (5 << 16) | 170, 1, 51, 13, 3,
+            (4 << 16) | 61, 2, 33, 31,
+            (3 << 16) | 62, 21, 33,
         ]
         out, step = reconstructor.insert_q6k_final_store_pre_barrier(words)
         self.assertTrue(step["changed"])
-        label_index = out.index((2 << 16) | 248)
-        self.assertEqual(out[label_index + 2:label_index + 6], [(4 << 16) | 224, 31, 31, 36])
+        self.assertTrue(step["structural"])
+        self.assertEqual(step["final_output_store_count"], 2)
+        self.assertEqual(step["insert_count"], 2)
+        first_compare = out.index((5 << 16) | 170)
+        self.assertEqual(out[first_compare - 4:first_compare], [(4 << 16) | 224, 4, 4, 5])
+
+    def test_q6_effective_reconstructor_inserts_pre_barrier_for_saved_function_accumulator_spv(self):
+        reconstructor = load_spirv_effective_reconstructor()
+        words = reconstructor.read_words(Q6_FUNCTION_ACCUMULATOR_SPV)
+        out, step = reconstructor.insert_q6k_final_store_pre_barrier(words)
+        self.assertTrue(step["changed"])
+        self.assertTrue(step["structural"])
+        self.assertEqual(step["final_output_store_count"], 2)
+        self.assertEqual(step["insert_count"], 2)
+        self.assertEqual(len(out), len(words) + 8)
+
 
     def test_q6_debug_probe_alias_guard_blocks_before_final_store_diagnosis(self):
         compare = LLAMA_COMPARE.read_text()
