@@ -524,7 +524,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertTrue(step["preserve_workgroup_size_spec_subtree"])
         self.assertEqual(materialized, words)
 
-    def test_q6_effective_reconstructor_lowers_storage16_duplicate_view_loads(self):
+    def test_q6_effective_reconstructor_rejects_storage16_without_q6_topology(self):
         reconstructor = load_spirv_effective_reconstructor()
         words = [
             0x07230203, 0x00010300, 0, 400, 0,
@@ -539,16 +539,25 @@ class GpuAbiContractTest(unittest.TestCase):
             (4 << 16) | 61, 3, 101, 100,
         ]
         lowered, step = reconstructor.lower_q6k_storage16_loads_to_storage8(words)
+        self.assertFalse(step["changed"])
+        self.assertEqual(step["reason"], "q6-duplicate-view-topology-not-found")
+        self.assertEqual(lowered, words)
+
+    def test_q6_effective_reconstructor_lowers_saved_storage16_duplicate_view_loads(self):
+        reconstructor = load_spirv_effective_reconstructor()
+        words = reconstructor.read_words(Q6_FUNCTION_ACCUMULATOR_SPV)
+        lowered, step = reconstructor.lower_q6k_storage16_loads_to_storage8(words)
         self.assertTrue(step["changed"])
-        self.assertEqual(step["lowered_count"], 1)
-        self.assertEqual(lowered[3], 411)
-        for index, opcode, word_count, inst in reconstructor.iter_instructions(lowered):
-            if opcode == 65 and word_count >= 4:
-                self.assertNotEqual(inst[3], 371)
+        self.assertTrue(step["structural"])
+        self.assertEqual(step["lowered_count"], 24)
+        self.assertEqual(step["pattern_count"], 24)
+        self.assertEqual(step["storage8_var_id"], 294)
+        self.assertEqual(step["storage16_var_id"], 321)
+        self.assertEqual(lowered[3], words[3] + 1 + 24 * 10)
         self.assertIn((5 << 16) | 197, lowered)
         self.assertIn((4 << 16) | 113, lowered)
 
-    def test_q6_effective_reconstructor_lowers_u32_to_u8vec4_bitcasts(self):
+    def test_q6_effective_reconstructor_rejects_bitcast_without_q6_topology(self):
         reconstructor = load_spirv_effective_reconstructor()
         words = [
             0x07230203, 0x00010300, 0, 500, 0,
@@ -561,14 +570,22 @@ class GpuAbiContractTest(unittest.TestCase):
             (4 << 16) | 124, 3, 100, 99,
         ]
         lowered, step = reconstructor.lower_q6k_u32_to_u8vec4_bitcasts(words)
+        self.assertFalse(step["changed"])
+        self.assertEqual(step["reason"], "q6-duplicate-view-topology-not-found")
+        self.assertEqual(lowered, words)
+
+    def test_q6_effective_reconstructor_lowers_saved_u32_to_u8vec4_bitcasts(self):
+        reconstructor = load_spirv_effective_reconstructor()
+        words = reconstructor.read_words(Q6_FUNCTION_ACCUMULATOR_SPV)
+        lowered, step = reconstructor.lower_q6k_u32_to_u8vec4_bitcasts(words)
         self.assertTrue(step["changed"])
-        self.assertEqual(step["lowered_count"], 1)
-        self.assertEqual(lowered[3], 507)
-        self.assertNotIn((4 << 16) | 124, lowered)
+        self.assertTrue(step["structural"])
+        self.assertEqual(step["lowered_count"], 16)
+        self.assertEqual(step["pattern_count"], 16)
+        self.assertEqual(lowered[3], words[3] + 16 * 7)
+        self.assertLess(lowered.count((4 << 16) | 124), words.count((4 << 16) | 124))
         self.assertIn((5 << 16) | 194, lowered)
         self.assertIn((7 << 16) | 80, lowered)
-        composite_index = lowered.index((7 << 16) | 80)
-        self.assertEqual(lowered[composite_index + 1:composite_index + 3], [3, 100])
 
     def test_q6_effective_reconstructor_inserts_final_store_pre_barrier(self):
         reconstructor = load_spirv_effective_reconstructor()
@@ -12762,8 +12779,12 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("else if (q6_probe_effective_replay && q6_native_callsite_detected", executor)
         self.assertIn("q6_final_store_pre_barrier_inserted = insert_q6k_final_store_pre_barrier", executor)
         self.assertIn('\\"q6_probe_effective_replay\\":%s', executor)
-        self.assertIn("Q6_STORAGE8_VAR_ID = 346", executor)
-        self.assertIn("Q6_STORAGE16_VAR_ID = 371", executor)
+        self.assertIn("find_q6k_duplicate_binding0_views", executor)
+        self.assertIn("Q6_STORAGE16_EXPECTED_LOADS = 24", executor)
+        self.assertIn("Q6_U32_TO_U8VEC4_EXPECTED_BITCASTS = 16", executor)
+        self.assertIn("q6_storage16_member_is_byte_lane", executor)
+        self.assertNotIn("Q6_STORAGE8_VAR_ID = 346", executor)
+        self.assertNotIn("Q6_STORAGE16_VAR_ID = 371", executor)
         self.assertIn("OP_U_CONVERT", executor)
         self.assertIn("OP_SHIFT_LEFT_LOGICAL", executor)
         self.assertIn("OP_SHIFT_RIGHT_LOGICAL", executor)
@@ -12795,7 +12816,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("q6_native_callsite_detected", executor)
         self.assertNotIn("if (q6_native_callsite_detected) {", executor)
         final_store_rewrite = re.search(
-            r"static int insert_q6k_final_store_pre_barrier\((?P<body>.*?)\n}\n\n\nstatic int lower_q6k_storage16_loads_to_storage8",
+            r"static int insert_q6k_final_store_pre_barrier\((?P<body>.*?)\n}\n\n\nstatic int find_q6k_duplicate_binding0_views",
             executor,
             re.S,
         ).group("body")

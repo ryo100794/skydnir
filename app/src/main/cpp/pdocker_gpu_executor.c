@@ -6793,6 +6793,281 @@ cleanup:
 }
 
 
+static int find_q6k_duplicate_binding0_views(
+        const uint32_t *in,
+        size_t words,
+        uint32_t *storage8_var_id,
+        uint32_t *storage16_var_id,
+        uint32_t *byte_type_id,
+        uint32_t *ptr_byte_type_id) {
+    enum {
+        OP_TYPE_INT = 21,
+        OP_TYPE_ARRAY = 28,
+        OP_TYPE_RUNTIME_ARRAY = 29,
+        OP_TYPE_STRUCT = 30,
+        OP_TYPE_POINTER = 32,
+        OP_VARIABLE = 59,
+        OP_LOAD = 61,
+        OP_ACCESS_CHAIN = 65,
+        OP_IN_BOUNDS_ACCESS_CHAIN = 66,
+        OP_DECORATE = 71,
+        STORAGE_CLASS_STORAGE_BUFFER = 12,
+        DECORATION_BINDING = 33,
+        DECORATION_DESCRIPTOR_SET = 34,
+    };
+    if (storage8_var_id) *storage8_var_id = 0;
+    if (storage16_var_id) *storage16_var_id = 0;
+    if (byte_type_id) *byte_type_id = 0;
+    if (ptr_byte_type_id) *ptr_byte_type_id = 0;
+    if (!in || words < 5 || in[0] != 0x07230203u) return 0;
+    const uint32_t bound = in[3];
+    if (bound == 0 || bound > 65536) return 0;
+    uint8_t *is_uint8_type = (uint8_t *)calloc(bound, sizeof(uint8_t));
+    uint8_t *is_any_int8_type = (uint8_t *)calloc(bound, sizeof(uint8_t));
+    uint8_t *is_uint16_type = (uint8_t *)calloc(bound, sizeof(uint8_t));
+    int32_t *binding_by_id = (int32_t *)malloc(bound * sizeof(binding_by_id[0]));
+    int32_t *set_by_id = (int32_t *)malloc(bound * sizeof(set_by_id[0]));
+    int32_t *pointer_storage_by_id = (int32_t *)malloc(bound * sizeof(pointer_storage_by_id[0]));
+    int32_t *pointer_pointee_by_id = (int32_t *)malloc(bound * sizeof(pointer_pointee_by_id[0]));
+    int32_t *variable_storage_by_id = (int32_t *)malloc(bound * sizeof(variable_storage_by_id[0]));
+    int32_t *variable_pointer_type_by_id = (int32_t *)malloc(bound * sizeof(variable_pointer_type_by_id[0]));
+    int32_t *array_element_by_id = (int32_t *)malloc(bound * sizeof(array_element_by_id[0]));
+    int32_t *runtime_array_element_by_id = (int32_t *)malloc(bound * sizeof(runtime_array_element_by_id[0]));
+    int32_t *struct_member0_by_id = (int32_t *)malloc(bound * sizeof(struct_member0_by_id[0]));
+    int32_t *struct_member1_by_id = (int32_t *)malloc(bound * sizeof(struct_member1_by_id[0]));
+    uint32_t *pointer_load_use_count = (uint32_t *)calloc(bound, sizeof(pointer_load_use_count[0]));
+    if (!is_uint8_type || !is_any_int8_type || !is_uint16_type || !binding_by_id || !set_by_id ||
+        !pointer_storage_by_id || !pointer_pointee_by_id ||
+        !variable_storage_by_id || !variable_pointer_type_by_id ||
+        !array_element_by_id || !runtime_array_element_by_id ||
+        !struct_member0_by_id || !struct_member1_by_id || !pointer_load_use_count) {
+        goto fail;
+    }
+    for (uint32_t id = 0; id < bound; ++id) {
+        binding_by_id[id] = -1;
+        set_by_id[id] = -1;
+        pointer_storage_by_id[id] = -1;
+        pointer_pointee_by_id[id] = -1;
+        variable_storage_by_id[id] = -1;
+        variable_pointer_type_by_id[id] = -1;
+        array_element_by_id[id] = -1;
+        runtime_array_element_by_id[id] = -1;
+        struct_member0_by_id[id] = -1;
+        struct_member1_by_id[id] = -1;
+    }
+
+    for (size_t i = 5; i < words;) {
+        const uint32_t inst = in[i];
+        const uint16_t word_count = (uint16_t)(inst >> 16);
+        const uint16_t op = (uint16_t)(inst & 0xffffu);
+        if (word_count == 0 || i + word_count > words) goto fail;
+        if (op == OP_TYPE_INT && word_count >= 4 && in[i + 1] < bound) {
+            if (in[i + 2] == 8) {
+                is_any_int8_type[in[i + 1]] = 1;
+                if (in[i + 3] == 0) is_uint8_type[in[i + 1]] = 1;
+            }
+            if (in[i + 2] == 16 && in[i + 3] == 0) is_uint16_type[in[i + 1]] = 1;
+        } else if (op == OP_TYPE_ARRAY && word_count >= 4 && in[i + 1] < bound) {
+            array_element_by_id[in[i + 1]] = in[i + 2] < bound ? (int32_t)in[i + 2] : -1;
+        } else if (op == OP_TYPE_RUNTIME_ARRAY && word_count >= 3 && in[i + 1] < bound) {
+            runtime_array_element_by_id[in[i + 1]] = in[i + 2] < bound ? (int32_t)in[i + 2] : -1;
+        } else if (op == OP_TYPE_STRUCT && word_count >= 3 && in[i + 1] < bound) {
+            struct_member0_by_id[in[i + 1]] = in[i + 2] < bound ? (int32_t)in[i + 2] : -1;
+            if (word_count >= 4) {
+                struct_member1_by_id[in[i + 1]] = in[i + 3] < bound ? (int32_t)in[i + 3] : -1;
+            }
+        } else if (op == OP_DECORATE && word_count >= 4 && in[i + 1] < bound) {
+            if (in[i + 2] == DECORATION_BINDING) {
+                binding_by_id[in[i + 1]] = (int32_t)in[i + 3];
+            } else if (in[i + 2] == DECORATION_DESCRIPTOR_SET) {
+                set_by_id[in[i + 1]] = (int32_t)in[i + 3];
+            }
+        } else if (op == OP_TYPE_POINTER && word_count >= 4 && in[i + 1] < bound) {
+            pointer_storage_by_id[in[i + 1]] = (int32_t)in[i + 2];
+            pointer_pointee_by_id[in[i + 1]] = in[i + 3] < bound ? (int32_t)in[i + 3] : -1;
+        } else if (op == OP_VARIABLE && word_count >= 4 && in[i + 2] < bound) {
+            const uint32_t result_type = in[i + 1];
+            if (result_type < bound) {
+                variable_pointer_type_by_id[in[i + 2]] = (int32_t)result_type;
+                variable_storage_by_id[in[i + 2]] = pointer_storage_by_id[result_type];
+            }
+        } else if (op == OP_LOAD && word_count >= 4 && in[i + 3] < bound) {
+            if (pointer_load_use_count[in[i + 3]] != UINT32_MAX) ++pointer_load_use_count[in[i + 3]];
+        }
+        i += word_count;
+    }
+
+    uint32_t binding0_vars[2] = {0, 0};
+    uint32_t binding0_count = 0;
+    for (uint32_t id = 0; id < bound; ++id) {
+        if (set_by_id[id] == 0 && binding_by_id[id] == 0 &&
+            variable_storage_by_id[id] == STORAGE_CLASS_STORAGE_BUFFER) {
+            if (binding0_count >= 2) goto fail;
+            binding0_vars[binding0_count++] = id;
+        }
+    }
+    if (binding0_count != 2) goto fail;
+
+    uint32_t uint8_type = 0;
+    uint32_t uint16_type = 0;
+    for (uint32_t id = 0; id < bound; ++id) {
+        if (is_uint8_type[id]) {
+            if (uint8_type != 0) goto fail;
+            uint8_type = id;
+        }
+        if (is_uint16_type[id]) {
+            if (uint16_type != 0) goto fail;
+            uint16_type = id;
+        }
+    }
+    if (!uint8_type || !uint16_type) goto fail;
+
+    int byte_var = -1;
+    int ushort_var = -1;
+    for (uint32_t i = 0; i < 2; ++i) {
+        const uint32_t var_id = binding0_vars[i];
+        const int32_t ptr_type = variable_pointer_type_by_id[var_id];
+        if (ptr_type < 0 || (uint32_t)ptr_type >= bound) goto fail;
+        const int32_t wrapper_type = pointer_pointee_by_id[ptr_type];
+        if (wrapper_type < 0 || (uint32_t)wrapper_type >= bound) goto fail;
+        const int32_t runtime_array = struct_member0_by_id[wrapper_type];
+        if (runtime_array < 0 || (uint32_t)runtime_array >= bound) goto fail;
+        const int32_t element_struct = runtime_array_element_by_id[runtime_array];
+        if (element_struct < 0 || (uint32_t)element_struct >= bound) goto fail;
+        const int32_t member0 = struct_member0_by_id[element_struct];
+        const int32_t member1 = struct_member1_by_id[element_struct];
+        if (member0 < 0 || member1 < 0 || (uint32_t)member0 >= bound || (uint32_t)member1 >= bound) goto fail;
+        const int32_t elem0 = array_element_by_id[member0];
+        const int32_t elem1 = array_element_by_id[member1];
+        if (elem0 < 0 || elem1 < 0 || (uint32_t)elem0 >= bound || (uint32_t)elem1 >= bound) goto fail;
+        if ((uint32_t)elem0 == uint8_type && (uint32_t)elem1 == uint8_type) {
+            if (byte_var >= 0) goto fail;
+            byte_var = (int)i;
+        }
+        if ((uint32_t)elem0 == uint16_type && (uint32_t)elem1 == uint16_type) {
+            if (ushort_var >= 0) goto fail;
+            ushort_var = (int)i;
+        }
+    }
+    if (byte_var < 0 || ushort_var < 0 || byte_var == ushort_var) goto fail;
+
+    uint32_t ptr_byte_type = 0;
+    for (size_t i = 5; i < words;) {
+        const uint32_t inst = in[i];
+        const uint16_t word_count = (uint16_t)(inst >> 16);
+        const uint16_t op = (uint16_t)(inst & 0xffffu);
+        if (word_count == 0 || i + word_count > words) goto fail;
+        if ((op == OP_ACCESS_CHAIN || op == OP_IN_BOUNDS_ACCESS_CHAIN) &&
+            word_count >= 4 && in[i + 1] < bound && in[i + 2] < bound) {
+            const uint32_t result_type = in[i + 1];
+            const uint32_t result_id = in[i + 2];
+            const uint32_t base = in[i + 3];
+            int var_index = -1;
+            if (base == binding0_vars[0]) var_index = 0;
+            else if (base == binding0_vars[1]) var_index = 1;
+            if (var_index >= 0 &&
+                pointer_storage_by_id[result_type] == STORAGE_CLASS_STORAGE_BUFFER &&
+                pointer_load_use_count[result_id] > 0) {
+                const int32_t pointee = pointer_pointee_by_id[result_type];
+                if (var_index == byte_var && pointee >= 0 &&
+                    (uint32_t)pointee < bound && is_uint8_type[pointee]) {
+                    ptr_byte_type = result_type;
+                }
+            }
+        }
+        i += word_count;
+    }
+    if (storage8_var_id) *storage8_var_id = binding0_vars[byte_var];
+    if (storage16_var_id) *storage16_var_id = binding0_vars[ushort_var];
+    if (byte_type_id) *byte_type_id = uint8_type;
+    if (ptr_byte_type_id) *ptr_byte_type_id = ptr_byte_type;
+    free(is_uint8_type); free(is_any_int8_type); free(is_uint16_type); free(binding_by_id); free(set_by_id);
+    free(pointer_storage_by_id); free(pointer_pointee_by_id);
+    free(variable_storage_by_id); free(variable_pointer_type_by_id);
+    free(array_element_by_id); free(runtime_array_element_by_id);
+    free(struct_member0_by_id); free(struct_member1_by_id); free(pointer_load_use_count);
+    return 1;
+
+fail:
+    free(is_uint8_type); free(is_any_int8_type); free(is_uint16_type); free(binding_by_id); free(set_by_id);
+    free(pointer_storage_by_id); free(pointer_pointee_by_id);
+    free(variable_storage_by_id); free(variable_pointer_type_by_id);
+    free(array_element_by_id); free(runtime_array_element_by_id);
+    free(struct_member0_by_id); free(struct_member1_by_id); free(pointer_load_use_count);
+    return 0;
+}
+
+
+static size_t spirv_count_id_uses(
+        const uint32_t *in,
+        size_t words,
+        uint32_t target_id,
+        size_t defining_instruction_index) {
+    if (!in || words < 5 || !target_id) return 0;
+    size_t uses = 0;
+    for (size_t i = 5; i < words;) {
+        const uint32_t inst = in[i];
+        const uint16_t word_count = (uint16_t)(inst >> 16);
+        if (word_count == 0 || i + word_count > words) return SIZE_MAX;
+        for (uint16_t k = 1; k < word_count; ++k) {
+            if (i == defining_instruction_index && k == 2) continue;
+            if (in[i + k] == target_id) ++uses;
+        }
+        i += word_count;
+    }
+    return uses;
+}
+
+
+static int spirv_get_int32_constant_value(
+        const uint32_t *in,
+        size_t words,
+        uint32_t target_id,
+        uint32_t *value) {
+    enum { OP_TYPE_INT = 21, OP_CONSTANT = 43 };
+    if (value) *value = 0;
+    if (!in || words < 5 || !target_id || in[0] != 0x07230203u) return 0;
+    uint32_t constant_type = 0;
+    uint32_t constant_value = 0;
+    for (size_t i = 5; i < words;) {
+        const uint32_t inst = in[i];
+        const uint16_t word_count = (uint16_t)(inst >> 16);
+        const uint16_t op = (uint16_t)(inst & 0xffffu);
+        if (word_count == 0 || i + word_count > words) return 0;
+        if (op == OP_CONSTANT && word_count == 4 && in[i + 2] == target_id) {
+            constant_type = in[i + 1];
+            constant_value = in[i + 3];
+            break;
+        }
+        i += word_count;
+    }
+    if (!constant_type) return 0;
+    for (size_t i = 5; i < words;) {
+        const uint32_t inst = in[i];
+        const uint16_t word_count = (uint16_t)(inst >> 16);
+        const uint16_t op = (uint16_t)(inst & 0xffffu);
+        if (word_count == 0 || i + word_count > words) return 0;
+        if (op == OP_TYPE_INT && word_count == 4 &&
+            in[i + 1] == constant_type && in[i + 2] == 32) {
+            if (value) *value = constant_value;
+            return 1;
+        }
+        i += word_count;
+    }
+    return 0;
+}
+
+
+static int q6_storage16_member_is_byte_lane(
+        const uint32_t *in,
+        size_t words,
+        uint32_t member_id) {
+    uint32_t value = 0;
+    return spirv_get_int32_constant_value(in, words, member_id, &value) &&
+        (value == 0 || value == 1);
+}
+
+
 static int lower_q6k_storage16_loads_to_storage8(
         uint32_t **code,
         size_t *bytes,
@@ -6809,9 +7084,10 @@ static int lower_q6k_storage16_loads_to_storage8(
      * duplicate storage16 view into two uchar loads from the storage8 view and
      * reconstructs the same little-endian ushort in SPIR-V.
      *
-     * It is intentionally fail-closed: no exact Q6_K source hash, no exact
-     * duplicate-view IDs, no exact AccessChain+Load pattern, or missing scalar
-     * constants means no rewrite.
+     * It is intentionally fail-closed: the module must expose a structural
+     * Q6_K duplicate set-0/binding-0 storage-buffer view pair, a byte view, a
+     * ushort view, the exact AccessChain+Load pattern, and the scalar
+     * constants needed to reconstruct the same little-endian ushort.
      */
     enum {
         OP_TYPE_INT = 21,
@@ -6825,19 +7101,30 @@ static int lower_q6k_storage16_loads_to_storage8(
         OP_SHIFT_LEFT_LOGICAL = 196,
         OP_BITWISE_OR = 197,
         STORAGE_CLASS_STORAGE_BUFFER = 12,
-        Q6_STORAGE8_VAR_ID = 346,
-        Q6_STORAGE16_VAR_ID = 371,
+        Q6_STORAGE16_EXPECTED_LOADS = 24,
     };
     if (lowered_count) *lowered_count = 0;
     if (!code || !*code || !bytes || *bytes < 20 ||
-        (*bytes % sizeof(uint32_t)) != 0 || (*code)[0] != 0x07230203u ||
-        !is_q6k_matvec_hash(source_spirv_hash)) {
+        (*bytes % sizeof(uint32_t)) != 0 || (*code)[0] != 0x07230203u) {
         return 0;
     }
+    (void)source_spirv_hash;
     const uint32_t *in = *code;
     const size_t words = *bytes / sizeof(uint32_t);
     uint32_t bound = in[3];
-    if (bound <= Q6_STORAGE16_VAR_ID || bound > 65536) return 0;
+    if (bound == 0 || bound > 65536) return 0;
+    uint32_t q6_storage8_var_id = 0;
+    uint32_t q6_storage16_var_id = 0;
+    uint32_t structural_byte_type = 0;
+    uint32_t structural_ptr_byte_type = 0;
+    if (!find_q6k_duplicate_binding0_views(
+            in, words,
+            &q6_storage8_var_id,
+            &q6_storage16_var_id,
+            &structural_byte_type,
+            &structural_ptr_byte_type)) {
+        return 0;
+    }
 
     uint32_t uint_type = 0;
     uint32_t uchar_type = 0;
@@ -6861,7 +7148,7 @@ static int lower_q6k_storage16_loads_to_storage8(
         }
         if (op == OP_TYPE_INT && word_count >= 4) {
             if (in[i + 2] == 32 && in[i + 3] == 0) uint_type = in[i + 1];
-            if (in[i + 2] == 8 && in[i + 3] == 0) {
+            if (in[i + 1] == structural_byte_type && in[i + 2] == 8) {
                 uchar_type = in[i + 1];
                 uchar_type_end = i + word_count;
             }
@@ -6869,7 +7156,7 @@ static int lower_q6k_storage16_loads_to_storage8(
         } else if (op == OP_TYPE_POINTER && word_count >= 4 &&
                    in[i + 2] == STORAGE_CLASS_STORAGE_BUFFER) {
             if (ushort_type && in[i + 3] == ushort_type) ptr_ushort_type = in[i + 1];
-            if (uchar_type && in[i + 3] == uchar_type) ptr_uchar_type = in[i + 1];
+            if (in[i + 1] == structural_ptr_byte_type) ptr_uchar_type = in[i + 1];
         } else if (op == OP_CONSTANT && word_count >= 4 && uint_type && in[i + 1] == uint_type) {
             if (in[i + 3] == 1) uint_1 = in[i + 2];
             if (in[i + 3] == 2) uint_2 = in[i + 2];
@@ -6890,15 +7177,18 @@ static int lower_q6k_storage16_loads_to_storage8(
         if (word_count == 0 || i + word_count > words) return 0;
         if (op == OP_ACCESS_CHAIN && word_count == 8 &&
             in[i + 1] == ptr_ushort_type &&
-            in[i + 3] == Q6_STORAGE16_VAR_ID &&
+            in[i + 3] == q6_storage16_var_id &&
             i + word_count < words) {
             const size_t load = i + word_count;
             const uint32_t load_inst = in[load];
             const uint16_t load_wc = (uint16_t)(load_inst >> 16);
             const uint16_t load_op = (uint16_t)(load_inst & 0xffffu);
+            const uint32_t member = in[i + 6];
             if (load_wc == 4 && load + load_wc <= words && load_op == OP_LOAD &&
                 in[load + 1] == ushort_type &&
-                in[load + 3] == in[i + 2]) {
+                in[load + 3] == in[i + 2] &&
+                q6_storage16_member_is_byte_lane(in, words, member) &&
+                spirv_count_id_uses(in, words, in[i + 2], i) == 1) {
                 pattern_count++;
                 i = load + load_wc;
                 continue;
@@ -6906,7 +7196,7 @@ static int lower_q6k_storage16_loads_to_storage8(
         }
         i += word_count;
     }
-    if (pattern_count == 0 || pattern_count > 256) return 0;
+    if (pattern_count != Q6_STORAGE16_EXPECTED_LOADS) return 0;
 
     const int add_ptr_uchar_type = ptr_uchar_type == 0;
     const uint32_t new_ptr_uchar_type = add_ptr_uchar_type ? bound++ : ptr_uchar_type;
@@ -6939,18 +7229,20 @@ static int lower_q6k_storage16_loads_to_storage8(
         }
         if (op == OP_ACCESS_CHAIN && word_count == 8 &&
             in[i + 1] == ptr_ushort_type &&
-            in[i + 3] == Q6_STORAGE16_VAR_ID &&
+            in[i + 3] == q6_storage16_var_id &&
             i + word_count < words) {
             const size_t load = i + word_count;
             const uint32_t load_inst = in[load];
             const uint16_t load_wc = (uint16_t)(load_inst >> 16);
             const uint16_t load_op = (uint16_t)(load_inst & 0xffffu);
+            const uint32_t member = in[i + 6];
             if (load_wc == 4 && load + load_wc <= words && load_op == OP_LOAD &&
                 in[load + 1] == ushort_type &&
-                in[load + 3] == in[i + 2]) {
+                in[load + 3] == in[i + 2] &&
+                q6_storage16_member_is_byte_lane(in, words, member) &&
+                spirv_count_id_uses(in, words, in[i + 2], i) == 1) {
                 const uint32_t index0 = in[i + 4];
                 const uint32_t block = in[i + 5];
-                const uint32_t member = in[i + 6];
                 const uint32_t ushort_index = in[i + 7];
                 const uint32_t load_result = in[load + 2];
                 const uint32_t b0_idx = next_id++;
@@ -6973,7 +7265,7 @@ static int lower_q6k_storage16_loads_to_storage8(
                 rewritten[out_words++] = (8u << 16) | OP_ACCESS_CHAIN;
                 rewritten[out_words++] = new_ptr_uchar_type;
                 rewritten[out_words++] = b0_ptr;
-                rewritten[out_words++] = Q6_STORAGE8_VAR_ID;
+                rewritten[out_words++] = q6_storage8_var_id;
                 rewritten[out_words++] = index0;
                 rewritten[out_words++] = block;
                 rewritten[out_words++] = member;
@@ -6998,7 +7290,7 @@ static int lower_q6k_storage16_loads_to_storage8(
                 rewritten[out_words++] = (8u << 16) | OP_ACCESS_CHAIN;
                 rewritten[out_words++] = new_ptr_uchar_type;
                 rewritten[out_words++] = b1_ptr;
-                rewritten[out_words++] = Q6_STORAGE8_VAR_ID;
+                rewritten[out_words++] = q6_storage8_var_id;
                 rewritten[out_words++] = index0;
                 rewritten[out_words++] = block;
                 rewritten[out_words++] = member;
@@ -7078,17 +7370,33 @@ static int lower_q6k_u32_to_u8vec4_bitcasts(
         OP_U_CONVERT = 113,
         OP_SHIFT_RIGHT_LOGICAL = 194,
         OP_COMPOSITE_CONSTRUCT = 80,
+        Q6_U32_TO_U8VEC4_EXPECTED_BITCASTS = 16,
     };
     if (lowered_count) *lowered_count = 0;
     if (!code || !*code || !bytes || *bytes < 20 ||
-        (*bytes % sizeof(uint32_t)) != 0 || (*code)[0] != 0x07230203u ||
-        !is_q6k_matvec_hash(source_spirv_hash)) {
+        (*bytes % sizeof(uint32_t)) != 0 || (*code)[0] != 0x07230203u) {
         return 0;
     }
+    (void)source_spirv_hash;
     const uint32_t *in = *code;
     const size_t words = *bytes / sizeof(uint32_t);
     uint32_t bound = in[3];
     if (bound == 0 || bound > 65536) return 0;
+    uint32_t q6_storage8_var_id = 0;
+    uint32_t q6_storage16_var_id = 0;
+    uint32_t structural_byte_type = 0;
+    uint32_t structural_ptr_byte_type = 0;
+    if (!find_q6k_duplicate_binding0_views(
+            in, words,
+            &q6_storage8_var_id,
+            &q6_storage16_var_id,
+            &structural_byte_type,
+            &structural_ptr_byte_type)) {
+        return 0;
+    }
+    (void)q6_storage8_var_id;
+    (void)q6_storage16_var_id;
+    (void)structural_ptr_byte_type;
 
     uint32_t uint_type = 0;
     uint32_t uchar_type = 0;
@@ -7104,7 +7412,7 @@ static int lower_q6k_u32_to_u8vec4_bitcasts(
         if (word_count == 0 || i + word_count > words) return 0;
         if (op == OP_TYPE_INT && word_count >= 4) {
             if (in[i + 2] == 32 && in[i + 3] == 0) uint_type = in[i + 1];
-            if (in[i + 2] == 8 && in[i + 3] == 0) uchar_type = in[i + 1];
+            if (in[i + 1] == structural_byte_type && in[i + 2] == 8 && in[i + 3] == 0) uchar_type = in[i + 1];
         } else if (op == OP_TYPE_VECTOR && word_count >= 4 && uchar_type &&
                    in[i + 2] == uchar_type && in[i + 3] == 4) {
             uchar4_type = in[i + 1];
@@ -7119,26 +7427,54 @@ static int lower_q6k_u32_to_u8vec4_bitcasts(
     if (!uint_type || !uchar_type || !uchar4_type || !uint_8 || !uint_16 || !uint_24) {
         return 0;
     }
+    uint32_t *type_by_id = (uint32_t *)calloc(bound, sizeof(type_by_id[0]));
+    if (!type_by_id) return 0;
+    for (size_t i = 5; i < words;) {
+        const uint32_t inst = in[i];
+        const uint16_t word_count = (uint16_t)(inst >> 16);
+        if (word_count == 0 || i + word_count > words) {
+            free(type_by_id);
+            return 0;
+        }
+        if (word_count >= 3 && in[i + 2] < bound &&
+            (in[i + 1] == uint_type || in[i + 1] == uchar_type || in[i + 1] == uchar4_type)) {
+            type_by_id[in[i + 2]] = in[i + 1];
+        }
+        i += word_count;
+    }
 
     size_t pattern_count = 0;
     for (size_t i = 5; i < words;) {
         const uint32_t inst = in[i];
         const uint16_t word_count = (uint16_t)(inst >> 16);
         const uint16_t op = (uint16_t)(inst & 0xffffu);
-        if (word_count == 0 || i + word_count > words) return 0;
-        if (op == OP_BITCAST && word_count == 4 && in[i + 1] == uchar4_type) {
+        if (word_count == 0 || i + word_count > words) {
+            free(type_by_id);
+            return 0;
+        }
+        if (op == OP_BITCAST && word_count == 4 && in[i + 1] == uchar4_type &&
+            in[i + 3] < bound && type_by_id[in[i + 3]] == uint_type) {
             pattern_count++;
         }
         i += word_count;
     }
-    if (pattern_count == 0 || pattern_count > 256) return 0;
+    if (pattern_count != Q6_U32_TO_U8VEC4_EXPECTED_BITCASTS) {
+        free(type_by_id);
+        return 0;
+    }
 
     const size_t extra_words = pattern_count * (38u - 4u);
     uint32_t new_bound = bound + (uint32_t)(pattern_count * 7u);
-    if (new_bound <= bound || new_bound > 65536) return 0;
+    if (new_bound <= bound || new_bound > 65536) {
+        free(type_by_id);
+        return 0;
+    }
     uint32_t next_id = bound;
     uint32_t *rewritten = (uint32_t *)malloc((words + extra_words) * sizeof(uint32_t));
-    if (!rewritten) return 0;
+    if (!rewritten) {
+        free(type_by_id);
+        return 0;
+    }
     memcpy(rewritten, in, 5 * sizeof(uint32_t));
     rewritten[3] = new_bound;
     size_t out_words = 5;
@@ -7149,10 +7485,12 @@ static int lower_q6k_u32_to_u8vec4_bitcasts(
         const uint16_t word_count = (uint16_t)(inst >> 16);
         const uint16_t op = (uint16_t)(inst & 0xffffu);
         if (word_count == 0 || i + word_count > words) {
+            free(type_by_id);
             free(rewritten);
             return 0;
         }
-        if (op == OP_BITCAST && word_count == 4 && in[i + 1] == uchar4_type) {
+        if (op == OP_BITCAST && word_count == 4 && in[i + 1] == uchar4_type &&
+            in[i + 3] < bound && type_by_id[in[i + 3]] == uint_type) {
             const uint32_t result = in[i + 2];
             const uint32_t source = in[i + 3];
             const uint32_t b0 = next_id++;
@@ -14290,7 +14628,7 @@ static int run_vulkan_dispatch_fd(
         !q6k_safe_kernel_requested &&
         is_q6k_matvec_hash(q6_storage16_lowering_identity_hash);
     const int q6_compat_rewrites_enabled =
-        q6_native_callsite_detected && q6k_compat_rewrites_requested &&
+        !q6k_safe_kernel_requested && q6k_compat_rewrites_requested &&
         !q6_probe_effective_replay;
     if (q6_compat_rewrites_enabled) {
         q6_storage16_loads_lowered = lower_q6k_storage16_loads_to_storage8(

@@ -305,16 +305,165 @@ def materialize_specialization_constants(
     return out, {"phase": "specialization-materialized", "changed": True, **counts}
 
 
-def lower_q6k_storage16_loads_to_storage8(words: list[int]) -> tuple[list[int], dict[str, Any]]:
-    """Mirror the executor's Q6 storage16 duplicate-view lowering.
+def _find_q6k_duplicate_binding0_views(words: list[int]) -> dict[str, int] | None:
+    OP_TYPE_INT = 21
+    OP_TYPE_ARRAY = 28
+    OP_TYPE_RUNTIME_ARRAY = 29
+    OP_TYPE_STRUCT = 30
+    OP_TYPE_POINTER = 32
+    OP_VARIABLE = 59
+    OP_LOAD = 61
+    OP_ACCESS_CHAIN = 65
+    OP_IN_BOUNDS_ACCESS_CHAIN = 66
+    OP_DECORATE = 71
+    STORAGE_CLASS_STORAGE_BUFFER = 12
+    DECORATION_BINDING = 33
+    DECORATION_DESCRIPTOR_SET = 34
+    if len(words) < 5 or words[0] != SPIRV_MAGIC:
+        return None
+    bound = words[3]
+    if bound <= 0 or bound > 65536:
+        return None
+    is_uint8_type = [False] * bound
+    is_any_int8_type = [False] * bound
+    is_uint16_type = [False] * bound
+    binding_by_id = [-1] * bound
+    set_by_id = [-1] * bound
+    pointer_storage_by_id = [-1] * bound
+    pointer_pointee_by_id = [-1] * bound
+    variable_storage_by_id = [-1] * bound
+    variable_pointer_type_by_id = [-1] * bound
+    array_element_by_id = [-1] * bound
+    runtime_array_element_by_id = [-1] * bound
+    struct_member0_by_id = [-1] * bound
+    struct_member1_by_id = [-1] * bound
+    pointer_load_use_count = [0] * bound
+    for _, opcode, word_count, inst in iter_instructions(words):
+        if opcode == OP_TYPE_INT and word_count >= 4 and inst[1] < bound:
+            if inst[2] == 8:
+                is_any_int8_type[inst[1]] = True
+                if inst[3] == 0:
+                    is_uint8_type[inst[1]] = True
+            elif inst[2] == 16 and inst[3] == 0:
+                is_uint16_type[inst[1]] = True
+        elif opcode == OP_TYPE_ARRAY and word_count >= 4 and inst[1] < bound:
+            array_element_by_id[inst[1]] = inst[2] if inst[2] < bound else -1
+        elif opcode == OP_TYPE_RUNTIME_ARRAY and word_count >= 3 and inst[1] < bound:
+            runtime_array_element_by_id[inst[1]] = inst[2] if inst[2] < bound else -1
+        elif opcode == OP_TYPE_STRUCT and word_count >= 3 and inst[1] < bound:
+            struct_member0_by_id[inst[1]] = inst[2] if inst[2] < bound else -1
+            if word_count >= 4:
+                struct_member1_by_id[inst[1]] = inst[3] if inst[3] < bound else -1
+        elif opcode == OP_DECORATE and word_count >= 4 and inst[1] < bound:
+            if inst[2] == DECORATION_BINDING:
+                binding_by_id[inst[1]] = inst[3]
+            elif inst[2] == DECORATION_DESCRIPTOR_SET:
+                set_by_id[inst[1]] = inst[3]
+        elif opcode == OP_TYPE_POINTER and word_count >= 4 and inst[1] < bound:
+            pointer_storage_by_id[inst[1]] = inst[2]
+            pointer_pointee_by_id[inst[1]] = inst[3] if inst[3] < bound else -1
+        elif opcode == OP_VARIABLE and word_count >= 4 and inst[2] < bound:
+            result_type = inst[1]
+            if result_type < bound:
+                variable_pointer_type_by_id[inst[2]] = result_type
+                variable_storage_by_id[inst[2]] = pointer_storage_by_id[result_type]
+        elif opcode == OP_LOAD and word_count >= 4 and inst[3] < bound:
+            pointer_load_use_count[inst[3]] += 1
+    binding0_vars = [
+        obj_id for obj_id in range(bound)
+        if set_by_id[obj_id] == 0
+        and binding_by_id[obj_id] == 0
+        and variable_storage_by_id[obj_id] == STORAGE_CLASS_STORAGE_BUFFER
+    ]
+    if len(binding0_vars) != 2:
+        return None
+    uint8_types = [obj_id for obj_id, is_type in enumerate(is_uint8_type) if is_type]
+    uint16_types = [obj_id for obj_id, is_type in enumerate(is_uint16_type) if is_type]
+    if len(uint8_types) != 1 or len(uint16_types) != 1:
+        return None
+    uint8_type = uint8_types[0]
+    uint16_type = uint16_types[0]
 
-    The executor applies this before duplicate descriptor normalization.  It
-    rewrites exact ushort loads from the Q6 duplicate storage16 block view
-    (variable id 371) into two uchar loads from the byte-identical storage8
-    view (variable id 346), reconstructing the same little-endian ushort.
-    No descriptors, push constants, specialization values, dispatch dimensions,
-    or llama.cpp code are changed.
-    """
+    def first_two_element_types(var_id: int) -> tuple[int, int] | None:
+        ptr_type = variable_pointer_type_by_id[var_id]
+        if not (0 <= ptr_type < bound):
+            return None
+        wrapper_type = pointer_pointee_by_id[ptr_type]
+        if not (0 <= wrapper_type < bound):
+            return None
+        runtime_array = struct_member0_by_id[wrapper_type]
+        if not (0 <= runtime_array < bound):
+            return None
+        element_struct = runtime_array_element_by_id[runtime_array]
+        if not (0 <= element_struct < bound):
+            return None
+        member0 = struct_member0_by_id[element_struct]
+        member1 = struct_member1_by_id[element_struct]
+        if not (0 <= member0 < bound and 0 <= member1 < bound):
+            return None
+        elem0 = array_element_by_id[member0]
+        elem1 = array_element_by_id[member1]
+        if not (0 <= elem0 < bound and 0 <= elem1 < bound):
+            return None
+        return elem0, elem1
+
+    layout_byte_candidates = []
+    layout_ushort_candidates = []
+    for idx, var_id in enumerate(binding0_vars):
+        elems = first_two_element_types(var_id)
+        if elems == (uint8_type, uint8_type):
+            layout_byte_candidates.append(idx)
+        if elems == (uint16_type, uint16_type):
+            layout_ushort_candidates.append(idx)
+    if len(layout_byte_candidates) != 1 or len(layout_ushort_candidates) != 1:
+        return None
+    byte_var_index = layout_byte_candidates[0]
+    ushort_var_index = layout_ushort_candidates[0]
+    if byte_var_index == ushort_var_index:
+        return None
+
+    ushort_access_count = [0, 0]
+    ptr_byte_type = 0
+    for _, opcode, word_count, inst in iter_instructions(words):
+        if opcode not in (OP_ACCESS_CHAIN, OP_IN_BOUNDS_ACCESS_CHAIN) or word_count < 4:
+            continue
+        result_type, result_id, base = inst[1], inst[2], inst[3]
+        if result_type >= bound or result_id >= bound:
+            continue
+        try:
+            var_index = binding0_vars.index(base)
+        except ValueError:
+            continue
+        if pointer_storage_by_id[result_type] != STORAGE_CLASS_STORAGE_BUFFER:
+            continue
+        if pointer_load_use_count[result_id] <= 0:
+            continue
+        pointee = pointer_pointee_by_id[result_type]
+        if var_index == ushort_var_index and 0 <= pointee < bound and is_uint16_type[pointee]:
+            ushort_access_count[var_index] += 1
+        if var_index == byte_var_index and 0 <= pointee < bound and is_uint8_type[pointee]:
+            ptr_byte_type = result_type
+    return {
+        "storage8_var_id": binding0_vars[byte_var_index],
+        "storage16_var_id": binding0_vars[ushort_var_index],
+        "byte_type_id": uint8_type,
+        "ptr_byte_type_id": ptr_byte_type,
+    }
+
+
+def _spirv_count_id_uses(words: list[int], target_id: int, defining_instruction_index: int) -> int:
+    count = 0
+    for index, _, word_count, inst in iter_instructions(words):
+        for operand_index, operand in enumerate(inst[1:], start=1):
+            if index == defining_instruction_index and operand_index == 2:
+                continue
+            if operand == target_id:
+                count += 1
+    return count
+
+
+def lower_q6k_storage16_loads_to_storage8(words: list[int]) -> tuple[list[int], dict[str, Any]]:
+    """Mirror the executor's structural Q6 storage16 duplicate-view lowering."""
     OP_TYPE_INT = 21
     OP_TYPE_POINTER = 32
     OP_CONSTANT = 43
@@ -326,27 +475,39 @@ def lower_q6k_storage16_loads_to_storage8(words: list[int]) -> tuple[list[int], 
     OP_SHIFT_LEFT_LOGICAL = 196
     OP_BITWISE_OR = 197
     STORAGE_CLASS_STORAGE_BUFFER = 12
-    Q6_STORAGE8_VAR_ID = 346
-    Q6_STORAGE16_VAR_ID = 371
+    Q6_STORAGE16_EXPECTED_LOADS = 24
 
     if len(words) < 5 or words[0] != SPIRV_MAGIC:
         return list(words), {"phase": "q6-storage16-loads-lowered", "changed": False, "reason": "invalid-spv"}
     bound = words[3]
-    if bound <= Q6_STORAGE16_VAR_ID or bound > 65536:
+    if bound <= 0 or bound > 65536:
         return list(words), {"phase": "q6-storage16-loads-lowered", "changed": False, "reason": "id-bound-out-of-range"}
+    q6_shape = _find_q6k_duplicate_binding0_views(words)
+    if not q6_shape:
+        return list(words), {"phase": "q6-storage16-loads-lowered", "changed": False, "reason": "q6-duplicate-view-topology-not-found"}
+    q6_storage8_var_id = q6_shape["storage8_var_id"]
+    q6_storage16_var_id = q6_shape["storage16_var_id"]
+    structural_byte_type = q6_shape["byte_type_id"]
+    structural_ptr_byte_type = q6_shape["ptr_byte_type_id"]
 
     uint_type = uchar_type = ushort_type = 0
     ptr_ushort_type = ptr_uchar_type = 0
     uint_1 = uint_2 = uint_8 = 0
+    int32_type_ids: set[int] = set()
+    constant_value_by_id: dict[int, int] = {}
     uchar_type_end: int | None = None
+    first_function = 0
 
     for index, opcode, word_count, inst in iter_instructions(words):
         if opcode == 54:  # OpFunction
+            first_function = index
             break
         if opcode == OP_TYPE_INT and word_count >= 4:
+            if inst[2] == 32:
+                int32_type_ids.add(inst[1])
             if inst[2] == 32 and inst[3] == 0:
                 uint_type = inst[1]
-            elif inst[2] == 8 and inst[3] == 0:
+            elif inst[1] == structural_byte_type and inst[2] == 8:
                 uchar_type = inst[1]
                 uchar_type_end = index + word_count
             elif inst[2] == 16 and inst[3] == 0:
@@ -354,33 +515,44 @@ def lower_q6k_storage16_loads_to_storage8(words: list[int]) -> tuple[list[int], 
         elif opcode == OP_TYPE_POINTER and word_count >= 4 and inst[2] == STORAGE_CLASS_STORAGE_BUFFER:
             if ushort_type and inst[3] == ushort_type:
                 ptr_ushort_type = inst[1]
-            if uchar_type and inst[3] == uchar_type:
+            if inst[1] == structural_ptr_byte_type:
                 ptr_uchar_type = inst[1]
-        elif opcode == OP_CONSTANT and word_count >= 4 and uint_type and inst[1] == uint_type:
-            if inst[3] == 1:
-                uint_1 = inst[2]
-            elif inst[3] == 2:
-                uint_2 = inst[2]
-            elif inst[3] == 8:
-                uint_8 = inst[2]
+        elif opcode == OP_CONSTANT and word_count == 4:
+            if inst[1] in int32_type_ids:
+                constant_value_by_id[inst[2]] = inst[3]
+            if uint_type and inst[1] == uint_type:
+                if inst[3] == 1:
+                    uint_1 = inst[2]
+                elif inst[3] == 2:
+                    uint_2 = inst[2]
+                elif inst[3] == 8:
+                    uint_8 = inst[2]
 
-    if not all([uint_type, uchar_type, ushort_type, ptr_ushort_type, uint_1, uint_2, uint_8]) or uchar_type_end is None:
+    if not all([first_function, uint_type, uchar_type, ushort_type, ptr_ushort_type, uint_1, uint_2, uint_8]) or uchar_type_end is None:
         return list(words), {"phase": "q6-storage16-loads-lowered", "changed": False, "reason": "missing-required-types-or-constants"}
 
-    instructions = list(iter_instructions(words))
     pattern_count = 0
-    for pos, (index, opcode, word_count, inst) in enumerate(instructions):
+    for index, opcode, word_count, inst in iter_instructions(words):
         if opcode != OP_ACCESS_CHAIN or word_count != 8:
             continue
-        if inst[1] != ptr_ushort_type or inst[3] != Q6_STORAGE16_VAR_ID:
+        if inst[1] != ptr_ushort_type or inst[3] != q6_storage16_var_id:
             continue
-        if pos + 1 >= len(instructions):
+        member = inst[6]
+        if constant_value_by_id.get(member) not in (0, 1):
             continue
-        _, load_opcode, load_wc, load_inst = instructions[pos + 1]
-        if load_opcode == OP_LOAD and load_wc == 4 and load_inst[1] == ushort_type and load_inst[3] == inst[2]:
+        if _spirv_count_id_uses(words, inst[2], index) != 1:
+            continue
+        load_i = index + word_count
+        if load_i >= len(words):
+            continue
+        load_inst_word = words[load_i]
+        load_wc = load_inst_word >> 16
+        load_opcode = load_inst_word & 0xFFFF
+        load_inst = words[load_i:load_i + load_wc]
+        if load_wc == 4 and load_i + load_wc <= len(words) and load_opcode == OP_LOAD and load_inst[1] == ushort_type and load_inst[3] == inst[2]:
             pattern_count += 1
-    if pattern_count == 0 or pattern_count > 256:
-        return list(words), {"phase": "q6-storage16-loads-lowered", "changed": False, "pattern_count": pattern_count}
+    if pattern_count != Q6_STORAGE16_EXPECTED_LOADS:
+        return list(words), {"phase": "q6-storage16-loads-lowered", "changed": False, "pattern_count": pattern_count, "expected_count": Q6_STORAGE16_EXPECTED_LOADS}
 
     add_ptr_uchar_type = ptr_uchar_type == 0
     new_ptr_uchar_type = bound if add_ptr_uchar_type else ptr_uchar_type
@@ -401,13 +573,20 @@ def lower_q6k_storage16_loads_to_storage8(words: list[int]) -> tuple[list[int], 
         inst = words[i:i + word_count]
         if add_ptr_uchar_type and i == uchar_type_end:
             out += [(4 << 16) | OP_TYPE_POINTER, new_ptr_uchar_type, STORAGE_CLASS_STORAGE_BUFFER, uchar_type]
-        if opcode == OP_ACCESS_CHAIN and word_count == 8 and inst[1] == ptr_ushort_type and inst[3] == Q6_STORAGE16_VAR_ID and i + word_count < len(words):
+        if opcode == OP_ACCESS_CHAIN and word_count == 8 and inst[1] == ptr_ushort_type and inst[3] == q6_storage16_var_id:
+            member = inst[6]
             load_i = i + word_count
-            load_inst_word = words[load_i]
+            load_inst_word = words[load_i] if load_i < len(words) else 0
             load_wc = load_inst_word >> 16
             load_opcode = load_inst_word & 0xFFFF
             load_inst = words[load_i:load_i + load_wc]
-            if load_wc == 4 and load_i + load_wc <= len(words) and load_opcode == OP_LOAD and load_inst[1] == ushort_type and load_inst[3] == inst[2]:
+            if (constant_value_by_id.get(member) in (0, 1)
+                    and _spirv_count_id_uses(words, inst[2], i) == 1
+                    and load_wc == 4
+                    and load_i + load_wc <= len(words)
+                    and load_opcode == OP_LOAD
+                    and load_inst[1] == ushort_type
+                    and load_inst[3] == inst[2]):
                 index0, block, member, ushort_index = inst[4], inst[5], inst[6], inst[7]
                 load_result = load_inst[2]
                 b0_idx = next_id; next_id += 1
@@ -422,11 +601,11 @@ def lower_q6k_storage16_loads_to_storage8(words: list[int]) -> tuple[list[int], 
                 combined32 = next_id; next_id += 1
                 out += [
                     (5 << 16) | OP_I_MUL, uint_type, b0_idx, ushort_index, uint_2,
-                    (8 << 16) | OP_ACCESS_CHAIN, new_ptr_uchar_type, b0_ptr, Q6_STORAGE8_VAR_ID, index0, block, member, b0_idx,
+                    (8 << 16) | OP_ACCESS_CHAIN, new_ptr_uchar_type, b0_ptr, q6_storage8_var_id, index0, block, member, b0_idx,
                     (4 << 16) | OP_LOAD, uchar_type, b0_u8, b0_ptr,
                     (4 << 16) | OP_U_CONVERT, uint_type, b0_u32, b0_u8,
                     (5 << 16) | OP_I_ADD, uint_type, b1_idx, b0_idx, uint_1,
-                    (8 << 16) | OP_ACCESS_CHAIN, new_ptr_uchar_type, b1_ptr, Q6_STORAGE8_VAR_ID, index0, block, member, b1_idx,
+                    (8 << 16) | OP_ACCESS_CHAIN, new_ptr_uchar_type, b1_ptr, q6_storage8_var_id, index0, block, member, b1_idx,
                     (4 << 16) | OP_LOAD, uchar_type, b1_u8, b1_ptr,
                     (4 << 16) | OP_U_CONVERT, uint_type, b1_u32, b1_u8,
                     (5 << 16) | OP_SHIFT_LEFT_LOGICAL, uint_type, hi32, b1_u32, uint_8,
@@ -445,8 +624,11 @@ def lower_q6k_storage16_loads_to_storage8(words: list[int]) -> tuple[list[int], 
     return out, {
         "phase": "q6-storage16-loads-lowered",
         "changed": True,
+        "structural": True,
         "lowered_count": lowered,
         "pattern_count": pattern_count,
+        "storage8_var_id": q6_storage8_var_id,
+        "storage16_var_id": q6_storage16_var_id,
         "added_ptr_uchar_type": add_ptr_uchar_type,
     }
 
@@ -460,16 +642,23 @@ def lower_q6k_u32_to_u8vec4_bitcasts(words: list[int]) -> tuple[list[int], dict[
     OP_U_CONVERT = 113
     OP_SHIFT_RIGHT_LOGICAL = 194
     OP_COMPOSITE_CONSTRUCT = 80
+    Q6_U32_TO_U8VEC4_EXPECTED_BITCASTS = 16
     if len(words) < 5 or words[0] != SPIRV_MAGIC:
         return list(words), {"phase": "q6-u32-to-u8vec4-bitcasts-lowered", "changed": False, "reason": "invalid-spv"}
     bound = words[3]
+    if bound <= 0 or bound > 65536:
+        return list(words), {"phase": "q6-u32-to-u8vec4-bitcasts-lowered", "changed": False, "reason": "id-bound-out-of-range"}
+    q6_shape = _find_q6k_duplicate_binding0_views(words)
+    if not q6_shape:
+        return list(words), {"phase": "q6-u32-to-u8vec4-bitcasts-lowered", "changed": False, "reason": "q6-duplicate-view-topology-not-found"}
+    structural_byte_type = q6_shape["byte_type_id"]
     uint_type = uchar_type = uchar4_type = 0
     uint_8 = uint_16 = uint_24 = 0
     for _, opcode, word_count, inst in iter_instructions(words):
         if opcode == OP_TYPE_INT and word_count >= 4:
             if inst[2] == 32 and inst[3] == 0:
                 uint_type = inst[1]
-            elif inst[2] == 8 and inst[3] == 0:
+            elif inst[1] == structural_byte_type and inst[2] == 8 and inst[3] == 0:
                 uchar_type = inst[1]
         elif opcode == OP_TYPE_VECTOR and word_count >= 4 and uchar_type and inst[2] == uchar_type and inst[3] == 4:
             uchar4_type = inst[1]
@@ -482,12 +671,25 @@ def lower_q6k_u32_to_u8vec4_bitcasts(words: list[int]) -> tuple[list[int], dict[
                 uint_24 = inst[2]
     if not all([uint_type, uchar_type, uchar4_type, uint_8, uint_16, uint_24]):
         return list(words), {"phase": "q6-u32-to-u8vec4-bitcasts-lowered", "changed": False, "reason": "missing-required-types-or-constants"}
+    type_by_id = [0] * bound
+    for _, _, word_count, inst in iter_instructions(words):
+        if word_count >= 3 and inst[2] < bound and inst[1] in (uint_type, uchar_type, uchar4_type):
+            type_by_id[inst[2]] = inst[1]
     pattern_count = sum(
         1 for _, opcode, word_count, inst in iter_instructions(words)
-        if opcode == OP_BITCAST and word_count == 4 and inst[1] == uchar4_type
+        if opcode == OP_BITCAST
+        and word_count == 4
+        and inst[1] == uchar4_type
+        and inst[3] < bound
+        and type_by_id[inst[3]] == uint_type
     )
-    if pattern_count == 0 or pattern_count > 256:
-        return list(words), {"phase": "q6-u32-to-u8vec4-bitcasts-lowered", "changed": False, "pattern_count": pattern_count}
+    if pattern_count != Q6_U32_TO_U8VEC4_EXPECTED_BITCASTS:
+        return list(words), {
+            "phase": "q6-u32-to-u8vec4-bitcasts-lowered",
+            "changed": False,
+            "pattern_count": pattern_count,
+            "expected_count": Q6_U32_TO_U8VEC4_EXPECTED_BITCASTS,
+        }
     next_id = bound
     new_bound = bound + pattern_count * 7
     out = words[:5]
@@ -500,7 +702,7 @@ def lower_q6k_u32_to_u8vec4_bitcasts(words: list[int]) -> tuple[list[int], dict[
         if word_count == 0 or i + word_count > len(words):
             raise ValueError(f"truncated SPIR-V instruction at word {i}")
         inst = words[i:i + word_count]
-        if opcode == OP_BITCAST and word_count == 4 and inst[1] == uchar4_type:
+        if opcode == OP_BITCAST and word_count == 4 and inst[1] == uchar4_type and inst[3] < bound and type_by_id[inst[3]] == uint_type:
             result, source = inst[2], inst[3]
             b0 = next_id; next_id += 1
             s1 = next_id; next_id += 1
@@ -530,6 +732,7 @@ def lower_q6k_u32_to_u8vec4_bitcasts(words: list[int]) -> tuple[list[int], dict[
     return out, {
         "phase": "q6-u32-to-u8vec4-bitcasts-lowered",
         "changed": True,
+        "structural": True,
         "lowered_count": lowered,
         "pattern_count": pattern_count,
     }
