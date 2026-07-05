@@ -10283,6 +10283,43 @@ class GpuAbiContractTest(unittest.TestCase):
         bind_body = source.split("VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(", 1)[1].split("VKAPI_ATTR void VKAPI_CALL vkCmdDispatch(", 1)[0]
         self.assertNotIn("dynamic descriptor with VK_WHOLE_SIZE is unsupported", bind_body)
 
+    def test_vulkan_dynamic_descriptor_offsets_follow_advertised_alignment(self):
+        icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
+
+        for marker in [
+            "#define PDOCKER_VK_MIN_STORAGE_BUFFER_OFFSET_ALIGNMENT 16ull",
+            "#define PDOCKER_VK_MIN_UNIFORM_BUFFER_OFFSET_ALIGNMENT 16ull",
+            "minStorageBufferOffsetAlignment = PDOCKER_VK_MIN_STORAGE_BUFFER_OFFSET_ALIGNMENT",
+            "minUniformBufferOffsetAlignment = PDOCKER_VK_MIN_UNIFORM_BUFFER_OFFSET_ALIGNMENT",
+        ]:
+            self.assertIn(marker, icd)
+        self.assertIn("descriptor_dynamic_offset_alignment", icd)
+        bind_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets", 1)[1].split(
+            "static void validate_bound_descriptor_layouts_before_dispatch", 1
+        )[0]
+        self.assertIn("descriptor_dynamic_offset_alignment(dynamic_descriptor_type)", bind_body)
+        self.assertIn("pDynamicOffsets[dynamic_index] % required_alignment", bind_body)
+        self.assertIn("dynamic descriptor offset misaligned", bind_body)
+
+        for marker in [
+            "#define PDOCKER_GPU_MIN_STORAGE_BUFFER_OFFSET_ALIGNMENT 16ull",
+            "#define PDOCKER_GPU_MIN_UNIFORM_BUFFER_OFFSET_ALIGNMENT 16ull",
+            "vulkan_descriptor_dynamic_offset_alignment_from_api",
+        ]:
+            self.assertIn(marker, executor)
+        validate_body = c_function_body(executor, "validate_vulkan_descriptor_dynamic_offset_alignment")
+        self.assertIn("dynamic_offset == 0 ? 0 : -EPROTO", validate_body)
+        self.assertIn("alignment <= 1", validate_body)
+        self.assertIn("dynamic_offset % alignment", validate_body)
+        self.assertIn(": -EINVAL", validate_body)
+
+        generic_body = c_function_body(executor, "convert_vulkan_dispatch_v5_to_v4_bindings")
+        self.assertIn("validate_vulkan_descriptor_dynamic_offset_alignment(", generic_body)
+        graphics_body = c_function_body(executor, "vulkan_graphics_v61_descriptor_dynamic_offset")
+        self.assertIn("validate_vulkan_descriptor_dynamic_offset_alignment(", graphics_body)
+        self.assertIn("*out_dynamic_offset = 0;", graphics_body)
+
     def test_vulkan_graphics_v61_icd_validates_descriptor_dynamic_offsets_against_command_table(self):
         icd = VULKAN_ICD.read_text()
         self.assertIn("validate_graphics_descriptor_dynamic_offset_fidelity", icd)
@@ -10323,7 +10360,7 @@ class GpuAbiContractTest(unittest.TestCase):
         helper = c_function_body(executor, "vulkan_graphics_v61_descriptor_dynamic_offset")
         for marker in [
             "PDOCKER_GPU_V5_DESCRIPTOR_FLAG_DYNAMIC",
-            "descriptor->dynamic_offset != 0",
+            "validate_vulkan_descriptor_dynamic_offset_alignment",
             "dynamic_descriptor_ordinal >= command->dynamic_offset_count",
             "command->first_dynamic_offset + dynamic_descriptor_ordinal",
             "entry->reserved0 != 0",

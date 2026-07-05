@@ -63,6 +63,8 @@
 #define PDOCKER_GPU_WRITEONLY_DIRTY_PROBE_DEFAULT_MIN_BYTES (16u * 1024u * 1024u)
 #define PDOCKER_GPU_WRITEBACK_FULL_HASH_DEFAULT_MAX_BYTES (64u * 1024u * 1024u)
 #define PDOCKER_GPU_WRITEONLY_DIRTY_PROBE_SENTINEL 0xA5u
+#define PDOCKER_GPU_MIN_STORAGE_BUFFER_OFFSET_ALIGNMENT 16ull
+#define PDOCKER_GPU_MIN_UNIFORM_BUFFER_OFFSET_ALIGNMENT 16ull
 
 #define PDOCKER_VK_FEATURE_SHADER_INT64                 (1ull << 0)
 #define PDOCKER_VK_FEATURE_STORAGE_BUFFER_16            (1ull << 3)
@@ -984,6 +986,40 @@ static int vulkan_descriptor_type_requires_image_view(VkDescriptorType type) {
 static int vulkan_descriptor_type_requires_sampler(VkDescriptorType type) {
     return type == VK_DESCRIPTOR_TYPE_SAMPLER ||
            type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+}
+
+static int vulkan_descriptor_dynamic_offset_alignment_from_api(
+        uint32_t api_descriptor_type,
+        uint64_t *alignment_out) {
+    if (!alignment_out) return -EINVAL;
+    switch ((VkDescriptorType)api_descriptor_type) {
+        case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC:
+            *alignment_out = PDOCKER_GPU_MIN_STORAGE_BUFFER_OFFSET_ALIGNMENT;
+            return 0;
+        case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
+            *alignment_out = PDOCKER_GPU_MIN_UNIFORM_BUFFER_OFFSET_ALIGNMENT;
+            return 0;
+        case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+        case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
+            *alignment_out = 1;
+            return 0;
+        default:
+            return -EOPNOTSUPP;
+    }
+}
+
+static int validate_vulkan_descriptor_dynamic_offset_alignment(
+        uint32_t api_descriptor_type,
+        int descriptor_is_dynamic,
+        uint64_t dynamic_offset) {
+    uint64_t alignment = 1;
+    int rc = vulkan_descriptor_dynamic_offset_alignment_from_api(api_descriptor_type, &alignment);
+    if (rc != 0) return rc;
+    if (!descriptor_is_dynamic) {
+        return dynamic_offset == 0 ? 0 : -EPROTO;
+    }
+    if (alignment <= 1) return -EPROTO;
+    return (dynamic_offset % alignment) == 0 ? 0 : -EINVAL;
 }
 
 static int vulkan_image_descriptor_read_only_layout_valid(VkImageLayout layout) {
@@ -20302,6 +20338,11 @@ static int convert_vulkan_dispatch_v5_to_v4_bindings(
         if (vulkan_dispatch_descriptor_type_from_api(d->descriptor_type, &descriptor_type) != 0) {
             return -EOPNOTSUPP;
         }
+        int dynamic_alignment_rc = validate_vulkan_descriptor_dynamic_offset_alignment(
+            d->descriptor_type,
+            (d->descriptor_flags & PDOCKER_GPU_V5_DESCRIPTOR_FLAG_DYNAMIC) != 0,
+            d->dynamic_offset);
+        if (dynamic_alignment_rc != 0) return dynamic_alignment_rc;
         (void)descriptor_type;
         if (d->resource_id != 0 && d->resource_id != buffer->resource_id) {
             return -EPROTO;
@@ -21976,9 +22017,11 @@ static int vulkan_graphics_v61_descriptor_dynamic_offset(
     if (!view || !command || !descriptor || !out_dynamic_offset) return -EINVAL;
     const int descriptor_is_dynamic =
         (descriptor->descriptor_flags & PDOCKER_GPU_V5_DESCRIPTOR_FLAG_DYNAMIC) != 0;
+    int alignment_rc = validate_vulkan_descriptor_dynamic_offset_alignment(
+        descriptor->descriptor_type, descriptor_is_dynamic, descriptor->dynamic_offset);
+    if (alignment_rc != 0) return alignment_rc;
     if (!descriptor_is_dynamic) {
-        if (view->is_v61 && descriptor->dynamic_offset != 0) return -EPROTO;
-        *out_dynamic_offset = descriptor->dynamic_offset;
+        *out_dynamic_offset = 0;
         return 0;
     }
     if (!view->is_v61) {

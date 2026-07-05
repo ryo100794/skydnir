@@ -215,6 +215,8 @@ PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_swapchain, VkSwa
 #define PDOCKER_VK_MAX_SPECIALIZATION_ENTRIES 16
 #define PDOCKER_VK_MAX_SPECIALIZATION_BYTES 256
 #define PDOCKER_VK_REQUIREMENT_ALIGNMENT 16ull
+#define PDOCKER_VK_MIN_STORAGE_BUFFER_OFFSET_ALIGNMENT 16ull
+#define PDOCKER_VK_MIN_UNIFORM_BUFFER_OFFSET_ALIGNMENT 16ull
 #define PDOCKER_VK_MAX_COPY_OPS 64
 #define PDOCKER_VK_MAX_DISPATCH_OPS 128
 #define PDOCKER_VK_MAX_COMMAND_OPS 256
@@ -11208,8 +11210,8 @@ static void fill_physical_device_properties(VkPhysicalDeviceProperties *pPropert
         caps->limits.maxDescriptorSetStorageBuffers < PDOCKER_VK_MAX_STORAGE_BUFFERS
             ? caps->limits.maxDescriptorSetStorageBuffers
             : PDOCKER_VK_MAX_STORAGE_BUFFERS;
-    pProperties->limits.minStorageBufferOffsetAlignment = 16;
-    pProperties->limits.minUniformBufferOffsetAlignment = 16;
+    pProperties->limits.minStorageBufferOffsetAlignment = PDOCKER_VK_MIN_STORAGE_BUFFER_OFFSET_ALIGNMENT;
+    pProperties->limits.minUniformBufferOffsetAlignment = PDOCKER_VK_MIN_UNIFORM_BUFFER_OFFSET_ALIGNMENT;
     pProperties->limits.minMemoryMapAlignment = 64;
     pProperties->limits.nonCoherentAtomSize = 64;
     pProperties->limits.timestampComputeAndGraphics = VK_TRUE;
@@ -14489,6 +14491,17 @@ static bool descriptor_type_supported_by_v5_object_transport(VkDescriptorType ty
 static bool descriptor_type_is_dynamic(VkDescriptorType type) {
     return type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC ||
            type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+}
+
+static VkDeviceSize descriptor_dynamic_offset_alignment(VkDescriptorType type) {
+    switch (type) {
+        case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC:
+            return PDOCKER_VK_MIN_STORAGE_BUFFER_OFFSET_ALIGNMENT;
+        case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
+            return PDOCKER_VK_MIN_UNIFORM_BUFFER_OFFSET_ALIGNMENT;
+        default:
+            return 1;
+    }
 }
 
 static bool descriptor_slot_object_matches_type(
@@ -19074,8 +19087,26 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
                         }
                     }
                     if (dynamic_index < dynamicOffsetCount && pDynamicOffsets) {
-                        if ((VkDeviceSize)pDynamicOffsets[dynamic_index] >
-                            (VkDeviceSize)(UINT64_MAX - slot->base_offset)) {
+                        VkDescriptorType dynamic_descriptor_type = expected_layout
+                            ? expected_layout->storage_binding_types[binding]
+                            : slot->descriptor_type;
+                        VkDeviceSize required_alignment =
+                            descriptor_dynamic_offset_alignment(dynamic_descriptor_type);
+                        if (required_alignment > 1 &&
+                            ((VkDeviceSize)pDynamicOffsets[dynamic_index] % required_alignment) != 0) {
+                            cmd->unsupported_descriptor_set_layout = true;
+                            if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
+                                fprintf(stderr,
+                                        "pdocker-vulkan-icd: dynamic descriptor offset misaligned set=%u binding=%u array=%u type=%u add=%u alignment=%llu\n",
+                                        target_set,
+                                        binding,
+                                        array_element,
+                                        dynamic_descriptor_type,
+                                        pDynamicOffsets[dynamic_index],
+                                        (unsigned long long)required_alignment);
+                            }
+                        } else if ((VkDeviceSize)pDynamicOffsets[dynamic_index] >
+                                   (VkDeviceSize)(UINT64_MAX - slot->base_offset)) {
                             cmd->unsupported_descriptor_set_layout = true;
                             if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
                                 fprintf(stderr,
