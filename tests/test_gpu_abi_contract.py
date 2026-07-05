@@ -5123,6 +5123,36 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, executor)
 
+        icd = VULKAN_ICD.read_text()
+        for marker in [
+            "uint64_t layout_id;",
+            "bool storage_binding_present[PDOCKER_VK_MAX_STORAGE_BUFFERS]",
+            "layout->layout_id = next_vulkan_object_generation()",
+            "layout->storage_binding_present[binding->binding] = true",
+            "collect_graphics_v624_layout_metadata",
+            "PdockerGpuVulkanGraphicsV624FrameHeader *frame_header_v624",
+            "sizeof(PdockerGpuVulkanGraphicsV624FrameHeader)",
+            "PdockerGpuVulkanGraphicsV624DescriptorSetLayoutEntry descriptor_set_layouts",
+            "PdockerGpuVulkanGraphicsV624PipelineLayoutSetEntry pipeline_layout_sets",
+            "need_v624_layout_metadata",
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V624_ABI_MINOR",
+            "frame_header_v624->v624.descriptor_set_layout_count",
+            "frame_header_v624->v624.pipeline_layout_count",
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V624_DESCRIPTOR_SET_LAYOUT_SCHEMA_HASH",
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V624_PIPELINE_LAYOUT_SET_SCHEMA_HASH",
+            "APPEND_GRAPHICS_TABLE(descriptor_set_layouts, descriptor_set_layout_count",
+            "APPEND_GRAPHICS_TABLE(pipeline_layout_sets, pipeline_layout_set_count",
+            "frame_header_v624->v624.descriptor_set_layout_table_hash",
+            "frame_header_v624->v624.pipeline_layout_table_hash",
+            "VULKAN_GRAPHICS_V6.24",
+            "candidate.layout_id = layout->layout_id",
+            "candidate.pipeline_layout_id = layout->layout_id",
+            "candidate.descriptor_set_layout_id = set_layout->layout_id",
+            "find_graphics_v624_descriptor_set_layout_entry",
+            "find_graphics_v624_pipeline_layout_set_entry",
+        ]:
+            self.assertIn(marker, icd)
+
     def test_vulkan_graphics_v6_field_macros_match_packed_structs(self):
         schemas = [
             (
@@ -8731,7 +8761,7 @@ class GpuAbiContractTest(unittest.TestCase):
         for marker in [
             "PdockerGpuVulkanGraphicsV623TessellationStateEntry tessellation_states[PDOCKER_GPU_VULKAN_GRAPHICS_V623_MAX_TESSELLATION_STATES]",
             "PdockerGpuVulkanGraphicsV623FrameHeader *frame_header_v623",
-            "sizeof(PdockerGpuVulkanGraphicsV623FrameHeader)",
+            "sizeof(*frame_header_v623)",
             "need_v623_tessellation_state",
             "PDOCKER_GPU_VULKAN_GRAPHICS_V623_ABI_MINOR",
             "frame_header_v623->v623.tessellation_state_count",

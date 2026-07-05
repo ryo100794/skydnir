@@ -208,6 +208,12 @@ PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_swapchain, VkSwa
 #define PDOCKER_VK_MAX_STORAGE_BUFFERS 16
 #define PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS PDOCKER_VK_MAX_STORAGE_BUFFERS
 #define PDOCKER_VK_MAX_DESCRIPTOR_SETS 8
+#ifndef PDOCKER_GPU_MAX_VULKAN_BINDINGS
+#define PDOCKER_GPU_MAX_VULKAN_BINDINGS PDOCKER_VK_MAX_STORAGE_BUFFERS
+#endif
+#ifndef PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS
+#define PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS PDOCKER_VK_MAX_DESCRIPTOR_SETS
+#endif
 #define PDOCKER_VK_MAX_PUSH_BYTES 256
 #define PDOCKER_VK_MAX_PUSH_CONSTANT_RANGES 8
 #define PDOCKER_VK_MAX_PUSH_CONSTANT_OPS 64
@@ -467,7 +473,9 @@ struct PdockerVkDescriptorBinding {
 };
 
 struct PdockerVkDescriptorSetLayout {
+    uint64_t layout_id;
     uint32_t storage_binding_count;
+    bool storage_binding_present[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     VkDescriptorType storage_binding_types[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     uint32_t storage_binding_counts[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     VkShaderStageFlags storage_binding_stage_flags[PDOCKER_VK_MAX_STORAGE_BUFFERS];
@@ -4201,6 +4209,185 @@ static bool normalize_image_subresource_range(
         const VkImageSubresourceRange *range,
         VkImageSubresourceRange *out);
 
+static int find_graphics_v624_descriptor_set_layout_entry(
+        const PdockerGpuVulkanGraphicsV624DescriptorSetLayoutEntry *entries,
+        size_t count,
+        uint64_t layout_id,
+        uint32_t binding) {
+    for (size_t i = 0; i < count; ++i) {
+        if (entries[i].layout_id == layout_id && entries[i].binding == binding) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+static int find_graphics_v624_pipeline_layout_set_entry(
+        const PdockerGpuVulkanGraphicsV624PipelineLayoutSetEntry *entries,
+        size_t count,
+        uint64_t pipeline_layout_id,
+        uint32_t set_index) {
+    for (size_t i = 0; i < count; ++i) {
+        if (entries[i].pipeline_layout_id == pipeline_layout_id &&
+            entries[i].set_index == set_index) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+static bool graphics_v624_descriptor_layout_entries_equal(
+        const PdockerGpuVulkanGraphicsV624DescriptorSetLayoutEntry *a,
+        const PdockerGpuVulkanGraphicsV624DescriptorSetLayoutEntry *b) {
+    return a && b &&
+           a->layout_id == b->layout_id &&
+           a->binding == b->binding &&
+           a->descriptor_type == b->descriptor_type &&
+           a->descriptor_count == b->descriptor_count &&
+           a->stage_flags == b->stage_flags &&
+           a->binding_flags == b->binding_flags &&
+           a->immutable_sampler_count == b->immutable_sampler_count &&
+           a->reserved0 == b->reserved0;
+}
+
+static bool graphics_v624_pipeline_layout_set_entries_equal(
+        const PdockerGpuVulkanGraphicsV624PipelineLayoutSetEntry *a,
+        const PdockerGpuVulkanGraphicsV624PipelineLayoutSetEntry *b) {
+    return a && b &&
+           a->pipeline_layout_id == b->pipeline_layout_id &&
+           a->set_index == b->set_index &&
+           a->reserved0 == b->reserved0 &&
+           a->descriptor_set_layout_id == b->descriptor_set_layout_id;
+}
+
+static int collect_graphics_v624_descriptor_set_layout_metadata(
+        PdockerGpuVulkanGraphicsV624DescriptorSetLayoutEntry *entries,
+        size_t *entry_count,
+        const PdockerVkDescriptorSetLayout *layout) {
+    if (!entries || !entry_count || !layout) return -EINVAL;
+    if (layout->layout_id == 0 ||
+        layout->storage_binding_count > PDOCKER_VK_MAX_STORAGE_BUFFERS) {
+        return -EPROTO;
+    }
+    if (layout->unsupported_descriptor_array || layout->unsupported_descriptor_type) {
+        return -EOPNOTSUPP;
+    }
+    for (uint32_t binding = 0; binding < layout->storage_binding_count; ++binding) {
+        if (!layout->storage_binding_present[binding]) continue;
+        VkDescriptorType descriptor_type = layout->storage_binding_types[binding];
+        if (!descriptor_type_supported_by_v4_transport(descriptor_type) &&
+            !descriptor_type_supported_by_v5_object_transport(descriptor_type)) {
+            return -EOPNOTSUPP;
+        }
+        uint32_t descriptor_count = layout->storage_binding_counts[binding];
+        if (descriptor_count > PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS ||
+            descriptor_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS) {
+            return -E2BIG;
+        }
+        uint32_t immutable_sampler_count = 0;
+        if (descriptor_type_requires_sampler(descriptor_type)) {
+            for (uint32_t array_element = 0; array_element < descriptor_count; ++array_element) {
+                if (layout->immutable_sampler_valid[binding][array_element]) {
+                    immutable_sampler_count++;
+                }
+            }
+        }
+        if (immutable_sampler_count != 0) {
+            /* V6.24 transports layout shape, not immutable sampler payloads. */
+            return -EOPNOTSUPP;
+        }
+        PdockerGpuVulkanGraphicsV624DescriptorSetLayoutEntry candidate;
+        memset(&candidate, 0, sizeof(candidate));
+        candidate.layout_id = layout->layout_id;
+        candidate.binding = binding;
+        candidate.descriptor_type = (uint32_t)descriptor_type;
+        candidate.descriptor_count = descriptor_count;
+        candidate.stage_flags = layout->storage_binding_stage_flags[binding];
+        candidate.binding_flags = 0;
+        candidate.immutable_sampler_count = immutable_sampler_count;
+        int existing = find_graphics_v624_descriptor_set_layout_entry(
+            entries, *entry_count, candidate.layout_id, candidate.binding);
+        if (existing >= 0) {
+            if (!graphics_v624_descriptor_layout_entries_equal(
+                    &entries[existing], &candidate)) {
+                return -EPROTO;
+            }
+            continue;
+        }
+        if (*entry_count >= PDOCKER_GPU_VULKAN_GRAPHICS_V624_MAX_DESCRIPTOR_SET_LAYOUT_BINDINGS) {
+            return -E2BIG;
+        }
+        entries[(*entry_count)++] = candidate;
+    }
+    return 0;
+}
+
+static int collect_graphics_v624_pipeline_layout_metadata(
+        PdockerGpuVulkanGraphicsV624DescriptorSetLayoutEntry *descriptor_set_layouts,
+        size_t *descriptor_set_layout_count,
+        PdockerGpuVulkanGraphicsV624PipelineLayoutSetEntry *pipeline_layout_sets,
+        size_t *pipeline_layout_set_count,
+        const PdockerVkPipelineLayout *layout) {
+    if (!descriptor_set_layouts || !descriptor_set_layout_count ||
+        !pipeline_layout_sets || !pipeline_layout_set_count || !layout) {
+        return -EINVAL;
+    }
+    if (layout->layout_id == 0 || layout->set_layout_count > PDOCKER_VK_MAX_DESCRIPTOR_SETS) {
+        return -EPROTO;
+    }
+    if (layout->unsupported_set_layout_count) return -EOPNOTSUPP;
+    for (uint32_t set_index = 0; set_index < layout->set_layout_count; ++set_index) {
+        const PdockerVkDescriptorSetLayout *set_layout = layout->set_layouts[set_index];
+        if (!set_layout || set_layout->layout_id == 0) return -EPROTO;
+        int rc = collect_graphics_v624_descriptor_set_layout_metadata(
+            descriptor_set_layouts, descriptor_set_layout_count, set_layout);
+        if (rc != 0) return rc;
+        PdockerGpuVulkanGraphicsV624PipelineLayoutSetEntry candidate;
+        memset(&candidate, 0, sizeof(candidate));
+        candidate.pipeline_layout_id = layout->layout_id;
+        candidate.set_index = set_index;
+        candidate.descriptor_set_layout_id = set_layout->layout_id;
+        int existing = find_graphics_v624_pipeline_layout_set_entry(
+            pipeline_layout_sets, *pipeline_layout_set_count,
+            candidate.pipeline_layout_id, candidate.set_index);
+        if (existing >= 0) {
+            if (!graphics_v624_pipeline_layout_set_entries_equal(
+                    &pipeline_layout_sets[existing], &candidate)) {
+                return -EPROTO;
+            }
+            continue;
+        }
+        if (*pipeline_layout_set_count >= PDOCKER_GPU_VULKAN_GRAPHICS_V624_MAX_PIPELINE_LAYOUT_SETS) {
+            return -E2BIG;
+        }
+        pipeline_layout_sets[(*pipeline_layout_set_count)++] = candidate;
+    }
+    return 0;
+}
+
+static int collect_graphics_v624_layout_metadata(
+        PdockerGpuVulkanGraphicsV624DescriptorSetLayoutEntry *descriptor_set_layouts,
+        size_t *descriptor_set_layout_count,
+        PdockerGpuVulkanGraphicsV624PipelineLayoutSetEntry *pipeline_layout_sets,
+        size_t *pipeline_layout_set_count,
+        PdockerVkPipeline *const *pipeline_objects,
+        size_t pipeline_count) {
+    if (!descriptor_set_layouts || !descriptor_set_layout_count ||
+        !pipeline_layout_sets || !pipeline_layout_set_count || !pipeline_objects) {
+        return -EINVAL;
+    }
+    for (size_t i = 0; i < pipeline_count; ++i) {
+        const PdockerVkPipeline *pipeline = pipeline_objects[i];
+        if (!pipeline || !pipeline->layout) continue;
+        int rc = collect_graphics_v624_pipeline_layout_metadata(
+            descriptor_set_layouts, descriptor_set_layout_count,
+            pipeline_layout_sets, pipeline_layout_set_count,
+            pipeline->layout);
+        if (rc != 0) return rc;
+    }
+    return 0;
+}
+
 static int collect_graphics_image_entry(
         PdockerGpuVulkanDispatchV5ImageEntry *image_entries,
         PdockerVkImage **image_objects,
@@ -5052,6 +5239,8 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     PdockerGpuVulkanGraphicsV621SubmitSyncInfoEntry submit_sync_infos[PDOCKER_GPU_VULKAN_GRAPHICS_V621_MAX_SUBMIT_SYNC_INFOS];
     PdockerGpuVulkanGraphicsV622MultisampleStateEntry multisample_states[PDOCKER_GPU_VULKAN_GRAPHICS_V622_MAX_MULTISAMPLE_STATES];
     PdockerGpuVulkanGraphicsV623TessellationStateEntry tessellation_states[PDOCKER_GPU_VULKAN_GRAPHICS_V623_MAX_TESSELLATION_STATES];
+    PdockerGpuVulkanGraphicsV624DescriptorSetLayoutEntry descriptor_set_layouts[PDOCKER_GPU_VULKAN_GRAPHICS_V624_MAX_DESCRIPTOR_SET_LAYOUT_BINDINGS];
+    PdockerGpuVulkanGraphicsV624PipelineLayoutSetEntry pipeline_layout_sets[PDOCKER_GPU_VULKAN_GRAPHICS_V624_MAX_PIPELINE_LAYOUT_SETS];
     int fds[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS];
     memset(pipeline_objects, 0, sizeof(pipeline_objects));
     memset(memory_objects, 0, sizeof(memory_objects));
@@ -5108,6 +5297,8 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     memset(submit_sync_infos, 0, sizeof(submit_sync_infos));
     memset(multisample_states, 0, sizeof(multisample_states));
     memset(tessellation_states, 0, sizeof(tessellation_states));
+    memset(descriptor_set_layouts, 0, sizeof(descriptor_set_layouts));
+    memset(pipeline_layout_sets, 0, sizeof(pipeline_layout_sets));
     if (submit_sync_count > PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS) {
         close(socket_fd);
         return -E2BIG;
@@ -5236,6 +5427,8 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
         close(socket_fd);
         return -ENOMEM;
     }
+    PdockerGpuVulkanGraphicsV624FrameHeader *frame_header_v624 =
+        (PdockerGpuVulkanGraphicsV624FrameHeader *)frame;
     PdockerGpuVulkanGraphicsV623FrameHeader *frame_header_v623 =
         (PdockerGpuVulkanGraphicsV623FrameHeader *)frame;
     PdockerGpuVulkanGraphicsV622FrameHeader *frame_header_v622 =
@@ -5289,7 +5482,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
      * largest known header before appending variable payloads so a later ABI
      * upgrade cannot overlap data already written into the frame.
      */
-    size_t cursor = sizeof(PdockerGpuVulkanGraphicsV623FrameHeader);
+    size_t cursor = sizeof(PdockerGpuVulkanGraphicsV624FrameHeader);
     size_t fd_count = 0;
     size_t resource_count = 0;
     size_t descriptor_count = 0;
@@ -5336,6 +5529,8 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     size_t copy_query_result_count = 0;
     size_t multisample_state_count = 0;
     size_t tessellation_state_count = 0;
+    size_t descriptor_set_layout_count = 0;
+    size_t pipeline_layout_set_count = 0;
     uint64_t update_payload_data_offset = 0;
     uint64_t update_payload_data_size = 0;
     bool need_v62_specialization = false;
@@ -5357,6 +5552,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     bool need_v618_copy_query = pre_need_v618_copy_query;
     bool need_v622_multisample_state = false;
     bool need_v623_tessellation_state = false;
+    bool need_v624_layout_metadata = false;
     uint64_t submit_id = __sync_add_and_fetch(&g_generic_dispatch_sequence, 1);
     int rc = 0;
     frame_build_phase = "pipeline-collect";
@@ -5747,6 +5943,14 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
             fnv1a64_bytes(pipeline_entry, sizeof(*pipeline_entry));
         pipeline_objects[pipeline_count++] = pipeline;
     }
+
+    frame_build_phase = "layout-metadata-collect";
+    rc = collect_graphics_v624_layout_metadata(
+        descriptor_set_layouts, &descriptor_set_layout_count,
+        pipeline_layout_sets, &pipeline_layout_set_count,
+        pipeline_objects, pipeline_count);
+    if (rc != 0) goto cleanup;
+    need_v624_layout_metadata = descriptor_set_layout_count > 0 || pipeline_layout_set_count > 0;
 
     frame_build_phase = "dynamic-state-collect";
     for (uint32_t i = 0; i < cmd->dynamic_state_count; ++i) {
@@ -6955,6 +7159,14 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     if (rc != 0) goto cleanup;
     bool need_v620_image_layout_range = image_layout_range_count > 0;
     bool need_v621_submit2_metadata = submit_info_count > 0 || submit_sync_info_count > 0;
+    if (need_v624_layout_metadata) {
+        /* V6.24 is append-only after V6.23, so populate V6.19/V6.20/V6.21/V6.22/V6.23 prefixes too. */
+        need_v623_tessellation_state = true;
+        need_v622_multisample_state = true;
+        need_v621_submit2_metadata = true;
+        need_v620_image_layout_range = true;
+        need_v619_submit_sync = true;
+    }
     if (need_v623_tessellation_state) {
         /* V6.23 is append-only after V6.22, so populate V6.19/V6.20/V6.21/V6.22 prefixes too. */
         need_v622_multisample_state = true;
@@ -6978,7 +7190,10 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     }
 
     memcpy(header->magic, PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAGIC, 8);
-    if (need_v623_tessellation_state) {
+    if (need_v624_layout_metadata) {
+        header->header_size = sizeof(*frame_header_v624);
+        header->abi_minor = PDOCKER_GPU_VULKAN_GRAPHICS_V624_ABI_MINOR;
+    } else if (need_v623_tessellation_state) {
         header->header_size = sizeof(*frame_header_v623);
         header->abi_minor = PDOCKER_GPU_VULKAN_GRAPHICS_V623_ABI_MINOR;
     } else if (need_v622_multisample_state) {
@@ -7250,6 +7465,14 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
         frame_header_v623->v623.tessellation_state_entry_size = sizeof(PdockerGpuVulkanGraphicsV623TessellationStateEntry);
         frame_header_v623->v623.tessellation_state_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V623_TESSELLATION_STATE_SCHEMA_HASH;
     }
+    if (need_v624_layout_metadata) {
+        frame_header_v624->v624.descriptor_set_layout_count = (uint32_t)descriptor_set_layout_count;
+        frame_header_v624->v624.descriptor_set_layout_entry_size = sizeof(PdockerGpuVulkanGraphicsV624DescriptorSetLayoutEntry);
+        frame_header_v624->v624.descriptor_set_layout_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V624_DESCRIPTOR_SET_LAYOUT_SCHEMA_HASH;
+        frame_header_v624->v624.pipeline_layout_count = (uint32_t)pipeline_layout_set_count;
+        frame_header_v624->v624.pipeline_layout_entry_size = sizeof(PdockerGpuVulkanGraphicsV624PipelineLayoutSetEntry);
+        frame_header_v624->v624.pipeline_layout_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V624_PIPELINE_LAYOUT_SET_SCHEMA_HASH;
+    }
 
     frame_build_phase = "frame-append-tables";
 #define APPEND_GRAPHICS_TABLE(data_, count_, entry_size_, offset_field_, size_field_) \
@@ -7469,6 +7692,16 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
                               frame_header_v623->v623.tessellation_state_table_offset,
                               frame_header_v623->v623.tessellation_state_table_size);
     }
+    if (need_v624_layout_metadata) {
+        APPEND_GRAPHICS_TABLE(descriptor_set_layouts, descriptor_set_layout_count,
+                              sizeof(descriptor_set_layouts[0]),
+                              frame_header_v624->v624.descriptor_set_layout_table_offset,
+                              frame_header_v624->v624.descriptor_set_layout_table_size);
+        APPEND_GRAPHICS_TABLE(pipeline_layout_sets, pipeline_layout_set_count,
+                              sizeof(pipeline_layout_sets[0]),
+                              frame_header_v624->v624.pipeline_layout_table_offset,
+                              frame_header_v624->v624.pipeline_layout_table_size);
+    }
 #undef APPEND_GRAPHICS_TABLE
     frame_header->v61.extension_hash = 1469598103934665603ull;
     frame_header->v61.extension_hash = fnv1a64_update_bytes(
@@ -7662,6 +7895,19 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
             tessellation_states, (size_t)frame_header_v623->v623.tessellation_state_table_size);
         frame_header_v623->v623.extension_hash = frame_header_v623->v623.tessellation_state_table_hash;
     }
+    if (need_v624_layout_metadata) {
+        frame_header_v624->v624.descriptor_set_layout_table_hash = fnv1a64_bytes(
+            descriptor_set_layouts, (size_t)frame_header_v624->v624.descriptor_set_layout_table_size);
+        frame_header_v624->v624.pipeline_layout_table_hash = fnv1a64_bytes(
+            pipeline_layout_sets, (size_t)frame_header_v624->v624.pipeline_layout_table_size);
+        frame_header_v624->v624.extension_hash = 1469598103934665603ull;
+        frame_header_v624->v624.extension_hash = fnv1a64_update_bytes(
+            frame_header_v624->v624.extension_hash, descriptor_set_layouts,
+            (size_t)frame_header_v624->v624.descriptor_set_layout_table_size);
+        frame_header_v624->v624.extension_hash = fnv1a64_update_bytes(
+            frame_header_v624->v624.extension_hash, pipeline_layout_sets,
+            (size_t)frame_header_v624->v624.pipeline_layout_table_size);
+    }
     header->frame_size = cursor;
     header->payload_hash = fnv1a64_bytes(frame + header->header_size,
                                          cursor - header->header_size);
@@ -7669,6 +7915,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     frame_build_phase = "send-frame";
     rc = send_vulkan_graphics_v6_frame_with_fds(socket_fd, frame, cursor, fds, fd_count);
     graphics_label =
+        need_v624_layout_metadata ? "VULKAN_GRAPHICS_V6.24" :
         need_v623_tessellation_state ? "VULKAN_GRAPHICS_V6.23" :
         need_v622_multisample_state ? "VULKAN_GRAPHICS_V6.22" :
         need_v621_submit2_metadata ? "VULKAN_GRAPHICS_V6.21" :
@@ -14589,7 +14836,8 @@ static bool descriptor_set_layout_compatible(
         return false;
     }
     for (uint32_t i = 0; i < expected->storage_binding_count; ++i) {
-        if (expected->storage_binding_types[i] != actual->storage_binding_types[i] ||
+        if (expected->storage_binding_present[i] != actual->storage_binding_present[i] ||
+            expected->storage_binding_types[i] != actual->storage_binding_types[i] ||
             expected->storage_binding_counts[i] != actual->storage_binding_counts[i] ||
             expected->storage_binding_stage_flags[i] != actual->storage_binding_stage_flags[i]) {
             return false;
@@ -14685,6 +14933,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorSetLayout(
     }
     PdockerVkDescriptorSetLayout *layout = pdocker_alloc_handle(sizeof(*layout));
     if (!layout) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    layout->layout_id = next_vulkan_object_generation();
     for (uint32_t i = 0; pCreateInfo && i < pCreateInfo->bindingCount; ++i) {
         const VkDescriptorSetLayoutBinding *binding = &pCreateInfo->pBindings[i];
         bool v4_descriptor = descriptor_type_supported_by_v4_transport(binding->descriptorType);
@@ -14712,6 +14961,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorSetLayout(
             layout->storage_binding_count = binding->binding + 1;
         }
         if ((v4_descriptor || v5_object_descriptor) && binding->binding < PDOCKER_VK_MAX_STORAGE_BUFFERS) {
+            layout->storage_binding_present[binding->binding] = true;
             layout->storage_binding_types[binding->binding] = binding->descriptorType;
             layout->storage_binding_counts[binding->binding] = binding->descriptorCount;
             layout->storage_binding_stage_flags[binding->binding] = binding->stageFlags;
