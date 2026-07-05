@@ -13226,6 +13226,13 @@ static VkResult validate_image_create_pnext_for_transport(const VkImageCreateInf
 
 static VkResult validate_image_create_info_for_transport(const VkImageCreateInfo *info) {
     if (!info) return VK_ERROR_INITIALIZATION_FAILED;
+    if (info->sharingMode != VK_SHARING_MODE_EXCLUSIVE) {
+        /* Queue family indices are not transported yet; fail closed instead of
+         * recreating a concurrent image with incomplete ownership metadata. */
+        trace_icd_runtime_failure("image-sharing-mode-concurrent-unsupported",
+                                  VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
     VkResult pnext_rc = validate_image_create_pnext_for_transport(info);
     if (pnext_rc != VK_SUCCESS) return pnext_rc;
     VkImageFormatProperties props;
@@ -13295,7 +13302,10 @@ static VkResult validate_image_view_pnext_for_transport(
         switch (header.sType) {
             case VK_STRUCTURE_TYPE_IMAGE_VIEW_USAGE_CREATE_INFO: {
                 const VkImageViewUsageCreateInfo *usage_info = (const VkImageViewUsageCreateInfo *)node;
-                if (usage_info->usage == 0 || (usage_info->usage & ~image->usage) != 0) {
+                if (usage_info->usage == 0 || usage_info->usage != image->usage) {
+                    /* VkImageViewUsageCreateInfo is not represented in the
+                     * replay ABI. A narrowed usage view would be silently
+                     * widened on the executor, so only the no-op case is safe. */
                     trace_icd_runtime_failure("image-view-usage-pnext-unsupported",
                                               VK_ERROR_FEATURE_NOT_PRESENT);
                     return VK_ERROR_FEATURE_NOT_PRESENT;

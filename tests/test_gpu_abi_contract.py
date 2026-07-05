@@ -7300,6 +7300,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("format_list->pViewFormats[i] != info->format", image_pnext_body)
         self.assertIn('unsupported_image_pnext_result("vkCreateImage", node)', image_pnext_body)
         self.assertIn("node = header.pNext;", image_pnext_body)
+        self.assertIn("info->sharingMode != VK_SHARING_MODE_EXCLUSIVE", image_validate_body)
+        self.assertIn('trace_icd_runtime_failure("image-sharing-mode-concurrent-unsupported"', image_validate_body)
+        self.assertIn("return VK_ERROR_FEATURE_NOT_PRESENT;", image_validate_body)
         self.assertIn("validate_image_create_pnext_for_transport(info)", image_validate_body)
         self.assertIn("if (pnext_rc != VK_SUCCESS) return pnext_rc;", image_validate_body)
         self.assertIn("vkGetPhysicalDeviceImageFormatProperties", image_validate_body)
@@ -7316,7 +7319,8 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         self.assertIn("VK_STRUCTURE_TYPE_IMAGE_VIEW_USAGE_CREATE_INFO", image_view_pnext_body)
         self.assertIn("usage_info->usage == 0", image_view_pnext_body)
-        self.assertIn("(usage_info->usage & ~image->usage) != 0", image_view_pnext_body)
+        self.assertIn("usage_info->usage != image->usage", image_view_pnext_body)
+        self.assertIn("VkImageViewUsageCreateInfo is not represented in the", image_view_pnext_body)
         self.assertIn('trace_icd_runtime_failure("image-view-usage-pnext-unsupported"', image_view_pnext_body)
         self.assertIn('unsupported_image_pnext_result("vkCreateImageView", node)', image_view_pnext_body)
         image_view_validate_body = icd.split("static VkResult validate_image_view_create_info_for_transport", 1)[1].split(
