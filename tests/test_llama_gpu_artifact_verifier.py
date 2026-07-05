@@ -2398,6 +2398,43 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         self.assertEqual(report["classification"], "q6-debug-u32-final-store-trace-missing")
         self.assertEqual(report["responsibility_boundary"], "q6-debug-u32-probe")
 
+    def test_q6_debug_probe_layout_stale_precedes_final_store_boundary(self):
+        q6 = {
+            "event_count": 1,
+            "workgroup_shape_blocker": False,
+            "latest_status": "mismatch",
+            "local_size_resolved": [32, 1, 1],
+            "q6_debug_u32_probe_blocker": "q6-debug-u32-probe-layout-stale",
+            "q6_debug_u32_probe": {
+                "summary": "fail",
+                "failures": ["q6 lane trace layout stale: refresh the probe bundle"],
+            },
+            "q6_final_store_boundary": q6_final_store_boundary("native-final-store-mismatch"),
+            "q6_output_layout_probe": {
+                "summary": "canonical-mismatch-inconclusive",
+                "samples": [
+                    q6_layout_sample_with_store_model(257, expected=1.25, gpu_at_dst=0.5)
+                ],
+            },
+            **q6_store_index_model_reflection(),
+            **q6_verified_writeback(),
+        }
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": passing_config_propagation(),
+                    "q6_workgroup_diagnostics": q6,
+                },
+            },
+        }
+        result = self.run_verifier(payload, "--require-q6-workgroup-clear")
+        self.assertEqual(result.returncode, 49, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "q6-debug-u32-probe-layout-stale")
+        self.assertEqual(report["responsibility_boundary"], "q6-debug-u32-probe")
+
     def test_q6_debug_binding_alias_precedes_final_store_boundary(self):
         q6 = {
             "event_count": 1,

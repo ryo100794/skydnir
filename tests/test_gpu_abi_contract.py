@@ -573,7 +573,7 @@ class GpuAbiContractTest(unittest.TestCase):
                 "role": "partial_to_workgroup_candidate",
                 "phase": "full",
                 "slot_base": 68,
-                "lane_trace_layout": {"header_base": 128, "schema_version": 1, "slot_base": 144, "lane_count": 32, "words_per_lane": 8},
+                "lane_trace_layout": {"header_base": 128, "schema_version": 1, "slot_base": 144, "lane_count": 64, "words_per_lane": 8},
             },
             {
                 "candidate_id": 215,
@@ -581,7 +581,7 @@ class GpuAbiContractTest(unittest.TestCase):
                 "role": "reduction_candidate",
                 "phase": "full",
                 "slot_base": 80,
-                "lane_trace_layout": {"header_base": 128, "schema_version": 1, "slot_base": 400, "lane_count": 32, "words_per_lane": 8},
+                "lane_trace_layout": {"header_base": 128, "schema_version": 1, "slot_base": 656, "lane_count": 64, "words_per_lane": 8},
             },
             {
                 "candidate_id": 227,
@@ -626,10 +626,10 @@ class GpuAbiContractTest(unittest.TestCase):
         parser = namespace["parse_q6_final_store_trace_v2"]
         values = {
             128: 1,
-            129: 32,
+            129: 64,
             130: 8,
             131: 144,
-            132: 400,
+            132: 656,
         }
         for record, value_bits in [
             (probe_writes[0], 0x3f500000),
@@ -653,7 +653,7 @@ class GpuAbiContractTest(unittest.TestCase):
                 values[base + 10] = 2
         for lane_base, candidate_id, value_bits in [
             (144 + 3 * 8, 205, 0x3fa00000),
-            (400 + 3 * 8, 215, 0x40200000),
+            (656 + 3 * 8, 215, 0x40200000),
         ]:
             values[lane_base] = 3
             values[lane_base + 1] = value_bits
@@ -682,6 +682,70 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertEqual(
             [205, 215],
             [phase["expected_candidate_id"] for phase in lane_trace["phases"]],
+        )
+
+    def test_q6_stage_trace_parser_rejects_stale_lane_layout_before_samples(self):
+        probe_writes = [
+            {
+                "candidate_id": 205,
+                "role_code": 1,
+                "role": "partial_to_workgroup_candidate",
+                "phase": "full",
+                "slot_base": 68,
+                "lane_trace_layout": {
+                    "header_base": 128,
+                    "schema_version": 1,
+                    "slot_base": 144,
+                    "lane_count": 32,
+                    "words_per_lane": 8,
+                },
+            },
+            {
+                "candidate_id": 215,
+                "role_code": 2,
+                "role": "reduction_candidate",
+                "phase": "full",
+                "slot_base": 80,
+                "lane_trace_layout": {
+                    "header_base": 128,
+                    "schema_version": 1,
+                    "slot_base": 400,
+                    "lane_count": 32,
+                    "words_per_lane": 8,
+                },
+            },
+            {
+                "candidate_id": 230,
+                "role_code": 4,
+                "role": "final_output_store",
+                "phase": "full",
+                "slot_base": 116,
+            },
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest_path = Path(tmp) / "q6.write.instrumentation.json"
+            manifest_path.write_text(
+                json.dumps({"instrumentation": {"probe_writes": probe_writes}}),
+                encoding="utf-8",
+            )
+            namespace = load_q6_stage_trace_namespace(manifest_path)
+
+        report = namespace["parse_q6_final_store_trace_v2"]([
+            {
+                "binding": 5,
+                "set": 0,
+                "size": 65536,
+                "debug_probe_binding": True,
+                "u32_after_dispatch": [{"index": 0, "value": 0}],
+                "u32_after_writeback": [{"index": 0, "value": 0}],
+            }
+        ])
+        self.assertEqual("fail", report["summary"])
+        self.assertEqual([], report["bindings"])
+        self.assertIn("q6 lane trace layout stale", "\n".join(report["failures"]))
+        self.assertEqual(
+            "q6-lane-trace-layout-stale",
+            report["probe_expectation_errors"][0]["error"],
         )
 
     def test_gpu_executor_scans_q6_final_store_debug_records_by_schema(self):
@@ -11498,6 +11562,24 @@ class GpuAbiContractTest(unittest.TestCase):
                 stderr=subprocess.PIPE,
                 check=True,
             )
+            stale_payload = json.loads(write_manifest.read_text(encoding="utf-8"))
+            for probe_write in stale_payload["instrumentation"]["probe_writes"]:
+                layout = probe_write.get("lane_trace_layout")
+                if isinstance(layout, dict):
+                    layout["lane_count"] = 32
+                    if probe_write.get("role") == "reduction_candidate":
+                        layout["slot_base"] = 400
+            stale_manifest = tmp_path / "native-q6.write.stale-lane.probe.json"
+            stale_manifest.write_text(json.dumps(stale_payload), encoding="utf-8")
+            stale_verified = subprocess.run(
+                ["python3", str(SPIRV_PROBE_MANIFEST_VERIFIER), str(stale_manifest)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self.assertNotEqual(0, stale_verified.returncode)
+            self.assertIn("q6 lane trace layout stale", stale_verified.stdout)
         payload = json.loads(result.stdout)
         instrumentation = payload["instrumentation"]
         self.assertEqual(instrumentation["kind"], "q6-debug-ssbo-probe-writes")
@@ -12644,6 +12726,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("CURRENT_PROBE_HASH", runner)
         self.assertIn("PDOCKER_Q6K_ALLOW_ARCHIVED_PROBE_SOURCE", runner)
         self.assertIn("refusing to refresh the default probe bundle from the archived fixture", runner)
+        self.assertIn("tooling_stale", runner)
         self.assertIn("probe env hash mismatch", runner)
         self.assertIn("scripts/prepare-q6k-noop-probe.sh", runner)
         self.assertIn("--expected-hash", runner)
@@ -12710,8 +12793,11 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("CURRENT_PROBE_HASH", runner)
         self.assertIn("PDOCKER_Q6K_ALLOW_ARCHIVED_PROBE_SOURCE", runner)
         self.assertIn("refusing to refresh the default probe bundle from the archived fixture", runner)
+        self.assertIn("tooling_stale", runner)
         self.assertIn("--expected-hash", runner)
 
+        self.assertIn("q6-debug-u32-probe-layout-stale", compare)
+        self.assertIn("lane-trace-layout-overlap", compare)
         self.assertIn("stale-target-hash", compare)
         self.assertIn("probe-target-unarmed", compare)
         self.assertIn("probe_effective_seen_but_unarmed", compare)

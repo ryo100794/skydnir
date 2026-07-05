@@ -177,17 +177,18 @@ if [[ "$SPV" == "$DEFAULT_SPV" && "$PROBE_ENV" == "$DEFAULT_PROBE_ENV" ]]; then
     SOURCE_SPV="$ROOT/docs/test/spirv-q6k-native-adb45055/native-q6-source.spv"
   fi
   NEED_PREPARE=0
+  TOOLING_STALE=0
   if [[ ! -f "$SPV" || ! -f "$PROBE_ENV" ]]; then
     NEED_PREPARE=1
-  elif [[ -n "$SOURCE_SPV" && (
-          "$SPV" -ot "$ROOT/scripts/instrument-spirv-noop-probe.py" ||
+  elif [[ "$SPV" -ot "$ROOT/scripts/instrument-spirv-noop-probe.py" ||
           "$SPV" -ot "$ROOT/scripts/analyze-spirv.py" ||
           "$SPV" -ot "$ROOT/scripts/prepare-q6k-noop-probe.sh" ||
-          "$SPV" -ot "$SOURCE_SPV" ||
           "$PROBE_ENV" -ot "$ROOT/scripts/instrument-spirv-noop-probe.py" ||
           "$PROBE_ENV" -ot "$ROOT/scripts/analyze-spirv.py" ||
-          "$PROBE_ENV" -ot "$ROOT/scripts/prepare-q6k-noop-probe.sh" ||
-          "$PROBE_ENV" -ot "$SOURCE_SPV" ) ]]; then
+          "$PROBE_ENV" -ot "$ROOT/scripts/prepare-q6k-noop-probe.sh" ]]; then
+    TOOLING_STALE=1
+    NEED_PREPARE=1
+  elif [[ -n "$SOURCE_SPV" && ( "$SPV" -ot "$SOURCE_SPV" || "$PROBE_ENV" -ot "$SOURCE_SPV" ) ]]; then
     NEED_PREPARE=1
   elif [[ -n "$PROBE_SOURCE_HASH" ]]; then
     CURRENT_PROBE_HASH="$(set -a; . "$PROBE_ENV"; printf '%s' "${PDOCKER_GPU_SPIRV_PROBE_EXPECTED_HASH:-}")"
@@ -199,6 +200,7 @@ if [[ "$SPV" == "$DEFAULT_SPV" && "$PROBE_ENV" == "$DEFAULT_PROBE_ENV" ]]; then
     if [[ -z "$SOURCE_SPV" ]]; then
       cat >&2 <<EOF
 [pdocker q6 workgroup] refusing to refresh the default probe bundle from the archived fixture.
+The existing default probe bundle is missing or stale; tooling_stale=${TOOLING_STALE}.
 Pass --probe-source-spv <actual Q6 source SPIR-V dump> and --probe-source-hash <actual source hash>,
 or set PDOCKER_Q6K_ALLOW_ARCHIVED_PROBE_SOURCE=1 only for fixture/regression runs.
 EOF
@@ -234,6 +236,24 @@ if [[ -n "$PROBE_SOURCE_HASH" ]]; then
   fi
 fi
 export_q6_required_env_overlay
+
+if [[ -z "${PDOCKER_GPU_SPIRV_PROBE_MANIFEST:-}" || ! -f "${PDOCKER_GPU_SPIRV_PROBE_MANIFEST:-}" ]]; then
+  echo "[pdocker q6 workgroup] missing probe manifest from probe env" >&2
+  exit 2
+fi
+if [[ -z "${PDOCKER_GPU_SPIRV_PROBE_SHADER:-}" || ! -f "${PDOCKER_GPU_SPIRV_PROBE_SHADER:-}" ]]; then
+  echo "[pdocker q6 workgroup] missing probe shader from probe env" >&2
+  exit 2
+fi
+if [[ "$PDOCKER_GPU_SPIRV_PROBE_SHADER" != "$SPV" ]]; then
+  echo "[pdocker q6 workgroup] probe env shader mismatch: expected $SPV got $PDOCKER_GPU_SPIRV_PROBE_SHADER" >&2
+  exit 2
+fi
+
+echo "[pdocker q6 workgroup] probe manifest verify: $PDOCKER_GPU_SPIRV_PROBE_MANIFEST"
+python3 scripts/verify-spirv-probe-manifest.py \
+  "$PDOCKER_GPU_SPIRV_PROBE_MANIFEST" \
+  --json-out docs/test/q6-probe-manifest-verify-latest.json
 
 echo "[pdocker q6 workgroup] preflight: $SPV"
 python3 scripts/maintenance/verify-q6-workgroup-lowering-preflight.py \

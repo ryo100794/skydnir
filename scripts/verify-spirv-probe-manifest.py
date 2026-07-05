@@ -20,6 +20,25 @@ EXPECTED_TRANSPORT = "append-as-normal-vulkan-dispatch-v4-binding"
 EXPECTED_PROBE_METHOD = "instrument-valid-module-not-arbitrary-fragment"
 MAX_VULKAN_BINDINGS = 16
 MAX_VULKAN_DESCRIPTOR_SETS = 8
+Q6_LANE_TRACE_SCHEMA_VERSION = 1
+Q6_LANE_TRACE_HEADER_BASE = 128
+Q6_LANE_TRACE_LANE_COUNT = 64
+Q6_LANE_TRACE_WORDS_PER_LANE = 8
+Q6_LANE_TRACE_PRE_REDUCTION_BASE = 144
+Q6_LANE_TRACE_REDUCTION_BASE = (
+    Q6_LANE_TRACE_PRE_REDUCTION_BASE
+    + Q6_LANE_TRACE_LANE_COUNT * Q6_LANE_TRACE_WORDS_PER_LANE
+)
+Q6_LANE_TRACE_RECORD_LAYOUT = {
+    "local_x": 0,
+    "stored_value_bits": 1,
+    "workgroup_x": 2,
+    "workgroup_y": 3,
+    "workgroup_z": 4,
+    "candidate_id": 5,
+    "col": 6,
+    "row": 7,
+}
 
 
 def fnv1a64(data: bytes) -> int:
@@ -38,8 +57,60 @@ def fail(errors: list[str], message: str) -> None:
     errors.append(message)
 
 
+def verify_q6_probe_write_layout(payload: dict, errors: list[str]) -> None:
+    instrumentation = payload.get("instrumentation")
+    if not isinstance(instrumentation, dict):
+        return
+    if instrumentation.get("kind") != "q6-debug-ssbo-probe-writes":
+        return
+    probe_writes = instrumentation.get("probe_writes")
+    if not isinstance(probe_writes, list):
+        fail(errors, "instrumentation.probe_writes must be a list for q6-debug-ssbo-probe-writes")
+        return
+    expected_by_role = {
+        "partial_to_workgroup_candidate": Q6_LANE_TRACE_PRE_REDUCTION_BASE,
+        "reduction_candidate": Q6_LANE_TRACE_REDUCTION_BASE,
+    }
+    seen_roles = set()
+    for index, item in enumerate(probe_writes):
+        if not isinstance(item, dict):
+            fail(errors, f"instrumentation.probe_writes[{index}] must be an object")
+            continue
+        layout = item.get("lane_trace_layout")
+        if layout is None:
+            continue
+        context = f"instrumentation.probe_writes[{index}].lane_trace_layout"
+        role = item.get("role")
+        if role not in expected_by_role:
+            fail(errors, f"{context} is only allowed on Q6 full partial/reduction roles")
+            continue
+        seen_roles.add(str(role))
+        expected_slot = expected_by_role[str(role)]
+        expected = {
+            "schema_version": Q6_LANE_TRACE_SCHEMA_VERSION,
+            "header_base": Q6_LANE_TRACE_HEADER_BASE,
+            "lane_count": Q6_LANE_TRACE_LANE_COUNT,
+            "words_per_lane": Q6_LANE_TRACE_WORDS_PER_LANE,
+            "slot_base": expected_slot,
+        }
+        if not isinstance(layout, dict):
+            fail(errors, f"{context} must be an object")
+            continue
+        for key, expected_value in expected.items():
+            actual = layout.get(key)
+            if actual != expected_value:
+                fail(errors, f"q6 lane trace layout stale: {context}.{key} expected {expected_value} got {actual}")
+        record_layout = layout.get("record_layout")
+        if record_layout != Q6_LANE_TRACE_RECORD_LAYOUT:
+            fail(errors, f"q6 lane trace layout stale: {context}.record_layout must match the current Q6 lane trace ABI")
+    for role in expected_by_role:
+        if role not in seen_roles:
+            fail(errors, f"q6 lane trace layout stale: missing {role} lane_trace_layout in q6-debug probe writes")
+
+
 def verify_manifest(payload: dict) -> list[str]:
     errors: list[str] = []
+    verify_q6_probe_write_layout(payload, errors)
     if payload.get("schema") != SCHEMA:
         fail(errors, f"schema must be {SCHEMA}")
 

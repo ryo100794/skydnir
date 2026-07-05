@@ -4562,6 +4562,41 @@ Q6_PROBE_ROLE_STAGE = {
 
 
 def q6_probe_expected_records_from_manifest():
+    def lane_layout_errors(item, index):
+        layout = item.get("lane_trace_layout") if isinstance(item, dict) else None
+        if not isinstance(layout, dict):
+            return []
+        role = str(item.get("role") or "")
+        expected_pre_base = 144
+        expected_lane_count = 64
+        expected_words_per_lane = 8
+        expected_reduction_base = expected_pre_base + expected_lane_count * expected_words_per_lane
+        expected_slot = {
+            "partial_to_workgroup_candidate": expected_pre_base,
+            "reduction_candidate": expected_reduction_base,
+        }.get(role)
+        errors = []
+        context = "instrumentation.probe_writes[%s].lane_trace_layout" % index
+        if expected_slot is None:
+            return [{"error": "q6-lane-trace-layout-stale", "message": "%s is only allowed on Q6 partial/reduction roles" % context}]
+        expected_values = {
+            "schema_version": 1,
+            "header_base": 128,
+            "lane_count": expected_lane_count,
+            "words_per_lane": expected_words_per_lane,
+            "slot_base": expected_slot,
+        }
+        for key, expected in expected_values.items():
+            actual = layout.get(key)
+            if actual != expected:
+                errors.append({
+                    "error": "q6-lane-trace-layout-stale",
+                    "field": "%s.%s" % (context, key),
+                    "expected": expected,
+                    "actual": actual,
+                })
+        return errors
+
     paths = []
     for env_map in (globals().get("manifest_requested_env", {}), globals().get("effective_runtime_env", {})):
         if isinstance(env_map, dict):
@@ -4585,6 +4620,7 @@ def q6_probe_expected_records_from_manifest():
             errors.append({"path": raw_path, "error": "missing-instrumentation-probe-writes"})
             continue
         records = []
+        layout_errors = []
         for index, item in enumerate(writes):
             if not isinstance(item, dict):
                 continue
@@ -4607,15 +4643,18 @@ def q6_probe_expected_records_from_manifest():
             lane_trace_layout = item.get("lane_trace_layout")
             if isinstance(lane_trace_layout, dict):
                 record["lane_trace_layout"] = lane_trace_layout
+                layout_errors.extend(lane_layout_errors(item, index))
             records.append(record)
         if records:
+            report_errors = errors + layout_errors
             return {
                 "schema": "pdocker.q6k.debug-probe-expectations.v1",
                 "source": "manifest",
                 "path": raw_path,
+                "valid": not layout_errors,
                 "record_count": len(records),
                 "records": records,
-                "errors": errors,
+                "errors": report_errors,
             }
         errors.append({"path": raw_path, "error": "no-usable-probe-records"})
     return {
@@ -4792,6 +4831,11 @@ def parse_q6_lane_trace_v1(dispatch, writeback):
         header_valid = header_valid and header["reduction_base"] == expected_reduction_base
 
     phases = []
+    pre_lane_expectation = next(
+        (item for item in lane_expectations if item["name"] == "pre-reduction-lanes"),
+        None,
+    )
+    layout_overlaps = []
     for item in lane_expectations:
         name = item["name"]
         slot_base = item["slot_base"]
@@ -4815,10 +4859,37 @@ def parse_q6_lane_trace_v1(dispatch, writeback):
             if not unexecuted:
                 observed_lane_count += 1
             record_failures = []
-            if not unexecuted and local_x != lane:
+            overlap_from_pre_reduction = False
+            if (
+                not unexecuted
+                and name == "reduction-lanes"
+                and isinstance(pre_lane_expectation, dict)
+                and slot_base == (
+                    pre_lane_expectation["slot_base"]
+                    + pre_lane_expectation["lane_count"] * pre_lane_expectation["words_per_lane"]
+                )
+                and local_x == lane + pre_lane_expectation["lane_count"]
+                and candidate_id == pre_lane_expectation["expected_candidate_id"]
+            ):
+                overlap_from_pre_reduction = True
+                status = "fail"
+                record_failures.append("layout-overlap")
+                if not layout_overlaps:
+                    layout_overlaps.append({
+                        "reason": "pre-reduction-live-lanes-overlap-reduction-trace-region",
+                        "phase": name,
+                        "lane": lane,
+                        "slot_base": base,
+                        "observed_local_x": local_x,
+                        "observed_candidate_id": candidate_id,
+                        "pre_reduction_lane_count": pre_lane_expectation["lane_count"],
+                        "pre_reduction_slot_base": pre_lane_expectation["slot_base"],
+                        "reduction_slot_base": slot_base,
+                    })
+            if not unexecuted and local_x != lane and not overlap_from_pre_reduction:
                 status = "fail"
                 record_failures.append("local-x")
-            if not unexecuted and candidate_id != expected_candidate:
+            if not unexecuted and candidate_id != expected_candidate and not overlap_from_pre_reduction:
                 status = "fail"
                 record_failures.append("candidate-id")
             record = {
@@ -4872,6 +4943,11 @@ def parse_q6_lane_trace_v1(dispatch, writeback):
             "header": header,
             "phases": phases,
         }
+    if layout_overlaps:
+        failures.insert(
+            0,
+            "lane-trace-layout-overlap: pre-reduction live lanes overlap the reduction trace region; refresh the probe bundle from the current Q6 source SPIR-V",
+        )
     if not header_valid:
         failures.append("lane trace header missing or invalid")
     return {
@@ -4879,6 +4955,7 @@ def parse_q6_lane_trace_v1(dispatch, writeback):
         "summary": "pass" if not failures else "fail",
         "header": header,
         "phases": phases,
+        "layout_overlaps": layout_overlaps[:8],
         "failures": failures[:16],
     }
 
@@ -4886,6 +4963,23 @@ def parse_q6_lane_trace_v1(dispatch, writeback):
 def parse_q6_final_store_trace_v2(bindings):
     parsed_bindings = []
     failures = []
+    expectation_errors = Q6_PROBE_EXPECTATION_REPORT.get("errors") or []
+    layout_stale_errors = [
+        error for error in expectation_errors
+        if isinstance(error, dict) and error.get("error") == "q6-lane-trace-layout-stale"
+    ]
+    if layout_stale_errors:
+        return {
+            "schema": "pdocker.q6k.final-store-trace.v2",
+            "debug_binding_count": 0,
+            "executed_final_trace_v2_count": 0,
+            "bindings": [],
+            "summary": "fail",
+            "failures": [
+                "q6 lane trace layout stale: refresh the probe bundle from the current Q6 source SPIR-V before running device diagnostics"
+            ],
+            "probe_expectation_errors": layout_stale_errors[:8],
+        }
     for binding in bindings:
         if not isinstance(binding, dict):
             continue
@@ -5461,6 +5555,13 @@ def classify_q6_debug_u32_probe_blocker(report):
     if report.get("summary") in {"pass", "not-run"}:
         return ""
     failures = "\n".join(str(item) for item in report.get("failures") or [])
+    if (
+        "lane trace layout stale" in failures
+        or "q6-lane-trace-layout-stale" in failures
+        or "lane-trace-layout-overlap" in failures
+        or "layout-overlap" in failures
+    ):
+        return "q6-debug-u32-probe-layout-stale"
     if "candidate-id" in failures or "role-code" in failures:
         return "q6-debug-u32-probe-metadata-mismatch"
     if "writeback" in failures:

@@ -43,6 +43,7 @@ ZERO_COMPACT_HASH = "0x0000000000000000"
 Q6_DEBUG_U32_BLOCKERS = {
     "q6-debug-binding-alias",
     "q6-debug-binding-alias-evidence-missing",
+    "q6-debug-u32-probe-layout-stale",
     "q6-debug-u32-probe-metadata-mismatch",
     "q6-debug-u32-writeback-mismatch",
     "q6-debug-u32-final-store-trace-missing",
@@ -1231,6 +1232,13 @@ def _q6_debug_u32_probe_blocker(q6: Any) -> str:
     if report.get("summary") in {"pass", "not-run"}:
         return ""
     failures = "\n".join(str(item) for item in report.get("failures") or []).lower()
+    if (
+        "lane trace layout stale" in failures
+        or "q6-lane-trace-layout-stale" in failures
+        or "lane-trace-layout-overlap" in failures
+        or "layout-overlap" in failures
+    ):
+        return "q6-debug-u32-probe-layout-stale"
     if (
         "candidate-id" in failures
         or "candidate id" in failures
