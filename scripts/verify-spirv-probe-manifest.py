@@ -425,6 +425,34 @@ def verify_manifest(payload: dict) -> list[str]:
                     fail(errors, f"{context}.base must be a Workgroup variable for {role}")
                 if not isinstance(target.get("related_output_store_word_index"), int):
                     fail(errors, f"{context}.related_output_store_word_index must be present for Workgroup probes")
+                stored_value = target.get("stored_value")
+                role_static = target.get("role_static_support")
+                if not isinstance(stored_value, dict):
+                    fail(errors, f"{context}.stored_value must be present for Workgroup probes")
+                elif stored_value.get("depends_on_debug_probe_binding") is not False:
+                    fail(errors, f"{context}.stored_value.depends_on_debug_probe_binding must be false")
+                if not isinstance(role_static, dict):
+                    fail(errors, f"{context}.role_static_support must be present for Workgroup probes")
+                elif role_static.get("schema") != "pdocker.spirv.q6-role-static-support.v1":
+                    fail(errors, f"{context}.role_static_support.schema must be pdocker.spirv.q6-role-static-support.v1")
+                if role == "reduction_candidate":
+                    if not isinstance(role_static, dict) or role_static.get("supported") is not True:
+                        fail(errors, f"{context}.role_static_support.supported must be true for reduction_candidate")
+                    requires_workgroup_load = role_static.get("requires_workgroup_load") if isinstance(role_static, dict) else None
+                    if requires_workgroup_load is True:
+                        if not isinstance(stored_value, dict) or stored_value.get("reaches_workgroup_load") is not True:
+                            fail(errors, f"{context}.stored_value.reaches_workgroup_load must be true for reduction_candidate")
+                        workgroup_loads = stored_value.get("workgroup_loads") if isinstance(stored_value, dict) else None
+                        if not isinstance(workgroup_loads, list) or not workgroup_loads:
+                            fail(errors, f"{context}.stored_value.workgroup_loads must be non-empty for reduction_candidate")
+                        if isinstance(role_static, dict) and role_static.get("same_workgroup_base_id") is not True:
+                            fail(errors, f"{context}.role_static_support.same_workgroup_base_id must be true for reduction_candidate")
+                    elif requires_workgroup_load is False:
+                        descriptor_leaf_count = stored_value.get("descriptor_load_leaf_count") if isinstance(stored_value, dict) else None
+                        if not isinstance(descriptor_leaf_count, int) or descriptor_leaf_count <= 0:
+                            fail(errors, f"{context}.stored_value.descriptor_load_leaf_count must be positive for descriptor-backed reduction_candidate")
+                    else:
+                        fail(errors, f"{context}.role_static_support.requires_workgroup_load must be boolean for reduction_candidate")
 
         def descriptor_dependency_has_debug_binding(summary: dict, context: str, debug_set: int | None, debug_binding: int | None) -> bool:
             matched = False

@@ -2592,6 +2592,1088 @@
   "q6_probe_targets": {
     "available": false,
     "final_output_store_count": 1,
+    "final_store_value_flow": {
+      "available": false,
+      "debug_probe_descriptor": {
+        "binding": 3,
+        "set": 0
+      },
+      "final_store_count": 1,
+      "method": "backward-slice-stored-value-and-output-index",
+      "notes": [
+        "Each final output OpStore must target descriptor binding 2.",
+        "The stored value producer chain is expected to reach a Workgroup load for native Q6_K.",
+        "The debug/probe descriptor must not be a dependency of either the stored value or output index."
+      ],
+      "required_output_descriptor_binding": 2,
+      "schema": "pdocker.spirv.q6-final-store-value-flow.v1",
+      "stores": [
+        {
+          "debug_probe_exclusion": {
+            "binding": 3,
+            "output_index_depends_on_debug_probe": false,
+            "passed": true,
+            "set": 0,
+            "stored_value_depends_on_debug_probe": false
+          },
+          "object_id": 358,
+          "output_index": {
+            "builtin_dependencies": [
+              {
+                "built_in": "WorkgroupId",
+                "id": 192,
+                "kind": "variable",
+                "storage_class": "Input"
+              }
+            ],
+            "constant_dependencies": [
+              {
+                "id": 32,
+                "value_u32": 0
+              },
+              {
+                "id": 86,
+                "value_u32": 0
+              },
+              {
+                "id": 152,
+                "value_u32": 2
+              },
+              {
+                "id": 274,
+                "value_u32": 6
+              }
+            ],
+            "depends_on_debug_probe_binding": false,
+            "descriptor_dependencies": [],
+            "descriptor_load_leaf_count": 0,
+            "descriptor_load_leaves": [],
+            "ext_inst_histogram": {},
+            "function_loads": [
+              {
+                "id": 355,
+                "load_word_index": 1527,
+                "pointer": {
+                  "base": {
+                    "built_in": null,
+                    "id": 272,
+                    "kind": "variable",
+                    "name": "d_offset",
+                    "storage_class": "Function"
+                  },
+                  "index_count": 0,
+                  "index_signatures": [],
+                  "truncated_index_count": 0
+                },
+                "store_word_limit": 1527
+              },
+              {
+                "id": 273,
+                "load_word_index": 1214,
+                "pointer": {
+                  "base": {
+                    "built_in": null,
+                    "id": 218,
+                    "kind": "variable",
+                    "name": "batch_idx",
+                    "storage_class": "Function"
+                  },
+                  "index_count": 0,
+                  "index_signatures": [],
+                  "truncated_index_count": 0
+                },
+                "store_word_limit": 1214
+              },
+              {
+                "id": 356,
+                "load_word_index": 1531,
+                "pointer": {
+                  "base": {
+                    "built_in": null,
+                    "id": 286,
+                    "kind": "variable",
+                    "name": "row",
+                    "storage_class": "Function"
+                  },
+                  "index_count": 0,
+                  "index_signatures": [],
+                  "truncated_index_count": 0
+                },
+                "store_word_limit": 1531
+              },
+              {
+                "id": 287,
+                "load_word_index": 1265,
+                "pointer": {
+                  "base": {
+                    "built_in": null,
+                    "id": 203,
+                    "kind": "variable",
+                    "name": "first_row",
+                    "storage_class": "Function"
+                  },
+                  "index_count": 0,
+                  "index_signatures": [],
+                  "truncated_index_count": 0
+                },
+                "store_word_limit": 1265
+              },
+              {
+                "id": 204,
+                "load_word_index": 961,
+                "pointer": {
+                  "base": {
+                    "built_in": null,
+                    "id": 189,
+                    "kind": "variable",
+                    "name": "wg_linear",
+                    "storage_class": "Function"
+                  },
+                  "index_count": 0,
+                  "index_signatures": [],
+                  "truncated_index_count": 0
+                },
+                "store_word_limit": 961
+              },
+              {
+                "id": 288,
+                "load_word_index": 1269,
+                "pointer": {
+                  "base": {
+                    "built_in": null,
+                    "id": 278,
+                    "kind": "variable",
+                    "name": "n",
+                    "storage_class": "Function"
+                  },
+                  "index_count": 0,
+                  "index_signatures": [],
+                  "truncated_index_count": 0
+                },
+                "store_word_limit": 1269
+              }
+            ],
+            "function_store_expansions": [
+              {
+                "load_id": 355,
+                "match_strategy": "pointer-signature",
+                "matched_store_word_index": 1232,
+                "store_object_id": 277,
+                "store_object_root": {
+                  "id": 277,
+                  "kind": "op",
+                  "op": "OpIMul"
+                },
+                "store_pointer": {
+                  "base": {
+                    "built_in": null,
+                    "id": 272,
+                    "kind": "variable",
+                    "name": "d_offset",
+                    "storage_class": "Function"
+                  },
+                  "index_count": 0,
+                  "index_signatures": [],
+                  "truncated_index_count": 0
+                },
+                "store_pointer_id": 272
+              },
+              {
+                "load_id": 273,
+                "match_strategy": "pointer-signature",
+                "matched_store_word_index": 1025,
+                "store_object_id": 224,
+                "store_object_root": {
+                  "id": 224,
+                  "kind": "op",
+                  "op": "OpIAdd"
+                },
+                "store_pointer": {
+                  "base": {
+                    "built_in": null,
+                    "id": 218,
+                    "kind": "variable",
+                    "name": "batch_idx",
+                    "storage_class": "Function"
+                  },
+                  "index_count": 0,
+                  "index_signatures": [],
+                  "truncated_index_count": 0
+                },
+                "store_pointer_id": 218
+              },
+              {
+                "load_id": 356,
+                "match_strategy": "pointer-signature",
+                "matched_store_word_index": 1278,
+                "store_object_id": 289,
+                "store_object_root": {
+                  "id": 289,
+                  "kind": "op",
+                  "op": "OpIAdd"
+                },
+                "store_pointer": {
+                  "base": {
+                    "built_in": null,
+                    "id": 286,
+                    "kind": "variable",
+                    "name": "row",
+                    "storage_class": "Function"
+                  },
+                  "index_count": 0,
+                  "index_signatures": [],
+                  "truncated_index_count": 0
+                },
+                "store_pointer_id": 286
+              },
+              {
+                "load_id": 287,
+                "match_strategy": "pointer-signature",
+                "matched_store_word_index": 970,
+                "store_object_id": 205,
+                "store_object_root": {
+                  "id": 205,
+                  "kind": "op",
+                  "op": "OpIMul"
+                },
+                "store_pointer": {
+                  "base": {
+                    "built_in": null,
+                    "id": 203,
+                    "kind": "variable",
+                    "name": "first_row",
+                    "storage_class": "Function"
+                  },
+                  "index_count": 0,
+                  "index_signatures": [],
+                  "truncated_index_count": 0
+                },
+                "store_pointer_id": 203
+              },
+              {
+                "load_id": 204,
+                "match_strategy": "pointer-signature",
+                "matched_store_word_index": 958,
+                "store_object_id": 202,
+                "store_object_root": {
+                  "id": 202,
+                  "kind": "op",
+                  "op": "OpIAdd"
+                },
+                "store_pointer": {
+                  "base": {
+                    "built_in": null,
+                    "id": 189,
+                    "kind": "variable",
+                    "name": "wg_linear",
+                    "storage_class": "Function"
+                  },
+                  "index_count": 0,
+                  "index_signatures": [],
+                  "truncated_index_count": 0
+                },
+                "store_pointer_id": 189
+              },
+              {
+                "load_id": 288,
+                "match_strategy": "pointer-signature",
+                "matched_store_word_index": 1235,
+                "store_object_id": 86,
+                "store_object_root": {
+                  "id": 86,
+                  "kind": "constant",
+                  "value_u32": 0
+                },
+                "store_pointer": {
+                  "base": {
+                    "built_in": null,
+                    "id": 278,
+                    "kind": "variable",
+                    "name": "n",
+                    "storage_class": "Function"
+                  },
+                  "index_count": 0,
+                  "index_signatures": [],
+                  "truncated_index_count": 0
+                },
+                "store_pointer_id": 278
+              }
+            ],
+            "group_nonuniform_histogram": {},
+            "index_ids": [
+              32,
+              357
+            ],
+            "load_count": 10,
+            "named_arithmetic_histogram": {},
+            "op_histogram": {
+              "OpIAdd": 4,
+              "OpIMul": 3
+            },
+            "producer_chain": [
+              {
+                "id": 32,
+                "kind": "constant",
+                "value_u32": 0
+              },
+              {
+                "id": 357,
+                "kind": "op",
+                "op": "OpIAdd"
+              },
+              {
+                "id": 355,
+                "kind": "load",
+                "pointer_base": {
+                  "built_in": null,
+                  "id": 272,
+                  "kind": "variable",
+                  "name": "d_offset",
+                  "storage_class": "Function"
+                }
+              },
+              {
+                "id": 277,
+                "kind": "op",
+                "op": "OpIMul"
+              },
+              {
+                "id": 273,
+                "kind": "load",
+                "pointer_base": {
+                  "built_in": null,
+                  "id": 218,
+                  "kind": "variable",
+                  "name": "batch_idx",
+                  "storage_class": "Function"
+                }
+              },
+              {
+                "id": 224,
+                "kind": "op",
+                "op": "OpIAdd"
+              },
+              {
+                "id": 220,
+                "kind": "load",
+                "pointer_base": {
+                  "built_in": "WorkgroupId",
+                  "id": 192,
+                  "kind": "variable",
+                  "name": "gl_WorkGroupID",
+                  "storage_class": "Input"
+                }
+              },
+              {
+                "base": {
+                  "built_in": "WorkgroupId",
+                  "id": 192,
+                  "kind": "variable",
+                  "name": "gl_WorkGroupID",
+                  "storage_class": "Input"
+                },
+                "index_count": 1,
+                "kind": "access_chain"
+              },
+              {
+                "id": 76
+              },
+              {
+                "id": 223,
+                "kind": "load",
+                "pointer_base": {
+                  "id": 209,
+                  "kind": "push_constant",
+                  "name": "p"
+                }
+              },
+              {
+                "base": {
+                  "id": 209,
+                  "kind": "push_constant",
+                  "name": "p"
+                },
+                "index_count": 1,
+                "kind": "access_chain"
+              },
+              {
+                "id": 221
+              },
+              {
+                "id": 218,
+                "kind": "variable"
+              },
+              {
+                "id": 276,
+                "kind": "load",
+                "pointer_base": {
+                  "id": 209,
+                  "kind": "push_constant",
+                  "name": "p"
+                }
+              },
+              {
+                "base": {
+                  "id": 209,
+                  "kind": "push_constant",
+                  "name": "p"
+                },
+                "index_count": 1,
+                "kind": "access_chain"
+              },
+              {
+                "id": 274
+              },
+              {
+                "id": 274,
+                "kind": "constant",
+                "value_u32": 6
+              },
+              {
+                "id": 272,
+                "kind": "variable"
+              },
+              {
+                "id": 356,
+                "kind": "load",
+                "pointer_base": {
+                  "built_in": null,
+                  "id": 286,
+                  "kind": "variable",
+                  "name": "row",
+                  "storage_class": "Function"
+                }
+              },
+              {
+                "id": 289,
+                "kind": "op",
+                "op": "OpIAdd"
+              },
+              {
+                "id": 287,
+                "kind": "load",
+                "pointer_base": {
+                  "built_in": null,
+                  "id": 203,
+                  "kind": "variable",
+                  "name": "first_row",
+                  "storage_class": "Function"
+                }
+              },
+              {
+                "id": 205,
+                "kind": "op",
+                "op": "OpIMul"
+              },
+              {
+                "id": 152,
+                "kind": "constant",
+                "value_u32": 2
+              },
+              {
+                "id": 204,
+                "kind": "load",
+                "pointer_base": {
+                  "built_in": null,
+                  "id": 189,
+                  "kind": "variable",
+                  "name": "wg_linear",
+                  "storage_class": "Function"
+                }
+              },
+              {
+                "id": 202,
+                "kind": "op",
+                "op": "OpIAdd"
+              },
+              {
+                "id": 195,
+                "kind": "load",
+                "pointer_base": {
+                  "built_in": "WorkgroupId",
+                  "id": 192,
+                  "kind": "variable",
+                  "name": "gl_WorkGroupID",
+                  "storage_class": "Input"
+                }
+              },
+              {
+                "id": 201,
+                "kind": "op",
+                "op": "OpIMul"
+              },
+              {
+                "id": 189,
+                "kind": "variable"
+              },
+              {
+                "id": 203,
+                "kind": "variable"
+              },
+              {
+                "id": 288,
+                "kind": "load",
+                "pointer_base": {
+                  "built_in": null,
+                  "id": 278,
+                  "kind": "variable",
+                  "name": "n",
+                  "storage_class": "Function"
+                }
+              },
+              {
+                "id": 86,
+                "kind": "constant",
+                "value_u32": 0
+              },
+              {
+                "id": 278,
+                "kind": "variable"
+              },
+              {
+                "id": 286,
+                "kind": "variable"
+              }
+            ],
+            "push_constant_dependencies": [
+              {
+                "member_index": 6,
+                "member_name": "batch_stride_d",
+                "member_offset": 24,
+                "member_type": {
+                  "bits": 32,
+                  "id": 6,
+                  "kind": "int",
+                  "signed": 0
+                },
+                "pointer": {
+                  "base": {
+                    "id": 209,
+                    "kind": "push_constant",
+                    "name": "p"
+                  },
+                  "index_count": 1,
+                  "index_signatures": [
+                    [
+                      "constant",
+                      6
+                    ]
+                  ],
+                  "truncated_index_count": 0
+                },
+                "variable_id": 209,
+                "variable_name": "p"
+              },
+              {
+                "member_index": 8,
+                "member_name": "base_work_group_y",
+                "member_offset": 32,
+                "member_type": {
+                  "bits": 32,
+                  "id": 6,
+                  "kind": "int",
+                  "signed": 0
+                },
+                "pointer": {
+                  "base": {
+                    "id": 209,
+                    "kind": "push_constant",
+                    "name": "p"
+                  },
+                  "index_count": 1,
+                  "index_signatures": [
+                    [
+                      "constant",
+                      8
+                    ]
+                  ],
+                  "truncated_index_count": 0
+                },
+                "variable_id": 209,
+                "variable_name": "p"
+              }
+            ],
+            "reaches_workgroup_load": false,
+            "root": {
+              "kind": "list"
+            },
+            "slice_complete": false,
+            "spec_constant_dependencies": [],
+            "truncated_depth_count": 4,
+            "truncated_function_store_expansion_count": 0,
+            "truncated_node_count": 0,
+            "truncation_boundaries": {
+              "truncated_depth_count": 4,
+              "truncated_function_store_expansion_count": 0,
+              "truncated_node_count": 0
+            },
+            "unresolved_id_leaves": [],
+            "workgroup_loads": []
+          },
+          "output_store": {
+            "base": {
+              "binding": 2,
+              "id": 354,
+              "kind": "descriptor",
+              "name": "",
+              "set": 0,
+              "storage_class": "Uniform"
+            },
+            "binding_matches_required": true,
+            "required_binding": 2
+          },
+          "phase": "single",
+          "pointer_id": 359,
+          "stored_value": {
+            "builtin_dependencies": [],
+            "constant_dependencies": [
+              {
+                "id": 32,
+                "value_u32": 0
+              },
+              {
+                "id": 86,
+                "value_u32": 0
+              },
+              {
+                "id": 297,
+                "value_u32": 0
+              }
+            ],
+            "depends_on_debug_probe_binding": false,
+            "descriptor_dependencies": [
+              {
+                "binding": 1,
+                "set": 0
+              }
+            ],
+            "descriptor_load_leaf_count": 1,
+            "descriptor_load_leaves": [
+              {
+                "access_chain_result_id": 341,
+                "access_word_index": 1466,
+                "array_strides": [
+                  4
+                ],
+                "binding": 1,
+                "byte_offset": {
+                  "dynamic_terms": [
+                    {
+                      "index_id": 339,
+                      "scale": 4
+                    }
+                  ],
+                  "static": 0,
+                  "unit": "bytes"
+                },
+                "descriptor": {
+                  "binding": 1,
+                  "set": 0,
+                  "storage_class": "Uniform",
+                  "variable_id": 333
+                },
+                "dynamic_indices": [
+                  {
+                    "id": 339,
+                    "ordinal": 1,
+                    "reason": "dynamic-runtime_array-index"
+                  }
+                ],
+                "element": {
+                  "bits": 32,
+                  "id": 17,
+                  "kind": "float"
+                },
+                "layout_fingerprint": {
+                  "binding": 1,
+                  "member_indices": [
+                    0
+                  ],
+                  "member_path": [
+                    {
+                      "index": 0,
+                      "index_id": 32,
+                      "kind": "struct_member",
+                      "offset": 0,
+                      "type_id": 330
+                    },
+                    {
+                      "array_stride": 4,
+                      "element_type_id": 17,
+                      "index_id": 339,
+                      "kind": "runtime_array_element"
+                    }
+                  ],
+                  "offsets": [
+                    0
+                  ],
+                  "set": 0,
+                  "storage_class": "Uniform",
+                  "strides": [
+                    4
+                  ],
+                  "terminal_type": {
+                    "bits": 32,
+                    "id": 17,
+                    "kind": "float"
+                  },
+                  "variable_id": 333
+                },
+                "load_word_index": 1466,
+                "member_indices": [
+                  0
+                ],
+                "member_path": [
+                  {
+                    "index": 0,
+                    "index_id": 32,
+                    "kind": "struct_member",
+                    "offset": 0,
+                    "type_id": 330
+                  },
+                  {
+                    "array_stride": 4,
+                    "element_type_id": 17,
+                    "index_id": 339,
+                    "kind": "runtime_array_element"
+                  }
+                ],
+                "op": "OpLoad",
+                "pointer_id": 341,
+                "result_id": 342,
+                "result_type": 17,
+                "set": 0,
+                "static_byte_offset": 0,
+                "static_member_offsets": [
+                  0
+                ],
+                "terminal_type": {
+                  "bits": 32,
+                  "id": 17,
+                  "kind": "float"
+                },
+                "variable_id": 333
+              }
+            ],
+            "ext_inst_histogram": {},
+            "function_loads": [
+              {
+                "id": 358,
+                "load_word_index": 1540,
+                "pointer": {
+                  "base": {
+                    "built_in": null,
+                    "id": 296,
+                    "kind": "variable",
+                    "name": "sum",
+                    "storage_class": "Function"
+                  },
+                  "index_count": 0,
+                  "index_signatures": [],
+                  "truncated_index_count": 0
+                },
+                "store_word_limit": 1540
+              },
+              {
+                "id": 344,
+                "load_word_index": 1475,
+                "pointer": {
+                  "base": {
+                    "built_in": null,
+                    "id": 296,
+                    "kind": "variable",
+                    "name": "sum",
+                    "storage_class": "Function"
+                  },
+                  "index_count": 0,
+                  "index_signatures": [],
+                  "truncated_index_count": 0
+                },
+                "store_word_limit": 1475
+              },
+              {
+                "id": 338,
+                "load_word_index": 1451,
+                "pointer": {
+                  "base": {
+                    "built_in": null,
+                    "id": 317,
+                    "kind": "variable",
+                    "name": "e",
+                    "storage_class": "Function"
+                  },
+                  "index_count": 0,
+                  "index_signatures": [],
+                  "truncated_index_count": 0
+                },
+                "store_word_limit": 1451
+              }
+            ],
+            "function_store_expansions": [
+              {
+                "load_id": 358,
+                "match_strategy": "pointer-signature",
+                "matched_store_word_index": 1307,
+                "store_object_id": 297,
+                "store_object_root": {
+                  "id": 297,
+                  "kind": "constant",
+                  "value_u32": 0
+                },
+                "store_pointer": {
+                  "base": {
+                    "built_in": null,
+                    "id": 296,
+                    "kind": "variable",
+                    "name": "sum",
+                    "storage_class": "Function"
+                  },
+                  "index_count": 0,
+                  "index_signatures": [],
+                  "truncated_index_count": 0
+                },
+                "store_pointer_id": 296
+              },
+              {
+                "load_id": 358,
+                "match_strategy": "pointer-signature",
+                "matched_store_word_index": 1484,
+                "store_object_id": 345,
+                "store_object_root": {
+                  "id": 345,
+                  "kind": "op",
+                  "op": "OpFAdd"
+                },
+                "store_pointer": {
+                  "base": {
+                    "built_in": null,
+                    "id": 296,
+                    "kind": "variable",
+                    "name": "sum",
+                    "storage_class": "Function"
+                  },
+                  "index_count": 0,
+                  "index_signatures": [],
+                  "truncated_index_count": 0
+                },
+                "store_pointer_id": 296
+              },
+              {
+                "load_id": 344,
+                "match_strategy": "pointer-signature",
+                "matched_store_word_index": 1307,
+                "store_object_id": 297,
+                "store_object_root": {
+                  "id": 297,
+                  "kind": "constant",
+                  "value_u32": 0
+                },
+                "store_pointer": {
+                  "base": {
+                    "built_in": null,
+                    "id": 296,
+                    "kind": "variable",
+                    "name": "sum",
+                    "storage_class": "Function"
+                  },
+                  "index_count": 0,
+                  "index_signatures": [],
+                  "truncated_index_count": 0
+                },
+                "store_pointer_id": 296
+              },
+              {
+                "load_id": 338,
+                "match_strategy": "pointer-signature",
+                "matched_store_word_index": 1383,
+                "store_object_id": 86,
+                "store_object_root": {
+                  "id": 86,
+                  "kind": "constant",
+                  "value_u32": 0
+                },
+                "store_pointer": {
+                  "base": {
+                    "built_in": null,
+                    "id": 317,
+                    "kind": "variable",
+                    "name": "e",
+                    "storage_class": "Function"
+                  },
+                  "index_count": 0,
+                  "index_signatures": [],
+                  "truncated_index_count": 0
+                },
+                "store_pointer_id": 317
+              }
+            ],
+            "group_nonuniform_histogram": {},
+            "load_count": 4,
+            "named_arithmetic_histogram": {},
+            "op_histogram": {
+              "OpFAdd": 1,
+              "OpFMul": 1,
+              "OpIAdd": 2
+            },
+            "producer_chain": [
+              {
+                "id": 358,
+                "kind": "load",
+                "pointer_base": {
+                  "built_in": null,
+                  "id": 296,
+                  "kind": "variable",
+                  "name": "sum",
+                  "storage_class": "Function"
+                }
+              },
+              {
+                "id": 297,
+                "kind": "constant",
+                "value_u32": 0
+              },
+              {
+                "id": 345,
+                "kind": "op",
+                "op": "OpFAdd"
+              },
+              {
+                "id": 344,
+                "kind": "load",
+                "pointer_base": {
+                  "built_in": null,
+                  "id": 296,
+                  "kind": "variable",
+                  "name": "sum",
+                  "storage_class": "Function"
+                }
+              },
+              {
+                "id": 297,
+                "kind": "constant",
+                "value_u32": 0
+              },
+              {
+                "id": 296,
+                "kind": "variable"
+              },
+              {
+                "id": 343,
+                "kind": "op",
+                "op": "OpFMul"
+              },
+              {
+                "id": 329,
+                "kind": "id"
+              },
+              {
+                "id": 342,
+                "kind": "load",
+                "pointer_base": {
+                  "binding": 1,
+                  "id": 333,
+                  "kind": "descriptor",
+                  "name": "",
+                  "set": 0,
+                  "storage_class": "Uniform"
+                }
+              },
+              {
+                "base": {
+                  "binding": 1,
+                  "id": 333,
+                  "kind": "descriptor",
+                  "name": "",
+                  "set": 0,
+                  "storage_class": "Uniform"
+                },
+                "index_count": 2,
+                "kind": "access_chain"
+              },
+              {
+                "id": 32
+              },
+              {
+                "id": 32,
+                "kind": "constant",
+                "value_u32": 0
+              },
+              {
+                "id": 339
+              },
+              {
+                "id": 339,
+                "kind": "op",
+                "op": "OpIAdd"
+              },
+              {
+                "id": 337,
+                "kind": "op",
+                "op": "OpIAdd"
+              },
+              {
+                "id": 338,
+                "kind": "load",
+                "pointer_base": {
+                  "built_in": null,
+                  "id": 317,
+                  "kind": "variable",
+                  "name": "e",
+                  "storage_class": "Function"
+                }
+              },
+              {
+                "id": 86,
+                "kind": "constant",
+                "value_u32": 0
+              },
+              {
+                "id": 317,
+                "kind": "variable"
+              },
+              {
+                "id": 296,
+                "kind": "variable"
+              }
+            ],
+            "push_constant_dependencies": [],
+            "reaches_workgroup_load": false,
+            "root": {
+              "id": 358,
+              "kind": "load",
+              "pointer_base": {
+                "built_in": null,
+                "id": 296,
+                "kind": "variable",
+                "name": "sum",
+                "storage_class": "Function"
+              }
+            },
+            "slice_complete": false,
+            "spec_constant_dependencies": [],
+            "truncated_depth_count": 2,
+            "truncated_function_store_expansion_count": 0,
+            "truncated_node_count": 0,
+            "truncation_boundaries": {
+              "truncated_depth_count": 2,
+              "truncated_function_store_expansion_count": 0,
+              "truncated_node_count": 0
+            },
+            "unresolved_id_leaves": [
+              {
+                "id": 329,
+                "kind": "id",
+                "name": ""
+              }
+            ],
+            "workgroup_loads": []
+          },
+          "valid": false,
+          "word_index": 1550
+        }
+      ],
+      "valid_store_count": 0
+    },
     "method": "structural-output-descriptor-and-workgroup-store-chain",
     "notes": [
       "Targets are derived from descriptor/workgroup dataflow, not from a shader hash.",
@@ -2668,7 +3750,10 @@
                       "name": "d_offset",
                       "result_type": 7,
                       "storage_class": "Function"
-                    }
+                    },
+                    "pointer_id": 272,
+                    "result_type": 6,
+                    "word_index": 1527
                   },
                   {
                     "id": 356,
@@ -2680,7 +3765,10 @@
                       "name": "row",
                       "result_type": 7,
                       "storage_class": "Function"
-                    }
+                    },
+                    "pointer_id": 286,
+                    "result_type": 6,
+                    "word_index": 1531
                   }
                 ],
                 "truncated_operands": 0
@@ -2693,6 +3781,462 @@
           "phase": "single",
           "pointer_id": 359,
           "role": "final_output_store",
+          "role_static_support": {
+            "method": "backward-slice-stored-value",
+            "reason": "non-workgroup-stage-role",
+            "requires_workgroup_load": false,
+            "same_workgroup_base_id": false,
+            "schema": "pdocker.spirv.q6-role-static-support.v1",
+            "store_workgroup_base_id": 354,
+            "stored_value_reaches_workgroup_load": false,
+            "support_kind": "non-workgroup-stage",
+            "supported": true,
+            "workgroup_load_base_ids": []
+          },
+          "stored_value": {
+            "builtin_dependencies": [],
+            "constant_dependencies": [
+              {
+                "id": 32,
+                "value_u32": 0
+              },
+              {
+                "id": 86,
+                "value_u32": 0
+              },
+              {
+                "id": 297,
+                "value_u32": 0
+              }
+            ],
+            "depends_on_debug_probe_binding": false,
+            "descriptor_dependencies": [
+              {
+                "binding": 1,
+                "set": 0
+              }
+            ],
+            "descriptor_load_leaf_count": 1,
+            "descriptor_load_leaves": [
+              {
+                "access_chain_result_id": 341,
+                "access_word_index": 1466,
+                "array_strides": [
+                  4
+                ],
+                "binding": 1,
+                "byte_offset": {
+                  "dynamic_terms": [
+                    {
+                      "index_id": 339,
+                      "scale": 4
+                    }
+                  ],
+                  "static": 0,
+                  "unit": "bytes"
+                },
+                "descriptor": {
+                  "binding": 1,
+                  "set": 0,
+                  "storage_class": "Uniform",
+                  "variable_id": 333
+                },
+                "dynamic_indices": [
+                  {
+                    "id": 339,
+                    "ordinal": 1,
+                    "reason": "dynamic-runtime_array-index"
+                  }
+                ],
+                "element": {
+                  "bits": 32,
+                  "id": 17,
+                  "kind": "float"
+                },
+                "layout_fingerprint": {
+                  "binding": 1,
+                  "member_indices": [
+                    0
+                  ],
+                  "member_path": [
+                    {
+                      "index": 0,
+                      "index_id": 32,
+                      "kind": "struct_member",
+                      "offset": 0,
+                      "type_id": 330
+                    },
+                    {
+                      "array_stride": 4,
+                      "element_type_id": 17,
+                      "index_id": 339,
+                      "kind": "runtime_array_element"
+                    }
+                  ],
+                  "offsets": [
+                    0
+                  ],
+                  "set": 0,
+                  "storage_class": "Uniform",
+                  "strides": [
+                    4
+                  ],
+                  "terminal_type": {
+                    "bits": 32,
+                    "id": 17,
+                    "kind": "float"
+                  },
+                  "variable_id": 333
+                },
+                "load_word_index": 1466,
+                "member_indices": [
+                  0
+                ],
+                "member_path": [
+                  {
+                    "index": 0,
+                    "index_id": 32,
+                    "kind": "struct_member",
+                    "offset": 0,
+                    "type_id": 330
+                  },
+                  {
+                    "array_stride": 4,
+                    "element_type_id": 17,
+                    "index_id": 339,
+                    "kind": "runtime_array_element"
+                  }
+                ],
+                "op": "OpLoad",
+                "pointer_id": 341,
+                "result_id": 342,
+                "result_type": 17,
+                "set": 0,
+                "static_byte_offset": 0,
+                "static_member_offsets": [
+                  0
+                ],
+                "terminal_type": {
+                  "bits": 32,
+                  "id": 17,
+                  "kind": "float"
+                },
+                "variable_id": 333
+              }
+            ],
+            "ext_inst_histogram": {},
+            "function_loads": [
+              {
+                "id": 358,
+                "load_word_index": 1540,
+                "pointer": {
+                  "base": {
+                    "built_in": null,
+                    "id": 296,
+                    "kind": "variable",
+                    "name": "sum",
+                    "storage_class": "Function"
+                  },
+                  "index_count": 0,
+                  "index_signatures": [],
+                  "truncated_index_count": 0
+                },
+                "store_word_limit": 1540
+              },
+              {
+                "id": 344,
+                "load_word_index": 1475,
+                "pointer": {
+                  "base": {
+                    "built_in": null,
+                    "id": 296,
+                    "kind": "variable",
+                    "name": "sum",
+                    "storage_class": "Function"
+                  },
+                  "index_count": 0,
+                  "index_signatures": [],
+                  "truncated_index_count": 0
+                },
+                "store_word_limit": 1475
+              },
+              {
+                "id": 338,
+                "load_word_index": 1451,
+                "pointer": {
+                  "base": {
+                    "built_in": null,
+                    "id": 317,
+                    "kind": "variable",
+                    "name": "e",
+                    "storage_class": "Function"
+                  },
+                  "index_count": 0,
+                  "index_signatures": [],
+                  "truncated_index_count": 0
+                },
+                "store_word_limit": 1451
+              }
+            ],
+            "function_store_expansions": [
+              {
+                "load_id": 358,
+                "match_strategy": "pointer-signature",
+                "matched_store_word_index": 1307,
+                "store_object_id": 297,
+                "store_object_root": {
+                  "id": 297,
+                  "kind": "constant",
+                  "value_u32": 0
+                },
+                "store_pointer": {
+                  "base": {
+                    "built_in": null,
+                    "id": 296,
+                    "kind": "variable",
+                    "name": "sum",
+                    "storage_class": "Function"
+                  },
+                  "index_count": 0,
+                  "index_signatures": [],
+                  "truncated_index_count": 0
+                },
+                "store_pointer_id": 296
+              },
+              {
+                "load_id": 358,
+                "match_strategy": "pointer-signature",
+                "matched_store_word_index": 1484,
+                "store_object_id": 345,
+                "store_object_root": {
+                  "id": 345,
+                  "kind": "op",
+                  "op": "OpFAdd"
+                },
+                "store_pointer": {
+                  "base": {
+                    "built_in": null,
+                    "id": 296,
+                    "kind": "variable",
+                    "name": "sum",
+                    "storage_class": "Function"
+                  },
+                  "index_count": 0,
+                  "index_signatures": [],
+                  "truncated_index_count": 0
+                },
+                "store_pointer_id": 296
+              },
+              {
+                "load_id": 344,
+                "match_strategy": "pointer-signature",
+                "matched_store_word_index": 1307,
+                "store_object_id": 297,
+                "store_object_root": {
+                  "id": 297,
+                  "kind": "constant",
+                  "value_u32": 0
+                },
+                "store_pointer": {
+                  "base": {
+                    "built_in": null,
+                    "id": 296,
+                    "kind": "variable",
+                    "name": "sum",
+                    "storage_class": "Function"
+                  },
+                  "index_count": 0,
+                  "index_signatures": [],
+                  "truncated_index_count": 0
+                },
+                "store_pointer_id": 296
+              },
+              {
+                "load_id": 338,
+                "match_strategy": "pointer-signature",
+                "matched_store_word_index": 1383,
+                "store_object_id": 86,
+                "store_object_root": {
+                  "id": 86,
+                  "kind": "constant",
+                  "value_u32": 0
+                },
+                "store_pointer": {
+                  "base": {
+                    "built_in": null,
+                    "id": 317,
+                    "kind": "variable",
+                    "name": "e",
+                    "storage_class": "Function"
+                  },
+                  "index_count": 0,
+                  "index_signatures": [],
+                  "truncated_index_count": 0
+                },
+                "store_pointer_id": 317
+              }
+            ],
+            "group_nonuniform_histogram": {},
+            "load_count": 4,
+            "named_arithmetic_histogram": {},
+            "op_histogram": {
+              "OpFAdd": 1,
+              "OpFMul": 1,
+              "OpIAdd": 2
+            },
+            "producer_chain": [
+              {
+                "id": 358,
+                "kind": "load",
+                "pointer_base": {
+                  "built_in": null,
+                  "id": 296,
+                  "kind": "variable",
+                  "name": "sum",
+                  "storage_class": "Function"
+                }
+              },
+              {
+                "id": 297,
+                "kind": "constant",
+                "value_u32": 0
+              },
+              {
+                "id": 345,
+                "kind": "op",
+                "op": "OpFAdd"
+              },
+              {
+                "id": 344,
+                "kind": "load",
+                "pointer_base": {
+                  "built_in": null,
+                  "id": 296,
+                  "kind": "variable",
+                  "name": "sum",
+                  "storage_class": "Function"
+                }
+              },
+              {
+                "id": 297,
+                "kind": "constant",
+                "value_u32": 0
+              },
+              {
+                "id": 296,
+                "kind": "variable"
+              },
+              {
+                "id": 343,
+                "kind": "op",
+                "op": "OpFMul"
+              },
+              {
+                "id": 329,
+                "kind": "id"
+              },
+              {
+                "id": 342,
+                "kind": "load",
+                "pointer_base": {
+                  "binding": 1,
+                  "id": 333,
+                  "kind": "descriptor",
+                  "name": "",
+                  "set": 0,
+                  "storage_class": "Uniform"
+                }
+              },
+              {
+                "base": {
+                  "binding": 1,
+                  "id": 333,
+                  "kind": "descriptor",
+                  "name": "",
+                  "set": 0,
+                  "storage_class": "Uniform"
+                },
+                "index_count": 2,
+                "kind": "access_chain"
+              },
+              {
+                "id": 32
+              },
+              {
+                "id": 32,
+                "kind": "constant",
+                "value_u32": 0
+              },
+              {
+                "id": 339
+              },
+              {
+                "id": 339,
+                "kind": "op",
+                "op": "OpIAdd"
+              },
+              {
+                "id": 337,
+                "kind": "op",
+                "op": "OpIAdd"
+              },
+              {
+                "id": 338,
+                "kind": "load",
+                "pointer_base": {
+                  "built_in": null,
+                  "id": 317,
+                  "kind": "variable",
+                  "name": "e",
+                  "storage_class": "Function"
+                }
+              },
+              {
+                "id": 86,
+                "kind": "constant",
+                "value_u32": 0
+              },
+              {
+                "id": 317,
+                "kind": "variable"
+              },
+              {
+                "id": 296,
+                "kind": "variable"
+              }
+            ],
+            "push_constant_dependencies": [],
+            "reaches_workgroup_load": false,
+            "root": {
+              "id": 358,
+              "kind": "load",
+              "pointer_base": {
+                "built_in": null,
+                "id": 296,
+                "kind": "variable",
+                "name": "sum",
+                "storage_class": "Function"
+              }
+            },
+            "slice_complete": false,
+            "spec_constant_dependencies": [],
+            "truncated_depth_count": 2,
+            "truncated_function_store_expansion_count": 0,
+            "truncated_node_count": 0,
+            "truncation_boundaries": {
+              "truncated_depth_count": 2,
+              "truncated_function_store_expansion_count": 0,
+              "truncated_node_count": 0
+            },
+            "unresolved_id_leaves": [
+              {
+                "id": 329,
+                "kind": "id",
+                "name": ""
+              }
+            ],
+            "workgroup_loads": []
+          },
           "word_index": 1550
         },
         "preceding_workgroup_stores": [],
@@ -2766,7 +4310,10 @@
                     "name": "d_offset",
                     "result_type": 7,
                     "storage_class": "Function"
-                  }
+                  },
+                  "pointer_id": 272,
+                  "result_type": 6,
+                  "word_index": 1527
                 },
                 {
                   "id": 356,
@@ -2778,7 +4325,10 @@
                     "name": "row",
                     "result_type": 7,
                     "storage_class": "Function"
-                  }
+                  },
+                  "pointer_id": 286,
+                  "result_type": 6,
+                  "word_index": 1531
                 }
               ],
               "truncated_operands": 0
@@ -2791,9 +4341,514 @@
         "phase": "single",
         "pointer_id": 359,
         "role": "final_output_store",
+        "role_static_support": {
+          "method": "backward-slice-stored-value",
+          "reason": "non-workgroup-stage-role",
+          "requires_workgroup_load": false,
+          "same_workgroup_base_id": false,
+          "schema": "pdocker.spirv.q6-role-static-support.v1",
+          "store_workgroup_base_id": 354,
+          "stored_value_reaches_workgroup_load": false,
+          "support_kind": "non-workgroup-stage",
+          "supported": true,
+          "workgroup_load_base_ids": []
+        },
+        "stored_value": {
+          "builtin_dependencies": [],
+          "constant_dependencies": [
+            {
+              "id": 32,
+              "value_u32": 0
+            },
+            {
+              "id": 86,
+              "value_u32": 0
+            },
+            {
+              "id": 297,
+              "value_u32": 0
+            }
+          ],
+          "depends_on_debug_probe_binding": false,
+          "descriptor_dependencies": [
+            {
+              "binding": 1,
+              "set": 0
+            }
+          ],
+          "descriptor_load_leaf_count": 1,
+          "descriptor_load_leaves": [
+            {
+              "access_chain_result_id": 341,
+              "access_word_index": 1466,
+              "array_strides": [
+                4
+              ],
+              "binding": 1,
+              "byte_offset": {
+                "dynamic_terms": [
+                  {
+                    "index_id": 339,
+                    "scale": 4
+                  }
+                ],
+                "static": 0,
+                "unit": "bytes"
+              },
+              "descriptor": {
+                "binding": 1,
+                "set": 0,
+                "storage_class": "Uniform",
+                "variable_id": 333
+              },
+              "dynamic_indices": [
+                {
+                  "id": 339,
+                  "ordinal": 1,
+                  "reason": "dynamic-runtime_array-index"
+                }
+              ],
+              "element": {
+                "bits": 32,
+                "id": 17,
+                "kind": "float"
+              },
+              "layout_fingerprint": {
+                "binding": 1,
+                "member_indices": [
+                  0
+                ],
+                "member_path": [
+                  {
+                    "index": 0,
+                    "index_id": 32,
+                    "kind": "struct_member",
+                    "offset": 0,
+                    "type_id": 330
+                  },
+                  {
+                    "array_stride": 4,
+                    "element_type_id": 17,
+                    "index_id": 339,
+                    "kind": "runtime_array_element"
+                  }
+                ],
+                "offsets": [
+                  0
+                ],
+                "set": 0,
+                "storage_class": "Uniform",
+                "strides": [
+                  4
+                ],
+                "terminal_type": {
+                  "bits": 32,
+                  "id": 17,
+                  "kind": "float"
+                },
+                "variable_id": 333
+              },
+              "load_word_index": 1466,
+              "member_indices": [
+                0
+              ],
+              "member_path": [
+                {
+                  "index": 0,
+                  "index_id": 32,
+                  "kind": "struct_member",
+                  "offset": 0,
+                  "type_id": 330
+                },
+                {
+                  "array_stride": 4,
+                  "element_type_id": 17,
+                  "index_id": 339,
+                  "kind": "runtime_array_element"
+                }
+              ],
+              "op": "OpLoad",
+              "pointer_id": 341,
+              "result_id": 342,
+              "result_type": 17,
+              "set": 0,
+              "static_byte_offset": 0,
+              "static_member_offsets": [
+                0
+              ],
+              "terminal_type": {
+                "bits": 32,
+                "id": 17,
+                "kind": "float"
+              },
+              "variable_id": 333
+            }
+          ],
+          "ext_inst_histogram": {},
+          "function_loads": [
+            {
+              "id": 358,
+              "load_word_index": 1540,
+              "pointer": {
+                "base": {
+                  "built_in": null,
+                  "id": 296,
+                  "kind": "variable",
+                  "name": "sum",
+                  "storage_class": "Function"
+                },
+                "index_count": 0,
+                "index_signatures": [],
+                "truncated_index_count": 0
+              },
+              "store_word_limit": 1540
+            },
+            {
+              "id": 344,
+              "load_word_index": 1475,
+              "pointer": {
+                "base": {
+                  "built_in": null,
+                  "id": 296,
+                  "kind": "variable",
+                  "name": "sum",
+                  "storage_class": "Function"
+                },
+                "index_count": 0,
+                "index_signatures": [],
+                "truncated_index_count": 0
+              },
+              "store_word_limit": 1475
+            },
+            {
+              "id": 338,
+              "load_word_index": 1451,
+              "pointer": {
+                "base": {
+                  "built_in": null,
+                  "id": 317,
+                  "kind": "variable",
+                  "name": "e",
+                  "storage_class": "Function"
+                },
+                "index_count": 0,
+                "index_signatures": [],
+                "truncated_index_count": 0
+              },
+              "store_word_limit": 1451
+            }
+          ],
+          "function_store_expansions": [
+            {
+              "load_id": 358,
+              "match_strategy": "pointer-signature",
+              "matched_store_word_index": 1307,
+              "store_object_id": 297,
+              "store_object_root": {
+                "id": 297,
+                "kind": "constant",
+                "value_u32": 0
+              },
+              "store_pointer": {
+                "base": {
+                  "built_in": null,
+                  "id": 296,
+                  "kind": "variable",
+                  "name": "sum",
+                  "storage_class": "Function"
+                },
+                "index_count": 0,
+                "index_signatures": [],
+                "truncated_index_count": 0
+              },
+              "store_pointer_id": 296
+            },
+            {
+              "load_id": 358,
+              "match_strategy": "pointer-signature",
+              "matched_store_word_index": 1484,
+              "store_object_id": 345,
+              "store_object_root": {
+                "id": 345,
+                "kind": "op",
+                "op": "OpFAdd"
+              },
+              "store_pointer": {
+                "base": {
+                  "built_in": null,
+                  "id": 296,
+                  "kind": "variable",
+                  "name": "sum",
+                  "storage_class": "Function"
+                },
+                "index_count": 0,
+                "index_signatures": [],
+                "truncated_index_count": 0
+              },
+              "store_pointer_id": 296
+            },
+            {
+              "load_id": 344,
+              "match_strategy": "pointer-signature",
+              "matched_store_word_index": 1307,
+              "store_object_id": 297,
+              "store_object_root": {
+                "id": 297,
+                "kind": "constant",
+                "value_u32": 0
+              },
+              "store_pointer": {
+                "base": {
+                  "built_in": null,
+                  "id": 296,
+                  "kind": "variable",
+                  "name": "sum",
+                  "storage_class": "Function"
+                },
+                "index_count": 0,
+                "index_signatures": [],
+                "truncated_index_count": 0
+              },
+              "store_pointer_id": 296
+            },
+            {
+              "load_id": 338,
+              "match_strategy": "pointer-signature",
+              "matched_store_word_index": 1383,
+              "store_object_id": 86,
+              "store_object_root": {
+                "id": 86,
+                "kind": "constant",
+                "value_u32": 0
+              },
+              "store_pointer": {
+                "base": {
+                  "built_in": null,
+                  "id": 317,
+                  "kind": "variable",
+                  "name": "e",
+                  "storage_class": "Function"
+                },
+                "index_count": 0,
+                "index_signatures": [],
+                "truncated_index_count": 0
+              },
+              "store_pointer_id": 317
+            }
+          ],
+          "group_nonuniform_histogram": {},
+          "load_count": 4,
+          "named_arithmetic_histogram": {},
+          "op_histogram": {
+            "OpFAdd": 1,
+            "OpFMul": 1,
+            "OpIAdd": 2
+          },
+          "producer_chain": [
+            {
+              "id": 358,
+              "kind": "load",
+              "pointer_base": {
+                "built_in": null,
+                "id": 296,
+                "kind": "variable",
+                "name": "sum",
+                "storage_class": "Function"
+              }
+            },
+            {
+              "id": 297,
+              "kind": "constant",
+              "value_u32": 0
+            },
+            {
+              "id": 345,
+              "kind": "op",
+              "op": "OpFAdd"
+            },
+            {
+              "id": 344,
+              "kind": "load",
+              "pointer_base": {
+                "built_in": null,
+                "id": 296,
+                "kind": "variable",
+                "name": "sum",
+                "storage_class": "Function"
+              }
+            },
+            {
+              "id": 297,
+              "kind": "constant",
+              "value_u32": 0
+            },
+            {
+              "id": 296,
+              "kind": "variable"
+            },
+            {
+              "id": 343,
+              "kind": "op",
+              "op": "OpFMul"
+            },
+            {
+              "id": 329,
+              "kind": "id"
+            },
+            {
+              "id": 342,
+              "kind": "load",
+              "pointer_base": {
+                "binding": 1,
+                "id": 333,
+                "kind": "descriptor",
+                "name": "",
+                "set": 0,
+                "storage_class": "Uniform"
+              }
+            },
+            {
+              "base": {
+                "binding": 1,
+                "id": 333,
+                "kind": "descriptor",
+                "name": "",
+                "set": 0,
+                "storage_class": "Uniform"
+              },
+              "index_count": 2,
+              "kind": "access_chain"
+            },
+            {
+              "id": 32
+            },
+            {
+              "id": 32,
+              "kind": "constant",
+              "value_u32": 0
+            },
+            {
+              "id": 339
+            },
+            {
+              "id": 339,
+              "kind": "op",
+              "op": "OpIAdd"
+            },
+            {
+              "id": 337,
+              "kind": "op",
+              "op": "OpIAdd"
+            },
+            {
+              "id": 338,
+              "kind": "load",
+              "pointer_base": {
+                "built_in": null,
+                "id": 317,
+                "kind": "variable",
+                "name": "e",
+                "storage_class": "Function"
+              }
+            },
+            {
+              "id": 86,
+              "kind": "constant",
+              "value_u32": 0
+            },
+            {
+              "id": 317,
+              "kind": "variable"
+            },
+            {
+              "id": 296,
+              "kind": "variable"
+            }
+          ],
+          "push_constant_dependencies": [],
+          "reaches_workgroup_load": false,
+          "root": {
+            "id": 358,
+            "kind": "load",
+            "pointer_base": {
+              "built_in": null,
+              "id": 296,
+              "kind": "variable",
+              "name": "sum",
+              "storage_class": "Function"
+            }
+          },
+          "slice_complete": false,
+          "spec_constant_dependencies": [],
+          "truncated_depth_count": 2,
+          "truncated_function_store_expansion_count": 0,
+          "truncated_node_count": 0,
+          "truncation_boundaries": {
+            "truncated_depth_count": 2,
+            "truncated_function_store_expansion_count": 0,
+            "truncated_node_count": 0
+          },
+          "unresolved_id_leaves": [
+            {
+              "id": 329,
+              "kind": "id",
+              "name": ""
+            }
+          ],
+          "workgroup_loads": []
+        },
         "word_index": 1550
       }
     ],
+    "q6_arithmetic_window_evidence": {
+      "available": true,
+      "method": "static-word-order-window-between-final-output-stores",
+      "notes": [
+        "This is static word-order evidence for named SPIR-V arithmetic instructions in each Q6 phase window.",
+        "It complements bounded backward slices, which may intentionally truncate deep producer graphs."
+      ],
+      "schema": "pdocker.spirv.q6-arithmetic-window-evidence.v1",
+      "window_count": 1,
+      "windows": [
+        {
+          "ext_inst_histogram": {},
+          "group_nonuniform_histogram": {},
+          "named_arithmetic_histogram": {},
+          "output_store_word_index": 1550,
+          "phase": "single",
+          "window_start_exclusive_word_index": -1
+        }
+      ]
+    },
+    "q6_barrier_window_evidence": {
+      "available": true,
+      "barrier_event_count": 0,
+      "method": "static-word-order-window-between-workgroup-stores-and-final-output-stores",
+      "notes": [
+        "This is static word-order evidence, not a proof of dynamic execution order.",
+        "Barrier semantics are decoded as SPIR-V bit flags; WorkgroupMemory plus AcquireRelease is required for the Q6 workgroup windows."
+      ],
+      "schema": "pdocker.spirv.q6-barrier-window-evidence.v1",
+      "window_count": 1,
+      "windows": [
+        {
+          "all_barriers_are_workgroup_acquire_release": true,
+          "all_workgroup_stores_have_following_barrier": true,
+          "arithmetic_window": {
+            "ext_inst_histogram": {},
+            "group_nonuniform_histogram": {},
+            "named_arithmetic_histogram": {}
+          },
+          "barrier_word_indices": [],
+          "barriers": [],
+          "output_store_word_index": 1550,
+          "phase": "single",
+          "window_start_exclusive_word_index": -1,
+          "workgroup_store_barrier_pairs": [],
+          "workgroup_store_word_indices": []
+        }
+      ]
+    },
     "workgroup_store_count": 0
   },
   "schema": "pdocker.spirv.probe-manifest.v1",

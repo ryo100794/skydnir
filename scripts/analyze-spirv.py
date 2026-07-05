@@ -64,6 +64,22 @@ OP_NAMES = {
     83: "OpVectorShuffle",
     84: "OpVectorExtractDynamic",
     86: "OpVectorTimesScalar",
+    109: "OpConvertFToU",
+    110: "OpConvertFToS",
+    111: "OpConvertSToF",
+    112: "OpConvertUToF",
+    113: "OpUConvert",
+    114: "OpSConvert",
+    115: "OpFConvert",
+    116: "OpQuantizeToF16",
+    117: "OpConvertPtrToU",
+    118: "OpSatConvertSToU",
+    119: "OpSatConvertUToS",
+    120: "OpConvertUToPtr",
+    121: "OpPtrCastToGeneric",
+    122: "OpGenericCastToPtr",
+    123: "OpGenericCastToPtrExplicit",
+    124: "OpBitcast",
     128: "OpIAdd",
     129: "OpFAdd",
     130: "OpISub",
@@ -132,6 +148,12 @@ GROUP_OPERATION_NAMES = {
     1: "InclusiveScan",
     2: "ExclusiveScan",
     3: "ClusteredReduce",
+}
+
+VALUE_RESULT_OPCODES = {
+    80, 81, 82, 83, 84, 86,
+    109, 110, 111, 112, 113, 114, 115, 116,
+    117, 118, 119, 120, 121, 122, 123, 124,
 }
 
 TERMINATOR_OPS = {249, 250, 251, 252, 253, 254, 255}
@@ -647,9 +669,56 @@ def build_q6_probe_targets(module: dict, debug_descriptor: dict | None = None) -
         candidate = candidate_by_block.get((block.get("function_id"), block.get("block_label")), {})
         pointer_origin = store.get("pointer_origin") or {}
         base = pointer_origin.get("base") or pointer_origin
+        store_base_id = base.get("id") if isinstance(base.get("id"), int) else None
+        stored_value_summary = collect_expression_dependencies(store.get("object_expr"), store_word_limit=word_index)
+        workgroup_load_base_ids = sorted({
+            load.get("pointer_base", {}).get("id")
+            for load in stored_value_summary.get("workgroup_loads", [])
+            if isinstance(load, dict)
+            and isinstance(load.get("pointer_base"), dict)
+            and isinstance(load.get("pointer_base", {}).get("id"), int)
+        })
+        same_workgroup_base = store_base_id in workgroup_load_base_ids if store_base_id is not None else False
+        descriptor_load_leaf_count = int(stored_value_summary.get("descriptor_load_leaf_count") or 0)
+        role_requires_workgroup_load = False
+        if role == "reduction_candidate":
+            if bool(stored_value_summary.get("reaches_workgroup_load")) and same_workgroup_base:
+                role_supported = True
+                role_reason = "stored-value-reaches-same-workgroup-base"
+                role_support_kind = "same-workgroup-load"
+                role_requires_workgroup_load = True
+            elif descriptor_load_leaf_count > 0:
+                role_supported = True
+                role_reason = "stored-value-reaches-descriptor-load"
+                role_support_kind = "descriptor-load"
+            else:
+                role_supported = False
+                role_reason = "stored-value-has-no-supported-reduction-source"
+                role_support_kind = "unsupported"
+        elif role in {"partial_to_workgroup_candidate", "post_reduction_workgroup_candidate"}:
+            role_supported = True
+            role_reason = "workgroup-store-role-does-not-require-reduction-load"
+            role_support_kind = "workgroup-stage"
+        else:
+            role_supported = True
+            role_reason = "non-workgroup-stage-role"
+            role_support_kind = "non-workgroup-stage"
         item = {
             "phase": phase,
             "role": role,
+            "role_static_support": {
+                "schema": "pdocker.spirv.q6-role-static-support.v1",
+                "method": "backward-slice-stored-value",
+                "supported": role_supported,
+                "reason": role_reason,
+                "support_kind": role_support_kind,
+                "requires_workgroup_load": role_requires_workgroup_load,
+                "stored_value_reaches_workgroup_load": bool(stored_value_summary.get("reaches_workgroup_load")),
+                "store_workgroup_base_id": store_base_id,
+                "workgroup_load_base_ids": workgroup_load_base_ids,
+                "same_workgroup_base_id": same_workgroup_base,
+            },
+            "stored_value": stored_value_summary,
             "word_index": word_index,
             "object_id": store.get("object_id"),
             "pointer_id": store.get("pointer_id"),
@@ -2052,7 +2121,7 @@ def analyze_spirv(path: Path) -> dict:
                     "operand_ids": inst[5:],
                 }
             )
-        elif opcode in (80, 81, 82, 83, 84, 86) and len(inst) >= 4:
+        elif opcode in VALUE_RESULT_OPCODES and len(inst) >= 4:
             id_defs[inst[2]] = {
                 "op": OP_NAMES.get(opcode, f"Op{opcode}"),
                 "result_type": inst[1],

@@ -10973,6 +10973,24 @@ class GpuAbiContractTest(unittest.TestCase):
                 for target in by_phase["full"]["preceding_workgroup_stores"][:2]
             ],
         )
+        for target in [
+            by_phase["tail"]["preceding_workgroup_stores"][1],
+            by_phase["full"]["preceding_workgroup_stores"][1],
+        ]:
+            self.assertEqual(target["role"], "reduction_candidate")
+            role_static = target["role_static_support"]
+            stored_value = target["stored_value"]
+            self.assertEqual(role_static["schema"], "pdocker.spirv.q6-role-static-support.v1")
+            self.assertEqual(role_static["method"], "backward-slice-stored-value")
+            self.assertTrue(role_static["supported"])
+            self.assertTrue(role_static["requires_workgroup_load"])
+            self.assertTrue(role_static["stored_value_reaches_workgroup_load"])
+            self.assertTrue(role_static["same_workgroup_base_id"])
+            self.assertEqual(role_static["store_workgroup_base_id"], target["base"]["id"])
+            self.assertIn(target["base"]["id"], role_static["workgroup_load_base_ids"])
+            self.assertTrue(stored_value["reaches_workgroup_load"])
+            self.assertGreaterEqual(len(stored_value["workgroup_loads"]), 1)
+            self.assertFalse(stored_value["depends_on_debug_probe_binding"])
 
     def test_spirv_analyzer_follows_q6_function_accumulator_final_store_flow(self):
         self.assertTrue(Q6_FUNCTION_ACCUMULATOR_SPV.exists(), "Q6 Function-accumulator SPIR-V evidence must be preserved")
@@ -11016,8 +11034,18 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertEqual([store["word_index"] for store in flow["stores"]], [4053, 7371])
         self.assertEqual(flow["debug_probe_descriptor"], {"set": 0, "binding": 6})
         expected_descriptor_leaves = [
-            [(3920, 2701, 2700, 3, 184, 0, 4), (3991, 2723, 2722, 4, 213, 0, 4)],
-            [(7238, 1742, 1741, 3, 184, 0, 4), (7309, 1764, 1763, 4, 213, 0, 4)],
+            [
+                (2156, 2145, 2144, 0, 294, 208, 210),
+                (3172, 2479, 2478, 0, 294, 208, 210),
+                (3920, 2701, 2700, 3, 184, 0, 4),
+                (3991, 2723, 2722, 4, 213, 0, 4),
+            ],
+            [
+                (2156, 2145, 2144, 0, 294, 208, 210),
+                (3172, 2479, 2478, 0, 294, 208, 210),
+                (7238, 1742, 1741, 3, 184, 0, 4),
+                (7309, 1764, 1763, 4, 213, 0, 4),
+            ],
         ]
         for store_index, store in enumerate(flow["stores"]):
             stored = store["stored_value"]
@@ -11048,12 +11076,12 @@ class GpuAbiContractTest(unittest.TestCase):
             )
             self.assertEqual([], output_index["descriptor_dependencies"])
             self.assertEqual(
-                [(0, 3), (0, 4)],
+                [(0, 0), (0, 3), (0, 4)],
                 [(dep["set"], dep["binding"]) for dep in stored["descriptor_dependencies"]],
             )
             self.assertFalse(stored["slice_complete"])
             self.assertGreater(stored["truncation_boundaries"]["truncated_node_count"], 0)
-            self.assertEqual(2, stored["descriptor_load_leaf_count"])
+            self.assertEqual(4, stored["descriptor_load_leaf_count"])
             leaves = stored["descriptor_load_leaves"]
             self.assertEqual(
                 expected_descriptor_leaves[store_index],
@@ -11070,15 +11098,18 @@ class GpuAbiContractTest(unittest.TestCase):
                     for leaf in leaves
                 ],
             )
-            self.assertEqual([(0, 3), (0, 4)], [(leaf["descriptor"]["set"], leaf["descriptor"]["binding"]) for leaf in leaves])
-            self.assertEqual([0, 0], [leaf["member_path"][0]["index"] for leaf in leaves])
             self.assertEqual(
-                ["runtime_array_element", "runtime_array_element"],
+                [(0, 0), (0, 0), (0, 3), (0, 4)],
+                [(leaf["descriptor"]["set"], leaf["descriptor"]["binding"]) for leaf in leaves],
+            )
+            self.assertEqual([0, 0, 0, 0], [leaf["member_path"][0]["index"] for leaf in leaves])
+            self.assertEqual(
+                ["runtime_array_element", "runtime_array_element", "runtime_array_element", "runtime_array_element"],
                 [leaf["member_path"][1]["kind"] for leaf in leaves],
             )
-            self.assertEqual([4, 4], [leaf["member_path"][1]["array_stride"] for leaf in leaves])
-            self.assertEqual(["float", "float"], [leaf["terminal_type"]["kind"] for leaf in leaves])
-            self.assertEqual([32, 32], [leaf["terminal_type"]["bits"] for leaf in leaves])
+            self.assertEqual([210, 210, 4, 4], [leaf["member_path"][1]["array_stride"] for leaf in leaves])
+            self.assertEqual(["float", "float", "float", "float"], [leaf["terminal_type"]["kind"] for leaf in leaves])
+            self.assertEqual([16, 16, 32, 32], [leaf["terminal_type"]["bits"] for leaf in leaves])
             self.assertNotIn(6, [leaf["descriptor"]["binding"] for leaf in leaves])
 
     def test_spirv_analyzer_reports_q6_barrier_window_evidence(self):
@@ -11473,6 +11504,46 @@ class GpuAbiContractTest(unittest.TestCase):
                 if target.get("role") != "reduction_candidate"
             ]
             cases.append((broken, "q6_probe_targets.priority_targets must include a reduction_candidate when available"))
+
+            reduction_valid = valid
+            if not any(
+                target.get("role") == "reduction_candidate"
+                for target in reduction_valid["q6_probe_targets"].get("priority_targets", [])
+            ):
+                reduction_valid = json.loads((
+                    ROOT / "docs" / "test" / "spirv-q6k-native-adb45055" / "native-q6-source.probe.json"
+                ).read_text(encoding="utf-8"))
+            self.assertTrue(any(
+                target.get("role") == "reduction_candidate"
+                for target in reduction_valid["q6_probe_targets"].get("priority_targets", [])
+            ))
+
+            broken = json.loads(json.dumps(reduction_valid))
+            target = next(
+                target
+                for target in broken["q6_probe_targets"]["priority_targets"]
+                if target.get("role") == "reduction_candidate"
+            )
+            target["role_static_support"]["supported"] = False
+            cases.append((broken, "role_static_support.supported must be true for reduction_candidate"))
+
+            broken = json.loads(json.dumps(reduction_valid))
+            target = next(
+                target
+                for target in broken["q6_probe_targets"]["priority_targets"]
+                if target.get("role") == "reduction_candidate"
+            )
+            target["stored_value"]["reaches_workgroup_load"] = False
+            cases.append((broken, "stored_value.reaches_workgroup_load must be true for reduction_candidate"))
+
+            broken = json.loads(json.dumps(reduction_valid))
+            target = next(
+                target
+                for target in broken["q6_probe_targets"]["priority_targets"]
+                if target.get("role") == "reduction_candidate"
+            )
+            target["role_static_support"]["same_workgroup_base_id"] = False
+            cases.append((broken, "role_static_support.same_workgroup_base_id must be true for reduction_candidate"))
 
             broken = json.loads(json.dumps(valid))
             broken["q6_probe_targets"]["final_store_value_flow"]["stores"][0]["debug_probe_exclusion"]["output_index_depends_on_debug_probe"] = True
