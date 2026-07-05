@@ -6558,7 +6558,6 @@ static int insert_q6k_final_store_pre_barrier(
         DECORATION_DESCRIPTOR_SET = 34,
         Q6_OUTPUT_BINDING = 2,
         Q6_MIN_GROUP_REDUCTIONS = 2,
-        Q6_EXPECTED_FINAL_OUTPUT_STORES = 2,
         Q6_MAX_FINAL_STORE_INSERTS = 4,
     };
     if (!code || !*code || !bytes || *bytes < 20 ||
@@ -6713,8 +6712,7 @@ static int insert_q6k_final_store_pre_barrier(
         }
         i += word_count;
     }
-    if (final_output_store_count != Q6_EXPECTED_FINAL_OUTPUT_STORES ||
-        insert_count == 0) {
+    if (final_output_store_count == 0 || insert_count == 0) {
         goto cleanup;
     }
 
@@ -7111,7 +7109,6 @@ static int lower_q6k_storage16_loads_to_storage8(
         OP_SHIFT_LEFT_LOGICAL = 196,
         OP_BITWISE_OR = 197,
         STORAGE_CLASS_STORAGE_BUFFER = 12,
-        Q6_STORAGE16_EXPECTED_LOADS = 24,
     };
     if (lowered_count) *lowered_count = 0;
     if (!code || !*code || !bytes || *bytes < 20 ||
@@ -7178,6 +7175,7 @@ static int lower_q6k_storage16_loads_to_storage8(
         return 0;
     }
 
+    size_t candidate_count = 0;
     size_t pattern_count = 0;
     for (size_t i = 5; i < words;) {
         const uint32_t inst = in[i];
@@ -7193,19 +7191,21 @@ static int lower_q6k_storage16_loads_to_storage8(
             const uint16_t load_wc = (uint16_t)(load_inst >> 16);
             const uint16_t load_op = (uint16_t)(load_inst & 0xffffu);
             const uint32_t member = in[i + 6];
-            if (load_wc == 4 && load + load_wc <= words && load_op == OP_LOAD &&
-                in[load + 1] == ushort_type &&
-                in[load + 3] == in[i + 2] &&
-                q6_storage16_member_is_byte_lane(in, words, member) &&
+            if (q6_storage16_member_is_byte_lane(in, words, member) &&
                 spirv_count_id_uses(in, words, in[i + 2], i) == 1) {
-                pattern_count++;
-                i = load + load_wc;
-                continue;
+                candidate_count++;
+                if (load_wc == 4 && load + load_wc <= words && load_op == OP_LOAD &&
+                    in[load + 1] == ushort_type &&
+                    in[load + 3] == in[i + 2]) {
+                    pattern_count++;
+                    i = load + load_wc;
+                    continue;
+                }
             }
         }
         i += word_count;
     }
-    if (pattern_count != Q6_STORAGE16_EXPECTED_LOADS) return 0;
+    if (pattern_count == 0 || pattern_count != candidate_count) return 0;
 
     const int add_ptr_uchar_type = ptr_uchar_type == 0;
     const uint32_t new_ptr_uchar_type = add_ptr_uchar_type ? bound++ : ptr_uchar_type;
@@ -7380,7 +7380,6 @@ static int lower_q6k_u32_to_u8vec4_bitcasts(
         OP_SHIFT_RIGHT_LOGICAL = 194,
         OP_BITWISE_OR = 197,
         OP_COMPOSITE_CONSTRUCT = 80,
-        Q6_U32_TO_U8VEC4_EXPECTED_BITCASTS = 16,
     };
     if (lowered_count) *lowered_count = 0;
     if (!code || !*code || !bytes || *bytes < 20 ||
@@ -7460,6 +7459,7 @@ static int lower_q6k_u32_to_u8vec4_bitcasts(
         i += word_count;
     }
 
+    size_t candidate_count = 0;
     size_t pattern_count = 0;
     for (size_t i = 5; i < words;) {
         const uint32_t inst = in[i];
@@ -7473,14 +7473,16 @@ static int lower_q6k_u32_to_u8vec4_bitcasts(
         uint16_t user_op = 0;
         if (op == OP_BITCAST && word_count == 4 && in[i + 1] == uchar4_type &&
             in[i + 3] < bound && type_by_id[in[i + 3]] == uint_type &&
-            opcode_by_id[in[i + 3]] == OP_BITWISE_OR &&
-            spirv_single_id_user_opcode(in, words, in[i + 2], i, &user_op) &&
-            user_op == OP_CONVERT_U_TO_F) {
-            pattern_count++;
+            opcode_by_id[in[i + 3]] == OP_BITWISE_OR) {
+            candidate_count++;
+            if (spirv_single_id_user_opcode(in, words, in[i + 2], i, &user_op) &&
+                user_op == OP_CONVERT_U_TO_F) {
+                pattern_count++;
+            }
         }
         i += word_count;
     }
-    if (pattern_count != Q6_U32_TO_U8VEC4_EXPECTED_BITCASTS) {
+    if (pattern_count == 0 || pattern_count != candidate_count) {
         free(type_by_id);
         free(opcode_by_id);
         return 0;

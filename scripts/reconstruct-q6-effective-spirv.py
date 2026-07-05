@@ -490,7 +490,6 @@ def lower_q6k_storage16_loads_to_storage8(words: list[int]) -> tuple[list[int], 
     OP_SHIFT_LEFT_LOGICAL = 196
     OP_BITWISE_OR = 197
     STORAGE_CLASS_STORAGE_BUFFER = 12
-    Q6_STORAGE16_EXPECTED_LOADS = 24
 
     if len(words) < 5 or words[0] != SPIRV_MAGIC:
         return list(words), {"phase": "q6-storage16-loads-lowered", "changed": False, "reason": "invalid-spv"}
@@ -546,6 +545,7 @@ def lower_q6k_storage16_loads_to_storage8(words: list[int]) -> tuple[list[int], 
     if not all([first_function, uint_type, uchar_type, ushort_type, ptr_ushort_type, uint_1, uint_2, uint_8]) or uchar_type_end is None:
         return list(words), {"phase": "q6-storage16-loads-lowered", "changed": False, "reason": "missing-required-types-or-constants"}
 
+    candidate_count = 0
     pattern_count = 0
     for index, opcode, word_count, inst in iter_instructions(words):
         if opcode != OP_ACCESS_CHAIN or word_count != 8:
@@ -557,6 +557,7 @@ def lower_q6k_storage16_loads_to_storage8(words: list[int]) -> tuple[list[int], 
             continue
         if _spirv_count_id_uses(words, inst[2], index) != 1:
             continue
+        candidate_count += 1
         load_i = index + word_count
         if load_i >= len(words):
             continue
@@ -566,8 +567,8 @@ def lower_q6k_storage16_loads_to_storage8(words: list[int]) -> tuple[list[int], 
         load_inst = words[load_i:load_i + load_wc]
         if load_wc == 4 and load_i + load_wc <= len(words) and load_opcode == OP_LOAD and load_inst[1] == ushort_type and load_inst[3] == inst[2]:
             pattern_count += 1
-    if pattern_count != Q6_STORAGE16_EXPECTED_LOADS:
-        return list(words), {"phase": "q6-storage16-loads-lowered", "changed": False, "pattern_count": pattern_count, "expected_count": Q6_STORAGE16_EXPECTED_LOADS}
+    if pattern_count == 0 or pattern_count != candidate_count:
+        return list(words), {"phase": "q6-storage16-loads-lowered", "changed": False, "pattern_count": pattern_count, "candidate_count": candidate_count, "reason": "incomplete-eligible-pattern-set"}
 
     add_ptr_uchar_type = ptr_uchar_type == 0
     new_ptr_uchar_type = bound if add_ptr_uchar_type else ptr_uchar_type
@@ -659,7 +660,6 @@ def lower_q6k_u32_to_u8vec4_bitcasts(words: list[int]) -> tuple[list[int], dict[
     OP_SHIFT_RIGHT_LOGICAL = 194
     OP_BITWISE_OR = 197
     OP_COMPOSITE_CONSTRUCT = 80
-    Q6_U32_TO_U8VEC4_EXPECTED_BITCASTS = 16
     if len(words) < 5 or words[0] != SPIRV_MAGIC:
         return list(words), {"phase": "q6-u32-to-u8vec4-bitcasts-lowered", "changed": False, "reason": "invalid-spv"}
     bound = words[3]
@@ -694,22 +694,27 @@ def lower_q6k_u32_to_u8vec4_bitcasts(words: list[int]) -> tuple[list[int], dict[
         if word_count >= 3 and inst[2] < bound and inst[1] in (uint_type, uchar_type, uchar4_type):
             type_by_id[inst[2]] = inst[1]
             opcode_by_id[inst[2]] = opcode
-    pattern_count = sum(
-        1 for index, opcode, word_count, inst in iter_instructions(words)
-        if opcode == OP_BITCAST
-        and word_count == 4
-        and inst[1] == uchar4_type
-        and inst[3] < bound
-        and type_by_id[inst[3]] == uint_type
-        and opcode_by_id[inst[3]] == OP_BITWISE_OR
-        and _spirv_single_id_user_opcode(words, inst[2], index) == OP_CONVERT_U_TO_F
-    )
-    if pattern_count != Q6_U32_TO_U8VEC4_EXPECTED_BITCASTS:
+    candidate_count = 0
+    pattern_count = 0
+    for index, opcode, word_count, inst in iter_instructions(words):
+        if (
+            opcode == OP_BITCAST
+            and word_count == 4
+            and inst[1] == uchar4_type
+            and inst[3] < bound
+            and type_by_id[inst[3]] == uint_type
+            and opcode_by_id[inst[3]] == OP_BITWISE_OR
+        ):
+            candidate_count += 1
+            if _spirv_single_id_user_opcode(words, inst[2], index) == OP_CONVERT_U_TO_F:
+                pattern_count += 1
+    if pattern_count == 0 or pattern_count != candidate_count:
         return list(words), {
             "phase": "q6-u32-to-u8vec4-bitcasts-lowered",
             "changed": False,
             "pattern_count": pattern_count,
-            "expected_count": Q6_U32_TO_U8VEC4_EXPECTED_BITCASTS,
+            "candidate_count": candidate_count,
+            "reason": "incomplete-eligible-pattern-set",
         }
     next_id = bound
     new_bound = bound + pattern_count * 7
@@ -808,7 +813,6 @@ def insert_q6k_final_store_pre_barrier(words: list[int]) -> tuple[list[int], dic
     DECORATION_DESCRIPTOR_SET = 34
     Q6_OUTPUT_BINDING = 2
     Q6_MIN_GROUP_REDUCTIONS = 2
-    Q6_EXPECTED_FINAL_OUTPUT_STORES = 2
     Q6_MAX_FINAL_STORE_INSERTS = 4
 
     if len(words) < 5 or words[0] != SPIRV_MAGIC:
@@ -905,7 +909,7 @@ def insert_q6k_final_store_pre_barrier(words: list[int]) -> tuple[list[int], dic
                 if last_lane0_compare_index not in insert_points and len(insert_points) < Q6_MAX_FINAL_STORE_INSERTS:
                     insert_points.append(last_lane0_compare_index)
 
-    if final_output_store_count != Q6_EXPECTED_FINAL_OUTPUT_STORES or not insert_points:
+    if final_output_store_count == 0 or not insert_points:
         return list(words), {
             "phase": "q6-final-store-pre-barrier",
             "changed": False,
