@@ -6117,6 +6117,21 @@ class GpuAbiContractTest(unittest.TestCase):
             update_body.index("no descriptor slot changes committed"),
         )
 
+    def test_graphics_descriptor_layout_does_not_silently_drop_unwritten_bindings(self):
+        icd = VULKAN_ICD.read_text()
+        collect_body = icd.split("static int collect_graphics_descriptor_entries", 1)[1].split(
+            "static int append_recorded_graphics_descriptor_bind_snapshot", 1
+        )[0]
+        self.assertIn("Graphics replay ABI currently transports descriptors", collect_body)
+        self.assertIn("expected-but-unwritten binding", collect_body)
+        self.assertIn("layout->storage_binding_counts[binding_index] > 0", collect_body)
+        self.assertIn("return -EOPNOTSUPP;", collect_body)
+        missing_descriptor_guard = collect_body.split(
+            "if (!binding->buffer && !binding->image_view && !binding->sampler)", 1
+        )[1].split("if (descriptor_type_supported_by_v5_object_transport", 1)[0]
+        self.assertIn("layout && layout->storage_binding_counts[binding_index] > 0", missing_descriptor_guard)
+        self.assertIn("continue;", missing_descriptor_guard)
+
     def test_graphics_uniform_buffer_descriptors_are_read_only(self):
         icd = VULKAN_ICD.read_text()
         collect_body = icd.split("static int collect_graphics_descriptor_entries", 1)[1].split(

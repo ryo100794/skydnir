@@ -4740,7 +4740,19 @@ static int collect_graphics_descriptor_entries(
             for (uint32_t array_element = 0; array_element < array_limit; ++array_element) {
                 const PdockerVkDescriptorBinding *binding =
                     &set->storage_buffers[binding_index][array_element];
-                if (!binding->buffer && !binding->image_view && !binding->sampler) continue;
+                if (!binding->buffer && !binding->image_view && !binding->sampler) {
+                    /* Graphics replay ABI currently transports descriptors that
+                     * were present in the bound set, not the full
+                     * VkDescriptorSetLayoutCreateInfo.  Do not silently turn an
+                     * expected-but-unwritten binding into a smaller replay
+                     * layout.  Descriptor binding flags / partially-bound arrays
+                     * are unsupported, so every declared element must be
+                     * materialized or the submit fails closed. */
+                    if (layout && layout->storage_binding_counts[binding_index] > 0) {
+                        return -EOPNOTSUPP;
+                    }
+                    continue;
+                }
                 if (descriptor_type_supported_by_v5_object_transport(binding->descriptor_type) ||
                     binding->image_view || binding->sampler) {
                     VkDescriptorType descriptor_type = binding->descriptor_type;
