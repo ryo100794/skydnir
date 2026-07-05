@@ -3216,6 +3216,41 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("cursor - header->header_size", icd)
         self.assertNotIn("frame + sizeof(*frame_header)", icd)
 
+    def test_vulkan_pipeline_specialization_fails_closed_at_create_time(self):
+        icd = VULKAN_ICD.read_text()
+        helper = c_function_body(icd, "validate_pipeline_specialization_info_for_transport")
+        for marker in [
+            "PDOCKER_VK_MAX_SPECIALIZATION_ENTRIES",
+            "PDOCKER_VK_MAX_SPECIALIZATION_BYTES",
+            "spec->mapEntryCount > 0 && !spec->pMapEntries",
+            "spec->dataSize > 0 && !spec->pData",
+            "entry->size == 0",
+            "entry->offset > spec->dataSize",
+            "entry->size > spec->dataSize - entry->offset",
+            "return VK_ERROR_FEATURE_NOT_PRESENT",
+        ]:
+            self.assertIn(marker, helper)
+
+        compute_body = c_function_body(icd, "vkCreateComputePipelines")
+        self.assertIn("pPipelines[i] = VK_NULL_HANDLE;", compute_body)
+        self.assertIn("validate_pipeline_specialization_info_for_transport(", compute_body)
+        self.assertIn("compute-pipeline-specialization-unsupported", compute_body)
+        self.assertLess(
+            compute_body.index("validate_pipeline_specialization_info_for_transport("),
+            compute_body.index("PdockerVkPipeline *pipeline = pdocker_alloc_handle"),
+        )
+        self.assertNotIn("pipeline->specialization_too_large = true", compute_body)
+
+        graphics_body = c_function_body(icd, "vkCreateGraphicsPipelines")
+        self.assertIn("pPipelines[i] = VK_NULL_HANDLE;", graphics_body)
+        self.assertIn("validate_pipeline_specialization_info_for_transport(", graphics_body)
+        self.assertIn("graphics-pipeline-specialization-unsupported", graphics_body)
+        self.assertIn("free(pipeline);", graphics_body)
+        self.assertIn("return spec_rc;", graphics_body)
+        self.assertNotIn("graphics_stage_specialization_too_large[stage_i] = true", graphics_body)
+        self.assertNotIn("spec->mapEntryCount > PDOCKER_VK_MAX_SPECIALIZATION_ENTRIES", compute_body)
+        self.assertNotIn("spec->mapEntryCount > PDOCKER_VK_MAX_SPECIALIZATION_ENTRIES", graphics_body)
+
     def test_vulkan_graphics_v67_static_viewport_scissor_metadata_is_append_only(self):
         abi = APP_HEADER.read_text()
         container_abi = CONTAINER_HEADER.read_text()

@@ -15404,6 +15404,35 @@ static VkResult validate_and_fill_pipeline_feedback_pnext(
     return VK_SUCCESS;
 }
 
+static VkResult validate_pipeline_specialization_info_for_transport(
+        const VkSpecializationInfo *spec,
+        const char *stage_name) {
+    if (!spec) return VK_SUCCESS;
+    if (spec->mapEntryCount > PDOCKER_VK_MAX_SPECIALIZATION_ENTRIES ||
+        spec->dataSize > PDOCKER_VK_MAX_SPECIALIZATION_BYTES) {
+        trace_icd_runtime_failure(stage_name ? stage_name : "pipeline-specialization-too-large",
+                                  VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    if ((spec->mapEntryCount > 0 && !spec->pMapEntries) ||
+        (spec->dataSize > 0 && !spec->pData)) {
+        trace_icd_runtime_failure(stage_name ? stage_name : "pipeline-specialization-missing-data",
+                                  VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    for (uint32_t i = 0; i < spec->mapEntryCount; ++i) {
+        const VkSpecializationMapEntry *entry = &spec->pMapEntries[i];
+        if (entry->size == 0 ||
+            entry->offset > spec->dataSize ||
+            entry->size > spec->dataSize - entry->offset) {
+            trace_icd_runtime_failure(stage_name ? stage_name : "pipeline-specialization-range-invalid",
+                                      VK_ERROR_FEATURE_NOT_PRESENT);
+            return VK_ERROR_FEATURE_NOT_PRESENT;
+        }
+    }
+    return VK_SUCCESS;
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateShaderModule(
         VkDevice device,
         const VkShaderModuleCreateInfo *pCreateInfo,
@@ -15466,6 +15495,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateComputePipelines(
         return VK_ERROR_INITIALIZATION_FAILED;
     }
     for (uint32_t i = 0; i < createInfoCount; ++i) {
+        pPipelines[i] = VK_NULL_HANDLE;
+    }
+    for (uint32_t i = 0; i < createInfoCount; ++i) {
         const VkComputePipelineCreateInfo *ci = &pCreateInfos[i];
         VkResult pnext_rc = validate_and_fill_pipeline_feedback_pnext(
             "vkCreateComputePipelines", ci->pNext, 1u, false);
@@ -15490,6 +15522,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateComputePipelines(
             return unsupported_create_info_pnext_result("vkCreateComputePipelines.stage",
                                                        ci->stage.pNext);
         }
+        VkResult spec_rc = validate_pipeline_specialization_info_for_transport(
+            ci->stage.pSpecializationInfo, "compute-pipeline-specialization-unsupported");
+        if (spec_rc != VK_SUCCESS) return spec_rc;
         PdockerVkPipeline *pipeline = pdocker_alloc_handle(sizeof(*pipeline));
         if (!pipeline) return VK_ERROR_OUT_OF_HOST_MEMORY;
         pipeline->object_id = next_vulkan_object_generation();
@@ -15512,18 +15547,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateComputePipelines(
         snprintf(pipeline->entry_name, sizeof(pipeline->entry_name), "%s", entry_name);
         const VkSpecializationInfo *spec = ci->stage.pSpecializationInfo;
         if (spec) {
-            if (spec->mapEntryCount > PDOCKER_VK_MAX_SPECIALIZATION_ENTRIES ||
-                spec->dataSize > PDOCKER_VK_MAX_SPECIALIZATION_BYTES) {
-                pipeline->specialization_too_large = true;
-            } else {
-                pipeline->specialization_entry_count = spec->mapEntryCount;
-                for (uint32_t j = 0; j < spec->mapEntryCount; ++j) {
-                    pipeline->specialization_entries[j] = spec->pMapEntries[j];
-                }
-                pipeline->specialization_data_size = spec->dataSize;
-                if (spec->dataSize && spec->pData) {
-                    memcpy(pipeline->specialization_data, spec->pData, spec->dataSize);
-                }
+            pipeline->specialization_entry_count = spec->mapEntryCount;
+            for (uint32_t j = 0; j < spec->mapEntryCount; ++j) {
+                pipeline->specialization_entries[j] = spec->pMapEntries[j];
+            }
+            pipeline->specialization_data_size = spec->dataSize;
+            if (spec->dataSize) {
+                memcpy(pipeline->specialization_data, spec->pData, spec->dataSize);
             }
         }
         pPipelines[i] = pdocker_vk_pipeline_to_handle(pipeline);
@@ -15661,6 +15691,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
         return VK_ERROR_INITIALIZATION_FAILED;
     }
     for (uint32_t i = 0; i < createInfoCount; ++i) {
+        pPipelines[i] = VK_NULL_HANDLE;
+    }
+    for (uint32_t i = 0; i < createInfoCount; ++i) {
         PdockerVkPipeline *pipeline = pdocker_alloc_handle(sizeof(*pipeline));
         if (!pipeline) return VK_ERROR_OUT_OF_HOST_MEMORY;
         pipeline->object_id = next_vulkan_object_generation();
@@ -15723,21 +15756,21 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
                            stage ? stage->pName : NULL);
             const VkSpecializationInfo *spec = stage ? stage->pSpecializationInfo : NULL;
             if (spec) {
-                if (spec->mapEntryCount > PDOCKER_VK_MAX_SPECIALIZATION_ENTRIES ||
-                    spec->dataSize > PDOCKER_VK_MAX_SPECIALIZATION_BYTES) {
-                    pipeline->graphics_stage_specialization_too_large[stage_i] = true;
-                    pipeline->graphics_unsupported = true;
-                } else {
-                    pipeline->graphics_stage_specialization_entry_counts[stage_i] = spec->mapEntryCount;
-                    for (uint32_t spec_i = 0; spec_i < spec->mapEntryCount; ++spec_i) {
-                        pipeline->graphics_stage_specialization_entries[stage_i][spec_i] =
-                            spec->pMapEntries[spec_i];
-                    }
-                    pipeline->graphics_stage_specialization_data_sizes[stage_i] = spec->dataSize;
-                    if (spec->dataSize && spec->pData) {
-                        memcpy(pipeline->graphics_stage_specialization_data[stage_i],
-                               spec->pData, spec->dataSize);
-                    }
+                VkResult spec_rc = validate_pipeline_specialization_info_for_transport(
+                    spec, "graphics-pipeline-specialization-unsupported");
+                if (spec_rc != VK_SUCCESS) {
+                    free(pipeline);
+                    return spec_rc;
+                }
+                pipeline->graphics_stage_specialization_entry_counts[stage_i] = spec->mapEntryCount;
+                for (uint32_t spec_i = 0; spec_i < spec->mapEntryCount; ++spec_i) {
+                    pipeline->graphics_stage_specialization_entries[stage_i][spec_i] =
+                        spec->pMapEntries[spec_i];
+                }
+                pipeline->graphics_stage_specialization_data_sizes[stage_i] = spec->dataSize;
+                if (spec->dataSize) {
+                    memcpy(pipeline->graphics_stage_specialization_data[stage_i],
+                           spec->pData, spec->dataSize);
                 }
             }
         }
