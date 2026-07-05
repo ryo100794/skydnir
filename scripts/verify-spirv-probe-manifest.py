@@ -39,6 +39,16 @@ Q6_LANE_TRACE_RECORD_LAYOUT = {
     "col": 6,
     "row": 7,
 }
+ROLE_CODES = {
+    "partial_to_workgroup_candidate": 1,
+    "reduction_candidate": 2,
+    "post_reduction_workgroup_candidate": 3,
+    "final_output_store": 4,
+}
+PHASE_CODES = {
+    "tail": 1,
+    "full": 2,
+}
 
 
 def fnv1a64(data: bytes) -> int:
@@ -67,6 +77,22 @@ def verify_q6_probe_write_layout(payload: dict, errors: list[str]) -> None:
     if not isinstance(probe_writes, list):
         fail(errors, "instrumentation.probe_writes must be a list for q6-debug-ssbo-probe-writes")
         return
+    priority_targets = (((payload.get("q6_probe_targets") or {}).get("priority_targets")) or [])
+    priority_keys = set()
+    if isinstance(priority_targets, list):
+        for target in priority_targets:
+            if not isinstance(target, dict):
+                continue
+            candidate = target.get("candidate") if isinstance(target.get("candidate"), dict) else {}
+            key = (
+                target.get("pointer_id"),
+                target.get("object_id"),
+                candidate.get("candidate_id"),
+                target.get("role"),
+                target.get("phase"),
+            )
+            if all(value is not None for value in key):
+                priority_keys.add(key)
     expected_by_role = {
         "partial_to_workgroup_candidate": Q6_LANE_TRACE_PRE_REDUCTION_BASE,
         "reduction_candidate": Q6_LANE_TRACE_REDUCTION_BASE,
@@ -76,13 +102,31 @@ def verify_q6_probe_write_layout(payload: dict, errors: list[str]) -> None:
         if not isinstance(item, dict):
             fail(errors, f"instrumentation.probe_writes[{index}] must be an object")
             continue
+        context = f"instrumentation.probe_writes[{index}]"
+        role = item.get("role")
+        if role not in ROLE_CODES:
+            fail(errors, f"{context}.role must be one of {sorted(ROLE_CODES)}")
+        elif item.get("role_code") != ROLE_CODES[role]:
+            fail(errors, f"{context}.role_code must match role {role}")
+        phase = item.get("phase")
+        expected_phase_code = PHASE_CODES.get(str(phase or ""), 0)
+        if item.get("phase_code") != expected_phase_code:
+            fail(errors, f"{context}.phase_code must match phase {phase}")
+        key = (
+            item.get("pointer_id"),
+            item.get("object_id"),
+            item.get("candidate_id"),
+            role,
+            phase,
+        )
+        if priority_keys and key not in priority_keys:
+            fail(errors, f"{context} does not match q6_probe_targets.priority_targets")
         layout = item.get("lane_trace_layout")
         if layout is None:
             continue
-        context = f"instrumentation.probe_writes[{index}].lane_trace_layout"
-        role = item.get("role")
-        if role not in expected_by_role:
-            fail(errors, f"{context} is only allowed on Q6 full partial/reduction roles")
+        layout_context = f"{context}.lane_trace_layout"
+        if role not in expected_by_role or phase != "full":
+            fail(errors, f"{layout_context} is only allowed on Q6 full partial/reduction roles")
             continue
         seen_roles.add(str(role))
         expected_slot = expected_by_role[str(role)]
@@ -94,15 +138,15 @@ def verify_q6_probe_write_layout(payload: dict, errors: list[str]) -> None:
             "slot_base": expected_slot,
         }
         if not isinstance(layout, dict):
-            fail(errors, f"{context} must be an object")
+            fail(errors, f"{layout_context} must be an object")
             continue
         for key, expected_value in expected.items():
             actual = layout.get(key)
             if actual != expected_value:
-                fail(errors, f"q6 lane trace layout stale: {context}.{key} expected {expected_value} got {actual}")
+                fail(errors, f"q6 lane trace layout stale: {layout_context}.{key} expected {expected_value} got {actual}")
         record_layout = layout.get("record_layout")
         if record_layout != Q6_LANE_TRACE_RECORD_LAYOUT:
-            fail(errors, f"q6 lane trace layout stale: {context}.record_layout must match the current Q6 lane trace ABI")
+            fail(errors, f"q6 lane trace layout stale: {layout_context}.record_layout must match the current Q6 lane trace ABI")
     for role in expected_by_role:
         if role not in seen_roles:
             fail(errors, f"q6 lane trace layout stale: missing {role} lane_trace_layout in q6-debug probe writes")

@@ -183,12 +183,14 @@ def collect_probe_targets(manifest_path: Path | None, enabled: bool) -> list[dic
             continue
         if not isinstance(role, str):
             continue
+        if role not in ROLE_CODES:
+            raise SystemExit(f"unsupported Q6 probe target role: {role}")
         out.append({
             "pointer_id": pointer_id,
             "object_id": object_id,
             "candidate_id": candidate,
             "role": role,
-            "role_code": ROLE_CODES.get(role, 0),
+            "role_code": ROLE_CODES[role],
             "phase": target.get("phase") if isinstance(target.get("phase"), str) else "",
         })
     if not out:

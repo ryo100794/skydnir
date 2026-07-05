@@ -11647,6 +11647,34 @@ class GpuAbiContractTest(unittest.TestCase):
             )
             self.assertNotEqual(0, stale_verified.returncode)
             self.assertIn("q6 lane trace layout stale", stale_verified.stdout)
+
+            bad_role_code_payload = json.loads(write_manifest.read_text(encoding="utf-8"))
+            bad_role_code_payload["instrumentation"]["probe_writes"][0]["role_code"] = 99
+            bad_role_code_manifest = tmp_path / "native-q6.write.bad-role-code.probe.json"
+            bad_role_code_manifest.write_text(json.dumps(bad_role_code_payload), encoding="utf-8")
+            bad_role_code_verified = subprocess.run(
+                ["python3", str(SPIRV_PROBE_MANIFEST_VERIFIER), str(bad_role_code_manifest)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self.assertNotEqual(0, bad_role_code_verified.returncode)
+            self.assertIn("role_code must match role", bad_role_code_verified.stdout)
+
+            bad_target_payload = json.loads(write_manifest.read_text(encoding="utf-8"))
+            bad_target_payload["instrumentation"]["probe_writes"][0]["candidate_id"] = 9999
+            bad_target_manifest = tmp_path / "native-q6.write.bad-target.probe.json"
+            bad_target_manifest.write_text(json.dumps(bad_target_payload), encoding="utf-8")
+            bad_target_verified = subprocess.run(
+                ["python3", str(SPIRV_PROBE_MANIFEST_VERIFIER), str(bad_target_manifest)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self.assertNotEqual(0, bad_target_verified.returncode)
+            self.assertIn("does not match q6_probe_targets.priority_targets", bad_target_verified.stdout)
         payload = json.loads(result.stdout)
         instrumentation = payload["instrumentation"]
         self.assertEqual(instrumentation["kind"], "q6-debug-ssbo-probe-writes")
