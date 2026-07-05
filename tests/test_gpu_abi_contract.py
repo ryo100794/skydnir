@@ -5095,6 +5095,34 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn("stage_flags", source)
             self.assertIn("descriptor_set_layout_id", source)
 
+        executor = GPU_EXECUTOR.read_text()
+        for marker in [
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V624_ABI_MINOR",
+            "sizeof(PdockerGpuVulkanGraphicsV624FrameHeader)",
+            "const PdockerGpuVulkanGraphicsV624FrameHeader *header_v624",
+            "const int is_v624",
+            "view->header_v624",
+            "view->is_v624",
+            "PdockerGpuVulkanGraphicsV624DescriptorSetLayoutEntry",
+            "PdockerGpuVulkanGraphicsV624PipelineLayoutSetEntry",
+            "descriptor_set_layout_count > PDOCKER_GPU_VULKAN_GRAPHICS_V624_MAX_DESCRIPTOR_SET_LAYOUT_BINDINGS",
+            "pipeline_layout_count > PDOCKER_GPU_VULKAN_GRAPHICS_V624_MAX_PIPELINE_LAYOUT_SETS",
+            "descriptor_set_layout_schema_hash != PDOCKER_GPU_VULKAN_GRAPHICS_V624_DESCRIPTOR_SET_LAYOUT_SCHEMA_HASH",
+            "pipeline_layout_schema_hash != PDOCKER_GPU_VULKAN_GRAPHICS_V624_PIPELINE_LAYOUT_SET_SCHEMA_HASH",
+            "FrameRange ranges[50]",
+            "vulkan_graphics_v6_table_range_count(header->abi_minor)",
+            "case PDOCKER_GPU_VULKAN_GRAPHICS_V624_ABI_MINOR: return 50u",
+            "frame_ranges_do_not_overlap(ranges, range_count)",
+            "descriptor_set_layout_table_hash",
+            "pipeline_layout_table_hash",
+            "descriptor_set_layouts",
+            "pipeline_layout_sets",
+            "entry->immutable_sampler_count != 0",
+            "entry->layout_id == other->layout_id && entry->binding == other->binding",
+            "entry->pipeline_layout_id == other->pipeline_layout_id &&",
+        ]:
+            self.assertIn(marker, executor)
+
     def test_vulkan_graphics_v6_field_macros_match_packed_structs(self):
         schemas = [
             (
@@ -8403,7 +8431,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "image_layout_range_entry_size != sizeof(PdockerGpuVulkanGraphicsV620ImageLayoutRangeEntry)",
             "image_layout_range_schema_hash != PDOCKER_GPU_VULKAN_GRAPHICS_V620_IMAGE_LAYOUT_RANGE_SCHEMA_HASH",
             "PDOCKER_GPU_VULKAN_GRAPHICS_V620_MAX_IMAGE_LAYOUT_RANGES",
-            "is_v620 ? 44u",
+            "case PDOCKER_GPU_VULKAN_GRAPHICS_V620_ABI_MINOR: return 44u",
             "view->image_layout_ranges",
             "image_layout_range_table_hash",
             "header_v620->v620.extension_hash != image_layout_range_table_hash",
@@ -8621,8 +8649,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "sizeof(PdockerGpuVulkanGraphicsV622FrameHeader)",
             "const int is_v622",
             "header_v622->v622.multisample_state_count",
-            "FrameRange ranges[48]",
-            "is_v622 ? 47u",
+            "FrameRange ranges[50]",
+            "case PDOCKER_GPU_VULKAN_GRAPHICS_V622_ABI_MINOR: return 47u",
             "view->header_v622",
             "view->is_v622",
             "view->multisample_states",
@@ -8729,8 +8757,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "sizeof(PdockerGpuVulkanGraphicsV623FrameHeader)",
             "const int is_v623",
             "header_v623->v623.tessellation_state_count",
-            "FrameRange ranges[48]",
-            "is_v623 ? 48u",
+            "FrameRange ranges[50]",
+            "case PDOCKER_GPU_VULKAN_GRAPHICS_V623_ABI_MINOR: return 48u",
             "view->header_v623",
             "view->is_v623",
             "view->tessellation_states",
@@ -8823,7 +8851,7 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, executor)
 
-        self.assertIn("is_v621 ? 46u", executor)
+        self.assertIn("case PDOCKER_GPU_VULKAN_GRAPHICS_V621_ABI_MINOR: return 46u", executor)
         self.assertNotIn("reserved0 = g_submit2", icd)
         self.assertNotIn("reserved0 = submit2", executor)
 
