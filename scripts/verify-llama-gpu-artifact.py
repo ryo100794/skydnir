@@ -1122,18 +1122,16 @@ def _q6_final_store_sample_has_latest_event_identity(sample: dict[str, Any]) -> 
     """Return true when a final-store sample is tied to the latest Q6 event.
 
     Some executor events do not carry a stable dispatch_id in the compare
-    artifact, so dispatch_id alone is not a safe required field.  The fail-
-    closed identity is either an explicit dispatch id or matching source and
-    effective SPIR-V compact hashes between the sample event annotation and the
-    boundary sample identity.
+    artifact, so dispatch_id is useful but not authoritative by itself.  The
+    fail-closed identity is matching source and effective SPIR-V compact hashes
+    between the sample event annotation and the boundary sample identity; a
+    present dispatch id must not bypass that hash lineage check.
     """
-    if sample.get("q6_event_dispatch_id") not in {None, ""}:
-        return True
     source = sample.get("source_spirv_hash")
     event_source = sample.get("q6_event_source_spirv_hash")
     effective = sample.get("effective_spirv_hash")
     event_effective = sample.get("q6_event_effective_spirv_hash")
-    return (
+    hashes_match = (
         _valid_compact_hash(source)
         and _valid_compact_hash(event_source)
         and str(source).lower() == str(event_source).lower()
@@ -1141,6 +1139,7 @@ def _q6_final_store_sample_has_latest_event_identity(sample: dict[str, Any]) -> 
         and _valid_compact_hash(event_effective)
         and str(effective).lower() == str(event_effective).lower()
     )
+    return hashes_match
 
 
 def _q6_final_store_boundary(q6: Any) -> dict[str, Any]:
@@ -2007,12 +2006,27 @@ def _q6_local_size_resolved(q6: Any) -> list[int] | None:
 
 
 def _q6_safe_kernel_enabled(q6: Any) -> bool:
-    return (
-        isinstance(q6, dict)
-        and (
-            q6.get("q6k_safe_kernel") is True
-            or str(q6.get("latest_spirv_hash") or "").lower() == "0x7ec0292e948c9b41"
-        )
+    if not isinstance(q6, dict):
+        return False
+    safe_hash = "0x7ec0292e948c9b41"
+    candidates = [
+        q6.get("latest_spirv_hash"),
+        q6.get("effective_spirv_hash"),
+        q6.get("source_spirv_hash"),
+    ]
+    latest_dispatch = q6.get("q6_dispatch_latest")
+    if isinstance(latest_dispatch, dict):
+        candidates.extend([
+            latest_dispatch.get("spirv_hash"),
+            latest_dispatch.get("effective_spirv_hash"),
+            (latest_dispatch.get("pipeline_key") or {}).get("spirv_hash")
+            if isinstance(latest_dispatch.get("pipeline_key"), dict) else None,
+        ])
+    pipeline_key = q6.get("pipeline_key")
+    if isinstance(pipeline_key, dict):
+        candidates.append(pipeline_key.get("spirv_hash"))
+    return q6.get("q6k_safe_kernel") is True or any(
+        str(value or "").lower() == safe_hash for value in candidates
     )
 
 
@@ -2990,6 +3004,14 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
             data.get("next_action")
             or "rerun with PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE=1 so Q6_K compact writable output hashes and row-indexed before/after writeback samples are present and verified"
         )
+    elif q6.get("q6_probe_effective_replay") is True:
+        classification = "q6-probe-effective-replay-diagnostic-only"
+        responsibility_boundary = "q6-diagnostic-evidence"
+        q6_blocker_class = "q6-probe-effective-replay-diagnostic-only"
+        next_action = (
+            data.get("next_action")
+            or "rerun the native Q6_K module without probe-effective replay before accepting correctness or benchmark claims"
+        )
     elif _q6_safe_kernel_enabled(q6) and q6.get("latest_status") == "match":
         classification = "q6-safe-kernel-diagnostic-only"
         responsibility_boundary = "q6-diagnostic-evidence"
@@ -3199,6 +3221,7 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
                 "q6-probe-writeback-cleared-oracle-missing",
                 "q6-workgroup-shape-blocker",
                 "q6-safe-kernel-diagnostic-only",
+                "q6-probe-effective-replay-diagnostic-only",
                 "q6-descriptor-invariant-mismatch",
                 "q6-debug-binding-alias-evidence-missing",
                 *Q6_DEBUG_U32_BLOCKERS,

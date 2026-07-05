@@ -4042,6 +4042,22 @@ def event_spirv_identity_hashes(event):
     return hashes
 
 def event_has_q6_matvec_identity(event):
+    if not isinstance(event, dict):
+        return False
+    env = globals().get("effective_runtime_env", {})
+    expected_probe_source = normalized_spirv_hash(
+        env.get("PDOCKER_GPU_SPIRV_PROBE_EXPECTED_HASH")
+    ) if isinstance(env, dict) else None
+    expected_probe_effective = normalized_spirv_hash(
+        env.get("PDOCKER_GPU_SPIRV_PROBE_EFFECTIVE_HASH")
+    ) if isinstance(env, dict) else None
+    event_source = normalized_spirv_hash(event.get("source_spirv_hash"))
+    event_effective = normalized_spirv_hash(event.get("effective_spirv_hash"))
+    if expected_probe_source and expected_probe_effective:
+        if event_source == expected_probe_effective and event_source != expected_probe_source:
+            return False
+        if event_effective == expected_probe_effective:
+            return event_source == expected_probe_source
     hashes = event_spirv_identity_hashes(event)
     probe_hashes = q6_probe_identity_hashes()
     return any(value in Q6_K_MATVEC_SPIRV_HASHES or value in probe_hashes for value in hashes)
@@ -4149,16 +4165,8 @@ def build_spirv_probe_env_audit():
         cpu_oracle = event.get("cpu_oracle") if isinstance(event.get("cpu_oracle"), dict) else {}
         if cpu_oracle.get("kernel_hint") == "mul-mat-vec-q6-k-large" and event_source:
             actual_q6_source_hashes.append(event_source)
-        source_matches = (
-            not expected_source
-            or event_source == expected_source
-            or (expected_effective and event_source == expected_effective)
-        )
-        effective_matches = (
-            not expected_effective
-            or event_effective == expected_effective
-            or (expected_effective and event_source == expected_effective)
-        )
+        source_matches = (not expected_source or event_source == expected_source)
+        effective_matches = (not expected_effective or event_effective == expected_effective)
         has_debug_binding = False
         for detail in event.get("binding_details") or []:
             if not isinstance(detail, dict):
@@ -6032,6 +6040,7 @@ q6_store_index_model_required = (
     }
 )
 q6_safe_kernel_used = q6_latest.get("q6k_safe_kernel") is True
+q6_probe_effective_replay_used = q6_latest.get("q6_probe_effective_replay") is True
 q6_local_size_resolved = q6_latest.get("spirv_local_size_resolved")
 q6_partial_local_size = q6_latest_partial.get("q6_local_size")
 q6_expected_local_size = (
@@ -6273,6 +6282,10 @@ q6_blocker_class = (
     if not q6_oracle_events
     else "workgroup-shape"
     if q6_workgroup_shape_blocker
+    else "q6-probe-effective-replay-diagnostic-only"
+    if q6_probe_effective_replay_used
+    else "q6-safe-kernel-diagnostic-only"
+    if q6_latest_oracle.get("status") == "match" and q6_safe_kernel_used
     else "cleared"
     if q6_latest_oracle.get("status") == "match"
     else "descriptor-effective-range-or-upload"
@@ -6342,6 +6355,7 @@ q6_workgroup_diagnostics = {
     "latest_status": q6_latest_oracle.get("status"),
     "latest_mismatch_count": q6_latest_oracle.get("mismatch_count"),
     "q6k_safe_kernel": q6_safe_kernel_used,
+    "q6_probe_effective_replay": q6_probe_effective_replay_used,
     "q6_storage16_loads_lowered": q6_latest.get("q6_storage16_loads_lowered"),
     "q6_storage16_loads_lowered_count": q6_latest.get("q6_storage16_loads_lowered_count"),
     "q6_u32_to_u8vec4_bitcasts_lowered": q6_latest.get("q6_u32_to_u8vec4_bitcasts_lowered"),
@@ -6422,6 +6436,10 @@ q6_workgroup_diagnostics = {
         if not q6_oracle_events
         else "workgroup-shape-inconsistent"
         if q6_workgroup_shape_blocker
+        else "q6-probe-effective-replay-diagnostic-only"
+        if q6_blocker_class == "q6-probe-effective-replay-diagnostic-only"
+        else "q6-safe-kernel-diagnostic-only"
+        if q6_blocker_class == "q6-safe-kernel-diagnostic-only"
         else "q6-oracle-matches"
         if q6_latest_oracle.get("status") == "match"
         else "q6-mismatch-at-%s-boundary" % q6_blocker_class

@@ -1473,6 +1473,66 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         self.assertFalse(interpretation["q6_shader_like_64_required"])
         self.assertIn("q6k_safe_kernel=true", interpretation["q6_shader_like_clear_basis"])
 
+
+    def test_q6_probe_effective_replay_match_is_diagnostic_only_not_correctness_claim(self):
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": passing_config_propagation(),
+                    "q6_workgroup_diagnostics": {
+                        **q6_verified_writeback(),
+                        "event_count": 1,
+                        "workgroup_shape_blocker": False,
+                        "latest_status": "match",
+                        "q6_probe_effective_replay": True,
+                        "local_size_resolved": [32, 1, 1],
+                    },
+                },
+                "correctness": gpu_correctness_report("pass"),
+            },
+            "cpu": {"tokens_per_second": 0.1},
+            **speedup_sections(),
+        }
+        result = self.run_verifier(payload)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "q6-probe-effective-replay-diagnostic-only")
+        self.assertEqual(report["responsibility_boundary"], "q6-diagnostic-evidence")
+        self.assertFalse(report["terminal"])
+        self.assertFalse(report["correctness_claim_allowed"])
+        self.assertFalse(report["benchmark_claim_allowed"])
+        self.assertEqual(report["q6_effective_blocker_class"], "q6-probe-effective-replay-diagnostic-only")
+
+    def test_q6_safe_kernel_hash_is_sticky_when_boolean_is_lost(self):
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": passing_config_propagation(),
+                    "q6_workgroup_diagnostics": {
+                        **q6_verified_writeback(),
+                        "event_count": 1,
+                        "workgroup_shape_blocker": False,
+                        "latest_status": "match",
+                        "pipeline_key": {"spirv_hash": "0x7ec0292e948c9b41"},
+                        "local_size_resolved": [1, 1, 1],
+                    },
+                },
+                "correctness": gpu_correctness_report("pass"),
+            },
+            "cpu": {"tokens_per_second": 0.1},
+            **speedup_sections(),
+        }
+        result = self.run_verifier(payload)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "q6-safe-kernel-diagnostic-only")
+        self.assertFalse(report["correctness_claim_allowed"])
+        self.assertFalse(report["benchmark_claim_allowed"])
+
     def test_q6_workgroup_blocker_reports_missing_required_env_overlay(self):
         payload = {
             "schema": "pdocker.llama.gpu.compare.v1",
@@ -2574,7 +2634,6 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
             expected=1.25,
             fd_after=0.5,
         )
-        boundary["samples"][0]["q6_event_dispatch_id"] = None
         boundary["samples"][0]["q6_event_effective_spirv_hash"] = "0x1111111111111111"
         q6 = {
             "event_count": 1,

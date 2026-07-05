@@ -14933,6 +14933,10 @@ static int run_vulkan_dispatch_fd(
         ret = 64;
         goto cleanup;
     }
+    const uint64_t reported_source_spirv_hash = cpu_oracle_spirv_hash;
+    const char *reported_source_spirv_hash_source = cpu_oracle_spirv_hash_source;
+    const uint64_t reported_effective_spirv_hash = original_spirv_hash;
+
     if (strict_passthrough && options && options->has_requested_feature_mask) {
         const uint64_t required_feature_mask = spirv_required_feature_mask(&spirv_summary);
         const uint64_t missing_requested_features =
@@ -17020,6 +17024,7 @@ static int run_vulkan_dispatch_fd(
                 "\"strict_passthrough\":%s,"
                 "\"shader_bytes\":%zu,"
                 "\"source_spirv_hash\":\"0x%016llx\","
+                "\"source_spirv_hash_source\":\"%s\","
                 "\"effective_spirv_hash\":\"0x%016llx\","
                 "\"oracle_spirv_hash\":\"0x%016llx\","
                 "\"oracle_spirv_hash_source\":\"%s\","
@@ -17052,8 +17057,9 @@ static int run_vulkan_dispatch_fd(
                 PDOCKER_GPU_EXECUTOR_BUILD_MARKER,
                 strict_passthrough ? "true" : "false",
                 shader_size,
-                (unsigned long long)original_spirv_hash,
-                (unsigned long long)spirv_summary.hash,
+                (unsigned long long)reported_source_spirv_hash,
+                reported_source_spirv_hash_source,
+                (unsigned long long)reported_effective_spirv_hash,
                 (unsigned long long)cpu_oracle_spirv_hash,
                 cpu_oracle_spirv_hash_source,
                 entry_name, specialization_count, binding_count, gx, gy, gz,
@@ -17396,6 +17402,7 @@ static int run_vulkan_dispatch_fd(
                 "\"staging_buffer\":%zu,\"upload_read\":%zu}},"
                 "\"shader_bytes\":%zu,"
                 "\"source_spirv_hash\":\"0x%016llx\","
+                "\"source_spirv_hash_source\":\"%s\","
                 "\"effective_spirv_hash\":\"0x%016llx\","
                 "\"oracle_spirv_hash\":\"0x%016llx\","
                 "\"oracle_spirv_hash_source\":\"%s\","
@@ -17494,8 +17501,9 @@ static int run_vulkan_dispatch_fd(
                 strict_object_graph_timing.staging_buffer_bytes,
                 strict_object_graph_timing.upload_read_bytes,
                 shader_size,
-                (unsigned long long)original_spirv_hash,
-                (unsigned long long)spirv_summary.hash,
+                (unsigned long long)reported_source_spirv_hash,
+                reported_source_spirv_hash_source,
+                (unsigned long long)reported_effective_spirv_hash,
                 (unsigned long long)cpu_oracle_spirv_hash,
                 cpu_oracle_spirv_hash_source,
                 entry_name, specialization_count, binding_count, gx, gy, gz,
@@ -17667,6 +17675,7 @@ static int run_vulkan_dispatch_fd(
             "\"staging_buffer\":%zu,\"upload_read\":%zu}},"
             "\"shader_bytes\":%zu,"
             "\"source_spirv_hash\":\"0x%016llx\","
+            "\"source_spirv_hash_source\":\"%s\","
             "\"effective_spirv_hash\":\"0x%016llx\","
             "\"oracle_spirv_hash\":\"0x%016llx\","
             "\"oracle_spirv_hash_source\":\"%s\","
@@ -17773,8 +17782,9 @@ static int run_vulkan_dispatch_fd(
             strict_object_graph_timing.staging_buffer_bytes,
             strict_object_graph_timing.upload_read_bytes,
             shader_size,
-            (unsigned long long)original_spirv_hash,
-            (unsigned long long)spirv_summary.hash,
+            (unsigned long long)reported_source_spirv_hash,
+            reported_source_spirv_hash_source,
+            (unsigned long long)reported_effective_spirv_hash,
             (unsigned long long)cpu_oracle_spirv_hash,
             cpu_oracle_spirv_hash_source,
             entry_name, specialization_count, binding_count, gx, gy, gz,

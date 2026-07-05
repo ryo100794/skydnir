@@ -5558,7 +5558,11 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("q6k_native_reduction_tree_sum32", source)
         self.assertIn('\\"q6_output_layout_probe\\":', source)
         self.assertIn('\\"source_spirv_hash\\":\\"0x%016llx\\"', source)
+        self.assertIn('\\"source_spirv_hash_source\\":\\"%s\\"', source)
         self.assertIn('\\"effective_spirv_hash\\":\\"0x%016llx\\"', source)
+        self.assertIn("reported_source_spirv_hash = cpu_oracle_spirv_hash", source)
+        self.assertIn("reported_source_spirv_hash_source = cpu_oracle_spirv_hash_source", source)
+        self.assertIn("reported_effective_spirv_hash = original_spirv_hash", source)
         self.assertIn("write_f32_sample_array", source)
         self.assertIn("write_f32_fd_sample_array", source)
         self.assertIn("write_f32_sample_array_at_indices", source)
@@ -9228,25 +9232,38 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_GPU_SPIRV_PROBE_EXPECTED_HASH": q6_hash,
             "PDOCKER_GPU_SPIRV_PROBE_EFFECTIVE_HASH": probe_hash,
         }
-        probe_event = {
+        swapped_probe_event = {
             "source_spirv_hash": probe_hash,
             "effective_spirv_hash": "0x579577e98a3af80f",
         }
         self.assertEqual(
             [probe_hash, q6_hash, "0x579577e98a3af80f"],
-            helpers["event_spirv_identity_hashes"](probe_event),
+            helpers["event_spirv_identity_hashes"](swapped_probe_event),
         )
-        self.assertTrue(helpers["event_has_q6_matvec_identity"](probe_event))
+        self.assertFalse(helpers["event_has_q6_matvec_identity"](swapped_probe_event))
+
+        valid_probe_event = {
+            "source_spirv_hash": q6_hash,
+            "effective_spirv_hash": probe_hash,
+        }
+        self.assertEqual(
+            [q6_hash, probe_hash, q6_hash],
+            helpers["event_spirv_identity_hashes"](valid_probe_event),
+        )
+        self.assertTrue(helpers["event_has_q6_matvec_identity"](valid_probe_event))
 
         helpers["effective_runtime_env"] = {
             "PDOCKER_GPU_SPIRV_PROBE_EXPECTED_HASH": non_q6_hash,
             "PDOCKER_GPU_SPIRV_PROBE_EFFECTIVE_HASH": probe_hash,
         }
-        self.assertFalse(helpers["event_has_q6_matvec_identity"](probe_event))
+        self.assertFalse(helpers["event_has_q6_matvec_identity"](swapped_probe_event))
 
     def test_llama_gpu_compare_keeps_q6_probe_diagnostics_distinct_from_oracle(self):
         source = LLAMA_COMPARE.read_text()
         self.assertIn("q6_probe_events = [", source)
+        self.assertIn("source_matches = (not expected_source or event_source == expected_source)", source)
+        self.assertIn("effective_matches = (not expected_effective or event_effective == expected_effective)", source)
+        self.assertNotIn("or (expected_effective and event_source == expected_effective)", source)
         self.assertIn('"q6_probe_event_count": len(q6_probe_events)', source)
         self.assertIn('"q6-probe-writeback-cleared-oracle-missing"', source)
         self.assertIn("q6-probe-writeback-cleared-but-source-oracle-not-available-for-instrumented-module", source)
@@ -12384,6 +12401,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "output_layout_or_shader_math",
             "numeric_layout_or_readback",
             "q6_blocker_class",
+            "q6_probe_effective_replay",
+            "q6-probe-effective-replay-diagnostic-only",
+            "q6-safe-kernel-diagnostic-only",
             "q6_shader_like_oracle_cleared",
             "q6_first_mismatch",
             "q6_row_indexed_sample_indices",
@@ -13265,7 +13285,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("skipped_non_target_actual_hashes", compare)
         self.assertIn("stale_target_hash", compare)
         self.assertIn("def q6_probe_identity_hashes()", compare)
-        self.assertIn("event_source == expected_effective", compare)
+        self.assertIn("source_matches = (not expected_source or event_source == expected_source)", compare)
+        self.assertIn("effective_matches = (not expected_effective or event_effective == expected_effective)", compare)
+        self.assertNotIn("event_source == expected_effective", compare)
         self.assertIn("target_or_probe_hashes", compare)
         self.assertIn("not any(value in actual_q6_or_skipped_hashes for value in target_or_probe_hashes)", compare)
         self.assertNotIn("expected in Q6_K_MATVEC_SPIRV_HASHES and effective", compare)
