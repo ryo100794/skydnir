@@ -4683,8 +4683,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("set_binding_descriptor_counts", executor)
         self.assertIn("bindings[i].api_array_element >= PDOCKER_GPU_MAX_VULKAN_BINDINGS", executor)
         self.assertIn("const uint32_t needed_descriptor_count = bindings[i].api_array_element + 1;", executor)
-        self.assertIn("layout_bindings[set_index][i].descriptorCount =", executor)
-        self.assertIn("set_binding_descriptor_counts[set_index][i] ?", executor)
+        self.assertIn("layout_bindings[set_index][layout_binding_count++]", executor)
+        self.assertIn("if (descriptor_count == 0) continue;", executor)
         self.assertIn("descriptor_pool_uniform_count += descriptor_count;", executor)
         self.assertIn("descriptor_pool_storage_count += descriptor_count;", executor)
         self.assertIn("writes[write_count].dstArrayElement = bindings[i].api_array_element;", executor)
@@ -4693,6 +4693,31 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("entry->descriptor_layout_hash == descriptor_layout_hash", executor)
         self.assertIn("pipeline_cache_entry->descriptor_layout_hash = descriptor_layout_hash;", executor)
         self.assertIn("descriptor alias rewrite does not support descriptor arrays", executor)
+
+    def test_vulkan_compute_descriptor_layout_skips_sparse_binding_gaps(self):
+        executor = GPU_EXECUTOR.read_text()
+        hash_body = c_function_body(executor, "vulkan_descriptor_layout_hash")
+        self.assertIn("uint32_t active_binding_count = 0;", hash_body)
+        self.assertIn("if (set_binding_descriptor_counts[set_index][binding_index] == 0) continue;", hash_body)
+        self.assertIn("fnv1a64_update(hash, &active_binding_count", hash_body)
+        self.assertNotIn("descriptor_counts[set_index][binding_index] ?", hash_body)
+
+        generic_body = executor.split("create-generic-descriptor-set-layout", 1)[0].rsplit(
+            "VkDescriptorSetLayoutBinding layout_bindings", 1
+        )[1]
+        self.assertIn("const uint32_t set_binding_limit = set_binding_counts[set_index];", generic_body)
+        self.assertIn("uint32_t layout_binding_count = 0;", generic_body)
+        self.assertIn("if (descriptor_count == 0) continue;", generic_body)
+        self.assertIn(".binding = i", generic_body)
+        self.assertIn(".descriptorCount = descriptor_count", generic_body)
+        self.assertIn(".bindingCount = layout_binding_count", generic_body)
+        self.assertNotIn(".bindingCount = set_layout_count", generic_body)
+
+        pool_body = executor.split("uint32_t descriptor_pool_storage_count = 0;", 1)[1].split(
+            "VkDescriptorPoolSize pool_sizes[8]", 1
+        )[0]
+        self.assertIn("if (descriptor_count == 0) continue;", pool_body)
+        self.assertNotIn("set_binding_descriptor_counts[set_index][binding_index] ?", pool_body)
 
     def test_vulkan_dispatch_v5_header_validator_is_separate_from_text_commands(self):
         executor = GPU_EXECUTOR.read_text()
@@ -6097,7 +6122,10 @@ class GpuAbiContractTest(unittest.TestCase):
         generic_body = executor.split("create-generic-descriptor-set-layout", 1)[0].rsplit(
             "VkDescriptorSetLayoutBinding layout_bindings", 1
         )[1]
-        self.assertIn("layout_bindings[set_index][i].descriptorType = set_binding_types[set_index][i];", generic_body)
+        self.assertIn("uint32_t layout_binding_count = 0;", generic_body)
+        self.assertIn("if (descriptor_count == 0) continue;", generic_body)
+        self.assertIn("layout_bindings[set_index][layout_binding_count++]", generic_body)
+        self.assertIn(".descriptorType = set_binding_types[set_index][i]", generic_body)
         pool_body = executor.split("descriptor_pool_uniform_count", 1)[1].split(
             "create-generic-descriptor-pool", 1
         )[0]

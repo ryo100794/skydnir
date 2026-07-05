@@ -7928,14 +7928,19 @@ static uint64_t vulkan_descriptor_layout_hash(
     uint64_t hash = 1469598103934665603ull;
     hash = fnv1a64_update(hash, &descriptor_set_count, sizeof(descriptor_set_count));
     for (uint32_t set_index = 0; set_index < descriptor_set_count; ++set_index) {
-        const uint32_t binding_count = set_binding_counts[set_index];
+        const uint32_t binding_limit = set_binding_counts[set_index];
+        uint32_t active_binding_count = 0;
+        for (uint32_t binding_index = 0; binding_index < binding_limit; ++binding_index) {
+            if (set_binding_descriptor_counts[set_index][binding_index] == 0) continue;
+            active_binding_count++;
+        }
         hash = fnv1a64_update(hash, &set_index, sizeof(set_index));
-        hash = fnv1a64_update(hash, &binding_count, sizeof(binding_count));
-        for (uint32_t binding_index = 0; binding_index < binding_count; ++binding_index) {
-            const uint32_t descriptor_type = (uint32_t)set_binding_types[set_index][binding_index];
+        hash = fnv1a64_update(hash, &active_binding_count, sizeof(active_binding_count));
+        for (uint32_t binding_index = 0; binding_index < binding_limit; ++binding_index) {
             const uint32_t descriptor_count =
-                set_binding_descriptor_counts[set_index][binding_index] ?
-                    set_binding_descriptor_counts[set_index][binding_index] : 1u;
+                set_binding_descriptor_counts[set_index][binding_index];
+            if (descriptor_count == 0) continue;
+            const uint32_t descriptor_type = (uint32_t)set_binding_types[set_index][binding_index];
             hash = fnv1a64_update(hash, &binding_index, sizeof(binding_index));
             hash = fnv1a64_update(hash, &descriptor_type, sizeof(descriptor_type));
             hash = fnv1a64_update(hash, &descriptor_count, sizeof(descriptor_count));
@@ -15891,19 +15896,22 @@ static int run_vulkan_dispatch_fd(
             [PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS][PDOCKER_GPU_MAX_VULKAN_BINDINGS];
         memset(layout_bindings, 0, sizeof(layout_bindings));
         for (uint32_t set_index = 0; set_index < descriptor_set_count; ++set_index) {
-            const uint32_t set_layout_count = set_binding_counts[set_index];
-            for (uint32_t i = 0; i < set_layout_count; ++i) {
-                layout_bindings[set_index][i].binding = i;
-                layout_bindings[set_index][i].descriptorType = set_binding_types[set_index][i];
-                layout_bindings[set_index][i].descriptorCount =
-                    set_binding_descriptor_counts[set_index][i] ?
-                        set_binding_descriptor_counts[set_index][i] : 1;
-                layout_bindings[set_index][i].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+            const uint32_t set_binding_limit = set_binding_counts[set_index];
+            uint32_t layout_binding_count = 0;
+            for (uint32_t i = 0; i < set_binding_limit; ++i) {
+                const uint32_t descriptor_count = set_binding_descriptor_counts[set_index][i];
+                if (descriptor_count == 0) continue;
+                layout_bindings[set_index][layout_binding_count++] = (VkDescriptorSetLayoutBinding){
+                    .binding = i,
+                    .descriptorType = set_binding_types[set_index][i],
+                    .descriptorCount = descriptor_count,
+                    .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+                };
             }
             VkDescriptorSetLayoutCreateInfo dslci = {
                 .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-                .bindingCount = set_layout_count,
-                .pBindings = set_layout_count ? layout_bindings[set_index] : NULL,
+                .bindingCount = layout_binding_count,
+                .pBindings = layout_binding_count ? layout_bindings[set_index] : NULL,
             };
             fail_stage = "create-generic-descriptor-set-layout";
             rc = vkCreateDescriptorSetLayout(rt->device, &dslci, NULL, &set_layouts[set_index]);
@@ -16031,8 +16039,8 @@ static int run_vulkan_dispatch_fd(
     for (uint32_t set_index = 0; set_index < descriptor_set_count; ++set_index) {
         for (uint32_t binding_index = 0; binding_index < set_binding_counts[set_index]; ++binding_index) {
             const uint32_t descriptor_count =
-                set_binding_descriptor_counts[set_index][binding_index] ?
-                    set_binding_descriptor_counts[set_index][binding_index] : 1;
+                set_binding_descriptor_counts[set_index][binding_index];
+            if (descriptor_count == 0) continue;
             switch (set_binding_types[set_index][binding_index]) {
                 case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
                     descriptor_pool_uniform_count += descriptor_count;
