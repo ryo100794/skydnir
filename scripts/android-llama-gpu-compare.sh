@@ -4190,6 +4190,11 @@ def build_spirv_probe_env_audit():
         and not any(value in actual_q6_or_skipped_hashes for value in target_or_probe_hashes)
     )
     host_to_container_missing = sorted(key for key in requested if key not in observed)
+    executor_probe_debug_seen_without_icd_arm = bool(
+        requested_any
+        and executor_debug_binding_events
+        and not matching_armed
+    )
     summary = (
         "not-requested"
         if not requested_any
@@ -4197,6 +4202,8 @@ def build_spirv_probe_env_audit():
         if host_to_container_missing
         else "pass"
         if matching_armed and executor_debug_binding_events
+        else "executor-probe-debug-seen-icd-arm-log-missing"
+        if executor_probe_debug_seen_without_icd_arm
         else "probe-target-unarmed"
         if probe_effective_seen_but_unarmed
         else "stale-target-hash"
@@ -4226,6 +4233,7 @@ def build_spirv_probe_env_audit():
         "skipped_non_target_actual_hashes": skipped_actual_hashes[-16:],
         "stale_target_hash": stale_target_hash,
         "probe_effective_seen_but_unarmed": probe_effective_seen_but_unarmed,
+        "executor_probe_debug_seen_without_icd_arm": executor_probe_debug_seen_without_icd_arm,
         "target_only": target_only,
         "host_to_container": {
             "summary": "not-requested" if not requested else "fail" if host_to_container_missing else "pass",
@@ -6092,6 +6100,128 @@ elif q6_shader_like_64_clear:
 q6_final_store_boundary["native_reduction_cleared"] = q6_shader_like_oracle_cleared
 
 
+def build_q6_stage_divergence():
+    manifest_sourced = (
+        isinstance(Q6_PROBE_EXPECTATION_REPORT, dict)
+        and Q6_PROBE_EXPECTATION_REPORT.get("source") == "manifest"
+        and Q6_PROBE_EXPECTATION_REPORT.get("valid") is True
+    )
+    probe_pass = isinstance(q6_debug_u32_probe, dict) and q6_debug_u32_probe.get("summary") == "pass"
+    final_boundary_summary = q6_final_store_boundary.get("summary") if isinstance(q6_final_store_boundary, dict) else None
+    phase_counts = {}
+    lane_trace_verified = False
+    trace_writeback_verified = False
+    final_records = []
+    trace_writeback_failures = []
+    if isinstance(q6_debug_u32_probe, dict):
+        for binding in q6_debug_u32_probe.get("bindings") or []:
+            if not isinstance(binding, dict):
+                continue
+            lane_trace = binding.get("lane_trace_v1") if isinstance(binding.get("lane_trace_v1"), dict) else {}
+            if lane_trace.get("summary") == "pass":
+                lane_trace_verified = True
+            for phase in lane_trace.get("phases") or []:
+                if not isinstance(phase, dict):
+                    continue
+                name = str(phase.get("name") or "")
+                try:
+                    executed = int(phase.get("executed_lane_count") or 0)
+                except (TypeError, ValueError):
+                    executed = 0
+                if name:
+                    phase_counts[name] = max(int(phase_counts.get(name) or 0), executed)
+            for record in binding.get("records") or []:
+                if not isinstance(record, dict) or record.get("status") != "pass":
+                    continue
+                if record.get("trace_writeback_verified") is False:
+                    trace_writeback_failures.append({
+                        "binding": binding.get("binding"),
+                        "probe": record.get("probe"),
+                        "stage": record.get("stage"),
+                        "fields": record.get("trace_writeback_mismatch_fields"),
+                    })
+                if record.get("role_code") == 4 and record.get("trace_status") == "pass":
+                    final_records.append(record)
+    trace_writeback_verified = bool(final_records) and not trace_writeback_failures
+    pre_reduction_compared = phase_counts.get("pre-reduction-lanes", 0) > 0
+    reduction_compared = phase_counts.get("reduction-lanes", 0) > 0
+    final_store_compared = final_boundary_summary in {
+        "pass",
+        "executor-writeback-mismatch",
+        "native-final-store-mismatch",
+    }
+    final_record = final_records[-1] if final_records else {}
+    final_store_matches_expected = None
+    if isinstance(q6_final_store_boundary, dict):
+        samples = q6_final_store_boundary.get("samples")
+        if isinstance(samples, list) and samples:
+            final_store_matches_expected = samples[-1].get("final_store_matches_expected")
+    missing = []
+    if not manifest_sourced:
+        missing.append("manifest_sourced")
+    if not probe_pass:
+        missing.append("q6_debug_u32_probe.summary")
+    if not lane_trace_verified:
+        missing.append("lane_trace_verified")
+    if not trace_writeback_verified:
+        missing.append("trace_writeback_verified")
+    if not pre_reduction_compared:
+        missing.append("pre_reduction_compared")
+    if not reduction_compared:
+        missing.append("reduction_compared")
+    if not final_store_compared:
+        missing.append("final_store_compared")
+
+    pre_reduction_matches = bool(pre_reduction_compared and lane_trace_verified)
+    reduction_matches = bool(
+        reduction_compared
+        and lane_trace_verified
+        and q6_shader_like_oracle_cleared
+    )
+    summary = "missing-evidence"
+    first_divergent_stage = None
+    if not missing:
+        if final_boundary_summary == "pass":
+            summary = "pass"
+        elif final_boundary_summary == "native-final-store-mismatch" and final_store_matches_expected is False:
+            if pre_reduction_matches and reduction_matches:
+                summary = "final-lane0-store-mismatch"
+                first_divergent_stage = "final-store"
+            elif not pre_reduction_matches:
+                summary = "pre-reduction-mismatch"
+                first_divergent_stage = "pre-reduction"
+            else:
+                summary = "reduction-mismatch"
+                first_divergent_stage = "reduction"
+
+    result = {
+        "schema": "pdocker.q6k.stage-divergence.v1",
+        "summary": summary,
+        "manifest_sourced": manifest_sourced,
+        "lane_trace_verified": lane_trace_verified,
+        "trace_writeback_verified": trace_writeback_verified,
+        "pre_reduction_compared": pre_reduction_compared,
+        "pre_reduction_matches": pre_reduction_matches,
+        "reduction_compared": reduction_compared,
+        "reduction_matches": reduction_matches,
+        "final_store_compared": final_store_compared,
+        "final_store_matches_expected": final_store_matches_expected,
+        "first_divergent_stage": first_divergent_stage,
+        "final_record_role_code": final_record.get("role_code"),
+        "final_record_local_invocation_id": final_record.get("local_invocation_id"),
+        "phase_executed_lane_counts": phase_counts,
+        "final_boundary_summary": final_boundary_summary,
+        "trace_writeback_failures": trace_writeback_failures[:8],
+    }
+    if missing:
+        result["missing"] = missing[:16]
+        result["reason"] = "stage divergence evidence is incomplete"
+    return result
+
+
+q6_stage_divergence = build_q6_stage_divergence()
+
+
 def classify_q6_output_index_probe(probe, native_reduction_cleared):
     samples = probe.get("samples") if isinstance(probe, dict) else None
     if not isinstance(samples, list) or not samples:
@@ -6249,6 +6379,7 @@ q6_workgroup_diagnostics = {
     "q6_debug_probe_expectations": Q6_PROBE_EXPECTATION_REPORT,
     "q6_debug_u32_probe": q6_debug_u32_probe,
     "q6_debug_u32_probe_blocker": q6_debug_u32_probe_blocker,
+    "q6_stage_divergence": q6_stage_divergence,
     "q6_output_layout_probe": q6_output_layout_probe,
     "q6_output_layout_probe_summary": q6_output_layout_probe_summary,
     "q6_output_index_probe_summary": q6_output_index_probe_summary,

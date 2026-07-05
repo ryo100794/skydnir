@@ -1300,6 +1300,7 @@ def _q6_stage_divergence_evidence(q6: Any) -> dict[str, Any]:
     summary = str(raw.get("summary") or "")
     valid_summaries = {
         "pass",
+        "missing-evidence",
         "pre-reduction-mismatch",
         "reduction-mismatch",
         "final-lane0-store-mismatch",

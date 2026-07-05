@@ -13314,6 +13314,18 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("specialization_materialize_report", data["missing_required_evidence_fields"])
         self.assertTrue(data["artifact_matches_plan_path"])
 
+    def test_q6_compare_emits_stage_divergence_and_probe_arm_audit_split(self):
+        compare = LLAMA_COMPARE.read_text()
+        self.assertIn("def build_q6_stage_divergence():", compare)
+        self.assertIn('"q6_stage_divergence": q6_stage_divergence', compare)
+        self.assertIn("pre_reduction_compared", compare)
+        self.assertIn("reduction_compared", compare)
+        self.assertIn("final_store_matches_expected", compare)
+        self.assertIn("executor-probe-debug-seen-icd-arm-log-missing", compare)
+        self.assertIn("executor_probe_debug_seen_without_icd_arm", compare)
+        verifier = LLAMA_GPU_ARTIFACT_VERIFIER.read_text()
+        self.assertIn('"missing-evidence",', verifier)
+
     def test_q6_plan_verifier_selects_final_store_boundary_branches(self):
         verifier = load_llama_q6_plan_verifier()
         plan = {"pass_branch": {"condition": "pass", "action": "promote"}}
