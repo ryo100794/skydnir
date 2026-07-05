@@ -470,6 +470,7 @@ struct PdockerVkDescriptorSetLayout {
     uint32_t storage_binding_count;
     VkDescriptorType storage_binding_types[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     uint32_t storage_binding_counts[PDOCKER_VK_MAX_STORAGE_BUFFERS];
+    VkShaderStageFlags storage_binding_stage_flags[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     PdockerVkSampler immutable_samplers
         [PDOCKER_VK_MAX_STORAGE_BUFFERS][PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS];
     bool immutable_sampler_valid
@@ -14589,7 +14590,8 @@ static bool descriptor_set_layout_compatible(
     }
     for (uint32_t i = 0; i < expected->storage_binding_count; ++i) {
         if (expected->storage_binding_types[i] != actual->storage_binding_types[i] ||
-            expected->storage_binding_counts[i] != actual->storage_binding_counts[i]) {
+            expected->storage_binding_counts[i] != actual->storage_binding_counts[i] ||
+            expected->storage_binding_stage_flags[i] != actual->storage_binding_stage_flags[i]) {
             return false;
         }
         uint32_t count = expected->storage_binding_counts[i];
@@ -14706,6 +14708,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorSetLayout(
         if ((v4_descriptor || v5_object_descriptor) && binding->binding < PDOCKER_VK_MAX_STORAGE_BUFFERS) {
             layout->storage_binding_types[binding->binding] = binding->descriptorType;
             layout->storage_binding_counts[binding->binding] = binding->descriptorCount;
+            layout->storage_binding_stage_flags[binding->binding] = binding->stageFlags;
             if (binding->pImmutableSamplers && descriptor_type_requires_sampler(binding->descriptorType)) {
                 uint32_t sampler_count = binding->descriptorCount;
                 if (sampler_count > PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS) {

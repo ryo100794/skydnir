@@ -6193,9 +6193,17 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("set_layouts[PDOCKER_VK_MAX_DESCRIPTOR_SETS]", icd)
         self.assertIn("bool unsupported_set_layout_count;", icd)
         self.assertIn("descriptor_set_layout_compatible", icd)
+        self.assertIn("storage_binding_stage_flags[PDOCKER_VK_MAX_STORAGE_BUFFERS]", icd)
         self.assertIn("descriptor_type_is_dynamic", icd)
         self.assertIn("VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC", icd)
         self.assertIn("VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC", icd)
+        dsl_create_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorSetLayout", 1)[1].split(
+            "VKAPI_ATTR void VKAPI_CALL vkDestroyDescriptorSetLayout", 1
+        )[0]
+        self.assertIn("layout->storage_binding_stage_flags[binding->binding] = binding->stageFlags;", dsl_create_body)
+        layout_compatible_body = c_function_body(icd, "descriptor_set_layout_compatible")
+        self.assertIn("expected->storage_binding_stage_flags[i]", layout_compatible_body)
+        self.assertIn("actual->storage_binding_stage_flags[i]", layout_compatible_body)
         create_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreatePipelineLayout", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkDestroyPipelineLayout", 1
         )[0]
