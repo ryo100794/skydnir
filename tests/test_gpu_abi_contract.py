@@ -10283,6 +10283,69 @@ class GpuAbiContractTest(unittest.TestCase):
         bind_body = source.split("VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(", 1)[1].split("VKAPI_ATTR void VKAPI_CALL vkCmdDispatch(", 1)[0]
         self.assertNotIn("dynamic descriptor with VK_WHOLE_SIZE is unsupported", bind_body)
 
+    def test_vulkan_graphics_v61_icd_validates_descriptor_dynamic_offsets_against_command_table(self):
+        icd = VULKAN_ICD.read_text()
+        self.assertIn("validate_graphics_descriptor_dynamic_offset_fidelity", icd)
+        helper = c_function_body(icd, "validate_graphics_descriptor_dynamic_offset_fidelity")
+        for marker in [
+            "PDOCKER_GPU_V5_DESCRIPTOR_FLAG_DYNAMIC",
+            "record->first_dynamic_offset > dynamic_offset_count",
+            "record->dynamic_offset_count > dynamic_offset_count - record->first_dynamic_offset",
+            "record->first_dynamic_offset + dynamic_descriptor_index",
+            "dynamic_offsets[dyn_index].offset",
+            "descriptor->dynamic_offset != (uint64_t)expected_dynamic_offset",
+            "dynamic_descriptor_index != record->dynamic_offset_count",
+            "return -EPROTO",
+        ]:
+            self.assertIn(marker, helper)
+        graphics_body = icd.split(
+            "static int send_recorded_vulkan_graphics_v6_1_frame_range", 1
+        )[1].split("static int send_recorded_vulkan_graphics_v6_1_frame(", 1)[0]
+        bind_body = graphics_body.split(
+            "record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_DESCRIPTOR_SETS", 1
+        )[1].split("record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_DYNAMIC_STATE", 1)[0]
+        self.assertIn("snapshot->dynamic_offset_count != record->dynamic_offset_count", bind_body)
+        self.assertIn("validate_graphics_descriptor_dynamic_offset_fidelity(", bind_body)
+        self.assertLess(
+            bind_body.index("rc = collect_graphics_descriptor_entries("),
+            bind_body.index("validate_graphics_descriptor_dynamic_offset_fidelity("),
+        )
+        self.assertLess(
+            bind_body.index("validate_graphics_descriptor_dynamic_offset_fidelity("),
+            bind_body.index("command->descriptor_count ="),
+        )
+        secondary_body = c_function_body(icd, "append_secondary_command_buffer")
+        self.assertIn("uint32_t dynamic_offset_base = dst->graphics_dynamic_offset_count;", secondary_body)
+        self.assertIn("record.first_dynamic_offset += dynamic_offset_base;", secondary_body)
+
+    def test_vulkan_graphics_v61_executor_uses_validated_dynamic_offset_source(self):
+        executor = GPU_EXECUTOR.read_text()
+        helper = c_function_body(executor, "vulkan_graphics_v61_descriptor_dynamic_offset")
+        for marker in [
+            "PDOCKER_GPU_V5_DESCRIPTOR_FLAG_DYNAMIC",
+            "descriptor->dynamic_offset != 0",
+            "dynamic_descriptor_ordinal >= command->dynamic_offset_count",
+            "command->first_dynamic_offset + dynamic_descriptor_ordinal",
+            "entry->reserved0 != 0",
+            "dyn != descriptor->dynamic_offset",
+            "*out_dynamic_offset = dyn",
+            "return -EPROTO",
+        ]:
+            self.assertIn(marker, helper)
+        validation_body = c_function_body(executor, "validate_vulkan_graphics_v6_frame_content")
+        self.assertIn("vulkan_graphics_v61_descriptor_dynamic_offset(", validation_body)
+        self.assertIn("&view, command, descriptor, dynamic_descriptor_count, &dyn", validation_body)
+        buffers_body = c_function_body(executor, "materialize_vulkan_graphics_v6_buffers")
+        self.assertIn("vulkan_graphics_v61_descriptor_dynamic_offset(", buffers_body)
+        self.assertIn("view, command, descriptor, dynamic_descriptor_count, &dynamic_offset", buffers_body)
+        self.assertIn("checked_u64_add3(descriptor->buffer_offset, dynamic_offset, 0", buffers_body)
+        self.assertIn("dynamic_descriptor_count != command->dynamic_offset_count", buffers_body)
+        descriptors_body = c_function_body(executor, "materialize_vulkan_graphics_v6_descriptors")
+        self.assertIn("vulkan_graphics_v61_descriptor_dynamic_offset(", descriptors_body)
+        self.assertIn("view, command, descriptor, dynamic_descriptor_count, &dynamic_offset", descriptors_body)
+        self.assertIn("checked_u64_add3(descriptor->buffer_offset, dynamic_offset, 0", descriptors_body)
+        self.assertIn("dynamic_descriptor_count != command->dynamic_offset_count", descriptors_body)
+
     def test_strict_passthrough_preserves_vkbuffer_coordinate_space(self):
         source = GPU_EXECUTOR.read_text() + "\n" + VULKAN_ICD.read_text()
         for marker in [

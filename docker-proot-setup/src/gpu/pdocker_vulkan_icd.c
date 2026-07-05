@@ -4842,6 +4842,34 @@ static int collect_graphics_descriptor_entries(
     return 0;
 }
 
+static int validate_graphics_descriptor_dynamic_offset_fidelity(
+        const PdockerGpuVulkanDispatchV5DescriptorObjectEntry *descriptors,
+        size_t descriptor_count,
+        const PdockerGpuVulkanGraphicsV61DynamicOffsetEntry *dynamic_offsets,
+        size_t dynamic_offset_count,
+        const PdockerVkGraphicsCommandRecord *record) {
+    if (!descriptors || !dynamic_offsets || !record) return -EINVAL;
+    if (record->first_dynamic_offset > dynamic_offset_count ||
+        record->dynamic_offset_count > dynamic_offset_count - record->first_dynamic_offset) {
+        return -ERANGE;
+    }
+    uint32_t dynamic_descriptor_index = 0;
+    for (size_t i = 0; i < descriptor_count; ++i) {
+        const PdockerGpuVulkanDispatchV5DescriptorObjectEntry *descriptor = &descriptors[i];
+        if ((descriptor->descriptor_flags & PDOCKER_GPU_V5_DESCRIPTOR_FLAG_DYNAMIC) == 0) {
+            if (descriptor->dynamic_offset != 0) return -EPROTO;
+            continue;
+        }
+        if (dynamic_descriptor_index >= record->dynamic_offset_count) return -EPROTO;
+        uint32_t dyn_index = record->first_dynamic_offset + dynamic_descriptor_index;
+        uint32_t expected_dynamic_offset = dynamic_offsets[dyn_index].offset;
+        if (descriptor->dynamic_offset != (uint64_t)expected_dynamic_offset) return -EPROTO;
+        dynamic_descriptor_index++;
+    }
+    if (dynamic_descriptor_index != record->dynamic_offset_count) return -EPROTO;
+    return 0;
+}
+
 static _Thread_local const VkSubmitInfo2 *g_submit2_metadata_override;
 static _Thread_local uint32_t g_submit2_metadata_command_index =
     PDOCKER_GPU_GRAPHICS_V621_COMMAND_BUFFER_INDEX_NONE;
@@ -6416,6 +6444,17 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
                 image_view_entries, image_view_objects, &image_view_count,
                 sampler_entries, sampler_objects, &sampler_count,
                 fds, &fd_count, snapshot, submit_id, &dynamic_descriptor_count);
+            if (rc != 0) goto cleanup;
+            if (snapshot->dynamic_offset_count != record->dynamic_offset_count) {
+                rc = -EPROTO;
+                goto cleanup;
+            }
+            rc = validate_graphics_descriptor_dynamic_offset_fidelity(
+                descriptors + command->first_descriptor,
+                descriptor_count - command->first_descriptor,
+                dynamic_offsets,
+                dynamic_offset_count,
+                record);
             if (rc != 0) goto cleanup;
             if (dynamic_descriptor_count != record->dynamic_offset_count) {
                 rc = -EPROTO;

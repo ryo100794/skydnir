@@ -21967,6 +21967,40 @@ static int u64_range_within_size(uint64_t offset, uint64_t size, uint64_t limit)
     return 1;
 }
 
+static int vulkan_graphics_v61_descriptor_dynamic_offset(
+        const VulkanGraphicsV6FrameView *view,
+        const PdockerGpuVulkanGraphicsV6CommandEntry *command,
+        const PdockerGpuVulkanDispatchV5DescriptorObjectEntry *descriptor,
+        uint32_t dynamic_descriptor_ordinal,
+        uint64_t *out_dynamic_offset) {
+    if (!view || !command || !descriptor || !out_dynamic_offset) return -EINVAL;
+    const int descriptor_is_dynamic =
+        (descriptor->descriptor_flags & PDOCKER_GPU_V5_DESCRIPTOR_FLAG_DYNAMIC) != 0;
+    if (!descriptor_is_dynamic) {
+        if (view->is_v61 && descriptor->dynamic_offset != 0) return -EPROTO;
+        *out_dynamic_offset = descriptor->dynamic_offset;
+        return 0;
+    }
+    if (!view->is_v61) {
+        *out_dynamic_offset = descriptor->dynamic_offset;
+        return 0;
+    }
+    if (!view->header_v61 || !view->dynamic_offsets ||
+        dynamic_descriptor_ordinal >= command->dynamic_offset_count ||
+        command->first_dynamic_offset > UINT32_MAX - dynamic_descriptor_ordinal) {
+        return -EPROTO;
+    }
+    const uint32_t dyn_index = command->first_dynamic_offset + dynamic_descriptor_ordinal;
+    if (dyn_index >= view->header_v61->v61.dynamic_offset_count) return -EPROTO;
+    const PdockerGpuVulkanGraphicsV61DynamicOffsetEntry *entry =
+        &view->dynamic_offsets[dyn_index];
+    if (entry->reserved0 != 0) return -EPROTO;
+    const uint64_t dyn = entry->offset;
+    if (dyn != descriptor->dynamic_offset) return -EPROTO;
+    *out_dynamic_offset = dyn;
+    return 0;
+}
+
 
 static int vulkan_graphics_v610_image_subresource_range_valid(
         const PdockerGpuVulkanDispatchV5ImageEntry *image,
@@ -23579,12 +23613,13 @@ static int validate_vulkan_graphics_v6_frame_content(
                     if (descriptor->dynamic_offset != 0) return -EPROTO;
                     continue;
                 }
-                if (dynamic_descriptor_count >= command->dynamic_offset_count) return -EPROTO;
+                uint64_t dyn = 0;
+                int dyn_rc = vulkan_graphics_v61_descriptor_dynamic_offset(
+                    &view, command, descriptor, dynamic_descriptor_count, &dyn);
+                if (dyn_rc != 0) return dyn_rc;
                 VkDescriptorType descriptor_type = VK_DESCRIPTOR_TYPE_MAX_ENUM;
                 if (vulkan_dispatch_descriptor_type_from_api(descriptor->descriptor_type, &descriptor_type) != 0) return -EPROTO;
                 const PdockerGpuVulkanDispatchV5ResourceEntry *buffer = &resources[descriptor->resource_index];
-                const uint32_t dyn_index = command->first_dynamic_offset + dynamic_descriptor_count;
-                const uint64_t dyn = dynamic_offsets[dyn_index].offset;
                 uint64_t effective_offset = 0;
                 if (checked_u64_add3(descriptor->buffer_offset, dyn, 0, &effective_offset) != 0) return -EOVERFLOW;
                 uint64_t effective_range = descriptor->range;
@@ -27181,6 +27216,7 @@ static int materialize_vulkan_graphics_v6_buffers(
                 }
             }
         } else if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_DESCRIPTOR_SETS) {
+            uint32_t dynamic_descriptor_count = 0;
             for (uint32_t d = 0; d < command->descriptor_count; ++d) {
                 const PdockerGpuVulkanDispatchV5DescriptorObjectEntry *descriptor =
                     &view->descriptors[command->first_descriptor + d];
@@ -27214,9 +27250,18 @@ static int materialize_vulkan_graphics_v6_buffers(
                     destroy_vulkan_graphics_replay_buffers(rt->device, out);
                     return -EPROTO;
                 }
+                uint64_t dynamic_offset = 0;
+                int dynamic_rc = vulkan_graphics_v61_descriptor_dynamic_offset(
+                    view, command, descriptor, dynamic_descriptor_count, &dynamic_offset);
+                if (dynamic_rc != 0) {
+                    destroy_vulkan_graphics_replay_buffers(rt->device, out);
+                    return dynamic_rc;
+                }
+                if (descriptor->descriptor_flags & PDOCKER_GPU_V5_DESCRIPTOR_FLAG_DYNAMIC) {
+                    dynamic_descriptor_count++;
+                }
                 uint64_t effective_offset = 0;
-                if (checked_u64_add3(descriptor->buffer_offset,
-                                     descriptor->dynamic_offset, 0,
+                if (checked_u64_add3(descriptor->buffer_offset, dynamic_offset, 0,
                                      &effective_offset) != 0) {
                     destroy_vulkan_graphics_replay_buffers(rt->device, out);
                     return -EOVERFLOW;
@@ -27247,6 +27292,10 @@ static int materialize_vulkan_graphics_v6_buffers(
                         return rc;
                     }
                 }
+            }
+            if (view->is_v61 && dynamic_descriptor_count != command->dynamic_offset_count) {
+                destroy_vulkan_graphics_replay_buffers(rt->device, out);
+                return -EPROTO;
             }
         } else if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW_INDEXED) {
             const PdockerGpuVulkanGraphicsV68IndirectDrawEntry *indirect =
@@ -27832,6 +27881,7 @@ static int materialize_vulkan_graphics_v6_descriptors(
         memset(image_infos, 0, sizeof(image_infos));
         memset(writes, 0, sizeof(writes));
         if (command->descriptor_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS) return -E2BIG;
+        uint32_t dynamic_descriptor_count = 0;
         for (uint32_t d = 0; d < command->descriptor_count; ++d) {
             const PdockerGpuVulkanDispatchV5DescriptorObjectEntry *descriptor =
                 &view->descriptors[command->first_descriptor + d];
@@ -27857,9 +27907,15 @@ static int materialize_vulkan_graphics_v6_descriptors(
                 .descriptorType = descriptor_type,
             };
             if (is_buffer_descriptor) {
+                uint64_t dynamic_offset = 0;
+                int dynamic_rc = vulkan_graphics_v61_descriptor_dynamic_offset(
+                    view, command, descriptor, dynamic_descriptor_count, &dynamic_offset);
+                if (dynamic_rc != 0) return dynamic_rc;
+                if (descriptor->descriptor_flags & PDOCKER_GPU_V5_DESCRIPTOR_FLAG_DYNAMIC) {
+                    dynamic_descriptor_count++;
+                }
                 uint64_t effective_offset = 0;
-                if (checked_u64_add3(descriptor->buffer_offset,
-                                     descriptor->dynamic_offset, 0,
+                if (checked_u64_add3(descriptor->buffer_offset, dynamic_offset, 0,
                                      &effective_offset) != 0) {
                     return -EOVERFLOW;
                 }
@@ -27927,6 +27983,9 @@ static int materialize_vulkan_graphics_v6_descriptors(
                 }
                 writes[d].pImageInfo = &image_infos[d];
             }
+        }
+        if (view->is_v61 && dynamic_descriptor_count != command->dynamic_offset_count) {
+            return -EPROTO;
         }
         vkUpdateDescriptorSets(rt->device, command->descriptor_count, writes, 0, NULL);
     }
