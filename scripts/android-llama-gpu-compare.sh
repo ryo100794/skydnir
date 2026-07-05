@@ -6041,6 +6041,14 @@ q6_store_index_model_required = (
 )
 q6_safe_kernel_used = q6_latest.get("q6k_safe_kernel") is True
 q6_probe_effective_replay_used = q6_latest.get("q6_probe_effective_replay") is True
+q6_compat_rewrite_used = any(
+    q6_latest.get(field) is True
+    for field in (
+        "q6_storage16_loads_lowered",
+        "q6_u32_to_u8vec4_bitcasts_lowered",
+        "q6_final_store_pre_barrier_inserted",
+    )
+)
 q6_local_size_resolved = q6_latest.get("spirv_local_size_resolved")
 q6_partial_local_size = q6_latest_partial.get("q6_local_size")
 q6_expected_local_size = (
@@ -6286,6 +6294,8 @@ q6_blocker_class = (
     if q6_probe_effective_replay_used
     else "q6-safe-kernel-diagnostic-only"
     if q6_latest_oracle.get("status") == "match" and q6_safe_kernel_used
+    else "q6-compat-rewrite-diagnostic-only"
+    if q6_latest_oracle.get("status") == "match" and q6_compat_rewrite_used
     else "cleared"
     if q6_latest_oracle.get("status") == "match"
     else "descriptor-effective-range-or-upload"
@@ -6356,6 +6366,7 @@ q6_workgroup_diagnostics = {
     "latest_mismatch_count": q6_latest_oracle.get("mismatch_count"),
     "q6k_safe_kernel": q6_safe_kernel_used,
     "q6_probe_effective_replay": q6_probe_effective_replay_used,
+    "q6_compat_rewrite_used": q6_compat_rewrite_used,
     "q6_storage16_loads_lowered": q6_latest.get("q6_storage16_loads_lowered"),
     "q6_storage16_loads_lowered_count": q6_latest.get("q6_storage16_loads_lowered_count"),
     "q6_u32_to_u8vec4_bitcasts_lowered": q6_latest.get("q6_u32_to_u8vec4_bitcasts_lowered"),

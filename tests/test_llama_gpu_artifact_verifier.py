@@ -1533,6 +1533,83 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         self.assertFalse(report["correctness_claim_allowed"])
         self.assertFalse(report["benchmark_claim_allowed"])
 
+    def test_q6_compat_rewrite_match_is_diagnostic_only_not_correctness_claim(self):
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": passing_config_propagation(),
+                    "q6_workgroup_diagnostics": {
+                        **q6_verified_writeback(),
+                        "event_count": 1,
+                        "workgroup_shape_blocker": False,
+                        "latest_status": "match",
+                        "local_size_resolved": [32, 1, 1],
+                        "q6_storage16_loads_lowered": True,
+                        "q6_storage16_loads_lowered_count": 24,
+                        "q6_u32_to_u8vec4_bitcasts_lowered": True,
+                        "q6_u32_to_u8vec4_bitcasts_lowered_count": 16,
+                        "q6_final_store_pre_barrier_inserted": True,
+                    },
+                },
+                "correctness": gpu_correctness_report("pass"),
+            },
+            "cpu": {"tokens_per_second": 0.1},
+            **speedup_sections(),
+        }
+        result = self.run_verifier(payload)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "q6-compat-rewrite-diagnostic-only")
+        self.assertEqual(report["responsibility_boundary"], "q6-diagnostic-evidence")
+        self.assertFalse(report["terminal"])
+        self.assertFalse(report["correctness_claim_allowed"])
+        self.assertFalse(report["benchmark_claim_allowed"])
+        self.assertEqual(report["q6_effective_blocker_class"], "q6-compat-rewrite-diagnostic-only")
+        self.assertIn("q6_storage16_loads_lowered", json.dumps(report["vulkan_shader_passthrough_rewrite_evidence"]))
+
+    def test_q4_safe_kernel_match_is_diagnostic_only_not_correctness_claim(self):
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": passing_config_propagation(),
+                    "generic_spirv_dispatch": {
+                        "valid_android_vulkan_events": [
+                            {
+                                "valid": True,
+                                "kernel": "generic_spirv",
+                                "q4k_safe_kernel": True,
+                                "pipeline_key": {"spirv_hash": "0x7ec0292e948c9b41"},
+                            }
+                        ],
+                    },
+                    "q6_workgroup_diagnostics": {
+                        **q6_verified_writeback(),
+                        "event_count": 1,
+                        "workgroup_shape_blocker": False,
+                        "latest_status": "match",
+                        "local_size_resolved": [32, 1, 1],
+                    },
+                },
+                "correctness": gpu_correctness_report("pass"),
+            },
+            "cpu": {"tokens_per_second": 0.1},
+            **speedup_sections(),
+        }
+        result = self.run_verifier(payload)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "q4-safe-kernel-diagnostic-only")
+        self.assertEqual(report["responsibility_boundary"], "q4-diagnostic-evidence")
+        self.assertFalse(report["terminal"])
+        self.assertFalse(report["correctness_claim_allowed"])
+        self.assertFalse(report["benchmark_claim_allowed"])
+        self.assertEqual(report["q6_effective_blocker_class"], "q4-safe-kernel-diagnostic-only")
+        self.assertIn("q4k_safe_kernel", json.dumps(report["vulkan_shader_passthrough_rewrite_evidence"]))
+
     def test_q6_workgroup_blocker_reports_missing_required_env_overlay(self):
         payload = {
             "schema": "pdocker.llama.gpu.compare.v1",

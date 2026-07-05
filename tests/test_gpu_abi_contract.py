@@ -5362,8 +5362,7 @@ class GpuAbiContractTest(unittest.TestCase):
                 "PDOCKER_GPU_DISPATCH_PROFILE_LOG": "1",
                 "PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE": "1",
                 "PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING": "1",
-                "PDOCKER_GPU_Q6K_COMPAT_REWRITES": "1",
-                "PDOCKER_GPU_Q6K_READONLY_OVERLAP_SNAPSHOT": "1",
+                            "PDOCKER_GPU_Q6K_READONLY_OVERLAP_SNAPSHOT": "1",
             },
             q6_overlay,
         )
@@ -5562,7 +5561,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('\\"effective_spirv_hash\\":\\"0x%016llx\\"', source)
         self.assertIn("reported_source_spirv_hash = cpu_oracle_spirv_hash", source)
         self.assertIn("reported_source_spirv_hash_source = cpu_oracle_spirv_hash_source", source)
-        self.assertIn("reported_effective_spirv_hash = original_spirv_hash", source)
+        self.assertIn("reported_effective_spirv_hash = spirv_summary.hash", source)
         self.assertIn("write_f32_sample_array", source)
         self.assertIn("write_f32_fd_sample_array", source)
         self.assertIn("write_f32_sample_array_at_indices", source)
@@ -5755,6 +5754,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('\\"q4k_safe_kernel\\":%s', source)
         self.assertIn("kQ4kSafeSpv", source)
         self.assertIn("kQ6kSafeSpv", source)
+        self.assertIn("replace_spirv_module(&shader_code, &shader_size, kQ4kSafeSpv", source)
+        self.assertIn("replace_spirv_module(&shader_code, &shader_size, kQ6kSafeSpv", source)
+        self.assertNotIn("memcpy(shader_code, kQ4kSafeSpv", source)
+        self.assertNotIn("memcpy(shader_code, kQ6kSafeSpv", source)
         self.assertIn("PDOCKER_GPU_Q6K_SAFE_KERNEL is an explicit diagnostic override", source)
         self.assertNotIn(
             "const int q6k_safe_kernel_requested =\n        strict_passthrough ? 0 :",
@@ -12828,6 +12831,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("q6_final_store_pre_barrier_inserted", compare)
         self.assertIn("q6_storage16_loads_lowered", compare)
         self.assertIn("q6_u32_to_u8vec4_bitcasts_lowered", compare)
+        self.assertIn("q6_compat_rewrite_used", compare)
+        self.assertIn("q6-compat-rewrite-diagnostic-only", compare)
         self.assertNotIn("q6_storage16_lowering_identity_hash", executor)
         self.assertIn("q6_structural_callsite_detected", executor)
         self.assertIn("find_q6k_duplicate_binding0_views(\n            (const uint32_t *)shader_code", executor)

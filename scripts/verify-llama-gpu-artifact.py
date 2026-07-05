@@ -752,6 +752,109 @@ def _valid_compact_hash(value: Any) -> bool:
     return isinstance(value, str) and bool(COMPACT_HASH_RE.fullmatch(value)) and value.lower() != ZERO_COMPACT_HASH
 
 
+VULKAN_SHADER_REWRITE_BOOL_FIELDS = {
+    "duplicate_descriptor_rewrite",
+    "strict_duplicate_descriptor_normalization",
+    "specialization_materialized",
+    "q4k_targeted_specialization_materialized",
+    "local_size_patched",
+    "float16_capability_added",
+    "q6_storage16_loads_lowered",
+    "q6_u32_to_u8vec4_bitcasts_lowered",
+    "q6_final_store_pre_barrier_inserted",
+    "q4k_safe_kernel",
+    "q6k_safe_kernel",
+    "q6_probe_effective_replay",
+}
+
+
+def _normalized_compact_hash(value: Any) -> str | None:
+    if not _valid_compact_hash(value):
+        return None
+    return str(value).lower()
+
+
+def _pipeline_spirv_hash(value: dict[str, Any]) -> str | None:
+    pipeline_key = value.get("pipeline_key")
+    if not isinstance(pipeline_key, dict):
+        return None
+    return _normalized_compact_hash(pipeline_key.get("spirv_hash"))
+
+
+def _vulkan_shader_passthrough_rewrite_evidence(data: Any, path: str = "$") -> list[dict[str, Any]]:
+    """Return evidence that a claimed Vulkan run was not shader pass-through.
+
+    This is intentionally generic. llama/Q6-specific compatibility rewrites,
+    safe-kernel replacements, specialization folding, descriptor-decoration
+    rewrites, and source/effective/executable SPIR-V hash splits may be useful
+    diagnostics, but they cannot support a "Vulkan pass-through works" claim.
+    """
+
+    evidence: list[dict[str, Any]] = []
+
+    def add(item: dict[str, Any]) -> None:
+        if len(evidence) < 16:
+            evidence.append(item)
+
+    def scan_hash_identity(value: dict[str, Any], value_path: str) -> None:
+        source_hash = _normalized_compact_hash(value.get("source_spirv_hash"))
+        original_hash = _normalized_compact_hash(value.get("original_spirv_hash"))
+        effective_hash = _normalized_compact_hash(value.get("effective_spirv_hash"))
+        executable_hash = _pipeline_spirv_hash(value)
+        baseline_hash = original_hash or source_hash
+        if baseline_hash and effective_hash and baseline_hash != effective_hash:
+            add({
+                "path": value_path,
+                "kind": "source-effective-spirv-hash-mismatch",
+                "source_spirv_hash": baseline_hash,
+                "effective_spirv_hash": effective_hash,
+            })
+        if effective_hash and executable_hash and effective_hash != executable_hash:
+            add({
+                "path": f"{value_path}.pipeline_key",
+                "kind": "effective-executable-spirv-hash-mismatch",
+                "effective_spirv_hash": effective_hash,
+                "pipeline_spirv_hash": executable_hash,
+            })
+        elif baseline_hash and executable_hash and baseline_hash != executable_hash:
+            add({
+                "path": f"{value_path}.pipeline_key",
+                "kind": "source-executable-spirv-hash-mismatch",
+                "source_spirv_hash": baseline_hash,
+                "pipeline_spirv_hash": executable_hash,
+            })
+
+    def visit(value: Any, value_path: str) -> None:
+        if len(evidence) >= 16:
+            return
+        if isinstance(value, dict):
+            for field in sorted(VULKAN_SHADER_REWRITE_BOOL_FIELDS):
+                if value.get(field) is True:
+                    add({
+                        "path": f"{value_path}.{field}",
+                        "kind": "shader-rewrite-or-diagnostic-replacement",
+                        "field": field,
+                        "value": True,
+                    })
+                    if len(evidence) >= 16:
+                        return
+            scan_hash_identity(value, value_path)
+            if len(evidence) >= 16:
+                return
+            for key, child in value.items():
+                visit(child, f"{value_path}.{key}")
+                if len(evidence) >= 16:
+                    return
+        elif isinstance(value, list):
+            for index, child in enumerate(value):
+                visit(child, f"{value_path}[{index}]")
+                if len(evidence) >= 16:
+                    return
+
+    visit(data, path)
+    return evidence
+
+
 def _compact_binding_identity(binding: dict[str, Any], path: str) -> dict[str, Any]:
     return {
         "path": path,
@@ -2131,6 +2234,26 @@ def _q6_workgroup_env_gap(
     }
 
 
+def _q6_compat_rewrite_used(q6: Any) -> bool:
+    if not isinstance(q6, dict):
+        return False
+    return any(
+        q6.get(field) is True
+        for field in (
+            "q6_storage16_loads_lowered",
+            "q6_u32_to_u8vec4_bitcasts_lowered",
+            "q6_final_store_pre_barrier_inserted",
+        )
+    )
+
+
+def _shader_mutation_evidence_has_field(
+        evidence: list[dict[str, Any]],
+        *fields: str) -> bool:
+    field_set = set(fields)
+    return any(item.get("field") in field_set for item in evidence)
+
+
 def _q6_dispatch_seen_without_oracle(q6: Any) -> bool:
     if not isinstance(q6, dict):
         return False
@@ -2889,6 +3012,8 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
             "config_propagation": config_propagation,
         }
 
+    vulkan_passthrough_rewrite_evidence = _vulkan_shader_passthrough_rewrite_evidence(data)
+
     q6_evidence_reached = False
     if isinstance(q6, dict):
         try:
@@ -3019,6 +3144,33 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
         next_action = (
             data.get("next_action")
             or "rerun with the native Q6_K kernel; q6k_safe_kernel is diagnostic-only and cannot support native Q6 correctness or benchmark claims"
+        )
+    elif _q6_compat_rewrite_used(q6) and q6.get("latest_status") == "match":
+        classification = "q6-compat-rewrite-diagnostic-only"
+        responsibility_boundary = "q6-diagnostic-evidence"
+        q6_blocker_class = "q6-compat-rewrite-diagnostic-only"
+        next_action = (
+            data.get("next_action")
+            or "rerun with native Q6_K SPIR-V and no Q6 compatibility rewrites before accepting correctness or benchmark claims"
+        )
+    elif (
+        _shader_mutation_evidence_has_field(vulkan_passthrough_rewrite_evidence, "q4k_safe_kernel")
+        and q6.get("latest_status") == "match"
+    ):
+        classification = "q4-safe-kernel-diagnostic-only"
+        responsibility_boundary = "q4-diagnostic-evidence"
+        q6_blocker_class = "q4-safe-kernel-diagnostic-only"
+        next_action = (
+            data.get("next_action")
+            or "rerun without the Q4_K safe-kernel diagnostic replacement before accepting correctness or benchmark claims"
+        )
+    elif vulkan_passthrough_rewrite_evidence and q6.get("latest_status") == "match":
+        classification = "vulkan-shader-mutation-diagnostic-only"
+        responsibility_boundary = "vulkan-shader-identity"
+        q6_blocker_class = "vulkan-shader-mutation-diagnostic-only"
+        next_action = (
+            data.get("next_action")
+            or "rerun with original/effective/executable SPIR-V identity preserved; shader mutations cannot support pass-through correctness or benchmark claims"
         )
     elif q6.get("latest_status") == "match":
         classification = "q6-workgroup-cleared-and-oracle-match"
@@ -3222,6 +3374,9 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
                 "q6-workgroup-shape-blocker",
                 "q6-safe-kernel-diagnostic-only",
                 "q6-probe-effective-replay-diagnostic-only",
+                "q6-compat-rewrite-diagnostic-only",
+                "q4-safe-kernel-diagnostic-only",
+                "vulkan-shader-mutation-diagnostic-only",
                 "q6-descriptor-invariant-mismatch",
                 "q6-debug-binding-alias-evidence-missing",
                 *Q6_DEBUG_U32_BLOCKERS,
@@ -3230,6 +3385,7 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
         ),
         "q6_descriptor_invariant_mismatches": q6_descriptor_invariant_mismatches,
         "q6_writeback_evidence": q6_writeback_evidence,
+        "vulkan_shader_passthrough_rewrite_evidence": vulkan_passthrough_rewrite_evidence,
         "runtime_freshness": runtime_freshness,
         "runtime_env_manifest": runtime_env_manifest,
         "config_propagation": config_propagation,

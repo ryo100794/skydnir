@@ -6471,6 +6471,25 @@ static int spirv_uses_float16_type(const uint32_t *code, size_t bytes) {
     return 0;
 }
 
+static int replace_spirv_module(
+        uint32_t **code,
+        size_t *bytes,
+        const uint32_t *replacement,
+        size_t replacement_bytes) {
+    if (!code || !*code || !bytes || !replacement || replacement_bytes < 20 ||
+        (replacement_bytes % sizeof(uint32_t)) != 0 || replacement[0] != 0x07230203u) {
+        return 0;
+    }
+    uint32_t *copy = (uint32_t *)malloc(replacement_bytes);
+    if (!copy) return 0;
+    memcpy(copy, replacement, replacement_bytes);
+    free(*code);
+    *code = copy;
+    *bytes = replacement_bytes;
+    return 1;
+}
+
+
 static int add_spirv_capability(
         uint32_t **code,
         size_t *bytes,
@@ -14828,8 +14847,11 @@ static int run_vulkan_dispatch_fd(
      * SPIR-V" without modifying llama.cpp, Dockerfiles, models, or prompts.
      */
     if (q4k_safe_kernel_requested && is_q4k_matvec_hash(original_spirv_hash)) {
-        memcpy(shader_code, kQ4kSafeSpv, sizeof(kQ4kSafeSpv));
-        shader_size = sizeof(kQ4kSafeSpv);
+        if (!replace_spirv_module(&shader_code, &shader_size, kQ4kSafeSpv, sizeof(kQ4kSafeSpv))) {
+            json_fail("vulkan-dispatch", "failed to install Q4_K safe-kernel diagnostic SPIR-V");
+            ret = 64;
+            goto cleanup;
+        }
         binding_alias_count = 0;
         q4k_safe_kernel_used = 1;
     }
@@ -14870,8 +14892,11 @@ static int run_vulkan_dispatch_fd(
      * changing llama.cpp, Dockerfiles, models, or prompts.
      */
     if (q6k_safe_kernel_requested && q6_structural_callsite_detected) {
-        memcpy(shader_code, kQ6kSafeSpv, sizeof(kQ6kSafeSpv));
-        shader_size = sizeof(kQ6kSafeSpv);
+        if (!replace_spirv_module(&shader_code, &shader_size, kQ6kSafeSpv, sizeof(kQ6kSafeSpv))) {
+            json_fail("vulkan-dispatch", "failed to install Q6_K safe-kernel diagnostic SPIR-V");
+            ret = 64;
+            goto cleanup;
+        }
         binding_alias_count = 0;
         q6k_safe_kernel_used = 1;
     }
@@ -14935,7 +14960,7 @@ static int run_vulkan_dispatch_fd(
     }
     const uint64_t reported_source_spirv_hash = cpu_oracle_spirv_hash;
     const char *reported_source_spirv_hash_source = cpu_oracle_spirv_hash_source;
-    const uint64_t reported_effective_spirv_hash = original_spirv_hash;
+    const uint64_t reported_effective_spirv_hash = spirv_summary.hash;
 
     if (strict_passthrough && options && options->has_requested_feature_mask) {
         const uint64_t required_feature_mask = spirv_required_feature_mask(&spirv_summary);
