@@ -4956,6 +4956,9 @@ def parse_q6_lane_trace_v1(dispatch, writeback):
             0,
             "lane-trace-layout-overlap: pre-reduction live lanes overlap the reduction trace region; refresh the probe bundle from the current Q6 source SPIR-V",
         )
+    for phase in phases:
+        if phase.get("observed_lane_count") == 0:
+            failures.append("%s: no executed lane trace records" % phase.get("name", "unknown-phase"))
     if not header_valid:
         failures.append("lane trace header missing or invalid")
     return {

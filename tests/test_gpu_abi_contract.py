@@ -457,6 +457,73 @@ class GpuAbiContractTest(unittest.TestCase):
         local_size_index = effective_words.index((6 << 16) | 16)
         self.assertEqual(effective_words[local_size_index + 3:local_size_index + 6], [32, 1, 1])
 
+    def test_q6_effective_spirv_reconstructor_accepts_runtime_workgroup_size(self):
+        reconstructor = load_spirv_effective_reconstructor()
+        words = [
+            0x07230203, 0x00010300, 0, 64, 0,
+            (6 << 16) | 16, 4, 17, 1, 1, 1,
+            (4 << 16) | 71, 10, 1, 0,
+            (4 << 16) | 71, 20, 11, 25,
+            (4 << 16) | 50, 1, 10, 1,
+            (4 << 16) | 43, 1, 11, 1,
+            (4 << 16) | 43, 1, 12, 1,
+            (6 << 16) | 51, 2, 20, 10, 11, 12,
+        ]
+        patched, step = reconstructor.patch_literal_local_size_from_spec(
+            words,
+            [{"constant_id": 0, "value_u64": 64}],
+        )
+        self.assertTrue(step["changed"])
+        self.assertEqual(step["resolved"], [64, 1, 1])
+        self.assertIn((6 << 16) | 16, patched)
+        local_size_index = patched.index((6 << 16) | 16)
+        self.assertEqual(patched[local_size_index + 3:local_size_index + 6], [64, 1, 1])
+
+    def test_q6_effective_spirv_reconstructor_obeys_event_lowering_flags(self):
+        reconstructor = load_spirv_effective_reconstructor()
+        words = [
+            0x07230203, 0x00010300, 0, 16, 0,
+            (4 << 16) | 21, 1, 32, 0,
+            (4 << 16) | 21, 2, 8, 0,
+            (4 << 16) | 23, 3, 2, 4,
+            (4 << 16) | 43, 1, 4, 8,
+            (4 << 16) | 43, 1, 5, 16,
+            (4 << 16) | 43, 1, 6, 24,
+            (4 << 16) | 124, 3, 7, 4,
+        ]
+        event = {
+            "q6_storage16_loads_lowered": False,
+            "q6_u32_to_u8vec4_bitcasts_lowered": False,
+            "q6_final_store_pre_barrier_inserted": False,
+            "duplicate_descriptor_rewrite": False,
+        }
+        effective_words, steps = reconstructor.reconstruct(words, event)
+        self.assertEqual(effective_words, words)
+        self.assertEqual(steps[4]["phase"], "q6-u32-to-u8vec4-bitcasts-lowered")
+        self.assertEqual(steps[4]["reason"], "not-enabled-by-event")
+
+    def test_q6_effective_spirv_reconstructor_preserves_unlegalized_workgroup_size_subtree(self):
+        reconstructor = load_spirv_effective_reconstructor()
+        words = [
+            0x07230203, 0x00010300, 0, 64, 0,
+            (6 << 16) | 16, 4, 17, 1, 1, 1,
+            (4 << 16) | 71, 10, 1, 0,
+            (4 << 16) | 71, 20, 11, 25,
+            (4 << 16) | 50, 1, 10, 1,
+            (4 << 16) | 43, 1, 11, 1,
+            (4 << 16) | 43, 1, 12, 16,
+            (6 << 16) | 51, 2, 20, 10, 11, 11,
+            (6 << 16) | 52, 1, 21, 81, 20, 0,
+            (6 << 16) | 52, 1, 22, 134, 21, 12,
+        ]
+        materialized, step = reconstructor.materialize_specialization_constants(
+            words,
+            [{"constant_id": 0, "value_u64": 64}],
+        )
+        self.assertFalse(step["changed"])
+        self.assertTrue(step["preserve_workgroup_size_spec_subtree"])
+        self.assertEqual(materialized, words)
+
     def test_q6_effective_reconstructor_lowers_storage16_duplicate_view_loads(self):
         reconstructor = load_spirv_effective_reconstructor()
         words = [
@@ -13323,6 +13390,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("final_store_matches_expected", compare)
         self.assertIn("executor-probe-debug-seen-icd-arm-log-missing", compare)
         self.assertIn("executor_probe_debug_seen_without_icd_arm", compare)
+        self.assertIn("no executed lane trace records", compare)
+        self.assertIn('phase.get("observed_lane_count") == 0', compare)
         verifier = LLAMA_GPU_ARTIFACT_VERIFIER.read_text()
         self.assertIn('"missing-evidence",', verifier)
 

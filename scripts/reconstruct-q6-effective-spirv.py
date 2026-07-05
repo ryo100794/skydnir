@@ -75,6 +75,19 @@ def _spec_value(entries: list[dict[str, Any]], constant_id: int | None, default:
     return default & 0xFFFFFFFF
 
 
+def _specialization_entry_value(
+    entries: list[dict[str, Any]],
+    constant_id: int | None,
+    default: int,
+) -> tuple[int, bool]:
+    if constant_id is None:
+        return default & 0xFFFFFFFF, False
+    for entry in entries:
+        if int(entry.get("constant_id", -1)) == constant_id:
+            return int(entry.get("value_u64", default)) & 0xFFFFFFFF, True
+    return default & 0xFFFFFFFF, False
+
+
 def _spec_id_decorations(words: list[int]) -> dict[int, int]:
     spec_ids: dict[int, int] = {}
     for _, opcode, word_count, inst in iter_instructions(words):
@@ -115,16 +128,31 @@ def patch_literal_local_size_from_spec(
     spec_ids = _spec_id_decorations(words)
     members = _workgroup_size_composite_members(words)
     resolved = list(local_size)
+    found_local_size_spec = False
     if members:
         for dim, member_id in enumerate(members[:3]):
-            resolved[dim] = _spec_value(specialization_entries, spec_ids.get(member_id), resolved[dim] or 1)
+            value, found = _specialization_entry_value(
+                specialization_entries,
+                spec_ids.get(member_id),
+                resolved[dim] or 1,
+            )
+            if found:
+                resolved[dim] = value
+                found_local_size_spec = True
 
+    invocation_count = resolved[0] * resolved[1] * resolved[2]
+    valid_resolved_local_size = (
+        found_local_size_spec
+        and all(1 <= value <= 1024 for value in resolved)
+        and 1 < invocation_count <= 1024
+    )
     eligible = (
         literal_local_size_count == 1
         and local_size_id_count == 0
         and local_size == [1, 1, 1]
         and local_size_id == [0, 0, 0]
-        and resolved == [32, 1, 1]
+        and resolved != local_size
+        and valid_resolved_local_size
         and literal_local_size_word_index is not None
     )
     if not eligible:
@@ -181,6 +209,9 @@ def materialize_specialization_constants(
 
     preserve_workgroup_size_subtree = local_size_id != [0, 0, 0] or local_size != resolved
     if preserve_workgroup_size_subtree:
+        for object_id, is_workgroup_size in enumerate(workgroup_size_id):
+            if is_workgroup_size:
+                skip[object_id] = True
         for _, opcode, word_count, inst in iter_instructions(words):
             if opcode == 51 and word_count >= 3 and inst[2] < bound and workgroup_size_id[inst[2]]:
                 for operand in inst[3:]:
@@ -619,6 +650,17 @@ def find_q6_event(artifact: dict[str, Any], event_index: int) -> dict[str, Any]:
     return events[event_index]
 
 
+def _event_flag(event: dict[str, Any], name: str, default: bool) -> bool:
+    value = event.get(name)
+    if value is None:
+        return default
+    return bool(value)
+
+
+def _skipped_step(phase: str, words: list[int], reason: str) -> tuple[list[int], dict[str, Any]]:
+    return list(words), {"phase": phase, "changed": False, "reason": reason}
+
+
 def reconstruct(source_words: list[int], event: dict[str, Any]) -> tuple[list[int], list[dict[str, Any]]]:
     entries = event.get("specialization_entries") or []
     binding_details = event.get("binding_details") or []
@@ -629,16 +671,32 @@ def reconstruct(source_words: list[int], event: dict[str, Any]) -> tuple[list[in
     words2, step = materialize_specialization_constants(words1, entries)
     step.update({"hash": hash_words(words2), "words": len(words2)})
     steps.append(step)
-    words3, step = lower_q6k_storage16_loads_to_storage8(words2)
+
+    if _event_flag(event, "q6_storage16_loads_lowered", True):
+        words3, step = lower_q6k_storage16_loads_to_storage8(words2)
+    else:
+        words3, step = _skipped_step("q6-storage16-loads-lowered", words2, "not-enabled-by-event")
     step.update({"hash": hash_words(words3), "words": len(words3)})
     steps.append(step)
-    words4, step = lower_q6k_u32_to_u8vec4_bitcasts(words3)
+
+    if _event_flag(event, "q6_u32_to_u8vec4_bitcasts_lowered", True):
+        words4, step = lower_q6k_u32_to_u8vec4_bitcasts(words3)
+    else:
+        words4, step = _skipped_step("q6-u32-to-u8vec4-bitcasts-lowered", words3, "not-enabled-by-event")
     step.update({"hash": hash_words(words4), "words": len(words4)})
     steps.append(step)
-    words5, step = insert_q6k_final_store_pre_barrier(words4)
+
+    if _event_flag(event, "q6_final_store_pre_barrier_inserted", True):
+        words5, step = insert_q6k_final_store_pre_barrier(words4)
+    else:
+        words5, step = _skipped_step("q6-final-store-pre-barrier", words4, "not-enabled-by-event")
     step.update({"hash": hash_words(words5), "words": len(words5)})
     steps.append(step)
-    words6, step = rewrite_duplicate_descriptor_bindings(words5, binding_details)
+
+    if _event_flag(event, "duplicate_descriptor_rewrite", bool(binding_details)):
+        words6, step = rewrite_duplicate_descriptor_bindings(words5, binding_details)
+    else:
+        words6, step = _skipped_step("duplicate-descriptor-rewritten", words5, "not-enabled-by-event")
     step.update({"hash": hash_words(words6), "words": len(words6)})
     steps.append(step)
     return words6, steps
