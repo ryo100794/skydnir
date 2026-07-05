@@ -45,3 +45,6 @@ app/src/main/assets/xterm/xterm.js
 app/src/main/assets/xterm/xterm.css
 app/src/main/assets/xterm/xterm-addon-fit.js
 docs/test/q6-runtime-spv-*/
+
+# Generated Q6 probe verification artifact.
+docs/test/q6-probe-manifest-verify-latest.json
