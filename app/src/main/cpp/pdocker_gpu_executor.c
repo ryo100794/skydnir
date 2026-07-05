@@ -6521,8 +6521,7 @@ static uint32_t spirv_resolve_access_base_id(
 
 static int insert_q6k_final_store_pre_barrier(
         uint32_t **code,
-        size_t *bytes,
-        uint64_t source_spirv_hash) {
+        size_t *bytes) {
     /*
      * Android Vulkan compatibility lowering for Q6_K-style final output
      * stores.  Device evidence split the current failure to the native shader
@@ -6566,7 +6565,6 @@ static int insert_q6k_final_store_pre_barrier(
         (*bytes % sizeof(uint32_t)) != 0 || (*code)[0] != 0x07230203u) {
         return 0;
     }
-    (void)source_spirv_hash;
     const uint32_t *in = *code;
     const size_t words = *bytes / sizeof(uint32_t);
     const uint32_t bound = in[3];
@@ -7084,7 +7082,6 @@ static int q6_storage16_member_is_byte_lane(
 static int lower_q6k_storage16_loads_to_storage8(
         uint32_t **code,
         size_t *bytes,
-        uint64_t source_spirv_hash,
         size_t *lowered_count) {
     /*
      * Android Vulkan compatibility lowering for the llama.cpp Q6_K mat-vec
@@ -7121,7 +7118,6 @@ static int lower_q6k_storage16_loads_to_storage8(
         (*bytes % sizeof(uint32_t)) != 0 || (*code)[0] != 0x07230203u) {
         return 0;
     }
-    (void)source_spirv_hash;
     const uint32_t *in = *code;
     const size_t words = *bytes / sizeof(uint32_t);
     uint32_t bound = in[3];
@@ -7360,7 +7356,6 @@ static int lower_q6k_storage16_loads_to_storage8(
 static int lower_q6k_u32_to_u8vec4_bitcasts(
         uint32_t **code,
         size_t *bytes,
-        uint64_t source_spirv_hash,
         size_t *lowered_count) {
     /*
      * Android Vulkan compatibility lowering for the native llama.cpp Q6_K
@@ -7392,7 +7387,6 @@ static int lower_q6k_u32_to_u8vec4_bitcasts(
         (*bytes % sizeof(uint32_t)) != 0 || (*code)[0] != 0x07230203u) {
         return 0;
     }
-    (void)source_spirv_hash;
     const uint32_t *in = *code;
     const size_t words = *bytes / sizeof(uint32_t);
     uint32_t bound = in[3];
@@ -8962,8 +8956,9 @@ static int is_q6k_matvec_oracle_hash(uint64_t spirv_hash) {
      * q6_K block layout by inspection: binding 0 contains duplicate typed
      * views of a 210-byte block (ql/qh/scales/d), binding 1 is vec4<f32>,
      * binding 2 is f32 output, and bindings 3/4 are f32 accumulators.  Do not
-     * add it to is_q6k_matvec_hash(); that function gates functional rewrite
-     * paths, while this oracle gate only records numeric evidence.
+     * add it to is_q6k_matvec_hash(); that helper names known diagnostic
+     * fixture hashes for oracle enrollment. Runtime Q6 compatibility rewrites
+     * are gated by structural SPIR-V/interface checks instead of hashes.
      */
     return spirv_hash == 0x9cfc45ae24ba71d8ull;
 }
@@ -14650,19 +14645,22 @@ static int run_vulkan_dispatch_fd(
         options && options->has_q6k_readonly_overlap_snapshot
             ? options->q6k_readonly_overlap_snapshot
             : env_truthy("PDOCKER_GPU_Q6K_READONLY_OVERLAP_SNAPSHOT", 0);
-    const uint64_t q6_storage16_lowering_identity_hash =
-        (options && options->has_source_spirv_hash &&
-         is_q6k_matvec_hash(options->source_spirv_hash))
-            ? options->source_spirv_hash
-            : original_spirv_hash;
     const int q6_probe_effective_replay =
         options && options->has_source_spirv_hash &&
         options->has_effective_spirv_hash &&
         options->source_spirv_hash != options->effective_spirv_hash &&
         options->effective_spirv_hash == original_spirv_hash;
+    const int q6_structural_callsite_detected =
+        find_q6k_duplicate_binding0_views(
+            (const uint32_t *)shader_code,
+            shader_size / sizeof(uint32_t),
+            NULL,
+            NULL,
+            NULL,
+            NULL);
     const int q6_native_callsite_detected =
         !q6k_safe_kernel_requested &&
-        is_q6k_matvec_hash(q6_storage16_lowering_identity_hash);
+        q6_structural_callsite_detected;
     const int q6_compat_rewrites_enabled =
         !q6k_safe_kernel_requested && q6k_compat_rewrites_requested &&
         !q6_probe_effective_replay;
@@ -14670,31 +14668,26 @@ static int run_vulkan_dispatch_fd(
         q6_storage16_loads_lowered = lower_q6k_storage16_loads_to_storage8(
             &shader_code,
             &shader_size,
-            q6_storage16_lowering_identity_hash,
             &q6_storage16_loads_lowered_count);
         q6_u32_to_u8vec4_bitcasts_lowered = lower_q6k_u32_to_u8vec4_bitcasts(
             &shader_code,
             &shader_size,
-            q6_storage16_lowering_identity_hash,
             &q6_u32_to_u8vec4_bitcasts_lowered_count);
         q6_final_store_pre_barrier_inserted = insert_q6k_final_store_pre_barrier(
             &shader_code,
-            &shader_size,
-            q6_storage16_lowering_identity_hash);
+            &shader_size);
     } else if (q6_probe_effective_replay && q6_native_callsite_detected &&
                q6k_compat_rewrites_requested) {
         q6_final_store_pre_barrier_inserted = insert_q6k_final_store_pre_barrier(
             &shader_code,
-            &shader_size,
-            q6_storage16_lowering_identity_hash);
+            &shader_size);
     }
     if (!q6_final_store_pre_barrier_inserted &&
         !q6k_safe_kernel_requested &&
         q6k_compat_rewrites_requested) {
         q6_final_store_pre_barrier_inserted = insert_q6k_final_store_pre_barrier(
             &shader_code,
-            &shader_size,
-            q6_storage16_lowering_identity_hash);
+            &shader_size);
     }
     const int q6_readonly_overlap_snapshot_auto =
         strict_passthrough && q6_native_callsite_detected &&
@@ -14874,7 +14867,7 @@ static int run_vulkan_dispatch_fd(
      * the native llama.cpp Q6_K SPIR-V reduction/output-layout path without
      * changing llama.cpp, Dockerfiles, models, or prompts.
      */
-    if (q6k_safe_kernel_requested && is_q6k_matvec_hash(original_spirv_hash)) {
+    if (q6k_safe_kernel_requested && q6_structural_callsite_detected) {
         memcpy(shader_code, kQ6kSafeSpv, sizeof(kQ6kSafeSpv));
         shader_size = sizeof(kQ6kSafeSpv);
         binding_alias_count = 0;
