@@ -14674,9 +14674,15 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorSetLayout(
     (void)device;
     (void)pAllocator;
     if (!pCreateInfo || !pSetLayout) return VK_ERROR_INITIALIZATION_FAILED;
+    *pSetLayout = VK_NULL_HANDLE;
     VkResult pnext_rc = validate_descriptor_set_layout_pnext(pCreateInfo);
     if (pnext_rc != VK_SUCCESS) return pnext_rc;
     if (pCreateInfo->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;
+    if (!descriptor_set_layout_create_info_supported(pCreateInfo)) {
+        trace_icd_runtime_failure("descriptor-set-layout-unsupported",
+                                  VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
     PdockerVkDescriptorSetLayout *layout = pdocker_alloc_handle(sizeof(*layout));
     if (!layout) return VK_ERROR_OUT_OF_HOST_MEMORY;
     for (uint32_t i = 0; pCreateInfo && i < pCreateInfo->bindingCount; ++i) {
@@ -14723,7 +14729,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorSetLayout(
                                 "pdocker-vulkan-icd: immutable sampler binding=%u array=%u has invalid sampler handle; rejecting layout\n",
                                 binding->binding,
                                 array_element);
-                        continue;
+                        free(layout);
+                        return VK_ERROR_FEATURE_NOT_PRESENT;
                     }
                     layout->immutable_samplers[binding->binding][array_element] = *sampler;
                     layout->immutable_sampler_valid[binding->binding][array_element] = true;
@@ -14735,6 +14742,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorSetLayout(
                         "pdocker-vulkan-icd: immutable sampler on non-sampler descriptor binding=%u type=%u rejected\n",
                         binding->binding,
                         binding->descriptorType);
+                free(layout);
+                return VK_ERROR_FEATURE_NOT_PRESENT;
             }
         }
     }

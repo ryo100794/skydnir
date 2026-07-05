@@ -7213,8 +7213,15 @@ class GpuAbiContractTest(unittest.TestCase):
             "VKAPI_ATTR void VKAPI_CALL vkDestroyDescriptorSetLayout", 1
         )[0]
         self.assertIn("if (!pCreateInfo || !pSetLayout)", descriptor_layout_body)
+        self.assertIn("*pSetLayout = VK_NULL_HANDLE;", descriptor_layout_body)
         self.assertIn("validate_descriptor_set_layout_pnext(pCreateInfo)", descriptor_layout_body)
         self.assertIn("if (pCreateInfo->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;", descriptor_layout_body)
+        self.assertIn("descriptor_set_layout_create_info_supported(pCreateInfo)", descriptor_layout_body)
+        self.assertIn('trace_icd_runtime_failure("descriptor-set-layout-unsupported"', descriptor_layout_body)
+        self.assertIn("return VK_ERROR_FEATURE_NOT_PRESENT;", descriptor_layout_body)
+        self.assertIn("free(layout);", descriptor_layout_body)
+        self.assertIn("immutable sampler binding=%u array=%u has invalid sampler handle", descriptor_layout_body)
+        self.assertIn("immutable sampler on non-sampler descriptor", descriptor_layout_body)
         descriptor_layout_pnext_body = icd.split("static VkResult validate_descriptor_set_layout_pnext", 1)[1].split(
             "static VkResult unsupported_image_transport_result", 1
         )[0]
