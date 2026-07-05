@@ -11373,6 +11373,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertTrue(any("literal LocalSize differs" in note for note in effective_module["risk_notes"]))
         q6_flow = next(item for item in comparison["comparisons"] if item["name"] == "q6_final_store_value_flow")
         self.assertTrue(q6_flow["match"])
+        self.assertEqual(comparison["q6_static_boundary"]["summary"], "q6-final-store-execution-shape")
         final_shape = next(item for item in comparison["comparisons"] if item["name"] == "q6_final_store_execution_shape")
         self.assertFalse(final_shape["match"])
         self.assertIn(
@@ -11818,6 +11819,7 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0)
             payload = json.loads(out.read_text())
         self.assertTrue(payload["all_match"])
+        self.assertEqual(payload["q6_static_boundary"]["summary"], "q6-static-match")
         self.assertEqual(payload["left"]["descriptors"][0]["layout"]["kind"], "struct")
         descriptor_comparison = next(item for item in payload["comparisons"] if item["name"] == "descriptors")
         self.assertIn("layout", descriptor_comparison["left"][0])
@@ -12019,6 +12021,7 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertEqual(result.returncode, 2, result.stderr)
             report = json.loads(out.read_text())
 
+        self.assertEqual(report["q6_static_boundary"]["summary"], "q6-stage-targets")
         stage_targets = next(item for item in report["comparisons"] if item["name"] == "q6_stage_targets")
         self.assertFalse(stage_targets["match"])
         self.assertIn(

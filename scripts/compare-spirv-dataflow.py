@@ -744,6 +744,51 @@ def compare_path_counts(name: str, left: dict[str, Any], right: dict[str, Any]) 
     }
 
 
+def comparison_by_name(comparisons: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    return {str(item.get("name")): item for item in comparisons if isinstance(item, dict)}
+
+
+def q6_static_boundary(comparisons: list[dict[str, Any]]) -> dict[str, Any]:
+    by_name = comparison_by_name(comparisons)
+    ordered = [
+        ("q6_final_store_execution_shape", "q6-final-store-execution-shape"),
+        ("q6_stage_targets", "q6-stage-targets"),
+        ("q6_final_store_value_flow", "q6-final-store-value-flow"),
+        ("q6_barrier_window_evidence", "q6-barrier-window"),
+        ("q6_arithmetic_window_evidence", "q6-arithmetic-window"),
+    ]
+    mismatches = []
+    for name, boundary in ordered:
+        item = by_name.get(name)
+        if item and item.get("match") is False:
+            mismatches.append(
+                {
+                    "comparison": name,
+                    "boundary": boundary,
+                    "first_mismatch_path": item.get("first_mismatch_path"),
+                    "diff_paths": (item.get("diff_paths") or [])[:16],
+                }
+            )
+    if not mismatches:
+        summary = "q6-static-match"
+    elif len(mismatches) == 1:
+        summary = mismatches[0]["boundary"]
+    elif mismatches[0]["boundary"] == "q6-final-store-execution-shape":
+        # This is the most actionable static boundary because final-store value
+        # flow can appear identical while the shader's LocalSize/BuiltIn
+        # WorkgroupSize contract is inconsistent.  Keep the remaining mismatches
+        # as context instead of hiding them.
+        summary = "q6-final-store-execution-shape"
+    else:
+        summary = "q6-static-mixed"
+    return {
+        "schema": "pdocker.spirv.q6-static-boundary.v1",
+        "summary": summary,
+        "mismatch_count": len(mismatches),
+        "mismatches": mismatches,
+    }
+
+
 def summarize(module: dict[str, Any]) -> dict[str, Any]:
     return {
         "schema": module.get("schema"),
@@ -848,6 +893,7 @@ def main() -> int:
         "left": left,
         "right": right,
         "comparisons": comparisons,
+        "q6_static_boundary": q6_static_boundary(comparisons),
         "all_match": all(item.get("match") for item in comparisons),
     }
     text = json.dumps(payload, indent=2, sort_keys=True)

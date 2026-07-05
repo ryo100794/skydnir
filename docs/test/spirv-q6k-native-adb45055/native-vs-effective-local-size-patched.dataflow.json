@@ -7524,6 +7524,22 @@
       "kind": "spec_constant_composite"
     }
   },
+  "q6_static_boundary": {
+    "mismatch_count": 1,
+    "mismatches": [
+      {
+        "boundary": "q6-final-store-execution-shape",
+        "comparison": "q6_final_store_execution_shape",
+        "diff_paths": [
+          "q6_final_store_execution_shape.literal_matches_workgroup_default",
+          "q6_final_store_execution_shape.local_size_consistent_with_workgroup_size"
+        ],
+        "first_mismatch_path": "q6_final_store_execution_shape.literal_matches_workgroup_default"
+      }
+    ],
+    "schema": "pdocker.spirv.q6-static-boundary.v1",
+    "summary": "q6-final-store-execution-shape"
+  },
   "right": {
     "bytes": 26784,
     "descriptors": [

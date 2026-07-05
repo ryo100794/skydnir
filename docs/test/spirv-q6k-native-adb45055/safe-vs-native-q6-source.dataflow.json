@@ -15941,6 +15941,92 @@
       "kind": "constant_composite"
     }
   },
+  "q6_static_boundary": {
+    "mismatch_count": 5,
+    "mismatches": [
+      {
+        "boundary": "q6-final-store-execution-shape",
+        "comparison": "q6_final_store_execution_shape",
+        "diff_paths": [
+          "q6_final_store_execution_shape.all_final_stores_valid",
+          "q6_final_store_execution_shape.available",
+          "q6_final_store_execution_shape.final_store_count",
+          "q6_final_store_execution_shape.valid_store_count"
+        ],
+        "first_mismatch_path": "q6_final_store_execution_shape.all_final_stores_valid"
+      },
+      {
+        "boundary": "q6-stage-targets",
+        "comparison": "q6_stage_targets",
+        "diff_paths": [
+          "q6_stage_targets.available",
+          "q6_stage_targets.final_output_store_count",
+          "q6_stage_targets.phase_count",
+          "q6_stage_targets.phases[0].name",
+          "q6_stage_targets.phases[0].preceding_workgroup_store_count",
+          "q6_stage_targets.phases[0].preceding_workgroup_stores",
+          "q6_stage_targets.phases[0].source_workgroup_base_count",
+          "q6_stage_targets.phases",
+          "q6_stage_targets.workgroup_store_count"
+        ],
+        "first_mismatch_path": "q6_stage_targets.available"
+      },
+      {
+        "boundary": "q6-final-store-value-flow",
+        "comparison": "q6_final_store_value_flow",
+        "diff_paths": [
+          "q6_final_store_value_flow.available",
+          "q6_final_store_value_flow.final_store_count",
+          "q6_final_store_value_flow.stores[0].output_index_dependencies.builtins[0].built_in",
+          "q6_final_store_value_flow.stores[0].output_index_dependencies.builtins[0].id",
+          "q6_final_store_value_flow.stores[0].output_index_dependencies.builtins",
+          "q6_final_store_value_flow.stores[0].output_index_dependencies.constants[0].id",
+          "q6_final_store_value_flow.stores[0].output_index_dependencies.constants[1].id",
+          "q6_final_store_value_flow.stores[0].output_index_dependencies.constants[2].id",
+          "q6_final_store_value_flow.stores[0].output_index_dependencies.constants[2].value_u32",
+          "q6_final_store_value_flow.stores[0].output_index_dependencies.constants",
+          "q6_final_store_value_flow.stores[0].output_index_dependencies.push_constants[0].variable_id",
+          "q6_final_store_value_flow.stores[0].output_index_dependencies.push_constants[1].variable_id",
+          "q6_final_store_value_flow.stores[0].output_index_dependencies.spec_constants",
+          "q6_final_store_value_flow.stores[0].output_index_dependencies.truncation_boundaries.truncated_depth_count",
+          "q6_final_store_value_flow.stores[0].output_index_op_histogram.OpIAdd",
+          "q6_final_store_value_flow.stores[0].output_index_op_histogram.OpIMul"
+        ],
+        "first_mismatch_path": "q6_final_store_value_flow.available"
+      },
+      {
+        "boundary": "q6-barrier-window",
+        "comparison": "q6_barrier_window_evidence",
+        "diff_paths": [
+          "q6_barrier_window_evidence.barrier_event_count",
+          "q6_barrier_window_evidence.window_count",
+          "q6_barrier_window_evidence.windows[0].all_workgroup_stores_have_following_barrier",
+          "q6_barrier_window_evidence.windows[0].barrier_semantics",
+          "q6_barrier_window_evidence.windows[0].barrier_word_indices",
+          "q6_barrier_window_evidence.windows[0].output_store_word_index",
+          "q6_barrier_window_evidence.windows[0].phase",
+          "q6_barrier_window_evidence.windows[0].workgroup_store_barrier_pairs",
+          "q6_barrier_window_evidence.windows[0].workgroup_store_word_indices",
+          "q6_barrier_window_evidence.windows"
+        ],
+        "first_mismatch_path": "q6_barrier_window_evidence.barrier_event_count"
+      },
+      {
+        "boundary": "q6-arithmetic-window",
+        "comparison": "q6_arithmetic_window_evidence",
+        "diff_paths": [
+          "q6_arithmetic_window_evidence.window_count",
+          "q6_arithmetic_window_evidence.windows[0].ext_inst_histogram.GLSL.std.450.Fma",
+          "q6_arithmetic_window_evidence.windows[0].named_arithmetic_histogram.GLSL.std.450.Fma",
+          "q6_arithmetic_window_evidence.windows[0].phase",
+          "q6_arithmetic_window_evidence.windows"
+        ],
+        "first_mismatch_path": "q6_arithmetic_window_evidence.window_count"
+      }
+    ],
+    "schema": "pdocker.spirv.q6-static-boundary.v1",
+    "summary": "q6-final-store-execution-shape"
+  },
   "right": {
     "bytes": 26784,
     "descriptors": [
