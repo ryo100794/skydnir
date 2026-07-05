@@ -4999,6 +4999,21 @@ class GpuAbiContractTest(unittest.TestCase):
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V623_TESSELLATION_STATE_SCHEMA_HASH",
             ),
             (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V624_HEADER_EXTENSION_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V624_HEADER_EXTENSION_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V624_HEADER_EXTENSION_SCHEMA_HASH",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V624_DESCRIPTOR_SET_LAYOUT_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V624_DESCRIPTOR_SET_LAYOUT_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V624_DESCRIPTOR_SET_LAYOUT_SCHEMA_HASH",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V624_PIPELINE_LAYOUT_SET_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V624_PIPELINE_LAYOUT_SET_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V624_PIPELINE_LAYOUT_SET_SCHEMA_HASH",
+            ),
+            (
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELDS",
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELD_COUNT",
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_SCHEMA_HASH",
@@ -5066,6 +5081,19 @@ class GpuAbiContractTest(unittest.TestCase):
             "- count_buffer->upload_base",
         ]:
             self.assertNotIn(forbidden, record_body)
+
+    def test_vulkan_graphics_v624_layout_metadata_abi_is_append_only(self):
+        for source in [APP_HEADER.read_text(), CONTAINER_HEADER.read_text()]:
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V624_ABI_MINOR 24u", source)
+            self.assertIn("PdockerGpuVulkanGraphicsV624FrameHeader", source)
+            self.assertIn("PdockerGpuVulkanGraphicsV624HeaderExtension", source)
+            self.assertIn("PdockerGpuVulkanGraphicsV624DescriptorSetLayoutEntry", source)
+            self.assertIn("PdockerGpuVulkanGraphicsV624PipelineLayoutSetEntry", source)
+            self.assertIn("descriptor_set_layout_schema_hash", source)
+            self.assertIn("pipeline_layout_schema_hash", source)
+            self.assertIn("layout_id", source)
+            self.assertIn("stage_flags", source)
+            self.assertIn("descriptor_set_layout_id", source)
 
     def test_vulkan_graphics_v6_field_macros_match_packed_structs(self):
         schemas = [
@@ -5233,6 +5261,21 @@ class GpuAbiContractTest(unittest.TestCase):
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V611_UPDATE_BUFFER_FIELDS",
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V611_UPDATE_BUFFER_FIELD_COUNT",
                 "PdockerGpuVulkanGraphicsV611UpdateBufferEntry",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V624_HEADER_EXTENSION_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V624_HEADER_EXTENSION_FIELD_COUNT",
+                "PdockerGpuVulkanGraphicsV624HeaderExtension",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V624_DESCRIPTOR_SET_LAYOUT_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V624_DESCRIPTOR_SET_LAYOUT_FIELD_COUNT",
+                "PdockerGpuVulkanGraphicsV624DescriptorSetLayoutEntry",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V624_PIPELINE_LAYOUT_SET_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V624_PIPELINE_LAYOUT_SET_FIELD_COUNT",
+                "PdockerGpuVulkanGraphicsV624PipelineLayoutSetEntry",
             ),
             (
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELDS",
