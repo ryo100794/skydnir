@@ -2951,6 +2951,51 @@ static int vulkan_image_single_aspect_supported_for_format(
 }
 
 static int vulkan_format_is_packed_depth_stencil(VkFormat format);
+static uint32_t vulkan_format_packed_depth_stencil_bytes_per_pixel(VkFormat format);
+
+static int vulkan_descriptor_type_is_readonly_image(VkDescriptorType descriptor_type) {
+    switch (descriptor_type) {
+        case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
+        case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
+        case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static int vulkan_packed_depth_stencil_dual_aspect_supported(
+        VkFormat format,
+        VkImageAspectFlags aspect_mask) {
+    return aspect_mask == (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT) &&
+           vulkan_format_packed_depth_stencil_bytes_per_pixel(format) != 0;
+}
+
+typedef int (*VulkanMergeImageCopyRangeForAspectFn)(
+        VulkanDispatchImageObject *image,
+        const VkImageSubresourceRange *range,
+        VkImageAspectFlags required);
+
+static int vulkan_merge_image_copy_range_for_aspects(
+        VulkanDispatchImageObject *image,
+        const VkImageSubresourceRange *range,
+        VkImageAspectFlags aspects,
+        VulkanMergeImageCopyRangeForAspectFn merge_one) {
+    if (!image || !range || !merge_one) return -EINVAL;
+    if ((aspects & (aspects - 1u)) == 0) {
+        return merge_one(image, range, aspects);
+    }
+    if (!vulkan_packed_depth_stencil_dual_aspect_supported(image->format, aspects) ||
+        range->aspectMask != aspects) {
+        return -EOPNOTSUPP;
+    }
+    VkImageSubresourceRange single_range = *range;
+    single_range.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+    int rc = merge_one(image, &single_range, VK_IMAGE_ASPECT_DEPTH_BIT);
+    if (rc != 0) return rc;
+    single_range.aspectMask = VK_IMAGE_ASPECT_STENCIL_BIT;
+    return merge_one(image, &single_range, VK_IMAGE_ASPECT_STENCIL_BIT);
+}
 
 static int vulkan_dispatch_merge_image_copy_range_for_aspect(
         VulkanDispatchImageObject *image,
@@ -2994,12 +3039,17 @@ static int vulkan_dispatch_descriptor_image_aspect_supported(
         VkImageAspectFlags *out_aspect) {
     if (!image || !range || !out_aspect) return 0;
     VkImageAspectFlags aspect = range->aspectMask;
-    if (!vulkan_image_single_aspect_supported_for_format(image->format, aspect)) {
-        return 0;
-    }
     if (descriptor_type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE &&
         aspect != VK_IMAGE_ASPECT_COLOR_BIT) {
         return 0;
+    }
+    if (!vulkan_image_single_aspect_supported_for_format(image->format, aspect)) {
+        if (!vulkan_descriptor_type_is_readonly_image(descriptor_type) ||
+            !vulkan_packed_depth_stencil_dual_aspect_supported(image->format, aspect)) {
+            return 0;
+        }
+        *out_aspect = aspect;
+        return 1;
     }
     switch (descriptor_type) {
         case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
@@ -3022,7 +3072,8 @@ static int vulkan_dispatch_merge_descriptor_image_copy_range(
             image, range, descriptor_type, &aspect)) {
         return -EOPNOTSUPP;
     }
-    return vulkan_dispatch_merge_image_copy_range_for_aspect(image, range, aspect);
+    return vulkan_merge_image_copy_range_for_aspects(
+        image, range, aspect, vulkan_dispatch_merge_image_copy_range_for_aspect);
 }
 
 static int vulkan_image_aspect_mask_valid_for_format(
@@ -26749,12 +26800,17 @@ static int vulkan_graphics_descriptor_image_aspect_supported(
         VkImageAspectFlags *out_aspect) {
     if (!image || !range || !out_aspect) return 0;
     VkImageAspectFlags aspect = range->aspectMask;
-    if (!vulkan_image_single_aspect_supported_for_format(image->format, aspect)) {
-        return 0;
-    }
     if (descriptor_type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE &&
         aspect != VK_IMAGE_ASPECT_COLOR_BIT) {
         return 0;
+    }
+    if (!vulkan_image_single_aspect_supported_for_format(image->format, aspect)) {
+        if (!vulkan_descriptor_type_is_readonly_image(descriptor_type) ||
+            !vulkan_packed_depth_stencil_dual_aspect_supported(image->format, aspect)) {
+            return 0;
+        }
+        *out_aspect = aspect;
+        return 1;
     }
     switch (descriptor_type) {
         case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
@@ -26777,7 +26833,8 @@ static int vulkan_graphics_merge_descriptor_image_copy_range(
             image, range, descriptor_type, &aspect)) {
         return -EOPNOTSUPP;
     }
-    return vulkan_graphics_merge_image_copy_range_for_aspect(image, range, aspect);
+    return vulkan_merge_image_copy_range_for_aspects(
+        image, range, aspect, vulkan_graphics_merge_image_copy_range_for_aspect);
 }
 
 

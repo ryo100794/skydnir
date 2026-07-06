@@ -40,6 +40,8 @@ Confirmed facts:
 | 2026-05-31 Q6 final-store barrier lane | Static analysis of the effective Q6 module shows the final store reads Workgroup `%143` at lane0 immediately after the reduction loop.  A hash-gated compatibility lowering now inserts one additional Workgroup-memory `OpControlBarrier` after the reduction loop convergence and before the lane0 final-store branch.  This keeps descriptor, buffer, push, specialization, dispatch, model, prompt, and llama.cpp bytes unchanged; it only tightens shader-side workgroup-memory visibility before final-store. | `app/src/main/cpp/pdocker_gpu_executor.c`; `scripts/reconstruct-q6-effective-spirv.py`; packaged `libpdockergpuexecutor.so`; host gate `tests.test_gpu_abi_contract tests.test_llama_gpu_artifact_verifier tests.test_termport_docker_api_contract`; APK build `:app:assembleCompatDebug` |
 | 2026-07-05 Q6 structural final-store barrier lane | The final-store pre-barrier pass is no longer tied to one source hash or fixed SSA IDs.  It now fails closed on SPIR-V structure: descriptor set 0 binding 2 final stores, lane-0 input compare, staged Function/Workgroup load source, Q6-like input binding presence, and subgroup-reduction presence.  The offline effective-SPIR-V reconstructor mirrors the same structural pass, so instrumented/probe modules whose hashes and ids differ from the original native module remain analyzable. | `app/src/main/cpp/pdocker_gpu_executor.c`; `scripts/reconstruct-q6-effective-spirv.py`; host gate `tests.test_gpu_abi_contract`; pending APK/device rerun on the next stable ADB connection to confirm `q6_final_store_pre_barrier_inserted=true` in runtime evidence; no llama.cpp/Dockerfile/model/prompt changes |
 | 2026-07-05 Q6 structural storage/bitcast/final-store lane | The Q6 storage16-to-storage8 and uint-to-u8vec4 bitcast compatibility passes are no longer tied to the original source hash or fixed SSA IDs.  They now fail closed on duplicate set-0/binding-0 storage-buffer topology, exact Q6 counts (`24` storage16 loads and `16` bitcasts), unsigned byte type availability, immediate AccessChain+Load shape, member-index constant values instead of signed/unsigned constant IDs, and Q6 decode consumer/source structure for the bitcast lane.  The final-store pre-barrier no longer has the residual fixed label/compare/local-invocation SSA-ID branch; it uses the structural lane-zero input compare and staged binding-2 store topology only.  The offline reconstructor mirrors the same structural rules against the saved native Q6 fixture. | `app/src/main/cpp/pdocker_gpu_executor.c`; `scripts/reconstruct-q6-effective-spirv.py`; `tests/test_gpu_abi_contract.py`; native build `scripts/build-native-android-ndk.sh`; host gates `tests.test_gpu_abi_contract tests.test_llama_gpu_artifact_verifier`, APK gate `:app:assembleCompatDebug`; pending device rerun because ADB `192.168.179.21:43119` refused connection |
+| 2026-07-06 Vulkan env/ABI propagation contract guard | Host-only static coverage now ties the Vulkan dispatch-option ABI macro, env manifest classifications, Q6 runner overlay, ICD token emission, executor token parsing, and invalid-option fail-closed messages together.  This prevents runner/ICD/executor key drift or a missing env bridge from being mistaken for a shader/device blocker at runtime. | `tests/test_gpu_abi_contract.py`; `docs/plan/LLAMA_GPU_BRIDGE_NEXT_STEPS.md`; host gate `python3 -m unittest tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_dispatch_option_env_contract_is_single_source_and_fail_closed`; no llama.cpp/Dockerfile/model/prompt changes |
+| 2026-07-06 Vulkan packed depth/stencil dual-aspect descriptor lane | The executor now accepts dual-aspect packed `D24S8`/`D32S8` image views for read-only sampled/combined/input-attachment descriptor replay by splitting the copy planning into depth and stencil plane ranges. Storage-image descriptors and buffer-image raw packed dual-aspect copies remain fail-closed until they have an explicit scratch/repack ABI lane. | `app/src/main/cpp/pdocker_gpu_executor.c`; host gate `tests.test_gpu_abi_contract`; no llama.cpp/Dockerfile/model/prompt changes |
 | 2026-06-03 Vulkan graphics V6.1 P0-P6 preflight lane | Producer commit `9d6e724` has completed V6.1 serialization through the attachment table and command table.  The executor now validates/describes V6.1 frames, runs an explicit `vulkan-graphics-v6-replay-preflight`, and accepts only validated no-op frames as implemented.  Non-empty graphics replay now advances through queue submit/fence wait and fails closed at attachment writeback until Android Vulkan readback is implemented. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; `app/src/main/cpp/pdocker_gpu_executor.c`; host test `tests.test_gpu_abi_contract` |
 | 2026-06-03 Vulkan graphics pipeline-state fail-closed lane | The container ICD refuses to promote graphics pipelines that depend on static state not serialized into the current replay ABI: blend/logic-op/blend constants/non-RGBA write masks, and non-dynamic viewport/scissor.  The earlier depth/stencil static-state gap is superseded by the V6.3 depth/stencil state lane.  This prevents executor P6 from reconstructing guessed defaults when real Android Vulkan replay is added. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; host test `tests.test_gpu_abi_contract` |
 | 2026-06-03 Vulkan graphics pipeline-materialization lane | Executor P6 now advances past generic command-recording refusal by materializing the serialized graphics pipeline object graph first: shader fd hash revalidation, entry-name copy, push-constant layout reconstruction, vertex input state, dynamic-rendering color formats, viewport/scissor dynamic state, and Android `vkCreateGraphicsPipelines`.  Attachment image materialization and command-buffer replay still fail closed after pipeline materialization; no success or benchmark claim is promoted from this partial P6 step. | `app/src/main/cpp/pdocker_gpu_executor.c`; host test `tests.test_gpu_abi_contract` |
@@ -1271,35 +1273,46 @@ env keys are classified as follows:
 |---|---|---|
 | `container_env_only` | `PDOCKER_VULKAN_HEAP_BYTES`, `PDOCKER_VULKAN_MAX_BUFFER_BYTES`, `GGML_VK_FORCE_MAX_BUFFER_SIZE`, `GGML_VK_FORCE_MAX_ALLOCATION_SIZE`, `GGML_VK_SUBALLOCATION_BLOCK_SIZE`, `PDOCKER_VULKAN_ICD_DEBUG`, `PDOCKER_VULKAN_ICD_TRACE_ALLOC`, `PDOCKER_VULKAN_ALIAS_COPIES`, `PDOCKER_VULKAN_DUMP_SPIRV_DIR`, `PDOCKER_VULKAN_ENABLE_8BIT_STORAGE`, `PDOCKER_VULKAN_ENABLE_16BIT_STORAGE`, `PDOCKER_VULKAN_ENABLE_INT64`, `PDOCKER_VULKAN_ENABLE_SUBGROUP_ARITHMETIC`, `PDOCKER_VULKAN_SUBGROUP_SIZE`, `PDOCKER_VULKAN_ADVERTISEMENT_SOURCE`, `PDOCKER_GPU_VIRTUAL_MEMORY`, `PDOCKER_GPU_VIRTUAL_MEMORY_MIN_BYTES`, `LLAMA_ARG_N_GPU_LAYERS` | Consumed by llama.cpp/container scripts or the glibc ICD before command emission; no executor reflection is expected. |
 | `icd_to_executor_bool_option` | `PDOCKER_VULKAN_DISABLE_8BIT_STORAGE`, `PDOCKER_VULKAN_DISABLE_16BIT_STORAGE`, `PDOCKER_VULKAN_DISABLE_SUBGROUP_ARITHMETIC`, `PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS`, `PDOCKER_GPU_STRICT_DUPLICATE_DESCRIPTOR_NORMALIZATION`, `PDOCKER_GPU_MATERIALIZE_DESCRIPTOR_ALIASES`, `PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS`, `PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION`, `PDOCKER_GPU_STRICT_PASSTHROUGH`, `PDOCKER_GPU_STRICT_RECONCILIATION`, `PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING`, `PDOCKER_GPU_SKIP_UNUSED_DESCRIPTOR_TRANSFERS`, `PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS`, `PDOCKER_GPU_DISABLE_OVERLAP_ALIASING`, `PDOCKER_GPU_CPU_ORACLE`, `PDOCKER_GPU_Q6K_ORACLE_WRITEBACK`, `PDOCKER_GPU_Q6K_SAFE_KERNEL`, `PDOCKER_GPU_Q6K_COMPAT_REWRITES`, `PDOCKER_GPU_Q6K_READONLY_OVERLAP_SNAPSHOT`, `PDOCKER_GPU_Q4K_SAFE_KERNEL`, `PDOCKER_GPU_Q4K_TARGETED_SPECIALIZATION`, `PDOCKER_GPU_Q4K_PIPELINE_RETRY_LADDER`, `PDOCKER_GPU_RESIDENT_CACHE`, `PDOCKER_GPU_MUTABLE_BUFFER_CACHE`, `PDOCKER_GPU_WRITEONLY_BUFFER_CACHE`, `PDOCKER_GPU_WRITEONLY_DIRTY_PROBE`, `PDOCKER_GPU_WRITEONLY_DIRTY_WRITEBACK`, `PDOCKER_GPU_STRICT_GRAPH_CACHE`, `PDOCKER_GPU_ADD_FLOAT16_CAPABILITY_FOR_STORAGE16`, `PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE` | ICD appends a command-token boolean (or the existing `profile=1` token) and executor JSON must expose the effective value. |
-| `icd_to_executor_size_option` | `PDOCKER_GPU_RESIDENT_CACHE_MIN_BYTES`, `PDOCKER_GPU_MUTABLE_BUFFER_CACHE_MAX_BYTES`, `PDOCKER_GPU_WRITEONLY_DIRTY_PROBE_MIN_BYTES` | ICD appends a parsed unsigned-size command token; malformed values are ignored rather than guessed. |
-| `icd_to_executor_string_option` | _none today_ | Future string/path options need a bounded, escaped command field plus executor reflection; container env alone is not enough. |
+| `icd_to_executor_size_option` | `PDOCKER_GPU_RESIDENT_CACHE_MIN_BYTES`, `PDOCKER_GPU_MUTABLE_BUFFER_CACHE_MAX_BYTES`, `PDOCKER_GPU_STRICT_GRAPH_CACHE_MAX_BYTES`, `PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING_MAX_TRANSFER_BYTES`, `PDOCKER_GPU_SPIRV_PROBE_DEBUG_BINDING`, `PDOCKER_GPU_WRITEONLY_DIRTY_PROBE_MIN_BYTES` | ICD appends a parsed unsigned-size command token; malformed values are ignored rather than guessed. |
+| `icd_to_executor_string_option` | `PDOCKER_GPU_FAILED_SPIRV_DIR`, `PDOCKER_GPU_SPIRV_DUMP_DIR` | ICD appends bounded hex-encoded string tokens and the executor consumes those tokens before falling back to APK-process env; malformed or oversized values fail closed before dispatch. |
 | `app_process_only` | `PDOCKER_GPU_DISABLE_ANDROID_VULKAN`, `PDOCKER_GPU_DISABLE_ANDROID_OPENCL`, `PDOCKER_ANDROID_OPENCL_LIBRARY` | Read by the APK/executor process before or outside per-dispatch Vulkan command emission. Forwarding these only into the container is not a reliable override. |
 | `deprecated_or_invalid` | _none in the manifest env set_ | Keep unsupported work tokens out of env classification. |
-| `needs_bridge` | `PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC`, `PDOCKER_GPU_RETRY_MATERIALIZE_SPECIALIZATION`, `PDOCKER_GPU_DISPATCH_PROFILE_LOG`, `PDOCKER_GPU_FAILED_SPIRV_DIR`, `PDOCKER_GPU_CHAIN_COMPAT_FEATURE_STRUCTS`, `PDOCKER_GPU_UNSAFE_DIRTY_WRITEBACK_CACHE`, `PDOCKER_GPU_WRITEBACK_FULL_HASH_MAX_BYTES` | Manifest forwarding can make these look requested, but the current executor-side behavior still depends on APK-process `getenv()` or an unreflected default. Do not interpret a run as having honored these until a dispatch option and JSON reflection exist. |
+| `needs_bridge` | `PDOCKER_GPU_CHAIN_COMPAT_FEATURE_STRUCTS`, `PDOCKER_GPU_DISPATCH_PROFILE_LOG`, `PDOCKER_GPU_RETRY_MATERIALIZE_SPECIALIZATION`, `PDOCKER_GPU_UNSAFE_DIRTY_WRITEBACK_CACHE`, `PDOCKER_GPU_WRITEBACK_FULL_HASH_MAX_BYTES` | Manifest forwarding can make these look requested, but the current executor-side behavior still depends on APK-process `getenv()` or an unreflected default. Do not interpret a run as having honored these until a dispatch option and, for correctness-affecting booleans, JSON reflection exist. |
 
 `needs_bridge` priority, highest risk first:
 
-1. `PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC` - directly controls the
-   active Q6 WorkgroupSize lane.  Until Aquinas lands a reflected bool option,
-   a container-only setting must not be used as proof that executor legalization
-   changed.
-2. `PDOCKER_GPU_RETRY_MATERIALIZE_SPECIALIZATION` and
+1. `PDOCKER_GPU_RETRY_MATERIALIZE_SPECIALIZATION` and
    `PDOCKER_GPU_CHAIN_COMPAT_FEATURE_STRUCTS` - can change shader/module
    creation paths and feature-chain interpretation, so stale executor defaults
    can invalidate SPIR-V blocker conclusions.
-3. `PDOCKER_GPU_DISPATCH_PROFILE_LOG`, `PDOCKER_GPU_FAILED_SPIRV_DIR`, and
+2. `PDOCKER_GPU_DISPATCH_PROFILE_LOG` and
    `PDOCKER_GPU_WRITEBACK_FULL_HASH_MAX_BYTES` - affect evidence capture.  A
    missing bridge may look like missing Q6 evidence rather than a failed knob.
-4. `PDOCKER_GPU_UNSAFE_DIRTY_WRITEBACK_CACHE` - safety gate for dirty-writeback
+3. `PDOCKER_GPU_UNSAFE_DIRTY_WRITEBACK_CACHE` - safety gate for dirty-writeback
    caching; keep it fail-closed until it has an explicit reflected option.
 
+`PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC` is no longer in
+`needs_bridge`: it is a reflected bool dispatch option and remains part of the
+Q6 required overlay.  `PDOCKER_GPU_FAILED_SPIRV_DIR` and
+`PDOCKER_GPU_SPIRV_DUMP_DIR` are bounded string dispatch options; they are
+diagnostic path controls, not correctness propagation booleans.
+
 String option design: add an ICD-to-executor string option only for bounded
-ASCII/UTF-8 payloads, escape separators or length-prefix the value, cap it well
-below `PDOCKER_GPU_MAX_COMMAND_BYTES`, and echo the accepted value in compact
-executor JSON.  For path-like diagnostics such as `PDOCKER_GPU_FAILED_SPIRV_DIR`,
-prefer a host/container path chosen by compare, bridged as `failed_spirv_dir=...`,
-and rejected if empty, absolute/relative policy is violated, or it would
-truncate the command.
+ASCII/UTF-8 payloads, hex-escape separators, cap it below
+`PDOCKER_GPU_VULKAN_STRING_DISPATCH_OPTION_MAX_BYTES`, and keep malformed,
+newline-containing, or oversized values fail-closed before dispatch.  For
+path-like diagnostics such as `PDOCKER_GPU_FAILED_SPIRV_DIR`, prefer a
+host/container path chosen by compare, bridged as `failed_spirv_dir_hex=...`,
+and rejected if it would truncate the command.  Add compact executor JSON
+reflection only when a string option becomes correctness-critical.
+
+- Static dispatch-option route guard: `tests.test_gpu_abi_contract` compares
+  the ABI dispatch-option macros, manifest `abi_dispatch_option_env_fields`,
+  bridge classifications, compare forwarding, Q6 runner `q6_required_env_overlay`,
+  ICD macro-driven token emitters, executor macro-driven token parsers, and
+  invalid-option fail-closed messages.  This catches runner/ICD/executor key drift
+  before runtime collection can misclassify an env bridge miss as a Vulkan shader
+  or device failure.
 
 - Lightweight env parity guard: `tests.test_llama_gpu_env_parity` checks that
   the manifest's pdockerd runtime env list, UI-compose runtime env list,

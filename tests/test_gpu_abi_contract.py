@@ -3163,8 +3163,11 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("vulkan_image_single_aspect_supported_for_format(image->format, aspect)", descriptor_aspect_helper)
         self.assertIn("descriptor_type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE", descriptor_aspect_helper)
         self.assertIn("aspect != VK_IMAGE_ASPECT_COLOR_BIT", descriptor_aspect_helper)
+        self.assertIn("vulkan_descriptor_type_is_readonly_image(descriptor_type)", descriptor_aspect_helper)
+        self.assertIn("vulkan_packed_depth_stencil_dual_aspect_supported(image->format, aspect)", descriptor_aspect_helper)
         self.assertIn("vulkan_graphics_descriptor_image_aspect_supported", descriptor_copy_helper)
-        self.assertIn("vulkan_graphics_merge_image_copy_range_for_aspect(image, range, aspect)", descriptor_copy_helper)
+        self.assertIn("vulkan_merge_image_copy_range_for_aspects", descriptor_copy_helper)
+        self.assertIn("vulkan_graphics_merge_image_copy_range_for_aspect", descriptor_copy_helper)
         self.assertNotIn("image, range, VK_IMAGE_ASPECT_COLOR_BIT", descriptor_copy_helper)
 
         self.assertIn("vulkan_image_tight_subresource_offset_for_aspect", staged_body)
@@ -4717,9 +4720,17 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:", helper_body)
         self.assertIn("descriptor_type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE", helper_body)
         self.assertIn("aspect != VK_IMAGE_ASPECT_COLOR_BIT", helper_body)
+        self.assertIn("vulkan_descriptor_type_is_readonly_image(descriptor_type)", helper_body)
+        self.assertIn("vulkan_packed_depth_stencil_dual_aspect_supported(image->format, aspect)", helper_body)
         self.assertIn("vulkan_dispatch_descriptor_image_aspect_supported", materialize_body)
         self.assertIn("vulkan_dispatch_merge_descriptor_image_copy_range", materialize_body)
         self.assertNotIn("range->aspectMask != VK_IMAGE_ASPECT_COLOR_BIT", materialize_body)
+        self.assertIn("vulkan_merge_image_copy_range_for_aspects", executor)
+        self.assertIn("VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT", executor)
+        self.assertIn("vulkan_descriptor_type_is_readonly_image", executor)
+        self.assertIn("vulkan_packed_depth_stencil_dual_aspect_supported", executor)
+        self.assertIn("single_range.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT", executor)
+        self.assertIn("single_range.aspectMask = VK_IMAGE_ASPECT_STENCIL_BIT", executor)
         self.assertIn("vulkan_image_copy_aspect_list", run_body)
         self.assertIn("vulkan_image_tight_subresource_offset_for_aspect", run_body)
         self.assertIn("vulkan_image_tight_copy_size_for_aspect", run_body)
@@ -13873,6 +13884,84 @@ class GpuAbiContractTest(unittest.TestCase):
             "top_dirty_probe_bindings",
         ]:
             self.assertIn(field, compare)
+
+    def test_vulkan_dispatch_option_env_contract_is_single_source_and_fail_closed(self):
+        abi_options = vulkan_dispatch_option_envs(APP_HEADER)
+        legacy_profile_response_envs = {"PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE"}
+        bridged_options = {
+            "bool": abi_options["bool"] | legacy_profile_response_envs,
+            "size": abi_options["size"],
+            "string": abi_options["string"],
+        }
+
+        manifest = json.loads(LLAMA_GPU_ENV_MANIFEST.read_text(encoding="utf-8"))
+        manifest_options = {
+            option_type: {
+                item["env"]
+                for item in manifest["abi_dispatch_option_env_fields"]
+                if item["type"] == option_type
+            }
+            for option_type in ("bool", "size", "string")
+        }
+        self.assertEqual(bridged_options, manifest_options)
+
+        classifications = manifest["env_bridge_classifications"]
+        self.assertEqual(bridged_options["bool"], set(classifications["icd_to_executor_bool_option"]))
+        self.assertEqual(bridged_options["size"], set(classifications["icd_to_executor_size_option"]))
+        self.assertEqual(bridged_options["string"], set(classifications["icd_to_executor_string_option"]))
+
+        compare_forward_envs = set(manifest["compare_forward_env_keys"])
+        bridged_envs = set().union(*bridged_options.values())
+        self.assertEqual([], sorted(bridged_envs - compare_forward_envs))
+
+        q6_required = set(manifest["q6_required_env_overlay"])
+        self.assertEqual({"PDOCKER_GPU_DISPATCH_PROFILE_LOG"}, q6_required - bridged_envs)
+        config_propagation_envs = {item["env"] for item in manifest["config_propagation_env_fields"]}
+        self.assertEqual(
+            [],
+            sorted(
+                q6_required
+                - config_propagation_envs
+                - {
+                    "PDOCKER_GPU_DISPATCH_PROFILE_LOG",
+                    "PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE",
+                    "PDOCKER_GPU_STRICT_RECONCILIATION",
+                }
+            ),
+        )
+
+        icd = VULKAN_ICD.read_text()
+        for marker in [
+            "PDOCKER_GPU_VULKAN_BOOL_DISPATCH_OPTIONS(PDOCKER_VK_BOOL_BRIDGE_OPTION)",
+            "PDOCKER_GPU_VULKAN_BOOL_DISPATCH_OPTIONS_NO_HAS(PDOCKER_VK_BOOL_BRIDGE_OPTION_NO_HAS)",
+            "PDOCKER_GPU_VULKAN_SIZE_DISPATCH_OPTIONS(PDOCKER_VK_U64_BRIDGE_OPTION)",
+            "PDOCKER_GPU_VULKAN_STRING_DISPATCH_OPTIONS(PDOCKER_VK_STRING_BRIDGE_OPTION)",
+            'env_truthy_default("PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE", false)',
+            '" profile=1"',
+            "generic dispatch rejected: invalid %s dispatch_id=%llu",
+            'PDOCKER_VK_APPEND_TOO_LONG("append-string-option")',
+        ]:
+            self.assertIn(marker, icd)
+
+        executor = GPU_EXECUTOR.read_text()
+        for marker in [
+            "PDOCKER_GPU_VULKAN_STRING_DISPATCH_OPTIONS(PDOCKER_EXEC_STRING_DISPATCH_OPTION)",
+            "PDOCKER_GPU_VULKAN_BOOL_DISPATCH_OPTIONS(PDOCKER_EXEC_BOOL_DISPATCH_OPTION)",
+            "PDOCKER_GPU_VULKAN_BOOL_DISPATCH_OPTIONS_NO_HAS(PDOCKER_EXEC_BOOL_DISPATCH_OPTION_NO_HAS)",
+            "PDOCKER_GPU_VULKAN_SIZE_DISPATCH_OPTIONS(PDOCKER_EXEC_SIZE_DISPATCH_OPTION)",
+            '{"profile", &options->has_profile_response, &options->profile_response}',
+            "parse_hex_string_token_value",
+            'json_fail("vulkan-dispatch-v5", "invalid option token")',
+            'json_fail("vulkan-dispatch", "invalid command")',
+            "strict reconciliation mismatch before dispatch",
+        ]:
+            self.assertIn(marker, executor)
+
+        runner = (ROOT / "scripts" / "android-llama-gpu-q6-workgroup-run.sh").read_text()
+        next_steps = LLAMA_GPU_NEXT_STEPS.read_text()
+        self.assertIn("q6_required_env_overlay", runner)
+        self.assertIn("Static dispatch-option route guard", next_steps)
+        self.assertIn("runner/ICD/executor key drift", next_steps)
 
     def test_q6_workgroup_runner_fixes_required_env_and_preflight(self):
         runner = (ROOT / "scripts" / "android-llama-gpu-q6-workgroup-run.sh").read_text()
