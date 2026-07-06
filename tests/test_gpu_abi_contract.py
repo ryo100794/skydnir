@@ -2691,9 +2691,10 @@ class GpuAbiContractTest(unittest.TestCase):
         for marker in [
             "read_graphics_shader_fd",
             "copy_graphics_entry_name",
-            "collect_graphics_push_ranges_for_layout",
+            "const VulkanGraphicsReplayLayouts *layouts",
+            "find_vulkan_graphics_replay_pipeline_layout_by_id",
+            ".layout = pipeline_layout->layout",
             "vkCreateShaderModule",
-            "vkCreatePipelineLayout",
             "VkPipelineVertexInputStateCreateInfo",
             "VkPipelineRenderingCreateInfo",
             "VK_DYNAMIC_STATE_VIEWPORT",
@@ -5135,8 +5136,14 @@ class GpuAbiContractTest(unittest.TestCase):
             "collect_graphics_descriptor_layout_from_v624_metadata",
             "dst->descriptor_set_layout_ids",
             "dst->set_binding_descriptor_counts",
-            "view->is_v624 ? 0u : pipeline_descriptor_stage_flags",
-            "pipeline->set_binding_descriptor_counts",
+            ".layout = pipeline_layout->layout",
+            "VulkanGraphicsReplayLayouts",
+            "materialize_vulkan_graphics_v6_layouts",
+            "find_vulkan_graphics_replay_pipeline_layout_by_id",
+            "vulkan_graphics_replay_descriptor_set_layout_for_set",
+            "set_layout->binding_descriptor_counts",
+            "vkCreatePipelineLayout(rt->device, &plci, NULL, &pl->layout)",
+            "vkCreateDescriptorSetLayout(rt->device, &dslci, NULL, &dsl->layout)",
         ]:
             self.assertIn(marker, executor)
 
@@ -5315,9 +5322,11 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("descriptor->descriptor_set < bind_first_set", descriptor_validation_body)
         self.assertIn("descriptor->descriptor_set >= bind_first_set + declared_bind_set_count", descriptor_validation_body)
         self.assertIn(
-            "descriptor->array_element >=\n                    pipeline->set_binding_descriptor_counts[descriptor->descriptor_set][descriptor->binding]",
+            "descriptor->array_element >= set_layout->binding_descriptor_counts[descriptor->binding]",
             descriptor_validation_body,
         )
+        self.assertIn("set_layout->binding_types[descriptor->binding]", descriptor_validation_body)
+        self.assertIn("vulkan_graphics_replay_descriptor_set_layout_for_set", v625_prealloc_body)
         self.assertIn(
             "if (descriptor_slot_seen[descriptor->descriptor_set][descriptor->binding][descriptor->array_element])",
             descriptor_validation_body,
@@ -5329,11 +5338,23 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("return -EPROTO;", descriptor_validation_body)
 
         self.assertIn("for (uint32_t set = bind_first_set; set < bind_first_set + declared_bind_set_count; ++set)", layout_coverage_body)
-        self.assertIn("for (uint32_t binding = 0; binding < pipeline->set_binding_counts[set]; ++binding)", layout_coverage_body)
-        self.assertIn("uint32_t expected_count = pipeline->set_binding_descriptor_counts[set][binding];", layout_coverage_body)
+        self.assertIn("for (uint32_t binding = 0; binding < set_layout->binding_count; ++binding)", layout_coverage_body)
+        self.assertIn("uint32_t expected_count = set_layout->binding_descriptor_counts[binding];", layout_coverage_body)
         self.assertIn("if (expected_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS) return -EPROTO;", layout_coverage_body)
         self.assertIn("for (uint32_t array_element = 0; array_element < expected_count; ++array_element)", layout_coverage_body)
         self.assertIn("if (!descriptor_slot_seen[set][binding][array_element]) return -EPROTO;", layout_coverage_body)
+
+    def test_vulkan_graphics_v625_descriptor_bind_uses_standalone_layouts(self):
+        executor = GPU_EXECUTOR.read_text()
+        descriptors_body = c_function_body(executor, "materialize_vulkan_graphics_v6_descriptors")
+        record_body = c_function_body(executor, "record_vulkan_graphics_v6_command_buffer")
+        self.assertNotIn("find_vulkan_graphics_replay_pipeline_by_layout", descriptors_body)
+        self.assertNotIn("find_vulkan_graphics_replay_pipeline_by_layout", record_body)
+        self.assertIn("find_vulkan_graphics_replay_pipeline_layout_by_id", descriptors_body)
+        self.assertIn("find_vulkan_graphics_replay_pipeline_layout_by_id", record_body)
+        self.assertIn("vkCmdPushConstants(command_buffer, push_layout->layout", record_body)
+        self.assertIn("vkCmdBindDescriptorSets(command_buffer", record_body)
+        self.assertIn("bind_layout->layout", record_body)
 
     def test_vulkan_graphics_v6_field_macros_match_packed_structs(self):
         schemas = [
@@ -8991,7 +9012,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "VK_PRIMITIVE_TOPOLOGY_PATCH_LIST",
             "VkPipelineTessellationStateCreateInfo tsci",
             ".pTessellationState = tessellation_state ? &tsci : NULL",
-            "view->is_v624 ? 0u : pipeline_descriptor_stage_flags",
+            ".layout = pipeline_layout->layout",
             "vulkan_graphics_v6_dynamic_primitive_topology_value",
             "tessellation draw requires patch-list primitive topology",
             "tessellation indexed draw requires patch-list primitive topology",
