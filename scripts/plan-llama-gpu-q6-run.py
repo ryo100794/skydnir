@@ -63,6 +63,10 @@ REQUIRED_EVIDENCE_FIELDS = [
     "q6_u32_to_u8vec4_bitcasts_lowered",
     "q6_u32_to_u8vec4_bitcasts_lowered_count",
     "q6_final_store_pre_barrier_inserted",
+    "spirv_raw_dump_evidence",
+    "original_phase_pattern",
+    "effective_phase_pattern",
+    "dump_dir",
     "final_store_value_f32",
     "final_store_matches_expected",
     "writeback_matches_final_store",
@@ -139,6 +143,22 @@ RUNNER_STEP_CONTRACT = [
         "touches_adb": False,
         "command": "scripts/maintenance/verify-q6-workgroup-lowering-preflight.py",
         "required_outputs": ["q6_workgroup_lowering_preflight"],
+    },
+    {
+        "name": "probe-source-freshness",
+        "touches_adb": False,
+        "command": "scripts/android-llama-gpu-q6-workgroup-run.sh",
+        "required_policy": (
+            "Before ADB, require --probe-locator or --probe-source-spv plus "
+            "--probe-source-hash unless PDOCKER_Q6K_ALLOW_ARCHIVED_PROBE_SOURCE=1."
+        ),
+        "required_outputs": ["fresh_probe_source_policy_record"],
+    },
+    {
+        "name": "probe-manifest-verify",
+        "touches_adb": False,
+        "command": "scripts/verify-spirv-probe-manifest.py",
+        "required_outputs": ["q6_probe_manifest_verify"],
     },
     {
         "name": "device-readiness",
@@ -300,6 +320,27 @@ def build_plan(args: argparse.Namespace) -> dict:
         "runner": str(RUNNER.relative_to(ROOT)),
         "runner_command": " ".join(runner_cmd),
         "runner_step_contract": RUNNER_STEP_CONTRACT,
+        "probe_source_policy": {
+            "schema": "pdocker.llama.gpu.q6.probe-source-policy.v1",
+            "require_before_adb": True,
+            "accepted_fresh_sources": [
+                "--probe-locator",
+                "--probe-source-spv plus --probe-source-hash",
+            ],
+            "archived_fixture_escape_hatch": "PDOCKER_Q6K_ALLOW_ARCHIVED_PROBE_SOURCE=1",
+            "reason": (
+                "A default /tmp probe bundle can be stale after Q6 trace layout changes; "
+                "device runs must prove the probe was generated from the actual runtime source SPIR-V."
+            ),
+        },
+        "raw_spirv_dump_evidence": {
+            "schema": "pdocker.llama.gpu.q6.raw-spirv-dump-policy.v1",
+            "required_env": "PDOCKER_GPU_SPIRV_DUMP_DIR",
+            "failed_dump_env": "PDOCKER_GPU_FAILED_SPIRV_DIR",
+            "original_phase_pattern": "pdocker-spirv-original-*.spv",
+            "effective_phase_pattern": "pdocker-spirv-effective-*.spv",
+            "reason": "Original/effective modules must be available for static analysis before another device rerun.",
+        },
         "q6_required_env_overlay": Q6_REQUIRED_ENV_OVERLAY,
         "required_evidence_fields": REQUIRED_EVIDENCE_FIELDS,
         "required_evidence_alternatives": REQUIRED_EVIDENCE_ALTERNATIVES,

@@ -3098,6 +3098,41 @@ runtime_env_manifest = {
     ),
 }
 
+def build_spirv_raw_dump_evidence():
+    dump_dir = (
+        observed_runtime_env.get("PDOCKER_GPU_SPIRV_DUMP_DIR")
+        or intended_runtime_env.get("PDOCKER_GPU_SPIRV_DUMP_DIR")
+        or requested_or_planned_env.get("PDOCKER_GPU_SPIRV_DUMP_DIR")
+        or ""
+    )
+    failed_dump_dir = (
+        observed_runtime_env.get("PDOCKER_GPU_FAILED_SPIRV_DIR")
+        or intended_runtime_env.get("PDOCKER_GPU_FAILED_SPIRV_DIR")
+        or requested_or_planned_env.get("PDOCKER_GPU_FAILED_SPIRV_DIR")
+        or ""
+    )
+    return {
+        "schema": "pdocker.llama.gpu.spirv-raw-dump-evidence.v1",
+        "summary": "pass" if dump_dir else "missing-evidence",
+        "recorded_from": "PDOCKER_GPU_SPIRV_DUMP_DIR",
+        "dump_dir": dump_dir,
+        "failed_dump_dir": failed_dump_dir,
+        "original_phase_pattern": "pdocker-spirv-original-*.spv",
+        "effective_phase_pattern": "pdocker-spirv-effective-*.spv",
+        "required_for_q6": True,
+        "env_present": {
+            "PDOCKER_GPU_SPIRV_DUMP_DIR": bool(dump_dir),
+            "PDOCKER_GPU_FAILED_SPIRV_DIR": bool(failed_dump_dir),
+        },
+        "note": (
+            "This records where the executor must emit raw original/effective SPIR-V modules; "
+            "the plan verifier treats the field itself as evidence that the run was configured "
+            "for post-run static analysis."
+        ),
+    }
+
+spirv_raw_dump_evidence = build_spirv_raw_dump_evidence()
+
 def probe_map(report):
     return {
         str(item.get("name")): str(item.get("content", ""))
@@ -6882,6 +6917,7 @@ result = {
             "spirv_hashes": spirv_hashes[-4:],
             "runtime_freshness": runtime_freshness,
             "config_propagation": config_propagation,
+            "spirv_raw_dump_evidence": spirv_raw_dump_evidence,
             "spirv_probe_env_audit": spirv_probe_env_audit,
             "api_executor_reconciliation": api_executor_reconciliation,
             "api_understanding": api_understanding,

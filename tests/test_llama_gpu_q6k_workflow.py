@@ -1,4 +1,5 @@
 import json
+import os
 import contextlib
 import importlib.util
 import io
@@ -38,6 +39,9 @@ class LlamaGpuQ6KWorkflowTest(unittest.TestCase):
         self.assertIn("load_q6_required_env_overlay", source)
         self.assertIn("q6_required_env_overlay", source)
         self.assertIn("q6_compare_env", source)
+        self.assertIn("validate_probe_source_policy", source)
+        self.assertIn("blocked-probe-source-freshness", source)
+        self.assertIn("android-llama-gpu-q6-workgroup-run.sh", source)
         self.assertIn('"browser_force_stop_allowed": False', source)
         self.assertIn('"benchmark_requires_correctness": True', source)
         self.assertIn('"llama_cpp_modified": False', source)
@@ -77,6 +81,7 @@ class LlamaGpuQ6KWorkflowTest(unittest.TestCase):
             overlay = json.loads((ROOT / "scripts" / "llama-gpu-env-manifest.json").read_text())["q6_required_env_overlay"]
             self.assertEqual(data["q6_required_env_overlay"], overlay)
             self.assertEqual(data["q6_compare_env"], overlay)
+            self.assertEqual("dry-run", data["probe_source_policy"]["summary"])
 
     def test_q6_required_env_overlay_is_loaded_from_manifest(self):
         workflow = load_workflow_module()
@@ -85,6 +90,45 @@ class LlamaGpuQ6KWorkflowTest(unittest.TestCase):
         self.assertEqual(overlay, manifest["q6_required_env_overlay"])
         self.assertLessEqual(set(overlay), set(manifest["compare_forward_env_keys"]))
         self.assertTrue(overlay)
+
+    def test_legacy_workflow_blocks_before_device_without_probe_source_freshness_policy(self):
+        workflow = load_workflow_module()
+        captured_steps = []
+        original_run_step = workflow.run_step
+
+        def fake_run_step(step_id, argv, env, dry_run, stdout_path=None):
+            captured_steps.append(step_id)
+            return {"id": step_id, "argv": list(argv), "exit_code": 0, "status": "pass"}
+
+        workflow.run_step = fake_run_step
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                workflow_manifest = Path(tmpdir) / "workflow.json"
+                old = os.environ.pop("PDOCKER_Q6K_ALLOW_ARCHIVED_PROBE_SOURCE", None)
+                try:
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        rc = workflow.main(
+                            [
+                                "--skip-local-checks",
+                                "--manifest-out",
+                                str(workflow_manifest),
+                                "--readiness-out",
+                                str(Path(tmpdir) / "readiness.json"),
+                                "--out",
+                                str(Path(tmpdir) / "compare.json"),
+                            ]
+                        )
+                finally:
+                    if old is not None:
+                        os.environ["PDOCKER_Q6K_ALLOW_ARCHIVED_PROBE_SOURCE"] = old
+                data = json.loads(workflow_manifest.read_text())
+        finally:
+            workflow.run_step = original_run_step
+
+        self.assertEqual(40, rc)
+        self.assertEqual("blocked-probe-source-freshness", data["status"])
+        self.assertEqual([], captured_steps)
+        self.assertNotIn("readiness", [step["id"] for step in data["steps"]])
 
     def test_verifier_json_is_extracted_from_full_stdout_not_tail(self):
         workflow = load_workflow_module()
@@ -165,18 +209,26 @@ class LlamaGpuQ6KWorkflowTest(unittest.TestCase):
         try:
             with tempfile.TemporaryDirectory() as tmpdir:
                 workflow_manifest = Path(tmpdir) / "workflow.json"
-                with contextlib.redirect_stdout(io.StringIO()):
-                    rc = workflow.main(
-                        [
-                            "--skip-local-checks",
-                            "--manifest-out",
-                            str(workflow_manifest),
-                            "--readiness-out",
-                            str(Path(tmpdir) / "readiness.json"),
-                            "--out",
-                            str(Path(tmpdir) / "compare.json"),
-                        ]
-                    )
+                old_archived = os.environ.get("PDOCKER_Q6K_ALLOW_ARCHIVED_PROBE_SOURCE")
+                os.environ["PDOCKER_Q6K_ALLOW_ARCHIVED_PROBE_SOURCE"] = "1"
+                try:
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        rc = workflow.main(
+                            [
+                                "--skip-local-checks",
+                                "--manifest-out",
+                                str(workflow_manifest),
+                                "--readiness-out",
+                                str(Path(tmpdir) / "readiness.json"),
+                                "--out",
+                                str(Path(tmpdir) / "compare.json"),
+                            ]
+                        )
+                finally:
+                    if old_archived is None:
+                        os.environ.pop("PDOCKER_Q6K_ALLOW_ARCHIVED_PROBE_SOURCE", None)
+                    else:
+                        os.environ["PDOCKER_Q6K_ALLOW_ARCHIVED_PROBE_SOURCE"] = old_archived
                 workflow_data = json.loads(workflow_manifest.read_text())
         finally:
             workflow.run_step = original_run_step
@@ -193,6 +245,7 @@ class LlamaGpuQ6KWorkflowTest(unittest.TestCase):
         self.assertIsNotNone(workflow_data)
         self.assertEqual(workflow_data["q6_required_env_overlay"], overlay)
         self.assertEqual(workflow_data["q6_compare_env"], overlay)
+        self.assertEqual("archived-fixture-allowed", workflow_data["probe_source_policy"]["summary"])
 
     def test_invalid_q6_required_env_overlay_blocks_before_device_steps(self):
         workflow = load_workflow_module()

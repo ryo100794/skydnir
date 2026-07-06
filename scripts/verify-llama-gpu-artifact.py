@@ -3388,6 +3388,7 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
         "vulkan_shader_passthrough_rewrite_evidence": vulkan_passthrough_rewrite_evidence,
         "runtime_freshness": runtime_freshness,
         "runtime_env_manifest": runtime_env_manifest,
+        "spirv_raw_dump_evidence": diagnostics.get("spirv_raw_dump_evidence") or {},
         "config_propagation": config_propagation,
         "api_prompt_sanity": api_prompt_sanity,
         "speedup_fields": speedup_fields,

@@ -5,10 +5,11 @@ The purpose of this script is to avoid ad-hoc cut-and-try device operation.  It
 always runs the same layers in order:
 
 1. local contract checks that must pass before touching the device;
-2. low-impact device readiness;
-3. guarded llama GPU compare only when readiness is green;
-4. artifact classification with the Q6_K workgroup acceptance gate;
-5. one workflow manifest that records commands, exit codes, and artifact paths.
+2. probe-source freshness policy checks that must pass before touching ADB;
+3. low-impact device readiness;
+4. guarded llama GPU compare only when readiness is green;
+5. artifact classification with the Q6_K workgroup acceptance gate;
+6. one workflow manifest that records commands, exit codes, and artifact paths.
 
 It does not modify llama.cpp, the llama Dockerfile, the model, or prompt probes.
 """
@@ -44,6 +45,32 @@ def load_q6_required_env_overlay() -> dict[str, str]:
             raise ValueError("invalid q6_required_env_overlay entry")
         result[key] = value
     return result
+
+
+def validate_probe_source_policy(env: dict[str, str], dry_run: bool) -> dict[str, Any]:
+    if dry_run:
+        return {
+            "summary": "dry-run",
+            "touches_adb": False,
+            "reason": "dry-run does not need probe-source materialization",
+        }
+    if env.get("PDOCKER_Q6K_ALLOW_ARCHIVED_PROBE_SOURCE") == "1":
+        return {
+            "summary": "archived-fixture-allowed",
+            "touches_adb": False,
+            "reason": "explicit archived fixture escape hatch is set",
+        }
+    return {
+        "summary": "blocked",
+        "touches_adb": False,
+        "reason": (
+            "This legacy workflow calls android-llama-gpu-compare.sh directly and cannot prove "
+            "that the Q6 probe bundle was generated from the actual runtime source SPIR-V. Use "
+            "scripts/android-llama-gpu-q6-workgroup-run.sh with --probe-locator or "
+            "--probe-source-spv plus --probe-source-hash, or set "
+            "PDOCKER_Q6K_ALLOW_ARCHIVED_PROBE_SOURCE=1 only for archived fixture/regression runs."
+        ),
+    }
 
 
 def git_capture() -> dict[str, Any]:
@@ -222,6 +249,15 @@ def main(argv: list[str]) -> int:
     manifest["q6_compare_env"] = {
         key: q6_required_env_overlay[key] for key in sorted(q6_required_env_overlay)
     }
+
+    probe_source_policy = validate_probe_source_policy(env, args.dry_run)
+    manifest["probe_source_policy"] = probe_source_policy
+    if probe_source_policy.get("summary") == "blocked":
+        manifest["status"] = "blocked-probe-source-freshness"
+        manifest["next_action"] = str(probe_source_policy.get("reason") or "provide fresh Q6 probe source evidence")
+        write_manifest(manifest_out, manifest)
+        print(json.dumps(manifest, indent=2, sort_keys=True))
+        return 40
 
     if not args.skip_local_checks:
         local_step = run_step(

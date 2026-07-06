@@ -13989,6 +13989,11 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("pdocker.q6k.source-spirv-dump-locator.v1", runner)
         self.assertIn("CURRENT_PROBE_HASH", runner)
         self.assertIn("PDOCKER_Q6K_ALLOW_ARCHIVED_PROBE_SOURCE", runner)
+        self.assertIn("validate_probe_source_freshness_before_adb", runner)
+        self.assertIn("refusing before ADB: actual Q6 probe source freshness is required", runner)
+        self.assertIn("--probe-source-spv requires --probe-source-hash", runner)
+        self.assertIn("--probe-source-hash requires --probe-source-spv", runner)
+        self.assertLess(runner.index("validate_probe_source_freshness_before_adb"), runner.index("android-llama-gpu-readiness.sh"))
         self.assertIn("refusing to refresh the default probe bundle from the archived fixture", runner)
         self.assertIn("tooling_stale", runner)
         self.assertIn("probe env hash mismatch", runner)
@@ -14005,6 +14010,27 @@ class GpuAbiContractTest(unittest.TestCase):
             tmp_path = Path(tmp)
             plan = tmp_path / "plan.json"
             artifact = tmp_path / "artifact.json"
+            blocked = subprocess.run(
+                [
+                    "bash",
+                    str(ROOT / "scripts" / "android-llama-gpu-q6-workgroup-run.sh"),
+                    "--serial",
+                    "adb-not-used",
+                    "--plan-out",
+                    str(plan),
+                    "--out",
+                    str(artifact),
+                ],
+                check=False,
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+            )
+            self.assertEqual(2, blocked.returncode, blocked.stdout + blocked.stderr)
+            self.assertIn("actual Q6 probe source freshness is required", blocked.stderr)
+            self.assertNotIn("android-llama-gpu-readiness.sh", blocked.stdout + blocked.stderr)
+            self.assertFalse(artifact.exists())
+
             result = subprocess.run(
                 [
                     "bash",
@@ -14056,6 +14082,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("pdocker.q6k.source-spirv-dump-locator.v1", runner)
         self.assertIn("CURRENT_PROBE_HASH", runner)
         self.assertIn("PDOCKER_Q6K_ALLOW_ARCHIVED_PROBE_SOURCE", runner)
+        self.assertIn("validate_probe_source_freshness_before_adb", runner)
+        self.assertIn("actual Q6 probe source freshness is required", runner)
         self.assertIn("refusing to refresh the default probe bundle from the archived fixture", runner)
         self.assertIn("tooling_stale", runner)
         self.assertIn("--expected-hash", runner)
@@ -14115,6 +14143,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("q6_u32_to_u8vec4_bitcasts_lowered", plan["required_evidence_fields"])
         self.assertIn("q6_u32_to_u8vec4_bitcasts_lowered_count", plan["required_evidence_fields"])
         self.assertIn("q6_final_store_pre_barrier_inserted", plan["required_evidence_fields"])
+        self.assertIn("spirv_raw_dump_evidence", plan["required_evidence_fields"])
+        self.assertIn("original_phase_pattern", plan["required_evidence_fields"])
+        self.assertIn("effective_phase_pattern", plan["required_evidence_fields"])
+        self.assertIn("dump_dir", plan["required_evidence_fields"])
         self.assertIn("q6_workgroup_specialization_interpretation", plan["required_evidence_fields"])
         self.assertIn("q6_local_size", plan["required_evidence_fields"])
         self.assertIn("q6_num_rows", plan["required_evidence_fields"])
@@ -14141,9 +14173,23 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertFalse(plan["inputs"]["dockerfile_may_change"])
         step_names = [step["name"] for step in plan["runner_step_contract"]]
         self.assertEqual(
-            ["plan", "spv-preflight", "device-readiness", "compare", "artifact-verifier", "plan-verdict"],
+            [
+                "plan",
+                "spv-preflight",
+                "probe-source-freshness",
+                "probe-manifest-verify",
+                "device-readiness",
+                "compare",
+                "artifact-verifier",
+                "plan-verdict",
+            ],
             step_names,
         )
+        self.assertTrue(plan["probe_source_policy"]["require_before_adb"])
+        self.assertIn("--probe-locator", plan["probe_source_policy"]["accepted_fresh_sources"])
+        self.assertEqual("PDOCKER_GPU_SPIRV_DUMP_DIR", plan["raw_spirv_dump_evidence"]["required_env"])
+        self.assertEqual("pdocker-spirv-original-*.spv", plan["raw_spirv_dump_evidence"]["original_phase_pattern"])
+        self.assertEqual("pdocker-spirv-effective-*.spv", plan["raw_spirv_dump_evidence"]["effective_phase_pattern"])
         compare_step = next(step for step in plan["runner_step_contract"] if step["name"] == "compare")
         self.assertTrue(compare_step["touches_adb"])
         self.assertEqual(manifest_overlay, plan["q6_required_env_overlay"])
@@ -14273,6 +14319,14 @@ class GpuAbiContractTest(unittest.TestCase):
                                 "spirv_probe_env_audit": {
                                     "summary": "pass",
                                     "icd": {"matching_armed_count": 1},
+                                },
+                                "spirv_raw_dump_evidence": {
+                                    "schema": "pdocker.llama.gpu.spirv-raw-dump-evidence.v1",
+                                    "summary": "pass",
+                                    "dump_dir": "/workspace/logs",
+                                    "failed_dump_dir": "/workspace/logs",
+                                    "original_phase_pattern": "pdocker-spirv-original-*.spv",
+                                    "effective_phase_pattern": "pdocker-spirv-effective-*.spv",
                                 },
                                 "q6_workgroup_diagnostics": {
                                     "event_count": 1,
@@ -14638,9 +14692,14 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("final_store_matches_expected", compare)
         self.assertIn("executor-probe-debug-seen-icd-arm-log-missing", compare)
         self.assertIn("executor_probe_debug_seen_without_icd_arm", compare)
+        self.assertIn("def build_spirv_raw_dump_evidence", compare)
+        self.assertIn('"spirv_raw_dump_evidence": spirv_raw_dump_evidence', compare)
+        self.assertIn("pdocker-spirv-original-*.spv", compare)
+        self.assertIn("pdocker-spirv-effective-*.spv", compare)
         self.assertIn("no executed lane trace records", compare)
         self.assertIn('phase.get("observed_lane_count") == 0', compare)
         verifier = LLAMA_GPU_ARTIFACT_VERIFIER.read_text()
+        self.assertIn('"spirv_raw_dump_evidence": diagnostics.get("spirv_raw_dump_evidence") or {}', verifier)
         self.assertIn('"missing-evidence",', verifier)
 
     def test_q6_plan_verifier_selects_final_store_boundary_branches(self):

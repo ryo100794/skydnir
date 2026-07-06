@@ -171,6 +171,35 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
   exit 0
 fi
 
+validate_probe_source_freshness_before_adb() {
+  if [[ -n "$PROBE_SOURCE_SPV" && -z "$PROBE_SOURCE_HASH" ]]; then
+    echo "[pdocker q6 workgroup] refusing before ADB: --probe-source-spv requires --probe-source-hash" >&2
+    exit 2
+  fi
+  if [[ -z "$PROBE_SOURCE_SPV" && -n "$PROBE_SOURCE_HASH" ]]; then
+    echo "[pdocker q6 workgroup] refusing before ADB: --probe-source-hash requires --probe-source-spv" >&2
+    exit 2
+  fi
+  if [[ "$ALLOW_ARCHIVED_PROBE_SOURCE" == "1" ]]; then
+    return
+  fi
+  if [[ -n "$PROBE_LOCATOR" ]]; then
+    return
+  fi
+  if [[ -n "$PROBE_SOURCE_SPV" && -n "$PROBE_SOURCE_HASH" ]]; then
+    return
+  fi
+  cat >&2 <<'EOF'
+[pdocker q6 workgroup] refusing before ADB: actual Q6 probe source freshness is required.
+Pass --probe-locator <locator.json>, or pass both --probe-source-spv <actual Q6 source SPIR-V dump>
+and --probe-source-hash <actual source hash>. Set PDOCKER_Q6K_ALLOW_ARCHIVED_PROBE_SOURCE=1 only
+for archived fixture/regression runs.
+EOF
+  exit 2
+}
+
+validate_probe_source_freshness_before_adb
+
 if [[ "$SPV" == "$DEFAULT_SPV" && "$PROBE_ENV" == "$DEFAULT_PROBE_ENV" ]]; then
   SOURCE_SPV="$PROBE_SOURCE_SPV"
   if [[ -z "$SOURCE_SPV" && "$ALLOW_ARCHIVED_PROBE_SOURCE" == "1" ]]; then
