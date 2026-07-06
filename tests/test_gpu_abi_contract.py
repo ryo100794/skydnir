@@ -3267,7 +3267,7 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn("PDOCKER_GPU_GRAPHICS_V67_SCISSOR_STATIC_PRESENT", source)
         self.assertIn("header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V67_ABI_MINOR", executor)
         self.assertIn("sizeof(PdockerGpuVulkanGraphicsV67FrameHeader)", executor)
-        self.assertIn("FrameRange ranges[43]", executor)
+        self.assertIn("FrameRange ranges[", executor)
         self.assertIn("find_vulkan_graphics_v67_viewport_scissor_state", executor)
         self.assertIn(".pViewports = dynamic_viewport ? NULL : static_viewports", executor)
         self.assertIn(".pScissors = dynamic_scissor ? NULL : static_scissors", executor)
@@ -3292,7 +3292,7 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn("PDOCKER_GPU_GRAPHICS_V610_BUFFER_IMAGE_COPY_DIRECTION_IMAGE_TO_BUFFER", source)
         for marker in [
             "sizeof(PdockerGpuVulkanGraphicsV610FrameHeader)",
-            "FrameRange ranges[43]",
+            "FrameRange ranges[",
             "header_v610->v610.buffer_image_copy_count",
             "header_v610->v610.image_copy_count",
             "find_vulkan_graphics_v610_buffer_image_copy",
@@ -3459,7 +3459,7 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn("PDOCKER_GPU_GRAPHICS_V6_COMMAND_CLEAR_COLOR_IMAGE", source)
         for marker in [
             "sizeof(PdockerGpuVulkanGraphicsV612FrameHeader)",
-            "FrameRange ranges[43]",
+            "FrameRange ranges[",
             "header_v612->v612.clear_color_image_count",
             "PdockerGpuVulkanGraphicsV612ClearColorImageEntry *clear_color_images",
             "find_vulkan_graphics_v612_clear_color_image",
@@ -3507,7 +3507,7 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn("stencil", source)
         for marker in [
             "sizeof(PdockerGpuVulkanGraphicsV613FrameHeader)",
-            "FrameRange ranges[43]",
+            "FrameRange ranges[",
             "header_v613->v613.clear_depth_stencil_image_count",
             "PdockerGpuVulkanGraphicsV613ClearDepthStencilImageEntry *clear_depth_stencil_images",
             "find_vulkan_graphics_v613_clear_depth_stencil_image",
@@ -3562,7 +3562,7 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn("PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESOLVE_IMAGE", source)
         for marker in [
             "sizeof(PdockerGpuVulkanGraphicsV614FrameHeader)",
-            "FrameRange ranges[43]",
+            "FrameRange ranges[",
             "header_v614->v614.resolve_image_count",
             "PdockerGpuVulkanGraphicsV614ResolveImageEntry *resolve_images",
             "find_vulkan_graphics_v614_resolve_image",
@@ -3616,7 +3616,7 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn("filter", source)
         for marker in [
             "sizeof(PdockerGpuVulkanGraphicsV615FrameHeader)",
-            "FrameRange ranges[43]",
+            "FrameRange ranges[",
             "header_v615->v615.blit_image_count",
             "PdockerGpuVulkanGraphicsV615BlitImageEntry *blit_images",
             "find_vulkan_graphics_v615_blit_image",
@@ -3852,7 +3852,7 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn("rect_extent_width", source)
         for marker in [
             "sizeof(PdockerGpuVulkanGraphicsV616FrameHeader)",
-            "FrameRange ranges[43]",
+            "FrameRange ranges[",
             "header_v616->v616.clear_attachments_command_count",
             "PdockerGpuVulkanGraphicsV616ClearAttachmentsCommandEntry *clear_attachment_commands",
             "clear_attachments_command_table_hash",
@@ -3896,7 +3896,7 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V611_MAX_UPDATE_BUFFER_BYTES 65536u", source)
         for marker in [
             "sizeof(PdockerGpuVulkanGraphicsV611FrameHeader)",
-            "FrameRange ranges[43]",
+            "FrameRange ranges[",
             "header_v611->v611.fill_buffer_count",
             "header_v611->v611.update_buffer_count",
             "find_vulkan_graphics_v611_fill_buffer",
@@ -3947,7 +3947,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_GPU_VULKAN_GRAPHICS_V61_MAX_BUFFER_BARRIERS",
         ]:
             self.assertIn(marker, header_validator)
-        range_body = header_validator.split("FrameRange ranges[43]", 1)[1].split(
+        range_body = header_validator.split("FrameRange ranges[", 1)[1].split(
             "table_range_valid(header->resource_table_offset", 1
         )[0]
         self.assertLess(
@@ -5014,6 +5014,16 @@ class GpuAbiContractTest(unittest.TestCase):
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V624_PIPELINE_LAYOUT_SET_SCHEMA_HASH",
             ),
             (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V625_HEADER_EXTENSION_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V625_HEADER_EXTENSION_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V625_HEADER_EXTENSION_SCHEMA_HASH",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V625_DESCRIPTOR_BIND_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V625_DESCRIPTOR_BIND_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V625_DESCRIPTOR_BIND_SCHEMA_HASH",
+            ),
+            (
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELDS",
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELD_COUNT",
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_SCHEMA_HASH",
@@ -5109,7 +5119,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "pipeline_layout_count > PDOCKER_GPU_VULKAN_GRAPHICS_V624_MAX_PIPELINE_LAYOUT_SETS",
             "descriptor_set_layout_schema_hash != PDOCKER_GPU_VULKAN_GRAPHICS_V624_DESCRIPTOR_SET_LAYOUT_SCHEMA_HASH",
             "pipeline_layout_schema_hash != PDOCKER_GPU_VULKAN_GRAPHICS_V624_PIPELINE_LAYOUT_SET_SCHEMA_HASH",
-            "FrameRange ranges[50]",
+            "FrameRange ranges[",
             "vulkan_graphics_v6_table_range_count(header->abi_minor)",
             "case PDOCKER_GPU_VULKAN_GRAPHICS_V624_ABI_MINOR: return 50u",
             "frame_ranges_do_not_overlap(ranges, range_count)",
@@ -5138,7 +5148,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "layout->storage_binding_present[binding->binding] = true",
             "collect_graphics_v624_layout_metadata",
             "PdockerGpuVulkanGraphicsV624FrameHeader *frame_header_v624",
-            "sizeof(PdockerGpuVulkanGraphicsV624FrameHeader)",
+            "sizeof(*frame_header_v624)",
             "PdockerGpuVulkanGraphicsV624DescriptorSetLayoutEntry descriptor_set_layouts",
             "PdockerGpuVulkanGraphicsV624PipelineLayoutSetEntry pipeline_layout_sets",
             "need_v624_layout_metadata",
@@ -5159,6 +5169,105 @@ class GpuAbiContractTest(unittest.TestCase):
             "find_graphics_v624_pipeline_layout_set_entry",
         ]:
             self.assertIn(marker, icd)
+
+    def test_vulkan_graphics_v625_descriptor_bind_metadata_abi_is_append_only(self):
+        expected_extension_fields = [
+            ("descriptor_bind_count", "u32"),
+            ("descriptor_bind_entry_size", "u32"),
+            ("descriptor_bind_table_offset", "u64"),
+            ("descriptor_bind_table_size", "u64"),
+            ("descriptor_bind_schema_hash", "u64"),
+            ("descriptor_bind_table_hash", "u64"),
+            ("extension_hash", "u64"),
+        ]
+        expected_bind_fields = [
+            ("command_index", "u32"),
+            ("first_set", "u32"),
+            ("descriptor_set_count", "u32"),
+            ("first_dynamic_offset", "u32"),
+            ("dynamic_offset_count", "u32"),
+            ("reserved0", "u32"),
+            ("pipeline_layout_id", "u64"),
+        ]
+        for header_path in [APP_HEADER, CONTAINER_HEADER]:
+            source = header_path.read_text()
+            with self.subTest(header=str(header_path)):
+                for header_marker in [
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V625_ABI_MINOR 25u",
+                    "PdockerGpuVulkanGraphicsV625HeaderExtension",
+                    "PdockerGpuVulkanGraphicsV625FrameHeader",
+                    "PdockerGpuVulkanGraphicsV625DescriptorBindEntry",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V625_MAX_DESCRIPTOR_BINDS",
+                    "descriptor_bind_schema_hash",
+                ]:
+                    self.assertIn(header_marker, source)
+                extension_fields, extension_count, declared_extension_hash, computed_extension_hash = vulkan_dispatch_v5_schema(
+                    header_path,
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V625_HEADER_EXTENSION_FIELDS",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V625_HEADER_EXTENSION_FIELD_COUNT",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V625_HEADER_EXTENSION_SCHEMA_HASH",
+                )
+                bind_fields, bind_count, declared_bind_hash, computed_bind_hash = vulkan_dispatch_v5_schema(
+                    header_path,
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V625_DESCRIPTOR_BIND_FIELDS",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V625_DESCRIPTOR_BIND_FIELD_COUNT",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V625_DESCRIPTOR_BIND_SCHEMA_HASH",
+                )
+                self.assertEqual(expected_extension_fields, extension_fields)
+                self.assertEqual(expected_bind_fields, bind_fields)
+                self.assertEqual(7, extension_count)
+                self.assertEqual(7, bind_count)
+                self.assertEqual(declared_extension_hash, computed_extension_hash)
+                self.assertEqual(declared_bind_hash, computed_bind_hash)
+                self.assertEqual(
+                    [name for name, _ in expected_extension_fields],
+                    c_struct_field_names(header_path, "PdockerGpuVulkanGraphicsV625HeaderExtension"),
+                )
+                self.assertEqual(
+                    [name for name, _ in expected_bind_fields],
+                    c_struct_field_names(header_path, "PdockerGpuVulkanGraphicsV625DescriptorBindEntry"),
+                )
+                self.assertEqual(
+                    c_struct_field_names(header_path, "PdockerGpuVulkanGraphicsV624FrameHeader") + ["v625"],
+                    c_struct_field_names(header_path, "PdockerGpuVulkanGraphicsV625FrameHeader"),
+                )
+
+        executor = GPU_EXECUTOR.read_text()
+        for executor_marker in [
+            "case PDOCKER_GPU_VULKAN_GRAPHICS_V625_ABI_MINOR: return 51u",
+            "sizeof(PdockerGpuVulkanGraphicsV625FrameHeader)",
+            "const PdockerGpuVulkanGraphicsV625FrameHeader *header_v625",
+            "view->header_v625",
+            "view->is_v625",
+            "view->descriptor_binds",
+            "header_v625->v625.descriptor_bind_count",
+            "descriptor_bind_schema_hash != PDOCKER_GPU_VULKAN_GRAPHICS_V625_DESCRIPTOR_BIND_SCHEMA_HASH",
+            "descriptor_bind_table_hash",
+            "find_vulkan_graphics_v625_descriptor_bind",
+            "bind_meta ? bind_meta->descriptor_set_count",
+            "command->descriptor_count == 0",
+            "pool_size_count == 0",
+        ]:
+            self.assertIn(executor_marker, executor)
+
+        icd = VULKAN_ICD.read_text()
+        for icd_marker in [
+            "PdockerGpuVulkanGraphicsV625DescriptorBindEntry descriptor_binds",
+            "PdockerGpuVulkanGraphicsV625FrameHeader *frame_header_v625",
+            "need_v625_descriptor_bind",
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V625_ABI_MINOR",
+            "frame_header_v625->v625.descriptor_bind_count",
+            "frame_header_v625->v625.descriptor_bind_entry_size",
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V625_DESCRIPTOR_BIND_SCHEMA_HASH",
+            "APPEND_GRAPHICS_TABLE(descriptor_binds, descriptor_bind_count",
+            "frame_header_v625->v625.descriptor_bind_table_hash",
+            "VULKAN_GRAPHICS_V6.25",
+            "bind_snapshot->pipeline_layout = pipeline_layout",
+            "collect_graphics_v624_pipeline_layout_metadata",
+            "bind->descriptor_set_count = snapshot->descriptor_set_count",
+            "bind->pipeline_layout_id = record->layout_id",
+        ]:
+            self.assertIn(icd_marker, icd)
 
     def test_vulkan_graphics_v6_field_macros_match_packed_structs(self):
         schemas = [
@@ -5341,6 +5450,16 @@ class GpuAbiContractTest(unittest.TestCase):
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V624_PIPELINE_LAYOUT_SET_FIELDS",
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V624_PIPELINE_LAYOUT_SET_FIELD_COUNT",
                 "PdockerGpuVulkanGraphicsV624PipelineLayoutSetEntry",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V625_HEADER_EXTENSION_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V625_HEADER_EXTENSION_FIELD_COUNT",
+                "PdockerGpuVulkanGraphicsV625HeaderExtension",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V625_DESCRIPTOR_BIND_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V625_DESCRIPTOR_BIND_FIELD_COUNT",
+                "PdockerGpuVulkanGraphicsV625DescriptorBindEntry",
             ),
             (
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELDS",
@@ -8324,7 +8443,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "header_v617->v617.query_command_count",
             "PdockerGpuVulkanGraphicsV617QueryCommandEntry",
             "PdockerGpuVulkanGraphicsV617QueryResultEntry",
-            "FrameRange ranges[43]",
+            "FrameRange ranges[",
             "query_command_schema_hash",
             "query_result_schema_hash",
             "view->query_commands",
@@ -8686,7 +8805,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "sizeof(PdockerGpuVulkanGraphicsV622FrameHeader)",
             "const int is_v622",
             "header_v622->v622.multisample_state_count",
-            "FrameRange ranges[50]",
+            "FrameRange ranges[",
             "case PDOCKER_GPU_VULKAN_GRAPHICS_V622_ABI_MINOR: return 47u",
             "view->header_v622",
             "view->is_v622",
@@ -8794,7 +8913,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "sizeof(PdockerGpuVulkanGraphicsV623FrameHeader)",
             "const int is_v623",
             "header_v623->v623.tessellation_state_count",
-            "FrameRange ranges[50]",
+            "FrameRange ranges[",
             "case PDOCKER_GPU_VULKAN_GRAPHICS_V623_ABI_MINOR: return 48u",
             "view->header_v623",
             "view->is_v623",
@@ -9003,7 +9122,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "submit_sync_entry_size != sizeof(PdockerGpuVulkanGraphicsV619SubmitSyncEntry)",
             "submit_sync_schema_hash != PDOCKER_GPU_VULKAN_GRAPHICS_V619_SUBMIT_SYNC_SCHEMA_HASH",
             "PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS",
-            "FrameRange ranges[43]",
+            "FrameRange ranges[",
             "view->submit_syncs",
             'write_vulkan_graphics_v6_table_desc(out, "submit_syncs"',
             "submit_sync_table_hash",
