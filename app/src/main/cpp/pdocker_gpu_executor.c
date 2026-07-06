@@ -28188,6 +28188,10 @@ static int materialize_vulkan_graphics_v6_descriptors(
         uint32_t descriptor_pool_sampled_image_count = 0;
         uint32_t descriptor_pool_storage_image_count = 0;
         uint32_t descriptor_pool_input_attachment_count = 0;
+        uint8_t descriptor_slot_seen[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS]
+                                    [PDOCKER_GPU_MAX_VULKAN_BINDINGS]
+                                    [PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+        memset(descriptor_slot_seen, 0, sizeof(descriptor_slot_seen));
         for (uint32_t d = 0; d < command->descriptor_count; ++d) {
             const PdockerGpuVulkanDispatchV5DescriptorObjectEntry *descriptor =
                 &view->descriptors[command->first_descriptor + d];
@@ -28200,6 +28204,12 @@ static int materialize_vulkan_graphics_v6_descriptors(
                 descriptor->array_element >=
                     pipeline->set_binding_descriptor_counts[descriptor->descriptor_set][descriptor->binding]) {
                 return -EPROTO;
+            }
+            if (bind_meta) {
+                if (descriptor_slot_seen[descriptor->descriptor_set][descriptor->binding][descriptor->array_element]) {
+                    return -EPROTO;
+                }
+                descriptor_slot_seen[descriptor->descriptor_set][descriptor->binding][descriptor->array_element] = 1u;
             }
             VkDescriptorType descriptor_type = VK_DESCRIPTOR_TYPE_MAX_ENUM;
             int rc = vulkan_dispatch_descriptor_type_from_api(
@@ -28221,6 +28231,17 @@ static int materialize_vulkan_graphics_v6_descriptors(
                 !vulkan_image_descriptor_layout_valid(
                     descriptor_type, (VkImageLayout)descriptor->image_layout)) {
                 return -EOPNOTSUPP;
+            }
+        }
+        if (bind_meta) {
+            for (uint32_t set = bind_first_set; set < bind_first_set + declared_bind_set_count; ++set) {
+                for (uint32_t binding = 0; binding < pipeline->set_binding_counts[set]; ++binding) {
+                    uint32_t expected_count = pipeline->set_binding_descriptor_counts[set][binding];
+                    if (expected_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS) return -EPROTO;
+                    for (uint32_t array_element = 0; array_element < expected_count; ++array_element) {
+                        if (!descriptor_slot_seen[set][binding][array_element]) return -EPROTO;
+                    }
+                }
             }
         }
         VulkanGraphicsReplayDescriptorBind *bind = &out->binds[out->bind_count++];

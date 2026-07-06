@@ -19399,8 +19399,21 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
             if (firstSet >= PDOCKER_VK_MAX_DESCRIPTOR_SETS ||
                 set_i >= PDOCKER_VK_MAX_DESCRIPTOR_SETS - firstSet) break;
             PdockerVkDescriptorSet *set = pdocker_vk_descriptor_set_from_handle(pDescriptorSets[set_i]);
-            if (!set) continue;
             uint32_t target_set = firstSet + set_i;
+            if (!set) {
+                cmd->unsupported_descriptor_set_layout = true;
+                if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
+                    fprintf(stderr,
+                            "pdocker-vulkan-icd: descriptor bind uses untracked descriptor set 0x%llx at set=%u\n",
+#if VK_USE_64_BIT_PTR_DEFINES
+                            (unsigned long long)(uintptr_t)pDescriptorSets[set_i],
+#else
+                            (unsigned long long)pDescriptorSets[set_i],
+#endif
+                            target_set);
+                }
+                return;
+            }
             if (pipeline_layout &&
                 target_set < pipeline_layout->set_layout_count &&
                 !descriptor_set_layout_compatible(pipeline_layout->set_layouts[target_set],

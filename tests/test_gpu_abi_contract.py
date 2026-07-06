@@ -5269,6 +5269,72 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(icd_marker, icd)
 
+    def test_vulkan_graphics_v625_descriptor_bind_fails_closed_on_untracked_sets(self):
+        icd = VULKAN_ICD.read_text()
+        bind_body = c_function_body(icd, "vkCmdBindDescriptorSets")
+        untracked_set_body = bind_body.split(
+            "PdockerVkDescriptorSet *set = pdocker_vk_descriptor_set_from_handle(pDescriptorSets[set_i]);", 1
+        )[1].split(
+            "if (pipeline_layout &&", 1
+        )[0]
+        self.assertNotIn("if (!set) continue;", bind_body)
+        self.assertIn("uint32_t target_set = firstSet + set_i;", untracked_set_body)
+        self.assertIn("if (!set)", untracked_set_body)
+        self.assertIn("cmd->unsupported_descriptor_set_layout = true;", untracked_set_body)
+        self.assertIn("descriptor bind uses untracked descriptor set", untracked_set_body)
+        self.assertIn("return;", untracked_set_body)
+        self.assertLess(
+            untracked_set_body.index("if (!set)"),
+            untracked_set_body.index("return;"),
+        )
+
+    def test_vulkan_graphics_v625_descriptor_bind_requires_exact_layout_coverage(self):
+        executor = GPU_EXECUTOR.read_text()
+        descriptors_body = c_function_body(executor, "materialize_vulkan_graphics_v6_descriptors")
+        v625_prealloc_body = descriptors_body.split(
+            "if (view->is_v625 && !bind_meta) return -EPROTO;", 1
+        )[1].split(
+            "VkDescriptorPoolCreateInfo dpci", 1
+        )[0]
+        descriptor_validation_body = v625_prealloc_body.split(
+            "for (uint32_t d = 0; d < command->descriptor_count; ++d)", 1
+        )[1].split(
+            "VulkanGraphicsReplayDescriptorBind *bind = &out->binds", 1
+        )[0]
+        layout_coverage_body = v625_prealloc_body.split(
+            "if (bind_meta) {", 2
+        )[2].split(
+            "VulkanGraphicsReplayDescriptorBind *bind = &out->binds", 1
+        )[0]
+
+        self.assertIn(
+            "uint8_t descriptor_slot_seen[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS]",
+            v625_prealloc_body,
+        )
+        self.assertIn("memset(descriptor_slot_seen, 0, sizeof(descriptor_slot_seen));", v625_prealloc_body)
+        self.assertIn("descriptor->descriptor_set < bind_first_set", descriptor_validation_body)
+        self.assertIn("descriptor->descriptor_set >= bind_first_set + declared_bind_set_count", descriptor_validation_body)
+        self.assertIn(
+            "descriptor->array_element >=\n                    pipeline->set_binding_descriptor_counts[descriptor->descriptor_set][descriptor->binding]",
+            descriptor_validation_body,
+        )
+        self.assertIn(
+            "if (descriptor_slot_seen[descriptor->descriptor_set][descriptor->binding][descriptor->array_element])",
+            descriptor_validation_body,
+        )
+        self.assertIn(
+            "descriptor_slot_seen[descriptor->descriptor_set][descriptor->binding][descriptor->array_element] = 1u;",
+            descriptor_validation_body,
+        )
+        self.assertIn("return -EPROTO;", descriptor_validation_body)
+
+        self.assertIn("for (uint32_t set = bind_first_set; set < bind_first_set + declared_bind_set_count; ++set)", layout_coverage_body)
+        self.assertIn("for (uint32_t binding = 0; binding < pipeline->set_binding_counts[set]; ++binding)", layout_coverage_body)
+        self.assertIn("uint32_t expected_count = pipeline->set_binding_descriptor_counts[set][binding];", layout_coverage_body)
+        self.assertIn("if (expected_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS) return -EPROTO;", layout_coverage_body)
+        self.assertIn("for (uint32_t array_element = 0; array_element < expected_count; ++array_element)", layout_coverage_body)
+        self.assertIn("if (!descriptor_slot_seen[set][binding][array_element]) return -EPROTO;", layout_coverage_body)
+
     def test_vulkan_graphics_v6_field_macros_match_packed_structs(self):
         schemas = [
             (
