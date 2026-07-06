@@ -11177,6 +11177,71 @@ class GpuAbiContractTest(unittest.TestCase):
             mixed_body.index("send_vulkan_submit_sync_only_frame(\n                    deferred_completion_sync_entries, deferred_completion_sync_count)"),
         )
 
+    def test_vulkan_graphics_v6_commits_icd_image_layouts_only_after_successful_replay(self):
+        icd = VULKAN_ICD.read_text()
+
+        helper = c_function_body(icd, "commit_graphics_v6_image_layout_ops_for_range")
+        self.assertIn("cmd->graphics_command_ops[record_index]", helper)
+        self.assertIn("graphics_record_should_serialize_for_range(", helper)
+        self.assertIn("graphics_record_commits_image_layouts_after_replay(record)", helper)
+        self.assertIn("record->image_barrier_op_first + barrier_index", helper)
+        self.assertIn("op_index < cmd->image_barrier_op_count", helper)
+        self.assertIn("execute_recorded_image_barrier_op(&cmd->image_barrier_ops[op_index])", helper)
+        self.assertNotIn("send_recorded_vulkan_graphics_v6_1_frame_range", helper)
+
+        classifier = c_function_body(icd, "graphics_record_commits_image_layouts_after_replay")
+        for marker in [
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT",
+        ]:
+            self.assertIn(marker, classifier)
+
+        mixed = c_function_body(icd, "execute_graphics_mixed_gpu_sequence")
+        first_segment = mixed.split(
+            "int graphics_rc = send_graphics_sequence_segment(\n"
+            "                cmd, segment_begin, op_index + 1u,",
+            1,
+        )[1].split("VkResult dispatch_rc = execute_recorded_dispatch_command_op", 1)[0]
+        self.assertIn("if (graphics_rc != 0) return graphics_rc;", first_segment)
+        self.assertIn(
+            "commit_graphics_v6_image_layout_ops_for_range(\n"
+            "                cmd, segment_begin, op_index + 1u, segment_index != 1u);",
+            first_segment,
+        )
+        self.assertLess(
+            first_segment.index("if (graphics_rc != 0) return graphics_rc;"),
+            first_segment.index("commit_graphics_v6_image_layout_ops_for_range("),
+        )
+
+        tail_segment = mixed.rsplit(
+            "int graphics_rc = send_graphics_sequence_segment(\n"
+            "            cmd, segment_begin, sequence_end,",
+            1,
+        )[1]
+        self.assertIn("if (graphics_rc != 0) return graphics_rc;", tail_segment)
+        self.assertIn(
+            "commit_graphics_v6_image_layout_ops_for_range(\n"
+            "            cmd, segment_begin, sequence_end, segment_index != 1u);",
+            tail_segment,
+        )
+        self.assertLess(
+            tail_segment.index("if (graphics_rc != 0) return graphics_rc;"),
+            tail_segment.index("commit_graphics_v6_image_layout_ops_for_range("),
+        )
+
+        send_segment = c_function_body(icd, "send_graphics_sequence_segment")
+        self.assertNotIn("execute_recorded_image_barrier_op", send_segment)
+        self.assertNotIn("commit_graphics_v6_image_layout_ops_for_range", send_segment)
+
+        submit_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit", 1)[1].split(
+            "VKAPI_ATTR VkResult VKAPI_CALL vkWaitForFences", 1
+        )[0]
+        validation_producer = submit_body.split("if (cmd->graphics_unsupported)", 1)[1].split(
+            'trace_icd_runtime_failure("graphics-command-unimplemented"', 1
+        )[0]
+        self.assertNotIn("commit_graphics_v6_image_layout_ops_for_range", validation_producer)
+
     def test_vulkan_graphics_dispatch_inside_frame_has_render_scope_diagnostics(self):
         icd = VULKAN_ICD.read_text()
         classifier = icd.split("static bool graphics_sequence_inside_active_rendering", 1)[1].split(

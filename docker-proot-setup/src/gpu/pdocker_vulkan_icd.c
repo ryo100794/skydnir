@@ -21983,6 +21983,41 @@ static VkResult execute_recorded_host_transfer_or_layout_op(
     return VK_SUCCESS;
 }
 
+static bool graphics_record_commits_image_layouts_after_replay(
+        const PdockerVkGraphicsCommandRecord *record) {
+    if (!record || record->image_barrier_op_count == 0) return false;
+    switch (record->command_type) {
+        case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER:
+        case PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT:
+        case PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static void commit_graphics_v6_image_layout_ops_for_range(
+        PdockerVkCommandBuffer *cmd,
+        uint32_t sequence_begin,
+        uint32_t sequence_end,
+        bool include_state_preamble) {
+    if (!cmd || sequence_begin >= sequence_end) return;
+    for (uint32_t record_index = 0; record_index < cmd->graphics_command_op_count; ++record_index) {
+        const PdockerVkGraphicsCommandRecord *record = &cmd->graphics_command_ops[record_index];
+        if (!graphics_record_should_serialize_for_range(
+                record, sequence_begin, sequence_end, include_state_preamble)) {
+            continue;
+        }
+        if (!graphics_record_commits_image_layouts_after_replay(record)) continue;
+        for (uint32_t barrier_index = 0; barrier_index < record->image_barrier_op_count; ++barrier_index) {
+            uint32_t op_index = record->image_barrier_op_first + barrier_index;
+            if (op_index < cmd->image_barrier_op_count) {
+                execute_recorded_image_barrier_op(&cmd->image_barrier_ops[op_index]);
+            }
+        }
+    }
+}
+
 static bool command_op_is_graphics_interleavable_transfer_op(PdockerVkCommandOpType type) {
     switch (type) {
         case PDOCKER_VK_COMMAND_COPY:
@@ -22367,6 +22402,8 @@ static int execute_graphics_mixed_gpu_sequence(
                 submit_sync_entries, submit_sync_count,
                 segment_index == 1u, segment_index == segment_total);
             if (graphics_rc != 0) return graphics_rc;
+            commit_graphics_v6_image_layout_ops_for_range(
+                cmd, segment_begin, op_index + 1u, segment_index != 1u);
         }
         VkResult dispatch_rc = execute_recorded_dispatch_command_op(cmd, op, NULL);
         if (dispatch_rc != VK_SUCCESS) return -EOPNOTSUPP;
@@ -22380,6 +22417,8 @@ static int execute_graphics_mixed_gpu_sequence(
             submit_sync_entries, submit_sync_count,
             segment_index == 1u, segment_index == segment_total);
         if (graphics_rc != 0) return graphics_rc;
+        commit_graphics_v6_image_layout_ops_for_range(
+            cmd, segment_begin, sequence_end, segment_index != 1u);
     }
     return segment_index == segment_total ? 0 : -EPROTO;
 }
