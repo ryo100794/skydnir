@@ -5117,9 +5117,16 @@ class GpuAbiContractTest(unittest.TestCase):
             "pipeline_layout_table_hash",
             "descriptor_set_layouts",
             "pipeline_layout_sets",
+            "entry->binding_flags != 0",
             "entry->immutable_sampler_count != 0",
+            "referenced_by_pipeline_layout",
             "entry->layout_id == other->layout_id && entry->binding == other->binding",
             "entry->pipeline_layout_id == other->pipeline_layout_id &&",
+            "collect_graphics_descriptor_layout_from_v624_metadata",
+            "dst->descriptor_set_layout_ids",
+            "dst->set_binding_descriptor_counts",
+            "view->is_v624 ? 0u : pipeline_descriptor_stage_flags",
+            "pipeline->set_binding_descriptor_counts",
         ]:
             self.assertIn(marker, executor)
 
@@ -8799,7 +8806,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "VK_PRIMITIVE_TOPOLOGY_PATCH_LIST",
             "VkPipelineTessellationStateCreateInfo tsci",
             ".pTessellationState = tessellation_state ? &tsci : NULL",
-            ".stageFlags = pipeline_descriptor_stage_flags",
+            "view->is_v624 ? 0u : pipeline_descriptor_stage_flags",
             "vulkan_graphics_v6_dynamic_primitive_topology_value",
             "tessellation draw requires patch-list primitive topology",
             "tessellation indexed draw requires patch-list primitive topology",
