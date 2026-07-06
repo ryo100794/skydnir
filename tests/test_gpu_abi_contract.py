@@ -8977,6 +8977,43 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(marker, executor)
 
 
+    def test_vulkan_graphics_msaa_source_store_is_fail_closed_until_msaa_readback_abi(self):
+        executor = GPU_EXECUTOR.read_text()
+        preflight = executor.split("static int preflight_vulkan_graphics_v6_replay_supported", 1)[1].split(
+            "static int vulkan_graphics_attachment_layout_supported", 1
+        )[0]
+        materialize = executor.split("static int materialize_vulkan_graphics_v6_attachments", 1)[1].split(
+            "static int record_vulkan_graphics_v6_attachment_writeback_commands", 1
+        )[0]
+
+        self.assertIn("multisample attachment load replay is not implemented", preflight)
+        self.assertIn("unresolved multisample graphics replay is not implemented", preflight)
+        self.assertIn("multisample source attachment STORE readback is not implemented", preflight)
+        self.assertLess(
+            preflight.index("multisample source attachment STORE readback is not implemented"),
+            preflight.index("resolve attachment replay requires V6.4 resolve metadata"),
+        )
+        self.assertIn(
+            "attachment->resolve_image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE &&\n"
+            "                            effective_store_op == VK_ATTACHMENT_STORE_OP_STORE",
+            preflight,
+        )
+        self.assertIn(
+            "if (effective_store_op == VK_ATTACHMENT_STORE_OP_STORE) {\n"
+            "                    return -EOPNOTSUPP;\n"
+            "                }\n"
+            "                writeback_image = resolve_image;",
+            materialize,
+        )
+        self.assertIn(
+            "if (effective_store_op == VK_ATTACHMENT_STORE_OP_STORE ||\n"
+            "                attachment->resolve_image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE) {\n"
+            "                writeback_image->writeback_needed = 1;",
+            materialize,
+        )
+        self.assertIn("if (image->samples != VK_SAMPLE_COUNT_1_BIT) return -EOPNOTSUPP;", executor)
+
+
     def test_vulkan_graphics_v623_tessellation_state_abi_is_append_only(self):
         expected_extension_fields = [
             ("tessellation_state_count", "u32"),
@@ -14165,6 +14202,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("q6_final_store_boundary.summary", json.dumps(plan["fail_branches"]))
         self.assertIn("q6_stage_divergence.summary", json.dumps(plan["fail_branches"]))
         self.assertIn("Q6 stage-divergence evidence gate", json.dumps(plan["fail_branches"]))
+        self.assertIn("spirv_raw_dump_evidence.summary", json.dumps(plan["fail_branches"]))
+        self.assertIn("Q6 raw SPIR-V dump evidence gate", json.dumps(plan["fail_branches"]))
         self.assertIn("q6_compat_rewrites.summary", json.dumps(plan["fail_branches"]))
         self.assertIn("Q6 structural compat rewrite gate", json.dumps(plan["fail_branches"]))
         self.assertIn("q6_debug_binding_alias_safety.summary", json.dumps(plan["fail_branches"]))
@@ -14755,6 +14794,19 @@ class GpuAbiContractTest(unittest.TestCase):
             "q6_stage_divergence.summary == missing-evidence",
             stage_missing_with_materialize_noise["condition"],
         )
+
+        raw_dump_missing = verifier.select_branch(
+            {
+                "classification": "llama-completion-wrong-output",
+            },
+            {"gpu": {"diagnostics": {"spirv_raw_dump_evidence": {"summary": "missing-evidence"}}}},
+            plan,
+        )
+        self.assertEqual(
+            "spirv_raw_dump_evidence.summary == missing-evidence",
+            raw_dump_missing["condition"],
+        )
+        self.assertEqual("Q6 raw SPIR-V dump evidence gate", raw_dump_missing["owner"])
 
         writeback = verifier.select_branch(
             {

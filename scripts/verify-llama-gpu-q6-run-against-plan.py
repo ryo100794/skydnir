@@ -172,6 +172,13 @@ def artifact_spirv_probe_env_audit(artifact: dict[str, Any]) -> dict[str, Any]:
     return nested_dict(artifact, "spirv_probe_env_audit")
 
 
+def artifact_spirv_raw_dump_evidence(artifact: dict[str, Any]) -> dict[str, Any]:
+    evidence = nested_dict(artifact, "gpu", "diagnostics", "spirv_raw_dump_evidence")
+    if evidence:
+        return evidence
+    return nested_dict(artifact, "spirv_raw_dump_evidence")
+
+
 def required_env_mismatches(data: dict[str, Any], plan: dict[str, Any]) -> list[dict[str, Any]]:
     required = plan.get("q6_required_env_overlay")
     if not isinstance(required, dict):
@@ -217,6 +224,7 @@ def select_branch(report: dict[str, Any], artifact: dict[str, Any], plan: dict[s
     if not isinstance(q6, dict):
         q6 = {}
     probe_audit = artifact_spirv_probe_env_audit(artifact)
+    raw_dump_evidence = artifact_spirv_raw_dump_evidence(artifact)
     materialize_report = None
     for value in walk_values(artifact):
         if isinstance(value, dict) and isinstance(value.get("specialization_materialize_report"), dict):
@@ -239,6 +247,12 @@ def select_branch(report: dict[str, Any], artifact: dict[str, Any], plan: dict[s
             "condition": "q6_stage_divergence.summary == missing-evidence",
             "action": "fix manifest-backed stage trace/probe evidence before claiming native Q6 final-store arithmetic",
             "owner": "Q6 stage-divergence evidence gate",
+        }
+    if raw_dump_evidence.get("summary") == "missing-evidence":
+        return {
+            "condition": "spirv_raw_dump_evidence.summary == missing-evidence",
+            "action": "fix PDOCKER_GPU_SPIRV_DUMP_DIR/PDOCKER_GPU_FAILED_SPIRV_DIR propagation before another device run",
+            "owner": "Q6 raw SPIR-V dump evidence gate",
         }
     if reason == "unsupported-spec-expression":
         return {

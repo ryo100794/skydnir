@@ -24985,6 +24985,10 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                         attachment->attachment_role == PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_STENCIL
                             ? attachment->stencil_load_op
                             : attachment->load_op;
+                    const uint32_t effective_store_op =
+                        attachment->attachment_role == PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_STENCIL
+                            ? attachment->stencil_store_op
+                            : attachment->store_op;
                     if (attachment->samples != VK_SAMPLE_COUNT_1_BIT) {
                         if (attachment->attachment_role != PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR) {
                             reason = "multisample replay is only enabled for color attachments";
@@ -24993,6 +24997,12 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                         }
                         if (effective_load_op == VK_ATTACHMENT_LOAD_OP_LOAD) {
                             reason = "multisample attachment load replay is not implemented";
+                            if (reason_out) *reason_out = reason;
+                            return -EOPNOTSUPP;
+                        }
+                        if (attachment->resolve_image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE &&
+                            effective_store_op == VK_ATTACHMENT_STORE_OP_STORE) {
+                            reason = "multisample source attachment STORE readback is not implemented";
                             if (reason_out) *reason_out = reason;
                             return -EOPNOTSUPP;
                         }
@@ -27230,6 +27240,9 @@ static int materialize_vulkan_graphics_v6_attachments(
                     replay_view->range.aspectMask != resolve_view->range.aspectMask ||
                     !vulkan_graphics_attachment_layout_supported(attachment->attachment_role,
                                                                  resolve_meta->resolve_layout)) {
+                    return -EOPNOTSUPP;
+                }
+                if (effective_store_op == VK_ATTACHMENT_STORE_OP_STORE) {
                     return -EOPNOTSUPP;
                 }
                 writeback_image = resolve_image;

@@ -4,12 +4,13 @@
 The purpose of this script is to avoid ad-hoc cut-and-try device operation.  It
 always runs the same layers in order:
 
-1. local contract checks that must pass before touching the device;
+1. manifest and Q6 environment checks;
 2. probe-source freshness policy checks that must pass before touching ADB;
-3. low-impact device readiness;
-4. guarded llama GPU compare only when readiness is green;
-5. artifact classification with the Q6_K workgroup acceptance gate;
-6. one workflow manifest that records commands, exit codes, and artifact paths.
+3. optional local contract checks;
+4. low-impact device readiness;
+5. guarded llama GPU compare only when readiness is green;
+6. artifact classification with the Q6_K workgroup acceptance gate;
+7. one workflow manifest that records commands, exit codes, and artifact paths.
 
 It does not modify llama.cpp, the llama Dockerfile, the model, or prompt probes.
 """

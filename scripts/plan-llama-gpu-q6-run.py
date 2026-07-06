@@ -246,6 +246,11 @@ FAIL_BRANCHES = [
         "owner": "Q6 stage-divergence evidence gate",
     },
     {
+        "condition": "spirv_raw_dump_evidence.summary == missing-evidence",
+        "action": "fix PDOCKER_GPU_SPIRV_DUMP_DIR/PDOCKER_GPU_FAILED_SPIRV_DIR propagation before another device run",
+        "owner": "Q6 raw SPIR-V dump evidence gate",
+    },
+    {
         "condition": "q6_final_store_boundary.summary == native-final-store-mismatch",
         "action": "inspect native Q6 final-store arithmetic/dataflow with descriptor coordinates preserved; do not blame executor writeback",
         "owner": "native Q6 final-store path",
