@@ -13098,6 +13098,27 @@ static bool pdocker_vk_queue_request_valid(
            flags == 0;
 }
 
+static bool pdocker_vk_sharing_mode_is_single_advertised_family(
+        VkSharingMode sharingMode,
+        uint32_t queueFamilyIndexCount,
+        const uint32_t *pQueueFamilyIndices) {
+    if (sharingMode == VK_SHARING_MODE_EXCLUSIVE) return true;
+    if (sharingMode != VK_SHARING_MODE_CONCURRENT) return false;
+    if (queueFamilyIndexCount == 0 || !pQueueFamilyIndices) return false;
+    for (uint32_t i = 0; i < queueFamilyIndexCount; ++i) {
+        if (pQueueFamilyIndices[i] >= PDOCKER_VK_ADVERTISED_QUEUE_FAMILY_COUNT) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static VkSharingMode pdocker_vk_effective_single_queue_sharing_mode(VkSharingMode sharingMode) {
+    return sharingMode == VK_SHARING_MODE_CONCURRENT
+        ? VK_SHARING_MODE_EXCLUSIVE
+        : sharingMode;
+}
+
 VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceQueueFamilyProperties(
         VkPhysicalDevice physicalDevice,
         uint32_t *pQueueFamilyPropertyCount,
@@ -13336,6 +13357,14 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateBuffer(
     VkResult pnext_rc = validate_buffer_create_pnext(pCreateInfo);
     if (pnext_rc != VK_SUCCESS) return pnext_rc;
     if (pCreateInfo->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;
+    if (!pdocker_vk_sharing_mode_is_single_advertised_family(
+            pCreateInfo->sharingMode,
+            pCreateInfo->queueFamilyIndexCount,
+            pCreateInfo->pQueueFamilyIndices)) {
+        trace_icd_runtime_failure("buffer-sharing-mode-unsupported",
+                                  VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
     if (pCreateInfo->size == 0 || pCreateInfo->size > pdocker_vulkan_max_buffer_size()) {
         if (trace_allocations()) {
             fprintf(stderr,
@@ -13538,10 +13567,13 @@ static VkResult validate_image_create_pnext_for_transport(const VkImageCreateInf
 
 static VkResult validate_image_create_info_for_transport(const VkImageCreateInfo *info) {
     if (!info) return VK_ERROR_INITIALIZATION_FAILED;
-    if (info->sharingMode != VK_SHARING_MODE_EXCLUSIVE) {
-        /* Queue family indices are not transported yet; fail closed instead of
-         * recreating a concurrent image with incomplete ownership metadata. */
-        trace_icd_runtime_failure("image-sharing-mode-concurrent-unsupported",
+    if (!pdocker_vk_sharing_mode_is_single_advertised_family(
+            info->sharingMode, info->queueFamilyIndexCount, info->pQueueFamilyIndices)) {
+        /* The ICD advertises one queue family. Concurrent sharing over only
+         * advertised families is equivalent to exclusive sharing and is
+         * normalized before executor transport; unknown families still fail
+         * closed instead of being recreated with incomplete ownership data. */
+        trace_icd_runtime_failure("image-sharing-mode-unsupported",
                                   VK_ERROR_FEATURE_NOT_PRESENT);
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }
@@ -13707,7 +13739,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateImage(
     image->samples = pCreateInfo->samples;
     image->tiling = pCreateInfo->tiling;
     image->usage = pCreateInfo->usage;
-    image->sharing_mode = pCreateInfo->sharingMode;
+    image->sharing_mode = pdocker_vk_effective_single_queue_sharing_mode(pCreateInfo->sharingMode);
     image->initial_layout = pCreateInfo->initialLayout;
     image->current_layout = pCreateInfo->initialLayout;
     image->layout_generation = next_vulkan_object_generation();
@@ -17383,16 +17415,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSwapchainKHR(
         pCreateInfo->compositeAlpha != VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
-    if (pCreateInfo->imageSharingMode == VK_SHARING_MODE_CONCURRENT) {
-        if (pCreateInfo->queueFamilyIndexCount == 0 || !pCreateInfo->pQueueFamilyIndices) {
-            return VK_ERROR_INITIALIZATION_FAILED;
-        }
-        for (uint32_t i = 0; i < pCreateInfo->queueFamilyIndexCount; ++i) {
-            if (pCreateInfo->pQueueFamilyIndices[i] >= PDOCKER_VK_ADVERTISED_QUEUE_FAMILY_COUNT) {
-                return VK_ERROR_INITIALIZATION_FAILED;
-            }
-        }
-    } else if (pCreateInfo->imageSharingMode != VK_SHARING_MODE_EXCLUSIVE) {
+    if (!pdocker_vk_sharing_mode_is_single_advertised_family(
+            pCreateInfo->imageSharingMode,
+            pCreateInfo->queueFamilyIndexCount,
+            pCreateInfo->pQueueFamilyIndices)) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
     uint32_t image_count = pCreateInfo->minImageCount < 2u ? 2u : pCreateInfo->minImageCount;
@@ -17425,9 +17451,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSwapchainKHR(
         image_info.samples = VK_SAMPLE_COUNT_1_BIT;
         image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
         image_info.usage = pCreateInfo->imageUsage;
-        image_info.sharingMode = pCreateInfo->imageSharingMode;
-        image_info.queueFamilyIndexCount = pCreateInfo->queueFamilyIndexCount;
-        image_info.pQueueFamilyIndices = pCreateInfo->pQueueFamilyIndices;
+        image_info.sharingMode = pdocker_vk_effective_single_queue_sharing_mode(
+            pCreateInfo->imageSharingMode);
+        image_info.queueFamilyIndexCount = 0;
+        image_info.pQueueFamilyIndices = NULL;
         image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         VkImage image = VK_NULL_HANDLE;
         VkResult rc = vkCreateImage(device, &image_info, NULL, &image);
@@ -20169,7 +20196,8 @@ static bool pdocker_vk_queue_family_barrier_replayable(
         dst_queue_family_index == VK_QUEUE_FAMILY_IGNORED) {
         return true;
     }
-    return src_queue_family_index == dst_queue_family_index;
+    return src_queue_family_index == dst_queue_family_index &&
+           src_queue_family_index < PDOCKER_VK_ADVERTISED_QUEUE_FAMILY_COUNT;
 }
 
 static void execute_recorded_image_barrier_op(PdockerVkImageBarrierOp *op) {

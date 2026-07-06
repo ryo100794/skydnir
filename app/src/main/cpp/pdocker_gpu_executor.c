@@ -3605,7 +3605,31 @@ static int validate_vulkan_dispatch_v5_image_descriptors_for_generic_dispatch(
     return 0;
 }
 
+static int vulkan_dispatch_native_image_sharing_mode(
+        const VulkanRuntime *rt,
+        VkSharingMode guest_sharing_mode,
+        uint32_t queue_family_indices[2],
+        uint32_t *queue_family_count,
+        VkSharingMode *native_sharing_mode) {
+    if (!queue_family_indices || !queue_family_count || !native_sharing_mode) return -EINVAL;
+    *queue_family_count = 0;
+    *native_sharing_mode = VK_SHARING_MODE_EXCLUSIVE;
+    if (guest_sharing_mode == VK_SHARING_MODE_EXCLUSIVE) return 0;
+    if (guest_sharing_mode != VK_SHARING_MODE_CONCURRENT) return -EOPNOTSUPP;
+    if (!rt || rt->queue_family == UINT32_MAX) return -EOPNOTSUPP;
+    if (rt->graphics_queue_family != UINT32_MAX &&
+        rt->graphics_queue_family != rt->queue_family) {
+        queue_family_indices[0] = rt->queue_family;
+        queue_family_indices[1] = rt->graphics_queue_family;
+        *queue_family_count = 2;
+        *native_sharing_mode = VK_SHARING_MODE_CONCURRENT;
+        return 0;
+    }
+    return 0;
+}
+
 static int materialize_vulkan_dispatch_images(
+        const VulkanRuntime *rt,
         VkPhysicalDevice physical_device,
         VkDevice device,
         const VulkanDispatchImageDescriptor *image_descriptors,
@@ -3719,6 +3743,16 @@ static int materialize_vulkan_dispatch_images(
         dst->direct_host_upload_needed = src->tiling == VK_IMAGE_TILING_LINEAR &&
                                          src->samples == VK_SAMPLE_COUNT_1_BIT;
         dst->upload_pending = dst->requires_staging;
+        uint32_t native_queue_family_indices[2] = {0, 0};
+        uint32_t native_queue_family_count = 0;
+        VkSharingMode native_sharing_mode = VK_SHARING_MODE_EXCLUSIVE;
+        int sharing_rc = vulkan_dispatch_native_image_sharing_mode(
+            rt,
+            (VkSharingMode)src->sharing_mode,
+            native_queue_family_indices,
+            &native_queue_family_count,
+            &native_sharing_mode);
+        if (sharing_rc != 0) return sharing_rc;
         VkImageCreateInfo ici = {
             .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
             .flags = (VkImageCreateFlags)src->create_flags,
@@ -3734,7 +3768,9 @@ static int materialize_vulkan_dispatch_images(
                    VK_IMAGE_USAGE_TRANSFER_DST_BIT |
                    VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
                 : (VkImageUsageFlags)src->usage,
-            .sharingMode = (VkSharingMode)src->sharing_mode,
+            .sharingMode = native_sharing_mode,
+            .queueFamilyIndexCount = native_queue_family_count,
+            .pQueueFamilyIndices = native_queue_family_count ? native_queue_family_indices : NULL,
             .initialLayout = create_initial_layout,
         };
         VkResult rc = vkCreateImage(device, &ici, NULL, &dst->image);
@@ -15681,6 +15717,7 @@ static int run_vulkan_dispatch_fd(
     if (needs_vulkan_image_objects) {
         fail_stage = "materialize-vulkan-image-objects";
         int image_rc = materialize_vulkan_dispatch_images(
+            rt,
             rt->physical_device,
             rt->device,
             image_descriptors,
@@ -26751,7 +26788,7 @@ static int vulkan_graphics_barrier_queue_family_replayable(
         dst_queue_family_index == VK_QUEUE_FAMILY_IGNORED) {
         return 1;
     }
-    return src_queue_family_index == dst_queue_family_index;
+    return src_queue_family_index == 0 && dst_queue_family_index == 0;
 }
 
 static uint32_t vulkan_graphics_replay_queue_family_index(
@@ -27039,6 +27076,7 @@ static int materialize_vulkan_graphics_v6_attachments(
         .image_layout_range_count = 0,
     };
     int rc = materialize_vulkan_dispatch_images(
+        rt,
         rt->physical_device,
         rt->device,
         NULL,

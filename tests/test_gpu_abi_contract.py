@@ -4085,7 +4085,8 @@ class GpuAbiContractTest(unittest.TestCase):
         )[1].split("static int submit_vulkan_graphics_v6_command_buffer", 1)[0]
         self.assertIn("src_queue_family_index == VK_QUEUE_FAMILY_IGNORED", helper)
         self.assertIn("dst_queue_family_index == VK_QUEUE_FAMILY_IGNORED", helper)
-        self.assertIn("return src_queue_family_index == dst_queue_family_index", helper)
+        self.assertIn("return src_queue_family_index == 0 && dst_queue_family_index == 0", helper)
+        self.assertNotIn("return src_queue_family_index == dst_queue_family_index", helper)
         self.assertIn("return VK_QUEUE_FAMILY_IGNORED", normalizer)
         self.assertIn("vulkan_graphics_barrier_queue_family_replayable", validator)
         preflight_barrier_helper = c_function_body(executor, "preflight_vulkan_graphics_v6_dependency_barriers")
@@ -4097,6 +4098,16 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn(".dstQueueFamilyIndex = barrier->dst_queue_family_index", recorder)
         self.assertIn("command->flags & VK_DEPENDENCY_BY_REGION_BIT", executor)
         self.assertIn("graphics barrier dependency flags are not supported", executor)
+        image_materializer = c_function_body(executor, "materialize_vulkan_dispatch_images")
+        sharing_helper = c_function_body(executor, "vulkan_dispatch_native_image_sharing_mode")
+        self.assertIn("guest_sharing_mode == VK_SHARING_MODE_EXCLUSIVE", sharing_helper)
+        self.assertIn("guest_sharing_mode != VK_SHARING_MODE_CONCURRENT", sharing_helper)
+        self.assertIn("rt->graphics_queue_family != rt->queue_family", sharing_helper)
+        self.assertIn("*native_sharing_mode = VK_SHARING_MODE_CONCURRENT", sharing_helper)
+        self.assertIn("native_queue_family_indices", image_materializer)
+        self.assertIn(".sharingMode = native_sharing_mode", image_materializer)
+        self.assertIn(".queueFamilyIndexCount = native_queue_family_count", image_materializer)
+        self.assertIn(".pQueueFamilyIndices = native_queue_family_count ? native_queue_family_indices : NULL", image_materializer)
 
     def test_vulkan_icd_serializes_graphics_image_barriers(self):
         icd = VULKAN_ICD.read_text()
@@ -4136,7 +4147,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("pdocker_vk_image_aspect_mask_valid_for_format", icd)
         self.assertIn("static bool pdocker_vk_queue_family_barrier_replayable", icd)
         self.assertIn("src_queue_family_index == VK_QUEUE_FAMILY_IGNORED", icd)
-        self.assertIn("return src_queue_family_index == dst_queue_family_index", icd)
+        self.assertIn("return src_queue_family_index == dst_queue_family_index &&", icd)
+        self.assertIn("src_queue_family_index < PDOCKER_VK_ADVERTISED_QUEUE_FAMILY_COUNT", icd)
         self.assertIn("image-barrier-cross-queue-family", icd)
         self.assertIn("buffer-barrier-cross-queue-family", icd)
         self.assertIn("buffer-barrier-invalid-range", icd)
@@ -7744,8 +7756,15 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("format_list->pViewFormats[i] != info->format", image_pnext_body)
         self.assertIn('unsupported_image_pnext_result("vkCreateImage", node)', image_pnext_body)
         self.assertIn("node = header.pNext;", image_pnext_body)
-        self.assertIn("info->sharingMode != VK_SHARING_MODE_EXCLUSIVE", image_validate_body)
-        self.assertIn('trace_icd_runtime_failure("image-sharing-mode-concurrent-unsupported"', image_validate_body)
+        sharing_helper_body = c_function_body(icd, "pdocker_vk_sharing_mode_is_single_advertised_family")
+        self.assertIn("sharingMode == VK_SHARING_MODE_EXCLUSIVE", sharing_helper_body)
+        self.assertIn("sharingMode != VK_SHARING_MODE_CONCURRENT", sharing_helper_body)
+        self.assertIn("queueFamilyIndexCount == 0 || !pQueueFamilyIndices", sharing_helper_body)
+        self.assertIn("pQueueFamilyIndices[i] >= PDOCKER_VK_ADVERTISED_QUEUE_FAMILY_COUNT", sharing_helper_body)
+        self.assertIn("pdocker_vk_sharing_mode_is_single_advertised_family(", image_validate_body)
+        self.assertIn("info->queueFamilyIndexCount", image_validate_body)
+        self.assertIn("info->pQueueFamilyIndices", image_validate_body)
+        self.assertIn('trace_icd_runtime_failure("image-sharing-mode-unsupported"', image_validate_body)
         self.assertIn("return VK_ERROR_FEATURE_NOT_PRESENT;", image_validate_body)
         self.assertIn("validate_image_create_pnext_for_transport(info)", image_validate_body)
         self.assertIn("if (pnext_rc != VK_SUCCESS) return pnext_rc;", image_validate_body)
@@ -7757,7 +7776,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "VKAPI_ATTR void VKAPI_CALL vkDestroyImage", 1
         )[0]
         self.assertIn("validate_image_create_info_for_transport(pCreateInfo)", create_image_body)
+        self.assertIn("pdocker_vk_effective_single_queue_sharing_mode(pCreateInfo->sharingMode)", create_image_body)
         self.assertNotIn("if (!pdocker_vk_format_bridge_supported(pCreateInfo->format))", create_image_body)
+        self.assertIn("buffer-sharing-mode-unsupported", icd)
         image_view_pnext_body = icd.split("static VkResult validate_image_view_pnext_for_transport", 1)[1].split(
             "static VkResult validate_image_view_create_info_for_transport", 1
         )[0]
