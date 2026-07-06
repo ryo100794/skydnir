@@ -5779,7 +5779,8 @@ class GpuAbiContractTest(unittest.TestCase):
                 "PDOCKER_GPU_DISPATCH_PROFILE_LOG": "1",
                 "PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE": "1",
                 "PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING": "1",
-                            "PDOCKER_GPU_Q6K_READONLY_OVERLAP_SNAPSHOT": "1",
+                "PDOCKER_GPU_Q6K_COMPAT_REWRITES": "1",
+                "PDOCKER_GPU_Q6K_READONLY_OVERLAP_SNAPSHOT": "1",
             },
             q6_overlay,
         )
@@ -14105,6 +14106,15 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("specialization_materialize_report", plan["required_evidence_fields"])
         self.assertIn("reconciliation", plan["required_evidence_fields"])
         self.assertIn("q6_final_store_boundary", plan["required_evidence_fields"])
+        self.assertIn("q6_stage_divergence", plan["required_evidence_fields"])
+        self.assertIn("q6_debug_probe_expectations", plan["required_evidence_fields"])
+        self.assertIn("q6_debug_u32_probe", plan["required_evidence_fields"])
+        self.assertIn("spirv_probe_env_audit", plan["required_evidence_fields"])
+        self.assertIn("q6_storage16_loads_lowered", plan["required_evidence_fields"])
+        self.assertIn("q6_storage16_loads_lowered_count", plan["required_evidence_fields"])
+        self.assertIn("q6_u32_to_u8vec4_bitcasts_lowered", plan["required_evidence_fields"])
+        self.assertIn("q6_u32_to_u8vec4_bitcasts_lowered_count", plan["required_evidence_fields"])
+        self.assertIn("q6_final_store_pre_barrier_inserted", plan["required_evidence_fields"])
         self.assertIn("q6_workgroup_specialization_interpretation", plan["required_evidence_fields"])
         self.assertIn("q6_local_size", plan["required_evidence_fields"])
         self.assertIn("q6_num_rows", plan["required_evidence_fields"])
@@ -14121,6 +14131,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("readonly_overlap_source_index", plan["required_evidence_fields"])
         self.assertIn("writeback", " ".join(branch["condition"] for branch in plan["fail_branches"]))
         self.assertIn("q6_final_store_boundary.summary", json.dumps(plan["fail_branches"]))
+        self.assertIn("q6_stage_divergence.summary", json.dumps(plan["fail_branches"]))
+        self.assertIn("Q6 stage-divergence evidence gate", json.dumps(plan["fail_branches"]))
+        self.assertIn("q6_compat_rewrites.summary", json.dumps(plan["fail_branches"]))
+        self.assertIn("Q6 structural compat rewrite gate", json.dumps(plan["fail_branches"]))
         self.assertIn("q6_debug_binding_alias_safety.summary", json.dumps(plan["fail_branches"]))
         self.assertIn("unsupported-spec-expression", json.dumps(plan["fail_branches"]))
         self.assertFalse(plan["inputs"]["llama_cpp_may_change"])
@@ -14136,6 +14150,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertEqual(manifest_overlay, compare_step["required_env_overlay"])
         self.assertEqual("1", compare_step["required_env_overlay"]["PDOCKER_GPU_STRICT_PASSTHROUGH"])
         self.assertEqual("1", compare_step["required_env_overlay"]["PDOCKER_GPU_STRICT_RECONCILIATION"])
+        self.assertEqual("1", compare_step["required_env_overlay"]["PDOCKER_GPU_Q6K_COMPAT_REWRITES"])
         self.assertEqual(
             "1",
             compare_step["required_env_overlay"]["PDOCKER_GPU_STRICT_DUPLICATE_DESCRIPTOR_NORMALIZATION"],
@@ -14255,6 +14270,10 @@ class GpuAbiContractTest(unittest.TestCase):
                                     "observed_icd_markers": ["vulkan-icd-feature-chain-marker-20260518"],
                                     "expected_icd_marker": "vulkan-icd-feature-chain-marker-20260518",
                                 },
+                                "spirv_probe_env_audit": {
+                                    "summary": "pass",
+                                    "icd": {"matching_armed_count": 1},
+                                },
                                 "q6_workgroup_diagnostics": {
                                     "event_count": 1,
                                     "latest_status": "mismatch",
@@ -14332,6 +14351,11 @@ class GpuAbiContractTest(unittest.TestCase):
                                         "checked_compute_binding_count": 1,
                                         "overlap_count": 0,
                                     },
+                                    "q6_storage16_loads_lowered": True,
+                                    "q6_storage16_loads_lowered_count": 24,
+                                    "q6_u32_to_u8vec4_bitcasts_lowered": True,
+                                    "q6_u32_to_u8vec4_bitcasts_lowered_count": 16,
+                                    "q6_final_store_pre_barrier_inserted": True,
                                     "q6_final_store_boundary": {
                                         "schema": "pdocker.q6k.final-store-boundary.v1",
                                         "summary": "pass",
@@ -14349,6 +14373,27 @@ class GpuAbiContractTest(unittest.TestCase):
                                                 "writeback_matches_expected": True,
                                             }
                                         ],
+                                    },
+                                    "q6_debug_probe_expectations": {
+                                        "source": "manifest",
+                                        "valid": True,
+                                    },
+                                    "q6_debug_u32_probe": {
+                                        "summary": "pass",
+                                        "executed_stage_trace_v2_count": 1,
+                                        "executed_final_trace_v2_count": 1,
+                                    },
+                                    "q6_stage_divergence": {
+                                        "schema": "pdocker.q6k.stage-divergence.v1",
+                                        "summary": "pass",
+                                        "manifest_sourced": True,
+                                        "lane_trace_verified": True,
+                                        "trace_writeback_verified": True,
+                                        "pre_reduction_compared": True,
+                                        "pre_reduction_matches": True,
+                                        "reduction_compared": True,
+                                        "reduction_matches": True,
+                                        "final_store_compared": True,
                                     },
                                 },
                                 "generic_spirv_dispatch": [
@@ -14385,6 +14430,11 @@ class GpuAbiContractTest(unittest.TestCase):
                                             }
                                         ],
                                         "q6_debug_binding_alias_safety": {"summary": "pass"},
+                                        "q6_storage16_loads_lowered": True,
+                                        "q6_storage16_loads_lowered_count": 24,
+                                        "q6_u32_to_u8vec4_bitcasts_lowered": True,
+                                        "q6_u32_to_u8vec4_bitcasts_lowered_count": 16,
+                                        "q6_final_store_pre_barrier_inserted": True,
                                         "binding_details": [
                                             {
                                                 "binding": 5,
@@ -14612,6 +14662,40 @@ class GpuAbiContractTest(unittest.TestCase):
             native["condition"],
         )
         self.assertEqual("native Q6 final-store path", native["owner"])
+
+        stage_missing = verifier.select_branch(
+            {
+                "classification": "q6-stage-divergence-evidence-missing",
+                "q6_workgroup_diagnostics": {
+                    "q6_final_store_boundary": {"summary": "native-final-store-mismatch"},
+                    "q6_stage_divergence": {"summary": "missing-evidence"},
+                },
+            },
+            {},
+            plan,
+        )
+        self.assertEqual(
+            "q6_stage_divergence.summary == missing-evidence",
+            stage_missing["condition"],
+        )
+        self.assertEqual("Q6 stage-divergence evidence gate", stage_missing["owner"])
+
+        stage_missing_with_materialize_noise = verifier.select_branch(
+            {
+                "classification": "q6-stage-divergence-evidence-missing",
+                "q6_workgroup_diagnostics": {
+                    "q6_stage_divergence": {"summary": "missing-evidence"},
+                },
+            },
+            {"gpu": {"diagnostics": {"generic_spirv_dispatch": [
+                {"specialization_materialize_report": {"failure_reason": "no-changes"}}
+            ]}}},
+            plan,
+        )
+        self.assertEqual(
+            "q6_stage_divergence.summary == missing-evidence",
+            stage_missing_with_materialize_noise["condition"],
+        )
 
         writeback = verifier.select_branch(
             {

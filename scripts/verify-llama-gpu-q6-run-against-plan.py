@@ -234,6 +234,12 @@ def select_branch(report: dict[str, Any], artifact: dict[str, Any], plan: dict[s
 
     reason = str(materialize_report.get("failure_reason") or "")
     changed = materialize_report.get("changed")
+    if classification == "q6-stage-divergence-evidence-missing":
+        return {
+            "condition": "q6_stage_divergence.summary == missing-evidence",
+            "action": "fix manifest-backed stage trace/probe evidence before claiming native Q6 final-store arithmetic",
+            "owner": "Q6 stage-divergence evidence gate",
+        }
     if reason == "unsupported-spec-expression":
         return {
             "condition": "specialization_materialize_report.failure_reason == unsupported-spec-expression",
