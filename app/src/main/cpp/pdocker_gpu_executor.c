@@ -23336,8 +23336,10 @@ static int validate_vulkan_graphics_v6_frame_content(
             }
             if (entry->layout_id == 0 || entry->binding >= PDOCKER_GPU_MAX_VULKAN_BINDINGS ||
                 entry->descriptor_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS ||
-                entry->binding_flags != 0 || entry->immutable_sampler_count != 0 ||
-                entry->reserved0 != 0 || type_rc != 0) {
+                entry->binding_flags != 0 || entry->reserved0 != 0 || type_rc != 0 ||
+                entry->immutable_sampler_count > entry->descriptor_count ||
+                (entry->immutable_sampler_count != 0 &&
+                 !vulkan_descriptor_type_requires_sampler(descriptor_type))) {
                 return -EPROTO;
             }
             for (uint32_t n = m + 1; n < header_v624->v624.descriptor_set_layout_count; ++n) {
@@ -25880,7 +25882,7 @@ static int collect_graphics_descriptor_layout_from_v624_metadata(
             if (entry->layout_id != descriptor_layout_id) continue;
             if (entry->binding >= PDOCKER_GPU_MAX_VULKAN_BINDINGS ||
                 entry->descriptor_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS ||
-                entry->binding_flags != 0 || entry->immutable_sampler_count != 0) {
+                entry->binding_flags != 0) {
                 return -EOPNOTSUPP;
             }
             VkDescriptorType descriptor_type = VK_DESCRIPTOR_TYPE_MAX_ENUM;
@@ -25891,6 +25893,11 @@ static int collect_graphics_descriptor_layout_from_v624_metadata(
                     entry->descriptor_type, &descriptor_type);
             }
             if (type_rc != 0) return type_rc;
+            if (entry->immutable_sampler_count > entry->descriptor_count ||
+                (entry->immutable_sampler_count != 0 &&
+                 !vulkan_descriptor_type_requires_sampler(descriptor_type))) {
+                return -EPROTO;
+            }
             set_binding_types[set][entry->binding] = descriptor_type;
             set_binding_descriptor_counts[set][entry->binding] = entry->descriptor_count;
             const uint32_t needed_bindings = entry->binding + 1u;
@@ -26056,7 +26063,7 @@ static int materialize_vulkan_graphics_v6_layouts(
             const PdockerGpuVulkanGraphicsV624DescriptorSetLayoutEntry *entry = &view->descriptor_set_layouts[i];
             if (entry->binding >= PDOCKER_GPU_MAX_VULKAN_BINDINGS ||
                 entry->descriptor_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS ||
-                entry->binding_flags != 0 || entry->immutable_sampler_count != 0) {
+                entry->binding_flags != 0) {
                 rc = -EOPNOTSUPP;
                 goto fail;
             }
@@ -26070,6 +26077,12 @@ static int materialize_vulkan_graphics_v6_layouts(
                 rc = vulkan_dispatch_image_descriptor_type_from_api(entry->descriptor_type, &descriptor_type);
             }
             if (rc != 0) goto fail;
+            if (entry->immutable_sampler_count > entry->descriptor_count ||
+                (entry->immutable_sampler_count != 0 &&
+                 !vulkan_descriptor_type_requires_sampler(descriptor_type))) {
+                rc = -EPROTO;
+                goto fail;
+            }
             dsl->binding_types[entry->binding] = descriptor_type;
             dsl->binding_descriptor_counts[entry->binding] = entry->descriptor_count;
             dsl->binding_stage_flags[entry->binding] = (VkShaderStageFlags)entry->stage_flags;

@@ -4293,10 +4293,10 @@ static int collect_graphics_v624_descriptor_set_layout_metadata(
                 }
             }
         }
-        if (immutable_sampler_count != 0) {
-            /* V6.24 transports layout shape, not immutable sampler payloads. */
-            return -EOPNOTSUPP;
-        }
+        /* V6.24 carries only immutable-sampler layout shape.  The sampler
+         * object itself is desugared into the descriptor slot by
+         * descriptor_set_apply_immutable_samplers() / vkUpdateDescriptorSets()
+         * and is serialized through the existing V6.25 descriptor bind path. */
         PdockerGpuVulkanGraphicsV624DescriptorSetLayoutEntry candidate;
         memset(&candidate, 0, sizeof(candidate));
         candidate.layout_id = layout->layout_id;

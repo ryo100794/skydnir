@@ -5172,7 +5172,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "descriptor_set_layouts",
             "pipeline_layout_sets",
             "entry->binding_flags != 0",
-            "entry->immutable_sampler_count != 0",
+            "entry->immutable_sampler_count > entry->descriptor_count",
+            "!vulkan_descriptor_type_requires_sampler(descriptor_type)",
             "referenced_by_pipeline_layout",
             "entry->layout_id == other->layout_id && entry->binding == other->binding",
             "entry->pipeline_layout_id == other->pipeline_layout_id &&",
@@ -5213,6 +5214,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "frame_header_v624->v624.pipeline_layout_table_hash",
             "VULKAN_GRAPHICS_V6.24",
             "candidate.layout_id = layout->layout_id",
+            "candidate.immutable_sampler_count = immutable_sampler_count;",
+            "descriptor_set_apply_immutable_samplers() / vkUpdateDescriptorSets()",
             "candidate.pipeline_layout_id = layout->layout_id",
             "candidate.descriptor_set_layout_id = set_layout->layout_id",
             "find_graphics_v624_descriptor_set_layout_entry",
@@ -6380,6 +6383,19 @@ class GpuAbiContractTest(unittest.TestCase):
         copy_compat_body = c_function_body(icd, "descriptor_copy_slot_compatible")
         self.assertIn("descriptor_layout_immutable_sampler_valid", copy_compat_body)
         self.assertIn("pdocker_vk_sampler_contents_equal", copy_compat_body)
+        collect_v624_body = c_function_body(icd, "collect_graphics_v624_descriptor_set_layout_metadata")
+        self.assertIn("candidate.immutable_sampler_count = immutable_sampler_count;", collect_v624_body)
+        self.assertIn("descriptor_set_apply_immutable_samplers() / vkUpdateDescriptorSets()", collect_v624_body)
+        self.assertNotIn("V6.24 transports layout shape, not immutable sampler payloads", collect_v624_body)
+
+        executor = GPU_EXECUTOR.read_text()
+        validate_body = c_function_body(executor, "validate_vulkan_graphics_v6_frame_content")
+        collect_body = c_function_body(executor, "collect_graphics_descriptor_layout_from_v624_metadata")
+        materialize_body = c_function_body(executor, "materialize_vulkan_graphics_v6_layouts")
+        for body in [validate_body, collect_body, materialize_body]:
+            self.assertIn("entry->immutable_sampler_count > entry->descriptor_count", body)
+            self.assertIn("!vulkan_descriptor_type_requires_sampler(descriptor_type)", body)
+            self.assertNotIn("entry->binding_flags != 0 || entry->immutable_sampler_count != 0", body)
 
     def test_vulkan_generic_dispatch_input_attachments_fail_closed_but_graphics_replays(self):
         icd = VULKAN_ICD.read_text()
