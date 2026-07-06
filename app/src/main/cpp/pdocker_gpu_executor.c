@@ -3044,6 +3044,16 @@ static int vulkan_image_aspect_mask_valid_for_format(
     return aspect_mask == VK_IMAGE_ASPECT_COLOR_BIT;
 }
 
+static VkImageAspectFlags vulkan_image_full_aspect_mask_for_format(VkFormat format) {
+    VkImageAspectFlags mask = 0;
+    if (vulkan_format_has_depth_aspect(format)) mask |= VK_IMAGE_ASPECT_DEPTH_BIT;
+    if (vulkan_format_has_stencil_aspect(format)) mask |= VK_IMAGE_ASPECT_STENCIL_BIT;
+    if (mask) return mask;
+    return vulkan_format_bytes_per_pixel_for_aspect(format, VK_IMAGE_ASPECT_COLOR_BIT)
+        ? VK_IMAGE_ASPECT_COLOR_BIT
+        : 0;
+}
+
 static int vulkan_dispatch_image_view_range_valid(
         const PdockerGpuVulkanDispatchV5ImageEntry *image,
         const PdockerGpuVulkanDispatchV5ImageViewEntry *view) {
@@ -28975,6 +28985,187 @@ static int vulkan_replay_subresource_range_contains(
            outer->baseArrayLayer <= inner->baseArrayLayer && inner_layer_end <= outer_layer_end;
 }
 
+static int vulkan_replay_image_layout_range_append(
+        VulkanReplayImageLayoutRange *ranges,
+        uint32_t *count,
+        const VkImageSubresourceRange *range,
+        VkImageLayout layout,
+        uint64_t generation) {
+    if (!ranges || !count || !range || range->aspectMask == 0 ||
+        range->levelCount == 0 || range->layerCount == 0) {
+        return -EINVAL;
+    }
+    for (uint32_t i = 0; i < *count; ++i) {
+        VulkanReplayImageLayoutRange *entry = &ranges[i];
+        if (entry->layout != layout || entry->generation != generation) continue;
+        if (entry->range.baseMipLevel == range->baseMipLevel &&
+            entry->range.levelCount == range->levelCount &&
+            entry->range.baseArrayLayer == range->baseArrayLayer &&
+            entry->range.layerCount == range->layerCount &&
+            (entry->range.aspectMask & range->aspectMask) == 0) {
+            entry->range.aspectMask |= range->aspectMask;
+            return 0;
+        }
+        if (entry->range.aspectMask == range->aspectMask &&
+            entry->range.baseArrayLayer == range->baseArrayLayer &&
+            entry->range.layerCount == range->layerCount) {
+            uint32_t entry_level_end = entry->range.baseMipLevel + entry->range.levelCount;
+            uint32_t range_level_end = range->baseMipLevel + range->levelCount;
+            if (entry_level_end == range->baseMipLevel) {
+                entry->range.levelCount += range->levelCount;
+                return 0;
+            }
+            if (range_level_end == entry->range.baseMipLevel) {
+                entry->range.baseMipLevel = range->baseMipLevel;
+                entry->range.levelCount += range->levelCount;
+                return 0;
+            }
+        }
+        if (entry->range.aspectMask == range->aspectMask &&
+            entry->range.baseMipLevel == range->baseMipLevel &&
+            entry->range.levelCount == range->levelCount) {
+            uint32_t entry_layer_end = entry->range.baseArrayLayer + entry->range.layerCount;
+            uint32_t range_layer_end = range->baseArrayLayer + range->layerCount;
+            if (entry_layer_end == range->baseArrayLayer) {
+                entry->range.layerCount += range->layerCount;
+                return 0;
+            }
+            if (range_layer_end == entry->range.baseArrayLayer) {
+                entry->range.baseArrayLayer = range->baseArrayLayer;
+                entry->range.layerCount += range->layerCount;
+                return 0;
+            }
+        }
+    }
+    if (*count >= PDOCKER_GPU_MAX_VULKAN_IMAGE_LAYOUT_RANGES_PER_IMAGE) return -E2BIG;
+    VulkanReplayImageLayoutRange *entry = &ranges[(*count)++];
+    memset(entry, 0, sizeof(*entry));
+    entry->range = *range;
+    entry->layout = layout;
+    entry->generation = generation;
+    return 0;
+}
+
+static int vulkan_replay_append_layout_range_remainder(
+        VulkanReplayImageLayoutRange *ranges,
+        uint32_t *count,
+        const VulkanReplayImageLayoutRange *old_entry,
+        const VkImageSubresourceRange *replacement) {
+    if (!ranges || !count || !old_entry || !replacement) return -EINVAL;
+    if (!vulkan_replay_subresource_ranges_overlap(&old_entry->range, replacement)) {
+        return vulkan_replay_image_layout_range_append(
+            ranges, count, &old_entry->range, old_entry->layout, old_entry->generation);
+    }
+
+    const VkImageAspectFlags old_aspects = old_entry->range.aspectMask;
+    const VkImageAspectFlags overlap_aspects = old_aspects & replacement->aspectMask;
+    const VkImageAspectFlags old_aspects_not_replaced = old_aspects & ~replacement->aspectMask;
+    if (old_aspects_not_replaced) {
+        VkImageSubresourceRange kept = old_entry->range;
+        kept.aspectMask = old_aspects_not_replaced;
+        int rc = vulkan_replay_image_layout_range_append(
+            ranges, count, &kept, old_entry->layout, old_entry->generation);
+        if (rc != 0) return rc;
+    }
+    if (!overlap_aspects) return 0;
+
+    const uint32_t old_level_begin = old_entry->range.baseMipLevel;
+    const uint32_t old_level_end = old_entry->range.baseMipLevel + old_entry->range.levelCount;
+    const uint32_t new_level_begin = replacement->baseMipLevel;
+    const uint32_t new_level_end = replacement->baseMipLevel + replacement->levelCount;
+    const uint32_t intersection_level_begin =
+        old_level_begin > new_level_begin ? old_level_begin : new_level_begin;
+    const uint32_t intersection_level_end =
+        old_level_end < new_level_end ? old_level_end : new_level_end;
+
+    const uint32_t old_layer_begin = old_entry->range.baseArrayLayer;
+    const uint32_t old_layer_end = old_entry->range.baseArrayLayer + old_entry->range.layerCount;
+    const uint32_t new_layer_begin = replacement->baseArrayLayer;
+    const uint32_t new_layer_end = replacement->baseArrayLayer + replacement->layerCount;
+    const uint32_t intersection_layer_begin =
+        old_layer_begin > new_layer_begin ? old_layer_begin : new_layer_begin;
+    const uint32_t intersection_layer_end =
+        old_layer_end < new_layer_end ? old_layer_end : new_layer_end;
+
+    if (intersection_level_begin > old_level_begin) {
+        VkImageSubresourceRange before_levels = {
+            .aspectMask = overlap_aspects,
+            .baseMipLevel = old_level_begin,
+            .levelCount = intersection_level_begin - old_level_begin,
+            .baseArrayLayer = old_layer_begin,
+            .layerCount = old_entry->range.layerCount,
+        };
+        int rc = vulkan_replay_image_layout_range_append(
+            ranges, count, &before_levels, old_entry->layout, old_entry->generation);
+        if (rc != 0) return rc;
+    }
+    if (old_level_end > intersection_level_end) {
+        VkImageSubresourceRange after_levels = {
+            .aspectMask = overlap_aspects,
+            .baseMipLevel = intersection_level_end,
+            .levelCount = old_level_end - intersection_level_end,
+            .baseArrayLayer = old_layer_begin,
+            .layerCount = old_entry->range.layerCount,
+        };
+        int rc = vulkan_replay_image_layout_range_append(
+            ranges, count, &after_levels, old_entry->layout, old_entry->generation);
+        if (rc != 0) return rc;
+    }
+
+    const uint32_t middle_level_count = intersection_level_end - intersection_level_begin;
+    if (middle_level_count == 0) return 0;
+    if (intersection_layer_begin > old_layer_begin) {
+        VkImageSubresourceRange before_layers = {
+            .aspectMask = overlap_aspects,
+            .baseMipLevel = intersection_level_begin,
+            .levelCount = middle_level_count,
+            .baseArrayLayer = old_layer_begin,
+            .layerCount = intersection_layer_begin - old_layer_begin,
+        };
+        int rc = vulkan_replay_image_layout_range_append(
+            ranges, count, &before_layers, old_entry->layout, old_entry->generation);
+        if (rc != 0) return rc;
+    }
+    if (old_layer_end > intersection_layer_end) {
+        VkImageSubresourceRange after_layers = {
+            .aspectMask = overlap_aspects,
+            .baseMipLevel = intersection_level_begin,
+            .levelCount = middle_level_count,
+            .baseArrayLayer = intersection_layer_end,
+            .layerCount = old_layer_end - intersection_layer_end,
+        };
+        int rc = vulkan_replay_image_layout_range_append(
+            ranges, count, &after_layers, old_entry->layout, old_entry->generation);
+        if (rc != 0) return rc;
+    }
+    return 0;
+}
+
+static int vulkan_replay_image_whole_range(
+        const VulkanDispatchImageObject *image,
+        VkImageSubresourceRange *out) {
+    if (!image || !out) return -EINVAL;
+    VkImageAspectFlags aspects = vulkan_image_full_aspect_mask_for_format(image->format);
+    if (!aspects || image->mip_levels == 0 || image->array_layers == 0) return -EOPNOTSUPP;
+    *out = (VkImageSubresourceRange){
+        .aspectMask = aspects,
+        .baseMipLevel = 0,
+        .levelCount = image->mip_levels,
+        .baseArrayLayer = 0,
+        .layerCount = image->array_layers,
+    };
+    return 0;
+}
+
+static int vulkan_replay_subresource_range_is_whole_image(
+        const VulkanDispatchImageObject *image,
+        const VkImageSubresourceRange *range) {
+    VkImageSubresourceRange whole;
+    if (vulkan_replay_image_whole_range(image, &whole) != 0) return 0;
+    return vulkan_replay_subresource_range_contains(range, &whole) &&
+           vulkan_replay_subresource_range_contains(&whole, range);
+}
+
 static int vulkan_replay_image_layout_for_range(
         const VulkanDispatchImageObject *image,
         const VkImageSubresourceRange *range,
@@ -29005,31 +29196,42 @@ static int vulkan_replay_image_set_layout_for_range(
         const VkImageSubresourceRange *range,
         VkImageLayout layout) {
     if (!image || !range) return -EINVAL;
+    if (!vulkan_replay_image_layout_range_valid(image, range) ||
+        !vulkan_image_aspect_mask_valid_for_format(image->format, range->aspectMask)) {
+        return -ERANGE;
+    }
     layout = vulkan_replay_layout_for_executor(layout);
     if (!image->layout_ranges_active) {
-        image->current_layout = layout;
-        return 0;
+        if (vulkan_replay_subresource_range_is_whole_image(image, range)) {
+            image->current_layout = layout;
+            return 0;
+        }
+        VkImageSubresourceRange whole;
+        int whole_rc = vulkan_replay_image_whole_range(image, &whole);
+        if (whole_rc != 0) return whole_rc;
+        image->layout_range_count = 0;
+        int append_rc = vulkan_replay_image_layout_range_append(
+            image->layout_ranges, &image->layout_range_count, &whole, image->current_layout, 0);
+        if (append_rc != 0) return append_rc;
+        image->layout_ranges_active = 1;
+        image->has_layout_ranges = 1;
     }
-    int updated = 0;
+
+    VulkanReplayImageLayoutRange rebuilt[PDOCKER_GPU_MAX_VULKAN_IMAGE_LAYOUT_RANGES_PER_IMAGE];
+    uint32_t rebuilt_count = 0;
+    memset(rebuilt, 0, sizeof(rebuilt));
     for (uint32_t i = 0; i < image->layout_range_count; ++i) {
-        VulkanReplayImageLayoutRange *entry = &image->layout_ranges[i];
-        if (!vulkan_replay_subresource_ranges_overlap(&entry->range, range)) continue;
-        if (!vulkan_replay_subresource_range_contains(&entry->range, range) ||
-            !vulkan_replay_subresource_range_contains(range, &entry->range)) {
-            return -EOPNOTSUPP;
-        }
-        entry->layout = layout;
-        updated = 1;
+        int rc = vulkan_replay_append_layout_range_remainder(
+            rebuilt, &rebuilt_count, &image->layout_ranges[i], range);
+        if (rc != 0) return rc;
     }
-    if (!updated) {
-        if (image->layout_range_count >= PDOCKER_GPU_MAX_VULKAN_IMAGE_LAYOUT_RANGES_PER_IMAGE) {
-            return -E2BIG;
-        }
-        VulkanReplayImageLayoutRange *entry = &image->layout_ranges[image->layout_range_count++];
-        memset(entry, 0, sizeof(*entry));
-        entry->range = *range;
-        entry->layout = layout;
-    }
+    int rc = vulkan_replay_image_layout_range_append(
+        rebuilt, &rebuilt_count, range, layout, 0);
+    if (rc != 0) return rc;
+    memcpy(image->layout_ranges, rebuilt, sizeof(rebuilt));
+    image->layout_range_count = rebuilt_count;
+    image->layout_ranges_active = 1;
+    image->has_layout_ranges = 1;
     return 0;
 }
 

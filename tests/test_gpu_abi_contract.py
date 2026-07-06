@@ -1813,6 +1813,26 @@ class GpuAbiContractTest(unittest.TestCase):
 
         set_layout_body = c_function_body(executor, "vulkan_replay_image_set_layout_for_range")
         self.assertIn("layout = vulkan_replay_layout_for_executor(layout);", set_layout_body)
+        self.assertIn("vulkan_replay_subresource_range_is_whole_image(image, range)", set_layout_body)
+        self.assertIn("vulkan_replay_image_whole_range(image, &whole)", set_layout_body)
+        self.assertIn("vulkan_replay_append_layout_range_remainder", set_layout_body)
+        self.assertIn("memcpy(image->layout_ranges, rebuilt, sizeof(rebuilt));", set_layout_body)
+        self.assertNotIn("!vulkan_replay_subresource_range_contains(&entry->range, range) ||", set_layout_body)
+
+        for helper in [
+            "vulkan_replay_image_layout_range_append",
+            "vulkan_replay_append_layout_range_remainder",
+            "vulkan_replay_image_whole_range",
+            "vulkan_replay_subresource_range_is_whole_image",
+        ]:
+            self.assertIn(helper, executor)
+        append_body = c_function_body(executor, "vulkan_replay_append_layout_range_remainder")
+        self.assertIn("old_aspects_not_replaced", append_body)
+        self.assertIn("overlap_aspects", append_body)
+        self.assertIn("intersection_level_begin", append_body)
+        self.assertIn("intersection_layer_begin", append_body)
+        self.assertIn("middle_level_count", append_body)
+        self.assertIn("vulkan_replay_image_layout_range_append", append_body)
 
         recorder_body = c_function_body(executor, "record_vulkan_graphics_v6_command_buffer")
         dependency_helper_body = c_function_body(executor, "collect_vulkan_graphics_v6_dependency_barriers")
