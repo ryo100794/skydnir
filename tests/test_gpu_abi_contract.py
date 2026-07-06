@@ -6521,14 +6521,19 @@ class GpuAbiContractTest(unittest.TestCase):
         create_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreatePipelineLayout", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkDestroyPipelineLayout", 1
         )[0]
+        self.assertIn("pCreateInfo->setLayoutCount > PDOCKER_VK_MAX_DESCRIPTOR_SETS", create_body)
+        self.assertIn("pCreateInfo->setLayoutCount > 0 && !pCreateInfo->pSetLayouts", create_body)
+        self.assertIn("pdocker_vk_descriptor_set_layout_from_handle(pCreateInfo->pSetLayouts[i])", create_body)
         self.assertIn("layout->set_layout_count = pCreateInfo->setLayoutCount;", create_body)
         self.assertIn("pCreateInfo->pSetLayouts", create_body)
-        self.assertIn("layout->unsupported_set_layout_count = true;", create_body)
+        self.assertNotIn("layout->unsupported_set_layout_count = true;", create_body)
         self.assertIn("push_constant_ranges[PDOCKER_VK_MAX_PUSH_CONSTANT_RANGES]", icd)
         self.assertIn("push_constant_ops[PDOCKER_VK_MAX_PUSH_CONSTANT_OPS]", icd)
+        self.assertIn("pCreateInfo->pushConstantRangeCount > 0 && !pCreateInfo->pPushConstantRanges", create_body)
+        self.assertIn("pCreateInfo->pushConstantRangeCount > PDOCKER_VK_MAX_PUSH_CONSTANT_RANGES", create_body)
         self.assertIn("layout->push_constant_range_count < PDOCKER_VK_MAX_PUSH_CONSTANT_RANGES", create_body)
         self.assertIn("snapshot->stage_flags = range->stageFlags;", create_body)
-        self.assertIn("layout->unsupported_push_constant_ranges = true;", create_body)
+        self.assertNotIn("layout->unsupported_push_constant_ranges = true;", create_body)
         bind_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets", 1)[1].split(
             "static void validate_bound_descriptor_layouts_before_dispatch", 1
         )[0]
@@ -7367,8 +7372,13 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("pCreateInfo->bindingCount > 0 && !pCreateInfo->pBindings", helper_body)
         self.assertIn("descriptor_type_supported_by_v4_transport(binding->descriptorType)", helper_body)
         self.assertIn("descriptor_type_supported_by_v5_object_transport(binding->descriptorType)", helper_body)
+        self.assertIn("bool seen_bindings[PDOCKER_VK_MAX_STORAGE_BUFFERS] = {0};", helper_body)
         self.assertIn("binding->binding >= PDOCKER_VK_MAX_STORAGE_BUFFERS", helper_body)
+        self.assertIn("seen_bindings[binding->binding]", helper_body)
+        self.assertIn("seen_bindings[binding->binding] = true;", helper_body)
+        self.assertIn("binding->descriptorCount == 0", helper_body)
         self.assertIn("binding->descriptorCount > PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS", helper_body)
+        self.assertIn("binding->pImmutableSamplers", helper_body)
         self.assertIn("VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_LAYOUT_SUPPORT", pnext_body)
         self.assertIn("p->maxVariableDescriptorCount = 0;", pnext_body)
         self.assertIn("MAP_PROC(vkGetDescriptorSetLayoutSupport)", proc_body)
@@ -7558,6 +7568,13 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         self.assertIn("if (!pCreateInfo || !pPipelineLayout)", pipeline_layout_body)
         self.assertIn("if (pCreateInfo->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;", pipeline_layout_body)
+        self.assertIn("pCreateInfo->setLayoutCount > PDOCKER_VK_MAX_DESCRIPTOR_SETS", pipeline_layout_body)
+        self.assertIn("pCreateInfo->setLayoutCount > 0 && !pCreateInfo->pSetLayouts", pipeline_layout_body)
+        self.assertIn("pdocker_vk_descriptor_set_layout_from_handle(pCreateInfo->pSetLayouts[i])", pipeline_layout_body)
+        self.assertIn("pCreateInfo->pushConstantRangeCount > 0 && !pCreateInfo->pPushConstantRanges", pipeline_layout_body)
+        self.assertIn("pCreateInfo->pushConstantRangeCount > PDOCKER_VK_MAX_PUSH_CONSTANT_RANGES", pipeline_layout_body)
+        self.assertNotIn("unsupported_set_layout_count = true", pipeline_layout_body)
+        self.assertNotIn("unsupported_push_constant_ranges = true", pipeline_layout_body)
         descriptor_pool_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorPool", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkDestroyDescriptorPool", 1
         )[0]

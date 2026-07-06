@@ -14919,6 +14919,7 @@ static bool descriptor_set_layout_create_info_supported(
     if (validate_descriptor_set_layout_pnext(pCreateInfo) != VK_SUCCESS) return false;
     if (pCreateInfo->flags != 0) return false;
     if (pCreateInfo->bindingCount > 0 && !pCreateInfo->pBindings) return false;
+    bool seen_bindings[PDOCKER_VK_MAX_STORAGE_BUFFERS] = {0};
     for (uint32_t i = 0; i < pCreateInfo->bindingCount; ++i) {
         const VkDescriptorSetLayoutBinding *binding = &pCreateInfo->pBindings[i];
         bool v4_descriptor = descriptor_type_supported_by_v4_transport(binding->descriptorType);
@@ -14927,7 +14928,11 @@ static bool descriptor_set_layout_create_info_supported(
             descriptor_type_supported_by_v5_object_transport(binding->descriptorType);
         if (!v4_descriptor && !v5_object_descriptor) return false;
         if (binding->binding >= PDOCKER_VK_MAX_STORAGE_BUFFERS) return false;
+        if (seen_bindings[binding->binding]) return false;
+        seen_bindings[binding->binding] = true;
+        if (binding->descriptorCount == 0) return false;
         if (binding->descriptorCount > PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS) return false;
+        if (binding->pImmutableSamplers) return false;
     }
     return true;
 }
@@ -15072,20 +15077,26 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreatePipelineLayout(
     if (!pCreateInfo || !pPipelineLayout) return VK_ERROR_INITIALIZATION_FAILED;
     if (pCreateInfo->pNext) return unsupported_create_info_pnext_result("vkCreatePipelineLayout", pCreateInfo->pNext);
     if (pCreateInfo->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;
+    if (pCreateInfo->setLayoutCount > PDOCKER_VK_MAX_DESCRIPTOR_SETS) return VK_ERROR_FEATURE_NOT_PRESENT;
+    if (pCreateInfo->setLayoutCount > 0 && !pCreateInfo->pSetLayouts) return VK_ERROR_INITIALIZATION_FAILED;
+    for (uint32_t i = 0; i < pCreateInfo->setLayoutCount; ++i) {
+        if (!pdocker_vk_descriptor_set_layout_from_handle(pCreateInfo->pSetLayouts[i])) {
+            return VK_ERROR_FEATURE_NOT_PRESENT;
+        }
+    }
+    if (pCreateInfo->pushConstantRangeCount > 0 && !pCreateInfo->pPushConstantRanges) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    if (pCreateInfo->pushConstantRangeCount > PDOCKER_VK_MAX_PUSH_CONSTANT_RANGES) {
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
     PdockerVkPipelineLayout *layout = pdocker_alloc_handle(sizeof(*layout));
     if (!layout) return VK_ERROR_OUT_OF_HOST_MEMORY;
     layout->layout_id = next_vulkan_object_generation();
     if (pCreateInfo) {
         layout->set_layout_count = pCreateInfo->setLayoutCount;
-        if (layout->set_layout_count > PDOCKER_VK_MAX_DESCRIPTOR_SETS) {
-            layout->unsupported_set_layout_count = true;
-            layout->set_layout_count = PDOCKER_VK_MAX_DESCRIPTOR_SETS;
-        }
         for (uint32_t i = 0; i < layout->set_layout_count; ++i) {
-            layout->set_layouts[i] =
-                pCreateInfo->pSetLayouts
-                    ? pdocker_vk_descriptor_set_layout_from_handle(pCreateInfo->pSetLayouts[i])
-                    : NULL;
+            layout->set_layouts[i] = pdocker_vk_descriptor_set_layout_from_handle(pCreateInfo->pSetLayouts[i]);
         }
     }
     for (uint32_t i = 0; pCreateInfo && i < pCreateInfo->pushConstantRangeCount; ++i) {
@@ -15102,8 +15113,6 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreatePipelineLayout(
             snapshot->stage_flags = range->stageFlags;
             snapshot->offset = range->offset;
             snapshot->size = range->size;
-        } else {
-            layout->unsupported_push_constant_ranges = true;
         }
     }
     if (layout->push_constant_size > PDOCKER_VK_MAX_PUSH_BYTES) {
