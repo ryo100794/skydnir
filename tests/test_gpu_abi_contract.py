@@ -2372,6 +2372,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "pipeline->rasterizer_discard_enable = ci->pRasterizationState->rasterizerDiscardEnable",
             "pipeline->depth_bias_enable = ci->pRasterizationState->depthBiasEnable",
             "pipeline->line_width = ci->pRasterizationState->lineWidth",
+            "PDOCKER_VK_FEATURE_DEPTH_CLAMP",
+            "PDOCKER_VK_FEATURE_FILL_MODE_NON_SOLID",
+            "pipeline->polygon_mode != VK_POLYGON_MODE_FILL",
             "pipeline->color_blend_logic_op_enable = cb->logicOpEnable",
             "pipeline->color_blend_constants",
             "memcpy(pipeline->color_blend_constants, cb->blendConstants",
@@ -7088,6 +7091,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_VK_FEATURE_ALPHA_TO_ONE",
             "PDOCKER_VK_FEATURE_LOGIC_OP",
             "PDOCKER_VK_FEATURE_WIDE_LINES",
+            "PDOCKER_VK_FEATURE_DEPTH_CLAMP",
+            "PDOCKER_VK_FEATURE_FILL_MODE_NON_SOLID",
             "PDOCKER_VK_FEATURE_DEPTH_BIAS_CLAMP",
             "PDOCKER_VK_FEATURE_DEPTH_BOUNDS",
             "if (p->synchronization2) mask |= PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;",
@@ -7100,6 +7105,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "if (features->alphaToOne) mask |= PDOCKER_VK_FEATURE_ALPHA_TO_ONE;",
             "if (features->logicOp) mask |= PDOCKER_VK_FEATURE_LOGIC_OP;",
             "if (features->wideLines) mask |= PDOCKER_VK_FEATURE_WIDE_LINES;",
+            "if (features->depthClamp) mask |= PDOCKER_VK_FEATURE_DEPTH_CLAMP;",
+            "if (features->fillModeNonSolid) mask |= PDOCKER_VK_FEATURE_FILL_MODE_NON_SOLID;",
             "if (features->depthBiasClamp) mask |= PDOCKER_VK_FEATURE_DEPTH_BIAS_CLAMP;",
             "if (features->depthBounds) mask |= PDOCKER_VK_FEATURE_DEPTH_BOUNDS;",
             "PDOCKER_VK_FOR_EACH_BASE_FEATURE(CHECK_BASE_FEATURE)",
@@ -7117,6 +7124,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "json_read_u32(json, \"alphaToOne\", &caps->features.alphaToOne);",
             "json_read_u32(json, \"logicOp\", &caps->features.logicOp);",
             "json_read_u32(json, \"wideLines\", &caps->features.wideLines);",
+            "json_read_u32(json, \"depthClamp\", &caps->features.depthClamp);",
+            "json_read_u32(json, \"fillModeNonSolid\", &caps->features.fillModeNonSolid);",
             "json_read_u32(json, \"depthBiasClamp\", &caps->features.depthBiasClamp);",
             "json_read_u32(json, \"depthBounds\", &caps->features.depthBounds);",
             "json_read_u32(json, \"maxGeometryOutputVertices\", &caps->limits.maxGeometryOutputVertices);",
@@ -7124,11 +7133,15 @@ class GpuAbiContractTest(unittest.TestCase):
             "json_read_float(json, \"lineWidthGranularity\", &caps->limits.lineWidthGranularity);",
             "static VkBool32 advertised_geometry_shader(void)",
             "static VkBool32 advertised_wide_lines(void)",
+            "static VkBool32 advertised_depth_clamp(void)",
+            "static VkBool32 advertised_fill_mode_non_solid(void)",
             "pFeatures->geometryShader = advertised_geometry_shader();",
             "pFeatures->sampleRateShading = advertised_sample_rate_shading();",
             "pFeatures->alphaToOne = advertised_alpha_to_one();",
             "pFeatures->logicOp = advertised_logic_op();",
             "pFeatures->wideLines = advertised_wide_lines();",
+            "pFeatures->depthClamp = advertised_depth_clamp();",
+            "pFeatures->fillModeNonSolid = advertised_fill_mode_non_solid();",
             "pFeatures->depthBiasClamp = advertised_depth_bias_clamp();",
             "pFeatures->depthBounds = advertised_depth_bounds();",
             "if (advertised_geometry_shader()) mask |= PDOCKER_VK_FEATURE_GEOMETRY_SHADER;",
@@ -7137,6 +7150,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "if (advertised_alpha_to_one()) mask |= PDOCKER_VK_FEATURE_ALPHA_TO_ONE;",
             "if (advertised_logic_op()) mask |= PDOCKER_VK_FEATURE_LOGIC_OP;",
             "if (advertised_wide_lines()) mask |= PDOCKER_VK_FEATURE_WIDE_LINES;",
+            "if (advertised_depth_clamp()) mask |= PDOCKER_VK_FEATURE_DEPTH_CLAMP;",
+            "if (advertised_fill_mode_non_solid()) mask |= PDOCKER_VK_FEATURE_FILL_MODE_NON_SOLID;",
             "if (advertised_depth_bias_clamp()) mask |= PDOCKER_VK_FEATURE_DEPTH_BIAS_CLAMP;",
             "if (advertised_depth_bounds()) mask |= PDOCKER_VK_FEATURE_DEPTH_BOUNDS;",
             "maxGeometryTotalOutputComponents",
@@ -15650,6 +15665,8 @@ class GpuAbiContractTest(unittest.TestCase):
             '\\"android_vulkan_enabled_features\\":{',
             '\\"tessellationShader\\":%u',
             '\\"wideLines\\":%u',
+            '\\"depthClamp\\":%u',
+            '\\"fillModeNonSolid\\":%u',
             '\\"chain_compat_feature_structs\\":%u',
             "enabled_ext_16bit_storage",
             "enabled_ext_8bit_storage",
@@ -15694,6 +15711,9 @@ class GpuAbiContractTest(unittest.TestCase):
             '\\"lineWidthGranularity\\":%.9g',
             '\\"physical_features\\":{',
             '\\"tessellationShader\\":%u',
+            '\\"wideLines\\":%u',
+            '\\"depthClamp\\":%u',
+            '\\"fillModeNonSolid\\":%u',
             '\\"storage16\\":{',
             '\\"storage8\\":{',
             '\\"float16_int8\\":{',
@@ -15778,6 +15798,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "float16_int8.shaderInt8",
             "features.tessellationShader",
             "features.wideLines",
+            "features.depthClamp",
+            "features.fillModeNonSolid",
             "lineWidthRange",
             "lineWidthGranularity",
             "tessellationShader:%u",
@@ -15898,6 +15920,12 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("p->multiview = caps->multiview;", pnext_body)
         self.assertIn("pFeatures->tessellationShader = advertised_tessellation_shader();", icd)
         self.assertIn("pFeatures->wideLines = advertised_wide_lines();", icd)
+        self.assertIn("pFeatures->depthClamp = advertised_depth_clamp();", icd)
+        self.assertIn("pFeatures->fillModeNonSolid = advertised_fill_mode_non_solid();", icd)
+        self.assertIn("PDOCKER_VK_FEATURE_DEPTH_CLAMP", icd)
+        self.assertIn("PDOCKER_VK_FEATURE_FILL_MODE_NON_SOLID", icd)
+        self.assertIn("depth-clamp pipeline replay requires depthClamp", GPU_EXECUTOR.read_text())
+        self.assertIn("non-solid polygon-mode pipeline replay requires fillModeNonSolid", GPU_EXECUTOR.read_text())
         self.assertIn("dynamic-line-width-feature-not-enabled", icd)
         self.assertIn("!advertised_line_width_supported(pipeline->line_width)", icd)
         self.assertIn("p->extendedDynamicState = advertised_extended_dynamic_state();", pnext_body)

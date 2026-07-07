@@ -324,6 +324,8 @@ static uint64_t g_generic_dispatch_sequence = 0;
 #define PDOCKER_VK_FEATURE_WIDE_LINES                  (1ull << 27)
 #define PDOCKER_VK_FEATURE_DEPTH_BIAS_CLAMP            (1ull << 28)
 #define PDOCKER_VK_FEATURE_DEPTH_BOUNDS                (1ull << 29)
+#define PDOCKER_VK_FEATURE_DEPTH_CLAMP                 (1ull << 30)
+#define PDOCKER_VK_FEATURE_FILL_MODE_NON_SOLID         (1ull << 31)
 
 struct PdockerVkMemory {
     uint64_t object_id;
@@ -11113,6 +11115,8 @@ static bool parse_executor_advertisement_caps_json(
     json_read_u32(json, "alphaToOne", &caps->features.alphaToOne);
     json_read_u32(json, "logicOp", &caps->features.logicOp);
     json_read_u32(json, "wideLines", &caps->features.wideLines);
+    json_read_u32(json, "depthClamp", &caps->features.depthClamp);
+    json_read_u32(json, "fillModeNonSolid", &caps->features.fillModeNonSolid);
     json_read_u32(json, "depthBiasClamp", &caps->features.depthBiasClamp);
     json_read_u32(json, "depthBounds", &caps->features.depthBounds);
     json_read_u32(json, "multiview", &caps->multiview);
@@ -11401,6 +11405,16 @@ static VkBool32 advertised_sample_rate_shading(void) {
     return (caps && caps->features.sampleRateShading) ? VK_TRUE : VK_FALSE;
 }
 
+static VkBool32 advertised_depth_clamp(void) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+    return (caps && caps->features.depthClamp) ? VK_TRUE : VK_FALSE;
+}
+
+static VkBool32 advertised_fill_mode_non_solid(void) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+    return (caps && caps->features.fillModeNonSolid) ? VK_TRUE : VK_FALSE;
+}
+
 static VkBool32 advertised_alpha_to_one(void) {
     const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
     return (caps && caps->features.alphaToOne) ? VK_TRUE : VK_FALSE;
@@ -11542,7 +11556,7 @@ static void trace_executor_advertisement_caps_once(void) {
                 "pdocker-vulkan-icd: executor advertisement caps shadow: "
                 "api=0x%08x device=\"%s\" vendor=0x%04x device_id=0x%04x "
                 "type=%u storage16=%u storage8=%u int8=%u indexTypeUint8=%u geometryShader=%u tessellationShader=%u "
-                "graphics_base={sampleRateShading:%u,alphaToOne:%u,logicOp:%u,wideLines:%u,depthBiasClamp:%u,depthBounds:%u} lineWidthRange=%.6g..%.6g lineWidthGranularity=%.6g subgroup={size:%u,ops:0x%x}\n",
+                "graphics_base={sampleRateShading:%u,alphaToOne:%u,logicOp:%u,wideLines:%u,depthClamp:%u,fillModeNonSolid:%u,depthBiasClamp:%u,depthBounds:%u} lineWidthRange=%.6g..%.6g lineWidthGranularity=%.6g subgroup={size:%u,ops:0x%x}\n",
                 caps->api_version,
                 caps->device_name,
                 caps->vendor_id,
@@ -11558,6 +11572,8 @@ static void trace_executor_advertisement_caps_once(void) {
                 caps->features.alphaToOne,
                 caps->features.logicOp,
                 caps->features.wideLines,
+                caps->features.depthClamp,
+                caps->features.fillModeNonSolid,
                 caps->features.depthBiasClamp,
                 caps->features.depthBounds,
                 caps->limits.lineWidthRange[0],
@@ -11943,6 +11959,8 @@ static void fill_physical_device_features(VkPhysicalDeviceFeatures *pFeatures) {
     pFeatures->alphaToOne = advertised_alpha_to_one();
     pFeatures->logicOp = advertised_logic_op();
     pFeatures->wideLines = advertised_wide_lines();
+    pFeatures->depthClamp = advertised_depth_clamp();
+    pFeatures->fillModeNonSolid = advertised_fill_mode_non_solid();
     pFeatures->depthBiasClamp = advertised_depth_bias_clamp();
     pFeatures->depthBounds = advertised_depth_bounds();
 }
@@ -12588,6 +12606,8 @@ static uint64_t feature_mask_from_base_features(const VkPhysicalDeviceFeatures *
     if (features->alphaToOne) mask |= PDOCKER_VK_FEATURE_ALPHA_TO_ONE;
     if (features->logicOp) mask |= PDOCKER_VK_FEATURE_LOGIC_OP;
     if (features->wideLines) mask |= PDOCKER_VK_FEATURE_WIDE_LINES;
+    if (features->depthClamp) mask |= PDOCKER_VK_FEATURE_DEPTH_CLAMP;
+    if (features->fillModeNonSolid) mask |= PDOCKER_VK_FEATURE_FILL_MODE_NON_SOLID;
     if (features->depthBiasClamp) mask |= PDOCKER_VK_FEATURE_DEPTH_BIAS_CLAMP;
     if (features->depthBounds) mask |= PDOCKER_VK_FEATURE_DEPTH_BOUNDS;
     return mask;
@@ -12746,6 +12766,8 @@ static uint64_t advertised_feature_mask(void) {
         if (advertised_alpha_to_one()) mask |= PDOCKER_VK_FEATURE_ALPHA_TO_ONE;
         if (advertised_logic_op()) mask |= PDOCKER_VK_FEATURE_LOGIC_OP;
         if (advertised_wide_lines()) mask |= PDOCKER_VK_FEATURE_WIDE_LINES;
+        if (advertised_depth_clamp()) mask |= PDOCKER_VK_FEATURE_DEPTH_CLAMP;
+        if (advertised_fill_mode_non_solid()) mask |= PDOCKER_VK_FEATURE_FILL_MODE_NON_SOLID;
         if (advertised_depth_bias_clamp()) mask |= PDOCKER_VK_FEATURE_DEPTH_BIAS_CLAMP;
         if (advertised_depth_bounds()) mask |= PDOCKER_VK_FEATURE_DEPTH_BOUNDS;
     } else {
@@ -12787,7 +12809,7 @@ static void trace_device_create_features(const VkDeviceCreateInfo *pCreateInfo) 
     if (!pCreateInfo || !(trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG"))) return;
     const VkPhysicalDeviceFeatures *features = pCreateInfo->pEnabledFeatures;
     fprintf(stderr,
-            "pdocker-vulkan-icd: create-device extensions=%u base_features={shaderInt64:%u,shaderInt16:%u,shaderFloat64:%u,geometryShader:%u,tessellationShader:%u,sampleRateShading:%u,alphaToOne:%u,logicOp:%u,wideLines:%u,depthBiasClamp:%u,depthBounds:%u}\n",
+            "pdocker-vulkan-icd: create-device extensions=%u base_features={shaderInt64:%u,shaderInt16:%u,shaderFloat64:%u,geometryShader:%u,tessellationShader:%u,sampleRateShading:%u,alphaToOne:%u,logicOp:%u,wideLines:%u,depthClamp:%u,fillModeNonSolid:%u,depthBiasClamp:%u,depthBounds:%u}\n",
             pCreateInfo->enabledExtensionCount,
             features ? features->shaderInt64 : 0,
             features ? features->shaderInt16 : 0,
@@ -12798,6 +12820,8 @@ static void trace_device_create_features(const VkDeviceCreateInfo *pCreateInfo) 
             features ? features->alphaToOne : 0,
             features ? features->logicOp : 0,
             features ? features->wideLines : 0,
+            features ? features->depthClamp : 0,
+            features ? features->fillModeNonSolid : 0,
             features ? features->depthBiasClamp : 0,
             features ? features->depthBounds : 0);
     for (const void *node = pCreateInfo->pNext; node;) {
@@ -12806,7 +12830,7 @@ static void trace_device_create_features(const VkDeviceCreateInfo *pCreateInfo) 
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2: {
                 const VkPhysicalDeviceFeatures2 *p = (const VkPhysicalDeviceFeatures2 *)node;
                 fprintf(stderr,
-                        "pdocker-vulkan-icd: create-device features2={shaderInt64:%u,shaderInt16:%u,shaderFloat64:%u,geometryShader:%u,tessellationShader:%u,sampleRateShading:%u,alphaToOne:%u,logicOp:%u,wideLines:%u,depthBiasClamp:%u,depthBounds:%u}\n",
+                        "pdocker-vulkan-icd: create-device features2={shaderInt64:%u,shaderInt16:%u,shaderFloat64:%u,geometryShader:%u,tessellationShader:%u,sampleRateShading:%u,alphaToOne:%u,logicOp:%u,wideLines:%u,depthClamp:%u,fillModeNonSolid:%u,depthBiasClamp:%u,depthBounds:%u}\n",
                         p->features.shaderInt64,
                         p->features.shaderInt16,
                         p->features.shaderFloat64,
@@ -12816,6 +12840,8 @@ static void trace_device_create_features(const VkDeviceCreateInfo *pCreateInfo) 
                         p->features.alphaToOne,
                         p->features.logicOp,
                         p->features.wideLines,
+                        p->features.depthClamp,
+                        p->features.fillModeNonSolid,
                         p->features.depthBiasClamp,
                         p->features.depthBounds);
                 break;
@@ -16376,6 +16402,14 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
             pipeline->depth_bias_clamp = ci->pRasterizationState->depthBiasClamp;
             pipeline->depth_bias_slope_factor = ci->pRasterizationState->depthBiasSlopeFactor;
             pipeline->line_width = ci->pRasterizationState->lineWidth;
+            if (pipeline->depth_clamp_enable &&
+                (pipeline->requested_feature_mask & PDOCKER_VK_FEATURE_DEPTH_CLAMP) == 0) {
+                pipeline->graphics_unsupported = true;
+            }
+            if (pipeline->polygon_mode != VK_POLYGON_MODE_FILL &&
+                (pipeline->requested_feature_mask & PDOCKER_VK_FEATURE_FILL_MODE_NON_SOLID) == 0) {
+                pipeline->graphics_unsupported = true;
+            }
             if (pipeline->depth_bias_enable && pipeline->depth_bias_clamp != 0.0f &&
                 (pipeline->requested_feature_mask & PDOCKER_VK_FEATURE_DEPTH_BIAS_CLAMP) == 0) {
                 pipeline->graphics_unsupported = true;

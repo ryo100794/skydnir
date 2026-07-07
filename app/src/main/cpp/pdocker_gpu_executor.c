@@ -83,6 +83,8 @@
 #define PDOCKER_VK_FEATURE_WIDE_LINES                  (1ull << 27)
 #define PDOCKER_VK_FEATURE_DEPTH_BIAS_CLAMP            (1ull << 28)
 #define PDOCKER_VK_FEATURE_DEPTH_BOUNDS                (1ull << 29)
+#define PDOCKER_VK_FEATURE_DEPTH_CLAMP                 (1ull << 30)
+#define PDOCKER_VK_FEATURE_FILL_MODE_NON_SOLID         (1ull << 31)
 
 #ifndef GL_COMPUTE_SHADER
 #define GL_COMPUTE_SHADER 0x91B9
@@ -1831,7 +1833,7 @@ static void log_vulkan_feature_trace(const VulkanRuntime *rt) {
     fprintf(stderr,
             "pdocker-gpu-executor: Android Vulkan features build_marker=%s api=%u.%u device=\"%s\" vendor=0x%04x device=0x%04x "
             "shaderInt64=%u geometryShader=%u tessellationShader=%u "
-            "graphics_base={sampleRateShading:%u,alphaToOne:%u,logicOp:%u,wideLines:%u,depthBiasClamp:%u,depthBounds:%u} "
+            "graphics_base={sampleRateShading:%u,alphaToOne:%u,logicOp:%u,wideLines:%u,depthClamp:%u,fillModeNonSolid:%u,depthBiasClamp:%u,depthBounds:%u} "
             "storage16={ssbo:%u,ubo_ssbo:%u,push:%u,io:%u} "
             "storage8={ssbo:%u,ubo_ssbo:%u,push:%u} "
             "float16=%u int8=%u indexTypeUint8=%u "
@@ -1852,6 +1854,8 @@ static void log_vulkan_feature_trace(const VulkanRuntime *rt) {
             rt->physical_features.alphaToOne,
             rt->physical_features.logicOp,
             rt->physical_features.wideLines,
+            rt->physical_features.depthClamp,
+            rt->physical_features.fillModeNonSolid,
             rt->physical_features.depthBiasClamp,
             rt->physical_features.depthBounds,
             rt->physical_storage16.storageBuffer16BitAccess,
@@ -1895,7 +1899,7 @@ static void log_vulkan_enabled_feature_trace(
         const VkPhysicalDeviceIndexTypeUint8FeaturesEXT *index_type_uint8) {
     fprintf(stderr,
             "pdocker-gpu-executor: Android Vulkan enabled features build_marker=%s shaderInt64=%u geometryShader=%u tessellationShader=%u "
-            "graphics_base={sampleRateShading:%u,alphaToOne:%u,logicOp:%u,wideLines:%u,depthBiasClamp:%u,depthBounds:%u} "
+            "graphics_base={sampleRateShading:%u,alphaToOne:%u,logicOp:%u,wideLines:%u,depthClamp:%u,fillModeNonSolid:%u,depthBiasClamp:%u,depthBounds:%u} "
             "storage16={ssbo:%u,ubo_ssbo:%u,push:%u,io:%u} "
             "storage8={ssbo:%u,ubo_ssbo:%u,push:%u} "
             "float16=%u int8=%u indexTypeUint8=%u "
@@ -1909,6 +1913,8 @@ static void log_vulkan_enabled_feature_trace(
             features ? features->alphaToOne : 0,
             features ? features->logicOp : 0,
             features ? features->wideLines : 0,
+            features ? features->depthClamp : 0,
+            features ? features->fillModeNonSolid : 0,
             features ? features->depthBiasClamp : 0,
             features ? features->depthBounds : 0,
             storage16 ? storage16->storageBuffer16BitAccess : 0,
@@ -1944,6 +1950,8 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             "\"alphaToOne\":%u,"
             "\"logicOp\":%u,"
             "\"wideLines\":%u,"
+            "\"depthClamp\":%u,"
+            "\"fillModeNonSolid\":%u,"
             "\"depthBiasClamp\":%u,"
             "\"depthBounds\":%u,"
             "\"storageBuffer16BitAccess\":%u,"
@@ -1999,6 +2007,8 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             rt ? rt->enabled_features.alphaToOne : 0,
             rt ? rt->enabled_features.logicOp : 0,
             rt ? rt->enabled_features.wideLines : 0,
+            rt ? rt->enabled_features.depthClamp : 0,
+            rt ? rt->enabled_features.fillModeNonSolid : 0,
             rt ? rt->enabled_features.depthBiasClamp : 0,
             rt ? rt->enabled_features.depthBounds : 0,
             rt ? rt->enabled_storage16.storageBuffer16BitAccess : 0,
@@ -2169,6 +2179,8 @@ static void write_feature_mask_names(FILE *out, uint64_t mask) {
     WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_ALPHA_TO_ONE, "alphaToOne");
     WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_LOGIC_OP, "logicOp");
     WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_WIDE_LINES, "wideLines");
+    WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_DEPTH_CLAMP, "depthClamp");
+    WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_FILL_MODE_NON_SOLID, "fillModeNonSolid");
     WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_DEPTH_BIAS_CLAMP, "depthBiasClamp");
     WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_DEPTH_BOUNDS, "depthBounds");
 #undef WRITE_FEATURE_NAME
@@ -18409,6 +18421,8 @@ cleanup:
                 "\"alphaToOne\":%u,"
                 "\"logicOp\":%u,"
                 "\"wideLines\":%u,"
+                "\"depthClamp\":%u,"
+                "\"fillModeNonSolid\":%u,"
                 "\"depthBiasClamp\":%u,"
                 "\"depthBounds\":%u,"
                 "\"storageBuffer16BitAccess\":%u,"
@@ -18427,6 +18441,8 @@ cleanup:
                 rt ? rt->physical_features.alphaToOne : 0,
                 rt ? rt->physical_features.logicOp : 0,
                 rt ? rt->physical_features.wideLines : 0,
+                rt ? rt->physical_features.depthClamp : 0,
+                rt ? rt->physical_features.fillModeNonSolid : 0,
                 rt ? rt->physical_features.depthBiasClamp : 0,
                 rt ? rt->physical_features.depthBounds : 0,
                 rt ? rt->physical_storage16.storageBuffer16BitAccess : 0,
@@ -18635,6 +18651,8 @@ static void print_capabilities(const char *transport) {
             "\"alphaToOne\":%u,"
             "\"logicOp\":%u,"
             "\"wideLines\":%u,"
+            "\"depthClamp\":%u,"
+            "\"fillModeNonSolid\":%u,"
             "\"depthBiasClamp\":%u,"
             "\"depthBounds\":%u,"
             "\"storageBuffer16BitAccess\":%u,"
@@ -18683,6 +18701,8 @@ static void print_capabilities(const char *transport) {
             rt ? rt->physical_features.alphaToOne : 0,
             rt ? rt->physical_features.logicOp : 0,
             rt ? rt->physical_features.wideLines : 0,
+            rt ? rt->physical_features.depthClamp : 0,
+            rt ? rt->physical_features.fillModeNonSolid : 0,
             rt ? rt->physical_features.depthBiasClamp : 0,
             rt ? rt->physical_features.depthBounds : 0,
             rt ? rt->physical_storage16.storageBuffer16BitAccess : 0,
@@ -18814,6 +18834,8 @@ static void print_vulkan_advertisement_caps(const char *transport) {
             "\"alphaToOne\":%u,"
             "\"logicOp\":%u,"
             "\"wideLines\":%u,"
+            "\"depthClamp\":%u,"
+            "\"fillModeNonSolid\":%u,"
             "\"depthBiasClamp\":%u,"
             "\"depthBounds\":%u,"
             "\"storage16\":{"
@@ -18840,6 +18862,8 @@ static void print_vulkan_advertisement_caps(const char *transport) {
             rt ? rt->physical_features.alphaToOne : 0,
             rt ? rt->physical_features.logicOp : 0,
             rt ? rt->physical_features.wideLines : 0,
+            rt ? rt->physical_features.depthClamp : 0,
+            rt ? rt->physical_features.fillModeNonSolid : 0,
             rt ? rt->physical_features.depthBiasClamp : 0,
             rt ? rt->physical_features.depthBounds : 0,
             rt ? rt->physical_storage16.storageBuffer16BitAccess : 0,
@@ -24642,6 +24666,11 @@ find_vulkan_graphics_v622_multisample_state(
     return NULL;
 }
 
+static const PdockerGpuVulkanGraphicsV65StaticPipelineStateEntry *
+find_vulkan_graphics_v65_static_pipeline_state(
+        const VulkanGraphicsV6FrameView *view,
+        uint32_t pipeline_index);
+
 static const PdockerGpuVulkanGraphicsV623TessellationStateEntry *
 find_vulkan_graphics_v623_tessellation_state(
         const VulkanGraphicsV6FrameView *view,
@@ -25646,6 +25675,21 @@ static int preflight_vulkan_graphics_v6_runtime_supported(
             }
             const PdockerGpuVulkanGraphicsV6PipelineEntry *pipeline =
                 &view->pipelines[command->pipeline_index];
+            const PdockerGpuVulkanGraphicsV65StaticPipelineStateEntry *static_state =
+                find_vulkan_graphics_v65_static_pipeline_state(view, command->pipeline_index);
+            const uint32_t static_flags = static_state ? static_state->flags : 0u;
+            if ((static_flags & PDOCKER_GPU_GRAPHICS_V65_STATIC_DEPTH_CLAMP_ENABLE) != 0 &&
+                !g_vulkan_runtime.enabled_features.depthClamp) {
+                reason = "depth-clamp pipeline replay requires depthClamp";
+                if (reason_out) *reason_out = reason;
+                return -EOPNOTSUPP;
+            }
+            if (pipeline->polygon_mode != VK_POLYGON_MODE_FILL &&
+                !g_vulkan_runtime.enabled_features.fillModeNonSolid) {
+                reason = "non-solid polygon-mode pipeline replay requires fillModeNonSolid";
+                if (reason_out) *reason_out = reason;
+                return -EOPNOTSUPP;
+            }
             const PdockerGpuVulkanGraphicsV622MultisampleStateEntry *multisample_state =
                 find_vulkan_graphics_v622_multisample_state(view, command->pipeline_index);
             if (multisample_state) {
