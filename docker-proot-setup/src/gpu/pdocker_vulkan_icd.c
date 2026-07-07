@@ -317,6 +317,7 @@ static uint64_t g_generic_dispatch_sequence = 0;
 #define PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2     (1ull << 22)
 #define PDOCKER_VK_FEATURE_MULTIVIEW                    (1ull << 20)
 #define PDOCKER_VK_FEATURE_TESSELLATION_SHADER        (1ull << 21)
+#define PDOCKER_VK_FEATURE_GEOMETRY_SHADER             (1ull << 23)
 
 struct PdockerVkMemory {
     uint64_t object_id;
@@ -11021,10 +11022,16 @@ static bool parse_executor_advertisement_caps_json(
     json_read_u32(json, "maxBoundDescriptorSets", &caps->limits.maxBoundDescriptorSets);
     json_read_u32(json, "maxComputeWorkGroupInvocations", &caps->limits.maxComputeWorkGroupInvocations);
     json_read_u32(json, "maxStorageBufferRange", &caps->limits.maxStorageBufferRange);
+    json_read_u32(json, "maxGeometryShaderInvocations", &caps->limits.maxGeometryShaderInvocations);
+    json_read_u32(json, "maxGeometryInputComponents", &caps->limits.maxGeometryInputComponents);
+    json_read_u32(json, "maxGeometryOutputComponents", &caps->limits.maxGeometryOutputComponents);
+    json_read_u32(json, "maxGeometryOutputVertices", &caps->limits.maxGeometryOutputVertices);
+    json_read_u32(json, "maxGeometryTotalOutputComponents", &caps->limits.maxGeometryTotalOutputComponents);
     json_read_u32_array3(json, "maxComputeWorkGroupSize", caps->limits.maxComputeWorkGroupSize);
     json_read_u32_array3(json, "maxComputeWorkGroupCount", caps->limits.maxComputeWorkGroupCount);
 
     json_read_u32(json, "shaderInt64", &caps->features.shaderInt64);
+    json_read_u32(json, "geometryShader", &caps->features.geometryShader);
     json_read_u32(json, "tessellationShader", &caps->features.tessellationShader);
     json_read_u32(json, "multiview", &caps->multiview);
     json_read_u32(json, "storageBuffer16BitAccess", &caps->storage16.storageBuffer16BitAccess);
@@ -11290,6 +11297,18 @@ static VkBool32 advertised_timeline_semaphore(void) {
     return (caps && caps->timeline_semaphore && caps->ext_timeline_semaphore) ? VK_TRUE : VK_FALSE;
 }
 
+static VkBool32 advertised_geometry_shader(void) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+    if (!caps || !caps->features.geometryShader) return VK_FALSE;
+    return (caps->limits.maxGeometryShaderInvocations &&
+            caps->limits.maxGeometryInputComponents &&
+            caps->limits.maxGeometryOutputComponents &&
+            caps->limits.maxGeometryOutputVertices &&
+            caps->limits.maxGeometryTotalOutputComponents)
+        ? VK_TRUE
+        : VK_FALSE;
+}
+
 static VkBool32 advertised_tessellation_shader(void) {
     const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
     return (caps && caps->features.tessellationShader) ? VK_TRUE : VK_FALSE;
@@ -11392,7 +11411,7 @@ static void trace_executor_advertisement_caps_once(void) {
         fprintf(stderr,
                 "pdocker-vulkan-icd: executor advertisement caps shadow: "
                 "api=0x%08x device=\"%s\" vendor=0x%04x device_id=0x%04x "
-                "type=%u storage16=%u storage8=%u int8=%u indexTypeUint8=%u tessellationShader=%u subgroup={size:%u,ops:0x%x}\n",
+                "type=%u storage16=%u storage8=%u int8=%u indexTypeUint8=%u geometryShader=%u tessellationShader=%u subgroup={size:%u,ops:0x%x}\n",
                 caps->api_version,
                 caps->device_name,
                 caps->vendor_id,
@@ -11402,6 +11421,7 @@ static void trace_executor_advertisement_caps_once(void) {
                 caps->storage8.storageBuffer8BitAccess,
                 caps->float16_int8.shaderInt8,
                 caps->index_type_uint8.indexTypeUint8,
+                caps->features.geometryShader,
                 caps->features.tessellationShader,
                 caps->subgroup.subgroupSize,
                 caps->subgroup.supportedOperations);
@@ -11485,6 +11505,16 @@ static void fill_physical_device_properties(VkPhysicalDeviceProperties *pPropert
                 ? caps->limits.maxStorageBufferRange
                 : transport_max_storage_range)
             : transport_max_storage_range;
+    pProperties->limits.maxGeometryShaderInvocations =
+        caps ? caps->limits.maxGeometryShaderInvocations : 0;
+    pProperties->limits.maxGeometryInputComponents =
+        caps ? caps->limits.maxGeometryInputComponents : 0;
+    pProperties->limits.maxGeometryOutputComponents =
+        caps ? caps->limits.maxGeometryOutputComponents : 0;
+    pProperties->limits.maxGeometryOutputVertices =
+        caps ? caps->limits.maxGeometryOutputVertices : 0;
+    pProperties->limits.maxGeometryTotalOutputComponents =
+        caps ? caps->limits.maxGeometryTotalOutputComponents : 0;
     pProperties->limits.maxMemoryAllocationCount = 4096;
     pProperties->limits.maxImageDimension1D = 4096;
     pProperties->limits.maxImageDimension2D = 4096;
@@ -11758,6 +11788,7 @@ static void fill_physical_device_features(VkPhysicalDeviceFeatures *pFeatures) {
     if (!pFeatures) return;
     memset(pFeatures, 0, sizeof(*pFeatures));
     pFeatures->shaderInt64 = advertised_shader_int64();
+    pFeatures->geometryShader = advertised_geometry_shader();
     pFeatures->tessellationShader = advertised_tessellation_shader();
 }
 
@@ -12396,6 +12427,7 @@ static uint64_t feature_mask_from_base_features(const VkPhysicalDeviceFeatures *
     if (features->shaderInt64) mask |= PDOCKER_VK_FEATURE_SHADER_INT64;
     if (features->shaderInt16) mask |= PDOCKER_VK_FEATURE_SHADER_INT16;
     if (features->shaderFloat64) mask |= PDOCKER_VK_FEATURE_SHADER_FLOAT64;
+    if (features->geometryShader) mask |= PDOCKER_VK_FEATURE_GEOMETRY_SHADER;
     if (features->tessellationShader) mask |= PDOCKER_VK_FEATURE_TESSELLATION_SHADER;
     return mask;
 }
@@ -12547,6 +12579,7 @@ static uint64_t advertised_feature_mask(void) {
             mask |= PDOCKER_VK_FEATURE_INDEX_TYPE_UINT8;
         }
         if (caps->multiview) mask |= PDOCKER_VK_FEATURE_MULTIVIEW;
+        if (advertised_geometry_shader()) mask |= PDOCKER_VK_FEATURE_GEOMETRY_SHADER;
         if (caps->features.tessellationShader) mask |= PDOCKER_VK_FEATURE_TESSELLATION_SHADER;
     } else {
         if (advertised_storage16()) mask |= PDOCKER_VK_FEATURE_STORAGE_BUFFER_16;
@@ -12587,11 +12620,12 @@ static void trace_device_create_features(const VkDeviceCreateInfo *pCreateInfo) 
     if (!pCreateInfo || !(trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG"))) return;
     const VkPhysicalDeviceFeatures *features = pCreateInfo->pEnabledFeatures;
     fprintf(stderr,
-            "pdocker-vulkan-icd: create-device extensions=%u base_features={shaderInt64:%u,shaderInt16:%u,shaderFloat64:%u,tessellationShader:%u}\n",
+            "pdocker-vulkan-icd: create-device extensions=%u base_features={shaderInt64:%u,shaderInt16:%u,shaderFloat64:%u,geometryShader:%u,tessellationShader:%u}\n",
             pCreateInfo->enabledExtensionCount,
             features ? features->shaderInt64 : 0,
             features ? features->shaderInt16 : 0,
             features ? features->shaderFloat64 : 0,
+            features ? features->geometryShader : 0,
             features ? features->tessellationShader : 0);
     for (const void *node = pCreateInfo->pNext; node;) {
         PdockerVkStructHeader header = read_vk_struct_header(node);
@@ -12599,10 +12633,11 @@ static void trace_device_create_features(const VkDeviceCreateInfo *pCreateInfo) 
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2: {
                 const VkPhysicalDeviceFeatures2 *p = (const VkPhysicalDeviceFeatures2 *)node;
                 fprintf(stderr,
-                        "pdocker-vulkan-icd: create-device features2={shaderInt64:%u,shaderInt16:%u,shaderFloat64:%u,tessellationShader:%u}\n",
+                        "pdocker-vulkan-icd: create-device features2={shaderInt64:%u,shaderInt16:%u,shaderFloat64:%u,geometryShader:%u,tessellationShader:%u}\n",
                         p->features.shaderInt64,
                         p->features.shaderInt16,
                         p->features.shaderFloat64,
+                        p->features.geometryShader,
                         p->features.tessellationShader);
                 break;
             }
@@ -16329,6 +16364,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
                 pipeline->patch_control_points = ts->patchControlPoints;
             }
         } else if (tessellation_stage_flags != 0) {
+            pipeline->graphics_unsupported = true;
+        }
+        const VkShaderStageFlags geometry_stage_flags =
+            pipeline->shader_stage_flags & VK_SHADER_STAGE_GEOMETRY_BIT;
+        if (geometry_stage_flags != 0 &&
+            (pipeline->requested_feature_mask & PDOCKER_VK_FEATURE_GEOMETRY_SHADER) == 0) {
             pipeline->graphics_unsupported = true;
         }
         if (!pipeline->dynamic_rendering_pipeline && pipeline->render_pass) {

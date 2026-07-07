@@ -76,6 +76,7 @@
 #define PDOCKER_VK_FEATURE_SHADER_FLOAT16               (1ull << 9)
 #define PDOCKER_VK_FEATURE_SHADER_INT8                  (1ull << 10)
 #define PDOCKER_VK_FEATURE_TESSELLATION_SHADER        (1ull << 21)
+#define PDOCKER_VK_FEATURE_GEOMETRY_SHADER             (1ull << 23)
 
 #ifndef GL_COMPUTE_SHADER
 #define GL_COMPUTE_SHADER 0x91B9
@@ -1823,7 +1824,7 @@ static void log_vulkan_feature_trace(const VulkanRuntime *rt) {
     if (!rt) return;
     fprintf(stderr,
             "pdocker-gpu-executor: Android Vulkan features build_marker=%s api=%u.%u device=\"%s\" vendor=0x%04x device=0x%04x "
-            "shaderInt64=%u tessellationShader=%u "
+            "shaderInt64=%u geometryShader=%u tessellationShader=%u "
             "storage16={ssbo:%u,ubo_ssbo:%u,push:%u,io:%u} "
             "storage8={ssbo:%u,ubo_ssbo:%u,push:%u} "
             "float16=%u int8=%u indexTypeUint8=%u "
@@ -1838,6 +1839,7 @@ static void log_vulkan_feature_trace(const VulkanRuntime *rt) {
             rt->physical_properties.vendorID,
             rt->physical_properties.deviceID,
             rt->physical_features.shaderInt64,
+            rt->physical_features.geometryShader,
             rt->physical_features.tessellationShader,
             rt->physical_storage16.storageBuffer16BitAccess,
             rt->physical_storage16.uniformAndStorageBuffer16BitAccess,
@@ -1879,7 +1881,7 @@ static void log_vulkan_enabled_feature_trace(
         const VkPhysicalDeviceShaderFloat16Int8Features *float16_int8,
         const VkPhysicalDeviceIndexTypeUint8FeaturesEXT *index_type_uint8) {
     fprintf(stderr,
-            "pdocker-gpu-executor: Android Vulkan enabled features build_marker=%s shaderInt64=%u tessellationShader=%u "
+            "pdocker-gpu-executor: Android Vulkan enabled features build_marker=%s shaderInt64=%u geometryShader=%u tessellationShader=%u "
             "storage16={ssbo:%u,ubo_ssbo:%u,push:%u,io:%u} "
             "storage8={ssbo:%u,ubo_ssbo:%u,push:%u} "
             "float16=%u int8=%u indexTypeUint8=%u "
@@ -1887,6 +1889,7 @@ static void log_vulkan_enabled_feature_trace(
             "core12_storage8={ssbo:%u,ubo_ssbo:%u,push:%u,float16:%u,int8:%u}\n",
             PDOCKER_GPU_EXECUTOR_BUILD_MARKER,
             features ? features->shaderInt64 : 0,
+            features ? features->geometryShader : 0,
             features ? features->tessellationShader : 0,
             storage16 ? storage16->storageBuffer16BitAccess : 0,
             storage16 ? storage16->uniformAndStorageBuffer16BitAccess : 0,
@@ -1915,6 +1918,7 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
     fprintf(out,
             "\"android_vulkan_enabled_features\":{"
             "\"shaderInt64\":%u,"
+            "\"geometryShader\":%u,"
             "\"tessellationShader\":%u,"
             "\"storageBuffer16BitAccess\":%u,"
             "\"uniformAndStorageBuffer16BitAccess\":%u,"
@@ -1963,6 +1967,7 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             "\"VK_EXT_extended_dynamic_state2\":%u,"
             "\"VK_EXT_index_type_uint8\":%u}}",
             rt ? rt->enabled_features.shaderInt64 : 0,
+            rt ? rt->enabled_features.geometryShader : 0,
             rt ? rt->enabled_features.tessellationShader : 0,
             rt ? rt->enabled_storage16.storageBuffer16BitAccess : 0,
             rt ? rt->enabled_storage16.uniformAndStorageBuffer16BitAccess : 0,
@@ -2127,6 +2132,7 @@ static void write_feature_mask_names(FILE *out, uint64_t mask) {
     WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_SHADER_FLOAT16, "shaderFloat16");
     WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_SHADER_INT8, "shaderInt8");
     WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_TESSELLATION_SHADER, "tessellationShader");
+    WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_GEOMETRY_SHADER, "geometryShader");
 #undef WRITE_FEATURE_NAME
 }
 
@@ -18359,6 +18365,7 @@ cleanup:
         fprintf(json_out(),
                 ",\"android_vulkan_features\":{"
                 "\"shaderInt64\":%u,"
+                "\"geometryShader\":%u,"
                 "\"tessellationShader\":%u,"
                 "\"storageBuffer16BitAccess\":%u,"
                 "\"uniformAndStorageBuffer16BitAccess\":%u,"
@@ -18370,6 +18377,7 @@ cleanup:
                 "\"shaderInt8\":%u,"
                 "\"indexTypeUint8\":%u},",
                 rt ? rt->physical_features.shaderInt64 : 0,
+                rt ? rt->physical_features.geometryShader : 0,
                 rt ? rt->physical_features.tessellationShader : 0,
                 rt ? rt->physical_storage16.storageBuffer16BitAccess : 0,
                 rt ? rt->physical_storage16.uniformAndStorageBuffer16BitAccess : 0,
@@ -18571,6 +18579,7 @@ static void print_capabilities(const char *transport) {
             "\"android_vulkan_features\":{"
             "\"api_major\":%u,\"api_minor\":%u,"
             "\"shaderInt64\":%u,"
+            "\"geometryShader\":%u,"
             "\"tessellationShader\":%u,"
             "\"storageBuffer16BitAccess\":%u,"
             "\"uniformAndStorageBuffer16BitAccess\":%u,"
@@ -18612,6 +18621,7 @@ static void print_capabilities(const char *transport) {
             rt ? VK_API_VERSION_MAJOR(rt->api_version) : 0,
             rt ? VK_API_VERSION_MINOR(rt->api_version) : 0,
             rt ? rt->physical_features.shaderInt64 : 0,
+            rt ? rt->physical_features.geometryShader : 0,
             rt ? rt->physical_features.tessellationShader : 0,
             rt ? rt->physical_storage16.storageBuffer16BitAccess : 0,
             rt ? rt->physical_storage16.uniformAndStorageBuffer16BitAccess : 0,
@@ -18704,7 +18714,12 @@ static void print_vulkan_advertisement_caps(const char *transport) {
             "\"maxComputeWorkGroupInvocations\":%u,"
             "\"maxComputeWorkGroupSize\":[%u,%u,%u],"
             "\"maxComputeWorkGroupCount\":[%u,%u,%u],"
-            "\"maxStorageBufferRange\":%u},",
+            "\"maxStorageBufferRange\":%u,"
+            "\"maxGeometryShaderInvocations\":%u,"
+            "\"maxGeometryInputComponents\":%u,"
+            "\"maxGeometryOutputComponents\":%u,"
+            "\"maxGeometryOutputVertices\":%u,"
+            "\"maxGeometryTotalOutputComponents\":%u},",
             limits ? limits->maxPushConstantsSize : 0,
             limits ? limits->maxComputeSharedMemorySize : 0,
             limits ? limits->maxPerStageDescriptorStorageBuffers : 0,
@@ -18717,10 +18732,16 @@ static void print_vulkan_advertisement_caps(const char *transport) {
             limits ? limits->maxComputeWorkGroupCount[0] : 0,
             limits ? limits->maxComputeWorkGroupCount[1] : 0,
             limits ? limits->maxComputeWorkGroupCount[2] : 0,
-            limits ? limits->maxStorageBufferRange : 0);
+            limits ? limits->maxStorageBufferRange : 0,
+            limits ? limits->maxGeometryShaderInvocations : 0,
+            limits ? limits->maxGeometryInputComponents : 0,
+            limits ? limits->maxGeometryOutputComponents : 0,
+            limits ? limits->maxGeometryOutputVertices : 0,
+            limits ? limits->maxGeometryTotalOutputComponents : 0);
     fprintf(out,
             "\"physical_features\":{"
             "\"shaderInt64\":%u,"
+            "\"geometryShader\":%u,"
             "\"tessellationShader\":%u,"
             "\"storage16\":{"
             "\"storageBuffer16BitAccess\":%u,"
@@ -18740,6 +18761,7 @@ static void print_vulkan_advertisement_caps(const char *transport) {
             "\"extendedDynamicState2LogicOp\":%u,"
             "\"extendedDynamicState2PatchControlPoints\":%u},",
             rt ? rt->physical_features.shaderInt64 : 0,
+            rt ? rt->physical_features.geometryShader : 0,
             rt ? rt->physical_features.tessellationShader : 0,
             rt ? rt->physical_storage16.storageBuffer16BitAccess : 0,
             rt ? rt->physical_storage16.uniformAndStorageBuffer16BitAccess : 0,
@@ -25100,6 +25122,7 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                         VK_SHADER_STAGE_VERTEX_BIT |
                         VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT |
                         VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT |
+                        VK_SHADER_STAGE_GEOMETRY_BIT |
                         VK_SHADER_STAGE_FRAGMENT_BIT;
                     if ((stage_flags & ~supported_stage_flags) != 0 || stage_flags == 0) {
                         reason = "unsupported graphics shader stage is not implemented";
@@ -25560,10 +25583,18 @@ static int preflight_vulkan_graphics_v6_runtime_supported(
                     return -EOPNOTSUPP;
                 }
             }
+            const VkShaderStageFlags pipeline_stage_flags =
+                vulkan_graphics_v6_pipeline_stage_flags(view, pipeline);
+            const VkShaderStageFlags geometry_stage_flags =
+                pipeline_stage_flags & VK_SHADER_STAGE_GEOMETRY_BIT;
+            if (geometry_stage_flags != 0 && !g_vulkan_runtime.enabled_features.geometryShader) {
+                reason = "geometry shader replay requires geometryShader";
+                if (reason_out) *reason_out = reason;
+                return -EOPNOTSUPP;
+            }
             const VkShaderStageFlags tessellation_stage_flags =
-                vulkan_graphics_v6_pipeline_stage_flags(view, pipeline) &
-                (VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT |
-                 VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT);
+                pipeline_stage_flags & (VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT |
+                                        VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT);
             if (tessellation_stage_flags != 0) {
                 const PdockerGpuVulkanGraphicsV623TessellationStateEntry *tessellation_state =
                     find_vulkan_graphics_v623_tessellation_state(view, command->pipeline_index);
@@ -25595,7 +25626,7 @@ static int preflight_vulkan_graphics_v6_runtime_supported(
     return 0;
 }
 
-#define PDOCKER_GPU_GRAPHICS_REPLAY_MAX_SHADER_STAGES 4u
+#define PDOCKER_GPU_GRAPHICS_REPLAY_MAX_SHADER_STAGES 5u
 #define PDOCKER_GPU_GRAPHICS_REPLAY_MAX_PUSH_RANGES 8u
 #define PDOCKER_GPU_GRAPHICS_REPLAY_MAX_COLOR_ATTACHMENTS 16u
 #define PDOCKER_GPU_GRAPHICS_REPLAY_MAX_BUFFERS PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_VERTEX_BINDINGS

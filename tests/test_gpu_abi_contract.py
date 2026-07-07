@@ -7083,10 +7083,12 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE",
             "PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2",
             "PDOCKER_VK_FEATURE_TESSELLATION_SHADER",
+            "PDOCKER_VK_FEATURE_GEOMETRY_SHADER",
             "if (p->synchronization2) mask |= PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;",
             "if (p->dynamicRendering) mask |= PDOCKER_VK_FEATURE_DYNAMIC_RENDERING;",
             "if (p->extendedDynamicState) mask |= PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE;",
             "if (p->extendedDynamicState2) mask |= PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2;",
+            "if (features->geometryShader) mask |= PDOCKER_VK_FEATURE_GEOMETRY_SHADER;",
             "if (features->tessellationShader) mask |= PDOCKER_VK_FEATURE_TESSELLATION_SHADER;",
             "PDOCKER_VK_FOR_EACH_BASE_FEATURE(CHECK_BASE_FEATURE)",
             "F(samplerAnisotropy)",
@@ -7098,7 +7100,13 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, bufferDeviceAddress);",
             "supported = !p->samplerYcbcrConversion;",
             "supported = !p->vulkanMemoryModel && !p->vulkanMemoryModelDeviceScope",
+            "json_read_u32(json, \"geometryShader\", &caps->features.geometryShader);",
+            "json_read_u32(json, \"maxGeometryOutputVertices\", &caps->limits.maxGeometryOutputVertices);",
+            "static VkBool32 advertised_geometry_shader(void)",
+            "pFeatures->geometryShader = advertised_geometry_shader();",
+            "if (advertised_geometry_shader()) mask |= PDOCKER_VK_FEATURE_GEOMETRY_SHADER;",
             "if (caps->features.tessellationShader) mask |= PDOCKER_VK_FEATURE_TESSELLATION_SHADER;",
+            "maxGeometryTotalOutputComponents",
             "if (advertised_synchronization2()) mask |= PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;",
             "if (advertised_dynamic_rendering()) mask |= PDOCKER_VK_FEATURE_DYNAMIC_RENDERING;",
         ]:
@@ -9109,6 +9117,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "VK_PRIMITIVE_TOPOLOGY_PATCH_LIST",
             "pipeline->requested_feature_mask =",
             "PDOCKER_VK_FEATURE_TESSELLATION_SHADER",
+            "PDOCKER_VK_FEATURE_GEOMETRY_SHADER",
+            "VK_SHADER_STAGE_GEOMETRY_BIT",
         ]:
             self.assertIn(marker, icd)
         graphics_create_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines", 1)[1].split(
@@ -9117,6 +9127,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("(void)device;", graphics_create_body)
         self.assertIn("device ? ((PdockerVkDevice *)device)->requested_feature_mask : 0", graphics_create_body)
         self.assertIn("pipeline->requested_feature_mask & PDOCKER_VK_FEATURE_TESSELLATION_SHADER", graphics_create_body)
+        self.assertIn("pipeline->requested_feature_mask & PDOCKER_VK_FEATURE_GEOMETRY_SHADER", graphics_create_body)
 
         for marker in [
             "PDOCKER_GPU_VULKAN_GRAPHICS_V623_ABI_MINOR",
@@ -9130,6 +9141,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "view->tessellation_states",
             "find_vulkan_graphics_v623_tessellation_state",
             "tessellation_state_table_hash",
+            "enabled_features.geometryShader",
             "enabled_features.tessellationShader",
             "maxTessellationPatchSize",
             "VK_PRIMITIVE_TOPOLOGY_PATCH_LIST",
@@ -9155,15 +9167,20 @@ class GpuAbiContractTest(unittest.TestCase):
             "static int record_vulkan_graphics_v6_command_buffer", 1
         )[1].split("static int submit_vulkan_graphics_v6_command_buffer", 1)[0]
 
+        self.assertNotIn("g_vulkan_runtime.enabled_features.geometryShader", replay_preflight_body)
         self.assertNotIn("g_vulkan_runtime.enabled_features.tessellationShader", replay_preflight_body)
         self.assertNotIn("g_vulkan_runtime.physical_properties.limits.maxTessellationPatchSize", replay_preflight_body)
         self.assertNotIn("g_vulkan_runtime.enabled_vulkan11.multiview", replay_preflight_body)
         self.assertNotIn("g_vulkan_runtime.enabled_features.sampleRateShading", replay_preflight_body)
         self.assertNotIn("g_vulkan_runtime.enabled_features.alphaToOne", replay_preflight_body)
         self.assertIn("init_vulkan_runtime(&g_vulkan_runtime)", runtime_preflight_body)
+        self.assertIn("g_vulkan_runtime.enabled_features.geometryShader", runtime_preflight_body)
+        self.assertIn("geometry shader replay requires geometryShader", runtime_preflight_body)
         self.assertIn("g_vulkan_runtime.enabled_features.tessellationShader", runtime_preflight_body)
         self.assertIn("g_vulkan_runtime.physical_properties.limits.maxTessellationPatchSize", runtime_preflight_body)
         self.assertIn("g_vulkan_runtime.enabled_vulkan11.multiview", runtime_preflight_body)
+        self.assertIn("VK_SHADER_STAGE_GEOMETRY_BIT", replay_preflight_body)
+        self.assertIn("#define PDOCKER_GPU_GRAPHICS_REPLAY_MAX_SHADER_STAGES 5u", executor)
         self.assertIn("VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY", replay_preflight_body)
         self.assertIn("tessellation draw requires patch-list primitive topology", replay_preflight_body)
         self.assertIn("tessellation indexed draw requires patch-list primitive topology", replay_preflight_body)
