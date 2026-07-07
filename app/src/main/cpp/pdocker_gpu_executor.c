@@ -85,6 +85,8 @@
 #define PDOCKER_VK_FEATURE_DEPTH_BOUNDS                (1ull << 29)
 #define PDOCKER_VK_FEATURE_DEPTH_CLAMP                 (1ull << 30)
 #define PDOCKER_VK_FEATURE_FILL_MODE_NON_SOLID         (1ull << 31)
+#define PDOCKER_VK_FEATURE_MULTI_DRAW_INDIRECT         (1ull << 32)
+#define PDOCKER_VK_FEATURE_DRAW_INDIRECT_FIRST_INSTANCE (1ull << 33)
 
 #ifndef GL_COMPUTE_SHADER
 #define GL_COMPUTE_SHADER 0x91B9
@@ -1833,7 +1835,7 @@ static void log_vulkan_feature_trace(const VulkanRuntime *rt) {
     fprintf(stderr,
             "pdocker-gpu-executor: Android Vulkan features build_marker=%s api=%u.%u device=\"%s\" vendor=0x%04x device=0x%04x "
             "shaderInt64=%u geometryShader=%u tessellationShader=%u "
-            "graphics_base={sampleRateShading:%u,alphaToOne:%u,logicOp:%u,wideLines:%u,depthClamp:%u,fillModeNonSolid:%u,depthBiasClamp:%u,depthBounds:%u} "
+            "graphics_base={sampleRateShading:%u,alphaToOne:%u,logicOp:%u,wideLines:%u,depthClamp:%u,fillModeNonSolid:%u,multiDrawIndirect:%u,drawIndirectFirstInstance:%u,depthBiasClamp:%u,depthBounds:%u} "
             "storage16={ssbo:%u,ubo_ssbo:%u,push:%u,io:%u} "
             "storage8={ssbo:%u,ubo_ssbo:%u,push:%u} "
             "float16=%u int8=%u indexTypeUint8=%u "
@@ -1856,6 +1858,8 @@ static void log_vulkan_feature_trace(const VulkanRuntime *rt) {
             rt->physical_features.wideLines,
             rt->physical_features.depthClamp,
             rt->physical_features.fillModeNonSolid,
+            rt->physical_features.multiDrawIndirect,
+            rt->physical_features.drawIndirectFirstInstance,
             rt->physical_features.depthBiasClamp,
             rt->physical_features.depthBounds,
             rt->physical_storage16.storageBuffer16BitAccess,
@@ -1899,7 +1903,7 @@ static void log_vulkan_enabled_feature_trace(
         const VkPhysicalDeviceIndexTypeUint8FeaturesEXT *index_type_uint8) {
     fprintf(stderr,
             "pdocker-gpu-executor: Android Vulkan enabled features build_marker=%s shaderInt64=%u geometryShader=%u tessellationShader=%u "
-            "graphics_base={sampleRateShading:%u,alphaToOne:%u,logicOp:%u,wideLines:%u,depthClamp:%u,fillModeNonSolid:%u,depthBiasClamp:%u,depthBounds:%u} "
+            "graphics_base={sampleRateShading:%u,alphaToOne:%u,logicOp:%u,wideLines:%u,depthClamp:%u,fillModeNonSolid:%u,multiDrawIndirect:%u,drawIndirectFirstInstance:%u,depthBiasClamp:%u,depthBounds:%u} "
             "storage16={ssbo:%u,ubo_ssbo:%u,push:%u,io:%u} "
             "storage8={ssbo:%u,ubo_ssbo:%u,push:%u} "
             "float16=%u int8=%u indexTypeUint8=%u "
@@ -1915,6 +1919,8 @@ static void log_vulkan_enabled_feature_trace(
             features ? features->wideLines : 0,
             features ? features->depthClamp : 0,
             features ? features->fillModeNonSolid : 0,
+            features ? features->multiDrawIndirect : 0,
+            features ? features->drawIndirectFirstInstance : 0,
             features ? features->depthBiasClamp : 0,
             features ? features->depthBounds : 0,
             storage16 ? storage16->storageBuffer16BitAccess : 0,
@@ -1952,6 +1958,8 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             "\"wideLines\":%u,"
             "\"depthClamp\":%u,"
             "\"fillModeNonSolid\":%u,"
+            "\"multiDrawIndirect\":%u,"
+            "\"drawIndirectFirstInstance\":%u,"
             "\"depthBiasClamp\":%u,"
             "\"depthBounds\":%u,"
             "\"storageBuffer16BitAccess\":%u,"
@@ -2009,6 +2017,8 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             rt ? rt->enabled_features.wideLines : 0,
             rt ? rt->enabled_features.depthClamp : 0,
             rt ? rt->enabled_features.fillModeNonSolid : 0,
+            rt ? rt->enabled_features.multiDrawIndirect : 0,
+            rt ? rt->enabled_features.drawIndirectFirstInstance : 0,
             rt ? rt->enabled_features.depthBiasClamp : 0,
             rt ? rt->enabled_features.depthBounds : 0,
             rt ? rt->enabled_storage16.storageBuffer16BitAccess : 0,
@@ -2181,6 +2191,8 @@ static void write_feature_mask_names(FILE *out, uint64_t mask) {
     WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_WIDE_LINES, "wideLines");
     WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_DEPTH_CLAMP, "depthClamp");
     WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_FILL_MODE_NON_SOLID, "fillModeNonSolid");
+    WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_MULTI_DRAW_INDIRECT, "multiDrawIndirect");
+    WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_DRAW_INDIRECT_FIRST_INSTANCE, "drawIndirectFirstInstance");
     WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_DEPTH_BIAS_CLAMP, "depthBiasClamp");
     WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_DEPTH_BOUNDS, "depthBounds");
 #undef WRITE_FEATURE_NAME
@@ -18423,6 +18435,8 @@ cleanup:
                 "\"wideLines\":%u,"
                 "\"depthClamp\":%u,"
                 "\"fillModeNonSolid\":%u,"
+                "\"multiDrawIndirect\":%u,"
+                "\"drawIndirectFirstInstance\":%u,"
                 "\"depthBiasClamp\":%u,"
                 "\"depthBounds\":%u,"
                 "\"storageBuffer16BitAccess\":%u,"
@@ -18443,6 +18457,8 @@ cleanup:
                 rt ? rt->physical_features.wideLines : 0,
                 rt ? rt->physical_features.depthClamp : 0,
                 rt ? rt->physical_features.fillModeNonSolid : 0,
+                rt ? rt->physical_features.multiDrawIndirect : 0,
+                rt ? rt->physical_features.drawIndirectFirstInstance : 0,
                 rt ? rt->physical_features.depthBiasClamp : 0,
                 rt ? rt->physical_features.depthBounds : 0,
                 rt ? rt->physical_storage16.storageBuffer16BitAccess : 0,
@@ -18653,6 +18669,8 @@ static void print_capabilities(const char *transport) {
             "\"wideLines\":%u,"
             "\"depthClamp\":%u,"
             "\"fillModeNonSolid\":%u,"
+            "\"multiDrawIndirect\":%u,"
+            "\"drawIndirectFirstInstance\":%u,"
             "\"depthBiasClamp\":%u,"
             "\"depthBounds\":%u,"
             "\"storageBuffer16BitAccess\":%u,"
@@ -18703,6 +18721,8 @@ static void print_capabilities(const char *transport) {
             rt ? rt->physical_features.wideLines : 0,
             rt ? rt->physical_features.depthClamp : 0,
             rt ? rt->physical_features.fillModeNonSolid : 0,
+            rt ? rt->physical_features.multiDrawIndirect : 0,
+            rt ? rt->physical_features.drawIndirectFirstInstance : 0,
             rt ? rt->physical_features.depthBiasClamp : 0,
             rt ? rt->physical_features.depthBounds : 0,
             rt ? rt->physical_storage16.storageBuffer16BitAccess : 0,
@@ -18836,6 +18856,8 @@ static void print_vulkan_advertisement_caps(const char *transport) {
             "\"wideLines\":%u,"
             "\"depthClamp\":%u,"
             "\"fillModeNonSolid\":%u,"
+            "\"multiDrawIndirect\":%u,"
+            "\"drawIndirectFirstInstance\":%u,"
             "\"depthBiasClamp\":%u,"
             "\"depthBounds\":%u,"
             "\"storage16\":{"
@@ -18864,6 +18886,8 @@ static void print_vulkan_advertisement_caps(const char *transport) {
             rt ? rt->physical_features.wideLines : 0,
             rt ? rt->physical_features.depthClamp : 0,
             rt ? rt->physical_features.fillModeNonSolid : 0,
+            rt ? rt->physical_features.multiDrawIndirect : 0,
+            rt ? rt->physical_features.drawIndirectFirstInstance : 0,
             rt ? rt->physical_features.depthBiasClamp : 0,
             rt ? rt->physical_features.depthBounds : 0,
             rt ? rt->physical_storage16.storageBuffer16BitAccess : 0,
@@ -25737,6 +25761,22 @@ static int preflight_vulkan_graphics_v6_runtime_supported(
                     if (reason_out) *reason_out = reason;
                     return -EOPNOTSUPP;
                 }
+            }
+        }
+    }
+    if (view && view->is_v68 && view->header_v68 && view->indirect_draws) {
+        for (uint32_t i = 0; i < view->header_v68->v68.indirect_draw_count; ++i) {
+            const PdockerGpuVulkanGraphicsV68IndirectDrawEntry *indirect = &view->indirect_draws[i];
+            if (indirect->draw_count > 1 &&
+                !g_vulkan_runtime.enabled_features.multiDrawIndirect) {
+                reason = "multi indirect draw replay requires multiDrawIndirect";
+                if (reason_out) *reason_out = reason;
+                return -EOPNOTSUPP;
+            }
+            if (!g_vulkan_runtime.enabled_features.drawIndirectFirstInstance) {
+                reason = "indirect draw replay requires drawIndirectFirstInstance";
+                if (reason_out) *reason_out = reason;
+                return -EOPNOTSUPP;
             }
         }
     }

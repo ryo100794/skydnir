@@ -7093,6 +7093,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_VK_FEATURE_WIDE_LINES",
             "PDOCKER_VK_FEATURE_DEPTH_CLAMP",
             "PDOCKER_VK_FEATURE_FILL_MODE_NON_SOLID",
+            "PDOCKER_VK_FEATURE_MULTI_DRAW_INDIRECT",
+            "PDOCKER_VK_FEATURE_DRAW_INDIRECT_FIRST_INSTANCE",
             "PDOCKER_VK_FEATURE_DEPTH_BIAS_CLAMP",
             "PDOCKER_VK_FEATURE_DEPTH_BOUNDS",
             "if (p->synchronization2) mask |= PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;",
@@ -7107,6 +7109,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "if (features->wideLines) mask |= PDOCKER_VK_FEATURE_WIDE_LINES;",
             "if (features->depthClamp) mask |= PDOCKER_VK_FEATURE_DEPTH_CLAMP;",
             "if (features->fillModeNonSolid) mask |= PDOCKER_VK_FEATURE_FILL_MODE_NON_SOLID;",
+            "if (features->multiDrawIndirect) mask |= PDOCKER_VK_FEATURE_MULTI_DRAW_INDIRECT;",
+            "if (features->drawIndirectFirstInstance) mask |= PDOCKER_VK_FEATURE_DRAW_INDIRECT_FIRST_INSTANCE;",
             "if (features->depthBiasClamp) mask |= PDOCKER_VK_FEATURE_DEPTH_BIAS_CLAMP;",
             "if (features->depthBounds) mask |= PDOCKER_VK_FEATURE_DEPTH_BOUNDS;",
             "PDOCKER_VK_FOR_EACH_BASE_FEATURE(CHECK_BASE_FEATURE)",
@@ -7126,6 +7130,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "json_read_u32(json, \"wideLines\", &caps->features.wideLines);",
             "json_read_u32(json, \"depthClamp\", &caps->features.depthClamp);",
             "json_read_u32(json, \"fillModeNonSolid\", &caps->features.fillModeNonSolid);",
+            "json_read_u32(json, \"multiDrawIndirect\", &caps->features.multiDrawIndirect);",
+            "json_read_u32(json, \"drawIndirectFirstInstance\", &caps->features.drawIndirectFirstInstance);",
             "json_read_u32(json, \"depthBiasClamp\", &caps->features.depthBiasClamp);",
             "json_read_u32(json, \"depthBounds\", &caps->features.depthBounds);",
             "json_read_u32(json, \"maxGeometryOutputVertices\", &caps->limits.maxGeometryOutputVertices);",
@@ -7135,6 +7141,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "static VkBool32 advertised_wide_lines(void)",
             "static VkBool32 advertised_depth_clamp(void)",
             "static VkBool32 advertised_fill_mode_non_solid(void)",
+            "static VkBool32 advertised_multi_draw_indirect(void)",
+            "static VkBool32 advertised_draw_indirect_first_instance(void)",
             "pFeatures->geometryShader = advertised_geometry_shader();",
             "pFeatures->sampleRateShading = advertised_sample_rate_shading();",
             "pFeatures->alphaToOne = advertised_alpha_to_one();",
@@ -7142,6 +7150,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "pFeatures->wideLines = advertised_wide_lines();",
             "pFeatures->depthClamp = advertised_depth_clamp();",
             "pFeatures->fillModeNonSolid = advertised_fill_mode_non_solid();",
+            "pFeatures->multiDrawIndirect = advertised_multi_draw_indirect();",
+            "pFeatures->drawIndirectFirstInstance = advertised_draw_indirect_first_instance();",
             "pFeatures->depthBiasClamp = advertised_depth_bias_clamp();",
             "pFeatures->depthBounds = advertised_depth_bounds();",
             "if (advertised_geometry_shader()) mask |= PDOCKER_VK_FEATURE_GEOMETRY_SHADER;",
@@ -7152,6 +7162,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "if (advertised_wide_lines()) mask |= PDOCKER_VK_FEATURE_WIDE_LINES;",
             "if (advertised_depth_clamp()) mask |= PDOCKER_VK_FEATURE_DEPTH_CLAMP;",
             "if (advertised_fill_mode_non_solid()) mask |= PDOCKER_VK_FEATURE_FILL_MODE_NON_SOLID;",
+            "if (advertised_multi_draw_indirect()) mask |= PDOCKER_VK_FEATURE_MULTI_DRAW_INDIRECT;",
+            "if (advertised_draw_indirect_first_instance()) mask |= PDOCKER_VK_FEATURE_DRAW_INDIRECT_FIRST_INSTANCE;",
             "if (advertised_depth_bias_clamp()) mask |= PDOCKER_VK_FEATURE_DEPTH_BIAS_CLAMP;",
             "if (advertised_depth_bounds()) mask |= PDOCKER_VK_FEATURE_DEPTH_BOUNDS;",
             "maxGeometryTotalOutputComponents",
@@ -15667,6 +15679,8 @@ class GpuAbiContractTest(unittest.TestCase):
             '\\"wideLines\\":%u',
             '\\"depthClamp\\":%u',
             '\\"fillModeNonSolid\\":%u',
+            '\\"multiDrawIndirect\\":%u',
+            '\\"drawIndirectFirstInstance\\":%u',
             '\\"chain_compat_feature_structs\\":%u',
             "enabled_ext_16bit_storage",
             "enabled_ext_8bit_storage",
@@ -15714,6 +15728,8 @@ class GpuAbiContractTest(unittest.TestCase):
             '\\"wideLines\\":%u',
             '\\"depthClamp\\":%u',
             '\\"fillModeNonSolid\\":%u',
+            '\\"multiDrawIndirect\\":%u',
+            '\\"drawIndirectFirstInstance\\":%u',
             '\\"storage16\\":{',
             '\\"storage8\\":{',
             '\\"float16_int8\\":{',
@@ -15922,10 +15938,16 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("pFeatures->wideLines = advertised_wide_lines();", icd)
         self.assertIn("pFeatures->depthClamp = advertised_depth_clamp();", icd)
         self.assertIn("pFeatures->fillModeNonSolid = advertised_fill_mode_non_solid();", icd)
+        self.assertIn("pFeatures->multiDrawIndirect = advertised_multi_draw_indirect();", icd)
+        self.assertIn("pFeatures->drawIndirectFirstInstance = advertised_draw_indirect_first_instance();", icd)
         self.assertIn("PDOCKER_VK_FEATURE_DEPTH_CLAMP", icd)
         self.assertIn("PDOCKER_VK_FEATURE_FILL_MODE_NON_SOLID", icd)
+        self.assertIn("PDOCKER_VK_FEATURE_MULTI_DRAW_INDIRECT", icd)
+        self.assertIn("PDOCKER_VK_FEATURE_DRAW_INDIRECT_FIRST_INSTANCE", icd)
         self.assertIn("depth-clamp pipeline replay requires depthClamp", GPU_EXECUTOR.read_text())
         self.assertIn("non-solid polygon-mode pipeline replay requires fillModeNonSolid", GPU_EXECUTOR.read_text())
+        self.assertIn("multi indirect draw replay requires multiDrawIndirect", GPU_EXECUTOR.read_text())
+        self.assertIn("indirect draw replay requires drawIndirectFirstInstance", GPU_EXECUTOR.read_text())
         self.assertIn("dynamic-line-width-feature-not-enabled", icd)
         self.assertIn("!advertised_line_width_supported(pipeline->line_width)", icd)
         self.assertIn("p->extendedDynamicState = advertised_extended_dynamic_state();", pnext_body)

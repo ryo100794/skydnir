@@ -326,6 +326,8 @@ static uint64_t g_generic_dispatch_sequence = 0;
 #define PDOCKER_VK_FEATURE_DEPTH_BOUNDS                (1ull << 29)
 #define PDOCKER_VK_FEATURE_DEPTH_CLAMP                 (1ull << 30)
 #define PDOCKER_VK_FEATURE_FILL_MODE_NON_SOLID         (1ull << 31)
+#define PDOCKER_VK_FEATURE_MULTI_DRAW_INDIRECT         (1ull << 32)
+#define PDOCKER_VK_FEATURE_DRAW_INDIRECT_FIRST_INSTANCE (1ull << 33)
 
 struct PdockerVkMemory {
     uint64_t object_id;
@@ -11117,6 +11119,8 @@ static bool parse_executor_advertisement_caps_json(
     json_read_u32(json, "wideLines", &caps->features.wideLines);
     json_read_u32(json, "depthClamp", &caps->features.depthClamp);
     json_read_u32(json, "fillModeNonSolid", &caps->features.fillModeNonSolid);
+    json_read_u32(json, "multiDrawIndirect", &caps->features.multiDrawIndirect);
+    json_read_u32(json, "drawIndirectFirstInstance", &caps->features.drawIndirectFirstInstance);
     json_read_u32(json, "depthBiasClamp", &caps->features.depthBiasClamp);
     json_read_u32(json, "depthBounds", &caps->features.depthBounds);
     json_read_u32(json, "multiview", &caps->multiview);
@@ -11413,6 +11417,16 @@ static VkBool32 advertised_depth_clamp(void) {
 static VkBool32 advertised_fill_mode_non_solid(void) {
     const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
     return (caps && caps->features.fillModeNonSolid) ? VK_TRUE : VK_FALSE;
+}
+
+static VkBool32 advertised_multi_draw_indirect(void) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+    return (caps && caps->features.multiDrawIndirect) ? VK_TRUE : VK_FALSE;
+}
+
+static VkBool32 advertised_draw_indirect_first_instance(void) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+    return (caps && caps->features.drawIndirectFirstInstance) ? VK_TRUE : VK_FALSE;
 }
 
 static VkBool32 advertised_alpha_to_one(void) {
@@ -11961,6 +11975,8 @@ static void fill_physical_device_features(VkPhysicalDeviceFeatures *pFeatures) {
     pFeatures->wideLines = advertised_wide_lines();
     pFeatures->depthClamp = advertised_depth_clamp();
     pFeatures->fillModeNonSolid = advertised_fill_mode_non_solid();
+    pFeatures->multiDrawIndirect = advertised_multi_draw_indirect();
+    pFeatures->drawIndirectFirstInstance = advertised_draw_indirect_first_instance();
     pFeatures->depthBiasClamp = advertised_depth_bias_clamp();
     pFeatures->depthBounds = advertised_depth_bounds();
 }
@@ -12608,6 +12624,8 @@ static uint64_t feature_mask_from_base_features(const VkPhysicalDeviceFeatures *
     if (features->wideLines) mask |= PDOCKER_VK_FEATURE_WIDE_LINES;
     if (features->depthClamp) mask |= PDOCKER_VK_FEATURE_DEPTH_CLAMP;
     if (features->fillModeNonSolid) mask |= PDOCKER_VK_FEATURE_FILL_MODE_NON_SOLID;
+    if (features->multiDrawIndirect) mask |= PDOCKER_VK_FEATURE_MULTI_DRAW_INDIRECT;
+    if (features->drawIndirectFirstInstance) mask |= PDOCKER_VK_FEATURE_DRAW_INDIRECT_FIRST_INSTANCE;
     if (features->depthBiasClamp) mask |= PDOCKER_VK_FEATURE_DEPTH_BIAS_CLAMP;
     if (features->depthBounds) mask |= PDOCKER_VK_FEATURE_DEPTH_BOUNDS;
     return mask;
@@ -12768,6 +12786,8 @@ static uint64_t advertised_feature_mask(void) {
         if (advertised_wide_lines()) mask |= PDOCKER_VK_FEATURE_WIDE_LINES;
         if (advertised_depth_clamp()) mask |= PDOCKER_VK_FEATURE_DEPTH_CLAMP;
         if (advertised_fill_mode_non_solid()) mask |= PDOCKER_VK_FEATURE_FILL_MODE_NON_SOLID;
+        if (advertised_multi_draw_indirect()) mask |= PDOCKER_VK_FEATURE_MULTI_DRAW_INDIRECT;
+        if (advertised_draw_indirect_first_instance()) mask |= PDOCKER_VK_FEATURE_DRAW_INDIRECT_FIRST_INSTANCE;
         if (advertised_depth_bias_clamp()) mask |= PDOCKER_VK_FEATURE_DEPTH_BIAS_CLAMP;
         if (advertised_depth_bounds()) mask |= PDOCKER_VK_FEATURE_DEPTH_BOUNDS;
     } else {
@@ -19113,6 +19133,18 @@ static void record_graphics_draw_command(
     if (!cmd->graphics_pipeline || !graphics_rendering_context_active ||
         cmd->render_pass_active || (indexed && !cmd->index_buffer_bound)) {
         cmd->graphics_unsupported = true;
+    }
+    if (indirect) {
+        if (vertexCount > 1 &&
+            (cmd->requested_feature_mask & PDOCKER_VK_FEATURE_MULTI_DRAW_INDIRECT) == 0) {
+            cmd->graphics_unsupported = true;
+        }
+        if ((cmd->requested_feature_mask & PDOCKER_VK_FEATURE_DRAW_INDIRECT_FIRST_INSTANCE) == 0) {
+            /* The indirect buffer owns firstInstance.  Without the feature we
+             * cannot prove every command's member is zero at record time, so
+             * fail closed before forwarding a potentially invalid stream. */
+            cmd->graphics_unsupported = true;
+        }
     }
     if (cmd->graphics_draw_op_count >= PDOCKER_VK_MAX_GRAPHICS_DRAW_OPS) {
         cmd->graphics_unsupported = true;
