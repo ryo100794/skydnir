@@ -7087,6 +7087,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_VK_FEATURE_SAMPLE_RATE_SHADING",
             "PDOCKER_VK_FEATURE_ALPHA_TO_ONE",
             "PDOCKER_VK_FEATURE_LOGIC_OP",
+            "PDOCKER_VK_FEATURE_WIDE_LINES",
             "PDOCKER_VK_FEATURE_DEPTH_BIAS_CLAMP",
             "PDOCKER_VK_FEATURE_DEPTH_BOUNDS",
             "if (p->synchronization2) mask |= PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;",
@@ -7098,6 +7099,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "if (features->sampleRateShading) mask |= PDOCKER_VK_FEATURE_SAMPLE_RATE_SHADING;",
             "if (features->alphaToOne) mask |= PDOCKER_VK_FEATURE_ALPHA_TO_ONE;",
             "if (features->logicOp) mask |= PDOCKER_VK_FEATURE_LOGIC_OP;",
+            "if (features->wideLines) mask |= PDOCKER_VK_FEATURE_WIDE_LINES;",
             "if (features->depthBiasClamp) mask |= PDOCKER_VK_FEATURE_DEPTH_BIAS_CLAMP;",
             "if (features->depthBounds) mask |= PDOCKER_VK_FEATURE_DEPTH_BOUNDS;",
             "PDOCKER_VK_FOR_EACH_BASE_FEATURE(CHECK_BASE_FEATURE)",
@@ -7114,14 +7116,19 @@ class GpuAbiContractTest(unittest.TestCase):
             "json_read_u32(json, \"sampleRateShading\", &caps->features.sampleRateShading);",
             "json_read_u32(json, \"alphaToOne\", &caps->features.alphaToOne);",
             "json_read_u32(json, \"logicOp\", &caps->features.logicOp);",
+            "json_read_u32(json, \"wideLines\", &caps->features.wideLines);",
             "json_read_u32(json, \"depthBiasClamp\", &caps->features.depthBiasClamp);",
             "json_read_u32(json, \"depthBounds\", &caps->features.depthBounds);",
             "json_read_u32(json, \"maxGeometryOutputVertices\", &caps->limits.maxGeometryOutputVertices);",
+            "json_read_float_array2(json, \"lineWidthRange\", caps->limits.lineWidthRange);",
+            "json_read_float(json, \"lineWidthGranularity\", &caps->limits.lineWidthGranularity);",
             "static VkBool32 advertised_geometry_shader(void)",
+            "static VkBool32 advertised_wide_lines(void)",
             "pFeatures->geometryShader = advertised_geometry_shader();",
             "pFeatures->sampleRateShading = advertised_sample_rate_shading();",
             "pFeatures->alphaToOne = advertised_alpha_to_one();",
             "pFeatures->logicOp = advertised_logic_op();",
+            "pFeatures->wideLines = advertised_wide_lines();",
             "pFeatures->depthBiasClamp = advertised_depth_bias_clamp();",
             "pFeatures->depthBounds = advertised_depth_bounds();",
             "if (advertised_geometry_shader()) mask |= PDOCKER_VK_FEATURE_GEOMETRY_SHADER;",
@@ -7129,6 +7136,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "if (advertised_sample_rate_shading()) mask |= PDOCKER_VK_FEATURE_SAMPLE_RATE_SHADING;",
             "if (advertised_alpha_to_one()) mask |= PDOCKER_VK_FEATURE_ALPHA_TO_ONE;",
             "if (advertised_logic_op()) mask |= PDOCKER_VK_FEATURE_LOGIC_OP;",
+            "if (advertised_wide_lines()) mask |= PDOCKER_VK_FEATURE_WIDE_LINES;",
             "if (advertised_depth_bias_clamp()) mask |= PDOCKER_VK_FEATURE_DEPTH_BIAS_CLAMP;",
             "if (advertised_depth_bounds()) mask |= PDOCKER_VK_FEATURE_DEPTH_BOUNDS;",
             "maxGeometryTotalOutputComponents",
@@ -15641,6 +15649,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "write_android_vulkan_enabled_features_report",
             '\\"android_vulkan_enabled_features\\":{',
             '\\"tessellationShader\\":%u',
+            '\\"wideLines\\":%u',
             '\\"chain_compat_feature_structs\\":%u',
             "enabled_ext_16bit_storage",
             "enabled_ext_8bit_storage",
@@ -15681,6 +15690,8 @@ class GpuAbiContractTest(unittest.TestCase):
             '\\"deviceName\\":',
             '\\"limits\\":{',
             '\\"maxStorageBufferRange\\":%u',
+            '\\"lineWidthRange\\":[%.9g,%.9g]',
+            '\\"lineWidthGranularity\\":%.9g',
             '\\"physical_features\\":{',
             '\\"tessellationShader\\":%u',
             '\\"storage16\\":{',
@@ -15757,6 +15768,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "parse_executor_advertisement_caps_json",
             "json_read_u32",
             "json_read_u32_array3",
+            "json_read_float",
+            "json_read_float_array2",
             "json_read_string",
             "pdocker_vk_advertised_caps",
             "executor_valid",
@@ -15764,6 +15777,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "storage8.storageBuffer8BitAccess",
             "float16_int8.shaderInt8",
             "features.tessellationShader",
+            "features.wideLines",
+            "lineWidthRange",
+            "lineWidthGranularity",
             "tessellationShader:%u",
             "multiview",
             "subgroup.supportedOperations",
@@ -15861,6 +15877,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("caps->device_type", properties_body)
         self.assertIn("caps->limits.maxComputeSharedMemorySize", properties_body)
         self.assertIn("caps->limits.maxStorageBufferRange < transport_max_storage_range", properties_body)
+        self.assertIn("pProperties->limits.lineWidthRange[0] = caps->limits.lineWidthRange[0];", properties_body)
+        self.assertIn("pProperties->limits.lineWidthGranularity = caps->limits.lineWidthGranularity;", properties_body)
         self.assertIn("caps->limits.maxBoundDescriptorSets < PDOCKER_VK_MAX_DESCRIPTOR_SETS", properties_body)
         self.assertIn("pdocker_vk_max_per_set_descriptors", icd)
         self.assertIn("PDOCKER_VK_MAX_STORAGE_BUFFERS * PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS", icd)
@@ -15879,6 +15897,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("p->dynamicRendering = advertised_dynamic_rendering();", pnext_body)
         self.assertIn("p->multiview = caps->multiview;", pnext_body)
         self.assertIn("pFeatures->tessellationShader = advertised_tessellation_shader();", icd)
+        self.assertIn("pFeatures->wideLines = advertised_wide_lines();", icd)
+        self.assertIn("dynamic-line-width-feature-not-enabled", icd)
+        self.assertIn("!advertised_line_width_supported(pipeline->line_width)", icd)
         self.assertIn("p->extendedDynamicState = advertised_extended_dynamic_state();", pnext_body)
         self.assertIn("p->extendedDynamicState2 = advertised_extended_dynamic_state2();", pnext_body)
         self.assertIn("p->extendedDynamicState2LogicOp = advertised_extended_dynamic_state2_logic_op();", pnext_body)

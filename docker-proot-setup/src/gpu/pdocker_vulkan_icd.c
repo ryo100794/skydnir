@@ -321,6 +321,7 @@ static uint64_t g_generic_dispatch_sequence = 0;
 #define PDOCKER_VK_FEATURE_SAMPLE_RATE_SHADING         (1ull << 24)
 #define PDOCKER_VK_FEATURE_ALPHA_TO_ONE                (1ull << 25)
 #define PDOCKER_VK_FEATURE_LOGIC_OP                    (1ull << 26)
+#define PDOCKER_VK_FEATURE_WIDE_LINES                  (1ull << 27)
 #define PDOCKER_VK_FEATURE_DEPTH_BIAS_CLAMP            (1ull << 28)
 #define PDOCKER_VK_FEATURE_DEPTH_BOUNDS                (1ull << 29)
 
@@ -1269,6 +1270,15 @@ static void record_graphics_dynamic_state_bytes(
             (cmd->requested_feature_mask & PDOCKER_VK_FEATURE_DEPTH_BIAS_CLAMP) == 0) {
             cmd->graphics_unsupported = true;
             command_buffer_mark_recording_failed(cmd, "dynamic-depth-bias-clamp-feature-not-enabled");
+            return;
+        }
+    } else if (state_type == VK_DYNAMIC_STATE_LINE_WIDTH && data && data_size >= sizeof(float)) {
+        float line_width = 1.0f;
+        memcpy(&line_width, data, sizeof(line_width));
+        if (line_width != 1.0f &&
+            (cmd->requested_feature_mask & PDOCKER_VK_FEATURE_WIDE_LINES) == 0) {
+            cmd->graphics_unsupported = true;
+            command_buffer_mark_recording_failed(cmd, "dynamic-line-width-feature-not-enabled");
             return;
         }
     } else if (state_type == VK_DYNAMIC_STATE_DEPTH_BOUNDS) {
@@ -11004,6 +11014,34 @@ static bool json_read_u32_array3(const char *json, const char *key, uint32_t out
     return *p == ']';
 }
 
+static bool json_read_float(const char *json, const char *key, float *out) {
+    const char *p = json_find_value(json, key);
+    if (!p || !out) return false;
+    char *end = NULL;
+    float value = strtof(p, &end);
+    if (end == p) return false;
+    *out = value;
+    return true;
+}
+
+static bool json_read_float_array2(const char *json, const char *key, float out[2]) {
+    const char *p = json_find_value(json, key);
+    if (!p || !out || *p != '[') return false;
+    ++p;
+    for (size_t i = 0; i < 2; ++i) {
+        char *end = NULL;
+        float value = strtof(p, &end);
+        if (end == p) return false;
+        out[i] = value;
+        p = end;
+        if (i < 1) {
+            if (*p != ',') return false;
+            ++p;
+        }
+    }
+    return *p == ']';
+}
+
 static bool json_read_string(const char *json, const char *key, char *out, size_t out_cap) {
     const char *p = json_find_value(json, key);
     if (!p || !out || out_cap == 0 || *p != '"') return false;
@@ -11063,6 +11101,8 @@ static bool parse_executor_advertisement_caps_json(
     json_read_u32(json, "maxGeometryOutputComponents", &caps->limits.maxGeometryOutputComponents);
     json_read_u32(json, "maxGeometryOutputVertices", &caps->limits.maxGeometryOutputVertices);
     json_read_u32(json, "maxGeometryTotalOutputComponents", &caps->limits.maxGeometryTotalOutputComponents);
+    json_read_float_array2(json, "lineWidthRange", caps->limits.lineWidthRange);
+    json_read_float(json, "lineWidthGranularity", &caps->limits.lineWidthGranularity);
     json_read_u32_array3(json, "maxComputeWorkGroupSize", caps->limits.maxComputeWorkGroupSize);
     json_read_u32_array3(json, "maxComputeWorkGroupCount", caps->limits.maxComputeWorkGroupCount);
 
@@ -11072,6 +11112,7 @@ static bool parse_executor_advertisement_caps_json(
     json_read_u32(json, "sampleRateShading", &caps->features.sampleRateShading);
     json_read_u32(json, "alphaToOne", &caps->features.alphaToOne);
     json_read_u32(json, "logicOp", &caps->features.logicOp);
+    json_read_u32(json, "wideLines", &caps->features.wideLines);
     json_read_u32(json, "depthBiasClamp", &caps->features.depthBiasClamp);
     json_read_u32(json, "depthBounds", &caps->features.depthBounds);
     json_read_u32(json, "multiview", &caps->multiview);
@@ -11375,6 +11416,29 @@ static VkBool32 advertised_depth_bias_clamp(void) {
     return (caps && caps->features.depthBiasClamp) ? VK_TRUE : VK_FALSE;
 }
 
+static bool advertised_line_width_limits_valid(const PdockerVkAdvertisedCaps *caps) {
+    return caps &&
+           caps->limits.lineWidthRange[0] <= 1.0f &&
+           caps->limits.lineWidthRange[1] >= 1.0f &&
+           caps->limits.lineWidthRange[0] <= caps->limits.lineWidthRange[1] &&
+           caps->limits.lineWidthGranularity > 0.0f;
+}
+
+static VkBool32 advertised_wide_lines(void) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+    return (caps && caps->features.wideLines && advertised_line_width_limits_valid(caps))
+        ? VK_TRUE
+        : VK_FALSE;
+}
+
+static bool advertised_line_width_supported(float line_width) {
+    if (line_width == 1.0f) return true;
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+    return advertised_wide_lines() &&
+           line_width >= caps->limits.lineWidthRange[0] &&
+           line_width <= caps->limits.lineWidthRange[1];
+}
+
 static VkBool32 advertised_depth_bounds(void) {
     const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
     return (caps && caps->features.depthBounds) ? VK_TRUE : VK_FALSE;
@@ -11478,7 +11542,7 @@ static void trace_executor_advertisement_caps_once(void) {
                 "pdocker-vulkan-icd: executor advertisement caps shadow: "
                 "api=0x%08x device=\"%s\" vendor=0x%04x device_id=0x%04x "
                 "type=%u storage16=%u storage8=%u int8=%u indexTypeUint8=%u geometryShader=%u tessellationShader=%u "
-                "graphics_base={sampleRateShading:%u,alphaToOne:%u,logicOp:%u,depthBiasClamp:%u,depthBounds:%u} subgroup={size:%u,ops:0x%x}\n",
+                "graphics_base={sampleRateShading:%u,alphaToOne:%u,logicOp:%u,wideLines:%u,depthBiasClamp:%u,depthBounds:%u} lineWidthRange=%.6g..%.6g lineWidthGranularity=%.6g subgroup={size:%u,ops:0x%x}\n",
                 caps->api_version,
                 caps->device_name,
                 caps->vendor_id,
@@ -11493,8 +11557,12 @@ static void trace_executor_advertisement_caps_once(void) {
                 caps->features.sampleRateShading,
                 caps->features.alphaToOne,
                 caps->features.logicOp,
+                caps->features.wideLines,
                 caps->features.depthBiasClamp,
                 caps->features.depthBounds,
+                caps->limits.lineWidthRange[0],
+                caps->limits.lineWidthRange[1],
+                caps->limits.lineWidthGranularity,
                 caps->subgroup.subgroupSize,
                 caps->subgroup.supportedOperations);
     } else {
@@ -11587,6 +11655,15 @@ static void fill_physical_device_properties(VkPhysicalDeviceProperties *pPropert
         caps ? caps->limits.maxGeometryOutputVertices : 0;
     pProperties->limits.maxGeometryTotalOutputComponents =
         caps ? caps->limits.maxGeometryTotalOutputComponents : 0;
+    if (advertised_wide_lines()) {
+        pProperties->limits.lineWidthRange[0] = caps->limits.lineWidthRange[0];
+        pProperties->limits.lineWidthRange[1] = caps->limits.lineWidthRange[1];
+        pProperties->limits.lineWidthGranularity = caps->limits.lineWidthGranularity;
+    } else {
+        pProperties->limits.lineWidthRange[0] = 1.0f;
+        pProperties->limits.lineWidthRange[1] = 1.0f;
+        pProperties->limits.lineWidthGranularity = 1.0f;
+    }
     pProperties->limits.maxMemoryAllocationCount = 4096;
     pProperties->limits.maxImageDimension1D = 4096;
     pProperties->limits.maxImageDimension2D = 4096;
@@ -11865,6 +11942,7 @@ static void fill_physical_device_features(VkPhysicalDeviceFeatures *pFeatures) {
     pFeatures->sampleRateShading = advertised_sample_rate_shading();
     pFeatures->alphaToOne = advertised_alpha_to_one();
     pFeatures->logicOp = advertised_logic_op();
+    pFeatures->wideLines = advertised_wide_lines();
     pFeatures->depthBiasClamp = advertised_depth_bias_clamp();
     pFeatures->depthBounds = advertised_depth_bounds();
 }
@@ -12509,6 +12587,7 @@ static uint64_t feature_mask_from_base_features(const VkPhysicalDeviceFeatures *
     if (features->sampleRateShading) mask |= PDOCKER_VK_FEATURE_SAMPLE_RATE_SHADING;
     if (features->alphaToOne) mask |= PDOCKER_VK_FEATURE_ALPHA_TO_ONE;
     if (features->logicOp) mask |= PDOCKER_VK_FEATURE_LOGIC_OP;
+    if (features->wideLines) mask |= PDOCKER_VK_FEATURE_WIDE_LINES;
     if (features->depthBiasClamp) mask |= PDOCKER_VK_FEATURE_DEPTH_BIAS_CLAMP;
     if (features->depthBounds) mask |= PDOCKER_VK_FEATURE_DEPTH_BOUNDS;
     return mask;
@@ -12666,6 +12745,7 @@ static uint64_t advertised_feature_mask(void) {
         if (advertised_sample_rate_shading()) mask |= PDOCKER_VK_FEATURE_SAMPLE_RATE_SHADING;
         if (advertised_alpha_to_one()) mask |= PDOCKER_VK_FEATURE_ALPHA_TO_ONE;
         if (advertised_logic_op()) mask |= PDOCKER_VK_FEATURE_LOGIC_OP;
+        if (advertised_wide_lines()) mask |= PDOCKER_VK_FEATURE_WIDE_LINES;
         if (advertised_depth_bias_clamp()) mask |= PDOCKER_VK_FEATURE_DEPTH_BIAS_CLAMP;
         if (advertised_depth_bounds()) mask |= PDOCKER_VK_FEATURE_DEPTH_BOUNDS;
     } else {
@@ -12707,7 +12787,7 @@ static void trace_device_create_features(const VkDeviceCreateInfo *pCreateInfo) 
     if (!pCreateInfo || !(trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG"))) return;
     const VkPhysicalDeviceFeatures *features = pCreateInfo->pEnabledFeatures;
     fprintf(stderr,
-            "pdocker-vulkan-icd: create-device extensions=%u base_features={shaderInt64:%u,shaderInt16:%u,shaderFloat64:%u,geometryShader:%u,tessellationShader:%u,sampleRateShading:%u,alphaToOne:%u,logicOp:%u,depthBiasClamp:%u,depthBounds:%u}\n",
+            "pdocker-vulkan-icd: create-device extensions=%u base_features={shaderInt64:%u,shaderInt16:%u,shaderFloat64:%u,geometryShader:%u,tessellationShader:%u,sampleRateShading:%u,alphaToOne:%u,logicOp:%u,wideLines:%u,depthBiasClamp:%u,depthBounds:%u}\n",
             pCreateInfo->enabledExtensionCount,
             features ? features->shaderInt64 : 0,
             features ? features->shaderInt16 : 0,
@@ -12717,6 +12797,7 @@ static void trace_device_create_features(const VkDeviceCreateInfo *pCreateInfo) 
             features ? features->sampleRateShading : 0,
             features ? features->alphaToOne : 0,
             features ? features->logicOp : 0,
+            features ? features->wideLines : 0,
             features ? features->depthBiasClamp : 0,
             features ? features->depthBounds : 0);
     for (const void *node = pCreateInfo->pNext; node;) {
@@ -12725,7 +12806,7 @@ static void trace_device_create_features(const VkDeviceCreateInfo *pCreateInfo) 
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2: {
                 const VkPhysicalDeviceFeatures2 *p = (const VkPhysicalDeviceFeatures2 *)node;
                 fprintf(stderr,
-                        "pdocker-vulkan-icd: create-device features2={shaderInt64:%u,shaderInt16:%u,shaderFloat64:%u,geometryShader:%u,tessellationShader:%u,sampleRateShading:%u,alphaToOne:%u,logicOp:%u,depthBiasClamp:%u,depthBounds:%u}\n",
+                        "pdocker-vulkan-icd: create-device features2={shaderInt64:%u,shaderInt16:%u,shaderFloat64:%u,geometryShader:%u,tessellationShader:%u,sampleRateShading:%u,alphaToOne:%u,logicOp:%u,wideLines:%u,depthBiasClamp:%u,depthBounds:%u}\n",
                         p->features.shaderInt64,
                         p->features.shaderInt16,
                         p->features.shaderFloat64,
@@ -12734,6 +12815,7 @@ static void trace_device_create_features(const VkDeviceCreateInfo *pCreateInfo) 
                         p->features.sampleRateShading,
                         p->features.alphaToOne,
                         p->features.logicOp,
+                        p->features.wideLines,
                         p->features.depthBiasClamp,
                         p->features.depthBounds);
                 break;
@@ -16296,6 +16378,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
             pipeline->line_width = ci->pRasterizationState->lineWidth;
             if (pipeline->depth_bias_enable && pipeline->depth_bias_clamp != 0.0f &&
                 (pipeline->requested_feature_mask & PDOCKER_VK_FEATURE_DEPTH_BIAS_CLAMP) == 0) {
+                pipeline->graphics_unsupported = true;
+            }
+            if (pipeline->line_width != 1.0f &&
+                ((pipeline->requested_feature_mask & PDOCKER_VK_FEATURE_WIDE_LINES) == 0 ||
+                 !advertised_line_width_supported(pipeline->line_width))) {
                 pipeline->graphics_unsupported = true;
             }
         }
