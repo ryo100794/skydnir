@@ -318,6 +318,11 @@ static uint64_t g_generic_dispatch_sequence = 0;
 #define PDOCKER_VK_FEATURE_MULTIVIEW                    (1ull << 20)
 #define PDOCKER_VK_FEATURE_TESSELLATION_SHADER        (1ull << 21)
 #define PDOCKER_VK_FEATURE_GEOMETRY_SHADER             (1ull << 23)
+#define PDOCKER_VK_FEATURE_SAMPLE_RATE_SHADING         (1ull << 24)
+#define PDOCKER_VK_FEATURE_ALPHA_TO_ONE                (1ull << 25)
+#define PDOCKER_VK_FEATURE_LOGIC_OP                    (1ull << 26)
+#define PDOCKER_VK_FEATURE_DEPTH_BIAS_CLAMP            (1ull << 28)
+#define PDOCKER_VK_FEATURE_DEPTH_BOUNDS                (1ull << 29)
 
 struct PdockerVkMemory {
     uint64_t object_id;
@@ -1129,6 +1134,7 @@ typedef struct {
     PdockerVkDynamicStateSnapshot dynamic_states[PDOCKER_VK_MAX_GRAPHICS_DYNAMIC_STATES];
     uint32_t dynamic_state_count;
     bool vertex_buffer_bound;
+    uint64_t requested_feature_mask;
 } PdockerVkCommandBuffer;
 
 typedef struct {
@@ -1144,7 +1150,7 @@ struct PdockerVkPipelineCache {
 };
 
 struct PdockerVkCommandPool {
-    int unused;
+    uint64_t requested_feature_mask;
 };
 
 static PdockerVkPhysicalDevice g_device;
@@ -1256,6 +1262,36 @@ static void record_graphics_dynamic_state_bytes(
         data_size > sizeof(cmd->dynamic_states[0].data)) {
         cmd->graphics_unsupported = true;
         return;
+    }
+    if (state_type == VK_DYNAMIC_STATE_DEPTH_BIAS && data && data_size >= sizeof(float) * 3u) {
+        const float *values = (const float *)data;
+        if (values[1] != 0.0f &&
+            (cmd->requested_feature_mask & PDOCKER_VK_FEATURE_DEPTH_BIAS_CLAMP) == 0) {
+            cmd->graphics_unsupported = true;
+            command_buffer_mark_recording_failed(cmd, "dynamic-depth-bias-clamp-feature-not-enabled");
+            return;
+        }
+    } else if (state_type == VK_DYNAMIC_STATE_DEPTH_BOUNDS) {
+        if ((cmd->requested_feature_mask & PDOCKER_VK_FEATURE_DEPTH_BOUNDS) == 0) {
+            cmd->graphics_unsupported = true;
+            command_buffer_mark_recording_failed(cmd, "dynamic-depth-bounds-feature-not-enabled");
+            return;
+        }
+    } else if (state_type == VK_DYNAMIC_STATE_DEPTH_BOUNDS_TEST_ENABLE &&
+               data && data_size >= sizeof(VkBool32)) {
+        VkBool32 enabled = VK_FALSE;
+        memcpy(&enabled, data, sizeof(enabled));
+        if (enabled && (cmd->requested_feature_mask & PDOCKER_VK_FEATURE_DEPTH_BOUNDS) == 0) {
+            cmd->graphics_unsupported = true;
+            command_buffer_mark_recording_failed(cmd, "dynamic-depth-bounds-feature-not-enabled");
+            return;
+        }
+    } else if (state_type == VK_DYNAMIC_STATE_LOGIC_OP_EXT) {
+        if ((cmd->requested_feature_mask & PDOCKER_VK_FEATURE_LOGIC_OP) == 0) {
+            cmd->graphics_unsupported = true;
+            command_buffer_mark_recording_failed(cmd, "dynamic-logic-op-feature-not-enabled");
+            return;
+        }
     }
     PdockerVkDynamicStateSnapshot *state = &cmd->dynamic_states[cmd->dynamic_state_count++];
     memset(state, 0, sizeof(*state));
@@ -11033,6 +11069,11 @@ static bool parse_executor_advertisement_caps_json(
     json_read_u32(json, "shaderInt64", &caps->features.shaderInt64);
     json_read_u32(json, "geometryShader", &caps->features.geometryShader);
     json_read_u32(json, "tessellationShader", &caps->features.tessellationShader);
+    json_read_u32(json, "sampleRateShading", &caps->features.sampleRateShading);
+    json_read_u32(json, "alphaToOne", &caps->features.alphaToOne);
+    json_read_u32(json, "logicOp", &caps->features.logicOp);
+    json_read_u32(json, "depthBiasClamp", &caps->features.depthBiasClamp);
+    json_read_u32(json, "depthBounds", &caps->features.depthBounds);
     json_read_u32(json, "multiview", &caps->multiview);
     json_read_u32(json, "storageBuffer16BitAccess", &caps->storage16.storageBuffer16BitAccess);
     json_read_u32(json, "uniformAndStorageBuffer16BitAccess", &caps->storage16.uniformAndStorageBuffer16BitAccess);
@@ -11314,6 +11355,31 @@ static VkBool32 advertised_tessellation_shader(void) {
     return (caps && caps->features.tessellationShader) ? VK_TRUE : VK_FALSE;
 }
 
+static VkBool32 advertised_sample_rate_shading(void) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+    return (caps && caps->features.sampleRateShading) ? VK_TRUE : VK_FALSE;
+}
+
+static VkBool32 advertised_alpha_to_one(void) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+    return (caps && caps->features.alphaToOne) ? VK_TRUE : VK_FALSE;
+}
+
+static VkBool32 advertised_logic_op(void) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+    return (caps && caps->features.logicOp) ? VK_TRUE : VK_FALSE;
+}
+
+static VkBool32 advertised_depth_bias_clamp(void) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+    return (caps && caps->features.depthBiasClamp) ? VK_TRUE : VK_FALSE;
+}
+
+static VkBool32 advertised_depth_bounds(void) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+    return (caps && caps->features.depthBounds) ? VK_TRUE : VK_FALSE;
+}
+
 static VkBool32 advertised_synchronization2(void) {
     const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
     return (caps && caps->synchronization2 && caps->ext_synchronization2) ? VK_TRUE : VK_FALSE;
@@ -11411,7 +11477,8 @@ static void trace_executor_advertisement_caps_once(void) {
         fprintf(stderr,
                 "pdocker-vulkan-icd: executor advertisement caps shadow: "
                 "api=0x%08x device=\"%s\" vendor=0x%04x device_id=0x%04x "
-                "type=%u storage16=%u storage8=%u int8=%u indexTypeUint8=%u geometryShader=%u tessellationShader=%u subgroup={size:%u,ops:0x%x}\n",
+                "type=%u storage16=%u storage8=%u int8=%u indexTypeUint8=%u geometryShader=%u tessellationShader=%u "
+                "graphics_base={sampleRateShading:%u,alphaToOne:%u,logicOp:%u,depthBiasClamp:%u,depthBounds:%u} subgroup={size:%u,ops:0x%x}\n",
                 caps->api_version,
                 caps->device_name,
                 caps->vendor_id,
@@ -11423,6 +11490,11 @@ static void trace_executor_advertisement_caps_once(void) {
                 caps->index_type_uint8.indexTypeUint8,
                 caps->features.geometryShader,
                 caps->features.tessellationShader,
+                caps->features.sampleRateShading,
+                caps->features.alphaToOne,
+                caps->features.logicOp,
+                caps->features.depthBiasClamp,
+                caps->features.depthBounds,
                 caps->subgroup.subgroupSize,
                 caps->subgroup.supportedOperations);
     } else {
@@ -11790,6 +11862,11 @@ static void fill_physical_device_features(VkPhysicalDeviceFeatures *pFeatures) {
     pFeatures->shaderInt64 = advertised_shader_int64();
     pFeatures->geometryShader = advertised_geometry_shader();
     pFeatures->tessellationShader = advertised_tessellation_shader();
+    pFeatures->sampleRateShading = advertised_sample_rate_shading();
+    pFeatures->alphaToOne = advertised_alpha_to_one();
+    pFeatures->logicOp = advertised_logic_op();
+    pFeatures->depthBiasClamp = advertised_depth_bias_clamp();
+    pFeatures->depthBounds = advertised_depth_bounds();
 }
 
 static void fill_pnext_features(void *pNext) {
@@ -12429,6 +12506,11 @@ static uint64_t feature_mask_from_base_features(const VkPhysicalDeviceFeatures *
     if (features->shaderFloat64) mask |= PDOCKER_VK_FEATURE_SHADER_FLOAT64;
     if (features->geometryShader) mask |= PDOCKER_VK_FEATURE_GEOMETRY_SHADER;
     if (features->tessellationShader) mask |= PDOCKER_VK_FEATURE_TESSELLATION_SHADER;
+    if (features->sampleRateShading) mask |= PDOCKER_VK_FEATURE_SAMPLE_RATE_SHADING;
+    if (features->alphaToOne) mask |= PDOCKER_VK_FEATURE_ALPHA_TO_ONE;
+    if (features->logicOp) mask |= PDOCKER_VK_FEATURE_LOGIC_OP;
+    if (features->depthBiasClamp) mask |= PDOCKER_VK_FEATURE_DEPTH_BIAS_CLAMP;
+    if (features->depthBounds) mask |= PDOCKER_VK_FEATURE_DEPTH_BOUNDS;
     return mask;
 }
 
@@ -12581,6 +12663,11 @@ static uint64_t advertised_feature_mask(void) {
         if (caps->multiview) mask |= PDOCKER_VK_FEATURE_MULTIVIEW;
         if (advertised_geometry_shader()) mask |= PDOCKER_VK_FEATURE_GEOMETRY_SHADER;
         if (caps->features.tessellationShader) mask |= PDOCKER_VK_FEATURE_TESSELLATION_SHADER;
+        if (advertised_sample_rate_shading()) mask |= PDOCKER_VK_FEATURE_SAMPLE_RATE_SHADING;
+        if (advertised_alpha_to_one()) mask |= PDOCKER_VK_FEATURE_ALPHA_TO_ONE;
+        if (advertised_logic_op()) mask |= PDOCKER_VK_FEATURE_LOGIC_OP;
+        if (advertised_depth_bias_clamp()) mask |= PDOCKER_VK_FEATURE_DEPTH_BIAS_CLAMP;
+        if (advertised_depth_bounds()) mask |= PDOCKER_VK_FEATURE_DEPTH_BOUNDS;
     } else {
         if (advertised_storage16()) mask |= PDOCKER_VK_FEATURE_STORAGE_BUFFER_16;
         if (advertised_storage8()) {
@@ -12620,25 +12707,35 @@ static void trace_device_create_features(const VkDeviceCreateInfo *pCreateInfo) 
     if (!pCreateInfo || !(trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG"))) return;
     const VkPhysicalDeviceFeatures *features = pCreateInfo->pEnabledFeatures;
     fprintf(stderr,
-            "pdocker-vulkan-icd: create-device extensions=%u base_features={shaderInt64:%u,shaderInt16:%u,shaderFloat64:%u,geometryShader:%u,tessellationShader:%u}\n",
+            "pdocker-vulkan-icd: create-device extensions=%u base_features={shaderInt64:%u,shaderInt16:%u,shaderFloat64:%u,geometryShader:%u,tessellationShader:%u,sampleRateShading:%u,alphaToOne:%u,logicOp:%u,depthBiasClamp:%u,depthBounds:%u}\n",
             pCreateInfo->enabledExtensionCount,
             features ? features->shaderInt64 : 0,
             features ? features->shaderInt16 : 0,
             features ? features->shaderFloat64 : 0,
             features ? features->geometryShader : 0,
-            features ? features->tessellationShader : 0);
+            features ? features->tessellationShader : 0,
+            features ? features->sampleRateShading : 0,
+            features ? features->alphaToOne : 0,
+            features ? features->logicOp : 0,
+            features ? features->depthBiasClamp : 0,
+            features ? features->depthBounds : 0);
     for (const void *node = pCreateInfo->pNext; node;) {
         PdockerVkStructHeader header = read_vk_struct_header(node);
         switch (header.sType) {
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2: {
                 const VkPhysicalDeviceFeatures2 *p = (const VkPhysicalDeviceFeatures2 *)node;
                 fprintf(stderr,
-                        "pdocker-vulkan-icd: create-device features2={shaderInt64:%u,shaderInt16:%u,shaderFloat64:%u,geometryShader:%u,tessellationShader:%u}\n",
+                        "pdocker-vulkan-icd: create-device features2={shaderInt64:%u,shaderInt16:%u,shaderFloat64:%u,geometryShader:%u,tessellationShader:%u,sampleRateShading:%u,alphaToOne:%u,logicOp:%u,depthBiasClamp:%u,depthBounds:%u}\n",
                         p->features.shaderInt64,
                         p->features.shaderInt16,
                         p->features.shaderFloat64,
                         p->features.geometryShader,
-                        p->features.tessellationShader);
+                        p->features.tessellationShader,
+                        p->features.sampleRateShading,
+                        p->features.alphaToOne,
+                        p->features.logicOp,
+                        p->features.depthBiasClamp,
+                        p->features.depthBounds);
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES: {
@@ -16197,6 +16294,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
             pipeline->depth_bias_clamp = ci->pRasterizationState->depthBiasClamp;
             pipeline->depth_bias_slope_factor = ci->pRasterizationState->depthBiasSlopeFactor;
             pipeline->line_width = ci->pRasterizationState->lineWidth;
+            if (pipeline->depth_bias_enable && pipeline->depth_bias_clamp != 0.0f &&
+                (pipeline->requested_feature_mask & PDOCKER_VK_FEATURE_DEPTH_BIAS_CLAMP) == 0) {
+                pipeline->graphics_unsupported = true;
+            }
         }
         if (ci->pMultisampleState) {
             const VkPipelineMultisampleStateCreateInfo *ms = ci->pMultisampleState;
@@ -16208,6 +16309,14 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
             pipeline->min_sample_shading = ms->minSampleShading;
             pipeline->alpha_to_coverage_enable = ms->alphaToCoverageEnable == VK_TRUE;
             pipeline->alpha_to_one_enable = ms->alphaToOneEnable == VK_TRUE;
+            if (pipeline->sample_shading_enable &&
+                (pipeline->requested_feature_mask & PDOCKER_VK_FEATURE_SAMPLE_RATE_SHADING) == 0) {
+                pipeline->graphics_unsupported = true;
+            }
+            if (pipeline->alpha_to_one_enable &&
+                (pipeline->requested_feature_mask & PDOCKER_VK_FEATURE_ALPHA_TO_ONE) == 0) {
+                pipeline->graphics_unsupported = true;
+            }
             if (ms->pSampleMask) {
                 uint32_t words = 1u;
                 if ((uint32_t)ms->rasterizationSamples > (uint32_t)VK_SAMPLE_COUNT_32_BIT) {
@@ -16234,6 +16343,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
             }
             pipeline->color_blend_logic_op_enable = cb->logicOpEnable;
             pipeline->color_blend_logic_op = cb->logicOp;
+            if (pipeline->color_blend_logic_op_enable &&
+                (pipeline->requested_feature_mask & PDOCKER_VK_FEATURE_LOGIC_OP) == 0) {
+                pipeline->graphics_unsupported = true;
+            }
             memcpy(pipeline->color_blend_constants, cb->blendConstants, sizeof(pipeline->color_blend_constants));
             if (cb->attachmentCount > PDOCKER_VK_MAX_STORAGE_BUFFERS) {
                 pipeline->color_blend_attachment_overflow = true;
@@ -16263,6 +16376,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
             pipeline->back_stencil_state = ds->back;
             pipeline->min_depth_bounds = ds->minDepthBounds;
             pipeline->max_depth_bounds = ds->maxDepthBounds;
+            if (ds->depthBoundsTestEnable &&
+                (pipeline->requested_feature_mask & PDOCKER_VK_FEATURE_DEPTH_BOUNDS) == 0) {
+                pipeline->graphics_unsupported = true;
+            }
         }
         if (ci->pViewportState) {
             const VkPipelineViewportStateCreateInfo *vs = ci->pViewportState;
@@ -17760,6 +17877,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateCommandPool(
     if (validate_rc != VK_SUCCESS) return validate_rc;
     PdockerVkCommandPool *pool = pdocker_alloc_handle(sizeof(*pool));
     if (!pool) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    PdockerVkDevice *dev = (PdockerVkDevice *)device;
+    pool->requested_feature_mask = dev ? dev->requested_feature_mask : 0;
     *pCommandPool = pdocker_vk_command_pool_to_handle(pool);
     return VK_SUCCESS;
 }
@@ -17815,7 +17934,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateCommandBuffers(
         return unsupported_create_info_pnext_result("vkAllocateCommandBuffers",
                                                    pAllocateInfo->pNext);
     }
-    if (!pdocker_vk_command_pool_from_handle(pAllocateInfo->commandPool)) {
+    PdockerVkCommandPool *pool = pdocker_vk_command_pool_from_handle(pAllocateInfo->commandPool);
+    if (!pool) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
     if (pAllocateInfo->level != VK_COMMAND_BUFFER_LEVEL_PRIMARY &&
@@ -17829,6 +17949,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateCommandBuffers(
         if (!cmd) return VK_ERROR_OUT_OF_HOST_MEMORY;
         set_loader_magic_value(cmd);
         cmd->level = pAllocateInfo->level;
+        cmd->requested_feature_mask = pool->requested_feature_mask;
         pCommandBuffers[i] = (VkCommandBuffer)cmd;
     }
     return VK_SUCCESS;

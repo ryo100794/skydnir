@@ -7084,12 +7084,22 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2",
             "PDOCKER_VK_FEATURE_TESSELLATION_SHADER",
             "PDOCKER_VK_FEATURE_GEOMETRY_SHADER",
+            "PDOCKER_VK_FEATURE_SAMPLE_RATE_SHADING",
+            "PDOCKER_VK_FEATURE_ALPHA_TO_ONE",
+            "PDOCKER_VK_FEATURE_LOGIC_OP",
+            "PDOCKER_VK_FEATURE_DEPTH_BIAS_CLAMP",
+            "PDOCKER_VK_FEATURE_DEPTH_BOUNDS",
             "if (p->synchronization2) mask |= PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;",
             "if (p->dynamicRendering) mask |= PDOCKER_VK_FEATURE_DYNAMIC_RENDERING;",
             "if (p->extendedDynamicState) mask |= PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE;",
             "if (p->extendedDynamicState2) mask |= PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2;",
             "if (features->geometryShader) mask |= PDOCKER_VK_FEATURE_GEOMETRY_SHADER;",
             "if (features->tessellationShader) mask |= PDOCKER_VK_FEATURE_TESSELLATION_SHADER;",
+            "if (features->sampleRateShading) mask |= PDOCKER_VK_FEATURE_SAMPLE_RATE_SHADING;",
+            "if (features->alphaToOne) mask |= PDOCKER_VK_FEATURE_ALPHA_TO_ONE;",
+            "if (features->logicOp) mask |= PDOCKER_VK_FEATURE_LOGIC_OP;",
+            "if (features->depthBiasClamp) mask |= PDOCKER_VK_FEATURE_DEPTH_BIAS_CLAMP;",
+            "if (features->depthBounds) mask |= PDOCKER_VK_FEATURE_DEPTH_BOUNDS;",
             "PDOCKER_VK_FOR_EACH_BASE_FEATURE(CHECK_BASE_FEATURE)",
             "F(samplerAnisotropy)",
             "F(geometryShader)",
@@ -7101,11 +7111,26 @@ class GpuAbiContractTest(unittest.TestCase):
             "supported = !p->samplerYcbcrConversion;",
             "supported = !p->vulkanMemoryModel && !p->vulkanMemoryModelDeviceScope",
             "json_read_u32(json, \"geometryShader\", &caps->features.geometryShader);",
+            "json_read_u32(json, \"sampleRateShading\", &caps->features.sampleRateShading);",
+            "json_read_u32(json, \"alphaToOne\", &caps->features.alphaToOne);",
+            "json_read_u32(json, \"logicOp\", &caps->features.logicOp);",
+            "json_read_u32(json, \"depthBiasClamp\", &caps->features.depthBiasClamp);",
+            "json_read_u32(json, \"depthBounds\", &caps->features.depthBounds);",
             "json_read_u32(json, \"maxGeometryOutputVertices\", &caps->limits.maxGeometryOutputVertices);",
             "static VkBool32 advertised_geometry_shader(void)",
             "pFeatures->geometryShader = advertised_geometry_shader();",
+            "pFeatures->sampleRateShading = advertised_sample_rate_shading();",
+            "pFeatures->alphaToOne = advertised_alpha_to_one();",
+            "pFeatures->logicOp = advertised_logic_op();",
+            "pFeatures->depthBiasClamp = advertised_depth_bias_clamp();",
+            "pFeatures->depthBounds = advertised_depth_bounds();",
             "if (advertised_geometry_shader()) mask |= PDOCKER_VK_FEATURE_GEOMETRY_SHADER;",
             "if (caps->features.tessellationShader) mask |= PDOCKER_VK_FEATURE_TESSELLATION_SHADER;",
+            "if (advertised_sample_rate_shading()) mask |= PDOCKER_VK_FEATURE_SAMPLE_RATE_SHADING;",
+            "if (advertised_alpha_to_one()) mask |= PDOCKER_VK_FEATURE_ALPHA_TO_ONE;",
+            "if (advertised_logic_op()) mask |= PDOCKER_VK_FEATURE_LOGIC_OP;",
+            "if (advertised_depth_bias_clamp()) mask |= PDOCKER_VK_FEATURE_DEPTH_BIAS_CLAMP;",
+            "if (advertised_depth_bounds()) mask |= PDOCKER_VK_FEATURE_DEPTH_BOUNDS;",
             "maxGeometryTotalOutputComponents",
             "if (advertised_synchronization2()) mask |= PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;",
             "if (advertised_dynamic_rendering()) mask |= PDOCKER_VK_FEATURE_DYNAMIC_RENDERING;",
@@ -8997,6 +9022,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "msci.pSampleMask",
             "enabled_features.sampleRateShading",
             "enabled_features.alphaToOne",
+            "PDOCKER_VK_FEATURE_SAMPLE_RATE_SHADING",
+            "PDOCKER_VK_FEATURE_ALPHA_TO_ONE",
         ]:
             self.assertIn(marker, executor)
 
@@ -9128,6 +9155,17 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("device ? ((PdockerVkDevice *)device)->requested_feature_mask : 0", graphics_create_body)
         self.assertIn("pipeline->requested_feature_mask & PDOCKER_VK_FEATURE_TESSELLATION_SHADER", graphics_create_body)
         self.assertIn("pipeline->requested_feature_mask & PDOCKER_VK_FEATURE_GEOMETRY_SHADER", graphics_create_body)
+        for marker in [
+            "PDOCKER_VK_FEATURE_SAMPLE_RATE_SHADING",
+            "PDOCKER_VK_FEATURE_ALPHA_TO_ONE",
+            "PDOCKER_VK_FEATURE_LOGIC_OP",
+            "PDOCKER_VK_FEATURE_DEPTH_BIAS_CLAMP",
+            "PDOCKER_VK_FEATURE_DEPTH_BOUNDS",
+            "dynamic-depth-bias-clamp-feature-not-enabled",
+            "dynamic-depth-bounds-feature-not-enabled",
+            "dynamic-logic-op-feature-not-enabled",
+        ]:
+            self.assertIn(marker, icd)
 
         for marker in [
             "PDOCKER_GPU_VULKAN_GRAPHICS_V623_ABI_MINOR",
