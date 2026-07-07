@@ -15244,7 +15244,14 @@ static bool descriptor_set_layout_create_info_supported(
         seen_bindings[binding->binding] = true;
         if (binding->descriptorCount == 0) return false;
         if (binding->descriptorCount > PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS) return false;
-        if (binding->pImmutableSamplers) return false;
+        if (binding->pImmutableSamplers) {
+            if (!descriptor_type_requires_sampler(binding->descriptorType)) return false;
+            for (uint32_t array_element = 0; array_element < binding->descriptorCount; ++array_element) {
+                if (!pdocker_vk_sampler_from_handle(binding->pImmutableSamplers[array_element])) {
+                    return false;
+                }
+            }
+        }
     }
     return true;
 }

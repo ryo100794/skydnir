@@ -6369,6 +6369,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("layout->immutable_samplers[binding->binding][array_element] = *sampler;", icd)
         self.assertIn("layout->immutable_sampler_valid[binding->binding][array_element] = true;", icd)
         self.assertIn("descriptor_set_apply_immutable_samplers(set);", icd)
+        support_helper = c_function_body(icd, "descriptor_set_layout_create_info_supported")
+        self.assertNotIn("if (binding->pImmutableSamplers) return false;", support_helper)
+        self.assertIn("!descriptor_type_requires_sampler(binding->descriptorType)", support_helper)
+        self.assertIn("pdocker_vk_sampler_from_handle(binding->pImmutableSamplers[array_element])", support_helper)
         update_body = icd.split(
             "VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets", 1
         )[1].split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateShaderModule", 1)[0]
@@ -7507,6 +7511,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("binding->descriptorCount == 0", helper_body)
         self.assertIn("binding->descriptorCount > PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS", helper_body)
         self.assertIn("binding->pImmutableSamplers", helper_body)
+        self.assertIn("!descriptor_type_requires_sampler(binding->descriptorType)", helper_body)
+        self.assertIn("pdocker_vk_sampler_from_handle(binding->pImmutableSamplers[array_element])", helper_body)
+        self.assertNotIn("if (binding->pImmutableSamplers) return false;", helper_body)
         self.assertIn("VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_LAYOUT_SUPPORT", pnext_body)
         self.assertIn("p->maxVariableDescriptorCount = 0;", pnext_body)
         self.assertIn("MAP_PROC(vkGetDescriptorSetLayoutSupport)", proc_body)
