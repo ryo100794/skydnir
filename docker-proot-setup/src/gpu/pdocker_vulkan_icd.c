@@ -11095,7 +11095,16 @@ static bool parse_executor_advertisement_caps_json(
 
     json_read_u32(json, "maxPushConstantsSize", &caps->limits.maxPushConstantsSize);
     json_read_u32(json, "maxComputeSharedMemorySize", &caps->limits.maxComputeSharedMemorySize);
+    json_read_u32(json, "maxPerStageDescriptorSamplers", &caps->limits.maxPerStageDescriptorSamplers);
+    json_read_u32(json, "maxPerStageDescriptorSampledImages", &caps->limits.maxPerStageDescriptorSampledImages);
+    json_read_u32(json, "maxPerStageDescriptorStorageImages", &caps->limits.maxPerStageDescriptorStorageImages);
+    json_read_u32(json, "maxPerStageDescriptorInputAttachments", &caps->limits.maxPerStageDescriptorInputAttachments);
     json_read_u32(json, "maxPerStageDescriptorStorageBuffers", &caps->limits.maxPerStageDescriptorStorageBuffers);
+    json_read_u32(json, "maxPerStageResources", &caps->limits.maxPerStageResources);
+    json_read_u32(json, "maxDescriptorSetSamplers", &caps->limits.maxDescriptorSetSamplers);
+    json_read_u32(json, "maxDescriptorSetSampledImages", &caps->limits.maxDescriptorSetSampledImages);
+    json_read_u32(json, "maxDescriptorSetStorageImages", &caps->limits.maxDescriptorSetStorageImages);
+    json_read_u32(json, "maxDescriptorSetInputAttachments", &caps->limits.maxDescriptorSetInputAttachments);
     json_read_u32(json, "maxDescriptorSetStorageBuffers", &caps->limits.maxDescriptorSetStorageBuffers);
     json_read_u32(json, "maxBoundDescriptorSets", &caps->limits.maxBoundDescriptorSets);
     json_read_u32(json, "maxComputeWorkGroupInvocations", &caps->limits.maxComputeWorkGroupInvocations);
@@ -11560,6 +11569,8 @@ static VkBool32 advertised_api_1_3(void) {
     return advertised_api_version() >= VK_MAKE_VERSION(1, 3, 0) ? VK_TRUE : VK_FALSE;
 }
 
+static uint32_t pdocker_vk_max_per_set_descriptors(void);
+
 static void trace_executor_advertisement_caps_once(void) {
     static int traced = 0;
     if (traced || !getenv("PDOCKER_VULKAN_ICD_DEBUG")) return;
@@ -11720,16 +11731,25 @@ static void fill_physical_device_properties(VkPhysicalDeviceProperties *pPropert
         caps->limits.maxBoundDescriptorSets < PDOCKER_VK_MAX_DESCRIPTOR_SETS
             ? caps->limits.maxBoundDescriptorSets
             : PDOCKER_VK_MAX_DESCRIPTOR_SETS;
-    pProperties->limits.maxPerStageDescriptorStorageBuffers =
-        caps && caps->limits.maxPerStageDescriptorStorageBuffers &&
-        caps->limits.maxPerStageDescriptorStorageBuffers < PDOCKER_VK_MAX_STORAGE_BUFFERS
-            ? caps->limits.maxPerStageDescriptorStorageBuffers
-            : PDOCKER_VK_MAX_STORAGE_BUFFERS;
-    pProperties->limits.maxDescriptorSetStorageBuffers =
-        caps && caps->limits.maxDescriptorSetStorageBuffers &&
-        caps->limits.maxDescriptorSetStorageBuffers < PDOCKER_VK_MAX_STORAGE_BUFFERS
-            ? caps->limits.maxDescriptorSetStorageBuffers
-            : PDOCKER_VK_MAX_STORAGE_BUFFERS;
+    const uint32_t bridge_per_stage_descriptors = PDOCKER_VK_MAX_STORAGE_BUFFERS;
+    const uint32_t bridge_per_set_descriptors = pdocker_vk_max_per_set_descriptors();
+#define PDOCKER_VK_SHADOW_LIMIT_OR_CAP(field, cap_value) \
+    pProperties->limits.field = \
+        caps && caps->limits.field && caps->limits.field < (cap_value) \
+            ? caps->limits.field \
+            : (cap_value)
+    PDOCKER_VK_SHADOW_LIMIT_OR_CAP(maxPerStageDescriptorSamplers, bridge_per_stage_descriptors);
+    PDOCKER_VK_SHADOW_LIMIT_OR_CAP(maxPerStageDescriptorSampledImages, bridge_per_stage_descriptors);
+    PDOCKER_VK_SHADOW_LIMIT_OR_CAP(maxPerStageDescriptorStorageImages, bridge_per_stage_descriptors);
+    PDOCKER_VK_SHADOW_LIMIT_OR_CAP(maxPerStageDescriptorInputAttachments, bridge_per_stage_descriptors);
+    PDOCKER_VK_SHADOW_LIMIT_OR_CAP(maxPerStageDescriptorStorageBuffers, bridge_per_stage_descriptors);
+    PDOCKER_VK_SHADOW_LIMIT_OR_CAP(maxPerStageResources, bridge_per_set_descriptors);
+    PDOCKER_VK_SHADOW_LIMIT_OR_CAP(maxDescriptorSetSamplers, bridge_per_set_descriptors);
+    PDOCKER_VK_SHADOW_LIMIT_OR_CAP(maxDescriptorSetSampledImages, bridge_per_set_descriptors);
+    PDOCKER_VK_SHADOW_LIMIT_OR_CAP(maxDescriptorSetStorageImages, bridge_per_set_descriptors);
+    PDOCKER_VK_SHADOW_LIMIT_OR_CAP(maxDescriptorSetInputAttachments, bridge_per_set_descriptors);
+    PDOCKER_VK_SHADOW_LIMIT_OR_CAP(maxDescriptorSetStorageBuffers, bridge_per_stage_descriptors);
+#undef PDOCKER_VK_SHADOW_LIMIT_OR_CAP
     /* Contract marker: minStorageBufferOffsetAlignment = 16. */
     pProperties->limits.minStorageBufferOffsetAlignment = PDOCKER_VK_MIN_STORAGE_BUFFER_OFFSET_ALIGNMENT;
     pProperties->limits.minUniformBufferOffsetAlignment = PDOCKER_VK_MIN_UNIFORM_BUFFER_OFFSET_ALIGNMENT;

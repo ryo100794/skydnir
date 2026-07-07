@@ -15720,7 +15720,16 @@ class GpuAbiContractTest(unittest.TestCase):
             '\\"deviceType\\":%u',
             '\\"deviceName\\":',
             '\\"limits\\":{',
+            '\\"maxPerStageDescriptorSamplers\\":%u',
+            '\\"maxPerStageDescriptorSampledImages\\":%u',
+            '\\"maxPerStageDescriptorStorageImages\\":%u',
+            '\\"maxPerStageDescriptorInputAttachments\\":%u',
             '\\"maxStorageBufferRange\\":%u',
+            '\\"maxPerStageResources\\":%u',
+            '\\"maxDescriptorSetSamplers\\":%u',
+            '\\"maxDescriptorSetSampledImages\\":%u',
+            '\\"maxDescriptorSetStorageImages\\":%u',
+            '\\"maxDescriptorSetInputAttachments\\":%u',
             '\\"lineWidthRange\\":[%.9g,%.9g]',
             '\\"lineWidthGranularity\\":%.9g',
             '\\"physical_features\\":{',
@@ -15818,6 +15827,15 @@ class GpuAbiContractTest(unittest.TestCase):
             "features.fillModeNonSolid",
             "lineWidthRange",
             "lineWidthGranularity",
+            "maxPerStageDescriptorSamplers",
+            "maxPerStageDescriptorSampledImages",
+            "maxPerStageDescriptorStorageImages",
+            "maxPerStageDescriptorInputAttachments",
+            "maxPerStageResources",
+            "maxDescriptorSetSamplers",
+            "maxDescriptorSetSampledImages",
+            "maxDescriptorSetStorageImages",
+            "maxDescriptorSetInputAttachments",
             "tessellationShader:%u",
             "multiview",
             "subgroup.supportedOperations",
@@ -15915,6 +15933,18 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("caps->device_type", properties_body)
         self.assertIn("caps->limits.maxComputeSharedMemorySize", properties_body)
         self.assertIn("caps->limits.maxStorageBufferRange < transport_max_storage_range", properties_body)
+        for marker in [
+            "PDOCKER_VK_SHADOW_LIMIT_OR_CAP(maxPerStageDescriptorSamplers, bridge_per_stage_descriptors)",
+            "PDOCKER_VK_SHADOW_LIMIT_OR_CAP(maxPerStageDescriptorSampledImages, bridge_per_stage_descriptors)",
+            "PDOCKER_VK_SHADOW_LIMIT_OR_CAP(maxPerStageDescriptorStorageImages, bridge_per_stage_descriptors)",
+            "PDOCKER_VK_SHADOW_LIMIT_OR_CAP(maxPerStageDescriptorInputAttachments, bridge_per_stage_descriptors)",
+            "PDOCKER_VK_SHADOW_LIMIT_OR_CAP(maxPerStageResources, bridge_per_set_descriptors)",
+            "PDOCKER_VK_SHADOW_LIMIT_OR_CAP(maxDescriptorSetSamplers, bridge_per_set_descriptors)",
+            "PDOCKER_VK_SHADOW_LIMIT_OR_CAP(maxDescriptorSetSampledImages, bridge_per_set_descriptors)",
+            "PDOCKER_VK_SHADOW_LIMIT_OR_CAP(maxDescriptorSetStorageImages, bridge_per_set_descriptors)",
+            "PDOCKER_VK_SHADOW_LIMIT_OR_CAP(maxDescriptorSetInputAttachments, bridge_per_set_descriptors)",
+        ]:
+            self.assertIn(marker, properties_body)
         self.assertIn("pProperties->limits.lineWidthRange[0] = caps->limits.lineWidthRange[0];", properties_body)
         self.assertIn("pProperties->limits.lineWidthGranularity = caps->limits.lineWidthGranularity;", properties_body)
         self.assertIn("caps->limits.maxBoundDescriptorSets < PDOCKER_VK_MAX_DESCRIPTOR_SETS", properties_body)

@@ -2458,7 +2458,16 @@ static void write_vulkan_limits_report(FILE *out, const VulkanRuntime *rt) {
             "\"limits\":{"
             "\"maxPushConstantsSize\":%u,"
             "\"maxComputeSharedMemorySize\":%u,"
+            "\"maxPerStageDescriptorSamplers\":%u,"
+            "\"maxPerStageDescriptorSampledImages\":%u,"
+            "\"maxPerStageDescriptorStorageImages\":%u,"
+            "\"maxPerStageDescriptorInputAttachments\":%u,"
             "\"maxPerStageDescriptorStorageBuffers\":%u,"
+            "\"maxPerStageResources\":%u,"
+            "\"maxDescriptorSetSamplers\":%u,"
+            "\"maxDescriptorSetSampledImages\":%u,"
+            "\"maxDescriptorSetStorageImages\":%u,"
+            "\"maxDescriptorSetInputAttachments\":%u,"
             "\"maxDescriptorSetStorageBuffers\":%u,"
             "\"maxBoundDescriptorSets\":%u,"
             "\"maxComputeWorkGroupInvocations\":%u,"
@@ -2468,7 +2477,16 @@ static void write_vulkan_limits_report(FILE *out, const VulkanRuntime *rt) {
             rt->physical_properties.deviceID,
             limits->maxPushConstantsSize,
             limits->maxComputeSharedMemorySize,
+            limits->maxPerStageDescriptorSamplers,
+            limits->maxPerStageDescriptorSampledImages,
+            limits->maxPerStageDescriptorStorageImages,
+            limits->maxPerStageDescriptorInputAttachments,
             limits->maxPerStageDescriptorStorageBuffers,
+            limits->maxPerStageResources,
+            limits->maxDescriptorSetSamplers,
+            limits->maxDescriptorSetSampledImages,
+            limits->maxDescriptorSetStorageImages,
+            limits->maxDescriptorSetInputAttachments,
             limits->maxDescriptorSetStorageBuffers,
             limits->maxBoundDescriptorSets,
             limits->maxComputeWorkGroupInvocations,
@@ -18810,7 +18828,16 @@ static void print_vulkan_advertisement_caps(const char *transport) {
             "},\"limits\":{"
             "\"maxPushConstantsSize\":%u,"
             "\"maxComputeSharedMemorySize\":%u,"
+            "\"maxPerStageDescriptorSamplers\":%u,"
+            "\"maxPerStageDescriptorSampledImages\":%u,"
+            "\"maxPerStageDescriptorStorageImages\":%u,"
+            "\"maxPerStageDescriptorInputAttachments\":%u,"
             "\"maxPerStageDescriptorStorageBuffers\":%u,"
+            "\"maxPerStageResources\":%u,"
+            "\"maxDescriptorSetSamplers\":%u,"
+            "\"maxDescriptorSetSampledImages\":%u,"
+            "\"maxDescriptorSetStorageImages\":%u,"
+            "\"maxDescriptorSetInputAttachments\":%u,"
             "\"maxDescriptorSetStorageBuffers\":%u,"
             "\"maxBoundDescriptorSets\":%u,"
             "\"maxComputeWorkGroupInvocations\":%u,"
@@ -18826,7 +18853,16 @@ static void print_vulkan_advertisement_caps(const char *transport) {
             "\"lineWidthGranularity\":%.9g},",
             limits ? limits->maxPushConstantsSize : 0,
             limits ? limits->maxComputeSharedMemorySize : 0,
+            limits ? limits->maxPerStageDescriptorSamplers : 0,
+            limits ? limits->maxPerStageDescriptorSampledImages : 0,
+            limits ? limits->maxPerStageDescriptorStorageImages : 0,
+            limits ? limits->maxPerStageDescriptorInputAttachments : 0,
             limits ? limits->maxPerStageDescriptorStorageBuffers : 0,
+            limits ? limits->maxPerStageResources : 0,
+            limits ? limits->maxDescriptorSetSamplers : 0,
+            limits ? limits->maxDescriptorSetSampledImages : 0,
+            limits ? limits->maxDescriptorSetStorageImages : 0,
+            limits ? limits->maxDescriptorSetInputAttachments : 0,
             limits ? limits->maxDescriptorSetStorageBuffers : 0,
             limits ? limits->maxBoundDescriptorSets : 0,
             limits ? limits->maxComputeWorkGroupInvocations : 0,

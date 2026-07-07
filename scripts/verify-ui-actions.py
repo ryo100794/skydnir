@@ -237,11 +237,15 @@ def main() -> int:
     require("vulkan icd exposes maintenance4 large-buffer diagnostics", "VkPhysicalDeviceMaintenance4Features" in vulkan_icd_src and "maintenance4 = VK_TRUE" in vulkan_icd_src and "create-buffer size=" in vulkan_icd_src and "buffer-requirements size=" in vulkan_icd_src and "minStorageBufferOffsetAlignment = 16" in vulkan_icd_src)
     require(
         "vulkan icd descriptor limits do not exceed bridge capacity",
-        "maxPerStageDescriptorStorageBuffers" in vulkan_icd_src
-        and "maxDescriptorSetStorageBuffers" in vulkan_icd_src
-        and "caps->limits.maxPerStageDescriptorStorageBuffers < PDOCKER_VK_MAX_STORAGE_BUFFERS" in vulkan_icd_src
-        and "caps->limits.maxDescriptorSetStorageBuffers < PDOCKER_VK_MAX_STORAGE_BUFFERS" in vulkan_icd_src
-        and ": PDOCKER_VK_MAX_STORAGE_BUFFERS" in vulkan_icd_src,
+        "const uint32_t bridge_per_stage_descriptors = PDOCKER_VK_MAX_STORAGE_BUFFERS" in vulkan_icd_src
+        and "const uint32_t bridge_per_set_descriptors = pdocker_vk_max_per_set_descriptors()" in vulkan_icd_src
+        and "PDOCKER_VK_SHADOW_LIMIT_OR_CAP(maxPerStageDescriptorStorageBuffers, bridge_per_stage_descriptors)" in vulkan_icd_src
+        and "PDOCKER_VK_SHADOW_LIMIT_OR_CAP(maxDescriptorSetStorageBuffers, bridge_per_stage_descriptors)" in vulkan_icd_src
+        and "PDOCKER_VK_SHADOW_LIMIT_OR_CAP(maxDescriptorSetSamplers, bridge_per_set_descriptors)" in vulkan_icd_src
+        and "PDOCKER_VK_SHADOW_LIMIT_OR_CAP(maxDescriptorSetSampledImages, bridge_per_set_descriptors)" in vulkan_icd_src
+        and "PDOCKER_VK_SHADOW_LIMIT_OR_CAP(maxDescriptorSetStorageImages, bridge_per_set_descriptors)" in vulkan_icd_src
+        and "PDOCKER_VK_SHADOW_LIMIT_OR_CAP(maxDescriptorSetInputAttachments, bridge_per_set_descriptors)" in vulkan_icd_src
+        and "PDOCKER_VK_MAX_STORAGE_BUFFERS * PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS" in vulkan_icd_src,
     )
     descriptor_size_src = vulkan_icd_src.split("static size_t descriptor_binding_size(const PdockerVkDescriptorBinding *binding) {", 1)[1].split("\n}", 1)[0]
     require("vulkan descriptor VK_WHOLE_SIZE is clamped to VkBuffer not allocation tail", "descriptor ranges are scoped to the VkBuffer" in descriptor_size_src and "available_in_buffer = binding->buffer->size - (size_t)binding->offset" in descriptor_size_src and "if (binding->range == VK_WHOLE_SIZE) return available_in_buffer;" in descriptor_size_src and "buffer_available(binding->buffer, binding->offset)" not in descriptor_size_src)
