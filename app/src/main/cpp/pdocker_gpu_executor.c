@@ -1835,7 +1835,7 @@ static void log_vulkan_feature_trace(const VulkanRuntime *rt) {
     fprintf(stderr,
             "pdocker-gpu-executor: Android Vulkan features build_marker=%s api=%u.%u device=\"%s\" vendor=0x%04x device=0x%04x "
             "shaderInt64=%u geometryShader=%u tessellationShader=%u "
-            "graphics_base={sampleRateShading:%u,alphaToOne:%u,logicOp:%u,wideLines:%u,depthClamp:%u,fillModeNonSolid:%u,multiDrawIndirect:%u,drawIndirectFirstInstance:%u,depthBiasClamp:%u,depthBounds:%u} "
+            "graphics_base={sampleRateShading:%u,alphaToOne:%u,logicOp:%u,wideLines:%u,depthClamp:%u,fillModeNonSolid:%u,multiDrawIndirect:%u,drawIndirectFirstInstance:%u,depthBiasClamp:%u,depthBounds:%u,samplerAnisotropy:%u} "
             "storage16={ssbo:%u,ubo_ssbo:%u,push:%u,io:%u} "
             "storage8={ssbo:%u,ubo_ssbo:%u,push:%u} "
             "float16=%u int8=%u indexTypeUint8=%u "
@@ -1862,6 +1862,7 @@ static void log_vulkan_feature_trace(const VulkanRuntime *rt) {
             rt->physical_features.drawIndirectFirstInstance,
             rt->physical_features.depthBiasClamp,
             rt->physical_features.depthBounds,
+            rt->physical_features.samplerAnisotropy,
             rt->physical_storage16.storageBuffer16BitAccess,
             rt->physical_storage16.uniformAndStorageBuffer16BitAccess,
             rt->physical_storage16.storagePushConstant16,
@@ -1903,7 +1904,7 @@ static void log_vulkan_enabled_feature_trace(
         const VkPhysicalDeviceIndexTypeUint8FeaturesEXT *index_type_uint8) {
     fprintf(stderr,
             "pdocker-gpu-executor: Android Vulkan enabled features build_marker=%s shaderInt64=%u geometryShader=%u tessellationShader=%u "
-            "graphics_base={sampleRateShading:%u,alphaToOne:%u,logicOp:%u,wideLines:%u,depthClamp:%u,fillModeNonSolid:%u,multiDrawIndirect:%u,drawIndirectFirstInstance:%u,depthBiasClamp:%u,depthBounds:%u} "
+            "graphics_base={sampleRateShading:%u,alphaToOne:%u,logicOp:%u,wideLines:%u,depthClamp:%u,fillModeNonSolid:%u,multiDrawIndirect:%u,drawIndirectFirstInstance:%u,depthBiasClamp:%u,depthBounds:%u,samplerAnisotropy:%u} "
             "storage16={ssbo:%u,ubo_ssbo:%u,push:%u,io:%u} "
             "storage8={ssbo:%u,ubo_ssbo:%u,push:%u} "
             "float16=%u int8=%u indexTypeUint8=%u "
@@ -1923,6 +1924,7 @@ static void log_vulkan_enabled_feature_trace(
             features ? features->drawIndirectFirstInstance : 0,
             features ? features->depthBiasClamp : 0,
             features ? features->depthBounds : 0,
+            features ? features->samplerAnisotropy : 0,
             storage16 ? storage16->storageBuffer16BitAccess : 0,
             storage16 ? storage16->uniformAndStorageBuffer16BitAccess : 0,
             storage16 ? storage16->storagePushConstant16 : 0,
@@ -1962,6 +1964,7 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             "\"drawIndirectFirstInstance\":%u,"
             "\"depthBiasClamp\":%u,"
             "\"depthBounds\":%u,"
+            "\"samplerAnisotropy\":%u,"
             "\"storageBuffer16BitAccess\":%u,"
             "\"uniformAndStorageBuffer16BitAccess\":%u,"
             "\"storagePushConstant16\":%u,"
@@ -2021,6 +2024,7 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             rt ? rt->enabled_features.drawIndirectFirstInstance : 0,
             rt ? rt->enabled_features.depthBiasClamp : 0,
             rt ? rt->enabled_features.depthBounds : 0,
+            rt ? rt->enabled_features.samplerAnisotropy : 0,
             rt ? rt->enabled_storage16.storageBuffer16BitAccess : 0,
             rt ? rt->enabled_storage16.uniformAndStorageBuffer16BitAccess : 0,
             rt ? rt->enabled_storage16.storagePushConstant16 : 0,
@@ -2458,6 +2462,7 @@ static void write_vulkan_limits_report(FILE *out, const VulkanRuntime *rt) {
             "\"limits\":{"
             "\"maxPushConstantsSize\":%u,"
             "\"maxComputeSharedMemorySize\":%u,"
+            "\"maxSamplerAnisotropy\":%.9g,"
             "\"maxPerStageDescriptorSamplers\":%u,"
             "\"maxPerStageDescriptorSampledImages\":%u,"
             "\"maxPerStageDescriptorStorageImages\":%u,"
@@ -2477,6 +2482,7 @@ static void write_vulkan_limits_report(FILE *out, const VulkanRuntime *rt) {
             rt->physical_properties.deviceID,
             limits->maxPushConstantsSize,
             limits->maxComputeSharedMemorySize,
+            limits->maxSamplerAnisotropy,
             limits->maxPerStageDescriptorSamplers,
             limits->maxPerStageDescriptorSampledImages,
             limits->maxPerStageDescriptorStorageImages,
@@ -18691,6 +18697,7 @@ static void print_capabilities(const char *transport) {
             "\"drawIndirectFirstInstance\":%u,"
             "\"depthBiasClamp\":%u,"
             "\"depthBounds\":%u,"
+            "\"samplerAnisotropy\":%u,"
             "\"storageBuffer16BitAccess\":%u,"
             "\"uniformAndStorageBuffer16BitAccess\":%u,"
             "\"storagePushConstant16\":%u,"
@@ -18743,6 +18750,7 @@ static void print_capabilities(const char *transport) {
             rt ? rt->physical_features.drawIndirectFirstInstance : 0,
             rt ? rt->physical_features.depthBiasClamp : 0,
             rt ? rt->physical_features.depthBounds : 0,
+            rt ? rt->physical_features.samplerAnisotropy : 0,
             rt ? rt->physical_storage16.storageBuffer16BitAccess : 0,
             rt ? rt->physical_storage16.uniformAndStorageBuffer16BitAccess : 0,
             rt ? rt->physical_storage16.storagePushConstant16 : 0,
@@ -18828,6 +18836,7 @@ static void print_vulkan_advertisement_caps(const char *transport) {
             "},\"limits\":{"
             "\"maxPushConstantsSize\":%u,"
             "\"maxComputeSharedMemorySize\":%u,"
+            "\"maxSamplerAnisotropy\":%.9g,"
             "\"maxPerStageDescriptorSamplers\":%u,"
             "\"maxPerStageDescriptorSampledImages\":%u,"
             "\"maxPerStageDescriptorStorageImages\":%u,"
@@ -18853,6 +18862,7 @@ static void print_vulkan_advertisement_caps(const char *transport) {
             "\"lineWidthGranularity\":%.9g},",
             limits ? limits->maxPushConstantsSize : 0,
             limits ? limits->maxComputeSharedMemorySize : 0,
+            limits ? limits->maxSamplerAnisotropy : 1.0f,
             limits ? limits->maxPerStageDescriptorSamplers : 0,
             limits ? limits->maxPerStageDescriptorSampledImages : 0,
             limits ? limits->maxPerStageDescriptorStorageImages : 0,
@@ -18896,6 +18906,7 @@ static void print_vulkan_advertisement_caps(const char *transport) {
             "\"drawIndirectFirstInstance\":%u,"
             "\"depthBiasClamp\":%u,"
             "\"depthBounds\":%u,"
+            "\"samplerAnisotropy\":%u,"
             "\"storage16\":{"
             "\"storageBuffer16BitAccess\":%u,"
             "\"uniformAndStorageBuffer16BitAccess\":%u,"
@@ -18926,6 +18937,7 @@ static void print_vulkan_advertisement_caps(const char *transport) {
             rt ? rt->physical_features.drawIndirectFirstInstance : 0,
             rt ? rt->physical_features.depthBiasClamp : 0,
             rt ? rt->physical_features.depthBounds : 0,
+            rt ? rt->physical_features.samplerAnisotropy : 0,
             rt ? rt->physical_storage16.storageBuffer16BitAccess : 0,
             rt ? rt->physical_storage16.uniformAndStorageBuffer16BitAccess : 0,
             rt ? rt->physical_storage16.storagePushConstant16 : 0,

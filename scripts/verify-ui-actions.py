@@ -247,6 +247,17 @@ def main() -> int:
         and "PDOCKER_VK_SHADOW_LIMIT_OR_CAP(maxDescriptorSetInputAttachments, bridge_per_set_descriptors)" in vulkan_icd_src
         and "PDOCKER_VK_MAX_STORAGE_BUFFERS * PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS" in vulkan_icd_src,
     )
+    require(
+        "vulkan icd gates sampler anisotropy by executor caps",
+        '\\\"samplerAnisotropy\\\":%u' in gpu_executor_src
+        and '\\\"maxSamplerAnisotropy\\\":%.9g' in gpu_executor_src
+        and 'json_read_u32(json, "samplerAnisotropy", &caps->features.samplerAnisotropy)' in vulkan_icd_src
+        and 'json_read_float(json, "maxSamplerAnisotropy", &caps->limits.maxSamplerAnisotropy)' in vulkan_icd_src
+        and "pFeatures->samplerAnisotropy = advertised_sampler_anisotropy();" in vulkan_icd_src
+        and "pProperties->limits.maxSamplerAnisotropy = advertised_max_sampler_anisotropy();" in vulkan_icd_src
+        and "sampler-anisotropy-feature-not-enabled" in vulkan_icd_src
+        and "sampler-anisotropy-limit-unsupported" in vulkan_icd_src,
+    )
     descriptor_size_src = vulkan_icd_src.split("static size_t descriptor_binding_size(const PdockerVkDescriptorBinding *binding) {", 1)[1].split("\n}", 1)[0]
     require("vulkan descriptor VK_WHOLE_SIZE is clamped to VkBuffer not allocation tail", "descriptor ranges are scoped to the VkBuffer" in descriptor_size_src and "available_in_buffer = binding->buffer->size - (size_t)binding->offset" in descriptor_size_src and "if (binding->range == VK_WHOLE_SIZE) return available_in_buffer;" in descriptor_size_src and "buffer_available(binding->buffer, binding->offset)" not in descriptor_size_src)
     require(

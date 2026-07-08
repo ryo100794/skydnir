@@ -7099,6 +7099,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_VK_FEATURE_FILL_MODE_NON_SOLID",
             "PDOCKER_VK_FEATURE_MULTI_DRAW_INDIRECT",
             "PDOCKER_VK_FEATURE_DRAW_INDIRECT_FIRST_INSTANCE",
+            "PDOCKER_VK_FEATURE_SAMPLER_ANISOTROPY",
             "PDOCKER_VK_FEATURE_DEPTH_BIAS_CLAMP",
             "PDOCKER_VK_FEATURE_DEPTH_BOUNDS",
             "if (p->synchronization2) mask |= PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;",
@@ -7115,6 +7116,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "if (features->fillModeNonSolid) mask |= PDOCKER_VK_FEATURE_FILL_MODE_NON_SOLID;",
             "if (features->multiDrawIndirect) mask |= PDOCKER_VK_FEATURE_MULTI_DRAW_INDIRECT;",
             "if (features->drawIndirectFirstInstance) mask |= PDOCKER_VK_FEATURE_DRAW_INDIRECT_FIRST_INSTANCE;",
+            "if (features->samplerAnisotropy) mask |= PDOCKER_VK_FEATURE_SAMPLER_ANISOTROPY;",
             "if (features->depthBiasClamp) mask |= PDOCKER_VK_FEATURE_DEPTH_BIAS_CLAMP;",
             "if (features->depthBounds) mask |= PDOCKER_VK_FEATURE_DEPTH_BOUNDS;",
             "PDOCKER_VK_FOR_EACH_BASE_FEATURE(CHECK_BASE_FEATURE)",
@@ -7138,6 +7140,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "json_read_u32(json, \"drawIndirectFirstInstance\", &caps->features.drawIndirectFirstInstance);",
             "json_read_u32(json, \"depthBiasClamp\", &caps->features.depthBiasClamp);",
             "json_read_u32(json, \"depthBounds\", &caps->features.depthBounds);",
+            "json_read_u32(json, \"samplerAnisotropy\", &caps->features.samplerAnisotropy);",
+            "json_read_float(json, \"maxSamplerAnisotropy\", &caps->limits.maxSamplerAnisotropy);",
             "json_read_u32(json, \"maxGeometryOutputVertices\", &caps->limits.maxGeometryOutputVertices);",
             "json_read_float_array2(json, \"lineWidthRange\", caps->limits.lineWidthRange);",
             "json_read_float(json, \"lineWidthGranularity\", &caps->limits.lineWidthGranularity);",
@@ -7147,6 +7151,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "static VkBool32 advertised_fill_mode_non_solid(void)",
             "static VkBool32 advertised_multi_draw_indirect(void)",
             "static VkBool32 advertised_draw_indirect_first_instance(void)",
+            "static VkBool32 advertised_sampler_anisotropy(void)",
             "pFeatures->geometryShader = advertised_geometry_shader();",
             "pFeatures->sampleRateShading = advertised_sample_rate_shading();",
             "pFeatures->alphaToOne = advertised_alpha_to_one();",
@@ -7156,6 +7161,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "pFeatures->fillModeNonSolid = advertised_fill_mode_non_solid();",
             "pFeatures->multiDrawIndirect = advertised_multi_draw_indirect();",
             "pFeatures->drawIndirectFirstInstance = advertised_draw_indirect_first_instance();",
+            "pFeatures->samplerAnisotropy = advertised_sampler_anisotropy();",
             "pFeatures->depthBiasClamp = advertised_depth_bias_clamp();",
             "pFeatures->depthBounds = advertised_depth_bounds();",
             "if (advertised_geometry_shader()) mask |= PDOCKER_VK_FEATURE_GEOMETRY_SHADER;",
@@ -7168,6 +7174,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "if (advertised_fill_mode_non_solid()) mask |= PDOCKER_VK_FEATURE_FILL_MODE_NON_SOLID;",
             "if (advertised_multi_draw_indirect()) mask |= PDOCKER_VK_FEATURE_MULTI_DRAW_INDIRECT;",
             "if (advertised_draw_indirect_first_instance()) mask |= PDOCKER_VK_FEATURE_DRAW_INDIRECT_FIRST_INSTANCE;",
+            "if (advertised_sampler_anisotropy()) mask |= PDOCKER_VK_FEATURE_SAMPLER_ANISOTROPY;",
             "if (advertised_depth_bias_clamp()) mask |= PDOCKER_VK_FEATURE_DEPTH_BIAS_CLAMP;",
             "if (advertised_depth_bounds()) mask |= PDOCKER_VK_FEATURE_DEPTH_BOUNDS;",
             "maxGeometryTotalOutputComponents",
@@ -7920,6 +7927,11 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('unsupported_image_pnext_result("vkCreateSampler", node)', sampler_validate_body)
         self.assertIn("node = header.pNext;", sampler_validate_body)
         self.assertIn("if (info->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;", sampler_validate_body)
+        self.assertIn("info->anisotropyEnable", sampler_validate_body)
+        self.assertIn("requested_feature_mask", sampler_validate_body)
+        self.assertIn("info->maxAnisotropy", sampler_validate_body)
+        self.assertIn("sampler-anisotropy-feature-not-enabled", sampler_validate_body)
+        self.assertIn("sampler-anisotropy-limit-unsupported", sampler_validate_body)
         self.assertIn("return VK_ERROR_FORMAT_NOT_SUPPORTED;", icd)
         self.assertIn("uint32_t bytes_per_pixel = conservative_format_bytes_per_pixel(info->format);", icd)
         self.assertIn("if (bytes_per_pixel == 0) return 0;", icd)
@@ -15727,6 +15739,7 @@ class GpuAbiContractTest(unittest.TestCase):
             '\\"deviceType\\":%u',
             '\\"deviceName\\":',
             '\\"limits\\":{',
+            '\\"maxSamplerAnisotropy\\":%.9g',
             '\\"maxPerStageDescriptorSamplers\\":%u',
             '\\"maxPerStageDescriptorSampledImages\\":%u',
             '\\"maxPerStageDescriptorStorageImages\\":%u',
@@ -15746,6 +15759,7 @@ class GpuAbiContractTest(unittest.TestCase):
             '\\"fillModeNonSolid\\":%u',
             '\\"multiDrawIndirect\\":%u',
             '\\"drawIndirectFirstInstance\\":%u',
+            '\\"samplerAnisotropy\\":%u',
             '\\"storage16\\":{',
             '\\"storage8\\":{',
             '\\"float16_int8\\":{',
@@ -15805,6 +15819,8 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         self.assertIn('\\"drawIndirectCount\\":%u', enabled_body)
         self.assertIn('\\"drawIndexedIndirectCount\\":%u', enabled_body)
+        self.assertIn('\\"samplerAnisotropy\\":%u', enabled_body)
+        self.assertIn("rt ? rt->enabled_features.samplerAnisotropy : 0", enabled_body)
         self.assertIn('\\"VK_KHR_draw_indirect_count\\":%u', enabled_body)
         self.assertIn('\\"VK_AMD_draw_indirect_count\\":%u', enabled_body)
         self.assertIn("rt && rt->cmd_draw_indirect_count ? 1u : 0u", enabled_body)
@@ -15832,8 +15848,10 @@ class GpuAbiContractTest(unittest.TestCase):
             "features.wideLines",
             "features.depthClamp",
             "features.fillModeNonSolid",
+            "features.samplerAnisotropy",
             "lineWidthRange",
             "lineWidthGranularity",
+            "maxSamplerAnisotropy",
             "maxPerStageDescriptorSamplers",
             "maxPerStageDescriptorSampledImages",
             "maxPerStageDescriptorStorageImages",
@@ -15893,6 +15911,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("optimal_features & pdocker_vk_transport_image_features(format)", parse_body)
         self.assertIn("sample_counts & PDOCKER_VK_SUPPORTED_SAMPLE_COUNTS", parse_body)
         self.assertIn("caps->image_format_cap_count == expected_format_cap_count", parse_body)
+        self.assertIn('json_read_float(json, "maxSamplerAnisotropy", &caps->limits.maxSamplerAnisotropy);', parse_body)
+        self.assertIn('json_read_u32(json, "samplerAnisotropy", &caps->features.samplerAnisotropy);', parse_body)
         query_body = icd.split("static int query_executor_advertisement_caps_line", 1)[1].split(
             "static const PdockerVkAdvertisedCaps *pdocker_vk_advertised_caps", 1
         )[0]
@@ -15939,6 +15959,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("caps && caps->api_version ? caps->api_version : pdocker_api_version()", properties_body)
         self.assertIn("caps->device_type", properties_body)
         self.assertIn("caps->limits.maxComputeSharedMemorySize", properties_body)
+        self.assertIn("pProperties->limits.maxSamplerAnisotropy = advertised_max_sampler_anisotropy();", properties_body)
         self.assertIn("caps->limits.maxStorageBufferRange < transport_max_storage_range", properties_body)
         for marker in [
             "PDOCKER_VK_SHADOW_LIMIT_OR_CAP(maxPerStageDescriptorSamplers, bridge_per_stage_descriptors)",
@@ -15977,10 +15998,14 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("pFeatures->fillModeNonSolid = advertised_fill_mode_non_solid();", icd)
         self.assertIn("pFeatures->multiDrawIndirect = advertised_multi_draw_indirect();", icd)
         self.assertIn("pFeatures->drawIndirectFirstInstance = advertised_draw_indirect_first_instance();", icd)
+        self.assertIn("pFeatures->samplerAnisotropy = advertised_sampler_anisotropy();", icd)
         self.assertIn("PDOCKER_VK_FEATURE_DEPTH_CLAMP", icd)
         self.assertIn("PDOCKER_VK_FEATURE_FILL_MODE_NON_SOLID", icd)
         self.assertIn("PDOCKER_VK_FEATURE_MULTI_DRAW_INDIRECT", icd)
         self.assertIn("PDOCKER_VK_FEATURE_DRAW_INDIRECT_FIRST_INSTANCE", icd)
+        self.assertIn("PDOCKER_VK_FEATURE_SAMPLER_ANISOTROPY", icd)
+        self.assertIn("if (features->samplerAnisotropy) mask |= PDOCKER_VK_FEATURE_SAMPLER_ANISOTROPY;", icd)
+        self.assertIn("if (advertised_sampler_anisotropy()) mask |= PDOCKER_VK_FEATURE_SAMPLER_ANISOTROPY;", icd)
         self.assertIn("depth-clamp pipeline replay requires depthClamp", GPU_EXECUTOR.read_text())
         self.assertIn("non-solid polygon-mode pipeline replay requires fillModeNonSolid", GPU_EXECUTOR.read_text())
         self.assertIn("multi indirect draw replay requires multiDrawIndirect", GPU_EXECUTOR.read_text())

@@ -328,6 +328,7 @@ static uint64_t g_generic_dispatch_sequence = 0;
 #define PDOCKER_VK_FEATURE_FILL_MODE_NON_SOLID         (1ull << 31)
 #define PDOCKER_VK_FEATURE_MULTI_DRAW_INDIRECT         (1ull << 32)
 #define PDOCKER_VK_FEATURE_DRAW_INDIRECT_FIRST_INSTANCE (1ull << 33)
+#define PDOCKER_VK_FEATURE_SAMPLER_ANISOTROPY          (1ull << 34)
 
 struct PdockerVkMemory {
     uint64_t object_id;
@@ -11095,6 +11096,7 @@ static bool parse_executor_advertisement_caps_json(
 
     json_read_u32(json, "maxPushConstantsSize", &caps->limits.maxPushConstantsSize);
     json_read_u32(json, "maxComputeSharedMemorySize", &caps->limits.maxComputeSharedMemorySize);
+    json_read_float(json, "maxSamplerAnisotropy", &caps->limits.maxSamplerAnisotropy);
     json_read_u32(json, "maxPerStageDescriptorSamplers", &caps->limits.maxPerStageDescriptorSamplers);
     json_read_u32(json, "maxPerStageDescriptorSampledImages", &caps->limits.maxPerStageDescriptorSampledImages);
     json_read_u32(json, "maxPerStageDescriptorStorageImages", &caps->limits.maxPerStageDescriptorStorageImages);
@@ -11132,6 +11134,7 @@ static bool parse_executor_advertisement_caps_json(
     json_read_u32(json, "drawIndirectFirstInstance", &caps->features.drawIndirectFirstInstance);
     json_read_u32(json, "depthBiasClamp", &caps->features.depthBiasClamp);
     json_read_u32(json, "depthBounds", &caps->features.depthBounds);
+    json_read_u32(json, "samplerAnisotropy", &caps->features.samplerAnisotropy);
     json_read_u32(json, "multiview", &caps->multiview);
     json_read_u32(json, "storageBuffer16BitAccess", &caps->storage16.storageBuffer16BitAccess);
     json_read_u32(json, "uniformAndStorageBuffer16BitAccess", &caps->storage16.uniformAndStorageBuffer16BitAccess);
@@ -11481,6 +11484,21 @@ static VkBool32 advertised_depth_bounds(void) {
     return (caps && caps->features.depthBounds) ? VK_TRUE : VK_FALSE;
 }
 
+static float advertised_max_sampler_anisotropy(void) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+    if (!caps || !caps->features.samplerAnisotropy || caps->limits.maxSamplerAnisotropy < 1.0f) {
+        return 1.0f;
+    }
+    return caps->limits.maxSamplerAnisotropy;
+}
+
+static VkBool32 advertised_sampler_anisotropy(void) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+    return (caps && caps->features.samplerAnisotropy && caps->limits.maxSamplerAnisotropy >= 1.0f)
+        ? VK_TRUE
+        : VK_FALSE;
+}
+
 static VkBool32 advertised_synchronization2(void) {
     const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
     return (caps && caps->synchronization2 && caps->ext_synchronization2) ? VK_TRUE : VK_FALSE;
@@ -11725,6 +11743,7 @@ static void fill_physical_device_properties(VkPhysicalDeviceProperties *pPropert
     pProperties->limits.sampledImageStencilSampleCounts = VK_SAMPLE_COUNT_1_BIT;
     pProperties->limits.storageImageSampleCounts = VK_SAMPLE_COUNT_1_BIT;
     pProperties->limits.maxSampleMaskWords = 1;
+    pProperties->limits.maxSamplerAnisotropy = advertised_max_sampler_anisotropy();
     pProperties->limits.maxColorAttachments = 8;
     pProperties->limits.maxBoundDescriptorSets =
         caps && caps->limits.maxBoundDescriptorSets &&
@@ -11999,6 +12018,7 @@ static void fill_physical_device_features(VkPhysicalDeviceFeatures *pFeatures) {
     pFeatures->drawIndirectFirstInstance = advertised_draw_indirect_first_instance();
     pFeatures->depthBiasClamp = advertised_depth_bias_clamp();
     pFeatures->depthBounds = advertised_depth_bounds();
+    pFeatures->samplerAnisotropy = advertised_sampler_anisotropy();
 }
 
 static void fill_pnext_features(void *pNext) {
@@ -12648,6 +12668,7 @@ static uint64_t feature_mask_from_base_features(const VkPhysicalDeviceFeatures *
     if (features->drawIndirectFirstInstance) mask |= PDOCKER_VK_FEATURE_DRAW_INDIRECT_FIRST_INSTANCE;
     if (features->depthBiasClamp) mask |= PDOCKER_VK_FEATURE_DEPTH_BIAS_CLAMP;
     if (features->depthBounds) mask |= PDOCKER_VK_FEATURE_DEPTH_BOUNDS;
+    if (features->samplerAnisotropy) mask |= PDOCKER_VK_FEATURE_SAMPLER_ANISOTROPY;
     return mask;
 }
 
@@ -12810,6 +12831,7 @@ static uint64_t advertised_feature_mask(void) {
         if (advertised_draw_indirect_first_instance()) mask |= PDOCKER_VK_FEATURE_DRAW_INDIRECT_FIRST_INSTANCE;
         if (advertised_depth_bias_clamp()) mask |= PDOCKER_VK_FEATURE_DEPTH_BIAS_CLAMP;
         if (advertised_depth_bounds()) mask |= PDOCKER_VK_FEATURE_DEPTH_BOUNDS;
+        if (advertised_sampler_anisotropy()) mask |= PDOCKER_VK_FEATURE_SAMPLER_ANISOTROPY;
     } else {
         if (advertised_storage16()) mask |= PDOCKER_VK_FEATURE_STORAGE_BUFFER_16;
         if (advertised_storage8()) {
@@ -13965,7 +13987,9 @@ static VkResult validate_image_view_create_info_for_transport(
     return VK_SUCCESS;
 }
 
-static VkResult validate_sampler_create_info_for_transport(const VkSamplerCreateInfo *info) {
+static VkResult validate_sampler_create_info_for_transport(
+        const VkSamplerCreateInfo *info,
+        uint64_t requested_feature_mask) {
     if (!info) return VK_ERROR_INITIALIZATION_FAILED;
     for (const void *node = info->pNext; node;) {
         PdockerVkStructHeader header = read_vk_struct_header(node);
@@ -13986,6 +14010,19 @@ static VkResult validate_sampler_create_info_for_transport(const VkSamplerCreate
         node = header.pNext;
     }
     if (info->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;
+    if (info->anisotropyEnable) {
+        if ((requested_feature_mask & PDOCKER_VK_FEATURE_SAMPLER_ANISOTROPY) == 0) {
+            trace_icd_runtime_failure("sampler-anisotropy-feature-not-enabled",
+                                      VK_ERROR_FEATURE_NOT_PRESENT);
+            return VK_ERROR_FEATURE_NOT_PRESENT;
+        }
+        float max_anisotropy = advertised_max_sampler_anisotropy();
+        if (info->maxAnisotropy < 1.0f || info->maxAnisotropy > max_anisotropy) {
+            trace_icd_runtime_failure("sampler-anisotropy-limit-unsupported",
+                                      VK_ERROR_FEATURE_NOT_PRESENT);
+            return VK_ERROR_FEATURE_NOT_PRESENT;
+        }
+    }
     return VK_SUCCESS;
 }
 
@@ -14278,14 +14315,16 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSampler(
         const VkSamplerCreateInfo *pCreateInfo,
         const VkAllocationCallbacks *pAllocator,
         VkSampler *pSampler) {
-    (void)device;
     (void)pAllocator;
     if (!pCreateInfo || !pSampler) return VK_ERROR_INITIALIZATION_FAILED;
     *pSampler = VK_NULL_HANDLE;
     if (!vulkan_v5_object_transport_enabled()) {
         return unsupported_image_transport_result("vkCreateSampler");
     }
-    VkResult validate_rc = validate_sampler_create_info_for_transport(pCreateInfo);
+    PdockerVkDevice *dev = (PdockerVkDevice *)device;
+    uint64_t requested_feature_mask = dev ? dev->requested_feature_mask : 0;
+    VkResult validate_rc = validate_sampler_create_info_for_transport(
+        pCreateInfo, requested_feature_mask);
     if (validate_rc != VK_SUCCESS) return validate_rc;
     PdockerVkSampler *sampler = pdocker_alloc_handle(sizeof(*sampler));
     if (!sampler) return VK_ERROR_OUT_OF_HOST_MEMORY;
