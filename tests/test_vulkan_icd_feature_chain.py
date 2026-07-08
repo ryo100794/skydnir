@@ -137,6 +137,49 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_dynamic_rendering_local_read_feature_is_queryable_but_not_enableable(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            int main(void) {{
+                VkPhysicalDeviceDynamicRenderingLocalReadFeatures local_read;
+                memset(&local_read, 0xff, sizeof(local_read));
+                local_read.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES;
+                local_read.pNext = NULL;
+                fill_pnext_features(&local_read);
+                if (local_read.sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES) {{
+                    return 2;
+                }}
+                if (local_read.pNext != NULL) {{
+                    return 3;
+                }}
+                if (local_read.dynamicRenderingLocalRead != VK_FALSE) {{
+                    return 4;
+                }}
+
+                VkDeviceCreateInfo create_info;
+                memset(&create_info, 0, sizeof(create_info));
+                create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                local_read.dynamicRenderingLocalRead = VK_TRUE;
+                create_info.pNext = &local_read;
+                if (validate_device_feature_requests(&create_info) == VK_SUCCESS) {{
+                    return 5;
+                }}
+                local_read.dynamicRenderingLocalRead = VK_FALSE;
+                if (validate_device_feature_requests(&create_info) != VK_SUCCESS) {{
+                    return 6;
+                }}
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_advertised_feature_extensions_are_enumerated_together(self):
         source = textwrap.dedent(
             f"""

@@ -61,6 +61,39 @@
 #define VK_KHR_DYNAMIC_RENDERING_SPEC_VERSION 1
 #endif
 
+#ifndef VK_KHR_dynamic_rendering_local_read
+#define VK_KHR_dynamic_rendering_local_read 1
+#define VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME "VK_KHR_dynamic_rendering_local_read"
+#define VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_SPEC_VERSION 1
+#define VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES ((VkStructureType)1000232000)
+#define VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_LOCATION_INFO ((VkStructureType)1000232001)
+#define VK_STRUCTURE_TYPE_RENDERING_INPUT_ATTACHMENT_INDEX_INFO ((VkStructureType)1000232002)
+#define VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES_KHR VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES
+#define VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_LOCATION_INFO_KHR VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_LOCATION_INFO
+#define VK_STRUCTURE_TYPE_RENDERING_INPUT_ATTACHMENT_INDEX_INFO_KHR VK_STRUCTURE_TYPE_RENDERING_INPUT_ATTACHMENT_INDEX_INFO
+#define VK_IMAGE_LAYOUT_RENDERING_LOCAL_READ ((VkImageLayout)1000232000)
+#define VK_IMAGE_LAYOUT_RENDERING_LOCAL_READ_KHR VK_IMAGE_LAYOUT_RENDERING_LOCAL_READ
+typedef struct VkPhysicalDeviceDynamicRenderingLocalReadFeatures {
+    VkStructureType sType;
+    void *pNext;
+    VkBool32 dynamicRenderingLocalRead;
+} VkPhysicalDeviceDynamicRenderingLocalReadFeatures;
+typedef struct VkRenderingAttachmentLocationInfo {
+    VkStructureType sType;
+    const void *pNext;
+    uint32_t colorAttachmentCount;
+    const uint32_t *pColorAttachmentLocations;
+} VkRenderingAttachmentLocationInfo;
+typedef struct VkRenderingInputAttachmentIndexInfo {
+    VkStructureType sType;
+    const void *pNext;
+    uint32_t colorAttachmentCount;
+    const uint32_t *pColorAttachmentInputIndices;
+    const uint32_t *pDepthInputAttachmentIndex;
+    const uint32_t *pStencilInputAttachmentIndex;
+} VkRenderingInputAttachmentIndexInfo;
+#endif
+
 #ifndef VK_KHR_SURFACE_EXTENSION_NAME
 #define VK_KHR_SURFACE_EXTENSION_NAME "VK_KHR_surface"
 #define VK_KHR_SURFACE_SPEC_VERSION 25
@@ -12157,6 +12190,12 @@ static void fill_pnext_features(void *pNext) {
                 p->dynamicRendering = advertised_dynamic_rendering();
                 break;
             }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES: {
+                VkPhysicalDeviceDynamicRenderingLocalReadFeatures *p = (VkPhysicalDeviceDynamicRenderingLocalReadFeatures *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                p->dynamicRenderingLocalRead = VK_FALSE;
+                break;
+            }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT: {
                 VkPhysicalDeviceExtendedDynamicStateFeaturesEXT *p = (VkPhysicalDeviceExtendedDynamicStateFeaturesEXT *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
@@ -12560,6 +12599,13 @@ static VkResult validate_device_feature_requests(const VkDeviceCreateInfo *pCrea
                 const VkPhysicalDeviceDynamicRenderingFeatures *p = (const VkPhysicalDeviceDynamicRenderingFeatures *)node;
                 supported = !p->dynamicRendering || advertised_dynamic_rendering();
                 if (!supported) unsupported_feature_name = "dynamicRendering";
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES: {
+                const VkPhysicalDeviceDynamicRenderingLocalReadFeatures *p =
+                    (const VkPhysicalDeviceDynamicRenderingLocalReadFeatures *)node;
+                supported = !p->dynamicRenderingLocalRead;
+                if (!supported) unsupported_feature_name = "dynamicRenderingLocalRead";
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT: {
@@ -18340,6 +18386,22 @@ static bool rendering_info_pnext_noop(const VkRenderingInfo *info) {
                 break;
             }
 #endif
+            case VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_LOCATION_INFO: {
+                const VkRenderingAttachmentLocationInfo *locations =
+                    (const VkRenderingAttachmentLocationInfo *)node;
+                if (locations->colorAttachmentCount != 0) return false;
+                break;
+            }
+            case VK_STRUCTURE_TYPE_RENDERING_INPUT_ATTACHMENT_INDEX_INFO: {
+                const VkRenderingInputAttachmentIndexInfo *indices =
+                    (const VkRenderingInputAttachmentIndexInfo *)node;
+                if (indices->colorAttachmentCount != 0 ||
+                    indices->pDepthInputAttachmentIndex ||
+                    indices->pStencilInputAttachmentIndex) {
+                    return false;
+                }
+                break;
+            }
             default:
                 return false;
         }

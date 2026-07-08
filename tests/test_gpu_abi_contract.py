@@ -6410,6 +6410,55 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn("!vulkan_descriptor_type_requires_sampler(descriptor_type)", body)
             self.assertNotIn("entry->binding_flags != 0 || entry->immutable_sampler_count != 0", body)
 
+    def test_vulkan_dynamic_rendering_local_read_is_explicitly_fail_closed(self):
+        icd = VULKAN_ICD.read_text()
+        self.assertIn("VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME", icd)
+        self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES", icd)
+        self.assertIn("VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_LOCATION_INFO", icd)
+        self.assertIn("VK_STRUCTURE_TYPE_RENDERING_INPUT_ATTACHMENT_INDEX_INFO", icd)
+        self.assertIn("VK_IMAGE_LAYOUT_RENDERING_LOCAL_READ", icd)
+
+        features_body = c_function_body(icd, "fill_pnext_features")
+        self.assertIn("VkPhysicalDeviceDynamicRenderingLocalReadFeatures", features_body)
+        self.assertIn("p->dynamicRenderingLocalRead = VK_FALSE;", features_body)
+
+        validate_body = c_function_body(icd, "validate_device_feature_requests")
+        self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES", validate_body)
+        self.assertIn("supported = !p->dynamicRenderingLocalRead;", validate_body)
+        self.assertIn("unsupported_feature_name = \"dynamicRenderingLocalRead\"", validate_body)
+
+        rendering_info_body = c_function_body(icd, "rendering_info_pnext_noop")
+        self.assertIn("VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_LOCATION_INFO", rendering_info_body)
+        self.assertIn("locations->colorAttachmentCount != 0", rendering_info_body)
+        self.assertIn("VK_STRUCTURE_TYPE_RENDERING_INPUT_ATTACHMENT_INDEX_INFO", rendering_info_body)
+        self.assertIn("indices->pDepthInputAttachmentIndex", rendering_info_body)
+        self.assertIn("indices->pStencilInputAttachmentIndex", rendering_info_body)
+
+    def test_vulkan_executor_sampler_anisotropy_replay_is_fail_closed(self):
+        executor = GPU_EXECUTOR.read_text()
+        helper_body = c_function_body(executor, "vulkan_sampler_entry_supported_by_runtime")
+        for marker in [
+            "src->anisotropy_enable",
+            "rt->enabled_features.samplerAnisotropy",
+            "rt->physical_properties.limits.maxSamplerAnisotropy",
+            "float_from_u32_bits(src->max_anisotropy_bits)",
+            "return -EOPNOTSUPP",
+            "sampler anisotropy replay requires samplerAnisotropy",
+            "sampler anisotropy exceeds Android Vulkan device limit",
+        ]:
+            self.assertIn(marker, helper_body)
+
+        materialize_body = c_function_body(executor, "materialize_vulkan_dispatch_images")
+        self.assertIn("vulkan_sampler_entry_supported_by_runtime(rt, src, &sampler_reason)", materialize_body)
+        self.assertLess(
+            materialize_body.index("vulkan_sampler_entry_supported_by_runtime(rt, src, &sampler_reason)"),
+            materialize_body.index(".anisotropyEnable = src->anisotropy_enable"),
+        )
+        self.assertLess(
+            materialize_body.index("vulkan_sampler_entry_supported_by_runtime(rt, src, &sampler_reason)"),
+            materialize_body.index("vkCreateSampler(device, &sci, NULL, &dst->sampler)"),
+        )
+
     def test_vulkan_generic_dispatch_input_attachments_fail_closed_but_graphics_replays(self):
         icd = VULKAN_ICD.read_text()
         executor = GPU_EXECUTOR.read_text()

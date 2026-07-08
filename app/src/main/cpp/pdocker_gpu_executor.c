@@ -3777,6 +3777,28 @@ static int vulkan_dispatch_native_image_sharing_mode(
     return 0;
 }
 
+static int vulkan_sampler_entry_supported_by_runtime(
+        const VulkanRuntime *rt,
+        const PdockerGpuVulkanDispatchV5SamplerEntry *src,
+        const char **reason_out) {
+    const char *reason = "sampler replay supported";
+    if (reason_out) *reason_out = reason;
+    if (!src || !src->anisotropy_enable) return 0;
+    if (!rt || !rt->ready || !rt->enabled_features.samplerAnisotropy) {
+        reason = "sampler anisotropy replay requires samplerAnisotropy";
+        if (reason_out) *reason_out = reason;
+        return -EOPNOTSUPP;
+    }
+    const float max_anisotropy = float_from_u32_bits(src->max_anisotropy_bits);
+    const float limit = rt->physical_properties.limits.maxSamplerAnisotropy;
+    if (!(max_anisotropy >= 1.0f) || !(max_anisotropy <= limit)) {
+        reason = "sampler anisotropy exceeds Android Vulkan device limit";
+        if (reason_out) *reason_out = reason;
+        return -EOPNOTSUPP;
+    }
+    return 0;
+}
+
 static int materialize_vulkan_dispatch_images(
         const VulkanRuntime *rt,
         VkPhysicalDevice physical_device,
@@ -4072,6 +4094,14 @@ static int materialize_vulkan_dispatch_images(
     }
     for (size_t i = 0; i < object_tables->sampler_count; ++i) {
         const PdockerGpuVulkanDispatchV5SamplerEntry *src = &object_tables->samplers[i];
+        const char *sampler_reason = NULL;
+        int sampler_rc = vulkan_sampler_entry_supported_by_runtime(rt, src, &sampler_reason);
+        if (sampler_rc != 0) {
+            fprintf(stderr,
+                    "pdocker-gpu-executor: sampler replay rejected: %s\n",
+                    sampler_reason ? sampler_reason : "unsupported sampler state");
+            return sampler_rc;
+        }
         if (*sampler_count >= PDOCKER_GPU_MAX_VULKAN_BINDINGS) return -E2BIG;
         VulkanDispatchSamplerObject *dst = &samplers[(*sampler_count)++];
         memset(dst, 0, sizeof(*dst));
