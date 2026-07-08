@@ -87,6 +87,7 @@
 #define PDOCKER_VK_FEATURE_FILL_MODE_NON_SOLID         (1ull << 31)
 #define PDOCKER_VK_FEATURE_MULTI_DRAW_INDIRECT         (1ull << 32)
 #define PDOCKER_VK_FEATURE_DRAW_INDIRECT_FIRST_INSTANCE (1ull << 33)
+#define PDOCKER_VK_FEATURE_INDEPENDENT_BLEND           (1ull << 35)
 
 #ifndef GL_COMPUTE_SHADER
 #define GL_COMPUTE_SHADER 0x91B9
@@ -1835,7 +1836,7 @@ static void log_vulkan_feature_trace(const VulkanRuntime *rt) {
     fprintf(stderr,
             "pdocker-gpu-executor: Android Vulkan features build_marker=%s api=%u.%u device=\"%s\" vendor=0x%04x device=0x%04x "
             "shaderInt64=%u geometryShader=%u tessellationShader=%u "
-            "graphics_base={sampleRateShading:%u,alphaToOne:%u,logicOp:%u,wideLines:%u,depthClamp:%u,fillModeNonSolid:%u,multiDrawIndirect:%u,drawIndirectFirstInstance:%u,depthBiasClamp:%u,depthBounds:%u,samplerAnisotropy:%u} "
+            "graphics_base={sampleRateShading:%u,alphaToOne:%u,logicOp:%u,independentBlend:%u,wideLines:%u,depthClamp:%u,fillModeNonSolid:%u,multiDrawIndirect:%u,drawIndirectFirstInstance:%u,depthBiasClamp:%u,depthBounds:%u,samplerAnisotropy:%u} "
             "storage16={ssbo:%u,ubo_ssbo:%u,push:%u,io:%u} "
             "storage8={ssbo:%u,ubo_ssbo:%u,push:%u} "
             "float16=%u int8=%u indexTypeUint8=%u "
@@ -1855,6 +1856,7 @@ static void log_vulkan_feature_trace(const VulkanRuntime *rt) {
             rt->physical_features.sampleRateShading,
             rt->physical_features.alphaToOne,
             rt->physical_features.logicOp,
+            rt->physical_features.independentBlend,
             rt->physical_features.wideLines,
             rt->physical_features.depthClamp,
             rt->physical_features.fillModeNonSolid,
@@ -1904,7 +1906,7 @@ static void log_vulkan_enabled_feature_trace(
         const VkPhysicalDeviceIndexTypeUint8FeaturesEXT *index_type_uint8) {
     fprintf(stderr,
             "pdocker-gpu-executor: Android Vulkan enabled features build_marker=%s shaderInt64=%u geometryShader=%u tessellationShader=%u "
-            "graphics_base={sampleRateShading:%u,alphaToOne:%u,logicOp:%u,wideLines:%u,depthClamp:%u,fillModeNonSolid:%u,multiDrawIndirect:%u,drawIndirectFirstInstance:%u,depthBiasClamp:%u,depthBounds:%u,samplerAnisotropy:%u} "
+            "graphics_base={sampleRateShading:%u,alphaToOne:%u,logicOp:%u,independentBlend:%u,wideLines:%u,depthClamp:%u,fillModeNonSolid:%u,multiDrawIndirect:%u,drawIndirectFirstInstance:%u,depthBiasClamp:%u,depthBounds:%u,samplerAnisotropy:%u} "
             "storage16={ssbo:%u,ubo_ssbo:%u,push:%u,io:%u} "
             "storage8={ssbo:%u,ubo_ssbo:%u,push:%u} "
             "float16=%u int8=%u indexTypeUint8=%u "
@@ -1917,6 +1919,7 @@ static void log_vulkan_enabled_feature_trace(
             features ? features->sampleRateShading : 0,
             features ? features->alphaToOne : 0,
             features ? features->logicOp : 0,
+            features ? features->independentBlend : 0,
             features ? features->wideLines : 0,
             features ? features->depthClamp : 0,
             features ? features->fillModeNonSolid : 0,
@@ -1957,6 +1960,7 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             "\"sampleRateShading\":%u,"
             "\"alphaToOne\":%u,"
             "\"logicOp\":%u,"
+            "\"independentBlend\":%u,"
             "\"wideLines\":%u,"
             "\"depthClamp\":%u,"
             "\"fillModeNonSolid\":%u,"
@@ -2017,6 +2021,7 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             rt ? rt->enabled_features.sampleRateShading : 0,
             rt ? rt->enabled_features.alphaToOne : 0,
             rt ? rt->enabled_features.logicOp : 0,
+            rt ? rt->enabled_features.independentBlend : 0,
             rt ? rt->enabled_features.wideLines : 0,
             rt ? rt->enabled_features.depthClamp : 0,
             rt ? rt->enabled_features.fillModeNonSolid : 0,
@@ -2192,6 +2197,7 @@ static void write_feature_mask_names(FILE *out, uint64_t mask) {
     WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_SAMPLE_RATE_SHADING, "sampleRateShading");
     WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_ALPHA_TO_ONE, "alphaToOne");
     WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_LOGIC_OP, "logicOp");
+    WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_INDEPENDENT_BLEND, "independentBlend");
     WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_WIDE_LINES, "wideLines");
     WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_DEPTH_CLAMP, "depthClamp");
     WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_FILL_MODE_NON_SOLID, "fillModeNonSolid");
@@ -18456,6 +18462,7 @@ cleanup:
                 "\"sampleRateShading\":%u,"
                 "\"alphaToOne\":%u,"
                 "\"logicOp\":%u,"
+                "\"independentBlend\":%u,"
                 "\"wideLines\":%u,"
                 "\"depthClamp\":%u,"
                 "\"fillModeNonSolid\":%u,"
@@ -18478,6 +18485,7 @@ cleanup:
                 rt ? rt->physical_features.sampleRateShading : 0,
                 rt ? rt->physical_features.alphaToOne : 0,
                 rt ? rt->physical_features.logicOp : 0,
+                rt ? rt->physical_features.independentBlend : 0,
                 rt ? rt->physical_features.wideLines : 0,
                 rt ? rt->physical_features.depthClamp : 0,
                 rt ? rt->physical_features.fillModeNonSolid : 0,
@@ -18690,6 +18698,7 @@ static void print_capabilities(const char *transport) {
             "\"sampleRateShading\":%u,"
             "\"alphaToOne\":%u,"
             "\"logicOp\":%u,"
+            "\"independentBlend\":%u,"
             "\"wideLines\":%u,"
             "\"depthClamp\":%u,"
             "\"fillModeNonSolid\":%u,"
@@ -18743,6 +18752,7 @@ static void print_capabilities(const char *transport) {
             rt ? rt->physical_features.sampleRateShading : 0,
             rt ? rt->physical_features.alphaToOne : 0,
             rt ? rt->physical_features.logicOp : 0,
+            rt ? rt->physical_features.independentBlend : 0,
             rt ? rt->physical_features.wideLines : 0,
             rt ? rt->physical_features.depthClamp : 0,
             rt ? rt->physical_features.fillModeNonSolid : 0,
@@ -18899,6 +18909,7 @@ static void print_vulkan_advertisement_caps(const char *transport) {
             "\"sampleRateShading\":%u,"
             "\"alphaToOne\":%u,"
             "\"logicOp\":%u,"
+            "\"independentBlend\":%u,"
             "\"wideLines\":%u,"
             "\"depthClamp\":%u,"
             "\"fillModeNonSolid\":%u,"
@@ -18930,6 +18941,7 @@ static void print_vulkan_advertisement_caps(const char *transport) {
             rt ? rt->physical_features.sampleRateShading : 0,
             rt ? rt->physical_features.alphaToOne : 0,
             rt ? rt->physical_features.logicOp : 0,
+            rt ? rt->physical_features.independentBlend : 0,
             rt ? rt->physical_features.wideLines : 0,
             rt ? rt->physical_features.depthClamp : 0,
             rt ? rt->physical_features.fillModeNonSolid : 0,
@@ -24726,6 +24738,43 @@ find_vulkan_graphics_v66_color_blend_state(
     return NULL;
 }
 
+static int vulkan_graphics_v66_color_blend_attachment_equal(
+        const PdockerGpuVulkanGraphicsV66ColorBlendAttachmentEntry *a,
+        const PdockerGpuVulkanGraphicsV66ColorBlendAttachmentEntry *b) {
+    if (!a || !b) return 0;
+    return ((a->flags & PDOCKER_GPU_GRAPHICS_V66_COLOR_BLEND_ATTACHMENT_BLEND_ENABLE) ==
+            (b->flags & PDOCKER_GPU_GRAPHICS_V66_COLOR_BLEND_ATTACHMENT_BLEND_ENABLE)) &&
+           a->src_color_blend_factor == b->src_color_blend_factor &&
+           a->dst_color_blend_factor == b->dst_color_blend_factor &&
+           a->color_blend_op == b->color_blend_op &&
+           a->src_alpha_blend_factor == b->src_alpha_blend_factor &&
+           a->dst_alpha_blend_factor == b->dst_alpha_blend_factor &&
+           a->alpha_blend_op == b->alpha_blend_op &&
+           a->color_write_mask == b->color_write_mask;
+}
+
+static int vulkan_graphics_v66_color_blend_state_needs_independent_blend(
+        const VulkanGraphicsV6FrameView *view,
+        const PdockerGpuVulkanGraphicsV66ColorBlendStateEntry *state) {
+    if (!view || !view->is_v66 || !view->header_v66 || !view->color_blend_attachments ||
+        !state || state->attachment_count <= 1) {
+        return 0;
+    }
+    if (state->attachment_first > view->header_v66->v66.color_blend_attachment_count ||
+        state->attachment_count >
+            view->header_v66->v66.color_blend_attachment_count - state->attachment_first) {
+        return 1;
+    }
+    const PdockerGpuVulkanGraphicsV66ColorBlendAttachmentEntry *first =
+        &view->color_blend_attachments[state->attachment_first];
+    for (uint32_t a = 1; a < state->attachment_count; ++a) {
+        const PdockerGpuVulkanGraphicsV66ColorBlendAttachmentEntry *cur =
+            &view->color_blend_attachments[state->attachment_first + a];
+        if (!vulkan_graphics_v66_color_blend_attachment_equal(first, cur)) return 1;
+    }
+    return 0;
+}
+
 static const PdockerGpuVulkanGraphicsV622MultisampleStateEntry *
 find_vulkan_graphics_v622_multisample_state(
         const VulkanGraphicsV6FrameView *view,
@@ -25728,6 +25777,18 @@ static int preflight_vulkan_graphics_v6_runtime_supported(
         reason = "dynamic rendering is not enabled on the Android Vulkan device";
         if (reason_out) *reason_out = reason;
         return -EOPNOTSUPP;
+    }
+    if (view && view->is_v66 && view->header_v66 && view->color_blend_states &&
+        !g_vulkan_runtime.enabled_features.independentBlend) {
+        for (uint32_t i = 0; i < view->header_v66->v66.color_blend_state_count; ++i) {
+            const PdockerGpuVulkanGraphicsV66ColorBlendStateEntry *color_blend_state =
+                &view->color_blend_states[i];
+            if (vulkan_graphics_v66_color_blend_state_needs_independent_blend(view, color_blend_state)) {
+                reason = "non-identical color blend attachment replay requires independentBlend";
+                if (reason_out) *reason_out = reason;
+                return -EOPNOTSUPP;
+            }
+        }
     }
     if (view && view->header && view->commands) {
         for (uint32_t i = 0; i < view->header->command_count; ++i) {
@@ -26838,6 +26899,8 @@ static int materialize_vulkan_graphics_v6_pipelines(
                 ? VK_TRUE : VK_FALSE;
             logic_op = (VkLogicOp)color_blend_state->logic_op;
             if (logic_op_enable && !rt->enabled_features.logicOp) return -EOPNOTSUPP;
+            if (vulkan_graphics_v66_color_blend_state_needs_independent_blend(view, color_blend_state) &&
+                !rt->enabled_features.independentBlend) return -EOPNOTSUPP;
             if (color_blend_state->flags & PDOCKER_GPU_GRAPHICS_V66_COLOR_BLEND_CONSTANTS_PRESENT) {
                 blend_constants[0] = float_from_u32_bits(color_blend_state->blend_constant0_bits);
                 blend_constants[1] = float_from_u32_bits(color_blend_state->blend_constant1_bits);

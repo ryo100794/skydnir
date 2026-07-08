@@ -2501,6 +2501,12 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("need_v66_color_blend_state", icd)
         self.assertIn("color_blend_states[color_blend_state_count++]", icd)
         self.assertIn("pipeline->color_blend_logic_op_enable = cb->logicOpEnable", icd)
+        self.assertIn("pdocker_vk_color_blend_attachment_state_equal", icd)
+        self.assertIn("PDOCKER_VK_FEATURE_INDEPENDENT_BLEND", icd)
+        self.assertIn("vulkan_graphics_v66_color_blend_state_needs_independent_blend", executor)
+        self.assertIn("non-identical color blend attachment replay requires independentBlend", executor)
+        self.assertIn("!g_vulkan_runtime.enabled_features.independentBlend", executor)
+        self.assertIn("!rt->enabled_features.independentBlend", executor)
         self.assertNotIn("attachment->blendEnable ||", icd)
 
     def test_vulkan_graphics_dynamic_rendering_multiview_is_passthrough_when_advertised(self):
@@ -7094,6 +7100,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_VK_FEATURE_SAMPLE_RATE_SHADING",
             "PDOCKER_VK_FEATURE_ALPHA_TO_ONE",
             "PDOCKER_VK_FEATURE_LOGIC_OP",
+            "PDOCKER_VK_FEATURE_INDEPENDENT_BLEND",
+            "#define PDOCKER_VK_FEATURE_INDEPENDENT_BLEND           (1ull << 35)",
             "PDOCKER_VK_FEATURE_WIDE_LINES",
             "PDOCKER_VK_FEATURE_DEPTH_CLAMP",
             "PDOCKER_VK_FEATURE_FILL_MODE_NON_SOLID",
@@ -7111,6 +7119,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "if (features->sampleRateShading) mask |= PDOCKER_VK_FEATURE_SAMPLE_RATE_SHADING;",
             "if (features->alphaToOne) mask |= PDOCKER_VK_FEATURE_ALPHA_TO_ONE;",
             "if (features->logicOp) mask |= PDOCKER_VK_FEATURE_LOGIC_OP;",
+            "if (features->independentBlend) mask |= PDOCKER_VK_FEATURE_INDEPENDENT_BLEND;",
             "if (features->wideLines) mask |= PDOCKER_VK_FEATURE_WIDE_LINES;",
             "if (features->depthClamp) mask |= PDOCKER_VK_FEATURE_DEPTH_CLAMP;",
             "if (features->fillModeNonSolid) mask |= PDOCKER_VK_FEATURE_FILL_MODE_NON_SOLID;",
@@ -7124,6 +7133,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "F(geometryShader)",
             "F(sampleRateShading)",
             "F(alphaToOne)",
+            "F(independentBlend)",
             "PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, descriptorIndexing);",
             "PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, scalarBlockLayout);",
             "PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, bufferDeviceAddress);",
@@ -7133,6 +7143,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "json_read_u32(json, \"sampleRateShading\", &caps->features.sampleRateShading);",
             "json_read_u32(json, \"alphaToOne\", &caps->features.alphaToOne);",
             "json_read_u32(json, \"logicOp\", &caps->features.logicOp);",
+            "json_read_u32(json, \"independentBlend\", &caps->features.independentBlend);",
             "json_read_u32(json, \"wideLines\", &caps->features.wideLines);",
             "json_read_u32(json, \"depthClamp\", &caps->features.depthClamp);",
             "json_read_u32(json, \"fillModeNonSolid\", &caps->features.fillModeNonSolid);",
@@ -7152,10 +7163,12 @@ class GpuAbiContractTest(unittest.TestCase):
             "static VkBool32 advertised_multi_draw_indirect(void)",
             "static VkBool32 advertised_draw_indirect_first_instance(void)",
             "static VkBool32 advertised_sampler_anisotropy(void)",
+            "static VkBool32 advertised_independent_blend(void)",
             "pFeatures->geometryShader = advertised_geometry_shader();",
             "pFeatures->sampleRateShading = advertised_sample_rate_shading();",
             "pFeatures->alphaToOne = advertised_alpha_to_one();",
             "pFeatures->logicOp = advertised_logic_op();",
+            "pFeatures->independentBlend = advertised_independent_blend();",
             "pFeatures->wideLines = advertised_wide_lines();",
             "pFeatures->depthClamp = advertised_depth_clamp();",
             "pFeatures->fillModeNonSolid = advertised_fill_mode_non_solid();",
@@ -7169,6 +7182,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "if (advertised_sample_rate_shading()) mask |= PDOCKER_VK_FEATURE_SAMPLE_RATE_SHADING;",
             "if (advertised_alpha_to_one()) mask |= PDOCKER_VK_FEATURE_ALPHA_TO_ONE;",
             "if (advertised_logic_op()) mask |= PDOCKER_VK_FEATURE_LOGIC_OP;",
+            "if (advertised_independent_blend()) mask |= PDOCKER_VK_FEATURE_INDEPENDENT_BLEND;",
             "if (advertised_wide_lines()) mask |= PDOCKER_VK_FEATURE_WIDE_LINES;",
             "if (advertised_depth_clamp()) mask |= PDOCKER_VK_FEATURE_DEPTH_CLAMP;",
             "if (advertised_fill_mode_non_solid()) mask |= PDOCKER_VK_FEATURE_FILL_MODE_NON_SOLID;",
@@ -9213,6 +9227,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_VK_FEATURE_SAMPLE_RATE_SHADING",
             "PDOCKER_VK_FEATURE_ALPHA_TO_ONE",
             "PDOCKER_VK_FEATURE_LOGIC_OP",
+            "PDOCKER_VK_FEATURE_INDEPENDENT_BLEND",
             "PDOCKER_VK_FEATURE_DEPTH_BIAS_CLAMP",
             "PDOCKER_VK_FEATURE_DEPTH_BOUNDS",
             "dynamic-depth-bias-clamp-feature-not-enabled",
@@ -15695,6 +15710,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "write_android_vulkan_enabled_features_report",
             '\\"android_vulkan_enabled_features\\":{',
             '\\"tessellationShader\\":%u',
+            '\\"independentBlend\\":%u',
             '\\"wideLines\\":%u',
             '\\"depthClamp\\":%u',
             '\\"fillModeNonSolid\\":%u',
@@ -15754,6 +15770,7 @@ class GpuAbiContractTest(unittest.TestCase):
             '\\"lineWidthGranularity\\":%.9g',
             '\\"physical_features\\":{',
             '\\"tessellationShader\\":%u',
+            '\\"independentBlend\\":%u',
             '\\"wideLines\\":%u',
             '\\"depthClamp\\":%u',
             '\\"fillModeNonSolid\\":%u',
@@ -15821,6 +15838,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('\\"drawIndexedIndirectCount\\":%u', enabled_body)
         self.assertIn('\\"samplerAnisotropy\\":%u', enabled_body)
         self.assertIn("rt ? rt->enabled_features.samplerAnisotropy : 0", enabled_body)
+        self.assertIn("rt ? rt->enabled_features.independentBlend : 0", enabled_body)
         self.assertIn('\\"VK_KHR_draw_indirect_count\\":%u', enabled_body)
         self.assertIn('\\"VK_AMD_draw_indirect_count\\":%u', enabled_body)
         self.assertIn("rt && rt->cmd_draw_indirect_count ? 1u : 0u", enabled_body)
@@ -15845,6 +15863,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "storage8.storageBuffer8BitAccess",
             "float16_int8.shaderInt8",
             "features.tessellationShader",
+            "features.independentBlend",
             "features.wideLines",
             "features.depthClamp",
             "features.fillModeNonSolid",
@@ -15913,6 +15932,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("caps->image_format_cap_count == expected_format_cap_count", parse_body)
         self.assertIn('json_read_float(json, "maxSamplerAnisotropy", &caps->limits.maxSamplerAnisotropy);', parse_body)
         self.assertIn('json_read_u32(json, "samplerAnisotropy", &caps->features.samplerAnisotropy);', parse_body)
+        self.assertIn('json_read_u32(json, "independentBlend", &caps->features.independentBlend);', parse_body)
         query_body = icd.split("static int query_executor_advertisement_caps_line", 1)[1].split(
             "static const PdockerVkAdvertisedCaps *pdocker_vk_advertised_caps", 1
         )[0]
@@ -15994,6 +16014,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("p->multiview = caps->multiview;", pnext_body)
         self.assertIn("pFeatures->tessellationShader = advertised_tessellation_shader();", icd)
         self.assertIn("pFeatures->wideLines = advertised_wide_lines();", icd)
+        self.assertIn("pFeatures->independentBlend = advertised_independent_blend();", icd)
         self.assertIn("pFeatures->depthClamp = advertised_depth_clamp();", icd)
         self.assertIn("pFeatures->fillModeNonSolid = advertised_fill_mode_non_solid();", icd)
         self.assertIn("pFeatures->multiDrawIndirect = advertised_multi_draw_indirect();", icd)
@@ -16005,11 +16026,14 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("PDOCKER_VK_FEATURE_DRAW_INDIRECT_FIRST_INSTANCE", icd)
         self.assertIn("PDOCKER_VK_FEATURE_SAMPLER_ANISOTROPY", icd)
         self.assertIn("if (features->samplerAnisotropy) mask |= PDOCKER_VK_FEATURE_SAMPLER_ANISOTROPY;", icd)
+        self.assertIn("if (features->independentBlend) mask |= PDOCKER_VK_FEATURE_INDEPENDENT_BLEND;", icd)
         self.assertIn("if (advertised_sampler_anisotropy()) mask |= PDOCKER_VK_FEATURE_SAMPLER_ANISOTROPY;", icd)
+        self.assertIn("if (advertised_independent_blend()) mask |= PDOCKER_VK_FEATURE_INDEPENDENT_BLEND;", icd)
         self.assertIn("depth-clamp pipeline replay requires depthClamp", GPU_EXECUTOR.read_text())
         self.assertIn("non-solid polygon-mode pipeline replay requires fillModeNonSolid", GPU_EXECUTOR.read_text())
         self.assertIn("multi indirect draw replay requires multiDrawIndirect", GPU_EXECUTOR.read_text())
         self.assertIn("indirect draw replay requires drawIndirectFirstInstance", GPU_EXECUTOR.read_text())
+        self.assertIn("non-identical color blend attachment replay requires independentBlend", GPU_EXECUTOR.read_text())
         self.assertIn("dynamic-line-width-feature-not-enabled", icd)
         self.assertIn("!advertised_line_width_supported(pipeline->line_width)", icd)
         self.assertIn("p->extendedDynamicState = advertised_extended_dynamic_state();", pnext_body)
