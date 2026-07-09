@@ -177,6 +177,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             }}
 
             int main(void) {{
+                unsetenv("PDOCKER_GPU_QUEUE_SOCKET");
                 PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)calloc(1, sizeof(*cmd));
                 if (!cmd) return 9;
 
@@ -244,6 +245,10 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                             cmd->graphics_command_op_count ? cmd->graphics_command_ops[0].memory_barrier_op_count : 0);
                     return 8;
                 }}
+                if (!command_buffer_needs_graphics_submit_sync_frame(cmd)) {{
+                    fprintf(stderr, "barrier-payload set-event2 did not require executor submit frame\\n");
+                    return 81;
+                }}
 
                 memset(cmd, 0, sizeof(*cmd));
                 memset(&dependency, 0, sizeof(dependency));
@@ -263,6 +268,10 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                             cmd->command_op_count, cmd->graphics_command_op_count,
                             cmd->graphics_command_op_count ? cmd->graphics_command_ops[0].flags : 0);
                     return 10;
+                }}
+                if (command_buffer_needs_graphics_submit_sync_frame(cmd)) {{
+                    fprintf(stderr, "by-region-only non-tracked set-event2 should not require executor submit frame\\n");
+                    return 101;
                 }}
 
                 memset(cmd, 0, sizeof(*cmd));
@@ -293,6 +302,52 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                             cmd->graphics_command_op_count ? cmd->graphics_command_ops[0].memory_barrier_op_count : 0);
                     return 12;
                 }}
+                if (!command_buffer_needs_graphics_submit_sync_frame(cmd)) {{
+                    fprintf(stderr, "barrier-payload wait-events2 did not require executor submit frame\\n");
+                    return 121;
+                }}
+
+                memset(cmd, 0, sizeof(*cmd));
+                VkMemoryBarrier legacy_memory_barrier;
+                memset(&legacy_memory_barrier, 0, sizeof(legacy_memory_barrier));
+                legacy_memory_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+                legacy_memory_barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+                legacy_memory_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+                vkCmdWaitEvents((VkCommandBuffer)cmd, 1, events,
+                                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                                1, &legacy_memory_barrier, 0, NULL, 0, NULL);
+                if (cmd->recording_failed) {{
+                    fprintf(stderr, "legacy barrier-payload wait-events unexpectedly failed: %s\\n",
+                            cmd->recording_failure_reason ? cmd->recording_failure_reason : "<null>");
+                    return 13;
+                }}
+                if (cmd->command_op_count != 1 || cmd->graphics_command_op_count != 1 ||
+                    cmd->memory_barrier_op_count != 1 ||
+                    cmd->command_ops[0].type != PDOCKER_VK_COMMAND_EVENT_WAIT ||
+                    cmd->graphics_command_ops[0].command_type != PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT ||
+                    cmd->graphics_command_ops[0].memory_barrier_op_first != 0 ||
+                    cmd->graphics_command_ops[0].memory_barrier_op_count != 1 ||
+                    !command_buffer_needs_graphics_submit_sync_frame(cmd)) {{
+                    fprintf(stderr, "legacy barrier-payload wait-events did not record replayable submit frame ops=%u graphics=%u mem=%u need=%d\\n",
+                            cmd->command_op_count, cmd->graphics_command_op_count,
+                            cmd->memory_barrier_op_count,
+                            command_buffer_needs_graphics_submit_sync_frame(cmd) ? 1 : 0);
+                    return 14;
+                }}
+
+                memset(cmd, 0, sizeof(*cmd));
+                VkEvent two_events[2] = {{ event, event }};
+                vkCmdWaitEvents((VkCommandBuffer)cmd, 2, two_events,
+                                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                                1, &legacy_memory_barrier, 0, NULL, 0, NULL);
+                if (!expect_reason(cmd, "event-wait-barrier-multi-event-unsupported")) return 15;
+                if (cmd->command_op_count != 0 || cmd->graphics_command_op_count != 0 ||
+                    cmd->memory_barrier_op_count != 0) {{
+                    fprintf(stderr, "multi-event legacy barrier failure still recorded commands\\n");
+                    return 16;
+                }}
                 vkDestroyEvent(VK_NULL_HANDLE, event, NULL);
                 free(cmd);
                 return 0;
@@ -301,6 +356,87 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
         )
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_dispatch_commands_fail_closed_when_recorded_inside_rendering_scopes(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include <stdlib.h>
+            #include "{ICD_SOURCE}"
+
+            static int expect_dispatch_scope_failure(PdockerVkCommandBuffer *cmd, const char *expected_reason) {{
+                if (!cmd->recording_failed) {{
+                    fprintf(stderr, "dispatch scope did not fail recording\\n");
+                    return 0;
+                }}
+                if (!cmd->recording_failure_reason || strcmp(cmd->recording_failure_reason, expected_reason) != 0) {{
+                    fprintf(stderr, "unexpected dispatch scope reason got=%s want=%s\\n",
+                            cmd->recording_failure_reason ? cmd->recording_failure_reason : "<null>",
+                            expected_reason);
+                    return 0;
+                }}
+                if (!cmd->graphics_unsupported || cmd->has_dispatch ||
+                    cmd->dispatch_op_count != 0 || cmd->command_op_count != 0) {{
+                    fprintf(stderr, "dispatch scope failure still recorded state unsupported=%d has=%d dispatch=%u ops=%u\\n",
+                            cmd->graphics_unsupported ? 1 : 0,
+                            cmd->has_dispatch ? 1 : 0,
+                            cmd->dispatch_op_count,
+                            cmd->command_op_count);
+                    return 0;
+                }}
+                if (vkEndCommandBuffer((VkCommandBuffer)cmd) != VK_ERROR_FEATURE_NOT_PRESENT) {{
+                    fprintf(stderr, "failed dispatch command buffer did not fail close at end\\n");
+                    return 0;
+                }}
+                return 1;
+            }}
+
+            int main(void) {{
+                PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)calloc(1, sizeof(*cmd));
+                if (!cmd) return 9;
+
+                cmd->dynamic_rendering_active = true;
+                vkCmdDispatch((VkCommandBuffer)cmd, 1, 1, 1);
+                if (!expect_dispatch_scope_failure(cmd, "dispatch-inside-dynamic-rendering-unsupported")) return 2;
+
+                memset(cmd, 0, sizeof(*cmd));
+                cmd->render_pass_active = true;
+                vkCmdDispatchBase((VkCommandBuffer)cmd, 0, 0, 0, 1, 1, 1);
+                if (!expect_dispatch_scope_failure(cmd, "dispatch-inside-legacy-render-pass-unsupported")) return 3;
+
+                memset(cmd, 0, sizeof(*cmd));
+                cmd->dynamic_rendering_active = true;
+                cmd->active_render_pass = (PdockerVkRenderPass *)0x1;
+                vkCmdDispatch((VkCommandBuffer)cmd, 1, 1, 1);
+                if (!expect_dispatch_scope_failure(cmd, "dispatch-inside-legacy-render-pass-unsupported")) return 4;
+
+                memset(cmd, 0, sizeof(*cmd));
+                cmd->inherited_rendering_active = true;
+                vkCmdDispatchIndirect((VkCommandBuffer)cmd, VK_NULL_HANDLE, 0);
+                if (!expect_dispatch_scope_failure(cmd, "dispatch-inside-inherited-rendering-unsupported")) return 5;
+
+                memset(cmd, 0, sizeof(*cmd));
+                vkCmdDispatch((VkCommandBuffer)cmd, 1, 1, 1);
+                if (cmd->recording_failed || !cmd->has_dispatch ||
+                    cmd->dispatch_op_count != 1 || cmd->command_op_count != 1 ||
+                    cmd->command_ops[0].type != PDOCKER_VK_COMMAND_DISPATCH) {{
+                    fprintf(stderr, "normal compute dispatch was not recorded cleanly failed=%d has=%d dispatch=%u ops=%u\\n",
+                            cmd->recording_failed ? 1 : 0,
+                            cmd->has_dispatch ? 1 : 0,
+                            cmd->dispatch_op_count,
+                            cmd->command_op_count);
+                    return 6;
+                }}
+                free(cmd);
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
 
     def test_bind_memory2_rejects_null_arrays_and_unsupported_pnext(self):
         source = textwrap.dedent(

@@ -4141,7 +4141,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("for (uint32_t i = 0; i < eventCount; ++i)", icd)
         self.assertNotIn("event-wait2-barrier-payload-unsupported", icd)
         self.assertNotIn("vkCmdPipelineBarrier2(commandBuffer, &pDependencyInfos[i])", icd)
-        self.assertNotIn("eventCount > 1", icd)
+        wait_events2_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdWaitEvents2", 1)[1].split("static bool query_range_valid", 1)[0]
+        self.assertNotIn("eventCount > 1", wait_events2_body)
         self.assertIn("command_op_is_graphics_frame_op", icd)
         self.assertIn("case PDOCKER_VK_COMMAND_IMAGE_BARRIER:", icd)
         self.assertIn("(size_t)frame_header->v61.image_barrier_table_size", icd)
@@ -8519,6 +8520,37 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("event-wait-barrier-payload-unsupported", icd)
         self.assertIn("event-wait-unsignaled", icd)
 
+    def test_vulkan_event_barrier_payloads_route_to_executor_frame(self):
+        icd = VULKAN_ICD.read_text()
+        submit_body = c_function_body(icd, "command_buffer_needs_graphics_submit_sync_frame")
+        wait_events_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdWaitEvents", 1)[1].split(
+            "static bool sync2_stage_access_pair_invalid", 1
+        )[0]
+        pipeline_barrier_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier(", 1)[1].split(
+            "static bool sync2_stage_access_pair_invalid", 1
+        )[0]
+
+        for marker in [
+            "graphics_record_has_dependency_payload",
+            "graphics_event_record_requires_submit_frame",
+            "record_legacy_pipeline_barrier_ops",
+            "legacy_pipeline_barrier_inputs_unsupported(srcStageMask",
+            "event-wait-barrier-zero-event-unsupported",
+            "event-wait-barrier-multi-event-unsupported",
+            "event-wait-stage-mask-unsupported",
+        ]:
+            self.assertIn(marker, icd)
+        self.assertIn("graphics_event_record_requires_submit_frame(cmd, record)", submit_body)
+        payload_helper = c_function_body(icd, "graphics_record_has_dependency_payload")
+        self.assertNotIn("record->flags != 0", payload_helper)
+        self.assertIn("record_legacy_pipeline_barrier_ops(commandBuffer", pipeline_barrier_body)
+        self.assertIn("bool has_barrier_payload = memoryBarrierCount || bufferMemoryBarrierCount || imageMemoryBarrierCount", wait_events_body)
+        self.assertIn("eventCount > 1", wait_events_body)
+        self.assertIn("record_legacy_pipeline_barrier_ops(commandBuffer", wait_events_body)
+        self.assertIn("record_event_wait_command(commandBuffer, pEvents[i],", wait_events_body)
+        self.assertIn("0, &barriers)", wait_events_body)
+        self.assertNotIn("vkCmdPipelineBarrier(commandBuffer,", wait_events_body)
+
     def test_vulkan_event_commands_are_graphics_v6_replayable(self):
         icd = VULKAN_ICD.read_text()
         executor = GPU_EXECUTOR.read_text()
@@ -9866,8 +9898,10 @@ class GpuAbiContractTest(unittest.TestCase):
         barrier_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier(", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkCmdCopyBuffer", 1
         )[0]
-        self.assertIn("pImageMemoryBarriers && i < imageMemoryBarrierCount", barrier_body)
-        self.assertIn("record_image_barrier_op(commandBuffer", barrier_body)
+        legacy_barrier_helper = c_function_body(icd, "record_legacy_pipeline_barrier_ops")
+        self.assertIn("pImageMemoryBarriers && i < imageMemoryBarrierCount", legacy_barrier_helper)
+        self.assertIn("record_image_barrier_op(commandBuffer", legacy_barrier_helper)
+        self.assertIn("record_legacy_pipeline_barrier_ops(commandBuffer", barrier_body)
         record_image_barrier_body = icd.split("static void record_image_barrier_op", 1)[1].split(
             "static void record_memory_barrier_op", 1
         )[0]
@@ -11500,6 +11534,38 @@ class GpuAbiContractTest(unittest.TestCase):
             'trace_icd_runtime_failure("graphics-command-unimplemented"', 1
         )[0]
         self.assertNotIn("commit_graphics_v6_image_layout_ops_for_range", validation_producer)
+
+    def test_vulkan_dispatch_recording_fails_closed_inside_rendering_scopes(self):
+        icd = VULKAN_ICD.read_text()
+        for marker in [
+            "dispatch_rendering_scope_recording_failure_reason",
+            "command_buffer_reject_dispatch_inside_rendering_scope",
+            "dispatch-inside-dynamic-rendering-unsupported",
+            "dispatch-inside-legacy-render-pass-unsupported",
+            "dispatch-inside-inherited-rendering-unsupported",
+            "cmd->render_pass_active || cmd->active_render_pass",
+            "cmd->inherited_rendering_active",
+            "cmd->dynamic_rendering_active",
+            "command_buffer_mark_recording_failed(cmd, reason);",
+        ]:
+            self.assertIn(marker, icd)
+        for name, next_name in [
+            ("vkCmdDispatch", "vkCmdDispatchBase"),
+            ("vkCmdDispatchBase", "vkCmdDispatchBaseKHR"),
+            ("vkCmdDispatchIndirect", "vkCmdPushConstants"),
+        ]:
+            body = icd.split(f"VKAPI_ATTR void VKAPI_CALL {name}", 1)[1].split(
+                f"VKAPI_ATTR void VKAPI_CALL {next_name}", 1
+            )[0]
+            self.assertIn("command_buffer_reject_dispatch_inside_rendering_scope(cmd)", body)
+            self.assertLess(
+                body.index("command_buffer_reject_dispatch_inside_rendering_scope(cmd)"),
+                body.index("cmd->has_dispatch = true"),
+            )
+            self.assertLess(
+                body.index("command_buffer_reject_dispatch_inside_rendering_scope(cmd)"),
+                body.index("validate_bound_descriptor_layouts_before_dispatch(cmd)"),
+            )
 
     def test_vulkan_graphics_dispatch_inside_frame_has_render_scope_diagnostics(self):
         icd = VULKAN_ICD.read_text()
