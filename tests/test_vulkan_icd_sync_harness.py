@@ -438,6 +438,141 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
+    def test_pipeline_barrier2_records_precise_unsupported_dependency_reasons(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include <stdlib.h>
+            #include "{ICD_SOURCE}"
+
+            typedef struct DummyPnext {{
+                VkStructureType sType;
+                const void *pNext;
+            }} DummyPnext;
+
+            static int expect_failure(PdockerVkCommandBuffer *cmd, const char *reason) {{
+                if (!cmd->recording_failed) {{
+                    fprintf(stderr, "pipeline barrier2 did not record failure\\n");
+                    return 0;
+                }}
+                if (!cmd->recording_failure_reason || strcmp(cmd->recording_failure_reason, reason) != 0) {{
+                    fprintf(stderr, "unexpected pipeline barrier2 reason got=%s want=%s\\n",
+                            cmd->recording_failure_reason ? cmd->recording_failure_reason : "<null>",
+                            reason);
+                    return 0;
+                }}
+                if (cmd->command_op_count != 0 || cmd->graphics_command_op_count != 0 ||
+                    cmd->memory_barrier_op_count != 0 || cmd->buffer_barrier_op_count != 0 ||
+                    cmd->image_barrier_op_count != 0) {{
+                    fprintf(stderr, "failed pipeline barrier2 recorded partial state ops=%u graphics=%u mem=%u buf=%u img=%u\\n",
+                            cmd->command_op_count,
+                            cmd->graphics_command_op_count,
+                            cmd->memory_barrier_op_count,
+                            cmd->buffer_barrier_op_count,
+                            cmd->image_barrier_op_count);
+                    return 0;
+                }}
+                if (vkEndCommandBuffer((VkCommandBuffer)cmd) != VK_ERROR_FEATURE_NOT_PRESENT) {{
+                    fprintf(stderr, "failed pipeline barrier2 did not fail close at end\\n");
+                    return 0;
+                }}
+                return 1;
+            }}
+
+            int main(void) {{
+                PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)calloc(1, sizeof(*cmd));
+                if (!cmd) return 9;
+
+                DummyPnext unsupported;
+                memset(&unsupported, 0, sizeof(unsupported));
+                unsupported.sType = (VkStructureType)1000060013;
+
+                VkDependencyInfo dependency;
+                memset(&dependency, 0, sizeof(dependency));
+                dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+                dependency.pNext = &unsupported;
+                vkCmdPipelineBarrier2((VkCommandBuffer)cmd, &dependency);
+                if (!expect_failure(cmd, "pipeline-barrier2-pnext-unsupported")) return 2;
+
+                memset(cmd, 0, sizeof(*cmd));
+                VkMemoryBarrier2 memory_barrier;
+                memset(&memory_barrier, 0, sizeof(memory_barrier));
+                memory_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+                memory_barrier.pNext = &unsupported;
+                memory_barrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+                memory_barrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+                memset(&dependency, 0, sizeof(dependency));
+                dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+                dependency.memoryBarrierCount = 1;
+                dependency.pMemoryBarriers = &memory_barrier;
+                vkCmdPipelineBarrier2((VkCommandBuffer)cmd, &dependency);
+                if (!expect_failure(cmd, "pipeline-barrier2-pnext-unsupported")) return 3;
+
+                memset(cmd, 0, sizeof(*cmd));
+                memset(&dependency, 0, sizeof(dependency));
+                dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+                dependency.memoryBarrierCount = 1;
+                dependency.pMemoryBarriers = NULL;
+                vkCmdPipelineBarrier2((VkCommandBuffer)cmd, &dependency);
+                if (!expect_failure(cmd, "pipeline-barrier2-missing-barrier-array")) return 4;
+
+                memset(cmd, 0, sizeof(*cmd));
+                memset(&memory_barrier, 0, sizeof(memory_barrier));
+                memory_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+                memory_barrier.srcStageMask = VK_PIPELINE_STAGE_2_NONE;
+                memory_barrier.srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT;
+                memory_barrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+                memset(&dependency, 0, sizeof(dependency));
+                dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+                dependency.memoryBarrierCount = 1;
+                dependency.pMemoryBarriers = &memory_barrier;
+                vkCmdPipelineBarrier2((VkCommandBuffer)cmd, &dependency);
+                if (!expect_failure(cmd, "pipeline-barrier2-none-stage-access-unsupported")) return 5;
+
+                memset(cmd, 0, sizeof(*cmd));
+                memset(&dependency, 0, sizeof(dependency));
+                dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+                dependency.dependencyFlags = VK_DEPENDENCY_VIEW_LOCAL_BIT;
+                vkCmdPipelineBarrier2((VkCommandBuffer)cmd, &dependency);
+                if (!expect_failure(cmd, "pipeline-barrier2-dependency-flags-unsupported")) return 6;
+
+                memset(cmd, 0, sizeof(*cmd));
+                memset(&memory_barrier, 0, sizeof(memory_barrier));
+                memory_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+                memory_barrier.srcStageMask = VK_PIPELINE_STAGE_2_NONE;
+                memory_barrier.dstStageMask = VK_PIPELINE_STAGE_2_NONE;
+                memset(&dependency, 0, sizeof(dependency));
+                dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+                dependency.memoryBarrierCount = 1;
+                dependency.pMemoryBarriers = &memory_barrier;
+                vkCmdPipelineBarrier2((VkCommandBuffer)cmd, &dependency);
+                if (cmd->recording_failed || cmd->graphics_unsupported ||
+                    cmd->command_op_count != 1 || cmd->memory_barrier_op_count != 1 ||
+                    cmd->graphics_command_op_count != 1 ||
+                    cmd->graphics_command_ops[0].command_type != PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER) {{
+                    fprintf(stderr, "valid NONE/zero-access barrier2 did not record cleanly failed=%d unsupported=%d ops=%u mem=%u graphics=%u\\n",
+                            cmd->recording_failed ? 1 : 0,
+                            cmd->graphics_unsupported ? 1 : 0,
+                            cmd->command_op_count,
+                            cmd->memory_barrier_op_count,
+                            cmd->graphics_command_op_count);
+                    return 7;
+                }}
+                if (vkEndCommandBuffer((VkCommandBuffer)cmd) != VK_SUCCESS) {{
+                    fprintf(stderr, "valid pipeline barrier2 failed at end\\n");
+                    return 8;
+                }}
+                free(cmd);
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
     def test_bind_memory2_rejects_null_arrays_and_unsupported_pnext(self):
         source = textwrap.dedent(
             f"""

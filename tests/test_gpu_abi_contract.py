@@ -4185,6 +4185,45 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("cmd->memory_barrier_op_count = 0;", clear_body)
         self.assertIn("cmd->buffer_barrier_op_count = 0;", clear_body)
 
+    def test_vulkan_pipeline_barrier2_fail_closed_at_record_time(self):
+        icd = VULKAN_ICD.read_text()
+        helper = c_function_body(icd, "dependency_info_unsupported_reason")
+        for marker in [
+            "dependency-info-pnext-unsupported",
+            "dependency-info-memory-barriers-missing",
+            "dependency-info-memory-barrier-pnext-unsupported",
+            "dependency-info-memory-stage-access-unsupported",
+            "dependency-info-buffer-barriers-missing",
+            "dependency-info-buffer-barrier-pnext-unsupported",
+            "dependency-info-buffer-stage-access-unsupported",
+            "dependency-info-image-barriers-missing",
+            "dependency-info-image-barrier-pnext-unsupported",
+            "dependency-info-image-stage-access-unsupported",
+        ]:
+            self.assertIn(marker, helper)
+        pipeline_reason = c_function_body(icd, "pipeline_barrier2_dependency_info_failure_reason")
+        for marker in [
+            "pipeline-barrier2-pnext-unsupported",
+            "pipeline-barrier2-missing-barrier-array",
+            "pipeline-barrier2-none-stage-access-unsupported",
+            "pipeline-barrier2-dependency-info-unsupported",
+        ]:
+            self.assertIn(marker, pipeline_reason)
+        body = c_function_body(icd, "vkCmdPipelineBarrier2")
+        self.assertIn("pipeline_barrier2_dependency_info_failure_reason(pDependencyInfo)", body)
+        self.assertIn("command_buffer_mark_recording_failed(cmd, unsupported_reason);", body)
+        self.assertIn('command_buffer_mark_recording_failed(cmd, "pipeline-barrier2-dependency-flags-unsupported");', body)
+        self.assertLess(
+            body.index("pipeline_barrier2_dependency_info_failure_reason(pDependencyInfo)"),
+            body.index("record_dependency_info_barrier_ops(commandBuffer, pDependencyInfo)"),
+        )
+        self.assertLess(
+            body.index('command_buffer_mark_recording_failed(cmd, "pipeline-barrier2-dependency-flags-unsupported");'),
+            body.index("record_dependency_info_barrier_ops(commandBuffer, pDependencyInfo)"),
+        )
+        memory_body = c_function_body(icd, "record_memory_barrier_op")
+        self.assertIn('command_buffer_mark_recording_failed(cmd, "memory-barrier-record-overflow");', memory_body)
+
     def test_vulkan_dispatch_v5_1_object_header_is_full_frame_validated(self):
         executor = GPU_EXECUTOR.read_text()
         self.assertIn("PdockerGpuVulkanDispatchV5ObjectFrameHeader", executor)
@@ -9927,16 +9966,17 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("dependency_info_has_unsupported_pnext", icd)
         self.assertIn("sync2_stage_access_pair_invalid", icd)
         self.assertIn("VK_PIPELINE_STAGE_2_NONE", icd)
-        self.assertIn("if (info->pNext) return true;", icd)
+        self.assertIn('if (info->pNext) return "dependency-info-pnext-unsupported";', icd)
         self.assertIn("info->memoryBarrierCount && !info->pMemoryBarriers", icd)
         self.assertIn("info->bufferMemoryBarrierCount && !info->pBufferMemoryBarriers", icd)
         self.assertIn("info->imageMemoryBarrierCount && !info->pImageMemoryBarriers", icd)
         self.assertIn("info->pMemoryBarriers[i].pNext", icd)
         self.assertIn("info->pBufferMemoryBarriers[i].pNext", icd)
         self.assertIn("info->pImageMemoryBarriers[i].pNext", icd)
-        self.assertIn("dependency_info_has_unsupported_pnext(pDependencyInfo)", barrier2_body)
-        self.assertIn("cmd->graphics_unsupported = true;", barrier2_body)
-        self.assertLess(barrier2_body.index("dependency_info_has_unsupported_pnext(pDependencyInfo)"), barrier2_body.index("VkDependencyFlags dependency_flags"))
+        self.assertIn("pipeline_barrier2_dependency_info_failure_reason(pDependencyInfo)", barrier2_body)
+        self.assertIn("command_buffer_mark_recording_failed(cmd, unsupported_reason);", barrier2_body)
+        self.assertNotIn("cmd->graphics_unsupported = true;", barrier2_body)
+        self.assertLess(barrier2_body.index("pipeline_barrier2_dependency_info_failure_reason(pDependencyInfo)"), barrier2_body.index("VkDependencyFlags dependency_flags"))
         self.assertIn("VkDependencyFlags dependency_flags", barrier2_body)
         self.assertIn("dependency_flags & ~VK_DEPENDENCY_BY_REGION_BIT", barrier2_body)
         self.assertIn("record.flags = dependency_flags & VK_DEPENDENCY_BY_REGION_BIT", barrier2_body)

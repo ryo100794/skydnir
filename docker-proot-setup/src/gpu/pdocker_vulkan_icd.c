@@ -20863,6 +20863,7 @@ static void record_memory_barrier_op(
     if (!cmd) return;
     if (cmd->memory_barrier_op_count >= PDOCKER_VK_MAX_COPY_OPS) {
         cmd->graphics_unsupported = true;
+        command_buffer_mark_recording_failed(cmd, "memory-barrier-record-overflow");
         return;
     }
     PdockerVkMemoryBarrierOp *op = &cmd->memory_barrier_ops[cmd->memory_barrier_op_count++];
@@ -23884,40 +23885,72 @@ static PdockerVkBarrierOpRange record_dependency_info_barrier_ops(
         VkCommandBuffer commandBuffer,
         const VkDependencyInfo *info);
 
-static bool dependency_info_has_unsupported_pnext(const VkDependencyInfo *info) {
-    if (!info) return false;
-    if (info->pNext) return true;
-    if (info->memoryBarrierCount && !info->pMemoryBarriers) return true;
+static const char *dependency_info_unsupported_reason(const VkDependencyInfo *info) {
+    if (!info) return NULL;
+    if (info->pNext) return "dependency-info-pnext-unsupported";
+    if (info->memoryBarrierCount && !info->pMemoryBarriers) {
+        return "dependency-info-memory-barriers-missing";
+    }
     if (info->pMemoryBarriers) {
         for (uint32_t i = 0; i < info->memoryBarrierCount; ++i) {
-            if (info->pMemoryBarriers[i].pNext) return true;
+            if (info->pMemoryBarriers[i].pNext) {
+                return "dependency-info-memory-barrier-pnext-unsupported";
+            }
             if (sync2_stage_access_pair_invalid(info->pMemoryBarriers[i].srcStageMask,
                                                 info->pMemoryBarriers[i].srcAccessMask,
                                                 info->pMemoryBarriers[i].dstStageMask,
-                                                info->pMemoryBarriers[i].dstAccessMask)) return true;
+                                                info->pMemoryBarriers[i].dstAccessMask)) {
+                return "dependency-info-memory-stage-access-unsupported";
+            }
         }
     }
-    if (info->bufferMemoryBarrierCount && !info->pBufferMemoryBarriers) return true;
+    if (info->bufferMemoryBarrierCount && !info->pBufferMemoryBarriers) {
+        return "dependency-info-buffer-barriers-missing";
+    }
     if (info->pBufferMemoryBarriers) {
         for (uint32_t i = 0; i < info->bufferMemoryBarrierCount; ++i) {
-            if (info->pBufferMemoryBarriers[i].pNext) return true;
+            if (info->pBufferMemoryBarriers[i].pNext) {
+                return "dependency-info-buffer-barrier-pnext-unsupported";
+            }
             if (sync2_stage_access_pair_invalid(info->pBufferMemoryBarriers[i].srcStageMask,
                                                 info->pBufferMemoryBarriers[i].srcAccessMask,
                                                 info->pBufferMemoryBarriers[i].dstStageMask,
-                                                info->pBufferMemoryBarriers[i].dstAccessMask)) return true;
+                                                info->pBufferMemoryBarriers[i].dstAccessMask)) {
+                return "dependency-info-buffer-stage-access-unsupported";
+            }
         }
     }
-    if (info->imageMemoryBarrierCount && !info->pImageMemoryBarriers) return true;
+    if (info->imageMemoryBarrierCount && !info->pImageMemoryBarriers) {
+        return "dependency-info-image-barriers-missing";
+    }
     if (info->pImageMemoryBarriers) {
         for (uint32_t i = 0; i < info->imageMemoryBarrierCount; ++i) {
-            if (info->pImageMemoryBarriers[i].pNext) return true;
+            if (info->pImageMemoryBarriers[i].pNext) {
+                return "dependency-info-image-barrier-pnext-unsupported";
+            }
             if (sync2_stage_access_pair_invalid(info->pImageMemoryBarriers[i].srcStageMask,
                                                 info->pImageMemoryBarriers[i].srcAccessMask,
                                                 info->pImageMemoryBarriers[i].dstStageMask,
-                                                info->pImageMemoryBarriers[i].dstAccessMask)) return true;
+                                                info->pImageMemoryBarriers[i].dstAccessMask)) {
+                return "dependency-info-image-stage-access-unsupported";
+            }
         }
     }
-    return false;
+    return NULL;
+}
+
+static bool dependency_info_has_unsupported_pnext(const VkDependencyInfo *info) {
+    return dependency_info_unsupported_reason(info) != NULL;
+}
+
+static const char *pipeline_barrier2_dependency_info_failure_reason(
+        const VkDependencyInfo *info) {
+    const char *reason = dependency_info_unsupported_reason(info);
+    if (!reason) return NULL;
+    if (strstr(reason, "pnext")) return "pipeline-barrier2-pnext-unsupported";
+    if (strstr(reason, "missing")) return "pipeline-barrier2-missing-barrier-array";
+    if (strstr(reason, "stage-access")) return "pipeline-barrier2-none-stage-access-unsupported";
+    return "pipeline-barrier2-dependency-info-unsupported";
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier2(
@@ -23925,13 +23958,16 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier2(
         const VkDependencyInfo *pDependencyInfo) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     if (!cmd) return;
-    if (dependency_info_has_unsupported_pnext(pDependencyInfo)) {
-        cmd->graphics_unsupported = true;
+    const char *unsupported_reason =
+        pipeline_barrier2_dependency_info_failure_reason(pDependencyInfo);
+    if (unsupported_reason) {
+        command_buffer_mark_recording_failed(cmd, unsupported_reason);
         return;
     }
     VkDependencyFlags dependency_flags = pDependencyInfo ? pDependencyInfo->dependencyFlags : 0;
     if ((dependency_flags & ~VK_DEPENDENCY_BY_REGION_BIT) != 0) {
-        cmd->graphics_unsupported = true;
+        command_buffer_mark_recording_failed(cmd, "pipeline-barrier2-dependency-flags-unsupported");
+        return;
     }
     PdockerVkBarrierOpRange barriers = record_dependency_info_barrier_ops(commandBuffer, pDependencyInfo);
     if (cmd->recording_failed) return;
