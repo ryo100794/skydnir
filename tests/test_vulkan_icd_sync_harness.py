@@ -342,10 +342,25 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                                 VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                                 VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                                 1, &legacy_memory_barrier, 0, NULL, 0, NULL);
-                if (!expect_reason(cmd, "event-wait-barrier-multi-event-unsupported")) return 15;
-                if (cmd->command_op_count != 0 || cmd->graphics_command_op_count != 0 ||
-                    cmd->memory_barrier_op_count != 0) {{
-                    fprintf(stderr, "multi-event legacy barrier failure still recorded commands\\n");
+                if (cmd->recording_failed) {{
+                    fprintf(stderr, "multi-event legacy barrier wait-events unexpectedly failed: %s\\n",
+                            cmd->recording_failure_reason ? cmd->recording_failure_reason : "<null>");
+                    return 15;
+                }}
+                if (cmd->command_op_count != 1 || cmd->graphics_command_op_count != 1 ||
+                    cmd->memory_barrier_op_count != 1 ||
+                    cmd->command_ops[0].type != PDOCKER_VK_COMMAND_EVENT_WAIT ||
+                    cmd->command_ops[0].event_wait_ref_count != 2 ||
+                    cmd->event_wait_ref_count != 2 ||
+                    cmd->graphics_command_ops[0].command_type != PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT ||
+                    cmd->graphics_command_ops[0].memory_barrier_op_first != 0 ||
+                    cmd->graphics_command_ops[0].memory_barrier_op_count != 1 ||
+                    !command_buffer_needs_graphics_submit_sync_frame(cmd)) {{
+                    fprintf(stderr, "multi-event legacy barrier wait-events did not record refs ops=%u graphics=%u mem=%u refs=%u op_refs=%u need=%d\\n",
+                            cmd->command_op_count, cmd->graphics_command_op_count,
+                            cmd->memory_barrier_op_count, cmd->event_wait_ref_count,
+                            cmd->command_op_count ? cmd->command_ops[0].event_wait_ref_count : 0,
+                            command_buffer_needs_graphics_submit_sync_frame(cmd) ? 1 : 0);
                     return 16;
                 }}
                 vkDestroyEvent(VK_NULL_HANDLE, event, NULL);
@@ -868,7 +883,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             #include <unistd.h>
             #include "{ICD_SOURCE}"
 
-            static VkSemaphore make_timeline(uint64_t initial_value) {{
+            static VkSemaphore make_timeline(VkDevice device, uint64_t initial_value) {{
                 VkSemaphore sem = VK_NULL_HANDLE;
                 VkSemaphoreTypeCreateInfo type_info;
                 memset(&type_info, 0, sizeof(type_info));
@@ -879,14 +894,25 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 memset(&create_info, 0, sizeof(create_info));
                 create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
                 create_info.pNext = &type_info;
-                if (vkCreateSemaphore(VK_NULL_HANDLE, &create_info, NULL, &sem) != VK_SUCCESS) return VK_NULL_HANDLE;
+                if (vkCreateSemaphore(device, &create_info, NULL, &sem) != VK_SUCCESS) return VK_NULL_HANDLE;
                 return sem;
             }}
 
             int main(void) {{
                 unsetenv("PDOCKER_GPU_QUEUE_SOCKET");
-                VkSemaphore wait_sem = make_timeline(5);
-                VkSemaphore signal_sem = make_timeline(0);
+                PdockerVkDevice device;
+                memset(&device, 0, sizeof(device));
+                device.requested_feature_mask = PDOCKER_VK_FEATURE_TIMELINE_SEMAPHORE;
+                VkDevice vk_device = (VkDevice)&device;
+                if (!advertised_timeline_semaphore()) {{
+                    if (make_timeline(vk_device, 5) != VK_NULL_HANDLE) {{
+                        fprintf(stderr, "timeline semaphore was accepted without advertised support\\n");
+                        return 20;
+                    }}
+                    return 0;
+                }}
+                VkSemaphore wait_sem = make_timeline(vk_device, 5);
+                VkSemaphore signal_sem = make_timeline(vk_device, 0);
                 if (!wait_sem || !signal_sem) return 2;
                 uint64_t value = 0;
                 if (vkGetSemaphoreCounterValue(VK_NULL_HANDLE, wait_sem, &value) != VK_SUCCESS || value != 5) {{

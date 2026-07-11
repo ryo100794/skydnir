@@ -20066,6 +20066,7 @@ static int frame_ranges_do_not_overlap(const FrameRange *ranges, size_t count) {
 
 static size_t vulkan_graphics_v6_table_range_count(uint32_t abi_minor) {
     switch (abi_minor) {
+        case PDOCKER_GPU_VULKAN_GRAPHICS_V626_ABI_MINOR: return 52u;
         case PDOCKER_GPU_VULKAN_GRAPHICS_V625_ABI_MINOR: return 51u;
         case PDOCKER_GPU_VULKAN_GRAPHICS_V624_ABI_MINOR: return 50u;
         case PDOCKER_GPU_VULKAN_GRAPHICS_V623_ABI_MINOR: return 48u;
@@ -20967,6 +20968,8 @@ static int validate_vulkan_graphics_v6_header_prefix(
         if (header->header_size != sizeof(PdockerGpuVulkanGraphicsV624FrameHeader)) return -EPROTO;
     } else if (header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V625_ABI_MINOR) {
         if (header->header_size != sizeof(PdockerGpuVulkanGraphicsV625FrameHeader)) return -EPROTO;
+    } else if (header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V626_ABI_MINOR) {
+        if (header->header_size != sizeof(PdockerGpuVulkanGraphicsV626FrameHeader)) return -EPROTO;
     } else {
         return -EPROTO;
     }
@@ -21032,11 +21035,14 @@ static int validate_vulkan_graphics_v6_header(
         (const PdockerGpuVulkanGraphicsV622FrameHeader *)header;
     const PdockerGpuVulkanGraphicsV623FrameHeader *header_v623 =
         (const PdockerGpuVulkanGraphicsV623FrameHeader *)header;
+    const PdockerGpuVulkanGraphicsV626FrameHeader *header_v626 =
+        (const PdockerGpuVulkanGraphicsV626FrameHeader *)header;
     const PdockerGpuVulkanGraphicsV625FrameHeader *header_v625 =
         (const PdockerGpuVulkanGraphicsV625FrameHeader *)header;
     const PdockerGpuVulkanGraphicsV624FrameHeader *header_v624 =
         (const PdockerGpuVulkanGraphicsV624FrameHeader *)header;
-    const int is_v625 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V625_ABI_MINOR;
+    const int is_v626 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V626_ABI_MINOR;
+    const int is_v625 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V625_ABI_MINOR || is_v626;
     const int is_v624 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V624_ABI_MINOR || is_v625;
     const int is_v623 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V623_ABI_MINOR || is_v624;
     const int is_v622 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V622_ABI_MINOR || is_v623;
@@ -21112,6 +21118,7 @@ static int validate_vulkan_graphics_v6_header(
         (is_v624 && header_v624->v624.descriptor_set_layout_count > PDOCKER_GPU_VULKAN_GRAPHICS_V624_MAX_DESCRIPTOR_SET_LAYOUT_BINDINGS) ||
         (is_v624 && header_v624->v624.pipeline_layout_count > PDOCKER_GPU_VULKAN_GRAPHICS_V624_MAX_PIPELINE_LAYOUT_SETS) ||
         (is_v625 && header_v625->v625.descriptor_bind_count > PDOCKER_GPU_VULKAN_GRAPHICS_V625_MAX_DESCRIPTOR_BINDS) ||
+        (is_v626 && header_v626->v626.event_wait_ref_count > PDOCKER_GPU_VULKAN_GRAPHICS_V626_MAX_EVENT_WAIT_REFS) ||
         header->command_count > PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS) {
         return -E2BIG;
     }
@@ -21294,8 +21301,13 @@ static int validate_vulkan_graphics_v6_header(
          header_v625->v625.descriptor_bind_schema_hash != PDOCKER_GPU_VULKAN_GRAPHICS_V625_DESCRIPTOR_BIND_SCHEMA_HASH)) {
         return -EPROTO;
     }
-    /* FrameRange ranges[43] was the V6.19 table-count guard; V6.20 appends one range, V6.21 appends two ranges, V6.22 appends one range, V6.23 appends one range, V6.24 appends two ranges, V6.25 appends one range. */
-    FrameRange ranges[51] = {
+    if (is_v626 &&
+        (header_v626->v626.event_wait_ref_entry_size != sizeof(PdockerGpuVulkanGraphicsV626EventWaitRefEntry) ||
+         header_v626->v626.event_wait_ref_schema_hash != PDOCKER_GPU_VULKAN_GRAPHICS_V626_EVENT_WAIT_REF_SCHEMA_HASH)) {
+        return -EPROTO;
+    }
+    /* FrameRange ranges[43] was the V6.19 table-count guard; V6.20 appends one range, V6.21 appends two ranges, V6.22 appends one range, V6.23 appends one range, V6.24 appends two ranges, V6.25 appends one range, V6.26 appends one range. */
+    FrameRange ranges[52] = {
         {header->resource_table_offset, header->resource_table_size},
         {header->descriptor_table_offset, header->descriptor_table_size},
         {header->image_table_offset, header->image_table_size},
@@ -21386,6 +21398,8 @@ static int validate_vulkan_graphics_v6_header(
          is_v624 ? header_v624->v624.pipeline_layout_table_size : 0},
         {is_v625 ? header_v625->v625.descriptor_bind_table_offset : 0,
          is_v625 ? header_v625->v625.descriptor_bind_table_size : 0},
+        {is_v626 ? header_v626->v626.event_wait_ref_table_offset : 0,
+         is_v626 ? header_v626->v626.event_wait_ref_table_size : 0},
     };
     if (!table_range_valid(header->resource_table_offset, header->resource_table_size,
                            header->resource_count, header->resource_entry_size,
@@ -21716,6 +21730,15 @@ static int validate_vulkan_graphics_v6_header(
                            header->frame_size, header->header_size)) {
         return -EPROTO;
     }
+    if (is_v626 &&
+        !table_range_valid(header_v626->v626.event_wait_ref_table_offset,
+                           header_v626->v626.event_wait_ref_table_size,
+                           header_v626->v626.event_wait_ref_count,
+                           header_v626->v626.event_wait_ref_entry_size,
+                           __alignof__(PdockerGpuVulkanGraphicsV626EventWaitRefEntry),
+                           header->frame_size, header->header_size)) {
+        return -EPROTO;
+    }
     const size_t range_count = vulkan_graphics_v6_table_range_count(header->abi_minor);
     if (range_count == 0 || !frame_ranges_do_not_overlap(ranges, range_count)) {
         return -EPROTO;
@@ -21762,6 +21785,7 @@ typedef struct VulkanGraphicsV6FrameView {
     const PdockerGpuVulkanGraphicsV623FrameHeader *header_v623;
     const PdockerGpuVulkanGraphicsV624FrameHeader *header_v624;
     const PdockerGpuVulkanGraphicsV625FrameHeader *header_v625;
+    const PdockerGpuVulkanGraphicsV626FrameHeader *header_v626;
     const int *passed_fds;
     size_t passed_fd_count;
     int is_v61;
@@ -21789,6 +21813,7 @@ typedef struct VulkanGraphicsV6FrameView {
     int is_v623;
     int is_v624;
     int is_v625;
+    int is_v626;
     const PdockerGpuVulkanDispatchV5ResourceEntry *resources;
     const PdockerGpuVulkanDispatchV5DescriptorObjectEntry *descriptors;
     const PdockerGpuVulkanDispatchV5ImageEntry *images;
@@ -21839,6 +21864,7 @@ typedef struct VulkanGraphicsV6FrameView {
     const PdockerGpuVulkanGraphicsV624DescriptorSetLayoutEntry *descriptor_set_layouts;
     const PdockerGpuVulkanGraphicsV624PipelineLayoutSetEntry *pipeline_layout_sets;
     const PdockerGpuVulkanGraphicsV625DescriptorBindEntry *descriptor_binds;
+    const PdockerGpuVulkanGraphicsV626EventWaitRefEntry *event_wait_refs;
 } VulkanGraphicsV6FrameView;
 
 static int init_vulkan_graphics_v6_frame_view(
@@ -21852,7 +21878,8 @@ static int init_vulkan_graphics_v6_frame_view(
         (const PdockerGpuVulkanGraphicsV6FrameHeader *)frame;
     int rc = validate_vulkan_graphics_v6_header(header, passed_fd_count);
     if (rc != 0) return rc;
-    const int is_v625_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V625_ABI_MINOR;
+    const int is_v626_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V626_ABI_MINOR;
+    const int is_v625_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V625_ABI_MINOR || is_v626_header;
     const int is_v624_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V624_ABI_MINOR || is_v625_header;
     const int is_v623_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V623_ABI_MINOR || is_v624_header;
     const int is_v622_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V622_ABI_MINOR || is_v623_header;
@@ -21955,6 +21982,9 @@ static int init_vulkan_graphics_v6_frame_view(
     const PdockerGpuVulkanGraphicsV625FrameHeader *header_v625 = is_v625_header
             ? (const PdockerGpuVulkanGraphicsV625FrameHeader *)frame
             : NULL;
+    const PdockerGpuVulkanGraphicsV626FrameHeader *header_v626 = is_v626_header
+            ? (const PdockerGpuVulkanGraphicsV626FrameHeader *)frame
+            : NULL;
     view->frame = frame;
     view->header = header;
     view->header_v61 = header_v61;
@@ -21982,6 +22012,7 @@ static int init_vulkan_graphics_v6_frame_view(
     view->header_v623 = header_v623;
     view->header_v624 = header_v624;
     view->header_v625 = header_v625;
+    view->header_v626 = header_v626;
     view->passed_fds = passed_fds;
     view->passed_fd_count = passed_fd_count;
     view->is_v61 = header_v61 != NULL;
@@ -22009,6 +22040,7 @@ static int init_vulkan_graphics_v6_frame_view(
     view->is_v623 = header_v623 != NULL;
     view->is_v624 = header_v624 != NULL;
     view->is_v625 = header_v625 != NULL;
+    view->is_v626 = header_v626 != NULL;
     view->resources =
         (const PdockerGpuVulkanDispatchV5ResourceEntry *)graphics_v6_table_ptr(
             frame, header, header->resource_table_offset, header->resource_table_size);
@@ -22346,6 +22378,15 @@ static int init_vulkan_graphics_v6_frame_view(
                 frame, header, header_v625->v625.descriptor_bind_table_offset,
                 header_v625->v625.descriptor_bind_table_size);
         if (header_v625->v625.descriptor_bind_count && !view->descriptor_binds) {
+            return -EPROTO;
+        }
+    }
+    if (view->is_v626) {
+        view->event_wait_refs =
+            (const PdockerGpuVulkanGraphicsV626EventWaitRefEntry *)graphics_v6_table_ptr(
+                frame, header, header_v626->v626.event_wait_ref_table_offset,
+                header_v626->v626.event_wait_ref_table_size);
+        if (header_v626->v626.event_wait_ref_count && !view->event_wait_refs) {
             return -EPROTO;
         }
     }
@@ -23099,6 +23140,7 @@ static int validate_vulkan_graphics_v6_frame_content(
     const PdockerGpuVulkanGraphicsV623FrameHeader *header_v623 = view.header_v623;
     const PdockerGpuVulkanGraphicsV624FrameHeader *header_v624 = view.header_v624;
     const PdockerGpuVulkanGraphicsV625FrameHeader *header_v625 = view.header_v625;
+    const PdockerGpuVulkanGraphicsV626FrameHeader *header_v626 = view.header_v626;
     const int is_v61 = view.is_v61;
     const int is_v62 = view.is_v62;
     const int is_v63 = view.is_v63;
@@ -23123,6 +23165,7 @@ static int validate_vulkan_graphics_v6_frame_content(
     const int is_v623 = view.is_v623;
     const int is_v624 = view.is_v624;
     const int is_v625 = view.is_v625;
+    const int is_v626 = view.is_v626;
     const PdockerGpuVulkanDispatchV5ResourceEntry *resources = view.resources;
     const PdockerGpuVulkanDispatchV5DescriptorObjectEntry *descriptors = view.descriptors;
     const PdockerGpuVulkanDispatchV5ImageEntry *images = view.images;
@@ -23168,6 +23211,7 @@ static int validate_vulkan_graphics_v6_frame_content(
     const PdockerGpuVulkanGraphicsV624DescriptorSetLayoutEntry *descriptor_set_layouts = view.descriptor_set_layouts;
     const PdockerGpuVulkanGraphicsV624PipelineLayoutSetEntry *pipeline_layout_sets = view.pipeline_layout_sets;
     const PdockerGpuVulkanGraphicsV625DescriptorBindEntry *descriptor_binds = view.descriptor_binds;
+    const PdockerGpuVulkanGraphicsV626EventWaitRefEntry *event_wait_refs = view.event_wait_refs;
     const size_t frame_hash_offset = offsetof(PdockerGpuVulkanGraphicsV6FrameHeader, frame_hash);
     uint64_t payload_hash = fnv1a64_update(1469598103934665603ull,
                                            frame + header->header_size,
@@ -23663,6 +23707,51 @@ static int validate_vulkan_graphics_v6_frame_content(
             if (!found_bind_metadata) return -EPROTO;
         }
         if (bind_command_count != header_v625->v625.descriptor_bind_count) return -EPROTO;
+    }
+    if (is_v626) {
+        uint64_t event_wait_ref_table_hash = fnv1a64_update(
+            1469598103934665603ull, event_wait_refs,
+            (size_t)header_v626->v626.event_wait_ref_table_size);
+        if (event_wait_ref_table_hash != header_v626->v626.event_wait_ref_table_hash ||
+            event_wait_ref_table_hash != header_v626->v626.extension_hash) {
+            return -EPROTO;
+        }
+        for (uint32_t m = 0; m < header_v626->v626.event_wait_ref_count; ++m) {
+            const PdockerGpuVulkanGraphicsV626EventWaitRefEntry *entry = &event_wait_refs[m];
+            if (entry->command_index >= header->command_count ||
+                commands[entry->command_index].command_type != PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT ||
+                entry->event_id == 0) {
+                return -EPROTO;
+            }
+            for (uint32_t n = m + 1; n < header_v626->v626.event_wait_ref_count; ++n) {
+                const PdockerGpuVulkanGraphicsV626EventWaitRefEntry *other = &event_wait_refs[n];
+                if (entry->command_index == other->command_index &&
+                    entry->event_ordinal == other->event_ordinal) {
+                    return -EPROTO;
+                }
+            }
+        }
+        for (uint32_t c = 0; c < header->command_count; ++c) {
+            if (commands[c].command_type != PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT) continue;
+            uint32_t ref_count = 0;
+            uint64_t ordinal_sum = 0;
+            uint64_t expected_sum = 0;
+            int saw_ordinal_zero = 0;
+            for (uint32_t m = 0; m < header_v626->v626.event_wait_ref_count; ++m) {
+                const PdockerGpuVulkanGraphicsV626EventWaitRefEntry *entry = &event_wait_refs[m];
+                if (entry->command_index != c) continue;
+                if (entry->event_ordinal >= header_v626->v626.event_wait_ref_count) return -EPROTO;
+                if (entry->event_ordinal == 0) {
+                    saw_ordinal_zero = 1;
+                    if (commands[c].pipeline_layout_id != entry->event_id) return -EPROTO;
+                }
+                ordinal_sum += entry->event_ordinal;
+                ref_count++;
+            }
+            if (ref_count == 0) continue;
+            expected_sum = ((uint64_t)ref_count * (uint64_t)(ref_count - 1u)) / 2u;
+            if (!saw_ordinal_zero || ordinal_sum != expected_sum) return -EPROTO;
+        }
     }
     if (is_v68) {
         uint64_t indirect_draw_table_hash = fnv1a64_update(
@@ -29745,6 +29834,106 @@ static int record_vulkan_graphics_v620_initial_image_layout_ranges(
     return 0;
 }
 
+
+static int resolve_vulkan_graphics_v626_wait_events(
+        const VulkanGraphicsV6FrameView *view,
+        const PdockerGpuVulkanGraphicsV6CommandEntry *command,
+        uint32_t command_index,
+        VkEvent *events,
+        uint32_t *event_count) {
+    if (!view || !command || !events || !event_count) return -EINVAL;
+    *event_count = 0;
+    if (view->is_v626 && view->header_v626 && view->event_wait_refs) {
+        const uint32_t ref_total = view->header_v626->v626.event_wait_ref_count;
+        uint32_t found = 0;
+        for (uint32_t i = 0; i < ref_total; ++i) {
+            const PdockerGpuVulkanGraphicsV626EventWaitRefEntry *ref = &view->event_wait_refs[i];
+            if (ref->command_index != command_index) continue;
+            if (ref->event_ordinal >= PDOCKER_GPU_VULKAN_GRAPHICS_V626_MAX_EVENT_WAIT_REFS ||
+                ref->event_id == 0) return -EPROTO;
+            if (ref->event_ordinal + 1u > found) found = ref->event_ordinal + 1u;
+        }
+        if (found > 0) {
+            if (found > PDOCKER_GPU_VULKAN_GRAPHICS_V626_MAX_EVENT_WAIT_REFS) return -E2BIG;
+            uint8_t seen[PDOCKER_GPU_VULKAN_GRAPHICS_V626_MAX_EVENT_WAIT_REFS];
+            memset(seen, 0, sizeof(seen));
+            for (uint32_t i = 0; i < ref_total; ++i) {
+                const PdockerGpuVulkanGraphicsV626EventWaitRefEntry *ref = &view->event_wait_refs[i];
+                if (ref->command_index != command_index) continue;
+                if (ref->event_ordinal >= found || seen[ref->event_ordinal]) return -EPROTO;
+                VulkanExecutorEventEntry *entry = find_executor_event_entry(ref->event_id);
+                if (!entry || !entry->event) return -EPROTO;
+                seen[ref->event_ordinal] = 1u;
+                events[ref->event_ordinal] = entry->event;
+            }
+            for (uint32_t i = 0; i < found; ++i) {
+                if (!seen[i]) return -EPROTO;
+            }
+            *event_count = found;
+            return 0;
+        }
+    }
+    VulkanExecutorEventEntry *entry = find_executor_event_entry(command->pipeline_layout_id);
+    if (!entry || !entry->event) return -EPROTO;
+    events[0] = entry->event;
+    *event_count = 1;
+    return 0;
+}
+
+static int convert_vulkan_graphics_v6_dependency_barriers_to_legacy(
+        const VkMemoryBarrier2 *memory_barriers2,
+        uint32_t memory_barrier_count,
+        const VkBufferMemoryBarrier2 *buffer_barriers2,
+        uint32_t buffer_barrier_count,
+        const VkImageMemoryBarrier2 *image_barriers2,
+        uint32_t image_barrier_count,
+        VkMemoryBarrier *memory_barriers,
+        VkBufferMemoryBarrier *buffer_barriers,
+        VkImageMemoryBarrier *image_barriers) {
+    if ((memory_barrier_count && (!memory_barriers2 || !memory_barriers)) ||
+        (buffer_barrier_count && (!buffer_barriers2 || !buffer_barriers)) ||
+        (image_barrier_count && (!image_barriers2 || !image_barriers))) return -EINVAL;
+    for (uint32_t i = 0; i < memory_barrier_count; ++i) {
+        if (memory_barriers2[i].srcAccessMask > UINT32_MAX ||
+            memory_barriers2[i].dstAccessMask > UINT32_MAX) return -EOVERFLOW;
+        memory_barriers[i] = (VkMemoryBarrier){
+            .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+            .srcAccessMask = (VkAccessFlags)memory_barriers2[i].srcAccessMask,
+            .dstAccessMask = (VkAccessFlags)memory_barriers2[i].dstAccessMask,
+        };
+    }
+    for (uint32_t i = 0; i < buffer_barrier_count; ++i) {
+        if (buffer_barriers2[i].srcAccessMask > UINT32_MAX ||
+            buffer_barriers2[i].dstAccessMask > UINT32_MAX) return -EOVERFLOW;
+        buffer_barriers[i] = (VkBufferMemoryBarrier){
+            .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+            .srcAccessMask = (VkAccessFlags)buffer_barriers2[i].srcAccessMask,
+            .dstAccessMask = (VkAccessFlags)buffer_barriers2[i].dstAccessMask,
+            .srcQueueFamilyIndex = buffer_barriers2[i].srcQueueFamilyIndex,
+            .dstQueueFamilyIndex = buffer_barriers2[i].dstQueueFamilyIndex,
+            .buffer = buffer_barriers2[i].buffer,
+            .offset = buffer_barriers2[i].offset,
+            .size = buffer_barriers2[i].size,
+        };
+    }
+    for (uint32_t i = 0; i < image_barrier_count; ++i) {
+        if (image_barriers2[i].srcAccessMask > UINT32_MAX ||
+            image_barriers2[i].dstAccessMask > UINT32_MAX) return -EOVERFLOW;
+        image_barriers[i] = (VkImageMemoryBarrier){
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .srcAccessMask = (VkAccessFlags)image_barriers2[i].srcAccessMask,
+            .dstAccessMask = (VkAccessFlags)image_barriers2[i].dstAccessMask,
+            .oldLayout = image_barriers2[i].oldLayout,
+            .newLayout = image_barriers2[i].newLayout,
+            .srcQueueFamilyIndex = image_barriers2[i].srcQueueFamilyIndex,
+            .dstQueueFamilyIndex = image_barriers2[i].dstQueueFamilyIndex,
+            .image = image_barriers2[i].image,
+            .subresourceRange = image_barriers2[i].subresourceRange,
+        };
+    }
+    return 0;
+}
+
 static int collect_vulkan_graphics_v6_dependency_barriers(
         const VulkanGraphicsV6FrameView *view,
         uint32_t command_index,
@@ -31318,10 +31507,23 @@ static int record_vulkan_graphics_v6_command_buffer(
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT:
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_EVENT:
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT: {
-                VulkanExecutorEventEntry *entry = find_executor_event_entry(command->pipeline_layout_id);
-                if (!entry || !entry->event) {
-                    rc = -EPROTO;
-                    goto cleanup;
+                VulkanExecutorEventEntry *entry = NULL;
+                VkEvent wait_events[PDOCKER_GPU_VULKAN_GRAPHICS_V626_MAX_EVENT_WAIT_REFS];
+                uint32_t wait_event_count = 0;
+                memset(wait_events, 0, sizeof(wait_events));
+                if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT) {
+                    rc = resolve_vulkan_graphics_v626_wait_events(
+                        view, command, ci, wait_events, &wait_event_count);
+                    if (rc != 0 || wait_event_count == 0) {
+                        rc = rc ? rc : -EPROTO;
+                        goto cleanup;
+                    }
+                } else {
+                    entry = find_executor_event_entry(command->pipeline_layout_id);
+                    if (!entry || !entry->event) {
+                        rc = -EPROTO;
+                        goto cleanup;
+                    }
                 }
                 VkMemoryBarrier2 memory_barriers_to_record[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
                 VkBufferMemoryBarrier2 buffer_barriers_to_record[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
@@ -31385,13 +31587,36 @@ static int record_vulkan_graphics_v6_command_buffer(
                     }
                     entry->signaled = 0u;
                 } else {
-                    VkEvent event = entry->event;
-                    if (legacy_stage_masks) {
-                        vkCmdWaitEvents(command_buffer, 1, &event,
-                                        (VkPipelineStageFlags)command->index_offset,
-                                        (VkPipelineStageFlags)command->push_hash,
-                                        0, NULL, 0, NULL, 0, NULL);
+                    const int legacy_event_stage_masks =
+                        command->flags == 0 &&
+                        command->index_offset != 0 &&
+                        command->index_offset <= UINT32_MAX &&
+                        command->push_hash <= UINT32_MAX;
+                    if (legacy_event_stage_masks) {
+                        if (has_event_barrier_payload) {
+                            VkMemoryBarrier memory_barriers_legacy[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+                            VkBufferMemoryBarrier buffer_barriers_legacy[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+                            VkImageMemoryBarrier image_barriers_legacy[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+                            rc = convert_vulkan_graphics_v6_dependency_barriers_to_legacy(
+                                memory_barriers_to_record, memory_barrier_count,
+                                buffer_barriers_to_record, buffer_barrier_count,
+                                image_barriers_to_record, image_barrier_count,
+                                memory_barriers_legacy, buffer_barriers_legacy, image_barriers_legacy);
+                            if (rc != 0) goto cleanup;
+                            vkCmdWaitEvents(command_buffer, wait_event_count, wait_events,
+                                            (VkPipelineStageFlags)command->index_offset,
+                                            (VkPipelineStageFlags)command->push_hash,
+                                            memory_barrier_count, memory_barrier_count ? memory_barriers_legacy : NULL,
+                                            buffer_barrier_count, buffer_barrier_count ? buffer_barriers_legacy : NULL,
+                                            image_barrier_count, image_barrier_count ? image_barriers_legacy : NULL);
+                        } else {
+                            vkCmdWaitEvents(command_buffer, wait_event_count, wait_events,
+                                            (VkPipelineStageFlags)command->index_offset,
+                                            (VkPipelineStageFlags)command->push_hash,
+                                            0, NULL, 0, NULL, 0, NULL);
+                        }
                     } else {
+                        if (wait_event_count != 1) { rc = -EOPNOTSUPP; goto cleanup; }
                         if (!rt->cmd_wait_events2) { rc = -EOPNOTSUPP; goto cleanup; }
                         VkMemoryBarrier2 event_scope = {
                             .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
@@ -31414,7 +31639,7 @@ static int record_vulkan_graphics_v6_command_buffer(
                             .imageMemoryBarrierCount = image_barrier_count,
                             .pImageMemoryBarriers = image_barrier_count ? image_barriers_to_record : NULL,
                         };
-                        rt->cmd_wait_events2(command_buffer, 1, &event, &dependency);
+                        rt->cmd_wait_events2(command_buffer, 1, wait_events, &dependency);
                     }
                 }
                 break;

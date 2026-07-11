@@ -5117,6 +5117,16 @@ class GpuAbiContractTest(unittest.TestCase):
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V625_DESCRIPTOR_BIND_SCHEMA_HASH",
             ),
             (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V626_HEADER_EXTENSION_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V626_HEADER_EXTENSION_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V626_HEADER_EXTENSION_SCHEMA_HASH",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V626_EVENT_WAIT_REF_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V626_EVENT_WAIT_REF_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V626_EVENT_WAIT_REF_SCHEMA_HASH",
+            ),
+            (
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELDS",
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELD_COUNT",
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_SCHEMA_HASH",
@@ -5368,6 +5378,96 @@ class GpuAbiContractTest(unittest.TestCase):
             "collect_graphics_v624_pipeline_layout_metadata",
             "bind->descriptor_set_count = snapshot->descriptor_set_count",
             "bind->pipeline_layout_id = record->layout_id",
+        ]:
+            self.assertIn(icd_marker, icd)
+
+    def test_vulkan_graphics_v626_event_wait_ref_metadata_is_append_only(self):
+        expected_extension_fields = [
+            ("event_wait_ref_count", "u32"),
+            ("event_wait_ref_entry_size", "u32"),
+            ("event_wait_ref_table_offset", "u64"),
+            ("event_wait_ref_table_size", "u64"),
+            ("event_wait_ref_schema_hash", "u64"),
+            ("event_wait_ref_table_hash", "u64"),
+            ("extension_hash", "u64"),
+        ]
+        expected_ref_fields = [
+            ("command_index", "u32"),
+            ("event_ordinal", "u32"),
+            ("event_id", "u64"),
+        ]
+        for header_path in [APP_HEADER, CONTAINER_HEADER]:
+            source = header_path.read_text()
+            with self.subTest(header=str(header_path)):
+                for header_marker in [
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V626_ABI_MINOR 26u",
+                    "PdockerGpuVulkanGraphicsV626HeaderExtension",
+                    "PdockerGpuVulkanGraphicsV626FrameHeader",
+                    "PdockerGpuVulkanGraphicsV626EventWaitRefEntry",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V626_MAX_EVENT_WAIT_REFS",
+                    "event_wait_ref_schema_hash",
+                ]:
+                    self.assertIn(header_marker, source)
+                extension_fields, extension_count, declared_extension_hash, computed_extension_hash = vulkan_dispatch_v5_schema(
+                    header_path,
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V626_HEADER_EXTENSION_FIELDS",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V626_HEADER_EXTENSION_FIELD_COUNT",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V626_HEADER_EXTENSION_SCHEMA_HASH",
+                )
+                ref_fields, ref_count, declared_ref_hash, computed_ref_hash = vulkan_dispatch_v5_schema(
+                    header_path,
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V626_EVENT_WAIT_REF_FIELDS",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V626_EVENT_WAIT_REF_FIELD_COUNT",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V626_EVENT_WAIT_REF_SCHEMA_HASH",
+                )
+                self.assertEqual(expected_extension_fields, extension_fields)
+                self.assertEqual(expected_ref_fields, ref_fields)
+                self.assertEqual(7, extension_count)
+                self.assertEqual(3, ref_count)
+                self.assertEqual(declared_extension_hash, computed_extension_hash)
+                self.assertEqual(declared_ref_hash, computed_ref_hash)
+                self.assertEqual(
+                    [name for name, _ in expected_extension_fields],
+                    c_struct_field_names(header_path, "PdockerGpuVulkanGraphicsV626HeaderExtension"),
+                )
+                self.assertEqual(
+                    [name for name, _ in expected_ref_fields],
+                    c_struct_field_names(header_path, "PdockerGpuVulkanGraphicsV626EventWaitRefEntry"),
+                )
+                self.assertEqual(
+                    c_struct_field_names(header_path, "PdockerGpuVulkanGraphicsV625FrameHeader") + ["v626"],
+                    c_struct_field_names(header_path, "PdockerGpuVulkanGraphicsV626FrameHeader"),
+                )
+
+        executor = GPU_EXECUTOR.read_text()
+        for executor_marker in [
+            "case PDOCKER_GPU_VULKAN_GRAPHICS_V626_ABI_MINOR: return 52u",
+            "sizeof(PdockerGpuVulkanGraphicsV626FrameHeader)",
+            "const PdockerGpuVulkanGraphicsV626FrameHeader *header_v626",
+            "view->header_v626",
+            "view->is_v626",
+            "view->event_wait_refs",
+            "header_v626->v626.event_wait_ref_count",
+            "event_wait_ref_schema_hash != PDOCKER_GPU_VULKAN_GRAPHICS_V626_EVENT_WAIT_REF_SCHEMA_HASH",
+            "event_wait_ref_table_hash",
+            "resolve_vulkan_graphics_v626_wait_events",
+            "vkCmdWaitEvents(command_buffer, wait_event_count, wait_events",
+        ]:
+            self.assertIn(executor_marker, executor)
+
+        icd = VULKAN_ICD.read_text()
+        for icd_marker in [
+            "PdockerGpuVulkanGraphicsV626EventWaitRefEntry event_wait_refs",
+            "PdockerGpuVulkanGraphicsV626FrameHeader *frame_header_v626",
+            "need_v626_event_wait_ref",
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V626_ABI_MINOR",
+            "frame_header_v626->v626.event_wait_ref_count",
+            "frame_header_v626->v626.event_wait_ref_entry_size",
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V626_EVENT_WAIT_REF_SCHEMA_HASH",
+            "APPEND_GRAPHICS_TABLE(event_wait_refs, event_wait_ref_count",
+            "frame_header_v626->v626.event_wait_ref_table_hash",
+            "VULKAN_GRAPHICS_V6.26",
+            "record_event_wait_command(commandBuffer, eventCount, pEvents",
         ]:
             self.assertIn(icd_marker, icd)
 
@@ -5642,6 +5742,16 @@ class GpuAbiContractTest(unittest.TestCase):
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V625_DESCRIPTOR_BIND_FIELDS",
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V625_DESCRIPTOR_BIND_FIELD_COUNT",
                 "PdockerGpuVulkanGraphicsV625DescriptorBindEntry",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V626_HEADER_EXTENSION_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V626_HEADER_EXTENSION_FIELD_COUNT",
+                "PdockerGpuVulkanGraphicsV626HeaderExtension",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V626_EVENT_WAIT_REF_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V626_EVENT_WAIT_REF_FIELD_COUNT",
+                "PdockerGpuVulkanGraphicsV626EventWaitRefEntry",
             ),
             (
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELDS",
@@ -8554,8 +8664,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("case PDOCKER_VK_COMMAND_EVENT:", replay_body)
         self.assertIn("case PDOCKER_VK_COMMAND_EVENT_WAIT:", replay_body)
         self.assertIn("op->event->signaled = op->event_signaled", replay_body)
-        self.assertIn("execute_recorded_event_wait_op(op)", replay_body)
-        self.assertIn("record_event_wait_command(commandBuffer, pEvents[i],", icd)
+        self.assertIn("execute_recorded_event_wait_op(cmd, op)", replay_body)
+        self.assertIn("record_event_wait_command(commandBuffer, eventCount, pEvents,", icd)
+        self.assertIn("event_wait_ref_count", icd)
         self.assertIn("event-wait-barrier-payload-unsupported", icd)
         self.assertIn("event-wait-unsignaled", icd)
 
@@ -8575,18 +8686,20 @@ class GpuAbiContractTest(unittest.TestCase):
             "record_legacy_pipeline_barrier_ops",
             "legacy_pipeline_barrier_inputs_unsupported(srcStageMask",
             "event-wait-barrier-zero-event-unsupported",
-            "event-wait-barrier-multi-event-unsupported",
             "event-wait-stage-mask-unsupported",
+            "event_wait_ref_count",
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V626_EVENT_WAIT_REF_SCHEMA_HASH",
         ]:
             self.assertIn(marker, icd)
+        self.assertNotIn("event-wait-barrier-multi-event-unsupported", icd)
         self.assertIn("graphics_event_record_requires_submit_frame(cmd, record)", submit_body)
         payload_helper = c_function_body(icd, "graphics_record_has_dependency_payload")
         self.assertNotIn("record->flags != 0", payload_helper)
         self.assertIn("record_legacy_pipeline_barrier_ops(commandBuffer", pipeline_barrier_body)
         self.assertIn("bool has_barrier_payload = memoryBarrierCount || bufferMemoryBarrierCount || imageMemoryBarrierCount", wait_events_body)
-        self.assertIn("eventCount > 1", wait_events_body)
+        self.assertNotIn("eventCount > 1", wait_events_body)
         self.assertIn("record_legacy_pipeline_barrier_ops(commandBuffer", wait_events_body)
-        self.assertIn("record_event_wait_command(commandBuffer, pEvents[i],", wait_events_body)
+        self.assertIn("record_event_wait_command(commandBuffer, eventCount, pEvents,", wait_events_body)
         self.assertIn("0, &barriers)", wait_events_body)
         self.assertNotIn("vkCmdPipelineBarrier(commandBuffer,", wait_events_body)
 
@@ -8669,10 +8782,12 @@ class GpuAbiContractTest(unittest.TestCase):
             "memoryBarrierCount = memory_barrier_count",
             "vkCmdSetEvent(command_buffer, entry->event, (VkPipelineStageFlags)command->index_offset)",
             "vkCmdResetEvent(command_buffer, entry->event, (VkPipelineStageFlags)command->index_offset)",
-            "vkCmdWaitEvents(command_buffer, 1, &event,",
+            "resolve_vulkan_graphics_v626_wait_events",
+            "VkEvent wait_events[PDOCKER_GPU_VULKAN_GRAPHICS_V626_MAX_EVENT_WAIT_REFS]",
+            "vkCmdWaitEvents(command_buffer, wait_event_count, wait_events,",
             "rt->cmd_set_event2(command_buffer, entry->event, &dependency)",
             "rt->cmd_reset_event2(command_buffer, entry->event, src_stage_mask2)",
-            "rt->cmd_wait_events2(command_buffer, 1, &event, &dependency)",
+            "rt->cmd_wait_events2(command_buffer, 1, wait_events, &dependency)",
         ]:
             self.assertIn(marker, executor)
 
@@ -8789,14 +8904,14 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("dependency_flags_unsupported(dependency_flags)", wait_events2_body)
         self.assertIn("event-wait2-dependency-flags-unsupported", wait_events2_body)
         self.assertIn("record_dependency_info_barrier_ops(commandBuffer, &pDependencyInfos[i])", wait_events2_body)
-        self.assertIn("record_event_wait_command(commandBuffer, pEvents[i],", wait_events2_body)
+        self.assertIn("record_event_wait_command(commandBuffer, 1, &pEvents[i],", wait_events2_body)
         self.assertNotIn("event-wait2-barrier-payload-unsupported", wait_events2_body)
         self.assertIn("dependency_info_src_stage_mask(&pDependencyInfos[i])", wait_events2_body)
         self.assertIn("dependency_info_dst_stage_mask(&pDependencyInfos[i])", wait_events2_body)
         self.assertNotIn("vkCmdPipelineBarrier2(commandBuffer, &pDependencyInfos[i])", wait_events2_body)
         self.assertLess(
             wait_events2_body.index("record_dependency_info_barrier_ops(commandBuffer, &pDependencyInfos[i])"),
-            wait_events2_body.index("record_event_wait_command(commandBuffer, pEvents[i],"),
+            wait_events2_body.index("record_event_wait_command(commandBuffer, 1, &pEvents[i],"),
         )
         self.assertNotIn("eventCount > 1", wait_events2_body)
 
