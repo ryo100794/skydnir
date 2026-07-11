@@ -1309,7 +1309,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_VULKAN_GRAPHICS_V6_VALIDATE_PRODUCER",
             "header->abi_minor = PDOCKER_GPU_VULKAN_GRAPHICS_V61_ABI_MINOR;",
             "frame.v61.extension_hash = 1469598103934665603ull;",
-            "CMSG_SPACE(sizeof(int) * PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS)",
+            "CMSG_SPACE(sizeof(int) * PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS)",
             "frame + sizeof(PdockerGpuVulkanGraphicsV6FrameHeader)",
             "record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_PIPELINE;",
             "record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_RENDERING;",
@@ -4857,6 +4857,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("memcmp(header->magic, PDOCKER_GPU_VULKAN_DISPATCH_V5_MAGIC, 8)", executor)
         self.assertIn("header->header_size != sizeof(PdockerGpuVulkanDispatchV5FrameHeader)", executor)
         self.assertIn("header->fd_count != received_fd_count", executor)
+        self.assertIn("header->fd_count > PDOCKER_GPU_MAX_PASSED_FDS", executor)
         self.assertIn("header->resource_schema_hash != PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_SCHEMA_HASH", executor)
         self.assertIn("header->descriptor_schema_hash != PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_SCHEMA_HASH", executor)
         self.assertIn("resource_bytes != header->resource_table_size", executor)
@@ -4873,6 +4874,26 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         self.assertIn('cmd[strcspn(cmd, "\\r\\n")] = \'\\0\';', text_recv)
         self.assertNotIn("validate_vulkan_dispatch_v5_header", text_recv)
+
+    def test_vulkan_transport_fd_cap_is_shared_and_sender_side_fail_closed(self):
+        app = APP_HEADER.read_text()
+        container = CONTAINER_HEADER.read_text()
+        executor = GPU_EXECUTOR.read_text()
+        icd = VULKAN_ICD.read_text()
+        for source in [app, container]:
+            self.assertIn("#define PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS 253u", source)
+            self.assertIn("#define PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS 24u", source)
+        self.assertIn("#define PDOCKER_GPU_MAX_PASSED_FDS PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS", executor)
+        self.assertIn("#if PDOCKER_GPU_MAX_PASSED_FDS > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS", executor)
+        self.assertIn("header->fd_count > PDOCKER_GPU_MAX_PASSED_FDS", executor)
+        self.assertIn('\\"transport_max_passed_fds\\":%u', executor)
+        self.assertIn("PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS", executor)
+        self.assertIn("fd_count > PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS", icd)
+        self.assertIn("fd_count >= PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS", icd)
+        self.assertIn("CMSG_SPACE(sizeof(int) * PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS)", icd)
+        self.assertIn("int fds[PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS]", icd)
+        self.assertNotIn("CMSG_SPACE(sizeof(int) * PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS)", icd)
+        self.assertNotIn("int fds[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS]", icd)
 
     def test_vulkan_dispatch_v5_schema_hashes_match_declared_field_macros(self):
         schemas = [
@@ -5817,6 +5838,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_SCHEMA_HASH",
             "PDOCKER_GPU_VULKAN_DISPATCH_V5_SPECIALIZATION_SCHEMA_HASH",
             "PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FRAME_BYTES",
+            "PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS",
         ]
         for marker in markers:
             self.assertIn(marker, app)
@@ -5875,6 +5897,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGES",
             "PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGE_VIEWS",
             "PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_SAMPLERS",
+            "PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS",
+            '\\"transport_max_passed_fds\\":%u',
             "validate_vulkan_dispatch_v5_object_extension",
             "PdockerGpuVulkanDispatchV5DescriptorObjectEntry",
         ]:

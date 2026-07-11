@@ -3921,10 +3921,10 @@ static int send_vulkan_dispatch_v5_frame_with_fds(
         const int *fds,
         size_t fd_count) {
     if (socket_fd < 0 || !frame || frame_size < sizeof(PdockerGpuVulkanDispatchV5FrameHeader) ||
-        !fds || fd_count == 0 || fd_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS) {
+        !fds || fd_count == 0 || fd_count > PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS) {
         return -EINVAL;
     }
-    char control[CMSG_SPACE(sizeof(int) * PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS)];
+    char control[CMSG_SPACE(sizeof(int) * PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS)];
     struct iovec iov;
     struct msghdr msg;
     memset(control, 0, sizeof(control));
@@ -3956,10 +3956,10 @@ static int send_vulkan_graphics_v6_frame_with_fds(
         const int *fds,
         size_t fd_count) {
     if (socket_fd < 0 || !frame || frame_size < sizeof(PdockerGpuVulkanGraphicsV6FrameHeader) ||
-        fd_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS || (fd_count > 0 && !fds)) {
+        fd_count > PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS || (fd_count > 0 && !fds)) {
         return -EINVAL;
     }
-    char control[CMSG_SPACE(sizeof(int) * PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS)];
+    char control[CMSG_SPACE(sizeof(int) * PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS)];
     struct iovec iov;
     struct msghdr msg;
     memset(control, 0, sizeof(control));
@@ -4101,7 +4101,7 @@ static int collect_graphics_memory_resource(
     if (existing >= 0) return existing;
     if (*resource_count >= PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_RESOURCES ||
         *memory_count >= PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_RESOURCES ||
-        *fd_count >= PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS ||
+        *fd_count >= PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS ||
         memory->fd < 0 || memory->size == 0) {
         return -E2BIG;
     }
@@ -5358,7 +5358,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     PdockerGpuVulkanGraphicsV624PipelineLayoutSetEntry pipeline_layout_sets[PDOCKER_GPU_VULKAN_GRAPHICS_V624_MAX_PIPELINE_LAYOUT_SETS];
     PdockerGpuVulkanGraphicsV625DescriptorBindEntry descriptor_binds[PDOCKER_GPU_VULKAN_GRAPHICS_V625_MAX_DESCRIPTOR_BINDS];
     PdockerGpuVulkanGraphicsV626EventWaitRefEntry event_wait_refs[PDOCKER_GPU_VULKAN_GRAPHICS_V626_MAX_EVENT_WAIT_REFS];
-    int fds[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS];
+    int fds[PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS];
     memset(pipeline_objects, 0, sizeof(pipeline_objects));
     memset(memory_objects, 0, sizeof(memory_objects));
     memset(memory_resource_indices, 0, sizeof(memory_resource_indices));
@@ -6010,7 +6010,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
             }
             PdockerVkShaderModule *shader = pipeline->graphics_stage_modules[stage_i];
             if (!shader || shader->code_fd < 0 || shader->code_size == 0 ||
-                fd_count >= PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS) {
+                fd_count >= PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS) {
                 rc = -EINVAL;
                 goto cleanup;
             }
@@ -7138,7 +7138,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
                 }
             }
             if (result_fd_index < 0) {
-                if (fd_count >= PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS) {
+                if (fd_count >= PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS) {
                     rc = -E2BIG;
                     goto cleanup;
                 }
@@ -7199,7 +7199,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
                 }
             }
             if (result_fd_index < 0) {
-                if (fd_count >= PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS) {
+                if (fd_count >= PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS) {
                     rc = -E2BIG;
                     goto cleanup;
                 }
@@ -8494,7 +8494,7 @@ static int send_generic_vulkan_dispatch_v5_1_op(
     }
     if (resource_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_RESOURCES ||
         descriptor_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS ||
-        fd_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS) {
+        fd_count > PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS) {
         return -E2BIG;
     }
     if (specialization_entry_count > PDOCKER_VK_MAX_SPECIALIZATION_ENTRIES ||
@@ -9077,7 +9077,7 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
     }
     const uint64_t dispatch_id = __sync_add_and_fetch(&g_generic_dispatch_sequence, 1);
 
-    int fds[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS];
+    int fds[PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS];
     uint32_t bindings[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     VkDeviceSize offsets[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     size_t sizes[PDOCKER_VK_MAX_STORAGE_BUFFERS];

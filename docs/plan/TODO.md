@@ -122,6 +122,21 @@ or closes.
   `vkCmdCopyImage2`, `vkCmdCopyBufferToImage2`, `vkCmdCopyImageToBuffer2`,
   `vkCmdBlitImage2`, and `vkCmdResolveImage2` reject unsupported top-level and
   per-region `pNext` payloads rather than silently dropping extension data.
+- [done] **V6.26 multi-event wait barrier lane**: The graphics ABI now carries
+  a V6.26 append-only event-wait reference table so legacy
+  `vkCmdWaitEvents(eventCount > 1, ..., barrier payloads)` is serialized as one
+  wait command with multiple ordered event ids.  The executor resolves all
+  referenced events, applies the dependency/barrier payload once, and replays
+  the native wait with `wait_event_count` rather than duplicating layout
+  transitions per event.  Sync2 pNext payloads and dependency flags beyond
+  `VK_DEPENDENCY_BY_REGION_BIT` remain fail-closed until they have explicit
+  ABI semantics.
+- [done] **Vulkan FD transport cap alignment**: The shared ABI now exposes
+  `PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS` separately from the V5 frame fd index
+  range.  The ICD fails closed before `sendmsg` when a frame would exceed the
+  actual SCM_RIGHTS transport capacity, and the executor validates V5/V6 frame
+  headers against the same transport cap instead of advertising the larger ABI
+  index range as a usable per-message fd count.
 - [done] **image format/view fail-closed audit**: The container ICD and
   Android executor now reject unsupported image formats before they can be
   treated as byte-linear payloads. Unknown, compressed, multiplanar, YCbCr,
@@ -134,7 +149,8 @@ or closes.
   dual-aspect depth+stencil copy layout, explicit compressed/multiplanar image
   support beyond the current fail-closed gate, unresolved MSAA store/readback,
   true cross-family ownership transfer,
-  dispatch inside the graphics-frame interval, and broader synchronization.
+  dispatch inside the graphics-frame interval, and sync2 pNext/dependency-flag
+  extensions beyond the currently explicit ABI lanes.
 
 
 ### TermPort F-Droid Native Payload Preparation 2026-06-06

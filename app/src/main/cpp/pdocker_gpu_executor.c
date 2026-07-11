@@ -43,7 +43,10 @@
 #define VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_EXTENSION_NAME "VK_KHR_storage_buffer_storage_class"
 #endif
 
-#define PDOCKER_GPU_MAX_PASSED_FDS 24
+#define PDOCKER_GPU_MAX_PASSED_FDS PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS
+#if PDOCKER_GPU_MAX_PASSED_FDS > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS
+#error "executor SCM_RIGHTS receive capacity exceeds V5 frame fd index range"
+#endif
 #define PDOCKER_GPU_MAX_COMMAND_BYTES 4096
 #define PDOCKER_GPU_MAX_VULKAN_BINDINGS 16
 #define PDOCKER_GPU_MAX_VULKAN_IMAGE_LAYOUT_RANGES_PER_IMAGE 64
@@ -18716,7 +18719,7 @@ static void print_capabilities(const char *transport) {
             "\"image_view_schema_hash\":\"0x%016llx\","
             "\"sampler_schema_hash\":\"0x%016llx\","
             "\"descriptor_object_schema_hash\":\"0x%016llx\","
-            "\"max_frame_bytes\":%u,\"max_fds\":%u,"
+            "\"max_frame_bytes\":%u,\"max_fds\":%u,\"transport_max_passed_fds\":%u,"
             "\"max_resources\":%u,\"max_descriptors\":%u,"
             "\"max_images\":%u,\"max_image_views\":%u,\"max_samplers\":%u},"
             "\"android_vulkan_ready\":%s,"
@@ -18768,6 +18771,7 @@ static void print_capabilities(const char *transport) {
             (unsigned long long)PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_OBJECT_SCHEMA_HASH,
             PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FRAME_BYTES,
             PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS,
+            PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS,
             PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_RESOURCES,
             PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS,
             PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGES,
@@ -20127,7 +20131,7 @@ static int validate_vulkan_dispatch_v5_header(
         header->frame_size > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FRAME_BYTES) {
         return -EMSGSIZE;
     }
-    if (header->fd_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS ||
+    if (header->fd_count > PDOCKER_GPU_MAX_PASSED_FDS ||
         header->fd_count != received_fd_count ||
         header->shader_fd_index >= header->fd_count) {
         return -EBADF;
