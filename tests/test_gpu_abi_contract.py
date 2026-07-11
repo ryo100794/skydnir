@@ -6934,6 +6934,62 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("VkDescriptorImageInfo image_infos[PDOCKER_GPU_MAX_VULKAN_BINDINGS];", body)
         self.assertNotIn("VkWriteDescriptorSet writes[PDOCKER_GPU_MAX_VULKAN_BINDINGS];", body)
 
+    def test_vulkan_compute_command_barriers_are_heap_backed(self):
+        executor = GPU_EXECUTOR.read_text()
+        body = c_function_body(executor, "run_vulkan_dispatch_fd")
+        self.assertIn("VkBufferMemoryBarrier *staging_upload_barriers = NULL;", body)
+        self.assertIn("VkImageMemoryBarrier *image_upload_barriers = NULL;", body)
+        self.assertIn("VkBufferMemoryBarrier *image_staging_upload_barriers = NULL;", body)
+        self.assertIn("VkBufferMemoryBarrier *pre_barriers = NULL;", body)
+        self.assertIn("VkImageMemoryBarrier *image_pre_barriers = NULL;", body)
+        self.assertIn("VkBufferMemoryBarrier *post_barriers = NULL;", body)
+        self.assertIn("VkImageMemoryBarrier *image_post_barriers = NULL;", body)
+        self.assertIn("VkBufferMemoryBarrier *image_staging_download_barriers = NULL;", body)
+        self.assertIn("VkBufferMemoryBarrier *staging_download_barriers = NULL;", body)
+        self.assertIn("buffer_barrier_capacity = binding_count ? binding_count : 1u;", body)
+        self.assertIn("image_barrier_capacity = dispatch_image_count;", body)
+        self.assertIn("image_descriptor_count > image_barrier_capacity", body)
+        self.assertIn(
+            "staging_upload_barriers = (VkBufferMemoryBarrier *)calloc(\n"
+            "        buffer_barrier_capacity, sizeof(*staging_upload_barriers));",
+            body,
+        )
+        self.assertIn(
+            "image_upload_barriers = (VkImageMemoryBarrier *)calloc(\n"
+            "        image_barrier_capacity, sizeof(*image_upload_barriers));",
+            body,
+        )
+        self.assertIn("pre_barriers = (VkBufferMemoryBarrier *)calloc(buffer_barrier_capacity, sizeof(*pre_barriers));", body)
+        self.assertIn(
+            "image_post_barriers = (VkImageMemoryBarrier *)calloc(\n"
+            "        image_barrier_capacity, sizeof(*image_post_barriers));",
+            body,
+        )
+        self.assertIn('json_fail("vulkan-dispatch", "out of memory allocating barrier tables")', body)
+        self.assertIn("if (layout_rc != 0) { io_rc = layout_rc; goto cleanup; }", body)
+        self.assertIn("free(staging_download_barriers);", body)
+        self.assertIn("free(image_staging_download_barriers);", body)
+        self.assertIn("free(image_post_barriers);", body)
+        self.assertIn("free(post_barriers);", body)
+        self.assertIn("free(image_pre_barriers);", body)
+        self.assertIn("free(pre_barriers);", body)
+        self.assertIn("free(image_staging_upload_barriers);", body)
+        self.assertIn("free(image_upload_barriers);", body)
+        self.assertIn("free(staging_upload_barriers);", body)
+        self.assertNotIn("VkBufferMemoryBarrier staging_upload_barriers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];", body)
+        self.assertNotIn("VkImageMemoryBarrier image_upload_barriers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];", body)
+        self.assertNotIn("VkBufferMemoryBarrier image_staging_upload_barriers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];", body)
+        self.assertNotIn("VkBufferMemoryBarrier pre_barriers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];", body)
+        self.assertNotIn("VkImageMemoryBarrier image_pre_barriers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];", body)
+        self.assertNotIn("VkBufferMemoryBarrier post_barriers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];", body)
+        self.assertNotIn("VkImageMemoryBarrier image_post_barriers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];", body)
+        self.assertNotIn("VkBufferMemoryBarrier image_staging_download_barriers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];", body)
+        self.assertNotIn("VkBufferMemoryBarrier staging_download_barriers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];", body)
+        self.assertNotIn("pre_barrier_count < PDOCKER_GPU_MAX_VULKAN_BINDINGS", body)
+        self.assertNotIn("post_barrier_count < PDOCKER_GPU_MAX_VULKAN_BINDINGS", body)
+        self.assertNotIn("image_pre_barrier_count < PDOCKER_GPU_MAX_VULKAN_BINDINGS", body)
+        self.assertNotIn("image_post_barrier_count < PDOCKER_GPU_MAX_VULKAN_BINDINGS", body)
+
     def test_vulkan_pipeline_layout_drives_descriptor_layout_and_dynamic_offsets(self):
         icd = VULKAN_ICD.read_text()
         executor = GPU_EXECUTOR.read_text()

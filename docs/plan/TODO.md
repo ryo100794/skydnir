@@ -172,9 +172,12 @@ or closes.
   stack arrays and no longer applies an extra `PDOCKER_VK_MAX_STORAGE_BUFFERS`
   guard inside the send function.  The Android V5 handler now allocates its
   legacy-conversion binding/image/fd tables from `VulkanDispatchV5NativePlan`
-  counts instead of fixed handler stack arrays.  Descriptor capture/layout
-  state and the `run_vulkan_dispatch_fd` execution path are still capped
-  separately and remain the next narrowing points to remove.  Acceptance: host verifier
+  counts instead of fixed handler stack arrays.  The legacy compute runner's
+  command-recording barrier tables are also heap-backed by active buffer/image
+  counts, so pre/post buffer barriers and image staging barriers no longer use
+  separate fixed stack arrays or bounded loop truncation.  Descriptor capture,
+  descriptor layout/index state, and full V5 table-native replay remain the
+  next narrowing points to remove.  Acceptance: host verifier
   `tests.test_gpu_abi_contract` must include
   a V5 descriptor-array case above the V4 16-slot limit, and a runtime artifact
   must either prove table-native replay or show sender-side fail-closed

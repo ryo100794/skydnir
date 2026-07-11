@@ -14482,6 +14482,17 @@ static int run_vulkan_dispatch_fd(
     VkDeviceSize *descriptor_write_offsets = NULL;
     VkDeviceSize *descriptor_write_ranges = NULL;
     uint8_t *descriptor_write_alias_flags = NULL;
+    VkBufferMemoryBarrier *staging_upload_barriers = NULL;
+    VkImageMemoryBarrier *image_upload_barriers = NULL;
+    VkBufferMemoryBarrier *image_staging_upload_barriers = NULL;
+    VkBufferMemoryBarrier *pre_barriers = NULL;
+    VkImageMemoryBarrier *image_pre_barriers = NULL;
+    VkBufferMemoryBarrier *post_barriers = NULL;
+    VkImageMemoryBarrier *image_post_barriers = NULL;
+    VkBufferMemoryBarrier *image_staging_download_barriers = NULL;
+    VkBufferMemoryBarrier *staging_download_barriers = NULL;
+    size_t buffer_barrier_capacity = 0;
+    size_t image_barrier_capacity = 0;
     uint32_t max_binding = 0;
     uint32_t max_descriptor_set = 0;
     for (size_t i = 0; i < binding_count; ++i) {
@@ -16597,6 +16608,37 @@ static int run_vulkan_dispatch_fd(
     if (rc != VK_SUCCESS) goto cleanup;
     double dispatch_start = now_ms();
     double command_record_start = now_ms();
+    buffer_barrier_capacity = binding_count ? binding_count : 1u;
+    image_barrier_capacity = dispatch_image_count;
+    if (image_descriptor_count > image_barrier_capacity) {
+        image_barrier_capacity = image_descriptor_count;
+    }
+    if (image_barrier_capacity == 0) image_barrier_capacity = 1u;
+    staging_upload_barriers = (VkBufferMemoryBarrier *)calloc(
+        buffer_barrier_capacity, sizeof(*staging_upload_barriers));
+    image_upload_barriers = (VkImageMemoryBarrier *)calloc(
+        image_barrier_capacity, sizeof(*image_upload_barriers));
+    image_staging_upload_barriers = (VkBufferMemoryBarrier *)calloc(
+        image_barrier_capacity, sizeof(*image_staging_upload_barriers));
+    pre_barriers = (VkBufferMemoryBarrier *)calloc(buffer_barrier_capacity, sizeof(*pre_barriers));
+    image_pre_barriers = (VkImageMemoryBarrier *)calloc(
+        image_barrier_capacity, sizeof(*image_pre_barriers));
+    post_barriers = (VkBufferMemoryBarrier *)calloc(buffer_barrier_capacity, sizeof(*post_barriers));
+    image_post_barriers = (VkImageMemoryBarrier *)calloc(
+        image_barrier_capacity, sizeof(*image_post_barriers));
+    image_staging_download_barriers = (VkBufferMemoryBarrier *)calloc(
+        image_barrier_capacity, sizeof(*image_staging_download_barriers));
+    staging_download_barriers = (VkBufferMemoryBarrier *)calloc(
+        buffer_barrier_capacity, sizeof(*staging_download_barriers));
+    if (!staging_upload_barriers || !image_upload_barriers ||
+        !image_staging_upload_barriers || !pre_barriers || !image_pre_barriers ||
+        !post_barriers || !image_post_barriers || !image_staging_download_barriers ||
+        !staging_download_barriers) {
+        json_fail("vulkan-dispatch", "out of memory allocating barrier tables");
+        ret = 64;
+        goto cleanup;
+    }
+
     VkCommandBufferBeginInfo cbi = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     rc = vkBeginCommandBuffer(command_buffer, &cbi);
     if (rc != VK_SUCCESS) { fail_stage = "begin-generic-command-buffer"; goto cleanup; }
@@ -16613,10 +16655,8 @@ static int run_vulkan_dispatch_fd(
                             0,
                             NULL);
     if (strict_device_local_staging) {
-        VkBufferMemoryBarrier staging_upload_barriers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
         uint32_t staging_upload_count = 0;
-        for (size_t i = 0; i < binding_count &&
-             staging_upload_count < PDOCKER_GPU_MAX_VULKAN_BINDINGS; ++i) {
+        for (size_t i = 0; i < binding_count; ++i) {
             if (!active_bindings[i] || !binding_read_needed[i] || !vk_buffers[i] ||
                 !vk_buffers[i]->device_local_staged || !vk_buffers[i]->staging_buffer) {
                 continue;
@@ -16668,9 +16708,7 @@ static int run_vulkan_dispatch_fd(
             strict_staging_upload_bytes += bindings[i].size;
         }
     }
-    VkImageMemoryBarrier image_upload_barriers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     uint32_t image_upload_barrier_count = 0;
-    VkBufferMemoryBarrier image_staging_upload_barriers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     uint32_t image_staging_upload_barrier_count = 0;
     for (size_t i = 0; i < dispatch_image_count; ++i) {
         VulkanDispatchImageObject *image = &dispatch_images[i];
@@ -16679,8 +16717,8 @@ static int run_vulkan_dispatch_fd(
             !image->copy_aspect_mask) {
             continue;
         }
-        if (image_upload_barrier_count >= PDOCKER_GPU_MAX_VULKAN_BINDINGS ||
-            image_staging_upload_barrier_count >= PDOCKER_GPU_MAX_VULKAN_BINDINGS) {
+        if (image_upload_barrier_count >= image_barrier_capacity ||
+            image_staging_upload_barrier_count >= image_barrier_capacity) {
             io_rc = -E2BIG;
             goto cleanup;
         }
@@ -16794,12 +16832,11 @@ static int run_vulkan_dispatch_fd(
         };
         int layout_rc = vulkan_replay_image_set_layout_for_range(image, &upload_range,
                                                                  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-        if (layout_rc != 0) return layout_rc;
+        if (layout_rc != 0) { io_rc = layout_rc; goto cleanup; }
         image->upload_pending = 0;
     }
-    VkBufferMemoryBarrier pre_barriers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     uint32_t pre_barrier_count = 0;
-    for (size_t i = 0; i < binding_count && pre_barrier_count < PDOCKER_GPU_MAX_VULKAN_BINDINGS; ++i) {
+    for (size_t i = 0; i < binding_count; ++i) {
         if (!active_bindings[i] || !vk_buffers[i] || !vk_buffers[i]->buffer) continue;
         pre_barriers[pre_barrier_count++] = (VkBufferMemoryBarrier){
             .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
@@ -16825,10 +16862,8 @@ static int run_vulkan_dispatch_fd(
                              pre_barrier_count, pre_barriers,
                              0, NULL);
     }
-    VkImageMemoryBarrier image_pre_barriers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     uint32_t image_pre_barrier_count = 0;
-    for (size_t i = 0; i < image_descriptor_count &&
-         image_pre_barrier_count < PDOCKER_GPU_MAX_VULKAN_BINDINGS; ++i) {
+    for (size_t i = 0; i < image_descriptor_count; ++i) {
         const VulkanDispatchImageDescriptor *d = &image_descriptors[i];
         VkDescriptorType descriptor_type = VK_DESCRIPTOR_TYPE_MAX_ENUM;
         if (vulkan_dispatch_image_descriptor_type_from_api(d->api_descriptor_type,
@@ -16895,9 +16930,8 @@ static int run_vulkan_dispatch_fd(
     } else {
         vkCmdDispatch(command_buffer, gx ? gx : 1, gy ? gy : 1, gz ? gz : 1);
     }
-    VkBufferMemoryBarrier post_barriers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     uint32_t post_barrier_count = 0;
-    for (size_t i = 0; i < binding_count && post_barrier_count < PDOCKER_GPU_MAX_VULKAN_BINDINGS; ++i) {
+    for (size_t i = 0; i < binding_count; ++i) {
         if (!active_bindings[i] || !binding_write_needed[i] || !vk_buffers[i] || !vk_buffers[i]->buffer) continue;
         post_barriers[post_barrier_count++] = (VkBufferMemoryBarrier){
             .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
@@ -16923,10 +16957,8 @@ static int run_vulkan_dispatch_fd(
                              post_barrier_count, post_barriers,
                              0, NULL);
     }
-    VkImageMemoryBarrier image_post_barriers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     uint32_t image_post_barrier_count = 0;
-    for (size_t i = 0; i < image_descriptor_count &&
-         image_post_barrier_count < PDOCKER_GPU_MAX_VULKAN_BINDINGS; ++i) {
+    for (size_t i = 0; i < image_descriptor_count; ++i) {
         const VulkanDispatchImageDescriptor *d = &image_descriptors[i];
         if (!(d->access_flags & PDOCKER_GPU_V5_ACCESS_WRITE) ||
             d->image_view_index == PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE ||
@@ -16969,7 +17001,6 @@ static int run_vulkan_dispatch_fd(
                              0, NULL,
                              image_post_barrier_count, image_post_barriers);
     }
-    VkBufferMemoryBarrier image_staging_download_barriers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     uint32_t image_staging_download_count = 0;
     for (size_t i = 0; i < dispatch_image_count; ++i) {
         VulkanDispatchImageObject *image = &dispatch_images[i];
@@ -17025,7 +17056,7 @@ static int run_vulkan_dispatch_fd(
                                        &region);
             }
         }
-        if (image_staging_download_count >= PDOCKER_GPU_MAX_VULKAN_BINDINGS) {
+        if (image_staging_download_count >= image_barrier_capacity) {
             io_rc = -E2BIG;
             goto cleanup;
         }
@@ -17078,10 +17109,8 @@ static int run_vulkan_dispatch_fd(
             strict_staging_download_copies++;
             strict_staging_download_bytes += bindings[i].size;
         }
-        VkBufferMemoryBarrier staging_download_barriers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
         uint32_t staging_download_count = 0;
-        for (size_t i = 0; i < binding_count &&
-             staging_download_count < PDOCKER_GPU_MAX_VULKAN_BINDINGS; ++i) {
+        for (size_t i = 0; i < binding_count; ++i) {
             if (!active_bindings[i] || !binding_write_needed[i] || !vk_buffers[i] ||
                 !vk_buffers[i]->device_local_staged || !vk_buffers[i]->staging_buffer) {
                 continue;
@@ -18755,6 +18784,15 @@ cleanup:
                                                strict_buffer_count);
         }
     }
+    free(staging_download_barriers);
+    free(image_staging_download_barriers);
+    free(image_post_barriers);
+    free(post_barriers);
+    free(image_pre_barriers);
+    free(pre_barriers);
+    free(image_staging_upload_barriers);
+    free(image_upload_barriers);
+    free(staging_upload_barriers);
     free(descriptor_write_alias_flags);
     free(descriptor_write_ranges);
     free(descriptor_write_offsets);
