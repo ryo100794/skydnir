@@ -955,6 +955,32 @@ typedef struct {
     size_t image_layout_range_count;
 } VulkanDispatchV5ObjectTables;
 
+typedef struct {
+    const PdockerGpuVulkanDispatchV5FrameHeader *header;
+    const PdockerGpuVulkanDispatchV5ResourceEntry *resources;
+    size_t resource_count;
+    const PdockerGpuVulkanDispatchV5DescriptorObjectEntry *object_descriptors;
+    size_t descriptor_count;
+    const int *passed_fds;
+    size_t passed_fd_count;
+    const PdockerGpuVulkanDispatchV5ImageEntry *images;
+    size_t image_count;
+    const PdockerGpuVulkanDispatchV5ImageViewEntry *image_views;
+    size_t image_view_count;
+    const PdockerGpuVulkanDispatchV5SamplerEntry *samplers;
+    size_t sampler_count;
+    const PdockerGpuVulkanDispatchV52ImageLayoutRangeEntry *image_layout_ranges;
+    size_t image_layout_range_count;
+    uint32_t buffer_descriptor_count;
+    uint32_t image_descriptor_count;
+    uint32_t max_descriptor_set;
+    uint32_t max_binding;
+    uint32_t max_array_element;
+    int has_object_extension;
+    int legacy_v4_execution_compatible;
+    const char *legacy_v4_incompatible_reason;
+} VulkanDispatchV5NativePlan;
+
 
 static int vulkan_dispatch_descriptor_type_from_api(
         uint32_t api_descriptor_type,
@@ -20562,6 +20588,293 @@ static int v5_resource_index_valid(
     return header && index < header->resource_count;
 }
 
+static void finish_vulkan_dispatch_v5_native_plan_legacy_status(
+        VulkanDispatchV5NativePlan *plan) {
+    if (!plan) return;
+    plan->legacy_v4_execution_compatible = 0;
+    plan->legacy_v4_incompatible_reason = "legacy-v4-compatible";
+    if (plan->buffer_descriptor_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS ||
+        plan->image_descriptor_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS) {
+        plan->legacy_v4_incompatible_reason = "descriptor-count-exceeds-legacy-v4";
+        return;
+    }
+    if (plan->max_descriptor_set >= PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS) {
+        plan->legacy_v4_incompatible_reason = "descriptor-set-exceeds-legacy-v4";
+        return;
+    }
+    if (plan->max_binding >= PDOCKER_GPU_MAX_VULKAN_BINDINGS) {
+        plan->legacy_v4_incompatible_reason = "binding-index-exceeds-legacy-v4";
+        return;
+    }
+    if (plan->max_array_element >= PDOCKER_GPU_MAX_VULKAN_BINDINGS) {
+        plan->legacy_v4_incompatible_reason = "array-element-exceeds-legacy-v4";
+        return;
+    }
+    if (plan->image_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS ||
+        plan->image_view_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS ||
+        plan->sampler_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS) {
+        plan->legacy_v4_incompatible_reason = "object-table-exceeds-legacy-v4";
+        return;
+    }
+    plan->legacy_v4_execution_compatible = 1;
+}
+
+static int build_vulkan_dispatch_v5_native_plan(
+        const unsigned char *frame,
+        const PdockerGpuVulkanDispatchV5FrameHeader *header,
+        const int *passed_fds,
+        size_t passed_fd_count,
+        VulkanDispatchV5NativePlan *plan) {
+    if (!frame || !header || !passed_fds || !plan) return -EINVAL;
+    memset(plan, 0, sizeof(*plan));
+    plan->header = header;
+    plan->passed_fds = passed_fds;
+    plan->passed_fd_count = passed_fd_count;
+    plan->legacy_v4_incompatible_reason = "legacy-v4-compatible";
+    if (header->resource_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_RESOURCES ||
+        header->descriptor_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS) {
+        return -E2BIG;
+    }
+    const int has_object_extension =
+        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_OBJECTS ||
+        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V52_ABI_MINOR;
+    const int has_v52_layout_ranges =
+        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V52_ABI_MINOR;
+    const PdockerGpuVulkanDispatchV5ResourceEntry *resources =
+        (const PdockerGpuVulkanDispatchV5ResourceEntry *)v5_frame_range(
+            frame, header, header->resource_table_offset, header->resource_table_size);
+    const PdockerGpuVulkanDispatchV5DescriptorEntry *legacy_descriptors =
+        !has_object_extension
+            ? (const PdockerGpuVulkanDispatchV5DescriptorEntry *)v5_frame_range(
+                  frame, header, header->descriptor_table_offset, header->descriptor_table_size)
+            : NULL;
+    const PdockerGpuVulkanDispatchV5DescriptorObjectEntry *object_descriptors =
+        has_object_extension
+            ? (const PdockerGpuVulkanDispatchV5DescriptorObjectEntry *)v5_frame_range(
+                  frame, header, header->descriptor_table_offset, header->descriptor_table_size)
+            : NULL;
+    if (!resources ||
+        (!has_object_extension && header->descriptor_count > 0 && !legacy_descriptors) ||
+        (has_object_extension && header->descriptor_count > 0 && !object_descriptors)) {
+        return -EPROTO;
+    }
+    plan->resources = resources;
+    plan->resource_count = header->resource_count;
+    plan->object_descriptors = object_descriptors;
+    plan->descriptor_count = header->descriptor_count;
+    plan->has_object_extension = has_object_extension;
+
+    if (has_object_extension) {
+        const PdockerGpuVulkanDispatchV5ObjectFrameHeader *object_header =
+            (const PdockerGpuVulkanDispatchV5ObjectFrameHeader *)frame;
+        const PdockerGpuVulkanDispatchV5ObjectHeaderExtension *objects = &object_header->objects;
+        plan->image_count = objects->image_count;
+        plan->image_view_count = objects->image_view_count;
+        plan->sampler_count = objects->sampler_count;
+        plan->images = plan->image_count
+            ? (const PdockerGpuVulkanDispatchV5ImageEntry *)v5_frame_range(
+                  frame, header, objects->image_table_offset, objects->image_table_size)
+            : NULL;
+        plan->image_views = plan->image_view_count
+            ? (const PdockerGpuVulkanDispatchV5ImageViewEntry *)v5_frame_range(
+                  frame, header, objects->image_view_table_offset, objects->image_view_table_size)
+            : NULL;
+        plan->samplers = plan->sampler_count
+            ? (const PdockerGpuVulkanDispatchV5SamplerEntry *)v5_frame_range(
+                  frame, header, objects->sampler_table_offset, objects->sampler_table_size)
+            : NULL;
+        if ((plan->image_count && !plan->images) ||
+            (plan->image_view_count && !plan->image_views) ||
+            (plan->sampler_count && !plan->samplers)) {
+            return -EPROTO;
+        }
+        for (size_t i = 0; i < plan->image_count; ++i) {
+            const PdockerGpuVulkanDispatchV5ImageEntry *img = &plan->images[i];
+            if (!v5_resource_index_valid(header, img->memory_resource_index)) return -EPROTO;
+            const PdockerGpuVulkanDispatchV5ResourceEntry *mem =
+                &resources[img->memory_resource_index];
+            if (mem->resource_type != PDOCKER_GPU_V5_RESOURCE_TYPE_MEMORY) return -EPROTO;
+            if (img->memory_offset > mem->size || img->memory_size > mem->size - img->memory_offset) {
+                return -ERANGE;
+            }
+        }
+        for (size_t i = 0; i < plan->image_view_count; ++i) {
+            if (plan->image_views[i].image_index >= plan->image_count) return -EPROTO;
+            const PdockerGpuVulkanDispatchV5ImageEntry *image =
+                &plan->images[plan->image_views[i].image_index];
+            if (!vulkan_dispatch_image_view_range_valid(image, &plan->image_views[i])) return -ERANGE;
+        }
+        if (has_v52_layout_ranges) {
+            const PdockerGpuVulkanDispatchV52FrameHeader *header_v52 =
+                (const PdockerGpuVulkanDispatchV52FrameHeader *)frame;
+            plan->image_layout_range_count = header_v52->v52.image_layout_range_count;
+            plan->image_layout_ranges = plan->image_layout_range_count
+                ? (const PdockerGpuVulkanDispatchV52ImageLayoutRangeEntry *)v5_frame_range(
+                      frame, header, header_v52->v52.image_layout_range_table_offset,
+                      header_v52->v52.image_layout_range_table_size)
+                : NULL;
+            if (plan->image_layout_range_count && !plan->image_layout_ranges) return -EPROTO;
+            int range_rc = validate_vulkan_dispatch_v52_image_layout_ranges(
+                plan->image_layout_ranges,
+                (uint32_t)plan->image_layout_range_count,
+                plan->images,
+                (uint32_t)plan->image_count);
+            if (range_rc != 0) return range_rc;
+        }
+    }
+
+    for (uint32_t i = 0; i < header->resource_count; ++i) {
+        const PdockerGpuVulkanDispatchV5ResourceEntry *r = &resources[i];
+        if (r->resource_type == PDOCKER_GPU_V5_RESOURCE_TYPE_MEMORY) {
+            if ((r->resource_flags & PDOCKER_GPU_V5_RESOURCE_FLAG_HOST_FD_BACKED) &&
+                (r->fd_index == PDOCKER_GPU_V5_RESOURCE_FD_NONE ||
+                 r->fd_index >= passed_fd_count ||
+                 passed_fds[r->fd_index] < 0)) {
+                return -EBADF;
+            }
+            if (r->parent_resource_index != PDOCKER_GPU_V5_RESOURCE_PARENT_NONE) return -EPROTO;
+        } else if (r->resource_type == PDOCKER_GPU_V5_RESOURCE_TYPE_BUFFER) {
+            if (!v5_resource_index_valid(header, r->parent_resource_index)) return -EPROTO;
+            const PdockerGpuVulkanDispatchV5ResourceEntry *mem = &resources[r->parent_resource_index];
+            if (mem->resource_type != PDOCKER_GPU_V5_RESOURCE_TYPE_MEMORY) return -EPROTO;
+            if (r->memory_offset > mem->size || r->size > mem->size - r->memory_offset) return -ERANGE;
+            if (r->fd_index != PDOCKER_GPU_V5_RESOURCE_FD_NONE) return -EPROTO;
+        } else if (r->resource_type == PDOCKER_GPU_V5_RESOURCE_TYPE_IMAGE ||
+                   r->resource_type == PDOCKER_GPU_V5_RESOURCE_TYPE_IMAGE_VIEW ||
+                   r->resource_type == PDOCKER_GPU_V5_RESOURCE_TYPE_SAMPLER) {
+            if (r->fd_index != PDOCKER_GPU_V5_RESOURCE_FD_NONE) return -EPROTO;
+        } else {
+            return -EOPNOTSUPP;
+        }
+    }
+
+    for (uint32_t i = 0; i < header->descriptor_count; ++i) {
+        PdockerGpuVulkanDispatchV5DescriptorObjectEntry object_copy;
+        const PdockerGpuVulkanDispatchV5DescriptorObjectEntry *d = NULL;
+        if (has_object_extension) {
+            d = &object_descriptors[i];
+        } else {
+            const PdockerGpuVulkanDispatchV5DescriptorEntry *legacy = &legacy_descriptors[i];
+            memset(&object_copy, 0, sizeof(object_copy));
+            object_copy.descriptor_set = legacy->descriptor_set;
+            object_copy.binding = legacy->binding;
+            object_copy.array_element = legacy->array_element;
+            object_copy.descriptor_type = legacy->descriptor_type;
+            object_copy.descriptor_flags = legacy->descriptor_flags;
+            object_copy.access_flags = legacy->access_flags;
+            object_copy.resource_index = legacy->resource_index;
+            object_copy.image_view_index = PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE;
+            object_copy.sampler_index = PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE;
+            object_copy.image_layout = 0;
+            object_copy.resource_id = legacy->resource_id;
+            object_copy.buffer_offset = legacy->buffer_offset;
+            object_copy.range = legacy->range;
+            object_copy.transfer_offset = legacy->transfer_offset;
+            object_copy.transfer_size = legacy->transfer_size;
+            object_copy.dynamic_offset = legacy->dynamic_offset;
+            d = &object_copy;
+        }
+        if (d->descriptor_set > plan->max_descriptor_set) plan->max_descriptor_set = d->descriptor_set;
+        if (d->binding > plan->max_binding) plan->max_binding = d->binding;
+        if (d->array_element > plan->max_array_element) plan->max_array_element = d->array_element;
+
+        VkDescriptorType image_descriptor_type = VK_DESCRIPTOR_TYPE_MAX_ENUM;
+        const int is_image_descriptor =
+            d->image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE ||
+            d->sampler_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE ||
+            vulkan_dispatch_image_descriptor_type_from_api(d->descriptor_type, &image_descriptor_type) == 0;
+        if (is_image_descriptor) {
+            if (vulkan_dispatch_image_descriptor_type_from_api(d->descriptor_type,
+                                                               &image_descriptor_type) != 0) {
+                return -EOPNOTSUPP;
+            }
+            if (!has_object_extension || d->resource_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE) {
+                return -EPROTO;
+            }
+            if (vulkan_descriptor_type_requires_image_view(image_descriptor_type)) {
+                if (d->image_view_index == PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE ||
+                    d->image_view_index >= plan->image_view_count) return -EPROTO;
+                if (d->resource_id != 0 &&
+                    d->resource_id != plan->image_views[d->image_view_index].view_id) {
+                    return -EPROTO;
+                }
+            } else if (d->image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE &&
+                       d->image_view_index >= plan->image_view_count) {
+                return -EPROTO;
+            }
+            if (vulkan_descriptor_type_requires_sampler(image_descriptor_type)) {
+                if (d->sampler_index == PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE ||
+                    d->sampler_index >= plan->sampler_count) return -EPROTO;
+                if (!vulkan_descriptor_type_requires_image_view(image_descriptor_type) &&
+                    d->resource_id != 0 &&
+                    d->resource_id != plan->samplers[d->sampler_index].sampler_id) {
+                    return -EPROTO;
+                }
+            } else if (d->sampler_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE &&
+                       d->sampler_index >= plan->sampler_count) {
+                return -EPROTO;
+            }
+            plan->image_descriptor_count++;
+            continue;
+        }
+
+        if (!v5_resource_index_valid(header, d->resource_index)) return -EPROTO;
+        const PdockerGpuVulkanDispatchV5ResourceEntry *buffer = &resources[d->resource_index];
+        if (buffer->resource_type != PDOCKER_GPU_V5_RESOURCE_TYPE_BUFFER) return -EPROTO;
+        const PdockerGpuVulkanDispatchV5ResourceEntry *memory = &resources[buffer->parent_resource_index];
+        if (memory->resource_type != PDOCKER_GPU_V5_RESOURCE_TYPE_MEMORY) return -EPROTO;
+        if (memory->fd_index >= passed_fd_count || passed_fds[memory->fd_index] < 0) return -EBADF;
+        VkDescriptorType descriptor_type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        if (vulkan_dispatch_descriptor_type_from_api(d->descriptor_type, &descriptor_type) != 0) {
+            return -EOPNOTSUPP;
+        }
+        (void)descriptor_type;
+        int dynamic_alignment_rc = validate_vulkan_descriptor_dynamic_offset_alignment(
+            d->descriptor_type,
+            (d->descriptor_flags & PDOCKER_GPU_V5_DESCRIPTOR_FLAG_DYNAMIC) != 0,
+            d->dynamic_offset);
+        if (dynamic_alignment_rc != 0) return dynamic_alignment_rc;
+        if (d->resource_id != 0 && d->resource_id != buffer->resource_id) return -EPROTO;
+        uint64_t api_offset = 0;
+        if (checked_u64_add3(d->buffer_offset, d->dynamic_offset, 0, &api_offset) != 0) return -EOVERFLOW;
+        uint64_t api_range = 0;
+        if (d->range == UINT64_MAX) {
+            if (api_offset > buffer->size) return -ERANGE;
+            api_range = buffer->size - api_offset;
+        } else {
+            if (api_offset > buffer->size || d->range > buffer->size - api_offset) return -ERANGE;
+            api_range = d->range;
+        }
+        if (d->transfer_offset > buffer->size || d->transfer_size > buffer->size - d->transfer_offset) return -ERANGE;
+        if (d->transfer_offset < api_offset) return -ERANGE;
+        const uint64_t transfer_delta = d->transfer_offset - api_offset;
+        if (transfer_delta > api_range || d->transfer_size > api_range - transfer_delta) return -ERANGE;
+        uint64_t fd_offset = 0;
+        if (checked_u64_add3(memory->external_offset, buffer->memory_offset, d->transfer_offset, &fd_offset) != 0) {
+            return -EOVERFLOW;
+        }
+        off_t fd_offset_checked = 0;
+        off_t api_offset_checked = 0;
+        off_t memory_offset_checked = 0;
+        if (checked_u64_to_off_t(fd_offset, &fd_offset_checked) != 0 ||
+            checked_u64_to_off_t(api_offset, &api_offset_checked) != 0 ||
+            checked_u64_to_off_t(buffer->memory_offset, &memory_offset_checked) != 0 ||
+            d->transfer_size > (uint64_t)SIZE_MAX ||
+            api_range > (uint64_t)SIZE_MAX ||
+            buffer->size > (uint64_t)SIZE_MAX ||
+            memory->size > (uint64_t)SIZE_MAX) {
+            return -EOVERFLOW;
+        }
+        (void)fd_offset_checked;
+        (void)api_offset_checked;
+        (void)memory_offset_checked;
+        plan->buffer_descriptor_count++;
+    }
+
+    finish_vulkan_dispatch_v5_native_plan_legacy_status(plan);
+    return 0;
+}
+
 static int convert_vulkan_dispatch_v5_to_v4_bindings(
         const unsigned char *frame,
         const PdockerGpuVulkanDispatchV5FrameHeader *header,
@@ -33303,6 +33616,21 @@ static int handle_vulkan_dispatch_v5_frame(int cfd) {
         cfd, &frame, &header, passed_fds, PDOCKER_GPU_MAX_PASSED_FDS, &passed_fd_count);
     if (rc != 0) {
         json_fail("vulkan-dispatch-v5", strerror(-rc));
+        goto cleanup;
+    }
+    VulkanDispatchV5NativePlan native_plan;
+    rc = build_vulkan_dispatch_v5_native_plan(
+        frame, &header, passed_fds, passed_fd_count, &native_plan);
+    if (rc != 0) {
+        json_fail("vulkan-dispatch-v5-native-plan", strerror(-rc));
+        goto cleanup;
+    }
+    if (!native_plan.legacy_v4_execution_compatible) {
+        json_fail(
+            "vulkan-dispatch-v5-native-plan",
+            native_plan.legacy_v4_incompatible_reason
+                ? native_plan.legacy_v4_incompatible_reason
+                : "v5 native table replay required");
         goto cleanup;
     }
     VulkanDispatchBinding bindings[PDOCKER_GPU_MAX_VULKAN_BINDINGS];

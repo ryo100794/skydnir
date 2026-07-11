@@ -157,13 +157,17 @@ or closes.
   into V4-style fixed binding arrays before sender serialization and again in
   the Android executor before `run_vulkan_dispatch_fd`.  This is fail-closed,
   not silent truncation, but it caps effective descriptor/image/sampler handling
-  at the legacy 16-slot execution path.  Next implementation must introduce a
-  table-native compute execution plan, heap-backed descriptor/object arenas,
-  and tests that stop treating `convert_vulkan_dispatch_v5_to_v4_bindings` as
-  the desired endpoint.  Acceptance: host verifier `tests.test_gpu_abi_contract`
-  must include a V5 descriptor-array case above the V4 16-slot limit, and a
-  runtime artifact must either prove table-native replay or show sender-side
-  fail-closed rejection before frame send.
+  at the legacy 16-slot execution path.  A first executor-side native-plan gate
+  now parses and validates the V5 resource/descriptor/object tables before any
+  V4 conversion and explicitly rejects frames that require table-native replay
+  instead of letting the legacy converter or descriptor-write arrays become the
+  evidence boundary.  Remaining implementation must replace the legacy fallback
+  with heap-backed descriptor/object arenas and a V5 table-native compute
+  runner, then widen the ICD producer beyond the current 16-slot collection
+  arrays.  Acceptance: host verifier `tests.test_gpu_abi_contract` must include
+  a V5 descriptor-array case above the V4 16-slot limit, and a runtime artifact
+  must either prove table-native replay or show sender-side fail-closed
+  rejection before frame send.
 - [planned] **residual graphics evidence gaps**: Do not promote full Vulkan
   pass-through until remaining fail-closed lanes have explicit ABI/evidence:
   dual-aspect depth+stencil copy layout, explicit compressed/multiplanar image

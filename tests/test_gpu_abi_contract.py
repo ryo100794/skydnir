@@ -4349,15 +4349,22 @@ class GpuAbiContractTest(unittest.TestCase):
             object_validator,
         )
 
-    def test_vulkan_dispatch_v5_1_object_transport_buffer_descriptors_reuse_v4_execution_path(self):
+    def test_vulkan_dispatch_v5_1_object_transport_uses_native_plan_before_legacy_execution(self):
         executor = GPU_EXECUTOR.read_text()
         handler = executor.split("static int handle_vulkan_dispatch_v5_frame", 1)[1].split(
             "static int serve_socket", 1
         )[0]
+        native_plan = "build_vulkan_dispatch_v5_native_plan"
         conversion = "convert_vulkan_dispatch_v5_to_v4_bindings"
+        self.assertIn(native_plan, handler)
+        self.assertIn("VulkanDispatchV5NativePlan native_plan;", handler)
+        self.assertIn("!native_plan.legacy_v4_execution_compatible", handler)
+        self.assertIn('json_fail(\n            "vulkan-dispatch-v5-native-plan",', handler)
         self.assertIn(conversion, handler)
         self.assertIn("run_vulkan_dispatch_fd(", handler)
         self.assertNotIn("object materialization is pending", handler)
+        self.assertLess(handler.index(native_plan), handler.index(conversion))
+        self.assertLess(handler.index("!native_plan.legacy_v4_execution_compatible"), handler.index(conversion))
         self.assertLess(handler.index(conversion), handler.index("run_vulkan_dispatch_fd("))
         converter = executor.split("static int convert_vulkan_dispatch_v5_to_v4_bindings", 1)[1].split(
             "static int recv_vulkan_dispatch_v5_header_with_fds", 1
@@ -4371,6 +4378,39 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VulkanDispatchImageDescriptor", converter)
         self.assertIn("image_descriptors[image_descriptor_count++]", converter)
         self.assertIn("vulkan_dispatch_image_descriptor_type_from_api", converter)
+
+    def test_vulkan_dispatch_v5_native_plan_tracks_table_shape_without_v4_capacity(self):
+        executor = GPU_EXECUTOR.read_text()
+        self.assertIn("} VulkanDispatchV5NativePlan;", executor)
+        self.assertIn("uint32_t buffer_descriptor_count;", executor)
+        self.assertIn("uint32_t image_descriptor_count;", executor)
+        self.assertIn("uint32_t max_array_element;", executor)
+        body = c_function_body(executor, "build_vulkan_dispatch_v5_native_plan")
+        self.assertIn("header->descriptor_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS", body)
+        self.assertIn("plan->descriptor_count = header->descriptor_count;", body)
+        self.assertIn("plan->max_descriptor_set", body)
+        self.assertIn("plan->max_binding", body)
+        self.assertIn("plan->max_array_element", body)
+        self.assertIn("plan->buffer_descriptor_count++", body)
+        self.assertIn("plan->image_descriptor_count++", body)
+        self.assertIn("finish_vulkan_dispatch_v5_native_plan_legacy_status(plan);", body)
+        self.assertNotIn("VulkanDispatchBinding", body)
+        self.assertNotIn("binding_capacity", body)
+        self.assertNotIn("image_descriptor_capacity", body)
+
+    def test_vulkan_dispatch_v5_native_plan_reports_legacy_v4_incompatibility(self):
+        executor = GPU_EXECUTOR.read_text()
+        body = c_function_body(executor, "finish_vulkan_dispatch_v5_native_plan_legacy_status")
+        self.assertIn("plan->legacy_v4_execution_compatible = 0;", body)
+        self.assertIn("descriptor-count-exceeds-legacy-v4", body)
+        self.assertIn("descriptor-set-exceeds-legacy-v4", body)
+        self.assertIn("binding-index-exceeds-legacy-v4", body)
+        self.assertIn("array-element-exceeds-legacy-v4", body)
+        self.assertIn("object-table-exceeds-legacy-v4", body)
+        self.assertIn("plan->buffer_descriptor_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS", body)
+        self.assertIn("plan->image_descriptor_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS", body)
+        self.assertIn("plan->max_array_element >= PDOCKER_GPU_MAX_VULKAN_BINDINGS", body)
+        self.assertIn("plan->legacy_v4_execution_compatible = 1;", body)
 
     def test_vulkan_dispatch_v5_2_image_layout_range_abi_scaffold(self):
         abi = APP_HEADER.read_text()
