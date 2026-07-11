@@ -21,8 +21,8 @@ Current TODO counters:
 
 | State | Count |
 |---|---:|
-| done | 88 |
-| doing | 21 |
+| done | 89 |
+| doing | 22 |
 | next | 33 |
 | blocked | 0 |
 
@@ -32,10 +32,10 @@ Current TODO counters:
 
 Keep the UI compose path truthful and visible while closing regressions that block demos.
 
+- **V5 compute native descriptor-table execution**: Compute V5/V5.1/V5.2 currently preserves richer frame tables on the wire but still narrows them into V4-style fixed binding arrays before...
 - **TermPort Skydnir payload build ownership**: TermPort now carries the Skydnir native sources it needs and wires Gradle `preBuild` through a local `buildSkydnirNative` task plus daemon...
 - Cross-project incomplete implementation audit: `docs/plan/INCOMPLETE_IMPLEMENTATION_AUDIT_20260513.md` now tracks unfinished, partial, temporary, or insufficiently verified work across...
 - Execution timeline and delegated task control: `docs/plan/EXECUTION_TIMELINE_20260513.md` converts the audit into staged gates, current agent assignments, merge checklists, and...
-- [#4](https://github.com/ryo100794/skydnir/issues/4) llama GPU bridge ABI: keep llama.cpp unmodified while expanding the Skydnir Vulkan/OpenCL bridge from discovery and model-buffer...
 
 ### Next: 2026-07-15 to 2026-07-21
 

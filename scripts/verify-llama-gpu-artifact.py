@@ -828,6 +828,14 @@ def _vulkan_shader_passthrough_rewrite_evidence(data: Any, path: str = "$") -> l
         if len(evidence) >= 16:
             return
         if isinstance(value, dict):
+            if value.get("strict_transport_identity_eligible") is False:
+                add({
+                    "path": f"{value_path}.strict_transport_identity_eligible",
+                    "kind": "strict-transport-identity-ineligible",
+                    "reason": value.get("strict_transport_identity_reason"),
+                })
+                if len(evidence) >= 16:
+                    return
             for field in sorted(VULKAN_SHADER_REWRITE_BOOL_FIELDS):
                 if value.get(field) is True:
                     add({

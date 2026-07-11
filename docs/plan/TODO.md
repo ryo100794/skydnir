@@ -137,6 +137,14 @@ or closes.
   actual SCM_RIGHTS transport capacity, and the executor validates V5/V6 frame
   headers against the same transport cap instead of advertising the larger ABI
   index range as a usable per-message fd count.
+- [done] **strict transport identity evidence gate**: The Android executor now
+  reports whether a strict dispatch is eligible as no-reconstruction
+  pass-through evidence.  Source/effective/received SPIR-V hashes must match,
+  shader bytes must remain unchanged through pipeline creation, and diagnostic
+  rewrites, safe kernels, compatibility lowerings, descriptor rewrites, or
+  pipeline-policy knobs demote the result to diagnostic evidence.  The llama GPU
+  artifact verifier treats `strict_transport_identity_eligible=false` as a
+  pass-through promotion blocker rather than a successful GPU bridge proof.
 - [done] **image format/view fail-closed audit**: The container ICD and
   Android executor now reject unsupported image formats before they can be
   treated as byte-linear payloads. Unknown, compressed, multiplanar, YCbCr,
@@ -144,6 +152,18 @@ or closes.
   fail closed. `VK_REMAINING_MIP_LEVELS` and `VK_REMAINING_ARRAY_LAYERS` are
   normalized by the producer-side ICD before image-view serialization, while
   the executor accepts only concrete bounded ranges.
+- [doing] **V5 compute native descriptor-table execution**: Compute V5/V5.1/V5.2
+  currently preserves richer frame tables on the wire but still narrows them
+  into V4-style fixed binding arrays before sender serialization and again in
+  the Android executor before `run_vulkan_dispatch_fd`.  This is fail-closed,
+  not silent truncation, but it caps effective descriptor/image/sampler handling
+  at the legacy 16-slot execution path.  Next implementation must introduce a
+  table-native compute execution plan, heap-backed descriptor/object arenas,
+  and tests that stop treating `convert_vulkan_dispatch_v5_to_v4_bindings` as
+  the desired endpoint.  Acceptance: host verifier `tests.test_gpu_abi_contract`
+  must include a V5 descriptor-array case above the V4 16-slot limit, and a
+  runtime artifact must either prove table-native replay or show sender-side
+  fail-closed rejection before frame send.
 - [planned] **residual graphics evidence gaps**: Do not promote full Vulkan
   pass-through until remaining fail-closed lanes have explicit ABI/evidence:
   dual-aspect depth+stencil copy layout, explicit compressed/multiplanar image

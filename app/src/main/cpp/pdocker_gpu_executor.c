@@ -15253,7 +15253,7 @@ static int run_vulkan_dispatch_fd(
     }
     const uint64_t reported_source_spirv_hash = cpu_oracle_spirv_hash;
     const char *reported_source_spirv_hash_source = cpu_oracle_spirv_hash_source;
-    const uint64_t reported_effective_spirv_hash = spirv_summary.hash;
+    uint64_t reported_effective_spirv_hash = spirv_summary.hash;
 
     if (strict_passthrough && options && options->has_requested_feature_mask) {
         const uint64_t required_feature_mask = spirv_required_feature_mask(&spirv_summary);
@@ -16236,6 +16236,14 @@ static int run_vulkan_dispatch_fd(
             }
         }
         if (rc != VK_SUCCESS) goto cleanup;
+        /*
+         * Pipeline-retry compatibility paths can materialize specialization
+         * constants after the first effective SPIR-V hash was recorded.  Keep
+         * the reported effective identity tied to the bytes used to create the
+         * executable shader module; otherwise pass-through evidence can claim
+         * one module while the pipeline actually runs another.
+         */
+        reported_effective_spirv_hash = spirv_summary.hash;
         timing_pipeline_create_ms = now_ms() - pipeline_create_start;
         if (!multi_descriptor_set) {
             pipeline_cache_entry = select_pipeline_cache_slot(rt->device);
@@ -17306,6 +17314,50 @@ static int run_vulkan_dispatch_fd(
                                           gz);
     }
     timing_cpu_oracle_ms = now_ms() - cpu_oracle_start;
+    const int strict_transport_has_sender_spirv_identity =
+        options && options->has_source_spirv_hash && options->has_effective_spirv_hash;
+    const int strict_transport_sender_spirv_identity_match =
+        strict_transport_has_sender_spirv_identity &&
+        options->source_spirv_hash == options->effective_spirv_hash &&
+        options->effective_spirv_hash == original_spirv_hash;
+    const int strict_transport_shader_bytes_unchanged =
+        original_spirv_hash == reported_effective_spirv_hash &&
+        reported_effective_spirv_hash == spirv_summary.hash;
+    const int strict_transport_shader_mutated =
+        local_size_patched ||
+        specialization_materialized ||
+        float16_capability_added ||
+        q6_storage16_loads_lowered ||
+        q6_u32_to_u8vec4_bitcasts_lowered ||
+        q6_final_store_pre_barrier_inserted ||
+        q6k_safe_kernel_used ||
+        q4k_safe_kernel_used ||
+        (rewrite_duplicate_descriptors && binding_alias_count > 0);
+    const int strict_transport_pipeline_policy_mutated =
+        disable_pipeline_optimization ||
+        materialize_readonly_overlap_snapshots;
+    const int strict_transport_identity_eligible =
+        strict_passthrough &&
+        strict_transport_sender_spirv_identity_match &&
+        strict_transport_shader_bytes_unchanged &&
+        !strict_transport_shader_mutated &&
+        !strict_transport_pipeline_policy_mutated;
+    const char *strict_transport_identity_reason = "ok";
+    if (!strict_passthrough) {
+        strict_transport_identity_reason = "not-strict-passthrough";
+    } else if (!strict_transport_has_sender_spirv_identity) {
+        strict_transport_identity_reason = "missing-source-effective-spirv-hashes";
+    } else if (options->source_spirv_hash != options->effective_spirv_hash) {
+        strict_transport_identity_reason = "source-effective-spirv-hash-mismatch";
+    } else if (options->effective_spirv_hash != original_spirv_hash) {
+        strict_transport_identity_reason = "sender-effective-received-spirv-hash-mismatch";
+    } else if (!strict_transport_shader_bytes_unchanged) {
+        strict_transport_identity_reason = "received-effective-spirv-hash-mismatch";
+    } else if (strict_transport_shader_mutated) {
+        strict_transport_identity_reason = "shader-or-diagnostic-rewrite-active";
+    } else if (strict_transport_pipeline_policy_mutated) {
+        strict_transport_identity_reason = "pipeline-policy-compatibility-knob-active";
+    }
     if (cpu_oracle_required_fail_closed(&cpu_oracle_report)) {
         oracle_fail_closed = 1;
         fail_stage = "cpu-oracle-required";
@@ -17344,6 +17396,12 @@ static int run_vulkan_dispatch_fd(
                 "\"backend_impl\":\"android_vulkan\",\"kernel\":\"generic_spirv\","
                 "\"compact_summary\":true,\"q6_compact_response\":true,"
                 "\"strict_passthrough\":%s,"
+                "\"strict_transport_identity_eligible\":%s,"
+                "\"strict_transport_identity_reason\":\"%s\","
+                "\"strict_transport_sender_spirv_identity_match\":%s,"
+                "\"strict_transport_shader_bytes_unchanged\":%s,"
+                "\"strict_transport_shader_mutated\":%s,"
+                "\"strict_transport_pipeline_policy_mutated\":%s,"
                 "\"shader_bytes\":%zu,"
                 "\"source_spirv_hash\":\"0x%016llx\","
                 "\"source_spirv_hash_source\":\"%s\","
@@ -17378,6 +17436,12 @@ static int run_vulkan_dispatch_fd(
                 PDOCKER_GPU_ABI_VERSION,
                 PDOCKER_GPU_EXECUTOR_BUILD_MARKER,
                 strict_passthrough ? "true" : "false",
+                strict_transport_identity_eligible ? "true" : "false",
+                strict_transport_identity_reason,
+                strict_transport_sender_spirv_identity_match ? "true" : "false",
+                strict_transport_shader_bytes_unchanged ? "true" : "false",
+                strict_transport_shader_mutated ? "true" : "false",
+                strict_transport_pipeline_policy_mutated ? "true" : "false",
                 shader_size,
                 (unsigned long long)reported_source_spirv_hash,
                 reported_source_spirv_hash_source,
@@ -17694,6 +17758,12 @@ static int run_vulkan_dispatch_fd(
                 "\"backend_impl\":\"android_vulkan\",\"kernel\":\"generic_spirv\","
                 "\"compact_summary\":true,"
                 "\"strict_passthrough\":%s,"
+                "\"strict_transport_identity_eligible\":%s,"
+                "\"strict_transport_identity_reason\":\"%s\","
+                "\"strict_transport_sender_spirv_identity_match\":%s,"
+                "\"strict_transport_shader_bytes_unchanged\":%s,"
+                "\"strict_transport_shader_mutated\":%s,"
+                "\"strict_transport_pipeline_policy_mutated\":%s,"
                 "\"requested_feature_mask\":\"0x%016llx\","
                 "\"requested_feature_mask_present\":%s,"
                 "\"strict_object_graph\":{\"used\":%s,\"memories\":%zu,\"buffers\":%zu,"
@@ -17782,6 +17852,12 @@ static int run_vulkan_dispatch_fd(
                 PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
                 PDOCKER_GPU_EXECUTOR_BUILD_MARKER,
                 strict_passthrough ? "true" : "false",
+                strict_transport_identity_eligible ? "true" : "false",
+                strict_transport_identity_reason,
+                strict_transport_sender_spirv_identity_match ? "true" : "false",
+                strict_transport_shader_bytes_unchanged ? "true" : "false",
+                strict_transport_shader_mutated ? "true" : "false",
+                strict_transport_pipeline_policy_mutated ? "true" : "false",
                 (unsigned long long)(options ? options->requested_feature_mask : 0),
                 (options && options->has_requested_feature_mask) ? "true" : "false",
                 strict_object_graph_used ? "true" : "false",
@@ -17967,6 +18043,12 @@ static int run_vulkan_dispatch_fd(
             "\"executor_build_marker\":\"%s\","
             "\"backend_impl\":\"android_vulkan\",\"kernel\":\"generic_spirv\","
             "\"strict_passthrough\":%s,"
+                "\"strict_transport_identity_eligible\":%s,"
+                "\"strict_transport_identity_reason\":\"%s\","
+                "\"strict_transport_sender_spirv_identity_match\":%s,"
+                "\"strict_transport_shader_bytes_unchanged\":%s,"
+                "\"strict_transport_shader_mutated\":%s,"
+                "\"strict_transport_pipeline_policy_mutated\":%s,"
             "\"requested_feature_mask\":\"0x%016llx\","
             "\"requested_feature_mask_present\":%s,"
             "\"strict_object_graph\":{\"used\":%s,\"memories\":%zu,\"buffers\":%zu,"
@@ -18063,6 +18145,12 @@ static int run_vulkan_dispatch_fd(
             PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
             PDOCKER_GPU_EXECUTOR_BUILD_MARKER,
             strict_passthrough ? "true" : "false",
+                strict_transport_identity_eligible ? "true" : "false",
+                strict_transport_identity_reason,
+                strict_transport_sender_spirv_identity_match ? "true" : "false",
+                strict_transport_shader_bytes_unchanged ? "true" : "false",
+                strict_transport_shader_mutated ? "true" : "false",
+                strict_transport_pipeline_policy_mutated ? "true" : "false",
             (unsigned long long)(options ? options->requested_feature_mask : 0),
             (options && options->has_requested_feature_mask) ? "true" : "false",
             strict_object_graph_used ? "true" : "false",

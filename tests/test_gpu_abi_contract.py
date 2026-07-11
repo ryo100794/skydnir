@@ -6166,6 +6166,13 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("reported_source_spirv_hash = cpu_oracle_spirv_hash", source)
         self.assertIn("reported_source_spirv_hash_source = cpu_oracle_spirv_hash_source", source)
         self.assertIn("reported_effective_spirv_hash = spirv_summary.hash", source)
+        self.assertIn("strict_transport_identity_eligible", source)
+        self.assertIn(r'\"strict_transport_identity_eligible\":%s', source)
+        self.assertIn(r'\"strict_transport_identity_reason\":\"%s\"', source)
+        self.assertIn("strict_transport_sender_spirv_identity_match", source)
+        self.assertIn("strict_transport_shader_bytes_unchanged", source)
+        self.assertIn("strict_transport_shader_mutated", source)
+        self.assertIn("strict_transport_pipeline_policy_mutated", source)
         self.assertIn("write_f32_sample_array", source)
         self.assertIn("write_f32_fd_sample_array", source)
         self.assertIn("write_f32_sample_array_at_indices", source)
@@ -16441,6 +16448,38 @@ class GpuAbiContractTest(unittest.TestCase):
             "dispatch_lifecycle",
         ]:
             self.assertIn(marker, compare)
+
+
+    def test_strict_transport_identity_demotes_shader_and_pipeline_reconstruction(self):
+        source = GPU_EXECUTOR.read_text()
+        verifier = (ROOT / "scripts/verify-llama-gpu-artifact.py").read_text()
+        self.assertIn("strict_transport_has_sender_spirv_identity", source)
+        self.assertIn("options->source_spirv_hash == options->effective_spirv_hash", source)
+        self.assertIn("options->effective_spirv_hash == original_spirv_hash", source)
+        self.assertIn("original_spirv_hash == reported_effective_spirv_hash", source)
+        self.assertIn("reported_effective_spirv_hash == spirv_summary.hash", source)
+        for marker in [
+            "local_size_patched ||",
+            "specialization_materialized ||",
+            "float16_capability_added ||",
+            "q6_storage16_loads_lowered ||",
+            "q6_u32_to_u8vec4_bitcasts_lowered ||",
+            "q6_final_store_pre_barrier_inserted ||",
+            "q6k_safe_kernel_used ||",
+            "q4k_safe_kernel_used ||",
+            "rewrite_duplicate_descriptors && binding_alias_count > 0",
+            "disable_pipeline_optimization ||",
+            "materialize_readonly_overlap_snapshots",
+            "source-effective-spirv-hash-mismatch",
+            "sender-effective-received-spirv-hash-mismatch",
+            "received-effective-spirv-hash-mismatch",
+            "shader-or-diagnostic-rewrite-active",
+            "pipeline-policy-compatibility-knob-active",
+        ]:
+            self.assertIn(marker, source)
+        self.assertIn("reported_effective_spirv_hash = spirv_summary.hash;", source)
+        self.assertIn("strict_transport_identity_eligible", verifier)
+        self.assertIn("strict-transport-identity-ineligible", verifier)
 
 
 if __name__ == "__main__":
