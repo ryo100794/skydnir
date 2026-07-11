@@ -4379,6 +4379,42 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("image_descriptors[image_descriptor_count++]", converter)
         self.assertIn("vulkan_dispatch_image_descriptor_type_from_api", converter)
 
+    def test_vulkan_dispatch_v5_handler_uses_native_plan_heap_tables_before_v4_fallback(self):
+        executor = GPU_EXECUTOR.read_text()
+        handler = c_function_body(executor, "handle_vulkan_dispatch_v5_frame")
+        self.assertIn("VulkanDispatchBinding *bindings = NULL;", handler)
+        self.assertIn("VulkanDispatchImageDescriptor *image_descriptors = NULL;", handler)
+        self.assertIn("int *binding_fds = NULL;", handler)
+        self.assertIn(
+            "binding_capacity = native_plan.buffer_descriptor_count ? native_plan.buffer_descriptor_count : 1u;",
+            handler,
+        )
+        self.assertIn(
+            "image_descriptor_capacity = native_plan.image_descriptor_count ? native_plan.image_descriptor_count : 1u;",
+            handler,
+        )
+        self.assertIn("bindings = (VulkanDispatchBinding *)calloc(binding_capacity, sizeof(*bindings));", handler)
+        self.assertIn(
+            "image_descriptors = (VulkanDispatchImageDescriptor *)calloc(\n"
+            "        image_descriptor_capacity, sizeof(*image_descriptors));",
+            handler,
+        )
+        self.assertIn("binding_fds = (int *)calloc(binding_capacity, sizeof(*binding_fds));", handler)
+        self.assertIn("bindings, binding_fds, binding_capacity, &binding_count,", handler)
+        self.assertIn("image_descriptors, image_descriptor_capacity,", handler)
+        self.assertIn("free(binding_fds);", handler)
+        self.assertIn("free(image_descriptors);", handler)
+        self.assertIn("free(bindings);", handler)
+        self.assertNotIn("VulkanDispatchBinding bindings[PDOCKER_GPU_MAX_VULKAN_BINDINGS];", handler)
+        self.assertNotIn(
+            "VulkanDispatchImageDescriptor image_descriptors[PDOCKER_GPU_MAX_VULKAN_BINDINGS];",
+            handler,
+        )
+        self.assertNotIn("int binding_fds[PDOCKER_GPU_MAX_VULKAN_BINDINGS];", handler)
+        self.assertLess(handler.index("build_vulkan_dispatch_v5_native_plan"), handler.index("binding_capacity = native_plan"))
+        self.assertLess(handler.index("binding_capacity = native_plan"), handler.index("convert_vulkan_dispatch_v5_to_v4_bindings"))
+        self.assertLess(handler.index("convert_vulkan_dispatch_v5_to_v4_bindings"), handler.index("run_vulkan_dispatch_fd("))
+
     def test_vulkan_dispatch_v5_native_plan_tracks_table_shape_without_v4_capacity(self):
         executor = GPU_EXECUTOR.read_text()
         self.assertIn("} VulkanDispatchV5NativePlan;", executor)

@@ -33644,6 +33644,11 @@ static int handle_vulkan_dispatch_v5_frame(int cfd) {
     size_t passed_fd_count = 0;
     PdockerGpuVulkanDispatchV5FrameHeader header;
     unsigned char *frame = NULL;
+    VulkanDispatchBinding *bindings = NULL;
+    VulkanDispatchImageDescriptor *image_descriptors = NULL;
+    int *binding_fds = NULL;
+    size_t binding_capacity = 0;
+    size_t image_descriptor_capacity = 0;
     int rc = recv_vulkan_dispatch_v5_frame(
         cfd, &frame, &header, passed_fds, PDOCKER_GPU_MAX_PASSED_FDS, &passed_fd_count);
     if (rc != 0) {
@@ -33665,23 +33670,28 @@ static int handle_vulkan_dispatch_v5_frame(int cfd) {
                 : "v5 native table replay required");
         goto cleanup;
     }
-    VulkanDispatchBinding bindings[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    VulkanDispatchImageDescriptor image_descriptors[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     VulkanDispatchV5ObjectTables object_tables;
-    int binding_fds[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     size_t binding_count = 0;
     size_t image_descriptor_count = 0;
-    memset(bindings, 0, sizeof(bindings));
-    for (size_t i = 0; i < PDOCKER_GPU_MAX_VULKAN_BINDINGS; ++i) {
-        bindings[i].resource_index = UINT32_MAX;
+    binding_capacity = native_plan.buffer_descriptor_count ? native_plan.buffer_descriptor_count : 1u;
+    image_descriptor_capacity = native_plan.image_descriptor_count ? native_plan.image_descriptor_count : 1u;
+    bindings = (VulkanDispatchBinding *)calloc(binding_capacity, sizeof(*bindings));
+    image_descriptors = (VulkanDispatchImageDescriptor *)calloc(
+        image_descriptor_capacity, sizeof(*image_descriptors));
+    binding_fds = (int *)calloc(binding_capacity, sizeof(*binding_fds));
+    if (!bindings || !image_descriptors || !binding_fds) {
+        json_fail("vulkan-dispatch-v5", "out of memory allocating descriptor tables");
+        goto cleanup;
     }
-    memset(image_descriptors, 0, sizeof(image_descriptors));
+    for (size_t i = 0; i < binding_capacity; ++i) {
+        bindings[i].resource_index = UINT32_MAX;
+        binding_fds[i] = -1;
+    }
     memset(&object_tables, 0, sizeof(object_tables));
-    for (size_t i = 0; i < PDOCKER_GPU_MAX_VULKAN_BINDINGS; ++i) binding_fds[i] = -1;
     rc = convert_vulkan_dispatch_v5_to_v4_bindings(
         frame, &header, passed_fds, passed_fd_count,
-        bindings, binding_fds, PDOCKER_GPU_MAX_VULKAN_BINDINGS, &binding_count,
-        image_descriptors, PDOCKER_GPU_MAX_VULKAN_BINDINGS,
+        bindings, binding_fds, binding_capacity, &binding_count,
+        image_descriptors, image_descriptor_capacity,
         &image_descriptor_count, &object_tables);
     if (rc != 0) {
         json_fail("vulkan-dispatch-v5", strerror(-rc));
@@ -33790,6 +33800,9 @@ static int handle_vulkan_dispatch_v5_frame(int cfd) {
         options.has_base_group ? options.base_group_y : 0,
         options.has_base_group ? options.base_group_z : 0);
 cleanup:
+    free(binding_fds);
+    free(image_descriptors);
+    free(bindings);
     free(frame);
     for (size_t i = 0; i < passed_fd_count && i < PDOCKER_GPU_MAX_PASSED_FDS; ++i) {
         if (passed_fds[i] >= 0) close(passed_fds[i]);

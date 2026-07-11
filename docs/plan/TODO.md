@@ -170,8 +170,11 @@ or closes.
   separate internal `VkWriteDescriptorSet[16]` cap.  The container-side ICD V5.1
   frame builder also uses heap-backed frame tables instead of maximum-sized
   stack arrays and no longer applies an extra `PDOCKER_VK_MAX_STORAGE_BUFFERS`
-  guard inside the send function, although descriptor capture/layout state is
-  still capped separately.  Acceptance: host verifier
+  guard inside the send function.  The Android V5 handler now allocates its
+  legacy-conversion binding/image/fd tables from `VulkanDispatchV5NativePlan`
+  counts instead of fixed handler stack arrays.  Descriptor capture/layout
+  state and the `run_vulkan_dispatch_fd` execution path are still capped
+  separately and remain the next narrowing points to remove.  Acceptance: host verifier
   `tests.test_gpu_abi_contract` must include
   a V5 descriptor-array case above the V4 16-slot limit, and a runtime artifact
   must either prove table-native replay or show sender-side fail-closed
