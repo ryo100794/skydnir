@@ -14471,6 +14471,17 @@ static int run_vulkan_dispatch_fd(
     int oracle_fail_closed = 0;
     int io_rc = 0;
     int fail_binding = -1;
+    size_t descriptor_write_capacity = 0;
+    VkDescriptorBufferInfo *infos = NULL;
+    VkDescriptorImageInfo *image_infos = NULL;
+    VkWriteDescriptorSet *writes = NULL;
+    uint32_t *descriptor_write_dst_bindings = NULL;
+    uint32_t *descriptor_write_source_bindings = NULL;
+    size_t *descriptor_write_source_indices = NULL;
+    size_t *descriptor_write_alias_reps = NULL;
+    VkDeviceSize *descriptor_write_offsets = NULL;
+    VkDeviceSize *descriptor_write_ranges = NULL;
+    uint8_t *descriptor_write_alias_flags = NULL;
     uint32_t max_binding = 0;
     uint32_t max_descriptor_set = 0;
     for (size_t i = 0; i < binding_count; ++i) {
@@ -16393,32 +16404,43 @@ static int run_vulkan_dispatch_fd(
     rc = vkAllocateDescriptorSets(rt->device, &dsai, descriptor_sets);
     timing_descriptor_allocate_ms = now_ms() - descriptor_allocate_start;
     if (rc != VK_SUCCESS) goto cleanup;
-    VkDescriptorBufferInfo infos[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    VkDescriptorImageInfo image_infos[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    VkWriteDescriptorSet writes[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    uint32_t descriptor_write_dst_bindings[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    uint32_t descriptor_write_source_bindings[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    size_t descriptor_write_source_indices[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    size_t descriptor_write_alias_reps[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    VkDeviceSize descriptor_write_offsets[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    VkDeviceSize descriptor_write_ranges[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    uint8_t descriptor_write_alias_flags[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+    descriptor_write_capacity = binding_count + image_descriptor_count + binding_alias_count;
+    if (descriptor_write_capacity == 0) descriptor_write_capacity = 1;
+    if (descriptor_write_capacity > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS) {
+        json_fail("vulkan-dispatch", "too many descriptor writes");
+        ret = 64;
+        goto cleanup;
+    }
+    infos = (VkDescriptorBufferInfo *)calloc(descriptor_write_capacity, sizeof(*infos));
+    image_infos = (VkDescriptorImageInfo *)calloc(descriptor_write_capacity, sizeof(*image_infos));
+    writes = (VkWriteDescriptorSet *)calloc(descriptor_write_capacity, sizeof(*writes));
+    descriptor_write_dst_bindings = (uint32_t *)calloc(descriptor_write_capacity, sizeof(*descriptor_write_dst_bindings));
+    descriptor_write_source_bindings = (uint32_t *)calloc(descriptor_write_capacity, sizeof(*descriptor_write_source_bindings));
+    descriptor_write_source_indices = (size_t *)calloc(descriptor_write_capacity, sizeof(*descriptor_write_source_indices));
+    descriptor_write_alias_reps = (size_t *)calloc(descriptor_write_capacity, sizeof(*descriptor_write_alias_reps));
+    descriptor_write_offsets = (VkDeviceSize *)calloc(descriptor_write_capacity, sizeof(*descriptor_write_offsets));
+    descriptor_write_ranges = (VkDeviceSize *)calloc(descriptor_write_capacity, sizeof(*descriptor_write_ranges));
+    descriptor_write_alias_flags = (uint8_t *)calloc(descriptor_write_capacity, sizeof(*descriptor_write_alias_flags));
+    if (!infos || !image_infos || !writes || !descriptor_write_dst_bindings ||
+        !descriptor_write_source_bindings || !descriptor_write_source_indices ||
+        !descriptor_write_alias_reps || !descriptor_write_offsets ||
+        !descriptor_write_ranges || !descriptor_write_alias_flags) {
+        json_fail("vulkan-dispatch", "out of memory allocating descriptor writes");
+        ret = 64;
+        goto cleanup;
+    }
     size_t strict_staging_upload_copies = 0;
     size_t strict_staging_upload_bytes = 0;
     size_t strict_staging_download_copies = 0;
     size_t strict_staging_download_bytes = 0;
-    memset(image_infos, 0, sizeof(image_infos));
-    memset(writes, 0, sizeof(writes));
-    memset(descriptor_write_dst_bindings, 0, sizeof(descriptor_write_dst_bindings));
-    memset(descriptor_write_source_bindings, 0, sizeof(descriptor_write_source_bindings));
-    memset(descriptor_write_source_indices, 0, sizeof(descriptor_write_source_indices));
-    memset(descriptor_write_alias_reps, 0, sizeof(descriptor_write_alias_reps));
-    memset(descriptor_write_offsets, 0, sizeof(descriptor_write_offsets));
-    memset(descriptor_write_ranges, 0, sizeof(descriptor_write_ranges));
-    memset(descriptor_write_alias_flags, 0, sizeof(descriptor_write_alias_flags));
     size_t write_count = 0;
     for (size_t i = 0; i < binding_count; ++i) {
         if (!active_bindings[i]) continue;
+        if (write_count >= descriptor_write_capacity) {
+            json_fail("vulkan-dispatch", "too many descriptor writes");
+            ret = 64;
+            goto cleanup;
+        }
         infos[write_count].buffer = vk_buffers[i]->buffer;
         infos[write_count].offset = (VkDeviceSize)binding_descriptor_offset[i];
         infos[write_count].range = (VkDeviceSize)
@@ -16445,7 +16467,7 @@ static int run_vulkan_dispatch_fd(
         ++write_count;
     }
     for (size_t i = 0; i < image_descriptor_count; ++i) {
-        if (write_count >= PDOCKER_GPU_MAX_VULKAN_BINDINGS) {
+        if (write_count >= descriptor_write_capacity) {
             json_fail("vulkan-dispatch", "too many descriptor writes");
             ret = 64;
             goto cleanup;
@@ -16509,7 +16531,7 @@ static int run_vulkan_dispatch_fd(
                 binding_aliases[i].rewritten_binding) >= 0) {
             continue;
         }
-        if (write_count >= PDOCKER_GPU_MAX_VULKAN_BINDINGS) {
+        if (write_count >= descriptor_write_capacity) {
             json_fail("vulkan-dispatch", "too many descriptor writes");
             ret = 64;
             goto cleanup;
@@ -18733,6 +18755,16 @@ cleanup:
                                                strict_buffer_count);
         }
     }
+    free(descriptor_write_alias_flags);
+    free(descriptor_write_ranges);
+    free(descriptor_write_offsets);
+    free(descriptor_write_alias_reps);
+    free(descriptor_write_source_indices);
+    free(descriptor_write_source_bindings);
+    free(descriptor_write_dst_bindings);
+    free(writes);
+    free(image_infos);
+    free(infos);
     free(shader_code);
     return ret;
 }

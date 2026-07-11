@@ -6837,11 +6837,28 @@ class GpuAbiContractTest(unittest.TestCase):
             "create-generic-descriptor-pool", 1
         )[0]
         self.assertIn("VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER", pool_body)
-        write_body = executor.split("VkDescriptorBufferInfo infos[PDOCKER_GPU_MAX_VULKAN_BINDINGS]", 1)[1].split(
+        write_body = executor.split("infos = (VkDescriptorBufferInfo *)calloc(descriptor_write_capacity", 1)[1].split(
             "vkUpdateDescriptorSets", 1
         )[0]
         self.assertIn("vulkan_dispatch_descriptor_type_from_api(bindings[i].api_descriptor_type", write_body)
         self.assertNotIn("writes[write_count].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;", write_body)
+
+    def test_vulkan_compute_descriptor_writes_are_heap_backed_for_v5_table_width(self):
+        executor = GPU_EXECUTOR.read_text()
+        body = c_function_body(executor, "run_vulkan_dispatch_fd")
+        self.assertIn("size_t descriptor_write_capacity = 0;", body)
+        self.assertIn("descriptor_write_capacity = binding_count + image_descriptor_count + binding_alias_count;", body)
+        self.assertIn("descriptor_write_capacity > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS", body)
+        self.assertIn("infos = (VkDescriptorBufferInfo *)calloc(descriptor_write_capacity, sizeof(*infos));", body)
+        self.assertIn("image_infos = (VkDescriptorImageInfo *)calloc(descriptor_write_capacity, sizeof(*image_infos));", body)
+        self.assertIn("writes = (VkWriteDescriptorSet *)calloc(descriptor_write_capacity, sizeof(*writes));", body)
+        self.assertIn("write_count >= descriptor_write_capacity", body)
+        self.assertIn("free(writes);", body)
+        self.assertIn("free(image_infos);", body)
+        self.assertIn("free(infos);", body)
+        self.assertNotIn("VkDescriptorBufferInfo infos[PDOCKER_GPU_MAX_VULKAN_BINDINGS];", body)
+        self.assertNotIn("VkDescriptorImageInfo image_infos[PDOCKER_GPU_MAX_VULKAN_BINDINGS];", body)
+        self.assertNotIn("VkWriteDescriptorSet writes[PDOCKER_GPU_MAX_VULKAN_BINDINGS];", body)
 
     def test_vulkan_pipeline_layout_drives_descriptor_layout_and_dynamic_offsets(self):
         icd = VULKAN_ICD.read_text()

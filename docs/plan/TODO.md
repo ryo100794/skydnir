@@ -164,7 +164,11 @@ or closes.
   evidence boundary.  Remaining implementation must replace the legacy fallback
   with heap-backed descriptor/object arenas and a V5 table-native compute
   runner, then widen the ICD producer beyond the current 16-slot collection
-  arrays.  Acceptance: host verifier `tests.test_gpu_abi_contract` must include
+  arrays.  The legacy compute runner's descriptor write staging is now
+  heap-backed by the effective descriptor write count, so mixed V5.1 frames such
+  as `16` buffer descriptors plus image/sampler descriptors no longer hit a
+  separate internal `VkWriteDescriptorSet[16]` cap.  Acceptance: host verifier
+  `tests.test_gpu_abi_contract` must include
   a V5 descriptor-array case above the V4 16-slot limit, and a runtime artifact
   must either prove table-native replay or show sender-side fail-closed
   rejection before frame send.
