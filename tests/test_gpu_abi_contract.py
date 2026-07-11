@@ -4572,6 +4572,44 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertRegex(sender, r"(?:calloc|malloc)\s*\([^;]*image_layout_range")
         self.assertIn("free(image_layout_ranges)", sender)
 
+    def test_vulkan_dispatch_v5_1_icd_frame_tables_are_heap_backed(self):
+        icd = VULKAN_ICD.read_text()
+        sender = c_function_body(icd, "send_generic_vulkan_dispatch_v5_1_op")
+        for forbidden in [
+            "PdockerGpuVulkanDispatchV5ResourceEntry resources[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_RESOURCES]",
+            "PdockerGpuVulkanDispatchV5DescriptorObjectEntry descriptors[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS]",
+            "PdockerGpuVulkanDispatchV5ImageEntry image_entries[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGES]",
+            "PdockerGpuVulkanDispatchV5ImageViewEntry image_view_entries[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGE_VIEWS]",
+            "PdockerGpuVulkanDispatchV5SamplerEntry sampler_entries[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_SAMPLERS]",
+            "PdockerGpuVulkanDispatchV5SpecializationEntry specs[PDOCKER_VK_MAX_SPECIALIZATION_ENTRIES]",
+            "binding_count > PDOCKER_VK_MAX_STORAGE_BUFFERS",
+            "image_descriptor_count > PDOCKER_VK_MAX_STORAGE_BUFFERS",
+        ]:
+            self.assertNotIn(forbidden, sender)
+        for required in [
+            "PdockerGpuVulkanDispatchV5ResourceEntry *resources = NULL;",
+            "PdockerGpuVulkanDispatchV5DescriptorObjectEntry *descriptors = NULL;",
+            "PdockerGpuVulkanDispatchV5ImageEntry *image_entries = NULL;",
+            "PdockerGpuVulkanDispatchV5ImageViewEntry *image_view_entries = NULL;",
+            "PdockerGpuVulkanDispatchV5SamplerEntry *sampler_entries = NULL;",
+            "PdockerGpuVulkanDispatchV5SpecializationEntry *specs = NULL;",
+            "resources = (PdockerGpuVulkanDispatchV5ResourceEntry *)calloc(",
+            "descriptors = (PdockerGpuVulkanDispatchV5DescriptorObjectEntry *)calloc(",
+            "binding_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS",
+            "image_descriptor_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS",
+            "free(specs);",
+            "free(sampler_entries);",
+            "free(image_view_entries);",
+            "free(image_entries);",
+            "free(descriptors);",
+            "free(resources);",
+        ]:
+            self.assertIn(required, sender)
+        post_alloc = sender.split("resources = (PdockerGpuVulkanDispatchV5ResourceEntry *)calloc(", 1)[1].split(
+            "cleanup:", 1
+        )[0]
+        self.assertNotRegex(post_alloc, r"return\s+-E[A-Z0-9_]+\s*;")
+
     def test_vulkan_dispatch_v5_2_executor_validates_and_materializes_layout_ranges(self):
         executor = GPU_EXECUTOR.read_text()
         converter = c_function_body(executor, "convert_vulkan_dispatch_v5_to_v4_bindings")
