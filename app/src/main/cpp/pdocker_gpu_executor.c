@@ -29881,20 +29881,36 @@ static int materialize_vulkan_graphics_v6_descriptors(
         };
         vrc = vkAllocateDescriptorSets(rt->device, &dsai, bind->sets);
         if (vrc != VK_SUCCESS) return -EIO;
-        VkDescriptorBufferInfo infos[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-        VkDescriptorImageInfo image_infos[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-        VkWriteDescriptorSet writes[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-        memset(infos, 0, sizeof(infos));
-        memset(image_infos, 0, sizeof(image_infos));
-        memset(writes, 0, sizeof(writes));
-        if (command->descriptor_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS) return -E2BIG;
+        VkDescriptorBufferInfo *infos = NULL;
+        VkDescriptorImageInfo *image_infos = NULL;
+        VkWriteDescriptorSet *writes = NULL;
+        const uint32_t descriptor_write_capacity = command->descriptor_count;
+        if (descriptor_write_capacity > 0) {
+            infos = (VkDescriptorBufferInfo *)calloc(descriptor_write_capacity, sizeof(*infos));
+            image_infos = (VkDescriptorImageInfo *)calloc(descriptor_write_capacity, sizeof(*image_infos));
+            writes = (VkWriteDescriptorSet *)calloc(descriptor_write_capacity, sizeof(*writes));
+            if (!infos || !image_infos || !writes) {
+                free(writes);
+                free(image_infos);
+                free(infos);
+                return -ENOMEM;
+            }
+        }
+#define PDOCKER_GPU_GRAPHICS_DESCRIPTOR_STAGING_RETURN(rc_) \
+        do { \
+            int rc__ = (rc_); \
+            free(writes); \
+            free(image_infos); \
+            free(infos); \
+            return rc__; \
+        } while (0)
         uint32_t dynamic_descriptor_count = 0;
         for (uint32_t d = 0; d < command->descriptor_count; ++d) {
             const PdockerGpuVulkanDispatchV5DescriptorObjectEntry *descriptor =
                 &view->descriptors[command->first_descriptor + d];
             if (descriptor->descriptor_set < bind->first_set ||
                 descriptor->descriptor_set >= bind->first_set + bind->set_count) {
-                return -EPROTO;
+                PDOCKER_GPU_GRAPHICS_DESCRIPTOR_STAGING_RETURN(-EPROTO);
             }
             VkDescriptorType descriptor_type = VK_DESCRIPTOR_TYPE_MAX_ENUM;
             int rc = vulkan_dispatch_descriptor_type_from_api(
@@ -29903,7 +29919,7 @@ static int materialize_vulkan_graphics_v6_descriptors(
             if (!is_buffer_descriptor &&
                 vulkan_dispatch_image_descriptor_type_from_api(
                     descriptor->descriptor_type, &descriptor_type) != 0) {
-                return rc;
+                PDOCKER_GPU_GRAPHICS_DESCRIPTOR_STAGING_RETURN(rc);
             }
             writes[d] = (VkWriteDescriptorSet){
                 .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
@@ -29917,31 +29933,31 @@ static int materialize_vulkan_graphics_v6_descriptors(
                 uint64_t dynamic_offset = 0;
                 int dynamic_rc = vulkan_graphics_v61_descriptor_dynamic_offset(
                     view, command, descriptor, dynamic_descriptor_count, &dynamic_offset);
-                if (dynamic_rc != 0) return dynamic_rc;
+                if (dynamic_rc != 0) PDOCKER_GPU_GRAPHICS_DESCRIPTOR_STAGING_RETURN(dynamic_rc);
                 if (descriptor->descriptor_flags & PDOCKER_GPU_V5_DESCRIPTOR_FLAG_DYNAMIC) {
                     dynamic_descriptor_count++;
                 }
                 uint64_t effective_offset = 0;
                 if (checked_u64_add3(descriptor->buffer_offset, dynamic_offset, 0,
                                      &effective_offset) != 0) {
-                    return -EOVERFLOW;
+                    PDOCKER_GPU_GRAPHICS_DESCRIPTOR_STAGING_RETURN(-EOVERFLOW);
                 }
                 const PdockerGpuVulkanDispatchV5ResourceEntry *buffer =
                     &view->resources[descriptor->resource_index];
                 uint64_t range = descriptor->range;
                 if (range == UINT64_MAX) {
-                    if (effective_offset > buffer->size) return -ERANGE;
+                    if (effective_offset > buffer->size) PDOCKER_GPU_GRAPHICS_DESCRIPTOR_STAGING_RETURN(-ERANGE);
                     range = buffer->size - effective_offset;
                 }
                 int buffer_index = find_vulkan_graphics_replay_buffer(
                     buffers, descriptor->resource_index);
-                if (buffer_index < 0) return buffer_index;
+                if (buffer_index < 0) PDOCKER_GPU_GRAPHICS_DESCRIPTOR_STAGING_RETURN(buffer_index);
                 const VulkanGraphicsReplayBuffer *replay_buffer =
                     &buffers->buffers[(uint32_t)buffer_index];
                 VkDeviceSize descriptor_offset = 0;
                 rc = vulkan_graphics_replay_buffer_vk_offset_for_range(
                     replay_buffer, effective_offset, range, &descriptor_offset);
-                if (rc != 0) return rc;
+                if (rc != 0) PDOCKER_GPU_GRAPHICS_DESCRIPTOR_STAGING_RETURN(rc);
                 infos[d] = (VkDescriptorBufferInfo){
                     .buffer = replay_buffer->buffer.buffer,
                     .offset = descriptor_offset,
@@ -29952,26 +29968,30 @@ static int materialize_vulkan_graphics_v6_descriptors(
                 if (vulkan_descriptor_type_requires_image_view(descriptor_type) &&
                     !vulkan_image_descriptor_layout_valid(
                         descriptor_type, (VkImageLayout)descriptor->image_layout)) {
-                    return -EOPNOTSUPP;
+                    PDOCKER_GPU_GRAPHICS_DESCRIPTOR_STAGING_RETURN(-EOPNOTSUPP);
                 }
                 if (vulkan_descriptor_type_requires_image_view(descriptor_type)) {
                     if (descriptor->image_view_index == PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE ||
                         descriptor->image_view_index >= attachments->view_count) {
-                        return -EPROTO;
+                        PDOCKER_GPU_GRAPHICS_DESCRIPTOR_STAGING_RETURN(-EPROTO);
                     }
                     const VulkanDispatchImageViewObject *view_obj =
                         &attachments->views[descriptor->image_view_index];
-                    if (view_obj->image_index >= attachments->image_count) return -EPROTO;
+                    if (view_obj->image_index >= attachments->image_count) {
+                        PDOCKER_GPU_GRAPHICS_DESCRIPTOR_STAGING_RETURN(-EPROTO);
+                    }
                     VulkanDispatchImageObject *image =
                         &attachments->images[view_obj->image_index];
                     VkImageUsageFlags required_usage =
                         vulkan_required_usage_for_image_descriptor(descriptor_type);
-                    if (required_usage && !(image->usage & required_usage)) return -EPROTO;
+                    if (required_usage && !(image->usage & required_usage)) {
+                        PDOCKER_GPU_GRAPHICS_DESCRIPTOR_STAGING_RETURN(-EPROTO);
+                    }
                     if (image->requires_staging ||
                         descriptor_type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
                         int range_rc = vulkan_graphics_merge_descriptor_image_copy_range(
                             image, &view_obj->range, descriptor_type);
-                        if (range_rc != 0) return range_rc;
+                        if (range_rc != 0) PDOCKER_GPU_GRAPHICS_DESCRIPTOR_STAGING_RETURN(range_rc);
                     }
                     image->descriptor_layout = (VkImageLayout)descriptor->image_layout;
                     image->descriptor_layout_seen = 1;
@@ -29984,7 +30004,7 @@ static int materialize_vulkan_graphics_v6_descriptors(
                 if (vulkan_descriptor_type_requires_sampler(descriptor_type)) {
                     if (descriptor->sampler_index == PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE ||
                         descriptor->sampler_index >= attachments->sampler_count) {
-                        return -EPROTO;
+                        PDOCKER_GPU_GRAPHICS_DESCRIPTOR_STAGING_RETURN(-EPROTO);
                     }
                     image_infos[d].sampler = attachments->samplers[descriptor->sampler_index].sampler;
                 }
@@ -29992,9 +30012,13 @@ static int materialize_vulkan_graphics_v6_descriptors(
             }
         }
         if (view->is_v61 && dynamic_descriptor_count != command->dynamic_offset_count) {
-            return -EPROTO;
+            PDOCKER_GPU_GRAPHICS_DESCRIPTOR_STAGING_RETURN(-EPROTO);
         }
         vkUpdateDescriptorSets(rt->device, command->descriptor_count, writes, 0, NULL);
+        free(writes);
+        free(image_infos);
+        free(infos);
+#undef PDOCKER_GPU_GRAPHICS_DESCRIPTOR_STAGING_RETURN
     }
     return 0;
 }

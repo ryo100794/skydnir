@@ -2934,7 +2934,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VK_ACCESS_SHADER_WRITE_BIT", executor)
         self.assertIn("VK_ACCESS_HOST_READ_BIT", executor)
         self.assertNotIn("graphics descriptor replay is not implemented", executor)
-        self.assertIn("VkDescriptorImageInfo image_infos", executor)
+        self.assertIn("VkDescriptorImageInfo *image_infos", executor)
         self.assertIn("VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER", executor)
         self.assertIn("VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE", executor)
         self.assertIn("VK_DESCRIPTOR_TYPE_SAMPLER", executor)
@@ -4876,7 +4876,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VkDeviceSize descriptor_offset = 0;", executor)
         self.assertIn("vulkan_graphics_replay_buffer_vk_offset_for_range", executor)
         self.assertIn("d->resource_id != samplers[d->sampler_index].sampler_id", executor)
-        self.assertIn("VkDescriptorImageInfo image_infos", executor)
+        self.assertIn("VkDescriptorImageInfo *image_infos", executor)
         self.assertIn("writes[write_count].pImageInfo = &image_infos[write_count];", executor)
         self.assertIn("VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER", executor)
         self.assertIn("VK_DESCRIPTOR_TYPE_STORAGE_IMAGE", executor)
@@ -5718,6 +5718,32 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("if (expected_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS) return -EPROTO;", layout_coverage_body)
         self.assertIn("for (uint32_t array_element = 0; array_element < expected_count; ++array_element)", layout_coverage_body)
         self.assertIn("if (!descriptor_slot_seen[set][binding][array_element]) return -EPROTO;", layout_coverage_body)
+
+    def test_vulkan_graphics_descriptor_write_staging_is_heap_backed(self):
+        executor = GPU_EXECUTOR.read_text()
+        body = c_function_body(executor, "materialize_vulkan_graphics_v6_descriptors")
+        for required in [
+            "VkDescriptorBufferInfo *infos = NULL;",
+            "VkDescriptorImageInfo *image_infos = NULL;",
+            "VkWriteDescriptorSet *writes = NULL;",
+            "const uint32_t descriptor_write_capacity = command->descriptor_count;",
+            "infos = (VkDescriptorBufferInfo *)calloc(descriptor_write_capacity, sizeof(*infos));",
+            "image_infos = (VkDescriptorImageInfo *)calloc(descriptor_write_capacity, sizeof(*image_infos));",
+            "writes = (VkWriteDescriptorSet *)calloc(descriptor_write_capacity, sizeof(*writes));",
+            "PDOCKER_GPU_GRAPHICS_DESCRIPTOR_STAGING_RETURN",
+            "free(writes);",
+            "free(image_infos);",
+            "free(infos);",
+            "vkUpdateDescriptorSets(rt->device, command->descriptor_count, writes, 0, NULL);",
+        ]:
+            self.assertIn(required, body)
+        for forbidden in [
+            "VkDescriptorBufferInfo infos[PDOCKER_GPU_MAX_VULKAN_BINDINGS];",
+            "VkDescriptorImageInfo image_infos[PDOCKER_GPU_MAX_VULKAN_BINDINGS];",
+            "VkWriteDescriptorSet writes[PDOCKER_GPU_MAX_VULKAN_BINDINGS];",
+            "command->descriptor_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS",
+        ]:
+            self.assertNotIn(forbidden, body)
 
     def test_vulkan_graphics_v625_descriptor_bind_uses_standalone_layouts(self):
         executor = GPU_EXECUTOR.read_text()
