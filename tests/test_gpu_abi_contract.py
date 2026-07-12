@@ -7499,7 +7499,9 @@ class GpuAbiContractTest(unittest.TestCase):
         icd = VULKAN_ICD.read_text()
         executor = GPU_EXECUTOR.read_text()
         self.assertIn("uint32_t set_layout_count;", icd)
-        self.assertIn("set_layouts[PDOCKER_VK_MAX_DESCRIPTOR_SETS]", icd)
+        self.assertIn("uint32_t set_layout_capacity;", icd)
+        self.assertIn("PdockerVkDescriptorSetLayout **set_layouts;", icd)
+        self.assertNotIn("set_layouts[PDOCKER_VK_MAX_DESCRIPTOR_SETS]", icd)
         self.assertIn("bool unsupported_set_layout_count;", icd)
         self.assertIn("descriptor_set_layout_compatible", icd)
         self.assertIn("VkShaderStageFlags *storage_binding_stage_flags", icd)
@@ -7517,10 +7519,13 @@ class GpuAbiContractTest(unittest.TestCase):
         create_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreatePipelineLayout", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkDestroyPipelineLayout", 1
         )[0]
-        self.assertIn("pCreateInfo->setLayoutCount > PDOCKER_VK_MAX_DESCRIPTOR_SETS", create_body)
+        self.assertIn("pCreateInfo->setLayoutCount > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS", create_body)
         self.assertIn("pCreateInfo->setLayoutCount > 0 && !pCreateInfo->pSetLayouts", create_body)
         self.assertIn("pdocker_vk_descriptor_set_layout_from_handle(pCreateInfo->pSetLayouts[i])", create_body)
         self.assertIn("layout->set_layout_count = pCreateInfo->setLayoutCount;", create_body)
+        self.assertIn("layout->set_layout_capacity = pCreateInfo->setLayoutCount;", create_body)
+        self.assertIn("layout->set_layouts = (PdockerVkDescriptorSetLayout **)calloc(", create_body)
+        self.assertIn("free(layout->set_layouts);", create_body)
         self.assertIn("pCreateInfo->pSetLayouts", create_body)
         self.assertNotIn("layout->unsupported_set_layout_count = true;", create_body)
         self.assertIn("push_constant_ranges[PDOCKER_VK_MAX_PUSH_CONSTANT_RANGES]", icd)
@@ -8695,8 +8700,11 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         self.assertIn("if (!pCreateInfo || !pPipelineLayout)", pipeline_layout_body)
         self.assertIn("if (pCreateInfo->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;", pipeline_layout_body)
-        self.assertIn("pCreateInfo->setLayoutCount > PDOCKER_VK_MAX_DESCRIPTOR_SETS", pipeline_layout_body)
+        self.assertIn("pCreateInfo->setLayoutCount > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS", pipeline_layout_body)
         self.assertIn("pCreateInfo->setLayoutCount > 0 && !pCreateInfo->pSetLayouts", pipeline_layout_body)
+        self.assertIn("layout->set_layouts = (PdockerVkDescriptorSetLayout **)calloc(", pipeline_layout_body)
+        self.assertIn("free(layout->set_layouts);", pipeline_layout_body)
+        self.assertNotIn("pCreateInfo->setLayoutCount > PDOCKER_VK_MAX_DESCRIPTOR_SETS", pipeline_layout_body)
         self.assertIn("pdocker_vk_descriptor_set_layout_from_handle(pCreateInfo->pSetLayouts[i])", pipeline_layout_body)
         self.assertIn("pCreateInfo->pushConstantRangeCount > 0 && !pCreateInfo->pPushConstantRanges", pipeline_layout_body)
         self.assertIn("pCreateInfo->pushConstantRangeCount > PDOCKER_VK_MAX_PUSH_CONSTANT_RANGES", pipeline_layout_body)

@@ -621,7 +621,8 @@ struct PdockerVkPipelineLayout {
     PdockerVkPushConstantRangeSnapshot push_constant_ranges[PDOCKER_VK_MAX_PUSH_CONSTANT_RANGES];
     uint32_t push_constant_range_count;
     uint32_t set_layout_count;
-    PdockerVkDescriptorSetLayout *set_layouts[PDOCKER_VK_MAX_DESCRIPTOR_SETS];
+    uint32_t set_layout_capacity;
+    PdockerVkDescriptorSetLayout **set_layouts;
     bool unsupported_set_layout_count;
     bool unsupported_push_constant_ranges;
 };
@@ -4682,7 +4683,9 @@ static int collect_graphics_v624_pipeline_layout_metadata(
         !pipeline_layout_sets || !pipeline_layout_set_count || !layout) {
         return -EINVAL;
     }
-    if (layout->layout_id == 0 || layout->set_layout_count > PDOCKER_VK_MAX_DESCRIPTOR_SETS) {
+    if (layout->layout_id == 0 ||
+        layout->set_layout_count > layout->set_layout_capacity ||
+        (layout->set_layout_count > 0 && !layout->set_layouts)) {
         return -EPROTO;
     }
     if (layout->unsupported_set_layout_count) return -EOPNOTSUPP;
@@ -16753,7 +16756,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreatePipelineLayout(
     if (!pCreateInfo || !pPipelineLayout) return VK_ERROR_INITIALIZATION_FAILED;
     if (pCreateInfo->pNext) return unsupported_create_info_pnext_result("vkCreatePipelineLayout", pCreateInfo->pNext);
     if (pCreateInfo->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;
-    if (pCreateInfo->setLayoutCount > PDOCKER_VK_MAX_DESCRIPTOR_SETS) return VK_ERROR_FEATURE_NOT_PRESENT;
+    if (pCreateInfo->setLayoutCount > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS) {
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
     if (pCreateInfo->setLayoutCount > 0 && !pCreateInfo->pSetLayouts) return VK_ERROR_INITIALIZATION_FAILED;
     for (uint32_t i = 0; i < pCreateInfo->setLayoutCount; ++i) {
         if (!pdocker_vk_descriptor_set_layout_from_handle(pCreateInfo->pSetLayouts[i])) {
@@ -16771,6 +16776,15 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreatePipelineLayout(
     layout->layout_id = next_vulkan_object_generation();
     if (pCreateInfo) {
         layout->set_layout_count = pCreateInfo->setLayoutCount;
+        layout->set_layout_capacity = pCreateInfo->setLayoutCount;
+        if (layout->set_layout_capacity > 0) {
+            layout->set_layouts = (PdockerVkDescriptorSetLayout **)calloc(
+                layout->set_layout_capacity, sizeof(*layout->set_layouts));
+            if (!layout->set_layouts) {
+                free(layout);
+                return VK_ERROR_OUT_OF_HOST_MEMORY;
+            }
+        }
         for (uint32_t i = 0; i < layout->set_layout_count; ++i) {
             layout->set_layouts[i] = pdocker_vk_descriptor_set_layout_from_handle(pCreateInfo->pSetLayouts[i]);
         }
@@ -16778,6 +16792,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreatePipelineLayout(
     for (uint32_t i = 0; pCreateInfo && i < pCreateInfo->pushConstantRangeCount; ++i) {
         const VkPushConstantRange *range = &pCreateInfo->pPushConstantRanges[i];
         if ((uint64_t)range->size > UINT32_MAX - (uint64_t)range->offset) {
+            free(layout->set_layouts);
             free(layout);
             return VK_ERROR_OUT_OF_HOST_MEMORY;
         }
@@ -16792,6 +16807,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreatePipelineLayout(
         }
     }
     if (layout->push_constant_size > PDOCKER_VK_MAX_PUSH_BYTES) {
+        free(layout->set_layouts);
         free(layout);
         return VK_ERROR_OUT_OF_HOST_MEMORY;
     }
@@ -16805,7 +16821,10 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyPipelineLayout(
         const VkAllocationCallbacks *pAllocator) {
     (void)device;
     (void)pAllocator;
-    free(pdocker_vk_pipeline_layout_from_handle(pipelineLayout));
+    PdockerVkPipelineLayout *layout = pdocker_vk_pipeline_layout_from_handle(pipelineLayout);
+    if (!layout) return;
+    free(layout->set_layouts);
+    free(layout);
 }
 
 static VkResult validate_descriptor_pool_create_pnext(const void *pNext) {
