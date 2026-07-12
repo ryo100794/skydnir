@@ -2246,3 +2246,22 @@ Acceptance:
 - Upstream compat Android smoke documents `targetSdk=28` in the installed package and covers `docker run ubuntu:22.04`, Dockerfile build, container start, non-TTY exec, and TTY `sh -it`.
 - Modern-target Android app-process execution is either delegated to a compat execution component or disabled with a precise capability reason.
 - No helper-loader binary is packaged unless the matching source-build input and compatibility checks are present.
+## P0: Vulkan Descriptor Binding Number vs Internal Slot Separation
+
+Status: **producer compact-slot lane implemented; device validation pending**.
+
+- The glibc Vulkan ICD stores sparse API descriptor binding numbers in
+  `storage_binding_numbers[]` and keeps descriptor-set storage snapshot-safe by
+  mapping those API bindings onto compact internal slots.
+- Compute generic dispatch and graphics descriptor metadata must always send
+  the original API binding number to the executor; internal compact slots must
+  not leak into transport frames.
+- Do not heap-allocate descriptor-set slot storage until command-buffer and
+  update-shadow deep-copy helpers exist.
+
+Acceptance:
+
+- `python3 -m unittest tests.test_gpu_abi_contract -q` passes.
+- glibc GPU shims rebuild and `libpdockervulkanicd.so` payload freshness passes.
+- Next device run verifies a sparse-binding compute shader through V5.1 without
+  changing llama.cpp, Dockerfile, model, or prompt.

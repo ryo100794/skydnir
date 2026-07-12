@@ -536,6 +536,7 @@ struct PdockerVkDescriptorBinding {
 struct PdockerVkDescriptorSetLayout {
     uint64_t layout_id;
     uint32_t storage_binding_count;
+    uint32_t storage_binding_numbers[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     bool storage_binding_present[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     VkDescriptorType storage_binding_types[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     uint32_t storage_binding_counts[PDOCKER_VK_MAX_STORAGE_BUFFERS];
@@ -556,6 +557,10 @@ struct PdockerVkDescriptorSet {
     bool unsupported_descriptor_type;
     bool has_image_descriptor;
 };
+
+static uint32_t descriptor_layout_binding_number(
+        const PdockerVkDescriptorSetLayout *layout,
+        uint32_t slot);
 
 struct PdockerVkShaderModule {
     size_t code_size;
@@ -4389,6 +4394,7 @@ static int collect_graphics_v624_descriptor_set_layout_metadata(
     }
     for (uint32_t binding = 0; binding < layout->storage_binding_count; ++binding) {
         if (!layout->storage_binding_present[binding]) continue;
+        const uint32_t api_binding = descriptor_layout_binding_number(layout, binding);
         VkDescriptorType descriptor_type = layout->storage_binding_types[binding];
         if (!descriptor_type_supported_by_v4_transport(descriptor_type) &&
             !descriptor_type_supported_by_v5_object_transport(descriptor_type)) {
@@ -4414,7 +4420,7 @@ static int collect_graphics_v624_descriptor_set_layout_metadata(
         PdockerGpuVulkanGraphicsV624DescriptorSetLayoutEntry candidate;
         memset(&candidate, 0, sizeof(candidate));
         candidate.layout_id = layout->layout_id;
-        candidate.binding = binding;
+        candidate.binding = api_binding;
         candidate.descriptor_type = (uint32_t)descriptor_type;
         candidate.descriptor_count = descriptor_count;
         candidate.stage_flags = layout->storage_binding_stage_flags[binding];
@@ -5035,6 +5041,7 @@ static int collect_graphics_descriptor_entries(
         uint32_t binding_limit = layout ? layout->storage_binding_count : PDOCKER_VK_MAX_STORAGE_BUFFERS;
         if (binding_limit > PDOCKER_VK_MAX_STORAGE_BUFFERS) return -E2BIG;
         for (uint32_t binding_index = 0; binding_index < binding_limit; ++binding_index) {
+            const uint32_t api_binding = descriptor_layout_binding_number(layout, binding_index);
             uint32_t array_limit = layout
                 ? layout->storage_binding_counts[binding_index]
                 : PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS;
@@ -5092,7 +5099,7 @@ static int collect_graphics_descriptor_entries(
                         &descriptors[(*descriptor_count)++];
                     memset(descriptor, 0, sizeof(*descriptor));
                     descriptor->descriptor_set = set_index;
-                    descriptor->binding = binding_index;
+                    descriptor->binding = api_binding;
                     descriptor->array_element = array_element;
                     descriptor->descriptor_type = descriptor_type;
                     descriptor->descriptor_flags = array_element ? PDOCKER_GPU_V5_DESCRIPTOR_FLAG_ARRAY_ENTRY : 0u;
@@ -5114,7 +5121,7 @@ static int collect_graphics_descriptor_entries(
                 }
                 size_t bytes = 0;
                 int rc = validate_descriptor_transport_shape(
-                    binding, set_index, binding_index, &bytes);
+                    binding, set_index, api_binding, &bytes);
                 if (rc < 0) return rc;
                 int buffer_index = collect_graphics_buffer_resource(
                     resources, resource_count,
@@ -5129,7 +5136,7 @@ static int collect_graphics_descriptor_entries(
                     &descriptors[(*descriptor_count)++];
                 memset(descriptor, 0, sizeof(*descriptor));
                 descriptor->descriptor_set = set_index;
-                descriptor->binding = binding_index;
+                descriptor->binding = api_binding;
                 descriptor->array_element = array_element;
                 descriptor->descriptor_type = binding->descriptor_type;
                 descriptor->descriptor_flags =
@@ -8249,44 +8256,77 @@ static bool pdocker_vk_sampler_contents_equal(
            a->generation == b->generation;
 }
 
+static uint32_t descriptor_layout_slot_count(
+        const PdockerVkDescriptorSetLayout *layout) {
+    if (!layout) return PDOCKER_VK_MAX_STORAGE_BUFFERS;
+    return layout->storage_binding_count < PDOCKER_VK_MAX_STORAGE_BUFFERS
+        ? layout->storage_binding_count
+        : PDOCKER_VK_MAX_STORAGE_BUFFERS;
+}
+
+static int descriptor_layout_slot_for_binding(
+        const PdockerVkDescriptorSetLayout *layout,
+        uint32_t api_binding) {
+    if (!layout) {
+        return api_binding < PDOCKER_VK_MAX_STORAGE_BUFFERS ? (int)api_binding : -1;
+    }
+    uint32_t slot_limit = descriptor_layout_slot_count(layout);
+    for (uint32_t slot = 0; slot < slot_limit; ++slot) {
+        if (layout->storage_binding_present[slot] &&
+            layout->storage_binding_numbers[slot] == api_binding) {
+            return (int)slot;
+        }
+    }
+    return -1;
+}
+
+static uint32_t descriptor_layout_binding_number(
+        const PdockerVkDescriptorSetLayout *layout,
+        uint32_t slot) {
+    if (!layout) return slot;
+    if (slot >= descriptor_layout_slot_count(layout)) return slot;
+    return layout->storage_binding_numbers[slot];
+}
+
 static bool descriptor_layout_immutable_sampler_valid(
         const PdockerVkDescriptorSetLayout *layout,
-        uint32_t binding,
+        uint32_t slot,
         uint32_t array_element) {
-    return layout && binding < PDOCKER_VK_MAX_STORAGE_BUFFERS &&
+    return layout && slot < descriptor_layout_slot_count(layout) &&
            array_element < PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS &&
-           layout->immutable_sampler_valid[binding][array_element];
+           layout->immutable_sampler_valid[slot][array_element];
 }
 
 static PdockerVkSampler *descriptor_layout_immutable_sampler(
         const PdockerVkDescriptorSetLayout *layout,
-        uint32_t binding,
+        uint32_t slot,
         uint32_t array_element) {
-    if (!descriptor_layout_immutable_sampler_valid(layout, binding, array_element)) {
+    if (!descriptor_layout_immutable_sampler_valid(layout, slot, array_element)) {
         return NULL;
     }
-    return (PdockerVkSampler *)&layout->immutable_samplers[binding][array_element];
+    return (PdockerVkSampler *)&layout->immutable_samplers[slot][array_element];
 }
 
 static void descriptor_set_apply_immutable_samplers(PdockerVkDescriptorSet *set) {
     if (!set || !set->layout) return;
-    for (uint32_t binding = 0; binding < set->layout->storage_binding_count &&
-         binding < PDOCKER_VK_MAX_STORAGE_BUFFERS; ++binding) {
-        const VkDescriptorType type = set->layout->storage_binding_types[binding];
+    uint32_t slot_limit = descriptor_layout_slot_count(set->layout);
+    for (uint32_t slot = 0; slot < slot_limit; ++slot) {
+        if (!set->layout->storage_binding_present[slot]) continue;
+        const VkDescriptorType type = set->layout->storage_binding_types[slot];
         if (!descriptor_type_requires_sampler(type)) continue;
-        uint32_t count = set->layout->storage_binding_counts[binding];
+        uint32_t count = set->layout->storage_binding_counts[slot];
         if (count > PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS) {
             set->unsupported_descriptor_array = true;
             count = PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS;
         }
         for (uint32_t array_element = 0; array_element < count; ++array_element) {
             PdockerVkSampler *sampler = descriptor_layout_immutable_sampler(
-                set->layout, binding, array_element);
+                set->layout, slot, array_element);
             if (!sampler) continue;
-            PdockerVkDescriptorBinding *slot = &set->storage_buffers[binding][array_element];
-            slot->sampler = sampler;
-            slot->descriptor_type = type;
-            slot->dynamic = false;
+            PdockerVkDescriptorBinding *descriptor = &set->storage_buffers[slot][array_element];
+            descriptor->sampler = sampler;
+            descriptor->descriptor_type = type;
+            descriptor->dynamic = false;
         }
     }
     set->has_image_descriptor = descriptor_set_has_image_descriptor(set);
@@ -8294,7 +8334,8 @@ static void descriptor_set_apply_immutable_samplers(PdockerVkDescriptorSet *set)
 
 static bool descriptor_set_has_image_descriptor(const PdockerVkDescriptorSet *set) {
     if (!set) return false;
-    for (uint32_t i = 0; i < PDOCKER_VK_MAX_STORAGE_BUFFERS; ++i) {
+    uint32_t slot_limit = descriptor_layout_slot_count(set->layout);
+    for (uint32_t i = 0; i < slot_limit; ++i) {
         for (uint32_t j = 0; j < PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS; ++j) {
             const PdockerVkDescriptorBinding *binding = &set->storage_buffers[i][j];
             if (binding->image_view || binding->sampler) return true;
@@ -8314,21 +8355,27 @@ static bool descriptor_set_has_image_descriptor(const PdockerVkDescriptorSet *se
 
 static bool descriptor_advance_to_valid_slot(
         const PdockerVkDescriptorSetLayout *layout,
-        uint32_t *binding,
+        uint32_t *slot,
         uint32_t *array_element) {
-    if (!binding || !array_element) return false;
-    while (*binding < PDOCKER_VK_MAX_STORAGE_BUFFERS) {
+    if (!slot || !array_element) return false;
+    const uint32_t slot_limit = descriptor_layout_slot_count(layout);
+    while (*slot < slot_limit) {
+        if (layout && !layout->storage_binding_present[*slot]) {
+            (*slot)++;
+            *array_element = 0;
+            continue;
+        }
         uint32_t count = layout
-            ? layout->storage_binding_counts[*binding]
+            ? layout->storage_binding_counts[*slot]
             : PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS;
         if (count > PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS) return false;
         if (count == 0) {
-            (*binding)++;
+            (*slot)++;
             *array_element = 0;
             continue;
         }
         if (*array_element < count) return true;
-        (*binding)++;
+        (*slot)++;
         *array_element = 0;
     }
     return false;
@@ -8341,14 +8388,16 @@ static bool descriptor_linear_slot(
         uint32_t linear_index,
         uint32_t *binding_out,
         uint32_t *array_element_out) {
-    uint32_t binding = start_binding;
+    int start_slot = descriptor_layout_slot_for_binding(layout, start_binding);
+    if (start_slot < 0) return false;
+    uint32_t slot = (uint32_t)start_slot;
     uint32_t array_element = start_array_element;
-    if (!descriptor_advance_to_valid_slot(layout, &binding, &array_element)) return false;
+    if (!descriptor_advance_to_valid_slot(layout, &slot, &array_element)) return false;
     for (uint32_t i = 0; i < linear_index; ++i) {
         array_element++;
-        if (!descriptor_advance_to_valid_slot(layout, &binding, &array_element)) return false;
+        if (!descriptor_advance_to_valid_slot(layout, &slot, &array_element)) return false;
     }
-    if (binding_out) *binding_out = binding;
+    if (binding_out) *binding_out = slot;
     if (array_element_out) *array_element_out = array_element;
     return true;
 }
@@ -9162,7 +9211,10 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
         const PdockerVkDescriptorSet *live_set = op->set_handles[set_index];
         const PdockerVkDescriptorSet *set = live_set ? live_set : snapshot_set;
         const PdockerVkDescriptorSetLayout *layout = set->layout ? set->layout : snapshot_set->layout;
-        for (uint32_t i = 0; i < PDOCKER_VK_MAX_STORAGE_BUFFERS; ++i) {
+        const uint32_t binding_limit = descriptor_layout_slot_count(layout);
+        for (uint32_t i = 0; i < binding_limit; ++i) {
+            if (layout && !layout->storage_binding_present[i]) continue;
+            const uint32_t api_binding = descriptor_layout_binding_number(layout, i);
             uint32_t array_limit = layout ? layout->storage_binding_counts[i] : PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS;
             if (array_limit == 0 && !layout) array_limit = PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS;
             if (array_limit > PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS) return -E2BIG;
@@ -9176,7 +9228,7 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
                                 "pdocker-vulkan-icd: generic dispatch rejected: input attachment descriptor dispatch_id=%llu set=%u binding=%u array=%u\n",
                                 (unsigned long long)dispatch_id,
                                 set_index,
-                                i,
+                                api_binding,
                                 array_element);
                         return -EOPNOTSUPP;
                     }
@@ -9198,7 +9250,7 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
                                     "pdocker-vulkan-icd: generic dispatch rejected: invalid image descriptor dispatch_id=%llu set=%u binding=%u array=%u type=%u image_view=%p image=%p memory=%p fd=%d\n",
                                     (unsigned long long)dispatch_id,
                                     set_index,
-                                    i,
+                                    api_binding,
                                     array_element,
                                     descriptor_type,
                                     (void *)binding->image_view,
@@ -9239,7 +9291,7 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
                         sampler_index = (uint32_t)existing_sampler;
                     }
                     image_descriptor_sets[image_descriptor_count] = set_index;
-                    image_descriptor_bindings[image_descriptor_count] = i;
+                    image_descriptor_bindings[image_descriptor_count] = api_binding;
                     image_descriptor_array_elements[image_descriptor_count] = array_element;
                     image_descriptor_types[image_descriptor_count] = descriptor_type;
                     image_descriptor_view_indices[image_descriptor_count] = view_index;
@@ -9251,14 +9303,14 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
                 if (!binding->buffer || !binding->buffer->memory) continue;
                 descriptor_array_transport_required = descriptor_array_transport_required || array_element != 0;
                 size_t bytes = 0;
-                int shape_rc = validate_descriptor_transport_shape(binding, set_index, i, &bytes);
+                int shape_rc = validate_descriptor_transport_shape(binding, set_index, api_binding, &bytes);
                 if (shape_rc < 0) {
                     fprintf(stderr,
                             "pdocker-vulkan-icd: generic dispatch rejected: descriptor shape dispatch_id=%llu rc=%d set=%u binding=%u array=%u descriptor_type=%u buffer=%p memory=%p offset=%llu range=%llu\n",
                             (unsigned long long)dispatch_id,
                             shape_rc,
                             set_index,
-                            i,
+                            api_binding,
                             array_element,
                             binding->descriptor_type,
                             (void *)binding->buffer,
@@ -9270,7 +9322,7 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
                 if (binding_count >= PDOCKER_VK_MAX_STORAGE_BUFFERS) return -E2BIG;
                 api_descriptor_sets[binding_count] = set_index;
                 api_descriptor_array_elements[binding_count] = array_element;
-                bindings[binding_count] = i;
+                bindings[binding_count] = api_binding;
                 PdockerVkMemory *dispatch_memory = binding->buffer->memory;
                 uint64_t dispatch_offset_u64 = 0;
                 if (!checked_add_u64((uint64_t)binding->buffer->memory_offset,
@@ -9280,7 +9332,7 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
                             "pdocker-vulkan-icd: generic dispatch rejected: descriptor absolute offset overflow dispatch_id=%llu set=%u binding=%u array=%u memory_offset=%llu offset=%llu\n",
                             (unsigned long long)dispatch_id,
                             set_index,
-                            i,
+                            api_binding,
                             array_element,
                             (unsigned long long)binding->buffer->memory_offset,
                             (unsigned long long)binding->offset);
@@ -9297,7 +9349,7 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
                             "pdocker-vulkan-icd: generic dispatch rejected: invalid dispatch memory dispatch_id=%llu set=%u binding=%u array=%u memory=%p fd=%d alias=%u\n",
                             (unsigned long long)dispatch_id,
                             set_index,
-                            i,
+                            api_binding,
                             array_element,
                             (void *)dispatch_memory,
                             dispatch_memory ? dispatch_memory->fd : -1,
@@ -9310,7 +9362,7 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
                             "pdocker-vulkan-icd: rejecting descriptor outside transport memory"
                             " set=%u binding=%u array=%u dispatch_offset=%llu size=%zu memory_size=%zu alias=%u\n",
                             set_index,
-                            i,
+                            api_binding,
                             array_element,
                             (unsigned long long)dispatch_offset,
                             bytes,
@@ -9331,12 +9383,12 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
                 api_memory_ids[binding_count] = pdocker_vk_memory_object_id(dispatch_memory);
                 api_buffer_ids[binding_count] = pdocker_vk_buffer_object_id(binding->buffer);
                 fds[1 + binding_count] = dispatch_memory->fd;
-                trace_guarded_binding(i, dispatch_memory, dispatch_offset, bytes);
+                trace_guarded_binding(api_binding, dispatch_memory, dispatch_offset, bytes);
                 if (alias_hit && trace_allocations()) {
                     fprintf(stderr,
                             "pdocker-vulkan-icd: descriptor alias set=%u binding=%u array=%u offset=%llu range=%zu source_mem=%zu source_off=%llu\n",
                             set_index,
-                            i,
+                            api_binding,
                             array_element,
                             (unsigned long long)binding->offset,
                             bytes,
@@ -15373,8 +15425,10 @@ static bool descriptor_copy_slot_compatible(
         VkDescriptorType *type_out) {
     (void)dst_array;
     if (!src || !dst || !src->layout || !dst->layout) return false;
-    if (src_binding >= PDOCKER_VK_MAX_STORAGE_BUFFERS ||
-        dst_binding >= PDOCKER_VK_MAX_STORAGE_BUFFERS) return false;
+    if (src_binding >= descriptor_layout_slot_count(src->layout) ||
+        dst_binding >= descriptor_layout_slot_count(dst->layout) ||
+        src_array >= PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS ||
+        dst_array >= PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS) return false;
     VkDescriptorType src_type = src->layout->storage_binding_types[src_binding];
     VkDescriptorType dst_type = dst->layout->storage_binding_types[dst_binding];
     if (src_type != dst_type) return false;
@@ -15408,7 +15462,8 @@ static bool descriptor_set_layout_compatible(
         return false;
     }
     for (uint32_t i = 0; i < expected->storage_binding_count; ++i) {
-        if (expected->storage_binding_present[i] != actual->storage_binding_present[i] ||
+        if (expected->storage_binding_numbers[i] != actual->storage_binding_numbers[i] ||
+            expected->storage_binding_present[i] != actual->storage_binding_present[i] ||
             expected->storage_binding_types[i] != actual->storage_binding_types[i] ||
             expected->storage_binding_counts[i] != actual->storage_binding_counts[i] ||
             expected->storage_binding_stage_flags[i] != actual->storage_binding_stage_flags[i]) {
@@ -15438,8 +15493,8 @@ static bool descriptor_set_layout_create_info_supported(
     if (!pCreateInfo) return false;
     if (validate_descriptor_set_layout_pnext(pCreateInfo) != VK_SUCCESS) return false;
     if (pCreateInfo->flags != 0) return false;
+    if (pCreateInfo->bindingCount > PDOCKER_VK_MAX_STORAGE_BUFFERS) return false;
     if (pCreateInfo->bindingCount > 0 && !pCreateInfo->pBindings) return false;
-    bool seen_bindings[PDOCKER_VK_MAX_STORAGE_BUFFERS] = {0};
     for (uint32_t i = 0; i < pCreateInfo->bindingCount; ++i) {
         const VkDescriptorSetLayoutBinding *binding = &pCreateInfo->pBindings[i];
         bool v4_descriptor = descriptor_type_supported_by_v4_transport(binding->descriptorType);
@@ -15447,9 +15502,10 @@ static bool descriptor_set_layout_create_info_supported(
             vulkan_v5_object_transport_enabled() &&
             descriptor_type_supported_by_v5_object_transport(binding->descriptorType);
         if (!v4_descriptor && !v5_object_descriptor) return false;
-        if (binding->binding >= PDOCKER_VK_MAX_STORAGE_BUFFERS) return false;
-        if (seen_bindings[binding->binding]) return false;
-        seen_bindings[binding->binding] = true;
+        if (binding->binding >= PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS) return false;
+        for (uint32_t previous = 0; previous < i; ++previous) {
+            if (pCreateInfo->pBindings[previous].binding == binding->binding) return false;
+        }
         if (binding->descriptorCount == 0) return false;
         if (binding->descriptorCount > PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS) return false;
         if (binding->pImmutableSamplers) {
@@ -15518,8 +15574,25 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorSetLayout(
     PdockerVkDescriptorSetLayout *layout = pdocker_alloc_handle(sizeof(*layout));
     if (!layout) return VK_ERROR_OUT_OF_HOST_MEMORY;
     layout->layout_id = next_vulkan_object_generation();
-    for (uint32_t i = 0; pCreateInfo && i < pCreateInfo->bindingCount; ++i) {
-        const VkDescriptorSetLayoutBinding *binding = &pCreateInfo->pBindings[i];
+
+    bool selected[PDOCKER_VK_MAX_STORAGE_BUFFERS] = {0};
+    while (layout->storage_binding_count < pCreateInfo->bindingCount) {
+        uint32_t best_index = pCreateInfo->bindingCount;
+        uint32_t best_binding_number = UINT32_MAX;
+        for (uint32_t i = 0; i < pCreateInfo->bindingCount; ++i) {
+            if (selected[i]) continue;
+            const VkDescriptorSetLayoutBinding *candidate = &pCreateInfo->pBindings[i];
+            if (candidate->binding < best_binding_number) {
+                best_index = i;
+                best_binding_number = candidate->binding;
+            }
+        }
+        if (best_index >= pCreateInfo->bindingCount) {
+            free(layout);
+            return VK_ERROR_INITIALIZATION_FAILED;
+        }
+        selected[best_index] = true;
+        const VkDescriptorSetLayoutBinding *binding = &pCreateInfo->pBindings[best_index];
         bool v4_descriptor = descriptor_type_supported_by_v4_transport(binding->descriptorType);
         bool v5_object_descriptor =
             vulkan_v5_object_transport_enabled() &&
@@ -15530,55 +15603,53 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorSetLayout(
                     "pdocker-vulkan-icd: descriptor type binding=%u type=%u is unsupported by current transport; rejecting instead of ignoring\n",
                     binding->binding,
                     binding->descriptorType);
-            continue;
+            free(layout);
+            return VK_ERROR_FEATURE_NOT_PRESENT;
         }
-        if (binding->binding >= PDOCKER_VK_MAX_STORAGE_BUFFERS) {
+        if (binding->binding >= PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS) {
             layout->unsupported_descriptor_type = true;
             fprintf(stderr,
-                    "pdocker-vulkan-icd: descriptor binding=%u exceeds V4 transport limit=%u; rejecting instead of truncating\n",
+                    "pdocker-vulkan-icd: descriptor binding=%u exceeds V5 transport descriptor limit=%u; rejecting instead of truncating\n",
                     binding->binding,
-                    PDOCKER_VK_MAX_STORAGE_BUFFERS);
-            continue;
+                    PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS);
+            free(layout);
+            return VK_ERROR_FEATURE_NOT_PRESENT;
         }
-        if ((v4_descriptor || v5_object_descriptor) && binding->binding < PDOCKER_VK_MAX_STORAGE_BUFFERS &&
-            binding->binding + 1 > layout->storage_binding_count) {
-            layout->storage_binding_count = binding->binding + 1;
-        }
-        if ((v4_descriptor || v5_object_descriptor) && binding->binding < PDOCKER_VK_MAX_STORAGE_BUFFERS) {
-            layout->storage_binding_present[binding->binding] = true;
-            layout->storage_binding_types[binding->binding] = binding->descriptorType;
-            layout->storage_binding_counts[binding->binding] = binding->descriptorCount;
-            layout->storage_binding_stage_flags[binding->binding] = binding->stageFlags;
-            if (binding->pImmutableSamplers && descriptor_type_requires_sampler(binding->descriptorType)) {
-                uint32_t sampler_count = binding->descriptorCount;
-                if (sampler_count > PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS) {
-                    sampler_count = PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS;
-                }
-                for (uint32_t array_element = 0; array_element < sampler_count; ++array_element) {
-                    PdockerVkSampler *sampler =
-                        pdocker_vk_sampler_from_handle(binding->pImmutableSamplers[array_element]);
-                    if (!sampler) {
-                        layout->unsupported_descriptor_type = true;
-                        fprintf(stderr,
-                                "pdocker-vulkan-icd: immutable sampler binding=%u array=%u has invalid sampler handle; rejecting layout\n",
-                                binding->binding,
-                                array_element);
-                        free(layout);
-                        return VK_ERROR_FEATURE_NOT_PRESENT;
-                    }
-                    layout->immutable_samplers[binding->binding][array_element] = *sampler;
-                    layout->immutable_sampler_valid[binding->binding][array_element] = true;
-                }
-            } else if (binding->pImmutableSamplers &&
-                       !descriptor_type_requires_sampler(binding->descriptorType)) {
-                layout->unsupported_descriptor_type = true;
-                fprintf(stderr,
-                        "pdocker-vulkan-icd: immutable sampler on non-sampler descriptor binding=%u type=%u rejected\n",
-                        binding->binding,
-                        binding->descriptorType);
-                free(layout);
-                return VK_ERROR_FEATURE_NOT_PRESENT;
+        uint32_t slot = layout->storage_binding_count++;
+        layout->storage_binding_numbers[slot] = binding->binding;
+        layout->storage_binding_present[slot] = true;
+        layout->storage_binding_types[slot] = binding->descriptorType;
+        layout->storage_binding_counts[slot] = binding->descriptorCount;
+        layout->storage_binding_stage_flags[slot] = binding->stageFlags;
+        if (binding->pImmutableSamplers && descriptor_type_requires_sampler(binding->descriptorType)) {
+            uint32_t sampler_count = binding->descriptorCount;
+            if (sampler_count > PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS) {
+                sampler_count = PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS;
             }
+            for (uint32_t array_element = 0; array_element < sampler_count; ++array_element) {
+                PdockerVkSampler *sampler =
+                    pdocker_vk_sampler_from_handle(binding->pImmutableSamplers[array_element]);
+                if (!sampler) {
+                    layout->unsupported_descriptor_type = true;
+                    fprintf(stderr,
+                            "pdocker-vulkan-icd: immutable sampler binding=%u array=%u has invalid sampler handle; rejecting layout\n",
+                            binding->binding,
+                            array_element);
+                    free(layout);
+                    return VK_ERROR_FEATURE_NOT_PRESENT;
+                }
+                layout->immutable_samplers[slot][array_element] = *sampler;
+                layout->immutable_sampler_valid[slot][array_element] = true;
+            }
+        } else if (binding->pImmutableSamplers &&
+                   !descriptor_type_requires_sampler(binding->descriptorType)) {
+            layout->unsupported_descriptor_type = true;
+            fprintf(stderr,
+                    "pdocker-vulkan-icd: immutable sampler on non-sampler descriptor binding=%u type=%u rejected\n",
+                    binding->binding,
+                    binding->descriptorType);
+            free(layout);
+            return VK_ERROR_FEATURE_NOT_PRESENT;
         }
     }
     *pSetLayout = pdocker_vk_descriptor_set_layout_to_handle(layout);
@@ -20059,13 +20130,10 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
                 pipeline_layout && target_set < pipeline_layout->set_layout_count
                     ? pipeline_layout->set_layouts[target_set]
                     : set->layout;
-            uint32_t binding_limit = expected_layout
-                ? expected_layout->storage_binding_count
-                : PDOCKER_VK_MAX_STORAGE_BUFFERS;
-            if (binding_limit > PDOCKER_VK_MAX_STORAGE_BUFFERS) {
-                binding_limit = PDOCKER_VK_MAX_STORAGE_BUFFERS;
-            }
+            uint32_t binding_limit = descriptor_layout_slot_count(expected_layout);
             for (uint32_t binding = 0; binding < binding_limit; ++binding) {
+                if (expected_layout && !expected_layout->storage_binding_present[binding]) continue;
+                const uint32_t api_binding = descriptor_layout_binding_number(expected_layout, binding);
                 uint32_t array_limit = expected_layout
                     ? expected_layout->storage_binding_counts[binding]
                     : PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS;
@@ -20090,7 +20158,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
                             fprintf(stderr,
                                     "pdocker-vulkan-icd: layout expects dynamic descriptor set=%u binding=%u array=%u but descriptor write is not dynamic\n",
                                     target_set,
-                                    binding,
+                                    api_binding,
                                     array_element);
                         }
                     }
@@ -20107,7 +20175,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
                                 fprintf(stderr,
                                         "pdocker-vulkan-icd: dynamic descriptor offset misaligned set=%u binding=%u array=%u type=%u add=%u alignment=%llu\n",
                                         target_set,
-                                        binding,
+                                        api_binding,
                                         array_element,
                                         dynamic_descriptor_type,
                                         pDynamicOffsets[dynamic_index],
@@ -20120,7 +20188,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
                                 fprintf(stderr,
                                         "pdocker-vulkan-icd: dynamic descriptor offset overflow set=%u binding=%u array=%u base=%llu add=%u\n",
                                         target_set,
-                                        binding,
+                                        api_binding,
                                         array_element,
                                         (unsigned long long)slot->base_offset,
                                         pDynamicOffsets[dynamic_index]);
@@ -20142,7 +20210,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
                             fprintf(stderr,
                                     "pdocker-vulkan-icd: dynamic descriptor set=%u binding=%u array=%u dyn_index=%u add=%u effective_offset=%llu\n",
                                     target_set,
-                                    binding,
+                                    api_binding,
                                     array_element,
                                     dynamic_index,
                                     pDynamicOffsets[dynamic_index],
@@ -20154,7 +20222,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
                             fprintf(stderr,
                                     "pdocker-vulkan-icd: missing dynamic offset set=%u binding=%u array=%u dyn_index=%u count=%u\n",
                                     target_set,
-                                    binding,
+                                    api_binding,
                                     array_element,
                                     dynamic_index,
                                     dynamicOffsetCount);

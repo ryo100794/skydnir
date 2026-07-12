@@ -5395,7 +5395,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "uint64_t layout_id;",
             "bool storage_binding_present[PDOCKER_VK_MAX_STORAGE_BUFFERS]",
             "layout->layout_id = next_vulkan_object_generation()",
-            "layout->storage_binding_present[binding->binding] = true",
+            "layout->storage_binding_numbers[slot] = binding->binding",
+            "layout->storage_binding_present[slot] = true",
             "collect_graphics_v624_layout_metadata",
             "PdockerGpuVulkanGraphicsV624FrameHeader *frame_header_v624",
             "sizeof(*frame_header_v624)",
@@ -6672,8 +6673,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("descriptor_layout_immutable_sampler_valid", icd)
         self.assertIn("descriptor_layout_immutable_sampler", icd)
         self.assertIn("descriptor_set_apply_immutable_samplers", icd)
-        self.assertIn("layout->immutable_samplers[binding->binding][array_element] = *sampler;", icd)
-        self.assertIn("layout->immutable_sampler_valid[binding->binding][array_element] = true;", icd)
+        self.assertIn("layout->immutable_samplers[slot][array_element] = *sampler;", icd)
+        self.assertIn("layout->immutable_sampler_valid[slot][array_element] = true;", icd)
         self.assertIn("descriptor_set_apply_immutable_samplers(set);", icd)
         support_helper = c_function_body(icd, "descriptor_set_layout_create_info_supported")
         self.assertNotIn("if (binding->pImmutableSamplers) return false;", support_helper)
@@ -6962,6 +6963,52 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("set_binding_types[set_index][", body)
         self.assertNotIn("set_binding_descriptor_counts[set_index][", body)
 
+    def test_vulkan_icd_descriptor_bindings_use_compact_slots_for_sparse_api_binding_numbers(self):
+        icd = VULKAN_ICD.read_text()
+        self.assertIn("uint32_t storage_binding_numbers[PDOCKER_VK_MAX_STORAGE_BUFFERS];", icd)
+        self.assertIn("descriptor_layout_slot_for_binding", icd)
+        self.assertIn("descriptor_layout_binding_number", icd)
+
+        support_body = c_function_body(icd, "descriptor_set_layout_create_info_supported")
+        self.assertIn("pCreateInfo->bindingCount > PDOCKER_VK_MAX_STORAGE_BUFFERS", support_body)
+        self.assertIn("binding->binding >= PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS", support_body)
+        self.assertIn("pCreateInfo->pBindings[previous].binding == binding->binding", support_body)
+        self.assertNotIn("bool seen_bindings[PDOCKER_VK_MAX_STORAGE_BUFFERS]", support_body)
+        self.assertNotIn("binding->binding >= PDOCKER_VK_MAX_STORAGE_BUFFERS", support_body)
+
+        create_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorSetLayout", 1)[1].split(
+            "VKAPI_ATTR void VKAPI_CALL vkDestroyDescriptorSetLayout", 1
+        )[0]
+        self.assertIn("bool selected[PDOCKER_VK_MAX_STORAGE_BUFFERS] = {0};", create_body)
+        self.assertIn("uint32_t best_binding_number = UINT32_MAX;", create_body)
+        self.assertIn("uint32_t slot = layout->storage_binding_count++;", create_body)
+        self.assertIn("layout->storage_binding_numbers[slot] = binding->binding;", create_body)
+        self.assertIn("layout->storage_binding_present[slot] = true;", create_body)
+        self.assertIn("layout->storage_binding_types[slot] = binding->descriptorType;", create_body)
+        self.assertNotIn("layout->storage_binding_present[binding->binding]", create_body)
+        self.assertNotIn("layout->storage_binding_types[binding->binding]", create_body)
+
+        linear_body = c_function_body(icd, "descriptor_linear_slot")
+        self.assertIn("descriptor_layout_slot_for_binding(layout, start_binding)", linear_body)
+        self.assertIn("if (binding_out) *binding_out = slot;", linear_body)
+
+        send_body = c_function_body(icd, "send_generic_vulkan_dispatch_op")
+        self.assertIn("const uint32_t api_binding = descriptor_layout_binding_number(layout, i);", send_body)
+        self.assertIn("image_descriptor_bindings[image_descriptor_count] = api_binding;", send_body)
+        self.assertIn("bindings[binding_count] = api_binding;", send_body)
+        self.assertIn("trace_guarded_binding(api_binding", send_body)
+        self.assertNotIn("image_descriptor_bindings[image_descriptor_count] = i;", send_body)
+        self.assertNotIn("bindings[binding_count] = i;", send_body)
+
+        graphics_layout_body = c_function_body(icd, "collect_graphics_v624_descriptor_set_layout_metadata")
+        self.assertIn("const uint32_t api_binding = descriptor_layout_binding_number(layout, binding);", graphics_layout_body)
+        self.assertIn("candidate.binding = api_binding;", graphics_layout_body)
+
+        graphics_descriptor_body = c_function_body(icd, "collect_graphics_descriptor_entries")
+        self.assertIn("const uint32_t api_binding = descriptor_layout_binding_number(layout, binding_index);", graphics_descriptor_body)
+        self.assertIn("descriptor->binding = api_binding;", graphics_descriptor_body)
+        self.assertIn("binding, set_index, api_binding, &bytes", graphics_descriptor_body)
+
     def test_vulkan_compute_shader_reflection_tables_are_heap_backed_for_sparse_binding_numbers(self):
         executor = GPU_EXECUTOR.read_text()
         body = c_function_body(executor, "run_vulkan_dispatch_fd")
@@ -7078,7 +7125,8 @@ class GpuAbiContractTest(unittest.TestCase):
         dsl_create_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorSetLayout", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkDestroyDescriptorSetLayout", 1
         )[0]
-        self.assertIn("layout->storage_binding_stage_flags[binding->binding] = binding->stageFlags;", dsl_create_body)
+        self.assertIn("layout->storage_binding_numbers[slot] = binding->binding;", dsl_create_body)
+        self.assertIn("layout->storage_binding_stage_flags[slot] = binding->stageFlags;", dsl_create_body)
         layout_compatible_body = c_function_body(icd, "descriptor_set_layout_compatible")
         self.assertIn("expected->storage_binding_stage_flags[i]", layout_compatible_body)
         self.assertIn("actual->storage_binding_stage_flags[i]", layout_compatible_body)
@@ -8016,10 +8064,11 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("pCreateInfo->bindingCount > 0 && !pCreateInfo->pBindings", helper_body)
         self.assertIn("descriptor_type_supported_by_v4_transport(binding->descriptorType)", helper_body)
         self.assertIn("descriptor_type_supported_by_v5_object_transport(binding->descriptorType)", helper_body)
-        self.assertIn("bool seen_bindings[PDOCKER_VK_MAX_STORAGE_BUFFERS] = {0};", helper_body)
-        self.assertIn("binding->binding >= PDOCKER_VK_MAX_STORAGE_BUFFERS", helper_body)
-        self.assertIn("seen_bindings[binding->binding]", helper_body)
-        self.assertIn("seen_bindings[binding->binding] = true;", helper_body)
+        self.assertIn("pCreateInfo->bindingCount > PDOCKER_VK_MAX_STORAGE_BUFFERS", helper_body)
+        self.assertIn("binding->binding >= PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS", helper_body)
+        self.assertIn("pCreateInfo->pBindings[previous].binding == binding->binding", helper_body)
+        self.assertNotIn("bool seen_bindings[PDOCKER_VK_MAX_STORAGE_BUFFERS]", helper_body)
+        self.assertNotIn("binding->binding >= PDOCKER_VK_MAX_STORAGE_BUFFERS", helper_body)
         self.assertIn("binding->descriptorCount == 0", helper_body)
         self.assertIn("binding->descriptorCount > PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS", helper_body)
         self.assertIn("binding->pImmutableSamplers", helper_body)
@@ -10417,7 +10466,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("unsupported_descriptor_type", icd)
         self.assertIn("descriptor type binding=%u type=%u is unsupported by current transport", icd)
         self.assertIn("descriptor write binding=%u type=%u is unsupported by current transport", icd)
-        self.assertIn("descriptor binding=%u exceeds V4 transport limit=%u", icd)
+        self.assertIn("descriptor binding=%u exceeds V5 transport descriptor limit=%u", icd)
         self.assertIn("layout->unsupported_descriptor_type = true;", icd)
         self.assertIn("set->unsupported_descriptor_type = true;", icd)
         update_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets", 1)[1].split(
@@ -13729,7 +13778,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "guarded_page_count",
             "trace_guarded_binding",
             "resident_pages=%zu dirty_pages=%zu",
-            "trace_guarded_binding(i, dispatch_memory, dispatch_offset, bytes)",
+            "trace_guarded_binding(api_binding, dispatch_memory, dispatch_offset, bytes)",
         ]:
             self.assertIn(marker, source)
         compare = LLAMA_COMPARE.read_text()

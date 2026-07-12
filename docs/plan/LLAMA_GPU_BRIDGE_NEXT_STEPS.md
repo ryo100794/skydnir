@@ -2103,3 +2103,17 @@ The verifier recomputes the expected checkout hashes and fails closed with
 runtime bridge binaries disagree.  This prevents stale APK/native payloads from
 being promoted as llama GPU correctness or performance evidence even when older
 marker strings are present in logs.
+### 2026-07-12 Producer ICD sparse descriptor binding lane
+
+The container-facing Vulkan ICD now separates Vulkan API binding numbers from
+its fixed internal descriptor slots for compute/graphics descriptor metadata.
+`PdockerVkDescriptorSetLayout` records `storage_binding_numbers[]`,
+`descriptor_linear_slot()` resolves API `dstBinding/srcBinding` into compact
+slots for storage, and compute V4/V5/V5.1 plus graphics V6 metadata serialize
+the original API binding number back to the executor.
+
+This is intentionally a compact-slot change, not a full heap descriptor-set
+rewrite: command-buffer snapshots still copy descriptor sets by value, so
+turning descriptor storage into pointers would require deep-copy/free snapshot
+helpers first.  The remaining hard cap is descriptor entry count, not sparse
+API binding number.
