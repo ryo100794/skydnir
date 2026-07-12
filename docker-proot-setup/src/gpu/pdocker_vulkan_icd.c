@@ -1546,22 +1546,6 @@ static bool append_secondary_command_buffer(
         src->dynamic_rendering_active || src->render_pass_active) {
         return false;
     }
-    for (uint32_t i = 0; i < src->dispatch_op_count; ++i) {
-        for (uint32_t set_i = 0; set_i < PDOCKER_VK_MAX_DESCRIPTOR_SETS; ++set_i) {
-            if (src->dispatch_ops[i].set_snapshot_used[set_i]) return false;
-        }
-    }
-    for (uint32_t i = 0; i < src->graphics_draw_op_count; ++i) {
-        for (uint32_t set_i = 0; set_i < PDOCKER_VK_MAX_DESCRIPTOR_SETS; ++set_i) {
-            if (src->graphics_draw_ops[i].set_snapshot_used[set_i]) return false;
-        }
-    }
-    for (uint32_t i = 0; i < src->graphics_descriptor_bind_op_count; ++i) {
-        for (uint32_t set_i = 0; set_i < PDOCKER_VK_MAX_DESCRIPTOR_SETS; ++set_i) {
-            if (src->graphics_descriptor_bind_ops[i].set_snapshot_used[set_i]) return false;
-        }
-    }
-
     uint32_t command_op_base = dst->command_op_count;
     uint32_t event_wait_ref_base = dst->event_wait_ref_count;
     uint32_t copy_base = dst->copy_op_count;
@@ -1632,16 +1616,55 @@ static bool append_secondary_command_buffer(
     memcpy(dst->image_barrier_ops + dst->image_barrier_op_count, src->image_barrier_ops,
            sizeof(src->image_barrier_ops[0]) * src->image_barrier_op_count);
     dst->image_barrier_op_count += src->image_barrier_op_count;
-    memcpy(dst->dispatch_ops + dst->dispatch_op_count, src->dispatch_ops,
-           sizeof(src->dispatch_ops[0]) * src->dispatch_op_count);
-    dst->dispatch_op_count += src->dispatch_op_count;
-    memcpy(dst->graphics_draw_ops + dst->graphics_draw_op_count, src->graphics_draw_ops,
-           sizeof(src->graphics_draw_ops[0]) * src->graphics_draw_op_count);
-    dst->graphics_draw_op_count += src->graphics_draw_op_count;
-    memcpy(dst->graphics_descriptor_bind_ops + dst->graphics_descriptor_bind_op_count,
-           src->graphics_descriptor_bind_ops,
-           sizeof(src->graphics_descriptor_bind_ops[0]) * src->graphics_descriptor_bind_op_count);
-    dst->graphics_descriptor_bind_op_count += src->graphics_descriptor_bind_op_count;
+    for (uint32_t i = 0; i < src->dispatch_op_count; ++i) {
+        PdockerVkDispatchOp copied = src->dispatch_ops[i];
+        PdockerVkDispatchOp *out = &dst->dispatch_ops[dst->dispatch_op_count];
+        *out = copied;
+        memset(out->set_snapshots, 0, sizeof(out->set_snapshots));
+        memset(out->set_snapshot_used, 0, sizeof(out->set_snapshot_used));
+        if (!descriptor_set_clone_snapshot_array(
+                out->set_snapshots,
+                out->set_snapshot_used,
+                copied.set_snapshots,
+                copied.set_snapshot_used,
+                PDOCKER_VK_MAX_DESCRIPTOR_SETS)) {
+            goto fail_secondary_append;
+        }
+        dst->dispatch_op_count++;
+    }
+    for (uint32_t i = 0; i < src->graphics_draw_op_count; ++i) {
+        PdockerVkGraphicsDrawSnapshot copied = src->graphics_draw_ops[i];
+        PdockerVkGraphicsDrawSnapshot *out = &dst->graphics_draw_ops[dst->graphics_draw_op_count];
+        *out = copied;
+        memset(out->set_snapshots, 0, sizeof(out->set_snapshots));
+        memset(out->set_snapshot_used, 0, sizeof(out->set_snapshot_used));
+        if (!descriptor_set_clone_snapshot_array(
+                out->set_snapshots,
+                out->set_snapshot_used,
+                copied.set_snapshots,
+                copied.set_snapshot_used,
+                PDOCKER_VK_MAX_DESCRIPTOR_SETS)) {
+            goto fail_secondary_append;
+        }
+        dst->graphics_draw_op_count++;
+    }
+    for (uint32_t i = 0; i < src->graphics_descriptor_bind_op_count; ++i) {
+        PdockerVkGraphicsDescriptorBindSnapshot copied = src->graphics_descriptor_bind_ops[i];
+        PdockerVkGraphicsDescriptorBindSnapshot *out =
+            &dst->graphics_descriptor_bind_ops[dst->graphics_descriptor_bind_op_count];
+        *out = copied;
+        memset(out->set_snapshots, 0, sizeof(out->set_snapshots));
+        memset(out->set_snapshot_used, 0, sizeof(out->set_snapshot_used));
+        if (!descriptor_set_clone_snapshot_array(
+                out->set_snapshots,
+                out->set_snapshot_used,
+                copied.set_snapshots,
+                copied.set_snapshot_used,
+                PDOCKER_VK_MAX_DESCRIPTOR_SETS)) {
+            goto fail_secondary_append;
+        }
+        dst->graphics_descriptor_bind_op_count++;
+    }
     memcpy(dst->graphics_rendering_ops + dst->graphics_rendering_op_count, src->graphics_rendering_ops,
            sizeof(src->graphics_rendering_ops[0]) * src->graphics_rendering_op_count);
     dst->graphics_rendering_op_count += src->graphics_rendering_op_count;
@@ -1782,6 +1805,52 @@ static bool append_secondary_command_buffer(
     if (src->compute_pipeline) dst->compute_pipeline = src->compute_pipeline;
     if (src->graphics_pipeline) dst->graphics_pipeline = src->graphics_pipeline;
     return true;
+
+fail_secondary_append:
+    for (uint32_t i = 0; i < PDOCKER_VK_MAX_COMMAND_OPS; ++i) {
+        free(update_payloads[i]);
+        update_payloads[i] = NULL;
+    }
+    for (uint32_t i = dispatch_base; i < dst->dispatch_op_count; ++i) {
+        descriptor_set_release_snapshot_array(
+            dst->dispatch_ops[i].set_snapshots,
+            dst->dispatch_ops[i].set_snapshot_used,
+            PDOCKER_VK_MAX_DESCRIPTOR_SETS);
+    }
+    for (uint32_t i = graphics_draw_base; i < dst->graphics_draw_op_count; ++i) {
+        descriptor_set_release_snapshot_array(
+            dst->graphics_draw_ops[i].set_snapshots,
+            dst->graphics_draw_ops[i].set_snapshot_used,
+            PDOCKER_VK_MAX_DESCRIPTOR_SETS);
+    }
+    for (uint32_t i = descriptor_bind_base; i < dst->graphics_descriptor_bind_op_count; ++i) {
+        descriptor_set_release_snapshot_array(
+            dst->graphics_descriptor_bind_ops[i].set_snapshots,
+            dst->graphics_descriptor_bind_ops[i].set_snapshot_used,
+            PDOCKER_VK_MAX_DESCRIPTOR_SETS);
+    }
+    dst->copy_op_count = copy_base;
+    dst->image_copy_op_count = image_copy_base;
+    dst->image_to_image_copy_op_count = image_to_image_copy_base;
+    dst->image_clear_op_count = image_clear_base;
+    dst->image_resolve_op_count = image_resolve_base;
+    dst->image_blit_op_count = image_blit_base;
+    dst->depth_stencil_clear_op_count = depth_stencil_clear_base;
+    dst->memory_barrier_op_count = memory_barrier_base;
+    dst->buffer_barrier_op_count = buffer_barrier_base;
+    dst->image_barrier_op_count = image_barrier_base;
+    dst->dispatch_op_count = dispatch_base;
+    dst->graphics_draw_op_count = graphics_draw_base;
+    dst->graphics_descriptor_bind_op_count = descriptor_bind_base;
+    dst->graphics_rendering_op_count = rendering_base;
+    dst->clear_attachments_command_op_count = clear_attachments_command_base;
+    dst->clear_attachment_op_count = clear_attachment_base;
+    dst->clear_rect_op_count = clear_rect_base;
+    dst->dynamic_state_count = dynamic_state_base;
+    dst->graphics_dynamic_offset_count = dynamic_offset_base;
+    dst->push_constant_op_count = push_op_base;
+    dst->event_wait_ref_count = event_wait_ref_base;
+    return false;
 }
 
 static void maybe_dump_spirv(const VkShaderModuleCreateInfo *info) {

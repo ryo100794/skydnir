@@ -190,13 +190,14 @@ or closes.
   any frame above the old 16-slot legacy path.  The container-side ICD
   descriptor layout/set state is also heap-backed by the validated binding
   count, with descriptor update staging and command-record descriptor snapshots
-  deep-copied instead of aliasing live descriptor-set storage.  The fixed
-  strict-graph cache is deliberately disabled for wider dispatches instead of
-  being widened inside this slice.  Remaining narrowing points: the real
-  SCM_RIGHTS fd limit for fd-bearing buffers, V1-V4 text debug command
-  compatibility caps, secondary command-buffer descriptor snapshot deep-copy
-  support, graphics fixed-array lanes, and device-runtime evidence for a >16 V5
-  compute dispatch.  Acceptance: host verifier
+  deep-copied instead of aliasing live descriptor-set storage.  Secondary
+  command-buffer append now deep-clones dispatch, graphics draw, and descriptor
+  bind snapshots instead of rejecting any secondary that already captured
+  descriptor state.  The fixed strict-graph cache is deliberately disabled for
+  wider dispatches instead of being widened inside this slice.  Remaining
+  narrowing points: the real SCM_RIGHTS fd limit for fd-bearing buffers, V1-V4
+  text debug command compatibility caps, graphics fixed-array lanes, and
+  device-runtime evidence for a >16 V5 compute dispatch.  Acceptance: host verifier
   `tests.test_gpu_abi_contract` covers the above-16 V5 executor path, native
   payloads must build cleanly, and a runtime artifact must prove table-native
   replay on device or show sender-side fail-closed rejection before frame send.

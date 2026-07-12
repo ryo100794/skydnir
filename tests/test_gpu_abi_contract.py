@@ -2601,6 +2601,17 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("render_pass_subpass_can_normalize_to_dynamic_rendering(rp, inherit->subpass)", icd)
         self.assertIn("op.index += dispatch_base;", icd)
         self.assertIn("op.index += graphics_draw_base;", icd)
+        secondary_body = c_function_body(icd, "append_secondary_command_buffer")
+        self.assertIn("PdockerVkDispatchOp copied = src->dispatch_ops[i];", secondary_body)
+        self.assertIn("PdockerVkGraphicsDrawSnapshot copied = src->graphics_draw_ops[i];", secondary_body)
+        self.assertIn("PdockerVkGraphicsDescriptorBindSnapshot copied = src->graphics_descriptor_bind_ops[i];", secondary_body)
+        self.assertIn("descriptor_set_clone_snapshot_array(", secondary_body)
+        self.assertIn("goto fail_secondary_append;", secondary_body)
+        self.assertIn("fail_secondary_append:", secondary_body)
+        self.assertIn("descriptor_set_release_snapshot_array(", secondary_body)
+        self.assertNotIn("src->dispatch_ops[i].set_snapshot_used[set_i]) return false", secondary_body)
+        self.assertNotIn("src->graphics_draw_ops[i].set_snapshot_used[set_i]) return false", secondary_body)
+        self.assertNotIn("src->graphics_descriptor_bind_ops[i].set_snapshot_used[set_i]) return false", secondary_body)
         execute_body = icd[icd.index("VKAPI_ATTR void VKAPI_CALL vkCmdExecuteCommands"):]
         execute_body = execute_body[:execute_body.index("VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets")]
         self.assertIn("secondary->level != VK_COMMAND_BUFFER_LEVEL_SECONDARY", execute_body)
