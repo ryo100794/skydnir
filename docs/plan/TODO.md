@@ -179,7 +179,11 @@ or closes.
   metadata in the legacy compute runner is now heap-backed and stride-indexed,
   and SPIR-V descriptor reflection tables are heap-backed by final
   `layout_count`, removing another 16-binding-number cap for otherwise
-  legacy-compatible frames.  The container-side generic dispatch collector now
+  legacy-compatible frames.  The legacy V1-V4 text dispatch path now uses a
+  heap-backed command builder and heap-backed parser bindings, and its remaining
+  binding ceiling is tied to the real `SCM_RIGHTS` text shape (one shader fd plus
+  one storage-buffer fd per binding) rather than the old 16-slot debug array.
+  The container-side generic dispatch collector now
   keeps its transient descriptor/object/fd tables in a cleanup-owned heap
   record keyed to the V5 table limits instead of fixed `PDOCKER_VK_MAX_STORAGE_BUFFERS`
   stack arrays; fd-bearing buffer descriptors still fail closed at the real
@@ -195,9 +199,9 @@ or closes.
   bind snapshots instead of rejecting any secondary that already captured
   descriptor state.  The fixed strict-graph cache is deliberately disabled for
   wider dispatches instead of being widened inside this slice.  Remaining
-  narrowing points: the real SCM_RIGHTS fd limit for fd-bearing buffers, V1-V4
-  text debug command compatibility caps, graphics fixed-array lanes, and
-  device-runtime evidence for a >16 V5 compute dispatch.  Acceptance: host verifier
+  narrowing points: the real SCM_RIGHTS fd limit for fd-bearing buffers,
+  graphics fixed-array lanes, and device-runtime evidence for a >16 V5 compute
+  dispatch.  Acceptance: host verifier
   `tests.test_gpu_abi_contract` covers the above-16 V5 executor path, native
   payloads must build cleanly, and a runtime artifact must prove table-native
   replay on device or show sender-side fail-closed rejection before frame send.

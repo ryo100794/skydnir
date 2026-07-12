@@ -34318,23 +34318,26 @@ static int serve_socket(const char *path) {
                 char entry_name[PDOCKER_GPU_MAX_VULKAN_ENTRY_NAME];
                 uint8_t specialization_data[PDOCKER_GPU_MAX_VULKAN_SPECIALIZATION_BYTES];
                 VulkanDispatchSpecialization specializations[PDOCKER_GPU_MAX_VULKAN_SPECIALIZATION_ENTRIES];
-                VulkanDispatchBinding bindings[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+                VulkanDispatchBinding *bindings = NULL;
                 VulkanDispatchOptions options;
                 memset(push, 0, sizeof(push));
                 memset(entry_name, 0, sizeof(entry_name));
                 memset(specialization_data, 0, sizeof(specialization_data));
                 memset(specializations, 0, sizeof(specializations));
-                memset(bindings, 0, sizeof(bindings));
                 memset(&options, 0, sizeof(options));
                 options.has_receive_evidence = receive_evidence.valid;
                 options.receive_evidence = receive_evidence;
                 int parse_ok = 1;
-                if (binding_count == 0 || binding_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS ||
+                if (binding_count == 0 || binding_count > PDOCKER_GPU_VULKAN_TEXT_DISPATCH_MAX_BINDINGS ||
                     push_size > PDOCKER_GPU_MAX_PUSH_BYTES ||
                     specialization_count > PDOCKER_GPU_MAX_VULKAN_SPECIALIZATION_ENTRIES ||
                     specialization_data_size > PDOCKER_GPU_MAX_VULKAN_SPECIALIZATION_BYTES ||
                     passed_fd_count < 1 + binding_count) {
                     parse_ok = 0;
+                }
+                if (parse_ok) {
+                    bindings = (VulkanDispatchBinding *)calloc(binding_count, sizeof(*bindings));
+                    if (!bindings) parse_ok = 0;
                 }
                 if (parse_ok && push_size > 0) {
                     int decoded = hex_decode(push_hex, push, sizeof(push));
@@ -34442,6 +34445,7 @@ static int serve_socket(const char *path) {
                                                  options.has_base_group ? options.base_group_y : 0,
                                                  options.has_base_group ? options.base_group_z : 0);
                 }
+                free(bindings);
             } else if (strncmp(cmd, "VULKAN_DISPATCH_V1 ", 19) == 0) {
                 char *save = NULL;
                 char *cursor = cmd + 19;
@@ -34460,14 +34464,17 @@ static int serve_socket(const char *path) {
                 tok = strtok_r(NULL, " ", &save);
                 const char *push_hex = tok ? tok : "-";
                 uint8_t push[PDOCKER_GPU_MAX_PUSH_BYTES];
-                VulkanDispatchBinding bindings[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+                VulkanDispatchBinding *bindings = NULL;
                 memset(push, 0, sizeof(push));
-                memset(bindings, 0, sizeof(bindings));
                 int parse_ok = 1;
-                if (binding_count == 0 || binding_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS ||
+                if (binding_count == 0 || binding_count > PDOCKER_GPU_VULKAN_TEXT_DISPATCH_MAX_BINDINGS ||
                     push_size > PDOCKER_GPU_MAX_PUSH_BYTES ||
                     passed_fd_count < 1 + binding_count) {
                     parse_ok = 0;
+                }
+                if (parse_ok) {
+                    bindings = (VulkanDispatchBinding *)calloc(binding_count, sizeof(*bindings));
+                    if (!bindings) parse_ok = 0;
                 }
                 if (parse_ok && push_size > 0) {
                     int decoded = hex_decode(push_hex, push, sizeof(push));
@@ -34496,6 +34503,7 @@ static int serve_socket(const char *path) {
                                                  NULL,
                                                  push, push_size, gx, gy, gz, 0, 0, 0);
                 }
+                free(bindings);
             } else {
                 json_fail("command", "unknown command");
             }

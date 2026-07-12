@@ -127,6 +127,13 @@
 #define PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FRAME_BYTES (4u * 1024u * 1024u)
 #define PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS 253u
 #define PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS 24u
+/*
+ * Legacy text dispatch (VULKAN_DISPATCH_V1..V4) sends one shader fd plus one
+ * storage-buffer fd per binding in a single SCM_RIGHTS message.  Keep the cap
+ * tied to the real text transport shape; wider dispatches must use the framed
+ * V5 path instead of silently inheriting the old 16-binding debug limit.
+ */
+#define PDOCKER_GPU_VULKAN_TEXT_DISPATCH_MAX_BINDINGS (PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS - 1u)
 #define PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_RESOURCES 1024u
 #define PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS 2048u
 #define PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGES 256u

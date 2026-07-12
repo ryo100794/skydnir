@@ -13,6 +13,7 @@
 #include <fcntl.h>
 #include <stdint.h>
 #include <signal.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -3922,6 +3923,66 @@ static void trace_vulkan_command_length_warning(uint64_t dispatch_id,
             near_max ? "true" : "false",
             fail_closed ? "true" : "false");
     fflush(stderr);
+}
+
+
+typedef struct {
+    char *data;
+    size_t len;
+    size_t cap;
+} PdockerVkCommandText;
+
+static void pdocker_vk_command_text_destroy(PdockerVkCommandText *text) {
+    if (!text) return;
+    free(text->data);
+    memset(text, 0, sizeof(*text));
+}
+
+static int pdocker_vk_command_text_reserve(PdockerVkCommandText *text, size_t needed) {
+    if (!text) return -EINVAL;
+    if (needed <= text->cap) return 0;
+    size_t next = text->cap ? text->cap : 4096u;
+    while (next < needed) {
+        if (next > SIZE_MAX / 2u) {
+            next = needed;
+            break;
+        }
+        next *= 2u;
+    }
+    char *data = (char *)realloc(text->data, next);
+    if (!data) return -ENOMEM;
+    text->data = data;
+    text->cap = next;
+    return 0;
+}
+
+static int pdocker_vk_command_text_appendf(PdockerVkCommandText *text, const char *fmt, ...) {
+    if (!text || !fmt) return -EINVAL;
+    va_list ap;
+    va_start(ap, fmt);
+    va_list copy;
+    va_copy(copy, ap);
+    int needed_i = vsnprintf(NULL, 0, fmt, copy);
+    va_end(copy);
+    if (needed_i < 0) {
+        va_end(ap);
+        return -EINVAL;
+    }
+    size_t needed = (size_t)needed_i;
+    if (needed > SIZE_MAX - text->len - 1u) {
+        va_end(ap);
+        return -EOVERFLOW;
+    }
+    int rc = pdocker_vk_command_text_reserve(text, text->len + needed + 1u);
+    if (rc != 0) {
+        va_end(ap);
+        return rc;
+    }
+    int written = vsnprintf(text->data + text->len, text->cap - text->len, fmt, ap);
+    va_end(ap);
+    if (written < 0 || (size_t)written != needed) return -EINVAL;
+    text->len += needed;
+    return 0;
 }
 
 static void trace_vulkan_reconcile_evidence(
@@ -9863,76 +9924,71 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
         binding_count++;
     }
 
-    char command[4096];
-#define PDOCKER_VK_COMMAND_TOO_LONG(stage_, used_) \
+    PdockerVkCommandText command = {0};
+#define PDOCKER_VK_APPEND_FAIL(stage_, rc_) \
     do { \
         trace_vulkan_command_length_warning(dispatch_id, \
-                                            (used_), \
-                                            sizeof(command), \
+                                            command.len, \
+                                            command.cap, \
                                             (stage_), \
                                             true); \
         close_spirv_probe_replay(&probe); \
-        return -ENAMETOOLONG; \
+        pdocker_vk_command_text_destroy(&command); \
+        return (rc_); \
     } while (0)
-#define PDOCKER_VK_APPEND_TOO_LONG(stage_) \
-    PDOCKER_VK_COMMAND_TOO_LONG((stage_), off + ((n > 0) ? (size_t)n : 0))
-    int n = snprintf(command, sizeof(command),
-                     "VULKAN_DISPATCH_V4 %zu %zu %u %u %u %u %s %s %u %zu %s",
-                     shader_size_to_send,
-                     binding_count,
-                     push_size,
-                     dispatch_x,
-                     dispatch_y ? dispatch_y : 1,
-                     dispatch_z ? dispatch_z : 1,
-                     push_token,
-                     entry_hex[0] ? entry_hex : "-",
-                     op->pipeline->specialization_entry_count,
-                     op->pipeline->specialization_data_size,
-                     spec_token);
-    if (n < 0 || (size_t)n >= sizeof(command)) {
-        PDOCKER_VK_COMMAND_TOO_LONG("core-header", (n > 0) ? (size_t)n : 0);
-    }
-    size_t off = (size_t)n;
+#define PDOCKER_VK_APPENDF(stage_, ...) \
+    do { \
+        int append_rc_ = pdocker_vk_command_text_appendf(&command, __VA_ARGS__); \
+        if (append_rc_ != 0) PDOCKER_VK_APPEND_FAIL((stage_), append_rc_); \
+    } while (0)
+
+    PDOCKER_VK_APPENDF("core-header",
+                       "VULKAN_DISPATCH_V4 %zu %zu %u %u %u %u %s %s %u %zu %s",
+                       shader_size_to_send,
+                       binding_count,
+                       push_size,
+                       dispatch_x,
+                       dispatch_y ? dispatch_y : 1,
+                       dispatch_z ? dispatch_z : 1,
+                       push_token,
+                       entry_hex[0] ? entry_hex : "-",
+                       op->pipeline->specialization_entry_count,
+                       op->pipeline->specialization_data_size,
+                       spec_token);
     for (uint32_t i = 0; i < op->pipeline->specialization_entry_count; ++i) {
         const VkSpecializationMapEntry *entry = &op->pipeline->specialization_entries[i];
-        n = snprintf(command + off, sizeof(command) - off,
-                     " %u %u %zu",
-                     entry->constantID,
-                     entry->offset,
-                     entry->size);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
-        off += (size_t)n;
+        PDOCKER_VK_APPENDF("append-specialization",
+                           " %u %u %zu",
+                           entry->constantID,
+                           entry->offset,
+                           entry->size);
     }
     for (size_t i = 0; i < binding_count; ++i) {
-        n = snprintf(command + off, sizeof(command) - off,
-                     " %u %u %llu %zu %llu %llu %zu %u %u %llu %zu %llu %llu",
-                     api_descriptor_sets[i],
-                     bindings[i],
-                     (unsigned long long)offsets[i],
-                     sizes[i],
-                     (unsigned long long)api_offsets[i],
-                     (unsigned long long)api_ranges[i],
-                     api_buffer_sizes[i],
-                     api_descriptor_types[i],
-                     api_dynamic_flags[i],
-                     (unsigned long long)api_memory_offsets[i],
-                     api_memory_sizes[i],
-                     (unsigned long long)api_memory_ids[i],
-                     (unsigned long long)api_buffer_ids[i]);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
-        off += (size_t)n;
+        PDOCKER_VK_APPENDF("append-binding",
+                           " %u %u %llu %zu %llu %llu %zu %u %u %llu %zu %llu %llu",
+                           api_descriptor_sets[i],
+                           bindings[i],
+                           (unsigned long long)offsets[i],
+                           sizes[i],
+                           (unsigned long long)api_offsets[i],
+                           (unsigned long long)api_ranges[i],
+                           api_buffer_sizes[i],
+                           api_descriptor_types[i],
+                           api_dynamic_flags[i],
+                           (unsigned long long)api_memory_offsets[i],
+                           api_memory_sizes[i],
+                           (unsigned long long)api_memory_ids[i],
+                           (unsigned long long)api_buffer_ids[i]);
     }
     if (op->base_group_x || op->base_group_y || op->base_group_z) {
-        n = snprintf(command + off, sizeof(command) - off,
-                     " base_group_x=%u base_group_y=%u base_group_z=%u",
-                     op->base_group_x,
-                     op->base_group_y,
-                     op->base_group_z);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-base-group");
-        off += (size_t)n;
+        PDOCKER_VK_APPENDF("append-base-group",
+                           " base_group_x=%u base_group_y=%u base_group_z=%u",
+                           op->base_group_x,
+                           op->base_group_y,
+                           op->base_group_z);
     }
-    const size_t core_command_len = off;
-    const uint64_t core_command_hash = fnv1a64_bytes(command, core_command_len);
+    const size_t core_command_len = command.len;
+    const uint64_t core_command_hash = fnv1a64_bytes(command.data, core_command_len);
     const uint64_t shader_hash = shader_hash_to_send;
     const uint64_t push_hash = fnv1a64_bytes(op->push_constants, push_size);
     const uint64_t specialization_data_hash =
@@ -9974,20 +10030,18 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
         descriptor_hash = fnv1a64_update_u64(descriptor_hash, (uint64_t)api_buffer_ids[i]);
     }
     if (reconcile_api_evidence_log_enabled()) {
-        n = snprintf(command + off, sizeof(command) - off,
-                     " dispatch_id=%llu sender_core_command_hash=0x%016llx"
-                     " sender_spirv_hash=0x%016llx sender_push_hash=0x%016llx"
-                     " sender_specialization_hash=0x%016llx sender_descriptor_hash=0x%016llx"
-                     " sender_dispatch_hash=0x%016llx",
-                     (unsigned long long)dispatch_id,
-                     (unsigned long long)core_command_hash,
-                     (unsigned long long)shader_hash,
-                     (unsigned long long)push_hash,
-                     (unsigned long long)specialization_hash,
-                     (unsigned long long)descriptor_hash,
-                     (unsigned long long)dispatch_hash);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
-        off += (size_t)n;
+        PDOCKER_VK_APPENDF("append-reconcile-evidence",
+                           " dispatch_id=%llu sender_core_command_hash=0x%016llx"
+                           " sender_spirv_hash=0x%016llx sender_push_hash=0x%016llx"
+                           " sender_specialization_hash=0x%016llx sender_descriptor_hash=0x%016llx"
+                           " sender_dispatch_hash=0x%016llx",
+                           (unsigned long long)dispatch_id,
+                           (unsigned long long)core_command_hash,
+                           (unsigned long long)shader_hash,
+                           (unsigned long long)push_hash,
+                           (unsigned long long)specialization_hash,
+                           (unsigned long long)descriptor_hash,
+                           (unsigned long long)dispatch_hash);
     }
     if (probe.enabled) {
         /*
@@ -9999,13 +10053,11 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
          * binding option is absent.  Pipeline cache/reconciliation still use
          * sender_spirv_hash above, which is the actual transmitted shader.
          */
-        n = snprintf(command + off, sizeof(command) - off,
-                     " sender_source_spirv_hash=0x%016llx"
-                     " sender_effective_spirv_hash=0x%016llx",
-                     (unsigned long long)source_shader_hash,
-                     (unsigned long long)shader_hash_to_send);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
-        off += (size_t)n;
+        PDOCKER_VK_APPENDF("append-probe-evidence",
+                           " sender_source_spirv_hash=0x%016llx"
+                           " sender_effective_spirv_hash=0x%016llx",
+                           (unsigned long long)source_shader_hash,
+                           (unsigned long long)shader_hash_to_send);
     }
     typedef struct {
         const char *env;
@@ -10025,12 +10077,10 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
     for (size_t i = 0; i < sizeof(bool_bridge_options) / sizeof(bool_bridge_options[0]); ++i) {
         const PdockerVkBoolBridgeOption *option = &bool_bridge_options[i];
         if (!getenv(option->env)) continue;
-        n = snprintf(command + off, sizeof(command) - off,
-                     " %s=%u",
-                     option->option,
-                     env_truthy_default(option->env, option->default_value) ? 1u : 0u);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
-        off += (size_t)n;
+        PDOCKER_VK_APPENDF("append-bool-option",
+                           " %s=%u",
+                           option->option,
+                           env_truthy_default(option->env, option->default_value) ? 1u : 0u);
     }
 
     typedef struct {
@@ -10050,12 +10100,10 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
         char *end = NULL;
         unsigned long long parsed = strtoull(value, &end, 10);
         if (!end || *end != '\0') continue;
-        n = snprintf(command + off, sizeof(command) - off,
-                     " %s=%llu",
-                     option->option,
-                     parsed);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
-        off += (size_t)n;
+        PDOCKER_VK_APPENDF("append-u64-option",
+                           " %s=%llu",
+                           option->option,
+                           parsed);
     }
     typedef struct {
         const char *env;
@@ -10079,42 +10127,33 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
                     option->env,
                     (unsigned long long)dispatch_id);
             close_spirv_probe_replay(&probe);
+            pdocker_vk_command_text_destroy(&command);
             return -EINVAL;
         }
         char value_hex[PDOCKER_GPU_VULKAN_STRING_DISPATCH_OPTION_MAX_BYTES * 2u + 1u];
         hex_encode((const uint8_t *)value, value_len, value_hex, sizeof(value_hex));
-        n = snprintf(command + off, sizeof(command) - off,
-                     " %s_hex=%s",
-                     option->option,
-                     value_hex);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-string-option");
-        off += (size_t)n;
+        PDOCKER_VK_APPENDF("append-string-option",
+                           " %s_hex=%s",
+                           option->option,
+                           value_hex);
     }
     if (trace_allocations() || env_truthy_default("PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE", false)) {
-        n = snprintf(command + off, sizeof(command) - off, " profile=1");
-        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
-        off += (size_t)n;
+        PDOCKER_VK_APPENDF("append-profile-option", " profile=1");
     }
-    n = snprintf(command + off, sizeof(command) - off,
-                 " requested_feature_mask=%llu",
-                 (unsigned long long)op->pipeline->requested_feature_mask);
-    if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
-    off += (size_t)n;
-    n = snprintf(command + off, sizeof(command) - off,
-                 " v4_binding_schema=0x%016llx v4_binding_fields=%u",
-                 (unsigned long long)PDOCKER_GPU_VULKAN_DISPATCH_V4_BINDING_SCHEMA_HASH,
-                 PDOCKER_GPU_VULKAN_DISPATCH_V4_BINDING_FIELD_COUNT);
-    if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
-    off += (size_t)n;
-    if (off + 2 >= sizeof(command)) PDOCKER_VK_COMMAND_TOO_LONG("newline", off + 2);
-    command[off++] = '\n';
-    command[off] = '\0';
+    PDOCKER_VK_APPENDF("append-requested-feature-mask",
+                       " requested_feature_mask=%llu",
+                       (unsigned long long)op->pipeline->requested_feature_mask);
+    PDOCKER_VK_APPENDF("append-v4-schema",
+                       " v4_binding_schema=0x%016llx v4_binding_fields=%u",
+                       (unsigned long long)PDOCKER_GPU_VULKAN_DISPATCH_V4_BINDING_SCHEMA_HASH,
+                       PDOCKER_GPU_VULKAN_DISPATCH_V4_BINDING_FIELD_COUNT);
+    PDOCKER_VK_APPENDF("newline", "\n");
 
-    const size_t raw_command_len = off;
-    const uint64_t raw_command_hash = fnv1a64_bytes(command, raw_command_len);
+    const size_t raw_command_len = command.len;
+    const uint64_t raw_command_hash = fnv1a64_bytes(command.data, raw_command_len);
     trace_vulkan_command_length_warning(dispatch_id,
                                         raw_command_len,
-                                        sizeof(command),
+                                        command.cap,
                                         "pre-send",
                                         false);
     trace_vulkan_reconcile_evidence(dispatch_id,
@@ -10151,8 +10190,8 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
                                     api_memory_sizes,
                                     api_memory_ids,
                                     api_buffer_ids);
-#undef PDOCKER_VK_APPEND_TOO_LONG
-#undef PDOCKER_VK_COMMAND_TOO_LONG
+#undef PDOCKER_VK_APPENDF
+#undef PDOCKER_VK_APPEND_FAIL
     const bool lifecycle_log = dispatch_lifecycle_log_enabled();
     const double lifecycle_start_ms = monotonic_ms();
     if (lifecycle_log) {
@@ -10184,17 +10223,18 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
             fflush(stderr);
         }
         close_spirv_probe_replay(&probe);
+        pdocker_vk_command_text_destroy(&command);
         return socket_fd;
     }
     const bool requires_v5_frame =
         descriptor_array_transport_required || image_descriptor_count > 0 ||
-        binding_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS || op->dispatch_indirect;
+        binding_count > PDOCKER_GPU_VULKAN_TEXT_DISPATCH_MAX_BINDINGS || op->dispatch_indirect;
     if ((vulkan_v5_frame_enabled() || requires_v5_frame) && !copy_alias_enabled()) {
         const char *option_text = "";
         size_t option_text_size = 0;
         if (raw_command_len > core_command_len + 1u &&
-            command[core_command_len] == ' ') {
-            option_text = command + core_command_len + 1u;
+            command.data[core_command_len] == ' ') {
+            option_text = command.data + core_command_len + 1u;
             option_text_size = raw_command_len - core_command_len - 1u;
             if (option_text_size > 0 && option_text[option_text_size - 1u] == '\n') {
                 option_text_size--;
@@ -10267,6 +10307,7 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
         }
         close(socket_fd);
         close_spirv_probe_replay(&probe);
+        pdocker_vk_command_text_destroy(&command);
         return rc;
     }
     if ((vulkan_v5_frame_enabled() || requires_v5_frame) && copy_alias_enabled()) {
@@ -10275,6 +10316,7 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
                 "because PDOCKER_VULKAN_ALIAS_COPIES is active\n");
         close(socket_fd);
         close_spirv_probe_replay(&probe);
+        pdocker_vk_command_text_destroy(&command);
         return -EOPNOTSUPP;
     }
     char control[CMSG_SPACE(sizeof(int) * PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS)];
@@ -10283,8 +10325,8 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
     memset(control, 0, sizeof(control));
     memset(&iov, 0, sizeof(iov));
     memset(&msg, 0, sizeof(msg));
-    iov.iov_base = command;
-    iov.iov_len = strlen(command);
+    iov.iov_base = command.data;
+    iov.iov_len = raw_command_len;
     msg.msg_iov = &iov;
     msg.msg_iovlen = 1;
     msg.msg_control = control;
@@ -10392,6 +10434,7 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
     }
     close(socket_fd);
     close_spirv_probe_replay(&probe);
+    pdocker_vk_command_text_destroy(&command);
     return rc;
 }
 

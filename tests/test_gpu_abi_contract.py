@@ -5021,6 +5021,7 @@ class GpuAbiContractTest(unittest.TestCase):
         for source in [app, container]:
             self.assertIn("#define PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS 253u", source)
             self.assertIn("#define PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS 24u", source)
+            self.assertIn("#define PDOCKER_GPU_VULKAN_TEXT_DISPATCH_MAX_BINDINGS (PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS - 1u)", source)
         self.assertIn("#define PDOCKER_GPU_MAX_PASSED_FDS PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS", executor)
         self.assertIn("#if PDOCKER_GPU_MAX_PASSED_FDS > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS", executor)
         self.assertIn("header->fd_count > PDOCKER_GPU_MAX_PASSED_FDS", executor)
@@ -5032,6 +5033,25 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("int fds[PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS]", icd)
         self.assertNotIn("CMSG_SPACE(sizeof(int) * PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS)", icd)
         self.assertNotIn("int fds[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS]", icd)
+
+    def test_vulkan_legacy_text_dispatch_is_heap_backed_to_transport_cap(self):
+        executor = GPU_EXECUTOR.read_text()
+        icd = VULKAN_ICD.read_text()
+        self.assertIn("typedef struct {\n    char *data;", icd)
+        self.assertIn("static int pdocker_vk_command_text_appendf", icd)
+        self.assertIn("PdockerVkCommandText command = {0};", icd)
+        self.assertIn("pdocker_vk_command_text_destroy(&command);", icd)
+        self.assertNotIn("char command[4096];", icd)
+        self.assertIn("binding_count > PDOCKER_GPU_VULKAN_TEXT_DISPATCH_MAX_BINDINGS || op->dispatch_indirect", icd)
+        text_body = executor.split('strncmp(cmd, "VULKAN_DISPATCH_V2 ", 19) == 0', 1)[1].split('} else if (strncmp(cmd, "VULKAN_DISPATCH_V1 ", 19) == 0)', 1)[0]
+        v1_body = executor.split('} else if (strncmp(cmd, "VULKAN_DISPATCH_V1 ", 19) == 0)', 1)[1].split('} else {\n                json_fail("command", "unknown command");', 1)[0]
+        for body in [text_body, v1_body]:
+            self.assertIn("VulkanDispatchBinding *bindings = NULL;", body)
+            self.assertIn("bindings = (VulkanDispatchBinding *)calloc(binding_count, sizeof(*bindings));", body)
+            self.assertIn("binding_count > PDOCKER_GPU_VULKAN_TEXT_DISPATCH_MAX_BINDINGS", body)
+            self.assertIn("free(bindings);", body)
+            self.assertNotIn("VulkanDispatchBinding bindings[PDOCKER_GPU_MAX_VULKAN_BINDINGS];", body)
+            self.assertNotIn("binding_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS", body)
 
     def test_vulkan_dispatch_v5_schema_hashes_match_declared_field_macros(self):
         schemas = [
@@ -7308,7 +7328,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("dispatch_indirect_resource=%u dispatch_indirect_offset=%llu", icd)
         self.assertIn("const bool requires_v5_frame =", icd)
         self.assertIn("descriptor_array_transport_required || image_descriptor_count > 0 ||", icd)
-        self.assertIn("binding_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS || op->dispatch_indirect", icd)
+        self.assertIn("binding_count > PDOCKER_GPU_VULKAN_TEXT_DISPATCH_MAX_BINDINGS || op->dispatch_indirect", icd)
         self.assertIn("dispatch_indirect_resource=", executor)
         self.assertIn("materialize_vulkan_dispatch_indirect_buffer", executor)
         self.assertIn("vkCmdDispatchIndirect(command_buffer", executor)
@@ -14849,7 +14869,7 @@ class GpuAbiContractTest(unittest.TestCase):
             'env_truthy_default("PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE", false)',
             '" profile=1"',
             "generic dispatch rejected: invalid %s dispatch_id=%llu",
-            'PDOCKER_VK_APPEND_TOO_LONG("append-string-option")',
+            'PDOCKER_VK_APPENDF("append-string-option"',
         ]:
             self.assertIn(marker, icd)
 
