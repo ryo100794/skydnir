@@ -211,7 +211,10 @@ or closes.
   ceiling from that lane.  Staged-image upload and attachment writeback now
   heap-allocate command-recording image/buffer barrier tables from the
   materialized image count, so those paths no longer carry a separate 16-entry
-  stack barrier ceiling.  The fixed strict-graph cache is deliberately
+  stack barrier ceiling.  V6.24 descriptor-set layout validation now also
+  accepts sparse/high API binding numbers and caps descriptor counts by the V5
+  descriptor-table maximum instead of the legacy 16-slot executor constant.
+  The fixed strict-graph cache is deliberately
   disabled for wider dispatches instead of being widened inside this slice.
   Remaining narrowing points: the real SCM_RIGHTS fd limit for fd-bearing buffers,
   remaining non-descriptor graphics fixed-array lanes, and device-runtime evidence for a >16 V5 compute

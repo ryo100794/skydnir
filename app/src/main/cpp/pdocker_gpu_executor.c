@@ -24268,8 +24268,8 @@ static int validate_vulkan_graphics_v6_frame_content(
             if (type_rc != 0) {
                 type_rc = vulkan_dispatch_image_descriptor_type_from_api(entry->descriptor_type, &descriptor_type);
             }
-            if (entry->layout_id == 0 || entry->binding >= PDOCKER_GPU_MAX_VULKAN_BINDINGS ||
-                entry->descriptor_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS ||
+            if (entry->layout_id == 0 ||
+                entry->descriptor_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS ||
                 entry->binding_flags != 0 || entry->reserved0 != 0 || type_rc != 0 ||
                 entry->immutable_sampler_count > entry->descriptor_count ||
                 (entry->immutable_sampler_count != 0 &&

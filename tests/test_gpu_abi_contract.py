@@ -5422,6 +5422,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "descriptor_set_layouts",
             "pipeline_layout_sets",
             "entry->binding_flags != 0",
+            "entry->descriptor_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS",
             "entry->immutable_sampler_count > entry->descriptor_count",
             "!vulkan_descriptor_type_requires_sampler(descriptor_type)",
             "referenced_by_pipeline_layout",
@@ -5441,6 +5442,11 @@ class GpuAbiContractTest(unittest.TestCase):
             "vkCreateDescriptorSetLayout(rt->device, &dslci, NULL, &dsl->layout)",
         ]:
             self.assertIn(marker, executor)
+        v624_validation_body = executor.split("if (is_v624) {", 1)[1].split(
+            "if (is_v625)", 1
+        )[0]
+        self.assertNotIn("entry->binding >= PDOCKER_GPU_MAX_VULKAN_BINDINGS", v624_validation_body)
+        self.assertNotIn("entry->descriptor_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS", v624_validation_body)
 
         icd = VULKAN_ICD.read_text()
         for marker in [
