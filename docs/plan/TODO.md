@@ -179,7 +179,11 @@ or closes.
   metadata in the legacy compute runner is now heap-backed and stride-indexed,
   and SPIR-V descriptor reflection tables are heap-backed by final
   `layout_count`, removing another 16-binding-number cap for otherwise
-  legacy-compatible frames.  Descriptor capture, descriptor count/array/object
+  legacy-compatible frames.  The container-side generic dispatch collector now
+  keeps its transient descriptor/object/fd tables in a cleanup-owned heap
+  record keyed to the V5 table limits instead of fixed `PDOCKER_VK_MAX_STORAGE_BUFFERS`
+  stack arrays; fd-bearing buffer descriptors still fail closed at the real
+  SCM_RIGHTS transport cap.  Descriptor capture, descriptor count/array/object
   limits, duplicate-rewrite limits, and full V5 table-native replay remain the
   next narrowing points to remove.  Acceptance: host verifier
   `tests.test_gpu_abi_contract` must include

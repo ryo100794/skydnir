@@ -6632,8 +6632,10 @@ class GpuAbiContractTest(unittest.TestCase):
         icd = VULKAN_ICD.read_text()
         self.assertIn("PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS", icd)
         self.assertIn("[PDOCKER_VK_MAX_STORAGE_BUFFERS][PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS]", icd)
-        self.assertIn("uint32_t api_descriptor_array_elements[PDOCKER_VK_MAX_STORAGE_BUFFERS];", icd)
-        self.assertIn("uint32_t image_descriptor_array_elements[PDOCKER_VK_MAX_STORAGE_BUFFERS];", icd)
+        self.assertIn("PdockerVkGenericDispatchTables *tables", icd)
+        self.assertIn("cleanup(cleanup_generic_dispatch_tables)", icd)
+        self.assertIn("uint32_t api_descriptor_array_elements[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS];", icd)
+        self.assertIn("uint32_t image_descriptor_array_elements[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS];", icd)
         self.assertIn("descriptor_linear_slot", icd)
         self.assertIn("descriptors[i].array_element = api_descriptor_array_elements[i];", icd)
         self.assertIn("descriptors[descriptor_index].array_element = image_descriptor_array_elements[i];", icd)
@@ -6660,6 +6662,40 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("storage_binding_counts[binding]", bind_body)
         self.assertIn("storage_buffers[binding][array_element]", bind_body)
         self.assertNotIn("PDOCKER_VULKAN_USE_V5_FRAME is disabled", bind_body)
+
+    def test_vulkan_generic_dispatch_temp_tables_are_not_layout_slot_limited(self):
+        icd = VULKAN_ICD.read_text()
+        self.assertIn("typedef struct {\n    int fds[PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS];", icd)
+        for marker in [
+            "uint32_t bindings[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS];",
+            "uint32_t api_descriptor_sets[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS];",
+            "uint32_t api_descriptor_array_elements[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS];",
+            "uint32_t image_descriptor_sets[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS];",
+            "PdockerVkImage *image_objects[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGES];",
+            "PdockerVkImageView *image_view_objects[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGE_VIEWS];",
+            "PdockerVkSampler *sampler_objects[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_SAMPLERS];",
+            "PdockerVkGenericDispatchTables *tables",
+            "cleanup(cleanup_generic_dispatch_tables)",
+            "for (size_t i = 0; i < PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS; ++i) {\n        fds[i] = -1;",
+            "binding_count >= PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS - 1u",
+            "char control[CMSG_SPACE(sizeof(int) * PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS)]",
+        ]:
+            self.assertIn(marker, icd)
+        body = icd.split("static int send_generic_vulkan_dispatch_op", 1)[1].split(
+            "VKAPI_ATTR void VKAPI_CALL vkCmdDispatch", 1
+        )[0]
+        for forbidden in [
+            "uint32_t bindings[PDOCKER_VK_MAX_STORAGE_BUFFERS]",
+            "uint32_t api_descriptor_sets[PDOCKER_VK_MAX_STORAGE_BUFFERS]",
+            "uint32_t api_descriptor_array_elements[PDOCKER_VK_MAX_STORAGE_BUFFERS]",
+            "uint32_t image_descriptor_sets[PDOCKER_VK_MAX_STORAGE_BUFFERS]",
+            "uint64_t api_memory_ids[PDOCKER_VK_MAX_STORAGE_BUFFERS]",
+            "memset(fds, -1, sizeof(fds));",
+            "char control[CMSG_SPACE(sizeof(fds))]",
+            "binding_count >= PDOCKER_VK_MAX_STORAGE_BUFFERS",
+            "image_descriptor_count >= PDOCKER_VK_MAX_STORAGE_BUFFERS",
+        ]:
+            self.assertNotIn(forbidden, body)
 
 
 
@@ -7188,7 +7224,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("memcpy(counts", resolve_body)
         self.assertIn("op->dispatch_indirect ? op->dispatch_indirect_buffer : NULL", icd)
         self.assertIn("dispatch_indirect_resource=%u dispatch_indirect_offset=%llu", icd)
-        self.assertIn("const bool requires_v5_frame = descriptor_array_transport_required || image_descriptor_count > 0 || op->dispatch_indirect;", icd)
+        self.assertIn("const bool requires_v5_frame =", icd)
+        self.assertIn("descriptor_array_transport_required || image_descriptor_count > 0 ||", icd)
+        self.assertIn("binding_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS || op->dispatch_indirect", icd)
         self.assertIn("dispatch_indirect_resource=", executor)
         self.assertIn("materialize_vulkan_dispatch_indirect_buffer", executor)
         self.assertIn("vkCmdDispatchIndirect(command_buffer", executor)
@@ -11279,8 +11317,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "entry->sampler_id = pdocker_vk_sampler_object_id(sampler);",
             "api_memory_ids[binding_count] = pdocker_vk_memory_object_id(dispatch_memory);",
             "api_buffer_ids[binding_count] = pdocker_vk_buffer_object_id(binding->buffer);",
-            "uint64_t api_memory_ids[PDOCKER_VK_MAX_STORAGE_BUFFERS];",
-            "uint64_t api_buffer_ids[PDOCKER_VK_MAX_STORAGE_BUFFERS];",
+            "uint64_t api_memory_ids[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS];",
+            "uint64_t api_buffer_ids[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS];",
             "const uint64_t *api_memory_ids",
             "const uint64_t *api_buffer_ids",
             "uint64_t probe_memory_id =",
