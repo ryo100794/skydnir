@@ -8187,6 +8187,25 @@ static int binding_index_for_number(const VulkanDispatchBinding *bindings,
     return -1;
 }
 
+static int binding_index_for_descriptor_slot(
+        const VulkanDispatchBinding *bindings,
+        const uint8_t *active_bindings,
+        size_t binding_count,
+        uint32_t descriptor_set,
+        uint32_t binding,
+        uint32_t array_element) {
+    if (!bindings) return -1;
+    for (size_t i = 0; i < binding_count; ++i) {
+        if (active_bindings && !active_bindings[i]) continue;
+        if (bindings[i].descriptor_set == descriptor_set &&
+            bindings[i].binding == binding &&
+            bindings[i].api_array_element == array_element) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
 static uint64_t vulkan_descriptor_layout_hash(
         const uint32_t *set_binding_counts,
         const VkDescriptorType *set_binding_types,
@@ -14549,6 +14568,7 @@ static int run_vulkan_dispatch_fd(
     uint32_t *shader_code = (uint32_t *)malloc(shader_size);
     VulkanVectorBuffer *temp_buffers = NULL;
     VulkanVectorBuffer *alias_temp_buffers = NULL;
+    size_t alias_temp_buffer_count = 0;
     VulkanVectorBuffer dispatch_indirect_temp_buffer;
     int dispatch_indirect_temp_buffer_used = 0;
     VulkanVectorBuffer **vk_buffers = NULL;
@@ -16190,15 +16210,6 @@ static int run_vulkan_dispatch_fd(
             set_binding_counts[set_index] = needed;
         }
     }
-    if (binding_alias_count > 0) {
-        for (size_t i = 0; i < binding_count; ++i) {
-            if (active_bindings[i] && bindings[i].api_array_element != 0) {
-                json_fail("vulkan-dispatch", "descriptor alias rewrite does not support descriptor arrays");
-                ret = 64;
-                goto cleanup;
-            }
-        }
-    }
     for (size_t i = 0; i < binding_alias_count; ++i) {
         if (multi_descriptor_set) {
             json_fail("vulkan-dispatch", "descriptor alias rewrite multi-set pending");
@@ -16216,33 +16227,50 @@ static int run_vulkan_dispatch_fd(
             ret = 64;
             goto cleanup;
         }
-        int original_index = binding_index_for_number(
-            bindings,
-            binding_count,
-            binding_aliases[i].original_binding);
-        if (original_index < 0) {
-            json_fail("vulkan-dispatch", "descriptor alias source missing");
-            ret = 64;
-            goto cleanup;
+        int alias_source_seen = 0;
+        VkDescriptorType alias_descriptor_type = VK_DESCRIPTOR_TYPE_MAX_ENUM;
+        uint32_t alias_descriptor_count = 0;
+        for (size_t source_i = 0; source_i < binding_count; ++source_i) {
+            if (!active_bindings[source_i]) continue;
+            if (bindings[source_i].descriptor_set != alias_set ||
+                bindings[source_i].binding != binding_aliases[i].original_binding) {
+                continue;
+            }
+            VkDescriptorType descriptor_type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            if (vulkan_dispatch_descriptor_type_from_api(bindings[source_i].api_descriptor_type,
+                                                         &descriptor_type) != 0) {
+                json_fail("vulkan-dispatch", "unsupported descriptor alias type for V4 transport");
+                ret = 64;
+                goto cleanup;
+            }
+            if (alias_source_seen && alias_descriptor_type != descriptor_type) {
+                json_fail("vulkan-dispatch", "conflicting descriptor alias source types");
+                ret = 64;
+                goto cleanup;
+            }
+            alias_source_seen = 1;
+            alias_descriptor_type = descriptor_type;
+            const uint32_t needed_descriptor_count = bindings[source_i].api_array_element + 1;
+            if (needed_descriptor_count > alias_descriptor_count) {
+                alias_descriptor_count = needed_descriptor_count;
+            }
         }
-        VkDescriptorType descriptor_type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        if (vulkan_dispatch_descriptor_type_from_api(bindings[original_index].api_descriptor_type,
-                                                     &descriptor_type) != 0) {
-            json_fail("vulkan-dispatch", "unsupported descriptor alias type for V4 transport");
+        if (!alias_source_seen || alias_descriptor_count == 0) {
+            json_fail("vulkan-dispatch", "descriptor alias source missing");
             ret = 64;
             goto cleanup;
         }
         const size_t table_index =
             (size_t)alias_set * layout_count + binding_aliases[i].rewritten_binding;
         if (set_binding_descriptor_counts[table_index] > 0 &&
-            set_binding_types[table_index] != descriptor_type) {
+            set_binding_types[table_index] != alias_descriptor_type) {
             json_fail("vulkan-dispatch", "conflicting descriptor alias types for set binding");
             ret = 64;
             goto cleanup;
         }
-        set_binding_types[table_index] = descriptor_type;
-        if (set_binding_descriptor_counts[table_index] == 0) {
-            set_binding_descriptor_counts[table_index] = 1;
+        set_binding_types[table_index] = alias_descriptor_type;
+        if (alias_descriptor_count > set_binding_descriptor_counts[table_index]) {
+            set_binding_descriptor_counts[table_index] = alias_descriptor_count;
         }
         const uint32_t needed = binding_aliases[i].rewritten_binding + 1;
         if (needed > set_binding_counts[alias_set]) {
@@ -16527,7 +16555,31 @@ static int run_vulkan_dispatch_fd(
     rc = vkAllocateDescriptorSets(rt->device, &dsai, descriptor_sets);
     timing_descriptor_allocate_ms = now_ms() - descriptor_allocate_start;
     if (rc != VK_SUCCESS) goto cleanup;
-    descriptor_write_capacity = binding_count + image_descriptor_count + binding_alias_count;
+    size_t descriptor_alias_write_count = 0;
+    for (size_t alias_i = 0; alias_i < binding_alias_count; ++alias_i) {
+        const uint32_t alias_set = binding_aliases[alias_i].descriptor_set;
+        for (size_t source_i = 0; source_i < binding_count; ++source_i) {
+            if (!active_bindings[source_i]) continue;
+            if (bindings[source_i].descriptor_set == alias_set &&
+                bindings[source_i].binding == binding_aliases[alias_i].original_binding &&
+                binding_index_for_descriptor_slot(
+                    bindings,
+                    active_bindings,
+                    binding_count,
+                    alias_set,
+                    binding_aliases[alias_i].rewritten_binding,
+                    bindings[source_i].api_array_element) < 0) {
+                descriptor_alias_write_count++;
+            }
+        }
+    }
+    if (descriptor_alias_write_count > SIZE_MAX - binding_count ||
+        image_descriptor_count > SIZE_MAX - binding_count - descriptor_alias_write_count) {
+        json_fail("vulkan-dispatch", "descriptor write count overflow");
+        ret = 64;
+        goto cleanup;
+    }
+    descriptor_write_capacity = binding_count + image_descriptor_count + descriptor_alias_write_count;
     if (descriptor_write_capacity == 0) descriptor_write_capacity = 1;
     if (descriptor_write_capacity > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS) {
         json_fail("vulkan-dispatch", "too many descriptor writes");
@@ -16648,66 +16700,69 @@ static int run_vulkan_dispatch_fd(
             ret = 64;
             goto cleanup;
         }
-        if (binding_index_for_number(
-                bindings,
-                binding_count,
-                binding_aliases[i].rewritten_binding) >= 0) {
-            continue;
+        for (size_t source_i = 0; source_i < binding_count; ++source_i) {
+            if (!active_bindings[source_i]) continue;
+            if (bindings[source_i].descriptor_set != binding_aliases[i].descriptor_set ||
+                bindings[source_i].binding != binding_aliases[i].original_binding) {
+                continue;
+            }
+            if (binding_index_for_descriptor_slot(
+                    bindings,
+                    active_bindings,
+                    binding_count,
+                    binding_aliases[i].descriptor_set,
+                    binding_aliases[i].rewritten_binding,
+                    bindings[source_i].api_array_element) >= 0) {
+                continue;
+            }
+            if (write_count >= descriptor_write_capacity) {
+                json_fail("vulkan-dispatch", "too many descriptor writes");
+                ret = 64;
+                goto cleanup;
+            }
+            if (materialize_descriptor_aliases &&
+                bindings[source_i].size > 0 &&
+                vk_buffers[source_i] &&
+                vk_buffers[source_i]->map &&
+                binding_gpu_offset[source_i] + bindings[source_i].size <=
+                    vk_buffers[source_i]->size &&
+                alias_temp_buffer_count < alias_table_capacity &&
+                create_vulkan_vector_buffer(
+                    rt->physical_device,
+                    rt->device,
+                    bindings[source_i].size,
+                    (const unsigned char *)vk_buffers[source_i]->map + binding_gpu_offset[source_i],
+                    &alias_temp_buffers[alias_temp_buffer_count]) == 0) {
+                infos[write_count].buffer = alias_temp_buffers[alias_temp_buffer_count].buffer;
+                infos[write_count].offset = 0;
+                alias_temp_buffer_count++;
+            } else {
+                infos[write_count].buffer = vk_buffers[source_i]->buffer;
+                infos[write_count].offset = (VkDeviceSize)binding_descriptor_offset[source_i];
+            }
+            infos[write_count].range = (VkDeviceSize)
+                vulkan_binding_descriptor_range(&bindings[source_i], strict_passthrough);
+            writes[write_count].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[write_count].dstSet = descriptor_sets[binding_aliases[i].descriptor_set];
+            writes[write_count].dstBinding = binding_aliases[i].rewritten_binding;
+            writes[write_count].dstArrayElement = bindings[source_i].api_array_element;
+            writes[write_count].descriptorCount = 1;
+            if (vulkan_dispatch_descriptor_type_from_api(bindings[source_i].api_descriptor_type,
+                                                         &writes[write_count].descriptorType) != 0) {
+                json_fail("vulkan-dispatch", "unsupported descriptor alias write type for V4 transport");
+                ret = 64;
+                goto cleanup;
+            }
+            writes[write_count].pBufferInfo = &infos[write_count];
+            descriptor_write_dst_bindings[write_count] = binding_aliases[i].rewritten_binding;
+            descriptor_write_source_indices[write_count] = source_i;
+            descriptor_write_source_bindings[write_count] = bindings[source_i].binding;
+            descriptor_write_alias_reps[write_count] = binding_alias_rep[source_i];
+            descriptor_write_offsets[write_count] = infos[write_count].offset;
+            descriptor_write_ranges[write_count] = infos[write_count].range;
+            descriptor_write_alias_flags[write_count] = 1;
+            ++write_count;
         }
-        if (write_count >= descriptor_write_capacity) {
-            json_fail("vulkan-dispatch", "too many descriptor writes");
-            ret = 64;
-            goto cleanup;
-        }
-        int original_index = binding_index_for_number(
-            bindings,
-            binding_count,
-            binding_aliases[i].original_binding);
-        if (original_index < 0) {
-            json_fail("vulkan-dispatch", "descriptor alias source missing");
-            ret = 64;
-            goto cleanup;
-        }
-        if (materialize_descriptor_aliases &&
-            bindings[original_index].size > 0 &&
-            vk_buffers[original_index] &&
-            vk_buffers[original_index]->map &&
-            binding_gpu_offset[original_index] + bindings[original_index].size <=
-                vk_buffers[original_index]->size &&
-            create_vulkan_vector_buffer(
-                rt->physical_device,
-                rt->device,
-                bindings[original_index].size,
-                (const unsigned char *)vk_buffers[original_index]->map + binding_gpu_offset[original_index],
-                &alias_temp_buffers[i]) == 0) {
-            infos[write_count].buffer = alias_temp_buffers[i].buffer;
-            infos[write_count].offset = 0;
-        } else {
-            infos[write_count].buffer = vk_buffers[original_index]->buffer;
-            infos[write_count].offset = (VkDeviceSize)binding_descriptor_offset[original_index];
-        }
-        infos[write_count].range = (VkDeviceSize)
-            vulkan_binding_descriptor_range(&bindings[original_index],
-                                            strict_passthrough);
-        writes[write_count].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[write_count].dstSet = descriptor_sets[binding_aliases[i].descriptor_set];
-        writes[write_count].dstBinding = binding_aliases[i].rewritten_binding;
-        writes[write_count].descriptorCount = 1;
-        if (vulkan_dispatch_descriptor_type_from_api(bindings[original_index].api_descriptor_type,
-                                                     &writes[write_count].descriptorType) != 0) {
-            json_fail("vulkan-dispatch", "unsupported descriptor alias write type for V4 transport");
-            ret = 64;
-            goto cleanup;
-        }
-        writes[write_count].pBufferInfo = &infos[write_count];
-        descriptor_write_dst_bindings[write_count] = binding_aliases[i].rewritten_binding;
-        descriptor_write_source_indices[write_count] = (size_t)original_index;
-        descriptor_write_source_bindings[write_count] = bindings[original_index].binding;
-        descriptor_write_alias_reps[write_count] = binding_alias_rep[original_index];
-        descriptor_write_offsets[write_count] = infos[write_count].offset;
-        descriptor_write_ranges[write_count] = infos[write_count].range;
-        descriptor_write_alias_flags[write_count] = 1;
-        ++write_count;
     }
     double descriptor_update_start = now_ms();
     vkUpdateDescriptorSets(rt->device, (uint32_t)write_count, writes, 0, NULL);
@@ -18861,7 +18916,7 @@ cleanup:
         }
     }
     if (alias_temp_buffers) {
-        for (size_t i = 0; i < binding_alias_count; ++i) {
+        for (size_t i = 0; i < alias_temp_buffer_count; ++i) {
             destroy_vulkan_vector_buffer(rt->device, &alias_temp_buffers[i]);
         }
     }

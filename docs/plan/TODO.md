@@ -220,7 +220,11 @@ or closes.
   sampler rows per binding, raises `PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS`
   to the V5 descriptor-table transport limit, and routes snapshots, updates,
   dynamic offsets, generic dispatch, graphics descriptor collection, and legacy
-  vector-add fallback through descriptor slot accessors.  Remaining overflow is
+  vector-add fallback through descriptor slot accessors.  The Android compute
+  executor duplicate-descriptor alias rewrite now also handles source descriptor
+  arrays by sizing the rewritten binding to the active source array span and
+  mirroring descriptor writes at the same `api_array_element`; only multi-set
+  alias rewrite remains fail-closed.  Remaining overflow is
   therefore a V5 transport-table limit rather than the former 16-element ICD
   storage shape.
   V6.1 explicit dependency barriers now allocate synchronization2 and legacy
