@@ -633,9 +633,9 @@ struct PdockerVkPipeline {
     uint64_t requested_feature_mask;
     uint32_t local_size_x;
     char entry_name[PDOCKER_VK_MAX_ENTRY_NAME];
-    VkSpecializationMapEntry specialization_entries[PDOCKER_VK_MAX_SPECIALIZATION_ENTRIES];
+    VkSpecializationMapEntry *specialization_entries;
     uint32_t specialization_entry_count;
-    uint8_t specialization_data[PDOCKER_VK_MAX_SPECIALIZATION_BYTES];
+    uint8_t *specialization_data;
     size_t specialization_data_size;
     bool specialization_too_large;
     bool graphics;
@@ -9348,11 +9348,11 @@ static int send_generic_vulkan_dispatch_v5_1_op(
         fd_count > PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS) {
         return -E2BIG;
     }
-    if (specialization_entry_count > PDOCKER_VK_MAX_SPECIALIZATION_ENTRIES ||
-        specialization_data_size > PDOCKER_VK_MAX_SPECIALIZATION_BYTES ||
-        push_size > PDOCKER_VK_MAX_PUSH_BYTES) {
+    if (push_size > PDOCKER_VK_MAX_PUSH_BYTES ||
+        (specialization_entry_count > 0 && !specialization_entries) ||
+        (specialization_data_size > 0 && !specialization_data)) {
         fprintf(stderr,
-                "pdocker-vulkan-icd: V5.1 frame rejected: metadata too large dispatch_id=%llu spec_entries=%u spec_bytes=%zu push_bytes=%zu\n",
+                "pdocker-vulkan-icd: V5.1 frame rejected: invalid metadata dispatch_id=%llu spec_entries=%u spec_bytes=%zu push_bytes=%zu\n",
                 (unsigned long long)dispatch_id,
                 specialization_entry_count,
                 specialization_data_size,
@@ -9789,7 +9789,7 @@ static int send_generic_vulkan_dispatch_v5_1_op(
                                           image_layout_range_count, &image_layout_range_table_bytes) ||
         !frame_capacity_add_aligned_table(&frame_capacity, sizeof(buffer_view_entries[0]),
                                           buffer_view_count, &buffer_view_table_bytes) ||
-        !frame_capacity_add_aligned_table(&frame_capacity, sizeof(specs[0]),
+        !frame_capacity_add_aligned_table(&frame_capacity, sizeof(*specs),
                                           specialization_entry_count, &specialization_table_bytes) ||
         !frame_capacity_add_aligned_bytes(&frame_capacity, specialization_data_size) ||
         !frame_capacity_add_aligned_bytes(&frame_capacity, push_size) ||
@@ -17566,12 +17566,6 @@ static VkResult validate_pipeline_specialization_info_for_transport(
         const VkSpecializationInfo *spec,
         const char *stage_name) {
     if (!spec) return VK_SUCCESS;
-    if (spec->mapEntryCount > PDOCKER_VK_MAX_SPECIALIZATION_ENTRIES ||
-        spec->dataSize > PDOCKER_VK_MAX_SPECIALIZATION_BYTES) {
-        trace_icd_runtime_failure(stage_name ? stage_name : "pipeline-specialization-too-large",
-                                  VK_ERROR_FEATURE_NOT_PRESENT);
-        return VK_ERROR_FEATURE_NOT_PRESENT;
-    }
     if ((spec->mapEntryCount > 0 && !spec->pMapEntries) ||
         (spec->dataSize > 0 && !spec->pData)) {
         trace_icd_runtime_failure(stage_name ? stage_name : "pipeline-specialization-missing-data",
@@ -17702,15 +17696,42 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateComputePipelines(
         }
         pipeline->local_size_x = 128;
         const char *entry_name = ci->stage.pName ? ci->stage.pName : "main";
-        snprintf(pipeline->entry_name, sizeof(pipeline->entry_name), "%s", entry_name);
+        size_t entry_name_len = strlen(entry_name);
+        if (entry_name_len == 0 || entry_name_len >= sizeof(pipeline->entry_name)) {
+            trace_icd_runtime_failure("compute-pipeline-entry-name-invalid",
+                                      VK_ERROR_FEATURE_NOT_PRESENT);
+            free(pipeline);
+            return VK_ERROR_FEATURE_NOT_PRESENT;
+        }
+        memcpy(pipeline->entry_name, entry_name, entry_name_len + 1u);
         const VkSpecializationInfo *spec = ci->stage.pSpecializationInfo;
         if (spec) {
             pipeline->specialization_entry_count = spec->mapEntryCount;
-            for (uint32_t j = 0; j < spec->mapEntryCount; ++j) {
-                pipeline->specialization_entries[j] = spec->pMapEntries[j];
-            }
             pipeline->specialization_data_size = spec->dataSize;
-            if (spec->dataSize) {
+            if (spec->mapEntryCount > 0) {
+                size_t specialization_entry_bytes = 0;
+                if (!checked_mul_size((size_t)spec->mapEntryCount,
+                                      sizeof(*pipeline->specialization_entries),
+                                      &specialization_entry_bytes)) {
+                    free(pipeline);
+                    return VK_ERROR_OUT_OF_HOST_MEMORY;
+                }
+                pipeline->specialization_entries = (VkSpecializationMapEntry *)calloc(
+                    spec->mapEntryCount, sizeof(*pipeline->specialization_entries));
+                if (!pipeline->specialization_entries) {
+                    free(pipeline);
+                    return VK_ERROR_OUT_OF_HOST_MEMORY;
+                }
+                memcpy(pipeline->specialization_entries, spec->pMapEntries,
+                       specialization_entry_bytes);
+            }
+            if (spec->dataSize > 0) {
+                pipeline->specialization_data = (uint8_t *)malloc(spec->dataSize);
+                if (!pipeline->specialization_data) {
+                    free(pipeline->specialization_entries);
+                    free(pipeline);
+                    return VK_ERROR_OUT_OF_HOST_MEMORY;
+                }
                 memcpy(pipeline->specialization_data, spec->pData, spec->dataSize);
             }
         }
@@ -18232,7 +18253,11 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyPipeline(
         const VkAllocationCallbacks *pAllocator) {
     (void)device;
     (void)pAllocator;
-    free(pdocker_vk_pipeline_from_handle(pipeline));
+    PdockerVkPipeline *p = pdocker_vk_pipeline_from_handle(pipeline);
+    if (!p) return;
+    free(p->specialization_entries);
+    free(p->specialization_data);
+    free(p);
 }
 
 static void capture_render_pass_subpass_state(

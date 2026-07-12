@@ -1127,6 +1127,7 @@ static VkImageUsageFlags vulkan_required_usage_for_image_descriptor(VkDescriptor
 }
 
 static int checked_u64_add3(uint64_t a, uint64_t b, uint64_t c, uint64_t *out);
+static int checked_size_mul_executor(size_t a, size_t b, size_t *out);
 
 static size_t vulkan_binding_descriptor_range(
         const VulkanDispatchBinding *binding,
@@ -14596,8 +14597,7 @@ static int run_vulkan_dispatch_fd(
         (binding_count == 0 && image_descriptor_count == 0) ||
         binding_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS || shader_size == 0 ||
         shader_size > 8 * 1024 * 1024 || push_size > PDOCKER_GPU_MAX_PUSH_BYTES ||
-        specialization_count > PDOCKER_GPU_MAX_VULKAN_SPECIALIZATION_ENTRIES ||
-        specialization_data_size > PDOCKER_GPU_MAX_VULKAN_SPECIALIZATION_BYTES) {
+        specialization_count > UINT32_MAX) {
         json_fail("vulkan-dispatch", "invalid dispatch metadata");
         return 64;
     }
@@ -14768,7 +14768,7 @@ static int run_vulkan_dispatch_fd(
     VkDescriptorPool descriptor_pool = VK_NULL_HANDLE;
     VkCommandBuffer command_buffer = VK_NULL_HANDLE;
     VkFence fence = VK_NULL_HANDLE;
-    VkSpecializationMapEntry vk_spec_entries[PDOCKER_GPU_MAX_VULKAN_SPECIALIZATION_ENTRIES];
+    VkSpecializationMapEntry *vk_spec_entries = NULL;
     VkSpecializationInfo vk_spec_info;
     const VkSpecializationInfo *vk_spec_ptr = NULL;
     SpirvTraceSummary spirv_summary;
@@ -14981,7 +14981,6 @@ static int run_vulkan_dispatch_fd(
     ino_t *binding_fd_ino = NULL;
     memset(&strict_object_graph_timing, 0, sizeof(strict_object_graph_timing));
     memset(&dispatch_indirect_temp_buffer, 0, sizeof(dispatch_indirect_temp_buffer));
-    memset(vk_spec_entries, 0, sizeof(vk_spec_entries));
     memset(&vk_spec_info, 0, sizeof(vk_spec_info));
     memset(&spirv_summary, 0, sizeof(spirv_summary));
     memset(set_layouts, 0, sizeof(set_layouts));
@@ -16225,6 +16224,25 @@ static int run_vulkan_dispatch_fd(
     }
 
     if (specialization_count > 0) {
+        if (!specializations || !specialization_data) {
+            json_fail("vulkan-dispatch", "missing specialization data");
+            ret = 64;
+            goto cleanup;
+        }
+        size_t vk_spec_entry_bytes = 0;
+        if (checked_size_mul_executor(specialization_count, sizeof(*vk_spec_entries),
+                                      &vk_spec_entry_bytes) != 0) {
+            json_fail("vulkan-dispatch", "specialization table too large");
+            ret = 64;
+            goto cleanup;
+        }
+        vk_spec_entries = (VkSpecializationMapEntry *)malloc(vk_spec_entry_bytes);
+        if (!vk_spec_entries) {
+            json_fail("vulkan-dispatch", "out of memory allocating specialization table");
+            ret = 75;
+            goto cleanup;
+        }
+        memset(vk_spec_entries, 0, vk_spec_entry_bytes);
         for (size_t i = 0; i < specialization_count; ++i) {
             if (specializations[i].offset > specialization_data_size ||
                 specializations[i].size > specialization_data_size - specializations[i].offset) {
@@ -19187,6 +19205,7 @@ cleanup:
     free(binding_dirty_probe_pages);
     free(binding_fd_after_hash);
     free(binding_gpu_after_dispatch_hash);
+    free(vk_spec_entries);
     free(binding_gpu_after_upload_hash);
     free(binding_fd_before_hash);
     free(binding_readonly_overlap_snapshot_bytes);
@@ -21109,6 +21128,13 @@ static int checked_u64_add3(uint64_t a, uint64_t b, uint64_t c, uint64_t *out) {
     uint64_t ab = a + b;
     if (ab > UINT64_MAX - c) return -EOVERFLOW;
     *out = ab + c;
+    return 0;
+}
+
+static int checked_size_mul_executor(size_t a, size_t b, size_t *out) {
+    if (!out) return -EINVAL;
+    if (a != 0 && b > SIZE_MAX / a) return -EOVERFLOW;
+    *out = a * b;
     return 0;
 }
 
@@ -34524,6 +34550,7 @@ static int handle_vulkan_dispatch_v5_frame(int cfd) {
     unsigned char *frame = NULL;
     VulkanDispatchBinding *bindings = NULL;
     VulkanDispatchImageDescriptor *image_descriptors = NULL;
+    VulkanDispatchSpecialization *specs = NULL;
     int *binding_fds = NULL;
     size_t binding_capacity = 0;
     size_t image_descriptor_capacity = 0;
@@ -34595,16 +34622,32 @@ static int handle_vulkan_dispatch_v5_frame(int cfd) {
     const uint8_t *specialization_data =
         (const uint8_t *)v5_frame_range(frame, &header, header.specialization_data_offset,
                                         header.specialization_data_size);
-    VulkanDispatchSpecialization specs[PDOCKER_GPU_MAX_VULKAN_SPECIALIZATION_ENTRIES];
-    memset(specs, 0, sizeof(specs));
-    if (header.specialization_count > PDOCKER_GPU_MAX_VULKAN_SPECIALIZATION_ENTRIES ||
-        header.specialization_data_size > PDOCKER_GPU_MAX_VULKAN_SPECIALIZATION_BYTES ||
-        (header.specialization_count > 0 && !v5_specs) ||
+    if ((header.specialization_count > 0 && !v5_specs) ||
         (header.specialization_data_size > 0 && !specialization_data)) {
         json_fail("vulkan-dispatch-v5", "invalid specialization payload");
         goto cleanup;
     }
+    if (header.specialization_count > 0) {
+        size_t specs_bytes = 0;
+        if (checked_size_mul_executor((size_t)header.specialization_count,
+                                      sizeof(*specs), &specs_bytes) != 0) {
+            json_fail("vulkan-dispatch-v5", "specialization table too large");
+            rc = -EOVERFLOW;
+            goto cleanup;
+        }
+        specs = (VulkanDispatchSpecialization *)malloc(specs_bytes);
+        if (!specs) {
+            json_fail("vulkan-dispatch-v5", "specialization allocation failed");
+            rc = -ENOMEM;
+            goto cleanup;
+        }
+        memset(specs, 0, specs_bytes);
+    }
     for (uint32_t i = 0; i < header.specialization_count; ++i) {
+        if (v5_specs[i].size > (uint64_t)SIZE_MAX) {
+            json_fail("vulkan-dispatch-v5", "invalid specialization entry size");
+            goto cleanup;
+        }
         specs[i].constant_id = v5_specs[i].constant_id;
         specs[i].offset = v5_specs[i].offset;
         specs[i].size = (size_t)v5_specs[i].size;
@@ -34665,7 +34708,7 @@ static int handle_vulkan_dispatch_v5_frame(int cfd) {
         json_fail("vulkan-dispatch-v5", "dispatch hash mismatch");
         goto cleanup;
     }
-    (void)run_vulkan_dispatch_fd(
+    int dispatch_rc = run_vulkan_dispatch_fd(
         passed_fds[header.shader_fd_index], binding_fds, bindings, binding_count,
         image_descriptors, image_descriptor_count, &object_tables,
         (size_t)header.shader_size, entry_name,
@@ -34677,7 +34720,12 @@ static int handle_vulkan_dispatch_v5_frame(int cfd) {
         options.has_base_group ? options.base_group_x : 0,
         options.has_base_group ? options.base_group_y : 0,
         options.has_base_group ? options.base_group_z : 0);
+    if (dispatch_rc != 0) {
+        rc = dispatch_rc < 0 ? dispatch_rc : -EIO;
+        goto cleanup;
+    }
 cleanup:
+    free(specs);
     free(binding_fds);
     free(image_descriptors);
     free(bindings);
@@ -34685,7 +34733,7 @@ cleanup:
     for (size_t i = 0; i < passed_fd_count && i < PDOCKER_GPU_MAX_PASSED_FDS; ++i) {
         if (passed_fds[i] >= 0) close(passed_fds[i]);
     }
-    return 0;
+    return rc;
 }
 
 static int recv_command_with_fds(
@@ -34871,8 +34919,9 @@ static int serve_socket(const char *path) {
             }
             if (v5_prefix > 0) {
                 g_json_out = out;
-                (void)handle_vulkan_dispatch_v5_frame(cfd);
+                int v5_rc = handle_vulkan_dispatch_v5_frame(cfd);
                 g_json_out = NULL;
+                if (v5_rc != 0) break;
                 continue;
             }
             int passed_fds[PDOCKER_GPU_MAX_PASSED_FDS];

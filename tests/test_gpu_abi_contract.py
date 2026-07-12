@@ -3280,12 +3280,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("cursor - header->header_size", icd)
         self.assertNotIn("frame + sizeof(*frame_header)", icd)
 
-    def test_vulkan_pipeline_specialization_fails_closed_at_create_time(self):
+    def test_vulkan_pipeline_specialization_validation_and_heap_storage_contract(self):
         icd = VULKAN_ICD.read_text()
         helper = c_function_body(icd, "validate_pipeline_specialization_info_for_transport")
         for marker in [
-            "PDOCKER_VK_MAX_SPECIALIZATION_ENTRIES",
-            "PDOCKER_VK_MAX_SPECIALIZATION_BYTES",
             "spec->mapEntryCount > 0 && !spec->pMapEntries",
             "spec->dataSize > 0 && !spec->pData",
             "entry->size == 0",
@@ -3303,7 +3301,18 @@ class GpuAbiContractTest(unittest.TestCase):
             compute_body.index("validate_pipeline_specialization_info_for_transport("),
             compute_body.index("PdockerVkPipeline *pipeline = pdocker_alloc_handle"),
         )
+        self.assertIn("checked_mul_size((size_t)spec->mapEntryCount", compute_body)
+        self.assertIn("specialization_entry_bytes", compute_body)
+        self.assertIn("pipeline->specialization_entries = (VkSpecializationMapEntry *)calloc(", compute_body)
+        self.assertIn("pipeline->specialization_data = (uint8_t *)malloc(spec->dataSize);", compute_body)
+        self.assertIn("memcpy(pipeline->specialization_entries, spec->pMapEntries", compute_body)
+        self.assertIn("memcpy(pipeline->specialization_data, spec->pData, spec->dataSize);", compute_body)
         self.assertNotIn("pipeline->specialization_too_large = true", compute_body)
+        self.assertNotIn("pipeline->specialization_entries[j] = spec->pMapEntries[j];", compute_body)
+
+        destroy_body = c_function_body(icd, "vkDestroyPipeline")
+        self.assertIn("free(p->specialization_entries);", destroy_body)
+        self.assertIn("free(p->specialization_data);", destroy_body)
 
         graphics_body = c_function_body(icd, "vkCreateGraphicsPipelines")
         self.assertIn("pPipelines[i] = VK_NULL_HANDLE;", graphics_body)
@@ -4421,6 +4430,15 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('json_fail(\n            "vulkan-dispatch-v5-native-plan",', handler)
         self.assertIn(conversion, handler)
         self.assertIn("run_vulkan_dispatch_fd(", handler)
+        self.assertIn("int dispatch_rc = run_vulkan_dispatch_fd(", handler)
+        self.assertIn("if (dispatch_rc != 0)", handler)
+        self.assertIn("rc = dispatch_rc < 0 ? dispatch_rc : -EIO;", handler)
+        self.assertIn("return rc;", handler)
+        self.assertNotIn("(void)run_vulkan_dispatch_fd(", handler)
+        serve = c_function_body(executor, "serve_socket")
+        self.assertIn("int v5_rc = handle_vulkan_dispatch_v5_frame(cfd);", serve)
+        self.assertIn("if (v5_rc != 0) break;", serve)
+        self.assertNotIn("(void)handle_vulkan_dispatch_v5_frame(cfd);", serve)
         self.assertNotIn("object materialization is pending", handler)
         self.assertLess(handler.index(native_plan), handler.index(conversion))
         self.assertLess(handler.index("!native_plan.v5_native_replay_compatible"), handler.index(conversion))
@@ -4688,6 +4706,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "PdockerGpuVulkanDispatchV5ImageViewEntry image_view_entries[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGE_VIEWS]",
             "PdockerGpuVulkanDispatchV5SamplerEntry sampler_entries[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_SAMPLERS]",
             "PdockerGpuVulkanDispatchV5SpecializationEntry specs[PDOCKER_VK_MAX_SPECIALIZATION_ENTRIES]",
+            "specialization_entry_count > PDOCKER_VK_MAX_SPECIALIZATION_ENTRIES",
+            "specialization_data_size > PDOCKER_VK_MAX_SPECIALIZATION_BYTES",
             "binding_count > PDOCKER_VK_MAX_STORAGE_BUFFERS",
             "image_descriptor_count > PDOCKER_VK_MAX_STORAGE_BUFFERS",
         ]:
@@ -4703,6 +4723,11 @@ class GpuAbiContractTest(unittest.TestCase):
             "descriptors = (PdockerGpuVulkanDispatchV5DescriptorObjectEntry *)calloc(",
             "binding_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS",
             "image_descriptor_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS",
+            "push_size > PDOCKER_VK_MAX_PUSH_BYTES",
+            "specialization_entry_count > 0 && !specialization_entries",
+            "specialization_data_size > 0 && !specialization_data",
+            "!frame_capacity_add_aligned_table(&frame_capacity, sizeof(*specs)",
+            "frame_capacity > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FRAME_BYTES",
             "free(specs);",
             "free(sampler_entries);",
             "free(image_view_entries);",
@@ -4715,6 +4740,31 @@ class GpuAbiContractTest(unittest.TestCase):
             "cleanup:", 1
         )[0]
         self.assertNotRegex(post_alloc, r"return\s+-E[A-Z0-9_]+\s*;")
+
+    def test_vulkan_dispatch_v5_executor_specialization_tables_are_heap_backed(self):
+        executor = GPU_EXECUTOR.read_text()
+        handler = c_function_body(executor, "handle_vulkan_dispatch_v5_frame")
+        dispatch_body = executor.split("static int run_vulkan_dispatch_fd", 1)[1].split("static int run_vector_add", 1)[0]
+
+        self.assertIn("VulkanDispatchSpecialization *specs = NULL;", handler)
+        self.assertIn("checked_size_mul_executor((size_t)header.specialization_count", handler)
+        self.assertIn("specs = (VulkanDispatchSpecialization *)malloc(specs_bytes);", handler)
+        self.assertIn("memset(specs, 0, specs_bytes);", handler)
+        self.assertIn("free(specs);", handler)
+        self.assertNotIn("VulkanDispatchSpecialization specs[PDOCKER_GPU_MAX_VULKAN_SPECIALIZATION_ENTRIES]", handler)
+        self.assertNotIn("header.specialization_count > PDOCKER_GPU_MAX_VULKAN_SPECIALIZATION_ENTRIES", handler)
+        self.assertNotIn("header.specialization_data_size > PDOCKER_GPU_MAX_VULKAN_SPECIALIZATION_BYTES", handler)
+        self.assertIn("v5_specs[i].size > (uint64_t)SIZE_MAX", handler)
+
+        self.assertIn("VkSpecializationMapEntry *vk_spec_entries = NULL;", dispatch_body)
+        self.assertIn("checked_size_mul_executor(specialization_count, sizeof(*vk_spec_entries)", dispatch_body)
+        self.assertIn("vk_spec_entries = (VkSpecializationMapEntry *)malloc(vk_spec_entry_bytes);", dispatch_body)
+        self.assertIn("memset(vk_spec_entries, 0, vk_spec_entry_bytes);", dispatch_body)
+        self.assertIn("free(vk_spec_entries);", dispatch_body)
+        self.assertNotIn("VkSpecializationMapEntry vk_spec_entries[PDOCKER_GPU_MAX_VULKAN_SPECIALIZATION_ENTRIES]", dispatch_body)
+        self.assertNotIn("specialization_count > PDOCKER_GPU_MAX_VULKAN_SPECIALIZATION_ENTRIES", dispatch_body)
+        self.assertNotIn("specialization_data_size > PDOCKER_GPU_MAX_VULKAN_SPECIALIZATION_BYTES", dispatch_body)
+        self.assertIn("specialization_count > UINT32_MAX", dispatch_body)
 
     def test_vulkan_dispatch_v5_2_executor_validates_and_materializes_layout_ranges(self):
         executor = GPU_EXECUTOR.read_text()
@@ -8508,6 +8558,11 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("ci->stage.flags != 0", compute_body)
         self.assertIn("ci->stage.pNext", compute_body)
         self.assertIn('unsupported_create_info_pnext_result("vkCreateComputePipelines.stage"', compute_body)
+        self.assertIn("size_t entry_name_len = strlen(entry_name);", compute_body)
+        self.assertIn("entry_name_len == 0 || entry_name_len >= sizeof(pipeline->entry_name)", compute_body)
+        self.assertIn("compute-pipeline-entry-name-invalid", compute_body)
+        self.assertIn("memcpy(pipeline->entry_name, entry_name, entry_name_len + 1u);", compute_body)
+        self.assertNotIn("snprintf(pipeline->entry_name", compute_body)
 
         self.assertIn('"vkCreateGraphicsPipelines", ci->pNext, ci->stageCount, true', graphics_body)
         self.assertIn("VK_STRUCTURE_TYPE_PIPELINE_CREATION_FEEDBACK_CREATE_INFO", graphics_body)
