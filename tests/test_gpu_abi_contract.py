@@ -4396,37 +4396,36 @@ class GpuAbiContractTest(unittest.TestCase):
             object_validator,
         )
 
-    def test_vulkan_dispatch_v5_1_object_transport_uses_native_plan_before_legacy_execution(self):
+    def test_vulkan_dispatch_v5_1_object_transport_uses_native_plan_materializer_before_execution(self):
         executor = GPU_EXECUTOR.read_text()
         handler = executor.split("static int handle_vulkan_dispatch_v5_frame", 1)[1].split(
             "static int serve_socket", 1
         )[0]
         native_plan = "build_vulkan_dispatch_v5_native_plan"
-        conversion = "convert_vulkan_dispatch_v5_to_v4_bindings"
+        conversion = "materialize_vulkan_dispatch_v5_native_plan_bindings"
         self.assertIn(native_plan, handler)
         self.assertIn("VulkanDispatchV5NativePlan native_plan;", handler)
-        self.assertIn("!native_plan.legacy_v4_execution_compatible", handler)
+        self.assertIn("!native_plan.v5_native_replay_compatible", handler)
         self.assertIn('json_fail(\n            "vulkan-dispatch-v5-native-plan",', handler)
         self.assertIn(conversion, handler)
         self.assertIn("run_vulkan_dispatch_fd(", handler)
         self.assertNotIn("object materialization is pending", handler)
         self.assertLess(handler.index(native_plan), handler.index(conversion))
-        self.assertLess(handler.index("!native_plan.legacy_v4_execution_compatible"), handler.index(conversion))
+        self.assertLess(handler.index("!native_plan.v5_native_replay_compatible"), handler.index(conversion))
         self.assertLess(handler.index(conversion), handler.index("run_vulkan_dispatch_fd("))
-        converter = executor.split("static int convert_vulkan_dispatch_v5_to_v4_bindings", 1)[1].split(
-            "static int recv_vulkan_dispatch_v5_header_with_fds", 1
-        )[0]
-        self.assertIn("PdockerGpuVulkanDispatchV5DescriptorObjectEntry", converter)
-        self.assertIn("header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_OBJECTS", converter)
-        self.assertIn("object_descriptors[i]", converter)
-        self.assertIn("object_copy.image_view_index = PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE;", converter)
-        self.assertIn("object_copy.sampler_index = PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE;", converter)
-        self.assertIn("d->image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE", converter)
-        self.assertIn("VulkanDispatchImageDescriptor", converter)
-        self.assertIn("image_descriptors[image_descriptor_count++]", converter)
-        self.assertIn("vulkan_dispatch_image_descriptor_type_from_api", converter)
+        helper = c_function_body(executor, "vulkan_dispatch_v5_plan_descriptor_object_at")
+        materializer = c_function_body(executor, "materialize_vulkan_dispatch_v5_native_plan_bindings")
+        self.assertIn("plan->object_descriptors[index]", helper)
+        self.assertIn("plan->legacy_descriptors[index]", helper)
+        self.assertIn("scratch->image_view_index = PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE;", helper)
+        self.assertIn("scratch->sampler_index = PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE;", helper)
+        self.assertIn("d->image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE", materializer)
+        self.assertIn("VulkanDispatchImageDescriptor", materializer)
+        self.assertIn("&image_descriptors[image_descriptor_count++]", materializer)
+        self.assertIn("vulkan_dispatch_image_descriptor_type_from_api", materializer)
+        self.assertNotIn("v5_frame_range(", materializer)
 
-    def test_vulkan_dispatch_v5_handler_uses_native_plan_heap_tables_before_v4_fallback(self):
+    def test_vulkan_dispatch_v5_handler_uses_native_plan_heap_tables_before_run(self):
         executor = GPU_EXECUTOR.read_text()
         handler = c_function_body(executor, "handle_vulkan_dispatch_v5_frame")
         self.assertIn("VulkanDispatchBinding *bindings = NULL;", handler)
@@ -4459,8 +4458,8 @@ class GpuAbiContractTest(unittest.TestCase):
         )
         self.assertNotIn("int binding_fds[PDOCKER_GPU_MAX_VULKAN_BINDINGS];", handler)
         self.assertLess(handler.index("build_vulkan_dispatch_v5_native_plan"), handler.index("binding_capacity = native_plan"))
-        self.assertLess(handler.index("binding_capacity = native_plan"), handler.index("convert_vulkan_dispatch_v5_to_v4_bindings"))
-        self.assertLess(handler.index("convert_vulkan_dispatch_v5_to_v4_bindings"), handler.index("run_vulkan_dispatch_fd("))
+        self.assertLess(handler.index("binding_capacity = native_plan"), handler.index("materialize_vulkan_dispatch_v5_native_plan_bindings"))
+        self.assertLess(handler.index("materialize_vulkan_dispatch_v5_native_plan_bindings"), handler.index("run_vulkan_dispatch_fd("))
 
     def test_vulkan_dispatch_v5_native_plan_tracks_table_shape_without_v4_capacity(self):
         executor = GPU_EXECUTOR.read_text()
@@ -4476,15 +4475,15 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("plan->max_array_element", body)
         self.assertIn("plan->buffer_descriptor_count++", body)
         self.assertIn("plan->image_descriptor_count++", body)
-        self.assertIn("finish_vulkan_dispatch_v5_native_plan_legacy_status(plan);", body)
+        self.assertIn("finish_vulkan_dispatch_v5_native_plan_replay_status(plan);", body)
         self.assertNotIn("VulkanDispatchBinding", body)
         self.assertNotIn("binding_capacity", body)
         self.assertNotIn("image_descriptor_capacity", body)
 
     def test_vulkan_dispatch_v5_native_plan_accepts_v5_native_table_width(self):
         executor = GPU_EXECUTOR.read_text()
-        body = c_function_body(executor, "finish_vulkan_dispatch_v5_native_plan_legacy_status")
-        self.assertIn("plan->legacy_v4_execution_compatible = 0;", body)
+        body = c_function_body(executor, "finish_vulkan_dispatch_v5_native_plan_replay_status")
+        self.assertIn("plan->v5_native_replay_compatible = 0;", body)
         self.assertIn("descriptor-count-exceeds-v5-native", body)
         self.assertIn("descriptor-set-exceeds-v5-native", body)
         self.assertNotIn("descriptor-count-exceeds-legacy-v4", body)
@@ -4503,7 +4502,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("plan->buffer_descriptor_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS", body)
         self.assertNotIn("plan->image_descriptor_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS", body)
         self.assertNotIn("plan->max_array_element >= PDOCKER_GPU_MAX_VULKAN_BINDINGS", body)
-        self.assertIn("plan->legacy_v4_execution_compatible = 1;", body)
+        self.assertIn("plan->v5_native_replay_compatible = 1;", body)
 
     def test_vulkan_dispatch_v5_2_image_layout_range_abi_scaffold(self):
         abi = APP_HEADER.read_text()
@@ -4705,7 +4704,10 @@ class GpuAbiContractTest(unittest.TestCase):
 
     def test_vulkan_dispatch_v5_2_executor_validates_and_materializes_layout_ranges(self):
         executor = GPU_EXECUTOR.read_text()
-        converter = c_function_body(executor, "convert_vulkan_dispatch_v5_to_v4_bindings")
+        converter = (
+            c_function_body(executor, "build_vulkan_dispatch_v5_native_plan")
+            + c_function_body(executor, "materialize_vulkan_dispatch_v5_native_plan_bindings")
+        )
         materializer = c_function_body(executor, "materialize_vulkan_dispatch_images")
         runner = c_function_body(executor, "run_vulkan_dispatch_fd")
         frame_validator = c_function_body(executor, "validate_vulkan_dispatch_v5_frame_content")
@@ -4801,9 +4803,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertRegex(validation, r"(?:layout_value_valid|layout_valid|image_layout_valid)")
         self.assertRegex(validation, r"return\s+-E(?:PROTO|RANGE|OPNOTSUPP);")
 
-    def test_vulkan_dispatch_v5_tables_convert_to_existing_v4_semantics(self):
+    def test_vulkan_dispatch_v5_tables_materialize_to_existing_run_bindings(self):
         executor = GPU_EXECUTOR.read_text()
-        self.assertIn("convert_vulkan_dispatch_v5_to_v4_bindings", executor)
+        self.assertIn("materialize_vulkan_dispatch_v5_native_plan_bindings", executor)
         self.assertIn("PdockerGpuVulkanDispatchV5ResourceEntry", executor)
         self.assertIn("PdockerGpuVulkanDispatchV5DescriptorEntry", executor)
         self.assertIn("PdockerGpuVulkanDispatchV5DescriptorObjectEntry", executor)
@@ -4867,12 +4869,10 @@ class GpuAbiContractTest(unittest.TestCase):
         msaa_helper_body = executor.split("static int vulkan_dispatch_msaa_image_allowed", 1)[1].split(
             "static int materialize_vulkan_dispatch_images", 1
         )[0]
-        convert_body = executor.split("static int convert_vulkan_dispatch_v5_to_v4_bindings", 1)[1].split(
-            "static int recv_vulkan_dispatch_v5_header_with_fds", 1
-        )[0]
+        convert_body = c_function_body(executor, "build_vulkan_dispatch_v5_native_plan")
         materialize_body = executor.split("static int materialize_vulkan_dispatch_images", 1)[1].split("static int run_vulkan_dispatch_fd", 1)[0]
-        self.assertIn("image_views[i].image_index >= image_count", convert_body)
-        self.assertIn("!vulkan_dispatch_image_view_range_valid(image, &image_views[i])", convert_body)
+        self.assertIn("plan->image_views[i].image_index >= plan->image_count", convert_body)
+        self.assertIn("!vulkan_dispatch_image_view_range_valid(image, &plan->image_views[i])", convert_body)
         self.assertIn("const unsigned char *msaa_image_allowed", materialize_body)
         self.assertIn("!vulkan_dispatch_msaa_image_allowed(", materialize_body)
         self.assertIn("!vulkan_dispatch_image_usage_supported_by_format(", materialize_body)
@@ -11802,7 +11802,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("dynamic_offset % alignment", validate_body)
         self.assertIn(": -EINVAL", validate_body)
 
-        generic_body = c_function_body(executor, "convert_vulkan_dispatch_v5_to_v4_bindings")
+        generic_body = c_function_body(executor, "materialize_vulkan_dispatch_v5_native_plan_bindings")
         self.assertIn("validate_vulkan_descriptor_dynamic_offset_alignment(", generic_body)
         graphics_body = c_function_body(executor, "vulkan_graphics_v61_descriptor_dynamic_offset")
         self.assertIn("validate_vulkan_descriptor_dynamic_offset_alignment(", graphics_body)
@@ -11981,9 +11981,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("entry->result_offset + (uint64_t)q *", source)
         self.assertNotIn("uint32_t query = entry->first_query + q;", source)
 
-    def test_vulkan_dispatch_v5_binding_conversion_rejects_truncating_casts(self):
+    def test_vulkan_dispatch_v5_binding_materialization_rejects_truncating_casts(self):
         source = GPU_EXECUTOR.read_text()
-        body = c_function_body(source, "convert_vulkan_dispatch_v5_to_v4_bindings")
+        body = c_function_body(source, "materialize_vulkan_dispatch_v5_native_plan_bindings")
         self.assertIn("checked_u64_to_off_t(fd_offset, &fd_offset_checked)", body)
         self.assertIn("checked_u64_to_off_t(api_offset, &api_offset_checked)", body)
         self.assertIn("checked_u64_to_off_t(buffer->memory_offset, &memory_offset_checked)", body)

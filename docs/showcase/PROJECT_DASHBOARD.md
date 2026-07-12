@@ -43,7 +43,7 @@ Vulkan/OpenCL GPU bridging for llama.cpp-class workloads.
 
 | State | Item |
 |---|---|
-| doing | **V5 compute native descriptor-table execution**: Compute V5/V5.1/V5.2 currently preserves richer frame tables on the wire but still narrows them into V4-style fixed binding arrays before... |
+| doing | **V5 compute native descriptor-table execution**: Compute V5/V5.1/V5.2 preserves richer frame tables on the wire and the Android executor now keeps those tables in... |
 | doing | **TermPort Skydnir payload build ownership**: TermPort now carries the Skydnir native sources it needs and wires Gradle `preBuild` through a local `buildSkydnirNative` task plus daemon... |
 | doing | Cross-project incomplete implementation audit: `docs/plan/INCOMPLETE_IMPLEMENTATION_AUDIT_20260513.md` now tracks unfinished, partial, temporary, or insufficiently verified work across... |
 | doing | Execution timeline and delegated task control: `docs/plan/EXECUTION_TIMELINE_20260513.md` converts the audit into staged gates, current agent assignments, merge checklists, and... |

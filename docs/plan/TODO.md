@@ -153,26 +153,25 @@ or closes.
   normalized by the producer-side ICD before image-view serialization, while
   the executor accepts only concrete bounded ranges.
 - [doing] **V5 compute native descriptor-table execution**: Compute V5/V5.1/V5.2
-  currently preserves richer frame tables on the wire but still narrows them
-  into V4-style fixed binding arrays before sender serialization and again in
-  the Android executor before `run_vulkan_dispatch_fd`.  This is fail-closed,
-  not silent truncation, but it caps effective descriptor/image/sampler handling
-  at the legacy 16-slot execution path.  A first executor-side native-plan gate
-  now parses and validates the V5 resource/descriptor/object tables before any
-  V4 conversion and explicitly rejects frames that require table-native replay
-  instead of letting the legacy converter or descriptor-write arrays become the
-  evidence boundary.  Remaining implementation must replace the legacy fallback
-  with heap-backed descriptor/object arenas and a V5 table-native compute
-  runner, then widen the ICD producer beyond the current 16-slot collection
-  arrays.  The legacy compute runner's descriptor write staging is now
+  preserves richer frame tables on the wire and the Android executor now keeps
+  those tables in `VulkanDispatchV5NativePlan` through execution-table
+  materialization.  The V5 handler no longer reparses the received frame through
+  a V4-named converter; `materialize_vulkan_dispatch_v5_native_plan_bindings`
+  consumes the validated native plan as the single source of truth for run
+  bindings, image descriptors, and object-table handoff to
+  `run_vulkan_dispatch_fd`.  This is fail-closed, not silent truncation.
+  Remaining implementation must replace or further widen the generic compute
+  runner itself where it still imposes non-table-native behavior, then prove a
+  wide V5 compute dispatch on device.  The legacy compute runner's descriptor
+  write staging is now
   heap-backed by the effective descriptor write count, so mixed V5.1 frames such
   as `16` buffer descriptors plus image/sampler descriptors no longer hit a
   separate internal `VkWriteDescriptorSet[16]` cap.  The container-side ICD V5.1
   frame builder also uses heap-backed frame tables instead of maximum-sized
   stack arrays and no longer applies an extra `PDOCKER_VK_MAX_STORAGE_BUFFERS`
-  guard inside the send function.  The Android V5 handler now allocates its
-  legacy-conversion binding/image/fd tables from `VulkanDispatchV5NativePlan`
-  counts instead of fixed handler stack arrays.  The legacy compute runner's
+  guard inside the send function.  The Android V5 handler allocates its
+  run binding/image/fd tables from `VulkanDispatchV5NativePlan` counts and
+  materializes them from the plan instead of reparsing frame ranges.  The legacy compute runner's
   command-recording barrier tables are also heap-backed by active buffer/image
   counts, so pre/post buffer barriers and image staging barriers no longer use
   separate fixed stack arrays or bounded loop truncation.  Descriptor layout
