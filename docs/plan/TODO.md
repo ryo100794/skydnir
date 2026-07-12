@@ -223,10 +223,11 @@ or closes.
   vector-add fallback through descriptor slot accessors.  The Android compute
   executor duplicate-descriptor alias rewrite now also handles source descriptor
   arrays by sizing the rewritten binding to the active source array span and
-  mirroring descriptor writes at the same `api_array_element`; only multi-set
-  alias rewrite remains fail-closed.  Remaining overflow is
-  therefore a V5 transport-table limit rather than the former 16-element ICD
-  storage shape.
+  mirroring descriptor writes at the same `api_array_element`.  Duplicate
+  Binding normalization is also tracked per descriptor set, so multi-set SPIR-V
+  modules allocate aliases inside the owning set instead of hitting the old
+  descriptor-set-0-only guard.  Remaining overflow is therefore a V5
+  transport-table limit rather than the former 16-element ICD storage shape.
   V6.1 explicit dependency barriers now allocate synchronization2 and legacy
   barrier replay tables from the validated V6.1 metadata counts, removing the
   former per-command 16-barrier stack ceiling while preserving the existing

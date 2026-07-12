@@ -7951,20 +7951,30 @@ static int rewrite_duplicate_descriptor_bindings(
     if (binding_capacity == 0 || binding_capacity > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS) {
         return -1;
     }
+    const uint32_t descriptor_set_capacity = PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS;
+    const size_t descriptor_slot_capacity =
+        (size_t)descriptor_set_capacity * (size_t)binding_capacity;
+    if (descriptor_set_capacity == 0 ||
+        descriptor_slot_capacity / descriptor_set_capacity != binding_capacity) {
+        return -1;
+    }
     uint8_t *used = NULL;
     uint8_t *first_seen = NULL;
     uint8_t *has_descriptor_set = NULL;
     uint32_t *descriptor_sets = NULL;
     int ret = -1;
-    used = (uint8_t *)calloc(binding_capacity, sizeof(uint8_t));
-    first_seen = (uint8_t *)calloc(binding_capacity, sizeof(uint8_t));
+    used = (uint8_t *)calloc(descriptor_slot_capacity, sizeof(uint8_t));
+    first_seen = (uint8_t *)calloc(descriptor_slot_capacity, sizeof(uint8_t));
     has_descriptor_set = (uint8_t *)calloc(bound ? bound : 1, sizeof(uint8_t));
     descriptor_sets = (uint32_t *)calloc(bound ? bound : 1, sizeof(uint32_t));
     if (!used || !first_seen || !has_descriptor_set || !descriptor_sets) goto cleanup;
     for (size_t i = 0; i < binding_count; ++i) {
         if (!bindings) break;
-        if (bindings[i].binding >= binding_capacity) goto cleanup;
-        used[bindings[i].binding] = 1;
+        if (bindings[i].descriptor_set >= descriptor_set_capacity ||
+            bindings[i].binding >= binding_capacity) goto cleanup;
+        const size_t slot =
+            (size_t)bindings[i].descriptor_set * binding_capacity + bindings[i].binding;
+        used[slot] = 1;
     }
 
     for (size_t i = 5; i < words;) {
@@ -7985,13 +7995,16 @@ static int rewrite_duplicate_descriptor_bindings(
         uint16_t op = (uint16_t)(inst & 0xffffu);
         if (word_count == 0 || i + word_count > words) break;
         if (op == 71 && word_count >= 4 && code[i + 1] < bound && code[i + 2] == 33) {
-            if (!has_descriptor_set[code[i + 1]] || descriptor_sets[code[i + 1]] != 0) {
+            if (!has_descriptor_set[code[i + 1]]) {
                 i += word_count;
                 continue;
             }
+            const uint32_t descriptor_set = descriptor_sets[code[i + 1]];
             uint32_t binding = code[i + 3];
-            if (binding >= binding_capacity) goto cleanup;
-            used[binding] = 1;
+            if (descriptor_set >= descriptor_set_capacity ||
+                binding >= binding_capacity) goto cleanup;
+            const size_t slot = (size_t)descriptor_set * binding_capacity + binding;
+            used[slot] = 1;
         }
         i += word_count;
     }
@@ -8003,18 +8016,23 @@ static int rewrite_duplicate_descriptor_bindings(
         uint16_t op = (uint16_t)(inst & 0xffffu);
         if (word_count == 0 || i + word_count > words) break;
         if (op == 71 && word_count >= 4 && code[i + 1] < bound && code[i + 2] == 33) {
-            if (!has_descriptor_set[code[i + 1]] || descriptor_sets[code[i + 1]] != 0) {
+            if (!has_descriptor_set[code[i + 1]]) {
                 i += word_count;
                 continue;
             }
+            const uint32_t descriptor_set = descriptor_sets[code[i + 1]];
             uint32_t binding = code[i + 3];
-            if (binding >= binding_capacity) goto cleanup;
-            if (!first_seen[binding]) {
-                first_seen[binding] = 1;
+            if (descriptor_set >= descriptor_set_capacity ||
+                binding >= binding_capacity) goto cleanup;
+            const size_t slot = (size_t)descriptor_set * binding_capacity + binding;
+            if (!first_seen[slot]) {
+                first_seen[slot] = 1;
             } else {
                 uint32_t alias_binding = UINT32_MAX;
                 for (uint32_t candidate = 0; candidate < binding_capacity; ++candidate) {
-                    if (!used[candidate]) {
+                    const size_t candidate_slot =
+                        (size_t)descriptor_set * binding_capacity + candidate;
+                    if (!used[candidate_slot]) {
                         alias_binding = candidate;
                         break;
                     }
@@ -8023,8 +8041,8 @@ static int rewrite_duplicate_descriptor_bindings(
                     alias_binding == UINT32_MAX) {
                     goto cleanup;
                 }
-                used[alias_binding] = 1;
-                aliases[alias_used].descriptor_set = 0;
+                used[(size_t)descriptor_set * binding_capacity + alias_binding] = 1;
+                aliases[alias_used].descriptor_set = descriptor_set;
                 aliases[alias_used].target_id = code[i + 1];
                 aliases[alias_used].original_binding = binding;
                 aliases[alias_used].rewritten_binding = alias_binding;
@@ -15178,11 +15196,6 @@ static int run_vulkan_dispatch_fd(
         }
     }
     if (rewrite_duplicate_descriptors) {
-        if (multi_descriptor_set) {
-            json_fail("vulkan-dispatch", "duplicate descriptor rewrite is single descriptor set only");
-            ret = 64;
-            goto cleanup;
-        }
         if (rewrite_duplicate_descriptor_bindings(
                 shader_code,
                 shader_size,
@@ -16211,11 +16224,6 @@ static int run_vulkan_dispatch_fd(
         }
     }
     for (size_t i = 0; i < binding_alias_count; ++i) {
-        if (multi_descriptor_set) {
-            json_fail("vulkan-dispatch", "descriptor alias rewrite multi-set pending");
-            ret = 64;
-            goto cleanup;
-        }
         if (binding_aliases[i].rewritten_binding >= layout_count) {
             json_fail("vulkan-dispatch", "invalid descriptor alias binding");
             ret = 64;
@@ -16695,11 +16703,6 @@ static int run_vulkan_dispatch_fd(
         ++write_count;
     }
     for (size_t i = 0; i < binding_alias_count; ++i) {
-        if (multi_descriptor_set) {
-            json_fail("vulkan-dispatch", "descriptor alias rewrite multi-set pending");
-            ret = 64;
-            goto cleanup;
-        }
         for (size_t source_i = 0; source_i < binding_count; ++source_i) {
             if (!active_bindings[source_i]) continue;
             if (bindings[source_i].descriptor_set != binding_aliases[i].descriptor_set ||
