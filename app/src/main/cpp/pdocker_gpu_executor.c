@@ -26670,7 +26670,8 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                     }
                     if ((descriptor->access_flags & PDOCKER_GPU_V5_ACCESS_WRITE) &&
                         descriptor_type != VK_DESCRIPTOR_TYPE_STORAGE_BUFFER &&
-                        descriptor_type != VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
+                        descriptor_type != VK_DESCRIPTOR_TYPE_STORAGE_IMAGE &&
+                        descriptor_type != VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER) {
                         reason = "graphics write descriptor replay is not implemented";
                         if (reason_out) *reason_out = reason;
                         return -EOPNOTSUPP;
@@ -30266,7 +30267,8 @@ static int materialize_vulkan_graphics_v6_descriptors(
             }
             if ((descriptor->access_flags & PDOCKER_GPU_V5_ACCESS_WRITE) &&
                 descriptor_type != VK_DESCRIPTOR_TYPE_STORAGE_BUFFER &&
-                descriptor_type != VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
+                descriptor_type != VK_DESCRIPTOR_TYPE_STORAGE_IMAGE &&
+                descriptor_type != VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER) {
                 return -EOPNOTSUPP;
             }
             if (vulkan_descriptor_type_requires_image_view(descriptor_type) &&

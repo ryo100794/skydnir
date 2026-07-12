@@ -2931,6 +2931,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("graphics write descriptor replay is not implemented", executor)
         self.assertIn("descriptor_type != VK_DESCRIPTOR_TYPE_STORAGE_BUFFER", executor)
         self.assertIn("descriptor_type != VK_DESCRIPTOR_TYPE_STORAGE_IMAGE", executor)
+        self.assertIn("descriptor_type != VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER", executor)
         self.assertIn("descriptor_pool_storage_image_count", executor)
         self.assertIn(".type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE", executor)
         self.assertIn("image->writeback_needed = 1", executor)
@@ -4982,6 +4983,7 @@ class GpuAbiContractTest(unittest.TestCase):
         for body in [preflight_body, materialize_body]:
             self.assertIn("descriptor_type != VK_DESCRIPTOR_TYPE_STORAGE_BUFFER", body)
             self.assertIn("descriptor_type != VK_DESCRIPTOR_TYPE_STORAGE_IMAGE", body)
+            self.assertIn("descriptor_type != VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER", body)
         self.assertIn("graphics write descriptor replay is not implemented", preflight_body)
         self.assertIn("image->writeback_needed = 1", materialize_body)
         self.assertIn("vulkan_required_usage_for_image_descriptor(descriptor_type)", materialize_body)
@@ -9104,6 +9106,17 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V627_ABI_MINOR", executor)
         self.assertIn("find_vulkan_graphics_v627_buffer_view", executor)
         self.assertIn("validate_vulkan_graphics_v627_buffer_views", executor)
+        graphics_preflight = executor.split(
+            "static int preflight_vulkan_graphics_v6_replay_supported", 1
+        )[1].split("static int collect_graphics_descriptor_layout_for_layout", 1)[0]
+        graphics_materialize = executor.split(
+            "static int materialize_vulkan_graphics_v6_descriptors", 1
+        )[1].split("static int record_vulkan_graphics_v6_staged_image_uploads", 1)[0]
+        for body in [graphics_preflight, graphics_materialize]:
+            self.assertIn("descriptor_type != VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER", body)
+        self.assertIn("case VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER:", graphics_materialize)
+        self.assertIn(".type = VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER", graphics_materialize)
+        self.assertIn("writes[d].pTexelBufferView", graphics_materialize)
 
     def test_vulkan_memory_api_validates_map_ranges_and_type_index(self):
         icd = VULKAN_ICD.read_text()
