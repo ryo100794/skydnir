@@ -177,6 +177,7 @@ typedef struct {
 
 typedef struct PdockerVkMemory PdockerVkMemory;
 typedef struct PdockerVkBuffer PdockerVkBuffer;
+typedef struct PdockerVkBufferView PdockerVkBufferView;
 typedef struct PdockerVkDescriptorBinding PdockerVkDescriptorBinding;
 typedef struct PdockerVkDescriptorPool PdockerVkDescriptorPool;
 typedef struct PdockerVkDescriptorSetLayout PdockerVkDescriptorSetLayout;
@@ -219,6 +220,7 @@ typedef struct PdockerVkSwapchain PdockerVkSwapchain;
  */
 PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_memory, VkDeviceMemory, PdockerVkMemory)
 PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_buffer, VkBuffer, PdockerVkBuffer)
+PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_buffer_view, VkBufferView, PdockerVkBufferView)
 PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_image, VkImage, PdockerVkImage)
 PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_image_view, VkImageView, PdockerVkImageView)
 PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_sampler, VkSampler, PdockerVkSampler)
@@ -412,12 +414,22 @@ typedef struct {
 struct PdockerVkBuffer {
     uint64_t object_id;
     size_t size;
+    VkBufferUsageFlags usage;
     VkDeviceSize requirements_size;
     VkDeviceSize requirements_alignment;
     PdockerVkMemory *memory;
     VkDeviceSize memory_offset;
     PdockerVkCopyAlias aliases[PDOCKER_VK_MAX_COPY_ALIASES];
     uint32_t alias_count;
+};
+
+struct PdockerVkBufferView {
+    uint64_t object_id;
+    PdockerVkBuffer *buffer;
+    VkFormat format;
+    VkDeviceSize offset;
+    VkDeviceSize range;
+    uint64_t generation;
 };
 
 struct PdockerVkImage {
@@ -524,6 +536,7 @@ static uint64_t pdocker_vk_sampler_object_id(const PdockerVkSampler *sampler) {
 
 struct PdockerVkDescriptorBinding {
     PdockerVkBuffer *buffer;
+    PdockerVkBufferView *buffer_view;
     PdockerVkImageView *image_view;
     PdockerVkSampler *sampler;
     VkDeviceSize offset;
@@ -4514,6 +4527,7 @@ static int find_sampler_table_index(PdockerVkSampler *const *samplers,
                                     const PdockerVkSampler *sampler);
 static bool descriptor_type_requires_image_view(VkDescriptorType type);
 static bool descriptor_type_requires_sampler(VkDescriptorType type);
+static bool descriptor_type_requires_buffer_view(VkDescriptorType type);
 static bool descriptor_type_supported_by_v4_transport(VkDescriptorType type);
 static bool descriptor_type_supported_by_v5_object_transport(VkDescriptorType type);
 static int validate_descriptor_transport_shape(
@@ -5247,7 +5261,7 @@ static int collect_graphics_descriptor_entries(
                 const PdockerVkDescriptorBinding *binding =
                     descriptor_set_binding_slot_const(set, binding_index, array_element);
                 if (!binding) return -EPROTO;
-                if (!binding->buffer && !binding->image_view && !binding->sampler) {
+                if (!binding->buffer && !binding->buffer_view && !binding->image_view && !binding->sampler) {
                     /* Graphics replay ABI currently transports descriptors that
                      * were present in the bound set, not the full
                      * VkDescriptorSetLayoutCreateInfo.  Do not silently turn an
@@ -5261,9 +5275,13 @@ static int collect_graphics_descriptor_entries(
                     continue;
                 }
                 if (descriptor_type_supported_by_v5_object_transport(binding->descriptor_type) ||
-                    binding->image_view || binding->sampler) {
+                    binding->buffer_view || binding->image_view || binding->sampler) {
                     VkDescriptorType descriptor_type = binding->descriptor_type;
-                    if (!descriptor_type_supported_by_v5_object_transport(descriptor_type)) {
+                    if (!descriptor_type_supported_by_v5_object_transport(descriptor_type) &&
+                        !descriptor_type_requires_buffer_view(descriptor_type)) {
+                        return -EOPNOTSUPP;
+                    }
+                    if (descriptor_type_requires_buffer_view(descriptor_type)) {
                         return -EOPNOTSUPP;
                     }
                     const bool requires_view = descriptor_type_requires_image_view(descriptor_type);
@@ -8428,6 +8446,11 @@ static bool descriptor_type_requires_sampler(VkDescriptorType type) {
            type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 }
 
+static bool descriptor_type_requires_buffer_view(VkDescriptorType type) {
+    return type == VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER ||
+           type == VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER;
+}
+
 static bool descriptor_set_has_image_descriptor(const PdockerVkDescriptorSet *set);
 
 static bool pdocker_vk_sampler_contents_equal(
@@ -8835,7 +8858,7 @@ static bool descriptor_set_has_image_descriptor(const PdockerVkDescriptorSet *se
             const PdockerVkDescriptorBinding *binding = descriptor_set_binding_slot_const(set, i, j);
             if (!binding) continue;
             if (binding->image_view || binding->sampler) return true;
-            if (!binding->buffer && !binding->image_view && !binding->sampler) continue;
+            if (!binding->buffer && !binding->buffer_view && !binding->image_view && !binding->sampler) continue;
             VkDescriptorType descriptor_type = binding->descriptor_type;
             if (descriptor_type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ||
                 descriptor_type == VK_DESCRIPTOR_TYPE_SAMPLER ||
@@ -9746,7 +9769,8 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
                 PdockerVkDescriptorBinding *binding =
                     descriptor_set_binding_slot((PdockerVkDescriptorSet *)set, i, array_element);
                 if (!binding) return -EPROTO;
-                if (descriptor_type_supported_by_v5_object_transport(binding->descriptor_type)) {
+                if (descriptor_type_supported_by_v5_object_transport(binding->descriptor_type) ||
+                    descriptor_type_requires_buffer_view(binding->descriptor_type)) {
                     VkDescriptorType descriptor_type = binding->descriptor_type;
                     if (descriptor_type == VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT) {
                         fprintf(stderr,
@@ -9755,6 +9779,16 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
                                 set_index,
                                 api_binding,
                                 array_element);
+                        return -EOPNOTSUPP;
+                    }
+                    if (descriptor_type_requires_buffer_view(descriptor_type)) {
+                        fprintf(stderr,
+                                "pdocker-vulkan-icd: generic dispatch rejected: texel-buffer descriptor ABI pending dispatch_id=%llu set=%u binding=%u array=%u type=%u\n",
+                                (unsigned long long)dispatch_id,
+                                set_index,
+                                api_binding,
+                                array_element,
+                                descriptor_type);
                         return -EOPNOTSUPP;
                     }
                     const bool requires_view = descriptor_type_requires_image_view(descriptor_type);
@@ -14422,6 +14456,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateBuffer(
     if (!buffer) return VK_ERROR_OUT_OF_HOST_MEMORY;
     buffer->object_id = next_vulkan_object_generation();
     buffer->size = (size_t)pCreateInfo->size;
+    buffer->usage = pCreateInfo->usage;
     buffer->requirements_alignment = PDOCKER_VK_REQUIREMENT_ALIGNMENT;
     buffer->requirements_size = align_device_size(pCreateInfo->size, buffer->requirements_alignment);
     if (trace_allocations()) {
@@ -14455,12 +14490,41 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateBufferView(
     *pView = VK_NULL_HANDLE;
     if (!pCreateInfo) return VK_ERROR_INITIALIZATION_FAILED;
     if (pCreateInfo->pNext) return unsupported_create_info_pnext_result("vkCreateBufferView", pCreateInfo->pNext);
-    if (pCreateInfo->flags != 0 || !pdocker_vk_buffer_from_handle(pCreateInfo->buffer)) {
-        trace_icd_runtime_failure("buffer-view-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
+    PdockerVkBuffer *buffer = pdocker_vk_buffer_from_handle(pCreateInfo->buffer);
+    if (pCreateInfo->flags != 0 || !buffer) {
+        trace_icd_runtime_failure("buffer-view-invalid-create-info", VK_ERROR_FEATURE_NOT_PRESENT);
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }
-    trace_icd_runtime_failure("buffer-view-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
-    return VK_ERROR_FEATURE_NOT_PRESENT;
+    if ((buffer->usage & (VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT)) == 0) {
+        trace_icd_runtime_failure("buffer-view-usage-missing", VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    if (conservative_format_bytes_per_pixel(pCreateInfo->format) == 0) {
+        trace_icd_runtime_failure("buffer-view-format-unsupported", VK_ERROR_FORMAT_NOT_SUPPORTED);
+        return VK_ERROR_FORMAT_NOT_SUPPORTED;
+    }
+    VkDeviceSize range = pCreateInfo->range;
+    if (range == VK_WHOLE_SIZE) {
+        if (pCreateInfo->offset > (VkDeviceSize)buffer->size) {
+            return VK_ERROR_FEATURE_NOT_PRESENT;
+        }
+        range = (VkDeviceSize)buffer->size - pCreateInfo->offset;
+    }
+    if (range == 0 || pCreateInfo->offset > (VkDeviceSize)buffer->size ||
+        range > (VkDeviceSize)buffer->size - pCreateInfo->offset) {
+        trace_icd_runtime_failure("buffer-view-range-invalid", VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    PdockerVkBufferView *view = pdocker_alloc_handle(sizeof(*view));
+    if (!view) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    view->object_id = next_vulkan_object_generation();
+    view->buffer = buffer;
+    view->format = pCreateInfo->format;
+    view->offset = pCreateInfo->offset;
+    view->range = range;
+    view->generation = next_vulkan_object_generation();
+    *pView = pdocker_vk_buffer_view_to_handle(view);
+    return VK_SUCCESS;
 }
 
 VKAPI_ATTR void VKAPI_CALL vkDestroyBufferView(
@@ -14468,8 +14532,8 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyBufferView(
         VkBufferView bufferView,
         const VkAllocationCallbacks *pAllocator) {
     (void)device;
-    (void)bufferView;
     (void)pAllocator;
+    free(pdocker_vk_buffer_view_from_handle(bufferView));
 }
 
 static VkResult unsupported_create_info_pnext_result(const char *api_name, const void *pNext) {
@@ -15924,11 +15988,14 @@ static bool descriptor_slot_object_matches_type(
         VkDescriptorType type) {
     if (!slot || slot->descriptor_type != type) return false;
     if (descriptor_type_supported_by_v4_transport(type)) {
-        return slot->buffer && !slot->image_view && !slot->sampler &&
+        return slot->buffer && !slot->buffer_view && !slot->image_view && !slot->sampler &&
                slot->dynamic == descriptor_type_is_dynamic(type);
     }
+    if (descriptor_type_requires_buffer_view(type)) {
+        return slot->buffer_view && !slot->buffer && !slot->image_view && !slot->sampler;
+    }
     if (descriptor_type_supported_by_v5_object_transport(type)) {
-        if (slot->buffer) return false;
+        if (slot->buffer || slot->buffer_view) return false;
         if (descriptor_type_requires_image_view(type) && !slot->image_view) return false;
         if (descriptor_type_requires_sampler(type) && !slot->sampler) return false;
         return true;
@@ -16555,10 +16622,11 @@ VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets(
         if (update_rc != 0) goto fail_closed;
 
         bool v4_descriptor = descriptor_type_supported_by_v4_transport(w->descriptorType);
+        bool texel_buffer_descriptor = descriptor_type_requires_buffer_view(w->descriptorType);
         bool v5_object_descriptor =
             vulkan_v5_object_transport_enabled() &&
             descriptor_type_supported_by_v5_object_transport(w->descriptorType);
-        if (!v4_descriptor && !v5_object_descriptor) {
+        if (!v4_descriptor && !v5_object_descriptor && !texel_buffer_descriptor) {
             set->unsupported_descriptor_type = true;
             update_rc = -EINVAL;
             fprintf(stderr,
@@ -16624,6 +16692,7 @@ VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets(
                 PdockerVkSampler *immutable_sampler = descriptor_layout_immutable_sampler(
                     set->layout, binding, array_element);
                 slot->buffer = NULL;
+                slot->buffer_view = NULL;
                 slot->image_view = requires_view
                     ? pdocker_vk_image_view_from_handle(info->imageView)
                     : NULL;
@@ -16671,6 +16740,57 @@ VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets(
             }
             continue;
         }
+        if (descriptor_type_requires_buffer_view(w->descriptorType)) {
+            if (!w->pTexelBufferView) {
+                set->unsupported_descriptor_type = true;
+                update_rc = -EINVAL;
+                fprintf(stderr,
+                        "pdocker-vulkan-icd: descriptor texel-buffer write missing pTexelBufferView binding=%u count=%u\n",
+                        w->dstBinding,
+                        w->descriptorCount);
+                goto fail_closed;
+            }
+            for (uint32_t j = 0; j < w->descriptorCount; ++j) {
+                uint32_t binding = 0;
+                uint32_t array_element = 0;
+                if (!descriptor_linear_slot(set->layout, w->dstBinding, w->dstArrayElement,
+                                            j, &binding, &array_element)) {
+                    set->unsupported_descriptor_array = true;
+                    update_rc = -ERANGE;
+                    goto fail_closed;
+                }
+                PdockerVkDescriptorBinding *slot =
+                    descriptor_set_binding_slot(set, binding, array_element);
+                if (!slot) {
+                    set->unsupported_descriptor_array = true;
+                    update_rc = -ERANGE;
+                    goto fail_closed;
+                }
+                slot->buffer = NULL;
+                slot->buffer_view = pdocker_vk_buffer_view_from_handle(w->pTexelBufferView[j]);
+                slot->image_view = NULL;
+                slot->sampler = NULL;
+                slot->image_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+                slot->base_offset = slot->buffer_view ? slot->buffer_view->offset : 0;
+                slot->dynamic_offset = 0;
+                slot->offset = slot->base_offset;
+                slot->range = slot->buffer_view ? slot->buffer_view->range : 0;
+                slot->descriptor_type = w->descriptorType;
+                slot->dynamic = false;
+                if (!slot->buffer_view) {
+                    set->unsupported_descriptor_type = true;
+                    update_rc = -EINVAL;
+                    fprintf(stderr,
+                            "pdocker-vulkan-icd: descriptor texel-buffer write has invalid buffer view binding=%u array=%u type=%u\n",
+                            binding,
+                            array_element,
+                            w->descriptorType);
+                    goto fail_closed;
+                }
+                set->has_image_descriptor = descriptor_set_has_image_descriptor(set);
+            }
+            continue;
+        }
         if (!w->pBufferInfo) {
             set->unsupported_descriptor_type = true;
             update_rc = -EINVAL;
@@ -16697,6 +16817,7 @@ VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets(
                 goto fail_closed;
             }
             slot->buffer = pdocker_vk_buffer_from_handle(w->pBufferInfo[j].buffer);
+            slot->buffer_view = NULL;
             slot->image_view = NULL;
             slot->sampler = NULL;
             slot->image_layout = VK_IMAGE_LAYOUT_UNDEFINED;

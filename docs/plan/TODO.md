@@ -145,6 +145,7 @@ or closes.
   pipeline-policy knobs demote the result to diagnostic evidence.  The llama GPU
   artifact verifier treats `strict_transport_identity_eligible=false` as a
   pass-through promotion blocker rather than a successful GPU bridge proof.
+- [done] **ICD buffer-view state groundwork**: The container-side Vulkan ICD now creates and destroys tracked `VkBufferView` objects, stores buffer usage on `VkBuffer`, validates buffer-view format/range/use at `vkCreateBufferView`, and shadows uniform/storage texel-buffer descriptor writes as `buffer_view` descriptor slots. This is only the producer-side state prerequisite. Submit paths still fail closed with `texel-buffer descriptor ABI pending`, and texel format features remain unadvertised until a V5.x/V6.x append-only buffer-view metadata table and executor-side native `VkBufferView` materialization exist.
 - [done] **image format/view fail-closed audit**: The container ICD and
   Android executor now reject unsupported image formats before they can be
   treated as byte-linear payloads. Unknown, compressed, multiplanar, YCbCr,
@@ -152,6 +153,7 @@ or closes.
   fail closed. `VK_REMAINING_MIP_LEVELS` and `VK_REMAINING_ARRAY_LAYERS` are
   normalized by the producer-side ICD before image-view serialization, while
   the executor accepts only concrete bounded ranges.
+- [todo] **Vulkan texel-buffer ABI lane**: Add append-only compute V5.x and graphics V6.x buffer-view metadata tables carrying descriptor identity, `VkFormat`, offset, range, and buffer-view generation/resource mapping. The Android executor must create native `VkBufferView` objects, write `pTexelBufferView` descriptors, keep the views alive until submit completion, and handle storage-texel writeback before the ICD advertises texel-buffer format features.
 - [doing] **V5 compute native descriptor-table execution**: Compute V5/V5.1/V5.2
   preserves richer frame tables on the wire and the Android executor now keeps
   those tables in `VulkanDispatchV5NativePlan` through execution-table

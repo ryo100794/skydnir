@@ -7017,7 +7017,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("layout->storage_binding_counts[binding_index] > 0", collect_body)
         self.assertIn("return -EOPNOTSUPP;", collect_body)
         missing_descriptor_guard = collect_body.split(
-            "if (!binding->buffer && !binding->image_view && !binding->sampler)", 1
+            "if (!binding->buffer && !binding->buffer_view && !binding->image_view && !binding->sampler)", 1
         )[1].split("if (descriptor_type_supported_by_v5_object_transport", 1)[0]
         self.assertIn("layout && layout->storage_binding_counts[binding_index] > 0", missing_descriptor_guard)
         self.assertIn("continue;", missing_descriptor_guard)
@@ -8197,7 +8197,11 @@ class GpuAbiContractTest(unittest.TestCase):
 
         self.assertIn("*pView = VK_NULL_HANDLE;", buffer_view_body)
         self.assertIn('unsupported_create_info_pnext_result("vkCreateBufferView", pCreateInfo->pNext)', buffer_view_body)
-        self.assertIn("buffer-view-unsupported", buffer_view_body)
+        self.assertIn("pdocker_vk_buffer_view_to_handle(view)", buffer_view_body)
+        self.assertIn("buffer-view-usage-missing", buffer_view_body)
+        self.assertIn("buffer-view-format-unsupported", buffer_view_body)
+        self.assertIn("buffer-view-range-invalid", buffer_view_body)
+        self.assertNotIn("buffer-view-unsupported", buffer_view_body)
 
         self.assertIn("*pYcbcrConversion = VK_NULL_HANDLE;", ycbcr_body)
         self.assertIn('unsupported_create_info_pnext_result("vkCreateSamplerYcbcrConversion", pCreateInfo->pNext)', ycbcr_body)
@@ -8770,7 +8774,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("img->memory = mem;", icd)
         self.assertIn("view->image = image;", icd)
         self.assertIn("sampler->mag_filter = pCreateInfo->magFilter;", icd)
-        self.assertIn("if (!binding->buffer && !binding->image_view && !binding->sampler) continue;", icd)
+        self.assertIn("if (!binding->buffer && !binding->buffer_view && !binding->image_view && !binding->sampler) continue;", icd)
         self.assertIn("set->has_image_descriptor = descriptor_set_has_image_descriptor(set);", icd)
         self.assertIn("descriptor_array_transport_required || image_descriptor_count > 0", icd)
         self.assertIn("V5.1 frame required but disabled for this dispatch", icd)
@@ -8982,6 +8986,41 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(marker, verifier)
         self.assertIn("verify-vulkan-icd-device-socket-artifact.py", doc)
         self.assertIn("never promotes Vulkan passthrough", doc)
+
+    def test_vulkan_buffer_view_state_is_tracked_but_texel_submit_remains_abi_gated(self):
+        icd = VULKAN_ICD.read_text()
+        self.assertIn("typedef struct PdockerVkBufferView PdockerVkBufferView;", icd)
+        self.assertIn(
+            "PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_buffer_view, VkBufferView, PdockerVkBufferView)",
+            icd,
+        )
+        self.assertIn("struct PdockerVkBufferView", icd)
+        self.assertIn("VkBufferUsageFlags usage;", icd)
+        self.assertIn("buffer->usage = pCreateInfo->usage;", icd)
+
+        create_body = c_function_body(icd, "vkCreateBufferView")
+        destroy_body = c_function_body(icd, "vkDestroyBufferView")
+        self.assertIn("PdockerVkBuffer *buffer = pdocker_vk_buffer_from_handle(pCreateInfo->buffer);", create_body)
+        self.assertIn("VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT", create_body)
+        self.assertIn("conservative_format_bytes_per_pixel(pCreateInfo->format) == 0", create_body)
+        self.assertIn("range == VK_WHOLE_SIZE", create_body)
+        self.assertIn("view->format = pCreateInfo->format;", create_body)
+        self.assertIn("view->offset = pCreateInfo->offset;", create_body)
+        self.assertIn("view->range = range;", create_body)
+        self.assertIn("free(pdocker_vk_buffer_view_from_handle(bufferView));", destroy_body)
+
+        update_body = c_function_body(icd, "vkUpdateDescriptorSets")
+        self.assertIn("descriptor_type_requires_buffer_view(w->descriptorType)", update_body)
+        self.assertIn("w->pTexelBufferView", update_body)
+        self.assertIn("slot->buffer_view = pdocker_vk_buffer_view_from_handle(w->pTexelBufferView[j]);", update_body)
+        self.assertIn("descriptor texel-buffer write has invalid buffer view", update_body)
+
+        support_body = c_function_body(icd, "descriptor_type_supported_by_v5_object_transport")
+        self.assertNotIn("VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER", support_body)
+        self.assertNotIn("VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER", support_body)
+        self.assertIn("static bool descriptor_type_requires_buffer_view", icd)
+        self.assertIn("texel-buffer descriptor ABI pending", icd)
+        self.assertIn("if (descriptor_type_requires_buffer_view(descriptor_type))", icd)
 
     def test_vulkan_memory_api_validates_map_ranges_and_type_index(self):
         icd = VULKAN_ICD.read_text()
