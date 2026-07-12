@@ -175,9 +175,12 @@ or closes.
   counts instead of fixed handler stack arrays.  The legacy compute runner's
   command-recording barrier tables are also heap-backed by active buffer/image
   counts, so pre/post buffer barriers and image staging barriers no longer use
-  separate fixed stack arrays or bounded loop truncation.  Descriptor capture,
-  descriptor layout/index state, and full V5 table-native replay remain the
-  next narrowing points to remove.  Acceptance: host verifier
+  separate fixed stack arrays or bounded loop truncation.  Descriptor layout
+  metadata in the legacy compute runner is now heap-backed and stride-indexed,
+  removing the 16-binding-number cap for otherwise legacy-compatible frames.
+  Descriptor capture, descriptor count/array/object limits, duplicate-rewrite
+  limits, and full V5 table-native replay remain the next narrowing points to
+  remove.  Acceptance: host verifier
   `tests.test_gpu_abi_contract` must include
   a V5 descriptor-array case above the V4 16-slot limit, and a runtime artifact
   must either prove table-native replay or show sender-side fail-closed
