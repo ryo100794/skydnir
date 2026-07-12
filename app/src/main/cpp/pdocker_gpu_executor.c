@@ -8063,30 +8063,24 @@ static int rewrite_duplicate_descriptor_bindings(
     if (binding_capacity == 0 || binding_capacity > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS) {
         return -1;
     }
-    const uint32_t descriptor_set_capacity = PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS;
-    const size_t descriptor_slot_capacity =
-        (size_t)descriptor_set_capacity * (size_t)binding_capacity;
-    if (descriptor_set_capacity == 0 ||
-        descriptor_slot_capacity / descriptor_set_capacity != binding_capacity) {
-        return -1;
-    }
+    uint32_t descriptor_set_capacity = 0;
+    uint32_t max_descriptor_set_seen = 0;
+    int have_descriptor_set = 0;
     uint8_t *used = NULL;
     uint8_t *first_seen = NULL;
     uint8_t *has_descriptor_set = NULL;
     uint32_t *descriptor_sets = NULL;
     int ret = -1;
-    used = (uint8_t *)calloc(descriptor_slot_capacity, sizeof(uint8_t));
-    first_seen = (uint8_t *)calloc(descriptor_slot_capacity, sizeof(uint8_t));
     has_descriptor_set = (uint8_t *)calloc(bound ? bound : 1, sizeof(uint8_t));
     descriptor_sets = (uint32_t *)calloc(bound ? bound : 1, sizeof(uint32_t));
-    if (!used || !first_seen || !has_descriptor_set || !descriptor_sets) goto cleanup;
+    if (!has_descriptor_set || !descriptor_sets) goto cleanup;
     for (size_t i = 0; i < binding_count; ++i) {
         if (!bindings) break;
-        if (bindings[i].descriptor_set >= descriptor_set_capacity ||
-            bindings[i].binding >= binding_capacity) goto cleanup;
-        const size_t slot =
-            (size_t)bindings[i].descriptor_set * binding_capacity + bindings[i].binding;
-        used[slot] = 1;
+        if (bindings[i].binding >= binding_capacity) goto cleanup;
+        if (!have_descriptor_set || bindings[i].descriptor_set > max_descriptor_set_seen) {
+            max_descriptor_set_seen = bindings[i].descriptor_set;
+            have_descriptor_set = 1;
+        }
     }
 
     for (size_t i = 5; i < words;) {
@@ -8097,8 +8091,33 @@ static int rewrite_duplicate_descriptor_bindings(
         if (op == 71 && word_count >= 4 && code[i + 1] < bound && code[i + 2] == 34) {
             has_descriptor_set[code[i + 1]] = 1;
             descriptor_sets[code[i + 1]] = code[i + 3];
+            if (!have_descriptor_set || code[i + 3] > max_descriptor_set_seen) {
+                max_descriptor_set_seen = code[i + 3];
+                have_descriptor_set = 1;
+            }
         }
         i += word_count;
+    }
+    if (!have_descriptor_set ||
+        max_descriptor_set_seen >= PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS) {
+        goto cleanup;
+    }
+    descriptor_set_capacity = max_descriptor_set_seen + 1u;
+    const size_t descriptor_slot_capacity =
+        (size_t)descriptor_set_capacity * (size_t)binding_capacity;
+    if (descriptor_slot_capacity / descriptor_set_capacity != binding_capacity) {
+        goto cleanup;
+    }
+    used = (uint8_t *)calloc(descriptor_slot_capacity, sizeof(uint8_t));
+    first_seen = (uint8_t *)calloc(descriptor_slot_capacity, sizeof(uint8_t));
+    if (!used || !first_seen) goto cleanup;
+    for (size_t i = 0; i < binding_count; ++i) {
+        if (!bindings) break;
+        if (bindings[i].descriptor_set >= descriptor_set_capacity ||
+            bindings[i].binding >= binding_capacity) goto cleanup;
+        const size_t slot =
+            (size_t)bindings[i].descriptor_set * binding_capacity + bindings[i].binding;
+        used[slot] = 1;
     }
 
     for (size_t i = 5; i < words;) {
@@ -14683,8 +14702,15 @@ static int run_vulkan_dispatch_fd(
             return 64;
         }
     }
-    if (max_descriptor_set >= PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS) {
+    if (max_descriptor_set >= PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS) {
         json_fail("vulkan-dispatch", "too many descriptor sets");
+        return 64;
+    }
+    const uint32_t runtime_descriptor_set_limit =
+        rt->physical_properties.limits.maxBoundDescriptorSets;
+    if (runtime_descriptor_set_limit &&
+        max_descriptor_set >= runtime_descriptor_set_limit) {
+        json_fail("vulkan-dispatch", "too many descriptor sets for runtime");
         return 64;
     }
     uint32_t layout_count = max_binding + 1;
@@ -21208,7 +21234,7 @@ static void finish_vulkan_dispatch_v5_native_plan_replay_status(
         plan->v5_native_replay_incompatible_reason = "descriptor-count-exceeds-v5-native";
         return;
     }
-    if (plan->max_descriptor_set >= PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS) {
+    if (plan->max_descriptor_set >= PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS) {
         plan->v5_native_replay_incompatible_reason = "descriptor-set-exceeds-v5-native";
         return;
     }
