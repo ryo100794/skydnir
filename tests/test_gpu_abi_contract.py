@@ -12169,7 +12169,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("dynamic_descriptor_count != command->dynamic_offset_count", descriptors_body)
 
     def test_strict_passthrough_preserves_vkbuffer_coordinate_space(self):
-        source = GPU_EXECUTOR.read_text() + "\n" + VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
+        source = executor + "\n" + VULKAN_ICD.read_text()
+        dispatch_body = c_function_body(executor, "run_vulkan_dispatch_fd")
         for marker in [
             "Strict passthrough keeps the application's VkBuffer coordinate",
             "VULKAN_DISPATCH_V3",
@@ -12193,8 +12195,6 @@ class GpuAbiContractTest(unittest.TestCase):
             "strict_object_graph",
             "unsupported_descriptor_set_layout",
             "descriptor-set-index-out-of-range",
-            "VkDescriptorSetLayout set_layouts[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS]",
-            "VkDescriptorSet descriptor_sets[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS]",
             ".setLayoutCount = descriptor_set_count",
             ".pSetLayouts = set_layouts",
             ".descriptorSetCount = descriptor_set_count",
@@ -12219,6 +12219,24 @@ class GpuAbiContractTest(unittest.TestCase):
             "object-graph coordinate fidelity",
         ]:
             self.assertIn(marker, source)
+        for marker in [
+            "VkDescriptorSetLayout *set_layouts = NULL;",
+            "VkDescriptorSet *descriptor_sets = NULL;",
+            "uint32_t *set_binding_counts = NULL;",
+            "set_layouts = (VkDescriptorSetLayout *)calloc(",
+            "descriptor_sets = (VkDescriptorSet *)calloc(",
+            "set_binding_counts = (uint32_t *)calloc(",
+            "free(set_binding_counts);",
+            "free(descriptor_sets);",
+            "free(set_layouts);",
+        ]:
+            self.assertIn(marker, dispatch_body)
+        for marker in [
+            "VkDescriptorSetLayout set_layouts[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS]",
+            "VkDescriptorSet descriptor_sets[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS]",
+            "uint32_t set_binding_counts[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS]",
+        ]:
+            self.assertNotIn(marker, dispatch_body)
 
     def test_strict_executor_range_arithmetic_is_checked_locally(self):
         source = GPU_EXECUTOR.read_text()

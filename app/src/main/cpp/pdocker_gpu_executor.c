@@ -14750,9 +14750,9 @@ static int run_vulkan_dispatch_fd(
     size_t *binding_dirty_writeback_bytes = NULL;
     unsigned char **binding_dirty_probe_masks = NULL;
     VkDescriptorSetLayout set_layout = VK_NULL_HANDLE;
-    VkDescriptorSetLayout set_layouts[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS];
-    VkDescriptorSet descriptor_sets[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS];
-    uint32_t set_binding_counts[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS];
+    VkDescriptorSetLayout *set_layouts = NULL;
+    VkDescriptorSet *descriptor_sets = NULL;
+    uint32_t *set_binding_counts = NULL;
     uint32_t *set_binding_descriptor_counts = NULL;
     VkDescriptorType *set_binding_types = NULL;
     VkDescriptorSetLayoutBinding *layout_bindings = NULL;
@@ -14983,9 +14983,6 @@ static int run_vulkan_dispatch_fd(
     memset(&dispatch_indirect_temp_buffer, 0, sizeof(dispatch_indirect_temp_buffer));
     memset(&vk_spec_info, 0, sizeof(vk_spec_info));
     memset(&spirv_summary, 0, sizeof(spirv_summary));
-    memset(set_layouts, 0, sizeof(set_layouts));
-    memset(descriptor_sets, 0, sizeof(descriptor_sets));
-    memset(set_binding_counts, 0, sizeof(set_binding_counts));
     if (!shader_code) return -21;
 
     const size_t binding_table_capacity = binding_count ? binding_count : 1u;
@@ -16267,13 +16264,20 @@ static int run_vulkan_dispatch_fd(
         ret = 64;
         goto cleanup;
     }
+    set_layouts = (VkDescriptorSetLayout *)calloc(
+        descriptor_set_count, sizeof(*set_layouts));
+    descriptor_sets = (VkDescriptorSet *)calloc(
+        descriptor_set_count, sizeof(*descriptor_sets));
+    set_binding_counts = (uint32_t *)calloc(
+        descriptor_set_count, sizeof(*set_binding_counts));
     set_binding_descriptor_counts = (uint32_t *)calloc(
         layout_table_capacity, sizeof(*set_binding_descriptor_counts));
     set_binding_types = (VkDescriptorType *)calloc(
         layout_table_capacity, sizeof(*set_binding_types));
     layout_bindings = (VkDescriptorSetLayoutBinding *)calloc(
         layout_table_capacity, sizeof(*layout_bindings));
-    if (!set_binding_descriptor_counts || !set_binding_types || !layout_bindings) {
+    if (!set_layouts || !descriptor_sets || !set_binding_counts ||
+        !set_binding_descriptor_counts || !set_binding_types || !layout_bindings) {
         json_fail("vulkan-dispatch", "out of memory allocating descriptor layout tables");
         ret = 64;
         goto cleanup;
@@ -19156,6 +19160,9 @@ cleanup:
     free(layout_bindings);
     free(set_binding_types);
     free(set_binding_descriptor_counts);
+    free(set_binding_counts);
+    free(descriptor_sets);
+    free(set_layouts);
     free(staging_download_barriers);
     free(image_staging_download_barriers);
     free(image_post_barriers);
