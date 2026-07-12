@@ -3838,12 +3838,16 @@ static int materialize_vulkan_dispatch_images(
         const unsigned char *msaa_image_allowed,
         size_t msaa_image_allowed_count,
         VulkanDispatchImageMemoryObject *memories,
+        size_t memory_capacity,
         size_t *memory_count,
         VulkanDispatchImageObject *images,
+        size_t image_capacity,
         size_t *image_count,
         VulkanDispatchImageViewObject *views,
+        size_t view_capacity,
         size_t *view_count,
         VulkanDispatchSamplerObject *samplers,
+        size_t sampler_capacity,
         size_t *sampler_count) {
     if (!memory_count || !image_count || !view_count || !sampler_count) return -EINVAL;
     *memory_count = 0;
@@ -3863,9 +3867,9 @@ static int materialize_vulkan_dispatch_images(
         !object_tables->image_views || !memories || !images || !views || !samplers) {
         return -EINVAL;
     }
-    if (object_tables->image_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS ||
-        object_tables->image_view_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS ||
-        object_tables->sampler_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS) {
+    if (object_tables->image_count > image_capacity ||
+        object_tables->image_view_count > view_capacity ||
+        object_tables->sampler_count > sampler_capacity) {
         return -E2BIG;
     }
 
@@ -3907,7 +3911,7 @@ static int materialize_vulkan_dispatch_images(
         int mem_index = find_image_memory_object(
             memories, *memory_count, src->memory_resource_index);
         if (mem_index < 0) {
-            if (*memory_count >= PDOCKER_GPU_MAX_VULKAN_BINDINGS) return -E2BIG;
+            if (*memory_count >= memory_capacity) return -E2BIG;
             mem_index = (int)(*memory_count)++;
             memories[mem_index].resource_index = src->memory_resource_index;
             memories[mem_index].memory_id = mem->resource_id;
@@ -3917,7 +3921,7 @@ static int materialize_vulkan_dispatch_images(
             memories[mem_index].external_offset = mem->external_offset;
             memories[mem_index].memory_type_bits = UINT32_MAX;
         }
-        if (*image_count >= PDOCKER_GPU_MAX_VULKAN_BINDINGS) return -E2BIG;
+        if (*image_count >= image_capacity) return -E2BIG;
         VulkanDispatchImageObject *dst = &images[(*image_count)++];
         memset(dst, 0, sizeof(*dst));
         dst->image_id = src->image_id;
@@ -4092,7 +4096,7 @@ static int materialize_vulkan_dispatch_images(
         if (!vulkan_dispatch_image_view_range_valid(src_image, src)) {
             return -EOPNOTSUPP;
         }
-        if (*view_count >= PDOCKER_GPU_MAX_VULKAN_BINDINGS) return -E2BIG;
+        if (*view_count >= view_capacity) return -E2BIG;
         VulkanDispatchImageViewObject *dst = &views[(*view_count)++];
         memset(dst, 0, sizeof(*dst));
         dst->view_id = src->view_id;
@@ -4131,7 +4135,7 @@ static int materialize_vulkan_dispatch_images(
                     sampler_reason ? sampler_reason : "unsupported sampler state");
             return sampler_rc;
         }
-        if (*sampler_count >= PDOCKER_GPU_MAX_VULKAN_BINDINGS) return -E2BIG;
+        if (*sampler_count >= sampler_capacity) return -E2BIG;
         VulkanDispatchSamplerObject *dst = &samplers[(*sampler_count)++];
         memset(dst, 0, sizeof(*dst));
         dst->sampler_id = src->sampler_id;
@@ -4504,8 +4508,10 @@ static int create_strict_vulkan_object_graph(
         const uint8_t *binding_read_needed,
         const uint8_t *binding_write_needed,
         VulkanStrictMemoryObject *memories,
+        size_t memory_capacity,
         size_t *memory_count,
         VulkanStrictBufferObject *buffers,
+        size_t buffer_capacity,
         size_t *buffer_count,
         VulkanVectorBuffer **vk_buffers,
         int device_local_staged,
@@ -4529,7 +4535,7 @@ static int create_strict_vulkan_object_graph(
         }
         int mem_index = find_strict_memory_object(memories, *memory_count, bindings[i].api_memory_id);
         if (mem_index < 0) {
-            if (*memory_count >= PDOCKER_GPU_MAX_VULKAN_BINDINGS) return -E2BIG;
+            if (*memory_count >= memory_capacity) return -E2BIG;
             mem_index = (int)(*memory_count)++;
             memories[mem_index].memory_id = bindings[i].api_memory_id;
             memories[mem_index].fd = buffer_fds[i];
@@ -4543,7 +4549,7 @@ static int create_strict_vulkan_object_graph(
 
         int buffer_index = find_strict_buffer_object(buffers, *buffer_count, bindings[i].api_buffer_id);
         if (buffer_index < 0) {
-            if (*buffer_count >= PDOCKER_GPU_MAX_VULKAN_BINDINGS) return -E2BIG;
+            if (*buffer_count >= buffer_capacity) return -E2BIG;
             buffer_index = (int)(*buffer_count)++;
             buffers[buffer_index].buffer_id = bindings[i].api_buffer_id;
             buffers[buffer_index].memory_id = bindings[i].api_memory_id;
@@ -7931,7 +7937,9 @@ static int rewrite_duplicate_descriptor_bindings(
         size_t bytes,
         const VulkanDispatchBinding *bindings,
         size_t binding_count,
+        uint32_t binding_capacity,
         VulkanBindingAlias *aliases,
+        size_t alias_capacity,
         size_t *alias_count,
         uint32_t *max_binding) {
     if (!code || !aliases || !alias_count || !max_binding || bytes < 20 ||
@@ -7940,19 +7948,22 @@ static int rewrite_duplicate_descriptor_bindings(
     }
     const size_t words = bytes / sizeof(uint32_t);
     const uint32_t bound = code[3];
-    uint8_t used[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    uint8_t first_seen[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+    if (binding_capacity == 0 || binding_capacity > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS) {
+        return -1;
+    }
+    uint8_t *used = NULL;
+    uint8_t *first_seen = NULL;
     uint8_t *has_descriptor_set = NULL;
     uint32_t *descriptor_sets = NULL;
     int ret = -1;
-    memset(used, 0, sizeof(used));
-    memset(first_seen, 0, sizeof(first_seen));
+    used = (uint8_t *)calloc(binding_capacity, sizeof(uint8_t));
+    first_seen = (uint8_t *)calloc(binding_capacity, sizeof(uint8_t));
     has_descriptor_set = (uint8_t *)calloc(bound ? bound : 1, sizeof(uint8_t));
     descriptor_sets = (uint32_t *)calloc(bound ? bound : 1, sizeof(uint32_t));
-    if (!has_descriptor_set || !descriptor_sets) goto cleanup;
+    if (!used || !first_seen || !has_descriptor_set || !descriptor_sets) goto cleanup;
     for (size_t i = 0; i < binding_count; ++i) {
         if (!bindings) break;
-        if (bindings[i].binding >= PDOCKER_GPU_MAX_VULKAN_BINDINGS) goto cleanup;
+        if (bindings[i].binding >= binding_capacity) goto cleanup;
         used[bindings[i].binding] = 1;
     }
 
@@ -7979,7 +7990,7 @@ static int rewrite_duplicate_descriptor_bindings(
                 continue;
             }
             uint32_t binding = code[i + 3];
-            if (binding >= PDOCKER_GPU_MAX_VULKAN_BINDINGS) goto cleanup;
+            if (binding >= binding_capacity) goto cleanup;
             used[binding] = 1;
         }
         i += word_count;
@@ -7997,18 +8008,18 @@ static int rewrite_duplicate_descriptor_bindings(
                 continue;
             }
             uint32_t binding = code[i + 3];
-            if (binding >= PDOCKER_GPU_MAX_VULKAN_BINDINGS) goto cleanup;
+            if (binding >= binding_capacity) goto cleanup;
             if (!first_seen[binding]) {
                 first_seen[binding] = 1;
             } else {
                 uint32_t alias_binding = UINT32_MAX;
-                for (uint32_t candidate = 0; candidate < PDOCKER_GPU_MAX_VULKAN_BINDINGS; ++candidate) {
+                for (uint32_t candidate = 0; candidate < binding_capacity; ++candidate) {
                     if (!used[candidate]) {
                         alias_binding = candidate;
                         break;
                     }
                 }
-                if (alias_used >= PDOCKER_GPU_MAX_VULKAN_BINDINGS ||
+                if (alias_used >= alias_capacity ||
                     alias_binding == UINT32_MAX) {
                     goto cleanup;
                 }
@@ -8027,6 +8038,8 @@ static int rewrite_duplicate_descriptor_bindings(
     *alias_count = alias_used;
     ret = 0;
 cleanup:
+    free(used);
+    free(first_seen);
     free(has_descriptor_set);
     free(descriptor_sets);
     return ret;
@@ -14433,7 +14446,7 @@ static int run_vulkan_dispatch_fd(
         uint32_t base_z) {
     if (shader_fd < 0 || !buffer_fds || !bindings ||
         (binding_count == 0 && image_descriptor_count == 0) ||
-        binding_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS || shader_size == 0 ||
+        binding_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS || shader_size == 0 ||
         shader_size > 8 * 1024 * 1024 || push_size > PDOCKER_GPU_MAX_PUSH_BYTES ||
         specialization_count > PDOCKER_GPU_MAX_VULKAN_SPECIALIZATION_ENTRIES ||
         specialization_data_size > PDOCKER_GPU_MAX_VULKAN_SPECIALIZATION_BYTES) {
@@ -14443,7 +14456,7 @@ static int run_vulkan_dispatch_fd(
     if (image_descriptor_count > 0 &&
         (!image_descriptors || !object_tables || !object_tables->resources ||
          !object_tables->passed_fds ||
-         image_descriptor_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS)) {
+         image_descriptor_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS)) {
         json_fail("vulkan-dispatch", "invalid image descriptor metadata");
         return 64;
     }
@@ -14516,7 +14529,7 @@ static int run_vulkan_dispatch_fd(
         if (image_descriptors[i].binding > max_binding) {
             max_binding = image_descriptors[i].binding;
         }
-        if (image_descriptors[i].api_array_element >= PDOCKER_GPU_MAX_VULKAN_BINDINGS) {
+        if (image_descriptors[i].api_array_element >= PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS) {
             json_fail("vulkan-dispatch", "invalid image descriptor array element");
             return 64;
         }
@@ -14534,17 +14547,17 @@ static int run_vulkan_dispatch_fd(
     const int multi_descriptor_set = max_descriptor_set > 0;
 
     uint32_t *shader_code = (uint32_t *)malloc(shader_size);
-    VulkanVectorBuffer temp_buffers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    VulkanVectorBuffer alias_temp_buffers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+    VulkanVectorBuffer *temp_buffers = NULL;
+    VulkanVectorBuffer *alias_temp_buffers = NULL;
     VulkanVectorBuffer dispatch_indirect_temp_buffer;
     int dispatch_indirect_temp_buffer_used = 0;
-    VulkanVectorBuffer *vk_buffers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    VulkanStrictMemoryObject strict_memories[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    VulkanStrictBufferObject strict_buffers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    VulkanDispatchImageMemoryObject image_memories[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    VulkanDispatchImageObject dispatch_images[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    VulkanDispatchImageViewObject dispatch_image_views[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    VulkanDispatchSamplerObject dispatch_samplers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+    VulkanVectorBuffer **vk_buffers = NULL;
+    VulkanStrictMemoryObject *strict_memories = NULL;
+    VulkanStrictBufferObject *strict_buffers = NULL;
+    VulkanDispatchImageMemoryObject *image_memories = NULL;
+    VulkanDispatchImageObject *dispatch_images = NULL;
+    VulkanDispatchImageViewObject *dispatch_image_views = NULL;
+    VulkanDispatchSamplerObject *dispatch_samplers = NULL;
     size_t strict_memory_count = 0;
     size_t strict_buffer_count = 0;
     size_t image_memory_count = 0;
@@ -14567,25 +14580,25 @@ static int run_vulkan_dispatch_fd(
     VulkanStrictGraphCacheEntry *strict_object_graph_cache_entry = NULL;
     size_t strict_readonly_overlap_snapshot_count = 0;
     size_t strict_readonly_overlap_snapshot_bytes = 0;
-    int cache_hits[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    int cache_resident[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    int mutable_cache_hits[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    int mutable_cache_reused[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    double binding_upload_ms[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    double binding_download_ms[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    double binding_dirty_probe_ms[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    uint8_t binding_readonly_overlap_snapshot[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    size_t binding_readonly_overlap_source_index[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    size_t binding_readonly_overlap_snapshot_bytes[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    uint64_t binding_fd_before_hash[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    uint64_t binding_gpu_after_upload_hash[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    uint64_t binding_gpu_after_dispatch_hash[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    uint64_t binding_fd_after_hash[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    size_t binding_dirty_probe_pages[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    size_t binding_dirty_probe_bytes[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    int binding_dirty_writeback_cached[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    size_t binding_dirty_writeback_bytes[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    unsigned char *binding_dirty_probe_masks[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+    int *cache_hits = NULL;
+    int *cache_resident = NULL;
+    int *mutable_cache_hits = NULL;
+    int *mutable_cache_reused = NULL;
+    double *binding_upload_ms = NULL;
+    double *binding_download_ms = NULL;
+    double *binding_dirty_probe_ms = NULL;
+    uint8_t *binding_readonly_overlap_snapshot = NULL;
+    size_t *binding_readonly_overlap_source_index = NULL;
+    size_t *binding_readonly_overlap_snapshot_bytes = NULL;
+    uint64_t *binding_fd_before_hash = NULL;
+    uint64_t *binding_gpu_after_upload_hash = NULL;
+    uint64_t *binding_gpu_after_dispatch_hash = NULL;
+    uint64_t *binding_fd_after_hash = NULL;
+    size_t *binding_dirty_probe_pages = NULL;
+    size_t *binding_dirty_probe_bytes = NULL;
+    int *binding_dirty_writeback_cached = NULL;
+    size_t *binding_dirty_writeback_bytes = NULL;
+    unsigned char **binding_dirty_probe_masks = NULL;
     VkDescriptorSetLayout set_layout = VK_NULL_HANDLE;
     VkDescriptorSetLayout set_layouts[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS];
     VkDescriptorSet descriptor_sets[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS];
@@ -14609,7 +14622,7 @@ static int run_vulkan_dispatch_fd(
     VkSpecializationInfo vk_spec_info;
     const VkSpecializationInfo *vk_spec_ptr = NULL;
     SpirvTraceSummary spirv_summary;
-    VulkanBindingAlias binding_aliases[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+    VulkanBindingAlias *binding_aliases = NULL;
     size_t binding_alias_count = 0;
     int have_spirv_summary = 0;
     int specialization_materialized = 0;
@@ -14783,18 +14796,17 @@ static int run_vulkan_dispatch_fd(
         options && options->has_materialize_descriptor_aliases
             ? options->materialize_descriptor_aliases
             : env_truthy("PDOCKER_GPU_MATERIALIZE_DESCRIPTOR_ALIASES", 0);
-    uint8_t active_bindings[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    uint8_t strict_graph_active_bindings[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    memset(&strict_object_graph_timing, 0, sizeof(strict_object_graph_timing));
-    uint8_t strict_resident_cached_bindings[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    uint8_t binding_read_needed[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    uint8_t binding_write_needed[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    uint8_t binding_group_read_needed[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    size_t binding_alias_rep[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    off_t binding_group_base[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    off_t binding_group_end[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    off_t binding_object_base[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    off_t binding_object_end[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+    uint8_t *active_bindings = NULL;
+    uint8_t *strict_graph_active_bindings = NULL;
+    uint8_t *strict_resident_cached_bindings = NULL;
+    uint8_t *binding_read_needed = NULL;
+    uint8_t *binding_write_needed = NULL;
+    uint8_t *binding_group_read_needed = NULL;
+    size_t *binding_alias_rep = NULL;
+    off_t *binding_group_base = NULL;
+    off_t *binding_group_end = NULL;
+    off_t *binding_object_base = NULL;
+    off_t *binding_object_end = NULL;
     /*
      * Two coordinate systems must not be conflated in strict passthrough:
      *
@@ -14812,64 +14824,99 @@ static int run_vulkan_dispatch_fd(
      * one address while reading/writing back another.  That is not a shader or
      * data transformation issue; it is object-graph coordinate fidelity.
      */
-    size_t binding_gpu_offset[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    size_t binding_descriptor_offset[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    uint8_t binding_group_span_seen[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    dev_t binding_fd_dev[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    ino_t binding_fd_ino[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    memset(temp_buffers, 0, sizeof(temp_buffers));
-    memset(alias_temp_buffers, 0, sizeof(alias_temp_buffers));
+    size_t *binding_gpu_offset = NULL;
+    size_t *binding_descriptor_offset = NULL;
+    uint8_t *binding_group_span_seen = NULL;
+    dev_t *binding_fd_dev = NULL;
+    ino_t *binding_fd_ino = NULL;
+    memset(&strict_object_graph_timing, 0, sizeof(strict_object_graph_timing));
     memset(&dispatch_indirect_temp_buffer, 0, sizeof(dispatch_indirect_temp_buffer));
-    memset(vk_buffers, 0, sizeof(vk_buffers));
-    memset(strict_memories, 0, sizeof(strict_memories));
-    memset(strict_buffers, 0, sizeof(strict_buffers));
-    memset(image_memories, 0, sizeof(image_memories));
-    memset(dispatch_images, 0, sizeof(dispatch_images));
-    memset(dispatch_image_views, 0, sizeof(dispatch_image_views));
-    memset(dispatch_samplers, 0, sizeof(dispatch_samplers));
-    memset(cache_hits, 0, sizeof(cache_hits));
-    memset(cache_resident, 0, sizeof(cache_resident));
-    memset(mutable_cache_hits, 0, sizeof(mutable_cache_hits));
-    memset(mutable_cache_reused, 0, sizeof(mutable_cache_reused));
-    memset(binding_upload_ms, 0, sizeof(binding_upload_ms));
-    memset(binding_download_ms, 0, sizeof(binding_download_ms));
-    memset(binding_dirty_probe_ms, 0, sizeof(binding_dirty_probe_ms));
-    memset(binding_readonly_overlap_snapshot, 0, sizeof(binding_readonly_overlap_snapshot));
-    memset(binding_readonly_overlap_source_index, 0, sizeof(binding_readonly_overlap_source_index));
-    memset(binding_readonly_overlap_snapshot_bytes, 0, sizeof(binding_readonly_overlap_snapshot_bytes));
-    memset(binding_fd_before_hash, 0, sizeof(binding_fd_before_hash));
-    memset(binding_gpu_after_upload_hash, 0, sizeof(binding_gpu_after_upload_hash));
-    memset(binding_gpu_after_dispatch_hash, 0, sizeof(binding_gpu_after_dispatch_hash));
-    memset(binding_fd_after_hash, 0, sizeof(binding_fd_after_hash));
-    memset(binding_dirty_probe_pages, 0, sizeof(binding_dirty_probe_pages));
-    memset(binding_dirty_probe_bytes, 0, sizeof(binding_dirty_probe_bytes));
-    memset(binding_dirty_writeback_cached, 0, sizeof(binding_dirty_writeback_cached));
-    memset(binding_dirty_writeback_bytes, 0, sizeof(binding_dirty_writeback_bytes));
-    memset(binding_dirty_probe_masks, 0, sizeof(binding_dirty_probe_masks));
     memset(vk_spec_entries, 0, sizeof(vk_spec_entries));
     memset(&vk_spec_info, 0, sizeof(vk_spec_info));
     memset(&spirv_summary, 0, sizeof(spirv_summary));
-    memset(binding_aliases, 0, sizeof(binding_aliases));
     memset(set_layouts, 0, sizeof(set_layouts));
     memset(descriptor_sets, 0, sizeof(descriptor_sets));
     memset(set_binding_counts, 0, sizeof(set_binding_counts));
-    memset(active_bindings, 0, sizeof(active_bindings));
-    memset(strict_graph_active_bindings, 0, sizeof(strict_graph_active_bindings));
-    memset(strict_resident_cached_bindings, 0, sizeof(strict_resident_cached_bindings));
-    memset(binding_read_needed, 0, sizeof(binding_read_needed));
-    memset(binding_write_needed, 0, sizeof(binding_write_needed));
-    memset(binding_group_read_needed, 0, sizeof(binding_group_read_needed));
-    memset(binding_alias_rep, 0, sizeof(binding_alias_rep));
-    memset(binding_group_base, 0, sizeof(binding_group_base));
-    memset(binding_group_end, 0, sizeof(binding_group_end));
-    memset(binding_object_base, 0, sizeof(binding_object_base));
-    memset(binding_object_end, 0, sizeof(binding_object_end));
-    memset(binding_gpu_offset, 0, sizeof(binding_gpu_offset));
-    memset(binding_descriptor_offset, 0, sizeof(binding_descriptor_offset));
-    memset(binding_group_span_seen, 0, sizeof(binding_group_span_seen));
-    memset(binding_fd_dev, 0, sizeof(binding_fd_dev));
-    memset(binding_fd_ino, 0, sizeof(binding_fd_ino));
     if (!shader_code) return -21;
+
+    const size_t binding_table_capacity = binding_count ? binding_count : 1u;
+    const size_t alias_table_capacity = PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS;
+    const size_t image_memory_capacity = object_tables && object_tables->resource_count
+        ? object_tables->resource_count
+        : 1u;
+    const size_t image_table_capacity = object_tables && object_tables->image_count
+        ? object_tables->image_count
+        : 1u;
+    const size_t image_view_table_capacity = object_tables && object_tables->image_view_count
+        ? object_tables->image_view_count
+        : 1u;
+    const size_t sampler_table_capacity = object_tables && object_tables->sampler_count
+        ? object_tables->sampler_count
+        : 1u;
+    if (binding_table_capacity > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS ||
+        image_memory_capacity > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_RESOURCES ||
+        image_table_capacity > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGES ||
+        image_view_table_capacity > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGE_VIEWS ||
+        sampler_table_capacity > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_SAMPLERS) {
+        json_fail("vulkan-dispatch", "descriptor/object table exceeds V5 transport limit");
+        ret = 64;
+        goto cleanup;
+    }
+#define PDOCKER_CALLOC_TABLE(var_, count_) \
+    do { \
+        (var_) = calloc((count_), sizeof(*(var_))); \
+        if (!(var_)) { \
+            json_fail("vulkan-dispatch", "out of memory allocating dispatch work tables"); \
+            ret = 75; \
+            goto cleanup; \
+        } \
+    } while (0)
+    PDOCKER_CALLOC_TABLE(temp_buffers, binding_table_capacity);
+    PDOCKER_CALLOC_TABLE(alias_temp_buffers, alias_table_capacity);
+    PDOCKER_CALLOC_TABLE(vk_buffers, binding_table_capacity);
+    PDOCKER_CALLOC_TABLE(strict_memories, binding_table_capacity);
+    PDOCKER_CALLOC_TABLE(strict_buffers, binding_table_capacity);
+    PDOCKER_CALLOC_TABLE(image_memories, image_memory_capacity);
+    PDOCKER_CALLOC_TABLE(dispatch_images, image_table_capacity);
+    PDOCKER_CALLOC_TABLE(dispatch_image_views, image_view_table_capacity);
+    PDOCKER_CALLOC_TABLE(dispatch_samplers, sampler_table_capacity);
+    PDOCKER_CALLOC_TABLE(cache_hits, binding_table_capacity);
+    PDOCKER_CALLOC_TABLE(cache_resident, binding_table_capacity);
+    PDOCKER_CALLOC_TABLE(mutable_cache_hits, binding_table_capacity);
+    PDOCKER_CALLOC_TABLE(mutable_cache_reused, binding_table_capacity);
+    PDOCKER_CALLOC_TABLE(binding_upload_ms, binding_table_capacity);
+    PDOCKER_CALLOC_TABLE(binding_download_ms, binding_table_capacity);
+    PDOCKER_CALLOC_TABLE(binding_dirty_probe_ms, binding_table_capacity);
+    PDOCKER_CALLOC_TABLE(binding_readonly_overlap_snapshot, binding_table_capacity);
+    PDOCKER_CALLOC_TABLE(binding_readonly_overlap_source_index, binding_table_capacity);
+    PDOCKER_CALLOC_TABLE(binding_readonly_overlap_snapshot_bytes, binding_table_capacity);
+    PDOCKER_CALLOC_TABLE(binding_fd_before_hash, binding_table_capacity);
+    PDOCKER_CALLOC_TABLE(binding_gpu_after_upload_hash, binding_table_capacity);
+    PDOCKER_CALLOC_TABLE(binding_gpu_after_dispatch_hash, binding_table_capacity);
+    PDOCKER_CALLOC_TABLE(binding_fd_after_hash, binding_table_capacity);
+    PDOCKER_CALLOC_TABLE(binding_dirty_probe_pages, binding_table_capacity);
+    PDOCKER_CALLOC_TABLE(binding_dirty_probe_bytes, binding_table_capacity);
+    PDOCKER_CALLOC_TABLE(binding_dirty_writeback_cached, binding_table_capacity);
+    PDOCKER_CALLOC_TABLE(binding_dirty_writeback_bytes, binding_table_capacity);
+    PDOCKER_CALLOC_TABLE(binding_dirty_probe_masks, binding_table_capacity);
+    PDOCKER_CALLOC_TABLE(binding_aliases, alias_table_capacity);
+    PDOCKER_CALLOC_TABLE(active_bindings, binding_table_capacity);
+    PDOCKER_CALLOC_TABLE(strict_graph_active_bindings, binding_table_capacity);
+    PDOCKER_CALLOC_TABLE(strict_resident_cached_bindings, binding_table_capacity);
+    PDOCKER_CALLOC_TABLE(binding_read_needed, binding_table_capacity);
+    PDOCKER_CALLOC_TABLE(binding_write_needed, binding_table_capacity);
+    PDOCKER_CALLOC_TABLE(binding_group_read_needed, binding_table_capacity);
+    PDOCKER_CALLOC_TABLE(binding_alias_rep, binding_table_capacity);
+    PDOCKER_CALLOC_TABLE(binding_group_base, binding_table_capacity);
+    PDOCKER_CALLOC_TABLE(binding_group_end, binding_table_capacity);
+    PDOCKER_CALLOC_TABLE(binding_object_base, binding_table_capacity);
+    PDOCKER_CALLOC_TABLE(binding_object_end, binding_table_capacity);
+    PDOCKER_CALLOC_TABLE(binding_gpu_offset, binding_table_capacity);
+    PDOCKER_CALLOC_TABLE(binding_descriptor_offset, binding_table_capacity);
+    PDOCKER_CALLOC_TABLE(binding_group_span_seen, binding_table_capacity);
+    PDOCKER_CALLOC_TABLE(binding_fd_dev, binding_table_capacity);
+    PDOCKER_CALLOC_TABLE(binding_fd_ino, binding_table_capacity);
+#undef PDOCKER_CALLOC_TABLE
     if (read_fd_exact(shader_fd, shader_code, shader_size, 0) != 0) goto cleanup;
     const SpirvTraceSummary requested_spirv_summary = summarize_spirv(shader_code, shader_size);
     const uint64_t original_spirv_hash = requested_spirv_summary.hash;
@@ -15121,7 +15168,9 @@ static int run_vulkan_dispatch_fd(
                 shader_size,
                 bindings,
                 binding_count,
+                PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS,
                 binding_aliases,
+                alias_table_capacity,
                 &binding_alias_count,
                 &max_binding) != 0) {
             json_fail("vulkan-dispatch", "too many rewritten descriptor aliases");
@@ -15605,7 +15654,7 @@ static int run_vulkan_dispatch_fd(
         specialization_data_size);
 
     double upload_start = now_ms();
-    memcpy(strict_graph_active_bindings, active_bindings, sizeof(strict_graph_active_bindings));
+    memcpy(strict_graph_active_bindings, active_bindings, binding_table_capacity * sizeof(strict_graph_active_bindings[0]));
     if (strict_passthrough && !strict_device_local_staging) {
         for (size_t i = 0; i < binding_count; ++i) {
             if (!strict_readonly_resident_cache_candidate(
@@ -15669,6 +15718,10 @@ static int run_vulkan_dispatch_fd(
     if (strict_passthrough) {
         fail_stage = "create-strict-vulkan-object-graph";
         strict_object_graph_cache_enabled = strict_graph_cache_enabled(options);
+        if (strict_object_graph_cache_enabled && binding_table_capacity > PDOCKER_GPU_MAX_VULKAN_BINDINGS) {
+            strict_object_graph_cache_enabled = 0;
+            strict_object_graph_cache_disabled_reason = "binding-count-exceeds-cache-capacity";
+        }
         strict_descriptor_window_compaction_planned = strict_descriptor_window_compaction_status(
             bindings,
             binding_count,
@@ -15731,8 +15784,20 @@ static int run_vulkan_dispatch_fd(
                 strict_object_graph_cache_entry->last_used = g_vulkan_strict_graph_cache_clock++;
                 strict_memory_count = strict_object_graph_cache_entry->memory_count;
                 strict_buffer_count = strict_object_graph_cache_entry->buffer_count;
-                memcpy(strict_memories, strict_object_graph_cache_entry->memories, sizeof(strict_memories));
-                memcpy(strict_buffers, strict_object_graph_cache_entry->buffers, sizeof(strict_buffers));
+                if (strict_memory_count > binding_table_capacity ||
+                    strict_buffer_count > binding_table_capacity ||
+                    strict_memory_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS ||
+                    strict_buffer_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS) {
+                    strict_object_graph_cache_entry->in_use = 0;
+                    destroy_strict_graph_cache_entry(rt->device, strict_object_graph_cache_entry);
+                    strict_object_graph_cache_entry = NULL;
+                    io_rc = -E2BIG;
+                    goto cleanup;
+                }
+                memcpy(strict_memories, strict_object_graph_cache_entry->memories,
+                       strict_memory_count * sizeof(strict_memories[0]));
+                memcpy(strict_buffers, strict_object_graph_cache_entry->buffers,
+                       strict_buffer_count * sizeof(strict_buffers[0]));
                 attach_strict_graph_views(strict_memories, strict_buffers, strict_buffer_count);
                 int bind_rc = bind_strict_graph_views_to_bindings(
                     bindings, binding_count, strict_graph_active_bindings,
@@ -15768,8 +15833,10 @@ static int run_vulkan_dispatch_fd(
                 binding_read_needed,
                 binding_write_needed,
                 strict_memories,
+                binding_table_capacity,
                 &strict_memory_count,
                 strict_buffers,
+                binding_table_capacity,
                 &strict_buffer_count,
                 vk_buffers,
                 strict_device_local_staging,
@@ -15971,12 +16038,16 @@ static int run_vulkan_dispatch_fd(
             NULL,
             0,
             image_memories,
+            image_memory_capacity,
             &image_memory_count,
             dispatch_images,
+            image_table_capacity,
             &dispatch_image_count,
             dispatch_image_views,
+            image_view_table_capacity,
             &dispatch_image_view_count,
             dispatch_samplers,
+            sampler_table_capacity,
             &dispatch_sampler_count);
         if (image_rc != 0) {
             json_fail("vulkan-dispatch", "failed to materialize V5.1 image objects");
@@ -16056,7 +16127,7 @@ static int run_vulkan_dispatch_fd(
         const uint32_t set_index = bindings[i].descriptor_set;
         if (set_index >= descriptor_set_count ||
             bindings[i].binding >= layout_count ||
-            bindings[i].api_array_element >= PDOCKER_GPU_MAX_VULKAN_BINDINGS) {
+            bindings[i].api_array_element >= PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS) {
             json_fail("vulkan-dispatch", "invalid descriptor set, binding, or array element");
             ret = 64;
             goto cleanup;
@@ -16090,7 +16161,7 @@ static int run_vulkan_dispatch_fd(
         const uint32_t set_index = d->descriptor_set;
         if (set_index >= descriptor_set_count ||
             d->binding >= layout_count ||
-            d->api_array_element >= PDOCKER_GPU_MAX_VULKAN_BINDINGS) {
+            d->api_array_element >= PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS) {
             json_fail("vulkan-dispatch", "invalid image descriptor set, binding, or array element");
             ret = 64;
             goto cleanup;
@@ -17863,8 +17934,8 @@ static int run_vulkan_dispatch_fd(
             slot->bytes = strict_object_graph_cache_bytes;
             slot->hits = 1;
             slot->last_used = g_vulkan_strict_graph_cache_clock++;
-            memcpy(slot->memories, strict_memories, sizeof(strict_memories));
-            memcpy(slot->buffers, strict_buffers, sizeof(strict_buffers));
+            memcpy(slot->memories, strict_memories, strict_memory_count * sizeof(slot->memories[0]));
+            memcpy(slot->buffers, strict_buffers, strict_buffer_count * sizeof(slot->buffers[0]));
             attach_strict_graph_views(slot->memories, slot->buffers, slot->buffer_count);
             strict_object_graph_cache_adopted = 1;
         }
@@ -18768,21 +18839,31 @@ cleanup:
             vkDestroyDescriptorSetLayout(rt->device, set_layout, NULL);
         }
     }
-    destroy_vulkan_dispatch_image_objects(rt->device,
-                                          image_memories,
-                                          image_memory_count,
-                                          dispatch_images,
-                                          dispatch_image_count,
-                                          dispatch_image_views,
-                                          dispatch_image_view_count,
-                                          dispatch_samplers,
-                                          dispatch_sampler_count);
-    for (size_t i = 0; i < binding_count; ++i) {
-        free(binding_dirty_probe_masks[i]);
-        destroy_vulkan_vector_buffer(rt->device, &temp_buffers[i]);
+    if (image_memories || dispatch_images || dispatch_image_views || dispatch_samplers) {
+        destroy_vulkan_dispatch_image_objects(rt->device,
+                                              image_memories,
+                                              image_memory_count,
+                                              dispatch_images,
+                                              dispatch_image_count,
+                                              dispatch_image_views,
+                                              dispatch_image_view_count,
+                                              dispatch_samplers,
+                                              dispatch_sampler_count);
     }
-    for (size_t i = 0; i < binding_alias_count; ++i) {
-        destroy_vulkan_vector_buffer(rt->device, &alias_temp_buffers[i]);
+    if (binding_dirty_probe_masks) {
+        for (size_t i = 0; i < binding_count; ++i) {
+            free(binding_dirty_probe_masks[i]);
+        }
+    }
+    if (temp_buffers) {
+        for (size_t i = 0; i < binding_count; ++i) {
+            destroy_vulkan_vector_buffer(rt->device, &temp_buffers[i]);
+        }
+    }
+    if (alias_temp_buffers) {
+        for (size_t i = 0; i < binding_alias_count; ++i) {
+            destroy_vulkan_vector_buffer(rt->device, &alias_temp_buffers[i]);
+        }
     }
     destroy_vulkan_vector_buffer(rt->device, &dispatch_indirect_temp_buffer);
     if (strict_object_graph_cache_entry) {
@@ -18813,18 +18894,20 @@ cleanup:
                 slot->bytes = strict_object_graph_cache_bytes;
                 slot->hits = 1;
                 slot->last_used = g_vulkan_strict_graph_cache_clock++;
-                memcpy(slot->memories, strict_memories, sizeof(strict_memories));
-                memcpy(slot->buffers, strict_buffers, sizeof(strict_buffers));
+                memcpy(slot->memories, strict_memories, strict_memory_count * sizeof(slot->memories[0]));
+                memcpy(slot->buffers, strict_buffers, strict_buffer_count * sizeof(slot->buffers[0]));
                 attach_strict_graph_views(slot->memories, slot->buffers, slot->buffer_count);
                 strict_object_graph_cache_adopted = 1;
             }
         }
         if (!strict_object_graph_cache_adopted) {
-            destroy_strict_vulkan_object_graph(rt->device,
-                                               strict_memories,
-                                               strict_memory_count,
-                                               strict_buffers,
-                                               strict_buffer_count);
+            if (strict_memories && strict_buffers) {
+                destroy_strict_vulkan_object_graph(rt->device,
+                                                   strict_memories,
+                                                   strict_memory_count,
+                                                   strict_buffers,
+                                                   strict_buffer_count);
+            }
         }
     }
     free(shader_binding_access);
@@ -18851,6 +18934,51 @@ cleanup:
     free(writes);
     free(image_infos);
     free(infos);
+    free(binding_fd_ino);
+    free(binding_fd_dev);
+    free(binding_group_span_seen);
+    free(binding_descriptor_offset);
+    free(binding_gpu_offset);
+    free(binding_object_end);
+    free(binding_object_base);
+    free(binding_group_end);
+    free(binding_group_base);
+    free(binding_alias_rep);
+    free(binding_group_read_needed);
+    free(binding_write_needed);
+    free(binding_read_needed);
+    free(strict_resident_cached_bindings);
+    free(strict_graph_active_bindings);
+    free(active_bindings);
+    free(binding_aliases);
+    free(binding_dirty_probe_masks);
+    free(binding_dirty_writeback_bytes);
+    free(binding_dirty_writeback_cached);
+    free(binding_dirty_probe_bytes);
+    free(binding_dirty_probe_pages);
+    free(binding_fd_after_hash);
+    free(binding_gpu_after_dispatch_hash);
+    free(binding_gpu_after_upload_hash);
+    free(binding_fd_before_hash);
+    free(binding_readonly_overlap_snapshot_bytes);
+    free(binding_readonly_overlap_source_index);
+    free(binding_readonly_overlap_snapshot);
+    free(binding_dirty_probe_ms);
+    free(binding_download_ms);
+    free(binding_upload_ms);
+    free(mutable_cache_reused);
+    free(mutable_cache_hits);
+    free(cache_resident);
+    free(cache_hits);
+    free(dispatch_samplers);
+    free(dispatch_image_views);
+    free(dispatch_images);
+    free(image_memories);
+    free(strict_buffers);
+    free(strict_memories);
+    free(vk_buffers);
+    free(alias_temp_buffers);
+    free(temp_buffers);
     free(shader_code);
     return ret;
 }
@@ -20711,27 +20839,27 @@ static void finish_vulkan_dispatch_v5_native_plan_legacy_status(
     if (!plan) return;
     plan->legacy_v4_execution_compatible = 0;
     plan->legacy_v4_incompatible_reason = "legacy-v4-compatible";
-    if (plan->buffer_descriptor_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS ||
-        plan->image_descriptor_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS) {
-        plan->legacy_v4_incompatible_reason = "descriptor-count-exceeds-legacy-v4";
+    if (plan->buffer_descriptor_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS ||
+        plan->image_descriptor_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS) {
+        plan->legacy_v4_incompatible_reason = "descriptor-count-exceeds-v5-native";
         return;
     }
     if (plan->max_descriptor_set >= PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS) {
-        plan->legacy_v4_incompatible_reason = "descriptor-set-exceeds-legacy-v4";
+        plan->legacy_v4_incompatible_reason = "descriptor-set-exceeds-v5-native";
         return;
     }
     if (plan->max_binding >= PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS) {
         plan->legacy_v4_incompatible_reason = "binding-index-exceeds-v5-table-limit";
         return;
     }
-    if (plan->max_array_element >= PDOCKER_GPU_MAX_VULKAN_BINDINGS) {
-        plan->legacy_v4_incompatible_reason = "array-element-exceeds-legacy-v4";
+    if (plan->max_array_element >= PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS) {
+        plan->legacy_v4_incompatible_reason = "array-element-exceeds-v5-table-limit";
         return;
     }
-    if (plan->image_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS ||
-        plan->image_view_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS ||
-        plan->sampler_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS) {
-        plan->legacy_v4_incompatible_reason = "object-table-exceeds-legacy-v4";
+    if (plan->image_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGES ||
+        plan->image_view_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGE_VIEWS ||
+        plan->sampler_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_SAMPLERS) {
+        plan->legacy_v4_incompatible_reason = "object-table-exceeds-v5-native";
         return;
     }
     plan->legacy_v4_execution_compatible = 1;
@@ -28112,12 +28240,16 @@ static int materialize_vulkan_graphics_v6_attachments(
         msaa_image_allowed,
         view->header->image_count,
         out->memories,
+        PDOCKER_GPU_MAX_VULKAN_BINDINGS,
         &out->memory_count,
         out->images,
+        PDOCKER_GPU_MAX_VULKAN_BINDINGS,
         &out->image_count,
         out->views,
+        PDOCKER_GPU_MAX_VULKAN_BINDINGS,
         &out->view_count,
         out->samplers,
+        PDOCKER_GPU_MAX_VULKAN_BINDINGS,
         &out->sampler_count);
     if (rc != 0) return rc;
     rc = materialize_vulkan_graphics_v620_image_layout_ranges(view, out);

@@ -183,13 +183,19 @@ or closes.
   keeps its transient descriptor/object/fd tables in a cleanup-owned heap
   record keyed to the V5 table limits instead of fixed `PDOCKER_VK_MAX_STORAGE_BUFFERS`
   stack arrays; fd-bearing buffer descriptors still fail closed at the real
-  SCM_RIGHTS transport cap.  Descriptor capture, descriptor count/array/object
-  limits, duplicate-rewrite limits, and full V5 table-native replay remain the
-  next narrowing points to remove.  Acceptance: host verifier
-  `tests.test_gpu_abi_contract` must include
-  a V5 descriptor-array case above the V4 16-slot limit, and a runtime artifact
-  must either prove table-native replay or show sender-side fail-closed
-  rejection before frame send.
+  SCM_RIGHTS transport cap.  The Android compute runner now also heap-allocates
+  its per-dispatch binding, alias, strict-object, image-object, telemetry,
+  dirty-probe, and coordinate tables from validated V5 counts, and the V5
+  native-plan gate accepts V5 descriptor/object limits rather than rejecting
+  any frame above the old 16-slot legacy path.  The fixed strict-graph cache is
+  deliberately disabled for wider dispatches instead of being widened inside
+  this slice.  Remaining narrowing points: ICD descriptor-state capture tables,
+  the real SCM_RIGHTS fd limit for fd-bearing buffers, V1-V4 text debug command
+  compatibility caps, graphics fixed-array lanes, and device-runtime evidence
+  for a >16 V5 compute dispatch.  Acceptance: host verifier
+  `tests.test_gpu_abi_contract` covers the above-16 V5 executor path, native
+  payloads must build cleanly, and a runtime artifact must prove table-native
+  replay on device or show sender-side fail-closed rejection before frame send.
 - [planned] **residual graphics evidence gaps**: Do not promote full Vulkan
   pass-through until remaining fail-closed lanes have explicit ABI/evidence:
   dual-aspect depth+stencil copy layout, explicit compressed/multiplanar image
