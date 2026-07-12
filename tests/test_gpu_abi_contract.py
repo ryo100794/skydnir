@@ -1339,7 +1339,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "graphics_draw_ops[PDOCKER_VK_MAX_GRAPHICS_DRAW_OPS]",
             "cmd->graphics_draw_op_count = 0;",
             "snapshot->pipeline = cmd->graphics_pipeline;",
-            "memcpy(snapshot->set_snapshots, cmd->graphics_bound_set_snapshots",
+            "descriptor_set_clone_snapshot_array(\n            snapshot->set_snapshots",
             "memcpy(snapshot->push_constants, cmd->push_constants",
             "snapshot->push_constant_op_count = cmd->push_constant_op_count;",
             "memcpy(snapshot->vertex_bindings, cmd->vertex_bindings",
@@ -5401,7 +5401,7 @@ class GpuAbiContractTest(unittest.TestCase):
         icd = VULKAN_ICD.read_text()
         for marker in [
             "uint64_t layout_id;",
-            "bool storage_binding_present[PDOCKER_VK_MAX_STORAGE_BUFFERS]",
+            "bool *storage_binding_present",
             "layout->layout_id = next_vulkan_object_generation()",
             "layout->storage_binding_numbers[slot] = binding->binding",
             "layout->storage_binding_present[slot] = true",
@@ -6643,7 +6643,7 @@ class GpuAbiContractTest(unittest.TestCase):
     def test_vulkan_descriptor_arrays_preserve_array_elements_with_v5_transport(self):
         icd = VULKAN_ICD.read_text()
         self.assertIn("PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS", icd)
-        self.assertIn("[PDOCKER_VK_MAX_STORAGE_BUFFERS][PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS]", icd)
+        self.assertIn("PdockerVkDescriptorBinding (*storage_buffers)[PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS]", icd)
         self.assertIn("PdockerVkGenericDispatchTables *tables", icd)
         self.assertIn("cleanup(cleanup_generic_dispatch_tables)", icd)
         self.assertIn("uint32_t api_descriptor_array_elements[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS];", icd)
@@ -6716,8 +6716,8 @@ class GpuAbiContractTest(unittest.TestCase):
     def test_vulkan_immutable_samplers_preserve_descriptor_object_fidelity(self):
         icd = VULKAN_ICD.read_text()
         self.assertNotIn("PdockerVkSampler *immutable_samplers", icd)
-        self.assertIn("PdockerVkSampler immutable_samplers", icd)
-        self.assertIn("bool immutable_sampler_valid", icd)
+        self.assertIn("PdockerVkSampler (*immutable_samplers)[PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS]", icd)
+        self.assertIn("bool (*immutable_sampler_valid)[PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS]", icd)
         self.assertIn("descriptor_layout_immutable_sampler_valid", icd)
         self.assertIn("descriptor_layout_immutable_sampler", icd)
         self.assertIn("descriptor_set_apply_immutable_samplers", icd)
@@ -6877,12 +6877,14 @@ class GpuAbiContractTest(unittest.TestCase):
             "PdockerVkDescriptorUpdateTarget",
             "descriptor_update_find_shadow",
             "descriptor_update_get_shadow",
-            "target->shadow = *live;",
+            "descriptor_set_clone_for_update",
+            "descriptor_set_commit_shadow",
+            "descriptor_update_targets_destroy",
         ]:
             self.assertIn(marker, icd)
         self.assertIn("descriptor_update_get_shadow(", update_body)
         self.assertIn("src = descriptor_update_find_shadow(targets, target_count, src_live);", update_body)
-        self.assertIn("*targets[i].live = targets[i].shadow;", update_body)
+        self.assertIn("descriptor_set_commit_shadow(targets[i].live, &targets[i].shadow);", update_body)
         self.assertIn("goto fail_closed;", update_body)
         self.assertIn("no descriptor slot changes committed", update_body)
         self.assertIn("targets[i].live->unsupported_descriptor_array |=", update_body)
@@ -6891,7 +6893,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("if (!w->pBufferInfo) continue;", update_body)
         self.assertLess(
             update_body.index("descriptor_update_get_shadow("),
-            update_body.index("*targets[i].live = targets[i].shadow;"),
+            update_body.index("descriptor_set_commit_shadow(targets[i].live, &targets[i].shadow);"),
         )
         self.assertLess(
             update_body.index("descriptor_copy_slot_compatible(src, src_binding, src_array"),
@@ -7013,12 +7015,12 @@ class GpuAbiContractTest(unittest.TestCase):
 
     def test_vulkan_icd_descriptor_bindings_use_compact_slots_for_sparse_api_binding_numbers(self):
         icd = VULKAN_ICD.read_text()
-        self.assertIn("uint32_t storage_binding_numbers[PDOCKER_VK_MAX_STORAGE_BUFFERS];", icd)
+        self.assertIn("uint32_t *storage_binding_numbers;", icd)
         self.assertIn("descriptor_layout_slot_for_binding", icd)
         self.assertIn("descriptor_layout_binding_number", icd)
 
         support_body = c_function_body(icd, "descriptor_set_layout_create_info_supported")
-        self.assertIn("pCreateInfo->bindingCount > PDOCKER_VK_MAX_STORAGE_BUFFERS", support_body)
+        self.assertIn("pCreateInfo->bindingCount > PDOCKER_VK_MAX_DESCRIPTOR_BINDING_SLOTS", support_body)
         self.assertIn("binding->binding >= PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS", support_body)
         self.assertIn("pCreateInfo->pBindings[previous].binding == binding->binding", support_body)
         self.assertNotIn("bool seen_bindings[PDOCKER_VK_MAX_STORAGE_BUFFERS]", support_body)
@@ -7027,7 +7029,8 @@ class GpuAbiContractTest(unittest.TestCase):
         create_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorSetLayout", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkDestroyDescriptorSetLayout", 1
         )[0]
-        self.assertIn("bool selected[PDOCKER_VK_MAX_STORAGE_BUFFERS] = {0};", create_body)
+        self.assertIn("bool *selected = NULL;", create_body)
+        self.assertIn("selected = (bool *)calloc(pCreateInfo->bindingCount, sizeof(*selected));", create_body)
         self.assertIn("uint32_t best_binding_number = UINT32_MAX;", create_body)
         self.assertIn("uint32_t slot = layout->storage_binding_count++;", create_body)
         self.assertIn("layout->storage_binding_numbers[slot] = binding->binding;", create_body)
@@ -7222,7 +7225,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("set_layouts[PDOCKER_VK_MAX_DESCRIPTOR_SETS]", icd)
         self.assertIn("bool unsupported_set_layout_count;", icd)
         self.assertIn("descriptor_set_layout_compatible", icd)
-        self.assertIn("storage_binding_stage_flags[PDOCKER_VK_MAX_STORAGE_BUFFERS]", icd)
+        self.assertIn("VkShaderStageFlags *storage_binding_stage_flags", icd)
         self.assertIn("descriptor_type_is_dynamic", icd)
         self.assertIn("VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC", icd)
         self.assertIn("VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC", icd)
@@ -8170,7 +8173,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("pCreateInfo->bindingCount > 0 && !pCreateInfo->pBindings", helper_body)
         self.assertIn("descriptor_type_supported_by_v4_transport(binding->descriptorType)", helper_body)
         self.assertIn("descriptor_type_supported_by_v5_object_transport(binding->descriptorType)", helper_body)
-        self.assertIn("pCreateInfo->bindingCount > PDOCKER_VK_MAX_STORAGE_BUFFERS", helper_body)
+        self.assertIn("pCreateInfo->bindingCount > PDOCKER_VK_MAX_DESCRIPTOR_BINDING_SLOTS", helper_body)
         self.assertIn("binding->binding >= PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS", helper_body)
         self.assertIn("pCreateInfo->pBindings[previous].binding == binding->binding", helper_body)
         self.assertNotIn("bool seen_bindings[PDOCKER_VK_MAX_STORAGE_BUFFERS]", helper_body)
