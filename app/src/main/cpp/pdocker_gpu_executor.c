@@ -28035,8 +28035,18 @@ static int materialize_vulkan_graphics_v6_pipelines(
             }
             tsci.patchControlPoints = tessellation_state->patch_control_points;
         }
-        VkPipelineColorBlendAttachmentState blend_attachments[16];
-        memset(blend_attachments, 0, sizeof(blend_attachments));
+        int pipeline_rc = 0;
+        VkPipelineColorBlendAttachmentState *blend_attachments = NULL;
+        VkFormat *color_formats = NULL;
+        if (src->color_attachment_count > 0) {
+            blend_attachments = (VkPipelineColorBlendAttachmentState *)calloc(
+                src->color_attachment_count, sizeof(*blend_attachments));
+            color_formats = (VkFormat *)calloc(src->color_attachment_count, sizeof(*color_formats));
+            if (blend_attachments == NULL || color_formats == NULL) {
+                pipeline_rc = -ENOMEM;
+                goto graphics_pipeline_cleanup;
+            }
+        }
         for (uint32_t c = 0; c < src->color_attachment_count; ++c) {
             blend_attachments[c].blendEnable = VK_FALSE;
             blend_attachments[c].srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
@@ -28058,9 +28068,15 @@ static int materialize_vulkan_graphics_v6_pipelines(
             logic_op_enable = (color_blend_state->flags & PDOCKER_GPU_GRAPHICS_V66_COLOR_BLEND_LOGIC_OP_ENABLE)
                 ? VK_TRUE : VK_FALSE;
             logic_op = (VkLogicOp)color_blend_state->logic_op;
-            if (logic_op_enable && !rt->enabled_features.logicOp) return -EOPNOTSUPP;
+            if (logic_op_enable && !rt->enabled_features.logicOp) {
+                pipeline_rc = -EOPNOTSUPP;
+                goto graphics_pipeline_cleanup;
+            }
             if (vulkan_graphics_v66_color_blend_state_needs_independent_blend(view, color_blend_state) &&
-                !rt->enabled_features.independentBlend) return -EOPNOTSUPP;
+                !rt->enabled_features.independentBlend) {
+                pipeline_rc = -EOPNOTSUPP;
+                goto graphics_pipeline_cleanup;
+            }
             if (color_blend_state->flags & PDOCKER_GPU_GRAPHICS_V66_COLOR_BLEND_CONSTANTS_PRESENT) {
                 blend_constants[0] = float_from_u32_bits(color_blend_state->blend_constant0_bits);
                 blend_constants[1] = float_from_u32_bits(color_blend_state->blend_constant1_bits);
@@ -28123,7 +28139,10 @@ static int materialize_vulkan_graphics_v6_pipelines(
             vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_DEPTH_COMPARE_OP) |
             vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_STENCIL_TEST_ENABLE) |
             vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_STENCIL_OP);
-        if ((src->dynamic_state_mask & ~supported_dynamic_state_mask) != 0) return -EOPNOTSUPP;
+        if ((src->dynamic_state_mask & ~supported_dynamic_state_mask) != 0) {
+            pipeline_rc = -EOPNOTSUPP;
+            goto graphics_pipeline_cleanup;
+        }
         ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_VIEWPORT);
         ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_SCISSOR);
         ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT);
@@ -28157,11 +28176,13 @@ static int materialize_vulkan_graphics_v6_pipelines(
             .pDynamicStates = dynamic_states,
         };
         const uint32_t *formats = &src->color_attachment_format0;
-        VkFormat color_formats[16];
         for (uint32_t c = 0; c < src->color_attachment_count; ++c) {
             color_formats[c] = (VkFormat)formats[c];
         }
-        if (src->dynamic_rendering_view_mask != 0 && !rt->enabled_vulkan11.multiview) return -EOPNOTSUPP;
+        if (src->dynamic_rendering_view_mask != 0 && !rt->enabled_vulkan11.multiview) {
+            pipeline_rc = -EOPNOTSUPP;
+            goto graphics_pipeline_cleanup;
+        }
         VkPipelineRenderingCreateInfo rendering = {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
             .viewMask = src->dynamic_rendering_view_mask,
@@ -28172,7 +28193,10 @@ static int materialize_vulkan_graphics_v6_pipelines(
         };
         const PdockerGpuVulkanGraphicsV63DepthStencilStateEntry *depth_stencil_state =
             find_vulkan_graphics_v63_depth_stencil_state(view, pidx);
-        if (src->depth_stencil_flags != 0 && !depth_stencil_state) return -EOPNOTSUPP;
+        if (src->depth_stencil_flags != 0 && !depth_stencil_state) {
+            pipeline_rc = -EOPNOTSUPP;
+            goto graphics_pipeline_cleanup;
+        }
         VkPipelineDepthStencilStateCreateInfo dssci;
         populate_vulkan_graphics_depth_stencil_state(depth_stencil_state, &dssci);
         VkGraphicsPipelineCreateInfo gpci = {
@@ -28196,7 +28220,14 @@ static int materialize_vulkan_graphics_v6_pipelines(
             .subpass = 0,
         };
         VkResult vrc = vkCreateGraphicsPipelines(rt->device, VK_NULL_HANDLE, 1, &gpci, NULL, &dst->pipeline);
-        if (vrc != VK_SUCCESS) return -EIO;
+        if (vrc != VK_SUCCESS) {
+            pipeline_rc = -EIO;
+            goto graphics_pipeline_cleanup;
+        }
+graphics_pipeline_cleanup:
+        free(blend_attachments);
+        free(color_formats);
+        if (pipeline_rc != 0) return pipeline_rc;
     }
     return 0;
 }

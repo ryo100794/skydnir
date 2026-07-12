@@ -2534,11 +2534,18 @@ class GpuAbiContractTest(unittest.TestCase):
             "command->rendering_view_mask != 0 &&",
             "!g_vulkan_runtime.enabled_vulkan11.multiview",
             "dynamic rendering multiview requires enabled Vulkan 1.1 multiview",
-            "if (src->dynamic_rendering_view_mask != 0 && !rt->enabled_vulkan11.multiview) return -EOPNOTSUPP;",
+            "src->dynamic_rendering_view_mask != 0 && !rt->enabled_vulkan11.multiview",
         ]:
             self.assertIn(marker, executor)
         self.assertNotIn("dynamic rendering multiview is not supported", executor)
         self.assertNotIn("if (src->dynamic_rendering_view_mask != 0) return -EOPNOTSUPP;", executor)
+        pipeline_body = c_function_body(executor, "materialize_vulkan_graphics_v6_pipelines")
+        self.assertIn("if (src->dynamic_rendering_view_mask != 0 && !rt->enabled_vulkan11.multiview) {", pipeline_body)
+        self.assertIn("pipeline_rc = -EOPNOTSUPP;", pipeline_body)
+        self.assertLess(
+            pipeline_body.index("src->dynamic_rendering_view_mask != 0 && !rt->enabled_vulkan11.multiview"),
+            pipeline_body.index("VkPipelineRenderingCreateInfo rendering"),
+        )
 
     def test_vulkan_graphics_unused_color_attachment_slots_are_preserved(self):
         abi = APP_HEADER.read_text()
@@ -7236,6 +7243,19 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("VkDescriptorImageInfo image_infos[PDOCKER_GPU_MAX_VULKAN_BINDINGS];", body)
         self.assertNotIn("VkWriteDescriptorSet writes[PDOCKER_GPU_MAX_VULKAN_BINDINGS];", body)
 
+    def test_vulkan_graphics_pipeline_color_attachment_tables_are_heap_backed(self):
+        executor = GPU_EXECUTOR.read_text()
+        body = c_function_body(executor, "materialize_vulkan_graphics_v6_pipelines")
+        self.assertIn("VkPipelineColorBlendAttachmentState *blend_attachments = NULL;", body)
+        self.assertIn("VkFormat *color_formats = NULL;", body)
+        self.assertIn("src->color_attachment_count, sizeof(*blend_attachments)", body)
+        self.assertIn("src->color_attachment_count, sizeof(*color_formats)", body)
+        self.assertIn("goto graphics_pipeline_cleanup;", body)
+        self.assertIn("free(blend_attachments);", body)
+        self.assertIn("free(color_formats);", body)
+        self.assertNotIn("VkPipelineColorBlendAttachmentState blend_attachments[16];", body)
+        self.assertNotIn("VkFormat color_formats[16];", body)
+
     def test_vulkan_compute_dispatch_executor_work_tables_are_heap_backed_for_v5_width(self):
         executor = GPU_EXECUTOR.read_text()
         body = c_function_body(executor, "run_vulkan_dispatch_fd")
@@ -9053,6 +9073,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("PdockerGpuVulkanDispatchV53BufferViewEntry", icd)
         self.assertIn("PdockerGpuVulkanGraphicsV627BufferViewEntry", icd)
         self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V627_BUFFER_VIEW_SCHEMA_HASH", icd)
+        self.assertIn("size_t cursor = sizeof(PdockerGpuVulkanGraphicsV627FrameHeader);", icd)
+        self.assertNotIn("size_t cursor = sizeof(PdockerGpuVulkanGraphicsV626FrameHeader);", icd)
         self.assertIn("executor_supports_vulkan_dispatch_v53_buffer_views", icd)
         self.assertIn("executor_supports_vulkan_graphics_v627_buffer_views", icd)
         self.assertIn("executor_supports_any_vulkan_buffer_views", icd)

@@ -1,6 +1,6 @@
 # Third-party notices
 
-pdocker-android bundles or depends on the following third-party components:
+Skydnir bundles or depends on the following third-party components:
 
 - go-containerregistry / crane: Apache-2.0, https://github.com/google/go-containerregistry
 - xterm.js and xterm-addon-fit: MIT, https://github.com/xtermjs/xterm.js
