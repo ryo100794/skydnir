@@ -222,7 +222,11 @@ or closes.
   vector-add fallback through descriptor slot accessors.  The Android compute
   executor duplicate-descriptor alias rewrite now also handles source descriptor
   arrays by sizing the rewritten binding to the active source array span and
-  mirroring descriptor writes at the same `api_array_element`.  Duplicate
+  mirroring descriptor writes at the same `api_array_element`.  The Android
+  compute strict object graph cache now uses heap-backed memory/buffer object
+  tables and heap-sized key scratch storage, so V5-width compute dispatches no
+  longer disable cache solely because they exceed the legacy 16-binding
+  executor constant.  Duplicate
   Binding normalization is also tracked per descriptor set, so multi-set SPIR-V
   modules allocate aliases inside the owning set instead of hitting the old
   descriptor-set-0-only guard.  Remaining overflow is therefore a V5

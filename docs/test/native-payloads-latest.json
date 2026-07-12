@@ -55,8 +55,8 @@
       },
       {
         "entry": "lib/arm64-v8a/libpdockergpuexecutor.so",
-        "sha256": "9620f4a49ff189fb30a151f5e2b94385be33ae47dddc7dd9ddebf2d861ad639a",
-        "size": 504184
+        "sha256": "dbb434ec0ba6089eae1dd9bd7048ee09654b15617aa2b498dc16782533160bf5",
+        "size": 505200
       },
       {
         "entry": "lib/arm64-v8a/libpdockergpushim.so",
@@ -121,15 +121,15 @@
     {
       "abi": "arm64-v8a",
       "exists": true,
-      "file": "/root/tl/pdocker-android/app/src/main/jniLibs/arm64-v8a/libpdockergpuexecutor.so: ELF 64-bit LSB pie executable, ARM aarch64, version 1 (SYSV), dynamically linked, interpreter /system/bin/linker64, BuildID[sha1]=512c3a9924ac9a10ed073fc7849369ededd8e8c1, not stripped",
+      "file": "/root/tl/pdocker-android/app/src/main/jniLibs/arm64-v8a/libpdockergpuexecutor.so: ELF 64-bit LSB pie executable, ARM aarch64, version 1 (SYSV), dynamically linked, interpreter /system/bin/linker64, BuildID[sha1]=d73509f3b2cc19e61b5354bac720d197544405c0, not stripped",
       "has_android_linker": true,
       "has_glibc_loader": false,
       "name": "libpdockergpuexecutor.so",
       "path": "app/src/main/jniLibs/arm64-v8a/libpdockergpuexecutor.so",
       "readelf_header_has_machine": true,
       "role": "android-bionic",
-      "sha256": "9620f4a49ff189fb30a151f5e2b94385be33ae47dddc7dd9ddebf2d861ad639a",
-      "size": 504184
+      "sha256": "dbb434ec0ba6089eae1dd9bd7048ee09654b15617aa2b498dc16782533160bf5",
+      "size": 505200
     },
     {
       "abi": "arm64-v8a",
@@ -173,15 +173,15 @@
     {
       "abi": "armeabi-v7a",
       "exists": true,
-      "file": "/root/tl/pdocker-android/app/src/main/jniLibs/armeabi-v7a/libpdockergpuexecutor.so: ELF 32-bit LSB pie executable, ARM, EABI5 version 1 (SYSV), dynamically linked, interpreter /system/bin/linker, BuildID[sha1]=e30acf167af4d9b53e820cc32f06dd6d5de294c0, not stripped",
+      "file": "/root/tl/pdocker-android/app/src/main/jniLibs/armeabi-v7a/libpdockergpuexecutor.so: ELF 32-bit LSB pie executable, ARM, EABI5 version 1 (SYSV), dynamically linked, interpreter /system/bin/linker, BuildID[sha1]=bcc78a14fd13b78bd1aa1a44e529364d6145d4a5, not stripped",
       "has_android_linker": true,
       "has_glibc_loader": false,
       "name": "libpdockergpuexecutor.so",
       "path": "app/src/main/jniLibs/armeabi-v7a/libpdockergpuexecutor.so",
       "readelf_header_has_machine": true,
       "role": "android-bionic",
-      "sha256": "e3e6223fdd009c1e9ac90b08b50f871694d64d69ac8fa267025818c27a86ce05",
-      "size": 600796
+      "sha256": "04b0d04dc72b85278daa2f455486451d2ea82755275bfa2030e13a8d15d55781",
+      "size": 601796
     },
     {
       "abi": "armeabi-v7a",
