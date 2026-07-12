@@ -6730,8 +6730,11 @@ class GpuAbiContractTest(unittest.TestCase):
 
     def test_vulkan_descriptor_arrays_preserve_array_elements_with_v5_transport(self):
         icd = VULKAN_ICD.read_text()
-        self.assertIn("PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS", icd)
-        self.assertIn("PdockerVkDescriptorBinding (*storage_buffers)[PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS]", icd)
+        self.assertIn("PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS", icd)
+        self.assertIn("PdockerVkDescriptorBinding **storage_buffers;", icd)
+        self.assertIn("uint32_t *storage_buffer_counts;", icd)
+        self.assertIn("descriptor_set_binding_slot", icd)
+        self.assertNotIn("PdockerVkDescriptorBinding (*storage_buffers)[PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS]", icd)
         self.assertIn("PdockerVkGenericDispatchTables *tables", icd)
         self.assertIn("cleanup(cleanup_generic_dispatch_tables)", icd)
         self.assertIn("uint32_t api_descriptor_array_elements[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS];", icd)
@@ -6742,9 +6745,12 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("descriptor_array_transport_required || image_descriptor_count > 0", icd)
         self.assertIn("api_descriptor_array_elements[binding_count] = array_element;", icd)
         self.assertIn("image_descriptor_array_elements[image_descriptor_count] = array_element;", icd)
-        self.assertIn("set->storage_buffers[binding][array_element]", icd)
-        self.assertIn("src->storage_buffers[src_binding][src_array]", icd)
-        self.assertIn("dst->storage_buffers[dst_binding][dst_array]", icd)
+        self.assertIn("descriptor_set_binding_slot(set, binding, array_element)", icd)
+        self.assertIn("descriptor_set_binding_slot_const(src, src_binding, src_array)", icd)
+        self.assertIn("descriptor_set_binding_slot(dst, dst_binding, dst_array)", icd)
+        self.assertNotIn("set->storage_buffers[binding][array_element]", icd)
+        self.assertNotIn("src->storage_buffers[src_binding][src_array]", icd)
+        self.assertNotIn("dst->storage_buffers[dst_binding][dst_array]", icd)
         self.assertNotIn("descriptor array layout binding=%u count=%u type=%u is unsupported by V4 transport", icd)
         self.assertNotIn("descriptor array write binding=%u array=%u count=%u is unsupported by V4 transport", icd)
         self.assertNotIn("descriptor array copy src_binding=%u src_array=%u dst_binding=%u dst_array=%u count=%u is unsupported by V4 transport", icd)
@@ -6760,7 +6766,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "VKAPI_ATTR void VKAPI_CALL vkCmdPushConstants", 1
         )[0]
         self.assertIn("storage_binding_counts[binding]", bind_body)
-        self.assertIn("storage_buffers[binding][array_element]", bind_body)
+        self.assertIn("descriptor_set_binding_slot(&target_set_snapshots[target_set], binding, array_element)", bind_body)
+        self.assertNotIn("storage_buffers[binding][array_element]", bind_body)
         self.assertNotIn("PDOCKER_VULKAN_USE_V5_FRAME is disabled", bind_body)
 
     def test_vulkan_generic_dispatch_temp_tables_are_not_layout_slot_limited(self):
@@ -6803,9 +6810,11 @@ class GpuAbiContractTest(unittest.TestCase):
 
     def test_vulkan_immutable_samplers_preserve_descriptor_object_fidelity(self):
         icd = VULKAN_ICD.read_text()
-        self.assertNotIn("PdockerVkSampler *immutable_samplers", icd)
-        self.assertIn("PdockerVkSampler (*immutable_samplers)[PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS]", icd)
-        self.assertIn("bool (*immutable_sampler_valid)[PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS]", icd)
+        self.assertIn("PdockerVkSampler **immutable_samplers;", icd)
+        self.assertIn("bool **immutable_sampler_valid;", icd)
+        self.assertIn("descriptor_set_layout_allocate_immutable_sampler_row", icd)
+        self.assertNotIn("PdockerVkSampler (*immutable_samplers)[PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS]", icd)
+        self.assertNotIn("bool (*immutable_sampler_valid)[PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS]", icd)
         self.assertIn("descriptor_layout_immutable_sampler_valid", icd)
         self.assertIn("descriptor_layout_immutable_sampler", icd)
         self.assertIn("descriptor_set_apply_immutable_samplers", icd)
@@ -6827,8 +6836,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("slot->sampler = pdocker_vk_sampler_from_handle(info->sampler);", update_body)
         self.assertIn("descriptor_set_apply_immutable_samplers(dst);", update_body)
         compat_body = c_function_body(icd, "descriptor_set_layout_compatible")
-        self.assertIn("expected->immutable_sampler_valid[i][array_element]", compat_body)
-        self.assertIn("actual->immutable_sampler_valid[i][array_element]", compat_body)
+        self.assertIn("descriptor_layout_immutable_sampler_valid(expected, i, array_element)", compat_body)
+        self.assertIn("descriptor_layout_immutable_sampler_valid(actual, i, array_element)", compat_body)
+        self.assertIn("descriptor_layout_immutable_sampler(expected, i, array_element)", compat_body)
         self.assertIn("pdocker_vk_sampler_contents_equal", compat_body)
         copy_compat_body = c_function_body(icd, "descriptor_copy_slot_compatible")
         self.assertIn("descriptor_layout_immutable_sampler_valid", copy_compat_body)
@@ -6943,7 +6953,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("descriptor_copy_slot_compatible(src, src_binding, src_array", update_body)
         self.assertLess(
             update_body.index("descriptor_copy_slot_compatible(src, src_binding, src_array"),
-            update_body.index("dst->storage_buffers[dst_binding][dst_array] ="),
+            update_body.index("descriptor_set_binding_slot(dst, dst_binding, dst_array)"),
         )
 
     def test_vulkan_descriptor_updates_stage_before_commit(self):
@@ -6985,7 +6995,7 @@ class GpuAbiContractTest(unittest.TestCase):
         )
         self.assertLess(
             update_body.index("descriptor_copy_slot_compatible(src, src_binding, src_array"),
-            update_body.index("dst->storage_buffers[dst_binding][dst_array] ="),
+            update_body.index("descriptor_set_binding_slot(dst, dst_binding, dst_array)"),
         )
         self.assertLess(
             update_body.index("fail_closed:"),
@@ -7354,7 +7364,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("dynamic descriptor offset overflow", bind_body)
         self.assertIn("cmd->unsupported_descriptor_set_layout = true;", bind_body)
         self.assertIn("slot->dynamic = descriptor_type_is_dynamic", icd)
-        self.assertIn("storage_buffers[binding][array_element]", bind_body)
+        self.assertIn("descriptor_set_binding_slot(&target_set_snapshots[target_set], binding, array_element)", bind_body)
+        self.assertNotIn("storage_buffers[binding][array_element]", bind_body)
         self.assertIn("validate_bound_descriptor_layouts_before_dispatch", icd)
         self.assertIn("dispatch descriptor layout mismatch", icd)
         dispatch_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdDispatch", 1)[1].split(
@@ -8268,7 +8279,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("bool seen_bindings[PDOCKER_VK_MAX_STORAGE_BUFFERS]", helper_body)
         self.assertNotIn("binding->binding >= PDOCKER_VK_MAX_STORAGE_BUFFERS", helper_body)
         self.assertIn("binding->descriptorCount == 0", helper_body)
-        self.assertIn("binding->descriptorCount > PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS", helper_body)
+        self.assertIn("binding->descriptorCount > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS", helper_body)
+        self.assertNotIn("binding->descriptorCount > PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS", helper_body)
         self.assertIn("binding->pImmutableSamplers", helper_body)
         self.assertIn("!descriptor_type_requires_sampler(binding->descriptorType)", helper_body)
         self.assertIn("pdocker_vk_sampler_from_handle(binding->pImmutableSamplers[array_element])", helper_body)
@@ -16831,6 +16843,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("caps->limits.maxBoundDescriptorSets < PDOCKER_VK_MAX_DESCRIPTOR_SETS", properties_body)
         self.assertIn("pdocker_vk_max_per_set_descriptors", icd)
         self.assertIn("PDOCKER_VK_MAX_STORAGE_BUFFERS * PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS", icd)
+        self.assertIn("PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS", icd)
         self.assertNotIn("maxPerSetDescriptors = 1024", icd)
         self.assertIn("p->maxPerSetDescriptors = pdocker_vk_max_per_set_descriptors();", icd)
         pnext_body = icd.split("static void fill_pnext_features", 1)[1].split(

@@ -215,9 +215,14 @@ or closes.
   accepts sparse/high API binding numbers and caps descriptor counts by the V5
   descriptor-table maximum instead of the legacy 16-slot executor constant.
   The producer ICD V6.24 metadata collector also no longer applies the
-  stale `PDOCKER_GPU_MAX_VULKAN_BINDINGS` descriptor-count guard;
-  descriptor arrays remain bounded by `PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS`
-  until the separate descriptor-array storage heap lane.
+  stale `PDOCKER_GPU_MAX_VULKAN_BINDINGS` descriptor-count guard.  The
+  descriptor-array storage heap lane now stores descriptor rows and immutable
+  sampler rows per binding, raises `PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS`
+  to the V5 descriptor-table transport limit, and routes snapshots, updates,
+  dynamic offsets, generic dispatch, graphics descriptor collection, and legacy
+  vector-add fallback through descriptor slot accessors.  Remaining overflow is
+  therefore a V5 transport-table limit rather than the former 16-element ICD
+  storage shape.
   V6.1 explicit dependency barriers now allocate synchronization2 and legacy
   barrier replay tables from the validated V6.1 metadata counts, removing the
   former per-command 16-barrier stack ceiling while preserving the existing
