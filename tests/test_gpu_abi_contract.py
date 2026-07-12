@@ -4093,6 +4093,19 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("vulkan_graphics_replay_queue_family_index", dependency_helper)
         self.assertNotIn("case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER:\n                rc = -EOPNOTSUPP", recorder)
 
+    def test_vulkan_graphics_descriptor_bind_image_barriers_are_heap_backed(self):
+        executor = GPU_EXECUTOR.read_text()
+        recorder = executor.split("static int record_vulkan_graphics_v6_command_buffer", 1)[1].split(
+            "static int submit_vulkan_graphics_v6_command_buffer", 1
+        )[0]
+        self.assertIn("descriptor_image_barrier_capacity", recorder)
+        self.assertIn("VkImageMemoryBarrier *descriptor_image_barriers", recorder)
+        self.assertIn("calloc(descriptor_image_barrier_capacity", recorder)
+        self.assertIn("free(descriptor_image_barriers)", recorder)
+        self.assertIn("image_barrier_count >= descriptor_image_barrier_capacity", recorder)
+        self.assertNotIn("VkImageMemoryBarrier image_barriers[PDOCKER_GPU_MAX_VULKAN_BINDINGS]", recorder)
+        self.assertNotIn("image_barrier_count >= PDOCKER_GPU_MAX_VULKAN_BINDINGS", recorder)
+
     def test_vulkan_graphics_no_attachment_dynamic_rendering_is_replayable(self):
         executor = GPU_EXECUTOR.read_text()
         preflight = executor.split(

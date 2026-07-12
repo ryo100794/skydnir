@@ -30870,6 +30870,8 @@ static int record_vulkan_graphics_v6_command_buffer(
         (view->header_v61 && view->header_v61->v61.image_barrier_count != 0)
             ? view->header_v61->v61.image_barrier_count
             : 1u;
+    const uint32_t descriptor_image_barrier_capacity =
+        view->header->descriptor_count ? view->header->descriptor_count : 1u;
     VkMemoryBarrier2 *memory_barriers_to_record =
         calloc(memory_barrier_capacity, sizeof(*memory_barriers_to_record));
     VkBufferMemoryBarrier2 *buffer_barriers_to_record =
@@ -30882,8 +30884,11 @@ static int record_vulkan_graphics_v6_command_buffer(
         calloc(buffer_barrier_capacity, sizeof(*buffer_barriers_legacy));
     VkImageMemoryBarrier *image_barriers_legacy =
         calloc(image_barrier_capacity, sizeof(*image_barriers_legacy));
+    VkImageMemoryBarrier *descriptor_image_barriers =
+        calloc(descriptor_image_barrier_capacity, sizeof(*descriptor_image_barriers));
     if (!memory_barriers_to_record || !buffer_barriers_to_record || !image_barriers_to_record ||
-        !memory_barriers_legacy || !buffer_barriers_legacy || !image_barriers_legacy) {
+        !memory_barriers_legacy || !buffer_barriers_legacy || !image_barriers_legacy ||
+        !descriptor_image_barriers) {
         rc = -ENOMEM;
         goto cleanup;
     }
@@ -31738,7 +31743,9 @@ static int record_vulkan_graphics_v6_command_buffer(
                     &layouts->pipeline_layouts[(uint32_t)bind_layout_index];
                 rc = record_vulkan_graphics_v6_staged_image_uploads(command_buffer, attachments);
                 if (rc != 0) goto cleanup;
-                VkImageMemoryBarrier image_barriers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+                memset(descriptor_image_barriers, 0,
+                       descriptor_image_barrier_capacity * sizeof(*descriptor_image_barriers));
+                VkImageMemoryBarrier *image_barriers = descriptor_image_barriers;
                 uint32_t image_barrier_count = 0;
                 VkPipelineStageFlags image_src_stages = 0;
                 for (uint32_t d = 0; d < command->descriptor_count; ++d) {
@@ -31763,7 +31770,7 @@ static int record_vulkan_graphics_v6_command_buffer(
                     }
                     VulkanDispatchImageObject *image =
                         &attachments->images[view_obj->image_index];
-                    if (image_barrier_count >= PDOCKER_GPU_MAX_VULKAN_BINDINGS) {
+                    if (image_barrier_count >= descriptor_image_barrier_capacity) {
                         rc = -E2BIG;
                         goto cleanup;
                     }
@@ -32502,6 +32509,7 @@ static int record_vulkan_graphics_v6_command_buffer(
     *out_command_buffer = command_buffer;
     command_buffer = VK_NULL_HANDLE;
 cleanup:
+    free(descriptor_image_barriers);
     free(image_barriers_legacy);
     free(buffer_barriers_legacy);
     free(memory_barriers_legacy);

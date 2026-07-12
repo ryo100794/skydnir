@@ -217,7 +217,10 @@ or closes.
   V6.1 explicit dependency barriers now allocate synchronization2 and legacy
   barrier replay tables from the validated V6.1 metadata counts, removing the
   former per-command 16-barrier stack ceiling while preserving the existing
-  fail-closed queue-family ownership checks.
+  fail-closed queue-family ownership checks.  Descriptor-bind image layout
+  transition barriers now also use a heap arena sized by the validated graphics
+  descriptor table count, so image descriptor binds no longer inherit a 16-entry
+  stack barrier ceiling.
   The fixed strict-graph cache is deliberately
   disabled for wider dispatches instead of being widened inside this slice.
   Remaining narrowing points: the real SCM_RIGHTS fd limit for fd-bearing buffers,
