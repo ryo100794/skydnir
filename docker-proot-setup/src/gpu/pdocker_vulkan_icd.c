@@ -4585,8 +4585,7 @@ static int collect_graphics_v624_descriptor_set_layout_metadata(
             return -EOPNOTSUPP;
         }
         uint32_t descriptor_count = layout->storage_binding_counts[binding];
-        if (descriptor_count > PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS ||
-            descriptor_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS) {
+        if (descriptor_count > PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS) {
             return -E2BIG;
         }
         uint32_t immutable_sampler_count = 0;

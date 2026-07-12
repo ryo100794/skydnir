@@ -7142,6 +7142,7 @@ class GpuAbiContractTest(unittest.TestCase):
         graphics_layout_body = c_function_body(icd, "collect_graphics_v624_descriptor_set_layout_metadata")
         self.assertIn("const uint32_t api_binding = descriptor_layout_binding_number(layout, binding);", graphics_layout_body)
         self.assertIn("candidate.binding = api_binding;", graphics_layout_body)
+        self.assertNotIn("descriptor_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS", graphics_layout_body)
 
         graphics_descriptor_body = c_function_body(icd, "collect_graphics_descriptor_entries")
         self.assertIn("const uint32_t api_binding = descriptor_layout_binding_number(layout, binding_index);", graphics_descriptor_body)
