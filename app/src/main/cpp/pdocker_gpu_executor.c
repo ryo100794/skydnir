@@ -28641,18 +28641,31 @@ static int record_vulkan_graphics_v6_attachment_writeback_commands(
         VkCommandBuffer command_buffer,
         VulkanGraphicsReplayAttachments *attachments) {
     if (!command_buffer || !attachments) return -EINVAL;
-    VkImageMemoryBarrier post_barriers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+    if (attachments->image_count > 0 && !attachments->images) return -EINVAL;
+    const size_t barrier_capacity = attachments->image_count ? attachments->image_count : 1u;
+    if (barrier_capacity > UINT32_MAX) return -E2BIG;
+    VkImageMemoryBarrier *post_barriers = (VkImageMemoryBarrier *)calloc(
+        barrier_capacity, sizeof(*post_barriers));
+    VkBufferMemoryBarrier *staging_barriers = (VkBufferMemoryBarrier *)calloc(
+        barrier_capacity, sizeof(*staging_barriers));
+    if (!post_barriers || !staging_barriers) {
+        free(staging_barriers);
+        free(post_barriers);
+        return -ENOMEM;
+    }
+    int rc = 0;
     uint32_t post_barrier_count = 0;
     VkPipelineStageFlags post_src_stages = 0;
+#define PDOCKER_GPU_GRAPHICS_WRITEBACK_RETURN(code_) do { rc = (code_); goto cleanup; } while (0)
     for (size_t i = 0; i < attachments->image_count; ++i) {
         VulkanDispatchImageObject *image = &attachments->images[i];
         if (!image->writeback_needed) continue;
-        if (image->samples != VK_SAMPLE_COUNT_1_BIT) return -EOPNOTSUPP;
+        if (image->samples != VK_SAMPLE_COUNT_1_BIT) PDOCKER_GPU_GRAPHICS_WRITEBACK_RETURN(-EOPNOTSUPP);
         if (!image->copy_aspect_mask || image->copy_level_count == 0 ||
             image->copy_layer_count == 0) {
-            return -EINVAL;
+            PDOCKER_GPU_GRAPHICS_WRITEBACK_RETURN(-EINVAL);
         }
-        if (post_barrier_count >= PDOCKER_GPU_MAX_VULKAN_BINDINGS) return -E2BIG;
+        if (post_barrier_count >= barrier_capacity) PDOCKER_GPU_GRAPHICS_WRITEBACK_RETURN(-E2BIG);
         VkImageSubresourceRange copy_range = {
             .aspectMask = image->copy_aspect_mask,
             .baseMipLevel = image->copy_base_mip,
@@ -28662,7 +28675,7 @@ static int record_vulkan_graphics_v6_attachment_writeback_commands(
         };
         VkImageLayout old_layout = image->current_layout;
         int layout_rc = vulkan_replay_image_layout_for_range(image, &copy_range, &old_layout);
-        if (layout_rc != 0) return layout_rc;
+        if (layout_rc != 0) PDOCKER_GPU_GRAPHICS_WRITEBACK_RETURN(layout_rc);
         VkImageLayout new_layout = image->requires_staging
             ? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
             : old_layout;
@@ -28684,7 +28697,7 @@ static int record_vulkan_graphics_v6_attachment_writeback_commands(
             vulkan_graphics_attachment_writeback_stage_mask(image->copy_aspect_mask);
         if (image->requires_staging) {
             layout_rc = vulkan_replay_image_set_layout_for_range(image, &copy_range, new_layout);
-            if (layout_rc != 0) return layout_rc;
+            if (layout_rc != 0) PDOCKER_GPU_GRAPHICS_WRITEBACK_RETURN(layout_rc);
         }
     }
     if (post_barrier_count) {
@@ -28697,17 +28710,16 @@ static int record_vulkan_graphics_v6_attachment_writeback_commands(
                              0, NULL,
                              post_barrier_count, post_barriers);
     }
-    VkBufferMemoryBarrier staging_barriers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     uint32_t staging_barrier_count = 0;
     for (size_t i = 0; i < attachments->image_count; ++i) {
         VulkanDispatchImageObject *image = &attachments->images[i];
         if (!image->writeback_needed || !image->requires_staging) continue;
-        if (!image->staging.buffer || !image->copy_aspect_mask) return -EINVAL;
+        if (!image->staging.buffer || !image->copy_aspect_mask) PDOCKER_GPU_GRAPHICS_WRITEBACK_RETURN(-EINVAL);
         VkImageAspectFlags copy_aspects[3];
         uint32_t copy_aspect_count = 0;
         if (!vulkan_image_copy_aspect_list(
                 image->copy_aspect_mask, copy_aspects, &copy_aspect_count)) {
-            return -EINVAL;
+            PDOCKER_GPU_GRAPHICS_WRITEBACK_RETURN(-EINVAL);
         }
         for (uint32_t aspect_i = 0; aspect_i < copy_aspect_count; ++aspect_i) {
             VkImageAspectFlags copy_aspect = copy_aspects[aspect_i];
@@ -28726,7 +28738,7 @@ static int record_vulkan_graphics_v6_attachment_writeback_commands(
                     !vulkan_image_mip_extent(image, mip, &mip_extent) ||
                     buffer_offset > (uint64_t)image->staging.size ||
                     copy_size > (uint64_t)image->staging.size - buffer_offset) {
-                    return -EINVAL;
+                    PDOCKER_GPU_GRAPHICS_WRITEBACK_RETURN(-EINVAL);
                 }
                 VkBufferImageCopy region = {
                     .bufferOffset = (VkDeviceSize)buffer_offset,
@@ -28749,7 +28761,7 @@ static int record_vulkan_graphics_v6_attachment_writeback_commands(
                                        &region);
             }
         }
-        if (staging_barrier_count >= PDOCKER_GPU_MAX_VULKAN_BINDINGS) return -E2BIG;
+        if (staging_barrier_count >= barrier_capacity) PDOCKER_GPU_GRAPHICS_WRITEBACK_RETURN(-E2BIG);
         staging_barriers[staging_barrier_count++] = (VkBufferMemoryBarrier){
             .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
             .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
@@ -28770,7 +28782,11 @@ static int record_vulkan_graphics_v6_attachment_writeback_commands(
                              staging_barrier_count, staging_barriers,
                              0, NULL);
     }
-    return 0;
+cleanup:
+    free(staging_barriers);
+    free(post_barriers);
+#undef PDOCKER_GPU_GRAPHICS_WRITEBACK_RETURN
+    return rc;
 }
 
 static int writeback_vulkan_graphics_v6_attachments(
@@ -30133,12 +30149,22 @@ static int record_vulkan_graphics_v6_staged_image_uploads(
         VkCommandBuffer command_buffer,
         VulkanGraphicsReplayAttachments *attachments) {
     if (!command_buffer || !attachments) return -EINVAL;
-    VkImageMemoryBarrier image_upload_barriers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    VkBufferMemoryBarrier staging_barriers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+    if (attachments->image_count > 0 && !attachments->images) return -EINVAL;
+    const size_t barrier_capacity = attachments->image_count ? attachments->image_count : 1u;
+    if (barrier_capacity > UINT32_MAX) return -E2BIG;
+    VkImageMemoryBarrier *image_upload_barriers = (VkImageMemoryBarrier *)calloc(
+        barrier_capacity, sizeof(*image_upload_barriers));
+    VkBufferMemoryBarrier *staging_barriers = (VkBufferMemoryBarrier *)calloc(
+        barrier_capacity, sizeof(*staging_barriers));
+    if (!image_upload_barriers || !staging_barriers) {
+        free(staging_barriers);
+        free(image_upload_barriers);
+        return -ENOMEM;
+    }
+    int rc = 0;
     uint32_t image_barrier_count = 0;
     uint32_t staging_barrier_count = 0;
-    memset(image_upload_barriers, 0, sizeof(image_upload_barriers));
-    memset(staging_barriers, 0, sizeof(staging_barriers));
+#define PDOCKER_GPU_GRAPHICS_UPLOAD_RETURN(code_) do { rc = (code_); goto cleanup; } while (0)
     for (size_t i = 0; i < attachments->image_count; ++i) {
         VulkanDispatchImageObject *image = &attachments->images[i];
         if (!image->requires_staging || !image->upload_pending) continue;
@@ -30147,9 +30173,9 @@ static int record_vulkan_graphics_v6_staged_image_uploads(
             image->copy_layer_count == 0) {
             continue;
         }
-        if (image_barrier_count >= PDOCKER_GPU_MAX_VULKAN_BINDINGS ||
-            staging_barrier_count >= PDOCKER_GPU_MAX_VULKAN_BINDINGS) {
-            return -E2BIG;
+        if (image_barrier_count >= barrier_capacity ||
+            staging_barrier_count >= barrier_capacity) {
+            PDOCKER_GPU_GRAPHICS_UPLOAD_RETURN(-E2BIG);
         }
         staging_barriers[staging_barrier_count++] = (VkBufferMemoryBarrier){
             .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
@@ -30170,7 +30196,7 @@ static int record_vulkan_graphics_v6_staged_image_uploads(
         };
         VkImageLayout old_layout = image->current_layout;
         int layout_rc = vulkan_replay_image_layout_for_range(image, &upload_range, &old_layout);
-        if (layout_rc != 0) return layout_rc;
+        if (layout_rc != 0) PDOCKER_GPU_GRAPHICS_UPLOAD_RETURN(layout_rc);
         image_upload_barriers[image_barrier_count++] = (VkImageMemoryBarrier){
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
             .srcAccessMask = 0,
@@ -30204,7 +30230,7 @@ static int record_vulkan_graphics_v6_staged_image_uploads(
         uint32_t copy_aspect_count = 0;
         if (!vulkan_image_copy_aspect_list(
                 image->copy_aspect_mask, copy_aspects, &copy_aspect_count)) {
-            return -EINVAL;
+            PDOCKER_GPU_GRAPHICS_UPLOAD_RETURN(-EINVAL);
         }
         for (uint32_t aspect_i = 0; aspect_i < copy_aspect_count; ++aspect_i) {
             VkImageAspectFlags copy_aspect = copy_aspects[aspect_i];
@@ -30223,7 +30249,7 @@ static int record_vulkan_graphics_v6_staged_image_uploads(
                     !vulkan_image_mip_extent(image, mip, &mip_extent) ||
                     buffer_offset > (uint64_t)image->staging.size ||
                     copy_size > (uint64_t)image->staging.size - buffer_offset) {
-                    return -EINVAL;
+                    PDOCKER_GPU_GRAPHICS_UPLOAD_RETURN(-EINVAL);
                 }
                 VkBufferImageCopy region = {
                     .bufferOffset = (VkDeviceSize)buffer_offset,
@@ -30255,10 +30281,14 @@ static int record_vulkan_graphics_v6_staged_image_uploads(
         };
         int layout_rc = vulkan_replay_image_set_layout_for_range(
             image, &upload_range, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-        if (layout_rc != 0) return layout_rc;
+        if (layout_rc != 0) PDOCKER_GPU_GRAPHICS_UPLOAD_RETURN(layout_rc);
         image->upload_pending = 0;
     }
-    return 0;
+cleanup:
+    free(staging_barriers);
+    free(image_upload_barriers);
+#undef PDOCKER_GPU_GRAPHICS_UPLOAD_RETURN
+    return rc;
 }
 
 static int graphics_push_metadata_for_command(

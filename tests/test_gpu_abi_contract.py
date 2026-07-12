@@ -3194,6 +3194,12 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("vulkan_image_tight_copy_size_for_aspect", staged_body)
         self.assertIn("copy_size > (uint64_t)image->staging.size - buffer_offset", staged_body)
         self.assertIn(".aspectMask = copy_aspect", staged_body)
+        self.assertIn("const size_t barrier_capacity = attachments->image_count ? attachments->image_count : 1u;", staged_body)
+        self.assertIn("VkImageMemoryBarrier *image_upload_barriers = (VkImageMemoryBarrier *)calloc(", staged_body)
+        self.assertIn("VkBufferMemoryBarrier *staging_barriers = (VkBufferMemoryBarrier *)calloc(", staged_body)
+        self.assertIn("free(image_upload_barriers);", staged_body)
+        self.assertNotIn("VkImageMemoryBarrier image_upload_barriers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];", staged_body)
+        self.assertNotIn("VkBufferMemoryBarrier staging_barriers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];", staged_body)
 
         self.assertIn("vulkan_graphics_attachment_writeback_access_mask(view_obj->range.aspectMask)", bind_body)
         self.assertIn("vulkan_graphics_attachment_writeback_stage_mask(view_obj->range.aspectMask)", bind_body)
@@ -3226,6 +3232,12 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("vulkan_image_tight_copy_size_for_aspect", writeback)
         self.assertIn("copy_size > (uint64_t)image->staging.size - buffer_offset", writeback)
         self.assertIn("copy_aspect, &copy_size", writeback)
+        self.assertIn("const size_t barrier_capacity = attachments->image_count ? attachments->image_count : 1u;", writeback)
+        self.assertIn("VkImageMemoryBarrier *post_barriers = (VkImageMemoryBarrier *)calloc(", writeback)
+        self.assertIn("VkBufferMemoryBarrier *staging_barriers = (VkBufferMemoryBarrier *)calloc(", writeback)
+        self.assertIn("free(post_barriers);", writeback)
+        self.assertNotIn("VkImageMemoryBarrier post_barriers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];", writeback)
+        self.assertNotIn("VkBufferMemoryBarrier staging_barriers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];", writeback)
 
     def test_vulkan_graphics_v62_specialization_metadata_is_append_only(self):
         abi = APP_HEADER.read_text()
@@ -8758,9 +8770,9 @@ class GpuAbiContractTest(unittest.TestCase):
         writeback_record_body = executor.split("static int record_vulkan_graphics_v6_attachment_writeback_commands", 1)[1].split(
             "static int writeback_vulkan_graphics_v6_attachments", 1
         )[0]
-        self.assertIn("if (image->samples != VK_SAMPLE_COUNT_1_BIT) return -EOPNOTSUPP;", writeback_record_body)
+        self.assertIn("if (image->samples != VK_SAMPLE_COUNT_1_BIT) PDOCKER_GPU_GRAPHICS_WRITEBACK_RETURN(-EOPNOTSUPP);", writeback_record_body)
         self.assertLess(
-            writeback_record_body.index("if (image->samples != VK_SAMPLE_COUNT_1_BIT) return -EOPNOTSUPP;"),
+            writeback_record_body.index("if (image->samples != VK_SAMPLE_COUNT_1_BIT) PDOCKER_GPU_GRAPHICS_WRITEBACK_RETURN(-EOPNOTSUPP);"),
             writeback_record_body.index("vkCmdCopyImageToBuffer"),
         )
         writeback_body = executor.split("static int writeback_vulkan_graphics_v6_attachments", 1)[1].split(
