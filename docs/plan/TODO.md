@@ -214,6 +214,10 @@ or closes.
   stack barrier ceiling.  V6.24 descriptor-set layout validation now also
   accepts sparse/high API binding numbers and caps descriptor counts by the V5
   descriptor-table maximum instead of the legacy 16-slot executor constant.
+  V6.1 explicit dependency barriers now allocate synchronization2 and legacy
+  barrier replay tables from the validated V6.1 metadata counts, removing the
+  former per-command 16-barrier stack ceiling while preserving the existing
+  fail-closed queue-family ownership checks.
   The fixed strict-graph cache is deliberately
   disabled for wider dispatches instead of being widened inside this slice.
   Remaining narrowing points: the real SCM_RIGHTS fd limit for fd-bearing buffers,

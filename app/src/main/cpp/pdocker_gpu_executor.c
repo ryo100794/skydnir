@@ -25873,20 +25873,10 @@ static int preflight_vulkan_graphics_v6_dependency_barriers(
         uint32_t command_index,
         const char **reason_out) {
     if (!view || !view->header || !view->header_v61) return -EINVAL;
-    uint32_t matched_memory_barriers = 0;
-    uint32_t matched_buffer_barriers = 0;
-    uint32_t matched_image_barriers = 0;
-    for (uint32_t b = 0; b < view->header_v61->v61.memory_barrier_count; ++b) {
-        const PdockerGpuVulkanGraphicsV61MemoryBarrierEntry *barrier =
-            &view->memory_barriers[b];
-        if (barrier->command_index != command_index) continue;
-        matched_memory_barriers++;
-    }
     for (uint32_t b = 0; b < view->header_v61->v61.buffer_barrier_count; ++b) {
         const PdockerGpuVulkanGraphicsV61BufferBarrierEntry *barrier =
             &view->buffer_barriers[b];
         if (barrier->command_index != command_index) continue;
-        matched_buffer_barriers++;
         if (!vulkan_graphics_barrier_queue_family_replayable(
                 barrier->src_queue_family_index,
                 barrier->dst_queue_family_index)) {
@@ -25898,19 +25888,12 @@ static int preflight_vulkan_graphics_v6_dependency_barriers(
         const PdockerGpuVulkanGraphicsV61ImageBarrierEntry *barrier =
             &view->image_barriers[b];
         if (barrier->command_index != command_index) continue;
-        matched_image_barriers++;
         if (!vulkan_graphics_barrier_queue_family_replayable(
                 barrier->src_queue_family_index,
                 barrier->dst_queue_family_index)) {
             if (reason_out) *reason_out = "graphics cross-queue-family barrier replay is not implemented";
             return -EOPNOTSUPP;
         }
-    }
-    if (matched_memory_barriers > PDOCKER_GPU_MAX_VULKAN_BINDINGS ||
-        matched_buffer_barriers > PDOCKER_GPU_MAX_VULKAN_BINDINGS ||
-        matched_image_barriers > PDOCKER_GPU_MAX_VULKAN_BINDINGS) {
-        if (reason_out) *reason_out = "graphics barrier batch exceeds replay stack limit";
-        return -E2BIG;
     }
     return 0;
 }
@@ -30743,13 +30726,17 @@ static int collect_vulkan_graphics_v6_dependency_barriers(
         VulkanGraphicsReplayAttachments *attachments,
         const VulkanGraphicsReplayBuffers *buffers,
         VkMemoryBarrier2 *memory_barriers_to_record,
+        uint32_t memory_barrier_capacity,
         uint32_t *memory_barrier_count,
         VkBufferMemoryBarrier2 *buffer_barriers_to_record,
+        uint32_t buffer_barrier_capacity,
         uint32_t *buffer_barrier_count,
         VkImageMemoryBarrier2 *image_barriers_to_record,
+        uint32_t image_barrier_capacity,
         uint32_t *image_barrier_count) {
-    if (!view || !attachments || !buffers || !memory_barriers_to_record || !memory_barrier_count ||
-        !buffer_barriers_to_record || !buffer_barrier_count || !image_barriers_to_record ||
+    if (!view || !attachments || !buffers || !memory_barriers_to_record || memory_barrier_capacity == 0 ||
+        !memory_barrier_count || !buffer_barriers_to_record || buffer_barrier_capacity == 0 ||
+        !buffer_barrier_count || !image_barriers_to_record || image_barrier_capacity == 0 ||
         !image_barrier_count) return -EINVAL;
     *memory_barrier_count = 0;
     *buffer_barrier_count = 0;
@@ -30759,7 +30746,7 @@ static int collect_vulkan_graphics_v6_dependency_barriers(
     for (uint32_t b = 0; b < view->header_v61->v61.memory_barrier_count; ++b) {
         const PdockerGpuVulkanGraphicsV61MemoryBarrierEntry *barrier = &view->memory_barriers[b];
         if (barrier->command_index != command_index) continue;
-        if (*memory_barrier_count >= PDOCKER_GPU_MAX_VULKAN_BINDINGS) return -E2BIG;
+        if (*memory_barrier_count >= memory_barrier_capacity) return -E2BIG;
         memory_barriers_to_record[(*memory_barrier_count)++] = (VkMemoryBarrier2){
             .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
             .srcStageMask = (VkPipelineStageFlags2)barrier->src_stage_mask,
@@ -30771,7 +30758,7 @@ static int collect_vulkan_graphics_v6_dependency_barriers(
     for (uint32_t b = 0; b < view->header_v61->v61.buffer_barrier_count; ++b) {
         const PdockerGpuVulkanGraphicsV61BufferBarrierEntry *barrier = &view->buffer_barriers[b];
         if (barrier->command_index != command_index) continue;
-        if (*buffer_barrier_count >= PDOCKER_GPU_MAX_VULKAN_BINDINGS) return -E2BIG;
+        if (*buffer_barrier_count >= buffer_barrier_capacity) return -E2BIG;
         int buffer_index = find_vulkan_graphics_replay_buffer(buffers, barrier->resource_index);
         if (buffer_index < 0) return buffer_index;
         const VulkanGraphicsReplayBuffer *replay_buffer = &buffers->buffers[(uint32_t)buffer_index];
@@ -30797,8 +30784,8 @@ static int collect_vulkan_graphics_v6_dependency_barriers(
     for (uint32_t b = 0; b < view->header_v61->v61.image_barrier_count; ++b) {
         const PdockerGpuVulkanGraphicsV61ImageBarrierEntry *barrier = &view->image_barriers[b];
         if (barrier->command_index != command_index) continue;
-        if (*image_barrier_count >= PDOCKER_GPU_MAX_VULKAN_BINDINGS ||
-            barrier->image_index >= attachments->image_count ||
+        if (*image_barrier_count >= image_barrier_capacity) return -E2BIG;
+        if (barrier->image_index >= attachments->image_count ||
             !attachments->images[barrier->image_index].image) {
             return -EPROTO;
         }
@@ -30871,6 +30858,35 @@ static int record_vulkan_graphics_v6_command_buffer(
     VkResult vrc = vkAllocateCommandBuffers(rt->device, &cbai, &command_buffer);
     if (vrc != VK_SUCCESS) return -EIO;
     int rc = 0;
+    const uint32_t memory_barrier_capacity =
+        (view->header_v61 && view->header_v61->v61.memory_barrier_count != 0)
+            ? view->header_v61->v61.memory_barrier_count
+            : 1u;
+    const uint32_t buffer_barrier_capacity =
+        (view->header_v61 && view->header_v61->v61.buffer_barrier_count != 0)
+            ? view->header_v61->v61.buffer_barrier_count
+            : 1u;
+    const uint32_t image_barrier_capacity =
+        (view->header_v61 && view->header_v61->v61.image_barrier_count != 0)
+            ? view->header_v61->v61.image_barrier_count
+            : 1u;
+    VkMemoryBarrier2 *memory_barriers_to_record =
+        calloc(memory_barrier_capacity, sizeof(*memory_barriers_to_record));
+    VkBufferMemoryBarrier2 *buffer_barriers_to_record =
+        calloc(buffer_barrier_capacity, sizeof(*buffer_barriers_to_record));
+    VkImageMemoryBarrier2 *image_barriers_to_record =
+        calloc(image_barrier_capacity, sizeof(*image_barriers_to_record));
+    VkMemoryBarrier *memory_barriers_legacy =
+        calloc(memory_barrier_capacity, sizeof(*memory_barriers_legacy));
+    VkBufferMemoryBarrier *buffer_barriers_legacy =
+        calloc(buffer_barrier_capacity, sizeof(*buffer_barriers_legacy));
+    VkImageMemoryBarrier *image_barriers_legacy =
+        calloc(image_barrier_capacity, sizeof(*image_barriers_legacy));
+    if (!memory_barriers_to_record || !buffer_barriers_to_record || !image_barriers_to_record ||
+        !memory_barriers_legacy || !buffer_barriers_legacy || !image_barriers_legacy) {
+        rc = -ENOMEM;
+        goto cleanup;
+    }
     VkCommandBufferBeginInfo cbi = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
@@ -32328,17 +32344,14 @@ static int record_vulkan_graphics_v6_command_buffer(
                         goto cleanup;
                     }
                 }
-                VkMemoryBarrier2 memory_barriers_to_record[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-                VkBufferMemoryBarrier2 buffer_barriers_to_record[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-                VkImageMemoryBarrier2 image_barriers_to_record[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
                 uint32_t memory_barrier_count = 0;
                 uint32_t buffer_barrier_count = 0;
                 uint32_t image_barrier_count = 0;
                 rc = collect_vulkan_graphics_v6_dependency_barriers(
                     view, ci, attachments, buffers,
-                    memory_barriers_to_record, &memory_barrier_count,
-                    buffer_barriers_to_record, &buffer_barrier_count,
-                    image_barriers_to_record, &image_barrier_count);
+                    memory_barriers_to_record, memory_barrier_capacity, &memory_barrier_count,
+                    buffer_barriers_to_record, buffer_barrier_capacity, &buffer_barrier_count,
+                    image_barriers_to_record, image_barrier_capacity, &image_barrier_count);
                 if (rc != 0) goto cleanup;
                 const VkPipelineStageFlags2 src_stage_mask2 = (VkPipelineStageFlags2)command->index_offset;
                 const VkPipelineStageFlags2 dst_stage_mask2 = (VkPipelineStageFlags2)command->push_hash;
@@ -32397,9 +32410,6 @@ static int record_vulkan_graphics_v6_command_buffer(
                         command->push_hash <= UINT32_MAX;
                     if (legacy_event_stage_masks) {
                         if (has_event_barrier_payload) {
-                            VkMemoryBarrier memory_barriers_legacy[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-                            VkBufferMemoryBarrier buffer_barriers_legacy[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-                            VkImageMemoryBarrier image_barriers_legacy[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
                             rc = convert_vulkan_graphics_v6_dependency_barriers_to_legacy(
                                 memory_barriers_to_record, memory_barrier_count,
                                 buffer_barriers_to_record, buffer_barrier_count,
@@ -32448,18 +32458,15 @@ static int record_vulkan_graphics_v6_command_buffer(
                 break;
             }
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER: {
-                VkMemoryBarrier2 memory_barriers_to_record[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-                VkBufferMemoryBarrier2 buffer_barriers_to_record[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-                VkImageMemoryBarrier2 image_barriers_to_record[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
                 uint32_t memory_barrier_count = 0;
                 uint32_t buffer_barrier_count = 0;
                 uint32_t image_barrier_count = 0;
                 if (!rt->cmd_pipeline_barrier2) { rc = -EOPNOTSUPP; goto cleanup; }
                 rc = collect_vulkan_graphics_v6_dependency_barriers(
                     view, ci, attachments, buffers,
-                    memory_barriers_to_record, &memory_barrier_count,
-                    buffer_barriers_to_record, &buffer_barrier_count,
-                    image_barriers_to_record, &image_barrier_count);
+                    memory_barriers_to_record, memory_barrier_capacity, &memory_barrier_count,
+                    buffer_barriers_to_record, buffer_barrier_capacity, &buffer_barrier_count,
+                    image_barriers_to_record, image_barrier_capacity, &image_barrier_count);
                 if (rc != 0) goto cleanup;
                 /* Vulkan permits an empty VkDependencyInfo. Replay it as a no-op
                  * barrier instead of treating a legal synchronization2 command as
@@ -32495,6 +32502,12 @@ static int record_vulkan_graphics_v6_command_buffer(
     *out_command_buffer = command_buffer;
     command_buffer = VK_NULL_HANDLE;
 cleanup:
+    free(image_barriers_legacy);
+    free(buffer_barriers_legacy);
+    free(memory_barriers_legacy);
+    free(image_barriers_to_record);
+    free(buffer_barriers_to_record);
+    free(memory_barriers_to_record);
     if (command_buffer) vkFreeCommandBuffers(rt->device, command_pool, 1, &command_buffer);
     return rc;
 }
