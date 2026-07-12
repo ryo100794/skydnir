@@ -7061,7 +7061,7 @@ class GpuAbiContractTest(unittest.TestCase):
         )
 
         object_descriptor_body = collect_body.split(
-            "if (descriptor_type_supported_by_v5_object_transport", 1
+            "const bool requires_view = descriptor_type_requires_image_view(descriptor_type);", 1
         )[1].split("continue;", 1)[0]
         self.assertIn("descriptor_type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE", object_descriptor_body)
         self.assertIn(": PDOCKER_GPU_V5_ACCESS_READ", object_descriptor_body)
@@ -9051,7 +9051,11 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("api_buffer_view_ranges", icd)
         self.assertIn("api_buffer_view_generations", icd)
         self.assertIn("PdockerGpuVulkanDispatchV53BufferViewEntry", icd)
+        self.assertIn("PdockerGpuVulkanGraphicsV627BufferViewEntry", icd)
+        self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V627_BUFFER_VIEW_SCHEMA_HASH", icd)
         self.assertIn("executor_supports_vulkan_dispatch_v53_buffer_views", icd)
+        self.assertIn("executor_supports_vulkan_graphics_v627_buffer_views", icd)
+        self.assertIn("executor_supports_any_vulkan_buffer_views", icd)
         self.assertIn("need_v53_buffer_views", icd)
         self.assertIn("texel_buffer_transport_required = true;", icd)
         self.assertIn("descriptor_array_transport_required || texel_buffer_transport_required", icd)
@@ -9075,6 +9079,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("vkCreateBufferView(rt->device", executor)
         self.assertIn("pTexelBufferView", executor)
         self.assertIn("vkDestroyBufferView(rt->device", executor)
+        self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V627_ABI_MINOR", executor)
+        self.assertIn("find_vulkan_graphics_v627_buffer_view", executor)
+        self.assertIn("validate_vulkan_graphics_v627_buffer_views", executor)
 
     def test_vulkan_memory_api_validates_map_ranges_and_type_index(self):
         icd = VULKAN_ICD.read_text()

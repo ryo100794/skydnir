@@ -688,6 +688,7 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V624_ABI_MINOR 24u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V625_ABI_MINOR 25u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V626_ABI_MINOR 26u
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V627_ABI_MINOR 27u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_SUBMIT 1u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_FRAME_HEADER_SCHEMA_HASH 0x8787f343f2f4f255ull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_SHADER_STAGE_SCHEMA_HASH 0xc9b21285e5a281b8ull
@@ -763,6 +764,8 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V625_DESCRIPTOR_BIND_SCHEMA_HASH 0x02c66ad395d542ffull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V626_HEADER_EXTENSION_SCHEMA_HASH 0x42145786f757d854ull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V626_EVENT_WAIT_REF_SCHEMA_HASH 0x7cb49d1e98ad96a8ull
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V627_HEADER_EXTENSION_SCHEMA_HASH 0x1f0b20113887d648ull
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V627_BUFFER_VIEW_SCHEMA_HASH 0x80faefc4342a79c8ull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_FRAME_BYTES (8u * 1024u * 1024u)
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_SHADER_STAGES 16u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_PIPELINES 64u
@@ -814,6 +817,7 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V624_MAX_PIPELINE_LAYOUT_SETS (PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_PIPELINES * PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS)
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V625_MAX_DESCRIPTOR_BINDS PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V626_MAX_EVENT_WAIT_REFS PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V627_MAX_BUFFER_VIEWS PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS
 
 
 #define PDOCKER_GPU_GRAPHICS_V63_DEPTH_STENCIL_DEPTH_TEST_ENABLE 0x00000001u
@@ -1520,6 +1524,27 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
     X(event_ordinal, u32) \
     X(event_id, u64)
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V626_EVENT_WAIT_REF_FIELD_COUNT 3u
+
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V627_HEADER_EXTENSION_FIELDS(X) \
+    X(buffer_view_count, u32) \
+    X(buffer_view_entry_size, u32) \
+    X(buffer_view_table_offset, u64) \
+    X(buffer_view_table_size, u64) \
+    X(buffer_view_schema_hash, u64) \
+    X(buffer_view_table_hash, u64) \
+    X(extension_hash, u64)
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V627_HEADER_EXTENSION_FIELD_COUNT 7u
+
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V627_BUFFER_VIEW_FIELDS(X) \
+    X(command_index, u32) \
+    X(descriptor_index, u32) \
+    X(resource_index, u32) \
+    X(format, u32) \
+    X(buffer_view_id, u64) \
+    X(buffer_offset, u64) \
+    X(range, u64) \
+    X(generation, u64)
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V627_BUFFER_VIEW_FIELD_COUNT 8u
 
 
 #define PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR 1u
@@ -2817,6 +2842,16 @@ typedef struct PdockerGpuVulkanGraphicsV626HeaderExtension {
     uint64_t extension_hash;
 } PdockerGpuVulkanGraphicsV626HeaderExtension;
 
+typedef struct PdockerGpuVulkanGraphicsV627HeaderExtension {
+    uint32_t buffer_view_count;
+    uint32_t buffer_view_entry_size;
+    uint64_t buffer_view_table_offset;
+    uint64_t buffer_view_table_size;
+    uint64_t buffer_view_schema_hash;
+    uint64_t buffer_view_table_hash;
+    uint64_t extension_hash;
+} PdockerGpuVulkanGraphicsV627HeaderExtension;
+
 typedef struct PdockerGpuVulkanGraphicsV624FrameHeader {
     PdockerGpuVulkanGraphicsV6FrameHeader base;
     PdockerGpuVulkanGraphicsV61HeaderExtension v61;
@@ -2903,6 +2938,37 @@ typedef struct PdockerGpuVulkanGraphicsV626FrameHeader {
     PdockerGpuVulkanGraphicsV625HeaderExtension v625;
     PdockerGpuVulkanGraphicsV626HeaderExtension v626;
 } PdockerGpuVulkanGraphicsV626FrameHeader;
+
+typedef struct PdockerGpuVulkanGraphicsV627FrameHeader {
+    PdockerGpuVulkanGraphicsV6FrameHeader base;
+    PdockerGpuVulkanGraphicsV61HeaderExtension v61;
+    PdockerGpuVulkanGraphicsV62HeaderExtension v62;
+    PdockerGpuVulkanGraphicsV63HeaderExtension v63;
+    PdockerGpuVulkanGraphicsV64HeaderExtension v64;
+    PdockerGpuVulkanGraphicsV65HeaderExtension v65;
+    PdockerGpuVulkanGraphicsV66HeaderExtension v66;
+    PdockerGpuVulkanGraphicsV67HeaderExtension v67;
+    PdockerGpuVulkanGraphicsV68HeaderExtension v68;
+    PdockerGpuVulkanGraphicsV69HeaderExtension v69;
+    PdockerGpuVulkanGraphicsV610HeaderExtension v610;
+    PdockerGpuVulkanGraphicsV611HeaderExtension v611;
+    PdockerGpuVulkanGraphicsV612HeaderExtension v612;
+    PdockerGpuVulkanGraphicsV613HeaderExtension v613;
+    PdockerGpuVulkanGraphicsV614HeaderExtension v614;
+    PdockerGpuVulkanGraphicsV615HeaderExtension v615;
+    PdockerGpuVulkanGraphicsV616HeaderExtension v616;
+    PdockerGpuVulkanGraphicsV617HeaderExtension v617;
+    PdockerGpuVulkanGraphicsV618HeaderExtension v618;
+    PdockerGpuVulkanGraphicsV619HeaderExtension v619;
+    PdockerGpuVulkanGraphicsV620HeaderExtension v620;
+    PdockerGpuVulkanGraphicsV621HeaderExtension v621;
+    PdockerGpuVulkanGraphicsV622HeaderExtension v622;
+    PdockerGpuVulkanGraphicsV623HeaderExtension v623;
+    PdockerGpuVulkanGraphicsV624HeaderExtension v624;
+    PdockerGpuVulkanGraphicsV625HeaderExtension v625;
+    PdockerGpuVulkanGraphicsV626HeaderExtension v626;
+    PdockerGpuVulkanGraphicsV627HeaderExtension v627;
+} PdockerGpuVulkanGraphicsV627FrameHeader;
 
 typedef struct PdockerGpuVulkanGraphicsV62SpecializationEntry {
     uint32_t shader_stage_index;
@@ -3355,6 +3421,17 @@ typedef struct PdockerGpuVulkanGraphicsV626EventWaitRefEntry {
     uint32_t event_ordinal;
     uint64_t event_id;
 } PdockerGpuVulkanGraphicsV626EventWaitRefEntry;
+
+typedef struct PdockerGpuVulkanGraphicsV627BufferViewEntry {
+    uint32_t command_index;
+    uint32_t descriptor_index;
+    uint32_t resource_index;
+    uint32_t format;
+    uint64_t buffer_view_id;
+    uint64_t buffer_offset;
+    uint64_t range;
+    uint64_t generation;
+} PdockerGpuVulkanGraphicsV627BufferViewEntry;
 
 typedef struct PdockerGpuVulkanGraphicsV61DynamicOffsetEntry {
     uint32_t offset;
