@@ -205,10 +205,13 @@ or closes.
   metadata and V6.25 descriptor-bind exact coverage now use heap-backed sparse
   binding records instead of fixed binding-number and descriptor-array-element
   tables, so high binding numbers no longer force a separate Android-side
-  16-slot layout replay ceiling.  The fixed strict-graph cache is deliberately
+  16-slot layout replay ceiling.  Graphics attachment materialization also now
+  heap-allocates image memory, image, image-view, sampler, and MSAA allow-mask
+  arenas from validated frame counts, removing the former 16-image replay
+  ceiling from that lane.  The fixed strict-graph cache is deliberately
   disabled for wider dispatches instead of being widened inside this slice.
   Remaining narrowing points: the real SCM_RIGHTS fd limit for fd-bearing buffers,
-  non-descriptor graphics fixed-array lanes, and device-runtime evidence for a >16 V5 compute
+  remaining non-descriptor graphics fixed-array lanes, and device-runtime evidence for a >16 V5 compute
   dispatch.  Acceptance: host verifier
   `tests.test_gpu_abi_contract` covers the above-16 V5 executor path, native
   payloads must build cleanly, and a runtime artifact must prove table-native

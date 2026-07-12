@@ -27862,14 +27862,18 @@ static int materialize_vulkan_graphics_v6_pipelines(
 }
 
 typedef struct VulkanGraphicsReplayAttachments {
-    VulkanDispatchImageMemoryObject memories[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    VulkanDispatchImageObject images[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    VulkanDispatchImageViewObject views[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    VulkanDispatchSamplerObject samplers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+    VulkanDispatchImageMemoryObject *memories;
+    VulkanDispatchImageObject *images;
+    VulkanDispatchImageViewObject *views;
+    VulkanDispatchSamplerObject *samplers;
     size_t memory_count;
     size_t image_count;
     size_t view_count;
     size_t sampler_count;
+    size_t memory_capacity;
+    size_t image_capacity;
+    size_t view_capacity;
+    size_t sampler_capacity;
 } VulkanGraphicsReplayAttachments;
 
 static void destroy_vulkan_graphics_replay_attachments(
@@ -27882,6 +27886,10 @@ static void destroy_vulkan_graphics_replay_attachments(
         attachments->images, attachments->image_count,
         attachments->views, attachments->view_count,
         attachments->samplers, attachments->sampler_count);
+    free(attachments->memories);
+    free(attachments->images);
+    free(attachments->views);
+    free(attachments->samplers);
     memset(attachments, 0, sizeof(*attachments));
 }
 
@@ -28159,8 +28167,7 @@ static int validate_vulkan_graphics_v6_msaa_images_are_v64_color_resolves(
         size_t allowed_msaa_image_count) {
     if (!view || !view->header || !allowed_msaa_images) return -EINVAL;
     const PdockerGpuVulkanGraphicsV6FrameHeader *header = view->header;
-    if (header->image_count > allowed_msaa_image_count ||
-        header->image_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS) {
+    if (header->image_count > allowed_msaa_image_count) {
         return -E2BIG;
     }
     memset(allowed_msaa_images, 0, allowed_msaa_image_count);
@@ -28262,10 +28269,41 @@ static int materialize_vulkan_graphics_v6_attachments(
         VulkanGraphicsReplayAttachments *out) {
     if (!rt || !view || !view->header || !out) return -EINVAL;
     memset(out, 0, sizeof(*out));
-    unsigned char msaa_image_allowed[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+    const size_t memory_capacity = view->header->resource_count ? view->header->resource_count : 1u;
+    const size_t image_capacity = view->header->image_count ? view->header->image_count : 1u;
+    const size_t view_capacity = view->header->image_view_count ? view->header->image_view_count : 1u;
+    const size_t sampler_capacity = view->header->sampler_count ? view->header->sampler_count : 1u;
+    if (memory_capacity > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_RESOURCES ||
+        image_capacity > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGES ||
+        view_capacity > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGE_VIEWS ||
+        sampler_capacity > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_SAMPLERS) {
+        return -E2BIG;
+    }
+    out->memory_capacity = memory_capacity;
+    out->image_capacity = image_capacity;
+    out->view_capacity = view_capacity;
+    out->sampler_capacity = sampler_capacity;
+    out->memories = (VulkanDispatchImageMemoryObject *)calloc(memory_capacity, sizeof(out->memories[0]));
+    out->images = (VulkanDispatchImageObject *)calloc(image_capacity, sizeof(out->images[0]));
+    out->views = (VulkanDispatchImageViewObject *)calloc(view_capacity, sizeof(out->views[0]));
+    out->samplers = (VulkanDispatchSamplerObject *)calloc(sampler_capacity, sizeof(out->samplers[0]));
+    if (!out->memories || !out->images || !out->views || !out->samplers) {
+        destroy_vulkan_graphics_replay_attachments(rt->device, out);
+        return -ENOMEM;
+    }
+    const size_t msaa_image_allowed_count = view->header->image_count ? view->header->image_count : 1u;
+    unsigned char *msaa_image_allowed = (unsigned char *)calloc(
+        msaa_image_allowed_count, sizeof(msaa_image_allowed[0]));
+    if (!msaa_image_allowed) {
+        destroy_vulkan_graphics_replay_attachments(rt->device, out);
+        return -ENOMEM;
+    }
     int msaa_rc = validate_vulkan_graphics_v6_msaa_images_are_v64_color_resolves(
-        view, msaa_image_allowed, sizeof(msaa_image_allowed));
-    if (msaa_rc != 0) return msaa_rc;
+        view, msaa_image_allowed, msaa_image_allowed_count);
+    if (msaa_rc != 0) {
+        free(msaa_image_allowed);
+        return msaa_rc;
+    }
     VulkanDispatchV5ObjectTables object_tables = {
         .resources = view->resources,
         .resource_count = view->header->resource_count,
@@ -28290,17 +28328,18 @@ static int materialize_vulkan_graphics_v6_attachments(
         msaa_image_allowed,
         view->header->image_count,
         out->memories,
-        PDOCKER_GPU_MAX_VULKAN_BINDINGS,
+        out->memory_capacity,
         &out->memory_count,
         out->images,
-        PDOCKER_GPU_MAX_VULKAN_BINDINGS,
+        out->image_capacity,
         &out->image_count,
         out->views,
-        PDOCKER_GPU_MAX_VULKAN_BINDINGS,
+        out->view_capacity,
         &out->view_count,
         out->samplers,
-        PDOCKER_GPU_MAX_VULKAN_BINDINGS,
+        out->sampler_capacity,
         &out->sampler_count);
+    free(msaa_image_allowed);
     if (rc != 0) return rc;
     rc = materialize_vulkan_graphics_v620_image_layout_ranges(view, out);
     if (rc != 0) return rc;

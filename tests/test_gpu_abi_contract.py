@@ -8693,6 +8693,7 @@ class GpuAbiContractTest(unittest.TestCase):
         )[1].split("static int materialize_vulkan_graphics_v6_attachments", 1)[0]
         self.assertIn("unsigned char *allowed_msaa_images", graphics_helper)
         self.assertIn("header->image_count > allowed_msaa_image_count", graphics_helper)
+        self.assertNotIn("header->image_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS", graphics_helper)
         self.assertIn("PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_RENDERING", graphics_helper)
         self.assertIn("PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_UNUSED_SLOT", graphics_helper)
         self.assertIn("command->attachment_first > header->attachment_count", graphics_helper)
@@ -8715,10 +8716,32 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("allowed_msaa_images[src_view->image_index] = 1;", graphics_helper)
         self.assertIn("view->images[i].samples != VK_SAMPLE_COUNT_1_BIT && !allowed_msaa_images[i]", graphics_helper)
 
+        attachments_struct = executor.split("typedef struct VulkanGraphicsReplayAttachments", 1)[1].split(
+            "} VulkanGraphicsReplayAttachments", 1
+        )[0]
+        self.assertIn("VulkanDispatchImageMemoryObject *memories;", attachments_struct)
+        self.assertIn("VulkanDispatchImageObject *images;", attachments_struct)
+        self.assertIn("VulkanDispatchImageViewObject *views;", attachments_struct)
+        self.assertIn("VulkanDispatchSamplerObject *samplers;", attachments_struct)
+        self.assertIn("size_t image_capacity;", attachments_struct)
+        self.assertNotIn("[PDOCKER_GPU_MAX_VULKAN_BINDINGS]", attachments_struct)
+        destroy_body = executor.split("static void destroy_vulkan_graphics_replay_attachments", 1)[1].split(
+            "static VkImageAspectFlags vulkan_graphics_attachment_aspect_mask", 1
+        )[0]
+        self.assertIn("free(attachments->memories);", destroy_body)
+        self.assertIn("free(attachments->images);", destroy_body)
+        self.assertIn("free(attachments->views);", destroy_body)
+        self.assertIn("free(attachments->samplers);", destroy_body)
+
         graphics_body = executor.split("static int materialize_vulkan_graphics_v6_attachments", 1)[1].split(
             "static int record_vulkan_graphics_v6_attachment_writeback_commands", 1
         )[0]
-        self.assertIn("unsigned char msaa_image_allowed[PDOCKER_GPU_MAX_VULKAN_BINDINGS];", graphics_body)
+        self.assertNotIn("unsigned char msaa_image_allowed[PDOCKER_GPU_MAX_VULKAN_BINDINGS];", graphics_body)
+        self.assertIn("unsigned char *msaa_image_allowed = (unsigned char *)calloc(", graphics_body)
+        self.assertIn("free(msaa_image_allowed);", graphics_body)
+        self.assertIn("out->image_capacity", graphics_body)
+        self.assertIn("out->view_capacity", graphics_body)
+        self.assertIn("out->sampler_capacity", graphics_body)
         self.assertIn("validate_vulkan_graphics_v6_msaa_images_are_v64_color_resolves(", graphics_body)
         self.assertIn("msaa_image_allowed,", graphics_body)
         self.assertIn("attachment->samples != VK_SAMPLE_COUNT_1_BIT", graphics_body)
