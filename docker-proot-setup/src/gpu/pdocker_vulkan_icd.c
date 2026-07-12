@@ -569,6 +569,7 @@ struct PdockerVkDescriptorSetLayout {
 
 struct PdockerVkDescriptorSet {
     PdockerVkDescriptorSetLayout *layout;
+    PdockerVkDescriptorPool *pool;
     uint32_t storage_binding_capacity;
     PdockerVkDescriptorBinding **storage_buffers;
     uint32_t *storage_buffer_counts;
@@ -1237,7 +1238,11 @@ typedef struct {
 } PdockerHandle;
 
 struct PdockerVkDescriptorPool {
-    int unused;
+    VkDescriptorPoolCreateFlags flags;
+    uint32_t max_sets;
+    PdockerVkDescriptorSet **sets;
+    uint32_t set_count;
+    uint32_t set_capacity;
 };
 
 struct PdockerVkPipelineCache {
@@ -8776,6 +8781,90 @@ static VkResult descriptor_set_allocate_storage(
     return VK_SUCCESS;
 }
 
+static void destroy_descriptor_set_object(PdockerVkDescriptorSet *set) {
+    if (!set) return;
+    destroy_descriptor_set_storage(set);
+    free(set);
+}
+
+static int descriptor_pool_reserve_sets(
+        PdockerVkDescriptorPool *pool,
+        uint32_t additional) {
+    if (!pool) return -EINVAL;
+    if (additional == 0) return 0;
+    if (additional > UINT32_MAX - pool->set_count) return -EOVERFLOW;
+    const uint32_t needed = pool->set_count + additional;
+    if (needed <= pool->set_capacity) return 0;
+    uint32_t new_capacity = pool->set_capacity ? pool->set_capacity : 4u;
+    while (new_capacity < needed) {
+        if (new_capacity > UINT32_MAX / 2u) {
+            new_capacity = needed;
+            break;
+        }
+        new_capacity *= 2u;
+    }
+    size_t bytes = 0;
+    if (!checked_mul_size((size_t)new_capacity, sizeof(pool->sets[0]), &bytes)) {
+        return -EOVERFLOW;
+    }
+    void *next = realloc(pool->sets, bytes);
+    if (!next) return -ENOMEM;
+    pool->sets = (PdockerVkDescriptorSet **)next;
+    pool->set_capacity = new_capacity;
+    return 0;
+}
+
+static int descriptor_pool_track_set(
+        PdockerVkDescriptorPool *pool,
+        PdockerVkDescriptorSet *set) {
+    if (!pool || !set) return -EINVAL;
+    int rc = descriptor_pool_reserve_sets(pool, 1);
+    if (rc != 0) return rc;
+    set->pool = pool;
+    pool->sets[pool->set_count++] = set;
+    return 0;
+}
+
+static void descriptor_pool_untrack_set(
+        PdockerVkDescriptorPool *pool,
+        PdockerVkDescriptorSet *set) {
+    if (!pool || !set || !pool->sets) return;
+    for (uint32_t i = 0; i < pool->set_count; ++i) {
+        if (pool->sets[i] != set) continue;
+        pool->sets[i] = pool->sets[pool->set_count - 1u];
+        pool->sets[pool->set_count - 1u] = NULL;
+        pool->set_count--;
+        set->pool = NULL;
+        return;
+    }
+}
+
+static void descriptor_pool_free_set(
+        PdockerVkDescriptorPool *pool,
+        PdockerVkDescriptorSet *set) {
+    if (!set) return;
+    descriptor_pool_untrack_set(pool ? pool : set->pool, set);
+    destroy_descriptor_set_object(set);
+}
+
+static void descriptor_pool_reset_sets(PdockerVkDescriptorPool *pool) {
+    if (!pool) return;
+    for (uint32_t i = 0; i < pool->set_count; ++i) {
+        PdockerVkDescriptorSet *set = pool->sets ? pool->sets[i] : NULL;
+        if (!set) continue;
+        set->pool = NULL;
+        destroy_descriptor_set_object(set);
+    }
+    pool->set_count = 0;
+}
+
+static void destroy_descriptor_pool_object(PdockerVkDescriptorPool *pool) {
+    if (!pool) return;
+    descriptor_pool_reset_sets(pool);
+    free(pool->sets);
+    free(pool);
+}
+
 static int descriptor_set_clone_for_update(
         const PdockerVkDescriptorSet *live,
         PdockerVkDescriptorSet *shadow) {
@@ -9983,9 +10072,8 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
     for (uint32_t set_index = 0; set_index < PDOCKER_VK_MAX_DESCRIPTOR_SETS; ++set_index) {
         if (!op->set_snapshot_used[set_index]) continue;
         const PdockerVkDescriptorSet *snapshot_set = &op->set_snapshots[set_index];
-        const PdockerVkDescriptorSet *live_set = op->set_handles[set_index];
-        const PdockerVkDescriptorSet *set = live_set ? live_set : snapshot_set;
-        const PdockerVkDescriptorSetLayout *layout = set->layout ? set->layout : snapshot_set->layout;
+        const PdockerVkDescriptorSet *set = snapshot_set;
+        const PdockerVkDescriptorSetLayout *layout = snapshot_set->layout;
         const uint32_t binding_limit = descriptor_layout_slot_count(layout);
         for (uint32_t i = 0; i < binding_limit; ++i) {
             if (layout && !layout->storage_binding_present[i]) continue;
@@ -16763,6 +16851,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorPool(
     }
     PdockerVkDescriptorPool *pool = pdocker_alloc_handle(sizeof(*pool));
     if (!pool) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    pool->flags = pCreateInfo->flags;
+    pool->max_sets = pCreateInfo->maxSets;
     *pDescriptorPool = pdocker_vk_descriptor_pool_to_handle(pool);
     return VK_SUCCESS;
 }
@@ -16773,7 +16863,7 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyDescriptorPool(
         const VkAllocationCallbacks *pAllocator) {
     (void)device;
     (void)pAllocator;
-    free(pdocker_vk_descriptor_pool_from_handle(descriptorPool));
+    destroy_descriptor_pool_object(pdocker_vk_descriptor_pool_from_handle(descriptorPool));
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkResetDescriptorPool(
@@ -16781,8 +16871,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkResetDescriptorPool(
         VkDescriptorPool descriptorPool,
         VkDescriptorPoolResetFlags flags) {
     (void)device;
-    (void)descriptorPool;
-    (void)flags;
+    if (flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;
+    PdockerVkDescriptorPool *pool = pdocker_vk_descriptor_pool_from_handle(descriptorPool);
+    if (!pool) return VK_ERROR_INITIALIZATION_FAILED;
+    descriptor_pool_reset_sets(pool);
     return VK_SUCCESS;
 }
 
@@ -16833,6 +16925,14 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateDescriptorSets(
     }
     VkResult pnext_rc = validate_descriptor_set_allocate_pnext(pAllocateInfo);
     if (pnext_rc != VK_SUCCESS) return pnext_rc;
+    PdockerVkDescriptorPool *pool = pdocker_vk_descriptor_pool_from_handle(pAllocateInfo->descriptorPool);
+    if (!pool) return VK_ERROR_INITIALIZATION_FAILED;
+    if (pAllocateInfo->descriptorSetCount > UINT32_MAX - pool->set_count ||
+        pool->set_count + pAllocateInfo->descriptorSetCount > pool->max_sets) {
+        return VK_ERROR_OUT_OF_POOL_MEMORY;
+    }
+    int reserve_rc = descriptor_pool_reserve_sets(pool, pAllocateInfo->descriptorSetCount);
+    if (reserve_rc != 0) return reserve_rc == -ENOMEM ? VK_ERROR_OUT_OF_HOST_MEMORY : VK_ERROR_INITIALIZATION_FAILED;
     for (uint32_t i = 0; i < pAllocateInfo->descriptorSetCount; ++i) {
         pDescriptorSets[i] = VK_NULL_HANDLE;
     }
@@ -16842,8 +16942,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateDescriptorSets(
             for (uint32_t j = 0; j < i; ++j) {
                 PdockerVkDescriptorSet *previous =
                     pdocker_vk_descriptor_set_from_handle(pDescriptorSets[j]);
-                destroy_descriptor_set_storage(previous);
-                free(previous);
+                descriptor_pool_free_set(pool, previous);
                 pDescriptorSets[j] = VK_NULL_HANDLE;
             }
             return VK_ERROR_OUT_OF_HOST_MEMORY;
@@ -16855,13 +16954,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateDescriptorSets(
                 for (uint32_t j = 0; j < i; ++j) {
                     PdockerVkDescriptorSet *previous =
                         pdocker_vk_descriptor_set_from_handle(pDescriptorSets[j]);
-                    destroy_descriptor_set_storage(previous);
-                    free(previous);
+                    descriptor_pool_free_set(pool, previous);
                     pDescriptorSets[j] = VK_NULL_HANDLE;
                 }
                 return VK_ERROR_INITIALIZATION_FAILED;
             }
         }
+        set->pool = pool;
         VkResult storage_rc = descriptor_set_allocate_storage(
             set, descriptor_set_storage_capacity_for_layout(set->layout));
         if (storage_rc != VK_SUCCESS) {
@@ -16869,13 +16968,21 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateDescriptorSets(
             for (uint32_t j = 0; j < i; ++j) {
                 PdockerVkDescriptorSet *previous =
                     pdocker_vk_descriptor_set_from_handle(pDescriptorSets[j]);
-                destroy_descriptor_set_storage(previous);
-                free(previous);
+                descriptor_pool_free_set(pool, previous);
                 pDescriptorSets[j] = VK_NULL_HANDLE;
             }
             return storage_rc;
         }
         descriptor_set_apply_immutable_samplers(set);
+        int track_rc = descriptor_pool_track_set(pool, set);
+        if (track_rc != 0) {
+            destroy_descriptor_set_object(set);
+            for (uint32_t j = 0; j < i; ++j) {
+                descriptor_pool_free_set(pool, pdocker_vk_descriptor_set_from_handle(pDescriptorSets[j]));
+                pDescriptorSets[j] = VK_NULL_HANDLE;
+            }
+            return track_rc == -ENOMEM ? VK_ERROR_OUT_OF_HOST_MEMORY : VK_ERROR_INITIALIZATION_FAILED;
+        }
         pDescriptorSets[i] = pdocker_vk_descriptor_set_to_handle(set);
     }
     return VK_SUCCESS;
@@ -16887,12 +16994,18 @@ VKAPI_ATTR VkResult VKAPI_CALL vkFreeDescriptorSets(
         uint32_t descriptorSetCount,
         const VkDescriptorSet *pDescriptorSets) {
     (void)device;
-    (void)descriptorPool;
+    PdockerVkDescriptorPool *pool = pdocker_vk_descriptor_pool_from_handle(descriptorPool);
+    if (!pool && descriptorSetCount > 0) return VK_ERROR_INITIALIZATION_FAILED;
+    if (descriptorSetCount > 0 && !pDescriptorSets) return VK_ERROR_INITIALIZATION_FAILED;
+    if (descriptorSetCount > 0 &&
+        !(pool->flags & VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT)) {
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
     for (uint32_t i = 0; i < descriptorSetCount; ++i) {
         PdockerVkDescriptorSet *set =
             pdocker_vk_descriptor_set_from_handle(pDescriptorSets[i]);
-        destroy_descriptor_set_storage(set);
-        free(set);
+        if (set && set->pool && set->pool != pool) return VK_ERROR_INITIALIZATION_FAILED;
+        descriptor_pool_free_set(pool, set);
     }
     return VK_SUCCESS;
 }
