@@ -5416,14 +5416,15 @@ class GpuAbiContractTest(unittest.TestCase):
             "entry->layout_id == other->layout_id && entry->binding == other->binding",
             "entry->pipeline_layout_id == other->pipeline_layout_id &&",
             "collect_graphics_descriptor_layout_from_v624_metadata",
+            "VulkanGraphicsReplayDescriptorBinding",
+            "ensure_vulkan_graphics_replay_descriptor_binding",
             "dst->descriptor_set_layout_ids",
-            "dst->set_binding_descriptor_counts",
             ".layout = pipeline_layout->layout",
             "VulkanGraphicsReplayLayouts",
             "materialize_vulkan_graphics_v6_layouts",
             "find_vulkan_graphics_replay_pipeline_layout_by_id",
             "vulkan_graphics_replay_descriptor_set_layout_for_set",
-            "set_layout->binding_descriptor_counts",
+            "find_vulkan_graphics_replay_descriptor_binding",
             "vkCreatePipelineLayout(rt->device, &plci, NULL, &pl->layout)",
             "vkCreateDescriptorSetLayout(rt->device, &dslci, NULL, &dsl->layout)",
         ]:
@@ -5683,41 +5684,29 @@ class GpuAbiContractTest(unittest.TestCase):
         )[1].split(
             "VulkanGraphicsReplayDescriptorBind *bind = &out->binds", 1
         )[0]
-        layout_coverage_body = v625_prealloc_body.split(
-            "if (bind_meta) {", 2
-        )[2].split(
-            "VulkanGraphicsReplayDescriptorBind *bind = &out->binds", 1
-        )[0]
 
-        self.assertIn(
+        self.assertNotIn(
             "uint8_t descriptor_slot_seen[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS]",
             v625_prealloc_body,
         )
-        self.assertIn("memset(descriptor_slot_seen, 0, sizeof(descriptor_slot_seen));", v625_prealloc_body)
+        self.assertNotIn("descriptor_slot_seen", v625_prealloc_body)
+        self.assertIn("uint32_t expected_descriptor_slots = 0;", v625_prealloc_body)
+        self.assertIn("expected_descriptor_slots += binding->descriptor_count;", v625_prealloc_body)
+        self.assertIn("if (command->descriptor_count != expected_descriptor_slots) return -EPROTO;", v625_prealloc_body)
         self.assertIn("descriptor->descriptor_set < bind_first_set", descriptor_validation_body)
         self.assertIn("descriptor->descriptor_set >= bind_first_set + declared_bind_set_count", descriptor_validation_body)
-        self.assertIn(
-            "descriptor->array_element >= set_layout->binding_descriptor_counts[descriptor->binding]",
-            descriptor_validation_body,
-        )
-        self.assertIn("set_layout->binding_types[descriptor->binding]", descriptor_validation_body)
-        self.assertIn("vulkan_graphics_replay_descriptor_set_layout_for_set", v625_prealloc_body)
-        self.assertIn(
-            "if (descriptor_slot_seen[descriptor->descriptor_set][descriptor->binding][descriptor->array_element])",
-            descriptor_validation_body,
-        )
-        self.assertIn(
-            "descriptor_slot_seen[descriptor->descriptor_set][descriptor->binding][descriptor->array_element] = 1u;",
-            descriptor_validation_body,
-        )
+        self.assertIn("find_vulkan_graphics_replay_descriptor_binding(set_layout, descriptor->binding)", descriptor_validation_body)
+        self.assertIn("descriptor->array_element >= binding->descriptor_count", descriptor_validation_body)
+        self.assertIn("binding->descriptor_type != descriptor_type", descriptor_validation_body)
+        self.assertIn("for (uint32_t previous = 0; previous < d; ++previous)", descriptor_validation_body)
+        self.assertIn("seen->descriptor_set == descriptor->descriptor_set", descriptor_validation_body)
+        self.assertIn("seen->binding == descriptor->binding", descriptor_validation_body)
+        self.assertIn("seen->array_element == descriptor->array_element", descriptor_validation_body)
         self.assertIn("return -EPROTO;", descriptor_validation_body)
-
-        self.assertIn("for (uint32_t set = bind_first_set; set < bind_first_set + declared_bind_set_count; ++set)", layout_coverage_body)
-        self.assertIn("for (uint32_t binding = 0; binding < set_layout->binding_count; ++binding)", layout_coverage_body)
-        self.assertIn("uint32_t expected_count = set_layout->binding_descriptor_counts[binding];", layout_coverage_body)
-        self.assertIn("if (expected_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS) return -EPROTO;", layout_coverage_body)
-        self.assertIn("for (uint32_t array_element = 0; array_element < expected_count; ++array_element)", layout_coverage_body)
-        self.assertIn("if (!descriptor_slot_seen[set][binding][array_element]) return -EPROTO;", layout_coverage_body)
+        self.assertIn("vulkan_graphics_replay_descriptor_set_layout_for_set", v625_prealloc_body)
+        self.assertIn("for (uint32_t b = 0; b < set_layout->binding_count; ++b)", v625_prealloc_body)
+        self.assertIn("const VulkanGraphicsReplayDescriptorBinding *binding = &set_layout->bindings[b];", v625_prealloc_body)
+        self.assertIn("switch (binding->descriptor_type)", v625_prealloc_body)
 
     def test_vulkan_graphics_descriptor_write_staging_is_heap_backed(self):
         executor = GPU_EXECUTOR.read_text()

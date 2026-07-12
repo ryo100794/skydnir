@@ -201,10 +201,14 @@ or closes.
   `VkDescriptorBufferInfo`, `VkDescriptorImageInfo`, and `VkWriteDescriptorSet`
   arrays on the heap using the command descriptor count, so descriptor-update
   replay no longer has a separate 16-write stack-array ceiling after layout
-  validation has accepted the descriptor set.  The fixed strict-graph cache is deliberately disabled for
-  wider dispatches instead of being widened inside this slice.  Remaining
-  narrowing points: the real SCM_RIGHTS fd limit for fd-bearing buffers,
-  graphics fixed-array lanes, and device-runtime evidence for a >16 V5 compute
+  validation has accepted the descriptor set.  Graphics descriptor-set layout
+  metadata and V6.25 descriptor-bind exact coverage now use heap-backed sparse
+  binding records instead of fixed binding-number and descriptor-array-element
+  tables, so high binding numbers no longer force a separate Android-side
+  16-slot layout replay ceiling.  The fixed strict-graph cache is deliberately
+  disabled for wider dispatches instead of being widened inside this slice.
+  Remaining narrowing points: the real SCM_RIGHTS fd limit for fd-bearing buffers,
+  non-descriptor graphics fixed-array lanes, and device-runtime evidence for a >16 V5 compute
   dispatch.  Acceptance: host verifier
   `tests.test_gpu_abi_contract` covers the above-16 V5 executor path, native
   payloads must build cleanly, and a runtime artifact must prove table-native
