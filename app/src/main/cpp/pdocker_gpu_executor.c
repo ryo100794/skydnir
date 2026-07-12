@@ -9214,11 +9214,12 @@ static void write_spirv_binding_reflection_report(
         FILE *out,
         const uint8_t *shader_used_bindings,
         const SpirvDescriptorAccess *shader_binding_access,
+        size_t shader_reflection_capacity,
         const VulkanDispatchBinding *bindings,
         size_t binding_count) {
     fprintf(out, "\"spirv_binding_reflection\":[");
     int first = 1;
-    for (uint32_t binding = 0; binding < PDOCKER_GPU_MAX_VULKAN_BINDINGS; ++binding) {
+    for (uint32_t binding = 0; binding < shader_reflection_capacity; ++binding) {
         int declared = shader_used_bindings && shader_used_bindings[binding];
         int readable = shader_binding_access && shader_binding_access[binding].readable;
         int writable = shader_binding_access && shader_binding_access[binding].writable;
@@ -14593,6 +14594,9 @@ static int run_vulkan_dispatch_fd(
     VkDescriptorType *set_binding_types = NULL;
     VkDescriptorSetLayoutBinding *layout_bindings = NULL;
     size_t layout_table_capacity = 0;
+    uint8_t *shader_used_bindings = NULL;
+    SpirvDescriptorAccess *shader_binding_access = NULL;
+    size_t shader_reflection_capacity = 0;
     VkPipelineLayout pipeline_layout = VK_NULL_HANDLE;
     VkShaderModule shader = VK_NULL_HANDLE;
     VkPipeline pipeline = VK_NULL_HANDLE;
@@ -14779,8 +14783,6 @@ static int run_vulkan_dispatch_fd(
         options && options->has_materialize_descriptor_aliases
             ? options->materialize_descriptor_aliases
             : env_truthy("PDOCKER_GPU_MATERIALIZE_DESCRIPTOR_ALIASES", 0);
-    uint8_t shader_used_bindings[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
-    SpirvDescriptorAccess shader_binding_access[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     uint8_t active_bindings[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     uint8_t strict_graph_active_bindings[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     memset(&strict_object_graph_timing, 0, sizeof(strict_object_graph_timing));
@@ -14851,8 +14853,6 @@ static int run_vulkan_dispatch_fd(
     memset(set_layouts, 0, sizeof(set_layouts));
     memset(descriptor_sets, 0, sizeof(descriptor_sets));
     memset(set_binding_counts, 0, sizeof(set_binding_counts));
-    memset(shader_used_bindings, 0, sizeof(shader_used_bindings));
-    memset(shader_binding_access, 0, sizeof(shader_binding_access));
     memset(active_bindings, 0, sizeof(active_bindings));
     memset(strict_graph_active_bindings, 0, sizeof(strict_graph_active_bindings));
     memset(strict_resident_cached_bindings, 0, sizeof(strict_resident_cached_bindings));
@@ -15314,6 +15314,22 @@ static int run_vulkan_dispatch_fd(
         }
     }
     /*
+     * Reflection tables are keyed by SPIR-V Binding numbers, not by the compact
+     * descriptor index in the V5 frame. Keep their capacity aligned with the
+     * already-validated layout_count so sparse high binding numbers do not
+     * silently look undeclared or lose NonReadable/NonWritable metadata.
+     */
+    shader_reflection_capacity = layout_count ? layout_count : 1;
+    shader_used_bindings = (uint8_t *)calloc(shader_reflection_capacity, sizeof(*shader_used_bindings));
+    shader_binding_access = (SpirvDescriptorAccess *)calloc(
+        shader_reflection_capacity, sizeof(*shader_binding_access));
+    if (!shader_used_bindings || !shader_binding_access) {
+        json_fail("vulkan-dispatch", "out of memory allocating shader reflection tables");
+        ret = 64;
+        goto cleanup;
+    }
+
+    /*
      * Strict passthrough is the ABI-preservation lane: do not patch the module,
      * but also do not reject a driver-visible module solely because the
      * analyzer sees a literal LocalSize that differs from the specialization
@@ -15333,12 +15349,12 @@ static int run_vulkan_dispatch_fd(
         shader_code,
         shader_size,
         shader_used_bindings,
-        sizeof(shader_used_bindings));
+        shader_reflection_capacity);
     collect_spirv_descriptor_accesses(
         shader_code,
         shader_size,
         shader_binding_access,
-        sizeof(shader_binding_access) / sizeof(shader_binding_access[0]));
+        shader_reflection_capacity);
     /*
      * Strict passthrough normally keeps every application-provided descriptor
      * transfer-conservative: if a descriptor exists, upload it and write it
@@ -15372,16 +15388,16 @@ static int run_vulkan_dispatch_fd(
         strict_passthrough;
     if (transfer_skip_unused_descriptor_transfers) {
         for (size_t i = 0; i < binding_alias_count; ++i) {
-            if (binding_aliases[i].rewritten_binding < sizeof(shader_used_bindings) &&
+            if (binding_aliases[i].rewritten_binding < shader_reflection_capacity &&
                 shader_used_bindings[binding_aliases[i].rewritten_binding] &&
-                binding_aliases[i].original_binding < sizeof(shader_used_bindings)) {
+                binding_aliases[i].original_binding < shader_reflection_capacity) {
                 shader_used_bindings[binding_aliases[i].original_binding] = 1;
             }
             if (transfer_use_spirv_descriptor_access &&
                 binding_aliases[i].rewritten_binding <
-                    sizeof(shader_binding_access) / sizeof(shader_binding_access[0]) &&
+                    shader_reflection_capacity &&
                 binding_aliases[i].original_binding <
-                    sizeof(shader_binding_access) / sizeof(shader_binding_access[0])) {
+                    shader_reflection_capacity) {
                 SpirvDescriptorAccess *original =
                     &shader_binding_access[binding_aliases[i].original_binding];
                 const SpirvDescriptorAccess *rewritten =
@@ -15401,7 +15417,7 @@ static int run_vulkan_dispatch_fd(
     size_t skipped_download_bytes = 0;
     for (size_t i = 0; i < binding_count; ++i) {
         const int shader_declared =
-            bindings[i].binding < sizeof(shader_used_bindings) &&
+            bindings[i].binding < shader_reflection_capacity &&
             shader_used_bindings[bindings[i].binding];
         if (!transfer_skip_unused_descriptor_transfers ||
             shader_declared ||
@@ -15419,7 +15435,7 @@ static int run_vulkan_dispatch_fd(
                 skipped_binding_count++;
                 skipped_binding_bytes += bindings[i].size;
             } else if (!transfer_use_spirv_descriptor_access ||
-                bindings[i].binding >= sizeof(shader_binding_access) / sizeof(shader_binding_access[0])) {
+                bindings[i].binding >= shader_reflection_capacity) {
                 binding_read_needed[i] = 1;
                 binding_write_needed[i] = 1;
             } else {
@@ -18134,6 +18150,7 @@ static int run_vulkan_dispatch_fd(
         write_spirv_binding_reflection_report(json_out(),
                                               shader_used_bindings,
                                               shader_binding_access,
+                                              shader_reflection_capacity,
                                               bindings,
                                               binding_count);
         fprintf(json_out(), ",");
@@ -18453,6 +18470,7 @@ static int run_vulkan_dispatch_fd(
         write_spirv_binding_reflection_report(json_out(),
                                               shader_used_bindings,
                                               shader_binding_access,
+                                              shader_reflection_capacity,
                                               bindings,
                                               binding_count);
         fprintf(json_out(), ",");
@@ -18809,6 +18827,8 @@ cleanup:
                                                strict_buffer_count);
         }
     }
+    free(shader_binding_access);
+    free(shader_used_bindings);
     free(layout_bindings);
     free(set_binding_types);
     free(set_binding_descriptor_counts);

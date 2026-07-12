@@ -6962,6 +6962,35 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("set_binding_types[set_index][", body)
         self.assertNotIn("set_binding_descriptor_counts[set_index][", body)
 
+    def test_vulkan_compute_shader_reflection_tables_are_heap_backed_for_sparse_binding_numbers(self):
+        executor = GPU_EXECUTOR.read_text()
+        body = c_function_body(executor, "run_vulkan_dispatch_fd")
+        report_body = c_function_body(executor, "write_spirv_binding_reflection_report")
+
+        self.assertIn("uint8_t *shader_used_bindings = NULL;", body)
+        self.assertIn("SpirvDescriptorAccess *shader_binding_access = NULL;", body)
+        self.assertIn("size_t shader_reflection_capacity = 0;", body)
+        self.assertIn("shader_reflection_capacity = layout_count ? layout_count : 1;", body)
+        self.assertIn("shader_used_bindings = (uint8_t *)calloc(shader_reflection_capacity", body)
+        self.assertIn("shader_binding_access = (SpirvDescriptorAccess *)calloc(", body)
+        self.assertIn("shader_reflection_capacity, sizeof(*shader_binding_access)", body)
+        self.assertIn("shader_used_bindings,\n        shader_reflection_capacity);", body)
+        self.assertIn("shader_binding_access,\n        shader_reflection_capacity);", body)
+        self.assertIn("bindings[i].binding < shader_reflection_capacity", body)
+        self.assertIn("bindings[i].binding >= shader_reflection_capacity", body)
+        self.assertIn("binding_aliases[i].rewritten_binding < shader_reflection_capacity", body)
+        self.assertIn("free(shader_binding_access);", body)
+        self.assertIn("free(shader_used_bindings);", body)
+        self.assertNotIn("uint8_t shader_used_bindings[PDOCKER_GPU_MAX_VULKAN_BINDINGS];", body)
+        self.assertNotIn("SpirvDescriptorAccess shader_binding_access[PDOCKER_GPU_MAX_VULKAN_BINDINGS];", body)
+        self.assertNotIn("bindings[i].binding < sizeof(shader_used_bindings)", body)
+        self.assertNotIn("sizeof(shader_binding_access) / sizeof(shader_binding_access[0])", body)
+
+        self.assertIn("size_t shader_reflection_capacity", executor)
+        self.assertIn("binding < shader_reflection_capacity", report_body)
+        self.assertNotIn("binding < PDOCKER_GPU_MAX_VULKAN_BINDINGS", report_body)
+        self.assertIn("shader_reflection_capacity,\n                                              bindings,", executor)
+
     def test_vulkan_compute_descriptor_writes_are_heap_backed_for_v5_table_width(self):
         executor = GPU_EXECUTOR.read_text()
         body = c_function_body(executor, "run_vulkan_dispatch_fd")
