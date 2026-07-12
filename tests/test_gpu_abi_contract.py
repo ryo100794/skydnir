@@ -1427,7 +1427,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "uint32_t next_subpass = cmd->active_subpass + 1u;",
             "VkDeviceSize base_offset;",
             "VkDeviceSize dynamic_offset;",
-            "api_dynamic_offsets[binding_count] = binding->dynamic_offset;",
+            "api_dynamic_offsets[binding_count] = transport_binding->dynamic_offset;",
             "descriptors[i].dynamic_offset = (uint64_t)api_dynamic_offsets[i];",
             "slot->offset = slot->base_offset + slot->dynamic_offset;",
             "if (binding->range == VK_WHOLE_SIZE) return available_in_buffer;",
@@ -4392,7 +4392,11 @@ class GpuAbiContractTest(unittest.TestCase):
             object_validator,
         )
         self.assertIn(
-            "header->abi_minor != PDOCKER_GPU_VULKAN_DISPATCH_V52_ABI_MINOR) return 0;",
+            "header->abi_minor != PDOCKER_GPU_VULKAN_DISPATCH_V52_ABI_MINOR &&",
+            object_validator,
+        )
+        self.assertIn(
+            "header->abi_minor != PDOCKER_GPU_VULKAN_DISPATCH_V53_ABI_MINOR) return 0;",
             object_validator,
         )
 
@@ -4640,13 +4644,15 @@ class GpuAbiContractTest(unittest.TestCase):
             capability_marker,
             "ICD must prove executor V5.2 image-layout-range support before sending abi_minor 2",
         )
-        abi_minor_assignment = "header->abi_minor = need_v52_image_layout_ranges"
+        abi_minor_assignment = "header->abi_minor = need_v53_buffer_views"
         self.assertIn(abi_minor_assignment, sender)
         self.assertLess(sender.index(capability_marker), sender.index(abi_minor_assignment))
         self.assertRegex(
             sender,
             r"need_v52_image_layout_ranges\s*&&\s*!.*v52.*image_layout.*range.*support",
         )
+        self.assertIn("executor_supports_vulkan_dispatch_v53_buffer_views", sender)
+        self.assertIn("need_v53_buffer_views", sender)
         self.assertRegex(sender, r"return\s+-(?:EOPNOTSUPP|EPROTO|EINVAL);")
 
     def test_vulkan_dispatch_v5_2_icd_layout_range_table_is_not_stack_sized_when_heap_backed(self):
@@ -5135,6 +5141,11 @@ class GpuAbiContractTest(unittest.TestCase):
                 "PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_OBJECT_FIELDS",
                 "PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_OBJECT_FIELD_COUNT",
                 "PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_OBJECT_SCHEMA_HASH",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_DISPATCH_V53_BUFFER_VIEW_FIELDS",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V53_BUFFER_VIEW_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V53_BUFFER_VIEW_SCHEMA_HASH",
             ),
             (
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_FRAME_HEADER_FIELDS",
@@ -6083,6 +6094,14 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_GPU_VULKAN_DISPATCH_V5_IMAGE_VIEW_SCHEMA_HASH",
             "PDOCKER_GPU_VULKAN_DISPATCH_V5_SAMPLER_SCHEMA_HASH",
             "PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_OBJECT_SCHEMA_HASH",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V53_ABI_MINOR",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_BUFFER_VIEWS",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V53_HEADER_EXTENSION_FIELDS",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V53_HEADER_EXTENSION_FIELD_COUNT",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V53_BUFFER_VIEW_FIELDS",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V53_BUFFER_VIEW_FIELD_COUNT",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V53_BUFFER_VIEW_SCHEMA_HASH",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V53_MAX_BUFFER_VIEWS",
         ]:
             self.assertIn(marker, app)
             self.assertIn(marker, container)
@@ -6095,6 +6114,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('#define PDOCKER_GPU_VULKAN_DISPATCH_V5_IMAGE_VIEW_FIELD_COUNT 15u', app)
         self.assertIn('#define PDOCKER_GPU_VULKAN_DISPATCH_V5_SAMPLER_FIELD_COUNT 19u', app)
         self.assertIn('#define PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_OBJECT_FIELD_COUNT 16u', app)
+        self.assertIn('#define PDOCKER_GPU_VULKAN_DISPATCH_V53_HEADER_EXTENSION_FIELD_COUNT 7u', app)
+        self.assertIn('#define PDOCKER_GPU_VULKAN_DISPATCH_V53_BUFFER_VIEW_FIELD_COUNT 8u', app)
         for marker in markers:
             app_line = next(line for line in app.splitlines() if marker in line and line.startswith("#define"))
             container_line = next(line for line in container.splitlines() if marker in line and line.startswith("#define"))
@@ -6113,6 +6134,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_GPU_VULKAN_DISPATCH_V5_IMAGE_VIEW_SCHEMA_HASH",
             "PDOCKER_GPU_VULKAN_DISPATCH_V5_SAMPLER_SCHEMA_HASH",
             "PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_OBJECT_SCHEMA_HASH",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V53_ABI_MINOR",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V53_BUFFER_VIEW_SCHEMA_HASH",
+            "PdockerGpuVulkanDispatchV53BufferViewEntry",
             "PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_RESOURCES",
             "PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS",
             "PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGES",
@@ -6747,7 +6771,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("descriptor_linear_slot", icd)
         self.assertIn("descriptors[i].array_element = api_descriptor_array_elements[i];", icd)
         self.assertIn("descriptors[descriptor_index].array_element = image_descriptor_array_elements[i];", icd)
-        self.assertIn("descriptor_array_transport_required || image_descriptor_count > 0", icd)
+        self.assertIn("descriptor_array_transport_required || texel_buffer_transport_required", icd)
         self.assertIn("api_descriptor_array_elements[binding_count] = array_element;", icd)
         self.assertIn("image_descriptor_array_elements[image_descriptor_count] = array_element;", icd)
         self.assertIn("descriptor_set_binding_slot(set, binding, array_element)", icd)
@@ -7058,7 +7082,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC", executor)
         self.assertIn("set_binding_types", executor)
         self.assertIn("descriptor_pool_uniform_count", executor)
-        self.assertIn("unsupported descriptor write type for V4 transport", executor)
+        self.assertIn("unsupported descriptor write type for V5 transport", executor)
         run_body = c_function_body(executor, "run_vulkan_dispatch_fd")
         marker = "const uint32_t set_binding_limit = set_binding_counts[set_index];"
         generic_body = marker + run_body.split(marker, 1)[1].split(
@@ -7446,7 +7470,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("op->dispatch_indirect ? op->dispatch_indirect_buffer : NULL", icd)
         self.assertIn("dispatch_indirect_resource=%u dispatch_indirect_offset=%llu", icd)
         self.assertIn("const bool requires_v5_frame =", icd)
-        self.assertIn("descriptor_array_transport_required || image_descriptor_count > 0 ||", icd)
+        self.assertIn("descriptor_array_transport_required || texel_buffer_transport_required ||", icd)
         self.assertIn("binding_count > PDOCKER_GPU_VULKAN_TEXT_DISPATCH_MAX_BINDINGS || op->dispatch_indirect", icd)
         self.assertIn("dispatch_indirect_resource=", executor)
         self.assertIn("materialize_vulkan_dispatch_indirect_buffer", executor)
@@ -8776,7 +8800,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("sampler->mag_filter = pCreateInfo->magFilter;", icd)
         self.assertIn("if (!binding->buffer && !binding->buffer_view && !binding->image_view && !binding->sampler) continue;", icd)
         self.assertIn("set->has_image_descriptor = descriptor_set_has_image_descriptor(set);", icd)
-        self.assertIn("descriptor_array_transport_required || image_descriptor_count > 0", icd)
+        self.assertIn("descriptor_array_transport_required || texel_buffer_transport_required", icd)
         self.assertIn("V5.1 frame required but disabled for this dispatch", icd)
         self.assertIn("because PDOCKER_VULKAN_ALIAS_COPIES is active", icd)
 
@@ -9001,8 +9025,10 @@ class GpuAbiContractTest(unittest.TestCase):
         create_body = c_function_body(icd, "vkCreateBufferView")
         destroy_body = c_function_body(icd, "vkDestroyBufferView")
         self.assertIn("PdockerVkBuffer *buffer = pdocker_vk_buffer_from_handle(pCreateInfo->buffer);", create_body)
-        self.assertIn("VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT", create_body)
-        self.assertIn("conservative_format_bytes_per_pixel(pCreateInfo->format) == 0", create_body)
+        self.assertIn("VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT", create_body)
+        self.assertIn("VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT", create_body)
+        self.assertIn("size_t texel_size = conservative_format_bytes_per_pixel(pCreateInfo->format);", create_body)
+        self.assertIn("if (texel_size == 0)", create_body)
         self.assertIn("range == VK_WHOLE_SIZE", create_body)
         self.assertIn("view->format = pCreateInfo->format;", create_body)
         self.assertIn("view->offset = pCreateInfo->offset;", create_body)
@@ -9019,8 +9045,36 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER", support_body)
         self.assertNotIn("VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER", support_body)
         self.assertIn("static bool descriptor_type_requires_buffer_view", icd)
-        self.assertIn("texel-buffer descriptor ABI pending", icd)
-        self.assertIn("if (descriptor_type_requires_buffer_view(descriptor_type))", icd)
+        self.assertIn("api_buffer_view_ids", icd)
+        self.assertIn("api_buffer_view_formats", icd)
+        self.assertIn("api_buffer_view_offsets", icd)
+        self.assertIn("api_buffer_view_ranges", icd)
+        self.assertIn("api_buffer_view_generations", icd)
+        self.assertIn("PdockerGpuVulkanDispatchV53BufferViewEntry", icd)
+        self.assertIn("executor_supports_vulkan_dispatch_v53_buffer_views", icd)
+        self.assertIn("need_v53_buffer_views", icd)
+        self.assertIn("texel_buffer_transport_required = true;", icd)
+        self.assertIn("descriptor_array_transport_required || texel_buffer_transport_required", icd)
+        self.assertIn("requires_v5_frame && copy_alias_enabled()", icd)
+        self.assertIn("if (descriptor_type_requires_buffer_view((VkDescriptorType)api_descriptor_types[i]))", icd)
+        self.assertIn("descriptor_type_requires_buffer_view(binding->descriptorType) &&", icd)
+        self.assertIn("executor_supports_vulkan_dispatch_v53_buffer_views();", icd)
+        self.assertIn("VK_FORMAT_FEATURE_UNIFORM_TEXEL_BUFFER_BIT", icd)
+        self.assertIn("VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_BIT", icd)
+        self.assertIn("pProperties->limits.maxTexelBufferElements", icd)
+        self.assertIn("pProperties->limits.minTexelBufferOffsetAlignment", icd)
+        self.assertIn("buffer-view-format-feature-unsupported", icd)
+        self.assertIn("buffer-view-offset-alignment-invalid", icd)
+        self.assertIn("buffer-view-texel-count-exceeds-limit", icd)
+        self.assertNotIn("texel-buffer descriptor ABI pending", icd)
+
+        executor = GPU_EXECUTOR.read_text()
+        self.assertIn("VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER", executor)
+        self.assertIn("VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER", executor)
+        self.assertIn("vulkan_dispatch_descriptor_type_requires_buffer_view", executor)
+        self.assertIn("vkCreateBufferView(rt->device", executor)
+        self.assertIn("pTexelBufferView", executor)
+        self.assertIn("vkDestroyBufferView(rt->device", executor)
 
     def test_vulkan_memory_api_validates_map_ranges_and_type_index(self):
         icd = VULKAN_ICD.read_text()
@@ -11607,7 +11661,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "entry->view_id = pdocker_vk_image_view_object_id(view);",
             "entry->sampler_id = pdocker_vk_sampler_object_id(sampler);",
             "api_memory_ids[binding_count] = pdocker_vk_memory_object_id(dispatch_memory);",
-            "api_buffer_ids[binding_count] = pdocker_vk_buffer_object_id(binding->buffer);",
+            "api_buffer_ids[binding_count] = pdocker_vk_buffer_object_id(transport_buffer);",
             "uint64_t api_memory_ids[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS];",
             "uint64_t api_buffer_ids[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS];",
             "const uint64_t *api_memory_ids",
@@ -11669,7 +11723,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "static void execute_recorded_image_copy_op", 1
         )[0]
         self.assertIn("descriptor absolute offset overflow", dispatch_body)
-        self.assertIn("checked_add_u64((uint64_t)binding->buffer->memory_offset", dispatch_body)
+        self.assertIn("checked_add_u64((uint64_t)transport_buffer->memory_offset", dispatch_body)
         self.assertNotIn("binding->buffer->memory_offset + binding->offset", dispatch_body)
         self.assertIn("return true;", overlap_body)
         self.assertIn("!checked_add_u64((uint64_t)a_offset", overlap_body)
