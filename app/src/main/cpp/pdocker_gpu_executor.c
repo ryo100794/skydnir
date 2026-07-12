@@ -27050,7 +27050,6 @@ typedef struct VulkanGraphicsReplayLayouts {
 
 typedef struct VulkanGraphicsReplayPipeline {
     uint64_t layout_id;
-    VkDescriptorSetLayout set_layouts[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS];
     uint64_t descriptor_set_layout_ids[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS];
     uint32_t descriptor_set_count;
     VkShaderModule shader_modules[PDOCKER_GPU_GRAPHICS_REPLAY_MAX_SHADER_STAGES];
@@ -27153,11 +27152,6 @@ static void destroy_vulkan_graphics_replay_pipelines(
     for (uint32_t i = 0; i < pipeline_count; ++i) {
         if (pipelines[i].pipeline) vkDestroyPipeline(device, pipelines[i].pipeline, NULL);
         if (pipelines[i].layout) vkDestroyPipelineLayout(device, pipelines[i].layout, NULL);
-        for (uint32_t d = 0; d < PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS; ++d) {
-            if (pipelines[i].set_layouts[d]) {
-                vkDestroyDescriptorSetLayout(device, pipelines[i].set_layouts[d], NULL);
-            }
-        }
         for (uint32_t s = 0; s < PDOCKER_GPU_GRAPHICS_REPLAY_MAX_SHADER_STAGES; ++s) {
             if (pipelines[i].shader_modules[s]) {
                 vkDestroyShaderModule(device, pipelines[i].shader_modules[s], NULL);
@@ -33917,7 +33911,26 @@ static int submit_vulkan_graphics_v6_command_buffer(
     if (diag) diag->stage = "wait-submit-fence";
     vrc = vkWaitForFences(rt->device, 1, &submit_fence, VK_TRUE, timeout_ns);
     if (vrc == VK_TIMEOUT) {
+        /* The submit succeeded, so replay descriptors, buffers, images,
+         * pipelines, command buffers, and the fence may still be referenced by
+         * the graphics queue.  The caller always tears down replay state after
+         * this function returns; wait the queue idle first so timeout handling
+         * cannot turn into an in-flight Vulkan object use-after-free.
+         */
+        if (diag) diag->stage = "wait-submit-timeout-queue-idle";
+        VkResult idle_rc = vkQueueWaitIdle(rt->graphics_queue);
         if (local_fence) vkDestroyFence(rt->device, local_fence, NULL);
+        if (idle_rc != VK_SUCCESS) {
+            if (diag) {
+                diag->vk_result = idle_rc;
+                diag->native_rc = -EIO;
+            }
+            return -EIO;
+        }
+        if (diag) {
+            diag->vk_result = VK_TIMEOUT;
+            diag->native_rc = -ETIMEDOUT;
+        }
         return -ETIMEDOUT;
     }
     if (vrc != VK_SUCCESS) {

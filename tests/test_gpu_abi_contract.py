@@ -7258,6 +7258,36 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("VkPipelineColorBlendAttachmentState blend_attachments[16];", body)
         self.assertNotIn("VkFormat color_formats[16];", body)
 
+    def test_vulkan_graphics_v6_descriptor_set_layouts_have_single_owner(self):
+        executor = GPU_EXECUTOR.read_text()
+        pipeline_struct = executor.split(
+            "typedef struct VulkanGraphicsReplayPipeline {", 1
+        )[1].split("} VulkanGraphicsReplayPipeline;", 1)[0]
+        pipeline_destroy = c_function_body(executor, "destroy_vulkan_graphics_replay_pipelines")
+        layouts_destroy = c_function_body(executor, "destroy_vulkan_graphics_replay_layouts")
+        self.assertNotIn("VkDescriptorSetLayout set_layouts", pipeline_struct)
+        self.assertNotIn("vkDestroyDescriptorSetLayout(device, pipelines[i].set_layouts", pipeline_destroy)
+        self.assertIn(
+            "vkDestroyDescriptorSetLayout(device, layouts->descriptor_set_layouts[i].layout",
+            layouts_destroy,
+        )
+        self.assertIn(
+            "pl->set_layouts[set] = out->descriptor_set_layouts[dsl_index].layout",
+            executor,
+        )
+
+    def test_vulkan_graphics_v6_submit_timeout_waits_idle_before_cleanup(self):
+        executor = GPU_EXECUTOR.read_text()
+        body = c_function_body(executor, "submit_vulkan_graphics_v6_command_buffer")
+        timeout_pos = body.index("if (vrc == VK_TIMEOUT)")
+        idle_pos = body.index("vkQueueWaitIdle(rt->graphics_queue)", timeout_pos)
+        destroy_pos = body.index("vkDestroyFence(rt->device, local_fence, NULL)", timeout_pos)
+        return_pos = body.index("return -ETIMEDOUT;", timeout_pos)
+        self.assertLess(timeout_pos, idle_pos)
+        self.assertLess(idle_pos, destroy_pos)
+        self.assertLess(destroy_pos, return_pos)
+        self.assertIn("cannot turn into an in-flight Vulkan object use-after-free", body)
+
     def test_vulkan_compute_dispatch_executor_work_tables_are_heap_backed_for_v5_width(self):
         executor = GPU_EXECUTOR.read_text()
         body = c_function_body(executor, "run_vulkan_dispatch_fd")
