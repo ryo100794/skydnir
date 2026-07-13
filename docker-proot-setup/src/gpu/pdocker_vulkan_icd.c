@@ -328,7 +328,7 @@ static bool pdocker_vk_color_blend_attachment_state_equal(
 }
 #define PDOCKER_VK_MAX_GRAPHICS_DRAW_OPS PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS
 #define PDOCKER_VK_MAX_GRAPHICS_DESCRIPTOR_BIND_OPS PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS
-#define PDOCKER_VK_MAX_GRAPHICS_RENDERING_OPS 128
+#define PDOCKER_VK_MAX_GRAPHICS_RENDERING_OPS PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS
 #define PDOCKER_VK_MAX_GRAPHICS_COMMAND_OPS PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS
 #define PDOCKER_VK_MAX_GRAPHICS_DYNAMIC_OFFSETS 4096
 #define PDOCKER_VK_MAX_CLEAR_ATTACHMENTS_COMMANDS PDOCKER_GPU_VULKAN_GRAPHICS_V616_MAX_CLEAR_ATTACHMENTS_COMMANDS
@@ -1173,9 +1173,9 @@ typedef struct {
     PdockerVkGraphicsDescriptorBindSnapshot *graphics_descriptor_bind_ops;
     uint32_t graphics_descriptor_bind_op_count;
     uint32_t graphics_descriptor_bind_op_capacity;
-    PdockerVkGraphicsRenderingSnapshot
-        graphics_rendering_ops[PDOCKER_VK_MAX_GRAPHICS_RENDERING_OPS];
+    PdockerVkGraphicsRenderingSnapshot *graphics_rendering_ops;
     uint32_t graphics_rendering_op_count;
+    uint32_t graphics_rendering_op_capacity;
     PdockerVkClearAttachmentsCommandSnapshot
         clear_attachments_command_ops[PDOCKER_VK_MAX_CLEAR_ATTACHMENTS_COMMANDS];
     uint32_t clear_attachments_command_op_count;
@@ -1663,6 +1663,39 @@ static bool command_buffer_reserve_graphics_descriptor_bind_ops(
     return true;
 }
 
+static bool command_buffer_reserve_graphics_rendering_ops(
+        PdockerVkCommandBuffer *cmd,
+        uint32_t extra) {
+    if (!cmd) return false;
+    if (extra == 0) return true;
+    if (cmd->graphics_rendering_op_count > PDOCKER_VK_MAX_GRAPHICS_RENDERING_OPS ||
+        extra > PDOCKER_VK_MAX_GRAPHICS_RENDERING_OPS - cmd->graphics_rendering_op_count) {
+        return false;
+    }
+    uint32_t needed = cmd->graphics_rendering_op_count + extra;
+    if (needed <= cmd->graphics_rendering_op_capacity) return true;
+    uint32_t new_capacity = cmd->graphics_rendering_op_capacity ?
+        cmd->graphics_rendering_op_capacity : 64u;
+    while (new_capacity < needed) {
+        if (new_capacity > PDOCKER_VK_MAX_GRAPHICS_RENDERING_OPS / 2u) {
+            new_capacity = PDOCKER_VK_MAX_GRAPHICS_RENDERING_OPS;
+            break;
+        }
+        new_capacity *= 2u;
+    }
+    if (new_capacity < needed || new_capacity > PDOCKER_VK_MAX_GRAPHICS_RENDERING_OPS) {
+        return false;
+    }
+    PdockerVkGraphicsRenderingSnapshot *new_ops =
+        (PdockerVkGraphicsRenderingSnapshot *)realloc(
+            cmd->graphics_rendering_ops,
+            (size_t)new_capacity * sizeof(*cmd->graphics_rendering_ops));
+    if (!new_ops) return false;
+    cmd->graphics_rendering_ops = new_ops;
+    cmd->graphics_rendering_op_capacity = new_capacity;
+    return true;
+}
+
 static bool command_buffer_reserve_dispatch_ops(PdockerVkCommandBuffer *cmd, uint32_t extra) {
     if (!cmd) return false;
     if (extra == 0) return true;
@@ -1799,6 +1832,10 @@ static void command_buffer_destroy_record_vectors(PdockerVkCommandBuffer *cmd) {
     cmd->graphics_descriptor_bind_ops = NULL;
     cmd->graphics_descriptor_bind_op_count = 0;
     cmd->graphics_descriptor_bind_op_capacity = 0;
+    free(cmd->graphics_rendering_ops);
+    cmd->graphics_rendering_ops = NULL;
+    cmd->graphics_rendering_op_count = 0;
+    cmd->graphics_rendering_op_capacity = 0;
     free(cmd->command_ops);
     cmd->command_ops = NULL;
     cmd->command_op_count = 0;
@@ -1931,8 +1968,9 @@ static bool append_graphics_rendering_snapshot(PdockerVkCommandBuffer *cmd,
                                                uint32_t *snapshot_index_out) {
     if (snapshot_index_out) *snapshot_index_out = UINT32_MAX;
     if (!cmd || !snapshot_index_out) return false;
-    if (cmd->graphics_rendering_op_count >= PDOCKER_VK_MAX_GRAPHICS_RENDERING_OPS) {
+    if (!command_buffer_reserve_graphics_rendering_ops(cmd, 1)) {
         cmd->graphics_unsupported = true;
+        command_buffer_mark_recording_failed(cmd, "graphics-rendering-record-overflow");
         return false;
     }
     uint32_t index = cmd->graphics_rendering_op_count++;
@@ -2052,6 +2090,7 @@ static bool append_secondary_command_buffer(
         !command_buffer_reserve_graphics_descriptor_bind_ops(
             dst,
             src->graphics_descriptor_bind_op_count) ||
+        !command_buffer_reserve_graphics_rendering_ops(dst, src->graphics_rendering_op_count) ||
         !command_buffer_reserve_command_ops(dst, src->command_op_count) ||
         !command_buffer_reserve_graphics_command_ops(dst, src->graphics_command_op_count) ||
         !command_buffer_reserve_push_constant_ops(dst, src->push_constant_op_count)) {
