@@ -5962,7 +5962,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "binding->binding_flags = entry->binding_flags;",
             "VkDescriptorSetLayoutBindingFlagsCreateInfo binding_flags_ci",
             ".pNext = has_binding_flags ? &binding_flags_ci : NULL",
-            "vulkan_graphics_descriptor_binding_flags_enabled(rt, src_binding->binding_flags)",
+            "vulkan_graphics_descriptor_binding_flags_enabled(rt, src_binding->binding_flags, src_binding->descriptor_type)",
         ]:
             self.assertIn(marker, executor)
         v624_validation_body = executor.split("if (is_v624) {", 1)[1].split(
@@ -6206,12 +6206,12 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         self.assertNotIn("if (!set) continue;", bind_body)
         self.assertIn("uint32_t target_set = firstSet + set_i;", untracked_set_body)
-        self.assertIn("if (!set)", untracked_set_body)
+        self.assertIn("if (!set || set->destroyed)", untracked_set_body)
         self.assertIn("cmd->unsupported_descriptor_set_layout = true;", untracked_set_body)
         self.assertIn("descriptor bind uses untracked descriptor set", untracked_set_body)
         self.assertIn("return;", untracked_set_body)
         self.assertLess(
-            untracked_set_body.index("if (!set)"),
+            untracked_set_body.index("if (!set || set->destroyed)"),
             untracked_set_body.index("return;"),
         )
 
@@ -9034,7 +9034,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("descriptor_set_layout_create_info_supported(pCreateInfo, requested_feature_mask)", support_body)
         self.assertIn("fill_descriptor_set_layout_support_pnext((void *)header.pNext, pCreateInfo, requested_feature_mask);", support_body)
         self.assertIn("validate_descriptor_set_layout_pnext(pCreateInfo) != VK_SUCCESS", helper_body)
-        self.assertIn("pCreateInfo->flags != 0", helper_body)
+        self.assertIn("descriptor_layout_flags_supported(pCreateInfo->flags)", helper_body)
         self.assertIn("pCreateInfo->bindingCount > 0 && !pCreateInfo->pBindings", helper_body)
         self.assertIn("descriptor_type_supported_by_v4_transport(binding->descriptorType)", helper_body)
         self.assertIn("descriptor_type_supported_by_v5_object_transport(binding->descriptorType)", helper_body)
@@ -9113,7 +9113,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("set->pool && set->pool != pool", free_body)
         self.assertIn("descriptor_pool_free_set(pool, set)", free_body)
         self.assertNotIn("(void)descriptorPool;", free_body)
-        self.assertIn("const PdockerVkDescriptorSet *set = snapshot_set;", generic_send_body)
+        self.assertIn("const PdockerVkDescriptorSet *snapshot_set = &op->set_snapshots[set_index];", generic_send_body)
+        self.assertIn("const PdockerVkDescriptorSet *live_set", generic_send_body)
+        self.assertIn("descriptor_layout_binding_update_after_bind(layout, i)", generic_send_body)
+        self.assertIn("descriptor_set_live_for_update_after_bind(live_set, layout)", generic_send_body)
         self.assertNotIn("const PdockerVkDescriptorSet *set = live_set ? live_set : snapshot_set;", generic_send_body)
 
 
@@ -9249,7 +9252,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("if (!pCreateInfo || !pSetLayout)", descriptor_layout_body)
         self.assertIn("*pSetLayout = VK_NULL_HANDLE;", descriptor_layout_body)
         self.assertIn("validate_descriptor_set_layout_pnext(pCreateInfo)", descriptor_layout_body)
-        self.assertIn("if (pCreateInfo->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;", descriptor_layout_body)
+        self.assertIn("descriptor_layout_flags_supported(pCreateInfo->flags)", descriptor_layout_body)
+        self.assertIn("VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT", icd)
         self.assertIn("const PdockerVkDevice *dev = (const PdockerVkDevice *)device;", descriptor_layout_body)
         self.assertIn("uint64_t requested_feature_mask = dev ? dev->requested_feature_mask : 0;", descriptor_layout_body)
         self.assertIn("descriptor_set_layout_create_info_supported(pCreateInfo, requested_feature_mask)", descriptor_layout_body)
@@ -9298,7 +9302,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("*pDescriptorPool = VK_NULL_HANDLE;", descriptor_pool_body)
         self.assertIn("pCreateInfo->sType != VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO", descriptor_pool_body)
         self.assertIn("validate_descriptor_pool_create_pnext(pCreateInfo->pNext)", descriptor_pool_body)
-        self.assertIn("pCreateInfo->flags & ~VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT", descriptor_pool_body)
+        self.assertIn("VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT", descriptor_pool_body)
+        self.assertIn("VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT", descriptor_pool_body)
         self.assertIn("pool->flags = pCreateInfo->flags;", descriptor_pool_body)
         self.assertIn("pool->max_sets = pCreateInfo->maxSets;", descriptor_pool_body)
         allocate_sets_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkAllocateDescriptorSets", 1)[1].split(
@@ -10029,7 +10034,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("header_v629->v629.variable_descriptor_count_count", describe_body)
         self.assertIn('"variable_descriptor_counts"', describe_body)
 
-    def test_graphics_descriptor_bind_snapshots_retain_live_handles_without_advertising_update_after_bind(self):
+    def test_graphics_descriptor_bind_snapshots_retain_live_handles_for_update_after_bind(self):
         icd = VULKAN_ICD.read_text()
         snapshot_struct = re.search(
             r"typedef struct \{(?P<body>.*?)\} PdockerVkGraphicsDescriptorBindSnapshot;",
@@ -10067,8 +10072,15 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("copied.set_handles", secondary_body)
 
         collect_body = c_function_body(icd, "collect_graphics_descriptor_entries")
-        self.assertNotIn("set_handles", collect_body)
-        self.assertNotIn("PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT", icd)
+        self.assertIn("set_handles", collect_body)
+        self.assertIn("descriptor_layout_binding_update_after_bind", collect_body)
+        self.assertIn("descriptor_set_live_for_update_after_bind", collect_body)
+        dispatch_body = c_function_body(icd, "send_generic_vulkan_dispatch_op")
+        self.assertIn("set_handles", dispatch_body)
+        self.assertIn("descriptor_layout_binding_update_after_bind", dispatch_body)
+        self.assertIn("descriptor_set_live_for_update_after_bind", dispatch_body)
+        self.assertIn("PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT", icd)
+        self.assertIn("retained_bind_handle_count", icd)
 
     def test_vulkan_descriptor_binding_flags_allow_variable_descriptor_count(self):
         icd = VULKAN_ICD.read_text()
@@ -10078,6 +10090,7 @@ class GpuAbiContractTest(unittest.TestCase):
             (executor, "vulkan_graphics_descriptor_binding_flags_supported"),
         ]:
             helper_body = c_function_body(source, helper_name)
+            self.assertTrue("PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT" in helper_body, helper_name)
             self.assertTrue("PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT" in helper_body, helper_name)
             self.assertTrue("PDOCKER_VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT" in helper_body, helper_name)
             self.assertTrue("PDOCKER_VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT" in helper_body, helper_name)
@@ -10086,14 +10099,24 @@ class GpuAbiContractTest(unittest.TestCase):
                 helper_body,
             )
         enabled_body = c_function_body(executor, "vulkan_graphics_descriptor_binding_flags_enabled")
+        type_gate_body = c_function_body(executor, "vulkan_graphics_descriptor_type_update_after_bind_enabled")
         self.assertIn("descriptorBindingUpdateUnusedWhilePending", enabled_body)
+        self.assertIn("vulkan_graphics_descriptor_type_update_after_bind_enabled(rt, descriptor_type)", enabled_body)
+        self.assertIn("descriptorBindingUniformBufferUpdateAfterBind", type_gate_body)
+        self.assertIn("descriptorBindingSampledImageUpdateAfterBind", type_gate_body)
+        self.assertIn("descriptorBindingStorageImageUpdateAfterBind", type_gate_body)
+        self.assertIn("descriptorBindingStorageBufferUpdateAfterBind", type_gate_body)
+        self.assertIn("descriptorBindingUniformTexelBufferUpdateAfterBind", type_gate_body)
+        self.assertIn("descriptorBindingStorageTexelBufferUpdateAfterBind", type_gate_body)
         self.assertIn("descriptorBindingPartiallyBound", enabled_body)
         self.assertIn("descriptorBindingVariableDescriptorCount", enabled_body)
+        self.assertIn("PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT", enabled_body)
         self.assertIn("PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT", enabled_body)
         self.assertIn("PDOCKER_VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT", enabled_body)
         self.assertIn("PDOCKER_VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT", enabled_body)
         layout_body = c_function_body(executor, "materialize_vulkan_graphics_v6_layouts")
-        self.assertIn("vulkan_graphics_descriptor_binding_flags_enabled(rt, src_binding->binding_flags)", layout_body)
+        self.assertIn("vulkan_graphics_descriptor_binding_flags_enabled(rt, src_binding->binding_flags, src_binding->descriptor_type)", layout_body)
+        self.assertIn("VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT", layout_body)
         self.assertNotIn(
             "src_binding->binding_flags &&\n                !rt->enabled_descriptor_indexing.descriptorBindingPartiallyBound",
             layout_body,
@@ -10101,9 +10124,13 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("descriptorBindingUpdateUnusedWhilePending", executor)
         self.assertIn("descriptorBindingUpdateUnusedWhilePending", icd)
         self.assertIn("PDOCKER_VK_FEATURE_DESCRIPTOR_UPDATE_UNUSED_WHILE_PENDING", icd)
+        self.assertIn("PDOCKER_VK_FEATURE_DESCRIPTOR_STORAGE_BUFFER_UPDATE_AFTER_BIND", icd)
         self.assertIn("PDOCKER_VULKAN_DISABLE_DESCRIPTOR_UPDATE_UNUSED_WHILE_PENDING", icd)
-        self.assertNotIn("PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT", icd)
-        self.assertNotIn("PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT", executor)
+        self.assertIn("PDOCKER_VULKAN_DISABLE_DESCRIPTOR_UPDATE_AFTER_BIND", icd)
+        self.assertIn("PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT", icd)
+        self.assertIn("PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT", executor)
+        descriptor_pool_body = c_function_body(executor, "materialize_vulkan_graphics_v6_descriptors")
+        self.assertIn("VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT", descriptor_pool_body)
 
     def test_vulkan_memory_api_validates_map_ranges_and_type_index(self):
         icd = VULKAN_ICD.read_text()

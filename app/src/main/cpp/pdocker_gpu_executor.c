@@ -100,9 +100,20 @@
 #define PDOCKER_VK_FEATURE_DESCRIPTOR_VARIABLE_COUNT    (1ull << 37)
 #define PDOCKER_VK_FEATURE_DESCRIPTOR_UPDATE_UNUSED_WHILE_PENDING (1ull << 38)
 
+#define PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT 0x00000001u
 #define PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT 0x00000002u
 #define PDOCKER_VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT 0x00000004u
 #define PDOCKER_VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT 0x00000008u
+
+#ifndef VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT
+#define VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT ((VkDescriptorBindingFlagBits)PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT)
+#endif
+#ifndef VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT
+#define VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT ((VkDescriptorSetLayoutCreateFlags)0x00000002u)
+#endif
+#ifndef VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT
+#define VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT ((VkDescriptorPoolCreateFlags)0x00000002u)
+#endif
 
 static int vulkan_graphics_descriptor_binding_flags_supported(uint32_t flags);
 
@@ -2067,6 +2078,12 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             "\"descriptorBindingPartiallyBound\":%u,"
             "\"descriptorBindingVariableDescriptorCount\":%u,"
             "\"descriptorBindingUpdateUnusedWhilePending\":%u,"
+            "\"descriptorBindingUniformBufferUpdateAfterBind\":%u,"
+            "\"descriptorBindingSampledImageUpdateAfterBind\":%u,"
+            "\"descriptorBindingStorageImageUpdateAfterBind\":%u,"
+            "\"descriptorBindingStorageBufferUpdateAfterBind\":%u,"
+            "\"descriptorBindingUniformTexelBufferUpdateAfterBind\":%u,"
+            "\"descriptorBindingStorageTexelBufferUpdateAfterBind\":%u,"
             "\"extendedDynamicState\":%u,"
             "\"extendedDynamicState2\":%u,"
             "\"extendedDynamicState2LogicOp\":%u,"
@@ -2133,6 +2150,12 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             rt ? rt->enabled_descriptor_indexing.descriptorBindingPartiallyBound : 0,
             rt ? rt->enabled_descriptor_indexing.descriptorBindingVariableDescriptorCount : 0,
             rt ? rt->enabled_descriptor_indexing.descriptorBindingUpdateUnusedWhilePending : 0,
+            rt ? rt->enabled_descriptor_indexing.descriptorBindingUniformBufferUpdateAfterBind : 0,
+            rt ? rt->enabled_descriptor_indexing.descriptorBindingSampledImageUpdateAfterBind : 0,
+            rt ? rt->enabled_descriptor_indexing.descriptorBindingStorageImageUpdateAfterBind : 0,
+            rt ? rt->enabled_descriptor_indexing.descriptorBindingStorageBufferUpdateAfterBind : 0,
+            rt ? rt->enabled_descriptor_indexing.descriptorBindingUniformTexelBufferUpdateAfterBind : 0,
+            rt ? rt->enabled_descriptor_indexing.descriptorBindingStorageTexelBufferUpdateAfterBind : 0,
             rt ? rt->enabled_extended_dynamic_state.extendedDynamicState : 0,
             rt ? rt->enabled_extended_dynamic_state2.extendedDynamicState2 : 0,
             rt ? rt->enabled_extended_dynamic_state2.extendedDynamicState2LogicOp : 0,
@@ -13402,6 +13425,24 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     enabled_descriptor_indexing.descriptorBindingUpdateUnusedWhilePending =
         rt->physical_descriptor_indexing.descriptorBindingUpdateUnusedWhilePending ||
         rt->physical_vulkan12.descriptorBindingUpdateUnusedWhilePending;
+    enabled_descriptor_indexing.descriptorBindingUniformBufferUpdateAfterBind =
+        rt->physical_descriptor_indexing.descriptorBindingUniformBufferUpdateAfterBind ||
+        rt->physical_vulkan12.descriptorBindingUniformBufferUpdateAfterBind;
+    enabled_descriptor_indexing.descriptorBindingSampledImageUpdateAfterBind =
+        rt->physical_descriptor_indexing.descriptorBindingSampledImageUpdateAfterBind ||
+        rt->physical_vulkan12.descriptorBindingSampledImageUpdateAfterBind;
+    enabled_descriptor_indexing.descriptorBindingStorageImageUpdateAfterBind =
+        rt->physical_descriptor_indexing.descriptorBindingStorageImageUpdateAfterBind ||
+        rt->physical_vulkan12.descriptorBindingStorageImageUpdateAfterBind;
+    enabled_descriptor_indexing.descriptorBindingStorageBufferUpdateAfterBind =
+        rt->physical_descriptor_indexing.descriptorBindingStorageBufferUpdateAfterBind ||
+        rt->physical_vulkan12.descriptorBindingStorageBufferUpdateAfterBind;
+    enabled_descriptor_indexing.descriptorBindingUniformTexelBufferUpdateAfterBind =
+        rt->physical_descriptor_indexing.descriptorBindingUniformTexelBufferUpdateAfterBind ||
+        rt->physical_vulkan12.descriptorBindingUniformTexelBufferUpdateAfterBind;
+    enabled_descriptor_indexing.descriptorBindingStorageTexelBufferUpdateAfterBind =
+        rt->physical_descriptor_indexing.descriptorBindingStorageTexelBufferUpdateAfterBind ||
+        rt->physical_vulkan12.descriptorBindingStorageTexelBufferUpdateAfterBind;
     enabled_vulkan12.descriptorBindingPartiallyBound =
         rt->physical_vulkan12.descriptorBindingPartiallyBound &&
         enabled_descriptor_indexing.descriptorBindingPartiallyBound;
@@ -13411,11 +13452,35 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     enabled_vulkan12.descriptorBindingUpdateUnusedWhilePending =
         rt->physical_vulkan12.descriptorBindingUpdateUnusedWhilePending &&
         enabled_descriptor_indexing.descriptorBindingUpdateUnusedWhilePending;
+    enabled_vulkan12.descriptorBindingUniformBufferUpdateAfterBind =
+        rt->physical_vulkan12.descriptorBindingUniformBufferUpdateAfterBind &&
+        enabled_descriptor_indexing.descriptorBindingUniformBufferUpdateAfterBind;
+    enabled_vulkan12.descriptorBindingSampledImageUpdateAfterBind =
+        rt->physical_vulkan12.descriptorBindingSampledImageUpdateAfterBind &&
+        enabled_descriptor_indexing.descriptorBindingSampledImageUpdateAfterBind;
+    enabled_vulkan12.descriptorBindingStorageImageUpdateAfterBind =
+        rt->physical_vulkan12.descriptorBindingStorageImageUpdateAfterBind &&
+        enabled_descriptor_indexing.descriptorBindingStorageImageUpdateAfterBind;
+    enabled_vulkan12.descriptorBindingStorageBufferUpdateAfterBind =
+        rt->physical_vulkan12.descriptorBindingStorageBufferUpdateAfterBind &&
+        enabled_descriptor_indexing.descriptorBindingStorageBufferUpdateAfterBind;
+    enabled_vulkan12.descriptorBindingUniformTexelBufferUpdateAfterBind =
+        rt->physical_vulkan12.descriptorBindingUniformTexelBufferUpdateAfterBind &&
+        enabled_descriptor_indexing.descriptorBindingUniformTexelBufferUpdateAfterBind;
+    enabled_vulkan12.descriptorBindingStorageTexelBufferUpdateAfterBind =
+        rt->physical_vulkan12.descriptorBindingStorageTexelBufferUpdateAfterBind &&
+        enabled_descriptor_indexing.descriptorBindingStorageTexelBufferUpdateAfterBind;
     enabled_vulkan12.descriptorIndexing =
         rt->physical_vulkan12.descriptorIndexing &&
         (enabled_vulkan12.descriptorBindingPartiallyBound ||
          enabled_vulkan12.descriptorBindingVariableDescriptorCount ||
-         enabled_vulkan12.descriptorBindingUpdateUnusedWhilePending);
+         enabled_vulkan12.descriptorBindingUpdateUnusedWhilePending ||
+         enabled_vulkan12.descriptorBindingUniformBufferUpdateAfterBind ||
+         enabled_vulkan12.descriptorBindingSampledImageUpdateAfterBind ||
+         enabled_vulkan12.descriptorBindingStorageImageUpdateAfterBind ||
+         enabled_vulkan12.descriptorBindingStorageBufferUpdateAfterBind ||
+         enabled_vulkan12.descriptorBindingUniformTexelBufferUpdateAfterBind ||
+         enabled_vulkan12.descriptorBindingStorageTexelBufferUpdateAfterBind);
     enabled_storage16.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES;
     enabled_storage16.storageBuffer16BitAccess = rt->physical_storage16.storageBuffer16BitAccess;
     enabled_storage16.uniformAndStorageBuffer16BitAccess = rt->physical_storage16.uniformAndStorageBuffer16BitAccess;
@@ -13464,6 +13529,12 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
          enabled_vulkan12.descriptorBindingPartiallyBound ||
          enabled_vulkan12.descriptorBindingVariableDescriptorCount ||
          enabled_vulkan12.descriptorBindingUpdateUnusedWhilePending ||
+         enabled_vulkan12.descriptorBindingUniformBufferUpdateAfterBind ||
+         enabled_vulkan12.descriptorBindingSampledImageUpdateAfterBind ||
+         enabled_vulkan12.descriptorBindingStorageImageUpdateAfterBind ||
+         enabled_vulkan12.descriptorBindingStorageBufferUpdateAfterBind ||
+         enabled_vulkan12.descriptorBindingUniformTexelBufferUpdateAfterBind ||
+         enabled_vulkan12.descriptorBindingStorageTexelBufferUpdateAfterBind ||
          enabled_vulkan12.descriptorIndexing)) {
         enabled_vulkan12.pNext = device_features_pnext;
         device_features_pnext = &enabled_vulkan12;
@@ -13516,7 +13587,13 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     const int descriptor_indexing_available =
         (enabled_descriptor_indexing.descriptorBindingPartiallyBound ||
          enabled_descriptor_indexing.descriptorBindingVariableDescriptorCount ||
-         enabled_descriptor_indexing.descriptorBindingUpdateUnusedWhilePending) &&
+         enabled_descriptor_indexing.descriptorBindingUpdateUnusedWhilePending ||
+         enabled_descriptor_indexing.descriptorBindingUniformBufferUpdateAfterBind ||
+         enabled_descriptor_indexing.descriptorBindingSampledImageUpdateAfterBind ||
+         enabled_descriptor_indexing.descriptorBindingStorageImageUpdateAfterBind ||
+         enabled_descriptor_indexing.descriptorBindingStorageBufferUpdateAfterBind ||
+         enabled_descriptor_indexing.descriptorBindingUniformTexelBufferUpdateAfterBind ||
+         enabled_descriptor_indexing.descriptorBindingStorageTexelBufferUpdateAfterBind) &&
         (rt->api_version >= VK_API_VERSION_1_2 ||
          vulkan_device_extension_supported(rt->physical_device,
                                            VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME));
@@ -13672,7 +13749,13 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     const uint32_t descriptor_indexing_before = enabled_extension_count;
     if ((enabled_descriptor_indexing.descriptorBindingPartiallyBound ||
          enabled_descriptor_indexing.descriptorBindingVariableDescriptorCount ||
-         enabled_descriptor_indexing.descriptorBindingUpdateUnusedWhilePending) &&
+         enabled_descriptor_indexing.descriptorBindingUpdateUnusedWhilePending ||
+         enabled_descriptor_indexing.descriptorBindingUniformBufferUpdateAfterBind ||
+         enabled_descriptor_indexing.descriptorBindingSampledImageUpdateAfterBind ||
+         enabled_descriptor_indexing.descriptorBindingStorageImageUpdateAfterBind ||
+         enabled_descriptor_indexing.descriptorBindingStorageBufferUpdateAfterBind ||
+         enabled_descriptor_indexing.descriptorBindingUniformTexelBufferUpdateAfterBind ||
+         enabled_descriptor_indexing.descriptorBindingStorageTexelBufferUpdateAfterBind) &&
         rt->api_version < VK_API_VERSION_1_2) {
         append_vulkan_device_extension(rt->physical_device,
                                        enabled_extensions,
@@ -19525,6 +19608,12 @@ static void print_capabilities(const char *transport) {
             "\"descriptorBindingPartiallyBound\":%u,"
             "\"descriptorBindingVariableDescriptorCount\":%u,"
             "\"descriptorBindingUpdateUnusedWhilePending\":%u,"
+            "\"descriptorBindingUniformBufferUpdateAfterBind\":%u,"
+            "\"descriptorBindingSampledImageUpdateAfterBind\":%u,"
+            "\"descriptorBindingStorageImageUpdateAfterBind\":%u,"
+            "\"descriptorBindingStorageBufferUpdateAfterBind\":%u,"
+            "\"descriptorBindingUniformTexelBufferUpdateAfterBind\":%u,"
+            "\"descriptorBindingStorageTexelBufferUpdateAfterBind\":%u,"
             "\"indexTypeUint8\":%u,"
             "\"subgroupSize\":%u,"
             "\"subgroupStages\":%u,"
@@ -19591,6 +19680,18 @@ static void print_capabilities(const char *transport) {
                   rt->physical_descriptor_indexing.descriptorBindingVariableDescriptorCount) : 0,
             rt ? (rt->physical_vulkan12.descriptorBindingUpdateUnusedWhilePending ||
                   rt->physical_descriptor_indexing.descriptorBindingUpdateUnusedWhilePending) : 0,
+            rt ? (rt->physical_vulkan12.descriptorBindingUniformBufferUpdateAfterBind ||
+                  rt->physical_descriptor_indexing.descriptorBindingUniformBufferUpdateAfterBind) : 0,
+            rt ? (rt->physical_vulkan12.descriptorBindingSampledImageUpdateAfterBind ||
+                  rt->physical_descriptor_indexing.descriptorBindingSampledImageUpdateAfterBind) : 0,
+            rt ? (rt->physical_vulkan12.descriptorBindingStorageImageUpdateAfterBind ||
+                  rt->physical_descriptor_indexing.descriptorBindingStorageImageUpdateAfterBind) : 0,
+            rt ? (rt->physical_vulkan12.descriptorBindingStorageBufferUpdateAfterBind ||
+                  rt->physical_descriptor_indexing.descriptorBindingStorageBufferUpdateAfterBind) : 0,
+            rt ? (rt->physical_vulkan12.descriptorBindingUniformTexelBufferUpdateAfterBind ||
+                  rt->physical_descriptor_indexing.descriptorBindingUniformTexelBufferUpdateAfterBind) : 0,
+            rt ? (rt->physical_vulkan12.descriptorBindingStorageTexelBufferUpdateAfterBind ||
+                  rt->physical_descriptor_indexing.descriptorBindingStorageTexelBufferUpdateAfterBind) : 0,
             rt ? rt->physical_index_type_uint8.indexTypeUint8 : 0,
             rt ? rt->subgroup_properties.subgroupSize : 0,
             rt ? rt->subgroup_properties.supportedStages : 0,
@@ -19780,6 +19881,12 @@ static void print_vulkan_advertisement_caps(const char *transport) {
             "\"descriptorBindingPartiallyBound\":%u,"
             "\"descriptorBindingVariableDescriptorCount\":%u,"
             "\"descriptorBindingUpdateUnusedWhilePending\":%u,"
+            "\"descriptorBindingUniformBufferUpdateAfterBind\":%u,"
+            "\"descriptorBindingSampledImageUpdateAfterBind\":%u,"
+            "\"descriptorBindingStorageImageUpdateAfterBind\":%u,"
+            "\"descriptorBindingStorageBufferUpdateAfterBind\":%u,"
+            "\"descriptorBindingUniformTexelBufferUpdateAfterBind\":%u,"
+            "\"descriptorBindingStorageTexelBufferUpdateAfterBind\":%u,"
             "\"indexTypeUint8\":%u,"
             "\"extendedDynamicState\":%u,"
             "\"extendedDynamicState2\":%u,"
@@ -19816,6 +19923,18 @@ static void print_vulkan_advertisement_caps(const char *transport) {
                   rt->physical_descriptor_indexing.descriptorBindingVariableDescriptorCount) : 0,
             rt ? (rt->physical_vulkan12.descriptorBindingUpdateUnusedWhilePending ||
                   rt->physical_descriptor_indexing.descriptorBindingUpdateUnusedWhilePending) : 0,
+            rt ? (rt->physical_vulkan12.descriptorBindingUniformBufferUpdateAfterBind ||
+                  rt->physical_descriptor_indexing.descriptorBindingUniformBufferUpdateAfterBind) : 0,
+            rt ? (rt->physical_vulkan12.descriptorBindingSampledImageUpdateAfterBind ||
+                  rt->physical_descriptor_indexing.descriptorBindingSampledImageUpdateAfterBind) : 0,
+            rt ? (rt->physical_vulkan12.descriptorBindingStorageImageUpdateAfterBind ||
+                  rt->physical_descriptor_indexing.descriptorBindingStorageImageUpdateAfterBind) : 0,
+            rt ? (rt->physical_vulkan12.descriptorBindingStorageBufferUpdateAfterBind ||
+                  rt->physical_descriptor_indexing.descriptorBindingStorageBufferUpdateAfterBind) : 0,
+            rt ? (rt->physical_vulkan12.descriptorBindingUniformTexelBufferUpdateAfterBind ||
+                  rt->physical_descriptor_indexing.descriptorBindingUniformTexelBufferUpdateAfterBind) : 0,
+            rt ? (rt->physical_vulkan12.descriptorBindingStorageTexelBufferUpdateAfterBind ||
+                  rt->physical_descriptor_indexing.descriptorBindingStorageTexelBufferUpdateAfterBind) : 0,
             rt ? rt->physical_index_type_uint8.indexTypeUint8 : 0,
             rt ? rt->physical_extended_dynamic_state.extendedDynamicState : 0,
             rt ? rt->physical_extended_dynamic_state2.extendedDynamicState2 : 0,
@@ -27530,15 +27649,47 @@ typedef struct VulkanGraphicsReplayDescriptorBinding {
 } VulkanGraphicsReplayDescriptorBinding;
 
 static int vulkan_graphics_descriptor_binding_flags_supported(uint32_t flags) {
-    return (flags & ~(PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT |
+    return (flags & ~(PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT |
+                      PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT |
                       PDOCKER_VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT |
                       PDOCKER_VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT)) == 0;
 }
 
+static int vulkan_graphics_descriptor_type_update_after_bind_enabled(
+        const VulkanRuntime *rt,
+        VkDescriptorType descriptor_type) {
+    if (!rt) return 0;
+    switch (descriptor_type) {
+        case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
+        case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
+            return rt->enabled_descriptor_indexing.descriptorBindingUniformBufferUpdateAfterBind;
+        case VK_DESCRIPTOR_TYPE_SAMPLER:
+        case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
+        case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
+            return rt->enabled_descriptor_indexing.descriptorBindingSampledImageUpdateAfterBind;
+        case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
+            return rt->enabled_descriptor_indexing.descriptorBindingStorageImageUpdateAfterBind;
+        case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+        case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC:
+            return rt->enabled_descriptor_indexing.descriptorBindingStorageBufferUpdateAfterBind;
+        case VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER:
+            return rt->enabled_descriptor_indexing.descriptorBindingUniformTexelBufferUpdateAfterBind;
+        case VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER:
+            return rt->enabled_descriptor_indexing.descriptorBindingStorageTexelBufferUpdateAfterBind;
+        default:
+            return 0;
+    }
+}
+
 static int vulkan_graphics_descriptor_binding_flags_enabled(
         const VulkanRuntime *rt,
-        uint32_t flags) {
+        uint32_t flags,
+        VkDescriptorType descriptor_type) {
     if (!vulkan_graphics_descriptor_binding_flags_supported(flags)) return 0;
+    if ((flags & PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT) &&
+        !vulkan_graphics_descriptor_type_update_after_bind_enabled(rt, descriptor_type)) {
+        return 0;
+    }
     if ((flags & PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT) &&
         (!rt || !rt->enabled_descriptor_indexing.descriptorBindingUpdateUnusedWhilePending)) {
         return 0;
@@ -27552,6 +27703,12 @@ static int vulkan_graphics_descriptor_binding_flags_enabled(
         return 0;
     }
     return 1;
+}
+
+static int vulkan_graphics_descriptor_binding_update_after_bind(
+        const VulkanGraphicsReplayDescriptorBinding *binding) {
+    return binding &&
+           (binding->binding_flags & PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT) != 0;
 }
 
 static int vulkan_graphics_descriptor_binding_partially_bound(
@@ -27573,6 +27730,19 @@ typedef struct VulkanGraphicsReplayDescriptorSetLayout {
     uint32_t binding_capacity;
     VulkanGraphicsReplayDescriptorBinding *bindings;
 } VulkanGraphicsReplayDescriptorSetLayout;
+
+static int vulkan_graphics_descriptor_layout_has_update_after_bind(
+        const VulkanGraphicsReplayDescriptorSetLayout *layout) {
+    if (!layout) return 0;
+    for (uint32_t i = 0; i < layout->binding_count; ++i) {
+        const VulkanGraphicsReplayDescriptorBinding *binding = &layout->bindings[i];
+        if (binding->descriptor_count > 0 &&
+            vulkan_graphics_descriptor_binding_update_after_bind(binding)) {
+            return 1;
+        }
+    }
+    return 0;
+}
 
 typedef struct VulkanGraphicsReplayPipelineLayout {
     uint64_t layout_id;
@@ -28258,6 +28428,7 @@ fail_scratch:
         VkDescriptorBindingFlags *binding_flags = NULL;
         uint32_t binding_count = 0;
         int has_binding_flags = 0;
+        int has_update_after_bind = 0;
         if (dsl->binding_count > 0) {
             bindings = (VkDescriptorSetLayoutBinding *)calloc(dsl->binding_count, sizeof(bindings[0]));
             binding_flags = (VkDescriptorBindingFlags *)calloc(dsl->binding_count, sizeof(binding_flags[0]));
@@ -28272,7 +28443,7 @@ fail_scratch:
                 rc = -EOPNOTSUPP;
                 goto fail;
             }
-            if (!vulkan_graphics_descriptor_binding_flags_enabled(rt, src_binding->binding_flags)) {
+            if (!vulkan_graphics_descriptor_binding_flags_enabled(rt, src_binding->binding_flags, src_binding->descriptor_type)) {
                 free(binding_flags);
                 free(bindings);
                 rc = -EOPNOTSUPP;
@@ -28286,6 +28457,10 @@ fail_scratch:
             };
             binding_flags[binding_count] = (VkDescriptorBindingFlags)src_binding->binding_flags;
             if (binding_flags[binding_count] != 0) has_binding_flags = 1;
+            if (src_binding->descriptor_count > 0 &&
+                vulkan_graphics_descriptor_binding_update_after_bind(src_binding)) {
+                has_update_after_bind = 1;
+            }
             binding_count++;
         }
         VkDescriptorSetLayoutBindingFlagsCreateInfo binding_flags_ci = {
@@ -28296,6 +28471,7 @@ fail_scratch:
         VkDescriptorSetLayoutCreateInfo dslci = {
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
             .pNext = has_binding_flags ? &binding_flags_ci : NULL,
+            .flags = has_update_after_bind ? VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT : 0,
             .bindingCount = binding_count,
             .pBindings = binding_count ? bindings : NULL,
         };
@@ -31070,11 +31246,15 @@ static int materialize_vulkan_graphics_v6_descriptors(
         uint32_t descriptor_pool_sampled_image_count = 0;
         uint32_t descriptor_pool_storage_image_count = 0;
         uint32_t descriptor_pool_input_attachment_count = 0;
+        VkDescriptorPoolCreateFlags descriptor_pool_flags = 0;
         if (bind_meta) {
             for (uint32_t set = bind_first_set; set < bind_first_set + declared_bind_set_count; ++set) {
                 const VulkanGraphicsReplayDescriptorSetLayout *set_layout =
                     vulkan_graphics_replay_descriptor_set_layout_for_set(layouts, pipeline_layout, set);
                 if (!set_layout) return -EPROTO;
+                if (vulkan_graphics_descriptor_layout_has_update_after_bind(set_layout)) {
+                    descriptor_pool_flags |= VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
+                }
             }
         }
         for (uint32_t d = 0; d < command->descriptor_count; ++d) {
@@ -31174,6 +31354,9 @@ static int materialize_vulkan_graphics_v6_descriptors(
             const VulkanGraphicsReplayDescriptorSetLayout *set_layout =
                 vulkan_graphics_replay_descriptor_set_layout_for_set(layouts, pipeline_layout, set);
             if (!set_layout) return -EPROTO;
+            if (vulkan_graphics_descriptor_layout_has_update_after_bind(set_layout)) {
+                descriptor_pool_flags |= VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
+            }
             for (uint32_t b = 0; b < set_layout->binding_count; ++b) {
                 const VulkanGraphicsReplayDescriptorBinding *binding = &set_layout->bindings[b];
                 int actual_ok = 0;
@@ -31279,6 +31462,7 @@ static int materialize_vulkan_graphics_v6_descriptors(
         }
         VkDescriptorPoolCreateInfo dpci = {
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+            .flags = descriptor_pool_flags,
             .maxSets = bind->set_count,
             .poolSizeCount = pool_size_count,
             .pPoolSizes = pool_sizes,

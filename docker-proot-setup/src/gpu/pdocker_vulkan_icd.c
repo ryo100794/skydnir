@@ -395,10 +395,27 @@ static uint64_t g_generic_dispatch_sequence = 0;
 #define PDOCKER_VK_FEATURE_DESCRIPTOR_PARTIALLY_BOUND   (1ull << 36)
 #define PDOCKER_VK_FEATURE_DESCRIPTOR_VARIABLE_COUNT    (1ull << 37)
 #define PDOCKER_VK_FEATURE_DESCRIPTOR_UPDATE_UNUSED_WHILE_PENDING (1ull << 38)
+#define PDOCKER_VK_FEATURE_DESCRIPTOR_UNIFORM_BUFFER_UPDATE_AFTER_BIND (1ull << 39)
+#define PDOCKER_VK_FEATURE_DESCRIPTOR_SAMPLED_IMAGE_UPDATE_AFTER_BIND (1ull << 40)
+#define PDOCKER_VK_FEATURE_DESCRIPTOR_STORAGE_IMAGE_UPDATE_AFTER_BIND (1ull << 41)
+#define PDOCKER_VK_FEATURE_DESCRIPTOR_STORAGE_BUFFER_UPDATE_AFTER_BIND (1ull << 42)
+#define PDOCKER_VK_FEATURE_DESCRIPTOR_UNIFORM_TEXEL_BUFFER_UPDATE_AFTER_BIND (1ull << 43)
+#define PDOCKER_VK_FEATURE_DESCRIPTOR_STORAGE_TEXEL_BUFFER_UPDATE_AFTER_BIND (1ull << 44)
 
+#define PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT 0x00000001u
 #define PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT 0x00000002u
 #define PDOCKER_VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT 0x00000004u
 #define PDOCKER_VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT 0x00000008u
+
+#ifndef VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT
+#define VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT ((VkDescriptorBindingFlagBits)PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT)
+#endif
+#ifndef VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT
+#define VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT ((VkDescriptorSetLayoutCreateFlags)0x00000002u)
+#endif
+#ifndef VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT
+#define VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT ((VkDescriptorPoolCreateFlags)0x00000002u)
+#endif
 
 struct PdockerVkMemory {
     uint64_t object_id;
@@ -638,6 +655,7 @@ struct PdockerVkDescriptorSetLayout {
     uint32_t *storage_binding_flags;
     PdockerVkSampler **immutable_samplers;
     bool **immutable_sampler_valid;
+    bool update_after_bind_pool;
     bool unsupported_descriptor_array;
     bool unsupported_descriptor_type;
 };
@@ -648,6 +666,8 @@ struct PdockerVkDescriptorSet {
     uint32_t storage_binding_capacity;
     PdockerVkDescriptorBinding **storage_buffers;
     uint32_t *storage_buffer_counts;
+    uint32_t retained_bind_handle_count;
+    bool destroyed;
     bool unsupported_descriptor_array;
     bool unsupported_descriptor_type;
     bool has_image_descriptor;
@@ -1486,6 +1506,15 @@ static bool descriptor_set_clone_snapshot_array(
         const bool *src_used,
         uint32_t count);
 
+static void descriptor_set_retain_bind_handle(PdockerVkDescriptorSet *set);
+static void descriptor_set_release_bind_handle(PdockerVkDescriptorSet *set);
+static bool descriptor_layout_binding_update_after_bind(
+        const PdockerVkDescriptorSetLayout *layout,
+        uint32_t slot);
+static bool descriptor_set_live_for_update_after_bind(
+        const PdockerVkDescriptorSet *set,
+        const PdockerVkDescriptorSetLayout *layout);
+
 static bool descriptor_set_state_alloc(
         PdockerVkDescriptorSet ***handles,
         PdockerVkDescriptorSet **snapshots,
@@ -1524,6 +1553,9 @@ static void descriptor_set_state_release_contents(
         descriptor_set_release_snapshot_array(snapshots, used, capacity);
     }
     if (handles && capacity > 0) {
+        for (uint32_t i = 0; i < capacity; ++i) {
+            descriptor_set_release_bind_handle(handles[i]);
+        }
         memset(handles, 0, sizeof(*handles) * capacity);
     }
 }
@@ -1606,6 +1638,9 @@ static bool dispatch_op_clone_descriptor_state(
         return false;
     }
     memcpy(op->set_handles, src_handles, sizeof(*op->set_handles) * src_capacity);
+    for (uint32_t i = 0; i < src_capacity; ++i) {
+        descriptor_set_retain_bind_handle(op->set_handles[i]);
+    }
     if (!descriptor_set_clone_snapshot_array(op->set_snapshots,
                                              op->set_snapshot_used,
                                              src_snapshots,
@@ -1779,6 +1814,9 @@ static bool graphics_descriptor_bind_snapshot_clone_descriptor_state(
         return false;
     }
     memcpy(dst->set_handles, src_handles, sizeof(*dst->set_handles) * src_capacity);
+    for (uint32_t i = 0; i < src_capacity; ++i) {
+        descriptor_set_retain_bind_handle(dst->set_handles[i]);
+    }
     if (!descriptor_set_clone_snapshot_array(dst->set_snapshots,
                                              dst->set_snapshot_used,
                                              src_snapshots,
@@ -6828,9 +6866,11 @@ static int collect_graphics_descriptor_entries(
     for (uint32_t set_i = 0; set_i < snapshot->descriptor_set_count; ++set_i) {
         uint32_t set_index = snapshot->first_set + set_i;
         if (!snapshot->set_snapshot_used[set_index]) return -EPROTO;
-        const PdockerVkDescriptorSet *set = &snapshot->set_snapshots[set_index];
-        const PdockerVkDescriptorSetLayout *layout = set->layout;
-        if (set->unsupported_descriptor_array || set->unsupported_descriptor_type ||
+        const PdockerVkDescriptorSet *snapshot_set = &snapshot->set_snapshots[set_index];
+        const PdockerVkDescriptorSet *live_set =
+            snapshot->set_handles ? snapshot->set_handles[set_index] : NULL;
+        const PdockerVkDescriptorSetLayout *layout = snapshot_set->layout;
+        if (snapshot_set->unsupported_descriptor_array || snapshot_set->unsupported_descriptor_type ||
             (layout && (layout->unsupported_descriptor_array || layout->unsupported_descriptor_type))) {
             return -EOPNOTSUPP;
         }
@@ -6839,10 +6879,14 @@ static int collect_graphics_descriptor_entries(
         for (uint32_t binding_index = 0; binding_index < binding_limit; ++binding_index) {
             const uint32_t api_binding = descriptor_layout_binding_number(layout, binding_index);
             uint32_t array_limit = layout
-                ? descriptor_set_effective_descriptor_count(set, layout, binding_index)
+                ? descriptor_set_effective_descriptor_count(snapshot_set, layout, binding_index)
                 : PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS;
             if (array_limit == 0 && !layout) array_limit = PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS;
             if (array_limit > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS) return -E2BIG;
+            const PdockerVkDescriptorSet *set = descriptor_layout_binding_update_after_bind(layout, binding_index)
+                ? (descriptor_set_live_for_update_after_bind(live_set, layout) ? live_set : NULL)
+                : snapshot_set;
+            if (!set) return -EPROTO;
             for (uint32_t array_element = 0; array_element < array_limit; ++array_element) {
                 const PdockerVkDescriptorBinding *binding =
                     descriptor_set_binding_slot_const(set, binding_index, array_element);
@@ -10469,8 +10513,39 @@ static VkResult descriptor_set_allocate_storage_with_counts(
 
 static void destroy_descriptor_set_object(PdockerVkDescriptorSet *set) {
     if (!set) return;
+    set->destroyed = true;
+    set->pool = NULL;
     destroy_descriptor_set_storage(set);
-    free(set);
+    if (set->retained_bind_handle_count == 0) {
+        free(set);
+    }
+}
+
+static void descriptor_set_retain_bind_handle(PdockerVkDescriptorSet *set) {
+    if (!set || set->destroyed) return;
+    if (set->retained_bind_handle_count == UINT32_MAX) {
+        set->destroyed = true;
+        return;
+    }
+    set->retained_bind_handle_count++;
+}
+
+static void descriptor_set_release_bind_handle(PdockerVkDescriptorSet *set) {
+    if (!set) return;
+    if (set->retained_bind_handle_count > 0) {
+        set->retained_bind_handle_count--;
+    }
+    if (set->destroyed && set->retained_bind_handle_count == 0) {
+        destroy_descriptor_set_storage(set);
+        free(set);
+    }
+}
+
+static bool descriptor_set_live_for_update_after_bind(
+        const PdockerVkDescriptorSet *set,
+        const PdockerVkDescriptorSetLayout *layout) {
+    return set && !set->destroyed && set->layout == layout &&
+           set->storage_buffers && set->storage_buffer_counts;
 }
 
 static int descriptor_pool_reserve_sets(
@@ -10562,6 +10637,8 @@ static int descriptor_set_clone_for_update(
     shadow->storage_buffers = NULL;
     shadow->storage_buffer_counts = NULL;
     shadow->storage_binding_capacity = 0;
+    shadow->retained_bind_handle_count = 0;
+    shadow->destroyed = false;
     VkResult rc = descriptor_set_allocate_storage_with_counts(
         shadow, binding_capacity, live->storage_buffer_counts);
     if (rc != VK_SUCCESS) return -ENOMEM;
@@ -11774,7 +11851,8 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
     for (uint32_t set_index = 0; set_index < op->set_capacity; ++set_index) {
         if (!op->set_snapshot_used[set_index]) continue;
         const PdockerVkDescriptorSet *snapshot_set = &op->set_snapshots[set_index];
-        const PdockerVkDescriptorSet *set = snapshot_set;
+        const PdockerVkDescriptorSet *live_set =
+            op->set_handles ? op->set_handles[set_index] : NULL;
         const PdockerVkDescriptorSetLayout *layout = snapshot_set->layout;
         const uint32_t binding_limit = descriptor_layout_slot_count(layout);
         for (uint32_t i = 0; i < binding_limit; ++i) {
@@ -11783,6 +11861,10 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
             uint32_t array_limit = layout ? layout->storage_binding_counts[i] : PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS;
             if (array_limit == 0 && !layout) array_limit = PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS;
             if (array_limit > PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS) return -E2BIG;
+            const PdockerVkDescriptorSet *set = descriptor_layout_binding_update_after_bind(layout, i)
+                ? (descriptor_set_live_for_update_after_bind(live_set, layout) ? live_set : NULL)
+                : snapshot_set;
+            if (!set) return -EPROTO;
             for (uint32_t array_element = 0; array_element < array_limit; ++array_element) {
                 PdockerVkDescriptorBinding *binding =
                     descriptor_set_binding_slot((PdockerVkDescriptorSet *)set, i, array_element);
@@ -13995,6 +14077,12 @@ static bool parse_executor_advertisement_caps_json(
     json_read_u32(json, "descriptorBindingPartiallyBound", &caps->descriptor_indexing.descriptorBindingPartiallyBound);
     json_read_u32(json, "descriptorBindingVariableDescriptorCount", &caps->descriptor_indexing.descriptorBindingVariableDescriptorCount);
     json_read_u32(json, "descriptorBindingUpdateUnusedWhilePending", &caps->descriptor_indexing.descriptorBindingUpdateUnusedWhilePending);
+    json_read_u32(json, "descriptorBindingUniformBufferUpdateAfterBind", &caps->descriptor_indexing.descriptorBindingUniformBufferUpdateAfterBind);
+    json_read_u32(json, "descriptorBindingSampledImageUpdateAfterBind", &caps->descriptor_indexing.descriptorBindingSampledImageUpdateAfterBind);
+    json_read_u32(json, "descriptorBindingStorageImageUpdateAfterBind", &caps->descriptor_indexing.descriptorBindingStorageImageUpdateAfterBind);
+    json_read_u32(json, "descriptorBindingStorageBufferUpdateAfterBind", &caps->descriptor_indexing.descriptorBindingStorageBufferUpdateAfterBind);
+    json_read_u32(json, "descriptorBindingUniformTexelBufferUpdateAfterBind", &caps->descriptor_indexing.descriptorBindingUniformTexelBufferUpdateAfterBind);
+    json_read_u32(json, "descriptorBindingStorageTexelBufferUpdateAfterBind", &caps->descriptor_indexing.descriptorBindingStorageTexelBufferUpdateAfterBind);
     json_read_u32(json, "indexTypeUint8", &caps->index_type_uint8.indexTypeUint8);
     if (json_read_u32(json, "timelineSemaphore", &value)) caps->timeline_semaphore = value != 0;
     if (json_read_u32(json, "synchronization2", &value)) caps->synchronization2 = value != 0;
@@ -14487,6 +14575,51 @@ static VkBool32 advertised_descriptor_binding_update_unused_while_pending(void) 
     return caps->descriptor_indexing.descriptorBindingUpdateUnusedWhilePending
         ? VK_TRUE
         : VK_FALSE;
+}
+
+static VkBool32 advertised_descriptor_binding_uniform_buffer_update_after_bind(void) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+    if (!caps || env_disabled("PDOCKER_VULKAN_DISABLE_DESCRIPTOR_UPDATE_AFTER_BIND")) return VK_FALSE;
+    return caps->descriptor_indexing.descriptorBindingUniformBufferUpdateAfterBind ? VK_TRUE : VK_FALSE;
+}
+
+static VkBool32 advertised_descriptor_binding_sampled_image_update_after_bind(void) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+    if (!caps || env_disabled("PDOCKER_VULKAN_DISABLE_DESCRIPTOR_UPDATE_AFTER_BIND")) return VK_FALSE;
+    return caps->descriptor_indexing.descriptorBindingSampledImageUpdateAfterBind ? VK_TRUE : VK_FALSE;
+}
+
+static VkBool32 advertised_descriptor_binding_storage_image_update_after_bind(void) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+    if (!caps || env_disabled("PDOCKER_VULKAN_DISABLE_DESCRIPTOR_UPDATE_AFTER_BIND")) return VK_FALSE;
+    return caps->descriptor_indexing.descriptorBindingStorageImageUpdateAfterBind ? VK_TRUE : VK_FALSE;
+}
+
+static VkBool32 advertised_descriptor_binding_storage_buffer_update_after_bind(void) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+    if (!caps || env_disabled("PDOCKER_VULKAN_DISABLE_DESCRIPTOR_UPDATE_AFTER_BIND")) return VK_FALSE;
+    return caps->descriptor_indexing.descriptorBindingStorageBufferUpdateAfterBind ? VK_TRUE : VK_FALSE;
+}
+
+static VkBool32 advertised_descriptor_binding_uniform_texel_buffer_update_after_bind(void) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+    if (!caps || env_disabled("PDOCKER_VULKAN_DISABLE_DESCRIPTOR_UPDATE_AFTER_BIND")) return VK_FALSE;
+    return caps->descriptor_indexing.descriptorBindingUniformTexelBufferUpdateAfterBind ? VK_TRUE : VK_FALSE;
+}
+
+static VkBool32 advertised_descriptor_binding_storage_texel_buffer_update_after_bind(void) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+    if (!caps || env_disabled("PDOCKER_VULKAN_DISABLE_DESCRIPTOR_UPDATE_AFTER_BIND")) return VK_FALSE;
+    return caps->descriptor_indexing.descriptorBindingStorageTexelBufferUpdateAfterBind ? VK_TRUE : VK_FALSE;
+}
+
+static VkBool32 advertised_descriptor_update_after_bind_any(void) {
+    return advertised_descriptor_binding_uniform_buffer_update_after_bind() ||
+           advertised_descriptor_binding_sampled_image_update_after_bind() ||
+           advertised_descriptor_binding_storage_image_update_after_bind() ||
+           advertised_descriptor_binding_storage_buffer_update_after_bind() ||
+           advertised_descriptor_binding_uniform_texel_buffer_update_after_bind() ||
+           advertised_descriptor_binding_storage_texel_buffer_update_after_bind();
 }
 
 static VkBool32 advertised_sampler_anisotropy(void) {
@@ -15079,9 +15212,16 @@ static void fill_pnext_features(void *pNext) {
                     p->shaderFloat16 = caps->float16_int8.shaderFloat16;
                     p->shaderInt8 = disabled ? VK_FALSE : caps->float16_int8.shaderInt8;
                     p->descriptorBindingUpdateUnusedWhilePending = advertised_descriptor_binding_update_unused_while_pending();
+                    p->descriptorBindingUniformBufferUpdateAfterBind = advertised_descriptor_binding_uniform_buffer_update_after_bind();
+                    p->descriptorBindingSampledImageUpdateAfterBind = advertised_descriptor_binding_sampled_image_update_after_bind();
+                    p->descriptorBindingStorageImageUpdateAfterBind = advertised_descriptor_binding_storage_image_update_after_bind();
+                    p->descriptorBindingStorageBufferUpdateAfterBind = advertised_descriptor_binding_storage_buffer_update_after_bind();
+                    p->descriptorBindingUniformTexelBufferUpdateAfterBind = advertised_descriptor_binding_uniform_texel_buffer_update_after_bind();
+                    p->descriptorBindingStorageTexelBufferUpdateAfterBind = advertised_descriptor_binding_storage_texel_buffer_update_after_bind();
                     p->descriptorBindingPartiallyBound = advertised_descriptor_binding_partially_bound();
                     p->descriptorBindingVariableDescriptorCount = advertised_descriptor_binding_variable_descriptor_count();
                     p->descriptorIndexing = p->descriptorBindingUpdateUnusedWhilePending ||
+                                            advertised_descriptor_update_after_bind_any() ||
                                             p->descriptorBindingPartiallyBound ||
                                             p->descriptorBindingVariableDescriptorCount;
                 } else {
@@ -15092,9 +15232,16 @@ static void fill_pnext_features(void *pNext) {
                     p->shaderFloat16 = VK_FALSE;
                     p->shaderInt8 = storage8;
                     p->descriptorBindingUpdateUnusedWhilePending = advertised_descriptor_binding_update_unused_while_pending();
+                    p->descriptorBindingUniformBufferUpdateAfterBind = advertised_descriptor_binding_uniform_buffer_update_after_bind();
+                    p->descriptorBindingSampledImageUpdateAfterBind = advertised_descriptor_binding_sampled_image_update_after_bind();
+                    p->descriptorBindingStorageImageUpdateAfterBind = advertised_descriptor_binding_storage_image_update_after_bind();
+                    p->descriptorBindingStorageBufferUpdateAfterBind = advertised_descriptor_binding_storage_buffer_update_after_bind();
+                    p->descriptorBindingUniformTexelBufferUpdateAfterBind = advertised_descriptor_binding_uniform_texel_buffer_update_after_bind();
+                    p->descriptorBindingStorageTexelBufferUpdateAfterBind = advertised_descriptor_binding_storage_texel_buffer_update_after_bind();
                     p->descriptorBindingPartiallyBound = advertised_descriptor_binding_partially_bound();
                     p->descriptorBindingVariableDescriptorCount = advertised_descriptor_binding_variable_descriptor_count();
                     p->descriptorIndexing = p->descriptorBindingUpdateUnusedWhilePending ||
+                                            advertised_descriptor_update_after_bind_any() ||
                                             p->descriptorBindingPartiallyBound ||
                                             p->descriptorBindingVariableDescriptorCount;
                 }
@@ -15182,6 +15329,12 @@ static void fill_pnext_features(void *pNext) {
                 VkPhysicalDeviceDescriptorIndexingFeatures *p = (VkPhysicalDeviceDescriptorIndexingFeatures *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
                 p->descriptorBindingUpdateUnusedWhilePending = advertised_descriptor_binding_update_unused_while_pending();
+                p->descriptorBindingUniformBufferUpdateAfterBind = advertised_descriptor_binding_uniform_buffer_update_after_bind();
+                p->descriptorBindingSampledImageUpdateAfterBind = advertised_descriptor_binding_sampled_image_update_after_bind();
+                p->descriptorBindingStorageImageUpdateAfterBind = advertised_descriptor_binding_storage_image_update_after_bind();
+                p->descriptorBindingStorageBufferUpdateAfterBind = advertised_descriptor_binding_storage_buffer_update_after_bind();
+                p->descriptorBindingUniformTexelBufferUpdateAfterBind = advertised_descriptor_binding_uniform_texel_buffer_update_after_bind();
+                p->descriptorBindingStorageTexelBufferUpdateAfterBind = advertised_descriptor_binding_storage_texel_buffer_update_after_bind();
                 p->descriptorBindingPartiallyBound = advertised_descriptor_binding_partially_bound();
                 p->descriptorBindingVariableDescriptorCount = advertised_descriptor_binding_variable_descriptor_count();
                 break;
@@ -15405,9 +15558,16 @@ static bool vulkan12_feature_request_supported(
     supported.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
     fill_pnext_features(&supported);
     supported.descriptorBindingUpdateUnusedWhilePending = advertised_descriptor_binding_update_unused_while_pending();
+    supported.descriptorBindingUniformBufferUpdateAfterBind = advertised_descriptor_binding_uniform_buffer_update_after_bind();
+    supported.descriptorBindingSampledImageUpdateAfterBind = advertised_descriptor_binding_sampled_image_update_after_bind();
+    supported.descriptorBindingStorageImageUpdateAfterBind = advertised_descriptor_binding_storage_image_update_after_bind();
+    supported.descriptorBindingStorageBufferUpdateAfterBind = advertised_descriptor_binding_storage_buffer_update_after_bind();
+    supported.descriptorBindingUniformTexelBufferUpdateAfterBind = advertised_descriptor_binding_uniform_texel_buffer_update_after_bind();
+    supported.descriptorBindingStorageTexelBufferUpdateAfterBind = advertised_descriptor_binding_storage_texel_buffer_update_after_bind();
     supported.descriptorBindingPartiallyBound = advertised_descriptor_binding_partially_bound();
     supported.descriptorBindingVariableDescriptorCount = advertised_descriptor_binding_variable_descriptor_count();
     supported.descriptorIndexing = supported.descriptorBindingUpdateUnusedWhilePending ||
+                                   advertised_descriptor_update_after_bind_any() ||
                                    supported.descriptorBindingPartiallyBound ||
                                    supported.descriptorBindingVariableDescriptorCount;
     PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, samplerMirrorClampToEdge);
@@ -15468,6 +15628,12 @@ static bool descriptor_indexing_feature_request_supported(
     memset(&supported, 0, sizeof(supported));
     supported.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
     supported.descriptorBindingUpdateUnusedWhilePending = advertised_descriptor_binding_update_unused_while_pending();
+    supported.descriptorBindingUniformBufferUpdateAfterBind = advertised_descriptor_binding_uniform_buffer_update_after_bind();
+    supported.descriptorBindingSampledImageUpdateAfterBind = advertised_descriptor_binding_sampled_image_update_after_bind();
+    supported.descriptorBindingStorageImageUpdateAfterBind = advertised_descriptor_binding_storage_image_update_after_bind();
+    supported.descriptorBindingStorageBufferUpdateAfterBind = advertised_descriptor_binding_storage_buffer_update_after_bind();
+    supported.descriptorBindingUniformTexelBufferUpdateAfterBind = advertised_descriptor_binding_uniform_texel_buffer_update_after_bind();
+    supported.descriptorBindingStorageTexelBufferUpdateAfterBind = advertised_descriptor_binding_storage_texel_buffer_update_after_bind();
     supported.descriptorBindingPartiallyBound = advertised_descriptor_binding_partially_bound();
     supported.descriptorBindingVariableDescriptorCount = advertised_descriptor_binding_variable_descriptor_count();
 #define CHECK_DESCRIPTOR_INDEXING_FEATURE(field) PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, field)
@@ -15760,6 +15926,12 @@ static uint64_t feature_mask_from_pnext_chain(const void *pNext) {
                 if (p->shaderFloat16) mask |= PDOCKER_VK_FEATURE_SHADER_FLOAT16;
                 if (p->shaderInt8) mask |= PDOCKER_VK_FEATURE_SHADER_INT8;
                 if (p->descriptorBindingUpdateUnusedWhilePending) mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_UPDATE_UNUSED_WHILE_PENDING;
+                if (p->descriptorBindingUniformBufferUpdateAfterBind) mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_UNIFORM_BUFFER_UPDATE_AFTER_BIND;
+                if (p->descriptorBindingSampledImageUpdateAfterBind) mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_SAMPLED_IMAGE_UPDATE_AFTER_BIND;
+                if (p->descriptorBindingStorageImageUpdateAfterBind) mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_STORAGE_IMAGE_UPDATE_AFTER_BIND;
+                if (p->descriptorBindingStorageBufferUpdateAfterBind) mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_STORAGE_BUFFER_UPDATE_AFTER_BIND;
+                if (p->descriptorBindingUniformTexelBufferUpdateAfterBind) mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_UNIFORM_TEXEL_BUFFER_UPDATE_AFTER_BIND;
+                if (p->descriptorBindingStorageTexelBufferUpdateAfterBind) mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_STORAGE_TEXEL_BUFFER_UPDATE_AFTER_BIND;
                 if (p->descriptorBindingPartiallyBound) mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_PARTIALLY_BOUND;
                 if (p->descriptorBindingVariableDescriptorCount) mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_VARIABLE_COUNT;
                 if (p->bufferDeviceAddress) mask |= PDOCKER_VK_FEATURE_BUFFER_DEVICE_ADDRESS;
@@ -15814,6 +15986,12 @@ static uint64_t feature_mask_from_pnext_chain(const void *pNext) {
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES: {
                 const VkPhysicalDeviceDescriptorIndexingFeatures *p = (const VkPhysicalDeviceDescriptorIndexingFeatures *)node;
                 if (p->descriptorBindingUpdateUnusedWhilePending) mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_UPDATE_UNUSED_WHILE_PENDING;
+                if (p->descriptorBindingUniformBufferUpdateAfterBind) mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_UNIFORM_BUFFER_UPDATE_AFTER_BIND;
+                if (p->descriptorBindingSampledImageUpdateAfterBind) mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_SAMPLED_IMAGE_UPDATE_AFTER_BIND;
+                if (p->descriptorBindingStorageImageUpdateAfterBind) mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_STORAGE_IMAGE_UPDATE_AFTER_BIND;
+                if (p->descriptorBindingStorageBufferUpdateAfterBind) mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_STORAGE_BUFFER_UPDATE_AFTER_BIND;
+                if (p->descriptorBindingUniformTexelBufferUpdateAfterBind) mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_UNIFORM_TEXEL_BUFFER_UPDATE_AFTER_BIND;
+                if (p->descriptorBindingStorageTexelBufferUpdateAfterBind) mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_STORAGE_TEXEL_BUFFER_UPDATE_AFTER_BIND;
                 if (p->descriptorBindingPartiallyBound) mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_PARTIALLY_BOUND;
                 if (p->descriptorBindingVariableDescriptorCount) mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_VARIABLE_COUNT;
                 break;
@@ -16892,9 +17070,37 @@ typedef struct PdockerVkDescriptorSetLayoutBindingFlagsCreateInfoCompat {
 } PdockerVkDescriptorSetLayoutBindingFlagsCreateInfoCompat;
 
 static bool descriptor_binding_flags_supported(uint32_t flags) {
-    return (flags & ~(PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT |
+    return (flags & ~(PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT |
+                      PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT |
                       PDOCKER_VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT |
                       PDOCKER_VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT)) == 0;
+}
+
+static uint64_t descriptor_update_after_bind_feature_mask_for_type(VkDescriptorType type) {
+    switch (type) {
+        case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
+        case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
+            return PDOCKER_VK_FEATURE_DESCRIPTOR_UNIFORM_BUFFER_UPDATE_AFTER_BIND;
+        case VK_DESCRIPTOR_TYPE_SAMPLER:
+        case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
+        case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
+            return PDOCKER_VK_FEATURE_DESCRIPTOR_SAMPLED_IMAGE_UPDATE_AFTER_BIND;
+        case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
+            return PDOCKER_VK_FEATURE_DESCRIPTOR_STORAGE_IMAGE_UPDATE_AFTER_BIND;
+        case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+        case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC:
+            return PDOCKER_VK_FEATURE_DESCRIPTOR_STORAGE_BUFFER_UPDATE_AFTER_BIND;
+        case VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER:
+            return PDOCKER_VK_FEATURE_DESCRIPTOR_UNIFORM_TEXEL_BUFFER_UPDATE_AFTER_BIND;
+        case VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER:
+            return PDOCKER_VK_FEATURE_DESCRIPTOR_STORAGE_TEXEL_BUFFER_UPDATE_AFTER_BIND;
+        default:
+            return 0;
+    }
+}
+
+static bool descriptor_layout_flags_supported(VkDescriptorSetLayoutCreateFlags flags) {
+    return (flags & ~VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT) == 0;
 }
 
 static uint32_t descriptor_set_layout_binding_flags_for_create_info(
@@ -16938,6 +17144,13 @@ static bool descriptor_layout_binding_variable_descriptor_count(
         uint32_t slot) {
     return (descriptor_layout_binding_flags(layout, slot) &
             PDOCKER_VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT) != 0;
+}
+
+static bool descriptor_layout_binding_update_after_bind(
+        const PdockerVkDescriptorSetLayout *layout,
+        uint32_t slot) {
+    return (descriptor_layout_binding_flags(layout, slot) &
+            PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT) != 0;
 }
 
 static int descriptor_layout_variable_descriptor_count_slot(
@@ -18466,7 +18679,8 @@ static bool descriptor_set_layout_compatible(
             expected->storage_binding_types[i] != actual->storage_binding_types[i] ||
             expected->storage_binding_counts[i] != actual->storage_binding_counts[i] ||
             expected->storage_binding_stage_flags[i] != actual->storage_binding_stage_flags[i] ||
-            expected->storage_binding_flags[i] != actual->storage_binding_flags[i]) {
+            expected->storage_binding_flags[i] != actual->storage_binding_flags[i] ||
+            expected->update_after_bind_pool != actual->update_after_bind_pool) {
             return false;
         }
         uint32_t count = expected->storage_binding_counts[i];
@@ -18491,7 +18705,7 @@ static bool descriptor_set_layout_create_info_supported(
         uint64_t requested_feature_mask) {
     if (!pCreateInfo) return false;
     if (validate_descriptor_set_layout_pnext(pCreateInfo) != VK_SUCCESS) return false;
-    if (pCreateInfo->flags != 0) return false;
+    if (!descriptor_layout_flags_supported(pCreateInfo->flags)) return false;
     if (pCreateInfo->bindingCount > PDOCKER_VK_MAX_DESCRIPTOR_BINDING_SLOTS) return false;
     if (pCreateInfo->bindingCount > 0 && !pCreateInfo->pBindings) return false;
     bool saw_variable_descriptor_count = false;
@@ -18516,6 +18730,15 @@ static bool descriptor_set_layout_create_info_supported(
         if ((binding_flags & PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT) &&
             (requested_feature_mask & PDOCKER_VK_FEATURE_DESCRIPTOR_UPDATE_UNUSED_WHILE_PENDING) == 0) {
             return false;
+        }
+        if (binding_flags & PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT) {
+            uint64_t update_after_bind_feature =
+                descriptor_update_after_bind_feature_mask_for_type(binding->descriptorType);
+            if ((pCreateInfo->flags & VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT) == 0 ||
+                update_after_bind_feature == 0 ||
+                (requested_feature_mask & update_after_bind_feature) == 0) {
+                return false;
+            }
         }
         if ((binding_flags & PDOCKER_VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT) &&
             (requested_feature_mask & PDOCKER_VK_FEATURE_DESCRIPTOR_PARTIALLY_BOUND) == 0) {
@@ -18594,7 +18817,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorSetLayout(
     *pSetLayout = VK_NULL_HANDLE;
     VkResult pnext_rc = validate_descriptor_set_layout_pnext(pCreateInfo);
     if (pnext_rc != VK_SUCCESS) return pnext_rc;
-    if (pCreateInfo->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;
+    if (!descriptor_layout_flags_supported(pCreateInfo->flags)) return VK_ERROR_FEATURE_NOT_PRESENT;
     const PdockerVkDevice *dev = (const PdockerVkDevice *)device;
     uint64_t requested_feature_mask = dev ? dev->requested_feature_mask : 0;
     if (!descriptor_set_layout_create_info_supported(pCreateInfo, requested_feature_mask)) {
@@ -18605,6 +18828,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorSetLayout(
     PdockerVkDescriptorSetLayout *layout = pdocker_alloc_handle(sizeof(*layout));
     if (!layout) return VK_ERROR_OUT_OF_HOST_MEMORY;
     layout->layout_id = next_vulkan_object_generation();
+    layout->update_after_bind_pool =
+        (pCreateInfo->flags & VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT) != 0;
     VkResult result = descriptor_set_layout_allocate_storage(
         layout, pCreateInfo->bindingCount ? pCreateInfo->bindingCount : 1u);
     if (result != VK_SUCCESS) {
@@ -18856,7 +19081,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorPool(
     }
     VkResult pnext_rc = validate_descriptor_pool_create_pnext(pCreateInfo->pNext);
     if (pnext_rc != VK_SUCCESS) return pnext_rc;
-    if ((pCreateInfo->flags & ~VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT) != 0) {
+    if ((pCreateInfo->flags & ~(VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT |
+                                 VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT)) != 0) {
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }
     PdockerVkDescriptorPool *pool = pdocker_alloc_handle(sizeof(*pool));
@@ -18978,6 +19204,17 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateDescriptorSets(
                     pDescriptorSets[j] = VK_NULL_HANDLE;
                 }
                 return VK_ERROR_INITIALIZATION_FAILED;
+            }
+            if (set->layout->update_after_bind_pool &&
+                (pool->flags & VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT) == 0) {
+                free(set);
+                for (uint32_t j = 0; j < i; ++j) {
+                    PdockerVkDescriptorSet *previous =
+                        pdocker_vk_descriptor_set_from_handle(pDescriptorSets[j]);
+                    descriptor_pool_free_set(pool, previous);
+                    pDescriptorSets[j] = VK_NULL_HANDLE;
+                }
+                return VK_ERROR_FEATURE_NOT_PRESENT;
             }
         }
         set->pool = pool;
@@ -23765,7 +24002,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
                 set_i >= target_set_capacity - firstSet) break;
             PdockerVkDescriptorSet *set = pdocker_vk_descriptor_set_from_handle(pDescriptorSets[set_i]);
             uint32_t target_set = firstSet + set_i;
-            if (!set) {
+            if (!set || set->destroyed) {
                 cmd->unsupported_descriptor_set_layout = true;
                 if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
                     fprintf(stderr,
@@ -23805,8 +24042,11 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
                 (set->layout && set->layout->unsupported_descriptor_type)) {
                 cmd->unsupported_descriptor_set_layout = true;
             }
+            descriptor_set_release_bind_handle(target_set_handles[target_set]);
             target_set_handles[target_set] = set;
+            descriptor_set_retain_bind_handle(set);
             if (descriptor_set_clone_snapshot(set, &target_set_snapshots[target_set]) != 0) {
+                descriptor_set_release_bind_handle(target_set_handles[target_set]);
                 target_set_handles[target_set] = NULL;
                 target_set_used[target_set] = false;
                 cmd->unsupported_descriptor_set_layout = true;

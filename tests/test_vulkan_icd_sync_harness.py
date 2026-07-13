@@ -1402,5 +1402,101 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
+    def test_descriptor_update_after_bind_requires_feature_layout_and_pool_flags(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            int main(void) {{
+                unsetenv("PDOCKER_GPU_QUEUE_SOCKET");
+
+                PdockerVkDevice device;
+                memset(&device, 0, sizeof(device));
+                device.requested_feature_mask = PDOCKER_VK_FEATURE_DESCRIPTOR_STORAGE_BUFFER_UPDATE_AFTER_BIND;
+
+                VkDescriptorSetLayoutBinding binding;
+                memset(&binding, 0, sizeof(binding));
+                binding.binding = 0;
+                binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+                binding.descriptorCount = 1;
+                binding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+                VkDescriptorBindingFlags binding_flags = VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT;
+                VkDescriptorSetLayoutBindingFlagsCreateInfo flags_info;
+                memset(&flags_info, 0, sizeof(flags_info));
+                flags_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO;
+                flags_info.bindingCount = 1;
+                flags_info.pBindingFlags = &binding_flags;
+
+                VkDescriptorSetLayoutCreateInfo layout_info;
+                memset(&layout_info, 0, sizeof(layout_info));
+                layout_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+                layout_info.pNext = &flags_info;
+                layout_info.bindingCount = 1;
+                layout_info.pBindings = &binding;
+
+                VkDescriptorSetLayout layout = VK_NULL_HANDLE;
+                if (vkCreateDescriptorSetLayout(VK_NULL_HANDLE, &layout_info, NULL, &layout) != VK_ERROR_FEATURE_NOT_PRESENT) {{
+                    fprintf(stderr, "UAB layout without requested feature/layout flag unexpectedly succeeded\\n");
+                    return 2;
+                }}
+                if (vkCreateDescriptorSetLayout((VkDevice)&device, &layout_info, NULL, &layout) != VK_ERROR_FEATURE_NOT_PRESENT) {{
+                    fprintf(stderr, "UAB layout without layout pool flag unexpectedly succeeded\\n");
+                    return 3;
+                }}
+
+                layout_info.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
+                if (vkCreateDescriptorSetLayout((VkDevice)&device, &layout_info, NULL, &layout) != VK_SUCCESS || !layout) {{
+                    fprintf(stderr, "UAB layout with feature and layout flag failed\\n");
+                    return 4;
+                }}
+
+                VkDescriptorPoolCreateInfo pool_info;
+                memset(&pool_info, 0, sizeof(pool_info));
+                pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+                pool_info.maxSets = 1;
+                VkDescriptorPool ordinary_pool = VK_NULL_HANDLE;
+                if (vkCreateDescriptorPool((VkDevice)&device, &pool_info, NULL, &ordinary_pool) != VK_SUCCESS || !ordinary_pool) {{
+                    fprintf(stderr, "ordinary descriptor pool create failed\\n");
+                    return 5;
+                }}
+
+                VkDescriptorSetAllocateInfo alloc_info;
+                memset(&alloc_info, 0, sizeof(alloc_info));
+                alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+                alloc_info.descriptorPool = ordinary_pool;
+                alloc_info.descriptorSetCount = 1;
+                alloc_info.pSetLayouts = &layout;
+                VkDescriptorSet set_handle = VK_NULL_HANDLE;
+                if (vkAllocateDescriptorSets((VkDevice)&device, &alloc_info, &set_handle) != VK_ERROR_FEATURE_NOT_PRESENT) {{
+                    fprintf(stderr, "UAB set allocated from ordinary pool\\n");
+                    return 6;
+                }}
+                vkDestroyDescriptorPool((VkDevice)&device, ordinary_pool, NULL);
+
+                pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
+                VkDescriptorPool uab_pool = VK_NULL_HANDLE;
+                if (vkCreateDescriptorPool((VkDevice)&device, &pool_info, NULL, &uab_pool) != VK_SUCCESS || !uab_pool) {{
+                    fprintf(stderr, "UAB descriptor pool create failed\\n");
+                    return 7;
+                }}
+                alloc_info.descriptorPool = uab_pool;
+                if (vkAllocateDescriptorSets((VkDevice)&device, &alloc_info, &set_handle) != VK_SUCCESS || !set_handle) {{
+                    fprintf(stderr, "UAB set allocation from UAB pool failed\\n");
+                    return 8;
+                }}
+                vkDestroyDescriptorPool((VkDevice)&device, uab_pool, NULL);
+                vkDestroyDescriptorSetLayout((VkDevice)&device, layout, NULL);
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
