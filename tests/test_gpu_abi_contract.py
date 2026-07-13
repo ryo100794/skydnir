@@ -4524,13 +4524,39 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("flags & pdocker_vk_supported_dependency_flags()", icd_transport)
         self.assertIn("flags) & vulkan_graphics_v6_supported_dependency_flags()", executor_transport)
 
-        self.assertIn("dependencyFlags & ~pdocker_vk_supported_dependency_flags()", icd)
-        self.assertIn("dependency_flags & ~pdocker_vk_supported_dependency_flags()", icd)
+        self.assertIn("pdocker_vk_accepted_dependency_flags", icd)
+        self.assertIn("pdocker_vk_noop_dependency_flags", icd)
+        self.assertIn("pdocker_vk_dependency_flags_supported_for_queue_family_state", icd)
         self.assertIn("command->flags & ~vulkan_graphics_v6_supported_dependency_flags()", executor)
         self.assertIn("vulkan_graphics_v6_transport_dependency_flags(command->flags)", executor)
         self.assertNotIn("command->flags & VK_DEPENDENCY_BY_REGION_BIT", executor)
         self.assertNotIn("dependencyFlags & ~VK_DEPENDENCY_BY_REGION_BIT", icd)
         self.assertNotIn("dependency_flags & ~VK_DEPENDENCY_BY_REGION_BIT", icd)
+
+    def test_vulkan_queue_family_all_stages_dependency_flag_is_noop_only_without_transfer(self):
+        icd = VULKAN_ICD.read_text()
+        noop_body = c_function_body(icd, "pdocker_vk_noop_dependency_flags")
+        accepted_body = c_function_body(icd, "pdocker_vk_accepted_dependency_flags")
+        support_body = c_function_body(icd, "pdocker_vk_dependency_flags_supported_for_queue_family_state")
+        queue_body = c_function_body(icd, "pdocker_vk_queue_family_barrier_is_ownership_transfer")
+        legacy_body = c_function_body(icd, "legacy_pipeline_barrier_inputs_unsupported")
+        dependency_body = c_function_body(icd, "dependency_info_unsupported_reason")
+
+        self.assertIn("VK_DEPENDENCY_QUEUE_FAMILY_OWNERSHIP_TRANSFER_USE_ALL_STAGES_BIT_KHR", noop_body)
+        self.assertIn("pdocker_vk_supported_dependency_flags() | pdocker_vk_noop_dependency_flags()", accepted_body)
+        self.assertIn("flags & ~pdocker_vk_accepted_dependency_flags()", support_body)
+        self.assertIn("has_queue_family_ownership_transfer", support_body)
+        self.assertIn("flags & pdocker_vk_noop_dependency_flags()", support_body)
+        self.assertIn("VK_QUEUE_FAMILY_IGNORED", queue_body)
+        self.assertIn("src_queue_family_index == dst_queue_family_index", queue_body)
+        self.assertIn("has_queue_family_ownership_transfer", legacy_body)
+        self.assertIn("pdocker_vk_dependency_flags_supported_for_queue_family_state", legacy_body)
+        self.assertIn("dependency-info-dependency-flags-unsupported", dependency_body)
+        self.assertIn("dependency_info_has_queue_family_ownership_transfer(info)", dependency_body)
+
+        transport_body = c_function_body(icd, "pdocker_vk_transport_dependency_flags")
+        self.assertIn("flags & pdocker_vk_supported_dependency_flags()", transport_body)
+        self.assertNotIn("pdocker_vk_accepted_dependency_flags", transport_body)
 
     def test_vulkan_barrier_external_acquire_unmodified_pnext_is_noop_metadata(self):
         icd = VULKAN_ICD.read_text()
@@ -4560,8 +4586,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("record_memory_barrier_op(commandBuffer", icd)
         self.assertIn("record_buffer_barrier_op(commandBuffer", icd)
         self.assertIn("record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER", icd)
-        self.assertIn("dependencyFlags & ~pdocker_vk_supported_dependency_flags()", icd)
-        self.assertIn("dependency_flags & ~pdocker_vk_supported_dependency_flags()", icd)
+        self.assertIn("pdocker_vk_dependency_flags_supported_for_queue_family_state", icd)
+        self.assertIn("dependency_info_has_queue_family_ownership_transfer", icd)
         self.assertIn("record.flags = pdocker_vk_transport_dependency_flags(dependencyFlags)", icd)
         self.assertIn("record.flags = pdocker_vk_transport_dependency_flags(dependency_flags)", icd)
         self.assertIn("for (uint32_t i = 0; i < eventCount; ++i)", icd)
@@ -4585,9 +4611,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("image-barrier-invalid-range", icd)
         self.assertIn("pdocker_vk_image_aspect_mask_valid_for_format", icd)
         self.assertIn("static bool pdocker_vk_queue_family_barrier_replayable", icd)
-        self.assertIn("src_queue_family_index == VK_QUEUE_FAMILY_IGNORED", icd)
-        self.assertIn("return src_queue_family_index == dst_queue_family_index &&", icd)
-        self.assertIn("src_queue_family_index < PDOCKER_VK_ADVERTISED_QUEUE_FAMILY_COUNT", icd)
+        queue_helper = c_function_body(icd, "pdocker_vk_queue_family_barrier_is_ownership_transfer")
+        self.assertIn("src_queue_family_index == VK_QUEUE_FAMILY_IGNORED", queue_helper)
+        self.assertIn("src_queue_family_index == dst_queue_family_index", queue_helper)
+        self.assertIn("src_queue_family_index < PDOCKER_VK_ADVERTISED_QUEUE_FAMILY_COUNT", queue_helper)
         self.assertIn("image-barrier-cross-queue-family", icd)
         self.assertIn("buffer-barrier-cross-queue-family", icd)
         self.assertIn("buffer-barrier-invalid-range", icd)
@@ -4616,6 +4643,7 @@ class GpuAbiContractTest(unittest.TestCase):
         helper = c_function_body(icd, "dependency_info_unsupported_reason")
         for marker in [
             "dependency-info-pnext-unsupported",
+            "dependency-info-dependency-flags-unsupported",
             "dependency-info-memory-barriers-missing",
             "dependency-info-memory-barrier-pnext-unsupported",
             "dependency-info-memory-stage-access-unsupported",
@@ -4632,19 +4660,20 @@ class GpuAbiContractTest(unittest.TestCase):
             "pipeline-barrier2-pnext-unsupported",
             "pipeline-barrier2-missing-barrier-array",
             "pipeline-barrier2-none-stage-access-unsupported",
+            "pipeline-barrier2-dependency-flags-unsupported",
             "pipeline-barrier2-dependency-info-unsupported",
         ]:
             self.assertIn(marker, pipeline_reason)
         body = c_function_body(icd, "vkCmdPipelineBarrier2")
         self.assertIn("pipeline_barrier2_dependency_info_failure_reason(pDependencyInfo)", body)
         self.assertIn("command_buffer_mark_recording_failed(cmd, unsupported_reason);", body)
-        self.assertIn('command_buffer_mark_recording_failed(cmd, "pipeline-barrier2-dependency-flags-unsupported");', body)
+        self.assertNotIn('command_buffer_mark_recording_failed(cmd, "pipeline-barrier2-dependency-flags-unsupported");', body)
         self.assertLess(
             body.index("pipeline_barrier2_dependency_info_failure_reason(pDependencyInfo)"),
             body.index("record_dependency_info_barrier_ops(commandBuffer, pDependencyInfo)"),
         )
         self.assertLess(
-            body.index('command_buffer_mark_recording_failed(cmd, "pipeline-barrier2-dependency-flags-unsupported");'),
+            body.index("command_buffer_mark_recording_failed(cmd, unsupported_reason);"),
             body.index("record_dependency_info_barrier_ops(commandBuffer, pDependencyInfo)"),
         )
         memory_body = c_function_body(icd, "record_memory_barrier_op")
@@ -11869,7 +11898,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("cmd->graphics_unsupported = true;", record_image_barrier_body)
         self.assertIn("command_buffer_mark_recording_failed(cmd, \"image-barrier-record-overflow\")", record_image_barrier_body)
         self.assertIn("submit will fail closed", record_image_barrier_body)
-        self.assertIn("dependencyFlags & ~pdocker_vk_supported_dependency_flags()", barrier_body)
+        self.assertIn("legacy_pipeline_barrier_inputs_unsupported(srcStageMask", barrier_body)
+        self.assertIn("dependencyFlags", barrier_body)
         self.assertIn("record.flags = pdocker_vk_transport_dependency_flags(dependencyFlags)", barrier_body)
         barrier2_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier2", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkCmdSetEvent2", 1
@@ -11900,7 +11930,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("cmd->graphics_unsupported = true;", barrier2_body)
         self.assertLess(barrier2_body.index("pipeline_barrier2_dependency_info_failure_reason(pDependencyInfo)"), barrier2_body.index("VkDependencyFlags dependency_flags"))
         self.assertIn("VkDependencyFlags dependency_flags", barrier2_body)
-        self.assertIn("dependency_flags & ~pdocker_vk_supported_dependency_flags()", barrier2_body)
+        self.assertIn("pipeline_barrier2_dependency_info_failure_reason(pDependencyInfo)", barrier2_body)
         self.assertIn("record.flags = pdocker_vk_transport_dependency_flags(dependency_flags)", barrier2_body)
         self.assertNotIn("vkCmdPipelineBarrier(commandBuffer", barrier2_body)
         self.assertIn("execute_recorded_image_barrier_op(", icd)

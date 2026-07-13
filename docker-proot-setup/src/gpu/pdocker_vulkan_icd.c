@@ -19839,6 +19839,43 @@ static VkDependencyFlags pdocker_vk_supported_dependency_flags(void) {
     return VK_DEPENDENCY_BY_REGION_BIT | VK_DEPENDENCY_DEVICE_GROUP_BIT;
 }
 
+static VkDependencyFlags pdocker_vk_noop_dependency_flags(void) {
+    VkDependencyFlags flags = 0;
+#ifdef VK_DEPENDENCY_QUEUE_FAMILY_OWNERSHIP_TRANSFER_USE_ALL_STAGES_BIT_KHR
+    flags |= VK_DEPENDENCY_QUEUE_FAMILY_OWNERSHIP_TRANSFER_USE_ALL_STAGES_BIT_KHR;
+#endif
+    return flags;
+}
+
+static VkDependencyFlags pdocker_vk_accepted_dependency_flags(void) {
+    return pdocker_vk_supported_dependency_flags() | pdocker_vk_noop_dependency_flags();
+}
+
+static bool pdocker_vk_queue_family_barrier_is_ownership_transfer(
+        uint32_t src_queue_family_index,
+        uint32_t dst_queue_family_index) {
+    if (src_queue_family_index == VK_QUEUE_FAMILY_IGNORED &&
+        dst_queue_family_index == VK_QUEUE_FAMILY_IGNORED) {
+        return false;
+    }
+    if (src_queue_family_index == dst_queue_family_index &&
+        src_queue_family_index < PDOCKER_VK_ADVERTISED_QUEUE_FAMILY_COUNT) {
+        return false;
+    }
+    return true;
+}
+
+static bool pdocker_vk_dependency_flags_supported_for_queue_family_state(
+        VkDependencyFlags flags,
+        bool has_queue_family_ownership_transfer) {
+    if ((flags & ~pdocker_vk_accepted_dependency_flags()) != 0) return false;
+    if (has_queue_family_ownership_transfer &&
+        (flags & pdocker_vk_noop_dependency_flags()) != 0) {
+        return false;
+    }
+    return true;
+}
+
 static VkDependencyFlags pdocker_vk_transport_dependency_flags(VkDependencyFlags flags) {
     return flags & pdocker_vk_supported_dependency_flags();
 }
@@ -24426,12 +24463,8 @@ static void update_image_layout_range_cache(
 static bool pdocker_vk_queue_family_barrier_replayable(
         uint32_t src_queue_family_index,
         uint32_t dst_queue_family_index) {
-    if (src_queue_family_index == VK_QUEUE_FAMILY_IGNORED &&
-        dst_queue_family_index == VK_QUEUE_FAMILY_IGNORED) {
-        return true;
-    }
-    return src_queue_family_index == dst_queue_family_index &&
-           src_queue_family_index < PDOCKER_VK_ADVERTISED_QUEUE_FAMILY_COUNT;
+    return !pdocker_vk_queue_family_barrier_is_ownership_transfer(
+        src_queue_family_index, dst_queue_family_index);
 }
 
 static void execute_recorded_image_barrier_op(PdockerVkImageBarrierOp *op) {
@@ -24622,6 +24655,7 @@ static void record_buffer_barrier_op(
 static bool legacy_pipeline_barrier_inputs_unsupported(
         VkPipelineStageFlags srcStageMask,
         VkPipelineStageFlags dstStageMask,
+        VkDependencyFlags dependencyFlags,
         uint32_t memoryBarrierCount,
         const VkMemoryBarrier *pMemoryBarriers,
         uint32_t bufferMemoryBarrierCount,
@@ -24629,6 +24663,7 @@ static bool legacy_pipeline_barrier_inputs_unsupported(
         uint32_t imageMemoryBarrierCount,
         const VkImageMemoryBarrier *pImageMemoryBarriers) {
     if (srcStageMask == 0 || dstStageMask == 0) return true;
+    bool has_queue_family_ownership_transfer = false;
     if (memoryBarrierCount && !pMemoryBarriers) return true;
     for (uint32_t i = 0; pMemoryBarriers && i < memoryBarrierCount; ++i) {
         if (pMemoryBarriers[i].pNext) return true;
@@ -24639,6 +24674,11 @@ static bool legacy_pipeline_barrier_inputs_unsupported(
                 pBufferMemoryBarriers[i].pNext)) {
             return true;
         }
+        if (pdocker_vk_queue_family_barrier_is_ownership_transfer(
+                pBufferMemoryBarriers[i].srcQueueFamilyIndex,
+                pBufferMemoryBarriers[i].dstQueueFamilyIndex)) {
+            has_queue_family_ownership_transfer = true;
+        }
     }
     if (imageMemoryBarrierCount && !pImageMemoryBarriers) return true;
     for (uint32_t i = 0; pImageMemoryBarriers && i < imageMemoryBarrierCount; ++i) {
@@ -24646,8 +24686,14 @@ static bool legacy_pipeline_barrier_inputs_unsupported(
                 pImageMemoryBarriers[i].pNext)) {
             return true;
         }
+        if (pdocker_vk_queue_family_barrier_is_ownership_transfer(
+                pImageMemoryBarriers[i].srcQueueFamilyIndex,
+                pImageMemoryBarriers[i].dstQueueFamilyIndex)) {
+            has_queue_family_ownership_transfer = true;
+        }
     }
-    return false;
+    return !pdocker_vk_dependency_flags_supported_for_queue_family_state(
+        dependencyFlags, has_queue_family_ownership_transfer);
 }
 
 
@@ -24724,6 +24770,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier(
     if (cmd) {
         if (legacy_pipeline_barrier_inputs_unsupported(srcStageMask,
                                                        dstStageMask,
+                                                       dependencyFlags,
                                                        memoryBarrierCount,
                                                        pMemoryBarriers,
                                                        bufferMemoryBarrierCount,
@@ -24733,9 +24780,6 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier(
             cmd->graphics_unsupported = true;
             command_buffer_mark_recording_failed(cmd, "legacy-pipeline-barrier-unsupported");
             return;
-        }
-        if ((dependencyFlags & ~pdocker_vk_supported_dependency_flags()) != 0) {
-            cmd->graphics_unsupported = true;
         }
         PdockerVkBarrierOpRange barriers =
             record_legacy_pipeline_barrier_ops(commandBuffer,
@@ -27586,6 +27630,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdWaitEvents(
     if (has_barrier_payload &&
         legacy_pipeline_barrier_inputs_unsupported(srcStageMask,
                                                    dstStageMask,
+                                                   0,
                                                    memoryBarrierCount,
                                                    pMemoryBarriers,
                                                    bufferMemoryBarrierCount,
@@ -27633,9 +27678,38 @@ static PdockerVkBarrierOpRange record_dependency_info_barrier_ops(
         VkCommandBuffer commandBuffer,
         const VkDependencyInfo *info);
 
+static bool dependency_info_has_queue_family_ownership_transfer(
+        const VkDependencyInfo *info) {
+    if (!info) return false;
+    if (info->pBufferMemoryBarriers) {
+        for (uint32_t i = 0; i < info->bufferMemoryBarrierCount; ++i) {
+            if (pdocker_vk_queue_family_barrier_is_ownership_transfer(
+                    info->pBufferMemoryBarriers[i].srcQueueFamilyIndex,
+                    info->pBufferMemoryBarriers[i].dstQueueFamilyIndex)) {
+                return true;
+            }
+        }
+    }
+    if (info->pImageMemoryBarriers) {
+        for (uint32_t i = 0; i < info->imageMemoryBarrierCount; ++i) {
+            if (pdocker_vk_queue_family_barrier_is_ownership_transfer(
+                    info->pImageMemoryBarriers[i].srcQueueFamilyIndex,
+                    info->pImageMemoryBarriers[i].dstQueueFamilyIndex)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 static const char *dependency_info_unsupported_reason(const VkDependencyInfo *info) {
     if (!info) return NULL;
     if (info->pNext) return "dependency-info-pnext-unsupported";
+    if (!pdocker_vk_dependency_flags_supported_for_queue_family_state(
+            info->dependencyFlags,
+            dependency_info_has_queue_family_ownership_transfer(info))) {
+        return "dependency-info-dependency-flags-unsupported";
+    }
     if (info->memoryBarrierCount && !info->pMemoryBarriers) {
         return "dependency-info-memory-barriers-missing";
     }
@@ -27700,6 +27774,7 @@ static const char *pipeline_barrier2_dependency_info_failure_reason(
     if (strstr(reason, "pnext")) return "pipeline-barrier2-pnext-unsupported";
     if (strstr(reason, "missing")) return "pipeline-barrier2-missing-barrier-array";
     if (strstr(reason, "stage-access")) return "pipeline-barrier2-none-stage-access-unsupported";
+    if (strstr(reason, "dependency-flags")) return "pipeline-barrier2-dependency-flags-unsupported";
     return "pipeline-barrier2-dependency-info-unsupported";
 }
 
@@ -27715,10 +27790,6 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier2(
         return;
     }
     VkDependencyFlags dependency_flags = pDependencyInfo ? pDependencyInfo->dependencyFlags : 0;
-    if ((dependency_flags & ~pdocker_vk_supported_dependency_flags()) != 0) {
-        command_buffer_mark_recording_failed(cmd, "pipeline-barrier2-dependency-flags-unsupported");
-        return;
-    }
     PdockerVkBarrierOpRange barriers = record_dependency_info_barrier_ops(commandBuffer, pDependencyInfo);
     if (cmd->recording_failed) return;
     if (barriers.memory_count || barriers.buffer_count || barriers.image_count) {
@@ -27741,7 +27812,8 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier2(
 }
 
 static bool dependency_flags_unsupported(VkDependencyFlags dependency_flags) {
-    return (dependency_flags & ~pdocker_vk_supported_dependency_flags()) != 0;
+    return !pdocker_vk_dependency_flags_supported_for_queue_family_state(
+        dependency_flags, false);
 }
 
 
