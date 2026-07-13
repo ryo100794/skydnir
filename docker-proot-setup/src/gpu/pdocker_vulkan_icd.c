@@ -326,7 +326,7 @@ static bool pdocker_vk_color_blend_attachment_state_equal(
            a->alphaBlendOp == b->alphaBlendOp &&
            a->colorWriteMask == b->colorWriteMask;
 }
-#define PDOCKER_VK_MAX_GRAPHICS_DRAW_OPS 128
+#define PDOCKER_VK_MAX_GRAPHICS_DRAW_OPS PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS
 #define PDOCKER_VK_MAX_GRAPHICS_DESCRIPTOR_BIND_OPS 128
 #define PDOCKER_VK_MAX_GRAPHICS_RENDERING_OPS 128
 #define PDOCKER_VK_MAX_GRAPHICS_COMMAND_OPS PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS
@@ -1167,8 +1167,9 @@ typedef struct {
     uint32_t command_op_capacity;
     PdockerVkEvent *event_wait_refs[PDOCKER_VK_MAX_EVENT_WAIT_REFS];
     uint32_t event_wait_ref_count;
-    PdockerVkGraphicsDrawSnapshot graphics_draw_ops[PDOCKER_VK_MAX_GRAPHICS_DRAW_OPS];
+    PdockerVkGraphicsDrawSnapshot *graphics_draw_ops;
     uint32_t graphics_draw_op_count;
+    uint32_t graphics_draw_op_capacity;
     PdockerVkGraphicsDescriptorBindSnapshot
         graphics_descriptor_bind_ops[PDOCKER_VK_MAX_GRAPHICS_DESCRIPTOR_BIND_OPS];
     uint32_t graphics_descriptor_bind_op_count;
@@ -1598,6 +1599,37 @@ static void command_buffer_destroy_descriptor_states(PdockerVkCommandBuffer *cmd
                                  &cmd->graphics_bound_set_capacity);
 }
 
+static bool command_buffer_reserve_graphics_draw_ops(PdockerVkCommandBuffer *cmd, uint32_t extra) {
+    if (!cmd) return false;
+    if (extra == 0) return true;
+    if (cmd->graphics_draw_op_count > PDOCKER_VK_MAX_GRAPHICS_DRAW_OPS ||
+        extra > PDOCKER_VK_MAX_GRAPHICS_DRAW_OPS - cmd->graphics_draw_op_count) {
+        return false;
+    }
+    uint32_t needed = cmd->graphics_draw_op_count + extra;
+    if (needed <= cmd->graphics_draw_op_capacity) return true;
+    uint32_t new_capacity = cmd->graphics_draw_op_capacity ?
+        cmd->graphics_draw_op_capacity : 64u;
+    while (new_capacity < needed) {
+        if (new_capacity > PDOCKER_VK_MAX_GRAPHICS_DRAW_OPS / 2u) {
+            new_capacity = PDOCKER_VK_MAX_GRAPHICS_DRAW_OPS;
+            break;
+        }
+        new_capacity *= 2u;
+    }
+    if (new_capacity < needed || new_capacity > PDOCKER_VK_MAX_GRAPHICS_DRAW_OPS) {
+        return false;
+    }
+    PdockerVkGraphicsDrawSnapshot *new_ops =
+        (PdockerVkGraphicsDrawSnapshot *)realloc(
+            cmd->graphics_draw_ops,
+            (size_t)new_capacity * sizeof(*cmd->graphics_draw_ops));
+    if (!new_ops) return false;
+    cmd->graphics_draw_ops = new_ops;
+    cmd->graphics_draw_op_capacity = new_capacity;
+    return true;
+}
+
 static bool command_buffer_reserve_dispatch_ops(PdockerVkCommandBuffer *cmd, uint32_t extra) {
     if (!cmd) return false;
     if (extra == 0) return true;
@@ -1726,6 +1758,10 @@ static void command_buffer_destroy_record_vectors(PdockerVkCommandBuffer *cmd) {
     cmd->dispatch_ops = NULL;
     cmd->dispatch_op_count = 0;
     cmd->dispatch_op_capacity = 0;
+    free(cmd->graphics_draw_ops);
+    cmd->graphics_draw_ops = NULL;
+    cmd->graphics_draw_op_count = 0;
+    cmd->graphics_draw_op_capacity = 0;
     free(cmd->command_ops);
     cmd->command_ops = NULL;
     cmd->command_op_count = 0;
@@ -1975,6 +2011,7 @@ static bool append_secondary_command_buffer(
         return false;
     }
     if (!command_buffer_reserve_dispatch_ops(dst, src->dispatch_op_count) ||
+        !command_buffer_reserve_graphics_draw_ops(dst, src->graphics_draw_op_count) ||
         !command_buffer_reserve_command_ops(dst, src->command_op_count) ||
         !command_buffer_reserve_graphics_command_ops(dst, src->graphics_command_op_count) ||
         !command_buffer_reserve_push_constant_ops(dst, src->push_constant_op_count)) {
@@ -21170,8 +21207,9 @@ static void record_graphics_draw_command(
             cmd->graphics_unsupported = true;
         }
     }
-    if (cmd->graphics_draw_op_count >= PDOCKER_VK_MAX_GRAPHICS_DRAW_OPS) {
+    if (!command_buffer_reserve_graphics_draw_ops(cmd, 1)) {
         cmd->graphics_unsupported = true;
+        command_buffer_mark_recording_failed(cmd, "graphics-draw-record-overflow");
         return;
     }
     uint32_t snapshot_index = cmd->graphics_draw_op_count++;
