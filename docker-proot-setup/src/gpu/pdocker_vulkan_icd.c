@@ -16458,6 +16458,16 @@ static bool pdocker_vk_queue_request_valid(
            flags == 0;
 }
 
+static bool pdocker_vk_device_queue_info2_valid(const VkDeviceQueueInfo2 *pQueueInfo) {
+    return pQueueInfo &&
+           pQueueInfo->sType == VK_STRUCTURE_TYPE_DEVICE_QUEUE_INFO_2 &&
+           pQueueInfo->pNext == NULL &&
+           pdocker_vk_queue_request_valid(
+               pQueueInfo->queueFamilyIndex,
+               pQueueInfo->queueIndex,
+               pQueueInfo->flags);
+}
+
 static bool pdocker_vk_sharing_mode_is_single_advertised_family(
         VkSharingMode sharingMode,
         uint32_t queueFamilyIndexCount,
@@ -18223,7 +18233,8 @@ static VkResult validate_device_queue_create_infos(const VkDeviceCreateInfo *pCr
         const VkDeviceQueueCreateInfo *qci = pCreateInfo->pQueueCreateInfos
             ? &pCreateInfo->pQueueCreateInfos[i]
             : NULL;
-        if (!qci || qci->queueCount == 0 ||
+        if (!qci || qci->sType != VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO ||
+            qci->queueCount == 0 ||
             qci->queueFamilyIndex >= PDOCKER_VK_ADVERTISED_QUEUE_FAMILY_COUNT ||
             qci->queueCount > PDOCKER_VK_ADVERTISED_QUEUE_COUNT ||
             qci->flags != 0) {
@@ -18324,14 +18335,7 @@ VKAPI_ATTR void VKAPI_CALL vkGetDeviceQueue2(
         VkQueue *pQueue) {
     (void)device;
     if (!pQueue) return;
-    if (!pQueueInfo) {
-        *pQueue = VK_NULL_HANDLE;
-        return;
-    }
-    *pQueue = pdocker_vk_queue_request_valid(
-            pQueueInfo->queueFamilyIndex,
-            pQueueInfo->queueIndex,
-            pQueueInfo->flags)
+    *pQueue = pdocker_vk_device_queue_info2_valid(pQueueInfo)
         ? (VkQueue)&g_queue
         : VK_NULL_HANDLE;
 }

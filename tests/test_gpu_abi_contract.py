@@ -8166,12 +8166,18 @@ class GpuAbiContractTest(unittest.TestCase):
         queue_create_body = c_function_body(icd, "validate_device_queue_create_infos")
         queue_pnext_body = c_function_body(icd, "validate_device_queue_create_info_pnext")
         self.assertIn("validate_device_queue_create_info_pnext(qci->pNext)", queue_create_body)
+        self.assertIn("qci->sType != VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO", queue_create_body)
         self.assertIn("VK_STRUCTURE_TYPE_DEVICE_QUEUE_GLOBAL_PRIORITY_CREATE_INFO", queue_pnext_body)
         self.assertIn("priority->globalPriority != VK_QUEUE_GLOBAL_PRIORITY_MEDIUM", queue_pnext_body)
         self.assertIn('unsupported_create_info_pnext_result("vkCreateDevice.queue", node)', queue_pnext_body)
+        queue_info2_body = c_function_body(icd, "pdocker_vk_device_queue_info2_valid")
+        self.assertIn("pQueueInfo->sType == VK_STRUCTURE_TYPE_DEVICE_QUEUE_INFO_2", queue_info2_body)
+        self.assertIn("pQueueInfo->pNext == NULL", queue_info2_body)
+        self.assertIn("pdocker_vk_queue_request_valid", queue_info2_body)
         queue_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkGetDeviceQueue", 1)[1].split(
             "static bool descriptor_type_supported", 1
         )[0]
+        self.assertIn("pdocker_vk_device_queue_info2_valid(pQueueInfo)", queue_body)
         self.assertIn("VK_NULL_HANDLE", queue_body)
         self.assertNotIn("queueFlags = VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT", qf_body)
         self.assertNotIn("queueFlags = VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT", qf2_body)

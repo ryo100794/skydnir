@@ -225,5 +225,86 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
 
+    def test_device_queue_lookup_shape_is_fail_closed(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            static int expect_null_queue(const VkDeviceQueueInfo2 *info, int code) {{
+                VkQueue queue = (VkQueue)(uintptr_t)0x1234u;
+                vkGetDeviceQueue2((VkDevice)(uintptr_t)0x1u, info, &queue);
+                if (queue != VK_NULL_HANDLE) {{
+                    fprintf(stderr, "expected null queue for case %d, got %p\\n", code, (void *)queue);
+                    return code;
+                }}
+                return 0;
+            }}
+
+            int main(void) {{
+                VkDeviceQueueInfo2 info;
+                memset(&info, 0, sizeof(info));
+                info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_INFO_2;
+                info.queueFamilyIndex = 0;
+                info.queueIndex = 0;
+                info.flags = 0;
+                VkQueue queue = VK_NULL_HANDLE;
+                vkGetDeviceQueue2((VkDevice)(uintptr_t)0x1u, &info, &queue);
+                if (queue == VK_NULL_HANDLE) {{
+                    fprintf(stderr, "valid device queue info did not return advertised queue\\n");
+                    return 2;
+                }}
+
+                if (expect_null_queue(NULL, 3)) return 3;
+
+                info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+                if (expect_null_queue(&info, 4)) return 4;
+                info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_INFO_2;
+
+                VkBaseInStructure dummy_pnext;
+                memset(&dummy_pnext, 0, sizeof(dummy_pnext));
+                dummy_pnext.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+                info.pNext = &dummy_pnext;
+                if (expect_null_queue(&info, 5)) return 5;
+                info.pNext = NULL;
+
+                info.flags = (VkDeviceQueueCreateFlags)1u;
+                if (expect_null_queue(&info, 6)) return 6;
+                info.flags = 0;
+
+                info.queueFamilyIndex = PDOCKER_VK_ADVERTISED_QUEUE_FAMILY_COUNT;
+                if (expect_null_queue(&info, 7)) return 7;
+
+                float priority = 1.0f;
+                VkDeviceQueueCreateInfo qci;
+                VkDeviceCreateInfo create_info;
+                memset(&qci, 0, sizeof(qci));
+                memset(&create_info, 0, sizeof(create_info));
+                qci.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+                qci.queueFamilyIndex = 0;
+                qci.queueCount = 1;
+                qci.pQueuePriorities = &priority;
+                create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                create_info.queueCreateInfoCount = 1;
+                create_info.pQueueCreateInfos = &qci;
+                if (validate_device_queue_create_infos(&create_info) == VK_SUCCESS) {{
+                    fprintf(stderr, "wrong queue-create sType was accepted\\n");
+                    return 8;
+                }}
+                qci.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+                if (validate_device_queue_create_infos(&create_info) != VK_SUCCESS) {{
+                    fprintf(stderr, "valid queue-create info was rejected\\n");
+                    return 9;
+                }}
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
