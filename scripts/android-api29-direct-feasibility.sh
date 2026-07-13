@@ -7,10 +7,12 @@ APK="${SKYDNIR_APK:-${PDOCKER_APK:-$ROOT/app/build/outputs/apk/debug/app-debug.a
 ADB="${ADB:-adb}"
 INSTALL=1
 SERIAL="${PDOCKER_ADB_SERIAL:-}"
+FORCE_STOP_APP=0
+FORCE_STOP_ALLOWLIST="${PDOCKER_API29_FORCE_STOP_ALLOWLIST:-}"
 
 usage() {
   cat <<EOF
-Usage: $0 [--no-install]
+Usage: $0 [--no-install] [--force-stop-app] [--force-stop-allowlist PACKAGE[,PACKAGE...]]
 
 Runs an API29+ direct-execution feasibility probe on a connected Android device.
 
@@ -19,21 +21,31 @@ Dockerfile RUN path. run-as may execute app-data files even when the app domain
 cannot, so only the Docker build result is treated as the product feasibility
 signal.
 
+Options:
+  --force-stop-app
+                      opt in to force-stopping the app before start; requires
+                      the package to be present in the force-stop allowlist
+  --force-stop-allowlist PACKAGE[,PACKAGE...]
+                      packages allowed for --force-stop-app in this run
+
 Environment:
   ADB                 adb executable (default: adb)
   PDOCKER_ADB_SERIAL  optional adb serial
   SKYDNIR_PACKAGE     package name (PDOCKER_PACKAGE is still accepted; default: $PKG)
   SKYDNIR_APK         debug APK path (PDOCKER_APK is still accepted; default: $APK)
+  PDOCKER_API29_FORCE_STOP_ALLOWLIST
+                      comma/space-separated packages allowed for --force-stop-app
 EOF
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --no-install) INSTALL=0 ;;
+    --no-install) INSTALL=0; shift ;;
+    --force-stop-app) FORCE_STOP_APP=1; shift ;;
+    --force-stop-allowlist) FORCE_STOP_ALLOWLIST="${2:?--force-stop-allowlist requires a value}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "unknown argument: $1" >&2; usage >&2; exit 2 ;;
   esac
-  shift
 done
 
 adb_cmd() {
@@ -46,6 +58,17 @@ adb_cmd() {
 
 remote_quote() {
   printf "'%s'" "$(printf "%s" "$1" | sed "s/'/'\\\\''/g")"
+}
+
+package_force_stop_allowed() {
+  local item
+  local normalized="${FORCE_STOP_ALLOWLIST//,/ }"
+  for item in $normalized; do
+    if [[ "$item" == "$PKG" ]]; then
+      return 0
+    fi
+  done
+  return 1
 }
 
 run_as() {
@@ -101,7 +124,16 @@ adb_cmd shell dumpsys package "$PKG" | grep -E "targetSdk|seInfo|legacyNativeLib
 
 section "start app daemon"
 adb_cmd logcat -c >/dev/null 2>&1 || true
-adb_cmd shell am force-stop "$PKG" >/dev/null 2>&1 || true
+if [[ "$FORCE_STOP_APP" -eq 1 ]]; then
+  if ! package_force_stop_allowed; then
+    echo "Refusing to force-stop $PKG: --force-stop-app requires the package in --force-stop-allowlist or PDOCKER_API29_FORCE_STOP_ALLOWLIST." >&2
+    exit 2
+  fi
+  echo "force-stopping allowlisted package: $PKG"
+  adb_cmd shell am force-stop "$PKG" >/dev/null 2>&1 || true
+else
+  echo "skipping app force-stop; pass --force-stop-app with an allowlisted package for a forced restart"
+fi
 run_as 'rm -f files/pdocker/pdockerd.sock' >/dev/null 2>&1 || true
 adb_cmd shell am start -n "$(main_activity)" -a "$PKG.action.SMOKE_START" >/dev/null
 wait_for_socket

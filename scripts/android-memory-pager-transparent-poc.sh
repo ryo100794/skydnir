@@ -9,15 +9,44 @@ APK="${APK:-$ROOT/app/build/outputs/apk/compat/debug/app-compat-debug.apk}"
 INSTALL_APK="${INSTALL_APK:-0}"
 POC_PAGES="${PDOCKER_MEMORY_PAGER_POC_PAGES:-32}"
 POC_RESIDENT_PAGES="${PDOCKER_MEMORY_PAGER_POC_RESIDENT_PAGES:-4}"
+ADB_CONNECT="${PDOCKER_ADB_CONNECT:-0}"
+DRY_RUN=0
 REMOTE_PREAMBLE="APP_DATA=\$(pwd); case \"\$APP_DATA\" in /data/*) ;; *) for d in /data/user/0/$PKG /data/data/$PKG; do if [ -d \"\$d/files\" ]; then APP_DATA=\"\$d\"; break; fi; done ;; esac; cd \"\$APP_DATA\" || exit 70; mkdir -p files/pdocker/tmp files/pdocker/diagnostics/memory-pager-transparent cache || exit 71; export TMPDIR=\"\$APP_DATA/files/pdocker/tmp\"; export PDOCKER_MEMORY_TELEMETRY_PATH=\"\$APP_DATA/files/pdocker/diagnostics/memory-pager-transparent/memory-ring.jsonl\"; export PDOCKER_MEMORY_RING_PATH=\"\$PDOCKER_MEMORY_TELEMETRY_PATH\"; export PDOCKER_MEMORY_SUMMARY_PATH=\"\$APP_DATA/files/pdocker/diagnostics/memory-pager-transparent/memory-summary.json\"; export PDOCKER_MEMORY_TELEMETRY_OPERATION_ID=apk-memory-pager-transparent; export PDOCKER_MEMORY_TELEMETRY_CONTAINER_ID=apk-memory-pager-transparent"
 DIRECT_CMD="$REMOTE_PREAMBLE; PDOCKER_MEMORY_PAGER_POC_PAGES=$POC_PAGES PDOCKER_MEMORY_PAGER_POC_RESIDENT_PAGES=$POC_RESIDENT_PAGES files/pdocker-runtime/docker-bin/pdocker-direct --pdocker-memory-pager-transparent-poc; POC_RC=\$?; echo __PDOCKER_MEMORY_RING_BEGIN__; cat \"\$PDOCKER_MEMORY_RING_PATH\" 2>/dev/null; echo __PDOCKER_MEMORY_RING_END__; echo __PDOCKER_MEMORY_SUMMARY_BEGIN__; cat \"\$PDOCKER_MEMORY_SUMMARY_PATH\" 2>/dev/null; echo __PDOCKER_MEMORY_SUMMARY_END__; echo exact_rc=\$POC_RC; exit \$POC_RC"
+
+usage() {
+  cat <<EOF
+Usage: $0 [--dry-run] [--adb-connect]
+
+Runs the APK transparent memory-pager proof of concept against an already connected
+Android device.  ANDROID_SERIAL is passed to adb with -s; even when it is a
+host:port wireless-debugging serial, this script does not run adb connect unless
+PDOCKER_ADB_CONNECT=1 or --adb-connect is provided.
+
+Environment:
+  ANDROID_SERIAL        optional adb serial for adb -s
+  PDOCKER_ADB_CONNECT   set to 1 to explicitly run adb connect ANDROID_SERIAL
+  OUT                   JSON artifact path (default: $OUT)
+  INSTALL_APK           set to 1 to install APK before the probe
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dry-run) DRY_RUN=1 ;;
+    --adb-connect) ADB_CONNECT=1 ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "unknown argument: $1" >&2; usage >&2; exit 2 ;;
+  esac
+  shift
+done
 
 ADB=(adb)
 if [[ -n "$SERIAL" ]]; then
   ADB+=( -s "$SERIAL" )
 fi
 
-if [[ "${1:-}" == "--dry-run" ]]; then
+if [[ "$DRY_RUN" == "1" ]]; then
   mkdir -p "$(dirname "$OUT")"
   python3 - "$OUT" "$DIRECT_CMD" <<'PY'
 import json, sys
@@ -29,6 +58,7 @@ out.write_text(json.dumps({
   "status": "dry-run",
   "command": command,
   "force_stops_app": False,
+  "adb_connects_by_default": False,
 }, indent=2) + "\n")
 PY
   echo "$OUT"
@@ -43,8 +73,13 @@ trap 'rm -f "$TMP_OUTPUT" "$TMP_MEM" "$TMP_DEVICES"' EXIT
 
 set +e
 adb devices -l >"$TMP_DEVICES" 2>&1
-if [[ -n "$SERIAL" ]]; then
+if [[ "$ADB_CONNECT" == "1" && -n "$SERIAL" ]]; then
   adb connect "$SERIAL" >>"$TMP_DEVICES" 2>&1
+elif [[ -n "$SERIAL" ]]; then
+  {
+    echo "using preconnected adb serial via adb -s: $SERIAL"
+    echo "not running adb connect; set PDOCKER_ADB_CONNECT=1 or pass --adb-connect to opt in"
+  } >>"$TMP_DEVICES"
 fi
 "${ADB[@]}" shell 'cat /proc/meminfo | egrep "MemAvailable|SwapFree|SwapTotal"' >"$TMP_MEM" 2>&1
 MEM_RC=$?
