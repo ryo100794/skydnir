@@ -2192,3 +2192,14 @@ usage storage.  This allows maintenance5-style buffer creation and
 the real usage.  Zero, duplicate, or out-of-range usage2 payloads remain
 fail-closed, and buffer-view usage2 still accepts only the no-op texel-usage
 case until the transport carries a distinct per-view usage field.
+
+### 2026-07-13 Vulkan image/view shape compatibility lane
+
+Image creation and image-view replay now fail-close on generic Vulkan shape
+compatibility before transport/native replay.  Cube-compatible images must be
+2D, square, one-depth-layer images with at least six array layers.  Image-view
+types are validated against source image type, cube compatibility, layer count,
+and cube-array layer alignment on both the container ICD and Android executor
+side.  This prevents invalid 2D/3D/cube view reinterpretation from reaching
+Android `vkCreateImageView` and keeps the lane generic; llama.cpp, Dockerfiles,
+models, prompts, and shader bytes are unchanged.

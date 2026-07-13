@@ -18820,5 +18820,48 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("strict-transport-identity-ineligible", verifier)
 
 
+    def test_vulkan_image_view_shape_validation_is_generic_and_fail_closed(self):
+        icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
+
+        self.assertIn("pdocker_vk_image_create_shape_supported_for_transport", icd)
+        self.assertIn("pdocker_vk_image_view_type_supported_for_transport", icd)
+        icd_create_body = c_function_body(icd, "validate_image_create_info_for_transport")
+        self.assertIn("pdocker_vk_image_create_shape_supported_for_transport(info)", icd_create_body)
+        self.assertIn("image-create-shape-unsupported", icd_create_body)
+        icd_view_body = c_function_body(icd, "validate_image_view_create_info_for_transport")
+        self.assertIn("normalize_image_view_subresource_range_for_transport", icd_view_body)
+        self.assertIn("pdocker_vk_image_view_type_supported_for_transport", icd_view_body)
+        self.assertIn("image-view-type-unsupported", icd_view_body)
+        icd_type_body = c_function_body(icd, "pdocker_vk_image_view_type_supported_for_transport")
+        for token in [
+            "VK_IMAGE_VIEW_TYPE_1D",
+            "VK_IMAGE_VIEW_TYPE_1D_ARRAY",
+            "VK_IMAGE_VIEW_TYPE_2D",
+            "VK_IMAGE_VIEW_TYPE_2D_ARRAY",
+            "VK_IMAGE_VIEW_TYPE_CUBE",
+            "VK_IMAGE_VIEW_TYPE_CUBE_ARRAY",
+            "VK_IMAGE_VIEW_TYPE_3D",
+            "range->baseArrayLayer % 6",
+            "range->layerCount % 6",
+        ]:
+            self.assertIn(token, icd_type_body)
+
+        self.assertIn("vulkan_dispatch_image_create_shape_valid", executor)
+        self.assertIn("vulkan_dispatch_image_view_type_valid", executor)
+        exec_range_body = c_function_body(executor, "vulkan_dispatch_image_view_range_valid")
+        self.assertIn("vulkan_dispatch_image_view_type_valid(image, view)", exec_range_body)
+        exec_shape_body = c_function_body(executor, "vulkan_dispatch_image_create_shape_valid")
+        self.assertIn("VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT", exec_shape_body)
+        self.assertIn("image->array_layers < 6", exec_shape_body)
+        materialize_body = c_function_body(executor, "materialize_vulkan_dispatch_images")
+        self.assertIn("vulkan_dispatch_image_create_shape_valid(src)", materialize_body)
+        self.assertIn("vulkan_dispatch_image_view_range_valid(src_image, src)", materialize_body)
+        self.assertLess(
+            materialize_body.find("vulkan_dispatch_image_view_range_valid(src_image, src)"),
+            materialize_body.find("vkCreateImageView"),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

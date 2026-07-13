@@ -17482,6 +17482,60 @@ static VkResult validate_image_create_pnext_for_transport(const VkImageCreateInf
     return VK_SUCCESS;
 }
 
+static bool pdocker_vk_image_create_shape_supported_for_transport(const VkImageCreateInfo *info) {
+    if (!info) return false;
+    if ((info->flags & VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT) != 0) {
+        if (info->imageType != VK_IMAGE_TYPE_2D ||
+            info->extent.width != info->extent.height ||
+            info->extent.depth != 1 ||
+            info->arrayLayers < 6) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool pdocker_vk_image_is_cube_compatible_for_transport(const PdockerVkImage *image) {
+    return image &&
+           (image->flags & VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT) != 0 &&
+           image->image_type == VK_IMAGE_TYPE_2D &&
+           image->extent.width == image->extent.height &&
+           image->extent.depth == 1 &&
+           image->array_layers >= 6;
+}
+
+static bool pdocker_vk_image_view_type_supported_for_transport(
+        const PdockerVkImage *image,
+        VkImageViewType view_type,
+        const VkImageSubresourceRange *range) {
+    if (!image || !range) return false;
+    switch (view_type) {
+        case VK_IMAGE_VIEW_TYPE_1D:
+            return image->image_type == VK_IMAGE_TYPE_1D && range->layerCount == 1;
+        case VK_IMAGE_VIEW_TYPE_1D_ARRAY:
+            return image->image_type == VK_IMAGE_TYPE_1D;
+        case VK_IMAGE_VIEW_TYPE_2D:
+            return image->image_type == VK_IMAGE_TYPE_2D && range->layerCount == 1;
+        case VK_IMAGE_VIEW_TYPE_2D_ARRAY:
+            return image->image_type == VK_IMAGE_TYPE_2D;
+        case VK_IMAGE_VIEW_TYPE_CUBE:
+            return pdocker_vk_image_is_cube_compatible_for_transport(image) &&
+                   (range->baseArrayLayer % 6) == 0 &&
+                   range->layerCount == 6;
+        case VK_IMAGE_VIEW_TYPE_CUBE_ARRAY:
+            return pdocker_vk_image_is_cube_compatible_for_transport(image) &&
+                   (range->baseArrayLayer % 6) == 0 &&
+                   range->layerCount >= 6 &&
+                   (range->layerCount % 6) == 0;
+        case VK_IMAGE_VIEW_TYPE_3D:
+            return image->image_type == VK_IMAGE_TYPE_3D &&
+                   range->baseArrayLayer == 0 &&
+                   range->layerCount == 1;
+        default:
+            return false;
+    }
+}
+
 static VkResult validate_image_create_info_for_transport(const VkImageCreateInfo *info) {
     if (!info) return VK_ERROR_INITIALIZATION_FAILED;
     if (!pdocker_vk_sharing_mode_is_single_advertised_family(
@@ -17493,6 +17547,11 @@ static VkResult validate_image_create_info_for_transport(const VkImageCreateInfo
         trace_icd_runtime_failure("image-sharing-mode-unsupported",
                                   VK_ERROR_FEATURE_NOT_PRESENT);
         return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    if (!pdocker_vk_image_create_shape_supported_for_transport(info)) {
+        trace_icd_runtime_failure("image-create-shape-unsupported",
+                                  VK_ERROR_FORMAT_NOT_SUPPORTED);
+        return VK_ERROR_FORMAT_NOT_SUPPORTED;
     }
     VkResult pnext_rc = validate_image_create_pnext_for_transport(info);
     if (pnext_rc != VK_SUCCESS) return pnext_rc;
@@ -17596,6 +17655,12 @@ static VkResult validate_image_view_create_info_for_transport(
     VkImageSubresourceRange normalized_range;
     if (!normalize_image_view_subresource_range_for_transport(
             image, &info->subresourceRange, &normalized_range)) {
+        return VK_ERROR_FORMAT_NOT_SUPPORTED;
+    }
+    if (!pdocker_vk_image_view_type_supported_for_transport(
+            image, info->viewType, &normalized_range)) {
+        trace_icd_runtime_failure("image-view-type-unsupported",
+                                  VK_ERROR_FORMAT_NOT_SUPPORTED);
         return VK_ERROR_FORMAT_NOT_SUPPORTED;
     }
     if (normalized_range_out) *normalized_range_out = normalized_range;

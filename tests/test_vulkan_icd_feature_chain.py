@@ -530,6 +530,139 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
+    def test_image_view_type_compatibility_is_fail_closed(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            static VkImageCreateInfo base_image_info(void) {{
+                VkImageCreateInfo info;
+                memset(&info, 0, sizeof(info));
+                info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+                info.imageType = VK_IMAGE_TYPE_2D;
+                info.format = VK_FORMAT_R8G8B8A8_UNORM;
+                info.extent.width = 64;
+                info.extent.height = 64;
+                info.extent.depth = 1;
+                info.mipLevels = 1;
+                info.arrayLayers = 1;
+                info.samples = VK_SAMPLE_COUNT_1_BIT;
+                info.tiling = VK_IMAGE_TILING_OPTIMAL;
+                info.usage = VK_IMAGE_USAGE_SAMPLED_BIT;
+                info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+                info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+                return info;
+            }}
+
+            static PdockerVkImage image_from_info(const VkImageCreateInfo *info) {{
+                PdockerVkImage image;
+                memset(&image, 0, sizeof(image));
+                image.flags = info->flags;
+                image.image_type = info->imageType;
+                image.format = info->format;
+                image.extent = info->extent;
+                image.mip_levels = info->mipLevels;
+                image.array_layers = info->arrayLayers;
+                image.samples = info->samples;
+                image.tiling = info->tiling;
+                image.usage = info->usage;
+                image.sharing_mode = info->sharingMode;
+                image.initial_layout = info->initialLayout;
+                image.generation = 1;
+                return image;
+            }}
+
+            static int expect_view_result(
+                    PdockerVkImage *image,
+                    VkImageViewType view_type,
+                    uint32_t base_layer,
+                    uint32_t layer_count,
+                    VkResult expected,
+                    int code) {{
+                VkImageViewCreateInfo view;
+                memset(&view, 0, sizeof(view));
+                view.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+                view.image = pdocker_vk_image_to_handle(image);
+                view.viewType = view_type;
+                view.format = image->format;
+                view.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                view.subresourceRange.baseMipLevel = 0;
+                view.subresourceRange.levelCount = 1;
+                view.subresourceRange.baseArrayLayer = base_layer;
+                view.subresourceRange.layerCount = layer_count;
+                VkResult rc = validate_image_view_create_info_for_transport(&view, NULL);
+                if (rc != expected) {{
+                    fprintf(stderr, "case %d returned %d expected %d\\n", code, rc, expected);
+                    return code;
+                }}
+                return 0;
+            }}
+
+            int main(void) {{
+                setenv("PDOCKER_VULKAN_HEAP_BYTES", "2147483648", 1);
+                setenv("PDOCKER_VULKAN_MAX_BUFFER_BYTES", "2147483648", 1);
+
+                VkImageCreateInfo info = base_image_info();
+                if (validate_image_create_info_for_transport(&info) != VK_SUCCESS) {{
+                    fprintf(stderr, "ordinary 2D image create was rejected\\n");
+                    return 2;
+                }}
+                PdockerVkImage image2d = image_from_info(&info);
+                if (expect_view_result(&image2d, VK_IMAGE_VIEW_TYPE_2D, 0, 1,
+                                       VK_SUCCESS, 3)) return 3;
+                if (expect_view_result(&image2d, VK_IMAGE_VIEW_TYPE_3D, 0, 1,
+                                       VK_ERROR_FORMAT_NOT_SUPPORTED, 4)) return 4;
+                if (expect_view_result(&image2d, VK_IMAGE_VIEW_TYPE_CUBE, 0, 1,
+                                       VK_ERROR_FORMAT_NOT_SUPPORTED, 5)) return 5;
+
+                VkImageCreateInfo bad_cube = base_image_info();
+                bad_cube.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+                bad_cube.extent.height = 32;
+                bad_cube.arrayLayers = 6;
+                if (validate_image_create_info_for_transport(&bad_cube) != VK_ERROR_FORMAT_NOT_SUPPORTED) {{
+                    fprintf(stderr, "non-square cube-compatible image was accepted\\n");
+                    return 6;
+                }}
+
+                VkImageCreateInfo cube_info = base_image_info();
+                cube_info.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+                cube_info.arrayLayers = 12;
+                if (validate_image_create_info_for_transport(&cube_info) != VK_SUCCESS) {{
+                    fprintf(stderr, "valid cube-compatible image was rejected\\n");
+                    return 7;
+                }}
+                PdockerVkImage cube = image_from_info(&cube_info);
+                if (expect_view_result(&cube, VK_IMAGE_VIEW_TYPE_CUBE, 0, 6,
+                                       VK_SUCCESS, 8)) return 8;
+                if (expect_view_result(&cube, VK_IMAGE_VIEW_TYPE_CUBE_ARRAY, 0, 12,
+                                       VK_SUCCESS, 9)) return 9;
+                if (expect_view_result(&cube, VK_IMAGE_VIEW_TYPE_CUBE, 1, 6,
+                                       VK_ERROR_FORMAT_NOT_SUPPORTED, 10)) return 10;
+
+                VkImageCreateInfo image3d_info = base_image_info();
+                image3d_info.imageType = VK_IMAGE_TYPE_3D;
+                image3d_info.extent.depth = 4;
+                image3d_info.arrayLayers = 1;
+                if (validate_image_create_info_for_transport(&image3d_info) != VK_SUCCESS) {{
+                    fprintf(stderr, "valid 3D image was rejected\\n");
+                    return 11;
+                }}
+                PdockerVkImage image3d = image_from_info(&image3d_info);
+                if (expect_view_result(&image3d, VK_IMAGE_VIEW_TYPE_3D, 0, 1,
+                                       VK_SUCCESS, 12)) return 12;
+                if (expect_view_result(&image3d, VK_IMAGE_VIEW_TYPE_2D, 0, 1,
+                                       VK_ERROR_FORMAT_NOT_SUPPORTED, 13)) return 13;
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
     def test_device_queue_lookup_shape_is_fail_closed(self):
         source = textwrap.dedent(
             f"""
