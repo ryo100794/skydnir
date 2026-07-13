@@ -3346,6 +3346,11 @@ static int vulkan_dispatch_image_create_shape_valid(
             return 0;
         }
     }
+    if ((image->create_flags & VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT) != 0) {
+        if (image->image_type != VK_IMAGE_TYPE_3D || image->array_layers != 1) {
+            return 0;
+        }
+    }
     return 1;
 }
 
@@ -3359,6 +3364,30 @@ static int vulkan_dispatch_image_cube_compatible(
            image->array_layers >= 6;
 }
 
+static int vulkan_dispatch_image_has_2d_array_compatible_slices(
+        const PdockerGpuVulkanDispatchV5ImageEntry *image) {
+    return image &&
+           (image->create_flags & VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT) != 0 &&
+           image->image_type == VK_IMAGE_TYPE_3D &&
+           image->array_layers == 1 &&
+           image->extent_depth > 0;
+}
+
+static int vulkan_dispatch_image_view_depth_slice_range_valid(
+        const PdockerGpuVulkanDispatchV5ImageEntry *image,
+        const PdockerGpuVulkanDispatchV5ImageViewEntry *view) {
+    if (!vulkan_dispatch_image_has_2d_array_compatible_slices(image) || !view) return 0;
+    if (view->base_mip_level >= image->mip_levels || view->level_count != 1 ||
+        view->layer_count == 0 || view->layer_count == VK_REMAINING_ARRAY_LAYERS) {
+        return 0;
+    }
+    uint32_t depth = (view->base_mip_level >= 31) ? 1u :
+        (image->extent_depth >> view->base_mip_level);
+    if (depth == 0) depth = 1;
+    return view->base_array_layer < depth &&
+           view->layer_count <= depth - view->base_array_layer;
+}
+
 static int vulkan_dispatch_image_view_type_valid(
         const PdockerGpuVulkanDispatchV5ImageEntry *image,
         const PdockerGpuVulkanDispatchV5ImageViewEntry *view) {
@@ -3369,9 +3398,14 @@ static int vulkan_dispatch_image_view_type_valid(
         case VK_IMAGE_VIEW_TYPE_1D_ARRAY:
             return image->image_type == VK_IMAGE_TYPE_1D;
         case VK_IMAGE_VIEW_TYPE_2D:
-            return image->image_type == VK_IMAGE_TYPE_2D && view->layer_count == 1;
+            if (image->image_type == VK_IMAGE_TYPE_2D) return view->layer_count == 1;
+            return vulkan_dispatch_image_has_2d_array_compatible_slices(image) &&
+                   view->layer_count == 1 &&
+                   vulkan_dispatch_image_view_depth_slice_range_valid(image, view);
         case VK_IMAGE_VIEW_TYPE_2D_ARRAY:
-            return image->image_type == VK_IMAGE_TYPE_2D;
+            return image->image_type == VK_IMAGE_TYPE_2D ||
+                   (vulkan_dispatch_image_has_2d_array_compatible_slices(image) &&
+                    vulkan_dispatch_image_view_depth_slice_range_valid(image, view));
         case VK_IMAGE_VIEW_TYPE_CUBE:
             return vulkan_dispatch_image_cube_compatible(image) &&
                    (view->base_array_layer % 6) == 0 &&
@@ -3408,8 +3442,15 @@ static int vulkan_dispatch_image_view_range_valid(
         return 0;
     }
     if (view->base_mip_level >= image->mip_levels ||
-        view->level_count > image->mip_levels - view->base_mip_level ||
-        view->base_array_layer >= image->array_layers ||
+        view->level_count > image->mip_levels - view->base_mip_level) {
+        return 0;
+    }
+    if (vulkan_dispatch_image_has_2d_array_compatible_slices(image) &&
+        (view->view_type == VK_IMAGE_VIEW_TYPE_2D ||
+         view->view_type == VK_IMAGE_VIEW_TYPE_2D_ARRAY)) {
+        return vulkan_dispatch_image_view_depth_slice_range_valid(image, view);
+    }
+    if (view->base_array_layer >= image->array_layers ||
         view->layer_count > image->array_layers - view->base_array_layer) {
         return 0;
     }

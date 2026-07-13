@@ -7513,6 +7513,9 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, helper_body)
 
+        exec_type_body = c_function_body(executor, "vulkan_dispatch_image_view_type_valid")
+        self.assertIn("vulkan_dispatch_image_has_2d_array_compatible_slices(image)", exec_type_body)
+        self.assertIn("vulkan_dispatch_image_view_depth_slice_range_valid(image, view)", exec_type_body)
         materialize_body = c_function_body(executor, "materialize_vulkan_dispatch_images")
         self.assertIn("vulkan_sampler_entry_supported_by_runtime(rt, src, &sampler_reason)", materialize_body)
         self.assertLess(
@@ -18826,13 +18829,30 @@ class GpuAbiContractTest(unittest.TestCase):
 
         self.assertIn("pdocker_vk_image_create_shape_supported_for_transport", icd)
         self.assertIn("pdocker_vk_image_view_type_supported_for_transport", icd)
+        format_props_body = c_function_body(icd, "vkGetPhysicalDeviceImageFormatProperties")
+        self.assertIn("VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT", format_props_body)
+        self.assertIn("type != VK_IMAGE_TYPE_3D", format_props_body)
         icd_create_body = c_function_body(icd, "validate_image_create_info_for_transport")
         self.assertIn("pdocker_vk_image_create_shape_supported_for_transport(info)", icd_create_body)
         self.assertIn("image-create-shape-unsupported", icd_create_body)
         icd_view_body = c_function_body(icd, "validate_image_view_create_info_for_transport")
         self.assertIn("normalize_image_view_subresource_range_for_transport", icd_view_body)
+        self.assertIn("info->viewType", icd_view_body)
         self.assertIn("pdocker_vk_image_view_type_supported_for_transport", icd_view_body)
         self.assertIn("image-view-type-unsupported", icd_view_body)
+        self.assertIn("pdocker_vk_image_has_2d_array_compatible_slices", icd)
+        self.assertIn("pdocker_vk_image_view_depth_slice_range_supported", icd)
+        icd_shape_body = c_function_body(icd, "pdocker_vk_image_create_shape_supported_for_transport")
+        self.assertIn("VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT", icd_shape_body)
+        self.assertIn("info->imageType != VK_IMAGE_TYPE_3D", icd_shape_body)
+        self.assertIn("info->arrayLayers != 1", icd_shape_body)
+        icd_depth_body = c_function_body(icd, "pdocker_vk_image_view_depth_slice_range_supported")
+        self.assertIn("range->levelCount != 1", icd_depth_body)
+        self.assertIn("range->baseMipLevel >= 31", icd_depth_body)
+        icd_normalize_body = c_function_body(icd, "normalize_image_view_subresource_range_for_transport")
+        self.assertIn("view_type == VK_IMAGE_VIEW_TYPE_2D", icd_normalize_body)
+        self.assertIn("view_type == VK_IMAGE_VIEW_TYPE_2D_ARRAY", icd_normalize_body)
+        self.assertIn("out->levelCount != 1", icd_normalize_body)
         icd_type_body = c_function_body(icd, "pdocker_vk_image_view_type_supported_for_transport")
         for token in [
             "VK_IMAGE_VIEW_TYPE_1D",
@@ -18842,6 +18862,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "VK_IMAGE_VIEW_TYPE_CUBE",
             "VK_IMAGE_VIEW_TYPE_CUBE_ARRAY",
             "VK_IMAGE_VIEW_TYPE_3D",
+            "pdocker_vk_image_has_2d_array_compatible_slices(image)",
+            "pdocker_vk_image_view_depth_slice_range_supported(image, range)",
             "range->baseArrayLayer % 6",
             "range->layerCount % 6",
         ]:
@@ -18851,9 +18873,19 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("vulkan_dispatch_image_view_type_valid", executor)
         exec_range_body = c_function_body(executor, "vulkan_dispatch_image_view_range_valid")
         self.assertIn("vulkan_dispatch_image_view_type_valid(image, view)", exec_range_body)
+        self.assertIn("vulkan_dispatch_image_has_2d_array_compatible_slices", executor)
+        self.assertIn("vulkan_dispatch_image_view_depth_slice_range_valid", executor)
+        exec_depth_body = c_function_body(executor, "vulkan_dispatch_image_view_depth_slice_range_valid")
+        self.assertIn("view->level_count != 1", exec_depth_body)
+        self.assertIn("view->base_mip_level >= 31", exec_depth_body)
+        self.assertIn("view->view_type == VK_IMAGE_VIEW_TYPE_2D", exec_range_body)
+        self.assertIn("view->view_type == VK_IMAGE_VIEW_TYPE_2D_ARRAY", exec_range_body)
         exec_shape_body = c_function_body(executor, "vulkan_dispatch_image_create_shape_valid")
         self.assertIn("VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT", exec_shape_body)
         self.assertIn("image->array_layers < 6", exec_shape_body)
+        self.assertIn("VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT", exec_shape_body)
+        self.assertIn("image->image_type != VK_IMAGE_TYPE_3D", exec_shape_body)
+        self.assertIn("image->array_layers != 1", exec_shape_body)
         materialize_body = c_function_body(executor, "materialize_vulkan_dispatch_images")
         self.assertIn("vulkan_dispatch_image_create_shape_valid(src)", materialize_body)
         self.assertIn("vulkan_dispatch_image_view_range_valid(src_image, src)", materialize_body)

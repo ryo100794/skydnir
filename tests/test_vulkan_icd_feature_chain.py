@@ -575,9 +575,11 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 return image;
             }}
 
-            static int expect_view_result(
+            static int expect_view_mip_result(
                     PdockerVkImage *image,
                     VkImageViewType view_type,
+                    uint32_t base_mip,
+                    uint32_t level_count,
                     uint32_t base_layer,
                     uint32_t layer_count,
                     VkResult expected,
@@ -589,8 +591,8 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 view.viewType = view_type;
                 view.format = image->format;
                 view.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-                view.subresourceRange.baseMipLevel = 0;
-                view.subresourceRange.levelCount = 1;
+                view.subresourceRange.baseMipLevel = base_mip;
+                view.subresourceRange.levelCount = level_count;
                 view.subresourceRange.baseArrayLayer = base_layer;
                 view.subresourceRange.layerCount = layer_count;
                 VkResult rc = validate_image_view_create_info_for_transport(&view, NULL);
@@ -599,6 +601,17 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     return code;
                 }}
                 return 0;
+            }}
+
+            static int expect_view_result(
+                    PdockerVkImage *image,
+                    VkImageViewType view_type,
+                    uint32_t base_layer,
+                    uint32_t layer_count,
+                    VkResult expected,
+                    int code) {{
+                return expect_view_mip_result(
+                    image, view_type, 0, 1, base_layer, layer_count, expected, code);
             }}
 
             int main(void) {{
@@ -655,6 +668,63 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                                        VK_SUCCESS, 12)) return 12;
                 if (expect_view_result(&image3d, VK_IMAGE_VIEW_TYPE_2D, 0, 1,
                                        VK_ERROR_FORMAT_NOT_SUPPORTED, 13)) return 13;
+
+                VkImageCreateInfo image3d_sliced_info = base_image_info();
+                image3d_sliced_info.flags = VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT;
+                image3d_sliced_info.imageType = VK_IMAGE_TYPE_3D;
+                image3d_sliced_info.extent.depth = 8;
+                image3d_sliced_info.mipLevels = 2;
+                image3d_sliced_info.arrayLayers = 1;
+                if (validate_image_create_info_for_transport(&image3d_sliced_info) != VK_SUCCESS) {{
+                    fprintf(stderr, "valid 3D 2D-array-compatible image was rejected\\n");
+                    return 14;
+                }}
+                PdockerVkImage image3d_sliced = image_from_info(&image3d_sliced_info);
+                if (expect_view_result(&image3d_sliced, VK_IMAGE_VIEW_TYPE_2D, 3, 1,
+                                       VK_SUCCESS, 15)) return 15;
+                if (expect_view_result(&image3d_sliced, VK_IMAGE_VIEW_TYPE_2D_ARRAY, 0, 8,
+                                       VK_SUCCESS, 16)) return 16;
+                if (expect_view_result(&image3d_sliced, VK_IMAGE_VIEW_TYPE_2D_ARRAY, 4, 5,
+                                       VK_ERROR_FORMAT_NOT_SUPPORTED, 17)) return 17;
+                if (expect_view_mip_result(&image3d_sliced, VK_IMAGE_VIEW_TYPE_2D_ARRAY,
+                                           0, 2, 0, 1,
+                                           VK_ERROR_FORMAT_NOT_SUPPORTED, 18)) return 18;
+                if (expect_view_mip_result(&image3d_sliced, VK_IMAGE_VIEW_TYPE_2D_ARRAY,
+                                           0, VK_REMAINING_MIP_LEVELS, 0, 1,
+                                           VK_ERROR_FORMAT_NOT_SUPPORTED, 19)) return 19;
+                if (expect_view_mip_result(&image3d_sliced, VK_IMAGE_VIEW_TYPE_2D,
+                                           1, VK_REMAINING_MIP_LEVELS, 3, 1,
+                                           VK_SUCCESS, 20)) return 20;
+                if (expect_view_mip_result(&image3d_sliced, VK_IMAGE_VIEW_TYPE_2D,
+                                           1, 1, 4, 1,
+                                           VK_ERROR_FORMAT_NOT_SUPPORTED, 21)) return 21;
+                if (expect_view_mip_result(&image3d_sliced, VK_IMAGE_VIEW_TYPE_3D,
+                                           0, 1, 0, VK_REMAINING_ARRAY_LAYERS,
+                                           VK_SUCCESS, 22)) return 22;
+
+                VkImageCreateInfo bad_2d_array_flag = base_image_info();
+                bad_2d_array_flag.flags = VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT;
+                if (validate_image_create_info_for_transport(&bad_2d_array_flag) != VK_ERROR_FORMAT_NOT_SUPPORTED) {{
+                    fprintf(stderr, "2D image with 2D-array-compatible flag was accepted\\n");
+                    return 23;
+                }}
+
+                VkImageFormatProperties props;
+                memset(&props, 0, sizeof(props));
+                if (vkGetPhysicalDeviceImageFormatProperties(
+                        VK_NULL_HANDLE, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_TYPE_3D,
+                        VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_SAMPLED_BIT,
+                        VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT, &props) != VK_SUCCESS) {{
+                    fprintf(stderr, "format query rejected valid 3D 2D-array-compatible flag\\n");
+                    return 24;
+                }}
+                if (vkGetPhysicalDeviceImageFormatProperties(
+                        VK_NULL_HANDLE, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_TYPE_2D,
+                        VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_SAMPLED_BIT,
+                        VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT, &props) != VK_ERROR_FORMAT_NOT_SUPPORTED) {{
+                    fprintf(stderr, "format query accepted 2D 2D-array-compatible flag\\n");
+                    return 25;
+                }}
                 return 0;
             }}
             """
