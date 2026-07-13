@@ -3273,7 +3273,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("vulkan_graphics_attachment_layout_supported", executor)
         self.assertIn("vulkan_graphics_attachment_required_usage", executor)
         self.assertIn("vulkan_graphics_merge_attachment_copy_range", executor)
-        self.assertIn("effective_load_op == VK_ATTACHMENT_LOAD_OP_LOAD && image->requires_staging", executor)
+        self.assertIn("effective_load_op == (uint32_t)VK_ATTACHMENT_LOAD_OP_LOAD && image->requires_staging", executor)
         self.assertIn("image->descriptor_layout = (VkImageLayout)attachment->layout", executor)
         self.assertIn("rc = record_vulkan_graphics_v6_staged_image_uploads(command_buffer, attachments);", executor)
         self.assertIn("vulkan_graphics_attachment_writeback_access_mask", executor)
@@ -11379,11 +11379,11 @@ class GpuAbiContractTest(unittest.TestCase):
         )
         self.assertIn(
             "attachment->resolve_image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE &&\n"
-            "                            effective_store_op == VK_ATTACHMENT_STORE_OP_STORE",
+            "                            vulkan_graphics_attachment_store_op_writes_back(effective_store_op)",
             preflight,
         )
         self.assertIn(
-            "if (effective_store_op == VK_ATTACHMENT_STORE_OP_STORE) {\n"
+            "if (vulkan_graphics_attachment_store_op_writes_back(effective_store_op)) {\n"
             "                    return -EOPNOTSUPP;\n"
             "                }\n"
             "                writeback_image = resolve_image;",
@@ -11391,12 +11391,50 @@ class GpuAbiContractTest(unittest.TestCase):
         )
         self.assertIn(
             "if ((vulkan_graphics_attachment_layout_writes(attachment->attachment_role, attachment->layout) &&\n"
-            "                 effective_store_op == VK_ATTACHMENT_STORE_OP_STORE) ||\n"
+            "                 vulkan_graphics_attachment_store_op_writes_back(effective_store_op)) ||\n"
             "                attachment->resolve_image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE) {\n"
             "                writeback_image->writeback_needed = 1;",
             materialize,
         )
         self.assertIn("if (image->samples != VK_SAMPLE_COUNT_1_BIT) return -EOPNOTSUPP;", executor)
+
+
+    def test_vulkan_graphics_attachment_none_ops_are_centralized_and_non_writing(self):
+        executor = GPU_EXECUTOR.read_text()
+        prefix = executor.split('#include "pdocker_gpu_abi.h"', 1)[0]
+        support_body = c_function_body(executor, "vulkan_graphics_attachment_ops_supported")
+        load_support_body = c_function_body(executor, "vulkan_graphics_attachment_load_op_supported")
+        store_support_body = c_function_body(executor, "vulkan_graphics_attachment_store_op_supported")
+        writeback_body = c_function_body(executor, "vulkan_graphics_attachment_store_op_writes_back")
+        load_replay_body = c_function_body(executor, "vulkan_graphics_replay_attachment_load_op")
+        store_replay_body = c_function_body(executor, "vulkan_graphics_replay_attachment_store_op")
+        materialize = c_function_body(executor, "materialize_vulkan_graphics_v6_attachments")
+        record = c_function_body(executor, "record_vulkan_graphics_v6_command_buffer")
+
+        for marker in [
+            "VK_ATTACHMENT_LOAD_OP_NONE ((VkAttachmentLoadOp)1000400000)",
+            "VK_ATTACHMENT_LOAD_OP_NONE_KHR VK_ATTACHMENT_LOAD_OP_NONE",
+            "VK_ATTACHMENT_LOAD_OP_NONE_EXT VK_ATTACHMENT_LOAD_OP_NONE",
+            "VK_ATTACHMENT_STORE_OP_NONE ((VkAttachmentStoreOp)1000301000)",
+            "VK_ATTACHMENT_STORE_OP_NONE_KHR VK_ATTACHMENT_STORE_OP_NONE",
+            "VK_ATTACHMENT_STORE_OP_NONE_EXT VK_ATTACHMENT_STORE_OP_NONE",
+            "VK_ATTACHMENT_STORE_OP_NONE_QCOM VK_ATTACHMENT_STORE_OP_NONE",
+        ]:
+            self.assertIn(marker, prefix)
+
+        self.assertIn("vulkan_graphics_attachment_load_op_supported(load_op)", support_body)
+        self.assertIn("vulkan_graphics_attachment_store_op_supported(store_op)", support_body)
+        self.assertIn("load_op == (uint32_t)VK_ATTACHMENT_LOAD_OP_NONE", load_support_body)
+        self.assertIn("store_op == (uint32_t)VK_ATTACHMENT_STORE_OP_NONE", store_support_body)
+        self.assertIn("return store_op == (uint32_t)VK_ATTACHMENT_STORE_OP_STORE;", writeback_body)
+        self.assertNotIn("VK_ATTACHMENT_STORE_OP_NONE", writeback_body)
+        self.assertIn("? VK_ATTACHMENT_LOAD_OP_DONT_CARE", load_replay_body)
+        self.assertIn("? VK_ATTACHMENT_STORE_OP_DONT_CARE", store_replay_body)
+        self.assertIn("vulkan_graphics_attachment_store_op_writes_back(effective_store_op)", materialize)
+        self.assertIn("vulkan_graphics_replay_attachment_load_op(", record)
+        self.assertIn("vulkan_graphics_replay_attachment_store_op(", record)
+        self.assertNotIn(".loadOp = (VkAttachmentLoadOp)", record)
+        self.assertNotIn(".storeOp = (VkAttachmentStoreOp)", record)
 
 
     def test_vulkan_graphics_depth_stencil_readonly_layouts_do_not_request_writes(self):
@@ -11439,7 +11477,7 @@ class GpuAbiContractTest(unittest.TestCase):
         )
         self.assertIn(
             "if ((vulkan_graphics_attachment_layout_writes(attachment->attachment_role, attachment->layout) &&\n"
-            "                 effective_store_op == VK_ATTACHMENT_STORE_OP_STORE) ||\n"
+            "                 vulkan_graphics_attachment_store_op_writes_back(effective_store_op)) ||\n"
             "                attachment->resolve_image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE) {",
             materialize,
         )

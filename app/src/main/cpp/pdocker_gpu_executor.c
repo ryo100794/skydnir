@@ -15,6 +15,27 @@
 #ifndef VK_DEPENDENCY_DEVICE_GROUP_BIT
 #define VK_DEPENDENCY_DEVICE_GROUP_BIT ((VkDependencyFlagBits)0x00000004)
 #endif
+#ifndef VK_ATTACHMENT_LOAD_OP_NONE
+#define VK_ATTACHMENT_LOAD_OP_NONE ((VkAttachmentLoadOp)1000400000)
+#endif
+#ifndef VK_ATTACHMENT_LOAD_OP_NONE_KHR
+#define VK_ATTACHMENT_LOAD_OP_NONE_KHR VK_ATTACHMENT_LOAD_OP_NONE
+#endif
+#ifndef VK_ATTACHMENT_LOAD_OP_NONE_EXT
+#define VK_ATTACHMENT_LOAD_OP_NONE_EXT VK_ATTACHMENT_LOAD_OP_NONE
+#endif
+#ifndef VK_ATTACHMENT_STORE_OP_NONE
+#define VK_ATTACHMENT_STORE_OP_NONE ((VkAttachmentStoreOp)1000301000)
+#endif
+#ifndef VK_ATTACHMENT_STORE_OP_NONE_KHR
+#define VK_ATTACHMENT_STORE_OP_NONE_KHR VK_ATTACHMENT_STORE_OP_NONE
+#endif
+#ifndef VK_ATTACHMENT_STORE_OP_NONE_EXT
+#define VK_ATTACHMENT_STORE_OP_NONE_EXT VK_ATTACHMENT_STORE_OP_NONE
+#endif
+#ifndef VK_ATTACHMENT_STORE_OP_NONE_QCOM
+#define VK_ATTACHMENT_STORE_OP_NONE_QCOM VK_ATTACHMENT_STORE_OP_NONE
+#endif
 #include "pdocker_gpu_abi.h"
 #include <dlfcn.h>
 #include <errno.h>
@@ -26508,6 +26529,11 @@ static int validate_vulkan_graphics_v6_frame_content(
 }
 
 static int vulkan_graphics_index_stride(uint32_t index_type, uint64_t *out_stride);
+static int vulkan_graphics_attachment_load_op_supported(uint32_t load_op);
+static int vulkan_graphics_attachment_store_op_supported(uint32_t store_op);
+static int vulkan_graphics_attachment_store_op_writes_back(uint32_t store_op);
+static VkAttachmentLoadOp vulkan_graphics_replay_attachment_load_op(uint32_t load_op);
+static VkAttachmentStoreOp vulkan_graphics_replay_attachment_store_op(uint32_t store_op);
 static int vulkan_graphics_attachment_ops_supported(
         const PdockerGpuVulkanGraphicsV6AttachmentEntry *attachment,
         uint32_t role);
@@ -27019,13 +27045,13 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                             if (reason_out) *reason_out = reason;
                             return -EOPNOTSUPP;
                         }
-                        if (effective_load_op == VK_ATTACHMENT_LOAD_OP_LOAD) {
+                        if (effective_load_op == (uint32_t)VK_ATTACHMENT_LOAD_OP_LOAD) {
                             reason = "multisample attachment load replay is not implemented";
                             if (reason_out) *reason_out = reason;
                             return -EOPNOTSUPP;
                         }
                         if (attachment->resolve_image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE &&
-                            effective_store_op == VK_ATTACHMENT_STORE_OP_STORE) {
+                            vulkan_graphics_attachment_store_op_writes_back(effective_store_op)) {
                             reason = "multisample source attachment STORE readback is not implemented";
                             if (reason_out) *reason_out = reason;
                             return -EOPNOTSUPP;
@@ -29277,6 +29303,35 @@ static uint32_t vulkan_graphics_replay_queue_family_index(
     return VK_QUEUE_FAMILY_IGNORED;
 }
 
+static int vulkan_graphics_attachment_load_op_supported(uint32_t load_op) {
+    return load_op == (uint32_t)VK_ATTACHMENT_LOAD_OP_LOAD ||
+           load_op == (uint32_t)VK_ATTACHMENT_LOAD_OP_CLEAR ||
+           load_op == (uint32_t)VK_ATTACHMENT_LOAD_OP_DONT_CARE ||
+           load_op == (uint32_t)VK_ATTACHMENT_LOAD_OP_NONE;
+}
+
+static int vulkan_graphics_attachment_store_op_supported(uint32_t store_op) {
+    return store_op == (uint32_t)VK_ATTACHMENT_STORE_OP_STORE ||
+           store_op == (uint32_t)VK_ATTACHMENT_STORE_OP_DONT_CARE ||
+           store_op == (uint32_t)VK_ATTACHMENT_STORE_OP_NONE;
+}
+
+static int vulkan_graphics_attachment_store_op_writes_back(uint32_t store_op) {
+    return store_op == (uint32_t)VK_ATTACHMENT_STORE_OP_STORE;
+}
+
+static VkAttachmentLoadOp vulkan_graphics_replay_attachment_load_op(uint32_t load_op) {
+    return load_op == (uint32_t)VK_ATTACHMENT_LOAD_OP_NONE
+        ? VK_ATTACHMENT_LOAD_OP_DONT_CARE
+        : (VkAttachmentLoadOp)load_op;
+}
+
+static VkAttachmentStoreOp vulkan_graphics_replay_attachment_store_op(uint32_t store_op) {
+    return store_op == (uint32_t)VK_ATTACHMENT_STORE_OP_NONE
+        ? VK_ATTACHMENT_STORE_OP_DONT_CARE
+        : (VkAttachmentStoreOp)store_op;
+}
+
 static int vulkan_graphics_attachment_ops_supported(
         const PdockerGpuVulkanGraphicsV6AttachmentEntry *attachment,
         uint32_t role) {
@@ -29287,13 +29342,10 @@ static int vulkan_graphics_attachment_ops_supported(
     const uint32_t store_op = role == PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_STENCIL
         ? attachment->stencil_store_op
         : attachment->store_op;
-    if (load_op != VK_ATTACHMENT_LOAD_OP_LOAD &&
-        load_op != VK_ATTACHMENT_LOAD_OP_CLEAR &&
-        load_op != VK_ATTACHMENT_LOAD_OP_DONT_CARE) {
+    if (!vulkan_graphics_attachment_load_op_supported(load_op)) {
         return -EOPNOTSUPP;
     }
-    if (store_op != VK_ATTACHMENT_STORE_OP_STORE &&
-        store_op != VK_ATTACHMENT_STORE_OP_DONT_CARE) {
+    if (!vulkan_graphics_attachment_store_op_supported(store_op)) {
         return -EOPNOTSUPP;
     }
     return 0;
@@ -29690,7 +29742,7 @@ static int materialize_vulkan_graphics_v6_attachments(
             uint32_t effective_store_op = attachment->attachment_role == PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_STENCIL
                 ? attachment->stencil_store_op
                 : attachment->store_op;
-            if (effective_load_op == VK_ATTACHMENT_LOAD_OP_LOAD && image->requires_staging) {
+            if (effective_load_op == (uint32_t)VK_ATTACHMENT_LOAD_OP_LOAD && image->requires_staging) {
                 int load_range_rc = vulkan_graphics_merge_attachment_copy_range(
                     image, &replay_view->range, attachment->attachment_role);
                 if (load_range_rc != 0) return load_range_rc;
@@ -29737,7 +29789,7 @@ static int materialize_vulkan_graphics_v6_attachments(
                                                               resolve_meta->resolve_layout)) {
                     return -EOPNOTSUPP;
                 }
-                if (effective_store_op == VK_ATTACHMENT_STORE_OP_STORE) {
+                if (vulkan_graphics_attachment_store_op_writes_back(effective_store_op)) {
                     return -EOPNOTSUPP;
                 }
                 writeback_image = resolve_image;
@@ -29752,7 +29804,7 @@ static int materialize_vulkan_graphics_v6_attachments(
                 writeback_image, &writeback_view->range, attachment->attachment_role);
             if (range_rc != 0) return range_rc;
             if ((vulkan_graphics_attachment_layout_writes(attachment->attachment_role, attachment->layout) &&
-                 effective_store_op == VK_ATTACHMENT_STORE_OP_STORE) ||
+                 vulkan_graphics_attachment_store_op_writes_back(effective_store_op)) ||
                 attachment->resolve_image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE) {
                 writeback_image->writeback_needed = 1;
             }
@@ -32772,12 +32824,14 @@ static int record_vulkan_graphics_v6_command_buffer(
                         .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
                         .imageView = replay_view->view,
                         .imageLayout = (VkImageLayout)src->layout,
-                        .loadOp = (VkAttachmentLoadOp)(src->attachment_role == PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_STENCIL
-                            ? src->stencil_load_op
-                            : src->load_op),
-                        .storeOp = (VkAttachmentStoreOp)(src->attachment_role == PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_STENCIL
-                            ? src->stencil_store_op
-                            : src->store_op),
+                        .loadOp = vulkan_graphics_replay_attachment_load_op(
+                            src->attachment_role == PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_STENCIL
+                                ? src->stencil_load_op
+                                : src->load_op),
+                        .storeOp = vulkan_graphics_replay_attachment_store_op(
+                            src->attachment_role == PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_STENCIL
+                                ? src->stencil_store_op
+                                : src->store_op),
                         .clearValue = clear_values[a],
                     };
                     if (resolve_meta && resolve_replay_view) {
