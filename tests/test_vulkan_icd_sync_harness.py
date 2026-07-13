@@ -1060,5 +1060,190 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
 
 
 
+
+    def test_submit2_struct_shape_failures_do_not_mutate_fence(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include <stdlib.h>
+            #include "{ICD_SOURCE}"
+
+            static VkFence make_signaled_fence(void) {{
+                VkFence fence = VK_NULL_HANDLE;
+                VkFenceCreateInfo create_info;
+                memset(&create_info, 0, sizeof(create_info));
+                create_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+                create_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+                if (vkCreateFence(VK_NULL_HANDLE, &create_info, NULL, &fence) != VK_SUCCESS) return VK_NULL_HANDLE;
+                return fence;
+            }}
+
+            static VkSemaphore make_binary_semaphore(void) {{
+                VkSemaphore semaphore = VK_NULL_HANDLE;
+                VkSemaphoreCreateInfo create_info;
+                memset(&create_info, 0, sizeof(create_info));
+                create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+                if (vkCreateSemaphore(VK_NULL_HANDLE, &create_info, NULL, &semaphore) != VK_SUCCESS) return VK_NULL_HANDLE;
+                return semaphore;
+            }}
+
+            static int expect_submit2_failure_preserves_fence(VkSubmitInfo2 *submit, VkResult expected, int code) {{
+                VkFence fence = make_signaled_fence();
+                if (!fence) return code + 100;
+                VkResult rc = vkQueueSubmit2(VK_NULL_HANDLE, 1, submit, fence);
+                if (rc != expected) {{
+                    fprintf(stderr, "case %d returned %d expected %d\\n", code, rc, expected);
+                    return code;
+                }}
+                if (vkGetFenceStatus(VK_NULL_HANDLE, fence) != VK_SUCCESS) {{
+                    fprintf(stderr, "case %d mutated signaled fence during prevalidation\\n", code);
+                    return code + 200;
+                }}
+                vkDestroyFence(VK_NULL_HANDLE, fence, NULL);
+                return 0;
+            }}
+
+            int main(void) {{
+                unsetenv("PDOCKER_GPU_QUEUE_SOCKET");
+
+                VkSubmitInfo2 submit;
+                memset(&submit, 0, sizeof(submit));
+                submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
+                if (vkQueueSubmit2(VK_NULL_HANDLE, 1, &submit, VK_NULL_HANDLE) != VK_SUCCESS) {{
+                    fprintf(stderr, "valid empty submit2 failed\\n");
+                    return 2;
+                }}
+
+                VkBaseInStructure unsupported;
+                memset(&unsupported, 0, sizeof(unsupported));
+                unsupported.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+
+                submit.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+                int err = expect_submit2_failure_preserves_fence(&submit, VK_ERROR_INITIALIZATION_FAILED, 3);
+                if (err) return err;
+                submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
+
+                submit.pNext = &unsupported;
+                err = expect_submit2_failure_preserves_fence(&submit, VK_ERROR_FEATURE_NOT_PRESENT, 4);
+                if (err) return err;
+                submit.pNext = NULL;
+
+                submit.flags = (VkSubmitFlags)1u;
+                err = expect_submit2_failure_preserves_fence(&submit, VK_ERROR_FEATURE_NOT_PRESENT, 5);
+                if (err) return err;
+                submit.flags = 0;
+
+                submit.waitSemaphoreInfoCount = 1;
+                submit.pWaitSemaphoreInfos = NULL;
+                err = expect_submit2_failure_preserves_fence(&submit, VK_ERROR_INITIALIZATION_FAILED, 6);
+                if (err) return err;
+                submit.waitSemaphoreInfoCount = 0;
+
+                submit.commandBufferInfoCount = 1;
+                submit.pCommandBufferInfos = NULL;
+                err = expect_submit2_failure_preserves_fence(&submit, VK_ERROR_INITIALIZATION_FAILED, 7);
+                if (err) return err;
+                submit.commandBufferInfoCount = 0;
+
+                submit.signalSemaphoreInfoCount = 1;
+                submit.pSignalSemaphoreInfos = NULL;
+                err = expect_submit2_failure_preserves_fence(&submit, VK_ERROR_INITIALIZATION_FAILED, 8);
+                if (err) return err;
+                submit.signalSemaphoreInfoCount = 0;
+
+                VkSemaphore semaphore = make_binary_semaphore();
+                if (!semaphore) return 9;
+
+                VkSemaphoreSubmitInfo sem_info;
+                memset(&sem_info, 0, sizeof(sem_info));
+                sem_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+                sem_info.semaphore = semaphore;
+                submit.waitSemaphoreInfoCount = 1;
+                submit.pWaitSemaphoreInfos = &sem_info;
+                err = expect_submit2_failure_preserves_fence(&submit, VK_ERROR_INITIALIZATION_FAILED, 10);
+                if (err) return err;
+
+                sem_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+                sem_info.semaphore = VK_NULL_HANDLE;
+                err = expect_submit2_failure_preserves_fence(&submit, VK_ERROR_INITIALIZATION_FAILED, 11);
+                if (err) return err;
+
+                sem_info.semaphore = semaphore;
+                sem_info.pNext = &unsupported;
+                err = expect_submit2_failure_preserves_fence(&submit, VK_ERROR_FEATURE_NOT_PRESENT, 12);
+                if (err) return err;
+                sem_info.pNext = NULL;
+
+                sem_info.deviceIndex = 1;
+                err = expect_submit2_failure_preserves_fence(&submit, VK_ERROR_FEATURE_NOT_PRESENT, 13);
+                if (err) return err;
+                sem_info.deviceIndex = 0;
+                submit.waitSemaphoreInfoCount = 0;
+                submit.pWaitSemaphoreInfos = NULL;
+
+                memset(&sem_info, 0, sizeof(sem_info));
+                sem_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+                sem_info.semaphore = semaphore;
+                submit.signalSemaphoreInfoCount = 1;
+                submit.pSignalSemaphoreInfos = &sem_info;
+                err = expect_submit2_failure_preserves_fence(&submit, VK_ERROR_INITIALIZATION_FAILED, 14);
+                if (err) return err;
+
+                sem_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+                sem_info.semaphore = VK_NULL_HANDLE;
+                err = expect_submit2_failure_preserves_fence(&submit, VK_ERROR_INITIALIZATION_FAILED, 15);
+                if (err) return err;
+
+                sem_info.semaphore = semaphore;
+                sem_info.pNext = &unsupported;
+                err = expect_submit2_failure_preserves_fence(&submit, VK_ERROR_FEATURE_NOT_PRESENT, 16);
+                if (err) return err;
+                sem_info.pNext = NULL;
+
+                sem_info.deviceIndex = 1;
+                err = expect_submit2_failure_preserves_fence(&submit, VK_ERROR_FEATURE_NOT_PRESENT, 17);
+                if (err) return err;
+                sem_info.deviceIndex = 0;
+                submit.signalSemaphoreInfoCount = 0;
+                submit.pSignalSemaphoreInfos = NULL;
+
+                PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)calloc(1, sizeof(*cmd));
+                if (!cmd) return 18;
+                VkCommandBufferSubmitInfo cmd_info;
+                memset(&cmd_info, 0, sizeof(cmd_info));
+                cmd_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+                cmd_info.commandBuffer = (VkCommandBuffer)cmd;
+                submit.commandBufferInfoCount = 1;
+                submit.pCommandBufferInfos = &cmd_info;
+                err = expect_submit2_failure_preserves_fence(&submit, VK_ERROR_INITIALIZATION_FAILED, 19);
+                if (err) return err;
+
+                cmd_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
+                cmd_info.commandBuffer = VK_NULL_HANDLE;
+                err = expect_submit2_failure_preserves_fence(&submit, VK_ERROR_INITIALIZATION_FAILED, 20);
+                if (err) return err;
+
+                cmd_info.commandBuffer = (VkCommandBuffer)cmd;
+                cmd_info.pNext = &unsupported;
+                err = expect_submit2_failure_preserves_fence(&submit, VK_ERROR_FEATURE_NOT_PRESENT, 21);
+                if (err) return err;
+                cmd_info.pNext = NULL;
+
+                cmd_info.deviceMask = 2;
+                err = expect_submit2_failure_preserves_fence(&submit, VK_ERROR_FEATURE_NOT_PRESENT, 22);
+                if (err) return err;
+
+                free(cmd);
+                vkDestroySemaphore(VK_NULL_HANDLE, semaphore, NULL);
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

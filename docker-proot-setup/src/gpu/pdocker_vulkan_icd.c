@@ -26121,10 +26121,39 @@ static void complete_submit_semaphores(
     }
 }
 
+static VkResult validate_submit2_info_shape(const VkSubmitInfo2 *submit) {
+    if (!submit || submit->sType != VK_STRUCTURE_TYPE_SUBMIT_INFO_2) {
+        trace_icd_runtime_failure("submit2-stype-invalid", VK_ERROR_INITIALIZATION_FAILED);
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    if (submit->waitSemaphoreInfoCount > 0 && !submit->pWaitSemaphoreInfos) {
+        trace_icd_runtime_failure("submit2-wait-array-missing", VK_ERROR_INITIALIZATION_FAILED);
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    if (submit->commandBufferInfoCount > 0 && !submit->pCommandBufferInfos) {
+        trace_icd_runtime_failure("submit2-command-array-missing", VK_ERROR_INITIALIZATION_FAILED);
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    if (submit->signalSemaphoreInfoCount > 0 && !submit->pSignalSemaphoreInfos) {
+        trace_icd_runtime_failure("submit2-signal-array-missing", VK_ERROR_INITIALIZATION_FAILED);
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    return VK_SUCCESS;
+}
+
+static void free_submit2_command_arrays(VkCommandBuffer **arrays, uint32_t count) {
+    if (!arrays) return;
+    for (uint32_t i = 0; i < count; ++i) {
+        free(arrays[i]);
+    }
+    free(arrays);
+}
+
 static VkResult validate_submit2_wait_semaphores(
         const VkSubmitInfo2 *submit,
         bool allow_executor_tracked_queue_waits) {
-    if (!submit) return VK_ERROR_INITIALIZATION_FAILED;
+    VkResult shape_rc = validate_submit2_info_shape(submit);
+    if (shape_rc != VK_SUCCESS) return shape_rc;
     if (submit->pNext) {
         trace_icd_runtime_failure("submit2-pnext-unsupported",
                                   VK_ERROR_FEATURE_NOT_PRESENT);
@@ -26133,6 +26162,14 @@ static VkResult validate_submit2_wait_semaphores(
     for (uint32_t i = 0; i < submit->waitSemaphoreInfoCount; ++i) {
         const VkSemaphoreSubmitInfo *info = submit->pWaitSemaphoreInfos ? &submit->pWaitSemaphoreInfos[i] : NULL;
         if (!info) return VK_ERROR_INITIALIZATION_FAILED;
+        if (info->sType != VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO) {
+            trace_icd_runtime_failure("submit2-wait-stype-invalid", VK_ERROR_INITIALIZATION_FAILED);
+            return VK_ERROR_INITIALIZATION_FAILED;
+        }
+        if (!info->semaphore) {
+            trace_icd_runtime_failure("submit2-wait-null-semaphore", VK_ERROR_INITIALIZATION_FAILED);
+            return VK_ERROR_INITIALIZATION_FAILED;
+        }
         if (info->pNext) {
             trace_icd_runtime_failure("submit2-wait-pnext-unsupported",
                                       VK_ERROR_FEATURE_NOT_PRESENT);
@@ -26158,10 +26195,19 @@ static VkResult validate_submit2_wait_semaphores(
 }
 
 static VkResult validate_submit2_signal_semaphores(const VkSubmitInfo2 *submit) {
-    if (!submit) return VK_ERROR_INITIALIZATION_FAILED;
+    VkResult shape_rc = validate_submit2_info_shape(submit);
+    if (shape_rc != VK_SUCCESS) return shape_rc;
     for (uint32_t i = 0; i < submit->signalSemaphoreInfoCount; ++i) {
         const VkSemaphoreSubmitInfo *info = submit->pSignalSemaphoreInfos ? &submit->pSignalSemaphoreInfos[i] : NULL;
         if (!info) return VK_ERROR_INITIALIZATION_FAILED;
+        if (info->sType != VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO) {
+            trace_icd_runtime_failure("submit2-signal-stype-invalid", VK_ERROR_INITIALIZATION_FAILED);
+            return VK_ERROR_INITIALIZATION_FAILED;
+        }
+        if (!info->semaphore) {
+            trace_icd_runtime_failure("submit2-signal-null-semaphore", VK_ERROR_INITIALIZATION_FAILED);
+            return VK_ERROR_INITIALIZATION_FAILED;
+        }
         if (info->pNext) {
             trace_icd_runtime_failure("submit2-signal-pnext-unsupported",
                                       VK_ERROR_FEATURE_NOT_PRESENT);
@@ -26177,10 +26223,19 @@ static VkResult validate_submit2_signal_semaphores(const VkSubmitInfo2 *submit) 
 }
 
 static VkResult validate_submit2_command_buffers(const VkSubmitInfo2 *submit) {
-    if (!submit) return VK_ERROR_INITIALIZATION_FAILED;
+    VkResult shape_rc = validate_submit2_info_shape(submit);
+    if (shape_rc != VK_SUCCESS) return shape_rc;
     for (uint32_t i = 0; i < submit->commandBufferInfoCount; ++i) {
         const VkCommandBufferSubmitInfo *info = submit->pCommandBufferInfos ? &submit->pCommandBufferInfos[i] : NULL;
         if (!info) return VK_ERROR_INITIALIZATION_FAILED;
+        if (info->sType != VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO) {
+            trace_icd_runtime_failure("submit2-command-stype-invalid", VK_ERROR_INITIALIZATION_FAILED);
+            return VK_ERROR_INITIALIZATION_FAILED;
+        }
+        if (!info->commandBuffer) {
+            trace_icd_runtime_failure("submit2-command-null-command-buffer", VK_ERROR_INITIALIZATION_FAILED);
+            return VK_ERROR_INITIALIZATION_FAILED;
+        }
         if (info->pNext) {
             trace_icd_runtime_failure("submit2-command-pnext-unsupported",
                                       VK_ERROR_FEATURE_NOT_PRESENT);
@@ -27305,19 +27360,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2(
                                       VK_ERROR_FEATURE_NOT_PRESENT);
             return VK_ERROR_FEATURE_NOT_PRESENT;
         }
-        if (src->waitSemaphoreInfoCount > 0 && !src->pWaitSemaphoreInfos) {
-            return VK_ERROR_INITIALIZATION_FAILED;
-        }
-        VkResult validate_rc = validate_submit2_wait_semaphores(src, bridge_available());
+        VkResult validate_rc = validate_submit2_info_shape(src);
         if (validate_rc != VK_SUCCESS) return validate_rc;
-        if (src->commandBufferInfoCount > 0 && !src->pCommandBufferInfos) {
-            return VK_ERROR_INITIALIZATION_FAILED;
-        }
+        validate_rc = validate_submit2_wait_semaphores(src, bridge_available());
+        if (validate_rc != VK_SUCCESS) return validate_rc;
         validate_rc = validate_submit2_command_buffers(src);
         if (validate_rc != VK_SUCCESS) return validate_rc;
-        if (src->signalSemaphoreInfoCount > 0 && !src->pSignalSemaphoreInfos) {
-            return VK_ERROR_INITIALIZATION_FAILED;
-        }
         validate_rc = validate_submit2_signal_semaphores(src);
         if (validate_rc != VK_SUCCESS) return validate_rc;
         PdockerGpuVulkanGraphicsV619SubmitSyncEntry validate_entries[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
@@ -27329,6 +27377,21 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2(
             return VK_ERROR_FEATURE_NOT_PRESENT;
         }
     }
+    VkCommandBuffer **submit2_cmd_arrays = calloc(submitCount, sizeof(*submit2_cmd_arrays));
+    if (!submit2_cmd_arrays) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    for (uint32_t i = 0; i < submitCount; ++i) {
+        const VkSubmitInfo2 *src = &pSubmits[i];
+        if (src->commandBufferInfoCount == 0) continue;
+        submit2_cmd_arrays[i] = calloc(src->commandBufferInfoCount, sizeof(*submit2_cmd_arrays[i]));
+        if (!submit2_cmd_arrays[i]) {
+            free_submit2_command_arrays(submit2_cmd_arrays, submitCount);
+            return VK_ERROR_OUT_OF_HOST_MEMORY;
+        }
+        for (uint32_t j = 0; j < src->commandBufferInfoCount; ++j) {
+            submit2_cmd_arrays[i][j] = src->pCommandBufferInfos[j].commandBuffer;
+        }
+    }
+
     PdockerVkFence *submit_fence = pdocker_vk_fence_from_handle(fence);
     if (submit_fence) submit_fence->signaled = false;
     for (uint32_t i = 0; i < submitCount; ++i) {
@@ -27336,23 +27399,29 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2(
         if (src->flags != 0) {
             trace_icd_runtime_failure("submit2-flags-unsupported",
                                       VK_ERROR_FEATURE_NOT_PRESENT);
+            free_submit2_command_arrays(submit2_cmd_arrays, submitCount);
             return VK_ERROR_FEATURE_NOT_PRESENT;
         }
-        if (src->waitSemaphoreInfoCount > 0 && !src->pWaitSemaphoreInfos) {
-            return VK_ERROR_INITIALIZATION_FAILED;
+        VkResult rc = validate_submit2_info_shape(src);
+        if (rc != VK_SUCCESS) {
+            free_submit2_command_arrays(submit2_cmd_arrays, submitCount);
+            return rc;
         }
-        VkResult rc = validate_submit2_wait_semaphores(src, bridge_available());
-        if (rc != VK_SUCCESS) return rc;
-        if (src->commandBufferInfoCount > 0 && !src->pCommandBufferInfos) {
-            return VK_ERROR_INITIALIZATION_FAILED;
+        rc = validate_submit2_wait_semaphores(src, bridge_available());
+        if (rc != VK_SUCCESS) {
+            free_submit2_command_arrays(submit2_cmd_arrays, submitCount);
+            return rc;
         }
         rc = validate_submit2_command_buffers(src);
-        if (rc != VK_SUCCESS) return rc;
-        if (src->signalSemaphoreInfoCount > 0 && !src->pSignalSemaphoreInfos) {
-            return VK_ERROR_INITIALIZATION_FAILED;
+        if (rc != VK_SUCCESS) {
+            free_submit2_command_arrays(submit2_cmd_arrays, submitCount);
+            return rc;
         }
         rc = validate_submit2_signal_semaphores(src);
-        if (rc != VK_SUCCESS) return rc;
+        if (rc != VK_SUCCESS) {
+            free_submit2_command_arrays(submit2_cmd_arrays, submitCount);
+            return rc;
+        }
 
         PdockerGpuVulkanGraphicsV619SubmitSyncEntry submit2_sync_entries[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
         size_t submit2_sync_count = 0;
@@ -27360,6 +27429,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2(
         if (!collect_submit2_submit_sync_entries(src, submit2_fence,
                                                  submit2_sync_entries, &submit2_sync_count)) {
             trace_icd_runtime_failure("submit2-sync-metadata-overflow", VK_ERROR_FEATURE_NOT_PRESENT);
+            free_submit2_command_arrays(submit2_cmd_arrays, submitCount);
             return VK_ERROR_FEATURE_NOT_PRESENT;
         }
 
@@ -27367,24 +27437,19 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2(
         memset(&legacy_submit, 0, sizeof(legacy_submit));
         legacy_submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         legacy_submit.commandBufferCount = src->commandBufferInfoCount;
-        VkCommandBuffer *cmds = NULL;
-        if (src->commandBufferInfoCount > 0) {
-            cmds = calloc(src->commandBufferInfoCount, sizeof(*cmds));
-            if (!cmds) return VK_ERROR_OUT_OF_HOST_MEMORY;
-            for (uint32_t j = 0; j < src->commandBufferInfoCount; ++j) {
-                cmds[j] = src->pCommandBufferInfos[j].commandBuffer;
-            }
-            legacy_submit.pCommandBuffers = cmds;
-        }
+        legacy_submit.pCommandBuffers = submit2_cmd_arrays[i];
         set_submit_sync_override(submit2_sync_entries, submit2_sync_count);
         set_submit2_metadata_override(src);
         rc = vkQueueSubmit(queue, 1, &legacy_submit, VK_NULL_HANDLE);
         clear_submit2_metadata_override();
         clear_submit_sync_override();
-        free(cmds);
-        if (rc != VK_SUCCESS) return rc;
+        if (rc != VK_SUCCESS) {
+            free_submit2_command_arrays(submit2_cmd_arrays, submitCount);
+            return rc;
+        }
         complete_submit2_semaphores(src);
     }
+    free_submit2_command_arrays(submit2_cmd_arrays, submitCount);
     if (submit_fence) {
         submit_fence->signaled = true;
         (void)send_executor_fence_signal(submit_fence);
