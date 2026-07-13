@@ -17687,6 +17687,19 @@ static VkResult validate_image_view_pnext_for_transport(
                 }
                 break;
             }
+            case VK_STRUCTURE_TYPE_IMAGE_VIEW_MIN_LOD_CREATE_INFO_EXT: {
+                const VkImageViewMinLodCreateInfoEXT *min_lod_info =
+                    (const VkImageViewMinLodCreateInfoEXT *)node;
+                if (min_lod_info->minLod != 0.0f) {
+                    /* The current image-view ABI has no per-view minLod field.
+                     * Accept only the default no-op value so the executor does
+                     * not silently widen an application-visible LOD clamp. */
+                    trace_icd_runtime_failure("image-view-min-lod-unsupported",
+                                              VK_ERROR_FEATURE_NOT_PRESENT);
+                    return VK_ERROR_FEATURE_NOT_PRESENT;
+                }
+                break;
+            }
             default:
                 return unsupported_image_pnext_result("vkCreateImageView", node);
         }

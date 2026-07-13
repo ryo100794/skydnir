@@ -725,6 +725,32 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     fprintf(stderr, "format query accepted 2D 2D-array-compatible flag\\n");
                     return 25;
                 }}
+
+                VkImageViewMinLodCreateInfoEXT min_lod;
+                memset(&min_lod, 0, sizeof(min_lod));
+                min_lod.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_MIN_LOD_CREATE_INFO_EXT;
+                min_lod.minLod = 0.0f;
+                VkImageViewCreateInfo min_lod_view;
+                memset(&min_lod_view, 0, sizeof(min_lod_view));
+                min_lod_view.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+                min_lod_view.pNext = &min_lod;
+                min_lod_view.image = pdocker_vk_image_to_handle(&image2d);
+                min_lod_view.viewType = VK_IMAGE_VIEW_TYPE_2D;
+                min_lod_view.format = image2d.format;
+                min_lod_view.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                min_lod_view.subresourceRange.baseMipLevel = 0;
+                min_lod_view.subresourceRange.levelCount = 1;
+                min_lod_view.subresourceRange.baseArrayLayer = 0;
+                min_lod_view.subresourceRange.layerCount = 1;
+                if (validate_image_view_create_info_for_transport(&min_lod_view, NULL) != VK_SUCCESS) {{
+                    fprintf(stderr, "no-op image view minLod pNext was rejected\\n");
+                    return 26;
+                }}
+                min_lod.minLod = 1.0f;
+                if (validate_image_view_create_info_for_transport(&min_lod_view, NULL) != VK_ERROR_FEATURE_NOT_PRESENT) {{
+                    fprintf(stderr, "nonzero image view minLod pNext was accepted\\n");
+                    return 27;
+                }}
                 return 0;
             }}
             """

@@ -9619,6 +9619,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("usage_info->usage != image->usage", image_view_pnext_body)
         self.assertIn("VkImageViewUsageCreateInfo is not represented in the", image_view_pnext_body)
         self.assertIn('trace_icd_runtime_failure("image-view-usage-pnext-unsupported"', image_view_pnext_body)
+        self.assertIn("VK_STRUCTURE_TYPE_IMAGE_VIEW_MIN_LOD_CREATE_INFO_EXT", image_view_pnext_body)
+        self.assertIn("VkImageViewMinLodCreateInfoEXT", image_view_pnext_body)
+        self.assertIn("min_lod_info->minLod != 0.0f", image_view_pnext_body)
+        self.assertIn('trace_icd_runtime_failure("image-view-min-lod-unsupported"', image_view_pnext_body)
         self.assertIn('unsupported_image_pnext_result("vkCreateImageView", node)', image_view_pnext_body)
         image_view_validate_body = icd.split("static VkResult validate_image_view_create_info_for_transport", 1)[1].split(
             "static VkResult validate_sampler_create_info_for_transport", 1
