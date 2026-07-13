@@ -66,6 +66,15 @@
 #define VK_KHR_DYNAMIC_RENDERING_SPEC_VERSION 1
 #endif
 
+#ifndef VK_KHR_LOAD_STORE_OP_NONE_EXTENSION_NAME
+#define VK_KHR_LOAD_STORE_OP_NONE_EXTENSION_NAME "VK_KHR_load_store_op_none"
+#define VK_KHR_LOAD_STORE_OP_NONE_SPEC_VERSION 1
+#endif
+#ifndef VK_EXT_LOAD_STORE_OP_NONE_EXTENSION_NAME
+#define VK_EXT_LOAD_STORE_OP_NONE_EXTENSION_NAME "VK_EXT_load_store_op_none"
+#define VK_EXT_LOAD_STORE_OP_NONE_SPEC_VERSION 1
+#endif
+
 #ifndef VK_KHR_dynamic_rendering_local_read
 #define VK_KHR_dynamic_rendering_local_read 1
 #define VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME "VK_KHR_dynamic_rendering_local_read"
@@ -14695,6 +14704,10 @@ static VkBool32 advertised_dynamic_rendering(void) {
     return (caps && caps->dynamic_rendering && caps->ext_dynamic_rendering) ? VK_TRUE : VK_FALSE;
 }
 
+static VkBool32 advertised_load_store_op_none(void) {
+    return advertised_dynamic_rendering();
+}
+
 static VkBool32 advertised_draw_indirect_count(void) {
     const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
     return (caps && caps->draw_indirect_count) ? VK_TRUE : VK_FALSE;
@@ -18474,7 +18487,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(
         VkExtensionProperties *pProperties) {
     (void)physicalDevice;
     (void)pLayerName;
-    VkExtensionProperties available[16];
+    VkExtensionProperties available[24];
     uint32_t available_count = 0;
 #define ADD_DEVICE_EXTENSION(name, version) do { \
         if (available_count < (uint32_t)(sizeof(available) / sizeof(available[0]))) { \
@@ -18513,6 +18526,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(
 #endif
     if (advertised_dynamic_rendering()) {
         ADD_DEVICE_EXTENSION(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME, VK_KHR_DYNAMIC_RENDERING_SPEC_VERSION);
+    }
+    if (advertised_load_store_op_none()) {
+        ADD_DEVICE_EXTENSION(VK_KHR_LOAD_STORE_OP_NONE_EXTENSION_NAME, VK_KHR_LOAD_STORE_OP_NONE_SPEC_VERSION);
+        ADD_DEVICE_EXTENSION(VK_EXT_LOAD_STORE_OP_NONE_EXTENSION_NAME, VK_EXT_LOAD_STORE_OP_NONE_SPEC_VERSION);
     }
 #ifdef VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME
     if (advertised_draw_indirect_count_khr()) {
@@ -18574,6 +18591,8 @@ static bool device_extension_advertised_name(const char *name) {
     if (strcmp(name, VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME) == 0) return advertised_timeline_semaphore();
 #endif
     if (strcmp(name, VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME) == 0) return advertised_dynamic_rendering();
+    if (strcmp(name, VK_KHR_LOAD_STORE_OP_NONE_EXTENSION_NAME) == 0) return advertised_load_store_op_none();
+    if (strcmp(name, VK_EXT_LOAD_STORE_OP_NONE_EXTENSION_NAME) == 0) return advertised_load_store_op_none();
 #ifdef VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME
     if (strcmp(name, VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME) == 0) {
         return advertised_draw_indirect_count_khr();

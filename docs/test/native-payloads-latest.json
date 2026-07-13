@@ -212,15 +212,15 @@
     {
       "abi": "arm64-v8a",
       "exists": true,
-      "file": "/root/tl/pdocker-android/app/src/main/jniLibs/arm64-v8a/libpdockervulkanicd.so: ELF 64-bit LSB shared object, ARM aarch64, version 1 (SYSV), dynamically linked, BuildID[sha1]=c563c4949dbfc829b8b24588cc82121955696718, not stripped",
+      "file": "/root/tl/pdocker-android/app/src/main/jniLibs/arm64-v8a/libpdockervulkanicd.so: ELF 64-bit LSB shared object, ARM aarch64, version 1 (SYSV), dynamically linked, BuildID[sha1]=dd8f692820558a257071c27bc3ce6aeec42bcb05, not stripped",
       "has_android_linker": false,
       "has_glibc_loader": false,
       "name": "libpdockervulkanicd.so",
       "path": "app/src/main/jniLibs/arm64-v8a/libpdockervulkanicd.so",
       "readelf_header_has_machine": true,
       "role": "linux-glibc-container",
-      "sha256": "b11706343314308fea0700a77e92e54ff15b68194ae351ae685c5c484963ea50",
-      "size": 493896
+      "sha256": "b568f505b786ec5484a539758c9e1e08a889d60e58f9345be3a19dbd1fddfcc1",
+      "size": 493872
     },
     {
       "abi": "arm64-v8a",
@@ -251,14 +251,14 @@
     {
       "abi": "armeabi-v7a",
       "exists": true,
-      "file": "/root/tl/pdocker-android/app/src/main/jniLibs/armeabi-v7a/libpdockervulkanicd.so: ELF 32-bit LSB shared object, ARM, EABI5 version 1 (SYSV), dynamically linked, BuildID[sha1]=cdb99ddb24787424bdfd47f92ac2639fb98642d1, not stripped",
+      "file": "/root/tl/pdocker-android/app/src/main/jniLibs/armeabi-v7a/libpdockervulkanicd.so: ELF 32-bit LSB shared object, ARM, EABI5 version 1 (SYSV), dynamically linked, BuildID[sha1]=a7bdbf2282dc40b0383aa0ccaeb3735af3a519b0, not stripped",
       "has_android_linker": false,
       "has_glibc_loader": false,
       "name": "libpdockervulkanicd.so",
       "path": "app/src/main/jniLibs/armeabi-v7a/libpdockervulkanicd.so",
       "readelf_header_has_machine": true,
       "role": "linux-glibc-container-experimental",
-      "sha256": "3b215954786c80b98cb6ea6eb14d53407b60f86c2c7b0f9a8bf937409f8fa765",
+      "sha256": "fdb0be8f627ae44c31fec93004c568187626438a971e3c93211e94bd5d9032ed",
       "size": 368300
     },
     {
