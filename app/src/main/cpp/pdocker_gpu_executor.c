@@ -1456,6 +1456,7 @@ typedef struct {
     VkPhysicalDeviceVulkan11Features physical_vulkan11;
     VkPhysicalDeviceVulkan12Features physical_vulkan12;
     VkPhysicalDeviceDescriptorIndexingFeatures physical_descriptor_indexing;
+    VkPhysicalDeviceDescriptorIndexingProperties physical_descriptor_indexing_properties;
     VkPhysicalDevice16BitStorageFeatures physical_storage16;
     VkPhysicalDevice8BitStorageFeatures physical_storage8;
     VkPhysicalDeviceShaderFloat16Int8Features physical_float16_int8;
@@ -13407,6 +13408,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     memset(&rt->physical_vulkan11, 0, sizeof(rt->physical_vulkan11));
     memset(&rt->physical_vulkan12, 0, sizeof(rt->physical_vulkan12));
     memset(&rt->physical_descriptor_indexing, 0, sizeof(rt->physical_descriptor_indexing));
+    memset(&rt->physical_descriptor_indexing_properties, 0, sizeof(rt->physical_descriptor_indexing_properties));
     memset(&rt->physical_storage16, 0, sizeof(rt->physical_storage16));
     memset(&rt->physical_storage8, 0, sizeof(rt->physical_storage8));
     memset(&rt->physical_float16_int8, 0, sizeof(rt->physical_float16_int8));
@@ -13419,6 +13421,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     rt->physical_vulkan11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
     rt->physical_vulkan12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
     rt->physical_descriptor_indexing.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
+    rt->physical_descriptor_indexing_properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES;
     rt->physical_storage16.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES;
     rt->physical_storage8.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES;
     rt->physical_float16_int8.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES;
@@ -13472,7 +13475,16 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
         memset(&properties2, 0, sizeof(properties2));
         properties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
         properties2.pNext = &rt->subgroup_properties;
+        const int descriptor_indexing_properties_available =
+            rt->api_version >= VK_API_VERSION_1_2 ||
+            vulkan_device_extension_supported(rt->physical_device,
+                                              VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME);
+        if (descriptor_indexing_properties_available) {
+            rt->subgroup_properties.pNext = &rt->physical_descriptor_indexing_properties;
+        }
         get_properties2(rt->physical_device, &properties2);
+        rt->subgroup_properties.pNext = NULL;
+        rt->physical_descriptor_indexing_properties.pNext = NULL;
     }
     uint32_t family_count = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(rt->physical_device, &family_count, NULL);
@@ -20002,6 +20014,56 @@ static void print_vulkan_advertisement_caps(const char *transport) {
             limits ? limits->lineWidthRange[0] : 1.0f,
             limits ? limits->lineWidthRange[1] : 1.0f,
             limits ? limits->lineWidthGranularity : 1.0f);
+    const VkPhysicalDeviceDescriptorIndexingProperties *descriptor_indexing_properties =
+        rt ? &rt->physical_descriptor_indexing_properties : NULL;
+    fprintf(out,
+            "\"descriptor_indexing_properties\":{"
+            "\"maxUpdateAfterBindDescriptorsInAllPools\":%u,"
+            "\"shaderUniformBufferArrayNonUniformIndexingNative\":%u,"
+            "\"shaderSampledImageArrayNonUniformIndexingNative\":%u,"
+            "\"shaderStorageBufferArrayNonUniformIndexingNative\":%u,"
+            "\"shaderStorageImageArrayNonUniformIndexingNative\":%u,"
+            "\"shaderInputAttachmentArrayNonUniformIndexingNative\":%u,"
+            "\"robustBufferAccessUpdateAfterBind\":%u,"
+            "\"quadDivergentImplicitLod\":%u,"
+            "\"maxPerStageDescriptorUpdateAfterBindSamplers\":%u,"
+            "\"maxPerStageDescriptorUpdateAfterBindUniformBuffers\":%u,"
+            "\"maxPerStageDescriptorUpdateAfterBindStorageBuffers\":%u,"
+            "\"maxPerStageDescriptorUpdateAfterBindSampledImages\":%u,"
+            "\"maxPerStageDescriptorUpdateAfterBindStorageImages\":%u,"
+            "\"maxPerStageDescriptorUpdateAfterBindInputAttachments\":%u,"
+            "\"maxPerStageUpdateAfterBindResources\":%u,"
+            "\"maxDescriptorSetUpdateAfterBindSamplers\":%u,"
+            "\"maxDescriptorSetUpdateAfterBindUniformBuffers\":%u,"
+            "\"maxDescriptorSetUpdateAfterBindUniformBuffersDynamic\":%u,"
+            "\"maxDescriptorSetUpdateAfterBindStorageBuffers\":%u,"
+            "\"maxDescriptorSetUpdateAfterBindStorageBuffersDynamic\":%u,"
+            "\"maxDescriptorSetUpdateAfterBindSampledImages\":%u,"
+            "\"maxDescriptorSetUpdateAfterBindStorageImages\":%u,"
+            "\"maxDescriptorSetUpdateAfterBindInputAttachments\":%u},",
+            descriptor_indexing_properties ? descriptor_indexing_properties->maxUpdateAfterBindDescriptorsInAllPools : 0,
+            descriptor_indexing_properties ? descriptor_indexing_properties->shaderUniformBufferArrayNonUniformIndexingNative : 0,
+            descriptor_indexing_properties ? descriptor_indexing_properties->shaderSampledImageArrayNonUniformIndexingNative : 0,
+            descriptor_indexing_properties ? descriptor_indexing_properties->shaderStorageBufferArrayNonUniformIndexingNative : 0,
+            descriptor_indexing_properties ? descriptor_indexing_properties->shaderStorageImageArrayNonUniformIndexingNative : 0,
+            descriptor_indexing_properties ? descriptor_indexing_properties->shaderInputAttachmentArrayNonUniformIndexingNative : 0,
+            descriptor_indexing_properties ? descriptor_indexing_properties->robustBufferAccessUpdateAfterBind : 0,
+            descriptor_indexing_properties ? descriptor_indexing_properties->quadDivergentImplicitLod : 0,
+            descriptor_indexing_properties ? descriptor_indexing_properties->maxPerStageDescriptorUpdateAfterBindSamplers : 0,
+            descriptor_indexing_properties ? descriptor_indexing_properties->maxPerStageDescriptorUpdateAfterBindUniformBuffers : 0,
+            descriptor_indexing_properties ? descriptor_indexing_properties->maxPerStageDescriptorUpdateAfterBindStorageBuffers : 0,
+            descriptor_indexing_properties ? descriptor_indexing_properties->maxPerStageDescriptorUpdateAfterBindSampledImages : 0,
+            descriptor_indexing_properties ? descriptor_indexing_properties->maxPerStageDescriptorUpdateAfterBindStorageImages : 0,
+            descriptor_indexing_properties ? descriptor_indexing_properties->maxPerStageDescriptorUpdateAfterBindInputAttachments : 0,
+            descriptor_indexing_properties ? descriptor_indexing_properties->maxPerStageUpdateAfterBindResources : 0,
+            descriptor_indexing_properties ? descriptor_indexing_properties->maxDescriptorSetUpdateAfterBindSamplers : 0,
+            descriptor_indexing_properties ? descriptor_indexing_properties->maxDescriptorSetUpdateAfterBindUniformBuffers : 0,
+            descriptor_indexing_properties ? descriptor_indexing_properties->maxDescriptorSetUpdateAfterBindUniformBuffersDynamic : 0,
+            descriptor_indexing_properties ? descriptor_indexing_properties->maxDescriptorSetUpdateAfterBindStorageBuffers : 0,
+            descriptor_indexing_properties ? descriptor_indexing_properties->maxDescriptorSetUpdateAfterBindStorageBuffersDynamic : 0,
+            descriptor_indexing_properties ? descriptor_indexing_properties->maxDescriptorSetUpdateAfterBindSampledImages : 0,
+            descriptor_indexing_properties ? descriptor_indexing_properties->maxDescriptorSetUpdateAfterBindStorageImages : 0,
+            descriptor_indexing_properties ? descriptor_indexing_properties->maxDescriptorSetUpdateAfterBindInputAttachments : 0);
     fprintf(out,
             "\"physical_features\":{"
             "\"shaderInt64\":%u,"

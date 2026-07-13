@@ -13930,6 +13930,7 @@ typedef struct {
     VkPhysicalDevice8BitStorageFeatures storage8;
     VkPhysicalDeviceShaderFloat16Int8Features float16_int8;
     VkPhysicalDeviceDescriptorIndexingFeatures descriptor_indexing;
+    VkPhysicalDeviceDescriptorIndexingProperties descriptor_indexing_properties;
     VkPhysicalDeviceIndexTypeUint8FeaturesEXT index_type_uint8;
     VkBool32 sampler_filter_minmax;
     VkPhysicalDeviceSubgroupProperties subgroup;
@@ -14145,6 +14146,29 @@ static bool parse_executor_advertisement_caps_json(
     json_read_u32(json, "descriptorBindingStorageBufferUpdateAfterBind", &caps->descriptor_indexing.descriptorBindingStorageBufferUpdateAfterBind);
     json_read_u32(json, "descriptorBindingUniformTexelBufferUpdateAfterBind", &caps->descriptor_indexing.descriptorBindingUniformTexelBufferUpdateAfterBind);
     json_read_u32(json, "descriptorBindingStorageTexelBufferUpdateAfterBind", &caps->descriptor_indexing.descriptorBindingStorageTexelBufferUpdateAfterBind);
+    json_read_u32(json, "maxUpdateAfterBindDescriptorsInAllPools", &caps->descriptor_indexing_properties.maxUpdateAfterBindDescriptorsInAllPools);
+    json_read_u32(json, "shaderUniformBufferArrayNonUniformIndexingNative", &caps->descriptor_indexing_properties.shaderUniformBufferArrayNonUniformIndexingNative);
+    json_read_u32(json, "shaderSampledImageArrayNonUniformIndexingNative", &caps->descriptor_indexing_properties.shaderSampledImageArrayNonUniformIndexingNative);
+    json_read_u32(json, "shaderStorageBufferArrayNonUniformIndexingNative", &caps->descriptor_indexing_properties.shaderStorageBufferArrayNonUniformIndexingNative);
+    json_read_u32(json, "shaderStorageImageArrayNonUniformIndexingNative", &caps->descriptor_indexing_properties.shaderStorageImageArrayNonUniformIndexingNative);
+    json_read_u32(json, "shaderInputAttachmentArrayNonUniformIndexingNative", &caps->descriptor_indexing_properties.shaderInputAttachmentArrayNonUniformIndexingNative);
+    json_read_u32(json, "robustBufferAccessUpdateAfterBind", &caps->descriptor_indexing_properties.robustBufferAccessUpdateAfterBind);
+    json_read_u32(json, "quadDivergentImplicitLod", &caps->descriptor_indexing_properties.quadDivergentImplicitLod);
+    json_read_u32(json, "maxPerStageDescriptorUpdateAfterBindSamplers", &caps->descriptor_indexing_properties.maxPerStageDescriptorUpdateAfterBindSamplers);
+    json_read_u32(json, "maxPerStageDescriptorUpdateAfterBindUniformBuffers", &caps->descriptor_indexing_properties.maxPerStageDescriptorUpdateAfterBindUniformBuffers);
+    json_read_u32(json, "maxPerStageDescriptorUpdateAfterBindStorageBuffers", &caps->descriptor_indexing_properties.maxPerStageDescriptorUpdateAfterBindStorageBuffers);
+    json_read_u32(json, "maxPerStageDescriptorUpdateAfterBindSampledImages", &caps->descriptor_indexing_properties.maxPerStageDescriptorUpdateAfterBindSampledImages);
+    json_read_u32(json, "maxPerStageDescriptorUpdateAfterBindStorageImages", &caps->descriptor_indexing_properties.maxPerStageDescriptorUpdateAfterBindStorageImages);
+    json_read_u32(json, "maxPerStageDescriptorUpdateAfterBindInputAttachments", &caps->descriptor_indexing_properties.maxPerStageDescriptorUpdateAfterBindInputAttachments);
+    json_read_u32(json, "maxPerStageUpdateAfterBindResources", &caps->descriptor_indexing_properties.maxPerStageUpdateAfterBindResources);
+    json_read_u32(json, "maxDescriptorSetUpdateAfterBindSamplers", &caps->descriptor_indexing_properties.maxDescriptorSetUpdateAfterBindSamplers);
+    json_read_u32(json, "maxDescriptorSetUpdateAfterBindUniformBuffers", &caps->descriptor_indexing_properties.maxDescriptorSetUpdateAfterBindUniformBuffers);
+    json_read_u32(json, "maxDescriptorSetUpdateAfterBindUniformBuffersDynamic", &caps->descriptor_indexing_properties.maxDescriptorSetUpdateAfterBindUniformBuffersDynamic);
+    json_read_u32(json, "maxDescriptorSetUpdateAfterBindStorageBuffers", &caps->descriptor_indexing_properties.maxDescriptorSetUpdateAfterBindStorageBuffers);
+    json_read_u32(json, "maxDescriptorSetUpdateAfterBindStorageBuffersDynamic", &caps->descriptor_indexing_properties.maxDescriptorSetUpdateAfterBindStorageBuffersDynamic);
+    json_read_u32(json, "maxDescriptorSetUpdateAfterBindSampledImages", &caps->descriptor_indexing_properties.maxDescriptorSetUpdateAfterBindSampledImages);
+    json_read_u32(json, "maxDescriptorSetUpdateAfterBindStorageImages", &caps->descriptor_indexing_properties.maxDescriptorSetUpdateAfterBindStorageImages);
+    json_read_u32(json, "maxDescriptorSetUpdateAfterBindInputAttachments", &caps->descriptor_indexing_properties.maxDescriptorSetUpdateAfterBindInputAttachments);
     json_read_u32(json, "indexTypeUint8", &caps->index_type_uint8.indexTypeUint8);
     if (json_read_u32(json, "timelineSemaphore", &value)) caps->timeline_semaphore = value != 0;
     if (json_read_u32(json, "synchronization2", &value)) caps->synchronization2 = value != 0;
@@ -14629,6 +14653,8 @@ static VkBool32 advertised_descriptor_binding_variable_descriptor_count(void) {
         : VK_FALSE;
 }
 
+static uint32_t pdocker_vk_max_per_set_descriptors(void);
+
 static VkBool32 advertised_descriptor_binding_update_unused_while_pending(void) {
     const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
     if (!caps || env_disabled("PDOCKER_VULKAN_DISABLE_DESCRIPTOR_UPDATE_UNUSED_WHILE_PENDING")) {
@@ -14639,14 +14665,42 @@ static VkBool32 advertised_descriptor_binding_update_unused_while_pending(void) 
         : VK_FALSE;
 }
 
-static uint32_t advertised_max_update_after_bind_descriptors_in_all_pools(void) {
+static VkBool32 advertised_descriptor_indexing_aggregate(void) {
     /*
-     * Update-after-bind features are only coherent when the corresponding
-     * descriptor-indexing properties advertise non-zero UAB capacity.  Keep
-     * this at zero until the bridge transports/replays the full per-stage and
-     * per-set UAB limit surface instead of accepting feature bits alone.
+     * Keep the Vulkan 1.2 aggregate descriptorIndexing feature false until
+     * the bridge supports the complete descriptor-indexing minimum surface.
+     * Individual implemented subfeatures are advertised independently.
      */
-    return 0;
+    return VK_FALSE;
+}
+
+static uint32_t pdocker_vk_clamp_nonzero_limit(uint32_t value, uint32_t cap) {
+    if (value == 0 || cap == 0) return 0;
+    return value < cap ? value : cap;
+}
+
+static bool advertised_descriptor_update_after_bind_native_feature_any(
+        const PdockerVkAdvertisedCaps *caps) {
+    return caps && !env_disabled("PDOCKER_VULKAN_DISABLE_DESCRIPTOR_UPDATE_AFTER_BIND") &&
+           (caps->descriptor_indexing.descriptorBindingUniformBufferUpdateAfterBind ||
+            caps->descriptor_indexing.descriptorBindingSampledImageUpdateAfterBind ||
+            caps->descriptor_indexing.descriptorBindingStorageImageUpdateAfterBind ||
+            caps->descriptor_indexing.descriptorBindingStorageBufferUpdateAfterBind ||
+            caps->descriptor_indexing.descriptorBindingUniformTexelBufferUpdateAfterBind ||
+            caps->descriptor_indexing.descriptorBindingStorageTexelBufferUpdateAfterBind);
+}
+
+static uint32_t advertised_max_update_after_bind_descriptors_in_all_pools(void) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+    if (!advertised_descriptor_update_after_bind_native_feature_any(caps)) return 0;
+    const uint64_t bridge_all_pools =
+        (uint64_t)pdocker_vk_max_per_set_descriptors() * (uint64_t)PDOCKER_VK_MAX_DESCRIPTOR_SETS;
+    const uint32_t bridge_cap = bridge_all_pools > UINT32_MAX
+        ? UINT32_MAX
+        : (uint32_t)bridge_all_pools;
+    return pdocker_vk_clamp_nonzero_limit(
+        caps->descriptor_indexing_properties.maxUpdateAfterBindDescriptorsInAllPools,
+        bridge_cap);
 }
 
 static VkBool32 advertised_descriptor_update_after_bind_limit_enabled(void) {
@@ -14654,6 +14708,42 @@ static VkBool32 advertised_descriptor_update_after_bind_limit_enabled(void) {
         ? VK_TRUE
         : VK_FALSE;
 }
+
+static uint32_t advertised_descriptor_update_after_bind_limit(
+        uint32_t native_value,
+        uint32_t bridge_cap) {
+    if (!advertised_descriptor_update_after_bind_limit_enabled()) return 0;
+    return pdocker_vk_clamp_nonzero_limit(native_value, bridge_cap);
+}
+
+#define PDOCKER_VK_FILL_DESCRIPTOR_INDEXING_PROPERTY_FIELDS(p_) do { \
+    const PdockerVkAdvertisedCaps *caps_ = executor_advertisement_caps_if_enabled(); \
+    const uint32_t per_stage_cap_ = PDOCKER_VK_MAX_STORAGE_BUFFERS; \
+    const uint32_t per_set_cap_ = pdocker_vk_max_per_set_descriptors(); \
+    (p_)->maxUpdateAfterBindDescriptorsInAllPools = advertised_max_update_after_bind_descriptors_in_all_pools(); \
+    (p_)->shaderUniformBufferArrayNonUniformIndexingNative = VK_FALSE; \
+    (p_)->shaderSampledImageArrayNonUniformIndexingNative = VK_FALSE; \
+    (p_)->shaderStorageBufferArrayNonUniformIndexingNative = VK_FALSE; \
+    (p_)->shaderStorageImageArrayNonUniformIndexingNative = VK_FALSE; \
+    (p_)->shaderInputAttachmentArrayNonUniformIndexingNative = VK_FALSE; \
+    (p_)->robustBufferAccessUpdateAfterBind = VK_FALSE; \
+    (p_)->quadDivergentImplicitLod = caps_ && caps_->descriptor_indexing_properties.quadDivergentImplicitLod ? VK_TRUE : VK_FALSE; \
+    (p_)->maxPerStageDescriptorUpdateAfterBindSamplers = advertised_descriptor_update_after_bind_limit(caps_ ? caps_->descriptor_indexing_properties.maxPerStageDescriptorUpdateAfterBindSamplers : 0, per_stage_cap_); \
+    (p_)->maxPerStageDescriptorUpdateAfterBindUniformBuffers = advertised_descriptor_update_after_bind_limit(caps_ ? caps_->descriptor_indexing_properties.maxPerStageDescriptorUpdateAfterBindUniformBuffers : 0, per_stage_cap_); \
+    (p_)->maxPerStageDescriptorUpdateAfterBindStorageBuffers = advertised_descriptor_update_after_bind_limit(caps_ ? caps_->descriptor_indexing_properties.maxPerStageDescriptorUpdateAfterBindStorageBuffers : 0, per_stage_cap_); \
+    (p_)->maxPerStageDescriptorUpdateAfterBindSampledImages = advertised_descriptor_update_after_bind_limit(caps_ ? caps_->descriptor_indexing_properties.maxPerStageDescriptorUpdateAfterBindSampledImages : 0, per_stage_cap_); \
+    (p_)->maxPerStageDescriptorUpdateAfterBindStorageImages = advertised_descriptor_update_after_bind_limit(caps_ ? caps_->descriptor_indexing_properties.maxPerStageDescriptorUpdateAfterBindStorageImages : 0, per_stage_cap_); \
+    (p_)->maxPerStageDescriptorUpdateAfterBindInputAttachments = 0; \
+    (p_)->maxPerStageUpdateAfterBindResources = advertised_descriptor_update_after_bind_limit(caps_ ? caps_->descriptor_indexing_properties.maxPerStageUpdateAfterBindResources : 0, per_set_cap_); \
+    (p_)->maxDescriptorSetUpdateAfterBindSamplers = advertised_descriptor_update_after_bind_limit(caps_ ? caps_->descriptor_indexing_properties.maxDescriptorSetUpdateAfterBindSamplers : 0, per_set_cap_); \
+    (p_)->maxDescriptorSetUpdateAfterBindUniformBuffers = advertised_descriptor_update_after_bind_limit(caps_ ? caps_->descriptor_indexing_properties.maxDescriptorSetUpdateAfterBindUniformBuffers : 0, per_stage_cap_); \
+    (p_)->maxDescriptorSetUpdateAfterBindUniformBuffersDynamic = 0; \
+    (p_)->maxDescriptorSetUpdateAfterBindStorageBuffers = advertised_descriptor_update_after_bind_limit(caps_ ? caps_->descriptor_indexing_properties.maxDescriptorSetUpdateAfterBindStorageBuffers : 0, per_stage_cap_); \
+    (p_)->maxDescriptorSetUpdateAfterBindStorageBuffersDynamic = 0; \
+    (p_)->maxDescriptorSetUpdateAfterBindSampledImages = advertised_descriptor_update_after_bind_limit(caps_ ? caps_->descriptor_indexing_properties.maxDescriptorSetUpdateAfterBindSampledImages : 0, per_set_cap_); \
+    (p_)->maxDescriptorSetUpdateAfterBindStorageImages = advertised_descriptor_update_after_bind_limit(caps_ ? caps_->descriptor_indexing_properties.maxDescriptorSetUpdateAfterBindStorageImages : 0, per_set_cap_); \
+    (p_)->maxDescriptorSetUpdateAfterBindInputAttachments = 0; \
+} while (0)
 
 static VkBool32 advertised_descriptor_binding_uniform_buffer_update_after_bind(void) {
     const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
@@ -14695,15 +14785,6 @@ static VkBool32 advertised_descriptor_binding_storage_texel_buffer_update_after_
     if (!caps || env_disabled("PDOCKER_VULKAN_DISABLE_DESCRIPTOR_UPDATE_AFTER_BIND") ||
         !advertised_descriptor_update_after_bind_limit_enabled()) return VK_FALSE;
     return caps->descriptor_indexing.descriptorBindingStorageTexelBufferUpdateAfterBind ? VK_TRUE : VK_FALSE;
-}
-
-static VkBool32 advertised_descriptor_update_after_bind_any(void) {
-    return advertised_descriptor_binding_uniform_buffer_update_after_bind() ||
-           advertised_descriptor_binding_sampled_image_update_after_bind() ||
-           advertised_descriptor_binding_storage_image_update_after_bind() ||
-           advertised_descriptor_binding_storage_buffer_update_after_bind() ||
-           advertised_descriptor_binding_uniform_texel_buffer_update_after_bind() ||
-           advertised_descriptor_binding_storage_texel_buffer_update_after_bind();
 }
 
 static VkBool32 advertised_sampler_anisotropy(void) {
@@ -14809,8 +14890,6 @@ static uint32_t advertised_api_version(void) {
 static VkBool32 advertised_api_1_3(void) {
     return advertised_api_version() >= VK_MAKE_VERSION(1, 3, 0) ? VK_TRUE : VK_FALSE;
 }
-
-static uint32_t pdocker_vk_max_per_set_descriptors(void);
 
 static void trace_executor_advertisement_caps_once(void) {
     static int traced = 0;
@@ -15183,16 +15262,14 @@ static void fill_pnext_properties(void *pNext) {
                 p->conformanceVersion.minor = 2;
                 p->shaderRoundingModeRTEFloat16 = VK_FALSE;
                 p->shaderRoundingModeRTZFloat16 = VK_FALSE;
-                p->maxUpdateAfterBindDescriptorsInAllPools = advertised_max_update_after_bind_descriptors_in_all_pools();
-                p->quadDivergentImplicitLod = VK_FALSE;
+                PDOCKER_VK_FILL_DESCRIPTOR_INDEXING_PROPERTY_FIELDS(p);
                 p->maxTimelineSemaphoreValueDifference = UINT64_MAX;
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES: {
                 VkPhysicalDeviceDescriptorIndexingProperties *p = (VkPhysicalDeviceDescriptorIndexingProperties *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
-                p->maxUpdateAfterBindDescriptorsInAllPools = advertised_max_update_after_bind_descriptors_in_all_pools();
-                p->quadDivergentImplicitLod = VK_FALSE;
+                PDOCKER_VK_FILL_DESCRIPTOR_INDEXING_PROPERTY_FIELDS(p);
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_STENCIL_RESOLVE_PROPERTIES: {
@@ -15362,10 +15439,7 @@ static void fill_pnext_features(void *pNext) {
                     p->descriptorBindingStorageTexelBufferUpdateAfterBind = advertised_descriptor_binding_storage_texel_buffer_update_after_bind();
                     p->descriptorBindingPartiallyBound = advertised_descriptor_binding_partially_bound();
                     p->descriptorBindingVariableDescriptorCount = advertised_descriptor_binding_variable_descriptor_count();
-                    p->descriptorIndexing = p->descriptorBindingUpdateUnusedWhilePending ||
-                                            advertised_descriptor_update_after_bind_any() ||
-                                            p->descriptorBindingPartiallyBound ||
-                                            p->descriptorBindingVariableDescriptorCount;
+                    p->descriptorIndexing = advertised_descriptor_indexing_aggregate();
                     p->samplerFilterMinmax = advertised_sampler_filter_minmax();
                     p->hostQueryReset = VK_TRUE;
                 } else {
@@ -15384,10 +15458,7 @@ static void fill_pnext_features(void *pNext) {
                     p->descriptorBindingStorageTexelBufferUpdateAfterBind = advertised_descriptor_binding_storage_texel_buffer_update_after_bind();
                     p->descriptorBindingPartiallyBound = advertised_descriptor_binding_partially_bound();
                     p->descriptorBindingVariableDescriptorCount = advertised_descriptor_binding_variable_descriptor_count();
-                    p->descriptorIndexing = p->descriptorBindingUpdateUnusedWhilePending ||
-                                            advertised_descriptor_update_after_bind_any() ||
-                                            p->descriptorBindingPartiallyBound ||
-                                            p->descriptorBindingVariableDescriptorCount;
+                    p->descriptorIndexing = advertised_descriptor_indexing_aggregate();
                     p->samplerFilterMinmax = advertised_sampler_filter_minmax();
                     p->hostQueryReset = VK_TRUE;
                 }
@@ -15771,10 +15842,7 @@ static bool vulkan12_feature_request_supported(
     supported.descriptorBindingStorageTexelBufferUpdateAfterBind = advertised_descriptor_binding_storage_texel_buffer_update_after_bind();
     supported.descriptorBindingPartiallyBound = advertised_descriptor_binding_partially_bound();
     supported.descriptorBindingVariableDescriptorCount = advertised_descriptor_binding_variable_descriptor_count();
-    supported.descriptorIndexing = supported.descriptorBindingUpdateUnusedWhilePending ||
-                                   advertised_descriptor_update_after_bind_any() ||
-                                   supported.descriptorBindingPartiallyBound ||
-                                   supported.descriptorBindingVariableDescriptorCount;
+    supported.descriptorIndexing = advertised_descriptor_indexing_aggregate();
     supported.samplerFilterMinmax = advertised_sampler_filter_minmax();
     PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, samplerMirrorClampToEdge);
     PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, drawIndirectCount);

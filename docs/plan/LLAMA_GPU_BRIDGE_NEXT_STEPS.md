@@ -90,6 +90,7 @@ Confirmed facts:
 | 2026-07-13 Vulkan dedicated allocation bind enforcement lane | `VkMemoryDedicatedAllocateInfo` now records the requested buffer or image target on the memory object, and `vkBindBufferMemory`/`vkBindImageMemory` enforce the dedicated-allocation contract: only the recorded resource may be bound and only at offset zero. Mismatched resource type, different target, and nonzero offsets fail closed before the bridge exposes KHR dedicated allocation publicly. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; host tests `tests.test_gpu_abi_contract tests.test_vulkan_icd_feature_chain`; no executor ABI, llama.cpp, Dockerfile, model, prompt, or shader changes |
 | 2026-07-13 Vulkan KHR memory trio public extension lane | The ICD now advertises and accepts `VK_KHR_get_memory_requirements2`, `VK_KHR_bind_memory2`, and `VK_KHR_dedicated_allocation`, and exposes the corresponding KHR procaddr aliases. This is enabled only after conservative requirements2 output, single-device bind-memory2 validation, and dedicated-allocation bind enforcement are in place. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; host test `tests.test_gpu_abi_contract`; no executor ABI, llama.cpp, Dockerfile, model, prompt, or shader changes |
 | 2026-07-13 Vulkan descriptor update-after-bind parity guard lane | The ICD no longer lets descriptor-indexing update-after-bind feature bits drift from the advertised UAB property surface. All six `descriptorBinding*UpdateAfterBind` feature helpers are gated by nonzero `maxUpdateAfterBindDescriptorsInAllPools`, which is currently zero, so true requests still fail closed. The feature mask now carries the six UAB bits only if that future property gate is opened, preserving query/create-device parity without changing executor ABI or llama inputs. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; host test `tests.test_gpu_abi_contract`; no executor ABI, llama.cpp, Dockerfile, model, prompt, or shader changes |
+| 2026-07-13 Vulkan descriptor-indexing aggregate fail-closed/property transport lane | The Android executor now queries native `VkPhysicalDeviceDescriptorIndexingProperties` only when Vulkan 1.2 or `VK_EXT_descriptor_indexing` makes that pNext struct legal, and exports the numeric descriptor-indexing property surface in advertisement JSON. The ICD parses those fields, fills both Vulkan 1.2 and EXT property structs through one helper, clamps update-after-bind descriptor limits to bridge bounds, and keeps the aggregate `descriptorIndexing` feature false until the complete descriptor-indexing minimum surface is coherent. Individual implemented descriptor-indexing subfeatures remain queryable independently; update-after-bind still stays gated by nonzero UAB descriptor budget. | `app/src/main/cpp/pdocker_gpu_executor.c`; `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; host test `tests.test_gpu_abi_contract`; no executor ABI, llama.cpp, Dockerfile, model, prompt, or shader changes |
 | 2026-05-20 Q6_K workflow | Device workflow reaches the known Q6_K blocker again; create-timeout race is no longer the blocker | `docs/test/llama-gpu-q6k-adb41503-20260520T110352Z.json` (ignored runtime evidence), workflow `classification=q6-native-device-execution-or-final-store` |
 | 2026-05-23 Q6 WorkgroupSize lane | Device is reachable and Q6 dispatch evidence is present, but the effective Q6 WorkgroupSize evidence is still not visible in the oracle record | ADB `192.168.179.26:34761`; `docs/test/llama-gpu-readiness-adb34761-latest.json`; `docs/test/llama-gpu-ngl1-q6-workgroup-legalized-adb34761-20260523T084956Z.json`; `docs/test/llama-gpu-ngl1-q6-workgroup-composite-adb34761-20260523T091428Z.json` |
 | commit `ac40e49` safe-kernel lane | `ngl=1` prompt/Q6 oracle/writeback correctness clears only under bridge-owned Q6 safe-kernel substitution | `docs/test/llama-gpu-ngl1-q6-safe-kernel-adb44443-20260523T112715Z.json`; classification `q6-workgroup-cleared-and-oracle-match`; safe-kernel hash `0x7ec0292e948c9b41` for source hash `0x1bf751845c5dce75` |
@@ -2197,6 +2198,26 @@ attachments out of the update-after-bind type map, matching Vulkan's descriptor
 binding flag restrictions before the gate can ever be opened.  This change does
 not alter executor ABI, llama.cpp, Dockerfiles, model files, prompts, or shader
 bytes.
+
+### 2026-07-13 Vulkan descriptor-indexing aggregate fail-closed/property transport lane
+
+Descriptor-indexing property transport is now separated from public aggregate
+feature advertisement.  The Android executor samples
+`VkPhysicalDeviceDescriptorIndexingProperties` only when the physical device
+exposes Vulkan 1.2 or `VK_EXT_descriptor_indexing`, then includes the numeric
+property fields in `VULKAN_ADVERTISEMENT_CAPS`.  The ICD parses those fields
+and fills both `VkPhysicalDeviceVulkan12Properties` and
+`VkPhysicalDeviceDescriptorIndexingProperties` through the same helper so the
+public property surface cannot drift between the core and EXT query structs.
+
+The aggregate Vulkan 1.2 `descriptorIndexing` feature remains fail-closed.
+Skydnir still advertises only the individual descriptor-indexing subfeatures
+that have bridge support, while update-after-bind features require a nonzero
+clamped update-after-bind descriptor budget.  Dynamic-buffer and input-attachment
+update-after-bind limits stay zero because those descriptor classes are not
+allowed in the bridge update-after-bind map.  This lane does not alter executor
+ABI, llama.cpp, Dockerfiles, model files, prompts, SPIR-V bytes, or shader
+reconstruction policy.
 
 ### 2026-07-13 Vulkan KHR memory trio public extension lane
 

@@ -8285,7 +8285,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "p->pointClippingBehavior = VK_POINT_CLIPPING_BEHAVIOR_ALL_CLIP_PLANES;",
             "p->maxMultiviewViewCount = 1;",
             "p->protectedNoFault = VK_FALSE;",
-            "p->maxUpdateAfterBindDescriptorsInAllPools = advertised_max_update_after_bind_descriptors_in_all_pools();",
+            "PDOCKER_VK_FILL_DESCRIPTOR_INDEXING_PROPERTY_FIELDS(p);",
             "p->supportedDepthResolveModes = VK_RESOLVE_MODE_NONE;",
             "p->filterMinmaxSingleComponentFormats = VK_FALSE;",
             "p->denormBehaviorIndependence = VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE;",
@@ -10480,6 +10480,40 @@ class GpuAbiContractTest(unittest.TestCase):
         descriptor_pool_body = c_function_body(executor, "materialize_vulkan_graphics_v6_descriptors")
         self.assertIn("VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT", descriptor_pool_body)
 
+    def test_vulkan_descriptor_indexing_aggregate_remains_fail_closed(self):
+        icd = VULKAN_ICD.read_text()
+        aggregate_body = c_function_body(icd, "advertised_descriptor_indexing_aggregate")
+        features_body = icd.split("static void fill_pnext_features", 1)[1].split(
+            "static uint64_t feature_mask_from_base_features", 1
+        )[0]
+        vulkan12_request_body = c_function_body(icd, "vulkan12_feature_request_supported")
+
+        self.assertIn("complete descriptor-indexing minimum surface", aggregate_body)
+        self.assertIn("return VK_FALSE;", aggregate_body)
+        self.assertEqual(
+            features_body.count("p->descriptorIndexing = advertised_descriptor_indexing_aggregate();"),
+            2,
+        )
+        self.assertIn(
+            "supported.descriptorIndexing = advertised_descriptor_indexing_aggregate();",
+            vulkan12_request_body,
+        )
+        descriptor_indexing_assignments = re.findall(
+            r"(?:p->|supported\.)descriptorIndexing\s*=\s*([^;]+);",
+            features_body + vulkan12_request_body,
+        )
+        self.assertGreaterEqual(len(descriptor_indexing_assignments), 3)
+        self.assertTrue(
+            all(expr.strip() == "advertised_descriptor_indexing_aggregate()" for expr in descriptor_indexing_assignments),
+            descriptor_indexing_assignments,
+        )
+        for marker in [
+            "p->descriptorBindingUpdateUnusedWhilePending = advertised_descriptor_binding_update_unused_while_pending();",
+            "p->descriptorBindingPartiallyBound = advertised_descriptor_binding_partially_bound();",
+            "p->descriptorBindingVariableDescriptorCount = advertised_descriptor_binding_variable_descriptor_count();",
+        ]:
+            self.assertIn(marker, features_body)
+
     def test_vulkan_descriptor_update_after_bind_features_are_limit_gated_and_masked(self):
         icd = VULKAN_ICD.read_text()
         max_uab_body = c_function_body(icd, "advertised_max_update_after_bind_descriptors_in_all_pools")
@@ -10489,17 +10523,34 @@ class GpuAbiContractTest(unittest.TestCase):
             "static void fill_physical_device_features", 1
         )[0]
 
-        self.assertIn("return 0;", max_uab_body)
-        self.assertIn("per-stage", max_uab_body)
-        self.assertIn("per-set UAB limit surface", max_uab_body)
+        self.assertIn("advertised_descriptor_update_after_bind_native_feature_any(caps)", max_uab_body)
+        self.assertIn("pdocker_vk_clamp_nonzero_limit", max_uab_body)
+        self.assertIn("maxUpdateAfterBindDescriptorsInAllPools", max_uab_body)
         self.assertIn("advertised_max_update_after_bind_descriptors_in_all_pools() > 0", limit_gate_body)
-        self.assertEqual(
-            props_body.count(
-                "p->maxUpdateAfterBindDescriptorsInAllPools = "
-                "advertised_max_update_after_bind_descriptors_in_all_pools();"
-            ),
-            2,
-        )
+        self.assertEqual(props_body.count("PDOCKER_VK_FILL_DESCRIPTOR_INDEXING_PROPERTY_FIELDS(p);"), 2)
+        self.assertIn("maxDescriptorSetUpdateAfterBindStorageBuffersDynamic = 0;", icd)
+        self.assertIn("maxPerStageDescriptorUpdateAfterBindInputAttachments = 0;", icd)
+        self.assertIn("maxDescriptorSetUpdateAfterBindInputAttachments = 0;", icd)
+
+        executor = GPU_EXECUTOR.read_text()
+        for marker in [
+            "VkPhysicalDeviceDescriptorIndexingProperties physical_descriptor_indexing_properties;",
+            "rt->physical_descriptor_indexing_properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES;",
+            "const int descriptor_indexing_properties_available =",
+            "rt->api_version >= VK_API_VERSION_1_2 ||",
+            "VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME",
+            "rt->subgroup_properties.pNext = &rt->physical_descriptor_indexing_properties;",
+            "descriptor_indexing_properties",
+            "maxPerStageDescriptorUpdateAfterBindSamplers",
+            "maxDescriptorSetUpdateAfterBindStorageImages",
+        ]:
+            self.assertIn(marker, executor)
+        for marker in [
+            "VkPhysicalDeviceDescriptorIndexingProperties descriptor_indexing_properties;",
+            'json_read_u32(json, "maxPerStageDescriptorUpdateAfterBindSamplers",',
+            'json_read_u32(json, "maxDescriptorSetUpdateAfterBindStorageImages",',
+        ]:
+            self.assertIn(marker, icd)
 
         requested_mask_body = c_function_body(icd, "feature_mask_from_pnext_chain")
         for requested_marker in [
