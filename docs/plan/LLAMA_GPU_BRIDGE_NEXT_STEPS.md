@@ -2181,3 +2181,14 @@ usage, non-texel usage bits, duplicates, and unknown buffer-view pNext structs
 remain fail-closed because the buffer-view transport does not yet carry a
 separate per-view usage field.  This is a generic Vulkan API-surface widening,
 not a llama.cpp- or model-specific path.
+
+### 2026-07-13 Vulkan buffer usage2 effective-usage lane
+
+`VkBufferUsageFlags2CreateInfo` on `VkBufferCreateInfo` is now treated as the
+buffer's effective usage when it is valid and fits the bridge's current 32-bit
+usage storage.  This allows maintenance5-style buffer creation and
+`vkGetDeviceBufferMemoryRequirements` queries where the legacy
+`VkBufferCreateInfo::usage` field is zero and the 64-bit pNext struct supplies
+the real usage.  Zero, duplicate, or out-of-range usage2 payloads remain
+fail-closed, and buffer-view usage2 still accepts only the no-op texel-usage
+case until the transport carries a distinct per-view usage field.

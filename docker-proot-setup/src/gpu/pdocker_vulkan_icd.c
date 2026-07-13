@@ -16940,8 +16940,35 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceExternalFenceProperties(
 
 static VkResult unsupported_create_info_pnext_result(const char *api_name, const void *pNext);
 
+static bool buffer_create_effective_usage(
+        const VkBufferCreateInfo *info,
+        VkBufferUsageFlags *usage_out) {
+    if (!info || !usage_out) return false;
+    bool saw_usage2 = false;
+    VkBufferUsageFlags effective_usage = info->usage;
+    for (const void *node = info->pNext; node;) {
+        PdockerVkStructHeader header = read_vk_struct_header(node);
+        if (header.sType == VK_STRUCTURE_TYPE_BUFFER_USAGE_FLAGS_2_CREATE_INFO) {
+            if (saw_usage2) return false;
+            saw_usage2 = true;
+            const VkBufferUsageFlags2CreateInfo *usage2_info =
+                (const VkBufferUsageFlags2CreateInfo *)node;
+            if (usage2_info->usage == 0 ||
+                (usage2_info->usage & ~(VkBufferUsageFlags2)UINT32_MAX) != 0) {
+                return false;
+            }
+            effective_usage = (VkBufferUsageFlags)usage2_info->usage;
+        }
+        node = header.pNext;
+    }
+    if (effective_usage == 0) return false;
+    *usage_out = effective_usage;
+    return true;
+}
+
 static VkResult validate_buffer_create_pnext(const VkBufferCreateInfo *info) {
     if (!info) return VK_ERROR_INITIALIZATION_FAILED;
+    bool saw_usage2 = false;
     for (const void *node = info->pNext; node;) {
         PdockerVkStructHeader header = read_vk_struct_header(node);
         switch (header.sType) {
@@ -16966,10 +16993,16 @@ static VkResult validate_buffer_create_pnext(const VkBufferCreateInfo *info) {
                 break;
             }
             case VK_STRUCTURE_TYPE_BUFFER_USAGE_FLAGS_2_CREATE_INFO: {
+                if (saw_usage2) {
+                    trace_icd_runtime_failure("buffer-usage2-duplicate",
+                                              VK_ERROR_FEATURE_NOT_PRESENT);
+                    return VK_ERROR_FEATURE_NOT_PRESENT;
+                }
+                saw_usage2 = true;
                 const VkBufferUsageFlags2CreateInfo *usage2_info =
                     (const VkBufferUsageFlags2CreateInfo *)node;
-                if ((usage2_info->usage & ~(VkBufferUsageFlags2)UINT32_MAX) != 0 ||
-                    (VkBufferUsageFlags)usage2_info->usage != info->usage) {
+                if (usage2_info->usage == 0 ||
+                    (usage2_info->usage & ~(VkBufferUsageFlags2)UINT32_MAX) != 0) {
                     trace_icd_runtime_failure("buffer-usage2-unsupported",
                                               VK_ERROR_FEATURE_NOT_PRESENT);
                     return VK_ERROR_FEATURE_NOT_PRESENT;
@@ -17014,6 +17047,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateBuffer(
     if (!pCreateInfo || !pBuffer) return VK_ERROR_INITIALIZATION_FAILED;
     VkResult pnext_rc = validate_buffer_create_pnext(pCreateInfo);
     if (pnext_rc != VK_SUCCESS) return pnext_rc;
+    VkBufferUsageFlags effective_usage = 0;
+    if (!buffer_create_effective_usage(pCreateInfo, &effective_usage)) {
+        trace_icd_runtime_failure("buffer-usage-missing", VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
     if (pCreateInfo->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;
     if (!pdocker_vk_sharing_mode_is_single_advertised_family(
             pCreateInfo->sharingMode,
@@ -17036,14 +17074,14 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateBuffer(
     if (!buffer) return VK_ERROR_OUT_OF_HOST_MEMORY;
     buffer->object_id = next_vulkan_object_generation();
     buffer->size = (size_t)pCreateInfo->size;
-    buffer->usage = pCreateInfo->usage;
+    buffer->usage = effective_usage;
     buffer->requirements_alignment = PDOCKER_VK_REQUIREMENT_ALIGNMENT;
     buffer->requirements_size = align_device_size(pCreateInfo->size, buffer->requirements_alignment);
     if (trace_allocations()) {
         fprintf(stderr,
                 "pdocker-vulkan-icd: create-buffer size=%zu usage=0x%x sharing=%u\n",
                 buffer->size,
-                (unsigned)pCreateInfo->usage,
+                (unsigned)effective_usage,
                 (unsigned)pCreateInfo->sharingMode);
     }
     *pBuffer = pdocker_vk_buffer_to_handle(buffer);
@@ -18115,7 +18153,9 @@ static void fill_buffer_create_memory_requirements(
         VkMemoryRequirements *pMemoryRequirements) {
     if (!pMemoryRequirements) return;
     memset(pMemoryRequirements, 0, sizeof(*pMemoryRequirements));
+    VkBufferUsageFlags effective_usage = 0;
     if (!pCreateInfo || validate_buffer_create_pnext(pCreateInfo) != VK_SUCCESS ||
+        !buffer_create_effective_usage(pCreateInfo, &effective_usage) ||
         pCreateInfo->flags != 0 ||
         pCreateInfo->size == 0 ||
         pCreateInfo->size > pdocker_vulkan_max_buffer_size()) {

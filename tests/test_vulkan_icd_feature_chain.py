@@ -382,13 +382,76 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 buffer_info.pNext = &usage2_info;
                 if (expect_nonzero_requirements(&buffer_info, 4)) return 4;
 
+                buffer_info.usage = 0;
                 usage2_info.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-                if (expect_zero_requirements(&buffer_info, 5)) return 5;
+                if (expect_nonzero_requirements(&buffer_info, 5)) return 5;
 
-                usage2_info.usage = buffer_info.usage;
+                usage2_info.usage = 0;
+                if (expect_zero_requirements(&buffer_info, 6)) return 6;
+
+                usage2_info.usage = (VkBufferUsageFlags2)1ull << 40;
+                if (expect_zero_requirements(&buffer_info, 7)) return 7;
+
+                buffer_info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
                 external_info.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
                 buffer_info.pNext = &external_info;
-                if (expect_zero_requirements(&buffer_info, 6)) return 6;
+                if (expect_zero_requirements(&buffer_info, 8)) return 8;
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
+    def test_buffer_create_usage2_pnext_supplies_effective_usage(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            int main(void) {{
+                VkBufferCreateInfo info;
+                VkBufferUsageFlags2CreateInfo usage2;
+                memset(&info, 0, sizeof(info));
+                memset(&usage2, 0, sizeof(usage2));
+                info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+                info.size = 4096;
+                info.usage = 0;
+                info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+                info.pNext = &usage2;
+                usage2.sType = VK_STRUCTURE_TYPE_BUFFER_USAGE_FLAGS_2_CREATE_INFO;
+                usage2.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+
+                VkBuffer buffer_handle = VK_NULL_HANDLE;
+                VkResult rc = vkCreateBuffer((VkDevice)(uintptr_t)0x1u, &info, NULL, &buffer_handle);
+                if (rc != VK_SUCCESS || buffer_handle == VK_NULL_HANDLE) {{
+                    fprintf(stderr, "usage2-only buffer create failed rc=%d handle=%p\\n", rc, (void *)buffer_handle);
+                    return 2;
+                }}
+                PdockerVkBuffer *buffer = pdocker_vk_buffer_from_handle(buffer_handle);
+                if (!buffer || buffer->usage != VK_BUFFER_USAGE_STORAGE_BUFFER_BIT) {{
+                    fprintf(stderr, "effective usage was not stored from usage2: 0x%x\\n", buffer ? buffer->usage : 0u);
+                    return 3;
+                }}
+                vkDestroyBuffer((VkDevice)(uintptr_t)0x1u, buffer_handle, NULL);
+
+                usage2.usage = 0;
+                buffer_handle = VK_NULL_HANDLE;
+                rc = vkCreateBuffer((VkDevice)(uintptr_t)0x1u, &info, NULL, &buffer_handle);
+                if (rc == VK_SUCCESS || buffer_handle != VK_NULL_HANDLE) {{
+                    fprintf(stderr, "zero usage2 buffer create was accepted rc=%d handle=%p\\n", rc, (void *)buffer_handle);
+                    return 4;
+                }}
+
+                usage2.usage = (VkBufferUsageFlags2)1ull << 40;
+                rc = vkCreateBuffer((VkDevice)(uintptr_t)0x1u, &info, NULL, &buffer_handle);
+                if (rc == VK_SUCCESS) {{
+                    fprintf(stderr, "out-of-range usage2 buffer create was accepted\\n");
+                    return 5;
+                }}
                 return 0;
             }}
             """

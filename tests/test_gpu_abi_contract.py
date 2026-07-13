@@ -9319,6 +9319,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("timeline-semaphore-feature-not-enabled", sem_create_body)
 
         self.assertIn("validate_buffer_create_pnext(pCreateInfo) != VK_SUCCESS", fill_buffer_req_body)
+        self.assertIn("buffer_create_effective_usage(pCreateInfo, &effective_usage)", fill_buffer_req_body)
         self.assertNotIn("pCreateInfo->pNext ||", fill_buffer_req_body)
         self.assertIn("pCreateInfo->flags != 0", fill_buffer_req_body)
         self.assertIn("if (pInfo && pInfo->pNext)", device_buffer_req_body)
@@ -9347,16 +9348,24 @@ class GpuAbiContractTest(unittest.TestCase):
         buffer_pnext_body = icd.split("static VkResult validate_buffer_create_pnext", 1)[1].split(
             "VKAPI_ATTR VkResult VKAPI_CALL vkCreateBuffer", 1
         )[0]
+        buffer_effective_usage_body = c_function_body(icd, "buffer_create_effective_usage")
         self.assertIn("validate_buffer_create_pnext(pCreateInfo)", create_buffer_body)
         self.assertIn("if (pnext_rc != VK_SUCCESS) return pnext_rc;", create_buffer_body)
+        self.assertIn("buffer_create_effective_usage(pCreateInfo, &effective_usage)", create_buffer_body)
+        self.assertIn("buffer->usage = effective_usage;", create_buffer_body)
+        self.assertIn("VK_STRUCTURE_TYPE_BUFFER_USAGE_FLAGS_2_CREATE_INFO", buffer_effective_usage_body)
+        self.assertIn("effective_usage = (VkBufferUsageFlags)usage2_info->usage;", buffer_effective_usage_body)
+        self.assertIn("if (effective_usage == 0) return false;", buffer_effective_usage_body)
         self.assertIn("VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO", buffer_pnext_body)
         self.assertIn("external_info->handleTypes != 0", buffer_pnext_body)
         self.assertIn("buffer-external-memory-handle-unsupported", buffer_pnext_body)
         self.assertIn("VK_STRUCTURE_TYPE_BUFFER_OPAQUE_CAPTURE_ADDRESS_CREATE_INFO", buffer_pnext_body)
         self.assertIn("capture_info->opaqueCaptureAddress != 0", buffer_pnext_body)
         self.assertIn("VK_STRUCTURE_TYPE_BUFFER_USAGE_FLAGS_2_CREATE_INFO", buffer_pnext_body)
+        self.assertIn("usage2_info->usage == 0", buffer_pnext_body)
         self.assertIn("usage2_info->usage & ~(VkBufferUsageFlags2)UINT32_MAX", buffer_pnext_body)
-        self.assertIn("(VkBufferUsageFlags)usage2_info->usage != info->usage", buffer_pnext_body)
+        self.assertIn("buffer-usage2-duplicate", buffer_pnext_body)
+        self.assertNotIn("usage2_info->usage != info->usage", buffer_pnext_body)
         self.assertIn("VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_CREATE_INFO_EXT", buffer_pnext_body)
         self.assertIn("address_info->deviceAddress != 0", buffer_pnext_body)
         self.assertIn("VK_STRUCTURE_TYPE_DEDICATED_ALLOCATION_BUFFER_CREATE_INFO_NV", buffer_pnext_body)
@@ -9888,7 +9897,7 @@ class GpuAbiContractTest(unittest.TestCase):
         )
         self.assertIn("struct PdockerVkBufferView", icd)
         self.assertIn("VkBufferUsageFlags usage;", icd)
-        self.assertIn("buffer->usage = pCreateInfo->usage;", icd)
+        self.assertIn("buffer->usage = effective_usage;", icd)
 
         create_body = c_function_body(icd, "vkCreateBufferView")
         destroy_body = c_function_body(icd, "vkDestroyBufferView")
