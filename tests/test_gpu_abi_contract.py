@@ -1375,7 +1375,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "push_constant_op_snapshot_array_clone(&snapshot->push_constant_ops",
             "memcpy(snapshot->vertex_bindings, cmd->vertex_bindings",
             "snapshot->index_buffer = cmd->index_buffer;",
-            "memcpy(snapshot->dynamic_states, cmd->dynamic_states",
+            "dynamic_state_snapshot_array_clone(snapshot->dynamic_states",
             "snapshot->dynamic_rendering_active = cmd->dynamic_rendering_active;",
             "snapshot->render_pass_active = cmd->render_pass_active;",
             "snapshot->active_render_pass = cmd->active_render_pass;",
@@ -9623,12 +9623,27 @@ class GpuAbiContractTest(unittest.TestCase):
             "command_buffer_reserve_dynamic_states",
             "free(cmd->dynamic_states);",
             "dynamic-state-record-overflow",
-            "if (cmd->dynamic_state_count > 0)",
-            "sizeof(snapshot->dynamic_states[0]) * cmd->dynamic_state_count",
         ]:
             self.assertIn(marker, icd)
         self.assertNotIn("memset(cmd->dynamic_states, 0, sizeof(cmd->dynamic_states))", icd)
         self.assertNotIn("memcpy(snapshot->dynamic_states, cmd->dynamic_states, sizeof(snapshot->dynamic_states))", icd)
+
+    def test_vulkan_icd_uses_heap_backed_dynamic_state_payloads(self):
+        icd = VULKAN_ICD.read_text()
+        for marker in [
+            "uint8_t *data;",
+            "dynamic_state_snapshot_release",
+            "dynamic_state_snapshot_clone",
+            "dynamic_state_snapshot_array_clone",
+            "dynamic-state-data-too-large",
+            "dynamic-state-data-oom",
+            "graphics-draw-dynamic-state-snapshot-oom",
+            "empty_dynamic_state_data",
+        ]:
+            self.assertIn(marker, icd)
+        self.assertNotIn("uint8_t data[128];", icd)
+        self.assertNotIn("sizeof(((PdockerVkDynamicStateSnapshot *)0)->data)", icd)
+        self.assertNotIn("if (data && data_size) memcpy(state->data, data, data_size);", icd)
 
     def test_vulkan_icd_records_buffer_image_copy_commands_before_dispatch(self):
         icd = VULKAN_ICD.read_text()

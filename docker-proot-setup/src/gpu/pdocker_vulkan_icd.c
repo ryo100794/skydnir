@@ -996,7 +996,7 @@ typedef struct {
     uint32_t state_type;
     uint32_t first_index;
     uint32_t count;
-    uint8_t data[128];
+    uint8_t *data;
     uint32_t data_size;
 } PdockerVkDynamicStateSnapshot;
 
@@ -1551,6 +1551,66 @@ static bool graphics_snapshot_clone_descriptor_state(
     return true;
 }
 
+static void dynamic_state_snapshot_release(PdockerVkDynamicStateSnapshot *snapshot) {
+    if (!snapshot) return;
+    free(snapshot->data);
+    snapshot->data = NULL;
+    snapshot->data_size = 0;
+}
+
+static void dynamic_state_snapshot_array_release(
+        PdockerVkDynamicStateSnapshot *items,
+        uint32_t count) {
+    if (!items) return;
+    for (uint32_t i = 0; i < count; ++i) {
+        dynamic_state_snapshot_release(&items[i]);
+    }
+}
+
+static bool dynamic_state_snapshot_clone(
+        PdockerVkDynamicStateSnapshot *dst,
+        const PdockerVkDynamicStateSnapshot *src) {
+    if (!dst || !src) return false;
+    memset(dst, 0, sizeof(*dst));
+    dst->state_type = src->state_type;
+    dst->first_index = src->first_index;
+    dst->count = src->count;
+    dst->data_size = src->data_size;
+    if (src->data_size == 0) return true;
+    dst->data = (uint8_t *)malloc(src->data_size);
+    if (!dst->data) {
+        dst->data_size = 0;
+        return false;
+    }
+    if (src->data) {
+        memcpy(dst->data, src->data, src->data_size);
+    } else {
+        memset(dst->data, 0, src->data_size);
+    }
+    return true;
+}
+
+static bool dynamic_state_snapshot_array_clone(
+        PdockerVkDynamicStateSnapshot *dst,
+        uint32_t *dst_count,
+        uint32_t dst_capacity,
+        const PdockerVkDynamicStateSnapshot *src,
+        uint32_t src_count) {
+    if (!dst || !dst_count) return false;
+    *dst_count = 0;
+    if (src_count == 0) return true;
+    if (!src || src_count > dst_capacity) return false;
+    for (uint32_t i = 0; i < src_count; ++i) {
+        if (!dynamic_state_snapshot_clone(&dst[i], &src[i])) {
+            dynamic_state_snapshot_array_release(dst, i);
+            *dst_count = 0;
+            return false;
+        }
+        *dst_count = i + 1u;
+    }
+    return true;
+}
+
 static void graphics_draw_snapshot_destroy_descriptor_state(PdockerVkGraphicsDrawSnapshot *snapshot) {
     if (!snapshot) return;
     descriptor_set_snapshot_state_destroy(&snapshot->set_snapshots,
@@ -1558,6 +1618,9 @@ static void graphics_draw_snapshot_destroy_descriptor_state(PdockerVkGraphicsDra
                                           &snapshot->set_capacity);
     push_constant_op_snapshot_array_destroy(&snapshot->push_constant_ops,
                                             &snapshot->push_constant_op_count);
+    dynamic_state_snapshot_array_release(snapshot->dynamic_states,
+                                         snapshot->dynamic_state_count);
+    snapshot->dynamic_state_count = 0;
 }
 
 static void graphics_descriptor_bind_snapshot_destroy_descriptor_state(
@@ -1941,6 +2004,7 @@ static void command_buffer_destroy_record_vectors(PdockerVkCommandBuffer *cmd) {
     cmd->graphics_dynamic_offsets = NULL;
     cmd->graphics_dynamic_offset_count = 0;
     cmd->graphics_dynamic_offset_capacity = 0;
+    dynamic_state_snapshot_array_release(cmd->dynamic_states, cmd->dynamic_state_count);
     free(cmd->dynamic_states);
     cmd->dynamic_states = NULL;
     cmd->dynamic_state_count = 0;
@@ -1998,8 +2062,9 @@ static void record_graphics_dynamic_state_bytes(
         const void *data,
         size_t data_size) {
     if (!cmd) return;
-    if (data_size > sizeof(((PdockerVkDynamicStateSnapshot *)0)->data)) {
+    if (data_size > UINT32_MAX) {
         cmd->graphics_unsupported = true;
+        command_buffer_mark_recording_failed(cmd, "dynamic-state-data-too-large");
         return;
     }
     if (state_type == VK_DYNAMIC_STATE_DEPTH_BIAS && data && data_size >= sizeof(float) * 3u) {
@@ -2046,18 +2111,35 @@ static void record_graphics_dynamic_state_bytes(
         command_buffer_mark_recording_failed(cmd, "dynamic-state-record-overflow");
         return;
     }
-    PdockerVkDynamicStateSnapshot *state = &cmd->dynamic_states[cmd->dynamic_state_count++];
-    memset(state, 0, sizeof(*state));
-    state->state_type = (uint32_t)state_type;
-    state->first_index = first_index;
-    state->count = count;
-    state->data_size = (uint32_t)data_size;
-    if (data && data_size) memcpy(state->data, data, data_size);
+    PdockerVkDynamicStateSnapshot state;
+    memset(&state, 0, sizeof(state));
+    state.state_type = (uint32_t)state_type;
+    state.first_index = first_index;
+    state.count = count;
+    state.data_size = (uint32_t)data_size;
+    if (data_size > 0) {
+        state.data = (uint8_t *)malloc(data_size);
+        if (!state.data) {
+            cmd->graphics_unsupported = true;
+            command_buffer_mark_recording_failed(cmd, "dynamic-state-data-oom");
+            return;
+        }
+        if (data) {
+            memcpy(state.data, data, data_size);
+        } else {
+            memset(state.data, 0, data_size);
+        }
+    }
+    uint32_t dynamic_state_index = cmd->dynamic_state_count++;
+    cmd->dynamic_states[dynamic_state_index] = state;
     PdockerVkGraphicsCommandRecord record;
     memset(&record, 0, sizeof(record));
     record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_DYNAMIC_STATE;
-    record.dynamic_state_index = cmd->dynamic_state_count - 1u;
-    (void)append_graphics_command_record(cmd, &record);
+    record.dynamic_state_index = dynamic_state_index;
+    if (!append_graphics_command_record(cmd, &record)) {
+        dynamic_state_snapshot_release(&cmd->dynamic_states[dynamic_state_index]);
+        cmd->dynamic_state_count = dynamic_state_index;
+    }
 }
 
 static bool copy_rendering_attachment_state(
@@ -2137,6 +2219,7 @@ static void clear_recorded_command_ops(PdockerVkCommandBuffer *cmd) {
             &cmd->graphics_descriptor_bind_ops[i]);
     }
     command_buffer_clear_descriptor_states(cmd);
+    dynamic_state_snapshot_array_release(cmd->dynamic_states, cmd->dynamic_state_count);
     cmd->command_op_count = 0;
     cmd->event_wait_ref_count = 0;
     cmd->copy_op_count = 0;
@@ -2354,6 +2437,8 @@ static bool append_secondary_command_buffer(
         out->set_capacity = 0;
         out->push_constant_ops = NULL;
         out->push_constant_op_count = 0;
+        memset(out->dynamic_states, 0, sizeof(out->dynamic_states));
+        out->dynamic_state_count = 0;
         if (!graphics_snapshot_clone_descriptor_state(&out->set_snapshots,
                                                       &out->set_snapshot_used,
                                                       &out->set_capacity,
@@ -2366,6 +2451,14 @@ static bool append_secondary_command_buffer(
                                                    &out->push_constant_op_count,
                                                    copied.push_constant_ops,
                                                    copied.push_constant_op_count)) {
+            graphics_draw_snapshot_destroy_descriptor_state(out);
+            goto fail_secondary_append;
+        }
+        if (!dynamic_state_snapshot_array_clone(out->dynamic_states,
+                                                &out->dynamic_state_count,
+                                                PDOCKER_VK_MAX_GRAPHICS_DYNAMIC_STATES,
+                                                copied.dynamic_states,
+                                                copied.dynamic_state_count)) {
             graphics_draw_snapshot_destroy_descriptor_state(out);
             goto fail_secondary_append;
         }
@@ -2408,9 +2501,13 @@ static bool append_secondary_command_buffer(
     memcpy(dst->clear_rect_ops + dst->clear_rect_op_count, src->clear_rect_ops,
            sizeof(src->clear_rect_ops[0]) * src->clear_rect_op_count);
     dst->clear_rect_op_count += src->clear_rect_op_count;
-    memcpy(dst->dynamic_states + dst->dynamic_state_count, src->dynamic_states,
-           sizeof(src->dynamic_states[0]) * src->dynamic_state_count);
-    dst->dynamic_state_count += src->dynamic_state_count;
+    for (uint32_t i = 0; i < src->dynamic_state_count; ++i) {
+        if (!dynamic_state_snapshot_clone(&dst->dynamic_states[dst->dynamic_state_count],
+                                          &src->dynamic_states[i])) {
+            goto fail_secondary_append;
+        }
+        dst->dynamic_state_count++;
+    }
     memcpy(dst->graphics_dynamic_offsets + dst->graphics_dynamic_offset_count, src->graphics_dynamic_offsets,
            sizeof(src->graphics_dynamic_offsets[0]) * src->graphics_dynamic_offset_count);
     dst->graphics_dynamic_offset_count += src->graphics_dynamic_offset_count;
@@ -2566,6 +2663,8 @@ fail_secondary_append:
     dst->clear_attachments_command_op_count = clear_attachments_command_base;
     dst->clear_attachment_op_count = clear_attachment_base;
     dst->clear_rect_op_count = clear_rect_base;
+    dynamic_state_snapshot_array_release(dst->dynamic_states + dynamic_state_base,
+                                         dst->dynamic_state_count - dynamic_state_base);
     dst->dynamic_state_count = dynamic_state_base;
     dst->graphics_dynamic_offset_count = dynamic_offset_base;
     dst->push_constant_op_count = push_op_base;
@@ -7095,9 +7194,17 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
         dst->first_index = src->first_index;
         dst->count = src->count;
         dst->data_size = src->data_size;
-        dst->data_hash = fnv1a64_bytes(src->data, src->data_size);
+        if (src->data_size > 0 && !src->data) {
+            rc = -EPROTO;
+            goto cleanup;
+        }
+        static const uint8_t empty_dynamic_state_data = 0;
+        const uint8_t *dynamic_state_data = src->data_size > 0
+            ? src->data
+            : &empty_dynamic_state_data;
+        dst->data_hash = fnv1a64_bytes(dynamic_state_data, src->data_size);
         rc = frame_append_bytes(frame, PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_FRAME_BYTES,
-                                &cursor, src->data, src->data_size, &dst->data_offset);
+                                &cursor, dynamic_state_data, src->data_size, &dst->data_offset);
         if (rc != 0) goto cleanup;
     }
 
@@ -21471,11 +21578,17 @@ static void record_graphics_draw_command(
     snapshot->index_offset = cmd->index_offset;
     snapshot->index_type = cmd->index_type;
     snapshot->index_buffer_bound = cmd->index_buffer_bound;
-    if (cmd->dynamic_state_count > 0) {
-        memcpy(snapshot->dynamic_states, cmd->dynamic_states,
-               sizeof(snapshot->dynamic_states[0]) * cmd->dynamic_state_count);
+    if (!dynamic_state_snapshot_array_clone(snapshot->dynamic_states,
+                                            &snapshot->dynamic_state_count,
+                                            PDOCKER_VK_MAX_GRAPHICS_DYNAMIC_STATES,
+                                            cmd->dynamic_states,
+                                            cmd->dynamic_state_count)) {
+        cmd->graphics_draw_op_count--;
+        graphics_draw_snapshot_destroy_descriptor_state(snapshot);
+        cmd->graphics_unsupported = true;
+        command_buffer_mark_recording_failed(cmd, "graphics-draw-dynamic-state-snapshot-oom");
+        return;
     }
-    snapshot->dynamic_state_count = cmd->dynamic_state_count;
     snapshot->dynamic_rendering_active = cmd->dynamic_rendering_active;
     snapshot->render_pass_active = cmd->render_pass_active;
     snapshot->active_render_pass = cmd->active_render_pass;
