@@ -140,6 +140,13 @@ or closes.
   payloads, and true multi-device/device-group semantics remain fail-closed;
   this is a single-physical-device no-op-preservation lane, not device-group
   virtualization.
+- [done] **barrier external acquire-unmodified pNext lane**: Legacy and
+  synchronization2 buffer/image barriers accept
+  `VkExternalMemoryAcquireUnmodifiedEXT` as no-op metadata when the existing
+  queue-family ownership checks keep the operation inside the supported
+  same/ignored queue-family boundary. Unknown barrier pNext chains and real
+  external ownership transfers still fail closed, while the actual buffer/image
+  barrier payload is recorded and replayed through the existing ABI.
 - [done] **descriptor-indexing per-flag feature gate**: Graphics replay no longer
   treats every descriptor binding flag as if it required
   `descriptorBindingPartiallyBound`.  The Android executor now validates each

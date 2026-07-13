@@ -588,6 +588,85 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
+    def test_external_memory_acquire_unmodified_buffer_barrier_pnext_records_cleanly(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include <stdlib.h>
+            #include "{ICD_SOURCE}"
+
+            int main(void) {{
+            #ifndef VK_EXT_external_memory_acquire_unmodified
+                return 0;
+            #else
+                PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)calloc(1, sizeof(*cmd));
+                PdockerVkBuffer *buffer = (PdockerVkBuffer *)calloc(1, sizeof(*buffer));
+                if (!cmd || !buffer) return 9;
+                buffer->object_id = 0x1234u;
+                buffer->size = 4096u;
+
+                VkExternalMemoryAcquireUnmodifiedEXT acquire;
+                memset(&acquire, 0, sizeof(acquire));
+                acquire.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_ACQUIRE_UNMODIFIED_EXT;
+                acquire.acquireUnmodifiedMemory = VK_TRUE;
+
+                VkBufferMemoryBarrier2 buffer_barrier;
+                memset(&buffer_barrier, 0, sizeof(buffer_barrier));
+                buffer_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
+                buffer_barrier.pNext = &acquire;
+                buffer_barrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+                buffer_barrier.srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT;
+                buffer_barrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+                buffer_barrier.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
+                buffer_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                buffer_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                buffer_barrier.buffer = pdocker_vk_buffer_to_handle(buffer);
+                buffer_barrier.offset = 16u;
+                buffer_barrier.size = 32u;
+
+                VkDependencyInfo dependency;
+                memset(&dependency, 0, sizeof(dependency));
+                dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+                dependency.bufferMemoryBarrierCount = 1;
+                dependency.pBufferMemoryBarriers = &buffer_barrier;
+
+                vkCmdPipelineBarrier2((VkCommandBuffer)cmd, &dependency);
+                if (cmd->recording_failed || cmd->graphics_unsupported) {{
+                    fprintf(stderr, "external acquire pNext caused failure reason=%s\\n",
+                            cmd->recording_failure_reason ? cmd->recording_failure_reason : "<null>");
+                    return 2;
+                }}
+                if (cmd->command_op_count != 1 || cmd->graphics_command_op_count != 1 ||
+                    cmd->buffer_barrier_op_count != 1) {{
+                    fprintf(stderr, "barrier was not recorded ops=%u graphics=%u buf=%u\\n",
+                            cmd->command_op_count,
+                            cmd->graphics_command_op_count,
+                            cmd->buffer_barrier_op_count);
+                    return 3;
+                }}
+                if (cmd->buffer_barrier_ops[0].buffer != buffer ||
+                    cmd->buffer_barrier_ops[0].offset != 16u ||
+                    cmd->buffer_barrier_ops[0].size != 32u) {{
+                    fprintf(stderr, "buffer barrier payload was not preserved\\n");
+                    return 4;
+                }}
+                if (vkEndCommandBuffer((VkCommandBuffer)cmd) != VK_SUCCESS) {{
+                    fprintf(stderr, "recorded barrier failed at end\\n");
+                    return 5;
+                }}
+                free(buffer);
+                free(cmd);
+                return 0;
+            #endif
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
     def test_bind_memory2_rejects_null_arrays_and_unsupported_pnext(self):
         source = textwrap.dedent(
             f"""

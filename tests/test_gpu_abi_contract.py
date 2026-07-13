@@ -4532,6 +4532,21 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("dependencyFlags & ~VK_DEPENDENCY_BY_REGION_BIT", icd)
         self.assertNotIn("dependency_flags & ~VK_DEPENDENCY_BY_REGION_BIT", icd)
 
+    def test_vulkan_barrier_external_acquire_unmodified_pnext_is_noop_metadata(self):
+        icd = VULKAN_ICD.read_text()
+        helper = c_function_body(icd, "barrier_external_acquire_unmodified_pnext_noop")
+        self.assertIn("VK_EXT_external_memory_acquire_unmodified", helper)
+        self.assertIn("VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_ACQUIRE_UNMODIFIED_EXT", helper)
+        self.assertIn("return false;", helper)
+        legacy_barrier_helper = c_function_body(icd, "legacy_pipeline_barrier_inputs_unsupported")
+        dependency_helper = c_function_body(icd, "dependency_info_unsupported_reason")
+        for body in [legacy_barrier_helper, dependency_helper]:
+            self.assertIn("barrier_external_acquire_unmodified_pnext_noop", body)
+        self.assertIn("dependency-info-buffer-barrier-pnext-unsupported", dependency_helper)
+        self.assertIn("dependency-info-image-barrier-pnext-unsupported", dependency_helper)
+        self.assertIn("record_buffer_barrier_op(commandBuffer", icd)
+        self.assertIn("record_image_barrier_op(commandBuffer", icd)
+
     def test_vulkan_icd_serializes_graphics_image_barriers(self):
         icd = VULKAN_ICD.read_text()
         self.assertIn("PdockerGpuVulkanGraphicsV61ImageBarrierEntry image_barriers", icd)

@@ -1579,7 +1579,15 @@ static bool dispatch_op_clone_descriptor_state(
         const PdockerVkDescriptorSet *src_snapshots,
         const bool *src_used,
         uint32_t src_capacity) {
-    if (!op || !src_handles || !src_snapshots || !src_used) return false;
+    if (!op) return false;
+    if (src_capacity == 0) {
+        op->set_handles = NULL;
+        op->set_snapshots = NULL;
+        op->set_snapshot_used = NULL;
+        op->set_capacity = 0;
+        return true;
+    }
+    if (!src_handles || !src_snapshots || !src_used) return false;
     if (!descriptor_set_state_alloc(&op->set_handles,
                                     &op->set_snapshots,
                                     &op->set_snapshot_used,
@@ -19796,6 +19804,24 @@ static VkDependencyFlags pdocker_vk_transport_dependency_flags(VkDependencyFlags
     return flags & pdocker_vk_supported_dependency_flags();
 }
 
+static bool barrier_external_acquire_unmodified_pnext_noop(
+        const void *pNext) {
+    const VkBaseInStructure *node = (const VkBaseInStructure *)pNext;
+    for (; node; node = (const VkBaseInStructure *)node->pNext) {
+#ifdef VK_EXT_external_memory_acquire_unmodified
+        if (node->sType == VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_ACQUIRE_UNMODIFIED_EXT) {
+            /* The bridge already rejects queue-family ownership transfers
+             * before replay. With no external queue-family acquire crossing
+             * this pNext is metadata only and can be dropped while preserving
+             * the transported buffer/image barrier. */
+            continue;
+        }
+#endif
+        return false;
+    }
+    return true;
+}
+
 static bool capture_single_subpass_dependency(
         PdockerVkRenderPass *rp,
         uint32_t src_subpass,
@@ -24571,11 +24597,17 @@ static bool legacy_pipeline_barrier_inputs_unsupported(
     }
     if (bufferMemoryBarrierCount && !pBufferMemoryBarriers) return true;
     for (uint32_t i = 0; pBufferMemoryBarriers && i < bufferMemoryBarrierCount; ++i) {
-        if (pBufferMemoryBarriers[i].pNext) return true;
+        if (!barrier_external_acquire_unmodified_pnext_noop(
+                pBufferMemoryBarriers[i].pNext)) {
+            return true;
+        }
     }
     if (imageMemoryBarrierCount && !pImageMemoryBarriers) return true;
     for (uint32_t i = 0; pImageMemoryBarriers && i < imageMemoryBarrierCount; ++i) {
-        if (pImageMemoryBarriers[i].pNext) return true;
+        if (!barrier_external_acquire_unmodified_pnext_noop(
+                pImageMemoryBarriers[i].pNext)) {
+            return true;
+        }
     }
     return false;
 }
@@ -27587,7 +27619,8 @@ static const char *dependency_info_unsupported_reason(const VkDependencyInfo *in
     }
     if (info->pBufferMemoryBarriers) {
         for (uint32_t i = 0; i < info->bufferMemoryBarrierCount; ++i) {
-            if (info->pBufferMemoryBarriers[i].pNext) {
+            if (!barrier_external_acquire_unmodified_pnext_noop(
+                    info->pBufferMemoryBarriers[i].pNext)) {
                 return "dependency-info-buffer-barrier-pnext-unsupported";
             }
             if (sync2_stage_access_pair_invalid(info->pBufferMemoryBarriers[i].srcStageMask,
@@ -27603,7 +27636,8 @@ static const char *dependency_info_unsupported_reason(const VkDependencyInfo *in
     }
     if (info->pImageMemoryBarriers) {
         for (uint32_t i = 0; i < info->imageMemoryBarrierCount; ++i) {
-            if (info->pImageMemoryBarriers[i].pNext) {
+            if (!barrier_external_acquire_unmodified_pnext_noop(
+                    info->pImageMemoryBarriers[i].pNext)) {
                 return "dependency-info-image-barrier-pnext-unsupported";
             }
             if (sync2_stage_access_pair_invalid(info->pImageMemoryBarriers[i].srcStageMask,
