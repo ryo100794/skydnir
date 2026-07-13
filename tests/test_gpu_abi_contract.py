@@ -3145,7 +3145,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INDEX_TYPE_UINT8_FEATURES_EXT",
             "VK_EXT_INDEX_TYPE_UINT8_EXTENSION_NAME",
             "rt->physical_extended_dynamic_state.pNext = &rt->physical_extended_dynamic_state2",
-            "rt->physical_extended_dynamic_state2.pNext = &rt->physical_index_type_uint8",
+            "rt->physical_extended_dynamic_state2.pNext = &rt->physical_descriptor_indexing",
+            "rt->physical_descriptor_indexing.pNext = &rt->physical_index_type_uint8",
             "enabled_index_type_uint8.pNext = device_features_pnext",
             "rt->enabled_ext_index_type_uint8",
             "case VK_INDEX_TYPE_UINT8_EXT:",
@@ -3155,6 +3156,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "rc = vulkan_graphics_index_type_supported_by_runtime(rt, command->index_type);",
             'indexTypeUint8',
             'VK_EXT_index_type_uint8',
+            'descriptorIndexing',
+            'descriptorBindingPartiallyBound',
+            'VK_EXT_descriptor_indexing',
         ]:
             self.assertIn(marker, executor)
 
@@ -5867,7 +5871,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "pipeline_layout_table_hash",
             "descriptor_set_layouts",
             "pipeline_layout_sets",
-            "entry->binding_flags != 0",
+            "!vulkan_graphics_descriptor_binding_flags_supported(entry->binding_flags)",
             "entry->descriptor_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS",
             "entry->immutable_sampler_count > entry->descriptor_count",
             "!vulkan_descriptor_type_requires_sampler(descriptor_type)",
@@ -5886,6 +5890,10 @@ class GpuAbiContractTest(unittest.TestCase):
             "find_vulkan_graphics_replay_descriptor_binding",
             "vkCreatePipelineLayout(rt->device, &plci, NULL, &pl->layout)",
             "vkCreateDescriptorSetLayout(rt->device, &dslci, NULL, &dsl->layout)",
+            "binding->binding_flags = entry->binding_flags;",
+            "VkDescriptorSetLayoutBindingFlagsCreateInfo binding_flags_ci",
+            ".pNext = has_binding_flags ? &binding_flags_ci : NULL",
+            "!rt->enabled_descriptor_indexing.descriptorBindingPartiallyBound",
         ]:
             self.assertIn(marker, executor)
         v624_validation_body = executor.split("if (is_v624) {", 1)[1].split(
@@ -5919,6 +5927,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "VULKAN_GRAPHICS_V6.24",
             "candidate.layout_id = layout->layout_id",
             "candidate.immutable_sampler_count = immutable_sampler_count;",
+            "candidate.binding_flags = descriptor_layout_binding_flags(layout, binding);",
+            "storage_binding_flags",
+            "expected->storage_binding_flags[i] != actual->storage_binding_flags[i]",
             "descriptor_set_apply_immutable_samplers() / vkUpdateDescriptorSets()",
             "candidate.pipeline_layout_id = layout->layout_id",
             "candidate.descriptor_set_layout_id = set_layout->layout_id",
@@ -6154,9 +6165,10 @@ class GpuAbiContractTest(unittest.TestCase):
             v625_prealloc_body,
         )
         self.assertNotIn("descriptor_slot_seen", v625_prealloc_body)
-        self.assertIn("uint32_t expected_descriptor_slots = 0;", v625_prealloc_body)
-        self.assertIn("expected_descriptor_slots += binding->descriptor_count;", v625_prealloc_body)
-        self.assertIn("if (command->descriptor_count != expected_descriptor_slots) return -EPROTO;", v625_prealloc_body)
+        self.assertIn("vulkan_graphics_command_has_descriptor_slot", descriptors_body)
+        self.assertIn("vulkan_graphics_descriptor_binding_partially_bound(binding)", v625_prealloc_body)
+        self.assertIn("if (!vulkan_graphics_command_has_descriptor_slot(", v625_prealloc_body)
+        self.assertIn("return -EPROTO;", v625_prealloc_body)
         self.assertIn("descriptor->descriptor_set < bind_first_set", descriptor_validation_body)
         self.assertIn("descriptor->descriptor_set >= bind_first_set + declared_bind_set_count", descriptor_validation_body)
         self.assertIn("find_vulkan_graphics_replay_descriptor_binding(set_layout, descriptor->binding)", descriptor_validation_body)
@@ -7494,8 +7506,8 @@ class GpuAbiContractTest(unittest.TestCase):
         collect_body = icd.split("static int collect_graphics_descriptor_entries", 1)[1].split(
             "static int append_recorded_graphics_descriptor_bind_snapshot", 1
         )[0]
-        self.assertIn("Graphics replay ABI currently transports descriptors", collect_body)
-        self.assertIn("expected-but-unwritten binding", collect_body)
+        self.assertIn("The replay layout remains the declared fixed-size layout", collect_body)
+        self.assertIn("Only VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT may omit", collect_body)
         self.assertIn("layout->storage_binding_counts[binding_index] > 0", collect_body)
         self.assertIn("return -EOPNOTSUPP;", collect_body)
         missing_descriptor_guard = collect_body.split(
@@ -8898,7 +8910,9 @@ class GpuAbiContractTest(unittest.TestCase):
         hidden_body = c_function_body(icd, "proc_address_hidden_by_advertisement")
 
         self.assertIn("zero_vk_out_struct_preserve_chain(pSupport, sizeof(*pSupport), header);", support_body)
-        self.assertIn("descriptor_set_layout_create_info_supported(pCreateInfo)", support_body)
+        self.assertIn("const PdockerVkDevice *dev = (const PdockerVkDevice *)device;", support_body)
+        self.assertIn("uint64_t requested_feature_mask = dev ? dev->requested_feature_mask : 0;", support_body)
+        self.assertIn("descriptor_set_layout_create_info_supported(pCreateInfo, requested_feature_mask)", support_body)
         self.assertIn("fill_descriptor_set_layout_support_pnext((void *)header.pNext);", support_body)
         self.assertIn("validate_descriptor_set_layout_pnext(pCreateInfo) != VK_SUCCESS", helper_body)
         self.assertIn("pCreateInfo->flags != 0", helper_body)
@@ -9117,7 +9131,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("*pSetLayout = VK_NULL_HANDLE;", descriptor_layout_body)
         self.assertIn("validate_descriptor_set_layout_pnext(pCreateInfo)", descriptor_layout_body)
         self.assertIn("if (pCreateInfo->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;", descriptor_layout_body)
-        self.assertIn("descriptor_set_layout_create_info_supported(pCreateInfo)", descriptor_layout_body)
+        self.assertIn("const PdockerVkDevice *dev = (const PdockerVkDevice *)device;", descriptor_layout_body)
+        self.assertIn("uint64_t requested_feature_mask = dev ? dev->requested_feature_mask : 0;", descriptor_layout_body)
+        self.assertIn("descriptor_set_layout_create_info_supported(pCreateInfo, requested_feature_mask)", descriptor_layout_body)
         self.assertIn('trace_icd_runtime_failure("descriptor-set-layout-unsupported"', descriptor_layout_body)
         self.assertIn("return VK_ERROR_FEATURE_NOT_PRESENT;", descriptor_layout_body)
         self.assertIn("free(layout);", descriptor_layout_body)
@@ -9137,7 +9153,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("descriptor-set-layout-binding-flags-count-mismatch", descriptor_layout_pnext_body)
         self.assertIn("flags->bindingCount > 0 && !flags->pBindingFlags", descriptor_layout_pnext_body)
         self.assertIn("descriptor-set-layout-binding-flags-missing", descriptor_layout_pnext_body)
-        self.assertIn("flags->pBindingFlags[i] != 0", descriptor_layout_pnext_body)
+        self.assertIn("uint32_t binding_flags = (uint32_t)flags->pBindingFlags[i];", descriptor_layout_pnext_body)
+        self.assertIn("!descriptor_binding_flags_supported(binding_flags)", descriptor_layout_pnext_body)
         self.assertIn("descriptor-set-layout-binding-flags-unsupported", descriptor_layout_pnext_body)
         self.assertIn('unsupported_create_info_pnext_result("vkCreateDescriptorSetLayout", node)', descriptor_layout_pnext_body)
         pipeline_layout_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreatePipelineLayout", 1)[1].split(

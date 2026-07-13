@@ -92,6 +92,11 @@
 #define PDOCKER_VK_FEATURE_MULTI_DRAW_INDIRECT         (1ull << 32)
 #define PDOCKER_VK_FEATURE_DRAW_INDIRECT_FIRST_INSTANCE (1ull << 33)
 #define PDOCKER_VK_FEATURE_INDEPENDENT_BLEND           (1ull << 35)
+#define PDOCKER_VK_FEATURE_DESCRIPTOR_PARTIALLY_BOUND   (1ull << 36)
+
+#define PDOCKER_VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT 0x00000004u
+
+static int vulkan_graphics_descriptor_binding_flags_supported(uint32_t flags);
 
 #ifndef GL_COMPUTE_SHADER
 #define GL_COMPUTE_SHADER 0x91B9
@@ -1409,6 +1414,7 @@ typedef struct {
     VkPhysicalDeviceFeatures physical_features;
     VkPhysicalDeviceVulkan11Features physical_vulkan11;
     VkPhysicalDeviceVulkan12Features physical_vulkan12;
+    VkPhysicalDeviceDescriptorIndexingFeatures physical_descriptor_indexing;
     VkPhysicalDevice16BitStorageFeatures physical_storage16;
     VkPhysicalDevice8BitStorageFeatures physical_storage8;
     VkPhysicalDeviceShaderFloat16Int8Features physical_float16_int8;
@@ -1420,6 +1426,7 @@ typedef struct {
     VkPhysicalDeviceFeatures enabled_features;
     VkPhysicalDeviceVulkan11Features enabled_vulkan11;
     VkPhysicalDeviceVulkan12Features enabled_vulkan12;
+    VkPhysicalDeviceDescriptorIndexingFeatures enabled_descriptor_indexing;
     VkPhysicalDevice16BitStorageFeatures enabled_storage16;
     VkPhysicalDevice8BitStorageFeatures enabled_storage8;
     VkPhysicalDeviceShaderFloat16Int8Features enabled_float16_int8;
@@ -1437,6 +1444,7 @@ typedef struct {
     uint8_t enabled_ext_extended_dynamic_state;
     uint8_t enabled_ext_extended_dynamic_state2;
     uint8_t enabled_ext_index_type_uint8;
+    uint8_t enabled_ext_descriptor_indexing;
     uint8_t enabled_ext_draw_indirect_count_khr;
     uint8_t enabled_ext_draw_indirect_count_amd;
     uint8_t enabled_chain_compat_feature_structs;
@@ -2047,6 +2055,8 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             "\"core12_storagePushConstant8\":%u,"
             "\"core12_shaderFloat16\":%u,"
             "\"core12_shaderInt8\":%u,"
+            "\"descriptorIndexing\":%u,"
+            "\"descriptorBindingPartiallyBound\":%u,"
             "\"extendedDynamicState\":%u,"
             "\"extendedDynamicState2\":%u,"
             "\"extendedDynamicState2LogicOp\":%u,"
@@ -2066,7 +2076,8 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             "\"VK_AMD_draw_indirect_count\":%u,"
             "\"VK_EXT_extended_dynamic_state\":%u,"
             "\"VK_EXT_extended_dynamic_state2\":%u,"
-            "\"VK_EXT_index_type_uint8\":%u}}",
+            "\"VK_EXT_index_type_uint8\":%u,"
+            "\"VK_EXT_descriptor_indexing\":%u}}",
             rt ? rt->enabled_features.shaderInt64 : 0,
             rt ? rt->enabled_features.geometryShader : 0,
             rt ? rt->enabled_features.tessellationShader : 0,
@@ -2108,6 +2119,8 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             rt ? rt->enabled_vulkan12.storagePushConstant8 : 0,
             rt ? rt->enabled_vulkan12.shaderFloat16 : 0,
             rt ? rt->enabled_vulkan12.shaderInt8 : 0,
+            rt ? rt->enabled_vulkan12.descriptorIndexing : 0,
+            rt ? rt->enabled_descriptor_indexing.descriptorBindingPartiallyBound : 0,
             rt ? rt->enabled_extended_dynamic_state.extendedDynamicState : 0,
             rt ? rt->enabled_extended_dynamic_state2.extendedDynamicState2 : 0,
             rt ? rt->enabled_extended_dynamic_state2.extendedDynamicState2LogicOp : 0,
@@ -2126,7 +2139,8 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             rt ? rt->enabled_ext_draw_indirect_count_amd : 0,
             rt ? rt->enabled_ext_extended_dynamic_state : 0,
             rt ? rt->enabled_ext_extended_dynamic_state2 : 0,
-            rt ? rt->enabled_ext_index_type_uint8 : 0);
+            rt ? rt->enabled_ext_index_type_uint8 : 0,
+            rt ? rt->enabled_ext_descriptor_indexing : 0);
 }
 
 static void log_spirv_trace(
@@ -13207,6 +13221,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     vkGetPhysicalDeviceFeatures(rt->physical_device, &rt->physical_features);
     memset(&rt->physical_vulkan11, 0, sizeof(rt->physical_vulkan11));
     memset(&rt->physical_vulkan12, 0, sizeof(rt->physical_vulkan12));
+    memset(&rt->physical_descriptor_indexing, 0, sizeof(rt->physical_descriptor_indexing));
     memset(&rt->physical_storage16, 0, sizeof(rt->physical_storage16));
     memset(&rt->physical_storage8, 0, sizeof(rt->physical_storage8));
     memset(&rt->physical_float16_int8, 0, sizeof(rt->physical_float16_int8));
@@ -13218,6 +13233,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     memset(&rt->subgroup_properties, 0, sizeof(rt->subgroup_properties));
     rt->physical_vulkan11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
     rt->physical_vulkan12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    rt->physical_descriptor_indexing.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
     rt->physical_storage16.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES;
     rt->physical_storage8.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES;
     rt->physical_float16_int8.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES;
@@ -13245,7 +13261,8 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
         rt->physical_synchronization2.pNext = &rt->physical_dynamic_rendering;
         rt->physical_dynamic_rendering.pNext = &rt->physical_extended_dynamic_state;
         rt->physical_extended_dynamic_state.pNext = &rt->physical_extended_dynamic_state2;
-        rt->physical_extended_dynamic_state2.pNext = &rt->physical_index_type_uint8;
+        rt->physical_extended_dynamic_state2.pNext = &rt->physical_descriptor_indexing;
+        rt->physical_descriptor_indexing.pNext = &rt->physical_index_type_uint8;
         get_features2(rt->physical_device, &features2);
         rt->physical_features = features2.features;
         rt->physical_vulkan11.pNext = NULL;
@@ -13257,6 +13274,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
         rt->physical_dynamic_rendering.pNext = NULL;
         rt->physical_extended_dynamic_state.pNext = NULL;
         rt->physical_extended_dynamic_state2.pNext = NULL;
+        rt->physical_descriptor_indexing.pNext = NULL;
         rt->physical_index_type_uint8.pNext = NULL;
     }
     PFN_vkGetPhysicalDeviceProperties2 get_properties2 =
@@ -13319,6 +13337,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     VkPhysicalDeviceFeatures enabled_features = rt->physical_features;
     VkPhysicalDeviceVulkan11Features enabled_vulkan11;
     VkPhysicalDeviceVulkan12Features enabled_vulkan12;
+    VkPhysicalDeviceDescriptorIndexingFeatures enabled_descriptor_indexing;
     VkPhysicalDevice16BitStorageFeatures enabled_storage16;
     VkPhysicalDevice8BitStorageFeatures enabled_storage8;
     VkPhysicalDeviceShaderFloat16Int8Features enabled_float16_int8;
@@ -13329,6 +13348,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     VkPhysicalDeviceIndexTypeUint8FeaturesEXT enabled_index_type_uint8;
     memset(&enabled_vulkan11, 0, sizeof(enabled_vulkan11));
     memset(&enabled_vulkan12, 0, sizeof(enabled_vulkan12));
+    memset(&enabled_descriptor_indexing, 0, sizeof(enabled_descriptor_indexing));
     memset(&enabled_storage16, 0, sizeof(enabled_storage16));
     memset(&enabled_storage8, 0, sizeof(enabled_storage8));
     memset(&enabled_float16_int8, 0, sizeof(enabled_float16_int8));
@@ -13348,6 +13368,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
         rt->physical_vulkan11.storageInputOutput16 || rt->physical_storage16.storageInputOutput16;
     enabled_vulkan11.multiview = rt->physical_vulkan11.multiview;
     enabled_vulkan12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    enabled_descriptor_indexing.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
     enabled_vulkan12.storageBuffer8BitAccess =
         rt->physical_vulkan12.storageBuffer8BitAccess || rt->physical_storage8.storageBuffer8BitAccess;
     enabled_vulkan12.uniformAndStorageBuffer8BitAccess =
@@ -13360,6 +13381,15 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
         rt->physical_vulkan12.shaderInt8 || rt->physical_float16_int8.shaderInt8;
     enabled_vulkan12.timelineSemaphore = rt->physical_vulkan12.timelineSemaphore;
     enabled_vulkan12.drawIndirectCount = rt->physical_vulkan12.drawIndirectCount;
+    enabled_descriptor_indexing.descriptorBindingPartiallyBound =
+        rt->physical_descriptor_indexing.descriptorBindingPartiallyBound ||
+        rt->physical_vulkan12.descriptorBindingPartiallyBound;
+    enabled_vulkan12.descriptorBindingPartiallyBound =
+        rt->physical_vulkan12.descriptorBindingPartiallyBound &&
+        enabled_descriptor_indexing.descriptorBindingPartiallyBound;
+    enabled_vulkan12.descriptorIndexing =
+        rt->physical_vulkan12.descriptorIndexing &&
+        enabled_vulkan12.descriptorBindingPartiallyBound;
     enabled_storage16.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES;
     enabled_storage16.storageBuffer16BitAccess = rt->physical_storage16.storageBuffer16BitAccess;
     enabled_storage16.uniformAndStorageBuffer16BitAccess = rt->physical_storage16.uniformAndStorageBuffer16BitAccess;
@@ -13404,7 +13434,9 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
          enabled_vulkan12.shaderFloat16 ||
          enabled_vulkan12.shaderInt8 ||
          enabled_vulkan12.timelineSemaphore ||
-         enabled_vulkan12.drawIndirectCount)) {
+         enabled_vulkan12.drawIndirectCount ||
+         enabled_vulkan12.descriptorBindingPartiallyBound ||
+         enabled_vulkan12.descriptorIndexing)) {
         enabled_vulkan12.pNext = device_features_pnext;
         device_features_pnext = &enabled_vulkan12;
     }
@@ -13451,6 +13483,18 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
         enabled_extended_dynamic_state2.pNext = device_features_pnext;
         device_features_pnext = &enabled_extended_dynamic_state2;
     }
+    const int chain_compat_feature_structs =
+        env_truthy("PDOCKER_GPU_CHAIN_COMPAT_FEATURE_STRUCTS", 1);
+    const int descriptor_indexing_available =
+        enabled_descriptor_indexing.descriptorBindingPartiallyBound &&
+        (rt->api_version >= VK_API_VERSION_1_2 ||
+         vulkan_device_extension_supported(rt->physical_device,
+                                           VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME));
+    if ((rt->api_version < VK_API_VERSION_1_2 || chain_compat_feature_structs) &&
+        descriptor_indexing_available) {
+        enabled_descriptor_indexing.pNext = device_features_pnext;
+        device_features_pnext = &enabled_descriptor_indexing;
+    }
     const int index_type_uint8_available =
         enabled_index_type_uint8.indexTypeUint8 &&
         vulkan_device_extension_supported(rt->physical_device,
@@ -13459,8 +13503,6 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
         enabled_index_type_uint8.pNext = device_features_pnext;
         device_features_pnext = &enabled_index_type_uint8;
     }
-    const int chain_compat_feature_structs =
-        env_truthy("PDOCKER_GPU_CHAIN_COMPAT_FEATURE_STRUCTS", 1);
     if ((rt->api_version < VK_API_VERSION_1_2 || chain_compat_feature_structs) &&
         (enabled_float16_int8.shaderFloat16 || enabled_float16_int8.shaderInt8)) {
         enabled_float16_int8.pNext = device_features_pnext;
@@ -13597,6 +13639,17 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
             extended_dynamic_state2_available &&
             enabled_extension_count > extended_dynamic_state2_before;
     }
+    const uint32_t descriptor_indexing_before = enabled_extension_count;
+    if (enabled_descriptor_indexing.descriptorBindingPartiallyBound &&
+        rt->api_version < VK_API_VERSION_1_2) {
+        append_vulkan_device_extension(rt->physical_device,
+                                       enabled_extensions,
+                                       &enabled_extension_count,
+                                       (uint32_t)(sizeof(enabled_extensions) / sizeof(enabled_extensions[0])),
+                                       VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME);
+        rt->enabled_ext_descriptor_indexing =
+            enabled_extension_count > descriptor_indexing_before;
+    }
     const uint32_t index_type_uint8_before = enabled_extension_count;
     if (enabled_index_type_uint8.indexTypeUint8) {
         append_vulkan_device_extension(rt->physical_device,
@@ -13611,6 +13664,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     rt->enabled_features = enabled_features;
     rt->enabled_vulkan11 = enabled_vulkan11;
     rt->enabled_vulkan12 = enabled_vulkan12;
+    rt->enabled_descriptor_indexing = enabled_descriptor_indexing;
     rt->enabled_storage16 = enabled_storage16;
     rt->enabled_storage8 = enabled_storage8;
     rt->enabled_float16_int8 = enabled_float16_int8;
@@ -13621,6 +13675,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     rt->enabled_index_type_uint8 = enabled_index_type_uint8;
     rt->enabled_vulkan11.pNext = NULL;
     rt->enabled_vulkan12.pNext = NULL;
+    rt->enabled_descriptor_indexing.pNext = NULL;
     rt->enabled_storage16.pNext = NULL;
     rt->enabled_storage8.pNext = NULL;
     rt->enabled_float16_int8.pNext = NULL;
@@ -19434,6 +19489,8 @@ static void print_capabilities(const char *transport) {
             "\"uniformAndStorageBuffer8BitAccess\":%u,"
             "\"storagePushConstant8\":%u,"
             "\"shaderFloat16\":%u,\"shaderInt8\":%u,"
+            "\"descriptorIndexing\":%u,"
+            "\"descriptorBindingPartiallyBound\":%u,"
             "\"indexTypeUint8\":%u,"
             "\"subgroupSize\":%u,"
             "\"subgroupStages\":%u,"
@@ -19493,6 +19550,9 @@ static void print_capabilities(const char *transport) {
             rt ? rt->physical_storage8.storagePushConstant8 : 0,
             rt ? rt->physical_float16_int8.shaderFloat16 : 0,
             rt ? rt->physical_float16_int8.shaderInt8 : 0,
+            rt ? rt->physical_vulkan12.descriptorIndexing : 0,
+            rt ? (rt->physical_vulkan12.descriptorBindingPartiallyBound ||
+                  rt->physical_descriptor_indexing.descriptorBindingPartiallyBound) : 0,
             rt ? rt->physical_index_type_uint8.indexTypeUint8 : 0,
             rt ? rt->subgroup_properties.subgroupSize : 0,
             rt ? rt->subgroup_properties.supportedStages : 0,
@@ -19672,6 +19732,8 @@ static void print_vulkan_advertisement_caps(const char *transport) {
             "\"float16_int8\":{"
             "\"shaderFloat16\":%u,"
             "\"shaderInt8\":%u},"
+            "\"descriptorIndexing\":%u,"
+            "\"descriptorBindingPartiallyBound\":%u,"
             "\"indexTypeUint8\":%u,"
             "\"extendedDynamicState\":%u,"
             "\"extendedDynamicState2\":%u,"
@@ -19701,6 +19763,9 @@ static void print_vulkan_advertisement_caps(const char *transport) {
             rt ? rt->physical_storage8.storagePushConstant8 : 0,
             rt ? rt->physical_float16_int8.shaderFloat16 : 0,
             rt ? rt->physical_float16_int8.shaderInt8 : 0,
+            rt ? rt->physical_vulkan12.descriptorIndexing : 0,
+            rt ? (rt->physical_vulkan12.descriptorBindingPartiallyBound ||
+                  rt->physical_descriptor_indexing.descriptorBindingPartiallyBound) : 0,
             rt ? rt->physical_index_type_uint8.indexTypeUint8 : 0,
             rt ? rt->physical_extended_dynamic_state.extendedDynamicState : 0,
             rt ? rt->physical_extended_dynamic_state2.extendedDynamicState2 : 0,
@@ -24873,7 +24938,8 @@ static int validate_vulkan_graphics_v6_frame_content(
             }
             if (entry->layout_id == 0 ||
                 entry->descriptor_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS ||
-                entry->binding_flags != 0 || entry->reserved0 != 0 || type_rc != 0 ||
+                !vulkan_graphics_descriptor_binding_flags_supported(entry->binding_flags) ||
+                entry->reserved0 != 0 || type_rc != 0 ||
                 entry->immutable_sampler_count > entry->descriptor_count ||
                 (entry->immutable_sampler_count != 0 &&
                  !vulkan_descriptor_type_requires_sampler(descriptor_type))) {
@@ -27273,7 +27339,18 @@ typedef struct VulkanGraphicsReplayDescriptorBinding {
     VkDescriptorType descriptor_type;
     uint32_t descriptor_count;
     VkShaderStageFlags stage_flags;
+    uint32_t binding_flags;
 } VulkanGraphicsReplayDescriptorBinding;
+
+static int vulkan_graphics_descriptor_binding_flags_supported(uint32_t flags) {
+    return (flags & ~PDOCKER_VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT) == 0;
+}
+
+static int vulkan_graphics_descriptor_binding_partially_bound(
+        const VulkanGraphicsReplayDescriptorBinding *binding) {
+    return binding &&
+           (binding->binding_flags & PDOCKER_VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT) != 0;
+}
 
 typedef struct VulkanGraphicsReplayDescriptorSetLayout {
     uint64_t layout_id;
@@ -27650,7 +27727,7 @@ static int collect_graphics_descriptor_layout_from_v624_metadata(
                 &view->descriptor_set_layouts[i];
             if (entry->layout_id != descriptor_layout_id) continue;
             if (entry->descriptor_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS ||
-                entry->binding_flags != 0) {
+                !vulkan_graphics_descriptor_binding_flags_supported(entry->binding_flags)) {
                 return -EOPNOTSUPP;
             }
             VkDescriptorType descriptor_type = VK_DESCRIPTOR_TYPE_MAX_ENUM;
@@ -27674,6 +27751,7 @@ static int collect_graphics_descriptor_layout_from_v624_metadata(
             binding->descriptor_type = descriptor_type;
             binding->descriptor_count = entry->descriptor_count;
             binding->stage_flags = (VkShaderStageFlags)entry->stage_flags;
+            binding->binding_flags = entry->binding_flags;
         }
     }
     return 0;
@@ -27848,7 +27926,7 @@ static int materialize_vulkan_graphics_v6_layouts(
         for (uint32_t i = 0; i < view->header_v624->v624.descriptor_set_layout_count; ++i) {
             const PdockerGpuVulkanGraphicsV624DescriptorSetLayoutEntry *entry = &view->descriptor_set_layouts[i];
             if (entry->descriptor_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS ||
-                entry->binding_flags != 0) {
+                !vulkan_graphics_descriptor_binding_flags_supported(entry->binding_flags)) {
                 rc = -EOPNOTSUPP;
                 goto fail;
             }
@@ -27874,6 +27952,7 @@ static int materialize_vulkan_graphics_v6_layouts(
             binding->descriptor_type = descriptor_type;
             binding->descriptor_count = entry->descriptor_count;
             binding->stage_flags = (VkShaderStageFlags)entry->stage_flags;
+            binding->binding_flags = entry->binding_flags;
         }
         for (uint32_t pidx = 0; pidx < view->header->pipeline_count; ++pidx) {
             if (view->pipelines[pidx].layout_id != 0) {
@@ -27962,27 +28041,53 @@ fail_scratch:
     for (uint32_t i = 0; i < out->descriptor_set_layout_count; ++i) {
         VulkanGraphicsReplayDescriptorSetLayout *dsl = &out->descriptor_set_layouts[i];
         VkDescriptorSetLayoutBinding *bindings = NULL;
+        VkDescriptorBindingFlags *binding_flags = NULL;
         uint32_t binding_count = 0;
+        int has_binding_flags = 0;
         if (dsl->binding_count > 0) {
             bindings = (VkDescriptorSetLayoutBinding *)calloc(dsl->binding_count, sizeof(bindings[0]));
-            if (!bindings) { rc = -ENOMEM; goto fail; }
+            binding_flags = (VkDescriptorBindingFlags *)calloc(dsl->binding_count, sizeof(binding_flags[0]));
+            if (!bindings || !binding_flags) { free(binding_flags); free(bindings); rc = -ENOMEM; goto fail; }
         }
         for (uint32_t b = 0; b < dsl->binding_count; ++b) {
             const VulkanGraphicsReplayDescriptorBinding *src_binding = &dsl->bindings[b];
             if (src_binding->descriptor_count == 0) continue;
-            bindings[binding_count++] = (VkDescriptorSetLayoutBinding){
+            if (!vulkan_graphics_descriptor_binding_flags_supported(src_binding->binding_flags)) {
+                free(binding_flags);
+                free(bindings);
+                rc = -EOPNOTSUPP;
+                goto fail;
+            }
+            if (src_binding->binding_flags &&
+                !rt->enabled_descriptor_indexing.descriptorBindingPartiallyBound) {
+                free(binding_flags);
+                free(bindings);
+                rc = -EOPNOTSUPP;
+                goto fail;
+            }
+            bindings[binding_count] = (VkDescriptorSetLayoutBinding){
                 .binding = src_binding->binding,
                 .descriptorType = src_binding->descriptor_type,
                 .descriptorCount = src_binding->descriptor_count,
                 .stageFlags = src_binding->stage_flags ? src_binding->stage_flags : VK_SHADER_STAGE_ALL_GRAPHICS,
             };
+            binding_flags[binding_count] = (VkDescriptorBindingFlags)src_binding->binding_flags;
+            if (binding_flags[binding_count] != 0) has_binding_flags = 1;
+            binding_count++;
         }
+        VkDescriptorSetLayoutBindingFlagsCreateInfo binding_flags_ci = {
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO,
+            .bindingCount = binding_count,
+            .pBindingFlags = binding_count ? binding_flags : NULL,
+        };
         VkDescriptorSetLayoutCreateInfo dslci = {
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+            .pNext = has_binding_flags ? &binding_flags_ci : NULL,
             .bindingCount = binding_count,
             .pBindings = binding_count ? bindings : NULL,
         };
         VkResult vrc = vkCreateDescriptorSetLayout(rt->device, &dslci, NULL, &dsl->layout);
+        free(binding_flags);
         free(bindings);
         if (vrc != VK_SUCCESS) { rc = -EIO; goto fail; }
     }
@@ -30629,6 +30734,25 @@ find_vulkan_graphics_v627_buffer_view(
     return NULL;
 }
 
+static int vulkan_graphics_command_has_descriptor_slot(
+        const VulkanGraphicsV6FrameView *view,
+        const PdockerGpuVulkanGraphicsV6CommandEntry *command,
+        uint32_t set,
+        uint32_t binding,
+        uint32_t array_element) {
+    if (!view || !command) return 0;
+    for (uint32_t d = 0; d < command->descriptor_count; ++d) {
+        const PdockerGpuVulkanDispatchV5DescriptorObjectEntry *descriptor =
+            &view->descriptors[command->first_descriptor + d];
+        if (descriptor->descriptor_set == set &&
+            descriptor->binding == binding &&
+            descriptor->array_element == array_element) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static int materialize_vulkan_graphics_v6_descriptors(
         VulkanRuntime *rt,
         const VulkanGraphicsV6FrameView *view,
@@ -30689,22 +30813,12 @@ static int materialize_vulkan_graphics_v6_descriptors(
         uint32_t descriptor_pool_sampled_image_count = 0;
         uint32_t descriptor_pool_storage_image_count = 0;
         uint32_t descriptor_pool_input_attachment_count = 0;
-        uint32_t expected_descriptor_slots = 0;
         if (bind_meta) {
             for (uint32_t set = bind_first_set; set < bind_first_set + declared_bind_set_count; ++set) {
                 const VulkanGraphicsReplayDescriptorSetLayout *set_layout =
                     vulkan_graphics_replay_descriptor_set_layout_for_set(layouts, pipeline_layout, set);
                 if (!set_layout) return -EPROTO;
-                for (uint32_t b = 0; b < set_layout->binding_count; ++b) {
-                    const VulkanGraphicsReplayDescriptorBinding *binding = &set_layout->bindings[b];
-                    if (binding->descriptor_count == 0) continue;
-                    if (UINT32_MAX - expected_descriptor_slots < binding->descriptor_count) {
-                        return -EOVERFLOW;
-                    }
-                    expected_descriptor_slots += binding->descriptor_count;
-                }
             }
-            if (command->descriptor_count != expected_descriptor_slots) return -EPROTO;
         }
         for (uint32_t d = 0; d < command->descriptor_count; ++d) {
             const PdockerGpuVulkanDispatchV5DescriptorObjectEntry *descriptor =
@@ -30756,6 +30870,26 @@ static int materialize_vulkan_graphics_v6_descriptors(
                 !vulkan_image_descriptor_layout_valid(
                     descriptor_type, (VkImageLayout)descriptor->image_layout)) {
                 return -EOPNOTSUPP;
+            }
+        }
+        if (bind_meta) {
+            for (uint32_t set = bind_first_set; set < bind_first_set + declared_bind_set_count; ++set) {
+                const VulkanGraphicsReplayDescriptorSetLayout *set_layout =
+                    vulkan_graphics_replay_descriptor_set_layout_for_set(layouts, pipeline_layout, set);
+                if (!set_layout) return -EPROTO;
+                for (uint32_t b = 0; b < set_layout->binding_count; ++b) {
+                    const VulkanGraphicsReplayDescriptorBinding *binding = &set_layout->bindings[b];
+                    if (!binding || binding->descriptor_count == 0 ||
+                        vulkan_graphics_descriptor_binding_partially_bound(binding)) {
+                        continue;
+                    }
+                    for (uint32_t array_element = 0; array_element < binding->descriptor_count; ++array_element) {
+                        if (!vulkan_graphics_command_has_descriptor_slot(
+                                view, command, set, binding->binding, array_element)) {
+                            return -EPROTO;
+                        }
+                    }
+                }
             }
         }
         VulkanGraphicsReplayDescriptorBind *bind = &out->binds[out->bind_count++];

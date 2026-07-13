@@ -386,6 +386,9 @@ static uint64_t g_generic_dispatch_sequence = 0;
 #define PDOCKER_VK_FEATURE_DRAW_INDIRECT_FIRST_INSTANCE (1ull << 33)
 #define PDOCKER_VK_FEATURE_SAMPLER_ANISOTROPY          (1ull << 34)
 #define PDOCKER_VK_FEATURE_INDEPENDENT_BLEND           (1ull << 35)
+#define PDOCKER_VK_FEATURE_DESCRIPTOR_PARTIALLY_BOUND   (1ull << 36)
+
+#define PDOCKER_VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT 0x00000004u
 
 struct PdockerVkMemory {
     uint64_t object_id;
@@ -622,6 +625,7 @@ struct PdockerVkDescriptorSetLayout {
     VkDescriptorType *storage_binding_types;
     uint32_t *storage_binding_counts;
     VkShaderStageFlags *storage_binding_stage_flags;
+    uint32_t *storage_binding_flags;
     PdockerVkSampler **immutable_samplers;
     bool **immutable_sampler_valid;
     bool unsupported_descriptor_array;
@@ -640,6 +644,12 @@ struct PdockerVkDescriptorSet {
 };
 
 static uint32_t descriptor_layout_binding_number(
+        const PdockerVkDescriptorSetLayout *layout,
+        uint32_t slot);
+static uint32_t descriptor_layout_binding_flags(
+        const PdockerVkDescriptorSetLayout *layout,
+        uint32_t slot);
+static bool descriptor_layout_binding_partially_bound(
         const PdockerVkDescriptorSetLayout *layout,
         uint32_t slot);
 static bool descriptor_layout_immutable_sampler_valid(
@@ -5945,7 +5955,7 @@ static int collect_graphics_v624_descriptor_set_layout_metadata(
         candidate.descriptor_type = (uint32_t)descriptor_type;
         candidate.descriptor_count = descriptor_count;
         candidate.stage_flags = layout->storage_binding_stage_flags[binding];
-        candidate.binding_flags = 0;
+        candidate.binding_flags = descriptor_layout_binding_flags(layout, binding);
         candidate.immutable_sampler_count = immutable_sampler_count;
         int existing = find_graphics_v624_descriptor_set_layout_entry(
             entries, *entry_count, candidate.layout_id, candidate.binding);
@@ -6677,14 +6687,12 @@ static int collect_graphics_descriptor_entries(
                     descriptor_set_binding_slot_const(set, binding_index, array_element);
                 if (!binding) return -EPROTO;
                 if (!descriptor_binding_has_bound_object(binding)) {
-                    /* Graphics replay ABI currently transports descriptors that
-                     * were present in the bound set, not the full
-                     * VkDescriptorSetLayoutCreateInfo.  Do not silently turn an
-                     * expected-but-unwritten binding into a smaller replay
-                     * layout.  Descriptor binding flags / partially-bound arrays
-                     * are unsupported, so every declared element must be
-                     * materialized or the submit fails closed. */
-                    if (layout && layout->storage_binding_counts[binding_index] > 0) {
+                    /* The replay layout remains the declared fixed-size layout.
+                     * Only VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT may omit
+                     * unwritten array elements; unflagged bindings still fail
+                     * closed to prevent silently shrinking the descriptor set. */
+                    if (layout && layout->storage_binding_counts[binding_index] > 0 &&
+                        !descriptor_layout_binding_partially_bound(layout, binding_index)) {
                         return -EOPNOTSUPP;
                     }
                     continue;
@@ -10091,6 +10099,7 @@ static void destroy_descriptor_set_layout_storage(PdockerVkDescriptorSetLayout *
     free(layout->storage_binding_types);
     free(layout->storage_binding_counts);
     free(layout->storage_binding_stage_flags);
+    free(layout->storage_binding_flags);
     free(layout->immutable_samplers);
     free(layout->immutable_sampler_valid);
     layout->storage_binding_numbers = NULL;
@@ -10098,6 +10107,7 @@ static void destroy_descriptor_set_layout_storage(PdockerVkDescriptorSetLayout *
     layout->storage_binding_types = NULL;
     layout->storage_binding_counts = NULL;
     layout->storage_binding_stage_flags = NULL;
+    layout->storage_binding_flags = NULL;
     layout->immutable_samplers = NULL;
     layout->immutable_sampler_valid = NULL;
     layout->storage_binding_capacity = 0;
@@ -10123,13 +10133,16 @@ static VkResult descriptor_set_layout_allocate_storage(
         binding_capacity, sizeof(*layout->storage_binding_counts));
     layout->storage_binding_stage_flags = (VkShaderStageFlags *)calloc(
         binding_capacity, sizeof(*layout->storage_binding_stage_flags));
+    layout->storage_binding_flags = (uint32_t *)calloc(
+        binding_capacity, sizeof(*layout->storage_binding_flags));
     layout->immutable_samplers = (PdockerVkSampler **)calloc(
         binding_capacity, sizeof(*layout->immutable_samplers));
     layout->immutable_sampler_valid = (bool **)calloc(
         binding_capacity, sizeof(*layout->immutable_sampler_valid));
     if (!layout->storage_binding_numbers || !layout->storage_binding_present ||
         !layout->storage_binding_types || !layout->storage_binding_counts ||
-        !layout->storage_binding_stage_flags || !layout->immutable_samplers ||
+        !layout->storage_binding_stage_flags || !layout->storage_binding_flags ||
+        !layout->immutable_samplers ||
         !layout->immutable_sampler_valid) {
         destroy_descriptor_set_layout_storage(layout);
         return VK_ERROR_OUT_OF_HOST_MEMORY;
@@ -13557,6 +13570,7 @@ typedef struct {
     VkPhysicalDevice16BitStorageFeatures storage16;
     VkPhysicalDevice8BitStorageFeatures storage8;
     VkPhysicalDeviceShaderFloat16Int8Features float16_int8;
+    VkPhysicalDeviceDescriptorIndexingFeatures descriptor_indexing;
     VkPhysicalDeviceIndexTypeUint8FeaturesEXT index_type_uint8;
     VkPhysicalDeviceSubgroupProperties subgroup;
     bool ext_16bit_storage;
@@ -13577,6 +13591,7 @@ typedef struct {
     bool ext_extended_dynamic_state2;
     VkPhysicalDeviceExtendedDynamicState2FeaturesEXT extended_dynamic_state2;
     bool ext_index_type_uint8;
+    bool ext_descriptor_indexing;
     bool vulkan_dispatch_v52_image_layout_ranges_supported;
     bool vulkan_dispatch_v53_buffer_views_supported;
     bool vulkan_graphics_v627_buffer_views_supported;
@@ -13757,6 +13772,7 @@ static bool parse_executor_advertisement_caps_json(
     json_read_u32(json, "storagePushConstant8", &caps->storage8.storagePushConstant8);
     json_read_u32(json, "shaderFloat16", &caps->float16_int8.shaderFloat16);
     json_read_u32(json, "shaderInt8", &caps->float16_int8.shaderInt8);
+    json_read_u32(json, "descriptorBindingPartiallyBound", &caps->descriptor_indexing.descriptorBindingPartiallyBound);
     json_read_u32(json, "indexTypeUint8", &caps->index_type_uint8.indexTypeUint8);
     if (json_read_u32(json, "timelineSemaphore", &value)) caps->timeline_semaphore = value != 0;
     if (json_read_u32(json, "synchronization2", &value)) caps->synchronization2 = value != 0;
@@ -13782,6 +13798,7 @@ static bool parse_executor_advertisement_caps_json(
     if (json_read_u32(json, "extendedDynamicState2PatchControlPoints", &value)) caps->extended_dynamic_state2.extendedDynamicState2PatchControlPoints = value != 0;
     if (json_read_u32(json, "VK_EXT_extended_dynamic_state2", &value)) caps->ext_extended_dynamic_state2 = value != 0;
     if (json_read_u32(json, "VK_EXT_index_type_uint8", &value)) caps->ext_index_type_uint8 = value != 0;
+    if (json_read_u32(json, "VK_EXT_descriptor_indexing", &value)) caps->ext_descriptor_indexing = value != 0;
 
     uint32_t v52_minor = 0;
     uint32_t v52_max_ranges = 0;
@@ -14190,6 +14207,17 @@ static float advertised_max_sampler_anisotropy(void) {
         return 1.0f;
     }
     return caps->limits.maxSamplerAnisotropy;
+}
+
+
+static VkBool32 advertised_descriptor_binding_partially_bound(void) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+    if (!caps || env_disabled("PDOCKER_VULKAN_DISABLE_DESCRIPTOR_PARTIALLY_BOUND")) {
+        return VK_FALSE;
+    }
+    return caps->descriptor_indexing.descriptorBindingPartiallyBound
+        ? VK_TRUE
+        : VK_FALSE;
 }
 
 static VkBool32 advertised_sampler_anisotropy(void) {
@@ -14872,6 +14900,7 @@ static void fill_pnext_features(void *pNext) {
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES: {
                 VkPhysicalDeviceDescriptorIndexingFeatures *p = (VkPhysicalDeviceDescriptorIndexingFeatures *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                p->descriptorBindingPartiallyBound = advertised_descriptor_binding_partially_bound();
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SCALAR_BLOCK_LAYOUT_FEATURES: {
@@ -15092,6 +15121,8 @@ static bool vulkan12_feature_request_supported(
     memset(&supported, 0, sizeof(supported));
     supported.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
     fill_pnext_features(&supported);
+    supported.descriptorIndexing = advertised_descriptor_binding_partially_bound();
+    supported.descriptorBindingPartiallyBound = advertised_descriptor_binding_partially_bound();
     PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, samplerMirrorClampToEdge);
     PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, drawIndirectCount);
     PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, storageBuffer8BitAccess);
@@ -15146,7 +15177,11 @@ static bool descriptor_indexing_feature_request_supported(
         const VkPhysicalDeviceDescriptorIndexingFeatures *requested,
         const char **unsupported_feature_name) {
     if (!requested) return true;
-#define CHECK_DESCRIPTOR_INDEXING_FEATURE(field) PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &(VkPhysicalDeviceDescriptorIndexingFeatures){0}, field)
+    VkPhysicalDeviceDescriptorIndexingFeatures supported;
+    memset(&supported, 0, sizeof(supported));
+    supported.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
+    supported.descriptorBindingPartiallyBound = advertised_descriptor_binding_partially_bound();
+#define CHECK_DESCRIPTOR_INDEXING_FEATURE(field) PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, field)
     CHECK_DESCRIPTOR_INDEXING_FEATURE(shaderInputAttachmentArrayDynamicIndexing);
     CHECK_DESCRIPTOR_INDEXING_FEATURE(shaderUniformTexelBufferArrayDynamicIndexing);
     CHECK_DESCRIPTOR_INDEXING_FEATURE(shaderStorageTexelBufferArrayDynamicIndexing);
@@ -15435,6 +15470,7 @@ static uint64_t feature_mask_from_pnext_chain(const void *pNext) {
                 if (p->storagePushConstant8) mask |= PDOCKER_VK_FEATURE_STORAGE_PUSH_CONSTANT_8;
                 if (p->shaderFloat16) mask |= PDOCKER_VK_FEATURE_SHADER_FLOAT16;
                 if (p->shaderInt8) mask |= PDOCKER_VK_FEATURE_SHADER_INT8;
+                if (p->descriptorBindingPartiallyBound) mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_PARTIALLY_BOUND;
                 if (p->bufferDeviceAddress) mask |= PDOCKER_VK_FEATURE_BUFFER_DEVICE_ADDRESS;
                 if (p->vulkanMemoryModel) mask |= PDOCKER_VK_FEATURE_VULKAN_MEMORY_MODEL;
                 if (p->timelineSemaphore) mask |= PDOCKER_VK_FEATURE_TIMELINE_SEMAPHORE;
@@ -15482,6 +15518,11 @@ static uint64_t feature_mask_from_pnext_chain(const void *pNext) {
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_2_FEATURES_EXT: {
                 const VkPhysicalDeviceExtendedDynamicState2FeaturesEXT *p = (const VkPhysicalDeviceExtendedDynamicState2FeaturesEXT *)node;
                 if (p->extendedDynamicState2) mask |= PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2;
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES: {
+                const VkPhysicalDeviceDescriptorIndexingFeatures *p = (const VkPhysicalDeviceDescriptorIndexingFeatures *)node;
+                if (p->descriptorBindingPartiallyBound) mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_PARTIALLY_BOUND;
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES: {
@@ -15538,6 +15579,9 @@ static uint64_t advertised_feature_mask(void) {
         }
         if (caps->ext_index_type_uint8 && caps->index_type_uint8.indexTypeUint8) {
             mask |= PDOCKER_VK_FEATURE_INDEX_TYPE_UINT8;
+        }
+        if (advertised_descriptor_binding_partially_bound()) {
+            mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_PARTIALLY_BOUND;
         }
         if (caps->multiview) mask |= PDOCKER_VK_FEATURE_MULTIVIEW;
         if (advertised_geometry_shader()) mask |= PDOCKER_VK_FEATURE_GEOMETRY_SHADER;
@@ -16538,6 +16582,46 @@ typedef struct PdockerVkDescriptorSetLayoutBindingFlagsCreateInfoCompat {
     const VkFlags *pBindingFlags;
 } PdockerVkDescriptorSetLayoutBindingFlagsCreateInfoCompat;
 
+static bool descriptor_binding_flags_supported(uint32_t flags) {
+    return (flags & ~PDOCKER_VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT) == 0;
+}
+
+static uint32_t descriptor_set_layout_binding_flags_for_create_info(
+        const VkDescriptorSetLayoutCreateInfo *pCreateInfo,
+        uint32_t binding_index) {
+    if (!pCreateInfo || binding_index >= pCreateInfo->bindingCount) return 0;
+    for (const void *node = pCreateInfo->pNext; node;) {
+        PdockerVkStructHeader header = read_vk_struct_header(node);
+        if (header.sType == VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO) {
+            const PdockerVkDescriptorSetLayoutBindingFlagsCreateInfoCompat *flags =
+                (const PdockerVkDescriptorSetLayoutBindingFlagsCreateInfoCompat *)node;
+            if (flags->bindingCount == pCreateInfo->bindingCount && flags->pBindingFlags) {
+                return (uint32_t)flags->pBindingFlags[binding_index];
+            }
+            return 0;
+        }
+        node = header.pNext;
+    }
+    return 0;
+}
+
+static uint32_t descriptor_layout_binding_flags(
+        const PdockerVkDescriptorSetLayout *layout,
+        uint32_t slot) {
+    if (!layout || slot >= descriptor_layout_slot_count(layout) ||
+        !layout->storage_binding_flags) {
+        return 0;
+    }
+    return layout->storage_binding_flags[slot];
+}
+
+static bool descriptor_layout_binding_partially_bound(
+        const PdockerVkDescriptorSetLayout *layout,
+        uint32_t slot) {
+    return (descriptor_layout_binding_flags(layout, slot) &
+            PDOCKER_VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT) != 0;
+}
+
 static VkResult validate_descriptor_set_layout_pnext(
         const VkDescriptorSetLayoutCreateInfo *pCreateInfo) {
     for (const void *node = pCreateInfo ? pCreateInfo->pNext : NULL; node;) {
@@ -16557,7 +16641,8 @@ static VkResult validate_descriptor_set_layout_pnext(
                     return VK_ERROR_FEATURE_NOT_PRESENT;
                 }
                 for (uint32_t i = 0; i < flags->bindingCount; ++i) {
-                    if (flags->pBindingFlags[i] != 0) {
+                    uint32_t binding_flags = (uint32_t)flags->pBindingFlags[i];
+                    if (!descriptor_binding_flags_supported(binding_flags)) {
                         trace_icd_runtime_failure("descriptor-set-layout-binding-flags-unsupported",
                                                   VK_ERROR_FEATURE_NOT_PRESENT);
                         return VK_ERROR_FEATURE_NOT_PRESENT;
@@ -18034,7 +18119,8 @@ static bool descriptor_set_layout_compatible(
             expected->storage_binding_present[i] != actual->storage_binding_present[i] ||
             expected->storage_binding_types[i] != actual->storage_binding_types[i] ||
             expected->storage_binding_counts[i] != actual->storage_binding_counts[i] ||
-            expected->storage_binding_stage_flags[i] != actual->storage_binding_stage_flags[i]) {
+            expected->storage_binding_stage_flags[i] != actual->storage_binding_stage_flags[i] ||
+            expected->storage_binding_flags[i] != actual->storage_binding_flags[i]) {
             return false;
         }
         uint32_t count = expected->storage_binding_counts[i];
@@ -18055,7 +18141,8 @@ static bool descriptor_set_layout_compatible(
 }
 
 static bool descriptor_set_layout_create_info_supported(
-        const VkDescriptorSetLayoutCreateInfo *pCreateInfo) {
+        const VkDescriptorSetLayoutCreateInfo *pCreateInfo,
+        uint64_t requested_feature_mask) {
     if (!pCreateInfo) return false;
     if (validate_descriptor_set_layout_pnext(pCreateInfo) != VK_SUCCESS) return false;
     if (pCreateInfo->flags != 0) return false;
@@ -18077,6 +18164,12 @@ static bool descriptor_set_layout_create_info_supported(
         }
         if (binding->descriptorCount == 0) return false;
         if (binding->descriptorCount > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS) return false;
+        uint32_t binding_flags = descriptor_set_layout_binding_flags_for_create_info(pCreateInfo, i);
+        if (!descriptor_binding_flags_supported(binding_flags)) return false;
+        if ((binding_flags & PDOCKER_VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT) &&
+            (requested_feature_mask & PDOCKER_VK_FEATURE_DESCRIPTOR_PARTIALLY_BOUND) == 0) {
+            return false;
+        }
         if (binding->pImmutableSamplers) {
             if (!descriptor_type_requires_sampler(binding->descriptorType)) return false;
             for (uint32_t array_element = 0; array_element < binding->descriptorCount; ++array_element) {
@@ -18117,7 +18210,9 @@ VKAPI_ATTR void VKAPI_CALL vkGetDescriptorSetLayoutSupport(
     if (!pSupport) return;
     PdockerVkStructHeader header = read_vk_struct_header(pSupport);
     zero_vk_out_struct_preserve_chain(pSupport, sizeof(*pSupport), header);
-    pSupport->supported = descriptor_set_layout_create_info_supported(pCreateInfo)
+    const PdockerVkDevice *dev = (const PdockerVkDevice *)device;
+    uint64_t requested_feature_mask = dev ? dev->requested_feature_mask : 0;
+    pSupport->supported = descriptor_set_layout_create_info_supported(pCreateInfo, requested_feature_mask)
         ? VK_TRUE
         : VK_FALSE;
     fill_descriptor_set_layout_support_pnext((void *)header.pNext);
@@ -18135,7 +18230,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorSetLayout(
     VkResult pnext_rc = validate_descriptor_set_layout_pnext(pCreateInfo);
     if (pnext_rc != VK_SUCCESS) return pnext_rc;
     if (pCreateInfo->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;
-    if (!descriptor_set_layout_create_info_supported(pCreateInfo)) {
+    const PdockerVkDevice *dev = (const PdockerVkDevice *)device;
+    uint64_t requested_feature_mask = dev ? dev->requested_feature_mask : 0;
+    if (!descriptor_set_layout_create_info_supported(pCreateInfo, requested_feature_mask)) {
         trace_icd_runtime_failure("descriptor-set-layout-unsupported",
                                   VK_ERROR_FEATURE_NOT_PRESENT);
         return VK_ERROR_FEATURE_NOT_PRESENT;
@@ -18207,6 +18304,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorSetLayout(
         layout->storage_binding_types[slot] = binding->descriptorType;
         layout->storage_binding_counts[slot] = binding->descriptorCount;
         layout->storage_binding_stage_flags[slot] = binding->stageFlags;
+        layout->storage_binding_flags[slot] = descriptor_set_layout_binding_flags_for_create_info(
+            pCreateInfo, best_index);
         if (binding->pImmutableSamplers && descriptor_type_requires_sampler(binding->descriptorType)) {
             if (descriptor_set_layout_allocate_immutable_sampler_row(
                     layout, slot, binding->descriptorCount) != VK_SUCCESS) {
