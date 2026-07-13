@@ -18486,6 +18486,16 @@ static VkResult validate_memory_allocate_pnext(const void *pNext) {
                 break;
             }
 #endif
+            case VK_STRUCTURE_TYPE_MEMORY_OPAQUE_CAPTURE_ADDRESS_ALLOCATE_INFO: {
+                const VkMemoryOpaqueCaptureAddressAllocateInfo *info =
+                    (const VkMemoryOpaqueCaptureAddressAllocateInfo *)node;
+                if (info->opaqueCaptureAddress != 0) {
+                    trace_icd_runtime_failure("memory-opaque-capture-address-unsupported",
+                                              VK_ERROR_FEATURE_NOT_PRESENT);
+                    return VK_ERROR_FEATURE_NOT_PRESENT;
+                }
+                break;
+            }
             default:
                 return unsupported_create_info_pnext_result("vkAllocateMemory", node);
         }

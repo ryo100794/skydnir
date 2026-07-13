@@ -876,5 +876,63 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
+    def test_memory_allocate_capture_address_pnext_is_fail_closed(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            int main(void) {{
+                VkMemoryOpaqueCaptureAddressAllocateInfo capture;
+                memset(&capture, 0, sizeof(capture));
+                capture.sType = VK_STRUCTURE_TYPE_MEMORY_OPAQUE_CAPTURE_ADDRESS_ALLOCATE_INFO;
+                capture.opaqueCaptureAddress = 0;
+                if (validate_memory_allocate_pnext(&capture) != VK_SUCCESS) {{
+                    fprintf(stderr, "zero opaque capture address allocation pNext was rejected\\n");
+                    return 2;
+                }}
+
+                capture.opaqueCaptureAddress = 0x1000u;
+                if (validate_memory_allocate_pnext(&capture) != VK_ERROR_FEATURE_NOT_PRESENT) {{
+                    fprintf(stderr, "nonzero opaque capture address allocation pNext was accepted\\n");
+                    return 3;
+                }}
+
+                VkMemoryAllocateFlagsInfo flags;
+                memset(&flags, 0, sizeof(flags));
+                memset(&capture, 0, sizeof(capture));
+                flags.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
+                flags.deviceMask = 1;
+                flags.pNext = &capture;
+                capture.sType = VK_STRUCTURE_TYPE_MEMORY_OPAQUE_CAPTURE_ADDRESS_ALLOCATE_INFO;
+                capture.opaqueCaptureAddress = 0;
+                if (validate_memory_allocate_pnext(&flags) != VK_SUCCESS) {{
+                    fprintf(stderr, "no-op memory allocate flags + capture chain was rejected\\n");
+                    return 4;
+                }}
+
+                flags.deviceMask = 2;
+                if (validate_memory_allocate_pnext(&flags) == VK_SUCCESS) {{
+                    fprintf(stderr, "multi-device memory allocation mask was accepted\\n");
+                    return 5;
+                }}
+
+                VkBaseInStructure unknown;
+                memset(&unknown, 0, sizeof(unknown));
+                unknown.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+                if (validate_memory_allocate_pnext(&unknown) == VK_SUCCESS) {{
+                    fprintf(stderr, "unknown memory allocation pNext was accepted\\n");
+                    return 6;
+                }}
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
