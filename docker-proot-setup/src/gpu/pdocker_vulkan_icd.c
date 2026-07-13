@@ -16555,10 +16555,25 @@ static bool image_format_info2_has_unsupported_pnext(const void *pNext) {
     const void *node = pNext;
     while (node) {
         PdockerVkStructHeader header = read_vk_struct_header(node);
-        (void)header;
-        trace_icd_runtime_failure("image-format-properties2-input-pnext-unsupported",
-                                  VK_ERROR_FORMAT_NOT_SUPPORTED);
-        return true;
+        switch (header.sType) {
+#ifdef VK_VERSION_1_1
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_IMAGE_FORMAT_INFO: {
+                const VkPhysicalDeviceExternalImageFormatInfo *external_info =
+                    (const VkPhysicalDeviceExternalImageFormatInfo *)node;
+                if (external_info->handleType != 0) {
+                    trace_icd_runtime_failure("image-format-properties2-external-handle-unsupported",
+                                              VK_ERROR_FORMAT_NOT_SUPPORTED);
+                    return true;
+                }
+                break;
+            }
+#endif
+            default:
+                trace_icd_runtime_failure("image-format-properties2-input-pnext-unsupported",
+                                          VK_ERROR_FORMAT_NOT_SUPPORTED);
+                return true;
+        }
+        node = header.pNext;
     }
     return false;
 }

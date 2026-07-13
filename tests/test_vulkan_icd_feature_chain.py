@@ -225,6 +225,80 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
 
+    def test_image_format_properties2_allows_noop_external_image_format_info(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            int main(void) {{
+                setenv("PDOCKER_VULKAN_HEAP_BYTES", "2147483648", 1);
+                setenv("PDOCKER_VULKAN_MAX_BUFFER_BYTES", "2147483648", 1);
+
+                VkPhysicalDeviceImageFormatInfo2 info;
+                VkPhysicalDeviceExternalImageFormatInfo external_info;
+                memset(&info, 0, sizeof(info));
+                memset(&external_info, 0, sizeof(external_info));
+                info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_FORMAT_INFO_2;
+                info.format = VK_FORMAT_R8G8B8A8_UNORM;
+                info.type = VK_IMAGE_TYPE_2D;
+                info.tiling = VK_IMAGE_TILING_OPTIMAL;
+                info.usage = VK_IMAGE_USAGE_SAMPLED_BIT;
+                external_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_IMAGE_FORMAT_INFO;
+                external_info.handleType = (VkExternalMemoryHandleTypeFlagBits)0;
+                info.pNext = &external_info;
+
+                VkImageFormatProperties2 properties;
+                VkExternalImageFormatProperties external_properties;
+                memset(&properties, 0, sizeof(properties));
+                memset(&external_properties, 0xff, sizeof(external_properties));
+                properties.sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_PROPERTIES_2;
+                properties.pNext = &external_properties;
+                external_properties.sType = VK_STRUCTURE_TYPE_EXTERNAL_IMAGE_FORMAT_PROPERTIES;
+                external_properties.pNext = NULL;
+
+                VkResult rc = vkGetPhysicalDeviceImageFormatProperties2(
+                    VK_NULL_HANDLE, &info, &properties);
+                if (rc != VK_SUCCESS) {{
+                    fprintf(stderr, "handleType=0 external image query failed: %d\\n", rc);
+                    return 2;
+                }}
+                if (properties.imageFormatProperties.maxExtent.width == 0 ||
+                    properties.imageFormatProperties.maxMipLevels == 0 ||
+                    properties.imageFormatProperties.sampleCounts == 0) {{
+                    fprintf(stderr, "legacy image format properties were not populated\\n");
+                    return 3;
+                }}
+                if (external_properties.sType != VK_STRUCTURE_TYPE_EXTERNAL_IMAGE_FORMAT_PROPERTIES ||
+                    external_properties.pNext != NULL) {{
+                    fprintf(stderr, "external output header was not preserved\\n");
+                    return 4;
+                }}
+                if (external_properties.externalMemoryProperties.externalMemoryFeatures != 0 ||
+                    external_properties.externalMemoryProperties.exportFromImportedHandleTypes != 0 ||
+                    external_properties.externalMemoryProperties.compatibleHandleTypes != 0) {{
+                    fprintf(stderr, "external output properties were not zero-filled\\n");
+                    return 5;
+                }}
+
+                external_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+                memset(&properties, 0, sizeof(properties));
+                properties.sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_PROPERTIES_2;
+                rc = vkGetPhysicalDeviceImageFormatProperties2(VK_NULL_HANDLE, &info, &properties);
+                if (rc != VK_ERROR_FORMAT_NOT_SUPPORTED) {{
+                    fprintf(stderr, "handleType!=0 external image query returned %d\\n", rc);
+                    return 6;
+                }}
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
     def test_device_queue_lookup_shape_is_fail_closed(self):
         source = textwrap.dedent(
             f"""
