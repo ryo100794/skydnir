@@ -16551,8 +16551,24 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceFormatProperties2(
     fill_format_properties2_pnext((void *)header.pNext, &pFormatProperties->formatProperties);
 }
 
-static bool image_format_info2_has_unsupported_pnext(const void *pNext) {
-    const void *node = pNext;
+static bool pdocker_vk_image_view_type_known_for_query(VkImageViewType view_type) {
+    switch (view_type) {
+        case VK_IMAGE_VIEW_TYPE_1D:
+        case VK_IMAGE_VIEW_TYPE_1D_ARRAY:
+        case VK_IMAGE_VIEW_TYPE_2D:
+        case VK_IMAGE_VIEW_TYPE_2D_ARRAY:
+        case VK_IMAGE_VIEW_TYPE_3D:
+        case VK_IMAGE_VIEW_TYPE_CUBE:
+        case VK_IMAGE_VIEW_TYPE_CUBE_ARRAY:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static bool image_format_info2_has_unsupported_pnext(const VkPhysicalDeviceImageFormatInfo2 *info) {
+    if (!info) return true;
+    const void *node = info->pNext;
     while (node) {
         PdockerVkStructHeader header = read_vk_struct_header(node);
         switch (header.sType) {
@@ -16562,6 +16578,18 @@ static bool image_format_info2_has_unsupported_pnext(const void *pNext) {
                     (const VkPhysicalDeviceExternalImageFormatInfo *)node;
                 if (external_info->handleType != 0) {
                     trace_icd_runtime_failure("image-format-properties2-external-handle-unsupported",
+                                              VK_ERROR_FORMAT_NOT_SUPPORTED);
+                    return true;
+                }
+                break;
+            }
+#endif
+#ifdef VK_EXT_filter_cubic
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_VIEW_IMAGE_FORMAT_INFO_EXT: {
+                const VkPhysicalDeviceImageViewImageFormatInfoEXT *view_info =
+                    (const VkPhysicalDeviceImageViewImageFormatInfoEXT *)node;
+                if (!pdocker_vk_image_view_type_known_for_query(view_info->imageViewType)) {
+                    trace_icd_runtime_failure("image-format-properties2-view-type-unsupported",
                                               VK_ERROR_FORMAT_NOT_SUPPORTED);
                     return true;
                 }
@@ -16680,7 +16708,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceImageFormatProperties2(
     if (!pImageFormatInfo || !pImageFormatProperties) return VK_ERROR_FORMAT_NOT_SUPPORTED;
     PdockerVkStructHeader header = read_vk_struct_header(pImageFormatProperties);
     zero_vk_out_struct_preserve_chain(pImageFormatProperties, sizeof(*pImageFormatProperties), header);
-    if (image_format_info2_has_unsupported_pnext(pImageFormatInfo->pNext)) {
+    if (image_format_info2_has_unsupported_pnext(pImageFormatInfo)) {
         return VK_ERROR_FORMAT_NOT_SUPPORTED;
     }
     VkResult rc = vkGetPhysicalDeviceImageFormatProperties(

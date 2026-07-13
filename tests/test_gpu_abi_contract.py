@@ -10498,7 +10498,7 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
 
         self.assertIn("zero_vk_out_struct_preserve_chain(pImageFormatProperties", image2_body)
-        self.assertIn("image_format_info2_has_unsupported_pnext(pImageFormatInfo->pNext)", image2_body)
+        self.assertIn("image_format_info2_has_unsupported_pnext(pImageFormatInfo)", image2_body)
         self.assertIn("return VK_ERROR_FORMAT_NOT_SUPPORTED;", image2_body)
         self.assertIn("vkGetPhysicalDeviceImageFormatProperties(", image2_body)
         for field in [
@@ -10511,6 +10511,11 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(field, image2_body)
         self.assertIn("fill_image_format_properties2_pnext((void *)header.pNext);", image2_body)
+        self.assertIn("pdocker_vk_image_view_type_known_for_query", icd)
+        self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_VIEW_IMAGE_FORMAT_INFO_EXT", input_pnext_body)
+        self.assertIn("VkPhysicalDeviceImageViewImageFormatInfoEXT", input_pnext_body)
+        self.assertIn("view_info->imageViewType", input_pnext_body)
+        self.assertIn("image-format-properties2-view-type-unsupported", input_pnext_body)
         self.assertIn("trace_icd_runtime_failure", input_pnext_body)
         self.assertIn("VK_ERROR_FORMAT_NOT_SUPPORTED", input_pnext_body)
         self.assertIn("VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_IMAGE_FORMAT_PROPERTIES", output_pnext_body)

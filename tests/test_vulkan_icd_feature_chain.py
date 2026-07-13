@@ -283,13 +283,49 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     return 5;
                 }}
 
+                VkPhysicalDeviceImageViewImageFormatInfoEXT view_info;
+                VkFilterCubicImageViewImageFormatPropertiesEXT cubic_props;
+                memset(&view_info, 0, sizeof(view_info));
+                memset(&cubic_props, 0xff, sizeof(cubic_props));
+                view_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_VIEW_IMAGE_FORMAT_INFO_EXT;
+                view_info.imageViewType = VK_IMAGE_VIEW_TYPE_2D;
+                external_info.pNext = &view_info;
+                memset(&properties, 0, sizeof(properties));
+                memset(&external_properties, 0, sizeof(external_properties));
+                properties.sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_PROPERTIES_2;
+                properties.pNext = &external_properties;
+                external_properties.sType = VK_STRUCTURE_TYPE_EXTERNAL_IMAGE_FORMAT_PROPERTIES;
+                external_properties.pNext = &cubic_props;
+                cubic_props.sType = VK_STRUCTURE_TYPE_FILTER_CUBIC_IMAGE_VIEW_IMAGE_FORMAT_PROPERTIES_EXT;
+                cubic_props.pNext = NULL;
+                rc = vkGetPhysicalDeviceImageFormatProperties2(VK_NULL_HANDLE, &info, &properties);
+                if (rc != VK_SUCCESS) {{
+                    fprintf(stderr, "filter-cubic image-view query pNext failed: %d\\n", rc);
+                    return 6;
+                }}
+                if (cubic_props.sType != VK_STRUCTURE_TYPE_FILTER_CUBIC_IMAGE_VIEW_IMAGE_FORMAT_PROPERTIES_EXT ||
+                    cubic_props.pNext != NULL || cubic_props.filterCubic != VK_FALSE ||
+                    cubic_props.filterCubicMinmax != VK_FALSE) {{
+                    fprintf(stderr, "filter-cubic output properties were not zero-filled\\n");
+                    return 7;
+                }}
+                view_info.imageViewType = (VkImageViewType)0x7fffffff;
+                memset(&properties, 0, sizeof(properties));
+                properties.sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_PROPERTIES_2;
+                rc = vkGetPhysicalDeviceImageFormatProperties2(VK_NULL_HANDLE, &info, &properties);
+                if (rc != VK_ERROR_FORMAT_NOT_SUPPORTED) {{
+                    fprintf(stderr, "invalid filter-cubic image-view query returned %d\\n", rc);
+                    return 8;
+                }}
+                external_info.pNext = NULL;
+
                 external_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
                 memset(&properties, 0, sizeof(properties));
                 properties.sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_PROPERTIES_2;
                 rc = vkGetPhysicalDeviceImageFormatProperties2(VK_NULL_HANDLE, &info, &properties);
                 if (rc != VK_ERROR_FORMAT_NOT_SUPPORTED) {{
                     fprintf(stderr, "handleType!=0 external image query returned %d\\n", rc);
-                    return 6;
+                    return 9;
                 }}
                 return 0;
             }}
