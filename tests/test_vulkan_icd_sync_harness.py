@@ -1245,5 +1245,162 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
+    def test_descriptor_update_template_updates_storage_buffer_slots_via_staged_path(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            int main(void) {{
+                unsetenv("PDOCKER_GPU_QUEUE_SOCKET");
+
+                VkDescriptorSetLayoutBinding binding;
+                memset(&binding, 0, sizeof(binding));
+                binding.binding = 5;
+                binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+                binding.descriptorCount = 2;
+                binding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+                VkDescriptorSetLayoutCreateInfo layout_info;
+                memset(&layout_info, 0, sizeof(layout_info));
+                layout_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+                layout_info.bindingCount = 1;
+                layout_info.pBindings = &binding;
+                VkDescriptorSetLayout layout = VK_NULL_HANDLE;
+                if (vkCreateDescriptorSetLayout(VK_NULL_HANDLE, &layout_info, NULL, &layout) != VK_SUCCESS || !layout) {{
+                    fprintf(stderr, "descriptor layout create failed\\n");
+                    return 2;
+                }}
+
+                VkDescriptorPoolCreateInfo pool_info;
+                memset(&pool_info, 0, sizeof(pool_info));
+                pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+                pool_info.maxSets = 1;
+                VkDescriptorPool pool = VK_NULL_HANDLE;
+                if (vkCreateDescriptorPool(VK_NULL_HANDLE, &pool_info, NULL, &pool) != VK_SUCCESS || !pool) {{
+                    fprintf(stderr, "descriptor pool create failed\\n");
+                    return 3;
+                }}
+
+                VkDescriptorSetAllocateInfo alloc_info;
+                memset(&alloc_info, 0, sizeof(alloc_info));
+                alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+                alloc_info.descriptorPool = pool;
+                alloc_info.descriptorSetCount = 1;
+                alloc_info.pSetLayouts = &layout;
+                VkDescriptorSet set_handle = VK_NULL_HANDLE;
+                if (vkAllocateDescriptorSets(VK_NULL_HANDLE, &alloc_info, &set_handle) != VK_SUCCESS || !set_handle) {{
+                    fprintf(stderr, "descriptor set allocate failed\\n");
+                    return 4;
+                }}
+
+                VkBufferCreateInfo buffer_info;
+                memset(&buffer_info, 0, sizeof(buffer_info));
+                buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+                buffer_info.size = 1024;
+                buffer_info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+                buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+                VkBuffer buffer = VK_NULL_HANDLE;
+                if (vkCreateBuffer(VK_NULL_HANDLE, &buffer_info, NULL, &buffer) != VK_SUCCESS || !buffer) {{
+                    fprintf(stderr, "buffer create failed\\n");
+                    return 5;
+                }}
+
+                VkMemoryAllocateInfo memory_info;
+                memset(&memory_info, 0, sizeof(memory_info));
+                memory_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+                memory_info.allocationSize = 2048;
+                memory_info.memoryTypeIndex = 1;
+                VkDeviceMemory memory = VK_NULL_HANDLE;
+                if (vkAllocateMemory(VK_NULL_HANDLE, &memory_info, NULL, &memory) != VK_SUCCESS || !memory) {{
+                    fprintf(stderr, "memory allocate failed\\n");
+                    return 6;
+                }}
+                if (vkBindBufferMemory(VK_NULL_HANDLE, buffer, memory, 0) != VK_SUCCESS) {{
+                    fprintf(stderr, "buffer bind failed\\n");
+                    return 7;
+                }}
+
+                VkDescriptorUpdateTemplateEntry entry;
+                memset(&entry, 0, sizeof(entry));
+                entry.dstBinding = 5;
+                entry.dstArrayElement = 0;
+                entry.descriptorCount = 2;
+                entry.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+                entry.offset = 0;
+                entry.stride = sizeof(VkDescriptorBufferInfo);
+
+                VkDescriptorUpdateTemplateCreateInfo template_info;
+                memset(&template_info, 0, sizeof(template_info));
+                template_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_UPDATE_TEMPLATE_CREATE_INFO;
+                template_info.descriptorUpdateEntryCount = 1;
+                template_info.pDescriptorUpdateEntries = &entry;
+                template_info.templateType = VK_DESCRIPTOR_UPDATE_TEMPLATE_TYPE_DESCRIPTOR_SET;
+                template_info.descriptorSetLayout = layout;
+                VkDescriptorUpdateTemplate update_template = VK_NULL_HANDLE;
+                if (vkCreateDescriptorUpdateTemplate(VK_NULL_HANDLE, &template_info, NULL, &update_template) != VK_SUCCESS || !update_template) {{
+                    fprintf(stderr, "descriptor update template create failed\\n");
+                    return 8;
+                }}
+
+                VkDescriptorBufferInfo payload[2];
+                memset(payload, 0, sizeof(payload));
+                payload[0].buffer = buffer;
+                payload[0].offset = 64;
+                payload[0].range = 32;
+                payload[1].buffer = buffer;
+                payload[1].offset = 128;
+                payload[1].range = 64;
+                vkUpdateDescriptorSetWithTemplate(VK_NULL_HANDLE, set_handle, update_template, payload);
+
+                PdockerVkDescriptorSet *set = pdocker_vk_descriptor_set_from_handle(set_handle);
+                int slot = descriptor_layout_slot_for_binding(set ? set->layout : NULL, 5);
+                if (!set || slot != 0 || set->unsupported_descriptor_array || set->unsupported_descriptor_type) {{
+                    fprintf(stderr, "descriptor set/template state invalid slot=%d unsupported_array=%d unsupported_type=%d\\n",
+                            slot,
+                            set && set->unsupported_descriptor_array ? 1 : 0,
+                            set && set->unsupported_descriptor_type ? 1 : 0);
+                    return 9;
+                }}
+                PdockerVkDescriptorBinding *slot0 = descriptor_set_binding_slot(set, (uint32_t)slot, 0);
+                PdockerVkDescriptorBinding *slot1 = descriptor_set_binding_slot(set, (uint32_t)slot, 1);
+                PdockerVkBuffer *buffer_object = pdocker_vk_buffer_from_handle(buffer);
+                if (!slot0 || !slot1 || slot0->buffer != buffer_object || slot1->buffer != buffer_object) {{
+                    fprintf(stderr, "descriptor template did not bind expected buffers\\n");
+                    return 10;
+                }}
+                if (slot0->offset != 64 || slot0->range != 32 ||
+                    slot1->offset != 128 || slot1->range != 64) {{
+                    fprintf(stderr, "descriptor offsets/ranges mismatch got0=%llu/%llu got1=%llu/%llu\\n",
+                            (unsigned long long)slot0->offset,
+                            (unsigned long long)slot0->range,
+                            (unsigned long long)slot1->offset,
+                            (unsigned long long)slot1->range);
+                    return 11;
+                }}
+                if (slot0->descriptor_type != VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ||
+                    slot1->descriptor_type != VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ||
+                    !slot0->buffer_snapshot.valid || !slot1->buffer_snapshot.valid ||
+                    slot0->buffer_snapshot.object_id != pdocker_vk_buffer_object_id(buffer_object) ||
+                    slot1->buffer_snapshot.object_id != pdocker_vk_buffer_object_id(buffer_object)) {{
+                    fprintf(stderr, "descriptor snapshots/type mismatch\\n");
+                    return 12;
+                }}
+
+                vkDestroyDescriptorUpdateTemplate(VK_NULL_HANDLE, update_template, NULL);
+                vkFreeMemory(VK_NULL_HANDLE, memory, NULL);
+                vkDestroyBuffer(VK_NULL_HANDLE, buffer, NULL);
+                vkDestroyDescriptorPool(VK_NULL_HANDLE, pool, NULL);
+                vkDestroyDescriptorSetLayout(VK_NULL_HANDLE, layout, NULL);
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

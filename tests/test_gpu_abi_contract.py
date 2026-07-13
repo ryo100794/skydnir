@@ -8872,6 +8872,7 @@ class GpuAbiContractTest(unittest.TestCase):
         buffer_view_body = c_function_body(icd, "vkCreateBufferView")
         ycbcr_body = c_function_body(icd, "vkCreateSamplerYcbcrConversion")
         template_create_body = c_function_body(icd, "vkCreateDescriptorUpdateTemplate")
+        template_destroy_body = c_function_body(icd, "vkDestroyDescriptorUpdateTemplate")
         template_update_body = c_function_body(icd, "vkUpdateDescriptorSetWithTemplate")
         bda_body = c_function_body(icd, "vkGetBufferDeviceAddress")
         opaque_buffer_body = c_function_body(icd, "vkGetBufferOpaqueCaptureAddress")
@@ -8903,10 +8904,22 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('unsupported_create_info_pnext_result("vkCreateSamplerYcbcrConversion", pCreateInfo->pNext)', ycbcr_body)
         self.assertIn("sampler-ycbcr-conversion-unsupported", ycbcr_body)
 
-        self.assertIn("*pDescriptorUpdateTemplate = VK_NULL_HANDLE;", template_create_body)
+        self.assertIn("struct PdockerVkDescriptorUpdateTemplate", icd)
+        self.assertIn("pdocker_vk_descriptor_update_template_to_handle", template_create_body)
+        self.assertIn("pdocker_vk_descriptor_update_template_from_handle", template_destroy_body)
+        self.assertIn("pCreateInfo->sType != VK_STRUCTURE_TYPE_DESCRIPTOR_UPDATE_TEMPLATE_CREATE_INFO", template_create_body)
         self.assertIn('unsupported_create_info_pnext_result("vkCreateDescriptorUpdateTemplate", pCreateInfo->pNext)', template_create_body)
-        self.assertIn("descriptor-update-template-unsupported", template_create_body)
-        self.assertIn("descriptor-update-template-unsupported", template_update_body)
+        self.assertIn("pCreateInfo->templateType != VK_DESCRIPTOR_UPDATE_TEMPLATE_TYPE_DESCRIPTOR_SET", template_create_body)
+        self.assertIn("descriptor_update_template_entry_layout_valid", template_create_body)
+        self.assertIn("memcpy(template_handle->entries", template_create_body)
+        self.assertIn("free(template_handle->entries);", template_destroy_body)
+        self.assertIn("VkWriteDescriptorSet *writes", template_update_body)
+        self.assertIn("descriptor_set_layout_compatible(template_handle->set_layout, set->layout)", template_update_body)
+        self.assertIn("descriptor_linear_slot(set", template_update_body)
+        self.assertIn("descriptor_layout_binding_number(set->layout, slot)", template_update_body)
+        self.assertIn("vkUpdateDescriptorSets(device, (uint32_t)write_count, writes, 0, NULL);", template_update_body)
+        self.assertNotIn("descriptor-update-template-unsupported", template_create_body)
+        self.assertNotIn("descriptor-update-template-unsupported", template_update_body)
 
         self.assertIn("return 0;", bda_body)
         self.assertIn("return 0;", opaque_buffer_body)
@@ -12708,12 +12721,14 @@ class GpuAbiContractTest(unittest.TestCase):
         for marker in [
             "pdocker_vk_descriptor_set_layout_from_handle",
             "pdocker_vk_descriptor_set_from_handle",
+            "pdocker_vk_descriptor_update_template_from_handle",
             "pdocker_vk_shader_module_from_handle",
             "pdocker_vk_pipeline_layout_from_handle",
             "pdocker_vk_pipeline_from_handle",
             "*pSetLayout = pdocker_vk_descriptor_set_layout_to_handle(layout);",
             "set->layout = pdocker_vk_descriptor_set_layout_from_handle(pAllocateInfo->pSetLayouts[i]);",
             "pDescriptorSets[i] = pdocker_vk_descriptor_set_to_handle(set);",
+            "pdocker_vk_descriptor_update_template_to_handle(template_handle)",
             "*pShaderModule = pdocker_vk_shader_module_to_handle(shader);",
             "pipeline->shader = pdocker_vk_shader_module_from_handle(ci->stage.module);",
             "pipeline->layout = pdocker_vk_pipeline_layout_from_handle(ci->layout);",

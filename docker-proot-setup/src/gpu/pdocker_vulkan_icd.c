@@ -186,6 +186,7 @@ typedef struct PdockerVkDescriptorBinding PdockerVkDescriptorBinding;
 typedef struct PdockerVkDescriptorPool PdockerVkDescriptorPool;
 typedef struct PdockerVkDescriptorSetLayout PdockerVkDescriptorSetLayout;
 typedef struct PdockerVkDescriptorSet PdockerVkDescriptorSet;
+typedef struct PdockerVkDescriptorUpdateTemplate PdockerVkDescriptorUpdateTemplate;
 typedef struct PdockerVkShaderModule PdockerVkShaderModule;
 typedef struct PdockerVkPipelineLayout PdockerVkPipelineLayout;
 typedef struct PdockerVkPipelineCache PdockerVkPipelineCache;
@@ -230,6 +231,7 @@ PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_image_view, VkIm
 PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_sampler, VkSampler, PdockerVkSampler)
 PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_descriptor_set_layout, VkDescriptorSetLayout, PdockerVkDescriptorSetLayout)
 PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_descriptor_set, VkDescriptorSet, PdockerVkDescriptorSet)
+PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_descriptor_update_template, VkDescriptorUpdateTemplate, PdockerVkDescriptorUpdateTemplate)
 PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_shader_module, VkShaderModule, PdockerVkShaderModule)
 PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_pipeline_layout, VkPipelineLayout, PdockerVkPipelineLayout)
 PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_pipeline, VkPipeline, PdockerVkPipeline)
@@ -649,6 +651,13 @@ struct PdockerVkDescriptorSet {
     bool unsupported_descriptor_array;
     bool unsupported_descriptor_type;
     bool has_image_descriptor;
+};
+
+struct PdockerVkDescriptorUpdateTemplate {
+    VkDescriptorUpdateTemplateType template_type;
+    PdockerVkDescriptorSetLayout *set_layout;
+    uint32_t entry_count;
+    VkDescriptorUpdateTemplateEntry *entries;
 };
 
 static uint32_t descriptor_layout_binding_number(
@@ -19547,6 +19556,78 @@ fail_closed:
     descriptor_update_targets_destroy(targets, target_count);
 }
 
+static bool descriptor_update_template_payload_size(
+        VkDescriptorType type,
+        size_t *payload_size_out) {
+    if (!payload_size_out) return false;
+    if (descriptor_type_supported_by_v4_transport(type)) {
+        *payload_size_out = sizeof(VkDescriptorBufferInfo);
+        return true;
+    }
+    if (descriptor_type_requires_buffer_view(type)) {
+        if (!executor_supports_any_vulkan_buffer_views()) return false;
+        *payload_size_out = sizeof(VkBufferView);
+        return true;
+    }
+    if (vulkan_v5_object_transport_enabled() &&
+        descriptor_type_supported_by_v5_object_transport(type)) {
+        *payload_size_out = sizeof(VkDescriptorImageInfo);
+        return true;
+    }
+    return false;
+}
+
+static bool descriptor_update_template_entry_range_valid(
+        const VkDescriptorUpdateTemplateEntry *entry,
+        size_t payload_size) {
+    if (!entry || entry->descriptorCount == 0 || payload_size == 0) return false;
+    if (entry->descriptorCount > 1 && entry->stride < payload_size) return false;
+    size_t stride_span = 0;
+    size_t last_offset = 0;
+    size_t end_offset = 0;
+    if (!checked_mul_size(entry->stride, (size_t)(entry->descriptorCount - 1u), &stride_span) ||
+        !checked_add_size(entry->offset, stride_span, &last_offset) ||
+        !checked_add_size(last_offset, payload_size, &end_offset)) {
+        return false;
+    }
+    return true;
+}
+
+static bool descriptor_update_template_entry_layout_valid(
+        const PdockerVkDescriptorSetLayout *layout,
+        const VkDescriptorUpdateTemplateEntry *entry) {
+    if (!layout || !entry) return false;
+    size_t payload_size = 0;
+    if (!descriptor_update_template_payload_size(entry->descriptorType, &payload_size) ||
+        !descriptor_update_template_entry_range_valid(entry, payload_size)) {
+        return false;
+    }
+    PdockerVkDescriptorSet pseudo_set;
+    memset(&pseudo_set, 0, sizeof(pseudo_set));
+    pseudo_set.layout = (PdockerVkDescriptorSetLayout *)layout;
+    for (uint32_t i = 0; i < entry->descriptorCount; ++i) {
+        uint32_t slot = 0;
+        uint32_t array_element = 0;
+        if (!descriptor_linear_slot(&pseudo_set,
+                                    entry->dstBinding,
+                                    entry->dstArrayElement,
+                                    i,
+                                    &slot,
+                                    &array_element)) {
+            return false;
+        }
+        (void)array_element;
+        if (slot >= descriptor_layout_slot_count(layout) ||
+            !layout->storage_binding_present ||
+            !layout->storage_binding_present[slot] ||
+            !layout->storage_binding_types ||
+            layout->storage_binding_types[slot] != entry->descriptorType) {
+            return false;
+        }
+    }
+    return true;
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorUpdateTemplate(
         VkDevice device,
         const VkDescriptorUpdateTemplateCreateInfo *pCreateInfo,
@@ -19556,10 +19637,60 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorUpdateTemplate(
     (void)pAllocator;
     if (!pDescriptorUpdateTemplate) return VK_ERROR_INITIALIZATION_FAILED;
     *pDescriptorUpdateTemplate = VK_NULL_HANDLE;
-    if (!pCreateInfo) return VK_ERROR_INITIALIZATION_FAILED;
-    if (pCreateInfo->pNext) return unsupported_create_info_pnext_result("vkCreateDescriptorUpdateTemplate", pCreateInfo->pNext);
-    trace_icd_runtime_failure("descriptor-update-template-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
-    return VK_ERROR_FEATURE_NOT_PRESENT;
+    if (!pCreateInfo ||
+        pCreateInfo->sType != VK_STRUCTURE_TYPE_DESCRIPTOR_UPDATE_TEMPLATE_CREATE_INFO) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    if (pCreateInfo->pNext) {
+        return unsupported_create_info_pnext_result("vkCreateDescriptorUpdateTemplate", pCreateInfo->pNext);
+    }
+    if (pCreateInfo->flags != 0 ||
+        pCreateInfo->templateType != VK_DESCRIPTOR_UPDATE_TEMPLATE_TYPE_DESCRIPTOR_SET) {
+        trace_icd_runtime_failure("descriptor-update-template-create-unsupported",
+                                  VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    if (pCreateInfo->descriptorUpdateEntryCount > 0 &&
+        !pCreateInfo->pDescriptorUpdateEntries) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    PdockerVkDescriptorSetLayout *layout =
+        pdocker_vk_descriptor_set_layout_from_handle(pCreateInfo->descriptorSetLayout);
+    if (!layout) return VK_ERROR_INITIALIZATION_FAILED;
+    for (uint32_t i = 0; i < pCreateInfo->descriptorUpdateEntryCount; ++i) {
+        if (!descriptor_update_template_entry_layout_valid(
+                layout, &pCreateInfo->pDescriptorUpdateEntries[i])) {
+            trace_icd_runtime_failure("descriptor-update-template-entry-unsupported",
+                                      VK_ERROR_FEATURE_NOT_PRESENT);
+            return VK_ERROR_FEATURE_NOT_PRESENT;
+        }
+    }
+    PdockerVkDescriptorUpdateTemplate *template_handle =
+        pdocker_alloc_handle(sizeof(*template_handle));
+    if (!template_handle) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    template_handle->template_type = pCreateInfo->templateType;
+    template_handle->set_layout = layout;
+    template_handle->entry_count = pCreateInfo->descriptorUpdateEntryCount;
+    if (template_handle->entry_count > 0) {
+        size_t entry_bytes = 0;
+        if (!checked_mul_size((size_t)template_handle->entry_count,
+                              sizeof(*template_handle->entries),
+                              &entry_bytes)) {
+            free(template_handle);
+            return VK_ERROR_OUT_OF_HOST_MEMORY;
+        }
+        template_handle->entries = (VkDescriptorUpdateTemplateEntry *)malloc(entry_bytes);
+        if (!template_handle->entries) {
+            free(template_handle);
+            return VK_ERROR_OUT_OF_HOST_MEMORY;
+        }
+        memcpy(template_handle->entries,
+               pCreateInfo->pDescriptorUpdateEntries,
+               entry_bytes);
+    }
+    *pDescriptorUpdateTemplate =
+        pdocker_vk_descriptor_update_template_to_handle(template_handle);
+    return VK_SUCCESS;
 }
 
 VKAPI_ATTR void VKAPI_CALL vkDestroyDescriptorUpdateTemplate(
@@ -19567,8 +19698,12 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyDescriptorUpdateTemplate(
         VkDescriptorUpdateTemplate descriptorUpdateTemplate,
         const VkAllocationCallbacks *pAllocator) {
     (void)device;
-    (void)descriptorUpdateTemplate;
     (void)pAllocator;
+    PdockerVkDescriptorUpdateTemplate *template_handle =
+        pdocker_vk_descriptor_update_template_from_handle(descriptorUpdateTemplate);
+    if (!template_handle) return;
+    free(template_handle->entries);
+    free(template_handle);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSetWithTemplate(
@@ -19576,11 +19711,101 @@ VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSetWithTemplate(
         VkDescriptorSet descriptorSet,
         VkDescriptorUpdateTemplate descriptorUpdateTemplate,
         const void *pData) {
-    (void)device;
-    (void)descriptorSet;
-    (void)descriptorUpdateTemplate;
-    (void)pData;
-    trace_icd_runtime_failure("descriptor-update-template-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
+    PdockerVkDescriptorSet *set = pdocker_vk_descriptor_set_from_handle(descriptorSet);
+    PdockerVkDescriptorUpdateTemplate *template_handle =
+        pdocker_vk_descriptor_update_template_from_handle(descriptorUpdateTemplate);
+    if (!set || !template_handle ||
+        !descriptor_set_layout_compatible(template_handle->set_layout, set->layout)) {
+        trace_icd_runtime_failure("descriptor-update-template-invalid",
+                                  VK_ERROR_FEATURE_NOT_PRESENT);
+        return;
+    }
+    size_t write_count = 0;
+    for (uint32_t i = 0; i < template_handle->entry_count; ++i) {
+        size_t next_count = 0;
+        if (!checked_add_size(write_count,
+                              (size_t)template_handle->entries[i].descriptorCount,
+                              &next_count) ||
+            next_count > UINT32_MAX) {
+            trace_icd_runtime_failure("descriptor-update-template-write-count-overflow",
+                                      VK_ERROR_FEATURE_NOT_PRESENT);
+            return;
+        }
+        write_count = next_count;
+    }
+    if (write_count == 0) {
+        vkUpdateDescriptorSets(device, 0, NULL, 0, NULL);
+        return;
+    }
+    if (!pData) {
+        trace_icd_runtime_failure("descriptor-update-template-null-data",
+                                  VK_ERROR_FEATURE_NOT_PRESENT);
+        return;
+    }
+    VkWriteDescriptorSet *writes =
+        (VkWriteDescriptorSet *)calloc(write_count, sizeof(*writes));
+    if (!writes) return;
+    const uint8_t *data = (const uint8_t *)pData;
+    size_t out = 0;
+    for (uint32_t entry_i = 0; entry_i < template_handle->entry_count; ++entry_i) {
+        const VkDescriptorUpdateTemplateEntry *entry = &template_handle->entries[entry_i];
+        size_t payload_size = 0;
+        if (!descriptor_update_template_payload_size(entry->descriptorType, &payload_size) ||
+            !descriptor_update_template_entry_range_valid(entry, payload_size)) {
+            free(writes);
+            trace_icd_runtime_failure("descriptor-update-template-entry-invalid-at-update",
+                                      VK_ERROR_FEATURE_NOT_PRESENT);
+            return;
+        }
+        for (uint32_t descriptor_i = 0; descriptor_i < entry->descriptorCount; ++descriptor_i) {
+            uint32_t slot = 0;
+            uint32_t array_element = 0;
+            if (!descriptor_linear_slot(set,
+                                        entry->dstBinding,
+                                        entry->dstArrayElement,
+                                        descriptor_i,
+                                        &slot,
+                                        &array_element)) {
+                free(writes);
+                trace_icd_runtime_failure("descriptor-update-template-linear-slot-invalid",
+                                          VK_ERROR_FEATURE_NOT_PRESENT);
+                return;
+            }
+            if (out >= write_count) {
+                free(writes);
+                trace_icd_runtime_failure("descriptor-update-template-write-count-mismatch",
+                                          VK_ERROR_FEATURE_NOT_PRESENT);
+                return;
+            }
+            size_t stride_offset = 0;
+            size_t data_offset = 0;
+            if (!checked_mul_size(entry->stride, (size_t)descriptor_i, &stride_offset) ||
+                !checked_add_size(entry->offset, stride_offset, &data_offset)) {
+                free(writes);
+                trace_icd_runtime_failure("descriptor-update-template-data-offset-overflow",
+                                          VK_ERROR_FEATURE_NOT_PRESENT);
+                return;
+            }
+            const void *descriptor_data = data + data_offset;
+            VkWriteDescriptorSet *write = &writes[out++];
+            memset(write, 0, sizeof(*write));
+            write->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            write->dstSet = descriptorSet;
+            write->dstBinding = descriptor_layout_binding_number(set->layout, slot);
+            write->dstArrayElement = array_element;
+            write->descriptorCount = 1;
+            write->descriptorType = entry->descriptorType;
+            if (descriptor_type_requires_buffer_view(entry->descriptorType)) {
+                write->pTexelBufferView = (const VkBufferView *)descriptor_data;
+            } else if (descriptor_type_supported_by_v5_object_transport(entry->descriptorType)) {
+                write->pImageInfo = (const VkDescriptorImageInfo *)descriptor_data;
+            } else {
+                write->pBufferInfo = (const VkDescriptorBufferInfo *)descriptor_data;
+            }
+        }
+    }
+    vkUpdateDescriptorSets(device, (uint32_t)write_count, writes, 0, NULL);
+    free(writes);
 }
 
 
