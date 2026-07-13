@@ -108,9 +108,12 @@ The command includes these field groups:
 1. **Shader identity**: `shader_size`, entry point, source SPIR-V bytes, source
    hash.
 2. **Dispatch identity**: `dispatch_x`, `dispatch_y`, `dispatch_z`.
-3. **Push constants**: byte count and hex payload.  The executor must not
-   reinterpret the push struct as a C struct unless a diagnostic oracle is
-   explicitly analyzing a known callsite.
+3. **Push constants**: byte count and hex payload plus the declared
+   `VkPushConstantRange` records from the owning pipeline layout.  The executor
+   must recreate pipeline layouts from declared ranges, not synthesize ranges
+   from whatever push commands happened to execute.  It must not reinterpret
+   the push struct as a C struct unless a diagnostic oracle is explicitly
+   analyzing a known callsite.
 4. **Specialization constants**: `{constantID, offset, size}` map entries and
    the raw specialization data blob.
 5. **Descriptor bindings**: descriptor set, binding, transfer offset/size,

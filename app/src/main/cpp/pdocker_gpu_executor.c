@@ -23504,6 +23504,8 @@ static void describe_vulkan_graphics_v6_frame(
     const PdockerGpuVulkanGraphicsV61FrameHeader *header_v61 = view->header_v61;
     const PdockerGpuVulkanGraphicsV619FrameHeader *header_v619 = view->header_v619;
     const PdockerGpuVulkanGraphicsV624FrameHeader *header_v624 = view->header_v624;
+    const PdockerGpuVulkanGraphicsV627FrameHeader *header_v627 = view->header_v627;
+    const PdockerGpuVulkanGraphicsV628FrameHeader *header_v628 = view->header_v628;
     fprintf(out,
             "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
             "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,\"executor_build_marker\":\"" PDOCKER_GPU_EXECUTOR_BUILD_MARKER "\","
@@ -23589,6 +23591,18 @@ static void describe_vulkan_graphics_v6_frame(
                 header_v625->v625.descriptor_bind_table_offset,
                 header_v625->v625.descriptor_bind_table_size,
                 header_v625->v625.descriptor_bind_count, 1);
+        }
+        if (view->is_v627 && header_v627) {
+            write_vulkan_graphics_v6_table_desc(out, "buffer_views",
+                header_v627->v627.buffer_view_table_offset,
+                header_v627->v627.buffer_view_table_size,
+                header_v627->v627.buffer_view_count, 1);
+        }
+        if (view->is_v628 && header_v628) {
+            write_vulkan_graphics_v6_table_desc(out, "push_constant_ranges",
+                header_v628->v628.push_constant_range_table_offset,
+                header_v628->v628.push_constant_range_table_size,
+                header_v628->v628.push_constant_range_count, 1);
         }
         if (view->is_v62 && view->header_v62) {
             write_vulkan_graphics_v6_table_desc(out, "specialization_entries",
