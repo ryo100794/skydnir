@@ -5878,6 +5878,35 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertNotIn(forbidden, body)
 
+    def test_vulkan_graphics_descriptor_replay_state_is_heap_backed(self):
+        executor = GPU_EXECUTOR.read_text()
+        bind_struct = executor.split("typedef struct VulkanGraphicsReplayDescriptorBind", 1)[1].split(
+            "} VulkanGraphicsReplayDescriptorBind;", 1
+        )[0]
+        descriptors_struct = executor.split("typedef struct VulkanGraphicsReplayDescriptors", 1)[1].split(
+            "} VulkanGraphicsReplayDescriptors;", 1
+        )[0]
+        body = c_function_body(executor, "materialize_vulkan_graphics_v6_descriptors")
+        destroy_body = c_function_body(executor, "destroy_vulkan_graphics_replay_descriptors")
+
+        self.assertIn("uint32_t set_capacity;", bind_struct)
+        self.assertIn("VkDescriptorSet *sets;", bind_struct)
+        self.assertNotIn("VkDescriptorSet sets[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS];", bind_struct)
+        self.assertIn("VulkanGraphicsReplayDescriptorBind *binds;", descriptors_struct)
+        self.assertIn("uint32_t bind_capacity;", descriptors_struct)
+        self.assertNotIn(
+            "VulkanGraphicsReplayDescriptorBind binds[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS];",
+            descriptors_struct,
+        )
+        self.assertIn("out->binds = (VulkanGraphicsReplayDescriptorBind *)calloc", body)
+        self.assertIn("out->bind_capacity = bind_capacity;", body)
+        self.assertIn("bind->sets = (VkDescriptorSet *)calloc", body)
+        self.assertIn("bind->set_capacity = bind->set_count;", body)
+        self.assertIn("VkDescriptorSetLayout *alloc_layouts =", body)
+        self.assertNotIn("VkDescriptorSetLayout alloc_layouts[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS];", body)
+        self.assertIn("free(descriptors->binds[i].sets);", destroy_body)
+        self.assertIn("free(descriptors->binds);", destroy_body)
+
     def test_vulkan_graphics_v625_descriptor_bind_uses_standalone_layouts(self):
         executor = GPU_EXECUTOR.read_text()
         descriptors_body = c_function_body(executor, "materialize_vulkan_graphics_v6_descriptors")
