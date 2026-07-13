@@ -397,6 +397,76 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
+    def test_buffer_view_usage2_pnext_accepts_only_noop_texel_usage(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            int main(void) {{
+                PdockerVkBuffer buffer;
+                VkBufferViewCreateInfo view_info;
+                VkBufferUsageFlags2CreateInfo usage2;
+                VkBufferUsageFlags texel_usage = 0;
+                memset(&buffer, 0, sizeof(buffer));
+                memset(&view_info, 0, sizeof(view_info));
+                memset(&usage2, 0, sizeof(usage2));
+
+                buffer.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                               VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT |
+                               VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT;
+                view_info.sType = VK_STRUCTURE_TYPE_BUFFER_VIEW_CREATE_INFO;
+                view_info.pNext = &usage2;
+                usage2.sType = VK_STRUCTURE_TYPE_BUFFER_USAGE_FLAGS_2_CREATE_INFO;
+                usage2.usage = VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT |
+                               VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT;
+                if (validate_buffer_view_create_pnext(&view_info, &buffer, &texel_usage) != VK_SUCCESS) {{
+                    fprintf(stderr, "matching usage2 texel subset was rejected\\n");
+                    return 2;
+                }}
+                if (texel_usage != (VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT |
+                                    VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT)) {{
+                    fprintf(stderr, "unexpected texel usage 0x%x\\n", texel_usage);
+                    return 3;
+                }}
+
+                usage2.usage = VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT;
+                if (validate_buffer_view_create_pnext(&view_info, &buffer, &texel_usage) == VK_SUCCESS) {{
+                    fprintf(stderr, "narrowing usage2 was accepted without a view-usage ABI field\\n");
+                    return 4;
+                }}
+
+                usage2.usage = VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT |
+                               VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+                if (validate_buffer_view_create_pnext(&view_info, &buffer, &texel_usage) == VK_SUCCESS) {{
+                    fprintf(stderr, "non-texel usage2 bit was accepted\\n");
+                    return 5;
+                }}
+
+                usage2.usage = 0;
+                if (validate_buffer_view_create_pnext(&view_info, &buffer, &texel_usage) == VK_SUCCESS) {{
+                    fprintf(stderr, "zero usage2 was accepted\\n");
+                    return 6;
+                }}
+
+                VkBaseInStructure unknown;
+                memset(&unknown, 0, sizeof(unknown));
+                unknown.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+                view_info.pNext = &unknown;
+                if (validate_buffer_view_create_pnext(&view_info, &buffer, &texel_usage) == VK_SUCCESS) {{
+                    fprintf(stderr, "unknown buffer-view pNext was accepted\\n");
+                    return 7;
+                }}
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
     def test_device_queue_lookup_shape_is_fail_closed(self):
         source = textwrap.dedent(
             f"""

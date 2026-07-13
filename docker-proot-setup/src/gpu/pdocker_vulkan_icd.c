@@ -17059,6 +17059,48 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyBuffer(
     free(pdocker_vk_buffer_from_handle(buffer));
 }
 
+static VkResult validate_buffer_view_create_pnext(
+        const VkBufferViewCreateInfo *info,
+        const PdockerVkBuffer *buffer,
+        VkBufferUsageFlags *texel_usage_out) {
+    if (!info || !buffer || !texel_usage_out) return VK_ERROR_INITIALIZATION_FAILED;
+    const VkBufferUsageFlags texel_usage =
+        buffer->usage & (VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT |
+                         VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT);
+    *texel_usage_out = texel_usage;
+    bool saw_usage2 = false;
+    for (const void *node = info->pNext; node;) {
+        PdockerVkStructHeader header = read_vk_struct_header(node);
+        switch (header.sType) {
+            case VK_STRUCTURE_TYPE_BUFFER_USAGE_FLAGS_2_CREATE_INFO: {
+                if (saw_usage2) {
+                    trace_icd_runtime_failure("buffer-view-usage2-duplicate",
+                                              VK_ERROR_FEATURE_NOT_PRESENT);
+                    return VK_ERROR_FEATURE_NOT_PRESENT;
+                }
+                saw_usage2 = true;
+                const VkBufferUsageFlags2CreateInfo *usage2_info =
+                    (const VkBufferUsageFlags2CreateInfo *)node;
+                const VkBufferUsageFlags2 allowed =
+                    (VkBufferUsageFlags2)(VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT |
+                                          VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT);
+                if (usage2_info->usage == 0 ||
+                    (usage2_info->usage & ~allowed) != 0 ||
+                    (VkBufferUsageFlags)usage2_info->usage != texel_usage) {
+                    trace_icd_runtime_failure("buffer-view-usage2-unsupported",
+                                              VK_ERROR_FEATURE_NOT_PRESENT);
+                    return VK_ERROR_FEATURE_NOT_PRESENT;
+                }
+                break;
+            }
+            default:
+                return unsupported_create_info_pnext_result("vkCreateBufferView", node);
+        }
+        node = header.pNext;
+    }
+    return VK_SUCCESS;
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateBufferView(
         VkDevice device,
         const VkBufferViewCreateInfo *pCreateInfo,
@@ -17069,15 +17111,14 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateBufferView(
     if (!pView) return VK_ERROR_INITIALIZATION_FAILED;
     *pView = VK_NULL_HANDLE;
     if (!pCreateInfo) return VK_ERROR_INITIALIZATION_FAILED;
-    if (pCreateInfo->pNext) return unsupported_create_info_pnext_result("vkCreateBufferView", pCreateInfo->pNext);
     PdockerVkBuffer *buffer = pdocker_vk_buffer_from_handle(pCreateInfo->buffer);
     if (pCreateInfo->flags != 0 || !buffer) {
         trace_icd_runtime_failure("buffer-view-invalid-create-info", VK_ERROR_FEATURE_NOT_PRESENT);
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }
-    const VkBufferUsageFlags texel_usage =
-        buffer->usage & (VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT |
-                         VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT);
+    VkBufferUsageFlags texel_usage = 0;
+    VkResult pnext_rc = validate_buffer_view_create_pnext(pCreateInfo, buffer, &texel_usage);
+    if (pnext_rc != VK_SUCCESS) return pnext_rc;
     if (!executor_supports_any_vulkan_buffer_views()) {
         trace_icd_runtime_failure("buffer-view-transport-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
         return VK_ERROR_FEATURE_NOT_PRESENT;

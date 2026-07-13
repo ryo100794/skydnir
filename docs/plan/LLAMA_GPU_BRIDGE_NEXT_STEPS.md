@@ -2170,3 +2170,14 @@ produce normal maintenance4 memory requirements.  Unsupported handle types or
 usage mismatches remain fail-closed by returning zero requirements from the
 query path.  This is a generic Vulkan pass-through compatibility fix, not a
 llama.cpp- or model-specific workaround.
+
+### 2026-07-13 Vulkan buffer-view usage2 pNext lane
+
+`vkCreateBufferView` now accepts the valid maintenance5
+`VkBufferUsageFlags2CreateInfo` pNext only when it is execution-neutral for the
+current bridge ABI: the 64-bit usage must be nonzero, texel-buffer-only, and
+match the texel usage already present on the backing buffer.  Narrowed view
+usage, non-texel usage bits, duplicates, and unknown buffer-view pNext structs
+remain fail-closed because the buffer-view transport does not yet carry a
+separate per-view usage field.  This is a generic Vulkan API-surface widening,
+not a llama.cpp- or model-specific path.
