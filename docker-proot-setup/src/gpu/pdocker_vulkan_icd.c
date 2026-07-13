@@ -252,7 +252,6 @@ PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_swapchain, VkSwa
 #define PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS PDOCKER_VK_MAX_DESCRIPTOR_SETS
 #endif
 #define PDOCKER_VK_MAX_PUSH_BYTES 256
-#define PDOCKER_VK_MAX_PUSH_CONSTANT_RANGES 8
 #define PDOCKER_VK_MAX_PUSH_CONSTANT_OPS 64
 #define PDOCKER_VK_MAX_ENTRY_NAME 128
 #define PDOCKER_VK_MAX_SPECIALIZATION_ENTRIES 16
@@ -605,12 +604,6 @@ typedef struct {
     VkShaderStageFlags stage_flags;
     uint32_t offset;
     uint32_t size;
-} PdockerVkPushConstantRangeSnapshot;
-
-typedef struct {
-    VkShaderStageFlags stage_flags;
-    uint32_t offset;
-    uint32_t size;
     uint64_t layout_id;
     uint64_t value_hash;
 } PdockerVkPushConstantOpSnapshot;
@@ -618,13 +611,10 @@ typedef struct {
 struct PdockerVkPipelineLayout {
     uint64_t layout_id;
     uint32_t push_constant_size;
-    PdockerVkPushConstantRangeSnapshot push_constant_ranges[PDOCKER_VK_MAX_PUSH_CONSTANT_RANGES];
-    uint32_t push_constant_range_count;
     uint32_t set_layout_count;
     uint32_t set_layout_capacity;
     PdockerVkDescriptorSetLayout **set_layouts;
     bool unsupported_set_layout_count;
-    bool unsupported_push_constant_ranges;
 };
 
 struct PdockerVkPipeline {
@@ -16983,9 +16973,6 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreatePipelineLayout(
     if (pCreateInfo->pushConstantRangeCount > 0 && !pCreateInfo->pPushConstantRanges) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
-    if (pCreateInfo->pushConstantRangeCount > PDOCKER_VK_MAX_PUSH_CONSTANT_RANGES) {
-        return VK_ERROR_FEATURE_NOT_PRESENT;
-    }
     PdockerVkPipelineLayout *layout = pdocker_alloc_handle(sizeof(*layout));
     if (!layout) return VK_ERROR_OUT_OF_HOST_MEMORY;
     layout->layout_id = next_vulkan_object_generation();
@@ -17013,13 +17000,6 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreatePipelineLayout(
         }
         uint32_t end = range->offset + range->size;
         if (end > layout->push_constant_size) layout->push_constant_size = end;
-        if (layout->push_constant_range_count < PDOCKER_VK_MAX_PUSH_CONSTANT_RANGES) {
-            PdockerVkPushConstantRangeSnapshot *snapshot =
-                &layout->push_constant_ranges[layout->push_constant_range_count++];
-            snapshot->stage_flags = range->stageFlags;
-            snapshot->offset = range->offset;
-            snapshot->size = range->size;
-        }
     }
     if (layout->push_constant_size > PDOCKER_VK_MAX_PUSH_BYTES) {
         free(layout->set_layouts);

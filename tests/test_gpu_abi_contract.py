@@ -7683,13 +7683,14 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("free(layout->set_layouts);", create_body)
         self.assertIn("pCreateInfo->pSetLayouts", create_body)
         self.assertNotIn("layout->unsupported_set_layout_count = true;", create_body)
-        self.assertIn("push_constant_ranges[PDOCKER_VK_MAX_PUSH_CONSTANT_RANGES]", icd)
+        self.assertNotIn("push_constant_ranges[PDOCKER_VK_MAX_PUSH_CONSTANT_RANGES]", icd)
+        self.assertNotIn("PDOCKER_VK_MAX_PUSH_CONSTANT_RANGES", icd)
+        self.assertNotIn("unsupported_push_constant_ranges", icd)
         self.assertIn("push_constant_ops[PDOCKER_VK_MAX_PUSH_CONSTANT_OPS]", icd)
         self.assertIn("pCreateInfo->pushConstantRangeCount > 0 && !pCreateInfo->pPushConstantRanges", create_body)
-        self.assertIn("pCreateInfo->pushConstantRangeCount > PDOCKER_VK_MAX_PUSH_CONSTANT_RANGES", create_body)
-        self.assertIn("layout->push_constant_range_count < PDOCKER_VK_MAX_PUSH_CONSTANT_RANGES", create_body)
-        self.assertIn("snapshot->stage_flags = range->stageFlags;", create_body)
-        self.assertNotIn("layout->unsupported_push_constant_ranges = true;", create_body)
+        self.assertNotIn("pCreateInfo->pushConstantRangeCount > PDOCKER_VK_MAX_PUSH_CONSTANT_RANGES", create_body)
+        self.assertNotIn("layout->push_constant_range_count < PDOCKER_VK_MAX_PUSH_CONSTANT_RANGES", create_body)
+        self.assertNotIn("snapshot->stage_flags = range->stageFlags;", create_body)
         bind_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets", 1)[1].split(
             "static void validate_bound_descriptor_layouts_before_dispatch", 1
         )[0]
@@ -8862,9 +8863,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("pCreateInfo->setLayoutCount > PDOCKER_VK_MAX_DESCRIPTOR_SETS", pipeline_layout_body)
         self.assertIn("pdocker_vk_descriptor_set_layout_from_handle(pCreateInfo->pSetLayouts[i])", pipeline_layout_body)
         self.assertIn("pCreateInfo->pushConstantRangeCount > 0 && !pCreateInfo->pPushConstantRanges", pipeline_layout_body)
-        self.assertIn("pCreateInfo->pushConstantRangeCount > PDOCKER_VK_MAX_PUSH_CONSTANT_RANGES", pipeline_layout_body)
+        self.assertNotIn("pCreateInfo->pushConstantRangeCount > PDOCKER_VK_MAX_PUSH_CONSTANT_RANGES", pipeline_layout_body)
         self.assertNotIn("unsupported_set_layout_count = true", pipeline_layout_body)
-        self.assertNotIn("unsupported_push_constant_ranges = true", pipeline_layout_body)
+        self.assertNotIn("unsupported_push_constant_ranges", pipeline_layout_body)
         descriptor_pool_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorPool", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkDestroyDescriptorPool", 1
         )[0]
