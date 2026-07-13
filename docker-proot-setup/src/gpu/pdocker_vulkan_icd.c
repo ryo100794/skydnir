@@ -15459,6 +15459,13 @@ static void fill_pnext_features(void *pNext) {
                 p->privateData = VK_FALSE;
                 break;
             }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PRIORITY_FEATURES_EXT: {
+                VkPhysicalDeviceMemoryPriorityFeaturesEXT *p =
+                    (VkPhysicalDeviceMemoryPriorityFeaturesEXT *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                p->memoryPriority = VK_FALSE;
+                break;
+            }
 #ifdef VK_EXT_subpass_merge_feedback
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBPASS_MERGE_FEEDBACK_FEATURES_EXT: {
                 VkPhysicalDeviceSubpassMergeFeedbackFeaturesEXT *p =
@@ -15913,6 +15920,13 @@ static VkResult validate_device_feature_requests(const VkDeviceCreateInfo *pCrea
                     (const VkPhysicalDevicePrivateDataFeatures *)node;
                 supported = !p->privateData;
                 if (!supported) unsupported_feature_name = "privateData";
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PRIORITY_FEATURES_EXT: {
+                const VkPhysicalDeviceMemoryPriorityFeaturesEXT *p =
+                    (const VkPhysicalDeviceMemoryPriorityFeaturesEXT *)node;
+                supported = !p->memoryPriority;
+                if (!supported) unsupported_feature_name = "memoryPriority";
                 break;
             }
 #ifdef VK_EXT_subpass_merge_feedback
@@ -18523,6 +18537,16 @@ static VkResult validate_memory_allocate_pnext(const void *pNext) {
                     (const VkMemoryOpaqueCaptureAddressAllocateInfo *)node;
                 if (info->opaqueCaptureAddress != 0) {
                     trace_icd_runtime_failure("memory-opaque-capture-address-unsupported",
+                                              VK_ERROR_FEATURE_NOT_PRESENT);
+                    return VK_ERROR_FEATURE_NOT_PRESENT;
+                }
+                break;
+            }
+            case VK_STRUCTURE_TYPE_MEMORY_PRIORITY_ALLOCATE_INFO_EXT: {
+                const VkMemoryPriorityAllocateInfoEXT *info =
+                    (const VkMemoryPriorityAllocateInfoEXT *)node;
+                if (info->priority != 0.5f) {
+                    trace_icd_runtime_failure("memory-priority-unsupported",
                                               VK_ERROR_FEATURE_NOT_PRESENT);
                     return VK_ERROR_FEATURE_NOT_PRESENT;
                 }

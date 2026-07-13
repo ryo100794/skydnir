@@ -213,6 +213,54 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_memory_priority_feature_is_queryable_but_not_enableable(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            int main(void) {{
+                VkPhysicalDeviceMemoryPriorityFeaturesEXT priority_features;
+                memset(&priority_features, 0xff, sizeof(priority_features));
+                priority_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PRIORITY_FEATURES_EXT;
+                priority_features.pNext = NULL;
+                fill_pnext_features(&priority_features);
+                if (priority_features.sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PRIORITY_FEATURES_EXT) {{
+                    fprintf(stderr, "memory priority feature sType was not preserved\\n");
+                    return 2;
+                }}
+                if (priority_features.pNext != NULL) {{
+                    fprintf(stderr, "memory priority feature pNext was not preserved\\n");
+                    return 3;
+                }}
+                if (priority_features.memoryPriority != VK_FALSE) {{
+                    fprintf(stderr, "memoryPriority was advertised without priority replay support\\n");
+                    return 4;
+                }}
+
+                VkDeviceCreateInfo create_info;
+                memset(&create_info, 0, sizeof(create_info));
+                create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                priority_features.memoryPriority = VK_TRUE;
+                create_info.pNext = &priority_features;
+                if (validate_device_feature_requests(&create_info) == VK_SUCCESS) {{
+                    fprintf(stderr, "memoryPriority=true was accepted\\n");
+                    return 5;
+                }}
+                priority_features.memoryPriority = VK_FALSE;
+                if (validate_device_feature_requests(&create_info) != VK_SUCCESS) {{
+                    fprintf(stderr, "memoryPriority=false was rejected\\n");
+                    return 6;
+                }}
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_dynamic_rendering_local_read_feature_is_queryable_but_not_enableable(self):
         source = textwrap.dedent(
             f"""
@@ -990,16 +1038,34 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     return 5;
                 }}
 
+                VkMemoryPriorityAllocateInfoEXT priority_info;
+                memset(&priority_info, 0, sizeof(priority_info));
+                priority_info.sType = VK_STRUCTURE_TYPE_MEMORY_PRIORITY_ALLOCATE_INFO_EXT;
+                priority_info.priority = 0.5f;
+                if (validate_memory_allocate_pnext(&priority_info) != VK_SUCCESS) {{
+                    fprintf(stderr, "default memory priority pNext was rejected\\n");
+                    return 6;
+                }}
+                priority_info.priority = 1.0f;
+                if (validate_memory_allocate_pnext(&priority_info) != VK_ERROR_FEATURE_NOT_PRESENT) {{
+                    fprintf(stderr, "non-default memory priority pNext was accepted\\n");
+                    return 7;
+                }}
+
                 VkMemoryAllocateFlagsInfo flags;
                 memset(&flags, 0, sizeof(flags));
                 memset(&capture, 0, sizeof(capture));
                 memset(&export_info, 0, sizeof(export_info));
+                memset(&priority_info, 0, sizeof(priority_info));
                 flags.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
                 flags.deviceMask = 1;
                 flags.pNext = &export_info;
                 export_info.sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO;
                 export_info.handleTypes = 0;
-                export_info.pNext = &capture;
+                export_info.pNext = &priority_info;
+                priority_info.sType = VK_STRUCTURE_TYPE_MEMORY_PRIORITY_ALLOCATE_INFO_EXT;
+                priority_info.priority = 0.5f;
+                priority_info.pNext = &capture;
                 capture.sType = VK_STRUCTURE_TYPE_MEMORY_OPAQUE_CAPTURE_ADDRESS_ALLOCATE_INFO;
                 capture.opaqueCaptureAddress = 0;
                 if (validate_memory_allocate_pnext(&flags) != VK_SUCCESS) {{

@@ -8330,6 +8330,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "VkPhysicalDeviceSeparateDepthStencilLayoutsFeatures",
             "VkPhysicalDeviceHostQueryResetFeatures",
             "VkPhysicalDevicePrivateDataFeatures",
+            "VkPhysicalDeviceMemoryPriorityFeaturesEXT",
             "VkPhysicalDeviceMaintenance4Features",
         ]:
             if struct_name not in body:
@@ -8666,6 +8667,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("p->privateData = VK_FALSE", icd)
         self.assertIn("supported = !p->privateData", icd)
         self.assertIn('unsupported_feature_name = "privateData"', icd)
+        self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PRIORITY_FEATURES_EXT", icd)
+        self.assertIn("p->memoryPriority = VK_FALSE", icd)
+        self.assertIn("supported = !p->memoryPriority", icd)
+        self.assertIn('unsupported_feature_name = "memoryPriority"', icd)
         self.assertIn("VK_STRUCTURE_TYPE_DEVICE_PRIVATE_DATA_CREATE_INFO", icd)
         self.assertIn("p->privateDataSlotRequestCount == 0", icd)
         self.assertIn('unsupported_feature_name = "privateDataSlotRequestCount"', icd)
@@ -9311,6 +9316,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VK_STRUCTURE_TYPE_MEMORY_OPAQUE_CAPTURE_ADDRESS_ALLOCATE_INFO", alloc_validator)
         self.assertIn("info->opaqueCaptureAddress != 0", alloc_validator)
         self.assertIn("memory-opaque-capture-address-unsupported", alloc_validator)
+        self.assertIn("VK_STRUCTURE_TYPE_MEMORY_PRIORITY_ALLOCATE_INFO_EXT", alloc_validator)
+        self.assertIn("info->priority != 0.5f", alloc_validator)
+        self.assertIn("memory-priority-unsupported", alloc_validator)
         self.assertIn("*pMemory = VK_NULL_HANDLE;", allocate_body)
         self.assertIn("validate_memory_allocate_pnext(pAllocateInfo->pNext)", allocate_body)
         self.assertIn("if (pnext_rc != VK_SUCCESS) return pnext_rc;", allocate_body)
