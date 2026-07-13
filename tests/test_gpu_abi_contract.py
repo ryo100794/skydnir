@@ -4494,7 +4494,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertEqual(dependency_helper.count("vulkan_graphics_replay_queue_family_index("), 4)
         self.assertNotIn(".srcQueueFamilyIndex = barrier->src_queue_family_index", recorder)
         self.assertNotIn(".dstQueueFamilyIndex = barrier->dst_queue_family_index", recorder)
-        self.assertIn("command->flags & VK_DEPENDENCY_BY_REGION_BIT", executor)
+        self.assertIn("vulkan_graphics_v6_transport_dependency_flags(command->flags)", executor)
         self.assertIn("graphics barrier dependency flags are not supported", executor)
         image_materializer = c_function_body(executor, "materialize_vulkan_dispatch_images")
         sharing_helper = c_function_body(executor, "vulkan_dispatch_native_image_sharing_mode")
@@ -4506,6 +4506,31 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn(".sharingMode = native_sharing_mode", image_materializer)
         self.assertIn(".queueFamilyIndexCount = native_queue_family_count", image_materializer)
         self.assertIn(".pQueueFamilyIndices = native_queue_family_count ? native_queue_family_indices : NULL", image_materializer)
+
+    def test_vulkan_dependency_device_group_flag_is_single_device_replayable(self):
+        icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
+
+        self.assertIn("VK_DEPENDENCY_DEVICE_GROUP_BIT", icd)
+        self.assertIn("VK_DEPENDENCY_DEVICE_GROUP_BIT", executor)
+
+        icd_supported = c_function_body(icd, "pdocker_vk_supported_dependency_flags")
+        icd_transport = c_function_body(icd, "pdocker_vk_transport_dependency_flags")
+        executor_supported = c_function_body(executor, "vulkan_graphics_v6_supported_dependency_flags")
+        executor_transport = c_function_body(executor, "vulkan_graphics_v6_transport_dependency_flags")
+
+        for body in [icd_supported, executor_supported]:
+            self.assertIn("VK_DEPENDENCY_BY_REGION_BIT | VK_DEPENDENCY_DEVICE_GROUP_BIT", body)
+        self.assertIn("flags & pdocker_vk_supported_dependency_flags()", icd_transport)
+        self.assertIn("flags) & vulkan_graphics_v6_supported_dependency_flags()", executor_transport)
+
+        self.assertIn("dependencyFlags & ~pdocker_vk_supported_dependency_flags()", icd)
+        self.assertIn("dependency_flags & ~pdocker_vk_supported_dependency_flags()", icd)
+        self.assertIn("command->flags & ~vulkan_graphics_v6_supported_dependency_flags()", executor)
+        self.assertIn("vulkan_graphics_v6_transport_dependency_flags(command->flags)", executor)
+        self.assertNotIn("command->flags & VK_DEPENDENCY_BY_REGION_BIT", executor)
+        self.assertNotIn("dependencyFlags & ~VK_DEPENDENCY_BY_REGION_BIT", icd)
+        self.assertNotIn("dependency_flags & ~VK_DEPENDENCY_BY_REGION_BIT", icd)
 
     def test_vulkan_icd_serializes_graphics_image_barriers(self):
         icd = VULKAN_ICD.read_text()
@@ -4520,10 +4545,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("record_memory_barrier_op(commandBuffer", icd)
         self.assertIn("record_buffer_barrier_op(commandBuffer", icd)
         self.assertIn("record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER", icd)
-        self.assertIn("dependencyFlags & ~VK_DEPENDENCY_BY_REGION_BIT", icd)
-        self.assertIn("dependency_flags & ~VK_DEPENDENCY_BY_REGION_BIT", icd)
-        self.assertIn("record.flags = dependencyFlags & VK_DEPENDENCY_BY_REGION_BIT", icd)
-        self.assertIn("record.flags = dependency_flags & VK_DEPENDENCY_BY_REGION_BIT", icd)
+        self.assertIn("dependencyFlags & ~pdocker_vk_supported_dependency_flags()", icd)
+        self.assertIn("dependency_flags & ~pdocker_vk_supported_dependency_flags()", icd)
+        self.assertIn("record.flags = pdocker_vk_transport_dependency_flags(dependencyFlags)", icd)
+        self.assertIn("record.flags = pdocker_vk_transport_dependency_flags(dependency_flags)", icd)
         self.assertIn("for (uint32_t i = 0; i < eventCount; ++i)", icd)
         self.assertNotIn("event-wait2-barrier-payload-unsupported", icd)
         self.assertNotIn("vkCmdPipelineBarrier2(commandBuffer, &pDependencyInfos[i])", icd)
@@ -10352,7 +10377,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "command->push_hash = (uint64_t)op->event_dst_stage_mask",
             "op.event_src_stage_mask = stage_mask",
             "op.event_dst_stage_mask = dst_stage_mask",
-            "record.flags = dependency_flags & VK_DEPENDENCY_BY_REGION_BIT",
+            "record.flags = pdocker_vk_transport_dependency_flags(dependency_flags)",
             "normalize_event_stage_mask((VkPipelineStageFlags2)srcStageMask)",
             "record_event_command(commandBuffer, event, false, stageMask, 0, NULL)",
         ]:
@@ -10400,7 +10425,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "const int legacy_stage_masks",
             "command->flags == 0",
             "command->index_offset != 0",
-            "dependencyFlags = command->flags & VK_DEPENDENCY_BY_REGION_BIT",
+            "dependencyFlags = vulkan_graphics_v6_transport_dependency_flags(command->flags)",
             "has_event_barrier_payload",
             "collect_vulkan_graphics_v6_dependency_barriers",
             "bufferMemoryBarrierCount = buffer_barrier_count",
@@ -11768,8 +11793,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("cmd->graphics_unsupported = true;", record_image_barrier_body)
         self.assertIn("command_buffer_mark_recording_failed(cmd, \"image-barrier-record-overflow\")", record_image_barrier_body)
         self.assertIn("submit will fail closed", record_image_barrier_body)
-        self.assertIn("dependencyFlags & ~VK_DEPENDENCY_BY_REGION_BIT", barrier_body)
-        self.assertIn("record.flags = dependencyFlags & VK_DEPENDENCY_BY_REGION_BIT", barrier_body)
+        self.assertIn("dependencyFlags & ~pdocker_vk_supported_dependency_flags()", barrier_body)
+        self.assertIn("record.flags = pdocker_vk_transport_dependency_flags(dependencyFlags)", barrier_body)
         barrier2_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier2", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkCmdSetEvent2", 1
         )[0]
@@ -11799,8 +11824,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("cmd->graphics_unsupported = true;", barrier2_body)
         self.assertLess(barrier2_body.index("pipeline_barrier2_dependency_info_failure_reason(pDependencyInfo)"), barrier2_body.index("VkDependencyFlags dependency_flags"))
         self.assertIn("VkDependencyFlags dependency_flags", barrier2_body)
-        self.assertIn("dependency_flags & ~VK_DEPENDENCY_BY_REGION_BIT", barrier2_body)
-        self.assertIn("record.flags = dependency_flags & VK_DEPENDENCY_BY_REGION_BIT", barrier2_body)
+        self.assertIn("dependency_flags & ~pdocker_vk_supported_dependency_flags()", barrier2_body)
+        self.assertIn("record.flags = pdocker_vk_transport_dependency_flags(dependency_flags)", barrier2_body)
         self.assertNotIn("vkCmdPipelineBarrier(commandBuffer", barrier2_body)
         self.assertIn("execute_recorded_image_barrier_op(", icd)
         for field in [

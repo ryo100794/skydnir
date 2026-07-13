@@ -129,8 +129,17 @@ or closes.
   referenced events, applies the dependency/barrier payload once, and replays
   the native wait with `wait_event_count` rather than duplicating layout
   transitions per event.  Sync2 pNext payloads and dependency flags beyond
-  `VK_DEPENDENCY_BY_REGION_BIT` remain fail-closed until they have explicit
+  `VK_DEPENDENCY_BY_REGION_BIT` and single-device
+  `VK_DEPENDENCY_DEVICE_GROUP_BIT` remain fail-closed until they have explicit
   ABI semantics.
+- [done] **single-device dependency flag transport lane**: Legacy and sync2
+  graphics barriers/events now preserve `VK_DEPENDENCY_DEVICE_GROUP_BIT` in the
+  transported command flags alongside `VK_DEPENDENCY_BY_REGION_BIT`.  The
+  Android executor validates the same allow-list and replays those two flags
+  through native dependency structs.  Other dependency flags, sync2 pNext
+  payloads, and true multi-device/device-group semantics remain fail-closed;
+  this is a single-physical-device no-op-preservation lane, not device-group
+  virtualization.
 - [done] **Vulkan FD transport cap alignment**: The shared ABI now exposes
   `PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS` separately from the V5 frame fd index
   range.  The ICD fails closed before `sendmsg` when a frame would exceed the

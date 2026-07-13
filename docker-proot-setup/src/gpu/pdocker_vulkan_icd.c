@@ -26,6 +26,10 @@
 #include <time.h>
 #include <unistd.h>
 #include <vulkan/vulkan.h>
+
+#ifndef VK_DEPENDENCY_DEVICE_GROUP_BIT
+#define VK_DEPENDENCY_DEVICE_GROUP_BIT ((VkDependencyFlagBits)0x00000004)
+#endif
 #include <vulkan/vk_icd.h>
 
 #ifndef MFD_CLOEXEC
@@ -19744,6 +19748,14 @@ static void merge_render_pass_dependency_state(
     dst->dst_access_mask |= dst_access_mask;
 }
 
+static VkDependencyFlags pdocker_vk_supported_dependency_flags(void) {
+    return VK_DEPENDENCY_BY_REGION_BIT | VK_DEPENDENCY_DEVICE_GROUP_BIT;
+}
+
+static VkDependencyFlags pdocker_vk_transport_dependency_flags(VkDependencyFlags flags) {
+    return flags & pdocker_vk_supported_dependency_flags();
+}
+
 static bool capture_single_subpass_dependency(
         PdockerVkRenderPass *rp,
         uint32_t src_subpass,
@@ -19754,7 +19766,7 @@ static bool capture_single_subpass_dependency(
         VkAccessFlags2 dst_access_mask,
         VkDependencyFlags dependency_flags) {
     if (!rp) return false;
-    const VkDependencyFlags supported_flags = VK_DEPENDENCY_BY_REGION_BIT;
+    const VkDependencyFlags supported_flags = pdocker_vk_supported_dependency_flags();
     if ((dependency_flags & ~supported_flags) != 0) return false;
     if (dst_subpass != VK_SUBPASS_EXTERNAL && dst_subpass >= PDOCKER_VK_MAX_STORAGE_BUFFERS) return false;
     if (src_subpass != VK_SUBPASS_EXTERNAL && src_subpass >= PDOCKER_VK_MAX_STORAGE_BUFFERS) return false;
@@ -24612,7 +24624,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier(
             command_buffer_mark_recording_failed(cmd, "legacy-pipeline-barrier-unsupported");
             return;
         }
-        if ((dependencyFlags & ~VK_DEPENDENCY_BY_REGION_BIT) != 0) {
+        if ((dependencyFlags & ~pdocker_vk_supported_dependency_flags()) != 0) {
             cmd->graphics_unsupported = true;
         }
         PdockerVkBarrierOpRange barriers =
@@ -24630,7 +24642,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier(
             PdockerVkGraphicsCommandRecord record;
             memset(&record, 0, sizeof(record));
             record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER;
-            record.flags = dependencyFlags & VK_DEPENDENCY_BY_REGION_BIT;
+            record.flags = pdocker_vk_transport_dependency_flags(dependencyFlags);
             record.memory_barrier_op_first = barriers.memory_first;
             record.memory_barrier_op_count = barriers.memory_count;
             record.buffer_barrier_op_first = barriers.buffer_first;
@@ -27350,7 +27362,7 @@ static void record_event_command(VkCommandBuffer commandBuffer,
     record.command_type = signaled
         ? PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT
         : PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_EVENT;
-    record.flags = dependency_flags & VK_DEPENDENCY_BY_REGION_BIT;
+    record.flags = pdocker_vk_transport_dependency_flags(dependency_flags);
     if (barriers) {
         record.memory_barrier_op_first = barriers->memory_first;
         record.memory_barrier_op_count = barriers->memory_count;
@@ -27408,7 +27420,7 @@ static void record_event_wait_command(VkCommandBuffer commandBuffer,
     PdockerVkGraphicsCommandRecord record;
     memset(&record, 0, sizeof(record));
     record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT;
-    record.flags = dependency_flags & VK_DEPENDENCY_BY_REGION_BIT;
+    record.flags = pdocker_vk_transport_dependency_flags(dependency_flags);
     if (barriers) {
         record.memory_barrier_op_first = barriers->memory_first;
         record.memory_barrier_op_count = barriers->memory_count;
@@ -27591,7 +27603,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier2(
         return;
     }
     VkDependencyFlags dependency_flags = pDependencyInfo ? pDependencyInfo->dependencyFlags : 0;
-    if ((dependency_flags & ~VK_DEPENDENCY_BY_REGION_BIT) != 0) {
+    if ((dependency_flags & ~pdocker_vk_supported_dependency_flags()) != 0) {
         command_buffer_mark_recording_failed(cmd, "pipeline-barrier2-dependency-flags-unsupported");
         return;
     }
@@ -27601,7 +27613,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier2(
         PdockerVkGraphicsCommandRecord record;
         memset(&record, 0, sizeof(record));
         record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER;
-        record.flags = dependency_flags & VK_DEPENDENCY_BY_REGION_BIT;
+        record.flags = pdocker_vk_transport_dependency_flags(dependency_flags);
         record.memory_barrier_op_first = barriers.memory_first;
         record.memory_barrier_op_count = barriers.memory_count;
         record.buffer_barrier_op_first = barriers.buffer_first;
@@ -27617,7 +27629,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier2(
 }
 
 static bool dependency_flags_unsupported(VkDependencyFlags dependency_flags) {
-    return (dependency_flags & ~VK_DEPENDENCY_BY_REGION_BIT) != 0;
+    return (dependency_flags & ~pdocker_vk_supported_dependency_flags()) != 0;
 }
 
 

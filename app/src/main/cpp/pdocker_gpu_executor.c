@@ -11,6 +11,10 @@
 #include <EGL/egl.h>
 #include <GLES3/gl31.h>
 #include <vulkan/vulkan.h>
+
+#ifndef VK_DEPENDENCY_DEVICE_GROUP_BIT
+#define VK_DEPENDENCY_DEVICE_GROUP_BIT ((VkDependencyFlagBits)0x00000004)
+#endif
 #include "pdocker_gpu_abi.h"
 #include <dlfcn.h>
 #include <errno.h>
@@ -24564,6 +24568,14 @@ static int validate_vulkan_graphics_v629_variable_descriptor_counts(
     return 0;
 }
 
+static VkDependencyFlags vulkan_graphics_v6_supported_dependency_flags(void) {
+    return VK_DEPENDENCY_BY_REGION_BIT | VK_DEPENDENCY_DEVICE_GROUP_BIT;
+}
+
+static VkDependencyFlags vulkan_graphics_v6_transport_dependency_flags(uint32_t flags) {
+    return ((VkDependencyFlags)flags) & vulkan_graphics_v6_supported_dependency_flags();
+}
+
 static int validate_vulkan_graphics_v6_frame_content(
         const unsigned char *frame,
         const int *passed_fds,
@@ -25916,7 +25928,7 @@ static int validate_vulkan_graphics_v6_frame_content(
              command->attachment_count != 0 || command->dynamic_state_count != 0 ||
              command->push_size != 0 || command->index_buffer_resource_index != UINT32_MAX ||
              command->pipeline_layout_id == 0 ||
-             (command->flags & ~VK_DEPENDENCY_BY_REGION_BIT) != 0)) return -EPROTO;
+             (command->flags & ~vulkan_graphics_v6_supported_dependency_flags()) != 0)) return -EPROTO;
         if ((command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT ||
              command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_EVENT) &&
             command->push_hash != 0) return -EPROTO;
@@ -27272,7 +27284,7 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                     if (reason_out) *reason_out = reason;
                     return -EPROTO;
                 }
-                if ((command->flags & ~VK_DEPENDENCY_BY_REGION_BIT) != 0) {
+                if ((command->flags & ~vulkan_graphics_v6_supported_dependency_flags()) != 0) {
                     reason = "graphics event dependency flags are not supported";
                     if (reason_out) *reason_out = reason;
                     return -EOPNOTSUPP;
@@ -27288,7 +27300,7 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                 if (rc != 0) return rc;
                 break;
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER: {
-                if ((command->flags & ~VK_DEPENDENCY_BY_REGION_BIT) != 0) {
+                if ((command->flags & ~vulkan_graphics_v6_supported_dependency_flags()) != 0) {
                     reason = "graphics barrier dependency flags are not supported";
                     if (reason_out) *reason_out = reason;
                     return -EOPNOTSUPP;
@@ -33813,7 +33825,7 @@ begin_rendering_cleanup:
                         }
                         VkDependencyInfo dependency = {
                             .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-                            .dependencyFlags = command->flags & VK_DEPENDENCY_BY_REGION_BIT,
+                            .dependencyFlags = vulkan_graphics_v6_transport_dependency_flags(command->flags),
                             .memoryBarrierCount = memory_barrier_count,
                             .pMemoryBarriers = memory_barrier_count ? memory_barriers_to_record : NULL,
                             .bufferMemoryBarrierCount = buffer_barrier_count,
@@ -33875,7 +33887,7 @@ begin_rendering_cleanup:
                         }
                         VkDependencyInfo dependency = {
                             .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-                            .dependencyFlags = command->flags & VK_DEPENDENCY_BY_REGION_BIT,
+                            .dependencyFlags = vulkan_graphics_v6_transport_dependency_flags(command->flags),
                             .memoryBarrierCount = memory_barrier_count,
                             .pMemoryBarriers = memory_barrier_count ? memory_barriers_to_record : NULL,
                             .bufferMemoryBarrierCount = buffer_barrier_count,
@@ -33904,7 +33916,7 @@ begin_rendering_cleanup:
                  * unsupported. */
                 VkDependencyInfo dependency = {
                     .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-                    .dependencyFlags = command->flags & VK_DEPENDENCY_BY_REGION_BIT,
+                    .dependencyFlags = vulkan_graphics_v6_transport_dependency_flags(command->flags),
                     .memoryBarrierCount = memory_barrier_count,
                     .pMemoryBarriers = memory_barrier_count ? memory_barriers_to_record : NULL,
                     .bufferMemoryBarrierCount = buffer_barrier_count,
