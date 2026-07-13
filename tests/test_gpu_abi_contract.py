@@ -1349,7 +1349,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "graphics_draw_ops[PDOCKER_VK_MAX_GRAPHICS_DRAW_OPS]",
             "cmd->graphics_draw_op_count = 0;",
             "snapshot->pipeline = cmd->graphics_pipeline;",
-            "descriptor_set_clone_snapshot_array(\n            snapshot->set_snapshots",
+            "graphics_snapshot_clone_descriptor_state(&snapshot->set_snapshots",
+            "&snapshot->set_capacity",
             "memcpy(snapshot->push_constants, cmd->push_constants",
             "snapshot->push_constant_op_count = cmd->push_constant_op_count;",
             "memcpy(snapshot->vertex_bindings, cmd->vertex_bindings",
@@ -1456,6 +1457,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "graphics_bound_set_handles[PDOCKER_VK_MAX_DESCRIPTOR_SETS]",
             "graphics_bound_set_snapshots[PDOCKER_VK_MAX_DESCRIPTOR_SETS]",
             "graphics_bound_set_used[PDOCKER_VK_MAX_DESCRIPTOR_SETS]",
+            "set_handles[PDOCKER_VK_MAX_DESCRIPTOR_SETS]",
+            "set_snapshots[PDOCKER_VK_MAX_DESCRIPTOR_SETS]",
+            "set_snapshot_used[PDOCKER_VK_MAX_DESCRIPTOR_SETS]",
         ]:
             self.assertNotIn(fixed_command_buffer_array, icd)
         self.assertIn("VK_KHR_SWAPCHAIN_EXTENSION_NAME", icd)
@@ -2631,10 +2635,14 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("PdockerVkDispatchOp copied = src->dispatch_ops[i];", secondary_body)
         self.assertIn("PdockerVkGraphicsDrawSnapshot copied = src->graphics_draw_ops[i];", secondary_body)
         self.assertIn("PdockerVkGraphicsDescriptorBindSnapshot copied = src->graphics_descriptor_bind_ops[i];", secondary_body)
-        self.assertIn("descriptor_set_clone_snapshot_array(", secondary_body)
+        self.assertIn("dispatch_op_clone_descriptor_state(out,", secondary_body)
+        self.assertIn("graphics_snapshot_clone_descriptor_state(&out->set_snapshots", secondary_body)
+        self.assertIn("copied.set_capacity", secondary_body)
         self.assertIn("goto fail_secondary_append;", secondary_body)
         self.assertIn("fail_secondary_append:", secondary_body)
-        self.assertIn("descriptor_set_release_snapshot_array(", secondary_body)
+        self.assertIn("dispatch_op_destroy_descriptor_state(&dst->dispatch_ops[i]);", secondary_body)
+        self.assertIn("graphics_draw_snapshot_destroy_descriptor_state(&dst->graphics_draw_ops[i]);", secondary_body)
+        self.assertIn("graphics_descriptor_bind_snapshot_destroy_descriptor_state(", secondary_body)
         self.assertNotIn("src->dispatch_ops[i].set_snapshot_used[set_i]) return false", secondary_body)
         self.assertNotIn("src->graphics_draw_ops[i].set_snapshot_used[set_i]) return false", secondary_body)
         self.assertNotIn("src->graphics_descriptor_bind_ops[i].set_snapshot_used[set_i]) return false", secondary_body)
@@ -11962,9 +11970,11 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("if (size == 0) return;", push_constants_body)
         self.assertIn("uint32_t end = offset + size;", push_constants_body)
         self.assertNotIn("size = PDOCKER_VK_MAX_PUSH_BYTES - offset", push_constants_body)
-        self.assertIn("bool descriptor_set_range_overflow = firstSet > PDOCKER_VK_MAX_DESCRIPTOR_SETS", bind_body)
-        self.assertIn("descriptorSetCount > PDOCKER_VK_MAX_DESCRIPTOR_SETS - firstSet", bind_body)
-        self.assertIn("set_i >= PDOCKER_VK_MAX_DESCRIPTOR_SETS - firstSet", bind_body)
+        self.assertIn("uint32_t target_set_capacity = 0;", bind_body)
+        self.assertIn("bool descriptor_set_range_overflow = firstSet > target_set_capacity", bind_body)
+        self.assertIn("descriptorSetCount > target_set_capacity - firstSet", bind_body)
+        self.assertIn("set_i >= target_set_capacity - firstSet", bind_body)
+        self.assertNotIn("firstSet + descriptorSetCount > target_set_capacity", bind_body)
         self.assertNotIn("firstSet + descriptorSetCount > PDOCKER_VK_MAX_DESCRIPTOR_SETS", bind_body)
         self.assertIn("checked_mul_u64((uint64_t)i, (uint64_t)stride, &offset64)", query_body)
         self.assertIn("offset64 > (uint64_t)SIZE_MAX", query_body)

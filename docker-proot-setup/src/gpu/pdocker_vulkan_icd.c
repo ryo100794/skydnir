@@ -913,9 +913,10 @@ typedef struct {
 
 typedef struct {
     PdockerVkPipeline *pipeline;
-    PdockerVkDescriptorSet *set_handles[PDOCKER_VK_MAX_DESCRIPTOR_SETS];
-    PdockerVkDescriptorSet set_snapshots[PDOCKER_VK_MAX_DESCRIPTOR_SETS];
-    bool set_snapshot_used[PDOCKER_VK_MAX_DESCRIPTOR_SETS];
+    PdockerVkDescriptorSet **set_handles;
+    PdockerVkDescriptorSet *set_snapshots;
+    bool *set_snapshot_used;
+    uint32_t set_capacity;
     uint32_t dispatch_x;
     uint32_t dispatch_y;
     uint32_t dispatch_z;
@@ -1010,8 +1011,9 @@ typedef struct {
 
 typedef struct {
     PdockerVkPipeline *pipeline;
-    PdockerVkDescriptorSet set_snapshots[PDOCKER_VK_MAX_DESCRIPTOR_SETS];
-    bool set_snapshot_used[PDOCKER_VK_MAX_DESCRIPTOR_SETS];
+    PdockerVkDescriptorSet *set_snapshots;
+    bool *set_snapshot_used;
+    uint32_t set_capacity;
     uint8_t push_constants[PDOCKER_VK_MAX_PUSH_BYTES];
     uint32_t push_constant_size;
     PdockerVkPushConstantOpSnapshot push_constant_ops[PDOCKER_VK_MAX_PUSH_CONSTANT_OPS];
@@ -1063,8 +1065,9 @@ typedef struct {
     uint32_t first_dynamic_offset;
     uint32_t dynamic_offset_count;
     PdockerVkPipelineLayout *pipeline_layout;
-    PdockerVkDescriptorSet set_snapshots[PDOCKER_VK_MAX_DESCRIPTOR_SETS];
-    bool set_snapshot_used[PDOCKER_VK_MAX_DESCRIPTOR_SETS];
+    PdockerVkDescriptorSet *set_snapshots;
+    bool *set_snapshot_used;
+    uint32_t set_capacity;
 } PdockerVkGraphicsDescriptorBindSnapshot;
 
 typedef struct {
@@ -1342,6 +1345,12 @@ static void descriptor_set_release_snapshot_array(
         PdockerVkDescriptorSet *sets,
         bool *used,
         uint32_t count);
+static bool descriptor_set_clone_snapshot_array(
+        PdockerVkDescriptorSet *dst_sets,
+        bool *dst_used,
+        const PdockerVkDescriptorSet *src_sets,
+        const bool *src_used,
+        uint32_t count);
 
 static bool descriptor_set_state_alloc(
         PdockerVkDescriptorSet ***handles,
@@ -1399,6 +1408,119 @@ static void descriptor_set_state_destroy(
     *snapshots = NULL;
     *used = NULL;
     *capacity = 0;
+}
+
+static bool descriptor_set_snapshot_state_alloc(
+        PdockerVkDescriptorSet **snapshots,
+        bool **used,
+        uint32_t *capacity,
+        uint32_t requested_capacity) {
+    if (!snapshots || !used || !capacity) return false;
+    if (requested_capacity == 0 ||
+        requested_capacity > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS) {
+        return false;
+    }
+    PdockerVkDescriptorSet *new_snapshots =
+        (PdockerVkDescriptorSet *)calloc(requested_capacity, sizeof(*new_snapshots));
+    bool *new_used = (bool *)calloc(requested_capacity, sizeof(*new_used));
+    if (!new_snapshots || !new_used) {
+        free(new_snapshots);
+        free(new_used);
+        return false;
+    }
+    *snapshots = new_snapshots;
+    *used = new_used;
+    *capacity = requested_capacity;
+    return true;
+}
+
+static void descriptor_set_snapshot_state_destroy(
+        PdockerVkDescriptorSet **snapshots,
+        bool **used,
+        uint32_t *capacity) {
+    if (!snapshots || !used || !capacity) return;
+    if (*snapshots && *used) {
+        descriptor_set_release_snapshot_array(*snapshots, *used, *capacity);
+    }
+    free(*snapshots);
+    free(*used);
+    *snapshots = NULL;
+    *used = NULL;
+    *capacity = 0;
+}
+
+static bool dispatch_op_clone_descriptor_state(
+        PdockerVkDispatchOp *op,
+        PdockerVkDescriptorSet **src_handles,
+        const PdockerVkDescriptorSet *src_snapshots,
+        const bool *src_used,
+        uint32_t src_capacity) {
+    if (!op || !src_handles || !src_snapshots || !src_used) return false;
+    if (!descriptor_set_state_alloc(&op->set_handles,
+                                    &op->set_snapshots,
+                                    &op->set_snapshot_used,
+                                    &op->set_capacity,
+                                    src_capacity)) {
+        return false;
+    }
+    memcpy(op->set_handles, src_handles, sizeof(*op->set_handles) * src_capacity);
+    if (!descriptor_set_clone_snapshot_array(op->set_snapshots,
+                                             op->set_snapshot_used,
+                                             src_snapshots,
+                                             src_used,
+                                             src_capacity)) {
+        descriptor_set_state_destroy(&op->set_handles,
+                                     &op->set_snapshots,
+                                     &op->set_snapshot_used,
+                                     &op->set_capacity);
+        return false;
+    }
+    return true;
+}
+
+static void dispatch_op_destroy_descriptor_state(PdockerVkDispatchOp *op) {
+    if (!op) return;
+    descriptor_set_state_destroy(&op->set_handles,
+                                 &op->set_snapshots,
+                                 &op->set_snapshot_used,
+                                 &op->set_capacity);
+}
+
+static bool graphics_snapshot_clone_descriptor_state(
+        PdockerVkDescriptorSet **dst_snapshots,
+        bool **dst_used,
+        uint32_t *dst_capacity,
+        const PdockerVkDescriptorSet *src_snapshots,
+        const bool *src_used,
+        uint32_t src_capacity) {
+    if (!dst_snapshots || !dst_used || !dst_capacity || !src_snapshots || !src_used) return false;
+    if (!descriptor_set_snapshot_state_alloc(dst_snapshots, dst_used, dst_capacity, src_capacity)) {
+        return false;
+    }
+    if (!descriptor_set_clone_snapshot_array(*dst_snapshots,
+                                             *dst_used,
+                                             src_snapshots,
+                                             src_used,
+                                             src_capacity)) {
+        descriptor_set_snapshot_state_destroy(dst_snapshots, dst_used, dst_capacity);
+        return false;
+    }
+    return true;
+}
+
+static void graphics_draw_snapshot_destroy_descriptor_state(PdockerVkGraphicsDrawSnapshot *snapshot) {
+    if (!snapshot) return;
+    descriptor_set_snapshot_state_destroy(&snapshot->set_snapshots,
+                                          &snapshot->set_snapshot_used,
+                                          &snapshot->set_capacity);
+}
+
+static void graphics_descriptor_bind_snapshot_destroy_descriptor_state(
+        PdockerVkGraphicsDescriptorBindSnapshot *snapshot) {
+    if (!snapshot) return;
+    descriptor_set_snapshot_state_destroy(&snapshot->set_snapshots,
+                                          &snapshot->set_snapshot_used,
+                                          &snapshot->set_capacity);
 }
 
 static bool command_buffer_alloc_descriptor_states(PdockerVkCommandBuffer *cmd) {
@@ -1595,22 +1717,14 @@ static void clear_recorded_command_ops(PdockerVkCommandBuffer *cmd) {
         }
     }
     for (uint32_t i = 0; i < cmd->dispatch_op_count; ++i) {
-        descriptor_set_release_snapshot_array(
-            cmd->dispatch_ops[i].set_snapshots,
-            cmd->dispatch_ops[i].set_snapshot_used,
-            PDOCKER_VK_MAX_DESCRIPTOR_SETS);
+        dispatch_op_destroy_descriptor_state(&cmd->dispatch_ops[i]);
     }
     for (uint32_t i = 0; i < cmd->graphics_draw_op_count; ++i) {
-        descriptor_set_release_snapshot_array(
-            cmd->graphics_draw_ops[i].set_snapshots,
-            cmd->graphics_draw_ops[i].set_snapshot_used,
-            PDOCKER_VK_MAX_DESCRIPTOR_SETS);
+        graphics_draw_snapshot_destroy_descriptor_state(&cmd->graphics_draw_ops[i]);
     }
     for (uint32_t i = 0; i < cmd->graphics_descriptor_bind_op_count; ++i) {
-        descriptor_set_release_snapshot_array(
-            cmd->graphics_descriptor_bind_ops[i].set_snapshots,
-            cmd->graphics_descriptor_bind_ops[i].set_snapshot_used,
-            PDOCKER_VK_MAX_DESCRIPTOR_SETS);
+        graphics_descriptor_bind_snapshot_destroy_descriptor_state(
+            &cmd->graphics_descriptor_bind_ops[i]);
     }
     command_buffer_clear_descriptor_states(cmd);
     cmd->command_op_count = 0;
@@ -1764,14 +1878,15 @@ static bool append_secondary_command_buffer(
         PdockerVkDispatchOp copied = src->dispatch_ops[i];
         PdockerVkDispatchOp *out = &dst->dispatch_ops[dst->dispatch_op_count];
         *out = copied;
-        memset(out->set_snapshots, 0, sizeof(out->set_snapshots));
-        memset(out->set_snapshot_used, 0, sizeof(out->set_snapshot_used));
-        if (!descriptor_set_clone_snapshot_array(
-                out->set_snapshots,
-                out->set_snapshot_used,
-                copied.set_snapshots,
-                copied.set_snapshot_used,
-                PDOCKER_VK_MAX_DESCRIPTOR_SETS)) {
+        out->set_handles = NULL;
+        out->set_snapshots = NULL;
+        out->set_snapshot_used = NULL;
+        out->set_capacity = 0;
+        if (!dispatch_op_clone_descriptor_state(out,
+                                                copied.set_handles,
+                                                copied.set_snapshots,
+                                                copied.set_snapshot_used,
+                                                copied.set_capacity)) {
             goto fail_secondary_append;
         }
         dst->dispatch_op_count++;
@@ -1780,14 +1895,15 @@ static bool append_secondary_command_buffer(
         PdockerVkGraphicsDrawSnapshot copied = src->graphics_draw_ops[i];
         PdockerVkGraphicsDrawSnapshot *out = &dst->graphics_draw_ops[dst->graphics_draw_op_count];
         *out = copied;
-        memset(out->set_snapshots, 0, sizeof(out->set_snapshots));
-        memset(out->set_snapshot_used, 0, sizeof(out->set_snapshot_used));
-        if (!descriptor_set_clone_snapshot_array(
-                out->set_snapshots,
-                out->set_snapshot_used,
-                copied.set_snapshots,
-                copied.set_snapshot_used,
-                PDOCKER_VK_MAX_DESCRIPTOR_SETS)) {
+        out->set_snapshots = NULL;
+        out->set_snapshot_used = NULL;
+        out->set_capacity = 0;
+        if (!graphics_snapshot_clone_descriptor_state(&out->set_snapshots,
+                                                      &out->set_snapshot_used,
+                                                      &out->set_capacity,
+                                                      copied.set_snapshots,
+                                                      copied.set_snapshot_used,
+                                                      copied.set_capacity)) {
             goto fail_secondary_append;
         }
         dst->graphics_draw_op_count++;
@@ -1797,14 +1913,15 @@ static bool append_secondary_command_buffer(
         PdockerVkGraphicsDescriptorBindSnapshot *out =
             &dst->graphics_descriptor_bind_ops[dst->graphics_descriptor_bind_op_count];
         *out = copied;
-        memset(out->set_snapshots, 0, sizeof(out->set_snapshots));
-        memset(out->set_snapshot_used, 0, sizeof(out->set_snapshot_used));
-        if (!descriptor_set_clone_snapshot_array(
-                out->set_snapshots,
-                out->set_snapshot_used,
-                copied.set_snapshots,
-                copied.set_snapshot_used,
-                PDOCKER_VK_MAX_DESCRIPTOR_SETS)) {
+        out->set_snapshots = NULL;
+        out->set_snapshot_used = NULL;
+        out->set_capacity = 0;
+        if (!graphics_snapshot_clone_descriptor_state(&out->set_snapshots,
+                                                      &out->set_snapshot_used,
+                                                      &out->set_capacity,
+                                                      copied.set_snapshots,
+                                                      copied.set_snapshot_used,
+                                                      copied.set_capacity)) {
             goto fail_secondary_append;
         }
         dst->graphics_descriptor_bind_op_count++;
@@ -1956,22 +2073,14 @@ fail_secondary_append:
         update_payloads[i] = NULL;
     }
     for (uint32_t i = dispatch_base; i < dst->dispatch_op_count; ++i) {
-        descriptor_set_release_snapshot_array(
-            dst->dispatch_ops[i].set_snapshots,
-            dst->dispatch_ops[i].set_snapshot_used,
-            PDOCKER_VK_MAX_DESCRIPTOR_SETS);
+        dispatch_op_destroy_descriptor_state(&dst->dispatch_ops[i]);
     }
     for (uint32_t i = graphics_draw_base; i < dst->graphics_draw_op_count; ++i) {
-        descriptor_set_release_snapshot_array(
-            dst->graphics_draw_ops[i].set_snapshots,
-            dst->graphics_draw_ops[i].set_snapshot_used,
-            PDOCKER_VK_MAX_DESCRIPTOR_SETS);
+        graphics_draw_snapshot_destroy_descriptor_state(&dst->graphics_draw_ops[i]);
     }
     for (uint32_t i = descriptor_bind_base; i < dst->graphics_descriptor_bind_op_count; ++i) {
-        descriptor_set_release_snapshot_array(
-            dst->graphics_descriptor_bind_ops[i].set_snapshots,
-            dst->graphics_descriptor_bind_ops[i].set_snapshot_used,
-            PDOCKER_VK_MAX_DESCRIPTOR_SETS);
+        graphics_descriptor_bind_snapshot_destroy_descriptor_state(
+            &dst->graphics_descriptor_bind_ops[i]);
     }
     dst->copy_op_count = copy_base;
     dst->image_copy_op_count = image_copy_base;
@@ -5366,9 +5475,11 @@ static int collect_graphics_descriptor_entries(
         !snapshot || !dynamic_descriptor_count_out) {
         return -EINVAL;
     }
-    if (snapshot->descriptor_set_count > PDOCKER_VK_MAX_DESCRIPTOR_SETS ||
-        snapshot->first_set > PDOCKER_VK_MAX_DESCRIPTOR_SETS ||
-        snapshot->descriptor_set_count > PDOCKER_VK_MAX_DESCRIPTOR_SETS - snapshot->first_set) {
+    const uint32_t snapshot_capacity = snapshot->set_capacity;
+    if (snapshot_capacity == 0 ||
+        snapshot->descriptor_set_count > snapshot_capacity ||
+        snapshot->first_set > snapshot_capacity ||
+        snapshot->descriptor_set_count > snapshot_capacity - snapshot->first_set) {
         return -ERANGE;
     }
     uint32_t dynamic_descriptor_count = 0;
@@ -10179,7 +10290,7 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
     fds[0] = shader->code_fd;
     bool descriptor_array_transport_required = false;
     bool texel_buffer_transport_required = false;
-    for (uint32_t set_index = 0; set_index < PDOCKER_VK_MAX_DESCRIPTOR_SETS; ++set_index) {
+    for (uint32_t set_index = 0; set_index < op->set_capacity; ++set_index) {
         if (!op->set_snapshot_used[set_index]) continue;
         const PdockerVkDescriptorSet *snapshot_set = &op->set_snapshots[set_index];
         const PdockerVkDescriptorSet *set = snapshot_set;
@@ -11078,13 +11189,11 @@ static int send_generic_vulkan_dispatch(PdockerVkCommandBuffer *cmd) {
     PdockerVkDispatchOp op;
     memset(&op, 0, sizeof(op));
     op.pipeline = cmd->compute_pipeline;
-    memcpy(op.set_handles, cmd->bound_set_handles, sizeof(op.set_handles));
-    if (!descriptor_set_clone_snapshot_array(
-            op.set_snapshots,
-            op.set_snapshot_used,
-            cmd->bound_set_snapshots,
-            cmd->bound_set_used,
-            PDOCKER_VK_MAX_DESCRIPTOR_SETS)) {
+    if (!dispatch_op_clone_descriptor_state(&op,
+                                            cmd->bound_set_handles,
+                                            cmd->bound_set_snapshots,
+                                            cmd->bound_set_used,
+                                            cmd->bound_set_capacity)) {
         return -ENOMEM;
     }
     op.dispatch_x = cmd->dispatch_x;
@@ -11101,8 +11210,7 @@ static int send_generic_vulkan_dispatch(PdockerVkCommandBuffer *cmd) {
     memcpy(op.push_constant_ops, cmd->push_constant_ops, sizeof(op.push_constant_ops));
     op.push_constant_op_count = cmd->push_constant_op_count;
     int rc = send_generic_vulkan_dispatch_op(&op);
-    descriptor_set_release_snapshot_array(
-        op.set_snapshots, op.set_snapshot_used, PDOCKER_VK_MAX_DESCRIPTOR_SETS);
+    dispatch_op_destroy_descriptor_state(&op);
     return rc;
 }
 
@@ -20866,12 +20974,12 @@ static void record_graphics_draw_command(
     PdockerVkGraphicsDrawSnapshot *snapshot = &cmd->graphics_draw_ops[snapshot_index];
     memset(snapshot, 0, sizeof(*snapshot));
     snapshot->pipeline = cmd->graphics_pipeline;
-    if (!descriptor_set_clone_snapshot_array(
-            snapshot->set_snapshots,
-            snapshot->set_snapshot_used,
-            cmd->graphics_bound_set_snapshots,
-            cmd->graphics_bound_set_used,
-            PDOCKER_VK_MAX_DESCRIPTOR_SETS)) {
+    if (!graphics_snapshot_clone_descriptor_state(&snapshot->set_snapshots,
+                                                  &snapshot->set_snapshot_used,
+                                                  &snapshot->set_capacity,
+                                                  cmd->graphics_bound_set_snapshots,
+                                                  cmd->graphics_bound_set_used,
+                                                  cmd->graphics_bound_set_capacity)) {
         cmd->graphics_draw_op_count--;
         cmd->graphics_unsupported = true;
         command_buffer_mark_recording_failed(cmd, "graphics-draw-descriptor-snapshot-oom");
@@ -21407,6 +21515,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
         PdockerVkDescriptorSet **target_set_handles = NULL;
         PdockerVkDescriptorSet *target_set_snapshots = NULL;
         bool *target_set_used = NULL;
+        uint32_t target_set_capacity = 0;
         if (pipelineBindPoint == VK_PIPELINE_BIND_POINT_GRAPHICS) {
             if (!pipeline_layout) {
                 cmd->unsupported_descriptor_set_layout = true;
@@ -21425,10 +21534,12 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
             target_set_handles = cmd->graphics_bound_set_handles;
             target_set_snapshots = cmd->graphics_bound_set_snapshots;
             target_set_used = cmd->graphics_bound_set_used;
+            target_set_capacity = cmd->graphics_bound_set_capacity;
         } else if (pipelineBindPoint == VK_PIPELINE_BIND_POINT_COMPUTE) {
             target_set_handles = cmd->bound_set_handles;
             target_set_snapshots = cmd->bound_set_snapshots;
             target_set_used = cmd->bound_set_used;
+            target_set_capacity = cmd->bound_set_capacity;
         } else {
             cmd->unsupported_descriptor_set_layout = true;
             return;
@@ -21450,11 +21561,11 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
             if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
                 fprintf(stderr,
                         "pdocker-vulkan-icd: pipeline layout set count exceeds passthrough limit=%u\n",
-                        PDOCKER_VK_MAX_DESCRIPTOR_SETS);
+                        target_set_capacity);
             }
         }
-        bool descriptor_set_range_overflow = firstSet > PDOCKER_VK_MAX_DESCRIPTOR_SETS ||
-            descriptorSetCount > PDOCKER_VK_MAX_DESCRIPTOR_SETS - firstSet;
+        bool descriptor_set_range_overflow = firstSet > target_set_capacity ||
+            descriptorSetCount > target_set_capacity - firstSet;
         if (descriptor_set_range_overflow) {
             cmd->unsupported_descriptor_set_layout = true;
         }
@@ -21464,12 +21575,12 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
                     "pdocker-vulkan-icd: descriptor sets firstSet=%u count=%u exceed passthrough limit=%u; rejecting instead of flattening\n",
                     firstSet,
                     descriptorSetCount,
-                    PDOCKER_VK_MAX_DESCRIPTOR_SETS);
+                    target_set_capacity);
         }
         uint32_t dynamic_index = 0;
         for (uint32_t set_i = 0; set_i < descriptorSetCount; ++set_i) {
-            if (firstSet >= PDOCKER_VK_MAX_DESCRIPTOR_SETS ||
-                set_i >= PDOCKER_VK_MAX_DESCRIPTOR_SETS - firstSet) break;
+            if (firstSet >= target_set_capacity ||
+                set_i >= target_set_capacity - firstSet) break;
             PdockerVkDescriptorSet *set = pdocker_vk_descriptor_set_from_handle(pDescriptorSets[set_i]);
             uint32_t target_set = firstSet + set_i;
             if (!set) {
@@ -21655,12 +21766,12 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
             bind_snapshot->first_dynamic_offset = graphics_first_dynamic_offset;
             bind_snapshot->dynamic_offset_count = dynamicOffsetCount;
             bind_snapshot->pipeline_layout = pipeline_layout;
-            if (!descriptor_set_clone_snapshot_array(
-                    bind_snapshot->set_snapshots,
-                    bind_snapshot->set_snapshot_used,
-                    cmd->graphics_bound_set_snapshots,
-                    cmd->graphics_bound_set_used,
-                    PDOCKER_VK_MAX_DESCRIPTOR_SETS)) {
+            if (!graphics_snapshot_clone_descriptor_state(&bind_snapshot->set_snapshots,
+                                                          &bind_snapshot->set_snapshot_used,
+                                                          &bind_snapshot->set_capacity,
+                                                          cmd->graphics_bound_set_snapshots,
+                                                          cmd->graphics_bound_set_used,
+                                                          cmd->graphics_bound_set_capacity)) {
                 cmd->graphics_descriptor_bind_op_count--;
                 cmd->unsupported_descriptor_set_layout = true;
                 command_buffer_mark_recording_failed(cmd, "graphics-bind-descriptor-snapshot-oom");
@@ -21688,7 +21799,7 @@ static void validate_bound_descriptor_layouts_before_dispatch(PdockerVkCommandBu
         cmd->unsupported_descriptor_set_layout = true;
         return;
     }
-    for (uint32_t set_i = 0; set_i < PDOCKER_VK_MAX_DESCRIPTOR_SETS; ++set_i) {
+    for (uint32_t set_i = 0; set_i < cmd->bound_set_capacity; ++set_i) {
         if (!cmd->bound_set_used[set_i]) continue;
         if (set_i >= layout->set_layout_count ||
             !descriptor_set_layout_compatible(layout->set_layouts[set_i],
@@ -21816,13 +21927,11 @@ VKAPI_ATTR void VKAPI_CALL vkCmdDispatch(
             PdockerVkDispatchOp *op = &cmd->dispatch_ops[op_index];
             memset(op, 0, sizeof(*op));
             op->pipeline = cmd->compute_pipeline;
-            memcpy(op->set_handles, cmd->bound_set_handles, sizeof(op->set_handles));
-            if (!descriptor_set_clone_snapshot_array(
-                    op->set_snapshots,
-                    op->set_snapshot_used,
-                    cmd->bound_set_snapshots,
-                    cmd->bound_set_used,
-                    PDOCKER_VK_MAX_DESCRIPTOR_SETS)) {
+            if (!dispatch_op_clone_descriptor_state(op,
+                                                    cmd->bound_set_handles,
+                                                    cmd->bound_set_snapshots,
+                                                    cmd->bound_set_used,
+                                                    cmd->bound_set_capacity)) {
                 cmd->dispatch_op_count--;
                 command_buffer_mark_recording_failed(cmd, "dispatch-descriptor-snapshot-oom");
                 return;
@@ -21878,13 +21987,11 @@ VKAPI_ATTR void VKAPI_CALL vkCmdDispatchBase(
             PdockerVkDispatchOp *op = &cmd->dispatch_ops[op_index];
             memset(op, 0, sizeof(*op));
             op->pipeline = cmd->compute_pipeline;
-            memcpy(op->set_handles, cmd->bound_set_handles, sizeof(op->set_handles));
-            if (!descriptor_set_clone_snapshot_array(
-                    op->set_snapshots,
-                    op->set_snapshot_used,
-                    cmd->bound_set_snapshots,
-                    cmd->bound_set_used,
-                    PDOCKER_VK_MAX_DESCRIPTOR_SETS)) {
+            if (!dispatch_op_clone_descriptor_state(op,
+                                                    cmd->bound_set_handles,
+                                                    cmd->bound_set_snapshots,
+                                                    cmd->bound_set_used,
+                                                    cmd->bound_set_capacity)) {
                 cmd->dispatch_op_count--;
                 command_buffer_mark_recording_failed(cmd, "dispatch-descriptor-snapshot-oom");
                 return;
@@ -21960,13 +22067,11 @@ VKAPI_ATTR void VKAPI_CALL vkCmdDispatchIndirect(
             PdockerVkDispatchOp *op = &cmd->dispatch_ops[op_index];
             memset(op, 0, sizeof(*op));
             op->pipeline = cmd->compute_pipeline;
-            memcpy(op->set_handles, cmd->bound_set_handles, sizeof(op->set_handles));
-            if (!descriptor_set_clone_snapshot_array(
-                    op->set_snapshots,
-                    op->set_snapshot_used,
-                    cmd->bound_set_snapshots,
-                    cmd->bound_set_used,
-                    PDOCKER_VK_MAX_DESCRIPTOR_SETS)) {
+            if (!dispatch_op_clone_descriptor_state(op,
+                                                    cmd->bound_set_handles,
+                                                    cmd->bound_set_snapshots,
+                                                    cmd->bound_set_used,
+                                                    cmd->bound_set_capacity)) {
                 cmd->dispatch_op_count--;
                 command_buffer_mark_recording_failed(cmd, "dispatch-descriptor-snapshot-oom");
                 return;
