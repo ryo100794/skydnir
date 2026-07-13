@@ -98,7 +98,9 @@
 #define PDOCKER_VK_FEATURE_INDEPENDENT_BLEND           (1ull << 35)
 #define PDOCKER_VK_FEATURE_DESCRIPTOR_PARTIALLY_BOUND   (1ull << 36)
 #define PDOCKER_VK_FEATURE_DESCRIPTOR_VARIABLE_COUNT    (1ull << 37)
+#define PDOCKER_VK_FEATURE_DESCRIPTOR_UPDATE_UNUSED_WHILE_PENDING (1ull << 38)
 
+#define PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT 0x00000002u
 #define PDOCKER_VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT 0x00000004u
 #define PDOCKER_VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT 0x00000008u
 
@@ -2063,6 +2065,8 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             "\"core12_shaderInt8\":%u,"
             "\"descriptorIndexing\":%u,"
             "\"descriptorBindingPartiallyBound\":%u,"
+            "\"descriptorBindingVariableDescriptorCount\":%u,"
+            "\"descriptorBindingUpdateUnusedWhilePending\":%u,"
             "\"extendedDynamicState\":%u,"
             "\"extendedDynamicState2\":%u,"
             "\"extendedDynamicState2LogicOp\":%u,"
@@ -2127,6 +2131,8 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             rt ? rt->enabled_vulkan12.shaderInt8 : 0,
             rt ? rt->enabled_vulkan12.descriptorIndexing : 0,
             rt ? rt->enabled_descriptor_indexing.descriptorBindingPartiallyBound : 0,
+            rt ? rt->enabled_descriptor_indexing.descriptorBindingVariableDescriptorCount : 0,
+            rt ? rt->enabled_descriptor_indexing.descriptorBindingUpdateUnusedWhilePending : 0,
             rt ? rt->enabled_extended_dynamic_state.extendedDynamicState : 0,
             rt ? rt->enabled_extended_dynamic_state2.extendedDynamicState2 : 0,
             rt ? rt->enabled_extended_dynamic_state2.extendedDynamicState2LogicOp : 0,
@@ -13393,16 +13399,23 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     enabled_descriptor_indexing.descriptorBindingVariableDescriptorCount =
         rt->physical_descriptor_indexing.descriptorBindingVariableDescriptorCount ||
         rt->physical_vulkan12.descriptorBindingVariableDescriptorCount;
+    enabled_descriptor_indexing.descriptorBindingUpdateUnusedWhilePending =
+        rt->physical_descriptor_indexing.descriptorBindingUpdateUnusedWhilePending ||
+        rt->physical_vulkan12.descriptorBindingUpdateUnusedWhilePending;
     enabled_vulkan12.descriptorBindingPartiallyBound =
         rt->physical_vulkan12.descriptorBindingPartiallyBound &&
         enabled_descriptor_indexing.descriptorBindingPartiallyBound;
     enabled_vulkan12.descriptorBindingVariableDescriptorCount =
         rt->physical_vulkan12.descriptorBindingVariableDescriptorCount &&
         enabled_descriptor_indexing.descriptorBindingVariableDescriptorCount;
+    enabled_vulkan12.descriptorBindingUpdateUnusedWhilePending =
+        rt->physical_vulkan12.descriptorBindingUpdateUnusedWhilePending &&
+        enabled_descriptor_indexing.descriptorBindingUpdateUnusedWhilePending;
     enabled_vulkan12.descriptorIndexing =
         rt->physical_vulkan12.descriptorIndexing &&
         (enabled_vulkan12.descriptorBindingPartiallyBound ||
-         enabled_vulkan12.descriptorBindingVariableDescriptorCount);
+         enabled_vulkan12.descriptorBindingVariableDescriptorCount ||
+         enabled_vulkan12.descriptorBindingUpdateUnusedWhilePending);
     enabled_storage16.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES;
     enabled_storage16.storageBuffer16BitAccess = rt->physical_storage16.storageBuffer16BitAccess;
     enabled_storage16.uniformAndStorageBuffer16BitAccess = rt->physical_storage16.uniformAndStorageBuffer16BitAccess;
@@ -13450,6 +13463,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
          enabled_vulkan12.drawIndirectCount ||
          enabled_vulkan12.descriptorBindingPartiallyBound ||
          enabled_vulkan12.descriptorBindingVariableDescriptorCount ||
+         enabled_vulkan12.descriptorBindingUpdateUnusedWhilePending ||
          enabled_vulkan12.descriptorIndexing)) {
         enabled_vulkan12.pNext = device_features_pnext;
         device_features_pnext = &enabled_vulkan12;
@@ -13501,7 +13515,8 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
         env_truthy("PDOCKER_GPU_CHAIN_COMPAT_FEATURE_STRUCTS", 1);
     const int descriptor_indexing_available =
         (enabled_descriptor_indexing.descriptorBindingPartiallyBound ||
-         enabled_descriptor_indexing.descriptorBindingVariableDescriptorCount) &&
+         enabled_descriptor_indexing.descriptorBindingVariableDescriptorCount ||
+         enabled_descriptor_indexing.descriptorBindingUpdateUnusedWhilePending) &&
         (rt->api_version >= VK_API_VERSION_1_2 ||
          vulkan_device_extension_supported(rt->physical_device,
                                            VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME));
@@ -13656,7 +13671,8 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     }
     const uint32_t descriptor_indexing_before = enabled_extension_count;
     if ((enabled_descriptor_indexing.descriptorBindingPartiallyBound ||
-         enabled_descriptor_indexing.descriptorBindingVariableDescriptorCount) &&
+         enabled_descriptor_indexing.descriptorBindingVariableDescriptorCount ||
+         enabled_descriptor_indexing.descriptorBindingUpdateUnusedWhilePending) &&
         rt->api_version < VK_API_VERSION_1_2) {
         append_vulkan_device_extension(rt->physical_device,
                                        enabled_extensions,
@@ -19508,6 +19524,7 @@ static void print_capabilities(const char *transport) {
             "\"descriptorIndexing\":%u,"
             "\"descriptorBindingPartiallyBound\":%u,"
             "\"descriptorBindingVariableDescriptorCount\":%u,"
+            "\"descriptorBindingUpdateUnusedWhilePending\":%u,"
             "\"indexTypeUint8\":%u,"
             "\"subgroupSize\":%u,"
             "\"subgroupStages\":%u,"
@@ -19572,6 +19589,8 @@ static void print_capabilities(const char *transport) {
                   rt->physical_descriptor_indexing.descriptorBindingPartiallyBound) : 0,
             rt ? (rt->physical_vulkan12.descriptorBindingVariableDescriptorCount ||
                   rt->physical_descriptor_indexing.descriptorBindingVariableDescriptorCount) : 0,
+            rt ? (rt->physical_vulkan12.descriptorBindingUpdateUnusedWhilePending ||
+                  rt->physical_descriptor_indexing.descriptorBindingUpdateUnusedWhilePending) : 0,
             rt ? rt->physical_index_type_uint8.indexTypeUint8 : 0,
             rt ? rt->subgroup_properties.subgroupSize : 0,
             rt ? rt->subgroup_properties.supportedStages : 0,
@@ -19760,6 +19779,7 @@ static void print_vulkan_advertisement_caps(const char *transport) {
             "\"descriptorIndexing\":%u,"
             "\"descriptorBindingPartiallyBound\":%u,"
             "\"descriptorBindingVariableDescriptorCount\":%u,"
+            "\"descriptorBindingUpdateUnusedWhilePending\":%u,"
             "\"indexTypeUint8\":%u,"
             "\"extendedDynamicState\":%u,"
             "\"extendedDynamicState2\":%u,"
@@ -19794,6 +19814,8 @@ static void print_vulkan_advertisement_caps(const char *transport) {
                   rt->physical_descriptor_indexing.descriptorBindingPartiallyBound) : 0,
             rt ? (rt->physical_vulkan12.descriptorBindingVariableDescriptorCount ||
                   rt->physical_descriptor_indexing.descriptorBindingVariableDescriptorCount) : 0,
+            rt ? (rt->physical_vulkan12.descriptorBindingUpdateUnusedWhilePending ||
+                  rt->physical_descriptor_indexing.descriptorBindingUpdateUnusedWhilePending) : 0,
             rt ? rt->physical_index_type_uint8.indexTypeUint8 : 0,
             rt ? rt->physical_extended_dynamic_state.extendedDynamicState : 0,
             rt ? rt->physical_extended_dynamic_state2.extendedDynamicState2 : 0,
@@ -27508,8 +27530,28 @@ typedef struct VulkanGraphicsReplayDescriptorBinding {
 } VulkanGraphicsReplayDescriptorBinding;
 
 static int vulkan_graphics_descriptor_binding_flags_supported(uint32_t flags) {
-    return (flags & ~(PDOCKER_VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT |
+    return (flags & ~(PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT |
+                      PDOCKER_VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT |
                       PDOCKER_VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT)) == 0;
+}
+
+static int vulkan_graphics_descriptor_binding_flags_enabled(
+        const VulkanRuntime *rt,
+        uint32_t flags) {
+    if (!vulkan_graphics_descriptor_binding_flags_supported(flags)) return 0;
+    if ((flags & PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT) &&
+        (!rt || !rt->enabled_descriptor_indexing.descriptorBindingUpdateUnusedWhilePending)) {
+        return 0;
+    }
+    if ((flags & PDOCKER_VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT) &&
+        (!rt || !rt->enabled_descriptor_indexing.descriptorBindingPartiallyBound)) {
+        return 0;
+    }
+    if ((flags & PDOCKER_VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT) &&
+        (!rt || !rt->enabled_descriptor_indexing.descriptorBindingVariableDescriptorCount)) {
+        return 0;
+    }
+    return 1;
 }
 
 static int vulkan_graphics_descriptor_binding_partially_bound(
@@ -28230,8 +28272,7 @@ fail_scratch:
                 rc = -EOPNOTSUPP;
                 goto fail;
             }
-            if (src_binding->binding_flags &&
-                !rt->enabled_descriptor_indexing.descriptorBindingPartiallyBound) {
+            if (!vulkan_graphics_descriptor_binding_flags_enabled(rt, src_binding->binding_flags)) {
                 free(binding_flags);
                 free(bindings);
                 rc = -EOPNOTSUPP;

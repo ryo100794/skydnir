@@ -5918,7 +5918,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "binding->binding_flags = entry->binding_flags;",
             "VkDescriptorSetLayoutBindingFlagsCreateInfo binding_flags_ci",
             ".pNext = has_binding_flags ? &binding_flags_ci : NULL",
-            "!rt->enabled_descriptor_indexing.descriptorBindingPartiallyBound",
+            "vulkan_graphics_descriptor_binding_flags_enabled(rt, src_binding->binding_flags)",
         ]:
             self.assertIn(marker, executor)
         v624_validation_body = executor.split("if (is_v624) {", 1)[1].split(
@@ -9943,12 +9943,32 @@ class GpuAbiContractTest(unittest.TestCase):
             (executor, "vulkan_graphics_descriptor_binding_flags_supported"),
         ]:
             helper_body = c_function_body(source, helper_name)
+            self.assertTrue("PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT" in helper_body, helper_name)
             self.assertTrue("PDOCKER_VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT" in helper_body, helper_name)
             self.assertTrue("PDOCKER_VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT" in helper_body, helper_name)
             self.assertNotIn(
                 "return (flags & ~PDOCKER_VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT) == 0;",
                 helper_body,
             )
+        enabled_body = c_function_body(executor, "vulkan_graphics_descriptor_binding_flags_enabled")
+        self.assertIn("descriptorBindingUpdateUnusedWhilePending", enabled_body)
+        self.assertIn("descriptorBindingPartiallyBound", enabled_body)
+        self.assertIn("descriptorBindingVariableDescriptorCount", enabled_body)
+        self.assertIn("PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT", enabled_body)
+        self.assertIn("PDOCKER_VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT", enabled_body)
+        self.assertIn("PDOCKER_VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT", enabled_body)
+        layout_body = c_function_body(executor, "materialize_vulkan_graphics_v6_layouts")
+        self.assertIn("vulkan_graphics_descriptor_binding_flags_enabled(rt, src_binding->binding_flags)", layout_body)
+        self.assertNotIn(
+            "src_binding->binding_flags &&\n                !rt->enabled_descriptor_indexing.descriptorBindingPartiallyBound",
+            layout_body,
+        )
+        self.assertIn("descriptorBindingUpdateUnusedWhilePending", executor)
+        self.assertIn("descriptorBindingUpdateUnusedWhilePending", icd)
+        self.assertIn("PDOCKER_VK_FEATURE_DESCRIPTOR_UPDATE_UNUSED_WHILE_PENDING", icd)
+        self.assertIn("PDOCKER_VULKAN_DISABLE_DESCRIPTOR_UPDATE_UNUSED_WHILE_PENDING", icd)
+        self.assertNotIn("PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT", icd)
+        self.assertNotIn("PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT", executor)
 
     def test_vulkan_memory_api_validates_map_ranges_and_type_index(self):
         icd = VULKAN_ICD.read_text()

@@ -140,6 +140,17 @@ or closes.
   payloads, and true multi-device/device-group semantics remain fail-closed;
   this is a single-physical-device no-op-preservation lane, not device-group
   virtualization.
+- [done] **descriptor-indexing per-flag feature gate**: Graphics replay no longer
+  treats every descriptor binding flag as if it required
+  `descriptorBindingPartiallyBound`.  The Android executor now validates each
+  transported binding flag against the matching enabled descriptor-indexing
+  feature: update-unused-while-pending requires
+  `descriptorBindingUpdateUnusedWhilePending`, partially-bound requires
+  `descriptorBindingPartiallyBound`, and variable descriptor count requires
+  `descriptorBindingVariableDescriptorCount`.  This keeps V6.29 variable-count
+  descriptor sets replayable on devices that expose variable descriptor counts
+  without coupling them to the unrelated partially-bound feature, and accepts
+  update-unused descriptor layouts without relaxing exact descriptor coverage.
 - [done] **Vulkan FD transport cap alignment**: The shared ABI now exposes
   `PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS` separately from the V5 frame fd index
   range.  The ICD fails closed before `sendmsg` when a frame would exceed the

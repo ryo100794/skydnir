@@ -392,7 +392,9 @@ static uint64_t g_generic_dispatch_sequence = 0;
 #define PDOCKER_VK_FEATURE_INDEPENDENT_BLEND           (1ull << 35)
 #define PDOCKER_VK_FEATURE_DESCRIPTOR_PARTIALLY_BOUND   (1ull << 36)
 #define PDOCKER_VK_FEATURE_DESCRIPTOR_VARIABLE_COUNT    (1ull << 37)
+#define PDOCKER_VK_FEATURE_DESCRIPTOR_UPDATE_UNUSED_WHILE_PENDING (1ull << 38)
 
+#define PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT 0x00000002u
 #define PDOCKER_VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT 0x00000004u
 #define PDOCKER_VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT 0x00000008u
 
@@ -13936,6 +13938,7 @@ static bool parse_executor_advertisement_caps_json(
     json_read_u32(json, "shaderInt8", &caps->float16_int8.shaderInt8);
     json_read_u32(json, "descriptorBindingPartiallyBound", &caps->descriptor_indexing.descriptorBindingPartiallyBound);
     json_read_u32(json, "descriptorBindingVariableDescriptorCount", &caps->descriptor_indexing.descriptorBindingVariableDescriptorCount);
+    json_read_u32(json, "descriptorBindingUpdateUnusedWhilePending", &caps->descriptor_indexing.descriptorBindingUpdateUnusedWhilePending);
     json_read_u32(json, "indexTypeUint8", &caps->index_type_uint8.indexTypeUint8);
     if (json_read_u32(json, "timelineSemaphore", &value)) caps->timeline_semaphore = value != 0;
     if (json_read_u32(json, "synchronization2", &value)) caps->synchronization2 = value != 0;
@@ -14416,6 +14419,16 @@ static VkBool32 advertised_descriptor_binding_variable_descriptor_count(void) {
     }
     return caps->descriptor_indexing.descriptorBindingVariableDescriptorCount &&
            caps->vulkan_graphics_v629_variable_descriptor_counts_supported
+        ? VK_TRUE
+        : VK_FALSE;
+}
+
+static VkBool32 advertised_descriptor_binding_update_unused_while_pending(void) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+    if (!caps || env_disabled("PDOCKER_VULKAN_DISABLE_DESCRIPTOR_UPDATE_UNUSED_WHILE_PENDING")) {
+        return VK_FALSE;
+    }
+    return caps->descriptor_indexing.descriptorBindingUpdateUnusedWhilePending
         ? VK_TRUE
         : VK_FALSE;
 }
@@ -15009,6 +15022,12 @@ static void fill_pnext_features(void *pNext) {
                     p->storagePushConstant8 = disabled ? VK_FALSE : caps->storage8.storagePushConstant8;
                     p->shaderFloat16 = caps->float16_int8.shaderFloat16;
                     p->shaderInt8 = disabled ? VK_FALSE : caps->float16_int8.shaderInt8;
+                    p->descriptorBindingUpdateUnusedWhilePending = advertised_descriptor_binding_update_unused_while_pending();
+                    p->descriptorBindingPartiallyBound = advertised_descriptor_binding_partially_bound();
+                    p->descriptorBindingVariableDescriptorCount = advertised_descriptor_binding_variable_descriptor_count();
+                    p->descriptorIndexing = p->descriptorBindingUpdateUnusedWhilePending ||
+                                            p->descriptorBindingPartiallyBound ||
+                                            p->descriptorBindingVariableDescriptorCount;
                 } else {
                     VkBool32 storage8 = advertised_storage8();
                     p->storageBuffer8BitAccess = storage8;
@@ -15016,6 +15035,12 @@ static void fill_pnext_features(void *pNext) {
                     p->storagePushConstant8 = VK_FALSE;
                     p->shaderFloat16 = VK_FALSE;
                     p->shaderInt8 = storage8;
+                    p->descriptorBindingUpdateUnusedWhilePending = advertised_descriptor_binding_update_unused_while_pending();
+                    p->descriptorBindingPartiallyBound = advertised_descriptor_binding_partially_bound();
+                    p->descriptorBindingVariableDescriptorCount = advertised_descriptor_binding_variable_descriptor_count();
+                    p->descriptorIndexing = p->descriptorBindingUpdateUnusedWhilePending ||
+                                            p->descriptorBindingPartiallyBound ||
+                                            p->descriptorBindingVariableDescriptorCount;
                 }
                 p->bufferDeviceAddress = VK_FALSE;
                 p->vulkanMemoryModel = VK_FALSE;
@@ -15100,6 +15125,7 @@ static void fill_pnext_features(void *pNext) {
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES: {
                 VkPhysicalDeviceDescriptorIndexingFeatures *p = (VkPhysicalDeviceDescriptorIndexingFeatures *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                p->descriptorBindingUpdateUnusedWhilePending = advertised_descriptor_binding_update_unused_while_pending();
                 p->descriptorBindingPartiallyBound = advertised_descriptor_binding_partially_bound();
                 p->descriptorBindingVariableDescriptorCount = advertised_descriptor_binding_variable_descriptor_count();
                 break;
@@ -15322,9 +15348,12 @@ static bool vulkan12_feature_request_supported(
     memset(&supported, 0, sizeof(supported));
     supported.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
     fill_pnext_features(&supported);
+    supported.descriptorBindingUpdateUnusedWhilePending = advertised_descriptor_binding_update_unused_while_pending();
     supported.descriptorBindingPartiallyBound = advertised_descriptor_binding_partially_bound();
     supported.descriptorBindingVariableDescriptorCount = advertised_descriptor_binding_variable_descriptor_count();
-    supported.descriptorIndexing = supported.descriptorBindingPartiallyBound || supported.descriptorBindingVariableDescriptorCount;
+    supported.descriptorIndexing = supported.descriptorBindingUpdateUnusedWhilePending ||
+                                   supported.descriptorBindingPartiallyBound ||
+                                   supported.descriptorBindingVariableDescriptorCount;
     PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, samplerMirrorClampToEdge);
     PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, drawIndirectCount);
     PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, storageBuffer8BitAccess);
@@ -15382,6 +15411,7 @@ static bool descriptor_indexing_feature_request_supported(
     VkPhysicalDeviceDescriptorIndexingFeatures supported;
     memset(&supported, 0, sizeof(supported));
     supported.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
+    supported.descriptorBindingUpdateUnusedWhilePending = advertised_descriptor_binding_update_unused_while_pending();
     supported.descriptorBindingPartiallyBound = advertised_descriptor_binding_partially_bound();
     supported.descriptorBindingVariableDescriptorCount = advertised_descriptor_binding_variable_descriptor_count();
 #define CHECK_DESCRIPTOR_INDEXING_FEATURE(field) PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, field)
@@ -15673,6 +15703,7 @@ static uint64_t feature_mask_from_pnext_chain(const void *pNext) {
                 if (p->storagePushConstant8) mask |= PDOCKER_VK_FEATURE_STORAGE_PUSH_CONSTANT_8;
                 if (p->shaderFloat16) mask |= PDOCKER_VK_FEATURE_SHADER_FLOAT16;
                 if (p->shaderInt8) mask |= PDOCKER_VK_FEATURE_SHADER_INT8;
+                if (p->descriptorBindingUpdateUnusedWhilePending) mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_UPDATE_UNUSED_WHILE_PENDING;
                 if (p->descriptorBindingPartiallyBound) mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_PARTIALLY_BOUND;
                 if (p->descriptorBindingVariableDescriptorCount) mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_VARIABLE_COUNT;
                 if (p->bufferDeviceAddress) mask |= PDOCKER_VK_FEATURE_BUFFER_DEVICE_ADDRESS;
@@ -15726,6 +15757,7 @@ static uint64_t feature_mask_from_pnext_chain(const void *pNext) {
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES: {
                 const VkPhysicalDeviceDescriptorIndexingFeatures *p = (const VkPhysicalDeviceDescriptorIndexingFeatures *)node;
+                if (p->descriptorBindingUpdateUnusedWhilePending) mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_UPDATE_UNUSED_WHILE_PENDING;
                 if (p->descriptorBindingPartiallyBound) mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_PARTIALLY_BOUND;
                 if (p->descriptorBindingVariableDescriptorCount) mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_VARIABLE_COUNT;
                 break;
@@ -15784,6 +15816,9 @@ static uint64_t advertised_feature_mask(void) {
         }
         if (caps->ext_index_type_uint8 && caps->index_type_uint8.indexTypeUint8) {
             mask |= PDOCKER_VK_FEATURE_INDEX_TYPE_UINT8;
+        }
+        if (advertised_descriptor_binding_update_unused_while_pending()) {
+            mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_UPDATE_UNUSED_WHILE_PENDING;
         }
         if (advertised_descriptor_binding_partially_bound()) {
             mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_PARTIALLY_BOUND;
@@ -16791,7 +16826,8 @@ typedef struct PdockerVkDescriptorSetLayoutBindingFlagsCreateInfoCompat {
 } PdockerVkDescriptorSetLayoutBindingFlagsCreateInfoCompat;
 
 static bool descriptor_binding_flags_supported(uint32_t flags) {
-    return (flags & ~(PDOCKER_VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT |
+    return (flags & ~(PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT |
+                      PDOCKER_VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT |
                       PDOCKER_VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT)) == 0;
 }
 
@@ -18417,6 +18453,10 @@ static bool descriptor_set_layout_create_info_supported(
         if (binding->descriptorCount > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS) return false;
         uint32_t binding_flags = descriptor_set_layout_binding_flags_for_create_info(pCreateInfo, i);
         if (!descriptor_binding_flags_supported(binding_flags)) return false;
+        if ((binding_flags & PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT) &&
+            (requested_feature_mask & PDOCKER_VK_FEATURE_DESCRIPTOR_UPDATE_UNUSED_WHILE_PENDING) == 0) {
+            return false;
+        }
         if ((binding_flags & PDOCKER_VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT) &&
             (requested_feature_mask & PDOCKER_VK_FEATURE_DESCRIPTOR_PARTIALLY_BOUND) == 0) {
             return false;
