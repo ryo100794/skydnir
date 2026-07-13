@@ -260,7 +260,7 @@ PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_swapchain, VkSwa
 #define PDOCKER_VK_MIN_STORAGE_BUFFER_OFFSET_ALIGNMENT 16ull
 #define PDOCKER_VK_MIN_UNIFORM_BUFFER_OFFSET_ALIGNMENT 16ull
 #define PDOCKER_VK_MAX_COPY_OPS 64
-#define PDOCKER_VK_MAX_DISPATCH_OPS 128
+#define PDOCKER_VK_MAX_DISPATCH_OPS PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS
 #define PDOCKER_VK_MAX_COMMAND_OPS PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS
 #define PDOCKER_VK_MAX_EVENT_WAIT_REFS PDOCKER_GPU_VULKAN_GRAPHICS_V626_MAX_EVENT_WAIT_REFS
 #define PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDINGS 16
@@ -1159,8 +1159,9 @@ typedef struct {
     uint32_t buffer_barrier_op_count;
     PdockerVkImageBarrierOp image_barrier_ops[PDOCKER_VK_MAX_COPY_OPS];
     uint32_t image_barrier_op_count;
-    PdockerVkDispatchOp dispatch_ops[PDOCKER_VK_MAX_DISPATCH_OPS];
+    PdockerVkDispatchOp *dispatch_ops;
     uint32_t dispatch_op_count;
+    uint32_t dispatch_op_capacity;
     PdockerVkCommandOp *command_ops;
     uint32_t command_op_count;
     uint32_t command_op_capacity;
@@ -1597,6 +1598,35 @@ static void command_buffer_destroy_descriptor_states(PdockerVkCommandBuffer *cmd
                                  &cmd->graphics_bound_set_capacity);
 }
 
+static bool command_buffer_reserve_dispatch_ops(PdockerVkCommandBuffer *cmd, uint32_t extra) {
+    if (!cmd) return false;
+    if (extra == 0) return true;
+    if (cmd->dispatch_op_count > PDOCKER_VK_MAX_DISPATCH_OPS ||
+        extra > PDOCKER_VK_MAX_DISPATCH_OPS - cmd->dispatch_op_count) {
+        return false;
+    }
+    uint32_t needed = cmd->dispatch_op_count + extra;
+    if (needed <= cmd->dispatch_op_capacity) return true;
+    uint32_t new_capacity = cmd->dispatch_op_capacity ? cmd->dispatch_op_capacity : 64u;
+    while (new_capacity < needed) {
+        if (new_capacity > PDOCKER_VK_MAX_DISPATCH_OPS / 2u) {
+            new_capacity = PDOCKER_VK_MAX_DISPATCH_OPS;
+            break;
+        }
+        new_capacity *= 2u;
+    }
+    if (new_capacity < needed || new_capacity > PDOCKER_VK_MAX_DISPATCH_OPS) {
+        return false;
+    }
+    PdockerVkDispatchOp *new_ops =
+        (PdockerVkDispatchOp *)realloc(cmd->dispatch_ops,
+                                       (size_t)new_capacity * sizeof(*cmd->dispatch_ops));
+    if (!new_ops) return false;
+    cmd->dispatch_ops = new_ops;
+    cmd->dispatch_op_capacity = new_capacity;
+    return true;
+}
+
 static bool command_buffer_reserve_command_ops(PdockerVkCommandBuffer *cmd, uint32_t extra) {
     if (!cmd) return false;
     if (extra == 0) return true;
@@ -1692,6 +1722,10 @@ static bool command_buffer_reserve_push_constant_ops(PdockerVkCommandBuffer *cmd
 
 static void command_buffer_destroy_record_vectors(PdockerVkCommandBuffer *cmd) {
     if (!cmd) return;
+    free(cmd->dispatch_ops);
+    cmd->dispatch_ops = NULL;
+    cmd->dispatch_op_count = 0;
+    cmd->dispatch_op_capacity = 0;
     free(cmd->command_ops);
     cmd->command_ops = NULL;
     cmd->command_op_count = 0;
@@ -1940,7 +1974,8 @@ static bool append_secondary_command_buffer(
         src->dynamic_rendering_active || src->render_pass_active) {
         return false;
     }
-    if (!command_buffer_reserve_command_ops(dst, src->command_op_count) ||
+    if (!command_buffer_reserve_dispatch_ops(dst, src->dispatch_op_count) ||
+        !command_buffer_reserve_command_ops(dst, src->command_op_count) ||
         !command_buffer_reserve_graphics_command_ops(dst, src->graphics_command_op_count) ||
         !command_buffer_reserve_push_constant_ops(dst, src->push_constant_op_count)) {
         return false;
@@ -22099,7 +22134,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdDispatch(
         cmd->dispatch_z = groupCountZ;
         cmd->has_dispatch = true;
         validate_bound_descriptor_layouts_before_dispatch(cmd);
-        if (cmd->dispatch_op_count < PDOCKER_VK_MAX_DISPATCH_OPS) {
+        if (command_buffer_reserve_dispatch_ops(cmd, 1)) {
             uint32_t op_index = cmd->dispatch_op_count++;
             PdockerVkDispatchOp *op = &cmd->dispatch_ops[op_index];
             memset(op, 0, sizeof(*op));
@@ -22166,7 +22201,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdDispatchBase(
         cmd->dispatch_z = groupCountZ;
         cmd->has_dispatch = true;
         validate_bound_descriptor_layouts_before_dispatch(cmd);
-        if (cmd->dispatch_op_count < PDOCKER_VK_MAX_DISPATCH_OPS) {
+        if (command_buffer_reserve_dispatch_ops(cmd, 1)) {
             uint32_t op_index = cmd->dispatch_op_count++;
             PdockerVkDispatchOp *op = &cmd->dispatch_ops[op_index];
             memset(op, 0, sizeof(*op));
@@ -22253,7 +22288,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdDispatchIndirect(
         cmd->dispatch_z = 0;
         cmd->has_dispatch = true;
         validate_bound_descriptor_layouts_before_dispatch(cmd);
-        if (cmd->dispatch_op_count < PDOCKER_VK_MAX_DISPATCH_OPS) {
+        if (command_buffer_reserve_dispatch_ops(cmd, 1)) {
             uint32_t op_index = cmd->dispatch_op_count++;
             PdockerVkDispatchOp *op = &cmd->dispatch_ops[op_index];
             memset(op, 0, sizeof(*op));
