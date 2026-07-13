@@ -1530,12 +1530,18 @@ class GpuAbiContractTest(unittest.TestCase):
         for marker in [
             "VK_KHR_SWAPCHAIN_EXTENSION_NAME",
             "VK_KHR_SWAPCHAIN_SPEC_VERSION",
+            "VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME",
+            "VK_KHR_BIND_MEMORY_2_EXTENSION_NAME",
+            "VK_KHR_DEDICATED_ALLOCATION_EXTENSION_NAME",
             "ADD_DEVICE_EXTENSION",
         ]:
             self.assertIn(marker, device_extension_body)
 
         device_validation_body = c_function_body(icd, "device_extension_advertised_name")
         self.assertIn("VK_KHR_SWAPCHAIN_EXTENSION_NAME", device_validation_body)
+        self.assertIn("VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME", device_validation_body)
+        self.assertIn("VK_KHR_BIND_MEMORY_2_EXTENSION_NAME", device_validation_body)
+        self.assertIn("VK_KHR_DEDICATED_ALLOCATION_EXTENSION_NAME", device_validation_body)
         self.assertRegex(
             device_validation_body,
             r"VK_KHR_SWAPCHAIN_EXTENSION_NAME[\s\S]{0,240}return\s+(?:true|VK_TRUE|advertised_[A-Za-z0-9_]+\(\))",
@@ -8936,10 +8942,37 @@ class GpuAbiContractTest(unittest.TestCase):
             '"vkGetPhysicalDeviceExternalSemaphorePropertiesKHR", vkGetPhysicalDeviceExternalSemaphoreProperties',
             '"vkGetPhysicalDeviceExternalFencePropertiesKHR", vkGetPhysicalDeviceExternalFenceProperties',
             '"vkGetBufferMemoryRequirements2KHR", vkGetBufferMemoryRequirements2',
+            '"vkGetImageMemoryRequirements2KHR", vkGetImageMemoryRequirements2',
             '"vkGetImageSparseMemoryRequirements2KHR", vkGetImageSparseMemoryRequirements2',
             '"vkBindBufferMemory2KHR", vkBindBufferMemory2',
+            '"vkBindImageMemory2KHR", vkBindImageMemory2',
         ]:
             self.assertIn(alias, proc_body)
+
+    def test_vulkan_khr_memory_trio_is_advertised_and_aliases_are_public(self):
+        icd = VULKAN_ICD.read_text()
+        enum_body = c_function_body(icd, "vkEnumerateDeviceExtensionProperties")
+        validation_body = c_function_body(icd, "device_extension_advertised_name")
+        hidden_body = c_function_body(icd, "proc_address_hidden_by_advertisement")
+        proc_body = icd.split("static PFN_vkVoidFunction proc_address", 1)[1].split(
+            "VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr", 1
+        )[0]
+        for marker in [
+            "VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME",
+            "VK_KHR_BIND_MEMORY_2_EXTENSION_NAME",
+            "VK_KHR_DEDICATED_ALLOCATION_EXTENSION_NAME",
+        ]:
+            self.assertIn(marker, enum_body)
+            self.assertIn(marker, validation_body)
+        for hidden in [
+            '"vkGetBufferMemoryRequirements2KHR"',
+            '"vkGetImageMemoryRequirements2KHR"',
+            '"vkBindBufferMemory2KHR"',
+            '"vkBindImageMemory2KHR"',
+        ]:
+            self.assertNotIn(hidden, hidden_body)
+            self.assertIn(hidden, proc_body)
+
 
     def test_vulkan_physical_device_group_and_external_property_queries_fail_closed(self):
         icd = VULKAN_ICD.read_text()
@@ -18827,8 +18860,6 @@ class GpuAbiContractTest(unittest.TestCase):
             "!advertised_draw_indirect_count_amd()",
             "!advertised_api_1_3()",
             "vkGetPhysicalDeviceProperties2KHR",
-            "vkGetBufferMemoryRequirements2KHR",
-            "vkBindBufferMemory2KHR",
             "vkCreateRenderPass2KHR",
             "vkCmdBeginRenderPass2KHR",
             "vkGetDeviceBufferMemoryRequirements",

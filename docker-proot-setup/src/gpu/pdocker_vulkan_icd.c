@@ -19104,6 +19104,18 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(
         ADD_DEVICE_EXTENSION(VK_KHR_LOAD_STORE_OP_NONE_EXTENSION_NAME, VK_KHR_LOAD_STORE_OP_NONE_SPEC_VERSION);
         ADD_DEVICE_EXTENSION(VK_EXT_LOAD_STORE_OP_NONE_EXTENSION_NAME, VK_EXT_LOAD_STORE_OP_NONE_SPEC_VERSION);
     }
+#ifdef VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME
+    ADD_DEVICE_EXTENSION(VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME,
+                         VK_KHR_GET_MEMORY_REQUIREMENTS_2_SPEC_VERSION);
+#endif
+#ifdef VK_KHR_BIND_MEMORY_2_EXTENSION_NAME
+    ADD_DEVICE_EXTENSION(VK_KHR_BIND_MEMORY_2_EXTENSION_NAME,
+                         VK_KHR_BIND_MEMORY_2_SPEC_VERSION);
+#endif
+#ifdef VK_KHR_DEDICATED_ALLOCATION_EXTENSION_NAME
+    ADD_DEVICE_EXTENSION(VK_KHR_DEDICATED_ALLOCATION_EXTENSION_NAME,
+                         VK_KHR_DEDICATED_ALLOCATION_SPEC_VERSION);
+#endif
 #ifdef VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME
     if (advertised_draw_indirect_count_khr()) {
         ADD_DEVICE_EXTENSION(VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME,
@@ -19166,6 +19178,15 @@ static bool device_extension_advertised_name(const char *name) {
     if (strcmp(name, VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME) == 0) return advertised_dynamic_rendering();
     if (strcmp(name, VK_KHR_LOAD_STORE_OP_NONE_EXTENSION_NAME) == 0) return advertised_load_store_op_none();
     if (strcmp(name, VK_EXT_LOAD_STORE_OP_NONE_EXTENSION_NAME) == 0) return advertised_load_store_op_none();
+#ifdef VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME
+    if (strcmp(name, VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME) == 0) return true;
+#endif
+#ifdef VK_KHR_BIND_MEMORY_2_EXTENSION_NAME
+    if (strcmp(name, VK_KHR_BIND_MEMORY_2_EXTENSION_NAME) == 0) return true;
+#endif
+#ifdef VK_KHR_DEDICATED_ALLOCATION_EXTENSION_NAME
+    if (strcmp(name, VK_KHR_DEDICATED_ALLOCATION_EXTENSION_NAME) == 0) return true;
+#endif
 #ifdef VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME
     if (strcmp(name, VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME) == 0) {
         return advertised_draw_indirect_count_khr();
@@ -30161,8 +30182,6 @@ static bool proc_address_hidden_by_advertisement(const char *pName) {
         strcmp(pName, "vkGetPhysicalDeviceExternalBufferPropertiesKHR") == 0 ||
         strcmp(pName, "vkGetPhysicalDeviceExternalSemaphorePropertiesKHR") == 0 ||
         strcmp(pName, "vkGetPhysicalDeviceExternalFencePropertiesKHR") == 0 ||
-        strcmp(pName, "vkGetBufferMemoryRequirements2KHR") == 0 ||
-        strcmp(pName, "vkGetImageMemoryRequirements2KHR") == 0 ||
         strcmp(pName, "vkGetImageSparseMemoryRequirements2KHR") == 0 ||
         strcmp(pName, "vkGetImageSubresourceLayout2KHR") == 0 ||
         strcmp(pName, "vkGetImageSubresourceLayout2EXT") == 0 ||
@@ -30178,8 +30197,6 @@ static bool proc_address_hidden_by_advertisement(const char *pName) {
         strcmp(pName, "vkGetBufferDeviceAddressEXT") == 0 ||
         strcmp(pName, "vkCreateSamplerYcbcrConversionKHR") == 0 ||
         strcmp(pName, "vkDestroySamplerYcbcrConversionKHR") == 0 ||
-        strcmp(pName, "vkBindBufferMemory2KHR") == 0 ||
-        strcmp(pName, "vkBindImageMemory2KHR") == 0 ||
         strcmp(pName, "vkCreateRenderPass2KHR") == 0 ||
         strcmp(pName, "vkCmdBeginRenderPass2KHR") == 0 ||
         strcmp(pName, "vkCmdNextSubpass2KHR") == 0 ||
