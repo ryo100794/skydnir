@@ -15453,6 +15453,12 @@ static void fill_pnext_features(void *pNext) {
                 p->hostQueryReset = VK_TRUE;
                 break;
             }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIVATE_DATA_FEATURES: {
+                VkPhysicalDevicePrivateDataFeatures *p = (VkPhysicalDevicePrivateDataFeatures *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                p->privateData = VK_FALSE;
+                break;
+            }
 #ifdef VK_EXT_subpass_merge_feedback
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBPASS_MERGE_FEEDBACK_FEATURES_EXT: {
                 VkPhysicalDeviceSubpassMergeFeedbackFeaturesEXT *p =
@@ -15902,6 +15908,13 @@ static VkResult validate_device_feature_requests(const VkDeviceCreateInfo *pCrea
                 supported = true;
                 break;
             }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIVATE_DATA_FEATURES: {
+                const VkPhysicalDevicePrivateDataFeatures *p =
+                    (const VkPhysicalDevicePrivateDataFeatures *)node;
+                supported = !p->privateData;
+                if (!supported) unsupported_feature_name = "privateData";
+                break;
+            }
 #ifdef VK_EXT_subpass_merge_feedback
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBPASS_MERGE_FEEDBACK_FEATURES_EXT: {
                 const VkPhysicalDeviceSubpassMergeFeedbackFeaturesEXT *p =
@@ -15915,6 +15928,13 @@ static VkResult validate_device_feature_requests(const VkDeviceCreateInfo *pCrea
                 VkResult group_rc = validate_device_group_device_create_info((const VkDeviceGroupDeviceCreateInfo *)node);
                 if (group_rc != VK_SUCCESS) return group_rc;
                 supported = true;
+                break;
+            }
+            case VK_STRUCTURE_TYPE_DEVICE_PRIVATE_DATA_CREATE_INFO: {
+                const VkDevicePrivateDataCreateInfo *p =
+                    (const VkDevicePrivateDataCreateInfo *)node;
+                supported = p->privateDataSlotRequestCount == 0;
+                if (!supported) unsupported_feature_name = "privateDataSlotRequestCount";
                 break;
             }
             case VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO:

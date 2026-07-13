@@ -137,6 +137,82 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_private_data_feature_and_device_create_info_are_noop_only(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            int main(void) {{
+                VkPhysicalDevicePrivateDataFeatures private_features;
+                memset(&private_features, 0xff, sizeof(private_features));
+                private_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIVATE_DATA_FEATURES;
+                private_features.pNext = NULL;
+                fill_pnext_features(&private_features);
+                if (private_features.sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIVATE_DATA_FEATURES) {{
+                    fprintf(stderr, "private feature sType was not preserved\\n");
+                    return 2;
+                }}
+                if (private_features.pNext != NULL) {{
+                    fprintf(stderr, "private feature pNext was not preserved\\n");
+                    return 3;
+                }}
+                if (private_features.privateData != VK_FALSE) {{
+                    fprintf(stderr, "privateData was advertised without private-data API support\\n");
+                    return 4;
+                }}
+
+                VkDeviceCreateInfo create_info;
+                memset(&create_info, 0, sizeof(create_info));
+                create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                private_features.privateData = VK_TRUE;
+                create_info.pNext = &private_features;
+                if (validate_device_feature_requests(&create_info) == VK_SUCCESS) {{
+                    fprintf(stderr, "privateData=true was accepted\\n");
+                    return 5;
+                }}
+                private_features.privateData = VK_FALSE;
+                if (validate_device_feature_requests(&create_info) != VK_SUCCESS) {{
+                    fprintf(stderr, "privateData=false was rejected\\n");
+                    return 6;
+                }}
+
+                VkDevicePrivateDataCreateInfo private_create;
+                memset(&private_create, 0, sizeof(private_create));
+                private_create.sType = VK_STRUCTURE_TYPE_DEVICE_PRIVATE_DATA_CREATE_INFO;
+                private_create.privateDataSlotRequestCount = 0;
+                create_info.pNext = &private_create;
+                if (validate_device_feature_requests(&create_info) != VK_SUCCESS) {{
+                    fprintf(stderr, "zero privateDataSlotRequestCount was rejected\\n");
+                    return 7;
+                }}
+                private_create.privateDataSlotRequestCount = 1;
+                if (validate_device_feature_requests(&create_info) == VK_SUCCESS) {{
+                    fprintf(stderr, "nonzero privateDataSlotRequestCount was accepted\\n");
+                    return 8;
+                }}
+
+                memset(&private_features, 0, sizeof(private_features));
+                memset(&private_create, 0, sizeof(private_create));
+                private_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIVATE_DATA_FEATURES;
+                private_features.privateData = VK_FALSE;
+                private_features.pNext = &private_create;
+                private_create.sType = VK_STRUCTURE_TYPE_DEVICE_PRIVATE_DATA_CREATE_INFO;
+                private_create.privateDataSlotRequestCount = 0;
+                create_info.pNext = &private_features;
+                if (validate_device_feature_requests(&create_info) != VK_SUCCESS) {{
+                    fprintf(stderr, "privateData=false plus zero slot request chain was rejected\\n");
+                    return 9;
+                }}
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_dynamic_rendering_local_read_feature_is_queryable_but_not_enableable(self):
         source = textwrap.dedent(
             f"""

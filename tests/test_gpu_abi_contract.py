@@ -8329,6 +8329,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "VkPhysicalDeviceShaderSubgroupExtendedTypesFeatures",
             "VkPhysicalDeviceSeparateDepthStencilLayoutsFeatures",
             "VkPhysicalDeviceHostQueryResetFeatures",
+            "VkPhysicalDevicePrivateDataFeatures",
             "VkPhysicalDeviceMaintenance4Features",
         ]:
             if struct_name not in body:
@@ -8661,6 +8662,13 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("p->subpassMergeFeedback = VK_FALSE", icd)
         self.assertIn("supported = !p->subpassMergeFeedback", icd)
         self.assertIn('unsupported_feature_name = "subpassMergeFeedback"', icd)
+        self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIVATE_DATA_FEATURES", icd)
+        self.assertIn("p->privateData = VK_FALSE", icd)
+        self.assertIn("supported = !p->privateData", icd)
+        self.assertIn('unsupported_feature_name = "privateData"', icd)
+        self.assertIn("VK_STRUCTURE_TYPE_DEVICE_PRIVATE_DATA_CREATE_INFO", icd)
+        self.assertIn("p->privateDataSlotRequestCount == 0", icd)
+        self.assertIn('unsupported_feature_name = "privateDataSlotRequestCount"', icd)
         self.assertIn("p->pPhysicalDevices[0] != (VkPhysicalDevice)&g_device", icd)
         self.assertIn("VK_ERROR_FEATURE_NOT_PRESENT", icd)
         for marker in [
