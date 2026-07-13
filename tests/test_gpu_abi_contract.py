@@ -8311,9 +8311,15 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         for struct_name in [
             "VkPhysicalDeviceVulkan11Features",
+            "VkPhysicalDeviceMultiviewFeatures",
+            "VkPhysicalDeviceVariablePointersFeatures",
+            "VkPhysicalDeviceProtectedMemoryFeatures",
+            "VkPhysicalDeviceShaderDrawParametersFeatures",
             "VkPhysicalDevice16BitStorageFeatures",
             "VkPhysicalDeviceVulkan12Features",
             "VkPhysicalDevice8BitStorageFeatures",
+            "VkPhysicalDeviceShaderAtomicInt64Features",
+            "VkPhysicalDeviceImagelessFramebufferFeatures",
             "VkPhysicalDeviceShaderFloat16Int8Features",
             "VkPhysicalDeviceSynchronization2Features",
             "VkPhysicalDeviceTimelineSemaphoreFeatures",
@@ -8664,6 +8670,25 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("p->subpassMergeFeedback = VK_FALSE", icd)
         self.assertIn("supported = !p->subpassMergeFeedback", icd)
         self.assertIn('unsupported_feature_name = "subpassMergeFeedback"', icd)
+        self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES", icd)
+        self.assertIn("p->multiview = caps ? caps->multiview : VK_FALSE", icd)
+        self.assertIn("supported = (!p->multiview || supported11.multiview)", icd)
+        self.assertIn("if (p->multiview) mask |= PDOCKER_VK_FEATURE_MULTIVIEW", icd)
+        self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VARIABLE_POINTERS_FEATURES", icd)
+        self.assertIn("p->variablePointersStorageBuffer = VK_FALSE", icd)
+        self.assertIn("supported = !p->variablePointersStorageBuffer && !p->variablePointers", icd)
+        self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROTECTED_MEMORY_FEATURES", icd)
+        self.assertIn("p->protectedMemory = VK_FALSE", icd)
+        self.assertIn("supported = !p->protectedMemory", icd)
+        self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETERS_FEATURES", icd)
+        self.assertIn("p->shaderDrawParameters = VK_FALSE", icd)
+        self.assertIn("supported = !p->shaderDrawParameters", icd)
+        self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_INT64_FEATURES", icd)
+        self.assertIn("p->shaderBufferInt64Atomics = VK_FALSE", icd)
+        self.assertIn("supported = !p->shaderBufferInt64Atomics && !p->shaderSharedInt64Atomics", icd)
+        self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGELESS_FRAMEBUFFER_FEATURES", icd)
+        self.assertIn("p->imagelessFramebuffer = VK_FALSE", icd)
+        self.assertIn("supported = !p->imagelessFramebuffer", icd)
         self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIVATE_DATA_FEATURES", icd)
         self.assertIn("p->privateData = VK_FALSE", icd)
         self.assertIn("supported = !p->privateData", icd)

@@ -261,6 +261,99 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_standalone_core_feature_structs_are_queryable_and_fail_closed(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            int main(void) {{
+                VkPhysicalDeviceMultiviewFeatures multiview;
+                VkPhysicalDeviceVariablePointersFeatures variable_pointers;
+                VkPhysicalDeviceProtectedMemoryFeatures protected_memory;
+                VkPhysicalDeviceShaderDrawParametersFeatures shader_draw;
+                VkPhysicalDeviceShaderAtomicInt64Features atomic64;
+                VkPhysicalDeviceImagelessFramebufferFeatures imageless;
+                VkDeviceCreateInfo create_info;
+
+                memset(&multiview, 0xff, sizeof(multiview));
+                memset(&variable_pointers, 0xff, sizeof(variable_pointers));
+                memset(&protected_memory, 0xff, sizeof(protected_memory));
+                memset(&shader_draw, 0xff, sizeof(shader_draw));
+                memset(&atomic64, 0xff, sizeof(atomic64));
+                memset(&imageless, 0xff, sizeof(imageless));
+                multiview.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES;
+                variable_pointers.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VARIABLE_POINTERS_FEATURES;
+                protected_memory.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROTECTED_MEMORY_FEATURES;
+                shader_draw.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETERS_FEATURES;
+                atomic64.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_INT64_FEATURES;
+                imageless.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGELESS_FRAMEBUFFER_FEATURES;
+                multiview.pNext = &variable_pointers;
+                variable_pointers.pNext = &protected_memory;
+                protected_memory.pNext = &shader_draw;
+                shader_draw.pNext = &atomic64;
+                atomic64.pNext = &imageless;
+                imageless.pNext = NULL;
+
+                fill_pnext_features(&multiview);
+                if (multiview.pNext != &variable_pointers || variable_pointers.pNext != &protected_memory ||
+                    protected_memory.pNext != &shader_draw || shader_draw.pNext != &atomic64 ||
+                    atomic64.pNext != &imageless || imageless.pNext != NULL) {{
+                    fprintf(stderr, "standalone feature pNext chain was not preserved\\n");
+                    return 2;
+                }}
+                if (multiview.multiview != VK_FALSE ||
+                    multiview.multiviewGeometryShader != VK_FALSE ||
+                    multiview.multiviewTessellationShader != VK_FALSE ||
+                    variable_pointers.variablePointersStorageBuffer != VK_FALSE ||
+                    variable_pointers.variablePointers != VK_FALSE ||
+                    protected_memory.protectedMemory != VK_FALSE ||
+                    shader_draw.shaderDrawParameters != VK_FALSE ||
+                    atomic64.shaderBufferInt64Atomics != VK_FALSE ||
+                    atomic64.shaderSharedInt64Atomics != VK_FALSE ||
+                    imageless.imagelessFramebuffer != VK_FALSE) {{
+                    fprintf(stderr, "standalone features were not conservatively zero-filled\\n");
+                    return 3;
+                }}
+
+                memset(&create_info, 0, sizeof(create_info));
+                create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                create_info.pNext = &multiview;
+                if (validate_device_feature_requests(&create_info) != VK_SUCCESS) {{
+                    fprintf(stderr, "all-false standalone feature chain was rejected\\n");
+                    return 4;
+                }}
+
+                multiview.multiview = VK_TRUE;
+                if (validate_device_feature_requests(&create_info) == VK_SUCCESS) {{
+                    fprintf(stderr, "offline multiview=true standalone feature was accepted\\n");
+                    return 5;
+                }}
+                multiview.multiview = VK_FALSE;
+                variable_pointers.variablePointers = VK_TRUE;
+                if (validate_device_feature_requests(&create_info) == VK_SUCCESS) return 6;
+                variable_pointers.variablePointers = VK_FALSE;
+                protected_memory.protectedMemory = VK_TRUE;
+                if (validate_device_feature_requests(&create_info) == VK_SUCCESS) return 7;
+                protected_memory.protectedMemory = VK_FALSE;
+                shader_draw.shaderDrawParameters = VK_TRUE;
+                if (validate_device_feature_requests(&create_info) == VK_SUCCESS) return 8;
+                shader_draw.shaderDrawParameters = VK_FALSE;
+                atomic64.shaderBufferInt64Atomics = VK_TRUE;
+                if (validate_device_feature_requests(&create_info) == VK_SUCCESS) return 9;
+                atomic64.shaderBufferInt64Atomics = VK_FALSE;
+                imageless.imagelessFramebuffer = VK_TRUE;
+                if (validate_device_feature_requests(&create_info) == VK_SUCCESS) return 10;
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+
     def test_shader_demote_feature_is_queryable_but_not_enableable(self):
         source = textwrap.dedent(
             f"""

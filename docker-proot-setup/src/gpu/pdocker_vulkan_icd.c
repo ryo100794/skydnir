@@ -15252,6 +15252,37 @@ static void fill_pnext_features(void *pNext) {
                 }
                 break;
             }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES: {
+                VkPhysicalDeviceMultiviewFeatures *p =
+                    (VkPhysicalDeviceMultiviewFeatures *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                p->multiview = caps ? caps->multiview : VK_FALSE;
+                p->multiviewGeometryShader = VK_FALSE;
+                p->multiviewTessellationShader = VK_FALSE;
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VARIABLE_POINTERS_FEATURES: {
+                VkPhysicalDeviceVariablePointersFeatures *p =
+                    (VkPhysicalDeviceVariablePointersFeatures *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                p->variablePointersStorageBuffer = VK_FALSE;
+                p->variablePointers = VK_FALSE;
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROTECTED_MEMORY_FEATURES: {
+                VkPhysicalDeviceProtectedMemoryFeatures *p =
+                    (VkPhysicalDeviceProtectedMemoryFeatures *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                p->protectedMemory = VK_FALSE;
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETERS_FEATURES: {
+                VkPhysicalDeviceShaderDrawParametersFeatures *p =
+                    (VkPhysicalDeviceShaderDrawParametersFeatures *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                p->shaderDrawParameters = VK_FALSE;
+                break;
+            }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES: {
                 VkPhysicalDevice16BitStorageFeatures *p = (VkPhysicalDevice16BitStorageFeatures *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
@@ -15337,6 +15368,21 @@ static void fill_pnext_features(void *pNext) {
                     p->uniformAndStorageBuffer8BitAccess = VK_FALSE;
                     p->storagePushConstant8 = VK_FALSE;
                 }
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_INT64_FEATURES: {
+                VkPhysicalDeviceShaderAtomicInt64Features *p =
+                    (VkPhysicalDeviceShaderAtomicInt64Features *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                p->shaderBufferInt64Atomics = VK_FALSE;
+                p->shaderSharedInt64Atomics = VK_FALSE;
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGELESS_FRAMEBUFFER_FEATURES: {
+                VkPhysicalDeviceImagelessFramebufferFeatures *p =
+                    (VkPhysicalDeviceImagelessFramebufferFeatures *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                p->imagelessFramebuffer = VK_FALSE;
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES: {
@@ -15808,6 +15854,40 @@ static VkResult validate_device_feature_requests(const VkDeviceCreateInfo *pCrea
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES:
                 supported = vulkan11_feature_request_supported((const VkPhysicalDeviceVulkan11Features *)node, &unsupported_feature_name);
                 break;
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES: {
+                const VkPhysicalDeviceMultiviewFeatures *p =
+                    (const VkPhysicalDeviceMultiviewFeatures *)node;
+                VkPhysicalDeviceVulkan11Features supported11;
+                memset(&supported11, 0, sizeof(supported11));
+                supported11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
+                fill_pnext_features(&supported11);
+                supported = (!p->multiview || supported11.multiview) &&
+                            !p->multiviewGeometryShader &&
+                            !p->multiviewTessellationShader;
+                if (!supported) unsupported_feature_name = "multiview";
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VARIABLE_POINTERS_FEATURES: {
+                const VkPhysicalDeviceVariablePointersFeatures *p =
+                    (const VkPhysicalDeviceVariablePointersFeatures *)node;
+                supported = !p->variablePointersStorageBuffer && !p->variablePointers;
+                if (!supported) unsupported_feature_name = "variablePointers";
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROTECTED_MEMORY_FEATURES: {
+                const VkPhysicalDeviceProtectedMemoryFeatures *p =
+                    (const VkPhysicalDeviceProtectedMemoryFeatures *)node;
+                supported = !p->protectedMemory;
+                if (!supported) unsupported_feature_name = "protectedMemory";
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETERS_FEATURES: {
+                const VkPhysicalDeviceShaderDrawParametersFeatures *p =
+                    (const VkPhysicalDeviceShaderDrawParametersFeatures *)node;
+                supported = !p->shaderDrawParameters;
+                if (!supported) unsupported_feature_name = "shaderDrawParameters";
+                break;
+            }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES:
                 supported = storage16_feature_request_supported((const VkPhysicalDevice16BitStorageFeatures *)node, &unsupported_feature_name);
                 break;
@@ -15817,6 +15897,20 @@ static VkResult validate_device_feature_requests(const VkDeviceCreateInfo *pCrea
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES:
                 supported = storage8_feature_request_supported((const VkPhysicalDevice8BitStorageFeatures *)node, &unsupported_feature_name);
                 break;
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_INT64_FEATURES: {
+                const VkPhysicalDeviceShaderAtomicInt64Features *p =
+                    (const VkPhysicalDeviceShaderAtomicInt64Features *)node;
+                supported = !p->shaderBufferInt64Atomics && !p->shaderSharedInt64Atomics;
+                if (!supported) unsupported_feature_name = "shaderInt64Atomics";
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGELESS_FRAMEBUFFER_FEATURES: {
+                const VkPhysicalDeviceImagelessFramebufferFeatures *p =
+                    (const VkPhysicalDeviceImagelessFramebufferFeatures *)node;
+                supported = !p->imagelessFramebuffer;
+                if (!supported) unsupported_feature_name = "imagelessFramebuffer";
+                break;
+            }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES:
                 supported = shader_float16_int8_feature_request_supported((const VkPhysicalDeviceShaderFloat16Int8Features *)node, &unsupported_feature_name);
                 break;
@@ -16032,6 +16126,12 @@ static uint64_t feature_mask_from_pnext_chain(const void *pNext) {
                 if (p->storageBuffer16BitAccess) mask |= PDOCKER_VK_FEATURE_STORAGE_BUFFER_16;
                 if (p->uniformAndStorageBuffer16BitAccess) mask |= PDOCKER_VK_FEATURE_UNIFORM_STORAGE_BUFFER_16;
                 if (p->storagePushConstant16) mask |= PDOCKER_VK_FEATURE_STORAGE_PUSH_CONSTANT_16;
+                if (p->multiview) mask |= PDOCKER_VK_FEATURE_MULTIVIEW;
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES: {
+                const VkPhysicalDeviceMultiviewFeatures *p =
+                    (const VkPhysicalDeviceMultiviewFeatures *)node;
                 if (p->multiview) mask |= PDOCKER_VK_FEATURE_MULTIVIEW;
                 break;
             }
