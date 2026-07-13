@@ -1225,7 +1225,17 @@ class GpuAbiContractTest(unittest.TestCase):
             "uint64_t layout_id;",
             "layout->layout_id = next_vulkan_object_generation();",
             "op->layout_id = captured_layout ? captured_layout->layout_id : 0;",
-            "graphics_bound_set_snapshots[PDOCKER_VK_MAX_DESCRIPTOR_SETS]",
+            "PdockerVkDescriptorSet **bound_set_handles;",
+            "PdockerVkDescriptorSet *bound_set_snapshots;",
+            "bool *bound_set_used;",
+            "uint32_t bound_set_capacity;",
+            "PdockerVkDescriptorSet **graphics_bound_set_handles;",
+            "PdockerVkDescriptorSet *graphics_bound_set_snapshots;",
+            "bool *graphics_bound_set_used;",
+            "uint32_t graphics_bound_set_capacity;",
+            "command_buffer_alloc_descriptor_states",
+            "command_buffer_clear_descriptor_states",
+            "command_buffer_destroy_descriptor_states",
             "PDOCKER_VK_MAX_GRAPHICS_COMMAND_OPS",
             "PDOCKER_VK_MAX_GRAPHICS_DYNAMIC_OFFSETS",
             "PdockerVkGraphicsCommandRecord",
@@ -1439,6 +1449,15 @@ class GpuAbiContractTest(unittest.TestCase):
             "pProperties->apiVersion > VK_API_VERSION_1_2",
         ]:
             self.assertIn(marker, icd)
+        for fixed_command_buffer_array in [
+            "bound_set_handles[PDOCKER_VK_MAX_DESCRIPTOR_SETS]",
+            "bound_set_snapshots[PDOCKER_VK_MAX_DESCRIPTOR_SETS]",
+            "bound_set_used[PDOCKER_VK_MAX_DESCRIPTOR_SETS]",
+            "graphics_bound_set_handles[PDOCKER_VK_MAX_DESCRIPTOR_SETS]",
+            "graphics_bound_set_snapshots[PDOCKER_VK_MAX_DESCRIPTOR_SETS]",
+            "graphics_bound_set_used[PDOCKER_VK_MAX_DESCRIPTOR_SETS]",
+        ]:
+            self.assertNotIn(fixed_command_buffer_array, icd)
         self.assertIn("VK_KHR_SWAPCHAIN_EXTENSION_NAME", icd)
 
     def test_vulkan_wsi_headless_and_swapchain_extensions_are_advertised(self):

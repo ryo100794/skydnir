@@ -1138,12 +1138,14 @@ typedef struct {
     PdockerVkPipeline *pipeline;
     PdockerVkPipeline *compute_pipeline;
     PdockerVkPipeline *graphics_pipeline;
-    PdockerVkDescriptorSet *bound_set_handles[PDOCKER_VK_MAX_DESCRIPTOR_SETS];
-    PdockerVkDescriptorSet bound_set_snapshots[PDOCKER_VK_MAX_DESCRIPTOR_SETS];
-    bool bound_set_used[PDOCKER_VK_MAX_DESCRIPTOR_SETS];
-    PdockerVkDescriptorSet *graphics_bound_set_handles[PDOCKER_VK_MAX_DESCRIPTOR_SETS];
-    PdockerVkDescriptorSet graphics_bound_set_snapshots[PDOCKER_VK_MAX_DESCRIPTOR_SETS];
-    bool graphics_bound_set_used[PDOCKER_VK_MAX_DESCRIPTOR_SETS];
+    PdockerVkDescriptorSet **bound_set_handles;
+    PdockerVkDescriptorSet *bound_set_snapshots;
+    bool *bound_set_used;
+    uint32_t bound_set_capacity;
+    PdockerVkDescriptorSet **graphics_bound_set_handles;
+    PdockerVkDescriptorSet *graphics_bound_set_snapshots;
+    bool *graphics_bound_set_used;
+    uint32_t graphics_bound_set_capacity;
     PdockerVkCopyOp copy_ops[PDOCKER_VK_MAX_COPY_OPS];
     uint32_t copy_op_count;
     PdockerVkImageCopyOp image_copy_ops[PDOCKER_VK_MAX_COPY_OPS];
@@ -1336,6 +1338,116 @@ static void command_buffer_mark_recording_failed(PdockerVkCommandBuffer *cmd, co
     cmd->recording_failure_reason = reason ? reason : "command-recording-failed";
 }
 
+static void descriptor_set_release_snapshot_array(
+        PdockerVkDescriptorSet *sets,
+        bool *used,
+        uint32_t count);
+
+static bool descriptor_set_state_alloc(
+        PdockerVkDescriptorSet ***handles,
+        PdockerVkDescriptorSet **snapshots,
+        bool **used,
+        uint32_t *capacity,
+        uint32_t requested_capacity) {
+    if (!handles || !snapshots || !used || !capacity) return false;
+    if (requested_capacity == 0 ||
+        requested_capacity > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS) {
+        return false;
+    }
+    PdockerVkDescriptorSet **new_handles =
+        (PdockerVkDescriptorSet **)calloc(requested_capacity, sizeof(*new_handles));
+    PdockerVkDescriptorSet *new_snapshots =
+        (PdockerVkDescriptorSet *)calloc(requested_capacity, sizeof(*new_snapshots));
+    bool *new_used = (bool *)calloc(requested_capacity, sizeof(*new_used));
+    if (!new_handles || !new_snapshots || !new_used) {
+        free(new_handles);
+        free(new_snapshots);
+        free(new_used);
+        return false;
+    }
+    *handles = new_handles;
+    *snapshots = new_snapshots;
+    *used = new_used;
+    *capacity = requested_capacity;
+    return true;
+}
+
+static void descriptor_set_state_release_contents(
+        PdockerVkDescriptorSet **handles,
+        PdockerVkDescriptorSet *snapshots,
+        bool *used,
+        uint32_t capacity) {
+    if (snapshots && used) {
+        descriptor_set_release_snapshot_array(snapshots, used, capacity);
+    }
+    if (handles && capacity > 0) {
+        memset(handles, 0, sizeof(*handles) * capacity);
+    }
+}
+
+static void descriptor_set_state_destroy(
+        PdockerVkDescriptorSet ***handles,
+        PdockerVkDescriptorSet **snapshots,
+        bool **used,
+        uint32_t *capacity) {
+    if (!handles || !snapshots || !used || !capacity) return;
+    descriptor_set_state_release_contents(*handles, *snapshots, *used, *capacity);
+    free(*handles);
+    free(*snapshots);
+    free(*used);
+    *handles = NULL;
+    *snapshots = NULL;
+    *used = NULL;
+    *capacity = 0;
+}
+
+static bool command_buffer_alloc_descriptor_states(PdockerVkCommandBuffer *cmd) {
+    if (!cmd) return false;
+    if (!descriptor_set_state_alloc(&cmd->bound_set_handles,
+                                    &cmd->bound_set_snapshots,
+                                    &cmd->bound_set_used,
+                                    &cmd->bound_set_capacity,
+                                    PDOCKER_VK_MAX_DESCRIPTOR_SETS)) {
+        return false;
+    }
+    if (!descriptor_set_state_alloc(&cmd->graphics_bound_set_handles,
+                                    &cmd->graphics_bound_set_snapshots,
+                                    &cmd->graphics_bound_set_used,
+                                    &cmd->graphics_bound_set_capacity,
+                                    PDOCKER_VK_MAX_DESCRIPTOR_SETS)) {
+        descriptor_set_state_destroy(&cmd->bound_set_handles,
+                                     &cmd->bound_set_snapshots,
+                                     &cmd->bound_set_used,
+                                     &cmd->bound_set_capacity);
+        return false;
+    }
+    return true;
+}
+
+static void command_buffer_clear_descriptor_states(PdockerVkCommandBuffer *cmd) {
+    if (!cmd) return;
+    descriptor_set_state_release_contents(cmd->bound_set_handles,
+                                          cmd->bound_set_snapshots,
+                                          cmd->bound_set_used,
+                                          cmd->bound_set_capacity);
+    descriptor_set_state_release_contents(cmd->graphics_bound_set_handles,
+                                          cmd->graphics_bound_set_snapshots,
+                                          cmd->graphics_bound_set_used,
+                                          cmd->graphics_bound_set_capacity);
+}
+
+static void command_buffer_destroy_descriptor_states(PdockerVkCommandBuffer *cmd) {
+    if (!cmd) return;
+    descriptor_set_state_destroy(&cmd->bound_set_handles,
+                                 &cmd->bound_set_snapshots,
+                                 &cmd->bound_set_used,
+                                 &cmd->bound_set_capacity);
+    descriptor_set_state_destroy(&cmd->graphics_bound_set_handles,
+                                 &cmd->graphics_bound_set_snapshots,
+                                 &cmd->graphics_bound_set_used,
+                                 &cmd->graphics_bound_set_capacity);
+}
+
 static bool append_graphics_command_record(
         PdockerVkCommandBuffer *cmd,
         const PdockerVkGraphicsCommandRecord *record) {
@@ -1500,12 +1612,7 @@ static void clear_recorded_command_ops(PdockerVkCommandBuffer *cmd) {
             cmd->graphics_descriptor_bind_ops[i].set_snapshot_used,
             PDOCKER_VK_MAX_DESCRIPTOR_SETS);
     }
-    descriptor_set_release_snapshot_array(
-        cmd->bound_set_snapshots, cmd->bound_set_used, PDOCKER_VK_MAX_DESCRIPTOR_SETS);
-    descriptor_set_release_snapshot_array(
-        cmd->graphics_bound_set_snapshots, cmd->graphics_bound_set_used, PDOCKER_VK_MAX_DESCRIPTOR_SETS);
-    memset(cmd->bound_set_handles, 0, sizeof(cmd->bound_set_handles));
-    memset(cmd->graphics_bound_set_handles, 0, sizeof(cmd->graphics_bound_set_handles));
+    command_buffer_clear_descriptor_states(cmd);
     cmd->command_op_count = 0;
     cmd->event_wait_ref_count = 0;
     cmd->copy_op_count = 0;
@@ -19672,7 +19779,16 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateCommandBuffers(
     }
     for (uint32_t i = 0; i < pAllocateInfo->commandBufferCount; ++i) {
         PdockerVkCommandBuffer *cmd = pdocker_alloc_handle(sizeof(*cmd));
-        if (!cmd) return VK_ERROR_OUT_OF_HOST_MEMORY;
+        if (!cmd || !command_buffer_alloc_descriptor_states(cmd)) {
+            if (cmd) free(cmd);
+            for (uint32_t j = 0; j < i; ++j) {
+                PdockerVkCommandBuffer *allocated = (PdockerVkCommandBuffer *)pCommandBuffers[j];
+                command_buffer_destroy_descriptor_states(allocated);
+                free((void *)allocated);
+                pCommandBuffers[j] = VK_NULL_HANDLE;
+            }
+            return VK_ERROR_OUT_OF_HOST_MEMORY;
+        }
         set_loader_magic_value(cmd);
         cmd->level = pAllocateInfo->level;
         cmd->requested_feature_mask = pool->requested_feature_mask;
@@ -19691,6 +19807,7 @@ VKAPI_ATTR void VKAPI_CALL vkFreeCommandBuffers(
     for (uint32_t i = 0; i < commandBufferCount; ++i) {
         PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)pCommandBuffers[i];
         clear_recorded_command_ops(cmd);
+        command_buffer_destroy_descriptor_states(cmd);
         free((void *)cmd);
     }
 }
@@ -19704,12 +19821,6 @@ VKAPI_ATTR VkResult VKAPI_CALL vkBeginCommandBuffer(
     cmd->pipeline = NULL;
     cmd->compute_pipeline = NULL;
     cmd->graphics_pipeline = NULL;
-    memset(cmd->bound_set_handles, 0, sizeof(cmd->bound_set_handles));
-    memset(cmd->bound_set_snapshots, 0, sizeof(cmd->bound_set_snapshots));
-    memset(cmd->bound_set_used, 0, sizeof(cmd->bound_set_used));
-    memset(cmd->graphics_bound_set_handles, 0, sizeof(cmd->graphics_bound_set_handles));
-    memset(cmd->graphics_bound_set_snapshots, 0, sizeof(cmd->graphics_bound_set_snapshots));
-    memset(cmd->graphics_bound_set_used, 0, sizeof(cmd->graphics_bound_set_used));
     cmd->dispatch_x = 0;
     cmd->dispatch_y = 0;
     cmd->dispatch_z = 0;
