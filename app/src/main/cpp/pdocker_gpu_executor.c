@@ -26534,6 +26534,9 @@ static int vulkan_graphics_attachment_store_op_supported(uint32_t store_op);
 static int vulkan_graphics_attachment_store_op_writes_back(uint32_t store_op);
 static VkAttachmentLoadOp vulkan_graphics_replay_attachment_load_op(uint32_t load_op);
 static VkAttachmentStoreOp vulkan_graphics_replay_attachment_store_op(uint32_t store_op);
+static int vulkan_graphics_attachment_noop_ops(uint32_t load_op, uint32_t store_op);
+static int vulkan_graphics_attachment_is_null_noop(
+        const PdockerGpuVulkanGraphicsV6AttachmentEntry *attachment);
 static int vulkan_graphics_attachment_ops_supported(
         const PdockerGpuVulkanGraphicsV6AttachmentEntry *attachment,
         uint32_t role);
@@ -27028,6 +27031,9 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                             if (reason_out) *reason_out = reason;
                             return -EPROTO;
                         }
+                        continue;
+                    }
+                    if (vulkan_graphics_attachment_is_null_noop(attachment)) {
                         continue;
                     }
                     const uint32_t attachment_index = command->attachment_first + a;
@@ -29332,6 +29338,40 @@ static VkAttachmentStoreOp vulkan_graphics_replay_attachment_store_op(uint32_t s
         : (VkAttachmentStoreOp)store_op;
 }
 
+static int vulkan_graphics_attachment_noop_ops(uint32_t load_op, uint32_t store_op) {
+    return (load_op == (uint32_t)VK_ATTACHMENT_LOAD_OP_DONT_CARE ||
+            load_op == (uint32_t)VK_ATTACHMENT_LOAD_OP_NONE) &&
+           (store_op == (uint32_t)VK_ATTACHMENT_STORE_OP_DONT_CARE ||
+            store_op == (uint32_t)VK_ATTACHMENT_STORE_OP_NONE);
+}
+
+static int vulkan_graphics_attachment_is_null_noop(
+        const PdockerGpuVulkanGraphicsV6AttachmentEntry *attachment) {
+    if (!attachment) return 0;
+    if (attachment->flags != 0 ||
+        attachment->image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE ||
+        attachment->resolve_image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE ||
+        attachment->format != VK_FORMAT_UNDEFINED ||
+        attachment->samples != VK_SAMPLE_COUNT_1_BIT ||
+        attachment->layout != VK_IMAGE_LAYOUT_UNDEFINED ||
+        attachment->clear_value_size != 0 ||
+        attachment->resource_id != 0) {
+        return 0;
+    }
+    if (attachment->attachment_role != PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR &&
+        attachment->attachment_role != PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_DEPTH &&
+        attachment->attachment_role != PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_STENCIL) {
+        return 0;
+    }
+    const uint32_t load_op = attachment->attachment_role == PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_STENCIL
+        ? attachment->stencil_load_op
+        : attachment->load_op;
+    const uint32_t store_op = attachment->attachment_role == PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_STENCIL
+        ? attachment->stencil_store_op
+        : attachment->store_op;
+    return vulkan_graphics_attachment_noop_ops(load_op, store_op);
+}
+
 static int vulkan_graphics_attachment_ops_supported(
         const PdockerGpuVulkanGraphicsV6AttachmentEntry *attachment,
         uint32_t role) {
@@ -29542,6 +29582,7 @@ static int validate_vulkan_graphics_v6_msaa_images_are_v64_color_resolves(
             const PdockerGpuVulkanGraphicsV6AttachmentEntry *attachment =
                 &view->attachments[attachment_index];
             if (attachment->flags & PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_UNUSED_SLOT) continue;
+            if (vulkan_graphics_attachment_is_null_noop(attachment)) continue;
             if (attachment->image_view_index == PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE ||
                 attachment->image_view_index >= header->image_view_count ||
                 !view->image_views) {
@@ -29714,6 +29755,9 @@ static int materialize_vulkan_graphics_v6_attachments(
                     attachment->resolve_image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE) {
                     return -EPROTO;
                 }
+                continue;
+            }
+            if (vulkan_graphics_attachment_is_null_noop(attachment)) {
                 continue;
             }
             if ((attachment->attachment_role != PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR &&
@@ -32686,6 +32730,22 @@ static int record_vulkan_graphics_v6_command_buffer(
                             .loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
                             .storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
                         };
+                        continue;
+                    }
+                    if (vulkan_graphics_attachment_is_null_noop(src)) {
+                        if (src->attachment_role == PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR) {
+                            if (color_attachment_count >= rendering_attachment_capacity) {
+                                rc = -E2BIG;
+                                goto begin_rendering_cleanup;
+                            }
+                            color_attachments[color_attachment_count++] = (VkRenderingAttachmentInfo){
+                                .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+                                .imageView = VK_NULL_HANDLE,
+                                .imageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+                                .loadOp = vulkan_graphics_replay_attachment_load_op(src->load_op),
+                                .storeOp = vulkan_graphics_replay_attachment_store_op(src->store_op),
+                            };
+                        }
                         continue;
                     }
                     if ((src->attachment_role != PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR &&

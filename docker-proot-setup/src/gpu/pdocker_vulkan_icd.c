@@ -28793,6 +28793,31 @@ static bool query_result_copy_buffer_range(VkQueryResultFlags flags,
     return true;
 }
 
+static bool query_pool_type_supports_command(
+        PdockerVkCommandOpType command_type,
+        VkQueryType pool_type) {
+    switch (command_type) {
+        case PDOCKER_VK_COMMAND_QUERY_BEGIN:
+        case PDOCKER_VK_COMMAND_QUERY_END:
+            return pool_type == VK_QUERY_TYPE_OCCLUSION;
+        case PDOCKER_VK_COMMAND_QUERY_TIMESTAMP:
+            return pool_type == VK_QUERY_TYPE_TIMESTAMP;
+        case PDOCKER_VK_COMMAND_QUERY_RESET:
+            return pool_type == VK_QUERY_TYPE_OCCLUSION ||
+                   pool_type == VK_QUERY_TYPE_TIMESTAMP;
+        default:
+            return false;
+    }
+}
+
+static bool query_control_flags_supported(VkQueryControlFlags flags) {
+    if ((flags & ~VK_QUERY_CONTROL_PRECISE_BIT) != 0) return false;
+    if ((flags & VK_QUERY_CONTROL_PRECISE_BIT) == 0) return true;
+    VkPhysicalDeviceFeatures features;
+    fill_physical_device_features(&features);
+    return features.occlusionQueryPrecise == VK_TRUE;
+}
+
 static void reset_query_range(
         PdockerVkQueryPool *pool,
         uint32_t firstQuery,
@@ -28861,6 +28886,15 @@ static void record_query_command(
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     PdockerVkQueryPool *pool = pdocker_vk_query_pool_from_handle(queryPool);
     if (!cmd || !query_range_valid(pool, firstQuery, queryCount)) return;
+    if (!query_pool_type_supports_command(type, pool->type)) {
+        command_buffer_mark_recording_failed(cmd, "query-command-type-mismatch");
+        return;
+    }
+    if (type == PDOCKER_VK_COMMAND_QUERY_BEGIN &&
+        !query_control_flags_supported((VkQueryControlFlags)stageMask)) {
+        command_buffer_mark_recording_failed(cmd, "query-control-flags-unsupported");
+        return;
+    }
     PdockerVkCommandOp op;
     memset(&op, 0, sizeof(op));
     op.type = type;
@@ -28941,6 +28975,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateQueryPool(
     }
     if (pCreateInfo->pNext) return unsupported_create_info_pnext_result("vkCreateQueryPool", pCreateInfo->pNext);
     if (pCreateInfo->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;
+    if (pCreateInfo->pipelineStatistics != 0) {
+        trace_icd_runtime_failure("query-pipeline-statistics-unsupported",
+                                  VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
     if (pCreateInfo->queryType != VK_QUERY_TYPE_TIMESTAMP &&
         pCreateInfo->queryType != VK_QUERY_TYPE_OCCLUSION) {
         trace_icd_runtime_failure("query-type-unsupported",

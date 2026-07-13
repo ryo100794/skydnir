@@ -4472,6 +4472,48 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn(".pDepthAttachment = depth_attachment_ptr", recorder)
         self.assertIn(".pStencilAttachment = stencil_attachment_ptr", recorder)
 
+    def test_vulkan_graphics_null_noop_attachments_are_replayable(self):
+        executor = GPU_EXECUTOR.read_text()
+        helper = c_function_body(executor, "vulkan_graphics_attachment_is_null_noop")
+        preflight = c_function_body(executor, "preflight_vulkan_graphics_v6_replay_supported")
+        msaa = c_function_body(executor, "validate_vulkan_graphics_v6_msaa_images_are_v64_color_resolves")
+        materialize = c_function_body(executor, "materialize_vulkan_graphics_v6_attachments")
+        record = c_function_body(executor, "record_vulkan_graphics_v6_command_buffer")
+
+        for marker in [
+            "attachment->flags != 0",
+            "attachment->image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE",
+            "attachment->resolve_image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE",
+            "attachment->format != VK_FORMAT_UNDEFINED",
+            "attachment->samples != VK_SAMPLE_COUNT_1_BIT",
+            "attachment->layout != VK_IMAGE_LAYOUT_UNDEFINED",
+            "attachment->clear_value_size != 0",
+            "attachment->resource_id != 0",
+            "const uint32_t load_op = attachment->attachment_role == PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_STENCIL",
+            "? attachment->stencil_load_op",
+            ": attachment->load_op",
+            "const uint32_t store_op = attachment->attachment_role == PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_STENCIL",
+            "? attachment->stencil_store_op",
+            ": attachment->store_op",
+            "return vulkan_graphics_attachment_noop_ops(load_op, store_op);",
+        ]:
+            self.assertIn(marker, helper)
+
+        self.assertIn("vulkan_graphics_attachment_is_null_noop(attachment)", preflight)
+        self.assertLess(
+            preflight.index("vulkan_graphics_attachment_is_null_noop(attachment)"),
+            preflight.index("null graphics attachment replay is not supported"),
+        )
+        self.assertIn("if (vulkan_graphics_attachment_is_null_noop(attachment)) continue;", msaa)
+        self.assertIn("if (vulkan_graphics_attachment_is_null_noop(attachment)) {", materialize)
+        self.assertIn("if (vulkan_graphics_attachment_is_null_noop(src)) {", record)
+        self.assertIn("if (src->attachment_role == PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR)", record)
+        self.assertIn(".imageView = VK_NULL_HANDLE", record)
+        self.assertIn(".imageLayout = VK_IMAGE_LAYOUT_UNDEFINED", record)
+        self.assertIn(".pDepthAttachment = depth_attachment_ptr", record)
+        self.assertIn(".pStencilAttachment = stencil_attachment_ptr", record)
+
+
     def test_vulkan_graphics_queue_family_barrier_is_safely_normalized(self):
         executor = GPU_EXECUTOR.read_text()
         helper = executor.split(

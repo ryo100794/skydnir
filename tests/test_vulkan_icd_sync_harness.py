@@ -10,6 +10,87 @@ ROOT = Path(__file__).resolve().parents[1]
 ICD_SOURCE = ROOT / "docker-proot-setup" / "src" / "gpu" / "pdocker_vulkan_icd.c"
 
 
+class VulkanIcdQueryValidationSourceContractTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.source = ICD_SOURCE.read_text(encoding="utf-8")
+
+    def section(self, start: str, end: str) -> str:
+        source = self.source
+        start_index = source.index(start)
+        end_index = source.index(end, start_index)
+        return source[start_index:end_index]
+
+    @staticmethod
+    def compact(text: str) -> str:
+        return " ".join(text.split())
+
+    def test_create_query_pool_rejects_pipeline_statistics_bits(self):
+        body = self.section(
+            "VKAPI_ATTR VkResult VKAPI_CALL vkCreateQueryPool",
+            "VKAPI_ATTR void VKAPI_CALL vkDestroyQueryPool",
+        )
+        compact = self.compact(body)
+        self.assertIn("pCreateInfo->pipelineStatistics != 0", compact)
+        self.assertIn('"query-pipeline-statistics-unsupported"', body)
+        self.assertIn("return VK_ERROR_FEATURE_NOT_PRESENT;", body)
+
+    def test_query_recording_validates_command_type_against_pool_type(self):
+        helper = self.compact(
+            self.section(
+                "static bool query_pool_type_supports_command",
+                "static bool query_control_flags_supported",
+            )
+        )
+        self.assertIn(
+            "case PDOCKER_VK_COMMAND_QUERY_BEGIN: case PDOCKER_VK_COMMAND_QUERY_END: "
+            "return pool_type == VK_QUERY_TYPE_OCCLUSION;",
+            helper,
+        )
+        self.assertIn(
+            "case PDOCKER_VK_COMMAND_QUERY_TIMESTAMP: "
+            "return pool_type == VK_QUERY_TYPE_TIMESTAMP;",
+            helper,
+        )
+
+        record = self.compact(
+            self.section(
+                "static void record_query_command",
+                "static void record_copy_query_results_command",
+            )
+        )
+        self.assertIn("!query_pool_type_supports_command(type, pool->type)", record)
+        self.assertIn(
+            'command_buffer_mark_recording_failed(cmd, "query-command-type-mismatch")',
+            record,
+        )
+
+    def test_precise_occlusion_query_flag_is_rejected_unless_advertised(self):
+        helper = self.section(
+            "static bool query_control_flags_supported",
+            "static void reset_query_range",
+        )
+        self.assertIn("VK_QUERY_CONTROL_PRECISE_BIT", helper)
+        self.assertIn("fill_physical_device_features(&features);", helper)
+        self.assertIn("features.occlusionQueryPrecise == VK_TRUE", helper)
+
+        record = self.compact(
+            self.section(
+                "static void record_query_command",
+                "static void record_copy_query_results_command",
+            )
+        )
+        self.assertIn(
+            "type == PDOCKER_VK_COMMAND_QUERY_BEGIN && "
+            "!query_control_flags_supported((VkQueryControlFlags)stageMask)",
+            record,
+        )
+        self.assertIn(
+            'command_buffer_mark_recording_failed(cmd, "query-control-flags-unsupported")',
+            record,
+        )
+
+
 @unittest.skipUnless(shutil.which("gcc"), "gcc is required for the ICD C sync harness")
 class VulkanIcdSyncHarnessTest(unittest.TestCase):
     def compile_and_run(self, source: str) -> subprocess.CompletedProcess[str]:
