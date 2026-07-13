@@ -27114,8 +27114,7 @@ static int preflight_vulkan_graphics_v6_runtime_supported(
 }
 
 #define PDOCKER_GPU_GRAPHICS_REPLAY_MAX_SHADER_STAGES 5u
-#define PDOCKER_GPU_GRAPHICS_REPLAY_MAX_PUSH_RANGES 8u
-#define PDOCKER_GPU_GRAPHICS_REPLAY_MAX_COLOR_ATTACHMENTS 16u
+#define PDOCKER_GPU_GRAPHICS_V6_PIPELINE_COLOR_ATTACHMENT_FORMAT_FIELDS 16u
 
 typedef struct VulkanGraphicsReplayDescriptorBinding {
     uint32_t binding;
@@ -27140,8 +27139,9 @@ typedef struct VulkanGraphicsReplayPipelineLayout {
     uint64_t *descriptor_set_layout_ids;
     uint32_t *descriptor_set_layout_indices;
     VkDescriptorSetLayout *set_layouts;
-    VkPushConstantRange push_ranges[PDOCKER_GPU_GRAPHICS_REPLAY_MAX_PUSH_RANGES];
+    VkPushConstantRange *push_ranges;
     uint32_t push_range_count;
+    uint32_t push_range_capacity;
 } VulkanGraphicsReplayPipelineLayout;
 
 typedef struct VulkanGraphicsReplayLayouts {
@@ -27237,6 +27237,7 @@ static void destroy_vulkan_graphics_replay_layouts(
             free(layouts->pipeline_layouts[i].descriptor_set_layout_ids);
             free(layouts->pipeline_layouts[i].descriptor_set_layout_indices);
             free(layouts->pipeline_layouts[i].set_layouts);
+            free(layouts->pipeline_layouts[i].push_ranges);
         }
     }
     if (layouts->descriptor_set_layouts) {
@@ -27317,24 +27318,49 @@ static int copy_graphics_entry_name(
 static int collect_graphics_push_ranges_for_layout(
         const VulkanGraphicsV6FrameView *view,
         uint64_t layout_id,
-        VkPushConstantRange *ranges,
-        uint32_t *range_count) {
-    if (!view || !ranges || !range_count) return -EINVAL;
+        VkPushConstantRange **ranges,
+        uint32_t *range_count,
+        uint32_t *range_capacity) {
+    if (!view || !ranges || !range_count || !range_capacity) return -EINVAL;
+    *ranges = NULL;
     *range_count = 0;
+    *range_capacity = 0;
     if (!view->is_v61 || !view->header_v61) return 0;
+    uint32_t count = 0;
     for (uint32_t i = 0; i < view->header_v61->v61.push_constant_metadata_count; ++i) {
         const PdockerGpuVulkanGraphicsV61PushConstantMetadataEntry *meta =
             &view->push_constant_metadata[i];
         if (meta->layout_id != layout_id) continue;
-        if (*range_count >= PDOCKER_GPU_GRAPHICS_REPLAY_MAX_PUSH_RANGES) return -E2BIG;
-        if (meta->range_offset > UINT32_MAX || meta->range_size > UINT32_MAX) return -EOVERFLOW;
-        ranges[*range_count] = (VkPushConstantRange){
+        if (count == UINT32_MAX) return -E2BIG;
+        count++;
+    }
+    if (count == 0) return 0;
+    if ((size_t)count > SIZE_MAX / sizeof((*ranges)[0])) return -EOVERFLOW;
+    VkPushConstantRange *allocated = (VkPushConstantRange *)calloc(
+        count, sizeof(allocated[0]));
+    if (!allocated) return -ENOMEM;
+    uint32_t out_count = 0;
+    for (uint32_t i = 0; i < view->header_v61->v61.push_constant_metadata_count; ++i) {
+        const PdockerGpuVulkanGraphicsV61PushConstantMetadataEntry *meta =
+            &view->push_constant_metadata[i];
+        if (meta->layout_id != layout_id) continue;
+        if (out_count >= count) {
+            free(allocated);
+            return -E2BIG;
+        }
+        if (meta->range_offset > UINT32_MAX || meta->range_size > UINT32_MAX) {
+            free(allocated);
+            return -EOVERFLOW;
+        }
+        allocated[out_count++] = (VkPushConstantRange){
             .stageFlags = (VkShaderStageFlags)meta->stage_flags,
             .offset = (uint32_t)meta->range_offset,
             .size = (uint32_t)meta->range_size,
         };
-        (*range_count)++;
     }
+    *ranges = allocated;
+    *range_count = out_count;
+    *range_capacity = count;
     return 0;
 }
 
@@ -27788,7 +27814,9 @@ fail_scratch:
             pl->set_layouts[set] = out->descriptor_set_layouts[dsl_index].layout;
             if (!pl->set_layouts[set]) { rc = -EPROTO; goto fail; }
         }
-        rc = collect_graphics_push_ranges_for_layout(view, pl->layout_id, pl->push_ranges, &pl->push_range_count);
+        rc = collect_graphics_push_ranges_for_layout(
+            view, pl->layout_id, &pl->push_ranges, &pl->push_range_count,
+            &pl->push_range_capacity);
         if (rc != 0) goto fail;
         VkPipelineLayoutCreateInfo plci = {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
@@ -27916,7 +27944,7 @@ static int materialize_vulkan_graphics_v6_pipelines(
         const PdockerGpuVulkanGraphicsV6PipelineEntry *src = &view->pipelines[pidx];
         if (src->shader_stage_count == 0 ||
             src->shader_stage_count > PDOCKER_GPU_GRAPHICS_REPLAY_MAX_SHADER_STAGES ||
-            src->color_attachment_count > PDOCKER_GPU_GRAPHICS_REPLAY_MAX_COLOR_ATTACHMENTS) {
+            src->color_attachment_count > PDOCKER_GPU_GRAPHICS_V6_PIPELINE_COLOR_ATTACHMENT_FORMAT_FIELDS) {
             return -EOPNOTSUPP;
         }
         VulkanGraphicsReplayPipeline *dst = &out_pipelines[pidx];
@@ -31581,27 +31609,50 @@ static int record_vulkan_graphics_v6_command_buffer(
         const PdockerGpuVulkanGraphicsV6CommandEntry *command = &view->commands[ci];
         switch (command->command_type) {
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_RENDERING: {
-                if (command->attachment_count > PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_ATTACHMENTS) {
-                    rc = -E2BIG;
-                    goto cleanup;
-                }
-                VkRenderingAttachmentInfo color_attachments[PDOCKER_GPU_GRAPHICS_REPLAY_MAX_COLOR_ATTACHMENTS];
+                VkRenderingAttachmentInfo *color_attachments = NULL;
+                VkClearValue *clear_values = NULL;
+                VkImageMemoryBarrier *pre_barriers = NULL;
+                uint32_t rendering_attachment_capacity = 0;
+                uint32_t pre_barrier_capacity = 0;
                 VkRenderingAttachmentInfo depth_attachment;
                 VkRenderingAttachmentInfo stencil_attachment;
                 VkRenderingAttachmentInfo *depth_attachment_ptr = NULL;
                 VkRenderingAttachmentInfo *stencil_attachment_ptr = NULL;
-                VkClearValue clear_values[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_ATTACHMENTS];
-                VkImageMemoryBarrier pre_barriers[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_ATTACHMENTS * 2u];
                 uint32_t color_attachment_count = 0;
                 uint32_t pre_barrier_count = 0;
                 VkPipelineStageFlags dst_stage_mask = 0;
-                memset(color_attachments, 0, sizeof(color_attachments));
                 memset(&depth_attachment, 0, sizeof(depth_attachment));
                 memset(&stencil_attachment, 0, sizeof(stencil_attachment));
-                memset(clear_values, 0, sizeof(clear_values));
-                memset(pre_barriers, 0, sizeof(pre_barriers));
+                if (command->attachment_count > PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_ATTACHMENTS) {
+                    rc = -E2BIG;
+                    goto begin_rendering_cleanup;
+                }
+                rendering_attachment_capacity = command->attachment_count;
+                if (rendering_attachment_capacity > UINT32_MAX / 2u) {
+                    rc = -EOVERFLOW;
+                    goto begin_rendering_cleanup;
+                }
+                pre_barrier_capacity = rendering_attachment_capacity * 2u;
+                if (rendering_attachment_capacity > 0) {
+                    if ((size_t)rendering_attachment_capacity > SIZE_MAX / sizeof(color_attachments[0]) ||
+                        (size_t)rendering_attachment_capacity > SIZE_MAX / sizeof(clear_values[0]) ||
+                        (size_t)pre_barrier_capacity > SIZE_MAX / sizeof(pre_barriers[0])) {
+                        rc = -EOVERFLOW;
+                        goto begin_rendering_cleanup;
+                    }
+                    color_attachments = (VkRenderingAttachmentInfo *)calloc(
+                        rendering_attachment_capacity, sizeof(color_attachments[0]));
+                    clear_values = (VkClearValue *)calloc(
+                        rendering_attachment_capacity, sizeof(clear_values[0]));
+                    pre_barriers = (VkImageMemoryBarrier *)calloc(
+                        pre_barrier_capacity, sizeof(pre_barriers[0]));
+                    if (!color_attachments || !clear_values || !pre_barriers) {
+                        rc = -ENOMEM;
+                        goto begin_rendering_cleanup;
+                    }
+                }
                 rc = record_vulkan_graphics_v6_staged_image_uploads(command_buffer, attachments);
-                if (rc != 0) goto cleanup;
+                if (rc != 0) goto begin_rendering_cleanup;
                 for (uint32_t a = 0; a < command->attachment_count; ++a) {
                     const PdockerGpuVulkanGraphicsV6AttachmentEntry *src =
                         &view->attachments[command->attachment_first + a];
@@ -31609,18 +31660,18 @@ static int record_vulkan_graphics_v6_command_buffer(
                         (src->flags & PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_UNUSED_SLOT) != 0;
                     if (src->flags & ~PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_UNUSED_SLOT) {
                         rc = -EPROTO;
-                        goto cleanup;
+                        goto begin_rendering_cleanup;
                     }
                     if (unused_slot) {
                         if (src->attachment_role != PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR ||
                             src->image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE ||
                             src->resolve_image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE) {
                             rc = -EPROTO;
-                            goto cleanup;
+                            goto begin_rendering_cleanup;
                         }
-                        if (color_attachment_count >= PDOCKER_GPU_GRAPHICS_REPLAY_MAX_COLOR_ATTACHMENTS) {
+                        if (color_attachment_count >= rendering_attachment_capacity) {
                             rc = -E2BIG;
-                            goto cleanup;
+                            goto begin_rendering_cleanup;
                         }
                         color_attachments[color_attachment_count++] = (VkRenderingAttachmentInfo){
                             .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
@@ -31638,41 +31689,41 @@ static int record_vulkan_graphics_v6_command_buffer(
                         src->image_view_index >= attachments->view_count ||
                         !attachments->views[src->image_view_index].view) {
                         rc = -EPROTO;
-                        goto cleanup;
+                        goto begin_rendering_cleanup;
                     }
                     VulkanDispatchImageViewObject *replay_view =
                         &attachments->views[src->image_view_index];
                     if (replay_view->image_index >= attachments->image_count) {
                         rc = -EPROTO;
-                        goto cleanup;
+                        goto begin_rendering_cleanup;
                     }
                     VulkanDispatchImageObject *image =
                         &attachments->images[replay_view->image_index];
                     if (!image->image) {
                         rc = -EPROTO;
-                        goto cleanup;
+                        goto begin_rendering_cleanup;
                     }
                     if (vulkan_graphics_attachment_ops_supported(src, src->attachment_role) != 0 ||
                         !vulkan_graphics_attachment_layout_supported(src->attachment_role, src->layout)) {
                         rc = -EOPNOTSUPP;
-                        goto cleanup;
+                        goto begin_rendering_cleanup;
                     }
                     if (src->clear_value_size) {
                         if (src->clear_value_size != sizeof(VkClearValue) ||
                             !payload_range_valid(src->clear_value_offset, src->clear_value_size,
                                                  view->header->frame_size)) {
                             rc = -EPROTO;
-                            goto cleanup;
+                            goto begin_rendering_cleanup;
                         }
                         memcpy(&clear_values[a], view->frame + src->clear_value_offset, sizeof(VkClearValue));
                     }
-                    if (pre_barrier_count >= PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_ATTACHMENTS * 2u) {
+                    if (pre_barrier_count >= pre_barrier_capacity) {
                         rc = -E2BIG;
-                        goto cleanup;
+                        goto begin_rendering_cleanup;
                     }
                     VkImageLayout old_layout = image->current_layout;
                     int layout_rc = vulkan_replay_image_layout_for_range(image, &replay_view->range, &old_layout);
-                    if (layout_rc != 0) { rc = layout_rc; goto cleanup; }
+                    if (layout_rc != 0) { rc = layout_rc; goto begin_rendering_cleanup; }
                     pre_barriers[pre_barrier_count++] = (VkImageMemoryBarrier){
                         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
                         .srcAccessMask = old_layout == VK_IMAGE_LAYOUT_PREINITIALIZED
@@ -31689,7 +31740,7 @@ static int record_vulkan_graphics_v6_command_buffer(
                     dst_stage_mask |= vulkan_graphics_attachment_stage_mask(src->attachment_role);
                     layout_rc = vulkan_replay_image_set_layout_for_range(image, &replay_view->range,
                                                                          (VkImageLayout)src->layout);
-                    if (layout_rc != 0) { rc = layout_rc; goto cleanup; }
+                    if (layout_rc != 0) { rc = layout_rc; goto begin_rendering_cleanup; }
                     const uint32_t attachment_index = command->attachment_first + a;
                     const PdockerGpuVulkanGraphicsV64ResolveAttachmentEntry *resolve_meta =
                         find_vulkan_graphics_v64_resolve_attachment(view, attachment_index);
@@ -31700,12 +31751,12 @@ static int record_vulkan_graphics_v6_command_buffer(
                             src->resolve_image_view_index >= attachments->view_count ||
                             !attachments->views[src->resolve_image_view_index].view) {
                             rc = -EPROTO;
-                            goto cleanup;
+                            goto begin_rendering_cleanup;
                         }
                         resolve_replay_view = &attachments->views[src->resolve_image_view_index];
                         if (resolve_replay_view->image_index >= attachments->image_count) {
                             rc = -EPROTO;
-                            goto cleanup;
+                            goto begin_rendering_cleanup;
                         }
                         resolve_image = &attachments->images[resolve_replay_view->image_index];
                         const uint32_t source_samples = view->images[image->source_index].samples;
@@ -31717,16 +31768,16 @@ static int record_vulkan_graphics_v6_command_buffer(
                             !vulkan_graphics_attachment_layout_supported(src->attachment_role,
                                                                          resolve_meta->resolve_layout)) {
                             rc = -EOPNOTSUPP;
-                            goto cleanup;
+                            goto begin_rendering_cleanup;
                         }
-                        if (pre_barrier_count >= PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_ATTACHMENTS * 2u) {
+                        if (pre_barrier_count >= pre_barrier_capacity) {
                             rc = -E2BIG;
-                            goto cleanup;
+                            goto begin_rendering_cleanup;
                         }
                         VkImageLayout resolve_old_layout = resolve_image->current_layout;
                         int resolve_layout_rc = vulkan_replay_image_layout_for_range(
                             resolve_image, &resolve_replay_view->range, &resolve_old_layout);
-                        if (resolve_layout_rc != 0) { rc = resolve_layout_rc; goto cleanup; }
+                        if (resolve_layout_rc != 0) { rc = resolve_layout_rc; goto begin_rendering_cleanup; }
                         pre_barriers[pre_barrier_count++] = (VkImageMemoryBarrier){
                             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
                             .srcAccessMask = resolve_old_layout == VK_IMAGE_LAYOUT_PREINITIALIZED
@@ -31743,7 +31794,7 @@ static int record_vulkan_graphics_v6_command_buffer(
                         resolve_layout_rc = vulkan_replay_image_set_layout_for_range(
                             resolve_image, &resolve_replay_view->range,
                             (VkImageLayout)resolve_meta->resolve_layout);
-                        if (resolve_layout_rc != 0) { rc = resolve_layout_rc; goto cleanup; }
+                        if (resolve_layout_rc != 0) { rc = resolve_layout_rc; goto begin_rendering_cleanup; }
                     }
                     VkRenderingAttachmentInfo info = {
                         .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
@@ -31763,17 +31814,17 @@ static int record_vulkan_graphics_v6_command_buffer(
                         info.resolveImageLayout = (VkImageLayout)resolve_meta->resolve_layout;
                     }
                     if (src->attachment_role == PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR) {
-                        if (color_attachment_count >= PDOCKER_GPU_GRAPHICS_REPLAY_MAX_COLOR_ATTACHMENTS) {
+                        if (color_attachment_count >= rendering_attachment_capacity) {
                             rc = -E2BIG;
-                            goto cleanup;
+                            goto begin_rendering_cleanup;
                         }
                         color_attachments[color_attachment_count++] = info;
                     } else if (src->attachment_role == PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_DEPTH) {
-                        if (depth_attachment_ptr) { rc = -EPROTO; goto cleanup; }
+                        if (depth_attachment_ptr) { rc = -EPROTO; goto begin_rendering_cleanup; }
                         depth_attachment = info;
                         depth_attachment_ptr = &depth_attachment;
                     } else {
-                        if (stencil_attachment_ptr) { rc = -EPROTO; goto cleanup; }
+                        if (stencil_attachment_ptr) { rc = -EPROTO; goto begin_rendering_cleanup; }
                         stencil_attachment = info;
                         stencil_attachment_ptr = &stencil_attachment;
                     }
@@ -31801,6 +31852,11 @@ static int record_vulkan_graphics_v6_command_buffer(
                     .pStencilAttachment = stencil_attachment_ptr,
                 };
                 rt->cmd_begin_rendering(command_buffer, &rendering);
+begin_rendering_cleanup:
+                free(pre_barriers);
+                free(clear_values);
+                free(color_attachments);
+                if (rc != 0) goto cleanup;
                 break;
             }
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_RENDERING:

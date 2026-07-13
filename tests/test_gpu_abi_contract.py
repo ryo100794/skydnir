@@ -7411,6 +7411,7 @@ class GpuAbiContractTest(unittest.TestCase):
     def test_vulkan_graphics_pipeline_color_attachment_tables_are_heap_backed(self):
         executor = GPU_EXECUTOR.read_text()
         body = c_function_body(executor, "materialize_vulkan_graphics_v6_pipelines")
+        recorder = c_function_body(executor, "record_vulkan_graphics_v6_command_buffer")
         self.assertIn("VkPipelineColorBlendAttachmentState *blend_attachments = NULL;", body)
         self.assertIn("VkFormat *color_formats = NULL;", body)
         self.assertIn("src->color_attachment_count, sizeof(*blend_attachments)", body)
@@ -7418,8 +7419,25 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("goto graphics_pipeline_cleanup;", body)
         self.assertIn("free(blend_attachments);", body)
         self.assertIn("free(color_formats);", body)
+        self.assertIn("PDOCKER_GPU_GRAPHICS_V6_PIPELINE_COLOR_ATTACHMENT_FORMAT_FIELDS", body)
         self.assertNotIn("VkPipelineColorBlendAttachmentState blend_attachments[16];", body)
         self.assertNotIn("VkFormat color_formats[16];", body)
+
+        self.assertIn("VkRenderingAttachmentInfo *color_attachments = NULL;", recorder)
+        self.assertIn("VkClearValue *clear_values = NULL;", recorder)
+        self.assertIn("VkImageMemoryBarrier *pre_barriers = NULL;", recorder)
+        self.assertIn("rendering_attachment_capacity = command->attachment_count;", recorder)
+        self.assertIn("color_attachments = (VkRenderingAttachmentInfo *)calloc", recorder)
+        self.assertIn("clear_values = (VkClearValue *)calloc", recorder)
+        self.assertIn("pre_barriers = (VkImageMemoryBarrier *)calloc", recorder)
+        self.assertIn("goto begin_rendering_cleanup", recorder)
+        self.assertIn("free(pre_barriers);", recorder)
+        self.assertIn("free(clear_values);", recorder)
+        self.assertIn("free(color_attachments);", recorder)
+        self.assertNotIn("VkRenderingAttachmentInfo color_attachments[PDOCKER_GPU_GRAPHICS_REPLAY_MAX_COLOR_ATTACHMENTS]", recorder)
+        self.assertNotIn("VkClearValue clear_values[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_ATTACHMENTS]", recorder)
+        self.assertNotIn("VkImageMemoryBarrier pre_barriers[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_ATTACHMENTS * 2u]", recorder)
+        self.assertNotIn("PDOCKER_GPU_GRAPHICS_REPLAY_MAX_COLOR_ATTACHMENTS", executor)
 
     def test_vulkan_graphics_pipeline_layout_descriptor_sets_are_heap_backed(self):
         executor = GPU_EXECUTOR.read_text()
@@ -12471,12 +12489,24 @@ class GpuAbiContractTest(unittest.TestCase):
         validate_body = c_function_body(source, "validate_vulkan_graphics_v6_frame_content")
         collect_body = c_function_body(source, "collect_graphics_push_ranges_for_layout")
         record_body = c_function_body(source, "record_vulkan_graphics_v6_command_buffer")
+        layout_struct = source.split("typedef struct VulkanGraphicsReplayPipelineLayout", 1)[1].split(
+            "} VulkanGraphicsReplayPipelineLayout;", 1
+        )[0]
+        destroy_body = c_function_body(source, "destroy_vulkan_graphics_replay_layouts")
         self.assertIn("meta->range_offset > UINT32_MAX || meta->range_size > UINT32_MAX", validate_body)
         self.assertIn("checked_u64_add3(meta->range_offset, meta->range_size, 0, &push_end)", validate_body)
         self.assertIn("push_end > PDOCKER_GPU_MAX_PUSH_BYTES", validate_body)
         self.assertIn("meta->range_offset > UINT32_MAX || meta->range_size > UINT32_MAX", collect_body)
         self.assertIn(".offset = (uint32_t)meta->range_offset", collect_body)
         self.assertIn(".size = (uint32_t)meta->range_size", collect_body)
+        self.assertIn("VkPushConstantRange *push_ranges;", layout_struct)
+        self.assertIn("uint32_t push_range_capacity;", layout_struct)
+        self.assertNotIn("VkPushConstantRange push_ranges[PDOCKER_GPU_GRAPHICS_REPLAY_MAX_PUSH_RANGES]", layout_struct)
+        self.assertIn("VkPushConstantRange **ranges", source)
+        self.assertIn("VkPushConstantRange *allocated = (VkPushConstantRange *)calloc", collect_body)
+        self.assertIn("*ranges = allocated;", collect_body)
+        self.assertIn("free(layouts->pipeline_layouts[i].push_ranges);", destroy_body)
+        self.assertNotIn("PDOCKER_GPU_GRAPHICS_REPLAY_MAX_PUSH_RANGES", source)
         self.assertIn("(uint32_t)meta->range_offset, (uint32_t)meta->range_size", record_body)
         self.assertNotIn("meta->range_offset, meta->range_size,", record_body)
 
