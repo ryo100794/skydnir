@@ -7966,17 +7966,19 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("layout->set_layout_count = pCreateInfo->setLayoutCount;", create_body)
         self.assertIn("layout->set_layout_capacity = pCreateInfo->setLayoutCount;", create_body)
         self.assertIn("layout->set_layouts = (PdockerVkDescriptorSetLayout **)calloc(", create_body)
-        self.assertIn("free(layout->set_layouts);", create_body)
+        self.assertIn("destroy_pipeline_layout_storage(layout);", create_body)
         self.assertIn("pCreateInfo->pSetLayouts", create_body)
         self.assertNotIn("layout->unsupported_set_layout_count = true;", create_body)
-        self.assertNotIn("push_constant_ranges[PDOCKER_VK_MAX_PUSH_CONSTANT_RANGES]", icd)
-        self.assertNotIn("PDOCKER_VK_MAX_PUSH_CONSTANT_RANGES", icd)
+        self.assertIn("VkPushConstantRange *push_constant_ranges;", icd)
+        self.assertIn("PDOCKER_VK_MAX_PUSH_CONSTANT_RANGES", icd)
         self.assertNotIn("unsupported_push_constant_ranges", icd)
         self.assertIn("PdockerVkPushConstantOpSnapshot *push_constant_ops", icd)
         self.assertIn("command_buffer_reserve_push_constant_ops", icd)
         self.assertIn("pCreateInfo->pushConstantRangeCount > 0 && !pCreateInfo->pPushConstantRanges", create_body)
-        self.assertNotIn("pCreateInfo->pushConstantRangeCount > PDOCKER_VK_MAX_PUSH_CONSTANT_RANGES", create_body)
-        self.assertNotIn("layout->push_constant_range_count < PDOCKER_VK_MAX_PUSH_CONSTANT_RANGES", create_body)
+        self.assertIn("pCreateInfo->pushConstantRangeCount > PDOCKER_VK_MAX_PUSH_CONSTANT_RANGES", create_body)
+        self.assertIn("layout->push_constant_range_count = pCreateInfo->pushConstantRangeCount;", create_body)
+        self.assertIn("layout->push_constant_ranges = (VkPushConstantRange *)calloc(", create_body)
+        self.assertIn("pdocker_vk_push_constant_range_valid(range)", create_body)
         self.assertNotIn("snapshot->stage_flags = range->stageFlags;", create_body)
         bind_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets", 1)[1].split(
             "static void validate_bound_descriptor_layouts_before_dispatch", 1
@@ -9146,11 +9148,11 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("pCreateInfo->setLayoutCount > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS", pipeline_layout_body)
         self.assertIn("pCreateInfo->setLayoutCount > 0 && !pCreateInfo->pSetLayouts", pipeline_layout_body)
         self.assertIn("layout->set_layouts = (PdockerVkDescriptorSetLayout **)calloc(", pipeline_layout_body)
-        self.assertIn("free(layout->set_layouts);", pipeline_layout_body)
+        self.assertIn("destroy_pipeline_layout_storage(layout);", pipeline_layout_body)
         self.assertNotIn("pCreateInfo->setLayoutCount > PDOCKER_VK_MAX_DESCRIPTOR_SETS", pipeline_layout_body)
         self.assertIn("pdocker_vk_descriptor_set_layout_from_handle(pCreateInfo->pSetLayouts[i])", pipeline_layout_body)
         self.assertIn("pCreateInfo->pushConstantRangeCount > 0 && !pCreateInfo->pPushConstantRanges", pipeline_layout_body)
-        self.assertNotIn("pCreateInfo->pushConstantRangeCount > PDOCKER_VK_MAX_PUSH_CONSTANT_RANGES", pipeline_layout_body)
+        self.assertIn("pCreateInfo->pushConstantRangeCount > PDOCKER_VK_MAX_PUSH_CONSTANT_RANGES", pipeline_layout_body)
         self.assertNotIn("unsupported_set_layout_count = true", pipeline_layout_body)
         self.assertNotIn("unsupported_push_constant_ranges", pipeline_layout_body)
         descriptor_pool_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorPool", 1)[1].split(
@@ -9651,7 +9653,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("PdockerGpuVulkanDispatchV53BufferViewEntry", icd)
         self.assertIn("PdockerGpuVulkanGraphicsV627BufferViewEntry", icd)
         self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V627_BUFFER_VIEW_SCHEMA_HASH", icd)
-        self.assertIn("size_t cursor = sizeof(PdockerGpuVulkanGraphicsV627FrameHeader);", icd)
+        self.assertIn("size_t cursor = sizeof(PdockerGpuVulkanGraphicsV628FrameHeader);", icd)
         self.assertNotIn("size_t cursor = sizeof(PdockerGpuVulkanGraphicsV626FrameHeader);", icd)
         self.assertIn("executor_supports_vulkan_dispatch_v53_buffer_views", icd)
         self.assertIn("executor_supports_vulkan_graphics_v627_buffer_views", icd)
@@ -9693,6 +9695,73 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("case VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER:", graphics_materialize)
         self.assertIn(".type = VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER", graphics_materialize)
         self.assertIn("writes[d].pTexelBufferView", graphics_materialize)
+
+    def test_vulkan_graphics_v628_transports_declared_push_constant_ranges(self):
+        container_abi = CONTAINER_HEADER.read_text()
+        app_abi = APP_HEADER.read_text()
+        icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
+
+        for abi in [container_abi, app_abi]:
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V628_ABI_MINOR 28u", abi)
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V628_HEADER_EXTENSION_SCHEMA_HASH", abi)
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V628_PUSH_CONSTANT_RANGE_SCHEMA_HASH", abi)
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V628_MAX_PUSH_CONSTANT_RANGES", abi)
+            self.assertIn("PdockerGpuVulkanGraphicsV628FrameHeader", abi)
+            self.assertIn("PdockerGpuVulkanGraphicsV628PushConstantRangeEntry", abi)
+            self.assertIn("X(pipeline_layout_id, u64)", abi)
+            self.assertIn("X(stage_flags, u32)", abi)
+            self.assertIn("X(offset, u32)", abi)
+            self.assertIn("X(size, u32)", abi)
+
+        pipeline_layout_body = c_function_body(icd, "vkCreatePipelineLayout")
+        push_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdPushConstants", 1)[1].split("static bool image_subresource_range_is_whole_image", 1)[0]
+        frame_body = icd.split("static int send_recorded_vulkan_graphics_v6_1_frame_range", 1)[1].split("static int send_recorded_vulkan_graphics_v6_1_frame(", 1)[0]
+        caps_body = c_function_body(icd, "parse_executor_advertisement_caps_json")
+        for marker_text in [
+            "uint32_t push_constant_range_count;",
+            "VkPushConstantRange *push_constant_ranges;",
+            "uint32_t declared_range_count;",
+            "VkPushConstantRange *declared_ranges;",
+            "collect_graphics_v628_push_constant_range_entries",
+            "collect_graphics_v628_pipeline_layout_push_constant_ranges",
+            "executor_supports_vulkan_graphics_v628_push_constant_ranges",
+        ]:
+            self.assertIn(marker_text, icd)
+        self.assertIn("layout->push_constant_ranges = (VkPushConstantRange *)calloc(", pipeline_layout_body)
+        self.assertIn("layout->push_constant_ranges[i] = *range;", pipeline_layout_body)
+        self.assertIn("pdocker_vk_push_constant_range_valid(range)", pipeline_layout_body)
+        self.assertIn("op->declared_range_count = declared_range_count;", push_body)
+        self.assertIn("memcpy(declared_ranges, captured_layout->push_constant_ranges", push_body)
+        self.assertIn("PdockerGpuVulkanGraphicsV628PushConstantRangeEntry push_constant_ranges", frame_body)
+        self.assertIn("size_t cursor = sizeof(PdockerGpuVulkanGraphicsV628FrameHeader);", frame_body)
+        self.assertIn("need_v628_push_constant_ranges", frame_body)
+        self.assertIn("frame_header_v628->v628.push_constant_range_count", frame_body)
+        self.assertIn("APPEND_GRAPHICS_TABLE(push_constant_ranges", frame_body)
+        self.assertIn("vulkan_graphics_v6_abi_minor_push_constant_ranges", caps_body)
+        self.assertIn("vulkan_graphics_v6_push_constant_range_schema_hash", caps_body)
+        self.assertIn("vulkan_graphics_v6_max_push_constant_ranges", caps_body)
+
+        for marker_text in [
+            "vulkan_graphics_v6_abi_minor_push_constant_ranges",
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V628_PUSH_CONSTANT_RANGE_SCHEMA_HASH",
+            "case PDOCKER_GPU_VULKAN_GRAPHICS_V628_ABI_MINOR: return 54u;",
+            "validate_vulkan_graphics_v628_declared_push_ranges",
+            "PdockerGpuVulkanGraphicsV628PushConstantRangeEntry",
+            "header_v628->v628.push_constant_range_count",
+            "view->push_constant_ranges",
+        ]:
+            self.assertIn(marker_text, executor)
+        collect_body = c_function_body(executor, "collect_graphics_push_ranges_for_layout")
+        self.assertIn("if (view->is_v628 && view->header_v628)", collect_body)
+        self.assertIn("entry->pipeline_layout_id == layout_id", collect_body)
+        self.assertIn(".stageFlags = (VkShaderStageFlags)entry->stage_flags", collect_body)
+        self.assertIn("view->header_v61->v61.push_constant_metadata_count", collect_body)
+        validate_body = c_function_body(executor, "validate_vulkan_graphics_v628_declared_push_ranges")
+        self.assertIn("entry->range_index == other->range_index", validate_body)
+        self.assertIn("covered_stage_flags", validate_body)
+        self.assertIn("decl->pipeline_layout_id != meta->layout_id", validate_body)
+        self.assertIn("(covered_stage_flags & meta->stage_flags) != meta->stage_flags", validate_body)
 
     def test_vulkan_memory_api_validates_map_ranges_and_type_index(self):
         icd = VULKAN_ICD.read_text()
@@ -12561,6 +12630,7 @@ class GpuAbiContractTest(unittest.TestCase):
         allocate_body = source.split("VKAPI_ATTR VkResult VKAPI_CALL vkAllocateMemory", 1)[1].split("VKAPI_ATTR void VKAPI_CALL vkFreeMemory", 1)[0]
         map_body = source.split("VKAPI_ATTR VkResult VKAPI_CALL vkMapMemory", 1)[1].split("VKAPI_ATTR void VKAPI_CALL vkUnmapMemory", 1)[0]
         pipeline_layout_body = source.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreatePipelineLayout", 1)[1].split("VKAPI_ATTR void VKAPI_CALL vkDestroyPipelineLayout", 1)[0]
+        push_range_valid_body = c_function_body(source, "pdocker_vk_push_constant_range_valid")
         bind_body = source.split("VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets", 1)[1].split("VKAPI_ATTR void VKAPI_CALL vkCmdPushConstants", 1)[0]
         push_constants_body = source.split("VKAPI_ATTR void VKAPI_CALL vkCmdPushConstants", 1)[1].split("static VkImageAspectFlags image_format_full_aspect_mask", 1)[0]
         query_body = source.split("VKAPI_ATTR VkResult VKAPI_CALL vkGetQueryPoolResults", 1)[1].split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateFence", 1)[0]
@@ -12577,9 +12647,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("memory->size > SIZE_MAX - (memory->page_size - 1)", allocate_body)
         self.assertIn("offset > (VkDeviceSize)m->size || offset > (VkDeviceSize)SIZE_MAX", map_body)
         self.assertIn("*ppData = (char *)m->map + (size_t)offset;", map_body)
-        self.assertIn("range->size > UINT32_MAX - (uint64_t)range->offset", pipeline_layout_body)
+        self.assertIn("range->size > UINT32_MAX - (uint64_t)range->offset", push_range_valid_body)
         self.assertNotIn("range->offset > UINT32_MAX", pipeline_layout_body)
-        self.assertIn("uint32_t end = range->offset + range->size;", pipeline_layout_body)
+        self.assertIn("uint32_t end = range->offset + range->size;", push_range_valid_body)
         self.assertIn("offset > PDOCKER_VK_MAX_PUSH_BYTES", push_constants_body)
         self.assertIn("(uint64_t)size > (uint64_t)PDOCKER_VK_MAX_PUSH_BYTES - (uint64_t)offset", push_constants_body)
         self.assertIn("cmd->graphics_unsupported = true;", push_constants_body)
