@@ -10810,6 +10810,32 @@ class GpuAbiContractTest(unittest.TestCase):
         )
 
 
+    def test_vulkan_graphics_depth_stencil_attachment_ranges_are_role_specific(self):
+        executor = GPU_EXECUTOR.read_text()
+        effective_body = c_function_body(executor, "vulkan_graphics_attachment_effective_range_for_role")
+        merge_body = c_function_body(executor, "vulkan_graphics_merge_attachment_copy_range")
+        materialize = c_function_body(executor, "materialize_vulkan_graphics_v6_attachments")
+        record = c_function_body(executor, "record_vulkan_graphics_v6_command_buffer")
+
+        self.assertIn("vulkan_graphics_attachment_aspect_mask(role)", effective_body)
+        self.assertIn("range->aspectMask == required", effective_body)
+        self.assertIn("range->aspectMask & required", effective_body)
+        self.assertIn("vulkan_packed_depth_stencil_dual_aspect_supported(image->format, range->aspectMask)", effective_body)
+        self.assertIn("out->aspectMask = required;", effective_body)
+        self.assertIn("vulkan_graphics_attachment_effective_range_for_role(", merge_body)
+        self.assertIn("image, &effective_range, vulkan_graphics_attachment_aspect_mask(role)", merge_body)
+        self.assertIn("vulkan_graphics_subresource_range_shape_equal(&source_attachment_range", materialize)
+        self.assertIn("vulkan_graphics_subresource_range_shape_equal(&replay_attachment_range", record)
+        self.assertIn(".subresourceRange = replay_attachment_range", record)
+        self.assertIn(".subresourceRange = resolve_attachment_range", record)
+        self.assertNotIn("replay_view->range.aspectMask != resolve_view->range.aspectMask", materialize)
+        self.assertNotIn("resolve_replay_view->range.aspectMask != replay_view->range.aspectMask", record)
+        self.assertIn("vulkan_replay_image_layout_for_range(image, &replay_attachment_range", record)
+        self.assertIn("vulkan_replay_image_set_layout_for_range(image, &replay_attachment_range", record)
+        self.assertIn("vulkan_replay_image_layout_for_range(\n                            resolve_image, &resolve_attachment_range", record)
+        self.assertIn("vulkan_replay_image_set_layout_for_range(\n                            resolve_image, &resolve_attachment_range", record)
+
+
     def test_vulkan_graphics_v623_tessellation_state_abi_is_append_only(self):
         expected_extension_fields = [
             ("tessellation_state_count", "u32"),

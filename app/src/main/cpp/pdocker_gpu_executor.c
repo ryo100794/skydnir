@@ -28426,6 +28426,38 @@ static VkImageAspectFlags vulkan_graphics_attachment_aspect_mask(uint32_t role) 
     }
 }
 
+static int vulkan_graphics_subresource_range_shape_equal(
+        const VkImageSubresourceRange *a,
+        const VkImageSubresourceRange *b) {
+    if (!a || !b) return 0;
+    return a->baseMipLevel == b->baseMipLevel &&
+           a->levelCount == b->levelCount &&
+           a->baseArrayLayer == b->baseArrayLayer &&
+           a->layerCount == b->layerCount;
+}
+
+static int vulkan_graphics_attachment_effective_range_for_role(
+        const VulkanDispatchImageObject *image,
+        const VkImageSubresourceRange *range,
+        uint32_t role,
+        VkImageSubresourceRange *out) {
+    if (!image || !range || !out) return -EINVAL;
+    VkImageAspectFlags required = vulkan_graphics_attachment_aspect_mask(role);
+    if (!required) return -EOPNOTSUPP;
+    if (range->aspectMask == required) {
+        *out = *range;
+        return 0;
+    }
+    if ((required == VK_IMAGE_ASPECT_DEPTH_BIT || required == VK_IMAGE_ASPECT_STENCIL_BIT) &&
+        (range->aspectMask & required) != 0 &&
+        vulkan_packed_depth_stencil_dual_aspect_supported(image->format, range->aspectMask)) {
+        *out = *range;
+        out->aspectMask = required;
+        return 0;
+    }
+    return -EOPNOTSUPP;
+}
+
 static int vulkan_graphics_merge_image_copy_range_for_aspect(
         VulkanDispatchImageObject *image,
         const VkImageSubresourceRange *range,
@@ -28465,8 +28497,12 @@ static int vulkan_graphics_merge_attachment_copy_range(
         VulkanDispatchImageObject *image,
         const VkImageSubresourceRange *range,
         uint32_t role) {
+    VkImageSubresourceRange effective_range;
+    int rc = vulkan_graphics_attachment_effective_range_for_role(
+        image, range, role, &effective_range);
+    if (rc != 0) return rc;
     return vulkan_graphics_merge_image_copy_range_for_aspect(
-        image, range, vulkan_graphics_attachment_aspect_mask(role));
+        image, &effective_range, vulkan_graphics_attachment_aspect_mask(role));
 }
 
 static int vulkan_graphics_descriptor_image_aspect_supported(
@@ -28973,10 +29009,19 @@ static int materialize_vulkan_graphics_v6_attachments(
                 if (!resolve_image->image || !(resolve_image->usage & required_usage)) return -EOPNOTSUPP;
                 const uint32_t source_samples = view->images[image->source_index].samples;
                 const uint32_t resolve_samples = view->images[resolve_image->source_index].samples;
+                VkImageSubresourceRange source_attachment_range;
+                VkImageSubresourceRange resolve_attachment_range;
+                int source_range_rc = vulkan_graphics_attachment_effective_range_for_role(
+                    image, &replay_view->range, attachment->attachment_role, &source_attachment_range);
+                if (source_range_rc != 0) return source_range_rc;
+                int resolve_range_rc = vulkan_graphics_attachment_effective_range_for_role(
+                    resolve_image, &resolve_view->range, attachment->attachment_role, &resolve_attachment_range);
+                if (resolve_range_rc != 0) return resolve_range_rc;
                 if (source_samples == VK_SAMPLE_COUNT_1_BIT ||
                     resolve_samples != VK_SAMPLE_COUNT_1_BIT ||
                     image->format != resolve_image->format ||
-                    replay_view->range.aspectMask != resolve_view->range.aspectMask ||
+                    !vulkan_graphics_subresource_range_shape_equal(&source_attachment_range,
+                                                                   &resolve_attachment_range) ||
                     !vulkan_graphics_attachment_layout_supported(attachment->attachment_role,
                                                                  resolve_meta->resolve_layout) ||
                     !vulkan_graphics_attachment_layout_writes(attachment->attachment_role,
@@ -31781,6 +31826,13 @@ static int record_vulkan_graphics_v6_command_buffer(
                         rc = -EOPNOTSUPP;
                         goto begin_rendering_cleanup;
                     }
+                    VkImageSubresourceRange replay_attachment_range;
+                    int attachment_range_rc = vulkan_graphics_attachment_effective_range_for_role(
+                        image, &replay_view->range, src->attachment_role, &replay_attachment_range);
+                    if (attachment_range_rc != 0) {
+                        rc = attachment_range_rc;
+                        goto begin_rendering_cleanup;
+                    }
                     if (src->clear_value_size) {
                         if (src->clear_value_size != sizeof(VkClearValue) ||
                             !payload_range_valid(src->clear_value_offset, src->clear_value_size,
@@ -31795,7 +31847,7 @@ static int record_vulkan_graphics_v6_command_buffer(
                         goto begin_rendering_cleanup;
                     }
                     VkImageLayout old_layout = image->current_layout;
-                    int layout_rc = vulkan_replay_image_layout_for_range(image, &replay_view->range, &old_layout);
+                    int layout_rc = vulkan_replay_image_layout_for_range(image, &replay_attachment_range, &old_layout);
                     if (layout_rc != 0) { rc = layout_rc; goto begin_rendering_cleanup; }
                     pre_barriers[pre_barrier_count++] = (VkImageMemoryBarrier){
                         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
@@ -31808,10 +31860,10 @@ static int record_vulkan_graphics_v6_command_buffer(
                         .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
                         .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
                         .image = image->image,
-                        .subresourceRange = replay_view->range,
+                        .subresourceRange = replay_attachment_range,
                     };
                     dst_stage_mask |= vulkan_graphics_attachment_stage_mask(src->attachment_role);
-                    layout_rc = vulkan_replay_image_set_layout_for_range(image, &replay_view->range,
+                    layout_rc = vulkan_replay_image_set_layout_for_range(image, &replay_attachment_range,
                                                                          (VkImageLayout)src->layout);
                     if (layout_rc != 0) { rc = layout_rc; goto begin_rendering_cleanup; }
                     const uint32_t attachment_index = command->attachment_first + a;
@@ -31834,15 +31886,23 @@ static int record_vulkan_graphics_v6_command_buffer(
                         resolve_image = &attachments->images[resolve_replay_view->image_index];
                         const uint32_t source_samples = view->images[image->source_index].samples;
                         const uint32_t resolve_samples = view->images[resolve_image->source_index].samples;
-                        if (!resolve_image->image || resolve_samples != VK_SAMPLE_COUNT_1_BIT ||
+                        VkImageSubresourceRange resolve_attachment_range;
+                        int resolve_range_rc = resolve_image->image
+                            ? vulkan_graphics_attachment_effective_range_for_role(
+                                  resolve_image, &resolve_replay_view->range,
+                                  src->attachment_role, &resolve_attachment_range)
+                            : -EPROTO;
+                        if (!resolve_image->image || resolve_range_rc != 0 ||
+                            resolve_samples != VK_SAMPLE_COUNT_1_BIT ||
                             source_samples == VK_SAMPLE_COUNT_1_BIT ||
                             resolve_image->format != image->format ||
-                            resolve_replay_view->range.aspectMask != replay_view->range.aspectMask ||
+                            !vulkan_graphics_subresource_range_shape_equal(&replay_attachment_range,
+                                                                           &resolve_attachment_range) ||
                             !vulkan_graphics_attachment_layout_supported(src->attachment_role,
                                                                          resolve_meta->resolve_layout) ||
                             !vulkan_graphics_attachment_layout_writes(src->attachment_role,
                                                                       resolve_meta->resolve_layout)) {
-                            rc = -EOPNOTSUPP;
+                            rc = resolve_range_rc != 0 ? resolve_range_rc : -EOPNOTSUPP;
                             goto begin_rendering_cleanup;
                         }
                         if (pre_barrier_count >= pre_barrier_capacity) {
@@ -31851,7 +31911,7 @@ static int record_vulkan_graphics_v6_command_buffer(
                         }
                         VkImageLayout resolve_old_layout = resolve_image->current_layout;
                         int resolve_layout_rc = vulkan_replay_image_layout_for_range(
-                            resolve_image, &resolve_replay_view->range, &resolve_old_layout);
+                            resolve_image, &resolve_attachment_range, &resolve_old_layout);
                         if (resolve_layout_rc != 0) { rc = resolve_layout_rc; goto begin_rendering_cleanup; }
                         pre_barriers[pre_barrier_count++] = (VkImageMemoryBarrier){
                             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
@@ -31865,10 +31925,10 @@ static int record_vulkan_graphics_v6_command_buffer(
                             .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
                             .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
                             .image = resolve_image->image,
-                            .subresourceRange = resolve_replay_view->range,
+                            .subresourceRange = resolve_attachment_range,
                         };
                         resolve_layout_rc = vulkan_replay_image_set_layout_for_range(
-                            resolve_image, &resolve_replay_view->range,
+                            resolve_image, &resolve_attachment_range,
                             (VkImageLayout)resolve_meta->resolve_layout);
                         if (resolve_layout_rc != 0) { rc = resolve_layout_rc; goto begin_rendering_cleanup; }
                     }
