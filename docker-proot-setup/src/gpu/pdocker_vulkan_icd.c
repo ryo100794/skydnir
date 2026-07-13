@@ -264,7 +264,9 @@ PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_swapchain, VkSwa
 #define PDOCKER_VK_MAX_DISPATCH_OPS PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS
 #define PDOCKER_VK_MAX_COMMAND_OPS PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS
 #define PDOCKER_VK_MAX_EVENT_WAIT_REFS PDOCKER_GPU_VULKAN_GRAPHICS_V626_MAX_EVENT_WAIT_REFS
-#define PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDINGS 16
+#define PDOCKER_VK_MAX_GRAPHICS_SHADER_STAGES PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_SHADER_STAGES
+#define PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDINGS PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_VERTEX_BINDINGS
+#define PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDING_SNAPSHOTS PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_VERTEX_BINDINGS
 #define PDOCKER_VK_MAX_GRAPHICS_VERTEX_ATTRIBUTES 32
 #define PDOCKER_VK_MAX_GRAPHICS_DYNAMIC_STATES 64
 #define PDOCKER_VK_MAX_SWAPCHAIN_IMAGES 4u
@@ -636,16 +638,16 @@ struct PdockerVkPipeline {
     PdockerVkRenderPass *render_pass;
     uint32_t shader_stage_count;
     VkShaderStageFlags shader_stage_flags;
-    PdockerVkShaderModule *graphics_stage_modules[PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDINGS];
-    VkShaderStageFlagBits graphics_stage_flags[PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDINGS];
-    char graphics_stage_entry_names[PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDINGS][PDOCKER_VK_MAX_ENTRY_NAME];
+    PdockerVkShaderModule *graphics_stage_modules[PDOCKER_VK_MAX_GRAPHICS_SHADER_STAGES];
+    VkShaderStageFlagBits graphics_stage_flags[PDOCKER_VK_MAX_GRAPHICS_SHADER_STAGES];
+    char graphics_stage_entry_names[PDOCKER_VK_MAX_GRAPHICS_SHADER_STAGES][PDOCKER_VK_MAX_ENTRY_NAME];
     VkSpecializationMapEntry graphics_stage_specialization_entries
-        [PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDINGS][PDOCKER_VK_MAX_SPECIALIZATION_ENTRIES];
-    uint32_t graphics_stage_specialization_entry_counts[PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDINGS];
+        [PDOCKER_VK_MAX_GRAPHICS_SHADER_STAGES][PDOCKER_VK_MAX_SPECIALIZATION_ENTRIES];
+    uint32_t graphics_stage_specialization_entry_counts[PDOCKER_VK_MAX_GRAPHICS_SHADER_STAGES];
     uint8_t graphics_stage_specialization_data
-        [PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDINGS][PDOCKER_VK_MAX_SPECIALIZATION_BYTES];
-    size_t graphics_stage_specialization_data_sizes[PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDINGS];
-    bool graphics_stage_specialization_too_large[PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDINGS];
+        [PDOCKER_VK_MAX_GRAPHICS_SHADER_STAGES][PDOCKER_VK_MAX_SPECIALIZATION_BYTES];
+    size_t graphics_stage_specialization_data_sizes[PDOCKER_VK_MAX_GRAPHICS_SHADER_STAGES];
+    bool graphics_stage_specialization_too_large[PDOCKER_VK_MAX_GRAPHICS_SHADER_STAGES];
     VkPrimitiveTopology topology;
     VkPolygonMode polygon_mode;
     VkCullModeFlags cull_mode;
@@ -986,6 +988,7 @@ typedef struct {
 } PdockerVkCommandOp;
 
 typedef struct {
+    uint32_t binding;
     PdockerVkBuffer *buffer;
     VkDeviceSize offset;
     VkDeviceSize size;
@@ -1189,6 +1192,9 @@ typedef struct {
     PdockerVkGraphicsRenderingSnapshot *graphics_rendering_ops;
     uint32_t graphics_rendering_op_count;
     uint32_t graphics_rendering_op_capacity;
+    PdockerVkVertexBindingState *graphics_vertex_binding_snapshots;
+    uint32_t graphics_vertex_binding_snapshot_count;
+    uint32_t graphics_vertex_binding_snapshot_capacity;
     PdockerVkClearAttachmentsCommandSnapshot *clear_attachments_command_ops;
     uint32_t clear_attachments_command_op_count;
     uint32_t clear_attachments_command_op_capacity;
@@ -1775,6 +1781,7 @@ PDOCKER_DEFINE_COMMAND_BUFFER_RESERVE_VECTOR(command_buffer_reserve_clear_attach
 PDOCKER_DEFINE_COMMAND_BUFFER_RESERVE_VECTOR(command_buffer_reserve_clear_rect_ops, clear_rect_ops, clear_rect_op_count, clear_rect_op_capacity, PdockerVkClearRectSnapshot, PDOCKER_VK_MAX_CLEAR_RECTS)
 PDOCKER_DEFINE_COMMAND_BUFFER_RESERVE_VECTOR(command_buffer_reserve_graphics_dynamic_offsets, graphics_dynamic_offsets, graphics_dynamic_offset_count, graphics_dynamic_offset_capacity, uint32_t, PDOCKER_VK_MAX_GRAPHICS_DYNAMIC_OFFSETS)
 PDOCKER_DEFINE_COMMAND_BUFFER_RESERVE_VECTOR(command_buffer_reserve_dynamic_states, dynamic_states, dynamic_state_count, dynamic_state_capacity, PdockerVkDynamicStateSnapshot, PDOCKER_VK_MAX_GRAPHICS_DYNAMIC_STATES)
+PDOCKER_DEFINE_COMMAND_BUFFER_RESERVE_VECTOR(command_buffer_reserve_graphics_vertex_binding_snapshots, graphics_vertex_binding_snapshots, graphics_vertex_binding_snapshot_count, graphics_vertex_binding_snapshot_capacity, PdockerVkVertexBindingState, PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDING_SNAPSHOTS)
 #undef PDOCKER_DEFINE_COMMAND_BUFFER_RESERVE_VECTOR
 
 static bool command_buffer_reserve_graphics_draw_ops(PdockerVkCommandBuffer *cmd, uint32_t extra) {
@@ -2089,6 +2096,10 @@ static void command_buffer_destroy_record_vectors(PdockerVkCommandBuffer *cmd) {
     cmd->graphics_rendering_ops = NULL;
     cmd->graphics_rendering_op_count = 0;
     cmd->graphics_rendering_op_capacity = 0;
+    free(cmd->graphics_vertex_binding_snapshots);
+    cmd->graphics_vertex_binding_snapshots = NULL;
+    cmd->graphics_vertex_binding_snapshot_count = 0;
+    cmd->graphics_vertex_binding_snapshot_capacity = 0;
     for (uint32_t i = 0; i < cmd->command_op_count; ++i) {
         if (cmd->command_ops[i].type == PDOCKER_VK_COMMAND_UPDATE) {
             free(cmd->command_ops[i].payload);
@@ -2315,6 +2326,7 @@ static void clear_recorded_command_ops(PdockerVkCommandBuffer *cmd) {
     cmd->clear_rect_op_count = 0;
     cmd->graphics_command_op_count = 0;
     cmd->graphics_dynamic_offset_count = 0;
+    cmd->graphics_vertex_binding_snapshot_count = 0;
     cmd->push_constant_op_count = 0;
 }
 
@@ -2354,6 +2366,7 @@ static bool command_buffer_has_room_for_secondary(
         src->graphics_draw_op_count <= PDOCKER_VK_MAX_GRAPHICS_DRAW_OPS - dst->graphics_draw_op_count &&
         src->graphics_descriptor_bind_op_count <= PDOCKER_VK_MAX_GRAPHICS_DESCRIPTOR_BIND_OPS - dst->graphics_descriptor_bind_op_count &&
         src->graphics_rendering_op_count <= PDOCKER_VK_MAX_GRAPHICS_RENDERING_OPS - dst->graphics_rendering_op_count &&
+        src->graphics_vertex_binding_snapshot_count <= PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDING_SNAPSHOTS - dst->graphics_vertex_binding_snapshot_count &&
         src->clear_attachments_command_op_count <= PDOCKER_VK_MAX_CLEAR_ATTACHMENTS_COMMANDS - dst->clear_attachments_command_op_count &&
         src->clear_attachment_op_count <= PDOCKER_VK_MAX_CLEAR_ATTACHMENTS - dst->clear_attachment_op_count &&
         src->clear_rect_op_count <= PDOCKER_VK_MAX_CLEAR_RECTS - dst->clear_rect_op_count &&
@@ -2387,6 +2400,9 @@ static bool append_secondary_command_buffer(
             dst,
             src->graphics_descriptor_bind_op_count) ||
         !command_buffer_reserve_graphics_rendering_ops(dst, src->graphics_rendering_op_count) ||
+        !command_buffer_reserve_graphics_vertex_binding_snapshots(
+            dst,
+            src->graphics_vertex_binding_snapshot_count) ||
         !command_buffer_reserve_clear_attachments_command_ops(
             dst,
             src->clear_attachments_command_op_count) ||
@@ -2416,6 +2432,7 @@ static bool append_secondary_command_buffer(
     uint32_t graphics_draw_base = dst->graphics_draw_op_count;
     uint32_t descriptor_bind_base = dst->graphics_descriptor_bind_op_count;
     uint32_t rendering_base = dst->graphics_rendering_op_count;
+    uint32_t vertex_binding_snapshot_base = dst->graphics_vertex_binding_snapshot_count;
     uint32_t clear_attachments_command_base = dst->clear_attachments_command_op_count;
     uint32_t clear_attachment_base = dst->clear_attachment_op_count;
     uint32_t clear_rect_base = dst->clear_rect_op_count;
@@ -2559,6 +2576,12 @@ static bool append_secondary_command_buffer(
     memcpy(dst->graphics_rendering_ops + dst->graphics_rendering_op_count, src->graphics_rendering_ops,
            sizeof(src->graphics_rendering_ops[0]) * src->graphics_rendering_op_count);
     dst->graphics_rendering_op_count += src->graphics_rendering_op_count;
+    if (src->graphics_vertex_binding_snapshot_count > 0) {
+        memcpy(dst->graphics_vertex_binding_snapshots + dst->graphics_vertex_binding_snapshot_count,
+               src->graphics_vertex_binding_snapshots,
+               sizeof(src->graphics_vertex_binding_snapshots[0]) * src->graphics_vertex_binding_snapshot_count);
+        dst->graphics_vertex_binding_snapshot_count += src->graphics_vertex_binding_snapshot_count;
+    }
     memcpy(dst->clear_attachments_command_ops + dst->clear_attachments_command_op_count,
            src->clear_attachments_command_ops,
            sizeof(src->clear_attachments_command_ops[0]) * src->clear_attachments_command_op_count);
@@ -2615,6 +2638,9 @@ static bool append_secondary_command_buffer(
                 break;
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_DYNAMIC_STATE:
                 record.dynamic_state_index += dynamic_state_base;
+                break;
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_VERTEX_BUFFERS:
+                record.vertex_binding_first += vertex_binding_snapshot_base;
                 break;
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_PUSH_CONSTANTS:
                 record.push_op_index += push_op_base;
@@ -2739,6 +2765,7 @@ fail_secondary_append:
     dst->graphics_draw_op_count = graphics_draw_base;
     dst->graphics_descriptor_bind_op_count = descriptor_bind_base;
     dst->graphics_rendering_op_count = rendering_base;
+    dst->graphics_vertex_binding_snapshot_count = vertex_binding_snapshot_base;
     dst->clear_attachments_command_op_count = clear_attachments_command_base;
     dst->clear_attachment_op_count = clear_attachment_base;
     dst->clear_rect_op_count = clear_rect_base;
@@ -6882,7 +6909,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
         PdockerVkPipeline *pipeline = record->pipeline;
         if (pipeline->graphics_unsupported ||
             pipeline->dynamic_rendering_format_overflow ||
-            pipeline->shader_stage_count > PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDINGS ||
+            pipeline->shader_stage_count > PDOCKER_VK_MAX_GRAPHICS_SHADER_STAGES ||
             shader_stage_count + pipeline->shader_stage_count > PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_SHADER_STAGES) {
             rc = -EOPNOTSUPP;
             goto cleanup;
@@ -8034,16 +8061,22 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
                 rc = -E2BIG;
                 goto cleanup;
             }
+            if (record->vertex_binding_first > cmd->graphics_vertex_binding_snapshot_count ||
+                record->vertex_binding_count >
+                    cmd->graphics_vertex_binding_snapshot_count - record->vertex_binding_first) {
+                rc = -EPROTO;
+                goto cleanup;
+            }
             command->vertex_binding_first = (uint32_t)vertex_binding_count;
             command->vertex_binding_count = record->vertex_binding_count;
             for (uint32_t b = 0; b < record->vertex_binding_count; ++b) {
-                uint32_t slot = record->vertex_binding_first + b;
-                if (slot >= PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDINGS ||
-                    !cmd->vertex_bindings[slot].bound || !cmd->vertex_bindings[slot].buffer) {
+                const PdockerVkVertexBindingState *binding =
+                    &cmd->graphics_vertex_binding_snapshots[record->vertex_binding_first + b];
+                if (binding->binding >= PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDINGS ||
+                    !binding->bound || !binding->buffer) {
                     rc = -EPROTO;
                     goto cleanup;
                 }
-                const PdockerVkVertexBindingState *binding = &cmd->vertex_bindings[slot];
                 uint64_t binding_size = 0;
                 if (!validate_vertex_binding_byte_range(binding, &binding_size)) {
                     rc = -ERANGE;
@@ -8056,7 +8089,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
                 if (buffer_index < 0) { rc = buffer_index; goto cleanup; }
                 PdockerGpuVulkanGraphicsV6VertexBindingEntry *entry =
                     &vertex_bindings[vertex_binding_count++];
-                entry->binding = slot;
+                entry->binding = binding->binding;
                 entry->stride = (uint32_t)binding->stride;
                 entry->input_rate = 0;
                 entry->buffer_resource_index = (uint32_t)buffer_index;
@@ -18807,8 +18840,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
             free(pipeline);
             return pnext_rc;
         }
-        uint32_t captured_stages = clamp_u32(ci->stageCount, PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDINGS);
-        if (ci->stageCount > PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDINGS) {
+        uint32_t captured_stages = clamp_u32(ci->stageCount, PDOCKER_VK_MAX_GRAPHICS_SHADER_STAGES);
+        if (ci->stageCount > PDOCKER_VK_MAX_GRAPHICS_SHADER_STAGES) {
             pipeline->graphics_unsupported = true;
         }
         for (uint32_t stage_i = 0; stage_i < captured_stages; ++stage_i) {
@@ -20650,6 +20683,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkResetCommandBuffer(
         VkCommandBuffer commandBuffer,
         VkCommandBufferResetFlags flags) {
     (void)flags;
+    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    if (!cmd) return VK_ERROR_INITIALIZATION_FAILED;
+    clear_recorded_command_ops(cmd);
+    command_buffer_destroy_record_vectors(cmd);
     return vkBeginCommandBuffer(commandBuffer, NULL);
 }
 
@@ -21528,14 +21565,22 @@ static void record_vertex_buffer_bindings(
         cmd->graphics_unsupported = true;
         return;
     }
+    if (!command_buffer_reserve_graphics_vertex_binding_snapshots(cmd, bindingCount)) {
+        cmd->graphics_unsupported = true;
+        command_buffer_mark_recording_failed(cmd, "graphics-vertex-binding-snapshot-overflow");
+        return;
+    }
+    uint32_t snapshot_first = cmd->graphics_vertex_binding_snapshot_count;
     for (uint32_t i = 0; i < bindingCount; ++i) {
         uint32_t slot = firstBinding + i;
         PdockerVkVertexBindingState *binding = &cmd->vertex_bindings[slot];
+        binding->binding = slot;
         binding->buffer = pdocker_vk_buffer_from_handle(pBuffers[i]);
         binding->offset = pOffsets[i];
         binding->size = pSizes ? pSizes[i] : VK_WHOLE_SIZE;
         binding->stride = pStrides ? pStrides[i] : 0;
         binding->bound = true;
+        cmd->graphics_vertex_binding_snapshots[cmd->graphics_vertex_binding_snapshot_count++] = *binding;
         if (slot + 1 > cmd->vertex_binding_count) cmd->vertex_binding_count = slot + 1;
     }
     cmd->vertex_buffer_bound = true;
@@ -21543,7 +21588,7 @@ static void record_vertex_buffer_bindings(
     memset(&record, 0, sizeof(record));
     record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_VERTEX_BUFFERS;
     record.flags = pStrides ? PDOCKER_GPU_GRAPHICS_V6_COMMAND_VERTEX_STRIDES_PRESENT : 0u;
-    record.vertex_binding_first = firstBinding;
+    record.vertex_binding_first = snapshot_first;
     record.vertex_binding_count = bindingCount;
     (void)append_graphics_command_record(cmd, &record);
 }

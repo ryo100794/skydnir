@@ -2356,6 +2356,67 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(marker, executor)
 
 
+    def test_vulkan_graphics_vertex_binding_replay_uses_bind_snapshots(self):
+        icd = VULKAN_ICD.read_text()
+        app_abi = APP_HEADER.read_text()
+        container_abi = CONTAINER_HEADER.read_text()
+
+        self.assertIn(
+            "#define PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDINGS PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_VERTEX_BINDINGS",
+            icd,
+        )
+        for abi in [app_abi, container_abi]:
+            self.assertIn("#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_VERTEX_BINDINGS 64u", abi)
+
+        for marker in [
+            "uint32_t binding;",
+            "PdockerVkVertexBindingState *graphics_vertex_binding_snapshots;",
+            "uint32_t graphics_vertex_binding_snapshot_count;",
+            "command_buffer_reserve_graphics_vertex_binding_snapshots",
+            "free(cmd->graphics_vertex_binding_snapshots);",
+            "cmd->graphics_vertex_binding_snapshot_count = 0;",
+        ]:
+            self.assertIn(marker, icd)
+
+        record_body = c_function_body(icd, "record_vertex_buffer_bindings")
+        for marker in [
+            "command_buffer_reserve_graphics_vertex_binding_snapshots(cmd, bindingCount)",
+            "uint32_t snapshot_first = cmd->graphics_vertex_binding_snapshot_count;",
+            "binding->binding = slot;",
+            "cmd->graphics_vertex_binding_snapshots[cmd->graphics_vertex_binding_snapshot_count++] = *binding;",
+            "record.vertex_binding_first = snapshot_first;",
+            "record.vertex_binding_count = bindingCount;",
+        ]:
+            self.assertIn(marker, record_body)
+        self.assertNotIn("record.vertex_binding_first = firstBinding;", record_body)
+
+        serialize_body = icd.rsplit(
+            "record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_VERTEX_BUFFERS", 1
+        )[1].split(
+            "record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_INDEX_BUFFER", 1
+        )[0]
+        for marker in [
+            "cmd->graphics_vertex_binding_snapshot_count",
+            "cmd->graphics_vertex_binding_snapshots[record->vertex_binding_first + b]",
+            "binding->binding >= PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDINGS",
+            "entry->binding = binding->binding;",
+        ]:
+            self.assertIn(marker, serialize_body)
+        self.assertNotIn("cmd->vertex_bindings[slot]", serialize_body)
+        self.assertNotIn("entry->binding = slot;", serialize_body)
+
+        append_secondary_body = c_function_body(icd, "append_secondary_command_buffer")
+        for marker in [
+            "command_buffer_reserve_graphics_vertex_binding_snapshots",
+            "uint32_t vertex_binding_snapshot_base = dst->graphics_vertex_binding_snapshot_count;",
+            "memcpy(dst->graphics_vertex_binding_snapshots + dst->graphics_vertex_binding_snapshot_count",
+            "dst->graphics_vertex_binding_snapshot_count += src->graphics_vertex_binding_snapshot_count;",
+            "record.vertex_binding_first += vertex_binding_snapshot_base;",
+            "dst->graphics_vertex_binding_snapshot_count = vertex_binding_snapshot_base;",
+        ]:
+            self.assertIn(marker, append_secondary_body)
+
+
     def test_vulkan_dynamic_vertex_input_binding_stride_is_replayed(self):
         icd = VULKAN_ICD.read_text()
         executor = GPU_EXECUTOR.read_text()
