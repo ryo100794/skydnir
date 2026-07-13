@@ -9290,6 +9290,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("pipeline-creation-feedback-stage-count-mismatch", feedback_body)
         self.assertIn("VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO", feedback_body)
         self.assertIn("allow_pipeline_rendering_create_info", feedback_body)
+        self.assertIn("VK_STRUCTURE_TYPE_PIPELINE_ROBUSTNESS_CREATE_INFO", feedback_body)
+        self.assertIn("pipeline_robustness_create_info_is_device_default", feedback_body)
+        self.assertIn("pipeline-robustness-non-default", feedback_body)
         self.assertIn("unsupported_create_info_pnext_result(api_name, node)", feedback_body)
 
         self.assertIn('"vkCreateComputePipelines", ci->pNext, 1u, false', compute_body)
@@ -9311,6 +9314,8 @@ class GpuAbiContractTest(unittest.TestCase):
 
         self.assertIn('"vkCreateGraphicsPipelines", ci->pNext, ci->stageCount, true', graphics_body)
         self.assertIn("VK_STRUCTURE_TYPE_PIPELINE_CREATION_FEEDBACK_CREATE_INFO", graphics_body)
+        self.assertIn("VK_STRUCTURE_TYPE_PIPELINE_ROBUSTNESS_CREATE_INFO", graphics_body)
+        self.assertIn("Already validated as DEVICE_DEFAULT-only", graphics_body)
 
 
     def test_vulkan_pipeline_create_noop_flags_are_transportable_hints(self):

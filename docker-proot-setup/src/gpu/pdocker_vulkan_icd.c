@@ -20757,6 +20757,17 @@ VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSetWithTemplate(
 }
 
 
+#if defined(VK_VERSION_1_3) || defined(VK_EXT_pipeline_robustness)
+static bool pipeline_robustness_create_info_is_device_default(
+        const VkPipelineRobustnessCreateInfo *info) {
+    return info &&
+           info->storageBuffers == VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_DEVICE_DEFAULT &&
+           info->uniformBuffers == VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_DEVICE_DEFAULT &&
+           info->vertexInputs == VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_DEVICE_DEFAULT &&
+           info->images == VK_PIPELINE_ROBUSTNESS_IMAGE_BEHAVIOR_DEVICE_DEFAULT;
+}
+#endif
+
 static VkResult validate_and_fill_pipeline_feedback_pnext(
         const char *api_name,
         const void *pNext,
@@ -20803,6 +20814,18 @@ static VkResult validate_and_fill_pipeline_feedback_pnext(
                     return unsupported_create_info_pnext_result(api_name, node);
                 }
                 break;
+#endif
+#if defined(VK_VERSION_1_3) || defined(VK_EXT_pipeline_robustness)
+            case VK_STRUCTURE_TYPE_PIPELINE_ROBUSTNESS_CREATE_INFO: {
+                const VkPipelineRobustnessCreateInfo *robustness_info =
+                    (const VkPipelineRobustnessCreateInfo *)node;
+                if (!pipeline_robustness_create_info_is_device_default(robustness_info)) {
+                    trace_icd_runtime_failure("pipeline-robustness-non-default",
+                                              VK_ERROR_FEATURE_NOT_PRESENT);
+                    return VK_ERROR_FEATURE_NOT_PRESENT;
+                }
+                break;
+            }
 #endif
             default:
                 return unsupported_create_info_pnext_result(api_name, node);
@@ -21499,6 +21522,14 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
                 /*
                  * Already validated and filled before object creation.  It is
                  * output-only metadata, so it does not change replay semantics.
+                 */
+#endif
+#if defined(VK_VERSION_1_3) || defined(VK_EXT_pipeline_robustness)
+            } else if (chain->sType == VK_STRUCTURE_TYPE_PIPELINE_ROBUSTNESS_CREATE_INFO) {
+                /*
+                 * Already validated as DEVICE_DEFAULT-only before object
+                 * creation.  No non-default robustness behavior is advertised
+                 * or replayed by the bridge.
                  */
 #endif
             } else {

@@ -322,6 +322,67 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
 
+    def test_pipeline_robustness_create_info_is_default_only(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            int main(void) {{
+                VkPipelineRobustnessCreateInfo robustness;
+                VkPipelineCreationFeedback feedback;
+                VkPipelineCreationFeedbackCreateInfo feedback_info;
+                memset(&robustness, 0, sizeof(robustness));
+                memset(&feedback, 0xff, sizeof(feedback));
+                memset(&feedback_info, 0, sizeof(feedback_info));
+                robustness.sType = VK_STRUCTURE_TYPE_PIPELINE_ROBUSTNESS_CREATE_INFO;
+                robustness.storageBuffers = VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_DEVICE_DEFAULT;
+                robustness.uniformBuffers = VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_DEVICE_DEFAULT;
+                robustness.vertexInputs = VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_DEVICE_DEFAULT;
+                robustness.images = VK_PIPELINE_ROBUSTNESS_IMAGE_BEHAVIOR_DEVICE_DEFAULT;
+
+                if (validate_and_fill_pipeline_feedback_pnext(
+                        "unit-pipeline-robustness", &robustness, 1u, false) != VK_SUCCESS) {{
+                    fprintf(stderr, "default pipeline robustness was rejected\\n");
+                    return 2;
+                }}
+                robustness.storageBuffers = VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_DISABLED;
+                if (validate_and_fill_pipeline_feedback_pnext(
+                        "unit-pipeline-robustness", &robustness, 1u, false) == VK_SUCCESS) {{
+                    fprintf(stderr, "non-default storage robustness was accepted\\n");
+                    return 3;
+                }}
+                robustness.storageBuffers = VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_DEVICE_DEFAULT;
+                robustness.images = VK_PIPELINE_ROBUSTNESS_IMAGE_BEHAVIOR_ROBUST_IMAGE_ACCESS;
+                if (validate_and_fill_pipeline_feedback_pnext(
+                        "unit-pipeline-robustness", &robustness, 1u, true) == VK_SUCCESS) {{
+                    fprintf(stderr, "non-default image robustness was accepted\\n");
+                    return 4;
+                }}
+                robustness.images = VK_PIPELINE_ROBUSTNESS_IMAGE_BEHAVIOR_DEVICE_DEFAULT;
+                feedback_info.sType = VK_STRUCTURE_TYPE_PIPELINE_CREATION_FEEDBACK_CREATE_INFO;
+                feedback_info.pPipelineCreationFeedback = &feedback;
+                feedback_info.pNext = &robustness;
+                if (validate_and_fill_pipeline_feedback_pnext(
+                        "unit-pipeline-robustness", &feedback_info, 1u, false) != VK_SUCCESS) {{
+                    fprintf(stderr, "feedback plus default robustness was rejected\\n");
+                    return 5;
+                }}
+                if ((feedback.flags & VK_PIPELINE_CREATION_FEEDBACK_VALID_BIT) == 0 ||
+                    feedback.duration != 0) {{
+                    fprintf(stderr, "pipeline feedback was not preserved through robustness chain\\n");
+                    return 6;
+                }}
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+
     def test_robustness_properties_are_queryable_without_feature_promotion(self):
         source = textwrap.dedent(
             f"""
