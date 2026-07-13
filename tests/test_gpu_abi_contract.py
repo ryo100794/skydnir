@@ -7499,7 +7499,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("layout->storage_binding_counts[binding_index] > 0", collect_body)
         self.assertIn("return -EOPNOTSUPP;", collect_body)
         missing_descriptor_guard = collect_body.split(
-            "if (!binding->buffer && !binding->buffer_view && !binding->image_view && !binding->sampler)", 1
+            "if (!descriptor_binding_has_bound_object(binding))", 1
         )[1].split("if (descriptor_type_supported_by_v5_object_transport", 1)[0]
         self.assertIn("layout && layout->storage_binding_counts[binding_index] > 0", missing_descriptor_guard)
         self.assertIn("continue;", missing_descriptor_guard)
@@ -12197,11 +12197,69 @@ class GpuAbiContractTest(unittest.TestCase):
     def test_vulkan_descriptor_range_is_scoped_to_vkbuffer_not_allocation(self):
         source = VULKAN_ICD.read_text()
         self.assertIn("descriptor ranges are scoped to the VkBuffer", source)
-        self.assertIn("binding->offset > binding->buffer->size", source)
-        self.assertIn("available_in_buffer = binding->buffer->size - (size_t)binding->offset", source)
+        self.assertIn("const size_t buffer_size = binding->buffer_snapshot.valid", source)
+        self.assertIn("binding->offset > (VkDeviceSize)buffer_size", source)
+        self.assertIn("available_in_buffer = buffer_size - (size_t)binding->offset", source)
         self.assertIn("if (binding->range == VK_WHOLE_SIZE) return available_in_buffer;", source)
         descriptor_size = source.split("static size_t descriptor_binding_size(const PdockerVkDescriptorBinding *binding) {", 1)[1].split("\n}", 1)[0]
         self.assertNotIn("buffer_available(binding->buffer, binding->offset)", descriptor_size)
+
+    def test_vulkan_descriptor_bindings_snapshot_object_state_at_update(self):
+        source = VULKAN_ICD.read_text()
+        descriptor_struct = source.split("struct PdockerVkDescriptorBinding {", 1)[1].split("};", 1)[0]
+        for field in [
+            "PdockerVkBufferSnapshot buffer_snapshot;",
+            "PdockerVkBufferViewSnapshot buffer_view_snapshot;",
+            "PdockerVkImageViewSnapshot image_view_snapshot;",
+            "PdockerVkSamplerSnapshot sampler_snapshot;",
+        ]:
+            self.assertIn(field, descriptor_struct)
+        snapshot_body = c_function_body(source, "descriptor_binding_snapshot_objects")
+        for marker in [
+            "snapshot_buffer_state(&binding->buffer_snapshot",
+            "snapshot_buffer_view_state(&binding->buffer_view_snapshot",
+            "snapshot_image_view_state(&binding->image_view_snapshot",
+            "snapshot_sampler_state(&binding->sampler_snapshot",
+        ]:
+            self.assertIn(marker, snapshot_body)
+        immutable_body = c_function_body(source, "descriptor_set_apply_immutable_samplers")
+        self.assertIn("descriptor_binding_snapshot_objects(descriptor)", immutable_body)
+        update_body = c_function_body(source, "vkUpdateDescriptorSets")
+        self.assertGreaterEqual(update_body.count("descriptor_binding_snapshot_objects(slot)"), 3)
+        self.assertIn("descriptor image write failed to snapshot object state", update_body)
+        self.assertIn("descriptor texel-buffer write failed to snapshot object state", update_body)
+        self.assertIn("descriptor buffer write failed to snapshot object state", update_body)
+
+    def test_vulkan_graphics_descriptor_collection_uses_snapshots_not_live_objects(self):
+        source = VULKAN_ICD.read_text()
+        body = c_function_body(source, "collect_graphics_descriptor_entries")
+        for marker in [
+            "descriptor_binding_has_bound_object(binding)",
+            "collect_graphics_buffer_resource_snapshot",
+            "collect_graphics_image_view_snapshot_entry",
+            "collect_graphics_sampler_snapshot_entry",
+            "view_snapshot->buffer_snapshot.object_id",
+            "binding->image_view_snapshot.object_id",
+            "binding->sampler_snapshot.object_id",
+            "binding->buffer_snapshot.object_id",
+        ]:
+            self.assertIn(marker, body)
+        for forbidden in [
+            "pdocker_vk_buffer_object_id(view->buffer)",
+            "buffer_view_entry->format = (uint32_t)view->format",
+            "buffer_view_entry->buffer_view_id = pdocker_vk_buffer_view_object_id(view)",
+            "? pdocker_vk_image_view_object_id(image_view_objects[view_index])",
+            ": pdocker_vk_sampler_object_id(sampler_objects[sampler_index])",
+            "collect_graphics_buffer_resource(\n                    resources",
+        ]:
+            self.assertNotIn(forbidden, body)
+        image_snapshot_body = c_function_body(source, "collect_graphics_image_view_snapshot_entry")
+        self.assertIn("image_view_entries[i].view_id == snapshot->object_id", image_snapshot_body)
+        sampler_snapshot_body = c_function_body(source, "collect_graphics_sampler_snapshot_entry")
+        self.assertIn("sampler_entries[i].sampler_id == snapshot->object_id", sampler_snapshot_body)
+        buffer_snapshot_body = c_function_body(source, "collect_graphics_buffer_resource_snapshot")
+        buffer_snapshot_find_body = c_function_body(source, "find_graphics_buffer_snapshot_resource_index")
+        self.assertIn("resources[resource_index].resource_id == object_id", buffer_snapshot_find_body)
 
     def test_vulkan_buffer_pointer_arithmetic_is_overflow_guarded(self):
         source = VULKAN_ICD.read_text()

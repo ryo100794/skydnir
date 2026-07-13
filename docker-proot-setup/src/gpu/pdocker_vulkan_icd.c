@@ -540,12 +540,69 @@ static uint64_t pdocker_vk_sampler_object_id(const PdockerVkSampler *sampler) {
     return sampler ? sampler->object_id : 0;
 }
 
+typedef struct {
+    bool valid;
+    uint64_t object_id;
+    PdockerVkMemory *memory;
+    size_t size;
+    VkBufferUsageFlags usage;
+    VkDeviceSize memory_offset;
+} PdockerVkBufferSnapshot;
+
+typedef struct {
+    bool valid;
+    uint64_t object_id;
+    PdockerVkBuffer *buffer;
+    PdockerVkBufferSnapshot buffer_snapshot;
+    VkFormat format;
+    VkDeviceSize offset;
+    VkDeviceSize range;
+    uint64_t generation;
+} PdockerVkBufferViewSnapshot;
+
+typedef struct {
+    bool valid;
+    uint64_t object_id;
+    PdockerVkImage *image;
+    VkImageViewType view_type;
+    VkFormat format;
+    VkComponentMapping components;
+    VkImageSubresourceRange subresource_range;
+    VkSampleCountFlagBits samples;
+    uint64_t generation;
+} PdockerVkImageViewSnapshot;
+
+typedef struct {
+    bool valid;
+    uint64_t object_id;
+    VkFilter mag_filter;
+    VkFilter min_filter;
+    VkSamplerMipmapMode mipmap_mode;
+    VkSamplerAddressMode address_mode_u;
+    VkSamplerAddressMode address_mode_v;
+    VkSamplerAddressMode address_mode_w;
+    float mip_lod_bias;
+    VkBool32 anisotropy_enable;
+    float max_anisotropy;
+    VkBool32 compare_enable;
+    VkCompareOp compare_op;
+    float min_lod;
+    float max_lod;
+    VkBorderColor border_color;
+    VkBool32 unnormalized_coordinates;
+    uint64_t generation;
+} PdockerVkSamplerSnapshot;
+
 
 struct PdockerVkDescriptorBinding {
     PdockerVkBuffer *buffer;
+    PdockerVkBufferSnapshot buffer_snapshot;
     PdockerVkBufferView *buffer_view;
+    PdockerVkBufferViewSnapshot buffer_view_snapshot;
     PdockerVkImageView *image_view;
+    PdockerVkImageViewSnapshot image_view_snapshot;
     PdockerVkSampler *sampler;
+    PdockerVkSamplerSnapshot sampler_snapshot;
     VkDeviceSize offset;
     VkDeviceSize base_offset;
     VkDeviceSize dynamic_offset;
@@ -771,18 +828,6 @@ typedef struct {
     VkPipelineStageFlags2 dst_stage_mask;
     VkAccessFlags2 dst_access_mask;
 } PdockerVkSubpassDependencyState;
-
-typedef struct {
-    bool valid;
-    uint64_t object_id;
-    PdockerVkImage *image;
-    VkImageViewType view_type;
-    VkFormat format;
-    VkComponentMapping components;
-    VkImageSubresourceRange subresource_range;
-    VkSampleCountFlagBits samples;
-    uint64_t generation;
-} PdockerVkImageViewSnapshot;
 
 typedef struct {
     PdockerVkImageView *image_view;
@@ -2256,6 +2301,8 @@ static void record_graphics_dynamic_state_bytes(
     }
 }
 
+static bool validate_buffer_backing_range(const PdockerVkBuffer *buffer);
+
 static bool snapshot_image_view_state(
         PdockerVkImageViewSnapshot *dst,
         PdockerVkImageView *view) {
@@ -2273,6 +2320,98 @@ static bool snapshot_image_view_state(
     dst->samples = view->image->samples;
     dst->generation = view->generation;
     return true;
+}
+
+static bool snapshot_buffer_state(
+        PdockerVkBufferSnapshot *dst,
+        PdockerVkBuffer *buffer) {
+    if (!dst) return false;
+    memset(dst, 0, sizeof(*dst));
+    if (!buffer) return true;
+    if (!validate_buffer_backing_range(buffer)) return false;
+    dst->valid = true;
+    dst->object_id = pdocker_vk_buffer_object_id(buffer);
+    dst->memory = buffer->memory;
+    dst->size = buffer->size;
+    dst->usage = buffer->usage;
+    dst->memory_offset = buffer->memory_offset;
+    return true;
+}
+
+static bool snapshot_buffer_view_state(
+        PdockerVkBufferViewSnapshot *dst,
+        PdockerVkBufferView *view) {
+    if (!dst) return false;
+    memset(dst, 0, sizeof(*dst));
+    if (!view) return true;
+    if (!view->buffer) return false;
+    PdockerVkBufferSnapshot buffer_snapshot;
+    if (!snapshot_buffer_state(&buffer_snapshot, view->buffer) || !buffer_snapshot.valid) {
+        return false;
+    }
+    dst->valid = true;
+    dst->object_id = pdocker_vk_buffer_view_object_id(view);
+    dst->buffer = view->buffer;
+    dst->buffer_snapshot = buffer_snapshot;
+    dst->format = view->format;
+    dst->offset = view->offset;
+    dst->range = view->range;
+    dst->generation = view->generation;
+    return true;
+}
+
+static bool snapshot_sampler_state(
+        PdockerVkSamplerSnapshot *dst,
+        PdockerVkSampler *sampler) {
+    if (!dst) return false;
+    memset(dst, 0, sizeof(*dst));
+    if (!sampler) return true;
+    dst->valid = true;
+    dst->object_id = pdocker_vk_sampler_object_id(sampler);
+    dst->mag_filter = sampler->mag_filter;
+    dst->min_filter = sampler->min_filter;
+    dst->mipmap_mode = sampler->mipmap_mode;
+    dst->address_mode_u = sampler->address_mode_u;
+    dst->address_mode_v = sampler->address_mode_v;
+    dst->address_mode_w = sampler->address_mode_w;
+    dst->mip_lod_bias = sampler->mip_lod_bias;
+    dst->anisotropy_enable = sampler->anisotropy_enable;
+    dst->max_anisotropy = sampler->max_anisotropy;
+    dst->compare_enable = sampler->compare_enable;
+    dst->compare_op = sampler->compare_op;
+    dst->min_lod = sampler->min_lod;
+    dst->max_lod = sampler->max_lod;
+    dst->border_color = sampler->border_color;
+    dst->unnormalized_coordinates = sampler->unnormalized_coordinates;
+    dst->generation = sampler->generation;
+    return true;
+}
+
+static bool descriptor_binding_snapshot_objects(PdockerVkDescriptorBinding *binding) {
+    if (!binding) return false;
+    memset(&binding->buffer_snapshot, 0, sizeof(binding->buffer_snapshot));
+    memset(&binding->buffer_view_snapshot, 0, sizeof(binding->buffer_view_snapshot));
+    memset(&binding->image_view_snapshot, 0, sizeof(binding->image_view_snapshot));
+    memset(&binding->sampler_snapshot, 0, sizeof(binding->sampler_snapshot));
+    if (binding->buffer && !snapshot_buffer_state(&binding->buffer_snapshot, binding->buffer)) {
+        return false;
+    }
+    if (binding->buffer_view && !snapshot_buffer_view_state(&binding->buffer_view_snapshot, binding->buffer_view)) {
+        return false;
+    }
+    if (binding->image_view && !snapshot_image_view_state(&binding->image_view_snapshot, binding->image_view)) {
+        return false;
+    }
+    if (binding->sampler && !snapshot_sampler_state(&binding->sampler_snapshot, binding->sampler)) {
+        return false;
+    }
+    return true;
+}
+
+static bool descriptor_binding_has_bound_object(const PdockerVkDescriptorBinding *binding) {
+    return binding &&
+           (binding->buffer_snapshot.valid || binding->buffer_view_snapshot.valid ||
+            binding->image_view_snapshot.valid || binding->sampler_snapshot.valid);
 }
 
 static bool copy_rendering_attachment_state(
@@ -5494,6 +5633,74 @@ static int collect_graphics_buffer_resource(
     return (int)index;
 }
 
+static int find_graphics_buffer_snapshot_resource_index(
+        PdockerVkBuffer *const *buffers,
+        const uint32_t *resource_indices,
+        const PdockerGpuVulkanDispatchV5ResourceEntry *resources,
+        size_t count,
+        const PdockerVkBuffer *buffer,
+        uint64_t object_id) {
+    for (size_t i = 0; i < count; ++i) {
+        uint32_t resource_index = resource_indices[i];
+        if (buffers[i] == buffer && resources[resource_index].resource_id == object_id) {
+            return (int)resource_index;
+        }
+    }
+    return -1;
+}
+
+static int collect_graphics_buffer_resource_snapshot(
+        PdockerGpuVulkanDispatchV5ResourceEntry *resources,
+        size_t *resource_count,
+        PdockerVkMemory **memory_objects,
+        uint32_t *memory_resource_indices,
+        size_t *memory_count,
+        PdockerVkBuffer **buffer_objects,
+        uint32_t *buffer_resource_indices,
+        size_t *buffer_count,
+        int *fds,
+        size_t *fd_count,
+        PdockerVkBuffer *buffer,
+        const PdockerVkBufferSnapshot *snapshot,
+        uint64_t generation) {
+    if (!resources || !resource_count || !buffer_objects || !buffer_resource_indices ||
+        !buffer_count || !snapshot || !snapshot->valid || !snapshot->memory ||
+        snapshot->size == 0) {
+        return -EINVAL;
+    }
+    if (snapshot->memory_offset > (VkDeviceSize)snapshot->memory->size ||
+        (VkDeviceSize)snapshot->size > (VkDeviceSize)snapshot->memory->size - snapshot->memory_offset) {
+        return -ERANGE;
+    }
+    int existing = find_graphics_buffer_snapshot_resource_index(
+        buffer_objects, buffer_resource_indices, resources, *buffer_count, buffer, snapshot->object_id);
+    if (existing >= 0) return existing;
+    int memory_index = collect_graphics_memory_resource(
+        resources, resource_count, memory_objects, memory_resource_indices, memory_count,
+        fds, fd_count, snapshot->memory, generation);
+    if (memory_index < 0) return memory_index;
+    if (*resource_count >= PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_RESOURCES ||
+        *buffer_count >= PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_RESOURCES) {
+        return -E2BIG;
+    }
+    uint32_t index = (uint32_t)(*resource_count)++;
+    PdockerGpuVulkanDispatchV5ResourceEntry *entry = &resources[index];
+    memset(entry, 0, sizeof(*entry));
+    entry->resource_type = PDOCKER_GPU_V5_RESOURCE_TYPE_BUFFER;
+    entry->resource_flags = PDOCKER_GPU_V5_RESOURCE_FLAG_MUTABLE;
+    entry->resource_id = snapshot->object_id;
+    entry->parent_resource_index = (uint32_t)memory_index;
+    entry->fd_index = PDOCKER_GPU_V5_RESOURCE_FD_NONE;
+    entry->memory_offset = (uint64_t)snapshot->memory_offset;
+    entry->size = (uint64_t)snapshot->size;
+    entry->usage = 0;
+    entry->generation = generation;
+    buffer_objects[*buffer_count] = buffer;
+    buffer_resource_indices[*buffer_count] = index;
+    (*buffer_count)++;
+    return (int)index;
+}
+
 static int find_image_table_index(PdockerVkImage *const *images,
                                   size_t count,
                                   const PdockerVkImage *image);
@@ -5844,8 +6051,11 @@ static int collect_graphics_image_view_snapshot_entry(
         !snapshot || !snapshot->valid || !snapshot->image) {
         return -EINVAL;
     }
-    int existing = find_image_view_table_index(image_view_objects, *image_view_count, view);
-    if (existing >= 0) return existing;
+    for (size_t i = 0; i < *image_view_count; ++i) {
+        if (image_view_objects[i] == view && image_view_entries[i].view_id == snapshot->object_id) {
+            return (int)i;
+        }
+    }
     if (*image_view_count >= PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGE_VIEWS) return -E2BIG;
     int image_index = collect_graphics_image_entry(
         image_entries, image_objects, image_count,
@@ -6042,6 +6252,46 @@ static int collect_graphics_sampler_entry(
     entry->border_color = sampler->border_color;
     entry->unnormalized_coordinates = sampler->unnormalized_coordinates;
     entry->generation = sampler->generation ? sampler->generation : generation;
+    sampler_objects[index] = sampler;
+    return (int)index;
+}
+
+static int collect_graphics_sampler_snapshot_entry(
+        PdockerGpuVulkanDispatchV5SamplerEntry *sampler_entries,
+        PdockerVkSampler **sampler_objects,
+        size_t *sampler_count,
+        PdockerVkSampler *sampler,
+        const PdockerVkSamplerSnapshot *snapshot,
+        uint64_t generation) {
+    if (!sampler_entries || !sampler_objects || !sampler_count || !snapshot || !snapshot->valid) {
+        return -EINVAL;
+    }
+    for (size_t i = 0; i < *sampler_count; ++i) {
+        if (sampler_objects[i] == sampler && sampler_entries[i].sampler_id == snapshot->object_id) {
+            return (int)i;
+        }
+    }
+    if (*sampler_count >= PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_SAMPLERS) return -E2BIG;
+    uint32_t index = (uint32_t)(*sampler_count)++;
+    PdockerGpuVulkanDispatchV5SamplerEntry *entry = &sampler_entries[index];
+    memset(entry, 0, sizeof(*entry));
+    entry->sampler_id = snapshot->object_id;
+    entry->mag_filter = snapshot->mag_filter;
+    entry->min_filter = snapshot->min_filter;
+    entry->mipmap_mode = snapshot->mipmap_mode;
+    entry->address_mode_u = snapshot->address_mode_u;
+    entry->address_mode_v = snapshot->address_mode_v;
+    entry->address_mode_w = snapshot->address_mode_w;
+    entry->mip_lod_bias_bits = float_bits_u32(snapshot->mip_lod_bias);
+    entry->anisotropy_enable = snapshot->anisotropy_enable;
+    entry->max_anisotropy_bits = float_bits_u32(snapshot->max_anisotropy);
+    entry->compare_enable = snapshot->compare_enable;
+    entry->compare_op = snapshot->compare_op;
+    entry->min_lod_bits = float_bits_u32(snapshot->min_lod);
+    entry->max_lod_bits = float_bits_u32(snapshot->max_lod);
+    entry->border_color = snapshot->border_color;
+    entry->unnormalized_coordinates = snapshot->unnormalized_coordinates;
+    entry->generation = snapshot->generation ? snapshot->generation : generation;
     sampler_objects[index] = sampler;
     return (int)index;
 }
@@ -6302,7 +6552,7 @@ static int collect_graphics_descriptor_entries(
                 const PdockerVkDescriptorBinding *binding =
                     descriptor_set_binding_slot_const(set, binding_index, array_element);
                 if (!binding) return -EPROTO;
-                if (!binding->buffer && !binding->buffer_view && !binding->image_view && !binding->sampler) {
+                if (!descriptor_binding_has_bound_object(binding)) {
                     /* Graphics replay ABI currently transports descriptors that
                      * were present in the bound set, not the full
                      * VkDescriptorSetLayoutCreateInfo.  Do not silently turn an
@@ -6316,7 +6566,8 @@ static int collect_graphics_descriptor_entries(
                     continue;
                 }
                 if (descriptor_type_supported_by_v5_object_transport(binding->descriptor_type) ||
-                    binding->buffer_view || binding->image_view || binding->sampler) {
+                    binding->buffer_view_snapshot.valid || binding->image_view_snapshot.valid ||
+                    binding->sampler_snapshot.valid) {
                     VkDescriptorType descriptor_type = binding->descriptor_type;
                     if (!descriptor_type_supported_by_v5_object_transport(descriptor_type) &&
                         !descriptor_type_requires_buffer_view(descriptor_type)) {
@@ -6325,27 +6576,31 @@ static int collect_graphics_descriptor_entries(
                     if (descriptor_type_requires_buffer_view(descriptor_type)) {
                         if (!executor_supports_vulkan_graphics_v627_buffer_views() ||
                             !buffer_view_entries || !buffer_view_count || !need_v627_buffer_views ||
-                            !binding->buffer_view || !binding->buffer_view->buffer) {
+                            !binding->buffer_view_snapshot.valid ||
+                            !binding->buffer_view_snapshot.buffer_snapshot.valid) {
                             return -EOPNOTSUPP;
                         }
-                        PdockerVkBufferView *view = binding->buffer_view;
+                        const PdockerVkBufferViewSnapshot *view_snapshot = &binding->buffer_view_snapshot;
                         PdockerVkDescriptorBinding texel_transport_binding = *binding;
-                        texel_transport_binding.buffer = view->buffer;
+                        texel_transport_binding.buffer = view_snapshot->buffer;
+                        texel_transport_binding.buffer_snapshot = view_snapshot->buffer_snapshot;
                         texel_transport_binding.buffer_view = NULL;
-                        texel_transport_binding.offset = view->offset;
-                        texel_transport_binding.base_offset = view->offset;
-                        texel_transport_binding.range = view->range;
+                        memset(&texel_transport_binding.buffer_view_snapshot, 0,
+                               sizeof(texel_transport_binding.buffer_view_snapshot));
+                        texel_transport_binding.offset = view_snapshot->offset;
+                        texel_transport_binding.base_offset = view_snapshot->offset;
+                        texel_transport_binding.range = view_snapshot->range;
                         texel_transport_binding.dynamic = false;
                         texel_transport_binding.dynamic_offset = 0;
                         size_t bytes = 0;
                         int shape_rc = validate_descriptor_transport_shape(
                             &texel_transport_binding, set_index, api_binding, &bytes);
                         if (shape_rc < 0) return shape_rc;
-                        int buffer_index = collect_graphics_buffer_resource(
+                        int buffer_index = collect_graphics_buffer_resource_snapshot(
                             resources, resource_count,
                             memory_objects, memory_resource_indices, memory_count,
                             buffer_objects, buffer_resource_indices, buffer_count,
-                            fds, fd_count, view->buffer, generation);
+                            fds, fd_count, view_snapshot->buffer, &view_snapshot->buffer_snapshot, generation);
                         if (buffer_index < 0) return buffer_index;
                         if (*descriptor_count >= PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS ||
                             *buffer_view_count >= PDOCKER_GPU_VULKAN_GRAPHICS_V627_MAX_BUFFER_VIEWS) {
@@ -6367,10 +6622,10 @@ static int collect_graphics_descriptor_entries(
                         descriptor->image_view_index = PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE;
                         descriptor->sampler_index = PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE;
                         descriptor->image_layout = 0;
-                        descriptor->resource_id = pdocker_vk_buffer_object_id(view->buffer);
-                        descriptor->buffer_offset = (uint64_t)view->offset;
-                        descriptor->range = (uint64_t)view->range;
-                        descriptor->transfer_offset = (uint64_t)view->offset;
+                        descriptor->resource_id = view_snapshot->buffer_snapshot.object_id;
+                        descriptor->buffer_offset = (uint64_t)view_snapshot->offset;
+                        descriptor->range = (uint64_t)view_snapshot->range;
+                        descriptor->transfer_offset = (uint64_t)view_snapshot->offset;
                         descriptor->transfer_size = (uint64_t)bytes;
                         descriptor->dynamic_offset = 0;
                         PdockerGpuVulkanGraphicsV627BufferViewEntry *buffer_view_entry =
@@ -6379,34 +6634,36 @@ static int collect_graphics_descriptor_entries(
                         buffer_view_entry->command_index = command_index;
                         buffer_view_entry->descriptor_index = descriptor_index;
                         buffer_view_entry->resource_index = (uint32_t)buffer_index;
-                        buffer_view_entry->format = (uint32_t)view->format;
-                        buffer_view_entry->buffer_view_id = pdocker_vk_buffer_view_object_id(view);
-                        buffer_view_entry->buffer_offset = (uint64_t)view->offset;
-                        buffer_view_entry->range = (uint64_t)view->range;
-                        buffer_view_entry->generation = view->generation;
+                        buffer_view_entry->format = (uint32_t)view_snapshot->format;
+                        buffer_view_entry->buffer_view_id = view_snapshot->object_id;
+                        buffer_view_entry->buffer_offset = (uint64_t)view_snapshot->offset;
+                        buffer_view_entry->range = (uint64_t)view_snapshot->range;
+                        buffer_view_entry->generation = view_snapshot->generation;
                         *need_v627_buffer_views = true;
                         continue;
                     }
                     const bool requires_view = descriptor_type_requires_image_view(descriptor_type);
                     const bool requires_sampler = descriptor_type_requires_sampler(descriptor_type);
-                    if ((requires_view && !binding->image_view) ||
-                        (requires_sampler && !binding->sampler)) {
+                    if ((requires_view && !binding->image_view_snapshot.valid) ||
+                        (requires_sampler && !binding->sampler_snapshot.valid)) {
                         return -EINVAL;
                     }
                     uint32_t view_index = PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE;
                     uint32_t sampler_index = PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE;
                     if (requires_view) {
-                        int collected_view = collect_graphics_image_view_entry(
+                        int collected_view = collect_graphics_image_view_snapshot_entry(
                             image_view_entries, image_view_objects, image_view_count,
                             image_entries, image_objects, image_count,
                             resources, resource_count, memory_objects, memory_resource_indices,
-                            memory_count, fds, fd_count, binding->image_view, generation);
+                            memory_count, fds, fd_count, binding->image_view,
+                            &binding->image_view_snapshot, generation);
                         if (collected_view < 0) return collected_view;
                         view_index = (uint32_t)collected_view;
                     }
                     if (requires_sampler) {
-                        int collected_sampler = collect_graphics_sampler_entry(
-                            sampler_entries, sampler_objects, sampler_count, binding->sampler, generation);
+                        int collected_sampler = collect_graphics_sampler_snapshot_entry(
+                            sampler_entries, sampler_objects, sampler_count, binding->sampler,
+                            &binding->sampler_snapshot, generation);
                         if (collected_sampler < 0) return collected_sampler;
                         sampler_index = (uint32_t)collected_sampler;
                     }
@@ -6430,8 +6687,8 @@ static int collect_graphics_descriptor_entries(
                     descriptor->image_layout = binding->image_layout;
                     descriptor->resource_id =
                         view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE
-                            ? pdocker_vk_image_view_object_id(image_view_objects[view_index])
-                            : pdocker_vk_sampler_object_id(sampler_objects[sampler_index]);
+                            ? binding->image_view_snapshot.object_id
+                            : binding->sampler_snapshot.object_id;
                     continue;
                 }
                 if (!descriptor_type_supported_by_v4_transport(binding->descriptor_type)) {
@@ -6441,11 +6698,11 @@ static int collect_graphics_descriptor_entries(
                 int rc = validate_descriptor_transport_shape(
                     binding, set_index, api_binding, &bytes);
                 if (rc < 0) return rc;
-                int buffer_index = collect_graphics_buffer_resource(
+                int buffer_index = collect_graphics_buffer_resource_snapshot(
                     resources, resource_count,
                     memory_objects, memory_resource_indices, memory_count,
                     buffer_objects, buffer_resource_indices, buffer_count,
-                    fds, fd_count, binding->buffer, generation);
+                    fds, fd_count, binding->buffer, &binding->buffer_snapshot, generation);
                 if (buffer_index < 0) return buffer_index;
                 if (*descriptor_count >= PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS) {
                     return -E2BIG;
@@ -6470,7 +6727,7 @@ static int collect_graphics_descriptor_entries(
                 descriptor->image_view_index = PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE;
                 descriptor->sampler_index = PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE;
                 descriptor->image_layout = 0;
-                descriptor->resource_id = pdocker_vk_buffer_object_id(binding->buffer);
+                descriptor->resource_id = binding->buffer_snapshot.object_id;
                 descriptor->buffer_offset = (uint64_t)binding->base_offset;
                 descriptor->range = (uint64_t)binding->range;
                 descriptor->transfer_offset = (uint64_t)binding->offset;
@@ -10084,6 +10341,9 @@ static void descriptor_set_apply_immutable_samplers(PdockerVkDescriptorSet *set)
             descriptor->sampler = sampler;
             descriptor->descriptor_type = type;
             descriptor->dynamic = false;
+            if (!descriptor_binding_snapshot_objects(descriptor)) {
+                set->unsupported_descriptor_type = true;
+            }
         }
     }
     set->has_image_descriptor = descriptor_set_has_image_descriptor(set);
@@ -12981,7 +13241,11 @@ static void execute_recorded_copy_ops(PdockerVkCommandBuffer *cmd) {
 }
 
 static size_t descriptor_binding_size(const PdockerVkDescriptorBinding *binding) {
-    if (!binding || !binding->buffer) return 0;
+    if (!binding) return 0;
+    const size_t buffer_size = binding->buffer_snapshot.valid
+        ? binding->buffer_snapshot.size
+        : (binding->buffer ? binding->buffer->size : 0u);
+    if (buffer_size == 0) return 0;
     /*
      * Vulkan descriptor ranges are scoped to the VkBuffer, not to the backing
      * VkDeviceMemory allocation.  llama.cpp suballocates several VkBuffers
@@ -12989,8 +13253,8 @@ static size_t descriptor_binding_size(const PdockerVkDescriptorBinding *binding)
      * allocation tail for VK_WHOLE_SIZE and can hand adjacent suballocations to
      * the Android executor.  That is silent data corruption, not just wasted IO.
      */
-    if (binding->offset > binding->buffer->size) return 0;
-    size_t available_in_buffer = binding->buffer->size - (size_t)binding->offset;
+    if (binding->offset > (VkDeviceSize)buffer_size) return 0;
+    size_t available_in_buffer = buffer_size - (size_t)binding->offset;
     if (binding->range == VK_WHOLE_SIZE) return available_in_buffer;
     return (size_t)binding->range < available_in_buffer
         ? (size_t)binding->range
@@ -13003,35 +13267,46 @@ static int validate_descriptor_transport_shape(
         uint32_t binding_index,
         size_t *effective_size) {
     if (effective_size) *effective_size = 0;
-    if (!binding || !binding->buffer || !binding->buffer->memory) return -EINVAL;
+    if (!binding) return -EINVAL;
 
+    const bool has_snapshot = binding->buffer_snapshot.valid;
     const PdockerVkBuffer *buffer = binding->buffer;
-    const PdockerVkMemory *memory = buffer->memory;
-    if (memory->fd < 0) return -EINVAL;
+    const PdockerVkMemory *memory = has_snapshot
+        ? binding->buffer_snapshot.memory
+        : (buffer ? buffer->memory : NULL);
+    const size_t buffer_size = has_snapshot
+        ? binding->buffer_snapshot.size
+        : (buffer ? buffer->size : 0u);
+    const VkDeviceSize memory_offset = has_snapshot
+        ? binding->buffer_snapshot.memory_offset
+        : (buffer ? buffer->memory_offset : 0u);
+    if (!memory || buffer_size == 0 || memory->fd < 0) return -EINVAL;
 
-    if (binding->offset > (VkDeviceSize)buffer->size) {
+    if (binding->offset > (VkDeviceSize)buffer_size) {
         fprintf(stderr,
                 "pdocker-vulkan-icd: rejecting descriptor past buffer"
-                " set=%u binding=%u offset=%llu buffer_size=%zu\n",
+                " set=%u binding=%u offset=%llu buffer_size=%zu snapshot=%u\n",
                 set_index,
                 binding_index,
                 (unsigned long long)binding->offset,
-                buffer->size);
+                buffer_size,
+                has_snapshot ? 1u : 0u);
         return -ERANGE;
     }
 
-    const size_t available_in_buffer = buffer->size - (size_t)binding->offset;
+    const size_t available_in_buffer = buffer_size - (size_t)binding->offset;
     size_t bytes = available_in_buffer;
     if (binding->range != VK_WHOLE_SIZE) {
         if (binding->range > (VkDeviceSize)available_in_buffer) {
             fprintf(stderr,
                     "pdocker-vulkan-icd: rejecting descriptor range outside buffer"
-                    " set=%u binding=%u offset=%llu range=%llu buffer_size=%zu\n",
+                    " set=%u binding=%u offset=%llu range=%llu buffer_size=%zu snapshot=%u\n",
                     set_index,
                     binding_index,
                     (unsigned long long)binding->offset,
                     (unsigned long long)binding->range,
-                    buffer->size);
+                    buffer_size,
+                    has_snapshot ? 1u : 0u);
             return -ERANGE;
         }
         bytes = (size_t)binding->range;
@@ -13039,27 +13314,29 @@ static int validate_descriptor_transport_shape(
     if (bytes == 0) {
         fprintf(stderr,
                 "pdocker-vulkan-icd: rejecting empty descriptor"
-                " set=%u binding=%u offset=%llu range=%llu buffer_size=%zu\n",
+                " set=%u binding=%u offset=%llu range=%llu buffer_size=%zu snapshot=%u\n",
                 set_index,
                 binding_index,
                 (unsigned long long)binding->offset,
                 (unsigned long long)binding->range,
-                buffer->size);
+                buffer_size,
+                has_snapshot ? 1u : 0u);
         return -EINVAL;
     }
 
-    if (buffer->memory_offset > (VkDeviceSize)memory->size ||
-        binding->offset > (VkDeviceSize)memory->size - buffer->memory_offset ||
-        (VkDeviceSize)bytes > (VkDeviceSize)memory->size - buffer->memory_offset - binding->offset) {
+    if (memory_offset > (VkDeviceSize)memory->size ||
+        binding->offset > (VkDeviceSize)memory->size - memory_offset ||
+        (VkDeviceSize)bytes > (VkDeviceSize)memory->size - memory_offset - binding->offset) {
         fprintf(stderr,
                 "pdocker-vulkan-icd: rejecting descriptor outside backing memory"
-                " set=%u binding=%u memory_offset=%llu offset=%llu size=%zu memory_size=%zu\n",
+                " set=%u binding=%u memory_offset=%llu offset=%llu size=%zu memory_size=%zu snapshot=%u\n",
                 set_index,
                 binding_index,
-                (unsigned long long)buffer->memory_offset,
+                (unsigned long long)memory_offset,
                 (unsigned long long)binding->offset,
                 bytes,
-                memory->size);
+                memory->size,
+                has_snapshot ? 1u : 0u);
         return -ERANGE;
     }
 
@@ -18260,6 +18537,16 @@ VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets(
                             immutable_sampler ? 1u : 0u);
                     goto fail_closed;
                 }
+                if (!descriptor_binding_snapshot_objects(slot)) {
+                    set->unsupported_descriptor_type = true;
+                    update_rc = -EINVAL;
+                    fprintf(stderr,
+                            "pdocker-vulkan-icd: descriptor image write failed to snapshot object state binding=%u array=%u type=%u\n",
+                            binding,
+                            array_element,
+                            w->descriptorType);
+                    goto fail_closed;
+                }
                 set->has_image_descriptor = descriptor_set_has_image_descriptor(set);
                 if (slot->image_view && slot->image_view->image) {
                     trace_image_layout_mismatch(
@@ -18327,6 +18614,16 @@ VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets(
                             w->descriptorType);
                     goto fail_closed;
                 }
+                if (!descriptor_binding_snapshot_objects(slot)) {
+                    set->unsupported_descriptor_type = true;
+                    update_rc = -EINVAL;
+                    fprintf(stderr,
+                            "pdocker-vulkan-icd: descriptor texel-buffer write failed to snapshot object state binding=%u array=%u type=%u\n",
+                            binding,
+                            array_element,
+                            w->descriptorType);
+                    goto fail_closed;
+                }
                 set->has_image_descriptor = descriptor_set_has_image_descriptor(set);
             }
             continue;
@@ -18367,6 +18664,16 @@ VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets(
             slot->range = w->pBufferInfo[j].range;
             slot->descriptor_type = w->descriptorType;
             slot->dynamic = descriptor_type_is_dynamic(w->descriptorType);
+            if (!descriptor_binding_snapshot_objects(slot)) {
+                set->unsupported_descriptor_type = true;
+                update_rc = -EINVAL;
+                fprintf(stderr,
+                        "pdocker-vulkan-icd: descriptor buffer write failed to snapshot object state binding=%u array=%u type=%u\n",
+                        binding,
+                        array_element,
+                        w->descriptorType);
+                goto fail_closed;
+            }
             set->has_image_descriptor = descriptor_set_has_image_descriptor(set);
             if (trace_allocations()) {
                 PdockerVkBuffer *buffer = slot->buffer;

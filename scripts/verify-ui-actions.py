@@ -259,7 +259,7 @@ def main() -> int:
         and "sampler-anisotropy-limit-unsupported" in vulkan_icd_src,
     )
     descriptor_size_src = vulkan_icd_src.split("static size_t descriptor_binding_size(const PdockerVkDescriptorBinding *binding) {", 1)[1].split("\n}", 1)[0]
-    require("vulkan descriptor VK_WHOLE_SIZE is clamped to VkBuffer not allocation tail", "descriptor ranges are scoped to the VkBuffer" in descriptor_size_src and "available_in_buffer = binding->buffer->size - (size_t)binding->offset" in descriptor_size_src and "if (binding->range == VK_WHOLE_SIZE) return available_in_buffer;" in descriptor_size_src and "buffer_available(binding->buffer, binding->offset)" not in descriptor_size_src)
+    require("vulkan descriptor VK_WHOLE_SIZE is clamped to VkBuffer not allocation tail", "descriptor ranges are scoped to the VkBuffer" in descriptor_size_src and "buffer_snapshot.valid" in descriptor_size_src and "available_in_buffer = buffer_size - (size_t)binding->offset" in descriptor_size_src and "if (binding->range == VK_WHOLE_SIZE) return available_in_buffer;" in descriptor_size_src and "buffer_available(binding->buffer, binding->offset)" not in descriptor_size_src)
     require(
         "vulkan icd tracks descriptor arrays copies and dynamic offsets",
         "descriptor_linear_slot" in vulkan_icd_src
