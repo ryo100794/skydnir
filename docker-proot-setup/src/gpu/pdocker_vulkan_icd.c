@@ -1243,8 +1243,9 @@ typedef struct {
     VkDeviceSize index_offset;
     VkIndexType index_type;
     bool index_buffer_bound;
-    PdockerVkDynamicStateSnapshot dynamic_states[PDOCKER_VK_MAX_GRAPHICS_DYNAMIC_STATES];
+    PdockerVkDynamicStateSnapshot *dynamic_states;
     uint32_t dynamic_state_count;
+    uint32_t dynamic_state_capacity;
     bool vertex_buffer_bound;
     uint64_t requested_feature_mask;
 } PdockerVkCommandBuffer;
@@ -1656,6 +1657,7 @@ PDOCKER_DEFINE_COMMAND_BUFFER_RESERVE_VECTOR(command_buffer_reserve_clear_attach
 PDOCKER_DEFINE_COMMAND_BUFFER_RESERVE_VECTOR(command_buffer_reserve_clear_attachment_ops, clear_attachment_ops, clear_attachment_op_count, clear_attachment_op_capacity, PdockerVkClearAttachmentSnapshot, PDOCKER_VK_MAX_CLEAR_ATTACHMENTS)
 PDOCKER_DEFINE_COMMAND_BUFFER_RESERVE_VECTOR(command_buffer_reserve_clear_rect_ops, clear_rect_ops, clear_rect_op_count, clear_rect_op_capacity, PdockerVkClearRectSnapshot, PDOCKER_VK_MAX_CLEAR_RECTS)
 PDOCKER_DEFINE_COMMAND_BUFFER_RESERVE_VECTOR(command_buffer_reserve_graphics_dynamic_offsets, graphics_dynamic_offsets, graphics_dynamic_offset_count, graphics_dynamic_offset_capacity, uint32_t, PDOCKER_VK_MAX_GRAPHICS_DYNAMIC_OFFSETS)
+PDOCKER_DEFINE_COMMAND_BUFFER_RESERVE_VECTOR(command_buffer_reserve_dynamic_states, dynamic_states, dynamic_state_count, dynamic_state_capacity, PdockerVkDynamicStateSnapshot, PDOCKER_VK_MAX_GRAPHICS_DYNAMIC_STATES)
 #undef PDOCKER_DEFINE_COMMAND_BUFFER_RESERVE_VECTOR
 
 static bool command_buffer_reserve_graphics_draw_ops(PdockerVkCommandBuffer *cmd, uint32_t extra) {
@@ -1939,6 +1941,10 @@ static void command_buffer_destroy_record_vectors(PdockerVkCommandBuffer *cmd) {
     cmd->graphics_dynamic_offsets = NULL;
     cmd->graphics_dynamic_offset_count = 0;
     cmd->graphics_dynamic_offset_capacity = 0;
+    free(cmd->dynamic_states);
+    cmd->dynamic_states = NULL;
+    cmd->dynamic_state_count = 0;
+    cmd->dynamic_state_capacity = 0;
     free(cmd->dispatch_ops);
     cmd->dispatch_ops = NULL;
     cmd->dispatch_op_count = 0;
@@ -1992,8 +1998,7 @@ static void record_graphics_dynamic_state_bytes(
         const void *data,
         size_t data_size) {
     if (!cmd) return;
-    if (cmd->dynamic_state_count >= PDOCKER_VK_MAX_GRAPHICS_DYNAMIC_STATES ||
-        data_size > sizeof(cmd->dynamic_states[0].data)) {
+    if (data_size > sizeof(((PdockerVkDynamicStateSnapshot *)0)->data)) {
         cmd->graphics_unsupported = true;
         return;
     }
@@ -2035,6 +2040,11 @@ static void record_graphics_dynamic_state_bytes(
             command_buffer_mark_recording_failed(cmd, "dynamic-logic-op-feature-not-enabled");
             return;
         }
+    }
+    if (!command_buffer_reserve_dynamic_states(cmd, 1)) {
+        cmd->graphics_unsupported = true;
+        command_buffer_mark_recording_failed(cmd, "dynamic-state-record-overflow");
+        return;
     }
     PdockerVkDynamicStateSnapshot *state = &cmd->dynamic_states[cmd->dynamic_state_count++];
     memset(state, 0, sizeof(*state));
@@ -2226,6 +2236,7 @@ static bool append_secondary_command_buffer(
         !command_buffer_reserve_clear_attachment_ops(dst, src->clear_attachment_op_count) ||
         !command_buffer_reserve_clear_rect_ops(dst, src->clear_rect_op_count) ||
         !command_buffer_reserve_graphics_dynamic_offsets(dst, src->graphics_dynamic_offset_count) ||
+        !command_buffer_reserve_dynamic_states(dst, src->dynamic_state_count) ||
         !command_buffer_reserve_event_wait_refs(dst, src->event_wait_ref_count) ||
         !command_buffer_reserve_command_ops(dst, src->command_op_count) ||
         !command_buffer_reserve_graphics_command_ops(dst, src->graphics_command_op_count) ||
@@ -20421,7 +20432,6 @@ VKAPI_ATTR VkResult VKAPI_CALL vkBeginCommandBuffer(
     cmd->index_offset = 0;
     cmd->index_type = VK_INDEX_TYPE_UINT16;
     cmd->index_buffer_bound = false;
-    memset(cmd->dynamic_states, 0, sizeof(cmd->dynamic_states));
     cmd->dynamic_state_count = 0;
     cmd->vertex_buffer_bound = false;
     if (!command_buffer_begin_pnext_supported(pBeginInfo)) {
@@ -21461,7 +21471,10 @@ static void record_graphics_draw_command(
     snapshot->index_offset = cmd->index_offset;
     snapshot->index_type = cmd->index_type;
     snapshot->index_buffer_bound = cmd->index_buffer_bound;
-    memcpy(snapshot->dynamic_states, cmd->dynamic_states, sizeof(snapshot->dynamic_states));
+    if (cmd->dynamic_state_count > 0) {
+        memcpy(snapshot->dynamic_states, cmd->dynamic_states,
+               sizeof(snapshot->dynamic_states[0]) * cmd->dynamic_state_count);
+    }
     snapshot->dynamic_state_count = cmd->dynamic_state_count;
     snapshot->dynamic_rendering_active = cmd->dynamic_rendering_active;
     snapshot->render_pass_active = cmd->render_pass_active;

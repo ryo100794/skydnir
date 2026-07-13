@@ -1258,6 +1258,11 @@ class GpuAbiContractTest(unittest.TestCase):
             "uint32_t graphics_dynamic_offset_capacity;",
             "command_buffer_reserve_graphics_dynamic_offsets",
             "free(cmd->graphics_dynamic_offsets);",
+            "PdockerVkDynamicStateSnapshot *dynamic_states;",
+            "uint32_t dynamic_state_capacity;",
+            "command_buffer_reserve_dynamic_states",
+            "free(cmd->dynamic_states);",
+            "dynamic-state-record-overflow",
             "append_graphics_command_record",
             "cmd->graphics_descriptor_bind_op_count = 0;",
             "cmd->graphics_rendering_op_count = 0;",
@@ -9609,6 +9614,21 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("clear_attachments_command_ops[PDOCKER_VK_MAX_CLEAR_ATTACHMENTS_COMMANDS]", icd)
         self.assertNotIn("clear_attachment_ops[PDOCKER_VK_MAX_CLEAR_ATTACHMENTS]", icd)
         self.assertNotIn("clear_rect_ops[PDOCKER_VK_MAX_CLEAR_RECTS]", icd)
+
+    def test_vulkan_icd_uses_heap_backed_command_dynamic_state_records(self):
+        icd = VULKAN_ICD.read_text()
+        for marker in [
+            "PdockerVkDynamicStateSnapshot *dynamic_states;",
+            "uint32_t dynamic_state_capacity;",
+            "command_buffer_reserve_dynamic_states",
+            "free(cmd->dynamic_states);",
+            "dynamic-state-record-overflow",
+            "if (cmd->dynamic_state_count > 0)",
+            "sizeof(snapshot->dynamic_states[0]) * cmd->dynamic_state_count",
+        ]:
+            self.assertIn(marker, icd)
+        self.assertNotIn("memset(cmd->dynamic_states, 0, sizeof(cmd->dynamic_states))", icd)
+        self.assertNotIn("memcpy(snapshot->dynamic_states, cmd->dynamic_states, sizeof(snapshot->dynamic_states))", icd)
 
     def test_vulkan_icd_records_buffer_image_copy_commands_before_dispatch(self):
         icd = VULKAN_ICD.read_text()
