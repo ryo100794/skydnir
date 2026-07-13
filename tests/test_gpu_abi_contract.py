@@ -13114,6 +13114,31 @@ class GpuAbiContractTest(unittest.TestCase):
                 body.index("validate_bound_descriptor_layouts_before_dispatch(cmd)"),
             )
 
+    def test_vulkan_dynamic_rendering_secondary_contents_flag_is_flattened_for_replay(self):
+        executor = GPU_EXECUTOR.read_text()
+        preflight_body = c_function_body(executor, "preflight_vulkan_graphics_v6_replay_supported")
+        for marker in [
+            "const VkRenderingFlags supported_rendering_flags =",
+            "VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT",
+            "command->flags & ~supported_rendering_flags",
+            'reason = "unsupported dynamic rendering flags";',
+        ]:
+            self.assertIn(marker, preflight_body)
+        self.assertNotIn("command->flags != 0", preflight_body)
+
+        record_body = c_function_body(executor, "record_vulkan_graphics_v6_command_buffer")
+        begin_body = record_body.split(
+            "case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_RENDERING:", 1
+        )[1].split(
+            "case PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_RENDERING:", 1
+        )[0]
+        for marker in [
+            ".flags = (VkRenderingFlags)(command->flags & ~VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT)",
+            "rt->cmd_begin_rendering(command_buffer, &rendering);",
+        ]:
+            self.assertIn(marker, begin_body)
+
+
     def test_vulkan_graphics_dispatch_inside_frame_has_render_scope_diagnostics(self):
         icd = VULKAN_ICD.read_text()
         classifier = icd.split("static bool graphics_sequence_inside_active_rendering", 1)[1].split(

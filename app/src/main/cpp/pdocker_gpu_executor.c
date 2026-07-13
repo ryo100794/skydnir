@@ -26406,8 +26406,10 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                     if (reason_out) *reason_out = reason;
                     return -EOPNOTSUPP;
                 }
-                if (command->flags != 0) {
-                    reason = "dynamic rendering flags are not supported";
+                const VkRenderingFlags supported_rendering_flags =
+                    VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT;
+                if ((command->flags & ~supported_rendering_flags) != 0) {
+                    reason = "unsupported dynamic rendering flags";
                     if (reason_out) *reason_out = reason;
                     return -EOPNOTSUPP;
                 }
@@ -31870,6 +31872,7 @@ static int record_vulkan_graphics_v6_command_buffer(
                 }
                 VkRenderingInfo rendering = {
                     .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+                    .flags = (VkRenderingFlags)(command->flags & ~VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT),
                     .renderArea = {
                         .offset = {command->render_area_offset_x, command->render_area_offset_y},
                         .extent = {command->render_area_extent_width, command->render_area_extent_height},
