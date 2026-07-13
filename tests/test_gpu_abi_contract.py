@@ -1969,6 +1969,61 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, icd)
 
+    def test_vulkan_dynamic_rendering_attachment_records_view_snapshot(self):
+        icd = VULKAN_ICD.read_text()
+        for marker in [
+            "PdockerVkImageViewSnapshot image_view_snapshot;",
+            "PdockerVkImageViewSnapshot resolve_image_view_snapshot;",
+            "static bool snapshot_image_view_state",
+            "dst->object_id = pdocker_vk_image_view_object_id(view);",
+            "dst->image = view->image;",
+            "dst->format = view->format;",
+            "dst->subresource_range = view->subresource_range;",
+            "dst->samples = view->image->samples;",
+            "snapshot_image_view_state(&dst->image_view_snapshot, dst->image_view)",
+            "snapshot_image_view_state(&dst->resolve_image_view_snapshot, dst->resolve_image_view)",
+            "collect_graphics_image_view_snapshot_entry",
+        ]:
+            self.assertIn(marker, icd)
+
+        collect_snapshot_body = c_function_body(icd, "collect_graphics_image_view_snapshot_entry")
+        for marker in [
+            "snapshot->valid",
+            "snapshot->image",
+            "collect_graphics_image_entry",
+            "snapshot->view_type",
+            "snapshot->object_id",
+            "snapshot->format",
+            "snapshot->components.r",
+            "snapshot->subresource_range.aspectMask",
+            "snapshot->generation ? snapshot->generation : generation",
+        ]:
+            self.assertIn(marker, collect_snapshot_body)
+
+        append_body = c_function_body(icd, "append_graphics_attachment_entry")
+        for marker in [
+            "collect_graphics_image_view_snapshot_entry",
+            "&src->image_view_snapshot",
+            "resource_id = src->image_view_snapshot.object_id;",
+            "format = src->image_view_snapshot.format;",
+            "samples = src->image_view_snapshot.samples;",
+            "src->resolve_image_view_snapshot.format != format",
+            "src->image_view_snapshot.samples == VK_SAMPLE_COUNT_1_BIT",
+            "src->resolve_image_view_snapshot.samples != VK_SAMPLE_COUNT_1_BIT",
+            "src->resolve_image_view_snapshot.subresource_range.aspectMask",
+            "&src->resolve_image_view_snapshot",
+        ]:
+            self.assertIn(marker, append_body)
+        for forbidden in [
+            "src->image_view->format",
+            "src->image_view->image",
+            "src->resolve_image_view->format",
+            "src->resolve_image_view->image",
+            "src->resolve_image_view->subresource_range",
+        ]:
+            self.assertNotIn(forbidden, append_body)
+
+
     def test_vulkan_command_time_pnext_is_fail_closed(self):
         icd = VULKAN_ICD.read_text()
         copy_body = icd.split(

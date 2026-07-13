@@ -773,9 +773,23 @@ typedef struct {
 } PdockerVkSubpassDependencyState;
 
 typedef struct {
+    bool valid;
+    uint64_t object_id;
+    PdockerVkImage *image;
+    VkImageViewType view_type;
+    VkFormat format;
+    VkComponentMapping components;
+    VkImageSubresourceRange subresource_range;
+    VkSampleCountFlagBits samples;
+    uint64_t generation;
+} PdockerVkImageViewSnapshot;
+
+typedef struct {
     PdockerVkImageView *image_view;
+    PdockerVkImageViewSnapshot image_view_snapshot;
     VkImageLayout image_layout;
     PdockerVkImageView *resolve_image_view;
+    PdockerVkImageViewSnapshot resolve_image_view_snapshot;
     VkImageLayout resolve_image_layout;
     VkResolveModeFlagBits resolve_mode;
     VkAttachmentLoadOp load_op;
@@ -2242,6 +2256,25 @@ static void record_graphics_dynamic_state_bytes(
     }
 }
 
+static bool snapshot_image_view_state(
+        PdockerVkImageViewSnapshot *dst,
+        PdockerVkImageView *view) {
+    if (!dst) return false;
+    memset(dst, 0, sizeof(*dst));
+    if (!view) return true;
+    if (!view->image) return false;
+    dst->valid = true;
+    dst->object_id = pdocker_vk_image_view_object_id(view);
+    dst->image = view->image;
+    dst->view_type = view->view_type;
+    dst->format = view->format;
+    dst->components = view->components;
+    dst->subresource_range = view->subresource_range;
+    dst->samples = view->image->samples;
+    dst->generation = view->generation;
+    return true;
+}
+
 static bool copy_rendering_attachment_state(
         PdockerVkRenderingAttachmentState *dst,
         const VkRenderingAttachmentInfo *src) {
@@ -2250,8 +2283,10 @@ static bool copy_rendering_attachment_state(
     if (!src) return true;
     if (src->pNext) return false;
     dst->image_view = pdocker_vk_image_view_from_handle(src->imageView);
+    if (!snapshot_image_view_state(&dst->image_view_snapshot, dst->image_view)) return false;
     dst->image_layout = src->imageLayout;
     dst->resolve_image_view = pdocker_vk_image_view_from_handle(src->resolveImageView);
+    if (!snapshot_image_view_state(&dst->resolve_image_view_snapshot, dst->resolve_image_view)) return false;
     dst->resolve_image_layout = src->resolveImageLayout;
     dst->resolve_mode = src->resolveMode;
     dst->load_op = src->loadOp;
@@ -5788,6 +5823,57 @@ static int collect_graphics_image_view_entry(
 }
 
 
+static int collect_graphics_image_view_snapshot_entry(
+        PdockerGpuVulkanDispatchV5ImageViewEntry *image_view_entries,
+        PdockerVkImageView **image_view_objects,
+        size_t *image_view_count,
+        PdockerGpuVulkanDispatchV5ImageEntry *image_entries,
+        PdockerVkImage **image_objects,
+        size_t *image_count,
+        PdockerGpuVulkanDispatchV5ResourceEntry *resources,
+        size_t *resource_count,
+        PdockerVkMemory **memory_objects,
+        uint32_t *memory_resource_indices,
+        size_t *memory_count,
+        int *fds,
+        size_t *fd_count,
+        PdockerVkImageView *view,
+        const PdockerVkImageViewSnapshot *snapshot,
+        uint64_t generation) {
+    if (!image_view_entries || !image_view_objects || !image_view_count || !view ||
+        !snapshot || !snapshot->valid || !snapshot->image) {
+        return -EINVAL;
+    }
+    int existing = find_image_view_table_index(image_view_objects, *image_view_count, view);
+    if (existing >= 0) return existing;
+    if (*image_view_count >= PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGE_VIEWS) return -E2BIG;
+    int image_index = collect_graphics_image_entry(
+        image_entries, image_objects, image_count,
+        resources, resource_count, memory_objects, memory_resource_indices, memory_count,
+        fds, fd_count, snapshot->image, generation);
+    if (image_index < 0) return image_index;
+    uint32_t index = (uint32_t)(*image_view_count)++;
+    PdockerGpuVulkanDispatchV5ImageViewEntry *entry = &image_view_entries[index];
+    memset(entry, 0, sizeof(*entry));
+    entry->view_type = snapshot->view_type;
+    entry->view_id = snapshot->object_id;
+    entry->image_index = (uint32_t)image_index;
+    entry->format = snapshot->format;
+    entry->component_r = snapshot->components.r;
+    entry->component_g = snapshot->components.g;
+    entry->component_b = snapshot->components.b;
+    entry->component_a = snapshot->components.a;
+    entry->aspect_mask = snapshot->subresource_range.aspectMask;
+    entry->base_mip_level = snapshot->subresource_range.baseMipLevel;
+    entry->level_count = snapshot->subresource_range.levelCount;
+    entry->base_array_layer = snapshot->subresource_range.baseArrayLayer;
+    entry->layer_count = snapshot->subresource_range.layerCount;
+    entry->generation = snapshot->generation ? snapshot->generation : generation;
+    image_view_objects[index] = view;
+    return (int)index;
+}
+
+
 static bool pdocker_vk_image_layout_value_valid_for_transport(
         const PdockerVkImage *image,
         VkImageLayout layout);
@@ -6019,38 +6105,40 @@ static int append_graphics_attachment_entry(
     VkFormat format = VK_FORMAT_UNDEFINED;
     VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT;
     if (src->image_view) {
-        int collected_view = collect_graphics_image_view_entry(
+        int collected_view = collect_graphics_image_view_snapshot_entry(
             image_view_entries, image_view_objects, image_view_count,
             image_entries, image_objects, image_count,
             resources, resource_count, memory_objects, memory_resource_indices,
-            memory_count, fds, fd_count, src->image_view, generation);
+            memory_count, fds, fd_count, src->image_view, &src->image_view_snapshot, generation);
         if (collected_view < 0) return collected_view;
         view_index = (uint32_t)collected_view;
-        resource_id = pdocker_vk_image_view_object_id(src->image_view);
-        format = src->image_view->format;
-        samples = src->image_view->image ? src->image_view->image->samples : VK_SAMPLE_COUNT_1_BIT;
+        resource_id = src->image_view_snapshot.object_id;
+        format = src->image_view_snapshot.format;
+        samples = src->image_view_snapshot.samples;
     }
     if (src->resolve_image_view) {
-        if (!src->image_view || src->resolve_image_view->format != format) return -EOPNOTSUPP;
-        if (src->image_view->image && src->image_view->image->samples == VK_SAMPLE_COUNT_1_BIT) {
+        if (!src->image_view || !src->image_view_snapshot.valid ||
+            !src->resolve_image_view_snapshot.valid ||
+            src->resolve_image_view_snapshot.format != format) return -EOPNOTSUPP;
+        if (src->image_view_snapshot.samples == VK_SAMPLE_COUNT_1_BIT) {
             return -EOPNOTSUPP;
         }
-        if (src->resolve_image_view->image &&
-            src->resolve_image_view->image->samples != VK_SAMPLE_COUNT_1_BIT) {
+        if (src->resolve_image_view_snapshot.samples != VK_SAMPLE_COUNT_1_BIT) {
             return -EOPNOTSUPP;
         }
-        if (src->resolve_image_view->subresource_range.aspectMask !=
-            src->image_view->subresource_range.aspectMask) {
+        if (src->resolve_image_view_snapshot.subresource_range.aspectMask !=
+            src->image_view_snapshot.subresource_range.aspectMask) {
             return -EOPNOTSUPP;
         }
         if (*resolve_attachment_count >= PDOCKER_GPU_VULKAN_GRAPHICS_V64_MAX_RESOLVE_ATTACHMENTS) {
             return -E2BIG;
         }
-        int collected_resolve_view = collect_graphics_image_view_entry(
+        int collected_resolve_view = collect_graphics_image_view_snapshot_entry(
             image_view_entries, image_view_objects, image_view_count,
             image_entries, image_objects, image_count,
             resources, resource_count, memory_objects, memory_resource_indices,
-            memory_count, fds, fd_count, src->resolve_image_view, generation);
+            memory_count, fds, fd_count, src->resolve_image_view,
+            &src->resolve_image_view_snapshot, generation);
         if (collected_resolve_view < 0) return collected_resolve_view;
         resolve_view_index = (uint32_t)collected_resolve_view;
     }
