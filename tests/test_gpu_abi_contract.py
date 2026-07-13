@@ -8284,6 +8284,42 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn("zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);", segment)
 
 
+    def test_vulkan_host_query_reset_is_advertised_and_device_enableable(self):
+        icd = VULKAN_ICD.read_text()
+        self.assertIn("#define PDOCKER_VK_FEATURE_HOST_QUERY_RESET", icd)
+
+        pnext_body = c_function_body(icd, "fill_pnext_features")
+        host_query_segment = pnext_body.split("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES", 1)[1].split("break;", 1)[0]
+        self.assertIn("VkPhysicalDeviceHostQueryResetFeatures *p", host_query_segment)
+        self.assertIn("p->hostQueryReset = VK_TRUE;", host_query_segment)
+        vulkan12_segment = pnext_body.split("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES", 1)[1].split("case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES", 1)[0]
+        self.assertGreaterEqual(vulkan12_segment.count("p->hostQueryReset = VK_TRUE;"), 2)
+
+        vulkan12_supported_body = c_function_body(icd, "vulkan12_feature_request_supported")
+        self.assertIn("supported.hostQueryReset = VK_TRUE;", vulkan12_supported_body)
+        self.assertIn(
+            "PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, hostQueryReset);",
+            vulkan12_supported_body,
+        )
+
+        feature_mask_body = c_function_body(icd, "feature_mask_from_pnext_chain")
+        self.assertIn("if (p->hostQueryReset) mask |= PDOCKER_VK_FEATURE_HOST_QUERY_RESET;", feature_mask_body)
+        advertised_mask_body = c_function_body(icd, "advertised_feature_mask")
+        self.assertIn("mask |= PDOCKER_VK_FEATURE_HOST_QUERY_RESET;", advertised_mask_body)
+
+        validate_body = c_function_body(icd, "validate_device_feature_requests")
+        host_query_request_segment = validate_body.split("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES", 1)[1].split("break;", 1)[0]
+        self.assertIn("supported = true;", host_query_request_segment)
+        self.assertNotIn("supported = !p->hostQueryReset", host_query_request_segment)
+        self.assertNotIn('unsupported_feature_name = "hostQueryReset"', host_query_request_segment)
+
+        self.assertIn("VKAPI_ATTR void VKAPI_CALL vkResetQueryPool", icd)
+        self.assertIn("reset_query_range(pdocker_vk_query_pool_from_handle(queryPool), firstQuery, queryCount);", icd)
+        reset_body = c_function_body(icd, "reset_query_range")
+        self.assertIn("if (!query_range_valid(pool, firstQuery, queryCount)) return;", reset_body)
+
+
+
     def test_vulkan_command_recording_overflow_fails_closed(self):
         icd = VULKAN_ICD.read_text()
         for marker in [

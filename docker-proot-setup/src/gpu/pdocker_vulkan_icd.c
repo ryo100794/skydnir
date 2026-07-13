@@ -442,6 +442,7 @@ static uint64_t g_generic_dispatch_sequence = 0;
 #define PDOCKER_VK_FEATURE_DESCRIPTOR_UNIFORM_TEXEL_BUFFER_UPDATE_AFTER_BIND (1ull << 43)
 #define PDOCKER_VK_FEATURE_DESCRIPTOR_STORAGE_TEXEL_BUFFER_UPDATE_AFTER_BIND (1ull << 44)
 #define PDOCKER_VK_FEATURE_SAMPLER_FILTER_MINMAX       (1ull << 45)
+#define PDOCKER_VK_FEATURE_HOST_QUERY_RESET            (1ull << 46)
 
 #define PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT 0x00000001u
 #define PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT 0x00000002u
@@ -15280,6 +15281,7 @@ static void fill_pnext_features(void *pNext) {
                                             p->descriptorBindingPartiallyBound ||
                                             p->descriptorBindingVariableDescriptorCount;
                     p->samplerFilterMinmax = advertised_sampler_filter_minmax();
+                    p->hostQueryReset = VK_TRUE;
                 } else {
                     VkBool32 storage8 = advertised_storage8();
                     p->storageBuffer8BitAccess = storage8;
@@ -15301,6 +15303,7 @@ static void fill_pnext_features(void *pNext) {
                                             p->descriptorBindingPartiallyBound ||
                                             p->descriptorBindingVariableDescriptorCount;
                     p->samplerFilterMinmax = advertised_sampler_filter_minmax();
+                    p->hostQueryReset = VK_TRUE;
                 }
                 p->bufferDeviceAddress = VK_FALSE;
                 p->vulkanMemoryModel = VK_FALSE;
@@ -15434,6 +15437,7 @@ static void fill_pnext_features(void *pNext) {
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES: {
                 VkPhysicalDeviceHostQueryResetFeatures *p = (VkPhysicalDeviceHostQueryResetFeatures *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                p->hostQueryReset = VK_TRUE;
                 break;
             }
 #ifdef VK_EXT_subpass_merge_feedback
@@ -15664,6 +15668,7 @@ static bool vulkan12_feature_request_supported(
     PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, uniformBufferStandardLayout);
     PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, shaderSubgroupExtendedTypes);
     PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, separateDepthStencilLayouts);
+    supported.hostQueryReset = VK_TRUE;
     PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, hostQueryReset);
     PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, timelineSemaphore);
     PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, bufferDeviceAddress);
@@ -15880,8 +15885,8 @@ static VkResult validate_device_feature_requests(const VkDeviceCreateInfo *pCrea
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES: {
                 const VkPhysicalDeviceHostQueryResetFeatures *p = (const VkPhysicalDeviceHostQueryResetFeatures *)node;
-                supported = !p->hostQueryReset;
-                if (!supported) unsupported_feature_name = "hostQueryReset";
+                (void)p;
+                supported = true;
                 break;
             }
 #ifdef VK_EXT_subpass_merge_feedback
@@ -15997,6 +16002,7 @@ static uint64_t feature_mask_from_pnext_chain(const void *pNext) {
                 if (p->timelineSemaphore) mask |= PDOCKER_VK_FEATURE_TIMELINE_SEMAPHORE;
                 if (p->drawIndirectCount) mask |= PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT;
                 if (p->samplerFilterMinmax) mask |= PDOCKER_VK_FEATURE_SAMPLER_FILTER_MINMAX;
+                if (p->hostQueryReset) mask |= PDOCKER_VK_FEATURE_HOST_QUERY_RESET;
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES: {
@@ -16058,6 +16064,11 @@ static uint64_t feature_mask_from_pnext_chain(const void *pNext) {
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES: {
                 const VkPhysicalDeviceMaintenance4Features *p = (const VkPhysicalDeviceMaintenance4Features *)node;
                 if (p->maintenance4) mask |= PDOCKER_VK_FEATURE_MAINTENANCE_4;
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES: {
+                const VkPhysicalDeviceHostQueryResetFeatures *p = (const VkPhysicalDeviceHostQueryResetFeatures *)node;
+                if (p->hostQueryReset) mask |= PDOCKER_VK_FEATURE_HOST_QUERY_RESET;
                 break;
             }
             default:
@@ -16135,6 +16146,7 @@ static uint64_t advertised_feature_mask(void) {
         if (advertised_depth_bounds()) mask |= PDOCKER_VK_FEATURE_DEPTH_BOUNDS;
         if (advertised_sampler_anisotropy()) mask |= PDOCKER_VK_FEATURE_SAMPLER_ANISOTROPY;
         if (advertised_sampler_filter_minmax()) mask |= PDOCKER_VK_FEATURE_SAMPLER_FILTER_MINMAX;
+        mask |= PDOCKER_VK_FEATURE_HOST_QUERY_RESET;
     } else {
         if (advertised_storage16()) mask |= PDOCKER_VK_FEATURE_STORAGE_BUFFER_16;
         if (advertised_storage8()) {
@@ -16151,6 +16163,7 @@ static uint64_t advertised_feature_mask(void) {
     if (advertised_draw_indirect_count() && advertised_draw_indexed_indirect_count()) {
         mask |= PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT;
     }
+    mask |= PDOCKER_VK_FEATURE_HOST_QUERY_RESET;
 #ifdef VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME
     if (advertised_extended_dynamic_state()) {
         mask |= PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE;
