@@ -1839,7 +1839,12 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("vulkan_replay_subresource_range_is_whole_image(image, range)", set_layout_body)
         self.assertIn("vulkan_replay_image_whole_range(image, &whole)", set_layout_body)
         self.assertIn("vulkan_replay_append_layout_range_remainder", set_layout_body)
-        self.assertIn("memcpy(image->layout_ranges, rebuilt, sizeof(rebuilt));", set_layout_body)
+        self.assertIn("VulkanReplayImageLayoutRange *rebuilt = NULL;", set_layout_body)
+        self.assertIn("uint32_t rebuilt_capacity = 0;", set_layout_body)
+        self.assertIn("free(image->layout_ranges);", set_layout_body)
+        self.assertIn("image->layout_ranges = rebuilt;", set_layout_body)
+        self.assertNotIn("VulkanReplayImageLayoutRange rebuilt[", set_layout_body)
+        self.assertNotIn("memcpy(image->layout_ranges, rebuilt, sizeof(rebuilt));", set_layout_body)
         self.assertNotIn("!vulkan_replay_subresource_range_contains(&entry->range, range) ||", set_layout_body)
 
         for helper in [
@@ -4848,9 +4853,38 @@ class GpuAbiContractTest(unittest.TestCase):
             "vulkan_replay_image_layout_range_valid",
             "image->layout_range_count",
             "image->has_layout_ranges = 1",
-            "PDOCKER_GPU_MAX_VULKAN_IMAGE_LAYOUT_RANGES_PER_IMAGE",
+            "ensure_vulkan_replay_image_layout_range_capacity",
         ]:
             self.assertIn(marker, layout_materializer)
+
+    def test_vulkan_image_layout_ranges_are_heap_backed(self):
+        executor = GPU_EXECUTOR.read_text()
+        append_body = c_function_body(executor, "vulkan_replay_image_layout_range_append")
+        set_layout_body = c_function_body(executor, "vulkan_replay_image_set_layout_for_range")
+        dispatch_record_body = c_function_body(executor, "record_vulkan_dispatch_v52_initial_image_layout_ranges")
+        graphics_record_body = c_function_body(executor, "record_vulkan_graphics_v620_initial_image_layout_ranges")
+
+        self.assertIn("VulkanReplayImageLayoutRange *layout_ranges;", executor)
+        self.assertIn("uint32_t layout_range_capacity;", executor)
+        self.assertNotIn(
+            "VulkanReplayImageLayoutRange layout_ranges[PDOCKER_GPU_MAX_VULKAN_IMAGE_LAYOUT_RANGES_PER_IMAGE]",
+            executor,
+        )
+        self.assertIn("ensure_vulkan_replay_image_layout_range_capacity", executor)
+        self.assertIn("VulkanReplayImageLayoutRange **ranges", executor)
+        self.assertIn("uint32_t *capacity", executor)
+        self.assertIn("ensure_vulkan_replay_image_layout_range_capacity(ranges, capacity", append_body)
+        self.assertNotIn("if (*count >= PDOCKER_GPU_MAX_VULKAN_IMAGE_LAYOUT_RANGES_PER_IMAGE)", append_body)
+        self.assertIn("VulkanReplayImageLayoutRange *rebuilt = NULL;", set_layout_body)
+        self.assertIn("uint32_t rebuilt_capacity = 0;", set_layout_body)
+        self.assertIn("free(image->layout_ranges);", set_layout_body)
+        self.assertNotIn("VulkanReplayImageLayoutRange rebuilt[", set_layout_body)
+        for body in (dispatch_record_body, graphics_record_body):
+            self.assertIn("PDOCKER_GPU_VULKAN_IMAGE_LAYOUT_BARRIER_BATCH", body)
+            self.assertIn("VkImageMemoryBarrier *barriers =", body)
+            self.assertIn("calloc(barrier_capacity, sizeof(barriers[0]))", body)
+            self.assertIn("free(barriers);", body)
+            self.assertNotIn("VkImageMemoryBarrier barriers[", body)
 
     def test_vulkan_dispatch_v5_2_executor_materializes_layout_ranges_without_image_descriptors(self):
         executor = GPU_EXECUTOR.read_text()

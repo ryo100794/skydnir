@@ -49,7 +49,8 @@
 #endif
 #define PDOCKER_GPU_MAX_COMMAND_BYTES 4096
 #define PDOCKER_GPU_MAX_VULKAN_BINDINGS 16
-#define PDOCKER_GPU_MAX_VULKAN_IMAGE_LAYOUT_RANGES_PER_IMAGE 64
+#define PDOCKER_GPU_MAX_VULKAN_IMAGE_LAYOUT_RANGES_PER_IMAGE PDOCKER_GPU_VULKAN_GRAPHICS_V620_MAX_IMAGE_LAYOUT_RANGES
+#define PDOCKER_GPU_VULKAN_IMAGE_LAYOUT_BARRIER_BATCH 64u
 #define PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS 8
 #define PDOCKER_GPU_MAX_PUSH_BYTES 256
 #define PDOCKER_GPU_MAX_VULKAN_ENTRY_NAME 128
@@ -2776,8 +2777,9 @@ typedef struct {
     VkImage image;
     VkMemoryRequirements requirements;
     VkImageLayout current_layout;
-    VulkanReplayImageLayoutRange layout_ranges[PDOCKER_GPU_MAX_VULKAN_IMAGE_LAYOUT_RANGES_PER_IMAGE];
+    VulkanReplayImageLayoutRange *layout_ranges;
     uint32_t layout_range_count;
+    uint32_t layout_range_capacity;
     int has_layout_ranges;
     int layout_ranges_active;
     VkImageLayout descriptor_layout;
@@ -2816,6 +2818,7 @@ static int vulkan_replay_image_layout_for_range(
         const VulkanDispatchImageObject *image,
         const VkImageSubresourceRange *range,
         VkImageLayout *out_layout);
+
 static int vulkan_replay_image_set_layout_for_range(
         VulkanDispatchImageObject *image,
         const VkImageSubresourceRange *range,
@@ -3727,6 +3730,7 @@ static void destroy_vulkan_dispatch_image_objects(
     if (images) {
         for (size_t i = 0; i < image_count; ++i) {
             destroy_vulkan_vector_buffer(device, &images[i].staging);
+            free(images[i].layout_ranges);
             if (images[i].image) vkDestroyImage(device, images[i].image, NULL);
             memset(&images[i], 0, sizeof(images[i]));
         }
@@ -4295,6 +4299,43 @@ static VulkanDispatchImageObject *vulkan_dispatch_image_by_source_index(
     return NULL;
 }
 
+static uint32_t vulkan_replay_image_layout_range_max_capacity(void) {
+    uint32_t max_capacity = PDOCKER_GPU_VULKAN_DISPATCH_V52_MAX_IMAGE_LAYOUT_RANGES;
+    if (PDOCKER_GPU_VULKAN_GRAPHICS_V620_MAX_IMAGE_LAYOUT_RANGES > max_capacity) {
+        max_capacity = PDOCKER_GPU_VULKAN_GRAPHICS_V620_MAX_IMAGE_LAYOUT_RANGES;
+    }
+    return max_capacity;
+}
+
+static int ensure_vulkan_replay_image_layout_range_capacity(
+        VulkanReplayImageLayoutRange **ranges,
+        uint32_t *capacity,
+        uint32_t needed) {
+    if (!ranges || !capacity) return -EINVAL;
+    if (needed <= *capacity) return 0;
+    const uint32_t max_capacity = vulkan_replay_image_layout_range_max_capacity();
+    if (needed > max_capacity) return -E2BIG;
+    uint32_t next_capacity = *capacity ? *capacity : 4u;
+    while (next_capacity < needed) {
+        if (next_capacity > max_capacity / 2u) {
+            next_capacity = max_capacity;
+        } else {
+            next_capacity *= 2u;
+        }
+    }
+    if ((uint64_t)next_capacity > (uint64_t)SIZE_MAX / sizeof((*ranges)[0])) return -E2BIG;
+    VulkanReplayImageLayoutRange *next =
+        (VulkanReplayImageLayoutRange *)calloc(next_capacity, sizeof(next[0]));
+    if (!next) return -ENOMEM;
+    if (*ranges && *capacity) {
+        memcpy(next, *ranges, (size_t)(*capacity) * sizeof((*ranges)[0]));
+    }
+    free(*ranges);
+    *ranges = next;
+    *capacity = next_capacity;
+    return 0;
+}
+
 static int materialize_vulkan_dispatch_v52_image_layout_ranges(
         const VulkanDispatchV5ObjectTables *object_tables,
         VulkanDispatchImageObject *images,
@@ -4310,9 +4351,6 @@ static int materialize_vulkan_dispatch_v52_image_layout_ranges(
         VulkanDispatchImageObject *image =
             vulkan_dispatch_image_by_source_index(images, image_count, src->image_index);
         if (!image) return -EPROTO;
-        if (image->layout_range_count >= PDOCKER_GPU_MAX_VULKAN_IMAGE_LAYOUT_RANGES_PER_IMAGE) {
-            return -E2BIG;
-        }
         VkImageSubresourceRange range = {
             .aspectMask = (VkImageAspectFlags)src->aspect_mask,
             .baseMipLevel = src->base_mip_level,
@@ -4338,6 +4376,9 @@ static int materialize_vulkan_dispatch_v52_image_layout_ranges(
             duplicate = 1;
         }
         if (duplicate) continue;
+        int grow_rc = ensure_vulkan_replay_image_layout_range_capacity(
+            &image->layout_ranges, &image->layout_range_capacity, image->layout_range_count + 1u);
+        if (grow_rc != 0) return grow_rc;
         VulkanReplayImageLayoutRange *dst = &image->layout_ranges[image->layout_range_count++];
         memset(dst, 0, sizeof(*dst));
         dst->range = range;
@@ -4348,28 +4389,31 @@ static int materialize_vulkan_dispatch_v52_image_layout_ranges(
     return 0;
 }
 
+
 static int record_vulkan_dispatch_v52_initial_image_layout_ranges(
         VkCommandBuffer command_buffer,
         VulkanDispatchImageObject *images,
         size_t image_count) {
     if (!command_buffer || !images) return -EINVAL;
-    VkImageMemoryBarrier barriers[PDOCKER_GPU_MAX_VULKAN_IMAGE_LAYOUT_RANGES_PER_IMAGE];
+    const uint32_t barrier_capacity = PDOCKER_GPU_VULKAN_IMAGE_LAYOUT_BARRIER_BATCH;
+    VkImageMemoryBarrier *barriers =
+        (VkImageMemoryBarrier *)calloc(barrier_capacity, sizeof(barriers[0]));
+    if (!barriers) return -ENOMEM;
     uint32_t barrier_count = 0;
-    memset(barriers, 0, sizeof(barriers));
     for (size_t image_index = 0; image_index < image_count; ++image_index) {
         VulkanDispatchImageObject *image = &images[image_index];
         if (!image->has_layout_ranges) continue;
         for (uint32_t range_index = 0; range_index < image->layout_range_count; ++range_index) {
             VulkanReplayImageLayoutRange *range = &image->layout_ranges[range_index];
             if (range->layout == image->current_layout) continue;
-            if (barrier_count >= PDOCKER_GPU_MAX_VULKAN_IMAGE_LAYOUT_RANGES_PER_IMAGE) {
+            if (barrier_count >= barrier_capacity) {
                 vkCmdPipelineBarrier(command_buffer,
                                      VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
                                      VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
                                      0, 0, NULL, 0, NULL,
                                      barrier_count, barriers);
                 barrier_count = 0;
-                memset(barriers, 0, sizeof(barriers));
+                memset(barriers, 0, (size_t)barrier_capacity * sizeof(barriers[0]));
             }
             barriers[barrier_count++] = (VkImageMemoryBarrier){
                 .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
@@ -4392,8 +4436,10 @@ static int record_vulkan_dispatch_v52_initial_image_layout_ranges(
                              0, 0, NULL, 0, NULL,
                              barrier_count, barriers);
     }
+    free(barriers);
     return 0;
 }
+
 
 static void destroy_strict_vulkan_object_graph(
         VkDevice device,
@@ -28585,9 +28631,6 @@ static int materialize_vulkan_graphics_v620_image_layout_ranges(
         VulkanDispatchImageObject *image = vulkan_graphics_replay_image_by_source_index(
             attachments, src->image_index);
         if (!image) return -EPROTO;
-        if (image->layout_range_count >= PDOCKER_GPU_MAX_VULKAN_IMAGE_LAYOUT_RANGES_PER_IMAGE) {
-            return -E2BIG;
-        }
         VkImageSubresourceRange range = {
             .aspectMask = (VkImageAspectFlags)src->aspect_mask,
             .baseMipLevel = src->base_mip_level,
@@ -28596,6 +28639,9 @@ static int materialize_vulkan_graphics_v620_image_layout_ranges(
             .layerCount = src->layer_count,
         };
         if (!vulkan_replay_image_layout_range_valid(image, &range)) return -ERANGE;
+        int grow_rc = ensure_vulkan_replay_image_layout_range_capacity(
+            &image->layout_ranges, &image->layout_range_capacity, image->layout_range_count + 1u);
+        if (grow_rc != 0) return grow_rc;
         VulkanReplayImageLayoutRange *dst = &image->layout_ranges[image->layout_range_count++];
         memset(dst, 0, sizeof(*dst));
         dst->range = range;
@@ -30897,18 +30943,21 @@ static int vulkan_replay_subresource_range_contains(
            outer->baseArrayLayer <= inner->baseArrayLayer && inner_layer_end <= outer_layer_end;
 }
 
+
 static int vulkan_replay_image_layout_range_append(
-        VulkanReplayImageLayoutRange *ranges,
+        VulkanReplayImageLayoutRange **ranges,
         uint32_t *count,
+        uint32_t *capacity,
         const VkImageSubresourceRange *range,
         VkImageLayout layout,
         uint64_t generation) {
-    if (!ranges || !count || !range || range->aspectMask == 0 ||
-        range->levelCount == 0 || range->layerCount == 0) {
+    if (!ranges || !count || !capacity || !range || range->aspectMask == 0 ||
+        range->levelCount == 0 || range->layerCount == 0 ||
+        *count > *capacity || (*count && !*ranges)) {
         return -EINVAL;
     }
     for (uint32_t i = 0; i < *count; ++i) {
-        VulkanReplayImageLayoutRange *entry = &ranges[i];
+        VulkanReplayImageLayoutRange *entry = &(*ranges)[i];
         if (entry->layout != layout || entry->generation != generation) continue;
         if (entry->range.baseMipLevel == range->baseMipLevel &&
             entry->range.levelCount == range->levelCount &&
@@ -30949,8 +30998,9 @@ static int vulkan_replay_image_layout_range_append(
             }
         }
     }
-    if (*count >= PDOCKER_GPU_MAX_VULKAN_IMAGE_LAYOUT_RANGES_PER_IMAGE) return -E2BIG;
-    VulkanReplayImageLayoutRange *entry = &ranges[(*count)++];
+    int rc = ensure_vulkan_replay_image_layout_range_capacity(ranges, capacity, *count + 1u);
+    if (rc != 0) return rc;
+    VulkanReplayImageLayoutRange *entry = &(*ranges)[(*count)++];
     memset(entry, 0, sizeof(*entry));
     entry->range = *range;
     entry->layout = layout;
@@ -30958,15 +31008,18 @@ static int vulkan_replay_image_layout_range_append(
     return 0;
 }
 
+
+
 static int vulkan_replay_append_layout_range_remainder(
-        VulkanReplayImageLayoutRange *ranges,
+        VulkanReplayImageLayoutRange **ranges,
         uint32_t *count,
+        uint32_t *capacity,
         const VulkanReplayImageLayoutRange *old_entry,
         const VkImageSubresourceRange *replacement) {
-    if (!ranges || !count || !old_entry || !replacement) return -EINVAL;
+    if (!ranges || !count || !capacity || !old_entry || !replacement) return -EINVAL;
     if (!vulkan_replay_subresource_ranges_overlap(&old_entry->range, replacement)) {
         return vulkan_replay_image_layout_range_append(
-            ranges, count, &old_entry->range, old_entry->layout, old_entry->generation);
+            ranges, count, capacity, &old_entry->range, old_entry->layout, old_entry->generation);
     }
 
     const VkImageAspectFlags old_aspects = old_entry->range.aspectMask;
@@ -30976,7 +31029,7 @@ static int vulkan_replay_append_layout_range_remainder(
         VkImageSubresourceRange kept = old_entry->range;
         kept.aspectMask = old_aspects_not_replaced;
         int rc = vulkan_replay_image_layout_range_append(
-            ranges, count, &kept, old_entry->layout, old_entry->generation);
+            ranges, count, capacity, &kept, old_entry->layout, old_entry->generation);
         if (rc != 0) return rc;
     }
     if (!overlap_aspects) return 0;
@@ -31008,7 +31061,7 @@ static int vulkan_replay_append_layout_range_remainder(
             .layerCount = old_entry->range.layerCount,
         };
         int rc = vulkan_replay_image_layout_range_append(
-            ranges, count, &before_levels, old_entry->layout, old_entry->generation);
+            ranges, count, capacity, &before_levels, old_entry->layout, old_entry->generation);
         if (rc != 0) return rc;
     }
     if (old_level_end > intersection_level_end) {
@@ -31020,7 +31073,7 @@ static int vulkan_replay_append_layout_range_remainder(
             .layerCount = old_entry->range.layerCount,
         };
         int rc = vulkan_replay_image_layout_range_append(
-            ranges, count, &after_levels, old_entry->layout, old_entry->generation);
+            ranges, count, capacity, &after_levels, old_entry->layout, old_entry->generation);
         if (rc != 0) return rc;
     }
 
@@ -31035,7 +31088,7 @@ static int vulkan_replay_append_layout_range_remainder(
             .layerCount = intersection_layer_begin - old_layer_begin,
         };
         int rc = vulkan_replay_image_layout_range_append(
-            ranges, count, &before_layers, old_entry->layout, old_entry->generation);
+            ranges, count, capacity, &before_layers, old_entry->layout, old_entry->generation);
         if (rc != 0) return rc;
     }
     if (old_layer_end > intersection_layer_end) {
@@ -31047,11 +31100,12 @@ static int vulkan_replay_append_layout_range_remainder(
             .layerCount = old_layer_end - intersection_layer_end,
         };
         int rc = vulkan_replay_image_layout_range_append(
-            ranges, count, &after_layers, old_entry->layout, old_entry->generation);
+            ranges, count, capacity, &after_layers, old_entry->layout, old_entry->generation);
         if (rc != 0) return rc;
     }
     return 0;
 }
+
 
 static int vulkan_replay_image_whole_range(
         const VulkanDispatchImageObject *image,
@@ -31123,44 +31177,56 @@ static int vulkan_replay_image_set_layout_for_range(
         if (whole_rc != 0) return whole_rc;
         image->layout_range_count = 0;
         int append_rc = vulkan_replay_image_layout_range_append(
-            image->layout_ranges, &image->layout_range_count, &whole, image->current_layout, 0);
+            &image->layout_ranges, &image->layout_range_count,
+            &image->layout_range_capacity, &whole, image->current_layout, 0);
         if (append_rc != 0) return append_rc;
         image->layout_ranges_active = 1;
         image->has_layout_ranges = 1;
     }
 
-    VulkanReplayImageLayoutRange rebuilt[PDOCKER_GPU_MAX_VULKAN_IMAGE_LAYOUT_RANGES_PER_IMAGE];
+    VulkanReplayImageLayoutRange *rebuilt = NULL;
     uint32_t rebuilt_count = 0;
-    memset(rebuilt, 0, sizeof(rebuilt));
+    uint32_t rebuilt_capacity = 0;
     for (uint32_t i = 0; i < image->layout_range_count; ++i) {
         int rc = vulkan_replay_append_layout_range_remainder(
-            rebuilt, &rebuilt_count, &image->layout_ranges[i], range);
-        if (rc != 0) return rc;
+            &rebuilt, &rebuilt_count, &rebuilt_capacity, &image->layout_ranges[i], range);
+        if (rc != 0) {
+            free(rebuilt);
+            return rc;
+        }
     }
     int rc = vulkan_replay_image_layout_range_append(
-        rebuilt, &rebuilt_count, range, layout, 0);
-    if (rc != 0) return rc;
-    memcpy(image->layout_ranges, rebuilt, sizeof(rebuilt));
+        &rebuilt, &rebuilt_count, &rebuilt_capacity, range, layout, 0);
+    if (rc != 0) {
+        free(rebuilt);
+        return rc;
+    }
+    free(image->layout_ranges);
+    image->layout_ranges = rebuilt;
     image->layout_range_count = rebuilt_count;
+    image->layout_range_capacity = rebuilt_capacity;
     image->layout_ranges_active = 1;
     image->has_layout_ranges = 1;
     return 0;
 }
 
+
 static int record_vulkan_graphics_v620_initial_image_layout_ranges(
         VkCommandBuffer command_buffer,
         VulkanGraphicsReplayAttachments *attachments) {
     if (!command_buffer || !attachments) return -EINVAL;
-    VkImageMemoryBarrier barriers[PDOCKER_GPU_MAX_VULKAN_IMAGE_LAYOUT_RANGES_PER_IMAGE];
+    const uint32_t barrier_capacity = PDOCKER_GPU_VULKAN_IMAGE_LAYOUT_BARRIER_BATCH;
+    VkImageMemoryBarrier *barriers =
+        (VkImageMemoryBarrier *)calloc(barrier_capacity, sizeof(barriers[0]));
+    if (!barriers) return -ENOMEM;
     uint32_t barrier_count = 0;
-    memset(barriers, 0, sizeof(barriers));
     for (size_t image_index = 0; image_index < attachments->image_count; ++image_index) {
         VulkanDispatchImageObject *image = &attachments->images[image_index];
         if (!image->has_layout_ranges) continue;
         for (uint32_t range_index = 0; range_index < image->layout_range_count; ++range_index) {
             const VulkanReplayImageLayoutRange *range = &image->layout_ranges[range_index];
             if (range->layout == image->current_layout) continue;
-            if (barrier_count >= PDOCKER_GPU_MAX_VULKAN_IMAGE_LAYOUT_RANGES_PER_IMAGE) {
+            if (barrier_count >= barrier_capacity) {
                 vkCmdPipelineBarrier(command_buffer,
                                      VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
                                      VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
@@ -31169,7 +31235,7 @@ static int record_vulkan_graphics_v620_initial_image_layout_ranges(
                                      0, NULL,
                                      barrier_count, barriers);
                 barrier_count = 0;
-                memset(barriers, 0, sizeof(barriers));
+                memset(barriers, 0, (size_t)barrier_capacity * sizeof(barriers[0]));
             }
             barriers[barrier_count++] = (VkImageMemoryBarrier){
                 .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
@@ -31193,6 +31259,7 @@ static int record_vulkan_graphics_v620_initial_image_layout_ranges(
                              0, NULL,
                              barrier_count, barriers);
     }
+    free(barriers);
     for (size_t image_index = 0; image_index < attachments->image_count; ++image_index) {
         if (attachments->images[image_index].has_layout_ranges) {
             attachments->images[image_index].layout_ranges_active = 1;
@@ -31200,6 +31267,7 @@ static int record_vulkan_graphics_v620_initial_image_layout_ranges(
     }
     return 0;
 }
+
 
 
 static int resolve_vulkan_graphics_v626_wait_events(
