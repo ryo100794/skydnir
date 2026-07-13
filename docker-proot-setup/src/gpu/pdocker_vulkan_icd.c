@@ -99,6 +99,46 @@ typedef struct VkRenderingInputAttachmentIndexInfo {
 } VkRenderingInputAttachmentIndexInfo;
 #endif
 
+#if !defined(VK_VERSION_1_3) && !defined(VK_KHR_maintenance5)
+#define VK_STRUCTURE_TYPE_RENDERING_AREA_INFO ((VkStructureType)1000470003)
+#define VK_STRUCTURE_TYPE_DEVICE_IMAGE_SUBRESOURCE_INFO ((VkStructureType)1000470004)
+#define VK_STRUCTURE_TYPE_SUBRESOURCE_LAYOUT_2 ((VkStructureType)1000338002)
+#define VK_STRUCTURE_TYPE_IMAGE_SUBRESOURCE_2 ((VkStructureType)1000338003)
+#define VK_STRUCTURE_TYPE_RENDERING_AREA_INFO_KHR VK_STRUCTURE_TYPE_RENDERING_AREA_INFO
+#define VK_STRUCTURE_TYPE_DEVICE_IMAGE_SUBRESOURCE_INFO_KHR VK_STRUCTURE_TYPE_DEVICE_IMAGE_SUBRESOURCE_INFO
+#define VK_STRUCTURE_TYPE_SUBRESOURCE_LAYOUT_2_KHR VK_STRUCTURE_TYPE_SUBRESOURCE_LAYOUT_2
+#define VK_STRUCTURE_TYPE_IMAGE_SUBRESOURCE_2_KHR VK_STRUCTURE_TYPE_IMAGE_SUBRESOURCE_2
+#define VK_STRUCTURE_TYPE_SUBRESOURCE_LAYOUT_2_EXT VK_STRUCTURE_TYPE_SUBRESOURCE_LAYOUT_2
+#define VK_STRUCTURE_TYPE_IMAGE_SUBRESOURCE_2_EXT VK_STRUCTURE_TYPE_IMAGE_SUBRESOURCE_2
+typedef struct VkRenderingAreaInfo {
+    VkStructureType sType;
+    const void *pNext;
+    uint32_t viewMask;
+    uint32_t colorAttachmentCount;
+    const VkFormat *pColorAttachmentFormats;
+    VkFormat depthAttachmentFormat;
+    VkFormat stencilAttachmentFormat;
+} VkRenderingAreaInfo;
+typedef struct VkImageSubresource2 {
+    VkStructureType sType;
+    void *pNext;
+    VkImageSubresource imageSubresource;
+} VkImageSubresource2;
+typedef struct VkDeviceImageSubresourceInfo {
+    VkStructureType sType;
+    const void *pNext;
+    const VkImageCreateInfo *pCreateInfo;
+    const VkImageSubresource2 *pSubresource;
+} VkDeviceImageSubresourceInfo;
+typedef struct VkSubresourceLayout2 {
+    VkStructureType sType;
+    void *pNext;
+    VkSubresourceLayout subresourceLayout;
+} VkSubresourceLayout2;
+typedef VkImageSubresource2 VkImageSubresource2KHR;
+typedef VkSubresourceLayout2 VkSubresourceLayout2KHR;
+#endif
+
 #ifndef VK_KHR_SURFACE_EXTENSION_NAME
 #define VK_KHR_SURFACE_EXTENSION_NAME "VK_KHR_surface"
 #define VK_KHR_SURFACE_SPEC_VERSION 25
@@ -17582,15 +17622,11 @@ VKAPI_ATTR void VKAPI_CALL vkGetImageMemoryRequirements2(
     fill_memory_requirements2_pnext(pnext);
 }
 
-VKAPI_ATTR void VKAPI_CALL vkGetImageSubresourceLayout(
-        VkDevice device,
-        VkImage image,
+static void fill_image_subresource_layout_tight(
+        const PdockerVkImage *img,
         const VkImageSubresource *pSubresource,
         VkSubresourceLayout *pLayout) {
-    (void)device;
     if (!pLayout) return;
-    memset(pLayout, 0, sizeof(*pLayout));
-    PdockerVkImage *img = pdocker_vk_image_from_handle(image);
     if (!img || !pSubresource ||
         pSubresource->aspectMask != VK_IMAGE_ASPECT_COLOR_BIT ||
         pSubresource->mipLevel >= img->mip_levels ||
@@ -17617,6 +17653,107 @@ VKAPI_ATTR void VKAPI_CALL vkGetImageSubresourceLayout(
     pLayout->rowPitch = (VkDeviceSize)((uint64_t)extent.width * bpp);
     pLayout->depthPitch = (VkDeviceSize)((uint64_t)extent.width * (uint64_t)extent.height * bpp);
     pLayout->arrayPitch = (VkDeviceSize)layer_stride;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkGetImageSubresourceLayout(
+        VkDevice device,
+        VkImage image,
+        const VkImageSubresource *pSubresource,
+        VkSubresourceLayout *pLayout) {
+    (void)device;
+    if (!pLayout) return;
+    memset(pLayout, 0, sizeof(*pLayout));
+    PdockerVkImage *img = pdocker_vk_image_from_handle(image);
+    fill_image_subresource_layout_tight(img, pSubresource, pLayout);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkGetImageSubresourceLayout2(
+        VkDevice device,
+        VkImage image,
+        const VkImageSubresource2 *pSubresource,
+        VkSubresourceLayout2 *pLayout) {
+    (void)device;
+    if (!pLayout) return;
+    PdockerVkStructHeader header = read_vk_struct_header(pLayout);
+    zero_vk_out_struct_preserve_chain(pLayout, sizeof(*pLayout), header);
+    if (!pSubresource || pSubresource->sType != VK_STRUCTURE_TYPE_IMAGE_SUBRESOURCE_2 ||
+        pSubresource->pNext) {
+        return;
+    }
+    PdockerVkImage *img = pdocker_vk_image_from_handle(image);
+    fill_image_subresource_layout_tight(img,
+                                        &pSubresource->imageSubresource,
+                                        &pLayout->subresourceLayout);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkGetImageSubresourceLayout2KHR(
+        VkDevice device,
+        VkImage image,
+        const VkImageSubresource2 *pSubresource,
+        VkSubresourceLayout2 *pLayout) {
+    vkGetImageSubresourceLayout2(device, image, pSubresource, pLayout);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkGetImageSubresourceLayout2EXT(
+        VkDevice device,
+        VkImage image,
+        const VkImageSubresource2 *pSubresource,
+        VkSubresourceLayout2 *pLayout) {
+    vkGetImageSubresourceLayout2(device, image, pSubresource, pLayout);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkGetDeviceImageSubresourceLayout(
+        VkDevice device,
+        const VkDeviceImageSubresourceInfo *pInfo,
+        VkSubresourceLayout2 *pLayout) {
+    (void)device;
+    if (!pLayout) return;
+    PdockerVkStructHeader header = read_vk_struct_header(pLayout);
+    zero_vk_out_struct_preserve_chain(pLayout, sizeof(*pLayout), header);
+    if (!pInfo || pInfo->sType != VK_STRUCTURE_TYPE_DEVICE_IMAGE_SUBRESOURCE_INFO ||
+        pInfo->pNext || !pInfo->pCreateInfo || !pInfo->pSubresource ||
+        pInfo->pCreateInfo->pNext || pInfo->pSubresource->pNext ||
+        pInfo->pSubresource->sType != VK_STRUCTURE_TYPE_IMAGE_SUBRESOURCE_2) {
+        return;
+    }
+    PdockerVkImage image;
+    memset(&image, 0, sizeof(image));
+    image.format = pInfo->pCreateInfo->format;
+    image.extent = pInfo->pCreateInfo->extent;
+    image.mip_levels = pInfo->pCreateInfo->mipLevels;
+    image.array_layers = pInfo->pCreateInfo->arrayLayers;
+    fill_image_subresource_layout_tight(&image,
+                                        &pInfo->pSubresource->imageSubresource,
+                                        &pLayout->subresourceLayout);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkGetDeviceImageSubresourceLayoutKHR(
+        VkDevice device,
+        const VkDeviceImageSubresourceInfo *pInfo,
+        VkSubresourceLayout2 *pLayout) {
+    vkGetDeviceImageSubresourceLayout(device, pInfo, pLayout);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkGetRenderingAreaGranularity(
+        VkDevice device,
+        const VkRenderingAreaInfo *pRenderingAreaInfo,
+        VkExtent2D *pGranularity) {
+    (void)device;
+    if (!pGranularity) return;
+    pGranularity->width = 1;
+    pGranularity->height = 1;
+    if (!pRenderingAreaInfo ||
+        pRenderingAreaInfo->sType != VK_STRUCTURE_TYPE_RENDERING_AREA_INFO ||
+        pRenderingAreaInfo->pNext) {
+        return;
+    }
+}
+
+VKAPI_ATTR void VKAPI_CALL vkGetRenderingAreaGranularityKHR(
+        VkDevice device,
+        const VkRenderingAreaInfo *pRenderingAreaInfo,
+        VkExtent2D *pGranularity) {
+    vkGetRenderingAreaGranularity(device, pRenderingAreaInfo, pGranularity);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkBindImageMemory(
@@ -20426,7 +20563,7 @@ static void capture_render_pass_dependencies2(
         const VkSubpassDependency2 *dependencies) {
     for (uint32_t i = 0; rp && dependencies && i < dependency_count; ++i) {
         const VkSubpassDependency2 *dep = &dependencies[i];
-        if (dep->pNext || dep->viewOffset != 0 ||
+        if (dep->pNext ||
             !capture_single_subpass_dependency(
                 rp, dep->srcSubpass, dep->dstSubpass,
                 (VkPipelineStageFlags2)dep->srcStageMask,
@@ -21136,7 +21273,11 @@ static bool command_buffer_begin_inheritance_supported(
     return true;
 }
 
-static bool render_pass_create_pnext_noop(const VkRenderPassCreateInfo *info) {
+static bool render_pass_create_pnext_supported(
+        const VkRenderPassCreateInfo *info,
+        const VkRenderPassMultiviewCreateInfo **out_multiview) {
+    if (out_multiview) *out_multiview = NULL;
+    bool saw_multiview = false;
     for (const void *node = info ? info->pNext : NULL; node;) {
         PdockerVkStructHeader header = read_vk_struct_header(node);
         switch (header.sType) {
@@ -21144,21 +21285,19 @@ static bool render_pass_create_pnext_noop(const VkRenderPassCreateInfo *info) {
             case VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO: {
                 const VkRenderPassMultiviewCreateInfo *mv =
                     (const VkRenderPassMultiviewCreateInfo *)node;
-                if (!info || mv->subpassCount != info->subpassCount ||
+                if (saw_multiview || !info ||
+                    mv->subpassCount != info->subpassCount ||
                     (mv->subpassCount > 0 && !mv->pViewMasks) ||
+                    (mv->dependencyCount != 0 &&
+                     mv->dependencyCount != info->dependencyCount) ||
                     (mv->dependencyCount > 0 && !mv->pViewOffsets) ||
                     (mv->correlationMaskCount > 0 && !mv->pCorrelationMasks)) {
                     return false;
                 }
-                for (uint32_t i = 0; i < mv->subpassCount; ++i) {
-                    if (mv->pViewMasks[i] != 0) return false;
-                }
-                for (uint32_t i = 0; i < mv->dependencyCount; ++i) {
-                    if (mv->pViewOffsets[i] != 0) return false;
-                }
-                for (uint32_t i = 0; i < mv->correlationMaskCount; ++i) {
-                    if (mv->pCorrelationMasks[i] != 0) return false;
-                }
+                /* Legacy multiview view-offset dependencies are normalized to the
+                 * same conservative all-view barriers used by RenderPass2. */
+                saw_multiview = true;
+                if (out_multiview) *out_multiview = mv;
                 break;
             }
 #endif
@@ -21249,7 +21388,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateRenderPass(
     if (!rp) return VK_ERROR_OUT_OF_HOST_MEMORY;
     rp->attachment_count = pCreateInfo ? pCreateInfo->attachmentCount : 0;
     rp->subpass_count = pCreateInfo ? pCreateInfo->subpassCount : 0;
-    if (pCreateInfo && (pCreateInfo->flags != 0 || !render_pass_create_pnext_noop(pCreateInfo))) {
+    const VkRenderPassMultiviewCreateInfo *multiview = NULL;
+    if (pCreateInfo &&
+        (pCreateInfo->flags != 0 ||
+         !render_pass_create_pnext_supported(pCreateInfo, &multiview))) {
         rp->subpass_overflow = true;
     }
     if (rp->attachment_count > PDOCKER_VK_MAX_STORAGE_BUFFERS) {
@@ -21283,6 +21425,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateRenderPass(
     for (uint32_t sp = 0; pCreateInfo && sp < captured_subpasses; ++sp) {
         const VkSubpassDescription *src = pCreateInfo->pSubpasses
             ? &pCreateInfo->pSubpasses[sp] : NULL;
+        const uint32_t view_mask =
+            (multiview && sp < multiview->subpassCount) ? multiview->pViewMasks[sp] : 0;
         capture_render_pass_subpass_state(
             rp, sp, src ? src->colorAttachmentCount : 0,
             src ? src->pColorAttachments : NULL,
@@ -21290,7 +21434,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateRenderPass(
             src ? src->pDepthStencilAttachment : NULL,
             src ? src->inputAttachmentCount : 0,
             src ? src->preserveAttachmentCount : 0,
-            0);
+            view_mask);
         if (!src || src->flags != 0) rp->subpasses[sp].unsupported = true;
     }
     if (pCreateInfo) {
@@ -29275,6 +29419,10 @@ static bool proc_address_hidden_by_advertisement(const char *pName) {
         strcmp(pName, "vkGetBufferMemoryRequirements2KHR") == 0 ||
         strcmp(pName, "vkGetImageMemoryRequirements2KHR") == 0 ||
         strcmp(pName, "vkGetImageSparseMemoryRequirements2KHR") == 0 ||
+        strcmp(pName, "vkGetImageSubresourceLayout2KHR") == 0 ||
+        strcmp(pName, "vkGetImageSubresourceLayout2EXT") == 0 ||
+        strcmp(pName, "vkGetDeviceImageSubresourceLayoutKHR") == 0 ||
+        strcmp(pName, "vkGetRenderingAreaGranularityKHR") == 0 ||
         strcmp(pName, "vkTrimCommandPoolKHR") == 0 ||
         strcmp(pName, "vkCreateDescriptorUpdateTemplateKHR") == 0 ||
         strcmp(pName, "vkDestroyDescriptorUpdateTemplateKHR") == 0 ||
@@ -29297,6 +29445,9 @@ static bool proc_address_hidden_by_advertisement(const char *pName) {
         (strcmp(pName, "vkGetDeviceBufferMemoryRequirements") == 0 ||
          strcmp(pName, "vkGetDeviceImageMemoryRequirements") == 0 ||
          strcmp(pName, "vkGetDeviceImageSparseMemoryRequirements") == 0 ||
+         strcmp(pName, "vkGetImageSubresourceLayout2") == 0 ||
+         strcmp(pName, "vkGetDeviceImageSubresourceLayout") == 0 ||
+         strcmp(pName, "vkGetRenderingAreaGranularity") == 0 ||
          strcmp(pName, "vkCmdBeginRendering") == 0 ||
          strcmp(pName, "vkCmdEndRendering") == 0 ||
          strcmp(pName, "vkCmdBindVertexBuffers2") == 0 ||
@@ -29510,6 +29661,13 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_PROC(vkGetDeviceMemoryOpaqueCaptureAddress);
     MAP_ALIAS("vkGetDeviceMemoryOpaqueCaptureAddressKHR", vkGetDeviceMemoryOpaqueCaptureAddress);
     MAP_PROC(vkGetImageSubresourceLayout);
+    MAP_PROC(vkGetImageSubresourceLayout2);
+    MAP_ALIAS("vkGetImageSubresourceLayout2KHR", vkGetImageSubresourceLayout2);
+    MAP_ALIAS("vkGetImageSubresourceLayout2EXT", vkGetImageSubresourceLayout2);
+    MAP_PROC(vkGetDeviceImageSubresourceLayout);
+    MAP_ALIAS("vkGetDeviceImageSubresourceLayoutKHR", vkGetDeviceImageSubresourceLayout);
+    MAP_PROC(vkGetRenderingAreaGranularity);
+    MAP_ALIAS("vkGetRenderingAreaGranularityKHR", vkGetRenderingAreaGranularity);
     MAP_PROC(vkAllocateMemory);
     MAP_PROC(vkFreeMemory);
     MAP_PROC(vkMapMemory);

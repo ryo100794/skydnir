@@ -9334,21 +9334,30 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("info->attachmentImageInfoCount != 0 || info->pAttachmentImageInfos", framebuffer_pnext_body)
         self.assertIn('unsupported_create_info_pnext_result("vkCreateFramebuffer", node)', framebuffer_pnext_body)
 
-    def test_vulkan_render_pass_accepts_only_noop_legacy_multiview_pnext(self):
+    def test_vulkan_render_pass_accepts_legacy_multiview_view_masks(self):
         icd = VULKAN_ICD.read_text()
-        helper_body = c_function_body(icd, "render_pass_create_pnext_noop")
+        helper_body = c_function_body(icd, "render_pass_create_pnext_supported")
         create_body = c_function_body(icd, "vkCreateRenderPass")
         self.assertIn("VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO", helper_body)
+        self.assertIn("bool saw_multiview = false;", helper_body)
         self.assertIn("mv->subpassCount != info->subpassCount", helper_body)
-        self.assertIn("mv->pViewMasks[i] != 0", helper_body)
-        self.assertIn("mv->pViewOffsets[i] != 0", helper_body)
-        self.assertIn("mv->pCorrelationMasks[i] != 0", helper_body)
+        self.assertIn("mv->subpassCount > 0 && !mv->pViewMasks", helper_body)
+        self.assertIn("mv->dependencyCount != info->dependencyCount", helper_body)
+        self.assertNotIn("mv->pViewOffsets[i] != 0", helper_body)
+        self.assertIn("if (out_multiview) *out_multiview = mv;", helper_body)
+        self.assertNotIn("mv->pViewMasks[i] != 0", helper_body)
+        self.assertNotIn("mv->pCorrelationMasks[i] != 0", helper_body)
         self.assertIn("VK_STRUCTURE_TYPE_RENDER_PASS_INPUT_ATTACHMENT_ASPECT_CREATE_INFO", helper_body)
         self.assertIn("aspect->aspectReferenceCount != 0", helper_body)
         self.assertIn("default:", helper_body)
         self.assertIn("return false;", helper_body)
-        self.assertIn("pCreateInfo->flags != 0 || !render_pass_create_pnext_noop(pCreateInfo)", create_body)
+        self.assertIn("const VkRenderPassMultiviewCreateInfo *multiview = NULL;", create_body)
+        self.assertIn("!render_pass_create_pnext_supported(pCreateInfo, &multiview)", create_body)
+        self.assertIn("multiview->pViewMasks[sp]", create_body)
+        self.assertIn("view_mask);", create_body)
         self.assertIn("rp->subpass_overflow = true;", create_body)
+        deps2_body = c_function_body(icd, "capture_render_pass_dependencies2")
+        self.assertNotIn("dep->viewOffset != 0", deps2_body)
 
 
     def test_vulkan_command_pool_buffer_and_event_create_infos_fail_closed(self):
@@ -10399,6 +10408,49 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("pLayout->rowPitch", icd)
         self.assertIn("pLayout->depthPitch", icd)
         self.assertIn("MAP_PROC(vkGetImageSubresourceLayout);", icd)
+
+    def test_vulkan_icd_exposes_maintenance5_subresource_query_surface_without_advertising(self):
+        icd = VULKAN_ICD.read_text()
+        helper_body = c_function_body(icd, "fill_image_subresource_layout_tight")
+        self.assertIn("image_tight_subresource_offset(img", helper_body)
+        self.assertIn("image_tight_mip_size(img", helper_body)
+        self.assertIn("image_tight_layer_stride(img", helper_body)
+        layout2_body = c_function_body(icd, "vkGetImageSubresourceLayout2")
+        self.assertIn("zero_vk_out_struct_preserve_chain(pLayout, sizeof(*pLayout), header);", layout2_body)
+        self.assertIn("pSubresource->sType != VK_STRUCTURE_TYPE_IMAGE_SUBRESOURCE_2", layout2_body)
+        self.assertIn("pSubresource->pNext", layout2_body)
+        self.assertIn("fill_image_subresource_layout_tight(img", layout2_body)
+        device_layout_body = c_function_body(icd, "vkGetDeviceImageSubresourceLayout")
+        self.assertIn("pInfo->sType != VK_STRUCTURE_TYPE_DEVICE_IMAGE_SUBRESOURCE_INFO", device_layout_body)
+        self.assertIn("pInfo->pCreateInfo->pNext", device_layout_body)
+        self.assertIn("image.format = pInfo->pCreateInfo->format;", device_layout_body)
+        self.assertIn("image.mip_levels = pInfo->pCreateInfo->mipLevels;", device_layout_body)
+        granularity_body = c_function_body(icd, "vkGetRenderingAreaGranularity")
+        self.assertIn("pGranularity->width = 1;", granularity_body)
+        self.assertIn("pGranularity->height = 1;", granularity_body)
+        self.assertIn("pRenderingAreaInfo->sType != VK_STRUCTURE_TYPE_RENDERING_AREA_INFO", granularity_body)
+        proc_body = icd.split("static PFN_vkVoidFunction proc_address", 1)[1]
+        for marker in [
+            "MAP_PROC(vkGetImageSubresourceLayout2);",
+            'MAP_ALIAS("vkGetImageSubresourceLayout2KHR", vkGetImageSubresourceLayout2);',
+            'MAP_ALIAS("vkGetImageSubresourceLayout2EXT", vkGetImageSubresourceLayout2);',
+            "MAP_PROC(vkGetDeviceImageSubresourceLayout);",
+            'MAP_ALIAS("vkGetDeviceImageSubresourceLayoutKHR", vkGetDeviceImageSubresourceLayout);',
+            "MAP_PROC(vkGetRenderingAreaGranularity);",
+            'MAP_ALIAS("vkGetRenderingAreaGranularityKHR", vkGetRenderingAreaGranularity);',
+        ]:
+            self.assertIn(marker, proc_body)
+        hidden_body = c_function_body(icd, "proc_address_hidden_by_advertisement")
+        for marker in [
+            'strcmp(pName, "vkGetImageSubresourceLayout2KHR") == 0',
+            'strcmp(pName, "vkGetImageSubresourceLayout2EXT") == 0',
+            'strcmp(pName, "vkGetDeviceImageSubresourceLayoutKHR") == 0',
+            'strcmp(pName, "vkGetRenderingAreaGranularityKHR") == 0',
+            'strcmp(pName, "vkGetImageSubresourceLayout2") == 0',
+            'strcmp(pName, "vkGetDeviceImageSubresourceLayout") == 0',
+            'strcmp(pName, "vkGetRenderingAreaGranularity") == 0',
+        ]:
+            self.assertIn(marker, hidden_body)
 
     def test_vulkan_icd_records_clear_color_image_commands(self):
         icd = VULKAN_ICD.read_text()
