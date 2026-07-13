@@ -8265,6 +8265,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "VkPhysicalDeviceSamplerFilterMinmaxProperties",
             "VkPhysicalDeviceFloatControlsProperties",
             "VkPhysicalDeviceTimelineSemaphoreProperties",
+            "VkPhysicalDeviceRobustness2PropertiesEXT",
+            "VkPhysicalDevicePipelineRobustnessProperties",
         ]:
             self.assertIn(f"{struct_name} *p", props_body)
             segment = props_body.split(f"{struct_name} *p", 1)[1].split("break;", 1)[0]
@@ -8282,6 +8284,10 @@ class GpuAbiContractTest(unittest.TestCase):
             "p->filterMinmaxSingleComponentFormats = VK_FALSE;",
             "p->denormBehaviorIndependence = VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE;",
             "p->maxTimelineSemaphoreValueDifference = UINT64_MAX;",
+            "p->robustStorageBufferAccessSizeAlignment = 1;",
+            "p->robustUniformBufferAccessSizeAlignment = 1;",
+            "p->defaultRobustnessStorageBuffers = VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_DEVICE_DEFAULT;",
+            "p->defaultRobustnessImages = VK_PIPELINE_ROBUSTNESS_IMAGE_BEHAVIOR_DEVICE_DEFAULT;",
         ]:
             self.assertIn(marker, props_body)
 
@@ -8338,6 +8344,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "VkPhysicalDevicePrivateDataFeatures",
             "VkPhysicalDeviceMemoryPriorityFeaturesEXT",
             "VkPhysicalDeviceShaderDemoteToHelperInvocationFeatures",
+            "VkPhysicalDeviceRobustness2FeaturesEXT",
+            "VkPhysicalDeviceImageRobustnessFeatures",
+            "VkPhysicalDevicePipelineRobustnessFeatures",
             "VkPhysicalDeviceMaintenance4Features",
         ]:
             if struct_name not in body:
@@ -8701,6 +8710,17 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("p->shaderDemoteToHelperInvocation = VK_FALSE", icd)
         self.assertIn("supported = !p->shaderDemoteToHelperInvocation", icd)
         self.assertIn('unsupported_feature_name = "shaderDemoteToHelperInvocation"', icd)
+        self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT", icd)
+        self.assertIn("p->robustBufferAccess2 = VK_FALSE", icd)
+        self.assertIn("p->robustImageAccess2 = VK_FALSE", icd)
+        self.assertIn("p->nullDescriptor = VK_FALSE", icd)
+        self.assertIn("supported = !p->robustBufferAccess2 && !p->robustImageAccess2 && !p->nullDescriptor", icd)
+        self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_ROBUSTNESS_FEATURES", icd)
+        self.assertIn("p->robustImageAccess = VK_FALSE", icd)
+        self.assertIn("supported = !p->robustImageAccess", icd)
+        self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_ROBUSTNESS_FEATURES", icd)
+        self.assertIn("p->pipelineRobustness = VK_FALSE", icd)
+        self.assertIn("supported = !p->pipelineRobustness", icd)
         self.assertIn("VK_STRUCTURE_TYPE_DEVICE_PRIVATE_DATA_CREATE_INFO", icd)
         self.assertIn("p->privateDataSlotRequestCount == 0", icd)
         self.assertIn('unsupported_feature_name = "privateDataSlotRequestCount"', icd)

@@ -15200,6 +15200,24 @@ static void fill_pnext_properties(void *pNext) {
                 p->maxTimelineSemaphoreValueDifference = UINT64_MAX;
                 break;
             }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_PROPERTIES_EXT: {
+                VkPhysicalDeviceRobustness2PropertiesEXT *p =
+                    (VkPhysicalDeviceRobustness2PropertiesEXT *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                p->robustStorageBufferAccessSizeAlignment = 1;
+                p->robustUniformBufferAccessSizeAlignment = 1;
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_ROBUSTNESS_PROPERTIES: {
+                VkPhysicalDevicePipelineRobustnessProperties *p =
+                    (VkPhysicalDevicePipelineRobustnessProperties *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                p->defaultRobustnessStorageBuffers = VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_DEVICE_DEFAULT;
+                p->defaultRobustnessUniformBuffers = VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_DEVICE_DEFAULT;
+                p->defaultRobustnessVertexInputs = VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_DEVICE_DEFAULT;
+                p->defaultRobustnessImages = VK_PIPELINE_ROBUSTNESS_IMAGE_BEHAVIOR_DEVICE_DEFAULT;
+                break;
+            }
             default:
                 break;
         }
@@ -15517,6 +15535,29 @@ static void fill_pnext_features(void *pNext) {
                     (VkPhysicalDeviceShaderDemoteToHelperInvocationFeatures *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
                 p->shaderDemoteToHelperInvocation = VK_FALSE;
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT: {
+                VkPhysicalDeviceRobustness2FeaturesEXT *p =
+                    (VkPhysicalDeviceRobustness2FeaturesEXT *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                p->robustBufferAccess2 = VK_FALSE;
+                p->robustImageAccess2 = VK_FALSE;
+                p->nullDescriptor = VK_FALSE;
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_ROBUSTNESS_FEATURES: {
+                VkPhysicalDeviceImageRobustnessFeatures *p =
+                    (VkPhysicalDeviceImageRobustnessFeatures *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                p->robustImageAccess = VK_FALSE;
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_ROBUSTNESS_FEATURES: {
+                VkPhysicalDevicePipelineRobustnessFeatures *p =
+                    (VkPhysicalDevicePipelineRobustnessFeatures *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                p->pipelineRobustness = VK_FALSE;
                 break;
             }
 #ifdef VK_EXT_subpass_merge_feedback
@@ -16035,6 +16076,27 @@ static VkResult validate_device_feature_requests(const VkDeviceCreateInfo *pCrea
                     (const VkPhysicalDeviceShaderDemoteToHelperInvocationFeatures *)node;
                 supported = !p->shaderDemoteToHelperInvocation;
                 if (!supported) unsupported_feature_name = "shaderDemoteToHelperInvocation";
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT: {
+                const VkPhysicalDeviceRobustness2FeaturesEXT *p =
+                    (const VkPhysicalDeviceRobustness2FeaturesEXT *)node;
+                supported = !p->robustBufferAccess2 && !p->robustImageAccess2 && !p->nullDescriptor;
+                if (!supported) unsupported_feature_name = "robustness2";
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_ROBUSTNESS_FEATURES: {
+                const VkPhysicalDeviceImageRobustnessFeatures *p =
+                    (const VkPhysicalDeviceImageRobustnessFeatures *)node;
+                supported = !p->robustImageAccess;
+                if (!supported) unsupported_feature_name = "robustImageAccess";
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_ROBUSTNESS_FEATURES: {
+                const VkPhysicalDevicePipelineRobustnessFeatures *p =
+                    (const VkPhysicalDevicePipelineRobustnessFeatures *)node;
+                supported = !p->pipelineRobustness;
+                if (!supported) unsupported_feature_name = "pipelineRobustness";
                 break;
             }
 #ifdef VK_EXT_subpass_merge_feedback

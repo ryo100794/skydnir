@@ -261,6 +261,114 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_robustness_features_are_queryable_false_only(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            int main(void) {{
+                VkPhysicalDeviceRobustness2FeaturesEXT robustness2;
+                VkPhysicalDeviceImageRobustnessFeatures image_robustness;
+                VkPhysicalDevicePipelineRobustnessFeatures pipeline_robustness;
+                VkDeviceCreateInfo create_info;
+
+                memset(&robustness2, 0xff, sizeof(robustness2));
+                memset(&image_robustness, 0xff, sizeof(image_robustness));
+                memset(&pipeline_robustness, 0xff, sizeof(pipeline_robustness));
+                robustness2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT;
+                image_robustness.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_ROBUSTNESS_FEATURES;
+                pipeline_robustness.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_ROBUSTNESS_FEATURES;
+                robustness2.pNext = &image_robustness;
+                image_robustness.pNext = &pipeline_robustness;
+                pipeline_robustness.pNext = NULL;
+                fill_pnext_features(&robustness2);
+                if (robustness2.pNext != &image_robustness ||
+                    image_robustness.pNext != &pipeline_robustness ||
+                    pipeline_robustness.pNext != NULL) {{
+                    fprintf(stderr, "robustness pNext chain was not preserved\\n");
+                    return 2;
+                }}
+                if (robustness2.robustBufferAccess2 != VK_FALSE ||
+                    robustness2.robustImageAccess2 != VK_FALSE ||
+                    robustness2.nullDescriptor != VK_FALSE ||
+                    image_robustness.robustImageAccess != VK_FALSE ||
+                    pipeline_robustness.pipelineRobustness != VK_FALSE) {{
+                    fprintf(stderr, "robustness features were not false-only\\n");
+                    return 3;
+                }}
+                memset(&create_info, 0, sizeof(create_info));
+                create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                create_info.pNext = &robustness2;
+                if (validate_device_feature_requests(&create_info) != VK_SUCCESS) {{
+                    fprintf(stderr, "all-false robustness chain was rejected\\n");
+                    return 4;
+                }}
+                robustness2.nullDescriptor = VK_TRUE;
+                if (validate_device_feature_requests(&create_info) == VK_SUCCESS) return 5;
+                robustness2.nullDescriptor = VK_FALSE;
+                image_robustness.robustImageAccess = VK_TRUE;
+                if (validate_device_feature_requests(&create_info) == VK_SUCCESS) return 6;
+                image_robustness.robustImageAccess = VK_FALSE;
+                pipeline_robustness.pipelineRobustness = VK_TRUE;
+                if (validate_device_feature_requests(&create_info) == VK_SUCCESS) return 7;
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+
+    def test_robustness_properties_are_queryable_without_feature_promotion(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            int main(void) {{
+                VkPhysicalDeviceProperties2 properties2;
+                VkPhysicalDeviceRobustness2PropertiesEXT robustness2;
+                VkPhysicalDevicePipelineRobustnessProperties pipeline;
+                memset(&properties2, 0, sizeof(properties2));
+                memset(&robustness2, 0xff, sizeof(robustness2));
+                memset(&pipeline, 0xff, sizeof(pipeline));
+                properties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+                properties2.pNext = &robustness2;
+                robustness2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_PROPERTIES_EXT;
+                robustness2.pNext = &pipeline;
+                pipeline.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_ROBUSTNESS_PROPERTIES;
+                pipeline.pNext = NULL;
+
+                vkGetPhysicalDeviceProperties2(VK_NULL_HANDLE, &properties2);
+                if (robustness2.pNext != &pipeline || pipeline.pNext != NULL) {{
+                    fprintf(stderr, "robustness properties pNext chain was not preserved\\n");
+                    return 2;
+                }}
+                if (robustness2.robustStorageBufferAccessSizeAlignment != 1 ||
+                    robustness2.robustUniformBufferAccessSizeAlignment != 1) {{
+                    fprintf(stderr, "robustness2 alignments were not conservative one-byte values\\n");
+                    return 3;
+                }}
+                if (pipeline.defaultRobustnessStorageBuffers != VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_DEVICE_DEFAULT ||
+                    pipeline.defaultRobustnessUniformBuffers != VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_DEVICE_DEFAULT ||
+                    pipeline.defaultRobustnessVertexInputs != VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_DEVICE_DEFAULT ||
+                    pipeline.defaultRobustnessImages != VK_PIPELINE_ROBUSTNESS_IMAGE_BEHAVIOR_DEVICE_DEFAULT) {{
+                    fprintf(stderr, "pipeline robustness defaults were not DEVICE_DEFAULT\\n");
+                    return 4;
+                }}
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+
     def test_standalone_core_feature_structs_are_queryable_and_fail_closed(self):
         source = textwrap.dedent(
             f"""

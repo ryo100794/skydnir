@@ -85,6 +85,7 @@ Confirmed facts:
 | 2026-07-13 Vulkan memory-priority no-op feature/allocation lane | `vkGetPhysicalDeviceFeatures2` now initializes `VkPhysicalDeviceMemoryPriorityFeaturesEXT` as `memoryPriority = VK_FALSE`, and `vkCreateDevice` accepts that feature struct only when false. `vkAllocateMemory` accepts `VkMemoryPriorityAllocateInfoEXT` only when `priority == 0.5f`, the Vulkan default priority. Non-default priority values remain fail-closed because the bridge does not advertise `VK_EXT_memory_priority`, replay allocation priorities, or expose `vkSetDeviceMemoryPriorityEXT`. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; host tests `tests.test_gpu_abi_contract tests.test_vulkan_icd_feature_chain`; no executor ABI, llama.cpp, Dockerfile, model, prompt, or shader changes |
 | 2026-07-13 Vulkan shader-demote no-op feature lane | `vkGetPhysicalDeviceFeatures2` now initializes `VkPhysicalDeviceShaderDemoteToHelperInvocationFeatures` as `shaderDemoteToHelperInvocation = VK_FALSE`, and `vkCreateDevice` accepts that feature struct only when false. True requests remain fail-closed because the bridge does not advertise `VK_EXT_shader_demote_to_helper_invocation` and must not silently accept shader semantics it does not validate through Android replay. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; host tests `tests.test_gpu_abi_contract tests.test_vulkan_icd_feature_chain`; no executor ABI, llama.cpp, Dockerfile, model, prompt, or shader changes |
 | 2026-07-13 Vulkan standalone core feature pNext lane | Standalone core feature structs for multiview, variable pointers, protected memory, shader draw parameters, shader int64 atomics, and imageless framebuffer now participate in feature queries and create-device validation instead of falling into unknown-pNext failure. Multiview mirrors the existing Vulkan 1.1 aggregate advertisement; the remaining feature structs are queryable as false-only and true requests fail closed. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; host tests `tests.test_gpu_abi_contract tests.test_vulkan_icd_feature_chain`; no executor ABI, llama.cpp, Dockerfile, model, prompt, or shader changes |
+| 2026-07-13 Vulkan robustness false-only/query-property lane | Robustness-related feature structs now participate in generic feature query and create-device validation without promoting unsupported semantics. `VkPhysicalDeviceRobustness2FeaturesEXT`, `VkPhysicalDeviceImageRobustnessFeatures`, and `VkPhysicalDevicePipelineRobustnessFeatures` report false-only and reject true requests. Robustness2 and pipeline robustness property structs are initialized with conservative query values so pNext property chains do not fail merely due to struct form. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; host tests `tests.test_gpu_abi_contract tests.test_vulkan_icd_feature_chain`; no executor ABI, llama.cpp, Dockerfile, model, prompt, or shader changes |
 | 2026-05-20 Q6_K workflow | Device workflow reaches the known Q6_K blocker again; create-timeout race is no longer the blocker | `docs/test/llama-gpu-q6k-adb41503-20260520T110352Z.json` (ignored runtime evidence), workflow `classification=q6-native-device-execution-or-final-store` |
 | 2026-05-23 Q6 WorkgroupSize lane | Device is reachable and Q6 dispatch evidence is present, but the effective Q6 WorkgroupSize evidence is still not visible in the oracle record | ADB `192.168.179.26:34761`; `docs/test/llama-gpu-readiness-adb34761-latest.json`; `docs/test/llama-gpu-ngl1-q6-workgroup-legalized-adb34761-20260523T084956Z.json`; `docs/test/llama-gpu-ngl1-q6-workgroup-composite-adb34761-20260523T091428Z.json` |
 | commit `ac40e49` safe-kernel lane | `ngl=1` prompt/Q6 oracle/writeback correctness clears only under bridge-owned Q6 safe-kernel substitution | `docs/test/llama-gpu-ngl1-q6-safe-kernel-adb44443-20260523T112715Z.json`; classification `q6-workgroup-cleared-and-oracle-match`; safe-kernel hash `0x7ec0292e948c9b41` for source hash `0x1bf751845c5dce75` |
@@ -2172,6 +2173,19 @@ API binding number.
 
 
 
+
+### 2026-07-13 Vulkan robustness false-only/query-property lane
+
+Robustness pNext structs are now handled as generic Vulkan API-surface
+compatibility without silently enabling semantics the bridge does not replay.
+`VkPhysicalDeviceRobustness2FeaturesEXT`,
+`VkPhysicalDeviceImageRobustnessFeatures`, and
+`VkPhysicalDevicePipelineRobustnessFeatures` are queryable as false-only, and
+any true request fails closed during `vkCreateDevice`.  The corresponding
+Robustness2 and pipeline robustness property structs are also initialized in
+`vkGetPhysicalDeviceProperties2`, using conservative alignment/default behavior
+values.  The ICD still does not advertise the robustness extensions or accept
+non-default pipeline robustness semantics.
 
 ### 2026-07-13 Vulkan standalone core feature pNext lane
 
