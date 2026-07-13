@@ -261,6 +261,55 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_shader_demote_feature_is_queryable_but_not_enableable(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            int main(void) {{
+                VkPhysicalDeviceShaderDemoteToHelperInvocationFeatures demote_features;
+                memset(&demote_features, 0xff, sizeof(demote_features));
+                demote_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DEMOTE_TO_HELPER_INVOCATION_FEATURES;
+                demote_features.pNext = NULL;
+                fill_pnext_features(&demote_features);
+                if (demote_features.sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DEMOTE_TO_HELPER_INVOCATION_FEATURES) {{
+                    fprintf(stderr, "shader demote feature sType was not preserved\\n");
+                    return 2;
+                }}
+                if (demote_features.pNext != NULL) {{
+                    fprintf(stderr, "shader demote feature pNext was not preserved\\n");
+                    return 3;
+                }}
+                if (demote_features.shaderDemoteToHelperInvocation != VK_FALSE) {{
+                    fprintf(stderr, "shaderDemoteToHelperInvocation was advertised without shader-demote support\\n");
+                    return 4;
+                }}
+
+                VkDeviceCreateInfo create_info;
+                memset(&create_info, 0, sizeof(create_info));
+                create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                demote_features.shaderDemoteToHelperInvocation = VK_TRUE;
+                create_info.pNext = &demote_features;
+                if (validate_device_feature_requests(&create_info) == VK_SUCCESS) {{
+                    fprintf(stderr, "shaderDemoteToHelperInvocation=true was accepted\\n");
+                    return 5;
+                }}
+                demote_features.shaderDemoteToHelperInvocation = VK_FALSE;
+                if (validate_device_feature_requests(&create_info) != VK_SUCCESS) {{
+                    fprintf(stderr, "shaderDemoteToHelperInvocation=false was rejected\\n");
+                    return 6;
+                }}
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+
     def test_dynamic_rendering_local_read_feature_is_queryable_but_not_enableable(self):
         source = textwrap.dedent(
             f"""

@@ -8331,6 +8331,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "VkPhysicalDeviceHostQueryResetFeatures",
             "VkPhysicalDevicePrivateDataFeatures",
             "VkPhysicalDeviceMemoryPriorityFeaturesEXT",
+            "VkPhysicalDeviceShaderDemoteToHelperInvocationFeatures",
             "VkPhysicalDeviceMaintenance4Features",
         ]:
             if struct_name not in body:
@@ -8671,6 +8672,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("p->memoryPriority = VK_FALSE", icd)
         self.assertIn("supported = !p->memoryPriority", icd)
         self.assertIn('unsupported_feature_name = "memoryPriority"', icd)
+        self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DEMOTE_TO_HELPER_INVOCATION_FEATURES", icd)
+        self.assertIn("p->shaderDemoteToHelperInvocation = VK_FALSE", icd)
+        self.assertIn("supported = !p->shaderDemoteToHelperInvocation", icd)
+        self.assertIn('unsupported_feature_name = "shaderDemoteToHelperInvocation"', icd)
         self.assertIn("VK_STRUCTURE_TYPE_DEVICE_PRIVATE_DATA_CREATE_INFO", icd)
         self.assertIn("p->privateDataSlotRequestCount == 0", icd)
         self.assertIn('unsupported_feature_name = "privateDataSlotRequestCount"', icd)

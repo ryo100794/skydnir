@@ -83,6 +83,7 @@ Confirmed facts:
 | 2026-07-13 Vulkan memory allocation export-handle no-op pNext lane | `vkAllocateMemory` now accepts `VkExportMemoryAllocateInfo` only when `handleTypes == 0`, treating the default external-memory export request as execution-neutral metadata. Nonzero external handle requests remain fail-closed because the bridge does not advertise or transport Vulkan external memory handles. This is generic allocation pNext compatibility and does not change executor ABI, replay data, llama.cpp, Dockerfiles, models, prompts, or shader bytes. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; host tests `tests.test_gpu_abi_contract tests.test_vulkan_icd_feature_chain`; glibc payload build `scripts/build-gpu-shim.sh`; no llama.cpp/Dockerfile/model/prompt changes |
 | 2026-07-13 Vulkan private-data no-op feature/create-info lane | `vkGetPhysicalDeviceFeatures2` now initializes `VkPhysicalDevicePrivateDataFeatures` as `privateData = VK_FALSE`, and `vkCreateDevice` accepts that feature struct only when false. `VkDevicePrivateDataCreateInfo` is accepted only when `privateDataSlotRequestCount == 0`. Nonzero private-data feature or slot requests remain fail-closed because the bridge does not advertise private-data slot APIs or carry per-object private-data state. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; host tests `tests.test_gpu_abi_contract tests.test_vulkan_icd_feature_chain`; no executor ABI, llama.cpp, Dockerfile, model, prompt, or shader changes |
 | 2026-07-13 Vulkan memory-priority no-op feature/allocation lane | `vkGetPhysicalDeviceFeatures2` now initializes `VkPhysicalDeviceMemoryPriorityFeaturesEXT` as `memoryPriority = VK_FALSE`, and `vkCreateDevice` accepts that feature struct only when false. `vkAllocateMemory` accepts `VkMemoryPriorityAllocateInfoEXT` only when `priority == 0.5f`, the Vulkan default priority. Non-default priority values remain fail-closed because the bridge does not advertise `VK_EXT_memory_priority`, replay allocation priorities, or expose `vkSetDeviceMemoryPriorityEXT`. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; host tests `tests.test_gpu_abi_contract tests.test_vulkan_icd_feature_chain`; no executor ABI, llama.cpp, Dockerfile, model, prompt, or shader changes |
+| 2026-07-13 Vulkan shader-demote no-op feature lane | `vkGetPhysicalDeviceFeatures2` now initializes `VkPhysicalDeviceShaderDemoteToHelperInvocationFeatures` as `shaderDemoteToHelperInvocation = VK_FALSE`, and `vkCreateDevice` accepts that feature struct only when false. True requests remain fail-closed because the bridge does not advertise `VK_EXT_shader_demote_to_helper_invocation` and must not silently accept shader semantics it does not validate through Android replay. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; host tests `tests.test_gpu_abi_contract tests.test_vulkan_icd_feature_chain`; no executor ABI, llama.cpp, Dockerfile, model, prompt, or shader changes |
 | 2026-05-20 Q6_K workflow | Device workflow reaches the known Q6_K blocker again; create-timeout race is no longer the blocker | `docs/test/llama-gpu-q6k-adb41503-20260520T110352Z.json` (ignored runtime evidence), workflow `classification=q6-native-device-execution-or-final-store` |
 | 2026-05-23 Q6 WorkgroupSize lane | Device is reachable and Q6 dispatch evidence is present, but the effective Q6 WorkgroupSize evidence is still not visible in the oracle record | ADB `192.168.179.26:34761`; `docs/test/llama-gpu-readiness-adb34761-latest.json`; `docs/test/llama-gpu-ngl1-q6-workgroup-legalized-adb34761-20260523T084956Z.json`; `docs/test/llama-gpu-ngl1-q6-workgroup-composite-adb34761-20260523T091428Z.json` |
 | commit `ac40e49` safe-kernel lane | `ngl=1` prompt/Q6 oracle/writeback correctness clears only under bridge-owned Q6 safe-kernel substitution | `docs/test/llama-gpu-ngl1-q6-safe-kernel-adb44443-20260523T112715Z.json`; classification `q6-workgroup-cleared-and-oracle-match`; safe-kernel hash `0x7ec0292e948c9b41` for source hash `0x1bf751845c5dce75` |
@@ -2170,6 +2171,16 @@ API binding number.
 
 
 
+
+### 2026-07-13 Vulkan shader-demote no-op feature lane
+
+`vkGetPhysicalDeviceFeatures2` now handles
+`VkPhysicalDeviceShaderDemoteToHelperInvocationFeatures` explicitly and reports
+`shaderDemoteToHelperInvocation = VK_FALSE`.  `vkCreateDevice` accepts the
+feature struct only when false.  A true request remains fail-closed because
+Skydnir does not advertise `VK_EXT_shader_demote_to_helper_invocation` and the
+bridge does not validate or replay shader-demote helper-invocation semantics as
+part of its generic Vulkan transport.
 
 ### 2026-07-13 Vulkan memory-priority no-op feature/allocation lane
 

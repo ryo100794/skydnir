@@ -15466,6 +15466,13 @@ static void fill_pnext_features(void *pNext) {
                 p->memoryPriority = VK_FALSE;
                 break;
             }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DEMOTE_TO_HELPER_INVOCATION_FEATURES: {
+                VkPhysicalDeviceShaderDemoteToHelperInvocationFeatures *p =
+                    (VkPhysicalDeviceShaderDemoteToHelperInvocationFeatures *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                p->shaderDemoteToHelperInvocation = VK_FALSE;
+                break;
+            }
 #ifdef VK_EXT_subpass_merge_feedback
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBPASS_MERGE_FEEDBACK_FEATURES_EXT: {
                 VkPhysicalDeviceSubpassMergeFeedbackFeaturesEXT *p =
@@ -15927,6 +15934,13 @@ static VkResult validate_device_feature_requests(const VkDeviceCreateInfo *pCrea
                     (const VkPhysicalDeviceMemoryPriorityFeaturesEXT *)node;
                 supported = !p->memoryPriority;
                 if (!supported) unsupported_feature_name = "memoryPriority";
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DEMOTE_TO_HELPER_INVOCATION_FEATURES: {
+                const VkPhysicalDeviceShaderDemoteToHelperInvocationFeatures *p =
+                    (const VkPhysicalDeviceShaderDemoteToHelperInvocationFeatures *)node;
+                supported = !p->shaderDemoteToHelperInvocation;
+                if (!supported) unsupported_feature_name = "shaderDemoteToHelperInvocation";
                 break;
             }
 #ifdef VK_EXT_subpass_merge_feedback
