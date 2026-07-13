@@ -322,6 +322,124 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
 
+    def test_dedicated_memory_bind_enforces_target_and_zero_offset(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            static VkBufferCreateInfo buffer_info(VkDeviceSize size) {{
+                VkBufferCreateInfo info;
+                memset(&info, 0, sizeof(info));
+                info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+                info.size = size;
+                info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+                info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+                return info;
+            }}
+
+
+            int main(void) {{
+                VkBufferCreateInfo binfo = buffer_info(64);
+                VkBuffer buffer_a = VK_NULL_HANDLE;
+                VkBuffer buffer_b = VK_NULL_HANDLE;
+                if (vkCreateBuffer(VK_NULL_HANDLE, &binfo, NULL, &buffer_a) != VK_SUCCESS ||
+                    vkCreateBuffer(VK_NULL_HANDLE, &binfo, NULL, &buffer_b) != VK_SUCCESS) {{
+                    fprintf(stderr, "buffer create failed\\n");
+                    return 2;
+                }}
+
+                VkMemoryDedicatedAllocateInfo dedicated;
+                memset(&dedicated, 0, sizeof(dedicated));
+                dedicated.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO;
+                dedicated.buffer = buffer_a;
+                VkMemoryAllocateInfo alloc;
+                memset(&alloc, 0, sizeof(alloc));
+                alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+                alloc.pNext = &dedicated;
+                alloc.allocationSize = 4096;
+                alloc.memoryTypeIndex = 0;
+                VkDeviceMemory memory = VK_NULL_HANDLE;
+                if (vkAllocateMemory(VK_NULL_HANDLE, &alloc, NULL, &memory) != VK_SUCCESS) {{
+                    fprintf(stderr, "buffer dedicated allocation failed\\n");
+                    return 3;
+                }}
+                PdockerVkMemory *memory_obj = pdocker_vk_memory_from_handle(memory);
+                if (!memory_obj || memory_obj->dedicated_buffer != pdocker_vk_buffer_from_handle(buffer_a) ||
+                    memory_obj->dedicated_image != NULL) {{
+                    fprintf(stderr, "buffer dedicated target was not recorded\\n");
+                    return 4;
+                }}
+                if (vkBindBufferMemory(VK_NULL_HANDLE, buffer_a, memory, 0) != VK_SUCCESS) {{
+                    fprintf(stderr, "dedicated buffer bind to target failed\\n");
+                    return 5;
+                }}
+                if (vkBindBufferMemory(VK_NULL_HANDLE, buffer_a, memory, 16) == VK_SUCCESS) {{
+                    fprintf(stderr, "dedicated buffer accepted nonzero offset\\n");
+                    return 6;
+                }}
+                if (vkBindBufferMemory(VK_NULL_HANDLE, buffer_b, memory, 0) == VK_SUCCESS) {{
+                    fprintf(stderr, "dedicated buffer accepted different buffer\\n");
+                    return 7;
+                }}
+
+                PdockerVkImage *image_obj_a = pdocker_alloc_handle(sizeof(*image_obj_a));
+                PdockerVkImage *image_obj_b = pdocker_alloc_handle(sizeof(*image_obj_b));
+                if (!image_obj_a || !image_obj_b) {{
+                    fprintf(stderr, "image test handle allocation failed\\n");
+                    return 8;
+                }}
+                image_obj_a->object_id = 101;
+                image_obj_a->requirements_alignment = PDOCKER_VK_REQUIREMENT_ALIGNMENT;
+                image_obj_a->requirements_size = 4096;
+                image_obj_a->memory_type_bits = 0x3;
+                image_obj_b->object_id = 102;
+                image_obj_b->requirements_alignment = PDOCKER_VK_REQUIREMENT_ALIGNMENT;
+                image_obj_b->requirements_size = 4096;
+                image_obj_b->memory_type_bits = 0x3;
+                VkImage image_a = pdocker_vk_image_to_handle(image_obj_a);
+                VkImage image_b = pdocker_vk_image_to_handle(image_obj_b);
+                memset(&dedicated, 0, sizeof(dedicated));
+                dedicated.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO;
+                dedicated.image = image_a;
+                memset(&alloc, 0, sizeof(alloc));
+                alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+                alloc.pNext = &dedicated;
+                alloc.allocationSize = 4096;
+                alloc.memoryTypeIndex = 0;
+                VkDeviceMemory image_memory = VK_NULL_HANDLE;
+                if (vkAllocateMemory(VK_NULL_HANDLE, &alloc, NULL, &image_memory) != VK_SUCCESS) {{
+                    fprintf(stderr, "image dedicated allocation failed\\n");
+                    return 9;
+                }}
+                PdockerVkMemory *image_memory_obj = pdocker_vk_memory_from_handle(image_memory);
+                if (!image_memory_obj || image_memory_obj->dedicated_image != pdocker_vk_image_from_handle(image_a) ||
+                    image_memory_obj->dedicated_buffer != NULL) {{
+                    fprintf(stderr, "image dedicated target was not recorded\\n");
+                    return 10;
+                }}
+                if (vkBindImageMemory(VK_NULL_HANDLE, image_a, image_memory, 0) != VK_SUCCESS) {{
+                    fprintf(stderr, "dedicated image bind to target failed\\n");
+                    return 11;
+                }}
+                if (vkBindImageMemory(VK_NULL_HANDLE, image_b, image_memory, 0) == VK_SUCCESS) {{
+                    fprintf(stderr, "dedicated image accepted different image\\n");
+                    return 12;
+                }}
+                if (vkBindBufferMemory(VK_NULL_HANDLE, buffer_a, image_memory, 0) == VK_SUCCESS) {{
+                    fprintf(stderr, "dedicated image memory accepted buffer bind\\n");
+                    return 13;
+                }}
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+
     def test_pipeline_robustness_create_info_is_default_only(self):
         source = textwrap.dedent(
             f"""

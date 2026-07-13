@@ -480,6 +480,8 @@ struct PdockerVkMemory {
     size_t page_count;
     unsigned char *resident_pages;
     unsigned char *dirty_pages;
+    PdockerVkBuffer *dedicated_buffer;
+    PdockerVkImage *dedicated_image;
 };
 
 typedef struct {
@@ -18287,6 +18289,13 @@ VKAPI_ATTR void VKAPI_CALL vkGetRenderingAreaGranularityKHR(
     vkGetRenderingAreaGranularity(device, pRenderingAreaInfo, pGranularity);
 }
 
+static VkResult validate_memory_dedicated_bind(
+        const char *api_name,
+        const PdockerVkMemory *memory,
+        const PdockerVkBuffer *buffer,
+        const PdockerVkImage *image,
+        VkDeviceSize memory_offset);
+
 VKAPI_ATTR VkResult VKAPI_CALL vkBindImageMemory(
         VkDevice device,
         VkImage image,
@@ -18300,6 +18309,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkBindImageMemory(
         trace_icd_runtime_failure("swapchain-image-bind-rejected", VK_ERROR_INITIALIZATION_FAILED);
         return VK_ERROR_INITIALIZATION_FAILED;
     }
+    VkResult dedicated_rc = validate_memory_dedicated_bind(
+        "memory-dedicated-image-bind-mismatch", mem, NULL, img, memoryOffset);
+    if (dedicated_rc != VK_SUCCESS) return dedicated_rc;
     VkDeviceSize alignment = img->requirements_alignment ? img->requirements_alignment : PDOCKER_VK_REQUIREMENT_ALIGNMENT;
     VkDeviceSize needed = img->requirements_size;
     if ((memoryOffset % alignment) != 0 ||
@@ -18666,6 +18678,62 @@ VKAPI_ATTR uint64_t VKAPI_CALL vkGetDeviceMemoryOpaqueCaptureAddress(
     return 0;
 }
 
+static void extract_memory_dedicated_allocate_targets(
+        const void *pNext,
+        PdockerVkImage **image_out,
+        PdockerVkBuffer **buffer_out) {
+    if (image_out) *image_out = NULL;
+    if (buffer_out) *buffer_out = NULL;
+    for (const void *node = pNext; node;) {
+        PdockerVkStructHeader header = read_vk_struct_header(node);
+#if defined(VK_VERSION_1_1) || defined(VK_KHR_dedicated_allocation)
+        if (header.sType == VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO) {
+            const VkMemoryDedicatedAllocateInfo *info =
+                (const VkMemoryDedicatedAllocateInfo *)node;
+            if (image_out && info->image != VK_NULL_HANDLE) {
+                *image_out = pdocker_vk_image_from_handle(info->image);
+            }
+            if (buffer_out && info->buffer != VK_NULL_HANDLE) {
+                *buffer_out = pdocker_vk_buffer_from_handle(info->buffer);
+            }
+        }
+#endif
+        node = header.pNext;
+    }
+}
+
+static VkResult validate_memory_dedicated_bind(
+        const char *api_name,
+        const PdockerVkMemory *memory,
+        const PdockerVkBuffer *buffer,
+        const PdockerVkImage *image,
+        VkDeviceSize memory_offset) {
+    if (!memory) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!memory->dedicated_buffer && !memory->dedicated_image) return VK_SUCCESS;
+    if (memory_offset != 0) {
+        trace_icd_runtime_failure("memory-dedicated-bind-offset-nonzero",
+                                  VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    if (buffer) {
+        if (memory->dedicated_buffer != buffer || memory->dedicated_image != NULL) {
+            trace_icd_runtime_failure(api_name ? api_name : "memory-dedicated-buffer-bind-mismatch",
+                                      VK_ERROR_FEATURE_NOT_PRESENT);
+            return VK_ERROR_FEATURE_NOT_PRESENT;
+        }
+        return VK_SUCCESS;
+    }
+    if (image) {
+        if (memory->dedicated_image != image || memory->dedicated_buffer != NULL) {
+            trace_icd_runtime_failure(api_name ? api_name : "memory-dedicated-image-bind-mismatch",
+                                      VK_ERROR_FEATURE_NOT_PRESENT);
+            return VK_ERROR_FEATURE_NOT_PRESENT;
+        }
+        return VK_SUCCESS;
+    }
+    return VK_ERROR_INITIALIZATION_FAILED;
+}
+
 static VkResult validate_memory_allocate_pnext(const void *pNext) {
     for (const void *node = pNext; node;) {
         PdockerVkStructHeader header = read_vk_struct_header(node);
@@ -18768,6 +18836,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateMemory(
     memory->property_flags = memory->memory_type_index == 0
         ? VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
         : (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    extract_memory_dedicated_allocate_targets(
+        pAllocateInfo->pNext, &memory->dedicated_image, &memory->dedicated_buffer);
     trace_pnext_chain("allocate", pAllocateInfo->pNext);
     if (trace_allocations()) {
         fprintf(stderr,
@@ -18934,6 +19004,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkBindBufferMemory(
     PdockerVkBuffer *b = pdocker_vk_buffer_from_handle(buffer);
     PdockerVkMemory *m = pdocker_vk_memory_from_handle(memory);
     if (!b || !m) return VK_ERROR_INITIALIZATION_FAILED;
+    VkResult dedicated_rc = validate_memory_dedicated_bind(
+        "memory-dedicated-buffer-bind-mismatch", m, b, NULL, memoryOffset);
+    if (dedicated_rc != VK_SUCCESS) return dedicated_rc;
     VkDeviceSize alignment = b->requirements_alignment ? b->requirements_alignment : PDOCKER_VK_REQUIREMENT_ALIGNMENT;
     VkDeviceSize needed = b->requirements_size ? b->requirements_size : align_device_size((VkDeviceSize)b->size, alignment);
     if ((memoryOffset % alignment) != 0 ||
