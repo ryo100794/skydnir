@@ -18476,6 +18476,18 @@ static VkResult validate_memory_allocate_pnext(const void *pNext) {
                 break;
             }
 #endif
+#if defined(VK_VERSION_1_1) || defined(VK_KHR_external_memory)
+            case VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO: {
+                const VkExportMemoryAllocateInfo *info =
+                    (const VkExportMemoryAllocateInfo *)node;
+                if (info->handleTypes != 0) {
+                    trace_icd_runtime_failure("memory-export-handle-unsupported",
+                                              VK_ERROR_FEATURE_NOT_PRESENT);
+                    return VK_ERROR_FEATURE_NOT_PRESENT;
+                }
+                break;
+            }
+#endif
 #if defined(VK_VERSION_1_1) || defined(VK_KHR_device_group)
             case VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO: {
                 const VkMemoryAllocateFlagsInfo *info =

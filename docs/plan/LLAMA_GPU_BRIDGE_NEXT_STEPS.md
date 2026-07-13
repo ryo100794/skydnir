@@ -80,6 +80,7 @@ Confirmed facts:
 | 2026-07-13 Vulkan image-view minLod no-op pNext lane | `vkCreateImageView` now accepts `VkImageViewMinLodCreateInfoEXT` only when `minLod == 0.0f`, treating the default value as execution-neutral metadata. Nonzero min-lod clamps still fail closed because the current image-view transport has no per-view LOD field and must not silently widen application-visible sampling state. This widens generic image-view pNext compatibility without changing executor ABI, replay data, llama.cpp, Dockerfiles, models, prompts, or shader bytes. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; host tests `tests.test_gpu_abi_contract tests.test_vulkan_icd_feature_chain`; glibc payload build `scripts/build-gpu-shim.sh`; APK build `:app:assembleCompatDebug`; no llama.cpp/Dockerfile/model/prompt changes |
 | 2026-07-13 Vulkan image-format2 filter-cubic view-query pNext lane | `vkGetPhysicalDeviceImageFormatProperties2` now accepts `VkPhysicalDeviceImageViewImageFormatInfoEXT` as query metadata when `imageViewType` is one of the known Vulkan image-view types. The output-side `VkFilterCubicImageViewImageFormatPropertiesEXT` remains zero-filled, so filter-cubic support is still not advertised or implied. Unknown view-type values and unknown input pNext structs continue to return `VK_ERROR_FORMAT_NOT_SUPPORTED`. This is query-only generic Vulkan API-surface widening and does not touch executor ABI, replay, llama.cpp, Dockerfiles, models, prompts, or shader bytes. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; host tests `tests.test_gpu_abi_contract tests.test_vulkan_icd_feature_chain`; no llama.cpp/Dockerfile/model/prompt changes |
 | 2026-07-13 Vulkan memory allocation capture-address no-op pNext lane | `vkAllocateMemory` now accepts `VkMemoryOpaqueCaptureAddressAllocateInfo` only when `opaqueCaptureAddress == 0`, treating it as execution-neutral capture/replay metadata. Nonzero capture addresses remain fail-closed because the bridge does not advertise buffer-device-address capture/replay and must not silently reinterpret application-provided device addresses. This widens generic Vulkan allocation pNext compatibility without changing executor ABI, replay data, llama.cpp, Dockerfiles, models, prompts, or shader bytes. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; host tests `tests.test_gpu_abi_contract tests.test_vulkan_icd_feature_chain`; glibc payload build `scripts/build-gpu-shim.sh`; no llama.cpp/Dockerfile/model/prompt changes |
+| 2026-07-13 Vulkan memory allocation export-handle no-op pNext lane | `vkAllocateMemory` now accepts `VkExportMemoryAllocateInfo` only when `handleTypes == 0`, treating the default external-memory export request as execution-neutral metadata. Nonzero external handle requests remain fail-closed because the bridge does not advertise or transport Vulkan external memory handles. This is generic allocation pNext compatibility and does not change executor ABI, replay data, llama.cpp, Dockerfiles, models, prompts, or shader bytes. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; host tests `tests.test_gpu_abi_contract tests.test_vulkan_icd_feature_chain`; glibc payload build `scripts/build-gpu-shim.sh`; no llama.cpp/Dockerfile/model/prompt changes |
 | 2026-05-20 Q6_K workflow | Device workflow reaches the known Q6_K blocker again; create-timeout race is no longer the blocker | `docs/test/llama-gpu-q6k-adb41503-20260520T110352Z.json` (ignored runtime evidence), workflow `classification=q6-native-device-execution-or-final-store` |
 | 2026-05-23 Q6 WorkgroupSize lane | Device is reachable and Q6 dispatch evidence is present, but the effective Q6 WorkgroupSize evidence is still not visible in the oracle record | ADB `192.168.179.26:34761`; `docs/test/llama-gpu-readiness-adb34761-latest.json`; `docs/test/llama-gpu-ngl1-q6-workgroup-legalized-adb34761-20260523T084956Z.json`; `docs/test/llama-gpu-ngl1-q6-workgroup-composite-adb34761-20260523T091428Z.json` |
 | commit `ac40e49` safe-kernel lane | `ngl=1` prompt/Q6 oracle/writeback correctness clears only under bridge-owned Q6 safe-kernel substitution | `docs/test/llama-gpu-ngl1-q6-safe-kernel-adb44443-20260523T112715Z.json`; classification `q6-workgroup-cleared-and-oracle-match`; safe-kernel hash `0x7ec0292e948c9b41` for source hash `0x1bf751845c5dce75` |
@@ -2164,6 +2165,18 @@ turning descriptor storage into pointers would require deep-copy/free snapshot
 helpers first.  The remaining hard cap is descriptor entry count, not sparse
 API binding number.
 
+
+
+### 2026-07-13 Vulkan memory allocation export-handle no-op pNext lane
+
+`vkAllocateMemory` now classifies `VkExportMemoryAllocateInfo` explicitly.
+A zero `handleTypes` value is accepted as a no-op external-memory export
+metadata struct, matching the bridge policy used for buffer/image external
+create-info pNext chains.  Any nonzero external-memory handle request still
+returns `VK_ERROR_FEATURE_NOT_PRESENT` because Skydnir does not advertise,
+serialize, or replay Vulkan external memory handles.  This closes another
+allocation-chain compatibility gap without adding executor ABI fields or
+pretending external-handle interop exists.
 
 ### 2026-07-13 Vulkan memory allocation capture-address no-op pNext lane
 

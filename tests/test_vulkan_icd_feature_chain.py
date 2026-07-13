@@ -900,23 +900,41 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     return 3;
                 }}
 
+                VkExportMemoryAllocateInfo export_info;
+                memset(&export_info, 0, sizeof(export_info));
+                export_info.sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO;
+                export_info.handleTypes = 0;
+                if (validate_memory_allocate_pnext(&export_info) != VK_SUCCESS) {{
+                    fprintf(stderr, "zero export memory handle-types pNext was rejected\\n");
+                    return 4;
+                }}
+                export_info.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+                if (validate_memory_allocate_pnext(&export_info) != VK_ERROR_FEATURE_NOT_PRESENT) {{
+                    fprintf(stderr, "nonzero export memory handle-types pNext was accepted\\n");
+                    return 5;
+                }}
+
                 VkMemoryAllocateFlagsInfo flags;
                 memset(&flags, 0, sizeof(flags));
                 memset(&capture, 0, sizeof(capture));
+                memset(&export_info, 0, sizeof(export_info));
                 flags.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
                 flags.deviceMask = 1;
-                flags.pNext = &capture;
+                flags.pNext = &export_info;
+                export_info.sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO;
+                export_info.handleTypes = 0;
+                export_info.pNext = &capture;
                 capture.sType = VK_STRUCTURE_TYPE_MEMORY_OPAQUE_CAPTURE_ADDRESS_ALLOCATE_INFO;
                 capture.opaqueCaptureAddress = 0;
                 if (validate_memory_allocate_pnext(&flags) != VK_SUCCESS) {{
-                    fprintf(stderr, "no-op memory allocate flags + capture chain was rejected\\n");
-                    return 4;
+                    fprintf(stderr, "no-op memory allocate flags + export + capture chain was rejected\\n");
+                    return 6;
                 }}
 
                 flags.deviceMask = 2;
                 if (validate_memory_allocate_pnext(&flags) == VK_SUCCESS) {{
                     fprintf(stderr, "multi-device memory allocation mask was accepted\\n");
-                    return 5;
+                    return 7;
                 }}
 
                 VkBaseInStructure unknown;
@@ -924,7 +942,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 unknown.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
                 if (validate_memory_allocate_pnext(&unknown) == VK_SUCCESS) {{
                     fprintf(stderr, "unknown memory allocation pNext was accepted\\n");
-                    return 6;
+                    return 8;
                 }}
                 return 0;
             }}
