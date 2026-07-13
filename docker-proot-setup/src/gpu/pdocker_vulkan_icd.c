@@ -22717,7 +22717,9 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBeginRendering(
         if (!rendering_info_pnext_noop(pRenderingInfo)) {
             cmd->graphics_unsupported = true;
         }
-        if (pRenderingInfo->flags != 0) {
+        const VkRenderingFlags supported_rendering_flags =
+            VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT;
+        if ((pRenderingInfo->flags & ~supported_rendering_flags) != 0) {
             cmd->graphics_unsupported = true;
         }
         cmd->active_render_area = pRenderingInfo->renderArea;

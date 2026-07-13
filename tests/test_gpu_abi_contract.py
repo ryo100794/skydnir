@@ -14028,7 +14028,21 @@ class GpuAbiContractTest(unittest.TestCase):
             )
 
     def test_vulkan_dynamic_rendering_secondary_contents_flag_is_flattened_for_replay(self):
+        icd = VULKAN_ICD.read_text()
         executor = GPU_EXECUTOR.read_text()
+        begin_rendering_body = icd.split(
+            "VKAPI_ATTR void VKAPI_CALL vkCmdBeginRendering", 1
+        )[1].split("VKAPI_ATTR void VKAPI_CALL vkCmdEndRendering", 1)[0]
+        for marker in [
+            "const VkRenderingFlags supported_rendering_flags =",
+            "VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT",
+            "pRenderingInfo->flags & ~supported_rendering_flags",
+            "cmd->active_rendering_flags = pRenderingInfo->flags;",
+            "record.flags = (uint32_t)cmd->active_rendering_flags;",
+        ]:
+            self.assertIn(marker, begin_rendering_body)
+        self.assertNotIn("pRenderingInfo->flags != 0", begin_rendering_body)
+
         preflight_body = c_function_body(executor, "preflight_vulkan_graphics_v6_replay_supported")
         for marker in [
             "const VkRenderingFlags supported_rendering_flags =",
