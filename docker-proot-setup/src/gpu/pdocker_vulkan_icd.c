@@ -267,6 +267,7 @@ PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_swapchain, VkSwa
 #define PDOCKER_VK_MAX_GRAPHICS_SHADER_STAGES PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_SHADER_STAGES
 #define PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDINGS PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_VERTEX_BINDINGS
 #define PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDING_SNAPSHOTS PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_VERTEX_BINDINGS
+#define PDOCKER_VK_MAX_GRAPHICS_INDEX_BUFFER_SNAPSHOTS PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS
 #define PDOCKER_VK_MAX_GRAPHICS_VERTEX_ATTRIBUTES 32
 #define PDOCKER_VK_MAX_GRAPHICS_DYNAMIC_STATES 64
 #define PDOCKER_VK_MAX_SWAPCHAIN_IMAGES 4u
@@ -997,6 +998,13 @@ typedef struct {
 } PdockerVkVertexBindingState;
 
 typedef struct {
+    PdockerVkBuffer *buffer;
+    VkDeviceSize offset;
+    VkIndexType index_type;
+    bool bound;
+} PdockerVkIndexBufferSnapshot;
+
+typedef struct {
     uint32_t state_type;
     uint32_t first_index;
     uint32_t count;
@@ -1109,6 +1117,7 @@ typedef struct {
     uint32_t dynamic_state_index;
     uint32_t draw_snapshot_index;
     uint32_t push_op_index;
+    uint32_t index_buffer_snapshot_index;
     uint32_t memory_barrier_op_first;
     uint32_t memory_barrier_op_count;
     uint32_t buffer_barrier_op_first;
@@ -1195,6 +1204,9 @@ typedef struct {
     PdockerVkVertexBindingState *graphics_vertex_binding_snapshots;
     uint32_t graphics_vertex_binding_snapshot_count;
     uint32_t graphics_vertex_binding_snapshot_capacity;
+    PdockerVkIndexBufferSnapshot *graphics_index_buffer_snapshots;
+    uint32_t graphics_index_buffer_snapshot_count;
+    uint32_t graphics_index_buffer_snapshot_capacity;
     PdockerVkClearAttachmentsCommandSnapshot *clear_attachments_command_ops;
     uint32_t clear_attachments_command_op_count;
     uint32_t clear_attachments_command_op_capacity;
@@ -1782,6 +1794,7 @@ PDOCKER_DEFINE_COMMAND_BUFFER_RESERVE_VECTOR(command_buffer_reserve_clear_rect_o
 PDOCKER_DEFINE_COMMAND_BUFFER_RESERVE_VECTOR(command_buffer_reserve_graphics_dynamic_offsets, graphics_dynamic_offsets, graphics_dynamic_offset_count, graphics_dynamic_offset_capacity, uint32_t, PDOCKER_VK_MAX_GRAPHICS_DYNAMIC_OFFSETS)
 PDOCKER_DEFINE_COMMAND_BUFFER_RESERVE_VECTOR(command_buffer_reserve_dynamic_states, dynamic_states, dynamic_state_count, dynamic_state_capacity, PdockerVkDynamicStateSnapshot, PDOCKER_VK_MAX_GRAPHICS_DYNAMIC_STATES)
 PDOCKER_DEFINE_COMMAND_BUFFER_RESERVE_VECTOR(command_buffer_reserve_graphics_vertex_binding_snapshots, graphics_vertex_binding_snapshots, graphics_vertex_binding_snapshot_count, graphics_vertex_binding_snapshot_capacity, PdockerVkVertexBindingState, PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDING_SNAPSHOTS)
+PDOCKER_DEFINE_COMMAND_BUFFER_RESERVE_VECTOR(command_buffer_reserve_graphics_index_buffer_snapshots, graphics_index_buffer_snapshots, graphics_index_buffer_snapshot_count, graphics_index_buffer_snapshot_capacity, PdockerVkIndexBufferSnapshot, PDOCKER_VK_MAX_GRAPHICS_INDEX_BUFFER_SNAPSHOTS)
 #undef PDOCKER_DEFINE_COMMAND_BUFFER_RESERVE_VECTOR
 
 static bool command_buffer_reserve_graphics_draw_ops(PdockerVkCommandBuffer *cmd, uint32_t extra) {
@@ -2100,6 +2113,10 @@ static void command_buffer_destroy_record_vectors(PdockerVkCommandBuffer *cmd) {
     cmd->graphics_vertex_binding_snapshots = NULL;
     cmd->graphics_vertex_binding_snapshot_count = 0;
     cmd->graphics_vertex_binding_snapshot_capacity = 0;
+    free(cmd->graphics_index_buffer_snapshots);
+    cmd->graphics_index_buffer_snapshots = NULL;
+    cmd->graphics_index_buffer_snapshot_count = 0;
+    cmd->graphics_index_buffer_snapshot_capacity = 0;
     for (uint32_t i = 0; i < cmd->command_op_count; ++i) {
         if (cmd->command_ops[i].type == PDOCKER_VK_COMMAND_UPDATE) {
             free(cmd->command_ops[i].payload);
@@ -2327,6 +2344,7 @@ static void clear_recorded_command_ops(PdockerVkCommandBuffer *cmd) {
     cmd->graphics_command_op_count = 0;
     cmd->graphics_dynamic_offset_count = 0;
     cmd->graphics_vertex_binding_snapshot_count = 0;
+    cmd->graphics_index_buffer_snapshot_count = 0;
     cmd->push_constant_op_count = 0;
 }
 
@@ -2367,6 +2385,7 @@ static bool command_buffer_has_room_for_secondary(
         src->graphics_descriptor_bind_op_count <= PDOCKER_VK_MAX_GRAPHICS_DESCRIPTOR_BIND_OPS - dst->graphics_descriptor_bind_op_count &&
         src->graphics_rendering_op_count <= PDOCKER_VK_MAX_GRAPHICS_RENDERING_OPS - dst->graphics_rendering_op_count &&
         src->graphics_vertex_binding_snapshot_count <= PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDING_SNAPSHOTS - dst->graphics_vertex_binding_snapshot_count &&
+        src->graphics_index_buffer_snapshot_count <= PDOCKER_VK_MAX_GRAPHICS_INDEX_BUFFER_SNAPSHOTS - dst->graphics_index_buffer_snapshot_count &&
         src->clear_attachments_command_op_count <= PDOCKER_VK_MAX_CLEAR_ATTACHMENTS_COMMANDS - dst->clear_attachments_command_op_count &&
         src->clear_attachment_op_count <= PDOCKER_VK_MAX_CLEAR_ATTACHMENTS - dst->clear_attachment_op_count &&
         src->clear_rect_op_count <= PDOCKER_VK_MAX_CLEAR_RECTS - dst->clear_rect_op_count &&
@@ -2403,6 +2422,9 @@ static bool append_secondary_command_buffer(
         !command_buffer_reserve_graphics_vertex_binding_snapshots(
             dst,
             src->graphics_vertex_binding_snapshot_count) ||
+        !command_buffer_reserve_graphics_index_buffer_snapshots(
+            dst,
+            src->graphics_index_buffer_snapshot_count) ||
         !command_buffer_reserve_clear_attachments_command_ops(
             dst,
             src->clear_attachments_command_op_count) ||
@@ -2433,6 +2455,7 @@ static bool append_secondary_command_buffer(
     uint32_t descriptor_bind_base = dst->graphics_descriptor_bind_op_count;
     uint32_t rendering_base = dst->graphics_rendering_op_count;
     uint32_t vertex_binding_snapshot_base = dst->graphics_vertex_binding_snapshot_count;
+    uint32_t index_buffer_snapshot_base = dst->graphics_index_buffer_snapshot_count;
     uint32_t clear_attachments_command_base = dst->clear_attachments_command_op_count;
     uint32_t clear_attachment_base = dst->clear_attachment_op_count;
     uint32_t clear_rect_base = dst->clear_rect_op_count;
@@ -2582,6 +2605,12 @@ static bool append_secondary_command_buffer(
                sizeof(src->graphics_vertex_binding_snapshots[0]) * src->graphics_vertex_binding_snapshot_count);
         dst->graphics_vertex_binding_snapshot_count += src->graphics_vertex_binding_snapshot_count;
     }
+    if (src->graphics_index_buffer_snapshot_count > 0) {
+        memcpy(dst->graphics_index_buffer_snapshots + dst->graphics_index_buffer_snapshot_count,
+               src->graphics_index_buffer_snapshots,
+               sizeof(src->graphics_index_buffer_snapshots[0]) * src->graphics_index_buffer_snapshot_count);
+        dst->graphics_index_buffer_snapshot_count += src->graphics_index_buffer_snapshot_count;
+    }
     memcpy(dst->clear_attachments_command_ops + dst->clear_attachments_command_op_count,
            src->clear_attachments_command_ops,
            sizeof(src->clear_attachments_command_ops[0]) * src->clear_attachments_command_op_count);
@@ -2641,6 +2670,9 @@ static bool append_secondary_command_buffer(
                 break;
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_VERTEX_BUFFERS:
                 record.vertex_binding_first += vertex_binding_snapshot_base;
+                break;
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_INDEX_BUFFER:
+                record.index_buffer_snapshot_index += index_buffer_snapshot_base;
                 break;
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_PUSH_CONSTANTS:
                 record.push_op_index += push_op_base;
@@ -2766,6 +2798,7 @@ fail_secondary_append:
     dst->graphics_descriptor_bind_op_count = descriptor_bind_base;
     dst->graphics_rendering_op_count = rendering_base;
     dst->graphics_vertex_binding_snapshot_count = vertex_binding_snapshot_base;
+    dst->graphics_index_buffer_snapshot_count = index_buffer_snapshot_base;
     dst->clear_attachments_command_op_count = clear_attachments_command_base;
     dst->clear_attachment_op_count = clear_attachment_base;
     dst->clear_rect_op_count = clear_rect_base;
@@ -8097,16 +8130,23 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
                 entry->size = binding_size;
             }
         } else if (record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_INDEX_BUFFER) {
-            PdockerVkBuffer *index_buffer = cmd->index_buffer;
-            if (!index_buffer || !validate_buffer_backing_range(index_buffer)) { rc = -EPROTO; goto cleanup; }
+            if (record->index_buffer_snapshot_index >= cmd->graphics_index_buffer_snapshot_count) {
+                rc = -EPROTO;
+                goto cleanup;
+            }
+            const PdockerVkIndexBufferSnapshot *index_snapshot =
+                &cmd->graphics_index_buffer_snapshots[record->index_buffer_snapshot_index];
+            PdockerVkBuffer *index_buffer = index_snapshot->buffer;
+            if (!index_snapshot->bound || !index_buffer ||
+                !validate_buffer_backing_range(index_buffer)) { rc = -EPROTO; goto cleanup; }
             int buffer_index = collect_graphics_buffer_resource(
                 resources, &resource_count, memory_objects, memory_resource_indices, &memory_count,
                 buffer_objects, buffer_resource_indices, &buffer_count, fds, &fd_count,
                 index_buffer, submit_id);
             if (buffer_index < 0) { rc = buffer_index; goto cleanup; }
             command->index_buffer_resource_index = (uint32_t)buffer_index;
-            command->index_offset = record->index_offset;
-            command->index_type = record->index_type;
+            command->index_offset = (uint64_t)index_snapshot->offset;
+            command->index_type = index_snapshot->index_type;
         } else if (record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_PUSH_CONSTANTS) {
             if (record->push_op_index >= cmd->push_constant_op_count ||
                 push_metadata_count >= PDOCKER_GPU_VULKAN_GRAPHICS_V61_MAX_PUSH_CONSTANT_METADATA) {
@@ -21620,13 +21660,27 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindIndexBuffer(
         VkIndexType indexType) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     if (!cmd) return;
+    if (!command_buffer_reserve_graphics_index_buffer_snapshots(cmd, 1)) {
+        cmd->graphics_unsupported = true;
+        command_buffer_mark_recording_failed(cmd, "graphics-index-buffer-snapshot-overflow");
+        return;
+    }
     cmd->index_buffer = pdocker_vk_buffer_from_handle(buffer);
     cmd->index_offset = offset;
     cmd->index_type = indexType;
     cmd->index_buffer_bound = true;
+    uint32_t snapshot_index = cmd->graphics_index_buffer_snapshot_count++;
+    PdockerVkIndexBufferSnapshot *snapshot =
+        &cmd->graphics_index_buffer_snapshots[snapshot_index];
+    memset(snapshot, 0, sizeof(*snapshot));
+    snapshot->buffer = cmd->index_buffer;
+    snapshot->offset = offset;
+    snapshot->index_type = indexType;
+    snapshot->bound = true;
     PdockerVkGraphicsCommandRecord record;
     memset(&record, 0, sizeof(record));
     record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_INDEX_BUFFER;
+    record.index_buffer_snapshot_index = snapshot_index;
     record.index_offset = offset;
     record.index_type = indexType;
     (void)append_graphics_command_record(cmd, &record);

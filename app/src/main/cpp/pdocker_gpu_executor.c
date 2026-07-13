@@ -29779,6 +29779,36 @@ static int materialize_vulkan_graphics_v6_buffers(
                     return rc;
                 }
             }
+        } else if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_INDEX_BUFFER) {
+            uint64_t index_stride = 0;
+            int rc = vulkan_graphics_index_stride(command->index_type, &index_stride);
+            if (rc != 0) {
+                destroy_vulkan_graphics_replay_buffers(rt->device, out);
+                return rc;
+            }
+            rc = vulkan_graphics_index_type_supported_by_runtime(rt, command->index_type);
+            if (rc != 0) {
+                destroy_vulkan_graphics_replay_buffers(rt->device, out);
+                return rc;
+            }
+            (void)index_stride;
+            const PdockerGpuVulkanDispatchV5ResourceEntry *index_buffer =
+                command->index_buffer_resource_index < view->header->resource_count
+                    ? &view->resources[command->index_buffer_resource_index]
+                    : NULL;
+            if (!index_buffer ||
+                index_buffer->resource_type != PDOCKER_GPU_V5_RESOURCE_TYPE_BUFFER ||
+                command->index_offset >= index_buffer->size) {
+                destroy_vulkan_graphics_replay_buffers(rt->device, out);
+                return -EPROTO;
+            }
+            rc = add_vulkan_graphics_replay_buffer_range(
+                view, out, command->index_buffer_resource_index, command->index_offset, 1u,
+                VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+            if (rc != 0) {
+                destroy_vulkan_graphics_replay_buffers(rt->device, out);
+                return rc;
+            }
         } else if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_DESCRIPTOR_SETS) {
             uint32_t dynamic_descriptor_count = 0;
             for (uint32_t d = 0; d < command->descriptor_count; ++d) {

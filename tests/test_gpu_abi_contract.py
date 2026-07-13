@@ -2417,6 +2417,90 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(marker, append_secondary_body)
 
 
+    def test_vulkan_graphics_index_buffer_replay_uses_bind_snapshots(self):
+        icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
+
+        for marker in [
+            "PdockerVkIndexBufferSnapshot *graphics_index_buffer_snapshots;",
+            "uint32_t graphics_index_buffer_snapshot_count;",
+            "command_buffer_reserve_graphics_index_buffer_snapshots",
+            "free(cmd->graphics_index_buffer_snapshots);",
+            "cmd->graphics_index_buffer_snapshot_count = 0;",
+            "uint32_t index_buffer_snapshot_index;",
+        ]:
+            self.assertIn(marker, icd)
+
+        bind_body = c_function_body(icd, "vkCmdBindIndexBuffer")
+        for marker in [
+            "command_buffer_reserve_graphics_index_buffer_snapshots(cmd, 1)",
+            "uint32_t snapshot_index = cmd->graphics_index_buffer_snapshot_count++;",
+            "PdockerVkIndexBufferSnapshot *snapshot =",
+            "snapshot->buffer = cmd->index_buffer;",
+            "snapshot->offset = offset;",
+            "snapshot->index_type = indexType;",
+            "snapshot->bound = true;",
+            "record.index_buffer_snapshot_index = snapshot_index;",
+        ]:
+            self.assertIn(marker, bind_body)
+
+        serialize_body = icd.rsplit(
+            "record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_INDEX_BUFFER", 1
+        )[1].split(
+            "record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_PUSH_CONSTANTS", 1
+        )[0]
+        for marker in [
+            "record->index_buffer_snapshot_index >= cmd->graphics_index_buffer_snapshot_count",
+            "cmd->graphics_index_buffer_snapshots[record->index_buffer_snapshot_index]",
+            "!index_snapshot->bound || !index_buffer",
+            "command->index_offset = (uint64_t)index_snapshot->offset;",
+            "command->index_type = index_snapshot->index_type;",
+        ]:
+            self.assertIn(marker, serialize_body)
+        self.assertNotIn("PdockerVkBuffer *index_buffer = cmd->index_buffer;", serialize_body)
+        self.assertNotIn("command->index_offset = record->index_offset;", serialize_body)
+        self.assertNotIn("command->index_type = record->index_type;", serialize_body)
+
+        append_secondary_body = c_function_body(icd, "append_secondary_command_buffer")
+        for marker in [
+            "command_buffer_reserve_graphics_index_buffer_snapshots",
+            "uint32_t index_buffer_snapshot_base = dst->graphics_index_buffer_snapshot_count;",
+            "memcpy(dst->graphics_index_buffer_snapshots + dst->graphics_index_buffer_snapshot_count",
+            "dst->graphics_index_buffer_snapshot_count += src->graphics_index_buffer_snapshot_count;",
+            "record.index_buffer_snapshot_index += index_buffer_snapshot_base;",
+            "dst->graphics_index_buffer_snapshot_count = index_buffer_snapshot_base;",
+        ]:
+            self.assertIn(marker, append_secondary_body)
+
+        materialize_body = c_function_body(executor, "materialize_vulkan_graphics_v6_buffers")
+        bind_materialize_body = materialize_body.split(
+            "command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_INDEX_BUFFER", 1
+        )[1].split(
+            "command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_DESCRIPTOR_SETS", 1
+        )[0]
+        for marker in [
+            "vulkan_graphics_index_stride(command->index_type, &index_stride)",
+            "vulkan_graphics_index_type_supported_by_runtime(rt, command->index_type)",
+            "command->index_buffer_resource_index < view->header->resource_count",
+            "index_buffer->resource_type != PDOCKER_GPU_V5_RESOURCE_TYPE_BUFFER",
+            "command->index_offset >= index_buffer->size",
+            "add_vulkan_graphics_replay_buffer_range",
+            "command->index_buffer_resource_index, command->index_offset, 1u",
+            "VK_BUFFER_USAGE_INDEX_BUFFER_BIT",
+        ]:
+            self.assertIn(marker, bind_materialize_body)
+
+        record_executor_body = c_function_body(executor, "record_vulkan_graphics_v6_command_buffer")
+        bind_record_body = record_executor_body.split(
+            "case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_INDEX_BUFFER:", 1
+        )[1].split(
+            "case PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW_INDEXED:", 1
+        )[0]
+        self.assertIn("find_vulkan_graphics_replay_buffer", bind_record_body)
+        self.assertIn("vulkan_graphics_replay_buffer_vk_offset_for_range", bind_record_body)
+        self.assertIn("vkCmdBindIndexBuffer", bind_record_body)
+
+
     def test_vulkan_dynamic_vertex_input_binding_stride_is_replayed(self):
         icd = VULKAN_ICD.read_text()
         executor = GPU_EXECUTOR.read_text()
