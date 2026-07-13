@@ -1355,7 +1355,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "graphics_snapshot_clone_descriptor_state(&snapshot->set_snapshots",
             "&snapshot->set_capacity",
             "memcpy(snapshot->push_constants, cmd->push_constants",
-            "snapshot->push_constant_op_count = cmd->push_constant_op_count;",
+            "push_constant_op_snapshot_array_clone(&snapshot->push_constant_ops",
             "memcpy(snapshot->vertex_bindings, cmd->vertex_bindings",
             "snapshot->index_buffer = cmd->index_buffer;",
             "memcpy(snapshot->dynamic_states, cmd->dynamic_states",
@@ -7690,7 +7690,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("push_constant_ranges[PDOCKER_VK_MAX_PUSH_CONSTANT_RANGES]", icd)
         self.assertNotIn("PDOCKER_VK_MAX_PUSH_CONSTANT_RANGES", icd)
         self.assertNotIn("unsupported_push_constant_ranges", icd)
-        self.assertIn("push_constant_ops[PDOCKER_VK_MAX_PUSH_CONSTANT_OPS]", icd)
+        self.assertIn("PdockerVkPushConstantOpSnapshot *push_constant_ops", icd)
+        self.assertIn("command_buffer_reserve_push_constant_ops", icd)
         self.assertIn("pCreateInfo->pushConstantRangeCount > 0 && !pCreateInfo->pPushConstantRanges", create_body)
         self.assertNotIn("pCreateInfo->pushConstantRangeCount > PDOCKER_VK_MAX_PUSH_CONSTANT_RANGES", create_body)
         self.assertNotIn("layout->push_constant_range_count < PDOCKER_VK_MAX_PUSH_CONSTANT_RANGES", create_body)
@@ -7715,7 +7716,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "VKAPI_ATTR void VKAPI_CALL vkCmdPushConstants", 1
         )[0]
         self.assertIn("validate_bound_descriptor_layouts_before_dispatch(cmd);", dispatch_body)
-        self.assertIn("op->push_constant_op_count = cmd->push_constant_op_count;", dispatch_body)
+        self.assertIn("push_constant_op_snapshot_array_clone(&op->push_constant_ops", dispatch_body)
         self.assertIn("VKAPI_ATTR void VKAPI_CALL vkCmdDispatchBase", dispatch_body)
         self.assertIn("op->base_group_x = baseGroupX;", dispatch_body)
         self.assertIn('MAP_ALIAS("vkCmdDispatchBaseKHR", vkCmdDispatchBaseKHR);', icd)
