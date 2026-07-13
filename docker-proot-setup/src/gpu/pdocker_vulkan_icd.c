@@ -15288,6 +15288,15 @@ static void fill_pnext_properties(void *pNext) {
                 p->filterMinmaxImageComponentMapping = VK_FALSE;
                 break;
             }
+#ifdef VK_EXT_custom_border_color
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUSTOM_BORDER_COLOR_PROPERTIES_EXT: {
+                VkPhysicalDeviceCustomBorderColorPropertiesEXT *p =
+                    (VkPhysicalDeviceCustomBorderColorPropertiesEXT *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                p->maxCustomBorderColorSamplers = 0;
+                break;
+            }
+#endif
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT_CONTROLS_PROPERTIES: {
                 VkPhysicalDeviceFloatControlsProperties *p = (VkPhysicalDeviceFloatControlsProperties *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
@@ -15625,6 +15634,26 @@ static void fill_pnext_features(void *pNext) {
                 p->memoryPriority = VK_FALSE;
                 break;
             }
+#ifdef VK_EXT_custom_border_color
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUSTOM_BORDER_COLOR_FEATURES_EXT: {
+                VkPhysicalDeviceCustomBorderColorFeaturesEXT *p =
+                    (VkPhysicalDeviceCustomBorderColorFeaturesEXT *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                p->customBorderColors = VK_FALSE;
+                p->customBorderColorWithoutFormat = VK_FALSE;
+                break;
+            }
+#endif
+#ifdef VK_EXT_border_color_swizzle
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BORDER_COLOR_SWIZZLE_FEATURES_EXT: {
+                VkPhysicalDeviceBorderColorSwizzleFeaturesEXT *p =
+                    (VkPhysicalDeviceBorderColorSwizzleFeaturesEXT *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                p->borderColorSwizzle = VK_FALSE;
+                p->borderColorSwizzleFromImage = VK_FALSE;
+                break;
+            }
+#endif
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DEMOTE_TO_HELPER_INVOCATION_FEATURES: {
                 VkPhysicalDeviceShaderDemoteToHelperInvocationFeatures *p =
                     (VkPhysicalDeviceShaderDemoteToHelperInvocationFeatures *)node;
@@ -16163,6 +16192,24 @@ static VkResult validate_device_feature_requests(const VkDeviceCreateInfo *pCrea
                 if (!supported) unsupported_feature_name = "memoryPriority";
                 break;
             }
+#ifdef VK_EXT_custom_border_color
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUSTOM_BORDER_COLOR_FEATURES_EXT: {
+                const VkPhysicalDeviceCustomBorderColorFeaturesEXT *p =
+                    (const VkPhysicalDeviceCustomBorderColorFeaturesEXT *)node;
+                supported = !p->customBorderColors && !p->customBorderColorWithoutFormat;
+                if (!supported) unsupported_feature_name = "customBorderColor";
+                break;
+            }
+#endif
+#ifdef VK_EXT_border_color_swizzle
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BORDER_COLOR_SWIZZLE_FEATURES_EXT: {
+                const VkPhysicalDeviceBorderColorSwizzleFeaturesEXT *p =
+                    (const VkPhysicalDeviceBorderColorSwizzleFeaturesEXT *)node;
+                supported = !p->borderColorSwizzle && !p->borderColorSwizzleFromImage;
+                if (!supported) unsupported_feature_name = "borderColorSwizzle";
+                break;
+            }
+#endif
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DEMOTE_TO_HELPER_INVOCATION_FEATURES: {
                 const VkPhysicalDeviceShaderDemoteToHelperInvocationFeatures *p =
                     (const VkPhysicalDeviceShaderDemoteToHelperInvocationFeatures *)node;
@@ -18086,6 +18133,13 @@ static VkResult validate_image_view_create_info_for_transport(
     return VK_SUCCESS;
 }
 
+static bool pdocker_vk_component_mapping_is_identity(VkComponentMapping components) {
+    return (components.r == VK_COMPONENT_SWIZZLE_IDENTITY || components.r == VK_COMPONENT_SWIZZLE_R) &&
+           (components.g == VK_COMPONENT_SWIZZLE_IDENTITY || components.g == VK_COMPONENT_SWIZZLE_G) &&
+           (components.b == VK_COMPONENT_SWIZZLE_IDENTITY || components.b == VK_COMPONENT_SWIZZLE_B) &&
+           (components.a == VK_COMPONENT_SWIZZLE_IDENTITY || components.a == VK_COMPONENT_SWIZZLE_A);
+}
+
 static VkResult validate_sampler_create_info_for_transport(
         const VkSamplerCreateInfo *info,
         uint64_t requested_feature_mask,
@@ -18122,11 +18176,43 @@ static VkResult validate_sampler_create_info_for_transport(
                                           VK_ERROR_FEATURE_NOT_PRESENT);
                 return VK_ERROR_FEATURE_NOT_PRESENT;
             }
+#ifdef VK_EXT_custom_border_color
+            case VK_STRUCTURE_TYPE_SAMPLER_CUSTOM_BORDER_COLOR_CREATE_INFO_EXT: {
+                if (info->borderColor == VK_BORDER_COLOR_FLOAT_CUSTOM_EXT ||
+                    info->borderColor == VK_BORDER_COLOR_INT_CUSTOM_EXT) {
+                    trace_icd_runtime_failure("sampler-custom-border-color-unsupported",
+                                              VK_ERROR_FEATURE_NOT_PRESENT);
+                    return VK_ERROR_FEATURE_NOT_PRESENT;
+                }
+                break;
+            }
+#endif
+#ifdef VK_EXT_border_color_swizzle
+            case VK_STRUCTURE_TYPE_SAMPLER_BORDER_COLOR_COMPONENT_MAPPING_CREATE_INFO_EXT: {
+                const VkSamplerBorderColorComponentMappingCreateInfoEXT *mapping_info =
+                    (const VkSamplerBorderColorComponentMappingCreateInfoEXT *)node;
+                if (!pdocker_vk_component_mapping_is_identity(mapping_info->components) ||
+                    mapping_info->srgb != VK_FALSE) {
+                    trace_icd_runtime_failure("sampler-border-color-swizzle-unsupported",
+                                              VK_ERROR_FEATURE_NOT_PRESENT);
+                    return VK_ERROR_FEATURE_NOT_PRESENT;
+                }
+                break;
+            }
+#endif
             default:
                 return unsupported_image_pnext_result("vkCreateSampler", node);
         }
         node = header.pNext;
     }
+#ifdef VK_EXT_custom_border_color
+    if (info->borderColor == VK_BORDER_COLOR_FLOAT_CUSTOM_EXT ||
+        info->borderColor == VK_BORDER_COLOR_INT_CUSTOM_EXT) {
+        trace_icd_runtime_failure("sampler-custom-border-color-unsupported",
+                                  VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+#endif
     if (info->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;
     if (info->anisotropyEnable) {
         if ((requested_feature_mask & PDOCKER_VK_FEATURE_SAMPLER_ANISOTROPY) == 0) {

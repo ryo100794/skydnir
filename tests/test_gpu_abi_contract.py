@@ -10174,6 +10174,52 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("decl->pipeline_layout_id != meta->layout_id", validate_body)
         self.assertIn("(covered_stage_flags & meta->stage_flags) != meta->stage_flags", validate_body)
 
+    def test_vulkan_sampler_border_color_noop_pnext_is_false_only(self):
+        icd = VULKAN_ICD.read_text()
+        sampler_validate_body = c_function_body(icd, "validate_sampler_create_info_for_transport")
+        for marker in [
+            "static bool pdocker_vk_component_mapping_is_identity(VkComponentMapping components)",
+            "VK_STRUCTURE_TYPE_SAMPLER_CUSTOM_BORDER_COLOR_CREATE_INFO_EXT",
+            "info->borderColor == VK_BORDER_COLOR_FLOAT_CUSTOM_EXT",
+            "info->borderColor == VK_BORDER_COLOR_INT_CUSTOM_EXT",
+            "sampler-custom-border-color-unsupported",
+            "VK_STRUCTURE_TYPE_SAMPLER_BORDER_COLOR_COMPONENT_MAPPING_CREATE_INFO_EXT",
+            "pdocker_vk_component_mapping_is_identity(mapping_info->components)",
+            "mapping_info->srgb != VK_FALSE",
+            "sampler-border-color-swizzle-unsupported",
+        ]:
+            self.assertIn(marker, icd if marker.startswith("static bool") else sampler_validate_body)
+
+        properties_body = c_function_body(icd, "fill_pnext_properties")
+        for marker in [
+            "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUSTOM_BORDER_COLOR_PROPERTIES_EXT",
+            "VkPhysicalDeviceCustomBorderColorPropertiesEXT",
+            "p->maxCustomBorderColorSamplers = 0;",
+        ]:
+            self.assertIn(marker, properties_body)
+
+        features_body = c_function_body(icd, "fill_pnext_features")
+        for marker in [
+            "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUSTOM_BORDER_COLOR_FEATURES_EXT",
+            "p->customBorderColors = VK_FALSE;",
+            "p->customBorderColorWithoutFormat = VK_FALSE;",
+            "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BORDER_COLOR_SWIZZLE_FEATURES_EXT",
+            "p->borderColorSwizzle = VK_FALSE;",
+            "p->borderColorSwizzleFromImage = VK_FALSE;",
+        ]:
+            self.assertIn(marker, features_body)
+
+        create_device_body = c_function_body(icd, "validate_device_feature_requests")
+        for marker in [
+            "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUSTOM_BORDER_COLOR_FEATURES_EXT",
+            "!p->customBorderColors && !p->customBorderColorWithoutFormat",
+            'unsupported_feature_name = "customBorderColor";',
+            "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BORDER_COLOR_SWIZZLE_FEATURES_EXT",
+            "!p->borderColorSwizzle && !p->borderColorSwizzleFromImage",
+            'unsupported_feature_name = "borderColorSwizzle";',
+        ]:
+            self.assertIn(marker, create_device_body)
+
     def test_vulkan_sampler_reduction_minmax_is_feature_gated_and_replayed(self):
         icd = VULKAN_ICD.read_text()
         executor = GPU_EXECUTOR.read_text()
