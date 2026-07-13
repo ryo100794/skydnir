@@ -261,7 +261,7 @@ PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_swapchain, VkSwa
 #define PDOCKER_VK_MIN_UNIFORM_BUFFER_OFFSET_ALIGNMENT 16ull
 #define PDOCKER_VK_MAX_COPY_OPS 64
 #define PDOCKER_VK_MAX_DISPATCH_OPS 128
-#define PDOCKER_VK_MAX_COMMAND_OPS 256
+#define PDOCKER_VK_MAX_COMMAND_OPS PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS
 #define PDOCKER_VK_MAX_EVENT_WAIT_REFS PDOCKER_GPU_VULKAN_GRAPHICS_V626_MAX_EVENT_WAIT_REFS
 #define PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDINGS 16
 #define PDOCKER_VK_MAX_GRAPHICS_VERTEX_ATTRIBUTES 32
@@ -329,7 +329,7 @@ static bool pdocker_vk_color_blend_attachment_state_equal(
 #define PDOCKER_VK_MAX_GRAPHICS_DRAW_OPS 128
 #define PDOCKER_VK_MAX_GRAPHICS_DESCRIPTOR_BIND_OPS 128
 #define PDOCKER_VK_MAX_GRAPHICS_RENDERING_OPS 128
-#define PDOCKER_VK_MAX_GRAPHICS_COMMAND_OPS 512
+#define PDOCKER_VK_MAX_GRAPHICS_COMMAND_OPS PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS
 #define PDOCKER_VK_MAX_GRAPHICS_DYNAMIC_OFFSETS 4096
 #define PDOCKER_VK_MAX_CLEAR_ATTACHMENTS_COMMANDS PDOCKER_GPU_VULKAN_GRAPHICS_V616_MAX_CLEAR_ATTACHMENTS_COMMANDS
 #define PDOCKER_VK_MAX_CLEAR_ATTACHMENTS PDOCKER_GPU_VULKAN_GRAPHICS_V616_MAX_CLEAR_ATTACHMENTS
@@ -1161,8 +1161,9 @@ typedef struct {
     uint32_t image_barrier_op_count;
     PdockerVkDispatchOp dispatch_ops[PDOCKER_VK_MAX_DISPATCH_OPS];
     uint32_t dispatch_op_count;
-    PdockerVkCommandOp command_ops[PDOCKER_VK_MAX_COMMAND_OPS];
+    PdockerVkCommandOp *command_ops;
     uint32_t command_op_count;
+    uint32_t command_op_capacity;
     PdockerVkEvent *event_wait_refs[PDOCKER_VK_MAX_EVENT_WAIT_REFS];
     uint32_t event_wait_ref_count;
     PdockerVkGraphicsDrawSnapshot graphics_draw_ops[PDOCKER_VK_MAX_GRAPHICS_DRAW_OPS];
@@ -1180,8 +1181,9 @@ typedef struct {
     uint32_t clear_attachment_op_count;
     PdockerVkClearRectSnapshot clear_rect_ops[PDOCKER_VK_MAX_CLEAR_RECTS];
     uint32_t clear_rect_op_count;
-    PdockerVkGraphicsCommandRecord graphics_command_ops[PDOCKER_VK_MAX_GRAPHICS_COMMAND_OPS];
+    PdockerVkGraphicsCommandRecord *graphics_command_ops;
     uint32_t graphics_command_op_count;
+    uint32_t graphics_command_op_capacity;
     uint32_t graphics_dynamic_offsets[PDOCKER_VK_MAX_GRAPHICS_DYNAMIC_OFFSETS];
     uint32_t graphics_dynamic_offset_count;
     uint32_t dispatch_x;
@@ -1560,11 +1562,85 @@ static void command_buffer_destroy_descriptor_states(PdockerVkCommandBuffer *cmd
                                  &cmd->graphics_bound_set_capacity);
 }
 
+static bool command_buffer_reserve_command_ops(PdockerVkCommandBuffer *cmd, uint32_t extra) {
+    if (!cmd) return false;
+    if (extra == 0) return true;
+    if (cmd->command_op_count > PDOCKER_VK_MAX_COMMAND_OPS ||
+        extra > PDOCKER_VK_MAX_COMMAND_OPS - cmd->command_op_count) {
+        return false;
+    }
+    uint32_t needed = cmd->command_op_count + extra;
+    if (needed <= cmd->command_op_capacity) return true;
+    uint32_t new_capacity = cmd->command_op_capacity ? cmd->command_op_capacity : 64u;
+    while (new_capacity < needed) {
+        if (new_capacity > PDOCKER_VK_MAX_COMMAND_OPS / 2u) {
+            new_capacity = PDOCKER_VK_MAX_COMMAND_OPS;
+            break;
+        }
+        new_capacity *= 2u;
+    }
+    if (new_capacity < needed || new_capacity > PDOCKER_VK_MAX_COMMAND_OPS) {
+        return false;
+    }
+    PdockerVkCommandOp *new_ops =
+        (PdockerVkCommandOp *)realloc(cmd->command_ops,
+                                      (size_t)new_capacity * sizeof(*cmd->command_ops));
+    if (!new_ops) return false;
+    cmd->command_ops = new_ops;
+    cmd->command_op_capacity = new_capacity;
+    return true;
+}
+
+static bool command_buffer_reserve_graphics_command_ops(
+        PdockerVkCommandBuffer *cmd,
+        uint32_t extra) {
+    if (!cmd) return false;
+    if (extra == 0) return true;
+    if (cmd->graphics_command_op_count > PDOCKER_VK_MAX_GRAPHICS_COMMAND_OPS ||
+        extra > PDOCKER_VK_MAX_GRAPHICS_COMMAND_OPS - cmd->graphics_command_op_count) {
+        return false;
+    }
+    uint32_t needed = cmd->graphics_command_op_count + extra;
+    if (needed <= cmd->graphics_command_op_capacity) return true;
+    uint32_t new_capacity = cmd->graphics_command_op_capacity ?
+        cmd->graphics_command_op_capacity : 64u;
+    while (new_capacity < needed) {
+        if (new_capacity > PDOCKER_VK_MAX_GRAPHICS_COMMAND_OPS / 2u) {
+            new_capacity = PDOCKER_VK_MAX_GRAPHICS_COMMAND_OPS;
+            break;
+        }
+        new_capacity *= 2u;
+    }
+    if (new_capacity < needed || new_capacity > PDOCKER_VK_MAX_GRAPHICS_COMMAND_OPS) {
+        return false;
+    }
+    PdockerVkGraphicsCommandRecord *new_ops =
+        (PdockerVkGraphicsCommandRecord *)realloc(
+            cmd->graphics_command_ops,
+            (size_t)new_capacity * sizeof(*cmd->graphics_command_ops));
+    if (!new_ops) return false;
+    cmd->graphics_command_ops = new_ops;
+    cmd->graphics_command_op_capacity = new_capacity;
+    return true;
+}
+
+static void command_buffer_destroy_record_vectors(PdockerVkCommandBuffer *cmd) {
+    if (!cmd) return;
+    free(cmd->command_ops);
+    cmd->command_ops = NULL;
+    cmd->command_op_count = 0;
+    cmd->command_op_capacity = 0;
+    free(cmd->graphics_command_ops);
+    cmd->graphics_command_ops = NULL;
+    cmd->graphics_command_op_count = 0;
+    cmd->graphics_command_op_capacity = 0;
+}
+
 static bool append_graphics_command_record(
         PdockerVkCommandBuffer *cmd,
         const PdockerVkGraphicsCommandRecord *record) {
     if (!cmd || !record) return false;
-    if (cmd->graphics_command_op_count >= PDOCKER_VK_MAX_GRAPHICS_COMMAND_OPS) {
+    if (!command_buffer_reserve_graphics_command_ops(cmd, 1)) {
         cmd->graphics_unsupported = true;
         command_buffer_mark_recording_failed(cmd, "graphics-command-record-overflow");
         return false;
@@ -1743,7 +1819,7 @@ static void clear_recorded_command_ops(PdockerVkCommandBuffer *cmd) {
 
 static bool append_command_op(PdockerVkCommandBuffer *cmd, const PdockerVkCommandOp *op) {
     if (!cmd || !op) return false;
-    if (cmd->command_op_count >= PDOCKER_VK_MAX_COMMAND_OPS) {
+    if (!command_buffer_reserve_command_ops(cmd, 1)) {
         command_buffer_mark_recording_failed(cmd, "command-op-record-overflow");
         if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
             fprintf(stderr,
@@ -1794,6 +1870,10 @@ static bool append_secondary_command_buffer(
         src->dynamic_rendering_active || src->render_pass_active) {
         return false;
     }
+    if (!command_buffer_reserve_command_ops(dst, src->command_op_count) ||
+        !command_buffer_reserve_graphics_command_ops(dst, src->graphics_command_op_count)) {
+        return false;
+    }
     uint32_t command_op_base = dst->command_op_count;
     uint32_t event_wait_ref_base = dst->event_wait_ref_count;
     uint32_t copy_base = dst->copy_op_count;
@@ -1813,22 +1893,28 @@ static bool append_secondary_command_buffer(
     uint32_t clear_attachments_command_base = dst->clear_attachments_command_op_count;
     uint32_t clear_attachment_base = dst->clear_attachment_op_count;
     uint32_t clear_rect_base = dst->clear_rect_op_count;
+    uint32_t graphics_command_base = dst->graphics_command_op_count;
     uint32_t dynamic_state_base = dst->dynamic_state_count;
     uint32_t dynamic_offset_base = dst->graphics_dynamic_offset_count;
     uint32_t push_op_base = dst->push_constant_op_count;
 
-    void *update_payloads[PDOCKER_VK_MAX_COMMAND_OPS];
-    memset(update_payloads, 0, sizeof(update_payloads));
+    void **update_payloads = NULL;
+    if (src->command_op_count > 0) {
+        update_payloads = (void **)calloc(src->command_op_count, sizeof(*update_payloads));
+        if (!update_payloads) return false;
+    }
     for (uint32_t i = 0; i < src->command_op_count; ++i) {
         const PdockerVkCommandOp *op = &src->command_ops[i];
         if (op->type != PDOCKER_VK_COMMAND_UPDATE || op->size == 0 || !op->payload) continue;
         if (op->size > (VkDeviceSize)SIZE_MAX) {
-            for (uint32_t j = 0; j < i; ++j) free(update_payloads[j]);
+            for (uint32_t j = 0; j < src->command_op_count; ++j) free(update_payloads[j]);
+            free(update_payloads);
             return false;
         }
         update_payloads[i] = malloc((size_t)op->size);
         if (!update_payloads[i]) {
-            for (uint32_t j = 0; j < i; ++j) free(update_payloads[j]);
+            for (uint32_t j = 0; j < src->command_op_count; ++j) free(update_payloads[j]);
+            free(update_payloads);
             return false;
         }
         memcpy(update_payloads[i], op->payload, (size_t)op->size);
@@ -2055,12 +2141,16 @@ static bool append_secondary_command_buffer(
     if (src->pipeline) dst->pipeline = src->pipeline;
     if (src->compute_pipeline) dst->compute_pipeline = src->compute_pipeline;
     if (src->graphics_pipeline) dst->graphics_pipeline = src->graphics_pipeline;
+    free(update_payloads);
     return true;
 
 fail_secondary_append:
-    for (uint32_t i = 0; i < PDOCKER_VK_MAX_COMMAND_OPS; ++i) {
-        free(update_payloads[i]);
-        update_payloads[i] = NULL;
+    if (update_payloads) {
+        for (uint32_t i = 0; i < src->command_op_count; ++i) {
+            free(update_payloads[i]);
+            update_payloads[i] = NULL;
+        }
+        free(update_payloads);
     }
     for (uint32_t i = dispatch_base; i < dst->dispatch_op_count; ++i) {
         dispatch_op_destroy_descriptor_state(&dst->dispatch_ops[i]);
@@ -2093,6 +2183,8 @@ fail_secondary_append:
     dst->graphics_dynamic_offset_count = dynamic_offset_base;
     dst->push_constant_op_count = push_op_base;
     dst->event_wait_ref_count = event_wait_ref_base;
+    dst->command_op_count = command_op_base;
+    dst->graphics_command_op_count = graphics_command_base;
     return false;
 }
 
@@ -19871,6 +19963,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateCommandBuffers(
             if (cmd) free(cmd);
             for (uint32_t j = 0; j < i; ++j) {
                 PdockerVkCommandBuffer *allocated = (PdockerVkCommandBuffer *)pCommandBuffers[j];
+                clear_recorded_command_ops(allocated);
+                command_buffer_destroy_record_vectors(allocated);
                 command_buffer_destroy_descriptor_states(allocated);
                 free((void *)allocated);
                 pCommandBuffers[j] = VK_NULL_HANDLE;
@@ -19895,6 +19989,7 @@ VKAPI_ATTR void VKAPI_CALL vkFreeCommandBuffers(
     for (uint32_t i = 0; i < commandBufferCount; ++i) {
         PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)pCommandBuffers[i];
         clear_recorded_command_ops(cmd);
+        command_buffer_destroy_record_vectors(cmd);
         command_buffer_destroy_descriptor_states(cmd);
         free((void *)cmd);
     }

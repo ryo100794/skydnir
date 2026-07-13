@@ -1239,12 +1239,15 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_VK_MAX_GRAPHICS_COMMAND_OPS",
             "PDOCKER_VK_MAX_GRAPHICS_DYNAMIC_OFFSETS",
             "PdockerVkGraphicsCommandRecord",
+            "uint32_t graphics_command_op_capacity;",
+            "command_buffer_reserve_graphics_command_ops",
+            "command_buffer_destroy_record_vectors",
             "PDOCKER_VK_MAX_GRAPHICS_DESCRIPTOR_BIND_OPS",
             "PdockerVkGraphicsDescriptorBindSnapshot",
             "PdockerVkGraphicsRenderingSnapshot",
             "graphics_descriptor_bind_ops[PDOCKER_VK_MAX_GRAPHICS_DESCRIPTOR_BIND_OPS]",
             "graphics_rendering_ops[PDOCKER_VK_MAX_GRAPHICS_RENDERING_OPS]",
-            "graphics_command_ops[PDOCKER_VK_MAX_GRAPHICS_COMMAND_OPS]",
+            "PdockerVkGraphicsCommandRecord *graphics_command_ops",
             "graphics_dynamic_offsets[PDOCKER_VK_MAX_GRAPHICS_DYNAMIC_OFFSETS]",
             "append_graphics_command_record",
             "cmd->graphics_descriptor_bind_op_count = 0;",
@@ -2612,7 +2615,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("cmd->level = pAllocateInfo->level;", icd)
         self.assertIn("append_secondary_command_buffer", icd)
         self.assertIn("command_buffer_has_room_for_secondary", icd)
-        self.assertIn("update_payloads[PDOCKER_VK_MAX_COMMAND_OPS]", icd)
+        self.assertIn("void **update_payloads", icd)
+        self.assertIn("calloc(src->command_op_count, sizeof(*update_payloads))", icd)
         self.assertIn("op.payload = update_payloads[i];", icd)
         self.assertIn("record.rendering_snapshot_index += rendering_base;", icd)
         self.assertIn("record.descriptor_bind_snapshot_index += descriptor_bind_base;", icd)
@@ -12977,7 +12981,11 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_VK_MAX_DISPATCH_OPS",
             "PDOCKER_VK_MAX_COMMAND_OPS",
             "PdockerVkDispatchOp dispatch_ops[PDOCKER_VK_MAX_DISPATCH_OPS]",
-            "PdockerVkCommandOp command_ops[PDOCKER_VK_MAX_COMMAND_OPS]",
+            "PdockerVkCommandOp *command_ops",
+            "uint32_t command_op_capacity;",
+            "command_buffer_reserve_command_ops",
+            "free(cmd->command_ops);",
+            "free(cmd->graphics_command_ops);",
             "cmd->dispatch_op_count = 0;",
             "clear_recorded_command_ops(cmd)",
             "append_command_op(cmd, &command_op)",
