@@ -2219,8 +2219,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines", 1
         )[1].split("VKAPI_ATTR void VKAPI_CALL vkDestroyPipeline", 1)[0]
         for marker in [
-            "if (ci->flags != 0)",
-            "basePipelineHandle/basePipelineIndex are ignored unless",
+            "pdocker_vk_pipeline_create_flags_transportable",
+            "Pipeline create flags accepted here are execution-neutral hints",
             "ci->pDynamicState->pNext || ci->pDynamicState->flags != 0",
             "ci->stageCount > 0 && !ci->pStages",
             "!stage || stage->pNext || stage->flags != 0",
@@ -9173,8 +9173,8 @@ class GpuAbiContractTest(unittest.TestCase):
 
         self.assertIn('"vkCreateComputePipelines", ci->pNext, 1u, false', compute_body)
         self.assertIn("ci->sType != VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO", compute_body)
-        self.assertIn("ci->flags != 0", compute_body)
-        self.assertIn("basePipelineHandle/basePipelineIndex are only meaningful", compute_body)
+        self.assertIn("pdocker_vk_pipeline_create_flags_transportable", compute_body)
+        self.assertIn("Pipeline create flags accepted here are execution-neutral hints", compute_body)
         self.assertNotIn("ci->basePipelineHandle != VK_NULL_HANDLE", compute_body)
         self.assertNotIn("ci->basePipelineIndex >= 0", compute_body)
         self.assertIn("ci->stage.sType != VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO", compute_body)
@@ -9190,6 +9190,32 @@ class GpuAbiContractTest(unittest.TestCase):
 
         self.assertIn('"vkCreateGraphicsPipelines", ci->pNext, ci->stageCount, true', graphics_body)
         self.assertIn("VK_STRUCTURE_TYPE_PIPELINE_CREATION_FEEDBACK_CREATE_INFO", graphics_body)
+
+
+    def test_vulkan_pipeline_create_noop_flags_are_transportable_hints(self):
+        icd = VULKAN_ICD.read_text()
+        helper_body = c_function_body(icd, "pdocker_vk_pipeline_create_flags_transportable")
+        for marker in [
+            "VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT",
+            "VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT",
+            "VK_PIPELINE_CREATE_DERIVATIVE_BIT",
+            "flags & ~noop_flags",
+            "basePipelineHandle != VK_NULL_HANDLE",
+            "basePipelineIndex >= 0",
+            "pdocker_vk_pipeline_from_handle(basePipelineHandle) != NULL",
+            "idx < create_info_count && idx != create_info_index",
+        ]:
+            self.assertIn(marker, helper_body)
+
+        compute_body = c_function_body(icd, "vkCreateComputePipelines")
+        graphics_body = c_function_body(icd, "vkCreateGraphicsPipelines")
+        for body in [compute_body, graphics_body]:
+            self.assertIn("pdocker_vk_pipeline_create_flags_transportable", body)
+            self.assertIn("ci->flags, ci->basePipelineHandle, ci->basePipelineIndex", body)
+            self.assertNotIn("ci->flags != 0", body)
+        self.assertIn('trace_icd_runtime_failure("compute-pipeline-create-info-unsupported"', compute_body)
+        self.assertIn("pipeline->graphics_unsupported = true;", graphics_body)
+
 
 
     def test_vulkan_external_handle_and_sync_pnext_paths_fail_closed(self):
