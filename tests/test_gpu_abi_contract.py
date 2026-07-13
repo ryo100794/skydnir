@@ -9585,7 +9585,13 @@ class GpuAbiContractTest(unittest.TestCase):
 
     def test_vulkan_icd_records_buffer_image_copy_commands_before_dispatch(self):
         icd = VULKAN_ICD.read_text()
-        self.assertIn("PdockerVkImageCopyOp image_copy_ops[PDOCKER_VK_MAX_COPY_OPS];", icd)
+        for marker in [
+            "PdockerVkImageCopyOp *image_copy_ops;",
+            "uint32_t image_copy_op_capacity;",
+            "command_buffer_reserve_image_copy_ops",
+            "free(cmd->image_copy_ops);",
+        ]:
+            self.assertIn(marker, icd)
         self.assertIn("PDOCKER_VK_COMMAND_IMAGE_COPY", icd)
         self.assertIn("vkCmdCopyBufferToImage", icd)
         self.assertIn("vkCmdCopyImageToBuffer", icd)
@@ -9605,7 +9611,7 @@ class GpuAbiContractTest(unittest.TestCase):
 
     def test_vulkan_icd_records_image_to_image_copy_commands(self):
         icd = VULKAN_ICD.read_text()
-        self.assertIn("PdockerVkImageToImageCopyOp image_to_image_copy_ops[PDOCKER_VK_MAX_COPY_OPS];", icd)
+        self.assertIn("PdockerVkImageToImageCopyOp *image_to_image_copy_ops;", icd)
         self.assertIn("PDOCKER_VK_COMMAND_IMAGE_TO_IMAGE_COPY", icd)
         self.assertIn("vkCmdCopyImage", icd)
         self.assertIn("record_image_to_image_copy_op", icd)
@@ -9631,7 +9637,7 @@ class GpuAbiContractTest(unittest.TestCase):
 
     def test_vulkan_icd_records_clear_color_image_commands(self):
         icd = VULKAN_ICD.read_text()
-        self.assertIn("PdockerVkImageClearOp image_clear_ops[PDOCKER_VK_MAX_COPY_OPS];", icd)
+        self.assertIn("PdockerVkImageClearOp *image_clear_ops;", icd)
         self.assertIn("PDOCKER_VK_COMMAND_CLEAR_COLOR_IMAGE", icd)
         self.assertIn("vkCmdClearColorImage", icd)
         self.assertIn("record_clear_color_image_op", icd)
@@ -9643,7 +9649,7 @@ class GpuAbiContractTest(unittest.TestCase):
 
     def test_vulkan_icd_records_resolve_image_commands(self):
         icd = VULKAN_ICD.read_text()
-        self.assertIn("PdockerVkImageResolveOp image_resolve_ops[PDOCKER_VK_MAX_COPY_OPS];", icd)
+        self.assertIn("PdockerVkImageResolveOp *image_resolve_ops;", icd)
         self.assertIn("PDOCKER_VK_COMMAND_RESOLVE_IMAGE", icd)
         self.assertIn("vkCmdResolveImage", icd)
         self.assertIn("record_resolve_image_op", icd)
@@ -9656,7 +9662,7 @@ class GpuAbiContractTest(unittest.TestCase):
 
     def test_vulkan_icd_records_blit_image_commands(self):
         icd = VULKAN_ICD.read_text()
-        self.assertIn("PdockerVkImageBlitOp image_blit_ops[PDOCKER_VK_MAX_COPY_OPS];", icd)
+        self.assertIn("PdockerVkImageBlitOp *image_blit_ops;", icd)
         self.assertIn("PDOCKER_VK_COMMAND_BLIT_IMAGE", icd)
         self.assertIn("vkCmdBlitImage", icd)
         self.assertIn("record_blit_image_op", icd)
@@ -9669,7 +9675,7 @@ class GpuAbiContractTest(unittest.TestCase):
 
     def test_vulkan_icd_records_clear_depth_stencil_image_commands(self):
         icd = VULKAN_ICD.read_text()
-        self.assertIn("PdockerVkDepthStencilClearOp depth_stencil_clear_ops[PDOCKER_VK_MAX_COPY_OPS];", icd)
+        self.assertIn("PdockerVkDepthStencilClearOp *depth_stencil_clear_ops;", icd)
         self.assertIn("PDOCKER_VK_COMMAND_CLEAR_DEPTH_STENCIL_IMAGE", icd)
         self.assertIn("vkCmdClearDepthStencilImage", icd)
         self.assertIn("record_clear_depth_stencil_image_op", icd)
@@ -11079,11 +11085,18 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("uint64_t layout_generation;", icd)
         self.assertIn("bool layout_mixed;", icd)
         self.assertIn("bool layout_range_overflow;", icd)
-        self.assertIn("PdockerVkImageLayoutRange layout_ranges[PDOCKER_VK_MAX_COPY_OPS];", icd)
+        self.assertIn("PdockerVkImageLayoutRange layout_ranges[PDOCKER_VK_MAX_IMAGE_LAYOUT_RANGES];", icd)
         self.assertIn("uint32_t layout_range_count;", icd)
         self.assertIn("PdockerVkImageBarrierOp", icd)
         self.assertIn("PDOCKER_VK_COMMAND_IMAGE_BARRIER", icd)
-        self.assertIn("image_barrier_ops[PDOCKER_VK_MAX_COPY_OPS]", icd)
+        for marker in [
+            "PdockerVkImageBarrierOp *image_barrier_ops",
+            "uint32_t image_barrier_op_capacity;",
+            "command_buffer_reserve_image_barrier_ops",
+            "command_buffer_reserve_memory_barrier_ops",
+            "command_buffer_reserve_buffer_barrier_ops",
+        ]:
+            self.assertIn(marker, icd)
         self.assertIn("execute_recorded_image_barrier_op", icd)
         self.assertIn("record_image_barrier_op", icd)
         self.assertIn("image_format_full_aspect_mask", icd)

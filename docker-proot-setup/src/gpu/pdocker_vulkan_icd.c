@@ -259,7 +259,8 @@ PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_swapchain, VkSwa
 #define PDOCKER_VK_REQUIREMENT_ALIGNMENT 16ull
 #define PDOCKER_VK_MIN_STORAGE_BUFFER_OFFSET_ALIGNMENT 16ull
 #define PDOCKER_VK_MIN_UNIFORM_BUFFER_OFFSET_ALIGNMENT 16ull
-#define PDOCKER_VK_MAX_COPY_OPS 64
+#define PDOCKER_VK_MAX_IMAGE_LAYOUT_RANGES 64
+#define PDOCKER_VK_MAX_COPY_OPS PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS
 #define PDOCKER_VK_MAX_DISPATCH_OPS PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS
 #define PDOCKER_VK_MAX_COMMAND_OPS PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS
 #define PDOCKER_VK_MAX_EVENT_WAIT_REFS PDOCKER_GPU_VULKAN_GRAPHICS_V626_MAX_EVENT_WAIT_REFS
@@ -448,7 +449,7 @@ struct PdockerVkImage {
     uint64_t layout_generation;
     bool layout_mixed;
     bool layout_range_overflow;
-    PdockerVkImageLayoutRange layout_ranges[PDOCKER_VK_MAX_COPY_OPS];
+    PdockerVkImageLayoutRange layout_ranges[PDOCKER_VK_MAX_IMAGE_LAYOUT_RANGES];
     uint32_t layout_range_count;
     VkDeviceSize requirements_size;
     VkDeviceSize requirements_alignment;
@@ -1139,26 +1140,36 @@ typedef struct {
     PdockerVkDescriptorSet *graphics_bound_set_snapshots;
     bool *graphics_bound_set_used;
     uint32_t graphics_bound_set_capacity;
-    PdockerVkCopyOp copy_ops[PDOCKER_VK_MAX_COPY_OPS];
+    PdockerVkCopyOp *copy_ops;
     uint32_t copy_op_count;
-    PdockerVkImageCopyOp image_copy_ops[PDOCKER_VK_MAX_COPY_OPS];
+    uint32_t copy_op_capacity;
+    PdockerVkImageCopyOp *image_copy_ops;
     uint32_t image_copy_op_count;
-    PdockerVkImageToImageCopyOp image_to_image_copy_ops[PDOCKER_VK_MAX_COPY_OPS];
+    uint32_t image_copy_op_capacity;
+    PdockerVkImageToImageCopyOp *image_to_image_copy_ops;
     uint32_t image_to_image_copy_op_count;
-    PdockerVkImageClearOp image_clear_ops[PDOCKER_VK_MAX_COPY_OPS];
+    uint32_t image_to_image_copy_op_capacity;
+    PdockerVkImageClearOp *image_clear_ops;
     uint32_t image_clear_op_count;
-    PdockerVkImageResolveOp image_resolve_ops[PDOCKER_VK_MAX_COPY_OPS];
+    uint32_t image_clear_op_capacity;
+    PdockerVkImageResolveOp *image_resolve_ops;
     uint32_t image_resolve_op_count;
-    PdockerVkImageBlitOp image_blit_ops[PDOCKER_VK_MAX_COPY_OPS];
+    uint32_t image_resolve_op_capacity;
+    PdockerVkImageBlitOp *image_blit_ops;
     uint32_t image_blit_op_count;
-    PdockerVkDepthStencilClearOp depth_stencil_clear_ops[PDOCKER_VK_MAX_COPY_OPS];
+    uint32_t image_blit_op_capacity;
+    PdockerVkDepthStencilClearOp *depth_stencil_clear_ops;
     uint32_t depth_stencil_clear_op_count;
-    PdockerVkMemoryBarrierOp memory_barrier_ops[PDOCKER_VK_MAX_COPY_OPS];
+    uint32_t depth_stencil_clear_op_capacity;
+    PdockerVkMemoryBarrierOp *memory_barrier_ops;
     uint32_t memory_barrier_op_count;
-    PdockerVkBufferBarrierOp buffer_barrier_ops[PDOCKER_VK_MAX_COPY_OPS];
+    uint32_t memory_barrier_op_capacity;
+    PdockerVkBufferBarrierOp *buffer_barrier_ops;
     uint32_t buffer_barrier_op_count;
-    PdockerVkImageBarrierOp image_barrier_ops[PDOCKER_VK_MAX_COPY_OPS];
+    uint32_t buffer_barrier_op_capacity;
+    PdockerVkImageBarrierOp *image_barrier_ops;
     uint32_t image_barrier_op_count;
+    uint32_t image_barrier_op_capacity;
     PdockerVkDispatchOp *dispatch_ops;
     uint32_t dispatch_op_count;
     uint32_t dispatch_op_capacity;
@@ -1599,6 +1610,45 @@ static void command_buffer_destroy_descriptor_states(PdockerVkCommandBuffer *cmd
                                  &cmd->graphics_bound_set_capacity);
 }
 
+#define PDOCKER_DEFINE_COMMAND_BUFFER_RESERVE_VECTOR(fn_name, field, count_field, capacity_field, type_name, max_count) \
+static bool fn_name(PdockerVkCommandBuffer *cmd, uint32_t extra) { \
+    if (!cmd) return false; \
+    if (extra == 0) return true; \
+    if (cmd->count_field > (max_count) || extra > (max_count) - cmd->count_field) { \
+        return false; \
+    } \
+    uint32_t needed = cmd->count_field + extra; \
+    if (needed <= cmd->capacity_field) return true; \
+    uint32_t new_capacity = cmd->capacity_field ? cmd->capacity_field : 64u; \
+    while (new_capacity < needed) { \
+        if (new_capacity > (max_count) / 2u) { \
+            new_capacity = (max_count); \
+            break; \
+        } \
+        new_capacity *= 2u; \
+    } \
+    if (new_capacity < needed || new_capacity > (max_count)) return false; \
+    type_name *new_items = (type_name *)realloc( \
+        cmd->field, \
+        (size_t)new_capacity * sizeof(*cmd->field)); \
+    if (!new_items) return false; \
+    cmd->field = new_items; \
+    cmd->capacity_field = new_capacity; \
+    return true; \
+}
+
+PDOCKER_DEFINE_COMMAND_BUFFER_RESERVE_VECTOR(command_buffer_reserve_copy_ops, copy_ops, copy_op_count, copy_op_capacity, PdockerVkCopyOp, PDOCKER_VK_MAX_COPY_OPS)
+PDOCKER_DEFINE_COMMAND_BUFFER_RESERVE_VECTOR(command_buffer_reserve_image_copy_ops, image_copy_ops, image_copy_op_count, image_copy_op_capacity, PdockerVkImageCopyOp, PDOCKER_VK_MAX_COPY_OPS)
+PDOCKER_DEFINE_COMMAND_BUFFER_RESERVE_VECTOR(command_buffer_reserve_image_to_image_copy_ops, image_to_image_copy_ops, image_to_image_copy_op_count, image_to_image_copy_op_capacity, PdockerVkImageToImageCopyOp, PDOCKER_VK_MAX_COPY_OPS)
+PDOCKER_DEFINE_COMMAND_BUFFER_RESERVE_VECTOR(command_buffer_reserve_image_clear_ops, image_clear_ops, image_clear_op_count, image_clear_op_capacity, PdockerVkImageClearOp, PDOCKER_VK_MAX_COPY_OPS)
+PDOCKER_DEFINE_COMMAND_BUFFER_RESERVE_VECTOR(command_buffer_reserve_image_resolve_ops, image_resolve_ops, image_resolve_op_count, image_resolve_op_capacity, PdockerVkImageResolveOp, PDOCKER_VK_MAX_COPY_OPS)
+PDOCKER_DEFINE_COMMAND_BUFFER_RESERVE_VECTOR(command_buffer_reserve_image_blit_ops, image_blit_ops, image_blit_op_count, image_blit_op_capacity, PdockerVkImageBlitOp, PDOCKER_VK_MAX_COPY_OPS)
+PDOCKER_DEFINE_COMMAND_BUFFER_RESERVE_VECTOR(command_buffer_reserve_depth_stencil_clear_ops, depth_stencil_clear_ops, depth_stencil_clear_op_count, depth_stencil_clear_op_capacity, PdockerVkDepthStencilClearOp, PDOCKER_VK_MAX_COPY_OPS)
+PDOCKER_DEFINE_COMMAND_BUFFER_RESERVE_VECTOR(command_buffer_reserve_memory_barrier_ops, memory_barrier_ops, memory_barrier_op_count, memory_barrier_op_capacity, PdockerVkMemoryBarrierOp, PDOCKER_VK_MAX_COPY_OPS)
+PDOCKER_DEFINE_COMMAND_BUFFER_RESERVE_VECTOR(command_buffer_reserve_buffer_barrier_ops, buffer_barrier_ops, buffer_barrier_op_count, buffer_barrier_op_capacity, PdockerVkBufferBarrierOp, PDOCKER_VK_MAX_COPY_OPS)
+PDOCKER_DEFINE_COMMAND_BUFFER_RESERVE_VECTOR(command_buffer_reserve_image_barrier_ops, image_barrier_ops, image_barrier_op_count, image_barrier_op_capacity, PdockerVkImageBarrierOp, PDOCKER_VK_MAX_COPY_OPS)
+#undef PDOCKER_DEFINE_COMMAND_BUFFER_RESERVE_VECTOR
+
 static bool command_buffer_reserve_graphics_draw_ops(PdockerVkCommandBuffer *cmd, uint32_t extra) {
     if (!cmd) return false;
     if (extra == 0) return true;
@@ -1820,6 +1870,46 @@ static bool command_buffer_reserve_push_constant_ops(PdockerVkCommandBuffer *cmd
 
 static void command_buffer_destroy_record_vectors(PdockerVkCommandBuffer *cmd) {
     if (!cmd) return;
+    free(cmd->copy_ops);
+    cmd->copy_ops = NULL;
+    cmd->copy_op_count = 0;
+    cmd->copy_op_capacity = 0;
+    free(cmd->image_copy_ops);
+    cmd->image_copy_ops = NULL;
+    cmd->image_copy_op_count = 0;
+    cmd->image_copy_op_capacity = 0;
+    free(cmd->image_to_image_copy_ops);
+    cmd->image_to_image_copy_ops = NULL;
+    cmd->image_to_image_copy_op_count = 0;
+    cmd->image_to_image_copy_op_capacity = 0;
+    free(cmd->image_clear_ops);
+    cmd->image_clear_ops = NULL;
+    cmd->image_clear_op_count = 0;
+    cmd->image_clear_op_capacity = 0;
+    free(cmd->image_resolve_ops);
+    cmd->image_resolve_ops = NULL;
+    cmd->image_resolve_op_count = 0;
+    cmd->image_resolve_op_capacity = 0;
+    free(cmd->image_blit_ops);
+    cmd->image_blit_ops = NULL;
+    cmd->image_blit_op_count = 0;
+    cmd->image_blit_op_capacity = 0;
+    free(cmd->depth_stencil_clear_ops);
+    cmd->depth_stencil_clear_ops = NULL;
+    cmd->depth_stencil_clear_op_count = 0;
+    cmd->depth_stencil_clear_op_capacity = 0;
+    free(cmd->memory_barrier_ops);
+    cmd->memory_barrier_ops = NULL;
+    cmd->memory_barrier_op_count = 0;
+    cmd->memory_barrier_op_capacity = 0;
+    free(cmd->buffer_barrier_ops);
+    cmd->buffer_barrier_ops = NULL;
+    cmd->buffer_barrier_op_count = 0;
+    cmd->buffer_barrier_op_capacity = 0;
+    free(cmd->image_barrier_ops);
+    cmd->image_barrier_ops = NULL;
+    cmd->image_barrier_op_count = 0;
+    cmd->image_barrier_op_capacity = 0;
     free(cmd->dispatch_ops);
     cmd->dispatch_ops = NULL;
     cmd->dispatch_op_count = 0;
@@ -2085,7 +2175,17 @@ static bool append_secondary_command_buffer(
         src->dynamic_rendering_active || src->render_pass_active) {
         return false;
     }
-    if (!command_buffer_reserve_dispatch_ops(dst, src->dispatch_op_count) ||
+    if (!command_buffer_reserve_copy_ops(dst, src->copy_op_count) ||
+        !command_buffer_reserve_image_copy_ops(dst, src->image_copy_op_count) ||
+        !command_buffer_reserve_image_to_image_copy_ops(dst, src->image_to_image_copy_op_count) ||
+        !command_buffer_reserve_image_clear_ops(dst, src->image_clear_op_count) ||
+        !command_buffer_reserve_image_resolve_ops(dst, src->image_resolve_op_count) ||
+        !command_buffer_reserve_image_blit_ops(dst, src->image_blit_op_count) ||
+        !command_buffer_reserve_depth_stencil_clear_ops(dst, src->depth_stencil_clear_op_count) ||
+        !command_buffer_reserve_memory_barrier_ops(dst, src->memory_barrier_op_count) ||
+        !command_buffer_reserve_buffer_barrier_ops(dst, src->buffer_barrier_op_count) ||
+        !command_buffer_reserve_image_barrier_ops(dst, src->image_barrier_op_count) ||
+        !command_buffer_reserve_dispatch_ops(dst, src->dispatch_op_count) ||
         !command_buffer_reserve_graphics_draw_ops(dst, src->graphics_draw_op_count) ||
         !command_buffer_reserve_graphics_descriptor_bind_ops(
             dst,
@@ -22656,7 +22756,7 @@ static bool image_layout_range_append(
             }
         }
     }
-    if (*count >= PDOCKER_VK_MAX_COPY_OPS) return false;
+    if (*count >= PDOCKER_VK_MAX_IMAGE_LAYOUT_RANGES) return false;
     PdockerVkImageLayoutRange *entry = &ranges[(*count)++];
     memset(entry, 0, sizeof(*entry));
     entry->range = *range;
@@ -22778,7 +22878,7 @@ static void update_image_layout_range_cache(
             return;
         }
     }
-    PdockerVkImageLayoutRange rebuilt[PDOCKER_VK_MAX_COPY_OPS];
+    PdockerVkImageLayoutRange rebuilt[PDOCKER_VK_MAX_IMAGE_LAYOUT_RANGES];
     uint32_t rebuilt_count = 0;
     memset(rebuilt, 0, sizeof(rebuilt));
     for (uint32_t i = 0; i < image->layout_range_count; ++i) {
@@ -22865,7 +22965,7 @@ static void record_image_barrier_op(
         uint32_t dstQueueFamilyIndex) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     if (!cmd || !image) return;
-    if (cmd->image_barrier_op_count >= PDOCKER_VK_MAX_COPY_OPS) {
+    if (!command_buffer_reserve_image_barrier_ops(cmd, 1)) {
         cmd->graphics_unsupported = true;
         command_buffer_mark_recording_failed(cmd, "image-barrier-record-overflow");
         if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
@@ -22926,7 +23026,7 @@ static void record_memory_barrier_op(
         VkPipelineStageFlags2 dstStageMask) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     if (!cmd) return;
-    if (cmd->memory_barrier_op_count >= PDOCKER_VK_MAX_COPY_OPS) {
+    if (!command_buffer_reserve_memory_barrier_ops(cmd, 1)) {
         cmd->graphics_unsupported = true;
         command_buffer_mark_recording_failed(cmd, "memory-barrier-record-overflow");
         return;
@@ -22952,7 +23052,7 @@ static void record_buffer_barrier_op(
         uint32_t dstQueueFamilyIndex) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     if (!cmd || !buffer) return;
-    if (cmd->buffer_barrier_op_count >= PDOCKER_VK_MAX_COPY_OPS) {
+    if (!command_buffer_reserve_buffer_barrier_ops(cmd, 1)) {
         cmd->graphics_unsupported = true;
         command_buffer_mark_recording_failed(cmd, "buffer-barrier-record-overflow");
         return;
@@ -23152,7 +23252,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdCopyBuffer(
         void *dst_ptr = buffer_ptr(dst, r->dstOffset, r->size);
         void *src_ptr = buffer_ptr(src, r->srcOffset, r->size);
         bool appended = false;
-        if (cmd->copy_op_count < PDOCKER_VK_MAX_COPY_OPS) {
+        if (command_buffer_reserve_copy_ops(cmd, 1)) {
             uint32_t op_index = cmd->copy_op_count++;
             PdockerVkCopyOp *op = &cmd->copy_ops[op_index];
             op->src = src;
@@ -23163,6 +23263,9 @@ VKAPI_ATTR void VKAPI_CALL vkCmdCopyBuffer(
             command_op.type = PDOCKER_VK_COMMAND_COPY;
             command_op.index = op_index;
             appended = append_command_op(cmd, &command_op);
+        } else {
+            cmd->graphics_unsupported = true;
+            command_buffer_mark_recording_failed(cmd, "copy-buffer-record-overflow");
         }
         if (trace_allocations()) {
             fprintf(stderr,
@@ -23191,7 +23294,7 @@ static void record_image_copy_op(PdockerVkCommandBuffer *cmd,
                                  VkImageLayout image_layout,
                                  const VkBufferImageCopy *region) {
     if (!cmd || !buffer || !image || !region) return;
-    if (cmd->image_copy_op_count >= PDOCKER_VK_MAX_COPY_OPS) {
+    if (!command_buffer_reserve_image_copy_ops(cmd, 1)) {
         if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
             fprintf(stderr,
                     "pdocker-vulkan-icd: image-copy command buffer full max=%u\n",
@@ -23277,7 +23380,7 @@ static void record_image_to_image_copy_op(PdockerVkCommandBuffer *cmd,
                                           VkImageLayout dst_layout,
                                           const VkImageCopy *region) {
     if (!cmd || !src || !dst || !region) return;
-    if (cmd->image_to_image_copy_op_count >= PDOCKER_VK_MAX_COPY_OPS) {
+    if (!command_buffer_reserve_image_to_image_copy_ops(cmd, 1)) {
         if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
             fprintf(stderr,
                     "pdocker-vulkan-icd: image-to-image copy command buffer full max=%u\n",
@@ -23337,7 +23440,7 @@ static void record_clear_color_image_op(PdockerVkCommandBuffer *cmd,
                                         const VkClearColorValue *color,
                                         const VkImageSubresourceRange *range) {
     if (!cmd || !image || !color || !range) return;
-    if (cmd->image_clear_op_count >= PDOCKER_VK_MAX_COPY_OPS) {
+    if (!command_buffer_reserve_image_clear_ops(cmd, 1)) {
         if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
             fprintf(stderr,
                     "pdocker-vulkan-icd: clear-color-image command buffer full max=%u\n",
@@ -23397,7 +23500,7 @@ static void record_resolve_image_op(PdockerVkCommandBuffer *cmd,
                                     VkImageLayout dst_layout,
                                     const VkImageResolve *region) {
     if (!cmd || !src || !dst || !region) return;
-    if (cmd->image_resolve_op_count >= PDOCKER_VK_MAX_COPY_OPS) {
+    if (!command_buffer_reserve_image_resolve_ops(cmd, 1)) {
         if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
             fprintf(stderr,
                     "pdocker-vulkan-icd: resolve-image command buffer full max=%u\n",
@@ -23457,7 +23560,7 @@ static void record_blit_image_op(PdockerVkCommandBuffer *cmd,
                                  const VkImageBlit *region,
                                  VkFilter filter) {
     if (!cmd || !src || !dst || !region) return;
-    if (cmd->image_blit_op_count >= PDOCKER_VK_MAX_COPY_OPS) {
+    if (!command_buffer_reserve_image_blit_ops(cmd, 1)) {
         if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
             fprintf(stderr,
                     "pdocker-vulkan-icd: blit-image command buffer full max=%u\n",
@@ -23527,7 +23630,7 @@ static void record_clear_depth_stencil_image_op(PdockerVkCommandBuffer *cmd,
                                                 const VkClearDepthStencilValue *value,
                                                 const VkImageSubresourceRange *range) {
     if (!cmd || !image || !value || !range) return;
-    if (cmd->depth_stencil_clear_op_count >= PDOCKER_VK_MAX_COPY_OPS) {
+    if (!command_buffer_reserve_depth_stencil_clear_ops(cmd, 1)) {
         if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
             fprintf(stderr,
                     "pdocker-vulkan-icd: clear-depth-stencil-image command buffer full max=%u\n",
