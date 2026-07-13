@@ -2678,6 +2678,71 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("!append_secondary_command_buffer(cmd, secondary)", execute_body)
         self.assertNotIn("cmd->graphics_unsupported = true;\n}", execute_body)
 
+
+    def test_vulkan_push_constant_ops_own_payloads_for_graphics_replay(self):
+        icd = VULKAN_ICD.read_text()
+        snapshot_struct = re.search(
+            r"typedef struct \{(?P<body>.*?)\} PdockerVkPushConstantOpSnapshot;",
+            icd,
+            re.S,
+        )
+        self.assertIsNotNone(snapshot_struct)
+        self.assertIn("uint8_t *data;", snapshot_struct.group("body"))
+
+        clone_body = c_function_body(icd, "push_constant_op_snapshot_clone")
+        for marker in [
+            "memset(dst, 0, sizeof(*dst));",
+            "if (!src->data)",
+            "dst->data = (uint8_t *)malloc(src->size);",
+            "memcpy(dst->data, src->data, src->size);",
+        ]:
+            self.assertIn(marker, clone_body)
+        self.assertNotIn("*dst = *src", clone_body)
+
+        release_body = c_function_body(icd, "push_constant_op_snapshot_release")
+        self.assertIn("free(op->data);", release_body)
+        array_clone_body = c_function_body(icd, "push_constant_op_snapshot_array_clone")
+        self.assertIn("push_constant_op_snapshot_clone(&ops[i], &src_ops[i])", array_clone_body)
+        self.assertNotIn("memcpy(ops, src_ops", array_clone_body)
+        clear_body = c_function_body(icd, "clear_recorded_command_ops")
+        self.assertIn("push_constant_op_snapshot_array_release(cmd->push_constant_ops", clear_body)
+        destroy_body = c_function_body(icd, "command_buffer_destroy_record_vectors")
+        self.assertIn("push_constant_op_snapshot_array_release(cmd->push_constant_ops", destroy_body)
+
+        push_body = c_function_body(icd, "vkCmdPushConstants")
+        for marker in [
+            "uint8_t *payload = (uint8_t *)malloc(size);",
+            "memcpy(payload, pValues, size);",
+            "free(payload);",
+            'command_buffer_mark_recording_failed(cmd, "push-constant-payload-oom")',
+            "memcpy(cmd->push_constants + offset, payload, size);",
+            "op->data = payload;",
+            "op->value_hash = fnv1a64_bytes(payload, size);",
+        ]:
+            self.assertIn(marker, push_body)
+        self.assertLess(
+            push_body.index("memcpy(payload, pValues, size);"),
+            push_body.index("op->data = payload;"),
+        )
+
+        serializer_body = c_function_body(icd, "send_recorded_vulkan_graphics_v6_1_frame_range")
+        push_branch = serializer_body.split(
+            "record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_PUSH_CONSTANTS", 1
+        )[1].split("} else if", 1)[0]
+        self.assertIn("push->size > 0 && !push->data", push_branch)
+        self.assertIn("const uint8_t *push_data = push->data;", push_branch)
+        self.assertIn("command->push_hash = fnv1a64_bytes(push_data, push->size);", push_branch)
+        self.assertNotIn("cmd->push_constants + push->offset", push_branch)
+
+        secondary_body = c_function_body(icd, "append_secondary_command_buffer")
+        self.assertIn(
+            "push_constant_op_snapshot_clone(\n"
+            "                &dst->push_constant_ops[dst->push_constant_op_count],",
+            secondary_body,
+        )
+        self.assertIn("push_constant_op_snapshot_array_release(dst->push_constant_ops + push_op_base", secondary_body)
+        self.assertNotIn("memcpy(dst->push_constant_ops + dst->push_constant_op_count", secondary_body)
+
     def test_vulkan_graphics_v6_describe_response_is_nonterminal(self):
         icd = VULKAN_ICD.read_text()
         response_helpers = icd.split("static bool dispatch_response_is_graphics_transport", 1)[1].split("typedef struct {", 1)[0]
@@ -7776,7 +7841,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("(void)stageFlags;", push_body)
         self.assertIn("op->stage_flags = stageFlags;", push_body)
         self.assertIn("op->offset = offset;", push_body)
-        self.assertIn("op->value_hash = fnv1a64_bytes(pValues, size);", push_body)
+        self.assertIn("op->value_hash = fnv1a64_bytes(payload, size);", push_body)
         self.assertIn("cmd->graphics_unsupported = true;", push_body)
 
 
@@ -12173,8 +12238,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("(uint64_t)src_spec->offset > stage->specialization_size", graphics_body)
         self.assertIn("stage->specialization_size - (uint64_t)src_spec->offset", graphics_body)
         self.assertNotIn("src_spec->offset + (uint64_t)src_spec->size", graphics_body)
-        self.assertIn("(uint64_t)push->offset > cmd->push_constant_size", graphics_body)
-        self.assertIn("cmd->push_constant_size - (uint64_t)push->offset", graphics_body)
+        self.assertIn("push->offset > PDOCKER_VK_MAX_PUSH_BYTES", graphics_body)
+        self.assertIn("PDOCKER_VK_MAX_PUSH_BYTES - push->offset", graphics_body)
+        self.assertIn("push->size > 0 && !push->data", graphics_body)
+        self.assertNotIn("cmd->push_constants + push->offset", graphics_body)
         self.assertIn("pAllocateInfo->allocationSize > (VkDeviceSize)SIZE_MAX", allocate_body)
         self.assertIn("memory->size > SIZE_MAX - (memory->page_size - 1)", allocate_body)
         self.assertIn("offset > (VkDeviceSize)m->size || offset > (VkDeviceSize)SIZE_MAX", map_body)

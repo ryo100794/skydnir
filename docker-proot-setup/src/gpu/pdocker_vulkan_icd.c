@@ -605,6 +605,7 @@ typedef struct {
     VkShaderStageFlags stage_flags;
     uint32_t offset;
     uint32_t size;
+    uint8_t *data;
     uint64_t layout_id;
     uint64_t value_hash;
 } PdockerVkPushConstantOpSnapshot;
@@ -1489,10 +1490,56 @@ static bool dispatch_op_clone_descriptor_state(
     return true;
 }
 
+static void push_constant_op_snapshot_release(PdockerVkPushConstantOpSnapshot *op) {
+    if (!op) return;
+    free(op->data);
+    op->data = NULL;
+    op->size = 0;
+}
+
+static bool push_constant_op_snapshot_clone(
+        PdockerVkPushConstantOpSnapshot *dst,
+        const PdockerVkPushConstantOpSnapshot *src) {
+    if (!dst || !src) return false;
+    memset(dst, 0, sizeof(*dst));
+    if (src->offset > PDOCKER_VK_MAX_PUSH_BYTES ||
+        src->size > PDOCKER_VK_MAX_PUSH_BYTES - src->offset) {
+        return false;
+    }
+    dst->stage_flags = src->stage_flags;
+    dst->offset = src->offset;
+    dst->size = src->size;
+    dst->layout_id = src->layout_id;
+    dst->value_hash = src->value_hash;
+    if (src->size == 0) return true;
+    if (!src->data) {
+        memset(dst, 0, sizeof(*dst));
+        return false;
+    }
+    dst->data = (uint8_t *)malloc(src->size);
+    if (!dst->data) {
+        memset(dst, 0, sizeof(*dst));
+        return false;
+    }
+    memcpy(dst->data, src->data, src->size);
+    return true;
+}
+
+static void push_constant_op_snapshot_array_release(
+        PdockerVkPushConstantOpSnapshot *ops,
+        uint32_t count) {
+    if (!ops) return;
+    for (uint32_t i = 0; i < count; ++i) {
+        push_constant_op_snapshot_release(&ops[i]);
+    }
+}
+
 static void push_constant_op_snapshot_array_destroy(
         PdockerVkPushConstantOpSnapshot **ops,
         uint32_t *count) {
     if (!ops) return;
+    uint32_t item_count = count ? *count : 0;
+    push_constant_op_snapshot_array_release(*ops, item_count);
     free(*ops);
     *ops = NULL;
     if (count) *count = 0;
@@ -1513,9 +1560,16 @@ static bool push_constant_op_snapshot_array_clone(
     PdockerVkPushConstantOpSnapshot *ops =
         (PdockerVkPushConstantOpSnapshot *)calloc(src_count, sizeof(*ops));
     if (!ops) return false;
-    memcpy(ops, src_ops, (size_t)src_count * sizeof(*ops));
+    uint32_t cloned_count = 0;
+    for (uint32_t i = 0; i < src_count; ++i) {
+        if (!push_constant_op_snapshot_clone(&ops[i], &src_ops[i])) {
+            push_constant_op_snapshot_array_destroy(&ops, &cloned_count);
+            return false;
+        }
+        cloned_count = i + 1u;
+    }
     *dst_ops = ops;
-    *dst_count = src_count;
+    *dst_count = cloned_count;
     return true;
 }
 
@@ -2009,14 +2063,24 @@ static void command_buffer_destroy_record_vectors(PdockerVkCommandBuffer *cmd) {
     cmd->dynamic_states = NULL;
     cmd->dynamic_state_count = 0;
     cmd->dynamic_state_capacity = 0;
+    for (uint32_t i = 0; i < cmd->dispatch_op_count; ++i) {
+        dispatch_op_destroy_descriptor_state(&cmd->dispatch_ops[i]);
+    }
     free(cmd->dispatch_ops);
     cmd->dispatch_ops = NULL;
     cmd->dispatch_op_count = 0;
     cmd->dispatch_op_capacity = 0;
+    for (uint32_t i = 0; i < cmd->graphics_draw_op_count; ++i) {
+        graphics_draw_snapshot_destroy_descriptor_state(&cmd->graphics_draw_ops[i]);
+    }
     free(cmd->graphics_draw_ops);
     cmd->graphics_draw_ops = NULL;
     cmd->graphics_draw_op_count = 0;
     cmd->graphics_draw_op_capacity = 0;
+    for (uint32_t i = 0; i < cmd->graphics_descriptor_bind_op_count; ++i) {
+        graphics_descriptor_bind_snapshot_destroy_descriptor_state(
+            &cmd->graphics_descriptor_bind_ops[i]);
+    }
     free(cmd->graphics_descriptor_bind_ops);
     cmd->graphics_descriptor_bind_ops = NULL;
     cmd->graphics_descriptor_bind_op_count = 0;
@@ -2025,6 +2089,12 @@ static void command_buffer_destroy_record_vectors(PdockerVkCommandBuffer *cmd) {
     cmd->graphics_rendering_ops = NULL;
     cmd->graphics_rendering_op_count = 0;
     cmd->graphics_rendering_op_capacity = 0;
+    for (uint32_t i = 0; i < cmd->command_op_count; ++i) {
+        if (cmd->command_ops[i].type == PDOCKER_VK_COMMAND_UPDATE) {
+            free(cmd->command_ops[i].payload);
+            cmd->command_ops[i].payload = NULL;
+        }
+    }
     free(cmd->command_ops);
     cmd->command_ops = NULL;
     cmd->command_op_count = 0;
@@ -2033,6 +2103,8 @@ static void command_buffer_destroy_record_vectors(PdockerVkCommandBuffer *cmd) {
     cmd->graphics_command_ops = NULL;
     cmd->graphics_command_op_count = 0;
     cmd->graphics_command_op_capacity = 0;
+    push_constant_op_snapshot_array_release(cmd->push_constant_ops,
+                                            cmd->push_constant_op_count);
     free(cmd->push_constant_ops);
     cmd->push_constant_ops = NULL;
     cmd->push_constant_op_count = 0;
@@ -2220,6 +2292,8 @@ static void clear_recorded_command_ops(PdockerVkCommandBuffer *cmd) {
     }
     command_buffer_clear_descriptor_states(cmd);
     dynamic_state_snapshot_array_release(cmd->dynamic_states, cmd->dynamic_state_count);
+    push_constant_op_snapshot_array_release(cmd->push_constant_ops,
+                                            cmd->push_constant_op_count);
     cmd->command_op_count = 0;
     cmd->event_wait_ref_count = 0;
     cmd->copy_op_count = 0;
@@ -2511,9 +2585,14 @@ static bool append_secondary_command_buffer(
     memcpy(dst->graphics_dynamic_offsets + dst->graphics_dynamic_offset_count, src->graphics_dynamic_offsets,
            sizeof(src->graphics_dynamic_offsets[0]) * src->graphics_dynamic_offset_count);
     dst->graphics_dynamic_offset_count += src->graphics_dynamic_offset_count;
-    memcpy(dst->push_constant_ops + dst->push_constant_op_count, src->push_constant_ops,
-           sizeof(src->push_constant_ops[0]) * src->push_constant_op_count);
-    dst->push_constant_op_count += src->push_constant_op_count;
+    for (uint32_t i = 0; i < src->push_constant_op_count; ++i) {
+        if (!push_constant_op_snapshot_clone(
+                &dst->push_constant_ops[dst->push_constant_op_count],
+                &src->push_constant_ops[i])) {
+            goto fail_secondary_append;
+        }
+        dst->push_constant_op_count++;
+    }
     memcpy(dst->event_wait_refs + dst->event_wait_ref_count, src->event_wait_refs,
            sizeof(src->event_wait_refs[0]) * src->event_wait_ref_count);
     dst->event_wait_ref_count += src->event_wait_ref_count;
@@ -2667,6 +2746,8 @@ fail_secondary_append:
                                          dst->dynamic_state_count - dynamic_state_base);
     dst->dynamic_state_count = dynamic_state_base;
     dst->graphics_dynamic_offset_count = dynamic_offset_base;
+    push_constant_op_snapshot_array_release(dst->push_constant_ops + push_op_base,
+                                            dst->push_constant_op_count - push_op_base);
     dst->push_constant_op_count = push_op_base;
     dst->event_wait_ref_count = event_wait_ref_base;
     dst->command_op_count = command_op_base;
@@ -8000,13 +8081,16 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
                 goto cleanup;
             }
             const PdockerVkPushConstantOpSnapshot *push = &cmd->push_constant_ops[record->push_op_index];
-            if ((uint64_t)push->offset > cmd->push_constant_size ||
-                (uint64_t)push->size > cmd->push_constant_size - (uint64_t)push->offset ||
-                push->size > PDOCKER_VK_MAX_PUSH_BYTES) {
+            if (push->offset > PDOCKER_VK_MAX_PUSH_BYTES ||
+                push->size > PDOCKER_VK_MAX_PUSH_BYTES - push->offset) {
                 rc = -ERANGE;
                 goto cleanup;
             }
-            const uint8_t *push_data = cmd->push_constants + push->offset;
+            if (push->size > 0 && !push->data) {
+                rc = -EPROTO;
+                goto cleanup;
+            }
+            const uint8_t *push_data = push->data;
             command->push_size = push->size;
             command->push_hash = fnv1a64_bytes(push_data, push->size);
             rc = frame_append_bytes(frame, PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_FRAME_BYTES,
@@ -22729,31 +22813,45 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPushConstants(
         uint32_t offset,
         uint32_t size,
         const void *pValues) {
-    (void)layout;
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
-    if (!cmd || !pValues) return;
+    if (!cmd) return;
     if (offset > PDOCKER_VK_MAX_PUSH_BYTES ||
         (uint64_t)size > (uint64_t)PDOCKER_VK_MAX_PUSH_BYTES - (uint64_t)offset) {
         cmd->graphics_unsupported = true;
+        command_buffer_mark_recording_failed(cmd, "push-constant-range-overflow");
         return;
     }
     if (size == 0) return;
-    memcpy(cmd->push_constants + offset, pValues, size);
-    uint32_t end = offset + size;
-    if (end > cmd->push_constant_size) cmd->push_constant_size = end;
+    if (!pValues) {
+        cmd->graphics_unsupported = true;
+        command_buffer_mark_recording_failed(cmd, "push-constant-payload-invalid");
+        return;
+    }
+    uint8_t *payload = (uint8_t *)malloc(size);
+    if (!payload) {
+        cmd->graphics_unsupported = true;
+        command_buffer_mark_recording_failed(cmd, "push-constant-payload-oom");
+        return;
+    }
+    memcpy(payload, pValues, size);
     if (!command_buffer_reserve_push_constant_ops(cmd, 1)) {
+        free(payload);
         cmd->graphics_unsupported = true;
         command_buffer_mark_recording_failed(cmd, "push-constant-record-overflow");
         return;
     }
+    memcpy(cmd->push_constants + offset, payload, size);
+    uint32_t end = offset + size;
+    if (end > cmd->push_constant_size) cmd->push_constant_size = end;
     PdockerVkPushConstantOpSnapshot *op =
         &cmd->push_constant_ops[cmd->push_constant_op_count++];
     op->stage_flags = stageFlags;
     op->offset = offset;
     op->size = size;
+    op->data = payload;
     PdockerVkPipelineLayout *captured_layout = pdocker_vk_pipeline_layout_from_handle(layout);
     op->layout_id = captured_layout ? captured_layout->layout_id : 0;
-    op->value_hash = fnv1a64_bytes(pValues, size);
+    op->value_hash = fnv1a64_bytes(payload, size);
     if (shader_stage_flags_include_graphics(stageFlags)) {
         PdockerVkGraphicsCommandRecord record;
         memset(&record, 0, sizeof(record));
