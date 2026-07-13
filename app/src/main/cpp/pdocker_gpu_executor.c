@@ -99,6 +99,7 @@
 #define PDOCKER_VK_FEATURE_DESCRIPTOR_PARTIALLY_BOUND   (1ull << 36)
 #define PDOCKER_VK_FEATURE_DESCRIPTOR_VARIABLE_COUNT    (1ull << 37)
 #define PDOCKER_VK_FEATURE_DESCRIPTOR_UPDATE_UNUSED_WHILE_PENDING (1ull << 38)
+#define PDOCKER_VK_FEATURE_SAMPLER_FILTER_MINMAX       (1ull << 45)
 
 #define PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT 0x00000001u
 #define PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT 0x00000002u
@@ -2048,6 +2049,7 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             "\"depthBiasClamp\":%u,"
             "\"depthBounds\":%u,"
             "\"samplerAnisotropy\":%u,"
+            "\"samplerFilterMinmax\":%u,"
             "\"storageBuffer16BitAccess\":%u,"
             "\"uniformAndStorageBuffer16BitAccess\":%u,"
             "\"storagePushConstant16\":%u,"
@@ -2120,6 +2122,7 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             rt ? rt->enabled_features.depthBiasClamp : 0,
             rt ? rt->enabled_features.depthBounds : 0,
             rt ? rt->enabled_features.samplerAnisotropy : 0,
+            rt ? rt->enabled_vulkan12.samplerFilterMinmax : 0,
             rt ? rt->enabled_storage16.storageBuffer16BitAccess : 0,
             rt ? rt->enabled_storage16.uniformAndStorageBuffer16BitAccess : 0,
             rt ? rt->enabled_storage16.storagePushConstant16 : 0,
@@ -3892,7 +3895,24 @@ static int vulkan_sampler_entry_supported_by_runtime(
         const char **reason_out) {
     const char *reason = "sampler replay supported";
     if (reason_out) *reason_out = reason;
-    if (!src || !src->anisotropy_enable) return 0;
+    if (!src) return 0;
+    switch ((VkSamplerReductionMode)src->reduction_mode) {
+        case VK_SAMPLER_REDUCTION_MODE_WEIGHTED_AVERAGE:
+            break;
+        case VK_SAMPLER_REDUCTION_MODE_MIN:
+        case VK_SAMPLER_REDUCTION_MODE_MAX:
+            if (!rt || !rt->ready || !rt->enabled_vulkan12.samplerFilterMinmax) {
+                reason = "sampler min/max reduction replay requires samplerFilterMinmax";
+                if (reason_out) *reason_out = reason;
+                return -EOPNOTSUPP;
+            }
+            break;
+        default:
+            reason = "sampler reduction mode is not supported by Vulkan replay";
+            if (reason_out) *reason_out = reason;
+            return -EOPNOTSUPP;
+    }
+    if (!src->anisotropy_enable) return 0;
     if (!rt || !rt->ready || !rt->enabled_features.samplerAnisotropy) {
         reason = "sampler anisotropy replay requires samplerAnisotropy";
         if (reason_out) *reason_out = reason;
@@ -4220,6 +4240,8 @@ static int materialize_vulkan_dispatch_images(
         memset(dst, 0, sizeof(*dst));
         dst->sampler_id = src->sampler_id;
         dst->source_index = (uint32_t)i;
+        VkSamplerReductionModeCreateInfo reduction_info;
+        memset(&reduction_info, 0, sizeof(reduction_info));
         VkSamplerCreateInfo sci = {
             .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
             .magFilter = (VkFilter)src->mag_filter,
@@ -4238,6 +4260,11 @@ static int materialize_vulkan_dispatch_images(
             .borderColor = (VkBorderColor)src->border_color,
             .unnormalizedCoordinates = src->unnormalized_coordinates,
         };
+        if (src->reduction_mode != VK_SAMPLER_REDUCTION_MODE_WEIGHTED_AVERAGE) {
+            reduction_info.sType = VK_STRUCTURE_TYPE_SAMPLER_REDUCTION_MODE_CREATE_INFO;
+            reduction_info.reductionMode = (VkSamplerReductionMode)src->reduction_mode;
+            sci.pNext = &reduction_info;
+        }
         VkResult rc = vkCreateSampler(device, &sci, NULL, &dst->sampler);
         if (rc != VK_SUCCESS) return -EIO;
     }
@@ -13416,6 +13443,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
         rt->physical_vulkan12.shaderInt8 || rt->physical_float16_int8.shaderInt8;
     enabled_vulkan12.timelineSemaphore = rt->physical_vulkan12.timelineSemaphore;
     enabled_vulkan12.drawIndirectCount = rt->physical_vulkan12.drawIndirectCount;
+    enabled_vulkan12.samplerFilterMinmax = rt->physical_vulkan12.samplerFilterMinmax;
     enabled_descriptor_indexing.descriptorBindingPartiallyBound =
         rt->physical_descriptor_indexing.descriptorBindingPartiallyBound ||
         rt->physical_vulkan12.descriptorBindingPartiallyBound;
@@ -13526,6 +13554,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
          enabled_vulkan12.shaderInt8 ||
          enabled_vulkan12.timelineSemaphore ||
          enabled_vulkan12.drawIndirectCount ||
+         enabled_vulkan12.samplerFilterMinmax ||
          enabled_vulkan12.descriptorBindingPartiallyBound ||
          enabled_vulkan12.descriptorBindingVariableDescriptorCount ||
          enabled_vulkan12.descriptorBindingUpdateUnusedWhilePending ||
@@ -19597,6 +19626,7 @@ static void print_capabilities(const char *transport) {
             "\"depthBiasClamp\":%u,"
             "\"depthBounds\":%u,"
             "\"samplerAnisotropy\":%u,"
+            "\"samplerFilterMinmax\":%u,"
             "\"storageBuffer16BitAccess\":%u,"
             "\"uniformAndStorageBuffer16BitAccess\":%u,"
             "\"storagePushConstant16\":%u,"
@@ -19665,6 +19695,7 @@ static void print_capabilities(const char *transport) {
             rt ? rt->physical_features.depthBiasClamp : 0,
             rt ? rt->physical_features.depthBounds : 0,
             rt ? rt->physical_features.samplerAnisotropy : 0,
+            rt ? rt->physical_vulkan12.samplerFilterMinmax : 0,
             rt ? rt->physical_storage16.storageBuffer16BitAccess : 0,
             rt ? rt->physical_storage16.uniformAndStorageBuffer16BitAccess : 0,
             rt ? rt->physical_storage16.storagePushConstant16 : 0,
@@ -19865,6 +19896,7 @@ static void print_vulkan_advertisement_caps(const char *transport) {
             "\"depthBiasClamp\":%u,"
             "\"depthBounds\":%u,"
             "\"samplerAnisotropy\":%u,"
+            "\"samplerFilterMinmax\":%u,"
             "\"storage16\":{"
             "\"storageBuffer16BitAccess\":%u,"
             "\"uniformAndStorageBuffer16BitAccess\":%u,"
@@ -19907,6 +19939,7 @@ static void print_vulkan_advertisement_caps(const char *transport) {
             rt ? rt->physical_features.depthBiasClamp : 0,
             rt ? rt->physical_features.depthBounds : 0,
             rt ? rt->physical_features.samplerAnisotropy : 0,
+            rt ? rt->physical_vulkan12.samplerFilterMinmax : 0,
             rt ? rt->physical_storage16.storageBuffer16BitAccess : 0,
             rt ? rt->physical_storage16.uniformAndStorageBuffer16BitAccess : 0,
             rt ? rt->physical_storage16.storagePushConstant16 : 0,

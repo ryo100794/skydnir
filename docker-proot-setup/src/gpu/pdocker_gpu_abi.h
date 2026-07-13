@@ -123,7 +123,7 @@
 #define PDOCKER_GPU_VULKAN_DISPATCH_V5_SPECIALIZATION_SCHEMA_HASH 0xae7e0f61a22df66eull
 #define PDOCKER_GPU_VULKAN_DISPATCH_V5_IMAGE_SCHEMA_HASH 0x41f750ec2c5cfc82ull
 #define PDOCKER_GPU_VULKAN_DISPATCH_V5_IMAGE_VIEW_SCHEMA_HASH 0xfef2d65210c4a660ull
-#define PDOCKER_GPU_VULKAN_DISPATCH_V5_SAMPLER_SCHEMA_HASH 0xc4c997c91fb85ab5ull
+#define PDOCKER_GPU_VULKAN_DISPATCH_V5_SAMPLER_SCHEMA_HASH 0xe9f589b671d21a2cull
 #define PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_OBJECT_SCHEMA_HASH 0xc7d2cec7923555f7ull
 #define PDOCKER_GPU_VULKAN_DISPATCH_V52_IMAGE_LAYOUT_RANGE_SCHEMA_HASH 0xa61770e90fd06da7ull
 #define PDOCKER_GPU_VULKAN_DISPATCH_V53_BUFFER_VIEW_SCHEMA_HASH 0xfa9323b0e3f0fb42ull
@@ -357,7 +357,7 @@
 
 #define PDOCKER_GPU_VULKAN_DISPATCH_V5_SAMPLER_FIELDS(X) \
     X(flags, u32) \
-    X(reserved0, u32) \
+    X(reduction_mode, u32) \
     X(sampler_id, u64) \
     X(mag_filter, u32) \
     X(min_filter, u32) \
@@ -598,7 +598,7 @@ typedef struct PdockerGpuVulkanDispatchV5ImageViewEntry {
 
 typedef struct PdockerGpuVulkanDispatchV5SamplerEntry {
     uint32_t flags;
-    uint32_t reserved0;
+    uint32_t reduction_mode;
     uint64_t sampler_id;
     uint32_t mag_filter;
     uint32_t min_filter;

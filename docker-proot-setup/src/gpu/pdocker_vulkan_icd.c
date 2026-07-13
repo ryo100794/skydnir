@@ -441,6 +441,7 @@ static uint64_t g_generic_dispatch_sequence = 0;
 #define PDOCKER_VK_FEATURE_DESCRIPTOR_STORAGE_BUFFER_UPDATE_AFTER_BIND (1ull << 42)
 #define PDOCKER_VK_FEATURE_DESCRIPTOR_UNIFORM_TEXEL_BUFFER_UPDATE_AFTER_BIND (1ull << 43)
 #define PDOCKER_VK_FEATURE_DESCRIPTOR_STORAGE_TEXEL_BUFFER_UPDATE_AFTER_BIND (1ull << 44)
+#define PDOCKER_VK_FEATURE_SAMPLER_FILTER_MINMAX       (1ull << 45)
 
 #define PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT 0x00000001u
 #define PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT 0x00000002u
@@ -584,6 +585,7 @@ struct PdockerVkSampler {
     float max_lod;
     VkBorderColor border_color;
     VkBool32 unnormalized_coordinates;
+    VkSamplerReductionMode reduction_mode;
     uint64_t generation;
 };
 
@@ -661,6 +663,7 @@ typedef struct {
     float max_lod;
     VkBorderColor border_color;
     VkBool32 unnormalized_coordinates;
+    VkSamplerReductionMode reduction_mode;
     uint64_t generation;
 } PdockerVkSamplerSnapshot;
 
@@ -2573,6 +2576,7 @@ static bool snapshot_sampler_state(
     dst->max_lod = sampler->max_lod;
     dst->border_color = sampler->border_color;
     dst->unnormalized_coordinates = sampler->unnormalized_coordinates;
+    dst->reduction_mode = sampler->reduction_mode;
     dst->generation = sampler->generation;
     return true;
 }
@@ -6624,6 +6628,7 @@ static int collect_graphics_sampler_entry(
     entry->max_lod_bits = float_bits_u32(sampler->max_lod);
     entry->border_color = sampler->border_color;
     entry->unnormalized_coordinates = sampler->unnormalized_coordinates;
+    entry->reduction_mode = sampler->reduction_mode;
     entry->generation = sampler->generation ? sampler->generation : generation;
     sampler_objects[index] = sampler;
     return (int)index;
@@ -6664,6 +6669,7 @@ static int collect_graphics_sampler_snapshot_entry(
     entry->max_lod_bits = float_bits_u32(snapshot->max_lod);
     entry->border_color = snapshot->border_color;
     entry->unnormalized_coordinates = snapshot->unnormalized_coordinates;
+    entry->reduction_mode = snapshot->reduction_mode;
     entry->generation = snapshot->generation ? snapshot->generation : generation;
     sampler_objects[index] = sampler;
     return (int)index;
@@ -10350,6 +10356,7 @@ static bool pdocker_vk_sampler_contents_equal(
            float_bits_u32(a->max_lod) == float_bits_u32(b->max_lod) &&
            a->border_color == b->border_color &&
            a->unnormalized_coordinates == b->unnormalized_coordinates &&
+           a->reduction_mode == b->reduction_mode &&
            a->generation == b->generation;
 }
 
@@ -11472,6 +11479,7 @@ static int send_generic_vulkan_dispatch_v5_1_op(
         sampler_entries[i].max_lod_bits = float_bits_u32(sampler->max_lod);
         sampler_entries[i].border_color = sampler->border_color;
         sampler_entries[i].unnormalized_coordinates = sampler->unnormalized_coordinates;
+        sampler_entries[i].reduction_mode = sampler->reduction_mode;
         sampler_entries[i].generation = sampler->generation;
     }
     for (size_t i = 0; i < image_descriptor_count; ++i) {
@@ -13911,6 +13919,7 @@ typedef struct {
     VkPhysicalDeviceShaderFloat16Int8Features float16_int8;
     VkPhysicalDeviceDescriptorIndexingFeatures descriptor_indexing;
     VkPhysicalDeviceIndexTypeUint8FeaturesEXT index_type_uint8;
+    VkBool32 sampler_filter_minmax;
     VkPhysicalDeviceSubgroupProperties subgroup;
     bool ext_16bit_storage;
     bool ext_8bit_storage;
@@ -14104,6 +14113,7 @@ static bool parse_executor_advertisement_caps_json(
     json_read_u32(json, "depthBiasClamp", &caps->features.depthBiasClamp);
     json_read_u32(json, "depthBounds", &caps->features.depthBounds);
     json_read_u32(json, "samplerAnisotropy", &caps->features.samplerAnisotropy);
+    json_read_u32(json, "samplerFilterMinmax", &caps->sampler_filter_minmax);
     json_read_u32(json, "multiview", &caps->multiview);
     json_read_u32(json, "storageBuffer16BitAccess", &caps->storage16.storageBuffer16BitAccess);
     json_read_u32(json, "uniformAndStorageBuffer16BitAccess", &caps->storage16.uniformAndStorageBuffer16BitAccess);
@@ -14667,6 +14677,11 @@ static VkBool32 advertised_sampler_anisotropy(void) {
     return (caps && caps->features.samplerAnisotropy && caps->limits.maxSamplerAnisotropy >= 1.0f)
         ? VK_TRUE
         : VK_FALSE;
+}
+
+static VkBool32 advertised_sampler_filter_minmax(void) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+    return (caps && caps->sampler_filter_minmax) ? VK_TRUE : VK_FALSE;
 }
 
 static VkBool32 advertised_synchronization2(void) {
@@ -15264,6 +15279,7 @@ static void fill_pnext_features(void *pNext) {
                                             advertised_descriptor_update_after_bind_any() ||
                                             p->descriptorBindingPartiallyBound ||
                                             p->descriptorBindingVariableDescriptorCount;
+                    p->samplerFilterMinmax = advertised_sampler_filter_minmax();
                 } else {
                     VkBool32 storage8 = advertised_storage8();
                     p->storageBuffer8BitAccess = storage8;
@@ -15284,6 +15300,7 @@ static void fill_pnext_features(void *pNext) {
                                             advertised_descriptor_update_after_bind_any() ||
                                             p->descriptorBindingPartiallyBound ||
                                             p->descriptorBindingVariableDescriptorCount;
+                    p->samplerFilterMinmax = advertised_sampler_filter_minmax();
                 }
                 p->bufferDeviceAddress = VK_FALSE;
                 p->vulkanMemoryModel = VK_FALSE;
@@ -15610,6 +15627,7 @@ static bool vulkan12_feature_request_supported(
                                    advertised_descriptor_update_after_bind_any() ||
                                    supported.descriptorBindingPartiallyBound ||
                                    supported.descriptorBindingVariableDescriptorCount;
+    supported.samplerFilterMinmax = advertised_sampler_filter_minmax();
     PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, samplerMirrorClampToEdge);
     PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, drawIndirectCount);
     PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, storageBuffer8BitAccess);
@@ -15978,6 +15996,7 @@ static uint64_t feature_mask_from_pnext_chain(const void *pNext) {
                 if (p->vulkanMemoryModel) mask |= PDOCKER_VK_FEATURE_VULKAN_MEMORY_MODEL;
                 if (p->timelineSemaphore) mask |= PDOCKER_VK_FEATURE_TIMELINE_SEMAPHORE;
                 if (p->drawIndirectCount) mask |= PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT;
+                if (p->samplerFilterMinmax) mask |= PDOCKER_VK_FEATURE_SAMPLER_FILTER_MINMAX;
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES: {
@@ -16115,6 +16134,7 @@ static uint64_t advertised_feature_mask(void) {
         if (advertised_depth_bias_clamp()) mask |= PDOCKER_VK_FEATURE_DEPTH_BIAS_CLAMP;
         if (advertised_depth_bounds()) mask |= PDOCKER_VK_FEATURE_DEPTH_BOUNDS;
         if (advertised_sampler_anisotropy()) mask |= PDOCKER_VK_FEATURE_SAMPLER_ANISOTROPY;
+        if (advertised_sampler_filter_minmax()) mask |= PDOCKER_VK_FEATURE_SAMPLER_FILTER_MINMAX;
     } else {
         if (advertised_storage16()) mask |= PDOCKER_VK_FEATURE_STORAGE_BUFFER_16;
         if (advertised_storage8()) {
@@ -17464,20 +17484,39 @@ static VkResult validate_image_view_create_info_for_transport(
 
 static VkResult validate_sampler_create_info_for_transport(
         const VkSamplerCreateInfo *info,
-        uint64_t requested_feature_mask) {
+        uint64_t requested_feature_mask,
+        VkSamplerReductionMode *reduction_mode_out) {
     if (!info) return VK_ERROR_INITIALIZATION_FAILED;
+    VkSamplerReductionMode reduction_mode = VK_SAMPLER_REDUCTION_MODE_WEIGHTED_AVERAGE;
+    bool saw_reduction_mode = false;
     for (const void *node = info->pNext; node;) {
         PdockerVkStructHeader header = read_vk_struct_header(node);
         switch (header.sType) {
             case VK_STRUCTURE_TYPE_SAMPLER_REDUCTION_MODE_CREATE_INFO: {
-                const VkSamplerReductionModeCreateInfo *reduction_info =
-                    (const VkSamplerReductionModeCreateInfo *)node;
-                if (reduction_info->reductionMode != VK_SAMPLER_REDUCTION_MODE_WEIGHTED_AVERAGE) {
-                    trace_icd_runtime_failure("sampler-reduction-mode-unsupported",
+                if (saw_reduction_mode) {
+                    trace_icd_runtime_failure("sampler-reduction-mode-duplicate",
                                               VK_ERROR_FEATURE_NOT_PRESENT);
                     return VK_ERROR_FEATURE_NOT_PRESENT;
                 }
-                break;
+                saw_reduction_mode = true;
+                const VkSamplerReductionModeCreateInfo *reduction_info =
+                    (const VkSamplerReductionModeCreateInfo *)node;
+                reduction_mode = reduction_info->reductionMode;
+                if (reduction_mode == VK_SAMPLER_REDUCTION_MODE_WEIGHTED_AVERAGE) {
+                    break;
+                }
+                if (reduction_mode == VK_SAMPLER_REDUCTION_MODE_MIN ||
+                    reduction_mode == VK_SAMPLER_REDUCTION_MODE_MAX) {
+                    if ((requested_feature_mask & PDOCKER_VK_FEATURE_SAMPLER_FILTER_MINMAX) == 0) {
+                        trace_icd_runtime_failure("sampler-reduction-mode-feature-not-enabled",
+                                                  VK_ERROR_FEATURE_NOT_PRESENT);
+                        return VK_ERROR_FEATURE_NOT_PRESENT;
+                    }
+                    break;
+                }
+                trace_icd_runtime_failure("sampler-reduction-mode-unsupported",
+                                          VK_ERROR_FEATURE_NOT_PRESENT);
+                return VK_ERROR_FEATURE_NOT_PRESENT;
             }
             default:
                 return unsupported_image_pnext_result("vkCreateSampler", node);
@@ -17498,6 +17537,7 @@ static VkResult validate_sampler_create_info_for_transport(
             return VK_ERROR_FEATURE_NOT_PRESENT;
         }
     }
+    if (reduction_mode_out) *reduction_mode_out = reduction_mode;
     return VK_SUCCESS;
 }
 
@@ -17895,8 +17935,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSampler(
     }
     PdockerVkDevice *dev = (PdockerVkDevice *)device;
     uint64_t requested_feature_mask = dev ? dev->requested_feature_mask : 0;
+    VkSamplerReductionMode reduction_mode = VK_SAMPLER_REDUCTION_MODE_WEIGHTED_AVERAGE;
     VkResult validate_rc = validate_sampler_create_info_for_transport(
-        pCreateInfo, requested_feature_mask);
+        pCreateInfo, requested_feature_mask, &reduction_mode);
     if (validate_rc != VK_SUCCESS) return validate_rc;
     PdockerVkSampler *sampler = pdocker_alloc_handle(sizeof(*sampler));
     if (!sampler) return VK_ERROR_OUT_OF_HOST_MEMORY;
@@ -17916,6 +17957,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSampler(
     sampler->max_lod = pCreateInfo->maxLod;
     sampler->border_color = pCreateInfo->borderColor;
     sampler->unnormalized_coordinates = pCreateInfo->unnormalizedCoordinates;
+    sampler->reduction_mode = reduction_mode;
     sampler->generation = next_vulkan_object_generation();
     *pSampler = pdocker_vk_sampler_to_handle(sampler);
     return VK_SUCCESS;

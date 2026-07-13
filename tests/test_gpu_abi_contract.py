@@ -9918,6 +9918,89 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("decl->pipeline_layout_id != meta->layout_id", validate_body)
         self.assertIn("(covered_stage_flags & meta->stage_flags) != meta->stage_flags", validate_body)
 
+    def test_vulkan_sampler_reduction_minmax_is_feature_gated_and_replayed(self):
+        icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
+        for header in [APP_HEADER.read_text(), CONTAINER_HEADER.read_text()]:
+            self.assertIn("X(reduction_mode, u32)", header)
+            self.assertIn("uint32_t reduction_mode;", header)
+            self.assertIn("PDOCKER_GPU_VULKAN_DISPATCH_V5_SAMPLER_SCHEMA_HASH 0xe9f589b671d21a2cull", header)
+
+        sampler_validate_body = c_function_body(icd, "validate_sampler_create_info_for_transport")
+        self.assertIn("VkSamplerReductionMode *reduction_mode_out", icd)
+        for marker in [
+            "VK_STRUCTURE_TYPE_SAMPLER_REDUCTION_MODE_CREATE_INFO",
+            "VK_SAMPLER_REDUCTION_MODE_WEIGHTED_AVERAGE",
+            "VK_SAMPLER_REDUCTION_MODE_MIN",
+            "VK_SAMPLER_REDUCTION_MODE_MAX",
+            "PDOCKER_VK_FEATURE_SAMPLER_FILTER_MINMAX",
+            "sampler-reduction-mode-feature-not-enabled",
+            "sampler-reduction-mode-duplicate",
+            "sampler-reduction-mode-unsupported",
+            "if (reduction_mode_out) *reduction_mode_out = reduction_mode;",
+        ]:
+            self.assertIn(marker, sampler_validate_body)
+        self.assertNotIn(
+            "reduction_info->reductionMode != VK_SAMPLER_REDUCTION_MODE_WEIGHTED_AVERAGE",
+            sampler_validate_body,
+        )
+
+        create_sampler_body = c_function_body(icd, "vkCreateSampler")
+        self.assertIn("VkSamplerReductionMode reduction_mode = VK_SAMPLER_REDUCTION_MODE_WEIGHTED_AVERAGE;", create_sampler_body)
+        self.assertIn("pCreateInfo, requested_feature_mask, &reduction_mode", create_sampler_body)
+        self.assertIn("sampler->reduction_mode = reduction_mode;", create_sampler_body)
+
+        vulkan12_supported_body = c_function_body(icd, "vulkan12_feature_request_supported")
+        self.assertIn("supported.samplerFilterMinmax = advertised_sampler_filter_minmax();", vulkan12_supported_body)
+        self.assertIn(
+            "PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, samplerFilterMinmax);",
+            vulkan12_supported_body,
+        )
+
+        for marker in [
+            "VkSamplerReductionMode reduction_mode;",
+            "dst->reduction_mode = sampler->reduction_mode;",
+            "a->reduction_mode == b->reduction_mode",
+            "entry->reduction_mode = sampler->reduction_mode;",
+            "entry->reduction_mode = snapshot->reduction_mode;",
+            "sampler_entries[i].reduction_mode = sampler->reduction_mode;",
+            'json_read_u32(json, "samplerFilterMinmax", &caps->sampler_filter_minmax);',
+            "static VkBool32 advertised_sampler_filter_minmax(void)",
+            "p->samplerFilterMinmax = advertised_sampler_filter_minmax();",
+            "if (p->samplerFilterMinmax) mask |= PDOCKER_VK_FEATURE_SAMPLER_FILTER_MINMAX;",
+            "if (advertised_sampler_filter_minmax()) mask |= PDOCKER_VK_FEATURE_SAMPLER_FILTER_MINMAX;",
+        ]:
+            self.assertIn(marker, icd)
+
+        sampler_runtime_body = c_function_body(executor, "vulkan_sampler_entry_supported_by_runtime")
+        for marker in [
+            "switch ((VkSamplerReductionMode)src->reduction_mode)",
+            "VK_SAMPLER_REDUCTION_MODE_MIN",
+            "VK_SAMPLER_REDUCTION_MODE_MAX",
+            "rt->enabled_vulkan12.samplerFilterMinmax",
+            "sampler min/max reduction replay requires samplerFilterMinmax",
+        ]:
+            self.assertIn(marker, sampler_runtime_body)
+
+        materialize_body = c_function_body(executor, "materialize_vulkan_dispatch_images")
+        for marker in [
+            "VkSamplerReductionModeCreateInfo reduction_info;",
+            "src->reduction_mode != VK_SAMPLER_REDUCTION_MODE_WEIGHTED_AVERAGE",
+            "reduction_info.sType = VK_STRUCTURE_TYPE_SAMPLER_REDUCTION_MODE_CREATE_INFO;",
+            "reduction_info.reductionMode = (VkSamplerReductionMode)src->reduction_mode;",
+            "sci.pNext = &reduction_info;",
+        ]:
+            self.assertIn(marker, materialize_body)
+
+        for marker in [
+            "PDOCKER_VK_FEATURE_SAMPLER_FILTER_MINMAX",
+            "enabled_vulkan12.samplerFilterMinmax = rt->physical_vulkan12.samplerFilterMinmax;",
+            '\\"samplerFilterMinmax\\":%u',
+            "rt ? rt->enabled_vulkan12.samplerFilterMinmax : 0",
+            "rt ? rt->physical_vulkan12.samplerFilterMinmax : 0",
+        ]:
+            self.assertIn(marker, executor)
+
     def test_vulkan_graphics_v629_transports_variable_descriptor_counts(self):
         expected_extension_fields = [
             ("variable_descriptor_count_count", "u32"),
