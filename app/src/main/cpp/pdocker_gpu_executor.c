@@ -27091,9 +27091,10 @@ typedef struct VulkanGraphicsReplayPipelineLayout {
     uint64_t layout_id;
     VkPipelineLayout layout;
     uint32_t descriptor_set_count;
-    uint64_t descriptor_set_layout_ids[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS];
-    uint32_t descriptor_set_layout_indices[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS];
-    VkDescriptorSetLayout set_layouts[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS];
+    uint32_t descriptor_set_capacity;
+    uint64_t *descriptor_set_layout_ids;
+    uint32_t *descriptor_set_layout_indices;
+    VkDescriptorSetLayout *set_layouts;
     VkPushConstantRange push_ranges[PDOCKER_GPU_GRAPHICS_REPLAY_MAX_PUSH_RANGES];
     uint32_t push_range_count;
 } VulkanGraphicsReplayPipelineLayout;
@@ -27188,6 +27189,9 @@ static void destroy_vulkan_graphics_replay_layouts(
             if (layouts->pipeline_layouts[i].layout) {
                 vkDestroyPipelineLayout(device, layouts->pipeline_layouts[i].layout, NULL);
             }
+            free(layouts->pipeline_layouts[i].descriptor_set_layout_ids);
+            free(layouts->pipeline_layouts[i].descriptor_set_layout_indices);
+            free(layouts->pipeline_layouts[i].set_layouts);
         }
     }
     if (layouts->descriptor_set_layouts) {
@@ -27467,7 +27471,22 @@ static int ensure_vulkan_graphics_replay_pipeline_layout_id(
     VulkanGraphicsReplayPipelineLayout *dst = &layouts->pipeline_layouts[index];
     memset(dst, 0, sizeof(*dst));
     dst->layout_id = layout_id;
-    for (uint32_t set = 0; set < PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS; ++set) {
+    dst->descriptor_set_capacity = PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS;
+    dst->descriptor_set_layout_ids = (uint64_t *)calloc(
+        dst->descriptor_set_capacity, sizeof(dst->descriptor_set_layout_ids[0]));
+    dst->descriptor_set_layout_indices = (uint32_t *)calloc(
+        dst->descriptor_set_capacity, sizeof(dst->descriptor_set_layout_indices[0]));
+    dst->set_layouts = (VkDescriptorSetLayout *)calloc(
+        dst->descriptor_set_capacity, sizeof(dst->set_layouts[0]));
+    if (!dst->descriptor_set_layout_ids || !dst->descriptor_set_layout_indices || !dst->set_layouts) {
+        free(dst->descriptor_set_layout_ids);
+        free(dst->descriptor_set_layout_indices);
+        free(dst->set_layouts);
+        memset(dst, 0, sizeof(*dst));
+        layouts->pipeline_layout_count--;
+        return -ENOMEM;
+    }
+    for (uint32_t set = 0; set < dst->descriptor_set_capacity; ++set) {
         dst->descriptor_set_layout_indices[set] = UINT32_MAX;
     }
     return (int)index;
@@ -27478,8 +27497,9 @@ vulkan_graphics_replay_descriptor_set_layout_for_set(
         const VulkanGraphicsReplayLayouts *layouts,
         const VulkanGraphicsReplayPipelineLayout *pipeline_layout,
         uint32_t set_index) {
-    if (!layouts || !pipeline_layout || set_index >= pipeline_layout->descriptor_set_count ||
-        set_index >= PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS) {
+    if (!layouts || !pipeline_layout || !pipeline_layout->descriptor_set_layout_indices ||
+        set_index >= pipeline_layout->descriptor_set_count ||
+        set_index >= pipeline_layout->descriptor_set_capacity) {
         return NULL;
     }
     uint32_t layout_index = pipeline_layout->descriptor_set_layout_indices[set_index];
@@ -27561,7 +27581,7 @@ static int materialize_vulkan_graphics_v6_layouts(
             int dsl_index = ensure_vulkan_graphics_replay_descriptor_set_layout_id(out, entry->descriptor_set_layout_id);
             if (dsl_index < 0) { rc = dsl_index; goto fail; }
             VulkanGraphicsReplayPipelineLayout *pl = &out->pipeline_layouts[(uint32_t)pl_index];
-            if (entry->set_index >= PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS) { rc = -EPROTO; goto fail; }
+            if (entry->set_index >= pl->descriptor_set_capacity) { rc = -EPROTO; goto fail; }
             uint32_t *slot = &pl->descriptor_set_layout_indices[entry->set_index];
             if (*slot != UINT32_MAX && *slot != (uint32_t)dsl_index) { rc = -EPROTO; goto fail; }
             *slot = (uint32_t)dsl_index;

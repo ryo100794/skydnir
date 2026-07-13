@@ -7364,6 +7364,30 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("VkPipelineColorBlendAttachmentState blend_attachments[16];", body)
         self.assertNotIn("VkFormat color_formats[16];", body)
 
+    def test_vulkan_graphics_pipeline_layout_descriptor_sets_are_heap_backed(self):
+        executor = GPU_EXECUTOR.read_text()
+        layout_struct = executor.split("typedef struct VulkanGraphicsReplayPipelineLayout", 1)[1].split(
+            "} VulkanGraphicsReplayPipelineLayout;", 1
+        )[0]
+        ensure_body = c_function_body(executor, "ensure_vulkan_graphics_replay_pipeline_layout_id")
+        destroy_body = c_function_body(executor, "destroy_vulkan_graphics_replay_layouts")
+
+        self.assertIn("uint32_t descriptor_set_capacity;", layout_struct)
+        self.assertIn("uint64_t *descriptor_set_layout_ids;", layout_struct)
+        self.assertIn("uint32_t *descriptor_set_layout_indices;", layout_struct)
+        self.assertIn("VkDescriptorSetLayout *set_layouts;", layout_struct)
+        self.assertNotIn("descriptor_set_layout_ids[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS]", layout_struct)
+        self.assertNotIn("descriptor_set_layout_indices[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS]", layout_struct)
+        self.assertNotIn("VkDescriptorSetLayout set_layouts[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS]", layout_struct)
+        self.assertIn("dst->descriptor_set_capacity = PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS;", ensure_body)
+        self.assertIn("dst->descriptor_set_layout_ids = (uint64_t *)calloc", ensure_body)
+        self.assertIn("dst->descriptor_set_layout_indices = (uint32_t *)calloc", ensure_body)
+        self.assertIn("dst->set_layouts = (VkDescriptorSetLayout *)calloc", ensure_body)
+        self.assertIn("layouts->pipeline_layout_count--;", ensure_body)
+        self.assertIn("free(layouts->pipeline_layouts[i].descriptor_set_layout_ids);", destroy_body)
+        self.assertIn("free(layouts->pipeline_layouts[i].descriptor_set_layout_indices);", destroy_body)
+        self.assertIn("free(layouts->pipeline_layouts[i].set_layouts);", destroy_body)
+
     def test_vulkan_graphics_v6_descriptor_set_layouts_have_single_owner(self):
         executor = GPU_EXECUTOR.read_text()
         pipeline_struct = executor.split(
