@@ -7258,13 +7258,13 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         self.assertNotIn("w->descriptorCount > 1 || w->dstArrayElement != 0", update_body)
         self.assertNotIn("c->descriptorCount > 1 || c->srcArrayElement != 0 || c->dstArrayElement != 0", update_body)
-        self.assertIn("descriptor_linear_slot(set->layout, w->dstBinding, w->dstArrayElement", update_body)
-        self.assertIn("descriptor_linear_slot(src->layout, c->srcBinding, c->srcArrayElement", update_body)
+        self.assertIn("descriptor_linear_slot(set, w->dstBinding, w->dstArrayElement", update_body)
+        self.assertIn("descriptor_linear_slot(src, c->srcBinding, c->srcArrayElement", update_body)
         self.assertNotIn("exceeds layout count", update_body)
         bind_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkCmdPushConstants", 1
         )[0]
-        self.assertIn("storage_binding_counts[binding]", bind_body)
+        self.assertIn("descriptor_set_effective_descriptor_count(&target_set_snapshots[target_set], expected_layout, binding)", bind_body)
         self.assertIn("descriptor_set_binding_slot(&target_set_snapshots[target_set], binding, array_element)", bind_body)
         self.assertNotIn("storage_buffers[binding][array_element]", bind_body)
         self.assertNotIn("PDOCKER_VULKAN_USE_V5_FRAME is disabled", bind_body)
@@ -8913,7 +8913,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("const PdockerVkDevice *dev = (const PdockerVkDevice *)device;", support_body)
         self.assertIn("uint64_t requested_feature_mask = dev ? dev->requested_feature_mask : 0;", support_body)
         self.assertIn("descriptor_set_layout_create_info_supported(pCreateInfo, requested_feature_mask)", support_body)
-        self.assertIn("fill_descriptor_set_layout_support_pnext((void *)header.pNext);", support_body)
+        self.assertIn("fill_descriptor_set_layout_support_pnext((void *)header.pNext, pCreateInfo, requested_feature_mask);", support_body)
         self.assertIn("validate_descriptor_set_layout_pnext(pCreateInfo) != VK_SUCCESS", helper_body)
         self.assertIn("pCreateInfo->flags != 0", helper_body)
         self.assertIn("pCreateInfo->bindingCount > 0 && !pCreateInfo->pBindings", helper_body)
@@ -8932,7 +8932,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("pdocker_vk_sampler_from_handle(binding->pImmutableSamplers[array_element])", helper_body)
         self.assertNotIn("if (binding->pImmutableSamplers) return false;", helper_body)
         self.assertIn("VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_LAYOUT_SUPPORT", pnext_body)
-        self.assertIn("p->maxVariableDescriptorCount = 0;", pnext_body)
+        self.assertIn("p->maxVariableDescriptorCount = descriptor_set_layout_create_info_variable_descriptor_count_limit(", pnext_body)
         self.assertIn("MAP_PROC(vkGetDescriptorSetLayoutSupport)", proc_body)
         self.assertIn('MAP_ALIAS("vkGetDescriptorSetLayoutSupportKHR", vkGetDescriptorSetLayoutSupport)', proc_body)
         self.assertIn("vkGetDescriptorSetLayoutSupportKHR", hidden_body)
@@ -8957,8 +8957,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("counts->descriptorSetCount != info->descriptorSetCount", allocate_pnext_body)
         self.assertIn("descriptor-allocate-variable-count-mismatch", allocate_pnext_body)
         self.assertIn("counts->descriptorSetCount != 0 && !counts->pDescriptorCounts", allocate_pnext_body)
-        self.assertIn("counts->pDescriptorCounts[i] != 0", allocate_pnext_body)
-        self.assertIn("descriptor-allocate-variable-count-unsupported", allocate_pnext_body)
+        self.assertNotIn("counts->pDescriptorCounts[i] != 0", allocate_pnext_body)
+        self.assertNotIn("descriptor-allocate-variable-count-unsupported", allocate_pnext_body)
         self.assertIn('unsupported_create_info_pnext_result("vkAllocateDescriptorSets", node)', allocate_pnext_body)
         self.assertIn("pAllocateInfo->sType != VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO", allocate_body)
         self.assertIn("validate_descriptor_set_allocate_pnext(pAllocateInfo)", allocate_body)
@@ -9670,7 +9670,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("PdockerGpuVulkanDispatchV53BufferViewEntry", icd)
         self.assertIn("PdockerGpuVulkanGraphicsV627BufferViewEntry", icd)
         self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V627_BUFFER_VIEW_SCHEMA_HASH", icd)
-        self.assertIn("size_t cursor = sizeof(PdockerGpuVulkanGraphicsV628FrameHeader);", icd)
+        self.assertIn("size_t cursor = sizeof(PdockerGpuVulkanGraphicsV629FrameHeader);", icd)
         self.assertNotIn("size_t cursor = sizeof(PdockerGpuVulkanGraphicsV626FrameHeader);", icd)
         self.assertIn("executor_supports_vulkan_dispatch_v53_buffer_views", icd)
         self.assertIn("executor_supports_vulkan_graphics_v627_buffer_views", icd)
@@ -9751,7 +9751,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("op->declared_range_count = declared_range_count;", push_body)
         self.assertIn("memcpy(declared_ranges, captured_layout->push_constant_ranges", push_body)
         self.assertIn("PdockerGpuVulkanGraphicsV628PushConstantRangeEntry push_constant_ranges", frame_body)
-        self.assertIn("size_t cursor = sizeof(PdockerGpuVulkanGraphicsV628FrameHeader);", frame_body)
+        self.assertIn("size_t cursor = sizeof(PdockerGpuVulkanGraphicsV629FrameHeader);", frame_body)
         self.assertIn("need_v628_push_constant_ranges", frame_body)
         self.assertIn("frame_header_v628->v628.push_constant_range_count", frame_body)
         self.assertIn("APPEND_GRAPHICS_TABLE(push_constant_ranges", frame_body)
@@ -9784,6 +9784,146 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("covered_stage_flags", validate_body)
         self.assertIn("decl->pipeline_layout_id != meta->layout_id", validate_body)
         self.assertIn("(covered_stage_flags & meta->stage_flags) != meta->stage_flags", validate_body)
+
+    def test_vulkan_graphics_v629_transports_variable_descriptor_counts(self):
+        expected_extension_fields = [
+            ("variable_descriptor_count_count", "u32"),
+            ("variable_descriptor_count_entry_size", "u32"),
+            ("variable_descriptor_count_table_offset", "u64"),
+            ("variable_descriptor_count_table_size", "u64"),
+            ("variable_descriptor_count_schema_hash", "u64"),
+            ("variable_descriptor_count_table_hash", "u64"),
+            ("extension_hash", "u64"),
+        ]
+        expected_variable_descriptor_count_fields = [
+            ("command_index", "u32"),
+            ("set_index", "u32"),
+            ("binding", "u32"),
+            ("actual_descriptor_count", "u32"),
+            ("layout_descriptor_count", "u32"),
+            ("reserved0", "u32"),
+            ("pipeline_layout_id", "u64"),
+            ("descriptor_set_layout_id", "u64"),
+        ]
+
+        for header_path in [APP_HEADER, CONTAINER_HEADER]:
+            source = header_path.read_text()
+            with self.subTest(header=str(header_path)):
+                for marker in [
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V629_ABI_MINOR 29u",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V629_HEADER_EXTENSION_SCHEMA_HASH 0x3d656684f026e518ull",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V629_VARIABLE_DESCRIPTOR_COUNT_SCHEMA_HASH 0x7808a01cc7e99aa7ull",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V629_MAX_VARIABLE_DESCRIPTOR_COUNTS",
+                    "PdockerGpuVulkanGraphicsV629HeaderExtension",
+                    "PdockerGpuVulkanGraphicsV629FrameHeader",
+                    "PdockerGpuVulkanGraphicsV629VariableDescriptorCountEntry",
+                    "variable_descriptor_count_schema_hash",
+                ]:
+                    self.assertIn(marker, source)
+
+                extension_fields, extension_count, declared_extension_hash, computed_extension_hash = vulkan_dispatch_v5_schema(
+                    header_path,
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V629_HEADER_EXTENSION_FIELDS",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V629_HEADER_EXTENSION_FIELD_COUNT",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V629_HEADER_EXTENSION_SCHEMA_HASH",
+                )
+                variable_count_fields, variable_count_field_count, declared_variable_count_hash, computed_variable_count_hash = vulkan_dispatch_v5_schema(
+                    header_path,
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V629_VARIABLE_DESCRIPTOR_COUNT_FIELDS",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V629_VARIABLE_DESCRIPTOR_COUNT_FIELD_COUNT",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V629_VARIABLE_DESCRIPTOR_COUNT_SCHEMA_HASH",
+                )
+                self.assertEqual(expected_extension_fields, extension_fields)
+                self.assertEqual(expected_variable_descriptor_count_fields, variable_count_fields)
+                self.assertEqual(7, extension_count)
+                self.assertEqual(8, variable_count_field_count)
+                self.assertEqual(0x3D656684F026E518, declared_extension_hash)
+                self.assertEqual(0x7808A01CC7E99AA7, declared_variable_count_hash)
+                self.assertEqual(declared_extension_hash, computed_extension_hash)
+                self.assertEqual(declared_variable_count_hash, computed_variable_count_hash)
+                self.assertEqual(
+                    [name for name, _ in expected_extension_fields],
+                    c_struct_field_names(header_path, "PdockerGpuVulkanGraphicsV629HeaderExtension"),
+                )
+                self.assertEqual(
+                    [name for name, _ in expected_variable_descriptor_count_fields],
+                    c_struct_field_names(header_path, "PdockerGpuVulkanGraphicsV629VariableDescriptorCountEntry"),
+                )
+                self.assertEqual(
+                    c_struct_field_names(header_path, "PdockerGpuVulkanGraphicsV628FrameHeader") + ["v629"],
+                    c_struct_field_names(header_path, "PdockerGpuVulkanGraphicsV629FrameHeader"),
+                )
+
+        icd = VULKAN_ICD.read_text()
+        for marker in [
+            "PdockerGpuVulkanGraphicsV629VariableDescriptorCountEntry variable_descriptor_counts",
+            "PdockerGpuVulkanGraphicsV629FrameHeader *frame_header_v629",
+            "size_t cursor = sizeof(PdockerGpuVulkanGraphicsV629FrameHeader);",
+            "need_v629_variable_descriptor_counts",
+            "collect_graphics_v629_variable_descriptor_counts",
+            "executor_supports_vulkan_graphics_v629_variable_descriptor_counts",
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V629_ABI_MINOR",
+            "frame_header_v629->v629.variable_descriptor_count_count",
+            "frame_header_v629->v629.variable_descriptor_count_entry_size",
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V629_VARIABLE_DESCRIPTOR_COUNT_SCHEMA_HASH",
+            "APPEND_GRAPHICS_TABLE(variable_descriptor_counts, variable_descriptor_count_count",
+            "frame_header_v629->v629.variable_descriptor_count_table_hash",
+            "vulkan_graphics_v6_abi_minor_variable_descriptor_counts",
+            "vulkan_graphics_v6_variable_descriptor_count_schema_hash",
+            "vulkan_graphics_v6_max_variable_descriptor_counts",
+            "VULKAN_GRAPHICS_V6.29",
+        ]:
+            self.assertTrue(marker in icd, marker)
+        caps_body = c_function_body(icd, "parse_executor_advertisement_caps_json")
+        self.assertIn("vulkan_graphics_v6_abi_minor_variable_descriptor_counts", caps_body)
+        self.assertIn("vulkan_graphics_v6_variable_descriptor_count_schema_hash", caps_body)
+        self.assertIn("vulkan_graphics_v6_max_variable_descriptor_counts", caps_body)
+        allocate_pnext_body = c_function_body(icd, "validate_descriptor_set_allocate_pnext")
+        self.assertIn("VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO", allocate_pnext_body)
+        self.assertNotIn("descriptor-allocate-variable-count-unsupported", allocate_pnext_body)
+        self.assertIn("descriptor_set_allocate_storage_with_counts", icd)
+        self.assertIn("descriptor_set_effective_descriptor_count", icd)
+        self.assertIn("set->storage_buffer_counts", icd)
+
+        executor = GPU_EXECUTOR.read_text()
+        for marker in [
+            "vulkan_graphics_v6_abi_minor_variable_descriptor_counts",
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V629_VARIABLE_DESCRIPTOR_COUNT_SCHEMA_HASH",
+            "case PDOCKER_GPU_VULKAN_GRAPHICS_V629_ABI_MINOR: return 55u;",
+            "sizeof(PdockerGpuVulkanGraphicsV629FrameHeader)",
+            "const PdockerGpuVulkanGraphicsV629FrameHeader *header_v629",
+            "view->header_v629",
+            "view->is_v629",
+            "view->variable_descriptor_counts",
+            "header_v629->v629.variable_descriptor_count_count",
+            "variable_descriptor_count_entry_size != sizeof(PdockerGpuVulkanGraphicsV629VariableDescriptorCountEntry)",
+            "variable_descriptor_count_schema_hash != PDOCKER_GPU_VULKAN_GRAPHICS_V629_VARIABLE_DESCRIPTOR_COUNT_SCHEMA_HASH",
+            "variable_descriptor_count_table_hash",
+            "validate_vulkan_graphics_v629_variable_descriptor_counts",
+            "find_vulkan_graphics_v629_variable_descriptor_count",
+            "materialize_vulkan_graphics_v629_variable_descriptor_counts",
+        ]:
+            self.assertTrue(marker in executor, marker)
+        describe_body = c_function_body(executor, "describe_vulkan_graphics_v6_frame")
+        self.assertIn("header_v629->v629.variable_descriptor_count_table_offset", describe_body)
+        self.assertIn("header_v629->v629.variable_descriptor_count_table_size", describe_body)
+        self.assertIn("header_v629->v629.variable_descriptor_count_count", describe_body)
+        self.assertIn('"variable_descriptor_counts"', describe_body)
+
+    def test_vulkan_descriptor_binding_flags_allow_variable_descriptor_count(self):
+        icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
+        for source, helper_name in [
+            (icd, "descriptor_binding_flags_supported"),
+            (executor, "vulkan_graphics_descriptor_binding_flags_supported"),
+        ]:
+            helper_body = c_function_body(source, helper_name)
+            self.assertTrue("PDOCKER_VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT" in helper_body, helper_name)
+            self.assertTrue("PDOCKER_VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT" in helper_body, helper_name)
+            self.assertNotIn(
+                "return (flags & ~PDOCKER_VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT) == 0;",
+                helper_body,
+            )
 
     def test_vulkan_memory_api_validates_map_ranges_and_type_index(self):
         icd = VULKAN_ICD.read_text()

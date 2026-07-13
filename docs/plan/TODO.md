@@ -239,7 +239,10 @@ or closes.
   fail-closed queue-family ownership checks.  Descriptor-bind image layout
   transition barriers now also use a heap arena sized by the validated graphics
   descriptor table count, so image descriptor binds no longer inherit a 16-entry
-  stack barrier ceiling.
+  stack barrier ceiling.  Variable descriptor-count layouts now use V6.29
+  metadata to carry allocation-time actual descriptor counts, so partially sized
+  descriptor arrays are validated and replayed by actual count instead of being
+  widened to the declared layout maximum.
   The fixed strict-graph cache is deliberately
   disabled for wider dispatches instead of being widened inside this slice.
   Remaining narrowing points: the real SCM_RIGHTS fd limit for fd-bearing buffers,
