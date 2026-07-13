@@ -8285,7 +8285,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "p->pointClippingBehavior = VK_POINT_CLIPPING_BEHAVIOR_ALL_CLIP_PLANES;",
             "p->maxMultiviewViewCount = 1;",
             "p->protectedNoFault = VK_FALSE;",
-            "p->maxUpdateAfterBindDescriptorsInAllPools = 0;",
+            "p->maxUpdateAfterBindDescriptorsInAllPools = advertised_max_update_after_bind_descriptors_in_all_pools();",
             "p->supportedDepthResolveModes = VK_RESOLVE_MODE_NONE;",
             "p->filterMinmaxSingleComponentFormats = VK_FALSE;",
             "p->denormBehaviorIndependence = VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE;",
@@ -10479,6 +10479,89 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT", executor)
         descriptor_pool_body = c_function_body(executor, "materialize_vulkan_graphics_v6_descriptors")
         self.assertIn("VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT", descriptor_pool_body)
+
+    def test_vulkan_descriptor_update_after_bind_features_are_limit_gated_and_masked(self):
+        icd = VULKAN_ICD.read_text()
+        max_uab_body = c_function_body(icd, "advertised_max_update_after_bind_descriptors_in_all_pools")
+        limit_gate_body = c_function_body(icd, "advertised_descriptor_update_after_bind_limit_enabled")
+        mask_body = c_function_body(icd, "advertised_feature_mask")
+        props_body = icd.split("static void fill_pnext_properties", 1)[1].split(
+            "static void fill_physical_device_features", 1
+        )[0]
+
+        self.assertIn("return 0;", max_uab_body)
+        self.assertIn("per-stage", max_uab_body)
+        self.assertIn("per-set UAB limit surface", max_uab_body)
+        self.assertIn("advertised_max_update_after_bind_descriptors_in_all_pools() > 0", limit_gate_body)
+        self.assertEqual(
+            props_body.count(
+                "p->maxUpdateAfterBindDescriptorsInAllPools = "
+                "advertised_max_update_after_bind_descriptors_in_all_pools();"
+            ),
+            2,
+        )
+
+        requested_mask_body = c_function_body(icd, "feature_mask_from_pnext_chain")
+        for requested_marker in [
+            "PDOCKER_VK_FEATURE_DESCRIPTOR_UNIFORM_BUFFER_UPDATE_AFTER_BIND",
+            "PDOCKER_VK_FEATURE_DESCRIPTOR_SAMPLED_IMAGE_UPDATE_AFTER_BIND",
+            "PDOCKER_VK_FEATURE_DESCRIPTOR_STORAGE_IMAGE_UPDATE_AFTER_BIND",
+            "PDOCKER_VK_FEATURE_DESCRIPTOR_STORAGE_BUFFER_UPDATE_AFTER_BIND",
+            "PDOCKER_VK_FEATURE_DESCRIPTOR_UNIFORM_TEXEL_BUFFER_UPDATE_AFTER_BIND",
+            "PDOCKER_VK_FEATURE_DESCRIPTOR_STORAGE_TEXEL_BUFFER_UPDATE_AFTER_BIND",
+        ]:
+            self.assertEqual(requested_mask_body.count(requested_marker), 2, requested_marker)
+
+        icd_type_gate_body = c_function_body(icd, "descriptor_update_after_bind_feature_mask_for_type")
+        executor_type_gate_body = c_function_body(
+            GPU_EXECUTOR.read_text(),
+            "vulkan_graphics_descriptor_type_update_after_bind_enabled",
+        )
+        for helper_body in [icd_type_gate_body, executor_type_gate_body]:
+            self.assertNotIn(
+                "case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:\n        case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:",
+                helper_body,
+            )
+            self.assertNotIn(
+                "case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:\n        case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC:",
+                helper_body,
+            )
+            self.assertIn("case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:", helper_body)
+            self.assertIn("case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC:", helper_body)
+            self.assertIn("case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:", helper_body)
+
+        feature_helpers = [
+            (
+                "advertised_descriptor_binding_uniform_buffer_update_after_bind",
+                "PDOCKER_VK_FEATURE_DESCRIPTOR_UNIFORM_BUFFER_UPDATE_AFTER_BIND",
+            ),
+            (
+                "advertised_descriptor_binding_sampled_image_update_after_bind",
+                "PDOCKER_VK_FEATURE_DESCRIPTOR_SAMPLED_IMAGE_UPDATE_AFTER_BIND",
+            ),
+            (
+                "advertised_descriptor_binding_storage_image_update_after_bind",
+                "PDOCKER_VK_FEATURE_DESCRIPTOR_STORAGE_IMAGE_UPDATE_AFTER_BIND",
+            ),
+            (
+                "advertised_descriptor_binding_storage_buffer_update_after_bind",
+                "PDOCKER_VK_FEATURE_DESCRIPTOR_STORAGE_BUFFER_UPDATE_AFTER_BIND",
+            ),
+            (
+                "advertised_descriptor_binding_uniform_texel_buffer_update_after_bind",
+                "PDOCKER_VK_FEATURE_DESCRIPTOR_UNIFORM_TEXEL_BUFFER_UPDATE_AFTER_BIND",
+            ),
+            (
+                "advertised_descriptor_binding_storage_texel_buffer_update_after_bind",
+                "PDOCKER_VK_FEATURE_DESCRIPTOR_STORAGE_TEXEL_BUFFER_UPDATE_AFTER_BIND",
+            ),
+        ]
+        for helper_name, feature_mask in feature_helpers:
+            helper_body = c_function_body(icd, helper_name)
+            self.assertIn("advertised_descriptor_update_after_bind_limit_enabled()", helper_body)
+            self.assertIn('env_disabled("PDOCKER_VULKAN_DISABLE_DESCRIPTOR_UPDATE_AFTER_BIND")', helper_body)
+            self.assertIn(f"if ({helper_name}())", mask_body)
+            self.assertIn(f"mask |= {feature_mask};", mask_body)
 
     def test_vulkan_memory_api_validates_map_ranges_and_type_index(self):
         icd = VULKAN_ICD.read_text()

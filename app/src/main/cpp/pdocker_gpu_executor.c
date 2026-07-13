@@ -27828,7 +27828,6 @@ static int vulkan_graphics_descriptor_type_update_after_bind_enabled(
     if (!rt) return 0;
     switch (descriptor_type) {
         case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
-        case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
             return rt->enabled_descriptor_indexing.descriptorBindingUniformBufferUpdateAfterBind;
         case VK_DESCRIPTOR_TYPE_SAMPLER:
         case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
@@ -27837,12 +27836,16 @@ static int vulkan_graphics_descriptor_type_update_after_bind_enabled(
         case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
             return rt->enabled_descriptor_indexing.descriptorBindingStorageImageUpdateAfterBind;
         case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
-        case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC:
             return rt->enabled_descriptor_indexing.descriptorBindingStorageBufferUpdateAfterBind;
         case VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER:
             return rt->enabled_descriptor_indexing.descriptorBindingUniformTexelBufferUpdateAfterBind;
         case VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER:
             return rt->enabled_descriptor_indexing.descriptorBindingStorageTexelBufferUpdateAfterBind;
+        case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
+        case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC:
+        case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:
+            /* Vulkan forbids update-after-bind on dynamic buffers and input attachments. */
+            return 0;
         default:
             return 0;
     }

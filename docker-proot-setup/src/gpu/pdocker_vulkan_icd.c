@@ -14639,39 +14639,61 @@ static VkBool32 advertised_descriptor_binding_update_unused_while_pending(void) 
         : VK_FALSE;
 }
 
+static uint32_t advertised_max_update_after_bind_descriptors_in_all_pools(void) {
+    /*
+     * Update-after-bind features are only coherent when the corresponding
+     * descriptor-indexing properties advertise non-zero UAB capacity.  Keep
+     * this at zero until the bridge transports/replays the full per-stage and
+     * per-set UAB limit surface instead of accepting feature bits alone.
+     */
+    return 0;
+}
+
+static VkBool32 advertised_descriptor_update_after_bind_limit_enabled(void) {
+    return advertised_max_update_after_bind_descriptors_in_all_pools() > 0
+        ? VK_TRUE
+        : VK_FALSE;
+}
+
 static VkBool32 advertised_descriptor_binding_uniform_buffer_update_after_bind(void) {
     const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
-    if (!caps || env_disabled("PDOCKER_VULKAN_DISABLE_DESCRIPTOR_UPDATE_AFTER_BIND")) return VK_FALSE;
+    if (!caps || env_disabled("PDOCKER_VULKAN_DISABLE_DESCRIPTOR_UPDATE_AFTER_BIND") ||
+        !advertised_descriptor_update_after_bind_limit_enabled()) return VK_FALSE;
     return caps->descriptor_indexing.descriptorBindingUniformBufferUpdateAfterBind ? VK_TRUE : VK_FALSE;
 }
 
 static VkBool32 advertised_descriptor_binding_sampled_image_update_after_bind(void) {
     const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
-    if (!caps || env_disabled("PDOCKER_VULKAN_DISABLE_DESCRIPTOR_UPDATE_AFTER_BIND")) return VK_FALSE;
+    if (!caps || env_disabled("PDOCKER_VULKAN_DISABLE_DESCRIPTOR_UPDATE_AFTER_BIND") ||
+        !advertised_descriptor_update_after_bind_limit_enabled()) return VK_FALSE;
     return caps->descriptor_indexing.descriptorBindingSampledImageUpdateAfterBind ? VK_TRUE : VK_FALSE;
 }
 
 static VkBool32 advertised_descriptor_binding_storage_image_update_after_bind(void) {
     const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
-    if (!caps || env_disabled("PDOCKER_VULKAN_DISABLE_DESCRIPTOR_UPDATE_AFTER_BIND")) return VK_FALSE;
+    if (!caps || env_disabled("PDOCKER_VULKAN_DISABLE_DESCRIPTOR_UPDATE_AFTER_BIND") ||
+        !advertised_descriptor_update_after_bind_limit_enabled()) return VK_FALSE;
     return caps->descriptor_indexing.descriptorBindingStorageImageUpdateAfterBind ? VK_TRUE : VK_FALSE;
 }
 
 static VkBool32 advertised_descriptor_binding_storage_buffer_update_after_bind(void) {
     const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
-    if (!caps || env_disabled("PDOCKER_VULKAN_DISABLE_DESCRIPTOR_UPDATE_AFTER_BIND")) return VK_FALSE;
+    if (!caps || env_disabled("PDOCKER_VULKAN_DISABLE_DESCRIPTOR_UPDATE_AFTER_BIND") ||
+        !advertised_descriptor_update_after_bind_limit_enabled()) return VK_FALSE;
     return caps->descriptor_indexing.descriptorBindingStorageBufferUpdateAfterBind ? VK_TRUE : VK_FALSE;
 }
 
 static VkBool32 advertised_descriptor_binding_uniform_texel_buffer_update_after_bind(void) {
     const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
-    if (!caps || env_disabled("PDOCKER_VULKAN_DISABLE_DESCRIPTOR_UPDATE_AFTER_BIND")) return VK_FALSE;
+    if (!caps || env_disabled("PDOCKER_VULKAN_DISABLE_DESCRIPTOR_UPDATE_AFTER_BIND") ||
+        !advertised_descriptor_update_after_bind_limit_enabled()) return VK_FALSE;
     return caps->descriptor_indexing.descriptorBindingUniformTexelBufferUpdateAfterBind ? VK_TRUE : VK_FALSE;
 }
 
 static VkBool32 advertised_descriptor_binding_storage_texel_buffer_update_after_bind(void) {
     const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
-    if (!caps || env_disabled("PDOCKER_VULKAN_DISABLE_DESCRIPTOR_UPDATE_AFTER_BIND")) return VK_FALSE;
+    if (!caps || env_disabled("PDOCKER_VULKAN_DISABLE_DESCRIPTOR_UPDATE_AFTER_BIND") ||
+        !advertised_descriptor_update_after_bind_limit_enabled()) return VK_FALSE;
     return caps->descriptor_indexing.descriptorBindingStorageTexelBufferUpdateAfterBind ? VK_TRUE : VK_FALSE;
 }
 
@@ -15161,7 +15183,7 @@ static void fill_pnext_properties(void *pNext) {
                 p->conformanceVersion.minor = 2;
                 p->shaderRoundingModeRTEFloat16 = VK_FALSE;
                 p->shaderRoundingModeRTZFloat16 = VK_FALSE;
-                p->maxUpdateAfterBindDescriptorsInAllPools = 0;
+                p->maxUpdateAfterBindDescriptorsInAllPools = advertised_max_update_after_bind_descriptors_in_all_pools();
                 p->quadDivergentImplicitLod = VK_FALSE;
                 p->maxTimelineSemaphoreValueDifference = UINT64_MAX;
                 break;
@@ -15169,7 +15191,7 @@ static void fill_pnext_properties(void *pNext) {
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES: {
                 VkPhysicalDeviceDescriptorIndexingProperties *p = (VkPhysicalDeviceDescriptorIndexingProperties *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
-                p->maxUpdateAfterBindDescriptorsInAllPools = 0;
+                p->maxUpdateAfterBindDescriptorsInAllPools = advertised_max_update_after_bind_descriptors_in_all_pools();
                 p->quadDivergentImplicitLod = VK_FALSE;
                 break;
             }
@@ -16349,6 +16371,24 @@ static uint64_t advertised_feature_mask(void) {
         if (advertised_descriptor_binding_update_unused_while_pending()) {
             mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_UPDATE_UNUSED_WHILE_PENDING;
         }
+        if (advertised_descriptor_binding_uniform_buffer_update_after_bind()) {
+            mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_UNIFORM_BUFFER_UPDATE_AFTER_BIND;
+        }
+        if (advertised_descriptor_binding_sampled_image_update_after_bind()) {
+            mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_SAMPLED_IMAGE_UPDATE_AFTER_BIND;
+        }
+        if (advertised_descriptor_binding_storage_image_update_after_bind()) {
+            mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_STORAGE_IMAGE_UPDATE_AFTER_BIND;
+        }
+        if (advertised_descriptor_binding_storage_buffer_update_after_bind()) {
+            mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_STORAGE_BUFFER_UPDATE_AFTER_BIND;
+        }
+        if (advertised_descriptor_binding_uniform_texel_buffer_update_after_bind()) {
+            mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_UNIFORM_TEXEL_BUFFER_UPDATE_AFTER_BIND;
+        }
+        if (advertised_descriptor_binding_storage_texel_buffer_update_after_bind()) {
+            mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_STORAGE_TEXEL_BUFFER_UPDATE_AFTER_BIND;
+        }
         if (advertised_descriptor_binding_partially_bound()) {
             mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_PARTIALLY_BOUND;
         }
@@ -17503,7 +17543,6 @@ static bool descriptor_binding_flags_supported(uint32_t flags) {
 static uint64_t descriptor_update_after_bind_feature_mask_for_type(VkDescriptorType type) {
     switch (type) {
         case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
-        case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
             return PDOCKER_VK_FEATURE_DESCRIPTOR_UNIFORM_BUFFER_UPDATE_AFTER_BIND;
         case VK_DESCRIPTOR_TYPE_SAMPLER:
         case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
@@ -17512,12 +17551,16 @@ static uint64_t descriptor_update_after_bind_feature_mask_for_type(VkDescriptorT
         case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
             return PDOCKER_VK_FEATURE_DESCRIPTOR_STORAGE_IMAGE_UPDATE_AFTER_BIND;
         case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
-        case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC:
             return PDOCKER_VK_FEATURE_DESCRIPTOR_STORAGE_BUFFER_UPDATE_AFTER_BIND;
         case VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER:
             return PDOCKER_VK_FEATURE_DESCRIPTOR_UNIFORM_TEXEL_BUFFER_UPDATE_AFTER_BIND;
         case VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER:
             return PDOCKER_VK_FEATURE_DESCRIPTOR_STORAGE_TEXEL_BUFFER_UPDATE_AFTER_BIND;
+        case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
+        case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC:
+        case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:
+            /* Vulkan forbids update-after-bind on dynamic buffers and input attachments. */
+            return 0;
         default:
             return 0;
     }
