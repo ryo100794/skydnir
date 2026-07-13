@@ -28563,13 +28563,42 @@ static int vulkan_graphics_attachment_layout_supported(uint32_t role, uint32_t l
         case PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_DEPTH:
             return layout == VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL ||
                    layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL ||
+                   layout == VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL ||
+                   layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL ||
+                   layout == VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_STENCIL_READ_ONLY_OPTIMAL ||
+                   layout == VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_STENCIL_ATTACHMENT_OPTIMAL ||
+                   layout == VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL ||
                    layout == VK_IMAGE_LAYOUT_GENERAL ||
                    layout == VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
         case PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_STENCIL:
             return layout == VK_IMAGE_LAYOUT_STENCIL_ATTACHMENT_OPTIMAL ||
                    layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL ||
+                   layout == VK_IMAGE_LAYOUT_STENCIL_READ_ONLY_OPTIMAL ||
+                   layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL ||
+                   layout == VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_STENCIL_READ_ONLY_OPTIMAL ||
+                   layout == VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_STENCIL_ATTACHMENT_OPTIMAL ||
+                   layout == VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL ||
                    layout == VK_IMAGE_LAYOUT_GENERAL ||
                    layout == VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
+        default:
+            return 0;
+    }
+}
+
+static int vulkan_graphics_attachment_layout_writes(uint32_t role, uint32_t layout) {
+    switch (role) {
+        case PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR:
+            return layout != VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL;
+        case PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_DEPTH:
+            return layout != VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL &&
+                   layout != VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL &&
+                   layout != VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_STENCIL_ATTACHMENT_OPTIMAL &&
+                   layout != VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL;
+        case PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_STENCIL:
+            return layout != VK_IMAGE_LAYOUT_STENCIL_READ_ONLY_OPTIMAL &&
+                   layout != VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL &&
+                   layout != VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_STENCIL_READ_ONLY_OPTIMAL &&
+                   layout != VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL;
         default:
             return 0;
     }
@@ -28581,10 +28610,19 @@ static VkImageUsageFlags vulkan_graphics_attachment_required_usage(uint32_t role
         : VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
 }
 
-static VkAccessFlags vulkan_graphics_attachment_access_mask(uint32_t role) {
-    return role == PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR
-        ? (VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT)
-        : (VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
+static VkAccessFlags vulkan_graphics_attachment_access_mask(uint32_t role, uint32_t layout) {
+    if (role == PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR) {
+        VkAccessFlags access = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
+        if (vulkan_graphics_attachment_layout_writes(role, layout)) {
+            access |= VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        }
+        return access;
+    }
+    VkAccessFlags access = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+    if (vulkan_graphics_attachment_layout_writes(role, layout)) {
+        access |= VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    }
+    return access;
 }
 
 static VkPipelineStageFlags vulkan_graphics_attachment_stage_mask(uint32_t role) {
@@ -28940,7 +28978,9 @@ static int materialize_vulkan_graphics_v6_attachments(
                     image->format != resolve_image->format ||
                     replay_view->range.aspectMask != resolve_view->range.aspectMask ||
                     !vulkan_graphics_attachment_layout_supported(attachment->attachment_role,
-                                                                 resolve_meta->resolve_layout)) {
+                                                                 resolve_meta->resolve_layout) ||
+                    !vulkan_graphics_attachment_layout_writes(attachment->attachment_role,
+                                                              resolve_meta->resolve_layout)) {
                     return -EOPNOTSUPP;
                 }
                 if (effective_store_op == VK_ATTACHMENT_STORE_OP_STORE) {
@@ -28957,7 +28997,8 @@ static int materialize_vulkan_graphics_v6_attachments(
             int range_rc = vulkan_graphics_merge_attachment_copy_range(
                 writeback_image, &writeback_view->range, attachment->attachment_role);
             if (range_rc != 0) return range_rc;
-            if (effective_store_op == VK_ATTACHMENT_STORE_OP_STORE ||
+            if ((vulkan_graphics_attachment_layout_writes(attachment->attachment_role, attachment->layout) &&
+                 effective_store_op == VK_ATTACHMENT_STORE_OP_STORE) ||
                 attachment->resolve_image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE) {
                 writeback_image->writeback_needed = 1;
             }
@@ -31761,7 +31802,7 @@ static int record_vulkan_graphics_v6_command_buffer(
                         .srcAccessMask = old_layout == VK_IMAGE_LAYOUT_PREINITIALIZED
                             ? VK_ACCESS_HOST_WRITE_BIT
                             : 0,
-                        .dstAccessMask = vulkan_graphics_attachment_access_mask(src->attachment_role),
+                        .dstAccessMask = vulkan_graphics_attachment_access_mask(src->attachment_role, src->layout),
                         .oldLayout = old_layout,
                         .newLayout = (VkImageLayout)src->layout,
                         .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
@@ -31798,7 +31839,9 @@ static int record_vulkan_graphics_v6_command_buffer(
                             resolve_image->format != image->format ||
                             resolve_replay_view->range.aspectMask != replay_view->range.aspectMask ||
                             !vulkan_graphics_attachment_layout_supported(src->attachment_role,
-                                                                         resolve_meta->resolve_layout)) {
+                                                                         resolve_meta->resolve_layout) ||
+                            !vulkan_graphics_attachment_layout_writes(src->attachment_role,
+                                                                      resolve_meta->resolve_layout)) {
                             rc = -EOPNOTSUPP;
                             goto begin_rendering_cleanup;
                         }
@@ -31815,7 +31858,8 @@ static int record_vulkan_graphics_v6_command_buffer(
                             .srcAccessMask = resolve_old_layout == VK_IMAGE_LAYOUT_PREINITIALIZED
                                 ? VK_ACCESS_HOST_WRITE_BIT
                                 : 0,
-                            .dstAccessMask = vulkan_graphics_attachment_access_mask(src->attachment_role),
+                            .dstAccessMask = vulkan_graphics_attachment_access_mask(
+                                src->attachment_role, resolve_meta->resolve_layout),
                             .oldLayout = resolve_old_layout,
                             .newLayout = (VkImageLayout)resolve_meta->resolve_layout,
                             .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,

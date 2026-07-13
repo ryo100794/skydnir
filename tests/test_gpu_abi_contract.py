@@ -10755,12 +10755,59 @@ class GpuAbiContractTest(unittest.TestCase):
             materialize,
         )
         self.assertIn(
-            "if (effective_store_op == VK_ATTACHMENT_STORE_OP_STORE ||\n"
+            "if ((vulkan_graphics_attachment_layout_writes(attachment->attachment_role, attachment->layout) &&\n"
+            "                 effective_store_op == VK_ATTACHMENT_STORE_OP_STORE) ||\n"
             "                attachment->resolve_image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE) {\n"
             "                writeback_image->writeback_needed = 1;",
             materialize,
         )
         self.assertIn("if (image->samples != VK_SAMPLE_COUNT_1_BIT) return -EOPNOTSUPP;", executor)
+
+
+    def test_vulkan_graphics_depth_stencil_readonly_layouts_do_not_request_writes(self):
+        executor = GPU_EXECUTOR.read_text()
+        layout_body = c_function_body(executor, "vulkan_graphics_attachment_layout_supported")
+        writes_body = c_function_body(executor, "vulkan_graphics_attachment_layout_writes")
+        access_body = c_function_body(executor, "vulkan_graphics_attachment_access_mask")
+        materialize = c_function_body(executor, "materialize_vulkan_graphics_v6_attachments")
+        record = c_function_body(executor, "record_vulkan_graphics_v6_command_buffer")
+
+        for marker in [
+            "VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL",
+            "VK_IMAGE_LAYOUT_STENCIL_READ_ONLY_OPTIMAL",
+            "VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL",
+            "VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_STENCIL_READ_ONLY_OPTIMAL",
+            "VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_STENCIL_ATTACHMENT_OPTIMAL",
+            "VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL",
+        ]:
+            self.assertIn(marker, layout_body)
+            self.assertIn(marker, writes_body)
+        self.assertIn("vulkan_graphics_attachment_layout_writes(role, layout)", access_body)
+        self.assertIn("VK_ACCESS_COLOR_ATTACHMENT_READ_BIT", access_body)
+        self.assertIn("VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT", access_body)
+        self.assertIn("VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT", access_body)
+        self.assertIn("vulkan_graphics_attachment_access_mask(src->attachment_role, src->layout)", record)
+        self.assertIn(
+            "vulkan_graphics_attachment_access_mask(\n"
+            "                                src->attachment_role, resolve_meta->resolve_layout)",
+            record,
+        )
+        self.assertIn(
+            "!vulkan_graphics_attachment_layout_writes(attachment->attachment_role,\n"
+            "                                                              resolve_meta->resolve_layout)",
+            materialize,
+        )
+        self.assertIn(
+            "!vulkan_graphics_attachment_layout_writes(src->attachment_role,\n"
+            "                                                                      resolve_meta->resolve_layout)",
+            record,
+        )
+        self.assertIn(
+            "if ((vulkan_graphics_attachment_layout_writes(attachment->attachment_role, attachment->layout) &&\n"
+            "                 effective_store_op == VK_ATTACHMENT_STORE_OP_STORE) ||\n"
+            "                attachment->resolve_image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE) {",
+            materialize,
+        )
 
 
     def test_vulkan_graphics_v623_tessellation_state_abi_is_append_only(self):
