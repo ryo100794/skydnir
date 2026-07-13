@@ -2159,3 +2159,14 @@ rewrite: command-buffer snapshots still copy descriptor sets by value, so
 turning descriptor storage into pointers would require deep-copy/free snapshot
 helpers first.  The remaining hard cap is descriptor entry count, not sparse
 API binding number.
+
+### 2026-07-13 Vulkan buffer memory-requirements pNext lane
+
+The container-facing ICD now keeps `vkGetDeviceBufferMemoryRequirements`
+consistent with `vkCreateBuffer` for buffer-create pNext chains.  No-op buffer
+pNext structs accepted by `vkCreateBuffer` (`VkExternalMemoryBufferCreateInfo`
+with no external handle type and matching `VkBufferUsageFlags2CreateInfo`) also
+produce normal maintenance4 memory requirements.  Unsupported handle types or
+usage mismatches remain fail-closed by returning zero requirements from the
+query path.  This is a generic Vulkan pass-through compatibility fix, not a
+llama.cpp- or model-specific workaround.

@@ -299,6 +299,104 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
+    def test_device_buffer_requirements_allow_noop_buffer_pnext(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            static int expect_nonzero_requirements(
+                    const VkBufferCreateInfo *buffer_info, int code) {{
+                VkDeviceBufferMemoryRequirements info;
+                VkMemoryRequirements2 requirements;
+                memset(&info, 0, sizeof(info));
+                memset(&requirements, 0, sizeof(requirements));
+                info.sType = VK_STRUCTURE_TYPE_DEVICE_BUFFER_MEMORY_REQUIREMENTS;
+                info.pCreateInfo = buffer_info;
+                requirements.sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2;
+                requirements.pNext = NULL;
+                vkGetDeviceBufferMemoryRequirements(
+                    (VkDevice)(uintptr_t)0x1u, &info, &requirements);
+                if (requirements.memoryRequirements.size == 0 ||
+                    requirements.memoryRequirements.alignment == 0 ||
+                    requirements.memoryRequirements.memoryTypeBits == 0) {{
+                    fprintf(stderr,
+                            "expected nonzero buffer requirements for case %d: size=%llu align=%llu bits=0x%x\\n",
+                            code,
+                            (unsigned long long)requirements.memoryRequirements.size,
+                            (unsigned long long)requirements.memoryRequirements.alignment,
+                            requirements.memoryRequirements.memoryTypeBits);
+                    return code;
+                }}
+                return 0;
+            }}
+
+            static int expect_zero_requirements(
+                    const VkBufferCreateInfo *buffer_info, int code) {{
+                VkDeviceBufferMemoryRequirements info;
+                VkMemoryRequirements2 requirements;
+                memset(&info, 0, sizeof(info));
+                memset(&requirements, 0xff, sizeof(requirements));
+                info.sType = VK_STRUCTURE_TYPE_DEVICE_BUFFER_MEMORY_REQUIREMENTS;
+                info.pCreateInfo = buffer_info;
+                requirements.sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2;
+                requirements.pNext = NULL;
+                vkGetDeviceBufferMemoryRequirements(
+                    (VkDevice)(uintptr_t)0x1u, &info, &requirements);
+                if (requirements.memoryRequirements.size != 0 ||
+                    requirements.memoryRequirements.alignment != 0 ||
+                    requirements.memoryRequirements.memoryTypeBits != 0) {{
+                    fprintf(stderr,
+                            "expected zero buffer requirements for case %d: size=%llu align=%llu bits=0x%x\\n",
+                            code,
+                            (unsigned long long)requirements.memoryRequirements.size,
+                            (unsigned long long)requirements.memoryRequirements.alignment,
+                            requirements.memoryRequirements.memoryTypeBits);
+                    return code;
+                }}
+                return 0;
+            }}
+
+            int main(void) {{
+                VkBufferCreateInfo buffer_info;
+                memset(&buffer_info, 0, sizeof(buffer_info));
+                buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+                buffer_info.size = 4096;
+                buffer_info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+                buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+                if (expect_nonzero_requirements(&buffer_info, 2)) return 2;
+
+                VkExternalMemoryBufferCreateInfo external_info;
+                memset(&external_info, 0, sizeof(external_info));
+                external_info.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO;
+                external_info.handleTypes = 0;
+                buffer_info.pNext = &external_info;
+                if (expect_nonzero_requirements(&buffer_info, 3)) return 3;
+
+                VkBufferUsageFlags2CreateInfo usage2_info;
+                memset(&usage2_info, 0, sizeof(usage2_info));
+                usage2_info.sType = VK_STRUCTURE_TYPE_BUFFER_USAGE_FLAGS_2_CREATE_INFO;
+                usage2_info.usage = buffer_info.usage;
+                buffer_info.pNext = &usage2_info;
+                if (expect_nonzero_requirements(&buffer_info, 4)) return 4;
+
+                usage2_info.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+                if (expect_zero_requirements(&buffer_info, 5)) return 5;
+
+                usage2_info.usage = buffer_info.usage;
+                external_info.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+                buffer_info.pNext = &external_info;
+                if (expect_zero_requirements(&buffer_info, 6)) return 6;
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
     def test_device_queue_lookup_shape_is_fail_closed(self):
         source = textwrap.dedent(
             f"""

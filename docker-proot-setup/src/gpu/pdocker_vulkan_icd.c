@@ -18074,7 +18074,8 @@ static void fill_buffer_create_memory_requirements(
         VkMemoryRequirements *pMemoryRequirements) {
     if (!pMemoryRequirements) return;
     memset(pMemoryRequirements, 0, sizeof(*pMemoryRequirements));
-    if (!pCreateInfo || pCreateInfo->pNext || pCreateInfo->flags != 0 ||
+    if (!pCreateInfo || validate_buffer_create_pnext(pCreateInfo) != VK_SUCCESS ||
+        pCreateInfo->flags != 0 ||
         pCreateInfo->size == 0 ||
         pCreateInfo->size > pdocker_vulkan_max_buffer_size()) {
         return;

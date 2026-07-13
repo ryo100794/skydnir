@@ -9313,7 +9313,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("dev->requested_feature_mask & PDOCKER_VK_FEATURE_TIMELINE_SEMAPHORE", sem_create_body)
         self.assertIn("timeline-semaphore-feature-not-enabled", sem_create_body)
 
-        self.assertIn("pCreateInfo->pNext", fill_buffer_req_body)
+        self.assertIn("validate_buffer_create_pnext(pCreateInfo) != VK_SUCCESS", fill_buffer_req_body)
+        self.assertNotIn("pCreateInfo->pNext ||", fill_buffer_req_body)
         self.assertIn("pCreateInfo->flags != 0", fill_buffer_req_body)
         self.assertIn("if (pInfo && pInfo->pNext)", device_buffer_req_body)
         self.assertIn("device-buffer-memory-requirements-pnext-unsupported", device_buffer_req_body)
