@@ -1254,7 +1254,10 @@ class GpuAbiContractTest(unittest.TestCase):
             "command_buffer_reserve_graphics_rendering_ops",
             "free(cmd->graphics_rendering_ops);",
             "PdockerVkGraphicsCommandRecord *graphics_command_ops",
-            "graphics_dynamic_offsets[PDOCKER_VK_MAX_GRAPHICS_DYNAMIC_OFFSETS]",
+            "uint32_t *graphics_dynamic_offsets",
+            "uint32_t graphics_dynamic_offset_capacity;",
+            "command_buffer_reserve_graphics_dynamic_offsets",
+            "free(cmd->graphics_dynamic_offsets);",
             "append_graphics_command_record",
             "cmd->graphics_descriptor_bind_op_count = 0;",
             "cmd->graphics_rendering_op_count = 0;",
@@ -9582,6 +9585,30 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VK_STRUCTURE_TYPE_FILTER_CUBIC_IMAGE_VIEW_IMAGE_FORMAT_PROPERTIES_EXT", output_pnext_body)
         self.assertIn("MAP_PROC(vkGetPhysicalDeviceImageFormatProperties2)", proc_body)
         self.assertIn('MAP_ALIAS("vkGetPhysicalDeviceImageFormatProperties2KHR", vkGetPhysicalDeviceImageFormatProperties2)', proc_body)
+
+
+    def test_vulkan_icd_uses_heap_backed_clear_attachment_records(self):
+        icd = VULKAN_ICD.read_text()
+        for marker in [
+            "PdockerVkEvent **event_wait_refs;",
+            "uint32_t event_wait_ref_capacity;",
+            "command_buffer_reserve_event_wait_refs",
+            "free(cmd->event_wait_refs);",
+            "PdockerVkClearAttachmentsCommandSnapshot *clear_attachments_command_ops;",
+            "uint32_t clear_attachments_command_op_capacity;",
+            "command_buffer_reserve_clear_attachments_command_ops",
+            "PdockerVkClearAttachmentSnapshot *clear_attachment_ops;",
+            "uint32_t clear_attachment_op_capacity;",
+            "command_buffer_reserve_clear_attachment_ops",
+            "PdockerVkClearRectSnapshot *clear_rect_ops;",
+            "uint32_t clear_rect_op_capacity;",
+            "command_buffer_reserve_clear_rect_ops",
+        ]:
+            self.assertIn(marker, icd)
+        self.assertNotIn("event_wait_refs[PDOCKER_VK_MAX_EVENT_WAIT_REFS]", icd)
+        self.assertNotIn("clear_attachments_command_ops[PDOCKER_VK_MAX_CLEAR_ATTACHMENTS_COMMANDS]", icd)
+        self.assertNotIn("clear_attachment_ops[PDOCKER_VK_MAX_CLEAR_ATTACHMENTS]", icd)
+        self.assertNotIn("clear_rect_ops[PDOCKER_VK_MAX_CLEAR_RECTS]", icd)
 
     def test_vulkan_icd_records_buffer_image_copy_commands_before_dispatch(self):
         icd = VULKAN_ICD.read_text()

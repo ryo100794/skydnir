@@ -1176,8 +1176,9 @@ typedef struct {
     PdockerVkCommandOp *command_ops;
     uint32_t command_op_count;
     uint32_t command_op_capacity;
-    PdockerVkEvent *event_wait_refs[PDOCKER_VK_MAX_EVENT_WAIT_REFS];
+    PdockerVkEvent **event_wait_refs;
     uint32_t event_wait_ref_count;
+    uint32_t event_wait_ref_capacity;
     PdockerVkGraphicsDrawSnapshot *graphics_draw_ops;
     uint32_t graphics_draw_op_count;
     uint32_t graphics_draw_op_capacity;
@@ -1187,18 +1188,21 @@ typedef struct {
     PdockerVkGraphicsRenderingSnapshot *graphics_rendering_ops;
     uint32_t graphics_rendering_op_count;
     uint32_t graphics_rendering_op_capacity;
-    PdockerVkClearAttachmentsCommandSnapshot
-        clear_attachments_command_ops[PDOCKER_VK_MAX_CLEAR_ATTACHMENTS_COMMANDS];
+    PdockerVkClearAttachmentsCommandSnapshot *clear_attachments_command_ops;
     uint32_t clear_attachments_command_op_count;
-    PdockerVkClearAttachmentSnapshot clear_attachment_ops[PDOCKER_VK_MAX_CLEAR_ATTACHMENTS];
+    uint32_t clear_attachments_command_op_capacity;
+    PdockerVkClearAttachmentSnapshot *clear_attachment_ops;
     uint32_t clear_attachment_op_count;
-    PdockerVkClearRectSnapshot clear_rect_ops[PDOCKER_VK_MAX_CLEAR_RECTS];
+    uint32_t clear_attachment_op_capacity;
+    PdockerVkClearRectSnapshot *clear_rect_ops;
     uint32_t clear_rect_op_count;
+    uint32_t clear_rect_op_capacity;
     PdockerVkGraphicsCommandRecord *graphics_command_ops;
     uint32_t graphics_command_op_count;
     uint32_t graphics_command_op_capacity;
-    uint32_t graphics_dynamic_offsets[PDOCKER_VK_MAX_GRAPHICS_DYNAMIC_OFFSETS];
+    uint32_t *graphics_dynamic_offsets;
     uint32_t graphics_dynamic_offset_count;
+    uint32_t graphics_dynamic_offset_capacity;
     uint32_t dispatch_x;
     uint32_t dispatch_y;
     uint32_t dispatch_z;
@@ -1647,6 +1651,11 @@ PDOCKER_DEFINE_COMMAND_BUFFER_RESERVE_VECTOR(command_buffer_reserve_depth_stenci
 PDOCKER_DEFINE_COMMAND_BUFFER_RESERVE_VECTOR(command_buffer_reserve_memory_barrier_ops, memory_barrier_ops, memory_barrier_op_count, memory_barrier_op_capacity, PdockerVkMemoryBarrierOp, PDOCKER_VK_MAX_COPY_OPS)
 PDOCKER_DEFINE_COMMAND_BUFFER_RESERVE_VECTOR(command_buffer_reserve_buffer_barrier_ops, buffer_barrier_ops, buffer_barrier_op_count, buffer_barrier_op_capacity, PdockerVkBufferBarrierOp, PDOCKER_VK_MAX_COPY_OPS)
 PDOCKER_DEFINE_COMMAND_BUFFER_RESERVE_VECTOR(command_buffer_reserve_image_barrier_ops, image_barrier_ops, image_barrier_op_count, image_barrier_op_capacity, PdockerVkImageBarrierOp, PDOCKER_VK_MAX_COPY_OPS)
+PDOCKER_DEFINE_COMMAND_BUFFER_RESERVE_VECTOR(command_buffer_reserve_event_wait_refs, event_wait_refs, event_wait_ref_count, event_wait_ref_capacity, PdockerVkEvent *, PDOCKER_VK_MAX_EVENT_WAIT_REFS)
+PDOCKER_DEFINE_COMMAND_BUFFER_RESERVE_VECTOR(command_buffer_reserve_clear_attachments_command_ops, clear_attachments_command_ops, clear_attachments_command_op_count, clear_attachments_command_op_capacity, PdockerVkClearAttachmentsCommandSnapshot, PDOCKER_VK_MAX_CLEAR_ATTACHMENTS_COMMANDS)
+PDOCKER_DEFINE_COMMAND_BUFFER_RESERVE_VECTOR(command_buffer_reserve_clear_attachment_ops, clear_attachment_ops, clear_attachment_op_count, clear_attachment_op_capacity, PdockerVkClearAttachmentSnapshot, PDOCKER_VK_MAX_CLEAR_ATTACHMENTS)
+PDOCKER_DEFINE_COMMAND_BUFFER_RESERVE_VECTOR(command_buffer_reserve_clear_rect_ops, clear_rect_ops, clear_rect_op_count, clear_rect_op_capacity, PdockerVkClearRectSnapshot, PDOCKER_VK_MAX_CLEAR_RECTS)
+PDOCKER_DEFINE_COMMAND_BUFFER_RESERVE_VECTOR(command_buffer_reserve_graphics_dynamic_offsets, graphics_dynamic_offsets, graphics_dynamic_offset_count, graphics_dynamic_offset_capacity, uint32_t, PDOCKER_VK_MAX_GRAPHICS_DYNAMIC_OFFSETS)
 #undef PDOCKER_DEFINE_COMMAND_BUFFER_RESERVE_VECTOR
 
 static bool command_buffer_reserve_graphics_draw_ops(PdockerVkCommandBuffer *cmd, uint32_t extra) {
@@ -1910,6 +1919,26 @@ static void command_buffer_destroy_record_vectors(PdockerVkCommandBuffer *cmd) {
     cmd->image_barrier_ops = NULL;
     cmd->image_barrier_op_count = 0;
     cmd->image_barrier_op_capacity = 0;
+    free(cmd->event_wait_refs);
+    cmd->event_wait_refs = NULL;
+    cmd->event_wait_ref_count = 0;
+    cmd->event_wait_ref_capacity = 0;
+    free(cmd->clear_attachments_command_ops);
+    cmd->clear_attachments_command_ops = NULL;
+    cmd->clear_attachments_command_op_count = 0;
+    cmd->clear_attachments_command_op_capacity = 0;
+    free(cmd->clear_attachment_ops);
+    cmd->clear_attachment_ops = NULL;
+    cmd->clear_attachment_op_count = 0;
+    cmd->clear_attachment_op_capacity = 0;
+    free(cmd->clear_rect_ops);
+    cmd->clear_rect_ops = NULL;
+    cmd->clear_rect_op_count = 0;
+    cmd->clear_rect_op_capacity = 0;
+    free(cmd->graphics_dynamic_offsets);
+    cmd->graphics_dynamic_offsets = NULL;
+    cmd->graphics_dynamic_offset_count = 0;
+    cmd->graphics_dynamic_offset_capacity = 0;
     free(cmd->dispatch_ops);
     cmd->dispatch_ops = NULL;
     cmd->dispatch_op_count = 0;
@@ -2191,6 +2220,13 @@ static bool append_secondary_command_buffer(
             dst,
             src->graphics_descriptor_bind_op_count) ||
         !command_buffer_reserve_graphics_rendering_ops(dst, src->graphics_rendering_op_count) ||
+        !command_buffer_reserve_clear_attachments_command_ops(
+            dst,
+            src->clear_attachments_command_op_count) ||
+        !command_buffer_reserve_clear_attachment_ops(dst, src->clear_attachment_op_count) ||
+        !command_buffer_reserve_clear_rect_ops(dst, src->clear_rect_op_count) ||
+        !command_buffer_reserve_graphics_dynamic_offsets(dst, src->graphics_dynamic_offset_count) ||
+        !command_buffer_reserve_event_wait_refs(dst, src->event_wait_ref_count) ||
         !command_buffer_reserve_command_ops(dst, src->command_op_count) ||
         !command_buffer_reserve_graphics_command_ops(dst, src->graphics_command_op_count) ||
         !command_buffer_reserve_push_constant_ops(dst, src->push_constant_op_count)) {
@@ -21821,11 +21857,15 @@ VKAPI_ATTR void VKAPI_CALL vkCmdClearAttachments(
     if (!cmd) return;
     if (!cmd->dynamic_rendering_active || cmd->inherited_rendering_active ||
         attachmentCount == 0 || rectCount == 0 || !pAttachments || !pRects ||
-        attachmentCount > PDOCKER_VK_MAX_CLEAR_ATTACHMENTS - cmd->clear_attachment_op_count ||
-        rectCount > PDOCKER_VK_MAX_CLEAR_RECTS - cmd->clear_rect_op_count ||
-        cmd->clear_attachments_command_op_count >= PDOCKER_VK_MAX_CLEAR_ATTACHMENTS_COMMANDS ||
         cmd->graphics_command_op_count >= PDOCKER_VK_MAX_GRAPHICS_COMMAND_OPS) {
         cmd->graphics_unsupported = true;
+        return;
+    }
+    if (!command_buffer_reserve_clear_attachment_ops(cmd, attachmentCount) ||
+        !command_buffer_reserve_clear_rect_ops(cmd, rectCount) ||
+        !command_buffer_reserve_clear_attachments_command_ops(cmd, 1)) {
+        cmd->graphics_unsupported = true;
+        command_buffer_mark_recording_failed(cmd, "clear-attachments-record-overflow");
         return;
     }
 
@@ -21976,8 +22016,9 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
         uint32_t graphics_first_dynamic_offset = cmd->graphics_dynamic_offset_count;
         if (pipelineBindPoint == VK_PIPELINE_BIND_POINT_GRAPHICS && dynamicOffsetCount > 0) {
             if (!pDynamicOffsets ||
-                dynamicOffsetCount > PDOCKER_VK_MAX_GRAPHICS_DYNAMIC_OFFSETS - cmd->graphics_dynamic_offset_count) {
+                !command_buffer_reserve_graphics_dynamic_offsets(cmd, dynamicOffsetCount)) {
                 cmd->unsupported_descriptor_set_layout = true;
+                command_buffer_mark_recording_failed(cmd, "graphics-dynamic-offset-record-overflow");
             } else {
                 memcpy(&cmd->graphics_dynamic_offsets[cmd->graphics_dynamic_offset_count],
                        pDynamicOffsets,
@@ -25967,8 +26008,7 @@ static void record_event_wait_command(VkCommandBuffer commandBuffer,
         command_buffer_mark_recording_failed(cmd, "event-wait-events-missing-events");
         return;
     }
-    if (event_count > PDOCKER_VK_MAX_EVENT_WAIT_REFS ||
-        cmd->event_wait_ref_count > PDOCKER_VK_MAX_EVENT_WAIT_REFS - event_count) {
+    if (!command_buffer_reserve_event_wait_refs(cmd, event_count)) {
         command_buffer_mark_recording_failed(cmd, "event-wait-ref-overflow");
         return;
     }
