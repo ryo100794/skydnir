@@ -2378,7 +2378,7 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         for marker in [
             "PDOCKER_GPU_GRAPHICS_V6_COMMAND_VERTEX_STRIDES_PRESENT",
-            "VkDeviceSize strides[PDOCKER_GPU_GRAPHICS_REPLAY_MAX_BUFFERS]",
+            "VkDeviceSize strides[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_VERTEX_BINDINGS]",
             "strides[b] = (VkDeviceSize)binding->stride;",
             "if (!rt->enabled_ext_extended_dynamic_state || !rt->cmd_bind_vertex_buffers2)",
             "rt->cmd_bind_vertex_buffers2(command_buffer, first_binding",
@@ -5940,6 +5940,29 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("VkDescriptorSetLayout alloc_layouts[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS];", body)
         self.assertIn("free(descriptors->binds[i].sets);", destroy_body)
         self.assertIn("free(descriptors->binds);", destroy_body)
+
+    def test_vulkan_graphics_replay_buffers_are_heap_backed(self):
+        executor = GPU_EXECUTOR.read_text()
+        buffers_struct = executor.split("typedef struct VulkanGraphicsReplayBuffers", 1)[1].split(
+            "} VulkanGraphicsReplayBuffers;", 1
+        )[0]
+        materialize_body = c_function_body(executor, "materialize_vulkan_graphics_v6_buffers")
+        add_body = c_function_body(executor, "add_vulkan_graphics_replay_buffer_range")
+        destroy_body = c_function_body(executor, "destroy_vulkan_graphics_replay_buffers")
+        barrier_body = c_function_body(executor, "record_vulkan_graphics_v6_buffer_writeback_barriers")
+
+        self.assertIn("VulkanGraphicsReplayBuffer *buffers;", buffers_struct)
+        self.assertIn("uint32_t buffer_capacity;", buffers_struct)
+        self.assertNotIn("VulkanGraphicsReplayBuffer buffers[PDOCKER_GPU_GRAPHICS_REPLAY_MAX_BUFFERS]", buffers_struct)
+        self.assertIn("out->buffers = (VulkanGraphicsReplayBuffer *)calloc", materialize_body)
+        self.assertIn("out->buffer_capacity = view->header->resource_count;", materialize_body)
+        self.assertIn("out->buffer_count >= out->buffer_capacity", add_body)
+        self.assertIn("free(buffers->buffers);", destroy_body)
+        self.assertIn("VkBufferMemoryBarrier *barriers =", barrier_body)
+        self.assertIn("buffers->buffer_count, sizeof(*barriers)", barrier_body)
+        self.assertIn("free(barriers);", barrier_body)
+        self.assertNotIn("VkBufferMemoryBarrier barriers[PDOCKER_GPU_GRAPHICS_REPLAY_MAX_BUFFERS]", barrier_body)
+        self.assertNotIn("PDOCKER_GPU_GRAPHICS_REPLAY_MAX_BUFFERS", executor)
 
     def test_vulkan_graphics_v625_descriptor_bind_uses_standalone_layouts(self):
         executor = GPU_EXECUTOR.read_text()

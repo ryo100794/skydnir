@@ -27116,7 +27116,6 @@ static int preflight_vulkan_graphics_v6_runtime_supported(
 #define PDOCKER_GPU_GRAPHICS_REPLAY_MAX_SHADER_STAGES 5u
 #define PDOCKER_GPU_GRAPHICS_REPLAY_MAX_PUSH_RANGES 8u
 #define PDOCKER_GPU_GRAPHICS_REPLAY_MAX_COLOR_ATTACHMENTS 16u
-#define PDOCKER_GPU_GRAPHICS_REPLAY_MAX_BUFFERS PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_VERTEX_BINDINGS
 
 typedef struct VulkanGraphicsReplayDescriptorBinding {
     uint32_t binding;
@@ -29336,14 +29335,15 @@ typedef struct VulkanGraphicsReplayBuffer {
 } VulkanGraphicsReplayBuffer;
 
 typedef struct VulkanGraphicsReplayBuffers {
-    VulkanGraphicsReplayBuffer buffers[PDOCKER_GPU_GRAPHICS_REPLAY_MAX_BUFFERS];
+    VulkanGraphicsReplayBuffer *buffers;
     uint32_t buffer_count;
+    uint32_t buffer_capacity;
 } VulkanGraphicsReplayBuffers;
 
 static int find_vulkan_graphics_replay_buffer(
         const VulkanGraphicsReplayBuffers *buffers,
         uint32_t resource_index) {
-    if (!buffers) return -EINVAL;
+    if (!buffers || (!buffers->buffers && buffers->buffer_count > 0)) return -EINVAL;
     for (uint32_t i = 0; i < buffers->buffer_count; ++i) {
         if (buffers->buffers[i].resource_index == resource_index) return (int)i;
     }
@@ -29354,8 +29354,11 @@ static void destroy_vulkan_graphics_replay_buffers(
         VkDevice device,
         VulkanGraphicsReplayBuffers *buffers) {
     if (!buffers) return;
-    for (uint32_t i = 0; i < buffers->buffer_count; ++i) {
-        destroy_vulkan_vector_buffer(device, &buffers->buffers[i].buffer);
+    if (buffers->buffers) {
+        for (uint32_t i = 0; i < buffers->buffer_count; ++i) {
+            destroy_vulkan_vector_buffer(device, &buffers->buffers[i].buffer);
+        }
+        free(buffers->buffers);
     }
     memset(buffers, 0, sizeof(*buffers));
 }
@@ -29671,7 +29674,7 @@ static int add_vulkan_graphics_replay_buffer_range(
     int found = find_vulkan_graphics_replay_buffer(out, resource_index);
     VulkanGraphicsReplayBuffer *dst = NULL;
     if (found < 0) {
-        if (out->buffer_count >= PDOCKER_GPU_GRAPHICS_REPLAY_MAX_BUFFERS) return -E2BIG;
+        if (!out->buffers || out->buffer_count >= out->buffer_capacity) return -E2BIG;
         dst = &out->buffers[out->buffer_count++];
         memset(dst, 0, sizeof(*dst));
         dst->resource_index = resource_index;
@@ -29727,6 +29730,13 @@ static int materialize_vulkan_graphics_v6_buffers(
         VulkanGraphicsReplayBuffers *out) {
     if (!rt || !view || !view->header || !out) return -EINVAL;
     memset(out, 0, sizeof(*out));
+    if (view->header->resource_count > 0) {
+        if ((size_t)view->header->resource_count > SIZE_MAX / sizeof(out->buffers[0])) return -EOVERFLOW;
+        out->buffers = (VulkanGraphicsReplayBuffer *)calloc(
+            view->header->resource_count, sizeof(out->buffers[0]));
+        if (!out->buffers) return -ENOMEM;
+        out->buffer_capacity = view->header->resource_count;
+    }
     for (uint32_t c = 0; c < view->header->command_count; ++c) {
         const PdockerGpuVulkanGraphicsV6CommandEntry *command = &view->commands[c];
         if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_VERTEX_BUFFERS) {
@@ -30164,20 +30174,24 @@ static const VulkanGraphicsReplayDescriptorBind *find_vulkan_graphics_replay_des
 static int record_vulkan_graphics_v6_buffer_writeback_barriers(
         VkCommandBuffer command_buffer,
         const VulkanGraphicsReplayBuffers *buffers) {
-    if (!command_buffer || !buffers) return -EINVAL;
-    VkBufferMemoryBarrier barriers[PDOCKER_GPU_GRAPHICS_REPLAY_MAX_BUFFERS];
+    if (!command_buffer || !buffers || (!buffers->buffers && buffers->buffer_count > 0)) return -EINVAL;
+    if (buffers->buffer_count == 0) return 0;
+    if ((size_t)buffers->buffer_count > SIZE_MAX / sizeof(VkBufferMemoryBarrier)) return -EOVERFLOW;
+    VkBufferMemoryBarrier *barriers = (VkBufferMemoryBarrier *)calloc(
+        buffers->buffer_count, sizeof(*barriers));
+    if (!barriers) return -ENOMEM;
     uint32_t barrier_count = 0;
-    memset(barriers, 0, sizeof(barriers));
+    int rc = 0;
     for (uint32_t i = 0; i < buffers->buffer_count; ++i) {
         const VulkanGraphicsReplayBuffer *src = &buffers->buffers[i];
         if (!src->writeback_needed) continue;
-        if (src->writeback_end <= src->writeback_base) return -EPROTO;
+        if (src->writeback_end <= src->writeback_base) { rc = -EPROTO; goto cleanup; }
         VkDeviceSize writeback_offset = 0;
-        int rc = vulkan_graphics_replay_buffer_vk_offset_for_range(
+        rc = vulkan_graphics_replay_buffer_vk_offset_for_range(
             src, src->writeback_base, src->writeback_end - src->writeback_base,
             &writeback_offset);
-        if (rc != 0) return rc;
-        if (barrier_count >= PDOCKER_GPU_GRAPHICS_REPLAY_MAX_BUFFERS) return -E2BIG;
+        if (rc != 0) goto cleanup;
+        if (barrier_count >= buffers->buffer_count) { rc = -E2BIG; goto cleanup; }
         barriers[barrier_count++] = (VkBufferMemoryBarrier){
             .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
             .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT,
@@ -30200,7 +30214,9 @@ static int record_vulkan_graphics_v6_buffer_writeback_barriers(
                              barrier_count, barriers,
                              0, NULL);
     }
-    return 0;
+cleanup:
+    free(barriers);
+    return rc;
 }
 
 static int writeback_vulkan_graphics_v6_storage_buffers(
@@ -32145,7 +32161,7 @@ static int record_vulkan_graphics_v6_command_buffer(
                 break;
             }
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_VERTEX_BUFFERS: {
-                if (command->vertex_binding_count > PDOCKER_GPU_GRAPHICS_REPLAY_MAX_BUFFERS) {
+                if (command->vertex_binding_count > PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_VERTEX_BINDINGS) {
                     rc = -E2BIG;
                     goto cleanup;
                 }
@@ -32155,9 +32171,9 @@ static int record_vulkan_graphics_v6_command_buffer(
                     rc = -EPROTO;
                     goto cleanup;
                 }
-                VkBuffer vk_buffers[PDOCKER_GPU_GRAPHICS_REPLAY_MAX_BUFFERS];
-                VkDeviceSize offsets[PDOCKER_GPU_GRAPHICS_REPLAY_MAX_BUFFERS];
-                VkDeviceSize strides[PDOCKER_GPU_GRAPHICS_REPLAY_MAX_BUFFERS];
+                VkBuffer vk_buffers[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_VERTEX_BINDINGS];
+                VkDeviceSize offsets[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_VERTEX_BINDINGS];
+                VkDeviceSize strides[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_VERTEX_BINDINGS];
                 const VkDeviceSize *stride_ptr =
                     (command->flags & PDOCKER_GPU_GRAPHICS_V6_COMMAND_VERTEX_STRIDES_PRESENT) ? strides : NULL;
                 uint32_t first_binding = UINT32_MAX;
