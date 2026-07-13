@@ -1162,6 +1162,7 @@ typedef struct {
     uint32_t first_dynamic_offset;
     uint32_t dynamic_offset_count;
     PdockerVkPipelineLayout *pipeline_layout;
+    PdockerVkDescriptorSet **set_handles;
     PdockerVkDescriptorSet *set_snapshots;
     bool *set_snapshot_used;
     uint32_t set_capacity;
@@ -1746,6 +1747,43 @@ static bool graphics_snapshot_clone_descriptor_state(
     return true;
 }
 
+static bool graphics_descriptor_bind_snapshot_clone_descriptor_state(
+        PdockerVkGraphicsDescriptorBindSnapshot *dst,
+        PdockerVkDescriptorSet **src_handles,
+        const PdockerVkDescriptorSet *src_snapshots,
+        const bool *src_used,
+        uint32_t src_capacity) {
+    if (!dst) return false;
+    if (src_capacity == 0) {
+        dst->set_handles = NULL;
+        dst->set_snapshots = NULL;
+        dst->set_snapshot_used = NULL;
+        dst->set_capacity = 0;
+        return true;
+    }
+    if (!src_handles || !src_snapshots || !src_used) return false;
+    if (!descriptor_set_state_alloc(&dst->set_handles,
+                                    &dst->set_snapshots,
+                                    &dst->set_snapshot_used,
+                                    &dst->set_capacity,
+                                    src_capacity)) {
+        return false;
+    }
+    memcpy(dst->set_handles, src_handles, sizeof(*dst->set_handles) * src_capacity);
+    if (!descriptor_set_clone_snapshot_array(dst->set_snapshots,
+                                             dst->set_snapshot_used,
+                                             src_snapshots,
+                                             src_used,
+                                             src_capacity)) {
+        descriptor_set_state_destroy(&dst->set_handles,
+                                     &dst->set_snapshots,
+                                     &dst->set_snapshot_used,
+                                     &dst->set_capacity);
+        return false;
+    }
+    return true;
+}
+
 static void dynamic_state_snapshot_release(PdockerVkDynamicStateSnapshot *snapshot) {
     if (!snapshot) return;
     free(snapshot->data);
@@ -1821,9 +1859,10 @@ static void graphics_draw_snapshot_destroy_descriptor_state(PdockerVkGraphicsDra
 static void graphics_descriptor_bind_snapshot_destroy_descriptor_state(
         PdockerVkGraphicsDescriptorBindSnapshot *snapshot) {
     if (!snapshot) return;
-    descriptor_set_snapshot_state_destroy(&snapshot->set_snapshots,
-                                          &snapshot->set_snapshot_used,
-                                          &snapshot->set_capacity);
+    descriptor_set_state_destroy(&snapshot->set_handles,
+                                 &snapshot->set_snapshots,
+                                 &snapshot->set_snapshot_used,
+                                 &snapshot->set_capacity);
 }
 
 static bool command_buffer_alloc_descriptor_states(PdockerVkCommandBuffer *cmd) {
@@ -2821,15 +2860,15 @@ static bool append_secondary_command_buffer(
         PdockerVkGraphicsDescriptorBindSnapshot *out =
             &dst->graphics_descriptor_bind_ops[dst->graphics_descriptor_bind_op_count];
         *out = copied;
+        out->set_handles = NULL;
         out->set_snapshots = NULL;
         out->set_snapshot_used = NULL;
         out->set_capacity = 0;
-        if (!graphics_snapshot_clone_descriptor_state(&out->set_snapshots,
-                                                      &out->set_snapshot_used,
-                                                      &out->set_capacity,
-                                                      copied.set_snapshots,
-                                                      copied.set_snapshot_used,
-                                                      copied.set_capacity)) {
+        if (!graphics_descriptor_bind_snapshot_clone_descriptor_state(out,
+                                                                      copied.set_handles,
+                                                                      copied.set_snapshots,
+                                                                      copied.set_snapshot_used,
+                                                                      copied.set_capacity)) {
             goto fail_secondary_append;
         }
         dst->graphics_descriptor_bind_op_count++;
@@ -23644,12 +23683,11 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
             bind_snapshot->first_dynamic_offset = graphics_first_dynamic_offset;
             bind_snapshot->dynamic_offset_count = dynamicOffsetCount;
             bind_snapshot->pipeline_layout = pipeline_layout;
-            if (!graphics_snapshot_clone_descriptor_state(&bind_snapshot->set_snapshots,
-                                                          &bind_snapshot->set_snapshot_used,
-                                                          &bind_snapshot->set_capacity,
-                                                          cmd->graphics_bound_set_snapshots,
-                                                          cmd->graphics_bound_set_used,
-                                                          cmd->graphics_bound_set_capacity)) {
+            if (!graphics_descriptor_bind_snapshot_clone_descriptor_state(bind_snapshot,
+                                                                          cmd->graphics_bound_set_handles,
+                                                                          cmd->graphics_bound_set_snapshots,
+                                                                          cmd->graphics_bound_set_used,
+                                                                          cmd->graphics_bound_set_capacity)) {
                 graphics_descriptor_bind_snapshot_destroy_descriptor_state(bind_snapshot);
                 cmd->graphics_descriptor_bind_op_count--;
                 cmd->unsupported_descriptor_set_layout = true;

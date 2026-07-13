@@ -9950,6 +9950,47 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("header_v629->v629.variable_descriptor_count_count", describe_body)
         self.assertIn('"variable_descriptor_counts"', describe_body)
 
+    def test_graphics_descriptor_bind_snapshots_retain_live_handles_without_advertising_update_after_bind(self):
+        icd = VULKAN_ICD.read_text()
+        snapshot_struct = re.search(
+            r"typedef struct \{(?P<body>.*?)\} PdockerVkGraphicsDescriptorBindSnapshot;",
+            icd,
+            re.S,
+        )
+        self.assertIsNotNone(snapshot_struct)
+        self.assertIn("PdockerVkDescriptorSet **set_handles;", snapshot_struct.group("body"))
+
+        helper_body = c_function_body(icd, "graphics_descriptor_bind_snapshot_clone_descriptor_state")
+        for marker in [
+            "descriptor_set_state_alloc(&dst->set_handles",
+            "memcpy(dst->set_handles, src_handles",
+            "descriptor_set_clone_snapshot_array(dst->set_snapshots",
+            "descriptor_set_state_destroy(&dst->set_handles",
+        ]:
+            self.assertIn(marker, helper_body)
+
+        destroy_body = c_function_body(icd, "graphics_descriptor_bind_snapshot_destroy_descriptor_state")
+        self.assertIn("descriptor_set_state_destroy(&snapshot->set_handles", destroy_body)
+
+        bind_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets", 1)[1].split(
+            "static void validate_bound_descriptor_layouts_before_dispatch", 1
+        )[0]
+        self.assertIn("graphics_descriptor_bind_snapshot_clone_descriptor_state(bind_snapshot", bind_body)
+        self.assertIn("cmd->graphics_bound_set_handles", bind_body)
+        self.assertLess(
+            bind_body.index("target_set_handles[target_set] = set;"),
+            bind_body.index("graphics_descriptor_bind_snapshot_clone_descriptor_state(bind_snapshot"),
+        )
+
+        secondary_body = c_function_body(icd, "append_secondary_command_buffer")
+        self.assertIn("out->set_handles = NULL;", secondary_body)
+        self.assertIn("graphics_descriptor_bind_snapshot_clone_descriptor_state(out,", secondary_body)
+        self.assertIn("copied.set_handles", secondary_body)
+
+        collect_body = c_function_body(icd, "collect_graphics_descriptor_entries")
+        self.assertNotIn("set_handles", collect_body)
+        self.assertNotIn("PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT", icd)
+
     def test_vulkan_descriptor_binding_flags_allow_variable_descriptor_count(self):
         icd = VULKAN_ICD.read_text()
         executor = GPU_EXECUTOR.read_text()
