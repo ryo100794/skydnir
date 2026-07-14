@@ -9188,6 +9188,32 @@ class GpuAbiContractTest(unittest.TestCase):
 
 
 
+
+    def test_vulkan_create_renderpass2_extension_is_advertised_and_aliases_are_public(self):
+        icd = VULKAN_ICD.read_text()
+        collector_body = c_function_body(icd, "collect_advertised_device_extensions")
+        validation_body = c_function_body(icd, "device_extension_advertised_name")
+        hidden_body = c_function_body(icd, "proc_address_hidden_by_advertisement")
+        proc_body = icd.split("static PFN_vkVoidFunction proc_address", 1)[1].split(
+            "VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr", 1
+        )[0]
+        self.assertIn("VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME", collector_body)
+        self.assertIn("collect_advertised_device_extensions(", validation_body)
+        for alias in [
+            'MAP_ALIAS("vkCreateRenderPass2KHR", vkCreateRenderPass2)',
+            'MAP_ALIAS("vkCmdBeginRenderPass2KHR", vkCmdBeginRenderPass2)',
+            'MAP_ALIAS("vkCmdNextSubpass2KHR", vkCmdNextSubpass2)',
+            'MAP_ALIAS("vkCmdEndRenderPass2KHR", vkCmdEndRenderPass2)',
+        ]:
+            self.assertIn(alias, proc_body)
+        for hidden in [
+            "vkCreateRenderPass2KHR",
+            "vkCmdBeginRenderPass2KHR",
+            "vkCmdNextSubpass2KHR",
+            "vkCmdEndRenderPass2KHR",
+        ]:
+            self.assertNotIn(hidden, hidden_body)
+
     def test_vulkan_maintenance1_is_advertised_and_trim_alias_is_public(self):
         icd = VULKAN_ICD.read_text()
         collector_body = c_function_body(icd, "collect_advertised_device_extensions")
@@ -19644,8 +19670,6 @@ class GpuAbiContractTest(unittest.TestCase):
             "!advertised_draw_indirect_count_khr()",
             "!advertised_draw_indirect_count_amd()",
             "!advertised_api_1_3()",
-            "vkCreateRenderPass2KHR",
-            "vkCmdBeginRenderPass2KHR",
             "vkGetDeviceBufferMemoryRequirements",
             "vkGetPhysicalDeviceToolProperties",
             "vkCreatePrivateDataSlot",
@@ -19672,6 +19696,13 @@ class GpuAbiContractTest(unittest.TestCase):
             "vkGetPhysicalDeviceExternalFencePropertiesKHR",
         ]:
             self.assertNotIn(advertised_instance_alias, proc_gate_body)
+        for advertised_device_alias in [
+            "vkCreateRenderPass2KHR",
+            "vkCmdBeginRenderPass2KHR",
+            "vkCmdNextSubpass2KHR",
+            "vkCmdEndRenderPass2KHR",
+        ]:
+            self.assertNotIn(advertised_device_alias, proc_gate_body)
         self.assertIn("advertised_draw_indirect_count() && advertised_draw_indexed_indirect_count()", proc_gate_body)
         self.assertIn("PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT", icd)
         self.assertIn("if (p->drawIndirectCount) mask |= PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT;", icd)
