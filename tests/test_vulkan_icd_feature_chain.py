@@ -1535,6 +1535,61 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_shader_float_controls_extension_exposes_conservative_properties(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            static int extension_seen(
+                    const VkExtensionProperties *extensions,
+                    uint32_t count,
+                    const char *name) {{
+                for (uint32_t i = 0; i < count; ++i) {{
+                    if (strcmp(extensions[i].extensionName, name) == 0) return 1;
+                }}
+                return 0;
+            }}
+
+            int main(void) {{
+            #ifdef VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME
+                if (!device_extension_advertised_name(VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME)) return 2;
+                uint32_t count = 64;
+                VkExtensionProperties extensions[64];
+                memset(extensions, 0, sizeof(extensions));
+                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &count, extensions) != VK_SUCCESS) return 3;
+                if (!extension_seen(extensions, count, VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME)) return 4;
+
+                const char *enabled[] = {{ VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME }};
+                VkDeviceCreateInfo create_info;
+                memset(&create_info, 0, sizeof(create_info));
+                create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                create_info.enabledExtensionCount = 1;
+                create_info.ppEnabledExtensionNames = enabled;
+                if (validate_device_extensions(&create_info) != VK_SUCCESS) return 5;
+
+                VkPhysicalDeviceFloatControlsProperties props;
+                memset(&props, 0xff, sizeof(props));
+                props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT_CONTROLS_PROPERTIES;
+                props.pNext = NULL;
+                fill_pnext_properties(&props);
+                if (props.sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT_CONTROLS_PROPERTIES) return 6;
+                if (props.pNext != NULL) return 7;
+                if (props.denormBehaviorIndependence != VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE) return 8;
+                if (props.roundingModeIndependence != VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE) return 9;
+                if (props.shaderSignedZeroInfNanPreserveFloat32 != VK_FALSE) return 10;
+                if (props.shaderRoundingModeRTEFloat32 != VK_FALSE) return 11;
+            #endif
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+
     def test_sampler_border_color_extensions_are_advertised_false_only(self):
         source = textwrap.dedent(
             f"""

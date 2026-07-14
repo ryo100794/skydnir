@@ -8665,6 +8665,9 @@ class GpuAbiContractTest(unittest.TestCase):
         props_body = icd.split("static void fill_pnext_properties", 1)[1].split(
             "static void fill_physical_device_features", 1
         )[0]
+        collector_body = c_function_body(icd, "collect_advertised_device_extensions")
+        self.assertIn("VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME", collector_body)
+        self.assertIn("VK_KHR_SHADER_FLOAT_CONTROLS_SPEC_VERSION", collector_body)
         for struct_name in [
             "VkPhysicalDeviceIDProperties",
             "VkPhysicalDevicePointClippingProperties",
@@ -8698,6 +8701,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "p->supportedDepthResolveModes = VK_RESOLVE_MODE_NONE;",
             "p->filterMinmaxSingleComponentFormats = VK_FALSE;",
             "p->denormBehaviorIndependence = VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE;",
+            "p->roundingModeIndependence = VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE;",
             "p->maxTimelineSemaphoreValueDifference = UINT64_MAX;",
             "p->robustStorageBufferAccessSizeAlignment = 1;",
             "p->robustUniformBufferAccessSizeAlignment = 1;",
