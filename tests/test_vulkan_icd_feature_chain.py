@@ -1333,6 +1333,93 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_maintenance5_and_vulkan13_feature_pnext_are_false_only(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            int main(void) {{
+            #ifdef VK_KHR_MAINTENANCE_5_EXTENSION_NAME
+                if (device_extension_advertised_name(VK_KHR_MAINTENANCE_5_EXTENSION_NAME)) {{
+                    fprintf(stderr, "maintenance5 extension must not be advertised yet\\n");
+                    return 2;
+                }}
+                VkPhysicalDeviceMaintenance5Features maintenance5;
+                memset(&maintenance5, 0xff, sizeof(maintenance5));
+                maintenance5.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_5_FEATURES;
+                maintenance5.pNext = NULL;
+                fill_pnext_features(&maintenance5);
+                if (maintenance5.sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_5_FEATURES ||
+                    maintenance5.pNext != NULL || maintenance5.maintenance5 != VK_FALSE) {{
+                    fprintf(stderr, "maintenance5 query was not false-only\\n");
+                    return 3;
+                }}
+                VkDeviceCreateInfo create_info;
+                memset(&create_info, 0, sizeof(create_info));
+                create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                create_info.pNext = &maintenance5;
+                maintenance5.maintenance5 = VK_TRUE;
+                if (validate_device_feature_requests(&create_info) == VK_SUCCESS) {{
+                    fprintf(stderr, "maintenance5=true was accepted\\n");
+                    return 4;
+                }}
+                maintenance5.maintenance5 = VK_FALSE;
+                if (validate_device_feature_requests(&create_info) != VK_SUCCESS) {{
+                    fprintf(stderr, "maintenance5=false was rejected\\n");
+                    return 5;
+                }}
+            #endif
+            #ifdef VK_VERSION_1_3
+                VkPhysicalDeviceVulkan13Features vulkan13;
+                memset(&vulkan13, 0xff, sizeof(vulkan13));
+                vulkan13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+                vulkan13.pNext = NULL;
+                fill_pnext_features(&vulkan13);
+                if (vulkan13.sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES ||
+                    vulkan13.pNext != NULL ||
+                    vulkan13.robustImageAccess != VK_FALSE ||
+                    vulkan13.inlineUniformBlock != VK_FALSE ||
+                    vulkan13.descriptorBindingInlineUniformBlockUpdateAfterBind != VK_FALSE ||
+                    vulkan13.pipelineCreationCacheControl != VK_FALSE ||
+                    vulkan13.privateData != VK_FALSE ||
+                    vulkan13.shaderDemoteToHelperInvocation != VK_FALSE ||
+                    vulkan13.shaderTerminateInvocation != VK_FALSE ||
+                    vulkan13.subgroupSizeControl != VK_FALSE ||
+                    vulkan13.computeFullSubgroups != VK_FALSE ||
+                    vulkan13.synchronization2 != VK_FALSE ||
+                    vulkan13.textureCompressionASTC_HDR != VK_FALSE ||
+                    vulkan13.shaderZeroInitializeWorkgroupMemory != VK_FALSE ||
+                    vulkan13.dynamicRendering != VK_FALSE ||
+                    vulkan13.shaderIntegerDotProduct != VK_FALSE ||
+                    vulkan13.maintenance4 != VK_FALSE) {{
+                    fprintf(stderr, "vulkan13 feature aggregate query was not all-false\\n");
+                    return 6;
+                }}
+                VkDeviceCreateInfo create_info13;
+                memset(&create_info13, 0, sizeof(create_info13));
+                create_info13.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                create_info13.pNext = &vulkan13;
+                vulkan13.synchronization2 = VK_TRUE;
+                if (validate_device_feature_requests(&create_info13) == VK_SUCCESS) {{
+                    fprintf(stderr, "vulkan13 synchronization2=true was accepted through aggregate\\n");
+                    return 7;
+                }}
+                vulkan13.synchronization2 = VK_FALSE;
+                if (validate_device_feature_requests(&create_info13) != VK_SUCCESS) {{
+                    fprintf(stderr, "all-false vulkan13 aggregate was rejected\\n");
+                    return 8;
+                }}
+            #endif
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_dynamic_rendering_attachment_location_identity_is_noop_only(self):
         source = textwrap.dedent(
             f"""

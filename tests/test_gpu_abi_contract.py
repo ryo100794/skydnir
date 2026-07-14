@@ -7684,6 +7684,59 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("indices->pDepthInputAttachmentIndex", rendering_info_body)
         self.assertIn("indices->pStencilInputAttachmentIndex", rendering_info_body)
 
+    def test_vulkan_maintenance5_feature_pnext_is_false_only_without_advertising(self):
+        icd = VULKAN_ICD.read_text()
+        self.assertIn("VK_KHR_MAINTENANCE_5_EXTENSION_NAME", icd)
+        self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_5_FEATURES", icd)
+        self.assertNotIn("ADD_DEVICE_EXTENSION(VK_KHR_MAINTENANCE_5_EXTENSION_NAME", icd)
+        self.assertNotIn("strcmp(name, VK_KHR_MAINTENANCE_5_EXTENSION_NAME) == 0) return true", icd)
+
+        features_body = c_function_body(icd, "fill_pnext_features")
+        self.assertIn("VkPhysicalDeviceMaintenance5Features", features_body)
+        self.assertIn("p->maintenance5 = VK_FALSE;", features_body)
+
+        validate_body = c_function_body(icd, "validate_device_feature_requests")
+        self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_5_FEATURES", validate_body)
+        self.assertIn("supported = !p->maintenance5;", validate_body)
+        self.assertIn("unsupported_feature_name = \"maintenance5\"", validate_body)
+
+    def test_vulkan13_feature_pnext_is_false_only_while_api_is_capped_to_12(self):
+        icd = VULKAN_ICD.read_text()
+        self.assertIn("static uint32_t pdocker_api_version(void)", icd)
+        self.assertIn("return VK_API_VERSION_1_2;", icd)
+        self.assertIn("pProperties->apiVersion > VK_API_VERSION_1_2", icd)
+        self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES", icd)
+
+        features_body = c_function_body(icd, "fill_pnext_features")
+        self.assertIn("VkPhysicalDeviceVulkan13Features", features_body)
+        vulkan13_feature_block = features_body.split("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES", 1)[1].split("#endif", 1)[0]
+        self.assertIn("zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);", vulkan13_feature_block)
+        self.assertNotIn("p->synchronization2 = advertised_synchronization2();", vulkan13_feature_block)
+        self.assertNotIn("p->dynamicRendering = advertised_dynamic_rendering();", vulkan13_feature_block)
+        self.assertNotIn("p->privateData = VK_TRUE", vulkan13_feature_block)
+
+        validate_body = c_function_body(icd, "validate_device_feature_requests")
+        vulkan13_block = validate_body.split("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES", 1)[1].split("#endif", 1)[0]
+        for marker in [
+            "!p->robustImageAccess",
+            "!p->inlineUniformBlock",
+            "!p->descriptorBindingInlineUniformBlockUpdateAfterBind",
+            "!p->pipelineCreationCacheControl",
+            "!p->privateData",
+            "!p->shaderDemoteToHelperInvocation",
+            "!p->shaderTerminateInvocation",
+            "!p->subgroupSizeControl",
+            "!p->computeFullSubgroups",
+            "!p->synchronization2",
+            "!p->textureCompressionASTC_HDR",
+            "!p->shaderZeroInitializeWorkgroupMemory",
+            "!p->dynamicRendering",
+            "!p->shaderIntegerDotProduct",
+            "!p->maintenance4",
+            "unsupported_feature_name = \"vulkan13Features\"",
+        ]:
+            self.assertIn(marker, vulkan13_block)
+
     def test_vulkan_executor_sampler_anisotropy_replay_is_fail_closed(self):
         executor = GPU_EXECUTOR.read_text()
         helper_body = c_function_body(executor, "vulkan_sampler_entry_supported_by_runtime")

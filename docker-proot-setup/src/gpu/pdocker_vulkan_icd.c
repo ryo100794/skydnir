@@ -16088,6 +16088,13 @@ static void fill_pnext_features(void *pNext) {
                 p->drawIndirectCount = advertised_draw_indirect_count() && advertised_draw_indexed_indirect_count();
                 break;
             }
+#ifdef VK_VERSION_1_3
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES: {
+                VkPhysicalDeviceVulkan13Features *p = (VkPhysicalDeviceVulkan13Features *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                break;
+            }
+#endif
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES: {
                 VkPhysicalDevice8BitStorageFeatures *p = (VkPhysicalDevice8BitStorageFeatures *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
@@ -16155,6 +16162,15 @@ static void fill_pnext_features(void *pNext) {
                 p->dynamicRenderingLocalRead = VK_FALSE;
                 break;
             }
+#ifdef VK_KHR_MAINTENANCE_5_EXTENSION_NAME
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_5_FEATURES: {
+                VkPhysicalDeviceMaintenance5Features *p =
+                    (VkPhysicalDeviceMaintenance5Features *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                p->maintenance5 = VK_FALSE;
+                break;
+            }
+#endif
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT: {
                 VkPhysicalDeviceExtendedDynamicStateFeaturesEXT *p = (VkPhysicalDeviceExtendedDynamicStateFeaturesEXT *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
@@ -16667,6 +16683,29 @@ static VkResult validate_device_feature_requests(const VkDeviceCreateInfo *pCrea
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES:
                 supported = vulkan12_feature_request_supported((const VkPhysicalDeviceVulkan12Features *)node, &unsupported_feature_name);
                 break;
+#ifdef VK_VERSION_1_3
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES: {
+                const VkPhysicalDeviceVulkan13Features *p =
+                    (const VkPhysicalDeviceVulkan13Features *)node;
+                supported = !p->robustImageAccess &&
+                            !p->inlineUniformBlock &&
+                            !p->descriptorBindingInlineUniformBlockUpdateAfterBind &&
+                            !p->pipelineCreationCacheControl &&
+                            !p->privateData &&
+                            !p->shaderDemoteToHelperInvocation &&
+                            !p->shaderTerminateInvocation &&
+                            !p->subgroupSizeControl &&
+                            !p->computeFullSubgroups &&
+                            !p->synchronization2 &&
+                            !p->textureCompressionASTC_HDR &&
+                            !p->shaderZeroInitializeWorkgroupMemory &&
+                            !p->dynamicRendering &&
+                            !p->shaderIntegerDotProduct &&
+                            !p->maintenance4;
+                if (!supported) unsupported_feature_name = "vulkan13Features";
+                break;
+            }
+#endif
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES:
                 supported = storage8_feature_request_supported((const VkPhysicalDevice8BitStorageFeatures *)node, &unsupported_feature_name);
                 break;
@@ -16712,6 +16751,15 @@ static VkResult validate_device_feature_requests(const VkDeviceCreateInfo *pCrea
                 if (!supported) unsupported_feature_name = "dynamicRenderingLocalRead";
                 break;
             }
+#ifdef VK_KHR_MAINTENANCE_5_EXTENSION_NAME
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_5_FEATURES: {
+                const VkPhysicalDeviceMaintenance5Features *p =
+                    (const VkPhysicalDeviceMaintenance5Features *)node;
+                supported = !p->maintenance5;
+                if (!supported) unsupported_feature_name = "maintenance5";
+                break;
+            }
+#endif
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT: {
                 const VkPhysicalDeviceExtendedDynamicStateFeaturesEXT *p = (const VkPhysicalDeviceExtendedDynamicStateFeaturesEXT *)node;
                 supported = !p->extendedDynamicState || advertised_extended_dynamic_state();
