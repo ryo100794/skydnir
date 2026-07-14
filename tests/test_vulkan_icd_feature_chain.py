@@ -223,6 +223,126 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_debug_utils_extension_is_icd_local_metadata(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            static uint32_t g_callback_count;
+            static VkBool32 VKAPI_CALL debug_callback(
+                    VkDebugUtilsMessageSeverityFlagBitsEXT severity,
+                    VkDebugUtilsMessageTypeFlagsEXT types,
+                    const VkDebugUtilsMessengerCallbackDataEXT *data,
+                    void *user_data) {{
+                if (severity == VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT &&
+                    (types & VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT) &&
+                    data && data->pMessage && user_data == (void *)(uintptr_t)0x1234u) {{
+                    g_callback_count++;
+                }}
+                return VK_FALSE;
+            }}
+
+            int main(void) {{
+                uint32_t extension_count = 0;
+                if (vkEnumerateInstanceExtensionProperties(NULL, &extension_count, NULL) != VK_SUCCESS) return 2;
+                VkExtensionProperties extensions[16];
+                memset(extensions, 0, sizeof(extensions));
+                uint32_t capacity = 16;
+                if (vkEnumerateInstanceExtensionProperties(NULL, &capacity, extensions) != VK_SUCCESS) return 3;
+                VkBool32 found = VK_FALSE;
+                for (uint32_t i = 0; i < capacity; ++i) {{
+                    if (strcmp(extensions[i].extensionName, VK_EXT_DEBUG_UTILS_EXTENSION_NAME) == 0) found = VK_TRUE;
+                }}
+                if (!found || !instance_extension_advertised_name(VK_EXT_DEBUG_UTILS_EXTENSION_NAME)) return 4;
+
+                const char *enabled[] = {{ VK_EXT_DEBUG_UTILS_EXTENSION_NAME }};
+                VkInstanceCreateInfo instance_info;
+                memset(&instance_info, 0, sizeof(instance_info));
+                instance_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+                instance_info.enabledExtensionCount = 1;
+                instance_info.ppEnabledExtensionNames = enabled;
+                VkInstance instance = VK_NULL_HANDLE;
+                if (vkCreateInstance(&instance_info, NULL, &instance) != VK_SUCCESS || instance == VK_NULL_HANDLE) return 5;
+
+                VkDebugUtilsMessengerCreateInfoEXT messenger_info;
+                memset(&messenger_info, 0, sizeof(messenger_info));
+                messenger_info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
+                messenger_info.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT;
+                messenger_info.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT;
+                messenger_info.pfnUserCallback = debug_callback;
+                messenger_info.pUserData = (void *)(uintptr_t)0x1234u;
+                VkDebugUtilsMessengerEXT messenger = (VkDebugUtilsMessengerEXT)(uintptr_t)0xfeedu;
+                if (vkCreateDebugUtilsMessengerEXT(instance, &messenger_info, NULL, &messenger) != VK_SUCCESS || messenger == VK_NULL_HANDLE) return 6;
+
+                VkDebugUtilsMessengerCallbackDataEXT callback_data;
+                memset(&callback_data, 0, sizeof(callback_data));
+                callback_data.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CALLBACK_DATA_EXT;
+                callback_data.pMessage = "validation message";
+                vkSubmitDebugUtilsMessageEXT(instance,
+                                             VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT,
+                                             VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT,
+                                             &callback_data);
+                if (g_callback_count != 1) return 7;
+                vkSubmitDebugUtilsMessageEXT(instance,
+                                             VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT,
+                                             VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT,
+                                             &callback_data);
+                if (g_callback_count != 1) return 8;
+
+                VkDebugUtilsObjectNameInfoEXT name_info;
+                memset(&name_info, 0, sizeof(name_info));
+                name_info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
+                name_info.objectType = VK_OBJECT_TYPE_BUFFER;
+                name_info.objectHandle = 0x1234u;
+                name_info.pObjectName = "buffer-name";
+                if (vkSetDebugUtilsObjectNameEXT(VK_NULL_HANDLE, &name_info) != VK_SUCCESS) return 9;
+
+                const uint32_t tag = 0xcafebabeu;
+                VkDebugUtilsObjectTagInfoEXT tag_info;
+                memset(&tag_info, 0, sizeof(tag_info));
+                tag_info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_TAG_INFO_EXT;
+                tag_info.objectType = VK_OBJECT_TYPE_BUFFER;
+                tag_info.objectHandle = 0x1234u;
+                tag_info.tagName = 1u;
+                tag_info.tagSize = sizeof(tag);
+                tag_info.pTag = &tag;
+                if (vkSetDebugUtilsObjectTagEXT(VK_NULL_HANDLE, &tag_info) != VK_SUCCESS) return 10;
+
+                VkDebugUtilsLabelEXT label;
+                memset(&label, 0, sizeof(label));
+                label.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
+                label.pLabelName = "label";
+                vkQueueBeginDebugUtilsLabelEXT(VK_NULL_HANDLE, &label);
+                vkQueueInsertDebugUtilsLabelEXT(VK_NULL_HANDLE, &label);
+                vkQueueEndDebugUtilsLabelEXT(VK_NULL_HANDLE);
+                vkCmdBeginDebugUtilsLabelEXT(VK_NULL_HANDLE, &label);
+                vkCmdInsertDebugUtilsLabelEXT(VK_NULL_HANDLE, &label);
+                vkCmdEndDebugUtilsLabelEXT(VK_NULL_HANDLE);
+
+                VkDebugUtilsMessengerEXT invalid_messenger = (VkDebugUtilsMessengerEXT)(uintptr_t)0xfeedu;
+                memset(&messenger_info, 0, sizeof(messenger_info));
+                messenger_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+                if (vkCreateDebugUtilsMessengerEXT(instance, &messenger_info, NULL, &invalid_messenger) != VK_ERROR_INITIALIZATION_FAILED) return 11;
+                if (invalid_messenger != VK_NULL_HANDLE) return 12;
+                memset(&name_info, 0, sizeof(name_info));
+                name_info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
+                name_info.objectType = VK_OBJECT_TYPE_UNKNOWN;
+                name_info.objectHandle = 0x1234u;
+                if (vkSetDebugUtilsObjectNameEXT(VK_NULL_HANDLE, &name_info) != VK_ERROR_INITIALIZATION_FAILED) return 13;
+
+                vkDestroyDebugUtilsMessengerEXT(instance, messenger, NULL);
+                vkDestroyDebugUtilsMessengerEXT(instance, VK_NULL_HANDLE, NULL);
+                vkDestroyInstance(instance, NULL);
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_private_data_feature_and_device_create_info_are_icd_local_metadata(self):
         source = textwrap.dedent(
             f"""

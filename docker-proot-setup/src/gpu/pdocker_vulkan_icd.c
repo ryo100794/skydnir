@@ -241,6 +241,7 @@ typedef struct PdockerVkPipelineLayout PdockerVkPipelineLayout;
 typedef struct PdockerVkPipelineCache PdockerVkPipelineCache;
 typedef struct PdockerVkValidationCache PdockerVkValidationCache;
 typedef struct PdockerVkPrivateDataSlot PdockerVkPrivateDataSlot;
+typedef struct PdockerVkDebugUtilsMessenger PdockerVkDebugUtilsMessenger;
 typedef struct PdockerVkPipeline PdockerVkPipeline;
 typedef struct PdockerVkCommandPool PdockerVkCommandPool;
 typedef struct PdockerVkFence PdockerVkFence;
@@ -297,6 +298,9 @@ PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_validation_cache
 #endif
 #ifdef VK_EXT_PRIVATE_DATA_EXTENSION_NAME
 PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_private_data_slot, VkPrivateDataSlot, PdockerVkPrivateDataSlot)
+#endif
+#ifdef VK_EXT_DEBUG_UTILS_EXTENSION_NAME
+PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_debug_utils_messenger, VkDebugUtilsMessengerEXT, PdockerVkDebugUtilsMessenger)
 #endif
 PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_command_pool, VkCommandPool, PdockerVkCommandPool)
 PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_render_pass, VkRenderPass, PdockerVkRenderPass)
@@ -1491,6 +1495,17 @@ struct PdockerVkPrivateDataSlot {
 };
 #endif
 
+#ifdef VK_EXT_DEBUG_UTILS_EXTENSION_NAME
+struct PdockerVkDebugUtilsMessenger {
+    VkInstance instance;
+    VkDebugUtilsMessageSeverityFlagsEXT message_severity;
+    VkDebugUtilsMessageTypeFlagsEXT message_type;
+    PFN_vkDebugUtilsMessengerCallbackEXT callback;
+    void *user_data;
+    struct PdockerVkDebugUtilsMessenger *next;
+};
+#endif
+
 struct PdockerVkCommandPool {
     uint64_t requested_feature_mask;
 };
@@ -1503,6 +1518,9 @@ static struct sigaction g_previous_sigsegv;
 static bool g_guarded_sigsegv_installed;
 static uint64_t g_vulkan_object_generation;
 static uint64_t g_vulkan_query_pool_generation;
+#ifdef VK_EXT_DEBUG_UTILS_EXTENSION_NAME
+static PdockerVkDebugUtilsMessenger *g_debug_utils_messengers;
+#endif
 
 static bool trace_allocations(void);
 static bool query_range_valid(
@@ -16729,7 +16747,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceExtensionProperties(
         uint32_t *pPropertyCount,
         VkExtensionProperties *pProperties) {
     (void)pLayerName;
-    VkExtensionProperties available[3];
+    VkExtensionProperties available[4];
     uint32_t available_count = 0;
 #define ADD_INSTANCE_EXTENSION(name, version) do { \
         if (available_count < (uint32_t)(sizeof(available) / sizeof(available[0]))) { \
@@ -16744,6 +16762,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceExtensionProperties(
     ADD_INSTANCE_EXTENSION(VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME, VK_EXT_HEADLESS_SURFACE_SPEC_VERSION);
     ADD_INSTANCE_EXTENSION(VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME,
                            VK_KHR_GET_SURFACE_CAPABILITIES_2_SPEC_VERSION);
+#ifdef VK_EXT_DEBUG_UTILS_EXTENSION_NAME
+    ADD_INSTANCE_EXTENSION(VK_EXT_DEBUG_UTILS_EXTENSION_NAME, VK_EXT_DEBUG_UTILS_SPEC_VERSION);
+#endif
 #undef ADD_INSTANCE_EXTENSION
     if (!pPropertyCount) return VK_ERROR_INITIALIZATION_FAILED;
     copy_extension_properties(available, available_count, pPropertyCount, pProperties);
@@ -16755,6 +16776,9 @@ static bool instance_extension_advertised_name(const char *name) {
     if (strcmp(name, VK_KHR_SURFACE_EXTENSION_NAME) == 0) return true;
     if (strcmp(name, VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME) == 0) return true;
     if (strcmp(name, VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME) == 0) return true;
+#ifdef VK_EXT_DEBUG_UTILS_EXTENSION_NAME
+    if (strcmp(name, VK_EXT_DEBUG_UTILS_EXTENSION_NAME) == 0) return true;
+#endif
     return false;
 }
 
@@ -16807,6 +16831,18 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyInstance(
         VkInstance instance,
         const VkAllocationCallbacks *pAllocator) {
     (void)pAllocator;
+#ifdef VK_EXT_DEBUG_UTILS_EXTENSION_NAME
+    PdockerVkDebugUtilsMessenger **debug_link = &g_debug_utils_messengers;
+    while (*debug_link) {
+        PdockerVkDebugUtilsMessenger *messenger = *debug_link;
+        if (messenger->instance == instance) {
+            *debug_link = messenger->next;
+            free(messenger);
+        } else {
+            debug_link = &messenger->next;
+        }
+    }
+#endif
     free((void *)instance);
 }
 
@@ -30559,6 +30595,153 @@ VKAPI_ATTR VkResult VKAPI_CALL vkMergeValidationCachesEXT(
 
 #endif
 
+#ifdef VK_EXT_DEBUG_UTILS_EXTENSION_NAME
+VKAPI_ATTR VkResult VKAPI_CALL vkSetDebugUtilsObjectNameEXT(
+        VkDevice device,
+        const VkDebugUtilsObjectNameInfoEXT *pNameInfo) {
+    (void)device;
+    if (!pNameInfo || pNameInfo->sType != VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    if (pNameInfo->pNext) {
+        return unsupported_create_info_pnext_result("vkSetDebugUtilsObjectNameEXT", pNameInfo->pNext);
+    }
+    if (pNameInfo->objectType == VK_OBJECT_TYPE_UNKNOWN || pNameInfo->objectHandle == 0) {
+        trace_icd_runtime_failure("debug-utils-object-name-target-invalid", VK_ERROR_INITIALIZATION_FAILED);
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    return VK_SUCCESS;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkSetDebugUtilsObjectTagEXT(
+        VkDevice device,
+        const VkDebugUtilsObjectTagInfoEXT *pTagInfo) {
+    (void)device;
+    if (!pTagInfo || pTagInfo->sType != VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_TAG_INFO_EXT) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    if (pTagInfo->pNext) {
+        return unsupported_create_info_pnext_result("vkSetDebugUtilsObjectTagEXT", pTagInfo->pNext);
+    }
+    if (pTagInfo->objectType == VK_OBJECT_TYPE_UNKNOWN || pTagInfo->objectHandle == 0 ||
+        (pTagInfo->tagSize > 0 && !pTagInfo->pTag)) {
+        trace_icd_runtime_failure("debug-utils-object-tag-target-invalid", VK_ERROR_INITIALIZATION_FAILED);
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    return VK_SUCCESS;
+}
+
+static bool debug_utils_label_valid(const VkDebugUtilsLabelEXT *label) {
+    return label && label->sType == VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT && !label->pNext;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkQueueBeginDebugUtilsLabelEXT(
+        VkQueue queue,
+        const VkDebugUtilsLabelEXT *pLabelInfo) {
+    (void)queue;
+    (void)debug_utils_label_valid(pLabelInfo);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkQueueEndDebugUtilsLabelEXT(VkQueue queue) {
+    (void)queue;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkQueueInsertDebugUtilsLabelEXT(
+        VkQueue queue,
+        const VkDebugUtilsLabelEXT *pLabelInfo) {
+    (void)queue;
+    (void)debug_utils_label_valid(pLabelInfo);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdBeginDebugUtilsLabelEXT(
+        VkCommandBuffer commandBuffer,
+        const VkDebugUtilsLabelEXT *pLabelInfo) {
+    (void)commandBuffer;
+    (void)debug_utils_label_valid(pLabelInfo);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdEndDebugUtilsLabelEXT(VkCommandBuffer commandBuffer) {
+    (void)commandBuffer;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdInsertDebugUtilsLabelEXT(
+        VkCommandBuffer commandBuffer,
+        const VkDebugUtilsLabelEXT *pLabelInfo) {
+    (void)commandBuffer;
+    (void)debug_utils_label_valid(pLabelInfo);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkCreateDebugUtilsMessengerEXT(
+        VkInstance instance,
+        const VkDebugUtilsMessengerCreateInfoEXT *pCreateInfo,
+        const VkAllocationCallbacks *pAllocator,
+        VkDebugUtilsMessengerEXT *pMessenger) {
+    (void)instance;
+    (void)pAllocator;
+    if (pMessenger) *pMessenger = VK_NULL_HANDLE;
+    if (!pCreateInfo || !pMessenger ||
+        pCreateInfo->sType != VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    if (pCreateInfo->pNext) {
+        return unsupported_create_info_pnext_result("vkCreateDebugUtilsMessengerEXT", pCreateInfo->pNext);
+    }
+    if (pCreateInfo->flags != 0 || !pCreateInfo->pfnUserCallback) {
+        trace_icd_runtime_failure("debug-utils-messenger-create-info-invalid", VK_ERROR_INITIALIZATION_FAILED);
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    PdockerVkDebugUtilsMessenger *messenger = pdocker_alloc_handle(sizeof(*messenger));
+    if (!messenger) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    messenger->instance = instance;
+    messenger->message_severity = pCreateInfo->messageSeverity;
+    messenger->message_type = pCreateInfo->messageType;
+    messenger->callback = pCreateInfo->pfnUserCallback;
+    messenger->user_data = pCreateInfo->pUserData;
+    messenger->next = g_debug_utils_messengers;
+    g_debug_utils_messengers = messenger;
+    *pMessenger = pdocker_vk_debug_utils_messenger_to_handle(messenger);
+    return *pMessenger ? VK_SUCCESS : VK_ERROR_OUT_OF_HOST_MEMORY;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkDestroyDebugUtilsMessengerEXT(
+        VkInstance instance,
+        VkDebugUtilsMessengerEXT messenger,
+        const VkAllocationCallbacks *pAllocator) {
+    (void)instance;
+    (void)pAllocator;
+    PdockerVkDebugUtilsMessenger *target = pdocker_vk_debug_utils_messenger_from_handle(messenger);
+    if (!target) return;
+    PdockerVkDebugUtilsMessenger **link = &g_debug_utils_messengers;
+    while (*link) {
+        if (*link == target) {
+            *link = target->next;
+            free(target);
+            return;
+        }
+        link = &(*link)->next;
+    }
+    free(target);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkSubmitDebugUtilsMessageEXT(
+        VkInstance instance,
+        VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
+        VkDebugUtilsMessageTypeFlagsEXT messageTypes,
+        const VkDebugUtilsMessengerCallbackDataEXT *pCallbackData) {
+    (void)instance;
+    if (!pCallbackData || pCallbackData->sType != VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CALLBACK_DATA_EXT) return;
+    if (pCallbackData->pNext) return;
+    for (PdockerVkDebugUtilsMessenger *messenger = g_debug_utils_messengers;
+         messenger;
+         messenger = messenger->next) {
+        if (!messenger->callback) continue;
+        if ((messenger->message_severity & (VkDebugUtilsMessageSeverityFlagsEXT)messageSeverity) == 0) continue;
+        if ((messenger->message_type & messageTypes) == 0) continue;
+        (void)messenger->callback(messageSeverity, messageTypes, pCallbackData, messenger->user_data);
+    }
+}
+#endif
+
 #ifdef VK_EXT_PRIVATE_DATA_EXTENSION_NAME
 VKAPI_ATTR VkResult VKAPI_CALL vkCreatePrivateDataSlot(
         VkDevice device,
@@ -30980,6 +31163,19 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_ALIAS("vkSetPrivateDataEXT", vkSetPrivateData);
     MAP_PROC(vkGetPrivateData);
     MAP_ALIAS("vkGetPrivateDataEXT", vkGetPrivateData);
+#endif
+#ifdef VK_EXT_DEBUG_UTILS_EXTENSION_NAME
+    MAP_PROC(vkSetDebugUtilsObjectNameEXT);
+    MAP_PROC(vkSetDebugUtilsObjectTagEXT);
+    MAP_PROC(vkQueueBeginDebugUtilsLabelEXT);
+    MAP_PROC(vkQueueEndDebugUtilsLabelEXT);
+    MAP_PROC(vkQueueInsertDebugUtilsLabelEXT);
+    MAP_PROC(vkCmdBeginDebugUtilsLabelEXT);
+    MAP_PROC(vkCmdEndDebugUtilsLabelEXT);
+    MAP_PROC(vkCmdInsertDebugUtilsLabelEXT);
+    MAP_PROC(vkCreateDebugUtilsMessengerEXT);
+    MAP_PROC(vkDestroyDebugUtilsMessengerEXT);
+    MAP_PROC(vkSubmitDebugUtilsMessageEXT);
 #endif
     MAP_PROC(vkCreateComputePipelines);
     MAP_PROC(vkCreateGraphicsPipelines);

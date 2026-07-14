@@ -1503,6 +1503,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "VK_EXT_HEADLESS_SURFACE_SPEC_VERSION",
             "VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME",
             "VK_KHR_GET_SURFACE_CAPABILITIES_2_SPEC_VERSION",
+            "VK_EXT_DEBUG_UTILS_EXTENSION_NAME",
+            "VK_EXT_DEBUG_UTILS_SPEC_VERSION",
             "copy_extension_properties",
             "available_count",
         ]:
@@ -1518,6 +1520,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "VK_KHR_SURFACE_EXTENSION_NAME",
             "VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME",
             "VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME",
+            "VK_EXT_DEBUG_UTILS_EXTENSION_NAME",
         ]:
             self.assertIn(marker, instance_validation_scope)
         self.assertIn("VK_ERROR_EXTENSION_NOT_PRESENT", create_instance_body + instance_validation_scope)
@@ -1525,6 +1528,15 @@ class GpuAbiContractTest(unittest.TestCase):
             create_instance_body,
             r"(validate_instance_extensions|instance_extension_advertised_name|VK_KHR_SURFACE_EXTENSION_NAME)",
         )
+        for marker in [
+            "VKAPI_ATTR VkResult VKAPI_CALL vkCreateDebugUtilsMessengerEXT",
+            "VKAPI_ATTR VkResult VKAPI_CALL vkSetDebugUtilsObjectNameEXT",
+            "VKAPI_ATTR void VKAPI_CALL vkCmdBeginDebugUtilsLabelEXT",
+            "VKAPI_ATTR void VKAPI_CALL vkSubmitDebugUtilsMessageEXT",
+            "MAP_PROC(vkCreateDebugUtilsMessengerEXT)",
+            "MAP_PROC(vkSetDebugUtilsObjectTagEXT)",
+        ]:
+            self.assertIn(marker, icd)
 
         device_extension_body = c_function_body(icd, "vkEnumerateDeviceExtensionProperties")
         for marker in [
