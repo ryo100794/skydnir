@@ -8430,7 +8430,7 @@ class GpuAbiContractTest(unittest.TestCase):
         proc_gate_body = icd.split("static bool proc_address_hidden_by_advertisement", 1)[1].split(
             "static PFN_vkVoidFunction proc_address", 1
         )[0]
-        self.assertIn('strcmp(pName, "vkCmdDispatchBaseKHR") == 0', proc_gate_body)
+        self.assertNotIn('strcmp(pName, "vkCmdDispatchBaseKHR") == 0', proc_gate_body)
         self.assertIn("base_group_x=%u base_group_y=%u base_group_z=%u", icd)
         dispatch_send_body = icd.split("static int send_generic_vulkan_dispatch_op", 1)[1].split("static int send_generic_vulkan_dispatch(", 1)[0]
         self.assertLess(dispatch_send_body.index("api_buffer_ids[i]"), dispatch_send_body.index("base_group_x=%u"))
@@ -9189,6 +9189,35 @@ class GpuAbiContractTest(unittest.TestCase):
 
 
 
+
+    def test_vulkan_device_group_extension_is_advertised_as_single_device_noop(self):
+        icd = VULKAN_ICD.read_text()
+        collector_body = c_function_body(icd, "collect_advertised_device_extensions")
+        validation_body = c_function_body(icd, "device_extension_advertised_name")
+        hidden_body = c_function_body(icd, "proc_address_hidden_by_advertisement")
+        proc_body = icd.split("static PFN_vkVoidFunction proc_address", 1)[1].split(
+            "VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr", 1
+        )[0]
+        peer_body = c_function_body(icd, "vkGetDeviceGroupPeerMemoryFeatures")
+        mask_body = c_function_body(icd, "vkCmdSetDeviceMask")
+        self.assertIn("VK_KHR_DEVICE_GROUP_EXTENSION_NAME", collector_body)
+        self.assertIn("collect_advertised_device_extensions(", validation_body)
+        for alias in [
+            'MAP_ALIAS("vkGetDeviceGroupPeerMemoryFeaturesKHR", vkGetDeviceGroupPeerMemoryFeatures)',
+            'MAP_ALIAS("vkCmdSetDeviceMaskKHR", vkCmdSetDeviceMask)',
+            'MAP_ALIAS("vkCmdDispatchBaseKHR", vkCmdDispatchBaseKHR)',
+        ]:
+            self.assertIn(alias, proc_body)
+        for hidden in [
+            "vkGetDeviceGroupPeerMemoryFeaturesKHR",
+            "vkCmdSetDeviceMaskKHR",
+            "vkCmdDispatchBaseKHR",
+        ]:
+            self.assertNotIn(hidden, hidden_body)
+        self.assertIn("*pPeerMemoryFeatures = 0;", peer_body)
+        self.assertIn("deviceMask != 1u", mask_body)
+        self.assertIn("op->base_group_x = baseGroupX;", icd)
+
     def test_vulkan_create_renderpass2_extension_is_advertised_and_aliases_are_public(self):
         icd = VULKAN_ICD.read_text()
         collector_body = c_function_body(icd, "collect_advertised_device_extensions")
@@ -9407,9 +9436,7 @@ class GpuAbiContractTest(unittest.TestCase):
         for alias in [
             "vkGetDeviceGroupPeerMemoryFeaturesKHR",
             "vkCmdSetDeviceMaskKHR",
-        ]:
-            self.assertIn(alias, hidden_body)
-        for alias in [
+            "vkCmdDispatchBaseKHR",
             "vkEnumeratePhysicalDeviceGroupsKHR",
             "vkGetPhysicalDeviceSparseImageFormatProperties2KHR",
             "vkGetPhysicalDeviceExternalBufferPropertiesKHR",
@@ -9419,6 +9446,7 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertNotIn(alias, hidden_body)
         for extension in [
             "VK_KHR_device_group_creation",
+            "VK_KHR_device_group",
             "VK_KHR_get_physical_device_properties2",
             "VK_KHR_external_memory_capabilities",
             "VK_KHR_external_semaphore_capabilities",

@@ -173,6 +173,64 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
 
 
 
+
+    def test_device_group_extension_exposes_single_device_noop_aliases(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            static int extension_seen(
+                    const VkExtensionProperties *extensions,
+                    uint32_t count,
+                    const char *name) {{
+                for (uint32_t i = 0; i < count; ++i) {{
+                    if (strcmp(extensions[i].extensionName, name) == 0) return 1;
+                }}
+                return 0;
+            }}
+
+            int main(void) {{
+            #ifdef VK_KHR_DEVICE_GROUP_EXTENSION_NAME
+                if (!device_extension_advertised_name(VK_KHR_DEVICE_GROUP_EXTENSION_NAME)) return 2;
+                uint32_t count = 64;
+                VkExtensionProperties extensions[64];
+                memset(extensions, 0, sizeof(extensions));
+                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &count, extensions) != VK_SUCCESS) return 3;
+                if (!extension_seen(extensions, count, VK_KHR_DEVICE_GROUP_EXTENSION_NAME)) return 4;
+
+                const char *enabled[] = {{ VK_KHR_DEVICE_GROUP_EXTENSION_NAME }};
+                VkDeviceCreateInfo device_info;
+                memset(&device_info, 0, sizeof(device_info));
+                device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                device_info.enabledExtensionCount = 1;
+                device_info.ppEnabledExtensionNames = enabled;
+                if (validate_device_extensions(&device_info) != VK_SUCCESS) return 5;
+
+                if (proc_address("vkGetDeviceGroupPeerMemoryFeaturesKHR") !=
+                    (PFN_vkVoidFunction)vkGetDeviceGroupPeerMemoryFeatures) return 6;
+                if (proc_address("vkCmdSetDeviceMaskKHR") !=
+                    (PFN_vkVoidFunction)vkCmdSetDeviceMask) return 7;
+                if (proc_address("vkCmdDispatchBaseKHR") !=
+                    (PFN_vkVoidFunction)vkCmdDispatchBaseKHR) return 8;
+
+                VkPeerMemoryFeatureFlags peer = 0xffffffffu;
+                ((PFN_vkGetDeviceGroupPeerMemoryFeaturesKHR)proc_address("vkGetDeviceGroupPeerMemoryFeaturesKHR"))(
+                    VK_NULL_HANDLE, 0, 0, 0, &peer);
+                if (peer != 0) return 9;
+                ((PFN_vkCmdSetDeviceMaskKHR)proc_address("vkCmdSetDeviceMaskKHR"))(VK_NULL_HANDLE, 1);
+                ((PFN_vkCmdDispatchBaseKHR)proc_address("vkCmdDispatchBaseKHR"))(
+                    VK_NULL_HANDLE, 1, 2, 3, 4, 5, 6);
+            #endif
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_create_renderpass2_extension_exposes_khr_aliases(self):
         source = textwrap.dedent(
             f"""
@@ -514,8 +572,8 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 if (proc_address("vkGetPhysicalDeviceExternalBufferPropertiesKHR") == NULL) return 35;
                 if (proc_address("vkGetPhysicalDeviceExternalSemaphorePropertiesKHR") == NULL) return 36;
                 if (proc_address("vkGetPhysicalDeviceExternalFencePropertiesKHR") == NULL) return 37;
-                if (proc_address("vkGetDeviceGroupPeerMemoryFeaturesKHR") != NULL) return 38;
-                if (proc_address("vkCmdSetDeviceMaskKHR") != NULL) return 39;
+                if (proc_address("vkGetDeviceGroupPeerMemoryFeaturesKHR") == NULL) return 38;
+                if (proc_address("vkCmdSetDeviceMaskKHR") == NULL) return 39;
                 return 0;
             }}
             """

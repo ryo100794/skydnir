@@ -198,6 +198,11 @@ typedef VkSubresourceLayout2 VkSubresourceLayout2KHR;
 #define VK_KHR_DEVICE_GROUP_CREATION_SPEC_VERSION 1
 #endif
 
+#ifndef VK_KHR_DEVICE_GROUP_EXTENSION_NAME
+#define VK_KHR_DEVICE_GROUP_EXTENSION_NAME "VK_KHR_device_group"
+#define VK_KHR_DEVICE_GROUP_SPEC_VERSION 4
+#endif
+
 #ifndef VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME
 #define VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME "VK_KHR_external_memory_capabilities"
 #define VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_SPEC_VERSION 1
@@ -20166,6 +20171,7 @@ static uint32_t collect_advertised_device_extensions(
                          VK_KHR_DESCRIPTOR_UPDATE_TEMPLATE_SPEC_VERSION);
     ADD_DEVICE_EXTENSION(VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME,
                          VK_KHR_CREATE_RENDERPASS_2_SPEC_VERSION);
+    ADD_DEVICE_EXTENSION(VK_KHR_DEVICE_GROUP_EXTENSION_NAME, VK_KHR_DEVICE_GROUP_SPEC_VERSION);
 #ifdef VK_KHR_MAINTENANCE_4_EXTENSION_NAME
     ADD_DEVICE_EXTENSION(VK_KHR_MAINTENANCE_4_EXTENSION_NAME, VK_KHR_MAINTENANCE_4_SPEC_VERSION);
 #endif
@@ -31854,9 +31860,7 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance instan
 
 static bool proc_address_hidden_by_advertisement(const char *pName) {
     if (!pName) return true;
-    if (strcmp(pName, "vkGetDeviceGroupPeerMemoryFeaturesKHR") == 0 ||
-        strcmp(pName, "vkCmdSetDeviceMaskKHR") == 0 ||
-        strcmp(pName, "vkGetImageSubresourceLayout2KHR") == 0 ||
+    if (strcmp(pName, "vkGetImageSubresourceLayout2KHR") == 0 ||
         strcmp(pName, "vkGetImageSubresourceLayout2EXT") == 0 ||
         strcmp(pName, "vkGetDeviceImageSubresourceLayoutKHR") == 0 ||
         strcmp(pName, "vkGetRenderingAreaGranularityKHR") == 0 ||
@@ -31921,9 +31925,6 @@ static bool proc_address_hidden_by_advertisement(const char *pName) {
          strcmp(pName, "vkCmdEndRendering") == 0 ||
          strcmp(pName, "vkCmdEndRenderingKHR") == 0) &&
         !advertised_dynamic_rendering()) {
-        return true;
-    }
-    if (strcmp(pName, "vkCmdDispatchBaseKHR") == 0) {
         return true;
     }
     if ((strcmp(pName, "vkCmdPipelineBarrier2") == 0 ||
