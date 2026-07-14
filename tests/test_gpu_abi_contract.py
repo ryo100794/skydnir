@@ -7775,6 +7775,12 @@ class GpuAbiContractTest(unittest.TestCase):
         buffer_pnext_body = c_function_body(icd, "validate_buffer_create_pnext")
         self.assertIn("VK_STRUCTURE_TYPE_BUFFER_OPAQUE_CAPTURE_ADDRESS_CREATE_INFO", buffer_pnext_body)
         self.assertIn("capture_info->opaqueCaptureAddress != 0", buffer_pnext_body)
+        self.assertIn("buffer_usage_supported_for_bridge((VkBufferUsageFlags)usage2_info->usage)", buffer_pnext_body)
+        supported_usage_body = c_function_body(icd, "buffer_usage_supported_for_bridge")
+        self.assertIn("VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT", supported_usage_body)
+        create_buffer_body = c_function_body(icd, "vkCreateBuffer")
+        self.assertIn("buffer_usage_supported_for_bridge(effective_usage)", create_buffer_body)
+        self.assertIn("buffer-device-address-usage-unsupported", create_buffer_body)
 
         hidden_body = c_function_body(icd, "proc_address_hidden_by_advertisement")
         for alias in [

@@ -18273,6 +18273,20 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceExternalFenceProperties(
 
 static VkResult unsupported_create_info_pnext_result(const char *api_name, const void *pNext);
 
+static bool buffer_usage_supported_for_bridge(VkBufferUsageFlags usage) {
+    (void)usage;
+#ifdef VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
+    if ((usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) != 0) return false;
+#endif
+#ifdef VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR
+    if ((usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR) != 0) return false;
+#endif
+#ifdef VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_EXT
+    if ((usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_EXT) != 0) return false;
+#endif
+    return true;
+}
+
 static bool buffer_create_effective_usage(
         const VkBufferCreateInfo *info,
         VkBufferUsageFlags *usage_out) {
@@ -18340,6 +18354,11 @@ static VkResult validate_buffer_create_pnext(const VkBufferCreateInfo *info) {
                                               VK_ERROR_FEATURE_NOT_PRESENT);
                     return VK_ERROR_FEATURE_NOT_PRESENT;
                 }
+                if (!buffer_usage_supported_for_bridge((VkBufferUsageFlags)usage2_info->usage)) {
+                    trace_icd_runtime_failure("buffer-device-address-usage-unsupported",
+                                              VK_ERROR_FEATURE_NOT_PRESENT);
+                    return VK_ERROR_FEATURE_NOT_PRESENT;
+                }
                 break;
             }
             case VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_CREATE_INFO_EXT: {
@@ -18383,6 +18402,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateBuffer(
     VkBufferUsageFlags effective_usage = 0;
     if (!buffer_create_effective_usage(pCreateInfo, &effective_usage)) {
         trace_icd_runtime_failure("buffer-usage-missing", VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    if (!buffer_usage_supported_for_bridge(effective_usage)) {
+        trace_icd_runtime_failure("buffer-device-address-usage-unsupported",
+                                  VK_ERROR_FEATURE_NOT_PRESENT);
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }
     if (pCreateInfo->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;

@@ -499,18 +499,39 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 flags.deviceMask = 2;
                 if (validate_memory_allocate_pnext(&flags) == VK_SUCCESS) return 17;
 
+            #ifdef VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
+                VkBufferCreateInfo buffer_create;
+                memset(&buffer_create, 0, sizeof(buffer_create));
+                buffer_create.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+                buffer_create.size = 4096;
+                buffer_create.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+                VkBuffer created_buffer = VK_NULL_HANDLE;
+                if (vkCreateBuffer(VK_NULL_HANDLE, &buffer_create, NULL, &created_buffer) != VK_ERROR_FEATURE_NOT_PRESENT) return 18;
+                if (created_buffer != VK_NULL_HANDLE) return 19;
+
+                VkBufferUsageFlags2CreateInfo usage2;
+                memset(&usage2, 0, sizeof(usage2));
+                usage2.sType = VK_STRUCTURE_TYPE_BUFFER_USAGE_FLAGS_2_CREATE_INFO;
+                usage2.usage = (VkBufferUsageFlags2)VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                    (VkBufferUsageFlags2)VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+                buffer_create.pNext = &usage2;
+                buffer_create.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+                if (validate_buffer_create_pnext(&buffer_create) == VK_SUCCESS) return 20;
+                buffer_create.pNext = NULL;
+            #endif
+
                 VkBufferDeviceAddressInfo buffer_info;
                 memset(&buffer_info, 0, sizeof(buffer_info));
                 buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
                 buffer_info.buffer = VK_NULL_HANDLE;
-                if (((PFN_vkGetBufferDeviceAddressKHR)proc_address("vkGetBufferDeviceAddressKHR"))(VK_NULL_HANDLE, &buffer_info) != 0) return 18;
-                if (((PFN_vkGetBufferOpaqueCaptureAddressKHR)proc_address("vkGetBufferOpaqueCaptureAddressKHR"))(VK_NULL_HANDLE, &buffer_info) != 0) return 19;
+                if (((PFN_vkGetBufferDeviceAddressKHR)proc_address("vkGetBufferDeviceAddressKHR"))(VK_NULL_HANDLE, &buffer_info) != 0) return 21;
+                if (((PFN_vkGetBufferOpaqueCaptureAddressKHR)proc_address("vkGetBufferOpaqueCaptureAddressKHR"))(VK_NULL_HANDLE, &buffer_info) != 0) return 22;
 
                 VkDeviceMemoryOpaqueCaptureAddressInfo memory_info;
                 memset(&memory_info, 0, sizeof(memory_info));
                 memory_info.sType = VK_STRUCTURE_TYPE_DEVICE_MEMORY_OPAQUE_CAPTURE_ADDRESS_INFO;
                 memory_info.memory = VK_NULL_HANDLE;
-                if (((PFN_vkGetDeviceMemoryOpaqueCaptureAddressKHR)proc_address("vkGetDeviceMemoryOpaqueCaptureAddressKHR"))(VK_NULL_HANDLE, &memory_info) != 0) return 20;
+                if (((PFN_vkGetDeviceMemoryOpaqueCaptureAddressKHR)proc_address("vkGetDeviceMemoryOpaqueCaptureAddressKHR"))(VK_NULL_HANDLE, &memory_info) != 0) return 23;
             #endif
                 return 0;
             }}
