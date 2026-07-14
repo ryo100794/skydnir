@@ -11170,7 +11170,10 @@ class GpuAbiContractTest(unittest.TestCase):
             "static uint64_t feature_mask_from_base_features", 1
         )[0]
         vulkan12_request_body = c_function_body(icd, "vulkan12_feature_request_supported")
+        collector_body = c_function_body(icd, "collect_advertised_device_extensions")
 
+        self.assertIn("VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME", collector_body)
+        self.assertIn("caps && caps->ext_descriptor_indexing", collector_body)
         self.assertIn("complete descriptor-indexing minimum surface", aggregate_body)
         self.assertIn("return VK_FALSE;", aggregate_body)
         self.assertEqual(
