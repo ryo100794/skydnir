@@ -6971,11 +6971,13 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("sender_effective_spirv_hash=0x%016llx", icd)
         self.assertIn("(unsigned long long)source_shader_hash", icd)
         self.assertIn("(unsigned long long)shader_hash_to_send", icd)
-        self.assertIn("Probe replay sends an instrumented/effective SPIR-V module", icd)
-        probe_identity_block = icd.index("if (probe.enabled) {", icd.index("sender_dispatch_hash"))
+        self.assertIn("Strict transport evidence must not depend on the executor guessing", icd)
+        self.assertIn("Normal strict", icd)
+        probe_identity_block = icd.index("if (strict_passthrough || probe.enabled) {", icd.index("sender_dispatch_hash"))
         self.assertLess(probe_identity_block, icd.index("sender_source_spirv_hash=0x%016llx"))
         self.assertLess(icd.index("sender_source_spirv_hash=0x%016llx"), icd.index("sender_effective_spirv_hash=0x%016llx"))
         self.assertLess(icd.index("sender_effective_spirv_hash=0x%016llx"), icd.index("typedef struct {", probe_identity_block))
+        self.assertIn("append-strict-spirv-identity", icd)
         env_manifest = json.loads(LLAMA_GPU_ENV_MANIFEST.read_text())
         self.assertIn("PDOCKER_GPU_SPIRV_PROBE_TARGET_ONLY", env_manifest["compare_forward_env_keys"])
         self.assertEqual(
@@ -14920,6 +14922,18 @@ class GpuAbiContractTest(unittest.TestCase):
             "if (requires_v5_frame", 1
         )[0]
         self.assertIn("specialization_transport_required ||", requires_block)
+
+    def test_vulkan_dispatch_strict_passthrough_carries_spirv_identity_without_probe(self):
+        icd = VULKAN_ICD.read_text()
+        generic_sender = c_function_body(icd, "send_generic_vulkan_dispatch_op")
+        identity_block = generic_sender.split("if (strict_passthrough || probe.enabled) {", 1)[1].split(
+            "typedef struct {", 1
+        )[0]
+        self.assertIn("sender_source_spirv_hash=0x%016llx", identity_block)
+        self.assertIn("sender_effective_spirv_hash=0x%016llx", identity_block)
+        self.assertIn("(unsigned long long)source_shader_hash", identity_block)
+        self.assertIn("(unsigned long long)shader_hash_to_send", identity_block)
+        self.assertNotIn("if (probe.enabled) {", identity_block)
 
     def test_vulkan_dispatch_strict_passthrough_forces_v5_frame(self):
         icd = VULKAN_ICD.read_text()

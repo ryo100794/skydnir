@@ -12903,17 +12903,16 @@ static int send_generic_vulkan_dispatch_op(
                            (unsigned long long)descriptor_hash,
                            (unsigned long long)dispatch_hash);
     }
-    if (probe.enabled) {
+    if (strict_passthrough || probe.enabled) {
         /*
-         * Probe replay sends an instrumented/effective SPIR-V module through
-         * fd[0], so the executor cannot recover the original llama.cpp source
-         * shader identity by hashing the received bytes.  Carry the
-         * source/effective relation explicitly and fail closed on the executor
-         * side if it does not match the received module hash or if the debug
-         * binding option is absent.  Pipeline cache/reconciliation still use
+         * Strict transport evidence must not depend on the executor guessing
+         * source/effective shader identity from received bytes.  Normal strict
+         * dispatches carry identical source/effective hashes; probe replay
+         * carries the explicit source/effective relation for the instrumented
+         * module sent through fd[0].  Pipeline cache/reconciliation still use
          * sender_spirv_hash above, which is the actual transmitted shader.
          */
-        PDOCKER_VK_APPENDF("append-probe-evidence",
+        PDOCKER_VK_APPENDF("append-strict-spirv-identity",
                            " sender_source_spirv_hash=0x%016llx"
                            " sender_effective_spirv_hash=0x%016llx",
                            (unsigned long long)source_shader_hash,
