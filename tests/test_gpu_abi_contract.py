@@ -9151,6 +9151,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("p->robustImageAccess2 = VK_FALSE", icd)
         self.assertIn("p->nullDescriptor = VK_FALSE", icd)
         self.assertIn("supported = !p->robustBufferAccess2 && !p->robustImageAccess2 && !p->nullDescriptor", icd)
+        self.assertIn("ADD_DEVICE_EXTENSION(VK_EXT_ROBUSTNESS_2_EXTENSION_NAME", collector_body)
         self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_ROBUSTNESS_FEATURES", icd)
         self.assertIn("p->robustImageAccess = VK_FALSE", icd)
         self.assertIn("supported = !p->robustImageAccess", icd)

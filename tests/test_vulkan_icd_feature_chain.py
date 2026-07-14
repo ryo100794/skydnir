@@ -2222,6 +2222,25 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     fprintf(stderr, "all-false robustness chain was rejected\\n");
                     return 4;
                 }}
+            #ifdef VK_EXT_ROBUSTNESS_2_EXTENSION_NAME
+                if (!device_extension_advertised_name(VK_EXT_ROBUSTNESS_2_EXTENSION_NAME)) {{
+                    fprintf(stderr, "VK_EXT_robustness2 was not advertised\\n");
+                    return 14;
+                }}
+                const char *robustness2_extensions[] = {{ VK_EXT_ROBUSTNESS_2_EXTENSION_NAME }};
+                create_info.enabledExtensionCount = 1;
+                create_info.ppEnabledExtensionNames = robustness2_extensions;
+                if (validate_device_extensions(&create_info) != VK_SUCCESS) {{
+                    fprintf(stderr, "VK_EXT_robustness2 extension enable was rejected\\n");
+                    return 15;
+                }}
+                if (validate_device_feature_requests(&create_info) != VK_SUCCESS) {{
+                    fprintf(stderr, "VK_EXT_robustness2 all-false feature chain was rejected\\n");
+                    return 16;
+                }}
+                create_info.enabledExtensionCount = 0;
+                create_info.ppEnabledExtensionNames = NULL;
+            #endif
             #ifdef VK_EXT_IMAGE_ROBUSTNESS_EXTENSION_NAME
                 if (!device_extension_advertised_name(VK_EXT_IMAGE_ROBUSTNESS_EXTENSION_NAME)) {{
                     fprintf(stderr, "VK_EXT_image_robustness was not advertised\\n");
