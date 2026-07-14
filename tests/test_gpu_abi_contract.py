@@ -9209,7 +9209,16 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("*pSparseMemoryRequirementCount = 0;", sparse2_body)
         self.assertNotIn("pSparseMemoryRequirements[0]", sparse2_body)
         hidden_body = c_function_body(icd, "proc_address_hidden_by_advertisement")
-        self.assertIn("vkGetImageSparseMemoryRequirements2KHR", hidden_body)
+        self.assertNotIn("vkGetImageSparseMemoryRequirements2KHR", hidden_body)
+        self.assertIn('strcmp(pName, "vkGetDeviceBufferMemoryRequirements") == 0', hidden_body)
+        self.assertIn('strcmp(pName, "vkGetDeviceImageMemoryRequirements") == 0', hidden_body)
+        self.assertIn('strcmp(pName, "vkGetDeviceImageSparseMemoryRequirements") == 0', hidden_body)
+        for advertised_alias in [
+            "vkGetDeviceBufferMemoryRequirementsKHR",
+            "vkGetDeviceImageMemoryRequirementsKHR",
+            "vkGetDeviceImageSparseMemoryRequirementsKHR",
+        ]:
+            self.assertNotIn(advertised_alias, hidden_body)
 
 
     def test_vulkan_proc_table_exposes_khr_aliases_for_advertised_core2_apis(self):

@@ -31807,7 +31807,6 @@ static bool proc_address_hidden_by_advertisement(const char *pName) {
         strcmp(pName, "vkGetPhysicalDeviceExternalBufferPropertiesKHR") == 0 ||
         strcmp(pName, "vkGetPhysicalDeviceExternalSemaphorePropertiesKHR") == 0 ||
         strcmp(pName, "vkGetPhysicalDeviceExternalFencePropertiesKHR") == 0 ||
-        strcmp(pName, "vkGetImageSparseMemoryRequirements2KHR") == 0 ||
         strcmp(pName, "vkGetImageSubresourceLayout2KHR") == 0 ||
         strcmp(pName, "vkGetImageSubresourceLayout2EXT") == 0 ||
         strcmp(pName, "vkGetDeviceImageSubresourceLayoutKHR") == 0 ||

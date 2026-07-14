@@ -1809,6 +1809,17 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
             }}
 
             int main(void) {{
+            #ifdef VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME
+                if (!device_extension_advertised_name(VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME)) return 20;
+                if (proc_address("vkGetImageSparseMemoryRequirements2KHR") == NULL) return 21;
+            #endif
+            #ifdef VK_KHR_MAINTENANCE_4_EXTENSION_NAME
+                if (!device_extension_advertised_name(VK_KHR_MAINTENANCE_4_EXTENSION_NAME)) return 22;
+                if (proc_address("vkGetDeviceBufferMemoryRequirements") != NULL) return 23;
+                if (proc_address("vkGetDeviceBufferMemoryRequirementsKHR") == NULL) return 24;
+                if (proc_address("vkGetDeviceImageMemoryRequirementsKHR") == NULL) return 25;
+                if (proc_address("vkGetDeviceImageSparseMemoryRequirementsKHR") == NULL) return 26;
+            #endif
                 VkBufferCreateInfo buffer_info;
                 memset(&buffer_info, 0, sizeof(buffer_info));
                 buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
