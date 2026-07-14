@@ -9186,6 +9186,30 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(api, body)
 
 
+
+    def test_vulkan_descriptor_update_template_extension_is_advertised_and_aliases_are_public(self):
+        icd = VULKAN_ICD.read_text()
+        collector_body = c_function_body(icd, "collect_advertised_device_extensions")
+        validation_body = c_function_body(icd, "device_extension_advertised_name")
+        hidden_body = c_function_body(icd, "proc_address_hidden_by_advertisement")
+        proc_body = icd.split("static PFN_vkVoidFunction proc_address", 1)[1].split(
+            "VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr", 1
+        )[0]
+        self.assertIn("VK_KHR_DESCRIPTOR_UPDATE_TEMPLATE_EXTENSION_NAME", collector_body)
+        self.assertIn("collect_advertised_device_extensions(", validation_body)
+        for alias in [
+            'MAP_ALIAS("vkCreateDescriptorUpdateTemplateKHR", vkCreateDescriptorUpdateTemplate)',
+            'MAP_ALIAS("vkDestroyDescriptorUpdateTemplateKHR", vkDestroyDescriptorUpdateTemplate)',
+            'MAP_ALIAS("vkUpdateDescriptorSetWithTemplateKHR", vkUpdateDescriptorSetWithTemplate)',
+        ]:
+            self.assertIn(alias, proc_body)
+        for hidden in [
+            "vkCreateDescriptorUpdateTemplateKHR",
+            "vkDestroyDescriptorUpdateTemplateKHR",
+            "vkUpdateDescriptorSetWithTemplateKHR",
+        ]:
+            self.assertNotIn(hidden, hidden_body)
+
     def test_vulkan_maintenance4_memory_requirement_apis_are_mapped_and_conservative(self):
         icd = VULKAN_ICD.read_text()
         for marker in [
@@ -9459,9 +9483,6 @@ class GpuAbiContractTest(unittest.TestCase):
             "vkTrimCommandPoolKHR",
             "vkCreateSamplerYcbcrConversionKHR",
             "vkDestroySamplerYcbcrConversionKHR",
-            "vkCreateDescriptorUpdateTemplateKHR",
-            "vkDestroyDescriptorUpdateTemplateKHR",
-            "vkUpdateDescriptorSetWithTemplateKHR",
             "vkGetBufferDeviceAddressKHR",
             "vkGetBufferOpaqueCaptureAddressKHR",
             "vkGetDeviceMemoryOpaqueCaptureAddressKHR",

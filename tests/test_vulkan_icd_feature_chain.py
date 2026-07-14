@@ -170,6 +170,91 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+
+    def test_descriptor_update_template_extension_exposes_khr_aliases(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            static int extension_seen(
+                    const VkExtensionProperties *extensions,
+                    uint32_t count,
+                    const char *name) {{
+                for (uint32_t i = 0; i < count; ++i) {{
+                    if (strcmp(extensions[i].extensionName, name) == 0) return 1;
+                }}
+                return 0;
+            }}
+
+            int main(void) {{
+            #ifdef VK_KHR_DESCRIPTOR_UPDATE_TEMPLATE_EXTENSION_NAME
+                if (!device_extension_advertised_name(VK_KHR_DESCRIPTOR_UPDATE_TEMPLATE_EXTENSION_NAME)) return 2;
+                uint32_t count = 64;
+                VkExtensionProperties extensions[64];
+                memset(extensions, 0, sizeof(extensions));
+                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &count, extensions) != VK_SUCCESS) return 3;
+                if (!extension_seen(extensions, count, VK_KHR_DESCRIPTOR_UPDATE_TEMPLATE_EXTENSION_NAME)) return 4;
+
+                const char *enabled[] = {{ VK_KHR_DESCRIPTOR_UPDATE_TEMPLATE_EXTENSION_NAME }};
+                VkDeviceCreateInfo device_info;
+                memset(&device_info, 0, sizeof(device_info));
+                device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                device_info.enabledExtensionCount = 1;
+                device_info.ppEnabledExtensionNames = enabled;
+                if (validate_device_extensions(&device_info) != VK_SUCCESS) return 5;
+                if (proc_address("vkCreateDescriptorUpdateTemplateKHR") == NULL) return 6;
+                if (proc_address("vkDestroyDescriptorUpdateTemplateKHR") == NULL) return 7;
+                if (proc_address("vkUpdateDescriptorSetWithTemplateKHR") == NULL) return 8;
+
+                VkDescriptorSetLayoutBinding binding;
+                VkDescriptorSetLayoutCreateInfo layout_info;
+                memset(&binding, 0, sizeof(binding));
+                memset(&layout_info, 0, sizeof(layout_info));
+                binding.binding = 0;
+                binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+                binding.descriptorCount = 1;
+                binding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+                layout_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+                layout_info.bindingCount = 1;
+                layout_info.pBindings = &binding;
+                VkDescriptorSetLayout layout = VK_NULL_HANDLE;
+                if (vkCreateDescriptorSetLayout(VK_NULL_HANDLE, &layout_info, NULL, &layout) != VK_SUCCESS) return 9;
+
+                VkDescriptorUpdateTemplateEntry entry;
+                VkDescriptorUpdateTemplateCreateInfo template_info;
+                memset(&entry, 0, sizeof(entry));
+                memset(&template_info, 0, sizeof(template_info));
+                entry.dstBinding = 0;
+                entry.dstArrayElement = 0;
+                entry.descriptorCount = 1;
+                entry.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+                entry.offset = 0;
+                entry.stride = sizeof(VkDescriptorBufferInfo);
+                template_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_UPDATE_TEMPLATE_CREATE_INFO;
+                template_info.descriptorUpdateEntryCount = 1;
+                template_info.pDescriptorUpdateEntries = &entry;
+                template_info.templateType = VK_DESCRIPTOR_UPDATE_TEMPLATE_TYPE_DESCRIPTOR_SET;
+                template_info.descriptorSetLayout = layout;
+                VkDescriptorUpdateTemplate update_template = VK_NULL_HANDLE;
+                PFN_vkCreateDescriptorUpdateTemplateKHR create_template =
+                    (PFN_vkCreateDescriptorUpdateTemplateKHR)proc_address("vkCreateDescriptorUpdateTemplateKHR");
+                PFN_vkDestroyDescriptorUpdateTemplateKHR destroy_template =
+                    (PFN_vkDestroyDescriptorUpdateTemplateKHR)proc_address("vkDestroyDescriptorUpdateTemplateKHR");
+                if (create_template(VK_NULL_HANDLE, &template_info, NULL, &update_template) != VK_SUCCESS) return 10;
+                if (update_template == VK_NULL_HANDLE) return 11;
+                destroy_template(VK_NULL_HANDLE, update_template, NULL);
+                vkDestroyDescriptorSetLayout(VK_NULL_HANDLE, layout, NULL);
+            #endif
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_validation_cache_extension_is_local_noop_and_shader_pnext_accepts_cache(self):
         source = textwrap.dedent(
             f"""
