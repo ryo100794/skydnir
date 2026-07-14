@@ -303,6 +303,64 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_shader_non_semantic_info_extension_keeps_shader_bytes_unmodified(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            int main(void) {{
+            #ifndef VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME
+                return 0;
+            #else
+                if (!device_extension_advertised_name(VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME)) return 2;
+                uint32_t extension_count = 0;
+                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &extension_count, NULL) != VK_SUCCESS ||
+                    extension_count == 0) return 3;
+                VkExtensionProperties extensions[64];
+                memset(extensions, 0, sizeof(extensions));
+                uint32_t capacity = 64;
+                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &capacity, extensions) != VK_SUCCESS) return 4;
+                VkBool32 found = VK_FALSE;
+                for (uint32_t i = 0; i < capacity; ++i) {{
+                    if (strcmp(extensions[i].extensionName, VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME) == 0) found = VK_TRUE;
+                }}
+                if (!found) return 5;
+
+                const char *enabled[] = {{ VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME }};
+                VkDeviceCreateInfo create_info;
+                memset(&create_info, 0, sizeof(create_info));
+                create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                create_info.enabledExtensionCount = 1;
+                create_info.ppEnabledExtensionNames = enabled;
+                if (validate_device_extensions(&create_info) != VK_SUCCESS) return 6;
+
+                const uint32_t shader_words[] = {{
+                    0x07230203u, 0x00010000u, 0u, 7u,
+                    0x4e53454du, 0x414e5449u, 0x4300debu, 0x12345678u
+                }};
+                VkShaderModuleCreateInfo shader_info;
+                memset(&shader_info, 0, sizeof(shader_info));
+                shader_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+                shader_info.codeSize = sizeof(shader_words);
+                shader_info.pCode = shader_words;
+                VkShaderModule shader = VK_NULL_HANDLE;
+                if (vkCreateShaderModule(VK_NULL_HANDLE, &shader_info, NULL, &shader) != VK_SUCCESS ||
+                    shader == VK_NULL_HANDLE) return 7;
+                PdockerVkShaderModule *stored = pdocker_vk_shader_module_from_handle(shader);
+                if (!stored || stored->code_size != sizeof(shader_words) || !stored->code_map) return 8;
+                if (memcmp(stored->code_map, shader_words, sizeof(shader_words)) != 0) return 9;
+                vkDestroyShaderModule(VK_NULL_HANDLE, shader, NULL);
+                return 0;
+            #endif
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_subpass_merge_feedback_feature_is_queryable_but_not_enableable(self):
         source = textwrap.dedent(
             f"""

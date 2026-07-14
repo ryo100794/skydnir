@@ -8411,7 +8411,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn('unsupported_feature_name = "hostQueryReset"', host_query_request_segment)
 
         self.assertIn("VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME", icd)
+        self.assertIn("VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME", icd)
         self.assertIn("ADD_DEVICE_EXTENSION(VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME", icd)
+        self.assertIn("ADD_DEVICE_EXTENSION(VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME", icd)
         self.assertIn("VKAPI_ATTR void VKAPI_CALL vkResetQueryPool", icd)
         self.assertIn("VKAPI_ATTR void VKAPI_CALL vkResetQueryPoolEXT", icd)
         self.assertIn("MAP_PROC(vkResetQueryPoolEXT)", icd)
@@ -9609,6 +9611,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VKAPI_ATTR VkResult VKAPI_CALL vkCreateValidationCacheEXT", icd)
         self.assertIn("VK_EXT_VALIDATION_CACHE_EXTENSION_NAME", icd)
         self.assertIn("VK_EXT_TOOLING_INFO_EXTENSION_NAME", icd)
+        self.assertIn("VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME", icd)
         self.assertIn("VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceToolProperties", icd)
         self.assertIn("MAP_PROC(vkGetPhysicalDeviceToolPropertiesEXT)", icd)
         self.assertIn("MAP_PROC(vkCreateValidationCacheEXT)", icd)
