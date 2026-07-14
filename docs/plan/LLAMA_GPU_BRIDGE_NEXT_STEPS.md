@@ -2327,16 +2327,15 @@ and does not expose `vkSetDeviceMemoryPriorityEXT`.
 
 ### 2026-07-13 Vulkan private-data no-op feature/create-info lane
 
-`vkGetPhysicalDeviceFeatures2` now handles
-`VkPhysicalDevicePrivateDataFeatures` explicitly and reports
-`privateData = VK_FALSE`.  `vkCreateDevice` accepts the same feature struct only
-when false, and accepts `VkDevicePrivateDataCreateInfo` only when
-`privateDataSlotRequestCount == 0`.  Any request to enable private data or
-reserve private-data slots still fails with `VK_ERROR_FEATURE_NOT_PRESENT`
-because Skydnir does not advertise `VK_EXT_private_data`, does not expose the
-private-data slot commands, and does not serialize per-object private-data
-state through the bridge.  This is a no-op metadata compatibility lane, not a
-private-data implementation.
+This lane originally made `VkPhysicalDevicePrivateDataFeatures` and
+`VkDevicePrivateDataCreateInfo` explicit fail-closed/no-op metadata instead of
+leaving them ambiguous.  It has since been superseded by the
+2026-07-14 private-data ICD-local metadata lane: Skydnir now advertises
+`VK_EXT_private_data`, reports `privateData = VK_TRUE`, accepts slot-count
+hints, and stores per-object private-data values as ICD-local metadata.  The
+important retained policy is that private data is metadata only; it is not
+transported through the Android Vulkan executor and cannot affect shader
+execution.
 
 ### 2026-07-13 Vulkan memory allocation export-handle no-op pNext lane
 
@@ -2410,15 +2409,14 @@ Dockerfiles, model files, prompts, SPIR-V bytes, or shader policy.
 ### 2026-07-13 Vulkan shader-module validation-cache no-op pNext lane
 
 `vkCreateShaderModule` now classifies `VkShaderModuleValidationCacheCreateInfoEXT`
-explicitly instead of rejecting the whole shader-module pNext chain.  A null
-`validationCache` is accepted as execution-neutral metadata, while a non-null
-validation-cache handle still fails closed with `VK_ERROR_FEATURE_NOT_PRESENT`
-because Skydnir does not advertise `VK_EXT_validation_cache`, does not create
-validation-cache objects, and does not replay driver validation-cache state
-through the bridge.  Unknown shader-module pNext structs remain fail-closed.
-This is generic Vulkan API-surface compatibility and does not change executor
-ABI, llama.cpp, Dockerfiles, model files, prompts, SPIR-V bytes, or shader
-policy.
+explicitly instead of rejecting the whole shader-module pNext chain.  This lane
+was later widened into ICD-local `VK_EXT_validation_cache` support: Skydnir now
+advertises the extension and accepts null or Skydnir-owned validation-cache
+handles as execution-neutral metadata.  Validation-cache data is still not
+replayed into Android Vulkan, and unknown shader-module pNext structs remain
+fail-closed.  This is generic Vulkan API-surface compatibility and does not
+change executor ABI, llama.cpp, Dockerfiles, model files, prompts, SPIR-V bytes,
+or shader policy.
 
 ### 2026-07-14 Vulkan query-result flags producer fail-closed lane
 
