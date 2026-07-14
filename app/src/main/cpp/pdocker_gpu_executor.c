@@ -2806,6 +2806,50 @@ static int materialize_vulkan_dispatch_indirect_buffer(
         out);
 }
 
+static int materialize_vulkan_dispatch_buffer_resource(
+        VkPhysicalDevice physical_device,
+        VkDevice device,
+        const VulkanDispatchV5ObjectTables *object_tables,
+        uint32_t resource_index,
+        VulkanVectorBuffer *out) {
+    if (!object_tables || !object_tables->resources || !object_tables->passed_fds || !out ||
+        resource_index >= object_tables->resource_count) {
+        return -EINVAL;
+    }
+    const PdockerGpuVulkanDispatchV5ResourceEntry *buffer =
+        &object_tables->resources[resource_index];
+    if (buffer->resource_type != PDOCKER_GPU_V5_RESOURCE_TYPE_BUFFER ||
+        buffer->parent_resource_index >= object_tables->resource_count) {
+        return -EPROTO;
+    }
+    const PdockerGpuVulkanDispatchV5ResourceEntry *memory =
+        &object_tables->resources[buffer->parent_resource_index];
+    if (memory->resource_type != PDOCKER_GPU_V5_RESOURCE_TYPE_MEMORY ||
+        memory->fd_index == PDOCKER_GPU_V5_RESOURCE_FD_NONE ||
+        memory->fd_index >= object_tables->passed_fd_count ||
+        object_tables->passed_fds[memory->fd_index] < 0) {
+        return -EBADF;
+    }
+    if (buffer->memory_offset > memory->size ||
+        buffer->size == 0 ||
+        buffer->size > memory->size - buffer->memory_offset ||
+        buffer->size > (uint64_t)SIZE_MAX) {
+        return -ERANGE;
+    }
+    if (memory->external_offset > UINT64_MAX - buffer->memory_offset) return -EOVERFLOW;
+    uint64_t fd_offset_u64 = memory->external_offset + buffer->memory_offset;
+    if (fd_offset_u64 > (uint64_t)LLONG_MAX) return -EOVERFLOW;
+    return create_vulkan_indirect_buffer_from_fd(
+        physical_device,
+        device,
+        object_tables->passed_fds[memory->fd_index],
+        (size_t)buffer->size,
+        (off_t)fd_offset_u64,
+        (VkBufferUsageFlags)buffer->usage,
+        out);
+}
+
+
 typedef struct {
     uint64_t memory_id;
     int fd;
@@ -4103,8 +4147,13 @@ static int materialize_vulkan_dispatch_images(
     }
     if ((image_descriptor_count > 0 && !image_descriptors) ||
         !object_tables || !object_tables->resources ||
-        !object_tables->passed_fds || !object_tables->images ||
-        !object_tables->image_views || !memories || !images || !views || !samplers) {
+        !object_tables->passed_fds ||
+        (object_tables->image_count > 0 && !object_tables->images) ||
+        (object_tables->image_view_count > 0 && !object_tables->image_views) ||
+        (object_tables->sampler_count > 0 && !object_tables->samplers) ||
+        !memories || !images ||
+        (object_tables->image_view_count > 0 && !views) ||
+        (object_tables->sampler_count > 0 && !samplers)) {
         return -EINVAL;
     }
     if (object_tables->image_count > image_capacity ||
@@ -4679,6 +4728,8 @@ static int record_vulkan_dispatch_v54_pre_dispatch_barriers(
         size_t binding_count,
         VulkanVectorBuffer *const *vk_buffers,
         const size_t *binding_descriptor_offset,
+        VulkanVectorBuffer *const *resource_buffers,
+        size_t resource_buffer_count,
         VulkanDispatchImageObject *images,
         size_t image_count) {
     if (!object_tables ||
@@ -4687,8 +4738,9 @@ static int record_vulkan_dispatch_v54_pre_dispatch_barriers(
          object_tables->image_barrier_count == 0)) {
         return 0;
     }
-    if (!rt || !rt->cmd_pipeline_barrier2 || !command_buffer || !bindings || !vk_buffers ||
-        !binding_descriptor_offset || !images) {
+    if (!rt || !rt->cmd_pipeline_barrier2 || !command_buffer ||
+        !images ||
+        (object_tables->buffer_barrier_count > 0 && !resource_buffers)) {
         return -EOPNOTSUPP;
     }
     VkMemoryBarrier2 *memory_barriers = NULL;
@@ -4728,14 +4780,25 @@ static int record_vulkan_dispatch_v54_pre_dispatch_barriers(
     for (size_t i = 0; i < object_tables->buffer_barrier_count; ++i) {
         const PdockerGpuVulkanDispatchV54BufferBarrierEntry *src =
             &object_tables->buffer_barriers[i];
+        VulkanVectorBuffer *buffer = NULL;
         int binding_index = find_vulkan_dispatch_binding_by_resource_index(
             bindings, binding_count, src->resource_index);
-        if (binding_index < 0) { rc = binding_index; goto cleanup; }
-        const VulkanDispatchBinding *binding = &bindings[(size_t)binding_index];
-        VulkanVectorBuffer *buffer = vk_buffers[(size_t)binding_index];
+        if (binding_index >= 0) {
+            const VulkanDispatchBinding *binding = &bindings[(size_t)binding_index];
+            if (!vk_buffers || !binding_descriptor_offset ||
+                !vulkan_binding_descriptor_offset_equals_api_offset(
+                    binding, binding_descriptor_offset[(size_t)binding_index])) {
+                rc = -ERANGE;
+                goto cleanup;
+            }
+            buffer = vk_buffers[(size_t)binding_index];
+        } else if (resource_buffers && src->resource_index < resource_buffer_count) {
+            buffer = resource_buffers[src->resource_index];
+        } else {
+            rc = -ENOENT;
+            goto cleanup;
+        }
         if (!buffer || !buffer->buffer ||
-            !vulkan_binding_descriptor_offset_equals_api_offset(
-                binding, binding_descriptor_offset[(size_t)binding_index]) ||
             src->offset > buffer->size || src->size > buffer->size - src->offset) {
             rc = -ERANGE;
             goto cleanup;
@@ -15279,6 +15342,9 @@ static int run_vulkan_dispatch_fd(
     VulkanVectorBuffer dispatch_indirect_temp_buffer;
     int dispatch_indirect_temp_buffer_used = 0;
     VulkanVectorBuffer **vk_buffers = NULL;
+    VulkanVectorBuffer **resource_buffers = NULL;
+    VulkanVectorBuffer *barrier_resource_buffers = NULL;
+    uint8_t *barrier_resource_buffer_used = NULL;
     VulkanStrictMemoryObject *strict_memories = NULL;
     VulkanStrictBufferObject *strict_buffers = NULL;
     VulkanDispatchImageMemoryObject *image_memories = NULL;
@@ -15563,6 +15629,9 @@ static int run_vulkan_dispatch_fd(
     if (!shader_code) return -21;
 
     const size_t binding_table_capacity = binding_count ? binding_count : 1u;
+    const size_t resource_buffer_capacity = object_tables && object_tables->resource_count
+        ? object_tables->resource_count
+        : 1u;
     const size_t alias_table_capacity = PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS;
     const size_t image_memory_capacity = object_tables && object_tables->resource_count
         ? object_tables->resource_count
@@ -15577,6 +15646,7 @@ static int run_vulkan_dispatch_fd(
         ? object_tables->sampler_count
         : 1u;
     if (binding_table_capacity > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS ||
+        resource_buffer_capacity > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_RESOURCES ||
         image_memory_capacity > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_RESOURCES ||
         image_table_capacity > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGES ||
         image_view_table_capacity > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGE_VIEWS ||
@@ -15597,6 +15667,9 @@ static int run_vulkan_dispatch_fd(
     PDOCKER_CALLOC_TABLE(temp_buffers, binding_table_capacity);
     PDOCKER_CALLOC_TABLE(alias_temp_buffers, alias_table_capacity);
     PDOCKER_CALLOC_TABLE(vk_buffers, binding_table_capacity);
+    PDOCKER_CALLOC_TABLE(resource_buffers, resource_buffer_capacity);
+    PDOCKER_CALLOC_TABLE(barrier_resource_buffers, resource_buffer_capacity);
+    PDOCKER_CALLOC_TABLE(barrier_resource_buffer_used, resource_buffer_capacity);
     PDOCKER_CALLOC_TABLE(strict_memories, binding_table_capacity);
     PDOCKER_CALLOC_TABLE(strict_buffers, binding_table_capacity);
     PDOCKER_CALLOC_TABLE(image_memories, image_memory_capacity);
@@ -16797,6 +16870,41 @@ static int run_vulkan_dispatch_fd(
         }
         dispatch_indirect_temp_buffer_used = 1;
     }
+    if (object_tables && object_tables->resources && resource_buffers) {
+        for (size_t i = 0; i < binding_count; ++i) {
+            if (bindings[i].resource_index < resource_buffer_capacity) {
+                resource_buffers[bindings[i].resource_index] = vk_buffers[i];
+            }
+        }
+        if (options && options->has_dispatch_indirect &&
+            options->dispatch_indirect_resource_index < resource_buffer_capacity &&
+            dispatch_indirect_temp_buffer_used) {
+            resource_buffers[options->dispatch_indirect_resource_index] = &dispatch_indirect_temp_buffer;
+        }
+        for (size_t i = 0; i < object_tables->buffer_barrier_count; ++i) {
+            const uint32_t resource_index = object_tables->buffer_barriers[i].resource_index;
+            if (resource_index >= resource_buffer_capacity) {
+                json_fail("vulkan-dispatch", "barrier buffer resource index out of range");
+                ret = 64;
+                goto cleanup;
+            }
+            if (resource_buffers[resource_index]) continue;
+            fail_stage = "materialize-v54-barrier-buffer-resource";
+            int buffer_rc = materialize_vulkan_dispatch_buffer_resource(
+                rt->physical_device,
+                rt->device,
+                object_tables,
+                resource_index,
+                &barrier_resource_buffers[resource_index]);
+            if (buffer_rc != 0) {
+                json_fail("vulkan-dispatch", "failed to materialize V5.4 barrier buffer resource");
+                ret = buffer_rc == -ENOMEM ? 75 : 64;
+                goto cleanup;
+            }
+            barrier_resource_buffer_used[resource_index] = 1;
+            resource_buffers[resource_index] = &barrier_resource_buffers[resource_index];
+        }
+    }
 
     if (specialization_count > 0) {
         if (!specializations || !specialization_data) {
@@ -17853,7 +17961,8 @@ static int run_vulkan_dispatch_fd(
     }
     int app_barrier_rc = record_vulkan_dispatch_v54_pre_dispatch_barriers(
         rt, command_buffer, object_tables, bindings, binding_count, vk_buffers,
-        binding_descriptor_offset, dispatch_images, dispatch_image_count);
+        binding_descriptor_offset, resource_buffers, resource_buffer_capacity,
+        dispatch_images, dispatch_image_count);
     if (app_barrier_rc != 0) { io_rc = app_barrier_rc; goto cleanup; }
     if (push_size) vkCmdPushConstants(command_buffer, pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, (uint32_t)push_size, push);
     if (options && options->has_dispatch_indirect) {
@@ -19696,6 +19805,13 @@ cleanup:
             destroy_vulkan_vector_buffer(rt->device, &alias_temp_buffers[i]);
         }
     }
+    if (barrier_resource_buffers && barrier_resource_buffer_used) {
+        for (size_t i = 0; i < resource_buffer_capacity; ++i) {
+            if (barrier_resource_buffer_used[i]) {
+                destroy_vulkan_vector_buffer(rt->device, &barrier_resource_buffers[i]);
+            }
+        }
+    }
     destroy_vulkan_vector_buffer(rt->device, &dispatch_indirect_temp_buffer);
     if (strict_object_graph_cache_entry) {
         if (ret != 0 && strict_object_graph_cache_hit) {
@@ -19813,6 +19929,9 @@ cleanup:
     free(image_memories);
     free(strict_buffers);
     free(strict_memories);
+    free(barrier_resource_buffer_used);
+    free(barrier_resource_buffers);
+    free(resource_buffers);
     free(vk_buffers);
     free(alias_temp_buffers);
     free(temp_buffers);

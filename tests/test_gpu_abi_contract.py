@@ -14834,6 +14834,47 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, sender)
 
+    def test_vulkan_dispatch_v54_barrier_only_resources_are_closed_over(self):
+        icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
+        sender = c_function_body(icd, "send_generic_vulkan_dispatch_v5_1_op")
+        generic_sender = c_function_body(icd, "send_generic_vulkan_dispatch_op")
+        barrier_recorder = c_function_body(executor, "record_vulkan_dispatch_v54_pre_dispatch_barriers")
+        runner = c_function_body(executor, "run_vulkan_dispatch_fd")
+
+        for marker in [
+            "PdockerVkBuffer *barrier_buffer_objects[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_RESOURCES]",
+            "uint32_t barrier_buffer_resource_indices[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_RESOURCES]",
+            "barrier_buffer_resource_indices[i] = UINT32_MAX",
+            "barrier_buffer_objects[h] == buffer",
+            "hidden_barrier_buffer_resources",
+            "hidden_barrier_buffer_fds",
+            "barrier_buffer_resource_indices[h] = buffer_index",
+            "barrier_buffer_resource_indices[h] != UINT32_MAX",
+        ]:
+            self.assertIn(marker, icd)
+        self.assertIn("barrier_buffer_objects,\n            barrier_buffer_resource_indices", generic_sender)
+        self.assertIn("image_objects[image_count++] = barrier->image", sender)
+
+        for marker in [
+            "materialize_vulkan_dispatch_buffer_resource",
+            "VulkanVectorBuffer **resource_buffers",
+            "VulkanVectorBuffer *barrier_resource_buffers",
+            "uint8_t *barrier_resource_buffer_used",
+            "resource_buffers[bindings[i].resource_index] = vk_buffers[i]",
+            "resource_buffers[options->dispatch_indirect_resource_index] = &dispatch_indirect_temp_buffer",
+            "materialize_vulkan_dispatch_buffer_resource(",
+            "barrier_resource_buffer_used[resource_index] = 1",
+            "resource_buffers[resource_index] = &barrier_resource_buffers[resource_index]",
+            "free(barrier_resource_buffer_used)",
+            "free(barrier_resource_buffers)",
+            "free(resource_buffers)",
+        ]:
+            self.assertIn(marker, runner)
+        self.assertIn("VulkanVectorBuffer *const *resource_buffers", executor)
+        self.assertIn("find_vulkan_dispatch_binding_by_resource_index", barrier_recorder)
+        self.assertIn("resource_buffers[src->resource_index]", barrier_recorder)
+
 
     def test_spirv_observability_is_generic_not_hash_only(self):
         source = GPU_EXECUTOR.read_text()
