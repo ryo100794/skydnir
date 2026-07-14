@@ -20321,6 +20321,12 @@ static uint32_t collect_advertised_device_extensions(
                              VK_EXT_DESCRIPTOR_INDEXING_SPEC_VERSION);
     }
 #endif
+#ifdef VK_KHR_MULTIVIEW_EXTENSION_NAME
+    if (caps && caps->multiview) {
+        ADD_DEVICE_EXTENSION(VK_KHR_MULTIVIEW_EXTENSION_NAME,
+                             VK_KHR_MULTIVIEW_SPEC_VERSION);
+    }
+#endif
     ADD_DEVICE_EXTENSION(VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME,
                          VK_KHR_CREATE_RENDERPASS_2_SPEC_VERSION);
 #ifdef VK_EXT_SUBPASS_MERGE_FEEDBACK_EXTENSION_NAME

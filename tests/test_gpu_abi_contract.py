@@ -2833,6 +2833,10 @@ class GpuAbiContractTest(unittest.TestCase):
             "if (caps->multiview) mask |= PDOCKER_VK_FEATURE_MULTIVIEW;",
         ]:
             self.assertIn(marker, icd)
+        collector_body = c_function_body(icd, "collect_advertised_device_extensions")
+        self.assertIn("if (caps && caps->multiview)", collector_body)
+        self.assertIn("ADD_DEVICE_EXTENSION(VK_KHR_MULTIVIEW_EXTENSION_NAME,", collector_body)
+        self.assertIn("VK_KHR_MULTIVIEW_SPEC_VERSION", collector_body)
         self.assertNotIn("pRenderingInfo->flags != 0 || pRenderingInfo->viewMask != 0", icd)
         self.assertNotIn("if (rendering->viewMask != 0)", icd)
         self.assertNotIn("subpass->flags != 0 || subpass->viewMask != 0", icd)
