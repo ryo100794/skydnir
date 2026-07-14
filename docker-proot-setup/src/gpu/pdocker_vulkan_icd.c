@@ -11013,6 +11013,7 @@ typedef struct {
     VkDeviceSize api_offsets[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS];
     VkDeviceSize api_ranges[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS];
     size_t api_buffer_sizes[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS];
+    uint64_t api_buffer_usages[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS];
     uint32_t api_descriptor_types[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS];
     uint32_t api_dynamic_flags[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS];
     VkDeviceSize api_dynamic_offsets[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS];
@@ -11075,6 +11076,7 @@ static int send_generic_vulkan_dispatch_v5_1_op(
         const VkDeviceSize *api_offsets,
         const VkDeviceSize *api_ranges,
         const size_t *api_buffer_sizes,
+        const uint64_t *api_buffer_usages,
         const uint32_t *api_descriptor_types,
         const uint32_t *api_dynamic_flags,
         const VkDeviceSize *api_dynamic_offsets,
@@ -11116,7 +11118,7 @@ static int send_generic_vulkan_dispatch_v5_1_op(
     if (socket_fd < 0 || !fds || !entry_name ||
         (binding_count > 0 &&
          (!api_descriptor_sets || !api_descriptor_array_elements || !bindings || !offsets || !sizes || !api_offsets ||
-          !api_ranges || !api_buffer_sizes || !api_descriptor_types ||
+          !api_ranges || !api_buffer_sizes || !api_buffer_usages || !api_descriptor_types ||
           !api_dynamic_flags || !api_dynamic_offsets || !api_memory_offsets || !api_memory_sizes ||
           !api_memory_ids || !api_buffer_ids || !api_buffer_view_ids ||
           !api_buffer_view_formats || !api_buffer_view_offsets ||
@@ -11342,7 +11344,8 @@ static int send_generic_vulkan_dispatch_v5_1_op(
         descriptors[i].transfer_offset = transfer_offset;
         descriptors[i].transfer_size = (uint64_t)sizes[i];
         descriptors[i].dynamic_offset = (uint64_t)api_dynamic_offsets[i];
-        resources[buffer_index].usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+        resources[buffer_index].usage = api_buffer_usages[i];
+        resources[buffer_index].usage |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
             VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
             VK_BUFFER_USAGE_TRANSFER_DST_BIT |
             VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
@@ -11914,6 +11917,7 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
     VkDeviceSize *api_offsets = tables->api_offsets;
     VkDeviceSize *api_ranges = tables->api_ranges;
     size_t *api_buffer_sizes = tables->api_buffer_sizes;
+    uint64_t *api_buffer_usages = tables->api_buffer_usages;
     uint32_t *api_descriptor_types = tables->api_descriptor_types;
     uint32_t *api_dynamic_flags = tables->api_dynamic_flags;
     VkDeviceSize *api_dynamic_offsets = tables->api_dynamic_offsets;
@@ -12161,6 +12165,7 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
                 api_offsets[binding_count] = transport_binding->base_offset;
                 api_ranges[binding_count] = transport_binding->range;
                 api_buffer_sizes[binding_count] = transport_buffer ? transport_buffer->size : 0;
+                api_buffer_usages[binding_count] = transport_buffer ? (uint64_t)transport_buffer->usage : 0;
                 api_descriptor_types[binding_count] = (uint32_t)binding->descriptor_type;
                 api_dynamic_flags[binding_count] = transport_binding->dynamic ? 1u : 0u;
                 api_dynamic_offsets[binding_count] = transport_binding->dynamic_offset;
@@ -12681,6 +12686,7 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
             api_offsets,
             api_ranges,
             api_buffer_sizes,
+            api_buffer_usages,
             api_descriptor_types,
             api_dynamic_flags,
             api_dynamic_offsets,

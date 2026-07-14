@@ -964,6 +964,7 @@ typedef struct {
     off_t api_offset;
     size_t api_range;
     size_t api_buffer_size;
+    uint64_t api_buffer_usage;
     uint32_t api_descriptor_type;
     int api_dynamic;
     off_t api_memory_offset;
@@ -4834,7 +4835,8 @@ static int create_strict_vulkan_object_graph(
             buffers[buffer_index].transport_buffer_size = compact_descriptor_window
                 ? 0
                 : bindings[i].api_buffer_size;
-            buffers[buffer_index].usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+            buffers[buffer_index].usage = (VkBufferUsageFlags)bindings[i].api_buffer_usage;
+            buffers[buffer_index].usage |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                 VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
                 VK_BUFFER_USAGE_TRANSFER_DST_BIT |
                 VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
@@ -22221,6 +22223,7 @@ static int materialize_vulkan_dispatch_v5_native_plan_bindings(
         binding->api_offset = api_offset_checked;
         binding->api_range = (size_t)api_range;
         binding->api_buffer_size = (size_t)buffer->size;
+        binding->api_buffer_usage = buffer->usage;
         binding->api_descriptor_type = d->descriptor_type;
         binding->api_dynamic = (d->descriptor_flags & PDOCKER_GPU_V5_DESCRIPTOR_FLAG_DYNAMIC) ? 1 : 0;
         binding->api_memory_offset = memory_offset_checked;

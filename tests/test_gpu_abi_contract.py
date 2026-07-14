@@ -6383,6 +6383,35 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("free(descriptors->binds[i].sets);", destroy_body)
         self.assertIn("free(descriptors->binds);", destroy_body)
 
+    def test_vulkan_compute_v5_preserves_api_buffer_usage_identity(self):
+        icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
+
+        tables = icd.split("typedef struct {", 1)[1].split("} PdockerVkGenericDispatchTables;", 1)[0]
+        self.assertIn("uint64_t api_buffer_usages[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS];", tables)
+
+        sender = c_function_body(icd, "send_generic_vulkan_dispatch_op")
+        self.assertIn("uint64_t *api_buffer_usages = tables->api_buffer_usages;", sender)
+        self.assertIn("api_buffer_usages[binding_count] = transport_buffer ? (uint64_t)transport_buffer->usage : 0;", sender)
+        self.assertIn("api_buffer_usages,\n            api_descriptor_types", sender)
+
+        frame_sender = c_function_body(icd, "send_generic_vulkan_dispatch_v5_1_op")
+        self.assertIn("const uint64_t *api_buffer_usages", icd)
+        self.assertIn("!api_ranges || !api_buffer_sizes || !api_buffer_usages || !api_descriptor_types", frame_sender)
+        self.assertIn("resources[buffer_index].usage = api_buffer_usages[i];", frame_sender)
+        self.assertIn("resources[buffer_index].usage |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT", frame_sender)
+
+        binding_struct = executor.split("} VulkanVectorBuffer;", 1)[1].split("} VulkanDispatchBinding;", 1)[0]
+        self.assertIn("uint64_t api_buffer_usage;", binding_struct)
+
+        materializer = c_function_body(executor, "materialize_vulkan_dispatch_v5_native_plan_bindings")
+        self.assertIn("binding->api_buffer_usage = buffer->usage;", materializer)
+
+        graph = c_function_body(executor, "create_strict_vulkan_object_graph")
+        self.assertIn("buffers[buffer_index].usage = (VkBufferUsageFlags)bindings[i].api_buffer_usage;", graph)
+        self.assertIn("buffers[buffer_index].usage |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT", graph)
+        self.assertNotIn("buffers[buffer_index].usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |", graph)
+
     def test_vulkan_graphics_replay_buffers_are_heap_backed(self):
         executor = GPU_EXECUTOR.read_text()
         buffers_struct = executor.split("typedef struct VulkanGraphicsReplayBuffers", 1)[1].split(
