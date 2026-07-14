@@ -9886,7 +9886,9 @@ class GpuAbiContractTest(unittest.TestCase):
         feedback_body = c_function_body(icd, "validate_and_fill_pipeline_feedback_pnext")
         compute_body = c_function_body(icd, "vkCreateComputePipelines")
         graphics_body = c_function_body(icd, "vkCreateGraphicsPipelines")
+        collector_body = c_function_body(icd, "collect_advertised_device_extensions")
 
+        self.assertIn("ADD_DEVICE_EXTENSION(VK_EXT_PIPELINE_CREATION_FEEDBACK_EXTENSION_NAME", collector_body)
         self.assertIn("VK_STRUCTURE_TYPE_PIPELINE_CREATION_FEEDBACK_CREATE_INFO", feedback_body)
         self.assertIn("VK_PIPELINE_CREATION_FEEDBACK_VALID_BIT", feedback_body)
         self.assertIn("feedback_info->pPipelineCreationFeedback->duration = 0;", feedback_body)

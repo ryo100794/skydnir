@@ -2005,6 +2005,23 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 robustness.vertexInputs = VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_DEVICE_DEFAULT;
                 robustness.images = VK_PIPELINE_ROBUSTNESS_IMAGE_BEHAVIOR_DEVICE_DEFAULT;
 
+            #ifdef VK_EXT_PIPELINE_CREATION_FEEDBACK_EXTENSION_NAME
+                if (!device_extension_advertised_name(VK_EXT_PIPELINE_CREATION_FEEDBACK_EXTENSION_NAME)) {{
+                    fprintf(stderr, "VK_EXT_pipeline_creation_feedback was not advertised\\n");
+                    return 7;
+                }}
+                const char *enabled_extensions[] = {{ VK_EXT_PIPELINE_CREATION_FEEDBACK_EXTENSION_NAME }};
+                VkDeviceCreateInfo extension_info;
+                memset(&extension_info, 0, sizeof(extension_info));
+                extension_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                extension_info.enabledExtensionCount = 1;
+                extension_info.ppEnabledExtensionNames = enabled_extensions;
+                if (validate_device_extensions(&extension_info) != VK_SUCCESS) {{
+                    fprintf(stderr, "VK_EXT_pipeline_creation_feedback extension enable was rejected\\n");
+                    return 8;
+                }}
+            #endif
+
                 if (validate_and_fill_pipeline_feedback_pnext(
                         "unit-pipeline-robustness", &robustness, 1u, false) != VK_SUCCESS) {{
                     fprintf(stderr, "default pipeline robustness was rejected\\n");
@@ -2036,6 +2053,33 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     feedback.duration != 0) {{
                     fprintf(stderr, "pipeline feedback was not preserved through robustness chain\\n");
                     return 6;
+                }}
+
+                VkPipelineCreationFeedback stage_feedback[2];
+                memset(&feedback, 0xff, sizeof(feedback));
+                memset(stage_feedback, 0xff, sizeof(stage_feedback));
+                memset(&feedback_info, 0, sizeof(feedback_info));
+                feedback_info.sType = VK_STRUCTURE_TYPE_PIPELINE_CREATION_FEEDBACK_CREATE_INFO;
+                feedback_info.pPipelineCreationFeedback = &feedback;
+                feedback_info.pipelineStageCreationFeedbackCount = 1;
+                feedback_info.pPipelineStageCreationFeedbacks = stage_feedback;
+                if (validate_and_fill_pipeline_feedback_pnext(
+                        "unit-pipeline-feedback", &feedback_info, 1u, false) != VK_SUCCESS) {{
+                    fprintf(stderr, "pipeline feedback valid stage count was rejected\\n");
+                    return 9;
+                }}
+                if ((feedback.flags & VK_PIPELINE_CREATION_FEEDBACK_VALID_BIT) == 0 ||
+                    feedback.duration != 0 ||
+                    (stage_feedback[0].flags & VK_PIPELINE_CREATION_FEEDBACK_VALID_BIT) == 0 ||
+                    stage_feedback[0].duration != 0) {{
+                    fprintf(stderr, "pipeline feedback was not filled with valid zero-duration metadata\\n");
+                    return 10;
+                }}
+                feedback_info.pipelineStageCreationFeedbackCount = 2;
+                if (validate_and_fill_pipeline_feedback_pnext(
+                        "unit-pipeline-feedback", &feedback_info, 1u, false) == VK_SUCCESS) {{
+                    fprintf(stderr, "pipeline feedback mismatched stage count was accepted\\n");
+                    return 11;
                 }}
                 return 0;
             }}
