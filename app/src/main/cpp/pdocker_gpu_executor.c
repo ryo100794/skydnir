@@ -16360,11 +16360,8 @@ static int run_vulkan_dispatch_fd(
     const int has_barrier_only_work = object_tables &&
         (object_tables->memory_barrier_count || object_tables->buffer_barrier_count ||
          object_tables->image_barrier_count);
-    if (active_binding_count == 0 && image_descriptor_count == 0 && !has_barrier_only_work) {
-        json_fail("vulkan-dispatch", "shader uses no passed storage bindings");
-        ret = 64;
-        goto cleanup;
-    }
+    const int descriptorless_compute_dispatch =
+        active_binding_count == 0 && image_descriptor_count == 0 && !has_barrier_only_work;
     for (size_t i = 0; i < binding_count; ++i) {
         binding_alias_rep[i] = i;
         binding_group_read_needed[i] = binding_read_needed[i];
@@ -17744,14 +17741,16 @@ static int run_vulkan_dispatch_fd(
         command_buffer, dispatch_images, dispatch_image_count);
     if (initial_layout_rc != 0) { io_rc = initial_layout_rc; goto cleanup; }
     vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
-    vkCmdBindDescriptorSets(command_buffer,
-                            VK_PIPELINE_BIND_POINT_COMPUTE,
-                            pipeline_layout,
-                            0,
-                            descriptor_set_count,
-                            descriptor_sets,
-                            0,
-                            NULL);
+    if (!descriptorless_compute_dispatch) {
+        vkCmdBindDescriptorSets(command_buffer,
+                                VK_PIPELINE_BIND_POINT_COMPUTE,
+                                pipeline_layout,
+                                0,
+                                descriptor_set_count,
+                                descriptor_sets,
+                                0,
+                                NULL);
+    }
     if (strict_device_local_staging) {
         uint32_t staging_upload_count = 0;
         for (size_t i = 0; i < binding_count; ++i) {

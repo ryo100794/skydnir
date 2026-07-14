@@ -37,6 +37,7 @@ Confirmed facts:
 | 2026-07-14 compute descriptor image-layout fail-closed lane | Generic compute descriptor capture now checks each image descriptor layout against the ICD-tracked image layout state before V5/V5.1 frame emission. Non-mixed images must match the tracked whole-image layout; mixed images reject overlapping explicit ranges with a different layout and require non-default descriptor layouts to be covered by an explicit matching range. This prevents descriptor `imageLayout` metadata from being transported when it contradicts the tracked barrier-derived image state. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; host test `tests.test_gpu_abi_contract`; no llama.cpp/Dockerfile/model/prompt changes |
 | 2026-07-14 compute V5.4 barrier-only resource closure lane | Generic compute V5.4 dispatch transport now treats pre-dispatch barrier targets as part of the transported object graph even when they are not descriptors. The ICD appends descriptor-external barrier buffers/images as hidden resources, the Android executor materializes barrier-only buffer resources independently of descriptor writes, and V5.4 frame validation now includes the same object-extension schema/entry-size/hash checks as V5.1-V5.3. This is generic Vulkan synchronization/object-closure work, not a llama.cpp or shader-specific workaround. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; `app/src/main/cpp/pdocker_gpu_executor.c`; host test `tests.test_gpu_abi_contract`; glibc payload build `scripts/build-gpu-shim.sh`; native executor build `scripts/build-native-android-ndk.sh`; no llama.cpp/Dockerfile/model/prompt changes |
 | 2026-07-14 strict compute V5 transport lane | Generic compute dispatch now forces framed V5 transport whenever `PDOCKER_GPU_STRICT_PASSTHROUGH` is active, even for simple buffer-only dispatches that could previously fall back to the legacy V4 text command. Normal strict dispatches also carry explicit source/effective SPIR-V hashes, so strict identity evidence does not depend on executor-side guessing or the probe-only path. This keeps strict pass-through on the object/hash-validated transport path and avoids claiming strict identity from the text compatibility lane. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; host test `tests.test_gpu_abi_contract`; glibc payload build `scripts/build-gpu-shim.sh`; no llama.cpp/Dockerfile/model/prompt changes |
+| 2026-07-14 descriptorless compute V5 transport lane | Generic compute dispatches with zero buffer/image descriptors no longer fail at the producer or executor boundary. The ICD forces descriptorless compute dispatches onto V5 framed transport because the legacy V4 text command requires at least one binding, and Android replay builds the compute pipeline/push-constant path while skipping descriptor-set bind for descriptorless dispatches. Shaders that actually require descriptors still fail through native Vulkan pipeline/validation. This is generic Vulkan dispatch transport work, not a llama.cpp/hash/Dockerfile/model/prompt workaround. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; `app/src/main/cpp/pdocker_gpu_executor.c`; host test `tests.test_gpu_abi_contract`; no llama.cpp/Dockerfile/model/prompt changes |
 | 2026-07-14 graphics index-buffer2 bounded-bind lane | The container-side Vulkan ICD now implements `vkCmdBindIndexBuffer2` and `vkCmdBindIndexBuffer2KHR` through the same graphics V6 bind-index-buffer transport, keeps those entry points hidden until the matching core/maintenance5 capability is advertised, and retains the new `size` argument as producer-side validity state. Bounded index-buffer binds fail closed when the requested range is invalid, direct indexed draws are checked against the bound byte size before frame emission, and indexed indirect draws with a bounded index range remain fail-closed because the bridge cannot prove every indirect command stays inside the caller-provided size without decoding the indirect stream. No graphics ABI field, Android replay semantics, llama.cpp, Dockerfile, model, prompt, or shader bytes changed. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; host test `tests.test_gpu_abi_contract`; glibc payload build `scripts/build-gpu-shim.sh`; no llama.cpp/Dockerfile/model/prompt changes |
 | 2026-07-14 aspect-aware descriptor layout lane | Image descriptor layout validation now treats depth/stencil-specific read-only layouts as valid only when the descriptor image view selects compatible aspects. `VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL` and `VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_STENCIL_ATTACHMENT_OPTIMAL` are accepted only for depth-only views; `VK_IMAGE_LAYOUT_STENCIL_READ_ONLY_OPTIMAL` and `VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_STENCIL_READ_ONLY_OPTIMAL` only for stencil-only views; dual depth/stencil read-only accepts only depth/stencil views; storage images still require `GENERAL`. The ICD checks this against tracked image-view aspects before frame emission; the Android executor applies the same rule when materializing compute and graphics descriptors. This is generic Vulkan layout validation, not a llama.cpp or shader-specific path. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; `app/src/main/cpp/pdocker_gpu_executor.c`; host test `tests.test_gpu_abi_contract`; glibc payload build `scripts/build-gpu-shim.sh`; native executor build `scripts/build-native-android-ndk.sh`; native payload verifier `scripts/verify-native-payloads.py`; no llama.cpp/Dockerfile/model/prompt changes |
 | 2026-07-14 dynamic-rendering attachment-location identity lane | `VkRenderingAttachmentLocationInfo` is now accepted when it is a true identity/no-op mapping for the active dynamic-rendering color attachments. Non-identity remaps, count mismatches, missing location arrays, and `VkRenderingInputAttachmentIndexInfo` local-read payloads still fail closed because `dynamicRenderingLocalRead` is not advertised. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; `tests.test_gpu_abi_contract`; `tests.test_vulkan_icd_feature_chain`; glibc payload build `scripts/build-gpu-shim.sh`; no llama.cpp/Dockerfile/model/prompt changes |
@@ -2568,11 +2569,11 @@ those buffer resources independently, then resolves barrier resources through
 descriptor-backed buffers first and hidden resource buffers second before
 issuing `vkCmdPipelineBarrier2`.
 
-The generic dispatch path now allows descriptorless compute dispatches only
-when a pending pre-dispatch barrier provides real synchronization work, and the
-V5.1 sender no longer rejects before hidden barrier resources can be counted.
-Android replay mirrors that rule by allowing zero active descriptors only for
-barrier-only work.
+This lane originally kept zero-descriptor compute limited to barrier-only
+work.  The later descriptorless compute V5 lane supersedes that limitation:
+barrier-only resources still close over hidden V5 object-table entries here,
+while true descriptorless compute now uses V5 framed transport instead of the
+legacy V4 text command path.
 
 The executor validator now treats V5.4 as an object-extension frame for the
 same image/image-view/sampler schema, entry-size, range, and object-hash checks
@@ -2582,6 +2583,22 @@ carry a different schema or omit the object hash.  This keeps V5.4 from
 bypassing object-table shape validation while adding synchronization metadata.
 The lane does not modify llama.cpp, Dockerfiles, models, prompts, SPIR-V bytes,
 or shader policy.
+
+
+### 2026-07-14 Vulkan descriptorless compute V5 transport lane
+
+Generic compute dispatches with zero buffer/image descriptors now use framed V5
+transport instead of being rejected or falling back to legacy V4 text encoding.
+The V4 text command schema requires at least one binding, so the ICD marks
+descriptorless compute as a V5-required frame even outside strict mode.  Android
+replay still creates the compute pipeline and applies push constants, but skips
+`vkCmdBindDescriptorSets` for the descriptorless path.
+
+This is intentionally fail-closed and generic: no llama.cpp source, Dockerfile,
+model, prompt, SPIR-V bytecode, or shader hash is changed.  A shader that
+actually declares descriptor requirements without corresponding transported
+descriptors must still fail through normal Vulkan pipeline creation or native
+validation.
 
 ### 2026-07-14 Vulkan strict compute V5 transport lane
 

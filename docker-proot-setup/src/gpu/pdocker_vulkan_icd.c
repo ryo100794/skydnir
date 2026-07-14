@@ -12691,23 +12691,8 @@ static int send_generic_vulkan_dispatch_op(
             }
         }
     }
-    const bool pending_compute_barriers_for_empty_descriptor_dispatch = pre_barriers &&
-        (pre_barriers->memory_count || pre_barriers->buffer_count || pre_barriers->image_count);
-    if (binding_count == 0 && image_descriptor_count == 0 &&
-        !pending_compute_barriers_for_empty_descriptor_dispatch) {
-        fprintf(stderr,
-                "pdocker-vulkan-icd: generic dispatch rejected: no descriptors found dispatch_id=%llu sets_used_mask=0x%02x live_mask=0x%02x\n",
-                (unsigned long long)dispatch_id,
-                (op->set_snapshot_used[0] ? 1u : 0u) |
-                    (op->set_snapshot_used[1] ? 2u : 0u) |
-                    (op->set_snapshot_used[2] ? 4u : 0u) |
-                    (op->set_snapshot_used[3] ? 8u : 0u),
-                (op->set_handles[0] ? 1u : 0u) |
-                    (op->set_handles[1] ? 2u : 0u) |
-                    (op->set_handles[2] ? 4u : 0u) |
-                    (op->set_handles[3] ? 8u : 0u));
-        return -EINVAL;
-    }
+    const bool descriptorless_compute_dispatch =
+        binding_count == 0 && image_descriptor_count == 0;
 
     const uint64_t source_shader_hash =
         (shader->code_map && shader->code_map != MAP_FAILED)
@@ -13129,7 +13114,7 @@ static int send_generic_vulkan_dispatch_op(
         op->pipeline->specialization_entry_count > 0 ||
         op->pipeline->specialization_data_size > 0;
     const bool requires_v5_frame =
-        strict_passthrough ||
+        strict_passthrough || descriptorless_compute_dispatch ||
         descriptor_array_transport_required || texel_buffer_transport_required ||
         image_descriptor_count > 0 || pending_compute_barriers ||
         specialization_transport_required ||
@@ -13138,9 +13123,10 @@ static int send_generic_vulkan_dispatch_op(
         fprintf(stderr,
                 "pdocker-vulkan-icd: generic dispatch rejected: "
                 "V5 framed transport is required but copy-alias text fallback is enabled "
-                "dispatch_id=%llu strict=%u texel=%u image_descriptors=%zu descriptor_array=%u barriers=%u specialization=%u\n",
+                "dispatch_id=%llu strict=%u descriptorless=%u texel=%u image_descriptors=%zu descriptor_array=%u barriers=%u specialization=%u\n",
                 (unsigned long long)dispatch_id,
                 strict_passthrough ? 1u : 0u,
+                descriptorless_compute_dispatch ? 1u : 0u,
                 texel_buffer_transport_required ? 1u : 0u,
                 image_descriptor_count,
                 descriptor_array_transport_required ? 1u : 0u,

@@ -14158,7 +14158,10 @@ class GpuAbiContractTest(unittest.TestCase):
             ".descriptorSetCount = descriptor_set_count",
             "vkAllocateDescriptorSets(rt->device, &dsai, descriptor_sets)",
             "writes[write_count].dstSet = descriptor_sets[bindings[i].descriptor_set]",
-            "descriptor_set_count,\n                            descriptor_sets",
+            "if (!descriptorless_compute_dispatch)",
+            "vkCmdBindDescriptorSets(command_buffer,",
+            "descriptor_set_count,",
+            "descriptor_sets",
             "off_t *binding_object_base = NULL;",
             "off_t *binding_object_end = NULL;",
             "object_base = bindings[i].api_memory_offset;",
@@ -14942,7 +14945,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("resource_buffers[src->resource_index]", barrier_recorder)
 
 
-    def test_vulkan_dispatch_v54_barrier_only_path_allows_descriptorless_transport(self):
+    def test_vulkan_dispatch_v5_allows_descriptorless_compute_transport(self):
         icd = VULKAN_ICD.read_text()
         executor = GPU_EXECUTOR.read_text()
         sender = c_function_body(icd, "send_generic_vulkan_dispatch_v5_1_op")
@@ -14950,10 +14953,20 @@ class GpuAbiContractTest(unittest.TestCase):
         runner = c_function_body(executor, "run_vulkan_dispatch_fd")
 
         self.assertNotIn("empty descriptor table", sender)
-        self.assertIn("pending_compute_barriers_for_empty_descriptor_dispatch", generic_sender)
-        self.assertIn("!pending_compute_barriers_for_empty_descriptor_dispatch", generic_sender)
+        self.assertNotIn("generic dispatch rejected: no descriptors found", generic_sender)
+        self.assertIn("const bool descriptorless_compute_dispatch =", generic_sender)
+        self.assertIn("binding_count == 0 && image_descriptor_count == 0", generic_sender)
+        requires_block = generic_sender.split("const bool requires_v5_frame =", 1)[1].split(
+            "if (requires_v5_frame && copy_alias_enabled())", 1
+        )[0]
+        self.assertIn("descriptorless_compute_dispatch", requires_block)
+        self.assertIn("descriptorless=%u", generic_sender)
+
         self.assertIn("const int has_barrier_only_work = object_tables &&", runner)
-        self.assertIn("!has_barrier_only_work", runner)
+        self.assertIn("const int descriptorless_compute_dispatch =", runner)
+        self.assertIn("active_binding_count == 0 && image_descriptor_count == 0 && !has_barrier_only_work", runner)
+        self.assertNotIn("shader uses no passed storage bindings", runner)
+        self.assertIn("if (!descriptorless_compute_dispatch)", runner)
         self.assertIn("(binding_count > 0 && (!buffer_fds || !bindings))", runner)
         self.assertNotIn("(binding_count == 0 && image_descriptor_count == 0) ||", runner)
 
