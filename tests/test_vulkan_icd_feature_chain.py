@@ -174,6 +174,70 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
 
 
 
+
+    def test_maintenance5_extension_exposes_query_and_index_buffer2_aliases(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            static int extension_seen(
+                    const VkExtensionProperties *extensions,
+                    uint32_t count,
+                    const char *name) {{
+                for (uint32_t i = 0; i < count; ++i) {{
+                    if (strcmp(extensions[i].extensionName, name) == 0) return 1;
+                }}
+                return 0;
+            }}
+
+            int main(void) {{
+            #ifdef VK_KHR_MAINTENANCE_5_EXTENSION_NAME
+                if (!device_extension_advertised_name(VK_KHR_MAINTENANCE_5_EXTENSION_NAME)) return 2;
+                uint32_t count = 64;
+                VkExtensionProperties extensions[64];
+                memset(extensions, 0, sizeof(extensions));
+                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &count, extensions) != VK_SUCCESS) return 3;
+                if (!extension_seen(extensions, count, VK_KHR_MAINTENANCE_5_EXTENSION_NAME)) return 4;
+
+                const char *enabled[] = {{ VK_KHR_MAINTENANCE_5_EXTENSION_NAME }};
+                VkDeviceCreateInfo device_info;
+                memset(&device_info, 0, sizeof(device_info));
+                device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                device_info.enabledExtensionCount = 1;
+                device_info.ppEnabledExtensionNames = enabled;
+                if (validate_device_extensions(&device_info) != VK_SUCCESS) return 5;
+
+                if (proc_address("vkGetImageSubresourceLayout2KHR") !=
+                    (PFN_vkVoidFunction)vkGetImageSubresourceLayout2) return 6;
+                if (proc_address("vkGetDeviceImageSubresourceLayoutKHR") !=
+                    (PFN_vkVoidFunction)vkGetDeviceImageSubresourceLayout) return 7;
+                if (proc_address("vkGetRenderingAreaGranularityKHR") !=
+                    (PFN_vkVoidFunction)vkGetRenderingAreaGranularity) return 8;
+                if (proc_address("vkCmdBindIndexBuffer2KHR") !=
+                    (PFN_vkVoidFunction)vkCmdBindIndexBuffer2KHR) return 9;
+                if (proc_address("vkGetImageSubresourceLayout2EXT") != NULL) return 10;
+
+                VkRenderingAreaInfo area;
+                VkExtent2D granularity;
+                memset(&area, 0, sizeof(area));
+                memset(&granularity, 0, sizeof(granularity));
+                area.sType = VK_STRUCTURE_TYPE_RENDERING_AREA_INFO;
+                ((PFN_vkGetRenderingAreaGranularityKHR)proc_address("vkGetRenderingAreaGranularityKHR"))(
+                    VK_NULL_HANDLE, &area, &granularity);
+                if (granularity.width != 1 || granularity.height != 1) return 11;
+                ((PFN_vkCmdBindIndexBuffer2KHR)proc_address("vkCmdBindIndexBuffer2KHR"))(
+                    VK_NULL_HANDLE, VK_NULL_HANDLE, 0, VK_WHOLE_SIZE, VK_INDEX_TYPE_UINT32);
+            #endif
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_device_group_extension_exposes_single_device_noop_aliases(self):
         source = textwrap.dedent(
             f"""
@@ -1768,8 +1832,8 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
 
             int main(void) {{
             #ifdef VK_KHR_MAINTENANCE_5_EXTENSION_NAME
-                if (device_extension_advertised_name(VK_KHR_MAINTENANCE_5_EXTENSION_NAME)) {{
-                    fprintf(stderr, "maintenance5 extension must not be advertised yet\\n");
+                if (!device_extension_advertised_name(VK_KHR_MAINTENANCE_5_EXTENSION_NAME)) {{
+                    fprintf(stderr, "maintenance5 extension was not advertised\\n");
                     return 2;
                 }}
                 VkPhysicalDeviceMaintenance5Features maintenance5;
@@ -2018,8 +2082,8 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     return 8;
                 }}
             #ifdef VK_KHR_MAINTENANCE_5_EXTENSION_NAME
-                if (device_extension_advertised_name(VK_KHR_MAINTENANCE_5_EXTENSION_NAME)) {{
-                    fprintf(stderr, "maintenance5 must remain unadvertised for false-only pNext support\\n");
+                if (!device_extension_advertised_name(VK_KHR_MAINTENANCE_5_EXTENSION_NAME)) {{
+                    fprintf(stderr, "maintenance5 should be advertised for implemented query/bind aliases\\n");
                     return 9;
                 }}
             #endif

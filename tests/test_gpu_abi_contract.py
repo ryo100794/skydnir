@@ -2610,8 +2610,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("MAP_PROC(vkCmdBindIndexBuffer2)", icd)
         self.assertIn("MAP_PROC(vkCmdBindIndexBuffer2KHR)", icd)
         self.assertIn("static VkBool32 advertised_api_1_4(void)", icd)
-        self.assertIn("strcmp(pName, \"vkCmdBindIndexBuffer2\") == 0", icd)
-        self.assertIn("strcmp(pName, \"vkCmdBindIndexBuffer2KHR\") == 0", icd)
+        hidden_body = c_function_body(icd, "proc_address_hidden_by_advertisement")
+        self.assertIn("strcmp(pName, \"vkCmdBindIndexBuffer2\") == 0", hidden_body)
+        self.assertNotIn("strcmp(pName, \"vkCmdBindIndexBuffer2KHR\") == 0", hidden_body)
 
 
     def test_vulkan_dynamic_vertex_input_binding_stride_is_replayed(self):
@@ -7693,12 +7694,14 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("indices->pDepthInputAttachmentIndex", rendering_info_body)
         self.assertIn("indices->pStencilInputAttachmentIndex", rendering_info_body)
 
-    def test_vulkan_maintenance5_feature_pnext_is_false_only_without_advertising(self):
+    def test_vulkan_maintenance5_is_advertised_with_false_only_feature_bit(self):
         icd = VULKAN_ICD.read_text()
         self.assertIn("VK_KHR_MAINTENANCE_5_EXTENSION_NAME", icd)
         self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_5_FEATURES", icd)
-        self.assertNotIn("ADD_DEVICE_EXTENSION(VK_KHR_MAINTENANCE_5_EXTENSION_NAME", icd)
-        self.assertNotIn("strcmp(name, VK_KHR_MAINTENANCE_5_EXTENSION_NAME) == 0) return true", icd)
+        collector_body = c_function_body(icd, "collect_advertised_device_extensions")
+        validation_body = c_function_body(icd, "device_extension_advertised_name")
+        self.assertIn("ADD_DEVICE_EXTENSION(VK_KHR_MAINTENANCE_5_EXTENSION_NAME", collector_body)
+        self.assertIn("collect_advertised_device_extensions(", validation_body)
 
         features_body = c_function_body(icd, "fill_pnext_features")
         self.assertIn("VkPhysicalDeviceMaintenance5Features", features_body)
@@ -11395,7 +11398,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("pLayout->depthPitch", icd)
         self.assertIn("MAP_PROC(vkGetImageSubresourceLayout);", icd)
 
-    def test_vulkan_icd_exposes_maintenance5_subresource_query_surface_without_advertising(self):
+    def test_vulkan_icd_exposes_advertised_maintenance5_subresource_query_surface(self):
         icd = VULKAN_ICD.read_text()
         helper_body = c_function_body(icd, "fill_image_subresource_layout_tight")
         self.assertIn("image_tight_subresource_offset(img", helper_body)
@@ -11428,16 +11431,20 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, proc_body)
         hidden_body = c_function_body(icd, "proc_address_hidden_by_advertisement")
-        for marker in [
+        for advertised_alias in [
             'strcmp(pName, "vkGetImageSubresourceLayout2KHR") == 0',
-            'strcmp(pName, "vkGetImageSubresourceLayout2EXT") == 0',
             'strcmp(pName, "vkGetDeviceImageSubresourceLayoutKHR") == 0',
             'strcmp(pName, "vkGetRenderingAreaGranularityKHR") == 0',
+            'strcmp(pName, "vkCmdBindIndexBuffer2KHR") == 0',
+        ]:
+            self.assertNotIn(advertised_alias, hidden_body)
+        self.assertIn('strcmp(pName, "vkGetImageSubresourceLayout2EXT") == 0', hidden_body)
+        for core_name in [
             'strcmp(pName, "vkGetImageSubresourceLayout2") == 0',
             'strcmp(pName, "vkGetDeviceImageSubresourceLayout") == 0',
             'strcmp(pName, "vkGetRenderingAreaGranularity") == 0',
         ]:
-            self.assertIn(marker, hidden_body)
+            self.assertIn(core_name, hidden_body)
 
     def test_vulkan_icd_records_clear_color_image_commands(self):
         icd = VULKAN_ICD.read_text()
