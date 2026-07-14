@@ -1508,6 +1508,12 @@ class GpuAbiContractTest(unittest.TestCase):
             "VK_EXT_HEADLESS_SURFACE_SPEC_VERSION",
             "VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME",
             "VK_KHR_GET_SURFACE_CAPABILITIES_2_SPEC_VERSION",
+            "VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME",
+            "VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_SPEC_VERSION",
+            "VK_KHR_DEVICE_GROUP_CREATION_EXTENSION_NAME",
+            "VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME",
+            "VK_KHR_EXTERNAL_SEMAPHORE_CAPABILITIES_EXTENSION_NAME",
+            "VK_KHR_EXTERNAL_FENCE_CAPABILITIES_EXTENSION_NAME",
             "VK_EXT_DEBUG_UTILS_EXTENSION_NAME",
             "VK_EXT_DEBUG_UTILS_SPEC_VERSION",
             "ADD_INSTANCE_EXTENSION",
@@ -9330,21 +9336,27 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, proc_body)
         for alias in [
-            "vkEnumeratePhysicalDeviceGroupsKHR",
             "vkGetDeviceGroupPeerMemoryFeaturesKHR",
             "vkCmdSetDeviceMaskKHR",
+        ]:
+            self.assertIn(alias, hidden_body)
+        for alias in [
+            "vkEnumeratePhysicalDeviceGroupsKHR",
             "vkGetPhysicalDeviceSparseImageFormatProperties2KHR",
             "vkGetPhysicalDeviceExternalBufferPropertiesKHR",
             "vkGetPhysicalDeviceExternalSemaphorePropertiesKHR",
             "vkGetPhysicalDeviceExternalFencePropertiesKHR",
         ]:
-            self.assertIn(alias, hidden_body)
+            self.assertNotIn(alias, hidden_body)
         for extension in [
             "VK_KHR_device_group_creation",
             "VK_KHR_get_physical_device_properties2",
             "VK_KHR_external_memory_capabilities",
             "VK_KHR_external_semaphore_capabilities",
             "VK_KHR_external_fence_capabilities",
+        ]:
+            self.assertIn(extension, icd)
+        for extension in [
             "VK_KHR_external_memory_fd",
             "VK_KHR_external_semaphore_fd",
             "VK_KHR_external_fence_fd",
@@ -19577,7 +19589,6 @@ class GpuAbiContractTest(unittest.TestCase):
             "!advertised_draw_indirect_count_khr()",
             "!advertised_draw_indirect_count_amd()",
             "!advertised_api_1_3()",
-            "vkGetPhysicalDeviceProperties2KHR",
             "vkCreateRenderPass2KHR",
             "vkCmdBeginRenderPass2KHR",
             "vkGetDeviceBufferMemoryRequirements",
@@ -19596,6 +19607,16 @@ class GpuAbiContractTest(unittest.TestCase):
             "vkCmdSetCullModeEXT",
         ]:
             self.assertIn(marker, proc_gate_body)
+        for advertised_instance_alias in [
+            "vkGetPhysicalDeviceProperties2KHR",
+            "vkGetPhysicalDeviceFeatures2KHR",
+            "vkGetPhysicalDeviceSparseImageFormatProperties2KHR",
+            "vkEnumeratePhysicalDeviceGroupsKHR",
+            "vkGetPhysicalDeviceExternalBufferPropertiesKHR",
+            "vkGetPhysicalDeviceExternalSemaphorePropertiesKHR",
+            "vkGetPhysicalDeviceExternalFencePropertiesKHR",
+        ]:
+            self.assertNotIn(advertised_instance_alias, proc_gate_body)
         self.assertIn("advertised_draw_indirect_count() && advertised_draw_indexed_indirect_count()", proc_gate_body)
         self.assertIn("PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT", icd)
         self.assertIn("if (p->drawIndirectCount) mask |= PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT;", icd)

@@ -168,6 +168,31 @@ typedef VkSubresourceLayout2 VkSubresourceLayout2KHR;
 #define VK_KHR_GET_SURFACE_CAPABILITIES_2_SPEC_VERSION 1
 #endif
 
+#ifndef VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME
+#define VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME "VK_KHR_get_physical_device_properties2"
+#define VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_SPEC_VERSION 2
+#endif
+
+#ifndef VK_KHR_DEVICE_GROUP_CREATION_EXTENSION_NAME
+#define VK_KHR_DEVICE_GROUP_CREATION_EXTENSION_NAME "VK_KHR_device_group_creation"
+#define VK_KHR_DEVICE_GROUP_CREATION_SPEC_VERSION 1
+#endif
+
+#ifndef VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME
+#define VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME "VK_KHR_external_memory_capabilities"
+#define VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_SPEC_VERSION 1
+#endif
+
+#ifndef VK_KHR_EXTERNAL_SEMAPHORE_CAPABILITIES_EXTENSION_NAME
+#define VK_KHR_EXTERNAL_SEMAPHORE_CAPABILITIES_EXTENSION_NAME "VK_KHR_external_semaphore_capabilities"
+#define VK_KHR_EXTERNAL_SEMAPHORE_CAPABILITIES_SPEC_VERSION 1
+#endif
+
+#ifndef VK_KHR_EXTERNAL_FENCE_CAPABILITIES_EXTENSION_NAME
+#define VK_KHR_EXTERNAL_FENCE_CAPABILITIES_EXTENSION_NAME "VK_KHR_external_fence_capabilities"
+#define VK_KHR_EXTERNAL_FENCE_CAPABILITIES_SPEC_VERSION 1
+#endif
+
 #ifndef VK_EXT_subpass_merge_feedback
 #define VK_EXT_subpass_merge_feedback 1
 #define VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBPASS_MERGE_FEEDBACK_FEATURES_EXT ((VkStructureType)1000458000)
@@ -17394,7 +17419,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceVersion(uint32_t *pApiVersion)
     return VK_SUCCESS;
 }
 
-#define PDOCKER_VK_MAX_INSTANCE_EXTENSIONS 8u
+#define PDOCKER_VK_MAX_INSTANCE_EXTENSIONS 16u
 
 static void write_extension_property(
         VkExtensionProperties *properties,
@@ -17416,6 +17441,16 @@ static uint32_t collect_advertised_instance_extensions(
     ADD_INSTANCE_EXTENSION(VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME, VK_EXT_HEADLESS_SURFACE_SPEC_VERSION);
     ADD_INSTANCE_EXTENSION(VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME,
                            VK_KHR_GET_SURFACE_CAPABILITIES_2_SPEC_VERSION);
+    ADD_INSTANCE_EXTENSION(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
+                           VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_SPEC_VERSION);
+    ADD_INSTANCE_EXTENSION(VK_KHR_DEVICE_GROUP_CREATION_EXTENSION_NAME,
+                           VK_KHR_DEVICE_GROUP_CREATION_SPEC_VERSION);
+    ADD_INSTANCE_EXTENSION(VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME,
+                           VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_SPEC_VERSION);
+    ADD_INSTANCE_EXTENSION(VK_KHR_EXTERNAL_SEMAPHORE_CAPABILITIES_EXTENSION_NAME,
+                           VK_KHR_EXTERNAL_SEMAPHORE_CAPABILITIES_SPEC_VERSION);
+    ADD_INSTANCE_EXTENSION(VK_KHR_EXTERNAL_FENCE_CAPABILITIES_EXTENSION_NAME,
+                           VK_KHR_EXTERNAL_FENCE_CAPABILITIES_SPEC_VERSION);
 #ifdef VK_EXT_DEBUG_UTILS_EXTENSION_NAME
     ADD_INSTANCE_EXTENSION(VK_EXT_DEBUG_UTILS_EXTENSION_NAME, VK_EXT_DEBUG_UTILS_SPEC_VERSION);
 #endif
@@ -31793,20 +31828,9 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance instan
 
 static bool proc_address_hidden_by_advertisement(const char *pName) {
     if (!pName) return true;
-    if (strcmp(pName, "vkGetPhysicalDeviceProperties2KHR") == 0 ||
-        strcmp(pName, "vkGetPhysicalDeviceFeatures2KHR") == 0 ||
-        strcmp(pName, "vkGetPhysicalDeviceFormatProperties2KHR") == 0 ||
-        strcmp(pName, "vkGetPhysicalDeviceImageFormatProperties2KHR") == 0 ||
-        strcmp(pName, "vkGetPhysicalDeviceQueueFamilyProperties2KHR") == 0 ||
-        strcmp(pName, "vkGetPhysicalDeviceMemoryProperties2KHR") == 0 ||
-        strcmp(pName, "vkGetDescriptorSetLayoutSupportKHR") == 0 ||
-        strcmp(pName, "vkEnumeratePhysicalDeviceGroupsKHR") == 0 ||
+    if (strcmp(pName, "vkGetDescriptorSetLayoutSupportKHR") == 0 ||
         strcmp(pName, "vkGetDeviceGroupPeerMemoryFeaturesKHR") == 0 ||
         strcmp(pName, "vkCmdSetDeviceMaskKHR") == 0 ||
-        strcmp(pName, "vkGetPhysicalDeviceSparseImageFormatProperties2KHR") == 0 ||
-        strcmp(pName, "vkGetPhysicalDeviceExternalBufferPropertiesKHR") == 0 ||
-        strcmp(pName, "vkGetPhysicalDeviceExternalSemaphorePropertiesKHR") == 0 ||
-        strcmp(pName, "vkGetPhysicalDeviceExternalFencePropertiesKHR") == 0 ||
         strcmp(pName, "vkGetImageSubresourceLayout2KHR") == 0 ||
         strcmp(pName, "vkGetImageSubresourceLayout2EXT") == 0 ||
         strcmp(pName, "vkGetDeviceImageSubresourceLayoutKHR") == 0 ||

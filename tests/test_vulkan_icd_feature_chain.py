@@ -180,6 +180,76 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_conservative_query_instance_extensions_are_advertised_with_aliases(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            static int extension_seen(
+                    const VkExtensionProperties *extensions,
+                    uint32_t count,
+                    const char *name) {{
+                for (uint32_t i = 0; i < count; ++i) {{
+                    if (strcmp(extensions[i].extensionName, name) == 0) return 1;
+                }}
+                return 0;
+            }}
+
+            int main(void) {{
+                uint32_t count = 0;
+                if (vkEnumerateInstanceExtensionProperties(NULL, &count, NULL) != VK_SUCCESS) return 2;
+                if (count == 0 || count > PDOCKER_VK_MAX_INSTANCE_EXTENSIONS) return 3;
+                VkExtensionProperties extensions[PDOCKER_VK_MAX_INSTANCE_EXTENSIONS];
+                memset(extensions, 0, sizeof(extensions));
+                uint32_t capacity = PDOCKER_VK_MAX_INSTANCE_EXTENSIONS;
+                if (vkEnumerateInstanceExtensionProperties(NULL, &capacity, extensions) != VK_SUCCESS) return 4;
+                if (capacity != count) return 5;
+
+                const char *required[] = {{
+                    VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
+                    VK_KHR_DEVICE_GROUP_CREATION_EXTENSION_NAME,
+                    VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME,
+                    VK_KHR_EXTERNAL_SEMAPHORE_CAPABILITIES_EXTENSION_NAME,
+                    VK_KHR_EXTERNAL_FENCE_CAPABILITIES_EXTENSION_NAME,
+                }};
+                for (uint32_t i = 0; i < sizeof(required) / sizeof(required[0]); ++i) {{
+                    if (!extension_seen(extensions, capacity, required[i])) return 10 + (int)i;
+                    if (!instance_extension_advertised_name(required[i])) return 20 + (int)i;
+                }}
+
+                const char *enabled[] = {{
+                    VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
+                    VK_KHR_DEVICE_GROUP_CREATION_EXTENSION_NAME,
+                    VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME,
+                    VK_KHR_EXTERNAL_SEMAPHORE_CAPABILITIES_EXTENSION_NAME,
+                    VK_KHR_EXTERNAL_FENCE_CAPABILITIES_EXTENSION_NAME,
+                }};
+                VkInstanceCreateInfo info;
+                memset(&info, 0, sizeof(info));
+                info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+                info.enabledExtensionCount = (uint32_t)(sizeof(enabled) / sizeof(enabled[0]));
+                info.ppEnabledExtensionNames = enabled;
+                if (validate_instance_extensions(&info) != VK_SUCCESS) return 30;
+
+                if (proc_address("vkGetPhysicalDeviceProperties2KHR") == NULL) return 31;
+                if (proc_address("vkGetPhysicalDeviceFeatures2KHR") == NULL) return 32;
+                if (proc_address("vkGetPhysicalDeviceSparseImageFormatProperties2KHR") == NULL) return 33;
+                if (proc_address("vkEnumeratePhysicalDeviceGroupsKHR") == NULL) return 34;
+                if (proc_address("vkGetPhysicalDeviceExternalBufferPropertiesKHR") == NULL) return 35;
+                if (proc_address("vkGetPhysicalDeviceExternalSemaphorePropertiesKHR") == NULL) return 36;
+                if (proc_address("vkGetPhysicalDeviceExternalFencePropertiesKHR") == NULL) return 37;
+                if (proc_address("vkGetDeviceGroupPeerMemoryFeaturesKHR") != NULL) return 38;
+                if (proc_address("vkCmdSetDeviceMaskKHR") != NULL) return 39;
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_tooling_info_extension_reports_bridge_metadata(self):
         source = textwrap.dedent(
             f"""
