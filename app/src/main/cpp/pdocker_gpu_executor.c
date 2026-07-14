@@ -4556,6 +4556,28 @@ static int vulkan_dispatch_subresource_ranges_equal(
            a->layerCount == b->layerCount;
 }
 
+static int vulkan_barrier_queue_family_replayable_for_executor(
+        uint32_t src_queue_family_index,
+        uint32_t dst_queue_family_index) {
+    if (src_queue_family_index == VK_QUEUE_FAMILY_IGNORED &&
+        dst_queue_family_index == VK_QUEUE_FAMILY_IGNORED) {
+        return 1;
+    }
+    return src_queue_family_index == 0 && dst_queue_family_index == 0;
+}
+
+static uint32_t vulkan_replay_queue_family_index_for_barrier(
+        uint32_t src_queue_family_index,
+        uint32_t dst_queue_family_index) {
+    (void)src_queue_family_index;
+    (void)dst_queue_family_index;
+    return VK_QUEUE_FAMILY_IGNORED;
+}
+
+static int vulkan_dispatch_v52_image_aspect_valid(
+        const PdockerGpuVulkanDispatchV5ImageEntry *image,
+        VkImageAspectFlags aspect_mask);
+
 static VulkanDispatchImageObject *vulkan_dispatch_image_by_source_index(
         VulkanDispatchImageObject *images,
         size_t image_count,
@@ -4809,9 +4831,9 @@ static int record_vulkan_dispatch_v54_pre_dispatch_barriers(
             .srcAccessMask = (VkAccessFlags2)src->src_access_mask,
             .dstStageMask = (VkPipelineStageFlags2)src->dst_stage_mask,
             .dstAccessMask = (VkAccessFlags2)src->dst_access_mask,
-            .srcQueueFamilyIndex = vulkan_graphics_replay_queue_family_index(
+            .srcQueueFamilyIndex = vulkan_replay_queue_family_index_for_barrier(
                 src->src_queue_family_index, src->dst_queue_family_index),
-            .dstQueueFamilyIndex = vulkan_graphics_replay_queue_family_index(
+            .dstQueueFamilyIndex = vulkan_replay_queue_family_index_for_barrier(
                 src->src_queue_family_index, src->dst_queue_family_index),
             .buffer = buffer->buffer,
             .offset = (VkDeviceSize)src->offset,
@@ -4844,9 +4866,9 @@ static int record_vulkan_dispatch_v54_pre_dispatch_barriers(
             .dstAccessMask = (VkAccessFlags2)src->dst_access_mask,
             .oldLayout = vulkan_replay_layout_for_executor((VkImageLayout)src->old_layout),
             .newLayout = vulkan_replay_layout_for_executor((VkImageLayout)src->new_layout),
-            .srcQueueFamilyIndex = vulkan_graphics_replay_queue_family_index(
+            .srcQueueFamilyIndex = vulkan_replay_queue_family_index_for_barrier(
                 src->src_queue_family_index, src->dst_queue_family_index),
-            .dstQueueFamilyIndex = vulkan_graphics_replay_queue_family_index(
+            .dstQueueFamilyIndex = vulkan_replay_queue_family_index_for_barrier(
                 src->src_queue_family_index, src->dst_queue_family_index),
             .image = image->image,
             .subresourceRange = range,
@@ -21678,7 +21700,8 @@ static int validate_vulkan_dispatch_v5_object_extension(
     if (!frame || !header) return -EINVAL;
     if (header->abi_minor != PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_OBJECTS &&
         header->abi_minor != PDOCKER_GPU_VULKAN_DISPATCH_V52_ABI_MINOR &&
-        header->abi_minor != PDOCKER_GPU_VULKAN_DISPATCH_V53_ABI_MINOR) return 0;
+        header->abi_minor != PDOCKER_GPU_VULKAN_DISPATCH_V53_ABI_MINOR &&
+        header->abi_minor != PDOCKER_GPU_VULKAN_DISPATCH_V54_ABI_MINOR) return 0;
     if (header->header_size < sizeof(PdockerGpuVulkanDispatchV5ObjectFrameHeader)) {
         return -EPROTO;
     }
@@ -22014,9 +22037,15 @@ static int validate_vulkan_dispatch_v5_frame_content(
         V5_RECORD_RANGE(ext->buffer_barrier_table_offset, ext->buffer_barrier_table_size);
         V5_RECORD_RANGE(ext->image_barrier_table_offset, ext->image_barrier_table_size);
         uint64_t expected_extension_hash = 1469598103934665603ull;
-        expected_extension_hash = fnv1a64_update_u64(expected_extension_hash, ext->memory_barrier_table_hash);
-        expected_extension_hash = fnv1a64_update_u64(expected_extension_hash, ext->buffer_barrier_table_hash);
-        expected_extension_hash = fnv1a64_update_u64(expected_extension_hash, ext->image_barrier_table_hash);
+        expected_extension_hash = fnv1a64_update(
+            expected_extension_hash, &ext->memory_barrier_table_hash,
+            sizeof(ext->memory_barrier_table_hash));
+        expected_extension_hash = fnv1a64_update(
+            expected_extension_hash, &ext->buffer_barrier_table_hash,
+            sizeof(ext->buffer_barrier_table_hash));
+        expected_extension_hash = fnv1a64_update(
+            expected_extension_hash, &ext->image_barrier_table_hash,
+            sizeof(ext->image_barrier_table_hash));
         if (!v5_hash_matches(frame, header, ext->memory_barrier_table_offset,
                              ext->memory_barrier_table_size,
                              ext->memory_barrier_table_hash) ||
@@ -22354,7 +22383,7 @@ static int build_vulkan_dispatch_v5_native_plan(
         const PdockerGpuVulkanDispatchV54BufferBarrierEntry *barrier = &plan->buffer_barriers[i];
         if (barrier->reserved0 != 0 || barrier->reserved1 != 0 || barrier->reserved2 != 0 ||
             !v5_resource_index_valid(header, barrier->resource_index) ||
-            !vulkan_graphics_barrier_queue_family_replayable(
+            !vulkan_barrier_queue_family_replayable_for_executor(
                 barrier->src_queue_family_index, barrier->dst_queue_family_index) ||
             (barrier->src_stage_mask == 0 && barrier->src_access_mask != 0) ||
             (barrier->dst_stage_mask == 0 && barrier->dst_access_mask != 0)) {
@@ -22370,7 +22399,7 @@ static int build_vulkan_dispatch_v5_native_plan(
     for (uint32_t i = 0; i < plan->image_barrier_count; ++i) {
         const PdockerGpuVulkanDispatchV54ImageBarrierEntry *barrier = &plan->image_barriers[i];
         if (barrier->reserved0 != 0 || barrier->image_index >= plan->image_count ||
-            !vulkan_graphics_barrier_queue_family_replayable(
+            !vulkan_barrier_queue_family_replayable_for_executor(
                 barrier->src_queue_family_index, barrier->dst_queue_family_index) ||
             (barrier->src_stage_mask == 0 && barrier->src_access_mask != 0) ||
             (barrier->dst_stage_mask == 0 && barrier->dst_access_mask != 0)) {

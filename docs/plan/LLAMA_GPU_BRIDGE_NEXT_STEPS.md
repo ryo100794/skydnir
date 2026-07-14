@@ -35,6 +35,7 @@ Confirmed facts:
 | 2026-07-14 compute V5 buffer usage identity lane | Generic compute V5/V5.1 transport now carries the original container-side `PdockerVkBuffer::usage` through `PdockerGpuVulkanDispatchV5ResourceEntry::usage`, materializes descriptor buffers into `VulkanDispatchBinding::api_buffer_usage`, and uses that API usage as the Android strict-object-graph buffer-usage base while OR-ing only replay-required storage/transfer/indirect/texel bits. Dispatch-indirect-only buffers use the same resource usage field when they are appended outside the descriptor table. This removes a compute object-identity narrowing point where usage was reconstructed solely from descriptor observations or left zero for hidden indirect resources. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; `app/src/main/cpp/pdocker_gpu_executor.c`; host test `tests.test_gpu_abi_contract`; no llama.cpp/Dockerfile/model/prompt changes |
 | 2026-07-14 compute V5.2 whole-image layout identity lane | V5.2 image-layout-range transport now emits a whole-image range for non-mixed images when Android replay would otherwise create the temporary image in a different initial layout. Mixed subresource layouts still use the existing per-range table. This closes a layout identity gap where `ImageEntry.initial_layout` carried the container current layout but optimal-tiled Android images were still created as `UNDEFINED` without a matching V5.2 initial layout transition. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; host test `tests.test_gpu_abi_contract`; no llama.cpp/Dockerfile/model/prompt changes |
 | 2026-07-14 compute descriptor image-layout fail-closed lane | Generic compute descriptor capture now checks each image descriptor layout against the ICD-tracked image layout state before V5/V5.1 frame emission. Non-mixed images must match the tracked whole-image layout; mixed images reject overlapping explicit ranges with a different layout and require non-default descriptor layouts to be covered by an explicit matching range. This prevents descriptor `imageLayout` metadata from being transported when it contradicts the tracked barrier-derived image state. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; host test `tests.test_gpu_abi_contract`; no llama.cpp/Dockerfile/model/prompt changes |
+| 2026-07-14 compute V5.4 barrier-only resource closure lane | Generic compute V5.4 dispatch transport now treats pre-dispatch barrier targets as part of the transported object graph even when they are not descriptors. The ICD appends descriptor-external barrier buffers/images as hidden resources, the Android executor materializes barrier-only buffer resources independently of descriptor writes, and V5.4 frame validation now includes the same object-extension schema/entry-size/hash checks as V5.1-V5.3. This is generic Vulkan synchronization/object-closure work, not a llama.cpp or shader-specific workaround. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; `app/src/main/cpp/pdocker_gpu_executor.c`; host test `tests.test_gpu_abi_contract`; glibc payload build `scripts/build-gpu-shim.sh`; native executor build `scripts/build-native-android-ndk.sh`; no llama.cpp/Dockerfile/model/prompt changes |
 | 2026-07-14 dynamic-rendering attachment-location identity lane | `VkRenderingAttachmentLocationInfo` is now accepted when it is a true identity/no-op mapping for the active dynamic-rendering color attachments. Non-identity remaps, count mismatches, missing location arrays, and `VkRenderingInputAttachmentIndexInfo` local-read payloads still fail closed because `dynamicRenderingLocalRead` is not advertised. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; `tests.test_gpu_abi_contract`; `tests.test_vulkan_icd_feature_chain`; glibc payload build `scripts/build-gpu-shim.sh`; no llama.cpp/Dockerfile/model/prompt changes |
 | 2026-07-14 create-device shape hardening lane | `vkCreateDevice` now fail-closes before feature/queue parsing when `VkDeviceCreateInfo` is null or has the wrong `sType`, and leaves the output device handle null. This prevents malformed parent create-info inputs from bypassing the detailed feature/extension gates. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; `tests.test_gpu_abi_contract`; `tests.test_vulkan_icd_feature_chain`; glibc payload build `scripts/build-gpu-shim.sh`; no llama.cpp/Dockerfile/model/prompt changes |
 | 2026-07-11 strict transport identity evidence gate | Strict pass-through evidence is now separated from diagnostic/compatibility Vulkan execution. The executor emits `strict_transport_identity_eligible` plus a reason and requires source/effective/received SPIR-V identity, unchanged shader bytes through pipeline creation, and no shader/pipeline reconstruction knobs before a run can be promoted as no-reconstruction pass-through evidence. The artifact verifier now treats an ineligible strict-transport record as diagnostic-only. | `app/src/main/cpp/pdocker_gpu_executor.c`; `scripts/verify-llama-gpu-artifact.py`; host test `tests.test_gpu_abi_contract`; native build `scripts/build-native-android-ndk.sh`; no llama.cpp/Dockerfile/model/prompt changes |
@@ -2548,6 +2549,24 @@ This is generic Vulkan image-state identity work.  It does not alter llama.cpp,
 Dockerfiles, prompts, model files, SPIR-V bytes, shader hashes, or shader policy.
 Exact source/destination stage/access mask identity remains a later append-only
 barrier-table lane.
+
+
+### 2026-07-14 Vulkan compute V5.4 barrier-only resource closure lane
+
+V5.4 compute barrier transport now closes over resources referenced only by
+pre-dispatch barriers.  The ICD does not fake those resources as descriptors; it
+adds descriptor-external barrier buffers and images to the V5 object/resource
+tables, records their resource indexes in the barrier table, and passes the
+backing fds through the normal SCM_RIGHTS path.  Android replay materializes
+those buffer resources independently, then resolves barrier resources through
+descriptor-backed buffers first and hidden resource buffers second before
+issuing `vkCmdPipelineBarrier2`.
+
+The executor validator now treats V5.4 as an object-extension frame for the
+same image/image-view/sampler schema, entry-size, range, and object-hash checks
+already applied to V5.1-V5.3.  This keeps V5.4 from bypassing object-table
+shape validation while adding synchronization metadata.  The lane does not
+modify llama.cpp, Dockerfiles, models, prompts, SPIR-V bytes, or shader policy.
 
 ### 2026-07-14 Vulkan compute V5 buffer-usage identity lane
 

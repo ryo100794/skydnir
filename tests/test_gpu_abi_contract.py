@@ -4879,7 +4879,11 @@ class GpuAbiContractTest(unittest.TestCase):
             object_validator,
         )
         self.assertIn(
-            "header->abi_minor != PDOCKER_GPU_VULKAN_DISPATCH_V53_ABI_MINOR) return 0;",
+            "header->abi_minor != PDOCKER_GPU_VULKAN_DISPATCH_V53_ABI_MINOR &&",
+            object_validator,
+        )
+        self.assertIn(
+            "header->abi_minor != PDOCKER_GPU_VULKAN_DISPATCH_V54_ABI_MINOR) return 0;",
             object_validator,
         )
 
