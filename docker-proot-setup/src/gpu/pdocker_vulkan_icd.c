@@ -10461,23 +10461,39 @@ static bool descriptor_image_read_only_layout_valid(VkImageLayout layout) {
            layout == VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL;
 }
 
-static bool descriptor_image_layout_valid_for_type(
+static bool descriptor_image_read_only_layout_valid_for_aspect(
+        VkImageLayout layout,
+        VkImageAspectFlags aspect_mask) {
+    if (descriptor_image_read_only_layout_valid(layout)) return true;
+    switch (layout) {
+        case VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_STENCIL_ATTACHMENT_OPTIMAL:
+            return aspect_mask != 0 &&
+                   (aspect_mask & ~((VkImageAspectFlags)VK_IMAGE_ASPECT_DEPTH_BIT)) == 0;
+        case VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_STENCIL_READ_ONLY_OPTIMAL:
+            return aspect_mask != 0 &&
+                   (aspect_mask & ~((VkImageAspectFlags)VK_IMAGE_ASPECT_STENCIL_BIT)) == 0;
+        default:
+            return false;
+    }
+}
+
+static bool descriptor_image_layout_valid_for_type_and_aspect(
         VkDescriptorType type,
-        VkImageLayout layout) {
+        VkImageLayout layout,
+        VkImageAspectFlags aspect_mask) {
     switch (type) {
         case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
             return layout == VK_IMAGE_LAYOUT_GENERAL;
         case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
         case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
-            return descriptor_image_read_only_layout_valid(layout) ||
-                   layout == VK_IMAGE_LAYOUT_GENERAL;
         case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:
-            return descriptor_image_read_only_layout_valid(layout) ||
+            return descriptor_image_read_only_layout_valid_for_aspect(layout, aspect_mask) ||
                    layout == VK_IMAGE_LAYOUT_GENERAL;
         default:
             return false;
     }
 }
+
 
 static bool descriptor_image_ranges_overlap(
         const VkImageSubresourceRange *a,
@@ -10512,7 +10528,8 @@ static bool descriptor_image_layout_matches_tracked_state(
         VkDescriptorType descriptor_type,
         VkImageLayout descriptor_layout) {
     if (!view || !view->image) return false;
-    if (!descriptor_image_layout_valid_for_type(descriptor_type, descriptor_layout)) {
+    if (!descriptor_image_layout_valid_for_type_and_aspect(
+            descriptor_type, descriptor_layout, view->subresource_range.aspectMask)) {
         return false;
     }
     const PdockerVkImage *image = view->image;

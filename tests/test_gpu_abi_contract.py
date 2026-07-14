@@ -3586,6 +3586,14 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL", layout_body)
         self.assertIn("VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL", layout_body)
         self.assertIn("VK_IMAGE_LAYOUT_STENCIL_READ_ONLY_OPTIMAL", layout_body)
+        self.assertIn("VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_STENCIL_ATTACHMENT_OPTIMAL", layout_body)
+        self.assertIn("VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_STENCIL_READ_ONLY_OPTIMAL", layout_body)
+        self.assertIn("vulkan_image_descriptor_read_only_layout_valid_for_aspect", executor)
+        self.assertIn("vulkan_graphics_descriptor_image_view_aspect_mask", executor)
+        self.assertIn("vulkan_graphics_descriptor_image_layout_valid", executor)
+        self.assertIn("image_view->aspect_mask", executor)
+        self.assertIn("vulkan_graphics_descriptor_image_layout_valid(", executor)
+        self.assertIn("view, descriptor, descriptor_type", executor)
 
     def test_vulkan_graphics_depth_stencil_writeback_bounds_are_aspect_aware(self):
         source = GPU_EXECUTOR.read_text()
@@ -5176,14 +5184,22 @@ class GpuAbiContractTest(unittest.TestCase):
     def test_vulkan_dispatch_icd_fails_closed_on_descriptor_image_layout_mismatch(self):
         icd = VULKAN_ICD.read_text()
         for helper_name in [
-            "descriptor_image_layout_valid_for_type",
+            "descriptor_image_read_only_layout_valid_for_aspect",
+            "descriptor_image_layout_valid_for_type_and_aspect",
             "descriptor_image_ranges_overlap",
             "descriptor_image_range_contains",
             "descriptor_image_layout_matches_tracked_state",
         ]:
             self.assertIn(helper_name, icd)
+        aspect_helper = c_function_body(icd, "descriptor_image_read_only_layout_valid_for_aspect")
+        self.assertIn("VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_STENCIL_ATTACHMENT_OPTIMAL", aspect_helper)
+        self.assertIn("VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_STENCIL_READ_ONLY_OPTIMAL", aspect_helper)
+        self.assertIn("VK_IMAGE_ASPECT_DEPTH_BIT", aspect_helper)
+        self.assertIn("VK_IMAGE_ASPECT_STENCIL_BIT", aspect_helper)
+        self.assertIn("aspect_mask != 0", aspect_helper)
         helper = c_function_body(icd, "descriptor_image_layout_matches_tracked_state")
-        self.assertIn("descriptor_image_layout_valid_for_type(descriptor_type, descriptor_layout)", helper)
+        self.assertIn("descriptor_image_layout_valid_for_type_and_aspect(", helper)
+        self.assertIn("view->subresource_range.aspectMask", helper)
         self.assertIn("pdocker_vk_image_aspect_mask_valid_for_format", helper)
         self.assertIn("if (!image->layout_mixed)", helper)
         self.assertIn("return image->current_layout == descriptor_layout;", helper)
@@ -5543,7 +5559,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("src->initial_layout != VK_IMAGE_LAYOUT_PREINITIALIZED", materialize_body)
         self.assertIn("checked_u64_add3(memory->external_offset", executor)
         self.assertIn("checked_u64_to_off_t(fd_offset_u64", executor)
-        self.assertIn("vulkan_image_descriptor_layout_valid(descriptor_type, d->image_layout)", executor)
+        self.assertIn("vulkan_image_descriptor_layout_valid_for_aspect(", executor)
+        self.assertIn("descriptor_type, d->image_layout, range->aspectMask", executor)
         self.assertIn("descriptor_type != VK_DESCRIPTOR_TYPE_STORAGE_IMAGE", executor)
         self.assertIn("vulkan_required_usage_for_image_descriptor(descriptor_type)", executor)
         self.assertIn("descriptor_layout_seen", executor)
