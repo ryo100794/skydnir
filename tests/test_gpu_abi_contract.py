@@ -1535,9 +1535,27 @@ class GpuAbiContractTest(unittest.TestCase):
 
         create_instance_body = c_function_body(icd, "vkCreateInstance")
         validate_instance_body = c_function_body(icd, "validate_instance_extensions")
+        validate_instance_shape_body = c_function_body(icd, "validate_instance_create_info_shape")
+        validate_instance_pnext_body = c_function_body(icd, "validate_instance_create_pnext_chain")
+        self.assertIn("validate_instance_create_info_shape(pCreateInfo)", create_instance_body)
+        self.assertIn("*pInstance = VK_NULL_HANDLE", create_instance_body)
         self.assertIn("validate_instance_extensions(pCreateInfo)", create_instance_body)
         self.assertIn("instance_extension_advertised_name(name)", validate_instance_body)
         self.assertIn("VK_ERROR_EXTENSION_NOT_PRESENT", create_instance_body + validate_instance_body)
+        for marker in [
+            "VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO",
+            "VK_STRUCTURE_TYPE_APPLICATION_INFO",
+            "VK_ERROR_LAYER_NOT_PRESENT",
+            "validate_instance_create_pnext_chain(pCreateInfo)",
+        ]:
+            self.assertIn(marker, validate_instance_shape_body)
+        for marker in [
+            "VK_STRUCTURE_TYPE_LOADER_INSTANCE_CREATE_INFO",
+            "VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT",
+            "instance_create_info_enables_extension",
+            "unsupported_create_info_pnext_result(\"vkCreateInstance\"",
+        ]:
+            self.assertIn(marker, validate_instance_pnext_body)
         for marker in [
             "VKAPI_ATTR VkResult VKAPI_CALL vkCreateDebugUtilsMessengerEXT",
             "VKAPI_ATTR VkResult VKAPI_CALL vkDebugMarkerSetObjectNameEXT",
@@ -11423,6 +11441,90 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("size > (VkDeviceSize)m->size - offset", map_body)
         self.assertIn("return VK_ERROR_MEMORY_MAP_FAILED;", map_body)
         self.assertNotIn("(void)size;", map_body)
+
+    def test_vulkan_storage_input_output16_is_reflected_in_feature_masks(self):
+        icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
+
+        for source in [icd, executor]:
+            self.assertIn("PDOCKER_VK_FEATURE_STORAGE_INPUT_OUTPUT_16", source)
+            self.assertIn("(1ull << 48)", source)
+
+        for marker in [
+            'json_read_u32(json, "storageInputOutput16", &caps->storage16.storageInputOutput16);',
+            "if (p->storageInputOutput16) mask |= PDOCKER_VK_FEATURE_STORAGE_INPUT_OUTPUT_16;",
+            "caps->storage16.storageInputOutput16",
+            "mask |= PDOCKER_VK_FEATURE_STORAGE_INPUT_OUTPUT_16;",
+        ]:
+            self.assertIn(marker, icd)
+
+        for marker in [
+            "int requires_storage16_input_output;",
+            'case 4436: return "StorageInputOutput16";',
+            "cap == 4436",
+            "summary->requires_storage16_input_output",
+            "PDOCKER_VK_FEATURE_STORAGE_INPUT_OUTPUT_16",
+            'WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_STORAGE_INPUT_OUTPUT_16, "storageInputOutput16");',
+            r'\"storageInputOutput16\":%u',
+            r'\"core11_storageInputOutput16\":%u',
+            "rt ? rt->enabled_storage16.storageInputOutput16 : 0",
+            "rt ? rt->enabled_vulkan11.storageInputOutput16 : 0",
+        ]:
+            self.assertIn(marker, executor)
+
+        feature_missing_body = c_function_body(executor, "spirv_feature_missing")
+        self.assertIn("requires_storage16_input_output", feature_missing_body)
+        self.assertIn("physical_storage16.storageInputOutput16", feature_missing_body)
+
+        required_mask_body = c_function_body(executor, "spirv_required_feature_mask")
+        self.assertIn("requires_storage16_input_output", required_mask_body)
+        self.assertIn("PDOCKER_VK_FEATURE_STORAGE_INPUT_OUTPUT_16", required_mask_body)
+
+    def test_vulkan_khr_map_memory2_alias_lane(self):
+        icd = VULKAN_ICD.read_text()
+        collector_body = c_function_body(icd, "collect_advertised_device_extensions")
+        self.assertIn("VK_KHR_MAP_MEMORY_2_EXTENSION_NAME", collector_body)
+        self.assertIn("VK_KHR_MAP_MEMORY_2_SPEC_VERSION", collector_body)
+
+        hidden_body = c_function_body(icd, "proc_address_hidden_by_advertisement")
+        self.assertIn('strcmp(pName, "vkMapMemory2") == 0', hidden_body)
+        self.assertIn('strcmp(pName, "vkUnmapMemory2") == 0', hidden_body)
+
+        proc_body = c_function_body(icd, "proc_address")
+        for marker in [
+            "MAP_PROC(vkMapMemory2);",
+            'MAP_ALIAS("vkMapMemory2KHR", vkMapMemory2);',
+            "MAP_PROC(vkUnmapMemory2);",
+            'MAP_ALIAS("vkUnmapMemory2KHR", vkUnmapMemory2);',
+        ]:
+            self.assertIn(marker, proc_body)
+
+        map2_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkMapMemory2", 1)[1].split(
+            "VKAPI_ATTR VkResult VKAPI_CALL vkUnmapMemory2", 1
+        )[0]
+        for marker in [
+            "pMemoryMapInfo->sType != VK_STRUCTURE_TYPE_MEMORY_MAP_INFO",
+            'unsupported_create_info_pnext_result("vkMapMemory2", pMemoryMapInfo->pNext)',
+            "pMemoryMapInfo->flags != 0",
+            "return vkMapMemory(device",
+            "pMemoryMapInfo->memory",
+            "pMemoryMapInfo->offset",
+            "pMemoryMapInfo->size",
+        ]:
+            self.assertIn(marker, map2_body)
+
+        unmap2_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkUnmapMemory2", 1)[1].split(
+            "VKAPI_ATTR void VKAPI_CALL vkGetDeviceMemoryCommitment", 1
+        )[0]
+        for marker in [
+            "pMemoryUnmapInfo->sType != VK_STRUCTURE_TYPE_MEMORY_UNMAP_INFO",
+            'unsupported_create_info_pnext_result("vkUnmapMemory2", pMemoryUnmapInfo->pNext)',
+            "pMemoryUnmapInfo->flags != 0",
+            "pdocker_vk_memory_from_handle(pMemoryUnmapInfo->memory)",
+            "vkUnmapMemory(device, pMemoryUnmapInfo->memory);",
+            "return VK_SUCCESS;",
+        ]:
+            self.assertIn(marker, unmap2_body)
 
     def test_vulkan_icd_advertises_conservative_image_format_properties(self):
         icd = VULKAN_ICD.read_text()

@@ -2004,6 +2004,105 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_instance_create_info_shape_is_fail_closed(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            typedef struct TestPnext {{
+                VkStructureType sType;
+                const void *pNext;
+            }} TestPnext;
+
+            static VkBool32 VKAPI_CALL test_debug_callback(
+                    VkDebugUtilsMessageSeverityFlagBitsEXT severity,
+                    VkDebugUtilsMessageTypeFlagsEXT types,
+                    const VkDebugUtilsMessengerCallbackDataEXT *data,
+                    void *user_data) {{
+                (void)severity;
+                (void)types;
+                (void)data;
+                (void)user_data;
+                return VK_FALSE;
+            }}
+
+            int main(void) {{
+                VkInstance instance = (VkInstance)(uintptr_t)0xfeedu;
+                if (vkCreateInstance(NULL, NULL, &instance) != VK_ERROR_INITIALIZATION_FAILED) return 2;
+                if (instance != VK_NULL_HANDLE) return 3;
+
+                VkInstanceCreateInfo info;
+                memset(&info, 0, sizeof(info));
+                info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+                instance = (VkInstance)(uintptr_t)0xfeedu;
+                if (vkCreateInstance(&info, NULL, &instance) != VK_ERROR_INITIALIZATION_FAILED) return 4;
+                if (instance != VK_NULL_HANDLE) return 5;
+
+                memset(&info, 0, sizeof(info));
+                info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+                info.flags = 1;
+                if (vkCreateInstance(&info, NULL, &instance) != VK_ERROR_INITIALIZATION_FAILED) return 6;
+
+                const char *layers[] = {{ "VK_LAYER_SKYDNIR_missing" }};
+                memset(&info, 0, sizeof(info));
+                info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+                info.enabledLayerCount = 1;
+                info.ppEnabledLayerNames = layers;
+                if (vkCreateInstance(&info, NULL, &instance) != VK_ERROR_LAYER_NOT_PRESENT) return 7;
+
+                VkApplicationInfo app;
+                memset(&app, 0, sizeof(app));
+                app.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+                memset(&info, 0, sizeof(info));
+                info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+                info.pApplicationInfo = &app;
+                if (vkCreateInstance(&info, NULL, &instance) != VK_ERROR_INITIALIZATION_FAILED) return 8;
+
+                TestPnext bad_pnext = {{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, NULL }};
+                memset(&app, 0, sizeof(app));
+                app.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+                app.pNext = &bad_pnext;
+                info.pApplicationInfo = &app;
+                if (vkCreateInstance(&info, NULL, &instance) != VK_ERROR_FEATURE_NOT_PRESENT) return 9;
+
+                memset(&info, 0, sizeof(info));
+                info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+                info.pNext = &bad_pnext;
+                if (vkCreateInstance(&info, NULL, &instance) != VK_ERROR_FEATURE_NOT_PRESENT) return 10;
+
+                VkDebugUtilsMessengerCreateInfoEXT debug_info;
+                memset(&debug_info, 0, sizeof(debug_info));
+                debug_info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
+                debug_info.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT;
+                debug_info.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT;
+                debug_info.pfnUserCallback = test_debug_callback;
+                info.pNext = &debug_info;
+                if (vkCreateInstance(&info, NULL, &instance) != VK_ERROR_EXTENSION_NOT_PRESENT) return 11;
+
+                const char *debug_ext[] = {{ VK_EXT_DEBUG_UTILS_EXTENSION_NAME }};
+                info.enabledExtensionCount = 1;
+                info.ppEnabledExtensionNames = debug_ext;
+                debug_info.pfnUserCallback = NULL;
+                if (vkCreateInstance(&info, NULL, &instance) != VK_ERROR_INITIALIZATION_FAILED) return 12;
+
+                debug_info.pfnUserCallback = test_debug_callback;
+                if (vkCreateInstance(&info, NULL, &instance) != VK_SUCCESS || instance == VK_NULL_HANDLE) return 13;
+                vkDestroyInstance(instance, NULL);
+
+                TestPnext loader_pnext = {{ VK_STRUCTURE_TYPE_LOADER_INSTANCE_CREATE_INFO, &debug_info }};
+                info.pNext = &loader_pnext;
+                instance = VK_NULL_HANDLE;
+                if (vkCreateInstance(&info, NULL, &instance) != VK_SUCCESS || instance == VK_NULL_HANDLE) return 14;
+                vkDestroyInstance(instance, NULL);
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_debug_utils_extension_is_icd_local_metadata(self):
         source = textwrap.dedent(
             f"""
@@ -2628,6 +2727,110 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 }}
             #endif
                 return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+
+    def test_khr_map_memory2_alias_maps_existing_memory_api(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            int main(void) {{
+            #ifndef VK_KHR_map_memory2
+                return 0;
+            #else
+                if (proc_address("vkMapMemory2") != NULL ||
+                    proc_address("vkUnmapMemory2") != NULL) {{
+                    fprintf(stderr, "core map-memory2 names visible below Vulkan 1.4\\n");
+                    return 2;
+                }}
+                PFN_vkMapMemory2KHR map2 = (PFN_vkMapMemory2KHR)proc_address("vkMapMemory2KHR");
+                PFN_vkUnmapMemory2KHR unmap2 = (PFN_vkUnmapMemory2KHR)proc_address("vkUnmapMemory2KHR");
+                if (!map2 || !unmap2) {{
+                    fprintf(stderr, "KHR map-memory2 aliases were not exposed\\n");
+                    return 3;
+                }}
+                if (!device_extension_advertised_name(VK_KHR_MAP_MEMORY_2_EXTENSION_NAME)) {{
+                    fprintf(stderr, "VK_KHR_map_memory2 was not advertised\\n");
+                    return 4;
+                }}
+
+                VkMemoryAllocateInfo alloc;
+                memset(&alloc, 0, sizeof(alloc));
+                alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+                alloc.allocationSize = 4096;
+                alloc.memoryTypeIndex = 1;
+                VkDeviceMemory memory = VK_NULL_HANDLE;
+                if (vkAllocateMemory(VK_NULL_HANDLE, &alloc, NULL, &memory) != VK_SUCCESS) {{
+                    fprintf(stderr, "memory allocation failed\\n");
+                    return 5;
+                }}
+                PdockerVkMemory *memory_obj = pdocker_vk_memory_from_handle(memory);
+                if (!memory_obj || !memory_obj->map) {{
+                    fprintf(stderr, "allocated memory object missing map\\n");
+                    return 6;
+                }}
+
+                VkMemoryMapInfo map_info;
+                memset(&map_info, 0, sizeof(map_info));
+                map_info.sType = VK_STRUCTURE_TYPE_MEMORY_MAP_INFO;
+                map_info.memory = memory;
+                map_info.offset = 32;
+                map_info.size = 64;
+                void *mapped = NULL;
+                if (map2(VK_NULL_HANDLE, &map_info, &mapped) != VK_SUCCESS) {{
+                    fprintf(stderr, "vkMapMemory2KHR failed\\n");
+                    return 7;
+                }}
+                if (mapped != (void *)((char *)memory_obj->map + 32)) {{
+                    fprintf(stderr, "vkMapMemory2KHR returned wrong mapped address\\n");
+                    return 8;
+                }}
+
+                VkBaseInStructure dummy;
+                memset(&dummy, 0, sizeof(dummy));
+                dummy.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+                map_info.pNext = &dummy;
+                mapped = NULL;
+                if (map2(VK_NULL_HANDLE, &map_info, &mapped) == VK_SUCCESS) {{
+                    fprintf(stderr, "vkMapMemory2KHR accepted unknown pNext\\n");
+                    return 9;
+                }}
+                map_info.pNext = NULL;
+                map_info.flags = 1;
+                if (map2(VK_NULL_HANDLE, &map_info, &mapped) == VK_SUCCESS) {{
+                    fprintf(stderr, "vkMapMemory2KHR accepted nonzero flags\\n");
+                    return 10;
+                }}
+
+                VkMemoryUnmapInfo unmap_info;
+                memset(&unmap_info, 0, sizeof(unmap_info));
+                unmap_info.sType = VK_STRUCTURE_TYPE_MEMORY_UNMAP_INFO;
+                unmap_info.memory = memory;
+                if (unmap2(VK_NULL_HANDLE, &unmap_info) != VK_SUCCESS) {{
+                    fprintf(stderr, "vkUnmapMemory2KHR failed\\n");
+                    return 11;
+                }}
+                unmap_info.pNext = &dummy;
+                if (unmap2(VK_NULL_HANDLE, &unmap_info) == VK_SUCCESS) {{
+                    fprintf(stderr, "vkUnmapMemory2KHR accepted unknown pNext\\n");
+                    return 12;
+                }}
+                unmap_info.pNext = NULL;
+                unmap_info.flags = 1;
+                if (unmap2(VK_NULL_HANDLE, &unmap_info) == VK_SUCCESS) {{
+                    fprintf(stderr, "vkUnmapMemory2KHR accepted nonzero flags\\n");
+                    return 13;
+                }}
+                return 0;
+            #endif
             }}
             """
         )

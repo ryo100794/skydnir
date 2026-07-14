@@ -105,6 +105,7 @@
 #define PDOCKER_VK_FEATURE_STORAGE_BUFFER_16            (1ull << 3)
 #define PDOCKER_VK_FEATURE_UNIFORM_STORAGE_BUFFER_16    (1ull << 4)
 #define PDOCKER_VK_FEATURE_STORAGE_PUSH_CONSTANT_16     (1ull << 5)
+#define PDOCKER_VK_FEATURE_STORAGE_INPUT_OUTPUT_16      (1ull << 48)
 #define PDOCKER_VK_FEATURE_STORAGE_BUFFER_8             (1ull << 6)
 #define PDOCKER_VK_FEATURE_UNIFORM_STORAGE_BUFFER_8     (1ull << 7)
 #define PDOCKER_VK_FEATURE_STORAGE_PUSH_CONSTANT_8      (1ull << 8)
@@ -1788,6 +1789,7 @@ typedef struct {
     int requires_storage16_buffer;
     int requires_storage16_uniform;
     int requires_storage16_push_constant;
+    int requires_storage16_input_output;
     int requires_storage8;
     int requires_storage8_buffer;
     int requires_storage8_uniform;
@@ -1818,6 +1820,7 @@ static const char *spirv_capability_name(uint32_t capability) {
         case 4433: return "StorageBuffer16BitAccess";
         case 4434: return "UniformAndStorageBuffer16BitAccess";
         case 4435: return "StoragePushConstant16";
+        case 4436: return "StorageInputOutput16";
         case 4448: return "StorageBuffer8BitAccess";
         case 4449: return "UniformAndStorageBuffer8BitAccess";
         case 4450: return "StoragePushConstant8";
@@ -1888,6 +1891,7 @@ static SpirvTraceSummary summarize_spirv(const uint32_t *code, size_t bytes) {
             else if (cap == 4433) s.requires_storage16 = s.requires_storage16_buffer = 1;
             else if (cap == 4434) s.requires_storage16 = s.requires_storage16_uniform = 1;
             else if (cap == 4435) s.requires_storage16 = s.requires_storage16_push_constant = 1;
+            else if (cap == 4436) s.requires_storage16 = s.requires_storage16_input_output = 1;
             else if (cap == 4448) s.requires_storage8 = s.requires_storage8_buffer = 1;
             else if (cap == 4449) s.requires_storage8 = s.requires_storage8_uniform = 1;
             else if (cap == 4450) s.requires_storage8 = s.requires_storage8_push_constant = 1;
@@ -2120,6 +2124,7 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             "\"storageBuffer16BitAccess\":%u,"
             "\"uniformAndStorageBuffer16BitAccess\":%u,"
             "\"storagePushConstant16\":%u,"
+            "\"storageInputOutput16\":%u,"
             "\"storageBuffer8BitAccess\":%u,"
             "\"uniformAndStorageBuffer8BitAccess\":%u,"
             "\"storagePushConstant8\":%u,"
@@ -2137,6 +2142,7 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             "\"core11_storageBuffer16BitAccess\":%u,"
             "\"core11_uniformAndStorageBuffer16BitAccess\":%u,"
             "\"core11_storagePushConstant16\":%u,"
+            "\"core11_storageInputOutput16\":%u,"
             "\"core11_multiview\":%u,"
             "\"core12_storageBuffer8BitAccess\":%u,"
             "\"core12_uniformAndStorageBuffer8BitAccess\":%u,"
@@ -2195,6 +2201,7 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             rt ? rt->enabled_storage16.storageBuffer16BitAccess : 0,
             rt ? rt->enabled_storage16.uniformAndStorageBuffer16BitAccess : 0,
             rt ? rt->enabled_storage16.storagePushConstant16 : 0,
+            rt ? rt->enabled_storage16.storageInputOutput16 : 0,
             rt ? rt->enabled_storage8.storageBuffer8BitAccess : 0,
             rt ? rt->enabled_storage8.uniformAndStorageBuffer8BitAccess : 0,
             rt ? rt->enabled_storage8.storagePushConstant8 : 0,
@@ -2212,6 +2219,7 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             rt ? rt->enabled_vulkan11.storageBuffer16BitAccess : 0,
             rt ? rt->enabled_vulkan11.uniformAndStorageBuffer16BitAccess : 0,
             rt ? rt->enabled_vulkan11.storagePushConstant16 : 0,
+            rt ? rt->enabled_vulkan11.storageInputOutput16 : 0,
             rt ? rt->enabled_vulkan11.multiview : 0,
             rt ? rt->enabled_vulkan12.storageBuffer8BitAccess : 0,
             rt ? rt->enabled_vulkan12.uniformAndStorageBuffer8BitAccess : 0,
@@ -2318,7 +2326,10 @@ static int spirv_feature_missing(const SpirvTraceSummary *summary, const VulkanR
     if (!summary || !rt) return 0;
     if (summary->requires_float16 && !rt->physical_float16_int8.shaderFloat16) return 1;
     if (summary->requires_int64 && !rt->physical_features.shaderInt64) return 1;
-    if (summary->requires_storage16 && !rt->physical_storage16.storageBuffer16BitAccess) return 1;
+    if (summary->requires_storage16_buffer && !rt->physical_storage16.storageBuffer16BitAccess) return 1;
+    if (summary->requires_storage16_uniform && !rt->physical_storage16.uniformAndStorageBuffer16BitAccess) return 1;
+    if (summary->requires_storage16_push_constant && !rt->physical_storage16.storagePushConstant16) return 1;
+    if (summary->requires_storage16_input_output && !rt->physical_storage16.storageInputOutput16) return 1;
     if (summary->requires_storage8 && !rt->physical_storage8.storageBuffer8BitAccess) return 1;
     if (summary->requires_int8 && !rt->physical_float16_int8.shaderInt8) return 1;
     if (summary->requires_subgroup_arithmetic &&
@@ -2340,6 +2351,7 @@ static uint64_t spirv_required_feature_mask(const SpirvTraceSummary *summary) {
     if (summary->requires_storage16_buffer) mask |= PDOCKER_VK_FEATURE_STORAGE_BUFFER_16;
     if (summary->requires_storage16_uniform) mask |= PDOCKER_VK_FEATURE_UNIFORM_STORAGE_BUFFER_16;
     if (summary->requires_storage16_push_constant) mask |= PDOCKER_VK_FEATURE_STORAGE_PUSH_CONSTANT_16;
+    if (summary->requires_storage16_input_output) mask |= PDOCKER_VK_FEATURE_STORAGE_INPUT_OUTPUT_16;
     if (summary->requires_storage8_buffer) mask |= PDOCKER_VK_FEATURE_STORAGE_BUFFER_8;
     if (summary->requires_storage8_uniform) mask |= PDOCKER_VK_FEATURE_UNIFORM_STORAGE_BUFFER_8;
     if (summary->requires_storage8_push_constant) mask |= PDOCKER_VK_FEATURE_STORAGE_PUSH_CONSTANT_8;
@@ -2361,6 +2373,7 @@ static void write_feature_mask_names(FILE *out, uint64_t mask) {
     WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_STORAGE_BUFFER_16, "storageBuffer16BitAccess");
     WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_UNIFORM_STORAGE_BUFFER_16, "uniformAndStorageBuffer16BitAccess");
     WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_STORAGE_PUSH_CONSTANT_16, "storagePushConstant16");
+    WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_STORAGE_INPUT_OUTPUT_16, "storageInputOutput16");
     WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_STORAGE_BUFFER_8, "storageBuffer8BitAccess");
     WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_UNIFORM_STORAGE_BUFFER_8, "uniformAndStorageBuffer8BitAccess");
     WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_STORAGE_PUSH_CONSTANT_8, "storagePushConstant8");
@@ -2391,7 +2404,11 @@ static void write_spirv_feature_report(
     if (!out || !summary) return;
     const int missing_float16 = summary->requires_float16 && (!rt || !rt->physical_float16_int8.shaderFloat16);
     const int missing_int64 = summary->requires_int64 && (!rt || !rt->physical_features.shaderInt64);
-    const int missing_storage16 = summary->requires_storage16 && (!rt || !rt->physical_storage16.storageBuffer16BitAccess);
+    const int missing_storage16 =
+        (summary->requires_storage16_buffer && (!rt || !rt->physical_storage16.storageBuffer16BitAccess)) ||
+        (summary->requires_storage16_uniform && (!rt || !rt->physical_storage16.uniformAndStorageBuffer16BitAccess)) ||
+        (summary->requires_storage16_push_constant && (!rt || !rt->physical_storage16.storagePushConstant16)) ||
+        (summary->requires_storage16_input_output && (!rt || !rt->physical_storage16.storageInputOutput16));
     const int missing_storage8 = summary->requires_storage8 && (!rt || !rt->physical_storage8.storageBuffer8BitAccess);
     const int missing_int8 = summary->requires_int8 && (!rt || !rt->physical_float16_int8.shaderInt8);
     const int missing_subgroup_arithmetic = summary->requires_subgroup_arithmetic &&
@@ -20160,6 +20177,7 @@ static void print_capabilities(const char *transport) {
             "\"storageBuffer16BitAccess\":%u,"
             "\"uniformAndStorageBuffer16BitAccess\":%u,"
             "\"storagePushConstant16\":%u,"
+            "\"storageInputOutput16\":%u,"
             "\"storageBuffer8BitAccess\":%u,"
             "\"uniformAndStorageBuffer8BitAccess\":%u,"
             "\"storagePushConstant8\":%u,"

@@ -475,6 +475,7 @@ static uint64_t g_generic_dispatch_sequence = 0;
 #define PDOCKER_VK_FEATURE_STORAGE_BUFFER_16            (1ull << 3)
 #define PDOCKER_VK_FEATURE_UNIFORM_STORAGE_BUFFER_16    (1ull << 4)
 #define PDOCKER_VK_FEATURE_STORAGE_PUSH_CONSTANT_16     (1ull << 5)
+#define PDOCKER_VK_FEATURE_STORAGE_INPUT_OUTPUT_16      (1ull << 48)
 #define PDOCKER_VK_FEATURE_STORAGE_BUFFER_8             (1ull << 6)
 #define PDOCKER_VK_FEATURE_UNIFORM_STORAGE_BUFFER_8     (1ull << 7)
 #define PDOCKER_VK_FEATURE_STORAGE_PUSH_CONSTANT_8      (1ull << 8)
@@ -17141,6 +17142,7 @@ static uint64_t feature_mask_from_pnext_chain(const void *pNext) {
                 if (p->storageBuffer16BitAccess) mask |= PDOCKER_VK_FEATURE_STORAGE_BUFFER_16;
                 if (p->uniformAndStorageBuffer16BitAccess) mask |= PDOCKER_VK_FEATURE_UNIFORM_STORAGE_BUFFER_16;
                 if (p->storagePushConstant16) mask |= PDOCKER_VK_FEATURE_STORAGE_PUSH_CONSTANT_16;
+                if (p->storageInputOutput16) mask |= PDOCKER_VK_FEATURE_STORAGE_INPUT_OUTPUT_16;
                 if (p->multiview) mask |= PDOCKER_VK_FEATURE_MULTIVIEW;
                 break;
             }
@@ -17155,6 +17157,7 @@ static uint64_t feature_mask_from_pnext_chain(const void *pNext) {
                 if (p->storageBuffer16BitAccess) mask |= PDOCKER_VK_FEATURE_STORAGE_BUFFER_16;
                 if (p->uniformAndStorageBuffer16BitAccess) mask |= PDOCKER_VK_FEATURE_UNIFORM_STORAGE_BUFFER_16;
                 if (p->storagePushConstant16) mask |= PDOCKER_VK_FEATURE_STORAGE_PUSH_CONSTANT_16;
+                if (p->storageInputOutput16) mask |= PDOCKER_VK_FEATURE_STORAGE_INPUT_OUTPUT_16;
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES: {
@@ -17312,6 +17315,9 @@ static uint64_t advertised_feature_mask(void) {
         }
         if (!storage16_disabled && caps->storage16.storagePushConstant16) {
             mask |= PDOCKER_VK_FEATURE_STORAGE_PUSH_CONSTANT_16;
+        }
+        if (!storage16_disabled && caps->storage16.storageInputOutput16) {
+            mask |= PDOCKER_VK_FEATURE_STORAGE_INPUT_OUTPUT_16;
         }
         if (!storage8_disabled && caps->storage8.storageBuffer8BitAccess) {
             mask |= PDOCKER_VK_FEATURE_STORAGE_BUFFER_8;
@@ -17618,6 +17624,8 @@ static bool instance_extension_advertised_name(const char *name) {
     return false;
 }
 
+static VkResult unsupported_create_info_pnext_result(const char *api_name, const void *pNext);
+
 static VkResult validate_instance_extensions(const VkInstanceCreateInfo *pCreateInfo) {
     if (!pCreateInfo) return VK_SUCCESS;
     for (uint32_t i = 0; i < pCreateInfo->enabledExtensionCount; ++i) {
@@ -17638,6 +17646,100 @@ static VkResult validate_instance_extensions(const VkInstanceCreateInfo *pCreate
     return VK_SUCCESS;
 }
 
+static VkResult invalid_instance_create_info_result(const char *reason, VkResult result) {
+    if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
+        fprintf(stderr,
+                "pdocker-vulkan-icd: vkCreateInstance invalid create info: %s\n",
+                reason ? reason : "invalid");
+    }
+    trace_icd_runtime_failure("create-instance-info-invalid", result);
+    return result;
+}
+
+static bool instance_create_info_enables_extension(
+        const VkInstanceCreateInfo *pCreateInfo,
+        const char *extension_name) {
+    if (!pCreateInfo || !extension_name) return false;
+    for (uint32_t i = 0; i < pCreateInfo->enabledExtensionCount; ++i) {
+        const char *name = pCreateInfo->ppEnabledExtensionNames
+            ? pCreateInfo->ppEnabledExtensionNames[i]
+            : NULL;
+        if (name && strcmp(name, extension_name) == 0) return true;
+    }
+    return false;
+}
+
+static VkResult validate_instance_create_pnext_chain(const VkInstanceCreateInfo *pCreateInfo) {
+    const void *node = pCreateInfo ? pCreateInfo->pNext : NULL;
+    while (node) {
+        PdockerVkStructHeader header = read_vk_struct_header(node);
+        switch (header.sType) {
+            case VK_STRUCTURE_TYPE_LOADER_INSTANCE_CREATE_INFO:
+                /*
+                 * The desktop Vulkan loader prepends ICD-private loader metadata
+                 * to VkInstanceCreateInfo::pNext before calling the ICD.  This is
+                 * not an application feature request; preserve the chain walk and
+                 * ignore the node itself.
+                 */
+                break;
+#ifdef VK_EXT_DEBUG_UTILS_EXTENSION_NAME
+            case VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT: {
+                const VkDebugUtilsMessengerCreateInfoEXT *debug_info =
+                    (const VkDebugUtilsMessengerCreateInfoEXT *)node;
+                if (!instance_create_info_enables_extension(
+                        pCreateInfo,
+                        VK_EXT_DEBUG_UTILS_EXTENSION_NAME)) {
+                    trace_icd_runtime_failure("create-instance-debug-utils-extension-disabled",
+                                              VK_ERROR_EXTENSION_NOT_PRESENT);
+                    return VK_ERROR_EXTENSION_NOT_PRESENT;
+                }
+                if (debug_info->flags != 0 || !debug_info->pfnUserCallback) {
+                    return invalid_instance_create_info_result(
+                        "debug-utils messenger create info",
+                        VK_ERROR_INITIALIZATION_FAILED);
+                }
+                break;
+            }
+#endif
+            default:
+                return unsupported_create_info_pnext_result("vkCreateInstance", node);
+        }
+        node = header.pNext;
+    }
+    return VK_SUCCESS;
+}
+
+static VkResult validate_instance_create_info_shape(const VkInstanceCreateInfo *pCreateInfo) {
+    if (!pCreateInfo) {
+        return invalid_instance_create_info_result("pCreateInfo is NULL",
+                                                  VK_ERROR_INITIALIZATION_FAILED);
+    }
+    if (pCreateInfo->sType != VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO) {
+        return invalid_instance_create_info_result("sType is not VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO",
+                                                  VK_ERROR_INITIALIZATION_FAILED);
+    }
+    if (pCreateInfo->flags != 0) {
+        return invalid_instance_create_info_result("flags must be zero",
+                                                  VK_ERROR_INITIALIZATION_FAILED);
+    }
+    if (pCreateInfo->pApplicationInfo) {
+        PdockerVkStructHeader app_header = read_vk_struct_header(pCreateInfo->pApplicationInfo);
+        if (app_header.sType != VK_STRUCTURE_TYPE_APPLICATION_INFO) {
+            return invalid_instance_create_info_result("pApplicationInfo has invalid sType",
+                                                      VK_ERROR_INITIALIZATION_FAILED);
+        }
+        if (app_header.pNext) {
+            return unsupported_create_info_pnext_result("vkCreateInstance.application",
+                                                       app_header.pNext);
+        }
+    }
+    if (pCreateInfo->enabledLayerCount != 0) {
+        return invalid_instance_create_info_result("instance layers are not advertised",
+                                                  VK_ERROR_LAYER_NOT_PRESENT);
+    }
+    return validate_instance_create_pnext_chain(pCreateInfo);
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceLayerProperties(
         uint32_t *pPropertyCount,
         VkLayerProperties *pProperties) {
@@ -17656,6 +17758,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateInstance(
         VkInstance *pInstance) {
     (void)pAllocator;
     if (!pInstance) return VK_ERROR_INITIALIZATION_FAILED;
+    *pInstance = VK_NULL_HANDLE;
+    VkResult shape_rc = validate_instance_create_info_shape(pCreateInfo);
+    if (shape_rc != VK_SUCCESS) return shape_rc;
     VkResult extension_rc = validate_instance_extensions(pCreateInfo);
     if (extension_rc != VK_SUCCESS) return extension_rc;
     PdockerVkInstance *instance = calloc(1, sizeof(*instance));
@@ -20219,6 +20324,50 @@ VKAPI_ATTR void VKAPI_CALL vkUnmapMemory(VkDevice device, VkDeviceMemory memory)
     (void)memory;
 }
 
+#ifdef VK_KHR_map_memory2
+VKAPI_ATTR VkResult VKAPI_CALL vkMapMemory2(
+        VkDevice device,
+        const VkMemoryMapInfo *pMemoryMapInfo,
+        void **ppData) {
+    if (!pMemoryMapInfo || pMemoryMapInfo->sType != VK_STRUCTURE_TYPE_MEMORY_MAP_INFO || !ppData) {
+        return VK_ERROR_MEMORY_MAP_FAILED;
+    }
+    if (pMemoryMapInfo->pNext) {
+        return unsupported_create_info_pnext_result("vkMapMemory2", pMemoryMapInfo->pNext);
+    }
+    if (pMemoryMapInfo->flags != 0) {
+        trace_icd_runtime_failure("map-memory2-flags-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    return vkMapMemory(device,
+                       pMemoryMapInfo->memory,
+                       pMemoryMapInfo->offset,
+                       pMemoryMapInfo->size,
+                       pMemoryMapInfo->flags,
+                       ppData);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkUnmapMemory2(
+        VkDevice device,
+        const VkMemoryUnmapInfo *pMemoryUnmapInfo) {
+    if (!pMemoryUnmapInfo || pMemoryUnmapInfo->sType != VK_STRUCTURE_TYPE_MEMORY_UNMAP_INFO) {
+        return VK_ERROR_MEMORY_MAP_FAILED;
+    }
+    if (pMemoryUnmapInfo->pNext) {
+        return unsupported_create_info_pnext_result("vkUnmapMemory2", pMemoryUnmapInfo->pNext);
+    }
+    if (pMemoryUnmapInfo->flags != 0) {
+        trace_icd_runtime_failure("unmap-memory2-flags-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    if (!pdocker_vk_memory_from_handle(pMemoryUnmapInfo->memory)) {
+        return VK_ERROR_MEMORY_MAP_FAILED;
+    }
+    vkUnmapMemory(device, pMemoryUnmapInfo->memory);
+    return VK_SUCCESS;
+}
+#endif
+
 VKAPI_ATTR void VKAPI_CALL vkGetDeviceMemoryCommitment(
         VkDevice device,
         VkDeviceMemory memory,
@@ -20448,6 +20597,9 @@ static uint32_t collect_advertised_device_extensions(
 #endif
 #ifdef VK_KHR_MAINTENANCE_5_EXTENSION_NAME
     ADD_DEVICE_EXTENSION(VK_KHR_MAINTENANCE_5_EXTENSION_NAME, VK_KHR_MAINTENANCE_5_SPEC_VERSION);
+#endif
+#ifdef VK_KHR_map_memory2
+    ADD_DEVICE_EXTENSION(VK_KHR_MAP_MEMORY_2_EXTENSION_NAME, VK_KHR_MAP_MEMORY_2_SPEC_VERSION);
 #endif
 #ifdef VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME
     ADD_DEVICE_EXTENSION(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME, VK_KHR_BUFFER_DEVICE_ADDRESS_SPEC_VERSION);
@@ -32247,6 +32399,8 @@ static bool proc_address_hidden_by_advertisement(const char *pName) {
          strcmp(pName, "vkGetDeviceImageSparseMemoryRequirements") == 0 ||
          strcmp(pName, "vkGetImageSubresourceLayout2") == 0 ||
          strcmp(pName, "vkGetDeviceImageSubresourceLayout") == 0 ||
+         strcmp(pName, "vkMapMemory2") == 0 ||
+         strcmp(pName, "vkUnmapMemory2") == 0 ||
          strcmp(pName, "vkGetRenderingAreaGranularity") == 0 ||
          strcmp(pName, "vkGetPhysicalDeviceToolProperties") == 0 ||
          strcmp(pName, "vkCreatePrivateDataSlot") == 0 ||
@@ -32480,6 +32634,12 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_PROC(vkFreeMemory);
     MAP_PROC(vkMapMemory);
     MAP_PROC(vkUnmapMemory);
+#ifdef VK_KHR_map_memory2
+    MAP_PROC(vkMapMemory2);
+    MAP_ALIAS("vkMapMemory2KHR", vkMapMemory2);
+    MAP_PROC(vkUnmapMemory2);
+    MAP_ALIAS("vkUnmapMemory2KHR", vkUnmapMemory2);
+#endif
     MAP_PROC(vkGetDeviceMemoryCommitment);
     MAP_PROC(vkFlushMappedMemoryRanges);
     MAP_PROC(vkInvalidateMappedMemoryRanges);
