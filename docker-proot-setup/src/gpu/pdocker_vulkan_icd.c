@@ -10455,9 +10455,6 @@ static bool descriptor_type_requires_buffer_view(VkDescriptorType type) {
 
 static bool descriptor_image_read_only_layout_valid(VkImageLayout layout) {
     return layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL ||
-           layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL ||
-           layout == VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL ||
-           layout == VK_IMAGE_LAYOUT_STENCIL_READ_ONLY_OPTIMAL ||
            layout == VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL;
 }
 
@@ -10466,9 +10463,15 @@ static bool descriptor_image_read_only_layout_valid_for_aspect(
         VkImageAspectFlags aspect_mask) {
     if (descriptor_image_read_only_layout_valid(layout)) return true;
     switch (layout) {
+        case VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL:
+            return aspect_mask != 0 &&
+                   (aspect_mask & ~((VkImageAspectFlags)(VK_IMAGE_ASPECT_DEPTH_BIT |
+                                                         VK_IMAGE_ASPECT_STENCIL_BIT))) == 0;
+        case VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL:
         case VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_STENCIL_ATTACHMENT_OPTIMAL:
             return aspect_mask != 0 &&
                    (aspect_mask & ~((VkImageAspectFlags)VK_IMAGE_ASPECT_DEPTH_BIT)) == 0;
+        case VK_IMAGE_LAYOUT_STENCIL_READ_ONLY_OPTIMAL:
         case VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_STENCIL_READ_ONLY_OPTIMAL:
             return aspect_mask != 0 &&
                    (aspect_mask & ~((VkImageAspectFlags)VK_IMAGE_ASPECT_STENCIL_BIT)) == 0;
