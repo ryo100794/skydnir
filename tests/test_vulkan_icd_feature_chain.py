@@ -218,7 +218,8 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     (PFN_vkVoidFunction)vkGetRenderingAreaGranularity) return 8;
                 if (proc_address("vkCmdBindIndexBuffer2KHR") !=
                     (PFN_vkVoidFunction)vkCmdBindIndexBuffer2KHR) return 9;
-                if (proc_address("vkGetImageSubresourceLayout2EXT") != NULL) return 10;
+                if (proc_address("vkGetImageSubresourceLayout2EXT") !=
+                    (PFN_vkVoidFunction)vkGetImageSubresourceLayout2) return 10;
 
                 VkRenderingAreaInfo area;
                 VkExtent2D granularity;
@@ -237,6 +238,103 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         )
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_host_image_copy_ext_extension_is_false_only(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            static int extension_seen(
+                    const VkExtensionProperties *extensions,
+                    uint32_t count,
+                    const char *name) {{
+                for (uint32_t i = 0; i < count; ++i) {{
+                    if (strcmp(extensions[i].extensionName, name) == 0) return 1;
+                }}
+                return 0;
+            }}
+
+            int main(void) {{
+            #ifdef VK_EXT_HOST_IMAGE_COPY_EXTENSION_NAME
+                if (!device_extension_advertised_name(VK_EXT_HOST_IMAGE_COPY_EXTENSION_NAME)) return 2;
+                uint32_t count = 64;
+                VkExtensionProperties extensions[64];
+                memset(extensions, 0, sizeof(extensions));
+                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &count, extensions) != VK_SUCCESS) return 3;
+                if (!extension_seen(extensions, count, VK_EXT_HOST_IMAGE_COPY_EXTENSION_NAME)) return 4;
+
+                const char *enabled[] = {{ VK_EXT_HOST_IMAGE_COPY_EXTENSION_NAME }};
+                VkDeviceCreateInfo device_info;
+                memset(&device_info, 0, sizeof(device_info));
+                device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                device_info.enabledExtensionCount = 1;
+                device_info.ppEnabledExtensionNames = enabled;
+                if (validate_device_extensions(&device_info) != VK_SUCCESS) return 5;
+
+                if (proc_address("vkCopyMemoryToImageEXT") != (PFN_vkVoidFunction)vkCopyMemoryToImageEXT) return 6;
+                if (proc_address("vkCopyImageToMemoryEXT") != (PFN_vkVoidFunction)vkCopyImageToMemoryEXT) return 7;
+                if (proc_address("vkCopyImageToImageEXT") != (PFN_vkVoidFunction)vkCopyImageToImageEXT) return 8;
+                if (proc_address("vkTransitionImageLayoutEXT") != (PFN_vkVoidFunction)vkTransitionImageLayoutEXT) return 9;
+                if (proc_address("vkGetImageSubresourceLayout2EXT") != (PFN_vkVoidFunction)vkGetImageSubresourceLayout2) return 10;
+
+                VkPhysicalDeviceHostImageCopyFeatures features;
+                memset(&features, 0xff, sizeof(features));
+                features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_IMAGE_COPY_FEATURES;
+                features.pNext = NULL;
+                fill_pnext_features(&features);
+                if (features.sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_IMAGE_COPY_FEATURES ||
+                    features.pNext != NULL || features.hostImageCopy != VK_FALSE) return 11;
+
+                device_info.pNext = &features;
+                features.hostImageCopy = VK_TRUE;
+                if (validate_device_feature_requests(&device_info) == VK_SUCCESS) return 12;
+                features.hostImageCopy = VK_FALSE;
+                if (validate_device_feature_requests(&device_info) != VK_SUCCESS) return 13;
+
+                VkImageLayout src_layouts[2] = {{ VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL }};
+                VkImageLayout dst_layouts[2] = {{ VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL }};
+                VkPhysicalDeviceHostImageCopyProperties props;
+                memset(&props, 0xff, sizeof(props));
+                props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_IMAGE_COPY_PROPERTIES;
+                props.pNext = NULL;
+                props.copySrcLayoutCount = 2;
+                props.pCopySrcLayouts = src_layouts;
+                props.copyDstLayoutCount = 2;
+                props.pCopyDstLayouts = dst_layouts;
+                fill_pnext_properties(&props);
+                if (props.sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_IMAGE_COPY_PROPERTIES ||
+                    props.pNext != NULL ||
+                    props.copySrcLayoutCount != 0 || props.copyDstLayoutCount != 0 ||
+                    props.pCopySrcLayouts != src_layouts || props.pCopyDstLayouts != dst_layouts ||
+                    props.identicalMemoryTypeRequirements != VK_FALSE) return 14;
+
+                VkCopyMemoryToImageInfo memory_to_image;
+                memset(&memory_to_image, 0, sizeof(memory_to_image));
+                memory_to_image.sType = VK_STRUCTURE_TYPE_COPY_MEMORY_TO_IMAGE_INFO;
+                if (((PFN_vkCopyMemoryToImageEXT)proc_address("vkCopyMemoryToImageEXT"))(VK_NULL_HANDLE, &memory_to_image) != VK_ERROR_FEATURE_NOT_PRESENT) return 15;
+
+                VkCopyImageToMemoryInfo image_to_memory;
+                memset(&image_to_memory, 0, sizeof(image_to_memory));
+                image_to_memory.sType = VK_STRUCTURE_TYPE_COPY_IMAGE_TO_MEMORY_INFO;
+                if (((PFN_vkCopyImageToMemoryEXT)proc_address("vkCopyImageToMemoryEXT"))(VK_NULL_HANDLE, &image_to_memory) != VK_ERROR_FEATURE_NOT_PRESENT) return 16;
+
+                VkCopyImageToImageInfo image_to_image;
+                memset(&image_to_image, 0, sizeof(image_to_image));
+                image_to_image.sType = VK_STRUCTURE_TYPE_COPY_IMAGE_TO_IMAGE_INFO;
+                if (((PFN_vkCopyImageToImageEXT)proc_address("vkCopyImageToImageEXT"))(VK_NULL_HANDLE, &image_to_image) != VK_ERROR_FEATURE_NOT_PRESENT) return 17;
+
+                if (((PFN_vkTransitionImageLayoutEXT)proc_address("vkTransitionImageLayoutEXT"))(VK_NULL_HANDLE, 0, NULL) != VK_ERROR_FEATURE_NOT_PRESENT) return 18;
+            #endif
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
 
     def test_sampler_ycbcr_conversion_khr_extension_is_false_only(self):
         source = textwrap.dedent(

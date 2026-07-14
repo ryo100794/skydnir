@@ -15991,6 +15991,21 @@ static void fill_pnext_properties(void *pNext) {
                 p->defaultRobustnessImages = VK_PIPELINE_ROBUSTNESS_IMAGE_BEHAVIOR_DEVICE_DEFAULT;
                 break;
             }
+#ifdef VK_EXT_HOST_IMAGE_COPY_EXTENSION_NAME
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_IMAGE_COPY_PROPERTIES: {
+                VkPhysicalDeviceHostImageCopyProperties *p =
+                    (VkPhysicalDeviceHostImageCopyProperties *)node;
+                VkImageLayout *copy_src_layouts = p->pCopySrcLayouts;
+                VkImageLayout *copy_dst_layouts = p->pCopyDstLayouts;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                p->pCopySrcLayouts = copy_src_layouts;
+                p->pCopyDstLayouts = copy_dst_layouts;
+                p->copySrcLayoutCount = 0;
+                p->copyDstLayoutCount = 0;
+                p->identicalMemoryTypeRequirements = VK_FALSE;
+                break;
+            }
+#endif
             default:
                 break;
         }
@@ -16227,6 +16242,15 @@ static void fill_pnext_features(void *pNext) {
                     (VkPhysicalDeviceMaintenance5Features *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
                 p->maintenance5 = VK_FALSE;
+                break;
+            }
+#endif
+#ifdef VK_EXT_HOST_IMAGE_COPY_EXTENSION_NAME
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_IMAGE_COPY_FEATURES: {
+                VkPhysicalDeviceHostImageCopyFeatures *p =
+                    (VkPhysicalDeviceHostImageCopyFeatures *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                p->hostImageCopy = VK_FALSE;
                 break;
             }
 #endif
@@ -16853,6 +16877,15 @@ static VkResult validate_device_feature_requests(const VkDeviceCreateInfo *pCrea
                     (const VkPhysicalDeviceMaintenance5Features *)node;
                 supported = !p->maintenance5;
                 if (!supported) unsupported_feature_name = "maintenance5";
+                break;
+            }
+#endif
+#ifdef VK_EXT_HOST_IMAGE_COPY_EXTENSION_NAME
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_IMAGE_COPY_FEATURES: {
+                const VkPhysicalDeviceHostImageCopyFeatures *p =
+                    (const VkPhysicalDeviceHostImageCopyFeatures *)node;
+                supported = !p->hostImageCopy;
+                if (!supported) unsupported_feature_name = "hostImageCopy";
                 break;
             }
 #endif
@@ -19333,6 +19366,50 @@ VKAPI_ATTR void VKAPI_CALL vkGetImageSubresourceLayout2EXT(
     vkGetImageSubresourceLayout2(device, image, pSubresource, pLayout);
 }
 
+#ifdef VK_EXT_HOST_IMAGE_COPY_EXTENSION_NAME
+VKAPI_ATTR VkResult VKAPI_CALL vkCopyMemoryToImageEXT(
+        VkDevice device,
+        const VkCopyMemoryToImageInfo *pCopyMemoryToImageInfo) {
+    (void)device;
+    (void)pCopyMemoryToImageInfo;
+    trace_icd_runtime_failure("host-image-copy-memory-to-image-unsupported",
+                              VK_ERROR_FEATURE_NOT_PRESENT);
+    return VK_ERROR_FEATURE_NOT_PRESENT;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkCopyImageToMemoryEXT(
+        VkDevice device,
+        const VkCopyImageToMemoryInfo *pCopyImageToMemoryInfo) {
+    (void)device;
+    (void)pCopyImageToMemoryInfo;
+    trace_icd_runtime_failure("host-image-copy-image-to-memory-unsupported",
+                              VK_ERROR_FEATURE_NOT_PRESENT);
+    return VK_ERROR_FEATURE_NOT_PRESENT;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkCopyImageToImageEXT(
+        VkDevice device,
+        const VkCopyImageToImageInfo *pCopyImageToImageInfo) {
+    (void)device;
+    (void)pCopyImageToImageInfo;
+    trace_icd_runtime_failure("host-image-copy-image-to-image-unsupported",
+                              VK_ERROR_FEATURE_NOT_PRESENT);
+    return VK_ERROR_FEATURE_NOT_PRESENT;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkTransitionImageLayoutEXT(
+        VkDevice device,
+        uint32_t transitionCount,
+        const VkHostImageLayoutTransitionInfo *pTransitions) {
+    (void)device;
+    (void)transitionCount;
+    (void)pTransitions;
+    trace_icd_runtime_failure("host-image-copy-transition-layout-unsupported",
+                              VK_ERROR_FEATURE_NOT_PRESENT);
+    return VK_ERROR_FEATURE_NOT_PRESENT;
+}
+#endif
+
 VKAPI_ATTR void VKAPI_CALL vkGetDeviceImageSubresourceLayout(
         VkDevice device,
         const VkDeviceImageSubresourceInfo *pInfo,
@@ -20200,6 +20277,10 @@ static uint32_t collect_advertised_device_extensions(
 #ifdef VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME
     ADD_DEVICE_EXTENSION(VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME,
                          VK_KHR_SAMPLER_YCBCR_CONVERSION_SPEC_VERSION);
+#endif
+#ifdef VK_EXT_HOST_IMAGE_COPY_EXTENSION_NAME
+    ADD_DEVICE_EXTENSION(VK_EXT_HOST_IMAGE_COPY_EXTENSION_NAME,
+                         VK_EXT_HOST_IMAGE_COPY_SPEC_VERSION);
 #endif
 #ifdef VK_KHR_MAINTENANCE_4_EXTENSION_NAME
     ADD_DEVICE_EXTENSION(VK_KHR_MAINTENANCE_4_EXTENSION_NAME, VK_KHR_MAINTENANCE_4_SPEC_VERSION);
@@ -31898,9 +31979,6 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance instan
 
 static bool proc_address_hidden_by_advertisement(const char *pName) {
     if (!pName) return true;
-    if (strcmp(pName, "vkGetImageSubresourceLayout2EXT") == 0) {
-        return true;
-    }
     if (!advertised_api_1_4() &&
         strcmp(pName, "vkCmdBindIndexBuffer2") == 0) {
         return true;
@@ -32130,6 +32208,12 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_PROC(vkGetImageSubresourceLayout2);
     MAP_ALIAS("vkGetImageSubresourceLayout2KHR", vkGetImageSubresourceLayout2);
     MAP_ALIAS("vkGetImageSubresourceLayout2EXT", vkGetImageSubresourceLayout2);
+#ifdef VK_EXT_HOST_IMAGE_COPY_EXTENSION_NAME
+    MAP_PROC(vkCopyMemoryToImageEXT);
+    MAP_PROC(vkCopyImageToMemoryEXT);
+    MAP_PROC(vkCopyImageToImageEXT);
+    MAP_PROC(vkTransitionImageLayoutEXT);
+#endif
     MAP_PROC(vkGetDeviceImageSubresourceLayout);
     MAP_ALIAS("vkGetDeviceImageSubresourceLayoutKHR", vkGetDeviceImageSubresourceLayout);
     MAP_PROC(vkGetRenderingAreaGranularity);
