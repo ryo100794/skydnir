@@ -1197,6 +1197,7 @@ typedef struct {
 typedef struct {
     PdockerVkBuffer *buffer;
     VkDeviceSize offset;
+    VkDeviceSize size;
     VkIndexType index_type;
     bool bound;
 } PdockerVkIndexBufferSnapshot;
@@ -1223,6 +1224,7 @@ typedef struct {
     bool vertex_buffer_bound;
     PdockerVkBuffer *index_buffer;
     VkDeviceSize index_offset;
+    VkDeviceSize index_size;
     VkIndexType index_type;
     bool index_buffer_bound;
     uint32_t vertex_count;
@@ -1458,6 +1460,7 @@ typedef struct {
     uint32_t vertex_binding_count;
     PdockerVkBuffer *index_buffer;
     VkDeviceSize index_offset;
+    VkDeviceSize index_size;
     VkIndexType index_type;
     bool index_buffer_bound;
     PdockerVkDynamicStateSnapshot *dynamic_states;
@@ -3178,6 +3181,7 @@ static bool append_secondary_command_buffer(
     if (src->index_buffer_bound) {
         dst->index_buffer = src->index_buffer;
         dst->index_offset = src->index_offset;
+        dst->index_size = src->index_size;
         dst->index_type = src->index_type;
         dst->index_buffer_bound = true;
     }
@@ -3364,6 +3368,8 @@ static bool checked_mul_u64(uint64_t a, uint64_t b, uint64_t *out) {
     *out = a * b;
     return true;
 }
+
+static bool checked_add_u64(uint64_t a, uint64_t b, uint64_t *out);
 
 static uint32_t conservative_format_bytes_per_pixel(VkFormat format) {
     switch (format) {
@@ -5753,6 +5759,7 @@ static bool vulkan_index_element_size(VkIndexType index_type, uint64_t *out_size
 
 static bool validate_index_buffer_draw_range(const PdockerVkBuffer *buffer,
                                              VkDeviceSize index_offset,
+                                             VkDeviceSize bind_size,
                                              VkIndexType index_type,
                                              uint32_t first_index,
                                              uint32_t index_count) {
@@ -5760,9 +5767,14 @@ static bool validate_index_buffer_draw_range(const PdockerVkBuffer *buffer,
     if (!vulkan_index_element_size(index_type, &element_size)) return false;
     uint64_t first_bytes = 0;
     uint64_t draw_bytes = 0;
+    uint64_t bind_relative_end = 0;
     if (!checked_mul_u64((uint64_t)first_index, element_size, &first_bytes) ||
         !checked_mul_u64((uint64_t)index_count, element_size, &draw_bytes) ||
+        !checked_add_u64(first_bytes, draw_bytes, &bind_relative_end) ||
         first_bytes > UINT64_MAX - (uint64_t)index_offset) {
+        return false;
+    }
+    if (bind_size != VK_WHOLE_SIZE && bind_relative_end > (uint64_t)bind_size) {
         return false;
     }
     const uint64_t byte_offset = (uint64_t)index_offset + first_bytes;
@@ -8993,7 +9005,12 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
                 &cmd->graphics_index_buffer_snapshots[record->index_buffer_snapshot_index];
             PdockerVkBuffer *index_buffer = index_snapshot->buffer;
             if (!index_snapshot->bound || !index_buffer ||
-                !validate_buffer_backing_range(index_buffer)) { rc = -EPROTO; goto cleanup; }
+                (index_snapshot->size == VK_WHOLE_SIZE
+                    ? !validate_buffer_backing_range(index_buffer)
+                    : !validate_buffer_byte_range(index_buffer, index_snapshot->offset, index_snapshot->size))) {
+                rc = -EPROTO;
+                goto cleanup;
+            }
             int buffer_index = collect_graphics_buffer_resource(
                 resources, &resource_count, memory_objects, memory_resource_indices, &memory_count,
                 buffer_objects, buffer_resource_indices, &buffer_count, fds, &fd_count,
@@ -9419,12 +9436,13 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
             if (draw->index_buffer_bound) {
                 if (!draw->index_buffer) { rc = -EPROTO; goto cleanup; }
                 if (draw->indexed && !draw->indirect) {
-                    if (!validate_index_buffer_draw_range(draw->index_buffer, draw->index_offset, draw->index_type,
-                                                          draw->first_index, draw->index_count)) {
+                    if (!validate_index_buffer_draw_range(draw->index_buffer, draw->index_offset, draw->index_size,
+                                                          draw->index_type, draw->first_index, draw->index_count)) {
                         rc = -ERANGE;
                         goto cleanup;
                     }
-                } else if (!validate_buffer_backing_range(draw->index_buffer)) {
+                } else if (draw->index_size != VK_WHOLE_SIZE ||
+                           !validate_buffer_backing_range(draw->index_buffer)) {
                     rc = -ERANGE;
                     goto cleanup;
                 }
@@ -15472,6 +15490,10 @@ static uint32_t advertised_api_version(void) {
 
 static VkBool32 advertised_api_1_3(void) {
     return advertised_api_version() >= VK_MAKE_VERSION(1, 3, 0) ? VK_TRUE : VK_FALSE;
+}
+
+static VkBool32 advertised_api_1_4(void) {
+    return advertised_api_version() >= VK_MAKE_VERSION(1, 4, 0) ? VK_TRUE : VK_FALSE;
 }
 
 static void trace_executor_advertisement_caps_once(void) {
@@ -24158,6 +24180,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkBeginCommandBuffer(
     cmd->vertex_binding_count = 0;
     cmd->index_buffer = NULL;
     cmd->index_offset = 0;
+    cmd->index_size = VK_WHOLE_SIZE;
     cmd->index_type = VK_INDEX_TYPE_UINT16;
     cmd->index_buffer_bound = false;
     cmd->dynamic_state_count = 0;
@@ -25134,20 +25157,30 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindVertexBuffers2(
     record_vertex_buffer_bindings(commandBuffer, firstBinding, bindingCount, pBuffers, pOffsets, pSizes, pStrides);
 }
 
-VKAPI_ATTR void VKAPI_CALL vkCmdBindIndexBuffer(
+static void record_index_buffer_binding(
         VkCommandBuffer commandBuffer,
         VkBuffer buffer,
         VkDeviceSize offset,
+        VkDeviceSize size,
         VkIndexType indexType) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     if (!cmd) return;
+    PdockerVkBuffer *tracked_buffer = pdocker_vk_buffer_from_handle(buffer);
+    if (!tracked_buffer || size == 0 ||
+        (size != VK_WHOLE_SIZE &&
+         !validate_buffer_byte_range(tracked_buffer, offset, size))) {
+        cmd->graphics_unsupported = true;
+        command_buffer_mark_recording_failed(cmd, "graphics-index-buffer-range-invalid");
+        return;
+    }
     if (!command_buffer_reserve_graphics_index_buffer_snapshots(cmd, 1)) {
         cmd->graphics_unsupported = true;
         command_buffer_mark_recording_failed(cmd, "graphics-index-buffer-snapshot-overflow");
         return;
     }
-    cmd->index_buffer = pdocker_vk_buffer_from_handle(buffer);
+    cmd->index_buffer = tracked_buffer;
     cmd->index_offset = offset;
+    cmd->index_size = size;
     cmd->index_type = indexType;
     cmd->index_buffer_bound = true;
     uint32_t snapshot_index = cmd->graphics_index_buffer_snapshot_count++;
@@ -25156,6 +25189,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindIndexBuffer(
     memset(snapshot, 0, sizeof(*snapshot));
     snapshot->buffer = cmd->index_buffer;
     snapshot->offset = offset;
+    snapshot->size = size;
     snapshot->index_type = indexType;
     snapshot->bound = true;
     PdockerVkGraphicsCommandRecord record;
@@ -25165,6 +25199,32 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindIndexBuffer(
     record.index_offset = offset;
     record.index_type = indexType;
     (void)append_graphics_command_record(cmd, &record);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdBindIndexBuffer(
+        VkCommandBuffer commandBuffer,
+        VkBuffer buffer,
+        VkDeviceSize offset,
+        VkIndexType indexType) {
+    record_index_buffer_binding(commandBuffer, buffer, offset, VK_WHOLE_SIZE, indexType);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdBindIndexBuffer2(
+        VkCommandBuffer commandBuffer,
+        VkBuffer buffer,
+        VkDeviceSize offset,
+        VkDeviceSize size,
+        VkIndexType indexType) {
+    record_index_buffer_binding(commandBuffer, buffer, offset, size, indexType);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdBindIndexBuffer2KHR(
+        VkCommandBuffer commandBuffer,
+        VkBuffer buffer,
+        VkDeviceSize offset,
+        VkDeviceSize size,
+        VkIndexType indexType) {
+    vkCmdBindIndexBuffer2(commandBuffer, buffer, offset, size, indexType);
 }
 
 static void record_graphics_draw_command(
@@ -25240,6 +25300,7 @@ static void record_graphics_draw_command(
     snapshot->vertex_buffer_bound = cmd->vertex_buffer_bound;
     snapshot->index_buffer = cmd->index_buffer;
     snapshot->index_offset = cmd->index_offset;
+    snapshot->index_size = cmd->index_size;
     snapshot->index_type = cmd->index_type;
     snapshot->index_buffer_bound = cmd->index_buffer_bound;
     if (!dynamic_state_snapshot_array_clone(snapshot->dynamic_states,
@@ -31698,7 +31759,12 @@ static bool proc_address_hidden_by_advertisement(const char *pName) {
         strcmp(pName, "vkCreateRenderPass2KHR") == 0 ||
         strcmp(pName, "vkCmdBeginRenderPass2KHR") == 0 ||
         strcmp(pName, "vkCmdNextSubpass2KHR") == 0 ||
-        strcmp(pName, "vkCmdEndRenderPass2KHR") == 0) {
+        strcmp(pName, "vkCmdEndRenderPass2KHR") == 0 ||
+        strcmp(pName, "vkCmdBindIndexBuffer2KHR") == 0) {
+        return true;
+    }
+    if (!advertised_api_1_4() &&
+        strcmp(pName, "vkCmdBindIndexBuffer2") == 0) {
         return true;
     }
     if (!advertised_api_1_3() &&
@@ -32057,6 +32123,8 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_PROC(vkCmdBindVertexBuffers2);
     MAP_ALIAS("vkCmdBindVertexBuffers2EXT", vkCmdBindVertexBuffers2);
     MAP_PROC(vkCmdBindIndexBuffer);
+    MAP_PROC(vkCmdBindIndexBuffer2);
+    MAP_PROC(vkCmdBindIndexBuffer2KHR);
     MAP_PROC(vkCmdDraw);
     MAP_PROC(vkCmdDrawIndexed);
     MAP_PROC(vkCmdDrawIndirect);

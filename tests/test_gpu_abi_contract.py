@@ -1413,7 +1413,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "binding->offset = pOffsets[i];",
             "binding->size = pSizes ? pSizes[i] : VK_WHOLE_SIZE;",
             "binding->stride = pStrides ? pStrides[i] : 0;",
-            "cmd->index_buffer = pdocker_vk_buffer_from_handle(buffer);",
+            "cmd->index_buffer = tracked_buffer;",
             "cmd->index_offset = offset;",
             "cmd->index_type = indexType;",
             "op.draw_first_vertex = firstVertex;",
@@ -2519,13 +2519,20 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, icd)
 
-        bind_body = c_function_body(icd, "vkCmdBindIndexBuffer")
+        bind_body = c_function_body(icd, "record_index_buffer_binding")
+        public_bind_body = c_function_body(icd, "vkCmdBindIndexBuffer")
+        bind2_body = c_function_body(icd, "vkCmdBindIndexBuffer2")
+        bind2_khr_body = c_function_body(icd, "vkCmdBindIndexBuffer2KHR")
+        self.assertIn("record_index_buffer_binding(commandBuffer, buffer, offset, VK_WHOLE_SIZE, indexType)", public_bind_body)
+        self.assertIn("record_index_buffer_binding(commandBuffer, buffer, offset, size, indexType)", bind2_body)
+        self.assertIn("vkCmdBindIndexBuffer2(commandBuffer, buffer, offset, size, indexType)", bind2_khr_body)
         for marker in [
             "command_buffer_reserve_graphics_index_buffer_snapshots(cmd, 1)",
             "uint32_t snapshot_index = cmd->graphics_index_buffer_snapshot_count++;",
             "PdockerVkIndexBufferSnapshot *snapshot =",
             "snapshot->buffer = cmd->index_buffer;",
             "snapshot->offset = offset;",
+            "snapshot->size = size;",
             "snapshot->index_type = indexType;",
             "snapshot->bound = true;",
             "record.index_buffer_snapshot_index = snapshot_index;",
@@ -2541,6 +2548,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "record->index_buffer_snapshot_index >= cmd->graphics_index_buffer_snapshot_count",
             "cmd->graphics_index_buffer_snapshots[record->index_buffer_snapshot_index]",
             "!index_snapshot->bound || !index_buffer",
+            "index_snapshot->size == VK_WHOLE_SIZE",
+            "validate_buffer_byte_range(index_buffer, index_snapshot->offset, index_snapshot->size)",
             "command->index_offset = (uint64_t)index_snapshot->offset;",
             "command->index_type = index_snapshot->index_type;",
         ]:
@@ -2587,6 +2596,11 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("find_vulkan_graphics_replay_buffer", bind_record_body)
         self.assertIn("vulkan_graphics_replay_buffer_vk_offset_for_range", bind_record_body)
         self.assertIn("vkCmdBindIndexBuffer", bind_record_body)
+        self.assertIn("MAP_PROC(vkCmdBindIndexBuffer2)", icd)
+        self.assertIn("MAP_PROC(vkCmdBindIndexBuffer2KHR)", icd)
+        self.assertIn("static VkBool32 advertised_api_1_4(void)", icd)
+        self.assertIn("strcmp(pName, \"vkCmdBindIndexBuffer2\") == 0", icd)
+        self.assertIn("strcmp(pName, \"vkCmdBindIndexBuffer2KHR\") == 0", icd)
 
 
     def test_vulkan_dynamic_vertex_input_binding_stride_is_replayed(self):
@@ -13937,12 +13951,15 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("vulkan_index_element_size(index_type, &element_size)", index_helper)
         self.assertIn("checked_mul_u64((uint64_t)first_index, element_size, &first_bytes)", index_helper)
         self.assertIn("checked_mul_u64((uint64_t)index_count, element_size, &draw_bytes)", index_helper)
+        self.assertIn("checked_add_u64(first_bytes, draw_bytes, &bind_relative_end)", index_helper)
         self.assertIn("first_bytes > UINT64_MAX - (uint64_t)index_offset", index_helper)
+        self.assertIn("bind_size != VK_WHOLE_SIZE && bind_relative_end > (uint64_t)bind_size", index_helper)
         self.assertIn("validate_vertex_binding_byte_range(binding, &binding_size)", graphics_body)
         self.assertIn("validate_buffer_backing_range(index_buffer)", graphics_body)
         self.assertIn("validate_buffer_byte_range(draw->indirect_buffer, draw->indirect_offset", graphics_body)
         self.assertIn("validate_buffer_byte_range(draw->count_buffer, draw->count_offset, sizeof(uint32_t))", graphics_body)
-        self.assertIn("validate_index_buffer_draw_range(draw->index_buffer, draw->index_offset, draw->index_type", graphics_body)
+        self.assertIn("validate_index_buffer_draw_range(draw->index_buffer, draw->index_offset, draw->index_size", graphics_body)
+        self.assertIn("draw->index_size != VK_WHOLE_SIZE", graphics_body)
 
     def test_vulkan_graphics_buffer_resources_and_image_copy_footprint_are_guarded(self):
         source = VULKAN_ICD.read_text()
