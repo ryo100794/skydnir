@@ -10913,6 +10913,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "sampler-reduction-mode-feature-not-enabled",
             "sampler-reduction-mode-duplicate",
             "sampler-reduction-mode-unsupported",
+            "VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE",
+            "sampler-mirror-clamp-to-edge-unsupported",
             "if (reduction_mode_out) *reduction_mode_out = reduction_mode;",
         ]:
             self.assertIn(marker, sampler_validate_body)
@@ -10920,6 +10922,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "reduction_info->reductionMode != VK_SAMPLER_REDUCTION_MODE_WEIGHTED_AVERAGE",
             sampler_validate_body,
         )
+
+        collector_body = c_function_body(icd, "collect_advertised_device_extensions")
+        self.assertNotIn("VK_KHR_SAMPLER_MIRROR_CLAMP_TO_EDGE_EXTENSION_NAME", collector_body)
 
         create_sampler_body = c_function_body(icd, "vkCreateSampler")
         self.assertIn("VkSamplerReductionMode reduction_mode = VK_SAMPLER_REDUCTION_MODE_WEIGHTED_AVERAGE;", create_sampler_body)

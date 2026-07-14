@@ -19188,6 +19188,13 @@ static VkResult validate_sampler_create_info_for_transport(
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }
 #endif
+    if (info->addressModeU == VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE ||
+        info->addressModeV == VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE ||
+        info->addressModeW == VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE) {
+        trace_icd_runtime_failure("sampler-mirror-clamp-to-edge-unsupported",
+                                  VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
     if (info->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;
     if (info->anisotropyEnable) {
         if ((requested_feature_mask & PDOCKER_VK_FEATURE_SAMPLER_ANISOTROPY) == 0) {

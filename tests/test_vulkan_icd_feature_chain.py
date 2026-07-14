@@ -1881,6 +1881,12 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 VkSamplerReductionMode reduction_mode = VK_SAMPLER_REDUCTION_MODE_WEIGHTED_AVERAGE;
                 if (validate_sampler_create_info_for_transport(&sampler_info, mask, &reduction_mode) != VK_SUCCESS) return 3;
                 if (reduction_mode != VK_SAMPLER_REDUCTION_MODE_MIN) return 4;
+            #ifdef VK_KHR_SAMPLER_MIRROR_CLAMP_TO_EDGE_EXTENSION_NAME
+                if (device_extension_advertised_name(VK_KHR_SAMPLER_MIRROR_CLAMP_TO_EDGE_EXTENSION_NAME)) return 5;
+            #endif
+                sampler_info.pNext = NULL;
+                sampler_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE;
+                if (validate_sampler_create_info_for_transport(&sampler_info, mask, NULL) == VK_SUCCESS) return 6;
             #endif
                 return 0;
             }}
