@@ -16901,6 +16901,51 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceProperties2(
     fill_pnext_properties(pProperties->pNext);
 }
 
+#ifdef VK_EXT_TOOLING_INFO_EXTENSION_NAME
+static void fill_tool_properties(VkPhysicalDeviceToolProperties *tool) {
+    if (!tool) return;
+    PdockerVkStructHeader header = read_vk_struct_header(tool);
+    zero_vk_out_struct_preserve_chain(tool, sizeof(*tool), header);
+    tool->sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TOOL_PROPERTIES;
+    snprintf(tool->name, sizeof(tool->name), "%s", "Skydnir Vulkan ICD bridge");
+    snprintf(tool->version, sizeof(tool->version), "%s", "0.1");
+    tool->purposes = VK_TOOL_PURPOSE_TRACING_BIT_EXT |
+                     VK_TOOL_PURPOSE_DEBUG_REPORTING_BIT_EXT |
+                     VK_TOOL_PURPOSE_DEBUG_MARKERS_BIT_EXT;
+    snprintf(tool->description, sizeof(tool->description), "%s",
+             "Container-facing Vulkan bridge metadata and diagnostics");
+    tool->layer[0] = '\0';
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceToolProperties(
+        VkPhysicalDevice physicalDevice,
+        uint32_t *pToolCount,
+        VkPhysicalDeviceToolProperties *pToolProperties) {
+    (void)physicalDevice;
+    const uint32_t available_count = 1;
+    if (!pToolCount) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!pToolProperties) {
+        *pToolCount = available_count;
+        return VK_SUCCESS;
+    }
+    uint32_t requested = *pToolCount;
+    uint32_t count = requested < available_count ? requested : available_count;
+    for (uint32_t i = 0; i < count; ++i) {
+        fill_tool_properties(&pToolProperties[i]);
+    }
+    *pToolCount = count;
+    return requested < available_count ? VK_INCOMPLETE : VK_SUCCESS;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceToolPropertiesEXT(
+        VkPhysicalDevice physicalDevice,
+        uint32_t *pToolCount,
+        VkPhysicalDeviceToolProperties *pToolProperties) {
+    return vkGetPhysicalDeviceToolProperties(physicalDevice, pToolCount, pToolProperties);
+}
+
+#endif
+
 VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceFeatures(
         VkPhysicalDevice physicalDevice,
         VkPhysicalDeviceFeatures *pFeatures) {
@@ -19441,6 +19486,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(
 #ifdef VK_EXT_VALIDATION_CACHE_EXTENSION_NAME
     ADD_DEVICE_EXTENSION(VK_EXT_VALIDATION_CACHE_EXTENSION_NAME, VK_EXT_VALIDATION_CACHE_SPEC_VERSION);
 #endif
+#ifdef VK_EXT_TOOLING_INFO_EXTENSION_NAME
+    ADD_DEVICE_EXTENSION(VK_EXT_TOOLING_INFO_EXTENSION_NAME, VK_EXT_TOOLING_INFO_SPEC_VERSION);
+#endif
 #ifdef VK_EXT_DEBUG_MARKER_EXTENSION_NAME
     ADD_DEVICE_EXTENSION(VK_EXT_DEBUG_MARKER_EXTENSION_NAME, VK_EXT_DEBUG_MARKER_SPEC_VERSION);
 #endif
@@ -19515,6 +19563,9 @@ static bool device_extension_advertised_name(const char *name) {
 #endif
 #ifdef VK_EXT_VALIDATION_CACHE_EXTENSION_NAME
     if (strcmp(name, VK_EXT_VALIDATION_CACHE_EXTENSION_NAME) == 0) return true;
+#endif
+#ifdef VK_EXT_TOOLING_INFO_EXTENSION_NAME
+    if (strcmp(name, VK_EXT_TOOLING_INFO_EXTENSION_NAME) == 0) return true;
 #endif
 #ifdef VK_EXT_DEBUG_MARKER_EXTENSION_NAME
     if (strcmp(name, VK_EXT_DEBUG_MARKER_EXTENSION_NAME) == 0) return true;
@@ -31217,6 +31268,10 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_PROC(vkDestroyValidationCacheEXT);
     MAP_PROC(vkGetValidationCacheDataEXT);
     MAP_PROC(vkMergeValidationCachesEXT);
+#endif
+#ifdef VK_EXT_TOOLING_INFO_EXTENSION_NAME
+    MAP_PROC(vkGetPhysicalDeviceToolProperties);
+    MAP_PROC(vkGetPhysicalDeviceToolPropertiesEXT);
 #endif
 #ifdef VK_EXT_PRIVATE_DATA_EXTENSION_NAME
     MAP_PROC(vkCreatePrivateDataSlot);

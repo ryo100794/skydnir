@@ -180,6 +180,69 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_tooling_info_extension_reports_bridge_metadata(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            int main(void) {{
+            #ifndef VK_EXT_TOOLING_INFO_EXTENSION_NAME
+                return 0;
+            #else
+                if (!device_extension_advertised_name(VK_EXT_TOOLING_INFO_EXTENSION_NAME)) return 2;
+                uint32_t extension_count = 0;
+                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &extension_count, NULL) != VK_SUCCESS ||
+                    extension_count == 0) return 3;
+                VkExtensionProperties extensions[64];
+                memset(extensions, 0, sizeof(extensions));
+                uint32_t capacity = 64;
+                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &capacity, extensions) != VK_SUCCESS) return 4;
+                VkBool32 found = VK_FALSE;
+                for (uint32_t i = 0; i < capacity; ++i) {{
+                    if (strcmp(extensions[i].extensionName, VK_EXT_TOOLING_INFO_EXTENSION_NAME) == 0) found = VK_TRUE;
+                }}
+                if (!found) return 5;
+
+                if (!vkGetPhysicalDeviceToolProperties || !vkGetPhysicalDeviceToolPropertiesEXT) return 6;
+                if (vkGetPhysicalDeviceToolProperties(VK_NULL_HANDLE, NULL, NULL) != VK_ERROR_INITIALIZATION_FAILED) return 7;
+                uint32_t tool_count = 0;
+                if (vkGetPhysicalDeviceToolPropertiesEXT(VK_NULL_HANDLE, &tool_count, NULL) != VK_SUCCESS ||
+                    tool_count != 1) return 8;
+
+                VkPhysicalDeviceToolProperties tool;
+                memset(&tool, 0, sizeof(tool));
+                tool.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TOOL_PROPERTIES;
+                uint32_t zero_capacity = 0;
+                if (vkGetPhysicalDeviceToolProperties(VK_NULL_HANDLE, &zero_capacity, &tool) != VK_INCOMPLETE ||
+                    zero_capacity != 0) return 9;
+
+                memset(&tool, 0, sizeof(tool));
+                tool.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TOOL_PROPERTIES;
+                uint32_t one_capacity = 1;
+                if (vkGetPhysicalDeviceToolPropertiesEXT(VK_NULL_HANDLE, &one_capacity, &tool) != VK_SUCCESS ||
+                    one_capacity != 1) return 10;
+                if (tool.sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TOOL_PROPERTIES) return 11;
+                if (strstr(tool.name, "Skydnir") == NULL) return 12;
+                if ((tool.purposes & VK_TOOL_PURPOSE_DEBUG_MARKERS_BIT_EXT) == 0) return 13;
+
+                const char *enabled[] = {{ VK_EXT_TOOLING_INFO_EXTENSION_NAME }};
+                VkDeviceCreateInfo create_info;
+                memset(&create_info, 0, sizeof(create_info));
+                create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                create_info.enabledExtensionCount = 1;
+                create_info.ppEnabledExtensionNames = enabled;
+                if (validate_device_extensions(&create_info) != VK_SUCCESS) return 14;
+                return 0;
+            #endif
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_subpass_merge_feedback_feature_is_queryable_but_not_enableable(self):
         source = textwrap.dedent(
             f"""

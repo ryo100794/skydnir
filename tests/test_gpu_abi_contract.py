@@ -1531,11 +1531,13 @@ class GpuAbiContractTest(unittest.TestCase):
         for marker in [
             "VKAPI_ATTR VkResult VKAPI_CALL vkCreateDebugUtilsMessengerEXT",
             "VKAPI_ATTR VkResult VKAPI_CALL vkDebugMarkerSetObjectNameEXT",
+            "VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceToolProperties",
             "VKAPI_ATTR VkResult VKAPI_CALL vkSetDebugUtilsObjectNameEXT",
             "VKAPI_ATTR void VKAPI_CALL vkCmdBeginDebugUtilsLabelEXT",
             "VKAPI_ATTR void VKAPI_CALL vkSubmitDebugUtilsMessageEXT",
             "MAP_PROC(vkCreateDebugUtilsMessengerEXT)",
             "MAP_PROC(vkDebugMarkerSetObjectNameEXT)",
+            "MAP_PROC(vkGetPhysicalDeviceToolPropertiesEXT)",
             "MAP_PROC(vkCmdDebugMarkerBeginEXT)",
             "MAP_PROC(vkSetDebugUtilsObjectTagEXT)",
         ]:
@@ -1548,6 +1550,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME",
             "VK_KHR_BIND_MEMORY_2_EXTENSION_NAME",
             "VK_KHR_DEDICATED_ALLOCATION_EXTENSION_NAME",
+            "VK_EXT_TOOLING_INFO_EXTENSION_NAME",
             "ADD_DEVICE_EXTENSION",
         ]:
             self.assertIn(marker, device_extension_body)
@@ -1557,6 +1560,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME", device_validation_body)
         self.assertIn("VK_KHR_BIND_MEMORY_2_EXTENSION_NAME", device_validation_body)
         self.assertIn("VK_KHR_DEDICATED_ALLOCATION_EXTENSION_NAME", device_validation_body)
+        self.assertIn("VK_EXT_TOOLING_INFO_EXTENSION_NAME", device_validation_body)
         self.assertRegex(
             device_validation_body,
             r"VK_KHR_SWAPCHAIN_EXTENSION_NAME[\s\S]{0,240}return\s+(?:true|VK_TRUE|advertised_[A-Za-z0-9_]+\(\))",
@@ -9600,6 +9604,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('unsupported_create_info_pnext_result("vkCreateShaderModule", node)', shader_module_pnext_body)
         self.assertIn("VKAPI_ATTR VkResult VKAPI_CALL vkCreateValidationCacheEXT", icd)
         self.assertIn("VK_EXT_VALIDATION_CACHE_EXTENSION_NAME", icd)
+        self.assertIn("VK_EXT_TOOLING_INFO_EXTENSION_NAME", icd)
+        self.assertIn("VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceToolProperties", icd)
+        self.assertIn("MAP_PROC(vkGetPhysicalDeviceToolPropertiesEXT)", icd)
         self.assertIn("MAP_PROC(vkCreateValidationCacheEXT)", icd)
         self.assertIn("MAP_PROC(vkMergeValidationCachesEXT)", icd)
         self.assertIn("VK_EXT_PRIVATE_DATA_EXTENSION_NAME", icd)
