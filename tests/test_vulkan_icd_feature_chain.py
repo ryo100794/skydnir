@@ -2549,6 +2549,92 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
 
+    def test_separate_depth_stencil_layouts_fail_closed_without_executor_caps(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <stdlib.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            int main(void) {{
+                unsetenv("PDOCKER_VULKAN_ADVERTISEMENT_SOURCE");
+
+                VkPhysicalDeviceSeparateDepthStencilLayoutsFeatures separate;
+                VkPhysicalDeviceHostQueryResetFeatures host_query;
+                memset(&separate, 0xff, sizeof(separate));
+                memset(&host_query, 0xff, sizeof(host_query));
+                separate.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SEPARATE_DEPTH_STENCIL_LAYOUTS_FEATURES;
+                host_query.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES;
+                separate.pNext = &host_query;
+                host_query.pNext = NULL;
+
+                fill_pnext_features(&separate);
+                if (separate.pNext != &host_query || host_query.pNext != NULL) {{
+                    fprintf(stderr, "separate depth/stencil pNext chain was not preserved\\n");
+                    return 2;
+                }}
+                if (separate.separateDepthStencilLayouts != VK_FALSE) {{
+                    fprintf(stderr, "separate depth/stencil advertised without executor caps\\n");
+                    return 3;
+                }}
+                if (host_query.hostQueryReset != VK_TRUE) {{
+                    fprintf(stderr, "following pNext feature was not filled\\n");
+                    return 4;
+                }}
+
+                VkDeviceCreateInfo create_info;
+                memset(&create_info, 0, sizeof(create_info));
+                create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                create_info.pNext = &separate;
+                if (validate_device_feature_requests(&create_info) != VK_SUCCESS) {{
+                    fprintf(stderr, "false separate depth/stencil request was rejected\\n");
+                    return 5;
+                }}
+                separate.separateDepthStencilLayouts = VK_TRUE;
+                if (validate_device_feature_requests(&create_info) == VK_SUCCESS) {{
+                    fprintf(stderr, "true separate depth/stencil request was accepted without caps\\n");
+                    return 6;
+                }}
+                if ((feature_mask_from_pnext_chain(&separate) & PDOCKER_VK_FEATURE_SEPARATE_DEPTH_STENCIL_LAYOUTS) == 0) {{
+                    fprintf(stderr, "separate depth/stencil request was not reflected in feature mask\\n");
+                    return 7;
+                }}
+                if ((advertised_feature_mask() & PDOCKER_VK_FEATURE_SEPARATE_DEPTH_STENCIL_LAYOUTS) != 0) {{
+                    fprintf(stderr, "separate depth/stencil advertised feature mask without caps\\n");
+                    return 8;
+                }}
+
+                VkPhysicalDeviceVulkan12Features core12;
+                memset(&core12, 0, sizeof(core12));
+                core12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+                fill_pnext_features(&core12);
+                if (core12.separateDepthStencilLayouts != VK_FALSE) {{
+                    fprintf(stderr, "core12 separate depth/stencil advertised without caps\\n");
+                    return 9;
+                }}
+                core12.separateDepthStencilLayouts = VK_TRUE;
+                create_info.pNext = &core12;
+                if (validate_device_feature_requests(&create_info) == VK_SUCCESS) {{
+                    fprintf(stderr, "core12 true separate depth/stencil request accepted without caps\\n");
+                    return 10;
+                }}
+
+            #ifdef VK_KHR_SEPARATE_DEPTH_STENCIL_LAYOUTS_EXTENSION_NAME
+                if (device_extension_advertised_name(VK_KHR_SEPARATE_DEPTH_STENCIL_LAYOUTS_EXTENSION_NAME)) {{
+                    fprintf(stderr, "VK_KHR_separate_depth_stencil_layouts advertised without executor caps\\n");
+                    return 11;
+                }}
+            #endif
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+
     def test_dedicated_memory_bind_enforces_target_and_zero_offset(self):
         source = textwrap.dedent(
             f"""

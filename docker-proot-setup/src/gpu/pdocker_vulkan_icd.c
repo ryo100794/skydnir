@@ -516,6 +516,7 @@ static uint64_t g_generic_dispatch_sequence = 0;
 #define PDOCKER_VK_FEATURE_DESCRIPTOR_STORAGE_TEXEL_BUFFER_UPDATE_AFTER_BIND (1ull << 44)
 #define PDOCKER_VK_FEATURE_SAMPLER_FILTER_MINMAX       (1ull << 45)
 #define PDOCKER_VK_FEATURE_HOST_QUERY_RESET            (1ull << 46)
+#define PDOCKER_VK_FEATURE_SEPARATE_DEPTH_STENCIL_LAYOUTS (1ull << 47)
 
 #define PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT 0x00000001u
 #define PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT 0x00000002u
@@ -14537,6 +14538,7 @@ typedef struct {
     VkPhysicalDeviceDescriptorIndexingProperties descriptor_indexing_properties;
     VkPhysicalDeviceIndexTypeUint8FeaturesEXT index_type_uint8;
     VkBool32 sampler_filter_minmax;
+    VkBool32 separate_depth_stencil_layouts;
     VkPhysicalDeviceSubgroupProperties subgroup;
     bool ext_16bit_storage;
     bool ext_8bit_storage;
@@ -14557,6 +14559,7 @@ typedef struct {
     VkPhysicalDeviceExtendedDynamicState2FeaturesEXT extended_dynamic_state2;
     bool ext_index_type_uint8;
     bool ext_descriptor_indexing;
+    bool ext_separate_depth_stencil_layouts;
     bool vulkan_dispatch_v52_image_layout_ranges_supported;
     bool vulkan_dispatch_v53_buffer_views_supported;
     bool vulkan_dispatch_v54_barriers_supported;
@@ -14736,6 +14739,7 @@ static bool parse_executor_advertisement_caps_json(
     json_read_u32(json, "depthBounds", &caps->features.depthBounds);
     json_read_u32(json, "samplerAnisotropy", &caps->features.samplerAnisotropy);
     json_read_u32(json, "samplerFilterMinmax", &caps->sampler_filter_minmax);
+    json_read_u32(json, "separateDepthStencilLayouts", &caps->separate_depth_stencil_layouts);
     json_read_u32(json, "multiview", &caps->multiview);
     json_read_u32(json, "storageBuffer16BitAccess", &caps->storage16.storageBuffer16BitAccess);
     json_read_u32(json, "uniformAndStorageBuffer16BitAccess", &caps->storage16.uniformAndStorageBuffer16BitAccess);
@@ -14804,6 +14808,9 @@ static bool parse_executor_advertisement_caps_json(
     if (json_read_u32(json, "VK_EXT_extended_dynamic_state2", &value)) caps->ext_extended_dynamic_state2 = value != 0;
     if (json_read_u32(json, "VK_EXT_index_type_uint8", &value)) caps->ext_index_type_uint8 = value != 0;
     if (json_read_u32(json, "VK_EXT_descriptor_indexing", &value)) caps->ext_descriptor_indexing = value != 0;
+    if (json_read_u32(json, "VK_KHR_separate_depth_stencil_layouts", &value)) {
+        caps->ext_separate_depth_stencil_layouts = value != 0;
+    }
 
     uint32_t v52_minor = 0;
     uint32_t v52_max_ranges = 0;
@@ -15458,6 +15465,14 @@ static VkBool32 advertised_sampler_anisotropy(void) {
 static VkBool32 advertised_sampler_filter_minmax(void) {
     const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
     return (caps && caps->sampler_filter_minmax) ? VK_TRUE : VK_FALSE;
+}
+
+static VkBool32 advertised_separate_depth_stencil_layouts(void) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+    if (!caps || !caps->separate_depth_stencil_layouts) return VK_FALSE;
+    return (caps->api_version >= VK_API_VERSION_1_2 || caps->ext_separate_depth_stencil_layouts)
+        ? VK_TRUE
+        : VK_FALSE;
 }
 
 static VkBool32 advertised_synchronization2(void) {
@@ -16130,6 +16145,7 @@ static void fill_pnext_features(void *pNext) {
                     p->descriptorBindingVariableDescriptorCount = advertised_descriptor_binding_variable_descriptor_count();
                     p->descriptorIndexing = advertised_descriptor_indexing_aggregate();
                     p->samplerFilterMinmax = advertised_sampler_filter_minmax();
+                    p->separateDepthStencilLayouts = advertised_separate_depth_stencil_layouts();
                     p->hostQueryReset = VK_TRUE;
                 } else {
                     VkBool32 storage8 = advertised_storage8();
@@ -16149,6 +16165,7 @@ static void fill_pnext_features(void *pNext) {
                     p->descriptorBindingVariableDescriptorCount = advertised_descriptor_binding_variable_descriptor_count();
                     p->descriptorIndexing = advertised_descriptor_indexing_aggregate();
                     p->samplerFilterMinmax = advertised_sampler_filter_minmax();
+                    p->separateDepthStencilLayouts = advertised_separate_depth_stencil_layouts();
                     p->hostQueryReset = VK_TRUE;
                 }
                 p->bufferDeviceAddress = VK_FALSE;
@@ -16333,6 +16350,7 @@ static void fill_pnext_features(void *pNext) {
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SEPARATE_DEPTH_STENCIL_LAYOUTS_FEATURES: {
                 VkPhysicalDeviceSeparateDepthStencilLayoutsFeatures *p = (VkPhysicalDeviceSeparateDepthStencilLayoutsFeatures *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                p->separateDepthStencilLayouts = advertised_separate_depth_stencil_layouts();
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES: {
@@ -16593,6 +16611,7 @@ static bool vulkan12_feature_request_supported(
     supported.descriptorBindingVariableDescriptorCount = advertised_descriptor_binding_variable_descriptor_count();
     supported.descriptorIndexing = advertised_descriptor_indexing_aggregate();
     supported.samplerFilterMinmax = advertised_sampler_filter_minmax();
+    supported.separateDepthStencilLayouts = advertised_separate_depth_stencil_layouts();
     PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, samplerMirrorClampToEdge);
     PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, drawIndirectCount);
     PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, storageBuffer8BitAccess);
@@ -16967,7 +16986,7 @@ static VkResult validate_device_feature_requests(const VkDeviceCreateInfo *pCrea
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SEPARATE_DEPTH_STENCIL_LAYOUTS_FEATURES: {
                 const VkPhysicalDeviceSeparateDepthStencilLayoutsFeatures *p = (const VkPhysicalDeviceSeparateDepthStencilLayoutsFeatures *)node;
-                supported = !p->separateDepthStencilLayouts;
+                supported = !p->separateDepthStencilLayouts || advertised_separate_depth_stencil_layouts();
                 if (!supported) unsupported_feature_name = "separateDepthStencilLayouts";
                 break;
             }
@@ -17159,6 +17178,7 @@ static uint64_t feature_mask_from_pnext_chain(const void *pNext) {
                 if (p->timelineSemaphore) mask |= PDOCKER_VK_FEATURE_TIMELINE_SEMAPHORE;
                 if (p->drawIndirectCount) mask |= PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT;
                 if (p->samplerFilterMinmax) mask |= PDOCKER_VK_FEATURE_SAMPLER_FILTER_MINMAX;
+                if (p->separateDepthStencilLayouts) mask |= PDOCKER_VK_FEATURE_SEPARATE_DEPTH_STENCIL_LAYOUTS;
                 if (p->hostQueryReset) mask |= PDOCKER_VK_FEATURE_HOST_QUERY_RESET;
                 break;
             }
@@ -17216,6 +17236,12 @@ static uint64_t feature_mask_from_pnext_chain(const void *pNext) {
                 if (p->descriptorBindingStorageTexelBufferUpdateAfterBind) mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_STORAGE_TEXEL_BUFFER_UPDATE_AFTER_BIND;
                 if (p->descriptorBindingPartiallyBound) mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_PARTIALLY_BOUND;
                 if (p->descriptorBindingVariableDescriptorCount) mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_VARIABLE_COUNT;
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SEPARATE_DEPTH_STENCIL_LAYOUTS_FEATURES: {
+                const VkPhysicalDeviceSeparateDepthStencilLayoutsFeatures *p =
+                    (const VkPhysicalDeviceSeparateDepthStencilLayoutsFeatures *)node;
+                if (p->separateDepthStencilLayouts) mask |= PDOCKER_VK_FEATURE_SEPARATE_DEPTH_STENCIL_LAYOUTS;
                 break;
             }
 #ifdef VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME
@@ -17348,6 +17374,9 @@ static uint64_t advertised_feature_mask(void) {
         if (advertised_depth_bounds()) mask |= PDOCKER_VK_FEATURE_DEPTH_BOUNDS;
         if (advertised_sampler_anisotropy()) mask |= PDOCKER_VK_FEATURE_SAMPLER_ANISOTROPY;
         if (advertised_sampler_filter_minmax()) mask |= PDOCKER_VK_FEATURE_SAMPLER_FILTER_MINMAX;
+        if (advertised_separate_depth_stencil_layouts()) {
+            mask |= PDOCKER_VK_FEATURE_SEPARATE_DEPTH_STENCIL_LAYOUTS;
+        }
         mask |= PDOCKER_VK_FEATURE_HOST_QUERY_RESET;
     } else {
         if (advertised_storage16()) mask |= PDOCKER_VK_FEATURE_STORAGE_BUFFER_16;
@@ -20365,6 +20394,12 @@ static uint32_t collect_advertised_device_extensions(
 #ifdef VK_KHR_VULKAN_MEMORY_MODEL_EXTENSION_NAME
     ADD_DEVICE_EXTENSION(VK_KHR_VULKAN_MEMORY_MODEL_EXTENSION_NAME,
                          VK_KHR_VULKAN_MEMORY_MODEL_SPEC_VERSION);
+#endif
+#ifdef VK_KHR_SEPARATE_DEPTH_STENCIL_LAYOUTS_EXTENSION_NAME
+    if (caps && caps->ext_separate_depth_stencil_layouts && advertised_separate_depth_stencil_layouts()) {
+        ADD_DEVICE_EXTENSION(VK_KHR_SEPARATE_DEPTH_STENCIL_LAYOUTS_EXTENSION_NAME,
+                             VK_KHR_SEPARATE_DEPTH_STENCIL_LAYOUTS_SPEC_VERSION);
+    }
 #endif
     ADD_DEVICE_EXTENSION(VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME,
                          VK_KHR_CREATE_RENDERPASS_2_SPEC_VERSION);

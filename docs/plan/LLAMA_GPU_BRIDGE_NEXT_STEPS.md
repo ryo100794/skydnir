@@ -18,6 +18,7 @@ Confirmed facts:
 
 | Area | Current result | Evidence |
 |---|---|---|
+| 2026-07-14 separate depth/stencil layout cap lane | The container-side Vulkan ICD now treats `separateDepthStencilLayouts` as an executor-advertised capability instead of a local guess. The executor queries Android Vulkan 1.2 plus the standalone `VkPhysicalDeviceSeparateDepthStencilLayoutsFeatures` chain, reports both the feature and `VK_KHR_separate_depth_stencil_layouts` extension availability, enables the feature only when core 1.2 or the KHR extension makes it legal, and the ICD fills/validates both Vulkan 1.2 aggregate and standalone pNext feature structs from that advertised cap. The KHR extension is enumerated only when the executor reports extension-backed support, and true feature requests fail closed otherwise. This is generic Vulkan feature negotiation; no llama.cpp, Dockerfile, model, prompt, or shader bytes changed. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; `app/src/main/cpp/pdocker_gpu_executor.c`; host tests `tests.test_gpu_abi_contract tests.test_vulkan_icd_feature_chain`; glibc payload build `scripts/build-gpu-shim.sh`; no llama.cpp/Dockerfile/model/prompt changes |
 | `ngl=0` default route | Required correctness passes | `docs/test/llama-gpu-default-oracle-match-ngl0-20260509.json` |
 | unsafe SPIR-V materialization | Disabled by default | commit `02619fd` |
 | zero-layer small multiply shader | CPU oracle matches default non-materialized hash | `0x11d5243c43b23a7b`, `mismatch_count=0` |

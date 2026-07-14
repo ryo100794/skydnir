@@ -10989,6 +10989,71 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, executor)
 
+    def test_vulkan_separate_depth_stencil_layouts_is_cap_gated(self):
+        icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
+
+        for source in [icd, executor]:
+            self.assertIn("PDOCKER_VK_FEATURE_SEPARATE_DEPTH_STENCIL_LAYOUTS", source)
+            self.assertIn("(1ull << 47)", source)
+
+        parse_body = c_function_body(icd, "parse_executor_advertisement_caps_json")
+        for marker in [
+            'json_read_u32(json, "separateDepthStencilLayouts", &caps->separate_depth_stencil_layouts);',
+            'json_read_u32(json, "VK_KHR_separate_depth_stencil_layouts", &value)',
+            "caps->ext_separate_depth_stencil_layouts = value != 0;",
+        ]:
+            self.assertIn(marker, parse_body)
+
+        advertised_body = c_function_body(icd, "advertised_separate_depth_stencil_layouts")
+        self.assertIn("caps->separate_depth_stencil_layouts", advertised_body)
+        self.assertIn("caps->api_version >= VK_API_VERSION_1_2", advertised_body)
+        self.assertIn("caps->ext_separate_depth_stencil_layouts", advertised_body)
+
+        pnext_body = c_function_body(icd, "fill_pnext_features")
+        for marker in [
+            "p->separateDepthStencilLayouts = advertised_separate_depth_stencil_layouts();",
+            "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SEPARATE_DEPTH_STENCIL_LAYOUTS_FEATURES",
+        ]:
+            self.assertIn(marker, pnext_body)
+
+        vulkan12_supported_body = c_function_body(icd, "vulkan12_feature_request_supported")
+        self.assertIn("supported.separateDepthStencilLayouts = advertised_separate_depth_stencil_layouts();", vulkan12_supported_body)
+        self.assertIn(
+            "PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, separateDepthStencilLayouts);",
+            vulkan12_supported_body,
+        )
+
+        create_device_body = c_function_body(icd, "validate_device_feature_requests")
+        self.assertIn("advertised_separate_depth_stencil_layouts()", create_device_body)
+        self.assertIn('unsupported_feature_name = "separateDepthStencilLayouts";', create_device_body)
+
+        feature_mask_body = c_function_body(icd, "feature_mask_from_pnext_chain")
+        self.assertIn("p->separateDepthStencilLayouts", feature_mask_body)
+        self.assertIn("mask |= PDOCKER_VK_FEATURE_SEPARATE_DEPTH_STENCIL_LAYOUTS", feature_mask_body)
+        self.assertIn("if (advertised_separate_depth_stencil_layouts())", c_function_body(icd, "advertised_feature_mask"))
+
+        collector_body = c_function_body(icd, "collect_advertised_device_extensions")
+        self.assertIn("VK_KHR_SEPARATE_DEPTH_STENCIL_LAYOUTS_EXTENSION_NAME", collector_body)
+        self.assertIn("caps->ext_separate_depth_stencil_layouts", collector_body)
+        self.assertIn("advertised_separate_depth_stencil_layouts()", collector_body)
+
+        for marker in [
+            "VkPhysicalDeviceSeparateDepthStencilLayoutsFeatures physical_separate_depth_stencil_layouts;",
+            "VkPhysicalDeviceSeparateDepthStencilLayoutsFeatures enabled_separate_depth_stencil_layouts;",
+            "enabled_vulkan12.separateDepthStencilLayouts",
+            "rt->physical_vulkan12.separateDepthStencilLayouts ||",
+            "rt->physical_separate_depth_stencil_layouts.separateDepthStencilLayouts",
+            "VK_KHR_SEPARATE_DEPTH_STENCIL_LAYOUTS_EXTENSION_NAME",
+            "const char *enabled_extensions[24];",
+            r'\"separateDepthStencilLayouts\":%u',
+            r'\"VK_KHR_separate_depth_stencil_layouts\":%u',
+            "rt ? rt->enabled_vulkan12.separateDepthStencilLayouts : 0",
+            "rt ? rt->enabled_ext_separate_depth_stencil_layouts : 0",
+            'WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_SEPARATE_DEPTH_STENCIL_LAYOUTS, "separateDepthStencilLayouts");',
+        ]:
+            self.assertIn(marker, executor)
+
     def test_vulkan_graphics_v629_transports_variable_descriptor_counts(self):
         expected_extension_fields = [
             ("variable_descriptor_count_count", "u32"),

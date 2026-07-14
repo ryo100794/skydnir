@@ -67,6 +67,12 @@
 #ifndef VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_EXTENSION_NAME
 #define VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_EXTENSION_NAME "VK_KHR_storage_buffer_storage_class"
 #endif
+#ifndef VK_KHR_SEPARATE_DEPTH_STENCIL_LAYOUTS_EXTENSION_NAME
+#define VK_KHR_SEPARATE_DEPTH_STENCIL_LAYOUTS_EXTENSION_NAME "VK_KHR_separate_depth_stencil_layouts"
+#endif
+#ifndef VK_KHR_SEPARATE_DEPTH_STENCIL_LAYOUTS_SPEC_VERSION
+#define VK_KHR_SEPARATE_DEPTH_STENCIL_LAYOUTS_SPEC_VERSION 1
+#endif
 
 #define PDOCKER_GPU_MAX_PASSED_FDS PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS
 #if PDOCKER_GPU_MAX_PASSED_FDS > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS
@@ -121,6 +127,7 @@
 #define PDOCKER_VK_FEATURE_DESCRIPTOR_VARIABLE_COUNT    (1ull << 37)
 #define PDOCKER_VK_FEATURE_DESCRIPTOR_UPDATE_UNUSED_WHILE_PENDING (1ull << 38)
 #define PDOCKER_VK_FEATURE_SAMPLER_FILTER_MINMAX       (1ull << 45)
+#define PDOCKER_VK_FEATURE_SEPARATE_DEPTH_STENCIL_LAYOUTS (1ull << 47)
 
 #define PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT 0x00000001u
 #define PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT 0x00000002u
@@ -1494,6 +1501,7 @@ typedef struct {
     VkPhysicalDevice16BitStorageFeatures physical_storage16;
     VkPhysicalDevice8BitStorageFeatures physical_storage8;
     VkPhysicalDeviceShaderFloat16Int8Features physical_float16_int8;
+    VkPhysicalDeviceSeparateDepthStencilLayoutsFeatures physical_separate_depth_stencil_layouts;
     VkPhysicalDeviceSynchronization2Features physical_synchronization2;
     VkPhysicalDeviceDynamicRenderingFeatures physical_dynamic_rendering;
     VkPhysicalDeviceExtendedDynamicStateFeaturesEXT physical_extended_dynamic_state;
@@ -1506,6 +1514,7 @@ typedef struct {
     VkPhysicalDevice16BitStorageFeatures enabled_storage16;
     VkPhysicalDevice8BitStorageFeatures enabled_storage8;
     VkPhysicalDeviceShaderFloat16Int8Features enabled_float16_int8;
+    VkPhysicalDeviceSeparateDepthStencilLayoutsFeatures enabled_separate_depth_stencil_layouts;
     VkPhysicalDeviceSynchronization2Features enabled_synchronization2;
     VkPhysicalDeviceDynamicRenderingFeatures enabled_dynamic_rendering;
     VkPhysicalDeviceExtendedDynamicStateFeaturesEXT enabled_extended_dynamic_state;
@@ -1521,6 +1530,7 @@ typedef struct {
     uint8_t enabled_ext_extended_dynamic_state2;
     uint8_t enabled_ext_index_type_uint8;
     uint8_t enabled_ext_descriptor_indexing;
+    uint8_t enabled_ext_separate_depth_stencil_layouts;
     uint8_t enabled_ext_draw_indirect_count_khr;
     uint8_t enabled_ext_draw_indirect_count_amd;
     uint8_t enabled_chain_compat_feature_structs;
@@ -2106,6 +2116,7 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             "\"depthBounds\":%u,"
             "\"samplerAnisotropy\":%u,"
             "\"samplerFilterMinmax\":%u,"
+            "\"separateDepthStencilLayouts\":%u,"
             "\"storageBuffer16BitAccess\":%u,"
             "\"uniformAndStorageBuffer16BitAccess\":%u,"
             "\"storagePushConstant16\":%u,"
@@ -2162,7 +2173,8 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             "\"VK_EXT_extended_dynamic_state\":%u,"
             "\"VK_EXT_extended_dynamic_state2\":%u,"
             "\"VK_EXT_index_type_uint8\":%u,"
-            "\"VK_EXT_descriptor_indexing\":%u}}",
+            "\"VK_EXT_descriptor_indexing\":%u,"
+            "\"VK_KHR_separate_depth_stencil_layouts\":%u}}",
             rt ? rt->enabled_features.shaderInt64 : 0,
             rt ? rt->enabled_features.geometryShader : 0,
             rt ? rt->enabled_features.tessellationShader : 0,
@@ -2179,6 +2191,7 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             rt ? rt->enabled_features.depthBounds : 0,
             rt ? rt->enabled_features.samplerAnisotropy : 0,
             rt ? rt->enabled_vulkan12.samplerFilterMinmax : 0,
+            rt ? rt->enabled_vulkan12.separateDepthStencilLayouts : 0,
             rt ? rt->enabled_storage16.storageBuffer16BitAccess : 0,
             rt ? rt->enabled_storage16.uniformAndStorageBuffer16BitAccess : 0,
             rt ? rt->enabled_storage16.storagePushConstant16 : 0,
@@ -2234,7 +2247,8 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             rt ? rt->enabled_ext_extended_dynamic_state : 0,
             rt ? rt->enabled_ext_extended_dynamic_state2 : 0,
             rt ? rt->enabled_ext_index_type_uint8 : 0,
-            rt ? rt->enabled_ext_descriptor_indexing : 0);
+            rt ? rt->enabled_ext_descriptor_indexing : 0,
+            rt ? rt->enabled_ext_separate_depth_stencil_layouts : 0);
 }
 
 static void log_spirv_trace(
@@ -2365,6 +2379,7 @@ static void write_feature_mask_names(FILE *out, uint64_t mask) {
     WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_DRAW_INDIRECT_FIRST_INSTANCE, "drawIndirectFirstInstance");
     WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_DEPTH_BIAS_CLAMP, "depthBiasClamp");
     WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_DEPTH_BOUNDS, "depthBounds");
+    WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_SEPARATE_DEPTH_STENCIL_LAYOUTS, "separateDepthStencilLayouts");
 #undef WRITE_FEATURE_NAME
 }
 
@@ -13690,6 +13705,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     memset(&rt->physical_storage16, 0, sizeof(rt->physical_storage16));
     memset(&rt->physical_storage8, 0, sizeof(rt->physical_storage8));
     memset(&rt->physical_float16_int8, 0, sizeof(rt->physical_float16_int8));
+    memset(&rt->physical_separate_depth_stencil_layouts, 0, sizeof(rt->physical_separate_depth_stencil_layouts));
     memset(&rt->physical_synchronization2, 0, sizeof(rt->physical_synchronization2));
     memset(&rt->physical_dynamic_rendering, 0, sizeof(rt->physical_dynamic_rendering));
     memset(&rt->physical_extended_dynamic_state, 0, sizeof(rt->physical_extended_dynamic_state));
@@ -13703,6 +13719,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     rt->physical_storage16.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES;
     rt->physical_storage8.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES;
     rt->physical_float16_int8.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES;
+    rt->physical_separate_depth_stencil_layouts.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SEPARATE_DEPTH_STENCIL_LAYOUTS_FEATURES;
     rt->physical_synchronization2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES;
     rt->physical_dynamic_rendering.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES;
     rt->physical_extended_dynamic_state.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT;
@@ -13720,7 +13737,8 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
         features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
         features2.pNext = &rt->physical_vulkan11;
         rt->physical_vulkan11.pNext = &rt->physical_vulkan12;
-        rt->physical_vulkan12.pNext = &rt->physical_storage16;
+        rt->physical_vulkan12.pNext = &rt->physical_separate_depth_stencil_layouts;
+        rt->physical_separate_depth_stencil_layouts.pNext = &rt->physical_storage16;
         rt->physical_storage16.pNext = &rt->physical_storage8;
         rt->physical_storage8.pNext = &rt->physical_float16_int8;
         rt->physical_float16_int8.pNext = &rt->physical_synchronization2;
@@ -13733,6 +13751,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
         rt->physical_features = features2.features;
         rt->physical_vulkan11.pNext = NULL;
         rt->physical_vulkan12.pNext = NULL;
+        rt->physical_separate_depth_stencil_layouts.pNext = NULL;
         rt->physical_storage16.pNext = NULL;
         rt->physical_storage8.pNext = NULL;
         rt->physical_float16_int8.pNext = NULL;
@@ -13816,6 +13835,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     VkPhysicalDevice16BitStorageFeatures enabled_storage16;
     VkPhysicalDevice8BitStorageFeatures enabled_storage8;
     VkPhysicalDeviceShaderFloat16Int8Features enabled_float16_int8;
+    VkPhysicalDeviceSeparateDepthStencilLayoutsFeatures enabled_separate_depth_stencil_layouts;
     VkPhysicalDeviceSynchronization2Features enabled_synchronization2;
     VkPhysicalDeviceDynamicRenderingFeatures enabled_dynamic_rendering;
     VkPhysicalDeviceExtendedDynamicStateFeaturesEXT enabled_extended_dynamic_state;
@@ -13827,6 +13847,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     memset(&enabled_storage16, 0, sizeof(enabled_storage16));
     memset(&enabled_storage8, 0, sizeof(enabled_storage8));
     memset(&enabled_float16_int8, 0, sizeof(enabled_float16_int8));
+    memset(&enabled_separate_depth_stencil_layouts, 0, sizeof(enabled_separate_depth_stencil_layouts));
     memset(&enabled_synchronization2, 0, sizeof(enabled_synchronization2));
     memset(&enabled_dynamic_rendering, 0, sizeof(enabled_dynamic_rendering));
     memset(&enabled_extended_dynamic_state, 0, sizeof(enabled_extended_dynamic_state));
@@ -13857,6 +13878,9 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     enabled_vulkan12.timelineSemaphore = rt->physical_vulkan12.timelineSemaphore;
     enabled_vulkan12.drawIndirectCount = rt->physical_vulkan12.drawIndirectCount;
     enabled_vulkan12.samplerFilterMinmax = rt->physical_vulkan12.samplerFilterMinmax;
+    enabled_vulkan12.separateDepthStencilLayouts =
+        rt->physical_vulkan12.separateDepthStencilLayouts ||
+        rt->physical_separate_depth_stencil_layouts.separateDepthStencilLayouts;
     enabled_descriptor_indexing.descriptorBindingPartiallyBound =
         rt->physical_descriptor_indexing.descriptorBindingPartiallyBound ||
         rt->physical_vulkan12.descriptorBindingPartiallyBound;
@@ -13932,6 +13956,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     enabled_storage8.uniformAndStorageBuffer8BitAccess = rt->physical_storage8.uniformAndStorageBuffer8BitAccess;
     enabled_storage8.storagePushConstant8 = rt->physical_storage8.storagePushConstant8;
     enabled_float16_int8.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES;
+    enabled_separate_depth_stencil_layouts.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SEPARATE_DEPTH_STENCIL_LAYOUTS_FEATURES;
     enabled_synchronization2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES;
     enabled_dynamic_rendering.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES;
     enabled_extended_dynamic_state.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT;
@@ -13950,6 +13975,8 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     enabled_index_type_uint8.indexTypeUint8 = rt->physical_index_type_uint8.indexTypeUint8;
     enabled_float16_int8.shaderFloat16 = rt->physical_float16_int8.shaderFloat16;
     enabled_float16_int8.shaderInt8 = rt->physical_float16_int8.shaderInt8;
+    enabled_separate_depth_stencil_layouts.separateDepthStencilLayouts =
+        enabled_vulkan12.separateDepthStencilLayouts;
     void *device_features_pnext = NULL;
     /*
      * For Vulkan 1.2+ devices, enable the promoted core feature structs.  The
@@ -13968,6 +13995,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
          enabled_vulkan12.timelineSemaphore ||
          enabled_vulkan12.drawIndirectCount ||
          enabled_vulkan12.samplerFilterMinmax ||
+         enabled_vulkan12.separateDepthStencilLayouts ||
          enabled_vulkan12.descriptorBindingPartiallyBound ||
          enabled_vulkan12.descriptorBindingVariableDescriptorCount ||
          enabled_vulkan12.descriptorBindingUpdateUnusedWhilePending ||
@@ -14026,6 +14054,16 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     }
     const int chain_compat_feature_structs =
         env_truthy("PDOCKER_GPU_CHAIN_COMPAT_FEATURE_STRUCTS", 1);
+    const int separate_depth_stencil_layouts_available =
+        enabled_separate_depth_stencil_layouts.separateDepthStencilLayouts &&
+        (rt->api_version >= VK_API_VERSION_1_2 ||
+         vulkan_device_extension_supported(rt->physical_device,
+                                           VK_KHR_SEPARATE_DEPTH_STENCIL_LAYOUTS_EXTENSION_NAME));
+    if ((rt->api_version < VK_API_VERSION_1_2 || chain_compat_feature_structs) &&
+        separate_depth_stencil_layouts_available) {
+        enabled_separate_depth_stencil_layouts.pNext = device_features_pnext;
+        device_features_pnext = &enabled_separate_depth_stencil_layouts;
+    }
     const int descriptor_indexing_available =
         (enabled_descriptor_indexing.descriptorBindingPartiallyBound ||
          enabled_descriptor_indexing.descriptorBindingVariableDescriptorCount ||
@@ -14072,7 +14110,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
         enabled_storage16.pNext = device_features_pnext;
         device_features_pnext = &enabled_storage16;
     }
-    const char *enabled_extensions[16];
+    const char *enabled_extensions[24];
     uint32_t enabled_extension_count = 0;
     memset(enabled_extensions, 0, sizeof(enabled_extensions));
     if (enabled_storage16.storageBuffer16BitAccess ||
@@ -14125,6 +14163,18 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
                                        &enabled_extension_count,
                                        (uint32_t)(sizeof(enabled_extensions) / sizeof(enabled_extensions[0])),
                                        VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME);
+    }
+    const uint32_t separate_depth_stencil_layouts_before = enabled_extension_count;
+    if (enabled_separate_depth_stencil_layouts.separateDepthStencilLayouts &&
+        rt->api_version < VK_API_VERSION_1_2) {
+        append_vulkan_device_extension(rt->physical_device,
+                                       enabled_extensions,
+                                       &enabled_extension_count,
+                                       (uint32_t)(sizeof(enabled_extensions) / sizeof(enabled_extensions[0])),
+                                       VK_KHR_SEPARATE_DEPTH_STENCIL_LAYOUTS_EXTENSION_NAME);
+        rt->enabled_ext_separate_depth_stencil_layouts =
+            separate_depth_stencil_layouts_available &&
+            enabled_extension_count > separate_depth_stencil_layouts_before;
     }
 #ifdef VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME
     if (enabled_vulkan12.timelineSemaphore && rt->api_version < VK_API_VERSION_1_2) {
@@ -14225,6 +14275,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     rt->enabled_storage16 = enabled_storage16;
     rt->enabled_storage8 = enabled_storage8;
     rt->enabled_float16_int8 = enabled_float16_int8;
+    rt->enabled_separate_depth_stencil_layouts = enabled_separate_depth_stencil_layouts;
     rt->enabled_synchronization2 = enabled_synchronization2;
     rt->enabled_dynamic_rendering = enabled_dynamic_rendering;
     rt->enabled_extended_dynamic_state = enabled_extended_dynamic_state;
@@ -14236,6 +14287,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     rt->enabled_storage16.pNext = NULL;
     rt->enabled_storage8.pNext = NULL;
     rt->enabled_float16_int8.pNext = NULL;
+    rt->enabled_separate_depth_stencil_layouts.pNext = NULL;
     rt->enabled_synchronization2.pNext = NULL;
     rt->enabled_dynamic_rendering.pNext = NULL;
     rt->enabled_extended_dynamic_state.pNext = NULL;
@@ -20104,6 +20156,7 @@ static void print_capabilities(const char *transport) {
             "\"depthBounds\":%u,"
             "\"samplerAnisotropy\":%u,"
             "\"samplerFilterMinmax\":%u,"
+            "\"separateDepthStencilLayouts\":%u,"
             "\"storageBuffer16BitAccess\":%u,"
             "\"uniformAndStorageBuffer16BitAccess\":%u,"
             "\"storagePushConstant16\":%u,"
@@ -20180,6 +20233,8 @@ static void print_capabilities(const char *transport) {
             rt ? rt->physical_features.depthBounds : 0,
             rt ? rt->physical_features.samplerAnisotropy : 0,
             rt ? rt->physical_vulkan12.samplerFilterMinmax : 0,
+            rt ? (rt->physical_vulkan12.separateDepthStencilLayouts ||
+                  rt->physical_separate_depth_stencil_layouts.separateDepthStencilLayouts) : 0,
             rt ? rt->physical_storage16.storageBuffer16BitAccess : 0,
             rt ? rt->physical_storage16.uniformAndStorageBuffer16BitAccess : 0,
             rt ? rt->physical_storage16.storagePushConstant16 : 0,
@@ -20445,6 +20500,7 @@ static void print_vulkan_advertisement_caps(const char *transport) {
             "\"depthBounds\":%u,"
             "\"samplerAnisotropy\":%u,"
             "\"samplerFilterMinmax\":%u,"
+            "\"separateDepthStencilLayouts\":%u,"
             "\"storage16\":{"
             "\"storageBuffer16BitAccess\":%u,"
             "\"uniformAndStorageBuffer16BitAccess\":%u,"
@@ -20488,6 +20544,8 @@ static void print_vulkan_advertisement_caps(const char *transport) {
             rt ? rt->physical_features.depthBounds : 0,
             rt ? rt->physical_features.samplerAnisotropy : 0,
             rt ? rt->physical_vulkan12.samplerFilterMinmax : 0,
+            rt ? (rt->physical_vulkan12.separateDepthStencilLayouts ||
+                  rt->physical_separate_depth_stencil_layouts.separateDepthStencilLayouts) : 0,
             rt ? rt->physical_storage16.storageBuffer16BitAccess : 0,
             rt ? rt->physical_storage16.uniformAndStorageBuffer16BitAccess : 0,
             rt ? rt->physical_storage16.storagePushConstant16 : 0,
