@@ -2324,14 +2324,63 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 VkDeviceCreateInfo create_info;
                 memset(&create_info, 0, sizeof(create_info));
                 create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-                local_read.dynamicRenderingLocalRead = VK_TRUE;
                 create_info.pNext = &local_read;
+
+            #ifdef VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME
+                const char *enabled_extensions[] = {{
+                    VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME,
+                }};
+                create_info.enabledExtensionCount = 1;
+                create_info.ppEnabledExtensionNames = enabled_extensions;
+                if (advertised_dynamic_rendering()) {{
+                    if (!device_extension_advertised_name(VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME)) {{
+                        fprintf(stderr, "VK_KHR_dynamic_rendering_local_read was not advertised with dynamic rendering\\n");
+                        return 5;
+                    }}
+                    uint32_t extension_count = 64;
+                    VkExtensionProperties extensions[64];
+                    memset(extensions, 0, sizeof(extensions));
+                    if (vkEnumerateDeviceExtensionProperties(
+                            VK_NULL_HANDLE, NULL, &extension_count, extensions) != VK_SUCCESS) {{
+                        fprintf(stderr, "device extension enumeration failed\\n");
+                        return 6;
+                    }}
+                    int saw_local_read = 0;
+                    for (uint32_t i = 0; i < extension_count; ++i) {{
+                        if (strcmp(extensions[i].extensionName,
+                                   VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME) == 0) {{
+                            saw_local_read = 1;
+                        }}
+                    }}
+                    if (!saw_local_read) {{
+                        fprintf(stderr, "VK_KHR_dynamic_rendering_local_read missing from enumeration\\n");
+                        return 7;
+                    }}
+                    if (validate_device_extensions(&create_info) != VK_SUCCESS) {{
+                        fprintf(stderr, "VK_KHR_dynamic_rendering_local_read extension enable was rejected\\n");
+                        return 8;
+                    }}
+                }} else {{
+                    if (device_extension_advertised_name(VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME)) {{
+                        fprintf(stderr, "VK_KHR_dynamic_rendering_local_read advertised without dynamic rendering\\n");
+                        return 9;
+                    }}
+                    if (validate_device_extensions(&create_info) == VK_SUCCESS) {{
+                        fprintf(stderr, "VK_KHR_dynamic_rendering_local_read enabled without dynamic rendering\\n");
+                        return 10;
+                    }}
+                    create_info.enabledExtensionCount = 0;
+                    create_info.ppEnabledExtensionNames = NULL;
+                }}
+            #endif
+
+                local_read.dynamicRenderingLocalRead = VK_TRUE;
                 if (validate_device_feature_requests(&create_info) == VK_SUCCESS) {{
-                    return 5;
+                    return 11;
                 }}
                 local_read.dynamicRenderingLocalRead = VK_FALSE;
                 if (validate_device_feature_requests(&create_info) != VK_SUCCESS) {{
-                    return 6;
+                    return 12;
                 }}
                 return 0;
             }}

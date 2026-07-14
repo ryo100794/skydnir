@@ -7677,6 +7677,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VK_STRUCTURE_TYPE_RENDERING_INPUT_ATTACHMENT_INDEX_INFO", icd)
         self.assertIn("VK_IMAGE_LAYOUT_RENDERING_LOCAL_READ", icd)
 
+        collector_body = c_function_body(icd, "collect_advertised_device_extensions")
+        self.assertIn("ADD_DEVICE_EXTENSION(VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME", collector_body)
+
         features_body = c_function_body(icd, "fill_pnext_features")
         self.assertIn("VkPhysicalDeviceDynamicRenderingLocalReadFeatures", features_body)
         self.assertIn("p->dynamicRenderingLocalRead = VK_FALSE;", features_body)
