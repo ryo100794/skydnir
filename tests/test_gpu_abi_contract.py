@@ -9187,6 +9187,25 @@ class GpuAbiContractTest(unittest.TestCase):
 
 
 
+
+    def test_vulkan_maintenance1_is_advertised_and_trim_alias_is_public(self):
+        icd = VULKAN_ICD.read_text()
+        collector_body = c_function_body(icd, "collect_advertised_device_extensions")
+        validation_body = c_function_body(icd, "device_extension_advertised_name")
+        hidden_body = c_function_body(icd, "proc_address_hidden_by_advertisement")
+        proc_body = icd.split("static PFN_vkVoidFunction proc_address", 1)[1].split(
+            "VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr", 1
+        )[0]
+        trim_body = c_function_body(icd, "vkTrimCommandPool")
+        self.assertIn("VK_KHR_MAINTENANCE_1_EXTENSION_NAME", collector_body)
+        self.assertIn("collect_advertised_device_extensions(", validation_body)
+        self.assertIn('MAP_ALIAS("vkTrimCommandPoolKHR", vkTrimCommandPool)', proc_body)
+        self.assertNotIn("vkTrimCommandPoolKHR", hidden_body)
+        self.assertIn("VkCommandPoolTrimFlags flags", icd)
+        self.assertIn("flags != 0", trim_body)
+        self.assertIn("command-pool-trim-flags-unsupported", trim_body)
+        self.assertIn("VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT", icd)
+
     def test_vulkan_descriptor_update_template_extension_is_advertised_and_aliases_are_public(self):
         icd = VULKAN_ICD.read_text()
         collector_body = c_function_body(icd, "collect_advertised_device_extensions")
@@ -9480,7 +9499,6 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, proc_body)
         for alias in [
-            "vkTrimCommandPoolKHR",
             "vkCreateSamplerYcbcrConversionKHR",
             "vkDestroySamplerYcbcrConversionKHR",
             "vkGetBufferDeviceAddressKHR",

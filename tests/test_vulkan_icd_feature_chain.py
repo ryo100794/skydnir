@@ -171,6 +171,54 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
 
+
+    def test_maintenance1_extension_exposes_trim_command_pool_alias(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            static int extension_seen(
+                    const VkExtensionProperties *extensions,
+                    uint32_t count,
+                    const char *name) {{
+                for (uint32_t i = 0; i < count; ++i) {{
+                    if (strcmp(extensions[i].extensionName, name) == 0) return 1;
+                }}
+                return 0;
+            }}
+
+            int main(void) {{
+            #ifdef VK_KHR_MAINTENANCE_1_EXTENSION_NAME
+                if (!device_extension_advertised_name(VK_KHR_MAINTENANCE_1_EXTENSION_NAME)) return 2;
+                uint32_t count = 64;
+                VkExtensionProperties extensions[64];
+                memset(extensions, 0, sizeof(extensions));
+                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &count, extensions) != VK_SUCCESS) return 3;
+                if (!extension_seen(extensions, count, VK_KHR_MAINTENANCE_1_EXTENSION_NAME)) return 4;
+
+                const char *enabled[] = {{ VK_KHR_MAINTENANCE_1_EXTENSION_NAME }};
+                VkDeviceCreateInfo device_info;
+                memset(&device_info, 0, sizeof(device_info));
+                device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                device_info.enabledExtensionCount = 1;
+                device_info.ppEnabledExtensionNames = enabled;
+                if (validate_device_extensions(&device_info) != VK_SUCCESS) return 5;
+
+                PFN_vkVoidFunction raw = proc_address("vkTrimCommandPoolKHR");
+                if (raw == NULL) return 6;
+                if (raw != (PFN_vkVoidFunction)vkTrimCommandPool) return 7;
+                ((PFN_vkTrimCommandPoolKHR)raw)(VK_NULL_HANDLE, VK_NULL_HANDLE, 0);
+            #endif
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_descriptor_update_template_extension_exposes_khr_aliases(self):
         source = textwrap.dedent(
             f"""

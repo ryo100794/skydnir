@@ -51,6 +51,11 @@
 #define VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_SPEC_VERSION 1
 #endif
 
+#ifndef VK_KHR_MAINTENANCE_1_EXTENSION_NAME
+#define VK_KHR_MAINTENANCE_1_EXTENSION_NAME "VK_KHR_maintenance1"
+#define VK_KHR_MAINTENANCE_1_SPEC_VERSION 2
+#endif
+
 #ifndef VK_KHR_MAINTENANCE_3_EXTENSION_NAME
 #define VK_KHR_MAINTENANCE_3_EXTENSION_NAME "VK_KHR_maintenance3"
 #define VK_KHR_MAINTENANCE_3_SPEC_VERSION 1
@@ -20150,6 +20155,7 @@ static uint32_t collect_advertised_device_extensions(
         ADD_DEVICE_EXTENSION(VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_EXTENSION_NAME,
                              VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_SPEC_VERSION);
     }
+    ADD_DEVICE_EXTENSION(VK_KHR_MAINTENANCE_1_EXTENSION_NAME, VK_KHR_MAINTENANCE_1_SPEC_VERSION);
     ADD_DEVICE_EXTENSION(VK_KHR_MAINTENANCE_3_EXTENSION_NAME, VK_KHR_MAINTENANCE_3_SPEC_VERSION);
     ADD_DEVICE_EXTENSION(VK_KHR_DESCRIPTOR_UPDATE_TEMPLATE_EXTENSION_NAME,
                          VK_KHR_DESCRIPTOR_UPDATE_TEMPLATE_SPEC_VERSION);
@@ -31847,7 +31853,6 @@ static bool proc_address_hidden_by_advertisement(const char *pName) {
         strcmp(pName, "vkGetImageSubresourceLayout2EXT") == 0 ||
         strcmp(pName, "vkGetDeviceImageSubresourceLayoutKHR") == 0 ||
         strcmp(pName, "vkGetRenderingAreaGranularityKHR") == 0 ||
-        strcmp(pName, "vkTrimCommandPoolKHR") == 0 ||
         strcmp(pName, "vkGetBufferDeviceAddressKHR") == 0 ||
         strcmp(pName, "vkGetBufferOpaqueCaptureAddressKHR") == 0 ||
         strcmp(pName, "vkGetDeviceMemoryOpaqueCaptureAddressKHR") == 0 ||
