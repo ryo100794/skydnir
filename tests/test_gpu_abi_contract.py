@@ -9150,6 +9150,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_ROBUSTNESS_FEATURES", icd)
         self.assertIn("p->robustImageAccess = VK_FALSE", icd)
         self.assertIn("supported = !p->robustImageAccess", icd)
+        self.assertIn("ADD_DEVICE_EXTENSION(VK_EXT_IMAGE_ROBUSTNESS_EXTENSION_NAME", collector_body)
         self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_ROBUSTNESS_FEATURES", icd)
         self.assertIn("p->pipelineRobustness = VK_FALSE", icd)
         self.assertIn("supported = !p->pipelineRobustness", icd)
