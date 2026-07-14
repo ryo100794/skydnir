@@ -94,6 +94,82 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+
+    def test_maintenance3_extension_exposes_descriptor_support_query(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            static int extension_seen(
+                    const VkExtensionProperties *extensions,
+                    uint32_t count,
+                    const char *name) {{
+                for (uint32_t i = 0; i < count; ++i) {{
+                    if (strcmp(extensions[i].extensionName, name) == 0) return 1;
+                }}
+                return 0;
+            }}
+
+            int main(void) {{
+            #ifdef VK_KHR_MAINTENANCE_3_EXTENSION_NAME
+                if (!device_extension_advertised_name(VK_KHR_MAINTENANCE_3_EXTENSION_NAME)) return 2;
+                uint32_t count = 64;
+                VkExtensionProperties extensions[64];
+                memset(extensions, 0, sizeof(extensions));
+                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &count, extensions) != VK_SUCCESS) return 3;
+                if (!extension_seen(extensions, count, VK_KHR_MAINTENANCE_3_EXTENSION_NAME)) return 4;
+
+                const char *enabled[] = {{ VK_KHR_MAINTENANCE_3_EXTENSION_NAME }};
+                VkDeviceCreateInfo create_info;
+                memset(&create_info, 0, sizeof(create_info));
+                create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                create_info.enabledExtensionCount = 1;
+                create_info.ppEnabledExtensionNames = enabled;
+                if (validate_device_extensions(&create_info) != VK_SUCCESS) return 5;
+
+                PFN_vkVoidFunction raw = proc_address("vkGetDescriptorSetLayoutSupportKHR");
+                if (raw == NULL) return 6;
+                if (raw != (PFN_vkVoidFunction)vkGetDescriptorSetLayoutSupport) return 7;
+
+                VkPhysicalDeviceMaintenance3Properties maintenance3;
+                VkPhysicalDeviceProperties2 properties2;
+                memset(&maintenance3, 0, sizeof(maintenance3));
+                memset(&properties2, 0, sizeof(properties2));
+                properties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+                properties2.pNext = &maintenance3;
+                maintenance3.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_3_PROPERTIES;
+                vkGetPhysicalDeviceProperties2((VkPhysicalDevice)(uintptr_t)0x1u, &properties2);
+                if (maintenance3.maxPerSetDescriptors == 0) return 8;
+                if (maintenance3.maxMemoryAllocationSize == 0) return 9;
+
+                VkDescriptorSetLayoutBinding binding;
+                VkDescriptorSetLayoutCreateInfo layout_info;
+                VkDescriptorSetLayoutSupport support;
+                memset(&binding, 0, sizeof(binding));
+                memset(&layout_info, 0, sizeof(layout_info));
+                memset(&support, 0, sizeof(support));
+                binding.binding = 0;
+                binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+                binding.descriptorCount = 1;
+                binding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+                layout_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+                layout_info.bindingCount = 1;
+                layout_info.pBindings = &binding;
+                support.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_SUPPORT;
+                ((PFN_vkGetDescriptorSetLayoutSupportKHR)raw)(
+                    VK_NULL_HANDLE, &layout_info, &support);
+                if (support.supported != VK_TRUE) return 10;
+            #endif
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_validation_cache_extension_is_local_noop_and_shader_pnext_accepts_cache(self):
         source = textwrap.dedent(
             f"""

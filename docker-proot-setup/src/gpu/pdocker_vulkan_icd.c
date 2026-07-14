@@ -51,6 +51,11 @@
 #define VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_SPEC_VERSION 1
 #endif
 
+#ifndef VK_KHR_MAINTENANCE_3_EXTENSION_NAME
+#define VK_KHR_MAINTENANCE_3_EXTENSION_NAME "VK_KHR_maintenance3"
+#define VK_KHR_MAINTENANCE_3_SPEC_VERSION 1
+#endif
+
 #ifndef VK_KHR_COPY_COMMANDS_2_EXTENSION_NAME
 #define VK_KHR_COPY_COMMANDS_2_EXTENSION_NAME "VK_KHR_copy_commands2"
 #define VK_KHR_COPY_COMMANDS_2_SPEC_VERSION 1
@@ -20140,6 +20145,7 @@ static uint32_t collect_advertised_device_extensions(
         ADD_DEVICE_EXTENSION(VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_EXTENSION_NAME,
                              VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_SPEC_VERSION);
     }
+    ADD_DEVICE_EXTENSION(VK_KHR_MAINTENANCE_3_EXTENSION_NAME, VK_KHR_MAINTENANCE_3_SPEC_VERSION);
 #ifdef VK_KHR_MAINTENANCE_4_EXTENSION_NAME
     ADD_DEVICE_EXTENSION(VK_KHR_MAINTENANCE_4_EXTENSION_NAME, VK_KHR_MAINTENANCE_4_SPEC_VERSION);
 #endif
@@ -31828,8 +31834,7 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance instan
 
 static bool proc_address_hidden_by_advertisement(const char *pName) {
     if (!pName) return true;
-    if (strcmp(pName, "vkGetDescriptorSetLayoutSupportKHR") == 0 ||
-        strcmp(pName, "vkGetDeviceGroupPeerMemoryFeaturesKHR") == 0 ||
+    if (strcmp(pName, "vkGetDeviceGroupPeerMemoryFeaturesKHR") == 0 ||
         strcmp(pName, "vkCmdSetDeviceMaskKHR") == 0 ||
         strcmp(pName, "vkGetImageSubresourceLayout2KHR") == 0 ||
         strcmp(pName, "vkGetImageSubresourceLayout2EXT") == 0 ||

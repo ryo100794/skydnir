@@ -9566,7 +9566,23 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("p->maxVariableDescriptorCount = descriptor_set_layout_create_info_variable_descriptor_count_limit(", pnext_body)
         self.assertIn("MAP_PROC(vkGetDescriptorSetLayoutSupport)", proc_body)
         self.assertIn('MAP_ALIAS("vkGetDescriptorSetLayoutSupportKHR", vkGetDescriptorSetLayoutSupport)', proc_body)
-        self.assertIn("vkGetDescriptorSetLayoutSupportKHR", hidden_body)
+        self.assertNotIn("vkGetDescriptorSetLayoutSupportKHR", hidden_body)
+
+    def test_vulkan_maintenance3_is_advertised_and_descriptor_support_alias_is_public(self):
+        icd = VULKAN_ICD.read_text()
+        collector_body = c_function_body(icd, "collect_advertised_device_extensions")
+        validation_body = c_function_body(icd, "device_extension_advertised_name")
+        hidden_body = c_function_body(icd, "proc_address_hidden_by_advertisement")
+        proc_body = icd.split("static PFN_vkVoidFunction proc_address", 1)[1].split(
+            "VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr", 1
+        )[0]
+        self.assertIn("VK_KHR_MAINTENANCE_3_EXTENSION_NAME", collector_body)
+        self.assertIn("collect_advertised_device_extensions(", validation_body)
+        self.assertIn('MAP_ALIAS("vkGetDescriptorSetLayoutSupportKHR", vkGetDescriptorSetLayoutSupport)', proc_body)
+        self.assertNotIn("vkGetDescriptorSetLayoutSupportKHR", hidden_body)
+        self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_3_PROPERTIES", icd)
+        self.assertIn("p->maxPerSetDescriptors = pdocker_vk_max_per_set_descriptors();", icd)
+        self.assertIn("p->maxMemoryAllocationSize = pdocker_vulkan_max_buffer_size();", icd)
 
 
     def test_vulkan_descriptor_pool_and_allocate_pnext_are_explicit_noop_or_fail_closed(self):
