@@ -8295,6 +8295,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("op->dispatch_indirect ? op->dispatch_indirect_buffer : NULL", icd)
         self.assertIn("dispatch_indirect_resource=%u dispatch_indirect_offset=%llu", icd)
         self.assertIn("const bool requires_v5_frame =", icd)
+        self.assertIn("strict_passthrough ||", icd)
         self.assertIn("descriptor_array_transport_required || texel_buffer_transport_required ||", icd)
         self.assertIn("binding_count > PDOCKER_GPU_VULKAN_TEXT_DISPATCH_MAX_BINDINGS || op->dispatch_indirect", icd)
         self.assertIn("dispatch_indirect_resource=", executor)
@@ -14919,6 +14920,17 @@ class GpuAbiContractTest(unittest.TestCase):
             "if (requires_v5_frame", 1
         )[0]
         self.assertIn("specialization_transport_required ||", requires_block)
+
+    def test_vulkan_dispatch_strict_passthrough_forces_v5_frame(self):
+        icd = VULKAN_ICD.read_text()
+        generic_sender = c_function_body(icd, "send_generic_vulkan_dispatch_op")
+        requires_block = generic_sender.split("const bool requires_v5_frame =", 1)[1].split(
+            "if (requires_v5_frame", 1
+        )[0]
+        self.assertIn("strict_passthrough ||", requires_block)
+        self.assertLess(requires_block.index("strict_passthrough ||"),
+                        requires_block.index("descriptor_array_transport_required"))
+        self.assertIn("strict=%u", generic_sender)
 
 
     def test_spirv_observability_is_generic_not_hash_only(self):

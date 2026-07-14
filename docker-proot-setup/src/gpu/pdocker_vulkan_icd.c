@@ -13092,6 +13092,7 @@ static int send_generic_vulkan_dispatch_op(
         op->pipeline->specialization_entry_count > 0 ||
         op->pipeline->specialization_data_size > 0;
     const bool requires_v5_frame =
+        strict_passthrough ||
         descriptor_array_transport_required || texel_buffer_transport_required ||
         image_descriptor_count > 0 || pending_compute_barriers ||
         specialization_transport_required ||
@@ -13100,12 +13101,14 @@ static int send_generic_vulkan_dispatch_op(
         fprintf(stderr,
                 "pdocker-vulkan-icd: generic dispatch rejected: "
                 "V5 framed transport is required but copy-alias text fallback is enabled "
-                "dispatch_id=%llu texel=%u image_descriptors=%zu descriptor_array=%u barriers=%u\n",
+                "dispatch_id=%llu strict=%u texel=%u image_descriptors=%zu descriptor_array=%u barriers=%u specialization=%u\n",
                 (unsigned long long)dispatch_id,
+                strict_passthrough ? 1u : 0u,
                 texel_buffer_transport_required ? 1u : 0u,
                 image_descriptor_count,
                 descriptor_array_transport_required ? 1u : 0u,
-                pending_compute_barriers ? 1u : 0u);
+                pending_compute_barriers ? 1u : 0u,
+                specialization_transport_required ? 1u : 0u);
         close_spirv_probe_replay(&probe);
         pdocker_vk_command_text_destroy(&command);
         close(socket_fd);
