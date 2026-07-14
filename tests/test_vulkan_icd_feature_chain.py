@@ -3069,6 +3069,104 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
 
+    def test_external_semaphore_and_fence_extensions_are_zero_handle_only(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            static int extension_seen(
+                    const VkExtensionProperties *extensions,
+                    uint32_t count,
+                    const char *name) {{
+                for (uint32_t i = 0; i < count; ++i) {{
+                    if (strcmp(extensions[i].extensionName, name) == 0) return 1;
+                }}
+                return 0;
+            }}
+
+            int main(void) {{
+                uint32_t count = 64;
+                VkExtensionProperties extensions[64];
+                memset(extensions, 0, sizeof(extensions));
+                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &count, extensions) != VK_SUCCESS) return 2;
+
+            #ifdef VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME
+                if (!device_extension_advertised_name(VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME)) return 3;
+                if (!extension_seen(extensions, count, VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME)) return 4;
+                const char *semaphore_enabled[] = {{ VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME }};
+                VkDeviceCreateInfo semaphore_device_info;
+                memset(&semaphore_device_info, 0, sizeof(semaphore_device_info));
+                semaphore_device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                semaphore_device_info.enabledExtensionCount = 1;
+                semaphore_device_info.ppEnabledExtensionNames = semaphore_enabled;
+                if (validate_device_extensions(&semaphore_device_info) != VK_SUCCESS) return 5;
+
+                VkExportSemaphoreCreateInfo semaphore_export;
+                memset(&semaphore_export, 0, sizeof(semaphore_export));
+                semaphore_export.sType = VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO;
+                semaphore_export.handleTypes = 0;
+                bool timeline = true;
+                uint64_t initial_value = 99;
+                if (!semaphore_create_info_parse_pnext(&semaphore_export, &timeline, &initial_value)) return 6;
+                if (timeline || initial_value != 0) return 7;
+                semaphore_export.handleTypes = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT;
+                if (semaphore_create_info_parse_pnext(&semaphore_export, &timeline, &initial_value)) return 8;
+
+                VkPhysicalDeviceExternalSemaphoreInfo semaphore_info;
+                VkExternalSemaphoreProperties semaphore_properties;
+                memset(&semaphore_info, 0, sizeof(semaphore_info));
+                memset(&semaphore_properties, 0xff, sizeof(semaphore_properties));
+                semaphore_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_SEMAPHORE_INFO;
+                semaphore_info.handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT;
+                semaphore_properties.sType = VK_STRUCTURE_TYPE_EXTERNAL_SEMAPHORE_PROPERTIES;
+                vkGetPhysicalDeviceExternalSemaphoreProperties(VK_NULL_HANDLE, &semaphore_info, &semaphore_properties);
+                if (semaphore_properties.externalSemaphoreFeatures != 0) return 9;
+                if (semaphore_properties.exportFromImportedHandleTypes != 0) return 10;
+                if (semaphore_properties.compatibleHandleTypes != 0) return 11;
+            #endif
+
+            #ifdef VK_KHR_EXTERNAL_FENCE_EXTENSION_NAME
+                if (!device_extension_advertised_name(VK_KHR_EXTERNAL_FENCE_EXTENSION_NAME)) return 12;
+                if (!extension_seen(extensions, count, VK_KHR_EXTERNAL_FENCE_EXTENSION_NAME)) return 13;
+                const char *fence_enabled[] = {{ VK_KHR_EXTERNAL_FENCE_EXTENSION_NAME }};
+                VkDeviceCreateInfo fence_device_info;
+                memset(&fence_device_info, 0, sizeof(fence_device_info));
+                fence_device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                fence_device_info.enabledExtensionCount = 1;
+                fence_device_info.ppEnabledExtensionNames = fence_enabled;
+                if (validate_device_extensions(&fence_device_info) != VK_SUCCESS) return 14;
+
+                VkExportFenceCreateInfo fence_export;
+                memset(&fence_export, 0, sizeof(fence_export));
+                fence_export.sType = VK_STRUCTURE_TYPE_EXPORT_FENCE_CREATE_INFO;
+                fence_export.handleTypes = 0;
+                if (validate_fence_create_pnext(&fence_export) != VK_SUCCESS) return 15;
+                fence_export.handleTypes = VK_EXTERNAL_FENCE_HANDLE_TYPE_OPAQUE_FD_BIT;
+                if (validate_fence_create_pnext(&fence_export) != VK_ERROR_FEATURE_NOT_PRESENT) return 16;
+
+                VkPhysicalDeviceExternalFenceInfo fence_info;
+                VkExternalFenceProperties fence_properties;
+                memset(&fence_info, 0, sizeof(fence_info));
+                memset(&fence_properties, 0xff, sizeof(fence_properties));
+                fence_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_FENCE_INFO;
+                fence_info.handleType = VK_EXTERNAL_FENCE_HANDLE_TYPE_OPAQUE_FD_BIT;
+                fence_properties.sType = VK_STRUCTURE_TYPE_EXTERNAL_FENCE_PROPERTIES;
+                vkGetPhysicalDeviceExternalFenceProperties(VK_NULL_HANDLE, &fence_info, &fence_properties);
+                if (fence_properties.externalFenceFeatures != 0) return 17;
+                if (fence_properties.exportFromImportedHandleTypes != 0) return 18;
+                if (fence_properties.compatibleHandleTypes != 0) return 19;
+            #endif
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+
     def test_buffer_create_usage2_pnext_supplies_effective_usage(self):
         source = textwrap.dedent(
             f"""

@@ -9564,9 +9564,13 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("deviceMask != 1u", device_mask_body)
         self.assertIn('command_buffer_mark_recording_failed(cmd, "device-mask-unsupported")', device_mask_body)
         self.assertIn("ADD_DEVICE_EXTENSION(VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME", collector_body)
+        self.assertIn("ADD_DEVICE_EXTENSION(VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME", collector_body)
+        self.assertIn("ADD_DEVICE_EXTENSION(VK_KHR_EXTERNAL_FENCE_EXTENSION_NAME", collector_body)
         self.assertIn("VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO", icd)
         self.assertIn("VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO", icd)
         self.assertIn("VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO", icd)
+        self.assertIn("VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO", icd)
+        self.assertIn("VK_STRUCTURE_TYPE_EXPORT_FENCE_CREATE_INFO", icd)
 
         self.assertIn("const VkPhysicalDeviceSparseImageFormatInfo2 *pFormatInfo", icd)
         self.assertIn("*pPropertyCount = 0;", sparse2_body)
