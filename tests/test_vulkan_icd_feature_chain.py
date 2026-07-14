@@ -1535,6 +1535,53 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_sampler_filter_minmax_extension_enables_reduction_feature_mask(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            int main(void) {{
+            #ifdef VK_EXT_SAMPLER_FILTER_MINMAX_EXTENSION_NAME
+                const char *enabled[] = {{ VK_EXT_SAMPLER_FILTER_MINMAX_EXTENSION_NAME }};
+                VkDeviceCreateInfo create_info;
+                memset(&create_info, 0, sizeof(create_info));
+                create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                create_info.enabledExtensionCount = 1;
+                create_info.ppEnabledExtensionNames = enabled;
+                uint64_t mask = requested_feature_mask_from_device_create_info(&create_info);
+                if ((mask & PDOCKER_VK_FEATURE_SAMPLER_FILTER_MINMAX) == 0) return 2;
+
+                VkSamplerCreateInfo sampler_info;
+                VkSamplerReductionModeCreateInfo reduction_info;
+                memset(&sampler_info, 0, sizeof(sampler_info));
+                memset(&reduction_info, 0, sizeof(reduction_info));
+                sampler_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+                sampler_info.pNext = &reduction_info;
+                sampler_info.magFilter = VK_FILTER_NEAREST;
+                sampler_info.minFilter = VK_FILTER_NEAREST;
+                sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+                sampler_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+                sampler_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+                sampler_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+                sampler_info.minLod = 0.0f;
+                sampler_info.maxLod = 0.0f;
+                reduction_info.sType = VK_STRUCTURE_TYPE_SAMPLER_REDUCTION_MODE_CREATE_INFO;
+                reduction_info.reductionMode = VK_SAMPLER_REDUCTION_MODE_MIN;
+                VkSamplerReductionMode reduction_mode = VK_SAMPLER_REDUCTION_MODE_WEIGHTED_AVERAGE;
+                if (validate_sampler_create_info_for_transport(&sampler_info, mask, &reduction_mode) != VK_SUCCESS) return 3;
+                if (reduction_mode != VK_SAMPLER_REDUCTION_MODE_MIN) return 4;
+            #endif
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+
     def test_subpass_merge_feedback_feature_is_queryable_and_enableable(self):
         source = textwrap.dedent(
             f"""

@@ -10909,6 +10909,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "p->samplerFilterMinmax = advertised_sampler_filter_minmax();",
             "if (p->samplerFilterMinmax) mask |= PDOCKER_VK_FEATURE_SAMPLER_FILTER_MINMAX;",
             "if (advertised_sampler_filter_minmax()) mask |= PDOCKER_VK_FEATURE_SAMPLER_FILTER_MINMAX;",
+            "device_create_info_extension_enabled",
+            "VK_EXT_SAMPLER_FILTER_MINMAX_EXTENSION_NAME",
+            "mask |= PDOCKER_VK_FEATURE_SAMPLER_FILTER_MINMAX;",
         ]:
             self.assertIn(marker, icd)
 
@@ -10931,6 +10934,10 @@ class GpuAbiContractTest(unittest.TestCase):
             "sci.pNext = &reduction_info;",
         ]:
             self.assertIn(marker, materialize_body)
+
+        collector_body = c_function_body(icd, "collect_advertised_device_extensions")
+        self.assertIn("VK_EXT_SAMPLER_FILTER_MINMAX_EXTENSION_NAME", collector_body)
+        self.assertIn("advertised_sampler_filter_minmax()", collector_body)
 
         for marker in [
             "PDOCKER_VK_FEATURE_SAMPLER_FILTER_MINMAX",

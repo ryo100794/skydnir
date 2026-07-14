@@ -17244,11 +17244,30 @@ static uint64_t feature_mask_from_pnext_chain(const void *pNext) {
     return mask;
 }
 
+static bool device_create_info_extension_enabled(
+        const VkDeviceCreateInfo *pCreateInfo,
+        const char *name) {
+    if (!pCreateInfo || !name) return false;
+    for (uint32_t i = 0; i < pCreateInfo->enabledExtensionCount; ++i) {
+        const char *enabled = pCreateInfo->ppEnabledExtensionNames
+            ? pCreateInfo->ppEnabledExtensionNames[i]
+            : NULL;
+        if (enabled && strcmp(enabled, name) == 0) return true;
+    }
+    return false;
+}
+
 static uint64_t requested_feature_mask_from_device_create_info(
         const VkDeviceCreateInfo *pCreateInfo) {
     if (!pCreateInfo) return 0;
     uint64_t mask = feature_mask_from_base_features(pCreateInfo->pEnabledFeatures);
     mask |= feature_mask_from_pnext_chain(pCreateInfo->pNext);
+#ifdef VK_EXT_SAMPLER_FILTER_MINMAX_EXTENSION_NAME
+    if (device_create_info_extension_enabled(pCreateInfo,
+                                             VK_EXT_SAMPLER_FILTER_MINMAX_EXTENSION_NAME)) {
+        mask |= PDOCKER_VK_FEATURE_SAMPLER_FILTER_MINMAX;
+    }
+#endif
     return mask;
 }
 
@@ -20307,6 +20326,12 @@ static uint32_t collect_advertised_device_extensions(
 #ifdef VK_EXT_SUBPASS_MERGE_FEEDBACK_EXTENSION_NAME
     ADD_DEVICE_EXTENSION(VK_EXT_SUBPASS_MERGE_FEEDBACK_EXTENSION_NAME,
                          VK_EXT_SUBPASS_MERGE_FEEDBACK_SPEC_VERSION);
+#endif
+#ifdef VK_EXT_SAMPLER_FILTER_MINMAX_EXTENSION_NAME
+    if (advertised_sampler_filter_minmax()) {
+        ADD_DEVICE_EXTENSION(VK_EXT_SAMPLER_FILTER_MINMAX_EXTENSION_NAME,
+                             VK_EXT_SAMPLER_FILTER_MINMAX_SPEC_VERSION);
+    }
 #endif
     ADD_DEVICE_EXTENSION(VK_KHR_DEVICE_GROUP_EXTENSION_NAME, VK_KHR_DEVICE_GROUP_SPEC_VERSION);
 #ifdef VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME
