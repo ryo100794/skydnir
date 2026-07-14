@@ -239,6 +239,7 @@ typedef struct PdockerVkDescriptorUpdateTemplate PdockerVkDescriptorUpdateTempla
 typedef struct PdockerVkShaderModule PdockerVkShaderModule;
 typedef struct PdockerVkPipelineLayout PdockerVkPipelineLayout;
 typedef struct PdockerVkPipelineCache PdockerVkPipelineCache;
+typedef struct PdockerVkValidationCache PdockerVkValidationCache;
 typedef struct PdockerVkPipeline PdockerVkPipeline;
 typedef struct PdockerVkCommandPool PdockerVkCommandPool;
 typedef struct PdockerVkFence PdockerVkFence;
@@ -290,6 +291,9 @@ PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_event, VkEvent, 
 PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_query_pool, VkQueryPool, PdockerVkQueryPool)
 PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_descriptor_pool, VkDescriptorPool, PdockerVkDescriptorPool)
 PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_pipeline_cache, VkPipelineCache, PdockerVkPipelineCache)
+#ifdef VK_EXT_VALIDATION_CACHE_EXTENSION_NAME
+PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_validation_cache, VkValidationCacheEXT, PdockerVkValidationCache)
+#endif
 PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_command_pool, VkCommandPool, PdockerVkCommandPool)
 PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_render_pass, VkRenderPass, PdockerVkRenderPass)
 PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_framebuffer, VkFramebuffer, PdockerVkFramebuffer)
@@ -1463,6 +1467,12 @@ struct PdockerVkDescriptorPool {
 struct PdockerVkPipelineCache {
     int unused;
 };
+
+#ifdef VK_EXT_VALIDATION_CACHE_EXTENSION_NAME
+struct PdockerVkValidationCache {
+    int unused;
+};
+#endif
 
 struct PdockerVkCommandPool {
     uint64_t requested_feature_mask;
@@ -19375,6 +19385,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(
                              VK_EXT_INDEX_TYPE_UINT8_SPEC_VERSION);
     }
 #endif
+#ifdef VK_EXT_VALIDATION_CACHE_EXTENSION_NAME
+    ADD_DEVICE_EXTENSION(VK_EXT_VALIDATION_CACHE_EXTENSION_NAME, VK_EXT_VALIDATION_CACHE_SPEC_VERSION);
+#endif
     ADD_DEVICE_EXTENSION(VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_SWAPCHAIN_SPEC_VERSION);
 #undef ADD_DEVICE_EXTENSION
     copy_extension_properties(available, available_count, pPropertyCount, pProperties);
@@ -19440,6 +19453,9 @@ static bool device_extension_advertised_name(const char *name) {
     if (strcmp(name, VK_EXT_INDEX_TYPE_UINT8_EXTENSION_NAME) == 0) {
         return caps && caps->ext_index_type_uint8 && caps->index_type_uint8.indexTypeUint8;
     }
+#endif
+#ifdef VK_EXT_VALIDATION_CACHE_EXTENSION_NAME
+    if (strcmp(name, VK_EXT_VALIDATION_CACHE_EXTENSION_NAME) == 0) return true;
 #endif
     if (strcmp(name, VK_KHR_SWAPCHAIN_EXTENSION_NAME) == 0) return true;
     return false;
@@ -21189,11 +21205,13 @@ static VkResult validate_shader_module_create_pnext(const void *pNext) {
             case VK_STRUCTURE_TYPE_SHADER_MODULE_VALIDATION_CACHE_CREATE_INFO_EXT: {
                 const VkShaderModuleValidationCacheCreateInfoEXT *cache_info =
                     (const VkShaderModuleValidationCacheCreateInfoEXT *)node;
-                if (cache_info->validationCache != VK_NULL_HANDLE) {
-                    trace_icd_runtime_failure("shader-module-validation-cache-unsupported",
-                                              VK_ERROR_FEATURE_NOT_PRESENT);
-                    return VK_ERROR_FEATURE_NOT_PRESENT;
-                }
+                /*
+                 * Validation caches are execution-neutral metadata.  The bridge
+                 * keeps VK_EXT_validation_cache local to the ICD and does not
+                 * forward cache content to Android Vulkan, so both null and
+                 * non-null cache handles are safe no-ops for shader creation.
+                 */
+                (void)cache_info;
                 break;
             }
 #endif
@@ -30434,6 +30452,70 @@ VKAPI_ATTR VkResult VKAPI_CALL vkMergePipelineCaches(
     return VK_SUCCESS;
 }
 
+#ifdef VK_EXT_VALIDATION_CACHE_EXTENSION_NAME
+VKAPI_ATTR VkResult VKAPI_CALL vkCreateValidationCacheEXT(
+        VkDevice device,
+        const VkValidationCacheCreateInfoEXT *pCreateInfo,
+        const VkAllocationCallbacks *pAllocator,
+        VkValidationCacheEXT *pValidationCache) {
+    (void)device;
+    (void)pAllocator;
+    if (!pCreateInfo || !pValidationCache ||
+        pCreateInfo->sType != VK_STRUCTURE_TYPE_VALIDATION_CACHE_CREATE_INFO_EXT) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    *pValidationCache = VK_NULL_HANDLE;
+    if (pCreateInfo->pNext) {
+        return unsupported_create_info_pnext_result("vkCreateValidationCacheEXT", pCreateInfo->pNext);
+    }
+    if (pCreateInfo->flags != 0 ||
+        (pCreateInfo->initialDataSize > 0 && !pCreateInfo->pInitialData)) {
+        trace_icd_runtime_failure("validation-cache-create-info-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    PdockerVkValidationCache *cache = pdocker_alloc_handle(sizeof(*cache));
+    if (!cache) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    *pValidationCache = pdocker_vk_validation_cache_to_handle(cache);
+    return *pValidationCache ? VK_SUCCESS : VK_ERROR_OUT_OF_HOST_MEMORY;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkDestroyValidationCacheEXT(
+        VkDevice device,
+        VkValidationCacheEXT validationCache,
+        const VkAllocationCallbacks *pAllocator) {
+    (void)device;
+    (void)pAllocator;
+    free(pdocker_vk_validation_cache_from_handle(validationCache));
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkGetValidationCacheDataEXT(
+        VkDevice device,
+        VkValidationCacheEXT validationCache,
+        size_t *pDataSize,
+        void *pData) {
+    (void)device;
+    (void)validationCache;
+    if (!pDataSize) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!pData) {
+        *pDataSize = 0;
+        return VK_SUCCESS;
+    }
+    if (*pDataSize > 0) *pDataSize = 0;
+    return VK_SUCCESS;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkMergeValidationCachesEXT(
+        VkDevice device,
+        VkValidationCacheEXT dstCache,
+        uint32_t srcCacheCount,
+        const VkValidationCacheEXT *pSrcCaches) {
+    (void)device;
+    (void)dstCache;
+    if (srcCacheCount > 0 && !pSrcCaches) return VK_ERROR_INITIALIZATION_FAILED;
+    return VK_SUCCESS;
+}
+#endif
+
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetDeviceProcAddr(VkDevice device, const char *pName);
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance instance, const char *pName);
 
@@ -30738,6 +30820,12 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_PROC(vkDestroyPipelineCache);
     MAP_PROC(vkGetPipelineCacheData);
     MAP_PROC(vkMergePipelineCaches);
+#ifdef VK_EXT_VALIDATION_CACHE_EXTENSION_NAME
+    MAP_PROC(vkCreateValidationCacheEXT);
+    MAP_PROC(vkDestroyValidationCacheEXT);
+    MAP_PROC(vkGetValidationCacheDataEXT);
+    MAP_PROC(vkMergeValidationCachesEXT);
+#endif
     MAP_PROC(vkCreateComputePipelines);
     MAP_PROC(vkCreateGraphicsPipelines);
     MAP_PROC(vkDestroyPipeline);

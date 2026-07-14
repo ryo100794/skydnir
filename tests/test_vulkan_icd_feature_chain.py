@@ -94,6 +94,92 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_validation_cache_extension_is_local_noop_and_shader_pnext_accepts_cache(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            int main(void) {{
+            #ifndef VK_EXT_VALIDATION_CACHE_EXTENSION_NAME
+                return 0;
+            #else
+                if (!device_extension_advertised_name(VK_EXT_VALIDATION_CACHE_EXTENSION_NAME)) {{
+                    fprintf(stderr, "validation cache extension was not advertised\\n");
+                    return 2;
+                }}
+                uint32_t extension_count = 0;
+                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &extension_count, NULL) != VK_SUCCESS ||
+                    extension_count == 0) {{
+                    fprintf(stderr, "device extension enumeration failed\\n");
+                    return 3;
+                }}
+                VkValidationCacheCreateInfoEXT cache_info;
+                memset(&cache_info, 0, sizeof(cache_info));
+                cache_info.sType = VK_STRUCTURE_TYPE_VALIDATION_CACHE_CREATE_INFO_EXT;
+                uint32_t initial_word = 0x12345678u;
+                cache_info.initialDataSize = sizeof(initial_word);
+                cache_info.pInitialData = &initial_word;
+                VkValidationCacheEXT cache = VK_NULL_HANDLE;
+                if (vkCreateValidationCacheEXT(VK_NULL_HANDLE, &cache_info, NULL, &cache) != VK_SUCCESS ||
+                    cache == VK_NULL_HANDLE) {{
+                    fprintf(stderr, "local validation cache create failed\\n");
+                    return 4;
+                }}
+                size_t cache_data_size = 99;
+                if (vkGetValidationCacheDataEXT(VK_NULL_HANDLE, cache, &cache_data_size, NULL) != VK_SUCCESS ||
+                    cache_data_size != 0) {{
+                    fprintf(stderr, "validation cache data query was not empty noop\\n");
+                    return 5;
+                }}
+                if (vkMergeValidationCachesEXT(VK_NULL_HANDLE, cache, 1, NULL) == VK_SUCCESS) {{
+                    fprintf(stderr, "validation cache merge accepted missing source array\\n");
+                    return 6;
+                }}
+                if (vkMergeValidationCachesEXT(VK_NULL_HANDLE, cache, 1, &cache) != VK_SUCCESS) {{
+                    fprintf(stderr, "validation cache merge noop failed\\n");
+                    return 7;
+                }}
+
+                const uint32_t shader_words[] = {{ 0x07230203u, 0x00010000u, 0u, 0u }};
+                VkShaderModuleValidationCacheCreateInfoEXT shader_cache;
+                memset(&shader_cache, 0, sizeof(shader_cache));
+                shader_cache.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_VALIDATION_CACHE_CREATE_INFO_EXT;
+                shader_cache.validationCache = cache;
+                VkShaderModuleCreateInfo shader_info;
+                memset(&shader_info, 0, sizeof(shader_info));
+                shader_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+                shader_info.pNext = &shader_cache;
+                shader_info.codeSize = sizeof(shader_words);
+                shader_info.pCode = shader_words;
+                VkShaderModule shader = VK_NULL_HANDLE;
+                if (vkCreateShaderModule(VK_NULL_HANDLE, &shader_info, NULL, &shader) != VK_SUCCESS ||
+                    shader == VK_NULL_HANDLE) {{
+                    fprintf(stderr, "shader module rejected local validation cache pNext\\n");
+                    return 8;
+                }}
+                vkDestroyShaderModule(VK_NULL_HANDLE, shader, NULL);
+
+                VkBaseInStructure unknown;
+                memset(&unknown, 0, sizeof(unknown));
+                unknown.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+                shader_cache.pNext = &unknown;
+                if (vkCreateShaderModule(VK_NULL_HANDLE, &shader_info, NULL, &shader) == VK_SUCCESS) {{
+                    fprintf(stderr, "shader module accepted unknown validation-cache pNext chain\\n");
+                    vkDestroyShaderModule(VK_NULL_HANDLE, shader, NULL);
+                    return 9;
+                }}
+                vkDestroyValidationCacheEXT(VK_NULL_HANDLE, cache, NULL);
+                return 0;
+            #endif
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_subpass_merge_feedback_feature_is_queryable_but_not_enableable(self):
         source = textwrap.dedent(
             f"""
