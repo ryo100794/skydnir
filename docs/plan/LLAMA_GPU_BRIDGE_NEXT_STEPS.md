@@ -33,6 +33,7 @@ Confirmed facts:
 | 2026-07-14 VK_EXT_memory_budget query lane | The container-side Vulkan ICD now advertises `VK_EXT_memory_budget` and accepts it in device creation because the bridge already fills `VkPhysicalDeviceMemoryBudgetPropertiesEXT` through `vkGetPhysicalDeviceMemoryProperties2`. Budgets are conservative heap-size metadata with zero current usage, so this broadens standard query compatibility without changing allocation, residency, executor ABI, shader bytes, llama.cpp, Dockerfile, model, or prompt behavior. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; host tests `tests.test_gpu_abi_contract tests.test_vulkan_icd_feature_chain`; no Android replay semantic change |
 | 2026-07-14 graphics buffer usage identity lane | Graphics V6 buffer resources now carry the original `VkBufferCreateInfo` usage from live buffers or descriptor snapshots through `PdockerGpuVulkanDispatchV5ResourceEntry::usage`, and Android replay uses that API usage as the base usage while OR-ing only the extra replay-required transfer/command bits. This removes a graphics object-identity narrowing point where Skydnir previously transported `usage = 0` and reconstructed buffer usage solely from observed commands/descriptors. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; `app/src/main/cpp/pdocker_gpu_executor.c`; host test `tests.test_gpu_abi_contract`; no llama.cpp/Dockerfile/model/prompt changes |
 | 2026-07-14 compute V5 buffer usage identity lane | Generic compute V5/V5.1 transport now carries the original container-side `PdockerVkBuffer::usage` through `PdockerGpuVulkanDispatchV5ResourceEntry::usage`, materializes descriptor buffers into `VulkanDispatchBinding::api_buffer_usage`, and uses that API usage as the Android strict-object-graph buffer-usage base while OR-ing only replay-required storage/transfer/indirect/texel bits. Dispatch-indirect-only buffers use the same resource usage field when they are appended outside the descriptor table. This removes a compute object-identity narrowing point where usage was reconstructed solely from descriptor observations or left zero for hidden indirect resources. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; `app/src/main/cpp/pdocker_gpu_executor.c`; host test `tests.test_gpu_abi_contract`; no llama.cpp/Dockerfile/model/prompt changes |
+| 2026-07-14 compute V5.2 whole-image layout identity lane | V5.2 image-layout-range transport now emits a whole-image range for non-mixed images when Android replay would otherwise create the temporary image in a different initial layout. Mixed subresource layouts still use the existing per-range table. This closes a layout identity gap where `ImageEntry.initial_layout` carried the container current layout but optimal-tiled Android images were still created as `UNDEFINED` without a matching V5.2 initial layout transition. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; host test `tests.test_gpu_abi_contract`; no llama.cpp/Dockerfile/model/prompt changes |
 | 2026-07-14 dynamic-rendering attachment-location identity lane | `VkRenderingAttachmentLocationInfo` is now accepted when it is a true identity/no-op mapping for the active dynamic-rendering color attachments. Non-identity remaps, count mismatches, missing location arrays, and `VkRenderingInputAttachmentIndexInfo` local-read payloads still fail closed because `dynamicRenderingLocalRead` is not advertised. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; `tests.test_gpu_abi_contract`; `tests.test_vulkan_icd_feature_chain`; glibc payload build `scripts/build-gpu-shim.sh`; no llama.cpp/Dockerfile/model/prompt changes |
 | 2026-07-14 create-device shape hardening lane | `vkCreateDevice` now fail-closes before feature/queue parsing when `VkDeviceCreateInfo` is null or has the wrong `sType`, and leaves the output device handle null. This prevents malformed parent create-info inputs from bypassing the detailed feature/extension gates. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; `tests.test_gpu_abi_contract`; `tests.test_vulkan_icd_feature_chain`; glibc payload build `scripts/build-gpu-shim.sh`; no llama.cpp/Dockerfile/model/prompt changes |
 | 2026-07-11 strict transport identity evidence gate | Strict pass-through evidence is now separated from diagnostic/compatibility Vulkan execution. The executor emits `strict_transport_identity_eligible` plus a reason and requires source/effective/received SPIR-V identity, unchanged shader bytes through pipeline creation, and no shader/pipeline reconstruction knobs before a run can be promoted as no-reconstruction pass-through evidence. The artifact verifier now treats an ineligible strict-transport record as diagnostic-only. | `app/src/main/cpp/pdocker_gpu_executor.c`; `scripts/verify-llama-gpu-artifact.py`; host test `tests.test_gpu_abi_contract`; native build `scripts/build-native-android-ndk.sh`; no llama.cpp/Dockerfile/model/prompt changes |
@@ -2517,6 +2518,22 @@ extension, accepts it in device extension validation, and maps
 the Vulkan 1.2 core entry point.  This keeps reset range validation centralized
 and does not add executor ABI, Android replay, llama.cpp, Dockerfile, model,
 prompt, SPIR-V, or shader changes.
+
+### 2026-07-14 Vulkan compute V5.2 whole-image layout identity lane
+
+V5/V5.1 image entries already carry the container-side current image layout in
+the legacy `initial_layout` field, but Android replay must create most
+optimal-tiled temporary images with `VK_IMAGE_LAYOUT_UNDEFINED`.  V5.2
+layout-range transport now emits a whole-image range for non-mixed images when
+that replay creation layout differs from the container current layout.  The
+executor's existing V5.2 range materializer then records the initial transition
+through the same generic image-layout-range path used for mixed subresource
+layouts.
+
+This is generic Vulkan image-state identity work.  It does not alter llama.cpp,
+Dockerfiles, prompts, model files, SPIR-V bytes, shader hashes, or shader policy.
+Exact source/destination stage/access mask identity remains a later append-only
+barrier-table lane.
 
 ### 2026-07-14 Vulkan compute V5 buffer-usage identity lane
 

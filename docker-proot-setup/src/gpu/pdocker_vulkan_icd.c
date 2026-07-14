@@ -6605,6 +6605,18 @@ static bool pdocker_vk_image_layout_value_valid_for_transport(
     }
 }
 
+static VkImageAspectFlags image_format_full_aspect_mask(VkFormat format);
+
+static VkImageLayout v5_executor_create_initial_layout_for_image(
+        const PdockerVkImage *image) {
+    if (!image) return VK_IMAGE_LAYOUT_UNDEFINED;
+    if (image->tiling == VK_IMAGE_TILING_LINEAR &&
+        image->current_layout == VK_IMAGE_LAYOUT_PREINITIALIZED) {
+        return VK_IMAGE_LAYOUT_PREINITIALIZED;
+    }
+    return VK_IMAGE_LAYOUT_UNDEFINED;
+}
+
 static int collect_v5_image_layout_range_entries(
         PdockerGpuVulkanDispatchV52ImageLayoutRangeEntry *range_entries,
         size_t *range_count,
@@ -6614,7 +6626,32 @@ static int collect_v5_image_layout_range_entries(
     *range_count = 0;
     for (size_t image_index = 0; image_index < image_count; ++image_index) {
         const PdockerVkImage *image = image_objects[image_index];
-        if (!image || !image->layout_mixed) continue;
+        if (!image) continue;
+        if (!image->layout_mixed) {
+            const VkImageLayout executor_initial =
+                v5_executor_create_initial_layout_for_image(image);
+            if (image->current_layout == executor_initial) continue;
+            const VkImageAspectFlags full_aspects =
+                image_format_full_aspect_mask(image->format);
+            if (!pdocker_vk_image_aspect_mask_valid_for_format(image->format, full_aspects)) {
+                return -ERANGE;
+            }
+            if (*range_count >= PDOCKER_GPU_VULKAN_DISPATCH_V52_MAX_IMAGE_LAYOUT_RANGES) {
+                return -E2BIG;
+            }
+            PdockerGpuVulkanDispatchV52ImageLayoutRangeEntry *dst = &range_entries[(*range_count)++];
+            memset(dst, 0, sizeof(*dst));
+            dst->image_index = (uint32_t)image_index;
+            dst->aspect_mask = full_aspects;
+            dst->base_mip_level = 0;
+            dst->level_count = image->mip_levels;
+            dst->base_array_layer = 0;
+            dst->layer_count = image->array_layers;
+            dst->layout = (uint32_t)image->current_layout;
+            dst->reserved0 = 0;
+            dst->layout_generation = image->layout_generation;
+            continue;
+        }
         if (image->layout_range_overflow || image->layout_range_count == 0) {
             if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
                 fprintf(stderr,

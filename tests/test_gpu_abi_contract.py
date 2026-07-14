@@ -5123,6 +5123,28 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertNotIn("return -EOPNOTSUPP;", reject_window)
         self.assertNotIn("mixed subresource layouts require per-subresource layout ABI", sender)
 
+    def test_vulkan_dispatch_v5_2_icd_transports_whole_image_layout_for_non_mixed_images(self):
+        icd = VULKAN_ICD.read_text()
+        collector = c_function_body(icd, "collect_v5_image_layout_range_entries")
+        self.assertIn("v5_executor_create_initial_layout_for_image", icd)
+        helper = c_function_body(icd, "v5_executor_create_initial_layout_for_image")
+        self.assertIn("image->tiling == VK_IMAGE_TILING_LINEAR", helper)
+        self.assertIn("image->current_layout == VK_IMAGE_LAYOUT_PREINITIALIZED", helper)
+        self.assertIn("return VK_IMAGE_LAYOUT_UNDEFINED;", helper)
+        self.assertIn("if (!image->layout_mixed)", collector)
+        self.assertIn("const VkImageLayout executor_initial =", collector)
+        self.assertIn("if (image->current_layout == executor_initial) continue;", collector)
+        self.assertIn("image_format_full_aspect_mask(image->format)", collector)
+        self.assertIn("pdocker_vk_image_aspect_mask_valid_for_format(image->format, full_aspects)", collector)
+        self.assertIn("dst->aspect_mask = full_aspects;", collector)
+        self.assertIn("dst->base_mip_level = 0;", collector)
+        self.assertIn("dst->level_count = image->mip_levels;", collector)
+        self.assertIn("dst->base_array_layer = 0;", collector)
+        self.assertIn("dst->layer_count = image->array_layers;", collector)
+        self.assertIn("dst->layout = (uint32_t)image->current_layout;", collector)
+        self.assertIn("dst->layout_generation = image->layout_generation;", collector)
+        self.assertLess(collector.index("if (!image->layout_mixed)"), collector.index("image->layout_range_overflow"))
+
     def test_vulkan_dispatch_v5_2_icd_gates_layout_ranges_on_executor_capability(self):
         icd = VULKAN_ICD.read_text()
         sender = c_function_body(icd, "send_generic_vulkan_dispatch_v5_1_op")
