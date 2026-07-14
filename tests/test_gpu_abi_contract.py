@@ -1122,15 +1122,16 @@ class GpuAbiContractTest(unittest.TestCase):
     def test_vulkan_icd_exposes_dynamic_rendering_and_graphics_fail_closed_scaffold(self):
         icd = VULKAN_ICD.read_text()
         self.assertIn("VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME", icd)
-        self.assertIn("ADD_DEVICE_EXTENSION(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME", icd)
-        self.assertIn("VK_KHR_LOAD_STORE_OP_NONE_EXTENSION_NAME", icd)
-        self.assertIn("VK_EXT_LOAD_STORE_OP_NONE_EXTENSION_NAME", icd)
-        self.assertIn("ADD_DEVICE_EXTENSION(VK_KHR_LOAD_STORE_OP_NONE_EXTENSION_NAME", icd)
-        self.assertIn("ADD_DEVICE_EXTENSION(VK_EXT_LOAD_STORE_OP_NONE_EXTENSION_NAME", icd)
-        self.assertIn("advertised_load_store_op_none()", icd)
-        self.assertIn("strcmp(name, VK_KHR_LOAD_STORE_OP_NONE_EXTENSION_NAME) == 0", icd)
-        self.assertIn("strcmp(name, VK_EXT_LOAD_STORE_OP_NONE_EXTENSION_NAME) == 0", icd)
-        self.assertIn("VkExtensionProperties available[32];", icd)
+        collector_body = c_function_body(icd, "collect_advertised_device_extensions")
+        self.assertIn("ADD_DEVICE_EXTENSION(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME", collector_body)
+        self.assertIn("VK_KHR_LOAD_STORE_OP_NONE_EXTENSION_NAME", collector_body)
+        self.assertIn("VK_EXT_LOAD_STORE_OP_NONE_EXTENSION_NAME", collector_body)
+        self.assertIn("ADD_DEVICE_EXTENSION(VK_KHR_LOAD_STORE_OP_NONE_EXTENSION_NAME", collector_body)
+        self.assertIn("ADD_DEVICE_EXTENSION(VK_EXT_LOAD_STORE_OP_NONE_EXTENSION_NAME", collector_body)
+        self.assertIn("advertised_load_store_op_none()", collector_body)
+        validation_body = c_function_body(icd, "device_extension_advertised_name")
+        self.assertIn("collect_advertised_device_extensions(", validation_body)
+        self.assertIn("VkExtensionProperties available[PDOCKER_VK_MAX_DEVICE_EXTENSIONS];", validation_body)
         self.assertIn("VkPhysicalDeviceDynamicRenderingFeatures", icd)
         self.assertIn("p->dynamicRendering = advertised_dynamic_rendering();", icd)
         for name in [
@@ -1543,7 +1544,7 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, icd)
 
-        device_extension_body = c_function_body(icd, "vkEnumerateDeviceExtensionProperties")
+        collector_body = c_function_body(icd, "collect_advertised_device_extensions")
         for marker in [
             "VK_KHR_SWAPCHAIN_EXTENSION_NAME",
             "VK_KHR_SWAPCHAIN_SPEC_VERSION",
@@ -1552,19 +1553,20 @@ class GpuAbiContractTest(unittest.TestCase):
             "VK_KHR_DEDICATED_ALLOCATION_EXTENSION_NAME",
             "VK_EXT_TOOLING_INFO_EXTENSION_NAME",
             "ADD_DEVICE_EXTENSION",
+            "write_extension_property(properties, count, (name), (version));",
+            "count++;",
         ]:
-            self.assertIn(marker, device_extension_body)
+            self.assertIn(marker, collector_body)
+
+        device_extension_body = c_function_body(icd, "vkEnumerateDeviceExtensionProperties")
+        self.assertIn("collect_advertised_device_extensions(", device_extension_body)
+        self.assertIn("copy_extension_properties(available, available_count, pPropertyCount, pProperties);", device_extension_body)
+        self.assertNotIn("ADD_DEVICE_EXTENSION", device_extension_body)
 
         device_validation_body = c_function_body(icd, "device_extension_advertised_name")
-        self.assertIn("VK_KHR_SWAPCHAIN_EXTENSION_NAME", device_validation_body)
-        self.assertIn("VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME", device_validation_body)
-        self.assertIn("VK_KHR_BIND_MEMORY_2_EXTENSION_NAME", device_validation_body)
-        self.assertIn("VK_KHR_DEDICATED_ALLOCATION_EXTENSION_NAME", device_validation_body)
-        self.assertIn("VK_EXT_TOOLING_INFO_EXTENSION_NAME", device_validation_body)
-        self.assertRegex(
-            device_validation_body,
-            r"VK_KHR_SWAPCHAIN_EXTENSION_NAME[\s\S]{0,240}return\s+(?:true|VK_TRUE|advertised_[A-Za-z0-9_]+\(\))",
-        )
+        self.assertIn("collect_advertised_device_extensions(", device_validation_body)
+        self.assertIn("strcmp(name, available[i].extensionName) == 0", device_validation_body)
+        self.assertNotIn("VK_KHR_SWAPCHAIN_EXTENSION_NAME", device_validation_body)
         self.assertIn(
             "validate_device_extensions(pCreateInfo)",
             c_function_body(icd, "vkCreateDevice"),
@@ -3224,11 +3226,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "mask |= PDOCKER_VK_FEATURE_INDEX_TYPE_UINT8",
         ]:
             self.assertIn(marker, icd)
-        extension_body = icd.split("vkEnumerateDeviceExtensionProperties", 1)[1].split(
-            "#undef ADD_DEVICE_EXTENSION", 1
-        )[0]
-        self.assertIn("VK_EXT_INDEX_TYPE_UINT8_EXTENSION_NAME", extension_body)
-        self.assertIn("caps->ext_index_type_uint8", extension_body)
+        collector_body = c_function_body(icd, "collect_advertised_device_extensions")
+        self.assertIn("VK_EXT_INDEX_TYPE_UINT8_EXTENSION_NAME", collector_body)
+        self.assertIn("caps->ext_index_type_uint8", collector_body)
 
     def test_vulkan_graphics_v6_executor_materializes_vertex_buffers_before_command_record(self):
         executor = GPU_EXECUTOR.read_text()
@@ -9239,6 +9239,7 @@ class GpuAbiContractTest(unittest.TestCase):
     def test_vulkan_khr_memory_trio_is_advertised_and_aliases_are_public(self):
         icd = VULKAN_ICD.read_text()
         enum_body = c_function_body(icd, "vkEnumerateDeviceExtensionProperties")
+        collector_body = c_function_body(icd, "collect_advertised_device_extensions")
         validation_body = c_function_body(icd, "device_extension_advertised_name")
         hidden_body = c_function_body(icd, "proc_address_hidden_by_advertisement")
         proc_body = icd.split("static PFN_vkVoidFunction proc_address", 1)[1].split(
@@ -9249,8 +9250,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "VK_KHR_BIND_MEMORY_2_EXTENSION_NAME",
             "VK_KHR_DEDICATED_ALLOCATION_EXTENSION_NAME",
         ]:
-            self.assertIn(marker, enum_body)
-            self.assertIn(marker, validation_body)
+            self.assertIn(marker, collector_body)
+        self.assertIn("collect_advertised_device_extensions(", enum_body)
+        self.assertIn("collect_advertised_device_extensions(", validation_body)
         for hidden in [
             '"vkGetBufferMemoryRequirements2KHR"',
             '"vkGetImageMemoryRequirements2KHR"',
@@ -19503,25 +19505,27 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("p->extendedDynamicState2 = advertised_extended_dynamic_state2();", pnext_body)
         self.assertIn("p->extendedDynamicState2LogicOp = advertised_extended_dynamic_state2_logic_op();", pnext_body)
         self.assertIn("p->extendedDynamicState2PatchControlPoints = advertised_extended_dynamic_state2_patch_control_points();", pnext_body)
-        extension_body = icd.split("vkEnumerateDeviceExtensionProperties", 1)[1].split(
-            "#undef ADD_DEVICE_EXTENSION", 1
-        )[0]
-        self.assertIn("caps ? caps->ext_16bit_storage : advertised_storage16()", extension_body)
-        self.assertIn("caps ? caps->ext_8bit_storage : advertised_storage8()", extension_body)
-        self.assertIn("caps ? caps->ext_shader_float16_int8 : advertised_storage8()", extension_body)
-        self.assertIn("advertised_storage_buffer_storage_class()", extension_body)
-        self.assertIn("advertised_timeline_semaphore()", extension_body)
-        self.assertIn("advertised_synchronization2()", extension_body)
-        self.assertIn("advertised_dynamic_rendering()", extension_body)
-        self.assertIn("advertised_load_store_op_none()", extension_body)
-        self.assertIn("VK_KHR_LOAD_STORE_OP_NONE_EXTENSION_NAME", extension_body)
-        self.assertIn("VK_EXT_LOAD_STORE_OP_NONE_EXTENSION_NAME", extension_body)
-        self.assertIn("advertised_extended_dynamic_state()", extension_body)
-        self.assertIn("advertised_extended_dynamic_state2()", extension_body)
-        self.assertIn("VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME", extension_body)
-        self.assertIn("VK_AMD_DRAW_INDIRECT_COUNT_EXTENSION_NAME", extension_body)
-        self.assertIn("advertised_draw_indirect_count_khr()", extension_body)
-        self.assertIn("advertised_draw_indirect_count_amd()", extension_body)
+        collector_body = c_function_body(icd, "collect_advertised_device_extensions")
+        enum_body = c_function_body(icd, "vkEnumerateDeviceExtensionProperties")
+        validation_body = c_function_body(icd, "device_extension_advertised_name")
+        self.assertIn("caps ? caps->ext_16bit_storage : advertised_storage16()", collector_body)
+        self.assertIn("caps ? caps->ext_8bit_storage : advertised_storage8()", collector_body)
+        self.assertIn("caps ? caps->ext_shader_float16_int8 : advertised_storage8()", collector_body)
+        self.assertIn("advertised_storage_buffer_storage_class()", collector_body)
+        self.assertIn("advertised_timeline_semaphore()", collector_body)
+        self.assertIn("advertised_synchronization2()", collector_body)
+        self.assertIn("advertised_dynamic_rendering()", collector_body)
+        self.assertIn("advertised_load_store_op_none()", collector_body)
+        self.assertIn("VK_KHR_LOAD_STORE_OP_NONE_EXTENSION_NAME", collector_body)
+        self.assertIn("VK_EXT_LOAD_STORE_OP_NONE_EXTENSION_NAME", collector_body)
+        self.assertIn("advertised_extended_dynamic_state()", collector_body)
+        self.assertIn("advertised_extended_dynamic_state2()", collector_body)
+        self.assertIn("VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME", collector_body)
+        self.assertIn("VK_AMD_DRAW_INDIRECT_COUNT_EXTENSION_NAME", collector_body)
+        self.assertIn("advertised_draw_indirect_count_khr()", collector_body)
+        self.assertIn("advertised_draw_indirect_count_amd()", collector_body)
+        self.assertIn("collect_advertised_device_extensions(", enum_body)
+        self.assertIn("collect_advertised_device_extensions(", validation_body)
         self.assertIn("VK_KHR_draw_indirect_count", icd)
         self.assertIn("VK_AMD_draw_indirect_count", icd)
         self.assertIn("return (caps && caps->ext_storage_buffer_storage_class) ? VK_TRUE : VK_FALSE;", icd)
@@ -19574,7 +19578,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("mask |= PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT;", icd)
         self.assertIn("vkCmdDrawIndirectCountKHR", proc_gate_body)
         self.assertIn("vkCmdDrawIndexedIndirectCountKHR", proc_gate_body)
-        self.assertNotIn("!caps || caps->ext_storage_buffer_storage_class", extension_body)
+        self.assertNotIn("!caps || caps->ext_storage_buffer_storage_class", collector_body)
         self.assertIn("PDOCKER_VULKAN_ICD_DEBUG", icd)
 
     def test_llama_gpu_dispatch_lifecycle_logs_are_recorded(self):

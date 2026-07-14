@@ -1524,7 +1524,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-    def test_advertised_feature_extensions_are_enumerated_together(self):
+    def test_device_extension_collector_drives_enumeration_and_validation(self):
         source = textwrap.dedent(
             f"""
             #include <stdint.h>
@@ -1537,15 +1537,29 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 if (vkEnumerateDeviceExtensionProperties(NULL, NULL, &count, NULL) != VK_SUCCESS) {{
                     return 2;
                 }}
-                VkExtensionProperties properties[16];
-                memset(properties, 0, sizeof(properties));
-                uint32_t capacity = 16;
-                if (vkEnumerateDeviceExtensionProperties(NULL, NULL, &capacity, properties) != VK_SUCCESS) {{
+                if (count == 0 || count > PDOCKER_VK_MAX_DEVICE_EXTENSIONS) {{
+                    fprintf(stderr, "unexpected extension count %u\\n", count);
                     return 3;
                 }}
+                VkExtensionProperties properties[PDOCKER_VK_MAX_DEVICE_EXTENSIONS];
+                memset(properties, 0, sizeof(properties));
+                uint32_t capacity = PDOCKER_VK_MAX_DEVICE_EXTENSIONS;
+                if (vkEnumerateDeviceExtensionProperties(NULL, NULL, &capacity, properties) != VK_SUCCESS) {{
+                    return 4;
+                }}
+                if (capacity != count) {{
+                    fprintf(stderr, "enumerated capacity %u != count %u\\n", capacity, count);
+                    return 5;
+                }}
+                const char *enabled[PDOCKER_VK_MAX_DEVICE_EXTENSIONS];
                 int has_storage8 = 0;
                 int has_float16_int8 = 0;
                 for (uint32_t i = 0; i < capacity; ++i) {{
+                    if (!device_extension_advertised_name(properties[i].extensionName)) {{
+                        fprintf(stderr, "enumerated extension was not accepted: %s\\n", properties[i].extensionName);
+                        return 6;
+                    }}
+                    enabled[i] = properties[i].extensionName;
                     if (strcmp(properties[i].extensionName, VK_KHR_8BIT_STORAGE_EXTENSION_NAME) == 0) {{
                         has_storage8 = 1;
                     }}
@@ -1553,13 +1567,35 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                         has_float16_int8 = 1;
                     }}
                 }}
+                VkDeviceCreateInfo create_info;
+                memset(&create_info, 0, sizeof(create_info));
+                create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                create_info.enabledExtensionCount = capacity;
+                create_info.ppEnabledExtensionNames = enabled;
+                if (validate_device_extensions(&create_info) != VK_SUCCESS) {{
+                    fprintf(stderr, "validate_device_extensions rejected its own enumerated list\\n");
+                    return 7;
+                }}
+                const char *bad_enabled[] = {{ "VK_SKYDNIR_not_advertised_test_extension" }};
+                create_info.enabledExtensionCount = 1;
+                create_info.ppEnabledExtensionNames = bad_enabled;
+                if (validate_device_extensions(&create_info) != VK_ERROR_EXTENSION_NOT_PRESENT) {{
+                    fprintf(stderr, "validate_device_extensions accepted a non-advertised extension\\n");
+                    return 8;
+                }}
+            #ifdef VK_KHR_MAINTENANCE_5_EXTENSION_NAME
+                if (device_extension_advertised_name(VK_KHR_MAINTENANCE_5_EXTENSION_NAME)) {{
+                    fprintf(stderr, "maintenance5 must remain unadvertised for false-only pNext support\\n");
+                    return 9;
+                }}
+            #endif
                 if (!has_storage8 || !has_float16_int8) {{
                     fprintf(stderr,
                             "missing extension storage8=%d float16_int8=%d count=%u\\n",
                             has_storage8,
                             has_float16_int8,
                             capacity);
-                    return 4;
+                    return 10;
                 }}
                 return 0;
             }}

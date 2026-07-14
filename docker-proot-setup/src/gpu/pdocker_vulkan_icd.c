@@ -20040,23 +20040,29 @@ VKAPI_ATTR VkResult VKAPI_CALL vkBindBufferMemory2(
     return VK_SUCCESS;
 }
 
-VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(
-        VkPhysicalDevice physicalDevice,
-        const char *pLayerName,
-        uint32_t *pPropertyCount,
-        VkExtensionProperties *pProperties) {
-    (void)physicalDevice;
-    (void)pLayerName;
-    VkExtensionProperties available[32];
-    uint32_t available_count = 0;
+#define PDOCKER_VK_MAX_DEVICE_EXTENSIONS 64u
+
+static void write_extension_property(
+        VkExtensionProperties *properties,
+        uint32_t index,
+        const char *name,
+        uint32_t version) {
+    if (!properties || !name) return;
+    memset(&properties[index], 0, sizeof(properties[index]));
+    snprintf(properties[index].extensionName,
+             sizeof(properties[index].extensionName), "%s", name);
+    properties[index].specVersion = version;
+}
+
+static uint32_t collect_advertised_device_extensions(
+        VkExtensionProperties *properties,
+        uint32_t capacity) {
+    uint32_t count = 0;
 #define ADD_DEVICE_EXTENSION(name, version) do { \
-        if (available_count < (uint32_t)(sizeof(available) / sizeof(available[0]))) { \
-            memset(&available[available_count], 0, sizeof(available[available_count])); \
-            snprintf(available[available_count].extensionName, \
-                     sizeof(available[available_count].extensionName), "%s", (name)); \
-            available[available_count].specVersion = (version); \
-            available_count++; \
+        if (count < capacity) { \
+            write_extension_property(properties, count, (name), (version)); \
         } \
+        count++; \
     } while (0)
     const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
     if (caps ? caps->ext_16bit_storage : advertised_storage16()) {
@@ -20160,95 +20166,39 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(
 #endif
     ADD_DEVICE_EXTENSION(VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_SWAPCHAIN_SPEC_VERSION);
 #undef ADD_DEVICE_EXTENSION
+    return count;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(
+        VkPhysicalDevice physicalDevice,
+        const char *pLayerName,
+        uint32_t *pPropertyCount,
+        VkExtensionProperties *pProperties) {
+    (void)physicalDevice;
+    (void)pLayerName;
+    VkExtensionProperties available[PDOCKER_VK_MAX_DEVICE_EXTENSIONS];
+    uint32_t available_count = collect_advertised_device_extensions(
+        available,
+        (uint32_t)(sizeof(available) / sizeof(available[0])));
+    if (available_count > (uint32_t)(sizeof(available) / sizeof(available[0]))) {
+        available_count = (uint32_t)(sizeof(available) / sizeof(available[0]));
+    }
     copy_extension_properties(available, available_count, pPropertyCount, pProperties);
     return VK_SUCCESS;
 }
 
 static bool device_extension_advertised_name(const char *name) {
     if (!name) return false;
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
-    if (strcmp(name, VK_KHR_16BIT_STORAGE_EXTENSION_NAME) == 0) {
-        return caps ? caps->ext_16bit_storage : advertised_storage16();
+    VkExtensionProperties available[PDOCKER_VK_MAX_DEVICE_EXTENSIONS];
+    uint32_t available_count = collect_advertised_device_extensions(
+        available,
+        (uint32_t)(sizeof(available) / sizeof(available[0])));
+    if (available_count > (uint32_t)(sizeof(available) / sizeof(available[0]))) {
+        available_count = (uint32_t)(sizeof(available) / sizeof(available[0]));
     }
-    if (strcmp(name, VK_KHR_8BIT_STORAGE_EXTENSION_NAME) == 0) {
-        return caps ? caps->ext_8bit_storage : advertised_storage8();
+    for (uint32_t i = 0; i < available_count; ++i) {
+        if (strcmp(name, available[i].extensionName) == 0) return true;
     }
-    if (strcmp(name, VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME) == 0) {
-        return caps ? caps->ext_shader_float16_int8 : advertised_storage8();
-    }
-    if (strcmp(name, VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_EXTENSION_NAME) == 0) {
-        return advertised_storage_buffer_storage_class();
-    }
-#ifdef VK_KHR_MAINTENANCE_4_EXTENSION_NAME
-    if (strcmp(name, VK_KHR_MAINTENANCE_4_EXTENSION_NAME) == 0) return true;
-#endif
-    if (strcmp(name, VK_KHR_COPY_COMMANDS_2_EXTENSION_NAME) == 0) return true;
-    if (strcmp(name, VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME) == 0) return advertised_synchronization2();
-#ifdef VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME
-    if (strcmp(name, VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME) == 0) return advertised_timeline_semaphore();
-#endif
-    if (strcmp(name, VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME) == 0) return advertised_dynamic_rendering();
-    if (strcmp(name, VK_KHR_LOAD_STORE_OP_NONE_EXTENSION_NAME) == 0) return advertised_load_store_op_none();
-    if (strcmp(name, VK_EXT_LOAD_STORE_OP_NONE_EXTENSION_NAME) == 0) return advertised_load_store_op_none();
-#ifdef VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME
-    if (strcmp(name, VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME) == 0) return true;
-#endif
-#ifdef VK_KHR_BIND_MEMORY_2_EXTENSION_NAME
-    if (strcmp(name, VK_KHR_BIND_MEMORY_2_EXTENSION_NAME) == 0) return true;
-#endif
-#ifdef VK_KHR_DEDICATED_ALLOCATION_EXTENSION_NAME
-    if (strcmp(name, VK_KHR_DEDICATED_ALLOCATION_EXTENSION_NAME) == 0) return true;
-#endif
-#ifdef VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME
-    if (strcmp(name, VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME) == 0) {
-        return advertised_draw_indirect_count_khr();
-    }
-#endif
-#ifdef VK_AMD_DRAW_INDIRECT_COUNT_EXTENSION_NAME
-    if (strcmp(name, VK_AMD_DRAW_INDIRECT_COUNT_EXTENSION_NAME) == 0) {
-        return advertised_draw_indirect_count_amd();
-    }
-#endif
-#ifdef VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME
-    if (strcmp(name, VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME) == 0) {
-        return advertised_extended_dynamic_state();
-    }
-#endif
-#ifdef VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME
-    if (strcmp(name, VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME) == 0) {
-        return advertised_extended_dynamic_state2();
-    }
-#endif
-#ifdef VK_EXT_INDEX_TYPE_UINT8_EXTENSION_NAME
-    if (strcmp(name, VK_EXT_INDEX_TYPE_UINT8_EXTENSION_NAME) == 0) {
-        return caps && caps->ext_index_type_uint8 && caps->index_type_uint8.indexTypeUint8;
-    }
-#endif
-#ifdef VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME
-    if (strcmp(name, VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME) == 0) return true;
-#endif
-#ifdef VK_EXT_MEMORY_BUDGET_EXTENSION_NAME
-    if (strcmp(name, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME) == 0) return true;
-#endif
-#ifdef VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME
-    if (strcmp(name, VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME) == 0) return true;
-#endif
-#ifdef VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME
-    if (strcmp(name, VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME) == 0) return true;
-#endif
-#ifdef VK_EXT_VALIDATION_CACHE_EXTENSION_NAME
-    if (strcmp(name, VK_EXT_VALIDATION_CACHE_EXTENSION_NAME) == 0) return true;
-#endif
-#ifdef VK_EXT_TOOLING_INFO_EXTENSION_NAME
-    if (strcmp(name, VK_EXT_TOOLING_INFO_EXTENSION_NAME) == 0) return true;
-#endif
-#ifdef VK_EXT_DEBUG_MARKER_EXTENSION_NAME
-    if (strcmp(name, VK_EXT_DEBUG_MARKER_EXTENSION_NAME) == 0) return true;
-#endif
-#ifdef VK_EXT_PRIVATE_DATA_EXTENSION_NAME
-    if (strcmp(name, VK_EXT_PRIVATE_DATA_EXTENSION_NAME) == 0) return true;
-#endif
-    if (strcmp(name, VK_KHR_SWAPCHAIN_EXTENSION_NAME) == 0) return true;
     return false;
 }
 
