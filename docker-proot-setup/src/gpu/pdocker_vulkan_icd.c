@@ -18473,8 +18473,9 @@ VKAPI_ATTR void VKAPI_CALL vkGetDeviceImageSubresourceLayout(
     zero_vk_out_struct_preserve_chain(pLayout, sizeof(*pLayout), header);
     if (!pInfo || pInfo->sType != VK_STRUCTURE_TYPE_DEVICE_IMAGE_SUBRESOURCE_INFO ||
         pInfo->pNext || !pInfo->pCreateInfo || !pInfo->pSubresource ||
-        pInfo->pCreateInfo->pNext || pInfo->pSubresource->pNext ||
-        pInfo->pSubresource->sType != VK_STRUCTURE_TYPE_IMAGE_SUBRESOURCE_2) {
+        pInfo->pSubresource->pNext ||
+        pInfo->pSubresource->sType != VK_STRUCTURE_TYPE_IMAGE_SUBRESOURCE_2 ||
+        validate_image_create_pnext_for_transport(pInfo->pCreateInfo) != VK_SUCCESS) {
         return;
     }
     PdockerVkImage image;
@@ -29650,12 +29651,20 @@ static bool query_range_valid(
            queryCount <= pool->query_count - firstQuery;
 }
 
+static bool query_result_flags_supported(VkQueryResultFlags flags) {
+    const VkQueryResultFlags supported = VK_QUERY_RESULT_64_BIT |
+                                         VK_QUERY_RESULT_WAIT_BIT |
+                                         VK_QUERY_RESULT_WITH_AVAILABILITY_BIT |
+                                         VK_QUERY_RESULT_PARTIAL_BIT;
+    return (flags & ~supported) == 0;
+}
+
 static bool query_result_copy_buffer_range(VkQueryResultFlags flags,
                                            uint32_t queryCount,
                                            VkDeviceSize dstOffset,
                                            VkDeviceSize stride,
                                            VkDeviceSize *out_bytes) {
-    if (queryCount == 0 || stride == 0 || !out_bytes) return false;
+    if (!query_result_flags_supported(flags) || queryCount == 0 || stride == 0 || !out_bytes) return false;
     const uint64_t scalar_size = (flags & VK_QUERY_RESULT_64_BIT) ? sizeof(uint64_t) : sizeof(uint32_t);
     const uint64_t item_size = scalar_size + ((flags & VK_QUERY_RESULT_WITH_AVAILABILITY_BIT) ? scalar_size : 0u);
     if (queryCount > 1 && (uint64_t)stride < item_size) return false;
@@ -29819,8 +29828,13 @@ static void record_copy_query_results_command(
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     PdockerVkQueryPool *pool = pdocker_vk_query_pool_from_handle(queryPool);
     PdockerVkBuffer *dst = pdocker_vk_buffer_from_handle(dstBuffer);
+    if (!cmd) return;
+    if (!query_result_flags_supported(flags)) {
+        command_buffer_mark_recording_failed(cmd, "query-result-flags-unsupported");
+        return;
+    }
     VkDeviceSize copy_bytes = 0;
-    if (!cmd || !dst || !query_range_valid(pool, firstQuery, queryCount) ||
+    if (!dst || !query_range_valid(pool, firstQuery, queryCount) ||
         !query_result_copy_buffer_range(flags, queryCount, dstOffset, stride, &copy_bytes) ||
         !validate_buffer_byte_range(dst, dstOffset, copy_bytes)) {
         return;
@@ -30027,6 +30041,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetQueryPoolResults(
     PdockerVkQueryPool *pool = pdocker_vk_query_pool_from_handle(queryPool);
     if (!pData || !query_range_valid(pool, firstQuery, queryCount)) {
         return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    if (!query_result_flags_supported(flags)) {
+        trace_icd_runtime_failure("query-result-flags-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
     }
     bool result64 = (flags & VK_QUERY_RESULT_64_BIT) != 0;
     bool with_availability = (flags & VK_QUERY_RESULT_WITH_AVAILABILITY_BIT) != 0;

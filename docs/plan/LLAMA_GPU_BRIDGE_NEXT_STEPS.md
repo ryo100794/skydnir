@@ -2416,6 +2416,32 @@ This is generic Vulkan API-surface compatibility and does not change executor
 ABI, llama.cpp, Dockerfiles, model files, prompts, SPIR-V bytes, or shader
 policy.
 
+### 2026-07-14 Vulkan query-result flags producer fail-closed lane
+
+Query-result flag validation is now aligned on the producer side before V6.18
+copy-query-result metadata can be recorded.  The ICD accepts only the Vulkan
+result flags already understood by the Android executor
+(`64_BIT`, `WAIT_BIT`, `WITH_AVAILABILITY_BIT`, and `PARTIAL_BIT`).  Unknown or
+future result flags now fail closed: `vkGetQueryPoolResults` returns
+`VK_ERROR_FEATURE_NOT_PRESENT`, and `vkCmdCopyQueryPoolResults` marks the command
+buffer as recording-failed instead of silently sizing and transporting a result
+layout the executor cannot replay.  This closes a generic Vulkan API-surface
+parity gap without changing executor ABI, llama.cpp, Dockerfiles, model files,
+prompts, SPIR-V bytes, or shader policy.
+
+### 2026-07-14 Vulkan device-image subresource pNext parity lane
+
+`vkGetDeviceImageSubresourceLayout` now reuses the same image-create pNext
+validation already used by `vkCreateImage` instead of rejecting every
+`VkImageCreateInfo::pNext` at query time.  Safe no-op chains such as zero-handle
+external-memory image metadata, matching stencil usage, and format lists that
+contain only the image format can therefore query the same tight subresource
+layout shape that would be accepted for image creation.  Unsupported image
+create pNext chains still leave the output layout zeroed and fail closed by
+not fabricating a layout.  This is maintenance5 query-surface compatibility
+only; it does not change executor ABI, llama.cpp, Dockerfiles, model files,
+prompts, SPIR-V bytes, or shader policy.
+
 ### 2026-07-13 Vulkan image/view shape compatibility lane
 
 Image creation and image-view replay now fail-close on generic Vulkan shape
