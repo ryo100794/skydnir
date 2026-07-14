@@ -16276,6 +16276,14 @@ static void fill_pnext_features(void *pNext) {
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
                 break;
             }
+#ifdef VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES_EXT: {
+                VkPhysicalDeviceBufferDeviceAddressFeaturesEXT *p =
+                    (VkPhysicalDeviceBufferDeviceAddressFeaturesEXT *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                break;
+            }
+#endif
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES: {
                 VkPhysicalDeviceSamplerYcbcrConversionFeatures *p = (VkPhysicalDeviceSamplerYcbcrConversionFeatures *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
@@ -16889,6 +16897,15 @@ static VkResult validate_device_feature_requests(const VkDeviceCreateInfo *pCrea
                 if (!supported) unsupported_feature_name = "bufferDeviceAddress";
                 break;
             }
+#ifdef VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES_EXT: {
+                const VkPhysicalDeviceBufferDeviceAddressFeaturesEXT *p =
+                    (const VkPhysicalDeviceBufferDeviceAddressFeaturesEXT *)node;
+                supported = !p->bufferDeviceAddress && !p->bufferDeviceAddressCaptureReplay && !p->bufferDeviceAddressMultiDevice;
+                if (!supported) unsupported_feature_name = "bufferDeviceAddressEXT";
+                break;
+            }
+#endif
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES: {
                 const VkPhysicalDeviceSamplerYcbcrConversionFeatures *p = (const VkPhysicalDeviceSamplerYcbcrConversionFeatures *)node;
                 supported = !p->samplerYcbcrConversion;
@@ -17170,6 +17187,14 @@ static uint64_t feature_mask_from_pnext_chain(const void *pNext) {
                 if (p->descriptorBindingVariableDescriptorCount) mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_VARIABLE_COUNT;
                 break;
             }
+#ifdef VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES_EXT: {
+                const VkPhysicalDeviceBufferDeviceAddressFeaturesEXT *p =
+                    (const VkPhysicalDeviceBufferDeviceAddressFeaturesEXT *)node;
+                if (p->bufferDeviceAddress) mask |= PDOCKER_VK_FEATURE_BUFFER_DEVICE_ADDRESS;
+                break;
+            }
+#endif
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES: {
                 const VkPhysicalDeviceMaintenance4Features *p = (const VkPhysicalDeviceMaintenance4Features *)node;
                 if (p->maintenance4) mask |= PDOCKER_VK_FEATURE_MAINTENANCE_4;
@@ -20180,6 +20205,9 @@ static uint32_t collect_advertised_device_extensions(
 #endif
 #ifdef VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME
     ADD_DEVICE_EXTENSION(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME, VK_KHR_BUFFER_DEVICE_ADDRESS_SPEC_VERSION);
+#endif
+#ifdef VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME
+    ADD_DEVICE_EXTENSION(VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME, VK_EXT_BUFFER_DEVICE_ADDRESS_SPEC_VERSION);
 #endif
     ADD_DEVICE_EXTENSION(VK_KHR_COPY_COMMANDS_2_EXTENSION_NAME, VK_KHR_COPY_COMMANDS_2_SPEC_VERSION);
     if (advertised_synchronization2()) {
@@ -31867,7 +31895,6 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance instan
 static bool proc_address_hidden_by_advertisement(const char *pName) {
     if (!pName) return true;
     if (strcmp(pName, "vkGetImageSubresourceLayout2EXT") == 0 ||
-        strcmp(pName, "vkGetBufferDeviceAddressEXT") == 0 ||
         strcmp(pName, "vkCreateSamplerYcbcrConversionKHR") == 0 ||
         strcmp(pName, "vkDestroySamplerYcbcrConversionKHR") == 0) {
         return true;

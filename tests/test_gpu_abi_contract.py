@@ -7720,7 +7720,27 @@ class GpuAbiContractTest(unittest.TestCase):
             "vkGetDeviceMemoryOpaqueCaptureAddressKHR",
         ]:
             self.assertNotIn(alias, hidden_body)
-        self.assertIn('strcmp(pName, "vkGetBufferDeviceAddressEXT") == 0', hidden_body)
+        self.assertNotIn('strcmp(pName, "vkGetBufferDeviceAddressEXT") == 0', hidden_body)
+
+    def test_vulkan_buffer_device_address_ext_is_advertised_false_only(self):
+        icd = VULKAN_ICD.read_text()
+        self.assertIn("VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME", icd)
+        collector_body = c_function_body(icd, "collect_advertised_device_extensions")
+        self.assertIn("ADD_DEVICE_EXTENSION(VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME", collector_body)
+
+        features_body = c_function_body(icd, "fill_pnext_features")
+        self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES_EXT", features_body)
+        self.assertIn("VkPhysicalDeviceBufferDeviceAddressFeaturesEXT", features_body)
+        validate_body = c_function_body(icd, "validate_device_feature_requests")
+        self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES_EXT", validate_body)
+        self.assertIn('unsupported_feature_name = "bufferDeviceAddressEXT"', validate_body)
+
+        mask_body = c_function_body(icd, "feature_mask_from_pnext_chain")
+        self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES_EXT", mask_body)
+        self.assertIn("p->bufferDeviceAddress) mask |= PDOCKER_VK_FEATURE_BUFFER_DEVICE_ADDRESS", mask_body)
+
+        hidden_body = c_function_body(icd, "proc_address_hidden_by_advertisement")
+        self.assertNotIn('strcmp(pName, "vkGetBufferDeviceAddressEXT") == 0', hidden_body)
 
     def test_vulkan_maintenance5_is_advertised_with_false_only_feature_bit(self):
         icd = VULKAN_ICD.read_text()
@@ -9589,10 +9609,10 @@ class GpuAbiContractTest(unittest.TestCase):
             "vkGetDeviceMemoryOpaqueCaptureAddressKHR",
         ]:
             self.assertNotIn(alias, hidden_body)
+        self.assertNotIn("vkGetBufferDeviceAddressEXT", hidden_body)
         for alias in [
             "vkCreateSamplerYcbcrConversionKHR",
             "vkDestroySamplerYcbcrConversionKHR",
-            "vkGetBufferDeviceAddressEXT",
         ]:
             self.assertIn(alias, hidden_body)
 
