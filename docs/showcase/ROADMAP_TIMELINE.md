@@ -28,7 +28,7 @@ Current TODO counters:
 
 ## Timeline
 
-### Now: 2026-07-13 to 2026-07-16
+### Now: 2026-07-14 to 2026-07-17
 
 Keep the UI compose path truthful and visible while closing regressions that block demos.
 
@@ -37,7 +37,7 @@ Keep the UI compose path truthful and visible while closing regressions that blo
 - Cross-project incomplete implementation audit: `docs/plan/INCOMPLETE_IMPLEMENTATION_AUDIT_20260513.md` now tracks unfinished, partial, temporary, or insufficiently verified work across...
 - Execution timeline and delegated task control: `docs/plan/EXECUTION_TIMELINE_20260513.md` converts the audit into staged gates, current agent assignments, merge checklists, and...
 
-### Next: 2026-07-17 to 2026-07-23
+### Next: 2026-07-18 to 2026-07-24
 
 Turn the remaining high-value TODOs into repeatable device checks and public artifacts.
 
@@ -45,7 +45,7 @@ Turn the remaining high-value TODOs into repeatable device checks and public art
 - Mobile-resource residency constraints for MoE: keep a concise design note with device RAM/headroom, thermal, storage bandwidth, SAF/app-private backing, cache eviction, and correctness...
 - [#8](https://github.com/ryo100794/skydnir/issues/8) Reproducible release/F-Droid readiness: turn the local build wrapper into a broader pinned CI/release process with source-built native...
 
-### Then: 2026-07-24 to 2026-08-03
+### Then: 2026-07-25 to 2026-08-04
 
 Use benchmark evidence to harden compatibility and publish tester-ready releases.
 

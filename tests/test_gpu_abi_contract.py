@@ -9162,9 +9162,16 @@ class GpuAbiContractTest(unittest.TestCase):
         body = icd.split("VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceMemoryProperties2", 1)[1].split(
             "VKAPI_ATTR VkResult VKAPI_CALL vkCreateBuffer", 1
         )[0]
+        helper_body = c_function_body(icd, "fill_memory_properties2_pnext")
         self.assertIn("PdockerVkStructHeader header = read_vk_struct_header(pMemoryProperties);", body)
+        self.assertIn("void *pnext = (void *)header.pNext;", body)
         self.assertIn("zero_vk_out_struct_preserve_chain(pMemoryProperties, sizeof(*pMemoryProperties), header);", body)
         self.assertIn("vkGetPhysicalDeviceMemoryProperties(physicalDevice, &pMemoryProperties->memoryProperties);", body)
+        self.assertIn("fill_memory_properties2_pnext(pnext, &pMemoryProperties->memoryProperties);", body)
+        self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT", helper_body)
+        self.assertIn("zero_vk_out_struct_preserve_chain(budget, sizeof(*budget), header);", helper_body)
+        self.assertIn("budget->heapBudget[i] = memoryProperties->memoryHeaps[i].size;", helper_body)
+        self.assertIn("budget->heapUsage[i] = 0;", helper_body)
 
 
     def test_vulkan_memory_requirements2_outputs_are_fully_initialized(self):
@@ -9463,7 +9470,6 @@ class GpuAbiContractTest(unittest.TestCase):
             "vkCreatePipelineLayout",
             "vkCreateDescriptorPool",
             "vkAllocateDescriptorSets",
-            "vkCreateShaderModule",
             "vkCreateQueryPool",
         ]:
             self.assertIn(f'unsupported_create_info_pnext_result("{api}"', icd)
@@ -9568,6 +9574,13 @@ class GpuAbiContractTest(unittest.TestCase):
         shader_module_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateShaderModule", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkDestroyShaderModule", 1
         )[0]
+        shader_module_pnext_body = c_function_body(icd, "validate_shader_module_create_pnext")
+        self.assertIn("validate_shader_module_create_pnext(pCreateInfo->pNext)", shader_module_body)
+        self.assertIn("if (pnext_rc != VK_SUCCESS) return pnext_rc;", shader_module_body)
+        self.assertIn("VK_STRUCTURE_TYPE_SHADER_MODULE_VALIDATION_CACHE_CREATE_INFO_EXT", shader_module_pnext_body)
+        self.assertIn("cache_info->validationCache != VK_NULL_HANDLE", shader_module_pnext_body)
+        self.assertIn("shader-module-validation-cache-unsupported", shader_module_pnext_body)
+        self.assertIn('unsupported_create_info_pnext_result("vkCreateShaderModule", node)', shader_module_pnext_body)
         self.assertIn("pCreateInfo->codeSize % sizeof(uint32_t)", shader_module_body)
         self.assertIn("!pCreateInfo->pCode", shader_module_body)
         query_pool_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateQueryPool", 1)[1].split(

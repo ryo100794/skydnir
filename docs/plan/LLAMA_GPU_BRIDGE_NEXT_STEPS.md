@@ -2390,6 +2390,32 @@ the real usage.  Zero, duplicate, or out-of-range usage2 payloads remain
 fail-closed, and buffer-view usage2 still accepts only the no-op texel-usage
 case until the transport carries a distinct per-view usage field.
 
+### 2026-07-13 Vulkan memory-properties2 budget output pNext lane
+
+`vkGetPhysicalDeviceMemoryProperties2` now walks known output pNext structs
+after filling the legacy memory-property payload.  When callers attach
+`VkPhysicalDeviceMemoryBudgetPropertiesEXT`, Skydnir zero-preserves the output
+struct, reports each advertised heap budget as the corresponding heap size, and
+reports heap usage as zero.  The bridge still does not advertise
+`VK_EXT_memory_budget` or promise driver-accurate runtime budget telemetry; this
+only prevents known output pNext data from being left stale or undefined in the
+compatibility query path.  Unknown memory-properties2 output structs remain
+ignored rather than fabricated.  This does not change executor ABI, llama.cpp,
+Dockerfiles, model files, prompts, SPIR-V bytes, or shader policy.
+
+### 2026-07-13 Vulkan shader-module validation-cache no-op pNext lane
+
+`vkCreateShaderModule` now classifies `VkShaderModuleValidationCacheCreateInfoEXT`
+explicitly instead of rejecting the whole shader-module pNext chain.  A null
+`validationCache` is accepted as execution-neutral metadata, while a non-null
+validation-cache handle still fails closed with `VK_ERROR_FEATURE_NOT_PRESENT`
+because Skydnir does not advertise `VK_EXT_validation_cache`, does not create
+validation-cache objects, and does not replay driver validation-cache state
+through the bridge.  Unknown shader-module pNext structs remain fail-closed.
+This is generic Vulkan API-surface compatibility and does not change executor
+ABI, llama.cpp, Dockerfiles, model files, prompts, SPIR-V bytes, or shader
+policy.
+
 ### 2026-07-13 Vulkan image/view shape compatibility lane
 
 Image creation and image-view replay now fail-close on generic Vulkan shape

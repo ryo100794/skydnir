@@ -17289,13 +17289,44 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceMemoryProperties(
     pMemoryProperties->memoryHeaps[1].flags = 0;
 }
 
+static void fill_memory_properties2_pnext(
+        void *pNext,
+        const VkPhysicalDeviceMemoryProperties *memoryProperties) {
+    for (void *node = pNext; node;) {
+        PdockerVkStructHeader header = read_vk_struct_header(node);
+        switch (header.sType) {
+#if defined(VK_EXT_memory_budget)
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT: {
+                VkPhysicalDeviceMemoryBudgetPropertiesEXT *budget =
+                    (VkPhysicalDeviceMemoryBudgetPropertiesEXT *)node;
+                zero_vk_out_struct_preserve_chain(budget, sizeof(*budget), header);
+                if (memoryProperties) {
+                    uint32_t heap_count = memoryProperties->memoryHeapCount;
+                    if (heap_count > VK_MAX_MEMORY_HEAPS) heap_count = VK_MAX_MEMORY_HEAPS;
+                    for (uint32_t i = 0; i < heap_count; ++i) {
+                        budget->heapBudget[i] = memoryProperties->memoryHeaps[i].size;
+                        budget->heapUsage[i] = 0;
+                    }
+                }
+                break;
+            }
+#endif
+            default:
+                break;
+        }
+        node = (void *)header.pNext;
+    }
+}
+
 VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceMemoryProperties2(
         VkPhysicalDevice physicalDevice,
         VkPhysicalDeviceMemoryProperties2 *pMemoryProperties) {
     if (!pMemoryProperties) return;
     PdockerVkStructHeader header = read_vk_struct_header(pMemoryProperties);
+    void *pnext = (void *)header.pNext;
     zero_vk_out_struct_preserve_chain(pMemoryProperties, sizeof(*pMemoryProperties), header);
     vkGetPhysicalDeviceMemoryProperties(physicalDevice, &pMemoryProperties->memoryProperties);
+    fill_memory_properties2_pnext(pnext, &pMemoryProperties->memoryProperties);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceExternalBufferProperties(
@@ -21149,6 +21180,30 @@ static VkResult validate_pipeline_specialization_info_for_transport(
     return VK_SUCCESS;
 }
 
+static VkResult validate_shader_module_create_pnext(const void *pNext) {
+    for (const void *node = pNext; node;) {
+        PdockerVkStructHeader header = read_vk_struct_header(node);
+        switch (header.sType) {
+#ifdef VK_EXT_VALIDATION_CACHE_EXTENSION_NAME
+            case VK_STRUCTURE_TYPE_SHADER_MODULE_VALIDATION_CACHE_CREATE_INFO_EXT: {
+                const VkShaderModuleValidationCacheCreateInfoEXT *cache_info =
+                    (const VkShaderModuleValidationCacheCreateInfoEXT *)node;
+                if (cache_info->validationCache != VK_NULL_HANDLE) {
+                    trace_icd_runtime_failure("shader-module-validation-cache-unsupported",
+                                              VK_ERROR_FEATURE_NOT_PRESENT);
+                    return VK_ERROR_FEATURE_NOT_PRESENT;
+                }
+                break;
+            }
+#endif
+            default:
+                return unsupported_create_info_pnext_result("vkCreateShaderModule", node);
+        }
+        node = header.pNext;
+    }
+    return VK_SUCCESS;
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateShaderModule(
         VkDevice device,
         const VkShaderModuleCreateInfo *pCreateInfo,
@@ -21157,7 +21212,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateShaderModule(
     (void)device;
     (void)pAllocator;
     if (!pCreateInfo || !pShaderModule) return VK_ERROR_INITIALIZATION_FAILED;
-    if (pCreateInfo->pNext) return unsupported_create_info_pnext_result("vkCreateShaderModule", pCreateInfo->pNext);
+    VkResult pnext_rc = validate_shader_module_create_pnext(pCreateInfo->pNext);
+    if (pnext_rc != VK_SUCCESS) return pnext_rc;
     if (pCreateInfo->flags != 0 || !pCreateInfo->pCode || pCreateInfo->codeSize == 0 ||
         (pCreateInfo->codeSize % sizeof(uint32_t)) != 0) {
         return VK_ERROR_INITIALIZATION_FAILED;
