@@ -31840,6 +31840,11 @@ static bool proc_address_hidden_by_advertisement(const char *pName) {
          strcmp(pName, "vkGetImageSubresourceLayout2") == 0 ||
          strcmp(pName, "vkGetDeviceImageSubresourceLayout") == 0 ||
          strcmp(pName, "vkGetRenderingAreaGranularity") == 0 ||
+         strcmp(pName, "vkGetPhysicalDeviceToolProperties") == 0 ||
+         strcmp(pName, "vkCreatePrivateDataSlot") == 0 ||
+         strcmp(pName, "vkDestroyPrivateDataSlot") == 0 ||
+         strcmp(pName, "vkSetPrivateData") == 0 ||
+         strcmp(pName, "vkGetPrivateData") == 0 ||
          strcmp(pName, "vkCmdBeginRendering") == 0 ||
          strcmp(pName, "vkCmdEndRendering") == 0 ||
          strcmp(pName, "vkCmdBindVertexBuffers2") == 0 ||

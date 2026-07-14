@@ -207,6 +207,8 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 if (!found) return 5;
 
                 if (!vkGetPhysicalDeviceToolProperties || !vkGetPhysicalDeviceToolPropertiesEXT) return 6;
+                if (proc_address("vkGetPhysicalDeviceToolProperties") != NULL) return 15;
+                if (proc_address("vkGetPhysicalDeviceToolPropertiesEXT") == NULL) return 16;
                 if (vkGetPhysicalDeviceToolProperties(VK_NULL_HANDLE, NULL, NULL) != VK_ERROR_INITIALIZATION_FAILED) return 7;
                 uint32_t tool_count = 0;
                 if (vkGetPhysicalDeviceToolPropertiesEXT(VK_NULL_HANDLE, &tool_count, NULL) != VK_SUCCESS ||
@@ -782,6 +784,10 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     if (strcmp(extensions[i].extensionName, VK_EXT_PRIVATE_DATA_EXTENSION_NAME) == 0) found = VK_TRUE;
                 }}
                 if (!found || !device_extension_advertised_name(VK_EXT_PRIVATE_DATA_EXTENSION_NAME)) return 11;
+                if (proc_address("vkCreatePrivateDataSlot") != NULL) return 26;
+                if (proc_address("vkCreatePrivateDataSlotEXT") == NULL) return 27;
+                if (proc_address("vkSetPrivateData") != NULL) return 28;
+                if (proc_address("vkSetPrivateDataEXT") == NULL) return 29;
 
                 VkPrivateDataSlotCreateInfo slot_info;
                 memset(&slot_info, 0, sizeof(slot_info));

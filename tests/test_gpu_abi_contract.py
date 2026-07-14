@@ -9882,6 +9882,15 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME", icd)
         self.assertIn("VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceToolProperties", icd)
         self.assertIn("MAP_PROC(vkGetPhysicalDeviceToolPropertiesEXT)", icd)
+        proc_gate_body = c_function_body(icd, "proc_address_hidden_by_advertisement")
+        for core_13_name in [
+            "vkGetPhysicalDeviceToolProperties",
+            "vkCreatePrivateDataSlot",
+            "vkDestroyPrivateDataSlot",
+            "vkSetPrivateData",
+            "vkGetPrivateData",
+        ]:
+            self.assertIn(f'strcmp(pName, "{core_13_name}") == 0', proc_gate_body)
         self.assertIn("MAP_PROC(vkCreateValidationCacheEXT)", icd)
         self.assertIn("MAP_PROC(vkMergeValidationCachesEXT)", icd)
         self.assertIn("VK_EXT_PRIVATE_DATA_EXTENSION_NAME", icd)
@@ -19563,6 +19572,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "vkCreateRenderPass2KHR",
             "vkCmdBeginRenderPass2KHR",
             "vkGetDeviceBufferMemoryRequirements",
+            "vkGetPhysicalDeviceToolProperties",
+            "vkCreatePrivateDataSlot",
+            "vkGetPrivateData",
             "vkCmdBeginRendering",
             "vkCmdCopyBuffer2",
             "vkQueueSubmit2",
