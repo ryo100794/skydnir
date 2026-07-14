@@ -1535,6 +1535,135 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_sampler_border_color_extensions_are_advertised_false_only(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            static int extension_seen(
+                    const VkExtensionProperties *extensions,
+                    uint32_t count,
+                    const char *name) {{
+                for (uint32_t i = 0; i < count; ++i) {{
+                    if (strcmp(extensions[i].extensionName, name) == 0) return 1;
+                }}
+                return 0;
+            }}
+
+            static VkSamplerCreateInfo base_sampler_info(void) {{
+                VkSamplerCreateInfo info;
+                memset(&info, 0, sizeof(info));
+                info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+                info.magFilter = VK_FILTER_NEAREST;
+                info.minFilter = VK_FILTER_NEAREST;
+                info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+                info.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+                info.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+                info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+                info.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+                info.minLod = 0.0f;
+                info.maxLod = 0.0f;
+                return info;
+            }}
+
+            int main(void) {{
+            #if defined(VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME) && defined(VK_EXT_BORDER_COLOR_SWIZZLE_EXTENSION_NAME)
+                if (!device_extension_advertised_name(VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME)) return 2;
+                if (!device_extension_advertised_name(VK_EXT_BORDER_COLOR_SWIZZLE_EXTENSION_NAME)) return 3;
+                uint32_t count = 64;
+                VkExtensionProperties extensions[64];
+                memset(extensions, 0, sizeof(extensions));
+                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &count, extensions) != VK_SUCCESS) return 4;
+                if (!extension_seen(extensions, count, VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME)) return 5;
+                if (!extension_seen(extensions, count, VK_EXT_BORDER_COLOR_SWIZZLE_EXTENSION_NAME)) return 6;
+
+                const char *enabled[] = {{
+                    VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME,
+                    VK_EXT_BORDER_COLOR_SWIZZLE_EXTENSION_NAME,
+                }};
+                VkDeviceCreateInfo create_info;
+                memset(&create_info, 0, sizeof(create_info));
+                create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                create_info.enabledExtensionCount = 2;
+                create_info.ppEnabledExtensionNames = enabled;
+                if (validate_device_extensions(&create_info) != VK_SUCCESS) return 7;
+
+                VkPhysicalDeviceCustomBorderColorFeaturesEXT custom_features;
+                VkPhysicalDeviceBorderColorSwizzleFeaturesEXT swizzle_features;
+                memset(&custom_features, 0, sizeof(custom_features));
+                memset(&swizzle_features, 0, sizeof(swizzle_features));
+                custom_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUSTOM_BORDER_COLOR_FEATURES_EXT;
+                custom_features.pNext = &swizzle_features;
+                swizzle_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BORDER_COLOR_SWIZZLE_FEATURES_EXT;
+                fill_pnext_features(&custom_features);
+                if (custom_features.customBorderColors != VK_FALSE) return 8;
+                if (custom_features.customBorderColorWithoutFormat != VK_FALSE) return 9;
+                if (swizzle_features.borderColorSwizzle != VK_FALSE) return 10;
+                if (swizzle_features.borderColorSwizzleFromImage != VK_FALSE) return 11;
+
+                VkPhysicalDeviceCustomBorderColorPropertiesEXT custom_props;
+                memset(&custom_props, 0xff, sizeof(custom_props));
+                custom_props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUSTOM_BORDER_COLOR_PROPERTIES_EXT;
+                custom_props.pNext = NULL;
+                fill_pnext_properties(&custom_props);
+                if (custom_props.maxCustomBorderColorSamplers != 0) return 12;
+
+                memset(&custom_features, 0, sizeof(custom_features));
+                memset(&swizzle_features, 0, sizeof(swizzle_features));
+                custom_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUSTOM_BORDER_COLOR_FEATURES_EXT;
+                custom_features.pNext = &swizzle_features;
+                swizzle_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BORDER_COLOR_SWIZZLE_FEATURES_EXT;
+                create_info.pNext = &custom_features;
+                if (validate_device_feature_requests(&create_info) != VK_SUCCESS) return 13;
+                custom_features.customBorderColors = VK_TRUE;
+                if (validate_device_feature_requests(&create_info) == VK_SUCCESS) return 14;
+                custom_features.customBorderColors = VK_FALSE;
+                custom_features.customBorderColorWithoutFormat = VK_TRUE;
+                if (validate_device_feature_requests(&create_info) == VK_SUCCESS) return 15;
+                custom_features.customBorderColorWithoutFormat = VK_FALSE;
+                swizzle_features.borderColorSwizzle = VK_TRUE;
+                if (validate_device_feature_requests(&create_info) == VK_SUCCESS) return 16;
+                swizzle_features.borderColorSwizzle = VK_FALSE;
+                swizzle_features.borderColorSwizzleFromImage = VK_TRUE;
+                if (validate_device_feature_requests(&create_info) == VK_SUCCESS) return 17;
+
+                VkSamplerCustomBorderColorCreateInfoEXT custom_info;
+                VkSamplerBorderColorComponentMappingCreateInfoEXT mapping_info;
+                VkSamplerCreateInfo sampler_info = base_sampler_info();
+                memset(&custom_info, 0, sizeof(custom_info));
+                memset(&mapping_info, 0, sizeof(mapping_info));
+                custom_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CUSTOM_BORDER_COLOR_CREATE_INFO_EXT;
+                custom_info.pNext = &mapping_info;
+                mapping_info.sType = VK_STRUCTURE_TYPE_SAMPLER_BORDER_COLOR_COMPONENT_MAPPING_CREATE_INFO_EXT;
+                mapping_info.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+                mapping_info.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+                mapping_info.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+                mapping_info.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+                mapping_info.srgb = VK_FALSE;
+                sampler_info.pNext = &custom_info;
+                if (validate_sampler_create_info_for_transport(&sampler_info, 0, NULL) != VK_SUCCESS) return 18;
+                sampler_info.borderColor = VK_BORDER_COLOR_FLOAT_CUSTOM_EXT;
+                if (validate_sampler_create_info_for_transport(&sampler_info, 0, NULL) == VK_SUCCESS) return 19;
+                sampler_info.borderColor = VK_BORDER_COLOR_INT_CUSTOM_EXT;
+                if (validate_sampler_create_info_for_transport(&sampler_info, 0, NULL) == VK_SUCCESS) return 20;
+                sampler_info.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+                mapping_info.components.r = VK_COMPONENT_SWIZZLE_G;
+                if (validate_sampler_create_info_for_transport(&sampler_info, 0, NULL) == VK_SUCCESS) return 21;
+                mapping_info.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+                mapping_info.srgb = VK_TRUE;
+                if (validate_sampler_create_info_for_transport(&sampler_info, 0, NULL) == VK_SUCCESS) return 22;
+            #endif
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+
     def test_sampler_filter_minmax_extension_enables_reduction_feature_mask(self):
         source = textwrap.dedent(
             f"""

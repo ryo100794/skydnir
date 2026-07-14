@@ -10847,6 +10847,15 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, features_body)
 
+        collector_body = c_function_body(icd, "collect_advertised_device_extensions")
+        for marker in [
+            "VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME",
+            "VK_EXT_CUSTOM_BORDER_COLOR_SPEC_VERSION",
+            "VK_EXT_BORDER_COLOR_SWIZZLE_EXTENSION_NAME",
+            "VK_EXT_BORDER_COLOR_SWIZZLE_SPEC_VERSION",
+        ]:
+            self.assertIn(marker, collector_body)
+
         create_device_body = c_function_body(icd, "validate_device_feature_requests")
         for marker in [
             "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUSTOM_BORDER_COLOR_FEATURES_EXT",
