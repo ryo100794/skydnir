@@ -1987,6 +1987,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "render_pass_create2_pnext_noop(pCreateInfo, &disallow_subpass_merging)",
             "fill_render_pass_create2_feedback(pCreateInfo, pCreateInfo->subpassCount)",
             "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBPASS_MERGE_FEEDBACK_FEATURES_EXT",
+            "VK_EXT_SUBPASS_MERGE_FEEDBACK_EXTENSION_NAME",
+            "VK_EXT_SUBPASS_MERGE_FEEDBACK_SPEC_VERSION",
             "VK_STRUCTURE_TYPE_RENDER_PASS_CREATION_CONTROL_EXT",
             "VK_STRUCTURE_TYPE_RENDER_PASS_CREATION_FEEDBACK_CREATE_INFO_EXT",
             "feedback->pRenderPassFeedback->postMergeSubpassCount",
@@ -9101,9 +9103,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("create-device-device-group-unsupported", icd)
         self.assertIn("physicalDeviceCount != 1", icd)
         self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBPASS_MERGE_FEEDBACK_FEATURES_EXT", icd)
-        self.assertIn("p->subpassMergeFeedback = VK_FALSE", icd)
-        self.assertIn("supported = !p->subpassMergeFeedback", icd)
-        self.assertIn('unsupported_feature_name = "subpassMergeFeedback"', icd)
+        self.assertIn("p->subpassMergeFeedback = VK_TRUE", icd)
+        self.assertIn("supported = true;", icd)
         self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES", icd)
         self.assertIn("p->multiview = caps ? caps->multiview : VK_FALSE", icd)
         self.assertIn("supported = (!p->multiview || supported11.multiview)", icd)

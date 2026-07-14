@@ -180,6 +180,62 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
 
+    def test_subpass_merge_feedback_extension_exposes_query_only_surface(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            static int extension_seen(
+                    const VkExtensionProperties *extensions,
+                    uint32_t count,
+                    const char *name) {{
+                for (uint32_t i = 0; i < count; ++i) {{
+                    if (strcmp(extensions[i].extensionName, name) == 0) return 1;
+                }}
+                return 0;
+            }}
+
+            int main(void) {{
+            #ifdef VK_EXT_SUBPASS_MERGE_FEEDBACK_EXTENSION_NAME
+                if (!device_extension_advertised_name(VK_EXT_SUBPASS_MERGE_FEEDBACK_EXTENSION_NAME)) return 2;
+                uint32_t count = 64;
+                VkExtensionProperties extensions[64];
+                memset(extensions, 0, sizeof(extensions));
+                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &count, extensions) != VK_SUCCESS) return 3;
+                if (!extension_seen(extensions, count, VK_EXT_SUBPASS_MERGE_FEEDBACK_EXTENSION_NAME)) return 4;
+
+                VkPhysicalDeviceSubpassMergeFeedbackFeaturesEXT feedback_features;
+                VkPhysicalDeviceFeatures2 features2;
+                memset(&feedback_features, 0, sizeof(feedback_features));
+                memset(&features2, 0, sizeof(features2));
+                features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+                features2.pNext = &feedback_features;
+                feedback_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBPASS_MERGE_FEEDBACK_FEATURES_EXT;
+                vkGetPhysicalDeviceFeatures2(VK_NULL_HANDLE, &features2);
+                if (feedback_features.subpassMergeFeedback != VK_TRUE) return 5;
+
+                const char *enabled[] = {{ VK_EXT_SUBPASS_MERGE_FEEDBACK_EXTENSION_NAME }};
+                VkDeviceCreateInfo device_info;
+                memset(&device_info, 0, sizeof(device_info));
+                device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                device_info.enabledExtensionCount = 1;
+                device_info.ppEnabledExtensionNames = enabled;
+                feedback_features.subpassMergeFeedback = VK_TRUE;
+                device_info.pNext = &feedback_features;
+                if (validate_device_extensions(&device_info) != VK_SUCCESS) return 6;
+                if (validate_device_feature_requests(&device_info) != VK_SUCCESS) return 7;
+            #endif
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+
     def test_maintenance3_extension_exposes_descriptor_support_query(self):
         source = textwrap.dedent(
             f"""
@@ -1479,7 +1535,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-    def test_subpass_merge_feedback_feature_is_queryable_but_not_enableable(self):
+    def test_subpass_merge_feedback_feature_is_queryable_and_enableable(self):
         source = textwrap.dedent(
             f"""
             #include <stdint.h>
@@ -1499,7 +1555,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 if (feedback.pNext != NULL) {{
                     return 3;
                 }}
-                if (feedback.subpassMergeFeedback != VK_FALSE) {{
+                if (feedback.subpassMergeFeedback != VK_TRUE) {{
                     return 4;
                 }}
 
@@ -1508,7 +1564,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
                 feedback.subpassMergeFeedback = VK_TRUE;
                 create_info.pNext = &feedback;
-                if (validate_device_feature_requests(&create_info) == VK_SUCCESS) {{
+                if (validate_device_feature_requests(&create_info) != VK_SUCCESS) {{
                     return 5;
                 }}
                 feedback.subpassMergeFeedback = VK_FALSE;

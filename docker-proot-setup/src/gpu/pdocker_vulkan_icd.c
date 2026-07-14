@@ -220,6 +220,8 @@ typedef VkSubresourceLayout2 VkSubresourceLayout2KHR;
 
 #ifndef VK_EXT_subpass_merge_feedback
 #define VK_EXT_subpass_merge_feedback 1
+#define VK_EXT_SUBPASS_MERGE_FEEDBACK_SPEC_VERSION 2
+#define VK_EXT_SUBPASS_MERGE_FEEDBACK_EXTENSION_NAME "VK_EXT_subpass_merge_feedback"
 #define VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBPASS_MERGE_FEEDBACK_FEATURES_EXT ((VkStructureType)1000458000)
 #define VK_STRUCTURE_TYPE_RENDER_PASS_CREATION_CONTROL_EXT ((VkStructureType)1000458001)
 #define VK_STRUCTURE_TYPE_RENDER_PASS_CREATION_FEEDBACK_CREATE_INFO_EXT ((VkStructureType)1000458002)
@@ -16407,7 +16409,7 @@ static void fill_pnext_features(void *pNext) {
                 VkPhysicalDeviceSubpassMergeFeedbackFeaturesEXT *p =
                     (VkPhysicalDeviceSubpassMergeFeedbackFeaturesEXT *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
-                p->subpassMergeFeedback = VK_FALSE;
+                p->subpassMergeFeedback = VK_TRUE;
                 break;
             }
 #endif
@@ -17036,13 +17038,9 @@ static VkResult validate_device_feature_requests(const VkDeviceCreateInfo *pCrea
                 break;
             }
 #ifdef VK_EXT_subpass_merge_feedback
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBPASS_MERGE_FEEDBACK_FEATURES_EXT: {
-                const VkPhysicalDeviceSubpassMergeFeedbackFeaturesEXT *p =
-                    (const VkPhysicalDeviceSubpassMergeFeedbackFeaturesEXT *)node;
-                supported = !p->subpassMergeFeedback;
-                if (!supported) unsupported_feature_name = "subpassMergeFeedback";
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBPASS_MERGE_FEEDBACK_FEATURES_EXT:
+                supported = true;
                 break;
-            }
 #endif
             case VK_STRUCTURE_TYPE_DEVICE_GROUP_DEVICE_CREATE_INFO: {
                 VkResult group_rc = validate_device_group_device_create_info((const VkDeviceGroupDeviceCreateInfo *)node);
@@ -20306,6 +20304,10 @@ static uint32_t collect_advertised_device_extensions(
 #endif
     ADD_DEVICE_EXTENSION(VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME,
                          VK_KHR_CREATE_RENDERPASS_2_SPEC_VERSION);
+#ifdef VK_EXT_SUBPASS_MERGE_FEEDBACK_EXTENSION_NAME
+    ADD_DEVICE_EXTENSION(VK_EXT_SUBPASS_MERGE_FEEDBACK_EXTENSION_NAME,
+                         VK_EXT_SUBPASS_MERGE_FEEDBACK_SPEC_VERSION);
+#endif
     ADD_DEVICE_EXTENSION(VK_KHR_DEVICE_GROUP_EXTENSION_NAME, VK_KHR_DEVICE_GROUP_SPEC_VERSION);
 #ifdef VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME
     ADD_DEVICE_EXTENSION(VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME, VK_KHR_EXTERNAL_MEMORY_SPEC_VERSION);
