@@ -2456,3 +2456,18 @@ and cube-array layer alignment on both the container ICD and Android executor
 side.  This prevents invalid 2D/3D/cube view reinterpretation from reaching
 Android `vkCreateImageView` and keeps the lane generic; llama.cpp, Dockerfiles,
 models, prompts, and shader bytes are unchanged.
+
+### 2026-07-14 Vulkan private-data ICD-local metadata lane
+
+`VK_EXT_private_data` is now exposed as ICD-local metadata rather than a shader
+or executor data-path feature.  The bridge advertises the device extension,
+reports `VkPhysicalDevicePrivateDataFeatures::privateData = VK_TRUE`, accepts
+`VkDevicePrivateDataCreateInfo` slot-count hints, and implements
+`vkCreatePrivateDataSlot`, `vkDestroyPrivateDataSlot`, `vkSetPrivateData`, and
+`vkGetPrivateData` with EXT aliases.  Slot payloads are stored in Skydnir-side
+metadata keyed by `(VkObjectType, objectHandle)`; they are not forwarded to
+Android Vulkan and cannot affect execution results.  Malformed create info,
+unknown pNext structs, invalid slots, unknown object type, and unsupported slot
+flags remain fail-closed.  This closes a generic Vulkan API compatibility gap
+without changing executor ABI, llama.cpp, Dockerfiles, model files, prompts,
+SPIR-V bytes, or shader policy.

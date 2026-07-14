@@ -240,6 +240,7 @@ typedef struct PdockerVkShaderModule PdockerVkShaderModule;
 typedef struct PdockerVkPipelineLayout PdockerVkPipelineLayout;
 typedef struct PdockerVkPipelineCache PdockerVkPipelineCache;
 typedef struct PdockerVkValidationCache PdockerVkValidationCache;
+typedef struct PdockerVkPrivateDataSlot PdockerVkPrivateDataSlot;
 typedef struct PdockerVkPipeline PdockerVkPipeline;
 typedef struct PdockerVkCommandPool PdockerVkCommandPool;
 typedef struct PdockerVkFence PdockerVkFence;
@@ -293,6 +294,9 @@ PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_descriptor_pool,
 PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_pipeline_cache, VkPipelineCache, PdockerVkPipelineCache)
 #ifdef VK_EXT_VALIDATION_CACHE_EXTENSION_NAME
 PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_validation_cache, VkValidationCacheEXT, PdockerVkValidationCache)
+#endif
+#ifdef VK_EXT_PRIVATE_DATA_EXTENSION_NAME
+PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_private_data_slot, VkPrivateDataSlot, PdockerVkPrivateDataSlot)
 #endif
 PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_command_pool, VkCommandPool, PdockerVkCommandPool)
 PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_render_pass, VkRenderPass, PdockerVkRenderPass)
@@ -1471,6 +1475,19 @@ struct PdockerVkPipelineCache {
 #ifdef VK_EXT_VALIDATION_CACHE_EXTENSION_NAME
 struct PdockerVkValidationCache {
     int unused;
+};
+#endif
+
+#ifdef VK_EXT_PRIVATE_DATA_EXTENSION_NAME
+typedef struct PdockerVkPrivateDataRecord {
+    VkObjectType object_type;
+    uint64_t object_handle;
+    uint64_t data;
+    struct PdockerVkPrivateDataRecord *next;
+} PdockerVkPrivateDataRecord;
+
+struct PdockerVkPrivateDataSlot {
+    PdockerVkPrivateDataRecord *records;
 };
 #endif
 
@@ -15634,7 +15651,7 @@ static void fill_pnext_features(void *pNext) {
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIVATE_DATA_FEATURES: {
                 VkPhysicalDevicePrivateDataFeatures *p = (VkPhysicalDevicePrivateDataFeatures *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
-                p->privateData = VK_FALSE;
+                p->privateData = VK_TRUE;
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PRIORITY_FEATURES_EXT: {
@@ -16191,8 +16208,8 @@ static VkResult validate_device_feature_requests(const VkDeviceCreateInfo *pCrea
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIVATE_DATA_FEATURES: {
                 const VkPhysicalDevicePrivateDataFeatures *p =
                     (const VkPhysicalDevicePrivateDataFeatures *)node;
-                supported = !p->privateData;
-                if (!supported) unsupported_feature_name = "privateData";
+                (void)p;
+                supported = true;
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PRIORITY_FEATURES_EXT: {
@@ -16266,8 +16283,8 @@ static VkResult validate_device_feature_requests(const VkDeviceCreateInfo *pCrea
             case VK_STRUCTURE_TYPE_DEVICE_PRIVATE_DATA_CREATE_INFO: {
                 const VkDevicePrivateDataCreateInfo *p =
                     (const VkDevicePrivateDataCreateInfo *)node;
-                supported = p->privateDataSlotRequestCount == 0;
-                if (!supported) unsupported_feature_name = "privateDataSlotRequestCount";
+                (void)p;
+                supported = true;
                 break;
             }
             case VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO:
@@ -19388,6 +19405,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(
 #ifdef VK_EXT_VALIDATION_CACHE_EXTENSION_NAME
     ADD_DEVICE_EXTENSION(VK_EXT_VALIDATION_CACHE_EXTENSION_NAME, VK_EXT_VALIDATION_CACHE_SPEC_VERSION);
 #endif
+#ifdef VK_EXT_PRIVATE_DATA_EXTENSION_NAME
+    ADD_DEVICE_EXTENSION(VK_EXT_PRIVATE_DATA_EXTENSION_NAME, VK_EXT_PRIVATE_DATA_SPEC_VERSION);
+#endif
     ADD_DEVICE_EXTENSION(VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_SWAPCHAIN_SPEC_VERSION);
 #undef ADD_DEVICE_EXTENSION
     copy_extension_properties(available, available_count, pPropertyCount, pProperties);
@@ -19456,6 +19476,9 @@ static bool device_extension_advertised_name(const char *name) {
 #endif
 #ifdef VK_EXT_VALIDATION_CACHE_EXTENSION_NAME
     if (strcmp(name, VK_EXT_VALIDATION_CACHE_EXTENSION_NAME) == 0) return true;
+#endif
+#ifdef VK_EXT_PRIVATE_DATA_EXTENSION_NAME
+    if (strcmp(name, VK_EXT_PRIVATE_DATA_EXTENSION_NAME) == 0) return true;
 #endif
     if (strcmp(name, VK_KHR_SWAPCHAIN_EXTENSION_NAME) == 0) return true;
     return false;
@@ -30533,6 +30556,109 @@ VKAPI_ATTR VkResult VKAPI_CALL vkMergeValidationCachesEXT(
     if (srcCacheCount > 0 && !pSrcCaches) return VK_ERROR_INITIALIZATION_FAILED;
     return VK_SUCCESS;
 }
+
+#endif
+
+#ifdef VK_EXT_PRIVATE_DATA_EXTENSION_NAME
+VKAPI_ATTR VkResult VKAPI_CALL vkCreatePrivateDataSlot(
+        VkDevice device,
+        const VkPrivateDataSlotCreateInfo *pCreateInfo,
+        const VkAllocationCallbacks *pAllocator,
+        VkPrivateDataSlot *pPrivateDataSlot) {
+    (void)device;
+    (void)pAllocator;
+    if (pPrivateDataSlot) *pPrivateDataSlot = VK_NULL_HANDLE;
+    if (!pCreateInfo || !pPrivateDataSlot ||
+        pCreateInfo->sType != VK_STRUCTURE_TYPE_PRIVATE_DATA_SLOT_CREATE_INFO) {
+        trace_icd_runtime_failure("private-data-slot-create-info-invalid", VK_ERROR_INITIALIZATION_FAILED);
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    if (pCreateInfo->pNext) {
+        return unsupported_create_info_pnext_result("vkCreatePrivateDataSlot", pCreateInfo->pNext);
+    }
+    if (pCreateInfo->flags != 0) {
+        trace_icd_runtime_failure("private-data-slot-flags-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    PdockerVkPrivateDataSlot *slot = pdocker_alloc_handle(sizeof(*slot));
+    if (!slot) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    *pPrivateDataSlot = pdocker_vk_private_data_slot_to_handle(slot);
+    return *pPrivateDataSlot ? VK_SUCCESS : VK_ERROR_OUT_OF_HOST_MEMORY;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkDestroyPrivateDataSlot(
+        VkDevice device,
+        VkPrivateDataSlot privateDataSlot,
+        const VkAllocationCallbacks *pAllocator) {
+    (void)device;
+    (void)pAllocator;
+    PdockerVkPrivateDataSlot *slot = pdocker_vk_private_data_slot_from_handle(privateDataSlot);
+    if (!slot) return;
+    PdockerVkPrivateDataRecord *record = slot->records;
+    while (record) {
+        PdockerVkPrivateDataRecord *next = record->next;
+        free(record);
+        record = next;
+    }
+    free(slot);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkSetPrivateData(
+        VkDevice device,
+        VkObjectType objectType,
+        uint64_t objectHandle,
+        VkPrivateDataSlot privateDataSlot,
+        uint64_t data) {
+    (void)device;
+    PdockerVkPrivateDataSlot *slot = pdocker_vk_private_data_slot_from_handle(privateDataSlot);
+    if (!slot) return VK_ERROR_INITIALIZATION_FAILED;
+    if (objectType == VK_OBJECT_TYPE_UNKNOWN || objectHandle == 0) {
+        trace_icd_runtime_failure("private-data-object-invalid", VK_ERROR_INITIALIZATION_FAILED);
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    PdockerVkPrivateDataRecord **link = &slot->records;
+    while (*link) {
+        PdockerVkPrivateDataRecord *record = *link;
+        if (record->object_type == objectType && record->object_handle == objectHandle) {
+            if (data == 0) {
+                *link = record->next;
+                free(record);
+            } else {
+                record->data = data;
+            }
+            return VK_SUCCESS;
+        }
+        link = &record->next;
+    }
+    if (data == 0) return VK_SUCCESS;
+    PdockerVkPrivateDataRecord *record = pdocker_alloc_handle(sizeof(*record));
+    if (!record) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    record->object_type = objectType;
+    record->object_handle = objectHandle;
+    record->data = data;
+    record->next = slot->records;
+    slot->records = record;
+    return VK_SUCCESS;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkGetPrivateData(
+        VkDevice device,
+        VkObjectType objectType,
+        uint64_t objectHandle,
+        VkPrivateDataSlot privateDataSlot,
+        uint64_t *pData) {
+    (void)device;
+    if (!pData) return;
+    *pData = 0;
+    PdockerVkPrivateDataSlot *slot = pdocker_vk_private_data_slot_from_handle(privateDataSlot);
+    if (!slot || objectType == VK_OBJECT_TYPE_UNKNOWN || objectHandle == 0) return;
+    for (const PdockerVkPrivateDataRecord *record = slot->records; record; record = record->next) {
+        if (record->object_type == objectType && record->object_handle == objectHandle) {
+            *pData = record->data;
+            return;
+        }
+    }
+}
 #endif
 
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetDeviceProcAddr(VkDevice device, const char *pName);
@@ -30844,6 +30970,16 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_PROC(vkDestroyValidationCacheEXT);
     MAP_PROC(vkGetValidationCacheDataEXT);
     MAP_PROC(vkMergeValidationCachesEXT);
+#endif
+#ifdef VK_EXT_PRIVATE_DATA_EXTENSION_NAME
+    MAP_PROC(vkCreatePrivateDataSlot);
+    MAP_ALIAS("vkCreatePrivateDataSlotEXT", vkCreatePrivateDataSlot);
+    MAP_PROC(vkDestroyPrivateDataSlot);
+    MAP_ALIAS("vkDestroyPrivateDataSlotEXT", vkDestroyPrivateDataSlot);
+    MAP_PROC(vkSetPrivateData);
+    MAP_ALIAS("vkSetPrivateDataEXT", vkSetPrivateData);
+    MAP_PROC(vkGetPrivateData);
+    MAP_ALIAS("vkGetPrivateDataEXT", vkGetPrivateData);
 #endif
     MAP_PROC(vkCreateComputePipelines);
     MAP_PROC(vkCreateGraphicsPipelines);

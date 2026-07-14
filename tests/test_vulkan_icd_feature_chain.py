@@ -223,7 +223,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_private_data_feature_and_device_create_info_are_noop_only(self):
+    def test_private_data_feature_and_device_create_info_are_icd_local_metadata(self):
         source = textwrap.dedent(
             f"""
             #include <stdint.h>
@@ -237,61 +237,81 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 private_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIVATE_DATA_FEATURES;
                 private_features.pNext = NULL;
                 fill_pnext_features(&private_features);
-                if (private_features.sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIVATE_DATA_FEATURES) {{
-                    fprintf(stderr, "private feature sType was not preserved\\n");
-                    return 2;
-                }}
-                if (private_features.pNext != NULL) {{
-                    fprintf(stderr, "private feature pNext was not preserved\\n");
-                    return 3;
-                }}
-                if (private_features.privateData != VK_FALSE) {{
-                    fprintf(stderr, "privateData was advertised without private-data API support\\n");
-                    return 4;
-                }}
+                if (private_features.sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIVATE_DATA_FEATURES) return 2;
+                if (private_features.pNext != NULL) return 3;
+                if (private_features.privateData != VK_TRUE) return 4;
 
                 VkDeviceCreateInfo create_info;
                 memset(&create_info, 0, sizeof(create_info));
                 create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
                 private_features.privateData = VK_TRUE;
                 create_info.pNext = &private_features;
-                if (validate_device_feature_requests(&create_info) == VK_SUCCESS) {{
-                    fprintf(stderr, "privateData=true was accepted\\n");
-                    return 5;
-                }}
+                if (validate_device_feature_requests(&create_info) != VK_SUCCESS) return 5;
                 private_features.privateData = VK_FALSE;
-                if (validate_device_feature_requests(&create_info) != VK_SUCCESS) {{
-                    fprintf(stderr, "privateData=false was rejected\\n");
-                    return 6;
-                }}
+                if (validate_device_feature_requests(&create_info) != VK_SUCCESS) return 6;
 
                 VkDevicePrivateDataCreateInfo private_create;
                 memset(&private_create, 0, sizeof(private_create));
                 private_create.sType = VK_STRUCTURE_TYPE_DEVICE_PRIVATE_DATA_CREATE_INFO;
                 private_create.privateDataSlotRequestCount = 0;
                 create_info.pNext = &private_create;
-                if (validate_device_feature_requests(&create_info) != VK_SUCCESS) {{
-                    fprintf(stderr, "zero privateDataSlotRequestCount was rejected\\n");
-                    return 7;
-                }}
-                private_create.privateDataSlotRequestCount = 1;
-                if (validate_device_feature_requests(&create_info) == VK_SUCCESS) {{
-                    fprintf(stderr, "nonzero privateDataSlotRequestCount was accepted\\n");
-                    return 8;
-                }}
+                if (validate_device_feature_requests(&create_info) != VK_SUCCESS) return 7;
+                private_create.privateDataSlotRequestCount = 4;
+                if (validate_device_feature_requests(&create_info) != VK_SUCCESS) return 8;
 
-                memset(&private_features, 0, sizeof(private_features));
-                memset(&private_create, 0, sizeof(private_create));
-                private_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIVATE_DATA_FEATURES;
-                private_features.privateData = VK_FALSE;
-                private_features.pNext = &private_create;
-                private_create.sType = VK_STRUCTURE_TYPE_DEVICE_PRIVATE_DATA_CREATE_INFO;
-                private_create.privateDataSlotRequestCount = 0;
-                create_info.pNext = &private_features;
-                if (validate_device_feature_requests(&create_info) != VK_SUCCESS) {{
-                    fprintf(stderr, "privateData=false plus zero slot request chain was rejected\\n");
-                    return 9;
+                uint32_t extension_count = 0;
+                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &extension_count, NULL) != VK_SUCCESS) return 9;
+                VkExtensionProperties extensions[64];
+                memset(extensions, 0, sizeof(extensions));
+                uint32_t capacity = 64;
+                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &capacity, extensions) != VK_SUCCESS) return 10;
+                VkBool32 found = VK_FALSE;
+                for (uint32_t i = 0; i < capacity; ++i) {{
+                    if (strcmp(extensions[i].extensionName, VK_EXT_PRIVATE_DATA_EXTENSION_NAME) == 0) found = VK_TRUE;
                 }}
+                if (!found || !device_extension_advertised_name(VK_EXT_PRIVATE_DATA_EXTENSION_NAME)) return 11;
+
+                VkPrivateDataSlotCreateInfo slot_info;
+                memset(&slot_info, 0, sizeof(slot_info));
+                slot_info.sType = VK_STRUCTURE_TYPE_PRIVATE_DATA_SLOT_CREATE_INFO;
+                VkPrivateDataSlot slot = (VkPrivateDataSlot)(uintptr_t)0xfeedu;
+                if (vkCreatePrivateDataSlot(VK_NULL_HANDLE, &slot_info, NULL, &slot) != VK_SUCCESS || slot == VK_NULL_HANDLE) return 12;
+                if (vkSetPrivateData(VK_NULL_HANDLE, VK_OBJECT_TYPE_BUFFER, 0x1234u, slot, 0xabcdu) != VK_SUCCESS) return 13;
+                uint64_t data = 0;
+                vkGetPrivateData(VK_NULL_HANDLE, VK_OBJECT_TYPE_BUFFER, 0x1234u, slot, &data);
+                if (data != 0xabcdu) return 14;
+                if (vkSetPrivateData(VK_NULL_HANDLE, VK_OBJECT_TYPE_BUFFER, 0x1234u, slot, 0xdefu) != VK_SUCCESS) return 15;
+                vkGetPrivateData(VK_NULL_HANDLE, VK_OBJECT_TYPE_BUFFER, 0x1234u, slot, &data);
+                if (data != 0xdefu) return 16;
+                vkGetPrivateData(VK_NULL_HANDLE, VK_OBJECT_TYPE_IMAGE, 0x1234u, slot, &data);
+                if (data != 0) return 17;
+                if (vkSetPrivateData(VK_NULL_HANDLE, VK_OBJECT_TYPE_BUFFER, 0x1234u, slot, 0) != VK_SUCCESS) return 18;
+                data = 0x777u;
+                vkGetPrivateData(VK_NULL_HANDLE, VK_OBJECT_TYPE_BUFFER, 0x1234u, slot, &data);
+                if (data != 0) return 19;
+
+                VkPrivateDataSlot invalid_slot = (VkPrivateDataSlot)(uintptr_t)0xfeedu;
+                memset(&slot_info, 0, sizeof(slot_info));
+                slot_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+                if (vkCreatePrivateDataSlot(VK_NULL_HANDLE, &slot_info, NULL, &invalid_slot) != VK_ERROR_INITIALIZATION_FAILED) return 20;
+                if (invalid_slot != VK_NULL_HANDLE) return 21;
+
+                VkBaseOutStructure unknown;
+                memset(&unknown, 0, sizeof(unknown));
+                unknown.sType = (VkStructureType)0x3fffffff;
+                memset(&slot_info, 0, sizeof(slot_info));
+                slot_info.sType = VK_STRUCTURE_TYPE_PRIVATE_DATA_SLOT_CREATE_INFO;
+                slot_info.pNext = &unknown;
+                if (vkCreatePrivateDataSlot(VK_NULL_HANDLE, &slot_info, NULL, &invalid_slot) != VK_ERROR_FEATURE_NOT_PRESENT) return 22;
+
+                memset(&slot_info, 0, sizeof(slot_info));
+                slot_info.sType = VK_STRUCTURE_TYPE_PRIVATE_DATA_SLOT_CREATE_INFO;
+                slot_info.flags = (VkPrivateDataSlotCreateFlags)1u;
+                if (vkCreatePrivateDataSlot(VK_NULL_HANDLE, &slot_info, NULL, &invalid_slot) != VK_ERROR_FEATURE_NOT_PRESENT) return 23;
+                if (vkSetPrivateData(VK_NULL_HANDLE, VK_OBJECT_TYPE_BUFFER, 0x1234u, VK_NULL_HANDLE, 1u) != VK_ERROR_INITIALIZATION_FAILED) return 24;
+                if (vkSetPrivateData(VK_NULL_HANDLE, VK_OBJECT_TYPE_UNKNOWN, 0x1234u, slot, 1u) != VK_ERROR_INITIALIZATION_FAILED) return 25;
+                vkDestroyPrivateDataSlot(VK_NULL_HANDLE, slot, NULL);
+                vkDestroyPrivateDataSlot(VK_NULL_HANDLE, VK_NULL_HANDLE, NULL);
                 return 0;
             }}
             """
