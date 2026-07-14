@@ -230,6 +230,127 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
 
 
 
+    def test_pipeline_barrier2_preserves_compute_barrier_stage_access_values(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include <stdlib.h>
+            #include "{ICD_SOURCE}"
+
+            int main(void) {{
+                PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)calloc(1, sizeof(*cmd));
+                if (!cmd) return 9;
+
+                VkBufferCreateInfo buffer_info;
+                memset(&buffer_info, 0, sizeof(buffer_info));
+                buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+                buffer_info.size = 4096;
+                buffer_info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+                buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+                VkBuffer buffer = VK_NULL_HANDLE;
+                if (vkCreateBuffer(VK_NULL_HANDLE, &buffer_info, NULL, &buffer) != VK_SUCCESS || !buffer) {{
+                    fprintf(stderr, "test buffer creation failed\\n");
+                    return 2;
+                }}
+
+                VkMemoryBarrier2 memory_barrier;
+                memset(&memory_barrier, 0, sizeof(memory_barrier));
+                memory_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+                memory_barrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+                memory_barrier.srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT;
+                memory_barrier.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+                memory_barrier.dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
+
+                VkBufferMemoryBarrier2 buffer_barrier;
+                memset(&buffer_barrier, 0, sizeof(buffer_barrier));
+                buffer_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
+                buffer_barrier.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+                buffer_barrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+                buffer_barrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+                buffer_barrier.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
+                buffer_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                buffer_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                buffer_barrier.buffer = buffer;
+                buffer_barrier.offset = 128;
+                buffer_barrier.size = 512;
+
+                VkDependencyInfo dependency;
+                memset(&dependency, 0, sizeof(dependency));
+                dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+                dependency.dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+                dependency.memoryBarrierCount = 1;
+                dependency.pMemoryBarriers = &memory_barrier;
+                dependency.bufferMemoryBarrierCount = 1;
+                dependency.pBufferMemoryBarriers = &buffer_barrier;
+
+                vkCmdPipelineBarrier2((VkCommandBuffer)cmd, &dependency);
+                if (cmd->recording_failed) {{
+                    fprintf(stderr, "pipeline barrier2 unexpectedly failed: %s\\n",
+                            cmd->recording_failure_reason ? cmd->recording_failure_reason : "<null>");
+                    return 3;
+                }}
+                if (cmd->memory_barrier_op_count != 1 || cmd->buffer_barrier_op_count != 1 ||
+                    cmd->image_barrier_op_count != 0 || cmd->command_op_count != 1 ||
+                    cmd->graphics_command_op_count != 1) {{
+                    fprintf(stderr, "unexpected barrier op counts mem=%u buf=%u img=%u cmd=%u gfx=%u\\n",
+                            cmd->memory_barrier_op_count, cmd->buffer_barrier_op_count,
+                            cmd->image_barrier_op_count, cmd->command_op_count,
+                            cmd->graphics_command_op_count);
+                    return 4;
+                }}
+
+                const PdockerVkMemoryBarrierOp *mem = &cmd->memory_barrier_ops[0];
+                if (mem->src_stage_mask != memory_barrier.srcStageMask ||
+                    mem->src_access_mask != memory_barrier.srcAccessMask ||
+                    mem->dst_stage_mask != memory_barrier.dstStageMask ||
+                    mem->dst_access_mask != memory_barrier.dstAccessMask) {{
+                    fprintf(stderr, "memory barrier masks were not preserved\\n");
+                    return 5;
+                }}
+
+                const PdockerVkBufferBarrierOp *buf = &cmd->buffer_barrier_ops[0];
+                if (buf->buffer != pdocker_vk_buffer_from_handle(buffer) ||
+                    buf->offset != buffer_barrier.offset ||
+                    buf->size != buffer_barrier.size ||
+                    buf->src_stage_mask != buffer_barrier.srcStageMask ||
+                    buf->src_access_mask != buffer_barrier.srcAccessMask ||
+                    buf->dst_stage_mask != buffer_barrier.dstStageMask ||
+                    buf->dst_access_mask != buffer_barrier.dstAccessMask ||
+                    buf->src_queue_family_index != buffer_barrier.srcQueueFamilyIndex ||
+                    buf->dst_queue_family_index != buffer_barrier.dstQueueFamilyIndex) {{
+                    fprintf(stderr, "buffer barrier payload was not preserved\\n");
+                    return 6;
+                }}
+
+                if (cmd->command_ops[0].type != PDOCKER_VK_COMMAND_BARRIER ||
+                    cmd->command_ops[0].memory_barrier_op_first != 0 ||
+                    cmd->command_ops[0].memory_barrier_op_count != 1 ||
+                    cmd->command_ops[0].buffer_barrier_op_first != 0 ||
+                    cmd->command_ops[0].buffer_barrier_op_count != 1 ||
+                    cmd->command_ops[0].dependency_flags != VK_DEPENDENCY_BY_REGION_BIT) {{
+                    fprintf(stderr, "command barrier range metadata was not preserved\\n");
+                    return 7;
+                }}
+                if (cmd->graphics_command_ops[0].command_type != PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER ||
+                    cmd->graphics_command_ops[0].memory_barrier_op_count != 1 ||
+                    cmd->graphics_command_ops[0].buffer_barrier_op_count != 1 ||
+                    cmd->graphics_command_ops[0].flags != VK_DEPENDENCY_BY_REGION_BIT) {{
+                    fprintf(stderr, "graphics barrier range metadata was not preserved\\n");
+                    return 8;
+                }}
+
+                vkDestroyBuffer(VK_NULL_HANDLE, buffer, NULL);
+                free(cmd);
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
     def test_set_event2_records_precise_unsupported_dependency_reasons(self):
         source = textwrap.dedent(
             f"""
