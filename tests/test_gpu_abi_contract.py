@@ -1496,6 +1496,10 @@ class GpuAbiContractTest(unittest.TestCase):
     def test_vulkan_wsi_headless_and_swapchain_extensions_are_advertised(self):
         icd = VULKAN_ICD.read_text()
 
+        copy_body = c_function_body(icd, "copy_extension_properties")
+        self.assertIn("return requested < available_count ? VK_INCOMPLETE : VK_SUCCESS;", copy_body)
+        self.assertIn("if (!pPropertyCount) return VK_ERROR_INITIALIZATION_FAILED;", copy_body)
+
         collector_body = c_function_body(icd, "collect_advertised_instance_extensions")
         for marker in [
             "VK_KHR_SURFACE_EXTENSION_NAME",
@@ -1515,7 +1519,7 @@ class GpuAbiContractTest(unittest.TestCase):
         instance_extension_body = c_function_body(icd, "vkEnumerateInstanceExtensionProperties")
         self.assertIn("PDOCKER_VK_MAX_INSTANCE_EXTENSIONS", instance_extension_body)
         self.assertIn("collect_advertised_instance_extensions(", instance_extension_body)
-        self.assertIn("copy_extension_properties(available, available_count, pPropertyCount, pProperties);", instance_extension_body)
+        self.assertIn("return copy_extension_properties(available, available_count, pPropertyCount, pProperties);", instance_extension_body)
         self.assertNotIn("ADD_INSTANCE_EXTENSION", instance_extension_body)
 
         instance_name_body = c_function_body(icd, "instance_extension_advertised_name")
@@ -1559,7 +1563,7 @@ class GpuAbiContractTest(unittest.TestCase):
 
         device_extension_body = c_function_body(icd, "vkEnumerateDeviceExtensionProperties")
         self.assertIn("collect_advertised_device_extensions(", device_extension_body)
-        self.assertIn("copy_extension_properties(available, available_count, pPropertyCount, pProperties);", device_extension_body)
+        self.assertIn("return copy_extension_properties(available, available_count, pPropertyCount, pProperties);", device_extension_body)
         self.assertNotIn("ADD_DEVICE_EXTENSION", device_extension_body)
 
         device_validation_body = c_function_body(icd, "device_extension_advertised_name")

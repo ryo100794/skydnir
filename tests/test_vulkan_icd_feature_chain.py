@@ -623,6 +623,12 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 uint32_t extension_count = 0;
                 if (vkEnumerateInstanceExtensionProperties(NULL, &extension_count, NULL) != VK_SUCCESS) return 2;
                 if (extension_count == 0 || extension_count > PDOCKER_VK_MAX_INSTANCE_EXTENSIONS) return 3;
+                if (extension_count > 1) {{
+                    VkExtensionProperties one_extension[1];
+                    uint32_t one_capacity = 1;
+                    if (vkEnumerateInstanceExtensionProperties(NULL, &one_capacity, one_extension) != VK_INCOMPLETE ||
+                        one_capacity != 1) return 11;
+                }}
                 VkExtensionProperties extensions[PDOCKER_VK_MAX_INSTANCE_EXTENSIONS];
                 memset(extensions, 0, sizeof(extensions));
                 uint32_t capacity = PDOCKER_VK_MAX_INSTANCE_EXTENSIONS;
@@ -1552,6 +1558,15 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 if (count == 0 || count > PDOCKER_VK_MAX_DEVICE_EXTENSIONS) {{
                     fprintf(stderr, "unexpected extension count %u\\n", count);
                     return 3;
+                }}
+                if (count > 1) {{
+                    VkExtensionProperties one_property[1];
+                    uint32_t one_capacity = 1;
+                    if (vkEnumerateDeviceExtensionProperties(NULL, NULL, &one_capacity, one_property) != VK_INCOMPLETE ||
+                        one_capacity != 1) {{
+                        fprintf(stderr, "truncated device extension enumeration did not return VK_INCOMPLETE\\n");
+                        return 11;
+                    }}
                 }}
                 VkExtensionProperties properties[PDOCKER_VK_MAX_DEVICE_EXTENSIONS];
                 memset(properties, 0, sizeof(properties));

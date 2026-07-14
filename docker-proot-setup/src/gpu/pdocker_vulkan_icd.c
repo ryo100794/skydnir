@@ -14440,19 +14440,21 @@ static uint32_t pdocker_api_version(void) {
     return VK_API_VERSION_1_2;
 }
 
-static void copy_extension_properties(
+static VkResult copy_extension_properties(
         const VkExtensionProperties *available,
         uint32_t available_count,
         uint32_t *pPropertyCount,
         VkExtensionProperties *pProperties) {
-    if (!pPropertyCount) return;
+    if (!pPropertyCount) return VK_ERROR_INITIALIZATION_FAILED;
     if (!pProperties) {
         *pPropertyCount = available_count;
-        return;
+        return VK_SUCCESS;
     }
-    uint32_t count = *pPropertyCount < available_count ? *pPropertyCount : available_count;
+    uint32_t requested = *pPropertyCount;
+    uint32_t count = requested < available_count ? requested : available_count;
     for (uint32_t i = 0; i < count; ++i) pProperties[i] = available[i];
     *pPropertyCount = count;
+    return requested < available_count ? VK_INCOMPLETE : VK_SUCCESS;
 }
 
 #define PDOCKER_VK_ADVERTISED_FORMAT_CAP_MAX 64u
@@ -17434,8 +17436,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceExtensionProperties(
     if (available_count > (uint32_t)(sizeof(available) / sizeof(available[0]))) {
         available_count = (uint32_t)(sizeof(available) / sizeof(available[0]));
     }
-    copy_extension_properties(available, available_count, pPropertyCount, pProperties);
-    return VK_SUCCESS;
+    return copy_extension_properties(available, available_count, pPropertyCount, pProperties);
 }
 
 static bool instance_extension_advertised_name(const char *name) {
@@ -20209,8 +20210,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(
     if (available_count > (uint32_t)(sizeof(available) / sizeof(available[0]))) {
         available_count = (uint32_t)(sizeof(available) / sizeof(available[0]));
     }
-    copy_extension_properties(available, available_count, pPropertyCount, pProperties);
-    return VK_SUCCESS;
+    return copy_extension_properties(available, available_count, pPropertyCount, pProperties);
 }
 
 static bool device_extension_advertised_name(const char *name) {
