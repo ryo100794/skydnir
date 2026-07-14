@@ -937,6 +937,130 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+
+    def test_depth_stencil_resolve_non_none_is_fail_closed_before_advertising(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            static VkRenderPass make_depth_resolve_render_pass(VkResolveModeFlagBits depth_mode,
+                                                               VkResolveModeFlagBits stencil_mode,
+                                                               uint32_t resolve_attachment) {{
+                VkAttachmentDescription2 attachments[2];
+                VkAttachmentReference2 depth_ref;
+                VkAttachmentReference2 resolve_ref;
+                VkSubpassDescriptionDepthStencilResolve resolve;
+                VkSubpassDescription2 subpass;
+                VkRenderPassCreateInfo2 create_info;
+                VkRenderPass render_pass = VK_NULL_HANDLE;
+
+                memset(attachments, 0, sizeof(attachments));
+                memset(&depth_ref, 0, sizeof(depth_ref));
+                memset(&resolve_ref, 0, sizeof(resolve_ref));
+                memset(&resolve, 0, sizeof(resolve));
+                memset(&subpass, 0, sizeof(subpass));
+                memset(&create_info, 0, sizeof(create_info));
+
+                attachments[0].sType = VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_2;
+                attachments[0].format = VK_FORMAT_D24_UNORM_S8_UINT;
+                attachments[0].samples = VK_SAMPLE_COUNT_4_BIT;
+                attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+                attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+                attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+                attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+                attachments[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+                attachments[0].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+                attachments[1] = attachments[0];
+                attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
+
+                depth_ref.sType = VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2;
+                depth_ref.attachment = 0;
+                depth_ref.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+                resolve_ref.sType = VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2;
+                resolve_ref.attachment = resolve_attachment;
+                resolve_ref.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+                resolve.sType = VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_DEPTH_STENCIL_RESOLVE;
+                resolve.depthResolveMode = depth_mode;
+                resolve.stencilResolveMode = stencil_mode;
+                resolve.pDepthStencilResolveAttachment = &resolve_ref;
+
+                subpass.sType = VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_2;
+                subpass.pNext = &resolve;
+                subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+                subpass.pDepthStencilAttachment = &depth_ref;
+
+                create_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO_2;
+                create_info.attachmentCount = 2;
+                create_info.pAttachments = attachments;
+                create_info.subpassCount = 1;
+                create_info.pSubpasses = &subpass;
+                if (vkCreateRenderPass2(VK_NULL_HANDLE, &create_info, NULL, &render_pass) != VK_SUCCESS) {{
+                    return VK_NULL_HANDLE;
+                }}
+                return render_pass;
+            }}
+
+            int main(void) {{
+            #ifdef VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME
+                if (device_extension_advertised_name(VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME)) {{
+                    fprintf(stderr, "VK_KHR_depth_stencil_resolve must remain unadvertised before support is coherent\\n");
+                    return 2;
+                }}
+            #endif
+                VkPhysicalDeviceDepthStencilResolveProperties props;
+                memset(&props, 0xff, sizeof(props));
+                props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_STENCIL_RESOLVE_PROPERTIES;
+                props.pNext = NULL;
+                fill_pnext_properties(&props);
+                if (props.supportedDepthResolveModes != VK_RESOLVE_MODE_NONE ||
+                    props.supportedStencilResolveModes != VK_RESOLVE_MODE_NONE) {{
+                    fprintf(stderr, "depth/stencil resolve properties advertised executable resolve modes\\n");
+                    return 3;
+                }}
+
+                VkRenderPass noop = make_depth_resolve_render_pass(
+                    VK_RESOLVE_MODE_NONE, VK_RESOLVE_MODE_NONE, 1);
+                if (noop == VK_NULL_HANDLE) return 4;
+                PdockerVkRenderPass *noop_rp = pdocker_vk_render_pass_from_handle(noop);
+                if (!noop_rp || !render_pass_subpass_can_normalize_to_dynamic_rendering(noop_rp, 0)) {{
+                    fprintf(stderr, "mode-NONE depth/stencil resolve metadata should remain no-op\\n");
+                    return 5;
+                }}
+                vkDestroyRenderPass(VK_NULL_HANDLE, noop, NULL);
+
+                VkRenderPass depth = make_depth_resolve_render_pass(
+                    VK_RESOLVE_MODE_AVERAGE_BIT, VK_RESOLVE_MODE_NONE, 1);
+                if (depth == VK_NULL_HANDLE) return 6;
+                PdockerVkRenderPass *depth_rp = pdocker_vk_render_pass_from_handle(depth);
+                if (!depth_rp || render_pass_subpass_can_normalize_to_dynamic_rendering(depth_rp, 0) ||
+                    !depth_rp->subpasses[0].unsupported) {{
+                    fprintf(stderr, "non-NONE depth resolve was not fail-closed\\n");
+                    return 7;
+                }}
+                vkDestroyRenderPass(VK_NULL_HANDLE, depth, NULL);
+
+                VkRenderPass invalid_ref = make_depth_resolve_render_pass(
+                    VK_RESOLVE_MODE_AVERAGE_BIT, VK_RESOLVE_MODE_NONE, 99);
+                if (invalid_ref == VK_NULL_HANDLE) return 8;
+                PdockerVkRenderPass *invalid_rp = pdocker_vk_render_pass_from_handle(invalid_ref);
+                if (!invalid_rp || render_pass_subpass_can_normalize_to_dynamic_rendering(invalid_rp, 0) ||
+                    !invalid_rp->subpasses[0].unsupported) {{
+                    fprintf(stderr, "invalid non-NONE depth resolve ref was not fail-closed\\n");
+                    return 9;
+                }}
+                vkDestroyRenderPass(VK_NULL_HANDLE, invalid_ref, NULL);
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+
     def test_maintenance1_extension_exposes_trim_command_pool_alias(self):
         source = textwrap.dedent(
             f"""

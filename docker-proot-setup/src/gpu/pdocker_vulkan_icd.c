@@ -23261,18 +23261,32 @@ static void capture_render_pass_subpass_state2(
         PdockerVkSubpassState *dst = &rp->subpasses[subpass_index];
         const VkAttachmentReference2 *resolve_ref =
             depth_stencil_resolve->pDepthStencilResolveAttachment;
-        dst->depth_resolve_mode = depth_stencil_resolve->depthResolveMode;
-        dst->stencil_resolve_mode = depth_stencil_resolve->stencilResolveMode;
+        const VkResolveModeFlagBits depth_resolve_mode =
+            depth_stencil_resolve->depthResolveMode;
+        const VkResolveModeFlagBits stencil_resolve_mode =
+            depth_stencil_resolve->stencilResolveMode;
+        const bool depth_stencil_resolve_requested =
+            depth_resolve_mode != VK_RESOLVE_MODE_NONE ||
+            stencil_resolve_mode != VK_RESOLVE_MODE_NONE;
+        if (depth_stencil_resolve_requested) {
+            unsupported = true;
+        }
         if (resolve_ref && resolve_ref->attachment != VK_ATTACHMENT_UNUSED) {
-            if (resolve_ref->pNext || resolve_ref->aspectMask != 0 ||
-                resolve_ref->attachment >= rp->attachment_count ||
-                !pdocker_vk_format_is_depth_stencil(
-                    rp->attachments[resolve_ref->attachment].format)) {
+            const bool resolve_ref_valid =
+                !resolve_ref->pNext && resolve_ref->aspectMask == 0 &&
+                resolve_ref->attachment < rp->attachment_count &&
+                pdocker_vk_format_is_depth_stencil(
+                    rp->attachments[resolve_ref->attachment].format);
+            if (depth_stencil_resolve_requested && !resolve_ref_valid) {
                 unsupported = true;
             }
-            dst->has_depth_stencil_resolve_attachment = true;
-            dst->depth_stencil_resolve_attachment = resolve_ref->attachment;
-            dst->depth_stencil_resolve_layout = resolve_ref->layout;
+            if (depth_stencil_resolve_requested && resolve_ref_valid) {
+                dst->has_depth_stencil_resolve_attachment = true;
+                dst->depth_stencil_resolve_attachment = resolve_ref->attachment;
+                dst->depth_stencil_resolve_layout = resolve_ref->layout;
+                dst->depth_resolve_mode = depth_resolve_mode;
+                dst->stencil_resolve_mode = stencil_resolve_mode;
+            }
         }
     }
     if (unsupported && rp && subpass_index < PDOCKER_VK_MAX_STORAGE_BUFFERS) {

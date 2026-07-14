@@ -1999,6 +1999,11 @@ class GpuAbiContractTest(unittest.TestCase):
             "depth_stencil_resolve->pDepthStencilResolveAttachment",
             "depth_stencil_resolve->depthResolveMode",
             "depth_stencil_resolve->stencilResolveMode",
+            "const bool depth_stencil_resolve_requested",
+            "depth_resolve_mode != VK_RESOLVE_MODE_NONE",
+            "if (depth_stencil_resolve_requested) {",
+            "unsupported = true;",
+            "depth_stencil_resolve_requested && resolve_ref_valid",
             "VK_STRUCTURE_TYPE_RENDER_PASS_SUBPASS_FEEDBACK_CREATE_INFO_EXT",
             "feedback->subpassMergeStatus = VK_SUBPASS_MERGE_STATUS_DISALLOWED_EXT",
             "feedback->subpassMergeStatus = VK_SUBPASS_MERGE_STATUS_NOT_MERGED_SINGLE_SUBPASS_EXT",
@@ -8672,6 +8677,7 @@ class GpuAbiContractTest(unittest.TestCase):
         collector_body = c_function_body(icd, "collect_advertised_device_extensions")
         self.assertIn("VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME", collector_body)
         self.assertIn("VK_KHR_SHADER_FLOAT_CONTROLS_SPEC_VERSION", collector_body)
+        self.assertNotIn("VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME", collector_body)
         for struct_name in [
             "VkPhysicalDeviceIDProperties",
             "VkPhysicalDevicePointClippingProperties",
