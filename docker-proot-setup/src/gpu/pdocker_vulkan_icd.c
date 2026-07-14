@@ -20197,6 +20197,10 @@ static uint32_t collect_advertised_device_extensions(
     ADD_DEVICE_EXTENSION(VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME,
                          VK_KHR_CREATE_RENDERPASS_2_SPEC_VERSION);
     ADD_DEVICE_EXTENSION(VK_KHR_DEVICE_GROUP_EXTENSION_NAME, VK_KHR_DEVICE_GROUP_SPEC_VERSION);
+#ifdef VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME
+    ADD_DEVICE_EXTENSION(VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME,
+                         VK_KHR_SAMPLER_YCBCR_CONVERSION_SPEC_VERSION);
+#endif
 #ifdef VK_KHR_MAINTENANCE_4_EXTENSION_NAME
     ADD_DEVICE_EXTENSION(VK_KHR_MAINTENANCE_4_EXTENSION_NAME, VK_KHR_MAINTENANCE_4_SPEC_VERSION);
 #endif
@@ -31894,9 +31898,7 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance instan
 
 static bool proc_address_hidden_by_advertisement(const char *pName) {
     if (!pName) return true;
-    if (strcmp(pName, "vkGetImageSubresourceLayout2EXT") == 0 ||
-        strcmp(pName, "vkCreateSamplerYcbcrConversionKHR") == 0 ||
-        strcmp(pName, "vkDestroySamplerYcbcrConversionKHR") == 0) {
+    if (strcmp(pName, "vkGetImageSubresourceLayout2EXT") == 0) {
         return true;
     }
     if (!advertised_api_1_4() &&

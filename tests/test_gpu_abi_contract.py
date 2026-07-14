@@ -7694,6 +7694,27 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("indices->pDepthInputAttachmentIndex", rendering_info_body)
         self.assertIn("indices->pStencilInputAttachmentIndex", rendering_info_body)
 
+    def test_vulkan_sampler_ycbcr_conversion_khr_is_advertised_false_only(self):
+        icd = VULKAN_ICD.read_text()
+        self.assertIn("VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME", icd)
+        collector_body = c_function_body(icd, "collect_advertised_device_extensions")
+        self.assertIn("ADD_DEVICE_EXTENSION(VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME", collector_body)
+
+        features_body = c_function_body(icd, "fill_pnext_features")
+        self.assertIn("VkPhysicalDeviceSamplerYcbcrConversionFeatures", features_body)
+        validate_body = c_function_body(icd, "validate_device_feature_requests")
+        self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES", validate_body)
+        self.assertIn("supported = !p->samplerYcbcrConversion;", validate_body)
+
+        ycbcr_body = c_function_body(icd, "vkCreateSamplerYcbcrConversion")
+        self.assertIn("*pYcbcrConversion = VK_NULL_HANDLE;", ycbcr_body)
+        self.assertIn("sampler-ycbcr-conversion-unsupported", ycbcr_body)
+        self.assertIn("return VK_ERROR_FEATURE_NOT_PRESENT;", ycbcr_body)
+
+        hidden_body = c_function_body(icd, "proc_address_hidden_by_advertisement")
+        self.assertNotIn("vkCreateSamplerYcbcrConversionKHR", hidden_body)
+        self.assertNotIn("vkDestroySamplerYcbcrConversionKHR", hidden_body)
+
     def test_vulkan_buffer_device_address_khr_is_advertised_false_only(self):
         icd = VULKAN_ICD.read_text()
         self.assertIn("VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME", icd)
@@ -9614,7 +9635,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "vkCreateSamplerYcbcrConversionKHR",
             "vkDestroySamplerYcbcrConversionKHR",
         ]:
-            self.assertIn(alias, hidden_body)
+            self.assertNotIn(alias, hidden_body)
 
 
     def test_vulkan_physical_memory_properties2_output_is_fully_initialized(self):
