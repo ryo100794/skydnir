@@ -8853,6 +8853,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "VKAPI_ATTR void VKAPI_CALL vkDestroyDevice", 1
         )[0]
         self.assertIn("*pDevice = VK_NULL_HANDLE;", create_body)
+        self.assertIn("pCreateInfo->sType != VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO", create_body)
+        self.assertIn("create-device-create-info-invalid", create_body)
         self.assertIn("validate_device_extensions(pCreateInfo)", create_body)
         self.assertIn("physicalDevice != (VkPhysicalDevice)&g_device", create_body)
         self.assertIn("validate_device_feature_requests(pCreateInfo)", create_body)

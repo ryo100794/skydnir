@@ -19546,8 +19546,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
         VkDevice *pDevice) {
     (void)pAllocator;
     if (!pDevice) return VK_ERROR_INITIALIZATION_FAILED;
-    if (physicalDevice != (VkPhysicalDevice)&g_device) return VK_ERROR_INITIALIZATION_FAILED;
     *pDevice = VK_NULL_HANDLE;
+    if (physicalDevice != (VkPhysicalDevice)&g_device) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!pCreateInfo || pCreateInfo->sType != VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO) {
+        trace_icd_runtime_failure("create-device-create-info-invalid", VK_ERROR_INITIALIZATION_FAILED);
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
     trace_device_create_features(pCreateInfo);
     VkResult extension_rc = validate_device_extensions(pCreateInfo);
     if (extension_rc != VK_SUCCESS) return extension_rc;

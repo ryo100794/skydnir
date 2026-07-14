@@ -1564,6 +1564,26 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     fprintf(stderr, "valid queue-create info was rejected\\n");
                     return 9;
                 }}
+
+                VkDevice device = (VkDevice)(uintptr_t)0x1234u;
+                if (vkCreateDevice((VkPhysicalDevice)&g_device, NULL, NULL, &device) !=
+                        VK_ERROR_INITIALIZATION_FAILED ||
+                    device != VK_NULL_HANDLE) {{
+                    return 10;
+                }}
+                create_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+                device = (VkDevice)(uintptr_t)0x1234u;
+                if (vkCreateDevice((VkPhysicalDevice)&g_device, &create_info, NULL, &device) !=
+                        VK_ERROR_INITIALIZATION_FAILED ||
+                    device != VK_NULL_HANDLE) {{
+                    return 11;
+                }}
+                create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                if (vkCreateDevice((VkPhysicalDevice)&g_device, &create_info, NULL, &device) != VK_SUCCESS ||
+                    device == VK_NULL_HANDLE) {{
+                    return 12;
+                }}
+                vkDestroyDevice(device, NULL);
                 return 0;
             }}
             """
