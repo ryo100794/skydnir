@@ -95,6 +95,91 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
 
+    def test_maintenance2_extension_exposes_noop_pnext_surface(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            static int extension_seen(
+                    const VkExtensionProperties *extensions,
+                    uint32_t count,
+                    const char *name) {{
+                for (uint32_t i = 0; i < count; ++i) {{
+                    if (strcmp(extensions[i].extensionName, name) == 0) return 1;
+                }}
+                return 0;
+            }}
+
+            int main(void) {{
+            #ifdef VK_KHR_MAINTENANCE_2_EXTENSION_NAME
+                if (!device_extension_advertised_name(VK_KHR_MAINTENANCE_2_EXTENSION_NAME)) return 2;
+                uint32_t count = 64;
+                VkExtensionProperties extensions[64];
+                memset(extensions, 0, sizeof(extensions));
+                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &count, extensions) != VK_SUCCESS) return 3;
+                if (!extension_seen(extensions, count, VK_KHR_MAINTENANCE_2_EXTENSION_NAME)) return 4;
+
+                const char *enabled[] = {{ VK_KHR_MAINTENANCE_2_EXTENSION_NAME }};
+                VkDeviceCreateInfo device_info;
+                memset(&device_info, 0, sizeof(device_info));
+                device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                device_info.enabledExtensionCount = 1;
+                device_info.ppEnabledExtensionNames = enabled;
+                if (validate_device_extensions(&device_info) != VK_SUCCESS) return 5;
+
+                VkPhysicalDevicePointClippingProperties point_clipping;
+                VkPhysicalDeviceProperties2 properties2;
+                memset(&point_clipping, 0xff, sizeof(point_clipping));
+                memset(&properties2, 0, sizeof(properties2));
+                properties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+                properties2.pNext = &point_clipping;
+                point_clipping.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_POINT_CLIPPING_PROPERTIES;
+                point_clipping.pNext = NULL;
+                vkGetPhysicalDeviceProperties2(VK_NULL_HANDLE, &properties2);
+                if (point_clipping.pNext != NULL) return 6;
+                if (point_clipping.pointClippingBehavior != VK_POINT_CLIPPING_BEHAVIOR_ALL_CLIP_PLANES) return 7;
+
+                VkRenderPassCreateInfo render_pass_info;
+                VkRenderPassInputAttachmentAspectCreateInfo aspect_info;
+                VkInputAttachmentAspectReference aspect_ref;
+                memset(&render_pass_info, 0, sizeof(render_pass_info));
+                memset(&aspect_info, 0, sizeof(aspect_info));
+                memset(&aspect_ref, 0, sizeof(aspect_ref));
+                render_pass_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+                render_pass_info.pNext = &aspect_info;
+                aspect_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_INPUT_ATTACHMENT_ASPECT_CREATE_INFO;
+                aspect_info.aspectReferenceCount = 0;
+                aspect_info.pAspectReferences = &aspect_ref;
+                if (!render_pass_create_pnext_supported(&render_pass_info, NULL)) return 8;
+                aspect_info.aspectReferenceCount = 1;
+                if (render_pass_create_pnext_supported(&render_pass_info, NULL)) return 9;
+
+                PdockerVkImage image;
+                VkImageViewCreateInfo view_info;
+                VkImageViewUsageCreateInfo view_usage;
+                memset(&image, 0, sizeof(image));
+                memset(&view_info, 0, sizeof(view_info));
+                memset(&view_usage, 0, sizeof(view_usage));
+                image.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+                view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+                view_info.pNext = &view_usage;
+                view_usage.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_USAGE_CREATE_INFO;
+                view_usage.usage = image.usage;
+                if (validate_image_view_pnext_for_transport(&view_info, &image) != VK_SUCCESS) return 10;
+                view_usage.usage = VK_IMAGE_USAGE_SAMPLED_BIT;
+                if (validate_image_view_pnext_for_transport(&view_info, &image) != VK_ERROR_FEATURE_NOT_PRESENT) return 11;
+            #endif
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+
     def test_maintenance3_extension_exposes_descriptor_support_query(self):
         source = textwrap.dedent(
             f"""

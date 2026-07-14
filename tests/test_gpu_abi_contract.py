@@ -9402,6 +9402,25 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("command-pool-trim-flags-unsupported", trim_body)
         self.assertIn("VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT", icd)
 
+    def test_vulkan_maintenance2_is_advertised_as_noop_pnext_surface(self):
+        icd = VULKAN_ICD.read_text()
+        collector_body = c_function_body(icd, "collect_advertised_device_extensions")
+        validation_body = c_function_body(icd, "device_extension_advertised_name")
+        helper_body = c_function_body(icd, "render_pass_create_pnext_supported")
+        image_view_pnext_body = icd.split("static VkResult validate_image_view_pnext_for_transport", 1)[1].split(
+            "static VkResult validate_image_view_create_info_for_transport", 1
+        )[0]
+        self.assertIn("ADD_DEVICE_EXTENSION(VK_KHR_MAINTENANCE_2_EXTENSION_NAME", collector_body)
+        self.assertIn("collect_advertised_device_extensions(", validation_body)
+        self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_POINT_CLIPPING_PROPERTIES", icd)
+        self.assertIn("p->pointClippingBehavior = VK_POINT_CLIPPING_BEHAVIOR_ALL_CLIP_PLANES;", icd)
+        self.assertIn("VK_STRUCTURE_TYPE_RENDER_PASS_INPUT_ATTACHMENT_ASPECT_CREATE_INFO", helper_body)
+        self.assertIn("aspect->aspectReferenceCount != 0", helper_body)
+        self.assertIn("VK_STRUCTURE_TYPE_IMAGE_VIEW_USAGE_CREATE_INFO", image_view_pnext_body)
+        self.assertIn("usage_info->usage == 0", image_view_pnext_body)
+        self.assertIn("usage_info->usage != image->usage", image_view_pnext_body)
+
+
     def test_vulkan_descriptor_update_template_extension_is_advertised_and_aliases_are_public(self):
         icd = VULKAN_ICD.read_text()
         collector_body = c_function_body(icd, "collect_advertised_device_extensions")
