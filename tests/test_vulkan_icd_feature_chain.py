@@ -1413,6 +1413,53 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     return 8;
                 }}
             #endif
+            #ifdef VK_VERSION_1_4
+                VkPhysicalDeviceVulkan14Features vulkan14;
+                memset(&vulkan14, 0xff, sizeof(vulkan14));
+                vulkan14.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES;
+                vulkan14.pNext = NULL;
+                fill_pnext_features(&vulkan14);
+                if (vulkan14.sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES ||
+                    vulkan14.pNext != NULL ||
+                    vulkan14.globalPriorityQuery != VK_FALSE ||
+                    vulkan14.shaderSubgroupRotate != VK_FALSE ||
+                    vulkan14.shaderSubgroupRotateClustered != VK_FALSE ||
+                    vulkan14.shaderFloatControls2 != VK_FALSE ||
+                    vulkan14.shaderExpectAssume != VK_FALSE ||
+                    vulkan14.rectangularLines != VK_FALSE ||
+                    vulkan14.bresenhamLines != VK_FALSE ||
+                    vulkan14.smoothLines != VK_FALSE ||
+                    vulkan14.stippledRectangularLines != VK_FALSE ||
+                    vulkan14.stippledBresenhamLines != VK_FALSE ||
+                    vulkan14.stippledSmoothLines != VK_FALSE ||
+                    vulkan14.vertexAttributeInstanceRateDivisor != VK_FALSE ||
+                    vulkan14.vertexAttributeInstanceRateZeroDivisor != VK_FALSE ||
+                    vulkan14.indexTypeUint8 != VK_FALSE ||
+                    vulkan14.dynamicRenderingLocalRead != VK_FALSE ||
+                    vulkan14.maintenance5 != VK_FALSE ||
+                    vulkan14.maintenance6 != VK_FALSE ||
+                    vulkan14.pipelineProtectedAccess != VK_FALSE ||
+                    vulkan14.pipelineRobustness != VK_FALSE ||
+                    vulkan14.hostImageCopy != VK_FALSE ||
+                    vulkan14.pushDescriptor != VK_FALSE) {{
+                    fprintf(stderr, "vulkan14 feature aggregate query was not all-false\\n");
+                    return 9;
+                }}
+                VkDeviceCreateInfo create_info14;
+                memset(&create_info14, 0, sizeof(create_info14));
+                create_info14.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                create_info14.pNext = &vulkan14;
+                vulkan14.maintenance5 = VK_TRUE;
+                if (validate_device_feature_requests(&create_info14) == VK_SUCCESS) {{
+                    fprintf(stderr, "vulkan14 maintenance5=true was accepted through aggregate\\n");
+                    return 10;
+                }}
+                vulkan14.maintenance5 = VK_FALSE;
+                if (validate_device_feature_requests(&create_info14) != VK_SUCCESS) {{
+                    fprintf(stderr, "all-false vulkan14 aggregate was rejected\\n");
+                    return 11;
+                }}
+            #endif
                 return 0;
             }}
             """

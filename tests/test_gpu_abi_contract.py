@@ -7737,6 +7737,48 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, vulkan13_block)
 
+    def test_vulkan14_feature_pnext_is_false_only_while_api_is_capped_to_12(self):
+        icd = VULKAN_ICD.read_text()
+        self.assertIn("return VK_API_VERSION_1_2;", icd)
+        self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES", icd)
+        self.assertIn("static VkBool32 advertised_api_1_4(void)", icd)
+
+        features_body = c_function_body(icd, "fill_pnext_features")
+        self.assertIn("VkPhysicalDeviceVulkan14Features", features_body)
+        vulkan14_feature_block = features_body.split("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES", 1)[1].split("#endif", 1)[0]
+        self.assertIn("zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);", vulkan14_feature_block)
+        self.assertNotIn("p->indexTypeUint8 =", vulkan14_feature_block)
+        self.assertNotIn("p->maintenance5 =", vulkan14_feature_block)
+        self.assertNotIn("p->dynamicRenderingLocalRead =", vulkan14_feature_block)
+
+        validate_body = c_function_body(icd, "validate_device_feature_requests")
+        vulkan14_block = validate_body.split("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES", 1)[1].split("#endif", 1)[0]
+        for marker in [
+            "!p->globalPriorityQuery",
+            "!p->shaderSubgroupRotate",
+            "!p->shaderSubgroupRotateClustered",
+            "!p->shaderFloatControls2",
+            "!p->shaderExpectAssume",
+            "!p->rectangularLines",
+            "!p->bresenhamLines",
+            "!p->smoothLines",
+            "!p->stippledRectangularLines",
+            "!p->stippledBresenhamLines",
+            "!p->stippledSmoothLines",
+            "!p->vertexAttributeInstanceRateDivisor",
+            "!p->vertexAttributeInstanceRateZeroDivisor",
+            "!p->indexTypeUint8",
+            "!p->dynamicRenderingLocalRead",
+            "!p->maintenance5",
+            "!p->maintenance6",
+            "!p->pipelineProtectedAccess",
+            "!p->pipelineRobustness",
+            "!p->hostImageCopy",
+            "!p->pushDescriptor",
+            "unsupported_feature_name = \"vulkan14Features\"",
+        ]:
+            self.assertIn(marker, vulkan14_block)
+
     def test_vulkan_executor_sampler_anisotropy_replay_is_fail_closed(self):
         executor = GPU_EXECUTOR.read_text()
         helper_body = c_function_body(executor, "vulkan_sampler_entry_supported_by_runtime")

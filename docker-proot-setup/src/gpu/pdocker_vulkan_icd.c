@@ -16095,6 +16095,13 @@ static void fill_pnext_features(void *pNext) {
                 break;
             }
 #endif
+#ifdef VK_VERSION_1_4
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES: {
+                VkPhysicalDeviceVulkan14Features *p = (VkPhysicalDeviceVulkan14Features *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                break;
+            }
+#endif
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES: {
                 VkPhysicalDevice8BitStorageFeatures *p = (VkPhysicalDevice8BitStorageFeatures *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
@@ -16703,6 +16710,35 @@ static VkResult validate_device_feature_requests(const VkDeviceCreateInfo *pCrea
                             !p->shaderIntegerDotProduct &&
                             !p->maintenance4;
                 if (!supported) unsupported_feature_name = "vulkan13Features";
+                break;
+            }
+#endif
+#ifdef VK_VERSION_1_4
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES: {
+                const VkPhysicalDeviceVulkan14Features *p =
+                    (const VkPhysicalDeviceVulkan14Features *)node;
+                supported = !p->globalPriorityQuery &&
+                            !p->shaderSubgroupRotate &&
+                            !p->shaderSubgroupRotateClustered &&
+                            !p->shaderFloatControls2 &&
+                            !p->shaderExpectAssume &&
+                            !p->rectangularLines &&
+                            !p->bresenhamLines &&
+                            !p->smoothLines &&
+                            !p->stippledRectangularLines &&
+                            !p->stippledBresenhamLines &&
+                            !p->stippledSmoothLines &&
+                            !p->vertexAttributeInstanceRateDivisor &&
+                            !p->vertexAttributeInstanceRateZeroDivisor &&
+                            !p->indexTypeUint8 &&
+                            !p->dynamicRenderingLocalRead &&
+                            !p->maintenance5 &&
+                            !p->maintenance6 &&
+                            !p->pipelineProtectedAccess &&
+                            !p->pipelineRobustness &&
+                            !p->hostImageCopy &&
+                            !p->pushDescriptor;
+                if (!supported) unsupported_feature_name = "vulkan14Features";
                 break;
             }
 #endif
