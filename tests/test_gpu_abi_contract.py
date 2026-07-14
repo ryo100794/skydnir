@@ -5145,6 +5145,37 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("dst->layout_generation = image->layout_generation;", collector)
         self.assertLess(collector.index("if (!image->layout_mixed)"), collector.index("image->layout_range_overflow"))
 
+    def test_vulkan_dispatch_icd_fails_closed_on_descriptor_image_layout_mismatch(self):
+        icd = VULKAN_ICD.read_text()
+        for helper_name in [
+            "descriptor_image_layout_valid_for_type",
+            "descriptor_image_ranges_overlap",
+            "descriptor_image_range_contains",
+            "descriptor_image_layout_matches_tracked_state",
+        ]:
+            self.assertIn(helper_name, icd)
+        helper = c_function_body(icd, "descriptor_image_layout_matches_tracked_state")
+        self.assertIn("descriptor_image_layout_valid_for_type(descriptor_type, descriptor_layout)", helper)
+        self.assertIn("pdocker_vk_image_aspect_mask_valid_for_format", helper)
+        self.assertIn("if (!image->layout_mixed)", helper)
+        self.assertIn("return image->current_layout == descriptor_layout;", helper)
+        self.assertIn("if (image->layout_range_overflow) return false;", helper)
+        self.assertIn("descriptor_image_ranges_overlap(&entry->range, view_range)", helper)
+        self.assertIn("if (entry->layout != descriptor_layout) return false;", helper)
+        self.assertIn("descriptor_image_range_contains(&entry->range, view_range)", helper)
+        self.assertIn("if (descriptor_layout == image->current_layout) return true;", helper)
+        self.assertIn("return covered_by_matching_explicit_range;", helper)
+
+        sender = c_function_body(icd, "send_generic_vulkan_dispatch_op")
+        self.assertIn("descriptor_image_layout_matches_tracked_state(", sender)
+        self.assertIn("binding->image_view, descriptor_type, binding->image_layout", sender)
+        self.assertIn("image descriptor layout mismatch", sender)
+        self.assertIn("return -EOPNOTSUPP;", sender)
+        self.assertLess(
+            sender.index("descriptor_image_layout_matches_tracked_state("),
+            sender.index("find_image_view_table_index("),
+        )
+
     def test_vulkan_dispatch_v5_2_icd_gates_layout_ranges_on_executor_capability(self):
         icd = VULKAN_ICD.read_text()
         sender = c_function_body(icd, "send_generic_vulkan_dispatch_v5_1_op")

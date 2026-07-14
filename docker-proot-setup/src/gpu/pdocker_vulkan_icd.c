@@ -10428,6 +10428,95 @@ static bool descriptor_type_requires_buffer_view(VkDescriptorType type) {
            type == VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER;
 }
 
+static bool descriptor_image_read_only_layout_valid(VkImageLayout layout) {
+    return layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL ||
+           layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL ||
+           layout == VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL ||
+           layout == VK_IMAGE_LAYOUT_STENCIL_READ_ONLY_OPTIMAL ||
+           layout == VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL;
+}
+
+static bool descriptor_image_layout_valid_for_type(
+        VkDescriptorType type,
+        VkImageLayout layout) {
+    switch (type) {
+        case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
+            return layout == VK_IMAGE_LAYOUT_GENERAL;
+        case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
+        case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
+            return descriptor_image_read_only_layout_valid(layout) ||
+                   layout == VK_IMAGE_LAYOUT_GENERAL;
+        case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:
+            return descriptor_image_read_only_layout_valid(layout) ||
+                   layout == VK_IMAGE_LAYOUT_GENERAL;
+        default:
+            return false;
+    }
+}
+
+static bool descriptor_image_ranges_overlap(
+        const VkImageSubresourceRange *a,
+        const VkImageSubresourceRange *b) {
+    if (!a || !b) return false;
+    if ((a->aspectMask & b->aspectMask) == 0) return false;
+    uint32_t a_level_end = a->baseMipLevel + a->levelCount;
+    uint32_t b_level_end = b->baseMipLevel + b->levelCount;
+    uint32_t a_layer_end = a->baseArrayLayer + a->layerCount;
+    uint32_t b_layer_end = b->baseArrayLayer + b->layerCount;
+    return a->baseMipLevel < b_level_end && b->baseMipLevel < a_level_end &&
+           a->baseArrayLayer < b_layer_end && b->baseArrayLayer < a_layer_end;
+}
+
+static bool descriptor_image_range_contains(
+        const VkImageSubresourceRange *outer,
+        const VkImageSubresourceRange *inner) {
+    if (!outer || !inner) return false;
+    if ((outer->aspectMask & inner->aspectMask) != inner->aspectMask) return false;
+    const uint32_t outer_level_end = outer->baseMipLevel + outer->levelCount;
+    const uint32_t inner_level_end = inner->baseMipLevel + inner->levelCount;
+    const uint32_t outer_layer_end = outer->baseArrayLayer + outer->layerCount;
+    const uint32_t inner_layer_end = inner->baseArrayLayer + inner->layerCount;
+    return outer->baseMipLevel <= inner->baseMipLevel &&
+           inner_level_end <= outer_level_end &&
+           outer->baseArrayLayer <= inner->baseArrayLayer &&
+           inner_layer_end <= outer_layer_end;
+}
+
+static bool descriptor_image_layout_matches_tracked_state(
+        const PdockerVkImageView *view,
+        VkDescriptorType descriptor_type,
+        VkImageLayout descriptor_layout) {
+    if (!view || !view->image) return false;
+    if (!descriptor_image_layout_valid_for_type(descriptor_type, descriptor_layout)) {
+        return false;
+    }
+    const PdockerVkImage *image = view->image;
+    const VkImageSubresourceRange *view_range = &view->subresource_range;
+    if (!pdocker_vk_image_aspect_mask_valid_for_format(image->format, view_range->aspectMask) ||
+        view_range->levelCount == 0 || view_range->layerCount == 0 ||
+        view_range->baseMipLevel >= image->mip_levels ||
+        view_range->levelCount > image->mip_levels - view_range->baseMipLevel ||
+        view_range->baseArrayLayer >= image->array_layers ||
+        view_range->layerCount > image->array_layers - view_range->baseArrayLayer) {
+        return false;
+    }
+    if (!image->layout_mixed) {
+        return image->current_layout == descriptor_layout;
+    }
+    if (image->layout_range_overflow) return false;
+    bool covered_by_matching_explicit_range = false;
+    for (uint32_t i = 0; i < image->layout_range_count; ++i) {
+        const PdockerVkImageLayoutRange *entry = &image->layout_ranges[i];
+        if (!descriptor_image_ranges_overlap(&entry->range, view_range)) continue;
+        if (entry->layout != descriptor_layout) return false;
+        if (descriptor_image_range_contains(&entry->range, view_range)) {
+            covered_by_matching_explicit_range = true;
+        }
+    }
+    if (descriptor_layout == image->current_layout) return true;
+    return covered_by_matching_explicit_range;
+}
+
 static bool descriptor_set_has_image_descriptor(const PdockerVkDescriptorSet *set);
 
 static bool pdocker_vk_sampler_contents_equal(
@@ -12057,6 +12146,21 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
                                     binding->image_view && binding->image_view->image ? (void *)binding->image_view->image->memory : NULL,
                                     binding->image_view && binding->image_view->image && binding->image_view->image->memory ? binding->image_view->image->memory->fd : -1);
                             return -EINVAL;
+                        }
+                        if (!descriptor_image_layout_matches_tracked_state(
+                                binding->image_view, descriptor_type, binding->image_layout)) {
+                            fprintf(stderr,
+                                    "pdocker-vulkan-icd: generic dispatch rejected: image descriptor layout mismatch dispatch_id=%llu set=%u binding=%u array=%u type=%u layout=%u image=%p mixed=%u current=%u\n",
+                                    (unsigned long long)dispatch_id,
+                                    set_index,
+                                    api_binding,
+                                    array_element,
+                                    descriptor_type,
+                                    (unsigned)binding->image_layout,
+                                    binding->image_view && binding->image_view->image ? (void *)binding->image_view->image : NULL,
+                                    binding->image_view && binding->image_view->image ? (unsigned)binding->image_view->image->layout_mixed : 0u,
+                                    binding->image_view && binding->image_view->image ? (unsigned)binding->image_view->image->current_layout : 0u);
+                            return -EOPNOTSUPP;
                         }
                         int existing_view =
                             find_image_view_table_index(image_view_objects,
