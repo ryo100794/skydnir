@@ -11526,6 +11526,96 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, unmap2_body)
 
+    def test_vulkan_device_proc_and_command_use_gate_extension_features(self):
+        icd = VULKAN_ICD.read_text()
+        for marker in [
+            "uint64_t enabled_extension_mask;",
+            "PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2",
+            "PDOCKER_VK_DEVICE_EXT_KHR_DYNAMIC_RENDERING",
+            "PDOCKER_VK_DEVICE_EXT_KHR_DRAW_INDIRECT_COUNT",
+            "PDOCKER_VK_DEVICE_EXT_AMD_DRAW_INDIRECT_COUNT",
+            "PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE",
+            "PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE_2",
+            "PDOCKER_VK_DEVICE_EXT_INDEX_TYPE_UINT8",
+            "enabled_device_extension_mask_from_create_info",
+            "validate_requested_feature_extension_enables",
+            "device_proc_address_hidden_by_enabled_state",
+        ]:
+            self.assertIn(marker, icd)
+
+        create_device_body = c_function_body(icd, "vkCreateDevice")
+        for marker in [
+            "enabled_device_extension_mask_from_create_info(pCreateInfo)",
+            "validate_requested_feature_extension_enables(",
+            "device->enabled_extension_mask = enabled_extension_mask;",
+        ]:
+            self.assertIn(marker, create_device_body)
+
+        feature_ext_body = c_function_body(icd, "validate_requested_feature_extension_enables")
+        for marker in [
+            "PDOCKER_VK_FEATURE_SYNCHRONIZATION_2",
+            "PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2",
+            "PDOCKER_VK_FEATURE_DYNAMIC_RENDERING",
+            "PDOCKER_VK_DEVICE_EXT_KHR_DYNAMIC_RENDERING",
+            "PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE",
+            "PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE",
+            "PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2",
+            "PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE_2",
+            "PDOCKER_VK_FEATURE_INDEX_TYPE_UINT8",
+            "PDOCKER_VK_DEVICE_EXT_INDEX_TYPE_UINT8",
+        ]:
+            self.assertIn(marker, feature_ext_body)
+
+        device_proc_body = c_function_body(icd, "device_proc_address_hidden_by_enabled_state")
+        for marker in [
+            "device->requested_feature_mask",
+            "device->enabled_extension_mask",
+            'strcmp(pName, "vkCmdBeginRenderingKHR") == 0',
+            'strcmp(pName, "vkCmdPipelineBarrier2KHR") == 0',
+            'strcmp(pName, "vkQueueSubmit2KHR") == 0',
+            'strcmp(pName, "vkCmdDrawIndirectCountKHR") == 0',
+            'strcmp(pName, "vkCmdDrawIndirectCountAMD") == 0',
+            'strcmp(pName, "vkCmdBindVertexBuffers2EXT") == 0',
+            'strcmp(pName, "vkCmdSetLogicOpEXT") == 0',
+            "PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT",
+        ]:
+            self.assertIn(marker, device_proc_body)
+
+        get_device_proc_body = c_function_body(icd, "vkGetDeviceProcAddr")
+        self.assertIn("device_proc_address_hidden_by_enabled_state(pdocker_device, pName)", get_device_proc_body)
+        self.assertIn("return proc_address(pName);", get_device_proc_body)
+
+        index_bind_body = c_function_body(icd, "record_index_buffer_binding")
+        for marker in [
+            "vulkan_index_element_size(indexType, &index_element_size)",
+            "graphics-index-type-invalid",
+            "indexType == VK_INDEX_TYPE_UINT8_EXT",
+            "PDOCKER_VK_FEATURE_INDEX_TYPE_UINT8",
+            "graphics-index-type-uint8-feature-disabled",
+        ]:
+            self.assertIn(marker, index_bind_body)
+
+        begin_rendering_body = c_function_body(icd, "vkCmdBeginRendering")
+        end_rendering_body = c_function_body(icd, "vkCmdEndRendering")
+        for body in [begin_rendering_body, end_rendering_body]:
+            self.assertIn("PDOCKER_VK_FEATURE_DYNAMIC_RENDERING", body)
+            self.assertIn("dynamic-rendering-feature-disabled", body)
+
+        pipeline_body = c_function_body(icd, "vkCreateGraphicsPipelines")
+        pipeline_rendering_slice = pipeline_body.split("VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO", 1)[1].split(
+            "pipeline->dynamic_rendering_pipeline = true;", 1
+        )[0]
+        self.assertIn("PDOCKER_VK_FEATURE_DYNAMIC_RENDERING", pipeline_rendering_slice)
+        self.assertIn("pipeline->graphics_unsupported = true;", pipeline_rendering_slice)
+
+        draw_body = c_function_body(icd, "record_graphics_draw_command")
+        for marker in [
+            "countBuffer != VK_NULL_HANDLE",
+            "PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT",
+            "graphics-draw-indirect-count-feature-disabled",
+        ]:
+            self.assertIn(marker, draw_body)
+
     def test_vulkan_icd_advertises_conservative_image_format_properties(self):
         icd = VULKAN_ICD.read_text()
         for marker in [

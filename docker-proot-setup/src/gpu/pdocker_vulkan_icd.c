@@ -274,6 +274,7 @@ typedef struct {
 typedef struct {
     VK_LOADER_DATA loader;
     uint64_t requested_feature_mask;
+    uint64_t enabled_extension_mask;
 } PdockerVkDevice;
 
 typedef struct {
@@ -491,6 +492,13 @@ static uint64_t g_generic_dispatch_sequence = 0;
 #define PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE       (1ull << 18)
 #define PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT          (1ull << 19)
 #define PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2     (1ull << 22)
+#define PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2     (1ull << 0)
+#define PDOCKER_VK_DEVICE_EXT_KHR_DYNAMIC_RENDERING     (1ull << 1)
+#define PDOCKER_VK_DEVICE_EXT_KHR_DRAW_INDIRECT_COUNT   (1ull << 2)
+#define PDOCKER_VK_DEVICE_EXT_AMD_DRAW_INDIRECT_COUNT   (1ull << 3)
+#define PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE    (1ull << 4)
+#define PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE_2  (1ull << 5)
+#define PDOCKER_VK_DEVICE_EXT_INDEX_TYPE_UINT8          (1ull << 6)
 #define PDOCKER_VK_FEATURE_MULTIVIEW                    (1ull << 20)
 #define PDOCKER_VK_FEATURE_TESSELLATION_SHADER        (1ull << 21)
 #define PDOCKER_VK_FEATURE_GEOMETRY_SHADER             (1ull << 23)
@@ -20770,6 +20778,70 @@ static VkResult validate_device_extensions(const VkDeviceCreateInfo *pCreateInfo
     return VK_SUCCESS;
 }
 
+static uint64_t enabled_device_extension_mask_from_create_info(
+        const VkDeviceCreateInfo *pCreateInfo) {
+    uint64_t mask = 0;
+    if (!pCreateInfo) return mask;
+    for (uint32_t i = 0; i < pCreateInfo->enabledExtensionCount; ++i) {
+        const char *name = pCreateInfo->ppEnabledExtensionNames
+            ? pCreateInfo->ppEnabledExtensionNames[i]
+            : NULL;
+        if (!name) continue;
+        if (strcmp(name, VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME) == 0) {
+            mask |= PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
+        } else if (strcmp(name, VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME) == 0) {
+            mask |= PDOCKER_VK_DEVICE_EXT_KHR_DYNAMIC_RENDERING;
+#ifdef VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME
+        } else if (strcmp(name, VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME) == 0) {
+            mask |= PDOCKER_VK_DEVICE_EXT_KHR_DRAW_INDIRECT_COUNT;
+#endif
+#ifdef VK_AMD_DRAW_INDIRECT_COUNT_EXTENSION_NAME
+        } else if (strcmp(name, VK_AMD_DRAW_INDIRECT_COUNT_EXTENSION_NAME) == 0) {
+            mask |= PDOCKER_VK_DEVICE_EXT_AMD_DRAW_INDIRECT_COUNT;
+#endif
+#ifdef VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME
+        } else if (strcmp(name, VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME) == 0) {
+            mask |= PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE;
+#endif
+#ifdef VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME
+        } else if (strcmp(name, VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME) == 0) {
+            mask |= PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE_2;
+#endif
+#ifdef VK_EXT_INDEX_TYPE_UINT8_EXTENSION_NAME
+        } else if (strcmp(name, VK_EXT_INDEX_TYPE_UINT8_EXTENSION_NAME) == 0) {
+            mask |= PDOCKER_VK_DEVICE_EXT_INDEX_TYPE_UINT8;
+#endif
+        }
+    }
+    return mask;
+}
+
+static VkResult validate_requested_feature_extension_enables(
+        uint64_t requested_feature_mask,
+        uint64_t enabled_extension_mask) {
+    if ((requested_feature_mask & PDOCKER_VK_FEATURE_SYNCHRONIZATION_2) &&
+        (enabled_extension_mask & PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2) == 0) {
+        return unsupported_device_feature_request_result("synchronization2 requires VK_KHR_synchronization2 on API 1.2");
+    }
+    if ((requested_feature_mask & PDOCKER_VK_FEATURE_DYNAMIC_RENDERING) &&
+        (enabled_extension_mask & PDOCKER_VK_DEVICE_EXT_KHR_DYNAMIC_RENDERING) == 0) {
+        return unsupported_device_feature_request_result("dynamicRendering requires VK_KHR_dynamic_rendering on API 1.2");
+    }
+    if ((requested_feature_mask & PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE) &&
+        (enabled_extension_mask & PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE) == 0) {
+        return unsupported_device_feature_request_result("extendedDynamicState requires VK_EXT_extended_dynamic_state");
+    }
+    if ((requested_feature_mask & PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2) &&
+        (enabled_extension_mask & PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE_2) == 0) {
+        return unsupported_device_feature_request_result("extendedDynamicState2 requires VK_EXT_extended_dynamic_state2");
+    }
+    if ((requested_feature_mask & PDOCKER_VK_FEATURE_INDEX_TYPE_UINT8) &&
+        (enabled_extension_mask & PDOCKER_VK_DEVICE_EXT_INDEX_TYPE_UINT8) == 0) {
+        return unsupported_device_feature_request_result("indexTypeUint8 requires VK_EXT_index_type_uint8");
+    }
+    return VK_SUCCESS;
+}
+
 static VkResult validate_device_queue_create_info_pnext(const void *pNext) {
     for (const void *node = pNext; node;) {
         PdockerVkStructHeader header = read_vk_struct_header(node);
@@ -20853,6 +20925,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
     VkResult feature_rc = validate_device_feature_requests(pCreateInfo);
     if (feature_rc != VK_SUCCESS) return feature_rc;
     uint64_t requested_feature_mask = requested_feature_mask_from_device_create_info(pCreateInfo);
+    uint64_t enabled_extension_mask = enabled_device_extension_mask_from_create_info(pCreateInfo);
+    VkResult feature_extension_rc = validate_requested_feature_extension_enables(
+        requested_feature_mask,
+        enabled_extension_mask);
+    if (feature_extension_rc != VK_SUCCESS) return feature_extension_rc;
     uint64_t supported_feature_mask = advertised_feature_mask();
     uint64_t unsupported_feature_mask = 0;
     if (!requested_features_supported(requested_feature_mask, supported_feature_mask,
@@ -20867,6 +20944,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
     PdockerVkDevice *device = calloc(1, sizeof(*device));
     if (!device) return VK_ERROR_OUT_OF_HOST_MEMORY;
     device->requested_feature_mask = requested_feature_mask;
+    device->enabled_extension_mask = enabled_extension_mask;
     if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
         fprintf(stderr,
                 "pdocker-vulkan-icd: create-device requested_feature_mask=0x%016llx supported_feature_mask=0x%016llx\n",
@@ -23161,6 +23239,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
             if (chain->sType == VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO) {
                 const VkPipelineRenderingCreateInfo *rendering =
                     (const VkPipelineRenderingCreateInfo *)chain;
+                if ((pipeline->requested_feature_mask & PDOCKER_VK_FEATURE_DYNAMIC_RENDERING) == 0) {
+                    pipeline->graphics_unsupported = true;
+                }
                 pipeline->dynamic_rendering_pipeline = true;
                 pipeline->dynamic_rendering_view_mask = rendering->viewMask;
                 pipeline->dynamic_rendering_color_attachment_count =
@@ -24968,6 +25049,11 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBeginRendering(
         const VkRenderingInfo *pRenderingInfo) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     if (!cmd) return;
+    if ((cmd->requested_feature_mask & PDOCKER_VK_FEATURE_DYNAMIC_RENDERING) == 0) {
+        cmd->graphics_unsupported = true;
+        command_buffer_mark_recording_failed(cmd, "dynamic-rendering-feature-disabled");
+        return;
+    }
     cmd->dynamic_rendering_active = true;
     cmd->render_pass_active = false;
     cmd->active_render_pass = NULL;
@@ -25032,6 +25118,11 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBeginRendering(
 VKAPI_ATTR void VKAPI_CALL vkCmdEndRendering(VkCommandBuffer commandBuffer) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     if (!cmd) return;
+    if ((cmd->requested_feature_mask & PDOCKER_VK_FEATURE_DYNAMIC_RENDERING) == 0) {
+        cmd->graphics_unsupported = true;
+        command_buffer_mark_recording_failed(cmd, "dynamic-rendering-feature-disabled");
+        return;
+    }
     PdockerVkGraphicsCommandRecord record;
     memset(&record, 0, sizeof(record));
     record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_RENDERING;
@@ -25835,6 +25926,21 @@ static void record_index_buffer_binding(
         command_buffer_mark_recording_failed(cmd, "graphics-index-buffer-range-invalid");
         return;
     }
+    uint64_t index_element_size = 0;
+    if (!vulkan_index_element_size(indexType, &index_element_size)) {
+        cmd->graphics_unsupported = true;
+        command_buffer_mark_recording_failed(cmd, "graphics-index-type-invalid");
+        return;
+    }
+#ifdef VK_EXT_INDEX_TYPE_UINT8_EXTENSION_NAME
+    if (indexType == VK_INDEX_TYPE_UINT8_EXT &&
+        (cmd->requested_feature_mask & PDOCKER_VK_FEATURE_INDEX_TYPE_UINT8) == 0) {
+        cmd->graphics_unsupported = true;
+        command_buffer_mark_recording_failed(cmd, "graphics-index-type-uint8-feature-disabled");
+        return;
+    }
+#endif
+    (void)index_element_size;
     if (!command_buffer_reserve_graphics_index_buffer_snapshots(cmd, 1)) {
         cmd->graphics_unsupported = true;
         command_buffer_mark_recording_failed(cmd, "graphics-index-buffer-snapshot-overflow");
@@ -25920,9 +26026,15 @@ static void record_graphics_draw_command(
         }
         if ((cmd->requested_feature_mask & PDOCKER_VK_FEATURE_DRAW_INDIRECT_FIRST_INSTANCE) == 0) {
             /* The indirect buffer owns firstInstance.  Without the feature we
-             * cannot prove every command's member is zero at record time, so
+             * cannot prove every command member is zero at record time, so
              * fail closed before forwarding a potentially invalid stream. */
             cmd->graphics_unsupported = true;
+        }
+        if (countBuffer != VK_NULL_HANDLE &&
+            (cmd->requested_feature_mask & PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT) == 0) {
+            cmd->graphics_unsupported = true;
+            command_buffer_mark_recording_failed(cmd, "graphics-draw-indirect-count-feature-disabled");
+            return;
         }
     }
     if (!command_buffer_reserve_graphics_draw_ops(cmd, 1)) {
@@ -32912,8 +33024,76 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance instan
     return proc_address(pName);
 }
 
+static bool device_proc_address_hidden_by_enabled_state(
+        const PdockerVkDevice *device,
+        const char *pName) {
+    if (!device || !pName) return true;
+    const uint64_t features = device->requested_feature_mask;
+    const uint64_t extensions = device->enabled_extension_mask;
+    if ((strcmp(pName, "vkCmdBeginRenderingKHR") == 0 ||
+         strcmp(pName, "vkCmdEndRenderingKHR") == 0) &&
+        ((features & PDOCKER_VK_FEATURE_DYNAMIC_RENDERING) == 0 ||
+         (extensions & PDOCKER_VK_DEVICE_EXT_KHR_DYNAMIC_RENDERING) == 0)) {
+        return true;
+    }
+    if ((strcmp(pName, "vkCmdPipelineBarrier2KHR") == 0 ||
+         strcmp(pName, "vkQueueSubmit2KHR") == 0 ||
+         strcmp(pName, "vkCmdSetEvent2KHR") == 0 ||
+         strcmp(pName, "vkCmdResetEvent2KHR") == 0 ||
+         strcmp(pName, "vkCmdWaitEvents2KHR") == 0 ||
+         strcmp(pName, "vkCmdWriteTimestamp2KHR") == 0) &&
+        ((features & PDOCKER_VK_FEATURE_SYNCHRONIZATION_2) == 0 ||
+         (extensions & PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2) == 0)) {
+        return true;
+    }
+    if ((strcmp(pName, "vkCmdDrawIndirectCount") == 0 ||
+         strcmp(pName, "vkCmdDrawIndexedIndirectCount") == 0) &&
+        (features & PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT) == 0) {
+        return true;
+    }
+    if ((strcmp(pName, "vkCmdDrawIndirectCountKHR") == 0 ||
+         strcmp(pName, "vkCmdDrawIndexedIndirectCountKHR") == 0) &&
+        ((features & PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT) == 0 ||
+         (extensions & PDOCKER_VK_DEVICE_EXT_KHR_DRAW_INDIRECT_COUNT) == 0)) {
+        return true;
+    }
+    if ((strcmp(pName, "vkCmdDrawIndirectCountAMD") == 0 ||
+         strcmp(pName, "vkCmdDrawIndexedIndirectCountAMD") == 0) &&
+        ((features & PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT) == 0 ||
+         (extensions & PDOCKER_VK_DEVICE_EXT_AMD_DRAW_INDIRECT_COUNT) == 0)) {
+        return true;
+    }
+    if ((strcmp(pName, "vkCmdBindVertexBuffers2EXT") == 0 ||
+         strcmp(pName, "vkCmdSetViewportWithCountEXT") == 0 ||
+         strcmp(pName, "vkCmdSetScissorWithCountEXT") == 0 ||
+         strcmp(pName, "vkCmdSetCullModeEXT") == 0 ||
+         strcmp(pName, "vkCmdSetFrontFaceEXT") == 0 ||
+         strcmp(pName, "vkCmdSetPrimitiveTopologyEXT") == 0 ||
+         strcmp(pName, "vkCmdSetDepthTestEnableEXT") == 0 ||
+         strcmp(pName, "vkCmdSetDepthWriteEnableEXT") == 0 ||
+         strcmp(pName, "vkCmdSetDepthCompareOpEXT") == 0 ||
+         strcmp(pName, "vkCmdSetDepthBoundsTestEnableEXT") == 0 ||
+         strcmp(pName, "vkCmdSetStencilTestEnableEXT") == 0 ||
+         strcmp(pName, "vkCmdSetStencilOpEXT") == 0) &&
+        ((features & PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE) == 0 ||
+         (extensions & PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE) == 0)) {
+        return true;
+    }
+    if ((strcmp(pName, "vkCmdSetRasterizerDiscardEnableEXT") == 0 ||
+         strcmp(pName, "vkCmdSetDepthBiasEnableEXT") == 0 ||
+         strcmp(pName, "vkCmdSetPrimitiveRestartEnableEXT") == 0 ||
+         strcmp(pName, "vkCmdSetLogicOpEXT") == 0 ||
+         strcmp(pName, "vkCmdSetPatchControlPointsEXT") == 0) &&
+        ((features & PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2) == 0 ||
+         (extensions & PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE_2) == 0)) {
+        return true;
+    }
+    return false;
+}
+
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetDeviceProcAddr(VkDevice device, const char *pName) {
-    (void)device;
+    PdockerVkDevice *pdocker_device = (PdockerVkDevice *)device;
+    if (device_proc_address_hidden_by_enabled_state(pdocker_device, pName)) return NULL;
     return proc_address(pName);
 }
 

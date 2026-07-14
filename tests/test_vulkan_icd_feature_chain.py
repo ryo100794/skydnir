@@ -2103,6 +2103,104 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_device_proc_and_command_recording_require_enabled_features(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            static int reason_is(const PdockerVkCommandBuffer *cmd, const char *reason) {{
+                return cmd && cmd->recording_failed && cmd->recording_failure_reason &&
+                       strcmp(cmd->recording_failure_reason, reason) == 0;
+            }}
+
+            int main(void) {{
+                PdockerVkDevice device;
+                memset(&device, 0, sizeof(device));
+                if (!device_proc_address_hidden_by_enabled_state(&device, "vkCmdBeginRenderingKHR")) return 2;
+                device.requested_feature_mask = PDOCKER_VK_FEATURE_DYNAMIC_RENDERING;
+                if (!device_proc_address_hidden_by_enabled_state(&device, "vkCmdBeginRenderingKHR")) return 3;
+                device.enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_DYNAMIC_RENDERING;
+                if (device_proc_address_hidden_by_enabled_state(&device, "vkCmdBeginRenderingKHR")) return 4;
+
+                memset(&device, 0, sizeof(device));
+                device.requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
+                if (!device_proc_address_hidden_by_enabled_state(&device, "vkQueueSubmit2KHR")) return 5;
+                device.enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
+                if (device_proc_address_hidden_by_enabled_state(&device, "vkQueueSubmit2KHR")) return 6;
+
+                memset(&device, 0, sizeof(device));
+                device.requested_feature_mask = PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT;
+                if (device_proc_address_hidden_by_enabled_state(&device, "vkCmdDrawIndirectCount")) return 7;
+                if (!device_proc_address_hidden_by_enabled_state(&device, "vkCmdDrawIndirectCountKHR")) return 8;
+                device.enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_DRAW_INDIRECT_COUNT;
+                if (device_proc_address_hidden_by_enabled_state(&device, "vkCmdDrawIndirectCountKHR")) return 9;
+
+                if (validate_requested_feature_extension_enables(
+                        PDOCKER_VK_FEATURE_DYNAMIC_RENDERING, 0) != VK_ERROR_FEATURE_NOT_PRESENT) return 10;
+                if (validate_requested_feature_extension_enables(
+                        PDOCKER_VK_FEATURE_DYNAMIC_RENDERING,
+                        PDOCKER_VK_DEVICE_EXT_KHR_DYNAMIC_RENDERING) != VK_SUCCESS) return 11;
+                if (validate_requested_feature_extension_enables(
+                        PDOCKER_VK_FEATURE_INDEX_TYPE_UINT8, 0) != VK_ERROR_FEATURE_NOT_PRESENT) return 12;
+                if (validate_requested_feature_extension_enables(
+                        PDOCKER_VK_FEATURE_INDEX_TYPE_UINT8,
+                        PDOCKER_VK_DEVICE_EXT_INDEX_TYPE_UINT8) != VK_SUCCESS) return 13;
+
+                PdockerVkMemory memory;
+                PdockerVkBuffer buffer;
+                PdockerVkCommandBuffer cmd;
+                memset(&memory, 0, sizeof(memory));
+                memset(&buffer, 0, sizeof(buffer));
+                memory.size = 1024;
+                buffer.size = 1024;
+                buffer.memory = &memory;
+                buffer.memory_offset = 0;
+
+            #ifdef VK_EXT_INDEX_TYPE_UINT8_EXTENSION_NAME
+                memset(&cmd, 0, sizeof(cmd));
+                record_index_buffer_binding((VkCommandBuffer)&cmd,
+                                            pdocker_vk_buffer_to_handle(&buffer),
+                                            0,
+                                            VK_WHOLE_SIZE,
+                                            VK_INDEX_TYPE_UINT8_EXT);
+                if (!reason_is(&cmd, "graphics-index-type-uint8-feature-disabled")) return 14;
+
+                memset(&cmd, 0, sizeof(cmd));
+                cmd.requested_feature_mask = PDOCKER_VK_FEATURE_INDEX_TYPE_UINT8;
+                record_index_buffer_binding((VkCommandBuffer)&cmd,
+                                            pdocker_vk_buffer_to_handle(&buffer),
+                                            0,
+                                            VK_WHOLE_SIZE,
+                                            VK_INDEX_TYPE_UINT8_EXT);
+                if (cmd.recording_failed) return 15;
+                command_buffer_destroy_record_vectors(&cmd);
+            #endif
+
+                memset(&cmd, 0, sizeof(cmd));
+                vkCmdBeginRendering((VkCommandBuffer)&cmd, NULL);
+                if (!reason_is(&cmd, "dynamic-rendering-feature-disabled")) return 16;
+
+                memset(&cmd, 0, sizeof(cmd));
+                record_graphics_draw_command((VkCommandBuffer)&cmd,
+                                             1, 1, 0, 0, 0, 0, 0,
+                                             false,
+                                             true,
+                                             VK_NULL_HANDLE,
+                                             0,
+                                             (VkBuffer)(uintptr_t)0x1234u,
+                                             0,
+                                             sizeof(VkDrawIndirectCommand));
+                if (!reason_is(&cmd, "graphics-draw-indirect-count-feature-disabled")) return 17;
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_debug_utils_extension_is_icd_local_metadata(self):
         source = textwrap.dedent(
             f"""
