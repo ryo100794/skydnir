@@ -20382,6 +20382,9 @@ static uint32_t collect_advertised_device_extensions(
 #ifdef VK_EXT_MEMORY_BUDGET_EXTENSION_NAME
     ADD_DEVICE_EXTENSION(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME, VK_EXT_MEMORY_BUDGET_SPEC_VERSION);
 #endif
+#ifdef VK_EXT_MEMORY_PRIORITY_EXTENSION_NAME
+    ADD_DEVICE_EXTENSION(VK_EXT_MEMORY_PRIORITY_EXTENSION_NAME, VK_EXT_MEMORY_PRIORITY_SPEC_VERSION);
+#endif
 #ifdef VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME
     ADD_DEVICE_EXTENSION(VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME, VK_EXT_HOST_QUERY_RESET_SPEC_VERSION);
 #endif
@@ -23740,6 +23743,62 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfacePresentModesKHR(
     for (uint32_t i = 0; i < count; ++i) pPresentModes[i] = modes[i];
     *pPresentModeCount = count;
     return count < available_count ? VK_INCOMPLETE : VK_SUCCESS;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkGetDeviceGroupPresentCapabilitiesKHR(
+        VkDevice device,
+        VkDeviceGroupPresentCapabilitiesKHR *pDeviceGroupPresentCapabilities) {
+    (void)device;
+    if (!pDeviceGroupPresentCapabilities) return VK_ERROR_INITIALIZATION_FAILED;
+    PdockerVkStructHeader header = read_vk_struct_header(pDeviceGroupPresentCapabilities);
+    zero_vk_out_struct_preserve_chain(pDeviceGroupPresentCapabilities,
+                                      sizeof(*pDeviceGroupPresentCapabilities),
+                                      header);
+    pDeviceGroupPresentCapabilities->presentMask[0] = 1u;
+    pDeviceGroupPresentCapabilities->modes = VK_DEVICE_GROUP_PRESENT_MODE_LOCAL_BIT_KHR;
+    return VK_SUCCESS;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkGetDeviceGroupSurfacePresentModesKHR(
+        VkDevice device,
+        VkSurfaceKHR surface,
+        VkDeviceGroupPresentModeFlagsKHR *pModes) {
+    (void)device;
+    if (!pModes) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!pdocker_vk_headless_surface_valid(pdocker_vk_surface_from_handle(surface))) {
+        *pModes = 0;
+        return VK_ERROR_SURFACE_LOST_KHR;
+    }
+    *pModes = VK_DEVICE_GROUP_PRESENT_MODE_LOCAL_BIT_KHR;
+    return VK_SUCCESS;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDevicePresentRectanglesKHR(
+        VkPhysicalDevice physicalDevice,
+        VkSurfaceKHR surface,
+        uint32_t *pRectCount,
+        VkRect2D *pRects) {
+    (void)physicalDevice;
+    if (!pRectCount) return VK_ERROR_INITIALIZATION_FAILED;
+    PdockerVkSurface *headless_surface = pdocker_vk_surface_from_handle(surface);
+    if (!pdocker_vk_headless_surface_valid(headless_surface)) {
+        *pRectCount = 0;
+        return VK_ERROR_SURFACE_LOST_KHR;
+    }
+    const uint32_t available_count = 1u;
+    if (!pRects) {
+        *pRectCount = available_count;
+        return VK_SUCCESS;
+    }
+    const uint32_t requested_count = *pRectCount;
+    if (requested_count < available_count) {
+        *pRectCount = 0;
+        return VK_INCOMPLETE;
+    }
+    pRects[0].offset = (VkOffset2D){0, 0};
+    pRects[0].extent = headless_surface->default_extent;
+    *pRectCount = available_count;
+    return VK_SUCCESS;
 }
 
 static VkResult fill_surface_capabilities2_pnext(void *pNext) {
@@ -32335,6 +32394,9 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_PROC(vkGetPhysicalDeviceSurfaceCapabilitiesKHR);
     MAP_PROC(vkGetPhysicalDeviceSurfaceFormatsKHR);
     MAP_PROC(vkGetPhysicalDeviceSurfacePresentModesKHR);
+    MAP_PROC(vkGetDeviceGroupPresentCapabilitiesKHR);
+    MAP_PROC(vkGetDeviceGroupSurfacePresentModesKHR);
+    MAP_PROC(vkGetPhysicalDevicePresentRectanglesKHR);
     MAP_PROC(vkGetPhysicalDeviceSurfaceCapabilities2KHR);
     MAP_PROC(vkGetPhysicalDeviceSurfaceFormats2KHR);
     MAP_PROC(vkCreateSwapchainKHR);

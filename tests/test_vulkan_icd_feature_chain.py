@@ -671,14 +671,60 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     (PFN_vkVoidFunction)vkCmdSetDeviceMask) return 7;
                 if (proc_address("vkCmdDispatchBaseKHR") !=
                     (PFN_vkVoidFunction)vkCmdDispatchBaseKHR) return 8;
+                if (proc_address("vkGetDeviceGroupPresentCapabilitiesKHR") !=
+                    (PFN_vkVoidFunction)vkGetDeviceGroupPresentCapabilitiesKHR) return 9;
+                if (proc_address("vkGetDeviceGroupSurfacePresentModesKHR") !=
+                    (PFN_vkVoidFunction)vkGetDeviceGroupSurfacePresentModesKHR) return 10;
+                if (proc_address("vkGetPhysicalDevicePresentRectanglesKHR") !=
+                    (PFN_vkVoidFunction)vkGetPhysicalDevicePresentRectanglesKHR) return 11;
 
                 VkPeerMemoryFeatureFlags peer = 0xffffffffu;
                 ((PFN_vkGetDeviceGroupPeerMemoryFeaturesKHR)proc_address("vkGetDeviceGroupPeerMemoryFeaturesKHR"))(
                     VK_NULL_HANDLE, 0, 0, 0, &peer);
-                if (peer != 0) return 9;
+                if (peer != 0) return 12;
                 ((PFN_vkCmdSetDeviceMaskKHR)proc_address("vkCmdSetDeviceMaskKHR"))(VK_NULL_HANDLE, 1);
                 ((PFN_vkCmdDispatchBaseKHR)proc_address("vkCmdDispatchBaseKHR"))(
                     VK_NULL_HANDLE, 1, 2, 3, 4, 5, 6);
+
+                VkDeviceGroupPresentCapabilitiesKHR present_caps;
+                memset(&present_caps, 0, sizeof(present_caps));
+                present_caps.sType = VK_STRUCTURE_TYPE_DEVICE_GROUP_PRESENT_CAPABILITIES_KHR;
+                if (vkGetDeviceGroupPresentCapabilitiesKHR(VK_NULL_HANDLE, &present_caps) != VK_SUCCESS) return 13;
+                if (present_caps.presentMask[0] != 1u) return 14;
+                if (present_caps.modes != VK_DEVICE_GROUP_PRESENT_MODE_LOCAL_BIT_KHR) return 15;
+
+                VkHeadlessSurfaceCreateInfoEXT surface_info;
+                memset(&surface_info, 0, sizeof(surface_info));
+                surface_info.sType = VK_STRUCTURE_TYPE_HEADLESS_SURFACE_CREATE_INFO_EXT;
+                VkSurfaceKHR surface = VK_NULL_HANDLE;
+                if (vkCreateHeadlessSurfaceEXT(VK_NULL_HANDLE, &surface_info, NULL, &surface) != VK_SUCCESS) return 16;
+                if (surface == VK_NULL_HANDLE) return 17;
+
+                VkDeviceGroupPresentModeFlagsKHR surface_modes = 0;
+                if (vkGetDeviceGroupSurfacePresentModesKHR(VK_NULL_HANDLE, surface, &surface_modes) != VK_SUCCESS) return 18;
+                if (surface_modes != VK_DEVICE_GROUP_PRESENT_MODE_LOCAL_BIT_KHR) return 19;
+
+                uint32_t rect_count = 0;
+                if (vkGetPhysicalDevicePresentRectanglesKHR(VK_NULL_HANDLE, surface, &rect_count, NULL) != VK_SUCCESS) return 20;
+                if (rect_count != 1u) return 21;
+                VkRect2D rect;
+                memset(&rect, 0xff, sizeof(rect));
+                rect_count = 1u;
+                if (vkGetPhysicalDevicePresentRectanglesKHR(VK_NULL_HANDLE, surface, &rect_count, &rect) != VK_SUCCESS) return 22;
+                if (rect_count != 1u) return 23;
+                if (rect.offset.x != 0 || rect.offset.y != 0) return 24;
+                if (rect.extent.width != 640u || rect.extent.height != 480u) return 25;
+                rect_count = 0u;
+                if (vkGetPhysicalDevicePresentRectanglesKHR(VK_NULL_HANDLE, surface, &rect_count, &rect) != VK_INCOMPLETE) return 26;
+                if (rect_count != 0u) return 27;
+
+                surface_modes = 99u;
+                if (vkGetDeviceGroupSurfacePresentModesKHR(VK_NULL_HANDLE, VK_NULL_HANDLE, &surface_modes) != VK_ERROR_SURFACE_LOST_KHR) return 28;
+                if (surface_modes != 0u) return 29;
+                rect_count = 99u;
+                if (vkGetPhysicalDevicePresentRectanglesKHR(VK_NULL_HANDLE, VK_NULL_HANDLE, &rect_count, NULL) != VK_ERROR_SURFACE_LOST_KHR) return 30;
+                if (rect_count != 0u) return 31;
+                vkDestroySurfaceKHR(VK_NULL_HANDLE, surface, NULL);
             #endif
                 return 0;
             }}
@@ -1735,6 +1781,23 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     fprintf(stderr, "memoryPriority=false was rejected\\n");
                     return 6;
                 }}
+
+            #ifdef VK_EXT_MEMORY_PRIORITY_EXTENSION_NAME
+                if (!device_extension_advertised_name(VK_EXT_MEMORY_PRIORITY_EXTENSION_NAME)) {{
+                    fprintf(stderr, "VK_EXT_memory_priority was not advertised as a false-only extension\\n");
+                    return 7;
+                }}
+                const char *enabled_extensions[] = {{ VK_EXT_MEMORY_PRIORITY_EXTENSION_NAME }};
+                VkDeviceCreateInfo extension_info;
+                memset(&extension_info, 0, sizeof(extension_info));
+                extension_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                extension_info.enabledExtensionCount = 1;
+                extension_info.ppEnabledExtensionNames = enabled_extensions;
+                if (validate_device_extensions(&extension_info) != VK_SUCCESS) {{
+                    fprintf(stderr, "VK_EXT_memory_priority extension enable was rejected\\n");
+                    return 8;
+                }}
+            #endif
                 return 0;
             }}
             """

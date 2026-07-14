@@ -9127,6 +9127,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("p->memoryPriority = VK_FALSE", icd)
         self.assertIn("supported = !p->memoryPriority", icd)
         self.assertIn('unsupported_feature_name = "memoryPriority"', icd)
+        collector_body = c_function_body(icd, "collect_advertised_device_extensions")
+        self.assertIn("ADD_DEVICE_EXTENSION(VK_EXT_MEMORY_PRIORITY_EXTENSION_NAME", collector_body)
         self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DEMOTE_TO_HELPER_INVOCATION_FEATURES", icd)
         self.assertIn("p->shaderDemoteToHelperInvocation = VK_FALSE", icd)
         self.assertIn("supported = !p->shaderDemoteToHelperInvocation", icd)
@@ -9326,17 +9328,32 @@ class GpuAbiContractTest(unittest.TestCase):
             'MAP_ALIAS("vkGetDeviceGroupPeerMemoryFeaturesKHR", vkGetDeviceGroupPeerMemoryFeatures)',
             'MAP_ALIAS("vkCmdSetDeviceMaskKHR", vkCmdSetDeviceMask)',
             'MAP_ALIAS("vkCmdDispatchBaseKHR", vkCmdDispatchBaseKHR)',
+            "MAP_PROC(vkGetDeviceGroupPresentCapabilitiesKHR)",
+            "MAP_PROC(vkGetDeviceGroupSurfacePresentModesKHR)",
+            "MAP_PROC(vkGetPhysicalDevicePresentRectanglesKHR)",
         ]:
             self.assertIn(alias, proc_body)
         for hidden in [
             "vkGetDeviceGroupPeerMemoryFeaturesKHR",
             "vkCmdSetDeviceMaskKHR",
             "vkCmdDispatchBaseKHR",
+            "vkGetDeviceGroupPresentCapabilitiesKHR",
+            "vkGetDeviceGroupSurfacePresentModesKHR",
+            "vkGetPhysicalDevicePresentRectanglesKHR",
         ]:
             self.assertNotIn(hidden, hidden_body)
+        caps_body = c_function_body(icd, "vkGetDeviceGroupPresentCapabilitiesKHR")
+        surface_modes_body = c_function_body(icd, "vkGetDeviceGroupSurfacePresentModesKHR")
+        rects_body = c_function_body(icd, "vkGetPhysicalDevicePresentRectanglesKHR")
         self.assertIn("*pPeerMemoryFeatures = 0;", peer_body)
         self.assertIn("deviceMask != 1u", mask_body)
         self.assertIn("op->base_group_x = baseGroupX;", icd)
+        self.assertIn("presentMask[0] = 1u", caps_body)
+        self.assertIn("VK_DEVICE_GROUP_PRESENT_MODE_LOCAL_BIT_KHR", caps_body)
+        self.assertIn("VK_DEVICE_GROUP_PRESENT_MODE_LOCAL_BIT_KHR", surface_modes_body)
+        self.assertIn("VK_ERROR_SURFACE_LOST_KHR", surface_modes_body)
+        self.assertIn("VK_INCOMPLETE", rects_body)
+        self.assertIn("headless_surface->default_extent", rects_body)
 
     def test_vulkan_create_renderpass2_extension_is_advertised_and_aliases_are_public(self):
         icd = VULKAN_ICD.read_text()
