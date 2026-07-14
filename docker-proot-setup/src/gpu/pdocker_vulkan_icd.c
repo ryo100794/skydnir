@@ -20178,6 +20178,9 @@ static uint32_t collect_advertised_device_extensions(
 #ifdef VK_KHR_MAINTENANCE_5_EXTENSION_NAME
     ADD_DEVICE_EXTENSION(VK_KHR_MAINTENANCE_5_EXTENSION_NAME, VK_KHR_MAINTENANCE_5_SPEC_VERSION);
 #endif
+#ifdef VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME
+    ADD_DEVICE_EXTENSION(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME, VK_KHR_BUFFER_DEVICE_ADDRESS_SPEC_VERSION);
+#endif
     ADD_DEVICE_EXTENSION(VK_KHR_COPY_COMMANDS_2_EXTENSION_NAME, VK_KHR_COPY_COMMANDS_2_SPEC_VERSION);
     if (advertised_synchronization2()) {
         ADD_DEVICE_EXTENSION(VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME, VK_KHR_SYNCHRONIZATION_2_SPEC_VERSION);
@@ -31864,9 +31867,6 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance instan
 static bool proc_address_hidden_by_advertisement(const char *pName) {
     if (!pName) return true;
     if (strcmp(pName, "vkGetImageSubresourceLayout2EXT") == 0 ||
-        strcmp(pName, "vkGetBufferDeviceAddressKHR") == 0 ||
-        strcmp(pName, "vkGetBufferOpaqueCaptureAddressKHR") == 0 ||
-        strcmp(pName, "vkGetDeviceMemoryOpaqueCaptureAddressKHR") == 0 ||
         strcmp(pName, "vkGetBufferDeviceAddressEXT") == 0 ||
         strcmp(pName, "vkCreateSamplerYcbcrConversionKHR") == 0 ||
         strcmp(pName, "vkDestroySamplerYcbcrConversionKHR") == 0) {

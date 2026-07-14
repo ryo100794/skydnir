@@ -238,6 +238,105 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_buffer_device_address_khr_extension_is_false_only(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            static int extension_seen(
+                    const VkExtensionProperties *extensions,
+                    uint32_t count,
+                    const char *name) {{
+                for (uint32_t i = 0; i < count; ++i) {{
+                    if (strcmp(extensions[i].extensionName, name) == 0) return 1;
+                }}
+                return 0;
+            }}
+
+            int main(void) {{
+            #ifdef VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME
+                if (!device_extension_advertised_name(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME)) return 2;
+                uint32_t count = 64;
+                VkExtensionProperties extensions[64];
+                memset(extensions, 0, sizeof(extensions));
+                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &count, extensions) != VK_SUCCESS) return 3;
+                if (!extension_seen(extensions, count, VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME)) return 4;
+
+                const char *enabled[] = {{ VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME }};
+                VkDeviceCreateInfo device_info;
+                memset(&device_info, 0, sizeof(device_info));
+                device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                device_info.enabledExtensionCount = 1;
+                device_info.ppEnabledExtensionNames = enabled;
+                if (validate_device_extensions(&device_info) != VK_SUCCESS) return 5;
+
+                if (proc_address("vkGetBufferDeviceAddressKHR") !=
+                    (PFN_vkVoidFunction)vkGetBufferDeviceAddress) return 6;
+                if (proc_address("vkGetBufferOpaqueCaptureAddressKHR") !=
+                    (PFN_vkVoidFunction)vkGetBufferOpaqueCaptureAddress) return 7;
+                if (proc_address("vkGetDeviceMemoryOpaqueCaptureAddressKHR") !=
+                    (PFN_vkVoidFunction)vkGetDeviceMemoryOpaqueCaptureAddress) return 8;
+                if (proc_address("vkGetBufferDeviceAddressEXT") != NULL) return 9;
+
+                VkPhysicalDeviceBufferDeviceAddressFeatures features;
+                memset(&features, 0xff, sizeof(features));
+                features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
+                features.pNext = NULL;
+                fill_pnext_features(&features);
+                if (features.sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES ||
+                    features.pNext != NULL ||
+                    features.bufferDeviceAddress != VK_FALSE ||
+                    features.bufferDeviceAddressCaptureReplay != VK_FALSE ||
+                    features.bufferDeviceAddressMultiDevice != VK_FALSE) return 10;
+
+                device_info.pNext = &features;
+                features.bufferDeviceAddress = VK_TRUE;
+                if (validate_device_feature_requests(&device_info) == VK_SUCCESS) return 11;
+                features.bufferDeviceAddress = VK_FALSE;
+                features.bufferDeviceAddressCaptureReplay = VK_TRUE;
+                if (validate_device_feature_requests(&device_info) == VK_SUCCESS) return 12;
+                features.bufferDeviceAddressCaptureReplay = VK_FALSE;
+                features.bufferDeviceAddressMultiDevice = VK_TRUE;
+                if (validate_device_feature_requests(&device_info) == VK_SUCCESS) return 13;
+                features.bufferDeviceAddressMultiDevice = VK_FALSE;
+                if (validate_device_feature_requests(&device_info) != VK_SUCCESS) return 14;
+
+                VkMemoryAllocateFlagsInfo flags;
+                memset(&flags, 0, sizeof(flags));
+                flags.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
+                flags.flags = 0;
+                flags.deviceMask = 0;
+                if (validate_memory_allocate_pnext(&flags) != VK_SUCCESS) return 15;
+                flags.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT_KHR;
+                if (validate_memory_allocate_pnext(&flags) == VK_SUCCESS) return 16;
+                flags.flags = 0;
+                flags.deviceMask = 2;
+                if (validate_memory_allocate_pnext(&flags) == VK_SUCCESS) return 17;
+
+                VkBufferDeviceAddressInfo buffer_info;
+                memset(&buffer_info, 0, sizeof(buffer_info));
+                buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+                buffer_info.buffer = VK_NULL_HANDLE;
+                if (((PFN_vkGetBufferDeviceAddressKHR)proc_address("vkGetBufferDeviceAddressKHR"))(VK_NULL_HANDLE, &buffer_info) != 0) return 18;
+                if (((PFN_vkGetBufferOpaqueCaptureAddressKHR)proc_address("vkGetBufferOpaqueCaptureAddressKHR"))(VK_NULL_HANDLE, &buffer_info) != 0) return 19;
+
+                VkDeviceMemoryOpaqueCaptureAddressInfo memory_info;
+                memset(&memory_info, 0, sizeof(memory_info));
+                memory_info.sType = VK_STRUCTURE_TYPE_DEVICE_MEMORY_OPAQUE_CAPTURE_ADDRESS_INFO;
+                memory_info.memory = VK_NULL_HANDLE;
+                if (((PFN_vkGetDeviceMemoryOpaqueCaptureAddressKHR)proc_address("vkGetDeviceMemoryOpaqueCaptureAddressKHR"))(VK_NULL_HANDLE, &memory_info) != 0) return 20;
+            #endif
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+
     def test_device_group_extension_exposes_single_device_noop_aliases(self):
         source = textwrap.dedent(
             f"""

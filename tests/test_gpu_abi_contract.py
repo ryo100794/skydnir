@@ -7694,6 +7694,34 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("indices->pDepthInputAttachmentIndex", rendering_info_body)
         self.assertIn("indices->pStencilInputAttachmentIndex", rendering_info_body)
 
+    def test_vulkan_buffer_device_address_khr_is_advertised_false_only(self):
+        icd = VULKAN_ICD.read_text()
+        self.assertIn("VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME", icd)
+        collector_body = c_function_body(icd, "collect_advertised_device_extensions")
+        self.assertIn("ADD_DEVICE_EXTENSION(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME", collector_body)
+
+        features_body = c_function_body(icd, "fill_pnext_features")
+        self.assertIn("VkPhysicalDeviceBufferDeviceAddressFeatures", features_body)
+        validate_body = c_function_body(icd, "validate_device_feature_requests")
+        self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES", validate_body)
+        self.assertIn("!p->bufferDeviceAddress && !p->bufferDeviceAddressCaptureReplay && !p->bufferDeviceAddressMultiDevice", validate_body)
+
+        allocate_pnext_body = c_function_body(icd, "validate_memory_allocate_pnext")
+        self.assertIn("VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO", allocate_pnext_body)
+        self.assertIn("info->flags != 0 || info->deviceMask > 1", allocate_pnext_body)
+        buffer_pnext_body = c_function_body(icd, "validate_buffer_create_pnext")
+        self.assertIn("VK_STRUCTURE_TYPE_BUFFER_OPAQUE_CAPTURE_ADDRESS_CREATE_INFO", buffer_pnext_body)
+        self.assertIn("capture_info->opaqueCaptureAddress != 0", buffer_pnext_body)
+
+        hidden_body = c_function_body(icd, "proc_address_hidden_by_advertisement")
+        for alias in [
+            "vkGetBufferDeviceAddressKHR",
+            "vkGetBufferOpaqueCaptureAddressKHR",
+            "vkGetDeviceMemoryOpaqueCaptureAddressKHR",
+        ]:
+            self.assertNotIn(alias, hidden_body)
+        self.assertIn('strcmp(pName, "vkGetBufferDeviceAddressEXT") == 0', hidden_body)
+
     def test_vulkan_maintenance5_is_advertised_with_false_only_feature_bit(self):
         icd = VULKAN_ICD.read_text()
         self.assertIn("VK_KHR_MAINTENANCE_5_EXTENSION_NAME", icd)
@@ -9556,11 +9584,14 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, proc_body)
         for alias in [
-            "vkCreateSamplerYcbcrConversionKHR",
-            "vkDestroySamplerYcbcrConversionKHR",
             "vkGetBufferDeviceAddressKHR",
             "vkGetBufferOpaqueCaptureAddressKHR",
             "vkGetDeviceMemoryOpaqueCaptureAddressKHR",
+        ]:
+            self.assertNotIn(alias, hidden_body)
+        for alias in [
+            "vkCreateSamplerYcbcrConversionKHR",
+            "vkDestroySamplerYcbcrConversionKHR",
             "vkGetBufferDeviceAddressEXT",
         ]:
             self.assertIn(alias, hidden_body)
