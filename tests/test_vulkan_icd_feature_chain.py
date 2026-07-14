@@ -2630,6 +2630,53 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     return 4;
                 }}
 
+            #ifdef VK_KHR_VARIABLE_POINTERS_EXTENSION_NAME
+                const char *variable_pointer_extensions[] = {{ VK_KHR_VARIABLE_POINTERS_EXTENSION_NAME }};
+                create_info.enabledExtensionCount = 1;
+                create_info.ppEnabledExtensionNames = variable_pointer_extensions;
+                if (!device_extension_advertised_name(VK_KHR_VARIABLE_POINTERS_EXTENSION_NAME) ||
+                    validate_device_extensions(&create_info) != VK_SUCCESS ||
+                    validate_device_feature_requests(&create_info) != VK_SUCCESS) {{
+                    fprintf(stderr, "VK_KHR_variable_pointers false-only enable failed\\n");
+                    return 11;
+                }}
+            #endif
+            #ifdef VK_KHR_SHADER_DRAW_PARAMETERS_EXTENSION_NAME
+                const char *shader_draw_extensions[] = {{ VK_KHR_SHADER_DRAW_PARAMETERS_EXTENSION_NAME }};
+                create_info.enabledExtensionCount = 1;
+                create_info.ppEnabledExtensionNames = shader_draw_extensions;
+                if (!device_extension_advertised_name(VK_KHR_SHADER_DRAW_PARAMETERS_EXTENSION_NAME) ||
+                    validate_device_extensions(&create_info) != VK_SUCCESS ||
+                    validate_device_feature_requests(&create_info) != VK_SUCCESS) {{
+                    fprintf(stderr, "VK_KHR_shader_draw_parameters false-only enable failed\\n");
+                    return 12;
+                }}
+            #endif
+            #ifdef VK_KHR_SHADER_ATOMIC_INT64_EXTENSION_NAME
+                const char *atomic64_extensions[] = {{ VK_KHR_SHADER_ATOMIC_INT64_EXTENSION_NAME }};
+                create_info.enabledExtensionCount = 1;
+                create_info.ppEnabledExtensionNames = atomic64_extensions;
+                if (!device_extension_advertised_name(VK_KHR_SHADER_ATOMIC_INT64_EXTENSION_NAME) ||
+                    validate_device_extensions(&create_info) != VK_SUCCESS ||
+                    validate_device_feature_requests(&create_info) != VK_SUCCESS) {{
+                    fprintf(stderr, "VK_KHR_shader_atomic_int64 false-only enable failed\\n");
+                    return 13;
+                }}
+            #endif
+            #ifdef VK_KHR_IMAGELESS_FRAMEBUFFER_EXTENSION_NAME
+                const char *imageless_extensions[] = {{ VK_KHR_IMAGELESS_FRAMEBUFFER_EXTENSION_NAME }};
+                create_info.enabledExtensionCount = 1;
+                create_info.ppEnabledExtensionNames = imageless_extensions;
+                if (!device_extension_advertised_name(VK_KHR_IMAGELESS_FRAMEBUFFER_EXTENSION_NAME) ||
+                    validate_device_extensions(&create_info) != VK_SUCCESS ||
+                    validate_device_feature_requests(&create_info) != VK_SUCCESS) {{
+                    fprintf(stderr, "VK_KHR_imageless_framebuffer false-only enable failed\\n");
+                    return 14;
+                }}
+            #endif
+                create_info.enabledExtensionCount = 0;
+                create_info.ppEnabledExtensionNames = NULL;
+
                 multiview.multiview = VK_TRUE;
                 if (validate_device_feature_requests(&create_info) == VK_SUCCESS) {{
                     fprintf(stderr, "offline multiview=true standalone feature was accepted\\n");
