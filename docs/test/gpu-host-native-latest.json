@@ -1,6 +1,6 @@
 {
   "schema": "pdocker.gpu.host_native.v1",
-  "timestamp_utc": "20260505T022346Z",
+  "timestamp_utc": "20260714T004326Z",
   "runs_requested": 2,
   "summary": {
     "cpu_matmul": {
@@ -11,12 +11,12 @@
       "transport": "host-cpu-local-process-buffer",
       "kernel": "matmul_fp32",
       "problem_size": "n=256x256",
-      "total_ms_median": 36.48165,
-      "total_ms_mean": 36.48165,
-      "steady_total_ms_median": 36.48165,
-      "steady_total_ms_mean": 36.48165,
-      "steady_dispatch_ms_median": 36.48165,
-      "steady_dispatch_ms_mean": 36.48165
+      "total_ms_median": 25.11665,
+      "total_ms_mean": 25.11665,
+      "steady_total_ms_median": 25.11665,
+      "steady_total_ms_mean": 25.11665,
+      "steady_dispatch_ms_median": 25.11665,
+      "steady_dispatch_ms_mean": 25.11665
     },
     "vulkan_matmul_resident": {
       "samples": 2,
@@ -26,12 +26,12 @@
       "transport": "direct-vulkan-resident-buffer",
       "kernel": "matmul_fp32",
       "problem_size": "n=256x256",
-      "total_ms_median": 134.0746,
-      "total_ms_mean": 134.0746,
-      "steady_total_ms_median": 1.1628,
-      "steady_total_ms_mean": 1.1628,
-      "steady_dispatch_ms_median": 1.1324,
-      "steady_dispatch_ms_mean": 1.1324
+      "total_ms_median": 94.80525,
+      "total_ms_mean": 94.80525,
+      "steady_total_ms_median": 0.5575,
+      "steady_total_ms_mean": 0.5575,
+      "steady_dispatch_ms_median": 0.5492,
+      "steady_dispatch_ms_mean": 0.5492
     },
     "cpu_vector": {
       "samples": 2,
@@ -41,12 +41,12 @@
       "transport": "host-cpu-local-process-buffer",
       "kernel": "vector_add",
       "problem_size": "n=262144",
-      "total_ms_median": 0.08065,
-      "total_ms_mean": 0.08065,
-      "steady_total_ms_median": 0.08065,
-      "steady_total_ms_mean": 0.08065,
-      "steady_dispatch_ms_median": 0.08065,
-      "steady_dispatch_ms_mean": 0.08065
+      "total_ms_median": 0.1368,
+      "total_ms_mean": 0.1368,
+      "steady_total_ms_median": 0.1368,
+      "steady_total_ms_mean": 0.1368,
+      "steady_dispatch_ms_median": 0.1368,
+      "steady_dispatch_ms_mean": 0.1368
     },
     "vulkan_vector_resident": {
       "samples": 2,
@@ -56,19 +56,19 @@
       "transport": "direct-vulkan-resident-buffer",
       "kernel": "vector_add",
       "problem_size": "n=262144",
-      "total_ms_median": 130.00725,
-      "total_ms_mean": 130.00725,
-      "steady_total_ms_median": 0.6184,
-      "steady_total_ms_mean": 0.6184,
-      "steady_dispatch_ms_median": 0.5297,
-      "steady_dispatch_ms_mean": 0.5297
+      "total_ms_median": 53.81825,
+      "total_ms_mean": 53.81825,
+      "steady_total_ms_median": 0.489,
+      "steady_total_ms_mean": 0.489,
+      "steady_dispatch_ms_median": 0.4573,
+      "steady_dispatch_ms_mean": 0.4573
     }
   },
   "ratios": {
-    "host_cpu_matmul_over_host_vulkan_matmul_resident": 31.373968008255932,
-    "host_vulkan_matmul_resident_over_host_cpu_matmul": 0.03187355835056802,
-    "host_cpu_vector_over_host_vulkan_vector_resident": 0.13041720569210868,
-    "host_vulkan_vector_resident_over_host_cpu_vector": 7.667699938003719
+    "host_cpu_matmul_over_host_vulkan_matmul_resident": 45.05228699551569,
+    "host_vulkan_matmul_resident_over_host_cpu_matmul": 0.022196431450850332,
+    "host_cpu_vector_over_host_vulkan_vector_resident": 0.27975460122699386,
+    "host_vulkan_vector_resident_over_host_cpu_vector": 3.574561403508772
   },
   "samples": {
     "cpu_matmul": [
@@ -87,9 +87,9 @@
         "init_ms": 0.0,
         "compile_ms": 0.0,
         "upload_ms": 0.0,
-        "dispatch_ms": 37.7796,
+        "dispatch_ms": 27.0283,
         "download_ms": 0.0,
-        "total_ms": 37.7796,
+        "total_ms": 27.0283,
         "checksum": -1.71134365,
         "max_abs_error": 0.0,
         "valid": true
@@ -109,9 +109,9 @@
         "init_ms": 0.0,
         "compile_ms": 0.0,
         "upload_ms": 0.0,
-        "dispatch_ms": 35.1837,
+        "dispatch_ms": 23.205,
         "download_ms": 0.0,
-        "total_ms": 35.1837,
+        "total_ms": 23.205,
         "checksum": -1.71134365,
         "max_abs_error": 0.0,
         "valid": true
@@ -132,12 +132,12 @@
         "transport": "direct-vulkan-resident-buffer",
         "kernel": "matmul_fp32",
         "problem_size": "n=256x256",
-        "init_ms": 263.4909,
+        "init_ms": 187.1136,
         "compile_ms": 0.0,
-        "upload_ms": 0.9211,
-        "dispatch_ms": 2.393,
-        "download_ms": 0.1814,
-        "total_ms": 266.9864,
+        "upload_ms": 0.622,
+        "dispatch_ms": 1.1426,
+        "download_ms": 0.1748,
+        "total_ms": 189.053,
         "checksum": -1.71026074,
         "max_abs_error": 7e-08,
         "valid": true
@@ -159,9 +159,9 @@
         "init_ms": 0.0,
         "compile_ms": 0.0,
         "upload_ms": 0.0,
-        "dispatch_ms": 1.1324,
-        "download_ms": 0.0304,
-        "total_ms": 1.1628,
+        "dispatch_ms": 0.5492,
+        "download_ms": 0.0083,
+        "total_ms": 0.5575,
         "checksum": -1.71026074,
         "max_abs_error": 7e-08,
         "valid": true
@@ -183,9 +183,9 @@
         "init_ms": 0.0,
         "compile_ms": 0.0,
         "upload_ms": 0.0,
-        "dispatch_ms": 0.088,
+        "dispatch_ms": 0.1869,
         "download_ms": 0.0,
-        "total_ms": 0.088,
+        "total_ms": 0.1869,
         "max_abs_error": 0.0,
         "valid": true
       },
@@ -204,9 +204,9 @@
         "init_ms": 0.0,
         "compile_ms": 0.0,
         "upload_ms": 0.0,
-        "dispatch_ms": 0.0733,
+        "dispatch_ms": 0.0867,
         "download_ms": 0.0,
-        "total_ms": 0.0733,
+        "total_ms": 0.0867,
         "max_abs_error": 0.0,
         "valid": true
       }
@@ -226,12 +226,12 @@
         "transport": "direct-vulkan-resident-buffer",
         "kernel": "vector_add",
         "problem_size": "n=262144",
-        "init_ms": 245.2624,
+        "init_ms": 103.7661,
         "compile_ms": 0.0,
-        "upload_ms": 11.9741,
-        "dispatch_ms": 0.992,
-        "download_ms": 1.1677,
-        "total_ms": 259.3961,
+        "upload_ms": 1.9843,
+        "dispatch_ms": 0.8593,
+        "download_ms": 0.5378,
+        "total_ms": 107.1475,
         "max_abs_error": 0.0,
         "valid": true
       },
@@ -252,9 +252,9 @@
         "init_ms": 0.0,
         "compile_ms": 0.0,
         "upload_ms": 0.0,
-        "dispatch_ms": 0.5297,
-        "download_ms": 0.0888,
-        "total_ms": 0.6184,
+        "dispatch_ms": 0.4573,
+        "download_ms": 0.0316,
+        "total_ms": 0.489,
         "max_abs_error": 0.0,
         "valid": true
       }
