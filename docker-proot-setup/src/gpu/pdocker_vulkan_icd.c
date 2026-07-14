@@ -5878,7 +5878,7 @@ static int collect_graphics_buffer_resource(
     entry->fd_index = PDOCKER_GPU_V5_RESOURCE_FD_NONE;
     entry->memory_offset = (uint64_t)buffer->memory_offset;
     entry->size = (uint64_t)buffer->size;
-    entry->usage = 0;
+    entry->usage = (uint64_t)buffer->usage;
     entry->generation = generation;
     buffer_objects[*buffer_count] = buffer;
     buffer_resource_indices[*buffer_count] = index;
@@ -5946,7 +5946,7 @@ static int collect_graphics_buffer_resource_snapshot(
     entry->fd_index = PDOCKER_GPU_V5_RESOURCE_FD_NONE;
     entry->memory_offset = (uint64_t)snapshot->memory_offset;
     entry->size = (uint64_t)snapshot->size;
-    entry->usage = 0;
+    entry->usage = (uint64_t)snapshot->usage;
     entry->generation = generation;
     buffer_objects[*buffer_count] = buffer;
     buffer_resource_indices[*buffer_count] = index;

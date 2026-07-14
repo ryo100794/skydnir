@@ -30761,6 +30761,8 @@ static int add_vulkan_graphics_replay_buffer_range(
     if (checked_u64_add3(offset, size, 0, &end) != 0) return -EOVERFLOW;
     int found = find_vulkan_graphics_replay_buffer(out, resource_index);
     VulkanGraphicsReplayBuffer *dst = NULL;
+    const VkBufferUsageFlags api_usage = (VkBufferUsageFlags)buffer->usage;
+    const VkBufferUsageFlags effective_usage = api_usage | usage;
     if (found < 0) {
         if (!out->buffers || out->buffer_count >= out->buffer_capacity) return -E2BIG;
         dst = &out->buffers[out->buffer_count++];
@@ -30768,12 +30770,12 @@ static int add_vulkan_graphics_replay_buffer_range(
         dst->resource_index = resource_index;
         dst->upload_base = offset;
         dst->upload_end = end;
-        dst->usage = usage;
+        dst->usage = effective_usage;
     } else {
         dst = &out->buffers[(uint32_t)found];
         if (offset < dst->upload_base) dst->upload_base = offset;
         if (end > dst->upload_end) dst->upload_end = end;
-        dst->usage |= usage;
+        dst->usage |= effective_usage;
     }
     return 0;
 }
