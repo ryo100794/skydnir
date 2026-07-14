@@ -2981,6 +2981,94 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
+    def test_external_memory_extension_is_zero_handle_only(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            static int extension_seen(
+                    const VkExtensionProperties *extensions,
+                    uint32_t count,
+                    const char *name) {{
+                for (uint32_t i = 0; i < count; ++i) {{
+                    if (strcmp(extensions[i].extensionName, name) == 0) return 1;
+                }}
+                return 0;
+            }}
+
+            int main(void) {{
+            #ifdef VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME
+                if (!device_extension_advertised_name(VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME)) return 2;
+                uint32_t count = 64;
+                VkExtensionProperties extensions[64];
+                memset(extensions, 0, sizeof(extensions));
+                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &count, extensions) != VK_SUCCESS) return 3;
+                if (!extension_seen(extensions, count, VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME)) return 4;
+
+                const char *enabled[] = {{ VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME }};
+                VkDeviceCreateInfo device_info;
+                memset(&device_info, 0, sizeof(device_info));
+                device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                device_info.enabledExtensionCount = 1;
+                device_info.ppEnabledExtensionNames = enabled;
+                if (validate_device_extensions(&device_info) != VK_SUCCESS) return 5;
+
+                VkBufferCreateInfo buffer_info;
+                VkExternalMemoryBufferCreateInfo buffer_external;
+                memset(&buffer_info, 0, sizeof(buffer_info));
+                memset(&buffer_external, 0, sizeof(buffer_external));
+                buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+                buffer_info.pNext = &buffer_external;
+                buffer_external.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO;
+                buffer_external.handleTypes = 0;
+                if (validate_buffer_create_pnext(&buffer_info) != VK_SUCCESS) return 6;
+                buffer_external.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+                if (validate_buffer_create_pnext(&buffer_info) != VK_ERROR_FEATURE_NOT_PRESENT) return 7;
+
+                VkImageCreateInfo image_info;
+                VkExternalMemoryImageCreateInfo image_external;
+                memset(&image_info, 0, sizeof(image_info));
+                memset(&image_external, 0, sizeof(image_external));
+                image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+                image_info.pNext = &image_external;
+                image_external.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO;
+                image_external.handleTypes = 0;
+                if (validate_image_create_pnext_for_transport(&image_info) != VK_SUCCESS) return 8;
+                image_external.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+                if (validate_image_create_pnext_for_transport(&image_info) != VK_ERROR_FEATURE_NOT_PRESENT) return 9;
+
+                VkExportMemoryAllocateInfo export_info;
+                memset(&export_info, 0, sizeof(export_info));
+                export_info.sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO;
+                export_info.handleTypes = 0;
+                if (validate_memory_allocate_pnext(&export_info) != VK_SUCCESS) return 10;
+                export_info.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+                if (validate_memory_allocate_pnext(&export_info) != VK_ERROR_FEATURE_NOT_PRESENT) return 11;
+
+                VkPhysicalDeviceExternalBufferInfo external_buffer_info;
+                VkExternalBufferProperties external_properties;
+                memset(&external_buffer_info, 0, sizeof(external_buffer_info));
+                memset(&external_properties, 0xff, sizeof(external_properties));
+                external_buffer_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_BUFFER_INFO;
+                external_buffer_info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+                external_buffer_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+                external_properties.sType = VK_STRUCTURE_TYPE_EXTERNAL_BUFFER_PROPERTIES;
+                vkGetPhysicalDeviceExternalBufferProperties(VK_NULL_HANDLE, &external_buffer_info, &external_properties);
+                if (external_properties.externalMemoryProperties.externalMemoryFeatures != 0) return 12;
+                if (external_properties.externalMemoryProperties.exportFromImportedHandleTypes != 0) return 13;
+                if (external_properties.externalMemoryProperties.compatibleHandleTypes != 0) return 14;
+            #endif
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+
     def test_buffer_create_usage2_pnext_supplies_effective_usage(self):
         source = textwrap.dedent(
             f"""

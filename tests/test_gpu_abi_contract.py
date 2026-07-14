@@ -9548,6 +9548,7 @@ class GpuAbiContractTest(unittest.TestCase):
         external_buffer_body = c_function_body(icd, "vkGetPhysicalDeviceExternalBufferProperties")
         external_semaphore_body = c_function_body(icd, "vkGetPhysicalDeviceExternalSemaphoreProperties")
         external_fence_body = c_function_body(icd, "vkGetPhysicalDeviceExternalFenceProperties")
+        collector_body = c_function_body(icd, "collect_advertised_device_extensions")
         proc_body = icd.split("static PFN_vkVoidFunction proc_address", 1)[1].split(
             "VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr", 1
         )[0]
@@ -9562,6 +9563,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("*pPeerMemoryFeatures = 0;", peer_body)
         self.assertIn("deviceMask != 1u", device_mask_body)
         self.assertIn('command_buffer_mark_recording_failed(cmd, "device-mask-unsupported")', device_mask_body)
+        self.assertIn("ADD_DEVICE_EXTENSION(VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME", collector_body)
+        self.assertIn("VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO", icd)
+        self.assertIn("VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO", icd)
+        self.assertIn("VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO", icd)
 
         self.assertIn("const VkPhysicalDeviceSparseImageFormatInfo2 *pFormatInfo", icd)
         self.assertIn("*pPropertyCount = 0;", sparse2_body)
