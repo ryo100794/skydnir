@@ -223,6 +223,71 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_debug_marker_extension_is_icd_local_metadata(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            int main(void) {{
+                uint32_t extension_count = 0;
+                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &extension_count, NULL) != VK_SUCCESS) return 2;
+                VkExtensionProperties extensions[64];
+                memset(extensions, 0, sizeof(extensions));
+                uint32_t capacity = 64;
+                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &capacity, extensions) != VK_SUCCESS) return 3;
+                VkBool32 found = VK_FALSE;
+                for (uint32_t i = 0; i < capacity; ++i) {{
+                    if (strcmp(extensions[i].extensionName, VK_EXT_DEBUG_MARKER_EXTENSION_NAME) == 0) found = VK_TRUE;
+                }}
+                if (!found || !device_extension_advertised_name(VK_EXT_DEBUG_MARKER_EXTENSION_NAME)) return 4;
+
+                VkDebugMarkerObjectNameInfoEXT name_info;
+                memset(&name_info, 0, sizeof(name_info));
+                name_info.sType = VK_STRUCTURE_TYPE_DEBUG_MARKER_OBJECT_NAME_INFO_EXT;
+                name_info.objectType = VK_DEBUG_REPORT_OBJECT_TYPE_BUFFER_EXT;
+                name_info.object = 0x1234u;
+                name_info.pObjectName = "legacy-buffer-name";
+                if (vkDebugMarkerSetObjectNameEXT(VK_NULL_HANDLE, &name_info) != VK_SUCCESS) return 5;
+
+                const uint32_t tag = 0x13572468u;
+                VkDebugMarkerObjectTagInfoEXT tag_info;
+                memset(&tag_info, 0, sizeof(tag_info));
+                tag_info.sType = VK_STRUCTURE_TYPE_DEBUG_MARKER_OBJECT_TAG_INFO_EXT;
+                tag_info.objectType = VK_DEBUG_REPORT_OBJECT_TYPE_BUFFER_EXT;
+                tag_info.object = 0x1234u;
+                tag_info.tagName = 7u;
+                tag_info.tagSize = sizeof(tag);
+                tag_info.pTag = &tag;
+                if (vkDebugMarkerSetObjectTagEXT(VK_NULL_HANDLE, &tag_info) != VK_SUCCESS) return 6;
+
+                VkDebugMarkerMarkerInfoEXT marker_info;
+                memset(&marker_info, 0, sizeof(marker_info));
+                marker_info.sType = VK_STRUCTURE_TYPE_DEBUG_MARKER_MARKER_INFO_EXT;
+                marker_info.pMarkerName = "legacy-marker";
+                vkCmdDebugMarkerBeginEXT(VK_NULL_HANDLE, &marker_info);
+                vkCmdDebugMarkerInsertEXT(VK_NULL_HANDLE, &marker_info);
+                vkCmdDebugMarkerEndEXT(VK_NULL_HANDLE);
+
+                memset(&name_info, 0, sizeof(name_info));
+                name_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+                if (vkDebugMarkerSetObjectNameEXT(VK_NULL_HANDLE, &name_info) != VK_ERROR_INITIALIZATION_FAILED) return 7;
+                memset(&tag_info, 0, sizeof(tag_info));
+                tag_info.sType = VK_STRUCTURE_TYPE_DEBUG_MARKER_OBJECT_TAG_INFO_EXT;
+                tag_info.objectType = VK_DEBUG_REPORT_OBJECT_TYPE_BUFFER_EXT;
+                tag_info.object = 0x1234u;
+                tag_info.tagSize = 4u;
+                tag_info.pTag = NULL;
+                if (vkDebugMarkerSetObjectTagEXT(VK_NULL_HANDLE, &tag_info) != VK_ERROR_INITIALIZATION_FAILED) return 8;
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_debug_utils_extension_is_icd_local_metadata(self):
         source = textwrap.dedent(
             f"""

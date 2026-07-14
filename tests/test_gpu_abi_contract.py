@@ -1130,7 +1130,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("advertised_load_store_op_none()", icd)
         self.assertIn("strcmp(name, VK_KHR_LOAD_STORE_OP_NONE_EXTENSION_NAME) == 0", icd)
         self.assertIn("strcmp(name, VK_EXT_LOAD_STORE_OP_NONE_EXTENSION_NAME) == 0", icd)
-        self.assertIn("VkExtensionProperties available[24];", icd)
+        self.assertIn("VkExtensionProperties available[32];", icd)
         self.assertIn("VkPhysicalDeviceDynamicRenderingFeatures", icd)
         self.assertIn("p->dynamicRendering = advertised_dynamic_rendering();", icd)
         for name in [
@@ -1530,10 +1530,13 @@ class GpuAbiContractTest(unittest.TestCase):
         )
         for marker in [
             "VKAPI_ATTR VkResult VKAPI_CALL vkCreateDebugUtilsMessengerEXT",
+            "VKAPI_ATTR VkResult VKAPI_CALL vkDebugMarkerSetObjectNameEXT",
             "VKAPI_ATTR VkResult VKAPI_CALL vkSetDebugUtilsObjectNameEXT",
             "VKAPI_ATTR void VKAPI_CALL vkCmdBeginDebugUtilsLabelEXT",
             "VKAPI_ATTR void VKAPI_CALL vkSubmitDebugUtilsMessageEXT",
             "MAP_PROC(vkCreateDebugUtilsMessengerEXT)",
+            "MAP_PROC(vkDebugMarkerSetObjectNameEXT)",
+            "MAP_PROC(vkCmdDebugMarkerBeginEXT)",
             "MAP_PROC(vkSetDebugUtilsObjectTagEXT)",
         ]:
             self.assertIn(marker, icd)
@@ -9600,6 +9603,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("MAP_PROC(vkCreateValidationCacheEXT)", icd)
         self.assertIn("MAP_PROC(vkMergeValidationCachesEXT)", icd)
         self.assertIn("VK_EXT_PRIVATE_DATA_EXTENSION_NAME", icd)
+        self.assertIn("VK_EXT_DEBUG_MARKER_EXTENSION_NAME", icd)
         self.assertIn("VKAPI_ATTR VkResult VKAPI_CALL vkCreatePrivateDataSlot", icd)
         self.assertIn("VKAPI_ATTR VkResult VKAPI_CALL vkSetPrivateData", icd)
         self.assertIn("MAP_PROC(vkCreatePrivateDataSlot)", icd)

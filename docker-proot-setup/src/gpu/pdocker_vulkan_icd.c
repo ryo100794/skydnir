@@ -19352,7 +19352,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(
         VkExtensionProperties *pProperties) {
     (void)physicalDevice;
     (void)pLayerName;
-    VkExtensionProperties available[24];
+    VkExtensionProperties available[32];
     uint32_t available_count = 0;
 #define ADD_DEVICE_EXTENSION(name, version) do { \
         if (available_count < (uint32_t)(sizeof(available) / sizeof(available[0]))) { \
@@ -19441,6 +19441,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(
 #ifdef VK_EXT_VALIDATION_CACHE_EXTENSION_NAME
     ADD_DEVICE_EXTENSION(VK_EXT_VALIDATION_CACHE_EXTENSION_NAME, VK_EXT_VALIDATION_CACHE_SPEC_VERSION);
 #endif
+#ifdef VK_EXT_DEBUG_MARKER_EXTENSION_NAME
+    ADD_DEVICE_EXTENSION(VK_EXT_DEBUG_MARKER_EXTENSION_NAME, VK_EXT_DEBUG_MARKER_SPEC_VERSION);
+#endif
 #ifdef VK_EXT_PRIVATE_DATA_EXTENSION_NAME
     ADD_DEVICE_EXTENSION(VK_EXT_PRIVATE_DATA_EXTENSION_NAME, VK_EXT_PRIVATE_DATA_SPEC_VERSION);
 #endif
@@ -19512,6 +19515,9 @@ static bool device_extension_advertised_name(const char *name) {
 #endif
 #ifdef VK_EXT_VALIDATION_CACHE_EXTENSION_NAME
     if (strcmp(name, VK_EXT_VALIDATION_CACHE_EXTENSION_NAME) == 0) return true;
+#endif
+#ifdef VK_EXT_DEBUG_MARKER_EXTENSION_NAME
+    if (strcmp(name, VK_EXT_DEBUG_MARKER_EXTENSION_NAME) == 0) return true;
 #endif
 #ifdef VK_EXT_PRIVATE_DATA_EXTENSION_NAME
     if (strcmp(name, VK_EXT_PRIVATE_DATA_EXTENSION_NAME) == 0) return true;
@@ -30595,6 +30601,64 @@ VKAPI_ATTR VkResult VKAPI_CALL vkMergeValidationCachesEXT(
 
 #endif
 
+#ifdef VK_EXT_DEBUG_MARKER_EXTENSION_NAME
+VKAPI_ATTR VkResult VKAPI_CALL vkDebugMarkerSetObjectNameEXT(
+        VkDevice device,
+        const VkDebugMarkerObjectNameInfoEXT *pNameInfo) {
+    (void)device;
+    if (!pNameInfo || pNameInfo->sType != VK_STRUCTURE_TYPE_DEBUG_MARKER_OBJECT_NAME_INFO_EXT) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    if (pNameInfo->pNext) {
+        return unsupported_create_info_pnext_result("vkDebugMarkerSetObjectNameEXT", pNameInfo->pNext);
+    }
+    if (pNameInfo->object == 0) {
+        trace_icd_runtime_failure("debug-marker-object-name-target-invalid", VK_ERROR_INITIALIZATION_FAILED);
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    return VK_SUCCESS;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkDebugMarkerSetObjectTagEXT(
+        VkDevice device,
+        const VkDebugMarkerObjectTagInfoEXT *pTagInfo) {
+    (void)device;
+    if (!pTagInfo || pTagInfo->sType != VK_STRUCTURE_TYPE_DEBUG_MARKER_OBJECT_TAG_INFO_EXT) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    if (pTagInfo->pNext) {
+        return unsupported_create_info_pnext_result("vkDebugMarkerSetObjectTagEXT", pTagInfo->pNext);
+    }
+    if (pTagInfo->object == 0 || (pTagInfo->tagSize > 0 && !pTagInfo->pTag)) {
+        trace_icd_runtime_failure("debug-marker-object-tag-target-invalid", VK_ERROR_INITIALIZATION_FAILED);
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    return VK_SUCCESS;
+}
+
+static bool debug_marker_info_valid(const VkDebugMarkerMarkerInfoEXT *marker) {
+    return marker && marker->sType == VK_STRUCTURE_TYPE_DEBUG_MARKER_MARKER_INFO_EXT && !marker->pNext;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdDebugMarkerBeginEXT(
+        VkCommandBuffer commandBuffer,
+        const VkDebugMarkerMarkerInfoEXT *pMarkerInfo) {
+    (void)commandBuffer;
+    (void)debug_marker_info_valid(pMarkerInfo);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdDebugMarkerEndEXT(VkCommandBuffer commandBuffer) {
+    (void)commandBuffer;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdDebugMarkerInsertEXT(
+        VkCommandBuffer commandBuffer,
+        const VkDebugMarkerMarkerInfoEXT *pMarkerInfo) {
+    (void)commandBuffer;
+    (void)debug_marker_info_valid(pMarkerInfo);
+}
+#endif
+
 #ifdef VK_EXT_DEBUG_UTILS_EXTENSION_NAME
 VKAPI_ATTR VkResult VKAPI_CALL vkSetDebugUtilsObjectNameEXT(
         VkDevice device,
@@ -31163,6 +31227,13 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_ALIAS("vkSetPrivateDataEXT", vkSetPrivateData);
     MAP_PROC(vkGetPrivateData);
     MAP_ALIAS("vkGetPrivateDataEXT", vkGetPrivateData);
+#endif
+#ifdef VK_EXT_DEBUG_MARKER_EXTENSION_NAME
+    MAP_PROC(vkDebugMarkerSetObjectNameEXT);
+    MAP_PROC(vkDebugMarkerSetObjectTagEXT);
+    MAP_PROC(vkCmdDebugMarkerBeginEXT);
+    MAP_PROC(vkCmdDebugMarkerEndEXT);
+    MAP_PROC(vkCmdDebugMarkerInsertEXT);
 #endif
 #ifdef VK_EXT_DEBUG_UTILS_EXTENSION_NAME
     MAP_PROC(vkSetDebugUtilsObjectNameEXT);
