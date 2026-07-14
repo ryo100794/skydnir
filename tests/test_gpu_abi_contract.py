@@ -9144,6 +9144,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_ROBUSTNESS_FEATURES", icd)
         self.assertIn("p->pipelineRobustness = VK_FALSE", icd)
         self.assertIn("supported = !p->pipelineRobustness", icd)
+        self.assertIn("ADD_DEVICE_EXTENSION(VK_EXT_PIPELINE_ROBUSTNESS_EXTENSION_NAME", collector_body)
         self.assertIn("VK_STRUCTURE_TYPE_DEVICE_PRIVATE_DATA_CREATE_INFO", icd)
         self.assertNotIn("p->privateDataSlotRequestCount == 0", icd)
         self.assertIn("p->pPhysicalDevices[0] != (VkPhysicalDevice)&g_device", icd)

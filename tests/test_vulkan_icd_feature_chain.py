@@ -1850,6 +1850,25 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     fprintf(stderr, "all-false robustness chain was rejected\\n");
                     return 4;
                 }}
+            #ifdef VK_EXT_PIPELINE_ROBUSTNESS_EXTENSION_NAME
+                if (!device_extension_advertised_name(VK_EXT_PIPELINE_ROBUSTNESS_EXTENSION_NAME)) {{
+                    fprintf(stderr, "VK_EXT_pipeline_robustness was not advertised\\n");
+                    return 8;
+                }}
+                const char *pipeline_robustness_extensions[] = {{ VK_EXT_PIPELINE_ROBUSTNESS_EXTENSION_NAME }};
+                create_info.enabledExtensionCount = 1;
+                create_info.ppEnabledExtensionNames = pipeline_robustness_extensions;
+                if (validate_device_extensions(&create_info) != VK_SUCCESS) {{
+                    fprintf(stderr, "VK_EXT_pipeline_robustness extension enable was rejected\\n");
+                    return 9;
+                }}
+                if (validate_device_feature_requests(&create_info) != VK_SUCCESS) {{
+                    fprintf(stderr, "VK_EXT_pipeline_robustness all-false feature chain was rejected\\n");
+                    return 10;
+                }}
+                create_info.enabledExtensionCount = 0;
+                create_info.ppEnabledExtensionNames = NULL;
+            #endif
                 robustness2.nullDescriptor = VK_TRUE;
                 if (validate_device_feature_requests(&create_info) == VK_SUCCESS) return 5;
                 robustness2.nullDescriptor = VK_FALSE;
