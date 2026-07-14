@@ -5189,7 +5189,7 @@ class GpuAbiContractTest(unittest.TestCase):
             capability_marker,
             "ICD must prove executor V5.2 image-layout-range support before sending abi_minor 2",
         )
-        abi_minor_assignment = "header->abi_minor = need_v53_buffer_views"
+        abi_minor_assignment = "header->abi_minor = need_v54_barriers"
         self.assertIn(abi_minor_assignment, sender)
         self.assertLess(sender.index(capability_marker), sender.index(abi_minor_assignment))
         self.assertRegex(
@@ -14426,11 +14426,11 @@ class GpuAbiContractTest(unittest.TestCase):
         side_exec_body = icd.split("static VkResult execute_graphics_mixed_host_side_ops", 1)[1].split(
             "VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit", 1
         )[0]
-        self.assertIn("execute_recorded_dispatch_command_op(cmd, op, NULL)", side_exec_body)
+        self.assertIn("execute_recorded_dispatch_command_op(cmd, op, NULL, 0, NULL)", side_exec_body)
         ordered_submit_body = submit_body.split("if (cmd->command_op_count > 0)", 1)[1].split(
             "execute_recorded_copy_ops(cmd);", 1
         )[0]
-        self.assertIn("execute_recorded_dispatch_command_op(cmd, op, &dispatches)", ordered_submit_body)
+        self.assertIn("execute_recorded_dispatch_command_op(cmd, op, &pending_compute_barriers, pending_compute_dependency_flags, &dispatches)", ordered_submit_body)
         self.assertLess(
             mixed_body.rindex("execute_graphics_mixed_host_side_ops("),
             mixed_body.index("send_vulkan_submit_sync_only_frame(\n                    deferred_completion_sync_entries, deferred_completion_sync_count)"),
@@ -14649,10 +14649,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("cmd, segment_begin, op_index + 1u", execute_body)
         self.assertLess(
             execute_body.index("send_graphics_sequence_segment("),
-            execute_body.index("execute_recorded_dispatch_command_op(cmd, op, NULL)"),
+            execute_body.index("execute_recorded_dispatch_command_op(cmd, op, NULL, 0, NULL)"),
         )
         self.assertLess(
-            execute_body.index("execute_recorded_dispatch_command_op(cmd, op, NULL)"),
+            execute_body.index("execute_recorded_dispatch_command_op(cmd, op, NULL, 0, NULL)"),
             execute_body.index("segment_begin = op_index + 1u"),
         )
         self.assertIn("filter_submit_sync_entries_for_graphics_frame", send_segment_body)
@@ -14760,13 +14760,80 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(marker, source)
         submit_body = source.split("VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit", 1)[1].split("VKAPI_ATTR VkResult VKAPI_CALL vkWaitForFences", 1)[0]
         self.assertIn("cmd->command_op_count > 0", submit_body)
-        self.assertIn("execute_recorded_dispatch_command_op(cmd, op, &dispatches)", submit_body)
+        self.assertIn("execute_recorded_dispatch_command_op(cmd, op, &pending_compute_barriers, pending_compute_dependency_flags, &dispatches)", submit_body)
         dispatch_helper_body = source.split("static VkResult execute_recorded_dispatch_command_op", 1)[1].split(
             "static bool submit_sync_entries_include_wait", 1
         )[0]
-        self.assertIn("send_generic_vulkan_dispatch_op(dispatch)", dispatch_helper_body)
+        self.assertIn("send_generic_vulkan_dispatch_op(dispatch, cmd, pre_barriers, pre_barrier_dependency_flags)", dispatch_helper_body)
         self.assertIn("cmd->dispatch_op_count > 0", submit_body)
-        self.assertIn("send_generic_vulkan_dispatch_op(op)", submit_body)
+        self.assertIn("send_generic_vulkan_dispatch_op(op, NULL, NULL, 0)", submit_body)
+
+    def test_vulkan_dispatch_v54_pending_compute_barriers_flow_to_dispatch_frame(self):
+        source = VULKAN_ICD.read_text()
+        sender = c_function_body(source, "send_generic_vulkan_dispatch_v5_1_op")
+        submit_body = source.split("VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit", 1)[1].split(
+            "VKAPI_ATTR VkResult VKAPI_CALL vkWaitForFences", 1
+        )[0]
+        dispatch_helper_body = source.split("static VkResult execute_recorded_dispatch_command_op", 1)[1].split(
+            "static bool submit_sync_entries_include_wait", 1
+        )[0]
+
+        for marker in [
+            "PdockerVkBarrierOpRange pending_compute_barriers",
+            "uint32_t pending_compute_dependency_flags",
+            "merge_pending_compute_barriers(\n                                    &pending_compute_barriers",
+            "execute_recorded_dispatch_command_op(cmd, op, &pending_compute_barriers, pending_compute_dependency_flags, &dispatches)",
+            "execute_recorded_image_barriers_in_range(cmd, &pending_compute_barriers)",
+            "reset_barrier_op_range(&pending_compute_barriers)",
+        ]:
+            self.assertIn(marker, submit_body)
+        merge_body = c_function_body(source, "merge_pending_compute_barriers")
+        for marker in [
+            "op->memory_barrier_op_first",
+            "op->memory_barrier_op_count",
+            "op->buffer_barrier_op_first",
+            "op->buffer_barrier_op_count",
+            "op->image_barrier_op_first",
+            "op->image_barrier_op_count",
+            "*pending_dependency_flags = op->dependency_flags",
+        ]:
+            self.assertIn(marker, merge_body)
+
+        self.assertIn(
+            "send_generic_vulkan_dispatch_op(dispatch, cmd, pre_barriers, pre_barrier_dependency_flags)",
+            dispatch_helper_body,
+        )
+        self.assertIn("pending_compute_barriers = pre_barriers &&", source)
+        self.assertIn("image_descriptor_count > 0 || pending_compute_barriers ||", source)
+
+        for marker in [
+            "PdockerGpuVulkanDispatchV54FrameHeader",
+            "PdockerGpuVulkanDispatchV54MemoryBarrierEntry *memory_barrier_entries",
+            "PdockerGpuVulkanDispatchV54BufferBarrierEntry *buffer_barrier_entries",
+            "PdockerGpuVulkanDispatchV54ImageBarrierEntry *image_barrier_entries",
+            "executor_supports_vulkan_dispatch_v54_barriers",
+            "header->abi_minor = need_v54_barriers",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V54_ABI_MINOR",
+            "frame_header_v54->v54.dependency_flags = pre_barrier_dependency_flags",
+            "frame_header_v54->v54.memory_barrier_count",
+            "frame_header_v54->v54.buffer_barrier_count",
+            "frame_header_v54->v54.image_barrier_count",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V54_MEMORY_BARRIER_SCHEMA_HASH",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V54_BUFFER_BARRIER_SCHEMA_HASH",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V54_IMAGE_BARRIER_SCHEMA_HASH",
+            "frame_header_v54->v54.memory_barrier_table_hash",
+            "frame_header_v54->v54.buffer_barrier_table_hash",
+            "frame_header_v54->v54.image_barrier_table_hash",
+            "frame_header_v54->v54.extension_hash",
+            "frame_append_bytes(frame, frame_capacity, &cursor,\n                                memory_barrier_entries",
+            "frame_append_bytes(frame, frame_capacity, &cursor,\n                                buffer_barrier_entries",
+            "frame_append_bytes(frame, frame_capacity, &cursor,\n                                image_barrier_entries",
+            "free(memory_barrier_entries)",
+            "free(buffer_barrier_entries)",
+            "free(image_barrier_entries)",
+        ]:
+            self.assertIn(marker, sender)
+
 
     def test_spirv_observability_is_generic_not_hash_only(self):
         source = GPU_EXECUTOR.read_text()

@@ -114,8 +114,10 @@
 #define PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_OBJECTS 1u
 #define PDOCKER_GPU_VULKAN_DISPATCH_V52_ABI_MINOR 2u
 #define PDOCKER_GPU_VULKAN_DISPATCH_V53_ABI_MINOR 3u
+#define PDOCKER_GPU_VULKAN_DISPATCH_V54_ABI_MINOR 4u
 #define PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_LAYOUT_RANGES PDOCKER_GPU_VULKAN_DISPATCH_V52_ABI_MINOR
 #define PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_BUFFER_VIEWS PDOCKER_GPU_VULKAN_DISPATCH_V53_ABI_MINOR
+#define PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_BARRIERS PDOCKER_GPU_VULKAN_DISPATCH_V54_ABI_MINOR
 #define PDOCKER_GPU_VULKAN_DISPATCH_V5_COMMAND_DISPATCH 1u
 #define PDOCKER_GPU_VULKAN_DISPATCH_V5_FRAME_HEADER_SCHEMA_HASH 0x3de711f5a527e2f8ull
 #define PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_SCHEMA_HASH 0x5fd531f2d77e9ad1ull
@@ -127,6 +129,9 @@
 #define PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_OBJECT_SCHEMA_HASH 0xc7d2cec7923555f7ull
 #define PDOCKER_GPU_VULKAN_DISPATCH_V52_IMAGE_LAYOUT_RANGE_SCHEMA_HASH 0xa61770e90fd06da7ull
 #define PDOCKER_GPU_VULKAN_DISPATCH_V53_BUFFER_VIEW_SCHEMA_HASH 0xfa9323b0e3f0fb42ull
+#define PDOCKER_GPU_VULKAN_DISPATCH_V54_MEMORY_BARRIER_SCHEMA_HASH 0x7b14b7d3d9d0ef31ull
+#define PDOCKER_GPU_VULKAN_DISPATCH_V54_BUFFER_BARRIER_SCHEMA_HASH 0x6e5fa8bb1f8d2c44ull
+#define PDOCKER_GPU_VULKAN_DISPATCH_V54_IMAGE_BARRIER_SCHEMA_HASH 0x91db8756d8c4a2a5ull
 #define PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FRAME_BYTES (4u * 1024u * 1024u)
 #define PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS 253u
 #define PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS 24u
@@ -144,6 +149,9 @@
 #define PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_SAMPLERS 512u
 #define PDOCKER_GPU_VULKAN_DISPATCH_V52_MAX_IMAGE_LAYOUT_RANGES 4096u
 #define PDOCKER_GPU_VULKAN_DISPATCH_V53_MAX_BUFFER_VIEWS PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS
+#define PDOCKER_GPU_VULKAN_DISPATCH_V54_MAX_MEMORY_BARRIERS 4096u
+#define PDOCKER_GPU_VULKAN_DISPATCH_V54_MAX_BUFFER_BARRIERS 4096u
+#define PDOCKER_GPU_VULKAN_DISPATCH_V54_MAX_IMAGE_BARRIERS 4096u
 
 #define PDOCKER_GPU_VULKAN_DISPATCH_V5_FRAME_HEADER_FIELDS(X) \
     X(magic, bytes8) \
@@ -308,6 +316,70 @@
     X(range, u64) \
     X(generation, u64)
 #define PDOCKER_GPU_VULKAN_DISPATCH_V53_BUFFER_VIEW_FIELD_COUNT 8u
+
+#define PDOCKER_GPU_VULKAN_DISPATCH_V54_HEADER_EXTENSION_FIELDS(X) \
+    X(dependency_flags, u32) \
+    X(reserved0, u32) \
+    X(memory_barrier_count, u32) \
+    X(memory_barrier_entry_size, u32) \
+    X(memory_barrier_table_offset, u64) \
+    X(memory_barrier_table_size, u64) \
+    X(memory_barrier_schema_hash, u64) \
+    X(memory_barrier_table_hash, u64) \
+    X(buffer_barrier_count, u32) \
+    X(buffer_barrier_entry_size, u32) \
+    X(buffer_barrier_table_offset, u64) \
+    X(buffer_barrier_table_size, u64) \
+    X(buffer_barrier_schema_hash, u64) \
+    X(buffer_barrier_table_hash, u64) \
+    X(image_barrier_count, u32) \
+    X(image_barrier_entry_size, u32) \
+    X(image_barrier_table_offset, u64) \
+    X(image_barrier_table_size, u64) \
+    X(image_barrier_schema_hash, u64) \
+    X(image_barrier_table_hash, u64) \
+    X(extension_hash, u64)
+#define PDOCKER_GPU_VULKAN_DISPATCH_V54_HEADER_EXTENSION_FIELD_COUNT 21u
+
+#define PDOCKER_GPU_VULKAN_DISPATCH_V54_MEMORY_BARRIER_FIELDS(X) \
+    X(src_access_mask, u64) \
+    X(dst_access_mask, u64) \
+    X(src_stage_mask, u64) \
+    X(dst_stage_mask, u64)
+#define PDOCKER_GPU_VULKAN_DISPATCH_V54_MEMORY_BARRIER_FIELD_COUNT 4u
+
+#define PDOCKER_GPU_VULKAN_DISPATCH_V54_BUFFER_BARRIER_FIELDS(X) \
+    X(resource_index, u32) \
+    X(reserved0, u32) \
+    X(offset, u64) \
+    X(size, u64) \
+    X(src_access_mask, u64) \
+    X(dst_access_mask, u64) \
+    X(src_stage_mask, u64) \
+    X(dst_stage_mask, u64) \
+    X(src_queue_family_index, u32) \
+    X(dst_queue_family_index, u32) \
+    X(reserved1, u32) \
+    X(reserved2, u32)
+#define PDOCKER_GPU_VULKAN_DISPATCH_V54_BUFFER_BARRIER_FIELD_COUNT 12u
+
+#define PDOCKER_GPU_VULKAN_DISPATCH_V54_IMAGE_BARRIER_FIELDS(X) \
+    X(image_index, u32) \
+    X(old_layout, u32) \
+    X(new_layout, u32) \
+    X(aspect_mask, u32) \
+    X(base_mip_level, u32) \
+    X(level_count, u32) \
+    X(base_array_layer, u32) \
+    X(layer_count, u32) \
+    X(src_access_mask, u64) \
+    X(dst_access_mask, u64) \
+    X(src_stage_mask, u64) \
+    X(dst_stage_mask, u64) \
+    X(src_queue_family_index, u32) \
+    X(dst_queue_family_index, u32) \
+    X(reserved0, u32)
+#define PDOCKER_GPU_VULKAN_DISPATCH_V54_IMAGE_BARRIER_FIELD_COUNT 15u
 
 #define PDOCKER_GPU_V5_IMAGE_FLAG_MUTABLE_FORMAT (1u << 0)
 #define PDOCKER_GPU_V5_IMAGE_FLAG_CUBE_COMPATIBLE (1u << 1)
@@ -501,6 +573,35 @@ typedef struct PdockerGpuVulkanDispatchV53FrameHeader {
     PdockerGpuVulkanDispatchV53HeaderExtension v53;
 } PdockerGpuVulkanDispatchV53FrameHeader;
 
+typedef struct PdockerGpuVulkanDispatchV54HeaderExtension {
+    uint32_t dependency_flags;
+    uint32_t reserved0;
+    uint32_t memory_barrier_count;
+    uint32_t memory_barrier_entry_size;
+    uint64_t memory_barrier_table_offset;
+    uint64_t memory_barrier_table_size;
+    uint64_t memory_barrier_schema_hash;
+    uint64_t memory_barrier_table_hash;
+    uint32_t buffer_barrier_count;
+    uint32_t buffer_barrier_entry_size;
+    uint64_t buffer_barrier_table_offset;
+    uint64_t buffer_barrier_table_size;
+    uint64_t buffer_barrier_schema_hash;
+    uint64_t buffer_barrier_table_hash;
+    uint32_t image_barrier_count;
+    uint32_t image_barrier_entry_size;
+    uint64_t image_barrier_table_offset;
+    uint64_t image_barrier_table_size;
+    uint64_t image_barrier_schema_hash;
+    uint64_t image_barrier_table_hash;
+    uint64_t extension_hash;
+} PdockerGpuVulkanDispatchV54HeaderExtension;
+
+typedef struct PdockerGpuVulkanDispatchV54FrameHeader {
+    PdockerGpuVulkanDispatchV53FrameHeader v53;
+    PdockerGpuVulkanDispatchV54HeaderExtension v54;
+} PdockerGpuVulkanDispatchV54FrameHeader;
+
 typedef struct PdockerGpuVulkanDispatchV53BufferViewEntry {
     uint32_t descriptor_index;
     uint32_t resource_index;
@@ -511,6 +612,46 @@ typedef struct PdockerGpuVulkanDispatchV53BufferViewEntry {
     uint64_t range;
     uint64_t generation;
 } PdockerGpuVulkanDispatchV53BufferViewEntry;
+
+typedef struct PdockerGpuVulkanDispatchV54MemoryBarrierEntry {
+    uint64_t src_access_mask;
+    uint64_t dst_access_mask;
+    uint64_t src_stage_mask;
+    uint64_t dst_stage_mask;
+} PdockerGpuVulkanDispatchV54MemoryBarrierEntry;
+
+typedef struct PdockerGpuVulkanDispatchV54BufferBarrierEntry {
+    uint32_t resource_index;
+    uint32_t reserved0;
+    uint64_t offset;
+    uint64_t size;
+    uint64_t src_access_mask;
+    uint64_t dst_access_mask;
+    uint64_t src_stage_mask;
+    uint64_t dst_stage_mask;
+    uint32_t src_queue_family_index;
+    uint32_t dst_queue_family_index;
+    uint32_t reserved1;
+    uint32_t reserved2;
+} PdockerGpuVulkanDispatchV54BufferBarrierEntry;
+
+typedef struct PdockerGpuVulkanDispatchV54ImageBarrierEntry {
+    uint32_t image_index;
+    uint32_t old_layout;
+    uint32_t new_layout;
+    uint32_t aspect_mask;
+    uint32_t base_mip_level;
+    uint32_t level_count;
+    uint32_t base_array_layer;
+    uint32_t layer_count;
+    uint64_t src_access_mask;
+    uint64_t dst_access_mask;
+    uint64_t src_stage_mask;
+    uint64_t dst_stage_mask;
+    uint32_t src_queue_family_index;
+    uint32_t dst_queue_family_index;
+    uint32_t reserved0;
+} PdockerGpuVulkanDispatchV54ImageBarrierEntry;
 
 typedef struct PdockerGpuVulkanDispatchV52ImageLayoutRangeEntry {
     uint32_t image_index;
