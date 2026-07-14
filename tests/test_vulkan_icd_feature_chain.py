@@ -819,6 +819,63 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_dynamic_rendering_attachment_location_identity_is_noop_only(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            int main(void) {{
+                VkRenderingInfo info;
+                VkRenderingAttachmentLocationInfo locations;
+                uint32_t identity_locations[2] = {{0u, 1u}};
+                uint32_t remap_locations[2] = {{1u, 0u}};
+                memset(&info, 0, sizeof(info));
+                memset(&locations, 0, sizeof(locations));
+                info.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+                info.colorAttachmentCount = 2;
+                info.pNext = &locations;
+                locations.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_LOCATION_INFO;
+
+                locations.colorAttachmentCount = 0;
+                locations.pColorAttachmentLocations = remap_locations;
+                if (!rendering_info_pnext_noop(&info)) return 2;
+
+                locations.colorAttachmentCount = 2;
+                locations.pColorAttachmentLocations = identity_locations;
+                if (!rendering_info_pnext_noop(&info)) return 3;
+
+                locations.pColorAttachmentLocations = remap_locations;
+                if (rendering_info_pnext_noop(&info)) return 4;
+
+                locations.colorAttachmentCount = 1;
+                locations.pColorAttachmentLocations = identity_locations;
+                if (rendering_info_pnext_noop(&info)) return 5;
+
+                locations.colorAttachmentCount = 2;
+                locations.pColorAttachmentLocations = NULL;
+                if (rendering_info_pnext_noop(&info)) return 6;
+
+                VkRenderingInputAttachmentIndexInfo indices;
+                uint32_t input_indices[2] = {{0u, 1u}};
+                memset(&indices, 0, sizeof(indices));
+                indices.sType = VK_STRUCTURE_TYPE_RENDERING_INPUT_ATTACHMENT_INDEX_INFO;
+                indices.colorAttachmentCount = 2;
+                indices.pColorAttachmentInputIndices = input_indices;
+                info.pNext = &indices;
+                if (rendering_info_pnext_noop(&info)) return 7;
+
+                indices.colorAttachmentCount = 0;
+                indices.pColorAttachmentInputIndices = input_indices;
+                if (!rendering_info_pnext_noop(&info)) return 8;
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_advertised_feature_extensions_are_enumerated_together(self):
         source = textwrap.dedent(
             f"""

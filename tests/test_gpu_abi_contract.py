@@ -7500,7 +7500,8 @@ class GpuAbiContractTest(unittest.TestCase):
 
         rendering_info_body = c_function_body(icd, "rendering_info_pnext_noop")
         self.assertIn("VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_LOCATION_INFO", rendering_info_body)
-        self.assertIn("locations->colorAttachmentCount != 0", rendering_info_body)
+        self.assertIn("rendering_attachment_locations_noop(info, locations)", rendering_info_body)
+        self.assertIn("locations->pColorAttachmentLocations[i] != i", icd)
         self.assertIn("VK_STRUCTURE_TYPE_RENDERING_INPUT_ATTACHMENT_INDEX_INFO", rendering_info_body)
         self.assertIn("indices->pDepthInputAttachmentIndex", rendering_info_body)
         self.assertIn("indices->pStencilInputAttachmentIndex", rendering_info_body)

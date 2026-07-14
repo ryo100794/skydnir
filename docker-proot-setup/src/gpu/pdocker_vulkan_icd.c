@@ -23541,6 +23541,21 @@ static bool device_group_render_pass_begin_noop(
         const VkRect2D *render_area);
 #endif
 
+static bool rendering_attachment_locations_noop(
+        const VkRenderingInfo *info,
+        const VkRenderingAttachmentLocationInfo *locations) {
+    if (!locations) return true;
+    if (locations->colorAttachmentCount == 0) return true;
+    if (!info || !locations->pColorAttachmentLocations ||
+        locations->colorAttachmentCount != info->colorAttachmentCount) {
+        return false;
+    }
+    for (uint32_t i = 0; i < locations->colorAttachmentCount; ++i) {
+        if (locations->pColorAttachmentLocations[i] != i) return false;
+    }
+    return true;
+}
+
 static bool rendering_info_pnext_noop(const VkRenderingInfo *info) {
     for (const void *node = info ? info->pNext : NULL; node;) {
         PdockerVkStructHeader header = read_vk_struct_header(node);
@@ -23559,7 +23574,7 @@ static bool rendering_info_pnext_noop(const VkRenderingInfo *info) {
             case VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_LOCATION_INFO: {
                 const VkRenderingAttachmentLocationInfo *locations =
                     (const VkRenderingAttachmentLocationInfo *)node;
-                if (locations->colorAttachmentCount != 0) return false;
+                if (!rendering_attachment_locations_noop(info, locations)) return false;
                 break;
             }
             case VK_STRUCTURE_TYPE_RENDERING_INPUT_ATTACHMENT_INDEX_INFO: {
