@@ -11530,6 +11530,8 @@ class GpuAbiContractTest(unittest.TestCase):
         icd = VULKAN_ICD.read_text()
         for marker in [
             "uint64_t enabled_extension_mask;",
+            "queue_synchronization2_enabled",
+            "command_buffer_require_synchronization2",
             "PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2",
             "PDOCKER_VK_DEVICE_EXT_KHR_DYNAMIC_RENDERING",
             "PDOCKER_VK_DEVICE_EXT_KHR_DRAW_INDIRECT_COUNT",
@@ -11571,7 +11573,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "device->requested_feature_mask",
             "device->enabled_extension_mask",
             'strcmp(pName, "vkCmdBeginRenderingKHR") == 0',
+            'strcmp(pName, "vkCmdPipelineBarrier2") == 0',
             'strcmp(pName, "vkCmdPipelineBarrier2KHR") == 0',
+            'strcmp(pName, "vkQueueSubmit2") == 0',
             'strcmp(pName, "vkQueueSubmit2KHR") == 0',
             'strcmp(pName, "vkCmdDrawIndirectCountKHR") == 0',
             'strcmp(pName, "vkCmdDrawIndirectCountAMD") == 0',
@@ -11584,6 +11588,28 @@ class GpuAbiContractTest(unittest.TestCase):
         get_device_proc_body = c_function_body(icd, "vkGetDeviceProcAddr")
         self.assertIn("device_proc_address_hidden_by_enabled_state(pdocker_device, pName)", get_device_proc_body)
         self.assertIn("return proc_address(pName);", get_device_proc_body)
+
+        queue_submit2_body = c_function_body(icd, "vkQueueSubmit2")
+        self.assertIn("queue_synchronization2_enabled((PdockerVkQueue *)queue)", queue_submit2_body)
+        self.assertIn("synchronization2-feature-disabled", queue_submit2_body)
+
+        for name in [
+            "vkCmdPipelineBarrier2",
+            "vkCmdSetEvent2",
+            "vkCmdResetEvent2",
+            "vkCmdWaitEvents2",
+            "vkCmdWriteTimestamp2",
+        ]:
+            body = c_function_body(icd, name)
+            self.assertIn("command_buffer_require_synchronization2", body)
+            self.assertIn("synchronization2-feature-disabled", body)
+
+        self.assertIn("g_last_device_requested_feature_mask = requested_feature_mask;", icd)
+        self.assertIn("g_last_device_enabled_extension_mask = enabled_extension_mask;", icd)
+        self.assertIn("g_queue.requested_feature_mask = g_last_device_requested_feature_mask;", icd)
+        self.assertIn("g_queue.enabled_extension_mask = g_last_device_enabled_extension_mask;", icd)
+        self.assertIn("pool->enabled_extension_mask = dev ? dev->enabled_extension_mask : 0;", icd)
+        self.assertIn("cmd->enabled_extension_mask = pool->enabled_extension_mask;", icd)
 
         index_bind_body = c_function_body(icd, "record_index_buffer_binding")
         for marker in [

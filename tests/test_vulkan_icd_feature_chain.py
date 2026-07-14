@@ -2128,8 +2128,10 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 memset(&device, 0, sizeof(device));
                 device.requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
                 if (!device_proc_address_hidden_by_enabled_state(&device, "vkQueueSubmit2KHR")) return 5;
+                if (!device_proc_address_hidden_by_enabled_state(&device, "vkQueueSubmit2")) return 101;
                 device.enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
                 if (device_proc_address_hidden_by_enabled_state(&device, "vkQueueSubmit2KHR")) return 6;
+                if (device_proc_address_hidden_by_enabled_state(&device, "vkQueueSubmit2")) return 102;
 
                 memset(&device, 0, sizeof(device));
                 device.requested_feature_mask = PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT;
@@ -2149,15 +2151,61 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                         PDOCKER_VK_FEATURE_INDEX_TYPE_UINT8,
                         PDOCKER_VK_DEVICE_EXT_INDEX_TYPE_UINT8) != VK_SUCCESS) return 13;
 
+                PdockerVkQueue queue;
+                PdockerVkFence fence;
+                memset(&queue, 0, sizeof(queue));
+                memset(&fence, 0, sizeof(fence));
+                fence.signaled = true;
+                if (vkQueueSubmit2((VkQueue)&queue, 0, NULL, (VkFence)&fence) != VK_ERROR_FEATURE_NOT_PRESENT) return 103;
+                if (!fence.signaled) return 104;
+                queue.requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
+                if (vkQueueSubmit2((VkQueue)&queue, 0, NULL, VK_NULL_HANDLE) != VK_ERROR_FEATURE_NOT_PRESENT) return 105;
+                queue.enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
+                if (vkQueueSubmit2((VkQueue)&queue, 0, NULL, VK_NULL_HANDLE) != VK_SUCCESS) return 106;
+
                 PdockerVkMemory memory;
                 PdockerVkBuffer buffer;
                 PdockerVkCommandBuffer cmd;
+                PdockerVkEvent event;
                 memset(&memory, 0, sizeof(memory));
                 memset(&buffer, 0, sizeof(buffer));
+                memset(&event, 0, sizeof(event));
+                event.event_id = 1;
                 memory.size = 1024;
                 buffer.size = 1024;
                 buffer.memory = &memory;
                 buffer.memory_offset = 0;
+
+                memset(&cmd, 0, sizeof(cmd));
+                vkCmdPipelineBarrier2((VkCommandBuffer)&cmd, NULL);
+                if (!reason_is(&cmd, "synchronization2-feature-disabled")) return 107;
+                if (cmd.command_op_count || cmd.graphics_command_op_count) return 108;
+
+                memset(&cmd, 0, sizeof(cmd));
+                cmd.requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
+                vkCmdPipelineBarrier2((VkCommandBuffer)&cmd, NULL);
+                if (!reason_is(&cmd, "synchronization2-feature-disabled")) return 109;
+
+                memset(&cmd, 0, sizeof(cmd));
+                cmd.requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
+                cmd.enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
+                vkCmdPipelineBarrier2((VkCommandBuffer)&cmd, NULL);
+                if (cmd.recording_failed) return 110;
+                if (cmd.command_op_count == 0) return 111;
+                command_buffer_destroy_record_vectors(&cmd);
+
+                memset(&cmd, 0, sizeof(cmd));
+                vkCmdSetEvent2((VkCommandBuffer)&cmd, pdocker_vk_event_to_handle(&event), NULL);
+                if (!reason_is(&cmd, "synchronization2-feature-disabled")) return 112;
+                memset(&cmd, 0, sizeof(cmd));
+                vkCmdResetEvent2((VkCommandBuffer)&cmd, pdocker_vk_event_to_handle(&event), 0);
+                if (!reason_is(&cmd, "synchronization2-feature-disabled")) return 113;
+                memset(&cmd, 0, sizeof(cmd));
+                vkCmdWaitEvents2((VkCommandBuffer)&cmd, 0, NULL, NULL);
+                if (!reason_is(&cmd, "synchronization2-feature-disabled")) return 114;
+                memset(&cmd, 0, sizeof(cmd));
+                vkCmdWriteTimestamp2((VkCommandBuffer)&cmd, 0, VK_NULL_HANDLE, 0);
+                if (!reason_is(&cmd, "synchronization2-feature-disabled")) return 115;
 
             #ifdef VK_EXT_INDEX_TYPE_UINT8_EXTENSION_NAME
                 memset(&cmd, 0, sizeof(cmd));

@@ -279,6 +279,8 @@ typedef struct {
 
 typedef struct {
     VK_LOADER_DATA loader;
+    uint64_t requested_feature_mask;
+    uint64_t enabled_extension_mask;
 } PdockerVkQueue;
 
 typedef struct PdockerVkMemory PdockerVkMemory;
@@ -1530,6 +1532,7 @@ typedef struct {
     uint32_t dynamic_state_capacity;
     bool vertex_buffer_bound;
     uint64_t requested_feature_mask;
+    uint64_t enabled_extension_mask;
 } PdockerVkCommandBuffer;
 
 typedef struct {
@@ -1580,10 +1583,14 @@ struct PdockerVkDebugUtilsMessenger {
 
 struct PdockerVkCommandPool {
     uint64_t requested_feature_mask;
+    uint64_t enabled_extension_mask;
 };
 
 static PdockerVkPhysicalDevice g_device;
 static PdockerVkQueue g_queue;
+static PdockerVkDevice *g_last_created_device;
+static uint64_t g_last_device_requested_feature_mask;
+static uint64_t g_last_device_enabled_extension_mask;
 static unsigned g_shader_dump_counter;
 static PdockerVkMemory *g_guarded_memories[PDOCKER_VK_MAX_GUARDED_MEMORIES];
 static struct sigaction g_previous_sigsegv;
@@ -1665,6 +1672,34 @@ static void command_buffer_mark_recording_failed(PdockerVkCommandBuffer *cmd, co
     if (!cmd) return;
     cmd->recording_failed = true;
     cmd->recording_failure_reason = reason ? reason : "command-recording-failed";
+}
+
+static bool synchronization2_feature_extension_enabled(
+        uint64_t requested_feature_mask,
+        uint64_t enabled_extension_mask) {
+    return (requested_feature_mask & PDOCKER_VK_FEATURE_SYNCHRONIZATION_2) != 0 &&
+           (enabled_extension_mask & PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2) != 0;
+}
+
+static bool command_buffer_synchronization2_enabled(const PdockerVkCommandBuffer *cmd) {
+    return cmd && synchronization2_feature_extension_enabled(
+        cmd->requested_feature_mask, cmd->enabled_extension_mask);
+}
+
+static bool queue_synchronization2_enabled(const PdockerVkQueue *queue) {
+    return queue && synchronization2_feature_extension_enabled(
+        queue->requested_feature_mask, queue->enabled_extension_mask);
+}
+
+static bool command_buffer_require_synchronization2(
+        PdockerVkCommandBuffer *cmd,
+        const char *reason) {
+    if (!cmd) return false;
+    if (!command_buffer_synchronization2_enabled(cmd)) {
+        command_buffer_mark_recording_failed(cmd, reason ? reason : "synchronization2-feature-disabled");
+        return false;
+    }
+    return true;
 }
 
 static void descriptor_set_release_snapshot_array(
@@ -20945,6 +20980,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
     if (!device) return VK_ERROR_OUT_OF_HOST_MEMORY;
     device->requested_feature_mask = requested_feature_mask;
     device->enabled_extension_mask = enabled_extension_mask;
+    g_last_created_device = device;
+    g_last_device_requested_feature_mask = requested_feature_mask;
+    g_last_device_enabled_extension_mask = enabled_extension_mask;
     if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
         fprintf(stderr,
                 "pdocker-vulkan-icd: create-device requested_feature_mask=0x%016llx supported_feature_mask=0x%016llx\n",
@@ -20961,6 +20999,11 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyDevice(
         VkDevice device,
         const VkAllocationCallbacks *pAllocator) {
     (void)pAllocator;
+    if ((PdockerVkDevice *)device == g_last_created_device) {
+        g_last_created_device = NULL;
+        g_last_device_requested_feature_mask = 0;
+        g_last_device_enabled_extension_mask = 0;
+    }
     free((void *)device);
 }
 
@@ -20969,22 +21012,30 @@ VKAPI_ATTR void VKAPI_CALL vkGetDeviceQueue(
         uint32_t queueFamilyIndex,
         uint32_t queueIndex,
         VkQueue *pQueue) {
-    (void)device;
     if (!pQueue) return;
-    *pQueue = pdocker_vk_queue_request_valid(queueFamilyIndex, queueIndex, 0)
-        ? (VkQueue)&g_queue
-        : VK_NULL_HANDLE;
+    if (!pdocker_vk_queue_request_valid(queueFamilyIndex, queueIndex, 0)) {
+        *pQueue = VK_NULL_HANDLE;
+        return;
+    }
+    (void)device;
+    g_queue.requested_feature_mask = g_last_device_requested_feature_mask;
+    g_queue.enabled_extension_mask = g_last_device_enabled_extension_mask;
+    *pQueue = (VkQueue)&g_queue;
 }
 
 VKAPI_ATTR void VKAPI_CALL vkGetDeviceQueue2(
         VkDevice device,
         const VkDeviceQueueInfo2 *pQueueInfo,
         VkQueue *pQueue) {
-    (void)device;
     if (!pQueue) return;
-    *pQueue = pdocker_vk_device_queue_info2_valid(pQueueInfo)
-        ? (VkQueue)&g_queue
-        : VK_NULL_HANDLE;
+    if (!pdocker_vk_device_queue_info2_valid(pQueueInfo)) {
+        *pQueue = VK_NULL_HANDLE;
+        return;
+    }
+    (void)device;
+    g_queue.requested_feature_mask = g_last_device_requested_feature_mask;
+    g_queue.enabled_extension_mask = g_last_device_enabled_extension_mask;
+    *pQueue = (VkQueue)&g_queue;
 }
 
 VKAPI_ATTR void VKAPI_CALL vkGetDeviceGroupPeerMemoryFeatures(
@@ -24777,6 +24828,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateCommandPool(
     if (!pool) return VK_ERROR_OUT_OF_HOST_MEMORY;
     PdockerVkDevice *dev = (PdockerVkDevice *)device;
     pool->requested_feature_mask = dev ? dev->requested_feature_mask : 0;
+    pool->enabled_extension_mask = dev ? dev->enabled_extension_mask : 0;
     *pCommandPool = pdocker_vk_command_pool_to_handle(pool);
     return VK_SUCCESS;
 }
@@ -24859,6 +24911,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateCommandBuffers(
         set_loader_magic_value(cmd);
         cmd->level = pAllocateInfo->level;
         cmd->requested_feature_mask = pool->requested_feature_mask;
+        cmd->enabled_extension_mask = pool->enabled_extension_mask;
         pCommandBuffers[i] = (VkCommandBuffer)cmd;
     }
     return VK_SUCCESS;
@@ -30614,6 +30667,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2(
         uint32_t submitCount,
         const VkSubmitInfo2 *pSubmits,
         VkFence fence) {
+    if (!queue_synchronization2_enabled((PdockerVkQueue *)queue)) {
+        trace_icd_runtime_failure("synchronization2-feature-disabled",
+                                  VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
     if (submitCount == 0) return vkQueueSubmit(queue, 0, NULL, fence);
     if (!pSubmits) return VK_ERROR_INITIALIZATION_FAILED;
     for (uint32_t validate_i = 0; validate_i < submitCount; ++validate_i) {
@@ -31115,6 +31173,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier2(
         const VkDependencyInfo *pDependencyInfo) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     if (!cmd) return;
+    if (!command_buffer_require_synchronization2(cmd, "synchronization2-feature-disabled")) return;
     const char *unsupported_reason =
         pipeline_barrier2_dependency_info_failure_reason(pDependencyInfo);
     if (unsupported_reason) {
@@ -31260,6 +31319,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetEvent2(
         VkEvent event,
         const VkDependencyInfo *pDependencyInfo) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    if (!command_buffer_require_synchronization2(cmd, "synchronization2-feature-disabled")) return;
     if (dependency_info_has_unsupported_pnext(pDependencyInfo)) {
         if (cmd) command_buffer_mark_recording_failed(cmd, "event-set2-dependency-info-unsupported");
         return;
@@ -31282,6 +31342,8 @@ VKAPI_ATTR void VKAPI_CALL vkCmdResetEvent2(
         VkCommandBuffer commandBuffer,
         VkEvent event,
         VkPipelineStageFlags2 stageMask) {
+    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    if (!command_buffer_require_synchronization2(cmd, "synchronization2-feature-disabled")) return;
     record_event_command(commandBuffer, event, false, stageMask, 0, NULL);
 }
 
@@ -31291,6 +31353,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdWaitEvents2(
         const VkEvent *pEvents,
         const VkDependencyInfo *pDependencyInfos) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    if (!command_buffer_require_synchronization2(cmd, "synchronization2-feature-disabled")) return;
     if (eventCount > 0 && (!pEvents || !pDependencyInfos)) {
         if (cmd) command_buffer_mark_recording_failed(cmd, "event-wait2-missing-arrays");
         return;
@@ -31687,6 +31750,8 @@ VKAPI_ATTR void VKAPI_CALL vkCmdWriteTimestamp2(
         VkPipelineStageFlags2 stage,
         VkQueryPool queryPool,
         uint32_t query) {
+    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    if (!command_buffer_require_synchronization2(cmd, "synchronization2-feature-disabled")) return;
     record_query_command(commandBuffer,
                          PDOCKER_VK_COMMAND_QUERY_TIMESTAMP,
                          queryPool,
@@ -33036,11 +33101,17 @@ static bool device_proc_address_hidden_by_enabled_state(
          (extensions & PDOCKER_VK_DEVICE_EXT_KHR_DYNAMIC_RENDERING) == 0)) {
         return true;
     }
-    if ((strcmp(pName, "vkCmdPipelineBarrier2KHR") == 0 ||
+    if ((strcmp(pName, "vkCmdPipelineBarrier2") == 0 ||
+         strcmp(pName, "vkCmdPipelineBarrier2KHR") == 0 ||
+         strcmp(pName, "vkQueueSubmit2") == 0 ||
          strcmp(pName, "vkQueueSubmit2KHR") == 0 ||
+         strcmp(pName, "vkCmdSetEvent2") == 0 ||
          strcmp(pName, "vkCmdSetEvent2KHR") == 0 ||
+         strcmp(pName, "vkCmdResetEvent2") == 0 ||
          strcmp(pName, "vkCmdResetEvent2KHR") == 0 ||
+         strcmp(pName, "vkCmdWaitEvents2") == 0 ||
          strcmp(pName, "vkCmdWaitEvents2KHR") == 0 ||
+         strcmp(pName, "vkCmdWriteTimestamp2") == 0 ||
          strcmp(pName, "vkCmdWriteTimestamp2KHR") == 0) &&
         ((features & PDOCKER_VK_FEATURE_SYNCHRONIZATION_2) == 0 ||
          (extensions & PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2) == 0)) {
