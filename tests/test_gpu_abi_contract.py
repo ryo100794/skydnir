@@ -6412,6 +6412,17 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("buffers[buffer_index].usage |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT", graph)
         self.assertNotIn("buffers[buffer_index].usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |", graph)
 
+        frame_sender = c_function_body(icd, "send_generic_vulkan_dispatch_v5_1_op")
+        self.assertIn("resources[buffer_index].usage = (uint64_t)dispatch_indirect_buffer->usage;", frame_sender)
+        self.assertIn("resources[buffer_index].usage |= VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT", frame_sender)
+
+        indirect_materializer = c_function_body(executor, "materialize_vulkan_dispatch_indirect_buffer")
+        self.assertIn("(VkBufferUsageFlags)buffer->usage", indirect_materializer)
+        indirect_creator = c_function_body(executor, "create_vulkan_indirect_buffer_from_fd")
+        self.assertIn("VkBufferUsageFlags api_usage", executor)
+        self.assertIn("const VkBufferUsageFlags effective_usage = api_usage |", indirect_creator)
+        self.assertIn("effective_usage,", indirect_creator)
+
     def test_vulkan_graphics_replay_buffers_are_heap_backed(self):
         executor = GPU_EXECUTOR.read_text()
         buffers_struct = executor.split("typedef struct VulkanGraphicsReplayBuffers", 1)[1].split(

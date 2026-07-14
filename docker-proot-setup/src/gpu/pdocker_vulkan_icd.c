@@ -11471,6 +11471,11 @@ static int send_generic_vulkan_dispatch_v5_1_op(
         resources[buffer_index].fd_index = PDOCKER_GPU_V5_RESOURCE_FD_NONE;
         resources[buffer_index].memory_offset = (uint64_t)dispatch_indirect_buffer->memory_offset;
         resources[buffer_index].size = (uint64_t)dispatch_indirect_buffer->size;
+        resources[buffer_index].usage = (uint64_t)dispatch_indirect_buffer->usage;
+        resources[buffer_index].usage |= VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
+            VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+            VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
         resources[buffer_index].generation = dispatch_id;
         fds[fd_index++] = memory->fd;
         dispatch_indirect_resource_index = buffer_index;

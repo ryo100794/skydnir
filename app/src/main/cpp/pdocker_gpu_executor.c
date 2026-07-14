@@ -2722,16 +2722,19 @@ static int create_vulkan_indirect_buffer_from_fd(
         int fd,
         size_t bytes,
         off_t fd_offset,
+        VkBufferUsageFlags api_usage,
         VulkanVectorBuffer *out) {
     if (fd < 0 || bytes == 0 || !out) return -EINVAL;
+    const VkBufferUsageFlags effective_usage = api_usage |
+        VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
     int rc = create_vulkan_buffer_with_usage(
         physical_device,
         device,
         bytes,
-        VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
-            VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-            VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+        effective_usage,
         NULL,
         out);
     if (rc != 0) return rc;
@@ -2785,6 +2788,7 @@ static int materialize_vulkan_dispatch_indirect_buffer(
         object_tables->passed_fds[memory->fd_index],
         (size_t)transport_size_u64,
         (off_t)fd_offset_u64,
+        (VkBufferUsageFlags)buffer->usage,
         out);
 }
 
