@@ -8410,7 +8410,11 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("supported = !p->hostQueryReset", host_query_request_segment)
         self.assertNotIn('unsupported_feature_name = "hostQueryReset"', host_query_request_segment)
 
+        self.assertIn("VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME", icd)
+        self.assertIn("ADD_DEVICE_EXTENSION(VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME", icd)
         self.assertIn("VKAPI_ATTR void VKAPI_CALL vkResetQueryPool", icd)
+        self.assertIn("VKAPI_ATTR void VKAPI_CALL vkResetQueryPoolEXT", icd)
+        self.assertIn("MAP_PROC(vkResetQueryPoolEXT)", icd)
         self.assertIn("reset_query_range(pdocker_vk_query_pool_from_handle(queryPool), firstQuery, queryCount);", icd)
         reset_body = c_function_body(icd, "reset_query_range")
         self.assertIn("if (!query_range_valid(pool, firstQuery, queryCount)) return;", reset_body)

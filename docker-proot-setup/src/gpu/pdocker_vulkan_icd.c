@@ -19483,6 +19483,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(
                              VK_EXT_INDEX_TYPE_UINT8_SPEC_VERSION);
     }
 #endif
+#ifdef VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME
+    ADD_DEVICE_EXTENSION(VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME, VK_EXT_HOST_QUERY_RESET_SPEC_VERSION);
+#endif
 #ifdef VK_EXT_VALIDATION_CACHE_EXTENSION_NAME
     ADD_DEVICE_EXTENSION(VK_EXT_VALIDATION_CACHE_EXTENSION_NAME, VK_EXT_VALIDATION_CACHE_SPEC_VERSION);
 #endif
@@ -19560,6 +19563,9 @@ static bool device_extension_advertised_name(const char *name) {
     if (strcmp(name, VK_EXT_INDEX_TYPE_UINT8_EXTENSION_NAME) == 0) {
         return caps && caps->ext_index_type_uint8 && caps->index_type_uint8.indexTypeUint8;
     }
+#endif
+#ifdef VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME
+    if (strcmp(name, VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME) == 0) return true;
 #endif
 #ifdef VK_EXT_VALIDATION_CACHE_EXTENSION_NAME
     if (strcmp(name, VK_EXT_VALIDATION_CACHE_EXTENSION_NAME) == 0) return true;
@@ -30132,6 +30138,16 @@ VKAPI_ATTR void VKAPI_CALL vkResetQueryPool(
     reset_query_range(pdocker_vk_query_pool_from_handle(queryPool), firstQuery, queryCount);
 }
 
+#ifdef VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME
+VKAPI_ATTR void VKAPI_CALL vkResetQueryPoolEXT(
+        VkDevice device,
+        VkQueryPool queryPool,
+        uint32_t firstQuery,
+        uint32_t queryCount) {
+    vkResetQueryPool(device, queryPool, firstQuery, queryCount);
+}
+#endif
+
 VKAPI_ATTR void VKAPI_CALL vkCmdWriteTimestamp(
         VkCommandBuffer commandBuffer,
         VkPipelineStageFlagBits pipelineStage,
@@ -31466,6 +31482,9 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_PROC(vkCmdResetQueryPool);
     MAP_PROC(vkCmdCopyQueryPoolResults);
     MAP_PROC(vkResetQueryPool);
+#ifdef VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME
+    MAP_PROC(vkResetQueryPoolEXT);
+#endif
     MAP_PROC(vkGetQueryPoolResults);
     MAP_PROC(vkCmdWriteTimestamp);
     MAP_PROC(vkCmdWriteTimestamp2);
