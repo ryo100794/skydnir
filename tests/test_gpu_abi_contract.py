@@ -8314,6 +8314,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "p->robustUniformBufferAccessSizeAlignment = 1;",
             "p->defaultRobustnessStorageBuffers = VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_DEVICE_DEFAULT;",
             "p->defaultRobustnessImages = VK_PIPELINE_ROBUSTNESS_IMAGE_BEHAVIOR_DEVICE_DEFAULT;",
+            "snprintf(p->driverName, sizeof(p->driverName), \"skydnir-vulkan-bridge\");",
+            "snprintf(p->driverInfo, sizeof(p->driverInfo), \"Skydnir neutral Vulkan bridge\");",
         ]:
             self.assertIn(marker, props_body)
 
@@ -8410,8 +8412,12 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("supported = !p->hostQueryReset", host_query_request_segment)
         self.assertNotIn('unsupported_feature_name = "hostQueryReset"', host_query_request_segment)
 
+        self.assertIn("VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME", icd)
+        self.assertIn("VK_EXT_MEMORY_BUDGET_EXTENSION_NAME", icd)
         self.assertIn("VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME", icd)
         self.assertIn("VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME", icd)
+        self.assertIn("ADD_DEVICE_EXTENSION(VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME", icd)
+        self.assertIn("ADD_DEVICE_EXTENSION(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME", icd)
         self.assertIn("ADD_DEVICE_EXTENSION(VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME", icd)
         self.assertIn("ADD_DEVICE_EXTENSION(VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME", icd)
         self.assertIn("VKAPI_ATTR void VKAPI_CALL vkResetQueryPool", icd)
@@ -9194,6 +9200,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("zero_vk_out_struct_preserve_chain(pMemoryProperties, sizeof(*pMemoryProperties), header);", body)
         self.assertIn("vkGetPhysicalDeviceMemoryProperties(physicalDevice, &pMemoryProperties->memoryProperties);", body)
         self.assertIn("fill_memory_properties2_pnext(pnext, &pMemoryProperties->memoryProperties);", body)
+        self.assertIn("VK_EXT_MEMORY_BUDGET_EXTENSION_NAME", icd)
+        self.assertIn("ADD_DEVICE_EXTENSION(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME", icd)
         self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT", helper_body)
         self.assertIn("zero_vk_out_struct_preserve_chain(budget, sizeof(*budget), header);", helper_body)
         self.assertIn("budget->heapBudget[i] = memoryProperties->memoryHeaps[i].size;", helper_body)

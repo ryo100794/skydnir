@@ -243,6 +243,134 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_driver_properties_extension_reports_skydnir_bridge_metadata(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            int main(void) {{
+            #ifndef VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME
+                return 0;
+            #else
+                if (!device_extension_advertised_name(VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME)) return 2;
+                uint32_t extension_count = 0;
+                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &extension_count, NULL) != VK_SUCCESS ||
+                    extension_count == 0) return 3;
+                VkExtensionProperties extensions[64];
+                memset(extensions, 0, sizeof(extensions));
+                uint32_t capacity = 64;
+                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &capacity, extensions) != VK_SUCCESS) return 4;
+                VkBool32 found = VK_FALSE;
+                for (uint32_t i = 0; i < capacity; ++i) {{
+                    if (strcmp(extensions[i].extensionName, VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME) == 0) found = VK_TRUE;
+                }}
+                if (!found) return 5;
+
+                const char *enabled[] = {{ VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME }};
+                VkDeviceCreateInfo create_info;
+                memset(&create_info, 0, sizeof(create_info));
+                create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                create_info.enabledExtensionCount = 1;
+                create_info.ppEnabledExtensionNames = enabled;
+                if (validate_device_extensions(&create_info) != VK_SUCCESS) return 6;
+
+                VkPhysicalDeviceProperties2 properties2;
+                VkPhysicalDeviceDriverProperties driver;
+                memset(&properties2, 0, sizeof(properties2));
+                memset(&driver, 0xff, sizeof(driver));
+                properties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+                properties2.pNext = &driver;
+                driver.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
+                driver.pNext = NULL;
+                vkGetPhysicalDeviceProperties2(VK_NULL_HANDLE, &properties2);
+                if (driver.sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES ||
+                    driver.pNext != NULL) return 7;
+                if (strstr(driver.driverName, "skydnir-vulkan-bridge") == NULL) {{
+                    fprintf(stderr, "unexpected driver name: %s\\n", driver.driverName);
+                    return 8;
+                }}
+                if (strstr(driver.driverInfo, "Skydnir neutral Vulkan bridge") == NULL) {{
+                    fprintf(stderr, "unexpected driver info: %s\\n", driver.driverInfo);
+                    return 9;
+                }}
+                if (strstr(driver.driverName, "pdocker") != NULL ||
+                    strstr(driver.driverInfo, "pdocker") != NULL) return 10;
+                if (driver.conformanceVersion.major != 1 || driver.conformanceVersion.minor != 2) return 11;
+                return 0;
+            #endif
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_memory_budget_extension_reports_conservative_heap_budget(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            int main(void) {{
+            #ifndef VK_EXT_MEMORY_BUDGET_EXTENSION_NAME
+                return 0;
+            #else
+                if (!device_extension_advertised_name(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME)) return 2;
+                uint32_t extension_count = 0;
+                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &extension_count, NULL) != VK_SUCCESS ||
+                    extension_count == 0) return 3;
+                VkExtensionProperties extensions[64];
+                memset(extensions, 0, sizeof(extensions));
+                uint32_t capacity = 64;
+                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &capacity, extensions) != VK_SUCCESS) return 4;
+                VkBool32 found = VK_FALSE;
+                for (uint32_t i = 0; i < capacity; ++i) {{
+                    if (strcmp(extensions[i].extensionName, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME) == 0) found = VK_TRUE;
+                }}
+                if (!found) return 5;
+
+                const char *enabled[] = {{ VK_EXT_MEMORY_BUDGET_EXTENSION_NAME }};
+                VkDeviceCreateInfo create_info;
+                memset(&create_info, 0, sizeof(create_info));
+                create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                create_info.enabledExtensionCount = 1;
+                create_info.ppEnabledExtensionNames = enabled;
+                if (validate_device_extensions(&create_info) != VK_SUCCESS) return 6;
+
+                VkPhysicalDeviceMemoryProperties2 memory2;
+                VkPhysicalDeviceMemoryBudgetPropertiesEXT budget;
+                memset(&memory2, 0, sizeof(memory2));
+                memset(&budget, 0xff, sizeof(budget));
+                memory2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2;
+                memory2.pNext = &budget;
+                budget.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT;
+                budget.pNext = NULL;
+                vkGetPhysicalDeviceMemoryProperties2(VK_NULL_HANDLE, &memory2);
+                if (budget.sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT ||
+                    budget.pNext != NULL) return 7;
+                if (memory2.memoryProperties.memoryHeapCount == 0) return 8;
+                for (uint32_t i = 0; i < memory2.memoryProperties.memoryHeapCount; ++i) {{
+                    if (budget.heapBudget[i] != memory2.memoryProperties.memoryHeaps[i].size) {{
+                        fprintf(stderr, "heap %u budget %llu != heap size %llu\\n",
+                                i,
+                                (unsigned long long)budget.heapBudget[i],
+                                (unsigned long long)memory2.memoryProperties.memoryHeaps[i].size);
+                        return 9;
+                    }}
+                    if (budget.heapUsage[i] != 0) return 10;
+                }}
+                return 0;
+            #endif
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_host_query_reset_extension_aliases_core_reset(self):
         source = textwrap.dedent(
             f"""

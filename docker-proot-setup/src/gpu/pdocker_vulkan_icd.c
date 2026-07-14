@@ -15276,8 +15276,8 @@ static void fill_pnext_properties(void *pNext) {
                 VkPhysicalDeviceDriverProperties *p = (VkPhysicalDeviceDriverProperties *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
                 p->driverID = VK_DRIVER_ID_MESA_LLVMPIPE;
-                snprintf(p->driverName, sizeof(p->driverName), "pdocker-vulkan-bridge");
-                snprintf(p->driverInfo, sizeof(p->driverInfo), "pdocker neutral Vulkan bridge");
+                snprintf(p->driverName, sizeof(p->driverName), "skydnir-vulkan-bridge");
+                snprintf(p->driverInfo, sizeof(p->driverInfo), "Skydnir neutral Vulkan bridge");
                 p->conformanceVersion.major = 1;
                 p->conformanceVersion.minor = 2;
                 p->conformanceVersion.subminor = 0;
@@ -15301,8 +15301,8 @@ static void fill_pnext_properties(void *pNext) {
                 VkPhysicalDeviceVulkan12Properties *p = (VkPhysicalDeviceVulkan12Properties *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
                 p->driverID = VK_DRIVER_ID_MESA_LLVMPIPE;
-                snprintf(p->driverName, sizeof(p->driverName), "pdocker-vulkan-bridge");
-                snprintf(p->driverInfo, sizeof(p->driverInfo), "pdocker neutral Vulkan bridge");
+                snprintf(p->driverName, sizeof(p->driverName), "skydnir-vulkan-bridge");
+                snprintf(p->driverInfo, sizeof(p->driverInfo), "Skydnir neutral Vulkan bridge");
                 p->conformanceVersion.major = 1;
                 p->conformanceVersion.minor = 2;
                 p->shaderRoundingModeRTEFloat16 = VK_FALSE;
@@ -19483,6 +19483,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(
                              VK_EXT_INDEX_TYPE_UINT8_SPEC_VERSION);
     }
 #endif
+#ifdef VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME
+    ADD_DEVICE_EXTENSION(VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME, VK_KHR_DRIVER_PROPERTIES_SPEC_VERSION);
+#endif
+#ifdef VK_EXT_MEMORY_BUDGET_EXTENSION_NAME
+    ADD_DEVICE_EXTENSION(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME, VK_EXT_MEMORY_BUDGET_SPEC_VERSION);
+#endif
 #ifdef VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME
     ADD_DEVICE_EXTENSION(VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME, VK_EXT_HOST_QUERY_RESET_SPEC_VERSION);
 #endif
@@ -19567,6 +19573,12 @@ static bool device_extension_advertised_name(const char *name) {
     if (strcmp(name, VK_EXT_INDEX_TYPE_UINT8_EXTENSION_NAME) == 0) {
         return caps && caps->ext_index_type_uint8 && caps->index_type_uint8.indexTypeUint8;
     }
+#endif
+#ifdef VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME
+    if (strcmp(name, VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME) == 0) return true;
+#endif
+#ifdef VK_EXT_MEMORY_BUDGET_EXTENSION_NAME
+    if (strcmp(name, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME) == 0) return true;
 #endif
 #ifdef VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME
     if (strcmp(name, VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME) == 0) return true;
