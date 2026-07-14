@@ -1496,7 +1496,7 @@ class GpuAbiContractTest(unittest.TestCase):
     def test_vulkan_wsi_headless_and_swapchain_extensions_are_advertised(self):
         icd = VULKAN_ICD.read_text()
 
-        instance_extension_body = c_function_body(icd, "vkEnumerateInstanceExtensionProperties")
+        collector_body = c_function_body(icd, "collect_advertised_instance_extensions")
         for marker in [
             "VK_KHR_SURFACE_EXTENSION_NAME",
             "VK_KHR_SURFACE_SPEC_VERSION",
@@ -1506,29 +1506,28 @@ class GpuAbiContractTest(unittest.TestCase):
             "VK_KHR_GET_SURFACE_CAPABILITIES_2_SPEC_VERSION",
             "VK_EXT_DEBUG_UTILS_EXTENSION_NAME",
             "VK_EXT_DEBUG_UTILS_SPEC_VERSION",
-            "copy_extension_properties",
-            "available_count",
+            "ADD_INSTANCE_EXTENSION",
+            "write_extension_property(properties, count, (name), (version));",
+            "count++;",
         ]:
-            self.assertIn(marker, instance_extension_body)
+            self.assertIn(marker, collector_body)
+
+        instance_extension_body = c_function_body(icd, "vkEnumerateInstanceExtensionProperties")
+        self.assertIn("PDOCKER_VK_MAX_INSTANCE_EXTENSIONS", instance_extension_body)
+        self.assertIn("collect_advertised_instance_extensions(", instance_extension_body)
+        self.assertIn("copy_extension_properties(available, available_count, pPropertyCount, pProperties);", instance_extension_body)
+        self.assertNotIn("ADD_INSTANCE_EXTENSION", instance_extension_body)
+
+        instance_name_body = c_function_body(icd, "instance_extension_advertised_name")
+        self.assertIn("collect_advertised_instance_extensions(", instance_name_body)
+        self.assertIn("strcmp(name, available[i].extensionName) == 0", instance_name_body)
+        self.assertNotIn("VK_KHR_SURFACE_EXTENSION_NAME", instance_name_body)
 
         create_instance_body = c_function_body(icd, "vkCreateInstance")
-        instance_validation_scope = create_instance_body
-        if "instance_extension_advertised_name" in icd:
-            instance_validation_scope += c_function_body(icd, "instance_extension_advertised_name")
-        if "validate_instance_extensions" in icd:
-            instance_validation_scope += c_function_body(icd, "validate_instance_extensions")
-        for marker in [
-            "VK_KHR_SURFACE_EXTENSION_NAME",
-            "VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME",
-            "VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME",
-            "VK_EXT_DEBUG_UTILS_EXTENSION_NAME",
-        ]:
-            self.assertIn(marker, instance_validation_scope)
-        self.assertIn("VK_ERROR_EXTENSION_NOT_PRESENT", create_instance_body + instance_validation_scope)
-        self.assertRegex(
-            create_instance_body,
-            r"(validate_instance_extensions|instance_extension_advertised_name|VK_KHR_SURFACE_EXTENSION_NAME)",
-        )
+        validate_instance_body = c_function_body(icd, "validate_instance_extensions")
+        self.assertIn("validate_instance_extensions(pCreateInfo)", create_instance_body)
+        self.assertIn("instance_extension_advertised_name(name)", validate_instance_body)
+        self.assertIn("VK_ERROR_EXTENSION_NOT_PRESENT", create_instance_body + validate_instance_body)
         for marker in [
             "VKAPI_ATTR VkResult VKAPI_CALL vkCreateDebugUtilsMessengerEXT",
             "VKAPI_ATTR VkResult VKAPI_CALL vkDebugMarkerSetObjectNameEXT",

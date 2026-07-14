@@ -622,24 +622,36 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
             int main(void) {{
                 uint32_t extension_count = 0;
                 if (vkEnumerateInstanceExtensionProperties(NULL, &extension_count, NULL) != VK_SUCCESS) return 2;
-                VkExtensionProperties extensions[16];
+                if (extension_count == 0 || extension_count > PDOCKER_VK_MAX_INSTANCE_EXTENSIONS) return 3;
+                VkExtensionProperties extensions[PDOCKER_VK_MAX_INSTANCE_EXTENSIONS];
                 memset(extensions, 0, sizeof(extensions));
-                uint32_t capacity = 16;
-                if (vkEnumerateInstanceExtensionProperties(NULL, &capacity, extensions) != VK_SUCCESS) return 3;
+                uint32_t capacity = PDOCKER_VK_MAX_INSTANCE_EXTENSIONS;
+                if (vkEnumerateInstanceExtensionProperties(NULL, &capacity, extensions) != VK_SUCCESS) return 4;
+                if (capacity != extension_count) return 5;
+                const char *enabled[PDOCKER_VK_MAX_INSTANCE_EXTENSIONS];
                 VkBool32 found = VK_FALSE;
                 for (uint32_t i = 0; i < capacity; ++i) {{
+                    if (!instance_extension_advertised_name(extensions[i].extensionName)) return 6;
+                    enabled[i] = extensions[i].extensionName;
                     if (strcmp(extensions[i].extensionName, VK_EXT_DEBUG_UTILS_EXTENSION_NAME) == 0) found = VK_TRUE;
                 }}
-                if (!found || !instance_extension_advertised_name(VK_EXT_DEBUG_UTILS_EXTENSION_NAME)) return 4;
+                if (!found || !instance_extension_advertised_name(VK_EXT_DEBUG_UTILS_EXTENSION_NAME)) return 7;
 
-                const char *enabled[] = {{ VK_EXT_DEBUG_UTILS_EXTENSION_NAME }};
                 VkInstanceCreateInfo instance_info;
                 memset(&instance_info, 0, sizeof(instance_info));
                 instance_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-                instance_info.enabledExtensionCount = 1;
+                instance_info.enabledExtensionCount = capacity;
                 instance_info.ppEnabledExtensionNames = enabled;
+                if (validate_instance_extensions(&instance_info) != VK_SUCCESS) return 8;
+                const char *bad_enabled[] = {{ "VK_SKYDNIR_not_advertised_instance_extension" }};
+                instance_info.enabledExtensionCount = 1;
+                instance_info.ppEnabledExtensionNames = bad_enabled;
+                if (validate_instance_extensions(&instance_info) != VK_ERROR_EXTENSION_NOT_PRESENT) return 9;
+                const char *debug_enabled[] = {{ VK_EXT_DEBUG_UTILS_EXTENSION_NAME }};
+                instance_info.enabledExtensionCount = 1;
+                instance_info.ppEnabledExtensionNames = debug_enabled;
                 VkInstance instance = VK_NULL_HANDLE;
-                if (vkCreateInstance(&instance_info, NULL, &instance) != VK_SUCCESS || instance == VK_NULL_HANDLE) return 5;
+                if (vkCreateInstance(&instance_info, NULL, &instance) != VK_SUCCESS || instance == VK_NULL_HANDLE) return 10;
 
                 VkDebugUtilsMessengerCreateInfoEXT messenger_info;
                 memset(&messenger_info, 0, sizeof(messenger_info));

@@ -17392,21 +17392,23 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceVersion(uint32_t *pApiVersion)
     return VK_SUCCESS;
 }
 
-VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceExtensionProperties(
-        const char *pLayerName,
-        uint32_t *pPropertyCount,
-        VkExtensionProperties *pProperties) {
-    (void)pLayerName;
-    VkExtensionProperties available[4];
-    uint32_t available_count = 0;
+#define PDOCKER_VK_MAX_INSTANCE_EXTENSIONS 8u
+
+static void write_extension_property(
+        VkExtensionProperties *properties,
+        uint32_t index,
+        const char *name,
+        uint32_t version);
+
+static uint32_t collect_advertised_instance_extensions(
+        VkExtensionProperties *properties,
+        uint32_t capacity) {
+    uint32_t count = 0;
 #define ADD_INSTANCE_EXTENSION(name, version) do { \
-        if (available_count < (uint32_t)(sizeof(available) / sizeof(available[0]))) { \
-            memset(&available[available_count], 0, sizeof(available[available_count])); \
-            snprintf(available[available_count].extensionName, \
-                     sizeof(available[available_count].extensionName), "%s", (name)); \
-            available[available_count].specVersion = (version); \
-            available_count++; \
+        if (count < capacity) { \
+            write_extension_property(properties, count, (name), (version)); \
         } \
+        count++; \
     } while (0)
     ADD_INSTANCE_EXTENSION(VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_SURFACE_SPEC_VERSION);
     ADD_INSTANCE_EXTENSION(VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME, VK_EXT_HEADLESS_SURFACE_SPEC_VERSION);
@@ -17416,20 +17418,59 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceExtensionProperties(
     ADD_INSTANCE_EXTENSION(VK_EXT_DEBUG_UTILS_EXTENSION_NAME, VK_EXT_DEBUG_UTILS_SPEC_VERSION);
 #endif
 #undef ADD_INSTANCE_EXTENSION
+    return count;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceExtensionProperties(
+        const char *pLayerName,
+        uint32_t *pPropertyCount,
+        VkExtensionProperties *pProperties) {
+    (void)pLayerName;
     if (!pPropertyCount) return VK_ERROR_INITIALIZATION_FAILED;
+    VkExtensionProperties available[PDOCKER_VK_MAX_INSTANCE_EXTENSIONS];
+    uint32_t available_count = collect_advertised_instance_extensions(
+        available,
+        (uint32_t)(sizeof(available) / sizeof(available[0])));
+    if (available_count > (uint32_t)(sizeof(available) / sizeof(available[0]))) {
+        available_count = (uint32_t)(sizeof(available) / sizeof(available[0]));
+    }
     copy_extension_properties(available, available_count, pPropertyCount, pProperties);
     return VK_SUCCESS;
 }
 
 static bool instance_extension_advertised_name(const char *name) {
     if (!name) return false;
-    if (strcmp(name, VK_KHR_SURFACE_EXTENSION_NAME) == 0) return true;
-    if (strcmp(name, VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME) == 0) return true;
-    if (strcmp(name, VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME) == 0) return true;
-#ifdef VK_EXT_DEBUG_UTILS_EXTENSION_NAME
-    if (strcmp(name, VK_EXT_DEBUG_UTILS_EXTENSION_NAME) == 0) return true;
-#endif
+    VkExtensionProperties available[PDOCKER_VK_MAX_INSTANCE_EXTENSIONS];
+    uint32_t available_count = collect_advertised_instance_extensions(
+        available,
+        (uint32_t)(sizeof(available) / sizeof(available[0])));
+    if (available_count > (uint32_t)(sizeof(available) / sizeof(available[0]))) {
+        available_count = (uint32_t)(sizeof(available) / sizeof(available[0]));
+    }
+    for (uint32_t i = 0; i < available_count; ++i) {
+        if (strcmp(name, available[i].extensionName) == 0) return true;
+    }
     return false;
+}
+
+static VkResult validate_instance_extensions(const VkInstanceCreateInfo *pCreateInfo) {
+    if (!pCreateInfo) return VK_SUCCESS;
+    for (uint32_t i = 0; i < pCreateInfo->enabledExtensionCount; ++i) {
+        const char *name = pCreateInfo->ppEnabledExtensionNames
+            ? pCreateInfo->ppEnabledExtensionNames[i]
+            : NULL;
+        if (!instance_extension_advertised_name(name)) {
+            trace_icd_runtime_failure("instance-extension-not-present",
+                                      VK_ERROR_EXTENSION_NOT_PRESENT);
+            if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
+                fprintf(stderr,
+                        "pdocker-vulkan-icd: instance extension unsupported: %s\n",
+                        name ? name : "<null>");
+            }
+            return VK_ERROR_EXTENSION_NOT_PRESENT;
+        }
+    }
+    return VK_SUCCESS;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceLayerProperties(
@@ -17450,23 +17491,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateInstance(
         VkInstance *pInstance) {
     (void)pAllocator;
     if (!pInstance) return VK_ERROR_INITIALIZATION_FAILED;
-    if (pCreateInfo && pCreateInfo->enabledExtensionCount > 0) {
-        for (uint32_t i = 0; i < pCreateInfo->enabledExtensionCount; ++i) {
-            const char *name = pCreateInfo->ppEnabledExtensionNames
-                ? pCreateInfo->ppEnabledExtensionNames[i]
-                : NULL;
-            if (!instance_extension_advertised_name(name)) {
-                trace_icd_runtime_failure("instance-extension-not-present",
-                                          VK_ERROR_EXTENSION_NOT_PRESENT);
-                if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
-                    fprintf(stderr,
-                            "pdocker-vulkan-icd: instance extension unsupported: %s\n",
-                            name ? name : "<null>");
-                }
-                return VK_ERROR_EXTENSION_NOT_PRESENT;
-            }
-        }
-    }
+    VkResult extension_rc = validate_instance_extensions(pCreateInfo);
+    if (extension_rc != VK_SUCCESS) return extension_rc;
     PdockerVkInstance *instance = calloc(1, sizeof(*instance));
     if (!instance) return VK_ERROR_OUT_OF_HOST_MEMORY;
     set_loader_magic_value(instance);
