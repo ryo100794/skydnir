@@ -11281,12 +11281,6 @@ static int send_generic_vulkan_dispatch_v5_1_op(
                 (const void *)entry_name);
         return -EINVAL;
     }
-    if (binding_count == 0 && image_descriptor_count == 0) {
-        fprintf(stderr,
-                "pdocker-vulkan-icd: V5.1 frame rejected: empty descriptor table dispatch_id=%llu\n",
-                (unsigned long long)dispatch_id);
-        return -EINVAL;
-    }
     if (binding_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS ||
         image_descriptor_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS ||
         image_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGES ||
@@ -12659,7 +12653,10 @@ static int send_generic_vulkan_dispatch_op(
             }
         }
     }
-    if (binding_count == 0 && image_descriptor_count == 0) {
+    const bool pending_compute_barriers_for_empty_descriptor_dispatch = pre_barriers &&
+        (pre_barriers->memory_count || pre_barriers->buffer_count || pre_barriers->image_count);
+    if (binding_count == 0 && image_descriptor_count == 0 &&
+        !pending_compute_barriers_for_empty_descriptor_dispatch) {
         fprintf(stderr,
                 "pdocker-vulkan-icd: generic dispatch rejected: no descriptors found dispatch_id=%llu sets_used_mask=0x%02x live_mask=0x%02x\n",
                 (unsigned long long)dispatch_id,
@@ -13091,9 +13088,13 @@ static int send_generic_vulkan_dispatch_op(
     }
     const bool pending_compute_barriers = pre_barriers &&
         (pre_barriers->memory_count || pre_barriers->buffer_count || pre_barriers->image_count);
+    const bool specialization_transport_required =
+        op->pipeline->specialization_entry_count > 0 ||
+        op->pipeline->specialization_data_size > 0;
     const bool requires_v5_frame =
         descriptor_array_transport_required || texel_buffer_transport_required ||
         image_descriptor_count > 0 || pending_compute_barriers ||
+        specialization_transport_required ||
         binding_count > PDOCKER_GPU_VULKAN_TEXT_DISPATCH_MAX_BINDINGS || op->dispatch_indirect;
     if (requires_v5_frame && copy_alias_enabled()) {
         fprintf(stderr,

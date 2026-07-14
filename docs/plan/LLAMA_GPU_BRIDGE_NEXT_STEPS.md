@@ -2159,6 +2159,9 @@ and entry-size fields on both the container ICD and Android executor sides.
 This avoids false mismatches across 64-bit ICD and 32-bit executor builds while
 still hashing the Vulkan-visible `(constantID, size, referenced bytes)`
 semantics rather than raw struct padding or unused specialization data bytes.
+The compute sender now also treats any specialization map entry or specialization
+data payload as requiring framed V5 transport, so specialization bytes do not
+fall back to the legacy text command token path.
 
 ### 2026-06-28 Runtime bridge binary identity gate
 
@@ -2562,11 +2565,20 @@ those buffer resources independently, then resolves barrier resources through
 descriptor-backed buffers first and hidden resource buffers second before
 issuing `vkCmdPipelineBarrier2`.
 
+The generic dispatch path now allows descriptorless compute dispatches only
+when a pending pre-dispatch barrier provides real synchronization work, and the
+V5.1 sender no longer rejects before hidden barrier resources can be counted.
+Android replay mirrors that rule by allowing zero active descriptors only for
+barrier-only work.
+
 The executor validator now treats V5.4 as an object-extension frame for the
 same image/image-view/sampler schema, entry-size, range, and object-hash checks
-already applied to V5.1-V5.3.  This keeps V5.4 from bypassing object-table
-shape validation while adding synchronization metadata.  The lane does not
-modify llama.cpp, Dockerfiles, models, prompts, SPIR-V bytes, or shader policy.
+already applied to V5.1-V5.3.  Those checks are unconditional for the extension
+frame, even when one of the object tables is empty, so zero-count tables cannot
+carry a different schema or omit the object hash.  This keeps V5.4 from
+bypassing object-table shape validation while adding synchronization metadata.
+The lane does not modify llama.cpp, Dockerfiles, models, prompts, SPIR-V bytes,
+or shader policy.
 
 ### 2026-07-14 Vulkan compute V5 buffer-usage identity lane
 

@@ -4779,6 +4779,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("objects->image_table_offset, objects->image_table_size", executor)
         self.assertIn("objects->image_view_table_offset, objects->image_view_table_size", executor)
         self.assertIn("objects->sampler_table_offset, objects->sampler_table_size", executor)
+        object_validator = c_function_body(executor, "validate_vulkan_dispatch_v5_object_extension")
+        self.assertNotIn("objects->image_count > 0 &&", object_validator)
+        self.assertNotIn("objects->image_view_count > 0 &&", object_validator)
+        self.assertNotIn("objects->sampler_count > 0 &&", object_validator)
 
     def test_vulkan_dispatch_v5_frame_hashes_are_fail_closed(self):
         icd = VULKAN_ICD.read_text()
@@ -4808,6 +4812,12 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("push_hash", validator)
         self.assertIn("option_hash", validator)
         self.assertIn("v5_object_extension_hash(frame, header, objects) != objects->object_hash", validator)
+        self.assertNotIn("objects->object_hash != 0 &&", validator)
+        self.assertNotIn("ext->image_layout_range_count > 0 &&", validator)
+        self.assertNotIn("ext->buffer_view_count > 0 &&", validator)
+        self.assertNotIn("ext->memory_barrier_count > 0 &&", validator)
+        self.assertNotIn("ext->buffer_barrier_count > 0 &&", validator)
+        self.assertNotIn("ext->image_barrier_count > 0 &&", validator)
         self.assertIn("full_fd_hash(passed_fds[header->shader_fd_index]", validator)
         self.assertIn("shader_hash != header->shader_hash", validator)
         self.assertIn("offsetof(PdockerGpuVulkanDispatchV5FrameHeader, frame_hash)", validator)
@@ -14878,6 +14888,37 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VulkanVectorBuffer *const *resource_buffers", executor)
         self.assertIn("find_vulkan_dispatch_binding_by_resource_index", barrier_recorder)
         self.assertIn("resource_buffers[src->resource_index]", barrier_recorder)
+
+
+    def test_vulkan_dispatch_v54_barrier_only_path_allows_descriptorless_transport(self):
+        icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
+        sender = c_function_body(icd, "send_generic_vulkan_dispatch_v5_1_op")
+        generic_sender = c_function_body(icd, "send_generic_vulkan_dispatch_op")
+        runner = c_function_body(executor, "run_vulkan_dispatch_fd")
+
+        self.assertNotIn("empty descriptor table", sender)
+        self.assertIn("pending_compute_barriers_for_empty_descriptor_dispatch", generic_sender)
+        self.assertIn("!pending_compute_barriers_for_empty_descriptor_dispatch", generic_sender)
+        self.assertIn("const int has_barrier_only_work = object_tables &&", runner)
+        self.assertIn("!has_barrier_only_work", runner)
+        self.assertIn("(binding_count > 0 && (!buffer_fds || !bindings))", runner)
+        self.assertNotIn("(binding_count == 0 && image_descriptor_count == 0) ||", runner)
+
+    def test_vulkan_dispatch_specialization_payload_forces_v5_frame(self):
+        icd = VULKAN_ICD.read_text()
+        generic_sender = c_function_body(icd, "send_generic_vulkan_dispatch_op")
+
+        self.assertIn("const bool specialization_transport_required =", generic_sender)
+        self.assertIn(
+            "op->pipeline->specialization_entry_count > 0 ||\n"
+            "        op->pipeline->specialization_data_size > 0",
+            generic_sender,
+        )
+        requires_block = generic_sender.split("const bool requires_v5_frame =", 1)[1].split(
+            "if (requires_v5_frame", 1
+        )[0]
+        self.assertIn("specialization_transport_required ||", requires_block)
 
 
     def test_spirv_observability_is_generic_not_hash_only(self):
