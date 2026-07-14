@@ -2295,6 +2295,130 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
 
+
+    def test_shader_layout_memory_model_extensions_are_false_only(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            int main(void) {{
+                VkPhysicalDeviceScalarBlockLayoutFeatures scalar;
+                VkPhysicalDeviceVulkanMemoryModelFeatures memory_model;
+                VkPhysicalDeviceUniformBufferStandardLayoutFeatures uniform_layout;
+                VkPhysicalDeviceShaderSubgroupExtendedTypesFeatures subgroup_types;
+                VkDeviceCreateInfo create_info;
+
+                memset(&scalar, 0xff, sizeof(scalar));
+                memset(&memory_model, 0xff, sizeof(memory_model));
+                memset(&uniform_layout, 0xff, sizeof(uniform_layout));
+                memset(&subgroup_types, 0xff, sizeof(subgroup_types));
+                scalar.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SCALAR_BLOCK_LAYOUT_FEATURES;
+                memory_model.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES;
+                uniform_layout.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_UNIFORM_BUFFER_STANDARD_LAYOUT_FEATURES;
+                subgroup_types.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_SUBGROUP_EXTENDED_TYPES_FEATURES;
+                scalar.pNext = &memory_model;
+                memory_model.pNext = &uniform_layout;
+                uniform_layout.pNext = &subgroup_types;
+                subgroup_types.pNext = NULL;
+
+                fill_pnext_features(&scalar);
+                if (scalar.pNext != &memory_model || memory_model.pNext != &uniform_layout ||
+                    uniform_layout.pNext != &subgroup_types || subgroup_types.pNext != NULL) {{
+                    fprintf(stderr, "shader layout pNext chain was not preserved\\n");
+                    return 2;
+                }}
+                if (scalar.scalarBlockLayout != VK_FALSE ||
+                    memory_model.vulkanMemoryModel != VK_FALSE ||
+                    memory_model.vulkanMemoryModelDeviceScope != VK_FALSE ||
+                    memory_model.vulkanMemoryModelAvailabilityVisibilityChains != VK_FALSE ||
+                    uniform_layout.uniformBufferStandardLayout != VK_FALSE ||
+                    subgroup_types.shaderSubgroupExtendedTypes != VK_FALSE) {{
+                    fprintf(stderr, "shader layout features were not false-only\\n");
+                    return 3;
+                }}
+
+                memset(&create_info, 0, sizeof(create_info));
+                create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                create_info.pNext = &scalar;
+                if (validate_device_feature_requests(&create_info) != VK_SUCCESS) {{
+                    fprintf(stderr, "all-false shader layout chain was rejected\\n");
+                    return 4;
+                }}
+            #ifdef VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME
+                const char *scalar_extensions[] = {{ VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME }};
+                create_info.enabledExtensionCount = 1;
+                create_info.ppEnabledExtensionNames = scalar_extensions;
+                if (!device_extension_advertised_name(VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME) ||
+                    validate_device_extensions(&create_info) != VK_SUCCESS ||
+                    validate_device_feature_requests(&create_info) != VK_SUCCESS) {{
+                    fprintf(stderr, "VK_EXT_scalar_block_layout false-only enable failed\\n");
+                    return 5;
+                }}
+            #endif
+            #ifdef VK_KHR_UNIFORM_BUFFER_STANDARD_LAYOUT_EXTENSION_NAME
+                const char *uniform_extensions[] = {{ VK_KHR_UNIFORM_BUFFER_STANDARD_LAYOUT_EXTENSION_NAME }};
+                create_info.enabledExtensionCount = 1;
+                create_info.ppEnabledExtensionNames = uniform_extensions;
+                if (!device_extension_advertised_name(VK_KHR_UNIFORM_BUFFER_STANDARD_LAYOUT_EXTENSION_NAME) ||
+                    validate_device_extensions(&create_info) != VK_SUCCESS ||
+                    validate_device_feature_requests(&create_info) != VK_SUCCESS) {{
+                    fprintf(stderr, "VK_KHR_uniform_buffer_standard_layout false-only enable failed\\n");
+                    return 6;
+                }}
+            #endif
+            #ifdef VK_KHR_SHADER_SUBGROUP_EXTENDED_TYPES_EXTENSION_NAME
+                const char *subgroup_extensions[] = {{ VK_KHR_SHADER_SUBGROUP_EXTENDED_TYPES_EXTENSION_NAME }};
+                create_info.enabledExtensionCount = 1;
+                create_info.ppEnabledExtensionNames = subgroup_extensions;
+                if (!device_extension_advertised_name(VK_KHR_SHADER_SUBGROUP_EXTENDED_TYPES_EXTENSION_NAME) ||
+                    validate_device_extensions(&create_info) != VK_SUCCESS ||
+                    validate_device_feature_requests(&create_info) != VK_SUCCESS) {{
+                    fprintf(stderr, "VK_KHR_shader_subgroup_extended_types false-only enable failed\\n");
+                    return 7;
+                }}
+            #endif
+            #ifdef VK_KHR_VULKAN_MEMORY_MODEL_EXTENSION_NAME
+                const char *memory_model_extensions[] = {{ VK_KHR_VULKAN_MEMORY_MODEL_EXTENSION_NAME }};
+                create_info.enabledExtensionCount = 1;
+                create_info.ppEnabledExtensionNames = memory_model_extensions;
+                if (!device_extension_advertised_name(VK_KHR_VULKAN_MEMORY_MODEL_EXTENSION_NAME) ||
+                    validate_device_extensions(&create_info) != VK_SUCCESS ||
+                    validate_device_feature_requests(&create_info) != VK_SUCCESS) {{
+                    fprintf(stderr, "VK_KHR_vulkan_memory_model false-only enable failed\\n");
+                    return 8;
+                }}
+            #endif
+                create_info.enabledExtensionCount = 0;
+                create_info.ppEnabledExtensionNames = NULL;
+
+                scalar.scalarBlockLayout = VK_TRUE;
+                if (validate_device_feature_requests(&create_info) == VK_SUCCESS) return 9;
+                scalar.scalarBlockLayout = VK_FALSE;
+                uniform_layout.uniformBufferStandardLayout = VK_TRUE;
+                if (validate_device_feature_requests(&create_info) == VK_SUCCESS) return 10;
+                uniform_layout.uniformBufferStandardLayout = VK_FALSE;
+                subgroup_types.shaderSubgroupExtendedTypes = VK_TRUE;
+                if (validate_device_feature_requests(&create_info) == VK_SUCCESS) return 11;
+                subgroup_types.shaderSubgroupExtendedTypes = VK_FALSE;
+                memory_model.vulkanMemoryModel = VK_TRUE;
+                if (validate_device_feature_requests(&create_info) == VK_SUCCESS) return 12;
+                memory_model.vulkanMemoryModel = VK_FALSE;
+                memory_model.vulkanMemoryModelDeviceScope = VK_TRUE;
+                if (validate_device_feature_requests(&create_info) == VK_SUCCESS) return 13;
+                memory_model.vulkanMemoryModelDeviceScope = VK_FALSE;
+                memory_model.vulkanMemoryModelAvailabilityVisibilityChains = VK_TRUE;
+                if (validate_device_feature_requests(&create_info) == VK_SUCCESS) return 14;
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+
     def test_dedicated_memory_bind_enforces_target_and_zero_offset(self):
         source = textwrap.dedent(
             f"""
