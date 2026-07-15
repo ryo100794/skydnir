@@ -4763,19 +4763,31 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("image-barrier-cross-queue-family", icd)
         self.assertIn("buffer-barrier-cross-queue-family", icd)
         self.assertIn("buffer-barrier-invalid-range", icd)
+        image_barrier_failure_body = c_function_body(icd, "image_barrier_recording_failure_reason")
+        self.assertLess(
+            image_barrier_failure_body.index("pdocker_vk_queue_family_barrier_replayable"),
+            image_barrier_failure_body.index("normalize_image_subresource_range"),
+        )
         image_record_body = icd.split("static void record_image_barrier_op", 2)[2].split(
             "static void record_memory_barrier_op", 1
         )[0]
+        self.assertIn("image_barrier_recording_failure_reason", image_record_body)
         self.assertLess(
-            image_record_body.index("pdocker_vk_queue_family_barrier_replayable"),
-            image_record_body.index("normalize_image_subresource_range"),
+            image_record_body.index("image_barrier_recording_failure_reason"),
+            image_record_body.index("command_buffer_reserve_image_barrier_ops"),
+        )
+        buffer_barrier_failure_body = c_function_body(icd, "buffer_barrier_recording_failure_reason")
+        self.assertLess(
+            buffer_barrier_failure_body.index("pdocker_vk_queue_family_barrier_replayable"),
+            buffer_barrier_failure_body.index("size == VK_WHOLE_SIZE"),
         )
         buffer_record_body = icd.split("static void record_buffer_barrier_op", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier", 1
         )[0]
+        self.assertIn("buffer_barrier_recording_failure_reason", buffer_record_body)
         self.assertLess(
-            buffer_record_body.index("pdocker_vk_queue_family_barrier_replayable"),
-            buffer_record_body.index("if (size == VK_WHOLE_SIZE)"),
+            buffer_record_body.index("buffer_barrier_recording_failure_reason"),
+            buffer_record_body.index("command_buffer_reserve_buffer_barrier_ops"),
         )
         clear_body = icd.split("static void clear_recorded_command_ops", 1)[1].split(
             "static bool append_command_op", 1
@@ -13658,8 +13670,14 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("info->pImageMemoryBarriers[i].pNext", icd)
         self.assertIn("pipeline_barrier2_dependency_info_failure_reason(pDependencyInfo)", barrier2_body)
         self.assertIn("command_buffer_mark_recording_failed(cmd, unsupported_reason);", barrier2_body)
-        self.assertNotIn("cmd->graphics_unsupported = true;", barrier2_body)
+        unsupported_reason_branch = barrier2_body.split("if (unsupported_reason)", 1)[1].split(
+            "const char *recording_failure_reason", 1
+        )[0]
+        self.assertNotIn("cmd->graphics_unsupported = true;", unsupported_reason_branch)
+        self.assertIn("dependency_info_barrier_recording_failure_reason(pDependencyInfo)", barrier2_body)
+        self.assertIn("cmd->graphics_unsupported = true;", barrier2_body)
         self.assertLess(barrier2_body.index("pipeline_barrier2_dependency_info_failure_reason(pDependencyInfo)"), barrier2_body.index("VkDependencyFlags dependency_flags"))
+        self.assertLess(barrier2_body.index("dependency_info_barrier_recording_failure_reason(pDependencyInfo)"), barrier2_body.index("VkDependencyFlags dependency_flags"))
         self.assertIn("VkDependencyFlags dependency_flags", barrier2_body)
         self.assertIn("pipeline_barrier2_dependency_info_failure_reason(pDependencyInfo)", barrier2_body)
         self.assertIn("record.flags = pdocker_vk_transport_dependency_flags(dependency_flags)", barrier2_body)

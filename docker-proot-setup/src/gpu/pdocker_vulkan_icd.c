@@ -27787,6 +27787,49 @@ static bool pdocker_vk_queue_family_barrier_replayable(
         src_queue_family_index, dst_queue_family_index);
 }
 
+static VkDeviceSize normalized_buffer_barrier_size(
+        const PdockerVkBuffer *buffer,
+        VkDeviceSize offset,
+        VkDeviceSize size) {
+    if (!buffer) return 0;
+    return size == VK_WHOLE_SIZE ? buffer->size - offset : size;
+}
+
+static const char *buffer_barrier_recording_failure_reason(
+        const PdockerVkBuffer *buffer,
+        VkDeviceSize offset,
+        VkDeviceSize size,
+        uint32_t srcQueueFamilyIndex,
+        uint32_t dstQueueFamilyIndex) {
+    if (!buffer) return "buffer-barrier-invalid-handle";
+    if (!pdocker_vk_queue_family_barrier_replayable(srcQueueFamilyIndex, dstQueueFamilyIndex)) {
+        return "buffer-barrier-cross-queue-family";
+    }
+    if (size == VK_WHOLE_SIZE) {
+        return offset > buffer->size ? "buffer-barrier-invalid-range" : NULL;
+    }
+    if (offset > buffer->size || size > buffer->size - offset) {
+        return "buffer-barrier-invalid-range";
+    }
+    return NULL;
+}
+
+static const char *image_barrier_recording_failure_reason(
+        const PdockerVkImage *image,
+        const VkImageSubresourceRange *range,
+        uint32_t srcQueueFamilyIndex,
+        uint32_t dstQueueFamilyIndex) {
+    if (!image) return "image-barrier-invalid-handle";
+    if (!pdocker_vk_queue_family_barrier_replayable(srcQueueFamilyIndex, dstQueueFamilyIndex)) {
+        return "image-barrier-cross-queue-family";
+    }
+    VkImageSubresourceRange normalized_range;
+    if (!range || !normalize_image_subresource_range(image, range, &normalized_range)) {
+        return "image-barrier-invalid-range";
+    }
+    return NULL;
+}
+
 static void execute_recorded_image_barrier_op(PdockerVkImageBarrierOp *op) {
     if (!op || !op->image) return;
     if (op->old_layout != VK_IMAGE_LAYOUT_UNDEFINED &&
@@ -27842,7 +27885,19 @@ static void record_image_barrier_op(
         uint32_t srcQueueFamilyIndex,
         uint32_t dstQueueFamilyIndex) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
-    if (!cmd || !image) return;
+    if (!cmd) return;
+    const char *failure_reason = image_barrier_recording_failure_reason(
+        image, &range, srcQueueFamilyIndex, dstQueueFamilyIndex);
+    if (failure_reason) {
+        cmd->graphics_unsupported = true;
+        command_buffer_mark_recording_failed(cmd, failure_reason);
+        if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
+            fprintf(stderr,
+                    "pdocker-vulkan-icd: image-barrier rejected reason=%s src=%u dst=%u; submit will fail closed\n",
+                    failure_reason, srcQueueFamilyIndex, dstQueueFamilyIndex);
+        }
+        return;
+    }
     if (!command_buffer_reserve_image_barrier_ops(cmd, 1)) {
         cmd->graphics_unsupported = true;
         command_buffer_mark_recording_failed(cmd, "image-barrier-record-overflow");
@@ -27853,29 +27908,8 @@ static void record_image_barrier_op(
         }
         return;
     }
-    if (!pdocker_vk_queue_family_barrier_replayable(srcQueueFamilyIndex, dstQueueFamilyIndex)) {
-        cmd->graphics_unsupported = true;
-        command_buffer_mark_recording_failed(cmd, "image-barrier-cross-queue-family");
-        if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
-            fprintf(stderr,
-                    "pdocker-vulkan-icd: image-barrier cross-queue-family src=%u dst=%u; submit will fail closed\n",
-                    srcQueueFamilyIndex,
-                    dstQueueFamilyIndex);
-        }
-        return;
-    }
     VkImageSubresourceRange normalized_range;
-    if (!normalize_image_subresource_range(image, &range, &normalized_range)) {
-        cmd->graphics_unsupported = true;
-        command_buffer_mark_recording_failed(cmd, "image-barrier-invalid-range");
-        if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
-            fprintf(stderr,
-                    "pdocker-vulkan-icd: image-barrier invalid range aspect=0x%x mip=%u levels=%u layer=%u layers=%u; submit will fail closed\n",
-                    range.aspectMask, range.baseMipLevel, range.levelCount,
-                    range.baseArrayLayer, range.layerCount);
-        }
-        return;
-    }
+    (void)normalize_image_subresource_range(image, &range, &normalized_range);
     uint32_t op_index = cmd->image_barrier_op_count++;
     PdockerVkImageBarrierOp *op = &cmd->image_barrier_ops[op_index];
     memset(op, 0, sizeof(*op));
@@ -27929,36 +27963,25 @@ static void record_buffer_barrier_op(
         uint32_t srcQueueFamilyIndex,
         uint32_t dstQueueFamilyIndex) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
-    if (!cmd || !buffer) return;
+    if (!cmd) return;
+    const char *failure_reason = buffer_barrier_recording_failure_reason(
+        buffer, offset, size, srcQueueFamilyIndex, dstQueueFamilyIndex);
+    if (failure_reason) {
+        cmd->graphics_unsupported = true;
+        command_buffer_mark_recording_failed(cmd, failure_reason);
+        if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
+            fprintf(stderr,
+                    "pdocker-vulkan-icd: buffer-barrier rejected reason=%s src=%u dst=%u; submit will fail closed\n",
+                    failure_reason, srcQueueFamilyIndex, dstQueueFamilyIndex);
+        }
+        return;
+    }
     if (!command_buffer_reserve_buffer_barrier_ops(cmd, 1)) {
         cmd->graphics_unsupported = true;
         command_buffer_mark_recording_failed(cmd, "buffer-barrier-record-overflow");
         return;
     }
-    if (!pdocker_vk_queue_family_barrier_replayable(srcQueueFamilyIndex, dstQueueFamilyIndex)) {
-        cmd->graphics_unsupported = true;
-        command_buffer_mark_recording_failed(cmd, "buffer-barrier-cross-queue-family");
-        if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
-            fprintf(stderr,
-                    "pdocker-vulkan-icd: buffer-barrier cross-queue-family src=%u dst=%u; submit will fail closed\n",
-                    srcQueueFamilyIndex,
-                    dstQueueFamilyIndex);
-        }
-        return;
-    }
-    if (size == VK_WHOLE_SIZE) {
-        if (offset > buffer->size) {
-            cmd->graphics_unsupported = true;
-            command_buffer_mark_recording_failed(cmd, "buffer-barrier-invalid-range");
-            return;
-        }
-        size = buffer->size - offset;
-    }
-    if (offset > buffer->size || size > buffer->size - offset) {
-        cmd->graphics_unsupported = true;
-        command_buffer_mark_recording_failed(cmd, "buffer-barrier-invalid-range");
-        return;
-    }
+    size = normalized_buffer_barrier_size(buffer, offset, size);
     PdockerVkBufferBarrierOp *op = &cmd->buffer_barrier_ops[cmd->buffer_barrier_op_count++];
     memset(op, 0, sizeof(*op));
     op->buffer = buffer;
@@ -28016,6 +28039,33 @@ static bool legacy_pipeline_barrier_inputs_unsupported(
         dependencyFlags, has_queue_family_ownership_transfer);
 }
 
+
+static const char *legacy_pipeline_barrier_recording_failure_reason(
+        uint32_t bufferMemoryBarrierCount,
+        const VkBufferMemoryBarrier *pBufferMemoryBarriers,
+        uint32_t imageMemoryBarrierCount,
+        const VkImageMemoryBarrier *pImageMemoryBarriers) {
+    for (uint32_t i = 0; pBufferMemoryBarriers && i < bufferMemoryBarrierCount; ++i) {
+        const VkBufferMemoryBarrier *b = &pBufferMemoryBarriers[i];
+        const char *reason = buffer_barrier_recording_failure_reason(
+            pdocker_vk_buffer_from_handle(b->buffer),
+            b->offset,
+            b->size,
+            b->srcQueueFamilyIndex,
+            b->dstQueueFamilyIndex);
+        if (reason) return reason;
+    }
+    for (uint32_t i = 0; pImageMemoryBarriers && i < imageMemoryBarrierCount; ++i) {
+        const VkImageMemoryBarrier *b = &pImageMemoryBarriers[i];
+        const char *reason = image_barrier_recording_failure_reason(
+            pdocker_vk_image_from_handle(b->image),
+            &b->subresourceRange,
+            b->srcQueueFamilyIndex,
+            b->dstQueueFamilyIndex);
+        if (reason) return reason;
+    }
+    return NULL;
+}
 
 static PdockerVkBarrierOpRange record_legacy_pipeline_barrier_ops(
         VkCommandBuffer commandBuffer,
@@ -28099,6 +28149,15 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier(
                                                        pImageMemoryBarriers)) {
             cmd->graphics_unsupported = true;
             command_buffer_mark_recording_failed(cmd, "legacy-pipeline-barrier-unsupported");
+            return;
+        }
+        const char *recording_failure_reason =
+            legacy_pipeline_barrier_recording_failure_reason(
+                bufferMemoryBarrierCount, pBufferMemoryBarriers,
+                imageMemoryBarrierCount, pImageMemoryBarriers);
+        if (recording_failure_reason) {
+            cmd->graphics_unsupported = true;
+            command_buffer_mark_recording_failed(cmd, recording_failure_reason);
             return;
         }
         PdockerVkBarrierOpRange barriers =
@@ -31279,6 +31338,31 @@ static bool dependency_info_has_unsupported_pnext(const VkDependencyInfo *info) 
     return dependency_info_unsupported_reason(info) != NULL;
 }
 
+static const char *dependency_info_barrier_recording_failure_reason(
+        const VkDependencyInfo *info) {
+    if (!info) return NULL;
+    for (uint32_t i = 0; info->pBufferMemoryBarriers && i < info->bufferMemoryBarrierCount; ++i) {
+        const VkBufferMemoryBarrier2 *b = &info->pBufferMemoryBarriers[i];
+        const char *reason = buffer_barrier_recording_failure_reason(
+            pdocker_vk_buffer_from_handle(b->buffer),
+            b->offset,
+            b->size,
+            b->srcQueueFamilyIndex,
+            b->dstQueueFamilyIndex);
+        if (reason) return reason;
+    }
+    for (uint32_t i = 0; info->pImageMemoryBarriers && i < info->imageMemoryBarrierCount; ++i) {
+        const VkImageMemoryBarrier2 *b = &info->pImageMemoryBarriers[i];
+        const char *reason = image_barrier_recording_failure_reason(
+            pdocker_vk_image_from_handle(b->image),
+            &b->subresourceRange,
+            b->srcQueueFamilyIndex,
+            b->dstQueueFamilyIndex);
+        if (reason) return reason;
+    }
+    return NULL;
+}
+
 static const char *pipeline_barrier2_dependency_info_failure_reason(
         const VkDependencyInfo *info) {
     const char *reason = dependency_info_unsupported_reason(info);
@@ -31300,6 +31384,13 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier2(
         pipeline_barrier2_dependency_info_failure_reason(pDependencyInfo);
     if (unsupported_reason) {
         command_buffer_mark_recording_failed(cmd, unsupported_reason);
+        return;
+    }
+    const char *recording_failure_reason =
+        dependency_info_barrier_recording_failure_reason(pDependencyInfo);
+    if (recording_failure_reason) {
+        cmd->graphics_unsupported = true;
+        command_buffer_mark_recording_failed(cmd, recording_failure_reason);
         return;
     }
     VkDependencyFlags dependency_flags = pDependencyInfo ? pDependencyInfo->dependencyFlags : 0;

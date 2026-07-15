@@ -307,6 +307,17 @@ or closes.
   attachment image and rejects 4x sampled or mixed-use images with
   `VK_ERROR_FORMAT_NOT_SUPPORTED`.  Acceptance: host tests
   `tests.test_vulkan_icd_feature_chain` and `tests.test_gpu_abi_contract` pass.
+- [done] **Vulkan cross-queue-family barrier prevalidation CPU harness lane**:
+  Legacy `vkCmdPipelineBarrier` and synchronization2 `vkCmdPipelineBarrier2`
+  now prevalidate buffer/image barrier ownership-transfer and range failures
+  before appending any memory, buffer, image, command, or graphics barrier
+  records.  A host C harness proves mixed memory+bad buffer/image barriers fail
+  closed with `buffer-barrier-cross-queue-family` or
+  `image-barrier-cross-queue-family` and leave no partial recorded state.
+  True cross-family ownership transfer remains outside the single advertised
+  virtual queue model until a real multi-family ABI is designed.  Acceptance:
+  host tests `tests.test_vulkan_icd_sync_harness` and
+  `tests.test_gpu_abi_contract` pass.
 - [planned] **residual graphics evidence gaps**: Do not promote full Vulkan
   pass-through until remaining fail-closed lanes have explicit ABI/evidence:
   dual-aspect depth+stencil copy layout, explicit compressed/multiplanar image
