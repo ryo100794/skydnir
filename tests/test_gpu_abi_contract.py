@@ -7154,10 +7154,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "ext->queue_object_id == 0",
         ]:
             self.assertIn(marker, v5_identity)
-        self.assertIn(
-            "return register_vulkan_runtime_identity_ids(",
-            c_function_body(executor, "register_vulkan_dispatch_v55_identity"),
-        )
+        v55_register = c_function_body(executor, "register_vulkan_dispatch_v55_identity")
+        self.assertIn("return register_vulkan_runtime_identity_ids(", v55_register)
+        self.assertIn("rt ? rt->queue : VK_NULL_HANDLE", v55_register)
 
         v6_prefix = c_function_body(executor, "validate_vulkan_graphics_v6_header_prefix")
         self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V630_ABI_MINOR", v6_prefix)
@@ -7176,14 +7175,42 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         self.assertIn("const PdockerGpuVulkanGraphicsV630FrameHeader *header_v630;", view_struct)
         self.assertIn("int is_v630;", view_struct)
-        self.assertIn(
-            "return register_vulkan_runtime_identity_ids(",
-            c_function_body(executor, "register_vulkan_graphics_v630_identity"),
-        )
+        v630_register = c_function_body(executor, "register_vulkan_graphics_v630_identity")
+        self.assertIn("return register_vulkan_runtime_identity_ids(", v630_register)
+        self.assertIn("rt ? rt->graphics_queue : VK_NULL_HANDLE", v630_register)
         self.assertIn(
             "register_vulkan_graphics_v630_identity(view, &g_vulkan_runtime)",
             c_function_body(executor, "run_vulkan_graphics_v6_frame"),
         )
+
+        runtime_register = c_function_body(executor, "register_vulkan_runtime_identity_ids")
+        for marker in [
+            "register_vulkan_instance_id(instance_object_id, rt->instance)",
+            "register_vulkan_physical_device_id(physical_device_object_id, rt->physical_device)",
+            "register_vulkan_device_id(device_object_id, rt->device)",
+            "register_vulkan_queue_id(queue_object_id, queue)",
+            "lookup_vulkan_runtime_identity_ids(",
+            "validate_vulkan_runtime_identity_handles(rt, queue, &handles)",
+        ]:
+            self.assertIn(marker, runtime_register)
+        runtime_lookup = c_function_body(executor, "lookup_vulkan_runtime_identity_ids")
+        for marker in [
+            "lookup_vulkan_instance_id(instance_object_id)",
+            "lookup_vulkan_physical_device_id(physical_device_object_id)",
+            "lookup_vulkan_device_id(device_object_id)",
+            "lookup_vulkan_queue_id(queue_object_id)",
+            "return -ENOENT;",
+        ]:
+            self.assertIn(marker, runtime_lookup)
+        runtime_validate = c_function_body(executor, "validate_vulkan_runtime_identity_handles")
+        for marker in [
+            "handles->instance != rt->instance",
+            "handles->physical_device != rt->physical_device",
+            "handles->device != rt->device",
+            "handles->queue != expected_queue",
+            "return -EPROTO;",
+        ]:
+            self.assertIn(marker, runtime_validate)
 
     def test_vulkan_icd_serializes_native_object_identity_frames(self):
         icd = VULKAN_ICD.read_text()
@@ -15489,6 +15516,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_GPU_VULKAN_NATIVE_HANDLE_DEVICE = 3",
             "PDOCKER_GPU_VULKAN_NATIVE_HANDLE_QUEUE = 4",
             "typedef union VulkanNativeHandle",
+            "typedef struct VulkanRuntimeIdentityHandles",
             "VkInstance instance;",
             "VkPhysicalDevice physical_device;",
             "VkDevice device;",

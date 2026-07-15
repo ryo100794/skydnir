@@ -1600,6 +1600,13 @@ typedef struct VulkanNativeHandleTable {
     VulkanNativeHandleEntry entries[PDOCKER_GPU_VULKAN_NATIVE_HANDLE_TABLE_CAPACITY];
 } VulkanNativeHandleTable;
 
+typedef struct VulkanRuntimeIdentityHandles {
+    VkInstance instance;
+    VkPhysicalDevice physical_device;
+    VkDevice device;
+    VkQueue queue;
+} VulkanRuntimeIdentityHandles;
+
 static VulkanNativeHandleTable g_vulkan_native_handles;
 
 #if defined(__GNUC__) || defined(__clang__)
@@ -1757,6 +1764,48 @@ static PDOCKER_GPU_UNUSED_FN VkQueue lookup_vulkan_queue_id(uint64_t object_id) 
         PDOCKER_GPU_VULKAN_NATIVE_HANDLE_QUEUE,
         object_id);
     return entry ? entry->handle.queue : VK_NULL_HANDLE;
+}
+
+static int lookup_vulkan_runtime_identity_ids(
+        uint64_t instance_object_id,
+        uint64_t physical_device_object_id,
+        uint64_t device_object_id,
+        uint64_t queue_object_id,
+        VulkanRuntimeIdentityHandles *out) {
+    if (!out) return -EINVAL;
+    memset(out, 0, sizeof(*out));
+    if (instance_object_id == 0 || physical_device_object_id == 0 ||
+        device_object_id == 0 || queue_object_id == 0) {
+        return -EPROTO;
+    }
+    out->instance = lookup_vulkan_instance_id(instance_object_id);
+    out->physical_device = lookup_vulkan_physical_device_id(physical_device_object_id);
+    out->device = lookup_vulkan_device_id(device_object_id);
+    out->queue = lookup_vulkan_queue_id(queue_object_id);
+    if (out->instance == VK_NULL_HANDLE || out->physical_device == VK_NULL_HANDLE ||
+        out->device == VK_NULL_HANDLE || out->queue == VK_NULL_HANDLE) {
+        return -ENOENT;
+    }
+    return 0;
+}
+
+static int validate_vulkan_runtime_identity_handles(
+        const VulkanRuntime *rt,
+        VkQueue expected_queue,
+        const VulkanRuntimeIdentityHandles *handles) {
+    if (!rt || !handles) return -EINVAL;
+    if (!rt->ready || rt->instance == VK_NULL_HANDLE ||
+        rt->physical_device == VK_NULL_HANDLE || rt->device == VK_NULL_HANDLE ||
+        expected_queue == VK_NULL_HANDLE) {
+        return -ENODEV;
+    }
+    if (handles->instance != rt->instance ||
+        handles->physical_device != rt->physical_device ||
+        handles->device != rt->device ||
+        handles->queue != expected_queue) {
+        return -EPROTO;
+    }
+    return 0;
 }
 
 static PDOCKER_GPU_UNUSED_FN void unregister_vulkan_instance_id(uint64_t object_id) {
@@ -22538,13 +22587,14 @@ static int validate_vulkan_dispatch_v55_identity_extension(
 
 static int register_vulkan_runtime_identity_ids(
         const VulkanRuntime *rt,
+        VkQueue queue,
         uint64_t instance_object_id,
         uint64_t physical_device_object_id,
         uint64_t device_object_id,
         uint64_t queue_object_id) {
     if (!rt || !rt->ready || rt->instance == VK_NULL_HANDLE ||
         rt->physical_device == VK_NULL_HANDLE || rt->device == VK_NULL_HANDLE ||
-        rt->queue == VK_NULL_HANDLE) {
+        queue == VK_NULL_HANDLE) {
         return -ENODEV;
     }
     if (instance_object_id == 0 || physical_device_object_id == 0 ||
@@ -22557,7 +22607,17 @@ static int register_vulkan_runtime_identity_ids(
     if (rc != 0) return rc;
     rc = register_vulkan_device_id(device_object_id, rt->device);
     if (rc != 0) return rc;
-    return register_vulkan_queue_id(queue_object_id, rt->queue);
+    rc = register_vulkan_queue_id(queue_object_id, queue);
+    if (rc != 0) return rc;
+    VulkanRuntimeIdentityHandles handles;
+    rc = lookup_vulkan_runtime_identity_ids(
+        instance_object_id,
+        physical_device_object_id,
+        device_object_id,
+        queue_object_id,
+        &handles);
+    if (rc != 0) return rc;
+    return validate_vulkan_runtime_identity_handles(rt, queue, &handles);
 }
 
 static int register_vulkan_dispatch_v55_identity(
@@ -22572,6 +22632,7 @@ static int register_vulkan_dispatch_v55_identity(
     if (rc != 0) return rc;
     return register_vulkan_runtime_identity_ids(
         rt,
+        rt ? rt->queue : VK_NULL_HANDLE,
         header_v55->v55.instance_object_id,
         header_v55->v55.physical_device_object_id,
         header_v55->v55.device_object_id,
@@ -24701,6 +24762,7 @@ static int register_vulkan_graphics_v630_identity(
     if (rc != 0) return rc;
     return register_vulkan_runtime_identity_ids(
         rt,
+        rt ? rt->graphics_queue : VK_NULL_HANDLE,
         view->header_v630->v630.instance_object_id,
         view->header_v630->v630.physical_device_object_id,
         view->header_v630->v630.device_object_id,
