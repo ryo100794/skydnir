@@ -34105,7 +34105,9 @@ static bool device_proc_address_hidden_by_enabled_state(
     if (!device || !pName) return true;
     const uint64_t features = device->requested_feature_mask;
     const uint64_t extensions = device->enabled_extension_mask;
-    if ((strcmp(pName, "vkCmdBeginRenderingKHR") == 0 ||
+    if ((strcmp(pName, "vkCmdBeginRendering") == 0 ||
+         strcmp(pName, "vkCmdBeginRenderingKHR") == 0 ||
+         strcmp(pName, "vkCmdEndRendering") == 0 ||
          strcmp(pName, "vkCmdEndRenderingKHR") == 0) &&
         ((features & PDOCKER_VK_FEATURE_DYNAMIC_RENDERING) == 0 ||
          (extensions & PDOCKER_VK_DEVICE_EXT_KHR_DYNAMIC_RENDERING) == 0)) {

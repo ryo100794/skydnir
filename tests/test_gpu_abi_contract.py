@@ -21419,6 +21419,57 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("!caps || caps->ext_storage_buffer_storage_class", collector_body)
         self.assertIn("PDOCKER_VULKAN_ICD_DEBUG", icd)
 
+    def test_vulkan_proc_address_table_is_structurally_consistent(self):
+        icd = VULKAN_ICD.read_text()
+        proc_body = c_function_body(icd, "proc_address")
+        proc_gate_body = c_function_body(icd, "proc_address_hidden_by_advertisement")
+        device_gate_body = c_function_body(icd, "device_proc_address_hidden_by_enabled_state")
+
+        map_proc = set(re.findall(r"MAP_PROC\((vk[A-Za-z0-9_]+)\)", proc_body))
+        map_alias = re.findall(
+            r'MAP_ALIAS\("([^"]+)",\s*(vk[A-Za-z0-9_]+)\)',
+            proc_body,
+        )
+        mapped_names = map_proc | {alias for alias, _target in map_alias}
+        self.assertEqual([], [(alias, target) for alias, target in map_alias if alias == target])
+
+        implemented = set(re.findall(
+            r"(?m)^VKAPI_ATTR\s+[A-Za-z_][A-Za-z0-9_\s\*]*?"
+            r"VKAPI_CALL\s+(vk[A-Za-z0-9_]+)\s*\([^;]*?\)\s*\{",
+            icd,
+        ))
+        implemented -= {"vkGetInstanceProcAddr", "vkGetDeviceProcAddr"}
+        self.assertEqual([], sorted(implemented - mapped_names))
+
+        implemented_alias_wrappers = sorted(
+            name for name in implemented if re.search(r"(KHR|EXT|AMD)$", name)
+        )
+        self.assertEqual([], [name for name in implemented_alias_wrappers if name not in mapped_names])
+
+        for base, alias in [
+            ("vkCmdBeginRendering", "vkCmdBeginRenderingKHR"),
+            ("vkCmdEndRendering", "vkCmdEndRenderingKHR"),
+            ("vkCmdPipelineBarrier2", "vkCmdPipelineBarrier2KHR"),
+            ("vkQueueSubmit2", "vkQueueSubmit2KHR"),
+            ("vkCmdSetEvent2", "vkCmdSetEvent2KHR"),
+            ("vkCmdResetEvent2", "vkCmdResetEvent2KHR"),
+            ("vkCmdWaitEvents2", "vkCmdWaitEvents2KHR"),
+            ("vkCmdWriteTimestamp2", "vkCmdWriteTimestamp2KHR"),
+            ("vkGetSemaphoreCounterValue", "vkGetSemaphoreCounterValueKHR"),
+            ("vkWaitSemaphores", "vkWaitSemaphoresKHR"),
+            ("vkSignalSemaphore", "vkSignalSemaphoreKHR"),
+        ]:
+            self.assertIn(f'strcmp(pName, "{base}") == 0', proc_gate_body)
+            self.assertIn(f'strcmp(pName, "{alias}") == 0', proc_gate_body)
+
+        for name in [
+            "vkCmdBeginRendering",
+            "vkCmdBeginRenderingKHR",
+            "vkCmdEndRendering",
+            "vkCmdEndRenderingKHR",
+        ]:
+            self.assertIn(f'strcmp(pName, "{name}") == 0', device_gate_body)
+
     def test_llama_gpu_dispatch_lifecycle_logs_are_recorded(self):
         compare = LLAMA_COMPARE.read_text()
         icd = VULKAN_ICD.read_text()
