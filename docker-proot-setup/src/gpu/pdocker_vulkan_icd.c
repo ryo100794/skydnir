@@ -1689,6 +1689,7 @@ static void ensure_vulkan_dispatchable_object_ids(void) {
 }
 
 static bool current_vulkan_dispatch_identity_ids(
+        const PdockerVkQueue *queue,
         uint64_t *instance_object_id,
         uint64_t *physical_device_object_id,
         uint64_t *device_object_id,
@@ -1698,14 +1699,15 @@ static bool current_vulkan_dispatch_identity_ids(
     if (device_object_id) *device_object_id = 0;
     if (queue_object_id) *queue_object_id = 0;
     ensure_vulkan_dispatchable_object_ids();
-    if (g_queue.instance_object_id == 0 || g_queue.physical_device_object_id == 0 ||
-        g_queue.device_object_id == 0 || g_queue.object_id == 0) {
+    const PdockerVkQueue *identity_queue = queue && queue->object_id != 0 ? queue : &g_queue;
+    if (identity_queue->instance_object_id == 0 || identity_queue->physical_device_object_id == 0 ||
+        identity_queue->device_object_id == 0 || identity_queue->object_id == 0) {
         return false;
     }
-    if (instance_object_id) *instance_object_id = g_queue.instance_object_id;
-    if (physical_device_object_id) *physical_device_object_id = g_queue.physical_device_object_id;
-    if (device_object_id) *device_object_id = g_queue.device_object_id;
-    if (queue_object_id) *queue_object_id = g_queue.object_id;
+    if (instance_object_id) *instance_object_id = identity_queue->instance_object_id;
+    if (physical_device_object_id) *physical_device_object_id = identity_queue->physical_device_object_id;
+    if (device_object_id) *device_object_id = identity_queue->device_object_id;
+    if (queue_object_id) *queue_object_id = identity_queue->object_id;
     return true;
 }
 
@@ -1738,6 +1740,16 @@ static bool command_buffer_synchronization2_enabled(const PdockerVkCommandBuffer
 static bool queue_synchronization2_enabled(const PdockerVkQueue *queue) {
     return queue && synchronization2_feature_extension_enabled(
         queue->requested_feature_mask, queue->enabled_extension_mask);
+}
+
+static PdockerVkQueue *pdocker_vk_queue_from_handle(VkQueue queue) {
+    PdockerVkQueue *pdocker_queue = (PdockerVkQueue *)queue;
+    return pdocker_queue && pdocker_queue->object_id != 0 &&
+           pdocker_queue->instance_object_id != 0 &&
+           pdocker_queue->physical_device_object_id != 0 &&
+           pdocker_queue->device_object_id != 0
+        ? pdocker_queue
+        : NULL;
 }
 
 static bool command_buffer_require_synchronization2(
@@ -7833,6 +7845,7 @@ typedef struct {
 
 static int send_recorded_vulkan_graphics_v6_1_frame_range(
         const PdockerVkCommandBuffer *cmd,
+        const PdockerVkQueue *submit_queue,
         const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *submit_sync_entries,
         size_t submit_sync_count,
         uint32_t sequence_begin,
@@ -10051,6 +10064,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     uint64_t graphics_device_object_id = 0;
     uint64_t graphics_queue_object_id = 0;
     const bool graphics_identity_ready = current_vulkan_dispatch_identity_ids(
+        submit_queue,
         &graphics_instance_object_id, &graphics_physical_device_object_id,
         &graphics_device_object_id, &graphics_queue_object_id);
     need_v630_native_objects =
@@ -11011,10 +11025,11 @@ cleanup:
 
 static int send_recorded_vulkan_graphics_v6_1_frame(
         const PdockerVkCommandBuffer *cmd,
+        const PdockerVkQueue *submit_queue,
         const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *submit_sync_entries,
         size_t submit_sync_count) {
     return send_recorded_vulkan_graphics_v6_1_frame_range(
-        cmd, submit_sync_entries, submit_sync_count, 0, UINT32_MAX, false);
+        cmd, submit_queue, submit_sync_entries, submit_sync_count, 0, UINT32_MAX, false);
 }
 
 static int find_image_table_index(PdockerVkImage *const *images,
@@ -11910,6 +11925,7 @@ static int send_generic_vulkan_dispatch_v5_1_op(
         size_t sampler_count,
         PdockerVkBuffer **barrier_buffer_objects,
         uint32_t *barrier_buffer_resource_indices,
+        const PdockerVkQueue *submit_queue,
         const PdockerVkCommandBuffer *barrier_cmd,
         const PdockerVkBarrierOpRange *pre_barriers,
         uint32_t pre_barrier_dependency_flags,
@@ -12727,6 +12743,7 @@ static int send_generic_vulkan_dispatch_v5_1_op(
     uint64_t device_object_id = 0;
     uint64_t queue_object_id = 0;
     const bool identity_ready = current_vulkan_dispatch_identity_ids(
+        submit_queue,
         &instance_object_id, &physical_device_object_id, &device_object_id, &queue_object_id);
     const bool need_v55_native_objects =
         identity_ready && executor_supports_vulkan_dispatch_v55_native_objects();
@@ -13052,6 +13069,7 @@ static int resolve_vulkan_dispatch_group_counts(
 
 static int send_generic_vulkan_dispatch_op(
         const PdockerVkDispatchOp *op,
+        const PdockerVkQueue *submit_queue,
         const PdockerVkCommandBuffer *barrier_cmd,
         const PdockerVkBarrierOpRange *pre_barriers,
         uint32_t pre_barrier_dependency_flags) {
@@ -13935,6 +13953,7 @@ static int send_generic_vulkan_dispatch_op(
             sampler_count,
             barrier_buffer_objects,
             barrier_buffer_resource_indices,
+            submit_queue,
             barrier_cmd,
             pre_barriers,
             pre_barrier_dependency_flags,
@@ -14084,7 +14103,7 @@ static int send_generic_vulkan_dispatch_op(
     return rc;
 }
 
-static int send_generic_vulkan_dispatch(PdockerVkCommandBuffer *cmd) {
+static int send_generic_vulkan_dispatch(PdockerVkCommandBuffer *cmd, const PdockerVkQueue *submit_queue) {
     if (!cmd) return -EINVAL;
     PdockerVkDispatchOp op;
     memset(&op, 0, sizeof(op));
@@ -14116,7 +14135,7 @@ static int send_generic_vulkan_dispatch(PdockerVkCommandBuffer *cmd) {
         dispatch_op_destroy_descriptor_state(&op);
         return -ENOMEM;
     }
-    int rc = send_generic_vulkan_dispatch_op(&op, NULL, NULL, 0);
+    int rc = send_generic_vulkan_dispatch_op(&op, submit_queue, NULL, NULL, 0);
     dispatch_op_destroy_descriptor_state(&op);
     return rc;
 }
@@ -30121,13 +30140,14 @@ static size_t filter_submit_sync_entries_completion_only(
 }
 
 static int send_vulkan_submit_sync_only_frame(
+        const PdockerVkQueue *submit_queue,
         const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *entries,
         size_t entry_count) {
     if (entry_count == 0) return 0;
     if (!entries) return -EINVAL;
     PdockerVkCommandBuffer *sync_cmd = (PdockerVkCommandBuffer *)calloc(1, sizeof(*sync_cmd));
     if (!sync_cmd) return -ENOMEM;
-    int rc = send_recorded_vulkan_graphics_v6_1_frame(sync_cmd, entries, entry_count);
+    int rc = send_recorded_vulkan_graphics_v6_1_frame(sync_cmd, submit_queue, entries, entry_count);
     free(sync_cmd);
     return rc;
 }
@@ -30829,6 +30849,7 @@ static const char *graphics_mixed_dispatch_inside_frame_reason(
 static VkResult execute_recorded_dispatch_command_op(
         PdockerVkCommandBuffer *cmd,
         const PdockerVkCommandOp *op,
+        const PdockerVkQueue *submit_queue,
         const PdockerVkBarrierOpRange *pre_barriers,
         uint32_t pre_barrier_dependency_flags,
         uint32_t *dispatches) {
@@ -30840,7 +30861,7 @@ static VkResult execute_recorded_dispatch_command_op(
         trace_icd_runtime_failure("dispatch-missing-shader", VK_ERROR_FEATURE_NOT_PRESENT);
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }
-    int generic_rc = send_generic_vulkan_dispatch_op(dispatch, cmd, pre_barriers, pre_barrier_dependency_flags);
+    int generic_rc = send_generic_vulkan_dispatch_op(dispatch, submit_queue, cmd, pre_barriers, pre_barrier_dependency_flags);
     if (generic_rc != 0) {
         trace_icd_runtime_failure("generic-dispatch-op", generic_rc);
         if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
@@ -31088,6 +31109,7 @@ static uint32_t count_graphics_sequence_segments_split_by_dispatch(
 
 static int send_graphics_sequence_segment(
         const PdockerVkCommandBuffer *cmd,
+        const PdockerVkQueue *submit_queue,
         uint32_t sequence_begin,
         uint32_t sequence_end,
         const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *submit_sync_entries,
@@ -31103,13 +31125,14 @@ static int send_graphics_sequence_segment(
         submit_sync_entries, submit_sync_count,
         first_segment, last_segment, segment_sync_entries);
     int rc = send_recorded_vulkan_graphics_v6_1_frame_range(
-        cmd, segment_sync_entries, segment_sync_count, sequence_begin, sequence_end, !first_segment);
+        cmd, submit_queue, segment_sync_entries, segment_sync_count, sequence_begin, sequence_end, !first_segment);
     free(segment_sync_entries);
     return rc;
 }
 
 static int execute_graphics_mixed_gpu_sequence(
         PdockerVkCommandBuffer *cmd,
+        const PdockerVkQueue *submit_queue,
         uint32_t first_gpu_op,
         uint32_t last_gpu_op,
         const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *submit_sync_entries,
@@ -31139,14 +31162,14 @@ static int execute_graphics_mixed_gpu_sequence(
                 cmd, segment_begin, op_index + 1u)) {
             segment_index++;
             int graphics_rc = send_graphics_sequence_segment(
-                cmd, segment_begin, op_index + 1u,
+                cmd, submit_queue, segment_begin, op_index + 1u,
                 submit_sync_entries, submit_sync_count,
                 segment_index == 1u, segment_index == segment_total);
             if (graphics_rc != 0) return graphics_rc;
             commit_graphics_v6_image_layout_ops_for_range(
                 cmd, segment_begin, op_index + 1u, segment_index != 1u);
         }
-        VkResult dispatch_rc = execute_recorded_dispatch_command_op(cmd, op, NULL, 0, NULL);
+        VkResult dispatch_rc = execute_recorded_dispatch_command_op(cmd, op, submit_queue, NULL, 0, NULL);
         if (dispatch_rc != VK_SUCCESS) return -EOPNOTSUPP;
         segment_begin = op_index + 1u;
     }
@@ -31154,7 +31177,7 @@ static int execute_graphics_mixed_gpu_sequence(
             cmd, segment_begin, sequence_end)) {
         segment_index++;
         int graphics_rc = send_graphics_sequence_segment(
-            cmd, segment_begin, sequence_end,
+            cmd, submit_queue, segment_begin, sequence_end,
             submit_sync_entries, submit_sync_count,
             segment_index == 1u, segment_index == segment_total);
         if (graphics_rc != 0) return graphics_rc;
@@ -31166,6 +31189,7 @@ static int execute_graphics_mixed_gpu_sequence(
 
 static VkResult execute_graphics_mixed_host_side_ops(
         PdockerVkCommandBuffer *cmd,
+        const PdockerVkQueue *submit_queue,
         uint32_t first_gpu_op,
         uint32_t last_gpu_op,
         bool before_graphics,
@@ -31184,7 +31208,7 @@ static VkResult execute_graphics_mixed_host_side_ops(
         }
         if (run) {
             VkResult rc = command_op_is_executor_compute_op(op->type)
-                ? execute_recorded_dispatch_command_op(cmd, op, NULL, 0, NULL)
+                ? execute_recorded_dispatch_command_op(cmd, op, submit_queue, NULL, 0, NULL)
                 : execute_recorded_host_transfer_or_layout_op(cmd, op, stats);
             if (rc != VK_SUCCESS) return rc;
         }
@@ -31217,7 +31241,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
         uint32_t submitCount,
         const VkSubmitInfo *pSubmits,
         VkFence fence) {
-    (void)queue;
+    PdockerVkQueue *submit_queue = pdocker_vk_queue_from_handle(queue);
+    if (!submit_queue) return VK_ERROR_INITIALIZATION_FAILED;
     if (submitCount > 0 && !pSubmits) return VK_ERROR_INITIALIZATION_FAILED;
     for (uint32_t validate_i = 0; validate_i < submitCount; ++validate_i) {
         VkResult shape_rc = validate_legacy_submit_info_shape(&pSubmits[validate_i]);
@@ -31288,7 +31313,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
             size_t submit_wait_sync_count = filter_submit_sync_entries_wait_only(
                 submit_sync_entries, submit_sync_count, submit_wait_sync_entries);
             int submit_wait_sync_rc = send_vulkan_submit_sync_only_frame(
-                submit_wait_sync_entries, submit_wait_sync_count);
+                submit_queue, submit_wait_sync_entries, submit_wait_sync_count);
             free(submit_wait_sync_entries);
             if (submit_wait_sync_rc != 0) {
                 trace_icd_runtime_failure("submit-pre-wait-sync-failed",
@@ -31325,7 +31350,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                         frame_submit_sync_entries);
                     set_submit2_metadata_command_index(j);
                     int graphics_rc = send_recorded_vulkan_graphics_v6_1_frame(
-                        cmd, frame_submit_sync_entries, frame_submit_sync_count);
+                        cmd, submit_queue, frame_submit_sync_entries, frame_submit_sync_count);
                     set_submit2_metadata_command_index(PDOCKER_GPU_GRAPHICS_V621_COMMAND_BUFFER_INDEX_NONE);
                     free(frame_submit_sync_entries);
                     if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
@@ -31428,7 +31453,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                 PdockerVkCopyStats mixed_stats;
                 memset(&mixed_stats, 0, sizeof(mixed_stats));
                 int pre_wait_sync_rc = send_vulkan_submit_sync_only_frame(
-                    pre_wait_sync_entries, pre_wait_sync_count);
+                    submit_queue, pre_wait_sync_entries, pre_wait_sync_count);
                 if (pre_wait_sync_rc != 0) {
                     trace_icd_runtime_failure("graphics-v6-pre-wait-sync-failed",
                                               VK_ERROR_FEATURE_NOT_PRESENT);
@@ -31436,14 +31461,14 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                     RETURN_VK_QUEUE_SUBMIT_WITH_SYNC(VK_ERROR_FEATURE_NOT_PRESENT);
                 }
                 VkResult mixed_host_rc = execute_graphics_mixed_host_side_ops(
-                    cmd, first_graphics_gpu_op, last_graphics_gpu_op, true, &mixed_stats);
+                    cmd, submit_queue, first_graphics_gpu_op, last_graphics_gpu_op, true, &mixed_stats);
                 if (mixed_host_rc != VK_SUCCESS) {
                     FREE_MIXED_SUBMIT_SYNC_ENTRIES();
                     RETURN_VK_QUEUE_SUBMIT_WITH_SYNC(mixed_host_rc);
                 }
                 set_submit2_metadata_command_index(j);
                 int graphics_rc = execute_graphics_mixed_gpu_sequence(
-                    cmd, first_graphics_gpu_op, last_graphics_gpu_op,
+                    cmd, submit_queue, first_graphics_gpu_op, last_graphics_gpu_op,
                     frame_submit_sync_entries, frame_submit_sync_count);
                 set_submit2_metadata_command_index(PDOCKER_GPU_GRAPHICS_V621_COMMAND_BUFFER_INDEX_NONE);
                 if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
@@ -31460,13 +31485,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                     RETURN_VK_QUEUE_SUBMIT_WITH_SYNC(VK_ERROR_FEATURE_NOT_PRESENT);
                 }
                 mixed_host_rc = execute_graphics_mixed_host_side_ops(
-                    cmd, first_graphics_gpu_op, last_graphics_gpu_op, false, &mixed_stats);
+                    cmd, submit_queue, first_graphics_gpu_op, last_graphics_gpu_op, false, &mixed_stats);
                 if (mixed_host_rc != VK_SUCCESS) {
                     FREE_MIXED_SUBMIT_SYNC_ENTRIES();
                     RETURN_VK_QUEUE_SUBMIT_WITH_SYNC(mixed_host_rc);
                 }
                 int deferred_sync_rc = send_vulkan_submit_sync_only_frame(
-                    deferred_completion_sync_entries, deferred_completion_sync_count);
+                    submit_queue, deferred_completion_sync_entries, deferred_completion_sync_count);
                 if (deferred_sync_rc != 0) {
                     trace_icd_runtime_failure("graphics-v6-deferred-completion-sync-failed",
                                               VK_ERROR_FEATURE_NOT_PRESENT);
@@ -31583,7 +31608,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                             execute_recorded_update_op(op);
                             break;
                         case PDOCKER_VK_COMMAND_DISPATCH: {
-                            VkResult dispatch_rc = execute_recorded_dispatch_command_op(cmd, op, &pending_compute_barriers, pending_compute_dependency_flags, &dispatches);
+                            VkResult dispatch_rc = execute_recorded_dispatch_command_op(cmd, op, submit_queue, &pending_compute_barriers, pending_compute_dependency_flags, &dispatches);
                             if (dispatch_rc != VK_SUCCESS) RETURN_VK_QUEUE_SUBMIT_WITH_SYNC(dispatch_rc);
                             execute_recorded_image_barriers_in_range(cmd, &pending_compute_barriers);
                             break;
@@ -31646,7 +31671,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                 if (all_generic) {
                     for (uint32_t op_index = 0; op_index < cmd->dispatch_op_count; ++op_index) {
                         PdockerVkDispatchOp *op = &cmd->dispatch_ops[op_index];
-                        int generic_rc = send_generic_vulkan_dispatch_op(op, NULL, NULL, 0);
+                        int generic_rc = send_generic_vulkan_dispatch_op(op, submit_queue, NULL, NULL, 0);
                         if (generic_rc != 0) {
                             trace_icd_runtime_failure("generic-dispatch-list", generic_rc);
                             if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
@@ -31675,7 +31700,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                 }
             }
             if (cmd->compute_pipeline && cmd->compute_pipeline->shader && cmd->compute_pipeline->shader->code_size > sizeof(uint32_t)) {
-                int generic_rc = send_generic_vulkan_dispatch(cmd);
+                int generic_rc = send_generic_vulkan_dispatch(cmd, submit_queue);
                 if (generic_rc == 0) continue;
                 trace_icd_runtime_failure("generic-dispatch-single", generic_rc);
                 if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
@@ -31735,7 +31760,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
             size_t submit_completion_sync_count = filter_submit_sync_entries_completion_only(
                 submit_sync_entries, submit_sync_count, submit_completion_sync_entries);
             int submit_completion_sync_rc = send_vulkan_submit_sync_only_frame(
-                submit_completion_sync_entries, submit_completion_sync_count);
+                submit_queue, submit_completion_sync_entries, submit_completion_sync_count);
             free(submit_completion_sync_entries);
             if (submit_completion_sync_rc != 0) {
                 trace_icd_runtime_failure("submit-completion-sync-failed",
@@ -31759,7 +31784,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2(
         uint32_t submitCount,
         const VkSubmitInfo2 *pSubmits,
         VkFence fence) {
-    if (!queue_synchronization2_enabled((PdockerVkQueue *)queue)) {
+    PdockerVkQueue *submit_queue = pdocker_vk_queue_from_handle(queue);
+    if (!submit_queue) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!queue_synchronization2_enabled(submit_queue)) {
         trace_icd_runtime_failure("synchronization2-feature-disabled",
                                   VK_ERROR_FEATURE_NOT_PRESENT);
         return VK_ERROR_FEATURE_NOT_PRESENT;
