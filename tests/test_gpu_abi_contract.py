@@ -4697,7 +4697,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("has_queue_family_ownership_transfer", legacy_body)
         self.assertIn("pdocker_vk_dependency_flags_supported_for_queue_family_state", legacy_body)
         self.assertIn("dependency-info-dependency-flags-unsupported", dependency_body)
-        self.assertIn("dependency_info_has_queue_family_ownership_transfer(info)", dependency_body)
+        dependency_flags_body = c_function_body(icd, "dependency_info_dependency_flags_unsupported")
+        self.assertIn("dependency_info_has_queue_family_ownership_transfer(info)", dependency_flags_body)
 
         transport_body = c_function_body(icd, "pdocker_vk_transport_dependency_flags")
         self.assertIn("flags & pdocker_vk_supported_dependency_flags()", transport_body)
@@ -12349,12 +12350,12 @@ class GpuAbiContractTest(unittest.TestCase):
         set_event2_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdSetEvent2", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkCmdResetEvent2", 1
         )[0]
-        self.assertIn("dependency_info_has_unsupported_pnext(pDependencyInfo)", set_event2_body)
-        self.assertIn("event-set2-dependency-info-unsupported", set_event2_body)
-        self.assertIn("command_buffer_mark_recording_failed(cmd, \"event-set2-dependency-info-unsupported\")", set_event2_body)
+        self.assertIn("event_set2_dependency_info_failure_reason(pDependencyInfo)", set_event2_body)
+        self.assertIn("event-set2-dependency-info-unsupported", icd)
+        self.assertIn("command_buffer_mark_recording_failed(cmd, unsupported_reason)", set_event2_body)
         self.assertNotIn("if (cmd) cmd->graphics_unsupported = true", set_event2_body)
-        self.assertIn("dependency_flags_unsupported(dependency_flags)", set_event2_body)
-        self.assertIn("event-set2-dependency-flags-unsupported", set_event2_body)
+        self.assertNotIn("dependency_flags_unsupported(dependency_flags)", set_event2_body)
+        self.assertIn("event-set2-dependency-flags-unsupported", icd)
         self.assertIn("command_buffer_prevalidate_dependency_info_barrier_recording(cmd, pDependencyInfo)", set_event2_body)
         self.assertIn("record_dependency_info_barrier_ops(commandBuffer, pDependencyInfo)", set_event2_body)
         self.assertLess(
@@ -12373,9 +12374,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("eventCount > 0 && (!pEvents || !pDependencyInfos)", wait_events2_body)
         self.assertIn("for (uint32_t i = 0; i < eventCount; ++i)", wait_events2_body)
         self.assertIn("if (!pEvents[i])", wait_events2_body)
-        self.assertIn("dependency_info_has_unsupported_pnext(&pDependencyInfos[i])", wait_events2_body)
-        self.assertIn("dependency_flags_unsupported(dependency_flags)", wait_events2_body)
-        self.assertIn("event-wait2-dependency-flags-unsupported", wait_events2_body)
+        self.assertIn("event_wait2_dependency_info_failure_reason(&pDependencyInfos[i])", wait_events2_body)
+        self.assertNotIn("dependency_flags_unsupported(dependency_flags)", wait_events2_body)
+        self.assertIn("event-wait2-dependency-flags-unsupported", icd)
         self.assertIn("command_buffer_prevalidate_dependency_info_barrier_recording(cmd, &pDependencyInfos[i])", wait_events2_body)
         self.assertIn("record_dependency_info_barrier_ops(commandBuffer, &pDependencyInfos[i])", wait_events2_body)
         self.assertLess(
@@ -12392,6 +12393,56 @@ class GpuAbiContractTest(unittest.TestCase):
             wait_events2_body.index("record_event_wait_command(commandBuffer, 1, &pEvents[i],"),
         )
         self.assertNotIn("eventCount > 1", wait_events2_body)
+
+    def test_vulkan_sync2_event_dependency_info_reason_mapping_order_is_precise(self):
+        icd = VULKAN_ICD.read_text()
+        dependency_reason_body = c_function_body(icd, "dependency_info_unsupported_reason")
+        set_event2_reason_body = c_function_body(icd, "event_set2_dependency_info_failure_reason")
+        wait_events2_reason_body = c_function_body(icd, "event_wait2_dependency_info_failure_reason")
+        set_event2_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdSetEvent2", 1)[1].split(
+            "VKAPI_ATTR void VKAPI_CALL vkCmdResetEvent2", 1
+        )[0]
+        wait_events2_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdWaitEvents2", 1)[1].split(
+            "static bool query_range_valid", 1
+        )[0]
+
+        self.assertNotIn("dependency_info_has_unsupported_pnext", icd)
+        self.assertIn("dependency_info_dependency_flags_unsupported(info)", dependency_reason_body)
+        self.assertLess(
+            dependency_reason_body.index('if (info->pNext) return "dependency-info-pnext-unsupported";'),
+            dependency_reason_body.index("dependency_info_dependency_flags_unsupported(info)"),
+        )
+        self.assertLess(
+            dependency_reason_body.index("dependency_info_dependency_flags_unsupported(info)"),
+            dependency_reason_body.index("info->memoryBarrierCount && !info->pMemoryBarriers"),
+        )
+
+        self.assertIn('return "event-set2-dependency-flags-unsupported"', set_event2_reason_body)
+        self.assertIn('return "event-set2-dependency-info-unsupported"', set_event2_reason_body)
+        self.assertLess(
+            set_event2_reason_body.index('return "event-set2-dependency-flags-unsupported"'),
+            set_event2_reason_body.index('return "event-set2-dependency-info-unsupported"'),
+        )
+        self.assertIn('return "event-wait2-dependency-flags-unsupported"', wait_events2_reason_body)
+        self.assertIn('return "event-wait2-pnext-unsupported"', wait_events2_reason_body)
+        self.assertIn('return "event-wait2-dependency-info-unsupported"', wait_events2_reason_body)
+        self.assertLess(
+            wait_events2_reason_body.index('return "event-wait2-dependency-flags-unsupported"'),
+            wait_events2_reason_body.index('return "event-wait2-pnext-unsupported"'),
+        )
+        self.assertLess(
+            wait_events2_reason_body.index('return "event-wait2-pnext-unsupported"'),
+            wait_events2_reason_body.index('return "event-wait2-dependency-info-unsupported"'),
+        )
+        self.assertLess(
+            set_event2_body.index("event_set2_dependency_info_failure_reason(pDependencyInfo)"),
+            set_event2_body.index("record_dependency_info_barrier_ops(commandBuffer, pDependencyInfo)"),
+        )
+        self.assertLess(
+            wait_events2_body.index("event_wait2_dependency_info_failure_reason(&pDependencyInfos[i])"),
+            wait_events2_body.index("record_dependency_info_barrier_ops(commandBuffer, &pDependencyInfos[i])"),
+        )
+
 
     def test_vulkan_graphics_v617_query_timestamp_abi_is_append_only(self):
         abi = APP_HEADER.read_text()
@@ -13675,7 +13726,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("pMemoryBarriers[i].pNext", icd)
         self.assertIn("pBufferMemoryBarriers[i].pNext", icd)
         self.assertIn("pImageMemoryBarriers[i].pNext", icd)
-        self.assertIn("dependency_info_has_unsupported_pnext", icd)
+        self.assertIn("event_set2_dependency_info_failure_reason", icd)
+        self.assertIn("event_wait2_dependency_info_failure_reason", icd)
         self.assertIn("sync2_stage_access_pair_invalid", icd)
         self.assertIn("VK_PIPELINE_STAGE_2_NONE", icd)
         self.assertIn('if (info->pNext) return "dependency-info-pnext-unsupported";', icd)

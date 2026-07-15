@@ -31264,7 +31264,7 @@ static bool sync2_stage_access_pair_invalid(
     return false;
 }
 
-static bool dependency_flags_unsupported(VkDependencyFlags dependency_flags);
+static bool dependency_info_dependency_flags_unsupported(const VkDependencyInfo *info);
 static PdockerVkBarrierOpRange record_dependency_info_barrier_ops(
         VkCommandBuffer commandBuffer,
         const VkDependencyInfo *info);
@@ -31296,9 +31296,7 @@ static bool dependency_info_has_queue_family_ownership_transfer(
 static const char *dependency_info_unsupported_reason(const VkDependencyInfo *info) {
     if (!info) return NULL;
     if (info->pNext) return "dependency-info-pnext-unsupported";
-    if (!pdocker_vk_dependency_flags_supported_for_queue_family_state(
-            info->dependencyFlags,
-            dependency_info_has_queue_family_ownership_transfer(info))) {
+    if (dependency_info_dependency_flags_unsupported(info)) {
         return "dependency-info-dependency-flags-unsupported";
     }
     if (info->memoryBarrierCount && !info->pMemoryBarriers) {
@@ -31354,8 +31352,21 @@ static const char *dependency_info_unsupported_reason(const VkDependencyInfo *in
     return NULL;
 }
 
-static bool dependency_info_has_unsupported_pnext(const VkDependencyInfo *info) {
-    return dependency_info_unsupported_reason(info) != NULL;
+static const char *event_set2_dependency_info_failure_reason(
+        const VkDependencyInfo *info) {
+    const char *reason = dependency_info_unsupported_reason(info);
+    if (!reason) return NULL;
+    if (strstr(reason, "dependency-flags")) return "event-set2-dependency-flags-unsupported";
+    return "event-set2-dependency-info-unsupported";
+}
+
+static const char *event_wait2_dependency_info_failure_reason(
+        const VkDependencyInfo *info) {
+    const char *reason = dependency_info_unsupported_reason(info);
+    if (!reason) return NULL;
+    if (strstr(reason, "dependency-flags")) return "event-wait2-dependency-flags-unsupported";
+    if (strstr(reason, "pnext")) return "event-wait2-pnext-unsupported";
+    return "event-wait2-dependency-info-unsupported";
 }
 
 static const char *dependency_info_barrier_recording_failure_reason(
@@ -31450,9 +31461,11 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier2(
     (void)append_command_op(cmd, &op);
 }
 
-static bool dependency_flags_unsupported(VkDependencyFlags dependency_flags) {
+static bool dependency_info_dependency_flags_unsupported(const VkDependencyInfo *info) {
+    if (!info) return false;
     return !pdocker_vk_dependency_flags_supported_for_queue_family_state(
-        dependency_flags, false);
+        info->dependencyFlags,
+        dependency_info_has_queue_family_ownership_transfer(info));
 }
 
 
@@ -31561,8 +31574,10 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetEvent2(
         const VkDependencyInfo *pDependencyInfo) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     if (!command_buffer_require_synchronization2(cmd, "synchronization2-feature-disabled")) return;
-    if (dependency_info_has_unsupported_pnext(pDependencyInfo)) {
-        if (cmd) command_buffer_mark_recording_failed(cmd, "event-set2-dependency-info-unsupported");
+    const char *unsupported_reason =
+        event_set2_dependency_info_failure_reason(pDependencyInfo);
+    if (unsupported_reason) {
+        if (cmd) command_buffer_mark_recording_failed(cmd, unsupported_reason);
         return;
     }
     if (!event) {
@@ -31570,10 +31585,6 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetEvent2(
         return;
     }
     const VkDependencyFlags dependency_flags = pDependencyInfo ? pDependencyInfo->dependencyFlags : 0;
-    if (dependency_flags_unsupported(dependency_flags)) {
-        if (cmd) command_buffer_mark_recording_failed(cmd, "event-set2-dependency-flags-unsupported");
-        return;
-    }
     if (!command_buffer_prevalidate_dependency_info_barrier_recording(cmd, pDependencyInfo)) {
         return;
     }
@@ -31607,13 +31618,10 @@ VKAPI_ATTR void VKAPI_CALL vkCmdWaitEvents2(
             if (cmd) command_buffer_mark_recording_failed(cmd, "event-wait2-null-event");
             return;
         }
-        if (dependency_info_has_unsupported_pnext(&pDependencyInfos[i])) {
-            if (cmd) command_buffer_mark_recording_failed(cmd, "event-wait2-pnext-unsupported");
-            return;
-        }
-        const VkDependencyFlags dependency_flags = pDependencyInfos[i].dependencyFlags;
-        if (dependency_flags_unsupported(dependency_flags)) {
-            if (cmd) command_buffer_mark_recording_failed(cmd, "event-wait2-dependency-flags-unsupported");
+        const char *unsupported_reason =
+            event_wait2_dependency_info_failure_reason(&pDependencyInfos[i]);
+        if (unsupported_reason) {
+            if (cmd) command_buffer_mark_recording_failed(cmd, unsupported_reason);
             return;
         }
         if (!command_buffer_prevalidate_dependency_info_barrier_recording(cmd, &pDependencyInfos[i])) {
