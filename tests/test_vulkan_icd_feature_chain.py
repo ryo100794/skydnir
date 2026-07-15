@@ -4875,5 +4875,67 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
+    def test_executor_advertisement_unique_usable_keys_override_legacy_truthy_keys(self):
+        source = textwrap.dedent(
+            rf"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            int main(void) {{
+                char json[65536];
+                size_t off = 0;
+                off += (size_t)snprintf(json + off, sizeof(json) - off,
+                    "{{\"schema\":\"skydnir-vulkan-advertisement-caps-v1\","
+                    "\"apiVersion\":4206592,\"format_caps_schema\":1,\"format_caps_count\":%zu,"
+                    "\"image_format_caps\":{{",
+                    pdocker_vk_bridge_format_count());
+                for (size_t i = 0; i < pdocker_vk_bridge_format_count(); ++i) {{
+                    VkFormat format = pdocker_vk_bridge_format_at(i);
+                    off += (size_t)snprintf(json + off, sizeof(json) - off,
+                        "%s\"fmt%dOptimalFeatures\":0,\"fmt%dSampleCounts\":1",
+                        i ? "," : "", (int)format, (int)format);
+                }}
+                off += (size_t)snprintf(json + off, sizeof(json) - off,
+                    "}},"
+                    "\"timelineSemaphore\":1,\"VK_KHR_timeline_semaphore\":1,\"timelineSemaphoreUsable\":0,"
+                    "\"synchronization2\":1,\"VK_KHR_synchronization2\":1,\"synchronization2Usable\":0,"
+                    "\"dynamicRendering\":1,\"VK_KHR_dynamic_rendering\":1,\"dynamicRenderingUsable\":0,"
+                    "\"drawIndirectCount\":1,\"drawIndexedIndirectCount\":1,"
+                    "\"drawIndirectCountUsable\":0,\"drawIndexedIndirectCountUsable\":0,"
+                    "\"VK_KHR_draw_indirect_count\":1,\"VK_AMD_draw_indirect_count\":1,"
+                    "\"extendedDynamicState\":1,\"VK_EXT_extended_dynamic_state\":1,\"extendedDynamicStateUsable\":0,"
+                    "\"extendedDynamicState2\":1,\"extendedDynamicState2LogicOp\":1,"
+                    "\"extendedDynamicState2PatchControlPoints\":1,\"VK_EXT_extended_dynamic_state2\":1,"
+                    "\"extendedDynamicState2Usable\":0,\"extendedDynamicState2LogicOpUsable\":0,"
+                    "\"extendedDynamicState2PatchControlPointsUsable\":0,"
+                    "\"indexTypeUint8\":1,\"VK_EXT_index_type_uint8\":1,\"indexTypeUint8Usable\":0}}\n");
+                if (off >= sizeof(json)) return 99;
+
+                PdockerVkAdvertisedCaps caps;
+                memset(&caps, 0, sizeof(caps));
+                if (!parse_executor_advertisement_caps_json(json, &caps)) return 1;
+                if (!caps.timeline_semaphore || !caps.ext_timeline_semaphore) return 2;
+                if (caps.timeline_semaphore_usable) return 3;
+                if (caps.synchronization2_usable) return 4;
+                if (caps.dynamic_rendering_usable) return 5;
+                if (caps.draw_indirect_count_usable) return 6;
+                if (caps.draw_indexed_indirect_count_usable) return 7;
+                if (caps.ext_draw_indirect_count_khr != true || caps.ext_draw_indirect_count_amd != true) return 8;
+                if (caps.extended_dynamic_state_usable) return 9;
+                if (caps.extended_dynamic_state2_usable.extendedDynamicState2) return 10;
+                if (caps.extended_dynamic_state2_usable.extendedDynamicState2LogicOp) return 11;
+                if (caps.extended_dynamic_state2_usable.extendedDynamicState2PatchControlPoints) return 12;
+                if (caps.index_type_uint8_usable) return 13;
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
+
+
+
 if __name__ == "__main__":
     unittest.main()

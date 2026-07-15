@@ -14645,17 +14645,26 @@ typedef struct {
     bool timeline_semaphore;
     bool synchronization2;
     bool dynamic_rendering;
+    bool timeline_semaphore_usable;
+    bool synchronization2_usable;
+    bool dynamic_rendering_usable;
     bool ext_timeline_semaphore;
     bool ext_synchronization2;
     bool ext_dynamic_rendering;
     bool draw_indirect_count;
     bool draw_indexed_indirect_count;
+    bool draw_indirect_count_usable;
+    bool draw_indexed_indirect_count_usable;
     bool ext_draw_indirect_count_khr;
     bool ext_draw_indirect_count_amd;
     bool ext_extended_dynamic_state;
+    bool extended_dynamic_state;
+    bool extended_dynamic_state_usable;
     bool ext_extended_dynamic_state2;
     VkPhysicalDeviceExtendedDynamicState2FeaturesEXT extended_dynamic_state2;
+    VkPhysicalDeviceExtendedDynamicState2FeaturesEXT extended_dynamic_state2_usable;
     bool ext_index_type_uint8;
+    bool index_type_uint8_usable;
     bool ext_descriptor_indexing;
     bool ext_separate_depth_stencil_layouts;
     bool vulkan_dispatch_v52_image_layout_ranges_supported;
@@ -14900,6 +14909,7 @@ static bool parse_executor_advertisement_caps_json(
     if (json_read_u32(json, "VK_KHR_draw_indirect_count", &value)) caps->ext_draw_indirect_count_khr = value != 0;
     if (json_read_u32(json, "VK_AMD_draw_indirect_count", &value)) caps->ext_draw_indirect_count_amd = value != 0;
     if (json_read_u32(json, "VK_EXT_extended_dynamic_state", &value)) caps->ext_extended_dynamic_state = value != 0;
+    if (json_read_u32(json, "extendedDynamicState", &value)) caps->extended_dynamic_state = value != 0;
     if (json_read_u32(json, "extendedDynamicState2", &value)) caps->extended_dynamic_state2.extendedDynamicState2 = value != 0;
     if (json_read_u32(json, "extendedDynamicState2LogicOp", &value)) caps->extended_dynamic_state2.extendedDynamicState2LogicOp = value != 0;
     if (json_read_u32(json, "extendedDynamicState2PatchControlPoints", &value)) caps->extended_dynamic_state2.extendedDynamicState2PatchControlPoints = value != 0;
@@ -14909,6 +14919,39 @@ static bool parse_executor_advertisement_caps_json(
     if (json_read_u32(json, "VK_KHR_separate_depth_stencil_layouts", &value)) {
         caps->ext_separate_depth_stencil_layouts = value != 0;
     }
+
+    caps->timeline_semaphore_usable = caps->timeline_semaphore && caps->ext_timeline_semaphore;
+    caps->synchronization2_usable = caps->synchronization2 && caps->ext_synchronization2;
+    caps->dynamic_rendering_usable = caps->dynamic_rendering && caps->ext_dynamic_rendering;
+    caps->draw_indirect_count_usable = caps->draw_indirect_count;
+    caps->draw_indexed_indirect_count_usable = caps->draw_indexed_indirect_count;
+    caps->extended_dynamic_state_usable = caps->extended_dynamic_state && caps->ext_extended_dynamic_state;
+    caps->extended_dynamic_state2_usable.extendedDynamicState2 =
+        caps->extended_dynamic_state2.extendedDynamicState2 && caps->ext_extended_dynamic_state2;
+    caps->extended_dynamic_state2_usable.extendedDynamicState2LogicOp =
+        caps->extended_dynamic_state2.extendedDynamicState2LogicOp && caps->ext_extended_dynamic_state2;
+    caps->extended_dynamic_state2_usable.extendedDynamicState2PatchControlPoints =
+        caps->extended_dynamic_state2.extendedDynamicState2PatchControlPoints && caps->ext_extended_dynamic_state2;
+    caps->index_type_uint8_usable = caps->index_type_uint8.indexTypeUint8 && caps->ext_index_type_uint8;
+
+    /* Prefer unique executor usable keys for advertised behavior. Legacy keys may
+     * appear in several JSON objects, and json_find_value returns the first match. */
+    if (json_read_u32(json, "timelineSemaphoreUsable", &value)) caps->timeline_semaphore_usable = value != 0;
+    if (json_read_u32(json, "synchronization2Usable", &value)) caps->synchronization2_usable = value != 0;
+    if (json_read_u32(json, "dynamicRenderingUsable", &value)) caps->dynamic_rendering_usable = value != 0;
+    if (json_read_u32(json, "drawIndirectCountUsable", &value)) caps->draw_indirect_count_usable = value != 0;
+    if (json_read_u32(json, "drawIndexedIndirectCountUsable", &value)) caps->draw_indexed_indirect_count_usable = value != 0;
+    if (json_read_u32(json, "extendedDynamicStateUsable", &value)) caps->extended_dynamic_state_usable = value != 0;
+    if (json_read_u32(json, "extendedDynamicState2Usable", &value)) {
+        caps->extended_dynamic_state2_usable.extendedDynamicState2 = value != 0;
+    }
+    if (json_read_u32(json, "extendedDynamicState2LogicOpUsable", &value)) {
+        caps->extended_dynamic_state2_usable.extendedDynamicState2LogicOp = value != 0;
+    }
+    if (json_read_u32(json, "extendedDynamicState2PatchControlPointsUsable", &value)) {
+        caps->extended_dynamic_state2_usable.extendedDynamicState2PatchControlPoints = value != 0;
+    }
+    if (json_read_u32(json, "indexTypeUint8Usable", &value)) caps->index_type_uint8_usable = value != 0;
 
     uint32_t v52_minor = 0;
     uint32_t v52_max_ranges = 0;
@@ -15296,7 +15339,7 @@ static VkBool32 advertised_storage_buffer_storage_class(void) {
 
 static VkBool32 advertised_timeline_semaphore(void) {
     const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
-    return (caps && caps->timeline_semaphore && caps->ext_timeline_semaphore) ? VK_TRUE : VK_FALSE;
+    return (caps && caps->timeline_semaphore_usable) ? VK_TRUE : VK_FALSE;
 }
 
 static VkBool32 advertised_geometry_shader(void) {
@@ -15575,12 +15618,12 @@ static VkBool32 advertised_separate_depth_stencil_layouts(void) {
 
 static VkBool32 advertised_synchronization2(void) {
     const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
-    return (caps && caps->synchronization2 && caps->ext_synchronization2) ? VK_TRUE : VK_FALSE;
+    return (caps && caps->synchronization2_usable) ? VK_TRUE : VK_FALSE;
 }
 
 static VkBool32 advertised_dynamic_rendering(void) {
     const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
-    return (caps && caps->dynamic_rendering && caps->ext_dynamic_rendering) ? VK_TRUE : VK_FALSE;
+    return (caps && caps->dynamic_rendering_usable) ? VK_TRUE : VK_FALSE;
 }
 
 static VkBool32 advertised_load_store_op_none(void) {
@@ -15589,18 +15632,18 @@ static VkBool32 advertised_load_store_op_none(void) {
 
 static VkBool32 advertised_draw_indirect_count(void) {
     const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
-    return (caps && caps->draw_indirect_count) ? VK_TRUE : VK_FALSE;
+    return (caps && caps->draw_indirect_count_usable) ? VK_TRUE : VK_FALSE;
 }
 
 static VkBool32 advertised_draw_indexed_indirect_count(void) {
     const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
-    return (caps && caps->draw_indexed_indirect_count) ? VK_TRUE : VK_FALSE;
+    return (caps && caps->draw_indexed_indirect_count_usable) ? VK_TRUE : VK_FALSE;
 }
 
 static VkBool32 advertised_draw_indirect_count_khr(void) {
     const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
     return (caps && caps->ext_draw_indirect_count_khr &&
-            caps->draw_indirect_count && caps->draw_indexed_indirect_count)
+            caps->draw_indirect_count_usable && caps->draw_indexed_indirect_count_usable)
         ? VK_TRUE
         : VK_FALSE;
 }
@@ -15608,7 +15651,7 @@ static VkBool32 advertised_draw_indirect_count_khr(void) {
 static VkBool32 advertised_draw_indirect_count_amd(void) {
     const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
     return (caps && caps->ext_draw_indirect_count_amd &&
-            caps->draw_indirect_count && caps->draw_indexed_indirect_count)
+            caps->draw_indirect_count_usable && caps->draw_indexed_indirect_count_usable)
         ? VK_TRUE
         : VK_FALSE;
 }
@@ -15616,7 +15659,7 @@ static VkBool32 advertised_draw_indirect_count_amd(void) {
 static VkBool32 advertised_extended_dynamic_state(void) {
     const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
 #ifdef VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME
-    return (caps && caps->ext_extended_dynamic_state) ? VK_TRUE : VK_FALSE;
+    return (caps && caps->extended_dynamic_state_usable) ? VK_TRUE : VK_FALSE;
 #else
     return VK_FALSE;
 #endif
@@ -15625,8 +15668,7 @@ static VkBool32 advertised_extended_dynamic_state(void) {
 static VkBool32 advertised_extended_dynamic_state2(void) {
     const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
 #ifdef VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME
-    return (caps && caps->ext_extended_dynamic_state2 &&
-            caps->extended_dynamic_state2.extendedDynamicState2) ? VK_TRUE : VK_FALSE;
+    return (caps && caps->extended_dynamic_state2_usable.extendedDynamicState2) ? VK_TRUE : VK_FALSE;
 #else
     return VK_FALSE;
 #endif
@@ -15635,9 +15677,7 @@ static VkBool32 advertised_extended_dynamic_state2(void) {
 static VkBool32 advertised_extended_dynamic_state2_logic_op(void) {
     const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
 #ifdef VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME
-    return (caps && caps->ext_extended_dynamic_state2 &&
-            caps->extended_dynamic_state2.extendedDynamicState2 &&
-            caps->extended_dynamic_state2.extendedDynamicState2LogicOp) ? VK_TRUE : VK_FALSE;
+    return (caps && caps->extended_dynamic_state2_usable.extendedDynamicState2LogicOp) ? VK_TRUE : VK_FALSE;
 #else
     return VK_FALSE;
 #endif
@@ -15646,12 +15686,16 @@ static VkBool32 advertised_extended_dynamic_state2_logic_op(void) {
 static VkBool32 advertised_extended_dynamic_state2_patch_control_points(void) {
     const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
 #ifdef VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME
-    return (caps && caps->ext_extended_dynamic_state2 &&
-            caps->extended_dynamic_state2.extendedDynamicState2 &&
-            caps->extended_dynamic_state2.extendedDynamicState2PatchControlPoints) ? VK_TRUE : VK_FALSE;
+    return (caps && caps->extended_dynamic_state2_usable.extendedDynamicState2PatchControlPoints) ? VK_TRUE : VK_FALSE;
 #else
     return VK_FALSE;
 #endif
+}
+
+static VkBool32 advertised_extended_dynamic_state2_any(void) {
+    return (advertised_extended_dynamic_state2() ||
+            advertised_extended_dynamic_state2_logic_op() ||
+            advertised_extended_dynamic_state2_patch_control_points()) ? VK_TRUE : VK_FALSE;
 }
 
 static uint32_t advertised_api_version(void) {
@@ -16388,7 +16432,7 @@ static void fill_pnext_features(void *pNext) {
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INDEX_TYPE_UINT8_FEATURES_EXT: {
                 VkPhysicalDeviceIndexTypeUint8FeaturesEXT *p = (VkPhysicalDeviceIndexTypeUint8FeaturesEXT *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
-                p->indexTypeUint8 = (caps && caps->ext_index_type_uint8 && caps->index_type_uint8.indexTypeUint8)
+                p->indexTypeUint8 = (caps && caps->index_type_uint8_usable)
                     ? VK_TRUE
                     : VK_FALSE;
                 break;
@@ -17433,7 +17477,7 @@ static uint64_t advertised_feature_mask(void) {
         if (!storage8_disabled && caps->float16_int8.shaderInt8) {
             mask |= PDOCKER_VK_FEATURE_SHADER_INT8;
         }
-        if (caps->ext_index_type_uint8 && caps->index_type_uint8.indexTypeUint8) {
+        if (caps->index_type_uint8_usable) {
             mask |= PDOCKER_VK_FEATURE_INDEX_TYPE_UINT8;
         }
         if (advertised_descriptor_binding_update_unused_while_pending()) {
@@ -20763,13 +20807,13 @@ static uint32_t collect_advertised_device_extensions(
     }
 #endif
 #ifdef VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME
-    if (advertised_extended_dynamic_state2()) {
+    if (advertised_extended_dynamic_state2_any()) {
         ADD_DEVICE_EXTENSION(VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME,
                              VK_EXT_EXTENDED_DYNAMIC_STATE_2_SPEC_VERSION);
     }
 #endif
 #ifdef VK_EXT_INDEX_TYPE_UINT8_EXTENSION_NAME
-    if (caps && caps->ext_index_type_uint8 && caps->index_type_uint8.indexTypeUint8) {
+    if (caps && caps->index_type_uint8_usable) {
         ADD_DEVICE_EXTENSION(VK_EXT_INDEX_TYPE_UINT8_EXTENSION_NAME,
                              VK_EXT_INDEX_TYPE_UINT8_SPEC_VERSION);
     }

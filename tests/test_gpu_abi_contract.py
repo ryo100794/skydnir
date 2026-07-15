@@ -3255,19 +3255,21 @@ class GpuAbiContractTest(unittest.TestCase):
         for marker in [
             "PDOCKER_VK_FEATURE_INDEX_TYPE_UINT8",
             "VkPhysicalDeviceIndexTypeUint8FeaturesEXT index_type_uint8",
+            "index_type_uint8_usable",
             "ext_index_type_uint8",
             "json_read_u32(json, \"indexTypeUint8\", &caps->index_type_uint8.indexTypeUint8)",
+            "json_read_u32(json, \"indexTypeUint8Usable\", &value)",
             "json_read_u32(json, \"VK_EXT_index_type_uint8\", &value)",
             "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INDEX_TYPE_UINT8_FEATURES_EXT",
-            "p->indexTypeUint8 = (caps && caps->ext_index_type_uint8 && caps->index_type_uint8.indexTypeUint8)",
+            "p->indexTypeUint8 = (caps && caps->index_type_uint8_usable)",
             "VK_EXT_INDEX_TYPE_UINT8_EXTENSION_NAME",
-            "caps && caps->ext_index_type_uint8 && caps->index_type_uint8.indexTypeUint8",
+            "caps && caps->index_type_uint8_usable",
             "mask |= PDOCKER_VK_FEATURE_INDEX_TYPE_UINT8",
         ]:
             self.assertIn(marker, icd)
         collector_body = c_function_body(icd, "collect_advertised_device_extensions")
         self.assertIn("VK_EXT_INDEX_TYPE_UINT8_EXTENSION_NAME", collector_body)
-        self.assertIn("caps->ext_index_type_uint8", collector_body)
+        self.assertIn("caps->index_type_uint8_usable", collector_body)
 
     def test_vulkan_graphics_v6_executor_materializes_vertex_buffers_before_command_record(self):
         executor = GPU_EXECUTOR.read_text()
@@ -19987,17 +19989,31 @@ class GpuAbiContractTest(unittest.TestCase):
         enabled_body = source.split("static void write_android_vulkan_enabled_features_report", 1)[1].split(
             "static void log_vulkan_feature_gap", 1
         )[0]
-        self.assertIn('\\"drawIndirectCount\\":%u', enabled_body)
-        self.assertIn('\\"drawIndexedIndirectCount\\":%u', enabled_body)
+        for marker in [
+            '\\"timelineSemaphoreUsable\\":%u',
+            '\\"synchronization2Usable\\":%u',
+            '\\"dynamicRenderingUsable\\":%u',
+            '\\"drawIndirectCountUsable\\":%u',
+            '\\"drawIndexedIndirectCountUsable\\":%u',
+            '\\"extendedDynamicStateUsable\\":%u',
+            '\\"extendedDynamicState2Usable\\":%u',
+            '\\"extendedDynamicState2LogicOpUsable\\":%u',
+            '\\"extendedDynamicState2PatchControlPointsUsable\\":%u',
+            '\\"indexTypeUint8Usable\\":%u',
+            '\\"drawIndirectCount\\":%u',
+            '\\"drawIndexedIndirectCount\\":%u',
+        ]:
+            self.assertIn(marker, enabled_body)
         self.assertIn('\\"samplerAnisotropy\\":%u', enabled_body)
         self.assertIn("rt ? rt->enabled_features.samplerAnisotropy : 0", enabled_body)
         self.assertIn("rt ? rt->enabled_features.independentBlend : 0", enabled_body)
         self.assertIn('\\"VK_KHR_draw_indirect_count\\":%u', enabled_body)
         self.assertIn('\\"VK_AMD_draw_indirect_count\\":%u', enabled_body)
-        self.assertIn("rt && rt->cmd_draw_indirect_count ? 1u : 0u", enabled_body)
-        self.assertIn("rt && rt->cmd_draw_indexed_indirect_count ? 1u : 0u", enabled_body)
-        self.assertIn("rt ? rt->enabled_ext_draw_indirect_count_khr : 0", enabled_body)
-        self.assertIn("rt ? rt->enabled_ext_draw_indirect_count_amd : 0", enabled_body)
+        self.assertIn("const uint32_t draw_indirect_count_loaded = (rt && rt->cmd_draw_indirect_count) ? 1u : 0u;", enabled_body)
+        self.assertIn("const uint32_t draw_indexed_indirect_count_loaded = (rt && rt->cmd_draw_indexed_indirect_count) ? 1u : 0u;", enabled_body)
+        self.assertIn("timeline_semaphore_usable", enabled_body)
+        self.assertIn("rt && rt->enabled_ext_draw_indirect_count_khr && draw_indirect_count_usable && draw_indexed_indirect_count_usable ? 1u : 0u", enabled_body)
+        self.assertIn("rt && rt->enabled_ext_draw_indirect_count_amd && draw_indirect_count_usable && draw_indexed_indirect_count_usable ? 1u : 0u", enabled_body)
 
     def test_vulkan_icd_can_shadow_query_executor_advertisement_caps(self):
         icd = VULKAN_ICD.read_text()
@@ -20037,13 +20053,18 @@ class GpuAbiContractTest(unittest.TestCase):
             "multiview",
             "subgroup.supportedOperations",
             "timeline_semaphore",
+            "timeline_semaphore_usable",
             "synchronization2",
+            "synchronization2_usable",
             "dynamic_rendering",
+            "dynamic_rendering_usable",
             "ext_timeline_semaphore",
             "ext_synchronization2",
             "ext_dynamic_rendering",
             "draw_indirect_count",
+            "draw_indirect_count_usable",
             "draw_indexed_indirect_count",
+            "draw_indexed_indirect_count_usable",
             "ext_draw_indirect_count_khr",
             "ext_draw_indirect_count_amd",
             "advertised_timeline_semaphore",
@@ -20086,6 +20107,19 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('json_read_float(json, "maxSamplerAnisotropy", &caps->limits.maxSamplerAnisotropy);', parse_body)
         self.assertIn('json_read_u32(json, "samplerAnisotropy", &caps->features.samplerAnisotropy);', parse_body)
         self.assertIn('json_read_u32(json, "independentBlend", &caps->features.independentBlend);', parse_body)
+        for usable_key in [
+            "timelineSemaphoreUsable",
+            "synchronization2Usable",
+            "dynamicRenderingUsable",
+            "drawIndirectCountUsable",
+            "drawIndexedIndirectCountUsable",
+            "extendedDynamicStateUsable",
+            "extendedDynamicState2Usable",
+            "extendedDynamicState2LogicOpUsable",
+            "extendedDynamicState2PatchControlPointsUsable",
+            "indexTypeUint8Usable",
+        ]:
+            self.assertIn(f'json_read_u32(json, "{usable_key}", &value)', parse_body)
         query_body = icd.split("static int query_executor_advertisement_caps_line", 1)[1].split(
             "static const PdockerVkAdvertisedCaps *pdocker_vk_advertised_caps", 1
         )[0]
@@ -20208,7 +20242,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VK_KHR_LOAD_STORE_OP_NONE_EXTENSION_NAME", collector_body)
         self.assertIn("VK_EXT_LOAD_STORE_OP_NONE_EXTENSION_NAME", collector_body)
         self.assertIn("advertised_extended_dynamic_state()", collector_body)
-        self.assertIn("advertised_extended_dynamic_state2()", collector_body)
+        self.assertIn("advertised_extended_dynamic_state2_any()", collector_body)
         self.assertIn("VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME", collector_body)
         self.assertIn("VK_AMD_DRAW_INDIRECT_COUNT_EXTENSION_NAME", collector_body)
         self.assertIn("advertised_draw_indirect_count_khr()", collector_body)
@@ -20218,16 +20252,19 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VK_KHR_draw_indirect_count", icd)
         self.assertIn("VK_AMD_draw_indirect_count", icd)
         self.assertIn("return (caps && caps->ext_storage_buffer_storage_class) ? VK_TRUE : VK_FALSE;", icd)
-        self.assertIn("return (caps && caps->timeline_semaphore && caps->ext_timeline_semaphore) ? VK_TRUE : VK_FALSE;", icd)
-        self.assertIn("return (caps && caps->synchronization2 && caps->ext_synchronization2) ? VK_TRUE : VK_FALSE;", icd)
-        self.assertIn("return (caps && caps->dynamic_rendering && caps->ext_dynamic_rendering) ? VK_TRUE : VK_FALSE;", icd)
-        self.assertIn("return (caps && caps->draw_indirect_count) ? VK_TRUE : VK_FALSE;", icd)
-        self.assertIn("return (caps && caps->draw_indexed_indirect_count) ? VK_TRUE : VK_FALSE;", icd)
-        self.assertIn("return (caps && caps->ext_extended_dynamic_state) ? VK_TRUE : VK_FALSE;", icd)
+        self.assertIn("return (caps && caps->timeline_semaphore_usable) ? VK_TRUE : VK_FALSE;", icd)
+        self.assertIn("return (caps && caps->synchronization2_usable) ? VK_TRUE : VK_FALSE;", icd)
+        self.assertIn("return (caps && caps->dynamic_rendering_usable) ? VK_TRUE : VK_FALSE;", icd)
+        self.assertIn("return (caps && caps->draw_indirect_count_usable) ? VK_TRUE : VK_FALSE;", icd)
+        self.assertIn("return (caps && caps->draw_indexed_indirect_count_usable) ? VK_TRUE : VK_FALSE;", icd)
+        self.assertIn("return (caps && caps->extended_dynamic_state_usable) ? VK_TRUE : VK_FALSE;", icd)
         self.assertIn("caps->ext_extended_dynamic_state2", icd)
         self.assertIn("caps->extended_dynamic_state2.extendedDynamicState2", icd)
         self.assertIn("caps->extended_dynamic_state2.extendedDynamicState2LogicOp", icd)
         self.assertIn("caps->extended_dynamic_state2.extendedDynamicState2PatchControlPoints", icd)
+        self.assertIn("caps->extended_dynamic_state2_usable.extendedDynamicState2", icd)
+        self.assertIn("caps->extended_dynamic_state2_usable.extendedDynamicState2LogicOp", icd)
+        self.assertIn("caps->extended_dynamic_state2_usable.extendedDynamicState2PatchControlPoints", icd)
         self.assertIn("advertised_extended_dynamic_state2_patch_control_points()", icd)
         self.assertIn("vkCmdSetPatchControlPointsEXT", icd)
         self.assertNotIn("!caps || caps->ext_extended_dynamic_state", icd)

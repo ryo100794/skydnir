@@ -2100,8 +2100,94 @@ static void log_vulkan_enabled_feature_trace(
             vulkan12 ? vulkan12->shaderInt8 : 0);
 }
 
+
+static uint32_t vulkan_runtime_sync2_supported(const VulkanRuntime *rt) {
+    return (rt && rt->physical_synchronization2.synchronization2 &&
+            (rt->api_version >= VK_API_VERSION_1_3 ||
+             vulkan_device_extension_supported(rt->physical_device,
+                                               VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME))) ? 1u : 0u;
+}
+
+static uint32_t vulkan_runtime_sync2_loaded(const VulkanRuntime *rt) {
+    /* vkCmdWriteTimestamp2 is transported as a query timestamp and replayed with vkCmdWriteTimestamp. */
+    return (rt && rt->queue_submit2 && rt->cmd_pipeline_barrier2 &&
+            rt->cmd_set_event2 && rt->cmd_reset_event2 && rt->cmd_wait_events2) ? 1u : 0u;
+}
+
+static uint32_t vulkan_runtime_dynamic_rendering_supported(const VulkanRuntime *rt) {
+    return (rt && rt->physical_dynamic_rendering.dynamicRendering &&
+            (rt->api_version >= VK_API_VERSION_1_3 ||
+             vulkan_device_extension_supported(rt->physical_device,
+                                               VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME))) ? 1u : 0u;
+}
+
+static uint32_t vulkan_runtime_draw_indirect_count_supported(const VulkanRuntime *rt) {
+    return (rt && rt->physical_vulkan12.drawIndirectCount) ? 1u : 0u;
+}
+
+static uint32_t vulkan_runtime_extended_dynamic_state_loaded(const VulkanRuntime *rt) {
+    return (rt && rt->cmd_set_viewport_with_count && rt->cmd_set_scissor_with_count &&
+            rt->cmd_set_cull_mode && rt->cmd_set_front_face && rt->cmd_set_primitive_topology &&
+            rt->cmd_set_depth_test_enable && rt->cmd_set_depth_write_enable &&
+            rt->cmd_set_depth_compare_op && rt->cmd_set_depth_bounds_test_enable &&
+            rt->cmd_set_stencil_test_enable && rt->cmd_set_stencil_op &&
+            rt->cmd_bind_vertex_buffers2) ? 1u : 0u;
+}
+
+static uint32_t vulkan_runtime_extended_dynamic_state2_loaded(const VulkanRuntime *rt) {
+    return (rt && rt->cmd_set_rasterizer_discard_enable && rt->cmd_set_depth_bias_enable &&
+            rt->cmd_set_primitive_restart_enable) ? 1u : 0u;
+}
+
 static void write_android_vulkan_enabled_features_report(FILE *out, const VulkanRuntime *rt) {
     if (!out) return;
+    const uint32_t timeline_semaphore_supported = (rt && rt->physical_vulkan12.timelineSemaphore) ? 1u : 0u;
+    const uint32_t timeline_semaphore_enabled = (rt && rt->enabled_vulkan12.timelineSemaphore && timeline_semaphore_supported) ? 1u : 0u;
+    const uint32_t timeline_semaphore_loaded = (rt && rt->get_semaphore_counter_value && rt->wait_semaphores && rt->signal_semaphore) ? 1u : 0u;
+    const uint32_t timeline_semaphore_usable = (timeline_semaphore_enabled && timeline_semaphore_loaded) ? 1u : 0u;
+    const uint32_t synchronization2_supported = vulkan_runtime_sync2_supported(rt);
+    const uint32_t synchronization2_enabled = (rt && rt->enabled_synchronization2.synchronization2 && synchronization2_supported) ? 1u : 0u;
+    const uint32_t synchronization2_loaded = vulkan_runtime_sync2_loaded(rt);
+    const uint32_t synchronization2_usable = (synchronization2_enabled && synchronization2_loaded) ? 1u : 0u;
+    const uint32_t dynamic_rendering_supported = vulkan_runtime_dynamic_rendering_supported(rt);
+    const uint32_t dynamic_rendering_enabled = (rt && rt->enabled_dynamic_rendering.dynamicRendering && rt->enabled_ext_dynamic_rendering && dynamic_rendering_supported) ? 1u : 0u;
+    const uint32_t dynamic_rendering_loaded = (rt && rt->cmd_begin_rendering && rt->cmd_end_rendering) ? 1u : 0u;
+    const uint32_t dynamic_rendering_usable = (dynamic_rendering_enabled && dynamic_rendering_loaded && rt && rt->graphics_ready) ? 1u : 0u;
+    const uint32_t draw_indirect_count_supported = vulkan_runtime_draw_indirect_count_supported(rt);
+    const uint32_t draw_indirect_count_enabled = (rt && rt->enabled_vulkan12.drawIndirectCount && draw_indirect_count_supported) ? 1u : 0u;
+    const uint32_t draw_indirect_count_loaded = (rt && rt->cmd_draw_indirect_count) ? 1u : 0u;
+    const uint32_t draw_indexed_indirect_count_loaded = (rt && rt->cmd_draw_indexed_indirect_count) ? 1u : 0u;
+    const uint32_t draw_indirect_count_usable = (draw_indirect_count_enabled && draw_indirect_count_loaded) ? 1u : 0u;
+    const uint32_t draw_indexed_indirect_count_usable = (draw_indirect_count_enabled && draw_indexed_indirect_count_loaded) ? 1u : 0u;
+    const uint32_t extended_dynamic_state_supported = (rt && rt->physical_extended_dynamic_state.extendedDynamicState &&
+        vulkan_device_extension_supported(rt->physical_device, VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME)) ? 1u : 0u;
+    const uint32_t extended_dynamic_state_enabled = (rt && rt->enabled_extended_dynamic_state.extendedDynamicState &&
+        rt->enabled_ext_extended_dynamic_state && extended_dynamic_state_supported) ? 1u : 0u;
+    const uint32_t extended_dynamic_state_loaded = vulkan_runtime_extended_dynamic_state_loaded(rt);
+    const uint32_t extended_dynamic_state_usable = (extended_dynamic_state_enabled && extended_dynamic_state_loaded) ? 1u : 0u;
+    const uint32_t extended_dynamic_state2_supported = (rt && rt->physical_extended_dynamic_state2.extendedDynamicState2 &&
+        vulkan_device_extension_supported(rt->physical_device, VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME)) ? 1u : 0u;
+    const uint32_t extended_dynamic_state2_logic_op_supported = (rt && rt->physical_extended_dynamic_state2.extendedDynamicState2LogicOp &&
+        vulkan_device_extension_supported(rt->physical_device, VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME)) ? 1u : 0u;
+    const uint32_t extended_dynamic_state2_patch_control_points_supported = (rt && rt->physical_extended_dynamic_state2.extendedDynamicState2PatchControlPoints &&
+        vulkan_device_extension_supported(rt->physical_device, VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME)) ? 1u : 0u;
+    const uint32_t extended_dynamic_state2_enabled = (rt && rt->enabled_extended_dynamic_state2.extendedDynamicState2 &&
+        rt->enabled_ext_extended_dynamic_state2 && extended_dynamic_state2_supported) ? 1u : 0u;
+    const uint32_t extended_dynamic_state2_logic_op_enabled = (rt && rt->enabled_extended_dynamic_state2.extendedDynamicState2LogicOp &&
+        rt->enabled_ext_extended_dynamic_state2 && extended_dynamic_state2_logic_op_supported) ? 1u : 0u;
+    const uint32_t extended_dynamic_state2_patch_control_points_enabled = (rt && rt->enabled_extended_dynamic_state2.extendedDynamicState2PatchControlPoints &&
+        rt->enabled_ext_extended_dynamic_state2 && extended_dynamic_state2_patch_control_points_supported) ? 1u : 0u;
+    const uint32_t extended_dynamic_state2_loaded = vulkan_runtime_extended_dynamic_state2_loaded(rt);
+    const uint32_t extended_dynamic_state2_usable = (extended_dynamic_state2_enabled && extended_dynamic_state2_loaded) ? 1u : 0u;
+    const uint32_t extended_dynamic_state2_logic_op_loaded = (rt && rt->cmd_set_logic_op) ? 1u : 0u;
+    const uint32_t extended_dynamic_state2_patch_control_points_loaded = (rt && rt->cmd_set_patch_control_points) ? 1u : 0u;
+    const uint32_t extended_dynamic_state2_logic_op_usable = (extended_dynamic_state2_logic_op_enabled && extended_dynamic_state2_logic_op_loaded) ? 1u : 0u;
+    const uint32_t extended_dynamic_state2_patch_control_points_usable = (extended_dynamic_state2_patch_control_points_enabled && extended_dynamic_state2_patch_control_points_loaded) ? 1u : 0u;
+    const uint32_t index_type_uint8_supported = (rt && rt->physical_index_type_uint8.indexTypeUint8 &&
+        vulkan_device_extension_supported(rt->physical_device, VK_EXT_INDEX_TYPE_UINT8_EXTENSION_NAME)) ? 1u : 0u;
+    const uint32_t index_type_uint8_enabled = (rt && rt->enabled_index_type_uint8.indexTypeUint8 && rt->enabled_ext_index_type_uint8 &&
+        index_type_uint8_supported) ? 1u : 0u;
+    const uint32_t index_type_uint8_usable = index_type_uint8_enabled;
     fprintf(out,
             "\"android_vulkan_enabled_features\":{"
             "\"shaderInt64\":%u,"
@@ -2131,12 +2217,29 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             "\"shaderFloat16\":%u,"
             "\"shaderInt8\":%u,"
             "\"timelineSemaphore\":%u,"
+            "\"timelineSemaphoreSupported\":%u,"
+            "\"timelineSemaphoreEnabled\":%u,"
+            "\"timelineSemaphoreLoaded\":%u,"
+            "\"timelineSemaphoreUsable\":%u,"
             "\"synchronization2\":%u,"
             "\"dynamicRendering\":%u,"
             "\"multiview\":%u,"
             "\"queueSubmit2\":%u,"
             "\"cmdPipelineBarrier2\":%u,"
+            "\"synchronization2Supported\":%u,"
+            "\"synchronization2Enabled\":%u,"
+            "\"synchronization2Loaded\":%u,"
+            "\"synchronization2Usable\":%u,"
+            "\"dynamicRenderingSupported\":%u,"
+            "\"dynamicRenderingEnabled\":%u,"
+            "\"dynamicRenderingLoaded\":%u,"
             "\"dynamicRenderingUsable\":%u,"
+            "\"drawIndirectCountSupported\":%u,"
+            "\"drawIndirectCountEnabled\":%u,"
+            "\"drawIndirectCountLoaded\":%u,"
+            "\"drawIndirectCountUsable\":%u,"
+            "\"drawIndexedIndirectCountLoaded\":%u,"
+            "\"drawIndexedIndirectCountUsable\":%u,"
             "\"drawIndirectCount\":%u,"
             "\"drawIndexedIndirectCount\":%u,"
             "\"core11_storageBuffer16BitAccess\":%u,"
@@ -2159,6 +2262,25 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             "\"descriptorBindingStorageBufferUpdateAfterBind\":%u,"
             "\"descriptorBindingUniformTexelBufferUpdateAfterBind\":%u,"
             "\"descriptorBindingStorageTexelBufferUpdateAfterBind\":%u,"
+            "\"extendedDynamicStateSupported\":%u,"
+            "\"extendedDynamicStateEnabled\":%u,"
+            "\"extendedDynamicStateLoaded\":%u,"
+            "\"extendedDynamicStateUsable\":%u,"
+            "\"extendedDynamicState2Supported\":%u,"
+            "\"extendedDynamicState2Enabled\":%u,"
+            "\"extendedDynamicState2Loaded\":%u,"
+            "\"extendedDynamicState2Usable\":%u,"
+            "\"extendedDynamicState2LogicOpSupported\":%u,"
+            "\"extendedDynamicState2LogicOpEnabled\":%u,"
+            "\"extendedDynamicState2LogicOpLoaded\":%u,"
+            "\"extendedDynamicState2LogicOpUsable\":%u,"
+            "\"extendedDynamicState2PatchControlPointsSupported\":%u,"
+            "\"extendedDynamicState2PatchControlPointsEnabled\":%u,"
+            "\"extendedDynamicState2PatchControlPointsLoaded\":%u,"
+            "\"extendedDynamicState2PatchControlPointsUsable\":%u,"
+            "\"indexTypeUint8Supported\":%u,"
+            "\"indexTypeUint8Enabled\":%u,"
+            "\"indexTypeUint8Usable\":%u,"
             "\"extendedDynamicState\":%u,"
             "\"extendedDynamicState2\":%u,"
             "\"extendedDynamicState2LogicOp\":%u,"
@@ -2207,15 +2329,32 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             rt ? rt->enabled_storage8.storagePushConstant8 : 0,
             rt ? rt->enabled_float16_int8.shaderFloat16 : 0,
             rt ? rt->enabled_float16_int8.shaderInt8 : 0,
-            rt && rt->enabled_vulkan12.timelineSemaphore && rt->get_semaphore_counter_value && rt->wait_semaphores && rt->signal_semaphore ? 1u : 0u,
-            rt && rt->enabled_synchronization2.synchronization2 && rt->queue_submit2 && rt->cmd_pipeline_barrier2 ? 1u : 0u,
-            rt && rt->graphics_ready ? 1u : 0u,
+            timeline_semaphore_usable,
+            timeline_semaphore_supported,
+            timeline_semaphore_enabled,
+            timeline_semaphore_loaded,
+            timeline_semaphore_usable,
+            synchronization2_usable,
+            dynamic_rendering_usable,
             rt ? rt->enabled_vulkan11.multiview : 0,
             rt && rt->queue_submit2 ? 1u : 0u,
             rt && rt->cmd_pipeline_barrier2 ? 1u : 0u,
-            rt && rt->graphics_ready ? 1u : 0u,
-            rt && rt->cmd_draw_indirect_count ? 1u : 0u,
-            rt && rt->cmd_draw_indexed_indirect_count ? 1u : 0u,
+            synchronization2_supported,
+            synchronization2_enabled,
+            synchronization2_loaded,
+            synchronization2_usable,
+            dynamic_rendering_supported,
+            dynamic_rendering_enabled,
+            dynamic_rendering_loaded,
+            dynamic_rendering_usable,
+            draw_indirect_count_supported,
+            draw_indirect_count_enabled,
+            draw_indirect_count_loaded,
+            draw_indirect_count_usable,
+            draw_indexed_indirect_count_loaded,
+            draw_indexed_indirect_count_usable,
+            draw_indirect_count_usable,
+            draw_indexed_indirect_count_usable,
             rt ? rt->enabled_vulkan11.storageBuffer16BitAccess : 0,
             rt ? rt->enabled_vulkan11.uniformAndStorageBuffer16BitAccess : 0,
             rt ? rt->enabled_vulkan11.storagePushConstant16 : 0,
@@ -2236,25 +2375,44 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             rt ? rt->enabled_descriptor_indexing.descriptorBindingStorageBufferUpdateAfterBind : 0,
             rt ? rt->enabled_descriptor_indexing.descriptorBindingUniformTexelBufferUpdateAfterBind : 0,
             rt ? rt->enabled_descriptor_indexing.descriptorBindingStorageTexelBufferUpdateAfterBind : 0,
-            rt ? rt->enabled_extended_dynamic_state.extendedDynamicState : 0,
-            rt ? rt->enabled_extended_dynamic_state2.extendedDynamicState2 : 0,
-            rt ? rt->enabled_extended_dynamic_state2.extendedDynamicState2LogicOp : 0,
-            rt ? rt->enabled_extended_dynamic_state2.extendedDynamicState2PatchControlPoints : 0,
-            rt ? rt->enabled_index_type_uint8.indexTypeUint8 : 0,
+            extended_dynamic_state_supported,
+            extended_dynamic_state_enabled,
+            extended_dynamic_state_loaded,
+            extended_dynamic_state_usable,
+            extended_dynamic_state2_supported,
+            extended_dynamic_state2_enabled,
+            extended_dynamic_state2_loaded,
+            extended_dynamic_state2_usable,
+            extended_dynamic_state2_logic_op_supported,
+            extended_dynamic_state2_logic_op_enabled,
+            extended_dynamic_state2_logic_op_loaded,
+            extended_dynamic_state2_logic_op_usable,
+            extended_dynamic_state2_patch_control_points_supported,
+            extended_dynamic_state2_patch_control_points_enabled,
+            extended_dynamic_state2_patch_control_points_loaded,
+            extended_dynamic_state2_patch_control_points_usable,
+            index_type_uint8_supported,
+            index_type_uint8_enabled,
+            index_type_uint8_usable,
+            extended_dynamic_state_usable,
+            extended_dynamic_state2_usable,
+            extended_dynamic_state2_logic_op_usable,
+            extended_dynamic_state2_patch_control_points_usable,
+            index_type_uint8_usable,
             rt ? rt->enabled_extension_count : 0,
             rt ? rt->enabled_chain_compat_feature_structs : 0,
             rt ? rt->enabled_ext_16bit_storage : 0,
             rt ? rt->enabled_ext_8bit_storage : 0,
             rt ? rt->enabled_ext_shader_float16_int8 : 0,
             rt ? rt->enabled_ext_storage_buffer_storage_class : 0,
-            rt && rt->enabled_vulkan12.timelineSemaphore && rt->get_semaphore_counter_value && rt->wait_semaphores && rt->signal_semaphore ? 1u : 0u,
-            rt && rt->enabled_synchronization2.synchronization2 && rt->queue_submit2 && rt->cmd_pipeline_barrier2 ? 1u : 0u,
-            rt && rt->graphics_ready ? 1u : 0u,
-            rt ? rt->enabled_ext_draw_indirect_count_khr : 0,
-            rt ? rt->enabled_ext_draw_indirect_count_amd : 0,
-            rt ? rt->enabled_ext_extended_dynamic_state : 0,
-            rt ? rt->enabled_ext_extended_dynamic_state2 : 0,
-            rt ? rt->enabled_ext_index_type_uint8 : 0,
+            timeline_semaphore_usable,
+            synchronization2_usable,
+            dynamic_rendering_usable,
+            rt && rt->enabled_ext_draw_indirect_count_khr && draw_indirect_count_usable && draw_indexed_indirect_count_usable ? 1u : 0u,
+            rt && rt->enabled_ext_draw_indirect_count_amd && draw_indirect_count_usable && draw_indexed_indirect_count_usable ? 1u : 0u,
+            extended_dynamic_state_usable,
+            (extended_dynamic_state2_usable || extended_dynamic_state2_logic_op_usable || extended_dynamic_state2_patch_control_points_usable) ? 1u : 0u,
+            index_type_uint8_usable,
             rt ? rt->enabled_ext_descriptor_indexing : 0,
             rt ? rt->enabled_ext_separate_depth_stencil_layouts : 0);
 }
@@ -13984,10 +14142,8 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     enabled_extended_dynamic_state.extendedDynamicState = rt->physical_extended_dynamic_state.extendedDynamicState;
     enabled_extended_dynamic_state2.extendedDynamicState2 = rt->physical_extended_dynamic_state2.extendedDynamicState2;
     enabled_extended_dynamic_state2.extendedDynamicState2LogicOp =
-        rt->physical_extended_dynamic_state2.extendedDynamicState2 &&
         rt->physical_extended_dynamic_state2.extendedDynamicState2LogicOp;
     enabled_extended_dynamic_state2.extendedDynamicState2PatchControlPoints =
-        rt->physical_extended_dynamic_state2.extendedDynamicState2 &&
         rt->physical_extended_dynamic_state2.extendedDynamicState2PatchControlPoints;
     enabled_index_type_uint8.indexTypeUint8 = rt->physical_index_type_uint8.indexTypeUint8;
     enabled_float16_int8.shaderFloat16 = rt->physical_float16_int8.shaderFloat16;
@@ -14061,8 +14217,12 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
         enabled_extended_dynamic_state.pNext = device_features_pnext;
         device_features_pnext = &enabled_extended_dynamic_state;
     }
+    const int extended_dynamic_state2_feature_requested =
+        enabled_extended_dynamic_state2.extendedDynamicState2 ||
+        enabled_extended_dynamic_state2.extendedDynamicState2LogicOp ||
+        enabled_extended_dynamic_state2.extendedDynamicState2PatchControlPoints;
     const int extended_dynamic_state2_available =
-        enabled_extended_dynamic_state2.extendedDynamicState2 &&
+        extended_dynamic_state2_feature_requested &&
         vulkan_device_extension_supported(rt->physical_device,
                                           VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME);
     if (extended_dynamic_state2_available) {
@@ -14245,7 +14405,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
             enabled_extension_count > extended_dynamic_state_before;
     }
     const uint32_t extended_dynamic_state2_before = enabled_extension_count;
-    if (enabled_extended_dynamic_state2.extendedDynamicState2) {
+    if (extended_dynamic_state2_feature_requested) {
         append_vulkan_device_extension(rt->physical_device,
                                        enabled_extensions,
                                        &enabled_extension_count,
