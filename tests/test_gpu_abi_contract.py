@@ -5445,6 +5445,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "free(resources);",
         ]:
             self.assertIn(required, sender)
+        self.assertNotIn("entry_name_size >= PDOCKER_VK_MAX_ENTRY_NAME", sender)
         post_alloc = sender.split("resources = (PdockerGpuVulkanDispatchV5ResourceEntry *)calloc(", 1)[1].split(
             "cleanup:", 1
         )[0]
@@ -5480,7 +5481,9 @@ class GpuAbiContractTest(unittest.TestCase):
         handler = c_function_body(executor, "handle_vulkan_dispatch_v5_frame")
         self.assertIn("char *entry_name = NULL;", handler)
         self.assertIn("char *option_copy = NULL;", handler)
+        self.assertIn("header.entry_name_size == 0", handler)
         self.assertIn("header.entry_name_size > (uint64_t)SIZE_MAX - 1u", handler)
+        self.assertIn("memchr(entry_ptr, '\\0', (size_t)header.entry_name_size)", handler)
         self.assertIn("const size_t entry_name_size = (size_t)header.entry_name_size + 1u;", handler)
         self.assertIn("entry_name = (char *)calloc(entry_name_size, 1);", handler)
         self.assertIn("memcpy(entry_name, entry_ptr, (size_t)header.entry_name_size);", handler)
@@ -5493,6 +5496,20 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("memcpy(option_copy, option_text, (size_t)header.option_text_size);", handler)
         self.assertIn("free(option_copy);", handler)
         self.assertNotIn("char option_copy[PDOCKER_GPU_MAX_COMMAND_BYTES];", handler)
+        dispatch_body = c_function_body(executor, "run_vulkan_dispatch_fd")
+        cache_struct = executor.split("} VulkanPipelineCacheEntry;", 1)[0].rsplit("typedef struct {", 1)[1]
+        cache_lookup = c_function_body(executor, "find_pipeline_cache_entry")
+        self.assertIn("char *entry_name;", cache_struct)
+        self.assertIn("size_t entry_name_size;", cache_struct)
+        self.assertIn("free(entry->entry_name);", executor)
+        self.assertIn("entry->entry_name_size == entry_name_size", cache_lookup)
+        self.assertIn("memcmp(entry->entry_name, entry_name, entry_name_size) == 0", cache_lookup)
+        self.assertIn("char *cache_entry_name = (char *)malloc(cache_entry_name_size + 1u);", dispatch_body)
+        self.assertIn("memcpy(cache_entry_name, entry_name, cache_entry_name_size + 1u);", dispatch_body)
+        self.assertIn("pipeline_cache_entry->entry_name = cache_entry_name;", dispatch_body)
+        self.assertIn("pipeline_cache_entry->entry_name_size = cache_entry_name_size;", dispatch_body)
+        self.assertNotIn("strncmp(entry->entry_name", cache_lookup)
+        self.assertNotIn("snprintf(pipeline_cache_entry->entry_name", dispatch_body)
         self.assertNotIn("header.option_text_size >= PDOCKER_GPU_MAX_COMMAND_BYTES", handler)
 
     def test_vulkan_dispatch_v5_push_constants_use_runtime_limit_not_static_frame_cap(self):
@@ -8871,6 +8888,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("gx ? gx : 1", executor_dispatch_body)
         self.assertNotIn("gy ? gy : 1", executor_dispatch_body)
         self.assertNotIn("gz ? gz : 1", executor_dispatch_body)
+        generic_sender_body = c_function_body(icd, "send_generic_vulkan_dispatch_op")
+        self.assertNotIn("dispatch_y ? dispatch_y : 1", generic_sender_body)
+        self.assertNotIn("dispatch_z ? dispatch_z : 1", generic_sender_body)
         v5_sender_body = c_function_body(icd, "send_generic_vulkan_dispatch_v5_1_op")
         self.assertIn("header->gx = gx;", v5_sender_body)
         self.assertIn("header->gy = gy;", v5_sender_body)
@@ -10256,9 +10276,15 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("ci->stage.pNext", compute_body)
         self.assertIn('unsupported_create_info_pnext_result("vkCreateComputePipelines.stage"', compute_body)
         self.assertIn("size_t entry_name_len = strlen(entry_name);", compute_body)
-        self.assertIn("entry_name_len == 0 || entry_name_len >= sizeof(pipeline->entry_name)", compute_body)
+        self.assertIn("entry_name_len == 0", compute_body)
+        self.assertNotIn("entry_name_len >= sizeof(pipeline->entry_name)", compute_body)
         self.assertIn("compute-pipeline-entry-name-invalid", compute_body)
+        self.assertIn("pipeline->entry_name = (char *)malloc(entry_name_len + 1u);", compute_body)
         self.assertIn("memcpy(pipeline->entry_name, entry_name, entry_name_len + 1u);", compute_body)
+        self.assertIn("pipeline->entry_name_size = entry_name_len;", compute_body)
+        self.assertIn("free(pipeline->entry_name);", compute_body)
+        destroy_pipeline_body = c_function_body(icd, "vkDestroyPipeline")
+        self.assertIn("free(p->entry_name);", destroy_pipeline_body)
         self.assertNotIn("snprintf(pipeline->entry_name", compute_body)
 
         self.assertIn('"vkCreateGraphicsPipelines", ci->pNext, ci->stageCount, true', graphics_body)
@@ -16271,6 +16297,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "if (requires_v5_frame", 1
         )[0]
         self.assertIn("specialization_transport_required ||", requires_block)
+        self.assertIn("const bool entry_name_requires_v5_frame =", generic_sender)
+        self.assertIn("entry_name_size >= PDOCKER_VK_MAX_ENTRY_NAME", generic_sender)
+        self.assertIn("entry_name_requires_v5_frame ||", requires_block)
 
     def test_vulkan_dispatch_strict_passthrough_carries_spirv_identity_without_probe(self):
         icd = VULKAN_ICD.read_text()

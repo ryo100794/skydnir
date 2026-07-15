@@ -2902,12 +2902,11 @@ and `bash scripts/build-native-android-ndk.sh`.
 ### 2026-07-15 Android compute zero-dispatch identity lane
 
 CPU/static pass-through work now preserves Vulkan zero group-count dispatches.
-The producer V5 frame writer serializes `gx/gy/gz` unchanged, and
-`run_vulkan_dispatch_fd` sends those values unchanged to `vkCmdDispatch` and
-`vkCmdDispatchBase` instead of rewriting zero dimensions to one workgroup.  The
-Q6 CPU diagnostic oracles also iterate the exact dispatch dimensions, so a
-zero-sized application dispatch remains a no-op in frame transport, native
-replay, and comparison evidence.
+The producer legacy text writer, V5 frame writer, dispatch-hash metadata, and
+`run_vulkan_dispatch_fd` now preserve `gx/gy/gz` unchanged instead of rewriting
+zero dimensions to one workgroup.  The Q6 CPU diagnostic oracles also iterate
+the exact dispatch dimensions, so a zero-sized application dispatch remains a
+no-op in command transport, native replay, hashes, and comparison evidence.
 
 Validation: `env -u PYTHONPATH python3 -m unittest tests.test_gpu_abi_contract -q`
 and `bash scripts/build-native-android-ndk.sh`.
@@ -2971,3 +2970,16 @@ prevents applications from observing support for layouts that only fail during
 compute dispatch serialization.
 
 Validation: `env -u PYTHONPATH python3 -m unittest tests.test_gpu_abi_contract -q` and `bash scripts/build-gpu-shim.sh`.
+
+### 2026-07-15 Vulkan compute entry-name heap lane
+
+CPU/static pass-through work removed the compute pipeline entry-point fixed
+string cap from the producer ICD and executor cache.  Compute `pName` is now
+heap-owned on the producer side, V5 framed transport carries the exact entry
+name payload, long entry names force V5 instead of legacy text hex encoding, and
+the Android executor pipeline cache stores heap-backed `(entry_name_size, bytes)`
+keys compared by `memcmp`.  The V5 frame receiver also rejects empty or embedded
+NUL entry-name payloads before creating the C string.  Graphics V6 entry-name
+storage remains unchanged in this lane.
+
+Validation: `env -u PYTHONPATH python3 -m unittest tests.test_gpu_abi_contract -q`, `bash scripts/build-gpu-shim.sh`, and `bash scripts/build-native-android-ndk.sh`.

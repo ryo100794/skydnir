@@ -882,7 +882,8 @@ struct PdockerVkPipeline {
     PdockerVkPipelineLayout *layout;
     uint64_t requested_feature_mask;
     uint32_t local_size_x;
-    char entry_name[PDOCKER_VK_MAX_ENTRY_NAME];
+    char *entry_name;
+    size_t entry_name_size;
     VkSpecializationMapEntry *specialization_entries;
     uint32_t specialization_entry_count;
     uint8_t *specialization_data;
@@ -11741,7 +11742,7 @@ static int send_generic_vulkan_dispatch_v5_1_op(
         return -E2BIG;
     }
     size_t entry_name_size = strlen(entry_name);
-    if (entry_name_size == 0 || entry_name_size >= PDOCKER_VK_MAX_ENTRY_NAME) {
+    if (entry_name_size == 0) {
         fprintf(stderr,
                 "pdocker-vulkan-icd: V5.1 frame rejected: invalid entry name dispatch_id=%llu entry_name_size=%zu\n",
                 (unsigned long long)dispatch_id,
@@ -13017,8 +13018,16 @@ static int send_generic_vulkan_dispatch_op(
     }
     const char *push_token = push_size ? (push_requires_v5_frame ? "-" : push_hex) : "-";
     char entry_hex[PDOCKER_VK_MAX_ENTRY_NAME * 2 + 1];
-    const char *entry_name = op->pipeline->entry_name[0] ? op->pipeline->entry_name : "main";
-    hex_encode((const uint8_t *)entry_name, strlen(entry_name), entry_hex, sizeof(entry_hex));
+    const char *entry_name = op->pipeline->entry_name && op->pipeline->entry_name[0]
+        ? op->pipeline->entry_name
+        : "main";
+    const size_t entry_name_size = strlen(entry_name);
+    const bool entry_name_requires_v5_frame = entry_name_size >= PDOCKER_VK_MAX_ENTRY_NAME;
+    if (!entry_name_requires_v5_frame) {
+        hex_encode((const uint8_t *)entry_name, entry_name_size, entry_hex, sizeof(entry_hex));
+    } else {
+        entry_hex[0] = 0;
+    }
     char spec_hex[PDOCKER_VK_MAX_SPECIALIZATION_BYTES * 2 + 1];
     hex_encode(op->pipeline->specialization_data,
                op->pipeline->specialization_data_size,
@@ -13112,8 +13121,8 @@ static int send_generic_vulkan_dispatch_op(
                        binding_count,
                        push_size,
                        dispatch_x,
-                       dispatch_y ? dispatch_y : 1,
-                       dispatch_z ? dispatch_z : 1,
+                       dispatch_y,
+                       dispatch_z,
                        push_token,
                        entry_hex[0] ? entry_hex : "-",
                        op->pipeline->specialization_entry_count,
@@ -13163,8 +13172,6 @@ static int send_generic_vulkan_dispatch_op(
                                     op->pipeline->specialization_entry_count,
                                     op->pipeline->specialization_data,
                                     op->pipeline->specialization_data_size);
-    dispatch_y = dispatch_y ? dispatch_y : 1;
-    dispatch_z = dispatch_z ? dispatch_z : 1;
     uint64_t dispatch_hash = 1469598103934665603ull;
     dispatch_hash = fnv1a64_update_u32(dispatch_hash, dispatch_x);
     dispatch_hash = fnv1a64_update_u32(dispatch_hash, dispatch_y);
@@ -13399,6 +13406,7 @@ static int send_generic_vulkan_dispatch_op(
         descriptor_array_transport_required || texel_buffer_transport_required ||
         image_descriptor_count > 0 || pending_compute_barriers ||
         specialization_transport_required || push_requires_v5_frame ||
+        entry_name_requires_v5_frame ||
         binding_count > PDOCKER_GPU_VULKAN_TEXT_DISPATCH_MAX_BINDINGS || op->dispatch_indirect;
     if (requires_v5_frame && copy_alias_enabled()) {
         fprintf(stderr,
@@ -23059,13 +23067,19 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateComputePipelines(
         pipeline->local_size_x = 128;
         const char *entry_name = ci->stage.pName ? ci->stage.pName : "main";
         size_t entry_name_len = strlen(entry_name);
-        if (entry_name_len == 0 || entry_name_len >= sizeof(pipeline->entry_name)) {
+        if (entry_name_len == 0) {
             trace_icd_runtime_failure("compute-pipeline-entry-name-invalid",
                                       VK_ERROR_FEATURE_NOT_PRESENT);
             free(pipeline);
             return VK_ERROR_FEATURE_NOT_PRESENT;
         }
+        pipeline->entry_name = (char *)malloc(entry_name_len + 1u);
+        if (!pipeline->entry_name) {
+            free(pipeline);
+            return VK_ERROR_OUT_OF_HOST_MEMORY;
+        }
         memcpy(pipeline->entry_name, entry_name, entry_name_len + 1u);
+        pipeline->entry_name_size = entry_name_len;
         const VkSpecializationInfo *spec = ci->stage.pSpecializationInfo;
         if (spec) {
             pipeline->specialization_entry_count = spec->mapEntryCount;
@@ -23075,12 +23089,14 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateComputePipelines(
                 if (!checked_mul_size((size_t)spec->mapEntryCount,
                                       sizeof(*pipeline->specialization_entries),
                                       &specialization_entry_bytes)) {
+                    free(pipeline->entry_name);
                     free(pipeline);
                     return VK_ERROR_OUT_OF_HOST_MEMORY;
                 }
                 pipeline->specialization_entries = (VkSpecializationMapEntry *)calloc(
                     spec->mapEntryCount, sizeof(*pipeline->specialization_entries));
                 if (!pipeline->specialization_entries) {
+                    free(pipeline->entry_name);
                     free(pipeline);
                     return VK_ERROR_OUT_OF_HOST_MEMORY;
                 }
@@ -23091,6 +23107,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateComputePipelines(
                 pipeline->specialization_data = (uint8_t *)malloc(spec->dataSize);
                 if (!pipeline->specialization_data) {
                     free(pipeline->specialization_entries);
+                    free(pipeline->entry_name);
                     free(pipeline);
                     return VK_ERROR_OUT_OF_HOST_MEMORY;
                 }
@@ -23695,6 +23712,7 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyPipeline(
     (void)pAllocator;
     PdockerVkPipeline *p = pdocker_vk_pipeline_from_handle(pipeline);
     if (!p) return;
+    free(p->entry_name);
     free(p->specialization_entries);
     free(p->specialization_data);
     free(p);

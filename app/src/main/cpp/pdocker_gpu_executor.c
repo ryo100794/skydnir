@@ -1750,7 +1750,8 @@ typedef struct {
     size_t specialization_count;
     uint32_t layout_count;
     uint32_t push_size;
-    char entry_name[PDOCKER_GPU_MAX_VULKAN_ENTRY_NAME];
+    char *entry_name;
+    size_t entry_name_size;
     unsigned long hits;
     uint64_t last_used;
     VkDescriptorSetLayout set_layout;
@@ -9321,6 +9322,7 @@ static void destroy_pipeline_cache_entry(VkDevice device, VulkanPipelineCacheEnt
     if (entry->shader) vkDestroyShaderModule(device, entry->shader, NULL);
     if (entry->pipeline_layout) vkDestroyPipelineLayout(device, entry->pipeline_layout, NULL);
     if (entry->set_layout) vkDestroyDescriptorSetLayout(device, entry->set_layout, NULL);
+    free(entry->entry_name);
     memset(entry, 0, sizeof(*entry));
 }
 
@@ -9335,6 +9337,8 @@ static VulkanPipelineCacheEntry *find_pipeline_cache_entry(
         uint64_t descriptor_layout_hash,
         uint32_t push_size,
         const char *entry_name) {
+    const size_t entry_name_size = entry_name ? strlen(entry_name) : 0;
+    if (entry_name_size == 0) return NULL;
     for (size_t i = 0; i < PDOCKER_GPU_PIPELINE_CACHE_SLOTS; ++i) {
         VulkanPipelineCacheEntry *entry = &g_vulkan_pipeline_cache[i];
         if (entry->valid &&
@@ -9347,7 +9351,9 @@ static VulkanPipelineCacheEntry *find_pipeline_cache_entry(
             entry->layout_count == layout_count &&
             entry->descriptor_layout_hash == descriptor_layout_hash &&
             entry->push_size == push_size &&
-            strncmp(entry->entry_name, entry_name, sizeof(entry->entry_name)) == 0) {
+            entry->entry_name_size == entry_name_size &&
+            entry->entry_name &&
+            memcmp(entry->entry_name, entry_name, entry_name_size) == 0) {
             return entry;
         }
     }
@@ -17752,24 +17758,30 @@ static int run_vulkan_dispatch_fd(
         reported_effective_spirv_hash = spirv_summary.hash;
         timing_pipeline_create_ms = now_ms() - pipeline_create_start;
         if (!multi_descriptor_set) {
-            pipeline_cache_entry = select_pipeline_cache_slot(rt->device);
-            pipeline_cache_entry->valid = 1;
-            pipeline_cache_entry->shader_hash = spirv_summary.hash;
-            pipeline_cache_entry->spec_hash = spec_hash;
-            pipeline_cache_entry->policy_hash = pipeline_policy_hash;
-            pipeline_cache_entry->shader_size = shader_size;
-            pipeline_cache_entry->specialization_data_size = specialization_data_size;
-            pipeline_cache_entry->specialization_count = specialization_count;
-            pipeline_cache_entry->layout_count = layout_count;
-            pipeline_cache_entry->descriptor_layout_hash = descriptor_layout_hash;
-            pipeline_cache_entry->push_size = (uint32_t)push_size;
-            snprintf(pipeline_cache_entry->entry_name, sizeof(pipeline_cache_entry->entry_name), "%s", entry_name);
-            pipeline_cache_entry->hits = 1;
-            pipeline_cache_entry->last_used = g_vulkan_pipeline_cache_clock++;
-            pipeline_cache_entry->set_layout = set_layout;
-            pipeline_cache_entry->pipeline_layout = pipeline_layout;
-            pipeline_cache_entry->shader = shader;
-            pipeline_cache_entry->pipeline = pipeline;
+            const size_t cache_entry_name_size = strlen(entry_name);
+            char *cache_entry_name = (char *)malloc(cache_entry_name_size + 1u);
+            if (cache_entry_name) {
+                memcpy(cache_entry_name, entry_name, cache_entry_name_size + 1u);
+                pipeline_cache_entry = select_pipeline_cache_slot(rt->device);
+                pipeline_cache_entry->valid = 1;
+                pipeline_cache_entry->shader_hash = spirv_summary.hash;
+                pipeline_cache_entry->spec_hash = spec_hash;
+                pipeline_cache_entry->policy_hash = pipeline_policy_hash;
+                pipeline_cache_entry->shader_size = shader_size;
+                pipeline_cache_entry->specialization_data_size = specialization_data_size;
+                pipeline_cache_entry->specialization_count = specialization_count;
+                pipeline_cache_entry->layout_count = layout_count;
+                pipeline_cache_entry->descriptor_layout_hash = descriptor_layout_hash;
+                pipeline_cache_entry->push_size = (uint32_t)push_size;
+                pipeline_cache_entry->entry_name = cache_entry_name;
+                pipeline_cache_entry->entry_name_size = cache_entry_name_size;
+                pipeline_cache_entry->hits = 1;
+                pipeline_cache_entry->last_used = g_vulkan_pipeline_cache_clock++;
+                pipeline_cache_entry->set_layout = set_layout;
+                pipeline_cache_entry->pipeline_layout = pipeline_layout;
+                pipeline_cache_entry->shader = shader;
+                pipeline_cache_entry->pipeline = pipeline;
+            }
         }
     }
     uint32_t descriptor_pool_storage_count = 0;
@@ -37103,7 +37115,9 @@ static int handle_vulkan_dispatch_v5_frame(int cfd) {
         goto cleanup;
     }
     const void *entry_ptr = v5_frame_range(frame, &header, header.entry_name_offset, header.entry_name_size);
-    if (!entry_ptr || header.entry_name_size > (uint64_t)SIZE_MAX - 1u) {
+    if (!entry_ptr || header.entry_name_size == 0 ||
+        header.entry_name_size > (uint64_t)SIZE_MAX - 1u ||
+        memchr(entry_ptr, '\0', (size_t)header.entry_name_size)) {
         json_fail("vulkan-dispatch-v5", "invalid entry name");
         goto cleanup;
     }
