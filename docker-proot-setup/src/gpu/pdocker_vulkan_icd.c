@@ -4586,6 +4586,53 @@ static int connect_queue(void) {
     return fd;
 }
 
+static int read_executor_text_response_line(int fd, char **out_line, size_t *out_len) {
+    const size_t max_line = 4096u;
+    size_t line_cap = 256u;
+    size_t off = 0;
+    if (!out_line || !out_len) return -EINVAL;
+    *out_line = NULL;
+    *out_len = 0;
+    char *line = (char *)malloc(line_cap);
+    if (!line) return -ENOMEM;
+    while (off + 1u < max_line) {
+        if (off + 1u >= line_cap) {
+            size_t next_cap = line_cap * 2u;
+            if (next_cap < line_cap) {
+                free(line);
+                return -EOVERFLOW;
+            }
+            if (next_cap > max_line) next_cap = max_line;
+            char *next = (char *)realloc(line, next_cap);
+            if (!next) {
+                free(line);
+                return -ENOMEM;
+            }
+            line = next;
+            line_cap = next_cap;
+        }
+        char ch;
+        ssize_t r = read(fd, &ch, 1);
+        if (r < 0) {
+            if (errno == EINTR) continue;
+            int err = errno;
+            free(line);
+            return -err;
+        }
+        if (r == 0) break;
+        line[off++] = ch;
+        if (ch == '\n') break;
+    }
+    if (off + 1u >= max_line) {
+        free(line);
+        return -EMSGSIZE;
+    }
+    line[off] = '\0';
+    *out_line = line;
+    *out_len = off;
+    return 0;
+}
+
 static int send_vector_add_3fd(size_t n, int fd_a, int fd_b, int fd_out) {
     int socket_fd = connect_queue();
     if (socket_fd < 0) return socket_fd;
@@ -4614,21 +4661,17 @@ static int send_vector_add_3fd(size_t n, int fd_a, int fd_b, int fd_out) {
     if (sendmsg(socket_fd, &msg, 0) < 0) {
         rc = -errno;
     } else {
-        char line[4096];
+        char *line = NULL;
         size_t off = 0;
-        while (off + 1 < sizeof(line)) {
-            char ch;
-            ssize_t r = read(socket_fd, &ch, 1);
-            if (r <= 0) break;
-            line[off++] = ch;
-            if (ch == '\n') break;
+        rc = read_executor_text_response_line(socket_fd, &line, &off);
+        if (rc == 0) {
+            if (getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
+                fprintf(stderr, "pdocker-vulkan-icd: bridge response: %s", line);
+                if (off == 0 || line[off - 1] != '\n') fprintf(stderr, "\n");
+            }
+            if (strstr(line, "\"valid\":true") == NULL) rc = -EIO;
         }
-        line[off] = '\0';
-        if (getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
-            fprintf(stderr, "pdocker-vulkan-icd: bridge response: %s", line);
-            if (off == 0 || line[off - 1] != '\n') fprintf(stderr, "\n");
-        }
-        if (strstr(line, "\"valid\":true") == NULL) rc = -EIO;
+        free(line);
     }
     close(socket_fd);
     return rc;
@@ -4818,27 +4861,23 @@ static int send_executor_text_command(
     if (write_rc != 0) {
         rc = write_rc;
     } else {
-        char line[4096];
+        char *line = NULL;
         size_t off = 0;
-        while (off + 1 < sizeof(line)) {
-            char ch;
-            ssize_t r = read(socket_fd, &ch, 1);
-            if (r <= 0) break;
-            line[off++] = ch;
-            if (ch == '\n') break;
+        rc = read_executor_text_response_line(socket_fd, &line, &off);
+        if (rc == 0) {
+            if (getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
+                fprintf(stderr, "pdocker-vulkan-icd: executor response: %s", line);
+                if (off == 0 || line[off - 1] != '\n') fprintf(stderr, "\n");
+            }
+            if (strstr(line, "\"valid\":true") == NULL) {
+                rc = -EIO;
+            } else {
+                if (out_result) *out_result = parse_executor_json_result(line, VK_SUCCESS);
+                if (out_signaled) *out_signaled = strstr(line, "\"signaled\":true") != NULL;
+                if (out_value) *out_value = parse_executor_json_u64_key(line, "value", 0);
+            }
         }
-        line[off] = '\0';
-        if (getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
-            fprintf(stderr, "pdocker-vulkan-icd: executor response: %s", line);
-            if (off == 0 || line[off - 1] != '\n') fprintf(stderr, "\n");
-        }
-        if (strstr(line, "\"valid\":true") == NULL) {
-            rc = -EIO;
-        } else {
-            if (out_result) *out_result = parse_executor_json_result(line, VK_SUCCESS);
-            if (out_signaled) *out_signaled = strstr(line, "\"signaled\":true") != NULL;
-            if (out_value) *out_value = parse_executor_json_u64_key(line, "value", 0);
-        }
+        free(line);
     }
     close(socket_fd);
     return rc;
