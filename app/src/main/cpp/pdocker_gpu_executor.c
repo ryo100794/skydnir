@@ -34199,7 +34199,8 @@ static int vulkan_replay_image_set_layout_for_range(
 
 static int record_vulkan_graphics_v620_initial_image_layout_ranges(
         VkCommandBuffer command_buffer,
-        VulkanGraphicsReplayAttachments *attachments) {
+        VulkanGraphicsReplayAttachments *attachments,
+        int strict_passthrough) {
     if (!command_buffer || !attachments) return -EINVAL;
     const uint32_t barrier_capacity = PDOCKER_GPU_VULKAN_IMAGE_LAYOUT_BARRIER_BATCH;
     VkImageMemoryBarrier *barriers =
@@ -34212,6 +34213,12 @@ static int record_vulkan_graphics_v620_initial_image_layout_ranges(
         for (uint32_t range_index = 0; range_index < image->layout_range_count; ++range_index) {
             const VulkanReplayImageLayoutRange *range = &image->layout_ranges[range_index];
             if (range->layout == image->current_layout) continue;
+            if (strict_passthrough) {
+                json_fail("vulkan-graphics-v6-command-record",
+                          "strict passthrough graphics initial image layout range mismatch");
+                free(barriers);
+                return -EOPNOTSUPP;
+            }
             if (barrier_count >= barrier_capacity) {
                 vkCmdPipelineBarrier(command_buffer,
                                      VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
@@ -34542,7 +34549,8 @@ static int record_vulkan_graphics_v6_command_buffer(
     if (vrc != VK_SUCCESS) { rc = -EIO; goto cleanup; }
     rc = record_vulkan_graphics_v6_staged_image_uploads(command_buffer, attachments, strict_passthrough);
     if (rc != 0) goto cleanup;
-    rc = record_vulkan_graphics_v620_initial_image_layout_ranges(command_buffer, attachments);
+    rc = record_vulkan_graphics_v620_initial_image_layout_ranges(
+        command_buffer, attachments, strict_passthrough);
     if (rc != 0) goto cleanup;
 
     uint32_t bound_pipeline_index = UINT32_MAX;

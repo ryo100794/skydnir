@@ -19190,6 +19190,18 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("const VkBufferUsageFlags create_usage = strict_passthrough", materialize)
         self.assertIn("strict_passthrough, &replay_buffers", graphics_run)
 
+    def test_strict_passthrough_rejects_graphics_initial_layout_range_barrier(self):
+        source = GPU_EXECUTOR.read_text()
+        initial_ranges = c_function_body(source, "record_vulkan_graphics_v620_initial_image_layout_ranges")
+        graphics_record = c_function_body(source, "record_vulkan_graphics_v6_command_buffer")
+        self.assertIn("int strict_passthrough", source)
+        self.assertIn("strict passthrough graphics initial image layout range mismatch", initial_ranges)
+        self.assertLess(
+            initial_ranges.index("strict passthrough graphics initial image layout range mismatch"),
+            initial_ranges.index("vkCmdPipelineBarrier"),
+        )
+        self.assertIn("command_buffer, attachments, strict_passthrough", graphics_record)
+
     def test_llama_gpu_artifact_gate_decision_tree_is_documented(self):
         verifier = LLAMA_GPU_ARTIFACT_VERIFIER.read_text()
         runbook = LLAMA_GPU_DEVICE_RUNBOOK.read_text()
