@@ -13097,7 +13097,10 @@ class GpuAbiContractTest(unittest.TestCase):
 
         for marker in [
             "PdockerGpuVulkanGraphicsV620FrameHeader *frame_header_v620",
-            "PdockerGpuVulkanGraphicsV620ImageLayoutRangeEntry image_layout_ranges[PDOCKER_GPU_VULKAN_GRAPHICS_V620_MAX_IMAGE_LAYOUT_RANGES]",
+            "PdockerGpuVulkanGraphicsV620ImageLayoutRangeEntry *image_layout_ranges = NULL",
+            "image-layout-range-allocate",
+            "calloc(\n            PDOCKER_GPU_VULKAN_GRAPHICS_V620_MAX_IMAGE_LAYOUT_RANGES,\n            sizeof(*image_layout_ranges))",
+            "free(image_layout_ranges);",
             "collect_graphics_image_layout_range_entries",
             "image->layout_range_overflow || image->layout_range_count == 0",
             "*range_count >= PDOCKER_GPU_VULKAN_GRAPHICS_V620_MAX_IMAGE_LAYOUT_RANGES",

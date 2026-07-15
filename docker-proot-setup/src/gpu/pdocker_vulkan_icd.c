@@ -7681,7 +7681,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     PdockerGpuVulkanGraphicsV617QueryCommandEntry query_commands[PDOCKER_GPU_VULKAN_GRAPHICS_V617_MAX_QUERY_COMMANDS];
     PdockerGpuVulkanGraphicsV618CopyQueryResultEntry copy_query_results[PDOCKER_GPU_VULKAN_GRAPHICS_V618_MAX_COPY_QUERY_RESULTS];
     PdockerGpuVulkanGraphicsV619SubmitSyncEntry submit_syncs[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
-    PdockerGpuVulkanGraphicsV620ImageLayoutRangeEntry image_layout_ranges[PDOCKER_GPU_VULKAN_GRAPHICS_V620_MAX_IMAGE_LAYOUT_RANGES];
+    PdockerGpuVulkanGraphicsV620ImageLayoutRangeEntry *image_layout_ranges = NULL;
     PdockerGpuVulkanGraphicsV621SubmitInfoEntry submit_infos[PDOCKER_GPU_VULKAN_GRAPHICS_V621_MAX_SUBMIT_INFOS];
     PdockerGpuVulkanGraphicsV621SubmitSyncInfoEntry submit_sync_infos[PDOCKER_GPU_VULKAN_GRAPHICS_V621_MAX_SUBMIT_SYNC_INFOS];
     PdockerGpuVulkanGraphicsV622MultisampleStateEntry multisample_states[PDOCKER_GPU_VULKAN_GRAPHICS_V622_MAX_MULTISAMPLE_STATES];
@@ -7744,7 +7744,6 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     memset(query_commands, 0, sizeof(query_commands));
     memset(copy_query_results, 0, sizeof(copy_query_results));
     memset(submit_syncs, 0, sizeof(submit_syncs));
-    memset(image_layout_ranges, 0, sizeof(image_layout_ranges));
     memset(submit_infos, 0, sizeof(submit_infos));
     memset(submit_sync_infos, 0, sizeof(submit_sync_infos));
     memset(multisample_states, 0, sizeof(multisample_states));
@@ -8002,6 +8001,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     size_t event_wait_ref_count = 0;
     size_t push_constant_range_count = 0;
     size_t variable_descriptor_count_count = 0;
+    size_t image_layout_range_count = 0;
     uint64_t update_payload_data_offset = 0;
     uint64_t update_payload_data_size = 0;
     bool need_v62_specialization = false;
@@ -9715,11 +9715,20 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     APPEND_INTERLEAVED_GRAPHICS_BUFFER_COPIES(sequence_end);
 #undef APPEND_INTERLEAVED_GRAPHICS_BUFFER_COPIES
 
-    size_t image_layout_range_count = 0;
-    frame_build_phase = "image-layout-range-collect";
-    rc = collect_graphics_image_layout_range_entries(
-        image_layout_ranges, &image_layout_range_count, image_objects, image_count);
-    if (rc != 0) goto cleanup;
+    if (image_count > 0) {
+        frame_build_phase = "image-layout-range-allocate";
+        image_layout_ranges = (PdockerGpuVulkanGraphicsV620ImageLayoutRangeEntry *)calloc(
+            PDOCKER_GPU_VULKAN_GRAPHICS_V620_MAX_IMAGE_LAYOUT_RANGES,
+            sizeof(*image_layout_ranges));
+        if (!image_layout_ranges) {
+            rc = -ENOMEM;
+            goto cleanup;
+        }
+        frame_build_phase = "image-layout-range-collect";
+        rc = collect_graphics_image_layout_range_entries(
+            image_layout_ranges, &image_layout_range_count, image_objects, image_count);
+        if (rc != 0) goto cleanup;
+    }
     bool need_v620_image_layout_range = image_layout_range_count > 0;
     bool need_v621_submit2_metadata = submit_info_count > 0 || submit_sync_info_count > 0;
     if (need_v629_variable_descriptor_counts) {
@@ -10643,6 +10652,7 @@ cleanup:
                 command_count, submit_sync_count, image_layout_range_count,
                 (image_layout_range_count > 0) ? 1 : 0, fd_count, cursor);
     }
+    free(image_layout_ranges);
     free(frame);
     close(socket_fd);
     return rc;
