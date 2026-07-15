@@ -27227,6 +27227,7 @@ static int validate_vulkan_graphics_v6_frame_content(
             const PdockerGpuVulkanDispatchV5ResourceEntry *buffer =
                 &resources[descriptor->resource_index];
             if (buffer->resource_type != PDOCKER_GPU_V5_RESOURCE_TYPE_BUFFER) return -EPROTO;
+            if (descriptor->resource_id == 0 || descriptor->resource_id != buffer->resource_id) return -EPROTO;
             uint64_t effective_offset = 0;
             if (checked_u64_add3(descriptor->buffer_offset, descriptor->dynamic_offset, 0, &effective_offset) != 0) {
                 return -EOVERFLOW;
@@ -27263,6 +27264,16 @@ static int validate_vulkan_graphics_v6_frame_content(
                 descriptor->sampler_index >= header->sampler_count) return -EPROTO;
         } else if (descriptor->sampler_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE) {
             return -EPROTO;
+        }
+        if (descriptor->resource_id == 0) return -EPROTO;
+        if (descriptor->image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE) {
+            const PdockerGpuVulkanDispatchV5ImageViewEntry *view_entry =
+                &image_views[descriptor->image_view_index];
+            if (descriptor->resource_id != view_entry->view_id) return -EPROTO;
+        } else if (descriptor->sampler_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE) {
+            const PdockerGpuVulkanDispatchV5SamplerEntry *sampler_entry =
+                &samplers[descriptor->sampler_index];
+            if (descriptor->resource_id != sampler_entry->sampler_id) return -EPROTO;
         }
     }
 
@@ -27507,6 +27518,13 @@ static int validate_vulkan_graphics_v6_frame_content(
             attachment->image_view_index >= header->image_view_count) return -EPROTO;
         if (attachment->resolve_image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE &&
             attachment->resolve_image_view_index >= header->image_view_count) return -EPROTO;
+        if (attachment->image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE) {
+            const PdockerGpuVulkanDispatchV5ImageViewEntry *view_entry =
+                &image_views[attachment->image_view_index];
+            if (attachment->resource_id == 0 || attachment->resource_id != view_entry->view_id) return -EPROTO;
+        } else if (attachment->resource_id != 0) {
+            return -EPROTO;
+        }
         if (!payload_range_valid(attachment->clear_value_offset, attachment->clear_value_size, header->frame_size)) {
             return -EPROTO;
         }
