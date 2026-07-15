@@ -4808,6 +4808,233 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
+    def test_msaa_sample_counts_are_limited_to_color_attachment_requests(self):
+        source = textwrap.dedent(
+            r"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <stdlib.h>
+            #include <string.h>
+            #include <sys/socket.h>
+            #include <sys/un.h>
+            #include <sys/wait.h>
+            #include <unistd.h>
+            #include "__ICD_SOURCE__"
+
+            static int write_full(int fd, const char *buf, size_t len) {
+                size_t off = 0;
+                while (off < len) {
+                    ssize_t written = write(fd, buf + off, len - off);
+                    if (written <= 0) return -1;
+                    off += (size_t)written;
+                }
+                return 0;
+            }
+
+            static pid_t start_caps_server(const char *path, const char *response) {
+                int listen_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+                if (listen_fd < 0) return -1;
+                unlink(path);
+                struct sockaddr_un addr;
+                memset(&addr, 0, sizeof(addr));
+                addr.sun_family = AF_UNIX;
+                snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", path);
+                if (bind(listen_fd, (const struct sockaddr *)&addr, sizeof(addr)) != 0 ||
+                    listen(listen_fd, 1) != 0) {
+                    close(listen_fd);
+                    return -1;
+                }
+                pid_t pid = fork();
+                if (pid < 0) {
+                    close(listen_fd);
+                    return -1;
+                }
+                if (pid == 0) {
+                    int client_fd = accept(listen_fd, NULL, NULL);
+                    if (client_fd < 0) _exit(11);
+                    char command[128];
+                    (void)read(client_fd, command, sizeof(command));
+                    int rc = write_full(client_fd, response, strlen(response));
+                    close(client_fd);
+                    close(listen_fd);
+                    _exit(rc == 0 ? 0 : 12);
+                }
+                close(listen_fd);
+                return pid;
+            }
+
+            static int build_caps_json(char *json, size_t size) {
+                size_t off = 0;
+                off += (size_t)snprintf(json + off, size - off,
+                    "{\"schema\":\"skydnir-vulkan-advertisement-caps-v1\","
+                    "\"apiVersion\":%u,\"format_caps_schema\":1,\"format_caps_count\":%zu,"
+                    "\"image_format_caps\":{",
+                    (unsigned)VK_API_VERSION_1_2,
+                    pdocker_vk_bridge_format_count());
+                for (size_t i = 0; i < pdocker_vk_bridge_format_count(); ++i) {
+                    VkFormat format = pdocker_vk_bridge_format_at(i);
+                    VkFormatFeatureFlags features = pdocker_vk_transport_image_features(format);
+                    VkSampleCountFlags samples = VK_SAMPLE_COUNT_1_BIT;
+                    if (format == VK_FORMAT_R8G8B8A8_UNORM) {
+                        features |= VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT |
+                                    VK_FORMAT_FEATURE_TRANSFER_SRC_BIT |
+                                    VK_FORMAT_FEATURE_TRANSFER_DST_BIT |
+                                    VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
+                                    VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT;
+                        samples = VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_4_BIT;
+                    }
+                    off += (size_t)snprintf(json + off, size - off,
+                        "%s\"fmt%dOptimalFeatures\":%u,\"fmt%dSampleCounts\":%u",
+                        i ? "," : "",
+                        (int)format, (unsigned)features,
+                        (int)format, (unsigned)samples);
+                }
+                off += (size_t)snprintf(json + off, size - off, "}}}\n");
+                return off < size ? 0 : -1;
+            }
+
+            static int expect_query_samples(
+                    VkImageUsageFlags usage,
+                    VkImageCreateFlags flags,
+                    VkImageType type,
+                    VkSampleCountFlags expected,
+                    int code) {
+                VkImageFormatProperties props;
+                memset(&props, 0xff, sizeof(props));
+                VkResult rc = vkGetPhysicalDeviceImageFormatProperties(
+                    VK_NULL_HANDLE,
+                    VK_FORMAT_R8G8B8A8_UNORM,
+                    type,
+                    VK_IMAGE_TILING_OPTIMAL,
+                    usage,
+                    flags,
+                    &props);
+                if (rc != VK_SUCCESS) {
+                    fprintf(stderr, "case %d image format query failed: %d\n", code, rc);
+                    return code;
+                }
+                if (props.sampleCounts != expected) {
+                    fprintf(stderr, "case %d sampleCounts=0x%x expected=0x%x\n",
+                            code, (unsigned)props.sampleCounts, (unsigned)expected);
+                    return code + 100;
+                }
+                return 0;
+            }
+
+            static int expect_create_image(
+                    VkImageUsageFlags usage,
+                    VkSampleCountFlagBits samples,
+                    VkResult expected,
+                    int code) {
+                VkImageCreateInfo info;
+                memset(&info, 0, sizeof(info));
+                info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+                info.imageType = VK_IMAGE_TYPE_2D;
+                info.format = VK_FORMAT_R8G8B8A8_UNORM;
+                info.extent.width = 64;
+                info.extent.height = 64;
+                info.extent.depth = 1;
+                info.mipLevels = 1;
+                info.arrayLayers = 1;
+                info.samples = samples;
+                info.tiling = VK_IMAGE_TILING_OPTIMAL;
+                info.usage = usage;
+                info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+                info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+                VkImage image = (VkImage)(uintptr_t)0x1234u;
+                VkResult rc = vkCreateImage(VK_NULL_HANDLE, &info, NULL, &image);
+                if (rc != expected) {
+                    fprintf(stderr, "case %d create image rc=%d expected=%d\n", code, rc, expected);
+                    return code;
+                }
+                if (rc == VK_SUCCESS) {
+                    if (image == VK_NULL_HANDLE) return code + 100;
+                    vkDestroyImage(VK_NULL_HANDLE, image, NULL);
+                } else if (image != VK_NULL_HANDLE) {
+                    fprintf(stderr, "case %d failed create left image handle %p\n", code, (void *)image);
+                    return code + 200;
+                }
+                return 0;
+            }
+
+            int main(void) {
+                char json[65536];
+                if (build_caps_json(json, sizeof(json)) != 0) {
+                    fprintf(stderr, "caps json overflow\n");
+                    return 2;
+                }
+                char dir_template[] = "/tmp/skydnir-msaa-caps-XXXXXX";
+                char *dir = mkdtemp(dir_template);
+                if (!dir) return 3;
+                char socket_path[256];
+                snprintf(socket_path, sizeof(socket_path), "%s/caps.sock", dir);
+                pid_t server = start_caps_server(socket_path, json);
+                if (server <= 0) return 4;
+
+                setenv("PDOCKER_GPU_QUEUE_SOCKET", socket_path, 1);
+                setenv("PDOCKER_VULKAN_ADVERTISEMENT_SOURCE", "executor", 1);
+                setenv("PDOCKER_VULKAN_HEAP_BYTES", "2147483648", 1);
+                setenv("PDOCKER_VULKAN_MAX_BUFFER_BYTES", "2147483648", 1);
+
+                VkPhysicalDeviceProperties device_props;
+                memset(&device_props, 0, sizeof(device_props));
+                vkGetPhysicalDeviceProperties(VK_NULL_HANDLE, &device_props);
+
+                int status = 0;
+                if (waitpid(server, &status, 0) != server || !WIFEXITED(status) ||
+                    WEXITSTATUS(status) != 0) {
+                    fprintf(stderr, "caps server failed status=0x%x\n", status);
+                    return 5;
+                }
+
+                if ((device_props.limits.framebufferColorSampleCounts & VK_SAMPLE_COUNT_4_BIT) == 0) {
+                    fprintf(stderr, "framebuffer color sample counts did not include 4x: 0x%x\n",
+                            (unsigned)device_props.limits.framebufferColorSampleCounts);
+                    return 6;
+                }
+                if (device_props.limits.sampledImageColorSampleCounts != VK_SAMPLE_COUNT_1_BIT ||
+                    device_props.limits.storageImageSampleCounts != VK_SAMPLE_COUNT_1_BIT ||
+                    device_props.limits.framebufferDepthSampleCounts != VK_SAMPLE_COUNT_1_BIT ||
+                    device_props.limits.framebufferStencilSampleCounts != VK_SAMPLE_COUNT_1_BIT) {
+                    fprintf(stderr, "non-color-attachment sample-count lanes advertised MSAA\n");
+                    return 7;
+                }
+
+                const VkSampleCountFlags msaa = VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_4_BIT;
+                if (expect_query_samples(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, 0,
+                                         VK_IMAGE_TYPE_2D, msaa, 10)) return 10;
+                if (expect_query_samples(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, 0,
+                                         VK_IMAGE_TYPE_2D, msaa, 11)) return 11;
+                if (expect_query_samples(VK_IMAGE_USAGE_SAMPLED_BIT, 0,
+                                         VK_IMAGE_TYPE_2D, VK_SAMPLE_COUNT_1_BIT, 12)) return 12;
+                if (expect_query_samples(VK_IMAGE_USAGE_STORAGE_BIT, 0,
+                                         VK_IMAGE_TYPE_2D, VK_SAMPLE_COUNT_1_BIT, 13)) return 13;
+                if (expect_query_samples(VK_IMAGE_USAGE_TRANSFER_SRC_BIT, 0,
+                                         VK_IMAGE_TYPE_2D, VK_SAMPLE_COUNT_1_BIT, 14)) return 14;
+                if (expect_query_samples(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 0,
+                                         VK_IMAGE_TYPE_2D, VK_SAMPLE_COUNT_1_BIT, 15)) return 15;
+                if (expect_query_samples(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+                                         VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
+                                         VK_IMAGE_TYPE_2D, VK_SAMPLE_COUNT_1_BIT, 16)) return 16;
+                if (expect_query_samples(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, 0,
+                                         VK_IMAGE_TYPE_3D, VK_SAMPLE_COUNT_1_BIT, 17)) return 17;
+
+                if (expect_create_image(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+                                        VK_SAMPLE_COUNT_4_BIT, VK_SUCCESS, 20)) return 20;
+                if (expect_create_image(VK_IMAGE_USAGE_SAMPLED_BIT,
+                                        VK_SAMPLE_COUNT_4_BIT, VK_ERROR_FORMAT_NOT_SUPPORTED, 21)) return 21;
+                if (expect_create_image(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                                        VK_SAMPLE_COUNT_4_BIT, VK_ERROR_FORMAT_NOT_SUPPORTED, 22)) return 22;
+                if (expect_create_image(VK_IMAGE_USAGE_SAMPLED_BIT,
+                                        VK_SAMPLE_COUNT_1_BIT, VK_SUCCESS, 23)) return 23;
+                return 0;
+            }
+            """
+        ).replace("__ICD_SOURCE__", str(ICD_SOURCE))
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
     def test_device_queue_lookup_shape_is_fail_closed(self):
         source = textwrap.dedent(
             f"""

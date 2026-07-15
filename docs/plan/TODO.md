@@ -297,6 +297,16 @@ or closes.
   stay zeroed, and plane-aspect image views are not accepted as byte-linear
   color views.  Acceptance: host tests `tests.test_vulkan_icd_feature_chain`
   and `tests.test_gpu_abi_contract` pass.
+- [done] **Vulkan MSAA sample-count advertisement CPU harness lane**:
+  Host C harness coverage now feeds executor-style per-format image caps through
+  the ICD advertisement socket path and proves `fmt%dSampleCounts` is exposed
+  only through the bounded color-attachment image creation/query lane.
+  Framebuffer color limits include advertised 4x MSAA, while sampled, storage,
+  transfer-only, cube-compatible, 3D, mixed color+sampled, and non-color
+  sample-count lanes remain single-sample.  `vkCreateImage` accepts a 4x color
+  attachment image and rejects 4x sampled or mixed-use images with
+  `VK_ERROR_FORMAT_NOT_SUPPORTED`.  Acceptance: host tests
+  `tests.test_vulkan_icd_feature_chain` and `tests.test_gpu_abi_contract` pass.
 - [planned] **residual graphics evidence gaps**: Do not promote full Vulkan
   pass-through until remaining fail-closed lanes have explicit ABI/evidence:
   dual-aspect depth+stencil copy layout, explicit compressed/multiplanar image
