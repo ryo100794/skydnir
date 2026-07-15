@@ -3098,7 +3098,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "frame_ranges_do_not_overlap",
             "handle_vulkan_graphics_v6_frame",
             "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_SUBMIT",
-            "PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_FRAME_BYTES",
+            "header->frame_size > (uint64_t)SIZE_MAX",
             "PDOCKER_GPU_VULKAN_GRAPHICS_V6_SHADER_STAGE_SCHEMA_HASH",
             "PDOCKER_GPU_VULKAN_GRAPHICS_V6_PIPELINE_SCHEMA_HASH",
             "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_SCHEMA_HASH",
@@ -15312,11 +15312,20 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("checked_align_size_8(*cursor, &aligned)", append_body)
         self.assertIn("if (size > 0 && !data) return -EINVAL;", append_body)
         self.assertIn("checked_add_size(aligned, size, &end)", append_body)
+        self.assertIn("static int frame_reserve_bytes", append_body)
+        self.assertIn("static int frame_append_bytes_grow", append_body)
+        self.assertIn("realloc(*frame, new_capacity)", append_body)
+        self.assertIn("memset(new_frame + old_capacity, 0, new_capacity - old_capacity)", append_body)
         self.assertNotIn("align_size_8(*cursor)", append_body)
 
         self.assertIn("checked_mul_size((entry_size_), (count_), &table_bytes_)", append_macro)
+        self.assertIn("APPEND_GRAPHICS_FRAME_BYTES((data_), table_bytes_, table_offset_)", append_macro)
         self.assertIn("table_bytes_", append_macro)
+        self.assertNotIn("&(offset_field_)", append_macro)
         self.assertNotIn("(entry_size_) * (count_)", append_macro)
+        self.assertIn("REFRESH_GRAPHICS_V6_FRAME_POINTERS", graphics_body)
+        self.assertIn("frame_append_bytes_grow(&frame, &frame_capacity, &cursor", graphics_body)
+        self.assertNotIn("frame_append_bytes(frame, PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_FRAME_BYTES", graphics_body)
 
         self.assertIn("checked_mul_size(binding_count, 2u, &resource_count)", v51_body)
         self.assertIn("frame_capacity_add_aligned_table(&frame_capacity", capacity_block)

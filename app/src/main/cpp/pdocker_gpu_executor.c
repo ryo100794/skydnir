@@ -23408,7 +23408,7 @@ static int validate_vulkan_graphics_v6_header_prefix(
         return -EPROTO;
     }
     if (header->frame_size < header->header_size ||
-        header->frame_size > PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_FRAME_BYTES) {
+        header->frame_size > (uint64_t)SIZE_MAX) {
         return -EMSGSIZE;
     }
     if (header->fd_count > PDOCKER_GPU_MAX_PASSED_FDS ||
