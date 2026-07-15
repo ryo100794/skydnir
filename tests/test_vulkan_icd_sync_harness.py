@@ -192,6 +192,8 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             int main(void) {{
                 PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)calloc(1, sizeof(*cmd));
                 if (!cmd) return 9;
+                cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
+                cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
                 uint32_t value = 0x12345678u;
 
                 vkCmdPushConstants((VkCommandBuffer)cmd, VK_NULL_HANDLE,
@@ -242,6 +244,8 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             int main(void) {{
                 PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)calloc(1, sizeof(*cmd));
                 if (!cmd) return 9;
+                cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
+                cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
 
                 VkBufferCreateInfo buffer_info;
                 memset(&buffer_info, 0, sizeof(buffer_info));
@@ -382,6 +386,8 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 unsetenv("PDOCKER_GPU_QUEUE_SOCKET");
                 PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)calloc(1, sizeof(*cmd));
                 if (!cmd) return 9;
+                cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
+                cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
 
                 DummyPnext unsupported;
                 memset(&unsupported, 0, sizeof(unsupported));
@@ -399,6 +405,8 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 }}
 
                 memset(cmd, 0, sizeof(*cmd));
+                cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
+                cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
                 memset(&dependency, 0, sizeof(dependency));
                 dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
                 vkCmdSetEvent2((VkCommandBuffer)cmd, VK_NULL_HANDLE, &dependency);
@@ -410,6 +418,8 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 }}
 
                 memset(cmd, 0, sizeof(*cmd));
+                cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
+                cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
                 VkEventCreateInfo create_info;
                 memset(&create_info, 0, sizeof(create_info));
                 create_info.sType = VK_STRUCTURE_TYPE_EVENT_CREATE_INFO;
@@ -453,6 +463,8 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 }}
 
                 memset(cmd, 0, sizeof(*cmd));
+                cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
+                cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
                 memset(&dependency, 0, sizeof(dependency));
                 dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
                 dependency.dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
@@ -477,6 +489,8 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 }}
 
                 memset(cmd, 0, sizeof(*cmd));
+                cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
+                cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
                 VkEvent events[1] = {{ event }};
                 memset(&dependency, 0, sizeof(dependency));
                 dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
@@ -510,6 +524,8 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 }}
 
                 memset(cmd, 0, sizeof(*cmd));
+                cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
+                cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
                 VkMemoryBarrier legacy_memory_barrier;
                 memset(&legacy_memory_barrier, 0, sizeof(legacy_memory_barrier));
                 legacy_memory_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
@@ -539,6 +555,8 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 }}
 
                 memset(cmd, 0, sizeof(*cmd));
+                cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
+                cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
                 VkEvent two_events[2] = {{ event, event }};
                 vkCmdWaitEvents((VkCommandBuffer)cmd, 2, two_events,
                                 VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
@@ -613,28 +631,38 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             int main(void) {{
                 PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)calloc(1, sizeof(*cmd));
                 if (!cmd) return 9;
+                cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
+                cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
 
                 cmd->dynamic_rendering_active = true;
                 vkCmdDispatch((VkCommandBuffer)cmd, 1, 1, 1);
                 if (!expect_dispatch_scope_failure(cmd, "dispatch-inside-dynamic-rendering-unsupported")) return 2;
 
                 memset(cmd, 0, sizeof(*cmd));
+                cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
+                cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
                 cmd->render_pass_active = true;
                 vkCmdDispatchBase((VkCommandBuffer)cmd, 0, 0, 0, 1, 1, 1);
                 if (!expect_dispatch_scope_failure(cmd, "dispatch-inside-legacy-render-pass-unsupported")) return 3;
 
                 memset(cmd, 0, sizeof(*cmd));
+                cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
+                cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
                 cmd->dynamic_rendering_active = true;
                 cmd->active_render_pass = (PdockerVkRenderPass *)0x1;
                 vkCmdDispatch((VkCommandBuffer)cmd, 1, 1, 1);
                 if (!expect_dispatch_scope_failure(cmd, "dispatch-inside-legacy-render-pass-unsupported")) return 4;
 
                 memset(cmd, 0, sizeof(*cmd));
+                cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
+                cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
                 cmd->inherited_rendering_active = true;
                 vkCmdDispatchIndirect((VkCommandBuffer)cmd, VK_NULL_HANDLE, 0);
                 if (!expect_dispatch_scope_failure(cmd, "dispatch-inside-inherited-rendering-unsupported")) return 5;
 
                 memset(cmd, 0, sizeof(*cmd));
+                cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
+                cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
                 vkCmdDispatch((VkCommandBuffer)cmd, 1, 1, 1);
                 if (cmd->recording_failed || !cmd->has_dispatch ||
                     cmd->dispatch_op_count != 1 || cmd->command_op_count != 1 ||
@@ -646,6 +674,206 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                             cmd->command_op_count);
                     return 6;
                 }}
+                free(cmd);
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
+    def test_pipeline_barrier2_image_barriers_normalize_remaining_and_reject_invalid_aspects(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include <stdlib.h>
+            #include "{ICD_SOURCE}"
+
+            #ifndef VK_IMAGE_ASPECT_PLANE_0_BIT
+            #define VK_IMAGE_ASPECT_PLANE_0_BIT ((VkImageAspectFlagBits)0x00000010)
+            #endif
+
+            static void init_image(PdockerVkImage *image, VkFormat format) {{
+                memset(image, 0, sizeof(*image));
+                image->object_id = 0xfeedu;
+                image->format = format;
+                image->image_type = VK_IMAGE_TYPE_2D;
+                image->extent.width = 8;
+                image->extent.height = 8;
+                image->extent.depth = 1;
+                image->mip_levels = 4;
+                image->array_layers = 3;
+                image->samples = VK_SAMPLE_COUNT_1_BIT;
+                image->usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+                image->current_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+                image->layout_generation = 1;
+            }}
+
+            static void init_image_barrier(VkImageMemoryBarrier2 *barrier,
+                                           PdockerVkImage *image,
+                                           VkImageAspectFlags aspect,
+                                           uint32_t base_mip,
+                                           uint32_t level_count,
+                                           uint32_t base_layer,
+                                           uint32_t layer_count) {{
+                memset(barrier, 0, sizeof(*barrier));
+                barrier->sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+                barrier->srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+                barrier->dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+                barrier->oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+                barrier->newLayout = VK_IMAGE_LAYOUT_GENERAL;
+                barrier->srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                barrier->dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                barrier->image = pdocker_vk_image_to_handle(image);
+                barrier->subresourceRange.aspectMask = aspect;
+                barrier->subresourceRange.baseMipLevel = base_mip;
+                barrier->subresourceRange.levelCount = level_count;
+                barrier->subresourceRange.baseArrayLayer = base_layer;
+                barrier->subresourceRange.layerCount = layer_count;
+            }}
+
+            static void submit_image_barrier(PdockerVkCommandBuffer *cmd,
+                                             VkImageMemoryBarrier2 *barrier) {{
+                VkDependencyInfo dependency;
+                memset(&dependency, 0, sizeof(dependency));
+                dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+                dependency.imageMemoryBarrierCount = 1;
+                dependency.pImageMemoryBarriers = barrier;
+                vkCmdPipelineBarrier2((VkCommandBuffer)cmd, &dependency);
+            }}
+
+            static int expect_failure(PdockerVkCommandBuffer *cmd, const char *reason) {{
+                if (!cmd->recording_failed) {{
+                    fprintf(stderr, "image barrier did not fail recording\\n");
+                    return 0;
+                }}
+                if (!cmd->recording_failure_reason || strcmp(cmd->recording_failure_reason, reason) != 0) {{
+                    fprintf(stderr, "unexpected failure reason got=%s want=%s\\n",
+                            cmd->recording_failure_reason ? cmd->recording_failure_reason : "<null>",
+                            reason);
+                    return 0;
+                }}
+                if (cmd->image_barrier_op_count != 0 || cmd->command_op_count != 0 ||
+                    cmd->graphics_command_op_count != 0) {{
+                    fprintf(stderr, "failed image barrier recorded partial state img=%u ops=%u graphics=%u\\n",
+                            cmd->image_barrier_op_count,
+                            cmd->command_op_count,
+                            cmd->graphics_command_op_count);
+                    return 0;
+                }}
+                return 1;
+            }}
+
+            static int expect_recorded_range(PdockerVkCommandBuffer *cmd,
+                                             VkImageAspectFlags aspect,
+                                             uint32_t base_mip,
+                                             uint32_t level_count,
+                                             uint32_t base_layer,
+                                             uint32_t layer_count) {{
+                if (cmd->recording_failed || cmd->graphics_unsupported) {{
+                    fprintf(stderr, "valid image barrier failed reason=%s\\n",
+                            cmd->recording_failure_reason ? cmd->recording_failure_reason : "<null>");
+                    return 0;
+                }}
+                if (cmd->image_barrier_op_count != 1 || cmd->command_op_count != 2 ||
+                    cmd->graphics_command_op_count != 1) {{
+                    fprintf(stderr, "valid image barrier counts img=%u ops=%u graphics=%u\\n",
+                            cmd->image_barrier_op_count,
+                            cmd->command_op_count,
+                            cmd->graphics_command_op_count);
+                    return 0;
+                }}
+                const PdockerVkImageBarrierOp *op = &cmd->image_barrier_ops[0];
+                if (op->range.aspectMask != aspect ||
+                    op->range.baseMipLevel != base_mip ||
+                    op->range.levelCount != level_count ||
+                    op->range.baseArrayLayer != base_layer ||
+                    op->range.layerCount != layer_count) {{
+                    fprintf(stderr, "normalized range mismatch aspect=0x%x mip=%u levels=%u layer=%u layers=%u\\n",
+                            op->range.aspectMask,
+                            op->range.baseMipLevel,
+                            op->range.levelCount,
+                            op->range.baseArrayLayer,
+                            op->range.layerCount);
+                    return 0;
+                }}
+                if (op->range.levelCount == VK_REMAINING_MIP_LEVELS ||
+                    op->range.layerCount == VK_REMAINING_ARRAY_LAYERS) {{
+                    fprintf(stderr, "sentinel range leaked into recorded metadata\\n");
+                    return 0;
+                }}
+                if (cmd->command_ops[0].type != PDOCKER_VK_COMMAND_IMAGE_BARRIER ||
+                    cmd->command_ops[1].type != PDOCKER_VK_COMMAND_BARRIER ||
+                    cmd->command_ops[1].image_barrier_op_first != 0 ||
+                    cmd->command_ops[1].image_barrier_op_count != 1) {{
+                    fprintf(stderr, "command barrier metadata did not point at image barrier\\n");
+                    return 0;
+                }}
+                if (cmd->graphics_command_ops[0].command_type != PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER ||
+                    cmd->graphics_command_ops[0].image_barrier_op_first != 0 ||
+                    cmd->graphics_command_ops[0].image_barrier_op_count != 1) {{
+                    fprintf(stderr, "graphics barrier metadata did not point at image barrier\\n");
+                    return 0;
+                }}
+                return 1;
+            }}
+
+            int main(void) {{
+                PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)calloc(1, sizeof(*cmd));
+                if (!cmd) return 9;
+                cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
+                cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
+
+                PdockerVkImage color;
+                init_image(&color, VK_FORMAT_R8G8B8A8_UNORM);
+                VkImageMemoryBarrier2 barrier;
+                init_image_barrier(&barrier, &color, VK_IMAGE_ASPECT_COLOR_BIT,
+                                   1, VK_REMAINING_MIP_LEVELS,
+                                   1, VK_REMAINING_ARRAY_LAYERS);
+                submit_image_barrier(cmd, &barrier);
+                if (!expect_recorded_range(cmd, VK_IMAGE_ASPECT_COLOR_BIT, 1, 3, 1, 2)) return 2;
+
+                memset(cmd, 0, sizeof(*cmd));
+                cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
+                cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
+                PdockerVkImage depth;
+                init_image(&depth, VK_FORMAT_D32_SFLOAT);
+                init_image_barrier(&barrier, &depth, VK_IMAGE_ASPECT_DEPTH_BIT,
+                                   0, VK_REMAINING_MIP_LEVELS,
+                                   0, VK_REMAINING_ARRAY_LAYERS);
+                submit_image_barrier(cmd, &barrier);
+                if (!expect_recorded_range(cmd, VK_IMAGE_ASPECT_DEPTH_BIT, 0, 4, 0, 3)) return 3;
+
+                memset(cmd, 0, sizeof(*cmd));
+                cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
+                cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
+                PdockerVkImage stencil;
+                init_image(&stencil, VK_FORMAT_S8_UINT);
+                init_image_barrier(&barrier, &stencil, VK_IMAGE_ASPECT_STENCIL_BIT,
+                                   2, VK_REMAINING_MIP_LEVELS,
+                                   0, 1);
+                submit_image_barrier(cmd, &barrier);
+                if (!expect_recorded_range(cmd, VK_IMAGE_ASPECT_STENCIL_BIT, 2, 2, 0, 1)) return 4;
+
+                memset(cmd, 0, sizeof(*cmd));
+                cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
+                cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
+                init_image_barrier(&barrier, &color, VK_IMAGE_ASPECT_PLANE_0_BIT,
+                                   0, 1, 0, 1);
+                submit_image_barrier(cmd, &barrier);
+                if (!expect_failure(cmd, "image-barrier-invalid-range")) return 5;
+
+                memset(cmd, 0, sizeof(*cmd));
+                cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
+                cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
+                init_image_barrier(&barrier, &color, VK_IMAGE_ASPECT_COLOR_BIT | VK_IMAGE_ASPECT_DEPTH_BIT,
+                                   0, 1, 0, 1);
+                submit_image_barrier(cmd, &barrier);
+                if (!expect_failure(cmd, "image-barrier-invalid-range")) return 6;
+
                 free(cmd);
                 return 0;
             }}
@@ -701,6 +929,8 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             int main(void) {{
                 PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)calloc(1, sizeof(*cmd));
                 if (!cmd) return 9;
+                cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
+                cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
 
                 DummyPnext unsupported;
                 memset(&unsupported, 0, sizeof(unsupported));
@@ -714,6 +944,8 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 if (!expect_failure(cmd, "pipeline-barrier2-pnext-unsupported")) return 2;
 
                 memset(cmd, 0, sizeof(*cmd));
+                cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
+                cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
                 VkMemoryBarrier2 memory_barrier;
                 memset(&memory_barrier, 0, sizeof(memory_barrier));
                 memory_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
@@ -728,6 +960,8 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 if (!expect_failure(cmd, "pipeline-barrier2-pnext-unsupported")) return 3;
 
                 memset(cmd, 0, sizeof(*cmd));
+                cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
+                cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
                 memset(&dependency, 0, sizeof(dependency));
                 dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
                 dependency.memoryBarrierCount = 1;
@@ -736,6 +970,8 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 if (!expect_failure(cmd, "pipeline-barrier2-missing-barrier-array")) return 4;
 
                 memset(cmd, 0, sizeof(*cmd));
+                cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
+                cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
                 memset(&memory_barrier, 0, sizeof(memory_barrier));
                 memory_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
                 memory_barrier.srcStageMask = VK_PIPELINE_STAGE_2_NONE;
@@ -749,6 +985,8 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 if (!expect_failure(cmd, "pipeline-barrier2-none-stage-access-unsupported")) return 5;
 
                 memset(cmd, 0, sizeof(*cmd));
+                cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
+                cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
                 memset(&dependency, 0, sizeof(dependency));
                 dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
                 dependency.dependencyFlags = VK_DEPENDENCY_VIEW_LOCAL_BIT;
@@ -756,6 +994,8 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 if (!expect_failure(cmd, "pipeline-barrier2-dependency-flags-unsupported")) return 6;
 
                 memset(cmd, 0, sizeof(*cmd));
+                cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
+                cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
                 memset(&memory_barrier, 0, sizeof(memory_barrier));
                 memory_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
                 memory_barrier.srcStageMask = VK_PIPELINE_STAGE_2_NONE;
@@ -806,6 +1046,8 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)calloc(1, sizeof(*cmd));
                 PdockerVkBuffer *buffer = (PdockerVkBuffer *)calloc(1, sizeof(*buffer));
                 if (!cmd || !buffer) return 9;
+                cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
+                cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
                 buffer->object_id = 0x1234u;
                 buffer->size = 4096u;
 
@@ -1029,6 +1271,8 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             int main(void) {{
                 PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)calloc(1, sizeof(*cmd));
                 if (!cmd) return 9;
+                cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
+                cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
 
                 VkMemoryBarrier barrier;
                 memset(&barrier, 0, sizeof(barrier));
@@ -1294,7 +1538,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             static int expect_submit2_failure_preserves_fence(VkSubmitInfo2 *submit, VkResult expected, int code) {{
                 VkFence fence = make_signaled_fence();
                 if (!fence) return code + 100;
-                VkResult rc = vkQueueSubmit2(VK_NULL_HANDLE, 1, submit, fence);
+                VkResult rc = vkQueueSubmit2((VkQueue)&g_queue, 1, submit, fence);
                 if (rc != expected) {{
                     fprintf(stderr, "case %d returned %d expected %d\\n", code, rc, expected);
                     return code;
@@ -1309,11 +1553,13 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
 
             int main(void) {{
                 unsetenv("PDOCKER_GPU_QUEUE_SOCKET");
+                g_queue.requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
+                g_queue.enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
 
                 VkSubmitInfo2 submit;
                 memset(&submit, 0, sizeof(submit));
                 submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
-                if (vkQueueSubmit2(VK_NULL_HANDLE, 1, &submit, VK_NULL_HANDLE) != VK_SUCCESS) {{
+                if (vkQueueSubmit2((VkQueue)&g_queue, 1, &submit, VK_NULL_HANDLE) != VK_SUCCESS) {{
                     fprintf(stderr, "valid empty submit2 failed\\n");
                     return 2;
                 }}
@@ -1413,6 +1659,8 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
 
                 PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)calloc(1, sizeof(*cmd));
                 if (!cmd) return 18;
+                cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
+                cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
                 VkCommandBufferSubmitInfo cmd_info;
                 memset(&cmd_info, 0, sizeof(cmd_info));
                 cmd_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;

@@ -278,6 +278,16 @@ or closes.
   `tests.test_gpu_abi_contract` covers the above-16 V5 executor path, native
   payloads must build cleanly, and a runtime artifact must prove table-native
   replay on device or show sender-side fail-closed rejection before frame send.
+- [done] **Vulkan V6.1 image-barrier CPU harness lane**: Host C harness
+  coverage now executes `vkCmdPipelineBarrier2` image-barrier recording with
+  `VK_REMAINING_MIP_LEVELS` / `VK_REMAINING_ARRAY_LAYERS`, proving producer
+  metadata stores concrete mip/layer ranges for color, pure-depth, and
+  pure-stencil images.  The same harness rejects plane aspects and invalid
+  mixed color/depth aspects without emitting partial command or graphics
+  metadata.  The sync harness now enables the required synchronization2
+  feature/extension bits on manual command buffers/queues so tests exercise
+  the current API gate instead of bypassing it.  Acceptance: host tests
+  `tests.test_vulkan_icd_sync_harness` and `tests.test_gpu_abi_contract` pass.
 - [planned] **residual graphics evidence gaps**: Do not promote full Vulkan
   pass-through until remaining fail-closed lanes have explicit ABI/evidence:
   dual-aspect depth+stencil copy layout, explicit compressed/multiplanar image
