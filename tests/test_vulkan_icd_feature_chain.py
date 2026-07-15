@@ -4936,6 +4936,144 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
 
 
+    def test_descriptor_sparse_api_bindings_do_not_leak_compact_slots(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            static int expect_slot(
+                    const PdockerVkDescriptorSet *set,
+                    uint32_t start_binding,
+                    uint32_t start_array,
+                    uint32_t linear_index,
+                    uint32_t expected_slot,
+                    uint32_t expected_array,
+                    uint32_t expected_api_binding) {{
+                uint32_t slot = UINT32_MAX;
+                uint32_t array_element = UINT32_MAX;
+                if (!descriptor_linear_slot(set, start_binding, start_array,
+                                            linear_index, &slot, &array_element)) {{
+                    fprintf(stderr,
+                            "descriptor_linear_slot failed start=%u array=%u linear=%u\\n",
+                            start_binding, start_array, linear_index);
+                    return 1;
+                }}
+                if (slot != expected_slot || array_element != expected_array) {{
+                    fprintf(stderr,
+                            "slot mismatch start=%u linear=%u got slot=%u array=%u expected slot=%u array=%u\\n",
+                            start_binding, linear_index, slot, array_element,
+                            expected_slot, expected_array);
+                    return 2;
+                }}
+                uint32_t api_binding = descriptor_layout_binding_number(set->layout, slot);
+                if (api_binding != expected_api_binding) {{
+                    fprintf(stderr,
+                            "api binding mismatch slot=%u got=%u expected=%u\\n",
+                            slot, api_binding, expected_api_binding);
+                    return 3;
+                }}
+                return 0;
+            }}
+
+            int main(void) {{
+                VkDescriptorSetLayoutBinding bindings[3];
+                memset(bindings, 0, sizeof(bindings));
+                bindings[0].binding = 9;
+                bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+                bindings[0].descriptorCount = 3;
+                bindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+                bindings[1].binding = 2;
+                bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+                bindings[1].descriptorCount = 2;
+                bindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+                bindings[2].binding = 6;
+                bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+                bindings[2].descriptorCount = 1;
+                bindings[2].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+                VkDescriptorSetLayoutCreateInfo create_info;
+                memset(&create_info, 0, sizeof(create_info));
+                create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+                create_info.bindingCount = 3;
+                create_info.pBindings = bindings;
+
+                VkDescriptorSetLayout layout_handle = VK_NULL_HANDLE;
+                VkResult rc = vkCreateDescriptorSetLayout(
+                    VK_NULL_HANDLE, &create_info, NULL, &layout_handle);
+                if (rc != VK_SUCCESS || layout_handle == VK_NULL_HANDLE) {{
+                    fprintf(stderr, "vkCreateDescriptorSetLayout failed rc=%d\\n", (int)rc);
+                    return 4;
+                }}
+                PdockerVkDescriptorSetLayout *layout =
+                    pdocker_vk_descriptor_set_layout_from_handle(layout_handle);
+                if (!layout) return 5;
+                if (descriptor_layout_slot_count(layout) != 3) return 6;
+                if (descriptor_layout_binding_number(layout, 0) != 2) return 7;
+                if (descriptor_layout_binding_number(layout, 1) != 6) return 8;
+                if (descriptor_layout_binding_number(layout, 2) != 9) return 9;
+                if (descriptor_layout_slot_for_binding(layout, 2) != 0) return 10;
+                if (descriptor_layout_slot_for_binding(layout, 6) != 1) return 11;
+                if (descriptor_layout_slot_for_binding(layout, 9) != 2) return 12;
+                if (descriptor_layout_slot_for_binding(layout, 0) >= 0) return 13;
+
+                PdockerVkDescriptorSet set;
+                memset(&set, 0, sizeof(set));
+                set.layout = layout;
+                rc = descriptor_set_allocate_storage_with_counts(
+                    &set, descriptor_set_storage_capacity_for_layout(layout), NULL);
+                if (rc != VK_SUCCESS) {{
+                    fprintf(stderr, "descriptor_set_allocate_storage_with_counts failed rc=%d\\n", (int)rc);
+                    vkDestroyDescriptorSetLayout(VK_NULL_HANDLE, layout_handle, NULL);
+                    return 14;
+                }}
+
+                int check = 0;
+                if ((check = expect_slot(&set, 2, 0, 0, 0, 0, 2)) != 0) return 20 + check;
+                if ((check = expect_slot(&set, 2, 0, 1, 0, 1, 2)) != 0) return 30 + check;
+                if ((check = expect_slot(&set, 2, 0, 2, 1, 0, 6)) != 0) return 40 + check;
+                if ((check = expect_slot(&set, 2, 0, 3, 2, 0, 9)) != 0) return 50 + check;
+                if ((check = expect_slot(&set, 6, 0, 1, 2, 0, 9)) != 0) return 60 + check;
+                if (descriptor_linear_slot(&set, 0, 0, 0, NULL, NULL)) return 70;
+
+                PdockerGpuVulkanGraphicsV624DescriptorSetLayoutEntry entries[8];
+                size_t entry_count = 0;
+                memset(entries, 0, sizeof(entries));
+                int collect_rc = collect_graphics_v624_descriptor_set_layout_metadata(
+                    entries, &entry_count, layout);
+                if (collect_rc != 0) {{
+                    fprintf(stderr, "collect layout metadata failed rc=%d\\n", collect_rc);
+                    return 80;
+                }}
+                if (entry_count != 3) return 81;
+                if (entries[0].binding != 2 || entries[1].binding != 6 ||
+                    entries[2].binding != 9) {{
+                    fprintf(stderr, "metadata leaked compact slots as API bindings: %u,%u,%u\\n",
+                            entries[0].binding, entries[1].binding, entries[2].binding);
+                    return 82;
+                }}
+                if (entries[0].descriptor_count != 2 ||
+                    entries[1].descriptor_count != 1 ||
+                    entries[2].descriptor_count != 3) {{
+                    fprintf(stderr, "metadata descriptor counts mismatch: %u,%u,%u\\n",
+                            entries[0].descriptor_count,
+                            entries[1].descriptor_count,
+                            entries[2].descriptor_count);
+                    return 83;
+                }}
+
+                destroy_descriptor_set_storage(&set);
+                vkDestroyDescriptorSetLayout(VK_NULL_HANDLE, layout_handle, NULL);
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
+
+
 
 if __name__ == "__main__":
     unittest.main()
