@@ -2637,6 +2637,70 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_msaa_resolve_attachment_helper_validates_samples_and_aspects(self):
+        source = textwrap.dedent("""
+            #include <errno.h>
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "__ICD_SOURCE__"
+
+            static void init_snapshot(PdockerVkRenderingAttachmentState *state,
+                                      VkSampleCountFlagBits src_samples,
+                                      VkSampleCountFlagBits resolve_samples,
+                                      VkImageAspectFlags src_aspect,
+                                      VkImageAspectFlags resolve_aspect) {
+                memset(state, 0, sizeof(*state));
+                static PdockerVkImageView src_view;
+                static PdockerVkImageView resolve_view;
+                state->image_view = &src_view;
+                state->resolve_image_view = &resolve_view;
+                state->resolve_mode = VK_RESOLVE_MODE_AVERAGE_BIT;
+                state->image_view_snapshot.valid = true;
+                state->image_view_snapshot.format = VK_FORMAT_R8G8B8A8_UNORM;
+                state->image_view_snapshot.samples = src_samples;
+                state->image_view_snapshot.subresource_range.aspectMask = src_aspect;
+                state->resolve_image_view_snapshot.valid = true;
+                state->resolve_image_view_snapshot.format = VK_FORMAT_R8G8B8A8_UNORM;
+                state->resolve_image_view_snapshot.samples = resolve_samples;
+                state->resolve_image_view_snapshot.subresource_range.aspectMask = resolve_aspect;
+            }
+
+            static int expect_rc(const char *label, PdockerVkRenderingAttachmentState *state, int expected) {
+                int rc = pdocker_vk_rendering_resolve_attachment_supported(state, VK_FORMAT_R8G8B8A8_UNORM);
+                if (rc != expected) {
+                    fprintf(stderr, "%s rc=%d expected=%d\\n", label, rc, expected);
+                    return 0;
+                }
+                return 1;
+            }
+
+            int main(void) {
+                PdockerVkRenderingAttachmentState state;
+                init_snapshot(&state, VK_SAMPLE_COUNT_4_BIT, VK_SAMPLE_COUNT_1_BIT,
+                              VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
+                if (!expect_rc("valid-msaa-resolve", &state, 0)) return 2;
+                init_snapshot(&state, VK_SAMPLE_COUNT_1_BIT, VK_SAMPLE_COUNT_1_BIT,
+                              VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
+                if (!expect_rc("single-sample-source", &state, -EOPNOTSUPP)) return 3;
+                init_snapshot(&state, VK_SAMPLE_COUNT_4_BIT, VK_SAMPLE_COUNT_4_BIT,
+                              VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
+                if (!expect_rc("msaa-resolve-target", &state, -EOPNOTSUPP)) return 4;
+                init_snapshot(&state, VK_SAMPLE_COUNT_4_BIT, VK_SAMPLE_COUNT_1_BIT,
+                              VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_ASPECT_DEPTH_BIT);
+                if (!expect_rc("resolve-aspect-mismatch", &state, -EOPNOTSUPP)) return 5;
+                state.resolve_image_view = NULL;
+                state.resolve_mode = VK_RESOLVE_MODE_AVERAGE_BIT;
+                if (!expect_rc("resolve-mode-without-view", &state, -EOPNOTSUPP)) return 6;
+                state.resolve_mode = VK_RESOLVE_MODE_NONE;
+                if (!expect_rc("no-resolve", &state, 0)) return 7;
+                if (pdocker_vk_rendering_resolve_attachment_supported(NULL, VK_FORMAT_R8G8B8A8_UNORM) != -EINVAL) return 8;
+                return 0;
+            }
+            """.replace("__ICD_SOURCE__", str(ICD_SOURCE)))
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_image_layout_range_cache_splits_partial_overlaps_without_overflow(self):
         source = textwrap.dedent(
             f"""

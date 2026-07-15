@@ -2076,13 +2076,18 @@ class GpuAbiContractTest(unittest.TestCase):
             "resource_id = src->image_view_snapshot.object_id;",
             "format = src->image_view_snapshot.format;",
             "samples = src->image_view_snapshot.samples;",
-            "src->resolve_image_view_snapshot.format != format",
-            "src->image_view_snapshot.samples == VK_SAMPLE_COUNT_1_BIT",
-            "src->resolve_image_view_snapshot.samples != VK_SAMPLE_COUNT_1_BIT",
-            "src->resolve_image_view_snapshot.subresource_range.aspectMask",
+            "pdocker_vk_rendering_resolve_attachment_supported(src, format)",
             "&src->resolve_image_view_snapshot",
         ]:
             self.assertIn(marker, append_body)
+        resolve_helper = c_function_body(icd, "pdocker_vk_rendering_resolve_attachment_supported")
+        for marker in [
+            "src->resolve_image_view_snapshot.format != attachment_format",
+            "src->image_view_snapshot.samples == VK_SAMPLE_COUNT_1_BIT",
+            "src->resolve_image_view_snapshot.samples != VK_SAMPLE_COUNT_1_BIT",
+            "src->resolve_image_view_snapshot.subresource_range.aspectMask",
+        ]:
+            self.assertIn(marker, resolve_helper)
         for forbidden in [
             "src->image_view->format",
             "src->image_view->image",

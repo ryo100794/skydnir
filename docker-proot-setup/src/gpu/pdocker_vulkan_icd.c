@@ -6972,6 +6972,32 @@ static int collect_graphics_sampler_snapshot_entry(
     return (int)index;
 }
 
+static int pdocker_vk_rendering_resolve_attachment_supported(
+        const PdockerVkRenderingAttachmentState *src,
+        VkFormat attachment_format) {
+    if (!src) return -EINVAL;
+    if ((src->resolve_mode == VK_RESOLVE_MODE_NONE) != (src->resolve_image_view == NULL)) {
+        return -EOPNOTSUPP;
+    }
+    if (!src->resolve_image_view) return 0;
+    if (!src->image_view || !src->image_view_snapshot.valid ||
+        !src->resolve_image_view_snapshot.valid ||
+        src->resolve_image_view_snapshot.format != attachment_format) {
+        return -EOPNOTSUPP;
+    }
+    if (src->image_view_snapshot.samples == VK_SAMPLE_COUNT_1_BIT) {
+        return -EOPNOTSUPP;
+    }
+    if (src->resolve_image_view_snapshot.samples != VK_SAMPLE_COUNT_1_BIT) {
+        return -EOPNOTSUPP;
+    }
+    if (src->resolve_image_view_snapshot.subresource_range.aspectMask !=
+        src->image_view_snapshot.subresource_range.aspectMask) {
+        return -EOPNOTSUPP;
+    }
+    return 0;
+}
+
 static int append_graphics_attachment_entry(
         PdockerGpuVulkanGraphicsV6AttachmentEntry *attachments,
         size_t *attachment_count,
@@ -7042,20 +7068,9 @@ static int append_graphics_attachment_entry(
         format = src->image_view_snapshot.format;
         samples = src->image_view_snapshot.samples;
     }
+    int resolve_rc = pdocker_vk_rendering_resolve_attachment_supported(src, format);
+    if (resolve_rc != 0) return resolve_rc;
     if (src->resolve_image_view) {
-        if (!src->image_view || !src->image_view_snapshot.valid ||
-            !src->resolve_image_view_snapshot.valid ||
-            src->resolve_image_view_snapshot.format != format) return -EOPNOTSUPP;
-        if (src->image_view_snapshot.samples == VK_SAMPLE_COUNT_1_BIT) {
-            return -EOPNOTSUPP;
-        }
-        if (src->resolve_image_view_snapshot.samples != VK_SAMPLE_COUNT_1_BIT) {
-            return -EOPNOTSUPP;
-        }
-        if (src->resolve_image_view_snapshot.subresource_range.aspectMask !=
-            src->image_view_snapshot.subresource_range.aspectMask) {
-            return -EOPNOTSUPP;
-        }
         if (*resolve_attachment_count >= PDOCKER_GPU_VULKAN_GRAPHICS_V64_MAX_RESOLVE_ATTACHMENTS) {
             return -E2BIG;
         }

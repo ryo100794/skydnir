@@ -134,6 +134,14 @@ or closes.
   copies with identical dual depth|stencil aspect masks into explicit depth and
   stencil commands, and fails closed for mismatched aspect masks, incompatible
   formats, or invalid inputs. Evidence: `python3 -m unittest tests.test_vulkan_icd_sync_harness.VulkanIcdSyncHarnessTest.test_dual_aspect_depth_stencil_image_copy_split_helper -q` and `python3 -m unittest tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_graphics_v610_depth_stencil_copy_has_explicit_plane_staging_boundary -q`.
+- [done] **MSAA resolve attachment producer gate**:
+  Dynamic-rendering attachment serialization now validates resolve attachment
+  consistency through `pdocker_vk_rendering_resolve_attachment_supported()`
+  before emitting V6.4 resolve metadata. A valid MSAA source must resolve into
+  a single-sample target with matching format/aspect state; single-sample
+  sources, multisample resolve targets, aspect mismatches, and resolve
+  mode/view shape mismatches fail closed before the executor sees the frame.
+  Evidence: `python3 -m unittest tests.test_vulkan_icd_sync_harness.VulkanIcdSyncHarnessTest.test_msaa_resolve_attachment_helper_validates_samples_and_aspects -q`.
 - [done] **image-barrier range/aspect normalization audit**: The producer ICD
   normalizes image-barrier `VK_REMAINING_MIP_LEVELS` and
   `VK_REMAINING_ARRAY_LAYERS` to concrete ranges before V6.1 serialization, and
