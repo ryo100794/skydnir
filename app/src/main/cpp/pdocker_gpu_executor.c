@@ -34423,6 +34423,7 @@ static int record_vulkan_graphics_v6_command_buffer(
         const VulkanGraphicsReplayBuffers *buffers,
         const VulkanGraphicsReplayDescriptors *descriptors,
         const VulkanGraphicsReplayQueries *queries,
+        int strict_passthrough,
         VkCommandPool *out_command_pool,
         VkCommandBuffer *out_command_buffer) {
     if (!rt || !view || !view->header || !pipelines || !layouts || !attachments || !buffers ||
@@ -35430,6 +35431,12 @@ begin_rendering_cleanup:
                     VkImageLayout old_layout = image->current_layout;
                     int layout_rc = vulkan_replay_image_layout_for_range(image, &view_obj->range, &old_layout);
                     if (layout_rc != 0) { rc = layout_rc; goto cleanup; }
+                    if (strict_passthrough && old_layout != (VkImageLayout)descriptor->image_layout) {
+                        json_fail("vulkan-graphics-v6-command-record",
+                                  "strict passthrough graphics image descriptor layout mismatch");
+                        rc = -EOPNOTSUPP;
+                        goto cleanup;
+                    }
                     VkAccessFlags src_access_mask = 0;
                     VkPipelineStageFlags src_stage_mask = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
                     if (old_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
@@ -37146,6 +37153,7 @@ submit_fail:
     return submit_fail_rc ? submit_fail_rc : (vrc == VK_ERROR_TOO_MANY_OBJECTS ? -E2BIG : -EIO);
 }
 static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
+    const int strict_passthrough = env_truthy("PDOCKER_GPU_STRICT_PASSTHROUGH", 0);
     const char *reason = NULL;
     int rc = preflight_vulkan_graphics_v6_replay_supported(view, &reason);
     if (rc != 0) {
@@ -37409,7 +37417,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
     rc = record_vulkan_graphics_v6_command_buffer(
         &g_vulkan_runtime, view, replay_pipelines,
         replay_pipeline_count, &replay_layouts, &replay_attachments, &replay_buffers,
-        &replay_descriptors, &replay_queries,
+        &replay_descriptors, &replay_queries, strict_passthrough,
         &replay_command_pool, &replay_command_buffer);
     if (rc != 0) {
         out = json_out();

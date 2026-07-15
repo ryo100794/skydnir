@@ -19106,6 +19106,19 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('\\"gpu_after_upload_hash\\":\\"0x%016llx\\"', source)
         self.assertIn("const int disable_pipeline_optimization =", source)
 
+    def test_strict_passthrough_rejects_graphics_descriptor_layout_replay(self):
+        source = GPU_EXECUTOR.read_text()
+        graphics_record = c_function_body(source, "record_vulkan_graphics_v6_command_buffer")
+        graphics_run = c_function_body(source, "run_vulkan_graphics_v6_frame")
+        self.assertIn("int strict_passthrough,\n        VkCommandPool *out_command_pool", source)
+        self.assertIn("strict passthrough graphics image descriptor layout mismatch", graphics_record)
+        self.assertLess(
+            graphics_record.index("strict passthrough graphics image descriptor layout mismatch"),
+            graphics_record.index("image_barriers[image_barrier_count++]"),
+        )
+        self.assertIn('env_truthy("PDOCKER_GPU_STRICT_PASSTHROUGH", 0)', graphics_run)
+        self.assertIn("&replay_descriptors, &replay_queries, strict_passthrough", graphics_run)
+
     def test_llama_gpu_artifact_gate_decision_tree_is_documented(self):
         verifier = LLAMA_GPU_ARTIFACT_VERIFIER.read_text()
         runbook = LLAMA_GPU_DEVICE_RUNBOOK.read_text()
