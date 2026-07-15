@@ -13659,8 +13659,8 @@ class GpuAbiContractTest(unittest.TestCase):
         executor = GPU_EXECUTOR.read_text()
 
         for marker in [
-            "PdockerGpuVulkanGraphicsV621SubmitInfoEntry submit_infos[PDOCKER_GPU_VULKAN_GRAPHICS_V621_MAX_SUBMIT_INFOS]",
-            "PdockerGpuVulkanGraphicsV621SubmitSyncInfoEntry submit_sync_infos[PDOCKER_GPU_VULKAN_GRAPHICS_V621_MAX_SUBMIT_SYNC_INFOS]",
+            "PdockerGpuVulkanGraphicsV621SubmitInfoEntry *submit_infos = NULL",
+            "PdockerGpuVulkanGraphicsV621SubmitSyncInfoEntry *submit_sync_infos = NULL",
             "g_submit2_metadata_override",
             "set_submit2_metadata_override(src);",
             "clear_submit2_metadata_override();",
@@ -13670,7 +13670,11 @@ class GpuAbiContractTest(unittest.TestCase):
             "header->abi_minor = PDOCKER_GPU_VULKAN_GRAPHICS_V621_ABI_MINOR;",
             "frame_header_v621->v621.submit_info_count",
             "submit_sync_infos[submit_sync_info_count].device_index = device_index;",
+            "calloc(\n        PDOCKER_GPU_VULKAN_GRAPHICS_V621_MAX_SUBMIT_INFOS, sizeof(*submit_infos))",
+            "free(submit_infos);",
             "APPEND_GRAPHICS_TABLE(submit_infos, submit_info_count",
+            "calloc(\n        PDOCKER_GPU_VULKAN_GRAPHICS_V621_MAX_SUBMIT_SYNC_INFOS, sizeof(*submit_sync_infos))",
+            "free(submit_sync_infos);",
             "APPEND_GRAPHICS_TABLE(submit_sync_infos, submit_sync_info_count",
             "frame_header_v621->v621.submit_info_table_hash",
             "VULKAN_GRAPHICS_V6.21",
@@ -13896,6 +13900,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "header->abi_minor = PDOCKER_GPU_VULKAN_GRAPHICS_V619_ABI_MINOR;",
             "frame_header_v619->v619.submit_sync_entry_size = sizeof(PdockerGpuVulkanGraphicsV619SubmitSyncEntry);",
             "frame_header_v619->v619.submit_sync_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V619_SUBMIT_SYNC_SCHEMA_HASH;",
+            "PdockerGpuVulkanGraphicsV619SubmitSyncEntry *submit_syncs = NULL",
+            "calloc(\n        PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS, sizeof(*submit_syncs))",
+            "free(submit_syncs);",
             "APPEND_GRAPHICS_TABLE(submit_syncs, submit_sync_count",
             "frame_header_v619->v619.extension_hash = frame_header_v619->v619.submit_sync_table_hash;",
             "entry->sync_type = sync_type;",

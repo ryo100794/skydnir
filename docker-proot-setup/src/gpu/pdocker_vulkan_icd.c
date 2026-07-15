@@ -7722,10 +7722,10 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     PdockerGpuVulkanGraphicsV616ClearRectEntry *clear_rects = NULL;
     PdockerGpuVulkanGraphicsV617QueryCommandEntry *query_commands = NULL;
     PdockerGpuVulkanGraphicsV618CopyQueryResultEntry *copy_query_results = NULL;
-    PdockerGpuVulkanGraphicsV619SubmitSyncEntry submit_syncs[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+    PdockerGpuVulkanGraphicsV619SubmitSyncEntry *submit_syncs = NULL;
     PdockerGpuVulkanGraphicsV620ImageLayoutRangeEntry *image_layout_ranges = NULL;
-    PdockerGpuVulkanGraphicsV621SubmitInfoEntry submit_infos[PDOCKER_GPU_VULKAN_GRAPHICS_V621_MAX_SUBMIT_INFOS];
-    PdockerGpuVulkanGraphicsV621SubmitSyncInfoEntry submit_sync_infos[PDOCKER_GPU_VULKAN_GRAPHICS_V621_MAX_SUBMIT_SYNC_INFOS];
+    PdockerGpuVulkanGraphicsV621SubmitInfoEntry *submit_infos = NULL;
+    PdockerGpuVulkanGraphicsV621SubmitSyncInfoEntry *submit_sync_infos = NULL;
     PdockerGpuVulkanGraphicsV622MultisampleStateEntry *multisample_states = NULL;
     PdockerGpuVulkanGraphicsV623TessellationStateEntry *tessellation_states = NULL;
     PdockerGpuVulkanGraphicsV624DescriptorSetLayoutEntry *descriptor_set_layouts = NULL;
@@ -7744,9 +7744,6 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     memset(image_objects, 0, sizeof(image_objects));
     memset(image_view_objects, 0, sizeof(image_view_objects));
     memset(sampler_objects, 0, sizeof(sampler_objects));
-    memset(submit_syncs, 0, sizeof(submit_syncs));
-    memset(submit_infos, 0, sizeof(submit_infos));
-    memset(submit_sync_infos, 0, sizeof(submit_sync_infos));
     if (submit_sync_count > PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS) {
         close(socket_fd);
         return -E2BIG;
@@ -7754,6 +7751,19 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     if (submit_sync_count > 0 && !submit_sync_entries) {
         close(socket_fd);
         return -EINVAL;
+    }
+    submit_syncs = (PdockerGpuVulkanGraphicsV619SubmitSyncEntry *)calloc(
+        PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS, sizeof(*submit_syncs));
+    submit_infos = (PdockerGpuVulkanGraphicsV621SubmitInfoEntry *)calloc(
+        PDOCKER_GPU_VULKAN_GRAPHICS_V621_MAX_SUBMIT_INFOS, sizeof(*submit_infos));
+    submit_sync_infos = (PdockerGpuVulkanGraphicsV621SubmitSyncInfoEntry *)calloc(
+        PDOCKER_GPU_VULKAN_GRAPHICS_V621_MAX_SUBMIT_SYNC_INFOS, sizeof(*submit_sync_infos));
+    if (!submit_syncs || !submit_infos || !submit_sync_infos) {
+        free(submit_sync_infos);
+        free(submit_infos);
+        free(submit_syncs);
+        close(socket_fd);
+        return -ENOMEM;
     }
     if (submit_sync_count > 0) {
         memcpy(submit_syncs, submit_sync_entries, submit_sync_count * sizeof(submit_syncs[0]));
@@ -10783,6 +10793,9 @@ cleanup:
                 command_count, submit_sync_count, image_layout_range_count,
                 (image_layout_range_count > 0) ? 1 : 0, fd_count, cursor);
     }
+    free(submit_sync_infos);
+    free(submit_infos);
+    free(submit_syncs);
     free(variable_descriptor_counts);
     free(descriptor_set_layouts);
     free(image_layout_ranges);
