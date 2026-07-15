@@ -441,6 +441,9 @@ or closes.
   16-binding per-set scratch cap on either producer or Android frame-validation
   side; duplicate bindings, descriptor counts, total metadata table size, and
   frame-size validation remain fail-closed.
+  Producer-side image layout range tracking no longer uses the former 64-entry
+  per-image stack array; mixed subresource layout ranges are heap-backed up to
+  the existing V6.20/V5.2 ABI table cap and freed with the image object.
   V5 FD capability advertising reports the effective single-message framed
   transport cap as `max_fds`; that cap is now aligned with the 253-entry ABI
   fd-index range, while `abi_fd_index_range` remains explicit metadata for

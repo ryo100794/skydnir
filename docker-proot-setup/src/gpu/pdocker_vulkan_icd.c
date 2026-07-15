@@ -382,7 +382,7 @@ PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_swapchain, VkSwa
 #define PDOCKER_VK_REQUIREMENT_ALIGNMENT 16ull
 #define PDOCKER_VK_MIN_STORAGE_BUFFER_OFFSET_ALIGNMENT 16ull
 #define PDOCKER_VK_MIN_UNIFORM_BUFFER_OFFSET_ALIGNMENT 16ull
-#define PDOCKER_VK_MAX_IMAGE_LAYOUT_RANGES 64
+#define PDOCKER_VK_MAX_IMAGE_LAYOUT_RANGES PDOCKER_GPU_VULKAN_GRAPHICS_V620_MAX_IMAGE_LAYOUT_RANGES
 #define PDOCKER_VK_MAX_COPY_OPS PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS
 #define PDOCKER_VK_MAX_DISPATCH_OPS PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS
 #define PDOCKER_VK_MAX_COMMAND_OPS PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS
@@ -614,8 +614,9 @@ struct PdockerVkImage {
     uint64_t layout_generation;
     bool layout_mixed;
     bool layout_range_overflow;
-    PdockerVkImageLayoutRange layout_ranges[PDOCKER_VK_MAX_IMAGE_LAYOUT_RANGES];
+    PdockerVkImageLayoutRange *layout_ranges;
     uint32_t layout_range_count;
+    uint32_t layout_range_capacity;
     VkDeviceSize requirements_size;
     VkDeviceSize requirements_alignment;
     uint32_t memory_type_bits;
@@ -6814,6 +6815,7 @@ static int collect_graphics_image_view_snapshot_entry(
 static bool pdocker_vk_image_layout_value_valid_for_transport(
         const PdockerVkImage *image,
         VkImageLayout layout);
+static bool image_layout_range_cache_readable(const PdockerVkImage *image);
 
 static int collect_graphics_image_layout_range_entries(
         PdockerGpuVulkanGraphicsV620ImageLayoutRangeEntry *range_entries,
@@ -6825,6 +6827,7 @@ static int collect_graphics_image_layout_range_entries(
     for (size_t image_index = 0; image_index < image_count; ++image_index) {
         const PdockerVkImage *image = image_objects[image_index];
         if (!image || !image->layout_mixed) continue;
+        if (!image_layout_range_cache_readable(image)) return -EPROTO;
         if (image->layout_range_overflow || image->layout_range_count == 0) {
             if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
                 fprintf(stderr,
@@ -6941,6 +6944,7 @@ static int collect_v5_image_layout_range_entries(
             dst->layout_generation = image->layout_generation;
             continue;
         }
+        if (!image_layout_range_cache_readable(image)) return -EPROTO;
         if (image->layout_range_overflow || image->layout_range_count == 0) {
             if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
                 fprintf(stderr,
@@ -10791,7 +10795,7 @@ static bool descriptor_image_layout_matches_tracked_state(
     if (!image->layout_mixed) {
         return image->current_layout == descriptor_layout;
     }
-    if (image->layout_range_overflow) return false;
+    if (image->layout_range_overflow || !image_layout_range_cache_readable(image)) return false;
     bool covered_by_matching_explicit_range = false;
     for (uint32_t i = 0; i < image->layout_range_count; ++i) {
         const PdockerVkImageLayoutRange *entry = &image->layout_ranges[i];
@@ -19708,6 +19712,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateImage(
     image->layout_mixed = false;
     image->layout_range_overflow = false;
     image->layout_range_count = 0;
+    image->layout_range_capacity = 0;
     image->requirements_alignment = PDOCKER_VK_REQUIREMENT_ALIGNMENT;
     image->requirements_size = requirements_size;
     image->memory_type_bits = 0x3;
@@ -19730,6 +19735,15 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateImage(
     return VK_SUCCESS;
 }
 
+static void pdocker_vk_destroy_image_object(PdockerVkImage *img) {
+    if (!img) return;
+    free(img->layout_ranges);
+    img->layout_ranges = NULL;
+    img->layout_range_count = 0;
+    img->layout_range_capacity = 0;
+    free(img);
+}
+
 VKAPI_ATTR void VKAPI_CALL vkDestroyImage(
         VkDevice device,
         VkImage image,
@@ -19741,7 +19755,7 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyImage(
         trace_icd_runtime_failure("swapchain-image-destroy-ignored", VK_ERROR_INITIALIZATION_FAILED);
         return;
     }
-    free(img);
+    pdocker_vk_destroy_image_object(img);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkGetImageMemoryRequirements(
@@ -24756,7 +24770,7 @@ static void pdocker_vk_destroy_swapchain_images(VkDevice device, PdockerVkSwapch
     for (uint32_t i = 0; i < swapchain->image_count && i < PDOCKER_VK_MAX_SWAPCHAIN_IMAGES; ++i) {
         if (swapchain->images[i]) {
             swapchain->images[i]->swapchain_owned = false;
-            free(swapchain->images[i]);
+            pdocker_vk_destroy_image_object(swapchain->images[i]);
             swapchain->images[i] = NULL;
         }
         if (swapchain->memories[i]) {
@@ -27811,8 +27825,17 @@ static void trace_image_layout_mismatch(
 
 static void clear_image_layout_ranges(PdockerVkImage *image) {
     if (!image) return;
+    free(image->layout_ranges);
+    image->layout_ranges = NULL;
     image->layout_range_count = 0;
+    image->layout_range_capacity = 0;
     image->layout_range_overflow = false;
+}
+
+static bool image_layout_range_cache_readable(const PdockerVkImage *image) {
+    return image &&
+           image->layout_range_count <= image->layout_range_capacity &&
+           (image->layout_range_count == 0 || image->layout_ranges != NULL);
 }
 
 static bool image_layout_ranges_overlap(
@@ -27839,20 +27862,47 @@ static bool image_layout_ranges_equal(
            a->layerCount == b->layerCount;
 }
 
+static bool image_layout_range_reserve(
+        PdockerVkImageLayoutRange **ranges,
+        uint32_t *capacity,
+        uint32_t needed) {
+    if (!ranges || !capacity) return false;
+    if (needed <= *capacity) return *ranges != NULL || needed == 0;
+    if (needed > PDOCKER_VK_MAX_IMAGE_LAYOUT_RANGES) return false;
+    uint32_t new_capacity = *capacity ? *capacity : 4u;
+    while (new_capacity < needed) {
+        if (new_capacity > PDOCKER_VK_MAX_IMAGE_LAYOUT_RANGES / 2u) {
+            new_capacity = PDOCKER_VK_MAX_IMAGE_LAYOUT_RANGES;
+        } else {
+            new_capacity *= 2u;
+        }
+    }
+    if (new_capacity < needed || new_capacity > PDOCKER_VK_MAX_IMAGE_LAYOUT_RANGES) return false;
+    PdockerVkImageLayoutRange *new_ranges =
+        (PdockerVkImageLayoutRange *)realloc(*ranges, (size_t)new_capacity * sizeof((*ranges)[0]));
+    if (!new_ranges) return false;
+    memset(new_ranges + *capacity, 0, (size_t)(new_capacity - *capacity) * sizeof(new_ranges[0]));
+    *ranges = new_ranges;
+    *capacity = new_capacity;
+    return true;
+}
+
 static bool image_layout_range_append(
-        PdockerVkImageLayoutRange *ranges,
+        PdockerVkImageLayoutRange **ranges,
         uint32_t *count,
+        uint32_t *capacity,
         const VkImageSubresourceRange *range,
         VkImageLayout layout,
         uint64_t generation) {
-    if (!ranges || !count || !range ||
+    if (!ranges || !count || !capacity || !range ||
         range->aspectMask == 0 ||
         range->levelCount == 0 ||
         range->layerCount == 0) {
         return true;
     }
+    if (*count > *capacity || (*count > 0 && !*ranges)) return false;
     for (uint32_t i = 0; i < *count; ++i) {
-        PdockerVkImageLayoutRange *entry = &ranges[i];
+        PdockerVkImageLayoutRange *entry = &(*ranges)[i];
         if (entry->layout != layout || entry->generation != generation) continue;
         if (entry->range.baseMipLevel == range->baseMipLevel &&
             entry->range.levelCount == range->levelCount &&
@@ -27893,8 +27943,8 @@ static bool image_layout_range_append(
             }
         }
     }
-    if (*count >= PDOCKER_VK_MAX_IMAGE_LAYOUT_RANGES) return false;
-    PdockerVkImageLayoutRange *entry = &ranges[(*count)++];
+    if (!image_layout_range_reserve(ranges, capacity, *count + 1u)) return false;
+    PdockerVkImageLayoutRange *entry = &(*ranges)[(*count)++];
     memset(entry, 0, sizeof(*entry));
     entry->range = *range;
     entry->layout = layout;
@@ -27903,14 +27953,15 @@ static bool image_layout_range_append(
 }
 
 static bool append_image_layout_range_remainder(
-        PdockerVkImageLayoutRange *ranges,
+        PdockerVkImageLayoutRange **ranges,
         uint32_t *count,
+        uint32_t *capacity,
         const PdockerVkImageLayoutRange *old_entry,
         const VkImageSubresourceRange *replacement) {
-    if (!ranges || !count || !old_entry || !replacement) return false;
+    if (!ranges || !count || !capacity || !old_entry || !replacement) return false;
     if (!image_layout_ranges_overlap(&old_entry->range, replacement)) {
         return image_layout_range_append(
-            ranges, count, &old_entry->range, old_entry->layout, old_entry->generation);
+            ranges, count, capacity, &old_entry->range, old_entry->layout, old_entry->generation);
     }
 
     const VkImageAspectFlags old_aspects = old_entry->range.aspectMask;
@@ -27920,7 +27971,7 @@ static bool append_image_layout_range_remainder(
         VkImageSubresourceRange kept = old_entry->range;
         kept.aspectMask = old_aspects_not_replaced;
         if (!image_layout_range_append(
-                ranges, count, &kept, old_entry->layout, old_entry->generation)) {
+                ranges, count, capacity, &kept, old_entry->layout, old_entry->generation)) {
             return false;
         }
     }
@@ -27953,7 +28004,7 @@ static bool append_image_layout_range_remainder(
             .layerCount = old_entry->range.layerCount,
         };
         if (!image_layout_range_append(
-                ranges, count, &before_levels, old_entry->layout, old_entry->generation)) {
+                ranges, count, capacity, &before_levels, old_entry->layout, old_entry->generation)) {
             return false;
         }
     }
@@ -27966,7 +28017,7 @@ static bool append_image_layout_range_remainder(
             .layerCount = old_entry->range.layerCount,
         };
         if (!image_layout_range_append(
-                ranges, count, &after_levels, old_entry->layout, old_entry->generation)) {
+                ranges, count, capacity, &after_levels, old_entry->layout, old_entry->generation)) {
             return false;
         }
     }
@@ -27982,7 +28033,7 @@ static bool append_image_layout_range_remainder(
             .layerCount = intersection_layer_begin - old_layer_begin,
         };
         if (!image_layout_range_append(
-                ranges, count, &before_layers, old_entry->layout, old_entry->generation)) {
+                ranges, count, capacity, &before_layers, old_entry->layout, old_entry->generation)) {
             return false;
         }
     }
@@ -27995,7 +28046,7 @@ static bool append_image_layout_range_remainder(
             .layerCount = old_layer_end - intersection_layer_end,
         };
         if (!image_layout_range_append(
-                ranges, count, &after_layers, old_entry->layout, old_entry->generation)) {
+                ranges, count, capacity, &after_layers, old_entry->layout, old_entry->generation)) {
             return false;
         }
     }
@@ -28007,6 +28058,10 @@ static void update_image_layout_range_cache(
         const VkImageSubresourceRange *normalized_range,
         VkImageLayout layout) {
     if (!image || !normalized_range) return;
+    if (!image_layout_range_cache_readable(image)) {
+        image->layout_range_overflow = true;
+        return;
+    }
     for (uint32_t i = 0; i < image->layout_range_count; ++i) {
         PdockerVkImageLayoutRange *entry = &image->layout_ranges[i];
         if (image_layout_ranges_equal(&entry->range, normalized_range)) {
@@ -28015,24 +28070,29 @@ static void update_image_layout_range_cache(
             return;
         }
     }
-    PdockerVkImageLayoutRange rebuilt[PDOCKER_VK_MAX_IMAGE_LAYOUT_RANGES];
+    PdockerVkImageLayoutRange *rebuilt = NULL;
     uint32_t rebuilt_count = 0;
-    memset(rebuilt, 0, sizeof(rebuilt));
+    uint32_t rebuilt_capacity = 0;
     for (uint32_t i = 0; i < image->layout_range_count; ++i) {
         PdockerVkImageLayoutRange *entry = &image->layout_ranges[i];
         if (!append_image_layout_range_remainder(
-                rebuilt, &rebuilt_count, entry, normalized_range)) {
+                &rebuilt, &rebuilt_count, &rebuilt_capacity, entry, normalized_range)) {
+            free(rebuilt);
             image->layout_range_overflow = true;
             return;
         }
     }
     if (!image_layout_range_append(
-            rebuilt, &rebuilt_count, normalized_range, layout, image->layout_generation)) {
+            &rebuilt, &rebuilt_count, &rebuilt_capacity,
+            normalized_range, layout, image->layout_generation)) {
+        free(rebuilt);
         image->layout_range_overflow = true;
         return;
     }
-    memcpy(image->layout_ranges, rebuilt, sizeof(rebuilt));
+    free(image->layout_ranges);
+    image->layout_ranges = rebuilt;
     image->layout_range_count = rebuilt_count;
+    image->layout_range_capacity = rebuilt_capacity;
 }
 
 static bool pdocker_vk_queue_family_barrier_replayable(
