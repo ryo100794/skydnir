@@ -1381,7 +1381,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "graphics_snapshot_clone_descriptor_state(&snapshot->set_snapshots",
             "&snapshot->set_capacity",
             "uint32_t snapshot_push_size = cmd->push_constant_size;",
-            "snapshot_push_size = PDOCKER_VK_MAX_PUSH_BYTES;",
+            "const uint32_t max_push_bytes = pdocker_vk_max_push_bytes();",
+            "snapshot_push_size = max_push_bytes;",
             "push_constant_state_clone(&snapshot->push_constants",
             "push_constant_op_snapshot_array_clone(&snapshot->push_constant_ops",
             "memcpy(snapshot->vertex_bindings, cmd->vertex_bindings",
@@ -15219,7 +15220,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("(uint64_t)src_spec->offset > stage->specialization_size", graphics_body)
         self.assertIn("stage->specialization_size - (uint64_t)src_spec->offset", graphics_body)
         self.assertNotIn("src_spec->offset + (uint64_t)src_spec->size", graphics_body)
-        self.assertIn("const uint32_t max_push_bytes = PDOCKER_VK_MAX_PUSH_BYTES;", graphics_body)
+        self.assertIn("const uint32_t max_push_bytes = pdocker_vk_max_push_bytes();", graphics_body)
         self.assertIn("push->offset > max_push_bytes", graphics_body)
         self.assertIn("max_push_bytes - push->offset", graphics_body)
         self.assertIn("push->size > 0 && !push->data", graphics_body)
@@ -15233,6 +15234,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("uint32_t end = range->offset + range->size;", push_range_valid_body)
         self.assertIn("pdocker_vk_max_push_bytes_for_stage_flags(range->stageFlags)", push_range_valid_body)
         self.assertIn("const uint32_t max_push_bytes = pdocker_vk_max_push_bytes_for_stage_flags(stageFlags);", push_constants_body)
+        max_push_for_stage_body = c_function_body(source, "pdocker_vk_max_push_bytes_for_stage_flags")
+        self.assertIn("(void)stage_flags;", max_push_for_stage_body)
+        self.assertIn("return pdocker_vk_max_push_bytes();", max_push_for_stage_body)
+        self.assertNotIn("VK_SHADER_STAGE_ALL_GRAPHICS", max_push_for_stage_body)
         self.assertIn("offset > max_push_bytes", push_constants_body)
         self.assertIn("(uint64_t)size > (uint64_t)max_push_bytes - (uint64_t)offset", push_constants_body)
         self.assertIn("cmd->graphics_unsupported = true;", push_constants_body)
@@ -15645,6 +15650,7 @@ class GpuAbiContractTest(unittest.TestCase):
     def test_vulkan_graphics_push_constants_reject_truncating_metadata(self):
         source = GPU_EXECUTOR.read_text()
         validate_body = c_function_body(source, "validate_vulkan_graphics_v6_frame_content")
+        preflight_body = c_function_body(source, "preflight_vulkan_graphics_v6_runtime_supported")
         collect_body = c_function_body(source, "collect_graphics_push_ranges_for_layout")
         record_body = c_function_body(source, "record_vulkan_graphics_v6_command_buffer")
         layout_struct = source.split("typedef struct VulkanGraphicsReplayPipelineLayout", 1)[1].split(
@@ -15653,7 +15659,11 @@ class GpuAbiContractTest(unittest.TestCase):
         destroy_body = c_function_body(source, "destroy_vulkan_graphics_replay_layouts")
         self.assertIn("meta->range_offset > UINT32_MAX || meta->range_size > UINT32_MAX", validate_body)
         self.assertIn("checked_u64_add3(meta->range_offset, meta->range_size, 0, &push_end)", validate_body)
-        self.assertIn("push_end > PDOCKER_GPU_MAX_PUSH_BYTES", validate_body)
+        self.assertNotIn("push_end > PDOCKER_GPU_MAX_PUSH_BYTES", validate_body)
+        self.assertIn("limits.maxPushConstantsSize", preflight_body)
+        self.assertIn("graphics push constants are unavailable on the Android Vulkan device", preflight_body)
+        self.assertIn("graphics push constant payload exceeds Android Vulkan runtime limit", preflight_body)
+        self.assertIn("graphics push constant range exceeds Android Vulkan runtime limit", preflight_body)
         self.assertIn("meta->range_offset > UINT32_MAX || meta->range_size > UINT32_MAX", collect_body)
         self.assertIn(".offset = (uint32_t)meta->range_offset", collect_body)
         self.assertIn(".size = (uint32_t)meta->range_size", collect_body)

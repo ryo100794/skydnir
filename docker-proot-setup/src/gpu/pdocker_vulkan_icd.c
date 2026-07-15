@@ -6368,9 +6368,8 @@ static bool graphics_v624_pipeline_layout_set_entries_equal(
 static uint32_t pdocker_vk_max_push_bytes(void);
 
 static uint32_t pdocker_vk_max_push_bytes_for_stage_flags(VkShaderStageFlags stage_flags) {
-    return (stage_flags & VK_SHADER_STAGE_ALL_GRAPHICS) != 0
-        ? PDOCKER_VK_MAX_PUSH_BYTES
-        : pdocker_vk_max_push_bytes();
+    (void)stage_flags;
+    return pdocker_vk_max_push_bytes();
 }
 
 static bool pdocker_vk_push_constant_range_valid(const VkPushConstantRange *range) {
@@ -9270,7 +9269,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
                 goto cleanup;
             }
             const PdockerVkPushConstantOpSnapshot *push = &cmd->push_constant_ops[record->push_op_index];
-            const uint32_t max_push_bytes = PDOCKER_VK_MAX_PUSH_BYTES;
+            const uint32_t max_push_bytes = pdocker_vk_max_push_bytes();
             if (push->offset > max_push_bytes ||
                 push->size > max_push_bytes - push->offset) {
                 rc = -ERANGE;
@@ -26447,8 +26446,9 @@ static void record_graphics_draw_command(
         return;
     }
     uint32_t snapshot_push_size = cmd->push_constant_size;
-    if (snapshot_push_size > PDOCKER_VK_MAX_PUSH_BYTES) {
-        snapshot_push_size = PDOCKER_VK_MAX_PUSH_BYTES;
+    const uint32_t max_push_bytes = pdocker_vk_max_push_bytes();
+    if (snapshot_push_size > max_push_bytes) {
+        snapshot_push_size = max_push_bytes;
     }
     if (!push_constant_state_clone(&snapshot->push_constants,
                                    &snapshot->push_constant_capacity,

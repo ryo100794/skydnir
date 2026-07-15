@@ -410,7 +410,10 @@ or closes.
   container-side ICD now also stores command, dispatch, and graphics snapshot
   push constants in heap-backed buffers sized by the advertised Vulkan push
   limit, and forces V5 framed transport when a compute push range exceeds the
-  legacy text scratch.  The
+  legacy text scratch.  Graphics V6/V6.1/V6.28 frame validation no longer uses
+  the legacy 256-byte push scratch as a replay limit; producer serialization and
+  Android preflight now use Vulkan `maxPushConstantsSize` as the effective
+  boundary.  The
   compute executor also no longer rejects SPIR-V modules solely because they are
   larger than the former 8 MiB debug cap; it validates the Vulkan-required
   nonzero four-byte code alignment and lets allocation/runtime errors surface

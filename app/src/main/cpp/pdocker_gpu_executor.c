@@ -25791,8 +25791,7 @@ static int validate_vulkan_graphics_v628_declared_push_ranges(
         const PdockerGpuVulkanGraphicsV628PushConstantRangeEntry *entry = &ranges[i];
         if (entry->pipeline_layout_id == 0 || entry->stage_flags == 0 || entry->size == 0 ||
             (entry->offset & 3u) != 0 || (entry->size & 3u) != 0 ||
-            (uint64_t)entry->size > UINT32_MAX - (uint64_t)entry->offset ||
-            entry->offset + entry->size > PDOCKER_GPU_MAX_PUSH_BYTES) {
+            (uint64_t)entry->size > UINT32_MAX - (uint64_t)entry->offset) {
             return -EPROTO;
         }
         int referenced = 0;
@@ -25831,8 +25830,7 @@ static int validate_vulkan_graphics_v628_declared_push_ranges(
                 &view->push_constant_metadata[i];
             if (meta->layout_id == 0 || meta->stage_flags == 0 || meta->range_size == 0 ||
                 (meta->range_offset & 3u) != 0 || (meta->range_size & 3u) != 0 ||
-                (uint64_t)meta->range_size > UINT32_MAX - (uint64_t)meta->range_offset ||
-                meta->range_offset + meta->range_size > PDOCKER_GPU_MAX_PUSH_BYTES) {
+                (uint64_t)meta->range_size > UINT32_MAX - (uint64_t)meta->range_offset) {
                 return -EPROTO;
             }
             uint32_t end = meta->range_offset + meta->range_size;
@@ -27111,7 +27109,6 @@ static int validate_vulkan_graphics_v6_frame_content(
             if ((meta->range_offset & 3u) != 0 || (meta->range_size & 3u) != 0) return -EINVAL;
             if (meta->range_offset > UINT32_MAX || meta->range_size > UINT32_MAX) return -EOVERFLOW;
             if (checked_u64_add3(meta->range_offset, meta->range_size, 0, &push_end) != 0) return -EOVERFLOW;
-            if (push_end > PDOCKER_GPU_MAX_PUSH_BYTES) return -ERANGE;
         }
         for (uint32_t i = 0; i < header_v61->v61.memory_barrier_count; ++i) {
             const PdockerGpuVulkanGraphicsV61MemoryBarrierEntry *barrier = &memory_barriers[i];
@@ -28770,6 +28767,39 @@ static int preflight_vulkan_graphics_v6_runtime_supported(
         reason = "dynamic rendering is not enabled on the Android Vulkan device";
         if (reason_out) *reason_out = reason;
         return -EOPNOTSUPP;
+    }
+    const uint32_t runtime_push_limit =
+        g_vulkan_runtime.physical_properties.limits.maxPushConstantsSize;
+    if (view && runtime_push_limit == 0 &&
+        ((view->is_v61 && view->header_v61 && view->header_v61->v61.push_constant_metadata_count) ||
+         (view->is_v628 && view->header_v628 && view->header_v628->v628.push_constant_range_count))) {
+        reason = "graphics push constants are unavailable on the Android Vulkan device";
+        if (reason_out) *reason_out = reason;
+        return -EOPNOTSUPP;
+    }
+    if (view && view->is_v628 && view->header_v628 && view->push_constant_ranges) {
+        for (uint32_t i = 0; i < view->header_v628->v628.push_constant_range_count; ++i) {
+            const PdockerGpuVulkanGraphicsV628PushConstantRangeEntry *entry =
+                &view->push_constant_ranges[i];
+            if (entry->offset > runtime_push_limit ||
+                entry->size > runtime_push_limit - entry->offset) {
+                reason = "graphics push constant range exceeds Android Vulkan runtime limit";
+                if (reason_out) *reason_out = reason;
+                return -E2BIG;
+            }
+        }
+    }
+    if (view && view->is_v61 && view->header_v61 && view->push_constant_metadata) {
+        for (uint32_t i = 0; i < view->header_v61->v61.push_constant_metadata_count; ++i) {
+            const PdockerGpuVulkanGraphicsV61PushConstantMetadataEntry *meta =
+                &view->push_constant_metadata[i];
+            if (meta->range_offset > runtime_push_limit ||
+                meta->range_size > runtime_push_limit - meta->range_offset) {
+                reason = "graphics push constant payload exceeds Android Vulkan runtime limit";
+                if (reason_out) *reason_out = reason;
+                return -E2BIG;
+            }
+        }
     }
     if (view && view->is_v66 && view->header_v66 && view->color_blend_states &&
         !g_vulkan_runtime.enabled_features.independentBlend) {
