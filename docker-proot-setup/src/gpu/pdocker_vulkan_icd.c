@@ -265,20 +265,24 @@ typedef struct VkRenderPassSubpassFeedbackCreateInfoEXT {
 
 typedef struct {
     VK_LOADER_DATA loader;
+    uint64_t object_id;
 } PdockerVkInstance;
 
 typedef struct {
     VK_LOADER_DATA loader;
+    uint64_t object_id;
 } PdockerVkPhysicalDevice;
 
 typedef struct {
     VK_LOADER_DATA loader;
+    uint64_t object_id;
     uint64_t requested_feature_mask;
     uint64_t enabled_extension_mask;
 } PdockerVkDevice;
 
 typedef struct {
     VK_LOADER_DATA loader;
+    uint64_t object_id;
     uint64_t requested_feature_mask;
     uint64_t enabled_extension_mask;
 } PdockerVkQueue;
@@ -1668,6 +1672,13 @@ static bool vulkan_v5_object_transport_enabled(void) {
 
 static uint64_t next_vulkan_object_generation(void) {
     return __sync_add_and_fetch(&g_vulkan_object_generation, 1);
+}
+
+static void ensure_vulkan_dispatchable_object_ids(void) {
+    static int initialized;
+    if (__sync_lock_test_and_set(&initialized, 1)) return;
+    g_device.object_id = next_vulkan_object_generation();
+    g_queue.object_id = next_vulkan_object_generation();
 }
 
 static uint64_t next_vulkan_query_pool_id(void) {
@@ -18408,8 +18419,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateInstance(
     if (shape_rc != VK_SUCCESS) return shape_rc;
     VkResult extension_rc = validate_instance_extensions(pCreateInfo);
     if (extension_rc != VK_SUCCESS) return extension_rc;
+    ensure_vulkan_dispatchable_object_ids();
     PdockerVkInstance *instance = calloc(1, sizeof(*instance));
     if (!instance) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    instance->object_id = next_vulkan_object_generation();
     set_loader_magic_value(instance);
     *pInstance = (VkInstance)instance;
     set_loader_magic_value(&g_device);
@@ -21611,8 +21624,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
                 (unsigned long long)requested_feature_mask);
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }
+    ensure_vulkan_dispatchable_object_ids();
     PdockerVkDevice *device = calloc(1, sizeof(*device));
     if (!device) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    device->object_id = next_vulkan_object_generation();
     device->requested_feature_mask = requested_feature_mask;
     device->enabled_extension_mask = enabled_extension_mask;
     g_last_created_device = device;
@@ -21653,6 +21668,7 @@ VKAPI_ATTR void VKAPI_CALL vkGetDeviceQueue(
         return;
     }
     (void)device;
+    ensure_vulkan_dispatchable_object_ids();
     g_queue.requested_feature_mask = g_last_device_requested_feature_mask;
     g_queue.enabled_extension_mask = g_last_device_enabled_extension_mask;
     *pQueue = (VkQueue)&g_queue;
@@ -21668,6 +21684,7 @@ VKAPI_ATTR void VKAPI_CALL vkGetDeviceQueue2(
         return;
     }
     (void)device;
+    ensure_vulkan_dispatchable_object_ids();
     g_queue.requested_feature_mask = g_last_device_requested_feature_mask;
     g_queue.enabled_extension_mask = g_last_device_enabled_extension_mask;
     *pQueue = (VkQueue)&g_queue;

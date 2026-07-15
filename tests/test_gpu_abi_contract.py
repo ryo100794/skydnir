@@ -15190,6 +15190,11 @@ class GpuAbiContractTest(unittest.TestCase):
         source = VULKAN_ICD.read_text()
         for marker in [
             "uint64_t object_id;",
+            "static void ensure_vulkan_dispatchable_object_ids",
+            "g_device.object_id = next_vulkan_object_generation();",
+            "g_queue.object_id = next_vulkan_object_generation();",
+            "instance->object_id = next_vulkan_object_generation();",
+            "device->object_id = next_vulkan_object_generation();",
             "static uint64_t pdocker_vk_memory_object_id",
             "static uint64_t pdocker_vk_buffer_object_id",
             "static uint64_t pdocker_vk_image_object_id",
@@ -15200,6 +15205,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "return sampler ? sampler->object_id : 0;",
             "return pipeline ? pipeline->object_id : 0;",
             "return render_pass ? render_pass->object_id : 0;",
+            "ensure_vulkan_dispatchable_object_ids();",
             "memory->object_id = next_vulkan_object_generation();",
             "buffer->object_id = next_vulkan_object_generation();",
             "image->object_id = next_vulkan_object_generation();",
