@@ -121,6 +121,12 @@ or closes.
   push/control gate drift is visible as a static mismatch path before another
   device run. Evidence:
   `python3 -m unittest tests.test_gpu_abi_contract.GpuAbiContractTest.test_spirv_dataflow_compare_reports_q6_stage_target_support_paths -q`.
+- [done] **offline Q6 SPIR-V fixture verifier**: `scripts/verify-q6-spirv-static-fixtures.py`
+  regenerates safe/native/effective Q6 fixture analyses and verifies the known
+  static classifications without ADB. `--json-out` preserves regenerated
+  analysis/compare artifacts next to the output file. Evidence:
+  `python3 scripts/verify-q6-spirv-static-fixtures.py` and
+  `python3 -m unittest tests.test_q6_spirv_static_fixtures -q`.
 - [done] **bounded dispatch+graphics mixed-submit lane**: Command buffers may now
   contain generic compute dispatch side work before or after a graphics replay
   frame. Submit wait sync is split before pre-graphics dispatches, completion
