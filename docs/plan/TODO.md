@@ -375,10 +375,10 @@ or closes.
   vector-add fallback through descriptor slot accessors.  The Android compute
   executor duplicate-descriptor alias rewrite now also handles source descriptor
   arrays by sizing the rewritten binding to the active source array span and
-  mirroring descriptor writes at the same `api_array_element`.  V5 option text
-  parsing is heap-backed by the validated frame payload size instead of the
-  legacy text-command buffer, so native framed dispatch no longer inherits that
-  unrelated command-size ceiling.  The Android
+  mirroring descriptor writes at the same `api_array_element`.  V5 entry-name
+  and option-text parsing are heap-backed by the validated frame payload size
+  instead of the legacy text-command buffers, so native framed dispatch no
+  longer inherits those unrelated string-size ceilings.  The Android
   compute strict object graph cache now uses heap-backed memory/buffer object
   tables and heap-sized key scratch storage, so V5-width compute dispatches no
   longer disable cache solely because they exceed the legacy 16-binding

@@ -5465,10 +5465,18 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("specialization_data_size > PDOCKER_GPU_MAX_VULKAN_SPECIALIZATION_BYTES", dispatch_body)
         self.assertIn("specialization_count > UINT32_MAX", dispatch_body)
 
-    def test_vulkan_dispatch_v5_option_text_is_heap_backed_by_frame_size(self):
+    def test_vulkan_dispatch_v5_text_payloads_are_heap_backed_by_frame_size(self):
         executor = GPU_EXECUTOR.read_text()
         handler = c_function_body(executor, "handle_vulkan_dispatch_v5_frame")
+        self.assertIn("char *entry_name = NULL;", handler)
         self.assertIn("char *option_copy = NULL;", handler)
+        self.assertIn("header.entry_name_size > (uint64_t)SIZE_MAX - 1u", handler)
+        self.assertIn("const size_t entry_name_size = (size_t)header.entry_name_size + 1u;", handler)
+        self.assertIn("entry_name = (char *)calloc(entry_name_size, 1);", handler)
+        self.assertIn("memcpy(entry_name, entry_ptr, (size_t)header.entry_name_size);", handler)
+        self.assertIn("free(entry_name);", handler)
+        self.assertNotIn("char entry_name[PDOCKER_GPU_MAX_VULKAN_ENTRY_NAME];", handler)
+        self.assertNotIn("header.entry_name_size >= PDOCKER_GPU_MAX_VULKAN_ENTRY_NAME", handler)
         self.assertIn("header.option_text_size > (uint64_t)SIZE_MAX - 1u", handler)
         self.assertIn("const size_t option_copy_size = (size_t)header.option_text_size + 1u;", handler)
         self.assertIn("option_copy = (char *)calloc(option_copy_size, 1);", handler)

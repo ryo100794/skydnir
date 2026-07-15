@@ -37009,6 +37009,7 @@ static int handle_vulkan_dispatch_v5_frame(int cfd) {
     VulkanDispatchBinding *bindings = NULL;
     VulkanDispatchImageDescriptor *image_descriptors = NULL;
     VulkanDispatchSpecialization *specs = NULL;
+    char *entry_name = NULL;
     char *option_copy = NULL;
     int *binding_fds = NULL;
     size_t binding_capacity = 0;
@@ -37062,14 +37063,18 @@ static int handle_vulkan_dispatch_v5_frame(int cfd) {
         goto cleanup;
     }
     const void *entry_ptr = v5_frame_range(frame, &header, header.entry_name_offset, header.entry_name_size);
-    if (!entry_ptr || header.entry_name_size >= PDOCKER_GPU_MAX_VULKAN_ENTRY_NAME) {
+    if (!entry_ptr || header.entry_name_size > (uint64_t)SIZE_MAX - 1u) {
         json_fail("vulkan-dispatch-v5", "invalid entry name");
         goto cleanup;
     }
-    char entry_name[PDOCKER_GPU_MAX_VULKAN_ENTRY_NAME];
-    memset(entry_name, 0, sizeof(entry_name));
+    const size_t entry_name_size = (size_t)header.entry_name_size + 1u;
+    entry_name = (char *)calloc(entry_name_size, 1);
+    if (!entry_name) {
+        json_fail("vulkan-dispatch-v5", "entry name allocation failed");
+        rc = -ENOMEM;
+        goto cleanup;
+    }
     memcpy(entry_name, entry_ptr, (size_t)header.entry_name_size);
-    entry_name[header.entry_name_size] = '\0';
     const uint8_t *push = (const uint8_t *)v5_frame_range(frame, &header, header.push_offset, header.push_size);
     if (header.push_size > PDOCKER_GPU_MAX_PUSH_BYTES || (header.push_size > 0 && !push)) {
         json_fail("vulkan-dispatch-v5", "invalid push constants");
@@ -37190,6 +37195,7 @@ static int handle_vulkan_dispatch_v5_frame(int cfd) {
     }
 cleanup:
     free(option_copy);
+    free(entry_name);
     free(specs);
     free(binding_fds);
     free(image_descriptors);
