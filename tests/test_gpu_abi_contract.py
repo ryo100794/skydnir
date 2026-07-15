@@ -15263,6 +15263,53 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertNotIn(direct_core_transport_id, source)
 
+    def test_vulkan_executor_has_dormant_native_handle_identity_table(self):
+        executor = GPU_EXECUTOR.read_text()
+        self.assertIn("PDOCKER_GPU_VULKAN_NATIVE_HANDLE_TABLE_CAPACITY 64u", executor)
+        table_region = executor.split(
+            "#define PDOCKER_GPU_VULKAN_NATIVE_HANDLE_TABLE_CAPACITY",
+            1,
+        )[1].split("#define PDOCKER_GPU_EXECUTOR_EVENT_REGISTRY_SLOTS", 1)[0]
+        for marker in [
+            "typedef enum VulkanNativeHandleKind",
+            "PDOCKER_GPU_VULKAN_NATIVE_HANDLE_INSTANCE = 1",
+            "PDOCKER_GPU_VULKAN_NATIVE_HANDLE_PHYSICAL_DEVICE = 2",
+            "PDOCKER_GPU_VULKAN_NATIVE_HANDLE_DEVICE = 3",
+            "PDOCKER_GPU_VULKAN_NATIVE_HANDLE_QUEUE = 4",
+            "typedef union VulkanNativeHandle",
+            "VkInstance instance;",
+            "VkPhysicalDevice physical_device;",
+            "VkDevice device;",
+            "VkQueue queue;",
+            "uint64_t object_id;",
+            "find_vulkan_native_handle_entry",
+            "put_vulkan_native_handle_entry",
+            "remove_vulkan_native_handle_entry",
+            "clear_vulkan_native_handle_table",
+            "register_vulkan_instance_id",
+            "register_vulkan_physical_device_id",
+            "register_vulkan_device_id",
+            "register_vulkan_queue_id",
+            "lookup_vulkan_instance_id",
+            "lookup_vulkan_physical_device_id",
+            "lookup_vulkan_device_id",
+            "lookup_vulkan_queue_id",
+            "unregister_vulkan_instance_id",
+            "unregister_vulkan_physical_device_id",
+            "unregister_vulkan_device_id",
+            "unregister_vulkan_queue_id",
+            "object_id == 0",
+            "-EEXIST",
+            "-ENOSPC",
+        ]:
+            self.assertIn(marker, table_region)
+        self.assertNotIn("vkDestroy", table_region)
+        init_body = c_function_body(executor, "init_vulkan_runtime")
+        self.assertNotIn("register_vulkan_instance_id", init_body)
+        self.assertNotIn("register_vulkan_physical_device_id", init_body)
+        self.assertNotIn("register_vulkan_device_id", init_body)
+        self.assertNotIn("register_vulkan_queue_id", init_body)
+
     def test_vulkan_icd_copy_alias_offsets_are_overflow_guarded(self):
         source = VULKAN_ICD.read_text()
         dispatch_body = source.split("static int send_generic_vulkan_dispatch_op", 1)[1].split(

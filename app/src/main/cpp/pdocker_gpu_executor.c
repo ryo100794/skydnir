@@ -1571,6 +1571,222 @@ typedef struct {
 
 static VulkanRuntime g_vulkan_runtime;
 
+#define PDOCKER_GPU_VULKAN_NATIVE_HANDLE_TABLE_CAPACITY 64u
+
+typedef enum VulkanNativeHandleKind {
+    PDOCKER_GPU_VULKAN_NATIVE_HANDLE_INSTANCE = 1,
+    PDOCKER_GPU_VULKAN_NATIVE_HANDLE_PHYSICAL_DEVICE = 2,
+    PDOCKER_GPU_VULKAN_NATIVE_HANDLE_DEVICE = 3,
+    PDOCKER_GPU_VULKAN_NATIVE_HANDLE_QUEUE = 4,
+} VulkanNativeHandleKind;
+
+typedef union VulkanNativeHandle {
+    VkInstance instance;
+    VkPhysicalDevice physical_device;
+    VkDevice device;
+    VkQueue queue;
+} VulkanNativeHandle;
+
+typedef struct VulkanNativeHandleEntry {
+    uint8_t used;
+    uint8_t kind;
+    uint16_t reserved0;
+    uint32_t reserved1;
+    uint64_t object_id;
+    VulkanNativeHandle handle;
+} VulkanNativeHandleEntry;
+
+typedef struct VulkanNativeHandleTable {
+    VulkanNativeHandleEntry entries[PDOCKER_GPU_VULKAN_NATIVE_HANDLE_TABLE_CAPACITY];
+} VulkanNativeHandleTable;
+
+static VulkanNativeHandleTable g_vulkan_native_handles;
+
+#if defined(__GNUC__) || defined(__clang__)
+#define PDOCKER_GPU_UNUSED_FN __attribute__((unused))
+#else
+#define PDOCKER_GPU_UNUSED_FN
+#endif
+
+static int vulkan_native_handle_kind_valid(VulkanNativeHandleKind kind) {
+    return kind == PDOCKER_GPU_VULKAN_NATIVE_HANDLE_INSTANCE ||
+           kind == PDOCKER_GPU_VULKAN_NATIVE_HANDLE_PHYSICAL_DEVICE ||
+           kind == PDOCKER_GPU_VULKAN_NATIVE_HANDLE_DEVICE ||
+           kind == PDOCKER_GPU_VULKAN_NATIVE_HANDLE_QUEUE;
+}
+
+static VulkanNativeHandleEntry *find_vulkan_native_handle_entry(
+        VulkanNativeHandleTable *table,
+        VulkanNativeHandleKind kind,
+        uint64_t object_id) {
+    if (!table || object_id == 0 || !vulkan_native_handle_kind_valid(kind)) return NULL;
+    for (size_t i = 0; i < PDOCKER_GPU_VULKAN_NATIVE_HANDLE_TABLE_CAPACITY; ++i) {
+        VulkanNativeHandleEntry *entry = &table->entries[i];
+        if (entry->used && entry->kind == (uint8_t)kind && entry->object_id == object_id) {
+            return entry;
+        }
+    }
+    return NULL;
+}
+
+static int vulkan_native_handle_equal(
+        VulkanNativeHandleKind kind,
+        VulkanNativeHandle a,
+        VulkanNativeHandle b) {
+    switch (kind) {
+        case PDOCKER_GPU_VULKAN_NATIVE_HANDLE_INSTANCE:
+            return a.instance == b.instance;
+        case PDOCKER_GPU_VULKAN_NATIVE_HANDLE_PHYSICAL_DEVICE:
+            return a.physical_device == b.physical_device;
+        case PDOCKER_GPU_VULKAN_NATIVE_HANDLE_DEVICE:
+            return a.device == b.device;
+        case PDOCKER_GPU_VULKAN_NATIVE_HANDLE_QUEUE:
+            return a.queue == b.queue;
+        default:
+            return 0;
+    }
+}
+
+static int put_vulkan_native_handle_entry(
+        VulkanNativeHandleTable *table,
+        VulkanNativeHandleKind kind,
+        uint64_t object_id,
+        VulkanNativeHandle handle) {
+    if (!table || object_id == 0 || !vulkan_native_handle_kind_valid(kind)) return -EINVAL;
+    VulkanNativeHandleEntry *existing = find_vulkan_native_handle_entry(table, kind, object_id);
+    if (existing) {
+        return vulkan_native_handle_equal(kind, existing->handle, handle) ? 0 : -EEXIST;
+    }
+    for (size_t i = 0; i < PDOCKER_GPU_VULKAN_NATIVE_HANDLE_TABLE_CAPACITY; ++i) {
+        VulkanNativeHandleEntry *entry = &table->entries[i];
+        if (!entry->used) {
+            memset(entry, 0, sizeof(*entry));
+            entry->used = 1;
+            entry->kind = (uint8_t)kind;
+            entry->object_id = object_id;
+            entry->handle = handle;
+            return 0;
+        }
+    }
+    return -ENOSPC;
+}
+
+static void remove_vulkan_native_handle_entry(
+        VulkanNativeHandleTable *table,
+        VulkanNativeHandleKind kind,
+        uint64_t object_id) {
+    VulkanNativeHandleEntry *entry = find_vulkan_native_handle_entry(table, kind, object_id);
+    if (entry) memset(entry, 0, sizeof(*entry));
+}
+
+static PDOCKER_GPU_UNUSED_FN void clear_vulkan_native_handle_table(VulkanNativeHandleTable *table) {
+    if (table) memset(table, 0, sizeof(*table));
+}
+
+static PDOCKER_GPU_UNUSED_FN int register_vulkan_instance_id(uint64_t object_id, VkInstance instance) {
+    VulkanNativeHandle handle;
+    memset(&handle, 0, sizeof(handle));
+    handle.instance = instance;
+    return put_vulkan_native_handle_entry(
+        &g_vulkan_native_handles,
+        PDOCKER_GPU_VULKAN_NATIVE_HANDLE_INSTANCE,
+        object_id,
+        handle);
+}
+
+static PDOCKER_GPU_UNUSED_FN int register_vulkan_physical_device_id(uint64_t object_id, VkPhysicalDevice physical_device) {
+    VulkanNativeHandle handle;
+    memset(&handle, 0, sizeof(handle));
+    handle.physical_device = physical_device;
+    return put_vulkan_native_handle_entry(
+        &g_vulkan_native_handles,
+        PDOCKER_GPU_VULKAN_NATIVE_HANDLE_PHYSICAL_DEVICE,
+        object_id,
+        handle);
+}
+
+static PDOCKER_GPU_UNUSED_FN int register_vulkan_device_id(uint64_t object_id, VkDevice device) {
+    VulkanNativeHandle handle;
+    memset(&handle, 0, sizeof(handle));
+    handle.device = device;
+    return put_vulkan_native_handle_entry(
+        &g_vulkan_native_handles,
+        PDOCKER_GPU_VULKAN_NATIVE_HANDLE_DEVICE,
+        object_id,
+        handle);
+}
+
+static PDOCKER_GPU_UNUSED_FN int register_vulkan_queue_id(uint64_t object_id, VkQueue queue) {
+    VulkanNativeHandle handle;
+    memset(&handle, 0, sizeof(handle));
+    handle.queue = queue;
+    return put_vulkan_native_handle_entry(
+        &g_vulkan_native_handles,
+        PDOCKER_GPU_VULKAN_NATIVE_HANDLE_QUEUE,
+        object_id,
+        handle);
+}
+
+static PDOCKER_GPU_UNUSED_FN VkInstance lookup_vulkan_instance_id(uint64_t object_id) {
+    VulkanNativeHandleEntry *entry = find_vulkan_native_handle_entry(
+        &g_vulkan_native_handles,
+        PDOCKER_GPU_VULKAN_NATIVE_HANDLE_INSTANCE,
+        object_id);
+    return entry ? entry->handle.instance : VK_NULL_HANDLE;
+}
+
+static PDOCKER_GPU_UNUSED_FN VkPhysicalDevice lookup_vulkan_physical_device_id(uint64_t object_id) {
+    VulkanNativeHandleEntry *entry = find_vulkan_native_handle_entry(
+        &g_vulkan_native_handles,
+        PDOCKER_GPU_VULKAN_NATIVE_HANDLE_PHYSICAL_DEVICE,
+        object_id);
+    return entry ? entry->handle.physical_device : VK_NULL_HANDLE;
+}
+
+static PDOCKER_GPU_UNUSED_FN VkDevice lookup_vulkan_device_id(uint64_t object_id) {
+    VulkanNativeHandleEntry *entry = find_vulkan_native_handle_entry(
+        &g_vulkan_native_handles,
+        PDOCKER_GPU_VULKAN_NATIVE_HANDLE_DEVICE,
+        object_id);
+    return entry ? entry->handle.device : VK_NULL_HANDLE;
+}
+
+static PDOCKER_GPU_UNUSED_FN VkQueue lookup_vulkan_queue_id(uint64_t object_id) {
+    VulkanNativeHandleEntry *entry = find_vulkan_native_handle_entry(
+        &g_vulkan_native_handles,
+        PDOCKER_GPU_VULKAN_NATIVE_HANDLE_QUEUE,
+        object_id);
+    return entry ? entry->handle.queue : VK_NULL_HANDLE;
+}
+
+static PDOCKER_GPU_UNUSED_FN void unregister_vulkan_instance_id(uint64_t object_id) {
+    remove_vulkan_native_handle_entry(
+        &g_vulkan_native_handles,
+        PDOCKER_GPU_VULKAN_NATIVE_HANDLE_INSTANCE,
+        object_id);
+}
+
+static PDOCKER_GPU_UNUSED_FN void unregister_vulkan_physical_device_id(uint64_t object_id) {
+    remove_vulkan_native_handle_entry(
+        &g_vulkan_native_handles,
+        PDOCKER_GPU_VULKAN_NATIVE_HANDLE_PHYSICAL_DEVICE,
+        object_id);
+}
+
+static PDOCKER_GPU_UNUSED_FN void unregister_vulkan_device_id(uint64_t object_id) {
+    remove_vulkan_native_handle_entry(
+        &g_vulkan_native_handles,
+        PDOCKER_GPU_VULKAN_NATIVE_HANDLE_DEVICE,
+        object_id);
+}
+
+static PDOCKER_GPU_UNUSED_FN void unregister_vulkan_queue_id(uint64_t object_id) {
+    remove_vulkan_native_handle_entry(
+        &g_vulkan_native_handles,
+        PDOCKER_GPU_VULKAN_NATIVE_HANDLE_QUEUE,
+        object_id);
+}
+
 #define PDOCKER_GPU_EXECUTOR_EVENT_REGISTRY_SLOTS 128u
 
 typedef struct {
