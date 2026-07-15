@@ -2997,3 +2997,16 @@ cleanup path.  This is a generic Vulkan ABI cleanup, not a llama-specific
 kernel path.
 
 Validation: `env -u PYTHONPATH python3 -m unittest tests.test_gpu_abi_contract -q`, `bash scripts/build-gpu-shim.sh`, and `bash scripts/build-native-android-ndk.sh`.
+
+
+### 2026-07-15 Vulkan graphics specialization heap lane
+
+CPU/static pass-through work removed the graphics pipeline specialization
+scratch arrays from the producer ICD and Android graphics replay.  Producer
+`VkSpecializationMapEntry` arrays and specialization data are now heap-owned per
+shader stage, and the executor stages V6.2 specialization entries on the heap
+before calling `vkCreateGraphicsPipelines`.  The transport limit is now the
+explicit V6.2 specialization-entry table cap, not the old 16-entry/256-byte
+local scratch shape.
+
+Validation: `env -u PYTHONPATH python3 -m unittest tests.test_gpu_abi_contract -q`, `bash scripts/build-gpu-shim.sh`, and `bash scripts/build-native-android-ndk.sh`.

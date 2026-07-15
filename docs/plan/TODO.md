@@ -423,7 +423,11 @@ or closes.
   entry-name keys to avoid truncation collisions.  Graphics pipeline shader
   stage entry-point names are also heap-owned on the producer side and
   heap-materialized from the V6 frame payload on Android replay, so graphics
-  `pName` no longer inherits the old 128-byte scratch buffer ceiling.
+  `pName` no longer inherits the old 128-byte scratch buffer ceiling.  Graphics
+  pipeline specialization entries and specialization data are now heap-owned on
+  the producer side and heap-staged by the Android V6.2 replay path, so this
+  lane no longer inherits the old 16-entry/256-byte scratch specialization
+  limits; the remaining cap is the explicit V6.2 ABI table limit.
   Variable descriptor-count layouts now use V6.29
   metadata to carry allocation-time actual descriptor counts, so partially sized
   descriptor arrays are validated and replayed by actual count instead of being
