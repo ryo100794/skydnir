@@ -3394,7 +3394,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("vulkan_graphics_merge_attachment_copy_range", executor)
         self.assertIn("effective_load_op == (uint32_t)VK_ATTACHMENT_LOAD_OP_LOAD && image->requires_staging", executor)
         self.assertIn("image->descriptor_layout = (VkImageLayout)attachment->layout", executor)
-        self.assertIn("rc = record_vulkan_graphics_v6_staged_image_uploads(command_buffer, attachments);", executor)
+        self.assertIn("rc = record_vulkan_graphics_v6_staged_image_uploads(command_buffer, attachments, strict_passthrough);", executor)
         self.assertIn("vulkan_graphics_attachment_writeback_access_mask", executor)
         self.assertIn("vulkan_format_bytes_per_pixel_for_aspect", executor)
         self.assertIn("vulkan_image_tight_subresource_offset_for_aspect", executor)
@@ -4031,7 +4031,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "VK_ACCESS_TRANSFER_WRITE_BIT",
             "VK_PIPELINE_STAGE_TRANSFER_BIT",
             "vkCmdClearColorImage(command_buffer",
-            "record_vulkan_graphics_v6_staged_image_uploads(command_buffer, attachments)",
+            "record_vulkan_graphics_v6_staged_image_uploads(command_buffer, attachments, strict_passthrough)",
         ]:
             self.assertIn(marker, executor)
         for marker in [
@@ -13487,7 +13487,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "materialize_vulkan_graphics_v620_image_layout_ranges",
             "vulkan_graphics_replay_image_by_source_index",
             "record_vulkan_graphics_v620_initial_image_layout_ranges",
-            "record_vulkan_graphics_v6_staged_image_uploads(command_buffer, attachments);",
+            "record_vulkan_graphics_v6_staged_image_uploads(command_buffer, attachments, strict_passthrough);",
         ]:
             self.assertIn(marker, executor)
 
@@ -19154,6 +19154,15 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, graphics_record)
         self.assertIn("strict_passthrough);", graphics_record)
+
+    def test_strict_passthrough_rejects_graphics_staged_image_upload(self):
+        source = GPU_EXECUTOR.read_text()
+        staged_upload = c_function_body(source, "record_vulkan_graphics_v6_staged_image_uploads")
+        graphics_record = c_function_body(source, "record_vulkan_graphics_v6_command_buffer")
+        self.assertIn("int strict_passthrough", source)
+        self.assertIn("image->requires_staging && image->upload_pending", staged_upload)
+        self.assertIn("strict passthrough graphics staged image upload mismatch", staged_upload)
+        self.assertIn("record_vulkan_graphics_v6_staged_image_uploads(command_buffer, attachments, strict_passthrough)", graphics_record)
 
     def test_llama_gpu_artifact_gate_decision_tree_is_documented(self):
         verifier = LLAMA_GPU_ARTIFACT_VERIFIER.read_text()

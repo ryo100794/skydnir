@@ -33691,9 +33691,20 @@ static int vulkan_replay_image_set_layout_for_range(
 
 static int record_vulkan_graphics_v6_staged_image_uploads(
         VkCommandBuffer command_buffer,
-        VulkanGraphicsReplayAttachments *attachments) {
+        VulkanGraphicsReplayAttachments *attachments,
+        int strict_passthrough) {
     if (!command_buffer || !attachments) return -EINVAL;
     if (attachments->image_count > 0 && !attachments->images) return -EINVAL;
+    if (strict_passthrough) {
+        for (size_t i = 0; i < attachments->image_count; ++i) {
+            const VulkanDispatchImageObject *image = &attachments->images[i];
+            if (image->requires_staging && image->upload_pending) {
+                json_fail("vulkan-graphics-v6-command-record",
+                          "strict passthrough graphics staged image upload mismatch");
+                return -EOPNOTSUPP;
+            }
+        }
+    }
     const size_t barrier_capacity = attachments->image_count ? attachments->image_count : 1u;
     if (barrier_capacity > UINT32_MAX) return -E2BIG;
     VkImageMemoryBarrier *image_upload_barriers = (VkImageMemoryBarrier *)calloc(
@@ -34506,7 +34517,7 @@ static int record_vulkan_graphics_v6_command_buffer(
     };
     vrc = vkBeginCommandBuffer(command_buffer, &cbi);
     if (vrc != VK_SUCCESS) { rc = -EIO; goto cleanup; }
-    rc = record_vulkan_graphics_v6_staged_image_uploads(command_buffer, attachments);
+    rc = record_vulkan_graphics_v6_staged_image_uploads(command_buffer, attachments, strict_passthrough);
     if (rc != 0) goto cleanup;
     rc = record_vulkan_graphics_v620_initial_image_layout_ranges(command_buffer, attachments);
     if (rc != 0) goto cleanup;
@@ -34566,7 +34577,7 @@ static int record_vulkan_graphics_v6_command_buffer(
                         goto begin_rendering_cleanup;
                     }
                 }
-                rc = record_vulkan_graphics_v6_staged_image_uploads(command_buffer, attachments);
+                rc = record_vulkan_graphics_v6_staged_image_uploads(command_buffer, attachments, strict_passthrough);
                 if (rc != 0) goto begin_rendering_cleanup;
                 for (uint32_t a = 0; a < command->attachment_count; ++a) {
                     const PdockerGpuVulkanGraphicsV6AttachmentEntry *src =
@@ -35427,7 +35438,7 @@ begin_rendering_cleanup:
                 }
                 const VulkanGraphicsReplayPipelineLayout *bind_layout =
                     &layouts->pipeline_layouts[(uint32_t)bind_layout_index];
-                rc = record_vulkan_graphics_v6_staged_image_uploads(command_buffer, attachments);
+                rc = record_vulkan_graphics_v6_staged_image_uploads(command_buffer, attachments, strict_passthrough);
                 if (rc != 0) goto cleanup;
                 memset(descriptor_image_barriers, 0,
                        descriptor_image_barrier_capacity * sizeof(*descriptor_image_barriers));
@@ -35599,7 +35610,7 @@ begin_rendering_cleanup:
                     rc = -EPROTO;
                     goto cleanup;
                 }
-                rc = record_vulkan_graphics_v6_staged_image_uploads(command_buffer, attachments);
+                rc = record_vulkan_graphics_v6_staged_image_uploads(command_buffer, attachments, strict_passthrough);
                 if (rc != 0) goto cleanup;
                 VkClearColorValue color;
                 memset(&color, 0, sizeof(color));
@@ -35641,7 +35652,7 @@ begin_rendering_cleanup:
                     rc = -EPROTO;
                     goto cleanup;
                 }
-                rc = record_vulkan_graphics_v6_staged_image_uploads(command_buffer, attachments);
+                rc = record_vulkan_graphics_v6_staged_image_uploads(command_buffer, attachments, strict_passthrough);
                 if (rc != 0) goto cleanup;
                 VkClearDepthStencilValue value;
                 memset(&value, 0, sizeof(value));
@@ -35843,7 +35854,7 @@ begin_rendering_cleanup:
                                            1,
                                            &region);
                 } else {
-                    rc = record_vulkan_graphics_v6_staged_image_uploads(command_buffer, attachments);
+                    rc = record_vulkan_graphics_v6_staged_image_uploads(command_buffer, attachments, strict_passthrough);
                     if (rc != 0) goto cleanup;
                     vkCmdCopyImageToBuffer(command_buffer,
                                            image->image,
@@ -35869,7 +35880,7 @@ begin_rendering_cleanup:
                         &view->images[src_image->source_index]) ||
                     !vulkan_graphics_v610_image_copy_single_sample_supported(
                         &view->images[dst_image->source_index])) { rc = -EOPNOTSUPP; goto cleanup; }
-                rc = record_vulkan_graphics_v6_staged_image_uploads(command_buffer, attachments);
+                rc = record_vulkan_graphics_v6_staged_image_uploads(command_buffer, attachments, strict_passthrough);
                 if (rc != 0) goto cleanup;
                 VkImageCopy region = {
                     .srcSubresource = {
@@ -35937,7 +35948,7 @@ begin_rendering_cleanup:
                         &view->images[src_image->source_index],
                         &view->images[dst_image->source_index],
                         resolve)) { rc = -EOPNOTSUPP; goto cleanup; }
-                rc = record_vulkan_graphics_v6_staged_image_uploads(command_buffer, attachments);
+                rc = record_vulkan_graphics_v6_staged_image_uploads(command_buffer, attachments, strict_passthrough);
                 if (rc != 0) goto cleanup;
                 VkImageResolve region = {
                     .srcSubresource = {
@@ -36005,7 +36016,7 @@ begin_rendering_cleanup:
                         &view->images[src_image->source_index],
                         &view->images[dst_image->source_index],
                         blit)) { rc = -EOPNOTSUPP; goto cleanup; }
-                rc = record_vulkan_graphics_v6_staged_image_uploads(command_buffer, attachments);
+                rc = record_vulkan_graphics_v6_staged_image_uploads(command_buffer, attachments, strict_passthrough);
                 if (rc != 0) goto cleanup;
                 VkImageBlit region = {
                     .srcSubresource = {
