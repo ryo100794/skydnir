@@ -3424,6 +3424,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VK_ACCESS_SHADER_READ_BIT", helper)
         self.assertIn("vkCmdPipelineBarrier(command_buffer", helper)
         self.assertNotIn("if (image->requires_staging) return -EOPNOTSUPP;", executor)
+        self.assertIn("&dispatch_sampler_count,\n            strict_passthrough", executor)
         self.assertIn("rc = -EOPNOTSUPP;", helper)
         run_body = executor.split("static int run_vulkan_graphics_v6_frame", 1)[1].split(
             "static int recv_vulkan_graphics_v6_header_with_fds", 1
@@ -5648,6 +5649,7 @@ class GpuAbiContractTest(unittest.TestCase):
         if "static int materialize_vulkan_dispatch_v52_image_layout_ranges" in executor:
             layout_materializer += c_function_body(executor, "materialize_vulkan_dispatch_v52_image_layout_ranges")
         self.assertIn("record_vulkan_dispatch_v52_initial_image_layout_ranges", runner)
+        self.assertIn("dispatch_images, dispatch_image_count, strict_passthrough", runner)
         for marker in [
             "object_tables->image_layout_ranges",
             "object_tables->image_layout_range_count",
@@ -5667,6 +5669,9 @@ class GpuAbiContractTest(unittest.TestCase):
         dispatch_record_body = c_function_body(executor, "record_vulkan_dispatch_v52_initial_image_layout_ranges")
         graphics_record_body = c_function_body(executor, "record_vulkan_graphics_v620_initial_image_layout_ranges")
 
+        self.assertIn("strict passthrough initial image layout range mismatch", dispatch_record_body)
+        self.assertIn("return -EOPNOTSUPP;", dispatch_record_body)
+        self.assertIn("strict_passthrough", dispatch_record_body)
         self.assertIn("VulkanReplayImageLayoutRange *layout_ranges;", executor)
         self.assertIn("uint32_t layout_range_capacity;", executor)
         self.assertNotIn(
@@ -5814,6 +5819,9 @@ class GpuAbiContractTest(unittest.TestCase):
             materialize_body.index("VkImageCreateInfo ici"),
         )
         self.assertIn("dst->requires_staging = src->samples == VK_SAMPLE_COUNT_1_BIT", materialize_body)
+        self.assertIn("strict passthrough image staging materialization mismatch", materialize_body)
+        self.assertIn("strict_passthrough && dst->requires_staging", materialize_body)
+        self.assertIn("return -EOPNOTSUPP;", materialize_body)
         self.assertIn("src->samples == VK_SAMPLE_COUNT_1_BIT", materialize_body)
         self.assertIn("memory->requires_device_local = 1;", materialize_body)
         self.assertNotIn("direct_host_upload_needed", materialize_body)
