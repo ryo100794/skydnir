@@ -5265,9 +5265,10 @@ class GpuAbiContractTest(unittest.TestCase):
         collector = c_function_body(icd, "collect_v5_image_layout_range_entries")
         self.assertIn("v5_executor_create_initial_layout_for_image", icd)
         helper = c_function_body(icd, "v5_executor_create_initial_layout_for_image")
-        self.assertIn("image->tiling == VK_IMAGE_TILING_LINEAR", helper)
-        self.assertIn("image->current_layout == VK_IMAGE_LAYOUT_PREINITIALIZED", helper)
+        self.assertIn("(void)image;", helper)
         self.assertIn("return VK_IMAGE_LAYOUT_UNDEFINED;", helper)
+        self.assertNotIn("VK_IMAGE_TILING_LINEAR", helper)
+        self.assertNotIn("VK_IMAGE_LAYOUT_PREINITIALIZED", helper)
         self.assertIn("if (!image->layout_mixed)", collector)
         self.assertIn("const VkImageLayout executor_initial =", collector)
         self.assertIn("if (image->current_layout == executor_initial) continue;", collector)
@@ -5618,8 +5619,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("vkCreateImageView(device, &ivci, NULL, &dst->view)", executor)
         self.assertIn("vkCreateSampler(device, &sci, NULL, &dst->sampler)", executor)
         self.assertIn("destroy_vulkan_dispatch_image_objects(rt->device", executor)
-        self.assertIn("src->tiling != VK_IMAGE_TILING_LINEAR", executor)
-        self.assertIn("src->tiling == VK_IMAGE_TILING_OPTIMAL", executor)
+        self.assertIn("vulkan_dispatch_image_tiling_valid_for_transport", executor)
+        tiling_helper = c_function_body(executor, "vulkan_dispatch_image_tiling_valid_for_transport")
+        self.assertIn("VK_IMAGE_TILING_OPTIMAL", tiling_helper)
+        self.assertNotIn("VK_IMAGE_TILING_LINEAR", tiling_helper)
         self.assertIn("VK_IMAGE_USAGE_TRANSFER_DST_BIT", executor)
         self.assertIn("VK_IMAGE_USAGE_TRANSFER_SRC_BIT", executor)
         self.assertIn("create_vulkan_buffer_with_usage", executor)
@@ -5656,13 +5659,16 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("!vulkan_dispatch_image_usage_supported_by_format(", materialize_body)
         self.assertIn("!vulkan_dispatch_image_view_range_valid(src_image, src)", materialize_body)
         self.assertIn("dst->samples = (VkSampleCountFlagBits)src->samples;", materialize_body)
-        self.assertIn("dst->requires_staging = src->tiling == VK_IMAGE_TILING_OPTIMAL", materialize_body)
-        self.assertIn("dst->direct_host_upload_needed = src->tiling == VK_IMAGE_TILING_LINEAR", materialize_body)
+        self.assertIn("!vulkan_dispatch_image_tiling_valid_for_transport(src->tiling)", materialize_body)
+        self.assertLess(
+            materialize_body.index("!vulkan_dispatch_image_tiling_valid_for_transport(src->tiling)"),
+            materialize_body.index("VkImageCreateInfo ici"),
+        )
+        self.assertIn("dst->requires_staging = src->samples == VK_SAMPLE_COUNT_1_BIT", materialize_body)
         self.assertIn("src->samples == VK_SAMPLE_COUNT_1_BIT", materialize_body)
-        self.assertIn("if (dst->direct_host_upload_needed)", materialize_body)
-        self.assertIn("if (memory->requires_device_local) return -EOPNOTSUPP;", materialize_body)
         self.assertIn("memory->requires_device_local = 1;", materialize_body)
-        self.assertIn("} else if (image->direct_host_upload_needed) {", materialize_body)
+        self.assertNotIn("direct_host_upload_needed", materialize_body)
+        self.assertNotIn("VK_IMAGE_TILING_LINEAR", materialize_body)
         self.assertIn("dst->upload_pending = dst->requires_staging;", materialize_body)
         self.assertIn("src->samples == VK_SAMPLE_COUNT_1_BIT", msaa_helper_body)
         self.assertIn("const VkImageUsageFlags accepted_msaa_usage", msaa_helper_body)
@@ -11882,6 +11888,25 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertLess(materialize_body.index(flags_gate), materialize_body.index("VkImageCreateInfo ici"))
         self.assertLess(materialize_body.index(flags_gate), materialize_body.index("vkCreateImage(device, &ici"))
         self.assertIn(".flags = (VkImageCreateFlags)src->create_flags", materialize_body)
+
+    def test_vulkan_image_tiling_is_fail_closed_in_executor(self):
+        icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
+
+        image_props_body = c_function_body(icd, "vkGetPhysicalDeviceImageFormatProperties")
+        self.assertIn("tiling != VK_IMAGE_TILING_OPTIMAL", image_props_body)
+        self.assertIn("return VK_ERROR_FORMAT_NOT_SUPPORTED;", image_props_body)
+
+        tiling_helper = c_function_body(executor, "vulkan_dispatch_image_tiling_valid_for_transport")
+        self.assertIn("VK_IMAGE_TILING_OPTIMAL", tiling_helper)
+        self.assertNotIn("VK_IMAGE_TILING_LINEAR", tiling_helper)
+        materialize_body = c_function_body(executor, "materialize_vulkan_dispatch_images")
+        gate = "vulkan_dispatch_image_tiling_valid_for_transport(src->tiling)"
+        self.assertIn(gate, materialize_body)
+        self.assertLess(materialize_body.index(gate), materialize_body.index("VkImageCreateInfo ici"))
+        self.assertLess(materialize_body.index(gate), materialize_body.index("vkCreateImage(device, &ici"))
+        self.assertNotIn("direct_host_upload_needed", executor)
+        self.assertNotIn("VK_IMAGE_TILING_LINEAR", materialize_body)
 
     def test_vulkan_image_view_component_swizzles_are_fail_closed_in_icd_and_executor(self):
         icd = VULKAN_ICD.read_text()

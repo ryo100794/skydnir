@@ -6822,7 +6822,7 @@ static bool pdocker_vk_image_layout_value_valid_for_transport(
         case VK_IMAGE_LAYOUT_PRESENT_SRC_KHR:
             return true;
         case VK_IMAGE_LAYOUT_PREINITIALIZED:
-            return image->tiling == VK_IMAGE_TILING_LINEAR;
+            return false;
         default:
             return false;
     }
@@ -6832,11 +6832,7 @@ static VkImageAspectFlags image_format_full_aspect_mask(VkFormat format);
 
 static VkImageLayout v5_executor_create_initial_layout_for_image(
         const PdockerVkImage *image) {
-    if (!image) return VK_IMAGE_LAYOUT_UNDEFINED;
-    if (image->tiling == VK_IMAGE_TILING_LINEAR &&
-        image->current_layout == VK_IMAGE_LAYOUT_PREINITIALIZED) {
-        return VK_IMAGE_LAYOUT_PREINITIALIZED;
-    }
+    (void)image;
     return VK_IMAGE_LAYOUT_UNDEFINED;
 }
 

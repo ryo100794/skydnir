@@ -3144,7 +3144,6 @@ typedef struct {
     VulkanVectorBuffer staging;
     int descriptor_layout_seen;
     int requires_staging;
-    int direct_host_upload_needed;
     int upload_pending;
     int writeback_needed;
 } VulkanDispatchImageObject;
@@ -3801,14 +3800,13 @@ static VkImageLayout vulkan_replay_layout_for_executor(VkImageLayout transported
 }
 
 static VkImageLayout vulkan_image_create_initial_layout_for_transport(
-        VkImageTiling tiling,
         VkImageLayout transported_layout) {
-    transported_layout = vulkan_replay_layout_for_executor(transported_layout);
-    if (tiling == VK_IMAGE_TILING_LINEAR &&
-        transported_layout == VK_IMAGE_LAYOUT_PREINITIALIZED) {
-        return VK_IMAGE_LAYOUT_PREINITIALIZED;
-    }
+    (void)vulkan_replay_layout_for_executor(transported_layout);
     return VK_IMAGE_LAYOUT_UNDEFINED;
+}
+
+static int vulkan_dispatch_image_tiling_valid_for_transport(uint32_t tiling) {
+    return (VkImageTiling)tiling == VK_IMAGE_TILING_OPTIMAL;
 }
 
 static int vulkan_image_tight_mip_size(
@@ -4441,9 +4439,8 @@ static int materialize_vulkan_dispatch_images(
         if (!vulkan_dispatch_image_create_shape_valid(src)) {
             return -EOPNOTSUPP;
         }
-        if (src->tiling != VK_IMAGE_TILING_OPTIMAL &&
-            src->tiling != VK_IMAGE_TILING_LINEAR) {
-            return -ENOTSUP;
+        if (!vulkan_dispatch_image_tiling_valid_for_transport(src->tiling)) {
+            return -EOPNOTSUPP;
         }
         if (!vulkan_dispatch_image_usage_supported_by_format(
                 (VkFormat)src->format, (VkImageUsageFlags)src->usage)) {
@@ -4455,7 +4452,6 @@ static int materialize_vulkan_dispatch_images(
         }
         VkImageLayout create_initial_layout =
             vulkan_image_create_initial_layout_for_transport(
-                (VkImageTiling)src->tiling,
                 (VkImageLayout)src->initial_layout);
         int mem_index = find_image_memory_object(
             memories, *memory_count, src->memory_resource_index);
@@ -4491,10 +4487,7 @@ static int materialize_vulkan_dispatch_images(
         dst->samples = (VkSampleCountFlagBits)src->samples;
         dst->array_layers = src->array_layers;
         dst->mip_levels = src->mip_levels;
-        dst->requires_staging = src->tiling == VK_IMAGE_TILING_OPTIMAL &&
-                                src->samples == VK_SAMPLE_COUNT_1_BIT;
-        dst->direct_host_upload_needed = src->tiling == VK_IMAGE_TILING_LINEAR &&
-                                         src->samples == VK_SAMPLE_COUNT_1_BIT;
+        dst->requires_staging = src->samples == VK_SAMPLE_COUNT_1_BIT;
         dst->upload_pending = dst->requires_staging;
         uint32_t native_queue_family_indices[2] = {0, 0};
         uint32_t native_queue_family_count = 0;
@@ -4548,10 +4541,7 @@ static int materialize_vulkan_dispatch_images(
         if ((size_t)native_end > memory->allocation_size) {
             memory->allocation_size = (size_t)native_end;
         }
-        if (dst->direct_host_upload_needed) {
-            if (memory->requires_device_local) return -EOPNOTSUPP;
-            memory->needs_host_map = 1;
-        } else if (!dst->requires_staging) {
+        if (!dst->requires_staging) {
             if (memory->needs_host_map) return -EOPNOTSUPP;
             memory->requires_device_local = 1;
         }
@@ -4627,14 +4617,6 @@ static int materialize_vulkan_dispatch_images(
             }
             int plane_rc = vulkan_image_unpack_packed_depth_stencil_to_planes(image);
             if (plane_rc != 0) return plane_rc;
-        } else if (image->direct_host_upload_needed) {
-            if (!memory->map) return -EIO;
-            if (read_fd_exact(memory->fd,
-                              (unsigned char *)memory->map + image->memory_offset,
-                              (size_t)image->memory_size,
-                              fd_offset) != 0) {
-                return -EIO;
-            }
         }
     }
     for (size_t i = 0; i < object_tables->image_view_count; ++i) {
@@ -25408,7 +25390,7 @@ static int vulkan_graphics_v620_layout_value_valid(
         case VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL:
             return 1;
         case VK_IMAGE_LAYOUT_PREINITIALIZED:
-            return image->tiling == VK_IMAGE_TILING_LINEAR;
+            return 0;
         default:
             return 0;
     }
