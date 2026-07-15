@@ -6076,6 +6076,11 @@ class GpuAbiContractTest(unittest.TestCase):
                 "PDOCKER_GPU_VULKAN_DISPATCH_V53_BUFFER_VIEW_SCHEMA_HASH",
             ),
             (
+                "PDOCKER_GPU_VULKAN_DISPATCH_V55_HEADER_EXTENSION_FIELDS",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V55_HEADER_EXTENSION_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V55_HEADER_EXTENSION_SCHEMA_HASH",
+            ),
+            (
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_FRAME_HEADER_FIELDS",
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_FRAME_HEADER_FIELD_COUNT",
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_FRAME_HEADER_SCHEMA_HASH",
@@ -6284,6 +6289,11 @@ class GpuAbiContractTest(unittest.TestCase):
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V626_EVENT_WAIT_REF_FIELDS",
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V626_EVENT_WAIT_REF_FIELD_COUNT",
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V626_EVENT_WAIT_REF_SCHEMA_HASH",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V630_HEADER_EXTENSION_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V630_HEADER_EXTENSION_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V630_HEADER_EXTENSION_SCHEMA_HASH",
             ),
             (
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELDS",
@@ -7050,6 +7060,11 @@ class GpuAbiContractTest(unittest.TestCase):
                 "PdockerGpuVulkanGraphicsV626EventWaitRefEntry",
             ),
             (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V630_HEADER_EXTENSION_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V630_HEADER_EXTENSION_FIELD_COUNT",
+                "PdockerGpuVulkanGraphicsV630HeaderExtension",
+            ),
+            (
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELDS",
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELD_COUNT",
                 "PdockerGpuVulkanGraphicsV6CommandEntry",
@@ -7091,6 +7106,11 @@ class GpuAbiContractTest(unittest.TestCase):
                 "PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_OBJECT_FIELD_COUNT",
                 "PdockerGpuVulkanDispatchV5DescriptorObjectEntry",
             ),
+            (
+                "PDOCKER_GPU_VULKAN_DISPATCH_V55_HEADER_EXTENSION_FIELDS",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V55_HEADER_EXTENSION_FIELD_COUNT",
+                "PdockerGpuVulkanDispatchV55HeaderExtension",
+            ),
         ]
         for header_path in [APP_HEADER, CONTAINER_HEADER]:
             for field_macro, count_macro, struct_name in schemas:
@@ -7098,6 +7118,59 @@ class GpuAbiContractTest(unittest.TestCase):
                     fields, count, _, _ = vulkan_dispatch_v5_schema(header_path, field_macro, count_macro)
                     self.assertEqual(len(fields), count)
                     self.assertEqual([name for name, _ in fields], c_struct_field_names(header_path, struct_name))
+
+    def test_vulkan_native_object_identity_extensions_are_append_only(self):
+        expected_identity_fields = [
+            "instance_object_id",
+            "physical_device_object_id",
+            "device_object_id",
+            "queue_object_id",
+            "extension_hash",
+        ]
+        for header_path in [APP_HEADER, CONTAINER_HEADER]:
+            source = header_path.read_text()
+            for marker in [
+                "PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR 5u",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_NATIVE_OBJECTS PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V55_HEADER_EXTENSION_SCHEMA_HASH 0x399a68f6b557789aull",
+                "PdockerGpuVulkanDispatchV55HeaderExtension",
+                "PdockerGpuVulkanDispatchV55FrameHeader",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V630_ABI_MINOR 30u",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V630_HEADER_EXTENSION_SCHEMA_HASH 0x399a68f6b557789aull",
+                "PdockerGpuVulkanGraphicsV630HeaderExtension",
+                "PdockerGpuVulkanGraphicsV630FrameHeader",
+                "#define PDOCKER_GPU_VULKAN_DISPATCH_V5_FRAME_HEADER_FIELD_COUNT 46u",
+                "#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_FRAME_HEADER_FIELD_COUNT 72u",
+            ]:
+                self.assertIn(marker, source)
+            dispatch_fields, dispatch_count, dispatch_hash, dispatch_computed = vulkan_dispatch_v5_schema(
+                header_path,
+                "PDOCKER_GPU_VULKAN_DISPATCH_V55_HEADER_EXTENSION_FIELDS",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V55_HEADER_EXTENSION_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V55_HEADER_EXTENSION_SCHEMA_HASH",
+            )
+            graphics_fields, graphics_count, graphics_hash, graphics_computed = vulkan_dispatch_v5_schema(
+                header_path,
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V630_HEADER_EXTENSION_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V630_HEADER_EXTENSION_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V630_HEADER_EXTENSION_SCHEMA_HASH",
+            )
+            self.assertEqual(expected_identity_fields, [name for name, _ in dispatch_fields])
+            self.assertEqual(expected_identity_fields, [name for name, _ in graphics_fields])
+            self.assertEqual(5, dispatch_count)
+            self.assertEqual(5, graphics_count)
+            self.assertEqual(dispatch_hash, dispatch_computed)
+            self.assertEqual(graphics_hash, graphics_computed)
+            self.assertEqual(["v54", "v55"], c_struct_field_names(header_path, "PdockerGpuVulkanDispatchV55FrameHeader"))
+            self.assertEqual(["v629", "v630"], c_struct_field_names(header_path, "PdockerGpuVulkanGraphicsV630FrameHeader"))
+            dispatch_ext = source.split("PDOCKER_GPU_VULKAN_DISPATCH_V55_HEADER_EXTENSION_FIELDS", 1)[1].split(
+                "PDOCKER_GPU_VULKAN_DISPATCH_V55_HEADER_EXTENSION_FIELD_COUNT", 1
+            )[0]
+            graphics_ext = source.split("PDOCKER_GPU_VULKAN_GRAPHICS_V630_HEADER_EXTENSION_FIELDS", 1)[1].split(
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V630_HEADER_EXTENSION_FIELD_COUNT", 1
+            )[0]
+            self.assertNotIn("dispatch_id", dispatch_ext)
+            self.assertNotIn("submit_id", graphics_ext)
 
     def test_vulkan_dispatch_v5_schema_is_single_source_and_advertised(self):
         app = APP_HEADER.read_text()
