@@ -7656,6 +7656,18 @@ static bool command_buffer_has_executor_frame_content_in_sequence_range(
     return false;
 }
 
+typedef struct {
+    PdockerVkPipeline *pipeline_objects[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_PIPELINES];
+    PdockerVkMemory *memory_objects[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_RESOURCES];
+    uint32_t memory_resource_indices[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_RESOURCES];
+    PdockerVkBuffer *buffer_objects[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_RESOURCES];
+    uint32_t buffer_resource_indices[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_RESOURCES];
+    PdockerVkImage *image_objects[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGES];
+    PdockerVkImageView *image_view_objects[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGE_VIEWS];
+    PdockerVkSampler *sampler_objects[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_SAMPLERS];
+    int fds[PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS];
+} PdockerVkGraphicsFrameObjectTables;
+
 static int send_recorded_vulkan_graphics_v6_1_frame_range(
         const PdockerVkCommandBuffer *cmd,
         const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *submit_sync_entries,
@@ -7673,14 +7685,15 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     int socket_fd = connect_queue();
     if (socket_fd < 0) return socket_fd;
 
-    PdockerVkPipeline *pipeline_objects[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_PIPELINES];
-    PdockerVkMemory *memory_objects[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_RESOURCES];
-    uint32_t memory_resource_indices[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_RESOURCES];
-    PdockerVkBuffer *buffer_objects[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_RESOURCES];
-    uint32_t buffer_resource_indices[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_RESOURCES];
-    PdockerVkImage *image_objects[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGES];
-    PdockerVkImageView *image_view_objects[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGE_VIEWS];
-    PdockerVkSampler *sampler_objects[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_SAMPLERS];
+    PdockerVkGraphicsFrameObjectTables *object_tables = NULL;
+    PdockerVkPipeline **pipeline_objects = NULL;
+    PdockerVkMemory **memory_objects = NULL;
+    uint32_t *memory_resource_indices = NULL;
+    PdockerVkBuffer **buffer_objects = NULL;
+    uint32_t *buffer_resource_indices = NULL;
+    PdockerVkImage **image_objects = NULL;
+    PdockerVkImageView **image_view_objects = NULL;
+    PdockerVkSampler **sampler_objects = NULL;
     PdockerGpuVulkanDispatchV5ResourceEntry *resources = NULL;
     PdockerGpuVulkanDispatchV5DescriptorObjectEntry *descriptors = NULL;
     PdockerGpuVulkanDispatchV5ImageEntry *image_entries = NULL;
@@ -7735,15 +7748,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     PdockerGpuVulkanGraphicsV627BufferViewEntry *buffer_views = NULL;
     PdockerGpuVulkanGraphicsV628PushConstantRangeEntry *push_constant_ranges = NULL;
     PdockerGpuVulkanGraphicsV629VariableDescriptorCountEntry *variable_descriptor_counts = NULL;
-    int fds[PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS];
-    memset(pipeline_objects, 0, sizeof(pipeline_objects));
-    memset(memory_objects, 0, sizeof(memory_objects));
-    memset(memory_resource_indices, 0, sizeof(memory_resource_indices));
-    memset(buffer_objects, 0, sizeof(buffer_objects));
-    memset(buffer_resource_indices, 0, sizeof(buffer_resource_indices));
-    memset(image_objects, 0, sizeof(image_objects));
-    memset(image_view_objects, 0, sizeof(image_view_objects));
-    memset(sampler_objects, 0, sizeof(sampler_objects));
+    int *fds = NULL;
     if (submit_sync_count > PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS) {
         close(socket_fd);
         return -E2BIG;
@@ -7752,6 +7757,20 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
         close(socket_fd);
         return -EINVAL;
     }
+    object_tables = (PdockerVkGraphicsFrameObjectTables *)calloc(1, sizeof(*object_tables));
+    if (!object_tables) {
+        close(socket_fd);
+        return -ENOMEM;
+    }
+    pipeline_objects = object_tables->pipeline_objects;
+    memory_objects = object_tables->memory_objects;
+    memory_resource_indices = object_tables->memory_resource_indices;
+    buffer_objects = object_tables->buffer_objects;
+    buffer_resource_indices = object_tables->buffer_resource_indices;
+    image_objects = object_tables->image_objects;
+    image_view_objects = object_tables->image_view_objects;
+    sampler_objects = object_tables->sampler_objects;
+    fds = object_tables->fds;
     submit_syncs = (PdockerGpuVulkanGraphicsV619SubmitSyncEntry *)calloc(
         PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS, sizeof(*submit_syncs));
     submit_infos = (PdockerGpuVulkanGraphicsV621SubmitInfoEntry *)calloc(
@@ -7762,6 +7781,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
         free(submit_sync_infos);
         free(submit_infos);
         free(submit_syncs);
+        free(object_tables);
         close(socket_fd);
         return -ENOMEM;
     }
@@ -7811,7 +7831,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
             }
         }
     }
-    memset(fds, -1, sizeof(fds));
+    memset(fds, -1, sizeof(*fds) * PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS);
 
     bool pre_need_v611_buffer_write = false;
     bool pre_need_v612_clear_color = false;
@@ -10847,6 +10867,7 @@ cleanup:
     free(image_entries);
     free(descriptors);
     free(resources);
+    free(object_tables);
     free(frame);
 #undef APPEND_GRAPHICS_FRAME_BYTES
 #undef REFRESH_GRAPHICS_V6_FRAME_POINTERS
