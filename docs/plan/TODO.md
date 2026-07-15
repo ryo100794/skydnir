@@ -430,7 +430,9 @@ or closes.
   limits; the remaining cap is the explicit V6.2 ABI table limit.  Generic
   compute specialization constants now route as binary V5 state before legacy
   text handling and no longer touch a fixed hex scratch buffer, avoiding silent
-  narrowing and redundant CPU copies for specialization payloads.
+  narrowing and redundant CPU copies for specialization payloads.  Dispatch
+  command recording now fails closed if the dispatch-op table cannot reserve an
+  entry, so submit never observes a silently truncated compute command buffer.
   Variable descriptor-count layouts now use V6.29
   metadata to carry allocation-time actual descriptor counts, so partially sized
   descriptor arrays are validated and replayed by actual count instead of being

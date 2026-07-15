@@ -27476,10 +27476,13 @@ VKAPI_ATTR void VKAPI_CALL vkCmdDispatch(
             command_op.type = PDOCKER_VK_COMMAND_DISPATCH;
             command_op.index = op_index;
             (void)append_command_op(cmd, &command_op);
-        } else if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
-            fprintf(stderr,
-                    "pdocker-vulkan-icd: dispatch command buffer full max=%u\n",
-                    PDOCKER_VK_MAX_DISPATCH_OPS);
+        } else {
+            command_buffer_mark_recording_failed(cmd, "dispatch-record-overflow");
+            if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
+                fprintf(stderr,
+                        "pdocker-vulkan-icd: dispatch command buffer full max=%u\n",
+                        PDOCKER_VK_MAX_DISPATCH_OPS);
+            }
         }
     }
 }
@@ -27543,10 +27546,13 @@ VKAPI_ATTR void VKAPI_CALL vkCmdDispatchBase(
             command_op.type = PDOCKER_VK_COMMAND_DISPATCH;
             command_op.index = op_index;
             (void)append_command_op(cmd, &command_op);
-        } else if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
-            fprintf(stderr,
-                    "pdocker-vulkan-icd: dispatch-base command buffer full max=%u\n",
-                    PDOCKER_VK_MAX_DISPATCH_OPS);
+        } else {
+            command_buffer_mark_recording_failed(cmd, "dispatch-base-record-overflow");
+            if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
+                fprintf(stderr,
+                        "pdocker-vulkan-icd: dispatch-base command buffer full max=%u\n",
+                        PDOCKER_VK_MAX_DISPATCH_OPS);
+            }
         }
     }
 }
@@ -27627,10 +27633,13 @@ VKAPI_ATTR void VKAPI_CALL vkCmdDispatchIndirect(
             command_op.type = PDOCKER_VK_COMMAND_DISPATCH;
             command_op.index = op_index;
             (void)append_command_op(cmd, &command_op);
-        } else if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
-            fprintf(stderr,
-                    "pdocker-vulkan-icd: indirect dispatch command buffer full max=%u\n",
-                    PDOCKER_VK_MAX_DISPATCH_OPS);
+        } else {
+            command_buffer_mark_recording_failed(cmd, "dispatch-indirect-record-overflow");
+            if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
+                fprintf(stderr,
+                        "pdocker-vulkan-icd: indirect dispatch command buffer full max=%u\n",
+                        PDOCKER_VK_MAX_DISPATCH_OPS);
+            }
         }
     }
 }

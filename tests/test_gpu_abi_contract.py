@@ -15943,10 +15943,10 @@ class GpuAbiContractTest(unittest.TestCase):
             "command_buffer_mark_recording_failed(cmd, reason);",
         ]:
             self.assertIn(marker, icd)
-        for name, next_name in [
-            ("vkCmdDispatch", "vkCmdDispatchBase"),
-            ("vkCmdDispatchBase", "vkCmdDispatchBaseKHR"),
-            ("vkCmdDispatchIndirect", "vkCmdPushConstants"),
+        for name, next_name, overflow_reason in [
+            ("vkCmdDispatch", "vkCmdDispatchBase", "dispatch-record-overflow"),
+            ("vkCmdDispatchBase", "vkCmdDispatchBaseKHR", "dispatch-base-record-overflow"),
+            ("vkCmdDispatchIndirect", "vkCmdPushConstants", "dispatch-indirect-record-overflow"),
         ]:
             body = icd.split(f"VKAPI_ATTR void VKAPI_CALL {name}", 1)[1].split(
                 f"VKAPI_ATTR void VKAPI_CALL {next_name}", 1
@@ -15959,6 +15959,11 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertLess(
                 body.index("command_buffer_reject_dispatch_inside_rendering_scope(cmd)"),
                 body.index("validate_bound_descriptor_layouts_before_dispatch(cmd)"),
+            )
+            self.assertIn(f'command_buffer_mark_recording_failed(cmd, "{overflow_reason}");', body)
+            self.assertLess(
+                body.index(f'command_buffer_mark_recording_failed(cmd, "{overflow_reason}");'),
+                body.index("pdocker-vulkan-icd:"),
             )
 
     def test_vulkan_dynamic_rendering_secondary_contents_flag_is_flattened_for_replay(self):
