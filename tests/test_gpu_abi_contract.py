@@ -6804,6 +6804,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("!api_ranges || !api_buffer_sizes || !api_buffer_usages || !api_descriptor_types", frame_sender)
         self.assertIn("resources[buffer_index].usage = api_buffer_usages[i];", frame_sender)
         self.assertIn("resources[buffer_index].usage |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT", frame_sender)
+        self.assertIn("strict V5.1 frame rejected: buffer usage widening required", frame_sender)
+        self.assertIn("allow_strict_compat_mutation", frame_sender)
 
         binding_struct = executor.split("} VulkanVectorBuffer;", 1)[1].split("} VulkanDispatchBinding;", 1)[0]
         self.assertIn("uint64_t api_buffer_usage;", binding_struct)
@@ -6819,6 +6821,8 @@ class GpuAbiContractTest(unittest.TestCase):
         frame_sender = c_function_body(icd, "send_generic_vulkan_dispatch_v5_1_op")
         self.assertIn("resources[buffer_index].usage = (uint64_t)dispatch_indirect_buffer->usage;", frame_sender)
         self.assertIn("resources[buffer_index].usage |= VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT", frame_sender)
+        self.assertIn("strict V5.1 frame rejected: dispatch-indirect usage widening required", frame_sender)
+        self.assertIn("strict V5.1 frame rejected: barrier buffer usage widening required", frame_sender)
 
         indirect_materializer = c_function_body(executor, "materialize_vulkan_dispatch_indirect_buffer")
         self.assertIn("(VkBufferUsageFlags)buffer->usage", indirect_materializer)
@@ -10733,8 +10737,11 @@ class GpuAbiContractTest(unittest.TestCase):
         for body in [compute_body, graphics_body]:
             self.assertIn("pdocker_vk_pipeline_create_flags_transportable", body)
             self.assertIn("ci->flags, ci->basePipelineHandle, ci->basePipelineIndex", body)
-            self.assertNotIn("ci->flags != 0", body)
+            self.assertIn('env_truthy_default("PDOCKER_GPU_STRICT_PASSTHROUGH", false)', body)
+            self.assertIn("strict_passthrough && ci->flags != 0", body)
+        self.assertIn('trace_icd_runtime_failure("strict-compute-pipeline-flags-unsupported"', compute_body)
         self.assertIn('trace_icd_runtime_failure("compute-pipeline-create-info-unsupported"', compute_body)
+        self.assertIn('trace_icd_runtime_failure("strict-graphics-pipeline-flags-unsupported"', graphics_body)
         self.assertIn("pipeline->graphics_unsupported = true;", graphics_body)
 
 

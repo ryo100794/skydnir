@@ -11969,6 +11969,10 @@ static int send_generic_vulkan_dispatch_v5_1_op(
                 (const void *)entry_name);
         return -EINVAL;
     }
+    const bool strict_passthrough =
+        env_truthy_default("PDOCKER_GPU_STRICT_PASSTHROUGH", false);
+    const bool allow_strict_compat_mutation =
+        env_truthy_default("PDOCKER_GPU_ALLOW_STRICT_SHADER_COMPAT_REWRITES", false);
     if (binding_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS ||
         image_descriptor_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS ||
         image_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGES ||
@@ -12259,6 +12263,27 @@ static int send_generic_vulkan_dispatch_v5_1_op(
         descriptors[i].transfer_offset = transfer_offset;
         descriptors[i].transfer_size = (uint64_t)sizes[i];
         descriptors[i].dynamic_offset = (uint64_t)api_dynamic_offsets[i];
+        uint64_t required_buffer_usage =
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+            VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+            VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+            VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
+        if ((VkDescriptorType)api_descriptor_types[i] == VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER) {
+            required_buffer_usage |= VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT;
+        } else if ((VkDescriptorType)api_descriptor_types[i] == VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER) {
+            required_buffer_usage |= VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT;
+        }
+        if (strict_passthrough && !allow_strict_compat_mutation &&
+            (api_buffer_usages[i] & required_buffer_usage) != required_buffer_usage) {
+            fprintf(stderr,
+                    "pdocker-vulkan-icd: strict V5.1 frame rejected: buffer usage widening required dispatch_id=%llu descriptor=%zu usage=0x%llx required=0x%llx\n",
+                    (unsigned long long)dispatch_id,
+                    i,
+                    (unsigned long long)api_buffer_usages[i],
+                    (unsigned long long)required_buffer_usage);
+            rc = -EINVAL;
+            goto cleanup;
+        }
         resources[buffer_index].usage = api_buffer_usages[i];
         resources[buffer_index].usage |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
             VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
@@ -12386,6 +12411,21 @@ static int send_generic_vulkan_dispatch_v5_1_op(
         resources[buffer_index].fd_index = PDOCKER_GPU_V5_RESOURCE_FD_NONE;
         resources[buffer_index].memory_offset = (uint64_t)dispatch_indirect_buffer->memory_offset;
         resources[buffer_index].size = (uint64_t)dispatch_indirect_buffer->size;
+        const uint64_t required_indirect_usage =
+            VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
+            VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+            VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+        if (strict_passthrough && !allow_strict_compat_mutation &&
+            (((uint64_t)dispatch_indirect_buffer->usage & required_indirect_usage) != required_indirect_usage)) {
+            fprintf(stderr,
+                    "pdocker-vulkan-icd: strict V5.1 frame rejected: dispatch-indirect usage widening required dispatch_id=%llu usage=0x%llx required=0x%llx\n",
+                    (unsigned long long)dispatch_id,
+                    (unsigned long long)dispatch_indirect_buffer->usage,
+                    (unsigned long long)required_indirect_usage);
+            rc = -EINVAL;
+            goto cleanup;
+        }
         resources[buffer_index].usage = (uint64_t)dispatch_indirect_buffer->usage;
         resources[buffer_index].usage |= VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
             VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
@@ -12425,6 +12465,20 @@ static int send_generic_vulkan_dispatch_v5_1_op(
         resources[buffer_index].fd_index = PDOCKER_GPU_V5_RESOURCE_FD_NONE;
         resources[buffer_index].memory_offset = (uint64_t)buffer->memory_offset;
         resources[buffer_index].size = (uint64_t)buffer->size;
+        const uint64_t required_barrier_usage =
+            VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+            VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+        if (strict_passthrough && !allow_strict_compat_mutation &&
+            (((uint64_t)buffer->usage & required_barrier_usage) != required_barrier_usage)) {
+            fprintf(stderr,
+                    "pdocker-vulkan-icd: strict V5.1 frame rejected: barrier buffer usage widening required dispatch_id=%llu usage=0x%llx required=0x%llx\n",
+                    (unsigned long long)dispatch_id,
+                    (unsigned long long)buffer->usage,
+                    (unsigned long long)required_barrier_usage);
+            rc = -EINVAL;
+            goto cleanup;
+        }
         resources[buffer_index].usage = (uint64_t)buffer->usage;
         resources[buffer_index].usage |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
             VK_BUFFER_USAGE_TRANSFER_DST_BIT |
@@ -23570,6 +23624,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateComputePipelines(
         VkResult pnext_rc = validate_and_fill_pipeline_feedback_pnext(
             "vkCreateComputePipelines", ci->pNext, 1u, false);
         if (pnext_rc != VK_SUCCESS) return pnext_rc;
+        const bool strict_passthrough =
+            env_truthy_default("PDOCKER_GPU_STRICT_PASSTHROUGH", false);
+        if (strict_passthrough && ci->flags != 0) {
+            trace_icd_runtime_failure("strict-compute-pipeline-flags-unsupported",
+                                      VK_ERROR_FEATURE_NOT_PRESENT);
+            return VK_ERROR_FEATURE_NOT_PRESENT;
+        }
         if (ci->sType != VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO ||
             !pdocker_vk_pipeline_create_flags_transportable(
                 ci->flags, ci->basePipelineHandle, ci->basePipelineIndex,
@@ -23867,6 +23928,14 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
             device ? ((PdockerVkDevice *)device)->requested_feature_mask : 0;
         pipeline->line_width = 1.0f;
         const VkGraphicsPipelineCreateInfo *ci = &pCreateInfos[i];
+        const bool strict_passthrough =
+            env_truthy_default("PDOCKER_GPU_STRICT_PASSTHROUGH", false);
+        if (strict_passthrough && ci->flags != 0) {
+            trace_icd_runtime_failure("strict-graphics-pipeline-flags-unsupported",
+                                      VK_ERROR_FEATURE_NOT_PRESENT);
+            pdocker_vk_pipeline_destroy(pipeline);
+            return VK_ERROR_FEATURE_NOT_PRESENT;
+        }
         if (!pdocker_vk_pipeline_create_flags_transportable(
                 ci->flags, ci->basePipelineHandle, ci->basePipelineIndex,
                 i, createInfoCount)) {
