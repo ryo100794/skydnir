@@ -30795,12 +30795,18 @@ static int send_graphics_sequence_segment(
         size_t submit_sync_count,
         bool first_segment,
         bool last_segment) {
-    PdockerGpuVulkanGraphicsV619SubmitSyncEntry segment_sync_entries[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+    PdockerGpuVulkanGraphicsV619SubmitSyncEntry *segment_sync_entries =
+        (PdockerGpuVulkanGraphicsV619SubmitSyncEntry *)calloc(
+            PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS,
+            sizeof(*segment_sync_entries));
+    if (!segment_sync_entries) return -ENOMEM;
     size_t segment_sync_count = filter_submit_sync_entries_for_graphics_frame(
         submit_sync_entries, submit_sync_count,
         first_segment, last_segment, segment_sync_entries);
-    return send_recorded_vulkan_graphics_v6_1_frame_range(
+    int rc = send_recorded_vulkan_graphics_v6_1_frame_range(
         cmd, segment_sync_entries, segment_sync_count, sequence_begin, sequence_end, !first_segment);
+    free(segment_sync_entries);
+    return rc;
 }
 
 static int execute_graphics_mixed_gpu_sequence(
@@ -31409,14 +31415,20 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2(
         if (validate_rc != VK_SUCCESS) return validate_rc;
         validate_rc = validate_submit2_signal_semaphores(src);
         if (validate_rc != VK_SUCCESS) return validate_rc;
-        PdockerGpuVulkanGraphicsV619SubmitSyncEntry validate_entries[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+        PdockerGpuVulkanGraphicsV619SubmitSyncEntry *validate_entries =
+            (PdockerGpuVulkanGraphicsV619SubmitSyncEntry *)calloc(
+                PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS,
+                sizeof(*validate_entries));
+        if (!validate_entries) return VK_ERROR_OUT_OF_HOST_MEMORY;
         size_t validate_entry_count = 0;
         VkFence validate_fence = (validate_i + 1u == submitCount) ? fence : VK_NULL_HANDLE;
         if (!collect_submit2_submit_sync_entries(src, validate_fence,
                                                  validate_entries, &validate_entry_count)) {
+            free(validate_entries);
             trace_icd_runtime_failure("submit2-sync-metadata-overflow", VK_ERROR_FEATURE_NOT_PRESENT);
             return VK_ERROR_FEATURE_NOT_PRESENT;
         }
+        free(validate_entries);
     }
     VkCommandBuffer **submit2_cmd_arrays = calloc(submitCount, sizeof(*submit2_cmd_arrays));
     if (!submit2_cmd_arrays) return VK_ERROR_OUT_OF_HOST_MEMORY;
@@ -31464,11 +31476,19 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2(
             return rc;
         }
 
-        PdockerGpuVulkanGraphicsV619SubmitSyncEntry submit2_sync_entries[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+        PdockerGpuVulkanGraphicsV619SubmitSyncEntry *submit2_sync_entries =
+            (PdockerGpuVulkanGraphicsV619SubmitSyncEntry *)calloc(
+                PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS,
+                sizeof(*submit2_sync_entries));
+        if (!submit2_sync_entries) {
+            free_submit2_command_arrays(submit2_cmd_arrays, submitCount);
+            return VK_ERROR_OUT_OF_HOST_MEMORY;
+        }
         size_t submit2_sync_count = 0;
         VkFence submit2_fence = (i + 1u == submitCount) ? fence : VK_NULL_HANDLE;
         if (!collect_submit2_submit_sync_entries(src, submit2_fence,
                                                  submit2_sync_entries, &submit2_sync_count)) {
+            free(submit2_sync_entries);
             trace_icd_runtime_failure("submit2-sync-metadata-overflow", VK_ERROR_FEATURE_NOT_PRESENT);
             free_submit2_command_arrays(submit2_cmd_arrays, submitCount);
             return VK_ERROR_FEATURE_NOT_PRESENT;
@@ -31484,6 +31504,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2(
         rc = vkQueueSubmit(queue, 1, &legacy_submit, VK_NULL_HANDLE);
         clear_submit2_metadata_override();
         clear_submit_sync_override();
+        free(submit2_sync_entries);
         if (rc != VK_SUCCESS) {
             free_submit2_command_arrays(submit2_cmd_arrays, submitCount);
             return rc;
