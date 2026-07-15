@@ -30971,11 +30971,16 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
             submit_sync_entries_include_wait(submit_sync_entries, submit_sync_count) &&
             (!submit_has_graphics_sync_frame ||
              submit_has_recorded_work_before_command(&pSubmits[i], first_graphics_submit_sync_cmd))) {
-            PdockerGpuVulkanGraphicsV619SubmitSyncEntry submit_wait_sync_entries[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+            PdockerGpuVulkanGraphicsV619SubmitSyncEntry *submit_wait_sync_entries =
+                (PdockerGpuVulkanGraphicsV619SubmitSyncEntry *)calloc(
+                    PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS,
+                    sizeof(*submit_wait_sync_entries));
+            if (!submit_wait_sync_entries) return VK_ERROR_OUT_OF_HOST_MEMORY;
             size_t submit_wait_sync_count = filter_submit_sync_entries_wait_only(
                 submit_sync_entries, submit_sync_count, submit_wait_sync_entries);
             int submit_wait_sync_rc = send_vulkan_submit_sync_only_frame(
                 submit_wait_sync_entries, submit_wait_sync_count);
+            free(submit_wait_sync_entries);
             if (submit_wait_sync_rc != 0) {
                 trace_icd_runtime_failure("submit-pre-wait-sync-failed",
                                           VK_ERROR_FEATURE_NOT_PRESENT);
@@ -30999,7 +31004,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
             }
             if (cmd->graphics_unsupported) {
                 if (env_truthy_default("PDOCKER_VULKAN_GRAPHICS_V6_VALIDATE_PRODUCER", false)) {
-                    PdockerGpuVulkanGraphicsV619SubmitSyncEntry frame_submit_sync_entries[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+                    PdockerGpuVulkanGraphicsV619SubmitSyncEntry *frame_submit_sync_entries =
+                        (PdockerGpuVulkanGraphicsV619SubmitSyncEntry *)calloc(
+                            PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS,
+                            sizeof(*frame_submit_sync_entries));
+                    if (!frame_submit_sync_entries) return VK_ERROR_OUT_OF_HOST_MEMORY;
                     size_t frame_submit_sync_count = filter_submit_sync_entries_for_graphics_frame(
                         submit_sync_entries, submit_sync_count,
                         j == first_graphics_submit_sync_cmd,
@@ -31009,6 +31018,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                     int graphics_rc = send_recorded_vulkan_graphics_v6_1_frame(
                         cmd, frame_submit_sync_entries, frame_submit_sync_count);
                     set_submit2_metadata_command_index(PDOCKER_GPU_GRAPHICS_V621_COMMAND_BUFFER_INDEX_NONE);
+                    free(frame_submit_sync_entries);
                     if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
                         fprintf(stderr,
                                 "pdocker-vulkan-icd: graphics V6.1 validation producer rc=%d\n",
@@ -31031,18 +31041,49 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                                               VK_ERROR_FEATURE_NOT_PRESENT);
                     return VK_ERROR_FEATURE_NOT_PRESENT;
                 }
-                PdockerGpuVulkanGraphicsV619SubmitSyncEntry frame_submit_sync_entries[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+                PdockerGpuVulkanGraphicsV619SubmitSyncEntry *frame_submit_sync_entries =
+                    (PdockerGpuVulkanGraphicsV619SubmitSyncEntry *)calloc(
+                        PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS,
+                        sizeof(*frame_submit_sync_entries));
+                PdockerGpuVulkanGraphicsV619SubmitSyncEntry *pre_wait_sync_entries =
+                    (PdockerGpuVulkanGraphicsV619SubmitSyncEntry *)calloc(
+                        PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS,
+                        sizeof(*pre_wait_sync_entries));
+                PdockerGpuVulkanGraphicsV619SubmitSyncEntry *frame_sync_without_waits =
+                    (PdockerGpuVulkanGraphicsV619SubmitSyncEntry *)calloc(
+                        PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS,
+                        sizeof(*frame_sync_without_waits));
+                PdockerGpuVulkanGraphicsV619SubmitSyncEntry *deferred_completion_sync_entries =
+                    (PdockerGpuVulkanGraphicsV619SubmitSyncEntry *)calloc(
+                        PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS,
+                        sizeof(*deferred_completion_sync_entries));
+                PdockerGpuVulkanGraphicsV619SubmitSyncEntry *deferred_frame_sync_entries =
+                    (PdockerGpuVulkanGraphicsV619SubmitSyncEntry *)calloc(
+                        PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS,
+                        sizeof(*deferred_frame_sync_entries));
+#define FREE_MIXED_SUBMIT_SYNC_ENTRIES() \
+                do { \
+                    free(deferred_frame_sync_entries); \
+                    free(deferred_completion_sync_entries); \
+                    free(frame_sync_without_waits); \
+                    free(pre_wait_sync_entries); \
+                    free(frame_submit_sync_entries); \
+                } while (0)
+                if (!frame_submit_sync_entries || !pre_wait_sync_entries ||
+                    !frame_sync_without_waits || !deferred_completion_sync_entries ||
+                    !deferred_frame_sync_entries) {
+                    FREE_MIXED_SUBMIT_SYNC_ENTRIES();
+                    return VK_ERROR_OUT_OF_HOST_MEMORY;
+                }
                 size_t frame_submit_sync_count = filter_submit_sync_entries_for_graphics_frame(
                     submit_sync_entries, submit_sync_count,
                     j == first_graphics_submit_sync_cmd,
                     j == last_graphics_submit_sync_cmd,
                     frame_submit_sync_entries);
-                PdockerGpuVulkanGraphicsV619SubmitSyncEntry pre_wait_sync_entries[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
                 size_t pre_wait_sync_count = 0;
                 if (submit_sync_entries_include_wait(frame_submit_sync_entries, frame_submit_sync_count) &&
                     (submit_waits_split_before_command_loop ||
                      command_buffer_has_host_side_ops_before(cmd, first_graphics_gpu_op))) {
-                    PdockerGpuVulkanGraphicsV619SubmitSyncEntry frame_sync_without_waits[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
                     if (!submit_waits_split_before_command_loop) {
                         pre_wait_sync_count = filter_submit_sync_entries_wait_only(
                             frame_submit_sync_entries, frame_submit_sync_count, pre_wait_sync_entries);
@@ -31059,12 +31100,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                                     : "pdocker-vulkan-icd: split graphics submit wait sync before prior host-side work\n");
                     }
                 }
-                PdockerGpuVulkanGraphicsV619SubmitSyncEntry deferred_completion_sync_entries[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
                 size_t deferred_completion_sync_count = 0;
                 if (submit_sync_entries_include_completion(frame_submit_sync_entries, frame_submit_sync_count) &&
                     (submit_has_recorded_work_after_command(&pSubmits[i], j) ||
                      command_buffer_has_host_side_ops_after(cmd, last_graphics_gpu_op))) {
-                    PdockerGpuVulkanGraphicsV619SubmitSyncEntry deferred_frame_sync_entries[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
                     deferred_completion_sync_count = filter_submit_sync_entries_completion_only(
                         frame_submit_sync_entries, frame_submit_sync_count, deferred_completion_sync_entries);
                     size_t deferred_frame_sync_count = filter_submit_sync_entries_without_completion(
@@ -31084,11 +31123,15 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                 if (pre_wait_sync_rc != 0) {
                     trace_icd_runtime_failure("graphics-v6-pre-wait-sync-failed",
                                               VK_ERROR_FEATURE_NOT_PRESENT);
+                    FREE_MIXED_SUBMIT_SYNC_ENTRIES();
                     return VK_ERROR_FEATURE_NOT_PRESENT;
                 }
                 VkResult mixed_host_rc = execute_graphics_mixed_host_side_ops(
                     cmd, first_graphics_gpu_op, last_graphics_gpu_op, true, &mixed_stats);
-                if (mixed_host_rc != VK_SUCCESS) return mixed_host_rc;
+                if (mixed_host_rc != VK_SUCCESS) {
+                    FREE_MIXED_SUBMIT_SYNC_ENTRIES();
+                    return mixed_host_rc;
+                }
                 set_submit2_metadata_command_index(j);
                 int graphics_rc = execute_graphics_mixed_gpu_sequence(
                     cmd, first_graphics_gpu_op, last_graphics_gpu_op,
@@ -31104,18 +31147,25 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                 if (graphics_rc != 0) {
                     trace_icd_runtime_failure("graphics-v6-submit-failed",
                                               VK_ERROR_FEATURE_NOT_PRESENT);
+                    FREE_MIXED_SUBMIT_SYNC_ENTRIES();
                     return VK_ERROR_FEATURE_NOT_PRESENT;
                 }
                 mixed_host_rc = execute_graphics_mixed_host_side_ops(
                     cmd, first_graphics_gpu_op, last_graphics_gpu_op, false, &mixed_stats);
-                if (mixed_host_rc != VK_SUCCESS) return mixed_host_rc;
+                if (mixed_host_rc != VK_SUCCESS) {
+                    FREE_MIXED_SUBMIT_SYNC_ENTRIES();
+                    return mixed_host_rc;
+                }
                 int deferred_sync_rc = send_vulkan_submit_sync_only_frame(
                     deferred_completion_sync_entries, deferred_completion_sync_count);
                 if (deferred_sync_rc != 0) {
                     trace_icd_runtime_failure("graphics-v6-deferred-completion-sync-failed",
                                               VK_ERROR_FEATURE_NOT_PRESENT);
+                    FREE_MIXED_SUBMIT_SYNC_ENTRIES();
                     return VK_ERROR_FEATURE_NOT_PRESENT;
                 }
+                FREE_MIXED_SUBMIT_SYNC_ENTRIES();
+#undef FREE_MIXED_SUBMIT_SYNC_ENTRIES
                 continue;
             }
             if (cmd->command_op_count > 0) {
@@ -31368,11 +31418,16 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
         }
         if (!submit_has_graphics_sync_frame && submit_completion_sync_needs_executor &&
             submit_sync_entries_include_completion(submit_sync_entries, submit_sync_count)) {
-            PdockerGpuVulkanGraphicsV619SubmitSyncEntry submit_completion_sync_entries[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+            PdockerGpuVulkanGraphicsV619SubmitSyncEntry *submit_completion_sync_entries =
+                (PdockerGpuVulkanGraphicsV619SubmitSyncEntry *)calloc(
+                    PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS,
+                    sizeof(*submit_completion_sync_entries));
+            if (!submit_completion_sync_entries) return VK_ERROR_OUT_OF_HOST_MEMORY;
             size_t submit_completion_sync_count = filter_submit_sync_entries_completion_only(
                 submit_sync_entries, submit_sync_count, submit_completion_sync_entries);
             int submit_completion_sync_rc = send_vulkan_submit_sync_only_frame(
                 submit_completion_sync_entries, submit_completion_sync_count);
+            free(submit_completion_sync_entries);
             if (submit_completion_sync_rc != 0) {
                 trace_icd_runtime_failure("submit-completion-sync-failed",
                                           VK_ERROR_FEATURE_NOT_PRESENT);
