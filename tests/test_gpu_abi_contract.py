@@ -5450,8 +5450,9 @@ class GpuAbiContractTest(unittest.TestCase):
             sender,
             r"PdockerGpuVulkanDispatchV52ImageLayoutRangeEntry\s*\*\s*image_layout_ranges",
         )
-        self.assertRegex(sender, r"(?:calloc|malloc)\s*\([^;]*image_layout_range")
-        self.assertIn("free(image_layout_ranges)", sender)
+        self.assertIn("pdocker_vk_zalloc_arena_reserve_table(&dispatch_table_arena_capacity,", sender)
+        self.assertIn("image_layout_ranges = (PdockerGpuVulkanDispatchV52ImageLayoutRangeEntry *)pdocker_vk_zalloc_arena_take_table", sender)
+        self.assertIn("free(dispatch_table_arena_storage)", sender)
 
     def test_vulkan_dispatch_v5_1_icd_frame_tables_are_heap_backed(self):
         icd = VULKAN_ICD.read_text()
@@ -5476,8 +5477,11 @@ class GpuAbiContractTest(unittest.TestCase):
             "PdockerGpuVulkanDispatchV5ImageViewEntry *image_view_entries = NULL;",
             "PdockerGpuVulkanDispatchV5SamplerEntry *sampler_entries = NULL;",
             "PdockerGpuVulkanDispatchV5SpecializationEntry *specs = NULL;",
-            "resources = (PdockerGpuVulkanDispatchV5ResourceEntry *)calloc(",
-            "descriptors = (PdockerGpuVulkanDispatchV5DescriptorObjectEntry *)calloc(",
+            "unsigned char *dispatch_table_arena_storage = NULL;",
+            "PdockerVkZallocArena dispatch_table_arena",
+            "resources = (PdockerGpuVulkanDispatchV5ResourceEntry *)pdocker_vk_zalloc_arena_take_table(",
+            "descriptors = (PdockerGpuVulkanDispatchV5DescriptorObjectEntry *)pdocker_vk_zalloc_arena_take_table(",
+            "image_layout_ranges = (PdockerGpuVulkanDispatchV52ImageLayoutRangeEntry *)pdocker_vk_zalloc_arena_take_table(",
             "binding_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS",
             "image_descriptor_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS",
             "push_size > pdocker_vk_max_push_bytes()",
@@ -5485,19 +5489,29 @@ class GpuAbiContractTest(unittest.TestCase):
             "specialization_data_size > 0 && !specialization_data",
             "!frame_capacity_add_aligned_table(&frame_capacity, sizeof(*specs)",
             "frame_capacity > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FRAME_BYTES",
-            "free(specs);",
-            "free(sampler_entries);",
-            "free(image_view_entries);",
-            "free(image_entries);",
-            "free(descriptors);",
-            "free(resources);",
+            "free(dispatch_table_arena_storage);",
         ]:
             self.assertIn(required, sender)
         self.assertNotIn("entry_name_size >= PDOCKER_VK_MAX_ENTRY_NAME", sender)
-        post_alloc = sender.split("resources = (PdockerGpuVulkanDispatchV5ResourceEntry *)calloc(", 1)[1].split(
+        post_alloc = sender.split("resources = (PdockerGpuVulkanDispatchV5ResourceEntry *)pdocker_vk_zalloc_arena_take_table(", 1)[1].split(
             "cleanup:", 1
         )[0]
         self.assertNotRegex(post_alloc, r"return\s+-E[A-Z0-9_]+\s*;")
+
+    def test_vulkan_icd_zalloc_arena_bounds_table_storage(self):
+        icd = VULKAN_ICD.read_text()
+        for marker in [
+            """typedef struct {
+    unsigned char *base;
+    size_t capacity;
+    size_t offset;
+} PdockerVkZallocArena;""",
+            "static bool pdocker_vk_zalloc_arena_reserve_table",
+            "static void *pdocker_vk_zalloc_arena_take_table",
+            "if (!checked_align_size_8(arena->offset, &aligned)) return NULL;",
+            "if (!checked_add_size(aligned, bytes, &end) || end > arena->capacity) return NULL;",
+        ]:
+            self.assertIn(marker, icd)
 
     def test_vulkan_dispatch_v5_executor_specialization_tables_are_heap_backed(self):
         executor = GPU_EXECUTOR.read_text()

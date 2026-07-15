@@ -4730,6 +4730,38 @@ static bool frame_capacity_add_aligned_table(size_t *capacity,
     return frame_capacity_add_aligned_bytes(capacity, table_bytes);
 }
 
+typedef struct {
+    unsigned char *base;
+    size_t capacity;
+    size_t offset;
+} PdockerVkZallocArena;
+
+static bool pdocker_vk_zalloc_arena_reserve_table(size_t *capacity,
+                                                   size_t count,
+                                                   size_t entry_size) {
+    size_t aligned = 0;
+    size_t bytes = 0;
+    if (!capacity) return false;
+    if (!checked_align_size_8(*capacity, &aligned)) return false;
+    if (!checked_mul_size(count, entry_size, &bytes)) return false;
+    return checked_add_size(aligned, bytes, capacity);
+}
+
+static void *pdocker_vk_zalloc_arena_take_table(PdockerVkZallocArena *arena,
+                                                 size_t count,
+                                                 size_t entry_size) {
+    size_t aligned = 0;
+    size_t bytes = 0;
+    size_t end = 0;
+    if (!arena || !arena->base) return NULL;
+    if (!checked_align_size_8(arena->offset, &aligned)) return NULL;
+    if (!checked_mul_size(count, entry_size, &bytes)) return NULL;
+    if (!checked_add_size(aligned, bytes, &end) || end > arena->capacity) return NULL;
+    void *ptr = arena->base + aligned;
+    arena->offset = end;
+    return ptr;
+}
+
 static int write_exact_fd(int fd, const void *data, size_t size) {
     const unsigned char *p = (const unsigned char *)data;
     size_t off = 0;
@@ -11788,6 +11820,7 @@ static int send_generic_vulkan_dispatch_v5_1_op(
     PdockerGpuVulkanDispatchV54BufferBarrierEntry *buffer_barrier_entries = NULL;
     PdockerGpuVulkanDispatchV54ImageBarrierEntry *image_barrier_entries = NULL;
     PdockerGpuVulkanDispatchV5SpecializationEntry *specs = NULL;
+    unsigned char *dispatch_table_arena_storage = NULL;
     unsigned char *frame = NULL;
     char *dispatch_indirect_options = NULL;
     int rc = 0;
@@ -11980,22 +12013,54 @@ static int send_generic_vulkan_dispatch_v5_1_op(
         return -EINVAL;
     }
 
-    resources = (PdockerGpuVulkanDispatchV5ResourceEntry *)calloc(
-        resource_count ? resource_count : 1u, sizeof(*resources));
-    descriptors = (PdockerGpuVulkanDispatchV5DescriptorObjectEntry *)calloc(
-        descriptor_count ? descriptor_count : 1u, sizeof(*descriptors));
-    image_entries = (PdockerGpuVulkanDispatchV5ImageEntry *)calloc(
-        image_count ? image_count : 1u, sizeof(*image_entries));
-    image_view_entries = (PdockerGpuVulkanDispatchV5ImageViewEntry *)calloc(
-        image_view_count ? image_view_count : 1u, sizeof(*image_view_entries));
-    sampler_entries = (PdockerGpuVulkanDispatchV5SamplerEntry *)calloc(
-        sampler_count ? sampler_count : 1u, sizeof(*sampler_entries));
-    buffer_view_entries = (PdockerGpuVulkanDispatchV53BufferViewEntry *)calloc(
-        buffer_view_count ? buffer_view_count : 1u, sizeof(*buffer_view_entries));
-    specs = (PdockerGpuVulkanDispatchV5SpecializationEntry *)calloc(
-        specialization_entry_count ? specialization_entry_count : 1u, sizeof(*specs));
+    size_t dispatch_table_arena_capacity = 0;
+    if (!pdocker_vk_zalloc_arena_reserve_table(&dispatch_table_arena_capacity,
+                                                resource_count ? resource_count : 1u, sizeof(*resources)) ||
+        !pdocker_vk_zalloc_arena_reserve_table(&dispatch_table_arena_capacity,
+                                                descriptor_count ? descriptor_count : 1u, sizeof(*descriptors)) ||
+        !pdocker_vk_zalloc_arena_reserve_table(&dispatch_table_arena_capacity,
+                                                image_count ? image_count : 1u, sizeof(*image_entries)) ||
+        !pdocker_vk_zalloc_arena_reserve_table(&dispatch_table_arena_capacity,
+                                                image_view_count ? image_view_count : 1u, sizeof(*image_view_entries)) ||
+        !pdocker_vk_zalloc_arena_reserve_table(&dispatch_table_arena_capacity,
+                                                sampler_count ? sampler_count : 1u, sizeof(*sampler_entries)) ||
+        !pdocker_vk_zalloc_arena_reserve_table(&dispatch_table_arena_capacity,
+                                                buffer_view_count ? buffer_view_count : 1u, sizeof(*buffer_view_entries)) ||
+        !pdocker_vk_zalloc_arena_reserve_table(&dispatch_table_arena_capacity,
+                                                specialization_entry_count ? specialization_entry_count : 1u, sizeof(*specs)) ||
+        !pdocker_vk_zalloc_arena_reserve_table(&dispatch_table_arena_capacity,
+                                                PDOCKER_GPU_VULKAN_DISPATCH_V52_MAX_IMAGE_LAYOUT_RANGES,
+                                                sizeof(*image_layout_ranges))) {
+        return -EMSGSIZE;
+    }
+    dispatch_table_arena_storage = (unsigned char *)calloc(1, dispatch_table_arena_capacity ? dispatch_table_arena_capacity : 1u);
+    if (!dispatch_table_arena_storage) {
+        rc = -ENOMEM;
+        goto cleanup;
+    }
+    PdockerVkZallocArena dispatch_table_arena = {
+        .base = dispatch_table_arena_storage,
+        .capacity = dispatch_table_arena_capacity,
+        .offset = 0,
+    };
+    resources = (PdockerGpuVulkanDispatchV5ResourceEntry *)pdocker_vk_zalloc_arena_take_table(
+        &dispatch_table_arena, resource_count ? resource_count : 1u, sizeof(*resources));
+    descriptors = (PdockerGpuVulkanDispatchV5DescriptorObjectEntry *)pdocker_vk_zalloc_arena_take_table(
+        &dispatch_table_arena, descriptor_count ? descriptor_count : 1u, sizeof(*descriptors));
+    image_entries = (PdockerGpuVulkanDispatchV5ImageEntry *)pdocker_vk_zalloc_arena_take_table(
+        &dispatch_table_arena, image_count ? image_count : 1u, sizeof(*image_entries));
+    image_view_entries = (PdockerGpuVulkanDispatchV5ImageViewEntry *)pdocker_vk_zalloc_arena_take_table(
+        &dispatch_table_arena, image_view_count ? image_view_count : 1u, sizeof(*image_view_entries));
+    sampler_entries = (PdockerGpuVulkanDispatchV5SamplerEntry *)pdocker_vk_zalloc_arena_take_table(
+        &dispatch_table_arena, sampler_count ? sampler_count : 1u, sizeof(*sampler_entries));
+    buffer_view_entries = (PdockerGpuVulkanDispatchV53BufferViewEntry *)pdocker_vk_zalloc_arena_take_table(
+        &dispatch_table_arena, buffer_view_count ? buffer_view_count : 1u, sizeof(*buffer_view_entries));
+    specs = (PdockerGpuVulkanDispatchV5SpecializationEntry *)pdocker_vk_zalloc_arena_take_table(
+        &dispatch_table_arena, specialization_entry_count ? specialization_entry_count : 1u, sizeof(*specs));
+    image_layout_ranges = (PdockerGpuVulkanDispatchV52ImageLayoutRangeEntry *)pdocker_vk_zalloc_arena_take_table(
+        &dispatch_table_arena, PDOCKER_GPU_VULKAN_DISPATCH_V52_MAX_IMAGE_LAYOUT_RANGES, sizeof(*image_layout_ranges));
     if (!resources || !descriptors || !image_entries || !image_view_entries ||
-        !sampler_entries || !buffer_view_entries || !specs) {
+        !sampler_entries || !buffer_view_entries || !specs || !image_layout_ranges) {
         rc = -ENOMEM;
         goto cleanup;
     }
@@ -12407,13 +12472,6 @@ static int send_generic_vulkan_dispatch_v5_1_op(
     }
 
     size_t image_layout_range_count = 0;
-    image_layout_ranges = (PdockerGpuVulkanDispatchV52ImageLayoutRangeEntry *)calloc(
-        PDOCKER_GPU_VULKAN_DISPATCH_V52_MAX_IMAGE_LAYOUT_RANGES,
-        sizeof(*image_layout_ranges));
-    if (!image_layout_ranges) {
-        rc = -ENOMEM;
-        goto cleanup;
-    }
     int layout_range_rc = collect_v5_image_layout_range_entries(
         image_layout_ranges, &image_layout_range_count, image_objects, image_count);
     if (layout_range_rc != 0) {
@@ -12821,17 +12879,10 @@ static int send_generic_vulkan_dispatch_v5_1_op(
 cleanup:
     free(dispatch_indirect_options);
     free(frame);
-    free(image_layout_ranges);
-    free(buffer_view_entries);
     free(memory_barrier_entries);
     free(buffer_barrier_entries);
     free(image_barrier_entries);
-    free(specs);
-    free(sampler_entries);
-    free(image_view_entries);
-    free(image_entries);
-    free(descriptors);
-    free(resources);
+    free(dispatch_table_arena_storage);
     return rc;
 }
 
