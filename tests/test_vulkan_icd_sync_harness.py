@@ -592,6 +592,224 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_descriptor_image_layout_mismatch_fails_before_transport(self):
+        source = textwrap.dedent(
+            f"""
+            #include <errno.h>
+            #include <fcntl.h>
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include <stdlib.h>
+            #include <unistd.h>
+            #include "{ICD_SOURCE}"
+
+            static void init_color_image(PdockerVkImage *image, PdockerVkMemory *memory,
+                                         VkImageLayout layout) {{
+                memset(image, 0, sizeof(*image));
+                memset(memory, 0, sizeof(*memory));
+                memory->fd = -1;
+                memory->size = 4096;
+                image->object_id = 0x1001;
+                image->format = VK_FORMAT_R8G8B8A8_UNORM;
+                image->extent.width = 16;
+                image->extent.height = 16;
+                image->extent.depth = 1;
+                image->mip_levels = 4;
+                image->array_layers = 2;
+                image->samples = VK_SAMPLE_COUNT_1_BIT;
+                image->current_layout = layout;
+                image->memory = memory;
+            }}
+
+            static void init_color_view(PdockerVkImageView *view, PdockerVkImage *image,
+                                        uint32_t base_level, uint32_t level_count,
+                                        uint32_t base_layer, uint32_t layer_count) {{
+                memset(view, 0, sizeof(*view));
+                view->object_id = 0x2001;
+                view->image = image;
+                view->format = image->format;
+                view->subresource_range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                view->subresource_range.baseMipLevel = base_level;
+                view->subresource_range.levelCount = level_count;
+                view->subresource_range.baseArrayLayer = base_layer;
+                view->subresource_range.layerCount = layer_count;
+            }}
+
+            static int expect_layout(const char *label, int got, int want) {{
+                if ((got != 0) != (want != 0)) {{
+                    fprintf(stderr, "%s got=%d want=%d\\n", label, got, want);
+                    return 0;
+                }}
+                return 1;
+            }}
+
+            static int send_one_sampled_image(PdockerVkImageView *view, VkImageLayout layout) {{
+                PdockerVkShaderModule shader;
+                PdockerVkPipeline pipeline;
+                PdockerVkDescriptorSetLayout set_layout;
+                PdockerVkDescriptorSet set;
+                PdockerVkDescriptorBinding binding_storage[1];
+                PdockerVkDescriptorBinding *storage_rows[1];
+                uint32_t storage_counts[1];
+                uint32_t binding_numbers[1];
+                bool binding_present[1];
+                VkDescriptorType binding_types[1];
+                uint32_t binding_counts[1];
+                PdockerVkDescriptorSet snapshots[1];
+                bool snapshot_used[1];
+                PdockerVkDispatchOp op;
+
+                memset(&shader, 0, sizeof(shader));
+                memset(&pipeline, 0, sizeof(pipeline));
+                memset(&set_layout, 0, sizeof(set_layout));
+                memset(&set, 0, sizeof(set));
+                memset(binding_storage, 0, sizeof(binding_storage));
+                memset(storage_rows, 0, sizeof(storage_rows));
+                memset(storage_counts, 0, sizeof(storage_counts));
+                memset(binding_numbers, 0, sizeof(binding_numbers));
+                memset(binding_present, 0, sizeof(binding_present));
+                memset(binding_types, 0, sizeof(binding_types));
+                memset(binding_counts, 0, sizeof(binding_counts));
+                memset(snapshots, 0, sizeof(snapshots));
+                memset(snapshot_used, 0, sizeof(snapshot_used));
+                memset(&op, 0, sizeof(op));
+
+                shader.code_fd = open("/dev/null", O_RDONLY);
+                if (shader.code_fd < 0) return -errno;
+                shader.code_size = 4;
+                pipeline.shader = &shader;
+                pipeline.local_size_x = 1;
+
+                binding_numbers[0] = 7;
+                binding_present[0] = true;
+                binding_types[0] = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+                binding_counts[0] = 1;
+                set_layout.storage_binding_count = 1;
+                set_layout.storage_binding_capacity = 1;
+                set_layout.storage_binding_numbers = binding_numbers;
+                set_layout.storage_binding_present = binding_present;
+                set_layout.storage_binding_types = binding_types;
+                set_layout.storage_binding_counts = binding_counts;
+
+                binding_storage[0].descriptor_type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+                binding_storage[0].image_view = view;
+                binding_storage[0].image_layout = layout;
+                storage_rows[0] = binding_storage;
+                storage_counts[0] = 1;
+                set.layout = &set_layout;
+                set.storage_binding_capacity = 1;
+                set.storage_buffers = storage_rows;
+                set.storage_buffer_counts = storage_counts;
+                snapshots[0] = set;
+                snapshot_used[0] = true;
+
+                op.pipeline = &pipeline;
+                op.set_snapshots = snapshots;
+                op.set_snapshot_used = snapshot_used;
+                op.set_capacity = 1;
+                op.dispatch_x = 1;
+                op.dispatch_y = 1;
+                op.dispatch_z = 1;
+
+                int rc = send_generic_vulkan_dispatch_op(&op, NULL, NULL, 0);
+                close(shader.code_fd);
+                return rc;
+            }}
+
+            int main(void) {{
+                setenv("PDOCKER_GPU_QUEUE_SOCKET", "/tmp/pdocker-icd-sync-harness-no-such-sock", 1);
+                PdockerVkMemory memory;
+                PdockerVkImage image;
+                PdockerVkImageView view;
+
+                init_color_image(&image, &memory, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                init_color_view(&view, &image, 0, 1, 0, 1);
+                if (!expect_layout("sampled readonly exact layout",
+                        descriptor_image_layout_matches_tracked_state(
+                            &view, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+                            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL), 1)) return 2;
+                if (!expect_layout("sampled mismatched tracked layout",
+                        descriptor_image_layout_matches_tracked_state(
+                            &view, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+                            VK_IMAGE_LAYOUT_GENERAL), 0)) return 3;
+
+                init_color_image(&image, &memory, VK_IMAGE_LAYOUT_GENERAL);
+                init_color_view(&view, &image, 0, 1, 0, 1);
+                if (!expect_layout("storage general layout",
+                        descriptor_image_layout_matches_tracked_state(
+                            &view, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                            VK_IMAGE_LAYOUT_GENERAL), 1)) return 4;
+                if (!expect_layout("storage readonly descriptor layout rejected",
+                        descriptor_image_layout_matches_tracked_state(
+                            &view, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL), 0)) return 5;
+
+                init_color_image(&image, &memory, VK_IMAGE_LAYOUT_GENERAL);
+                image.layout_mixed = true;
+                image.layout_range_count = 1;
+                image.layout_ranges[0].layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                image.layout_ranges[0].range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                image.layout_ranges[0].range.baseMipLevel = 1;
+                image.layout_ranges[0].range.levelCount = 2;
+                image.layout_ranges[0].range.baseArrayLayer = 0;
+                image.layout_ranges[0].range.layerCount = 2;
+                init_color_view(&view, &image, 1, 2, 0, 2);
+                if (!expect_layout("mixed explicit range fully covers view",
+                        descriptor_image_layout_matches_tracked_state(
+                            &view, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+                            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL), 1)) return 6;
+
+                image.layout_range_count = 2;
+                image.layout_ranges[1] = image.layout_ranges[0];
+                image.layout_ranges[1].layout = VK_IMAGE_LAYOUT_GENERAL;
+                image.layout_ranges[1].range.baseMipLevel = 2;
+                image.layout_ranges[1].range.levelCount = 1;
+                if (!expect_layout("mixed conflicting overlapping explicit range rejected",
+                        descriptor_image_layout_matches_tracked_state(
+                            &view, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+                            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL), 0)) return 7;
+
+                image.layout_range_count = 1;
+                image.layout_ranges[0].layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                image.layout_ranges[0].range.baseMipLevel = 1;
+                image.layout_ranges[0].range.levelCount = 1;
+                image.layout_ranges[0].range.baseArrayLayer = 0;
+                image.layout_ranges[0].range.layerCount = 2;
+                if (!expect_layout("mixed missing explicit coverage rejected",
+                        descriptor_image_layout_matches_tracked_state(
+                            &view, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+                            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL), 0)) return 8;
+
+                init_color_image(&image, &memory, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                init_color_view(&view, &image, 0, 1, 0, 1);
+                memory.fd = open("/dev/null", O_RDONLY);
+                if (memory.fd < 0) return 9;
+                int mismatch_rc = send_one_sampled_image(&view, VK_IMAGE_LAYOUT_GENERAL);
+                close(memory.fd);
+                memory.fd = -1;
+                if (mismatch_rc != -EOPNOTSUPP) {{
+                    fprintf(stderr, "mismatched descriptor layout rc=%d, want -EOPNOTSUPP before transport\\n",
+                            mismatch_rc);
+                    return 10;
+                }}
+
+                memory.fd = open("/dev/null", O_RDONLY);
+                if (memory.fd < 0) return 11;
+                int matching_rc = send_one_sampled_image(
+                    &view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                close(memory.fd);
+                if (matching_rc == -EOPNOTSUPP) {{
+                    fprintf(stderr, "matching sampled-image descriptor was rejected as layout mismatch\\n");
+                    return 12;
+                }}
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_dispatch_commands_fail_closed_when_recorded_inside_rendering_scopes(self):
         source = textwrap.dedent(
             f"""
