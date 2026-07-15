@@ -16642,6 +16642,19 @@ static int run_vulkan_dispatch_fd(
         options && options->has_q6k_readonly_overlap_snapshot
             ? options->q6k_readonly_overlap_snapshot
             : env_truthy("PDOCKER_GPU_Q6K_READONLY_OVERLAP_SNAPSHOT", 0);
+    const int strict_shader_compat_rewrites_requested =
+        q4k_safe_kernel_requested ||
+        q6k_safe_kernel_requested ||
+        q6k_compat_rewrites_requested;
+    const int allow_strict_shader_compat_rewrites =
+        env_truthy("PDOCKER_GPU_ALLOW_STRICT_SHADER_COMPAT_REWRITES", 0);
+    if (strict_passthrough &&
+        strict_shader_compat_rewrites_requested &&
+        !allow_strict_shader_compat_rewrites) {
+        json_fail("vulkan-dispatch", "strict passthrough blocks shader compatibility rewrites");
+        ret = 64;
+        goto cleanup;
+    }
     const int q6_probe_effective_replay =
         options && options->has_source_spirv_hash &&
         options->has_effective_spirv_hash &&
@@ -16814,10 +16827,10 @@ static int run_vulkan_dispatch_fd(
     }
     /*
      * PDOCKER_GPU_Q4K_SAFE_KERNEL is an explicit diagnostic override, not a
-     * default optimization.  Keep it available even when strict passthrough is
-     * requested so we can split "llama.cpp call-site/descriptor ABI is intact"
-     * from "the Android Vulkan driver accepts llama.cpp's optimized Q4_K
-     * SPIR-V" without modifying llama.cpp, Dockerfiles, models, or prompts.
+     * default optimization.  Strict passthrough blocks this shader
+     * substitution unless PDOCKER_GPU_ALLOW_STRICT_SHADER_COMPAT_REWRITES is
+     * explicitly set; that keeps true pass-through runs from silently mixing in
+     * llama-oriented diagnostic kernels.
      */
     if (q4k_safe_kernel_requested && is_q4k_matvec_hash(original_spirv_hash)) {
         if (!replace_spirv_module(&shader_code, &shader_size, kQ4kSafeSpv, sizeof(kQ4kSafeSpv))) {
@@ -16859,10 +16872,10 @@ static int run_vulkan_dispatch_fd(
     }
     /*
      * PDOCKER_GPU_Q6K_SAFE_KERNEL is an explicit diagnostic override, not a
-     * default optimization.  Keep it available under strict passthrough so the
-     * same descriptor/object graph can split "bridge/device execution" from
-     * the native llama.cpp Q6_K SPIR-V reduction/output-layout path without
-     * changing llama.cpp, Dockerfiles, models, or prompts.
+     * default optimization.  Strict passthrough blocks this shader
+     * substitution unless PDOCKER_GPU_ALLOW_STRICT_SHADER_COMPAT_REWRITES is
+     * explicitly set; that keeps true pass-through runs from silently mixing in
+     * llama-oriented diagnostic kernels.
      */
     if (q6k_safe_kernel_requested && q6_structural_callsite_detected) {
         if (!replace_spirv_module(&shader_code, &shader_size, kQ6kSafeSpv, sizeof(kQ6kSafeSpv))) {

@@ -7537,6 +7537,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertEqual(
             {
                 "PDOCKER_GPU_CPU_ORACLE": "1",
+                "PDOCKER_GPU_ALLOW_STRICT_SHADER_COMPAT_REWRITES": "1",
                 "PDOCKER_GPU_STRICT_PASSTHROUGH": "1",
                 "PDOCKER_GPU_STRICT_RECONCILIATION": "1",
                 "PDOCKER_GPU_STRICT_DUPLICATE_DESCRIPTOR_NORMALIZATION": "1",
@@ -7953,6 +7954,16 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("kQ6kSafeSpv", source)
         self.assertIn("replace_spirv_module(&shader_code, &shader_size, kQ4kSafeSpv", source)
         self.assertIn("replace_spirv_module(&shader_code, &shader_size, kQ6kSafeSpv", source)
+        self.assertIn("PDOCKER_GPU_ALLOW_STRICT_SHADER_COMPAT_REWRITES", source)
+        self.assertIn("strict passthrough blocks shader compatibility rewrites", source)
+        self.assertLess(
+            source.index("strict passthrough blocks shader compatibility rewrites"),
+            source.index("replace_spirv_module(&shader_code, &shader_size, kQ4kSafeSpv"),
+        )
+        self.assertLess(
+            source.index("strict passthrough blocks shader compatibility rewrites"),
+            source.index("replace_spirv_module(&shader_code, &shader_size, kQ6kSafeSpv"),
+        )
         self.assertNotIn("memcpy(shader_code, kQ4kSafeSpv", source)
         self.assertNotIn("memcpy(shader_code, kQ6kSafeSpv", source)
         self.assertIn("PDOCKER_GPU_Q6K_SAFE_KERNEL is an explicit diagnostic override", source)
@@ -19682,7 +19693,13 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertEqual([], sorted(bridged_envs - compare_forward_envs))
 
         q6_required = set(manifest["q6_required_env_overlay"])
-        self.assertEqual({"PDOCKER_GPU_DISPATCH_PROFILE_LOG"}, q6_required - bridged_envs)
+        self.assertEqual(
+            {
+                "PDOCKER_GPU_ALLOW_STRICT_SHADER_COMPAT_REWRITES",
+                "PDOCKER_GPU_DISPATCH_PROFILE_LOG",
+            },
+            q6_required - bridged_envs,
+        )
         config_propagation_envs = {item["env"] for item in manifest["config_propagation_env_fields"]}
         self.assertEqual(
             [],
@@ -19691,6 +19708,7 @@ class GpuAbiContractTest(unittest.TestCase):
                 - config_propagation_envs
                 - {
                     "PDOCKER_GPU_DISPATCH_PROFILE_LOG",
+                    "PDOCKER_GPU_ALLOW_STRICT_SHADER_COMPAT_REWRITES",
                     "PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE",
                     "PDOCKER_GPU_STRICT_RECONCILIATION",
                 }
