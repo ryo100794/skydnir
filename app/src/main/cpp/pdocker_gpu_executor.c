@@ -4336,6 +4336,11 @@ static int vulkan_sampler_entry_supported_by_runtime(
     const char *reason = "sampler replay supported";
     if (reason_out) *reason_out = reason;
     if (!src) return 0;
+    if (src->flags != 0) {
+        reason = "sampler create flags are not supported by Vulkan replay";
+        if (reason_out) *reason_out = reason;
+        return -EOPNOTSUPP;
+    }
     switch ((VkSamplerReductionMode)src->reduction_mode) {
         case VK_SAMPLER_REDUCTION_MODE_WEIGHTED_AVERAGE:
             break;

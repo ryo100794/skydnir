@@ -8014,6 +8014,27 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, vulkan14_block)
 
+    def test_vulkan_sampler_flags_are_fail_closed_in_icd_and_executor(self):
+        icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
+
+        sampler_validate_body = c_function_body(icd, "validate_sampler_create_info_for_transport")
+        self.assertIn("if (info->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;", sampler_validate_body)
+
+        runtime_body = c_function_body(executor, "vulkan_sampler_entry_supported_by_runtime")
+        self.assertIn("src->flags != 0", runtime_body)
+        self.assertIn("sampler create flags are not supported by Vulkan replay", runtime_body)
+        self.assertIn("return -EOPNOTSUPP;", runtime_body)
+        self.assertLess(runtime_body.index("src->flags != 0"), runtime_body.index("switch ((VkSamplerReductionMode)src->reduction_mode)"))
+
+        materialize_body = c_function_body(executor, "materialize_vulkan_dispatch_images")
+        gate = "vulkan_sampler_entry_supported_by_runtime(rt, src, &sampler_reason)"
+        self.assertIn(gate, materialize_body)
+        self.assertLess(materialize_body.index(gate), materialize_body.index("VkSamplerCreateInfo sci"))
+        self.assertLess(materialize_body.index(gate), materialize_body.index("vkCreateSampler(device, &sci"))
+        sampler_create_block = c_block_from(materialize_body, "VkSamplerCreateInfo sci")
+        self.assertNotIn(".flags =", sampler_create_block)
+
     def test_vulkan_executor_sampler_anisotropy_replay_is_fail_closed(self):
         executor = GPU_EXECUTOR.read_text()
         helper_body = c_function_body(executor, "vulkan_sampler_entry_supported_by_runtime")
