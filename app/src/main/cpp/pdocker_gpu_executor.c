@@ -29159,20 +29159,28 @@ static int read_graphics_shader_fd(
 static int copy_graphics_entry_name(
         const VulkanGraphicsV6FrameView *view,
         const PdockerGpuVulkanGraphicsV6ShaderStageEntry *stage,
-        char *out,
-        size_t out_size) {
-    if (!view || !stage || !out || out_size == 0) return -EINVAL;
+        char **out) {
+    if (!view || !stage || !out) return -EINVAL;
+    *out = NULL;
+    const char *default_name = "main";
     if (stage->entry_name_size == 0) {
-        snprintf(out, out_size, "main");
+        size_t default_size = strlen(default_name);
+        *out = (char *)malloc(default_size + 1u);
+        if (!*out) return -ENOMEM;
+        memcpy(*out, default_name, default_size + 1u);
         return 0;
     }
-    if (stage->entry_name_size >= out_size ||
+    if (stage->entry_name_size > (uint64_t)SIZE_MAX - 1u ||
         !payload_range_valid(stage->entry_name_offset, stage->entry_name_size,
                              view->header->frame_size)) {
         return -ENAMETOOLONG;
     }
-    memcpy(out, view->frame + stage->entry_name_offset, (size_t)stage->entry_name_size);
-    out[stage->entry_name_size] = '\0';
+    const char *payload = (const char *)view->frame + stage->entry_name_offset;
+    if (memchr(payload, '\0', (size_t)stage->entry_name_size)) return -EINVAL;
+    const size_t name_size = (size_t)stage->entry_name_size;
+    *out = (char *)calloc(name_size + 1u, 1);
+    if (!*out) return -ENOMEM;
+    memcpy(*out, payload, name_size);
     return 0;
 }
 
@@ -29868,10 +29876,16 @@ static int materialize_vulkan_graphics_v6_pipelines(
     if (view->header->pipeline_count > max_pipelines) return -E2BIG;
     for (uint32_t pidx = 0; pidx < view->header->pipeline_count; ++pidx) {
         const PdockerGpuVulkanGraphicsV6PipelineEntry *src = &view->pipelines[pidx];
+        char *entry_names[PDOCKER_GPU_GRAPHICS_REPLAY_MAX_SHADER_STAGES];
+        int pipeline_rc = 0;
+        VkPipelineColorBlendAttachmentState *blend_attachments = NULL;
+        VkFormat *color_formats = NULL;
+        memset(entry_names, 0, sizeof(entry_names));
         if (src->shader_stage_count == 0 ||
             src->shader_stage_count > PDOCKER_GPU_GRAPHICS_REPLAY_MAX_SHADER_STAGES ||
             src->color_attachment_count > PDOCKER_GPU_GRAPHICS_V6_PIPELINE_COLOR_ATTACHMENT_FORMAT_FIELDS) {
-            return -EOPNOTSUPP;
+            pipeline_rc = -EOPNOTSUPP;
+            goto graphics_pipeline_cleanup;
         }
         VulkanGraphicsReplayPipeline *dst = &out_pipelines[pidx];
         dst->layout_id = src->layout_id;
@@ -29880,18 +29894,19 @@ static int materialize_vulkan_graphics_v6_pipelines(
         VkSpecializationInfo specialization_infos[PDOCKER_GPU_GRAPHICS_REPLAY_MAX_SHADER_STAGES];
         VkSpecializationMapEntry specialization_entries
             [PDOCKER_GPU_GRAPHICS_REPLAY_MAX_SHADER_STAGES][PDOCKER_GPU_MAX_VULKAN_SPECIALIZATION_ENTRIES];
-        char entry_names[PDOCKER_GPU_GRAPHICS_REPLAY_MAX_SHADER_STAGES][128];
         memset(shader_stages, 0, sizeof(shader_stages));
         memset(specialization_infos, 0, sizeof(specialization_infos));
         memset(specialization_entries, 0, sizeof(specialization_entries));
-        memset(entry_names, 0, sizeof(entry_names));
         for (uint32_t sidx = 0; sidx < src->shader_stage_count; ++sidx) {
             const uint32_t absolute_stage_index = src->shader_stage_first + sidx;
             const PdockerGpuVulkanGraphicsV6ShaderStageEntry *stage =
                 &view->shader_stages[absolute_stage_index];
             uint32_t *shader_code = NULL;
             int rc = read_graphics_shader_fd(view, stage, &shader_code);
-            if (rc != 0) return rc;
+            if (rc != 0) {
+                pipeline_rc = rc;
+                goto graphics_pipeline_cleanup;
+            }
             VkShaderModuleCreateInfo smci = {
                 .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
                 .codeSize = (size_t)stage->shader_size,
@@ -29899,16 +29914,28 @@ static int materialize_vulkan_graphics_v6_pipelines(
             };
             VkResult vrc = vkCreateShaderModule(rt->device, &smci, NULL, &dst->shader_modules[sidx]);
             free(shader_code);
-            if (vrc != VK_SUCCESS) return -EIO;
-            rc = copy_graphics_entry_name(view, stage, entry_names[sidx], sizeof(entry_names[sidx]));
-            if (rc != 0) return rc;
+            if (vrc != VK_SUCCESS) {
+                pipeline_rc = -EIO;
+                goto graphics_pipeline_cleanup;
+            }
+            rc = copy_graphics_entry_name(view, stage, &entry_names[sidx]);
+            if (rc != 0) {
+                pipeline_rc = rc;
+                goto graphics_pipeline_cleanup;
+            }
             const VkSpecializationInfo *specialization_info = NULL;
             if (stage->specialization_size != 0) {
-                if (!view->is_v62) return -EOPNOTSUPP;
+                if (!view->is_v62) {
+                    pipeline_rc = -EOPNOTSUPP;
+                    goto graphics_pipeline_cleanup;
+                }
                 uint32_t spec_count = collect_vulkan_graphics_v62_specialization_entries(
                     view, absolute_stage_index, specialization_entries[sidx],
                     PDOCKER_GPU_MAX_VULKAN_SPECIALIZATION_ENTRIES);
-                if (spec_count == UINT32_MAX) return -E2BIG;
+                if (spec_count == UINT32_MAX) {
+                    pipeline_rc = -E2BIG;
+                    goto graphics_pipeline_cleanup;
+                }
                 specialization_infos[sidx] = (VkSpecializationInfo){
                     .mapEntryCount = spec_count,
                     .pMapEntries = spec_count ? specialization_entries[sidx] : NULL,
@@ -29928,17 +29955,26 @@ static int materialize_vulkan_graphics_v6_pipelines(
 
         int layout_index = find_vulkan_graphics_replay_pipeline_layout_by_id(
             layouts, src->layout_id);
-        if (layout_index < 0) return layout_index;
+        if (layout_index < 0) {
+            pipeline_rc = layout_index;
+            goto graphics_pipeline_cleanup;
+        }
         const VulkanGraphicsReplayPipelineLayout *pipeline_layout =
             &layouts->pipeline_layouts[(uint32_t)layout_index];
-        if (!pipeline_layout->layout) return -EPROTO;
+        if (!pipeline_layout->layout) {
+            pipeline_rc = -EPROTO;
+            goto graphics_pipeline_cleanup;
+        }
         dst->descriptor_set_count = pipeline_layout->descriptor_set_count;
         memset(dst->descriptor_set_layout_ids, 0, sizeof(dst->descriptor_set_layout_ids));
         for (uint32_t set = 0; set < pipeline_layout->descriptor_set_count; ++set) {
             const VulkanGraphicsReplayDescriptorSetLayout *set_layout =
                 vulkan_graphics_replay_descriptor_set_layout_for_set(
                     layouts, pipeline_layout, set);
-            if (!set_layout) return -EPROTO;
+            if (!set_layout) {
+                pipeline_rc = -EPROTO;
+                goto graphics_pipeline_cleanup;
+            }
             dst->descriptor_set_layout_ids[set] = pipeline_layout->descriptor_set_layout_ids[set];
         }
 
@@ -29949,7 +29985,10 @@ static int materialize_vulkan_graphics_v6_pipelines(
         for (uint32_t b = 0; b < src->vertex_binding_count; ++b) {
             const PdockerGpuVulkanGraphicsV6VertexBindingEntry *vb =
                 &view->vertex_bindings[src->vertex_binding_first + b];
-            if (vb->buffer_resource_index != UINT32_MAX) return -EPROTO;
+            if (vb->buffer_resource_index != UINT32_MAX) {
+                pipeline_rc = -EPROTO;
+                goto graphics_pipeline_cleanup;
+            }
             bindings[b] = (VkVertexInputBindingDescription){
                 .binding = vb->binding,
                 .stride = vb->stride,
@@ -30006,12 +30045,14 @@ static int materialize_vulkan_graphics_v6_pipelines(
         if (viewport_count == 0 || scissor_count == 0 ||
             viewport_count > PDOCKER_GPU_VULKAN_GRAPHICS_V67_MAX_VIEWPORTS_PER_PIPELINE ||
             scissor_count > PDOCKER_GPU_VULKAN_GRAPHICS_V67_MAX_SCISSORS_PER_PIPELINE) {
-            return -EPROTO;
+            pipeline_rc = -EPROTO;
+            goto graphics_pipeline_cleanup;
         }
         if (!dynamic_viewport) {
             if (!viewport_scissor_state ||
                 (viewport_scissor_state->flags & PDOCKER_GPU_GRAPHICS_V67_VIEWPORT_STATIC_PRESENT) == 0) {
-                return -EOPNOTSUPP;
+                pipeline_rc = -EOPNOTSUPP;
+                goto graphics_pipeline_cleanup;
             }
             for (uint32_t v = 0; v < viewport_count; ++v) {
                 const PdockerGpuVulkanGraphicsV67ViewportEntry *src_viewport =
@@ -30029,7 +30070,8 @@ static int materialize_vulkan_graphics_v6_pipelines(
         if (!dynamic_scissor) {
             if (!viewport_scissor_state ||
                 (viewport_scissor_state->flags & PDOCKER_GPU_GRAPHICS_V67_SCISSOR_STATIC_PRESENT) == 0) {
-                return -EOPNOTSUPP;
+                pipeline_rc = -EOPNOTSUPP;
+                goto graphics_pipeline_cleanup;
             }
             for (uint32_t v = 0; v < scissor_count; ++v) {
                 const PdockerGpuVulkanGraphicsV67ScissorEntry *src_scissor =
@@ -30104,13 +30146,11 @@ static int materialize_vulkan_graphics_v6_pipelines(
                 src->topology != VK_PRIMITIVE_TOPOLOGY_PATCH_LIST ||
                 tessellation_state->patch_control_points == 0 ||
                 tessellation_state->patch_control_points > rt->physical_properties.limits.maxTessellationPatchSize) {
-                return -EOPNOTSUPP;
+                pipeline_rc = -EOPNOTSUPP;
+                goto graphics_pipeline_cleanup;
             }
             tsci.patchControlPoints = tessellation_state->patch_control_points;
         }
-        int pipeline_rc = 0;
-        VkPipelineColorBlendAttachmentState *blend_attachments = NULL;
-        VkFormat *color_formats = NULL;
         if (src->color_attachment_count > 0) {
             blend_attachments = (VkPipelineColorBlendAttachmentState *)calloc(
                 src->color_attachment_count, sizeof(*blend_attachments));
@@ -30298,6 +30338,10 @@ static int materialize_vulkan_graphics_v6_pipelines(
             goto graphics_pipeline_cleanup;
         }
 graphics_pipeline_cleanup:
+        for (uint32_t sidx = 0; sidx < src->shader_stage_count &&
+                sidx < PDOCKER_GPU_GRAPHICS_REPLAY_MAX_SHADER_STAGES; ++sidx) {
+            free(entry_names[sidx]);
+        }
         free(blend_attachments);
         free(color_formats);
         if (pipeline_rc != 0) return pipeline_rc;

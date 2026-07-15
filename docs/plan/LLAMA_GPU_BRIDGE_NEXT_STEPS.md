@@ -2983,3 +2983,17 @@ NUL entry-name payloads before creating the C string.  Graphics V6 entry-name
 storage remains unchanged in this lane.
 
 Validation: `env -u PYTHONPATH python3 -m unittest tests.test_gpu_abi_contract -q`, `bash scripts/build-gpu-shim.sh`, and `bash scripts/build-native-android-ndk.sh`.
+
+
+### 2026-07-15 Vulkan graphics entry-name heap lane
+
+CPU/static pass-through work removed the remaining graphics shader-stage
+entry-point fixed 128-byte scratch path.  The producer ICD now owns graphics
+stage `pName` strings on the heap and serializes the exact payload into the V6
+frame.  The Android executor materializes V6 graphics entry names into
+heap-backed null-terminated strings for `vkCreateGraphicsPipelines`, rejects
+embedded NUL payloads, and frees those names through the pipeline materializer
+cleanup path.  This is a generic Vulkan ABI cleanup, not a llama-specific
+kernel path.
+
+Validation: `env -u PYTHONPATH python3 -m unittest tests.test_gpu_abi_contract -q`, `bash scripts/build-gpu-shim.sh`, and `bash scripts/build-native-android-ndk.sh`.

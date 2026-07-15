@@ -896,7 +896,8 @@ struct PdockerVkPipeline {
     VkShaderStageFlags shader_stage_flags;
     PdockerVkShaderModule *graphics_stage_modules[PDOCKER_VK_MAX_GRAPHICS_SHADER_STAGES];
     VkShaderStageFlagBits graphics_stage_flags[PDOCKER_VK_MAX_GRAPHICS_SHADER_STAGES];
-    char graphics_stage_entry_names[PDOCKER_VK_MAX_GRAPHICS_SHADER_STAGES][PDOCKER_VK_MAX_ENTRY_NAME];
+    char *graphics_stage_entry_names[PDOCKER_VK_MAX_GRAPHICS_SHADER_STAGES];
+    size_t graphics_stage_entry_name_sizes[PDOCKER_VK_MAX_GRAPHICS_SHADER_STAGES];
     VkSpecializationMapEntry graphics_stage_specialization_entries
         [PDOCKER_VK_MAX_GRAPHICS_SHADER_STAGES][PDOCKER_VK_MAX_SPECIALIZATION_ENTRIES];
     uint32_t graphics_stage_specialization_entry_counts[PDOCKER_VK_MAX_GRAPHICS_SHADER_STAGES];
@@ -957,6 +958,17 @@ struct PdockerVkPipeline {
     VkVertexInputAttributeDescription vertex_attributes[PDOCKER_VK_MAX_GRAPHICS_VERTEX_ATTRIBUTES];
     uint64_t dynamic_state_mask;
 };
+
+static void pdocker_vk_pipeline_destroy(PdockerVkPipeline *pipeline) {
+    if (!pipeline) return;
+    free(pipeline->entry_name);
+    for (uint32_t i = 0; i < PDOCKER_VK_MAX_GRAPHICS_SHADER_STAGES; ++i) {
+        free(pipeline->graphics_stage_entry_names[i]);
+    }
+    free(pipeline->specialization_entries);
+    free(pipeline->specialization_data);
+    free(pipeline);
+}
 
 struct PdockerVkFence {
     bool signaled;
@@ -1663,15 +1675,6 @@ static uint64_t next_vulkan_query_pool_id(void) {
 
 static uint32_t clamp_u32(uint32_t value, uint32_t limit) {
     return value > limit ? limit : value;
-}
-
-static void safe_copy_cstr(char *dst, size_t dst_size, const char *src) {
-    if (!dst || dst_size == 0) return;
-    if (!src) {
-        dst[0] = '\0';
-        return;
-    }
-    snprintf(dst, dst_size, "%s", src);
 }
 
 static void command_buffer_mark_recording_failed(PdockerVkCommandBuffer *cmd, const char *reason) {
@@ -8359,7 +8362,8 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
                 rc = -EINVAL;
                 goto cleanup;
             }
-            const char *entry_name = pipeline->graphics_stage_entry_names[stage_i][0]
+            const char *entry_name = pipeline->graphics_stage_entry_names[stage_i] &&
+                    pipeline->graphics_stage_entry_names[stage_i][0]
                 ? pipeline->graphics_stage_entry_names[stage_i]
                 : "main";
             PdockerGpuVulkanGraphicsV6ShaderStageEntry *stage =
@@ -23070,12 +23074,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateComputePipelines(
         if (entry_name_len == 0) {
             trace_icd_runtime_failure("compute-pipeline-entry-name-invalid",
                                       VK_ERROR_FEATURE_NOT_PRESENT);
-            free(pipeline);
+            pdocker_vk_pipeline_destroy(pipeline);
             return VK_ERROR_FEATURE_NOT_PRESENT;
         }
         pipeline->entry_name = (char *)malloc(entry_name_len + 1u);
         if (!pipeline->entry_name) {
-            free(pipeline);
+            pdocker_vk_pipeline_destroy(pipeline);
             return VK_ERROR_OUT_OF_HOST_MEMORY;
         }
         memcpy(pipeline->entry_name, entry_name, entry_name_len + 1u);
@@ -23089,15 +23093,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateComputePipelines(
                 if (!checked_mul_size((size_t)spec->mapEntryCount,
                                       sizeof(*pipeline->specialization_entries),
                                       &specialization_entry_bytes)) {
-                    free(pipeline->entry_name);
-                    free(pipeline);
+                    pdocker_vk_pipeline_destroy(pipeline);
                     return VK_ERROR_OUT_OF_HOST_MEMORY;
                 }
                 pipeline->specialization_entries = (VkSpecializationMapEntry *)calloc(
                     spec->mapEntryCount, sizeof(*pipeline->specialization_entries));
                 if (!pipeline->specialization_entries) {
-                    free(pipeline->entry_name);
-                    free(pipeline);
+                    pdocker_vk_pipeline_destroy(pipeline);
                     return VK_ERROR_OUT_OF_HOST_MEMORY;
                 }
                 memcpy(pipeline->specialization_entries, spec->pMapEntries,
@@ -23106,9 +23108,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateComputePipelines(
             if (spec->dataSize > 0) {
                 pipeline->specialization_data = (uint8_t *)malloc(spec->dataSize);
                 if (!pipeline->specialization_data) {
-                    free(pipeline->specialization_entries);
-                    free(pipeline->entry_name);
-                    free(pipeline);
+                    pdocker_vk_pipeline_destroy(pipeline);
                     return VK_ERROR_OUT_OF_HOST_MEMORY;
                 }
                 memcpy(pipeline->specialization_data, spec->pData, spec->dataSize);
@@ -23361,7 +23361,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
         VkResult pnext_rc = validate_and_fill_pipeline_feedback_pnext(
             "vkCreateGraphicsPipelines", ci->pNext, ci->stageCount, true);
         if (pnext_rc != VK_SUCCESS) {
-            free(pipeline);
+            pdocker_vk_pipeline_destroy(pipeline);
             return pnext_rc;
         }
         uint32_t captured_stages = clamp_u32(ci->stageCount, PDOCKER_VK_MAX_GRAPHICS_SHADER_STAGES);
@@ -23376,15 +23376,26 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
             pipeline->shader_stage_flags |= stage ? stage->stage : 0;
             pipeline->graphics_stage_flags[stage_i] = stage ? stage->stage : 0;
             pipeline->graphics_stage_modules[stage_i] = stage ? pdocker_vk_shader_module_from_handle(stage->module) : NULL;
-            safe_copy_cstr(pipeline->graphics_stage_entry_names[stage_i],
-                           sizeof(pipeline->graphics_stage_entry_names[stage_i]),
-                           stage ? stage->pName : NULL);
+            const char *graphics_entry_name = (stage && stage->pName && stage->pName[0])
+                ? stage->pName
+                : NULL;
+            if (graphics_entry_name) {
+                size_t graphics_entry_name_len = strlen(graphics_entry_name);
+                pipeline->graphics_stage_entry_names[stage_i] = (char *)malloc(graphics_entry_name_len + 1u);
+                if (!pipeline->graphics_stage_entry_names[stage_i]) {
+                    pdocker_vk_pipeline_destroy(pipeline);
+                    return VK_ERROR_OUT_OF_HOST_MEMORY;
+                }
+                memcpy(pipeline->graphics_stage_entry_names[stage_i],
+                       graphics_entry_name, graphics_entry_name_len + 1u);
+                pipeline->graphics_stage_entry_name_sizes[stage_i] = graphics_entry_name_len;
+            }
             const VkSpecializationInfo *spec = stage ? stage->pSpecializationInfo : NULL;
             if (spec) {
                 VkResult spec_rc = validate_pipeline_specialization_info_for_transport(
                     spec, "graphics-pipeline-specialization-unsupported");
                 if (spec_rc != VK_SUCCESS) {
-                    free(pipeline);
+                    pdocker_vk_pipeline_destroy(pipeline);
                     return spec_rc;
                 }
                 pipeline->graphics_stage_specialization_entry_counts[stage_i] = spec->mapEntryCount;
@@ -23712,10 +23723,7 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyPipeline(
     (void)pAllocator;
     PdockerVkPipeline *p = pdocker_vk_pipeline_from_handle(pipeline);
     if (!p) return;
-    free(p->entry_name);
-    free(p->specialization_entries);
-    free(p->specialization_data);
-    free(p);
+    pdocker_vk_pipeline_destroy(p);
 }
 
 static void capture_render_pass_subpass_state(

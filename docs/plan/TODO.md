@@ -420,7 +420,10 @@ or closes.
   names are now heap-owned in the producer ICD, V5 framed transport carries the
   exact entry name payload, long entry names force V5 instead of legacy text
   hex encoding, and the Android executor pipeline cache uses heap-backed exact
-  entry-name keys to avoid truncation collisions.
+  entry-name keys to avoid truncation collisions.  Graphics pipeline shader
+  stage entry-point names are also heap-owned on the producer side and
+  heap-materialized from the V6 frame payload on Android replay, so graphics
+  `pName` no longer inherits the old 128-byte scratch buffer ceiling.
   Variable descriptor-count layouts now use V6.29
   metadata to carry allocation-time actual descriptor counts, so partially sized
   descriptor arrays are validated and replayed by actual count instead of being
