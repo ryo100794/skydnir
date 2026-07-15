@@ -24992,6 +24992,11 @@ static int vulkan_graphics_v610_image_subresource_range_valid(
     return 0;
 }
 
+static int vulkan_graphics_v610_image_copy_single_sample_supported(
+        const PdockerGpuVulkanDispatchV5ImageEntry *image) {
+    return image && image->samples == VK_SAMPLE_COUNT_1_BIT;
+}
+
 static int vulkan_graphics_v615_image_blit_subresource_valid(
         const PdockerGpuVulkanDispatchV5ImageEntry *image,
         uint32_t aspect_mask,
@@ -27179,6 +27184,7 @@ static int validate_vulkan_graphics_v6_frame_content(
             const PdockerGpuVulkanDispatchV5ResourceEntry *buffer = &resources[entry->buffer_resource_index];
             const PdockerGpuVulkanDispatchV5ImageEntry *image = &images[entry->image_index];
             if (buffer->resource_type != PDOCKER_GPU_V5_RESOURCE_TYPE_BUFFER) return -EPROTO;
+            if (!vulkan_graphics_v610_image_copy_single_sample_supported(image)) return -EOPNOTSUPP;
             if (vulkan_graphics_v610_image_subresource_range_valid(
                     image, entry->aspect_mask, entry->mip_level, entry->base_array_layer,
                     entry->layer_count, entry->image_offset_x, entry->image_offset_y,
@@ -27208,6 +27214,8 @@ static int validate_vulkan_graphics_v6_frame_content(
             seen_image_copy_command[entry->command_index] = 1;
             const PdockerGpuVulkanDispatchV5ImageEntry *src_image = &images[entry->src_image_index];
             const PdockerGpuVulkanDispatchV5ImageEntry *dst_image = &images[entry->dst_image_index];
+            if (!vulkan_graphics_v610_image_copy_single_sample_supported(src_image) ||
+                !vulkan_graphics_v610_image_copy_single_sample_supported(dst_image)) return -EOPNOTSUPP;
             if (!(src_image->usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) ||
                 !(dst_image->usage & VK_IMAGE_USAGE_TRANSFER_DST_BIT) ||
                 entry->src_aspect_mask != entry->dst_aspect_mask ||
@@ -30825,6 +30833,8 @@ static int materialize_vulkan_graphics_v6_attachments(
             const PdockerGpuVulkanGraphicsV610BufferImageCopyEntry *copy = &view->buffer_image_copies[i];
             if (copy->image_index >= out->image_count) return -EPROTO;
             VulkanDispatchImageObject *image = &out->images[copy->image_index];
+            if (!vulkan_graphics_v610_image_copy_single_sample_supported(
+                    &view->images[image->source_index])) return -EOPNOTSUPP;
             VkImageSubresourceRange range = {
                 .aspectMask = (VkImageAspectFlags)copy->aspect_mask,
                 .baseMipLevel = copy->mip_level,
@@ -30854,6 +30864,10 @@ static int materialize_vulkan_graphics_v6_attachments(
                 copy->dst_image_index >= out->image_count) return -EPROTO;
             VulkanDispatchImageObject *src_image = &out->images[copy->src_image_index];
             VulkanDispatchImageObject *dst_image = &out->images[copy->dst_image_index];
+            if (!vulkan_graphics_v610_image_copy_single_sample_supported(
+                    &view->images[src_image->source_index]) ||
+                !vulkan_graphics_v610_image_copy_single_sample_supported(
+                    &view->images[dst_image->source_index])) return -EOPNOTSUPP;
             VkImageSubresourceRange src_range = {
                 .aspectMask = (VkImageAspectFlags)copy->src_aspect_mask,
                 .baseMipLevel = copy->src_mip_level,
@@ -34880,6 +34894,11 @@ begin_rendering_cleanup:
                     rc = -EPROTO;
                     goto cleanup;
                 }
+                if (!vulkan_graphics_v610_image_copy_single_sample_supported(
+                        &view->images[image->source_index])) {
+                    rc = -EOPNOTSUPP;
+                    goto cleanup;
+                }
                 VkBufferImageCopy region = {
                     .bufferOffset = buffer_offset,
                     .bufferRowLength = copy->buffer_row_length,
@@ -34930,6 +34949,10 @@ begin_rendering_cleanup:
                 VulkanDispatchImageObject *src_image = &attachments->images[copy->src_image_index];
                 VulkanDispatchImageObject *dst_image = &attachments->images[copy->dst_image_index];
                 if (!src_image->image || !dst_image->image) { rc = -EPROTO; goto cleanup; }
+                if (!vulkan_graphics_v610_image_copy_single_sample_supported(
+                        &view->images[src_image->source_index]) ||
+                    !vulkan_graphics_v610_image_copy_single_sample_supported(
+                        &view->images[dst_image->source_index])) { rc = -EOPNOTSUPP; goto cleanup; }
                 rc = record_vulkan_graphics_v6_staged_image_uploads(command_buffer, attachments);
                 if (rc != 0) goto cleanup;
                 VkImageCopy region = {

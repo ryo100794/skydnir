@@ -12889,6 +12889,7 @@ class GpuAbiContractTest(unittest.TestCase):
 
     def test_vulkan_graphics_msaa_source_store_is_fail_closed_until_msaa_readback_abi(self):
         executor = GPU_EXECUTOR.read_text()
+        icd = VULKAN_ICD.read_text()
         preflight = executor.split("static int preflight_vulkan_graphics_v6_replay_supported", 1)[1].split(
             "static int vulkan_graphics_attachment_layout_supported", 1
         )[0]
@@ -12923,6 +12924,16 @@ class GpuAbiContractTest(unittest.TestCase):
             materialize,
         )
         self.assertIn("if (image->samples != VK_SAMPLE_COUNT_1_BIT) return -EOPNOTSUPP;", executor)
+        self.assertIn("static int vulkan_graphics_v610_image_copy_single_sample_supported", executor)
+        self.assertIn("if (!vulkan_graphics_v610_image_copy_single_sample_supported(image)) return -EOPNOTSUPP;", executor)
+        self.assertIn("!vulkan_graphics_v610_image_copy_single_sample_supported(src_image)", executor)
+        self.assertIn("!vulkan_graphics_v610_image_copy_single_sample_supported(dst_image)", executor)
+        self.assertIn("copy__->image->samples != VK_SAMPLE_COUNT_1_BIT", icd)
+        self.assertIn("copy__->src->samples != VK_SAMPLE_COUNT_1_BIT", icd)
+        self.assertIn("copy__->dst->samples != VK_SAMPLE_COUNT_1_BIT", icd)
+        self.assertIn("op->image->samples != VK_SAMPLE_COUNT_1_BIT", icd)
+        self.assertIn("op->src->samples != VK_SAMPLE_COUNT_1_BIT", icd)
+        self.assertIn("op->dst->samples != VK_SAMPLE_COUNT_1_BIT", icd)
 
 
     def test_vulkan_graphics_attachment_none_ops_are_centralized_and_non_writing(self):

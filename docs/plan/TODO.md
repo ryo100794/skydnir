@@ -142,6 +142,13 @@ or closes.
   sources, multisample resolve targets, aspect mismatches, and resolve
   mode/view shape mismatches fail closed before the executor sees the frame.
   Evidence: `python3 -m unittest tests.test_vulkan_icd_sync_harness.VulkanIcdSyncHarnessTest.test_msaa_resolve_attachment_helper_validates_samples_and_aspects -q`.
+- [done] **Vulkan V6.10 MSAA copy/readback fail-closed lane**:
+  V6.10 buffer-image and image-image copy paths are now single-sample-only at
+  the producer, host fallback, executor validation, materialization/planning,
+  and command-recording boundaries. MSAA content reduction remains owned by
+  explicit/in-render resolve paths; copy-to-buffer, copy-from-buffer, and
+  copy-image cannot become alternate unresolved-MSAA readback or transport
+  routes. Evidence: `python3 -m unittest tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_graphics_msaa_source_store_is_fail_closed_until_msaa_readback_abi -q`, `python3 -m unittest tests.test_gpu_abi_contract -q`, and `bash scripts/build-native-android-ndk.sh`.
 - [done] **image-barrier range/aspect normalization audit**: The producer ICD
   normalizes image-barrier `VK_REMAINING_MIP_LEVELS` and
   `VK_REMAINING_ARRAY_LAYERS` to concrete ranges before V6.1 serialization, and

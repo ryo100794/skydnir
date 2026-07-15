@@ -8842,6 +8842,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
                 } \
                 const PdockerVkImageCopyOp *copy__ = &cmd->image_copy_ops[op__->index]; \
                 if (!copy__->buffer || !copy__->image || !copy__->buffer->memory || !copy__->image->memory || \
+                    copy__->image->samples != VK_SAMPLE_COUNT_1_BIT || \
                     !pdocker_vk_image_single_aspect_supported_for_format(copy__->image->format, copy__->region.imageSubresource.aspectMask) || \
                     copy__->region.imageSubresource.layerCount == 0 || \
                     copy__->region.imageExtent.width == 0 || copy__->region.imageExtent.height == 0 || \
@@ -8920,6 +8921,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
                 VkImageAspectFlags split_aspects__[2] = {0, 0}; \
                 uint32_t copy_aspect_count__ = 0; \
                 if (!copy__->src || !copy__->dst || !copy__->src->memory || !copy__->dst->memory || \
+                    copy__->src->samples != VK_SAMPLE_COUNT_1_BIT || copy__->dst->samples != VK_SAMPLE_COUNT_1_BIT || \
                     copy__->region.srcSubresource.aspectMask != copy__->region.dstSubresource.aspectMask || \
                     copy__->region.srcSubresource.layerCount == 0 || \
                     copy__->region.srcSubresource.layerCount != copy__->region.dstSubresource.layerCount || \
@@ -13898,6 +13900,7 @@ static void execute_recorded_copy_op(PdockerVkCopyOp *op, PdockerVkCopyStats *st
 static void execute_recorded_image_copy_op(PdockerVkImageCopyOp *op, PdockerVkCopyStats *stats) {
     if (!op || !op->buffer || !op->image || !op->buffer->memory ||
         !op->image->memory ||
+        op->image->samples != VK_SAMPLE_COUNT_1_BIT ||
         op->region.imageSubresource.aspectMask != VK_IMAGE_ASPECT_COLOR_BIT ||
         op->region.imageSubresource.layerCount == 0 ||
         op->region.imageExtent.width == 0 ||
@@ -14010,6 +14013,7 @@ static void execute_recorded_image_to_image_copy_op(
         PdockerVkImageToImageCopyOp *op,
         PdockerVkCopyStats *stats) {
     if (!op || !op->src || !op->dst || !op->src->memory || !op->dst->memory ||
+        op->src->samples != VK_SAMPLE_COUNT_1_BIT || op->dst->samples != VK_SAMPLE_COUNT_1_BIT ||
         op->region.srcSubresource.aspectMask != VK_IMAGE_ASPECT_COLOR_BIT ||
         op->region.dstSubresource.aspectMask != VK_IMAGE_ASPECT_COLOR_BIT ||
         op->region.srcSubresource.layerCount == 0 ||
