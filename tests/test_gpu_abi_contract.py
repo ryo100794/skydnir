@@ -19134,6 +19134,27 @@ class GpuAbiContractTest(unittest.TestCase):
             resolve_block.index("pre_barriers[pre_barrier_count++]"),
         )
 
+    def test_strict_passthrough_rejects_graphics_command_layout_tracker_drift(self):
+        source = GPU_EXECUTOR.read_text()
+        graphics_record = c_function_body(source, "record_vulkan_graphics_v6_command_buffer")
+        barrier_collector = c_function_body(source, "collect_vulkan_graphics_v6_dependency_barriers")
+        helper = c_function_body(source, "strict_vulkan_graphics_image_layout_matches")
+        self.assertIn("vulkan_replay_image_layout_for_range", helper)
+        self.assertIn("vulkan_replay_layout_for_executor", helper)
+        self.assertIn("strict passthrough graphics barrier old layout mismatch", barrier_collector)
+        for marker in [
+            "strict passthrough graphics clear layout mismatch",
+            "strict passthrough graphics buffer-image copy layout mismatch",
+            "strict passthrough graphics image-copy src layout mismatch",
+            "strict passthrough graphics image-copy dst layout mismatch",
+            "strict passthrough graphics resolve src layout mismatch",
+            "strict passthrough graphics resolve dst layout mismatch",
+            "strict passthrough graphics blit src layout mismatch",
+            "strict passthrough graphics blit dst layout mismatch",
+        ]:
+            self.assertIn(marker, graphics_record)
+        self.assertIn("strict_passthrough);", graphics_record)
+
     def test_llama_gpu_artifact_gate_decision_tree_is_documented(self):
         verifier = LLAMA_GPU_ARTIFACT_VERIFIER.read_text()
         runbook = LLAMA_GPU_DEVICE_RUNBOOK.read_text()

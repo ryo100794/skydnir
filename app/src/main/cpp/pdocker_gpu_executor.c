@@ -34091,6 +34091,24 @@ static int vulkan_replay_image_layout_for_range(
     return 0;
 }
 
+static int strict_vulkan_graphics_image_layout_matches(
+        int strict_passthrough,
+        const VulkanDispatchImageObject *image,
+        const VkImageSubresourceRange *range,
+        VkImageLayout expected_layout,
+        const char *message) {
+    if (!strict_passthrough) return 0;
+    VkImageLayout tracked_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+    int rc = vulkan_replay_image_layout_for_range(image, range, &tracked_layout);
+    if (rc != 0) return rc;
+    expected_layout = vulkan_replay_layout_for_executor(expected_layout);
+    if (tracked_layout != expected_layout) {
+        json_fail("vulkan-graphics-v6-command-record", message);
+        return -EOPNOTSUPP;
+    }
+    return 0;
+}
+
 static int vulkan_replay_image_set_layout_for_range(
         VulkanDispatchImageObject *image,
         const VkImageSubresourceRange *range,
@@ -34316,7 +34334,8 @@ static int collect_vulkan_graphics_v6_dependency_barriers(
         uint32_t *buffer_barrier_count,
         VkImageMemoryBarrier2 *image_barriers_to_record,
         uint32_t image_barrier_capacity,
-        uint32_t *image_barrier_count) {
+        uint32_t *image_barrier_count,
+        int strict_passthrough) {
     if (!view || !attachments || !buffers || !memory_barriers_to_record || memory_barrier_capacity == 0 ||
         !memory_barrier_count || !buffer_barriers_to_record || buffer_barrier_capacity == 0 ||
         !buffer_barrier_count || !image_barriers_to_record || image_barrier_capacity == 0 ||
@@ -34390,6 +34409,11 @@ static int collect_vulkan_graphics_v6_dependency_barriers(
             .baseArrayLayer = barrier->base_array_layer,
             .layerCount = barrier->layer_count,
         };
+        rc = strict_vulkan_graphics_image_layout_matches(
+            strict_passthrough, barrier_image, &barrier_range,
+            (VkImageLayout)barrier->old_layout,
+            "strict passthrough graphics barrier old layout mismatch");
+        if (rc != 0) return rc;
         image_barriers_to_record[(*image_barrier_count)++] = (VkImageMemoryBarrier2){
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
             .srcStageMask = (VkPipelineStageFlags2)barrier->src_stage_mask,
@@ -35590,6 +35614,10 @@ begin_rendering_cleanup:
                     .baseArrayLayer = clear->base_array_layer,
                     .layerCount = clear->layer_count,
                 };
+                rc = strict_vulkan_graphics_image_layout_matches(
+                    strict_passthrough, image, &range, (VkImageLayout)clear->image_layout,
+                    "strict passthrough graphics clear layout mismatch");
+                if (rc != 0) goto cleanup;
                 vkCmdClearColorImage(command_buffer,
                                      image->image,
                                      vulkan_replay_layout_for_executor((VkImageLayout)clear->image_layout),
@@ -35626,6 +35654,10 @@ begin_rendering_cleanup:
                     .baseArrayLayer = clear->base_array_layer,
                     .layerCount = clear->layer_count,
                 };
+                rc = strict_vulkan_graphics_image_layout_matches(
+                    strict_passthrough, image, &range, (VkImageLayout)clear->image_layout,
+                    "strict passthrough graphics clear layout mismatch");
+                if (rc != 0) goto cleanup;
                 vkCmdClearDepthStencilImage(command_buffer,
                                             image->image,
                                             vulkan_replay_layout_for_executor((VkImageLayout)clear->image_layout),
@@ -35799,6 +35831,10 @@ begin_rendering_cleanup:
                     .baseArrayLayer = copy->base_array_layer,
                     .layerCount = copy->layer_count,
                 };
+                rc = strict_vulkan_graphics_image_layout_matches(
+                    strict_passthrough, image, &image_range, (VkImageLayout)copy->image_layout,
+                    "strict passthrough graphics buffer-image copy layout mismatch");
+                if (rc != 0) goto cleanup;
                 if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_COPY_BUFFER_TO_IMAGE) {
                     vkCmdCopyBufferToImage(command_buffer,
                                            replay_buffer->buffer.buffer,
@@ -35873,6 +35909,14 @@ begin_rendering_cleanup:
                     .baseArrayLayer = copy->dst_base_array_layer,
                     .layerCount = copy->layer_count,
                 };
+                rc = strict_vulkan_graphics_image_layout_matches(
+                    strict_passthrough, src_image, &src_range, (VkImageLayout)copy->src_layout,
+                    "strict passthrough graphics image-copy src layout mismatch");
+                if (rc != 0) goto cleanup;
+                rc = strict_vulkan_graphics_image_layout_matches(
+                    strict_passthrough, dst_image, &dst_range, (VkImageLayout)copy->dst_layout,
+                    "strict passthrough graphics image-copy dst layout mismatch");
+                if (rc != 0) goto cleanup;
                 rc = vulkan_replay_image_set_layout_for_range(
                     src_image, &src_range, vulkan_replay_layout_for_executor((VkImageLayout)copy->src_layout));
                 if (rc != 0) goto cleanup;
@@ -35933,6 +35977,14 @@ begin_rendering_cleanup:
                     .baseArrayLayer = resolve->dst_base_array_layer,
                     .layerCount = resolve->layer_count,
                 };
+                rc = strict_vulkan_graphics_image_layout_matches(
+                    strict_passthrough, src_image, &src_range, (VkImageLayout)resolve->src_layout,
+                    "strict passthrough graphics resolve src layout mismatch");
+                if (rc != 0) goto cleanup;
+                rc = strict_vulkan_graphics_image_layout_matches(
+                    strict_passthrough, dst_image, &dst_range, (VkImageLayout)resolve->dst_layout,
+                    "strict passthrough graphics resolve dst layout mismatch");
+                if (rc != 0) goto cleanup;
                 rc = vulkan_replay_image_set_layout_for_range(
                     src_image, &src_range, vulkan_replay_layout_for_executor((VkImageLayout)resolve->src_layout));
                 if (rc != 0) goto cleanup;
@@ -35999,6 +36051,14 @@ begin_rendering_cleanup:
                     .baseArrayLayer = blit->dst_base_array_layer,
                     .layerCount = blit->layer_count,
                 };
+                rc = strict_vulkan_graphics_image_layout_matches(
+                    strict_passthrough, src_image, &src_range, (VkImageLayout)blit->src_layout,
+                    "strict passthrough graphics blit src layout mismatch");
+                if (rc != 0) goto cleanup;
+                rc = strict_vulkan_graphics_image_layout_matches(
+                    strict_passthrough, dst_image, &dst_range, (VkImageLayout)blit->dst_layout,
+                    "strict passthrough graphics blit dst layout mismatch");
+                if (rc != 0) goto cleanup;
                 rc = vulkan_replay_image_set_layout_for_range(
                     src_image, &src_range, vulkan_replay_layout_for_executor((VkImageLayout)blit->src_layout));
                 if (rc != 0) goto cleanup;
@@ -36035,7 +36095,8 @@ begin_rendering_cleanup:
                     view, ci, attachments, buffers,
                     memory_barriers_to_record, memory_barrier_capacity, &memory_barrier_count,
                     buffer_barriers_to_record, buffer_barrier_capacity, &buffer_barrier_count,
-                    image_barriers_to_record, image_barrier_capacity, &image_barrier_count);
+                    image_barriers_to_record, image_barrier_capacity, &image_barrier_count,
+                    strict_passthrough);
                 if (rc != 0) goto cleanup;
                 const VkPipelineStageFlags2 src_stage_mask2 = (VkPipelineStageFlags2)command->index_offset;
                 const VkPipelineStageFlags2 dst_stage_mask2 = (VkPipelineStageFlags2)command->push_hash;
@@ -36150,7 +36211,8 @@ begin_rendering_cleanup:
                     view, ci, attachments, buffers,
                     memory_barriers_to_record, memory_barrier_capacity, &memory_barrier_count,
                     buffer_barriers_to_record, buffer_barrier_capacity, &buffer_barrier_count,
-                    image_barriers_to_record, image_barrier_capacity, &image_barrier_count);
+                    image_barriers_to_record, image_barrier_capacity, &image_barrier_count,
+                    strict_passthrough);
                 if (rc != 0) goto cleanup;
                 /* Vulkan permits an empty VkDependencyInfo. Replay it as a no-op
                  * barrier instead of treating a legal synchronization2 command as
