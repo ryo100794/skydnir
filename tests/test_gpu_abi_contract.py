@@ -11562,6 +11562,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE",
             "PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE",
             "PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2",
+            "PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2_LOGIC_OP",
+            "PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2_PATCH_CONTROL_POINTS",
             "PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE_2",
             "PDOCKER_VK_FEATURE_INDEX_TYPE_UINT8",
             "PDOCKER_VK_DEVICE_EXT_INDEX_TYPE_UINT8",
@@ -11633,6 +11635,37 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         self.assertIn("PDOCKER_VK_FEATURE_DYNAMIC_RENDERING", pipeline_rendering_slice)
         self.assertIn("pipeline->graphics_unsupported = true;", pipeline_rendering_slice)
+
+        dynamic_body = c_function_body(icd, "record_graphics_dynamic_state_bytes")
+        for marker in [
+            "command_buffer_require_graphics_dynamic_state_feature",
+            "dynamic-state-feature-not-enabled",
+            "dynamic-logic-op-feature-not-enabled",
+        ]:
+            self.assertIn(marker, dynamic_body)
+
+        vertex_body = c_function_body(icd, "vkCmdBindVertexBuffers2")
+        for marker in [
+            "VK_DYNAMIC_STATE_VERTEX_INPUT_BINDING_STRIDE",
+            "graphics-vertex-binding2-feature-disabled",
+            "record_vertex_buffer_bindings",
+        ]:
+            self.assertIn(marker, vertex_body)
+
+        dynamic_feature_body = c_function_body(icd, "graphics_dynamic_state_required_feature_mask")
+        for marker in [
+            "VK_DYNAMIC_STATE_VERTEX_INPUT_BINDING_STRIDE",
+            "VK_DYNAMIC_STATE_CULL_MODE",
+            "VK_DYNAMIC_STATE_RASTERIZER_DISCARD_ENABLE",
+            "VK_DYNAMIC_STATE_LOGIC_OP_EXT",
+            "PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2_LOGIC_OP",
+            "VK_DYNAMIC_STATE_PATCH_CONTROL_POINTS_EXT",
+            "PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2_PATCH_CONTROL_POINTS",
+        ]:
+            self.assertIn(marker, dynamic_feature_body)
+
+        pipeline_body = c_function_body(icd, "vkCreateGraphicsPipelines")
+        self.assertIn("graphics_dynamic_state_feature_enabled(", pipeline_body)
 
         draw_body = c_function_body(icd, "record_graphics_draw_command")
         for marker in [

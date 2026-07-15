@@ -494,6 +494,8 @@ static uint64_t g_generic_dispatch_sequence = 0;
 #define PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE       (1ull << 18)
 #define PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT          (1ull << 19)
 #define PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2     (1ull << 22)
+#define PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2_LOGIC_OP (1ull << 49)
+#define PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2_PATCH_CONTROL_POINTS (1ull << 50)
 #define PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2     (1ull << 0)
 #define PDOCKER_VK_DEVICE_EXT_KHR_DYNAMIC_RENDERING     (1ull << 1)
 #define PDOCKER_VK_DEVICE_EXT_KHR_DRAW_INDIRECT_COUNT   (1ull << 2)
@@ -1702,6 +1704,54 @@ static bool command_buffer_require_synchronization2(
     return true;
 }
 
+static uint64_t graphics_dynamic_state_required_feature_mask(VkDynamicState state_type) {
+    switch (state_type) {
+        case VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT:
+        case VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT:
+        case VK_DYNAMIC_STATE_CULL_MODE:
+        case VK_DYNAMIC_STATE_FRONT_FACE:
+        case VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY:
+        case VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE:
+        case VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE:
+        case VK_DYNAMIC_STATE_DEPTH_COMPARE_OP:
+        case VK_DYNAMIC_STATE_DEPTH_BOUNDS_TEST_ENABLE:
+        case VK_DYNAMIC_STATE_STENCIL_TEST_ENABLE:
+        case VK_DYNAMIC_STATE_STENCIL_OP:
+        case VK_DYNAMIC_STATE_VERTEX_INPUT_BINDING_STRIDE:
+            return PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE;
+        case VK_DYNAMIC_STATE_RASTERIZER_DISCARD_ENABLE:
+        case VK_DYNAMIC_STATE_DEPTH_BIAS_ENABLE:
+        case VK_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE:
+            return PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2;
+        case VK_DYNAMIC_STATE_LOGIC_OP_EXT:
+            return PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2_LOGIC_OP;
+        case VK_DYNAMIC_STATE_PATCH_CONTROL_POINTS_EXT:
+            return PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2_PATCH_CONTROL_POINTS;
+        default:
+            return 0;
+    }
+}
+
+static bool graphics_dynamic_state_feature_enabled(
+        uint64_t requested_feature_mask,
+        VkDynamicState state_type) {
+    uint64_t required = graphics_dynamic_state_required_feature_mask(state_type);
+    return (requested_feature_mask & required) == required;
+}
+
+static bool command_buffer_require_graphics_dynamic_state_feature(
+        PdockerVkCommandBuffer *cmd,
+        VkDynamicState state_type,
+        const char *reason) {
+    if (!cmd) return false;
+    if (!graphics_dynamic_state_feature_enabled(cmd->requested_feature_mask, state_type)) {
+        cmd->graphics_unsupported = true;
+        command_buffer_mark_recording_failed(cmd, reason ? reason : "dynamic-state-feature-not-enabled");
+        return false;
+    }
+    return true;
+}
+
 static void descriptor_set_release_snapshot_array(
         PdockerVkDescriptorSet *sets,
         bool *used,
@@ -2581,6 +2631,10 @@ static void record_graphics_dynamic_state_bytes(
     if (data_size > UINT32_MAX) {
         cmd->graphics_unsupported = true;
         command_buffer_mark_recording_failed(cmd, "dynamic-state-data-too-large");
+        return;
+    }
+    if (!command_buffer_require_graphics_dynamic_state_feature(
+            cmd, state_type, "dynamic-state-feature-not-enabled")) {
         return;
     }
     if (state_type == VK_DYNAMIC_STATE_DEPTH_BIAS && data && data_size >= sizeof(float) * 3u) {
@@ -17269,6 +17323,8 @@ static uint64_t feature_mask_from_pnext_chain(const void *pNext) {
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_2_FEATURES_EXT: {
                 const VkPhysicalDeviceExtendedDynamicState2FeaturesEXT *p = (const VkPhysicalDeviceExtendedDynamicState2FeaturesEXT *)node;
                 if (p->extendedDynamicState2) mask |= PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2;
+                if (p->extendedDynamicState2LogicOp) mask |= PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2_LOGIC_OP;
+                if (p->extendedDynamicState2PatchControlPoints) mask |= PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2_PATCH_CONTROL_POINTS;
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES: {
@@ -17452,6 +17508,12 @@ static uint64_t advertised_feature_mask(void) {
 #ifdef VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME
     if (advertised_extended_dynamic_state2()) {
         mask |= PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2;
+    }
+    if (advertised_extended_dynamic_state2_logic_op()) {
+        mask |= PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2_LOGIC_OP;
+    }
+    if (advertised_extended_dynamic_state2_patch_control_points()) {
+        mask |= PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2_PATCH_CONTROL_POINTS;
     }
 #endif
     return mask;
@@ -20866,7 +20928,9 @@ static VkResult validate_requested_feature_extension_enables(
         (enabled_extension_mask & PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE) == 0) {
         return unsupported_device_feature_request_result("extendedDynamicState requires VK_EXT_extended_dynamic_state");
     }
-    if ((requested_feature_mask & PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2) &&
+    if ((requested_feature_mask & (PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2 |
+                                   PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2_LOGIC_OP |
+                                   PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2_PATCH_CONTROL_POINTS)) &&
         (enabled_extension_mask & PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE_2) == 0) {
         return unsupported_device_feature_request_result("extendedDynamicState2 requires VK_EXT_extended_dynamic_state2");
     }
@@ -23053,7 +23117,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
             for (uint32_t d = 0; d < ci->pDynamicState->dynamicStateCount; ++d) {
                 VkDynamicState state = ci->pDynamicState->pDynamicStates[d];
                 uint64_t state_bit = pdocker_vk_graphics_dynamic_state_bit(state);
-                if (state_bit == 0) {
+                if (state_bit == 0 ||
+                    !graphics_dynamic_state_feature_enabled(
+                        pipeline->requested_feature_mask, state)) {
                     pipeline->graphics_unsupported = true;
                 }
                 captured_dynamic_state_mask |= state_bit;
@@ -25906,6 +25972,12 @@ static void record_vertex_buffer_bindings(
         const VkDeviceSize *pStrides) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     if (!cmd) return;
+    if ((pSizes || pStrides) &&
+        !command_buffer_require_graphics_dynamic_state_feature(
+            cmd, VK_DYNAMIC_STATE_VERTEX_INPUT_BINDING_STRIDE,
+            "graphics-vertex-binding2-feature-disabled")) {
+        return;
+    }
     if (bindingCount > 0 && (!pBuffers || !pOffsets)) {
         cmd->graphics_unsupported = true;
         return;
@@ -25960,6 +26032,12 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindVertexBuffers2(
         const VkDeviceSize *pOffsets,
         const VkDeviceSize *pSizes,
         const VkDeviceSize *pStrides) {
+    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    if (!command_buffer_require_graphics_dynamic_state_feature(
+            cmd, VK_DYNAMIC_STATE_VERTEX_INPUT_BINDING_STRIDE,
+            "graphics-vertex-binding2-feature-disabled")) {
+        return;
+    }
     record_vertex_buffer_bindings(commandBuffer, firstBinding, bindingCount, pBuffers, pOffsets, pSizes, pStrides);
 }
 
@@ -33152,10 +33230,18 @@ static bool device_proc_address_hidden_by_enabled_state(
     }
     if ((strcmp(pName, "vkCmdSetRasterizerDiscardEnableEXT") == 0 ||
          strcmp(pName, "vkCmdSetDepthBiasEnableEXT") == 0 ||
-         strcmp(pName, "vkCmdSetPrimitiveRestartEnableEXT") == 0 ||
-         strcmp(pName, "vkCmdSetLogicOpEXT") == 0 ||
-         strcmp(pName, "vkCmdSetPatchControlPointsEXT") == 0) &&
+         strcmp(pName, "vkCmdSetPrimitiveRestartEnableEXT") == 0) &&
         ((features & PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2) == 0 ||
+         (extensions & PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE_2) == 0)) {
+        return true;
+    }
+    if (strcmp(pName, "vkCmdSetLogicOpEXT") == 0 &&
+        ((features & PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2_LOGIC_OP) == 0 ||
+         (extensions & PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE_2) == 0)) {
+        return true;
+    }
+    if (strcmp(pName, "vkCmdSetPatchControlPointsEXT") == 0 &&
+        ((features & PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2_PATCH_CONTROL_POINTS) == 0 ||
          (extensions & PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE_2) == 0)) {
         return true;
     }

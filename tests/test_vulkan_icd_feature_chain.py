@@ -2150,6 +2150,26 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 if (validate_requested_feature_extension_enables(
                         PDOCKER_VK_FEATURE_INDEX_TYPE_UINT8,
                         PDOCKER_VK_DEVICE_EXT_INDEX_TYPE_UINT8) != VK_SUCCESS) return 13;
+                if (validate_requested_feature_extension_enables(
+                        PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2_LOGIC_OP, 0) != VK_ERROR_FEATURE_NOT_PRESENT) return 116;
+                if (validate_requested_feature_extension_enables(
+                        PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2_LOGIC_OP,
+                        PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE_2) != VK_SUCCESS) return 117;
+                if (validate_requested_feature_extension_enables(
+                        PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2_PATCH_CONTROL_POINTS, 0) != VK_ERROR_FEATURE_NOT_PRESENT) return 118;
+
+                memset(&device, 0, sizeof(device));
+                device.requested_feature_mask = PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2;
+                device.enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE_2;
+                if (!device_proc_address_hidden_by_enabled_state(&device, "vkCmdSetLogicOpEXT")) return 119;
+                device.requested_feature_mask = PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2_LOGIC_OP;
+                if (device_proc_address_hidden_by_enabled_state(&device, "vkCmdSetLogicOpEXT")) return 120;
+                memset(&device, 0, sizeof(device));
+                device.requested_feature_mask = PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2_PATCH_CONTROL_POINTS;
+                device.enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE_2;
+                if (device_proc_address_hidden_by_enabled_state(&device, "vkCmdSetPatchControlPointsEXT")) return 121;
+                device.enabled_extension_mask = 0;
+                if (!device_proc_address_hidden_by_enabled_state(&device, "vkCmdSetPatchControlPointsEXT")) return 122;
 
                 PdockerVkQueue queue;
                 PdockerVkFence fence;
@@ -2206,6 +2226,47 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 memset(&cmd, 0, sizeof(cmd));
                 vkCmdWriteTimestamp2((VkCommandBuffer)&cmd, 0, VK_NULL_HANDLE, 0);
                 if (!reason_is(&cmd, "synchronization2-feature-disabled")) return 115;
+
+                memset(&cmd, 0, sizeof(cmd));
+                vkCmdSetCullMode((VkCommandBuffer)&cmd, VK_CULL_MODE_NONE);
+                if (!reason_is(&cmd, "dynamic-state-feature-not-enabled")) return 123;
+                memset(&cmd, 0, sizeof(cmd));
+                cmd.requested_feature_mask = PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE;
+                vkCmdSetCullMode((VkCommandBuffer)&cmd, VK_CULL_MODE_NONE);
+                if (cmd.recording_failed || cmd.dynamic_state_count == 0) return 124;
+                command_buffer_destroy_record_vectors(&cmd);
+
+                memset(&cmd, 0, sizeof(cmd));
+                vkCmdSetRasterizerDiscardEnable((VkCommandBuffer)&cmd, VK_FALSE);
+                if (!reason_is(&cmd, "dynamic-state-feature-not-enabled")) return 125;
+                memset(&cmd, 0, sizeof(cmd));
+                cmd.requested_feature_mask = PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2;
+                vkCmdSetRasterizerDiscardEnable((VkCommandBuffer)&cmd, VK_FALSE);
+                if (cmd.recording_failed || cmd.dynamic_state_count == 0) return 126;
+                command_buffer_destroy_record_vectors(&cmd);
+
+                memset(&cmd, 0, sizeof(cmd));
+                cmd.requested_feature_mask = PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2 | PDOCKER_VK_FEATURE_LOGIC_OP;
+                vkCmdSetLogicOpEXT((VkCommandBuffer)&cmd, VK_LOGIC_OP_COPY);
+                if (!reason_is(&cmd, "dynamic-state-feature-not-enabled")) return 127;
+                memset(&cmd, 0, sizeof(cmd));
+                cmd.requested_feature_mask = PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2_LOGIC_OP;
+                vkCmdSetLogicOpEXT((VkCommandBuffer)&cmd, VK_LOGIC_OP_COPY);
+                if (!reason_is(&cmd, "dynamic-logic-op-feature-not-enabled")) return 128;
+                memset(&cmd, 0, sizeof(cmd));
+                cmd.requested_feature_mask = PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2_LOGIC_OP | PDOCKER_VK_FEATURE_LOGIC_OP;
+                vkCmdSetLogicOpEXT((VkCommandBuffer)&cmd, VK_LOGIC_OP_COPY);
+                if (cmd.recording_failed || cmd.dynamic_state_count == 0) return 129;
+                command_buffer_destroy_record_vectors(&cmd);
+
+                memset(&cmd, 0, sizeof(cmd));
+                vkCmdBindVertexBuffers2((VkCommandBuffer)&cmd, 0, 1, (VkBuffer[]){{pdocker_vk_buffer_to_handle(&buffer)}}, (VkDeviceSize[]){{0}}, NULL, NULL);
+                if (!reason_is(&cmd, "graphics-vertex-binding2-feature-disabled")) return 130;
+                memset(&cmd, 0, sizeof(cmd));
+                cmd.requested_feature_mask = PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE;
+                vkCmdBindVertexBuffers2((VkCommandBuffer)&cmd, 0, 1, (VkBuffer[]){{pdocker_vk_buffer_to_handle(&buffer)}}, (VkDeviceSize[]){{0}}, NULL, NULL);
+                if (cmd.recording_failed || cmd.graphics_vertex_binding_snapshot_count == 0) return 131;
+                command_buffer_destroy_record_vectors(&cmd);
 
             #ifdef VK_EXT_INDEX_TYPE_UINT8_EXTENSION_NAME
                 memset(&cmd, 0, sizeof(cmd));
