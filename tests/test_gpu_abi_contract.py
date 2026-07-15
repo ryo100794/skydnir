@@ -5278,6 +5278,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "descriptor_image_ranges_overlap",
             "descriptor_image_range_contains",
             "descriptor_image_layout_matches_tracked_state",
+            "descriptor_image_aspect_transport_supported",
         ]:
             self.assertIn(helper_name, icd)
         base_readonly_helper = c_function_body(icd, "descriptor_image_read_only_layout_valid")
@@ -5306,14 +5307,26 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("descriptor_image_range_contains(&entry->range, view_range)", helper)
         self.assertIn("if (descriptor_layout == image->current_layout) return true;", helper)
         self.assertIn("return covered_by_matching_explicit_range;", helper)
+        transport_helper = c_function_body(icd, "descriptor_image_aspect_transport_supported")
+        self.assertIn("case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:", transport_helper)
+        self.assertIn("aspect == VK_IMAGE_ASPECT_COLOR_BIT", transport_helper)
+        self.assertIn("pdocker_vk_image_single_aspect_supported_for_format(", transport_helper)
+        self.assertIn("case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:", transport_helper)
+        self.assertIn("pdocker_vk_image_to_image_depth_stencil_split_supported(", transport_helper)
 
         sender = c_function_body(icd, "send_generic_vulkan_dispatch_op")
         self.assertIn("descriptor_image_layout_matches_tracked_state(", sender)
         self.assertIn("binding->image_view, descriptor_type, binding->image_layout", sender)
         self.assertIn("image descriptor layout mismatch", sender)
+        self.assertIn("descriptor_image_aspect_transport_supported(binding->image_view, descriptor_type)", sender)
+        self.assertIn("unsupported image descriptor aspect", sender)
         self.assertIn("return -EOPNOTSUPP;", sender)
         self.assertLess(
             sender.index("descriptor_image_layout_matches_tracked_state("),
+            sender.index("descriptor_image_aspect_transport_supported("),
+        )
+        self.assertLess(
+            sender.index("descriptor_image_aspect_transport_supported("),
             sender.index("find_image_view_table_index("),
         )
 

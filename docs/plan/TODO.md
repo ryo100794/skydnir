@@ -114,6 +114,12 @@ or closes.
   transport still rejects dual-aspect depth/stencil ranges and any attempt to
   merge two different aspects onto the same image copy range, so no packed
   memory layout is guessed.
+- [done] **descriptor dual-aspect depth/stencil CPU gate**: The ICD now checks
+  descriptor image aspect transportability before queue transport. Read-only
+  sampled packed `D24S8`/`D32S8` dual-aspect views may proceed through the
+  explicit depth/stencil split path, while storage-image depth/stencil views
+  fail closed before socket transport even when their descriptor layout is
+  `VK_IMAGE_LAYOUT_GENERAL`. Evidence: `python3 -m unittest tests.test_vulkan_icd_sync_harness.VulkanIcdSyncHarnessTest.test_descriptor_image_layout_mismatch_fails_before_transport -q` and `python3 -m unittest tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_dispatch_icd_fails_closed_on_descriptor_image_layout_mismatch -q`.
 - [done] **image-barrier range/aspect normalization audit**: The producer ICD
   normalizes image-barrier `VK_REMAINING_MIP_LEVELS` and
   `VK_REMAINING_ARRAY_LAYERS` to concrete ranges before V6.1 serialization, and
@@ -335,8 +341,8 @@ or closes.
   `tests.test_gpu_abi_contract` pass.
 - [planned] **residual graphics evidence gaps**: Do not promote full Vulkan
   pass-through until remaining fail-closed lanes have explicit ABI/evidence:
-  dual-aspect depth+stencil copy layout, explicit compressed/multiplanar image
-  support beyond the current fail-closed gate, unresolved MSAA store/readback,
+  dual-aspect depth+stencil copy/layout evidence beyond the descriptor CPU
+  gate, explicit compressed/multiplanar image support beyond the current fail-closed gate, unresolved MSAA store/readback,
   true cross-family ownership transfer, and sync2 pNext/dependency-flag
   extensions beyond the currently explicit ABI lanes.  Dispatch between render
   scopes has range-split evidence, and dispatch inside active rendering remains

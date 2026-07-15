@@ -10713,6 +10713,29 @@ static bool descriptor_image_layout_matches_tracked_state(
     return covered_by_matching_explicit_range;
 }
 
+static bool descriptor_image_aspect_transport_supported(
+        const PdockerVkImageView *view,
+        VkDescriptorType descriptor_type) {
+    if (!view || !view->image) return false;
+    const VkImageAspectFlags aspect = view->subresource_range.aspectMask;
+    switch (descriptor_type) {
+        case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
+            return aspect == VK_IMAGE_ASPECT_COLOR_BIT &&
+                   pdocker_vk_image_single_aspect_supported_for_format(
+                       view->image->format, aspect);
+        case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
+        case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
+            if (pdocker_vk_image_single_aspect_supported_for_format(
+                    view->image->format, aspect)) {
+                return true;
+            }
+            return pdocker_vk_image_to_image_depth_stencil_split_supported(
+                view->image->format, view->image->format, aspect, aspect);
+        default:
+            return false;
+    }
+}
+
 static bool descriptor_set_has_image_descriptor(const PdockerVkDescriptorSet *set);
 
 static bool pdocker_vk_sampler_contents_equal(
@@ -12661,6 +12684,18 @@ static int send_generic_vulkan_dispatch_op(
                                     binding->image_view && binding->image_view->image ? (void *)binding->image_view->image : NULL,
                                     binding->image_view && binding->image_view->image ? (unsigned)binding->image_view->image->layout_mixed : 0u,
                                     binding->image_view && binding->image_view->image ? (unsigned)binding->image_view->image->current_layout : 0u);
+                            return -EOPNOTSUPP;
+                        }
+                        if (!descriptor_image_aspect_transport_supported(binding->image_view, descriptor_type)) {
+                            fprintf(stderr,
+                                    "pdocker-vulkan-icd: generic dispatch rejected: unsupported image descriptor aspect dispatch_id=%llu set=%u binding=%u array=%u type=%u aspect=0x%x format=%u\n",
+                                    (unsigned long long)dispatch_id,
+                                    set_index,
+                                    api_binding,
+                                    array_element,
+                                    descriptor_type,
+                                    binding->image_view ? (unsigned)binding->image_view->subresource_range.aspectMask : 0u,
+                                    binding->image_view && binding->image_view->image ? (unsigned)binding->image_view->image->format : 0u);
                             return -EOPNOTSUPP;
                         }
                         int existing_view =

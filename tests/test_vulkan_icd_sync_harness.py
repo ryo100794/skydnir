@@ -636,6 +636,36 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 view->subresource_range.layerCount = layer_count;
             }}
 
+            static void init_depth_stencil_image(PdockerVkImage *image, PdockerVkMemory *memory,
+                                                 VkImageLayout layout) {{
+                memset(image, 0, sizeof(*image));
+                memset(memory, 0, sizeof(*memory));
+                memory->fd = -1;
+                memory->size = 8192;
+                image->object_id = 0x3001;
+                image->format = VK_FORMAT_D24_UNORM_S8_UINT;
+                image->extent.width = 16;
+                image->extent.height = 16;
+                image->extent.depth = 1;
+                image->mip_levels = 1;
+                image->array_layers = 1;
+                image->samples = VK_SAMPLE_COUNT_1_BIT;
+                image->current_layout = layout;
+                image->memory = memory;
+            }}
+
+            static void init_depth_stencil_view(PdockerVkImageView *view, PdockerVkImage *image) {{
+                memset(view, 0, sizeof(*view));
+                view->object_id = 0x4001;
+                view->image = image;
+                view->format = image->format;
+                view->subresource_range.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+                view->subresource_range.baseMipLevel = 0;
+                view->subresource_range.levelCount = 1;
+                view->subresource_range.baseArrayLayer = 0;
+                view->subresource_range.layerCount = 1;
+            }}
+
             static int expect_layout(const char *label, int got, int want) {{
                 if ((got != 0) != (want != 0)) {{
                     fprintf(stderr, "%s got=%d want=%d\\n", label, got, want);
@@ -644,7 +674,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 return 1;
             }}
 
-            static int send_one_sampled_image(PdockerVkImageView *view, VkImageLayout layout) {{
+            static int send_one_image_descriptor(PdockerVkImageView *view, VkDescriptorType descriptor_type, VkImageLayout layout) {{
                 PdockerVkShaderModule shader;
                 PdockerVkPipeline pipeline;
                 PdockerVkDescriptorSetLayout set_layout;
@@ -683,7 +713,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
 
                 binding_numbers[0] = 7;
                 binding_present[0] = true;
-                binding_types[0] = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+                binding_types[0] = descriptor_type;
                 binding_counts[0] = 1;
                 set_layout.storage_binding_count = 1;
                 set_layout.storage_binding_capacity = 1;
@@ -692,7 +722,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 set_layout.storage_binding_types = binding_types;
                 set_layout.storage_binding_counts = binding_counts;
 
-                binding_storage[0].descriptor_type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+                binding_storage[0].descriptor_type = descriptor_type;
                 binding_storage[0].image_view = view;
                 binding_storage[0].image_layout = layout;
                 storage_rows[0] = binding_storage;
@@ -785,7 +815,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 init_color_view(&view, &image, 0, 1, 0, 1);
                 memory.fd = open("/dev/null", O_RDONLY);
                 if (memory.fd < 0) return 9;
-                int mismatch_rc = send_one_sampled_image(&view, VK_IMAGE_LAYOUT_GENERAL);
+                int mismatch_rc = send_one_image_descriptor(&view, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, VK_IMAGE_LAYOUT_GENERAL);
                 close(memory.fd);
                 memory.fd = -1;
                 if (mismatch_rc != -EOPNOTSUPP) {{
@@ -796,12 +826,60 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
 
                 memory.fd = open("/dev/null", O_RDONLY);
                 if (memory.fd < 0) return 11;
-                int matching_rc = send_one_sampled_image(
-                    &view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                int matching_rc = send_one_image_descriptor(
+                    &view, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
                 close(memory.fd);
                 if (matching_rc == -EOPNOTSUPP) {{
                     fprintf(stderr, "matching sampled-image descriptor was rejected as layout mismatch\\n");
                     return 12;
+                }}
+
+                init_depth_stencil_image(&image, &memory, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
+                init_depth_stencil_view(&view, &image);
+                if (!expect_layout("dual-aspect sampled depth/stencil readonly layout",
+                        descriptor_image_layout_matches_tracked_state(
+                            &view, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+                            VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL), 1)) return 13;
+                if (!expect_layout("dual-aspect sampled depth-only layout rejected",
+                        descriptor_image_layout_matches_tracked_state(
+                            &view, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+                            VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL), 0)) return 14;
+                if (!expect_layout("dual-aspect sampled descriptor transport supported",
+                        descriptor_image_aspect_transport_supported(
+                            &view, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE), 1)) return 15;
+
+                init_depth_stencil_image(&image, &memory, VK_IMAGE_LAYOUT_GENERAL);
+                init_depth_stencil_view(&view, &image);
+                if (!expect_layout("dual-aspect storage layout alone matches",
+                        descriptor_image_layout_matches_tracked_state(
+                            &view, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                            VK_IMAGE_LAYOUT_GENERAL), 1)) return 16;
+                if (!expect_layout("dual-aspect storage descriptor transport rejected",
+                        descriptor_image_aspect_transport_supported(
+                            &view, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE), 0)) return 17;
+                memory.fd = open("/dev/null", O_RDONLY);
+                if (memory.fd < 0) return 18;
+                int storage_depth_stencil_rc = send_one_image_descriptor(
+                    &view, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_IMAGE_LAYOUT_GENERAL);
+                close(memory.fd);
+                memory.fd = -1;
+                if (storage_depth_stencil_rc != -EOPNOTSUPP) {{
+                    fprintf(stderr, "storage depth/stencil descriptor rc=%d, want -EOPNOTSUPP before transport\\n",
+                            storage_depth_stencil_rc);
+                    return 19;
+                }}
+
+                init_depth_stencil_image(&image, &memory, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
+                init_depth_stencil_view(&view, &image);
+                memory.fd = open("/dev/null", O_RDONLY);
+                if (memory.fd < 0) return 20;
+                int sampled_depth_stencil_rc = send_one_image_descriptor(
+                    &view, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+                    VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
+                close(memory.fd);
+                if (sampled_depth_stencil_rc == -EOPNOTSUPP) {{
+                    fprintf(stderr, "sampled depth/stencil descriptor was rejected before transport\\n");
+                    return 21;
                 }}
                 return 0;
             }}
