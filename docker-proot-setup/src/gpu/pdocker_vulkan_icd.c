@@ -31407,7 +31407,10 @@ static bool dependency_info_has_queue_family_ownership_transfer(
 }
 
 static const char *dependency_info_unsupported_reason(const VkDependencyInfo *info) {
-    if (!info) return NULL;
+    if (!info) return "dependency-info-null";
+    if (info->sType != VK_STRUCTURE_TYPE_DEPENDENCY_INFO) {
+        return "dependency-info-stype-invalid";
+    }
     if (info->pNext) return "dependency-info-pnext-unsupported";
     if (dependency_info_dependency_flags_unsupported(info)) {
         return "dependency-info-dependency-flags-unsupported";
@@ -31417,6 +31420,9 @@ static const char *dependency_info_unsupported_reason(const VkDependencyInfo *in
     }
     if (info->pMemoryBarriers) {
         for (uint32_t i = 0; i < info->memoryBarrierCount; ++i) {
+            if (info->pMemoryBarriers[i].sType != VK_STRUCTURE_TYPE_MEMORY_BARRIER_2) {
+                return "dependency-info-memory-barrier-stype-invalid";
+            }
             if (info->pMemoryBarriers[i].pNext) {
                 return "dependency-info-memory-barrier-pnext-unsupported";
             }
@@ -31433,6 +31439,9 @@ static const char *dependency_info_unsupported_reason(const VkDependencyInfo *in
     }
     if (info->pBufferMemoryBarriers) {
         for (uint32_t i = 0; i < info->bufferMemoryBarrierCount; ++i) {
+            if (info->pBufferMemoryBarriers[i].sType != VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2) {
+                return "dependency-info-buffer-barrier-stype-invalid";
+            }
             if (!barrier_external_acquire_unmodified_pnext_noop(
                     info->pBufferMemoryBarriers[i].pNext)) {
                 return "dependency-info-buffer-barrier-pnext-unsupported";
@@ -31450,6 +31459,9 @@ static const char *dependency_info_unsupported_reason(const VkDependencyInfo *in
     }
     if (info->pImageMemoryBarriers) {
         for (uint32_t i = 0; i < info->imageMemoryBarrierCount; ++i) {
+            if (info->pImageMemoryBarriers[i].sType != VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2) {
+                return "dependency-info-image-barrier-stype-invalid";
+            }
             if (!barrier_external_acquire_unmodified_pnext_noop(
                     info->pImageMemoryBarriers[i].pNext)) {
                 return "dependency-info-image-barrier-pnext-unsupported";

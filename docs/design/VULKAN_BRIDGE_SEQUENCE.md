@@ -158,7 +158,7 @@ The bridge uses four evidence lanes:
 | Sampler object shape | sampler flags, filters, address modes, LOD, anisotropy, reduction mode, compare state, border color, and boolean fields | native `VkSampler` replay | ICD and executor reject nonzero sampler flags, unsupported address/filter/mipmap/compare/border enums, malformed booleans, invalid LOD ranges, mirror-clamp address mode, and feature-gated reduction/anisotropy before replay | sampler table, sampler replay rejection reason |
 | Input bytes | backing fd range | upload to mapped Android VkBuffer memory | read/upload when shader reflection says readable or strict transfer requires it | upload hashes, `read_bindings`, skipped upload bytes |
 | Output bytes | backing fd range | read back after fence/invalidate | write back only shader-writable bindings; preserve alias evidence | writeback hashes, `write_bindings`, dirty/writeback reports, Q6 final-store trace-v2 records when probing |
-| Barriers/fences | submit/wait sequence | Android command buffer barriers + fence wait | required host/device visibility synchronization | `pre_barriers`, `post_barriers`, dispatch timings |
+| Barriers/fences | submit/wait sequence plus validated legacy/sync2 barrier structs | Android command buffer barriers + fence wait | required host/device visibility synchronization; malformed sync2 `VkDependencyInfo` or nested barrier `sType` fields fail closed before transport state is recorded | `pre_barriers`, `post_barriers`, dispatch timings, `dependency-info-*` failure reasons |
 
 ## SPIR-V processing sequence
 

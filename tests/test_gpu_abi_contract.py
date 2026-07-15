@@ -12672,7 +12672,17 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
 
         self.assertNotIn("dependency_info_has_unsupported_pnext", icd)
+        self.assertIn('if (!info) return "dependency-info-null";', dependency_reason_body)
+        self.assertIn("info->sType != VK_STRUCTURE_TYPE_DEPENDENCY_INFO", dependency_reason_body)
         self.assertIn("dependency_info_dependency_flags_unsupported(info)", dependency_reason_body)
+        self.assertLess(
+            dependency_reason_body.index('if (!info) return "dependency-info-null";'),
+            dependency_reason_body.index("info->sType != VK_STRUCTURE_TYPE_DEPENDENCY_INFO"),
+        )
+        self.assertLess(
+            dependency_reason_body.index("info->sType != VK_STRUCTURE_TYPE_DEPENDENCY_INFO"),
+            dependency_reason_body.index('if (info->pNext) return "dependency-info-pnext-unsupported";'),
+        )
         self.assertLess(
             dependency_reason_body.index('if (info->pNext) return "dependency-info-pnext-unsupported";'),
             dependency_reason_body.index("dependency_info_dependency_flags_unsupported(info)"),
@@ -12681,6 +12691,15 @@ class GpuAbiContractTest(unittest.TestCase):
             dependency_reason_body.index("dependency_info_dependency_flags_unsupported(info)"),
             dependency_reason_body.index("info->memoryBarrierCount && !info->pMemoryBarriers"),
         )
+        for marker in [
+            "info->pMemoryBarriers[i].sType != VK_STRUCTURE_TYPE_MEMORY_BARRIER_2",
+            "dependency-info-memory-barrier-stype-invalid",
+            "info->pBufferMemoryBarriers[i].sType != VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2",
+            "dependency-info-buffer-barrier-stype-invalid",
+            "info->pImageMemoryBarriers[i].sType != VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2",
+            "dependency-info-image-barrier-stype-invalid",
+        ]:
+            self.assertIn(marker, dependency_reason_body)
 
         self.assertIn('return "event-set2-dependency-flags-unsupported"', set_event2_reason_body)
         self.assertIn('return "event-set2-dependency-info-unsupported"', set_event2_reason_body)
@@ -14006,7 +14025,12 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("event_wait2_dependency_info_failure_reason", icd)
         self.assertIn("sync2_stage_access_pair_invalid", icd)
         self.assertIn("VK_PIPELINE_STAGE_2_NONE", icd)
+        self.assertIn('if (!info) return "dependency-info-null";', icd)
+        self.assertIn("info->sType != VK_STRUCTURE_TYPE_DEPENDENCY_INFO", icd)
         self.assertIn('if (info->pNext) return "dependency-info-pnext-unsupported";', icd)
+        self.assertIn("info->pMemoryBarriers[i].sType != VK_STRUCTURE_TYPE_MEMORY_BARRIER_2", icd)
+        self.assertIn("info->pBufferMemoryBarriers[i].sType != VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2", icd)
+        self.assertIn("info->pImageMemoryBarriers[i].sType != VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2", icd)
         self.assertIn("info->memoryBarrierCount && !info->pMemoryBarriers", icd)
         self.assertIn("info->bufferMemoryBarrierCount && !info->pBufferMemoryBarriers", icd)
         self.assertIn("info->imageMemoryBarrierCount && !info->pImageMemoryBarriers", icd)

@@ -1538,7 +1538,21 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 memset(&unsupported, 0, sizeof(unsupported));
                 unsupported.sType = (VkStructureType)1000060013;
 
+                vkCmdPipelineBarrier2((VkCommandBuffer)cmd, NULL);
+                if (!expect_failure(cmd, "pipeline-barrier2-dependency-info-unsupported")) return 20;
+
+                memset(cmd, 0, sizeof(*cmd));
+                cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
+                cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
                 VkDependencyInfo dependency;
+                memset(&dependency, 0, sizeof(dependency));
+                dependency.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+                vkCmdPipelineBarrier2((VkCommandBuffer)cmd, &dependency);
+                if (!expect_failure(cmd, "pipeline-barrier2-dependency-info-unsupported")) return 21;
+
+                memset(cmd, 0, sizeof(*cmd));
+                cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
+                cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
                 memset(&dependency, 0, sizeof(dependency));
                 dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
                 dependency.pNext = &unsupported;
@@ -1570,6 +1584,20 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 dependency.pMemoryBarriers = NULL;
                 vkCmdPipelineBarrier2((VkCommandBuffer)cmd, &dependency);
                 if (!expect_failure(cmd, "pipeline-barrier2-missing-barrier-array")) return 4;
+
+                memset(cmd, 0, sizeof(*cmd));
+                cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
+                cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
+                memset(&memory_barrier, 0, sizeof(memory_barrier));
+                memory_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
+                memory_barrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+                memory_barrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+                memset(&dependency, 0, sizeof(dependency));
+                dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+                dependency.memoryBarrierCount = 1;
+                dependency.pMemoryBarriers = &memory_barrier;
+                vkCmdPipelineBarrier2((VkCommandBuffer)cmd, &dependency);
+                if (!expect_failure(cmd, "pipeline-barrier2-dependency-info-unsupported")) return 22;
 
                 memset(cmd, 0, sizeof(*cmd));
                 cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
