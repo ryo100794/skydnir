@@ -34099,85 +34099,72 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance instan
     return proc_address(pName);
 }
 
+typedef struct PdockerVkDeviceProcEnabledStateGate {
+    const char *name;
+    uint64_t required_feature_mask;
+    uint64_t required_extension_mask;
+} PdockerVkDeviceProcEnabledStateGate;
+
+static const PdockerVkDeviceProcEnabledStateGate k_device_proc_enabled_state_gates[] = {
+        {"vkCmdBeginRendering", PDOCKER_VK_FEATURE_DYNAMIC_RENDERING, PDOCKER_VK_DEVICE_EXT_KHR_DYNAMIC_RENDERING},
+        {"vkCmdBeginRenderingKHR", PDOCKER_VK_FEATURE_DYNAMIC_RENDERING, PDOCKER_VK_DEVICE_EXT_KHR_DYNAMIC_RENDERING},
+        {"vkCmdEndRendering", PDOCKER_VK_FEATURE_DYNAMIC_RENDERING, PDOCKER_VK_DEVICE_EXT_KHR_DYNAMIC_RENDERING},
+        {"vkCmdEndRenderingKHR", PDOCKER_VK_FEATURE_DYNAMIC_RENDERING, PDOCKER_VK_DEVICE_EXT_KHR_DYNAMIC_RENDERING},
+        {"vkCmdPipelineBarrier2", PDOCKER_VK_FEATURE_SYNCHRONIZATION_2, PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2},
+        {"vkCmdPipelineBarrier2KHR", PDOCKER_VK_FEATURE_SYNCHRONIZATION_2, PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2},
+        {"vkQueueSubmit2", PDOCKER_VK_FEATURE_SYNCHRONIZATION_2, PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2},
+        {"vkQueueSubmit2KHR", PDOCKER_VK_FEATURE_SYNCHRONIZATION_2, PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2},
+        {"vkCmdSetEvent2", PDOCKER_VK_FEATURE_SYNCHRONIZATION_2, PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2},
+        {"vkCmdSetEvent2KHR", PDOCKER_VK_FEATURE_SYNCHRONIZATION_2, PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2},
+        {"vkCmdResetEvent2", PDOCKER_VK_FEATURE_SYNCHRONIZATION_2, PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2},
+        {"vkCmdResetEvent2KHR", PDOCKER_VK_FEATURE_SYNCHRONIZATION_2, PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2},
+        {"vkCmdWaitEvents2", PDOCKER_VK_FEATURE_SYNCHRONIZATION_2, PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2},
+        {"vkCmdWaitEvents2KHR", PDOCKER_VK_FEATURE_SYNCHRONIZATION_2, PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2},
+        {"vkCmdWriteTimestamp2", PDOCKER_VK_FEATURE_SYNCHRONIZATION_2, PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2},
+        {"vkCmdWriteTimestamp2KHR", PDOCKER_VK_FEATURE_SYNCHRONIZATION_2, PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2},
+        {"vkCmdDrawIndirectCount", PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT, 0},
+        {"vkCmdDrawIndexedIndirectCount", PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT, 0},
+        {"vkCmdDrawIndirectCountKHR", PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT, PDOCKER_VK_DEVICE_EXT_KHR_DRAW_INDIRECT_COUNT},
+        {"vkCmdDrawIndexedIndirectCountKHR", PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT, PDOCKER_VK_DEVICE_EXT_KHR_DRAW_INDIRECT_COUNT},
+        {"vkCmdDrawIndirectCountAMD", PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT, PDOCKER_VK_DEVICE_EXT_AMD_DRAW_INDIRECT_COUNT},
+        {"vkCmdDrawIndexedIndirectCountAMD", PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT, PDOCKER_VK_DEVICE_EXT_AMD_DRAW_INDIRECT_COUNT},
+        {"vkCmdBindVertexBuffers2EXT", PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE, PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE},
+        {"vkCmdSetViewportWithCountEXT", PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE, PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE},
+        {"vkCmdSetScissorWithCountEXT", PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE, PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE},
+        {"vkCmdSetCullModeEXT", PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE, PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE},
+        {"vkCmdSetFrontFaceEXT", PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE, PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE},
+        {"vkCmdSetPrimitiveTopologyEXT", PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE, PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE},
+        {"vkCmdSetDepthTestEnableEXT", PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE, PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE},
+        {"vkCmdSetDepthWriteEnableEXT", PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE, PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE},
+        {"vkCmdSetDepthCompareOpEXT", PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE, PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE},
+        {"vkCmdSetDepthBoundsTestEnableEXT", PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE, PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE},
+        {"vkCmdSetStencilTestEnableEXT", PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE, PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE},
+        {"vkCmdSetStencilOpEXT", PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE, PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE},
+        {"vkCmdSetRasterizerDiscardEnableEXT", PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2, PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE_2},
+        {"vkCmdSetDepthBiasEnableEXT", PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2, PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE_2},
+        {"vkCmdSetPrimitiveRestartEnableEXT", PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2, PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE_2},
+        {"vkCmdSetLogicOpEXT", PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2_LOGIC_OP, PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE_2},
+        {"vkCmdSetPatchControlPointsEXT", PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2_PATCH_CONTROL_POINTS, PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE_2},
+};
+
+static bool device_proc_enabled_state_gate_hidden(
+        const PdockerVkDevice *device,
+        const PdockerVkDeviceProcEnabledStateGate *gate) {
+    return ((device->requested_feature_mask & gate->required_feature_mask) != gate->required_feature_mask ||
+            (device->enabled_extension_mask & gate->required_extension_mask) != gate->required_extension_mask);
+}
+
 static bool device_proc_address_hidden_by_enabled_state(
         const PdockerVkDevice *device,
         const char *pName) {
     if (!device || !pName) return true;
-    const uint64_t features = device->requested_feature_mask;
-    const uint64_t extensions = device->enabled_extension_mask;
-    if ((strcmp(pName, "vkCmdBeginRendering") == 0 ||
-         strcmp(pName, "vkCmdBeginRenderingKHR") == 0 ||
-         strcmp(pName, "vkCmdEndRendering") == 0 ||
-         strcmp(pName, "vkCmdEndRenderingKHR") == 0) &&
-        ((features & PDOCKER_VK_FEATURE_DYNAMIC_RENDERING) == 0 ||
-         (extensions & PDOCKER_VK_DEVICE_EXT_KHR_DYNAMIC_RENDERING) == 0)) {
-        return true;
-    }
-    if ((strcmp(pName, "vkCmdPipelineBarrier2") == 0 ||
-         strcmp(pName, "vkCmdPipelineBarrier2KHR") == 0 ||
-         strcmp(pName, "vkQueueSubmit2") == 0 ||
-         strcmp(pName, "vkQueueSubmit2KHR") == 0 ||
-         strcmp(pName, "vkCmdSetEvent2") == 0 ||
-         strcmp(pName, "vkCmdSetEvent2KHR") == 0 ||
-         strcmp(pName, "vkCmdResetEvent2") == 0 ||
-         strcmp(pName, "vkCmdResetEvent2KHR") == 0 ||
-         strcmp(pName, "vkCmdWaitEvents2") == 0 ||
-         strcmp(pName, "vkCmdWaitEvents2KHR") == 0 ||
-         strcmp(pName, "vkCmdWriteTimestamp2") == 0 ||
-         strcmp(pName, "vkCmdWriteTimestamp2KHR") == 0) &&
-        ((features & PDOCKER_VK_FEATURE_SYNCHRONIZATION_2) == 0 ||
-         (extensions & PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2) == 0)) {
-        return true;
-    }
-    if ((strcmp(pName, "vkCmdDrawIndirectCount") == 0 ||
-         strcmp(pName, "vkCmdDrawIndexedIndirectCount") == 0) &&
-        (features & PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT) == 0) {
-        return true;
-    }
-    if ((strcmp(pName, "vkCmdDrawIndirectCountKHR") == 0 ||
-         strcmp(pName, "vkCmdDrawIndexedIndirectCountKHR") == 0) &&
-        ((features & PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT) == 0 ||
-         (extensions & PDOCKER_VK_DEVICE_EXT_KHR_DRAW_INDIRECT_COUNT) == 0)) {
-        return true;
-    }
-    if ((strcmp(pName, "vkCmdDrawIndirectCountAMD") == 0 ||
-         strcmp(pName, "vkCmdDrawIndexedIndirectCountAMD") == 0) &&
-        ((features & PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT) == 0 ||
-         (extensions & PDOCKER_VK_DEVICE_EXT_AMD_DRAW_INDIRECT_COUNT) == 0)) {
-        return true;
-    }
-    if ((strcmp(pName, "vkCmdBindVertexBuffers2EXT") == 0 ||
-         strcmp(pName, "vkCmdSetViewportWithCountEXT") == 0 ||
-         strcmp(pName, "vkCmdSetScissorWithCountEXT") == 0 ||
-         strcmp(pName, "vkCmdSetCullModeEXT") == 0 ||
-         strcmp(pName, "vkCmdSetFrontFaceEXT") == 0 ||
-         strcmp(pName, "vkCmdSetPrimitiveTopologyEXT") == 0 ||
-         strcmp(pName, "vkCmdSetDepthTestEnableEXT") == 0 ||
-         strcmp(pName, "vkCmdSetDepthWriteEnableEXT") == 0 ||
-         strcmp(pName, "vkCmdSetDepthCompareOpEXT") == 0 ||
-         strcmp(pName, "vkCmdSetDepthBoundsTestEnableEXT") == 0 ||
-         strcmp(pName, "vkCmdSetStencilTestEnableEXT") == 0 ||
-         strcmp(pName, "vkCmdSetStencilOpEXT") == 0) &&
-        ((features & PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE) == 0 ||
-         (extensions & PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE) == 0)) {
-        return true;
-    }
-    if ((strcmp(pName, "vkCmdSetRasterizerDiscardEnableEXT") == 0 ||
-         strcmp(pName, "vkCmdSetDepthBiasEnableEXT") == 0 ||
-         strcmp(pName, "vkCmdSetPrimitiveRestartEnableEXT") == 0) &&
-        ((features & PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2) == 0 ||
-         (extensions & PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE_2) == 0)) {
-        return true;
-    }
-    if (strcmp(pName, "vkCmdSetLogicOpEXT") == 0 &&
-        ((features & PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2_LOGIC_OP) == 0 ||
-         (extensions & PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE_2) == 0)) {
-        return true;
-    }
-    if (strcmp(pName, "vkCmdSetPatchControlPointsEXT") == 0 &&
-        ((features & PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2_PATCH_CONTROL_POINTS) == 0 ||
-         (extensions & PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE_2) == 0)) {
-        return true;
+    for (size_t i = 0;
+         i < sizeof(k_device_proc_enabled_state_gates) / sizeof(k_device_proc_enabled_state_gates[0]);
+         ++i) {
+        const PdockerVkDeviceProcEnabledStateGate *gate = &k_device_proc_enabled_state_gates[i];
+        if (strcmp(pName, gate->name) == 0) {
+            return device_proc_enabled_state_gate_hidden(device, gate);
+        }
     }
     return false;
 }

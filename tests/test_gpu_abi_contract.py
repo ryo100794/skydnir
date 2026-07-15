@@ -11957,21 +11957,34 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(marker, feature_ext_body)
 
         device_proc_body = c_function_body(icd, "device_proc_address_hidden_by_enabled_state")
+        device_proc_gate_body = c_function_body(icd, "device_proc_enabled_state_gate_hidden")
+        device_proc_table = icd.split("k_device_proc_enabled_state_gates[]", 1)[1].split("};", 1)[0]
+        for marker in [
+            "k_device_proc_enabled_state_gates",
+            "device_proc_enabled_state_gate_hidden",
+            "strcmp(pName, gate->name) == 0",
+        ]:
+            self.assertIn(marker, device_proc_body)
+        self.assertIn("typedef struct PdockerVkDeviceProcEnabledStateGate", icd)
         for marker in [
             "device->requested_feature_mask",
             "device->enabled_extension_mask",
-            'strcmp(pName, "vkCmdBeginRenderingKHR") == 0',
-            'strcmp(pName, "vkCmdPipelineBarrier2") == 0',
-            'strcmp(pName, "vkCmdPipelineBarrier2KHR") == 0',
-            'strcmp(pName, "vkQueueSubmit2") == 0',
-            'strcmp(pName, "vkQueueSubmit2KHR") == 0',
-            'strcmp(pName, "vkCmdDrawIndirectCountKHR") == 0',
-            'strcmp(pName, "vkCmdDrawIndirectCountAMD") == 0',
-            'strcmp(pName, "vkCmdBindVertexBuffers2EXT") == 0',
-            'strcmp(pName, "vkCmdSetLogicOpEXT") == 0',
-            "PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT",
+            "required_feature_mask",
+            "required_extension_mask",
         ]:
-            self.assertIn(marker, device_proc_body)
+            self.assertIn(marker, device_proc_gate_body)
+        for marker in [
+            '"vkCmdBeginRenderingKHR", PDOCKER_VK_FEATURE_DYNAMIC_RENDERING',
+            '"vkCmdPipelineBarrier2", PDOCKER_VK_FEATURE_SYNCHRONIZATION_2',
+            '"vkCmdPipelineBarrier2KHR", PDOCKER_VK_FEATURE_SYNCHRONIZATION_2',
+            '"vkQueueSubmit2", PDOCKER_VK_FEATURE_SYNCHRONIZATION_2',
+            '"vkQueueSubmit2KHR", PDOCKER_VK_FEATURE_SYNCHRONIZATION_2',
+            '"vkCmdDrawIndirectCountKHR", PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT',
+            '"vkCmdDrawIndirectCountAMD", PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT',
+            '"vkCmdBindVertexBuffers2EXT", PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE',
+            '"vkCmdSetLogicOpEXT", PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2_LOGIC_OP',
+        ]:
+            self.assertIn(marker, device_proc_table)
 
         get_device_proc_body = c_function_body(icd, "vkGetDeviceProcAddr")
         self.assertIn("device_proc_address_hidden_by_enabled_state(pdocker_device, pName)", get_device_proc_body)
@@ -21462,13 +21475,28 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(f'strcmp(pName, "{base}") == 0', proc_gate_body)
             self.assertIn(f'strcmp(pName, "{alias}") == 0', proc_gate_body)
 
+        device_gate_table = icd.split("k_device_proc_enabled_state_gates[]", 1)[1].split("};", 1)[0]
         for name in [
             "vkCmdBeginRendering",
             "vkCmdBeginRenderingKHR",
             "vkCmdEndRendering",
             "vkCmdEndRenderingKHR",
+            "vkCmdPipelineBarrier2",
+            "vkCmdPipelineBarrier2KHR",
+            "vkQueueSubmit2",
+            "vkQueueSubmit2KHR",
+            "vkCmdDrawIndirectCountKHR",
+            "vkCmdDrawIndexedIndirectCountKHR",
+            "vkCmdDrawIndirectCountAMD",
+            "vkCmdDrawIndexedIndirectCountAMD",
+            "vkCmdBindVertexBuffers2EXT",
+            "vkCmdSetLogicOpEXT",
         ]:
-            self.assertIn(f'strcmp(pName, "{name}") == 0', device_gate_body)
+            self.assertIn(f'"{name}"', device_gate_table)
+        self.assertIn("PDOCKER_VK_FEATURE_DYNAMIC_RENDERING", device_gate_table)
+        self.assertIn("PDOCKER_VK_DEVICE_EXT_KHR_DYNAMIC_RENDERING", device_gate_table)
+        self.assertIn("PDOCKER_VK_FEATURE_SYNCHRONIZATION_2", device_gate_table)
+        self.assertIn("PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2", device_gate_table)
 
     def test_llama_gpu_dispatch_lifecycle_logs_are_recorded(self):
         compare = LLAMA_COMPARE.read_text()
