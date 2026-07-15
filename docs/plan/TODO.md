@@ -279,7 +279,8 @@ or closes.
   payloads must build cleanly, and a runtime artifact must prove table-native
   replay on device or show sender-side fail-closed rejection before frame send.
 - [done] **Vulkan V6.1 image-barrier CPU harness lane**: Host C harness
-  coverage now executes `vkCmdPipelineBarrier2` image-barrier recording with
+  coverage now executes both legacy `vkCmdPipelineBarrier` and
+  `vkCmdPipelineBarrier2` image-barrier recording with
   `VK_REMAINING_MIP_LEVELS` / `VK_REMAINING_ARRAY_LAYERS`, proving producer
   metadata stores concrete mip/layer ranges for color, pure-depth, and
   pure-stencil images.  The same harness rejects plane aspects and invalid

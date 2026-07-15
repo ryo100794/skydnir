@@ -883,6 +883,197 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
+    def test_legacy_pipeline_barrier_image_barriers_normalize_remaining_and_reject_invalid_aspects(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include <stdlib.h>
+            #include "{ICD_SOURCE}"
+
+            #ifndef VK_IMAGE_ASPECT_PLANE_0_BIT
+            #define VK_IMAGE_ASPECT_PLANE_0_BIT ((VkImageAspectFlagBits)0x00000010)
+            #endif
+
+            static void init_image(PdockerVkImage *image, VkFormat format) {{
+                memset(image, 0, sizeof(*image));
+                image->object_id = 0xbeefu;
+                image->format = format;
+                image->image_type = VK_IMAGE_TYPE_2D;
+                image->extent.width = 16;
+                image->extent.height = 8;
+                image->extent.depth = 1;
+                image->mip_levels = 5;
+                image->array_layers = 4;
+                image->samples = VK_SAMPLE_COUNT_1_BIT;
+                image->usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+                image->current_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+                image->layout_generation = 1;
+            }}
+
+            static void init_legacy_image_barrier(VkImageMemoryBarrier *barrier,
+                                                  PdockerVkImage *image,
+                                                  VkImageAspectFlags aspect,
+                                                  uint32_t base_mip,
+                                                  uint32_t level_count,
+                                                  uint32_t base_layer,
+                                                  uint32_t layer_count) {{
+                memset(barrier, 0, sizeof(*barrier));
+                barrier->sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+                barrier->srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+                barrier->dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+                barrier->oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+                barrier->newLayout = VK_IMAGE_LAYOUT_GENERAL;
+                barrier->srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                barrier->dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                barrier->image = pdocker_vk_image_to_handle(image);
+                barrier->subresourceRange.aspectMask = aspect;
+                barrier->subresourceRange.baseMipLevel = base_mip;
+                barrier->subresourceRange.levelCount = level_count;
+                barrier->subresourceRange.baseArrayLayer = base_layer;
+                barrier->subresourceRange.layerCount = layer_count;
+            }}
+
+            static void submit_legacy_image_barrier(PdockerVkCommandBuffer *cmd,
+                                                    VkImageMemoryBarrier *barrier) {{
+                vkCmdPipelineBarrier((VkCommandBuffer)cmd,
+                                     VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                                     VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                     0,
+                                     0, NULL,
+                                     0, NULL,
+                                     1, barrier);
+            }}
+
+            static int expect_failure(PdockerVkCommandBuffer *cmd, const char *reason) {{
+                if (!cmd->recording_failed) {{
+                    fprintf(stderr, "legacy image barrier did not fail recording\\n");
+                    return 0;
+                }}
+                if (!cmd->recording_failure_reason || strcmp(cmd->recording_failure_reason, reason) != 0) {{
+                    fprintf(stderr, "unexpected legacy failure reason got=%s want=%s\\n",
+                            cmd->recording_failure_reason ? cmd->recording_failure_reason : "<null>",
+                            reason);
+                    return 0;
+                }}
+                if (cmd->image_barrier_op_count != 0 || cmd->command_op_count != 0 ||
+                    cmd->graphics_command_op_count != 0) {{
+                    fprintf(stderr, "failed legacy image barrier recorded partial state img=%u ops=%u graphics=%u\\n",
+                            cmd->image_barrier_op_count,
+                            cmd->command_op_count,
+                            cmd->graphics_command_op_count);
+                    return 0;
+                }}
+                return 1;
+            }}
+
+            static int expect_recorded_range(PdockerVkCommandBuffer *cmd,
+                                             VkImageAspectFlags aspect,
+                                             uint32_t base_mip,
+                                             uint32_t level_count,
+                                             uint32_t base_layer,
+                                             uint32_t layer_count) {{
+                if (cmd->recording_failed || cmd->graphics_unsupported) {{
+                    fprintf(stderr, "valid legacy image barrier failed reason=%s\\n",
+                            cmd->recording_failure_reason ? cmd->recording_failure_reason : "<null>");
+                    return 0;
+                }}
+                if (cmd->image_barrier_op_count != 1 || cmd->command_op_count != 2 ||
+                    cmd->graphics_command_op_count != 1) {{
+                    fprintf(stderr, "valid legacy image barrier counts img=%u ops=%u graphics=%u\\n",
+                            cmd->image_barrier_op_count,
+                            cmd->command_op_count,
+                            cmd->graphics_command_op_count);
+                    return 0;
+                }}
+                const PdockerVkImageBarrierOp *op = &cmd->image_barrier_ops[0];
+                if (op->range.aspectMask != aspect ||
+                    op->range.baseMipLevel != base_mip ||
+                    op->range.levelCount != level_count ||
+                    op->range.baseArrayLayer != base_layer ||
+                    op->range.layerCount != layer_count) {{
+                    fprintf(stderr, "legacy normalized range mismatch aspect=0x%x mip=%u levels=%u layer=%u layers=%u\\n",
+                            op->range.aspectMask,
+                            op->range.baseMipLevel,
+                            op->range.levelCount,
+                            op->range.baseArrayLayer,
+                            op->range.layerCount);
+                    return 0;
+                }}
+                if (op->range.levelCount == VK_REMAINING_MIP_LEVELS ||
+                    op->range.layerCount == VK_REMAINING_ARRAY_LAYERS) {{
+                    fprintf(stderr, "legacy sentinel range leaked into recorded metadata\\n");
+                    return 0;
+                }}
+                if (cmd->command_ops[0].type != PDOCKER_VK_COMMAND_IMAGE_BARRIER ||
+                    cmd->command_ops[1].type != PDOCKER_VK_COMMAND_BARRIER ||
+                    cmd->command_ops[1].image_barrier_op_first != 0 ||
+                    cmd->command_ops[1].image_barrier_op_count != 1) {{
+                    fprintf(stderr, "legacy command barrier metadata did not point at image barrier\\n");
+                    return 0;
+                }}
+                if (cmd->graphics_command_ops[0].command_type != PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER ||
+                    cmd->graphics_command_ops[0].image_barrier_op_first != 0 ||
+                    cmd->graphics_command_ops[0].image_barrier_op_count != 1) {{
+                    fprintf(stderr, "legacy graphics barrier metadata did not point at image barrier\\n");
+                    return 0;
+                }}
+                return 1;
+            }}
+
+            int main(void) {{
+                PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)calloc(1, sizeof(*cmd));
+                if (!cmd) return 9;
+
+                PdockerVkImage color;
+                init_image(&color, VK_FORMAT_R8G8B8A8_UNORM);
+                VkImageMemoryBarrier barrier;
+                init_legacy_image_barrier(&barrier, &color, VK_IMAGE_ASPECT_COLOR_BIT,
+                                          2, VK_REMAINING_MIP_LEVELS,
+                                          1, VK_REMAINING_ARRAY_LAYERS);
+                submit_legacy_image_barrier(cmd, &barrier);
+                if (!expect_recorded_range(cmd, VK_IMAGE_ASPECT_COLOR_BIT, 2, 3, 1, 3)) return 2;
+
+                memset(cmd, 0, sizeof(*cmd));
+                PdockerVkImage depth;
+                init_image(&depth, VK_FORMAT_D32_SFLOAT);
+                init_legacy_image_barrier(&barrier, &depth, VK_IMAGE_ASPECT_DEPTH_BIT,
+                                          1, VK_REMAINING_MIP_LEVELS,
+                                          0, VK_REMAINING_ARRAY_LAYERS);
+                submit_legacy_image_barrier(cmd, &barrier);
+                if (!expect_recorded_range(cmd, VK_IMAGE_ASPECT_DEPTH_BIT, 1, 4, 0, 4)) return 3;
+
+                memset(cmd, 0, sizeof(*cmd));
+                PdockerVkImage stencil;
+                init_image(&stencil, VK_FORMAT_S8_UINT);
+                init_legacy_image_barrier(&barrier, &stencil, VK_IMAGE_ASPECT_STENCIL_BIT,
+                                          4, VK_REMAINING_MIP_LEVELS,
+                                          2, 1);
+                submit_legacy_image_barrier(cmd, &barrier);
+                if (!expect_recorded_range(cmd, VK_IMAGE_ASPECT_STENCIL_BIT, 4, 1, 2, 1)) return 4;
+
+                memset(cmd, 0, sizeof(*cmd));
+                init_legacy_image_barrier(&barrier, &color, VK_IMAGE_ASPECT_PLANE_0_BIT,
+                                          0, 1, 0, 1);
+                submit_legacy_image_barrier(cmd, &barrier);
+                if (!expect_failure(cmd, "image-barrier-invalid-range")) return 5;
+
+                memset(cmd, 0, sizeof(*cmd));
+                init_legacy_image_barrier(&barrier, &color, VK_IMAGE_ASPECT_COLOR_BIT | VK_IMAGE_ASPECT_STENCIL_BIT,
+                                          0, 1, 0, 1);
+                submit_legacy_image_barrier(cmd, &barrier);
+                if (!expect_failure(cmd, "image-barrier-invalid-range")) return 6;
+
+                free(cmd);
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
     def test_pipeline_barrier2_records_precise_unsupported_dependency_reasons(self):
         source = textwrap.dedent(
             f"""
