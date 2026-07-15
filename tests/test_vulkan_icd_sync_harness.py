@@ -1335,6 +1335,193 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_pipeline_barrier_noop_dependency_flags_are_stripped_or_rejected_with_ownership(self):
+        source = textwrap.dedent(
+            rf"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include <stdlib.h>
+            #include "{ICD_SOURCE}"
+
+            #ifndef VK_DEPENDENCY_QUEUE_FAMILY_OWNERSHIP_TRANSFER_USE_ALL_STAGES_BIT_KHR
+            int main(void) {{
+                return 0;
+            }}
+            #else
+            static void reset_cmd(PdockerVkCommandBuffer *cmd, int sync2) {{
+                memset(cmd, 0, sizeof(*cmd));
+                if (sync2) {{
+                    cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
+                    cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
+                }}
+            }}
+
+            static int expect_no_partial_failure(PdockerVkCommandBuffer *cmd, const char *reason, int code) {{
+                if (!cmd->recording_failed || !cmd->recording_failure_reason ||
+                    strcmp(cmd->recording_failure_reason, reason) != 0) {{
+                    fprintf(stderr, "case %d unexpected failure got=%s want=%s failed=%d\n",
+                            code,
+                            cmd->recording_failure_reason ? cmd->recording_failure_reason : "<null>",
+                            reason,
+                            cmd->recording_failed ? 1 : 0);
+                    return code;
+                }}
+                if (cmd->memory_barrier_op_count != 0 || cmd->buffer_barrier_op_count != 0 ||
+                    cmd->image_barrier_op_count != 0 || cmd->command_op_count != 0 ||
+                    cmd->graphics_command_op_count != 0) {{
+                    fprintf(stderr, "case %d partial barrier state mem=%u buf=%u img=%u cmd=%u gfx=%u\n",
+                            code,
+                            cmd->memory_barrier_op_count,
+                            cmd->buffer_barrier_op_count,
+                            cmd->image_barrier_op_count,
+                            cmd->command_op_count,
+                            cmd->graphics_command_op_count);
+                    return code + 100;
+                }}
+                if (vkEndCommandBuffer((VkCommandBuffer)cmd) != VK_ERROR_FEATURE_NOT_PRESENT) {{
+                    fprintf(stderr, "case %d did not fail closed at end\n", code);
+                    return code + 200;
+                }}
+                return 0;
+            }}
+
+            int main(void) {{
+                PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)calloc(1, sizeof(*cmd));
+                PdockerVkBuffer *buffer = (PdockerVkBuffer *)calloc(1, sizeof(*buffer));
+                if (!cmd || !buffer) return 99;
+                buffer->object_id = 0x1357u;
+                buffer->size = 4096u;
+
+                const VkDependencyFlags noop_flag =
+                    VK_DEPENDENCY_QUEUE_FAMILY_OWNERSHIP_TRANSFER_USE_ALL_STAGES_BIT_KHR;
+                const VkDependencyFlags mixed_flags = VK_DEPENDENCY_BY_REGION_BIT | noop_flag;
+
+                VkMemoryBarrier memory_barrier;
+                memset(&memory_barrier, 0, sizeof(memory_barrier));
+                memory_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+                memory_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+                memory_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+                reset_cmd(cmd, 0);
+                vkCmdPipelineBarrier((VkCommandBuffer)cmd,
+                                     VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                     VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                                     mixed_flags,
+                                     1, &memory_barrier,
+                                     0, NULL,
+                                     0, NULL);
+                if (cmd->recording_failed || cmd->memory_barrier_op_count != 1 ||
+                    cmd->buffer_barrier_op_count != 0 || cmd->image_barrier_op_count != 0 ||
+                    cmd->command_op_count != 1 || cmd->graphics_command_op_count != 1) {{
+                    fprintf(stderr, "legacy no-ownership noop dependency flag was not accepted cleanly failed=%d mem=%u cmd=%u gfx=%u\n",
+                            cmd->recording_failed ? 1 : 0,
+                            cmd->memory_barrier_op_count,
+                            cmd->command_op_count,
+                            cmd->graphics_command_op_count);
+                    return 2;
+                }}
+                if (cmd->command_ops[0].dependency_flags != VK_DEPENDENCY_BY_REGION_BIT ||
+                    cmd->graphics_command_ops[0].flags != VK_DEPENDENCY_BY_REGION_BIT) {{
+                    fprintf(stderr, "legacy noop dependency flag was not stripped command=0x%x graphics=0x%x\n",
+                            cmd->command_ops[0].dependency_flags,
+                            cmd->graphics_command_ops[0].flags);
+                    return 3;
+                }}
+
+                VkMemoryBarrier2 memory_barrier2;
+                memset(&memory_barrier2, 0, sizeof(memory_barrier2));
+                memory_barrier2.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+                memory_barrier2.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+                memory_barrier2.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+                memory_barrier2.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+                memory_barrier2.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
+
+                VkDependencyInfo dependency;
+                memset(&dependency, 0, sizeof(dependency));
+                dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+                dependency.dependencyFlags = mixed_flags;
+                dependency.memoryBarrierCount = 1;
+                dependency.pMemoryBarriers = &memory_barrier2;
+
+                reset_cmd(cmd, 1);
+                vkCmdPipelineBarrier2((VkCommandBuffer)cmd, &dependency);
+                if (cmd->recording_failed || cmd->memory_barrier_op_count != 1 ||
+                    cmd->buffer_barrier_op_count != 0 || cmd->image_barrier_op_count != 0 ||
+                    cmd->command_op_count != 1 || cmd->graphics_command_op_count != 1) {{
+                    fprintf(stderr, "sync2 no-ownership noop dependency flag was not accepted cleanly failed=%d mem=%u cmd=%u gfx=%u\n",
+                            cmd->recording_failed ? 1 : 0,
+                            cmd->memory_barrier_op_count,
+                            cmd->command_op_count,
+                            cmd->graphics_command_op_count);
+                    return 4;
+                }}
+                if (cmd->command_ops[0].dependency_flags != VK_DEPENDENCY_BY_REGION_BIT ||
+                    cmd->graphics_command_ops[0].flags != VK_DEPENDENCY_BY_REGION_BIT) {{
+                    fprintf(stderr, "sync2 noop dependency flag was not stripped command=0x%x graphics=0x%x\n",
+                            cmd->command_ops[0].dependency_flags,
+                            cmd->graphics_command_ops[0].flags);
+                    return 5;
+                }}
+
+                VkBufferMemoryBarrier buffer_barrier;
+                memset(&buffer_barrier, 0, sizeof(buffer_barrier));
+                buffer_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+                buffer_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+                buffer_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+                buffer_barrier.srcQueueFamilyIndex = 0;
+                buffer_barrier.dstQueueFamilyIndex = 1;
+                buffer_barrier.buffer = pdocker_vk_buffer_to_handle(buffer);
+                buffer_barrier.offset = 0;
+                buffer_barrier.size = 64;
+
+                reset_cmd(cmd, 0);
+                vkCmdPipelineBarrier((VkCommandBuffer)cmd,
+                                     VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                     VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                                     mixed_flags,
+                                     1, &memory_barrier,
+                                     1, &buffer_barrier,
+                                     0, NULL);
+                int rc = expect_no_partial_failure(cmd, "legacy-pipeline-barrier-unsupported", 6);
+                if (rc) return rc;
+
+                VkBufferMemoryBarrier2 buffer_barrier2;
+                memset(&buffer_barrier2, 0, sizeof(buffer_barrier2));
+                buffer_barrier2.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
+                buffer_barrier2.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+                buffer_barrier2.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+                buffer_barrier2.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+                buffer_barrier2.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
+                buffer_barrier2.srcQueueFamilyIndex = 0;
+                buffer_barrier2.dstQueueFamilyIndex = 1;
+                buffer_barrier2.buffer = pdocker_vk_buffer_to_handle(buffer);
+                buffer_barrier2.offset = 0;
+                buffer_barrier2.size = 64;
+
+                memset(&dependency, 0, sizeof(dependency));
+                dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+                dependency.dependencyFlags = mixed_flags;
+                dependency.memoryBarrierCount = 1;
+                dependency.pMemoryBarriers = &memory_barrier2;
+                dependency.bufferMemoryBarrierCount = 1;
+                dependency.pBufferMemoryBarriers = &buffer_barrier2;
+
+                reset_cmd(cmd, 1);
+                vkCmdPipelineBarrier2((VkCommandBuffer)cmd, &dependency);
+                rc = expect_no_partial_failure(cmd, "pipeline-barrier2-dependency-flags-unsupported", 7);
+                if (rc) return rc;
+
+                free(buffer);
+                free(cmd);
+                return 0;
+            }}
+            #endif
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
 
     def test_pipeline_barrier_cross_queue_family_fails_before_partial_recording(self):
         source = textwrap.dedent(

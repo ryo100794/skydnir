@@ -99,6 +99,7 @@ or closes.
   image barrier recording now rejects non-ignored source/destination
   queue-family mismatches before serialization and records a deterministic
   failure reason, matching the executor's same-family/ignored-only replay contract.
+- [done] **ownership-transfer dependency no-op flag lane**: CPU harness coverage now proves `VK_DEPENDENCY_QUEUE_FAMILY_OWNERSHIP_TRANSFER_USE_ALL_STAGES_BIT_KHR` is stripped from recorded legacy/sync2 memory-only barriers, but fails closed without partial barrier state when paired with buffer queue-family ownership transfer. Evidence: `python3 -m unittest tests.test_vulkan_icd_sync_harness.VulkanIcdSyncHarnessTest.test_pipeline_barrier_noop_dependency_flags_are_stripped_or_rejected_with_ownership -q`.
 - [done] **bounded dispatch+graphics mixed-submit lane**: Command buffers may now
   contain generic compute dispatch side work before or after a graphics replay
   frame. Submit wait sync is split before pre-graphics dispatches, completion
