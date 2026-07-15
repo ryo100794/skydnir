@@ -5297,7 +5297,8 @@ static int ensure_vulkan_replay_image_layout_range_capacity(
 static int materialize_vulkan_dispatch_v52_image_layout_ranges(
         const VulkanDispatchV5ObjectTables *object_tables,
         VulkanDispatchImageObject *images,
-        size_t image_count) {
+        size_t image_count,
+        int strict_passthrough) {
     if (!object_tables || object_tables->image_layout_range_count == 0) return 0;
     if (!object_tables->image_layout_ranges || !images) return -EINVAL;
     for (size_t i = 0; i < object_tables->image_layout_range_count; ++i) {
@@ -5321,6 +5322,11 @@ static int materialize_vulkan_dispatch_v52_image_layout_ranges(
             !vulkan_dispatch_v52_layout_value_valid(&object_tables->images[src->image_index],
                                                     (VkImageLayout)src->layout)) {
             return -ERANGE;
+        }
+        if (strict_passthrough && (VkImageLayout)src->layout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
+            json_fail("vulkan-dispatch",
+                      "strict passthrough present layout replay mismatch");
+            return -EOPNOTSUPP;
         }
         VkImageLayout layout = vulkan_replay_layout_for_executor((VkImageLayout)src->layout);
         int duplicate = 0;
@@ -5428,7 +5434,8 @@ static int record_vulkan_dispatch_v54_pre_dispatch_barriers(
         VulkanVectorBuffer *const *resource_buffers,
         size_t resource_buffer_count,
         VulkanDispatchImageObject *images,
-        size_t image_count) {
+        size_t image_count,
+        int strict_passthrough) {
     if (!object_tables ||
         (object_tables->memory_barrier_count == 0 &&
          object_tables->buffer_barrier_count == 0 &&
@@ -5500,6 +5507,14 @@ static int record_vulkan_dispatch_v54_pre_dispatch_barriers(
             rc = -ERANGE;
             goto cleanup;
         }
+        if (strict_passthrough &&
+            (src->src_queue_family_index != VK_QUEUE_FAMILY_IGNORED ||
+             src->dst_queue_family_index != VK_QUEUE_FAMILY_IGNORED)) {
+            json_fail("vulkan-dispatch",
+                      "strict passthrough barrier queue family mismatch");
+            rc = -EOPNOTSUPP;
+            goto cleanup;
+        }
         buffer_barriers[i] = (VkBufferMemoryBarrier2){
             .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
             .srcStageMask = (VkPipelineStageFlags2)src->src_stage_mask,
@@ -5531,6 +5546,22 @@ static int record_vulkan_dispatch_v54_pre_dispatch_barriers(
         if (!vulkan_replay_image_layout_range_valid(image, &range) ||
             !vulkan_image_aspect_mask_valid_for_format(image->format, range.aspectMask)) {
             rc = -ERANGE;
+            goto cleanup;
+        }
+        if (strict_passthrough &&
+            (src->src_queue_family_index != VK_QUEUE_FAMILY_IGNORED ||
+             src->dst_queue_family_index != VK_QUEUE_FAMILY_IGNORED)) {
+            json_fail("vulkan-dispatch",
+                      "strict passthrough barrier queue family mismatch");
+            rc = -EOPNOTSUPP;
+            goto cleanup;
+        }
+        if (strict_passthrough &&
+            ((VkImageLayout)src->old_layout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR ||
+             (VkImageLayout)src->new_layout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR)) {
+            json_fail("vulkan-dispatch",
+                      "strict passthrough present layout replay mismatch");
+            rc = -EOPNOTSUPP;
             goto cleanup;
         }
         image_barriers[i] = (VkImageMemoryBarrier2){
@@ -17724,7 +17755,7 @@ static int run_vulkan_dispatch_fd(
     if (object_tables && object_tables->image_layout_range_count > 0) {
         fail_stage = "materialize-vulkan-v52-image-layout-ranges";
         int image_rc = materialize_vulkan_dispatch_v52_image_layout_ranges(
-            object_tables, dispatch_images, dispatch_image_count);
+            object_tables, dispatch_images, dispatch_image_count, strict_passthrough);
         if (image_rc != 0) {
             json_fail("vulkan-dispatch", "failed to materialize V5.2 image layout ranges");
             ret = image_rc == -ENOMEM ? 75 : 64;
@@ -18836,7 +18867,7 @@ static int run_vulkan_dispatch_fd(
     int app_barrier_rc = record_vulkan_dispatch_v54_pre_dispatch_barriers(
         rt, command_buffer, object_tables, bindings, binding_count, vk_buffers,
         binding_descriptor_offset, resource_buffers, resource_buffer_capacity,
-        dispatch_images, dispatch_image_count);
+        dispatch_images, dispatch_image_count, strict_passthrough);
     if (app_barrier_rc != 0) { io_rc = app_barrier_rc; goto cleanup; }
     if (push_size) vkCmdPushConstants(command_buffer, pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, (uint32_t)push_size, push);
     if (options && options->has_dispatch_indirect) {

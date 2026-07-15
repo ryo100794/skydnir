@@ -4702,6 +4702,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("return src_queue_family_index == 0 && dst_queue_family_index == 0", helper)
         self.assertNotIn("return src_queue_family_index == dst_queue_family_index", helper)
         self.assertIn("return VK_QUEUE_FAMILY_IGNORED", normalizer)
+        dispatch_barriers = c_function_body(executor, "record_vulkan_dispatch_v54_pre_dispatch_barriers")
+        self.assertIn("strict passthrough barrier queue family mismatch", dispatch_barriers)
+        self.assertIn("strict passthrough present layout replay mismatch", dispatch_barriers)
+        self.assertIn("dispatch_image_count, strict_passthrough", executor)
         self.assertIn("vulkan_graphics_barrier_queue_family_replayable", validator)
         preflight_barrier_helper = c_function_body(executor, "preflight_vulkan_graphics_v6_dependency_barriers")
         self.assertIn("vulkan_graphics_barrier_queue_family_replayable", preflight_barrier_helper)
@@ -5655,6 +5659,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "object_tables->image_layout_range_count",
             "const PdockerGpuVulkanDispatchV52ImageLayoutRangeEntry *src",
             "vulkan_replay_layout_for_executor((VkImageLayout)src->layout)",
+            "strict passthrough present layout replay mismatch",
+            "strict_passthrough && (VkImageLayout)src->layout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR",
             "vulkan_replay_image_layout_range_valid",
             "image->layout_range_count",
             "image->has_layout_ranges = 1",
@@ -5709,6 +5715,7 @@ class GpuAbiContractTest(unittest.TestCase):
             runner,
             r"object_tables(?:->|\.)image_layout_range_count\s*>\s*0",
         )
+        self.assertIn("object_tables, dispatch_images, dispatch_image_count, strict_passthrough", runner)
 
     def test_vulkan_dispatch_v5_2_executor_rejects_invalid_layout_range_entries(self):
         executor = GPU_EXECUTOR.read_text()
