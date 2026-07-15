@@ -177,9 +177,10 @@ def collect_probe_targets(manifest_path: Path | None, enabled: bool) -> list[dic
             continue
         pointer_id = target.get("pointer_id")
         object_id = target.get("object_id")
+        word_index = target.get("word_index")
         role = target.get("role")
         candidate = ((target.get("candidate") or {}).get("candidate_id"))
-        if not all(isinstance(v, int) for v in (pointer_id, object_id, candidate)):
+        if not all(isinstance(v, int) for v in (pointer_id, object_id, word_index, candidate)):
             continue
         if not isinstance(role, str):
             continue
@@ -188,6 +189,7 @@ def collect_probe_targets(manifest_path: Path | None, enabled: bool) -> list[dic
         out.append({
             "pointer_id": pointer_id,
             "object_id": object_id,
+            "word_index": word_index,
             "candidate_id": candidate,
             "role": role,
             "role_code": ROLE_CODES[role],
@@ -481,6 +483,9 @@ def insert_probe_writes(
             "phase_code": int(PHASE_CODES.get(str(target.get("phase") or ""), 0)),
             "pointer_id": pointer,
             "object_id": obj,
+            "target_store_word_index": int(target["word_index"]),
+            "observation_order": "after_target_store",
+            "feedback_policy": "debug-write-only-no-q6-read-dependency",
             "value_bitcast": bool(bitcast_id),
             "slot_base": base,
             "record_layout": {

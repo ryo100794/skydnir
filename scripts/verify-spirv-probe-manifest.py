@@ -79,6 +79,7 @@ def verify_q6_probe_write_layout(payload: dict, errors: list[str]) -> None:
         return
     priority_targets = (((payload.get("q6_probe_targets") or {}).get("priority_targets")) or [])
     priority_keys = set()
+    priority_by_key = {}
     if isinstance(priority_targets, list):
         for target in priority_targets:
             if not isinstance(target, dict):
@@ -93,6 +94,7 @@ def verify_q6_probe_write_layout(payload: dict, errors: list[str]) -> None:
             )
             if all(value is not None for value in key):
                 priority_keys.add(key)
+                priority_by_key[key] = target
     expected_by_role = {
         "partial_to_workgroup_candidate": Q6_LANE_TRACE_PRE_REDUCTION_BASE,
         "reduction_candidate": Q6_LANE_TRACE_REDUCTION_BASE,
@@ -119,8 +121,20 @@ def verify_q6_probe_write_layout(payload: dict, errors: list[str]) -> None:
             role,
             phase,
         )
+        if item.get("schema_version") != 2:
+            fail(errors, f"{context}.schema_version must be 2")
         if priority_keys and key not in priority_keys:
             fail(errors, f"{context} does not match q6_probe_targets.priority_targets")
+        matched_target = priority_by_key.get(key)
+        if item.get("observation_order") != "after_target_store":
+            fail(errors, f"{context}.observation_order must be after_target_store")
+        if item.get("feedback_policy") != "debug-write-only-no-q6-read-dependency":
+            fail(errors, f"{context}.feedback_policy must be debug-write-only-no-q6-read-dependency")
+        if isinstance(matched_target, dict):
+            if item.get("target_store_word_index") != matched_target.get("word_index"):
+                fail(errors, f"{context}.target_store_word_index must match q6_probe_targets priority target word_index")
+        elif not isinstance(item.get("target_store_word_index"), int):
+            fail(errors, f"{context}.target_store_word_index must be an integer")
         layout = item.get("lane_trace_layout")
         if layout is None:
             continue

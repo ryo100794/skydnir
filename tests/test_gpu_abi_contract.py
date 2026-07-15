@@ -17316,12 +17316,66 @@ class GpuAbiContractTest(unittest.TestCase):
             )
             self.assertNotEqual(0, bad_target_verified.returncode)
             self.assertIn("does not match q6_probe_targets.priority_targets", bad_target_verified.stdout)
+
+            bad_observation_payload = json.loads(write_manifest.read_text(encoding="utf-8"))
+            bad_observation_payload["instrumentation"]["probe_writes"][0]["observation_order"] = "before_target_store"
+            bad_observation_manifest = tmp_path / "native-q6.write.bad-observation.probe.json"
+            bad_observation_manifest.write_text(json.dumps(bad_observation_payload), encoding="utf-8")
+            bad_observation_verified = subprocess.run(
+                ["python3", str(SPIRV_PROBE_MANIFEST_VERIFIER), str(bad_observation_manifest)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self.assertNotEqual(0, bad_observation_verified.returncode)
+            self.assertIn("observation_order must be after_target_store", bad_observation_verified.stdout)
+
+            bad_feedback_payload = json.loads(write_manifest.read_text(encoding="utf-8"))
+            bad_feedback_payload["instrumentation"]["probe_writes"][0]["feedback_policy"] = "unknown"
+            bad_feedback_manifest = tmp_path / "native-q6.write.bad-feedback.probe.json"
+            bad_feedback_manifest.write_text(json.dumps(bad_feedback_payload), encoding="utf-8")
+            bad_feedback_verified = subprocess.run(
+                ["python3", str(SPIRV_PROBE_MANIFEST_VERIFIER), str(bad_feedback_manifest)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self.assertNotEqual(0, bad_feedback_verified.returncode)
+            self.assertIn("feedback_policy must be debug-write-only-no-q6-read-dependency", bad_feedback_verified.stdout)
+
+            bad_word_payload = json.loads(write_manifest.read_text(encoding="utf-8"))
+            bad_word_payload["instrumentation"]["probe_writes"][0]["target_store_word_index"] += 1
+            bad_word_manifest = tmp_path / "native-q6.write.bad-word.probe.json"
+            bad_word_manifest.write_text(json.dumps(bad_word_payload), encoding="utf-8")
+            bad_word_verified = subprocess.run(
+                ["python3", str(SPIRV_PROBE_MANIFEST_VERIFIER), str(bad_word_manifest)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self.assertNotEqual(0, bad_word_verified.returncode)
+            self.assertIn("target_store_word_index must match", bad_word_verified.stdout)
         payload = json.loads(result.stdout)
         instrumentation = payload["instrumentation"]
         self.assertEqual(instrumentation["kind"], "q6-debug-ssbo-probe-writes")
         self.assertEqual(instrumentation["executable_probe_writes"], 10)
         self.assertTrue(
             all(item.get("schema_version") == 2 for item in instrumentation["probe_writes"])
+        )
+        self.assertTrue(
+            all(isinstance(item.get("target_store_word_index"), int) for item in instrumentation["probe_writes"])
+        )
+        self.assertTrue(
+            all(item.get("observation_order") == "after_target_store" for item in instrumentation["probe_writes"])
+        )
+        self.assertTrue(
+            all(
+                item.get("feedback_policy") == "debug-write-only-no-q6-read-dependency"
+                for item in instrumentation["probe_writes"]
+            )
         )
         self.assertTrue(
             all(

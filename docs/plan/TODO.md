@@ -108,6 +108,13 @@ or closes.
   command op, or graphics op is recorded. Evidence:
   `python3 -m unittest tests.test_vulkan_icd_sync_harness.VulkanIcdSyncHarnessTest.test_pipeline_barrier2_records_precise_unsupported_dependency_reasons -q`
   and `python3 -m unittest tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_sync2_event_dependency_info_reason_mapping_order_is_precise -q`.
+- [done] **Q6 probe observation-order manifest guard**: executable Q6 debug
+  probe manifests now prove every emitted probe write observes the target store
+  after the store, names the structural `target_store_word_index`, and declares
+  `debug-write-only-no-q6-read-dependency` feedback policy. The manifest
+  verifier rejects stale observation order, feedback policy, or word-index
+  mismatches before any runtime evidence can be promoted. Evidence:
+  `python3 -m unittest tests.test_gpu_abi_contract.GpuAbiContractTest.test_native_q6_probe_write_instrumentation_validates -q`.
 - [done] **bounded dispatch+graphics mixed-submit lane**: Command buffers may now
   contain generic compute dispatch side work before or after a graphics replay
   frame. Submit wait sync is split before pre-graphics dispatches, completion
