@@ -365,9 +365,9 @@ or closes.
   descriptor-table maximum instead of the legacy 16-slot executor constant.
   The producer ICD V6.24 metadata collector also no longer applies the
   stale `PDOCKER_GPU_MAX_VULKAN_BINDINGS` descriptor-count guard.  The
-  executor source no longer defines the old 16-binding constant, so new code
-  cannot silently reintroduce that stale ceiling by including the executor
-  implementation.  The
+  executor source and shared ABI no longer define the old ambiguous 16-binding
+  constant; the remaining V6.24 layout-entry count guard is named explicitly as
+  a descriptor-layout bindings-per-set limit.  The
   descriptor-array storage heap lane now stores descriptor rows and immutable
   sampler rows per binding, raises `PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS`
   to the V5 descriptor-table transport limit, and routes snapshots, updates,
@@ -375,7 +375,10 @@ or closes.
   vector-add fallback through descriptor slot accessors.  The Android compute
   executor duplicate-descriptor alias rewrite now also handles source descriptor
   arrays by sizing the rewritten binding to the active source array span and
-  mirroring descriptor writes at the same `api_array_element`.  The Android
+  mirroring descriptor writes at the same `api_array_element`.  V5 option text
+  parsing is heap-backed by the validated frame payload size instead of the
+  legacy text-command buffer, so native framed dispatch no longer inherits that
+  unrelated command-size ceiling.  The Android
   compute strict object graph cache now uses heap-backed memory/buffer object
   tables and heap-sized key scratch storage, so V5-width compute dispatches no
   longer disable cache solely because they exceed the legacy 16-binding

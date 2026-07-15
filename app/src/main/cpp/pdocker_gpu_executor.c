@@ -37009,6 +37009,7 @@ static int handle_vulkan_dispatch_v5_frame(int cfd) {
     VulkanDispatchBinding *bindings = NULL;
     VulkanDispatchImageDescriptor *image_descriptors = NULL;
     VulkanDispatchSpecialization *specs = NULL;
+    char *option_copy = NULL;
     int *binding_fds = NULL;
     size_t binding_capacity = 0;
     size_t image_descriptor_capacity = 0;
@@ -37122,12 +37123,17 @@ static int handle_vulkan_dispatch_v5_frame(int cfd) {
     if (header.option_text_size > 0) {
         const char *option_text = (const char *)v5_frame_range(
             frame, &header, header.option_text_offset, header.option_text_size);
-        if (!option_text || header.option_text_size >= PDOCKER_GPU_MAX_COMMAND_BYTES) {
+        if (!option_text || header.option_text_size > (uint64_t)SIZE_MAX - 1u) {
             json_fail("vulkan-dispatch-v5", "invalid option text");
             goto cleanup;
         }
-        char option_copy[PDOCKER_GPU_MAX_COMMAND_BYTES];
-        memset(option_copy, 0, sizeof(option_copy));
+        const size_t option_copy_size = (size_t)header.option_text_size + 1u;
+        option_copy = (char *)calloc(option_copy_size, 1);
+        if (!option_copy) {
+            json_fail("vulkan-dispatch-v5", "option text allocation failed");
+            rc = -ENOMEM;
+            goto cleanup;
+        }
         memcpy(option_copy, option_text, (size_t)header.option_text_size);
         char *save = NULL;
         for (char *tok = strtok_r(option_copy, " ", &save);
@@ -37183,6 +37189,7 @@ static int handle_vulkan_dispatch_v5_frame(int cfd) {
         goto cleanup;
     }
 cleanup:
+    free(option_copy);
     free(specs);
     free(binding_fds);
     free(image_descriptors);

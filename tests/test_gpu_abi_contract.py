@@ -5070,8 +5070,14 @@ class GpuAbiContractTest(unittest.TestCase):
 
     def test_vulkan_executor_has_no_stale_16_binding_constant(self):
         executor = GPU_EXECUTOR.read_text()
+        app_abi = APP_HEADER.read_text()
+        container_abi = CONTAINER_HEADER.read_text()
         self.assertNotIn("#define PDOCKER_GPU_MAX_VULKAN_BINDINGS", executor)
         self.assertNotIn("PDOCKER_GPU_MAX_VULKAN_BINDINGS", executor)
+        self.assertNotIn("PDOCKER_GPU_MAX_VULKAN_BINDINGS", app_abi)
+        self.assertNotIn("PDOCKER_GPU_MAX_VULKAN_BINDINGS", container_abi)
+        self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V624_MAX_DESCRIPTOR_BINDINGS_PER_SET", app_abi)
+        self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V624_MAX_DESCRIPTOR_BINDINGS_PER_SET", container_abi)
 
     def test_vulkan_dispatch_v5_native_plan_tracks_table_shape_without_v4_capacity(self):
         executor = GPU_EXECUTOR.read_text()
@@ -5458,6 +5464,18 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("specialization_count > PDOCKER_GPU_MAX_VULKAN_SPECIALIZATION_ENTRIES", dispatch_body)
         self.assertNotIn("specialization_data_size > PDOCKER_GPU_MAX_VULKAN_SPECIALIZATION_BYTES", dispatch_body)
         self.assertIn("specialization_count > UINT32_MAX", dispatch_body)
+
+    def test_vulkan_dispatch_v5_option_text_is_heap_backed_by_frame_size(self):
+        executor = GPU_EXECUTOR.read_text()
+        handler = c_function_body(executor, "handle_vulkan_dispatch_v5_frame")
+        self.assertIn("char *option_copy = NULL;", handler)
+        self.assertIn("header.option_text_size > (uint64_t)SIZE_MAX - 1u", handler)
+        self.assertIn("const size_t option_copy_size = (size_t)header.option_text_size + 1u;", handler)
+        self.assertIn("option_copy = (char *)calloc(option_copy_size, 1);", handler)
+        self.assertIn("memcpy(option_copy, option_text, (size_t)header.option_text_size);", handler)
+        self.assertIn("free(option_copy);", handler)
+        self.assertNotIn("char option_copy[PDOCKER_GPU_MAX_COMMAND_BYTES];", handler)
+        self.assertNotIn("header.option_text_size >= PDOCKER_GPU_MAX_COMMAND_BYTES", handler)
 
     def test_vulkan_dispatch_v5_2_executor_validates_and_materializes_layout_ranges(self):
         executor = GPU_EXECUTOR.read_text()
