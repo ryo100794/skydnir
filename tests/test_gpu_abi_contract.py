@@ -5431,7 +5431,7 @@ class GpuAbiContractTest(unittest.TestCase):
             capability_marker,
             "ICD must prove executor V5.2 image-layout-range support before sending abi_minor 2",
         )
-        abi_minor_assignment = "header->abi_minor = need_v54_barriers"
+        abi_minor_assignment = "header->abi_minor = need_v55_native_objects"
         self.assertIn(abi_minor_assignment, sender)
         self.assertLess(sender.index(capability_marker), sender.index(abi_minor_assignment))
         self.assertRegex(
@@ -7184,6 +7184,79 @@ class GpuAbiContractTest(unittest.TestCase):
             "register_vulkan_graphics_v630_identity(view, &g_vulkan_runtime)",
             c_function_body(executor, "run_vulkan_graphics_v6_frame"),
         )
+
+    def test_vulkan_icd_serializes_native_object_identity_frames(self):
+        icd = VULKAN_ICD.read_text()
+        for marker in [
+            "uint64_t instance_object_id;",
+            "uint64_t physical_device_object_id;",
+            "uint64_t device_object_id;",
+            "static bool current_vulkan_dispatch_identity_ids(",
+            "g_queue.instance_object_id",
+            "g_queue.physical_device_object_id",
+            "g_queue.device_object_id",
+            "device->instance_object_id = g_device.instance_object_id;",
+            "device->physical_device_object_id = g_device.object_id;",
+            "g_queue.device_object_id = pdocker_device->object_id;",
+        ]:
+            self.assertIn(marker, icd)
+
+        caps_struct = icd.split("typedef struct {", 1)[1].split("} PdockerVkAdvertisedCaps;", 1)[0]
+        for marker in [
+            "vulkan_dispatch_v55_native_objects_supported",
+            "vulkan_graphics_v630_native_objects_supported",
+            "vulkan_dispatch_v5_abi_minor_native_objects",
+            "vulkan_graphics_v6_abi_minor_native_objects",
+        ]:
+            self.assertIn(marker, caps_struct)
+        parse_caps = c_function_body(icd, "parse_executor_advertisement_caps_json")
+        for marker in [
+            "vulkan_dispatch_v5_abi_minor_native_objects",
+            "vulkan_dispatch_v5_native_object_identity_schema_hash",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V55_HEADER_EXTENSION_SCHEMA_HASH",
+            "caps->vulkan_dispatch_v55_native_objects_supported",
+            "vulkan_graphics_v6_abi_minor_native_objects",
+            "vulkan_graphics_v6_native_object_identity_schema_hash",
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V630_HEADER_EXTENSION_SCHEMA_HASH",
+            "caps->vulkan_graphics_v630_native_objects_supported",
+        ]:
+            self.assertIn(marker, parse_caps)
+        self.assertIn("executor_supports_vulkan_dispatch_v55_native_objects", icd)
+        self.assertIn("executor_supports_vulkan_graphics_v630_native_objects", icd)
+
+        v5_sender = c_function_body(icd, "send_generic_vulkan_dispatch_v5_1_op")
+        for marker in [
+            "current_vulkan_dispatch_identity_ids(",
+            "need_v55_native_objects",
+            "executor_supports_vulkan_dispatch_v55_native_objects()",
+            "sizeof(PdockerGpuVulkanDispatchV55FrameHeader)",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR",
+            "PdockerGpuVulkanDispatchV55FrameHeader *frame_header_v55",
+            "frame_header_v55->v55.instance_object_id = instance_object_id;",
+            "frame_header_v55->v55.physical_device_object_id = physical_device_object_id;",
+            "frame_header_v55->v55.device_object_id = device_object_id;",
+            "frame_header_v55->v55.queue_object_id = queue_object_id;",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V55_HEADER_EXTENSION_SCHEMA_HASH",
+        ]:
+            self.assertIn(marker, v5_sender)
+
+        v6_sender = c_function_body(icd, "send_recorded_vulkan_graphics_v6_1_frame_range")
+        for marker in [
+            "PdockerGpuVulkanGraphicsV630FrameHeader *frame_header_v630",
+            "frame_header_v629 = &frame_header_v630->v629;",
+            "size_t cursor = sizeof(PdockerGpuVulkanGraphicsV630FrameHeader);",
+            "need_v630_native_objects",
+            "executor_supports_vulkan_graphics_v630_native_objects()",
+            "sizeof(*frame_header_v630)",
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V630_ABI_MINOR",
+            "frame_header_v630->v630.instance_object_id = graphics_instance_object_id;",
+            "frame_header_v630->v630.physical_device_object_id = graphics_physical_device_object_id;",
+            "frame_header_v630->v630.device_object_id = graphics_device_object_id;",
+            "frame_header_v630->v630.queue_object_id = graphics_queue_object_id;",
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V630_HEADER_EXTENSION_SCHEMA_HASH",
+            "VULKAN_GRAPHICS_V6.30",
+        ]:
+            self.assertIn(marker, v6_sender)
 
     def test_vulkan_native_object_identity_extensions_are_append_only(self):
         expected_identity_fields = [
@@ -11262,7 +11335,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("PdockerGpuVulkanDispatchV53BufferViewEntry", icd)
         self.assertIn("PdockerGpuVulkanGraphicsV627BufferViewEntry", icd)
         self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V627_BUFFER_VIEW_SCHEMA_HASH", icd)
-        self.assertIn("size_t cursor = sizeof(PdockerGpuVulkanGraphicsV629FrameHeader);", icd)
+        self.assertIn("size_t cursor = sizeof(PdockerGpuVulkanGraphicsV630FrameHeader);", icd)
         self.assertNotIn("size_t cursor = sizeof(PdockerGpuVulkanGraphicsV626FrameHeader);", icd)
         self.assertIn("executor_supports_vulkan_dispatch_v53_buffer_views", icd)
         self.assertIn("executor_supports_vulkan_graphics_v627_buffer_views", icd)
@@ -11343,7 +11416,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("op->declared_range_count = declared_range_count;", push_body)
         self.assertIn("memcpy(declared_ranges, captured_layout->push_constant_ranges", push_body)
         self.assertIn("PdockerGpuVulkanGraphicsV628PushConstantRangeEntry *push_constant_ranges = NULL", frame_body)
-        self.assertIn("size_t cursor = sizeof(PdockerGpuVulkanGraphicsV629FrameHeader);", frame_body)
+        self.assertIn("size_t cursor = sizeof(PdockerGpuVulkanGraphicsV630FrameHeader);", frame_body)
         self.assertIn("need_v628_push_constant_ranges", frame_body)
         self.assertIn("frame_header_v628->v628.push_constant_range_count", frame_body)
         self.assertIn("APPEND_GRAPHICS_TABLE(push_constant_ranges", frame_body)
@@ -11670,7 +11743,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "sizeof(*variable_descriptor_counts)",
             "free(variable_descriptor_counts);",
             "PdockerGpuVulkanGraphicsV629FrameHeader *frame_header_v629",
-            "size_t cursor = sizeof(PdockerGpuVulkanGraphicsV629FrameHeader);",
+            "size_t cursor = sizeof(PdockerGpuVulkanGraphicsV630FrameHeader);",
             "need_v629_variable_descriptor_counts",
             "collect_graphics_v629_variable_descriptor_counts",
             "executor_supports_vulkan_graphics_v629_variable_descriptor_counts",
@@ -16549,8 +16622,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "PdockerGpuVulkanDispatchV54BufferBarrierEntry *buffer_barrier_entries",
             "PdockerGpuVulkanDispatchV54ImageBarrierEntry *image_barrier_entries",
             "executor_supports_vulkan_dispatch_v54_barriers",
-            "header->abi_minor = need_v54_barriers",
+            "header->abi_minor = need_v55_native_objects",
             "PDOCKER_GPU_VULKAN_DISPATCH_V54_ABI_MINOR",
+            "need_v54_barriers_or_identity",
             "frame_header_v54->v54.dependency_flags = pre_barrier_dependency_flags",
             "frame_header_v54->v54.memory_barrier_count",
             "frame_header_v54->v54.buffer_barrier_count",
