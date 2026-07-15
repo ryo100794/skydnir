@@ -5144,7 +5144,7 @@ static bool dispatch_response_is_graphics_terminal_success(const char *line) {
 
 static int read_dispatch_response_status(int socket_fd, const char *transport_name) {
     const size_t max_response = 1024 * 1024;
-    char stack_line[16384];
+    char stack_line[4096];
     char *heap_line = NULL;
     char *line = stack_line;
     size_t line_cap = sizeof(stack_line);
@@ -13796,7 +13796,7 @@ static int send_generic_vulkan_dispatch_op(
          *   leaving line valid on ENOMEM.
          */
         const size_t max_response = 1024 * 1024;
-        char stack_line[16384];
+        char stack_line[4096];
         size_t line_cap = sizeof(stack_line);
         size_t line_off = 0;
         char *heap_line = NULL;

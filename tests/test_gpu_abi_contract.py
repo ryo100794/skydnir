@@ -19106,7 +19106,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("api_descriptor_types[binding_count]", icd)
         self.assertIn("PDOCKER_GPU_DISPATCH_PROFILE_LOG", icd)
         self.assertIn("const size_t max_response = 1024 * 1024", icd)
-        self.assertIn("char stack_line[16384]", icd)
+        self.assertIn("char stack_line[4096]", icd)
         self.assertIn("char *heap_line = NULL", icd)
         self.assertIn("memcpy(next, line, line_off)", icd)
         self.assertIn("free(heap_line)", icd)
