@@ -1720,6 +1720,224 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
+
+    def test_event_barrier_cross_queue_family_fails_before_partial_recording(self):
+        source = textwrap.dedent(
+            rf"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include <stdlib.h>
+            #include "{ICD_SOURCE}"
+
+            static void reset_cmd(PdockerVkCommandBuffer *cmd, int sync2) {{
+                memset(cmd, 0, sizeof(*cmd));
+                if (sync2) {{
+                    cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
+                    cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
+                }}
+            }}
+
+            static void init_image(PdockerVkImage *image) {{
+                memset(image, 0, sizeof(*image));
+                image->object_id = 0xabcdu;
+                image->format = VK_FORMAT_R8G8B8A8_UNORM;
+                image->image_type = VK_IMAGE_TYPE_2D;
+                image->extent.width = 16;
+                image->extent.height = 16;
+                image->extent.depth = 1;
+                image->mip_levels = 1;
+                image->array_layers = 1;
+                image->samples = VK_SAMPLE_COUNT_1_BIT;
+                image->usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+                image->current_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+                image->layout_generation = 1;
+            }}
+
+            static int expect_clean_failure(PdockerVkCommandBuffer *cmd, const char *reason, int code) {{
+                if (!cmd->recording_failed || !cmd->recording_failure_reason ||
+                    strcmp(cmd->recording_failure_reason, reason) != 0) {{
+                    fprintf(stderr, "case %d unexpected failure got=%s want=%s failed=%d\n",
+                            code,
+                            cmd->recording_failure_reason ? cmd->recording_failure_reason : "<null>",
+                            reason,
+                            cmd->recording_failed ? 1 : 0);
+                    return code;
+                }}
+                if (cmd->memory_barrier_op_count != 0 || cmd->buffer_barrier_op_count != 0 ||
+                    cmd->image_barrier_op_count != 0 || cmd->event_wait_ref_count != 0 ||
+                    cmd->command_op_count != 0 || cmd->graphics_command_op_count != 0) {{
+                    fprintf(stderr, "case %d partial state mem=%u buf=%u img=%u refs=%u cmd=%u gfx=%u\n",
+                            code,
+                            cmd->memory_barrier_op_count,
+                            cmd->buffer_barrier_op_count,
+                            cmd->image_barrier_op_count,
+                            cmd->event_wait_ref_count,
+                            cmd->command_op_count,
+                            cmd->graphics_command_op_count);
+                    return code + 100;
+                }}
+                if (vkEndCommandBuffer((VkCommandBuffer)cmd) != VK_ERROR_FEATURE_NOT_PRESENT) {{
+                    fprintf(stderr, "case %d did not fail closed at end\n", code);
+                    return code + 200;
+                }}
+                return 0;
+            }}
+
+            int main(void) {{
+                PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)calloc(1, sizeof(*cmd));
+                PdockerVkBuffer *buffer = (PdockerVkBuffer *)calloc(1, sizeof(*buffer));
+                PdockerVkImage *image = (PdockerVkImage *)calloc(1, sizeof(*image));
+                if (!cmd || !buffer || !image) return 99;
+                buffer->object_id = 0x1234u;
+                buffer->size = 4096u;
+                init_image(image);
+
+                VkEventCreateInfo event_info;
+                memset(&event_info, 0, sizeof(event_info));
+                event_info.sType = VK_STRUCTURE_TYPE_EVENT_CREATE_INFO;
+                VkEvent event = VK_NULL_HANDLE;
+                if (vkCreateEvent(VK_NULL_HANDLE, &event_info, NULL, &event) != VK_SUCCESS || !event) {{
+                    fprintf(stderr, "event creation failed\n");
+                    return 98;
+                }}
+                VkEvent events[1] = {{ event }};
+
+                VkMemoryBarrier memory_barrier;
+                memset(&memory_barrier, 0, sizeof(memory_barrier));
+                memory_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+                memory_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+                memory_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+                VkBufferMemoryBarrier buffer_barrier;
+                memset(&buffer_barrier, 0, sizeof(buffer_barrier));
+                buffer_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+                buffer_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+                buffer_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+                buffer_barrier.srcQueueFamilyIndex = 0;
+                buffer_barrier.dstQueueFamilyIndex = 1;
+                buffer_barrier.buffer = pdocker_vk_buffer_to_handle(buffer);
+                buffer_barrier.offset = 0;
+                buffer_barrier.size = 64;
+
+                VkImageMemoryBarrier image_barrier;
+                memset(&image_barrier, 0, sizeof(image_barrier));
+                image_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+                image_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+                image_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+                image_barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+                image_barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+                image_barrier.srcQueueFamilyIndex = 0;
+                image_barrier.dstQueueFamilyIndex = 1;
+                image_barrier.image = pdocker_vk_image_to_handle(image);
+                image_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                image_barrier.subresourceRange.baseMipLevel = 0;
+                image_barrier.subresourceRange.levelCount = 1;
+                image_barrier.subresourceRange.baseArrayLayer = 0;
+                image_barrier.subresourceRange.layerCount = 1;
+
+                reset_cmd(cmd, 0);
+                vkCmdWaitEvents((VkCommandBuffer)cmd, 1, events,
+                                VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                                1, &memory_barrier,
+                                1, &buffer_barrier,
+                                0, NULL);
+                int rc = expect_clean_failure(cmd, "buffer-barrier-cross-queue-family", 2);
+                if (rc) return rc;
+
+                reset_cmd(cmd, 0);
+                vkCmdWaitEvents((VkCommandBuffer)cmd, 1, events,
+                                VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                                1, &memory_barrier,
+                                0, NULL,
+                                1, &image_barrier);
+                rc = expect_clean_failure(cmd, "image-barrier-cross-queue-family", 3);
+                if (rc) return rc;
+
+                VkMemoryBarrier2 memory_barrier2;
+                memset(&memory_barrier2, 0, sizeof(memory_barrier2));
+                memory_barrier2.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+                memory_barrier2.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+                memory_barrier2.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+                memory_barrier2.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+                memory_barrier2.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
+
+                VkBufferMemoryBarrier2 buffer_barrier2;
+                memset(&buffer_barrier2, 0, sizeof(buffer_barrier2));
+                buffer_barrier2.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
+                buffer_barrier2.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+                buffer_barrier2.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+                buffer_barrier2.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+                buffer_barrier2.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
+                buffer_barrier2.srcQueueFamilyIndex = 0;
+                buffer_barrier2.dstQueueFamilyIndex = 1;
+                buffer_barrier2.buffer = pdocker_vk_buffer_to_handle(buffer);
+                buffer_barrier2.offset = 0;
+                buffer_barrier2.size = 64;
+
+                VkImageMemoryBarrier2 image_barrier2;
+                memset(&image_barrier2, 0, sizeof(image_barrier2));
+                image_barrier2.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+                image_barrier2.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+                image_barrier2.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+                image_barrier2.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+                image_barrier2.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
+                image_barrier2.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+                image_barrier2.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+                image_barrier2.srcQueueFamilyIndex = 0;
+                image_barrier2.dstQueueFamilyIndex = 1;
+                image_barrier2.image = pdocker_vk_image_to_handle(image);
+                image_barrier2.subresourceRange = image_barrier.subresourceRange;
+
+                VkDependencyInfo dependency;
+                memset(&dependency, 0, sizeof(dependency));
+                dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+                dependency.memoryBarrierCount = 1;
+                dependency.pMemoryBarriers = &memory_barrier2;
+                dependency.bufferMemoryBarrierCount = 1;
+                dependency.pBufferMemoryBarriers = &buffer_barrier2;
+
+                reset_cmd(cmd, 1);
+                vkCmdSetEvent2((VkCommandBuffer)cmd, event, &dependency);
+                rc = expect_clean_failure(cmd, "buffer-barrier-cross-queue-family", 4);
+                if (rc) return rc;
+
+                reset_cmd(cmd, 1);
+                vkCmdWaitEvents2((VkCommandBuffer)cmd, 1, events, &dependency);
+                rc = expect_clean_failure(cmd, "buffer-barrier-cross-queue-family", 5);
+                if (rc) return rc;
+
+                memset(&dependency, 0, sizeof(dependency));
+                dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+                dependency.memoryBarrierCount = 1;
+                dependency.pMemoryBarriers = &memory_barrier2;
+                dependency.imageMemoryBarrierCount = 1;
+                dependency.pImageMemoryBarriers = &image_barrier2;
+
+                reset_cmd(cmd, 1);
+                vkCmdSetEvent2((VkCommandBuffer)cmd, event, &dependency);
+                rc = expect_clean_failure(cmd, "image-barrier-cross-queue-family", 6);
+                if (rc) return rc;
+
+                reset_cmd(cmd, 1);
+                vkCmdWaitEvents2((VkCommandBuffer)cmd, 1, events, &dependency);
+                rc = expect_clean_failure(cmd, "image-barrier-cross-queue-family", 7);
+                if (rc) return rc;
+
+                vkDestroyEvent(VK_NULL_HANDLE, event, NULL);
+                free(image);
+                free(buffer);
+                free(cmd);
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
     def test_external_memory_acquire_unmodified_buffer_barrier_pnext_records_cleanly(self):
         source = textwrap.dedent(
             f"""

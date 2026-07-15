@@ -12160,6 +12160,13 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("bool has_barrier_payload = memoryBarrierCount || bufferMemoryBarrierCount || imageMemoryBarrierCount", wait_events_body)
         self.assertNotIn("eventCount > 1", wait_events_body)
         self.assertIn("record_legacy_pipeline_barrier_ops(commandBuffer", wait_events_body)
+        self.assertIn("command_buffer_prevalidate_legacy_barrier_recording(", wait_events_body)
+        self.assertIn("bufferMemoryBarrierCount, pBufferMemoryBarriers", wait_events_body)
+        self.assertIn("imageMemoryBarrierCount, pImageMemoryBarriers", wait_events_body)
+        self.assertLess(
+            wait_events_body.index("command_buffer_prevalidate_legacy_barrier_recording("),
+            wait_events_body.index("record_legacy_pipeline_barrier_ops(commandBuffer"),
+        )
         self.assertIn("record_event_wait_command(commandBuffer, eventCount, pEvents,", wait_events_body)
         self.assertIn("0, &barriers)", wait_events_body)
         self.assertNotIn("vkCmdPipelineBarrier(commandBuffer,", wait_events_body)
@@ -12348,7 +12355,12 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("if (cmd) cmd->graphics_unsupported = true", set_event2_body)
         self.assertIn("dependency_flags_unsupported(dependency_flags)", set_event2_body)
         self.assertIn("event-set2-dependency-flags-unsupported", set_event2_body)
+        self.assertIn("command_buffer_prevalidate_dependency_info_barrier_recording(cmd, pDependencyInfo)", set_event2_body)
         self.assertIn("record_dependency_info_barrier_ops(commandBuffer, pDependencyInfo)", set_event2_body)
+        self.assertLess(
+            set_event2_body.index("command_buffer_prevalidate_dependency_info_barrier_recording(cmd, pDependencyInfo)"),
+            set_event2_body.index("record_dependency_info_barrier_ops(commandBuffer, pDependencyInfo)"),
+        )
         self.assertIn("record_event_command(commandBuffer, event, true, dependency_info_src_stage_mask(pDependencyInfo), dependency_flags, &barriers)", set_event2_body)
         self.assertNotIn("event-set2-barrier-payload-unsupported", set_event2_body)
         self.assertIn("command_buffer_mark_recording_failed", set_event2_body)
@@ -12364,7 +12376,12 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("dependency_info_has_unsupported_pnext(&pDependencyInfos[i])", wait_events2_body)
         self.assertIn("dependency_flags_unsupported(dependency_flags)", wait_events2_body)
         self.assertIn("event-wait2-dependency-flags-unsupported", wait_events2_body)
+        self.assertIn("command_buffer_prevalidate_dependency_info_barrier_recording(cmd, &pDependencyInfos[i])", wait_events2_body)
         self.assertIn("record_dependency_info_barrier_ops(commandBuffer, &pDependencyInfos[i])", wait_events2_body)
+        self.assertLess(
+            wait_events2_body.index("command_buffer_prevalidate_dependency_info_barrier_recording(cmd, &pDependencyInfos[i])"),
+            wait_events2_body.index("record_dependency_info_barrier_ops(commandBuffer, &pDependencyInfos[i])"),
+        )
         self.assertIn("record_event_wait_command(commandBuffer, 1, &pEvents[i],", wait_events2_body)
         self.assertNotIn("event-wait2-barrier-payload-unsupported", wait_events2_body)
         self.assertIn("dependency_info_src_stage_mask(&pDependencyInfos[i])", wait_events2_body)
@@ -13671,13 +13688,16 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("pipeline_barrier2_dependency_info_failure_reason(pDependencyInfo)", barrier2_body)
         self.assertIn("command_buffer_mark_recording_failed(cmd, unsupported_reason);", barrier2_body)
         unsupported_reason_branch = barrier2_body.split("if (unsupported_reason)", 1)[1].split(
-            "const char *recording_failure_reason", 1
+            "command_buffer_prevalidate_dependency_info_barrier_recording", 1
         )[0]
         self.assertNotIn("cmd->graphics_unsupported = true;", unsupported_reason_branch)
-        self.assertIn("dependency_info_barrier_recording_failure_reason(pDependencyInfo)", barrier2_body)
-        self.assertIn("cmd->graphics_unsupported = true;", barrier2_body)
+        self.assertIn("command_buffer_prevalidate_dependency_info_barrier_recording(cmd, pDependencyInfo)", barrier2_body)
+        prevalidate_dependency_helper = c_function_body(icd, "command_buffer_prevalidate_dependency_info_barrier_recording")
+        self.assertIn("dependency_info_barrier_recording_failure_reason(info)", prevalidate_dependency_helper)
+        self.assertIn("cmd->graphics_unsupported = true;", prevalidate_dependency_helper)
+        self.assertIn("command_buffer_mark_recording_failed(cmd, recording_failure_reason)", prevalidate_dependency_helper)
         self.assertLess(barrier2_body.index("pipeline_barrier2_dependency_info_failure_reason(pDependencyInfo)"), barrier2_body.index("VkDependencyFlags dependency_flags"))
-        self.assertLess(barrier2_body.index("dependency_info_barrier_recording_failure_reason(pDependencyInfo)"), barrier2_body.index("VkDependencyFlags dependency_flags"))
+        self.assertLess(barrier2_body.index("command_buffer_prevalidate_dependency_info_barrier_recording(cmd, pDependencyInfo)"), barrier2_body.index("VkDependencyFlags dependency_flags"))
         self.assertIn("VkDependencyFlags dependency_flags", barrier2_body)
         self.assertIn("pipeline_barrier2_dependency_info_failure_reason(pDependencyInfo)", barrier2_body)
         self.assertIn("record.flags = pdocker_vk_transport_dependency_flags(dependency_flags)", barrier2_body)

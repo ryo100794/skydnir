@@ -28067,6 +28067,23 @@ static const char *legacy_pipeline_barrier_recording_failure_reason(
     return NULL;
 }
 
+static bool command_buffer_prevalidate_legacy_barrier_recording(
+        PdockerVkCommandBuffer *cmd,
+        uint32_t bufferMemoryBarrierCount,
+        const VkBufferMemoryBarrier *pBufferMemoryBarriers,
+        uint32_t imageMemoryBarrierCount,
+        const VkImageMemoryBarrier *pImageMemoryBarriers) {
+    if (!cmd) return false;
+    const char *recording_failure_reason =
+        legacy_pipeline_barrier_recording_failure_reason(
+            bufferMemoryBarrierCount, pBufferMemoryBarriers,
+            imageMemoryBarrierCount, pImageMemoryBarriers);
+    if (!recording_failure_reason) return true;
+    cmd->graphics_unsupported = true;
+    command_buffer_mark_recording_failed(cmd, recording_failure_reason);
+    return false;
+}
+
 static PdockerVkBarrierOpRange record_legacy_pipeline_barrier_ops(
         VkCommandBuffer commandBuffer,
         VkPipelineStageFlags srcStageMask,
@@ -28151,13 +28168,10 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier(
             command_buffer_mark_recording_failed(cmd, "legacy-pipeline-barrier-unsupported");
             return;
         }
-        const char *recording_failure_reason =
-            legacy_pipeline_barrier_recording_failure_reason(
+        if (!command_buffer_prevalidate_legacy_barrier_recording(
+                cmd,
                 bufferMemoryBarrierCount, pBufferMemoryBarriers,
-                imageMemoryBarrierCount, pImageMemoryBarriers);
-        if (recording_failure_reason) {
-            cmd->graphics_unsupported = true;
-            command_buffer_mark_recording_failed(cmd, recording_failure_reason);
+                imageMemoryBarrierCount, pImageMemoryBarriers)) {
             return;
         }
         PdockerVkBarrierOpRange barriers =
@@ -31217,6 +31231,12 @@ VKAPI_ATTR void VKAPI_CALL vkCmdWaitEvents(
             return;
         }
     }
+    if (!command_buffer_prevalidate_legacy_barrier_recording(
+            cmd,
+            bufferMemoryBarrierCount, pBufferMemoryBarriers,
+            imageMemoryBarrierCount, pImageMemoryBarriers)) {
+        return;
+    }
     PdockerVkBarrierOpRange barriers =
         record_legacy_pipeline_barrier_ops(commandBuffer,
                                            srcStageMask,
@@ -31363,6 +31383,18 @@ static const char *dependency_info_barrier_recording_failure_reason(
     return NULL;
 }
 
+static bool command_buffer_prevalidate_dependency_info_barrier_recording(
+        PdockerVkCommandBuffer *cmd,
+        const VkDependencyInfo *info) {
+    if (!cmd) return false;
+    const char *recording_failure_reason =
+        dependency_info_barrier_recording_failure_reason(info);
+    if (!recording_failure_reason) return true;
+    cmd->graphics_unsupported = true;
+    command_buffer_mark_recording_failed(cmd, recording_failure_reason);
+    return false;
+}
+
 static const char *pipeline_barrier2_dependency_info_failure_reason(
         const VkDependencyInfo *info) {
     const char *reason = dependency_info_unsupported_reason(info);
@@ -31386,11 +31418,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier2(
         command_buffer_mark_recording_failed(cmd, unsupported_reason);
         return;
     }
-    const char *recording_failure_reason =
-        dependency_info_barrier_recording_failure_reason(pDependencyInfo);
-    if (recording_failure_reason) {
-        cmd->graphics_unsupported = true;
-        command_buffer_mark_recording_failed(cmd, recording_failure_reason);
+    if (!command_buffer_prevalidate_dependency_info_barrier_recording(cmd, pDependencyInfo)) {
         return;
     }
     VkDependencyFlags dependency_flags = pDependencyInfo ? pDependencyInfo->dependencyFlags : 0;
@@ -31546,6 +31574,9 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetEvent2(
         if (cmd) command_buffer_mark_recording_failed(cmd, "event-set2-dependency-flags-unsupported");
         return;
     }
+    if (!command_buffer_prevalidate_dependency_info_barrier_recording(cmd, pDependencyInfo)) {
+        return;
+    }
     PdockerVkBarrierOpRange barriers = record_dependency_info_barrier_ops(commandBuffer, pDependencyInfo);
     if (cmd && cmd->recording_failed) return;
     record_event_command(commandBuffer, event, true, dependency_info_src_stage_mask(pDependencyInfo), dependency_flags, &barriers);
@@ -31583,6 +31614,9 @@ VKAPI_ATTR void VKAPI_CALL vkCmdWaitEvents2(
         const VkDependencyFlags dependency_flags = pDependencyInfos[i].dependencyFlags;
         if (dependency_flags_unsupported(dependency_flags)) {
             if (cmd) command_buffer_mark_recording_failed(cmd, "event-wait2-dependency-flags-unsupported");
+            return;
+        }
+        if (!command_buffer_prevalidate_dependency_info_barrier_recording(cmd, &pDependencyInfos[i])) {
             return;
         }
 
