@@ -365,6 +365,9 @@ or closes.
   descriptor-table maximum instead of the legacy 16-slot executor constant.
   The producer ICD V6.24 metadata collector also no longer applies the
   stale `PDOCKER_GPU_MAX_VULKAN_BINDINGS` descriptor-count guard.  The
+  executor source no longer defines the old 16-binding constant, so new code
+  cannot silently reintroduce that stale ceiling by including the executor
+  implementation.  The
   descriptor-array storage heap lane now stores descriptor rows and immutable
   sampler rows per binding, raises `PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS`
   to the V5 descriptor-table transport limit, and routes snapshots, updates,

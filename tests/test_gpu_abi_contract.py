@@ -5068,6 +5068,11 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertLess(handler.index("binding_capacity = native_plan"), handler.index("materialize_vulkan_dispatch_v5_native_plan_bindings"))
         self.assertLess(handler.index("materialize_vulkan_dispatch_v5_native_plan_bindings"), handler.index("run_vulkan_dispatch_fd("))
 
+    def test_vulkan_executor_has_no_stale_16_binding_constant(self):
+        executor = GPU_EXECUTOR.read_text()
+        self.assertNotIn("#define PDOCKER_GPU_MAX_VULKAN_BINDINGS", executor)
+        self.assertNotIn("PDOCKER_GPU_MAX_VULKAN_BINDINGS", executor)
+
     def test_vulkan_dispatch_v5_native_plan_tracks_table_shape_without_v4_capacity(self):
         executor = GPU_EXECUTOR.read_text()
         self.assertIn("} VulkanDispatchV5NativePlan;", executor)
