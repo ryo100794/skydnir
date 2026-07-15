@@ -1285,14 +1285,14 @@ class GpuAbiContractTest(unittest.TestCase):
             "send_empty_vulkan_graphics_v6_1_validation_frame",
             "send_recorded_vulkan_graphics_v6_1_frame",
             "find_graphics_pipeline_index",
-            "PdockerGpuVulkanGraphicsV6ShaderStageEntry shader_stages",
-            "PdockerGpuVulkanGraphicsV6PipelineEntry pipelines",
-            "PdockerGpuVulkanDispatchV5ResourceEntry resources",
-            "PdockerGpuVulkanDispatchV5DescriptorObjectEntry descriptors",
-            "PdockerGpuVulkanDispatchV5ImageEntry image_entries",
-            "PdockerGpuVulkanDispatchV5ImageViewEntry image_view_entries",
-            "PdockerGpuVulkanDispatchV5SamplerEntry sampler_entries",
-            "PdockerGpuVulkanGraphicsV6VertexBindingEntry vertex_bindings",
+            "PdockerGpuVulkanGraphicsV6ShaderStageEntry *shader_stages = NULL",
+            "PdockerGpuVulkanGraphicsV6PipelineEntry *pipelines = NULL",
+            "PdockerGpuVulkanDispatchV5ResourceEntry *resources = NULL",
+            "PdockerGpuVulkanDispatchV5DescriptorObjectEntry *descriptors = NULL",
+            "PdockerGpuVulkanDispatchV5ImageEntry *image_entries = NULL",
+            "PdockerGpuVulkanDispatchV5ImageViewEntry *image_view_entries = NULL",
+            "PdockerGpuVulkanDispatchV5SamplerEntry *sampler_entries = NULL",
+            "PdockerGpuVulkanGraphicsV6VertexBindingEntry *vertex_bindings = NULL",
             "collect_graphics_memory_resource",
             "collect_graphics_buffer_resource",
             "collect_graphics_descriptor_entries",
@@ -1315,7 +1315,12 @@ class GpuAbiContractTest(unittest.TestCase):
             "APPEND_GRAPHICS_TABLE(sampler_entries, sampler_count",
             "APPEND_GRAPHICS_TABLE(vertex_bindings, vertex_binding_count",
             "APPEND_GRAPHICS_TABLE(attachments, attachment_count",
-            "PdockerGpuVulkanGraphicsV6CommandEntry commands",
+            "ALLOC_GRAPHICS_TRANSPORT_TABLE(resources, PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_RESOURCES)",
+            "ALLOC_GRAPHICS_TRANSPORT_TABLE(descriptors, PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS)",
+            "ALLOC_GRAPHICS_TRANSPORT_TABLE(commands, PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS)",
+            "free(commands);",
+            "free(resources);",
+            "PdockerGpuVulkanGraphicsV6CommandEntry *commands = NULL",
             "graphics_submit_sync_frame_bounds",
             "filter_submit_sync_entries_for_graphics_frame",
             "frame_submit_sync_entries",
@@ -4782,7 +4787,7 @@ class GpuAbiContractTest(unittest.TestCase):
 
     def test_vulkan_icd_serializes_graphics_image_barriers(self):
         icd = VULKAN_ICD.read_text()
-        self.assertIn("PdockerGpuVulkanGraphicsV61ImageBarrierEntry image_barriers", icd)
+        self.assertIn("PdockerGpuVulkanGraphicsV61ImageBarrierEntry *image_barriers = NULL", icd)
         self.assertIn("frame_header->v61.image_barrier_count", icd)
         self.assertIn("frame_header->v61.memory_barrier_count", icd)
         self.assertIn("frame_header->v61.buffer_barrier_count", icd)
@@ -6292,7 +6297,7 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn("PdockerGpuVulkanGraphicsV68FrameHeader", source)
             self.assertIn("PdockerGpuVulkanGraphicsV68IndirectDrawEntry", source)
             self.assertIn("PDOCKER_GPU_GRAPHICS_V68_INDIRECT_DRAW_COUNT_BUFFER_PRESENT", source)
-        self.assertIn("PdockerGpuVulkanGraphicsV68IndirectDrawEntry indirect_draws", icd)
+        self.assertIn("PdockerGpuVulkanGraphicsV68IndirectDrawEntry *indirect_draws = NULL", icd)
         self.assertIn("need_v68_indirect_draw", icd)
         self.assertIn("collect_graphics_buffer_resource", icd)
         self.assertIn("draw->indirect", icd)
@@ -6421,7 +6426,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_GPU_VULKAN_GRAPHICS_V624_MAX_DESCRIPTOR_SET_LAYOUT_BINDINGS",
             "sizeof(*descriptor_set_layouts)",
             "free(descriptor_set_layouts);",
-            "PdockerGpuVulkanGraphicsV624PipelineLayoutSetEntry pipeline_layout_sets",
+            "PdockerGpuVulkanGraphicsV624PipelineLayoutSetEntry *pipeline_layout_sets = NULL",
             "need_v624_layout_metadata",
             "PDOCKER_GPU_VULKAN_GRAPHICS_V624_ABI_MINOR",
             "frame_header_v624->v624.descriptor_set_layout_count",
@@ -6529,7 +6534,7 @@ class GpuAbiContractTest(unittest.TestCase):
 
         icd = VULKAN_ICD.read_text()
         for icd_marker in [
-            "PdockerGpuVulkanGraphicsV625DescriptorBindEntry descriptor_binds",
+            "PdockerGpuVulkanGraphicsV625DescriptorBindEntry *descriptor_binds = NULL",
             "PdockerGpuVulkanGraphicsV625FrameHeader *frame_header_v625",
             "need_v625_descriptor_bind",
             "PDOCKER_GPU_VULKAN_GRAPHICS_V625_ABI_MINOR",
@@ -6622,7 +6627,7 @@ class GpuAbiContractTest(unittest.TestCase):
 
         icd = VULKAN_ICD.read_text()
         for icd_marker in [
-            "PdockerGpuVulkanGraphicsV626EventWaitRefEntry event_wait_refs",
+            "PdockerGpuVulkanGraphicsV626EventWaitRefEntry *event_wait_refs = NULL",
             "PdockerGpuVulkanGraphicsV626FrameHeader *frame_header_v626",
             "need_v626_event_wait_ref",
             "PDOCKER_GPU_VULKAN_GRAPHICS_V626_ABI_MINOR",
@@ -11183,7 +11188,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("pdocker_vk_push_constant_range_valid(range)", pipeline_layout_body)
         self.assertIn("op->declared_range_count = declared_range_count;", push_body)
         self.assertIn("memcpy(declared_ranges, captured_layout->push_constant_ranges", push_body)
-        self.assertIn("PdockerGpuVulkanGraphicsV628PushConstantRangeEntry push_constant_ranges", frame_body)
+        self.assertIn("PdockerGpuVulkanGraphicsV628PushConstantRangeEntry *push_constant_ranges = NULL", frame_body)
         self.assertIn("size_t cursor = sizeof(PdockerGpuVulkanGraphicsV629FrameHeader);", frame_body)
         self.assertIn("need_v628_push_constant_ranges", frame_body)
         self.assertIn("frame_header_v628->v628.push_constant_range_count", frame_body)
@@ -13291,7 +13296,7 @@ class GpuAbiContractTest(unittest.TestCase):
         executor = GPU_EXECUTOR.read_text()
 
         for marker in [
-            "PdockerGpuVulkanGraphicsV622MultisampleStateEntry multisample_states[PDOCKER_GPU_VULKAN_GRAPHICS_V622_MAX_MULTISAMPLE_STATES]",
+            "PdockerGpuVulkanGraphicsV622MultisampleStateEntry *multisample_states = NULL",
             "PdockerGpuVulkanGraphicsV622FrameHeader *frame_header_v622",
             "sizeof(*frame_header_v622)",
             "need_v622_multisample_state",
@@ -13552,7 +13557,7 @@ class GpuAbiContractTest(unittest.TestCase):
         executor = GPU_EXECUTOR.read_text()
 
         for marker in [
-            "PdockerGpuVulkanGraphicsV623TessellationStateEntry tessellation_states[PDOCKER_GPU_VULKAN_GRAPHICS_V623_MAX_TESSELLATION_STATES]",
+            "PdockerGpuVulkanGraphicsV623TessellationStateEntry *tessellation_states = NULL",
             "PdockerGpuVulkanGraphicsV623FrameHeader *frame_header_v623",
             "sizeof(*frame_header_v623)",
             "need_v623_tessellation_state",
