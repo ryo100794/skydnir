@@ -194,6 +194,14 @@ or closes.
   mode stays fail-closed to match the ICD unadvertised extension policy.
   Evidence:
   `python3 -m unittest tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_sampler_scalar_fields_are_fail_closed_in_executor -q`.
+- [done] **image sharing-mode executor boundary gate**:
+  Image sharing mode is now single-queue at the executor boundary. The ICD still
+  accepts Vulkan-conformant concurrent sharing only when all listed queue family
+  indices are within the one advertised virtual family, then normalizes it to
+  exclusive before transport. The Android executor now rejects any transported
+  non-exclusive image sharing mode instead of expanding it to Android-native
+  compute/graphics queue families that the ABI did not carry. Evidence:
+  `python3 -m unittest tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_graphics_queue_family_barrier_is_safely_normalized -q`.
 - [done] **image-barrier range/aspect normalization audit**: The producer ICD
   normalizes image-barrier `VK_REMAINING_MIP_LEVELS` and
   `VK_REMAINING_ARRAY_LAYERS` to concrete ranges before V6.1 serialization, and
