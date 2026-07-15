@@ -436,6 +436,10 @@ or closes.
   Graphics V6.24 descriptor-set-layout metadata now validates against its own
   per-set binding cap on both producer and Android frame-validation sides; full
   heap-backed V6.30 layout transport remains the path to remove that ABI cap.
+  V5 FD capability advertising now reports the effective single-message
+  transport cap as `max_fds` and keeps the wider ABI index range as separate
+  metadata, so callers no longer confuse the 253 index range with the current
+  24-FD transport limit.
   Variable descriptor-count layouts now use V6.29
   metadata to carry allocation-time actual descriptor counts, so partially sized
   descriptor arrays are validated and replayed by actual count instead of being

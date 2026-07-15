@@ -20522,6 +20522,7 @@ static void print_capabilities(const char *transport) {
             "\"sampler_schema_hash\":\"0x%016llx\","
             "\"descriptor_object_schema_hash\":\"0x%016llx\","
             "\"max_frame_bytes\":%u,\"max_fds\":%u,\"transport_max_passed_fds\":%u,"
+            "\"abi_fd_index_range\":%u,"
             "\"max_resources\":%u,\"max_descriptors\":%u,"
             "\"max_images\":%u,\"max_image_views\":%u,\"max_samplers\":%u},"
             "\"android_vulkan_ready\":%s,"
@@ -20595,8 +20596,9 @@ static void print_capabilities(const char *transport) {
             (unsigned long long)PDOCKER_GPU_VULKAN_DISPATCH_V5_SAMPLER_SCHEMA_HASH,
             (unsigned long long)PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_OBJECT_SCHEMA_HASH,
             PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FRAME_BYTES,
-            PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS,
             PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS,
+            PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS,
+            PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS,
             PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_RESOURCES,
             PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS,
             PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGES,
