@@ -19092,6 +19092,11 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('\\"cpu_oracle_requested\\":%s', source)
         self.assertIn('\\"pre_barriers\\":%u,\\"post_barriers\\":%u', source)
         self.assertIn("vkCmdPipelineBarrier(command_buffer,", source)
+        self.assertIn("strict passthrough image descriptor layout mismatch", source)
+        self.assertLess(
+            source.index("strict passthrough image descriptor layout mismatch"),
+            source.index("image_pre_barriers[image_pre_barrier_count++]"),
+        )
         self.assertIn("VK_ACCESS_HOST_WRITE_BIT", source)
         self.assertIn("VK_ACCESS_SHADER_WRITE_BIT", source)
         self.assertIn('\\"gpu_after_upload_hash\\":\\"0x%016llx\\"', source)

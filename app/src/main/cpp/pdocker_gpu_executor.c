@@ -18768,6 +18768,11 @@ static int run_vulkan_dispatch_fd(
         int descriptor_layout_rc = vulkan_replay_image_layout_for_range(
             image, &view->range, &old_descriptor_layout);
         if (descriptor_layout_rc != 0) { io_rc = descriptor_layout_rc; goto cleanup; }
+        if (strict_passthrough && old_descriptor_layout != d->image_layout) {
+            json_fail("vulkan-dispatch", "strict passthrough image descriptor layout mismatch");
+            ret = 64;
+            goto cleanup;
+        }
         image_pre_barriers[image_pre_barrier_count++] = (VkImageMemoryBarrier){
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
             .srcAccessMask = image->requires_staging
