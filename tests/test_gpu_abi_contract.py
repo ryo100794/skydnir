@@ -20287,6 +20287,24 @@ class GpuAbiContractTest(unittest.TestCase):
         capabilities_close = capabilities_body.index('fprintf(json_out(), ",\\\"process_exec\\\":true}\\n");')
         self.assertLess(capabilities_features, capabilities_enabled)
         self.assertLess(capabilities_enabled, capabilities_close)
+        for marker in [
+            "storageInputOutput16",
+            "rt ? rt->physical_storage16.storageInputOutput16 : 0",
+            "rt ? rt->subgroup_properties.supportedOperations : 0",
+        ]:
+            self.assertIn(marker, capabilities_body)
+        self.assertLess(
+            capabilities_body.index("rt ? rt->physical_storage16.storagePushConstant16 : 0"),
+            capabilities_body.index("rt ? rt->physical_storage16.storageInputOutput16 : 0"),
+        )
+        self.assertLess(
+            capabilities_body.index("rt ? rt->physical_storage16.storageInputOutput16 : 0"),
+            capabilities_body.index("rt ? rt->physical_storage8.storageBuffer8BitAccess : 0"),
+        )
+        self.assertLess(
+            capabilities_body.index("rt ? rt->subgroup_properties.supportedStages : 0"),
+            capabilities_body.index("rt ? rt->subgroup_properties.supportedOperations : 0"),
+        )
 
     def test_gpu_executor_exposes_vulkan_advertisement_caps_command(self):
         source = GPU_EXECUTOR.read_text()

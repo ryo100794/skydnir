@@ -20575,6 +20575,7 @@ static void print_capabilities(const char *transport) {
             rt ? rt->physical_storage16.storageBuffer16BitAccess : 0,
             rt ? rt->physical_storage16.uniformAndStorageBuffer16BitAccess : 0,
             rt ? rt->physical_storage16.storagePushConstant16 : 0,
+            rt ? rt->physical_storage16.storageInputOutput16 : 0,
             rt ? rt->physical_storage8.storageBuffer8BitAccess : 0,
             rt ? rt->physical_storage8.uniformAndStorageBuffer8BitAccess : 0,
             rt ? rt->physical_storage8.storagePushConstant8 : 0,
