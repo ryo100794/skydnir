@@ -11883,6 +11883,49 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertLess(materialize_body.index(flags_gate), materialize_body.index("vkCreateImage(device, &ici"))
         self.assertIn(".flags = (VkImageCreateFlags)src->create_flags", materialize_body)
 
+    def test_vulkan_image_view_component_swizzles_are_fail_closed_in_icd_and_executor(self):
+        icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
+
+        icd_swizzle_body = c_function_body(icd, "pdocker_vk_component_swizzle_valid_for_transport")
+        icd_mapping_body = c_function_body(icd, "pdocker_vk_component_mapping_valid_for_transport")
+        executor_swizzle_body = c_function_body(executor, "vulkan_dispatch_component_swizzle_valid")
+        executor_mapping_body = c_function_body(executor, "vulkan_dispatch_image_view_components_valid")
+        for body in [icd_swizzle_body, executor_swizzle_body]:
+            for marker in [
+                "VK_COMPONENT_SWIZZLE_IDENTITY",
+                "VK_COMPONENT_SWIZZLE_ZERO",
+                "VK_COMPONENT_SWIZZLE_ONE",
+                "VK_COMPONENT_SWIZZLE_R",
+                "VK_COMPONENT_SWIZZLE_G",
+                "VK_COMPONENT_SWIZZLE_B",
+                "VK_COMPONENT_SWIZZLE_A",
+                "default:",
+            ]:
+                self.assertIn(marker, body)
+        for marker in ["components.r", "components.g", "components.b", "components.a"]:
+            self.assertIn(marker, icd_mapping_body)
+        for marker in ["view->component_r", "view->component_g", "view->component_b", "view->component_a"]:
+            self.assertIn(marker, executor_mapping_body)
+
+        image_view_validate_body = c_function_body(icd, "validate_image_view_create_info_for_transport")
+        self.assertIn("pdocker_vk_component_mapping_valid_for_transport(info->components)", image_view_validate_body)
+        self.assertIn("image-view-component-swizzle-unsupported", image_view_validate_body)
+        self.assertLess(
+            image_view_validate_body.index("pdocker_vk_component_mapping_valid_for_transport(info->components)"),
+            image_view_validate_body.index("normalize_image_view_subresource_range_for_transport"),
+        )
+
+        materialize_body = c_function_body(executor, "materialize_vulkan_dispatch_images")
+        gate = "vulkan_dispatch_image_view_components_valid(src)"
+        self.assertIn(gate, materialize_body)
+        self.assertLess(materialize_body.index(gate), materialize_body.index("VkImageViewCreateInfo ivci"))
+        self.assertLess(materialize_body.index(gate), materialize_body.index("vkCreateImageView(device, &ivci"))
+        self.assertIn(".r = (VkComponentSwizzle)src->component_r", materialize_body)
+        self.assertIn(".g = (VkComponentSwizzle)src->component_g", materialize_body)
+        self.assertIn(".b = (VkComponentSwizzle)src->component_b", materialize_body)
+        self.assertIn(".a = (VkComponentSwizzle)src->component_a", materialize_body)
+
     def test_vulkan_format_properties2_queries_reuse_legacy_caps(self):
         icd = VULKAN_ICD.read_text()
         format2_body = c_function_body(icd, "vkGetPhysicalDeviceFormatProperties2")

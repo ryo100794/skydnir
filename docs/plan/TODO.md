@@ -158,6 +158,13 @@ or closes.
   even if a malformed frame bypasses normal ICD capture. Evidence:
   `python3 -m unittest tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_image_create_flags_are_fail_closed_in_icd_and_executor -q`
   and `python3 -m unittest tests.test_gpu_abi_contract -q`.
+- [done] **image view component-swizzle boundary gate**:
+  Image-view component mappings are now validated at both bridge boundaries.
+  The ICD rejects invalid `VkComponentSwizzle` enum values before recording an
+  image view, and the Android executor independently rejects malformed
+  transported image-view component fields before native `vkCreateImageView`.
+  Valid swizzle pass-through remains unchanged. Evidence:
+  `python3 -m unittest tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_image_view_component_swizzles_are_fail_closed_in_icd_and_executor -q`.
 - [done] **image-barrier range/aspect normalization audit**: The producer ICD
   normalizes image-barrier `VK_REMAINING_MIP_LEVELS` and
   `VK_REMAINING_ARRAY_LAYERS` to concrete ranges before V6.1 serialization, and

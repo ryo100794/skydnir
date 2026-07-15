@@ -19414,6 +19414,28 @@ static bool normalize_image_view_subresource_range_for_transport(
     return true;
 }
 
+static bool pdocker_vk_component_swizzle_valid_for_transport(VkComponentSwizzle swizzle) {
+    switch (swizzle) {
+        case VK_COMPONENT_SWIZZLE_IDENTITY:
+        case VK_COMPONENT_SWIZZLE_ZERO:
+        case VK_COMPONENT_SWIZZLE_ONE:
+        case VK_COMPONENT_SWIZZLE_R:
+        case VK_COMPONENT_SWIZZLE_G:
+        case VK_COMPONENT_SWIZZLE_B:
+        case VK_COMPONENT_SWIZZLE_A:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static bool pdocker_vk_component_mapping_valid_for_transport(VkComponentMapping components) {
+    return pdocker_vk_component_swizzle_valid_for_transport(components.r) &&
+           pdocker_vk_component_swizzle_valid_for_transport(components.g) &&
+           pdocker_vk_component_swizzle_valid_for_transport(components.b) &&
+           pdocker_vk_component_swizzle_valid_for_transport(components.a);
+}
+
 static VkResult validate_image_view_pnext_for_transport(
         const VkImageViewCreateInfo *info,
         const PdockerVkImage *image) {
@@ -19464,6 +19486,11 @@ static VkResult validate_image_view_create_info_for_transport(
     VkResult pnext_rc = validate_image_view_pnext_for_transport(info, image);
     if (pnext_rc != VK_SUCCESS) return pnext_rc;
     if (!pdocker_vk_format_bridge_supported(info->format) || info->format != image->format) {
+        return VK_ERROR_FORMAT_NOT_SUPPORTED;
+    }
+    if (!pdocker_vk_component_mapping_valid_for_transport(info->components)) {
+        trace_icd_runtime_failure("image-view-component-swizzle-unsupported",
+                                  VK_ERROR_FORMAT_NOT_SUPPORTED);
         return VK_ERROR_FORMAT_NOT_SUPPORTED;
     }
     VkImageSubresourceRange normalized_range;

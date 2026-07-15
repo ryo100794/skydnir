@@ -3718,6 +3718,30 @@ static int vulkan_dispatch_image_view_type_valid(
     }
 }
 
+static int vulkan_dispatch_component_swizzle_valid(uint32_t swizzle) {
+    switch ((VkComponentSwizzle)swizzle) {
+        case VK_COMPONENT_SWIZZLE_IDENTITY:
+        case VK_COMPONENT_SWIZZLE_ZERO:
+        case VK_COMPONENT_SWIZZLE_ONE:
+        case VK_COMPONENT_SWIZZLE_R:
+        case VK_COMPONENT_SWIZZLE_G:
+        case VK_COMPONENT_SWIZZLE_B:
+        case VK_COMPONENT_SWIZZLE_A:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static int vulkan_dispatch_image_view_components_valid(
+        const PdockerGpuVulkanDispatchV5ImageViewEntry *view) {
+    return view &&
+           vulkan_dispatch_component_swizzle_valid(view->component_r) &&
+           vulkan_dispatch_component_swizzle_valid(view->component_g) &&
+           vulkan_dispatch_component_swizzle_valid(view->component_b) &&
+           vulkan_dispatch_component_swizzle_valid(view->component_a);
+}
+
 static int vulkan_dispatch_image_view_range_valid(
         const PdockerGpuVulkanDispatchV5ImageEntry *image,
         const PdockerGpuVulkanDispatchV5ImageViewEntry *view) {
@@ -4619,6 +4643,9 @@ static int materialize_vulkan_dispatch_images(
         const PdockerGpuVulkanDispatchV5ImageEntry *src_image =
             &object_tables->images[images[src->image_index].source_index];
         if (!vulkan_dispatch_image_view_range_valid(src_image, src)) {
+            return -EOPNOTSUPP;
+        }
+        if (!vulkan_dispatch_image_view_components_valid(src)) {
             return -EOPNOTSUPP;
         }
         if (*view_count >= view_capacity) return -E2BIG;
