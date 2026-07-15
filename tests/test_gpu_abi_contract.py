@@ -7980,6 +7980,16 @@ class GpuAbiContractTest(unittest.TestCase):
             source.index("strict passthrough blocks shader compatibility rewrites"),
             source.index("if (rewrite_duplicate_descriptor_bindings("),
         )
+        self.assertIn("strict passthrough blocks pipeline compatibility knobs", source)
+        self.assertLess(
+            source.index("strict passthrough blocks pipeline compatibility knobs"),
+            source.index(".flags = disable_pipeline_optimization"),
+        )
+        self.assertIn("strict passthrough blocks data compatibility materialization", source)
+        self.assertLess(
+            source.index("strict passthrough blocks data compatibility materialization"),
+            source.index("if (materialize_readonly_overlap_snapshots)"),
+        )
         self.assertNotIn("memcpy(shader_code, kQ4kSafeSpv", source)
         self.assertNotIn("memcpy(shader_code, kQ6kSafeSpv", source)
         self.assertIn("PDOCKER_GPU_Q6K_SAFE_KERNEL is an explicit diagnostic override", source)

@@ -16613,6 +16613,13 @@ static int run_vulkan_dispatch_fd(
         options && options->has_disable_pipeline_optimization
             ? options->disable_pipeline_optimization
             : env_truthy("PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION", 0);
+    if (strict_passthrough &&
+        disable_pipeline_optimization &&
+        !allow_strict_shader_compat_rewrites) {
+        json_fail("vulkan-dispatch", "strict passthrough blocks pipeline compatibility knobs");
+        ret = 64;
+        goto cleanup;
+    }
     const int add_float16_capability_for_storage16 =
         options && options->has_add_float16_capability_for_storage16
             ? options->add_float16_capability_for_storage16
@@ -16732,6 +16739,12 @@ static int run_vulkan_dispatch_fd(
     const int materialize_readonly_overlap_snapshots =
         strict_passthrough &&
         (disable_overlap_aliasing || q6_readonly_overlap_snapshot_auto);
+    if (materialize_readonly_overlap_snapshots &&
+        !allow_strict_shader_compat_rewrites) {
+        json_fail("vulkan-dispatch", "strict passthrough blocks data compatibility materialization");
+        ret = 64;
+        goto cleanup;
+    }
     /*
      * Duplicate descriptor Binding decorations are legal SPIR-V.  The legacy
      * non-strict path keeps the historical default-on rewrite.  Strict mode is
