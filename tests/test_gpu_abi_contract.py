@@ -5043,7 +5043,11 @@ class GpuAbiContractTest(unittest.TestCase):
             object_validator,
         )
         self.assertIn(
-            "header->abi_minor != PDOCKER_GPU_VULKAN_DISPATCH_V54_ABI_MINOR) return 0;",
+            "header->abi_minor != PDOCKER_GPU_VULKAN_DISPATCH_V54_ABI_MINOR &&",
+            object_validator,
+        )
+        self.assertIn(
+            "header->abi_minor != PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR) return 0;",
             object_validator,
         )
 
@@ -7118,6 +7122,68 @@ class GpuAbiContractTest(unittest.TestCase):
                     fields, count, _, _ = vulkan_dispatch_v5_schema(header_path, field_macro, count_macro)
                     self.assertEqual(len(fields), count)
                     self.assertEqual([name for name, _ in fields], c_struct_field_names(header_path, struct_name))
+
+    def test_vulkan_native_object_identity_extensions_are_validated_and_advertised(self):
+        executor = GPU_EXECUTOR.read_text()
+        caps = c_function_body(executor, "print_vulkan_advertisement_caps")
+        self.assertIn(
+            '\\"vulkan_graphics_v6_max_variable_descriptor_counts\\":%u,',
+            caps,
+        )
+        for marker in [
+            "vulkan_dispatch_v5_abi_minor_native_objects",
+            "vulkan_dispatch_v5_native_object_identity_schema_hash",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V55_HEADER_EXTENSION_SCHEMA_HASH",
+            "vulkan_graphics_v6_abi_minor_native_objects",
+            "vulkan_graphics_v6_native_object_identity_schema_hash",
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V630_ABI_MINOR",
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V630_HEADER_EXTENSION_SCHEMA_HASH",
+        ]:
+            self.assertIn(marker, caps)
+
+        v5_header = c_function_body(executor, "validate_vulkan_dispatch_v5_header")
+        self.assertIn("PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR", v5_header)
+        self.assertIn("sizeof(PdockerGpuVulkanDispatchV55FrameHeader)", v5_header)
+        v5_identity = c_function_body(executor, "validate_vulkan_dispatch_v55_identity_extension")
+        for marker in [
+            "PDOCKER_GPU_VULKAN_DISPATCH_V55_HEADER_EXTENSION_SCHEMA_HASH",
+            "ext->instance_object_id == 0",
+            "ext->physical_device_object_id == 0",
+            "ext->device_object_id == 0",
+            "ext->queue_object_id == 0",
+        ]:
+            self.assertIn(marker, v5_identity)
+        self.assertIn(
+            "return register_vulkan_runtime_identity_ids(",
+            c_function_body(executor, "register_vulkan_dispatch_v55_identity"),
+        )
+
+        v6_prefix = c_function_body(executor, "validate_vulkan_graphics_v6_header_prefix")
+        self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V630_ABI_MINOR", v6_prefix)
+        self.assertIn("sizeof(PdockerGpuVulkanGraphicsV630FrameHeader)", v6_prefix)
+        v6_identity = c_function_body(executor, "validate_vulkan_graphics_v630_identity_extension")
+        for marker in [
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V630_HEADER_EXTENSION_SCHEMA_HASH",
+            "ext->instance_object_id == 0",
+            "ext->physical_device_object_id == 0",
+            "ext->device_object_id == 0",
+            "ext->queue_object_id == 0",
+        ]:
+            self.assertIn(marker, v6_identity)
+        view_struct = executor.split("typedef struct VulkanGraphicsV6FrameView", 1)[1].split(
+            "} VulkanGraphicsV6FrameView;", 1
+        )[0]
+        self.assertIn("const PdockerGpuVulkanGraphicsV630FrameHeader *header_v630;", view_struct)
+        self.assertIn("int is_v630;", view_struct)
+        self.assertIn(
+            "return register_vulkan_runtime_identity_ids(",
+            c_function_body(executor, "register_vulkan_graphics_v630_identity"),
+        )
+        self.assertIn(
+            "register_vulkan_graphics_v630_identity(view, &g_vulkan_runtime)",
+            c_function_body(executor, "run_vulkan_graphics_v6_frame"),
+        )
 
     def test_vulkan_native_object_identity_extensions_are_append_only(self):
         expected_identity_fields = [
