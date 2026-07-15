@@ -120,6 +120,12 @@ or closes.
   explicit depth/stencil split path, while storage-image depth/stencil views
   fail closed before socket transport even when their descriptor layout is
   `VK_IMAGE_LAYOUT_GENERAL`. Evidence: `python3 -m unittest tests.test_vulkan_icd_sync_harness.VulkanIcdSyncHarnessTest.test_descriptor_image_layout_mismatch_fails_before_transport -q` and `python3 -m unittest tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_dispatch_icd_fails_closed_on_descriptor_image_layout_mismatch -q`.
+- [done] **dual-aspect depth/stencil layout-range split CPU gate**:
+  `update_image_layout_range_cache()` now has CPU harness evidence for packed
+  `D24S8` ranges whose old tracked range covers both depth and stencil aspects
+  and a later barrier updates only one aspect. The cache preserves the untouched
+  aspect and non-overlapping layers instead of collapsing back to a guessed
+  whole-image layout. Evidence: `python3 -m unittest tests.test_vulkan_icd_sync_harness.VulkanIcdSyncHarnessTest.test_image_layout_range_cache_splits_partial_overlaps_without_overflow -q`.
 - [done] **image-barrier range/aspect normalization audit**: The producer ICD
   normalizes image-barrier `VK_REMAINING_MIP_LEVELS` and
   `VK_REMAINING_ARRAY_LAYERS` to concrete ranges before V6.1 serialization, and
@@ -341,8 +347,8 @@ or closes.
   `tests.test_gpu_abi_contract` pass.
 - [planned] **residual graphics evidence gaps**: Do not promote full Vulkan
   pass-through until remaining fail-closed lanes have explicit ABI/evidence:
-  dual-aspect depth+stencil copy/layout evidence beyond the descriptor CPU
-  gate, explicit compressed/multiplanar image support beyond the current fail-closed gate, unresolved MSAA store/readback,
+  dual-aspect depth+stencil image-copy execution evidence beyond the
+  descriptor/layout-range CPU gates, explicit compressed/multiplanar image support beyond the current fail-closed gate, unresolved MSAA store/readback,
   true cross-family ownership transfer, and sync2 pNext/dependency-flag
   extensions beyond the currently explicit ABI lanes.  Dispatch between render
   scopes has range-split evidence, and dispatch inside active rendering remains

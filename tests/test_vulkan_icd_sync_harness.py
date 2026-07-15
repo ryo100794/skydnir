@@ -2599,6 +2599,27 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 return 0;
             }}
 
+            static int find_range_aspect(PdockerVkImage *image,
+                                         VkImageLayout layout,
+                                         VkImageAspectFlags aspect_mask,
+                                         uint32_t base_mip,
+                                         uint32_t level_count,
+                                         uint32_t base_layer,
+                                         uint32_t layer_count) {{
+                for (uint32_t i = 0; i < image->layout_range_count; ++i) {{
+                    PdockerVkImageLayoutRange *entry = &image->layout_ranges[i];
+                    if (entry->layout == layout &&
+                        entry->range.aspectMask == aspect_mask &&
+                        entry->range.baseMipLevel == base_mip &&
+                        entry->range.levelCount == level_count &&
+                        entry->range.baseArrayLayer == base_layer &&
+                        entry->range.layerCount == layer_count) {{
+                        return 1;
+                    }}
+                }}
+                return 0;
+            }}
+
             int main(void) {{
                 PdockerVkImage image;
                 memset(&image, 0, sizeof(image));
@@ -2652,6 +2673,64 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                     fprintf(stderr, "exact replacement did not update center range count=%u overflow=%d\\n",
                             image.layout_range_count, image.layout_range_overflow ? 1 : 0);
                     return 5;
+                }}
+
+                memset(&image, 0, sizeof(image));
+                image.format = VK_FORMAT_D24_UNORM_S8_UINT;
+                image.mip_levels = 2;
+                image.array_layers = 2;
+                image.layout_generation = 10;
+
+                VkImageSubresourceRange ds_full = {{
+                    .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT,
+                    .baseMipLevel = 0,
+                    .levelCount = 2,
+                    .baseArrayLayer = 0,
+                    .layerCount = 2,
+                }};
+                update_image_layout_range_cache(&image, &ds_full, VK_IMAGE_LAYOUT_GENERAL);
+                if (image.layout_range_overflow || image.layout_range_count != 1 ||
+                    !find_range_aspect(&image, VK_IMAGE_LAYOUT_GENERAL,
+                                       VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, 0, 2, 0, 2)) {{
+                    fprintf(stderr, "initial dual-aspect range was not cached count=%u overflow=%d\\n",
+                            image.layout_range_count, image.layout_range_overflow ? 1 : 0);
+                    return 6;
+                }}
+
+                image.layout_generation = 11;
+                VkImageSubresourceRange depth_first_layer = {{
+                    .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
+                    .baseMipLevel = 0,
+                    .levelCount = 2,
+                    .baseArrayLayer = 0,
+                    .layerCount = 1,
+                }};
+                update_image_layout_range_cache(&image, &depth_first_layer, VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL);
+                if (image.layout_range_overflow ||
+                    !find_range_aspect(&image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_ASPECT_STENCIL_BIT, 0, 2, 0, 2) ||
+                    !find_range_aspect(&image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_ASPECT_DEPTH_BIT, 0, 2, 1, 1) ||
+                    !find_range_aspect(&image, VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_DEPTH_BIT, 0, 2, 0, 1)) {{
+                    fprintf(stderr, "dual-aspect depth split missing expected remainders count=%u overflow=%d\\n",
+                            image.layout_range_count, image.layout_range_overflow ? 1 : 0);
+                    return 7;
+                }}
+
+                image.layout_generation = 12;
+                VkImageSubresourceRange stencil_full = {{
+                    .aspectMask = VK_IMAGE_ASPECT_STENCIL_BIT,
+                    .baseMipLevel = 0,
+                    .levelCount = 2,
+                    .baseArrayLayer = 0,
+                    .layerCount = 2,
+                }};
+                update_image_layout_range_cache(&image, &stencil_full, VK_IMAGE_LAYOUT_STENCIL_READ_ONLY_OPTIMAL);
+                if (image.layout_range_overflow ||
+                    !find_range_aspect(&image, VK_IMAGE_LAYOUT_STENCIL_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_STENCIL_BIT, 0, 2, 0, 2) ||
+                    !find_range_aspect(&image, VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_DEPTH_BIT, 0, 2, 0, 1) ||
+                    !find_range_aspect(&image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_ASPECT_DEPTH_BIT, 0, 2, 1, 1)) {{
+                    fprintf(stderr, "dual-aspect stencil replacement clobbered depth ranges count=%u overflow=%d\\n",
+                            image.layout_range_count, image.layout_range_overflow ? 1 : 0);
+                    return 8;
                 }}
                 return 0;
             }}
