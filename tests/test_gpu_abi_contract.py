@@ -19119,6 +19119,21 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('env_truthy("PDOCKER_GPU_STRICT_PASSTHROUGH", 0)', graphics_run)
         self.assertIn("&replay_descriptors, &replay_queries, strict_passthrough", graphics_run)
 
+    def test_strict_passthrough_rejects_graphics_rendering_prebarrier_layout_replay(self):
+        source = GPU_EXECUTOR.read_text()
+        graphics_record = c_function_body(source, "record_vulkan_graphics_v6_command_buffer")
+        self.assertIn("strict passthrough graphics attachment layout mismatch", graphics_record)
+        self.assertIn("strict passthrough graphics resolve attachment layout mismatch", graphics_record)
+        self.assertLess(
+            graphics_record.index("strict passthrough graphics attachment layout mismatch"),
+            graphics_record.index("pre_barriers[pre_barrier_count++]"),
+        )
+        resolve_block = graphics_record[graphics_record.index("resolve_old_layout"):]
+        self.assertLess(
+            resolve_block.index("strict passthrough graphics resolve attachment layout mismatch"),
+            resolve_block.index("pre_barriers[pre_barrier_count++]"),
+        )
+
     def test_llama_gpu_artifact_gate_decision_tree_is_documented(self):
         verifier = LLAMA_GPU_ARTIFACT_VERIFIER.read_text()
         runbook = LLAMA_GPU_DEVICE_RUNBOOK.read_text()

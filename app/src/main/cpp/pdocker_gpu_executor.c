@@ -34638,6 +34638,12 @@ static int record_vulkan_graphics_v6_command_buffer(
                     VkImageLayout old_layout = image->current_layout;
                     int layout_rc = vulkan_replay_image_layout_for_range(image, &replay_attachment_range, &old_layout);
                     if (layout_rc != 0) { rc = layout_rc; goto begin_rendering_cleanup; }
+                    if (strict_passthrough && old_layout != (VkImageLayout)src->layout) {
+                        json_fail("vulkan-graphics-v6-command-record",
+                                  "strict passthrough graphics attachment layout mismatch");
+                        rc = -EOPNOTSUPP;
+                        goto begin_rendering_cleanup;
+                    }
                     pre_barriers[pre_barrier_count++] = (VkImageMemoryBarrier){
                         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
                         .srcAccessMask = old_layout == VK_IMAGE_LAYOUT_PREINITIALIZED
@@ -34702,6 +34708,13 @@ static int record_vulkan_graphics_v6_command_buffer(
                         int resolve_layout_rc = vulkan_replay_image_layout_for_range(
                             resolve_image, &resolve_attachment_range, &resolve_old_layout);
                         if (resolve_layout_rc != 0) { rc = resolve_layout_rc; goto begin_rendering_cleanup; }
+                        if (strict_passthrough &&
+                            resolve_old_layout != (VkImageLayout)resolve_meta->resolve_layout) {
+                            json_fail("vulkan-graphics-v6-command-record",
+                                      "strict passthrough graphics resolve attachment layout mismatch");
+                            rc = -EOPNOTSUPP;
+                            goto begin_rendering_cleanup;
+                        }
                         pre_barriers[pre_barrier_count++] = (VkImageMemoryBarrier){
                             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
                             .srcAccessMask = resolve_old_layout == VK_IMAGE_LAYOUT_PREINITIALIZED
