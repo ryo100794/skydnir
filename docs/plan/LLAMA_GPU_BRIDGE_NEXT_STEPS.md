@@ -2885,3 +2885,16 @@ the Skydnir-owned shader-module backing fd unchanged.  This opens a generic
 Vulkan compatibility surface for clients that carry non-semantic debug or
 annotation instructions while keeping executor ABI, Android replay, llama.cpp,
 Dockerfiles, models, prompts, and shader policy unchanged.
+
+### 2026-07-15 Android compute sparse descriptor-layout lane
+
+CPU/static pass-through work removed the Android compute executor dense
+`descriptor_set_count * layout_count` descriptor-layout tables.  The generic
+compute runner now builds a sparse heap-backed `VulkanComputeDescriptorLayoutSlot`
+list, sorts it by API descriptor set and binding, and uses that same list for
+layout hashing, `vkCreateDescriptorSetLayout`, and descriptor-pool sizing.  This
+keeps sparse/high API binding numbers from inflating Android-side layout memory
+while preserving the original API binding numbers in descriptor writes.
+
+Validation: `env -u PYTHONPATH python3 -m unittest tests.test_gpu_abi_contract -q`
+and `bash scripts/build-native-android-ndk.sh`.

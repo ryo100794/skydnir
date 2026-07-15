@@ -325,10 +325,14 @@ or closes.
   command-recording barrier tables are also heap-backed by active buffer/image
   counts, so pre/post buffer barriers and image staging barriers no longer use
   separate fixed stack arrays or bounded loop truncation.  Descriptor layout
-  metadata in the legacy compute runner is now heap-backed and stride-indexed,
-  and SPIR-V descriptor reflection tables are heap-backed by final
-  `layout_count`, removing another 16-binding-number cap for otherwise
-  legacy-compatible frames.  The legacy V1-V4 text dispatch path now uses a
+  metadata in the legacy compute runner is now sparse-slot backed rather than
+  a dense `descriptor_set_count * layout_count` rectangle; layout hashing,
+  descriptor-set layout creation, and descriptor-pool sizing iterate only
+  active API binding records, so sparse high binding numbers no longer multiply
+  Android-side layout memory.  SPIR-V descriptor reflection tables are
+  heap-backed by final `layout_count`, removing another 16-binding-number cap
+  for otherwise legacy-compatible frames.  The legacy V1-V4 text dispatch path
+  now uses a
   heap-backed command builder and heap-backed parser bindings, and its remaining
   binding ceiling is tied to the real `SCM_RIGHTS` text shape (one shader fd plus
   one storage-buffer fd per binding) rather than the old 16-slot debug array.

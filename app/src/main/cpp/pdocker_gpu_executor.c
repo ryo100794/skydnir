@@ -9227,30 +9227,86 @@ static int binding_index_for_descriptor_slot(
     return -1;
 }
 
+typedef struct VulkanComputeDescriptorLayoutSlot {
+    uint32_t descriptor_set;
+    uint32_t binding;
+    uint32_t descriptor_count;
+    VkDescriptorType descriptor_type;
+} VulkanComputeDescriptorLayoutSlot;
+
+static int compare_vulkan_compute_descriptor_layout_slots(const void *a, const void *b) {
+    const VulkanComputeDescriptorLayoutSlot *lhs = (const VulkanComputeDescriptorLayoutSlot *)a;
+    const VulkanComputeDescriptorLayoutSlot *rhs = (const VulkanComputeDescriptorLayoutSlot *)b;
+    if (lhs->descriptor_set < rhs->descriptor_set) return -1;
+    if (lhs->descriptor_set > rhs->descriptor_set) return 1;
+    if (lhs->binding < rhs->binding) return -1;
+    if (lhs->binding > rhs->binding) return 1;
+    return 0;
+}
+
+static VulkanComputeDescriptorLayoutSlot *find_vulkan_compute_descriptor_layout_slot(
+        VulkanComputeDescriptorLayoutSlot *slots,
+        size_t slot_count,
+        uint32_t descriptor_set,
+        uint32_t binding) {
+    if (!slots) return NULL;
+    for (size_t i = 0; i < slot_count; ++i) {
+        if (slots[i].descriptor_set == descriptor_set && slots[i].binding == binding) {
+            return &slots[i];
+        }
+    }
+    return NULL;
+}
+
+static int ensure_vulkan_compute_descriptor_layout_slot(
+        VulkanComputeDescriptorLayoutSlot *slots,
+        size_t slot_capacity,
+        size_t *slot_count,
+        uint32_t descriptor_set_count,
+        uint32_t descriptor_set,
+        uint32_t binding,
+        VkDescriptorType descriptor_type,
+        uint32_t descriptor_count) {
+    if (!slots || !slot_count || descriptor_count == 0) return -EINVAL;
+    if (descriptor_set >= descriptor_set_count) return -ERANGE;
+    VulkanComputeDescriptorLayoutSlot *slot = find_vulkan_compute_descriptor_layout_slot(
+        slots, *slot_count, descriptor_set, binding);
+    if (slot) {
+        if (slot->descriptor_type != descriptor_type) return -EPROTO;
+        if (descriptor_count > slot->descriptor_count) slot->descriptor_count = descriptor_count;
+    } else {
+        if (*slot_count >= slot_capacity) return -E2BIG;
+        slot = &slots[(*slot_count)++];
+        memset(slot, 0, sizeof(*slot));
+        slot->descriptor_set = descriptor_set;
+        slot->binding = binding;
+        slot->descriptor_type = descriptor_type;
+        slot->descriptor_count = descriptor_count;
+    }
+    return 0;
+}
+
 static uint64_t vulkan_descriptor_layout_hash(
-        const uint32_t *set_binding_counts,
-        const VkDescriptorType *set_binding_types,
-        const uint32_t *set_binding_descriptor_counts,
+        const VulkanComputeDescriptorLayoutSlot *layout_slots,
+        size_t layout_slot_count,
         uint32_t descriptor_set_count,
         uint32_t layout_stride) {
     uint64_t hash = 1469598103934665603ull;
     hash = fnv1a64_update(hash, &descriptor_set_count, sizeof(descriptor_set_count));
     hash = fnv1a64_update(hash, &layout_stride, sizeof(layout_stride));
     for (uint32_t set_index = 0; set_index < descriptor_set_count; ++set_index) {
-        const uint32_t binding_limit = set_binding_counts[set_index];
         uint32_t active_binding_count = 0;
-        for (uint32_t binding_index = 0; binding_index < binding_limit; ++binding_index) {
-            const size_t table_index = (size_t)set_index * layout_stride + binding_index;
-            if (set_binding_descriptor_counts[table_index] == 0) continue;
-            active_binding_count++;
+        for (size_t i = 0; i < layout_slot_count; ++i) {
+            if (layout_slots[i].descriptor_set == set_index) active_binding_count++;
         }
         hash = fnv1a64_update(hash, &set_index, sizeof(set_index));
         hash = fnv1a64_update(hash, &active_binding_count, sizeof(active_binding_count));
-        for (uint32_t binding_index = 0; binding_index < binding_limit; ++binding_index) {
-            const size_t table_index = (size_t)set_index * layout_stride + binding_index;
-            const uint32_t descriptor_count = set_binding_descriptor_counts[table_index];
-            if (descriptor_count == 0) continue;
-            const uint32_t descriptor_type = (uint32_t)set_binding_types[table_index];
+        for (size_t i = 0; i < layout_slot_count; ++i) {
+            const VulkanComputeDescriptorLayoutSlot *slot = &layout_slots[i];
+            if (slot->descriptor_set != set_index) continue;
+            const uint32_t binding_index = slot->binding;
+            const uint32_t descriptor_count = slot->descriptor_count;
+            const uint32_t descriptor_type = (uint32_t)slot->descriptor_type;
             hash = fnv1a64_update(hash, &binding_index, sizeof(binding_index));
             hash = fnv1a64_update(hash, &descriptor_type, sizeof(descriptor_type));
             hash = fnv1a64_update(hash, &descriptor_count, sizeof(descriptor_count));
@@ -15826,11 +15882,10 @@ static int run_vulkan_dispatch_fd(
     VkDescriptorSetLayout set_layout = VK_NULL_HANDLE;
     VkDescriptorSetLayout *set_layouts = NULL;
     VkDescriptorSet *descriptor_sets = NULL;
-    uint32_t *set_binding_counts = NULL;
-    uint32_t *set_binding_descriptor_counts = NULL;
-    VkDescriptorType *set_binding_types = NULL;
+    VulkanComputeDescriptorLayoutSlot *layout_slots = NULL;
     VkDescriptorSetLayoutBinding *layout_bindings = NULL;
-    size_t layout_table_capacity = 0;
+    size_t layout_slot_capacity = 0;
+    size_t layout_slot_count = 0;
     uint8_t *shader_used_bindings = NULL;
     SpirvDescriptorAccess *shader_binding_access = NULL;
     size_t shader_reflection_capacity = 0;
@@ -17374,33 +17429,49 @@ static int run_vulkan_dispatch_fd(
         vk_spec_info.pData = specialization_data;
         vk_spec_ptr = specialization_materialized ? NULL : &vk_spec_info;
     }
-    layout_table_capacity = (size_t)descriptor_set_count * (size_t)layout_count;
-    if (descriptor_set_count == 0 || layout_count == 0 ||
-        layout_table_capacity / descriptor_set_count != layout_count) {
+    if (descriptor_set_count == 0 || layout_count == 0) {
         json_fail("vulkan-dispatch", "invalid descriptor layout table size");
         ret = 64;
         goto cleanup;
     }
+    size_t descriptor_alias_write_count = 0;
+    for (size_t alias_i = 0; alias_i < binding_alias_count; ++alias_i) {
+        const uint32_t alias_set = binding_aliases[alias_i].descriptor_set;
+        for (size_t source_i = 0; source_i < binding_count; ++source_i) {
+            if (!active_bindings[source_i]) continue;
+            if (bindings[source_i].descriptor_set == alias_set &&
+                bindings[source_i].binding == binding_aliases[alias_i].original_binding &&
+                binding_index_for_descriptor_slot(
+                    bindings,
+                    active_bindings,
+                    binding_count,
+                    alias_set,
+                    binding_aliases[alias_i].rewritten_binding,
+                    bindings[source_i].api_array_element) < 0) {
+                descriptor_alias_write_count++;
+            }
+        }
+    }
+    if (binding_count > SIZE_MAX - image_descriptor_count ||
+        descriptor_alias_write_count > SIZE_MAX - binding_count - image_descriptor_count) {
+        json_fail("vulkan-dispatch", "descriptor layout slot count overflow");
+        ret = 64;
+        goto cleanup;
+    }
+    layout_slot_capacity = binding_count + image_descriptor_count + descriptor_alias_write_count;
+    if (layout_slot_capacity == 0) layout_slot_capacity = 1;
     set_layouts = (VkDescriptorSetLayout *)calloc(
         descriptor_set_count, sizeof(*set_layouts));
     descriptor_sets = (VkDescriptorSet *)calloc(
         descriptor_set_count, sizeof(*descriptor_sets));
-    set_binding_counts = (uint32_t *)calloc(
-        descriptor_set_count, sizeof(*set_binding_counts));
-    set_binding_descriptor_counts = (uint32_t *)calloc(
-        layout_table_capacity, sizeof(*set_binding_descriptor_counts));
-    set_binding_types = (VkDescriptorType *)calloc(
-        layout_table_capacity, sizeof(*set_binding_types));
+    layout_slots = (VulkanComputeDescriptorLayoutSlot *)calloc(
+        layout_slot_capacity, sizeof(*layout_slots));
     layout_bindings = (VkDescriptorSetLayoutBinding *)calloc(
-        layout_table_capacity, sizeof(*layout_bindings));
-    if (!set_layouts || !descriptor_sets || !set_binding_counts ||
-        !set_binding_descriptor_counts || !set_binding_types || !layout_bindings) {
+        layout_slot_capacity, sizeof(*layout_bindings));
+    if (!set_layouts || !descriptor_sets || !layout_slots || !layout_bindings) {
         json_fail("vulkan-dispatch", "out of memory allocating descriptor layout tables");
         ret = 64;
         goto cleanup;
-    }
-    for (size_t i = 0; i < layout_table_capacity; ++i) {
-        set_binding_types[i] = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     }
     for (size_t i = 0; i < binding_count; ++i) {
         if (!active_bindings[i]) continue;
@@ -17412,7 +17483,6 @@ static int run_vulkan_dispatch_fd(
             ret = 64;
             goto cleanup;
         }
-        const size_t table_index = (size_t)set_index * layout_count + bindings[i].binding;
         VkDescriptorType descriptor_type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         if (vulkan_dispatch_descriptor_type_from_api(bindings[i].api_descriptor_type,
                                                      &descriptor_type) != 0) {
@@ -17420,20 +17490,17 @@ static int run_vulkan_dispatch_fd(
             ret = 64;
             goto cleanup;
         }
-        if (set_binding_descriptor_counts[table_index] > 0 &&
-            set_binding_types[table_index] != descriptor_type) {
-            json_fail("vulkan-dispatch", "conflicting descriptor types for set binding");
-            ret = 64;
+        const uint32_t needed_descriptor_count = bindings[i].api_array_element + 1u;
+        int layout_rc = ensure_vulkan_compute_descriptor_layout_slot(
+            layout_slots, layout_slot_capacity, &layout_slot_count,
+            descriptor_set_count,
+            set_index, bindings[i].binding, descriptor_type, needed_descriptor_count);
+        if (layout_rc != 0) {
+            json_fail("vulkan-dispatch",
+                      layout_rc == -EPROTO ? "conflicting descriptor types for set binding" :
+                      "descriptor layout slot overflow");
+            ret = layout_rc == -ENOMEM ? 75 : 64;
             goto cleanup;
-        }
-        set_binding_types[table_index] = descriptor_type;
-        const uint32_t needed_descriptor_count = bindings[i].api_array_element + 1;
-        if (needed_descriptor_count > set_binding_descriptor_counts[table_index]) {
-            set_binding_descriptor_counts[table_index] = needed_descriptor_count;
-        }
-        const uint32_t needed = bindings[i].binding + 1;
-        if (needed > set_binding_counts[set_index]) {
-            set_binding_counts[set_index] = needed;
         }
     }
     for (size_t i = 0; i < image_descriptor_count; ++i) {
@@ -17446,7 +17513,6 @@ static int run_vulkan_dispatch_fd(
             ret = 64;
             goto cleanup;
         }
-        const size_t table_index = (size_t)set_index * layout_count + d->binding;
         VkDescriptorType descriptor_type = VK_DESCRIPTOR_TYPE_MAX_ENUM;
         if (vulkan_dispatch_image_descriptor_type_from_api(d->api_descriptor_type,
                                                            &descriptor_type) != 0) {
@@ -17454,20 +17520,17 @@ static int run_vulkan_dispatch_fd(
             ret = 64;
             goto cleanup;
         }
-        if (set_binding_descriptor_counts[table_index] > 0 &&
-            set_binding_types[table_index] != descriptor_type) {
-            json_fail("vulkan-dispatch", "conflicting image descriptor types for set binding");
-            ret = 64;
+        const uint32_t needed_descriptor_count = d->api_array_element + 1u;
+        int layout_rc = ensure_vulkan_compute_descriptor_layout_slot(
+            layout_slots, layout_slot_capacity, &layout_slot_count,
+            descriptor_set_count,
+            set_index, d->binding, descriptor_type, needed_descriptor_count);
+        if (layout_rc != 0) {
+            json_fail("vulkan-dispatch",
+                      layout_rc == -EPROTO ? "conflicting image descriptor types for set binding" :
+                      "descriptor layout slot overflow");
+            ret = layout_rc == -ENOMEM ? 75 : 64;
             goto cleanup;
-        }
-        set_binding_types[table_index] = descriptor_type;
-        const uint32_t needed_descriptor_count = d->api_array_element + 1;
-        if (needed_descriptor_count > set_binding_descriptor_counts[table_index]) {
-            set_binding_descriptor_counts[table_index] = needed_descriptor_count;
-        }
-        const uint32_t needed = d->binding + 1;
-        if (needed > set_binding_counts[set_index]) {
-            set_binding_counts[set_index] = needed;
         }
     }
     for (size_t i = 0; i < binding_alias_count; ++i) {
@@ -17505,7 +17568,7 @@ static int run_vulkan_dispatch_fd(
             }
             alias_source_seen = 1;
             alias_descriptor_type = descriptor_type;
-            const uint32_t needed_descriptor_count = bindings[source_i].api_array_element + 1;
+            const uint32_t needed_descriptor_count = bindings[source_i].api_array_element + 1u;
             if (needed_descriptor_count > alias_descriptor_count) {
                 alias_descriptor_count = needed_descriptor_count;
             }
@@ -17515,27 +17578,26 @@ static int run_vulkan_dispatch_fd(
             ret = 64;
             goto cleanup;
         }
-        const size_t table_index =
-            (size_t)alias_set * layout_count + binding_aliases[i].rewritten_binding;
-        if (set_binding_descriptor_counts[table_index] > 0 &&
-            set_binding_types[table_index] != alias_descriptor_type) {
-            json_fail("vulkan-dispatch", "conflicting descriptor alias types for set binding");
-            ret = 64;
+        int layout_rc = ensure_vulkan_compute_descriptor_layout_slot(
+            layout_slots, layout_slot_capacity, &layout_slot_count,
+            descriptor_set_count,
+            alias_set, binding_aliases[i].rewritten_binding,
+            alias_descriptor_type, alias_descriptor_count);
+        if (layout_rc != 0) {
+            json_fail("vulkan-dispatch",
+                      layout_rc == -EPROTO ? "conflicting descriptor alias types for set binding" :
+                      "descriptor layout slot overflow");
+            ret = layout_rc == -ENOMEM ? 75 : 64;
             goto cleanup;
         }
-        set_binding_types[table_index] = alias_descriptor_type;
-        if (alias_descriptor_count > set_binding_descriptor_counts[table_index]) {
-            set_binding_descriptor_counts[table_index] = alias_descriptor_count;
-        }
-        const uint32_t needed = binding_aliases[i].rewritten_binding + 1;
-        if (needed > set_binding_counts[alias_set]) {
-            set_binding_counts[alias_set] = needed;
-        }
+    }
+    if (layout_slot_count > 1) {
+        qsort(layout_slots, layout_slot_count, sizeof(*layout_slots),
+              compare_vulkan_compute_descriptor_layout_slots);
     }
     const uint64_t descriptor_layout_hash = vulkan_descriptor_layout_hash(
-        set_binding_counts,
-        set_binding_types,
-        set_binding_descriptor_counts,
+        layout_slots,
+        layout_slot_count,
         descriptor_set_count,
         layout_count);
     if (!multi_descriptor_set) {
@@ -17565,18 +17627,15 @@ static int run_vulkan_dispatch_fd(
     } else {
         double pipeline_create_start = now_ms();
         for (uint32_t set_index = 0; set_index < descriptor_set_count; ++set_index) {
-            const uint32_t set_binding_limit = set_binding_counts[set_index];
             uint32_t layout_binding_count = 0;
-            VkDescriptorSetLayoutBinding *set_layout_bindings =
-                layout_bindings + (size_t)set_index * layout_count;
-            for (uint32_t i = 0; i < set_binding_limit; ++i) {
-                const size_t table_index = (size_t)set_index * layout_count + i;
-                const uint32_t descriptor_count = set_binding_descriptor_counts[table_index];
-                if (descriptor_count == 0) continue;
+            VkDescriptorSetLayoutBinding *set_layout_bindings = layout_bindings;
+            for (size_t i = 0; i < layout_slot_count; ++i) {
+                const VulkanComputeDescriptorLayoutSlot *slot = &layout_slots[i];
+                if (slot->descriptor_set != set_index) continue;
                 set_layout_bindings[layout_binding_count++] = (VkDescriptorSetLayoutBinding){
-                    .binding = i,
-                    .descriptorType = set_binding_types[table_index],
-                    .descriptorCount = descriptor_count,
+                    .binding = slot->binding,
+                    .descriptorType = slot->descriptor_type,
+                    .descriptorCount = slot->descriptor_count,
                     .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
                 };
             }
@@ -17718,40 +17777,37 @@ static int run_vulkan_dispatch_fd(
     uint32_t descriptor_pool_sampled_image_count = 0;
     uint32_t descriptor_pool_storage_image_count = 0;
     uint32_t descriptor_pool_input_attachment_count = 0;
-    for (uint32_t set_index = 0; set_index < descriptor_set_count; ++set_index) {
-        for (uint32_t binding_index = 0; binding_index < set_binding_counts[set_index]; ++binding_index) {
-            const size_t table_index = (size_t)set_index * layout_count + binding_index;
-            const uint32_t descriptor_count = set_binding_descriptor_counts[table_index];
-            if (descriptor_count == 0) continue;
-            switch (set_binding_types[table_index]) {
-                case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
-                    descriptor_pool_uniform_count += descriptor_count;
-                    break;
-                case VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER:
-                    descriptor_pool_uniform_texel_count += descriptor_count;
-                    break;
-                case VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER:
-                    descriptor_pool_storage_texel_count += descriptor_count;
-                    break;
-                case VK_DESCRIPTOR_TYPE_SAMPLER:
-                    descriptor_pool_sampler_count += descriptor_count;
-                    break;
-                case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
-                    descriptor_pool_combined_image_sampler_count += descriptor_count;
-                    break;
-                case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
-                    descriptor_pool_sampled_image_count += descriptor_count;
-                    break;
-                case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
-                    descriptor_pool_storage_image_count += descriptor_count;
-                    break;
-                case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:
-                    descriptor_pool_input_attachment_count += descriptor_count;
-                    break;
-                default:
-                    descriptor_pool_storage_count += descriptor_count;
-                    break;
-            }
+    for (size_t i = 0; i < layout_slot_count; ++i) {
+        const VulkanComputeDescriptorLayoutSlot *slot = &layout_slots[i];
+        const uint32_t descriptor_count = slot->descriptor_count;
+        switch (slot->descriptor_type) {
+            case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
+                descriptor_pool_uniform_count += descriptor_count;
+                break;
+            case VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER:
+                descriptor_pool_uniform_texel_count += descriptor_count;
+                break;
+            case VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER:
+                descriptor_pool_storage_texel_count += descriptor_count;
+                break;
+            case VK_DESCRIPTOR_TYPE_SAMPLER:
+                descriptor_pool_sampler_count += descriptor_count;
+                break;
+            case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
+                descriptor_pool_combined_image_sampler_count += descriptor_count;
+                break;
+            case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
+                descriptor_pool_sampled_image_count += descriptor_count;
+                break;
+            case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
+                descriptor_pool_storage_image_count += descriptor_count;
+                break;
+            case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:
+                descriptor_pool_input_attachment_count += descriptor_count;
+                break;
+            default:
+                descriptor_pool_storage_count += descriptor_count;
+                break;
         }
     }
     VkDescriptorPoolSize pool_sizes[10];
@@ -17828,24 +17884,6 @@ static int run_vulkan_dispatch_fd(
     rc = vkAllocateDescriptorSets(rt->device, &dsai, descriptor_sets);
     timing_descriptor_allocate_ms = now_ms() - descriptor_allocate_start;
     if (rc != VK_SUCCESS) goto cleanup;
-    size_t descriptor_alias_write_count = 0;
-    for (size_t alias_i = 0; alias_i < binding_alias_count; ++alias_i) {
-        const uint32_t alias_set = binding_aliases[alias_i].descriptor_set;
-        for (size_t source_i = 0; source_i < binding_count; ++source_i) {
-            if (!active_bindings[source_i]) continue;
-            if (bindings[source_i].descriptor_set == alias_set &&
-                bindings[source_i].binding == binding_aliases[alias_i].original_binding &&
-                binding_index_for_descriptor_slot(
-                    bindings,
-                    active_bindings,
-                    binding_count,
-                    alias_set,
-                    binding_aliases[alias_i].rewritten_binding,
-                    bindings[source_i].api_array_element) < 0) {
-                descriptor_alias_write_count++;
-            }
-        }
-    }
     if (descriptor_alias_write_count > SIZE_MAX - binding_count ||
         image_descriptor_count > SIZE_MAX - binding_count - descriptor_alias_write_count) {
         json_fail("vulkan-dispatch", "descriptor write count overflow");
@@ -20289,9 +20327,7 @@ cleanup:
     free(shader_binding_access);
     free(shader_used_bindings);
     free(layout_bindings);
-    free(set_binding_types);
-    free(set_binding_descriptor_counts);
-    free(set_binding_counts);
+    free(layout_slots);
     free(descriptor_sets);
     free(set_layouts);
     free(staging_download_barriers);
