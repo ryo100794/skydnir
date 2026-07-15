@@ -1654,15 +1654,41 @@ static int vulkan_native_handle_equal(
     }
 }
 
+static int vulkan_native_handle_is_null(
+        VulkanNativeHandleKind kind,
+        VulkanNativeHandle handle) {
+    switch (kind) {
+        case PDOCKER_GPU_VULKAN_NATIVE_HANDLE_INSTANCE:
+            return handle.instance == VK_NULL_HANDLE;
+        case PDOCKER_GPU_VULKAN_NATIVE_HANDLE_PHYSICAL_DEVICE:
+            return handle.physical_device == VK_NULL_HANDLE;
+        case PDOCKER_GPU_VULKAN_NATIVE_HANDLE_DEVICE:
+            return handle.device == VK_NULL_HANDLE;
+        case PDOCKER_GPU_VULKAN_NATIVE_HANDLE_QUEUE:
+            return handle.queue == VK_NULL_HANDLE;
+        default:
+            return 1;
+    }
+}
+
 static int put_vulkan_native_handle_entry(
         VulkanNativeHandleTable *table,
         VulkanNativeHandleKind kind,
         uint64_t object_id,
         VulkanNativeHandle handle) {
-    if (!table || object_id == 0 || !vulkan_native_handle_kind_valid(kind)) return -EINVAL;
+    if (!table || object_id == 0 || !vulkan_native_handle_kind_valid(kind) ||
+        vulkan_native_handle_is_null(kind, handle)) return -EINVAL;
     VulkanNativeHandleEntry *existing = find_vulkan_native_handle_entry(table, kind, object_id);
     if (existing) {
         return vulkan_native_handle_equal(kind, existing->handle, handle) ? 0 : -EEXIST;
+    }
+    for (size_t i = 0; i < PDOCKER_GPU_VULKAN_NATIVE_HANDLE_TABLE_CAPACITY; ++i) {
+        VulkanNativeHandleEntry *entry = &table->entries[i];
+        if (entry->used && entry->kind == (uint8_t)kind &&
+            vulkan_native_handle_equal(kind, entry->handle, handle) &&
+            entry->object_id != object_id) {
+            return -EEXIST;
+        }
     }
     for (size_t i = 0; i < PDOCKER_GPU_VULKAN_NATIVE_HANDLE_TABLE_CAPACITY; ++i) {
         VulkanNativeHandleEntry *entry = &table->entries[i];
