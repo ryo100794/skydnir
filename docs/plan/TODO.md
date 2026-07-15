@@ -278,12 +278,13 @@ or closes.
   descriptor sets replayable on devices that expose variable descriptor counts
   without coupling them to the unrelated partially-bound feature, and accepts
   update-unused descriptor layouts without relaxing exact descriptor coverage.
-- [done] **Vulkan FD transport cap alignment**: The shared ABI now exposes
-  `PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS` separately from the V5 frame fd index
-  range.  The ICD fails closed before `sendmsg` when a frame would exceed the
-  actual SCM_RIGHTS transport capacity, and the executor validates V5/V6 frame
-  headers against the same transport cap instead of advertising the larger ABI
-  index range as a usable per-message fd count.
+- [done] **Vulkan FD transport cap alignment**: The shared ABI uses
+  `PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS` as the effective single-message
+  SCM_RIGHTS transport capacity and aligns it with the V5 fd-index range
+  (`253`) for framed V5/V6 paths.  The ICD fails closed before `sendmsg` when
+  a frame would exceed that capacity, the executor validates V5/V6 frame headers
+  against the same cap, and legacy text dispatch remains separately capped at
+  24 FDs to force wide work onto typed V5 transport.
 - [done] **strict transport identity evidence gate**: The Android executor now
   reports whether a strict dispatch is eligible as no-reconstruction
   pass-through evidence.  Source/effective/received SPIR-V hashes must match,
@@ -436,10 +437,10 @@ or closes.
   Graphics V6.24 descriptor-set-layout metadata now validates against its own
   per-set binding cap on both producer and Android frame-validation sides; full
   heap-backed V6.30 layout transport remains the path to remove that ABI cap.
-  V5 FD capability advertising now reports the effective single-message
-  transport cap as `max_fds` and keeps the wider ABI index range as separate
-  metadata, so callers no longer confuse the 253 index range with the current
-  24-FD transport limit.
+  V5 FD capability advertising reports the effective single-message framed
+  transport cap as `max_fds`; that cap is now aligned with the 253-entry ABI
+  fd-index range, while `abi_fd_index_range` remains explicit metadata for
+  protocol clarity and legacy text stays at its smaller forced-V5 threshold.
   Variable descriptor-count layouts now use V6.29
   metadata to carry allocation-time actual descriptor counts, so partially sized
   descriptor arrays are validated and replayed by actual count instead of being
