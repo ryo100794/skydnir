@@ -31494,6 +31494,7 @@ static void vulkan_graphics_planning_set_image_layout(
 static int materialize_vulkan_graphics_v6_attachments(
         VulkanRuntime *rt,
         const VulkanGraphicsV6FrameView *view,
+        int strict_passthrough,
         VulkanGraphicsReplayAttachments *out) {
     if (!rt || !view || !view->header || !out) return -EINVAL;
     memset(out, 0, sizeof(*out));
@@ -31569,6 +31570,16 @@ static int materialize_vulkan_graphics_v6_attachments(
         &out->sampler_count);
     free(msaa_image_allowed);
     if (rc != 0) return rc;
+    if (strict_passthrough) {
+        for (size_t i = 0; i < out->image_count; ++i) {
+            if (out->images[i].requires_staging) {
+                json_fail("vulkan-graphics-v6-attachment-materialize",
+                          "strict passthrough graphics image staging materialization mismatch");
+                destroy_vulkan_graphics_replay_attachments(rt->device, out);
+                return -EOPNOTSUPP;
+            }
+        }
+    }
     rc = materialize_vulkan_graphics_v620_image_layout_ranges(view, out);
     if (rc != 0) return rc;
 
@@ -37374,7 +37385,8 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
             (unsigned long long)view->header->submit_id);
     fflush(out);
 
-    rc = materialize_vulkan_graphics_v6_attachments(&g_vulkan_runtime, view, &replay_attachments);
+    rc = materialize_vulkan_graphics_v6_attachments(
+        &g_vulkan_runtime, view, strict_passthrough, &replay_attachments);
     if (rc != 0) {
         out = json_out();
         fprintf(out,

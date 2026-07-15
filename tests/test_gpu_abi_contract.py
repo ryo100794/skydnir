@@ -19164,6 +19164,16 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("strict passthrough graphics staged image upload mismatch", staged_upload)
         self.assertIn("record_vulkan_graphics_v6_staged_image_uploads(command_buffer, attachments, strict_passthrough)", graphics_record)
 
+    def test_strict_passthrough_rejects_graphics_image_staging_materialization(self):
+        source = GPU_EXECUTOR.read_text()
+        materialize = c_function_body(source, "materialize_vulkan_graphics_v6_attachments")
+        graphics_run = c_function_body(source, "run_vulkan_graphics_v6_frame")
+        self.assertIn("int strict_passthrough", source)
+        self.assertIn("out->images[i].requires_staging", materialize)
+        self.assertIn("strict passthrough graphics image staging materialization mismatch", materialize)
+        self.assertIn("destroy_vulkan_graphics_replay_attachments(rt->device, out);", materialize)
+        self.assertIn("strict_passthrough, &replay_attachments", graphics_run)
+
     def test_llama_gpu_artifact_gate_decision_tree_is_documented(self):
         verifier = LLAMA_GPU_ARTIFACT_VERIFIER.read_text()
         runbook = LLAMA_GPU_DEVICE_RUNBOOK.read_text()
