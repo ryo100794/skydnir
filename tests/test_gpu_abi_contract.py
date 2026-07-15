@@ -22043,6 +22043,14 @@ class GpuAbiContractTest(unittest.TestCase):
         source = GPU_EXECUTOR.read_text()
         verifier = (ROOT / "scripts/verify-llama-gpu-artifact.py").read_text()
         self.assertIn("strict_transport_has_sender_spirv_identity", source)
+        self.assertIn("strict passthrough requires sender SPIR-V identity", source)
+        self.assertIn("strict-spirv-identity-missing", source)
+        self.assertIn("strict-spirv-source-effective-mismatch", source)
+        self.assertIn("strict-spirv-sender-received-mismatch", source)
+        self.assertLess(
+            source.index("strict passthrough requires sender SPIR-V identity"),
+            source.index("local_size_patched = patch_spirv_literal_local_size_from_spec"),
+        )
         self.assertIn("options->source_spirv_hash == options->effective_spirv_hash", source)
         self.assertIn("options->effective_spirv_hash == original_spirv_hash", source)
         self.assertIn("original_spirv_hash == reported_effective_spirv_hash", source)

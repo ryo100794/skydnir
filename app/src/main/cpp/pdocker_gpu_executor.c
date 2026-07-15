@@ -16509,6 +16509,29 @@ static int run_vulkan_dispatch_fd(
     if (read_fd_exact(shader_fd, shader_code, shader_size, 0) != 0) goto cleanup;
     const SpirvTraceSummary requested_spirv_summary = summarize_spirv(shader_code, shader_size);
     const uint64_t original_spirv_hash = requested_spirv_summary.hash;
+    if (strict_passthrough) {
+        if (!options || !options->has_source_spirv_hash || !options->has_effective_spirv_hash) {
+            json_fail("vulkan-dispatch", "strict passthrough requires sender SPIR-V identity");
+            fail_stage = "strict-spirv-identity-missing";
+            rc = VK_ERROR_FEATURE_NOT_PRESENT;
+            ret = 64;
+            goto cleanup;
+        }
+        if (options->source_spirv_hash != options->effective_spirv_hash) {
+            json_fail("vulkan-dispatch", "strict passthrough source/effective SPIR-V hash mismatch");
+            fail_stage = "strict-spirv-source-effective-mismatch";
+            rc = VK_ERROR_FEATURE_NOT_PRESENT;
+            ret = 64;
+            goto cleanup;
+        }
+        if (options->effective_spirv_hash != original_spirv_hash) {
+            json_fail("vulkan-dispatch", "strict passthrough sender/received SPIR-V hash mismatch");
+            fail_stage = "strict-spirv-sender-received-mismatch";
+            rc = VK_ERROR_FEATURE_NOT_PRESENT;
+            ret = 64;
+            goto cleanup;
+        }
+    }
     uint64_t cpu_oracle_spirv_hash = original_spirv_hash;
     const char *cpu_oracle_spirv_hash_source = "received";
     dump_spirv_if_requested("original", dispatch_lifecycle_id, shader_code, shader_size, &requested_spirv_summary, options);
