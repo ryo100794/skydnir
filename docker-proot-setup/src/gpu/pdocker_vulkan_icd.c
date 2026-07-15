@@ -1177,8 +1177,9 @@ typedef struct {
     bool dispatch_indirect;
     PdockerVkBuffer *dispatch_indirect_buffer;
     VkDeviceSize dispatch_indirect_offset;
-    uint8_t push_constants[PDOCKER_VK_MAX_PUSH_BYTES];
+    uint8_t *push_constants;
     uint32_t push_constant_size;
+    uint32_t push_constant_capacity;
     PdockerVkPushConstantOpSnapshot *push_constant_ops;
     uint32_t push_constant_op_count;
 } PdockerVkDispatchOp;
@@ -1281,8 +1282,9 @@ typedef struct {
     PdockerVkDescriptorSet *set_snapshots;
     bool *set_snapshot_used;
     uint32_t set_capacity;
-    uint8_t push_constants[PDOCKER_VK_MAX_PUSH_BYTES];
+    uint8_t *push_constants;
     uint32_t push_constant_size;
+    uint32_t push_constant_capacity;
     PdockerVkPushConstantOpSnapshot *push_constant_ops;
     uint32_t push_constant_op_count;
     PdockerVkVertexBindingState vertex_bindings[PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDINGS];
@@ -1491,8 +1493,9 @@ typedef struct {
     uint32_t dispatch_x;
     uint32_t dispatch_y;
     uint32_t dispatch_z;
-    uint8_t push_constants[PDOCKER_VK_MAX_PUSH_BYTES];
+    uint8_t *push_constants;
     uint32_t push_constant_size;
+    uint32_t push_constant_capacity;
     PdockerVkPushConstantOpSnapshot *push_constant_ops;
     uint32_t push_constant_op_count;
     uint32_t push_constant_op_capacity;
@@ -1872,6 +1875,78 @@ static void descriptor_set_snapshot_state_destroy(
     *capacity = 0;
 }
 
+static bool push_constant_state_reserve(
+        uint8_t **data,
+        uint32_t *capacity,
+        uint32_t required) {
+    if (!data || !capacity) return false;
+    if (required == 0 || required <= *capacity) return true;
+    uint8_t *allocated = (uint8_t *)calloc(required, 1);
+    if (!allocated) return false;
+    if (*data && *capacity > 0) {
+        memcpy(allocated, *data, *capacity);
+    }
+    free(*data);
+    *data = allocated;
+    *capacity = required;
+    return true;
+}
+
+static bool push_constant_state_clone(
+        uint8_t **dst_data,
+        uint32_t *dst_capacity,
+        uint32_t *dst_size,
+        const uint8_t *src_data,
+        uint32_t src_size) {
+    if (!dst_data || !dst_capacity || !dst_size) return false;
+    if (src_size > 0 && !src_data) return false;
+    if (!push_constant_state_reserve(dst_data, dst_capacity, src_size)) return false;
+    if (*dst_data && *dst_capacity > 0) {
+        memset(*dst_data, 0, *dst_capacity);
+    }
+    if (src_size > 0) {
+        memcpy(*dst_data, src_data, src_size);
+    }
+    *dst_size = src_size;
+    return true;
+}
+
+static void push_constant_state_release(
+        uint8_t **data,
+        uint32_t *capacity,
+        uint32_t *size) {
+    if (!data) return;
+    free(*data);
+    *data = NULL;
+    if (capacity) *capacity = 0;
+    if (size) *size = 0;
+}
+
+static bool dispatch_op_clone_push_constants_from_command(
+        PdockerVkDispatchOp *op,
+        const PdockerVkCommandBuffer *cmd) {
+    if (!op || !cmd) return false;
+    uint32_t required = cmd->push_constant_size;
+    if (op->pipeline && op->pipeline->layout &&
+        op->pipeline->layout->push_constant_size > required) {
+        required = op->pipeline->layout->push_constant_size;
+    }
+    if (!push_constant_state_clone(&op->push_constants,
+                                   &op->push_constant_capacity,
+                                   &op->push_constant_size,
+                                   cmd->push_constants,
+                                   cmd->push_constant_size)) {
+        return false;
+    }
+    if (!push_constant_state_reserve(&op->push_constants,
+                                     &op->push_constant_capacity,
+                                     required)) {
+        return false;
+    }
+    op->push_constant_size = required;
+    return true;
+}
+
 static bool dispatch_op_clone_descriptor_state(
         PdockerVkDispatchOp *op,
         PdockerVkDescriptorSet **src_handles,
@@ -1927,8 +2002,7 @@ static bool push_constant_op_snapshot_clone(
         const PdockerVkPushConstantOpSnapshot *src) {
     if (!dst || !src) return false;
     memset(dst, 0, sizeof(*dst));
-    if (src->offset > PDOCKER_VK_MAX_PUSH_BYTES ||
-        src->size > PDOCKER_VK_MAX_PUSH_BYTES - src->offset) {
+    if ((uint64_t)src->offset + (uint64_t)src->size > UINT32_MAX) {
         return false;
     }
     dst->stage_flags = src->stage_flags;
@@ -2024,6 +2098,9 @@ static void dispatch_op_destroy_descriptor_state(PdockerVkDispatchOp *op) {
                                  &op->set_capacity);
     push_constant_op_snapshot_array_destroy(&op->push_constant_ops,
                                             &op->push_constant_op_count);
+    push_constant_state_release(&op->push_constants,
+                                &op->push_constant_capacity,
+                                &op->push_constant_size);
 }
 
 static bool graphics_snapshot_clone_descriptor_state(
@@ -2155,6 +2232,9 @@ static void graphics_draw_snapshot_destroy_descriptor_state(PdockerVkGraphicsDra
                                           &snapshot->set_capacity);
     push_constant_op_snapshot_array_destroy(&snapshot->push_constant_ops,
                                             &snapshot->push_constant_op_count);
+    push_constant_state_release(&snapshot->push_constants,
+                                &snapshot->push_constant_capacity,
+                                &snapshot->push_constant_size);
     dynamic_state_snapshot_array_release(snapshot->dynamic_states,
                                          snapshot->dynamic_state_count);
     snapshot->dynamic_state_count = 0;
@@ -2603,6 +2683,9 @@ static void command_buffer_destroy_record_vectors(PdockerVkCommandBuffer *cmd) {
     cmd->push_constant_ops = NULL;
     cmd->push_constant_op_count = 0;
     cmd->push_constant_op_capacity = 0;
+    push_constant_state_release(&cmd->push_constants,
+                                &cmd->push_constant_capacity,
+                                &cmd->push_constant_size);
 }
 
 static bool append_graphics_command_record(
@@ -3110,6 +3193,9 @@ static bool append_secondary_command_buffer(
         out->set_snapshots = NULL;
         out->set_snapshot_used = NULL;
         out->set_capacity = 0;
+        out->push_constants = NULL;
+        out->push_constant_size = 0;
+        out->push_constant_capacity = 0;
         out->push_constant_ops = NULL;
         out->push_constant_op_count = 0;
         if (!dispatch_op_clone_descriptor_state(out,
@@ -3117,6 +3203,14 @@ static bool append_secondary_command_buffer(
                                                 copied.set_snapshots,
                                                 copied.set_snapshot_used,
                                                 copied.set_capacity)) {
+            goto fail_secondary_append;
+        }
+        if (!push_constant_state_clone(&out->push_constants,
+                                       &out->push_constant_capacity,
+                                       &out->push_constant_size,
+                                       copied.push_constants,
+                                       copied.push_constant_size)) {
+            dispatch_op_destroy_descriptor_state(out);
             goto fail_secondary_append;
         }
         if (!push_constant_op_snapshot_array_clone(&out->push_constant_ops,
@@ -3135,6 +3229,9 @@ static bool append_secondary_command_buffer(
         out->set_snapshots = NULL;
         out->set_snapshot_used = NULL;
         out->set_capacity = 0;
+        out->push_constants = NULL;
+        out->push_constant_size = 0;
+        out->push_constant_capacity = 0;
         out->push_constant_ops = NULL;
         out->push_constant_op_count = 0;
         memset(out->dynamic_states, 0, sizeof(out->dynamic_states));
@@ -3145,6 +3242,14 @@ static bool append_secondary_command_buffer(
                                                       copied.set_snapshots,
                                                       copied.set_snapshot_used,
                                                       copied.set_capacity)) {
+            goto fail_secondary_append;
+        }
+        if (!push_constant_state_clone(&out->push_constants,
+                                       &out->push_constant_capacity,
+                                       &out->push_constant_size,
+                                       copied.push_constants,
+                                       copied.push_constant_size)) {
+            graphics_draw_snapshot_destroy_descriptor_state(out);
             goto fail_secondary_append;
         }
         if (!push_constant_op_snapshot_array_clone(&out->push_constant_ops,
@@ -3336,9 +3441,13 @@ static bool append_secondary_command_buffer(
         dst->index_type = src->index_type;
         dst->index_buffer_bound = true;
     }
-    if (src->push_constant_size > 0) {
-        memcpy(dst->push_constants, src->push_constants, sizeof(dst->push_constants));
-        dst->push_constant_size = src->push_constant_size;
+    if (src->push_constant_size > 0 &&
+        !push_constant_state_clone(&dst->push_constants,
+                                   &dst->push_constant_capacity,
+                                   &dst->push_constant_size,
+                                   src->push_constants,
+                                   src->push_constant_size)) {
+        goto fail_secondary_append;
     }
     if (src->has_dispatch) {
         dst->dispatch_x = src->dispatch_x;
@@ -6252,12 +6361,20 @@ static bool graphics_v624_pipeline_layout_set_entries_equal(
            a->descriptor_set_layout_id == b->descriptor_set_layout_id;
 }
 
+static uint32_t pdocker_vk_max_push_bytes(void);
+
+static uint32_t pdocker_vk_max_push_bytes_for_stage_flags(VkShaderStageFlags stage_flags) {
+    return (stage_flags & VK_SHADER_STAGE_ALL_GRAPHICS) != 0
+        ? PDOCKER_VK_MAX_PUSH_BYTES
+        : pdocker_vk_max_push_bytes();
+}
+
 static bool pdocker_vk_push_constant_range_valid(const VkPushConstantRange *range) {
     if (!range || range->stageFlags == 0 || range->size == 0) return false;
     if ((range->offset & 3u) != 0 || (range->size & 3u) != 0) return false;
     if ((uint64_t)range->size > UINT32_MAX - (uint64_t)range->offset) return false;
     uint32_t end = range->offset + range->size;
-    return end <= PDOCKER_VK_MAX_PUSH_BYTES;
+    return end <= pdocker_vk_max_push_bytes_for_stage_flags(range->stageFlags);
 }
 
 static int find_graphics_v628_push_constant_range_entry(
@@ -9148,8 +9265,9 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
                 goto cleanup;
             }
             const PdockerVkPushConstantOpSnapshot *push = &cmd->push_constant_ops[record->push_op_index];
-            if (push->offset > PDOCKER_VK_MAX_PUSH_BYTES ||
-                push->size > PDOCKER_VK_MAX_PUSH_BYTES - push->offset) {
+            const uint32_t max_push_bytes = PDOCKER_VK_MAX_PUSH_BYTES;
+            if (push->offset > max_push_bytes ||
+                push->size > max_push_bytes - push->offset) {
                 rc = -ERANGE;
                 goto cleanup;
             }
@@ -11611,7 +11729,7 @@ static int send_generic_vulkan_dispatch_v5_1_op(
         fd_count > PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS) {
         return -E2BIG;
     }
-    if (push_size > PDOCKER_VK_MAX_PUSH_BYTES ||
+    if (push_size > pdocker_vk_max_push_bytes() ||
         (specialization_entry_count > 0 && !specialization_entries) ||
         (specialization_data_size > 0 && !specialization_data)) {
         fprintf(stderr,
@@ -12860,14 +12978,16 @@ static int send_generic_vulkan_dispatch_op(
         op->pipeline->layout->push_constant_size > push_size) {
         push_size = op->pipeline->layout->push_constant_size;
     }
-    if (push_size > PDOCKER_VK_MAX_PUSH_BYTES) {
+    const uint32_t max_push_bytes = pdocker_vk_max_push_bytes();
+    if (push_size > max_push_bytes || (push_size > 0 && !op->push_constants)) {
         fprintf(stderr,
                 "pdocker-vulkan-icd: generic dispatch rejected: push constants too large dispatch_id=%llu push_size=%u max=%u\n",
                 (unsigned long long)dispatch_id,
                 push_size,
-                PDOCKER_VK_MAX_PUSH_BYTES);
+                max_push_bytes);
         return -E2BIG;
     }
+    const bool push_requires_v5_frame = push_size > PDOCKER_VK_MAX_PUSH_BYTES;
     uint32_t dispatch_x = 0;
     uint32_t dispatch_y = 0;
     uint32_t dispatch_z = 0;
@@ -12890,8 +13010,12 @@ static int send_generic_vulkan_dispatch_op(
         }
     }
     char push_hex[PDOCKER_VK_MAX_PUSH_BYTES * 2 + 1];
-    hex_encode(op->push_constants, push_size, push_hex, sizeof(push_hex));
-    const char *push_token = push_size ? push_hex : "-";
+    if (push_size > 0 && !push_requires_v5_frame) {
+        hex_encode(op->push_constants, push_size, push_hex, sizeof(push_hex));
+    } else {
+        push_hex[0] = 0;
+    }
+    const char *push_token = push_size ? (push_requires_v5_frame ? "-" : push_hex) : "-";
     char entry_hex[PDOCKER_VK_MAX_ENTRY_NAME * 2 + 1];
     const char *entry_name = op->pipeline->entry_name[0] ? op->pipeline->entry_name : "main";
     hex_encode((const uint8_t *)entry_name, strlen(entry_name), entry_hex, sizeof(entry_hex));
@@ -13274,7 +13398,7 @@ static int send_generic_vulkan_dispatch_op(
         strict_passthrough || descriptorless_compute_dispatch ||
         descriptor_array_transport_required || texel_buffer_transport_required ||
         image_descriptor_count > 0 || pending_compute_barriers ||
-        specialization_transport_required ||
+        specialization_transport_required || push_requires_v5_frame ||
         binding_count > PDOCKER_GPU_VULKAN_TEXT_DISPATCH_MAX_BINDINGS || op->dispatch_indirect;
     if (requires_v5_frame && copy_alias_enabled()) {
         fprintf(stderr,
@@ -13535,8 +13659,10 @@ static int send_generic_vulkan_dispatch(PdockerVkCommandBuffer *cmd) {
     op.dispatch_indirect = false;
     op.dispatch_indirect_buffer = NULL;
     op.dispatch_indirect_offset = 0;
-    op.push_constant_size = cmd->push_constant_size;
-    memcpy(op.push_constants, cmd->push_constants, sizeof(op.push_constants));
+    if (!dispatch_op_clone_push_constants_from_command(&op, cmd)) {
+        dispatch_op_destroy_descriptor_state(&op);
+        return -ENOMEM;
+    }
     if (!push_constant_op_snapshot_array_clone(&op.push_constant_ops,
                                                &op.push_constant_op_count,
                                                cmd->push_constant_ops,
@@ -15239,6 +15365,13 @@ static const PdockerVkAdvertisedCaps *executor_advertisement_caps_if_enabled(voi
     if (!executor_advertisement_source_enabled()) return NULL;
     const PdockerVkAdvertisedCaps *caps = pdocker_vk_advertised_caps();
     return caps && caps->executor_valid ? caps : NULL;
+}
+
+static uint32_t pdocker_vk_max_push_bytes(void) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+    return caps && caps->limits.maxPushConstantsSize
+        ? caps->limits.maxPushConstantsSize
+        : PDOCKER_VK_MAX_PUSH_BYTES;
 }
 
 static const PdockerVkAdvertisedFormatCaps *pdocker_vk_find_advertised_format_caps(
@@ -25086,7 +25219,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkBeginCommandBuffer(
     cmd->dispatch_z = 0;
     cmd->recording_failed = false;
     cmd->recording_failure_reason = NULL;
-    memset(cmd->push_constants, 0, sizeof(cmd->push_constants));
+    if (cmd->push_constants && cmd->push_constant_capacity > 0) {
+        memset(cmd->push_constants, 0, cmd->push_constant_capacity);
+    }
     cmd->push_constant_size = 0;
     cmd->has_dispatch = false;
     cmd->unsupported_descriptor_set_layout = false;
@@ -26261,8 +26396,21 @@ static void record_graphics_draw_command(
         command_buffer_mark_recording_failed(cmd, "graphics-draw-descriptor-snapshot-oom");
         return;
     }
-    memcpy(snapshot->push_constants, cmd->push_constants, sizeof(snapshot->push_constants));
-    snapshot->push_constant_size = cmd->push_constant_size;
+    uint32_t snapshot_push_size = cmd->push_constant_size;
+    if (snapshot_push_size > PDOCKER_VK_MAX_PUSH_BYTES) {
+        snapshot_push_size = PDOCKER_VK_MAX_PUSH_BYTES;
+    }
+    if (!push_constant_state_clone(&snapshot->push_constants,
+                                   &snapshot->push_constant_capacity,
+                                   &snapshot->push_constant_size,
+                                   cmd->push_constants,
+                                   snapshot_push_size)) {
+        cmd->graphics_draw_op_count--;
+        graphics_draw_snapshot_destroy_descriptor_state(snapshot);
+        cmd->graphics_unsupported = true;
+        command_buffer_mark_recording_failed(cmd, "graphics-draw-push-constant-state-oom");
+        return;
+    }
     if (!push_constant_op_snapshot_array_clone(&snapshot->push_constant_ops,
                                                &snapshot->push_constant_op_count,
                                                cmd->push_constant_ops,
@@ -26312,7 +26460,17 @@ static void record_graphics_draw_command(
     snapshot->active_clear_value_count = cmd->active_clear_value_count;
     if (snapshot->pipeline && snapshot->pipeline->layout &&
         snapshot->pipeline->layout->push_constant_size > snapshot->push_constant_size) {
-        snapshot->push_constant_size = snapshot->pipeline->layout->push_constant_size;
+        uint32_t required_push_size = snapshot->pipeline->layout->push_constant_size;
+        if (!push_constant_state_reserve(&snapshot->push_constants,
+                                         &snapshot->push_constant_capacity,
+                                         required_push_size)) {
+            cmd->graphics_draw_op_count--;
+            graphics_draw_snapshot_destroy_descriptor_state(snapshot);
+            cmd->graphics_unsupported = true;
+            command_buffer_mark_recording_failed(cmd, "graphics-draw-push-constant-state-oom");
+            return;
+        }
+        snapshot->push_constant_size = required_push_size;
     }
     snapshot->vertex_count = vertexCount;
     snapshot->instance_count = instanceCount;
@@ -27248,12 +27406,12 @@ VKAPI_ATTR void VKAPI_CALL vkCmdDispatch(
             op->dispatch_indirect = false;
             op->dispatch_indirect_buffer = NULL;
             op->dispatch_indirect_offset = 0;
-            op->push_constant_size = cmd->push_constant_size;
-            if (op->pipeline && op->pipeline->layout &&
-                op->pipeline->layout->push_constant_size > op->push_constant_size) {
-                op->push_constant_size = op->pipeline->layout->push_constant_size;
+            if (!dispatch_op_clone_push_constants_from_command(op, cmd)) {
+                cmd->dispatch_op_count--;
+                dispatch_op_destroy_descriptor_state(op);
+                command_buffer_mark_recording_failed(cmd, "dispatch-push-constant-state-oom");
+                return;
             }
-            memcpy(op->push_constants, cmd->push_constants, sizeof(op->push_constants));
             if (!push_constant_op_snapshot_array_clone(&op->push_constant_ops,
                                                        &op->push_constant_op_count,
                                                        cmd->push_constant_ops,
@@ -27315,12 +27473,12 @@ VKAPI_ATTR void VKAPI_CALL vkCmdDispatchBase(
             op->dispatch_indirect = false;
             op->dispatch_indirect_buffer = NULL;
             op->dispatch_indirect_offset = 0;
-            op->push_constant_size = cmd->push_constant_size;
-            if (op->pipeline && op->pipeline->layout &&
-                op->pipeline->layout->push_constant_size > op->push_constant_size) {
-                op->push_constant_size = op->pipeline->layout->push_constant_size;
+            if (!dispatch_op_clone_push_constants_from_command(op, cmd)) {
+                cmd->dispatch_op_count--;
+                dispatch_op_destroy_descriptor_state(op);
+                command_buffer_mark_recording_failed(cmd, "dispatch-push-constant-state-oom");
+                return;
             }
-            memcpy(op->push_constants, cmd->push_constants, sizeof(op->push_constants));
             if (!push_constant_op_snapshot_array_clone(&op->push_constant_ops,
                                                        &op->push_constant_op_count,
                                                        cmd->push_constant_ops,
@@ -27399,12 +27557,12 @@ VKAPI_ATTR void VKAPI_CALL vkCmdDispatchIndirect(
             op->dispatch_indirect = true;
             op->dispatch_indirect_buffer = indirect_buffer;
             op->dispatch_indirect_offset = offset;
-            op->push_constant_size = cmd->push_constant_size;
-            if (op->pipeline && op->pipeline->layout &&
-                op->pipeline->layout->push_constant_size > op->push_constant_size) {
-                op->push_constant_size = op->pipeline->layout->push_constant_size;
+            if (!dispatch_op_clone_push_constants_from_command(op, cmd)) {
+                cmd->dispatch_op_count--;
+                dispatch_op_destroy_descriptor_state(op);
+                command_buffer_mark_recording_failed(cmd, "dispatch-push-constant-state-oom");
+                return;
             }
-            memcpy(op->push_constants, cmd->push_constants, sizeof(op->push_constants));
             if (!push_constant_op_snapshot_array_clone(&op->push_constant_ops,
                                                        &op->push_constant_op_count,
                                                        cmd->push_constant_ops,
@@ -27436,8 +27594,9 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPushConstants(
         const void *pValues) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     if (!cmd) return;
-    if (offset > PDOCKER_VK_MAX_PUSH_BYTES ||
-        (uint64_t)size > (uint64_t)PDOCKER_VK_MAX_PUSH_BYTES - (uint64_t)offset) {
+    const uint32_t max_push_bytes = pdocker_vk_max_push_bytes_for_stage_flags(stageFlags);
+    if (offset > max_push_bytes ||
+        (uint64_t)size > (uint64_t)max_push_bytes - (uint64_t)offset) {
         cmd->graphics_unsupported = true;
         command_buffer_mark_recording_failed(cmd, "push-constant-range-overflow");
         return;
@@ -27484,8 +27643,17 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPushConstants(
         command_buffer_mark_recording_failed(cmd, "push-constant-record-overflow");
         return;
     }
-    memcpy(cmd->push_constants + offset, payload, size);
     uint32_t end = offset + size;
+    if (!push_constant_state_reserve(&cmd->push_constants,
+                                     &cmd->push_constant_capacity,
+                                     end)) {
+        free(declared_ranges);
+        free(payload);
+        cmd->graphics_unsupported = true;
+        command_buffer_mark_recording_failed(cmd, "push-constant-state-oom");
+        return;
+    }
+    memcpy(cmd->push_constants + offset, payload, size);
     if (end > cmd->push_constant_size) cmd->push_constant_size = end;
     PdockerVkPushConstantOpSnapshot *op =
         &cmd->push_constant_ops[cmd->push_constant_op_count++];

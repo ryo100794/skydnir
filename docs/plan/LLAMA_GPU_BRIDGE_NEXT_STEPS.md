@@ -2934,3 +2934,16 @@ nonzero size and four-byte SPIR-V code alignment.  Large modules now fail only
 through normal allocation/read/runtime paths instead of a legacy debug cap.
 
 Validation: `env -u PYTHONPATH python3 -m unittest tests.test_gpu_abi_contract -q`.
+
+### 2026-07-15 Producer ICD heap push-constant lane
+
+CPU/static pass-through work moved producer-side Vulkan push-constant storage
+out of fixed `PDOCKER_VK_MAX_PUSH_BYTES` arrays.  Command buffers, compute
+dispatch snapshots, and graphics draw snapshots now keep heap-backed push byte
+storage, validate API ranges against the advertised Vulkan
+`maxPushConstantsSize`, and force framed V5 compute transport when push constants
+no longer fit the legacy text-command scratch.  This keeps the receiver-side
+runtime push limit and producer-side recording model aligned without changing
+llama.cpp, Dockerfiles, models, or prompts.
+
+Validation: `env -u PYTHONPATH python3 -m unittest tests.test_gpu_abi_contract -q` and `bash scripts/build-gpu-shim.sh`.

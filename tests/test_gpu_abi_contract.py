@@ -1380,7 +1380,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "snapshot->pipeline = cmd->graphics_pipeline;",
             "graphics_snapshot_clone_descriptor_state(&snapshot->set_snapshots",
             "&snapshot->set_capacity",
-            "memcpy(snapshot->push_constants, cmd->push_constants",
+            "uint32_t snapshot_push_size = cmd->push_constant_size;",
+            "snapshot_push_size = PDOCKER_VK_MAX_PUSH_BYTES;",
+            "push_constant_state_clone(&snapshot->push_constants",
             "push_constant_op_snapshot_array_clone(&snapshot->push_constant_ops",
             "memcpy(snapshot->vertex_bindings, cmd->vertex_bindings",
             "snapshot->index_buffer = cmd->index_buffer;",
@@ -2956,6 +2958,11 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("PdockerVkGraphicsDescriptorBindSnapshot copied = src->graphics_descriptor_bind_ops[i];", secondary_body)
         self.assertIn("dispatch_op_clone_descriptor_state(out,", secondary_body)
         self.assertIn("graphics_snapshot_clone_descriptor_state(&out->set_snapshots", secondary_body)
+        self.assertIn("out->push_constants = NULL;", secondary_body)
+        self.assertIn("out->push_constant_capacity = 0;", secondary_body)
+        self.assertIn("push_constant_state_clone(&out->push_constants", secondary_body)
+        self.assertIn("copied.push_constants", secondary_body)
+        self.assertIn("copied.push_constant_size", secondary_body)
         self.assertIn("copied.set_capacity", secondary_body)
         self.assertIn("goto fail_secondary_append;", secondary_body)
         self.assertIn("fail_secondary_append:", secondary_body)
@@ -3008,6 +3015,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "memcpy(payload, pValues, size);",
             "free(payload);",
             'command_buffer_mark_recording_failed(cmd, "push-constant-payload-oom")',
+            "push_constant_state_reserve(&cmd->push_constants",
             "memcpy(cmd->push_constants + offset, payload, size);",
             "op->data = payload;",
             "op->value_hash = fnv1a64_bytes(payload, size);",
@@ -5422,7 +5430,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "descriptors = (PdockerGpuVulkanDispatchV5DescriptorObjectEntry *)calloc(",
             "binding_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS",
             "image_descriptor_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS",
-            "push_size > PDOCKER_VK_MAX_PUSH_BYTES",
+            "push_size > pdocker_vk_max_push_bytes()",
             "specialization_entry_count > 0 && !specialization_entries",
             "specialization_data_size > 0 && !specialization_data",
             "!frame_capacity_add_aligned_table(&frame_capacity, sizeof(*specs)",
@@ -15118,8 +15126,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("(uint64_t)src_spec->offset > stage->specialization_size", graphics_body)
         self.assertIn("stage->specialization_size - (uint64_t)src_spec->offset", graphics_body)
         self.assertNotIn("src_spec->offset + (uint64_t)src_spec->size", graphics_body)
-        self.assertIn("push->offset > PDOCKER_VK_MAX_PUSH_BYTES", graphics_body)
-        self.assertIn("PDOCKER_VK_MAX_PUSH_BYTES - push->offset", graphics_body)
+        self.assertIn("const uint32_t max_push_bytes = PDOCKER_VK_MAX_PUSH_BYTES;", graphics_body)
+        self.assertIn("push->offset > max_push_bytes", graphics_body)
+        self.assertIn("max_push_bytes - push->offset", graphics_body)
         self.assertIn("push->size > 0 && !push->data", graphics_body)
         self.assertNotIn("cmd->push_constants + push->offset", graphics_body)
         self.assertIn("pAllocateInfo->allocationSize > (VkDeviceSize)SIZE_MAX", allocate_body)
@@ -15129,12 +15138,18 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("range->size > UINT32_MAX - (uint64_t)range->offset", push_range_valid_body)
         self.assertNotIn("range->offset > UINT32_MAX", pipeline_layout_body)
         self.assertIn("uint32_t end = range->offset + range->size;", push_range_valid_body)
-        self.assertIn("offset > PDOCKER_VK_MAX_PUSH_BYTES", push_constants_body)
-        self.assertIn("(uint64_t)size > (uint64_t)PDOCKER_VK_MAX_PUSH_BYTES - (uint64_t)offset", push_constants_body)
+        self.assertIn("pdocker_vk_max_push_bytes_for_stage_flags(range->stageFlags)", push_range_valid_body)
+        self.assertIn("const uint32_t max_push_bytes = pdocker_vk_max_push_bytes_for_stage_flags(stageFlags);", push_constants_body)
+        self.assertIn("offset > max_push_bytes", push_constants_body)
+        self.assertIn("(uint64_t)size > (uint64_t)max_push_bytes - (uint64_t)offset", push_constants_body)
         self.assertIn("cmd->graphics_unsupported = true;", push_constants_body)
         self.assertIn("if (size == 0) return;", push_constants_body)
         self.assertIn("uint32_t end = offset + size;", push_constants_body)
         self.assertNotIn("size = PDOCKER_VK_MAX_PUSH_BYTES - offset", push_constants_body)
+        self.assertIn("push_constant_state_reserve(&cmd->push_constants", push_constants_body)
+        self.assertIn("uint8_t *push_constants;", source)
+        self.assertIn("uint32_t push_constant_capacity;", source)
+        self.assertNotIn("uint8_t push_constants[PDOCKER_VK_MAX_PUSH_BYTES]", source)
         self.assertIn("uint32_t target_set_capacity = 0;", bind_body)
         self.assertIn("bool descriptor_set_range_overflow = firstSet > target_set_capacity", bind_body)
         self.assertIn("descriptorSetCount > target_set_capacity - firstSet", bind_body)

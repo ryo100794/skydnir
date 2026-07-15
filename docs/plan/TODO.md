@@ -404,6 +404,10 @@ or closes.
   Android runtime `maxPushConstantsSize` after Vulkan initialization instead
   of the executor text-command scratch buffer size; legacy V1-V4 text commands
   still keep their small fixed push scratch as a text transport limit.  The
+  container-side ICD now also stores command, dispatch, and graphics snapshot
+  push constants in heap-backed buffers sized by the advertised Vulkan push
+  limit, and forces V5 framed transport when a compute push range exceeds the
+  legacy text scratch.  The
   compute executor also no longer rejects SPIR-V modules solely because they are
   larger than the former 8 MiB debug cap; it validates the Vulkan-required
   nonzero four-byte code alignment and lets allocation/runtime errors surface
