@@ -11789,6 +11789,7 @@ static int send_generic_vulkan_dispatch_v5_1_op(
     PdockerGpuVulkanDispatchV54ImageBarrierEntry *image_barrier_entries = NULL;
     PdockerGpuVulkanDispatchV5SpecializationEntry *specs = NULL;
     unsigned char *frame = NULL;
+    char *dispatch_indirect_options = NULL;
     int rc = 0;
     if (socket_fd < 0 || !fds || !entry_name ||
         (binding_count > 0 &&
@@ -12363,23 +12364,46 @@ static int send_generic_vulkan_dispatch_v5_1_op(
         specs[i].size = specialization_entries[i].size;
     }
 
-    char dispatch_indirect_options[4096];
     const char *effective_option_text = option_text ? option_text : "";
     size_t effective_option_text_size = option_text ? option_text_size : 0;
     if (has_dispatch_indirect) {
-        const char *separator = effective_option_text_size ? " " : "";
-        int n = snprintf(dispatch_indirect_options, sizeof(dispatch_indirect_options),
-                         "%.*s%sdispatch_indirect_resource=%u dispatch_indirect_offset=%llu",
-                         (int)effective_option_text_size, effective_option_text,
-                         separator,
+        const size_t separator_len = effective_option_text_size ? 1u : 0u;
+        int suffix_len = snprintf(NULL, 0,
+                                  "dispatch_indirect_resource=%u dispatch_indirect_offset=%llu",
+                                  dispatch_indirect_resource_index,
+                                  (unsigned long long)dispatch_indirect_offset);
+        if (suffix_len < 0) {
+            rc = -EINVAL;
+            goto cleanup;
+        }
+        if (effective_option_text_size > SIZE_MAX - separator_len - (size_t)suffix_len - 1u) {
+            rc = -EOVERFLOW;
+            goto cleanup;
+        }
+        const size_t dispatch_indirect_option_size =
+            effective_option_text_size + separator_len + (size_t)suffix_len;
+        dispatch_indirect_options = (char *)malloc(dispatch_indirect_option_size + 1u);
+        if (!dispatch_indirect_options) {
+            rc = -ENOMEM;
+            goto cleanup;
+        }
+        size_t option_cursor = 0;
+        if (effective_option_text_size) {
+            memcpy(dispatch_indirect_options, effective_option_text, effective_option_text_size);
+            option_cursor += effective_option_text_size;
+            dispatch_indirect_options[option_cursor++] = ' ';
+        }
+        int n = snprintf(dispatch_indirect_options + option_cursor,
+                         (size_t)suffix_len + 1u,
+                         "dispatch_indirect_resource=%u dispatch_indirect_offset=%llu",
                          dispatch_indirect_resource_index,
                          (unsigned long long)dispatch_indirect_offset);
-        if (n < 0 || (size_t)n >= sizeof(dispatch_indirect_options)) {
-            rc = -ENAMETOOLONG;
+        if (n != suffix_len) {
+            rc = -EINVAL;
             goto cleanup;
         }
         effective_option_text = dispatch_indirect_options;
-        effective_option_text_size = (size_t)n;
+        effective_option_text_size = dispatch_indirect_option_size;
     }
 
     size_t image_layout_range_count = 0;
@@ -12795,6 +12819,7 @@ static int send_generic_vulkan_dispatch_v5_1_op(
 
     rc = send_vulkan_dispatch_v5_frame_with_fds(socket_fd, frame, cursor, fds, fd_count);
 cleanup:
+    free(dispatch_indirect_options);
     free(frame);
     free(image_layout_ranges);
     free(buffer_view_entries);
