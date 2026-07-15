@@ -837,15 +837,40 @@ def comparison_by_name(comparisons: list[dict[str, Any]]) -> dict[str, dict[str,
     return {str(item.get("name")): item for item in comparisons if isinstance(item, dict)}
 
 
+def q6_final_store_value_flow_boundaries(comparison: dict[str, Any]) -> list[str]:
+    paths = [str(path) for path in (comparison.get("diff_paths") or [])]
+    if not paths:
+        return []
+    ordered_patterns = [
+        ("q6-final-store-value-flow", (
+            "q6_final_store_value_flow.available",
+            "q6_final_store_value_flow.final_store_count",
+            "q6_final_store_value_flow.valid_store_count",
+            ".output_binding",
+            ".binding_matches_required",
+            ".valid",
+        )),
+        ("q6-output-index-ssa", (".output_index_ssa_path.",)),
+        ("q6-final-store-ssa-value", (".ssa_value_path.",)),
+        ("q6-output-index-dependencies", (".output_index_dependencies.",)),
+        ("q6-final-store-value-dependencies", (".stored_value_dependencies.",)),
+        ("q6-output-index-arithmetic", (".output_index_op_histogram",)),
+        ("q6-final-store-value-arithmetic", (".stored_value_op_histogram",)),
+        ("q6-control-dependencies", (".control_dependencies",)),
+        ("q6-debug-probe-exclusion", (".debug_probe_exclusion",)),
+    ]
+    boundaries: list[str] = []
+    for boundary, patterns in ordered_patterns:
+        if any(pattern in path for path in paths for pattern in patterns):
+            boundaries.append(boundary)
+    return boundaries or ["q6-final-store-value-flow"]
+
+
 def q6_final_store_value_flow_boundary(comparison: dict[str, Any]) -> str:
-    first = comparison.get("first_mismatch_path")
-    if not isinstance(first, str):
-        first = ""
-    if ".output_index_ssa_path." in first:
-        return "q6-output-index-ssa"
-    if ".ssa_value_path." in first:
-        return "q6-final-store-ssa-value"
-    return "q6-final-store-value-flow"
+    boundaries = q6_final_store_value_flow_boundaries(comparison)
+    if len(boundaries) == 1:
+        return boundaries[0]
+    return "q6-final-store-value-flow-mixed"
 
 
 def q6_static_boundary(comparisons: list[dict[str, Any]]) -> dict[str, Any]:
@@ -861,19 +886,25 @@ def q6_static_boundary(comparisons: list[dict[str, Any]]) -> dict[str, Any]:
     for name, boundary in ordered:
         item = by_name.get(name)
         if item and item.get("match") is False:
+            sub_boundaries = (
+                q6_final_store_value_flow_boundaries(item)
+                if name == "q6_final_store_value_flow"
+                else []
+            )
             effective_boundary = (
                 q6_final_store_value_flow_boundary(item)
                 if name == "q6_final_store_value_flow"
                 else boundary
             )
-            mismatches.append(
-                {
-                    "comparison": name,
-                    "boundary": effective_boundary,
-                    "first_mismatch_path": item.get("first_mismatch_path"),
-                    "diff_paths": (item.get("diff_paths") or [])[:16],
-                }
-            )
+            mismatch = {
+                "comparison": name,
+                "boundary": effective_boundary,
+                "first_mismatch_path": item.get("first_mismatch_path"),
+                "diff_paths": (item.get("diff_paths") or [])[:16],
+            }
+            if sub_boundaries:
+                mismatch["sub_boundaries"] = sub_boundaries
+            mismatches.append(mismatch)
     if not mismatches:
         summary = "q6-static-match"
     elif len(mismatches) == 1:

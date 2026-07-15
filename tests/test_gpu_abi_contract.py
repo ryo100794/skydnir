@@ -17690,6 +17690,11 @@ class GpuAbiContractTest(unittest.TestCase):
             q6_flow["diff_paths"],
         )
         self.assertEqual(q6_flow["path_diffs"][0]["kind"], "value")
+        self.assertEqual(report["q6_static_boundary"]["summary"], "q6-final-store-value-arithmetic")
+        self.assertEqual(
+            report["q6_static_boundary"]["mismatches"][0]["sub_boundaries"],
+            ["q6-final-store-value-arithmetic"],
+        )
 
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -17713,6 +17718,11 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn(
             "q6_final_store_value_flow.stores[0].control_dependencies[0].condition_dependencies.push_constants[0].member_offset",
             q6_flow["diff_paths"],
+        )
+        self.assertEqual(report["q6_static_boundary"]["summary"], "q6-control-dependencies")
+        self.assertEqual(
+            report["q6_static_boundary"]["mismatches"][0]["sub_boundaries"],
+            ["q6-control-dependencies"],
         )
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -17764,6 +17774,50 @@ class GpuAbiContractTest(unittest.TestCase):
             q6_flow["diff_paths"],
         )
         self.assertEqual(report["q6_static_boundary"]["summary"], "q6-output-index-ssa")
+        self.assertEqual(
+            report["q6_static_boundary"]["mismatches"][0]["sub_boundaries"],
+            ["q6-output-index-ssa"],
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            left = tmp_path / "left.analysis.json"
+            right = tmp_path / "right.analysis.json"
+            out = tmp_path / "compare.json"
+            left.write_text(json.dumps(flow_payload(2), indent=2, sort_keys=True) + "\n")
+            right.write_text(
+                json.dumps(
+                    flow_payload(
+                        3,
+                        control_push_offset=32,
+                        ssa_node_op="OpFAdd",
+                        output_index_node_op="OpIMul",
+                    ),
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n"
+            )
+            result = subprocess.run(
+                ["python3", str(SPIRV_DATAFLOW_COMPARE), str(left), str(right), "--json-out", str(out)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self.assertEqual(result.returncode, 2, result.stderr)
+            report = json.loads(out.read_text())
+
+        self.assertEqual(report["q6_static_boundary"]["summary"], "q6-final-store-value-flow-mixed")
+        self.assertEqual(
+            report["q6_static_boundary"]["mismatches"][0]["sub_boundaries"],
+            [
+                "q6-output-index-ssa",
+                "q6-final-store-ssa-value",
+                "q6-final-store-value-arithmetic",
+                "q6-control-dependencies",
+            ],
+        )
 
     def test_spirv_dataflow_compare_reports_q6_stage_target_support_paths(self):
         def analysis_payload(
