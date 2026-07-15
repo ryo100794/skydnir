@@ -427,7 +427,10 @@ or closes.
   pipeline specialization entries and specialization data are now heap-owned on
   the producer side and heap-staged by the Android V6.2 replay path, so this
   lane no longer inherits the old 16-entry/256-byte scratch specialization
-  limits; the remaining cap is the explicit V6.2 ABI table limit.
+  limits; the remaining cap is the explicit V6.2 ABI table limit.  Generic
+  compute specialization constants now route as binary V5 state before legacy
+  text handling and no longer touch a fixed hex scratch buffer, avoiding silent
+  narrowing and redundant CPU copies for specialization payloads.
   Variable descriptor-count layouts now use V6.29
   metadata to carry allocation-time actual descriptor counts, so partially sized
   descriptor arrays are validated and replayed by actual count instead of being

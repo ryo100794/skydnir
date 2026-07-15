@@ -16346,6 +16346,11 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("const bool entry_name_requires_v5_frame =", generic_sender)
         self.assertIn("entry_name_size >= PDOCKER_VK_MAX_ENTRY_NAME", generic_sender)
         self.assertIn("entry_name_requires_v5_frame ||", requires_block)
+        self.assertNotIn("hex_encode(op->pipeline->specialization_data", generic_sender)
+        self.assertLess(
+            generic_sender.index("const bool specialization_transport_required ="),
+            generic_sender.index("const char *spec_token = \"-\""),
+        )
 
     def test_vulkan_dispatch_strict_passthrough_carries_spirv_identity_without_probe(self):
         icd = VULKAN_ICD.read_text()

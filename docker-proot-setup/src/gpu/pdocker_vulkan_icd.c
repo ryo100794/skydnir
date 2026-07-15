@@ -13032,12 +13032,9 @@ static int send_generic_vulkan_dispatch_op(
     } else {
         entry_hex[0] = 0;
     }
-    char spec_hex[PDOCKER_VK_MAX_SPECIALIZATION_BYTES * 2 + 1];
-    hex_encode(op->pipeline->specialization_data,
-               op->pipeline->specialization_data_size,
-               spec_hex,
-               sizeof(spec_hex));
-    const char *spec_token = op->pipeline->specialization_data_size ? spec_hex : "-";
+    const bool specialization_transport_required =
+        op->pipeline->specialization_entry_count > 0 ||
+        op->pipeline->specialization_data_size > 0;
     if (op->pipeline->specialization_too_large) {
         fprintf(stderr,
                 "pdocker-vulkan-icd: generic dispatch rejected: specialization too large dispatch_id=%llu entries=%u data_size=%zu\n",
@@ -13046,6 +13043,15 @@ static int send_generic_vulkan_dispatch_op(
                 op->pipeline->specialization_data_size);
         return -E2BIG;
     }
+    /*
+     * Specialization constants are binary Vulkan pipeline state.  Any
+     * specialization payload uses the V5 framed transport below, so do not
+     * pre-encode it into a legacy text scratch buffer.  Keeping the V4 token
+     * empty avoids an unnecessary large copy and prevents the legacy text path
+     * from silently narrowing the binary payload before the V5 routing decision
+     * is reached.
+     */
+    const char *spec_token = "-";
 
     PdockerVkSpirvProbeReplay probe;
     int probe_rc = prepare_spirv_probe_replay(&probe,
@@ -13402,9 +13408,6 @@ static int send_generic_vulkan_dispatch_op(
     }
     const bool pending_compute_barriers = pre_barriers &&
         (pre_barriers->memory_count || pre_barriers->buffer_count || pre_barriers->image_count);
-    const bool specialization_transport_required =
-        op->pipeline->specialization_entry_count > 0 ||
-        op->pipeline->specialization_data_size > 0;
     const bool requires_v5_frame =
         strict_passthrough || descriptorless_compute_dispatch ||
         descriptor_array_transport_required || texel_buffer_transport_required ||
