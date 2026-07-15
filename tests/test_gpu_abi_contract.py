@@ -8925,7 +8925,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("push_constant_op_snapshot_array_clone(&op->push_constant_ops", dispatch_body)
         self.assertIn("VKAPI_ATTR void VKAPI_CALL vkCmdDispatchBase", dispatch_body)
         self.assertIn("op->base_group_x = baseGroupX;", dispatch_body)
-        self.assertIn('MAP_ALIAS("vkCmdDispatchBaseKHR", vkCmdDispatchBaseKHR);', icd)
+        self.assertIn('MAP_PROC(vkCmdDispatchBaseKHR);', icd)
         proc_gate_body = icd.split("static bool proc_address_hidden_by_advertisement", 1)[1].split(
             "static PFN_vkVoidFunction proc_address", 1
         )[0]
@@ -9740,7 +9740,7 @@ class GpuAbiContractTest(unittest.TestCase):
         for alias in [
             'MAP_ALIAS("vkGetDeviceGroupPeerMemoryFeaturesKHR", vkGetDeviceGroupPeerMemoryFeatures)',
             'MAP_ALIAS("vkCmdSetDeviceMaskKHR", vkCmdSetDeviceMask)',
-            'MAP_ALIAS("vkCmdDispatchBaseKHR", vkCmdDispatchBaseKHR)',
+            'MAP_PROC(vkCmdDispatchBaseKHR)',
             "MAP_PROC(vkGetDeviceGroupPresentCapabilitiesKHR)",
             "MAP_PROC(vkGetDeviceGroupSurfacePresentModesKHR)",
             "MAP_PROC(vkGetPhysicalDevicePresentRectanglesKHR)",

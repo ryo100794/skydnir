@@ -34035,7 +34035,7 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_PROC(vkCmdUpdateBuffer);
     MAP_PROC(vkCmdDispatch);
     MAP_PROC(vkCmdDispatchBase);
-    MAP_ALIAS("vkCmdDispatchBaseKHR", vkCmdDispatchBaseKHR);
+    MAP_PROC(vkCmdDispatchBaseKHR);
     MAP_PROC(vkCmdSetDeviceMask);
     MAP_ALIAS("vkCmdSetDeviceMaskKHR", vkCmdSetDeviceMask);
     MAP_PROC(vkCmdDispatchIndirect);
