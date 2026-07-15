@@ -15715,7 +15715,7 @@ static int run_vulkan_dispatch_fd(
     if (shader_fd < 0 ||
         (binding_count > 0 && (!buffer_fds || !bindings)) ||
         binding_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS || shader_size == 0 ||
-        shader_size > 8 * 1024 * 1024 || push_size > UINT32_MAX ||
+        (shader_size & 3u) != 0 || push_size > UINT32_MAX ||
         (push_size > 0 && !push) || specialization_count > UINT32_MAX) {
         json_fail("vulkan-dispatch", "invalid dispatch metadata");
         return 64;

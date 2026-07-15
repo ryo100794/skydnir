@@ -5496,6 +5496,13 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("push_size > UINT32_MAX", runner)
         self.assertNotIn("push_size > PDOCKER_GPU_MAX_PUSH_BYTES", runner)
 
+    def test_vulkan_dispatch_v5_shader_size_is_not_limited_by_legacy_text_cap(self):
+        executor = GPU_EXECUTOR.read_text()
+        runner = c_function_body(executor, "run_vulkan_dispatch_fd")
+        self.assertIn("(shader_size & 3u) != 0", runner)
+        self.assertNotIn("shader_size > 8 * 1024 * 1024", runner)
+        self.assertNotIn("shader_size > PDOCKER_GPU_MAX_COMMAND_BYTES", runner)
+
     def test_vulkan_dispatch_v5_2_executor_validates_and_materializes_layout_ranges(self):
         executor = GPU_EXECUTOR.read_text()
         converter = (

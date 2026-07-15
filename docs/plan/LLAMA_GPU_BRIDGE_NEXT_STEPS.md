@@ -2923,3 +2923,14 @@ text commands still keep their fixed push scratch buffer as a text transport
 limit; producer-side heap push storage remains separate follow-up work.
 
 Validation: `env -u PYTHONPATH python3 -m unittest tests.test_gpu_abi_contract -q`.
+
+### 2026-07-15 Android compute shader-size receiver cap removal lane
+
+CPU/static pass-through work removed the Android compute executor hard 8 MiB
+SPIR-V module rejection from `run_vulkan_dispatch_fd`.  V5 frame validation
+already proves the shader fd range/hash against the received frame; the runtime
+path now checks only Vulkan-relevant local invariants for the module byte count:
+nonzero size and four-byte SPIR-V code alignment.  Large modules now fail only
+through normal allocation/read/runtime paths instead of a legacy debug cap.
+
+Validation: `env -u PYTHONPATH python3 -m unittest tests.test_gpu_abi_contract -q`.

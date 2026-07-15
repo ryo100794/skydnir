@@ -403,7 +403,11 @@ or closes.
   Android V5 framed compute dispatch now validates push constants against the
   Android runtime `maxPushConstantsSize` after Vulkan initialization instead
   of the executor text-command scratch buffer size; legacy V1-V4 text commands
-  still keep their small fixed push scratch as a text transport limit.
+  still keep their small fixed push scratch as a text transport limit.  The
+  compute executor also no longer rejects SPIR-V modules solely because they are
+  larger than the former 8 MiB debug cap; it validates the Vulkan-required
+  nonzero four-byte code alignment and lets allocation/runtime errors surface
+  normally.
   Variable descriptor-count layouts now use V6.29
   metadata to carry allocation-time actual descriptor counts, so partially sized
   descriptor arrays are validated and replayed by actual count instead of being
