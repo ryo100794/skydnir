@@ -126,6 +126,14 @@ or closes.
   and a later barrier updates only one aspect. The cache preserves the untouched
   aspect and non-overlapping layers instead of collapsing back to a guessed
   whole-image layout. Evidence: `python3 -m unittest tests.test_vulkan_icd_sync_harness.VulkanIcdSyncHarnessTest.test_image_layout_range_cache_splits_partial_overlaps_without_overflow -q`.
+- [done] **dual-aspect depth/stencil image-copy split CPU gate**:
+  `vkCmdCopyImage` producer serialization now routes image-copy aspect selection
+  through `pdocker_vk_image_to_image_copy_split_aspects()` before queue
+  transport. The helper keeps ordinary single-aspect color/depth/stencil copies
+  as one V6.10 command, splits packed `D24S8`/`D32S8` source-to-destination
+  copies with identical dual depth|stencil aspect masks into explicit depth and
+  stencil commands, and fails closed for mismatched aspect masks, incompatible
+  formats, or invalid inputs. Evidence: `python3 -m unittest tests.test_vulkan_icd_sync_harness.VulkanIcdSyncHarnessTest.test_dual_aspect_depth_stencil_image_copy_split_helper -q` and `python3 -m unittest tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_graphics_v610_depth_stencil_copy_has_explicit_plane_staging_boundary -q`.
 - [done] **image-barrier range/aspect normalization audit**: The producer ICD
   normalizes image-barrier `VK_REMAINING_MIP_LEVELS` and
   `VK_REMAINING_ARRAY_LAYERS` to concrete ranges before V6.1 serialization, and

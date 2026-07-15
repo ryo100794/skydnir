@@ -2571,6 +2571,72 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+
+    def test_dual_aspect_depth_stencil_image_copy_split_helper(self):
+        source = textwrap.dedent("""
+            #include <errno.h>
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "__ICD_SOURCE__"
+
+            static void init_image(PdockerVkImage *image, VkFormat format) {
+                memset(image, 0, sizeof(*image));
+                image->format = format;
+                image->mip_levels = 1;
+                image->array_layers = 1;
+            }
+
+            static int expect_split(const char *label, PdockerVkImageToImageCopyOp *copy,
+                                    int want_rc, uint32_t want_count,
+                                    VkImageAspectFlags a0, VkImageAspectFlags a1) {
+                VkImageAspectFlags aspects[2] = {0, 0};
+                uint32_t count = 99;
+                int rc = pdocker_vk_image_to_image_copy_split_aspects(copy, aspects, &count);
+                if (rc != want_rc || count != want_count || aspects[0] != a0 || aspects[1] != a1) {
+                    fprintf(stderr, "%s rc=%d count=%u aspects=0x%x,0x%x want rc=%d count=%u aspects=0x%x,0x%x\\n",
+                            label, rc, count, aspects[0], aspects[1], want_rc, want_count, a0, a1);
+                    return 0;
+                }
+                return 1;
+            }
+
+            int main(void) {
+                PdockerVkImage src;
+                PdockerVkImage dst;
+                PdockerVkImageToImageCopyOp copy;
+                memset(&copy, 0, sizeof(copy));
+                copy.src = &src;
+                copy.dst = &dst;
+
+                init_image(&src, VK_FORMAT_R8G8B8A8_UNORM);
+                init_image(&dst, VK_FORMAT_R8G8B8A8_UNORM);
+                copy.region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                copy.region.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                if (!expect_split("color single aspect", &copy, 0, 1,
+                                  VK_IMAGE_ASPECT_COLOR_BIT, 0)) return 2;
+
+                init_image(&src, VK_FORMAT_D24_UNORM_S8_UINT);
+                init_image(&dst, VK_FORMAT_D24_UNORM_S8_UINT);
+                copy.region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+                copy.region.dstSubresource.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+                if (!expect_split("packed depth/stencil dual aspect", &copy, 0, 2,
+                                  VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_ASPECT_STENCIL_BIT)) return 3;
+
+                copy.region.dstSubresource.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+                if (!expect_split("mismatched aspect masks", &copy, -EOPNOTSUPP, 0, 0, 0)) return 4;
+
+                init_image(&dst, VK_FORMAT_D32_SFLOAT);
+                copy.region.dstSubresource.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+                if (!expect_split("incompatible depth/stencil formats", &copy, -EOPNOTSUPP, 0, 0, 0)) return 5;
+
+                if (pdocker_vk_image_to_image_copy_split_aspects(NULL, NULL, NULL) != -EINVAL) return 6;
+                return 0;
+            }
+            """.replace("__ICD_SOURCE__", str(ICD_SOURCE)))
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_image_layout_range_cache_splits_partial_overlaps_without_overflow(self):
         source = textwrap.dedent(
             f"""

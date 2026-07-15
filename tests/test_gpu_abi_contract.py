@@ -3832,14 +3832,21 @@ class GpuAbiContractTest(unittest.TestCase):
         # Image<->image D|S is now producer-split into per-aspect V6.10
         # COPY_IMAGE commands.  This is generic Vulkan image-copy handling, not
         # a llama-specific shader workaround.
-        self.assertIn("pdocker_vk_image_to_image_depth_stencil_split_supported", icd)
+        self.assertIn("pdocker_vk_image_to_image_copy_split_aspects", icd)
+        split_helper = c_function_body(icd, "pdocker_vk_image_to_image_copy_split_aspects")
+        self.assertIn("copy->region.srcSubresource.aspectMask != copy->region.dstSubresource.aspectMask", split_helper)
+        self.assertIn("pdocker_vk_image_single_aspect_supported_for_format", split_helper)
+        self.assertIn("pdocker_vk_image_to_image_depth_stencil_split_supported", split_helper)
+        self.assertIn("split_aspects[0] = VK_IMAGE_ASPECT_DEPTH_BIT", split_helper)
+        self.assertIn("split_aspects[1] = VK_IMAGE_ASPECT_STENCIL_BIT", split_helper)
+        self.assertIn("*copy_aspect_count = 2", split_helper)
         copy_collect = icd.split(
             "if (op__->type == PDOCKER_VK_COMMAND_IMAGE_TO_IMAGE_COPY)", 1
-        )[1].split("} \\n        } \\n    } while (0)", 1)[0]
+        )[1].split("} \n        } \n    } while (0)", 1)[0]
         self.assertIn("VkImageAspectFlags split_aspects__[2]", copy_collect)
         self.assertIn("copy_aspect_count__", copy_collect)
-        self.assertIn("split_aspects__[0] = VK_IMAGE_ASPECT_DEPTH_BIT", copy_collect)
-        self.assertIn("split_aspects__[1] = VK_IMAGE_ASPECT_STENCIL_BIT", copy_collect)
+        self.assertIn("pdocker_vk_image_to_image_copy_split_aspects(", copy_collect)
+        self.assertIn("rc = split_rc__;", copy_collect)
         self.assertIn(
             "command_count > PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS - copy_aspect_count__",
             copy_collect,
@@ -11979,9 +11986,11 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("image_ptr(op->src", icd)
         self.assertIn("image_ptr(op->dst", icd)
         self.assertIn("MAP_PROC(vkCmdCopyImage);", icd)
-        self.assertIn("copy__->src->format, copy__->region.srcSubresource.aspectMask", icd)
-        self.assertIn("copy__->dst->format, copy__->region.dstSubresource.aspectMask", icd)
-        self.assertIn("copy__->region.srcSubresource.aspectMask != copy__->region.dstSubresource.aspectMask", icd)
+        self.assertIn("pdocker_vk_image_to_image_copy_split_aspects", icd)
+        split_helper = c_function_body(icd, "pdocker_vk_image_to_image_copy_split_aspects")
+        self.assertIn("copy->src->format, copy->region.srcSubresource.aspectMask", split_helper)
+        self.assertIn("copy->dst->format, copy->region.dstSubresource.aspectMask", split_helper)
+        self.assertIn("copy->region.srcSubresource.aspectMask != copy->region.dstSubresource.aspectMask", split_helper)
 
     def test_vulkan_icd_exposes_tight_image_subresource_layout(self):
         icd = VULKAN_ICD.read_text()

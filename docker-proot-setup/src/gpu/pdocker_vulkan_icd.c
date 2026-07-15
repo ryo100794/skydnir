@@ -3654,6 +3654,39 @@ static bool pdocker_vk_image_to_image_depth_stencil_split_supported(
            conservative_format_bytes_per_pixel_for_aspect(dst_format, VK_IMAGE_ASPECT_STENCIL_BIT) != 0;
 }
 
+static int pdocker_vk_image_to_image_copy_split_aspects(
+        const PdockerVkImageToImageCopyOp *copy,
+        VkImageAspectFlags split_aspects[2],
+        uint32_t *copy_aspect_count) {
+    if (!copy || !copy->src || !copy->dst || !split_aspects || !copy_aspect_count) {
+        return -EINVAL;
+    }
+    split_aspects[0] = 0;
+    split_aspects[1] = 0;
+    *copy_aspect_count = 0;
+    if (copy->region.srcSubresource.aspectMask != copy->region.dstSubresource.aspectMask) {
+        return -EOPNOTSUPP;
+    }
+    if (pdocker_vk_image_single_aspect_supported_for_format(
+            copy->src->format, copy->region.srcSubresource.aspectMask) &&
+        pdocker_vk_image_single_aspect_supported_for_format(
+            copy->dst->format, copy->region.dstSubresource.aspectMask)) {
+        split_aspects[0] = copy->region.srcSubresource.aspectMask;
+        *copy_aspect_count = 1;
+        return 0;
+    }
+    if (pdocker_vk_image_to_image_depth_stencil_split_supported(
+            copy->src->format, copy->dst->format,
+            copy->region.srcSubresource.aspectMask,
+            copy->region.dstSubresource.aspectMask)) {
+        split_aspects[0] = VK_IMAGE_ASPECT_DEPTH_BIT;
+        split_aspects[1] = VK_IMAGE_ASPECT_STENCIL_BIT;
+        *copy_aspect_count = 2;
+        return 0;
+    }
+    return -EOPNOTSUPP;
+}
+
 static bool pdocker_vk_image_aspect_mask_valid_for_format(
         VkFormat format,
         VkImageAspectFlags aspect_mask) {
@@ -8887,21 +8920,10 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
                     rc = -EOPNOTSUPP; \
                     goto cleanup; \
                 } \
-                if (pdocker_vk_image_single_aspect_supported_for_format( \
-                        copy__->src->format, copy__->region.srcSubresource.aspectMask) && \
-                    pdocker_vk_image_single_aspect_supported_for_format( \
-                        copy__->dst->format, copy__->region.dstSubresource.aspectMask)) { \
-                    split_aspects__[0] = copy__->region.srcSubresource.aspectMask; \
-                    copy_aspect_count__ = 1; \
-                } else if (pdocker_vk_image_to_image_depth_stencil_split_supported( \
-                               copy__->src->format, copy__->dst->format, \
-                               copy__->region.srcSubresource.aspectMask, \
-                               copy__->region.dstSubresource.aspectMask)) { \
-                    split_aspects__[0] = VK_IMAGE_ASPECT_DEPTH_BIT; \
-                    split_aspects__[1] = VK_IMAGE_ASPECT_STENCIL_BIT; \
-                    copy_aspect_count__ = 2; \
-                } else { \
-                    rc = -EOPNOTSUPP; \
+                int split_rc__ = pdocker_vk_image_to_image_copy_split_aspects( \
+                    copy__, split_aspects__, &copy_aspect_count__); \
+                if (split_rc__ != 0) { \
+                    rc = split_rc__; \
                     goto cleanup; \
                 } \
                 if (copy_aspect_count__ == 0 || \
