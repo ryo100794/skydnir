@@ -186,6 +186,14 @@ or closes.
   independently rejects transported sampler entries with nonzero `flags` before
   native `vkCreateSampler` instead of silently dropping the field. Evidence:
   `python3 -m unittest tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_sampler_flags_are_fail_closed_in_icd_and_executor -q`.
+- [done] **sampler scalar executor boundary validator**:
+  Transported sampler scalar fields are now validated before native
+  `vkCreateSampler` replay. The executor rejects unsupported filter, mipmap,
+  address, compare-op, and border-color enum values, malformed `VkBool32`
+  fields, non-finite LOD values, and `minLod > maxLod`; mirror-clamp address
+  mode stays fail-closed to match the ICD unadvertised extension policy.
+  Evidence:
+  `python3 -m unittest tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_sampler_scalar_fields_are_fail_closed_in_executor -q`.
 - [done] **image-barrier range/aspect normalization audit**: The producer ICD
   normalizes image-barrier `VK_REMAINING_MIP_LEVELS` and
   `VK_REMAINING_ARRAY_LAYERS` to concrete ranges before V6.1 serialization, and

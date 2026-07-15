@@ -4329,6 +4329,131 @@ static int vulkan_dispatch_native_image_sharing_mode(
     return 0;
 }
 
+static int vulkan_bool32_transport_valid(uint32_t value) {
+    return value == VK_FALSE || value == VK_TRUE;
+}
+
+static int vulkan_sampler_filter_transport_valid(uint32_t filter) {
+    switch ((VkFilter)filter) {
+        case VK_FILTER_NEAREST:
+        case VK_FILTER_LINEAR:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static int vulkan_sampler_mipmap_mode_transport_valid(uint32_t mode) {
+    switch ((VkSamplerMipmapMode)mode) {
+        case VK_SAMPLER_MIPMAP_MODE_NEAREST:
+        case VK_SAMPLER_MIPMAP_MODE_LINEAR:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static int vulkan_sampler_address_mode_transport_valid(uint32_t mode) {
+    switch ((VkSamplerAddressMode)mode) {
+        case VK_SAMPLER_ADDRESS_MODE_REPEAT:
+        case VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT:
+        case VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE:
+        case VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER:
+            return 1;
+        case VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE:
+        default:
+            return 0;
+    }
+}
+
+static int vulkan_compare_op_transport_valid(uint32_t op) {
+    switch ((VkCompareOp)op) {
+        case VK_COMPARE_OP_NEVER:
+        case VK_COMPARE_OP_LESS:
+        case VK_COMPARE_OP_EQUAL:
+        case VK_COMPARE_OP_LESS_OR_EQUAL:
+        case VK_COMPARE_OP_GREATER:
+        case VK_COMPARE_OP_NOT_EQUAL:
+        case VK_COMPARE_OP_GREATER_OR_EQUAL:
+        case VK_COMPARE_OP_ALWAYS:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static int vulkan_sampler_border_color_transport_valid(uint32_t border_color) {
+    switch ((VkBorderColor)border_color) {
+        case VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK:
+        case VK_BORDER_COLOR_INT_TRANSPARENT_BLACK:
+        case VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK:
+        case VK_BORDER_COLOR_INT_OPAQUE_BLACK:
+        case VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE:
+        case VK_BORDER_COLOR_INT_OPAQUE_WHITE:
+            return 1;
+#ifdef VK_EXT_custom_border_color
+        case VK_BORDER_COLOR_FLOAT_CUSTOM_EXT:
+        case VK_BORDER_COLOR_INT_CUSTOM_EXT:
+            return 0;
+#endif
+        default:
+            return 0;
+    }
+}
+
+static int vulkan_sampler_scalar_fields_supported(
+        const PdockerGpuVulkanDispatchV5SamplerEntry *src,
+        const char **reason_out) {
+    const char *reason = "sampler scalar fields supported";
+    if (reason_out) *reason_out = reason;
+    if (!src) return 0;
+    if (!vulkan_sampler_filter_transport_valid(src->mag_filter) ||
+        !vulkan_sampler_filter_transport_valid(src->min_filter)) {
+        reason = "sampler filter enum is not supported by Vulkan replay";
+        if (reason_out) *reason_out = reason;
+        return -EOPNOTSUPP;
+    }
+    if (!vulkan_sampler_mipmap_mode_transport_valid(src->mipmap_mode)) {
+        reason = "sampler mipmap mode enum is not supported by Vulkan replay";
+        if (reason_out) *reason_out = reason;
+        return -EOPNOTSUPP;
+    }
+    if (!vulkan_sampler_address_mode_transport_valid(src->address_mode_u) ||
+        !vulkan_sampler_address_mode_transport_valid(src->address_mode_v) ||
+        !vulkan_sampler_address_mode_transport_valid(src->address_mode_w)) {
+        reason = "sampler address mode enum is not supported by Vulkan replay";
+        if (reason_out) *reason_out = reason;
+        return -EOPNOTSUPP;
+    }
+    if (!vulkan_bool32_transport_valid(src->anisotropy_enable) ||
+        !vulkan_bool32_transport_valid(src->compare_enable) ||
+        !vulkan_bool32_transport_valid(src->unnormalized_coordinates)) {
+        reason = "sampler boolean field is malformed";
+        if (reason_out) *reason_out = reason;
+        return -EINVAL;
+    }
+    if (!vulkan_compare_op_transport_valid(src->compare_op)) {
+        reason = "sampler compare op enum is not supported by Vulkan replay";
+        if (reason_out) *reason_out = reason;
+        return -EOPNOTSUPP;
+    }
+    if (!vulkan_sampler_border_color_transport_valid(src->border_color)) {
+        reason = "sampler border color enum is not supported by Vulkan replay";
+        if (reason_out) *reason_out = reason;
+        return -EOPNOTSUPP;
+    }
+    const float mip_lod_bias = float_from_u32_bits(src->mip_lod_bias_bits);
+    const float min_lod = float_from_u32_bits(src->min_lod_bits);
+    const float max_lod = float_from_u32_bits(src->max_lod_bits);
+    if (!isfinite(mip_lod_bias) || !isfinite(min_lod) || !isfinite(max_lod) ||
+        min_lod > max_lod) {
+        reason = "sampler LOD fields are malformed";
+        if (reason_out) *reason_out = reason;
+        return -EINVAL;
+    }
+    return 0;
+}
+
 static int vulkan_sampler_entry_supported_by_runtime(
         const VulkanRuntime *rt,
         const PdockerGpuVulkanDispatchV5SamplerEntry *src,
@@ -4340,6 +4465,11 @@ static int vulkan_sampler_entry_supported_by_runtime(
         reason = "sampler create flags are not supported by Vulkan replay";
         if (reason_out) *reason_out = reason;
         return -EOPNOTSUPP;
+    }
+    int scalar_rc = vulkan_sampler_scalar_fields_supported(src, &reason);
+    if (scalar_rc != 0) {
+        if (reason_out) *reason_out = reason;
+        return scalar_rc;
     }
     switch ((VkSamplerReductionMode)src->reduction_mode) {
         case VK_SAMPLER_REDUCTION_MODE_WEIGHTED_AVERAGE:

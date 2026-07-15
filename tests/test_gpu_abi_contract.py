@@ -8035,6 +8035,94 @@ class GpuAbiContractTest(unittest.TestCase):
         sampler_create_block = c_block_from(materialize_body, "VkSamplerCreateInfo sci")
         self.assertNotIn(".flags =", sampler_create_block)
 
+    def test_vulkan_sampler_scalar_fields_are_fail_closed_in_executor(self):
+        executor = GPU_EXECUTOR.read_text()
+
+        for helper_name in [
+            "vulkan_bool32_transport_valid",
+            "vulkan_sampler_filter_transport_valid",
+            "vulkan_sampler_mipmap_mode_transport_valid",
+            "vulkan_sampler_address_mode_transport_valid",
+            "vulkan_compare_op_transport_valid",
+            "vulkan_sampler_border_color_transport_valid",
+            "vulkan_sampler_scalar_fields_supported",
+        ]:
+            self.assertIn(helper_name, executor)
+
+        filter_body = c_function_body(executor, "vulkan_sampler_filter_transport_valid")
+        self.assertIn("VK_FILTER_NEAREST", filter_body)
+        self.assertIn("VK_FILTER_LINEAR", filter_body)
+        mipmap_body = c_function_body(executor, "vulkan_sampler_mipmap_mode_transport_valid")
+        self.assertIn("VK_SAMPLER_MIPMAP_MODE_NEAREST", mipmap_body)
+        self.assertIn("VK_SAMPLER_MIPMAP_MODE_LINEAR", mipmap_body)
+        address_body = c_function_body(executor, "vulkan_sampler_address_mode_transport_valid")
+        for marker in [
+            "VK_SAMPLER_ADDRESS_MODE_REPEAT",
+            "VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT",
+            "VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE",
+            "VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER",
+            "VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE",
+        ]:
+            self.assertIn(marker, address_body)
+        compare_body = c_function_body(executor, "vulkan_compare_op_transport_valid")
+        for marker in [
+            "VK_COMPARE_OP_NEVER",
+            "VK_COMPARE_OP_LESS",
+            "VK_COMPARE_OP_EQUAL",
+            "VK_COMPARE_OP_LESS_OR_EQUAL",
+            "VK_COMPARE_OP_GREATER",
+            "VK_COMPARE_OP_NOT_EQUAL",
+            "VK_COMPARE_OP_GREATER_OR_EQUAL",
+            "VK_COMPARE_OP_ALWAYS",
+        ]:
+            self.assertIn(marker, compare_body)
+        border_body = c_function_body(executor, "vulkan_sampler_border_color_transport_valid")
+        for marker in [
+            "VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK",
+            "VK_BORDER_COLOR_INT_TRANSPARENT_BLACK",
+            "VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK",
+            "VK_BORDER_COLOR_INT_OPAQUE_BLACK",
+            "VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE",
+            "VK_BORDER_COLOR_INT_OPAQUE_WHITE",
+        ]:
+            self.assertIn(marker, border_body)
+
+        scalar_body = c_function_body(executor, "vulkan_sampler_scalar_fields_supported")
+        for marker in [
+            "src->mag_filter",
+            "src->min_filter",
+            "src->mipmap_mode",
+            "src->address_mode_u",
+            "src->address_mode_v",
+            "src->address_mode_w",
+            "src->anisotropy_enable",
+            "src->compare_enable",
+            "src->unnormalized_coordinates",
+            "src->compare_op",
+            "src->border_color",
+            "float_from_u32_bits(src->mip_lod_bias_bits)",
+            "float_from_u32_bits(src->min_lod_bits)",
+            "float_from_u32_bits(src->max_lod_bits)",
+            "!isfinite(mip_lod_bias)",
+            "min_lod > max_lod",
+            "sampler address mode enum is not supported by Vulkan replay",
+            "sampler boolean field is malformed",
+            "sampler LOD fields are malformed",
+        ]:
+            self.assertIn(marker, scalar_body)
+
+        runtime_body = c_function_body(executor, "vulkan_sampler_entry_supported_by_runtime")
+        self.assertIn("vulkan_sampler_scalar_fields_supported(src, &reason)", runtime_body)
+        self.assertLess(
+            runtime_body.index("vulkan_sampler_scalar_fields_supported(src, &reason)"),
+            runtime_body.index("switch ((VkSamplerReductionMode)src->reduction_mode)"),
+        )
+
+        materialize_body = c_function_body(executor, "materialize_vulkan_dispatch_images")
+        gate = "vulkan_sampler_entry_supported_by_runtime(rt, src, &sampler_reason)"
+        self.assertLess(materialize_body.index(gate), materialize_body.index("VkSamplerCreateInfo sci"))
+        self.assertLess(materialize_body.index(gate), materialize_body.index("vkCreateSampler(device, &sci"))
+
     def test_vulkan_executor_sampler_anisotropy_replay_is_fail_closed(self):
         executor = GPU_EXECUTOR.read_text()
         helper_body = c_function_body(executor, "vulkan_sampler_entry_supported_by_runtime")
