@@ -16651,6 +16651,29 @@ class GpuAbiContractTest(unittest.TestCase):
                 [dep["member_offset"] for dep in output_index["push_constant_dependencies"]],
             )
             self.assertEqual([], output_index["descriptor_dependencies"])
+            index_ssa_path = store["output_index_ssa_path"]
+            self.assertEqual(index_ssa_path["schema"], "pdocker.spirv.q6-ssa-value-path.v1")
+            self.assertEqual(index_ssa_path["method"], "bounded-backward-producer-chain")
+            self.assertEqual(index_ssa_path["root"], output_index["root"])
+            self.assertFalse(index_ssa_path["complete"])
+            self.assertEqual(index_ssa_path["node_count"], len(output_index["producer_chain"]))
+            self.assertEqual(index_ssa_path["captured_node_count"], len(index_ssa_path["nodes"]))
+            self.assertEqual(index_ssa_path["nodes"][0], output_index["producer_chain"][0])
+            self.assertEqual(
+                output_index["spec_constant_dependencies"],
+                index_ssa_path["frontier"]["spec_constant_dependencies"],
+            )
+            self.assertEqual(
+                output_index["builtin_dependencies"],
+                index_ssa_path["frontier"]["builtin_dependencies"],
+            )
+            self.assertEqual(
+                output_index["push_constant_dependencies"],
+                index_ssa_path["frontier"]["push_constant_dependencies"],
+            )
+            self.assertEqual([], index_ssa_path["frontier"]["descriptor_dependencies"])
+            self.assertIn("dependency-slice-truncated", index_ssa_path["incomplete_reasons"])
+            self.assertIn("unresolved-id-frontier", index_ssa_path["incomplete_reasons"])
             self.assertEqual(
                 [(0, 0), (0, 3), (0, 4)],
                 [(dep["set"], dep["binding"]) for dep in stored["descriptor_dependencies"]],
@@ -17526,7 +17549,12 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertEqual(descriptor_comparison["path_diffs"][0]["kind"], "value")
 
     def test_spirv_dataflow_compare_reports_q6_final_store_flow_paths(self):
-        def flow_payload(op_count: int, control_push_offset: int = 28, ssa_node_op: str = "OpIAdd") -> dict:
+        def flow_payload(
+            op_count: int,
+            control_push_offset: int = 28,
+            ssa_node_op: str = "OpIAdd",
+            output_index_node_op: str = "OpIAdd",
+        ) -> dict:
             return {
                 "schema": "pdocker.spirv.analysis.v1",
                 "path": "synthetic.spv",
@@ -17587,6 +17615,35 @@ class GpuAbiContractTest(unittest.TestCase):
                                     "incomplete_reasons": [],
                                 },
                                 "output_index": {"op_histogram": {"OpIAdd": 1}},
+                                "output_index_ssa_path": {
+                                    "schema": "pdocker.spirv.q6-ssa-value-path.v1",
+                                    "available": True,
+                                    "complete": True,
+                                    "node_count": 2,
+                                    "captured_node_count": 2,
+                                    "function_store_expansion_count": 0,
+                                    "captured_function_store_expansion_count": 0,
+                                    "nodes": [
+                                        {"kind": "op", "id": 20, "op": output_index_node_op},
+                                        {"kind": "load", "id": 21, "pointer_base": {"kind": "variable", "storage_class": "Input", "built_in": "WorkgroupId"}},
+                                    ],
+                                    "function_store_expansions": [],
+                                    "frontier": {
+                                        "workgroup_loads": [],
+                                        "descriptor_load_leaves": [],
+                                        "descriptor_load_leaf_count": 0,
+                                        "descriptor_dependencies": [],
+                                        "push_constant_dependencies": [{"variable_id": 1, "member_index": 8, "member_offset": 32}],
+                                        "builtin_dependencies": [{"id": 21, "built_in": "WorkgroupId", "storage_class": "Input"}],
+                                        "unresolved_id_leaves": [],
+                                    },
+                                    "truncation": {
+                                        "truncated_node_count": 0,
+                                        "truncated_depth_count": 0,
+                                        "truncated_function_store_expansion_count": 0,
+                                    },
+                                    "incomplete_reasons": [],
+                                },
                                 "control_dependencies": [
                                     {
                                         "predecessor_block_label": 7,
@@ -17679,6 +17736,30 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertFalse(q6_flow["match"])
         self.assertIn(
             "q6_final_store_value_flow.stores[0].ssa_value_path.nodes[0].op",
+            q6_flow["diff_paths"],
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            left = tmp_path / "left.analysis.json"
+            right = tmp_path / "right.analysis.json"
+            out = tmp_path / "compare.json"
+            left.write_text(json.dumps(flow_payload(2, output_index_node_op="OpIAdd"), indent=2, sort_keys=True) + "\n")
+            right.write_text(json.dumps(flow_payload(2, output_index_node_op="OpIMul"), indent=2, sort_keys=True) + "\n")
+            result = subprocess.run(
+                ["python3", str(SPIRV_DATAFLOW_COMPARE), str(left), str(right), "--json-out", str(out)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self.assertEqual(result.returncode, 2, result.stderr)
+            report = json.loads(out.read_text())
+
+        q6_flow = next(item for item in report["comparisons"] if item["name"] == "q6_final_store_value_flow")
+        self.assertFalse(q6_flow["match"])
+        self.assertIn(
+            "q6_final_store_value_flow.stores[0].output_index_ssa_path.nodes[0].op",
             q6_flow["diff_paths"],
         )
 

@@ -1632,6 +1632,7 @@ def build_q6_probe_targets(module: dict, debug_descriptor: dict | None = None) -
                         if isinstance(index, dict) and isinstance(index.get("id"), int)
                     ],
                 },
+                "output_index_ssa_path": build_ssa_value_path(output_index),
                 "debug_probe_exclusion": {
                     "set": debug_probe_set,
                     "binding": debug_probe_binding,

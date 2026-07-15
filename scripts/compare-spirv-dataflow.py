@@ -476,6 +476,7 @@ def q6_final_store_value_flow_signature(module: dict[str, Any]) -> dict[str, Any
                 "stored_value_dependencies": q6_dependency_signature(stored_value),
                 "ssa_value_path": q6_ssa_value_path_signature(store.get("ssa_value_path")),
                 "output_index_dependencies": q6_dependency_signature(output_index),
+                "output_index_ssa_path": q6_ssa_value_path_signature(store.get("output_index_ssa_path")),
                 "control_dependencies": q6_control_dependency_signature(store.get("control_dependencies")),
                 "debug_probe_exclusion_passed": debug_exclusion.get("passed"),
                 "valid": store.get("valid"),
