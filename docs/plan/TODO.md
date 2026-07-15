@@ -318,13 +318,25 @@ or closes.
   virtual queue model until a real multi-family ABI is designed.  Acceptance:
   host tests `tests.test_vulkan_icd_sync_harness` and
   `tests.test_gpu_abi_contract` pass.
+- [done] **Vulkan dispatch/graphics render-scope classifier CPU harness lane**:
+  Host C harness coverage now exercises the mixed graphics/compute submit
+  planner directly.  It proves compute dispatch at an active rendering sequence
+  is classified as `graphics-mixed-dispatch-inside-rendering-unimplemented`,
+  while a dispatch between two render scopes is not misclassified as active
+  rendering, plans successfully, and splits the graphics sequence into two
+  ordered graphics segments around the compute dispatch.  This closes the
+  producer-side render-scope boundary evidence for the bounded mixed-submit
+  lane without changing llama.cpp, shader bytes, Dockerfiles, models, or
+  prompts.  Acceptance: host tests `tests.test_vulkan_icd_sync_harness` and
+  `tests.test_gpu_abi_contract` pass.
 - [planned] **residual graphics evidence gaps**: Do not promote full Vulkan
   pass-through until remaining fail-closed lanes have explicit ABI/evidence:
   dual-aspect depth+stencil copy layout, explicit compressed/multiplanar image
   support beyond the current fail-closed gate, unresolved MSAA store/readback,
-  true cross-family ownership transfer,
-  dispatch inside the graphics-frame interval, and sync2 pNext/dependency-flag
-  extensions beyond the currently explicit ABI lanes.
+  true cross-family ownership transfer, and sync2 pNext/dependency-flag
+  extensions beyond the currently explicit ABI lanes.  Dispatch between render
+  scopes has range-split evidence, and dispatch inside active rendering remains
+  a fail-closed invalid/unsupported boundary with CPU harness coverage.
 
 
 ### TermPort F-Droid Native Payload Preparation 2026-06-06

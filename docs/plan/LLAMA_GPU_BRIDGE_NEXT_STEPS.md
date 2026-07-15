@@ -28,6 +28,7 @@ Confirmed facts:
 | 2026-07-14 executor usable-cap advertisement lane | The Android Vulkan executor now separates advertised capability states into explicit supported/enabled/loaded/usable predicates for timeline semaphores, synchronization2, dynamic rendering, draw-indirect-count, extended dynamic state, extended dynamic state 2 subfeatures, and uint8 index type. The container ICD stores usable predicates separately instead of overwriting feature or extension availability fields, and advertised features/proc gates prefer unique `*Usable` keys so legacy duplicate JSON keys cannot accidentally promote unsupported API use. A C contract test now feeds conflicting legacy-true/usable-false JSON and verifies the parser remains fail-closed. | `app/src/main/cpp/pdocker_gpu_executor.c`; `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; host tests `tests.test_gpu_abi_contract tests.test_vulkan_icd_feature_chain`; glibc payload build `scripts/build-gpu-shim.sh`; no llama.cpp/Dockerfile/model/prompt changes |
 | 2026-07-15 MSAA sample-count advertisement harness lane | A host C harness now drives executor-style `VULKAN_ADVERTISEMENT_CAPS` through the real ICD socket-query path and proves advertised MSAA sample counts are scoped to the color-attachment image lane. Framebuffer color limits can expose 4x MSAA, but sampled/storage/transfer-only/cube/3D/mixed-use queries and image creation remain single-sample or fail-closed. This records CPU-side producer evidence for the unresolved-MSAA boundary without changing Android replay, llama.cpp, Dockerfiles, models, prompts, or shader bytes. | `tests.test_vulkan_icd_feature_chain`; `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; no llama.cpp/Dockerfile/model/prompt changes |
 | 2026-07-15 cross-queue-family barrier prevalidation lane | Legacy and synchronization2 pipeline barriers now validate buffer/image queue-family ownership-transfer and range failures before emitting any barrier-table state. Mixed memory+invalid buffer/image barriers fail closed with the specific barrier reason and no partial memory/barrier records, preserving the single-virtual-queue contract while true multi-family ownership transfer remains unsupported. This is generic Vulkan synchronization correctness; no Android replay ABI widening, llama.cpp, Dockerfile, model, prompt, or shader bytes changed. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; host tests `tests.test_vulkan_icd_sync_harness tests.test_gpu_abi_contract`; no llama.cpp/Dockerfile/model/prompt changes |
+| 2026-07-15 dispatch/graphics render-scope classifier harness lane | A host C harness now exercises the mixed graphics/compute submit planner directly: compute dispatch inside active rendering is rejected with `graphics-mixed-dispatch-inside-rendering-unimplemented`, while dispatch between two render scopes is accepted by the planner and splits the graphics sequence into two ordered graphics segments around the compute dispatch. This records CPU-side producer evidence for the bounded mixed-submit lane; no Android replay ABI widening, llama.cpp, Dockerfile, model, prompt, or shader bytes changed. | `tests.test_vulkan_icd_sync_harness`; `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; no llama.cpp/Dockerfile/model/prompt changes |
 | `ngl=0` default route | Required correctness passes | `docs/test/llama-gpu-default-oracle-match-ngl0-20260509.json` |
 | unsafe SPIR-V materialization | Disabled by default | commit `02619fd` |
 | zero-layer small multiply shader | CPU oracle matches default non-materialized hash | `0x11d5243c43b23a7b`, `mismatch_count=0` |
@@ -348,13 +349,15 @@ Residual graphics gaps remain explicit: descriptor dual-aspect depth/stencil
 views, any non-standard raw packed depth/stencil buffer-image transport beyond
 Vulkan's single-aspect valid usage, explicit compressed/multiplanar image
 support beyond the current fail-closed gate, unresolved MSAA store/readback,
-true cross-family ownership transfer, dispatch inside an active rendering
-scope, and broader synchronization are still fail-closed until they have their
-own ABI/evidence lanes.  The V6.1
+true cross-family ownership transfer and broader synchronization are still
+fail-closed until they have their own ABI/evidence lanes.  Dispatch between
+render scopes has range-split producer evidence, and dispatch inside active
+rendering remains fail-closed with explicit CPU harness coverage.  The V6.1
 image-barrier range/aspect, copy2 pNext, non-byte-linear image, MSAA
-sample-count advertisement, and cross-queue-family fail-closed/no-partial
-producer evidence gaps have been audited closed; true cross-family ownership
-transfer remains a separate unsupported ABI gap.
+sample-count advertisement, cross-queue-family fail-closed/no-partial, and
+dispatch/graphics render-scope classifier producer evidence gaps have been
+audited closed; true cross-family ownership transfer remains a separate
+unsupported ABI gap.
 
 Next active implementation slices should reduce the remaining residuals without
 weakening the fail-closed boundary. Acceptance checks for any image/barrier

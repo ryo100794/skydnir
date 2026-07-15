@@ -683,6 +683,121 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
+    def test_graphics_mixed_submit_plan_classifies_dispatch_render_scope_boundaries(self):
+        source = textwrap.dedent(
+            rf"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            static void add_graphics_record(
+                    PdockerVkCommandBuffer *cmd,
+                    uint32_t command_type,
+                    uint32_t sequence) {{
+                PdockerVkGraphicsCommandRecord *record =
+                    &cmd->graphics_command_ops[cmd->graphics_command_op_count++];
+                memset(record, 0, sizeof(*record));
+                record->command_type = command_type;
+                record->command_op_sequence = sequence;
+            }}
+
+            static void init_inside_rendering_case(PdockerVkCommandBuffer *cmd,
+                                                   PdockerVkCommandOp *ops,
+                                                   PdockerVkGraphicsCommandRecord *records) {{
+                memset(cmd, 0, sizeof(*cmd));
+                memset(ops, 0, sizeof(PdockerVkCommandOp) * 4u);
+                memset(records, 0, sizeof(PdockerVkGraphicsCommandRecord) * 8u);
+                cmd->command_ops = ops;
+                cmd->command_op_capacity = 4;
+                cmd->graphics_command_ops = records;
+                cmd->graphics_command_op_capacity = 8;
+                cmd->command_op_count = 2;
+                ops[0].type = PDOCKER_VK_COMMAND_GRAPHICS_DRAW;
+                ops[1].type = PDOCKER_VK_COMMAND_DISPATCH;
+                add_graphics_record(cmd, PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_RENDERING, 0);
+                add_graphics_record(cmd, PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW, 0);
+                add_graphics_record(cmd, PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_RENDERING, 2);
+            }}
+
+            static void init_between_render_scopes_case(PdockerVkCommandBuffer *cmd,
+                                                        PdockerVkCommandOp *ops,
+                                                        PdockerVkGraphicsCommandRecord *records) {{
+                memset(cmd, 0, sizeof(*cmd));
+                memset(ops, 0, sizeof(PdockerVkCommandOp) * 4u);
+                memset(records, 0, sizeof(PdockerVkGraphicsCommandRecord) * 8u);
+                cmd->command_ops = ops;
+                cmd->command_op_capacity = 4;
+                cmd->graphics_command_ops = records;
+                cmd->graphics_command_op_capacity = 8;
+                cmd->command_op_count = 3;
+                ops[0].type = PDOCKER_VK_COMMAND_GRAPHICS_DRAW;
+                ops[1].type = PDOCKER_VK_COMMAND_DISPATCH;
+                ops[2].type = PDOCKER_VK_COMMAND_GRAPHICS_DRAW;
+                add_graphics_record(cmd, PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_RENDERING, 0);
+                add_graphics_record(cmd, PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW, 0);
+                add_graphics_record(cmd, PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_RENDERING, 1);
+                add_graphics_record(cmd, PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_RENDERING, 2);
+                add_graphics_record(cmd, PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW, 2);
+                add_graphics_record(cmd, PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_RENDERING, 3);
+            }}
+
+            int main(void) {{
+                PdockerVkCommandBuffer cmd;
+                PdockerVkCommandOp ops[4];
+                PdockerVkGraphicsCommandRecord records[8];
+                uint32_t first = UINT32_MAX;
+                uint32_t last = UINT32_MAX;
+                const char *reason = NULL;
+
+                init_inside_rendering_case(&cmd, ops, records);
+                if (!graphics_sequence_inside_active_rendering(&cmd, 1)) {{
+                    fprintf(stderr, "dispatch sequence was not classified inside active rendering\n");
+                    return 2;
+                }}
+                if (graphics_mixed_submit_plan(&cmd, &first, &last, &reason)) {{
+                    fprintf(stderr, "inside-rendering dispatch plan unexpectedly succeeded\n");
+                    return 3;
+                }}
+                if (!reason || strcmp(reason, "graphics-mixed-dispatch-inside-rendering-unimplemented") != 0) {{
+                    fprintf(stderr, "inside-rendering dispatch reason got=%s\n", reason ? reason : "<null>");
+                    return 4;
+                }}
+
+                init_between_render_scopes_case(&cmd, ops, records);
+                first = UINT32_MAX;
+                last = UINT32_MAX;
+                reason = NULL;
+                if (graphics_sequence_inside_active_rendering(&cmd, 1)) {{
+                    fprintf(stderr, "between-scope dispatch was misclassified inside active rendering\n");
+                    return 5;
+                }}
+                if (strcmp(graphics_mixed_dispatch_inside_frame_reason(&cmd, 1),
+                           "graphics-mixed-dispatch-between-render-scopes-unimplemented") != 0) {{
+                    fprintf(stderr, "between-scope diagnostic changed\n");
+                    return 6;
+                }}
+                if (!graphics_mixed_submit_plan(&cmd, &first, &last, &reason)) {{
+                    fprintf(stderr, "between-scope dispatch plan failed reason=%s\n",
+                            reason ? reason : "<null>");
+                    return 7;
+                }}
+                if (first != 0 || last != 3) {{
+                    fprintf(stderr, "between-scope frame bounds first=%u last=%u\n", first, last);
+                    return 8;
+                }}
+                if (count_graphics_sequence_segments_split_by_dispatch(&cmd, first, last) != 2) {{
+                    fprintf(stderr, "between-scope dispatch did not split into two graphics segments\n");
+                    return 9;
+                }}
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
     def test_pipeline_barrier2_image_barriers_normalize_remaining_and_reject_invalid_aspects(self):
         source = textwrap.dedent(
             f"""
