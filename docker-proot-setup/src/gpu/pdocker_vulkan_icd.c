@@ -7657,6 +7657,55 @@ static bool command_buffer_has_executor_frame_content_in_sequence_range(
 }
 
 typedef struct {
+    PdockerGpuVulkanDispatchV5ResourceEntry resources[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_RESOURCES];
+    PdockerGpuVulkanDispatchV5DescriptorObjectEntry descriptors[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS];
+    PdockerGpuVulkanDispatchV5ImageEntry image_entries[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGES];
+    PdockerGpuVulkanDispatchV5ImageViewEntry image_view_entries[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGE_VIEWS];
+    PdockerGpuVulkanDispatchV5SamplerEntry sampler_entries[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_SAMPLERS];
+    PdockerGpuVulkanGraphicsV6ShaderStageEntry shader_stages[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_SHADER_STAGES];
+    PdockerGpuVulkanGraphicsV6PipelineEntry pipelines[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_PIPELINES];
+    PdockerGpuVulkanGraphicsV6VertexBindingEntry vertex_bindings[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_VERTEX_BINDINGS];
+    PdockerGpuVulkanGraphicsV6VertexAttributeEntry vertex_attributes[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_VERTEX_ATTRIBUTES];
+    PdockerGpuVulkanGraphicsV6AttachmentEntry attachments[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_ATTACHMENTS];
+    PdockerGpuVulkanGraphicsV6DynamicStateEntry dynamic_states[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_DYNAMIC_STATES];
+    PdockerGpuVulkanGraphicsV6CommandEntry commands[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS];
+    PdockerGpuVulkanGraphicsV61DynamicOffsetEntry dynamic_offsets[PDOCKER_GPU_VULKAN_GRAPHICS_V61_MAX_DYNAMIC_OFFSETS];
+    PdockerGpuVulkanGraphicsV61PushConstantMetadataEntry push_metadata[PDOCKER_GPU_VULKAN_GRAPHICS_V61_MAX_PUSH_CONSTANT_METADATA];
+    PdockerGpuVulkanGraphicsV61ImageBarrierEntry image_barriers[PDOCKER_GPU_VULKAN_GRAPHICS_V61_MAX_IMAGE_BARRIERS];
+    PdockerGpuVulkanGraphicsV61MemoryBarrierEntry memory_barriers[PDOCKER_GPU_VULKAN_GRAPHICS_V61_MAX_MEMORY_BARRIERS];
+    PdockerGpuVulkanGraphicsV61BufferBarrierEntry buffer_barriers[PDOCKER_GPU_VULKAN_GRAPHICS_V61_MAX_BUFFER_BARRIERS];
+    PdockerGpuVulkanGraphicsV62SpecializationEntry specialization_entries[PDOCKER_GPU_VULKAN_GRAPHICS_V62_MAX_SPECIALIZATION_ENTRIES];
+    PdockerGpuVulkanGraphicsV63DepthStencilStateEntry depth_stencil_states[PDOCKER_GPU_VULKAN_GRAPHICS_V63_MAX_DEPTH_STENCIL_STATES];
+    PdockerGpuVulkanGraphicsV64ResolveAttachmentEntry resolve_attachments[PDOCKER_GPU_VULKAN_GRAPHICS_V64_MAX_RESOLVE_ATTACHMENTS];
+    PdockerGpuVulkanGraphicsV65StaticPipelineStateEntry static_pipeline_states[PDOCKER_GPU_VULKAN_GRAPHICS_V65_MAX_STATIC_PIPELINE_STATES];
+    PdockerGpuVulkanGraphicsV66ColorBlendStateEntry color_blend_states[PDOCKER_GPU_VULKAN_GRAPHICS_V66_MAX_COLOR_BLEND_STATES];
+    PdockerGpuVulkanGraphicsV66ColorBlendAttachmentEntry color_blend_attachments[PDOCKER_GPU_VULKAN_GRAPHICS_V66_MAX_COLOR_BLEND_ATTACHMENTS];
+    PdockerGpuVulkanGraphicsV67ViewportScissorStateEntry viewport_scissor_states[PDOCKER_GPU_VULKAN_GRAPHICS_V67_MAX_VIEWPORT_SCISSOR_STATES];
+    PdockerGpuVulkanGraphicsV67ViewportEntry viewport_entries[PDOCKER_GPU_VULKAN_GRAPHICS_V67_MAX_VIEWPORTS];
+    PdockerGpuVulkanGraphicsV67ScissorEntry scissor_entries[PDOCKER_GPU_VULKAN_GRAPHICS_V67_MAX_SCISSORS];
+    PdockerGpuVulkanGraphicsV68IndirectDrawEntry indirect_draws[PDOCKER_GPU_VULKAN_GRAPHICS_V68_MAX_INDIRECT_DRAWS];
+    PdockerGpuVulkanGraphicsV69BufferCopyEntry buffer_copies[PDOCKER_GPU_VULKAN_GRAPHICS_V69_MAX_BUFFER_COPIES];
+    PdockerGpuVulkanGraphicsV610BufferImageCopyEntry buffer_image_copies[PDOCKER_GPU_VULKAN_GRAPHICS_V610_MAX_BUFFER_IMAGE_COPIES];
+    PdockerGpuVulkanGraphicsV610ImageCopyEntry image_copies[PDOCKER_GPU_VULKAN_GRAPHICS_V610_MAX_IMAGE_COPIES];
+    PdockerGpuVulkanGraphicsV611FillBufferEntry fill_buffers[PDOCKER_GPU_VULKAN_GRAPHICS_V611_MAX_FILL_BUFFERS];
+    PdockerGpuVulkanGraphicsV611UpdateBufferEntry update_buffers[PDOCKER_GPU_VULKAN_GRAPHICS_V611_MAX_UPDATE_BUFFERS];
+    PdockerGpuVulkanGraphicsV612ClearColorImageEntry clear_color_images[PDOCKER_GPU_VULKAN_GRAPHICS_V612_MAX_CLEAR_COLOR_IMAGES];
+    PdockerGpuVulkanGraphicsV613ClearDepthStencilImageEntry clear_depth_stencil_images[PDOCKER_GPU_VULKAN_GRAPHICS_V613_MAX_CLEAR_DEPTH_STENCIL_IMAGES];
+    PdockerGpuVulkanGraphicsV614ResolveImageEntry resolve_images[PDOCKER_GPU_VULKAN_GRAPHICS_V614_MAX_RESOLVE_IMAGES];
+    PdockerGpuVulkanGraphicsV615BlitImageEntry blit_images[PDOCKER_GPU_VULKAN_GRAPHICS_V615_MAX_BLIT_IMAGES];
+    PdockerGpuVulkanGraphicsV616ClearAttachmentsCommandEntry clear_attachments_commands[PDOCKER_GPU_VULKAN_GRAPHICS_V616_MAX_CLEAR_ATTACHMENTS_COMMANDS];
+    PdockerGpuVulkanGraphicsV617QueryCommandEntry query_commands[PDOCKER_GPU_VULKAN_GRAPHICS_V617_MAX_QUERY_COMMANDS];
+    PdockerGpuVulkanGraphicsV618CopyQueryResultEntry copy_query_results[PDOCKER_GPU_VULKAN_GRAPHICS_V618_MAX_COPY_QUERY_RESULTS];
+    PdockerGpuVulkanGraphicsV622MultisampleStateEntry multisample_states[PDOCKER_GPU_VULKAN_GRAPHICS_V622_MAX_MULTISAMPLE_STATES];
+    PdockerGpuVulkanGraphicsV623TessellationStateEntry tessellation_states[PDOCKER_GPU_VULKAN_GRAPHICS_V623_MAX_TESSELLATION_STATES];
+    PdockerGpuVulkanGraphicsV624PipelineLayoutSetEntry pipeline_layout_sets[PDOCKER_GPU_VULKAN_GRAPHICS_V624_MAX_PIPELINE_LAYOUT_SETS];
+    PdockerGpuVulkanGraphicsV625DescriptorBindEntry descriptor_binds[PDOCKER_GPU_VULKAN_GRAPHICS_V625_MAX_DESCRIPTOR_BINDS];
+    PdockerGpuVulkanGraphicsV626EventWaitRefEntry event_wait_refs[PDOCKER_GPU_VULKAN_GRAPHICS_V626_MAX_EVENT_WAIT_REFS];
+    PdockerGpuVulkanGraphicsV627BufferViewEntry buffer_views[PDOCKER_GPU_VULKAN_GRAPHICS_V627_MAX_BUFFER_VIEWS];
+    PdockerGpuVulkanGraphicsV628PushConstantRangeEntry push_constant_ranges[PDOCKER_GPU_VULKAN_GRAPHICS_V628_MAX_PUSH_CONSTANT_RANGES];
+} PdockerVkGraphicsTransportTables;
+
+typedef struct {
     PdockerVkPipeline *pipeline_objects[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_PIPELINES];
     PdockerVkMemory *memory_objects[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_RESOURCES];
     uint32_t memory_resource_indices[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_RESOURCES];
@@ -7686,6 +7735,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     if (socket_fd < 0) return socket_fd;
 
     PdockerVkGraphicsFrameObjectTables *object_tables = NULL;
+    PdockerVkGraphicsTransportTables *transport_tables = NULL;
     PdockerVkPipeline **pipeline_objects = NULL;
     PdockerVkMemory **memory_objects = NULL;
     uint32_t *memory_resource_indices = NULL;
@@ -8097,15 +8147,6 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     size_t buffer_view_count = 0;
     uint64_t submit_id = __sync_add_and_fetch(&g_generic_dispatch_sequence, 1);
     int rc = 0;
-#define ALLOC_GRAPHICS_TRANSPORT_TABLE(ptr_, count_) \
-    do { \
-        frame_build_phase = "graphics-transport-table-allocate:" #ptr_; \
-        (ptr_) = (__typeof__(ptr_))calloc((count_), sizeof(*(ptr_))); \
-        if (!(ptr_)) { \
-            rc = -ENOMEM; \
-            goto cleanup; \
-        } \
-    } while (0)
 #define ENSURE_GRAPHICS_V616_CLEAR_TABLES() \
     do { \
         if (!clear_attachments) { \
@@ -8148,52 +8189,58 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
             } \
         } \
     } while (0)
-    ALLOC_GRAPHICS_TRANSPORT_TABLE(resources, PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_RESOURCES);
-    ALLOC_GRAPHICS_TRANSPORT_TABLE(descriptors, PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS);
-    ALLOC_GRAPHICS_TRANSPORT_TABLE(image_entries, PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGES);
-    ALLOC_GRAPHICS_TRANSPORT_TABLE(image_view_entries, PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGE_VIEWS);
-    ALLOC_GRAPHICS_TRANSPORT_TABLE(sampler_entries, PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_SAMPLERS);
-    ALLOC_GRAPHICS_TRANSPORT_TABLE(shader_stages, PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_SHADER_STAGES);
-    ALLOC_GRAPHICS_TRANSPORT_TABLE(pipelines, PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_PIPELINES);
-    ALLOC_GRAPHICS_TRANSPORT_TABLE(vertex_bindings, PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_VERTEX_BINDINGS);
-    ALLOC_GRAPHICS_TRANSPORT_TABLE(vertex_attributes, PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_VERTEX_ATTRIBUTES);
-    ALLOC_GRAPHICS_TRANSPORT_TABLE(attachments, PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_ATTACHMENTS);
-    ALLOC_GRAPHICS_TRANSPORT_TABLE(dynamic_states, PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_DYNAMIC_STATES);
-    ALLOC_GRAPHICS_TRANSPORT_TABLE(commands, PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS);
-    ALLOC_GRAPHICS_TRANSPORT_TABLE(dynamic_offsets, PDOCKER_GPU_VULKAN_GRAPHICS_V61_MAX_DYNAMIC_OFFSETS);
-    ALLOC_GRAPHICS_TRANSPORT_TABLE(push_metadata, PDOCKER_GPU_VULKAN_GRAPHICS_V61_MAX_PUSH_CONSTANT_METADATA);
-    ALLOC_GRAPHICS_TRANSPORT_TABLE(image_barriers, PDOCKER_GPU_VULKAN_GRAPHICS_V61_MAX_IMAGE_BARRIERS);
-    ALLOC_GRAPHICS_TRANSPORT_TABLE(memory_barriers, PDOCKER_GPU_VULKAN_GRAPHICS_V61_MAX_MEMORY_BARRIERS);
-    ALLOC_GRAPHICS_TRANSPORT_TABLE(buffer_barriers, PDOCKER_GPU_VULKAN_GRAPHICS_V61_MAX_BUFFER_BARRIERS);
-    ALLOC_GRAPHICS_TRANSPORT_TABLE(specialization_entries, PDOCKER_GPU_VULKAN_GRAPHICS_V62_MAX_SPECIALIZATION_ENTRIES);
-    ALLOC_GRAPHICS_TRANSPORT_TABLE(depth_stencil_states, PDOCKER_GPU_VULKAN_GRAPHICS_V63_MAX_DEPTH_STENCIL_STATES);
-    ALLOC_GRAPHICS_TRANSPORT_TABLE(resolve_attachments, PDOCKER_GPU_VULKAN_GRAPHICS_V64_MAX_RESOLVE_ATTACHMENTS);
-    ALLOC_GRAPHICS_TRANSPORT_TABLE(static_pipeline_states, PDOCKER_GPU_VULKAN_GRAPHICS_V65_MAX_STATIC_PIPELINE_STATES);
-    ALLOC_GRAPHICS_TRANSPORT_TABLE(color_blend_states, PDOCKER_GPU_VULKAN_GRAPHICS_V66_MAX_COLOR_BLEND_STATES);
-    ALLOC_GRAPHICS_TRANSPORT_TABLE(color_blend_attachments, PDOCKER_GPU_VULKAN_GRAPHICS_V66_MAX_COLOR_BLEND_ATTACHMENTS);
-    ALLOC_GRAPHICS_TRANSPORT_TABLE(viewport_scissor_states, PDOCKER_GPU_VULKAN_GRAPHICS_V67_MAX_VIEWPORT_SCISSOR_STATES);
-    ALLOC_GRAPHICS_TRANSPORT_TABLE(viewport_entries, PDOCKER_GPU_VULKAN_GRAPHICS_V67_MAX_VIEWPORTS);
-    ALLOC_GRAPHICS_TRANSPORT_TABLE(scissor_entries, PDOCKER_GPU_VULKAN_GRAPHICS_V67_MAX_SCISSORS);
-    ALLOC_GRAPHICS_TRANSPORT_TABLE(indirect_draws, PDOCKER_GPU_VULKAN_GRAPHICS_V68_MAX_INDIRECT_DRAWS);
-    ALLOC_GRAPHICS_TRANSPORT_TABLE(buffer_copies, PDOCKER_GPU_VULKAN_GRAPHICS_V69_MAX_BUFFER_COPIES);
-    ALLOC_GRAPHICS_TRANSPORT_TABLE(buffer_image_copies, PDOCKER_GPU_VULKAN_GRAPHICS_V610_MAX_BUFFER_IMAGE_COPIES);
-    ALLOC_GRAPHICS_TRANSPORT_TABLE(image_copies, PDOCKER_GPU_VULKAN_GRAPHICS_V610_MAX_IMAGE_COPIES);
-    ALLOC_GRAPHICS_TRANSPORT_TABLE(fill_buffers, PDOCKER_GPU_VULKAN_GRAPHICS_V611_MAX_FILL_BUFFERS);
-    ALLOC_GRAPHICS_TRANSPORT_TABLE(update_buffers, PDOCKER_GPU_VULKAN_GRAPHICS_V611_MAX_UPDATE_BUFFERS);
-    ALLOC_GRAPHICS_TRANSPORT_TABLE(clear_color_images, PDOCKER_GPU_VULKAN_GRAPHICS_V612_MAX_CLEAR_COLOR_IMAGES);
-    ALLOC_GRAPHICS_TRANSPORT_TABLE(clear_depth_stencil_images, PDOCKER_GPU_VULKAN_GRAPHICS_V613_MAX_CLEAR_DEPTH_STENCIL_IMAGES);
-    ALLOC_GRAPHICS_TRANSPORT_TABLE(resolve_images, PDOCKER_GPU_VULKAN_GRAPHICS_V614_MAX_RESOLVE_IMAGES);
-    ALLOC_GRAPHICS_TRANSPORT_TABLE(blit_images, PDOCKER_GPU_VULKAN_GRAPHICS_V615_MAX_BLIT_IMAGES);
-    ALLOC_GRAPHICS_TRANSPORT_TABLE(clear_attachments_commands, PDOCKER_GPU_VULKAN_GRAPHICS_V616_MAX_CLEAR_ATTACHMENTS_COMMANDS);
-    ALLOC_GRAPHICS_TRANSPORT_TABLE(query_commands, PDOCKER_GPU_VULKAN_GRAPHICS_V617_MAX_QUERY_COMMANDS);
-    ALLOC_GRAPHICS_TRANSPORT_TABLE(copy_query_results, PDOCKER_GPU_VULKAN_GRAPHICS_V618_MAX_COPY_QUERY_RESULTS);
-    ALLOC_GRAPHICS_TRANSPORT_TABLE(multisample_states, PDOCKER_GPU_VULKAN_GRAPHICS_V622_MAX_MULTISAMPLE_STATES);
-    ALLOC_GRAPHICS_TRANSPORT_TABLE(tessellation_states, PDOCKER_GPU_VULKAN_GRAPHICS_V623_MAX_TESSELLATION_STATES);
-    ALLOC_GRAPHICS_TRANSPORT_TABLE(pipeline_layout_sets, PDOCKER_GPU_VULKAN_GRAPHICS_V624_MAX_PIPELINE_LAYOUT_SETS);
-    ALLOC_GRAPHICS_TRANSPORT_TABLE(descriptor_binds, PDOCKER_GPU_VULKAN_GRAPHICS_V625_MAX_DESCRIPTOR_BINDS);
-    ALLOC_GRAPHICS_TRANSPORT_TABLE(event_wait_refs, PDOCKER_GPU_VULKAN_GRAPHICS_V626_MAX_EVENT_WAIT_REFS);
-    ALLOC_GRAPHICS_TRANSPORT_TABLE(buffer_views, PDOCKER_GPU_VULKAN_GRAPHICS_V627_MAX_BUFFER_VIEWS);
-    ALLOC_GRAPHICS_TRANSPORT_TABLE(push_constant_ranges, PDOCKER_GPU_VULKAN_GRAPHICS_V628_MAX_PUSH_CONSTANT_RANGES);
+    frame_build_phase = "graphics-transport-tables-allocate";
+    transport_tables = (PdockerVkGraphicsTransportTables *)calloc(1, sizeof(*transport_tables));
+    if (!transport_tables) {
+        rc = -ENOMEM;
+        goto cleanup;
+    }
+    resources = transport_tables->resources;
+    descriptors = transport_tables->descriptors;
+    image_entries = transport_tables->image_entries;
+    image_view_entries = transport_tables->image_view_entries;
+    sampler_entries = transport_tables->sampler_entries;
+    shader_stages = transport_tables->shader_stages;
+    pipelines = transport_tables->pipelines;
+    vertex_bindings = transport_tables->vertex_bindings;
+    vertex_attributes = transport_tables->vertex_attributes;
+    attachments = transport_tables->attachments;
+    dynamic_states = transport_tables->dynamic_states;
+    commands = transport_tables->commands;
+    dynamic_offsets = transport_tables->dynamic_offsets;
+    push_metadata = transport_tables->push_metadata;
+    image_barriers = transport_tables->image_barriers;
+    memory_barriers = transport_tables->memory_barriers;
+    buffer_barriers = transport_tables->buffer_barriers;
+    specialization_entries = transport_tables->specialization_entries;
+    depth_stencil_states = transport_tables->depth_stencil_states;
+    resolve_attachments = transport_tables->resolve_attachments;
+    static_pipeline_states = transport_tables->static_pipeline_states;
+    color_blend_states = transport_tables->color_blend_states;
+    color_blend_attachments = transport_tables->color_blend_attachments;
+    viewport_scissor_states = transport_tables->viewport_scissor_states;
+    viewport_entries = transport_tables->viewport_entries;
+    scissor_entries = transport_tables->scissor_entries;
+    indirect_draws = transport_tables->indirect_draws;
+    buffer_copies = transport_tables->buffer_copies;
+    buffer_image_copies = transport_tables->buffer_image_copies;
+    image_copies = transport_tables->image_copies;
+    fill_buffers = transport_tables->fill_buffers;
+    update_buffers = transport_tables->update_buffers;
+    clear_color_images = transport_tables->clear_color_images;
+    clear_depth_stencil_images = transport_tables->clear_depth_stencil_images;
+    resolve_images = transport_tables->resolve_images;
+    blit_images = transport_tables->blit_images;
+    clear_attachments_commands = transport_tables->clear_attachments_commands;
+    query_commands = transport_tables->query_commands;
+    copy_query_results = transport_tables->copy_query_results;
+    multisample_states = transport_tables->multisample_states;
+    tessellation_states = transport_tables->tessellation_states;
+    pipeline_layout_sets = transport_tables->pipeline_layout_sets;
+    descriptor_binds = transport_tables->descriptor_binds;
+    event_wait_refs = transport_tables->event_wait_refs;
+    buffer_views = transport_tables->buffer_views;
+    push_constant_ranges = transport_tables->push_constant_ranges;
     if (pre_need_v616_clear_attachments) {
         ENSURE_GRAPHICS_V616_CLEAR_TABLES();
     }
@@ -10821,57 +10868,11 @@ cleanup:
     free(image_layout_ranges);
     free(clear_rects);
     free(clear_attachments);
-    free(push_constant_ranges);
-    free(buffer_views);
-    free(event_wait_refs);
-    free(descriptor_binds);
-    free(pipeline_layout_sets);
-    free(tessellation_states);
-    free(multisample_states);
-    free(copy_query_results);
-    free(query_commands);
-    free(clear_attachments_commands);
-    free(blit_images);
-    free(resolve_images);
-    free(clear_depth_stencil_images);
-    free(clear_color_images);
-    free(update_buffers);
-    free(fill_buffers);
-    free(image_copies);
-    free(buffer_image_copies);
-    free(buffer_copies);
-    free(indirect_draws);
-    free(scissor_entries);
-    free(viewport_entries);
-    free(viewport_scissor_states);
-    free(color_blend_attachments);
-    free(color_blend_states);
-    free(static_pipeline_states);
-    free(resolve_attachments);
-    free(depth_stencil_states);
-    free(specialization_entries);
-    free(buffer_barriers);
-    free(memory_barriers);
-    free(image_barriers);
-    free(push_metadata);
-    free(dynamic_offsets);
-    free(commands);
-    free(dynamic_states);
-    free(attachments);
-    free(vertex_attributes);
-    free(vertex_bindings);
-    free(pipelines);
-    free(shader_stages);
-    free(sampler_entries);
-    free(image_view_entries);
-    free(image_entries);
-    free(descriptors);
-    free(resources);
+    free(transport_tables);
     free(object_tables);
     free(frame);
 #undef APPEND_GRAPHICS_FRAME_BYTES
 #undef REFRESH_GRAPHICS_V6_FRAME_POINTERS
-#undef ALLOC_GRAPHICS_TRANSPORT_TABLE
 #undef ENSURE_GRAPHICS_V629_VARIABLE_DESCRIPTOR_COUNTS
 #undef ENSURE_GRAPHICS_V624_LAYOUT_TABLES
 #undef ENSURE_GRAPHICS_V616_CLEAR_TABLES
