@@ -384,6 +384,70 @@ def q6_barrier_window_signature(module: dict[str, Any]) -> dict[str, Any] | None
         "windows": windows,
     }
 
+def q6_ssa_value_path_signature(path: Any) -> dict[str, Any]:
+    if not isinstance(path, dict):
+        return {}
+    frontier = path.get("frontier") if isinstance(path.get("frontier"), dict) else {}
+    truncation = path.get("truncation") if isinstance(path.get("truncation"), dict) else {}
+    return {
+        "available": path.get("available"),
+        "complete": path.get("complete"),
+        "node_count": path.get("node_count"),
+        "captured_node_count": path.get("captured_node_count"),
+        "function_store_expansion_count": path.get("function_store_expansion_count"),
+        "captured_function_store_expansion_count": path.get("captured_function_store_expansion_count"),
+        "incomplete_reasons": path.get("incomplete_reasons") or [],
+        "nodes": [
+            {
+                key: node.get(key)
+                for key in (
+                    "kind",
+                    "id",
+                    "op",
+                    "value_u32",
+                    "default_u32",
+                    "spec_id",
+                    "index_count",
+                    "pointer_base",
+                    "base",
+                )
+                if isinstance(node, dict) and key in node
+            }
+            for node in (path.get("nodes") or [])
+            if isinstance(node, dict)
+        ],
+        "function_store_expansions": [
+            {
+                key: expansion.get(key)
+                for key in (
+                    "load_id",
+                    "matched_store_word_index",
+                    "match_strategy",
+                    "store_pointer_id",
+                    "store_object_id",
+                    "store_object_root",
+                    "store_pointer",
+                )
+                if isinstance(expansion, dict) and key in expansion
+            }
+            for expansion in (path.get("function_store_expansions") or [])
+            if isinstance(expansion, dict)
+        ],
+        "frontier": {
+            "workgroup_loads": frontier.get("workgroup_loads") or [],
+            "descriptor_load_leaves": q6_descriptor_leaf_signature(
+                {"descriptor_load_leaves": frontier.get("descriptor_load_leaves") or []}
+            ),
+            "descriptor_load_leaf_count": frontier.get("descriptor_load_leaf_count"),
+            "descriptor_dependencies": frontier.get("descriptor_dependencies") or [],
+            "push_constant_dependencies": frontier.get("push_constant_dependencies") or [],
+            "builtin_dependencies": frontier.get("builtin_dependencies") or [],
+            "unresolved_id_leaves": frontier.get("unresolved_id_leaves") or [],
+        },
+        "truncation": truncation,
+    }
+
+
 def q6_final_store_value_flow_signature(module: dict[str, Any]) -> dict[str, Any] | None:
     q6 = module.get("q6_probe_targets")
     if not isinstance(q6, dict):
@@ -410,6 +474,7 @@ def q6_final_store_value_flow_signature(module: dict[str, Any]) -> dict[str, Any
                 "stored_value_op_histogram": stored_value.get("op_histogram") or {},
                 "output_index_op_histogram": output_index.get("op_histogram") or {},
                 "stored_value_dependencies": q6_dependency_signature(stored_value),
+                "ssa_value_path": q6_ssa_value_path_signature(store.get("ssa_value_path")),
                 "output_index_dependencies": q6_dependency_signature(output_index),
                 "control_dependencies": q6_control_dependency_signature(store.get("control_dependencies")),
                 "debug_probe_exclusion_passed": debug_exclusion.get("passed"),

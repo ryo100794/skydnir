@@ -1422,6 +1422,123 @@ def build_q6_probe_targets(module: dict, debug_descriptor: dict | None = None) -
             "depends_on_debug_probe_binding": depends_on_debug_probe_binding,
         }
 
+    def summarize_ssa_path_node(node: object) -> dict:
+        if not isinstance(node, dict):
+            return {"kind": type(node).__name__}
+        item = {
+            key: node.get(key)
+            for key in ("kind", "id", "op", "value_u32", "default_u32", "spec_id", "index_count")
+            if key in node
+        }
+        for key in ("pointer_base", "base"):
+            if isinstance(node.get(key), dict):
+                item[key] = compact_base(node.get(key))
+        return item
+
+    def summarize_ssa_function_store_expansion(expansion: object) -> dict:
+        if not isinstance(expansion, dict):
+            return {"kind": type(expansion).__name__}
+        item = {
+            key: expansion.get(key)
+            for key in (
+                "load_id",
+                "matched_store_word_index",
+                "match_strategy",
+                "store_pointer_id",
+                "store_object_id",
+            )
+            if key in expansion
+        }
+        if isinstance(expansion.get("store_object_root"), dict):
+            item["store_object_root"] = summarize_ssa_path_node(expansion.get("store_object_root"))
+        pointer = expansion.get("store_pointer")
+        if isinstance(pointer, dict):
+            pointer_item = {
+                "base": compact_base(pointer.get("base")),
+                "index_count": pointer.get("index_count"),
+                "truncated_index_count": pointer.get("truncated_index_count"),
+            }
+            item["store_pointer"] = {
+                key: value for key, value in pointer_item.items() if value not in (None, {}, [])
+            }
+        return item
+
+    def build_ssa_value_path(summary: object, max_nodes: int = 64, max_function_expansions: int = 24) -> dict:
+        """Return bounded structural SSA/value-flow evidence for a final stored value."""
+        if not isinstance(summary, dict):
+            return {
+                "schema": "pdocker.spirv.q6-ssa-value-path.v1",
+                "method": "bounded-backward-producer-chain",
+                "available": False,
+                "reason": f"unsupported-summary-{type(summary).__name__}",
+            }
+        chain = summary.get("producer_chain") if isinstance(summary.get("producer_chain"), list) else []
+        nodes = [summarize_ssa_path_node(node) for node in chain[:max_nodes]]
+        function_expansions = summary.get("function_store_expansions")
+        if not isinstance(function_expansions, list):
+            function_expansions = []
+        truncation = summary.get("truncation_boundaries") if isinstance(summary.get("truncation_boundaries"), dict) else {}
+        explicit_truncation_count = sum(
+            int(truncation.get(key) or 0)
+            for key in (
+                "truncated_node_count",
+                "truncated_depth_count",
+                "truncated_function_store_expansion_count",
+            )
+            if isinstance(truncation.get(key), int)
+        )
+        captured_truncation_count = max(0, len(chain) - len(nodes))
+        unresolved = summary.get("unresolved_id_leaves") if isinstance(summary.get("unresolved_id_leaves"), list) else []
+        return {
+            "schema": "pdocker.spirv.q6-ssa-value-path.v1",
+            "method": "bounded-backward-producer-chain",
+            "available": bool(nodes),
+            "root": summary.get("root") if isinstance(summary.get("root"), dict) else {},
+            "max_nodes": max_nodes,
+            "node_count": len(chain),
+            "captured_node_count": len(nodes),
+            "nodes": nodes,
+            "function_store_expansions": [
+                summarize_ssa_function_store_expansion(expansion)
+                for expansion in function_expansions[:max_function_expansions]
+            ],
+            "function_store_expansion_count": len(function_expansions),
+            "captured_function_store_expansion_count": min(len(function_expansions), max_function_expansions),
+            "frontier": {
+                "workgroup_loads": summary.get("workgroup_loads") or [],
+                "descriptor_load_leaves": summary.get("descriptor_load_leaves") or [],
+                "descriptor_load_leaf_count": summary.get("descriptor_load_leaf_count"),
+                "descriptor_dependencies": summary.get("descriptor_dependencies") or [],
+                "push_constant_dependencies": summary.get("push_constant_dependencies") or [],
+                "builtin_dependencies": summary.get("builtin_dependencies") or [],
+                "spec_constant_dependencies": summary.get("spec_constant_dependencies") or [],
+                "constant_dependencies": summary.get("constant_dependencies") or [],
+                "unresolved_id_leaves": unresolved,
+            },
+            "truncation": {
+                **truncation,
+                "captured_node_truncation_count": captured_truncation_count,
+                "captured_function_store_expansion_truncation_count": max(
+                    0,
+                    len(function_expansions) - max_function_expansions,
+                ),
+            },
+            "complete": bool(summary.get("slice_complete")) and not captured_truncation_count,
+            "incomplete_reasons": [
+                reason
+                for reason, active in (
+                    ("bounded-producer-chain-truncated", captured_truncation_count > 0),
+                    ("dependency-slice-truncated", explicit_truncation_count > 0),
+                    ("unresolved-id-frontier", bool(unresolved)),
+                    (
+                        "function-store-expansion-truncated",
+                        len(function_expansions) > max_function_expansions,
+                    ),
+                )
+                if active
+            ],
+        }
+
     stores = sorted(module.get("store_events", []), key=lambda item: int(item.get("word_index", -1)))
     final_output_stores = []
     workgroup_stores = []
@@ -1506,6 +1623,7 @@ def build_q6_probe_targets(module: dict, debug_descriptor: dict | None = None) -
                     "binding_matches_required": base.get("kind") == "descriptor" and base.get("binding") == 2,
                 },
                 "stored_value": stored_value,
+                "ssa_value_path": build_ssa_value_path(stored_value),
                 "output_index": {
                     **output_index,
                     "index_ids": [
