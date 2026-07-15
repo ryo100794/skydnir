@@ -5118,8 +5118,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("PDOCKER_GPU_MAX_VULKAN_BINDINGS", executor)
         self.assertNotIn("PDOCKER_GPU_MAX_VULKAN_BINDINGS", app_abi)
         self.assertNotIn("PDOCKER_GPU_MAX_VULKAN_BINDINGS", container_abi)
-        self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V624_MAX_DESCRIPTOR_BINDINGS_PER_SET", app_abi)
-        self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V624_MAX_DESCRIPTOR_BINDINGS_PER_SET", container_abi)
+        self.assertNotIn("PDOCKER_GPU_VULKAN_GRAPHICS_V624_MAX_DESCRIPTOR_BINDINGS_PER_SET", app_abi)
+        self.assertNotIn("PDOCKER_GPU_VULKAN_GRAPHICS_V624_MAX_DESCRIPTOR_BINDINGS_PER_SET", container_abi)
+        self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V624_MAX_DESCRIPTOR_SET_LAYOUT_BINDINGS 8192u", app_abi)
+        self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V624_MAX_DESCRIPTOR_SET_LAYOUT_BINDINGS 8192u", container_abi)
 
     def test_vulkan_dispatch_v5_native_plan_tracks_table_shape_without_v4_capacity(self):
         executor = GPU_EXECUTOR.read_text()
@@ -6366,8 +6368,6 @@ class GpuAbiContractTest(unittest.TestCase):
             "entry->immutable_sampler_count > entry->descriptor_count",
             "!vulkan_descriptor_type_requires_sampler(descriptor_type)",
             "referenced_by_pipeline_layout",
-            "layout_binding_count++",
-            "layout_binding_count > PDOCKER_GPU_VULKAN_GRAPHICS_V624_MAX_DESCRIPTOR_BINDINGS_PER_SET",
             "entry->layout_id != other->layout_id",
             "entry->binding == other->binding",
             "entry->pipeline_layout_id == other->pipeline_layout_id &&",
@@ -6394,8 +6394,13 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         self.assertNotIn("entry->binding >= PDOCKER_GPU_MAX_VULKAN_BINDINGS", v624_validation_body)
         self.assertNotIn("entry->descriptor_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS", v624_validation_body)
+        self.assertNotIn("PDOCKER_GPU_VULKAN_GRAPHICS_V624_MAX_DESCRIPTOR_BINDINGS_PER_SET", v624_validation_body)
+        self.assertNotIn("layout_binding_count >", v624_validation_body)
 
         icd = VULKAN_ICD.read_text()
+        collect_v624_body = c_function_body(icd, "collect_graphics_v624_descriptor_set_layout_metadata")
+        self.assertNotIn("PDOCKER_GPU_VULKAN_GRAPHICS_V624_MAX_DESCRIPTOR_BINDINGS_PER_SET", collect_v624_body)
+        self.assertNotIn("layout->storage_binding_count >", collect_v624_body)
         for marker in [
             "uint64_t layout_id;",
             "bool *storage_binding_present",
@@ -6418,7 +6423,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "frame_header_v624->v624.descriptor_set_layout_table_hash",
             "frame_header_v624->v624.pipeline_layout_table_hash",
             "VULKAN_GRAPHICS_V6.24",
-            "layout->storage_binding_count > PDOCKER_GPU_VULKAN_GRAPHICS_V624_MAX_DESCRIPTOR_BINDINGS_PER_SET",
+            "if (layout->layout_id == 0)",
             "candidate.layout_id = layout->layout_id",
             "candidate.immutable_sampler_count = immutable_sampler_count;",
             "candidate.binding_flags = descriptor_layout_binding_flags(layout, binding);",

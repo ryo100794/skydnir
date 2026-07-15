@@ -437,9 +437,10 @@ or closes.
   narrowing and redundant CPU copies for specialization payloads.  Dispatch
   command recording now fails closed if the dispatch-op table cannot reserve an
   entry, so submit never observes a silently truncated compute command buffer.
-  Graphics V6.24 descriptor-set-layout metadata now validates against its own
-  per-set binding cap on both producer and Android frame-validation sides; full
-  heap-backed V6.30 layout transport remains the path to remove that ABI cap.
+  Graphics V6.24 descriptor-set-layout metadata no longer applies the former
+  16-binding per-set scratch cap on either producer or Android frame-validation
+  side; duplicate bindings, descriptor counts, total metadata table size, and
+  frame-size validation remain fail-closed.
   V5 FD capability advertising reports the effective single-message framed
   transport cap as `max_fds`; that cap is now aligned with the 253-entry ABI
   fd-index range, while `abi_fd_index_range` remains explicit metadata for
