@@ -2959,3 +2959,15 @@ a legacy debug cap.  This is required for large model-buffer work and does not
 change llama.cpp, Dockerfiles, models, or prompts.
 
 Validation: `env -u PYTHONPATH python3 -m unittest tests.test_gpu_abi_contract -q`.
+
+### 2026-07-15 Vulkan descriptor aggregate advertisement lane
+
+CPU/static pass-through work aligned descriptor indexing advertisement with the
+V5 compute dispatch descriptor-table total.  `maxPerSetDescriptors` now reports
+the V5 descriptor transport total instead of the old storage-buffer-slot times
+array-element product, and descriptor-set layout validation rejects aggregate
+per-layout descriptor counts that cannot fit into one V5 dispatch frame.  This
+prevents applications from observing support for layouts that only fail during
+compute dispatch serialization.
+
+Validation: `env -u PYTHONPATH python3 -m unittest tests.test_gpu_abi_contract -q` and `bash scripts/build-gpu-shim.sh`.

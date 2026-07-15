@@ -419,7 +419,10 @@ or closes.
   Variable descriptor-count layouts now use V6.29
   metadata to carry allocation-time actual descriptor counts, so partially sized
   descriptor arrays are validated and replayed by actual count instead of being
-  widened to the declared layout maximum.
+  widened to the declared layout maximum.  Descriptor indexing advertisement and
+  descriptor-set layout validation now cap per-set aggregate descriptor counts to
+  the V5 dispatch descriptor-table total, avoiding layouts that query as
+  supported but fail only when serialized into V5 compute transport.
   The fixed strict-graph cache is deliberately
   disabled for wider dispatches instead of being widened inside this slice.
   Remaining narrowing points: the real SCM_RIGHTS fd limit for fd-bearing buffers,

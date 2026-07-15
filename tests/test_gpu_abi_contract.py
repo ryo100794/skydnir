@@ -7748,6 +7748,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("descriptor_set_binding_slot(&target_set_snapshots[target_set], binding, array_element)", bind_body)
         self.assertNotIn("storage_buffers[binding][array_element]", bind_body)
         self.assertNotIn("PDOCKER_VULKAN_USE_V5_FRAME is disabled", bind_body)
+        support_helper = c_function_body(icd, "descriptor_set_layout_create_info_supported")
+        self.assertIn("uint32_t descriptor_count_total = 0;", support_helper)
+        self.assertIn("binding->descriptorCount > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS - descriptor_count_total", support_helper)
+        self.assertIn("descriptor_count_total += binding->descriptorCount;", support_helper)
 
     def test_vulkan_generic_dispatch_temp_tables_are_not_layout_slot_limited(self):
         icd = VULKAN_ICD.read_text()
@@ -21059,25 +21063,34 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("pProperties->limits.maxSamplerAnisotropy = advertised_max_sampler_anisotropy();", properties_body)
         self.assertIn("caps->limits.maxStorageBufferRange < transport_max_storage_range", properties_body)
         for marker in [
+            "const uint32_t bridge_per_stage_descriptors = PDOCKER_VK_MAX_STORAGE_BUFFERS;",
+            "const uint32_t bridge_per_set_descriptors = pdocker_vk_max_per_set_descriptors();",
             "PDOCKER_VK_SHADOW_LIMIT_OR_CAP(maxPerStageDescriptorSamplers, bridge_per_stage_descriptors)",
             "PDOCKER_VK_SHADOW_LIMIT_OR_CAP(maxPerStageDescriptorSampledImages, bridge_per_stage_descriptors)",
             "PDOCKER_VK_SHADOW_LIMIT_OR_CAP(maxPerStageDescriptorStorageImages, bridge_per_stage_descriptors)",
             "PDOCKER_VK_SHADOW_LIMIT_OR_CAP(maxPerStageDescriptorInputAttachments, bridge_per_stage_descriptors)",
+            "PDOCKER_VK_SHADOW_LIMIT_OR_CAP(maxPerStageDescriptorStorageBuffers, bridge_per_stage_descriptors)",
             "PDOCKER_VK_SHADOW_LIMIT_OR_CAP(maxPerStageResources, bridge_per_set_descriptors)",
             "PDOCKER_VK_SHADOW_LIMIT_OR_CAP(maxDescriptorSetSamplers, bridge_per_set_descriptors)",
             "PDOCKER_VK_SHADOW_LIMIT_OR_CAP(maxDescriptorSetSampledImages, bridge_per_set_descriptors)",
             "PDOCKER_VK_SHADOW_LIMIT_OR_CAP(maxDescriptorSetStorageImages, bridge_per_set_descriptors)",
             "PDOCKER_VK_SHADOW_LIMIT_OR_CAP(maxDescriptorSetInputAttachments, bridge_per_set_descriptors)",
+            "PDOCKER_VK_SHADOW_LIMIT_OR_CAP(maxDescriptorSetStorageBuffers, bridge_per_stage_descriptors)",
         ]:
             self.assertIn(marker, properties_body)
         self.assertIn("pProperties->limits.lineWidthRange[0] = caps->limits.lineWidthRange[0];", properties_body)
         self.assertIn("pProperties->limits.lineWidthGranularity = caps->limits.lineWidthGranularity;", properties_body)
         self.assertIn("caps->limits.maxBoundDescriptorSets < PDOCKER_VK_MAX_DESCRIPTOR_SETS", properties_body)
         self.assertIn("pdocker_vk_max_per_set_descriptors", icd)
-        self.assertIn("PDOCKER_VK_MAX_STORAGE_BUFFERS * PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS", icd)
+        self.assertIn("return PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS;", icd)
+        self.assertNotIn("return PDOCKER_VK_MAX_STORAGE_BUFFERS * PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS;", icd)
         self.assertIn("PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS", icd)
         self.assertNotIn("maxPerSetDescriptors = 1024", icd)
         self.assertIn("p->maxPerSetDescriptors = pdocker_vk_max_per_set_descriptors();", icd)
+        self.assertIn("advertised_descriptor_update_after_bind_limit(caps_ ? caps_->descriptor_indexing_properties.maxDescriptorSetUpdateAfterBindSamplers : 0, per_set_cap_)", icd)
+        self.assertIn("advertised_descriptor_update_after_bind_limit(caps_ ? caps_->descriptor_indexing_properties.maxDescriptorSetUpdateAfterBindSampledImages : 0, per_set_cap_)", icd)
+        self.assertIn("advertised_descriptor_update_after_bind_limit(caps_ ? caps_->descriptor_indexing_properties.maxDescriptorSetUpdateAfterBindStorageBuffers : 0, per_stage_cap_)", icd)
+        self.assertIn("(p_)->maxDescriptorSetUpdateAfterBindInputAttachments = 0;", icd)
         pnext_body = icd.split("static void fill_pnext_features", 1)[1].split(
             "static uint64_t feature_mask_from_base_features", 1
         )[0]

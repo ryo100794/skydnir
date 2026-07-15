@@ -16124,7 +16124,7 @@ static VkShaderStageFlags advertised_subgroup_stages(void) {
 }
 
 static uint32_t pdocker_vk_max_per_set_descriptors(void) {
-    return PDOCKER_VK_MAX_STORAGE_BUFFERS * PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS;
+    return PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS;
 }
 
 static void fill_pnext_properties(void *pNext) {
@@ -21455,6 +21455,7 @@ static bool descriptor_set_layout_create_info_supported(
     if (pCreateInfo->bindingCount > PDOCKER_VK_MAX_DESCRIPTOR_BINDING_SLOTS) return false;
     if (pCreateInfo->bindingCount > 0 && !pCreateInfo->pBindings) return false;
     bool saw_variable_descriptor_count = false;
+    uint32_t descriptor_count_total = 0;
     for (uint32_t i = 0; i < pCreateInfo->bindingCount; ++i) {
         const VkDescriptorSetLayoutBinding *binding = &pCreateInfo->pBindings[i];
         bool v4_descriptor = descriptor_type_supported_by_v4_transport(binding->descriptorType);
@@ -21471,6 +21472,8 @@ static bool descriptor_set_layout_create_info_supported(
         }
         if (binding->descriptorCount == 0) return false;
         if (binding->descriptorCount > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS) return false;
+        if (binding->descriptorCount > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS - descriptor_count_total) return false;
+        descriptor_count_total += binding->descriptorCount;
         uint32_t binding_flags = descriptor_set_layout_binding_flags_for_create_info(pCreateInfo, i);
         if (!descriptor_binding_flags_supported(binding_flags)) return false;
         if ((binding_flags & PDOCKER_VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT) &&
