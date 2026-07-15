@@ -2340,7 +2340,7 @@ Acceptance:
 - No helper-loader binary is packaged unless the matching source-build input and compatibility checks are present.
 ## P0: Vulkan Descriptor Binding Number vs Internal Slot Separation
 
-Status: **producer compact-slot lane implemented; CPU contract covered; device validation pending**.
+Status: **producer compact-slot lane implemented; producer/executor CPU contracts covered; device validation pending**.
 
 - The glibc Vulkan ICD stores sparse API descriptor binding numbers in
   `storage_binding_numbers[]` and keeps descriptor-set storage snapshot-safe by
@@ -2355,6 +2355,7 @@ Acceptance:
 
 - `python3 -m unittest tests.test_gpu_abi_contract -q` passes.
 - `python3 -m unittest tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_descriptor_sparse_api_bindings_do_not_leak_compact_slots` passes and proves sparse API bindings are serialized as original API binding numbers, not compact internal slots.
+- `python3 -m unittest tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_dispatch_v5_executor_preserves_sparse_api_binding_numbers` passes and proves V5/V5.1 native-plan materialization and generic dispatch layout/write paths keep API binding numbers rather than descriptor table ordinals.
 - glibc GPU shims rebuild and `libpdockervulkanicd.so` payload freshness passes.
 - Next device run verifies a sparse-binding compute shader through V5.1 without
   changing llama.cpp, Dockerfile, model, or prompt.

@@ -5060,6 +5060,34 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("binding_capacity", body)
         self.assertNotIn("image_descriptor_capacity", body)
 
+    def test_vulkan_dispatch_v5_executor_preserves_sparse_api_binding_numbers(self):
+        executor = GPU_EXECUTOR.read_text()
+        plan_body = c_function_body(executor, "build_vulkan_dispatch_v5_native_plan")
+        materializer = c_function_body(executor, "materialize_vulkan_dispatch_v5_native_plan_bindings")
+        runner = c_function_body(executor, "run_vulkan_dispatch_fd")
+
+        self.assertIn("if (d->binding > plan->max_binding) plan->max_binding = d->binding;", plan_body)
+        self.assertIn("plan->max_binding >= PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS", executor)
+        self.assertNotIn("plan->max_binding = plan->descriptor_count", plan_body)
+
+        self.assertIn("imgd->binding = d->binding;", materializer)
+        self.assertIn("binding->binding = d->binding;", materializer)
+        self.assertIn("imgd->api_array_element = d->array_element;", materializer)
+        self.assertIn("binding->api_array_element = d->array_element;", materializer)
+        self.assertNotIn("imgd->binding = image_descriptor_count", materializer)
+        self.assertNotIn("binding->binding = buffer_descriptor_count", materializer)
+
+        self.assertIn("if (bindings[i].binding > max_binding) max_binding = bindings[i].binding;", runner)
+        self.assertIn("if (image_descriptors[i].binding > max_binding)", runner)
+        self.assertIn("uint32_t layout_count = max_binding + 1;", runner)
+        self.assertIn("const size_t table_index = (size_t)set_index * layout_count + bindings[i].binding;", runner)
+        self.assertIn("const size_t table_index = (size_t)set_index * layout_count + d->binding;", runner)
+        self.assertIn(".binding = i,", runner)
+        self.assertIn("writes[write_count].dstBinding = bindings[i].binding;", runner)
+        self.assertIn("writes[write_count].dstBinding = d->binding;", runner)
+        self.assertNotIn(".binding = layout_binding_count", runner)
+        self.assertNotIn("writes[write_count].dstBinding = i;", runner)
+
     def test_vulkan_dispatch_v5_native_plan_accepts_v5_native_table_width(self):
         executor = GPU_EXECUTOR.read_text()
         body = c_function_body(executor, "finish_vulkan_dispatch_v5_native_plan_replay_status")
