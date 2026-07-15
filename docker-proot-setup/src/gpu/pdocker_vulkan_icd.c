@@ -34087,6 +34087,8 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_PROC(vkSignalSemaphore);
     MAP_ALIAS("vkSignalSemaphoreKHR", vkSignalSemaphore);
     MAP_PROC(vk_icdNegotiateLoaderICDInterfaceVersion);
+    MAP_PROC(vk_icdGetInstanceProcAddr);
+    MAP_PROC(vk_icdGetPhysicalDeviceProcAddr);
 #undef MAP_ALIAS
 #undef MAP_PROC
     return NULL;

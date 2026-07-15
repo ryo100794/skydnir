@@ -11976,6 +11976,14 @@ class GpuAbiContractTest(unittest.TestCase):
         get_device_proc_body = c_function_body(icd, "vkGetDeviceProcAddr")
         self.assertIn("device_proc_address_hidden_by_enabled_state(pdocker_device, pName)", get_device_proc_body)
         self.assertIn("return proc_address(pName);", get_device_proc_body)
+        proc_body = icd.split("static PFN_vkVoidFunction proc_address", 1)[1].split("#undef MAP_PROC", 1)[0]
+        for marker in [
+            "MAP_PROC(vk_icdNegotiateLoaderICDInterfaceVersion);",
+            "MAP_PROC(vk_icdGetInstanceProcAddr);",
+            "MAP_PROC(vk_icdGetPhysicalDeviceProcAddr);",
+        ]:
+            self.assertIn(marker, proc_body)
+
 
         queue_submit2_body = c_function_body(icd, "vkQueueSubmit2")
         self.assertIn("queue_synchronization2_enabled((PdockerVkQueue *)queue)", queue_submit2_body)
