@@ -23664,6 +23664,31 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateComputePipelines(
         pipeline->object_id = next_vulkan_object_generation();
         pipeline->shader = pdocker_vk_shader_module_from_handle(ci->stage.module);
         pipeline->layout = pdocker_vk_pipeline_layout_from_handle(ci->layout);
+        if (!pipeline->shader || !pipeline->layout) {
+            trace_icd_runtime_failure(
+                strict_passthrough
+                    ? "strict-compute-pipeline-untracked-layout-or-shader"
+                    : "compute-pipeline-untracked-layout-or-shader",
+                VK_ERROR_FEATURE_NOT_PRESENT);
+            pdocker_vk_pipeline_destroy(pipeline);
+            return VK_ERROR_FEATURE_NOT_PRESENT;
+        }
+        if (strict_passthrough && pipeline->layout->push_constant_range_count > 1u) {
+            trace_icd_runtime_failure("strict-compute-pipeline-push-range-layout-unsupported",
+                                      VK_ERROR_FEATURE_NOT_PRESENT);
+            pdocker_vk_pipeline_destroy(pipeline);
+            return VK_ERROR_FEATURE_NOT_PRESENT;
+        }
+        if (strict_passthrough && pipeline->layout->push_constant_range_count == 1u) {
+            const VkPushConstantRange *range = &pipeline->layout->push_constant_ranges[0];
+            if (range->offset != 0 || range->stageFlags != VK_SHADER_STAGE_COMPUTE_BIT ||
+                range->size != pipeline->layout->push_constant_size) {
+                trace_icd_runtime_failure("strict-compute-pipeline-push-range-layout-unsupported",
+                                          VK_ERROR_FEATURE_NOT_PRESENT);
+                pdocker_vk_pipeline_destroy(pipeline);
+                return VK_ERROR_FEATURE_NOT_PRESENT;
+            }
+        }
         pipeline->requested_feature_mask =
             device ? ((PdockerVkDevice *)device)->requested_feature_mask : 0;
         if (env_truthy_default("PDOCKER_GPU_ADD_FLOAT16_CAPABILITY_FOR_STORAGE16", false)) {
