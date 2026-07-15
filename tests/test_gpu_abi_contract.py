@@ -6848,9 +6848,13 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("out->buffer_capacity = view->header->resource_count;", materialize_body)
         self.assertIn("out->buffer_count >= out->buffer_capacity", add_body)
         self.assertIn("const VkBufferUsageFlags api_usage = (VkBufferUsageFlags)buffer->usage;", add_body)
-        self.assertIn("const VkBufferUsageFlags effective_usage = api_usage | usage;", add_body)
+        self.assertIn("const VkBufferUsageFlags effective_usage = strict_passthrough", add_body)
         self.assertIn("dst->usage = effective_usage;", add_body)
         self.assertIn("dst->usage |= effective_usage;", add_body)
+        self.assertIn("strict passthrough graphics buffer usage mismatch", add_body)
+        self.assertIn("(api_usage & usage) != usage", add_body)
+        self.assertIn("const VkBufferUsageFlags create_usage = strict_passthrough", materialize_body)
+        self.assertIn("create_usage,", materialize_body)
         self.assertIn("free(buffers->buffers);", destroy_body)
         self.assertIn("VkBufferMemoryBarrier *barriers =", barrier_body)
         self.assertIn("buffers->buffer_count, sizeof(*barriers)", barrier_body)
@@ -19173,6 +19177,18 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("strict passthrough graphics image staging materialization mismatch", materialize)
         self.assertIn("destroy_vulkan_graphics_replay_attachments(rt->device, out);", materialize)
         self.assertIn("strict_passthrough, &replay_attachments", graphics_run)
+
+    def test_strict_passthrough_rejects_graphics_buffer_usage_widening(self):
+        source = GPU_EXECUTOR.read_text()
+        add_body = c_function_body(source, "add_vulkan_graphics_replay_buffer_range")
+        materialize = c_function_body(source, "materialize_vulkan_graphics_v6_buffers")
+        graphics_run = c_function_body(source, "run_vulkan_graphics_v6_frame")
+        self.assertIn("int strict_passthrough,\n        uint32_t resource_index", source)
+        self.assertIn("strict_passthrough && (api_usage & usage) != usage", add_body)
+        self.assertIn("strict passthrough graphics buffer usage mismatch", add_body)
+        self.assertIn("? api_usage", add_body)
+        self.assertIn("const VkBufferUsageFlags create_usage = strict_passthrough", materialize)
+        self.assertIn("strict_passthrough, &replay_buffers", graphics_run)
 
     def test_llama_gpu_artifact_gate_decision_tree_is_documented(self):
         verifier = LLAMA_GPU_ARTIFACT_VERIFIER.read_text()

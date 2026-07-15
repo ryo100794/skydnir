@@ -32418,6 +32418,7 @@ static int vulkan_graphics_index_type_supported_by_runtime(
 static int add_vulkan_graphics_replay_buffer_range(
         const VulkanGraphicsV6FrameView *view,
         VulkanGraphicsReplayBuffers *out,
+        int strict_passthrough,
         uint32_t resource_index,
         uint64_t offset,
         uint64_t size,
@@ -32444,7 +32445,14 @@ static int add_vulkan_graphics_replay_buffer_range(
     int found = find_vulkan_graphics_replay_buffer(out, resource_index);
     VulkanGraphicsReplayBuffer *dst = NULL;
     const VkBufferUsageFlags api_usage = (VkBufferUsageFlags)buffer->usage;
-    const VkBufferUsageFlags effective_usage = api_usage | usage;
+    if (strict_passthrough && (api_usage & usage) != usage) {
+        json_fail("vulkan-graphics-v6-buffer-materialize",
+                  "strict passthrough graphics buffer usage mismatch");
+        return -EOPNOTSUPP;
+    }
+    const VkBufferUsageFlags effective_usage = strict_passthrough
+        ? api_usage
+        : (api_usage | usage);
     if (found < 0) {
         if (!out->buffers || out->buffer_count >= out->buffer_capacity) return -E2BIG;
         dst = &out->buffers[out->buffer_count++];
@@ -32499,6 +32507,7 @@ static int mark_vulkan_graphics_replay_buffer_writeback_range(
 static int materialize_vulkan_graphics_v6_buffers(
         VulkanRuntime *rt,
         const VulkanGraphicsV6FrameView *view,
+        int strict_passthrough,
         VulkanGraphicsReplayBuffers *out) {
     if (!rt || !view || !view->header || !out) return -EINVAL;
     memset(out, 0, sizeof(*out));
@@ -32516,7 +32525,7 @@ static int materialize_vulkan_graphics_v6_buffers(
                 const PdockerGpuVulkanGraphicsV6VertexBindingEntry *binding =
                     &view->vertex_bindings[command->vertex_binding_first + b];
                 int rc = add_vulkan_graphics_replay_buffer_range(
-                    view, out, binding->buffer_resource_index, binding->offset, binding->size,
+                    view, out, strict_passthrough, binding->buffer_resource_index, binding->offset, binding->size,
                     VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
                 if (rc != 0) {
                     destroy_vulkan_graphics_replay_buffers(rt->device, out);
@@ -32547,7 +32556,7 @@ static int materialize_vulkan_graphics_v6_buffers(
                 return -EPROTO;
             }
             rc = add_vulkan_graphics_replay_buffer_range(
-                view, out, command->index_buffer_resource_index, command->index_offset, 1u,
+                view, out, strict_passthrough, command->index_buffer_resource_index, command->index_offset, 1u,
                 VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
             if (rc != 0) {
                 destroy_vulkan_graphics_replay_buffers(rt->device, out);
@@ -32622,7 +32631,7 @@ static int materialize_vulkan_graphics_v6_buffers(
                     descriptor_usage = VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT;
                 }
                 int rc = add_vulkan_graphics_replay_buffer_range(
-                    view, out, descriptor->resource_index, effective_offset, range,
+                    view, out, strict_passthrough, descriptor->resource_index, effective_offset, range,
                     descriptor_usage);
                 if (rc != 0) {
                     destroy_vulkan_graphics_replay_buffers(rt->device, out);
@@ -32656,7 +32665,7 @@ static int materialize_vulkan_graphics_v6_buffers(
                     return -EPROTO;
                 }
                 int rc = add_vulkan_graphics_replay_buffer_range(
-                    view, out, command->index_buffer_resource_index, command->index_offset,
+                    view, out, strict_passthrough, command->index_buffer_resource_index, command->index_offset,
                     index_buffer->size - command->index_offset, VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
                 if (rc != 0) {
                     destroy_vulkan_graphics_replay_buffers(rt->device, out);
@@ -32682,7 +32691,7 @@ static int materialize_vulkan_graphics_v6_buffers(
             }
             range_offset = command->index_offset;
             rc = add_vulkan_graphics_replay_buffer_range(
-                view, out, command->index_buffer_resource_index, range_offset, range_size,
+                view, out, strict_passthrough, command->index_buffer_resource_index, range_offset, range_size,
                 VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
             if (rc != 0) {
                 destroy_vulkan_graphics_replay_buffers(rt->device, out);
@@ -32693,7 +32702,7 @@ static int materialize_vulkan_graphics_v6_buffers(
                 const PdockerGpuVulkanGraphicsV61BufferBarrierEntry *barrier = &view->buffer_barriers[b];
                 if (barrier->command_index != c) continue;
                 int rc = add_vulkan_graphics_replay_buffer_range(
-                    view, out, barrier->resource_index, barrier->offset, barrier->size,
+                    view, out, strict_passthrough, barrier->resource_index, barrier->offset, barrier->size,
                     VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT);
                 if (rc != 0) {
                     destroy_vulkan_graphics_replay_buffers(rt->device, out);
@@ -32708,14 +32717,14 @@ static int materialize_vulkan_graphics_v6_buffers(
                 return -EPROTO;
             }
             int rc = add_vulkan_graphics_replay_buffer_range(
-                view, out, copy->src_resource_index, copy->src_offset, copy->size,
+                view, out, strict_passthrough, copy->src_resource_index, copy->src_offset, copy->size,
                 VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
             if (rc != 0) {
                 destroy_vulkan_graphics_replay_buffers(rt->device, out);
                 return rc;
             }
             rc = add_vulkan_graphics_replay_buffer_range(
-                view, out, copy->dst_resource_index, copy->dst_offset, copy->size,
+                view, out, strict_passthrough, copy->dst_resource_index, copy->dst_offset, copy->size,
                 VK_BUFFER_USAGE_TRANSFER_DST_BIT);
             if (rc != 0) {
                 destroy_vulkan_graphics_replay_buffers(rt->device, out);
@@ -32736,7 +32745,7 @@ static int materialize_vulkan_graphics_v6_buffers(
                 return -EPROTO;
             }
             int rc = add_vulkan_graphics_replay_buffer_range(
-                view, out, copy->dst_resource_index, copy->dst_offset, copy_size,
+                view, out, strict_passthrough, copy->dst_resource_index, copy->dst_offset, copy_size,
                 VK_BUFFER_USAGE_TRANSFER_DST_BIT);
             if (rc != 0) {
                 destroy_vulkan_graphics_replay_buffers(rt->device, out);
@@ -32756,7 +32765,7 @@ static int materialize_vulkan_graphics_v6_buffers(
                 return -EPROTO;
             }
             int rc = add_vulkan_graphics_replay_buffer_range(
-                view, out, fill->dst_resource_index, fill->dst_offset, fill->size,
+                view, out, strict_passthrough, fill->dst_resource_index, fill->dst_offset, fill->size,
                 VK_BUFFER_USAGE_TRANSFER_DST_BIT);
             if (rc != 0) {
                 destroy_vulkan_graphics_replay_buffers(rt->device, out);
@@ -32776,7 +32785,7 @@ static int materialize_vulkan_graphics_v6_buffers(
                 return -EPROTO;
             }
             int rc = add_vulkan_graphics_replay_buffer_range(
-                view, out, update->dst_resource_index, update->dst_offset, update->data_size,
+                view, out, strict_passthrough, update->dst_resource_index, update->dst_offset, update->data_size,
                 VK_BUFFER_USAGE_TRANSFER_DST_BIT);
             if (rc != 0) {
                 destroy_vulkan_graphics_replay_buffers(rt->device, out);
@@ -32810,7 +32819,7 @@ static int materialize_vulkan_graphics_v6_buffers(
                 ? VK_BUFFER_USAGE_TRANSFER_SRC_BIT
                 : VK_BUFFER_USAGE_TRANSFER_DST_BIT;
             rc = add_vulkan_graphics_replay_buffer_range(
-                view, out, copy->buffer_resource_index, copy_offset, copy_size, usage);
+                view, out, strict_passthrough, copy->buffer_resource_index, copy_offset, copy_size, usage);
             if (rc != 0) {
                 destroy_vulkan_graphics_replay_buffers(rt->device, out);
                 return rc;
@@ -32841,7 +32850,7 @@ static int materialize_vulkan_graphics_v6_buffers(
                 return -EOVERFLOW;
             }
             int rc = add_vulkan_graphics_replay_buffer_range(
-                view, out, entry->indirect_resource_index, entry->indirect_offset, indirect_bytes,
+                view, out, strict_passthrough, entry->indirect_resource_index, entry->indirect_offset, indirect_bytes,
                 VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT);
             if (rc != 0) {
                 destroy_vulkan_graphics_replay_buffers(rt->device, out);
@@ -32849,7 +32858,7 @@ static int materialize_vulkan_graphics_v6_buffers(
             }
             if (entry->flags & PDOCKER_GPU_GRAPHICS_V68_INDIRECT_DRAW_COUNT_BUFFER_PRESENT) {
                 rc = add_vulkan_graphics_replay_buffer_range(
-                    view, out, entry->count_resource_index, entry->count_offset, sizeof(uint32_t),
+                    view, out, strict_passthrough, entry->count_resource_index, entry->count_offset, sizeof(uint32_t),
                     VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT);
                 if (rc != 0) {
                     destroy_vulkan_graphics_replay_buffers(rt->device, out);
@@ -32871,9 +32880,12 @@ static int materialize_vulkan_graphics_v6_buffers(
             destroy_vulkan_graphics_replay_buffers(rt->device, out);
             return -EOVERFLOW;
         }
+        const VkBufferUsageFlags create_usage = strict_passthrough
+            ? dst->usage
+            : (dst->usage | VK_BUFFER_USAGE_TRANSFER_DST_BIT);
         int rc = create_vulkan_buffer_with_usage(
             rt->physical_device, rt->device, (size_t)upload_size_u64,
-            dst->usage | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+            create_usage,
             NULL, &dst->buffer);
         if (rc != 0) {
             destroy_vulkan_graphics_replay_buffers(rt->device, out);
@@ -37417,7 +37429,8 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
             (unsigned long long)view->header->submit_id);
     fflush(out);
 
-    rc = materialize_vulkan_graphics_v6_buffers(&g_vulkan_runtime, view, &replay_buffers);
+    rc = materialize_vulkan_graphics_v6_buffers(
+        &g_vulkan_runtime, view, strict_passthrough, &replay_buffers);
     if (rc != 0) {
         out = json_out();
         fprintf(out,
