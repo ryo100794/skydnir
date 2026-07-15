@@ -6638,55 +6638,6 @@ static int collect_graphics_image_entry(
     return (int)index;
 }
 
-static int collect_graphics_image_view_entry(
-        PdockerGpuVulkanDispatchV5ImageViewEntry *image_view_entries,
-        PdockerVkImageView **image_view_objects,
-        size_t *image_view_count,
-        PdockerGpuVulkanDispatchV5ImageEntry *image_entries,
-        PdockerVkImage **image_objects,
-        size_t *image_count,
-        PdockerGpuVulkanDispatchV5ResourceEntry *resources,
-        size_t *resource_count,
-        PdockerVkMemory **memory_objects,
-        uint32_t *memory_resource_indices,
-        size_t *memory_count,
-        int *fds,
-        size_t *fd_count,
-        PdockerVkImageView *view,
-        uint64_t generation) {
-    if (!image_view_entries || !image_view_objects || !image_view_count || !view || !view->image) {
-        return -EINVAL;
-    }
-    int existing = find_image_view_table_index(image_view_objects, *image_view_count, view);
-    if (existing >= 0) return existing;
-    if (*image_view_count >= PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGE_VIEWS) return -E2BIG;
-    int image_index = collect_graphics_image_entry(
-        image_entries, image_objects, image_count,
-        resources, resource_count, memory_objects, memory_resource_indices, memory_count,
-        fds, fd_count, view->image, generation);
-    if (image_index < 0) return image_index;
-    uint32_t index = (uint32_t)(*image_view_count)++;
-    PdockerGpuVulkanDispatchV5ImageViewEntry *entry = &image_view_entries[index];
-    memset(entry, 0, sizeof(*entry));
-    entry->view_type = view->view_type;
-    entry->view_id = pdocker_vk_image_view_object_id(view);
-    entry->image_index = (uint32_t)image_index;
-    entry->format = view->format;
-    entry->component_r = view->components.r;
-    entry->component_g = view->components.g;
-    entry->component_b = view->components.b;
-    entry->component_a = view->components.a;
-    entry->aspect_mask = view->subresource_range.aspectMask;
-    entry->base_mip_level = view->subresource_range.baseMipLevel;
-    entry->level_count = view->subresource_range.levelCount;
-    entry->base_array_layer = view->subresource_range.baseArrayLayer;
-    entry->layer_count = view->subresource_range.layerCount;
-    entry->generation = view->generation ? view->generation : generation;
-    image_view_objects[index] = view;
-    return (int)index;
-}
-
-
 static int collect_graphics_image_view_snapshot_entry(
         PdockerGpuVulkanDispatchV5ImageViewEntry *image_view_entries,
         PdockerVkImageView **image_view_objects,
@@ -6910,41 +6861,6 @@ static int collect_v5_image_layout_range_entries(
         }
     }
     return 0;
-}
-
-static int collect_graphics_sampler_entry(
-        PdockerGpuVulkanDispatchV5SamplerEntry *sampler_entries,
-        PdockerVkSampler **sampler_objects,
-        size_t *sampler_count,
-        PdockerVkSampler *sampler,
-        uint64_t generation) {
-    if (!sampler_entries || !sampler_objects || !sampler_count || !sampler) return -EINVAL;
-    int existing = find_sampler_table_index(sampler_objects, *sampler_count, sampler);
-    if (existing >= 0) return existing;
-    if (*sampler_count >= PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_SAMPLERS) return -E2BIG;
-    uint32_t index = (uint32_t)(*sampler_count)++;
-    PdockerGpuVulkanDispatchV5SamplerEntry *entry = &sampler_entries[index];
-    memset(entry, 0, sizeof(*entry));
-    entry->sampler_id = pdocker_vk_sampler_object_id(sampler);
-    entry->mag_filter = sampler->mag_filter;
-    entry->min_filter = sampler->min_filter;
-    entry->mipmap_mode = sampler->mipmap_mode;
-    entry->address_mode_u = sampler->address_mode_u;
-    entry->address_mode_v = sampler->address_mode_v;
-    entry->address_mode_w = sampler->address_mode_w;
-    entry->mip_lod_bias_bits = float_bits_u32(sampler->mip_lod_bias);
-    entry->anisotropy_enable = sampler->anisotropy_enable;
-    entry->max_anisotropy_bits = float_bits_u32(sampler->max_anisotropy);
-    entry->compare_enable = sampler->compare_enable;
-    entry->compare_op = sampler->compare_op;
-    entry->min_lod_bits = float_bits_u32(sampler->min_lod);
-    entry->max_lod_bits = float_bits_u32(sampler->max_lod);
-    entry->border_color = sampler->border_color;
-    entry->unnormalized_coordinates = sampler->unnormalized_coordinates;
-    entry->reduction_mode = sampler->reduction_mode;
-    entry->generation = sampler->generation ? sampler->generation : generation;
-    sampler_objects[index] = sampler;
-    return (int)index;
 }
 
 static int collect_graphics_sampler_snapshot_entry(
