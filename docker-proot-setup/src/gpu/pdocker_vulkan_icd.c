@@ -12409,8 +12409,8 @@ static int send_generic_vulkan_dispatch_v5_1_op(
     header->shader_size = shader_size;
     header->shader_hash = shader_hash;
     header->gx = gx;
-    header->gy = gy ? gy : 1;
-    header->gz = gz ? gz : 1;
+    header->gy = gy;
+    header->gz = gz;
     header->resource_count = (uint32_t)resource_count;
     header->resource_entry_size = sizeof(PdockerGpuVulkanDispatchV5ResourceEntry);
     header->resource_schema_hash = PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_SCHEMA_HASH;

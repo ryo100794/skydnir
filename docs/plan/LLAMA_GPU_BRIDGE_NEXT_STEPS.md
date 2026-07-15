@@ -2902,11 +2902,12 @@ and `bash scripts/build-native-android-ndk.sh`.
 ### 2026-07-15 Android compute zero-dispatch identity lane
 
 CPU/static pass-through work now preserves Vulkan zero group-count dispatches.
-`run_vulkan_dispatch_fd` sends `gx/gy/gz` unchanged to `vkCmdDispatch` and
+The producer V5 frame writer serializes `gx/gy/gz` unchanged, and
+`run_vulkan_dispatch_fd` sends those values unchanged to `vkCmdDispatch` and
 `vkCmdDispatchBase` instead of rewriting zero dimensions to one workgroup.  The
 Q6 CPU diagnostic oracles also iterate the exact dispatch dimensions, so a
-zero-sized application dispatch remains a no-op in both native replay and
-comparison evidence.
+zero-sized application dispatch remains a no-op in frame transport, native
+replay, and comparison evidence.
 
 Validation: `env -u PYTHONPATH python3 -m unittest tests.test_gpu_abi_contract -q`
 and `bash scripts/build-native-android-ndk.sh`.
@@ -2947,3 +2948,14 @@ runtime push limit and producer-side recording model aligned without changing
 llama.cpp, Dockerfiles, models, or prompts.
 
 Validation: `env -u PYTHONPATH python3 -m unittest tests.test_gpu_abi_contract -q` and `bash scripts/build-gpu-shim.sh`.
+
+### 2026-07-15 Android compute binding-size cap removal lane
+
+CPU/static pass-through work removed the Android compute executor fixed 512 MiB
+binding-size rejection from `run_vulkan_dispatch_fd`.  V5 framed dispatches
+still reject zero-sized buffer bindings, but large transfer ranges now reach the
+normal Vulkan allocation, fd-read, and runtime-limit path instead of failing on
+a legacy debug cap.  This is required for large model-buffer work and does not
+change llama.cpp, Dockerfiles, models, or prompts.
+
+Validation: `env -u PYTHONPATH python3 -m unittest tests.test_gpu_abi_contract -q`.

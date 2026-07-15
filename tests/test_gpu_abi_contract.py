@@ -5126,6 +5126,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("if (bindings[i].binding > max_binding) max_binding = bindings[i].binding;", runner)
         self.assertIn("if (image_descriptors[i].binding > max_binding)", runner)
         self.assertIn("uint32_t layout_count = max_binding + 1;", runner)
+        self.assertIn("if (bindings[i].size == 0)", runner)
+        self.assertNotIn("512 * 1024 * 1024", runner)
         self.assertIn("ensure_vulkan_compute_descriptor_layout_slot", runner)
         self.assertIn(".binding = slot->binding", runner)
         self.assertIn(".binding = slot->binding,", runner)
@@ -8865,6 +8867,12 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("gx ? gx : 1", executor_dispatch_body)
         self.assertNotIn("gy ? gy : 1", executor_dispatch_body)
         self.assertNotIn("gz ? gz : 1", executor_dispatch_body)
+        v5_sender_body = c_function_body(icd, "send_generic_vulkan_dispatch_v5_1_op")
+        self.assertIn("header->gx = gx;", v5_sender_body)
+        self.assertIn("header->gy = gy;", v5_sender_body)
+        self.assertIn("header->gz = gz;", v5_sender_body)
+        self.assertNotIn("gy ? gy : 1", v5_sender_body)
+        self.assertNotIn("gz ? gz : 1", v5_sender_body)
         push_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdPushConstants", 1)[1].split(
             "static bool image_subresource_range_is_whole_image", 1
         )[0]

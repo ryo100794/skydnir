@@ -15790,7 +15790,7 @@ static int run_vulkan_dispatch_fd(
             max_descriptor_set = bindings[i].descriptor_set;
         }
         if (bindings[i].binding > max_binding) max_binding = bindings[i].binding;
-        if (bindings[i].size == 0 || bindings[i].size > 512 * 1024 * 1024) {
+        if (bindings[i].size == 0) {
             json_fail("vulkan-dispatch", "invalid binding size");
             return 64;
         }

@@ -397,9 +397,10 @@ or closes.
   fail-closed queue-family ownership checks.  Descriptor-bind image layout
   transition barriers now also use a heap arena sized by the validated graphics
   descriptor table count, so image descriptor binds no longer inherit a 16-entry
-  stack barrier ceiling.  Compute dispatch recording now preserves zero group
-  counts when calling `vkCmdDispatch`/`vkCmdDispatchBase`; zero-sized Vulkan
-  dispatches remain API no-ops instead of being rewritten to one workgroup.
+  stack barrier ceiling.  Compute dispatch recording and V5 frame serialization
+  now preserve zero group counts when calling `vkCmdDispatch`/`vkCmdDispatchBase`;
+  zero-sized Vulkan dispatches remain API no-ops instead of being rewritten to
+  one workgroup.
   Android V5 framed compute dispatch now validates push constants against the
   Android runtime `maxPushConstantsSize` after Vulkan initialization instead
   of the executor text-command scratch buffer size; legacy V1-V4 text commands
@@ -411,7 +412,10 @@ or closes.
   compute executor also no longer rejects SPIR-V modules solely because they are
   larger than the former 8 MiB debug cap; it validates the Vulkan-required
   nonzero four-byte code alignment and lets allocation/runtime errors surface
-  normally.
+  normally.  The Android compute runner also no longer rejects buffer descriptor
+  transfer ranges solely because they exceed the former 512 MiB debug binding
+  cap; zero-sized bindings still fail closed, while large ranges now proceed to
+  normal Vulkan allocation/runtime validation.
   Variable descriptor-count layouts now use V6.29
   metadata to carry allocation-time actual descriptor counts, so partially sized
   descriptor arrays are validated and replayed by actual count instead of being
