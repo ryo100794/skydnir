@@ -11908,6 +11908,23 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("direct_host_upload_needed", executor)
         self.assertNotIn("VK_IMAGE_TILING_LINEAR", materialize_body)
 
+    def test_vulkan_image_view_flags_are_fail_closed_in_icd_and_executor(self):
+        icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
+
+        image_view_validate_body = c_function_body(icd, "validate_image_view_create_info_for_transport")
+        self.assertIn("if (info->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;", image_view_validate_body)
+
+        flags_helper = c_function_body(executor, "vulkan_dispatch_image_view_flags_valid")
+        self.assertIn("return flags == 0;", flags_helper)
+        materialize_body = c_function_body(executor, "materialize_vulkan_dispatch_images")
+        gate = "vulkan_dispatch_image_view_flags_valid(src->flags)"
+        self.assertIn(gate, materialize_body)
+        self.assertLess(materialize_body.index(gate), materialize_body.index("VkImageViewCreateInfo ivci"))
+        self.assertLess(materialize_body.index(gate), materialize_body.index("vkCreateImageView(device, &ivci"))
+        self.assertIn("VkImageViewCreateInfo ivci", materialize_body)
+        self.assertNotIn(".flags =", c_block_from(materialize_body, "VkImageViewCreateInfo ivci"))
+
     def test_vulkan_image_view_component_swizzles_are_fail_closed_in_icd_and_executor(self):
         icd = VULKAN_ICD.read_text()
         executor = GPU_EXECUTOR.read_text()

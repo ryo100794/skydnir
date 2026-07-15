@@ -3741,6 +3741,10 @@ static int vulkan_dispatch_image_view_components_valid(
            vulkan_dispatch_component_swizzle_valid(view->component_a);
 }
 
+static int vulkan_dispatch_image_view_flags_valid(uint32_t flags) {
+    return flags == 0;
+}
+
 static int vulkan_dispatch_image_view_range_valid(
         const PdockerGpuVulkanDispatchV5ImageEntry *image,
         const PdockerGpuVulkanDispatchV5ImageViewEntry *view) {
@@ -4628,6 +4632,9 @@ static int materialize_vulkan_dispatch_images(
             return -EOPNOTSUPP;
         }
         if (!vulkan_dispatch_image_view_components_valid(src)) {
+            return -EOPNOTSUPP;
+        }
+        if (!vulkan_dispatch_image_view_flags_valid(src->flags)) {
             return -EOPNOTSUPP;
         }
         if (*view_count >= view_capacity) return -E2BIG;

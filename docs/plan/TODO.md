@@ -173,6 +173,13 @@ or closes.
   `vkCreateImage`, and the obsolete linear direct-host-upload path has been
   removed. Evidence:
   `python3 -m unittest tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_image_tiling_is_fail_closed_in_executor -q`.
+- [done] **image view flags executor boundary gate**:
+  Image-view flags are now fail-closed on both sides of the bridge. The ICD
+  rejects nonzero `VkImageViewCreateInfo::flags`; the Android executor now
+  independently rejects transported image-view entries with nonzero `flags`
+  before native `vkCreateImageView` instead of silently dropping the field.
+  Evidence:
+  `python3 -m unittest tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_image_view_flags_are_fail_closed_in_icd_and_executor -q`.
 - [done] **image-barrier range/aspect normalization audit**: The producer ICD
   normalizes image-barrier `VK_REMAINING_MIP_LEVELS` and
   `VK_REMAINING_ARRAY_LAYERS` to concrete ranges before V6.1 serialization, and
