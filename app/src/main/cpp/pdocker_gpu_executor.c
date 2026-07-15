@@ -16546,18 +16546,14 @@ static int run_vulkan_dispatch_fd(
             : strict_passthrough
             ? (legalize_workgroup_env ? "strict-env" : "strict-passthrough")
             : "env-default";
-    const int allow_strict_shader_compat_rewrites =
-        env_truthy("PDOCKER_GPU_ALLOW_STRICT_SHADER_COMPAT_REWRITES", 0);
     if (strict_passthrough &&
-        legalize_workgroup_size_from_spec &&
-        !allow_strict_shader_compat_rewrites) {
+        legalize_workgroup_size_from_spec) {
         json_fail("vulkan-dispatch", "strict passthrough blocks shader compatibility rewrites");
         ret = 64;
         goto cleanup;
     }
     if (strict_passthrough &&
-        materialize_specialization_requested &&
-        !allow_strict_shader_compat_rewrites) {
+        materialize_specialization_requested) {
         json_fail("vulkan-dispatch", "strict passthrough blocks shader compatibility rewrites");
         ret = 64;
         goto cleanup;
@@ -16614,8 +16610,7 @@ static int run_vulkan_dispatch_fd(
             ? options->disable_pipeline_optimization
             : env_truthy("PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION", 0);
     if (strict_passthrough &&
-        disable_pipeline_optimization &&
-        !allow_strict_shader_compat_rewrites) {
+        disable_pipeline_optimization) {
         json_fail("vulkan-dispatch", "strict passthrough blocks pipeline compatibility knobs");
         ret = 64;
         goto cleanup;
@@ -16625,8 +16620,7 @@ static int run_vulkan_dispatch_fd(
             ? options->add_float16_capability_for_storage16
             : env_truthy("PDOCKER_GPU_ADD_FLOAT16_CAPABILITY_FOR_STORAGE16", 0);
     if (strict_passthrough &&
-        add_float16_capability_for_storage16 &&
-        !allow_strict_shader_compat_rewrites) {
+        add_float16_capability_for_storage16) {
         json_fail("vulkan-dispatch", "strict passthrough blocks shader compatibility rewrites");
         ret = 64;
         goto cleanup;
@@ -16656,8 +16650,7 @@ static int run_vulkan_dispatch_fd(
         (options && options->has_strict_duplicate_descriptor_normalization
             ? options->strict_duplicate_descriptor_normalization
             : env_truthy("PDOCKER_GPU_STRICT_DUPLICATE_DESCRIPTOR_NORMALIZATION", 0));
-    if (strict_duplicate_descriptor_normalization &&
-        !allow_strict_shader_compat_rewrites) {
+    if (strict_duplicate_descriptor_normalization) {
         json_fail("vulkan-dispatch", "strict passthrough blocks shader compatibility rewrites");
         ret = 64;
         goto cleanup;
@@ -16683,8 +16676,7 @@ static int run_vulkan_dispatch_fd(
         q6k_safe_kernel_requested ||
         q6k_compat_rewrites_requested;
     if (strict_passthrough &&
-        strict_shader_compat_rewrites_requested &&
-        !allow_strict_shader_compat_rewrites) {
+        strict_shader_compat_rewrites_requested) {
         json_fail("vulkan-dispatch", "strict passthrough blocks shader compatibility rewrites");
         ret = 64;
         goto cleanup;
@@ -16739,8 +16731,7 @@ static int run_vulkan_dispatch_fd(
     const int materialize_readonly_overlap_snapshots =
         strict_passthrough &&
         (disable_overlap_aliasing || q6_readonly_overlap_snapshot_auto);
-    if (materialize_readonly_overlap_snapshots &&
-        !allow_strict_shader_compat_rewrites) {
+    if (materialize_readonly_overlap_snapshots) {
         json_fail("vulkan-dispatch", "strict passthrough blocks data compatibility materialization");
         ret = 64;
         goto cleanup;
@@ -16827,8 +16818,7 @@ static int run_vulkan_dispatch_fd(
             ? options->q4k_pipeline_retry_ladder
             : env_truthy("PDOCKER_GPU_Q4K_PIPELINE_RETRY_LADDER", 0));
     if (strict_passthrough &&
-        q4k_pipeline_retry_enabled &&
-        !allow_strict_shader_compat_rewrites) {
+        q4k_pipeline_retry_enabled) {
         json_fail("vulkan-dispatch", "strict passthrough blocks shader compatibility rewrites");
         ret = 64;
         goto cleanup;
@@ -16875,9 +16865,8 @@ static int run_vulkan_dispatch_fd(
     /*
      * PDOCKER_GPU_Q4K_SAFE_KERNEL is an explicit diagnostic override, not a
      * default optimization.  Strict passthrough blocks this shader
-     * substitution unless PDOCKER_GPU_ALLOW_STRICT_SHADER_COMPAT_REWRITES is
-     * explicitly set; that keeps true pass-through runs from silently mixing in
-     * llama-oriented diagnostic kernels.
+     * substitution in strict pass-through; that keeps true pass-through runs
+     * from silently mixing in llama-oriented diagnostic kernels.
      */
     if (q4k_safe_kernel_requested && is_q4k_matvec_hash(original_spirv_hash)) {
         if (!replace_spirv_module(&shader_code, &shader_size, kQ4kSafeSpv, sizeof(kQ4kSafeSpv))) {
@@ -16920,9 +16909,8 @@ static int run_vulkan_dispatch_fd(
     /*
      * PDOCKER_GPU_Q6K_SAFE_KERNEL is an explicit diagnostic override, not a
      * default optimization.  Strict passthrough blocks this shader
-     * substitution unless PDOCKER_GPU_ALLOW_STRICT_SHADER_COMPAT_REWRITES is
-     * explicitly set; that keeps true pass-through runs from silently mixing in
-     * llama-oriented diagnostic kernels.
+     * substitution in strict pass-through; that keeps true pass-through runs
+     * from silently mixing in llama-oriented diagnostic kernels.
      */
     if (q6k_safe_kernel_requested && q6_structural_callsite_detected) {
         if (!replace_spirv_module(&shader_code, &shader_size, kQ6kSafeSpv, sizeof(kQ6kSafeSpv))) {

@@ -11971,8 +11971,6 @@ static int send_generic_vulkan_dispatch_v5_1_op(
     }
     const bool strict_passthrough =
         env_truthy_default("PDOCKER_GPU_STRICT_PASSTHROUGH", false);
-    const bool allow_strict_compat_mutation =
-        env_truthy_default("PDOCKER_GPU_ALLOW_STRICT_SHADER_COMPAT_REWRITES", false);
     if (binding_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS ||
         image_descriptor_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS ||
         image_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGES ||
@@ -12273,7 +12271,7 @@ static int send_generic_vulkan_dispatch_v5_1_op(
         } else if ((VkDescriptorType)api_descriptor_types[i] == VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER) {
             required_buffer_usage |= VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT;
         }
-        if (strict_passthrough && !allow_strict_compat_mutation &&
+        if (strict_passthrough &&
             (api_buffer_usages[i] & required_buffer_usage) != required_buffer_usage) {
             fprintf(stderr,
                     "pdocker-vulkan-icd: strict V5.1 frame rejected: buffer usage widening required dispatch_id=%llu descriptor=%zu usage=0x%llx required=0x%llx\n",
@@ -12285,14 +12283,16 @@ static int send_generic_vulkan_dispatch_v5_1_op(
             goto cleanup;
         }
         resources[buffer_index].usage = api_buffer_usages[i];
-        resources[buffer_index].usage |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-            VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-            VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-            VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
-        if ((VkDescriptorType)api_descriptor_types[i] == VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER) {
-            resources[buffer_index].usage |= VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT;
-        } else if ((VkDescriptorType)api_descriptor_types[i] == VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER) {
-            resources[buffer_index].usage |= VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT;
+        if (!strict_passthrough) {
+            resources[buffer_index].usage |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
+            if ((VkDescriptorType)api_descriptor_types[i] == VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER) {
+                resources[buffer_index].usage |= VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT;
+            } else if ((VkDescriptorType)api_descriptor_types[i] == VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER) {
+                resources[buffer_index].usage |= VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT;
+            }
         }
     }
     size_t buffer_view_index = 0;
@@ -12416,7 +12416,7 @@ static int send_generic_vulkan_dispatch_v5_1_op(
             VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
             VK_BUFFER_USAGE_TRANSFER_DST_BIT |
             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-        if (strict_passthrough && !allow_strict_compat_mutation &&
+        if (strict_passthrough &&
             (((uint64_t)dispatch_indirect_buffer->usage & required_indirect_usage) != required_indirect_usage)) {
             fprintf(stderr,
                     "pdocker-vulkan-icd: strict V5.1 frame rejected: dispatch-indirect usage widening required dispatch_id=%llu usage=0x%llx required=0x%llx\n",
@@ -12427,10 +12427,12 @@ static int send_generic_vulkan_dispatch_v5_1_op(
             goto cleanup;
         }
         resources[buffer_index].usage = (uint64_t)dispatch_indirect_buffer->usage;
-        resources[buffer_index].usage |= VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
-            VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-            VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+        if (!strict_passthrough) {
+            resources[buffer_index].usage |= VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
+                VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+        }
         resources[buffer_index].generation = dispatch_id;
         fds[fd_index++] = memory->fd;
         dispatch_indirect_resource_index = buffer_index;
@@ -12469,7 +12471,7 @@ static int send_generic_vulkan_dispatch_v5_1_op(
             VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
             VK_BUFFER_USAGE_TRANSFER_DST_BIT |
             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-        if (strict_passthrough && !allow_strict_compat_mutation &&
+        if (strict_passthrough &&
             (((uint64_t)buffer->usage & required_barrier_usage) != required_barrier_usage)) {
             fprintf(stderr,
                     "pdocker-vulkan-icd: strict V5.1 frame rejected: barrier buffer usage widening required dispatch_id=%llu usage=0x%llx required=0x%llx\n",
@@ -12480,9 +12482,11 @@ static int send_generic_vulkan_dispatch_v5_1_op(
             goto cleanup;
         }
         resources[buffer_index].usage = (uint64_t)buffer->usage;
-        resources[buffer_index].usage |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-            VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+        if (!strict_passthrough) {
+            resources[buffer_index].usage |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+        }
         resources[buffer_index].generation = dispatch_id;
         fds[fd_index++] = memory->fd;
         barrier_buffer_resource_indices[h] = buffer_index;

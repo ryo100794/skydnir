@@ -6805,7 +6805,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("resources[buffer_index].usage = api_buffer_usages[i];", frame_sender)
         self.assertIn("resources[buffer_index].usage |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT", frame_sender)
         self.assertIn("strict V5.1 frame rejected: buffer usage widening required", frame_sender)
-        self.assertIn("allow_strict_compat_mutation", frame_sender)
+        self.assertIn("if (!strict_passthrough) {\n            resources[buffer_index].usage |=", frame_sender)
+        self.assertNotIn("allow_strict_compat_mutation", frame_sender)
 
         binding_struct = executor.split("} VulkanVectorBuffer;", 1)[1].split("} VulkanDispatchBinding;", 1)[0]
         self.assertIn("uint64_t api_buffer_usage;", binding_struct)
@@ -7545,17 +7546,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertEqual(
             {
                 "PDOCKER_GPU_CPU_ORACLE": "1",
-                "PDOCKER_GPU_ALLOW_STRICT_SHADER_COMPAT_REWRITES": "1",
                 "PDOCKER_GPU_STRICT_PASSTHROUGH": "1",
                 "PDOCKER_GPU_STRICT_RECONCILIATION": "1",
-                "PDOCKER_GPU_STRICT_DUPLICATE_DESCRIPTOR_NORMALIZATION": "1",
-                "PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC": "1",
-                "PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS": "1",
                 "PDOCKER_GPU_DISPATCH_PROFILE_LOG": "1",
                 "PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE": "1",
-                "PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING": "1",
-                "PDOCKER_GPU_Q6K_COMPAT_REWRITES": "1",
-                "PDOCKER_GPU_Q6K_READONLY_OVERLAP_SNAPSHOT": "1",
             },
             q6_overlay,
         )
@@ -7962,7 +7956,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("kQ6kSafeSpv", source)
         self.assertIn("replace_spirv_module(&shader_code, &shader_size, kQ4kSafeSpv", source)
         self.assertIn("replace_spirv_module(&shader_code, &shader_size, kQ6kSafeSpv", source)
-        self.assertIn("PDOCKER_GPU_ALLOW_STRICT_SHADER_COMPAT_REWRITES", source)
+        self.assertNotIn("PDOCKER_GPU_ALLOW_STRICT_SHADER_COMPAT_REWRITES", source)
         self.assertIn("strict passthrough blocks shader compatibility rewrites", source)
         self.assertLess(
             source.index("strict passthrough blocks shader compatibility rewrites"),
@@ -7995,8 +7989,8 @@ class GpuAbiContractTest(unittest.TestCase):
         )
         self.assertIn("strict passthrough blocks data compatibility materialization", source)
         self.assertLess(
-            source.index("strict passthrough blocks data compatibility materialization"),
             source.index("if (materialize_readonly_overlap_snapshots)"),
+            source.index("strict passthrough blocks data compatibility materialization"),
         )
         self.assertNotIn("memcpy(shader_code, kQ4kSafeSpv", source)
         self.assertNotIn("memcpy(shader_code, kQ6kSafeSpv", source)
@@ -19483,8 +19477,12 @@ class GpuAbiContractTest(unittest.TestCase):
             executor.index("q6_u32_to_u8vec4_bitcasts_lowered = lower_q6k_u32_to_u8vec4_bitcasts"),
         )
         self.assertLess(
-            executor.index("q6_u32_to_u8vec4_bitcasts_lowered = lower_q6k_u32_to_u8vec4_bitcasts"),
             executor.index("if (strict_duplicate_descriptor_normalization)"),
+            executor.index("q6_u32_to_u8vec4_bitcasts_lowered = lower_q6k_u32_to_u8vec4_bitcasts"),
+        )
+        self.assertLess(
+            executor.index("strict_shader_compat_rewrites_requested"),
+            executor.index("q6_u32_to_u8vec4_bitcasts_lowered = lower_q6k_u32_to_u8vec4_bitcasts"),
         )
         q6_rewrite_block = re.search(
             r"if \(q6_compat_rewrites_enabled\) \{(?P<body>.*?)\n    \}",
@@ -19833,7 +19831,6 @@ class GpuAbiContractTest(unittest.TestCase):
         q6_required = set(manifest["q6_required_env_overlay"])
         self.assertEqual(
             {
-                "PDOCKER_GPU_ALLOW_STRICT_SHADER_COMPAT_REWRITES",
                 "PDOCKER_GPU_DISPATCH_PROFILE_LOG",
             },
             q6_required - bridged_envs,
@@ -19846,7 +19843,6 @@ class GpuAbiContractTest(unittest.TestCase):
                 - config_propagation_envs
                 - {
                     "PDOCKER_GPU_DISPATCH_PROFILE_LOG",
-                    "PDOCKER_GPU_ALLOW_STRICT_SHADER_COMPAT_REWRITES",
                     "PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE",
                     "PDOCKER_GPU_STRICT_RECONCILIATION",
                 }
@@ -20120,10 +20116,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertEqual(manifest_overlay, compare_step["required_env_overlay"])
         self.assertEqual("1", compare_step["required_env_overlay"]["PDOCKER_GPU_STRICT_PASSTHROUGH"])
         self.assertEqual("1", compare_step["required_env_overlay"]["PDOCKER_GPU_STRICT_RECONCILIATION"])
-        self.assertEqual("1", compare_step["required_env_overlay"]["PDOCKER_GPU_Q6K_COMPAT_REWRITES"])
-        self.assertEqual(
-            "1",
-            compare_step["required_env_overlay"]["PDOCKER_GPU_STRICT_DUPLICATE_DESCRIPTOR_NORMALIZATION"],
+        self.assertNotIn("PDOCKER_GPU_Q6K_COMPAT_REWRITES", compare_step["required_env_overlay"])
+        self.assertNotIn(
+            "PDOCKER_GPU_STRICT_DUPLICATE_DESCRIPTOR_NORMALIZATION",
+            compare_step["required_env_overlay"],
         )
         self.assertEqual(plan["q6_required_env_overlay"], compare_step["required_env_overlay"])
         self.assertIn("--require-q6-workgroup-clear", json.dumps(plan["runner_step_contract"]))
@@ -20536,7 +20532,7 @@ class GpuAbiContractTest(unittest.TestCase):
 
             artifact_data = json.loads(artifact.read_text(encoding="utf-8"))
             artifact_data["gpu"]["runtime_env_manifest"]["host_requested_env"].pop(
-                "PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS"
+                "PDOCKER_GPU_CPU_ORACLE"
             )
             artifact.write_text(json.dumps(artifact_data), encoding="utf-8")
             env_mismatch = subprocess.run(
@@ -20556,7 +20552,7 @@ class GpuAbiContractTest(unittest.TestCase):
             )
             self.assertEqual(14, env_mismatch.returncode, env_mismatch.stdout + env_mismatch.stderr)
             self.assertEqual(
-                "PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS",
+                "PDOCKER_GPU_CPU_ORACLE",
                 json.loads(env_mismatch.stdout)["required_env_mismatches"][0]["key"],
             )
 
