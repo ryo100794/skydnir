@@ -149,6 +149,15 @@ or closes.
   explicit/in-render resolve paths; copy-to-buffer, copy-from-buffer, and
   copy-image cannot become alternate unresolved-MSAA readback or transport
   routes. Evidence: `python3 -m unittest tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_graphics_msaa_source_store_is_fail_closed_until_msaa_readback_abi -q`, `python3 -m unittest tests.test_gpu_abi_contract -q`, and `bash scripts/build-native-android-ndk.sh`.
+- [done] **image create-flag executor boundary gate**:
+  The ICD image-format query path now uses a named transport create-flag
+  allowlist, and the Android executor independently rejects unsupported image
+  create flags before replaying native `vkCreateImage`. Sparse, disjoint,
+  block-texel-compatible, extended-usage, compressed/multiplanar/YCbCr-style
+  reinterpretation, and unmodeled mutable-format behavior remain fail-closed
+  even if a malformed frame bypasses normal ICD capture. Evidence:
+  `python3 -m unittest tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_image_create_flags_are_fail_closed_in_icd_and_executor -q`
+  and `python3 -m unittest tests.test_gpu_abi_contract -q`.
 - [done] **image-barrier range/aspect normalization audit**: The producer ICD
   normalizes image-barrier `VK_REMAINING_MIP_LEVELS` and
   `VK_REMAINING_ARRAY_LAYERS` to concrete ranges before V6.1 serialization, and

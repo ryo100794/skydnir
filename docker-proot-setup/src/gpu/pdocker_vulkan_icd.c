@@ -3951,6 +3951,26 @@ static VkFormatFeatureFlags pdocker_vk_image_usage_required_features(
     return required;
 }
 
+static VkImageCreateFlags pdocker_vk_supported_image_create_flags_for_transport(void) {
+    return VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT |
+           VK_IMAGE_CREATE_ALIAS_BIT |
+           VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT |
+           VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT;
+}
+
+static bool pdocker_vk_image_create_flags_supported_for_transport(VkImageCreateFlags flags) {
+    const VkImageCreateFlags unsupported_sparse_flags =
+        VK_IMAGE_CREATE_SPARSE_BINDING_BIT |
+        VK_IMAGE_CREATE_SPARSE_RESIDENCY_BIT |
+        VK_IMAGE_CREATE_SPARSE_ALIASED_BIT;
+    const VkImageCreateFlags unsupported_unmodeled_flags =
+        VK_IMAGE_CREATE_DISJOINT_BIT |
+        VK_IMAGE_CREATE_BLOCK_TEXEL_VIEW_COMPATIBLE_BIT |
+        VK_IMAGE_CREATE_EXTENDED_USAGE_BIT;
+    if ((flags & (unsupported_sparse_flags | unsupported_unmodeled_flags)) != 0) return false;
+    return (flags & ~pdocker_vk_supported_image_create_flags_for_transport()) == 0;
+}
+
 static bool pdocker_vk_image_usage_supported_by_format(
         VkFormat format,
         VkImageUsageFlags usage) {
@@ -18306,15 +18326,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceImageFormatProperties(
     if (type != VK_IMAGE_TYPE_1D && type != VK_IMAGE_TYPE_2D && type != VK_IMAGE_TYPE_3D) {
         return VK_ERROR_FORMAT_NOT_SUPPORTED;
     }
-    const VkImageCreateFlags unsupported_sparse_flags = VK_IMAGE_CREATE_SPARSE_BINDING_BIT |
-                                                          VK_IMAGE_CREATE_SPARSE_RESIDENCY_BIT |
-                                                          VK_IMAGE_CREATE_SPARSE_ALIASED_BIT;
-    if (flags & unsupported_sparse_flags) return VK_ERROR_FORMAT_NOT_SUPPORTED;
-    const VkImageCreateFlags supported_flags = VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT |
-                                               VK_IMAGE_CREATE_ALIAS_BIT |
-                                               VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT |
-                                               VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT;
-    if (flags & ~supported_flags) return VK_ERROR_FORMAT_NOT_SUPPORTED;
+    if (!pdocker_vk_image_create_flags_supported_for_transport(flags)) {
+        return VK_ERROR_FORMAT_NOT_SUPPORTED;
+    }
     if ((flags & VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT) && type != VK_IMAGE_TYPE_2D) {
         return VK_ERROR_FORMAT_NOT_SUPPORTED;
     }

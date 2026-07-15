@@ -3598,6 +3598,27 @@ static int vulkan_image_aspect_mask_valid_for_format(
     return aspect_mask == VK_IMAGE_ASPECT_COLOR_BIT;
 }
 
+static VkImageCreateFlags vulkan_dispatch_supported_image_create_flags(void) {
+    return VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT |
+           VK_IMAGE_CREATE_ALIAS_BIT |
+           VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT |
+           VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT;
+}
+
+static int vulkan_dispatch_image_create_flags_valid(uint32_t create_flags) {
+    const VkImageCreateFlags flags = (VkImageCreateFlags)create_flags;
+    const VkImageCreateFlags unsupported_sparse_flags =
+        VK_IMAGE_CREATE_SPARSE_BINDING_BIT |
+        VK_IMAGE_CREATE_SPARSE_RESIDENCY_BIT |
+        VK_IMAGE_CREATE_SPARSE_ALIASED_BIT;
+    const VkImageCreateFlags unsupported_unmodeled_flags =
+        VK_IMAGE_CREATE_DISJOINT_BIT |
+        VK_IMAGE_CREATE_BLOCK_TEXEL_VIEW_COMPATIBLE_BIT |
+        VK_IMAGE_CREATE_EXTENDED_USAGE_BIT;
+    if ((flags & (unsupported_sparse_flags | unsupported_unmodeled_flags)) != 0) return 0;
+    return (flags & ~vulkan_dispatch_supported_image_create_flags()) == 0;
+}
+
 static VkImageAspectFlags vulkan_image_full_aspect_mask_for_format(VkFormat format) {
     VkImageAspectFlags mask = 0;
     if (vulkan_format_has_depth_aspect(format)) mask |= VK_IMAGE_ASPECT_DEPTH_BIT;
@@ -4389,6 +4410,9 @@ static int materialize_vulkan_dispatch_images(
             src->extent_depth == 0 || src->mip_levels == 0 ||
             src->array_layers == 0 || src->memory_size > (uint64_t)SIZE_MAX) {
             return -EPROTO;
+        }
+        if (!vulkan_dispatch_image_create_flags_valid(src->create_flags)) {
+            return -EOPNOTSUPP;
         }
         if (!vulkan_dispatch_image_create_shape_valid(src)) {
             return -EOPNOTSUPP;

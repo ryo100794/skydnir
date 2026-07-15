@@ -11841,6 +11841,48 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         self.assertIn("features &= ~(VK_FORMAT_FEATURE_BLIT_SRC_BIT", legacy_features)
 
+    def test_vulkan_image_create_flags_are_fail_closed_in_icd_and_executor(self):
+        icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
+
+        for source, helper_name, supported_helper in [
+            (icd, "pdocker_vk_image_create_flags_supported_for_transport", "pdocker_vk_supported_image_create_flags_for_transport"),
+            (executor, "vulkan_dispatch_image_create_flags_valid", "vulkan_dispatch_supported_image_create_flags"),
+        ]:
+            helper_body = c_function_body(source, helper_name)
+            supported_body = c_function_body(source, supported_helper)
+            for marker in [
+                "VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT",
+                "VK_IMAGE_CREATE_ALIAS_BIT",
+                "VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT",
+                "VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT",
+            ]:
+                self.assertIn(marker, supported_body)
+            for marker in [
+                "VK_IMAGE_CREATE_SPARSE_BINDING_BIT",
+                "VK_IMAGE_CREATE_SPARSE_RESIDENCY_BIT",
+                "VK_IMAGE_CREATE_SPARSE_ALIASED_BIT",
+                "VK_IMAGE_CREATE_DISJOINT_BIT",
+                "VK_IMAGE_CREATE_BLOCK_TEXEL_VIEW_COMPATIBLE_BIT",
+                "VK_IMAGE_CREATE_EXTENDED_USAGE_BIT",
+                "unsupported_sparse_flags",
+                "unsupported_unmodeled_flags",
+            ]:
+                self.assertIn(marker, helper_body)
+            self.assertIn("flags & (unsupported_sparse_flags | unsupported_unmodeled_flags)", helper_body)
+            self.assertIn("flags & ~", helper_body)
+
+        image_props_body = c_function_body(icd, "vkGetPhysicalDeviceImageFormatProperties")
+        self.assertIn("pdocker_vk_image_create_flags_supported_for_transport(flags)", image_props_body)
+        self.assertNotIn("flags & ~supported_flags", image_props_body)
+
+        materialize_body = c_function_body(executor, "materialize_vulkan_dispatch_images")
+        flags_gate = "vulkan_dispatch_image_create_flags_valid(src->create_flags)"
+        self.assertIn(flags_gate, materialize_body)
+        self.assertLess(materialize_body.index(flags_gate), materialize_body.index("VkImageCreateInfo ici"))
+        self.assertLess(materialize_body.index(flags_gate), materialize_body.index("vkCreateImage(device, &ici"))
+        self.assertIn(".flags = (VkImageCreateFlags)src->create_flags", materialize_body)
+
     def test_vulkan_format_properties2_queries_reuse_legacy_caps(self):
         icd = VULKAN_ICD.read_text()
         format2_body = c_function_body(icd, "vkGetPhysicalDeviceFormatProperties2")
