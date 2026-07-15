@@ -17738,6 +17738,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "q6_final_store_value_flow.stores[0].ssa_value_path.nodes[0].op",
             q6_flow["diff_paths"],
         )
+        self.assertEqual(report["q6_static_boundary"]["summary"], "q6-final-store-ssa-value")
 
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -17762,6 +17763,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "q6_final_store_value_flow.stores[0].output_index_ssa_path.nodes[0].op",
             q6_flow["diff_paths"],
         )
+        self.assertEqual(report["q6_static_boundary"]["summary"], "q6-output-index-ssa")
 
     def test_spirv_dataflow_compare_reports_q6_stage_target_support_paths(self):
         def analysis_payload(

@@ -837,6 +837,17 @@ def comparison_by_name(comparisons: list[dict[str, Any]]) -> dict[str, dict[str,
     return {str(item.get("name")): item for item in comparisons if isinstance(item, dict)}
 
 
+def q6_final_store_value_flow_boundary(comparison: dict[str, Any]) -> str:
+    first = comparison.get("first_mismatch_path")
+    if not isinstance(first, str):
+        first = ""
+    if ".output_index_ssa_path." in first:
+        return "q6-output-index-ssa"
+    if ".ssa_value_path." in first:
+        return "q6-final-store-ssa-value"
+    return "q6-final-store-value-flow"
+
+
 def q6_static_boundary(comparisons: list[dict[str, Any]]) -> dict[str, Any]:
     by_name = comparison_by_name(comparisons)
     ordered = [
@@ -850,10 +861,15 @@ def q6_static_boundary(comparisons: list[dict[str, Any]]) -> dict[str, Any]:
     for name, boundary in ordered:
         item = by_name.get(name)
         if item and item.get("match") is False:
+            effective_boundary = (
+                q6_final_store_value_flow_boundary(item)
+                if name == "q6_final_store_value_flow"
+                else boundary
+            )
             mismatches.append(
                 {
                     "comparison": name,
-                    "boundary": boundary,
+                    "boundary": effective_boundary,
                     "first_mismatch_path": item.get("first_mismatch_path"),
                     "diff_paths": (item.get("diff_paths") or [])[:16],
                 }
