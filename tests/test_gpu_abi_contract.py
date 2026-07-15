@@ -3440,7 +3440,7 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         for marker in [
             "vkCreateFence",
-            "vkQueueSubmit(rt->graphics_queue",
+            "vkQueueSubmit(submit_queue",
             "PDOCKER_GPU_GRAPHICS_SUBMIT_TIMEOUT_MS",
             "vkWaitForFences",
             "vkDestroyFence",
@@ -7157,6 +7157,7 @@ class GpuAbiContractTest(unittest.TestCase):
         v55_register = c_function_body(executor, "register_vulkan_dispatch_v55_identity")
         self.assertIn("return register_vulkan_runtime_identity_ids(", v55_register)
         self.assertIn("rt ? rt->queue : VK_NULL_HANDLE", v55_register)
+        self.assertIn("out_handles", v55_register)
 
         v6_prefix = c_function_body(executor, "validate_vulkan_graphics_v6_header_prefix")
         self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V630_ABI_MINOR", v6_prefix)
@@ -7178,10 +7179,12 @@ class GpuAbiContractTest(unittest.TestCase):
         v630_register = c_function_body(executor, "register_vulkan_graphics_v630_identity")
         self.assertIn("return register_vulkan_runtime_identity_ids(", v630_register)
         self.assertIn("rt ? rt->graphics_queue : VK_NULL_HANDLE", v630_register)
-        self.assertIn(
-            "register_vulkan_graphics_v630_identity(view, &g_vulkan_runtime)",
-            c_function_body(executor, "run_vulkan_graphics_v6_frame"),
-        )
+        self.assertIn("out_handles", v630_register)
+        graphics_run = c_function_body(executor, "run_vulkan_graphics_v6_frame")
+        self.assertIn("register_vulkan_graphics_v630_identity(view, &g_vulkan_runtime, &identity_handles)", graphics_run)
+        self.assertIn("identity_submit_queue = identity_handles.queue;", graphics_run)
+        self.assertIn("identity_submit_queue = g_vulkan_runtime.graphics_queue;", graphics_run)
+        self.assertIn("replay_command_buffer, identity_submit_queue, &submit_diag", graphics_run)
 
         runtime_register = c_function_body(executor, "register_vulkan_runtime_identity_ids")
         for marker in [
@@ -7191,6 +7194,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "register_vulkan_queue_id(queue_object_id, queue)",
             "lookup_vulkan_runtime_identity_ids(",
             "validate_vulkan_runtime_identity_handles(rt, queue, &handles)",
+            "if (out_handles) *out_handles = handles;",
         ]:
             self.assertIn(marker, runtime_register)
         runtime_lookup = c_function_body(executor, "lookup_vulkan_runtime_identity_ids")
@@ -7211,6 +7215,27 @@ class GpuAbiContractTest(unittest.TestCase):
             "return -EPROTO;",
         ]:
             self.assertIn(marker, runtime_validate)
+        for marker in [
+            "if (submit_queue == VK_NULL_HANDLE) submit_queue = rt->queue;",
+            "vkQueueSubmit(submit_queue, 1, &submit, fence)",
+        ]:
+            self.assertIn(marker, c_function_body(executor, "run_vulkan_dispatch_fd"))
+        handler = c_function_body(executor, "handle_vulkan_dispatch_v5_frame")
+        for marker in [
+            "VkQueue identity_submit_queue = VK_NULL_HANDLE;",
+            "register_vulkan_dispatch_v55_identity(frame, &header, &g_vulkan_runtime, &identity_handles)",
+            "identity_submit_queue = identity_handles.queue;",
+            "identity_submit_queue);",
+        ]:
+            self.assertIn(marker, handler)
+        graphics_submit = c_function_body(executor, "submit_vulkan_graphics_v6_command_buffer")
+        for marker in [
+            "!submit_queue",
+            "queue_submit2(submit_queue",
+            "vkQueueSubmit(submit_queue",
+            "vkQueueWaitIdle(submit_queue)",
+        ]:
+            self.assertIn(marker, graphics_submit)
 
     def test_vulkan_icd_serializes_native_object_identity_frames(self):
         icd = VULKAN_ICD.read_text()
@@ -8932,7 +8957,7 @@ class GpuAbiContractTest(unittest.TestCase):
         executor = GPU_EXECUTOR.read_text()
         body = c_function_body(executor, "submit_vulkan_graphics_v6_command_buffer")
         timeout_pos = body.index("if (vrc == VK_TIMEOUT)")
-        idle_pos = body.index("vkQueueWaitIdle(rt->graphics_queue)", timeout_pos)
+        idle_pos = body.index("vkQueueWaitIdle(submit_queue)", timeout_pos)
         destroy_pos = body.index("vkDestroyFence(rt->device, local_fence, NULL)", timeout_pos)
         return_pos = body.index("return -ETIMEDOUT;", timeout_pos)
         self.assertLess(timeout_pos, idle_pos)
@@ -14132,7 +14157,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "VkTimelineSemaphoreSubmitInfo timeline_info",
             "timeline_info.pWaitSemaphoreValues = wait_count ? wait_values : NULL;",
             "timeline_info.pSignalSemaphoreValues = signal_count ? signal_values : NULL;",
-            "rc = submit_vulkan_graphics_v6_command_buffer(\n        &g_vulkan_runtime, view, replay_command_buffer, &submit_diag);",
+            "rc = submit_vulkan_graphics_v6_command_buffer(\n        &g_vulkan_runtime, view, replay_command_buffer, identity_submit_queue, &submit_diag);",
         ]:
             self.assertIn(marker, executor)
         self.assertIn("const int is_v619 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V619_ABI_MINOR;", executor)
@@ -14222,7 +14247,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "VkSubmitInfo2 submit2",
             ".stageMask = wait_stage_masks2[i];",
             ".stageMask = signal_stage_masks2[i];",
-            "vrc = rt->queue_submit2(rt->graphics_queue, 1, &submit2, submit_fence);",
+            "vrc = rt->queue_submit2(submit_queue, 1, &submit2, submit_fence);",
             "vulkan_legacy_submit_stage_mask_from_stage2",
         ]:
             self.assertIn(marker, executor)
@@ -14230,7 +14255,7 @@ class GpuAbiContractTest(unittest.TestCase):
         submit_body = executor.split("static int submit_vulkan_graphics_v6_command_buffer", 1)[1].split(
             "static int run_vulkan_graphics_v6_frame", 1
         )[0]
-        self.assertLess(submit_body.index("if (rt->queue_submit2)"), submit_body.index("vkQueueSubmit(rt->graphics_queue"))
+        self.assertLess(submit_body.index("if (rt->queue_submit2)"), submit_body.index("vkQueueSubmit(submit_queue"))
         self.assertLess(submit_body.index("VkSubmitInfo2 submit2"), submit_body.index("vrc = rt->queue_submit2"))
         self.assertNotIn("(VkPipelineStageFlags)sync->stage_mask", submit_body)
 

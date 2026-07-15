@@ -15982,7 +15982,8 @@ static int run_vulkan_dispatch_fd(
         uint32_t gz,
         uint32_t base_x,
         uint32_t base_y,
-        uint32_t base_z) {
+        uint32_t base_z,
+        VkQueue submit_queue) {
     if (shader_fd < 0 ||
         (binding_count > 0 && (!buffer_fds || !bindings)) ||
         binding_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS || shader_size == 0 ||
@@ -16013,6 +16014,11 @@ static int run_vulkan_dispatch_fd(
     const int was_ready = g_vulkan_runtime.ready;
     if (init_vulkan_runtime(&g_vulkan_runtime) != 0) return -21;
     VulkanRuntime *rt = &g_vulkan_runtime;
+    if (submit_queue == VK_NULL_HANDLE) submit_queue = rt->queue;
+    if (submit_queue == VK_NULL_HANDLE) {
+        json_fail("vulkan-dispatch", "submit queue unavailable");
+        return -ENODEV;
+    }
     const uint32_t runtime_push_limit = rt->physical_properties.limits.maxPushConstantsSize;
     if (push_size > 0 && (runtime_push_limit == 0 || push_size > runtime_push_limit)) {
         json_fail("vulkan-dispatch", "push constants exceed runtime limit");
@@ -19025,7 +19031,7 @@ static int run_vulkan_dispatch_fd(
         fflush(stderr);
     }
     double queue_submit_start = now_ms();
-    rc = vkQueueSubmit(rt->queue, 1, &submit, fence);
+    rc = vkQueueSubmit(submit_queue, 1, &submit, fence);
     timing_queue_submit_ms = now_ms() - queue_submit_start;
     if (rc != VK_SUCCESS) {
         json_fail("submit-generic-dispatch", "vkQueueSubmit failed");
@@ -22591,7 +22597,8 @@ static int register_vulkan_runtime_identity_ids(
         uint64_t instance_object_id,
         uint64_t physical_device_object_id,
         uint64_t device_object_id,
-        uint64_t queue_object_id) {
+        uint64_t queue_object_id,
+        VulkanRuntimeIdentityHandles *out_handles) {
     if (!rt || !rt->ready || rt->instance == VK_NULL_HANDLE ||
         rt->physical_device == VK_NULL_HANDLE || rt->device == VK_NULL_HANDLE ||
         queue == VK_NULL_HANDLE) {
@@ -22617,13 +22624,17 @@ static int register_vulkan_runtime_identity_ids(
         queue_object_id,
         &handles);
     if (rc != 0) return rc;
-    return validate_vulkan_runtime_identity_handles(rt, queue, &handles);
+    rc = validate_vulkan_runtime_identity_handles(rt, queue, &handles);
+    if (rc != 0) return rc;
+    if (out_handles) *out_handles = handles;
+    return 0;
 }
 
 static int register_vulkan_dispatch_v55_identity(
         const unsigned char *frame,
         const PdockerGpuVulkanDispatchV5FrameHeader *header,
-        const VulkanRuntime *rt) {
+        const VulkanRuntime *rt,
+        VulkanRuntimeIdentityHandles *out_handles) {
     if (!frame || !header) return -EINVAL;
     if (header->abi_minor != PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR) return 0;
     const PdockerGpuVulkanDispatchV55FrameHeader *header_v55 =
@@ -22636,7 +22647,8 @@ static int register_vulkan_dispatch_v55_identity(
         header_v55->v55.instance_object_id,
         header_v55->v55.physical_device_object_id,
         header_v55->v55.device_object_id,
-        header_v55->v55.queue_object_id);
+        header_v55->v55.queue_object_id,
+        out_handles);
 }
 
 static int validate_vulkan_graphics_v630_identity_extension(
@@ -24755,7 +24767,8 @@ typedef struct VulkanGraphicsV6FrameView {
 
 static int register_vulkan_graphics_v630_identity(
         const VulkanGraphicsV6FrameView *view,
-        const VulkanRuntime *rt) {
+        const VulkanRuntime *rt,
+        VulkanRuntimeIdentityHandles *out_handles) {
     if (!view || !view->header) return -EINVAL;
     if (!view->is_v630 || !view->header_v630) return 0;
     int rc = validate_vulkan_graphics_v630_identity_extension(&view->header_v630->v630);
@@ -24766,7 +24779,8 @@ static int register_vulkan_graphics_v630_identity(
         view->header_v630->v630.instance_object_id,
         view->header_v630->v630.physical_device_object_id,
         view->header_v630->v630.device_object_id,
-        view->header_v630->v630.queue_object_id);
+        view->header_v630->v630.queue_object_id,
+        out_handles);
 }
 
 static int vulkan_graphics_descriptor_image_view_aspect_mask(
@@ -36781,9 +36795,10 @@ static int submit_vulkan_graphics_v6_command_buffer(
         VulkanRuntime *rt,
         const VulkanGraphicsV6FrameView *view,
         VkCommandBuffer command_buffer,
+        VkQueue submit_queue,
         VulkanGraphicsSubmitDiag *diag) {
     reset_vulkan_graphics_submit_diag(diag);
-    if (!rt || !view || !view->header || !command_buffer || !rt->device || !rt->graphics_queue) return -EINVAL;
+    if (!rt || !view || !view->header || !command_buffer || !rt->device || !submit_queue) return -EINVAL;
     const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *fence_sync = NULL;
     if (view->is_v619 && view->header_v619 && view->submit_syncs) {
         for (uint32_t i = 0; i < view->header_v619->v619.submit_sync_count; ++i) {
@@ -36939,7 +36954,7 @@ static int submit_vulkan_graphics_v6_command_buffer(
             diag->signal_count = signal_count;
             diag->timeline_used = timeline_used;
         }
-        vrc = rt->queue_submit2(rt->graphics_queue, 1, &submit2, submit_fence);
+        vrc = rt->queue_submit2(submit_queue, 1, &submit2, submit_fence);
     } else {
         VkTimelineSemaphoreSubmitInfo timeline_info;
         memset(&timeline_info, 0, sizeof(timeline_info));
@@ -36965,7 +36980,7 @@ static int submit_vulkan_graphics_v6_command_buffer(
             diag->signal_count = signal_count;
             diag->timeline_used = timeline_used;
         }
-        vrc = vkQueueSubmit(rt->graphics_queue, 1, &submit, submit_fence);
+        vrc = vkQueueSubmit(submit_queue, 1, &submit, submit_fence);
     }
     if (vrc != VK_SUCCESS) goto submit_fail;
     const uint64_t timeout_ns =
@@ -36980,7 +36995,7 @@ static int submit_vulkan_graphics_v6_command_buffer(
          * cannot turn into an in-flight Vulkan object use-after-free.
          */
         if (diag) diag->stage = "wait-submit-timeout-queue-idle";
-        VkResult idle_rc = vkQueueWaitIdle(rt->graphics_queue);
+        VkResult idle_rc = vkQueueWaitIdle(submit_queue);
         if (local_fence) vkDestroyFence(rt->device, local_fence, NULL);
         if (idle_rc != VK_SUCCESS) {
             if (diag) {
@@ -37067,10 +37082,15 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
         fflush(out);
         return rc;
     }
+    VkQueue identity_submit_queue = VK_NULL_HANDLE;
     if (view && view->is_v630) {
-        rc = register_vulkan_graphics_v630_identity(view, &g_vulkan_runtime);
+        VulkanRuntimeIdentityHandles identity_handles;
+        memset(&identity_handles, 0, sizeof(identity_handles));
+        rc = register_vulkan_graphics_v630_identity(view, &g_vulkan_runtime, &identity_handles);
         if (rc != 0) return rc;
+        identity_submit_queue = identity_handles.queue;
     }
+    if (identity_submit_queue == VK_NULL_HANDLE) identity_submit_queue = g_vulkan_runtime.graphics_queue;
     VulkanGraphicsReplayPipeline replay_pipelines[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_PIPELINES];
     VulkanGraphicsReplayLayouts replay_layouts;
     VulkanGraphicsReplayAttachments replay_attachments;
@@ -37314,7 +37334,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
 
     VulkanGraphicsSubmitDiag submit_diag;
     rc = submit_vulkan_graphics_v6_command_buffer(
-        &g_vulkan_runtime, view, replay_command_buffer, &submit_diag);
+        &g_vulkan_runtime, view, replay_command_buffer, identity_submit_queue, &submit_diag);
     if (rc != 0) {
         out = json_out();
         fprintf(out,
@@ -37761,17 +37781,21 @@ static int handle_vulkan_dispatch_v5_frame(int cfd) {
         json_fail("vulkan-dispatch-v5", "dispatch hash mismatch");
         goto cleanup;
     }
+    VkQueue identity_submit_queue = VK_NULL_HANDLE;
     if (header.abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR) {
         if (init_vulkan_runtime(&g_vulkan_runtime) != 0) {
             json_fail("vulkan-dispatch-v5", "vulkan runtime unavailable for native object identity");
             rc = -ENODEV;
             goto cleanup;
         }
-        rc = register_vulkan_dispatch_v55_identity(frame, &header, &g_vulkan_runtime);
+        VulkanRuntimeIdentityHandles identity_handles;
+        memset(&identity_handles, 0, sizeof(identity_handles));
+        rc = register_vulkan_dispatch_v55_identity(frame, &header, &g_vulkan_runtime, &identity_handles);
         if (rc != 0) {
             json_fail("vulkan-dispatch-v5", "failed to register native object identity");
             goto cleanup;
         }
+        identity_submit_queue = identity_handles.queue;
     }
     int dispatch_rc = run_vulkan_dispatch_fd(
         passed_fds[header.shader_fd_index], binding_fds, bindings, binding_count,
@@ -37784,7 +37808,8 @@ static int handle_vulkan_dispatch_v5_frame(int cfd) {
         header.gx, header.gy, header.gz,
         options.has_base_group ? options.base_group_x : 0,
         options.has_base_group ? options.base_group_y : 0,
-        options.has_base_group ? options.base_group_z : 0);
+        options.has_base_group ? options.base_group_z : 0,
+        identity_submit_queue);
     if (dispatch_rc != 0) {
         rc = dispatch_rc < 0 ? dispatch_rc : -EIO;
         goto cleanup;
@@ -38219,7 +38244,8 @@ static int serve_socket(const char *path) {
                                                  push, push_size, gx, gy, gz,
                                                  options.has_base_group ? options.base_group_x : 0,
                                                  options.has_base_group ? options.base_group_y : 0,
-                                                 options.has_base_group ? options.base_group_z : 0);
+                                                 options.has_base_group ? options.base_group_z : 0,
+                                                 VK_NULL_HANDLE);
                 }
                 free(bindings);
             } else if (strncmp(cmd, "VULKAN_DISPATCH_V1 ", 19) == 0) {
@@ -38277,7 +38303,8 @@ static int serve_socket(const char *path) {
                                                  shader_size, "main",
                                                  NULL, 0, NULL, 0,
                                                  NULL,
-                                                 push, push_size, gx, gy, gz, 0, 0, 0);
+                                                 push, push_size, gx, gy, gz, 0, 0, 0,
+                                                 VK_NULL_HANDLE);
                 }
                 free(bindings);
             } else {
