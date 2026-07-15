@@ -161,6 +161,27 @@ def q6_descriptor_leaf_signature(summary: dict[str, Any]) -> list[dict[str, Any]
         )
     return leaves
 
+def q6_control_dependency_signature(dependencies: Any) -> list[dict[str, Any]]:
+    if not isinstance(dependencies, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for dependency in dependencies:
+        if not isinstance(dependency, dict):
+            continue
+        item: dict[str, Any] = {
+            "predecessor_block_label": dependency.get("predecessor_block_label"),
+            "condition_id": dependency.get("condition_id"),
+            "branch_side": dependency.get("branch_side"),
+        }
+        condition = dependency.get("condition_dependencies")
+        if isinstance(condition, dict):
+            item["condition_dependencies"] = q6_dependency_signature(condition)
+            item["condition_op_histogram"] = condition.get("op_histogram") or {}
+            item["condition_slice_complete"] = condition.get("slice_complete")
+        out.append(item)
+    return out
+
+
 def q6_dependency_signature(summary: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(summary, dict):
         return {}
@@ -276,6 +297,7 @@ def q6_stage_target_signature(module: dict[str, Any]) -> dict[str, Any] | None:
                     "stored_value_named_arithmetic_histogram": stored_value.get("named_arithmetic_histogram") or {},
                     "stored_value_slice_complete": stored_value.get("slice_complete"),
                     "depends_on_debug_probe_binding": stored_value.get("depends_on_debug_probe_binding"),
+                    "control_dependencies": q6_control_dependency_signature(target.get("control_dependencies")),
                 }
             )
         output_store = phase.get("output_store") if isinstance(phase.get("output_store"), dict) else {}
@@ -389,6 +411,7 @@ def q6_final_store_value_flow_signature(module: dict[str, Any]) -> dict[str, Any
                 "output_index_op_histogram": output_index.get("op_histogram") or {},
                 "stored_value_dependencies": q6_dependency_signature(stored_value),
                 "output_index_dependencies": q6_dependency_signature(output_index),
+                "control_dependencies": q6_control_dependency_signature(store.get("control_dependencies")),
                 "debug_probe_exclusion_passed": debug_exclusion.get("passed"),
                 "valid": store.get("valid"),
             }

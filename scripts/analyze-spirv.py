@@ -654,14 +654,48 @@ def build_q6_probe_targets(module: dict, debug_descriptor: dict | None = None) -
                     branch_side = "true"
                 elif terminator.get("false_label") == block_label:
                     branch_side = "false"
-                conditional_predecessors_by_block[(function_id, block_label)].append(
-                    {
-                        "predecessor_block_label": predecessor.get("block_label"),
-                        "predecessor_block_ordinal": predecessor.get("block_ordinal"),
-                        "condition_id": terminator.get("condition_id"),
-                        "branch_side": branch_side,
-                    }
+                item = {
+                    "predecessor_block_label": predecessor.get("block_label"),
+                    "predecessor_block_ordinal": predecessor.get("block_ordinal"),
+                    "condition_id": terminator.get("condition_id"),
+                    "branch_side": branch_side,
+                }
+                if isinstance(terminator.get("condition_expr"), dict):
+                    item["condition_expr"] = terminator.get("condition_expr")
+                conditional_predecessors_by_block[(function_id, block_label)].append(item)
+
+    def compact_dependency_summary(summary: dict) -> dict:
+        return {
+            "root": summary.get("root"),
+            "op_histogram": summary.get("op_histogram") or {},
+            "ext_inst_histogram": summary.get("ext_inst_histogram") or {},
+            "group_nonuniform_histogram": summary.get("group_nonuniform_histogram") or {},
+            "named_arithmetic_histogram": summary.get("named_arithmetic_histogram") or {},
+            "spec_constant_dependencies": summary.get("spec_constant_dependencies") or [],
+            "constant_dependencies": summary.get("constant_dependencies") or [],
+            "builtin_dependencies": summary.get("builtin_dependencies") or [],
+            "push_constant_dependencies": summary.get("push_constant_dependencies") or [],
+            "descriptor_dependencies": summary.get("descriptor_dependencies") or [],
+            "descriptor_load_leaf_count": summary.get("descriptor_load_leaf_count"),
+            "slice_complete": summary.get("slice_complete"),
+            "depends_on_debug_probe_binding": summary.get("depends_on_debug_probe_binding"),
+            "truncation_boundaries": summary.get("truncation_boundaries") or {},
+        }
+
+    def control_dependencies_for_block(block: dict, word_index: int) -> list[dict]:
+        control_dependencies = []
+        for dependency in conditional_predecessors_by_block.get(
+            (block.get("function_id"), block.get("block_label")),
+            [],
+        ):
+            item = dict(dependency)
+            condition_expr = item.get("condition_expr")
+            if isinstance(condition_expr, dict):
+                item["condition_dependencies"] = compact_dependency_summary(
+                    collect_expression_dependencies(condition_expr, store_word_limit=word_index)
                 )
+            control_dependencies.append(item)
+        return control_dependencies
 
     def annotate_store(store: dict, phase: str, role: str, output_store_word_index: int | None = None) -> dict:
         word_index = int(store.get("word_index", -1))
@@ -680,6 +714,9 @@ def build_q6_probe_targets(module: dict, debug_descriptor: dict | None = None) -
         })
         same_workgroup_base = store_base_id in workgroup_load_base_ids if store_base_id is not None else False
         descriptor_load_leaf_count = int(stored_value_summary.get("descriptor_load_leaf_count") or 0)
+
+        control_dependencies = control_dependencies_for_block(block, word_index)
+
         role_requires_workgroup_load = False
         if role == "reduction_candidate":
             if bool(stored_value_summary.get("reaches_workgroup_load")) and same_workgroup_base:
@@ -738,10 +775,7 @@ def build_q6_probe_targets(module: dict, debug_descriptor: dict | None = None) -
                 "block_entry_insert_after_phi_word_index": candidate.get("block_entry_insert_after_phi_word_index"),
                 "block_exit_insert_before_word_index": candidate.get("block_exit_insert_before_word_index"),
             },
-            "control_dependencies": conditional_predecessors_by_block.get(
-                (block.get("function_id"), block.get("block_label")),
-                [],
-            ),
+            "control_dependencies": control_dependencies,
             "capture": [
                 "local_invocation_id",
                 "workgroup_id",
@@ -1456,6 +1490,8 @@ def build_q6_probe_targets(module: dict, debug_descriptor: dict | None = None) -
             index.get("expr", index) if isinstance(index, dict) else index
             for index in pointer_origin.get("indices", [])
         ])
+        block = block_for_word(output_word) or {}
+        control_dependencies = control_dependencies_for_block(block, output_word)
         stored_depends_on_debug = bool(stored_value.get("depends_on_debug_probe_binding"))
         index_depends_on_debug = bool(output_index.get("depends_on_debug_probe_binding"))
         final_store_flows.append(
@@ -1485,6 +1521,7 @@ def build_q6_probe_targets(module: dict, debug_descriptor: dict | None = None) -
                     "output_index_depends_on_debug_probe": index_depends_on_debug,
                     "passed": not stored_depends_on_debug and not index_depends_on_debug,
                 },
+                "control_dependencies": control_dependencies,
                 "valid": (
                     base.get("kind") == "descriptor"
                     and base.get("binding") == 2
@@ -2715,6 +2752,30 @@ def analyze_spirv(path: Path) -> dict:
         risk_notes.append("literal LocalSize differs from BuiltIn WorkgroupSize default; executor must materialize or specialize WorkgroupSize consistently before replay")
 
     control_flow = summarize_cfg(words)
+
+    def annotate_control_flow_condition_expressions() -> None:
+        def annotate_terminator(terminator: object) -> None:
+            if not isinstance(terminator, dict):
+                return
+            if terminator.get("op") != "OpBranchConditional":
+                return
+            condition_id = terminator.get("condition_id")
+            if not isinstance(condition_id, int):
+                return
+            terminator["condition_expr"] = describe_id_expr(condition_id)
+
+        for function in control_flow.get("functions", []):
+            if not isinstance(function, dict):
+                continue
+            for block in function.get("blocks", []):
+                if not isinstance(block, dict):
+                    continue
+                annotate_terminator(block.get("terminator_instruction"))
+                for predecessor in block.get("predecessors", []) or []:
+                    if isinstance(predecessor, dict):
+                        annotate_terminator(predecessor.get("terminator_instruction"))
+
+    annotate_control_flow_condition_expressions()
 
     def block_for_word_in_cfg(word_index: int) -> dict | None:
         for function in control_flow.get("functions", []):

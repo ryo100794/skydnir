@@ -115,6 +115,12 @@ or closes.
   verifier rejects stale observation order, feedback policy, or word-index
   mismatches before any runtime evidence can be promoted. Evidence:
   `python3 -m unittest tests.test_gpu_abi_contract.GpuAbiContractTest.test_native_q6_probe_write_instrumentation_validates -q`.
+- [done] **Q6 control-condition dataflow lane**: `analyze-spirv.py` now
+  records dependency summaries for conditional branch predicates that gate Q6
+  target blocks, and `compare-spirv-dataflow.py` compares those predicates so
+  push/control gate drift is visible as a static mismatch path before another
+  device run. Evidence:
+  `python3 -m unittest tests.test_gpu_abi_contract.GpuAbiContractTest.test_spirv_dataflow_compare_reports_q6_stage_target_support_paths -q`.
 - [done] **bounded dispatch+graphics mixed-submit lane**: Command buffers may now
   contain generic compute dispatch side work before or after a graphics replay
   frame. Submit wait sync is split before pre-graphics dispatches, completion

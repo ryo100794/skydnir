@@ -16484,6 +16484,17 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertEqual(by_phase["full"]["source_workgroup_base_ids"], [143])
         self.assertEqual(by_phase["tail"]["output_store"]["word_index"], 3789)
         self.assertEqual(by_phase["full"]["output_store"]["word_index"], 6653)
+        self.assertEqual(
+            [12, 12],
+            [
+                by_phase["tail"]["preceding_workgroup_stores"][index]["control_dependencies"][0]["condition_dependencies"]["push_constant_dependencies"][0]["member_offset"]
+                for index in (0, 1)
+            ],
+        )
+        self.assertIn(
+            "OpULessThan",
+            by_phase["full"]["preceding_workgroup_stores"][0]["control_dependencies"][0]["condition_dependencies"]["op_histogram"],
+        )
         self.assertEqual(by_phase["tail"]["output_store"]["base"]["kind"], "descriptor")
         self.assertEqual(by_phase["tail"]["output_store"]["base"]["binding"], 2)
         self.assertEqual(
@@ -16590,6 +16601,14 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertEqual(flow["valid_store_count"], 2)
         self.assertEqual([store["word_index"] for store in flow["stores"]], [4053, 7371])
         self.assertEqual(flow["debug_probe_descriptor"], {"set": 0, "binding": 6})
+        self.assertEqual([1, 1], [len(store.get("control_dependencies", [])) for store in flow["stores"]])
+        self.assertEqual(
+            ["OpINotEqual", "OpINotEqual"],
+            [
+                next(iter(store["control_dependencies"][0]["condition_dependencies"]["op_histogram"]))
+                for store in flow["stores"]
+            ],
+        )
         expected_descriptor_leaves = [
             [
                 (2156, 2145, 2144, 0, 294, 208, 210),
@@ -17477,7 +17496,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertEqual(descriptor_comparison["path_diffs"][0]["kind"], "value")
 
     def test_spirv_dataflow_compare_reports_q6_final_store_flow_paths(self):
-        def flow_payload(op_count: int) -> dict:
+        def flow_payload(op_count: int, control_push_offset: int = 28) -> dict:
             return {
                 "schema": "pdocker.spirv.analysis.v1",
                 "path": "synthetic.spv",
@@ -17509,6 +17528,20 @@ class GpuAbiContractTest(unittest.TestCase):
                                     "op_histogram": {"OpIAdd": op_count},
                                 },
                                 "output_index": {"op_histogram": {"OpIAdd": 1}},
+                                "control_dependencies": [
+                                    {
+                                        "predecessor_block_label": 7,
+                                        "condition_id": 99,
+                                        "branch_side": "true",
+                                        "condition_dependencies": {
+                                            "push_constant_dependencies": [
+                                                {"variable_id": 1, "member_index": 7, "member_offset": control_push_offset}
+                                            ],
+                                            "op_histogram": {"OpINotEqual": 1},
+                                            "slice_complete": True,
+                                        },
+                                    }
+                                ],
                                 "debug_probe_exclusion": {"passed": True},
                                 "valid": True,
                             }
@@ -17542,6 +17575,29 @@ class GpuAbiContractTest(unittest.TestCase):
         )
         self.assertEqual(q6_flow["path_diffs"][0]["kind"], "value")
 
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            left = tmp_path / "left.analysis.json"
+            right = tmp_path / "right.analysis.json"
+            out = tmp_path / "compare.json"
+            left.write_text(json.dumps(flow_payload(2, control_push_offset=28), indent=2, sort_keys=True) + "\n")
+            right.write_text(json.dumps(flow_payload(2, control_push_offset=32), indent=2, sort_keys=True) + "\n")
+            result = subprocess.run(
+                ["python3", str(SPIRV_DATAFLOW_COMPARE), str(left), str(right), "--json-out", str(out)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self.assertEqual(result.returncode, 2, result.stderr)
+            report = json.loads(out.read_text())
+
+        q6_flow = next(item for item in report["comparisons"] if item["name"] == "q6_final_store_value_flow")
+        self.assertFalse(q6_flow["match"])
+        self.assertIn(
+            "q6_final_store_value_flow.stores[0].control_dependencies[0].condition_dependencies.push_constants[0].member_offset",
+            q6_flow["diff_paths"],
+        )
 
     def test_spirv_dataflow_compare_reports_q6_stage_target_support_paths(self):
         def analysis_payload(
@@ -17550,6 +17606,7 @@ class GpuAbiContractTest(unittest.TestCase):
             descriptor_binding: int = 0,
             target_base_id: int = 143,
             load_base_id: int = 143,
+            control_push_offset: int = 0,
         ) -> dict:
             return {
                 "schema": "pdocker.spirv.analysis.v1",
@@ -17587,6 +17644,20 @@ class GpuAbiContractTest(unittest.TestCase):
                                         "store_workgroup_base_id": target_base_id,
                                         "workgroup_load_base_ids": [load_base_id] if support_kind == "same-workgroup-load" else [],
                                     },
+                                    "control_dependencies": [
+                                        {
+                                            "predecessor_block_label": 11,
+                                            "condition_id": 101,
+                                            "branch_side": "true",
+                                            "condition_dependencies": {
+                                                "push_constant_dependencies": [
+                                                    {"variable_id": 1, "member_index": 0, "member_offset": control_push_offset}
+                                                ],
+                                                "op_histogram": {"OpULessThan": 1},
+                                                "slice_complete": True,
+                                            },
+                                        }
+                                    ],
                                     "stored_value": {
                                         "workgroup_loads": [
                                             {"pointer_base": {"kind": "variable", "storage_class": "Workgroup", "id": load_base_id}}
@@ -17701,6 +17772,38 @@ class GpuAbiContractTest(unittest.TestCase):
         )
         self.assertIn(
             "q6_stage_targets.phases[0].preceding_workgroup_stores[0].stored_value_workgroup_load_bases[0].id",
+            stage_targets["diff_paths"],
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            left = tmp_path / "left.analysis.json"
+            right = tmp_path / "right.analysis.json"
+            out = tmp_path / "compare.json"
+            left.write_text(json.dumps(
+                analysis_payload("same-workgroup-load", control_push_offset=0),
+                indent=2,
+                sort_keys=True,
+            ) + "\n")
+            right.write_text(json.dumps(
+                analysis_payload("same-workgroup-load", control_push_offset=4),
+                indent=2,
+                sort_keys=True,
+            ) + "\n")
+            result = subprocess.run(
+                ["python3", str(SPIRV_DATAFLOW_COMPARE), str(left), str(right), "--json-out", str(out)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self.assertEqual(result.returncode, 2, result.stderr)
+            report = json.loads(out.read_text())
+
+        stage_targets = next(item for item in report["comparisons"] if item["name"] == "q6_stage_targets")
+        self.assertFalse(stage_targets["match"])
+        self.assertIn(
+            "q6_stage_targets.phases[0].preceding_workgroup_stores[0].control_dependencies[0].condition_dependencies.push_constants[0].member_offset",
             stage_targets["diff_paths"],
         )
 
