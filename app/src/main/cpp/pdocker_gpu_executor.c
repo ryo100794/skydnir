@@ -16546,6 +16546,22 @@ static int run_vulkan_dispatch_fd(
             : strict_passthrough
             ? (legalize_workgroup_env ? "strict-env" : "strict-passthrough")
             : "env-default";
+    const int allow_strict_shader_compat_rewrites =
+        env_truthy("PDOCKER_GPU_ALLOW_STRICT_SHADER_COMPAT_REWRITES", 0);
+    if (strict_passthrough &&
+        legalize_workgroup_size_from_spec &&
+        !allow_strict_shader_compat_rewrites) {
+        json_fail("vulkan-dispatch", "strict passthrough blocks shader compatibility rewrites");
+        ret = 64;
+        goto cleanup;
+    }
+    if (strict_passthrough &&
+        materialize_specialization_requested &&
+        !allow_strict_shader_compat_rewrites) {
+        json_fail("vulkan-dispatch", "strict passthrough blocks shader compatibility rewrites");
+        ret = 64;
+        goto cleanup;
+    }
     if (legalize_workgroup_size_from_spec) {
         /*
          * Some ggml SPIR-V modules carry a literal OpExecutionMode LocalSize
@@ -16601,6 +16617,13 @@ static int run_vulkan_dispatch_fd(
         options && options->has_add_float16_capability_for_storage16
             ? options->add_float16_capability_for_storage16
             : env_truthy("PDOCKER_GPU_ADD_FLOAT16_CAPABILITY_FOR_STORAGE16", 0);
+    if (strict_passthrough &&
+        add_float16_capability_for_storage16 &&
+        !allow_strict_shader_compat_rewrites) {
+        json_fail("vulkan-dispatch", "strict passthrough blocks shader compatibility rewrites");
+        ret = 64;
+        goto cleanup;
+    }
     if (add_float16_capability_for_storage16 &&
         spirv_uses_float16_type(shader_code, shader_size) &&
         !spirv_has_capability(shader_code, shader_size, 9)) {
@@ -16626,6 +16649,12 @@ static int run_vulkan_dispatch_fd(
         (options && options->has_strict_duplicate_descriptor_normalization
             ? options->strict_duplicate_descriptor_normalization
             : env_truthy("PDOCKER_GPU_STRICT_DUPLICATE_DESCRIPTOR_NORMALIZATION", 0));
+    if (strict_duplicate_descriptor_normalization &&
+        !allow_strict_shader_compat_rewrites) {
+        json_fail("vulkan-dispatch", "strict passthrough blocks shader compatibility rewrites");
+        ret = 64;
+        goto cleanup;
+    }
     const int q4k_safe_kernel_requested =
         options && options->has_q4k_safe_kernel
             ? options->q4k_safe_kernel
@@ -16646,8 +16675,6 @@ static int run_vulkan_dispatch_fd(
         q4k_safe_kernel_requested ||
         q6k_safe_kernel_requested ||
         q6k_compat_rewrites_requested;
-    const int allow_strict_shader_compat_rewrites =
-        env_truthy("PDOCKER_GPU_ALLOW_STRICT_SHADER_COMPAT_REWRITES", 0);
     if (strict_passthrough &&
         strict_shader_compat_rewrites_requested &&
         !allow_strict_shader_compat_rewrites) {

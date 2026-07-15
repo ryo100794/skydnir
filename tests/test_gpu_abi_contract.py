@@ -7964,6 +7964,22 @@ class GpuAbiContractTest(unittest.TestCase):
             source.index("strict passthrough blocks shader compatibility rewrites"),
             source.index("replace_spirv_module(&shader_code, &shader_size, kQ6kSafeSpv"),
         )
+        self.assertLess(
+            source.index("strict passthrough blocks shader compatibility rewrites"),
+            source.index("local_size_patched = patch_spirv_literal_local_size_from_spec"),
+        )
+        self.assertLess(
+            source.index("strict passthrough blocks shader compatibility rewrites"),
+            source.index("specialization_materialized = materialize_spirv_specialization_constants"),
+        )
+        self.assertLess(
+            source.index("strict passthrough blocks shader compatibility rewrites"),
+            source.index("float16_capability_added =\n            add_spirv_capability"),
+        )
+        self.assertLess(
+            source.index("strict passthrough blocks shader compatibility rewrites"),
+            source.index("if (rewrite_duplicate_descriptor_bindings("),
+        )
         self.assertNotIn("memcpy(shader_code, kQ4kSafeSpv", source)
         self.assertNotIn("memcpy(shader_code, kQ6kSafeSpv", source)
         self.assertIn("PDOCKER_GPU_Q6K_SAFE_KERNEL is an explicit diagnostic override", source)
