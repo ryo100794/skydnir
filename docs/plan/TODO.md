@@ -400,6 +400,10 @@ or closes.
   stack barrier ceiling.  Compute dispatch recording now preserves zero group
   counts when calling `vkCmdDispatch`/`vkCmdDispatchBase`; zero-sized Vulkan
   dispatches remain API no-ops instead of being rewritten to one workgroup.
+  Android V5 framed compute dispatch now validates push constants against the
+  Android runtime `maxPushConstantsSize` after Vulkan initialization instead
+  of the executor text-command scratch buffer size; legacy V1-V4 text commands
+  still keep their small fixed push scratch as a text transport limit.
   Variable descriptor-count layouts now use V6.29
   metadata to carry allocation-time actual descriptor counts, so partially sized
   descriptor arrays are validated and replayed by actual count instead of being

@@ -2910,3 +2910,16 @@ comparison evidence.
 
 Validation: `env -u PYTHONPATH python3 -m unittest tests.test_gpu_abi_contract -q`
 and `bash scripts/build-native-android-ndk.sh`.
+
+### 2026-07-15 Android compute V5 push-constant receiver limit lane
+
+CPU/static pass-through work removed the Android executor V5 framed-dispatch
+receiver dependency on `PDOCKER_GPU_MAX_PUSH_BYTES`.  V5 frame parsing now only
+checks that the push range exists inside the received frame and fits host
+`size_t`; `run_vulkan_dispatch_fd` initializes Vulkan first and validates the
+push byte count against the advertised Android runtime `maxPushConstantsSize`
+before creating the pipeline layout and calling `vkCmdPushConstants`.  Legacy
+text commands still keep their fixed push scratch buffer as a text transport
+limit; producer-side heap push storage remains separate follow-up work.
+
+Validation: `env -u PYTHONPATH python3 -m unittest tests.test_gpu_abi_contract -q`.

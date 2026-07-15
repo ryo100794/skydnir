@@ -5485,6 +5485,17 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("char option_copy[PDOCKER_GPU_MAX_COMMAND_BYTES];", handler)
         self.assertNotIn("header.option_text_size >= PDOCKER_GPU_MAX_COMMAND_BYTES", handler)
 
+    def test_vulkan_dispatch_v5_push_constants_use_runtime_limit_not_static_frame_cap(self):
+        executor = GPU_EXECUTOR.read_text()
+        handler = c_function_body(executor, "handle_vulkan_dispatch_v5_frame")
+        runner = c_function_body(executor, "run_vulkan_dispatch_fd")
+        self.assertIn("header.push_size > (uint64_t)SIZE_MAX", handler)
+        self.assertNotIn("header.push_size > PDOCKER_GPU_MAX_PUSH_BYTES", handler)
+        self.assertIn("const uint32_t runtime_push_limit = rt->physical_properties.limits.maxPushConstantsSize;", runner)
+        self.assertIn("push constants exceed runtime limit", runner)
+        self.assertIn("push_size > UINT32_MAX", runner)
+        self.assertNotIn("push_size > PDOCKER_GPU_MAX_PUSH_BYTES", runner)
+
     def test_vulkan_dispatch_v5_2_executor_validates_and_materializes_layout_ranges(self):
         executor = GPU_EXECUTOR.read_text()
         converter = (

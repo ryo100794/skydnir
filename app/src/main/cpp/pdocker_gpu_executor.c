@@ -15715,8 +15715,8 @@ static int run_vulkan_dispatch_fd(
     if (shader_fd < 0 ||
         (binding_count > 0 && (!buffer_fds || !bindings)) ||
         binding_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS || shader_size == 0 ||
-        shader_size > 8 * 1024 * 1024 || push_size > PDOCKER_GPU_MAX_PUSH_BYTES ||
-        specialization_count > UINT32_MAX) {
+        shader_size > 8 * 1024 * 1024 || push_size > UINT32_MAX ||
+        (push_size > 0 && !push) || specialization_count > UINT32_MAX) {
         json_fail("vulkan-dispatch", "invalid dispatch metadata");
         return 64;
     }
@@ -15742,6 +15742,11 @@ static int run_vulkan_dispatch_fd(
     const int was_ready = g_vulkan_runtime.ready;
     if (init_vulkan_runtime(&g_vulkan_runtime) != 0) return -21;
     VulkanRuntime *rt = &g_vulkan_runtime;
+    const uint32_t runtime_push_limit = rt->physical_properties.limits.maxPushConstantsSize;
+    if (push_size > 0 && (runtime_push_limit == 0 || push_size > runtime_push_limit)) {
+        json_fail("vulkan-dispatch", "push constants exceed runtime limit");
+        return 64;
+    }
     const char *fail_stage = "start";
     const uint64_t dispatch_lifecycle_id =
         __sync_add_and_fetch(&g_vulkan_dispatch_lifecycle_sequence, 1);
@@ -37111,7 +37116,7 @@ static int handle_vulkan_dispatch_v5_frame(int cfd) {
     }
     memcpy(entry_name, entry_ptr, (size_t)header.entry_name_size);
     const uint8_t *push = (const uint8_t *)v5_frame_range(frame, &header, header.push_offset, header.push_size);
-    if (header.push_size > PDOCKER_GPU_MAX_PUSH_BYTES || (header.push_size > 0 && !push)) {
+    if (header.push_size > (uint64_t)SIZE_MAX || (header.push_size > 0 && !push)) {
         json_fail("vulkan-dispatch-v5", "invalid push constants");
         goto cleanup;
     }
