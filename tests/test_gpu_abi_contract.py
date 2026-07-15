@@ -8071,6 +8071,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("q4k_pipeline_retry_enabled", q4_retry_block)
         self.assertIn("strict passthrough", q4_retry_block)
         self.assertIn("Q4_K", q4_retry_block)
+        self.assertLess(
+            source.index("strict passthrough blocks shader compatibility rewrites"),
+            source.index("q4k_pipeline_retry_attempted = q4k_pipeline_retry_enabled"),
+        )
         self.assertIn('"evidence_policy": "q4k_callsite_gated"', LLAMA_GPU_ENV_MANIFEST.read_text())
         self.assertIn('evidence_policy == "q4k_callsite_gated"', compare)
         self.assertNotIn("callsite_gated_config_envs", compare)

@@ -16826,6 +16826,13 @@ static int run_vulkan_dispatch_fd(
         (options && options->has_q4k_pipeline_retry_ladder
             ? options->q4k_pipeline_retry_ladder
             : env_truthy("PDOCKER_GPU_Q4K_PIPELINE_RETRY_LADDER", 0));
+    if (strict_passthrough &&
+        q4k_pipeline_retry_enabled &&
+        !allow_strict_shader_compat_rewrites) {
+        json_fail("vulkan-dispatch", "strict passthrough blocks shader compatibility rewrites");
+        ret = 64;
+        goto cleanup;
+    }
     dispatch_lifecycle_spirv_hash = original_spirv_hash;
     const char *strict_reconciliation_field = NULL;
     if (strict_reconciliation && strict_reconciliation_has_mismatch(
