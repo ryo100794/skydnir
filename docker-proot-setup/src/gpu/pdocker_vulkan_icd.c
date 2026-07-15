@@ -7657,6 +7657,9 @@ static bool command_buffer_has_executor_frame_content_in_sequence_range(
 }
 
 typedef struct {
+    PdockerGpuVulkanGraphicsV619SubmitSyncEntry submit_syncs[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+    PdockerGpuVulkanGraphicsV621SubmitInfoEntry submit_infos[PDOCKER_GPU_VULKAN_GRAPHICS_V621_MAX_SUBMIT_INFOS];
+    PdockerGpuVulkanGraphicsV621SubmitSyncInfoEntry submit_sync_infos[PDOCKER_GPU_VULKAN_GRAPHICS_V621_MAX_SUBMIT_SYNC_INFOS];
     PdockerGpuVulkanDispatchV5ResourceEntry resources[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_RESOURCES];
     PdockerGpuVulkanDispatchV5DescriptorObjectEntry descriptors[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS];
     PdockerGpuVulkanDispatchV5ImageEntry image_entries[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGES];
@@ -7821,20 +7824,61 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     image_view_objects = object_tables->image_view_objects;
     sampler_objects = object_tables->sampler_objects;
     fds = object_tables->fds;
-    submit_syncs = (PdockerGpuVulkanGraphicsV619SubmitSyncEntry *)calloc(
-        PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS, sizeof(*submit_syncs));
-    submit_infos = (PdockerGpuVulkanGraphicsV621SubmitInfoEntry *)calloc(
-        PDOCKER_GPU_VULKAN_GRAPHICS_V621_MAX_SUBMIT_INFOS, sizeof(*submit_infos));
-    submit_sync_infos = (PdockerGpuVulkanGraphicsV621SubmitSyncInfoEntry *)calloc(
-        PDOCKER_GPU_VULKAN_GRAPHICS_V621_MAX_SUBMIT_SYNC_INFOS, sizeof(*submit_sync_infos));
-    if (!submit_syncs || !submit_infos || !submit_sync_infos) {
-        free(submit_sync_infos);
-        free(submit_infos);
-        free(submit_syncs);
+    transport_tables = (PdockerVkGraphicsTransportTables *)calloc(1, sizeof(*transport_tables));
+    if (!transport_tables) {
         free(object_tables);
         close(socket_fd);
         return -ENOMEM;
     }
+    submit_syncs = transport_tables->submit_syncs;
+    submit_infos = transport_tables->submit_infos;
+    submit_sync_infos = transport_tables->submit_sync_infos;
+    resources = transport_tables->resources;
+    descriptors = transport_tables->descriptors;
+    image_entries = transport_tables->image_entries;
+    image_view_entries = transport_tables->image_view_entries;
+    sampler_entries = transport_tables->sampler_entries;
+    shader_stages = transport_tables->shader_stages;
+    pipelines = transport_tables->pipelines;
+    vertex_bindings = transport_tables->vertex_bindings;
+    vertex_attributes = transport_tables->vertex_attributes;
+    attachments = transport_tables->attachments;
+    dynamic_states = transport_tables->dynamic_states;
+    commands = transport_tables->commands;
+    dynamic_offsets = transport_tables->dynamic_offsets;
+    push_metadata = transport_tables->push_metadata;
+    image_barriers = transport_tables->image_barriers;
+    memory_barriers = transport_tables->memory_barriers;
+    buffer_barriers = transport_tables->buffer_barriers;
+    specialization_entries = transport_tables->specialization_entries;
+    depth_stencil_states = transport_tables->depth_stencil_states;
+    resolve_attachments = transport_tables->resolve_attachments;
+    static_pipeline_states = transport_tables->static_pipeline_states;
+    color_blend_states = transport_tables->color_blend_states;
+    color_blend_attachments = transport_tables->color_blend_attachments;
+    viewport_scissor_states = transport_tables->viewport_scissor_states;
+    viewport_entries = transport_tables->viewport_entries;
+    scissor_entries = transport_tables->scissor_entries;
+    indirect_draws = transport_tables->indirect_draws;
+    buffer_copies = transport_tables->buffer_copies;
+    buffer_image_copies = transport_tables->buffer_image_copies;
+    image_copies = transport_tables->image_copies;
+    fill_buffers = transport_tables->fill_buffers;
+    update_buffers = transport_tables->update_buffers;
+    clear_color_images = transport_tables->clear_color_images;
+    clear_depth_stencil_images = transport_tables->clear_depth_stencil_images;
+    resolve_images = transport_tables->resolve_images;
+    blit_images = transport_tables->blit_images;
+    clear_attachments_commands = transport_tables->clear_attachments_commands;
+    query_commands = transport_tables->query_commands;
+    copy_query_results = transport_tables->copy_query_results;
+    multisample_states = transport_tables->multisample_states;
+    tessellation_states = transport_tables->tessellation_states;
+    pipeline_layout_sets = transport_tables->pipeline_layout_sets;
+    descriptor_binds = transport_tables->descriptor_binds;
+    event_wait_refs = transport_tables->event_wait_refs;
+    buffer_views = transport_tables->buffer_views;
+    push_constant_ranges = transport_tables->push_constant_ranges;
     if (submit_sync_count > 0) {
         memcpy(submit_syncs, submit_sync_entries, submit_sync_count * sizeof(submit_syncs[0]));
     }
@@ -7953,6 +7997,8 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     size_t frame_capacity = PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_FRAME_BYTES;
     unsigned char *frame = (unsigned char *)calloc(1, frame_capacity);
     if (!frame) {
+        free(transport_tables);
+        free(object_tables);
         close(socket_fd);
         return -ENOMEM;
     }
@@ -8189,58 +8235,6 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
             } \
         } \
     } while (0)
-    frame_build_phase = "graphics-transport-tables-allocate";
-    transport_tables = (PdockerVkGraphicsTransportTables *)calloc(1, sizeof(*transport_tables));
-    if (!transport_tables) {
-        rc = -ENOMEM;
-        goto cleanup;
-    }
-    resources = transport_tables->resources;
-    descriptors = transport_tables->descriptors;
-    image_entries = transport_tables->image_entries;
-    image_view_entries = transport_tables->image_view_entries;
-    sampler_entries = transport_tables->sampler_entries;
-    shader_stages = transport_tables->shader_stages;
-    pipelines = transport_tables->pipelines;
-    vertex_bindings = transport_tables->vertex_bindings;
-    vertex_attributes = transport_tables->vertex_attributes;
-    attachments = transport_tables->attachments;
-    dynamic_states = transport_tables->dynamic_states;
-    commands = transport_tables->commands;
-    dynamic_offsets = transport_tables->dynamic_offsets;
-    push_metadata = transport_tables->push_metadata;
-    image_barriers = transport_tables->image_barriers;
-    memory_barriers = transport_tables->memory_barriers;
-    buffer_barriers = transport_tables->buffer_barriers;
-    specialization_entries = transport_tables->specialization_entries;
-    depth_stencil_states = transport_tables->depth_stencil_states;
-    resolve_attachments = transport_tables->resolve_attachments;
-    static_pipeline_states = transport_tables->static_pipeline_states;
-    color_blend_states = transport_tables->color_blend_states;
-    color_blend_attachments = transport_tables->color_blend_attachments;
-    viewport_scissor_states = transport_tables->viewport_scissor_states;
-    viewport_entries = transport_tables->viewport_entries;
-    scissor_entries = transport_tables->scissor_entries;
-    indirect_draws = transport_tables->indirect_draws;
-    buffer_copies = transport_tables->buffer_copies;
-    buffer_image_copies = transport_tables->buffer_image_copies;
-    image_copies = transport_tables->image_copies;
-    fill_buffers = transport_tables->fill_buffers;
-    update_buffers = transport_tables->update_buffers;
-    clear_color_images = transport_tables->clear_color_images;
-    clear_depth_stencil_images = transport_tables->clear_depth_stencil_images;
-    resolve_images = transport_tables->resolve_images;
-    blit_images = transport_tables->blit_images;
-    clear_attachments_commands = transport_tables->clear_attachments_commands;
-    query_commands = transport_tables->query_commands;
-    copy_query_results = transport_tables->copy_query_results;
-    multisample_states = transport_tables->multisample_states;
-    tessellation_states = transport_tables->tessellation_states;
-    pipeline_layout_sets = transport_tables->pipeline_layout_sets;
-    descriptor_binds = transport_tables->descriptor_binds;
-    event_wait_refs = transport_tables->event_wait_refs;
-    buffer_views = transport_tables->buffer_views;
-    push_constant_ranges = transport_tables->push_constant_ranges;
     if (pre_need_v616_clear_attachments) {
         ENSURE_GRAPHICS_V616_CLEAR_TABLES();
     }
@@ -10860,9 +10854,6 @@ cleanup:
                 command_count, submit_sync_count, image_layout_range_count,
                 (image_layout_range_count > 0) ? 1 : 0, fd_count, cursor);
     }
-    free(submit_sync_infos);
-    free(submit_infos);
-    free(submit_syncs);
     free(variable_descriptor_counts);
     free(descriptor_set_layouts);
     free(image_layout_ranges);
