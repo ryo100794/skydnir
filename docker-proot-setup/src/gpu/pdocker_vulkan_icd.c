@@ -7686,7 +7686,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     PdockerGpuVulkanGraphicsV621SubmitSyncInfoEntry submit_sync_infos[PDOCKER_GPU_VULKAN_GRAPHICS_V621_MAX_SUBMIT_SYNC_INFOS];
     PdockerGpuVulkanGraphicsV622MultisampleStateEntry multisample_states[PDOCKER_GPU_VULKAN_GRAPHICS_V622_MAX_MULTISAMPLE_STATES];
     PdockerGpuVulkanGraphicsV623TessellationStateEntry tessellation_states[PDOCKER_GPU_VULKAN_GRAPHICS_V623_MAX_TESSELLATION_STATES];
-    PdockerGpuVulkanGraphicsV624DescriptorSetLayoutEntry descriptor_set_layouts[PDOCKER_GPU_VULKAN_GRAPHICS_V624_MAX_DESCRIPTOR_SET_LAYOUT_BINDINGS];
+    PdockerGpuVulkanGraphicsV624DescriptorSetLayoutEntry *descriptor_set_layouts = NULL;
     PdockerGpuVulkanGraphicsV624PipelineLayoutSetEntry pipeline_layout_sets[PDOCKER_GPU_VULKAN_GRAPHICS_V624_MAX_PIPELINE_LAYOUT_SETS];
     PdockerGpuVulkanGraphicsV625DescriptorBindEntry descriptor_binds[PDOCKER_GPU_VULKAN_GRAPHICS_V625_MAX_DESCRIPTOR_BINDS];
     PdockerGpuVulkanGraphicsV626EventWaitRefEntry event_wait_refs[PDOCKER_GPU_VULKAN_GRAPHICS_V626_MAX_EVENT_WAIT_REFS];
@@ -7748,7 +7748,6 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     memset(submit_sync_infos, 0, sizeof(submit_sync_infos));
     memset(multisample_states, 0, sizeof(multisample_states));
     memset(tessellation_states, 0, sizeof(tessellation_states));
-    memset(descriptor_set_layouts, 0, sizeof(descriptor_set_layouts));
     memset(pipeline_layout_sets, 0, sizeof(pipeline_layout_sets));
     memset(descriptor_binds, 0, sizeof(descriptor_binds));
     memset(event_wait_refs, 0, sizeof(event_wait_refs));
@@ -8422,12 +8421,22 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
         pipeline_objects[pipeline_count++] = pipeline;
     }
 
-    frame_build_phase = "layout-metadata-collect";
-    rc = collect_graphics_v624_layout_metadata(
-        descriptor_set_layouts, &descriptor_set_layout_count,
-        pipeline_layout_sets, &pipeline_layout_set_count,
-        pipeline_objects, pipeline_count);
-    if (rc != 0) goto cleanup;
+    if (pipeline_count > 0) {
+        frame_build_phase = "layout-metadata-allocate";
+        descriptor_set_layouts = (PdockerGpuVulkanGraphicsV624DescriptorSetLayoutEntry *)calloc(
+            PDOCKER_GPU_VULKAN_GRAPHICS_V624_MAX_DESCRIPTOR_SET_LAYOUT_BINDINGS,
+            sizeof(*descriptor_set_layouts));
+        if (!descriptor_set_layouts) {
+            rc = -ENOMEM;
+            goto cleanup;
+        }
+        frame_build_phase = "layout-metadata-collect";
+        rc = collect_graphics_v624_layout_metadata(
+            descriptor_set_layouts, &descriptor_set_layout_count,
+            pipeline_layout_sets, &pipeline_layout_set_count,
+            pipeline_objects, pipeline_count);
+        if (rc != 0) goto cleanup;
+    }
     need_v624_layout_metadata = descriptor_set_layout_count > 0 || pipeline_layout_set_count > 0;
     rc = collect_graphics_v628_push_constant_ranges(
         push_constant_ranges, &push_constant_range_count, pipeline_objects, pipeline_count);
@@ -10652,6 +10661,7 @@ cleanup:
                 command_count, submit_sync_count, image_layout_range_count,
                 (image_layout_range_count > 0) ? 1 : 0, fd_count, cursor);
     }
+    free(descriptor_set_layouts);
     free(image_layout_ranges);
     free(frame);
     close(socket_fd);
