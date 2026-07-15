@@ -11434,8 +11434,7 @@ static void run_cpu_oracle_rope_yarn(
         return;
     }
     const uint64_t max_dispatch_invocations =
-        (uint64_t)(gx ? gx : 1u) * (uint64_t)(gy ? gy : 1u) *
-        (uint64_t)(gz ? gz : 1u) * 256ull;
+        (uint64_t)gx * (uint64_t)gy * (uint64_t)gz * 256ull;
     const uint64_t max_float_ops = max_dispatch_invocations * 2ull;
     if (max_float_ops > 4ull * 1024ull * 1024ull) {
         free(x); free(y); free(z); free(i_buf); free(dst);
@@ -11447,9 +11446,9 @@ static void run_cpu_oracle_rope_yarn(
     report->expected_hash = 1469598103934665603ull;
     report->gpu_hash = 1469598103934665603ull;
     const uint64_t half_n_dims = (uint64_t)n_dims >> 1;
-    const uint32_t dispatch_x = gx ? gx : 1u;
-    const uint32_t dispatch_y = gy ? gy : 1u;
-    const uint32_t dispatch_z = gz ? gz : 1u;
+    const uint32_t dispatch_x = gx;
+    const uint32_t dispatch_y = gy;
+    const uint32_t dispatch_z = gz;
     for (uint32_t zc = 0; zc < dispatch_z; ++zc) {
         for (uint32_t wy = 0; wy < dispatch_y; ++wy) {
             for (uint32_t ly = 0; ly < 256u; ++ly) {
@@ -13616,9 +13615,9 @@ static void run_cpu_oracle_small_f32_indexing(
     }
     report->expected_hash = 1469598103934665603ull;
     report->gpu_hash = 1469598103934665603ull;
-    const uint64_t max_invocations = (uint64_t)(gx ? gx : 1u) * 256ull *
-                                     (uint64_t)(gy ? gy : 1u) *
-                                     (uint64_t)(gz ? gz : 1u);
+    const uint64_t max_invocations = (uint64_t)gx * 256ull *
+                                     (uint64_t)gy *
+                                     (uint64_t)gz;
     const uint64_t max_iterations = max_invocations * 2ull;
     if (max_iterations > 4ull * 1024ull * 1024ull) {
         free(src0);
@@ -13628,9 +13627,9 @@ static void run_cpu_oracle_small_f32_indexing(
         return;
     }
     const uint8_t *gpu_dst_base = (const uint8_t *)vk_buffers[idx2]->map + binding_gpu_offset[idx2];
-    for (uint32_t z = 0; z < (gz ? gz : 1u); ++z) {
-        for (uint32_t y = 0; y < (gy ? gy : 1u); ++y) {
-            for (uint32_t wx = 0; wx < (gx ? gx : 1u); ++wx) {
+    for (uint32_t z = 0; z < gz; ++z) {
+        for (uint32_t y = 0; y < gy; ++y) {
+            for (uint32_t wx = 0; wx < gx; ++wx) {
                 for (uint32_t lx = 0; lx < 256u; ++lx) {
                     uint64_t base_id = ((uint64_t)z * 262144ull) +
                                        ((uint64_t)y * 512ull) +
@@ -18453,9 +18452,9 @@ static int run_vulkan_dispatch_fd(
         }
         rt->cmd_dispatch_base(command_buffer,
                               base_x, base_y, base_z,
-                              gx ? gx : 1, gy ? gy : 1, gz ? gz : 1);
+                              gx, gy, gz);
     } else {
-        vkCmdDispatch(command_buffer, gx ? gx : 1, gy ? gy : 1, gz ? gz : 1);
+        vkCmdDispatch(command_buffer, gx, gy, gz);
     }
     uint32_t post_barrier_count = 0;
     for (size_t i = 0; i < binding_count; ++i) {

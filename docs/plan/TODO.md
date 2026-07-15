@@ -397,7 +397,10 @@ or closes.
   fail-closed queue-family ownership checks.  Descriptor-bind image layout
   transition barriers now also use a heap arena sized by the validated graphics
   descriptor table count, so image descriptor binds no longer inherit a 16-entry
-  stack barrier ceiling.  Variable descriptor-count layouts now use V6.29
+  stack barrier ceiling.  Compute dispatch recording now preserves zero group
+  counts when calling `vkCmdDispatch`/`vkCmdDispatchBase`; zero-sized Vulkan
+  dispatches remain API no-ops instead of being rewritten to one workgroup.
+  Variable descriptor-count layouts now use V6.29
   metadata to carry allocation-time actual descriptor counts, so partially sized
   descriptor arrays are validated and replayed by actual count instead of being
   widened to the declared layout maximum.

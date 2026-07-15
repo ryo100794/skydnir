@@ -8833,6 +8833,12 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("options.has_base_group ? options.base_group_z : 0", executor)
         self.assertIn("cmd_dispatch_base", executor)
         self.assertIn("vkCmdDispatchBase is unavailable", executor)
+        executor_dispatch_body = c_function_body(executor, "run_vulkan_dispatch_fd")
+        self.assertIn("vkCmdDispatch(command_buffer, gx, gy, gz);", executor_dispatch_body)
+        self.assertIn("base_x, base_y, base_z,\n                              gx, gy, gz);", executor_dispatch_body)
+        self.assertNotIn("gx ? gx : 1", executor_dispatch_body)
+        self.assertNotIn("gy ? gy : 1", executor_dispatch_body)
+        self.assertNotIn("gz ? gz : 1", executor_dispatch_body)
         push_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdPushConstants", 1)[1].split(
             "static bool image_subresource_range_is_whole_image", 1
         )[0]

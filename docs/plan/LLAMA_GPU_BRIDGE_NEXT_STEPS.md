@@ -2898,3 +2898,15 @@ while preserving the original API binding numbers in descriptor writes.
 
 Validation: `env -u PYTHONPATH python3 -m unittest tests.test_gpu_abi_contract -q`
 and `bash scripts/build-native-android-ndk.sh`.
+
+### 2026-07-15 Android compute zero-dispatch identity lane
+
+CPU/static pass-through work now preserves Vulkan zero group-count dispatches.
+`run_vulkan_dispatch_fd` sends `gx/gy/gz` unchanged to `vkCmdDispatch` and
+`vkCmdDispatchBase` instead of rewriting zero dimensions to one workgroup.  The
+Q6 CPU diagnostic oracles also iterate the exact dispatch dimensions, so a
+zero-sized application dispatch remains a no-op in both native replay and
+comparison evidence.
+
+Validation: `env -u PYTHONPATH python3 -m unittest tests.test_gpu_abi_contract -q`
+and `bash scripts/build-native-android-ndk.sh`.
