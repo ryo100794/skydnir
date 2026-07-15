@@ -6560,7 +6560,7 @@ static int collect_graphics_v624_descriptor_set_layout_metadata(
         const PdockerVkDescriptorSetLayout *layout) {
     if (!entries || !entry_count || !layout) return -EINVAL;
     if (layout->layout_id == 0 ||
-        layout->storage_binding_count > PDOCKER_VK_MAX_STORAGE_BUFFERS) {
+        layout->storage_binding_count > PDOCKER_GPU_VULKAN_GRAPHICS_V624_MAX_DESCRIPTOR_BINDINGS_PER_SET) {
         return -EPROTO;
     }
     if (layout->unsupported_descriptor_array || layout->unsupported_descriptor_type) {

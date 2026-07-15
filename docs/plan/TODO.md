@@ -433,6 +433,9 @@ or closes.
   narrowing and redundant CPU copies for specialization payloads.  Dispatch
   command recording now fails closed if the dispatch-op table cannot reserve an
   entry, so submit never observes a silently truncated compute command buffer.
+  Graphics V6.24 descriptor-set-layout metadata now validates against its own
+  per-set binding cap on both producer and Android frame-validation sides; full
+  heap-backed V6.30 layout transport remains the path to remove that ABI cap.
   Variable descriptor-count layouts now use V6.29
   metadata to carry allocation-time actual descriptor counts, so partially sized
   descriptor arrays are validated and replayed by actual count instead of being

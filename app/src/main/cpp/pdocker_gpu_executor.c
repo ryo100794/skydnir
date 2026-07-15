@@ -26478,11 +26478,18 @@ static int validate_vulkan_graphics_v6_frame_content(
                  !vulkan_descriptor_type_requires_sampler(descriptor_type))) {
                 return -EPROTO;
             }
-            for (uint32_t n = m + 1; n < header_v624->v624.descriptor_set_layout_count; ++n) {
+            uint32_t layout_binding_count = 1;
+            for (uint32_t n = 0; n < header_v624->v624.descriptor_set_layout_count; ++n) {
+                if (n == m) continue;
                 const PdockerGpuVulkanGraphicsV624DescriptorSetLayoutEntry *other = &descriptor_set_layouts[n];
-                if (entry->layout_id == other->layout_id && entry->binding == other->binding) {
+                if (entry->layout_id != other->layout_id) continue;
+                layout_binding_count++;
+                if (entry->binding == other->binding) {
                     return -EPROTO;
                 }
+            }
+            if (layout_binding_count > PDOCKER_GPU_VULKAN_GRAPHICS_V624_MAX_DESCRIPTOR_BINDINGS_PER_SET) {
+                return -EPROTO;
             }
         }
         for (uint32_t m = 0; m < header_v624->v624.descriptor_set_layout_count; ++m) {
