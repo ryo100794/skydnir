@@ -289,6 +289,14 @@ or closes.
   feature/extension bits on manual command buffers/queues so tests exercise
   the current API gate instead of bypassing it.  Acceptance: host tests
   `tests.test_vulkan_icd_sync_harness` and `tests.test_gpu_abi_contract` pass.
+- [done] **Vulkan non-byte-linear image fail-closed CPU harness lane**:
+  Host C harness coverage now proves block-compressed and Vulkan 1.1
+  multiplanar image formats are not advertised as ordinary bridge image
+  formats, `vkGetPhysicalDeviceImageFormatProperties` and `vkCreateImage`
+  reject them with `VK_ERROR_FORMAT_NOT_SUPPORTED`, rejected property structs
+  stay zeroed, and plane-aspect image views are not accepted as byte-linear
+  color views.  Acceptance: host tests `tests.test_vulkan_icd_feature_chain`
+  and `tests.test_gpu_abi_contract` pass.
 - [planned] **residual graphics evidence gaps**: Do not promote full Vulkan
   pass-through until remaining fail-closed lanes have explicit ABI/evidence:
   dual-aspect depth+stencil copy layout, explicit compressed/multiplanar image

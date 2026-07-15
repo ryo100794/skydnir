@@ -4680,6 +4680,134 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
+    def test_non_byte_linear_image_formats_are_fail_closed(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            #ifndef VK_IMAGE_ASPECT_PLANE_0_BIT
+            #define VK_IMAGE_ASPECT_PLANE_0_BIT ((VkImageAspectFlagBits)0x00000010)
+            #endif
+
+            static VkImageCreateInfo image_info_for_format(VkFormat format) {{
+                VkImageCreateInfo info;
+                memset(&info, 0, sizeof(info));
+                info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+                info.imageType = VK_IMAGE_TYPE_2D;
+                info.format = format;
+                info.extent.width = 64;
+                info.extent.height = 64;
+                info.extent.depth = 1;
+                info.mipLevels = 1;
+                info.arrayLayers = 1;
+                info.samples = VK_SAMPLE_COUNT_1_BIT;
+                info.tiling = VK_IMAGE_TILING_OPTIMAL;
+                info.usage = VK_IMAGE_USAGE_SAMPLED_BIT;
+                info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+                info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+                return info;
+            }}
+
+            static int expect_image_format_rejected(VkFormat format, int code) {{
+                VkFormatProperties format_props;
+                memset(&format_props, 0xff, sizeof(format_props));
+                vkGetPhysicalDeviceFormatProperties(VK_NULL_HANDLE, format, &format_props);
+                if (format_props.bufferFeatures != 0 ||
+                    format_props.linearTilingFeatures != 0 ||
+                    format_props.optimalTilingFeatures != 0) {{
+                    fprintf(stderr, "case %d unsupported format advertised features buffer=0x%x linear=0x%x optimal=0x%x\\n",
+                            code,
+                            (unsigned)format_props.bufferFeatures,
+                            (unsigned)format_props.linearTilingFeatures,
+                            (unsigned)format_props.optimalTilingFeatures);
+                    return code;
+                }}
+
+                VkImageFormatProperties image_props;
+                memset(&image_props, 0xff, sizeof(image_props));
+                VkResult rc = vkGetPhysicalDeviceImageFormatProperties(
+                    VK_NULL_HANDLE,
+                    format,
+                    VK_IMAGE_TYPE_2D,
+                    VK_IMAGE_TILING_OPTIMAL,
+                    VK_IMAGE_USAGE_SAMPLED_BIT,
+                    0,
+                    &image_props);
+                if (rc != VK_ERROR_FORMAT_NOT_SUPPORTED) {{
+                    fprintf(stderr, "case %d image format query returned %d\\n", code, rc);
+                    return code + 10;
+                }}
+                if (image_props.maxExtent.width != 0 ||
+                    image_props.maxMipLevels != 0 ||
+                    image_props.sampleCounts != 0 ||
+                    image_props.maxResourceSize != 0) {{
+                    fprintf(stderr, "case %d rejected image query left nonzero properties\\n", code);
+                    return code + 20;
+                }}
+
+                VkImageCreateInfo info = image_info_for_format(format);
+                rc = validate_image_create_info_for_transport(&info);
+                if (rc != VK_ERROR_FORMAT_NOT_SUPPORTED) {{
+                    fprintf(stderr, "case %d validate image create returned %d\\n", code, rc);
+                    return code + 30;
+                }}
+
+                VkImage image = (VkImage)(uintptr_t)0x1234u;
+                rc = vkCreateImage(VK_NULL_HANDLE, &info, NULL, &image);
+                if (rc != VK_ERROR_FORMAT_NOT_SUPPORTED || image != VK_NULL_HANDLE) {{
+                    fprintf(stderr, "case %d create image rc=%d image=%p\\n", code, rc, (void *)image);
+                    return code + 40;
+                }}
+                return 0;
+            }}
+
+            int main(void) {{
+                setenv("PDOCKER_VULKAN_HEAP_BYTES", "2147483648", 1);
+                setenv("PDOCKER_VULKAN_MAX_BUFFER_BYTES", "2147483648", 1);
+
+                if (expect_image_format_rejected(VK_FORMAT_BC1_RGBA_UNORM_BLOCK, 2)) return 2;
+            #ifdef VK_VERSION_1_1
+                if (expect_image_format_rejected(VK_FORMAT_G8_B8R8_2PLANE_420_UNORM, 3)) return 3;
+            #endif
+
+                PdockerVkImage color_image;
+                memset(&color_image, 0, sizeof(color_image));
+                color_image.format = VK_FORMAT_R8G8B8A8_UNORM;
+                color_image.image_type = VK_IMAGE_TYPE_2D;
+                color_image.extent.width = 16;
+                color_image.extent.height = 16;
+                color_image.extent.depth = 1;
+                color_image.mip_levels = 1;
+                color_image.array_layers = 1;
+                color_image.samples = VK_SAMPLE_COUNT_1_BIT;
+                color_image.usage = VK_IMAGE_USAGE_SAMPLED_BIT;
+
+                VkImageViewCreateInfo view;
+                memset(&view, 0, sizeof(view));
+                view.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+                view.image = pdocker_vk_image_to_handle(&color_image);
+                view.viewType = VK_IMAGE_VIEW_TYPE_2D;
+                view.format = color_image.format;
+                view.subresourceRange.aspectMask = VK_IMAGE_ASPECT_PLANE_0_BIT;
+                view.subresourceRange.baseMipLevel = 0;
+                view.subresourceRange.levelCount = 1;
+                view.subresourceRange.baseArrayLayer = 0;
+                view.subresourceRange.layerCount = 1;
+                if (validate_image_view_create_info_for_transport(&view, NULL) != VK_ERROR_FORMAT_NOT_SUPPORTED) {{
+                    fprintf(stderr, "plane-aspect image view was accepted as byte-linear color\\n");
+                    return 4;
+                }}
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
     def test_device_queue_lookup_shape_is_fail_closed(self):
         source = textwrap.dedent(
             f"""
