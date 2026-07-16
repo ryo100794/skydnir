@@ -13786,6 +13786,131 @@ static int resolve_vulkan_dispatch_group_counts(
     return 0;
 }
 
+static int validate_strict_descriptor_transport_invariant(
+        uint64_t dispatch_id,
+        uint32_t set_index,
+        uint32_t binding_index,
+        uint32_t array_element,
+        VkDeviceSize dispatch_offset,
+        size_t bytes,
+        VkDeviceSize api_offset,
+        VkDeviceSize api_range,
+        size_t api_buffer_size,
+        VkDeviceSize api_dynamic_offset,
+        VkDeviceSize api_memory_offset,
+        size_t api_memory_size,
+        uint64_t api_memory_id,
+        uint64_t api_buffer_id) {
+    uint64_t effective_api_offset = 0;
+    uint64_t expected_dispatch_offset = 0;
+    uint64_t descriptor_end = 0;
+    uint64_t descriptor_range = 0;
+    uint64_t descriptor_range_end = 0;
+    uint64_t memory_end = 0;
+
+    if (api_memory_id == 0 || api_buffer_id == 0 || api_buffer_size == 0 ||
+        api_memory_size == 0 || bytes == 0) {
+        fprintf(stderr,
+                "pdocker-vulkan-icd: strict descriptor transport invariant rejected: missing object metadata dispatch_id=%llu set=%u binding=%u array=%u memory_id=%llu buffer_id=%llu buffer_size=%zu memory_size=%zu size=%zu\n",
+                (unsigned long long)dispatch_id,
+                set_index,
+                binding_index,
+                array_element,
+                (unsigned long long)api_memory_id,
+                (unsigned long long)api_buffer_id,
+                api_buffer_size,
+                api_memory_size,
+                bytes);
+        return -EINVAL;
+    }
+
+    if (!checked_add_u64((uint64_t)api_offset,
+                         (uint64_t)api_dynamic_offset,
+                         &effective_api_offset) ||
+        !checked_add_u64((uint64_t)api_memory_offset,
+                         effective_api_offset,
+                         &expected_dispatch_offset)) {
+        fprintf(stderr,
+                "pdocker-vulkan-icd: strict descriptor transport invariant rejected: effective offset overflow dispatch_id=%llu set=%u binding=%u array=%u memory_offset=%llu api_offset=%llu dynamic_offset=%llu\n",
+                (unsigned long long)dispatch_id,
+                set_index,
+                binding_index,
+                array_element,
+                (unsigned long long)api_memory_offset,
+                (unsigned long long)api_offset,
+                (unsigned long long)api_dynamic_offset);
+        return -EOVERFLOW;
+    }
+
+    if ((uint64_t)dispatch_offset != expected_dispatch_offset) {
+        fprintf(stderr,
+                "pdocker-vulkan-icd: strict descriptor transport invariant rejected: dispatch offset mismatch dispatch_id=%llu set=%u binding=%u array=%u dispatch_offset=%llu expected=%llu memory_offset=%llu api_offset=%llu dynamic_offset=%llu\n",
+                (unsigned long long)dispatch_id,
+                set_index,
+                binding_index,
+                array_element,
+                (unsigned long long)dispatch_offset,
+                (unsigned long long)expected_dispatch_offset,
+                (unsigned long long)api_memory_offset,
+                (unsigned long long)api_offset,
+                (unsigned long long)api_dynamic_offset);
+        return -ERANGE;
+    }
+
+    if (!checked_add_u64(effective_api_offset, (uint64_t)bytes, &descriptor_end) ||
+        descriptor_end > (uint64_t)api_buffer_size) {
+        fprintf(stderr,
+                "pdocker-vulkan-icd: strict descriptor transport invariant rejected: transfer outside buffer dispatch_id=%llu set=%u binding=%u array=%u effective_offset=%llu size=%zu buffer_size=%zu\n",
+                (unsigned long long)dispatch_id,
+                set_index,
+                binding_index,
+                array_element,
+                (unsigned long long)effective_api_offset,
+                bytes,
+                api_buffer_size);
+        return -ERANGE;
+    }
+
+    if (api_range == VK_WHOLE_SIZE) {
+        descriptor_range = (uint64_t)api_buffer_size - effective_api_offset;
+    } else {
+        descriptor_range = (uint64_t)api_range;
+    }
+    if (descriptor_range == 0 || bytes > descriptor_range ||
+        !checked_add_u64(effective_api_offset, descriptor_range, &descriptor_range_end) ||
+        descriptor_range_end > (uint64_t)api_buffer_size) {
+        fprintf(stderr,
+                "pdocker-vulkan-icd: strict descriptor transport invariant rejected: descriptor range outside buffer dispatch_id=%llu set=%u binding=%u array=%u effective_offset=%llu range=%llu size=%zu buffer_size=%zu\n",
+                (unsigned long long)dispatch_id,
+                set_index,
+                binding_index,
+                array_element,
+                (unsigned long long)effective_api_offset,
+                (unsigned long long)api_range,
+                bytes,
+                api_buffer_size);
+        return -ERANGE;
+    }
+
+    if (!checked_add_u64((uint64_t)api_memory_offset,
+                         (uint64_t)api_buffer_size,
+                         &memory_end) ||
+        memory_end > (uint64_t)api_memory_size) {
+        fprintf(stderr,
+                "pdocker-vulkan-icd: strict descriptor transport invariant rejected: buffer outside memory dispatch_id=%llu set=%u binding=%u array=%u memory_offset=%llu buffer_size=%zu memory_size=%zu\n",
+                (unsigned long long)dispatch_id,
+                set_index,
+                binding_index,
+                array_element,
+                (unsigned long long)api_memory_offset,
+                api_buffer_size,
+                api_memory_size);
+        return -ERANGE;
+    }
+
+    return 0;
+}
+
 static int send_generic_vulkan_dispatch_op(
         const PdockerVkDispatchOp *op,
         const PdockerVkQueue *submit_queue,
@@ -14122,6 +14247,24 @@ static int send_generic_vulkan_dispatch_op(
                 api_buffer_view_offsets[binding_count] = transport_buffer_view ? transport_buffer_view->offset : 0;
                 api_buffer_view_ranges[binding_count] = transport_buffer_view ? transport_buffer_view->range : 0;
                 api_buffer_view_generations[binding_count] = transport_buffer_view ? transport_buffer_view->generation : 0;
+                if (strict_passthrough) {
+                    int invariant_rc = validate_strict_descriptor_transport_invariant(
+                        dispatch_id,
+                        set_index,
+                        api_binding,
+                        array_element,
+                        offsets[binding_count],
+                        sizes[binding_count],
+                        api_offsets[binding_count],
+                        api_ranges[binding_count],
+                        api_buffer_sizes[binding_count],
+                        api_dynamic_offsets[binding_count],
+                        api_memory_offsets[binding_count],
+                        api_memory_sizes[binding_count],
+                        api_memory_ids[binding_count],
+                        api_buffer_ids[binding_count]);
+                    if (invariant_rc != 0) return invariant_rc;
+                }
                 fds[1 + binding_count] = dispatch_memory->fd;
                 trace_guarded_binding(api_binding, dispatch_memory, dispatch_offset, bytes);
                 if (alias_hit && trace_allocations()) {

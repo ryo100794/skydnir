@@ -9,6 +9,18 @@ llama.cpp itself remains unmodified.
 
 ## Current Ground Truth
 
+
+### 2026-07-16 CPU/static strict descriptor offset invariant lane
+
+The strict Vulkan descriptor transport contract was tightened without changing
+llama.cpp, Dockerfiles, models, prompts, or shader bytes.  The ICD now validates
+sender-side descriptor coordinates using `api_offset + api_dynamic_offset` before
+framing, while the executor treats V5 `binding.api_offset` as the already
+normalized effective offset and preserves `api_base_offset` for dynamic
+`VkDescriptorBufferInfo.offset`.  V4 text dispatch remains unsuitable for strict
+dynamic descriptors because it does not carry `api_dynamic_offset`; strict
+dispatch continues to require V5 framing.
+
 The current implementation is a Skydnir-owned glibc Vulkan ICD bridge plus an
 APK-owned Android Vulkan executor.  The container still owns llama.cpp model
 loading, graph construction, sampling, and HTTP serving.  The bridge only

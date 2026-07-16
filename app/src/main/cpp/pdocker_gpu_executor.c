@@ -1275,6 +1275,27 @@ static size_t vulkan_binding_descriptor_range(
     return binding->size;
 }
 
+static int vulkan_binding_effective_api_offset_u64(
+        const VulkanDispatchBinding *binding,
+        uint64_t *out) {
+    if (!binding || !out || binding->api_offset < 0) return -EINVAL;
+    *out = (uint64_t)binding->api_offset;
+    return 0;
+}
+
+static int vulkan_binding_descriptor_api_offset_u64(
+        const VulkanDispatchBinding *binding,
+        uint64_t *out) {
+    if (!binding || !out || binding->api_offset < 0) return -EINVAL;
+    if (binding->api_dynamic) {
+        if (binding->api_base_offset < 0) return -EINVAL;
+        *out = (uint64_t)binding->api_base_offset;
+    } else {
+        *out = (uint64_t)binding->api_offset;
+    }
+    return 0;
+}
+
 static int vulkan_binding_offset_equals_memory_plus_api_offset(
         const VulkanDispatchBinding *binding) {
     if (!binding || binding->offset < 0 ||
@@ -1282,18 +1303,20 @@ static int vulkan_binding_offset_equals_memory_plus_api_offset(
         return 0;
     }
     const uint64_t memory_offset = (uint64_t)binding->api_memory_offset;
-    const uint64_t api_offset = (uint64_t)binding->api_offset;
+    uint64_t api_offset = 0;
     uint64_t expected_offset = 0;
-    if (checked_u64_add3(memory_offset, api_offset, 0, &expected_offset) != 0) return 0;
+    if (vulkan_binding_effective_api_offset_u64(binding, &api_offset) != 0 ||
+        checked_u64_add3(memory_offset, api_offset, 0, &expected_offset) != 0) return 0;
     return (uint64_t)binding->offset == expected_offset;
 }
 
 static int vulkan_binding_descriptor_offset_equals_api_offset(
         const VulkanDispatchBinding *binding,
         size_t binding_descriptor_offset) {
-    if (!binding || binding->api_offset < 0 ||
-        (uint64_t)binding->api_offset > (uint64_t)SIZE_MAX) return 0;
-    return binding_descriptor_offset == (size_t)binding->api_offset;
+    uint64_t descriptor_offset = 0;
+    if (vulkan_binding_descriptor_api_offset_u64(binding, &descriptor_offset) != 0 ||
+        descriptor_offset > (uint64_t)SIZE_MAX) return 0;
+    return binding_descriptor_offset == (size_t)descriptor_offset;
 }
 
 static int vulkan_binding_gpu_offset_equals_memory_plus_api_offset(
@@ -1303,7 +1326,8 @@ static int vulkan_binding_gpu_offset_equals_memory_plus_api_offset(
         return 0;
     }
     const uint64_t memory_offset = (uint64_t)binding->api_memory_offset;
-    const uint64_t api_offset = (uint64_t)binding->api_offset;
+    uint64_t api_offset = 0;
+    if (vulkan_binding_effective_api_offset_u64(binding, &api_offset) != 0) return 0;
     if (memory_offset > UINT64_MAX - api_offset) return 0;
     const uint64_t gpu_offset = memory_offset + api_offset;
     if (gpu_offset > (uint64_t)SIZE_MAX) return 0;
@@ -6141,13 +6165,15 @@ static int validate_strict_vulkan_binding_contract(
             field = "api_offset";
         } else {
             const uint64_t memory_offset = (uint64_t)b->api_memory_offset;
-            const uint64_t descriptor_offset = (uint64_t)b->api_offset;
+            uint64_t descriptor_offset = 0;
             const uint64_t binding_offset = (uint64_t)b->offset;
             const uint64_t buffer_size = (uint64_t)b->api_buffer_size;
             const uint64_t memory_size = (uint64_t)b->api_memory_size;
             const uint64_t binding_size = (uint64_t)b->size;
             const uint64_t descriptor_range = (uint64_t)b->api_range;
-            if (descriptor_offset > buffer_size ||
+            if (vulkan_binding_effective_api_offset_u64(b, &descriptor_offset) != 0) {
+                field = "api_offset";
+            } else if (descriptor_offset > buffer_size ||
                 binding_size > buffer_size - descriptor_offset) {
                 field = "api_offset";
             } else if (descriptor_range == 0 ||
@@ -10632,10 +10658,11 @@ static int vulkan_binding_api_absolute_range(
         return 0;
     }
     const uint64_t memory_offset = (uint64_t)binding->api_memory_offset;
-    const uint64_t api_offset = (uint64_t)binding->api_offset;
+    uint64_t api_offset = 0;
     uint64_t s = 0;
     uint64_t e = 0;
-    if (checked_u64_add3(memory_offset, api_offset, 0, &s) != 0 ||
+    if (vulkan_binding_effective_api_offset_u64(binding, &api_offset) != 0 ||
+        checked_u64_add3(memory_offset, api_offset, 0, &s) != 0 ||
         checked_u64_add3(s, (uint64_t)binding->size, 0, &e) != 0) return 0;
     if (start) *start = s;
     if (end) *end = e;
@@ -17589,8 +17616,10 @@ static int run_vulkan_dispatch_fd(
             bindings[i].api_memory_offset >= 0 &&
             bindings[i].api_offset >= 0) {
             uint64_t descriptor_absolute_u64 = 0;
-            if (checked_u64_add3((uint64_t)bindings[i].api_memory_offset,
-                                 (uint64_t)bindings[i].api_offset, 0, &descriptor_absolute_u64) != 0 ||
+            uint64_t effective_api_offset = 0;
+            if (vulkan_binding_effective_api_offset_u64(&bindings[i], &effective_api_offset) != 0 ||
+                checked_u64_add3((uint64_t)bindings[i].api_memory_offset,
+                                 effective_api_offset, 0, &descriptor_absolute_u64) != 0 ||
                 checked_u64_to_off_t(descriptor_absolute_u64, &descriptor_absolute) != 0) {
                 fail_binding = (int)i;
                 fail_stage = "strict-descriptor-absolute";
@@ -17604,9 +17633,18 @@ static int run_vulkan_dispatch_fd(
         }
         binding_descriptor_offset[i] = binding_gpu_offset[i];
         if (strict_passthrough && bindings[i].api_offset >= 0) {
-            binding_descriptor_offset[i] = (size_t)bindings[i].api_offset;
+            uint64_t descriptor_api_offset = 0;
+            if (vulkan_binding_descriptor_api_offset_u64(&bindings[i], &descriptor_api_offset) != 0 ||
+                descriptor_api_offset > (uint64_t)SIZE_MAX) {
+                fail_binding = (int)i;
+                fail_stage = "strict-descriptor-api-offset";
+                json_fail("vulkan-dispatch", "strict descriptor api offset overflow");
+                ret = 64;
+                goto cleanup;
+            }
+            binding_descriptor_offset[i] = (size_t)descriptor_api_offset;
             binding_gpu_offset[i] = strict_device_local_staging
-                ? binding_descriptor_offset[i]
+                ? (size_t)bindings[i].api_offset
                 : (size_t)descriptor_absolute;
         }
     }
@@ -17633,7 +17671,8 @@ static int run_vulkan_dispatch_fd(
             if (bindings[i].api_memory_offset < 0 || bindings[i].api_offset < 0 ||
                 checked_u64_to_off_t((uint64_t)bindings[i].api_memory_offset, &cache_binding.offset) != 0 ||
                 checked_u64_add3((uint64_t)bindings[i].api_offset,
-                                 (uint64_t)bindings[i].size, 0, &cache_binding_size) != 0 ||
+                                 (uint64_t)bindings[i].size,
+                                 0, &cache_binding_size) != 0 ||
                 cache_binding_size > (uint64_t)SIZE_MAX) {
                 fail_binding = (int)i;
                 fail_stage = "strict-readonly-resident-cache-range";
@@ -17662,7 +17701,16 @@ static int run_vulkan_dispatch_fd(
                 strict_resident_cached_bindings[i] = 1;
                 strict_graph_active_bindings[i] = 0;
                 binding_gpu_offset[i] = (size_t)bindings[i].api_offset;
-                binding_descriptor_offset[i] = (size_t)bindings[i].api_offset;
+                uint64_t descriptor_api_offset = 0;
+                if (vulkan_binding_descriptor_api_offset_u64(&bindings[i], &descriptor_api_offset) != 0 ||
+                    descriptor_api_offset > (uint64_t)SIZE_MAX) {
+                    fail_binding = (int)i;
+                    fail_stage = "strict-readonly-resident-cache-descriptor-offset";
+                    json_fail("vulkan-dispatch", "strict readonly resident cache descriptor offset overflow");
+                    ret = 64;
+                    goto cleanup;
+                }
+                binding_descriptor_offset[i] = (size_t)descriptor_api_offset;
                 continue;
             }
             if (vk_buffers[i] == &temp_buffers[i]) {
@@ -39528,6 +39576,7 @@ static int serve_socket(const char *path) {
                     tok = strtok_r(NULL, " ", &save);
                     if (!tok) { parse_ok = 0; break; }
                     bindings[i].api_offset = (off_t)strtoll(tok, NULL, 10);
+                    bindings[i].api_base_offset = bindings[i].api_offset;
                     tok = strtok_r(NULL, " ", &save);
                     if (!tok) { parse_ok = 0; break; }
                     bindings[i].api_range = (size_t)strtoull(tok, NULL, 10);

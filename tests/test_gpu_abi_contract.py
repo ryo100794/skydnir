@@ -16405,6 +16405,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "strict binding contract mismatch",
             "binding_offset != memory_offset + descriptor_offset",
             "binding_size > buffer_size - descriptor_offset",
+            "field = \"api_offset\"",
+            "vulkan_binding_effective_api_offset_u64(b, &descriptor_offset)",
             "binding_size > descriptor_range",
             "buffer_size > memory_size - memory_offset",
             "vulkan_binding_descriptor_range",
@@ -16433,7 +16435,10 @@ class GpuAbiContractTest(unittest.TestCase):
             "checked_u64_to_off_t(descriptor_absolute_u64, &descriptor_absolute)",
             "binding_gpu_offset[i] = (size_t)(descriptor_absolute - binding_group_base[rep]);",
             ": (size_t)descriptor_absolute;",
-            "binding_descriptor_offset[i] = (size_t)bindings[i].api_offset;",
+            "vulkan_binding_descriptor_api_offset_u64(&bindings[i], &descriptor_api_offset)",
+            "binding_descriptor_offset[i] = (size_t)descriptor_api_offset;",
+            "vulkan_binding_effective_api_offset_u64(&bindings[i], &effective_api_offset)",
+            "api_dynamic_offset",
             "infos[write_count].range = (VkDeviceSize)\n            vulkan_binding_descriptor_range(&bindings[i], strict_passthrough);",
             "VkDescriptorBufferInfo.offset",
             "object-graph coordinate fidelity",
@@ -16453,6 +16458,15 @@ class GpuAbiContractTest(unittest.TestCase):
             "VkDescriptorSet descriptor_sets[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS]",
         ]:
             self.assertNotIn(marker, dispatch_body)
+
+        icd_sender = c_function_body(VULKAN_ICD.read_text(), "send_generic_vulkan_dispatch_op")
+        for marker in [
+            "validate_strict_descriptor_transport_invariant(",
+            "api_dynamic_offsets[binding_count]",
+            "api_memory_ids[binding_count]",
+            "api_buffer_ids[binding_count]",
+        ]:
+            self.assertIn(marker, icd_sender)
 
     def test_strict_executor_range_arithmetic_is_checked_locally(self):
         source = GPU_EXECUTOR.read_text()
@@ -16474,6 +16488,7 @@ class GpuAbiContractTest(unittest.TestCase):
 
     def test_vulkan_executor_range_helpers_avoid_truncation_and_wrap(self):
         source = GPU_EXECUTOR.read_text()
+        effective_offset_body = c_function_body(source, "vulkan_binding_effective_api_offset_u64")
         offset_equals_body = c_function_body(source, "vulkan_binding_offset_equals_memory_plus_api_offset")
         descriptor_offset_body = c_function_body(source, "vulkan_binding_descriptor_offset_equals_api_offset")
         gpu_offset_body = c_function_body(source, "vulkan_binding_gpu_offset_equals_memory_plus_api_offset")
@@ -16481,14 +16496,21 @@ class GpuAbiContractTest(unittest.TestCase):
         overlap_body = c_function_body(source, "ranges_overlap_off_size")
         absolute_range_body = c_function_body(source, "vulkan_binding_api_absolute_range")
         frame_range_body = c_function_body(source, "frame_ranges_do_not_overlap")
+        descriptor_api_offset_body = c_function_body(source, "vulkan_binding_descriptor_api_offset_u64")
+        self.assertIn("*out = (uint64_t)binding->api_offset", effective_offset_body)
+        self.assertIn("binding->api_dynamic", descriptor_api_offset_body)
+        self.assertIn("binding->api_base_offset", descriptor_api_offset_body)
         self.assertIn("binding->offset < 0", offset_equals_body)
+        self.assertIn("vulkan_binding_effective_api_offset_u64(binding, &api_offset)", offset_equals_body)
         self.assertIn("checked_u64_add3(memory_offset, api_offset, 0, &expected_offset)", offset_equals_body)
-        self.assertIn("(uint64_t)binding->api_offset > (uint64_t)SIZE_MAX", descriptor_offset_body)
+        self.assertIn("vulkan_binding_descriptor_api_offset_u64(binding, &descriptor_offset)", descriptor_offset_body)
+        self.assertIn("vulkan_binding_effective_api_offset_u64(binding, &api_offset)", gpu_offset_body)
         self.assertIn("const uint64_t gpu_offset = memory_offset + api_offset", gpu_offset_body)
         self.assertIn("gpu_offset > (uint64_t)SIZE_MAX", gpu_offset_body)
         self.assertIn("specialization->size > specialization_data_size - specialization->offset", spec_value_body)
         self.assertIn("checked_u64_add3(a_start, (uint64_t)a_size", overlap_body)
         self.assertIn("checked_u64_add3(b_start, (uint64_t)b_size", overlap_body)
+        self.assertIn("vulkan_binding_effective_api_offset_u64(binding, &api_offset)", absolute_range_body)
         self.assertIn("checked_u64_add3(memory_offset, api_offset, 0, &s)", absolute_range_body)
         self.assertIn("checked_u64_add3(s, (uint64_t)binding->size, 0, &e)", absolute_range_body)
         self.assertIn("checked_u64_add3(ranges[i].offset, ranges[i].size, 0, &a1)", frame_range_body)
@@ -16496,6 +16518,28 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("specialization->offset + specialization->size > specialization_data_size", source)
         self.assertNotIn("uint64_t a1 = ranges[i].offset + ranges[i].size", source)
         self.assertNotIn("uint64_t b1 = ranges[j].offset + ranges[j].size", source)
+
+    def test_strict_descriptor_transport_invariant_is_checked_before_send(self):
+        icd = VULKAN_ICD.read_text()
+        helper_body = c_function_body(icd, "validate_strict_descriptor_transport_invariant")
+        sender_body = c_function_body(icd, "send_generic_vulkan_dispatch_op")
+        for marker in [
+            "strict descriptor transport invariant rejected",
+            "checked_add_u64((uint64_t)api_offset",
+            "checked_add_u64((uint64_t)api_memory_offset",
+            "dispatch_offset != expected_dispatch_offset",
+            "effective_api_offset, (uint64_t)bytes",
+            "api_range == VK_WHOLE_SIZE",
+            "bytes > descriptor_range",
+            "api_memory_id == 0 || api_buffer_id == 0",
+            "memory_end > (uint64_t)api_memory_size",
+        ]:
+            self.assertIn(marker, helper_body)
+        self.assertIn("if (strict_passthrough)", sender_body)
+        self.assertIn("validate_strict_descriptor_transport_invariant(", sender_body)
+        self.assertIn("api_dynamic_offsets[binding_count]", sender_body)
+        self.assertIn("api_memory_ids[binding_count]", sender_body)
+        self.assertIn("api_buffer_ids[binding_count]", sender_body)
 
     def test_vulkan_graphics_query_replay_offsets_are_checked(self):
         source = GPU_EXECUTOR.read_text()

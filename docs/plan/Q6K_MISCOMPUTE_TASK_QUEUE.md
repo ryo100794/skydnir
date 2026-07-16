@@ -380,24 +380,34 @@ executor unnoticed.
 
 Acceptance:
 
-For every native Q6 V4 binding:
+For every native Q6 buffer descriptor transported through the strict Vulkan path:
 
 ```text
-offset == api_memory_offset + api_offset
-api_offset + size <= api_buffer_size
+effective_api_offset == api_offset + api_dynamic_offset      # ICD sender before V5 framing
+offset == api_memory_offset + effective_api_offset
+effective_api_offset + size <= api_buffer_size
 api_memory_offset + api_buffer_size <= api_memory_size
-VkDescriptorBufferInfo.offset == api_offset
-VkDescriptorBufferInfo.range == size
+VkDescriptorBufferInfo.offset == api_offset                  # dynamic descriptors keep base offset here
+pDynamicOffsets[] contains api_dynamic_offset                # V5.6 exact-layout path
+VkDescriptorBufferInfo.range == size or validated api_range
 host fd read/write offset == offset
 ```
+
+On the executor side, V5 materialization normalizes
+`binding.api_offset = api_offset + api_dynamic_offset` and preserves
+`binding.api_base_offset = api_offset` for dynamic descriptor writes.  The older
+V4 text payload does not carry `api_dynamic_offset`; strict passthrough therefore
+continues to require V5 framing instead of interpreting V4 dynamic descriptors.
 
 The artifact must state whether each invariant passed.  If any invariant fails,
 shader arithmetic is not investigated until this layer is fixed.
 
-Next task if failed:
+Current implementation note:
 
-- Add the invariant at ICD send time and executor parse time, then add a
-  contract test that rejects inconsistent V4 binding metadata.
+- ICD strict send validates the descriptor transport invariant before V5 framing.
+- Executor strict validation checks the normalized effective offset and uses the
+  preserved base offset for dynamic `VkDescriptorBufferInfo.offset`.
+- Fresh device artifact evidence remains pending.
 
 Additional strict-passthrough invariant:
 
