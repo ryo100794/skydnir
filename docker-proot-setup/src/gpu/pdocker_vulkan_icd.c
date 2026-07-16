@@ -22459,6 +22459,10 @@ static bool pdocker_supports_shader_atomic_int64_transport(void) {
     return false;
 }
 
+static bool pdocker_supports_shader_layout_semantics_transport(void) {
+    return false;
+}
+
 static bool pdocker_supports_custom_border_color_transport(void) {
     return false;
 }
@@ -22559,20 +22563,28 @@ static uint32_t collect_advertised_device_extensions(
     }
 #endif
 #ifdef VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME
-    ADD_DEVICE_EXTENSION(VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME,
-                         VK_EXT_SCALAR_BLOCK_LAYOUT_SPEC_VERSION);
+    if (pdocker_supports_shader_layout_semantics_transport()) {
+        ADD_DEVICE_EXTENSION(VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME,
+                             VK_EXT_SCALAR_BLOCK_LAYOUT_SPEC_VERSION);
+    }
 #endif
 #ifdef VK_KHR_UNIFORM_BUFFER_STANDARD_LAYOUT_EXTENSION_NAME
-    ADD_DEVICE_EXTENSION(VK_KHR_UNIFORM_BUFFER_STANDARD_LAYOUT_EXTENSION_NAME,
-                         VK_KHR_UNIFORM_BUFFER_STANDARD_LAYOUT_SPEC_VERSION);
+    if (pdocker_supports_shader_layout_semantics_transport()) {
+        ADD_DEVICE_EXTENSION(VK_KHR_UNIFORM_BUFFER_STANDARD_LAYOUT_EXTENSION_NAME,
+                             VK_KHR_UNIFORM_BUFFER_STANDARD_LAYOUT_SPEC_VERSION);
+    }
 #endif
 #ifdef VK_KHR_SHADER_SUBGROUP_EXTENDED_TYPES_EXTENSION_NAME
-    ADD_DEVICE_EXTENSION(VK_KHR_SHADER_SUBGROUP_EXTENDED_TYPES_EXTENSION_NAME,
-                         VK_KHR_SHADER_SUBGROUP_EXTENDED_TYPES_SPEC_VERSION);
+    if (pdocker_supports_shader_layout_semantics_transport()) {
+        ADD_DEVICE_EXTENSION(VK_KHR_SHADER_SUBGROUP_EXTENDED_TYPES_EXTENSION_NAME,
+                             VK_KHR_SHADER_SUBGROUP_EXTENDED_TYPES_SPEC_VERSION);
+    }
 #endif
 #ifdef VK_KHR_VULKAN_MEMORY_MODEL_EXTENSION_NAME
-    ADD_DEVICE_EXTENSION(VK_KHR_VULKAN_MEMORY_MODEL_EXTENSION_NAME,
-                         VK_KHR_VULKAN_MEMORY_MODEL_SPEC_VERSION);
+    if (pdocker_supports_shader_layout_semantics_transport()) {
+        ADD_DEVICE_EXTENSION(VK_KHR_VULKAN_MEMORY_MODEL_EXTENSION_NAME,
+                             VK_KHR_VULKAN_MEMORY_MODEL_SPEC_VERSION);
+    }
 #endif
 #ifdef VK_KHR_SEPARATE_DEPTH_STENCIL_LAYOUTS_EXTENSION_NAME
     if (caps && caps->ext_separate_depth_stencil_layouts && advertised_separate_depth_stencil_layouts()) {

@@ -2797,7 +2797,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
 
 
 
-    def test_shader_layout_memory_model_extensions_are_false_only(self):
+    def test_shader_layout_memory_model_extensions_are_not_advertised_without_transport(self):
         source = textwrap.dedent(
             f"""
             #include <stdint.h>
@@ -2852,10 +2852,9 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 const char *scalar_extensions[] = {{ VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME }};
                 create_info.enabledExtensionCount = 1;
                 create_info.ppEnabledExtensionNames = scalar_extensions;
-                if (!device_extension_advertised_name(VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME) ||
-                    validate_device_extensions(&create_info) != VK_SUCCESS ||
-                    validate_device_feature_requests(&create_info) != VK_SUCCESS) {{
-                    fprintf(stderr, "VK_EXT_scalar_block_layout false-only enable failed\\n");
+                if (device_extension_advertised_name(VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME) ||
+                    validate_device_extensions(&create_info) != VK_ERROR_EXTENSION_NOT_PRESENT) {{
+                    fprintf(stderr, "VK_EXT_scalar_block_layout was accepted without transport\\n");
                     return 5;
                 }}
             #endif
@@ -2863,10 +2862,9 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 const char *uniform_extensions[] = {{ VK_KHR_UNIFORM_BUFFER_STANDARD_LAYOUT_EXTENSION_NAME }};
                 create_info.enabledExtensionCount = 1;
                 create_info.ppEnabledExtensionNames = uniform_extensions;
-                if (!device_extension_advertised_name(VK_KHR_UNIFORM_BUFFER_STANDARD_LAYOUT_EXTENSION_NAME) ||
-                    validate_device_extensions(&create_info) != VK_SUCCESS ||
-                    validate_device_feature_requests(&create_info) != VK_SUCCESS) {{
-                    fprintf(stderr, "VK_KHR_uniform_buffer_standard_layout false-only enable failed\\n");
+                if (device_extension_advertised_name(VK_KHR_UNIFORM_BUFFER_STANDARD_LAYOUT_EXTENSION_NAME) ||
+                    validate_device_extensions(&create_info) != VK_ERROR_EXTENSION_NOT_PRESENT) {{
+                    fprintf(stderr, "VK_KHR_uniform_buffer_standard_layout was accepted without transport\\n");
                     return 6;
                 }}
             #endif
@@ -2874,10 +2872,9 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 const char *subgroup_extensions[] = {{ VK_KHR_SHADER_SUBGROUP_EXTENDED_TYPES_EXTENSION_NAME }};
                 create_info.enabledExtensionCount = 1;
                 create_info.ppEnabledExtensionNames = subgroup_extensions;
-                if (!device_extension_advertised_name(VK_KHR_SHADER_SUBGROUP_EXTENDED_TYPES_EXTENSION_NAME) ||
-                    validate_device_extensions(&create_info) != VK_SUCCESS ||
-                    validate_device_feature_requests(&create_info) != VK_SUCCESS) {{
-                    fprintf(stderr, "VK_KHR_shader_subgroup_extended_types false-only enable failed\\n");
+                if (device_extension_advertised_name(VK_KHR_SHADER_SUBGROUP_EXTENDED_TYPES_EXTENSION_NAME) ||
+                    validate_device_extensions(&create_info) != VK_ERROR_EXTENSION_NOT_PRESENT) {{
+                    fprintf(stderr, "VK_KHR_shader_subgroup_extended_types was accepted without transport\\n");
                     return 7;
                 }}
             #endif
@@ -2885,10 +2882,9 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 const char *memory_model_extensions[] = {{ VK_KHR_VULKAN_MEMORY_MODEL_EXTENSION_NAME }};
                 create_info.enabledExtensionCount = 1;
                 create_info.ppEnabledExtensionNames = memory_model_extensions;
-                if (!device_extension_advertised_name(VK_KHR_VULKAN_MEMORY_MODEL_EXTENSION_NAME) ||
-                    validate_device_extensions(&create_info) != VK_SUCCESS ||
-                    validate_device_feature_requests(&create_info) != VK_SUCCESS) {{
-                    fprintf(stderr, "VK_KHR_vulkan_memory_model false-only enable failed\\n");
+                if (device_extension_advertised_name(VK_KHR_VULKAN_MEMORY_MODEL_EXTENSION_NAME) ||
+                    validate_device_extensions(&create_info) != VK_ERROR_EXTENSION_NOT_PRESENT) {{
+                    fprintf(stderr, "VK_KHR_vulkan_memory_model was accepted without transport\\n");
                     return 8;
                 }}
             #endif

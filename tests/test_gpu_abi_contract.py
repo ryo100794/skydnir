@@ -10360,6 +10360,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("pdocker_supports_imageless_framebuffer_transport", icd)
         self.assertIn("if (pdocker_supports_imageless_framebuffer_transport())", collector_body)
         self.assertIn("ADD_DEVICE_EXTENSION(VK_KHR_IMAGELESS_FRAMEBUFFER_EXTENSION_NAME", collector_body)
+        self.assertIn("pdocker_supports_shader_layout_semantics_transport", icd)
+        self.assertEqual(collector_body.count("if (pdocker_supports_shader_layout_semantics_transport())"), 4)
         self.assertIn("ADD_DEVICE_EXTENSION(VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME", collector_body)
         self.assertIn("ADD_DEVICE_EXTENSION(VK_KHR_UNIFORM_BUFFER_STANDARD_LAYOUT_EXTENSION_NAME", collector_body)
         self.assertIn("ADD_DEVICE_EXTENSION(VK_KHR_SHADER_SUBGROUP_EXTENDED_TYPES_EXTENSION_NAME", collector_body)
