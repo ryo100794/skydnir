@@ -8715,6 +8715,37 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('MAP_ALIAS("vkCreateSamplerYcbcrConversionKHR", vkCreateSamplerYcbcrConversion);', proc_body)
         self.assertIn('MAP_ALIAS("vkDestroySamplerYcbcrConversionKHR", vkDestroySamplerYcbcrConversion);', proc_body)
 
+    def test_vulkan_debug_marker_ext_is_not_advertised_without_transport(self):
+        icd = VULKAN_ICD.read_text()
+        self.assertIn("VK_EXT_DEBUG_MARKER_EXTENSION_NAME", icd)
+        helper_body = c_function_body(icd, "pdocker_supports_debug_marker_transport")
+        self.assertIn("return false;", helper_body)
+        collector_body = c_function_body(icd, "collect_advertised_device_extensions")
+        self.assertIn("pdocker_supports_debug_marker_transport()", collector_body)
+        self.assertIn("ADD_DEVICE_EXTENSION(VK_EXT_DEBUG_MARKER_EXTENSION_NAME", collector_body)
+        self.assertLess(
+            collector_body.index("pdocker_supports_debug_marker_transport()"),
+            collector_body.index("ADD_DEVICE_EXTENSION(VK_EXT_DEBUG_MARKER_EXTENSION_NAME"),
+        )
+        hidden_body = c_function_body(icd, "proc_address_hidden_by_advertisement")
+        self.assertIn("!pdocker_supports_debug_marker_transport()", hidden_body)
+        for marker in [
+            "vkDebugMarkerSetObjectNameEXT",
+            "vkDebugMarkerSetObjectTagEXT",
+            "vkCmdDebugMarkerBeginEXT",
+            "vkCmdDebugMarkerEndEXT",
+            "vkCmdDebugMarkerInsertEXT",
+        ]:
+            self.assertIn(marker, hidden_body)
+        for func in [
+            "vkDebugMarkerSetObjectNameEXT",
+            "vkDebugMarkerSetObjectTagEXT",
+            "vkCmdDebugMarkerBeginEXT",
+            "vkCmdDebugMarkerEndEXT",
+            "vkCmdDebugMarkerInsertEXT",
+        ]:
+            self.assertIn(func, icd)
+
     def test_vulkan_buffer_device_address_khr_is_not_advertised_without_transport(self):
         icd = VULKAN_ICD.read_text()
         self.assertIn("VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME", icd)

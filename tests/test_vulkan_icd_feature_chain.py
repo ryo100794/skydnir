@@ -1934,7 +1934,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_debug_marker_extension_is_icd_local_metadata(self):
+    def test_debug_marker_extension_is_not_advertised_without_transport(self):
         source = textwrap.dedent(
             f"""
             #include <stdint.h>
@@ -1943,6 +1943,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
             #include "{ICD_SOURCE}"
 
             int main(void) {{
+            #ifdef VK_EXT_DEBUG_MARKER_EXTENSION_NAME
                 uint32_t extension_count = 0;
                 if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &extension_count, NULL) != VK_SUCCESS) return 2;
                 VkExtensionProperties extensions[64];
@@ -1953,7 +1954,21 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 for (uint32_t i = 0; i < capacity; ++i) {{
                     if (strcmp(extensions[i].extensionName, VK_EXT_DEBUG_MARKER_EXTENSION_NAME) == 0) found = VK_TRUE;
                 }}
-                if (!found || !device_extension_advertised_name(VK_EXT_DEBUG_MARKER_EXTENSION_NAME)) return 4;
+                if (found || device_extension_advertised_name(VK_EXT_DEBUG_MARKER_EXTENSION_NAME)) return 4;
+
+                const char *enabled[] = {{ VK_EXT_DEBUG_MARKER_EXTENSION_NAME }};
+                VkDeviceCreateInfo device_info;
+                memset(&device_info, 0, sizeof(device_info));
+                device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                device_info.enabledExtensionCount = 1;
+                device_info.ppEnabledExtensionNames = enabled;
+                if (validate_device_extensions(&device_info) != VK_ERROR_EXTENSION_NOT_PRESENT) return 5;
+
+                if (proc_address("vkDebugMarkerSetObjectNameEXT") != NULL) return 6;
+                if (proc_address("vkDebugMarkerSetObjectTagEXT") != NULL) return 7;
+                if (proc_address("vkCmdDebugMarkerBeginEXT") != NULL) return 8;
+                if (proc_address("vkCmdDebugMarkerEndEXT") != NULL) return 9;
+                if (proc_address("vkCmdDebugMarkerInsertEXT") != NULL) return 10;
 
                 VkDebugMarkerObjectNameInfoEXT name_info;
                 memset(&name_info, 0, sizeof(name_info));
@@ -1961,7 +1976,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 name_info.objectType = VK_DEBUG_REPORT_OBJECT_TYPE_BUFFER_EXT;
                 name_info.object = 0x1234u;
                 name_info.pObjectName = "legacy-buffer-name";
-                if (vkDebugMarkerSetObjectNameEXT(VK_NULL_HANDLE, &name_info) != VK_SUCCESS) return 5;
+                if (vkDebugMarkerSetObjectNameEXT(VK_NULL_HANDLE, &name_info) != VK_SUCCESS) return 11;
 
                 const uint32_t tag = 0x13572468u;
                 VkDebugMarkerObjectTagInfoEXT tag_info;
@@ -1972,7 +1987,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 tag_info.tagName = 7u;
                 tag_info.tagSize = sizeof(tag);
                 tag_info.pTag = &tag;
-                if (vkDebugMarkerSetObjectTagEXT(VK_NULL_HANDLE, &tag_info) != VK_SUCCESS) return 6;
+                if (vkDebugMarkerSetObjectTagEXT(VK_NULL_HANDLE, &tag_info) != VK_SUCCESS) return 12;
 
                 VkDebugMarkerMarkerInfoEXT marker_info;
                 memset(&marker_info, 0, sizeof(marker_info));
@@ -1984,14 +1999,15 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
 
                 memset(&name_info, 0, sizeof(name_info));
                 name_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-                if (vkDebugMarkerSetObjectNameEXT(VK_NULL_HANDLE, &name_info) != VK_ERROR_INITIALIZATION_FAILED) return 7;
+                if (vkDebugMarkerSetObjectNameEXT(VK_NULL_HANDLE, &name_info) != VK_ERROR_INITIALIZATION_FAILED) return 13;
                 memset(&tag_info, 0, sizeof(tag_info));
                 tag_info.sType = VK_STRUCTURE_TYPE_DEBUG_MARKER_OBJECT_TAG_INFO_EXT;
                 tag_info.objectType = VK_DEBUG_REPORT_OBJECT_TYPE_BUFFER_EXT;
                 tag_info.object = 0x1234u;
                 tag_info.tagSize = 4u;
                 tag_info.pTag = NULL;
-                if (vkDebugMarkerSetObjectTagEXT(VK_NULL_HANDLE, &tag_info) != VK_ERROR_INITIALIZATION_FAILED) return 8;
+                if (vkDebugMarkerSetObjectTagEXT(VK_NULL_HANDLE, &tag_info) != VK_ERROR_INITIALIZATION_FAILED) return 14;
+            #endif
                 return 0;
             }}
             """

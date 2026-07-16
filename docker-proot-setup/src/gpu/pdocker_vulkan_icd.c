@@ -22396,6 +22396,10 @@ static bool pdocker_supports_buffer_device_address_transport(void) {
     return false;
 }
 
+static bool pdocker_supports_debug_marker_transport(void) {
+    return false;
+}
+
 static uint32_t collect_advertised_device_extensions(
         VkExtensionProperties *properties,
         uint32_t capacity) {
@@ -22654,7 +22658,10 @@ static uint32_t collect_advertised_device_extensions(
     ADD_DEVICE_EXTENSION(VK_EXT_TOOLING_INFO_EXTENSION_NAME, VK_EXT_TOOLING_INFO_SPEC_VERSION);
 #endif
 #ifdef VK_EXT_DEBUG_MARKER_EXTENSION_NAME
-    ADD_DEVICE_EXTENSION(VK_EXT_DEBUG_MARKER_EXTENSION_NAME, VK_EXT_DEBUG_MARKER_SPEC_VERSION);
+    if (pdocker_supports_debug_marker_transport()) {
+        ADD_DEVICE_EXTENSION(VK_EXT_DEBUG_MARKER_EXTENSION_NAME,
+                             VK_EXT_DEBUG_MARKER_SPEC_VERSION);
+    }
 #endif
 #ifdef VK_EXT_PRIVATE_DATA_EXTENSION_NAME
     ADD_DEVICE_EXTENSION(VK_EXT_PRIVATE_DATA_EXTENSION_NAME, VK_EXT_PRIVATE_DATA_SPEC_VERSION);
@@ -35148,6 +35155,16 @@ static bool proc_address_hidden_by_advertisement(const char *pName) {
         !advertised_draw_indirect_count_amd()) {
         return true;
     }
+#ifdef VK_EXT_DEBUG_MARKER_EXTENSION_NAME
+    if (!pdocker_supports_debug_marker_transport() &&
+        (strcmp(pName, "vkDebugMarkerSetObjectNameEXT") == 0 ||
+         strcmp(pName, "vkDebugMarkerSetObjectTagEXT") == 0 ||
+         strcmp(pName, "vkCmdDebugMarkerBeginEXT") == 0 ||
+         strcmp(pName, "vkCmdDebugMarkerEndEXT") == 0 ||
+         strcmp(pName, "vkCmdDebugMarkerInsertEXT") == 0)) {
+        return true;
+    }
+#endif
 #if defined(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME) || defined(VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME)
     if (!pdocker_supports_buffer_device_address_transport() &&
         (strcmp(pName, "vkGetBufferDeviceAddressKHR") == 0 ||
