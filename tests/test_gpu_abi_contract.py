@@ -5177,15 +5177,16 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertLess(sender.index("const bool need_v55_native_objects"), sender.index("const bool need_v56_compute_layouts"))
         self.assertLess(sender.index("const bool need_v56_compute_layouts"), sender.index("collect_dispatch_v56_pipeline_layout_metadata"))
         collect_v56_layout = c_function_body(icd, "collect_dispatch_v56_descriptor_set_layout_metadata")
-        self.assertIn("descriptor_type_is_dynamic(descriptor_type)", collect_v56_layout)
-        self.assertIn("does not yet transport dynamic-offset arrays", collect_v56_layout)
+        self.assertNotIn("does not yet transport dynamic-offset arrays", collect_v56_layout)
+        self.assertNotIn("return -EOPNOTSUPP;\n        }\n        if (!descriptor_type_supported_by_v4_transport", collect_v56_layout)
         self.assertIn("candidate.immutable_sampler_count != 0", collect_v56_layout)
         self.assertIn("PDOCKER_VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT", collect_v56_layout)
         exact_write_validator = c_function_body(executor, "validate_vulkan_compute_v56_descriptor_writes")
         for marker in [
-            "vulkan_dispatch_descriptor_type_is_dynamic(bindings[i].api_descriptor_type)",
+            "vulkan_dispatch_descriptor_type_from_api_exact",
             "record_vulkan_compute_v56_descriptor_write",
             "slot_write_counts",
+            "vulkan_dispatch_descriptor_type_is_dynamic(slot->descriptor_type)",
             "PDOCKER_VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT",
             "slot_write_counts[i] != slot->descriptor_count",
         ]:
@@ -5213,7 +5214,17 @@ class GpuAbiContractTest(unittest.TestCase):
             "VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT",
             "VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT",
             "entry->immutable_sampler_count != 0",
-            "vulkan_dispatch_descriptor_type_is_dynamic(entry->descriptor_type)",
+            "vulkan_dispatch_descriptor_type_from_api_exact(entry->descriptor_type",
+            "VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC",
+            "VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC",
+            "descriptor_pool_storage_dynamic_count",
+            "descriptor_pool_uniform_dynamic_count",
+            "compute_dynamic_offsets",
+            "compute_dynamic_offset_count ? compute_dynamic_offsets : NULL",
+            "V5.6 dynamic descriptors require strict object-graph coordinates",
+            "strict_graph_active_bindings[i]",
+            "strict_resident_cached_bindings[i]",
+            "binding_readonly_overlap_snapshot[i]",
             "PDOCKER_VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT",
             "!multi_descriptor_set && !use_v56_compute_layout",
         ]:
@@ -7973,7 +7984,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("vulkan_binding_gpu_offset_equals_memory_plus_api_offset", source)
         self.assertIn("vulkan_binding_descriptor_offset_equals_api_offset", source)
         self.assertIn("vulkan_binding_descriptor_range_matches_api_range", source)
-        self.assertIn("infos[write_count].offset = (VkDeviceSize)binding_descriptor_offset[i];", source)
+        self.assertIn("VkDeviceSize descriptor_offset = (VkDeviceSize)binding_descriptor_offset[i];", source)
+        self.assertIn("infos[write_count].offset = descriptor_offset;", source)
         self.assertIn("PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING", source)
         self.assertIn("has_strict_device_local_staging", source)
         abi = APP_HEADER.read_text()

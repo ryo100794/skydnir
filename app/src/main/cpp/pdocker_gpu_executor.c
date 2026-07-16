@@ -969,6 +969,8 @@ typedef struct {
     off_t offset;
     size_t size;
     off_t api_offset;
+    off_t api_base_offset;
+    uint64_t api_dynamic_offset;
     size_t api_range;
     size_t api_buffer_size;
     uint64_t api_buffer_usage;
@@ -1088,6 +1090,24 @@ static int vulkan_dispatch_descriptor_type_from_api(
         case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
             *out_type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
             return 0;
+        case VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER:
+        case VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER:
+            *out_type = (VkDescriptorType)api_descriptor_type;
+            return 0;
+        default:
+            return -EOPNOTSUPP;
+    }
+}
+
+static int vulkan_dispatch_descriptor_type_from_api_exact(
+        uint32_t api_descriptor_type,
+        VkDescriptorType *out_type) {
+    if (!out_type) return -EINVAL;
+    switch ((VkDescriptorType)api_descriptor_type) {
+        case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+        case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC:
+        case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
+        case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
         case VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER:
         case VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER:
             *out_type = (VkDescriptorType)api_descriptor_type;
@@ -9745,12 +9765,8 @@ static int validate_vulkan_compute_v56_descriptor_writes(
     int rc = 0;
     for (size_t i = 0; i < binding_count; ++i) {
         if (!active_bindings[i]) continue;
-        if (vulkan_dispatch_descriptor_type_is_dynamic(bindings[i].api_descriptor_type)) {
-            rc = -EOPNOTSUPP;
-            goto cleanup;
-        }
         VkDescriptorType descriptor_type = VK_DESCRIPTOR_TYPE_MAX_ENUM;
-        rc = vulkan_dispatch_descriptor_type_from_api(
+        rc = vulkan_dispatch_descriptor_type_from_api_exact(
             bindings[i].api_descriptor_type, &descriptor_type);
         if (rc != 0) goto cleanup;
         rc = record_vulkan_compute_v56_descriptor_write(
@@ -9775,6 +9791,11 @@ static int validate_vulkan_compute_v56_descriptor_writes(
         const VulkanComputeDescriptorLayoutSlot *slot = &layout_slots[i];
         if (slot_write_counts[i] > slot->descriptor_count) {
             rc = -ERANGE;
+            goto cleanup;
+        }
+        if (vulkan_dispatch_descriptor_type_is_dynamic(slot->descriptor_type) &&
+            slot_write_counts[i] != slot->descriptor_count) {
+            rc = -ENOENT;
             goto cleanup;
         }
         if ((slot->binding_flags & PDOCKER_VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT) == 0 &&
@@ -16352,14 +16373,13 @@ static int run_vulkan_dispatch_fd(
             if (entry->layout_id == 0 || entry->descriptor_count == 0 ||
                 entry->descriptor_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS ||
                 entry->immutable_sampler_count != 0 ||
-                vulkan_dispatch_descriptor_type_is_dynamic(entry->descriptor_type) ||
                 (entry->binding_flags & PDOCKER_VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT) != 0 ||
                 !vulkan_graphics_descriptor_binding_flags_supported(entry->binding_flags)) {
                 json_fail("vulkan-dispatch", "unsupported V5.6 compute descriptor set layout metadata");
                 return 64;
             }
             VkDescriptorType descriptor_type = VK_DESCRIPTOR_TYPE_MAX_ENUM;
-            int type_rc = vulkan_dispatch_descriptor_type_from_api(entry->descriptor_type, &descriptor_type);
+            int type_rc = vulkan_dispatch_descriptor_type_from_api_exact(entry->descriptor_type, &descriptor_type);
             if (type_rc != 0) {
                 type_rc = vulkan_dispatch_image_descriptor_type_from_api(entry->descriptor_type, &descriptor_type);
             }
@@ -16468,6 +16488,8 @@ static int run_vulkan_dispatch_fd(
     int pipeline_cache_hit = 0;
     int descriptor_pool_update_after_bind = 0;
     VkDescriptorPool descriptor_pool = VK_NULL_HANDLE;
+    uint32_t *compute_dynamic_offsets = NULL;
+    uint32_t compute_dynamic_offset_count = 0;
     VkCommandBuffer command_buffer = VK_NULL_HANDLE;
     VkFence fence = VK_NULL_HANDLE;
     VkSpecializationMapEntry *vk_spec_entries = NULL;
@@ -18145,7 +18167,7 @@ static int run_vulkan_dispatch_fd(
                     &object_tables->compute_descriptor_set_layouts[layout_i];
                 if (entry->layout_id != set_entry->descriptor_set_layout_id) continue;
                 VkDescriptorType descriptor_type = VK_DESCRIPTOR_TYPE_MAX_ENUM;
-                int type_rc = vulkan_dispatch_descriptor_type_from_api(entry->descriptor_type, &descriptor_type);
+                int type_rc = vulkan_dispatch_descriptor_type_from_api_exact(entry->descriptor_type, &descriptor_type);
                 if (type_rc != 0) {
                     type_rc = vulkan_dispatch_image_descriptor_type_from_api(entry->descriptor_type, &descriptor_type);
                 }
@@ -18189,8 +18211,10 @@ static int run_vulkan_dispatch_fd(
             goto cleanup;
         }
         VkDescriptorType descriptor_type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        if (vulkan_dispatch_descriptor_type_from_api(bindings[i].api_descriptor_type,
-                                                     &descriptor_type) != 0) {
+        int descriptor_type_rc = use_v56_compute_layout
+            ? vulkan_dispatch_descriptor_type_from_api_exact(bindings[i].api_descriptor_type, &descriptor_type)
+            : vulkan_dispatch_descriptor_type_from_api(bindings[i].api_descriptor_type, &descriptor_type);
+        if (descriptor_type_rc != 0) {
             json_fail("vulkan-dispatch", "unsupported descriptor type for V4 transport");
             ret = 64;
             goto cleanup;
@@ -18584,7 +18608,9 @@ static int run_vulkan_dispatch_fd(
         }
     }
     uint32_t descriptor_pool_storage_count = 0;
+    uint32_t descriptor_pool_storage_dynamic_count = 0;
     uint32_t descriptor_pool_uniform_count = 0;
+    uint32_t descriptor_pool_uniform_dynamic_count = 0;
     uint32_t descriptor_pool_uniform_texel_count = 0;
     uint32_t descriptor_pool_storage_texel_count = 0;
     uint32_t descriptor_pool_sampler_count = 0;
@@ -18596,8 +18622,14 @@ static int run_vulkan_dispatch_fd(
         const VulkanComputeDescriptorLayoutSlot *slot = &layout_slots[i];
         const uint32_t descriptor_count = slot->descriptor_count;
         switch (slot->descriptor_type) {
+            case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC:
+                descriptor_pool_storage_dynamic_count += descriptor_count;
+                break;
             case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
                 descriptor_pool_uniform_count += descriptor_count;
+                break;
+            case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
+                descriptor_pool_uniform_dynamic_count += descriptor_count;
                 break;
             case VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER:
                 descriptor_pool_uniform_texel_count += descriptor_count;
@@ -18625,16 +18657,26 @@ static int run_vulkan_dispatch_fd(
                 break;
         }
     }
-    VkDescriptorPoolSize pool_sizes[10];
+    VkDescriptorPoolSize pool_sizes[12];
     uint32_t pool_size_count = 0;
     if (descriptor_pool_storage_count > 0) {
         pool_sizes[pool_size_count].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         pool_sizes[pool_size_count].descriptorCount = descriptor_pool_storage_count;
         pool_size_count++;
     }
+    if (descriptor_pool_storage_dynamic_count > 0) {
+        pool_sizes[pool_size_count].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC;
+        pool_sizes[pool_size_count].descriptorCount = descriptor_pool_storage_dynamic_count;
+        pool_size_count++;
+    }
     if (descriptor_pool_uniform_count > 0) {
         pool_sizes[pool_size_count].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         pool_sizes[pool_size_count].descriptorCount = descriptor_pool_uniform_count;
+        pool_size_count++;
+    }
+    if (descriptor_pool_uniform_dynamic_count > 0) {
+        pool_sizes[pool_size_count].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+        pool_sizes[pool_size_count].descriptorCount = descriptor_pool_uniform_dynamic_count;
         pool_size_count++;
     }
     if (descriptor_pool_uniform_texel_count > 0) {
@@ -18747,7 +18789,23 @@ static int run_vulkan_dispatch_fd(
             goto cleanup;
         }
         infos[write_count].buffer = vk_buffers[i]->buffer;
-        infos[write_count].offset = (VkDeviceSize)binding_descriptor_offset[i];
+        VkDeviceSize descriptor_offset = (VkDeviceSize)binding_descriptor_offset[i];
+        if (use_v56_compute_layout && bindings[i].api_dynamic) {
+            if (!strict_passthrough || !strict_object_graph_used ||
+                !strict_graph_active_bindings[i] || strict_resident_cached_bindings[i] ||
+                binding_readonly_overlap_snapshot[i]) {
+                json_fail("vulkan-dispatch", "V5.6 dynamic descriptors require strict object-graph coordinates");
+                ret = 64;
+                goto cleanup;
+            }
+            if (bindings[i].api_base_offset < 0) {
+                json_fail("vulkan-dispatch", "dynamic descriptor base offset overflow");
+                ret = 64;
+                goto cleanup;
+            }
+            descriptor_offset = (VkDeviceSize)bindings[i].api_base_offset;
+        }
+        infos[write_count].offset = descriptor_offset;
         infos[write_count].range = (VkDeviceSize)
             vulkan_binding_descriptor_range(&bindings[i], strict_passthrough);
         writes[write_count].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -18755,8 +18813,10 @@ static int run_vulkan_dispatch_fd(
         writes[write_count].dstBinding = bindings[i].binding;
         writes[write_count].dstArrayElement = bindings[i].api_array_element;
         writes[write_count].descriptorCount = 1;
-        if (vulkan_dispatch_descriptor_type_from_api(bindings[i].api_descriptor_type,
-                                                     &writes[write_count].descriptorType) != 0) {
+        int write_descriptor_type_rc = use_v56_compute_layout
+            ? vulkan_dispatch_descriptor_type_from_api_exact(bindings[i].api_descriptor_type, &writes[write_count].descriptorType)
+            : vulkan_dispatch_descriptor_type_from_api(bindings[i].api_descriptor_type, &writes[write_count].descriptorType);
+        if (write_descriptor_type_rc != 0) {
             json_fail("vulkan-dispatch", "unsupported descriptor write type for V5 transport");
             ret = 64;
             goto cleanup;
@@ -18938,6 +18998,49 @@ static int run_vulkan_dispatch_fd(
     double descriptor_update_start = now_ms();
     vkUpdateDescriptorSets(rt->device, (uint32_t)write_count, writes, 0, NULL);
     timing_descriptor_update_ms = now_ms() - descriptor_update_start;
+    if (use_v56_compute_layout) {
+        compute_dynamic_offsets = (uint32_t *)calloc(
+            descriptor_write_capacity ? descriptor_write_capacity : 1u,
+            sizeof(*compute_dynamic_offsets));
+        if (!compute_dynamic_offsets) {
+            json_fail("vulkan-dispatch", "out of memory allocating V5.6 dynamic offsets");
+            ret = 75;
+            goto cleanup;
+        }
+        for (size_t slot_i = 0; slot_i < layout_slot_count; ++slot_i) {
+            const VulkanComputeDescriptorLayoutSlot *slot = &layout_slots[slot_i];
+            if (!vulkan_dispatch_descriptor_type_is_dynamic(slot->descriptor_type)) continue;
+            for (uint32_t array_element = 0; array_element < slot->descriptor_count; ++array_element) {
+                int binding_index = binding_index_for_descriptor_slot(
+                    bindings, active_bindings, binding_count,
+                    slot->descriptor_set, slot->binding, array_element);
+                if (binding_index < 0) {
+                    json_fail("vulkan-dispatch", "missing V5.6 dynamic descriptor binding");
+                    ret = 64;
+                    goto cleanup;
+                }
+                const VulkanDispatchBinding *binding = &bindings[binding_index];
+                if (!binding->api_dynamic ||
+                    binding->api_descriptor_type != (uint32_t)slot->descriptor_type) {
+                    json_fail("vulkan-dispatch", "V5.6 dynamic descriptor metadata mismatch");
+                    ret = 64;
+                    goto cleanup;
+                }
+                if (binding->api_dynamic_offset > UINT32_MAX) {
+                    json_fail("vulkan-dispatch", "V5.6 dynamic descriptor offset overflow");
+                    ret = 64;
+                    goto cleanup;
+                }
+                if (compute_dynamic_offset_count >= descriptor_write_capacity) {
+                    json_fail("vulkan-dispatch", "too many V5.6 dynamic descriptor offsets");
+                    ret = 64;
+                    goto cleanup;
+                }
+                compute_dynamic_offsets[compute_dynamic_offset_count++] =
+                    (uint32_t)binding->api_dynamic_offset;
+            }
+        }
+    }
     VkCommandBufferAllocateInfo cbai = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, .commandPool = rt->command_pool, .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY, .commandBufferCount = 1};
     fail_stage = "allocate-generic-command-buffer";
     double command_allocate_start = now_ms();
@@ -18991,8 +19094,8 @@ static int run_vulkan_dispatch_fd(
                                 0,
                                 descriptor_set_count,
                                 descriptor_sets,
-                                0,
-                                NULL);
+                                compute_dynamic_offset_count,
+                                compute_dynamic_offset_count ? compute_dynamic_offsets : NULL);
     }
     if (strict_device_local_staging) {
         uint32_t staging_upload_count = 0;
@@ -21153,6 +21256,7 @@ cleanup:
     free(layout_binding_flags);
     free(layout_bindings);
     free(layout_slots);
+    free(compute_dynamic_offsets);
     free(descriptor_sets);
     free(set_layouts);
     free(staging_download_barriers);
@@ -24089,9 +24193,11 @@ static int build_vulkan_dispatch_v5_native_plan(
         }
         off_t fd_offset_checked = 0;
         off_t api_offset_checked = 0;
+        off_t api_base_offset_checked = 0;
         off_t memory_offset_checked = 0;
         if (checked_u64_to_off_t(fd_offset, &fd_offset_checked) != 0 ||
             checked_u64_to_off_t(api_offset, &api_offset_checked) != 0 ||
+            checked_u64_to_off_t(d->buffer_offset, &api_base_offset_checked) != 0 ||
             checked_u64_to_off_t(buffer->memory_offset, &memory_offset_checked) != 0 ||
             d->transfer_size > (uint64_t)SIZE_MAX ||
             api_range > (uint64_t)SIZE_MAX ||
@@ -24101,6 +24207,7 @@ static int build_vulkan_dispatch_v5_native_plan(
         }
         (void)fd_offset_checked;
         (void)api_offset_checked;
+        (void)api_base_offset_checked;
         (void)memory_offset_checked;
         plan->buffer_descriptor_count++;
     }
@@ -24290,9 +24397,11 @@ static int materialize_vulkan_dispatch_v5_native_plan_bindings(
         }
         off_t fd_offset_checked = 0;
         off_t api_offset_checked = 0;
+        off_t api_base_offset_checked = 0;
         off_t memory_offset_checked = 0;
         if (checked_u64_to_off_t(fd_offset, &fd_offset_checked) != 0 ||
             checked_u64_to_off_t(api_offset, &api_offset_checked) != 0 ||
+            checked_u64_to_off_t(d->buffer_offset, &api_base_offset_checked) != 0 ||
             checked_u64_to_off_t(buffer->memory_offset, &memory_offset_checked) != 0 ||
             d->transfer_size > (uint64_t)SIZE_MAX ||
             api_range > (uint64_t)SIZE_MAX ||
@@ -24308,6 +24417,8 @@ static int materialize_vulkan_dispatch_v5_native_plan_bindings(
         binding->offset = fd_offset_checked;
         binding->size = (size_t)d->transfer_size;
         binding->api_offset = api_offset_checked;
+        binding->api_base_offset = api_base_offset_checked;
+        binding->api_dynamic_offset = d->dynamic_offset;
         binding->api_range = (size_t)api_range;
         binding->api_buffer_size = (size_t)buffer->size;
         binding->api_buffer_usage = buffer->usage;
