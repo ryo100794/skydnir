@@ -38505,7 +38505,8 @@ static int handle_vulkan_dispatch_v5_frame(int cfd) {
         goto cleanup;
     }
     VkQueue identity_submit_queue = VK_NULL_HANDLE;
-    if (header.abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR) {
+    if (header.abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR ||
+        header.abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR) {
         if (init_vulkan_runtime(&g_vulkan_runtime) != 0) {
             json_fail("vulkan-dispatch-v5", "vulkan runtime unavailable for native object identity");
             rc = -ENODEV;

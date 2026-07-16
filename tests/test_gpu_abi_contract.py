@@ -7383,6 +7383,8 @@ class GpuAbiContractTest(unittest.TestCase):
         handler = c_function_body(executor, "handle_vulkan_dispatch_v5_frame")
         for marker in [
             "VkQueue identity_submit_queue = VK_NULL_HANDLE;",
+            "header.abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR ||",
+            "header.abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR",
             "register_vulkan_dispatch_v55_identity(frame, &header, &g_vulkan_runtime, &identity_handles)",
             "identity_submit_queue = identity_handles.queue;",
             "identity_submit_queue);",
