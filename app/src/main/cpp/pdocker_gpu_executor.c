@@ -23086,6 +23086,166 @@ static size_t vulkan_graphics_v6_table_range_count(uint32_t abi_minor) {
     }
 }
 
+static int vulkan_dispatch_v5_abi_minor_has_object_extension(uint32_t abi_minor) {
+    switch (abi_minor) {
+        case PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_OBJECTS:
+        case PDOCKER_GPU_VULKAN_DISPATCH_V52_ABI_MINOR:
+        case PDOCKER_GPU_VULKAN_DISPATCH_V53_ABI_MINOR:
+        case PDOCKER_GPU_VULKAN_DISPATCH_V54_ABI_MINOR:
+        case PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR:
+        case PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR:
+        case PDOCKER_GPU_VULKAN_DISPATCH_V57_ABI_MINOR:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static int vulkan_dispatch_v5_abi_minor_has_v52_layout_ranges(uint32_t abi_minor) {
+    switch (abi_minor) {
+        case PDOCKER_GPU_VULKAN_DISPATCH_V52_ABI_MINOR:
+        case PDOCKER_GPU_VULKAN_DISPATCH_V53_ABI_MINOR:
+        case PDOCKER_GPU_VULKAN_DISPATCH_V54_ABI_MINOR:
+        case PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR:
+        case PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR:
+        case PDOCKER_GPU_VULKAN_DISPATCH_V57_ABI_MINOR:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static int vulkan_dispatch_v5_abi_minor_has_v53_buffer_views(uint32_t abi_minor) {
+    switch (abi_minor) {
+        case PDOCKER_GPU_VULKAN_DISPATCH_V53_ABI_MINOR:
+        case PDOCKER_GPU_VULKAN_DISPATCH_V54_ABI_MINOR:
+        case PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR:
+        case PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR:
+        case PDOCKER_GPU_VULKAN_DISPATCH_V57_ABI_MINOR:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static int vulkan_dispatch_v5_abi_minor_has_v54_barriers(uint32_t abi_minor) {
+    switch (abi_minor) {
+        case PDOCKER_GPU_VULKAN_DISPATCH_V54_ABI_MINOR:
+        case PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR:
+        case PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR:
+        case PDOCKER_GPU_VULKAN_DISPATCH_V57_ABI_MINOR:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static int vulkan_dispatch_v5_abi_minor_has_v55_identity(uint32_t abi_minor) {
+    switch (abi_minor) {
+        case PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR:
+        case PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR:
+        case PDOCKER_GPU_VULKAN_DISPATCH_V57_ABI_MINOR:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static int vulkan_dispatch_v5_abi_minor_has_v56_compute_layouts(uint32_t abi_minor) {
+    switch (abi_minor) {
+        case PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR:
+        case PDOCKER_GPU_VULKAN_DISPATCH_V57_ABI_MINOR:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static const PdockerGpuVulkanDispatchV52FrameHeader *
+vulkan_dispatch_v5_header_v52(const unsigned char *frame, uint32_t abi_minor) {
+    if (!frame) return NULL;
+    switch (abi_minor) {
+        case PDOCKER_GPU_VULKAN_DISPATCH_V52_ABI_MINOR:
+            return (const PdockerGpuVulkanDispatchV52FrameHeader *)frame;
+        case PDOCKER_GPU_VULKAN_DISPATCH_V53_ABI_MINOR:
+            return &((const PdockerGpuVulkanDispatchV53FrameHeader *)frame)->v52;
+        case PDOCKER_GPU_VULKAN_DISPATCH_V54_ABI_MINOR:
+            return &((const PdockerGpuVulkanDispatchV54FrameHeader *)frame)->v53.v52;
+        case PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR:
+            return &((const PdockerGpuVulkanDispatchV55FrameHeader *)frame)->v54.v53.v52;
+        case PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR:
+            return &((const PdockerGpuVulkanDispatchV56FrameHeader *)frame)->v55.v54.v53.v52;
+        case PDOCKER_GPU_VULKAN_DISPATCH_V57_ABI_MINOR:
+            return &((const PdockerGpuVulkanDispatchV57FrameHeader *)frame)->v56.v55.v54.v53.v52;
+        default:
+            return NULL;
+    }
+}
+
+static const PdockerGpuVulkanDispatchV53FrameHeader *
+vulkan_dispatch_v5_header_v53(const unsigned char *frame, uint32_t abi_minor) {
+    if (!frame) return NULL;
+    switch (abi_minor) {
+        case PDOCKER_GPU_VULKAN_DISPATCH_V53_ABI_MINOR:
+            return (const PdockerGpuVulkanDispatchV53FrameHeader *)frame;
+        case PDOCKER_GPU_VULKAN_DISPATCH_V54_ABI_MINOR:
+            return &((const PdockerGpuVulkanDispatchV54FrameHeader *)frame)->v53;
+        case PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR:
+            return &((const PdockerGpuVulkanDispatchV55FrameHeader *)frame)->v54.v53;
+        case PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR:
+            return &((const PdockerGpuVulkanDispatchV56FrameHeader *)frame)->v55.v54.v53;
+        case PDOCKER_GPU_VULKAN_DISPATCH_V57_ABI_MINOR:
+            return &((const PdockerGpuVulkanDispatchV57FrameHeader *)frame)->v56.v55.v54.v53;
+        default:
+            return NULL;
+    }
+}
+
+static const PdockerGpuVulkanDispatchV54FrameHeader *
+vulkan_dispatch_v5_header_v54(const unsigned char *frame, uint32_t abi_minor) {
+    if (!frame) return NULL;
+    switch (abi_minor) {
+        case PDOCKER_GPU_VULKAN_DISPATCH_V54_ABI_MINOR:
+            return (const PdockerGpuVulkanDispatchV54FrameHeader *)frame;
+        case PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR:
+            return &((const PdockerGpuVulkanDispatchV55FrameHeader *)frame)->v54;
+        case PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR:
+            return &((const PdockerGpuVulkanDispatchV56FrameHeader *)frame)->v55.v54;
+        case PDOCKER_GPU_VULKAN_DISPATCH_V57_ABI_MINOR:
+            return &((const PdockerGpuVulkanDispatchV57FrameHeader *)frame)->v56.v55.v54;
+        default:
+            return NULL;
+    }
+}
+
+static const PdockerGpuVulkanDispatchV55FrameHeader *
+vulkan_dispatch_v5_header_v55(const unsigned char *frame, uint32_t abi_minor) {
+    if (!frame) return NULL;
+    switch (abi_minor) {
+        case PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR:
+            return (const PdockerGpuVulkanDispatchV55FrameHeader *)frame;
+        case PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR:
+            return &((const PdockerGpuVulkanDispatchV56FrameHeader *)frame)->v55;
+        case PDOCKER_GPU_VULKAN_DISPATCH_V57_ABI_MINOR:
+            return &((const PdockerGpuVulkanDispatchV57FrameHeader *)frame)->v56.v55;
+        default:
+            return NULL;
+    }
+}
+
+static const PdockerGpuVulkanDispatchV56FrameHeader *
+vulkan_dispatch_v5_header_v56(const unsigned char *frame, uint32_t abi_minor) {
+    if (!frame) return NULL;
+    switch (abi_minor) {
+        case PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR:
+            return (const PdockerGpuVulkanDispatchV56FrameHeader *)frame;
+        case PDOCKER_GPU_VULKAN_DISPATCH_V57_ABI_MINOR:
+            return &((const PdockerGpuVulkanDispatchV57FrameHeader *)frame)->v56;
+        default:
+            return NULL;
+    }
+}
+
 static int validate_vulkan_dispatch_v5_header(
         const PdockerGpuVulkanDispatchV5FrameHeader *header,
         size_t received_fd_count) {
@@ -23193,13 +23353,7 @@ static int validate_vulkan_dispatch_v5_object_extension(
         const unsigned char *frame,
         const PdockerGpuVulkanDispatchV5FrameHeader *header) {
     if (!frame || !header) return -EINVAL;
-    if (header->abi_minor != PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_OBJECTS &&
-        header->abi_minor != PDOCKER_GPU_VULKAN_DISPATCH_V52_ABI_MINOR &&
-        header->abi_minor != PDOCKER_GPU_VULKAN_DISPATCH_V53_ABI_MINOR &&
-        header->abi_minor != PDOCKER_GPU_VULKAN_DISPATCH_V54_ABI_MINOR &&
-        header->abi_minor != PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR &&
-        header->abi_minor != PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR &&
-        header->abi_minor != PDOCKER_GPU_VULKAN_DISPATCH_V57_ABI_MINOR) return 0;
+    if (!vulkan_dispatch_v5_abi_minor_has_object_extension(header->abi_minor)) return 0;
     if (header->header_size < sizeof(PdockerGpuVulkanDispatchV5ObjectFrameHeader)) {
         return -EPROTO;
     }
@@ -23418,11 +23572,9 @@ static int register_vulkan_dispatch_v55_identity(
         const VulkanRuntime *rt,
         VulkanRuntimeIdentityHandles *out_handles) {
     if (!frame || !header) return -EINVAL;
-    if (header->abi_minor != PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR &&
-        header->abi_minor != PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR &&
-        header->abi_minor != PDOCKER_GPU_VULKAN_DISPATCH_V57_ABI_MINOR) return 0;
     const PdockerGpuVulkanDispatchV55FrameHeader *header_v55 =
-        (const PdockerGpuVulkanDispatchV55FrameHeader *)frame;
+        vulkan_dispatch_v5_header_v55(frame, header->abi_minor);
+    if (!header_v55) return 0;
     int rc = validate_vulkan_dispatch_v55_identity_extension(&header_v55->v55);
     if (rc != 0) return rc;
     return register_vulkan_runtime_identity_ids(
@@ -23507,13 +23659,7 @@ static int validate_vulkan_dispatch_v5_frame_content(
 
     rc = validate_vulkan_dispatch_v5_object_extension(frame, header);
     if (rc != 0) return rc;
-    if (header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_OBJECTS ||
-        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V52_ABI_MINOR ||
-        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V53_ABI_MINOR ||
-        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V54_ABI_MINOR ||
-        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR ||
-        (header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR ||
-        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V57_ABI_MINOR)) {
+    if (vulkan_dispatch_v5_abi_minor_has_object_extension(header->abi_minor)) {
         const PdockerGpuVulkanDispatchV5ObjectFrameHeader *object_header =
             (const PdockerGpuVulkanDispatchV5ObjectFrameHeader *)frame;
         const PdockerGpuVulkanDispatchV5ObjectHeaderExtension *objects = &object_header->objects;
@@ -23538,23 +23684,10 @@ static int validate_vulkan_dispatch_v5_frame_content(
             return -EPROTO;
         }
     }
-    if (header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V52_ABI_MINOR ||
-        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V53_ABI_MINOR ||
-        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V54_ABI_MINOR ||
-        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR ||
-        (header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR ||
-        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V57_ABI_MINOR)) {
+    if (vulkan_dispatch_v5_abi_minor_has_v52_layout_ranges(header->abi_minor)) {
         const PdockerGpuVulkanDispatchV52FrameHeader *header_v52 =
-            (header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR ||
-        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V57_ABI_MINOR)
-                ? &((const PdockerGpuVulkanDispatchV56FrameHeader *)frame)->v55.v54.v53.v52
-                : (header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR
-                ? &((const PdockerGpuVulkanDispatchV55FrameHeader *)frame)->v54.v53.v52
-                : (header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V54_ABI_MINOR
-                    ? &((const PdockerGpuVulkanDispatchV54FrameHeader *)frame)->v53.v52
-                    : (header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V53_ABI_MINOR
-                        ? &((const PdockerGpuVulkanDispatchV53FrameHeader *)frame)->v52
-                        : (const PdockerGpuVulkanDispatchV52FrameHeader *)frame)));
+            vulkan_dispatch_v5_header_v52(frame, header->abi_minor);
+        if (!header_v52) return -EPROTO;
         const PdockerGpuVulkanDispatchV52HeaderExtension *ext = &header_v52->v52;
         if (ext->image_layout_range_count > PDOCKER_GPU_VULKAN_DISPATCH_V52_MAX_IMAGE_LAYOUT_RANGES ||
             ext->image_layout_range_entry_size != sizeof(PdockerGpuVulkanDispatchV52ImageLayoutRangeEntry) ||
@@ -23580,20 +23713,10 @@ static int validate_vulkan_dispatch_v5_frame_content(
             return -EPROTO;
         }
     }
-    if (header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V53_ABI_MINOR ||
-        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V54_ABI_MINOR ||
-        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR ||
-        (header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR ||
-        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V57_ABI_MINOR)) {
+    if (vulkan_dispatch_v5_abi_minor_has_v53_buffer_views(header->abi_minor)) {
         const PdockerGpuVulkanDispatchV53FrameHeader *header_v53 =
-            (header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR ||
-        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V57_ABI_MINOR)
-                ? &((const PdockerGpuVulkanDispatchV56FrameHeader *)frame)->v55.v54.v53
-                : (header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR
-                ? &((const PdockerGpuVulkanDispatchV55FrameHeader *)frame)->v54.v53
-                : (header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V54_ABI_MINOR
-                    ? &((const PdockerGpuVulkanDispatchV54FrameHeader *)frame)->v53
-                    : (const PdockerGpuVulkanDispatchV53FrameHeader *)frame));
+            vulkan_dispatch_v5_header_v53(frame, header->abi_minor);
+        if (!header_v53) return -EPROTO;
         const PdockerGpuVulkanDispatchV53HeaderExtension *ext = &header_v53->v53;
         if (ext->buffer_view_count > PDOCKER_GPU_VULKAN_DISPATCH_V53_MAX_BUFFER_VIEWS ||
             ext->buffer_view_entry_size != sizeof(PdockerGpuVulkanDispatchV53BufferViewEntry) ||
@@ -23619,17 +23742,10 @@ static int validate_vulkan_dispatch_v5_frame_content(
             return -EPROTO;
         }
     }
-    if (header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V54_ABI_MINOR ||
-        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR ||
-        (header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR ||
-        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V57_ABI_MINOR)) {
+    if (vulkan_dispatch_v5_abi_minor_has_v54_barriers(header->abi_minor)) {
         const PdockerGpuVulkanDispatchV54FrameHeader *header_v54 =
-            (header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR ||
-        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V57_ABI_MINOR)
-                ? &((const PdockerGpuVulkanDispatchV56FrameHeader *)frame)->v55.v54
-                : (header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR
-                ? &((const PdockerGpuVulkanDispatchV55FrameHeader *)frame)->v54
-                : (const PdockerGpuVulkanDispatchV54FrameHeader *)frame);
+            vulkan_dispatch_v5_header_v54(frame, header->abi_minor);
+        if (!header_v54) return -EPROTO;
         const PdockerGpuVulkanDispatchV54HeaderExtension *ext = &header_v54->v54;
         if (ext->reserved0 != 0 ||
             ext->memory_barrier_count > PDOCKER_GPU_VULKAN_DISPATCH_V54_MAX_MEMORY_BARRIERS ||
@@ -23700,18 +23816,17 @@ static int validate_vulkan_dispatch_v5_frame_content(
             return -EPROTO;
         }
     }
-    if (header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR ||
-        (header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR ||
-        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V57_ABI_MINOR)) {
+    if (vulkan_dispatch_v5_abi_minor_has_v55_identity(header->abi_minor)) {
         const PdockerGpuVulkanDispatchV55FrameHeader *header_v55 =
-            (const PdockerGpuVulkanDispatchV55FrameHeader *)frame;
+            vulkan_dispatch_v5_header_v55(frame, header->abi_minor);
+        if (!header_v55) return -EPROTO;
         int v55_rc = validate_vulkan_dispatch_v55_identity_extension(&header_v55->v55);
         if (v55_rc != 0) return v55_rc;
     }
-    if ((header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR ||
-        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V57_ABI_MINOR)) {
+    if (vulkan_dispatch_v5_abi_minor_has_v56_compute_layouts(header->abi_minor)) {
         const PdockerGpuVulkanDispatchV56FrameHeader *header_v56 =
-            (const PdockerGpuVulkanDispatchV56FrameHeader *)frame;
+            vulkan_dispatch_v5_header_v56(frame, header->abi_minor);
+        if (!header_v56) return -EPROTO;
         const PdockerGpuVulkanDispatchV56HeaderExtension *ext = &header_v56->v56;
         if (ext->pipeline_layout_id == 0 ||
             ext->descriptor_set_layout_count > PDOCKER_GPU_VULKAN_DISPATCH_V56_MAX_DESCRIPTOR_SET_LAYOUT_BINDINGS ||
@@ -23964,34 +24079,15 @@ static int build_vulkan_dispatch_v5_native_plan(
         return -E2BIG;
     }
     const int has_object_extension =
-        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_OBJECTS ||
-        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V52_ABI_MINOR ||
-        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V53_ABI_MINOR ||
-        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V54_ABI_MINOR ||
-        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR ||
-        (header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR ||
-        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V57_ABI_MINOR);
+        vulkan_dispatch_v5_abi_minor_has_object_extension(header->abi_minor);
     const int has_v52_layout_ranges =
-        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V52_ABI_MINOR ||
-        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V53_ABI_MINOR ||
-        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V54_ABI_MINOR ||
-        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR ||
-        (header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR ||
-        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V57_ABI_MINOR);
+        vulkan_dispatch_v5_abi_minor_has_v52_layout_ranges(header->abi_minor);
     const int has_v53_buffer_views =
-        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V53_ABI_MINOR ||
-        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V54_ABI_MINOR ||
-        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR ||
-        (header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR ||
-        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V57_ABI_MINOR);
+        vulkan_dispatch_v5_abi_minor_has_v53_buffer_views(header->abi_minor);
     const int has_v54_barriers =
-        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V54_ABI_MINOR ||
-        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR ||
-        (header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR ||
-        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V57_ABI_MINOR);
+        vulkan_dispatch_v5_abi_minor_has_v54_barriers(header->abi_minor);
     const int has_v56_compute_layouts =
-        (header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR ||
-        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V57_ABI_MINOR);
+        vulkan_dispatch_v5_abi_minor_has_v56_compute_layouts(header->abi_minor);
     const PdockerGpuVulkanDispatchV5ResourceEntry *resources =
         (const PdockerGpuVulkanDispatchV5ResourceEntry *)v5_frame_range(
             frame, header, header->resource_table_offset, header->resource_table_size);
@@ -24059,16 +24155,8 @@ static int build_vulkan_dispatch_v5_native_plan(
         }
         if (has_v52_layout_ranges) {
             const PdockerGpuVulkanDispatchV52FrameHeader *header_v52 =
-                (header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR ||
-        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V57_ABI_MINOR)
-                    ? &((const PdockerGpuVulkanDispatchV56FrameHeader *)frame)->v55.v54.v53.v52
-                    : (header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR
-                        ? &((const PdockerGpuVulkanDispatchV55FrameHeader *)frame)->v54.v53.v52
-                        : (has_v54_barriers
-                            ? &((const PdockerGpuVulkanDispatchV54FrameHeader *)frame)->v53.v52
-                            : (has_v53_buffer_views
-                                ? &((const PdockerGpuVulkanDispatchV53FrameHeader *)frame)->v52
-                                : (const PdockerGpuVulkanDispatchV52FrameHeader *)frame)));
+                vulkan_dispatch_v5_header_v52(frame, header->abi_minor);
+            if (!header_v52) return -EPROTO;
             plan->image_layout_range_count = header_v52->v52.image_layout_range_count;
             plan->image_layout_ranges = plan->image_layout_range_count
                 ? (const PdockerGpuVulkanDispatchV52ImageLayoutRangeEntry *)v5_frame_range(
@@ -24085,14 +24173,8 @@ static int build_vulkan_dispatch_v5_native_plan(
         }
         if (has_v53_buffer_views) {
             const PdockerGpuVulkanDispatchV53FrameHeader *header_v53 =
-                (header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR ||
-        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V57_ABI_MINOR)
-                    ? &((const PdockerGpuVulkanDispatchV56FrameHeader *)frame)->v55.v54.v53
-                    : (header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR
-                        ? &((const PdockerGpuVulkanDispatchV55FrameHeader *)frame)->v54.v53
-                        : (has_v54_barriers
-                            ? &((const PdockerGpuVulkanDispatchV54FrameHeader *)frame)->v53
-                            : (const PdockerGpuVulkanDispatchV53FrameHeader *)frame));
+                vulkan_dispatch_v5_header_v53(frame, header->abi_minor);
+            if (!header_v53) return -EPROTO;
             plan->buffer_view_count = header_v53->v53.buffer_view_count;
             plan->buffer_views = plan->buffer_view_count
                 ? (const PdockerGpuVulkanDispatchV53BufferViewEntry *)v5_frame_range(
@@ -24103,12 +24185,8 @@ static int build_vulkan_dispatch_v5_native_plan(
         }
         if (has_v54_barriers) {
             const PdockerGpuVulkanDispatchV54FrameHeader *header_v54 =
-                (header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR ||
-        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V57_ABI_MINOR)
-                    ? &((const PdockerGpuVulkanDispatchV56FrameHeader *)frame)->v55.v54
-                    : (header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR
-                        ? &((const PdockerGpuVulkanDispatchV55FrameHeader *)frame)->v54
-                        : (const PdockerGpuVulkanDispatchV54FrameHeader *)frame);
+                vulkan_dispatch_v5_header_v54(frame, header->abi_minor);
+            if (!header_v54) return -EPROTO;
             plan->barrier_dependency_flags = header_v54->v54.dependency_flags;
             plan->memory_barrier_count = header_v54->v54.memory_barrier_count;
             plan->memory_barriers = plan->memory_barrier_count
@@ -24136,7 +24214,8 @@ static int build_vulkan_dispatch_v5_native_plan(
         }
         if (has_v56_compute_layouts) {
             const PdockerGpuVulkanDispatchV56FrameHeader *header_v56 =
-                (const PdockerGpuVulkanDispatchV56FrameHeader *)frame;
+                vulkan_dispatch_v5_header_v56(frame, header->abi_minor);
+            if (!header_v56) return -EPROTO;
             const PdockerGpuVulkanDispatchV56HeaderExtension *ext = &header_v56->v56;
             plan->compute_pipeline_layout_id = ext->pipeline_layout_id;
             plan->compute_descriptor_set_layout_count = ext->descriptor_set_layout_count;
@@ -38990,8 +39069,7 @@ static int handle_vulkan_dispatch_v5_frame(int cfd) {
         goto cleanup;
     }
     VkQueue identity_submit_queue = VK_NULL_HANDLE;
-    if (header.abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR ||
-        header.abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR) {
+    if (vulkan_dispatch_v5_abi_minor_has_v55_identity(header.abi_minor)) {
         if (init_vulkan_runtime(&g_vulkan_runtime) != 0) {
             json_fail("vulkan-dispatch-v5", "vulkan runtime unavailable for native object identity");
             rc = -ENODEV;

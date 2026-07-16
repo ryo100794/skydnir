@@ -5041,33 +5041,20 @@ class GpuAbiContractTest(unittest.TestCase):
             "static const void *v5_frame_range", 1
         )[0]
         self.assertIn(
-            "header->abi_minor != PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_OBJECTS &&",
+            "vulkan_dispatch_v5_abi_minor_has_object_extension(header->abi_minor)",
             object_validator,
         )
-        self.assertIn(
-            "header->abi_minor != PDOCKER_GPU_VULKAN_DISPATCH_V52_ABI_MINOR &&",
-            object_validator,
-        )
-        self.assertIn(
-            "header->abi_minor != PDOCKER_GPU_VULKAN_DISPATCH_V53_ABI_MINOR &&",
-            object_validator,
-        )
-        self.assertIn(
-            "header->abi_minor != PDOCKER_GPU_VULKAN_DISPATCH_V54_ABI_MINOR &&",
-            object_validator,
-        )
-        self.assertIn(
-            "header->abi_minor != PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR &&",
-            object_validator,
-        )
-        self.assertIn(
-            "header->abi_minor != PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR &&",
-            object_validator,
-        )
-        self.assertIn(
-            "header->abi_minor != PDOCKER_GPU_VULKAN_DISPATCH_V57_ABI_MINOR) return 0;",
-            object_validator,
-        )
+        object_minor_helper = c_function_body(executor, "vulkan_dispatch_v5_abi_minor_has_object_extension")
+        for marker in [
+            "case PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_OBJECTS:",
+            "case PDOCKER_GPU_VULKAN_DISPATCH_V52_ABI_MINOR:",
+            "case PDOCKER_GPU_VULKAN_DISPATCH_V53_ABI_MINOR:",
+            "case PDOCKER_GPU_VULKAN_DISPATCH_V54_ABI_MINOR:",
+            "case PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR:",
+            "case PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR:",
+            "case PDOCKER_GPU_VULKAN_DISPATCH_V57_ABI_MINOR:",
+        ]:
+            self.assertIn(marker, object_minor_helper)
 
     def test_vulkan_dispatch_v5_1_object_transport_uses_native_plan_materializer_before_execution(self):
         executor = GPU_EXECUTOR.read_text()
@@ -5126,8 +5113,14 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("sizeof(PdockerGpuVulkanDispatchV56FrameHeader)", header_validator)
 
         validator = c_function_body(executor, "validate_vulkan_dispatch_v5_frame_content")
+        v56_minor_helper = c_function_body(executor, "vulkan_dispatch_v5_abi_minor_has_v56_compute_layouts")
         for marker in [
-            "PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR",
+            "case PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR:",
+            "case PDOCKER_GPU_VULKAN_DISPATCH_V57_ABI_MINOR:",
+        ]:
+            self.assertIn(marker, v56_minor_helper)
+        self.assertIn("vulkan_dispatch_v5_abi_minor_has_v56_compute_layouts(header->abi_minor)", validator)
+        for marker in [
             "PDOCKER_GPU_VULKAN_DISPATCH_V56_DESCRIPTOR_SET_LAYOUT_SCHEMA_HASH",
             "PDOCKER_GPU_VULKAN_DISPATCH_V56_PIPELINE_LAYOUT_SET_SCHEMA_HASH",
             "PDOCKER_GPU_VULKAN_DISPATCH_V56_PUSH_CONSTANT_RANGE_SCHEMA_HASH",
@@ -5862,9 +5855,19 @@ class GpuAbiContractTest(unittest.TestCase):
             "__alignof__(PdockerGpuVulkanDispatchV52ImageLayoutRangeEntry)",
         ]:
             self.assertIn(marker, frame_validator)
+        v52_minor_helper = c_function_body(executor, "vulkan_dispatch_v5_abi_minor_has_v52_layout_ranges")
         for marker in [
-            "PDOCKER_GPU_VULKAN_DISPATCH_V52_ABI_MINOR",
+            "case PDOCKER_GPU_VULKAN_DISPATCH_V52_ABI_MINOR:",
+            "case PDOCKER_GPU_VULKAN_DISPATCH_V53_ABI_MINOR:",
+            "case PDOCKER_GPU_VULKAN_DISPATCH_V54_ABI_MINOR:",
+            "case PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR:",
+            "case PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR:",
+            "case PDOCKER_GPU_VULKAN_DISPATCH_V57_ABI_MINOR:",
+        ]:
+            self.assertIn(marker, v52_minor_helper)
+        for marker in [
             "PdockerGpuVulkanDispatchV52FrameHeader",
+            "vulkan_dispatch_v5_header_v52(frame, header->abi_minor)",
             "header_v52->v52.image_layout_range_count",
             "header_v52->v52.image_layout_range_table_offset",
             "header_v52->v52.image_layout_range_table_size",
@@ -6353,6 +6356,16 @@ class GpuAbiContractTest(unittest.TestCase):
                 "PDOCKER_GPU_VULKAN_DISPATCH_V56_PUSH_CONSTANT_RANGE_FIELDS",
                 "PDOCKER_GPU_VULKAN_DISPATCH_V56_PUSH_CONSTANT_RANGE_FIELD_COUNT",
                 "PDOCKER_GPU_VULKAN_DISPATCH_V56_PUSH_CONSTANT_RANGE_SCHEMA_HASH",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_DISPATCH_V57_HEADER_EXTENSION_FIELDS",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V57_HEADER_EXTENSION_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V57_HEADER_EXTENSION_SCHEMA_HASH",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_DISPATCH_V57_PUSH_CONSTANT_OP_FIELDS",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V57_PUSH_CONSTANT_OP_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V57_PUSH_CONSTANT_OP_SCHEMA_HASH",
             ),
             (
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_FRAME_HEADER_FIELDS",
@@ -7502,13 +7515,19 @@ class GpuAbiContractTest(unittest.TestCase):
         handler = c_function_body(executor, "handle_vulkan_dispatch_v5_frame")
         for marker in [
             "VkQueue identity_submit_queue = VK_NULL_HANDLE;",
-            "header.abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR ||",
-            "header.abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR",
+            "vulkan_dispatch_v5_abi_minor_has_v55_identity(header.abi_minor)",
             "register_vulkan_dispatch_v55_identity(frame, &header, &g_vulkan_runtime, &identity_handles)",
             "identity_submit_queue = identity_handles.queue;",
             "identity_submit_queue);",
         ]:
             self.assertIn(marker, handler)
+        v55_minor_helper = c_function_body(executor, "vulkan_dispatch_v5_abi_minor_has_v55_identity")
+        for marker in [
+            "case PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR:",
+            "case PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR:",
+            "case PDOCKER_GPU_VULKAN_DISPATCH_V57_ABI_MINOR:",
+        ]:
+            self.assertIn(marker, v55_minor_helper)
         graphics_submit = c_function_body(executor, "submit_vulkan_graphics_v6_command_buffer")
         for marker in [
             "!submit_queue",
