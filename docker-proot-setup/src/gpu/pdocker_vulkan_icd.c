@@ -6978,6 +6978,10 @@ static int collect_dispatch_v56_descriptor_set_layout_metadata(
         candidate.stage_flags = layout->storage_binding_stage_flags[slot];
         candidate.binding_flags = descriptor_layout_binding_flags(layout, slot);
         candidate.immutable_sampler_count = immutable_sampler_count;
+        if (candidate.immutable_sampler_count != 0 ||
+            (candidate.binding_flags & PDOCKER_VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT) != 0) {
+            return -EOPNOTSUPP;
+        }
         int existing = find_dispatch_v56_descriptor_set_layout_entry(
             entries, *entry_count, candidate.layout_id, candidate.binding);
         if (existing >= 0) {

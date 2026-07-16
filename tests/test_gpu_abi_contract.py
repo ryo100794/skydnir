@@ -5179,6 +5179,17 @@ class GpuAbiContractTest(unittest.TestCase):
         collect_v56_layout = c_function_body(icd, "collect_dispatch_v56_descriptor_set_layout_metadata")
         self.assertIn("descriptor_type_is_dynamic(descriptor_type)", collect_v56_layout)
         self.assertIn("does not yet transport dynamic-offset arrays", collect_v56_layout)
+        self.assertIn("candidate.immutable_sampler_count != 0", collect_v56_layout)
+        self.assertIn("PDOCKER_VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT", collect_v56_layout)
+        exact_write_validator = c_function_body(executor, "validate_vulkan_compute_v56_descriptor_writes")
+        for marker in [
+            "vulkan_dispatch_descriptor_type_is_dynamic(bindings[i].api_descriptor_type)",
+            "record_vulkan_compute_v56_descriptor_write",
+            "slot_write_counts",
+            "PDOCKER_VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT",
+            "slot_write_counts[i] != slot->descriptor_count",
+        ]:
+            self.assertIn(marker, exact_write_validator)
 
         runner = c_function_body(executor, "run_vulkan_dispatch_fd")
         for marker in [
@@ -5186,13 +5197,19 @@ class GpuAbiContractTest(unittest.TestCase):
             "const int use_v56_compute_layout = v56_compute_layout_available && binding_alias_count == 0;",
             "object_tables->compute_pipeline_layout_sets",
             "object_tables->compute_descriptor_set_layouts",
+            "incomplete V5.6 compute layout metadata",
             "validate_vulkan_compute_descriptor_layout_slot",
             "create-v56-compute-descriptor-set-layout",
             "create-v56-compute-pipeline-layout",
             "create-v56-compute-descriptor-pool",
             "compute_push_ranges",
             "V5.6 compute pipeline layout has a descriptor set gap",
+            "V5.6 compute descriptor writes do not match layout",
+            "validate_vulkan_compute_v56_descriptor_writes",
+            "V5.6 compute push constants require one simple range",
             "V5.6 compute push ranges do not cover transported push payload",
+            "entry->offset != 0",
+            "entry->stage_flags != VK_SHADER_STAGE_COMPUTE_BIT",
             "VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT",
             "VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT",
             "entry->immutable_sampler_count != 0",

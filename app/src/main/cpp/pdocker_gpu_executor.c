@@ -9673,6 +9673,122 @@ static int validate_vulkan_compute_descriptor_layout_slot(
     return 0;
 }
 
+typedef struct VulkanComputeDescriptorWriteKey {
+    uint32_t descriptor_set;
+    uint32_t binding;
+    uint32_t array_element;
+} VulkanComputeDescriptorWriteKey;
+
+static int record_vulkan_compute_v56_descriptor_write(
+        VulkanComputeDescriptorLayoutSlot *layout_slots,
+        size_t layout_slot_count,
+        VulkanComputeDescriptorWriteKey *keys,
+        size_t key_capacity,
+        size_t *key_count,
+        uint32_t *slot_write_counts,
+        uint32_t descriptor_set,
+        uint32_t binding,
+        uint32_t array_element,
+        VkDescriptorType descriptor_type) {
+    if (!layout_slots || !keys || !key_count || !slot_write_counts) return -EINVAL;
+    VulkanComputeDescriptorLayoutSlot *slot = find_vulkan_compute_descriptor_layout_slot(
+        layout_slots, layout_slot_count, descriptor_set, binding);
+    if (!slot) return -ENOENT;
+    if (slot->descriptor_type != descriptor_type) return -EPROTO;
+    if (array_element >= slot->descriptor_count) return -ERANGE;
+    for (size_t i = 0; i < *key_count; ++i) {
+        if (keys[i].descriptor_set == descriptor_set &&
+            keys[i].binding == binding &&
+            keys[i].array_element == array_element) {
+            return -EEXIST;
+        }
+    }
+    if (*key_count >= key_capacity) return -E2BIG;
+    keys[(*key_count)++] = (VulkanComputeDescriptorWriteKey){
+        .descriptor_set = descriptor_set,
+        .binding = binding,
+        .array_element = array_element,
+    };
+    slot_write_counts[(size_t)(slot - layout_slots)]++;
+    return 0;
+}
+
+static int validate_vulkan_compute_v56_descriptor_writes(
+        VulkanComputeDescriptorLayoutSlot *layout_slots,
+        size_t layout_slot_count,
+        const VulkanDispatchBinding *bindings,
+        const uint8_t *active_bindings,
+        size_t binding_count,
+        const VulkanDispatchImageDescriptor *image_descriptors,
+        size_t image_descriptor_count) {
+    if (!layout_slots || layout_slot_count == 0 ||
+        (binding_count > 0 && (!bindings || !active_bindings)) ||
+        (image_descriptor_count > 0 && !image_descriptors)) {
+        return -EINVAL;
+    }
+    if (binding_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS ||
+        image_descriptor_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS ||
+        binding_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS - image_descriptor_count) {
+        return -E2BIG;
+    }
+    const size_t key_capacity = binding_count + image_descriptor_count;
+    VulkanComputeDescriptorWriteKey *keys = (VulkanComputeDescriptorWriteKey *)calloc(
+        key_capacity ? key_capacity : 1u, sizeof(*keys));
+    uint32_t *slot_write_counts = (uint32_t *)calloc(
+        layout_slot_count, sizeof(*slot_write_counts));
+    if (!keys || !slot_write_counts) {
+        free(slot_write_counts);
+        free(keys);
+        return -ENOMEM;
+    }
+    size_t key_count = 0;
+    int rc = 0;
+    for (size_t i = 0; i < binding_count; ++i) {
+        if (!active_bindings[i]) continue;
+        if (vulkan_dispatch_descriptor_type_is_dynamic(bindings[i].api_descriptor_type)) {
+            rc = -EOPNOTSUPP;
+            goto cleanup;
+        }
+        VkDescriptorType descriptor_type = VK_DESCRIPTOR_TYPE_MAX_ENUM;
+        rc = vulkan_dispatch_descriptor_type_from_api(
+            bindings[i].api_descriptor_type, &descriptor_type);
+        if (rc != 0) goto cleanup;
+        rc = record_vulkan_compute_v56_descriptor_write(
+            layout_slots, layout_slot_count, keys, key_capacity, &key_count,
+            slot_write_counts, bindings[i].descriptor_set, bindings[i].binding,
+            bindings[i].api_array_element, descriptor_type);
+        if (rc != 0) goto cleanup;
+    }
+    for (size_t i = 0; i < image_descriptor_count; ++i) {
+        const VulkanDispatchImageDescriptor *descriptor = &image_descriptors[i];
+        VkDescriptorType descriptor_type = VK_DESCRIPTOR_TYPE_MAX_ENUM;
+        rc = vulkan_dispatch_image_descriptor_type_from_api(
+            descriptor->api_descriptor_type, &descriptor_type);
+        if (rc != 0) goto cleanup;
+        rc = record_vulkan_compute_v56_descriptor_write(
+            layout_slots, layout_slot_count, keys, key_capacity, &key_count,
+            slot_write_counts, descriptor->descriptor_set, descriptor->binding,
+            descriptor->api_array_element, descriptor_type);
+        if (rc != 0) goto cleanup;
+    }
+    for (size_t i = 0; i < layout_slot_count; ++i) {
+        const VulkanComputeDescriptorLayoutSlot *slot = &layout_slots[i];
+        if (slot_write_counts[i] > slot->descriptor_count) {
+            rc = -ERANGE;
+            goto cleanup;
+        }
+        if ((slot->binding_flags & PDOCKER_VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT) == 0 &&
+            slot_write_counts[i] != slot->descriptor_count) {
+            rc = -ENOENT;
+            goto cleanup;
+        }
+    }
+cleanup:
+    free(slot_write_counts);
+    free(keys);
+    return rc;
+}
+
 static uint64_t vulkan_descriptor_layout_hash(
         const VulkanComputeDescriptorLayoutSlot *layout_slots,
         size_t layout_slot_count,
@@ -16210,11 +16326,14 @@ static int run_vulkan_dispatch_fd(
             return 64;
         }
     }
-    if (object_tables && object_tables->compute_pipeline_layout_id != 0 &&
-        object_tables->compute_descriptor_set_layout_count > 0 &&
-        object_tables->compute_descriptor_set_layouts &&
-        object_tables->compute_pipeline_layout_set_count > 0 &&
-        object_tables->compute_pipeline_layout_sets) {
+    if (object_tables && object_tables->compute_pipeline_layout_id != 0) {
+        if (object_tables->compute_descriptor_set_layout_count == 0 ||
+            !object_tables->compute_descriptor_set_layouts ||
+            object_tables->compute_pipeline_layout_set_count == 0 ||
+            !object_tables->compute_pipeline_layout_sets) {
+            json_fail("vulkan-dispatch", "incomplete V5.6 compute layout metadata");
+            return 64;
+        }
         v56_compute_layout_available = 1;
         for (size_t i = 0; i < object_tables->compute_pipeline_layout_set_count; ++i) {
             const PdockerGpuVulkanDispatchV56PipelineLayoutSetEntry *entry =
@@ -18129,6 +18248,17 @@ static int run_vulkan_dispatch_fd(
             goto cleanup;
         }
     }
+    if (use_v56_compute_layout) {
+        int exact_descriptor_rc = validate_vulkan_compute_v56_descriptor_writes(
+            layout_slots, layout_slot_count,
+            bindings, active_bindings, binding_count,
+            image_descriptors, image_descriptor_count);
+        if (exact_descriptor_rc != 0) {
+            json_fail("vulkan-dispatch", "V5.6 compute descriptor writes do not match layout");
+            ret = exact_descriptor_rc == -ENOMEM ? 75 : 64;
+            goto cleanup;
+        }
+    }
     for (size_t i = 0; i < binding_alias_count; ++i) {
         if (binding_aliases[i].rewritten_binding >= layout_count) {
             json_fail("vulkan-dispatch", "invalid descriptor alias binding");
@@ -18276,6 +18406,11 @@ static int run_vulkan_dispatch_fd(
             goto cleanup;
         }
         if (use_v56_compute_layout && object_tables->compute_push_constant_range_count > 0) {
+            if (object_tables->compute_push_constant_range_count > 1) {
+                json_fail("vulkan-dispatch", "V5.6 compute push constants require one simple range");
+                ret = 64;
+                goto cleanup;
+            }
             if (object_tables->compute_push_constant_range_count > UINT32_MAX ||
                 (size_t)object_tables->compute_push_constant_range_count >
                     SIZE_MAX / sizeof(compute_push_ranges[0])) {
@@ -18298,9 +18433,10 @@ static int run_vulkan_dispatch_fd(
                     entry->size == 0 ||
                     (entry->offset & 3u) != 0 ||
                     (entry->size & 3u) != 0 ||
+                    entry->offset != 0 ||
                     entry->offset > UINT32_MAX - entry->size ||
                     entry->offset + entry->size > runtime_push_limit ||
-                    (entry->stage_flags & VK_SHADER_STAGE_COMPUTE_BIT) == 0) {
+                    entry->stage_flags != VK_SHADER_STAGE_COMPUTE_BIT) {
                     json_fail("vulkan-dispatch", "invalid V5.6 compute push constant range");
                     ret = 64;
                     goto cleanup;
