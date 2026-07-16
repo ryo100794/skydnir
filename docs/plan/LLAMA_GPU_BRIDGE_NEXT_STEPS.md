@@ -2920,10 +2920,11 @@ the struct only when every field is false and rejects any true bit as
 `vulkan14Features` with `VK_ERROR_FEATURE_NOT_PRESENT`.
 
 This intentionally does not promote individually implemented extension lanes into
-the Vulkan 1.4 aggregate and does not advertise maintenance5, maintenance6, host
-image copy, push descriptors, pipeline robustness, or Vulkan 1.4 entry-point
-semantics.  Executor ABI, llama.cpp, Dockerfiles, models, prompts, SPIR-V bytes,
-and shader policy remain unchanged.
+the Vulkan 1.4 aggregate and does not expose Vulkan 1.4 core semantics for
+maintenance5, maintenance6, host image copy, push descriptors, pipeline
+robustness, or Vulkan 1.4 entry points merely because selected standalone
+extension surfaces are implemented.  Executor ABI, llama.cpp, Dockerfiles,
+models, prompts, SPIR-V bytes, and shader policy remain unchanged.
 
 ### 2026-07-14 Vulkan 1.3 feature aggregate false-only lane
 
@@ -2952,9 +2953,11 @@ when `maintenance5` is false and rejects true requests with
 `VK_ERROR_FEATURE_NOT_PRESENT`.
 
 This closes a generic Vulkan compatibility gap for clients that attach known
-feature structs defensively.  It does not expose the extension name, does not
-change function advertisement gates, and does not modify executor ABI, llama.cpp,
-Dockerfiles, models, prompts, SPIR-V bytes, or shader policy.
+feature structs defensively.  The standalone extension name and selected alias
+entry points are exposed, but the optional maintenance5 feature bit remains
+false-only and Vulkan 1.4 core promotion remains out of scope.  This does not
+modify executor ABI, llama.cpp, Dockerfiles, models, prompts, SPIR-V bytes, or
+shader policy.
 
 ### 2026-07-14 Vulkan descriptorless compute V5 transport lane
 
@@ -3203,3 +3206,17 @@ Validation: `env -u PYTHONPATH python3 -m unittest tests.test_gpu_abi_contract -
 `env -u PYTHONPATH python3 -m unittest tests.test_vulkan_icd_feature_chain -q`,
 `bash scripts/build-gpu-shim.sh`, `env -u PYTHONPATH python3 scripts/verify-native-payloads.py`,
 and `./gradlew :app:assembleDebug`.
+
+### 2026-07-16 packed depth/stencil buffer-image footprint lane
+
+CPU/static pass-through work made producer-side buffer-image copy footprint
+validation use the requested single image aspect instead of the whole packed
+format size.  Depth-only and stencil-only copies for packed depth/stencil formats
+now compute buffer spans from `conservative_format_bytes_per_pixel_for_aspect`,
+while raw dual-aspect packed depth/stencil buffer-image traffic remains
+fail-closed until an explicit pack/unpack ABI exists.  This narrows the residual
+raw packed depth/stencil gap without adding hidden conversion or changing
+executor ABI, llama.cpp, Dockerfiles, models, prompts, SPIR-V bytes, or shader
+policy.
+
+Validation: `env -u PYTHONPATH python3 -m unittest tests.test_vulkan_icd_sync_harness.VulkanIcdSyncHarnessTest.test_packed_depth_stencil_buffer_image_copy_footprint_is_aspect_aware tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_graphics_buffer_resources_and_image_copy_footprint_are_guarded tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_graphics_v610_depth_stencil_copy_has_explicit_plane_staging_boundary -q`.

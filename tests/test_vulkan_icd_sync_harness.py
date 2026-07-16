@@ -1102,6 +1102,121 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
+
+    def test_packed_depth_stencil_buffer_image_copy_footprint_is_aspect_aware(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            static int expect_footprint(
+                    VkFormat format,
+                    VkImageAspectFlags aspect,
+                    VkDeviceSize expected_offset,
+                    VkDeviceSize expected_bytes) {{
+                PdockerVkBuffer buffer;
+                PdockerVkImage image;
+                PdockerVkImageCopyOp op;
+                VkDeviceSize offset = 0;
+                VkDeviceSize bytes = 0;
+                memset(&buffer, 0, sizeof(buffer));
+                memset(&image, 0, sizeof(image));
+                memset(&op, 0, sizeof(op));
+                image.format = format;
+                op.buffer = &buffer;
+                op.image = &image;
+                op.region.bufferOffset = expected_offset;
+                op.region.bufferRowLength = 8;
+                op.region.bufferImageHeight = 5;
+                op.region.imageSubresource.aspectMask = aspect;
+                op.region.imageSubresource.layerCount = 2;
+                op.region.imageExtent.width = 4;
+                op.region.imageExtent.height = 3;
+                op.region.imageExtent.depth = 2;
+                if (!image_copy_buffer_footprint(&op, &offset, &bytes)) {{
+                    fprintf(stderr, "footprint rejected format=%d aspect=0x%x\\n", format, aspect);
+                    return 1;
+                }}
+                if (offset != expected_offset || bytes != expected_bytes) {{
+                    fprintf(stderr,
+                            "footprint mismatch format=%d aspect=0x%x offset=%llu bytes=%llu expected_offset=%llu expected_bytes=%llu\\n",
+                            format,
+                            aspect,
+                            (unsigned long long)offset,
+                            (unsigned long long)bytes,
+                            (unsigned long long)expected_offset,
+                            (unsigned long long)expected_bytes);
+                    return 2;
+                }}
+                return 0;
+            }}
+
+            static int expect_rejected(VkFormat format, VkImageAspectFlags aspect) {{
+                PdockerVkBuffer buffer;
+                PdockerVkImage image;
+                PdockerVkImageCopyOp op;
+                VkDeviceSize offset = 0;
+                VkDeviceSize bytes = 0;
+                memset(&buffer, 0, sizeof(buffer));
+                memset(&image, 0, sizeof(image));
+                memset(&op, 0, sizeof(op));
+                image.format = format;
+                op.buffer = &buffer;
+                op.image = &image;
+                op.region.bufferOffset = 7;
+                op.region.bufferRowLength = 8;
+                op.region.bufferImageHeight = 5;
+                op.region.imageSubresource.aspectMask = aspect;
+                op.region.imageSubresource.layerCount = 2;
+                op.region.imageExtent.width = 4;
+                op.region.imageExtent.height = 3;
+                op.region.imageExtent.depth = 2;
+                if (image_copy_buffer_footprint(&op, &offset, &bytes)) {{
+                    fprintf(stderr,
+                            "footprint unexpectedly accepted format=%d aspect=0x%x offset=%llu bytes=%llu\\n",
+                            format,
+                            aspect,
+                            (unsigned long long)offset,
+                            (unsigned long long)bytes);
+                    return 1;
+                }}
+                return 0;
+            }}
+
+            int main(void) {{
+                const VkDeviceSize offset = 7;
+                if (expect_footprint(VK_FORMAT_D24_UNORM_S8_UINT,
+                                     VK_IMAGE_ASPECT_DEPTH_BIT,
+                                     offset, 560)) return 10;
+                if (expect_footprint(VK_FORMAT_D24_UNORM_S8_UINT,
+                                     VK_IMAGE_ASPECT_STENCIL_BIT,
+                                     offset, 140)) return 11;
+                if (expect_footprint(VK_FORMAT_D32_SFLOAT_S8_UINT,
+                                     VK_IMAGE_ASPECT_DEPTH_BIT,
+                                     offset, 560)) return 12;
+                if (expect_footprint(VK_FORMAT_D32_SFLOAT_S8_UINT,
+                                     VK_IMAGE_ASPECT_STENCIL_BIT,
+                                     offset, 140)) return 13;
+                if (expect_footprint(VK_FORMAT_R8G8B8A8_UNORM,
+                                     VK_IMAGE_ASPECT_COLOR_BIT,
+                                     offset, 560)) return 14;
+                if (expect_rejected(VK_FORMAT_D24_UNORM_S8_UINT,
+                                    VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)) return 20;
+                if (expect_rejected(VK_FORMAT_D32_SFLOAT_S8_UINT,
+                                    VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)) return 21;
+                if (expect_rejected(VK_FORMAT_D24_UNORM_S8_UINT,
+                                    VK_IMAGE_ASPECT_COLOR_BIT)) return 22;
+                if (expect_rejected(VK_FORMAT_R8G8B8A8_UNORM,
+                                    VK_IMAGE_ASPECT_DEPTH_BIT)) return 23;
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_pipeline_barrier2_image_barriers_normalize_remaining_and_reject_invalid_aspects(self):
         source = textwrap.dedent(
             f"""

@@ -6312,7 +6312,9 @@ static bool image_copy_buffer_footprint(const PdockerVkImageCopyOp *op,
         op->region.bufferImageHeight < op->region.imageExtent.height) {
         return false;
     }
-    uint64_t bpp = conservative_format_bytes_per_pixel(op->image->format);
+    uint64_t bpp = conservative_format_bytes_per_pixel_for_aspect(
+        op->image->format, op->region.imageSubresource.aspectMask);
+    if (bpp == 0) return false;
     uint64_t row_texels = op->region.bufferRowLength
         ? op->region.bufferRowLength
         : op->region.imageExtent.width;
