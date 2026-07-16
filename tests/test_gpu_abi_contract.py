@@ -5177,6 +5177,29 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertLess(sender.index("const bool need_v55_native_objects"), sender.index("const bool need_v56_compute_layouts"))
         self.assertLess(sender.index("const bool need_v56_compute_layouts"), sender.index("collect_dispatch_v56_pipeline_layout_metadata"))
 
+        runner = c_function_body(executor, "run_vulkan_dispatch_fd")
+        for marker in [
+            "v56_compute_layout_available",
+            "const int use_v56_compute_layout = v56_compute_layout_available && binding_alias_count == 0;",
+            "object_tables->compute_pipeline_layout_sets",
+            "object_tables->compute_descriptor_set_layouts",
+            "validate_vulkan_compute_descriptor_layout_slot",
+            "create-v56-compute-descriptor-set-layout",
+            "create-v56-compute-pipeline-layout",
+            "create-v56-compute-descriptor-pool",
+            "compute_push_ranges",
+            "V5.6 compute pipeline layout has a descriptor set gap",
+            "V5.6 compute push ranges do not cover transported push payload",
+            "VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT",
+            "VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT",
+            "entry->immutable_sampler_count != 0",
+            "PDOCKER_VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT",
+            "!multi_descriptor_set && !use_v56_compute_layout",
+        ]:
+            self.assertIn(marker, runner)
+        self.assertLess(runner.index("const int use_v56_compute_layout"), runner.index("validate_vulkan_compute_descriptor_layout_slot"))
+        self.assertLess(runner.index("validate_vulkan_compute_descriptor_layout_slot"), runner.index("create-v56-compute-descriptor-set-layout"))
+
     def test_vulkan_dispatch_v5_handler_uses_native_plan_heap_tables_before_run(self):
         executor = GPU_EXECUTOR.read_text()
         handler = c_function_body(executor, "handle_vulkan_dispatch_v5_frame")
@@ -6019,7 +6042,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("bindings[i].api_array_element >= PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS", executor)
         self.assertIn("const uint32_t needed_descriptor_count = bindings[i].api_array_element + 1u;", executor)
         self.assertIn("VkDescriptorSetLayoutBinding *set_layout_bindings = layout_bindings;", executor)
-        self.assertIn("set_layout_bindings[layout_binding_count++]", executor)
+        self.assertIn("set_layout_bindings[layout_binding_count]", executor)
+        self.assertIn("layout_binding_count++;", executor)
+        self.assertIn("layout_binding_flags[layout_binding_count] = (VkDescriptorBindingFlags)slot->binding_flags;", executor)
         self.assertIn("const VulkanComputeDescriptorLayoutSlot *slot = &layout_slots[i];", executor)
         self.assertIn("descriptor_pool_uniform_count += descriptor_count;", executor)
         self.assertIn("descriptor_pool_storage_count += descriptor_count;", executor)
@@ -6031,7 +6056,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("descriptor alias rewrite does not support descriptor arrays", executor)
         self.assertIn("binding_index_for_descriptor_slot", executor)
         self.assertIn("uint32_t alias_descriptor_count = 0;", executor)
-        self.assertIn("alias_descriptor_type, alias_descriptor_count);", executor)
+        self.assertIn("alias_descriptor_type, alias_descriptor_count,", executor)
+        self.assertIn("VK_SHADER_STAGE_COMPUTE_BIT, 0);", executor)
         self.assertIn("size_t descriptor_alias_write_count = 0;", executor)
         self.assertIn("writes[write_count].dstArrayElement = bindings[source_i].api_array_element;", executor)
 
@@ -8924,8 +8950,11 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         self.assertIn("uint32_t layout_binding_count = 0;", generic_body)
         self.assertIn("const VulkanComputeDescriptorLayoutSlot *slot = &layout_slots[i];", generic_body)
-        self.assertIn("set_layout_bindings[layout_binding_count++]", generic_body)
+        self.assertIn("set_layout_bindings[layout_binding_count]", generic_body)
+        self.assertIn("layout_binding_count++;", generic_body)
         self.assertIn(".descriptorType = slot->descriptor_type", generic_body)
+        self.assertIn(".stageFlags = slot->stage_flags ? slot->stage_flags : VK_SHADER_STAGE_COMPUTE_BIT", generic_body)
+        self.assertIn("layout_binding_flags[layout_binding_count] = (VkDescriptorBindingFlags)slot->binding_flags;", generic_body)
         pool_body = executor.split("descriptor_pool_uniform_count", 1)[1].split(
             "create-generic-descriptor-pool", 1
         )[0]
@@ -8952,7 +8981,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VulkanComputeDescriptorLayoutSlot *layout_slots = NULL;", body)
         self.assertIn("size_t layout_slot_capacity = 0;", body)
         self.assertIn("size_t layout_slot_count = 0;", body)
-        self.assertIn("layout_slot_capacity = binding_count + image_descriptor_count + descriptor_alias_write_count;", body)
+        self.assertIn("const int use_v56_compute_layout = v56_compute_layout_available && binding_alias_count == 0;", body)
+        self.assertIn("layout_slot_capacity = use_v56_compute_layout", body)
+        self.assertIn("? object_tables->compute_descriptor_set_layout_count", body)
+        self.assertIn(": binding_count + image_descriptor_count + descriptor_alias_write_count;", body)
         self.assertIn("layout_slots = (VulkanComputeDescriptorLayoutSlot *)calloc(", body)
         self.assertIn("ensure_vulkan_compute_descriptor_layout_slot", body)
         self.assertIn("qsort(layout_slots, layout_slot_count, sizeof(*layout_slots)", body)
@@ -8960,6 +8992,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VkDescriptorSetLayoutBinding *set_layout_bindings = layout_bindings;", body)
         self.assertIn(".binding = slot->binding", body)
         self.assertIn(".descriptorType = slot->descriptor_type", body)
+        self.assertIn(".stageFlags = slot->stage_flags ? slot->stage_flags : VK_SHADER_STAGE_COMPUTE_BIT", body)
+        self.assertIn("layout_binding_flags[layout_binding_count] = (VkDescriptorBindingFlags)slot->binding_flags;", body)
         self.assertIn("free(layout_slots);", body)
         self.assertNotIn("uint32_t *set_binding_descriptor_counts = NULL;", body)
         self.assertNotIn("VkDescriptorType *set_binding_types = NULL;", body)
