@@ -22007,6 +22007,8 @@ static VkResult validate_memory_dedicated_bind(
     return VK_ERROR_INITIALIZATION_FAILED;
 }
 
+static bool pdocker_supports_memory_priority_transport(void);
+
 static VkResult validate_memory_allocate_pnext(const void *pNext) {
     for (const void *node = pNext; node;) {
         PdockerVkStructHeader header = read_vk_struct_header(node);
@@ -22062,7 +22064,8 @@ static VkResult validate_memory_allocate_pnext(const void *pNext) {
             case VK_STRUCTURE_TYPE_MEMORY_PRIORITY_ALLOCATE_INFO_EXT: {
                 const VkMemoryPriorityAllocateInfoEXT *info =
                     (const VkMemoryPriorityAllocateInfoEXT *)node;
-                if (info->priority != 0.5f) {
+                (void)info;
+                if (!pdocker_supports_memory_priority_transport()) {
                     trace_icd_runtime_failure("memory-priority-unsupported",
                                               VK_ERROR_FEATURE_NOT_PRESENT);
                     return VK_ERROR_FEATURE_NOT_PRESENT;
@@ -22396,6 +22399,10 @@ static bool pdocker_supports_buffer_device_address_transport(void) {
     return false;
 }
 
+static bool pdocker_supports_memory_priority_transport(void) {
+    return false;
+}
+
 static bool pdocker_supports_debug_marker_transport(void) {
     return false;
 }
@@ -22622,7 +22629,10 @@ static uint32_t collect_advertised_device_extensions(
     ADD_DEVICE_EXTENSION(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME, VK_EXT_MEMORY_BUDGET_SPEC_VERSION);
 #endif
 #ifdef VK_EXT_MEMORY_PRIORITY_EXTENSION_NAME
-    ADD_DEVICE_EXTENSION(VK_EXT_MEMORY_PRIORITY_EXTENSION_NAME, VK_EXT_MEMORY_PRIORITY_SPEC_VERSION);
+    if (pdocker_supports_memory_priority_transport()) {
+        ADD_DEVICE_EXTENSION(VK_EXT_MEMORY_PRIORITY_EXTENSION_NAME,
+                             VK_EXT_MEMORY_PRIORITY_SPEC_VERSION);
+    }
 #endif
 #ifdef VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME
     ADD_DEVICE_EXTENSION(VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME, VK_EXT_HOST_QUERY_RESET_SPEC_VERSION);
