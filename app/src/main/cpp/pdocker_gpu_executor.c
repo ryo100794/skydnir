@@ -18442,11 +18442,6 @@ static int run_vulkan_dispatch_fd(
             goto cleanup;
         }
         if (use_v56_compute_layout && object_tables->compute_push_constant_range_count > 0) {
-            if (object_tables->compute_push_constant_range_count > 1) {
-                json_fail("vulkan-dispatch", "V5.6 compute push constants require one simple range");
-                ret = 64;
-                goto cleanup;
-            }
             if (object_tables->compute_push_constant_range_count > UINT32_MAX ||
                 (size_t)object_tables->compute_push_constant_range_count >
                     SIZE_MAX / sizeof(compute_push_ranges[0])) {
@@ -18461,18 +18456,17 @@ static int run_vulkan_dispatch_fd(
                 ret = 75;
                 goto cleanup;
             }
-            int push_payload_covered = push_size == 0;
             for (size_t i = 0; i < object_tables->compute_push_constant_range_count; ++i) {
                 const PdockerGpuVulkanDispatchV56PushConstantRangeEntry *entry =
                     &object_tables->compute_push_constant_ranges[i];
                 if (entry->pipeline_layout_id != object_tables->compute_pipeline_layout_id ||
+                    entry->stage_flags == 0 ||
                     entry->size == 0 ||
                     (entry->offset & 3u) != 0 ||
                     (entry->size & 3u) != 0 ||
-                    entry->offset != 0 ||
                     entry->offset > UINT32_MAX - entry->size ||
                     entry->offset + entry->size > runtime_push_limit ||
-                    entry->stage_flags != VK_SHADER_STAGE_COMPUTE_BIT) {
+                    entry->offset + entry->size > push_size) {
                     json_fail("vulkan-dispatch", "invalid V5.6 compute push constant range");
                     ret = 64;
                     goto cleanup;
@@ -18482,15 +18476,6 @@ static int run_vulkan_dispatch_fd(
                     .offset = entry->offset,
                     .size = entry->size,
                 };
-                if (push_size == 0 || (entry->offset == 0 && push_size <= entry->size &&
-                    (entry->stage_flags & VK_SHADER_STAGE_COMPUTE_BIT) != 0)) {
-                    push_payload_covered = 1;
-                }
-            }
-            if (!push_payload_covered) {
-                json_fail("vulkan-dispatch", "V5.6 compute push ranges do not cover transported push payload");
-                ret = 64;
-                goto cleanup;
             }
         }
         VkPipelineLayoutCreateInfo plci = {
@@ -19373,7 +19358,32 @@ static int run_vulkan_dispatch_fd(
         binding_descriptor_offset, resource_buffers, resource_buffer_capacity,
         dispatch_images, dispatch_image_count, strict_passthrough);
     if (app_barrier_rc != 0) { io_rc = app_barrier_rc; goto cleanup; }
-    if (push_size) vkCmdPushConstants(command_buffer, pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, (uint32_t)push_size, push);
+    if (push_size) {
+        if (use_v56_compute_layout && compute_push_range_count > 0) {
+            for (uint32_t push_i = 0; push_i < compute_push_range_count; ++push_i) {
+                const VkPushConstantRange *range = &compute_push_ranges[push_i];
+                if ((range->stageFlags & VK_SHADER_STAGE_COMPUTE_BIT) == 0) continue;
+                if (range->offset > push_size || range->size > push_size - range->offset) {
+                    json_fail("vulkan-dispatch", "V5.6 compute push range exceeds transported push payload");
+                    ret = 64;
+                    goto cleanup;
+                }
+                vkCmdPushConstants(command_buffer,
+                                   pipeline_layout,
+                                   VK_SHADER_STAGE_COMPUTE_BIT,
+                                   range->offset,
+                                   range->size,
+                                   push + range->offset);
+            }
+        } else {
+            vkCmdPushConstants(command_buffer,
+                               pipeline_layout,
+                               VK_SHADER_STAGE_COMPUTE_BIT,
+                               0,
+                               (uint32_t)push_size,
+                               push);
+        }
+    }
     if (options && options->has_dispatch_indirect) {
         if (!dispatch_indirect_temp_buffer_used || !dispatch_indirect_temp_buffer.buffer) {
             json_fail("vulkan-dispatch", "dispatch indirect buffer is unavailable");

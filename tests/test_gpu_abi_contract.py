@@ -5211,10 +5211,10 @@ class GpuAbiContractTest(unittest.TestCase):
             "V5.6 compute pipeline layout has a descriptor set gap",
             "V5.6 compute descriptor writes do not match layout",
             "validate_vulkan_compute_v56_descriptor_writes",
-            "V5.6 compute push constants require one simple range",
-            "V5.6 compute push ranges do not cover transported push payload",
-            "entry->offset != 0",
-            "entry->stage_flags != VK_SHADER_STAGE_COMPUTE_BIT",
+            "entry->stage_flags == 0",
+            "entry->offset + entry->size > push_size",
+            "VK_SHADER_STAGE_COMPUTE_BIT) == 0) continue",
+            "push + range->offset",
             "VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT",
             "VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT",
             "entry->immutable_sampler_count != 0",
@@ -10889,6 +10889,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("strict-compute-pipeline-untracked-layout-or-shader", compute_body)
         self.assertIn("compute-pipeline-untracked-layout-or-shader", compute_body)
         self.assertIn("strict-compute-pipeline-push-range-layout-unsupported", compute_body)
+        self.assertIn("!executor_supports_vulkan_dispatch_v56_compute_layouts()", compute_body)
         self.assertIn("pipeline->layout->push_constant_range_count > 1u", compute_body)
         self.assertIn("range->offset != 0", compute_body)
         self.assertIn("range->stageFlags != VK_SHADER_STAGE_COMPUTE_BIT", compute_body)
@@ -17168,10 +17169,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "stageFlags & VK_SHADER_STAGE_COMPUTE_BIT",
             "strict-compute-push-constant-untracked-layout",
             "strict-compute-push-constant-layout-unsupported",
-            "captured_layout->push_constant_range_count != 1u",
-            "range->offset != 0",
-            "range->stageFlags != VK_SHADER_STAGE_COMPUTE_BIT",
-            "range->size != captured_layout->push_constant_size",
+            "captured_layout->push_constant_range_count == 0u",
+            "pdocker_vk_push_constant_ranges_cover_stage_span",
         ]:
             self.assertIn(marker, push_body)
         for marker in [

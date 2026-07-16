@@ -6547,6 +6547,34 @@ static bool pdocker_vk_push_constant_range_valid(const VkPushConstantRange *rang
     return end <= pdocker_vk_max_push_bytes_for_stage_flags(range->stageFlags);
 }
 
+static bool pdocker_vk_push_constant_ranges_cover_stage_span(
+        const VkPushConstantRange *ranges,
+        uint32_t range_count,
+        VkShaderStageFlags stage_flags,
+        uint32_t offset,
+        uint32_t size) {
+    if (size == 0) return true;
+    if (!ranges || range_count == 0 || stage_flags == 0) return false;
+    if ((offset & 3u) != 0 || (size & 3u) != 0) return false;
+    if ((uint64_t)size > UINT32_MAX - (uint64_t)offset) return false;
+    const uint32_t end = offset + size;
+    uint32_t cursor = offset;
+    while (cursor < end) {
+        uint32_t best_end = cursor;
+        for (uint32_t i = 0; i < range_count; ++i) {
+            const VkPushConstantRange *range = &ranges[i];
+            if (!pdocker_vk_push_constant_range_valid(range)) continue;
+            if ((range->stageFlags & stage_flags) != stage_flags) continue;
+            if (range->offset > cursor) continue;
+            uint32_t range_end = range->offset + range->size;
+            if (range_end > best_end) best_end = range_end;
+        }
+        if (best_end <= cursor) return false;
+        cursor = best_end > end ? end : best_end;
+    }
+    return true;
+}
+
 static int find_graphics_v628_push_constant_range_entry(
         const PdockerGpuVulkanGraphicsV628PushConstantRangeEntry *entries,
         size_t count,
@@ -24320,13 +24348,14 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateComputePipelines(
             pdocker_vk_pipeline_destroy(pipeline);
             return VK_ERROR_FEATURE_NOT_PRESENT;
         }
-        if (strict_passthrough && pipeline->layout->push_constant_range_count > 1u) {
-            trace_icd_runtime_failure("strict-compute-pipeline-push-range-layout-unsupported",
-                                      VK_ERROR_FEATURE_NOT_PRESENT);
-            pdocker_vk_pipeline_destroy(pipeline);
-            return VK_ERROR_FEATURE_NOT_PRESENT;
-        }
-        if (strict_passthrough && pipeline->layout->push_constant_range_count == 1u) {
+        if (strict_passthrough && pipeline->layout->push_constant_range_count > 0u &&
+            !executor_supports_vulkan_dispatch_v56_compute_layouts()) {
+            if (pipeline->layout->push_constant_range_count > 1u) {
+                trace_icd_runtime_failure("strict-compute-pipeline-push-range-layout-unsupported",
+                                          VK_ERROR_FEATURE_NOT_PRESENT);
+                pdocker_vk_pipeline_destroy(pipeline);
+                return VK_ERROR_FEATURE_NOT_PRESENT;
+            }
             const VkPushConstantRange *range = &pipeline->layout->push_constant_ranges[0];
             if (range->offset != 0 || range->stageFlags != VK_SHADER_STAGE_COMPUTE_BIT ||
                 range->size != pipeline->layout->push_constant_size) {
@@ -29006,18 +29035,14 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPushConstants(
                 cmd, "strict-compute-push-constant-untracked-layout");
             return;
         }
-        if (captured_layout->push_constant_range_count != 1u ||
-            !captured_layout->push_constant_ranges) {
-            free(payload);
-            cmd->graphics_unsupported = true;
-            command_buffer_mark_recording_failed(
-                cmd, "strict-compute-push-constant-layout-unsupported");
-            return;
-        }
-        const VkPushConstantRange *range = &captured_layout->push_constant_ranges[0];
-        if (range->offset != 0 || range->stageFlags != VK_SHADER_STAGE_COMPUTE_BIT ||
-            range->size != captured_layout->push_constant_size ||
-            offset > range->size || (uint64_t)size > (uint64_t)range->size - (uint64_t)offset) {
+        if (captured_layout->push_constant_range_count == 0u ||
+            !captured_layout->push_constant_ranges ||
+            !pdocker_vk_push_constant_ranges_cover_stage_span(
+                captured_layout->push_constant_ranges,
+                captured_layout->push_constant_range_count,
+                stageFlags,
+                offset,
+                size)) {
             free(payload);
             cmd->graphics_unsupported = true;
             command_buffer_mark_recording_failed(
