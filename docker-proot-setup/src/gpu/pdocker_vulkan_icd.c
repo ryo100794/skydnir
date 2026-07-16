@@ -24665,6 +24665,32 @@ static VkResult validate_and_fill_pipeline_feedback_pnext(
     return VK_SUCCESS;
 }
 
+static VkResult validate_pipeline_shader_stage_pnext_for_transport(
+        const char *api_name,
+        const void *pNext) {
+    for (const void *node = pNext; node;) {
+        PdockerVkStructHeader header = read_vk_struct_header(node);
+        switch (header.sType) {
+#if defined(VK_VERSION_1_3) || defined(VK_EXT_pipeline_robustness)
+            case VK_STRUCTURE_TYPE_PIPELINE_ROBUSTNESS_CREATE_INFO: {
+                const VkPipelineRobustnessCreateInfo *robustness_info =
+                    (const VkPipelineRobustnessCreateInfo *)node;
+                if (!pipeline_robustness_create_info_is_device_default(robustness_info)) {
+                    trace_icd_runtime_failure("pipeline-stage-robustness-non-default",
+                                              VK_ERROR_FEATURE_NOT_PRESENT);
+                    return VK_ERROR_FEATURE_NOT_PRESENT;
+                }
+                break;
+            }
+#endif
+            default:
+                return unsupported_create_info_pnext_result(api_name, node);
+        }
+        node = header.pNext;
+    }
+    return VK_SUCCESS;
+}
+
 static VkResult validate_pipeline_specialization_info_for_transport(
         const VkSpecializationInfo *spec,
         const char *stage_name) {
@@ -24832,8 +24858,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateComputePipelines(
             return VK_ERROR_FEATURE_NOT_PRESENT;
         }
         if (ci->stage.pNext) {
-            return unsupported_create_info_pnext_result("vkCreateComputePipelines.stage",
-                                                       ci->stage.pNext);
+            VkResult stage_pnext_rc = validate_pipeline_shader_stage_pnext_for_transport(
+                "vkCreateComputePipelines.stage", ci->stage.pNext);
+            if (stage_pnext_rc != VK_SUCCESS) return stage_pnext_rc;
         }
         VkResult spec_rc = validate_pipeline_specialization_info_for_transport(
             ci->stage.pSpecializationInfo, "compute-pipeline-specialization-unsupported");
@@ -25191,8 +25218,15 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
         }
         for (uint32_t stage_i = 0; stage_i < captured_stages; ++stage_i) {
             const VkPipelineShaderStageCreateInfo *stage = ci->pStages ? &ci->pStages[stage_i] : NULL;
-            if (!stage || stage->pNext || stage->flags != 0) {
+            if (!stage || stage->flags != 0) {
                 pipeline->graphics_unsupported = true;
+            } else if (stage->pNext) {
+                VkResult stage_pnext_rc = validate_pipeline_shader_stage_pnext_for_transport(
+                    "vkCreateGraphicsPipelines.stage", stage->pNext);
+                if (stage_pnext_rc != VK_SUCCESS) {
+                    pdocker_vk_pipeline_destroy(pipeline);
+                    return stage_pnext_rc;
+                }
             }
             pipeline->shader_stage_flags |= stage ? stage->stage : 0;
             pipeline->graphics_stage_flags[stage_i] = stage ? stage->stage : 0;

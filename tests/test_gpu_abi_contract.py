@@ -2306,7 +2306,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "Pipeline create flags accepted here are execution-neutral hints",
             "ci->pDynamicState->pNext || ci->pDynamicState->flags != 0",
             "ci->stageCount > 0 && !ci->pStages",
-            "!stage || stage->pNext || stage->flags != 0",
+            "!stage || stage->flags != 0",
+            "validate_pipeline_shader_stage_pnext_for_transport",
+            '"vkCreateGraphicsPipelines.stage", stage->pNext',
             "ci->pInputAssemblyState->pNext || ci->pInputAssemblyState->flags != 0",
             "ci->pRasterizationState->pNext || ci->pRasterizationState->flags != 0",
             "ms->pNext || ms->flags != 0",
@@ -11171,6 +11173,7 @@ class GpuAbiContractTest(unittest.TestCase):
     def test_vulkan_pipeline_creation_feedback_and_compute_pnext_contract(self):
         icd = VULKAN_ICD.read_text()
         feedback_body = c_function_body(icd, "validate_and_fill_pipeline_feedback_pnext")
+        stage_pnext_body = c_function_body(icd, "validate_pipeline_shader_stage_pnext_for_transport")
         compute_body = c_function_body(icd, "vkCreateComputePipelines")
         graphics_body = c_function_body(icd, "vkCreateGraphicsPipelines")
         collector_body = c_function_body(icd, "collect_advertised_device_extensions")
@@ -11187,6 +11190,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("pipeline_robustness_create_info_is_device_default", feedback_body)
         self.assertIn("pipeline-robustness-non-default", feedback_body)
         self.assertIn("unsupported_create_info_pnext_result(api_name, node)", feedback_body)
+        self.assertIn("VK_STRUCTURE_TYPE_PIPELINE_ROBUSTNESS_CREATE_INFO", stage_pnext_body)
+        self.assertIn("pipeline_robustness_create_info_is_device_default", stage_pnext_body)
+        self.assertIn("pipeline-stage-robustness-non-default", stage_pnext_body)
+        self.assertIn("unsupported_create_info_pnext_result(api_name, node)", stage_pnext_body)
 
         self.assertIn('"vkCreateComputePipelines", ci->pNext, 1u, false', compute_body)
         self.assertIn("ci->sType != VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO", compute_body)
@@ -11198,7 +11205,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("ci->stage.stage != VK_SHADER_STAGE_COMPUTE_BIT", compute_body)
         self.assertIn("ci->stage.flags != 0", compute_body)
         self.assertIn("ci->stage.pNext", compute_body)
-        self.assertIn('unsupported_create_info_pnext_result("vkCreateComputePipelines.stage"', compute_body)
+        self.assertIn("validate_pipeline_shader_stage_pnext_for_transport", compute_body)
+        self.assertIn('"vkCreateComputePipelines.stage", ci->stage.pNext', compute_body)
+        self.assertNotIn('unsupported_create_info_pnext_result("vkCreateComputePipelines.stage"', compute_body)
         self.assertIn("size_t entry_name_len = strlen(entry_name);", compute_body)
         self.assertIn("entry_name_len == 0", compute_body)
         self.assertNotIn("entry_name_len >= sizeof(pipeline->entry_name)", compute_body)
@@ -11235,6 +11244,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("safe_copy_cstr(pipeline->graphics_stage_entry_names", graphics_body)
         self.assertIn("VK_STRUCTURE_TYPE_PIPELINE_CREATION_FEEDBACK_CREATE_INFO", graphics_body)
         self.assertIn("VK_STRUCTURE_TYPE_PIPELINE_ROBUSTNESS_CREATE_INFO", graphics_body)
+        self.assertIn("validate_pipeline_shader_stage_pnext_for_transport", graphics_body)
+        self.assertIn('"vkCreateGraphicsPipelines.stage", stage->pNext', graphics_body)
         self.assertIn("Already validated as DEVICE_DEFAULT-only", graphics_body)
 
 

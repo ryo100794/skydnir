@@ -3267,11 +3267,21 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     fprintf(stderr, "default pipeline robustness was rejected\\n");
                     return 2;
                 }}
+                if (validate_pipeline_shader_stage_pnext_for_transport(
+                        "unit-stage-robustness", &robustness) != VK_SUCCESS) {{
+                    fprintf(stderr, "default stage pipeline robustness was rejected\\n");
+                    return 12;
+                }}
                 robustness.storageBuffers = VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_DISABLED;
                 if (validate_and_fill_pipeline_feedback_pnext(
                         "unit-pipeline-robustness", &robustness, 1u, false) == VK_SUCCESS) {{
                     fprintf(stderr, "non-default storage robustness was accepted\\n");
                     return 3;
+                }}
+                if (validate_pipeline_shader_stage_pnext_for_transport(
+                        "unit-stage-robustness", &robustness) == VK_SUCCESS) {{
+                    fprintf(stderr, "non-default stage storage robustness was accepted\\n");
+                    return 13;
                 }}
                 robustness.storageBuffers = VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_DEVICE_DEFAULT;
                 robustness.images = VK_PIPELINE_ROBUSTNESS_IMAGE_BEHAVIOR_ROBUST_IMAGE_ACCESS;
