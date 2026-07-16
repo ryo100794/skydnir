@@ -143,6 +143,10 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
 
             int main(void) {{
                 unsetenv("PDOCKER_GPU_QUEUE_SOCKET");
+                ensure_vulkan_dispatchable_object_ids();
+                g_queue.instance_object_id = 1;
+                g_queue.physical_device_object_id = 1;
+                g_queue.device_object_id = 1;
                 VkFence fence = VK_NULL_HANDLE;
                 VkFenceCreateInfo create_info;
                 memset(&create_info, 0, sizeof(create_info));
@@ -164,7 +168,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                     fprintf(stderr, "reset fence was not reported not-ready\\n");
                     return 5;
                 }}
-                if (vkQueueSubmit(VK_NULL_HANDLE, 0, NULL, fence) != VK_SUCCESS) {{
+                if (vkQueueSubmit((VkQueue)&g_queue, 0, NULL, fence) != VK_SUCCESS) {{
                     fprintf(stderr, "empty queue submit failed\\n");
                     return 6;
                 }}
@@ -742,7 +746,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 op.dispatch_y = 1;
                 op.dispatch_z = 1;
 
-                int rc = send_generic_vulkan_dispatch_op(&op, NULL, NULL, 0);
+                int rc = send_generic_vulkan_dispatch_op(&op, NULL, NULL, NULL, 0);
                 close(shader.code_fd);
                 return rc;
             }}
@@ -776,7 +780,11 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL), 0)) return 5;
 
                 init_color_image(&image, &memory, VK_IMAGE_LAYOUT_GENERAL);
+                PdockerVkImageLayoutRange layout_ranges[2];
+                memset(layout_ranges, 0, sizeof(layout_ranges));
                 image.layout_mixed = true;
+                image.layout_ranges = layout_ranges;
+                image.layout_range_capacity = 2;
                 image.layout_range_count = 1;
                 image.layout_ranges[0].layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
                 image.layout_ranges[0].range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -2964,6 +2972,10 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
 
             int main(void) {{
                 unsetenv("PDOCKER_GPU_QUEUE_SOCKET");
+                ensure_vulkan_dispatchable_object_ids();
+                g_queue.instance_object_id = 1;
+                g_queue.physical_device_object_id = 1;
+                g_queue.device_object_id = 1;
                 VkSemaphore sem_a = VK_NULL_HANDLE;
                 VkSemaphore sem_b = VK_NULL_HANDLE;
                 VkSemaphoreCreateInfo sem_info;
@@ -2979,7 +2991,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 submit.waitSemaphoreCount = 1;
                 submit.pWaitSemaphores = &sem_a;
                 submit.pWaitDstStageMask = &wait_stage;
-                if (vkQueueSubmit(VK_NULL_HANDLE, 1, &submit, VK_NULL_HANDLE) != VK_ERROR_FEATURE_NOT_PRESENT) {{
+                if (vkQueueSubmit((VkQueue)&g_queue, 1, &submit, VK_NULL_HANDLE) != VK_ERROR_FEATURE_NOT_PRESENT) {{
                     fprintf(stderr, "unsignaled binary wait did not fail closed\\n");
                     return 4;
                 }}
@@ -2988,7 +3000,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
                 submit.signalSemaphoreCount = 1;
                 submit.pSignalSemaphores = &sem_a;
-                if (vkQueueSubmit(VK_NULL_HANDLE, 1, &submit, VK_NULL_HANDLE) != VK_SUCCESS) {{
+                if (vkQueueSubmit((VkQueue)&g_queue, 1, &submit, VK_NULL_HANDLE) != VK_SUCCESS) {{
                     fprintf(stderr, "binary signal submit failed\\n");
                     return 5;
                 }}
@@ -3010,7 +3022,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 submit.pWaitDstStageMask = &wait_stage;
                 submit.signalSemaphoreCount = 1;
                 submit.pSignalSemaphores = &sem_b;
-                if (vkQueueSubmit(VK_NULL_HANDLE, 1, &submit, fence) != VK_SUCCESS) {{
+                if (vkQueueSubmit((VkQueue)&g_queue, 1, &submit, fence) != VK_SUCCESS) {{
                     fprintf(stderr, "binary wait/signal submit failed\\n");
                     return 8;
                 }}
@@ -3063,6 +3075,10 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
 
             int main(void) {{
                 unsetenv("PDOCKER_GPU_QUEUE_SOCKET");
+                ensure_vulkan_dispatchable_object_ids();
+                g_queue.instance_object_id = 1;
+                g_queue.physical_device_object_id = 1;
+                g_queue.device_object_id = 1;
                 PdockerVkDevice device;
                 memset(&device, 0, sizeof(device));
                 device.requested_feature_mask = PDOCKER_VK_FEATURE_TIMELINE_SEMAPHORE;
@@ -3124,7 +3140,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 timeline.signalSemaphoreValueCount = 1;
                 timeline.pSignalSemaphoreValues = &submit_signal_value;
                 submit.pNext = &timeline;
-                if (vkQueueSubmit(VK_NULL_HANDLE, 1, &submit, VK_NULL_HANDLE) != VK_SUCCESS) {{
+                if (vkQueueSubmit((VkQueue)&g_queue, 1, &submit, VK_NULL_HANDLE) != VK_SUCCESS) {{
                     fprintf(stderr, "timeline submit wait/signal failed\\n");
                     return 7;
                 }}
@@ -3191,6 +3207,10 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
 
             int main(void) {{
                 unsetenv("PDOCKER_GPU_QUEUE_SOCKET");
+                ensure_vulkan_dispatchable_object_ids();
+                g_queue.instance_object_id = 1;
+                g_queue.physical_device_object_id = 1;
+                g_queue.device_object_id = 1;
                 g_queue.requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
                 g_queue.enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
 

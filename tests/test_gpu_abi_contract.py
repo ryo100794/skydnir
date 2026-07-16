@@ -22630,5 +22630,42 @@ class GpuAbiContractTest(unittest.TestCase):
         )
 
 
+    def test_strict_passthrough_blocks_q6_cpu_oracle_writeback(self):
+        source = GPU_EXECUTOR.read_text()
+        q6_branch = source.split("} else if (is_q6k_matvec_oracle_hash(cpu_oracle_spirv_hash)) {", 1)[1].split(
+            "    } else {\n        run_cpu_oracle_small_f32_indexing", 1
+        )[0]
+        self.assertIn("strict_passthrough && cpu_oracle_requested && q6k_oracle_writeback", q6_branch)
+        self.assertIn("strict passthrough blocks CPU oracle writeback", q6_branch)
+        self.assertIn("fail_stage = \"strict-cpu-oracle-writeback\"", q6_branch)
+        self.assertLess(
+            q6_branch.index("strict passthrough blocks CPU oracle writeback"),
+            q6_branch.index("run_cpu_oracle_q6k_matvec_sample"),
+        )
+
+    def test_vulkan_graphics_v6_advertisement_requires_supported_minor_chain(self):
+        executor = GPU_EXECUTOR.read_text()
+        icd = VULKAN_ICD.read_text()
+        caps = c_function_body(executor, "print_vulkan_advertisement_caps")
+        parser = c_function_body(icd, "parse_executor_advertisement_caps_json")
+        caps_struct = icd.split("} PdockerVkAdvertisedCaps;", 1)[0].rsplit("typedef struct {", 1)[1]
+
+        self.assertIn("vulkan_graphics_v6_supported_minors", caps)
+        self.assertIn("[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30]", caps)
+        self.assertIn("bool vulkan_graphics_v6_supported_minors_valid;", caps_struct)
+        self.assertIn("bool vulkan_graphics_v6_supported_minor[31];", caps_struct)
+        self.assertIn("json_read_u32_membership_array(\n            json,\n            \"vulkan_graphics_v6_supported_minors\"", parser)
+        self.assertIn("caps->vulkan_graphics_v6_supported_minors_valid = true;", parser)
+        self.assertIn("caps->vulkan_graphics_v6_supported_minor[PDOCKER_GPU_VULKAN_GRAPHICS_V627_ABI_MINOR]", parser)
+        self.assertIn("caps->vulkan_graphics_v6_supported_minor[PDOCKER_GPU_VULKAN_GRAPHICS_V628_ABI_MINOR]", parser)
+        self.assertIn("caps->vulkan_graphics_v627_buffer_views_supported &&", parser)
+        self.assertLess(
+            parser.index("caps->vulkan_graphics_v627_buffer_views_supported &&"),
+            parser.index("v628_minor_ok && v628_minor >= PDOCKER_GPU_VULKAN_GRAPHICS_V628_ABI_MINOR"),
+        )
+        self.assertIn("caps->vulkan_graphics_v628_push_constant_ranges_supported &&", parser)
+        self.assertIn("caps->vulkan_graphics_v629_variable_descriptor_counts_supported &&", parser)
+
+
 if __name__ == "__main__":
     unittest.main()

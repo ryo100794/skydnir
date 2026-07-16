@@ -2174,6 +2174,11 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 PdockerVkQueue queue;
                 PdockerVkFence fence;
                 memset(&queue, 0, sizeof(queue));
+                ensure_vulkan_dispatchable_object_ids();
+                queue.object_id = next_vulkan_object_generation();
+                queue.instance_object_id = 1;
+                queue.physical_device_object_id = 1;
+                queue.device_object_id = 1;
                 memset(&fence, 0, sizeof(fence));
                 fence.signaled = true;
                 if (vkQueueSubmit2((VkQueue)&queue, 0, NULL, (VkFence)&fence) != VK_ERROR_FEATURE_NOT_PRESENT) return 103;
@@ -2206,10 +2211,13 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 vkCmdPipelineBarrier2((VkCommandBuffer)&cmd, NULL);
                 if (!reason_is(&cmd, "synchronization2-feature-disabled")) return 109;
 
+                VkDependencyInfo dependency_info;
+                memset(&dependency_info, 0, sizeof(dependency_info));
+                dependency_info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
                 memset(&cmd, 0, sizeof(cmd));
                 cmd.requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
                 cmd.enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
-                vkCmdPipelineBarrier2((VkCommandBuffer)&cmd, NULL);
+                vkCmdPipelineBarrier2((VkCommandBuffer)&cmd, &dependency_info);
                 if (cmd.recording_failed) return 110;
                 if (cmd.command_op_count == 0) return 111;
                 command_buffer_destroy_record_vectors(&cmd);
@@ -4868,6 +4876,8 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 off += (size_t)snprintf(json + off, size - off,
                     "{\"schema\":\"skydnir-vulkan-advertisement-caps-v1\","
                     "\"apiVersion\":%u,\"format_caps_schema\":1,\"format_caps_count\":%zu,"
+                    "\"vulkan_dispatch_v5_supported_minors\":[0,1,2,3,4,5,6,7],"
+                    "\"vulkan_graphics_v6_supported_minors\":[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30],"
                     "\"image_format_caps\":{",
                     (unsigned)VK_API_VERSION_1_2,
                     pdocker_vk_bridge_format_count());
@@ -5060,12 +5070,39 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 info.queueFamilyIndex = 0;
                 info.queueIndex = 0;
                 info.flags = 0;
-                VkQueue queue = VK_NULL_HANDLE;
+                VkQueue queue = (VkQueue)(uintptr_t)0x1234u;
                 vkGetDeviceQueue2((VkDevice)(uintptr_t)0x1u, &info, &queue);
-                if (queue == VK_NULL_HANDLE) {{
-                    fprintf(stderr, "valid device queue info did not return advertised queue\\n");
+                if (queue != VK_NULL_HANDLE) {{
+                    fprintf(stderr, "invalid device returned stale queue %p\\n", (void *)queue);
                     return 2;
                 }}
+
+                float valid_priority = 1.0f;
+                VkDeviceQueueCreateInfo valid_qci;
+                VkDeviceCreateInfo valid_create_info;
+                memset(&valid_qci, 0, sizeof(valid_qci));
+                memset(&valid_create_info, 0, sizeof(valid_create_info));
+                valid_qci.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+                valid_qci.queueFamilyIndex = 0;
+                valid_qci.queueCount = 1;
+                valid_qci.pQueuePriorities = &valid_priority;
+                valid_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                valid_create_info.queueCreateInfoCount = 1;
+                valid_create_info.pQueueCreateInfos = &valid_qci;
+                VkDevice valid_device = VK_NULL_HANDLE;
+                if (vkCreateDevice((VkPhysicalDevice)&g_device, &valid_create_info, NULL, &valid_device) != VK_SUCCESS ||
+                    valid_device == VK_NULL_HANDLE) {{
+                    fprintf(stderr, "valid device create failed before queue lookup\\n");
+                    return 13;
+                }}
+                queue = VK_NULL_HANDLE;
+                vkGetDeviceQueue2(valid_device, &info, &queue);
+                if (queue == VK_NULL_HANDLE) {{
+                    fprintf(stderr, "valid device queue info did not return advertised queue\\n");
+                    vkDestroyDevice(valid_device, NULL);
+                    return 14;
+                }}
+                vkDestroyDevice(valid_device, NULL);
 
                 if (expect_null_queue(NULL, 3)) return 3;
 
@@ -5244,6 +5281,8 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 off += (size_t)snprintf(json + off, sizeof(json) - off,
                     "{{\"schema\":\"skydnir-vulkan-advertisement-caps-v1\","
                     "\"apiVersion\":4206592,\"format_caps_schema\":1,\"format_caps_count\":%zu,"
+                    "\"vulkan_dispatch_v5_supported_minors\":[0,1,2,3,4,5,6,7],"
+                    "\"vulkan_graphics_v6_supported_minors\":[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30],"
                     "\"image_format_caps\":{{",
                     pdocker_vk_bridge_format_count());
                 for (size_t i = 0; i < pdocker_vk_bridge_format_count(); ++i) {{
@@ -5428,6 +5467,72 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
 
+
+
+    def test_graphics_v628_advertisement_requires_v627_supported_minor_prefix(self):
+        source = textwrap.dedent(
+            rf"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            static size_t append_caps_prefix(char *json, size_t size, const char *graphics_minors) {{
+                size_t off = 0;
+                off += (size_t)snprintf(json + off, size - off,
+                    "{{\"schema\":\"skydnir-vulkan-advertisement-caps-v1\","
+                    "\"apiVersion\":4206592,\"format_caps_schema\":1,\"format_caps_count\":%zu,"
+                    "\"vulkan_dispatch_v5_supported_minors\":[0,1,2,3,4,5,6,7],"
+                    "\"vulkan_graphics_v6_supported_minors\":%s,"
+                    "\"vulkan_graphics_v6_abi_minor_buffer_views\":%u,"
+                    "\"vulkan_graphics_v6_buffer_view_schema_hash\":\"0x%016llx\","
+                    "\"vulkan_graphics_v6_max_buffer_views\":%u,"
+                    "\"vulkan_graphics_v6_abi_minor_push_constant_ranges\":%u,"
+                    "\"vulkan_graphics_v6_push_constant_range_schema_hash\":\"0x%016llx\","
+                    "\"vulkan_graphics_v6_max_push_constant_ranges\":%u,"
+                    "\"image_format_caps\":{{",
+                    pdocker_vk_bridge_format_count(), graphics_minors,
+                    PDOCKER_GPU_VULKAN_GRAPHICS_V627_ABI_MINOR,
+                    (unsigned long long)PDOCKER_GPU_VULKAN_GRAPHICS_V627_BUFFER_VIEW_SCHEMA_HASH,
+                    PDOCKER_GPU_VULKAN_GRAPHICS_V627_MAX_BUFFER_VIEWS,
+                    PDOCKER_GPU_VULKAN_GRAPHICS_V628_ABI_MINOR,
+                    (unsigned long long)PDOCKER_GPU_VULKAN_GRAPHICS_V628_PUSH_CONSTANT_RANGE_SCHEMA_HASH,
+                    PDOCKER_GPU_VULKAN_GRAPHICS_V628_MAX_PUSH_CONSTANT_RANGES);
+                for (size_t i = 0; i < pdocker_vk_bridge_format_count(); ++i) {{
+                    VkFormat format = pdocker_vk_bridge_format_at(i);
+                    off += (size_t)snprintf(json + off, size - off,
+                        "%s\"fmt%dOptimalFeatures\":0,\"fmt%dSampleCounts\":1",
+                        i ? "," : "", (int)format, (int)format);
+                }}
+                off += (size_t)snprintf(json + off, size - off, "}}}}\n");
+                return off;
+            }}
+
+            static int parse_case(const char *graphics_minors, int expect_v627, int expect_v628, int code) {{
+                char json[65536];
+                size_t off = append_caps_prefix(json, sizeof(json), graphics_minors);
+                if (off >= sizeof(json)) return code + 1;
+                PdockerVkAdvertisedCaps caps;
+                memset(&caps, 0, sizeof(caps));
+                if (!parse_executor_advertisement_caps_json(json, &caps)) return code + 2;
+                if ((caps.vulkan_graphics_v627_buffer_views_supported != 0) != expect_v627) return code + 3;
+                if ((caps.vulkan_graphics_v628_push_constant_ranges_supported != 0) != expect_v628) return code + 4;
+                return 0;
+            }}
+
+            int main(void) {{
+                int rc = parse_case("[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30]", 1, 1, 10);
+                if (rc) return rc;
+                rc = parse_case("[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,28,29,30]", 0, 0, 20);
+                if (rc) return rc;
+                rc = parse_case("[28]", 0, 0, 30);
+                if (rc) return rc;
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
 if __name__ == "__main__":

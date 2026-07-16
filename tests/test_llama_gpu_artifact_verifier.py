@@ -4163,5 +4163,46 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         self.assertFalse(report["benchmark_claim_allowed"])
 
 
+    def test_strict_passthrough_rejects_cpu_oracle_writeback_as_mutation_evidence(self):
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": passing_config_propagation(),
+                    "generic_spirv_dispatch": {
+                        "events": [
+                            {
+                                "strict_passthrough": True,
+                                "strict_transport_identity_eligible": True,
+                                "source_spirv_hash": "0x1111111111111111",
+                                "effective_spirv_hash": "0x1111111111111111",
+                                "original_spirv_hash": "0x1111111111111111",
+                                "pipeline_key": {"spirv_hash": "0x1111111111111111"},
+                                "cpu_oracle": {"oracle_writeback": True},
+                            }
+                        ]
+                    },
+                    "q6_workgroup_diagnostics": {
+                        "event_count": 1,
+                        "workgroup_shape_blocker": False,
+                        "latest_status": "match",
+                        **q6_verified_writeback(),
+                    },
+                },
+                "correctness": gpu_correctness_report("pass", required_failures=0, passed=True, content="5"),
+            },
+            "cpu": {"tokens_per_second": 0.1},
+            **speedup_sections(speedup=12.0, target_met=True, cpu_tps=0.1, gpu_tps=1.2),
+        }
+        result = self.run_verifier(payload, "--require-q6-workgroup-clear")
+        self.assertEqual(result.returncode, 31, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "vulkan-shader-mutation-diagnostic-only")
+        self.assertFalse(report["correctness_claim_allowed"])
+        self.assertFalse(report["benchmark_claim_allowed"])
+        self.assertIn("cpu-oracle-writeback", json.dumps(report["vulkan_shader_passthrough_rewrite_evidence"]))
+
+
 if __name__ == "__main__":
     unittest.main()

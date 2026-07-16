@@ -846,6 +846,16 @@ def _vulkan_shader_passthrough_rewrite_evidence(data: Any, path: str = "$") -> l
                     })
                     if len(evidence) >= 16:
                         return
+            cpu_oracle = value.get("cpu_oracle")
+            if isinstance(cpu_oracle, dict) and cpu_oracle.get("oracle_writeback") is True:
+                add({
+                    "path": f"{value_path}.cpu_oracle.oracle_writeback",
+                    "kind": "cpu-oracle-writeback",
+                    "field": "cpu_oracle.oracle_writeback",
+                    "value": True,
+                })
+                if len(evidence) >= 16:
+                    return
             scan_hash_identity(value, value_path)
             if len(evidence) >= 16:
                 return

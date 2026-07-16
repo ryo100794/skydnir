@@ -16023,6 +16023,8 @@ typedef struct {
     bool vulkan_dispatch_v57_push_constant_ops_supported;
     bool vulkan_dispatch_v5_supported_minors_valid;
     bool vulkan_dispatch_v5_supported_minor[8];
+    bool vulkan_graphics_v6_supported_minors_valid;
+    bool vulkan_graphics_v6_supported_minor[31];
     bool vulkan_graphics_v627_buffer_views_supported;
     bool vulkan_graphics_v628_push_constant_ranges_supported;
     bool vulkan_graphics_v629_variable_descriptor_counts_supported;
@@ -16343,6 +16345,15 @@ static bool parse_executor_advertisement_caps_json(
         return false;
     }
     caps->vulkan_dispatch_v5_supported_minors_valid = true;
+    if (!json_read_u32_membership_array(
+            json,
+            "vulkan_graphics_v6_supported_minors",
+            caps->vulkan_graphics_v6_supported_minor,
+            sizeof(caps->vulkan_graphics_v6_supported_minor) /
+                sizeof(caps->vulkan_graphics_v6_supported_minor[0]))) {
+        return false;
+    }
+    caps->vulkan_graphics_v6_supported_minors_valid = true;
 
     /* Prefer unique executor usable keys for advertised behavior. Legacy keys may
      * appear in several JSON objects, and json_find_value returns the first match. */
@@ -16553,6 +16564,7 @@ static bool parse_executor_advertisement_caps_json(
     caps->vulkan_graphics_v6_abi_minor_buffer_views = v627_minor;
     caps->vulkan_graphics_v6_max_buffer_views = v627_max_views;
     caps->vulkan_graphics_v627_buffer_views_supported =
+        caps->vulkan_graphics_v6_supported_minor[PDOCKER_GPU_VULKAN_GRAPHICS_V627_ABI_MINOR] &&
         v627_minor_ok && v627_minor >= PDOCKER_GPU_VULKAN_GRAPHICS_V627_ABI_MINOR &&
         v627_max_ok && v627_max_views >= PDOCKER_GPU_VULKAN_GRAPHICS_V627_MAX_BUFFER_VIEWS &&
         v627_schema_ok && strcmp(v627_schema_hash, expected_v627_schema_hash) == 0;
@@ -16572,6 +16584,8 @@ static bool parse_executor_advertisement_caps_json(
     caps->vulkan_graphics_v6_abi_minor_push_constant_ranges = v628_minor;
     caps->vulkan_graphics_v6_max_push_constant_ranges = v628_max_ranges;
     caps->vulkan_graphics_v628_push_constant_ranges_supported =
+        caps->vulkan_graphics_v627_buffer_views_supported &&
+        caps->vulkan_graphics_v6_supported_minor[PDOCKER_GPU_VULKAN_GRAPHICS_V628_ABI_MINOR] &&
         v628_minor_ok && v628_minor >= PDOCKER_GPU_VULKAN_GRAPHICS_V628_ABI_MINOR &&
         v628_max_ok && v628_max_ranges >= PDOCKER_GPU_VULKAN_GRAPHICS_V628_MAX_PUSH_CONSTANT_RANGES &&
         v628_schema_ok && strcmp(v628_schema_hash, expected_v628_schema_hash) == 0;
@@ -16591,6 +16605,8 @@ static bool parse_executor_advertisement_caps_json(
     caps->vulkan_graphics_v6_abi_minor_variable_descriptor_counts = v629_minor;
     caps->vulkan_graphics_v6_max_variable_descriptor_counts = v629_max_counts;
     caps->vulkan_graphics_v629_variable_descriptor_counts_supported =
+        caps->vulkan_graphics_v628_push_constant_ranges_supported &&
+        caps->vulkan_graphics_v6_supported_minor[PDOCKER_GPU_VULKAN_GRAPHICS_V629_ABI_MINOR] &&
         v629_minor_ok && v629_minor >= PDOCKER_GPU_VULKAN_GRAPHICS_V629_ABI_MINOR &&
         v629_max_ok && v629_max_counts >= PDOCKER_GPU_VULKAN_GRAPHICS_V629_MAX_VARIABLE_DESCRIPTOR_COUNTS &&
         v629_schema_ok && strcmp(v629_schema_hash, expected_v629_schema_hash) == 0;
@@ -16607,6 +16623,8 @@ static bool parse_executor_advertisement_caps_json(
         v630_schema_hash, sizeof(v630_schema_hash));
     caps->vulkan_graphics_v6_abi_minor_native_objects = v630_minor;
     caps->vulkan_graphics_v630_native_objects_supported =
+        caps->vulkan_graphics_v629_variable_descriptor_counts_supported &&
+        caps->vulkan_graphics_v6_supported_minor[PDOCKER_GPU_VULKAN_GRAPHICS_V630_ABI_MINOR] &&
         v630_minor_ok && v630_minor >= PDOCKER_GPU_VULKAN_GRAPHICS_V630_ABI_MINOR &&
         v630_schema_ok && strcmp(v630_schema_hash, expected_v630_schema_hash) == 0;
 
@@ -22729,12 +22747,15 @@ VKAPI_ATTR void VKAPI_CALL vkGetDeviceQueue(
         return;
     }
     ensure_vulkan_dispatchable_object_ids();
-    const PdockerVkDevice *pdocker_device = (const PdockerVkDevice *)device;
-    if (pdocker_device && pdocker_device->object_id != 0) {
-        g_queue.instance_object_id = pdocker_device->instance_object_id;
-        g_queue.physical_device_object_id = pdocker_device->physical_device_object_id;
-        g_queue.device_object_id = pdocker_device->object_id;
+    const PdockerVkDevice *pdocker_device =
+        device == (VkDevice)g_last_created_device ? (const PdockerVkDevice *)device : NULL;
+    if (!pdocker_device || pdocker_device->object_id == 0) {
+        *pQueue = VK_NULL_HANDLE;
+        return;
     }
+    g_queue.instance_object_id = pdocker_device->instance_object_id;
+    g_queue.physical_device_object_id = pdocker_device->physical_device_object_id;
+    g_queue.device_object_id = pdocker_device->object_id;
     g_queue.requested_feature_mask = g_last_device_requested_feature_mask;
     g_queue.enabled_extension_mask = g_last_device_enabled_extension_mask;
     *pQueue = (VkQueue)&g_queue;
@@ -22750,12 +22771,15 @@ VKAPI_ATTR void VKAPI_CALL vkGetDeviceQueue2(
         return;
     }
     ensure_vulkan_dispatchable_object_ids();
-    const PdockerVkDevice *pdocker_device = (const PdockerVkDevice *)device;
-    if (pdocker_device && pdocker_device->object_id != 0) {
-        g_queue.instance_object_id = pdocker_device->instance_object_id;
-        g_queue.physical_device_object_id = pdocker_device->physical_device_object_id;
-        g_queue.device_object_id = pdocker_device->object_id;
+    const PdockerVkDevice *pdocker_device =
+        device == (VkDevice)g_last_created_device ? (const PdockerVkDevice *)device : NULL;
+    if (!pdocker_device || pdocker_device->object_id == 0) {
+        *pQueue = VK_NULL_HANDLE;
+        return;
     }
+    g_queue.instance_object_id = pdocker_device->instance_object_id;
+    g_queue.physical_device_object_id = pdocker_device->physical_device_object_id;
+    g_queue.device_object_id = pdocker_device->object_id;
     g_queue.requested_feature_mask = g_last_device_requested_feature_mask;
     g_queue.enabled_extension_mask = g_last_device_enabled_extension_mask;
     *pQueue = (VkQueue)&g_queue;

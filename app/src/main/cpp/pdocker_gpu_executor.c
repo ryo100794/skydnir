@@ -19863,6 +19863,14 @@ static int run_vulkan_dispatch_fd(
             options && options->has_q6k_oracle_writeback
                 ? options->q6k_oracle_writeback
                 : env_truthy("PDOCKER_GPU_Q6K_ORACLE_WRITEBACK", 0);
+        if (strict_passthrough && cpu_oracle_requested && q6k_oracle_writeback) {
+            json_fail("vulkan-dispatch",
+                      "strict passthrough blocks CPU oracle writeback");
+            fail_stage = "strict-cpu-oracle-writeback";
+            rc = VK_ERROR_FEATURE_NOT_PRESENT;
+            ret = 64;
+            goto cleanup;
+        }
         uint64_t q6_resolved_local_size[3];
         resolve_spirv_local_size(&spirv_summary,
                                  specializations,
@@ -21692,6 +21700,7 @@ static void print_vulkan_advertisement_caps(const char *transport) {
             "\"executor_build_marker\":\"%s\","
             "\"vulkan_dispatch_v5_frame\":true,"
             "\"vulkan_dispatch_v5_supported_minors\":[0,1,2,3,4,5,6,7],"
+            "\"vulkan_graphics_v6_supported_minors\":[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30],"
             "\"vulkan_dispatch_v5_abi_minor_image_layout_ranges\":%u,"
             "\"vulkan_dispatch_v5_image_layout_range_schema_hash\":\"0x%016llx\","
             "\"vulkan_dispatch_v5_max_image_layout_ranges\":%u,"
