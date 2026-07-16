@@ -17848,6 +17848,8 @@ static void fill_pnext_properties(void *pNext) {
                 snprintf(p->driverInfo, sizeof(p->driverInfo), "Skydnir neutral Vulkan bridge");
                 p->conformanceVersion.major = 1;
                 p->conformanceVersion.minor = 2;
+                p->denormBehaviorIndependence = VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE;
+                p->roundingModeIndependence = VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE;
                 p->shaderRoundingModeRTEFloat16 = VK_FALSE;
                 p->shaderRoundingModeRTZFloat16 = VK_FALSE;
                 PDOCKER_VK_FILL_DESCRIPTOR_INDEXING_PROPERTY_FIELDS(p);
@@ -22457,6 +22459,14 @@ static bool pdocker_supports_shader_atomic_int64_transport(void) {
     return false;
 }
 
+static bool pdocker_supports_custom_border_color_transport(void) {
+    return false;
+}
+
+static bool pdocker_supports_border_color_swizzle_transport(void) {
+    return false;
+}
+
 static bool pdocker_supports_sampler_ycbcr_conversion_transport(void) {
     return false;
 }
@@ -22583,12 +22593,16 @@ static uint32_t collect_advertised_device_extensions(
     }
 #endif
 #ifdef VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME
-    ADD_DEVICE_EXTENSION(VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME,
-                         VK_EXT_CUSTOM_BORDER_COLOR_SPEC_VERSION);
+    if (pdocker_supports_custom_border_color_transport()) {
+        ADD_DEVICE_EXTENSION(VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME,
+                             VK_EXT_CUSTOM_BORDER_COLOR_SPEC_VERSION);
+    }
 #endif
 #ifdef VK_EXT_BORDER_COLOR_SWIZZLE_EXTENSION_NAME
-    ADD_DEVICE_EXTENSION(VK_EXT_BORDER_COLOR_SWIZZLE_EXTENSION_NAME,
-                         VK_EXT_BORDER_COLOR_SWIZZLE_SPEC_VERSION);
+    if (pdocker_supports_border_color_swizzle_transport()) {
+        ADD_DEVICE_EXTENSION(VK_EXT_BORDER_COLOR_SWIZZLE_EXTENSION_NAME,
+                             VK_EXT_BORDER_COLOR_SWIZZLE_SPEC_VERSION);
+    }
 #endif
 #ifdef VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME
     ADD_DEVICE_EXTENSION(VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME,

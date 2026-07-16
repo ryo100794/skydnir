@@ -1734,6 +1734,16 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 if (props.roundingModeIndependence != VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE) return 9;
                 if (props.shaderSignedZeroInfNanPreserveFloat32 != VK_FALSE) return 10;
                 if (props.shaderRoundingModeRTEFloat32 != VK_FALSE) return 11;
+
+                VkPhysicalDeviceVulkan12Properties vulkan12_props;
+                memset(&vulkan12_props, 0xff, sizeof(vulkan12_props));
+                vulkan12_props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES;
+                vulkan12_props.pNext = NULL;
+                fill_pnext_properties(&vulkan12_props);
+                if (vulkan12_props.denormBehaviorIndependence != VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE) return 12;
+                if (vulkan12_props.roundingModeIndependence != VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE) return 13;
+                if (vulkan12_props.shaderSignedZeroInfNanPreserveFloat32 != VK_FALSE) return 14;
+                if (vulkan12_props.shaderRoundingModeRTEFloat32 != VK_FALSE) return 15;
             #endif
                 return 0;
             }}
@@ -1743,7 +1753,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
 
-    def test_sampler_border_color_extensions_are_advertised_false_only(self):
+    def test_sampler_border_color_pnext_is_false_only_and_not_advertised_without_transport(self):
         source = textwrap.dedent(
             f"""
             #include <stdint.h>
@@ -1779,14 +1789,14 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
 
             int main(void) {{
             #if defined(VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME) && defined(VK_EXT_BORDER_COLOR_SWIZZLE_EXTENSION_NAME)
-                if (!device_extension_advertised_name(VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME)) return 2;
-                if (!device_extension_advertised_name(VK_EXT_BORDER_COLOR_SWIZZLE_EXTENSION_NAME)) return 3;
+                if (device_extension_advertised_name(VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME)) return 2;
+                if (device_extension_advertised_name(VK_EXT_BORDER_COLOR_SWIZZLE_EXTENSION_NAME)) return 3;
                 uint32_t count = 64;
                 VkExtensionProperties extensions[64];
                 memset(extensions, 0, sizeof(extensions));
                 if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &count, extensions) != VK_SUCCESS) return 4;
-                if (!extension_seen(extensions, count, VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME)) return 5;
-                if (!extension_seen(extensions, count, VK_EXT_BORDER_COLOR_SWIZZLE_EXTENSION_NAME)) return 6;
+                if (extension_seen(extensions, count, VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME)) return 5;
+                if (extension_seen(extensions, count, VK_EXT_BORDER_COLOR_SWIZZLE_EXTENSION_NAME)) return 6;
 
                 const char *enabled[] = {{
                     VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME,
@@ -1797,7 +1807,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
                 create_info.enabledExtensionCount = 2;
                 create_info.ppEnabledExtensionNames = enabled;
-                if (validate_device_extensions(&create_info) != VK_SUCCESS) return 7;
+                if (validate_device_extensions(&create_info) != VK_ERROR_EXTENSION_NOT_PRESENT) return 7;
 
                 VkPhysicalDeviceCustomBorderColorFeaturesEXT custom_features;
                 VkPhysicalDeviceBorderColorSwizzleFeaturesEXT swizzle_features;
@@ -1824,6 +1834,8 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 custom_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUSTOM_BORDER_COLOR_FEATURES_EXT;
                 custom_features.pNext = &swizzle_features;
                 swizzle_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BORDER_COLOR_SWIZZLE_FEATURES_EXT;
+                create_info.enabledExtensionCount = 0;
+                create_info.ppEnabledExtensionNames = NULL;
                 create_info.pNext = &custom_features;
                 if (validate_device_feature_requests(&create_info) != VK_SUCCESS) return 13;
                 custom_features.customBorderColors = VK_TRUE;

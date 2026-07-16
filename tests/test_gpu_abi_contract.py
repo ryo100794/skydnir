@@ -9856,6 +9856,10 @@ class GpuAbiContractTest(unittest.TestCase):
         if "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_PROPERTIES" in props_body:
             segment = props_body.split("VkPhysicalDeviceMaintenance4Properties *p", 1)[1].split("break;", 1)[0]
             self.assertIn("zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);", segment)
+        vulkan12_segment = props_body.split("VkPhysicalDeviceVulkan12Properties *p", 1)[1].split("break;", 1)[0]
+        self.assertIn("p->denormBehaviorIndependence = VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE;", vulkan12_segment)
+        self.assertIn("p->roundingModeIndependence = VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE;", vulkan12_segment)
+
         for marker in [
             "memcpy(p->deviceUUID, device_uuid, sizeof(p->deviceUUID));",
             "p->pointClippingBehavior = VK_POINT_CLIPPING_BEHAVIOR_ALL_CLIP_PLANES;",
@@ -12139,6 +12143,10 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(marker, features_body)
 
         collector_body = c_function_body(icd, "collect_advertised_device_extensions")
+        self.assertIn("pdocker_supports_custom_border_color_transport", icd)
+        self.assertIn("if (pdocker_supports_custom_border_color_transport())", collector_body)
+        self.assertIn("pdocker_supports_border_color_swizzle_transport", icd)
+        self.assertIn("if (pdocker_supports_border_color_swizzle_transport())", collector_body)
         for marker in [
             "VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME",
             "VK_EXT_CUSTOM_BORDER_COLOR_SPEC_VERSION",
