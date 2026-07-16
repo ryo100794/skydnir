@@ -5163,6 +5163,8 @@ class GpuAbiContractTest(unittest.TestCase):
         for marker in [
             "executor_supports_vulkan_dispatch_v56_compute_layouts",
             "compute_pipeline_layout != NULL && need_v55_native_objects",
+            "strict_passthrough && compute_pipeline_layout != NULL && !need_v56_compute_layouts",
+            "strict V5.6 frame rejected: executor does not advertise compute layout replay support",
             "if (need_v56_compute_layouts) {",
             "collect_dispatch_v56_pipeline_layout_metadata",
             "collect_dispatch_v56_pipeline_layout_push_constant_ranges",
@@ -5196,6 +5198,8 @@ class GpuAbiContractTest(unittest.TestCase):
         runner = c_function_body(executor, "run_vulkan_dispatch_fd")
         for marker in [
             "v56_compute_layout_available",
+            "strict passthrough requires V5.6 compute layout metadata",
+            "strict passthrough rejects descriptor alias layout synthesis",
             "const int use_v56_compute_layout = v56_compute_layout_available && binding_alias_count == 0;",
             "object_tables->compute_pipeline_layout_sets",
             "object_tables->compute_descriptor_set_layouts",
@@ -5230,6 +5234,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "!multi_descriptor_set && !use_v56_compute_layout",
         ]:
             self.assertIn(marker, runner)
+        self.assertLess(runner.index("strict passthrough requires V5.6 compute layout metadata"), runner.index("const int use_v56_compute_layout"))
+        self.assertLess(runner.index("strict passthrough rejects descriptor alias layout synthesis"), runner.index("const int use_v56_compute_layout"))
         self.assertLess(runner.index("const int use_v56_compute_layout"), runner.index("validate_vulkan_compute_descriptor_layout_slot"))
         self.assertLess(runner.index("validate_vulkan_compute_descriptor_layout_slot"), runner.index("create-v56-compute-descriptor-set-layout"))
 
@@ -5307,6 +5313,7 @@ class GpuAbiContractTest(unittest.TestCase):
         for marker in [
             "executor_supports_vulkan_dispatch_v57_push_constant_ops",
             "const bool need_v57_push_ops",
+            "strict_passthrough && push_constant_op_count > 0 && !need_v57_push_ops",
             "PdockerGpuVulkanDispatchV57PushConstantOpEntry *push_constant_op_entries",
             "push_constant_op_entries[i].sequence = i;",
             "frame_header_v57->v57.push_constant_op_schema_hash",

@@ -18145,6 +18145,16 @@ static int run_vulkan_dispatch_fd(
         ret = 64;
         goto cleanup;
     }
+    if (strict_passthrough && !v56_compute_layout_available) {
+        json_fail("vulkan-dispatch", "strict passthrough requires V5.6 compute layout metadata");
+        ret = 64;
+        goto cleanup;
+    }
+    if (strict_passthrough && binding_alias_count != 0) {
+        json_fail("vulkan-dispatch", "strict passthrough rejects descriptor alias layout synthesis");
+        ret = 64;
+        goto cleanup;
+    }
     const int use_v56_compute_layout = v56_compute_layout_available && binding_alias_count == 0;
     layout_slot_capacity = use_v56_compute_layout
         ? object_tables->compute_descriptor_set_layout_count

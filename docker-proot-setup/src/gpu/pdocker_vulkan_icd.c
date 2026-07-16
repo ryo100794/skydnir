@@ -13047,6 +13047,13 @@ static int send_generic_vulkan_dispatch_v5_1_op(
     const bool need_v56_compute_layouts =
         compute_pipeline_layout != NULL && need_v55_native_objects &&
         executor_supports_vulkan_dispatch_v56_compute_layouts();
+    if (strict_passthrough && compute_pipeline_layout != NULL && !need_v56_compute_layouts) {
+        fprintf(stderr,
+                "pdocker-vulkan-icd: strict V5.6 frame rejected: executor does not advertise compute layout replay support dispatch_id=%llu\n",
+                (unsigned long long)dispatch_id);
+        rc = -EOPNOTSUPP;
+        goto cleanup;
+    }
     size_t descriptor_set_layout_count = 0;
     size_t pipeline_layout_set_count = 0;
     size_t push_constant_range_count = 0;
@@ -13070,8 +13077,7 @@ static int send_generic_vulkan_dispatch_v5_1_op(
     const bool need_v57_push_ops =
         need_v56_compute_layouts && push_constant_op_count > 0 &&
         executor_supports_vulkan_dispatch_v57_push_constant_ops();
-    if (need_v56_compute_layouts && push_constant_op_count > 0 && !need_v57_push_ops &&
-        strict_passthrough) {
+    if (strict_passthrough && push_constant_op_count > 0 && !need_v57_push_ops) {
         fprintf(stderr,
                 "pdocker-vulkan-icd: strict V5.7 frame rejected: executor does not advertise push-op replay support dispatch_id=%llu ops=%u\n",
                 (unsigned long long)dispatch_id,
