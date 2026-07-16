@@ -10146,6 +10146,55 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("info->deviceMask != 0 && info->deviceMask != 1u", submit2_command_body)
         self.assertIn("submit2-command-device-mask-unsupported", submit2_command_body)
 
+    def test_vulkan_submit_completion_handles_fail_closed_when_untracked(self):
+        icd = VULKAN_ICD.read_text()
+        legacy_collect = c_function_body(icd, "collect_legacy_submit_sync_entries")
+        submit2_collect = c_function_body(icd, "collect_submit2_submit_sync_entries")
+        queue_submit = c_function_body(icd, "vkQueueSubmit")
+        queue_submit2 = c_function_body(icd, "vkQueueSubmit2")
+        bind_descriptor_sets = c_function_body(icd, "vkCmdBindDescriptorSets")
+        queue_wait_idle = c_function_body(icd, "vkQueueWaitIdle")
+        device_wait_idle = c_function_body(icd, "vkDeviceWaitIdle")
+
+        for marker in [
+            "submit-wait-semaphore-untracked",
+            "submit-signal-semaphore-untracked",
+            "submit-fence-untracked",
+            "if (fence != VK_NULL_HANDLE && !submit_fence)",
+        ]:
+            self.assertIn(marker, legacy_collect)
+        for marker in [
+            "submit2-wait-semaphore-untracked",
+            "submit2-signal-semaphore-untracked",
+            "submit2-fence-untracked",
+            "if (fence != VK_NULL_HANDLE && !submit_fence)",
+        ]:
+            self.assertIn(marker, submit2_collect)
+        self.assertIn(
+            "if (fence != VK_NULL_HANDLE && !submit_fence) return VK_ERROR_INITIALIZATION_FAILED;",
+            queue_submit,
+        )
+        self.assertLess(
+            queue_submit.index("if (fence != VK_NULL_HANDLE && !submit_fence)"),
+            queue_submit.index("submit_fence->signaled = false;"),
+        )
+        self.assertIn(
+            "if (fence != VK_NULL_HANDLE && !submit2_fence_handle) return VK_ERROR_INITIALIZATION_FAILED;",
+            queue_submit2,
+        )
+        self.assertIn("descriptor-set-array-missing", bind_descriptor_sets)
+        self.assertIn('command_buffer_mark_recording_failed(cmd, "descriptor-set-array-missing");', bind_descriptor_sets)
+        self.assertLess(
+            bind_descriptor_sets.index("descriptorSetCount > 0 && !pDescriptorSets"),
+            bind_descriptor_sets.index("descriptorSetCount > 0 && pDescriptorSets"),
+        )
+        self.assertIn("PdockerVkQueue *submit_queue = pdocker_vk_queue_from_handle(queue);", queue_wait_idle)
+        self.assertIn("if (!submit_queue) return VK_ERROR_INITIALIZATION_FAILED;", queue_wait_idle)
+        self.assertNotIn("(void)queue;", queue_wait_idle)
+        self.assertIn("PdockerVkDevice *dev = pdocker_vk_device_from_handle(device);", device_wait_idle)
+        self.assertIn("if (!dev) return VK_ERROR_INITIALIZATION_FAILED;", device_wait_idle)
+        self.assertNotIn("(void)device;", device_wait_idle)
+
     def test_vulkan_wait_apis_honor_timeout_contract(self):
         icd = VULKAN_ICD.read_text()
         for marker in [

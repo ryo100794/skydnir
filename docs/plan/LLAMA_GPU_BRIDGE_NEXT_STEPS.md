@@ -10,6 +10,23 @@ llama.cpp itself remains unmodified.
 ## Current Ground Truth
 
 
+### 2026-07-16 CPU/static Vulkan submit/idle fail-closed lane
+
+The container-side Vulkan ICD now rejects untracked submit completion and
+wait/signal handles instead of silently dropping them from the transported
+submit-sync table.  `vkQueueSubmit` and `vkQueueSubmit2` validate non-null fence
+handles before mutating local state, legacy and submit2 sync collectors reject
+untracked semaphores/fences, `vkCmdBindDescriptorSets` records a deterministic
+`descriptor-set-array-missing` failure when the descriptor count is non-zero but
+the array pointer is absent, and idle calls validate typed queue/device handles
+instead of unconditional success.  This is generic Vulkan API contract hardening
+for pass-through; it does not change llama.cpp, Dockerfiles, models, prompts, or
+shader bytes.
+
+Evidence: `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`,
+`tests.test_gpu_abi_contract`; compile gates `scripts/build-gpu-shim.sh`,
+`scripts/build-native-android-ndk.sh`, and `scripts/verify-native-payloads.py`.
+
 ### 2026-07-16 CPU/static Q6 workgroup evidence gate lane
 
 The Q6_K artifact verifier now requires a complete workgroup/local-size evidence

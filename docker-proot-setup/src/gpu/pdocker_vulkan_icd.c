@@ -1752,6 +1752,16 @@ static PdockerVkQueue *pdocker_vk_queue_from_handle(VkQueue queue) {
         : NULL;
 }
 
+static PdockerVkDevice *pdocker_vk_device_from_handle(VkDevice device) {
+    PdockerVkDevice *pdocker_device = (PdockerVkDevice *)device;
+    return pdocker_device && pdocker_device == g_last_created_device &&
+           pdocker_device->object_id != 0 &&
+           pdocker_device->instance_object_id != 0 &&
+           pdocker_device->physical_device_object_id != 0
+        ? pdocker_device
+        : NULL;
+}
+
 static bool command_buffer_require_synchronization2(
         PdockerVkCommandBuffer *cmd,
         const char *reason) {
@@ -28666,7 +28676,13 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     const bool strict_passthrough =
         env_truthy_default("PDOCKER_GPU_STRICT_PASSTHROUGH", false);
-    if (cmd && descriptorSetCount > 0 && pDescriptorSets) {
+    if (!cmd) return;
+    if (descriptorSetCount > 0 && !pDescriptorSets) {
+        cmd->unsupported_descriptor_set_layout = true;
+        command_buffer_mark_recording_failed(cmd, "descriptor-set-array-missing");
+        return;
+    }
+    if (descriptorSetCount > 0 && pDescriptorSets) {
         PdockerVkDescriptorSet **target_set_handles = NULL;
         PdockerVkDescriptorSet *target_set_snapshots = NULL;
         bool *target_set_used = NULL;
@@ -31069,6 +31085,11 @@ static bool collect_legacy_submit_sync_entries(
         PdockerVkSemaphore *sem = submit->pWaitSemaphores
             ? pdocker_vk_semaphore_from_handle(submit->pWaitSemaphores[i])
             : NULL;
+        if (submit->pWaitSemaphores && submit->pWaitSemaphores[i] != VK_NULL_HANDLE && !sem) {
+            trace_icd_runtime_failure("submit-wait-semaphore-untracked",
+                                      VK_ERROR_INITIALIZATION_FAILED);
+            return false;
+        }
         uint64_t value = sem && sem->timeline ? submit_timeline_wait_value(timeline, i) : 0;
         uint64_t stage_mask = submit->pWaitDstStageMask ? (uint64_t)submit->pWaitDstStageMask[i] : 0;
         if (!append_submit_sync_entry(entries, entry_count,
@@ -31081,6 +31102,11 @@ static bool collect_legacy_submit_sync_entries(
         PdockerVkSemaphore *sem = submit->pSignalSemaphores
             ? pdocker_vk_semaphore_from_handle(submit->pSignalSemaphores[i])
             : NULL;
+        if (submit->pSignalSemaphores && submit->pSignalSemaphores[i] != VK_NULL_HANDLE && !sem) {
+            trace_icd_runtime_failure("submit-signal-semaphore-untracked",
+                                      VK_ERROR_INITIALIZATION_FAILED);
+            return false;
+        }
         uint64_t value = sem && sem->timeline ? submit_timeline_signal_value(timeline, i) : 0;
         if (!append_submit_sync_entry(entries, entry_count,
                                       PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_SIGNAL,
@@ -31089,6 +31115,11 @@ static bool collect_legacy_submit_sync_entries(
         }
     }
     PdockerVkFence *submit_fence = pdocker_vk_fence_from_handle(fence);
+    if (fence != VK_NULL_HANDLE && !submit_fence) {
+        trace_icd_runtime_failure("submit-fence-untracked",
+                                  VK_ERROR_INITIALIZATION_FAILED);
+        return false;
+    }
     if (submit_fence &&
         !append_submit_sync_entry(entries, entry_count,
                                   PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_FENCE,
@@ -31111,6 +31142,11 @@ static bool collect_submit2_submit_sync_entries(
             ? &submit->pWaitSemaphoreInfos[i]
             : NULL;
         PdockerVkSemaphore *sem = info ? pdocker_vk_semaphore_from_handle(info->semaphore) : NULL;
+        if (info && info->semaphore != VK_NULL_HANDLE && !sem) {
+            trace_icd_runtime_failure("submit2-wait-semaphore-untracked",
+                                      VK_ERROR_INITIALIZATION_FAILED);
+            return false;
+        }
         uint64_t value = sem && sem->timeline ? info->value : 0;
         uint64_t stage_mask = info ? (uint64_t)info->stageMask : 0;
         if (!append_submit_sync_entry(entries, entry_count,
@@ -31124,6 +31160,11 @@ static bool collect_submit2_submit_sync_entries(
             ? &submit->pSignalSemaphoreInfos[i]
             : NULL;
         PdockerVkSemaphore *sem = info ? pdocker_vk_semaphore_from_handle(info->semaphore) : NULL;
+        if (info && info->semaphore != VK_NULL_HANDLE && !sem) {
+            trace_icd_runtime_failure("submit2-signal-semaphore-untracked",
+                                      VK_ERROR_INITIALIZATION_FAILED);
+            return false;
+        }
         uint64_t value = sem && sem->timeline ? info->value : 0;
         uint64_t stage_mask = info ? (uint64_t)info->stageMask : 0;
         if (!append_submit_sync_entry(entries, entry_count,
@@ -31133,6 +31174,11 @@ static bool collect_submit2_submit_sync_entries(
         }
     }
     PdockerVkFence *submit_fence = pdocker_vk_fence_from_handle(fence);
+    if (fence != VK_NULL_HANDLE && !submit_fence) {
+        trace_icd_runtime_failure("submit2-fence-untracked",
+                                  VK_ERROR_INITIALIZATION_FAILED);
+        return false;
+    }
     if (submit_fence &&
         !append_submit_sync_entry(entries, entry_count,
                                   PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_FENCE,
@@ -32430,6 +32476,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
         if (pnext_rc != VK_SUCCESS) return pnext_rc;
     }
     PdockerVkFence *submit_fence = pdocker_vk_fence_from_handle(fence);
+    if (fence != VK_NULL_HANDLE && !submit_fence) return VK_ERROR_INITIALIZATION_FAILED;
     if (submit_fence) submit_fence->signaled = false;
     for (uint32_t i = 0; i < submitCount; ++i) {
         VkResult shape_rc = validate_legacy_submit_info_shape(&pSubmits[i]);
@@ -32940,6 +32987,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2(
     }
     if (submitCount == 0) return vkQueueSubmit(queue, 0, NULL, fence);
     if (!pSubmits) return VK_ERROR_INITIALIZATION_FAILED;
+    PdockerVkFence *submit2_fence_handle = pdocker_vk_fence_from_handle(fence);
+    if (fence != VK_NULL_HANDLE && !submit2_fence_handle) return VK_ERROR_INITIALIZATION_FAILED;
     for (uint32_t validate_i = 0; validate_i < submitCount; ++validate_i) {
         const VkSubmitInfo2 *src = &pSubmits[validate_i];
         if (src->flags != 0) {
@@ -33060,12 +33109,16 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2(
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkQueueWaitIdle(VkQueue queue) {
-    (void)queue;
+    PdockerVkQueue *submit_queue = pdocker_vk_queue_from_handle(queue);
+    if (!submit_queue) return VK_ERROR_INITIALIZATION_FAILED;
+    (void)submit_queue;
     return VK_SUCCESS;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkDeviceWaitIdle(VkDevice device) {
-    (void)device;
+    PdockerVkDevice *dev = pdocker_vk_device_from_handle(device);
+    if (!dev) return VK_ERROR_INITIALIZATION_FAILED;
+    (void)dev;
     return VK_SUCCESS;
 }
 
