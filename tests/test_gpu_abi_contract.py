@@ -7778,7 +7778,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "PdockerGpuVulkanDispatchV5DescriptorObjectEntry",
         ]:
             self.assertIn(marker, executor)
-        self.assertIn("supported_minors", executor)
+        self.assertIn('\\"supported_minors\\":[0,1,2,3,4,5,6,7]', executor)
 
     def test_llama_gpu_env_manifest_covers_abi_dispatch_options(self):
         manifest = json.loads(LLAMA_GPU_ENV_MANIFEST.read_text())

@@ -21490,7 +21490,7 @@ static void print_capabilities(const char *transport) {
             "\"vulkan_dispatch_v5_frame\":true,"
             "\"vulkan_dispatch_v5\":{"
             "\"abi_major\":%u,\"abi_minor\":%u,"
-            "\"abi_minor_objects\":%u,\"abi_minor_image_layout_ranges\":%u,\"abi_minor_buffer_views\":%u,\"abi_minor_barriers\":%u,\"supported_minors\":[0,1,2,3,4],"
+            "\"abi_minor_objects\":%u,\"abi_minor_image_layout_ranges\":%u,\"abi_minor_buffer_views\":%u,\"abi_minor_barriers\":%u,\"supported_minors\":[0,1,2,3,4,5,6,7],"
             "\"image_layout_range_schema_hash\":\"0x%016llx\",\"buffer_view_schema_hash\":\"0x%016llx\","
             "\"memory_barrier_schema_hash\":\"0x%016llx\",\"buffer_barrier_schema_hash\":\"0x%016llx\",\"image_barrier_schema_hash\":\"0x%016llx\","
             "\"max_image_layout_ranges\":%u,\"max_buffer_views\":%u,\"max_memory_barriers\":%u,\"max_buffer_barriers\":%u,\"max_image_barriers\":%u,"
