@@ -4685,49 +4685,7 @@ static int read_executor_text_response_line(int fd, char **out_line, size_t *out
     return 0;
 }
 
-static int send_vector_add_3fd(size_t n, int fd_a, int fd_b, int fd_out) {
-    int socket_fd = connect_queue();
-    if (socket_fd < 0) return socket_fd;
-    char cmd[64];
-    snprintf(cmd, sizeof(cmd), "VULKAN_VECTOR_ADD_3FD %zu\n", n);
-    int fds[3] = { fd_a, fd_b, fd_out };
-    char control[CMSG_SPACE(sizeof(fds))];
-    struct iovec iov;
-    struct msghdr msg;
-    memset(control, 0, sizeof(control));
-    memset(&iov, 0, sizeof(iov));
-    memset(&msg, 0, sizeof(msg));
-    iov.iov_base = cmd;
-    iov.iov_len = strlen(cmd);
-    msg.msg_iov = &iov;
-    msg.msg_iovlen = 1;
-    msg.msg_control = control;
-    msg.msg_controllen = sizeof(control);
-    struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
-    cmsg->cmsg_level = SOL_SOCKET;
-    cmsg->cmsg_type = SCM_RIGHTS;
-    cmsg->cmsg_len = CMSG_LEN(sizeof(fds));
-    memcpy(CMSG_DATA(cmsg), fds, sizeof(fds));
-    msg.msg_controllen = sizeof(control);
-    int rc = 0;
-    if (sendmsg(socket_fd, &msg, 0) < 0) {
-        rc = -errno;
-    } else {
-        char *line = NULL;
-        size_t off = 0;
-        rc = read_executor_text_response_line(socket_fd, &line, &off);
-        if (rc == 0) {
-            if (getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
-                fprintf(stderr, "pdocker-vulkan-icd: bridge response: %s", line);
-                if (off == 0 || line[off - 1] != '\n') fprintf(stderr, "\n");
-            }
-            if (strstr(line, "\"valid\":true") == NULL) rc = -EIO;
-        }
-        free(line);
-    }
-    close(socket_fd);
-    return rc;
-}
+
 
 static void hex_encode(const uint8_t *src, size_t src_size, char *dst, size_t dst_size) {
     static const char hex[] = "0123456789abcdef";
@@ -4871,7 +4829,6 @@ static int write_exact_fd(int fd, const void *data, size_t size) {
     }
     return 0;
 }
-
 
 static int parse_executor_json_result(const char *line, int fallback) {
     if (!line) return fallback;
@@ -32766,39 +32723,6 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
             trace_icd_runtime_failure("vulkan-dispatch-legacy-vector-add-fallback-rejected",
                                       VK_ERROR_FEATURE_NOT_PRESENT);
             RETURN_VK_QUEUE_SUBMIT_WITH_SYNC(VK_ERROR_FEATURE_NOT_PRESENT);
-            PdockerVkDescriptorSet *legacy_set = cmd->bound_set_used[0]
-                ? &cmd->bound_set_snapshots[0]
-                : NULL;
-            const PdockerVkDescriptorBinding *legacy_a =
-                descriptor_set_binding_slot_const(legacy_set, 0, 0);
-            const PdockerVkDescriptorBinding *legacy_b =
-                descriptor_set_binding_slot_const(legacy_set, 1, 0);
-            const PdockerVkDescriptorBinding *legacy_out =
-                descriptor_set_binding_slot_const(legacy_set, 2, 0);
-            if (!cmd || !legacy_set || !legacy_a || !legacy_b || !legacy_out ||
-                !legacy_a->buffer || !legacy_b->buffer || !legacy_out->buffer) {
-                if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
-                    fprintf(stderr,
-                            "pdocker-vulkan-icd: vector-add dispatch missing storage buffers set=%p\n",
-                            (void *)legacy_set);
-                }
-                RETURN_VK_QUEUE_SUBMIT_WITH_SYNC(VK_ERROR_FEATURE_NOT_PRESENT);
-            }
-            PdockerVkBuffer *a = legacy_a->buffer;
-            PdockerVkBuffer *b = legacy_b->buffer;
-            PdockerVkBuffer *out = legacy_out->buffer;
-            if (!a->memory || !b->memory || !out->memory) RETURN_VK_QUEUE_SUBMIT_WITH_SYNC(VK_ERROR_MEMORY_MAP_FAILED);
-            size_t n = descriptor_binding_size(legacy_a) / sizeof(float);
-            size_t b_n = descriptor_binding_size(legacy_b) / sizeof(float);
-            size_t out_n = descriptor_binding_size(legacy_out) / sizeof(float);
-            if (b_n < n) n = b_n;
-            if (out_n < n) n = out_n;
-            if (cmd->dispatch_x && cmd->compute_pipeline && cmd->compute_pipeline->local_size_x) {
-                size_t dispatched = (size_t)cmd->dispatch_x * cmd->compute_pipeline->local_size_x;
-                if (dispatched < n) n = dispatched;
-            }
-            int rc = send_vector_add_3fd(n, a->memory->fd, b->memory->fd, out->memory->fd);
-            if (rc != 0) RETURN_VK_QUEUE_SUBMIT_WITH_SYNC(VK_ERROR_DEVICE_LOST);
         }
         if (!submit_has_graphics_sync_frame && submit_completion_sync_needs_executor &&
             submit_sync_entries_include_completion(submit_sync_entries, submit_sync_count)) {

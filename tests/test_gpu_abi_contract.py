@@ -9634,10 +9634,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "VKAPI_ATTR VkResult VKAPI_CALL vkWaitForFences", 1
         )[0]
         self.assertIn("vulkan-dispatch-legacy-vector-add-fallback-rejected", submit_body)
-        self.assertLess(
-            submit_body.index("vulkan-dispatch-legacy-vector-add-fallback-rejected"),
-            submit_body.index("send_vector_add_3fd"),
-        )
+        self.assertNotIn("send_vector_add_3fd", submit_body)
+        self.assertNotIn("VULKAN_VECTOR_ADD_3FD", icd)
         executor_dispatch_body = c_function_body(executor, "run_vulkan_dispatch_fd")
         self.assertIn("vkCmdDispatch(command_buffer, gx, gy, gz);", executor_dispatch_body)
         self.assertIn("base_x, base_y, base_z,\n                              gx, gy, gz);", executor_dispatch_body)
