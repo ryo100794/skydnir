@@ -5252,6 +5252,7 @@ class GpuAbiContractTest(unittest.TestCase):
 
         caps = c_function_body(executor, "print_vulkan_advertisement_caps")
         for marker in [
+            "vulkan_dispatch_v5_supported_minors",
             "vulkan_dispatch_v5_abi_minor_push_ops",
             "vulkan_dispatch_v5_push_constant_op_schema_hash",
             "vulkan_dispatch_v5_max_push_constant_ops",
@@ -5260,9 +5261,14 @@ class GpuAbiContractTest(unittest.TestCase):
 
         header_validator = c_function_body(executor, "validate_vulkan_dispatch_v5_header")
         self.assertIn("sizeof(PdockerGpuVulkanDispatchV57FrameHeader)", header_validator)
+        v57_minor_helper = c_function_body(executor, "vulkan_dispatch_v5_abi_minor_has_v57_push_ops")
+        self.assertIn("case PDOCKER_GPU_VULKAN_DISPATCH_V57_ABI_MINOR:", v57_minor_helper)
+        self.assertIn("return 1;", v57_minor_helper)
 
         validator = c_function_body(executor, "validate_vulkan_dispatch_v5_frame_content")
         for marker in [
+            "vulkan_dispatch_v5_abi_minor_has_v57_push_ops(header->abi_minor)",
+            "vulkan_dispatch_v5_header_v57(frame, header->abi_minor)",
             "PDOCKER_GPU_VULKAN_DISPATCH_V57_PUSH_CONSTANT_OP_SCHEMA_HASH",
             "v5_table_range_valid(ext->push_constant_op_table_offset",
             "v5_payload_range_valid(ext->push_constant_data_offset",
@@ -5273,6 +5279,8 @@ class GpuAbiContractTest(unittest.TestCase):
 
         plan = c_function_body(executor, "build_vulkan_dispatch_v5_native_plan")
         for marker in [
+            "vulkan_dispatch_v5_abi_minor_has_v57_push_ops(header->abi_minor)",
+            "vulkan_dispatch_v5_header_v57(frame, header->abi_minor)",
             "plan->compute_push_constant_op_count = v57->push_constant_op_count;",
             "plan->compute_push_constant_ops",
             "plan->compute_push_constant_op_data",
@@ -5306,6 +5314,14 @@ class GpuAbiContractTest(unittest.TestCase):
             "free(push_constant_op_entries)",
         ]:
             self.assertIn(marker, sender)
+
+        caps_parser = c_function_body(icd, "parse_executor_advertisement_caps_json")
+        for marker in [
+            "json_read_u32_membership_array",
+            "vulkan_dispatch_v5_supported_minors",
+            "vulkan_dispatch_v5_supported_minor[PDOCKER_GPU_VULKAN_DISPATCH_V57_ABI_MINOR]",
+        ]:
+            self.assertIn(marker, caps_parser)
 
         generic_sender = c_function_body(icd, "send_generic_vulkan_dispatch_op")
         self.assertIn("op->push_constant_ops", generic_sender)

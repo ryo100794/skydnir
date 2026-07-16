@@ -16053,6 +16053,8 @@ typedef struct {
     bool vulkan_dispatch_v55_native_objects_supported;
     bool vulkan_dispatch_v56_compute_layouts_supported;
     bool vulkan_dispatch_v57_push_constant_ops_supported;
+    bool vulkan_dispatch_v5_supported_minors_valid;
+    bool vulkan_dispatch_v5_supported_minor[8];
     bool vulkan_graphics_v627_buffer_views_supported;
     bool vulkan_graphics_v628_push_constant_ranges_supported;
     bool vulkan_graphics_v629_variable_descriptor_counts_supported;
@@ -16118,6 +16120,44 @@ static bool json_read_u32_array3(const char *json, const char *key, uint32_t out
         }
     }
     return *p == ']';
+}
+
+static const char *json_skip_ws(const char *p) {
+    while (p && ((unsigned char)*p == 32u || (unsigned char)*p == 9u ||
+                 (unsigned char)*p == 13u || (unsigned char)*p == 10u)) ++p;
+    return p;
+}
+
+static bool json_read_u32_membership_array(
+        const char *json,
+        const char *key,
+        bool *out,
+        size_t out_count) {
+    const char *p = json_find_value(json, key);
+    if (!p || !out || out_count == 0) return false;
+    memset(out, 0, out_count * sizeof(out[0]));
+    p = json_skip_ws(p);
+    if (!p || (unsigned char)*p != 91u) return false;
+    ++p;
+    bool saw_value = false;
+    for (;;) {
+        p = json_skip_ws(p);
+        if (!p) return false;
+        if ((unsigned char)*p == 93u) return saw_value;
+        char *end = NULL;
+        unsigned long value = strtoul(p, &end, 10);
+        if (end == p || value >= out_count) return false;
+        out[value] = true;
+        saw_value = true;
+        p = json_skip_ws(end);
+        if (!p) return false;
+        if ((unsigned char)*p == 44u) {
+            ++p;
+            continue;
+        }
+        if ((unsigned char)*p == 93u) return true;
+        return false;
+    }
 }
 
 static bool json_read_float(const char *json, const char *key, float *out) {
@@ -16326,6 +16366,16 @@ static bool parse_executor_advertisement_caps_json(
         caps->extended_dynamic_state2.extendedDynamicState2PatchControlPoints && caps->ext_extended_dynamic_state2;
     caps->index_type_uint8_usable = caps->index_type_uint8.indexTypeUint8 && caps->ext_index_type_uint8;
 
+    if (!json_read_u32_membership_array(
+            json,
+            "vulkan_dispatch_v5_supported_minors",
+            caps->vulkan_dispatch_v5_supported_minor,
+            sizeof(caps->vulkan_dispatch_v5_supported_minor) /
+                sizeof(caps->vulkan_dispatch_v5_supported_minor[0]))) {
+        return false;
+    }
+    caps->vulkan_dispatch_v5_supported_minors_valid = true;
+
     /* Prefer unique executor usable keys for advertised behavior. Legacy keys may
      * appear in several JSON objects, and json_find_value returns the first match. */
     if (json_read_u32(json, "timelineSemaphoreUsable", &value)) caps->timeline_semaphore_usable = value != 0;
@@ -16360,6 +16410,7 @@ static bool parse_executor_advertisement_caps_json(
     caps->vulkan_dispatch_v5_abi_minor_image_layout_ranges = v52_minor;
     caps->vulkan_dispatch_v5_max_image_layout_ranges = v52_max_ranges;
     caps->vulkan_dispatch_v52_image_layout_ranges_supported =
+        caps->vulkan_dispatch_v5_supported_minor[PDOCKER_GPU_VULKAN_DISPATCH_V52_ABI_MINOR] &&
         v52_minor_ok && v52_minor >= PDOCKER_GPU_VULKAN_DISPATCH_V52_ABI_MINOR &&
         v52_max_ok && v52_max_ranges >= PDOCKER_GPU_VULKAN_DISPATCH_V52_MAX_IMAGE_LAYOUT_RANGES &&
         v52_schema_ok && strcmp(v52_schema_hash, expected_v52_schema_hash) == 0;
@@ -16379,6 +16430,7 @@ static bool parse_executor_advertisement_caps_json(
     caps->vulkan_dispatch_v5_abi_minor_buffer_views = v53_minor;
     caps->vulkan_dispatch_v5_max_buffer_views = v53_max_views;
     caps->vulkan_dispatch_v53_buffer_views_supported =
+        caps->vulkan_dispatch_v5_supported_minor[PDOCKER_GPU_VULKAN_DISPATCH_V53_ABI_MINOR] &&
         v53_minor_ok && v53_minor >= PDOCKER_GPU_VULKAN_DISPATCH_V53_ABI_MINOR &&
         v53_max_ok && v53_max_views >= PDOCKER_GPU_VULKAN_DISPATCH_V53_MAX_BUFFER_VIEWS &&
         v53_schema_ok && strcmp(v53_schema_hash, expected_v53_schema_hash) == 0;
@@ -16420,6 +16472,7 @@ static bool parse_executor_advertisement_caps_json(
     caps->vulkan_dispatch_v5_max_buffer_barriers = v54_max_buffer;
     caps->vulkan_dispatch_v5_max_image_barriers = v54_max_image;
     caps->vulkan_dispatch_v54_barriers_supported =
+        caps->vulkan_dispatch_v5_supported_minor[PDOCKER_GPU_VULKAN_DISPATCH_V54_ABI_MINOR] &&
         v54_minor_ok && v54_minor >= PDOCKER_GPU_VULKAN_DISPATCH_V54_ABI_MINOR &&
         v54_max_memory_ok && v54_max_memory >= PDOCKER_GPU_VULKAN_DISPATCH_V54_MAX_MEMORY_BARRIERS &&
         v54_max_buffer_ok && v54_max_buffer >= PDOCKER_GPU_VULKAN_DISPATCH_V54_MAX_BUFFER_BARRIERS &&
@@ -16440,6 +16493,7 @@ static bool parse_executor_advertisement_caps_json(
         v55_schema_hash, sizeof(v55_schema_hash));
     caps->vulkan_dispatch_v5_abi_minor_native_objects = v55_minor;
     caps->vulkan_dispatch_v55_native_objects_supported =
+        caps->vulkan_dispatch_v5_supported_minor[PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR] &&
         v55_minor_ok && v55_minor >= PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR &&
         v55_schema_ok && strcmp(v55_schema_hash, expected_v55_schema_hash) == 0;
 
@@ -16483,6 +16537,7 @@ static bool parse_executor_advertisement_caps_json(
     caps->vulkan_dispatch_v5_max_pipeline_layout_sets = v56_max_pipeline_layout_sets;
     caps->vulkan_dispatch_v5_max_push_constant_ranges = v56_max_push_constant_ranges;
     caps->vulkan_dispatch_v56_compute_layouts_supported =
+        caps->vulkan_dispatch_v5_supported_minor[PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR] &&
         v56_minor_ok && v56_minor >= PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR &&
         v56_max_descriptor_ok &&
         v56_max_descriptor_set_layouts >= PDOCKER_GPU_VULKAN_DISPATCH_V56_MAX_DESCRIPTOR_SET_LAYOUT_BINDINGS &&
@@ -16510,6 +16565,7 @@ static bool parse_executor_advertisement_caps_json(
     caps->vulkan_dispatch_v5_max_push_constant_ops = v57_max_ops;
     caps->vulkan_dispatch_v57_push_constant_ops_supported =
         caps->vulkan_dispatch_v56_compute_layouts_supported &&
+        caps->vulkan_dispatch_v5_supported_minor[PDOCKER_GPU_VULKAN_DISPATCH_V57_ABI_MINOR] &&
         v57_minor_ok && v57_minor >= PDOCKER_GPU_VULKAN_DISPATCH_V57_ABI_MINOR &&
         v57_max_ok && v57_max_ops >= PDOCKER_GPU_VULKAN_DISPATCH_V57_MAX_PUSH_CONSTANT_OPS &&
         v57_schema_ok && strcmp(v57_schema_hash, expected_v57_schema_hash) == 0;
