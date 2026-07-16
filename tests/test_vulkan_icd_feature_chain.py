@@ -3437,10 +3437,9 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 const char *variable_pointer_extensions[] = {{ VK_KHR_VARIABLE_POINTERS_EXTENSION_NAME }};
                 create_info.enabledExtensionCount = 1;
                 create_info.ppEnabledExtensionNames = variable_pointer_extensions;
-                if (!device_extension_advertised_name(VK_KHR_VARIABLE_POINTERS_EXTENSION_NAME) ||
-                    validate_device_extensions(&create_info) != VK_SUCCESS ||
-                    validate_device_feature_requests(&create_info) != VK_SUCCESS) {{
-                    fprintf(stderr, "VK_KHR_variable_pointers false-only enable failed\\n");
+                if (device_extension_advertised_name(VK_KHR_VARIABLE_POINTERS_EXTENSION_NAME) ||
+                    validate_device_extensions(&create_info) != VK_ERROR_EXTENSION_NOT_PRESENT) {{
+                    fprintf(stderr, "VK_KHR_variable_pointers was accepted without transport\\n");
                     return 11;
                 }}
             #endif
@@ -3459,10 +3458,9 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 const char *atomic64_extensions[] = {{ VK_KHR_SHADER_ATOMIC_INT64_EXTENSION_NAME }};
                 create_info.enabledExtensionCount = 1;
                 create_info.ppEnabledExtensionNames = atomic64_extensions;
-                if (!device_extension_advertised_name(VK_KHR_SHADER_ATOMIC_INT64_EXTENSION_NAME) ||
-                    validate_device_extensions(&create_info) != VK_SUCCESS ||
-                    validate_device_feature_requests(&create_info) != VK_SUCCESS) {{
-                    fprintf(stderr, "VK_KHR_shader_atomic_int64 false-only enable failed\\n");
+                if (device_extension_advertised_name(VK_KHR_SHADER_ATOMIC_INT64_EXTENSION_NAME) ||
+                    validate_device_extensions(&create_info) != VK_ERROR_EXTENSION_NOT_PRESENT) {{
+                    fprintf(stderr, "VK_KHR_shader_atomic_int64 was accepted without transport\\n");
                     return 13;
                 }}
             #endif
