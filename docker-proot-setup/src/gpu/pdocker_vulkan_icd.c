@@ -22453,6 +22453,10 @@ static bool pdocker_supports_dynamic_rendering_local_read_transport(void) {
     return false;
 }
 
+static bool pdocker_supports_shader_demote_transport(void) {
+    return false;
+}
+
 static bool pdocker_supports_debug_marker_transport(void) {
     return false;
 }
@@ -22690,8 +22694,10 @@ static uint32_t collect_advertised_device_extensions(
     ADD_DEVICE_EXTENSION(VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME, VK_EXT_HOST_QUERY_RESET_SPEC_VERSION);
 #endif
 #ifdef VK_EXT_SHADER_DEMOTE_TO_HELPER_INVOCATION_EXTENSION_NAME
-    ADD_DEVICE_EXTENSION(VK_EXT_SHADER_DEMOTE_TO_HELPER_INVOCATION_EXTENSION_NAME,
-                         VK_EXT_SHADER_DEMOTE_TO_HELPER_INVOCATION_SPEC_VERSION);
+    if (pdocker_supports_shader_demote_transport()) {
+        ADD_DEVICE_EXTENSION(VK_EXT_SHADER_DEMOTE_TO_HELPER_INVOCATION_EXTENSION_NAME,
+                             VK_EXT_SHADER_DEMOTE_TO_HELPER_INVOCATION_SPEC_VERSION);
+    }
 #endif
 #ifdef VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME
     ADD_DEVICE_EXTENSION(VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME,

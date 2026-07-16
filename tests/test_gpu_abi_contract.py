@@ -10367,6 +10367,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("p->shaderDemoteToHelperInvocation = VK_FALSE", icd)
         self.assertIn("supported = !p->shaderDemoteToHelperInvocation", icd)
         self.assertIn('unsupported_feature_name = "shaderDemoteToHelperInvocation"', icd)
+        self.assertIn("pdocker_supports_shader_demote_transport", icd)
+        self.assertIn("if (pdocker_supports_shader_demote_transport())", collector_body)
         self.assertIn("ADD_DEVICE_EXTENSION(VK_EXT_SHADER_DEMOTE_TO_HELPER_INVOCATION_EXTENSION_NAME", collector_body)
         self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT", icd)
         self.assertIn("p->robustBufferAccess2 = VK_FALSE", icd)

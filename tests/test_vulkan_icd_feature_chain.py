@@ -3508,7 +3508,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
 
-    def test_shader_demote_feature_is_queryable_but_not_enableable(self):
+    def test_shader_demote_feature_is_false_only_and_not_advertised_without_transport(self):
         source = textwrap.dedent(
             f"""
             #include <stdint.h>
@@ -3541,8 +3541,8 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 create_info.pNext = &demote_features;
 
             #ifdef VK_EXT_SHADER_DEMOTE_TO_HELPER_INVOCATION_EXTENSION_NAME
-                if (!device_extension_advertised_name(VK_EXT_SHADER_DEMOTE_TO_HELPER_INVOCATION_EXTENSION_NAME)) {{
-                    fprintf(stderr, "VK_EXT_shader_demote_to_helper_invocation was not advertised\\n");
+                if (device_extension_advertised_name(VK_EXT_SHADER_DEMOTE_TO_HELPER_INVOCATION_EXTENSION_NAME)) {{
+                    fprintf(stderr, "VK_EXT_shader_demote_to_helper_invocation was advertised without transport\\n");
                     return 7;
                 }}
                 uint32_t extension_count = 64;
@@ -3553,26 +3553,24 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     fprintf(stderr, "device extension enumeration failed\\n");
                     return 8;
                 }}
-                int saw_demote = 0;
                 for (uint32_t i = 0; i < extension_count; ++i) {{
                     if (strcmp(extensions[i].extensionName,
                                VK_EXT_SHADER_DEMOTE_TO_HELPER_INVOCATION_EXTENSION_NAME) == 0) {{
-                        saw_demote = 1;
+                        fprintf(stderr, "VK_EXT_shader_demote_to_helper_invocation appeared in enumeration without transport\\n");
+                        return 9;
                     }}
-                }}
-                if (!saw_demote) {{
-                    fprintf(stderr, "VK_EXT_shader_demote_to_helper_invocation missing from enumeration\\n");
-                    return 9;
                 }}
                 const char *enabled_extensions[] = {{
                     VK_EXT_SHADER_DEMOTE_TO_HELPER_INVOCATION_EXTENSION_NAME,
                 }};
                 create_info.enabledExtensionCount = 1;
                 create_info.ppEnabledExtensionNames = enabled_extensions;
-                if (validate_device_extensions(&create_info) != VK_SUCCESS) {{
-                    fprintf(stderr, "VK_EXT_shader_demote_to_helper_invocation extension enable was rejected\\n");
+                if (validate_device_extensions(&create_info) != VK_ERROR_EXTENSION_NOT_PRESENT) {{
+                    fprintf(stderr, "VK_EXT_shader_demote_to_helper_invocation extension enable was accepted without transport\\n");
                     return 10;
                 }}
+                create_info.enabledExtensionCount = 0;
+                create_info.ppEnabledExtensionNames = NULL;
             #endif
 
                 demote_features.shaderDemoteToHelperInvocation = VK_TRUE;
