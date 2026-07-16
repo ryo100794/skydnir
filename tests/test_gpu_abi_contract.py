@@ -5057,7 +5057,11 @@ class GpuAbiContractTest(unittest.TestCase):
             object_validator,
         )
         self.assertIn(
-            "header->abi_minor != PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR) return 0;",
+            "header->abi_minor != PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR &&",
+            object_validator,
+        )
+        self.assertIn(
+            "header->abi_minor != PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR) return 0;",
             object_validator,
         )
 
@@ -5098,6 +5102,80 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("&image_descriptors[image_descriptor_count++]", materializer)
         self.assertIn("vulkan_dispatch_image_descriptor_type_from_api", materializer)
         self.assertNotIn("v5_frame_range(", materializer)
+
+    def test_vulkan_dispatch_v56_compute_layout_metadata_is_fail_closed(self):
+        executor = GPU_EXECUTOR.read_text()
+        for header_path in [APP_HEADER, CONTAINER_HEADER]:
+            header = header_path.read_text()
+            for marker in [
+                "PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR 6u",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_COMPUTE_LAYOUTS PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR",
+                "PdockerGpuVulkanDispatchV56HeaderExtension",
+                "PdockerGpuVulkanDispatchV56FrameHeader",
+                "PdockerGpuVulkanDispatchV56DescriptorSetLayoutEntry",
+                "PdockerGpuVulkanDispatchV56PipelineLayoutSetEntry",
+                "PdockerGpuVulkanDispatchV56PushConstantRangeEntry",
+            ]:
+                self.assertIn(marker, header)
+
+        header_validator = c_function_body(executor, "validate_vulkan_dispatch_v5_header")
+        self.assertIn("sizeof(PdockerGpuVulkanDispatchV56FrameHeader)", header_validator)
+
+        validator = c_function_body(executor, "validate_vulkan_dispatch_v5_frame_content")
+        for marker in [
+            "PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V56_DESCRIPTOR_SET_LAYOUT_SCHEMA_HASH",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V56_PIPELINE_LAYOUT_SET_SCHEMA_HASH",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V56_PUSH_CONSTANT_RANGE_SCHEMA_HASH",
+            "v5_table_range_valid(ext->descriptor_set_layout_table_offset",
+            "v5_table_range_valid(ext->pipeline_layout_table_offset",
+            "v5_table_range_valid(ext->push_constant_range_table_offset",
+            "V5_RECORD_RANGE(ext->descriptor_set_layout_table_offset",
+            "V5_RECORD_RANGE(ext->pipeline_layout_table_offset",
+            "V5_RECORD_RANGE(ext->push_constant_range_table_offset",
+            "ext->extension_hash != expected_extension_hash",
+        ]:
+            self.assertIn(marker, validator)
+
+        plan = c_function_body(executor, "build_vulkan_dispatch_v5_native_plan")
+        for marker in [
+            "has_v56_compute_layouts",
+            "plan->compute_pipeline_layout_id = ext->pipeline_layout_id;",
+            "plan->compute_descriptor_set_layouts",
+            "plan->compute_pipeline_layout_sets",
+            "plan->compute_push_constant_ranges",
+            "entry->pipeline_layout_id != plan->compute_pipeline_layout_id",
+            "entry->immutable_sampler_count > entry->descriptor_count",
+            "entry->offset > UINT32_MAX - entry->size",
+        ]:
+            self.assertIn(marker, plan)
+
+        materializer = c_function_body(executor, "materialize_vulkan_dispatch_v5_native_plan_bindings")
+        for marker in [
+            "object_tables_out->compute_pipeline_layout_id = plan->compute_pipeline_layout_id;",
+            "object_tables_out->compute_descriptor_set_layouts = plan->compute_descriptor_set_layouts;",
+            "object_tables_out->compute_pipeline_layout_sets = plan->compute_pipeline_layout_sets;",
+            "object_tables_out->compute_push_constant_ranges = plan->compute_push_constant_ranges;",
+        ]:
+            self.assertIn(marker, materializer)
+
+        icd = VULKAN_ICD.read_text()
+        sender = c_function_body(icd, "send_generic_vulkan_dispatch_v5_1_op")
+        for marker in [
+            "executor_supports_vulkan_dispatch_v56_compute_layouts",
+            "compute_pipeline_layout != NULL && need_v55_native_objects",
+            "if (need_v56_compute_layouts) {",
+            "collect_dispatch_v56_pipeline_layout_metadata",
+            "collect_dispatch_v56_pipeline_layout_push_constant_ranges",
+            "PdockerGpuVulkanDispatchV56FrameHeader",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR",
+            "descriptor_set_layout_entries, descriptor_set_layout_table_bytes",
+            "pipeline_layout_set_entries, pipeline_layout_set_table_bytes",
+            "push_constant_range_entries, push_constant_range_table_bytes",
+        ]:
+            self.assertIn(marker, sender)
+        self.assertLess(sender.index("const bool need_v55_native_objects"), sender.index("const bool need_v56_compute_layouts"))
+        self.assertLess(sender.index("const bool need_v56_compute_layouts"), sender.index("collect_dispatch_v56_pipeline_layout_metadata"))
 
     def test_vulkan_dispatch_v5_handler_uses_native_plan_heap_tables_before_run(self):
         executor = GPU_EXECUTOR.read_text()
@@ -5441,8 +5519,15 @@ class GpuAbiContractTest(unittest.TestCase):
             capability_marker,
             "ICD must prove executor V5.2 image-layout-range support before sending abi_minor 2",
         )
-        abi_minor_assignment = "header->abi_minor = need_v55_native_objects"
-        self.assertIn(abi_minor_assignment, sender)
+        abi_minor_assignment_markers = [
+            "header->abi_minor = need_v56_compute_layouts",
+            "header->abi_minor = need_v55_native_objects",
+        ]
+        abi_minor_assignment = next((marker for marker in abi_minor_assignment_markers if marker in sender), None)
+        self.assertIsNotNone(
+            abi_minor_assignment,
+            "ICD must select the dispatch ABI minor only after proving required executor capabilities",
+        )
         self.assertLess(sender.index(capability_marker), sender.index(abi_minor_assignment))
         self.assertRegex(
             sender,
@@ -6103,6 +6188,26 @@ class GpuAbiContractTest(unittest.TestCase):
                 "PDOCKER_GPU_VULKAN_DISPATCH_V55_HEADER_EXTENSION_FIELDS",
                 "PDOCKER_GPU_VULKAN_DISPATCH_V55_HEADER_EXTENSION_FIELD_COUNT",
                 "PDOCKER_GPU_VULKAN_DISPATCH_V55_HEADER_EXTENSION_SCHEMA_HASH",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_DISPATCH_V56_HEADER_EXTENSION_FIELDS",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V56_HEADER_EXTENSION_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V56_HEADER_EXTENSION_SCHEMA_HASH",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_DISPATCH_V56_DESCRIPTOR_SET_LAYOUT_FIELDS",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V56_DESCRIPTOR_SET_LAYOUT_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V56_DESCRIPTOR_SET_LAYOUT_SCHEMA_HASH",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_DISPATCH_V56_PIPELINE_LAYOUT_SET_FIELDS",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V56_PIPELINE_LAYOUT_SET_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V56_PIPELINE_LAYOUT_SET_SCHEMA_HASH",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_DISPATCH_V56_PUSH_CONSTANT_RANGE_FIELDS",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V56_PUSH_CONSTANT_RANGE_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V56_PUSH_CONSTANT_RANGE_SCHEMA_HASH",
             ),
             (
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_FRAME_HEADER_FIELDS",
@@ -16788,7 +16893,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "PdockerGpuVulkanDispatchV54BufferBarrierEntry *buffer_barrier_entries",
             "PdockerGpuVulkanDispatchV54ImageBarrierEntry *image_barrier_entries",
             "executor_supports_vulkan_dispatch_v54_barriers",
-            "header->abi_minor = need_v55_native_objects",
+            "header->abi_minor = need_v56_compute_layouts",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR",
             "PDOCKER_GPU_VULKAN_DISPATCH_V54_ABI_MINOR",
             "need_v54_barriers_or_identity",
             "frame_header_v54->v54.dependency_flags = pre_barrier_dependency_flags",
