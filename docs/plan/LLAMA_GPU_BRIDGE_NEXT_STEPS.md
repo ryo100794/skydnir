@@ -3166,3 +3166,39 @@ explicit V6.2 specialization-entry table cap, not the old 16-entry/256-byte
 local scratch shape.
 
 Validation: `env -u PYTHONPATH python3 -m unittest tests.test_gpu_abi_contract -q`, `bash scripts/build-gpu-shim.sh`, and `bash scripts/build-native-android-ndk.sh`.
+
+### 2026-07-16 Vulkan extension advertisement contract lane
+
+CPU/static pass-through work tightened the public Vulkan extension surface so
+extension names are advertised only when the bridge can either transport the
+corresponding behavior or prove that all observable behavior is conservative
+metadata.  `VK_EXT_custom_border_color` and `VK_EXT_border_color_swizzle` remain
+query/fail-closed internally, but are no longer advertised because the sampler
+ABI does not transport custom border color payloads, component swizzle, or sRGB
+remapping.  Shader layout and memory-model extensions are also gated behind a
+false transport helper because they imply SPIR-V/layout semantics that are not
+yet validated or represented by the executor.  `VK_KHR_shader_float_controls`
+stays advertised with conservative all-false properties, and the Vulkan 1.2
+aggregate properties now explicitly report `VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE`
+for both denorm and rounding independence.
+
+Validation: `env -u PYTHONPATH python3 -m unittest tests.test_gpu_abi_contract -q`,
+`env -u PYTHONPATH python3 -m unittest tests.test_vulkan_icd_feature_chain -q`,
+`bash scripts/build-gpu-shim.sh`, `env -u PYTHONPATH python3 scripts/verify-native-payloads.py`,
+and `./gradlew :app:assembleDebug`.
+
+### 2026-07-16 Vulkan default pipeline robustness stage-pNext lane
+
+The robustness extensions remain advertised because the ICD reports all
+robustness feature bits as `VK_FALSE`, rejects true feature requests, and accepts
+only `DEVICE_DEFAULT` pipeline robustness metadata.  To keep that advertised
+surface compatible without adding new replay semantics, shader-stage pNext
+validation now accepts `VkPipelineRobustnessCreateInfo` only when every behavior
+field is `DEVICE_DEFAULT`; non-default stage robustness still fails closed.  The
+same default-only helper is used for top-level pipeline pNext and shader-stage
+pNext, so no non-default robustness behavior is transported or replayed.
+
+Validation: `env -u PYTHONPATH python3 -m unittest tests.test_gpu_abi_contract -q`,
+`env -u PYTHONPATH python3 -m unittest tests.test_vulkan_icd_feature_chain -q`,
+`bash scripts/build-gpu-shim.sh`, `env -u PYTHONPATH python3 scripts/verify-native-payloads.py`,
+and `./gradlew :app:assembleDebug`.
