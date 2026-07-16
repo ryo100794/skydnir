@@ -10,6 +10,23 @@ llama.cpp itself remains unmodified.
 ## Current Ground Truth
 
 
+### 2026-07-16 CPU/static Q6 workgroup evidence gate lane
+
+The Q6_K artifact verifier now requires a complete workgroup/local-size evidence
+tuple before it can classify a native Q6 mismatch as arithmetic, reduction, or
+output-layout work.  The tuple includes explicit resolved local size, Q6 local
+size, literal SPIR-V local size, LocalSizeId ids, BuiltIn WorkgroupSize spec ids,
+specialization entries, and the guard that `SpecId 1/2` are not WorkgroupSize.y/z.
+`android-llama-gpu-compare.sh` now preserves these executor JSON fields in the
+summary artifact.  The gate is deliberately below descriptor/writeback failures
+and diagnostic-only safe-kernel paths, but above native arithmetic/reduction
+classification.
+
+Evidence: `scripts/verify-llama-gpu-artifact.py`,
+`scripts/android-llama-gpu-compare.sh`,
+`tests.test_llama_gpu_artifact_verifier`; no llama.cpp, Dockerfile, model,
+prompt, or shader-byte changes.
+
 ### 2026-07-16 CPU/static strict descriptor offset invariant lane
 
 The strict Vulkan descriptor transport contract was tightened without changing

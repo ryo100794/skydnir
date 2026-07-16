@@ -6409,8 +6409,25 @@ q6_workgroup_diagnostics = {
     "q6_final_store_pre_barrier_inserted": q6_latest.get("q6_final_store_pre_barrier_inserted"),
     "expected_local_size": q6_expected_local_size,
     "local_size": q6_latest.get("spirv_local_size"),
+    "spirv_local_size": q6_latest.get("spirv_local_size"),
+    "spirv_local_size_id": q6_latest.get("spirv_local_size_id"),
+    "spirv_local_size_spec_id": q6_latest.get("spirv_local_size_spec_id"),
+    "spirv_workgroup_size_spec_id": q6_latest.get("spirv_workgroup_size_spec_id"),
     "local_size_resolved": q6_latest.get("spirv_local_size_resolved"),
+    "spirv_local_size_resolved": q6_latest.get("spirv_local_size_resolved"),
     "local_size_consistent": q6_latest.get("spirv_local_size_consistent"),
+    "specialization_entries": (
+        q6_latest.get("specialization_entries")
+        if isinstance(q6_latest.get("specialization_entries"), list)
+        else []
+    ),
+    "source_spirv_hash": q6_latest.get("source_spirv_hash"),
+    "effective_spirv_hash": q6_latest.get("effective_spirv_hash"),
+    "pipeline_spirv_hash": (
+        q6_latest.get("pipeline_key", {}).get("spirv_hash")
+        if isinstance(q6_latest.get("pipeline_key"), dict)
+        else None
+    ),
     "q6_local_size": q6_latest_partial.get("q6_local_size"),
     "q6_local_invocations": q6_latest_partial.get("q6_local_invocations"),
     "q6_accum_mask": q6_latest_partial.get("q6_accum_mask"),

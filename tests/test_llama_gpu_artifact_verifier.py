@@ -190,7 +190,27 @@ def speedup_sections(speedup=2.0, target_met=True, cpu_tps=0.1, gpu_tps=0.2):
 
 def q6_verified_writeback(hash_value="0x1111111111111111"):
     return {
+        "local_size": [1, 1, 1],
+        "spirv_local_size": [1, 1, 1],
+        "spirv_local_size_id": [0, 0, 0],
+        "spirv_local_size_spec_id": [4294967295, 4294967295, 4294967295],
+        "spirv_workgroup_size_spec_id": [0, 4294967295, 4294967295],
+        "specialization_entries": [
+            {"constant_id": 0, "offset": 0, "size": 4, "value_u64": 32},
+            {"constant_id": 1, "offset": 4, "size": 4, "value_u64": 1},
+            {"constant_id": 2, "offset": 8, "size": 4, "value_u64": 1},
+        ],
         "local_size_resolved": [32, 1, 1],
+        "spirv_local_size_resolved": [32, 1, 1],
+        "q6_local_size": [32, 1, 1],
+        "local_size_consistent": True,
+        "q6_workgroup_specialization_interpretation": {
+            "spec_id_0": "WorkgroupSize.x / Q6 lane count",
+            "spec_id_1": "Q6 row-count/data-loop dimension; not WorkgroupSize.y",
+            "spec_id_2": "Q6 column/count dimension; not WorkgroupSize.z",
+            "do_not_patch_local_size_y_from_spec_id_1": True,
+            "do_not_patch_local_size_z_from_spec_id_2": True,
+        },
         "q6_writeback_verified_all": True,
         "q6_row_indexed_sample_indices": [257],
         "q6_row_indexed_writeback_verified": True,
@@ -1385,14 +1405,15 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                     "runtime_freshness": runtime_marker(),
                     "config_propagation": passing_config_propagation(),
                     "q6_workgroup_diagnostics": {
+                        **q6_verified_writeback(),
                         "event_count": 2,
                         "workgroup_shape_blocker": False,
                         "latest_status": "mismatch",
                         "local_size_resolved": [32, 64, 1],
+                        "spirv_local_size_resolved": [32, 64, 1],
                         "q6_local_size": [32, 64, 1],
                         "q6_num_rows": 64,
                         "q6_num_cols": 4,
-                        **q6_verified_writeback(),
                     },
                 },
                 "correctness": gpu_correctness_report("fail", required_failures=1, passed=False, content="4"),
@@ -1619,6 +1640,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                     "runtime_freshness": runtime_marker(),
                     "config_propagation": q6_env_gap_config_propagation(),
                     "q6_workgroup_diagnostics": {
+                        **q6_verified_writeback(),
                         "event_count": 1,
                         "latest_status": "match",
                         "local_size": [1, 1, 1],
@@ -1626,7 +1648,6 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                         "local_size_consistent": False,
                         "q6_local_size": [32, 1, 1],
                         "local_size_patched": False,
-                        **q6_verified_writeback(),
                     },
                 },
                 "correctness": gpu_correctness_report("pass"),
@@ -3028,16 +3049,17 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                     "runtime_freshness": runtime_marker(),
                     "config_propagation": passing_config_propagation(),
                     "q6_workgroup_diagnostics": {
+                        **q6_verified_writeback(),
                         "event_count": 1,
                         "workgroup_shape_blocker": False,
                         "latest_status": "mismatch",
                         "local_size_resolved": [64, 1, 1],
+                        "spirv_local_size_resolved": [64, 1, 1],
                         "q6_local_size": [32, 1, 1],
                         "local_size_consistent": False,
                         "q6_shader_like_abs_delta": 0.0,
                         "q6_shader_like_64_abs_delta": 0.0,
                         "q6_shader_like_oracle_cleared": True,
-                        **q6_verified_writeback(),
                     },
                 },
                 "correctness": gpu_correctness_report("fail", required_failures=1, passed=False, content="4"),
@@ -3081,6 +3103,137 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         report = json.loads(result.stdout)
         self.assertEqual(report["classification"], "q6-workgroup-shape-blocker")
 
+    def test_q6_missing_workgroup_specialization_evidence_blocks_arithmetic_classification(self):
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": passing_config_propagation(),
+                    "q6_workgroup_diagnostics": {
+                        "event_count": 1,
+                        "workgroup_shape_blocker": False,
+                        "latest_status": "mismatch",
+                        "blocker_class": "q6-arithmetic-reduction-or-output-layout",
+                        "q6_shader_like_abs_delta": 0.5,
+                        **q6_verified_writeback(),
+                    },
+                },
+                "correctness": gpu_correctness_report("fail", required_failures=1, passed=False, content="4"),
+            },
+            "cpu": {"tokens_per_second": 0.1},
+            **speedup_sections(speedup=0.5, target_met=False, cpu_tps=0.1, gpu_tps=0.05),
+        }
+        payload["gpu"]["diagnostics"]["q6_workgroup_diagnostics"].pop(
+            "q6_workgroup_specialization_interpretation"
+        )
+        result = self.run_verifier(payload, "--require-q6-workgroup-clear")
+        self.assertEqual(result.returncode, 31, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "q6-workgroup-shape-blocker")
+        self.assertEqual(report["q6_effective_blocker_class"], "q6-workgroup-evidence-missing")
+        self.assertIn(
+            "q6_workgroup_specialization_interpretation",
+            report["q6_workgroup_evidence_status"]["missing"],
+        )
+        self.assertNotEqual(
+            report["q6_effective_blocker_class"],
+            "q6-arithmetic-reduction-or-output-layout",
+        )
+
+    def test_q6_missing_required_workgroup_tuple_fields_block_arithmetic_classification(self):
+        for missing_field in (
+            "spirv_local_size_id",
+            "spirv_workgroup_size_spec_id",
+            "specialization_entries",
+        ):
+            with self.subTest(missing_field=missing_field):
+                payload = {
+                    "schema": "pdocker.llama.gpu.compare.v1",
+                    "gpu": {
+                        "diagnostics": {
+                            "runtime_freshness": runtime_marker(),
+                            "config_propagation": passing_config_propagation(),
+                            "q6_workgroup_diagnostics": {
+                                "event_count": 1,
+                                "workgroup_shape_blocker": False,
+                                "latest_status": "mismatch",
+                                "blocker_class": "q6-arithmetic-reduction-or-output-layout",
+                                "q6_shader_like_abs_delta": 0.5,
+                                **q6_verified_writeback(),
+                            },
+                        },
+                        "correctness": gpu_correctness_report("fail", required_failures=1, passed=False, content="4"),
+                    },
+                    "cpu": {"tokens_per_second": 0.1},
+                    **speedup_sections(speedup=0.5, target_met=False, cpu_tps=0.1, gpu_tps=0.05),
+                }
+                payload["gpu"]["diagnostics"]["q6_workgroup_diagnostics"].pop(missing_field)
+                result = self.run_verifier(payload, "--require-q6-workgroup-clear")
+                self.assertEqual(result.returncode, 31, result.stdout)
+                report = json.loads(result.stdout)
+                self.assertEqual(report["classification"], "q6-workgroup-shape-blocker")
+                self.assertEqual(report["q6_effective_blocker_class"], "q6-workgroup-evidence-missing")
+                self.assertIn(missing_field, report["q6_workgroup_evidence_status"]["missing"])
+
+    def test_q6_malformed_specialization_entries_block_arithmetic_classification(self):
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": passing_config_propagation(),
+                    "q6_workgroup_diagnostics": {
+                        "event_count": 1,
+                        "workgroup_shape_blocker": False,
+                        "latest_status": "mismatch",
+                        "blocker_class": "q6-arithmetic-reduction-or-output-layout",
+                        "q6_shader_like_abs_delta": 0.5,
+                        **q6_verified_writeback(),
+                        "specialization_entries": [{"constant_id": 0, "value_u64": 16}],
+                    },
+                },
+                "correctness": gpu_correctness_report("fail", required_failures=1, passed=False, content="4"),
+            },
+            "cpu": {"tokens_per_second": 0.1},
+            **speedup_sections(speedup=0.5, target_met=False, cpu_tps=0.1, gpu_tps=0.05),
+        }
+        result = self.run_verifier(payload, "--require-q6-workgroup-clear")
+        self.assertEqual(result.returncode, 31, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "q6-workgroup-shape-blocker")
+        self.assertEqual(report["q6_effective_blocker_class"], "q6-workgroup-evidence-contradictory")
+        self.assertIn("constant-id-0-value-does-not-match-workgroup-x", json.dumps(report["q6_workgroup_evidence_status"]))
+
+    def test_q6_contradictory_workgroup_spec_id_evidence_blocks_arithmetic_classification(self):
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": passing_config_propagation(),
+                    "q6_workgroup_diagnostics": {
+                        "event_count": 1,
+                        "workgroup_shape_blocker": False,
+                        "latest_status": "mismatch",
+                        "blocker_class": "q6-arithmetic-reduction-or-output-layout",
+                        "q6_shader_like_abs_delta": 0.5,
+                        **q6_verified_writeback(),
+                        "spirv_workgroup_size_spec_id": [0, "bad", 2],
+                    },
+                },
+                "correctness": gpu_correctness_report("fail", required_failures=1, passed=False, content="4"),
+            },
+            "cpu": {"tokens_per_second": 0.1},
+            **speedup_sections(speedup=0.5, target_met=False, cpu_tps=0.1, gpu_tps=0.05),
+        }
+        result = self.run_verifier(payload, "--require-q6-workgroup-clear")
+        self.assertEqual(result.returncode, 31, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "q6-workgroup-shape-blocker")
+        self.assertEqual(report["q6_effective_blocker_class"], "q6-workgroup-evidence-contradictory")
+        self.assertIn("spirv_workgroup_size_spec_id", json.dumps(report["q6_workgroup_evidence_status"]))
+
     def test_q6_32x1x1_num_rows_nonzero_shader_like_delta_remains_arithmetic_boundary(self):
         payload = {
             "schema": "pdocker.llama.gpu.compare.v1",
@@ -3123,8 +3276,14 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                         "latest_status": "mismatch",
                         **q6_verified_writeback(),
                         "local_size_resolved": [64, 1, 1],
+                        "spirv_local_size_resolved": [64, 1, 1],
                         "local_size": [64, 1, 1],
                         "q6_local_size": [64, 1, 1],
+                        "specialization_entries": [
+                            {"constant_id": 0, "offset": 0, "size": 4, "value_u64": 64},
+                            {"constant_id": 1, "offset": 4, "size": 4, "value_u64": 1},
+                            {"constant_id": 2, "offset": 8, "size": 4, "value_u64": 1},
+                        ],
                         "local_size_consistent": True,
                         "q6_shader_like_abs_delta": 0.5,
                         "q6_shader_like_64_abs_delta": 0.0,

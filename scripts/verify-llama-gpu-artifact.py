@@ -896,6 +896,41 @@ def _integer_list(value: Any) -> list[int] | None:
     return result
 
 
+
+def _integer_list_exact(value: Any, length: int = 3) -> list[int] | None:
+    result = _integer_list(value)
+    if result is None or len(result) != length:
+        return None
+    return result
+
+
+def _u64_from_entry(entry: dict[str, Any]) -> int | None:
+    for key in ("value_u64", "value", "u64"):
+        if key not in entry:
+            continue
+        try:
+            value = int(entry.get(key))
+        except (TypeError, ValueError):
+            continue
+        if value >= 0:
+            return value
+    return None
+
+
+def _q6_specialization_entry_value(entries: Any, constant_id: int) -> int | None:
+    if not isinstance(entries, list):
+        return None
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            candidate = int(entry.get("constant_id", entry.get("spec_id")))
+        except (TypeError, ValueError):
+            continue
+        if candidate == constant_id:
+            return _u64_from_entry(entry)
+    return None
+
 def _f32_samples_by_index(value: Any) -> dict[int, float] | None:
     if not isinstance(value, list) or not value:
         return None
@@ -2205,6 +2240,190 @@ def _q6_workgroup_shape_blocked(q6: Any) -> bool:
     return not _q6_required_local_size_clear(q6)
 
 
+def _q6_workgroup_evidence_status(q6: Any) -> dict[str, Any]:
+    required_fields = [
+        "local_size_resolved",
+        "q6_local_size",
+        "local_size_consistent",
+        "q6_workgroup_specialization_interpretation",
+        "local_size|spirv_local_size",
+        "spirv_local_size_id",
+        "spirv_workgroup_size_spec_id",
+        "specialization_entries",
+    ]
+    if not isinstance(q6, dict):
+        return {
+            "summary": "fail",
+            "evidence_failure": True,
+            "missing": ["gpu.diagnostics.q6_workgroup_diagnostics"],
+            "contradictions": [],
+            "evidence_contradictions": [],
+            "required_fields": required_fields,
+        }
+
+    missing: list[str] = []
+    contradictions: list[dict[str, Any]] = []
+    native_q6_workgroup = not _q6_safe_kernel_enabled(q6)
+
+    local_size = _integer_list_exact(q6.get("local_size_resolved"))
+    q6_local_size = _integer_list_exact(q6.get("q6_local_size"))
+    expected = _q6_expected_local_size(q6)
+    literal_local_size = _integer_list_exact(q6.get("spirv_local_size"))
+    if literal_local_size is None:
+        literal_local_size = _integer_list_exact(q6.get("local_size"))
+    local_size_id = _integer_list_exact(q6.get("spirv_local_size_id"))
+    workgroup_size_spec_id = _integer_list_exact(q6.get("spirv_workgroup_size_spec_id"))
+    specialization_entries = q6.get("specialization_entries")
+    interpretation = q6.get("q6_workgroup_specialization_interpretation")
+
+    if "local_size_resolved" not in q6:
+        missing.append("local_size_resolved")
+    elif local_size is None:
+        contradictions.append({
+            "field": "local_size_resolved",
+            "reason": "not-length-3-integer-list",
+            "value": q6.get("local_size_resolved"),
+        })
+    if q6_local_size is None:
+        missing.append("q6_local_size")
+    if not isinstance(q6.get("local_size_consistent"), bool):
+        missing.append("local_size_consistent")
+    if not isinstance(interpretation, dict):
+        missing.append("q6_workgroup_specialization_interpretation")
+    if "spirv_local_size" not in q6 and "local_size" not in q6:
+        missing.append("local_size|spirv_local_size")
+    elif literal_local_size is None:
+        contradictions.append({
+            "field": "local_size|spirv_local_size",
+            "reason": "not-length-3-integer-list",
+            "spirv_local_size": q6.get("spirv_local_size"),
+            "local_size": q6.get("local_size"),
+        })
+    if "spirv_local_size_id" not in q6:
+        missing.append("spirv_local_size_id")
+    elif local_size_id is None:
+        contradictions.append({
+            "field": "spirv_local_size_id",
+            "reason": "not-length-3-integer-list",
+            "value": q6.get("spirv_local_size_id"),
+        })
+    if "spirv_workgroup_size_spec_id" not in q6:
+        missing.append("spirv_workgroup_size_spec_id")
+    elif workgroup_size_spec_id is None:
+        contradictions.append({
+            "field": "spirv_workgroup_size_spec_id",
+            "reason": "not-length-3-integer-list",
+            "value": q6.get("spirv_workgroup_size_spec_id"),
+        })
+    if "specialization_entries" not in q6:
+        missing.append("specialization_entries")
+    elif not isinstance(specialization_entries, list):
+        contradictions.append({
+            "field": "specialization_entries",
+            "reason": "not-list",
+            "value": specialization_entries,
+        })
+
+    for key in ("local_size", "spirv_local_size", "spirv_local_size_resolved"):
+        value = q6.get(key)
+        if value is not None and _integer_list_exact(value) is None:
+            contradictions.append({"field": key, "reason": "not-length-3-integer-list", "value": value})
+    if isinstance(specialization_entries, list) and any(not isinstance(item, dict) for item in specialization_entries):
+        contradictions.append({
+            "field": "specialization_entries",
+            "reason": "contains-non-object",
+        })
+
+    if q6.get("local_size_consistent") is False:
+        contradictions.append({
+            "field": "local_size_consistent",
+            "reason": "reported-false",
+            "value": False,
+        })
+    if local_size is not None and q6_local_size is not None and local_size != q6_local_size:
+        contradictions.append({
+            "field": "q6_local_size",
+            "reason": "differs-from-resolved-local-size",
+            "local_size_resolved": local_size,
+            "q6_local_size": q6_local_size,
+        })
+    if local_size is not None and expected is not None and local_size != expected:
+        contradictions.append({
+            "field": "local_size_resolved",
+            "reason": "differs-from-expected-local-size",
+            "local_size_resolved": local_size,
+            "expected_local_size": expected,
+        })
+    if _q6_local_size_looks_contaminated_by_q6_shape(q6):
+        contradictions.append({
+            "field": "local_size_resolved",
+            "reason": "contaminated-by-q6-row-or-column-count",
+            "local_size_resolved": local_size,
+            "q6_num_rows": q6.get("q6_num_rows"),
+            "q6_num_cols": q6.get("q6_num_cols"),
+        })
+
+    if isinstance(interpretation, dict):
+        if interpretation.get("do_not_patch_local_size_y_from_spec_id_1") is not True:
+            contradictions.append({
+                "field": "q6_workgroup_specialization_interpretation",
+                "reason": "missing-spec-id-1-not-workgroup-y-guard",
+            })
+        if interpretation.get("do_not_patch_local_size_z_from_spec_id_2") is not True:
+            contradictions.append({
+                "field": "q6_workgroup_specialization_interpretation",
+                "reason": "missing-spec-id-2-not-workgroup-z-guard",
+            })
+
+    spec0_value = _q6_specialization_entry_value(specialization_entries, 0)
+    if native_q6_workgroup:
+        if workgroup_size_spec_id is not None and workgroup_size_spec_id[0] != 0:
+            contradictions.append({
+                "field": "spirv_workgroup_size_spec_id",
+                "reason": "workgroup-x-spec-id-is-not-zero",
+                "spirv_workgroup_size_spec_id": workgroup_size_spec_id,
+            })
+        if isinstance(specialization_entries, list) and spec0_value is None:
+            missing.append("specialization_entries.constant_id_0")
+        elif spec0_value is not None and local_size is not None and spec0_value != local_size[0]:
+            contradictions.append({
+                "field": "specialization_entries",
+                "reason": "constant-id-0-value-does-not-match-workgroup-x",
+                "constant_id": 0,
+                "value_u64": spec0_value,
+                "expected_value_u64": local_size[0],
+            })
+
+    evidence_contradictions = [
+        item for item in contradictions
+        if item.get("reason") in {
+            "not-length-3-integer-list",
+            "contains-non-object",
+            "not-list",
+            "differs-from-resolved-local-size",
+            "missing-spec-id-1-not-workgroup-y-guard",
+            "missing-spec-id-2-not-workgroup-z-guard",
+            "workgroup-x-spec-id-is-not-zero",
+            "constant-id-0-value-does-not-match-workgroup-x",
+        }
+    ]
+    return {
+        "summary": "fail" if missing or contradictions else "pass",
+        "evidence_failure": bool(missing or evidence_contradictions),
+        "missing": missing,
+        "contradictions": contradictions,
+        "evidence_contradictions": evidence_contradictions,
+        "required_fields": required_fields,
+        "local_size_resolved": local_size,
+        "literal_local_size": literal_local_size,
+        "spirv_local_size_id": local_size_id,
+        "spirv_workgroup_size_spec_id": workgroup_size_spec_id,
+        "specialization_constant_0_value": spec0_value,
+        "q6_local_size": q6_local_size,
+        "expected_local_size": expected,
+    }
+
+
 def _q6_workgroup_env_gap(
     runtime_env_manifest: dict[str, Any],
     config_propagation: dict[str, Any],
@@ -3090,6 +3309,7 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
     q6_output_index_probe = _q6_output_index_probe(q6)
     q6_output_index_probe_summary = str(q6_output_index_probe.get("summary") or "not-run")
     q6_workgroup_env_gap = _q6_workgroup_env_gap(runtime_env_manifest, config_propagation)
+    q6_workgroup_evidence_status = _q6_workgroup_evidence_status(q6)
     q6_native_vs_writeback_split = (
         q6.get("q6_native_vs_writeback_split")
         if isinstance(q6.get("q6_native_vs_writeback_split"), dict)
@@ -3115,10 +3335,31 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
             data.get("next_action")
             or "fix compare/executor evidence retention so every observed Q6_K/final-projection dispatch carries CPU-oracle diagnostics"
         )
+    elif _q6_safe_kernel_enabled(q6) and q6.get("latest_status") == "match":
+        classification = "q6-safe-kernel-diagnostic-only"
+        responsibility_boundary = "q6-diagnostic-evidence"
+        q6_blocker_class = "q6-safe-kernel-diagnostic-only"
+        next_action = (
+            data.get("next_action")
+            or "rerun with the native Q6_K kernel; q6k_safe_kernel is diagnostic-only and cannot support native Q6 correctness or benchmark claims"
+        )
     elif _q6_workgroup_shape_blocked(q6):
         classification = "q6-workgroup-shape-blocker"
         responsibility_boundary = "q6-local-size"
-        if q6_workgroup_env_gap.get("summary") == "fail":
+        if q6_workgroup_evidence_status.get("evidence_failure"):
+            if q6_workgroup_evidence_status.get("missing"):
+                q6_blocker_class = "q6-workgroup-evidence-missing"
+                next_action = (
+                    "rerun or fix artifact emission so Q6 workgroup evidence fields are present before "
+                    "interpreting arithmetic/reduction: "
+                    + ",".join(q6_workgroup_evidence_status["missing"])
+                )
+            else:
+                q6_blocker_class = "q6-workgroup-evidence-contradictory"
+                next_action = (
+                    "fix contradictory Q6 workgroup/local-size evidence before interpreting arithmetic/reduction"
+                )
+        elif q6_workgroup_env_gap.get("summary") == "fail":
             q6_blocker_class = "q6-workgroup-env-not-requested"
             next_action = (
                 "rerun via scripts/android-llama-gpu-q6-workgroup-run.sh or the "
@@ -3155,14 +3396,6 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
             data.get("next_action")
             or "rerun the native Q6_K module without probe-effective replay before accepting correctness or benchmark claims"
         )
-    elif _q6_safe_kernel_enabled(q6) and q6.get("latest_status") == "match":
-        classification = "q6-safe-kernel-diagnostic-only"
-        responsibility_boundary = "q6-diagnostic-evidence"
-        q6_blocker_class = "q6-safe-kernel-diagnostic-only"
-        next_action = (
-            data.get("next_action")
-            or "rerun with the native Q6_K kernel; q6k_safe_kernel is diagnostic-only and cannot support native Q6 correctness or benchmark claims"
-        )
     elif _q6_compat_rewrite_used(q6) and q6.get("latest_status") == "match":
         classification = "q6-compat-rewrite-diagnostic-only"
         responsibility_boundary = "q6-diagnostic-evidence"
@@ -3190,6 +3423,19 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
             data.get("next_action")
             or "rerun with original/effective/executable SPIR-V identity preserved; shader mutations cannot support pass-through correctness or benchmark claims"
         )
+    elif q6_workgroup_evidence_status.get("evidence_failure"):
+        classification = "q6-workgroup-shape-blocker"
+        responsibility_boundary = "q6-local-size"
+        if q6_workgroup_evidence_status.get("missing"):
+            q6_blocker_class = "q6-workgroup-evidence-missing"
+            next_action = (
+                "rerun or fix artifact emission so Q6 workgroup evidence fields are present before "
+                "interpreting arithmetic/reduction: "
+                + ",".join(q6_workgroup_evidence_status["missing"])
+            )
+        else:
+            q6_blocker_class = "q6-workgroup-evidence-contradictory"
+            next_action = "fix contradictory Q6 workgroup/local-size evidence before interpreting arithmetic/reduction"
     elif q6.get("latest_status") == "match":
         classification = "q6-workgroup-cleared-and-oracle-match"
         responsibility_boundary = "q6-oracle-match"
@@ -3366,6 +3612,7 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
         "q6_output_index_probe": q6_output_index_probe,
         "q6_output_index_probe_summary": q6_output_index_probe_summary,
         "q6_workgroup_env_gap": q6_workgroup_env_gap,
+        "q6_workgroup_evidence_status": q6_workgroup_evidence_status,
         "q6_row_provenance_probe": q6_row_provenance,
         "q6_partial_signature_probe": q6_partial_signature,
         "q6_debug_binding_alias_safety": q6_debug_binding_alias_safety,

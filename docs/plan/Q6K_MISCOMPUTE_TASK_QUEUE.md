@@ -343,7 +343,7 @@ Next task if failed:
 
 ### Q6K-007: Workgroup/local-size contract lock
 
-Status: closed for analyzer support, open for verifier/runtime hard gate.
+Status: closed for analyzer support and verifier/runtime summary hard gate.
 
 Purpose: stop the investigation from oscillating between stale `[32,2,1]`,
 current `[32,1,1]`, literal `[1,1,1]`, and specialization-derived workgroup
@@ -356,20 +356,35 @@ Acceptance:
 - [x] native-vs-effective comparison records that effective
   `0xe38f6a6a906d765c` is the local-size legalized form of source
   `0x1bf751845c5dce75`;
-- [ ] the artifact verifier must classify missing or contradictory workgroup
-  evidence before arithmetic/reduction classifications;
-- the artifact records literal local size, LocalSizeId ids, BuiltIn
-  WorkgroupSize ids, specialization constant ids, specialization values, and
-  resolved local size for the same native Q6 dispatch;
-- the verifier classifies missing or contradictory workgroup evidence before
-  arithmetic/reduction classifications;
-- docs and task queue name exactly which tuple is used for the current lane and
-  why.
+- [x] `scripts/android-llama-gpu-compare.sh` carries the executor JSON
+  workgroup tuple into `gpu.diagnostics.q6_workgroup_diagnostics` instead of
+  dropping it at summary time;
+- [x] `scripts/verify-llama-gpu-artifact.py` emits
+  `q6_workgroup_evidence_status` and classifies missing or contradictory
+  workgroup evidence before native Q6 arithmetic/reduction classifications;
+- [x] the verifier does not let this evidence gate mask earlier writeback
+  failures or diagnostic-only safe-kernel paths.
+
+Current required tuple for the native Q6 lane:
+
+- `local_size_resolved` and `q6_local_size`, both length-3 integer lists;
+- `local_size_consistent` boolean;
+- literal `local_size` or `spirv_local_size`;
+- `spirv_local_size_id`;
+- `spirv_workgroup_size_spec_id`;
+- `specialization_entries`, including the WorkgroupSize.x specialization value;
+- `q6_workgroup_specialization_interpretation` with explicit guards that
+  `SpecId 1` and `SpecId 2` are not silently treated as WorkgroupSize.y/z.
+
+The gate is intentionally placed after descriptor/writeback checks and after
+diagnostic-only safe-kernel classification, but before accepting any
+`q6-workgroup-cleared-but-oracle-mismatch` arithmetic/reduction boundary.
 
 Next task if failed:
 
-- Add analyzer/compare support for specialization-resolved local size before
-  another device run is interpreted.
+- Fix the artifact emitter or verifier tuple validation before another device
+  run is interpreted.  Do not classify native Q6 arithmetic/reduction from an
+  artifact that lacks this tuple.
 
 ### Q6K-008: Runtime descriptor offset invariant gate
 
