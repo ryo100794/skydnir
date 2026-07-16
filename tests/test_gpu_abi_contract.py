@@ -10341,6 +10341,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETERS_FEATURES", icd)
         self.assertIn("p->shaderDrawParameters = VK_FALSE", icd)
         self.assertIn("supported = !p->shaderDrawParameters", icd)
+        self.assertIn("pdocker_supports_shader_draw_parameters_transport", icd)
+        self.assertIn("if (pdocker_supports_shader_draw_parameters_transport())", collector_body)
         self.assertIn("ADD_DEVICE_EXTENSION(VK_KHR_SHADER_DRAW_PARAMETERS_EXTENSION_NAME", collector_body)
         self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_INT64_FEATURES", icd)
         self.assertIn("p->shaderBufferInt64Atomics = VK_FALSE", icd)

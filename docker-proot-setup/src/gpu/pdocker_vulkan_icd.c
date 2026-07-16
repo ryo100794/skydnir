@@ -22449,6 +22449,10 @@ static bool pdocker_supports_variable_pointers_transport(void) {
     return false;
 }
 
+static bool pdocker_supports_shader_draw_parameters_transport(void) {
+    return false;
+}
+
 static bool pdocker_supports_shader_atomic_int64_transport(void) {
     return false;
 }
@@ -22527,8 +22531,10 @@ static uint32_t collect_advertised_device_extensions(
     }
 #endif
 #ifdef VK_KHR_SHADER_DRAW_PARAMETERS_EXTENSION_NAME
-    ADD_DEVICE_EXTENSION(VK_KHR_SHADER_DRAW_PARAMETERS_EXTENSION_NAME,
-                         VK_KHR_SHADER_DRAW_PARAMETERS_SPEC_VERSION);
+    if (pdocker_supports_shader_draw_parameters_transport()) {
+        ADD_DEVICE_EXTENSION(VK_KHR_SHADER_DRAW_PARAMETERS_EXTENSION_NAME,
+                             VK_KHR_SHADER_DRAW_PARAMETERS_SPEC_VERSION);
+    }
 #endif
 #ifdef VK_KHR_SHADER_ATOMIC_INT64_EXTENSION_NAME
     if (pdocker_supports_shader_atomic_int64_transport()) {

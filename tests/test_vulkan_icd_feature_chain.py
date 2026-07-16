@@ -3447,10 +3447,9 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 const char *shader_draw_extensions[] = {{ VK_KHR_SHADER_DRAW_PARAMETERS_EXTENSION_NAME }};
                 create_info.enabledExtensionCount = 1;
                 create_info.ppEnabledExtensionNames = shader_draw_extensions;
-                if (!device_extension_advertised_name(VK_KHR_SHADER_DRAW_PARAMETERS_EXTENSION_NAME) ||
-                    validate_device_extensions(&create_info) != VK_SUCCESS ||
-                    validate_device_feature_requests(&create_info) != VK_SUCCESS) {{
-                    fprintf(stderr, "VK_KHR_shader_draw_parameters false-only enable failed\\n");
+                if (device_extension_advertised_name(VK_KHR_SHADER_DRAW_PARAMETERS_EXTENSION_NAME) ||
+                    validate_device_extensions(&create_info) != VK_ERROR_EXTENSION_NOT_PRESENT) {{
+                    fprintf(stderr, "VK_KHR_shader_draw_parameters was accepted without transport\\n");
                     return 12;
                 }}
             #endif
