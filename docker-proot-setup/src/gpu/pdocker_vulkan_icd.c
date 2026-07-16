@@ -22403,6 +22403,10 @@ static bool pdocker_supports_memory_priority_transport(void) {
     return false;
 }
 
+static bool pdocker_supports_dynamic_rendering_local_read_transport(void) {
+    return false;
+}
+
 static bool pdocker_supports_debug_marker_transport(void) {
     return false;
 }
@@ -22572,8 +22576,10 @@ static uint32_t collect_advertised_device_extensions(
     if (advertised_dynamic_rendering()) {
         ADD_DEVICE_EXTENSION(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME, VK_KHR_DYNAMIC_RENDERING_SPEC_VERSION);
 #ifdef VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME
-        ADD_DEVICE_EXTENSION(VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME,
-                             VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_SPEC_VERSION);
+        if (pdocker_supports_dynamic_rendering_local_read_transport()) {
+            ADD_DEVICE_EXTENSION(VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME,
+                                 VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_SPEC_VERSION);
+        }
 #endif
     }
     if (advertised_load_store_op_none()) {

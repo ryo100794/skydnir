@@ -8605,6 +8605,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VK_IMAGE_LAYOUT_RENDERING_LOCAL_READ", icd)
 
         collector_body = c_function_body(icd, "collect_advertised_device_extensions")
+        self.assertIn("pdocker_supports_dynamic_rendering_local_read_transport", icd)
+        self.assertIn("if (pdocker_supports_dynamic_rendering_local_read_transport())", collector_body)
         self.assertIn("ADD_DEVICE_EXTENSION(VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME", collector_body)
 
         features_body = c_function_body(icd, "fill_pnext_features")
