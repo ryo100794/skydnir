@@ -10,6 +10,22 @@ llama.cpp itself remains unmodified.
 ## Current Ground Truth
 
 
+### 2026-07-16 CPU/static Q6 workgroup no-fallback lane
+
+The Q6 workgroup/local-size evidence path now treats missing resolved local size
+or missing Q6 local size as evidence loss, not as a value to infer from another
+field.  The verifier no longer falls back from `local_size_resolved` to literal
+`local_size`, native-Q6 expected shape no longer falls back to the resolved value
+when `q6_local_size` is absent, and the compare driver records
+`q6_workgroup_evidence_missing` plus a shape blocker before raw arithmetic or
+reduction classifications can self-consistently pass on incomplete evidence.
+This remains CPU/static artifact-contract work; no llama.cpp, Dockerfile, model,
+prompt, or shader-byte changes.
+
+Evidence: `scripts/verify-llama-gpu-artifact.py`,
+`scripts/android-llama-gpu-compare.sh`, `tests.test_llama_gpu_artifact_verifier`,
+`tests.test_gpu_abi_contract`.
+
 ### 2026-07-16 CPU/static Vulkan submit/idle fail-closed lane
 
 The container-side Vulkan ICD now rejects untracked submit completion and

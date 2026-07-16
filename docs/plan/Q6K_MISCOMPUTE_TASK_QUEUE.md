@@ -368,6 +368,8 @@ Acceptance:
 Current required tuple for the native Q6 lane:
 
 - `local_size_resolved` and `q6_local_size`, both length-3 integer lists;
+  neither value may be synthesized from the other or from literal SPIR-V
+  `local_size`;
 - `local_size_consistent` boolean;
 - literal `local_size` or `spirv_local_size`;
 - `spirv_local_size_id`;
@@ -379,6 +381,9 @@ Current required tuple for the native Q6 lane:
 The gate is intentionally placed after descriptor/writeback checks and after
 diagnostic-only safe-kernel classification, but before accepting any
 `q6-workgroup-cleared-but-oracle-mismatch` arithmetic/reduction boundary.
+A native Q6 artifact with missing `q6_local_size`, missing
+`local_size_resolved`, or no specialization entry for WorkgroupSize.x/SpecId 0
+must remain a workgroup evidence blocker, not an arithmetic/reduction result.
 
 Next task if failed:
 

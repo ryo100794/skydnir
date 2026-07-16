@@ -6091,12 +6091,37 @@ q6_expected_local_size = (
     if q6_safe_kernel_used
     else q6_partial_local_size
     if isinstance(q6_partial_local_size, list)
-    else q6_local_size_resolved
+    else None
 )
+q6_workgroup_evidence_missing = []
+if q6_latest and not q6_safe_kernel_used:
+    if not isinstance(q6_local_size_resolved, list):
+        q6_workgroup_evidence_missing.append("local_size_resolved")
+    if not isinstance(q6_partial_local_size, list):
+        q6_workgroup_evidence_missing.append("q6_local_size")
+    if not isinstance(q6_latest.get("spirv_local_size"), list):
+        q6_workgroup_evidence_missing.append("spirv_local_size")
+    if not isinstance(q6_latest.get("spirv_local_size_id"), list):
+        q6_workgroup_evidence_missing.append("spirv_local_size_id")
+    if not isinstance(q6_latest.get("spirv_workgroup_size_spec_id"), list):
+        q6_workgroup_evidence_missing.append("spirv_workgroup_size_spec_id")
+    if not isinstance(q6_latest.get("spirv_local_size_consistent"), bool):
+        q6_workgroup_evidence_missing.append("local_size_consistent")
+    specialization_entries_for_shape = q6_latest.get("specialization_entries")
+    if not isinstance(specialization_entries_for_shape, list):
+        q6_workgroup_evidence_missing.append("specialization_entries")
+    elif not any(
+        isinstance(item, dict)
+        and (item.get("constant_id") == 0 or item.get("spec_id") == 0)
+        for item in specialization_entries_for_shape
+    ):
+        q6_workgroup_evidence_missing.append("specialization_entries.constant_id_0")
 q6_workgroup_shape_blocker = bool(
     q6_latest
     and (
-        q6_latest.get("spirv_local_size_consistent") is False
+        bool(q6_workgroup_evidence_missing)
+        or q6_latest.get("spirv_local_size_consistent") is False
+        or q6_expected_local_size is None
         or q6_latest.get("spirv_local_size_resolved") != q6_expected_local_size
         or (
             isinstance(q6_latest_partial.get("q6_local_size"), list)
@@ -6473,6 +6498,7 @@ q6_workgroup_diagnostics = {
     "q6_shader_like_clear_basis": q6_shader_like_clear_basis,
     "q6_shader_like_64_interpretation": q6_shader_like_64_interpretation,
     "q6_workgroup_specialization_interpretation": q6_workgroup_specialization_interpretation,
+    "q6_workgroup_evidence_missing": q6_workgroup_evidence_missing,
     "q6_first_mismatch": q6_first_mismatch,
     "q6_row_indexed_sample_indices": q6_oracle_row_indexed_sample_indices[:48],
     "q6_row_indexed_writeback_evidence": q6_row_indexed_writeback_evidence[:8],

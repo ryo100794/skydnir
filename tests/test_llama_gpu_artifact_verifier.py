@@ -1017,7 +1017,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         self.assertFalse(report["correctness_claim_allowed"])
         self.assertFalse(report["benchmark_claim_allowed"])
 
-    def test_q6_local_size_takes_precedence_over_writeback_and_oracle_boundaries(self):
+    def test_q6_writeback_takes_precedence_over_workgroup_and_oracle_boundaries(self):
         payload = {
             "schema": "pdocker.llama.gpu.compare.v1",
             "gpu": {
@@ -1044,10 +1044,10 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
             **speedup_sections(speedup=2.0, target_met=True),
         }
         result = self.run_verifier(payload)
-        self.assertEqual(result.returncode, 32, result.stdout)
+        self.assertEqual(result.returncode, 40, result.stdout)
         report = json.loads(result.stdout)
-        self.assertEqual(report["classification"], "q6-workgroup-shape-blocker")
-        self.assertEqual(report["responsibility_boundary"], "q6-local-size")
+        self.assertEqual(report["classification"], "q6-writeback-mismatch")
+        self.assertEqual(report["responsibility_boundary"], "q6-writeback")
         self.assertEqual(report["q6_writeback_evidence"]["summary"], "mismatch")
         self.assertFalse(report["correctness_claim_allowed"])
         self.assertFalse(report["benchmark_claim_allowed"])
@@ -3143,6 +3143,9 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
 
     def test_q6_missing_required_workgroup_tuple_fields_block_arithmetic_classification(self):
         for missing_field in (
+            "local_size_resolved",
+            "q6_local_size",
+            "local_size_consistent",
             "spirv_local_size_id",
             "spirv_workgroup_size_spec_id",
             "specialization_entries",
@@ -3175,6 +3178,37 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                 self.assertEqual(report["classification"], "q6-workgroup-shape-blocker")
                 self.assertEqual(report["q6_effective_blocker_class"], "q6-workgroup-evidence-missing")
                 self.assertIn(missing_field, report["q6_workgroup_evidence_status"]["missing"])
+
+    def test_q6_missing_both_literal_local_size_fields_blocks_arithmetic_classification(self):
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": passing_config_propagation(),
+                    "q6_workgroup_diagnostics": {
+                        "event_count": 1,
+                        "workgroup_shape_blocker": False,
+                        "latest_status": "mismatch",
+                        "blocker_class": "q6-arithmetic-reduction-or-output-layout",
+                        "q6_shader_like_abs_delta": 0.5,
+                        **q6_verified_writeback(),
+                    },
+                },
+                "correctness": gpu_correctness_report("fail", required_failures=1, passed=False, content="4"),
+            },
+            "cpu": {"tokens_per_second": 0.1},
+            **speedup_sections(speedup=0.5, target_met=False, cpu_tps=0.1, gpu_tps=0.05),
+        }
+        q6 = payload["gpu"]["diagnostics"]["q6_workgroup_diagnostics"]
+        q6.pop("local_size")
+        q6.pop("spirv_local_size")
+        result = self.run_verifier(payload, "--require-q6-workgroup-clear")
+        self.assertEqual(result.returncode, 31, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "q6-workgroup-shape-blocker")
+        self.assertEqual(report["q6_effective_blocker_class"], "q6-workgroup-evidence-missing")
+        self.assertIn("local_size|spirv_local_size", report["q6_workgroup_evidence_status"]["missing"])
 
     def test_q6_malformed_specialization_entries_block_arithmetic_classification(self):
         payload = {
@@ -3833,9 +3867,11 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                     "runtime_freshness": runtime_marker(),
                     "config_propagation": passing_config_propagation(),
                     "q6_workgroup_diagnostics": {
+                        **q6_verified_writeback(),
                         "workgroup_shape_blocker": True,
                         "latest_status": "mismatch",
                         "local_size_resolved": [64, 1, 1],
+                        "spirv_local_size_resolved": [64, 1, 1],
                         "q6_local_size": [32, 1, 1],
                     },
                 },

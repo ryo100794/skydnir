@@ -2158,7 +2158,10 @@ def _numeric_close_to_zero(value: Any, tolerance: float = 1.0e-3) -> bool:
 def _q6_local_size_resolved(q6: Any) -> list[int] | None:
     if not isinstance(q6, dict):
         return None
-    return _integer_list(q6.get("local_size_resolved") or q6.get("local_size"))
+    # Native Q6 classification must not infer the executor-resolved workgroup
+    # shape from the literal SPIR-V LocalSize.  A missing resolved value is
+    # evidence loss, not a value to synthesize.
+    return _integer_list(q6.get("local_size_resolved"))
 
 
 def _q6_safe_kernel_enabled(q6: Any) -> bool:
@@ -2194,7 +2197,10 @@ def _q6_expected_local_size(q6: Any) -> list[int] | None:
     q6_local_size = _integer_list(q6.get("q6_local_size"))
     if q6_local_size is not None:
         return q6_local_size
-    return _q6_local_size_resolved(q6)
+    # For native Q6, the expected runtime workgroup shape must come from the
+    # captured Q6 tuple.  Falling back to local_size_resolved would make a
+    # missing q6_local_size self-consistent and hide evidence loss.
+    return None
 
 
 def _q6_required_local_size_clear(q6: Any) -> bool:
@@ -3343,7 +3349,11 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
             data.get("next_action")
             or "rerun with the native Q6_K kernel; q6k_safe_kernel is diagnostic-only and cannot support native Q6 correctness or benchmark claims"
         )
-    elif _q6_workgroup_shape_blocked(q6):
+    elif (
+        _q6_workgroup_shape_blocked(q6)
+        and not q6_descriptor_invariant_mismatches
+        and q6_writeback_evidence.get("summary") == "pass"
+    ):
         classification = "q6-workgroup-shape-blocker"
         responsibility_boundary = "q6-local-size"
         if q6_workgroup_evidence_status.get("evidence_failure"):
