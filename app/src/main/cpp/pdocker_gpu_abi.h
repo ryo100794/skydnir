@@ -117,11 +117,13 @@
 #define PDOCKER_GPU_VULKAN_DISPATCH_V54_ABI_MINOR 4u
 #define PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR 5u
 #define PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR 6u
+#define PDOCKER_GPU_VULKAN_DISPATCH_V57_ABI_MINOR 7u
 #define PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_LAYOUT_RANGES PDOCKER_GPU_VULKAN_DISPATCH_V52_ABI_MINOR
 #define PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_BUFFER_VIEWS PDOCKER_GPU_VULKAN_DISPATCH_V53_ABI_MINOR
 #define PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_BARRIERS PDOCKER_GPU_VULKAN_DISPATCH_V54_ABI_MINOR
 #define PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_NATIVE_OBJECTS PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR
 #define PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_COMPUTE_LAYOUTS PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR
+#define PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_PUSH_OPS PDOCKER_GPU_VULKAN_DISPATCH_V57_ABI_MINOR
 #define PDOCKER_GPU_VULKAN_DISPATCH_V5_COMMAND_DISPATCH 1u
 #define PDOCKER_GPU_VULKAN_DISPATCH_V5_FRAME_HEADER_SCHEMA_HASH 0x3de711f5a527e2f8ull
 #define PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_SCHEMA_HASH 0x5fd531f2d77e9ad1ull
@@ -141,6 +143,8 @@
 #define PDOCKER_GPU_VULKAN_DISPATCH_V56_DESCRIPTOR_SET_LAYOUT_SCHEMA_HASH 0x68e5ecdcc4de709dull
 #define PDOCKER_GPU_VULKAN_DISPATCH_V56_PIPELINE_LAYOUT_SET_SCHEMA_HASH 0xf8ac8c54032c1be8ull
 #define PDOCKER_GPU_VULKAN_DISPATCH_V56_PUSH_CONSTANT_RANGE_SCHEMA_HASH 0x8f60c935dae37ccdull
+#define PDOCKER_GPU_VULKAN_DISPATCH_V57_HEADER_EXTENSION_SCHEMA_HASH 0x094aaf9b46be9136ull
+#define PDOCKER_GPU_VULKAN_DISPATCH_V57_PUSH_CONSTANT_OP_SCHEMA_HASH 0x577f934a37175206ull
 #define PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FRAME_BYTES (4u * 1024u * 1024u)
 #define PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS 253u
 #define PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS
@@ -166,6 +170,7 @@
 #define PDOCKER_GPU_VULKAN_DISPATCH_V56_MAX_DESCRIPTOR_SET_LAYOUT_BINDINGS 4096u
 #define PDOCKER_GPU_VULKAN_DISPATCH_V56_MAX_PIPELINE_LAYOUT_SETS 512u
 #define PDOCKER_GPU_VULKAN_DISPATCH_V56_MAX_PUSH_CONSTANT_RANGES 256u
+#define PDOCKER_GPU_VULKAN_DISPATCH_V57_MAX_PUSH_CONSTANT_OPS 4096u
 
 #define PDOCKER_GPU_VULKAN_DISPATCH_V5_FRAME_HEADER_FIELDS(X) \
     X(magic, bytes8) \
@@ -452,6 +457,30 @@
     X(size, u32)
 #define PDOCKER_GPU_VULKAN_DISPATCH_V56_PUSH_CONSTANT_RANGE_FIELD_COUNT 5u
 
+#define PDOCKER_GPU_VULKAN_DISPATCH_V57_HEADER_EXTENSION_FIELDS(X) \
+    X(push_constant_op_count, u32) \
+    X(push_constant_op_entry_size, u32) \
+    X(push_constant_op_table_offset, u64) \
+    X(push_constant_op_table_size, u64) \
+    X(push_constant_op_schema_hash, u64) \
+    X(push_constant_op_table_hash, u64) \
+    X(push_constant_data_offset, u64) \
+    X(push_constant_data_size, u64) \
+    X(push_constant_data_hash, u64) \
+    X(extension_hash, u64)
+#define PDOCKER_GPU_VULKAN_DISPATCH_V57_HEADER_EXTENSION_FIELD_COUNT 10u
+
+#define PDOCKER_GPU_VULKAN_DISPATCH_V57_PUSH_CONSTANT_OP_FIELDS(X) \
+    X(pipeline_layout_id, u64) \
+    X(sequence, u32) \
+    X(stage_flags, u32) \
+    X(offset, u32) \
+    X(size, u32) \
+    X(data_offset, u64) \
+    X(data_hash, u64) \
+    X(reserved0, u64)
+#define PDOCKER_GPU_VULKAN_DISPATCH_V57_PUSH_CONSTANT_OP_FIELD_COUNT 8u
+
 #define PDOCKER_GPU_V5_IMAGE_FLAG_MUTABLE_FORMAT (1u << 0)
 #define PDOCKER_GPU_V5_IMAGE_FLAG_CUBE_COMPATIBLE (1u << 1)
 #define PDOCKER_GPU_V5_IMAGE_FLAG_ALIAS (1u << 2)
@@ -714,6 +743,24 @@ typedef struct PdockerGpuVulkanDispatchV56FrameHeader {
     PdockerGpuVulkanDispatchV56HeaderExtension v56;
 } PdockerGpuVulkanDispatchV56FrameHeader;
 
+typedef struct PdockerGpuVulkanDispatchV57HeaderExtension {
+    uint32_t push_constant_op_count;
+    uint32_t push_constant_op_entry_size;
+    uint64_t push_constant_op_table_offset;
+    uint64_t push_constant_op_table_size;
+    uint64_t push_constant_op_schema_hash;
+    uint64_t push_constant_op_table_hash;
+    uint64_t push_constant_data_offset;
+    uint64_t push_constant_data_size;
+    uint64_t push_constant_data_hash;
+    uint64_t extension_hash;
+} PdockerGpuVulkanDispatchV57HeaderExtension;
+
+typedef struct PdockerGpuVulkanDispatchV57FrameHeader {
+    PdockerGpuVulkanDispatchV56FrameHeader v56;
+    PdockerGpuVulkanDispatchV57HeaderExtension v57;
+} PdockerGpuVulkanDispatchV57FrameHeader;
+
 typedef struct PdockerGpuVulkanDispatchV53BufferViewEntry {
     uint32_t descriptor_index;
     uint32_t resource_index;
@@ -790,6 +837,17 @@ typedef struct PdockerGpuVulkanDispatchV56PushConstantRangeEntry {
     uint32_t offset;
     uint32_t size;
 } PdockerGpuVulkanDispatchV56PushConstantRangeEntry;
+
+typedef struct PdockerGpuVulkanDispatchV57PushConstantOpEntry {
+    uint64_t pipeline_layout_id;
+    uint32_t sequence;
+    uint32_t stage_flags;
+    uint32_t offset;
+    uint32_t size;
+    uint64_t data_offset;
+    uint64_t data_hash;
+    uint64_t reserved0;
+} PdockerGpuVulkanDispatchV57PushConstantOpEntry;
 
 typedef struct PdockerGpuVulkanDispatchV52ImageLayoutRangeEntry {
     uint32_t image_index;

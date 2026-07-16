@@ -12071,6 +12071,7 @@ static bool executor_supports_vulkan_dispatch_v53_buffer_views(void);
 static bool executor_supports_vulkan_dispatch_v54_barriers(void);
 static bool executor_supports_vulkan_dispatch_v55_native_objects(void);
 static bool executor_supports_vulkan_dispatch_v56_compute_layouts(void);
+static bool executor_supports_vulkan_dispatch_v57_push_constant_ops(void);
 
 typedef struct {
     int fds[PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS];
@@ -12127,6 +12128,8 @@ static int send_generic_vulkan_dispatch_v5_1_op(
         const uint8_t *push,
         size_t push_size,
         uint64_t push_hash,
+        const PdockerVkPushConstantOpSnapshot *push_constant_ops,
+        uint32_t push_constant_op_count,
         const char *entry_name,
         const VkSpecializationMapEntry *specialization_entries,
         uint32_t specialization_entry_count,
@@ -12194,6 +12197,8 @@ static int send_generic_vulkan_dispatch_v5_1_op(
     PdockerGpuVulkanDispatchV56DescriptorSetLayoutEntry *descriptor_set_layout_entries = NULL;
     PdockerGpuVulkanDispatchV56PipelineLayoutSetEntry *pipeline_layout_set_entries = NULL;
     PdockerGpuVulkanDispatchV56PushConstantRangeEntry *push_constant_range_entries = NULL;
+    PdockerGpuVulkanDispatchV57PushConstantOpEntry *push_constant_op_entries = NULL;
+    unsigned char *push_constant_op_data = NULL;
     PdockerGpuVulkanDispatchV5SpecializationEntry *specs = NULL;
     unsigned char *dispatch_table_arena_storage = NULL;
     unsigned char *frame = NULL;
@@ -13100,6 +13105,67 @@ static int send_generic_vulkan_dispatch_v5_1_op(
             goto cleanup;
         }
     }
+    const bool need_v57_push_ops =
+        need_v56_compute_layouts && push_constant_op_count > 0 &&
+        executor_supports_vulkan_dispatch_v57_push_constant_ops();
+    if (need_v56_compute_layouts && push_constant_op_count > 0 && !need_v57_push_ops &&
+        strict_passthrough) {
+        fprintf(stderr,
+                "pdocker-vulkan-icd: strict V5.7 frame rejected: executor does not advertise push-op replay support dispatch_id=%llu ops=%u\n",
+                (unsigned long long)dispatch_id,
+                push_constant_op_count);
+        rc = -EOPNOTSUPP;
+        goto cleanup;
+    }
+    size_t push_constant_op_table_bytes = 0;
+    size_t push_constant_op_data_size = 0;
+    if (need_v57_push_ops) {
+        if (!push_constant_ops ||
+            push_constant_op_count > PDOCKER_GPU_VULKAN_DISPATCH_V57_MAX_PUSH_CONSTANT_OPS) {
+            rc = -E2BIG;
+            goto cleanup;
+        }
+        if (!checked_mul_size((size_t)push_constant_op_count, sizeof(*push_constant_op_entries),
+                              &push_constant_op_table_bytes)) {
+            rc = -EOVERFLOW;
+            goto cleanup;
+        }
+        for (uint32_t i = 0; i < push_constant_op_count; ++i) {
+            const PdockerVkPushConstantOpSnapshot *src = &push_constant_ops[i];
+            if (!src->data || src->size == 0 ||
+                (src->stage_flags & VK_SHADER_STAGE_COMPUTE_BIT) == 0 ||
+                (src->offset & 3u) != 0 || (src->size & 3u) != 0 ||
+                src->offset > UINT32_MAX - src->size ||
+                src->offset + src->size > push_size ||
+                src->layout_id != compute_pipeline_layout->layout_id ||
+                src->size > SIZE_MAX - push_constant_op_data_size) {
+                rc = -EPROTO;
+                goto cleanup;
+            }
+            push_constant_op_data_size += src->size;
+        }
+        push_constant_op_entries = (PdockerGpuVulkanDispatchV57PushConstantOpEntry *)calloc(
+            push_constant_op_count ? push_constant_op_count : 1u, sizeof(*push_constant_op_entries));
+        push_constant_op_data = (unsigned char *)malloc(push_constant_op_data_size ? push_constant_op_data_size : 1u);
+        if (!push_constant_op_entries || !push_constant_op_data) {
+            rc = -ENOMEM;
+            goto cleanup;
+        }
+        size_t data_cursor = 0;
+        for (uint32_t i = 0; i < push_constant_op_count; ++i) {
+            const PdockerVkPushConstantOpSnapshot *src = &push_constant_ops[i];
+            memcpy(push_constant_op_data + data_cursor, src->data, src->size);
+            push_constant_op_entries[i].pipeline_layout_id = src->layout_id;
+            push_constant_op_entries[i].sequence = i;
+            push_constant_op_entries[i].stage_flags = (uint32_t)src->stage_flags;
+            push_constant_op_entries[i].offset = src->offset;
+            push_constant_op_entries[i].size = src->size;
+            push_constant_op_entries[i].data_offset = (uint64_t)data_cursor;
+            push_constant_op_entries[i].data_hash = fnv1a64_bytes(src->data, src->size);
+            push_constant_op_entries[i].reserved0 = 0;
+            data_cursor += src->size;
+        }
+    }
     const bool need_v54_barriers_or_identity = need_v54_barriers || need_v55_native_objects;
     const bool need_v53_buffer_views = buffer_view_count > 0 || need_v54_barriers_or_identity;
     const bool need_v52_image_layout_ranges = image_layout_range_count > 0 || need_v53_buffer_views;
@@ -13136,7 +13202,9 @@ static int send_generic_vulkan_dispatch_v5_1_op(
     size_t pipeline_layout_set_table_bytes = 0;
     size_t push_constant_range_table_bytes = 0;
     size_t specialization_table_bytes = 0;
-    size_t frame_header_size = need_v56_compute_layouts
+    size_t frame_header_size = need_v57_push_ops
+        ? sizeof(PdockerGpuVulkanDispatchV57FrameHeader)
+        : (need_v56_compute_layouts
         ? sizeof(PdockerGpuVulkanDispatchV56FrameHeader)
         : (need_v55_native_objects
         ? sizeof(PdockerGpuVulkanDispatchV55FrameHeader)
@@ -13146,7 +13214,7 @@ static int send_generic_vulkan_dispatch_v5_1_op(
             ? sizeof(PdockerGpuVulkanDispatchV53FrameHeader)
             : (need_v52_image_layout_ranges
                 ? sizeof(PdockerGpuVulkanDispatchV52FrameHeader)
-                : sizeof(PdockerGpuVulkanDispatchV5ObjectFrameHeader)))));
+                : sizeof(PdockerGpuVulkanDispatchV5ObjectFrameHeader))))));
     size_t frame_capacity = frame_header_size;
     if (!frame_capacity_add_aligned_table(&frame_capacity, sizeof(resources[0]),
                                           resource_count, &resource_table_bytes) ||
@@ -13177,6 +13245,10 @@ static int send_generic_vulkan_dispatch_v5_1_op(
         !frame_capacity_add_aligned_table(&frame_capacity, sizeof(push_constant_range_entries[0]),
                                           need_v56_compute_layouts ? push_constant_range_count : 0,
                                           &push_constant_range_table_bytes) ||
+        !frame_capacity_add_aligned_table(&frame_capacity, sizeof(push_constant_op_entries[0]),
+                                          need_v57_push_ops ? push_constant_op_count : 0,
+                                          &push_constant_op_table_bytes) ||
+        !frame_capacity_add_aligned_bytes(&frame_capacity, need_v57_push_ops ? push_constant_op_data_size : 0) ||
         !frame_capacity_add_aligned_table(&frame_capacity, sizeof(*specs),
                                           specialization_entry_count, &specialization_table_bytes) ||
         !frame_capacity_add_aligned_bytes(&frame_capacity, specialization_data_size) ||
@@ -13195,8 +13267,11 @@ static int send_generic_vulkan_dispatch_v5_1_op(
         rc = -ENOMEM;
         goto cleanup;
     }
+    PdockerGpuVulkanDispatchV57FrameHeader *frame_header_v57 =
+        need_v57_push_ops ? (PdockerGpuVulkanDispatchV57FrameHeader *)frame : NULL;
     PdockerGpuVulkanDispatchV56FrameHeader *frame_header_v56 =
-        need_v56_compute_layouts ? (PdockerGpuVulkanDispatchV56FrameHeader *)frame : NULL;
+        need_v57_push_ops ? &frame_header_v57->v56 :
+        (need_v56_compute_layouts ? (PdockerGpuVulkanDispatchV56FrameHeader *)frame : NULL);
     PdockerGpuVulkanDispatchV55FrameHeader *frame_header_v55 =
         need_v56_compute_layouts ? &frame_header_v56->v55 :
         (need_v55_native_objects ? (PdockerGpuVulkanDispatchV55FrameHeader *)frame : NULL);
@@ -13215,7 +13290,9 @@ static int send_generic_vulkan_dispatch_v5_1_op(
     memcpy(header->magic, PDOCKER_GPU_VULKAN_DISPATCH_V5_MAGIC, 8);
     header->header_size = (uint16_t)frame_header_size;
     header->abi_major = PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MAJOR;
-    header->abi_minor = need_v56_compute_layouts
+    header->abi_minor = need_v57_push_ops
+        ? PDOCKER_GPU_VULKAN_DISPATCH_V57_ABI_MINOR
+        : (need_v56_compute_layouts
         ? PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR
         : (need_v55_native_objects
         ? PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR
@@ -13225,7 +13302,7 @@ static int send_generic_vulkan_dispatch_v5_1_op(
             ? PDOCKER_GPU_VULKAN_DISPATCH_V53_ABI_MINOR
             : (need_v52_image_layout_ranges
                 ? PDOCKER_GPU_VULKAN_DISPATCH_V52_ABI_MINOR
-                : PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_OBJECTS))));
+                : PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_OBJECTS)))));
     header->command = PDOCKER_GPU_VULKAN_DISPATCH_V5_COMMAND_DISPATCH;
     header->dispatch_id = dispatch_id;
     header->fd_count = (uint32_t)fd_count;
@@ -13346,6 +13423,24 @@ static int send_generic_vulkan_dispatch_v5_1_op(
             v56_extension_hash, frame_header_v56->v56.push_constant_range_table_hash);
         frame_header_v56->v56.extension_hash = v56_extension_hash;
     }
+    if (need_v57_push_ops) {
+        frame_header_v57->v57.push_constant_op_count = push_constant_op_count;
+        frame_header_v57->v57.push_constant_op_entry_size =
+            sizeof(PdockerGpuVulkanDispatchV57PushConstantOpEntry);
+        frame_header_v57->v57.push_constant_op_schema_hash =
+            PDOCKER_GPU_VULKAN_DISPATCH_V57_PUSH_CONSTANT_OP_SCHEMA_HASH;
+        frame_header_v57->v57.push_constant_op_table_hash =
+            fnv1a64_bytes(push_constant_op_entries, push_constant_op_table_bytes);
+        frame_header_v57->v57.push_constant_data_size = push_constant_op_data_size;
+        frame_header_v57->v57.push_constant_data_hash =
+            fnv1a64_bytes(push_constant_op_data, push_constant_op_data_size);
+        uint64_t v57_extension_hash = 1469598103934665603ull;
+        v57_extension_hash = fnv1a64_update_u64(
+            v57_extension_hash, frame_header_v57->v57.push_constant_op_table_hash);
+        v57_extension_hash = fnv1a64_update_u64(
+            v57_extension_hash, frame_header_v57->v57.push_constant_data_hash);
+        frame_header_v57->v57.extension_hash = v57_extension_hash;
+    }
 
     size_t cursor = frame_header_size;
     rc = frame_append_bytes(frame, frame_capacity, &cursor,
@@ -13421,6 +13516,18 @@ static int send_generic_vulkan_dispatch_v5_1_op(
         if (rc != 0) goto cleanup;
         frame_header_v56->v56.push_constant_range_table_size = push_constant_range_table_bytes;
     }
+    if (need_v57_push_ops) {
+        rc = frame_append_bytes(frame, frame_capacity, &cursor,
+                                push_constant_op_entries, push_constant_op_table_bytes,
+                                &frame_header_v57->v57.push_constant_op_table_offset);
+        if (rc != 0) goto cleanup;
+        frame_header_v57->v57.push_constant_op_table_size = push_constant_op_table_bytes;
+        rc = frame_append_bytes(frame, frame_capacity, &cursor,
+                                push_constant_op_data, push_constant_op_data_size,
+                                &frame_header_v57->v57.push_constant_data_offset);
+        if (rc != 0) goto cleanup;
+        frame_header_v57->v57.push_constant_data_size = push_constant_op_data_size;
+    }
     rc = frame_append_bytes(frame, frame_capacity, &cursor,
                             specs, specialization_table_bytes,
                             &header->specialization_table_offset);
@@ -13447,6 +13554,8 @@ cleanup:
     free(memory_barrier_entries);
     free(buffer_barrier_entries);
     free(image_barrier_entries);
+    free(push_constant_op_entries);
+    free(push_constant_op_data);
     free(dispatch_table_arena_storage);
     return rc;
 }
@@ -14576,6 +14685,8 @@ static int send_generic_vulkan_dispatch_op(
             op->push_constants,
             push_size,
             push_hash,
+            op->push_constant_ops,
+            op->push_constant_op_count,
             entry_name,
             op->pipeline->specialization_entries,
             op->pipeline->specialization_entry_count,
@@ -15941,6 +16052,7 @@ typedef struct {
     bool vulkan_dispatch_v54_barriers_supported;
     bool vulkan_dispatch_v55_native_objects_supported;
     bool vulkan_dispatch_v56_compute_layouts_supported;
+    bool vulkan_dispatch_v57_push_constant_ops_supported;
     bool vulkan_graphics_v627_buffer_views_supported;
     bool vulkan_graphics_v628_push_constant_ranges_supported;
     bool vulkan_graphics_v629_variable_descriptor_counts_supported;
@@ -15958,6 +16070,8 @@ typedef struct {
     uint32_t vulkan_dispatch_v5_max_descriptor_set_layout_bindings;
     uint32_t vulkan_dispatch_v5_max_pipeline_layout_sets;
     uint32_t vulkan_dispatch_v5_max_push_constant_ranges;
+    uint32_t vulkan_dispatch_v5_abi_minor_push_ops;
+    uint32_t vulkan_dispatch_v5_max_push_constant_ops;
     uint32_t vulkan_graphics_v6_abi_minor_buffer_views;
     uint32_t vulkan_graphics_v6_max_buffer_views;
     uint32_t vulkan_graphics_v6_abi_minor_push_constant_ranges;
@@ -16380,6 +16494,26 @@ static bool parse_executor_advertisement_caps_json(
         v56_pipeline_schema_ok && strcmp(v56_pipeline_schema_hash, expected_v56_pipeline_schema_hash) == 0 &&
         v56_push_schema_ok && strcmp(v56_push_schema_hash, expected_v56_push_schema_hash) == 0;
 
+    uint32_t v57_minor = 0;
+    uint32_t v57_max_ops = 0;
+    char v57_schema_hash[32];
+    char expected_v57_schema_hash[32];
+    memset(v57_schema_hash, 0, sizeof(v57_schema_hash));
+    snprintf(expected_v57_schema_hash, sizeof(expected_v57_schema_hash), "0x%016llx",
+             (unsigned long long)PDOCKER_GPU_VULKAN_DISPATCH_V57_PUSH_CONSTANT_OP_SCHEMA_HASH);
+    const bool v57_minor_ok = json_read_u32(json, "vulkan_dispatch_v5_abi_minor_push_ops", &v57_minor);
+    const bool v57_max_ok = json_read_u32(json, "vulkan_dispatch_v5_max_push_constant_ops", &v57_max_ops);
+    const bool v57_schema_ok = json_read_string(
+        json, "vulkan_dispatch_v5_push_constant_op_schema_hash",
+        v57_schema_hash, sizeof(v57_schema_hash));
+    caps->vulkan_dispatch_v5_abi_minor_push_ops = v57_minor;
+    caps->vulkan_dispatch_v5_max_push_constant_ops = v57_max_ops;
+    caps->vulkan_dispatch_v57_push_constant_ops_supported =
+        caps->vulkan_dispatch_v56_compute_layouts_supported &&
+        v57_minor_ok && v57_minor >= PDOCKER_GPU_VULKAN_DISPATCH_V57_ABI_MINOR &&
+        v57_max_ok && v57_max_ops >= PDOCKER_GPU_VULKAN_DISPATCH_V57_MAX_PUSH_CONSTANT_OPS &&
+        v57_schema_ok && strcmp(v57_schema_hash, expected_v57_schema_hash) == 0;
+
     uint32_t v627_minor = 0;
     uint32_t v627_max_views = 0;
     char v627_schema_hash[32];
@@ -16567,6 +16701,13 @@ static bool executor_supports_vulkan_dispatch_v56_compute_layouts(void) {
     const PdockerVkAdvertisedCaps *caps = pdocker_vk_advertised_caps();
     return caps && caps->executor_valid &&
            caps->vulkan_dispatch_v56_compute_layouts_supported;
+}
+
+static bool executor_supports_vulkan_dispatch_v57_push_constant_ops(void) {
+    if (!bridge_available()) return false;
+    const PdockerVkAdvertisedCaps *caps = pdocker_vk_advertised_caps();
+    return caps && caps->executor_valid &&
+           caps->vulkan_dispatch_v57_push_constant_ops_supported;
 }
 
 static bool executor_supports_vulkan_graphics_v627_buffer_views(void) {
