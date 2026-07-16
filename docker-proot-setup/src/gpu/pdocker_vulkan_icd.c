@@ -4917,6 +4917,10 @@ static int send_executor_text_command(
         size_t off = 0;
         rc = read_executor_text_response_line(socket_fd, &line, &off);
         if (rc == 0) {
+            if (!line) {
+                rc = -EIO;
+                goto text_response_done;
+            }
             if (getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
                 fprintf(stderr, "pdocker-vulkan-icd: executor response: %s", line);
                 if (off == 0 || line[off - 1] != '\n') fprintf(stderr, "\n");
@@ -4929,6 +4933,7 @@ static int send_executor_text_command(
                 if (out_value) *out_value = parse_executor_json_u64_key(line, "value", 0);
             }
         }
+text_response_done:
         free(line);
     }
     close(socket_fd);
@@ -14576,7 +14581,7 @@ static int send_generic_vulkan_dispatch_op(
                                     op->pipeline->specialization_data_size,
                                     specialization_data_hash,
                                     specialization_hash,
-                                    op->dispatch_x,
+                                    dispatch_x,
                                     dispatch_y,
                                     dispatch_z,
                                     binding_count,
@@ -14611,9 +14616,9 @@ static int send_generic_vulkan_dispatch_op(
                 (unsigned long long)shader_hash,
                 shader_size_to_send,
                 binding_count,
-                op->dispatch_x,
-                op->dispatch_y ? op->dispatch_y : 1,
-                op->dispatch_z ? op->dispatch_z : 1);
+                dispatch_x,
+                dispatch_y,
+                dispatch_z);
         fflush(stderr);
     }
 
@@ -14679,7 +14684,7 @@ static int send_generic_vulkan_dispatch_op(
             image_descriptor_count,
             shader_size_to_send,
             shader_hash,
-            op->dispatch_x,
+            dispatch_x,
             dispatch_y,
             dispatch_z,
             op->push_constants,
@@ -32758,6 +32763,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                 }
                 RETURN_VK_QUEUE_SUBMIT_WITH_SYNC(VK_ERROR_FEATURE_NOT_PRESENT);
             }
+            trace_icd_runtime_failure("vulkan-dispatch-legacy-vector-add-fallback-rejected",
+                                      VK_ERROR_FEATURE_NOT_PRESENT);
+            RETURN_VK_QUEUE_SUBMIT_WITH_SYNC(VK_ERROR_FEATURE_NOT_PRESENT);
             PdockerVkDescriptorSet *legacy_set = cmd->bound_set_used[0]
                 ? &cmd->bound_set_snapshots[0]
                 : NULL;

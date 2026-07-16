@@ -9630,6 +9630,14 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("options.has_base_group ? options.base_group_z : 0", executor)
         self.assertIn("cmd_dispatch_base", executor)
         self.assertIn("vkCmdDispatchBase is unavailable", executor)
+        submit_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit", 1)[1].split(
+            "VKAPI_ATTR VkResult VKAPI_CALL vkWaitForFences", 1
+        )[0]
+        self.assertIn("vulkan-dispatch-legacy-vector-add-fallback-rejected", submit_body)
+        self.assertLess(
+            submit_body.index("vulkan-dispatch-legacy-vector-add-fallback-rejected"),
+            submit_body.index("send_vector_add_3fd"),
+        )
         executor_dispatch_body = c_function_body(executor, "run_vulkan_dispatch_fd")
         self.assertIn("vkCmdDispatch(command_buffer, gx, gy, gz);", executor_dispatch_body)
         self.assertIn("base_x, base_y, base_z,\n                              gx, gy, gz);", executor_dispatch_body)
@@ -9639,6 +9647,27 @@ class GpuAbiContractTest(unittest.TestCase):
         generic_sender_body = c_function_body(icd, "send_generic_vulkan_dispatch_op")
         self.assertNotIn("dispatch_y ? dispatch_y : 1", generic_sender_body)
         self.assertNotIn("dispatch_z ? dispatch_z : 1", generic_sender_body)
+        self.assertIn(
+            "shader_hash,\n"
+            "            dispatch_x,\n"
+            "            dispatch_y,\n"
+            "            dispatch_z,",
+            generic_sender_body,
+        )
+        self.assertNotIn(
+            "shader_hash,\n"
+            "            op->dispatch_x,\n"
+            "            dispatch_y,\n"
+            "            dispatch_z,",
+            generic_sender_body,
+        )
+        self.assertIn(
+            "binding_count,\n"
+            "                dispatch_x,\n"
+            "                dispatch_y,\n"
+            "                dispatch_z);",
+            generic_sender_body,
+        )
         v5_sender_body = c_function_body(icd, "send_generic_vulkan_dispatch_v5_1_op")
         self.assertIn("header->gx = gx;", v5_sender_body)
         self.assertIn("header->gy = gy;", v5_sender_body)
@@ -12254,6 +12283,8 @@ class GpuAbiContractTest(unittest.TestCase):
         for marker in [
             "vulkan_graphics_v6_abi_minor_variable_descriptor_counts",
             "PDOCKER_GPU_VULKAN_GRAPHICS_V629_VARIABLE_DESCRIPTOR_COUNT_SCHEMA_HASH",
+            "header_v629->v629.variable_descriptor_count_count > PDOCKER_GPU_VULKAN_GRAPHICS_V629_MAX_VARIABLE_DESCRIPTOR_COUNTS",
+            "case PDOCKER_GPU_VULKAN_GRAPHICS_V630_ABI_MINOR: return 55u;",
             "case PDOCKER_GPU_VULKAN_GRAPHICS_V629_ABI_MINOR: return 55u;",
             "sizeof(PdockerGpuVulkanGraphicsV629FrameHeader)",
             "const PdockerGpuVulkanGraphicsV629FrameHeader *header_v629",
@@ -12267,6 +12298,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "validate_vulkan_graphics_v629_variable_descriptor_counts",
             "find_vulkan_graphics_v629_variable_descriptor_count",
             "materialize_vulkan_graphics_v629_variable_descriptor_counts",
+            "table_range_valid(header_v629->v629.variable_descriptor_count_table_offset",
+            "header_v629->v629.variable_descriptor_count_count",
+            "__alignof__(PdockerGpuVulkanGraphicsV629VariableDescriptorCountEntry)",
         ]:
             self.assertTrue(marker in executor, marker)
         describe_body = c_function_body(executor, "describe_vulkan_graphics_v6_frame")

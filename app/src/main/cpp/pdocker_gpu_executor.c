@@ -25128,6 +25128,7 @@ static int validate_vulkan_graphics_v6_header(
         (is_v626 && header_v626->v626.event_wait_ref_count > PDOCKER_GPU_VULKAN_GRAPHICS_V626_MAX_EVENT_WAIT_REFS) ||
         (is_v627 && header_v627->v627.buffer_view_count > PDOCKER_GPU_VULKAN_GRAPHICS_V627_MAX_BUFFER_VIEWS) ||
         (is_v628 && header_v628->v628.push_constant_range_count > PDOCKER_GPU_VULKAN_GRAPHICS_V628_MAX_PUSH_CONSTANT_RANGES) ||
+        (is_v629 && header_v629->v629.variable_descriptor_count_count > PDOCKER_GPU_VULKAN_GRAPHICS_V629_MAX_VARIABLE_DESCRIPTOR_COUNTS) ||
         header->command_count > PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS) {
         return -E2BIG;
     }
@@ -25788,6 +25789,15 @@ static int validate_vulkan_graphics_v6_header(
                            header_v628->v628.push_constant_range_count,
                            header_v628->v628.push_constant_range_entry_size,
                            __alignof__(PdockerGpuVulkanGraphicsV628PushConstantRangeEntry),
+                           header->frame_size, header->header_size)) {
+        return -EPROTO;
+    }
+    if (is_v629 &&
+        !table_range_valid(header_v629->v629.variable_descriptor_count_table_offset,
+                           header_v629->v629.variable_descriptor_count_table_size,
+                           header_v629->v629.variable_descriptor_count_count,
+                           header_v629->v629.variable_descriptor_count_entry_size,
+                           __alignof__(PdockerGpuVulkanGraphicsV629VariableDescriptorCountEntry),
                            header->frame_size, header->header_size)) {
         return -EPROTO;
     }
