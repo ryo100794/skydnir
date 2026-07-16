@@ -28682,6 +28682,16 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
         command_buffer_mark_recording_failed(cmd, "descriptor-set-array-missing");
         return;
     }
+    if (dynamicOffsetCount > 0 && !pDynamicOffsets) {
+        cmd->unsupported_descriptor_set_layout = true;
+        command_buffer_mark_recording_failed(cmd, "descriptor-dynamic-offset-array-missing");
+        return;
+    }
+    if (descriptorSetCount == 0 && dynamicOffsetCount > 0) {
+        cmd->unsupported_descriptor_set_layout = true;
+        command_buffer_mark_recording_failed(cmd, "descriptor-dynamic-offset-without-sets");
+        return;
+    }
     if (descriptorSetCount > 0 && pDescriptorSets) {
         PdockerVkDescriptorSet **target_set_handles = NULL;
         PdockerVkDescriptorSet *target_set_snapshots = NULL;

@@ -16352,6 +16352,14 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("descriptor_dynamic_offset_alignment(dynamic_descriptor_type)", bind_body)
         self.assertIn("pDynamicOffsets[dynamic_index] % required_alignment", bind_body)
         self.assertIn("dynamic descriptor offset misaligned", bind_body)
+        self.assertIn("dynamicOffsetCount > 0 && !pDynamicOffsets", bind_body)
+        self.assertIn("descriptor-dynamic-offset-array-missing", bind_body)
+        self.assertIn("descriptorSetCount == 0 && dynamicOffsetCount > 0", bind_body)
+        self.assertIn("descriptor-dynamic-offset-without-sets", bind_body)
+        self.assertLess(
+            bind_body.index("descriptor-dynamic-offset-array-missing"),
+            bind_body.index("command_buffer_reserve_graphics_dynamic_offsets"),
+        )
 
         for marker in [
             "#define PDOCKER_GPU_MIN_STORAGE_BUFFER_OFFSET_ALIGNMENT 16ull",
