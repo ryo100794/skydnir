@@ -10799,6 +10799,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("*pPeerMemoryFeatures = 0;", peer_body)
         self.assertIn("deviceMask != 1u", device_mask_body)
         self.assertIn('command_buffer_mark_recording_failed(cmd, "device-mask-unsupported")', device_mask_body)
+        self.assertIn("pdocker_supports_external_handle_transport", icd)
+        self.assertIn("if (pdocker_supports_external_handle_transport())", collector_body)
         self.assertIn("ADD_DEVICE_EXTENSION(VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME", collector_body)
         self.assertIn("ADD_DEVICE_EXTENSION(VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME", collector_body)
         self.assertIn("ADD_DEVICE_EXTENSION(VK_KHR_EXTERNAL_FENCE_EXTENSION_NAME", collector_body)

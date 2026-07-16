@@ -4175,7 +4175,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
-    def test_external_memory_extension_is_zero_handle_only(self):
+    def test_external_memory_extension_is_not_advertised_without_transport(self):
         source = textwrap.dedent(
             f"""
             #include <stdint.h>
@@ -4195,12 +4195,12 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
 
             int main(void) {{
             #ifdef VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME
-                if (!device_extension_advertised_name(VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME)) return 2;
+                if (device_extension_advertised_name(VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME)) return 2;
                 uint32_t count = 64;
                 VkExtensionProperties extensions[64];
                 memset(extensions, 0, sizeof(extensions));
                 if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &count, extensions) != VK_SUCCESS) return 3;
-                if (!extension_seen(extensions, count, VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME)) return 4;
+                if (extension_seen(extensions, count, VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME)) return 4;
 
                 const char *enabled[] = {{ VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME }};
                 VkDeviceCreateInfo device_info;
@@ -4208,7 +4208,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
                 device_info.enabledExtensionCount = 1;
                 device_info.ppEnabledExtensionNames = enabled;
-                if (validate_device_extensions(&device_info) != VK_SUCCESS) return 5;
+                if (validate_device_extensions(&device_info) != VK_ERROR_EXTENSION_NOT_PRESENT) return 5;
 
                 VkBufferCreateInfo buffer_info;
                 VkExternalMemoryBufferCreateInfo buffer_external;
@@ -4263,7 +4263,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
 
-    def test_external_semaphore_and_fence_extensions_are_zero_handle_only(self):
+    def test_external_semaphore_and_fence_extensions_are_not_advertised_without_transport(self):
         source = textwrap.dedent(
             f"""
             #include <stdint.h>
@@ -4288,15 +4288,15 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &count, extensions) != VK_SUCCESS) return 2;
 
             #ifdef VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME
-                if (!device_extension_advertised_name(VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME)) return 3;
-                if (!extension_seen(extensions, count, VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME)) return 4;
+                if (device_extension_advertised_name(VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME)) return 3;
+                if (extension_seen(extensions, count, VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME)) return 4;
                 const char *semaphore_enabled[] = {{ VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME }};
                 VkDeviceCreateInfo semaphore_device_info;
                 memset(&semaphore_device_info, 0, sizeof(semaphore_device_info));
                 semaphore_device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
                 semaphore_device_info.enabledExtensionCount = 1;
                 semaphore_device_info.ppEnabledExtensionNames = semaphore_enabled;
-                if (validate_device_extensions(&semaphore_device_info) != VK_SUCCESS) return 5;
+                if (validate_device_extensions(&semaphore_device_info) != VK_ERROR_EXTENSION_NOT_PRESENT) return 5;
 
                 VkExportSemaphoreCreateInfo semaphore_export;
                 memset(&semaphore_export, 0, sizeof(semaphore_export));
@@ -4323,15 +4323,15 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
             #endif
 
             #ifdef VK_KHR_EXTERNAL_FENCE_EXTENSION_NAME
-                if (!device_extension_advertised_name(VK_KHR_EXTERNAL_FENCE_EXTENSION_NAME)) return 12;
-                if (!extension_seen(extensions, count, VK_KHR_EXTERNAL_FENCE_EXTENSION_NAME)) return 13;
+                if (device_extension_advertised_name(VK_KHR_EXTERNAL_FENCE_EXTENSION_NAME)) return 12;
+                if (extension_seen(extensions, count, VK_KHR_EXTERNAL_FENCE_EXTENSION_NAME)) return 13;
                 const char *fence_enabled[] = {{ VK_KHR_EXTERNAL_FENCE_EXTENSION_NAME }};
                 VkDeviceCreateInfo fence_device_info;
                 memset(&fence_device_info, 0, sizeof(fence_device_info));
                 fence_device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
                 fence_device_info.enabledExtensionCount = 1;
                 fence_device_info.ppEnabledExtensionNames = fence_enabled;
-                if (validate_device_extensions(&fence_device_info) != VK_SUCCESS) return 14;
+                if (validate_device_extensions(&fence_device_info) != VK_ERROR_EXTENSION_NOT_PRESENT) return 14;
 
                 VkExportFenceCreateInfo fence_export;
                 memset(&fence_export, 0, sizeof(fence_export));

@@ -22437,6 +22437,10 @@ static bool pdocker_supports_host_image_copy_transport(void) {
     return false;
 }
 
+static bool pdocker_supports_external_handle_transport(void) {
+    return false;
+}
+
 static bool pdocker_supports_sampler_ycbcr_conversion_transport(void) {
     return false;
 }
@@ -22568,13 +22572,19 @@ static uint32_t collect_advertised_device_extensions(
 #endif
     ADD_DEVICE_EXTENSION(VK_KHR_DEVICE_GROUP_EXTENSION_NAME, VK_KHR_DEVICE_GROUP_SPEC_VERSION);
 #ifdef VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME
-    ADD_DEVICE_EXTENSION(VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME, VK_KHR_EXTERNAL_MEMORY_SPEC_VERSION);
+    if (pdocker_supports_external_handle_transport()) {
+        ADD_DEVICE_EXTENSION(VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME, VK_KHR_EXTERNAL_MEMORY_SPEC_VERSION);
+    }
 #endif
 #ifdef VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME
-    ADD_DEVICE_EXTENSION(VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME, VK_KHR_EXTERNAL_SEMAPHORE_SPEC_VERSION);
+    if (pdocker_supports_external_handle_transport()) {
+        ADD_DEVICE_EXTENSION(VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME, VK_KHR_EXTERNAL_SEMAPHORE_SPEC_VERSION);
+    }
 #endif
 #ifdef VK_KHR_EXTERNAL_FENCE_EXTENSION_NAME
-    ADD_DEVICE_EXTENSION(VK_KHR_EXTERNAL_FENCE_EXTENSION_NAME, VK_KHR_EXTERNAL_FENCE_SPEC_VERSION);
+    if (pdocker_supports_external_handle_transport()) {
+        ADD_DEVICE_EXTENSION(VK_KHR_EXTERNAL_FENCE_EXTENSION_NAME, VK_KHR_EXTERNAL_FENCE_SPEC_VERSION);
+    }
 #endif
 #ifdef VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME
     /* YCbCr conversion is not transported through sampler/image-view metadata yet. */
