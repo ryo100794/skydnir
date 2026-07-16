@@ -6468,6 +6468,7 @@ static int find_sampler_table_index(PdockerVkSampler *const *samplers,
 static bool descriptor_type_requires_image_view(VkDescriptorType type);
 static bool descriptor_type_requires_sampler(VkDescriptorType type);
 static bool descriptor_type_requires_buffer_view(VkDescriptorType type);
+static bool descriptor_type_is_dynamic(VkDescriptorType type);
 static bool descriptor_type_supported_by_v4_transport(VkDescriptorType type);
 static bool descriptor_type_supported_by_v5_object_transport(VkDescriptorType type);
 static int validate_descriptor_transport_shape(
@@ -6942,6 +6943,14 @@ static int collect_dispatch_v56_descriptor_set_layout_metadata(
         if (!layout->storage_binding_types || !layout->storage_binding_counts ||
             !layout->storage_binding_stage_flags) return -EPROTO;
         const VkDescriptorType descriptor_type = layout->storage_binding_types[slot];
+        /* V5.6 replays descriptor-set layout identity, but the compute bind path
+         * does not yet transport dynamic-offset arrays into vkCmdBindDescriptorSets.
+         * Reject dynamic buffer layouts before frame emission instead of silently
+         * lowering them to non-dynamic descriptors.
+         */
+        if (descriptor_type_is_dynamic(descriptor_type)) {
+            return -EOPNOTSUPP;
+        }
         if (!descriptor_type_supported_by_v4_transport(descriptor_type) &&
             !descriptor_type_supported_by_v5_object_transport(descriptor_type) &&
             !(descriptor_type_requires_buffer_view(descriptor_type) &&

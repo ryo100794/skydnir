@@ -1097,6 +1097,12 @@ static int vulkan_dispatch_descriptor_type_from_api(
     }
 }
 
+static int vulkan_dispatch_descriptor_type_is_dynamic(
+        uint32_t api_descriptor_type) {
+    return (VkDescriptorType)api_descriptor_type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC ||
+           (VkDescriptorType)api_descriptor_type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+}
+
 static int vulkan_dispatch_image_descriptor_type_from_api(
         uint32_t api_descriptor_type,
         VkDescriptorType *out_type) {
@@ -16227,6 +16233,7 @@ static int run_vulkan_dispatch_fd(
             if (entry->layout_id == 0 || entry->descriptor_count == 0 ||
                 entry->descriptor_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS ||
                 entry->immutable_sampler_count != 0 ||
+                vulkan_dispatch_descriptor_type_is_dynamic(entry->descriptor_type) ||
                 (entry->binding_flags & PDOCKER_VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT) != 0 ||
                 !vulkan_graphics_descriptor_binding_flags_supported(entry->binding_flags)) {
                 json_fail("vulkan-dispatch", "unsupported V5.6 compute descriptor set layout metadata");

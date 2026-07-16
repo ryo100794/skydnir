@@ -5176,6 +5176,9 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(marker, sender)
         self.assertLess(sender.index("const bool need_v55_native_objects"), sender.index("const bool need_v56_compute_layouts"))
         self.assertLess(sender.index("const bool need_v56_compute_layouts"), sender.index("collect_dispatch_v56_pipeline_layout_metadata"))
+        collect_v56_layout = c_function_body(icd, "collect_dispatch_v56_descriptor_set_layout_metadata")
+        self.assertIn("descriptor_type_is_dynamic(descriptor_type)", collect_v56_layout)
+        self.assertIn("does not yet transport dynamic-offset arrays", collect_v56_layout)
 
         runner = c_function_body(executor, "run_vulkan_dispatch_fd")
         for marker in [
@@ -5193,6 +5196,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT",
             "VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT",
             "entry->immutable_sampler_count != 0",
+            "vulkan_dispatch_descriptor_type_is_dynamic(entry->descriptor_type)",
             "PDOCKER_VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT",
             "!multi_descriptor_set && !use_v56_compute_layout",
         ]:
