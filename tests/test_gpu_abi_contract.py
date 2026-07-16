@@ -7553,6 +7553,22 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, graphics_submit)
 
+    def test_vulkan_graphics_v6_accepted_minors_have_table_ranges(self):
+        executor = GPU_EXECUTOR.read_text()
+        prefix = c_function_body(executor, "validate_vulkan_graphics_v6_header_prefix")
+        table_ranges = c_function_body(executor, "vulkan_graphics_v6_table_range_count")
+        accepted = set(re.findall(
+            r"header->abi_minor == (PDOCKER_GPU_VULKAN_GRAPHICS_V6(?:\d+)?_ABI_MINOR)",
+            prefix,
+        ))
+        ranged = set(re.findall(
+            r"case\s+(PDOCKER_GPU_VULKAN_GRAPHICS_V6(?:\d+)?_ABI_MINOR):\s+return\s+[1-9][0-9]*u;",
+            table_ranges,
+        ))
+        self.assertTrue(accepted)
+        self.assertEqual(accepted, ranged)
+        self.assertIn("case PDOCKER_GPU_VULKAN_GRAPHICS_V630_ABI_MINOR: return 55u;", table_ranges)
+
     def test_vulkan_icd_serializes_native_object_identity_frames(self):
         icd = VULKAN_ICD.read_text()
         for marker in [

@@ -23053,6 +23053,7 @@ static int frame_ranges_do_not_overlap(const FrameRange *ranges, size_t count) {
 
 static size_t vulkan_graphics_v6_table_range_count(uint32_t abi_minor) {
     switch (abi_minor) {
+        case PDOCKER_GPU_VULKAN_GRAPHICS_V630_ABI_MINOR: return 55u;
         case PDOCKER_GPU_VULKAN_GRAPHICS_V629_ABI_MINOR: return 55u;
         case PDOCKER_GPU_VULKAN_GRAPHICS_V628_ABI_MINOR: return 54u;
         case PDOCKER_GPU_VULKAN_GRAPHICS_V627_ABI_MINOR: return 53u;
