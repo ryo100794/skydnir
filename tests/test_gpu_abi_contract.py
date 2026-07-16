@@ -8715,11 +8715,18 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('MAP_ALIAS("vkCreateSamplerYcbcrConversionKHR", vkCreateSamplerYcbcrConversion);', proc_body)
         self.assertIn('MAP_ALIAS("vkDestroySamplerYcbcrConversionKHR", vkDestroySamplerYcbcrConversion);', proc_body)
 
-    def test_vulkan_buffer_device_address_khr_is_advertised_false_only(self):
+    def test_vulkan_buffer_device_address_khr_is_not_advertised_without_transport(self):
         icd = VULKAN_ICD.read_text()
         self.assertIn("VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME", icd)
+        helper_body = c_function_body(icd, "pdocker_supports_buffer_device_address_transport")
+        self.assertIn("return false;", helper_body)
         collector_body = c_function_body(icd, "collect_advertised_device_extensions")
+        self.assertIn("pdocker_supports_buffer_device_address_transport()", collector_body)
         self.assertIn("ADD_DEVICE_EXTENSION(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME", collector_body)
+        self.assertLess(
+            collector_body.index("pdocker_supports_buffer_device_address_transport()"),
+            collector_body.index("ADD_DEVICE_EXTENSION(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME"),
+        )
 
         features_body = c_function_body(icd, "fill_pnext_features")
         self.assertIn("VkPhysicalDeviceBufferDeviceAddressFeatures", features_body)
@@ -8741,18 +8748,20 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("buffer-device-address-usage-unsupported", create_buffer_body)
 
         hidden_body = c_function_body(icd, "proc_address_hidden_by_advertisement")
+        self.assertIn("!pdocker_supports_buffer_device_address_transport()", hidden_body)
         for alias in [
             "vkGetBufferDeviceAddressKHR",
             "vkGetBufferOpaqueCaptureAddressKHR",
             "vkGetDeviceMemoryOpaqueCaptureAddressKHR",
+            "vkGetBufferDeviceAddressEXT",
         ]:
-            self.assertNotIn(alias, hidden_body)
-        self.assertNotIn('strcmp(pName, "vkGetBufferDeviceAddressEXT") == 0', hidden_body)
+            self.assertIn(alias, hidden_body)
 
-    def test_vulkan_buffer_device_address_ext_is_advertised_false_only(self):
+    def test_vulkan_buffer_device_address_ext_is_not_advertised_without_transport(self):
         icd = VULKAN_ICD.read_text()
         self.assertIn("VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME", icd)
         collector_body = c_function_body(icd, "collect_advertised_device_extensions")
+        self.assertIn("pdocker_supports_buffer_device_address_transport()", collector_body)
         self.assertIn("ADD_DEVICE_EXTENSION(VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME", collector_body)
 
         features_body = c_function_body(icd, "fill_pnext_features")
@@ -8767,7 +8776,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("p->bufferDeviceAddress) mask |= PDOCKER_VK_FEATURE_BUFFER_DEVICE_ADDRESS", mask_body)
 
         hidden_body = c_function_body(icd, "proc_address_hidden_by_advertisement")
-        self.assertNotIn('strcmp(pName, "vkGetBufferDeviceAddressEXT") == 0', hidden_body)
+        self.assertIn('strcmp(pName, "vkGetBufferDeviceAddressEXT") == 0', hidden_body)
 
     def test_vulkan_maintenance5_is_advertised_with_false_only_feature_bit(self):
         icd = VULKAN_ICD.read_text()
@@ -10915,9 +10924,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "vkGetBufferDeviceAddressKHR",
             "vkGetBufferOpaqueCaptureAddressKHR",
             "vkGetDeviceMemoryOpaqueCaptureAddressKHR",
+            "vkGetBufferDeviceAddressEXT",
         ]:
-            self.assertNotIn(alias, hidden_body)
-        self.assertNotIn("vkGetBufferDeviceAddressEXT", hidden_body)
+            self.assertIn(alias, hidden_body)
         for alias in [
             "vkCreateSamplerYcbcrConversionKHR",
             "vkDestroySamplerYcbcrConversionKHR",

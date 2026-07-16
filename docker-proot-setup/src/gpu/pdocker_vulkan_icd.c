@@ -22392,6 +22392,10 @@ static bool pdocker_supports_sampler_ycbcr_conversion_transport(void) {
     return false;
 }
 
+static bool pdocker_supports_buffer_device_address_transport(void) {
+    return false;
+}
+
 static uint32_t collect_advertised_device_extensions(
         VkExtensionProperties *properties,
         uint32_t capacity) {
@@ -22533,10 +22537,17 @@ static uint32_t collect_advertised_device_extensions(
     ADD_DEVICE_EXTENSION(VK_KHR_MAP_MEMORY_2_EXTENSION_NAME, VK_KHR_MAP_MEMORY_2_SPEC_VERSION);
 #endif
 #ifdef VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME
-    ADD_DEVICE_EXTENSION(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME, VK_KHR_BUFFER_DEVICE_ADDRESS_SPEC_VERSION);
+    /* Device-address values are not stable or meaningful across the bridge transport. */
+    if (pdocker_supports_buffer_device_address_transport()) {
+        ADD_DEVICE_EXTENSION(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
+                             VK_KHR_BUFFER_DEVICE_ADDRESS_SPEC_VERSION);
+    }
 #endif
 #ifdef VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME
-    ADD_DEVICE_EXTENSION(VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME, VK_EXT_BUFFER_DEVICE_ADDRESS_SPEC_VERSION);
+    if (pdocker_supports_buffer_device_address_transport()) {
+        ADD_DEVICE_EXTENSION(VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
+                             VK_EXT_BUFFER_DEVICE_ADDRESS_SPEC_VERSION);
+    }
 #endif
     ADD_DEVICE_EXTENSION(VK_KHR_COPY_COMMANDS_2_EXTENSION_NAME, VK_KHR_COPY_COMMANDS_2_SPEC_VERSION);
     if (advertised_synchronization2()) {
@@ -35137,6 +35148,15 @@ static bool proc_address_hidden_by_advertisement(const char *pName) {
         !advertised_draw_indirect_count_amd()) {
         return true;
     }
+#if defined(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME) || defined(VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME)
+    if (!pdocker_supports_buffer_device_address_transport() &&
+        (strcmp(pName, "vkGetBufferDeviceAddressKHR") == 0 ||
+         strcmp(pName, "vkGetBufferOpaqueCaptureAddressKHR") == 0 ||
+         strcmp(pName, "vkGetDeviceMemoryOpaqueCaptureAddressKHR") == 0 ||
+         strcmp(pName, "vkGetBufferDeviceAddressEXT") == 0)) {
+        return true;
+    }
+#endif
 #ifdef VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME
     if (!pdocker_supports_sampler_ycbcr_conversion_transport() &&
         (strcmp(pName, "vkCreateSamplerYcbcrConversionKHR") == 0 ||

@@ -559,7 +559,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_buffer_device_address_khr_extension_is_false_only(self):
+    def test_buffer_device_address_khr_extension_is_not_advertised_without_transport(self):
         source = textwrap.dedent(
             f"""
             #include <stdint.h>
@@ -579,12 +579,12 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
 
             int main(void) {{
             #ifdef VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME
-                if (!device_extension_advertised_name(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME)) return 2;
+                if (device_extension_advertised_name(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME)) return 2;
                 uint32_t count = 64;
                 VkExtensionProperties extensions[64];
                 memset(extensions, 0, sizeof(extensions));
                 if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &count, extensions) != VK_SUCCESS) return 3;
-                if (!extension_seen(extensions, count, VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME)) return 4;
+                if (extension_seen(extensions, count, VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME)) return 4;
 
                 const char *enabled[] = {{ VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME }};
                 VkDeviceCreateInfo device_info;
@@ -592,16 +592,12 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
                 device_info.enabledExtensionCount = 1;
                 device_info.ppEnabledExtensionNames = enabled;
-                if (validate_device_extensions(&device_info) != VK_SUCCESS) return 5;
+                if (validate_device_extensions(&device_info) != VK_ERROR_EXTENSION_NOT_PRESENT) return 5;
 
-                if (proc_address("vkGetBufferDeviceAddressKHR") !=
-                    (PFN_vkVoidFunction)vkGetBufferDeviceAddress) return 6;
-                if (proc_address("vkGetBufferOpaqueCaptureAddressKHR") !=
-                    (PFN_vkVoidFunction)vkGetBufferOpaqueCaptureAddress) return 7;
-                if (proc_address("vkGetDeviceMemoryOpaqueCaptureAddressKHR") !=
-                    (PFN_vkVoidFunction)vkGetDeviceMemoryOpaqueCaptureAddress) return 8;
-                if (proc_address("vkGetBufferDeviceAddressEXT") !=
-                    (PFN_vkVoidFunction)vkGetBufferDeviceAddress) return 9;
+                if (proc_address("vkGetBufferDeviceAddressKHR") != NULL) return 6;
+                if (proc_address("vkGetBufferOpaqueCaptureAddressKHR") != NULL) return 7;
+                if (proc_address("vkGetDeviceMemoryOpaqueCaptureAddressKHR") != NULL) return 8;
+                if (proc_address("vkGetBufferDeviceAddressEXT") != NULL) return 9;
 
                 VkPhysicalDeviceBufferDeviceAddressFeatures features;
                 memset(&features, 0xff, sizeof(features));
@@ -614,6 +610,8 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     features.bufferDeviceAddressCaptureReplay != VK_FALSE ||
                     features.bufferDeviceAddressMultiDevice != VK_FALSE) return 10;
 
+                device_info.enabledExtensionCount = 0;
+                device_info.ppEnabledExtensionNames = NULL;
                 device_info.pNext = &features;
                 features.bufferDeviceAddress = VK_TRUE;
                 if (validate_device_feature_requests(&device_info) == VK_SUCCESS) return 11;
@@ -663,14 +661,14 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 memset(&buffer_info, 0, sizeof(buffer_info));
                 buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
                 buffer_info.buffer = VK_NULL_HANDLE;
-                if (((PFN_vkGetBufferDeviceAddressKHR)proc_address("vkGetBufferDeviceAddressKHR"))(VK_NULL_HANDLE, &buffer_info) != 0) return 21;
-                if (((PFN_vkGetBufferOpaqueCaptureAddressKHR)proc_address("vkGetBufferOpaqueCaptureAddressKHR"))(VK_NULL_HANDLE, &buffer_info) != 0) return 22;
+                if (vkGetBufferDeviceAddress(VK_NULL_HANDLE, &buffer_info) != 0) return 21;
+                if (vkGetBufferOpaqueCaptureAddress(VK_NULL_HANDLE, &buffer_info) != 0) return 22;
 
                 VkDeviceMemoryOpaqueCaptureAddressInfo memory_info;
                 memset(&memory_info, 0, sizeof(memory_info));
                 memory_info.sType = VK_STRUCTURE_TYPE_DEVICE_MEMORY_OPAQUE_CAPTURE_ADDRESS_INFO;
                 memory_info.memory = VK_NULL_HANDLE;
-                if (((PFN_vkGetDeviceMemoryOpaqueCaptureAddressKHR)proc_address("vkGetDeviceMemoryOpaqueCaptureAddressKHR"))(VK_NULL_HANDLE, &memory_info) != 0) return 23;
+                if (vkGetDeviceMemoryOpaqueCaptureAddress(VK_NULL_HANDLE, &memory_info) != 0) return 23;
             #endif
                 return 0;
             }}
@@ -679,8 +677,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stderr)
 
-
-    def test_buffer_device_address_ext_extension_is_false_only(self):
+    def test_buffer_device_address_ext_extension_is_not_advertised_without_transport(self):
         source = textwrap.dedent(
             f"""
             #include <stdint.h>
@@ -700,12 +697,12 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
 
             int main(void) {{
             #ifdef VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME
-                if (!device_extension_advertised_name(VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME)) return 2;
+                if (device_extension_advertised_name(VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME)) return 2;
                 uint32_t count = 64;
                 VkExtensionProperties extensions[64];
                 memset(extensions, 0, sizeof(extensions));
                 if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &count, extensions) != VK_SUCCESS) return 3;
-                if (!extension_seen(extensions, count, VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME)) return 4;
+                if (extension_seen(extensions, count, VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME)) return 4;
 
                 const char *enabled[] = {{ VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME }};
                 VkDeviceCreateInfo device_info;
@@ -713,10 +710,9 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
                 device_info.enabledExtensionCount = 1;
                 device_info.ppEnabledExtensionNames = enabled;
-                if (validate_device_extensions(&device_info) != VK_SUCCESS) return 5;
+                if (validate_device_extensions(&device_info) != VK_ERROR_EXTENSION_NOT_PRESENT) return 5;
 
-                if (proc_address("vkGetBufferDeviceAddressEXT") !=
-                    (PFN_vkVoidFunction)vkGetBufferDeviceAddress) return 6;
+                if (proc_address("vkGetBufferDeviceAddressEXT") != NULL) return 6;
 
                 VkPhysicalDeviceBufferDeviceAddressFeaturesEXT features;
                 memset(&features, 0xff, sizeof(features));
@@ -729,6 +725,8 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     features.bufferDeviceAddressCaptureReplay != VK_FALSE ||
                     features.bufferDeviceAddressMultiDevice != VK_FALSE) return 7;
 
+                device_info.enabledExtensionCount = 0;
+                device_info.ppEnabledExtensionNames = NULL;
                 device_info.pNext = &features;
                 features.bufferDeviceAddress = VK_TRUE;
                 if (validate_device_feature_requests(&device_info) == VK_SUCCESS) return 8;
@@ -759,7 +757,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 memset(&query, 0, sizeof(query));
                 query.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
                 query.buffer = VK_NULL_HANDLE;
-                if (((PFN_vkGetBufferDeviceAddressEXT)proc_address("vkGetBufferDeviceAddressEXT"))(VK_NULL_HANDLE, &query) != 0) return 14;
+                if (vkGetBufferDeviceAddress(VK_NULL_HANDLE, &query) != 0) return 14;
             #endif
                 return 0;
             }}
@@ -767,7 +765,6 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         )
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stderr)
-
 
     def test_device_group_extension_exposes_single_device_noop_aliases(self):
         source = textwrap.dedent(
