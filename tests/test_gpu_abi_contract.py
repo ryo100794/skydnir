@@ -16974,6 +16974,43 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(marker, descriptor_finder)
 
 
+    def test_vulkan_dispatch_strict_passthrough_rejects_compute_push_constant_synthesis(self):
+        icd = VULKAN_ICD.read_text()
+        push_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdPushConstants", 1)[1].split(
+            "static VkImageAspectFlags image_format_full_aspect_mask", 1
+        )[0]
+        dispatch_helper = c_function_body(icd, "validate_strict_compute_push_constant_state_before_dispatch")
+        dispatch_body = c_function_body(icd, "vkCmdDispatch")
+        dispatch_base_body = c_function_body(icd, "vkCmdDispatchBase")
+        dispatch_indirect_body = c_function_body(icd, "vkCmdDispatchIndirect")
+
+        for marker in [
+            'env_truthy_default("PDOCKER_GPU_STRICT_PASSTHROUGH", false)',
+            "stageFlags & VK_SHADER_STAGE_COMPUTE_BIT",
+            "strict-compute-push-constant-untracked-layout",
+            "strict-compute-push-constant-layout-unsupported",
+            "captured_layout->push_constant_range_count != 1u",
+            "range->offset != 0",
+            "range->stageFlags != VK_SHADER_STAGE_COMPUTE_BIT",
+            "range->size != captured_layout->push_constant_size",
+        ]:
+            self.assertIn(marker, push_body)
+        for marker in [
+            'env_truthy_default("PDOCKER_GPU_STRICT_PASSTHROUGH", false)',
+            "cmd->compute_pipeline->layout->push_constant_size",
+            "cmd->push_constant_size < required",
+            "strict-compute-push-constant-state-incomplete",
+        ]:
+            self.assertIn(marker, dispatch_helper)
+        for body in [dispatch_body, dispatch_base_body, dispatch_indirect_body]:
+            self.assertIn("validate_bound_descriptor_layouts_before_dispatch(cmd);", body)
+            self.assertIn("validate_strict_compute_push_constant_state_before_dispatch(cmd);", body)
+            self.assertLess(
+                body.index("validate_strict_compute_push_constant_state_before_dispatch(cmd);"),
+                body.index("dispatch_op_clone_push_constants_from_command"),
+            )
+
+
     def test_spirv_observability_is_generic_not_hash_only(self):
         source = GPU_EXECUTOR.read_text()
         for marker in [

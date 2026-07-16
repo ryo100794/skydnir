@@ -28326,6 +28326,19 @@ static bool command_buffer_reject_dispatch_inside_rendering_scope(
     return true;
 }
 
+static void validate_strict_compute_push_constant_state_before_dispatch(
+        PdockerVkCommandBuffer *cmd) {
+    if (!cmd || !cmd->compute_pipeline || !cmd->compute_pipeline->layout) return;
+    if (!env_truthy_default("PDOCKER_GPU_STRICT_PASSTHROUGH", false)) return;
+    const uint32_t required = cmd->compute_pipeline->layout->push_constant_size;
+    if (required == 0) return;
+    if (!cmd->push_constants || cmd->push_constant_size < required) {
+        command_buffer_mark_recording_failed(
+            cmd, "strict-compute-push-constant-state-incomplete");
+        cmd->unsupported_descriptor_set_layout = true;
+    }
+}
+
 VKAPI_ATTR void VKAPI_CALL vkCmdDispatch(
         VkCommandBuffer commandBuffer,
         uint32_t groupCountX,
@@ -28341,6 +28354,8 @@ VKAPI_ATTR void VKAPI_CALL vkCmdDispatch(
         cmd->dispatch_z = groupCountZ;
         cmd->has_dispatch = true;
         validate_bound_descriptor_layouts_before_dispatch(cmd);
+        validate_strict_compute_push_constant_state_before_dispatch(cmd);
+        if (cmd->recording_failed) return;
         if (command_buffer_reserve_dispatch_ops(cmd, 1)) {
             uint32_t op_index = cmd->dispatch_op_count++;
             PdockerVkDispatchOp *op = &cmd->dispatch_ops[op_index];
@@ -28411,6 +28426,8 @@ VKAPI_ATTR void VKAPI_CALL vkCmdDispatchBase(
         cmd->dispatch_z = groupCountZ;
         cmd->has_dispatch = true;
         validate_bound_descriptor_layouts_before_dispatch(cmd);
+        validate_strict_compute_push_constant_state_before_dispatch(cmd);
+        if (cmd->recording_failed) return;
         if (command_buffer_reserve_dispatch_ops(cmd, 1)) {
             uint32_t op_index = cmd->dispatch_op_count++;
             PdockerVkDispatchOp *op = &cmd->dispatch_ops[op_index];
@@ -28501,6 +28518,8 @@ VKAPI_ATTR void VKAPI_CALL vkCmdDispatchIndirect(
         cmd->dispatch_z = 0;
         cmd->has_dispatch = true;
         validate_bound_descriptor_layouts_before_dispatch(cmd);
+        validate_strict_compute_push_constant_state_before_dispatch(cmd);
+        if (cmd->recording_failed) return;
         if (command_buffer_reserve_dispatch_ops(cmd, 1)) {
             uint32_t op_index = cmd->dispatch_op_count++;
             PdockerVkDispatchOp *op = &cmd->dispatch_ops[op_index];
@@ -28582,6 +28601,34 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPushConstants(
     }
     memcpy(payload, pValues, size);
     PdockerVkPipelineLayout *captured_layout = pdocker_vk_pipeline_layout_from_handle(layout);
+    if (env_truthy_default("PDOCKER_GPU_STRICT_PASSTHROUGH", false) &&
+        (stageFlags & VK_SHADER_STAGE_COMPUTE_BIT) != 0) {
+        if (!captured_layout) {
+            free(payload);
+            cmd->graphics_unsupported = true;
+            command_buffer_mark_recording_failed(
+                cmd, "strict-compute-push-constant-untracked-layout");
+            return;
+        }
+        if (captured_layout->push_constant_range_count != 1u ||
+            !captured_layout->push_constant_ranges) {
+            free(payload);
+            cmd->graphics_unsupported = true;
+            command_buffer_mark_recording_failed(
+                cmd, "strict-compute-push-constant-layout-unsupported");
+            return;
+        }
+        const VkPushConstantRange *range = &captured_layout->push_constant_ranges[0];
+        if (range->offset != 0 || range->stageFlags != VK_SHADER_STAGE_COMPUTE_BIT ||
+            range->size != captured_layout->push_constant_size ||
+            offset > range->size || (uint64_t)size > (uint64_t)range->size - (uint64_t)offset) {
+            free(payload);
+            cmd->graphics_unsupported = true;
+            command_buffer_mark_recording_failed(
+                cmd, "strict-compute-push-constant-layout-unsupported");
+            return;
+        }
+    }
     VkPushConstantRange *declared_ranges = NULL;
     uint32_t declared_range_count = captured_layout ? captured_layout->push_constant_range_count : 0u;
     if (declared_range_count > 0) {
