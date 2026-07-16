@@ -13110,6 +13110,230 @@ static bool resolve_copy_alias(PdockerVkBuffer *buffer,
                                PdockerVkMemory **src_memory,
                                VkDeviceSize *src_offset);
 
+static void set_strict_compute_v5_layout_reason(
+        const char **reason_out,
+        const char *reason) {
+    if (reason_out) *reason_out = reason;
+}
+
+static int find_strict_compute_v5_transported_descriptor_type(
+        size_t binding_count,
+        const uint32_t *api_descriptor_sets,
+        const uint32_t *api_descriptor_array_elements,
+        const uint32_t *bindings,
+        const uint32_t *api_descriptor_types,
+        size_t image_descriptor_count,
+        const uint32_t *image_descriptor_sets,
+        const uint32_t *image_descriptor_bindings,
+        const uint32_t *image_descriptor_array_elements,
+        const uint32_t *image_descriptor_types,
+        uint32_t set_index,
+        uint32_t binding,
+        uint32_t array_element,
+        VkDescriptorType *out_type) {
+    bool found = false;
+    VkDescriptorType found_type = (VkDescriptorType)0;
+    for (size_t i = 0; i < binding_count; ++i) {
+        if (api_descriptor_sets[i] != set_index ||
+            bindings[i] != binding ||
+            api_descriptor_array_elements[i] != array_element) {
+            continue;
+        }
+        VkDescriptorType type = (VkDescriptorType)api_descriptor_types[i];
+        if (!found) {
+            found = true;
+            found_type = type;
+        } else if (found_type != type) {
+            return -EPROTO;
+        }
+    }
+    for (size_t i = 0; i < image_descriptor_count; ++i) {
+        if (image_descriptor_sets[i] != set_index ||
+            image_descriptor_bindings[i] != binding ||
+            image_descriptor_array_elements[i] != array_element) {
+            continue;
+        }
+        VkDescriptorType type = (VkDescriptorType)image_descriptor_types[i];
+        if (!found) {
+            found = true;
+            found_type = type;
+        } else if (found_type != type) {
+            return -EPROTO;
+        }
+    }
+    if (!found) return -ENOENT;
+    if (out_type) *out_type = found_type;
+    return 0;
+}
+
+static int validate_strict_compute_v5_layout_descriptor_entry(
+        const PdockerVkPipelineLayout *layout,
+        uint32_t set_index,
+        uint32_t binding,
+        uint32_t array_element,
+        VkDescriptorType descriptor_type,
+        const char **reason_out) {
+    if (!layout || set_index >= layout->set_layout_count ||
+        !layout->set_layouts || !layout->set_layouts[set_index]) {
+        set_strict_compute_v5_layout_reason(
+            reason_out, "strict-compute-v5-layout-synthesis-mismatch");
+        return -EOPNOTSUPP;
+    }
+    const PdockerVkDescriptorSetLayout *set_layout = layout->set_layouts[set_index];
+    int slot = descriptor_layout_slot_for_binding(set_layout, binding);
+    if (slot < 0) {
+        set_strict_compute_v5_layout_reason(
+            reason_out, "strict-compute-v5-layout-synthesis-mismatch");
+        return -EOPNOTSUPP;
+    }
+    uint32_t slot_u = (uint32_t)slot;
+    if (array_element >= descriptor_layout_descriptor_count(set_layout, slot_u)) {
+        set_strict_compute_v5_layout_reason(
+            reason_out, "strict-compute-v5-layout-descriptor-count-mismatch");
+        return -EOPNOTSUPP;
+    }
+    if (set_layout->storage_binding_types[slot_u] != descriptor_type) {
+        set_strict_compute_v5_layout_reason(
+            reason_out, "strict-compute-v5-layout-synthesis-mismatch");
+        return -EPROTO;
+    }
+    return 0;
+}
+
+static int validate_strict_compute_v5_layout_synthesis(
+        const PdockerVkPipelineLayout *layout,
+        size_t binding_count,
+        const uint32_t *api_descriptor_sets,
+        const uint32_t *api_descriptor_array_elements,
+        const uint32_t *bindings,
+        const uint32_t *api_descriptor_types,
+        size_t image_descriptor_count,
+        const uint32_t *image_descriptor_sets,
+        const uint32_t *image_descriptor_bindings,
+        const uint32_t *image_descriptor_array_elements,
+        const uint32_t *image_descriptor_types,
+        const char **reason_out) {
+    set_strict_compute_v5_layout_reason(
+        reason_out, "strict-compute-v5-layout-synthesis-mismatch");
+    if (!layout) return -EOPNOTSUPP;
+
+    const bool has_descriptors = binding_count != 0 || image_descriptor_count != 0;
+    uint32_t max_set_index = 0;
+    for (size_t i = 0; i < binding_count; ++i) {
+        if (api_descriptor_sets[i] > max_set_index) max_set_index = api_descriptor_sets[i];
+    }
+    for (size_t i = 0; i < image_descriptor_count; ++i) {
+        if (image_descriptor_sets[i] > max_set_index) max_set_index = image_descriptor_sets[i];
+    }
+    const uint32_t synthesized_set_count = has_descriptors ? max_set_index + 1u : 1u;
+    if (layout->set_layout_count != synthesized_set_count) {
+        set_strict_compute_v5_layout_reason(
+            reason_out,
+            !has_descriptors && layout->set_layout_count == 0
+                ? "strict-compute-v5-layout-descriptorless-shape-unsupported"
+                : "strict-compute-v5-layout-set-count-unsupported");
+        return -EOPNOTSUPP;
+    }
+    if (layout->set_layout_count > layout->set_layout_capacity ||
+        (layout->set_layout_count > 0 && !layout->set_layouts)) {
+        return -EPROTO;
+    }
+
+    for (size_t i = 0; i < binding_count; ++i) {
+        int rc = validate_strict_compute_v5_layout_descriptor_entry(
+            layout,
+            api_descriptor_sets[i],
+            bindings[i],
+            api_descriptor_array_elements[i],
+            (VkDescriptorType)api_descriptor_types[i],
+            reason_out);
+        if (rc != 0) return rc;
+    }
+    for (size_t i = 0; i < image_descriptor_count; ++i) {
+        int rc = validate_strict_compute_v5_layout_descriptor_entry(
+            layout,
+            image_descriptor_sets[i],
+            image_descriptor_bindings[i],
+            image_descriptor_array_elements[i],
+            (VkDescriptorType)image_descriptor_types[i],
+            reason_out);
+        if (rc != 0) return rc;
+    }
+
+    for (uint32_t set_index = 0; set_index < layout->set_layout_count; ++set_index) {
+        const PdockerVkDescriptorSetLayout *set_layout = layout->set_layouts[set_index];
+        if (!set_layout) return -EPROTO;
+        if (set_layout->update_after_bind_pool) {
+            set_strict_compute_v5_layout_reason(
+                reason_out, "strict-compute-v5-layout-binding-flags-unsupported");
+            return -EOPNOTSUPP;
+        }
+        uint32_t slot_limit = descriptor_layout_slot_count(set_layout);
+        for (uint32_t slot = 0; slot < slot_limit; ++slot) {
+            if (!set_layout->storage_binding_present ||
+                !set_layout->storage_binding_present[slot]) {
+                continue;
+            }
+            if (!set_layout->storage_binding_stage_flags ||
+                !set_layout->storage_binding_types ||
+                !set_layout->storage_binding_counts) {
+                return -EPROTO;
+            }
+            if (set_layout->storage_binding_stage_flags[slot] != VK_SHADER_STAGE_COMPUTE_BIT) {
+                set_strict_compute_v5_layout_reason(
+                    reason_out, "strict-compute-v5-layout-stage-flags-unsupported");
+                return -EOPNOTSUPP;
+            }
+            if (descriptor_layout_binding_flags(set_layout, slot) != 0) {
+                set_strict_compute_v5_layout_reason(
+                    reason_out, "strict-compute-v5-layout-binding-flags-unsupported");
+                return -EOPNOTSUPP;
+            }
+            const uint32_t api_binding = descriptor_layout_binding_number(set_layout, slot);
+            const uint32_t descriptor_count = descriptor_layout_descriptor_count(set_layout, slot);
+            const VkDescriptorType expected_type = set_layout->storage_binding_types[slot];
+            for (uint32_t array_element = 0; array_element < descriptor_count; ++array_element) {
+                if (descriptor_layout_immutable_sampler_valid(set_layout, slot, array_element)) {
+                    set_strict_compute_v5_layout_reason(
+                        reason_out, "strict-compute-v5-layout-immutable-sampler-unsupported");
+                    return -EOPNOTSUPP;
+                }
+                VkDescriptorType transported_type = (VkDescriptorType)0;
+                int rc = find_strict_compute_v5_transported_descriptor_type(
+                    binding_count,
+                    api_descriptor_sets,
+                    api_descriptor_array_elements,
+                    bindings,
+                    api_descriptor_types,
+                    image_descriptor_count,
+                    image_descriptor_sets,
+                    image_descriptor_bindings,
+                    image_descriptor_array_elements,
+                    image_descriptor_types,
+                    set_index,
+                    api_binding,
+                    array_element,
+                    &transported_type);
+                if (rc == -ENOENT) {
+                    set_strict_compute_v5_layout_reason(
+                        reason_out,
+                        array_element == 0
+                            ? "strict-compute-v5-layout-declared-binding-missing"
+                            : "strict-compute-v5-layout-descriptor-array-hole");
+                    return -EOPNOTSUPP;
+                }
+                if (rc != 0) return rc;
+                if (transported_type != expected_type) {
+                    set_strict_compute_v5_layout_reason(
+                        reason_out, "strict-compute-v5-layout-synthesis-mismatch");
+                    return -EPROTO;
+                }
+            }
+        }
+    }
+    return 0;
+}
+
 static int resolve_vulkan_dispatch_group_counts(
         const PdockerVkDispatchOp *op,
         uint32_t *group_count_x,
@@ -13476,6 +13700,33 @@ static int send_generic_vulkan_dispatch_op(
                 }
                 binding_count++;
             }
+        }
+    }
+    if (strict_passthrough) {
+        const char *layout_reason = NULL;
+        int layout_rc = validate_strict_compute_v5_layout_synthesis(
+            op->pipeline ? op->pipeline->layout : NULL,
+            binding_count,
+            api_descriptor_sets,
+            api_descriptor_array_elements,
+            bindings,
+            api_descriptor_types,
+            image_descriptor_count,
+            image_descriptor_sets,
+            image_descriptor_bindings,
+            image_descriptor_array_elements,
+            image_descriptor_types,
+            &layout_reason);
+        if (layout_rc != 0) {
+            fprintf(stderr,
+                    "pdocker-vulkan-icd: generic dispatch rejected: %s dispatch_id=%llu rc=%d set_count=%u bindings=%zu image_descriptors=%zu\n",
+                    layout_reason ? layout_reason : "strict-compute-v5-layout-synthesis-mismatch",
+                    (unsigned long long)dispatch_id,
+                    layout_rc,
+                    op->pipeline && op->pipeline->layout ? op->pipeline->layout->set_layout_count : 0u,
+                    binding_count,
+                    image_descriptor_count);
+            return layout_rc;
         }
     }
     const bool descriptorless_compute_dispatch =
@@ -27656,6 +27907,8 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
         const uint32_t *pDynamicOffsets) {
     PdockerVkPipelineLayout *pipeline_layout = pdocker_vk_pipeline_layout_from_handle(layout);
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    const bool strict_passthrough =
+        env_truthy_default("PDOCKER_GPU_STRICT_PASSTHROUGH", false);
     if (cmd && descriptorSetCount > 0 && pDescriptorSets) {
         PdockerVkDescriptorSet **target_set_handles = NULL;
         PdockerVkDescriptorSet *target_set_snapshots = NULL;
@@ -27681,6 +27934,22 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
             target_set_used = cmd->graphics_bound_set_used;
             target_set_capacity = cmd->graphics_bound_set_capacity;
         } else if (pipelineBindPoint == VK_PIPELINE_BIND_POINT_COMPUTE) {
+            if (strict_passthrough && !pipeline_layout) {
+                cmd->unsupported_descriptor_set_layout = true;
+                command_buffer_mark_recording_failed(
+                    cmd, "strict-compute-descriptor-bind-untracked-layout");
+                if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
+                    fprintf(stderr,
+                            "pdocker-vulkan-icd: strict compute descriptor bind uses untracked pipeline layout 0x%llx\n",
+#if VK_USE_64_BIT_PTR_DEFINES
+                            (unsigned long long)(uintptr_t)layout
+#else
+                            (unsigned long long)layout
+#endif
+                    );
+                }
+                return;
+            }
             target_set_handles = cmd->bound_set_handles;
             target_set_snapshots = cmd->bound_set_snapshots;
             target_set_used = cmd->bound_set_used;

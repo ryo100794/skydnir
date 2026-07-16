@@ -10770,6 +10770,17 @@ class GpuAbiContractTest(unittest.TestCase):
 
 
 
+        bind_body = c_function_body(icd, "vkCmdBindDescriptorSets")
+        self.assertIn('env_truthy_default("PDOCKER_GPU_STRICT_PASSTHROUGH", false)', bind_body)
+        self.assertIn("strict_passthrough && !pipeline_layout", bind_body)
+        self.assertIn("strict-compute-descriptor-bind-untracked-layout", bind_body)
+        self.assertLess(
+            bind_body.index("strict-compute-descriptor-bind-untracked-layout"),
+            bind_body.index("target_set_handles = cmd->bound_set_handles"),
+        )
+
+
+
     def test_vulkan_external_handle_and_sync_pnext_paths_fail_closed(self):
         icd = VULKAN_ICD.read_text()
         alloc_validator = c_function_body(icd, "validate_memory_allocate_pnext")
@@ -16912,6 +16923,55 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertLess(requires_block.index("strict_passthrough ||"),
                         requires_block.index("descriptor_array_transport_required"))
         self.assertIn("strict=%u", generic_sender)
+
+
+    def test_vulkan_dispatch_strict_passthrough_rejects_v5_layout_synthesis_gaps(self):
+        icd = VULKAN_ICD.read_text()
+        generic_sender = c_function_body(icd, "send_generic_vulkan_dispatch_op")
+        layout_validator = c_function_body(icd, "validate_strict_compute_v5_layout_synthesis")
+        descriptor_finder = c_function_body(icd, "find_strict_compute_v5_transported_descriptor_type")
+        descriptor_entry = c_function_body(icd, "validate_strict_compute_v5_layout_descriptor_entry")
+
+        self.assertIn("validate_strict_compute_v5_layout_synthesis", generic_sender)
+        self.assertLess(
+            generic_sender.index("validate_strict_compute_v5_layout_synthesis"),
+            generic_sender.index("const bool descriptorless_compute_dispatch"),
+        )
+        for marker in [
+            "strict-compute-v5-layout-synthesis-mismatch",
+            "strict-compute-v5-layout-set-count-unsupported",
+            "strict-compute-v5-layout-declared-binding-missing",
+            "strict-compute-v5-layout-descriptor-array-hole",
+            "strict-compute-v5-layout-binding-flags-unsupported",
+            "strict-compute-v5-layout-stage-flags-unsupported",
+            "strict-compute-v5-layout-immutable-sampler-unsupported",
+            "strict-compute-v5-layout-descriptorless-shape-unsupported",
+            "layout->set_layout_count != synthesized_set_count",
+            "has_descriptors ? max_set_index + 1u : 1u",
+            "descriptor_layout_binding_flags(set_layout, slot) != 0",
+            "set_layout->storage_binding_stage_flags[slot] != VK_SHADER_STAGE_COMPUTE_BIT",
+            "descriptor_layout_immutable_sampler_valid(set_layout, slot, array_element)",
+            "validate_strict_compute_v5_layout_descriptor_entry",
+            "find_strict_compute_v5_transported_descriptor_type",
+        ]:
+            self.assertIn(marker, layout_validator)
+        for marker in [
+            "strict-compute-v5-layout-descriptor-count-mismatch",
+            "array_element >= descriptor_layout_descriptor_count(set_layout, slot_u)",
+            "set_layout->storage_binding_types[slot_u] != descriptor_type",
+        ]:
+            self.assertIn(marker, descriptor_entry)
+        for marker in [
+            "api_descriptor_sets[i] != set_index",
+            "bindings[i] != binding",
+            "api_descriptor_array_elements[i] != array_element",
+            "image_descriptor_sets[i] != set_index",
+            "image_descriptor_bindings[i] != binding",
+            "image_descriptor_array_elements[i] != array_element",
+            "found_type != type",
+            "return -ENOENT",
+        ]:
+            self.assertIn(marker, descriptor_finder)
 
 
     def test_spirv_observability_is_generic_not_hash_only(self):
