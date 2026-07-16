@@ -8624,11 +8624,18 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("indices->pDepthInputAttachmentIndex", rendering_info_body)
         self.assertIn("indices->pStencilInputAttachmentIndex", rendering_info_body)
 
-    def test_vulkan_host_image_copy_ext_is_advertised_false_only(self):
+    def test_vulkan_host_image_copy_ext_is_not_advertised_without_transport(self):
         icd = VULKAN_ICD.read_text()
         self.assertIn("VK_EXT_HOST_IMAGE_COPY_EXTENSION_NAME", icd)
+        helper_body = c_function_body(icd, "pdocker_supports_host_image_copy_transport")
+        self.assertIn("return false;", helper_body)
         collector_body = c_function_body(icd, "collect_advertised_device_extensions")
+        self.assertIn("pdocker_supports_host_image_copy_transport()", collector_body)
         self.assertIn("ADD_DEVICE_EXTENSION(VK_EXT_HOST_IMAGE_COPY_EXTENSION_NAME", collector_body)
+        self.assertLess(
+            collector_body.index("pdocker_supports_host_image_copy_transport()"),
+            collector_body.index("ADD_DEVICE_EXTENSION(VK_EXT_HOST_IMAGE_COPY_EXTENSION_NAME"),
+        )
 
         features_body = c_function_body(icd, "fill_pnext_features")
         self.assertIn("VkPhysicalDeviceHostImageCopyFeatures", features_body)
@@ -8653,6 +8660,14 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn("return VK_ERROR_FEATURE_NOT_PRESENT;", body)
 
         hidden_body = c_function_body(icd, "proc_address_hidden_by_advertisement")
+        self.assertIn("!pdocker_supports_host_image_copy_transport()", hidden_body)
+        for hidden_marker in [
+            "vkCopyMemoryToImageEXT",
+            "vkCopyImageToMemoryEXT",
+            "vkCopyImageToImageEXT",
+            "vkTransitionImageLayoutEXT",
+        ]:
+            self.assertIn(hidden_marker, hidden_body)
         self.assertNotIn("vkGetImageSubresourceLayout2EXT", hidden_body)
         proc_body = icd.split("static PFN_vkVoidFunction proc_address", 1)[1].split(
             "VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr", 1

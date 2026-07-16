@@ -22384,6 +22384,10 @@ static void write_extension_property(
     properties[index].specVersion = version;
 }
 
+static bool pdocker_supports_host_image_copy_transport(void) {
+    return false;
+}
+
 static uint32_t collect_advertised_device_extensions(
         VkExtensionProperties *properties,
         uint32_t capacity) {
@@ -22504,8 +22508,13 @@ static uint32_t collect_advertised_device_extensions(
                          VK_KHR_SAMPLER_YCBCR_CONVERSION_SPEC_VERSION);
 #endif
 #ifdef VK_EXT_HOST_IMAGE_COPY_EXTENSION_NAME
-    ADD_DEVICE_EXTENSION(VK_EXT_HOST_IMAGE_COPY_EXTENSION_NAME,
-                         VK_EXT_HOST_IMAGE_COPY_SPEC_VERSION);
+    /* Host-image-copy has no pdocker/skydnir transport or executor replay path yet.
+     * Keep the entry points as defensive fail-closed stubs, but do not advertise
+     * or accept the extension until the ABI can carry the copy commands. */
+    if (pdocker_supports_host_image_copy_transport()) {
+        ADD_DEVICE_EXTENSION(VK_EXT_HOST_IMAGE_COPY_EXTENSION_NAME,
+                             VK_EXT_HOST_IMAGE_COPY_SPEC_VERSION);
+    }
 #endif
 #ifdef VK_KHR_MAINTENANCE_4_EXTENSION_NAME
     ADD_DEVICE_EXTENSION(VK_KHR_MAINTENANCE_4_EXTENSION_NAME, VK_KHR_MAINTENANCE_4_SPEC_VERSION);
@@ -35121,6 +35130,15 @@ static bool proc_address_hidden_by_advertisement(const char *pName) {
         !advertised_draw_indirect_count_amd()) {
         return true;
     }
+#ifdef VK_EXT_HOST_IMAGE_COPY_EXTENSION_NAME
+    if (!pdocker_supports_host_image_copy_transport() &&
+        (strcmp(pName, "vkCopyMemoryToImageEXT") == 0 ||
+         strcmp(pName, "vkCopyImageToMemoryEXT") == 0 ||
+         strcmp(pName, "vkCopyImageToImageEXT") == 0 ||
+         strcmp(pName, "vkTransitionImageLayoutEXT") == 0)) {
+        return true;
+    }
+#endif
     return false;
 }
 
