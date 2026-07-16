@@ -22441,6 +22441,10 @@ static bool pdocker_supports_external_handle_transport(void) {
     return false;
 }
 
+static bool pdocker_supports_imageless_framebuffer_transport(void) {
+    return false;
+}
+
 static bool pdocker_supports_sampler_ycbcr_conversion_transport(void) {
     return false;
 }
@@ -22521,8 +22525,10 @@ static uint32_t collect_advertised_device_extensions(
                          VK_KHR_SHADER_ATOMIC_INT64_SPEC_VERSION);
 #endif
 #ifdef VK_KHR_IMAGELESS_FRAMEBUFFER_EXTENSION_NAME
-    ADD_DEVICE_EXTENSION(VK_KHR_IMAGELESS_FRAMEBUFFER_EXTENSION_NAME,
-                         VK_KHR_IMAGELESS_FRAMEBUFFER_SPEC_VERSION);
+    if (pdocker_supports_imageless_framebuffer_transport()) {
+        ADD_DEVICE_EXTENSION(VK_KHR_IMAGELESS_FRAMEBUFFER_EXTENSION_NAME,
+                             VK_KHR_IMAGELESS_FRAMEBUFFER_SPEC_VERSION);
+    }
 #endif
 #ifdef VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME
     ADD_DEVICE_EXTENSION(VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME,

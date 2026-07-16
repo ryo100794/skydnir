@@ -3470,10 +3470,9 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 const char *imageless_extensions[] = {{ VK_KHR_IMAGELESS_FRAMEBUFFER_EXTENSION_NAME }};
                 create_info.enabledExtensionCount = 1;
                 create_info.ppEnabledExtensionNames = imageless_extensions;
-                if (!device_extension_advertised_name(VK_KHR_IMAGELESS_FRAMEBUFFER_EXTENSION_NAME) ||
-                    validate_device_extensions(&create_info) != VK_SUCCESS ||
-                    validate_device_feature_requests(&create_info) != VK_SUCCESS) {{
-                    fprintf(stderr, "VK_KHR_imageless_framebuffer false-only enable failed\\n");
+                if (device_extension_advertised_name(VK_KHR_IMAGELESS_FRAMEBUFFER_EXTENSION_NAME) ||
+                    validate_device_extensions(&create_info) != VK_ERROR_EXTENSION_NOT_PRESENT) {{
+                    fprintf(stderr, "VK_KHR_imageless_framebuffer was accepted without transport\\n");
                     return 14;
                 }}
             #endif

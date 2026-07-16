@@ -10347,6 +10347,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGELESS_FRAMEBUFFER_FEATURES", icd)
         self.assertIn("p->imagelessFramebuffer = VK_FALSE", icd)
         self.assertIn("supported = !p->imagelessFramebuffer", icd)
+        self.assertIn("pdocker_supports_imageless_framebuffer_transport", icd)
+        self.assertIn("if (pdocker_supports_imageless_framebuffer_transport())", collector_body)
         self.assertIn("ADD_DEVICE_EXTENSION(VK_KHR_IMAGELESS_FRAMEBUFFER_EXTENSION_NAME", collector_body)
         self.assertIn("ADD_DEVICE_EXTENSION(VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME", collector_body)
         self.assertIn("ADD_DEVICE_EXTENSION(VK_KHR_UNIFORM_BUFFER_STANDARD_LAYOUT_EXTENSION_NAME", collector_body)
