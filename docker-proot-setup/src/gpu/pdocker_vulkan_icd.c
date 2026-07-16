@@ -17808,6 +17808,20 @@ static void fill_pnext_properties(void *pNext) {
                 break;
             }
 #endif
+#ifdef VK_KHR_MAINTENANCE_5_EXTENSION_NAME
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_5_PROPERTIES: {
+                VkPhysicalDeviceMaintenance5Properties *p =
+                    (VkPhysicalDeviceMaintenance5Properties *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                p->earlyFragmentMultisampleCoverageAfterSampleCounting = VK_FALSE;
+                p->earlyFragmentSampleMaskTestBeforeSampleCounting = VK_FALSE;
+                p->depthStencilSwizzleOneSupport = VK_FALSE;
+                p->polygonModePointSize = VK_FALSE;
+                p->nonStrictSinglePixelWideLinesUseParallelogram = VK_FALSE;
+                p->nonStrictWideLinesUseParallelogram = VK_FALSE;
+                break;
+            }
+#endif
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES: {
                 VkPhysicalDeviceSubgroupProperties *p = (VkPhysicalDeviceSubgroupProperties *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
@@ -24646,6 +24660,18 @@ static VkResult validate_and_fill_pipeline_feedback_pnext(
                     return unsupported_create_info_pnext_result(api_name, node);
                 }
                 break;
+#endif
+#ifdef VK_KHR_MAINTENANCE_5_EXTENSION_NAME
+            case VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO: {
+                const VkPipelineCreateFlags2CreateInfo *flags2_info =
+                    (const VkPipelineCreateFlags2CreateInfo *)node;
+                if (flags2_info->flags != 0) {
+                    trace_icd_runtime_failure("pipeline-create-flags2-nonzero",
+                                              VK_ERROR_FEATURE_NOT_PRESENT);
+                    return VK_ERROR_FEATURE_NOT_PRESENT;
+                }
+                break;
+            }
 #endif
 #if defined(VK_VERSION_1_3) || defined(VK_EXT_pipeline_robustness)
             case VK_STRUCTURE_TYPE_PIPELINE_ROBUSTNESS_CREATE_INFO: {

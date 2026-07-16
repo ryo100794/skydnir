@@ -370,6 +370,34 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 ((PFN_vkGetRenderingAreaGranularityKHR)proc_address("vkGetRenderingAreaGranularityKHR"))(
                     VK_NULL_HANDLE, &area, &granularity);
                 if (granularity.width != 1 || granularity.height != 1) return 11;
+
+                VkPhysicalDeviceMaintenance5Properties maintenance5_props;
+                VkPhysicalDeviceProperties2 properties2;
+                memset(&maintenance5_props, 0xff, sizeof(maintenance5_props));
+                memset(&properties2, 0, sizeof(properties2));
+                properties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+                properties2.pNext = &maintenance5_props;
+                maintenance5_props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_5_PROPERTIES;
+                maintenance5_props.pNext = NULL;
+                vkGetPhysicalDeviceProperties2(VK_NULL_HANDLE, &properties2);
+                if (maintenance5_props.sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_5_PROPERTIES ||
+                    maintenance5_props.pNext != NULL ||
+                    maintenance5_props.earlyFragmentMultisampleCoverageAfterSampleCounting != VK_FALSE ||
+                    maintenance5_props.earlyFragmentSampleMaskTestBeforeSampleCounting != VK_FALSE ||
+                    maintenance5_props.depthStencilSwizzleOneSupport != VK_FALSE ||
+                    maintenance5_props.polygonModePointSize != VK_FALSE ||
+                    maintenance5_props.nonStrictSinglePixelWideLinesUseParallelogram != VK_FALSE ||
+                    maintenance5_props.nonStrictWideLinesUseParallelogram != VK_FALSE) return 12;
+
+                VkPipelineCreateFlags2CreateInfo flags2;
+                memset(&flags2, 0, sizeof(flags2));
+                flags2.sType = VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO;
+                if (validate_and_fill_pipeline_feedback_pnext(
+                        "unit-maintenance5-flags2", &flags2, 1u, false) != VK_SUCCESS) return 13;
+                flags2.flags = (VkPipelineCreateFlags2)1;
+                if (validate_and_fill_pipeline_feedback_pnext(
+                        "unit-maintenance5-flags2", &flags2, 1u, false) == VK_SUCCESS) return 14;
+
                 ((PFN_vkCmdBindIndexBuffer2KHR)proc_address("vkCmdBindIndexBuffer2KHR"))(
                     VK_NULL_HANDLE, VK_NULL_HANDLE, 0, VK_WHOLE_SIZE, VK_INDEX_TYPE_UINT32);
             #endif

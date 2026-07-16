@@ -8826,6 +8826,18 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VkPhysicalDeviceMaintenance5Features", features_body)
         self.assertIn("p->maintenance5 = VK_FALSE;", features_body)
 
+        properties_body = c_function_body(icd, "fill_pnext_properties")
+        self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_5_PROPERTIES", properties_body)
+        self.assertIn("VkPhysicalDeviceMaintenance5Properties", properties_body)
+        self.assertIn("p->depthStencilSwizzleOneSupport = VK_FALSE;", properties_body)
+        self.assertIn("p->nonStrictWideLinesUseParallelogram = VK_FALSE;", properties_body)
+
+        feedback_body = c_function_body(icd, "validate_and_fill_pipeline_feedback_pnext")
+        self.assertIn("VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO", feedback_body)
+        self.assertIn("VkPipelineCreateFlags2CreateInfo", feedback_body)
+        self.assertIn("flags2_info->flags != 0", feedback_body)
+        self.assertIn("pipeline-create-flags2-nonzero", feedback_body)
+
         validate_body = c_function_body(icd, "validate_device_feature_requests")
         self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_5_FEATURES", validate_body)
         self.assertIn("supported = !p->maintenance5;", validate_body)

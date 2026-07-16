@@ -3220,3 +3220,15 @@ executor ABI, llama.cpp, Dockerfiles, models, prompts, SPIR-V bytes, or shader
 policy.
 
 Validation: `env -u PYTHONPATH python3 -m unittest tests.test_vulkan_icd_sync_harness.VulkanIcdSyncHarnessTest.test_packed_depth_stencil_buffer_image_copy_footprint_is_aspect_aware tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_graphics_buffer_resources_and_image_copy_footprint_are_guarded tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_graphics_v610_depth_stencil_copy_has_explicit_plane_staging_boundary -q`.
+
+### 2026-07-16 maintenance5 properties and flags2 zero-only lane
+
+CPU/static pass-through work closed another advertised `VK_KHR_maintenance5`
+contract gap.  `VkPhysicalDeviceMaintenance5Properties` is now recognized in the
+properties pNext chain and reports all optional maintenance5 behavior flags as
+`VK_FALSE`.  `VkPipelineCreateFlags2CreateInfo` is accepted as zero-only
+pipeline metadata and any non-zero 64-bit pipeline flags fail closed before
+pipeline creation.  This keeps the standalone maintenance5 query/alias surface
+truthful without promoting Vulkan 1.4 semantics or adding executor ABI fields.
+
+Validation: `env -u PYTHONPATH python3 -m unittest tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_maintenance5_extension_exposes_query_and_index_buffer2_aliases tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_maintenance5_is_advertised_with_false_only_feature_bit -q`.
