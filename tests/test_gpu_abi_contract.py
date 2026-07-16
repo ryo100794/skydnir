@@ -8681,11 +8681,18 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, proc_body)
 
-    def test_vulkan_sampler_ycbcr_conversion_khr_is_advertised_false_only(self):
+    def test_vulkan_sampler_ycbcr_conversion_khr_is_not_advertised_without_transport(self):
         icd = VULKAN_ICD.read_text()
         self.assertIn("VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME", icd)
+        helper_body = c_function_body(icd, "pdocker_supports_sampler_ycbcr_conversion_transport")
+        self.assertIn("return false;", helper_body)
         collector_body = c_function_body(icd, "collect_advertised_device_extensions")
+        self.assertIn("pdocker_supports_sampler_ycbcr_conversion_transport()", collector_body)
         self.assertIn("ADD_DEVICE_EXTENSION(VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME", collector_body)
+        self.assertLess(
+            collector_body.index("pdocker_supports_sampler_ycbcr_conversion_transport()"),
+            collector_body.index("ADD_DEVICE_EXTENSION(VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME"),
+        )
 
         features_body = c_function_body(icd, "fill_pnext_features")
         self.assertIn("VkPhysicalDeviceSamplerYcbcrConversionFeatures", features_body)
@@ -8699,8 +8706,14 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("return VK_ERROR_FEATURE_NOT_PRESENT;", ycbcr_body)
 
         hidden_body = c_function_body(icd, "proc_address_hidden_by_advertisement")
-        self.assertNotIn("vkCreateSamplerYcbcrConversionKHR", hidden_body)
-        self.assertNotIn("vkDestroySamplerYcbcrConversionKHR", hidden_body)
+        self.assertIn("!pdocker_supports_sampler_ycbcr_conversion_transport()", hidden_body)
+        self.assertIn("vkCreateSamplerYcbcrConversionKHR", hidden_body)
+        self.assertIn("vkDestroySamplerYcbcrConversionKHR", hidden_body)
+        proc_body = icd.split("static PFN_vkVoidFunction proc_address", 1)[1].split(
+            "VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr", 1
+        )[0]
+        self.assertIn('MAP_ALIAS("vkCreateSamplerYcbcrConversionKHR", vkCreateSamplerYcbcrConversion);', proc_body)
+        self.assertIn('MAP_ALIAS("vkDestroySamplerYcbcrConversionKHR", vkDestroySamplerYcbcrConversion);', proc_body)
 
     def test_vulkan_buffer_device_address_khr_is_advertised_false_only(self):
         icd = VULKAN_ICD.read_text()
@@ -10909,7 +10922,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "vkCreateSamplerYcbcrConversionKHR",
             "vkDestroySamplerYcbcrConversionKHR",
         ]:
-            self.assertNotIn(alias, hidden_body)
+            self.assertIn(alias, hidden_body)
 
 
     def test_vulkan_physical_memory_properties2_output_is_fully_initialized(self):

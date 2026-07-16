@@ -478,7 +478,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_sampler_ycbcr_conversion_khr_extension_is_false_only(self):
+    def test_sampler_ycbcr_conversion_khr_extension_is_not_advertised_without_transport(self):
         source = textwrap.dedent(
             f"""
             #include <stdint.h>
@@ -498,12 +498,12 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
 
             int main(void) {{
             #ifdef VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME
-                if (!device_extension_advertised_name(VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME)) return 2;
+                if (device_extension_advertised_name(VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME)) return 2;
                 uint32_t count = 64;
                 VkExtensionProperties extensions[64];
                 memset(extensions, 0, sizeof(extensions));
                 if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &count, extensions) != VK_SUCCESS) return 3;
-                if (!extension_seen(extensions, count, VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME)) return 4;
+                if (extension_seen(extensions, count, VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME)) return 4;
 
                 const char *enabled[] = {{ VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME }};
                 VkDeviceCreateInfo device_info;
@@ -511,12 +511,10 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
                 device_info.enabledExtensionCount = 1;
                 device_info.ppEnabledExtensionNames = enabled;
-                if (validate_device_extensions(&device_info) != VK_SUCCESS) return 5;
+                if (validate_device_extensions(&device_info) != VK_ERROR_EXTENSION_NOT_PRESENT) return 5;
 
-                if (proc_address("vkCreateSamplerYcbcrConversionKHR") !=
-                    (PFN_vkVoidFunction)vkCreateSamplerYcbcrConversion) return 6;
-                if (proc_address("vkDestroySamplerYcbcrConversionKHR") !=
-                    (PFN_vkVoidFunction)vkDestroySamplerYcbcrConversion) return 7;
+                if (proc_address("vkCreateSamplerYcbcrConversionKHR") != NULL) return 6;
+                if (proc_address("vkDestroySamplerYcbcrConversionKHR") != NULL) return 7;
 
                 VkPhysicalDeviceSamplerYcbcrConversionFeatures features;
                 memset(&features, 0xff, sizeof(features));
@@ -527,6 +525,8 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     features.pNext != NULL ||
                     features.samplerYcbcrConversion != VK_FALSE) return 8;
 
+                device_info.enabledExtensionCount = 0;
+                device_info.ppEnabledExtensionNames = NULL;
                 device_info.pNext = &features;
                 features.samplerYcbcrConversion = VK_TRUE;
                 if (validate_device_feature_requests(&device_info) == VK_SUCCESS) return 9;
@@ -548,11 +548,9 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 create_info.yChromaOffset = VK_CHROMA_LOCATION_COSITED_EVEN;
                 create_info.chromaFilter = VK_FILTER_NEAREST;
                 create_info.forceExplicitReconstruction = VK_FALSE;
-                if (((PFN_vkCreateSamplerYcbcrConversionKHR)proc_address("vkCreateSamplerYcbcrConversionKHR"))(
-                        VK_NULL_HANDLE, &create_info, NULL, &conversion) != VK_ERROR_FEATURE_NOT_PRESENT) return 11;
+                if (vkCreateSamplerYcbcrConversion(VK_NULL_HANDLE, &create_info, NULL, &conversion) != VK_ERROR_FEATURE_NOT_PRESENT) return 11;
                 if (conversion != VK_NULL_HANDLE) return 12;
-                ((PFN_vkDestroySamplerYcbcrConversionKHR)proc_address("vkDestroySamplerYcbcrConversionKHR"))(
-                    VK_NULL_HANDLE, VK_NULL_HANDLE, NULL);
+                vkDestroySamplerYcbcrConversion(VK_NULL_HANDLE, VK_NULL_HANDLE, NULL);
             #endif
                 return 0;
             }}
@@ -560,7 +558,6 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         )
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stderr)
-
 
     def test_buffer_device_address_khr_extension_is_false_only(self):
         source = textwrap.dedent(

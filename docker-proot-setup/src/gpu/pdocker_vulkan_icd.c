@@ -22388,6 +22388,10 @@ static bool pdocker_supports_host_image_copy_transport(void) {
     return false;
 }
 
+static bool pdocker_supports_sampler_ycbcr_conversion_transport(void) {
+    return false;
+}
+
 static uint32_t collect_advertised_device_extensions(
         VkExtensionProperties *properties,
         uint32_t capacity) {
@@ -22504,8 +22508,11 @@ static uint32_t collect_advertised_device_extensions(
     ADD_DEVICE_EXTENSION(VK_KHR_EXTERNAL_FENCE_EXTENSION_NAME, VK_KHR_EXTERNAL_FENCE_SPEC_VERSION);
 #endif
 #ifdef VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME
-    ADD_DEVICE_EXTENSION(VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME,
-                         VK_KHR_SAMPLER_YCBCR_CONVERSION_SPEC_VERSION);
+    /* YCbCr conversion is not transported through sampler/image-view metadata yet. */
+    if (pdocker_supports_sampler_ycbcr_conversion_transport()) {
+        ADD_DEVICE_EXTENSION(VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME,
+                             VK_KHR_SAMPLER_YCBCR_CONVERSION_SPEC_VERSION);
+    }
 #endif
 #ifdef VK_EXT_HOST_IMAGE_COPY_EXTENSION_NAME
     /* Host-image-copy has no pdocker/skydnir transport or executor replay path yet.
@@ -35130,6 +35137,13 @@ static bool proc_address_hidden_by_advertisement(const char *pName) {
         !advertised_draw_indirect_count_amd()) {
         return true;
     }
+#ifdef VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME
+    if (!pdocker_supports_sampler_ycbcr_conversion_transport() &&
+        (strcmp(pName, "vkCreateSamplerYcbcrConversionKHR") == 0 ||
+         strcmp(pName, "vkDestroySamplerYcbcrConversionKHR") == 0)) {
+        return true;
+    }
+#endif
 #ifdef VK_EXT_HOST_IMAGE_COPY_EXTENSION_NAME
     if (!pdocker_supports_host_image_copy_transport() &&
         (strcmp(pName, "vkCopyMemoryToImageEXT") == 0 ||
