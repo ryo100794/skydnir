@@ -1517,7 +1517,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 vkGetPhysicalDeviceMemoryProperties2(VK_NULL_HANDLE, &memory2);
                 if (budget.sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT ||
                     budget.pNext != NULL) return 7;
-                if (memory2.memoryProperties.memoryHeapCount == 0) return 8;
+                if (memory2.memoryProperties.memoryHeapCount < 2) return 8;
                 for (uint32_t i = 0; i < memory2.memoryProperties.memoryHeapCount; ++i) {{
                     if (budget.heapBudget[i] != memory2.memoryProperties.memoryHeaps[i].size) {{
                         fprintf(stderr, "heap %u budget %llu != heap size %llu\\n",
@@ -1526,8 +1526,42 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                                 (unsigned long long)memory2.memoryProperties.memoryHeaps[i].size);
                         return 9;
                     }}
-                    if (budget.heapUsage[i] != 0) return 10;
                 }}
+                const VkDeviceSize initial_heap0 = budget.heapUsage[0];
+                const VkDeviceSize initial_heap1 = budget.heapUsage[1];
+
+                VkMemoryAllocateInfo alloc_info;
+                memset(&alloc_info, 0, sizeof(alloc_info));
+                alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+                alloc_info.allocationSize = 4096;
+                alloc_info.memoryTypeIndex = 1;
+                VkDeviceMemory memory = VK_NULL_HANDLE;
+                if (vkAllocateMemory(VK_NULL_HANDLE, &alloc_info, NULL, &memory) != VK_SUCCESS ||
+                    memory == VK_NULL_HANDLE) return 10;
+
+                memset(&memory2, 0, sizeof(memory2));
+                memset(&budget, 0, sizeof(budget));
+                memory2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2;
+                memory2.pNext = &budget;
+                budget.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT;
+                vkGetPhysicalDeviceMemoryProperties2(VK_NULL_HANDLE, &memory2);
+                if (budget.heapUsage[0] != initial_heap0) return 11;
+                if (budget.heapUsage[1] != initial_heap1 + alloc_info.allocationSize) {{
+                    fprintf(stderr, "heap 1 usage %llu != expected %llu\\n",
+                            (unsigned long long)budget.heapUsage[1],
+                            (unsigned long long)(initial_heap1 + alloc_info.allocationSize));
+                    return 12;
+                }}
+
+                vkFreeMemory(VK_NULL_HANDLE, memory, NULL);
+                memset(&memory2, 0, sizeof(memory2));
+                memset(&budget, 0, sizeof(budget));
+                memory2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2;
+                memory2.pNext = &budget;
+                budget.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT;
+                vkGetPhysicalDeviceMemoryProperties2(VK_NULL_HANDLE, &memory2);
+                if (budget.heapUsage[0] != initial_heap0) return 13;
+                if (budget.heapUsage[1] != initial_heap1) return 14;
                 return 0;
             #endif
             }}

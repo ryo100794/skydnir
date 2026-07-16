@@ -10985,7 +10985,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT", helper_body)
         self.assertIn("zero_vk_out_struct_preserve_chain(budget, sizeof(*budget), header);", helper_body)
         self.assertIn("budget->heapBudget[i] = memoryProperties->memoryHeaps[i].size;", helper_body)
-        self.assertIn("budget->heapUsage[i] = 0;", helper_body)
+        self.assertIn("budget->heapUsage[i] = pdocker_vk_heap_usage(i);", helper_body)
+        self.assertIn("static uint64_t pdocker_vk_memory_heap_usage_bytes[VK_MAX_MEMORY_HEAPS];", icd)
+        self.assertIn("pdocker_vk_heap_usage_add(memory->heap_index, memory->size);", icd)
+        self.assertIn("pdocker_vk_heap_usage_sub(m->heap_index, m->size);", icd)
 
 
     def test_vulkan_memory_requirements2_outputs_are_fully_initialized(self):

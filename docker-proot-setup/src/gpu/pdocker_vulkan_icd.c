@@ -560,6 +560,7 @@ struct PdockerVkMemory {
     uint64_t object_id;
     size_t size;
     uint32_t memory_type_index;
+    uint32_t heap_index;
     VkMemoryPropertyFlags property_flags;
     int fd;
     void *map;
@@ -689,6 +690,48 @@ struct PdockerVkSampler {
     VkSamplerReductionMode reduction_mode;
     uint64_t generation;
 };
+
+static uint64_t pdocker_vk_memory_heap_usage_bytes[VK_MAX_MEMORY_HEAPS];
+
+static uint32_t pdocker_vk_heap_index_for_memory_type(uint32_t memory_type_index) {
+    if (memory_type_index == 0) return 0;
+    if (memory_type_index == 1) return 1;
+    return VK_MAX_MEMORY_HEAPS;
+}
+
+static void pdocker_vk_heap_usage_add(uint32_t heap_index, size_t size) {
+    if (heap_index >= VK_MAX_MEMORY_HEAPS || size == 0) return;
+    const uint64_t delta = (uint64_t)size;
+    uint64_t old_value;
+    uint64_t new_value;
+    do {
+        old_value = __atomic_load_n(
+            &pdocker_vk_memory_heap_usage_bytes[heap_index], __ATOMIC_RELAXED);
+        new_value = UINT64_MAX - old_value < delta ? UINT64_MAX : old_value + delta;
+    } while (!__atomic_compare_exchange_n(
+        &pdocker_vk_memory_heap_usage_bytes[heap_index], &old_value, new_value,
+        false, __ATOMIC_RELAXED, __ATOMIC_RELAXED));
+}
+
+static void pdocker_vk_heap_usage_sub(uint32_t heap_index, size_t size) {
+    if (heap_index >= VK_MAX_MEMORY_HEAPS || size == 0) return;
+    const uint64_t delta = (uint64_t)size;
+    uint64_t old_value;
+    uint64_t new_value;
+    do {
+        old_value = __atomic_load_n(
+            &pdocker_vk_memory_heap_usage_bytes[heap_index], __ATOMIC_RELAXED);
+        new_value = old_value < delta ? 0 : old_value - delta;
+    } while (!__atomic_compare_exchange_n(
+        &pdocker_vk_memory_heap_usage_bytes[heap_index], &old_value, new_value,
+        false, __ATOMIC_RELAXED, __ATOMIC_RELAXED));
+}
+
+static VkDeviceSize pdocker_vk_heap_usage(uint32_t heap_index) {
+    if (heap_index >= VK_MAX_MEMORY_HEAPS) return 0;
+    return (VkDeviceSize)__atomic_load_n(
+        &pdocker_vk_memory_heap_usage_bytes[heap_index], __ATOMIC_RELAXED);
+}
 
 static uint64_t pdocker_vk_memory_object_id(const PdockerVkMemory *memory) {
     return memory ? memory->object_id : 0;
@@ -20237,7 +20280,7 @@ static void fill_memory_properties2_pnext(
                     if (heap_count > VK_MAX_MEMORY_HEAPS) heap_count = VK_MAX_MEMORY_HEAPS;
                     for (uint32_t i = 0; i < heap_count; ++i) {
                         budget->heapBudget[i] = memoryProperties->memoryHeaps[i].size;
-                        budget->heapUsage[i] = 0;
+                        budget->heapUsage[i] = pdocker_vk_heap_usage(i);
                     }
                 }
                 break;
@@ -22109,6 +22152,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateMemory(
     memory->object_id = next_vulkan_object_generation();
     memory->size = (size_t)pAllocateInfo->allocationSize;
     memory->memory_type_index = pAllocateInfo->memoryTypeIndex;
+    memory->heap_index = pdocker_vk_heap_index_for_memory_type(memory->memory_type_index);
     memory->property_flags = memory->memory_type_index == 0
         ? VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
         : (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
@@ -22178,6 +22222,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateMemory(
                     memory->page_count);
         }
     }
+    pdocker_vk_heap_usage_add(memory->heap_index, memory->size);
     *pMemory = pdocker_vk_memory_to_handle(memory);
     return VK_SUCCESS;
 }
@@ -22191,6 +22236,7 @@ VKAPI_ATTR void VKAPI_CALL vkFreeMemory(
     PdockerVkMemory *m = pdocker_vk_memory_from_handle(memory);
     if (!m) return;
     unregister_guarded_memory(m);
+    pdocker_vk_heap_usage_sub(m->heap_index, m->size);
     if (m->map && m->map != MAP_FAILED) munmap(m->map, m->size);
     if (m->fd >= 0) close(m->fd);
     free(m->resident_pages);
