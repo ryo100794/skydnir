@@ -9597,6 +9597,14 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertLess(dispatch_send_body.index("api_buffer_ids[i]"), dispatch_send_body.index("base_group_x=%u"))
         self.assertIn("VKAPI_ATTR void VKAPI_CALL vkCmdDispatchIndirect", dispatch_body)
         self.assertIn("op->dispatch_indirect = true;", dispatch_body)
+        for marker in [
+            "dispatch-indirect-buffer-invalid",
+            "dispatch-indirect-offset-unaligned",
+            "cmd->unsupported_descriptor_set_layout = true;",
+        ]:
+            self.assertIn(marker, dispatch_body)
+        self.assertLess(dispatch_body.index("dispatch-indirect-buffer-invalid"), dispatch_body.index("cmd->dispatch_x = 0;"))
+        self.assertLess(dispatch_body.index("dispatch-indirect-offset-unaligned"), dispatch_body.index("cmd->dispatch_x = 0;"))
         self.assertIn("MAP_PROC(vkCmdDispatchIndirect);", icd)
         self.assertIn("resolve_vulkan_dispatch_group_counts", icd)
         resolve_body = icd.split("static int resolve_vulkan_dispatch_group_counts", 1)[1].split(

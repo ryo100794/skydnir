@@ -29135,6 +29135,16 @@ VKAPI_ATTR void VKAPI_CALL vkCmdDispatchIndirect(
     if (cmd) {
         if (command_buffer_reject_dispatch_inside_rendering_scope(cmd)) return;
         PdockerVkBuffer *indirect_buffer = pdocker_vk_buffer_from_handle(buffer);
+        if (!indirect_buffer) {
+            cmd->unsupported_descriptor_set_layout = true;
+            command_buffer_mark_recording_failed(cmd, "dispatch-indirect-buffer-invalid");
+            return;
+        }
+        if ((offset & 3u) != 0) {
+            cmd->unsupported_descriptor_set_layout = true;
+            command_buffer_mark_recording_failed(cmd, "dispatch-indirect-offset-unaligned");
+            return;
+        }
         cmd->dispatch_x = 0;
         cmd->dispatch_y = 0;
         cmd->dispatch_z = 0;
