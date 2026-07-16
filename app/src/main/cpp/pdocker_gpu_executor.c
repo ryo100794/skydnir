@@ -9769,6 +9769,18 @@ static int validate_vulkan_compute_v56_descriptor_writes(
         rc = vulkan_dispatch_descriptor_type_from_api_exact(
             bindings[i].api_descriptor_type, &descriptor_type);
         if (rc != 0) goto cleanup;
+        const int descriptor_type_dynamic =
+            vulkan_dispatch_descriptor_type_is_dynamic(bindings[i].api_descriptor_type);
+        if (bindings[i].api_dynamic != descriptor_type_dynamic) {
+            rc = -EPROTO;
+            goto cleanup;
+        }
+        if (descriptor_type_dynamic &&
+            (bindings[i].api_base_offset < 0 ||
+             bindings[i].api_dynamic_offset > UINT32_MAX)) {
+            rc = -ERANGE;
+            goto cleanup;
+        }
         rc = record_vulkan_compute_v56_descriptor_write(
             layout_slots, layout_slot_count, keys, key_capacity, &key_count,
             slot_write_counts, bindings[i].descriptor_set, bindings[i].binding,
@@ -24172,6 +24184,10 @@ static int build_vulkan_dispatch_v5_native_plan(
             (d->descriptor_flags & PDOCKER_GPU_V5_DESCRIPTOR_FLAG_DYNAMIC) != 0,
             d->dynamic_offset);
         if (dynamic_alignment_rc != 0) return dynamic_alignment_rc;
+        if (vulkan_dispatch_descriptor_type_is_dynamic(d->descriptor_type) !=
+            ((d->descriptor_flags & PDOCKER_GPU_V5_DESCRIPTOR_FLAG_DYNAMIC) != 0)) {
+            return -EPROTO;
+        }
         if (d->resource_id != 0 && d->resource_id != buffer->resource_id) return -EPROTO;
         uint64_t api_offset = 0;
         if (checked_u64_add3(d->buffer_offset, d->dynamic_offset, 0, &api_offset) != 0) return -EOVERFLOW;
@@ -24369,6 +24385,10 @@ static int materialize_vulkan_dispatch_v5_native_plan_bindings(
             (d->descriptor_flags & PDOCKER_GPU_V5_DESCRIPTOR_FLAG_DYNAMIC) != 0,
             d->dynamic_offset);
         if (dynamic_alignment_rc != 0) return dynamic_alignment_rc;
+        if (vulkan_dispatch_descriptor_type_is_dynamic(d->descriptor_type) !=
+            ((d->descriptor_flags & PDOCKER_GPU_V5_DESCRIPTOR_FLAG_DYNAMIC) != 0)) {
+            return -EPROTO;
+        }
         (void)descriptor_type;
         if (d->resource_id != 0 && d->resource_id != buffer->resource_id) return -EPROTO;
         uint64_t api_offset = 0;

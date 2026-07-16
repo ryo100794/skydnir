@@ -5147,6 +5147,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "entry->pipeline_layout_id != plan->compute_pipeline_layout_id",
             "entry->immutable_sampler_count > entry->descriptor_count",
             "entry->offset > UINT32_MAX - entry->size",
+            "vulkan_dispatch_descriptor_type_is_dynamic(d->descriptor_type) !=",
         ]:
             self.assertIn(marker, plan)
 
@@ -5156,6 +5157,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "object_tables_out->compute_descriptor_set_layouts = plan->compute_descriptor_set_layouts;",
             "object_tables_out->compute_pipeline_layout_sets = plan->compute_pipeline_layout_sets;",
             "object_tables_out->compute_push_constant_ranges = plan->compute_push_constant_ranges;",
+            "vulkan_dispatch_descriptor_type_is_dynamic(d->descriptor_type) !=",
         ]:
             self.assertIn(marker, materializer)
 
@@ -5184,6 +5186,8 @@ class GpuAbiContractTest(unittest.TestCase):
         exact_write_validator = c_function_body(executor, "validate_vulkan_compute_v56_descriptor_writes")
         for marker in [
             "vulkan_dispatch_descriptor_type_from_api_exact",
+            "bindings[i].api_dynamic != descriptor_type_dynamic",
+            "bindings[i].api_dynamic_offset > UINT32_MAX",
             "record_vulkan_compute_v56_descriptor_write",
             "slot_write_counts",
             "vulkan_dispatch_descriptor_type_is_dynamic(slot->descriptor_type)",
