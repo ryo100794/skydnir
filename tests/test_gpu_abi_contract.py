@@ -321,6 +321,17 @@ def c_function_body(source, name):
     raise AssertionError(f"unterminated function body: {name}")
 
 
+def c_function_signature(source, name):
+    signature = re.search(
+        rf"(?m)^(?:VKAPI_ATTR\s+)?[A-Za-z_][A-Za-z0-9_\s\*]*?"
+        rf"(?:VKAPI_CALL\s+)?{re.escape(name)}\s*\([^;]*?\)\s*\{{",
+        source,
+        re.S,
+    )
+    assert signature is not None, name
+    return signature.group(0).rsplit("{", 1)[0]
+
+
 def c_block_from(source, needle):
     start = source.index(needle)
     brace = source.index("{", start)
@@ -15552,7 +15563,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "send_executor_semaphore_create(sem)",
             "send_executor_semaphore_destroy(sem)",
             "send_executor_semaphore_counter(sem, &value, &result)",
-            "send_executor_semaphore_wait(pWaitInfo, timeout, &result)",
+            "send_executor_semaphore_wait(device, pWaitInfo, timeout, &result)",
             "send_executor_semaphore_signal(sem, pSignalInfo->value, &result)",
         ]:
             self.assertIn(marker, icd)
@@ -15562,6 +15573,14 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         self.assertIn("bridge_available()", create_body)
         self.assertIn("send_executor_semaphore_create(sem)", create_body)
+        semaphore_pairs_body = c_function_body(icd, "append_semaphore_wait_pairs")
+        semaphore_pairs_signature = c_function_signature(icd, "append_semaphore_wait_pairs")
+        semaphore_executor_wait_body = c_function_body(icd, "send_executor_semaphore_wait")
+        semaphore_executor_wait_signature = c_function_signature(icd, "send_executor_semaphore_wait")
+        self.assertIn("VkDevice device", semaphore_pairs_signature)
+        self.assertIn("VkDevice device", semaphore_executor_wait_signature)
+        self.assertIn("semaphore_handle_lookup_for_device(device", semaphore_pairs_body)
+        self.assertIn("append_semaphore_wait_pairs(device, cmd", semaphore_executor_wait_body)
         wait_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkWaitSemaphores", 1)[1].split(
             "VKAPI_ATTR VkResult VKAPI_CALL vkSignalSemaphore", 1
         )[0]
@@ -15611,13 +15630,25 @@ class GpuAbiContractTest(unittest.TestCase):
             "bridge_available()",
             "send_executor_fence_create(fence, initial_signaled)",
             "send_executor_fence_destroy(f)",
-            "send_executor_fence_reset(fenceCount, pFences)",
+            "send_executor_fence_reset(device, fenceCount, pFences)",
             "send_executor_fence_status(f, &result)",
             "send_executor_fence_signal(submit_fence)",
-            "send_executor_fence_wait(fenceCount, pFences, waitAll, timeout, &result)",
+            "send_executor_fence_wait(device, fenceCount, pFences, waitAll, timeout, &result)",
         ]:
             self.assertIn(marker, icd)
 
+        append_fence_body = c_function_body(icd, "append_fence_ids")
+        append_fence_signature = c_function_signature(icd, "append_fence_ids")
+        fence_reset_helper_body = c_function_body(icd, "send_executor_fence_reset")
+        fence_reset_helper_signature = c_function_signature(icd, "send_executor_fence_reset")
+        fence_wait_helper_body = c_function_body(icd, "send_executor_fence_wait")
+        fence_wait_helper_signature = c_function_signature(icd, "send_executor_fence_wait")
+        self.assertIn("VkDevice device", append_fence_signature)
+        self.assertIn("VkDevice device", fence_reset_helper_signature)
+        self.assertIn("VkDevice device", fence_wait_helper_signature)
+        self.assertIn("fence_handle_lookup_for_device(device", append_fence_body)
+        self.assertIn("append_fence_ids(device, cmd", fence_reset_helper_body)
+        self.assertIn("append_fence_ids(device, cmd", fence_wait_helper_body)
         fence_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkGetFenceStatus", 1)[1].split(
             "VKAPI_ATTR VkResult VKAPI_CALL vkWaitForFences", 1
         )[0]
@@ -15632,7 +15663,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("fences_wait_satisfied(device, fenceCount, pFences, waitAll)", wait_body)
         self.assertLess(
             wait_body.index("fences_wait_satisfied(device, fenceCount, pFences, waitAll)"),
-            wait_body.index("send_executor_fence_wait(fenceCount, pFences, waitAll, timeout, &result)"),
+            wait_body.index("send_executor_fence_wait(device, fenceCount, pFences, waitAll, timeout, &result)"),
         )
         reset_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkResetFences", 1)[1].split(
             "VKAPI_ATTR VkResult VKAPI_CALL vkGetFenceStatus", 1

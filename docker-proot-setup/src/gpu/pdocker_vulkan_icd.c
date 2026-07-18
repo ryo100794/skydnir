@@ -6784,10 +6784,17 @@ static int send_executor_semaphore_signal(PdockerVkSemaphore *sem, uint64_t valu
     return rc;
 }
 
-static int append_semaphore_wait_pairs(char *cmd, size_t cap, size_t *off, const VkSemaphoreWaitInfo *pWaitInfo) {
+static int append_semaphore_wait_pairs(
+        VkDevice device,
+        char *cmd,
+        size_t cap,
+        size_t *off,
+        const VkSemaphoreWaitInfo *pWaitInfo) {
     if (!cmd || !off || !pWaitInfo) return -EINVAL;
     for (uint32_t i = 0; i < pWaitInfo->semaphoreCount; ++i) {
-        PdockerVkSemaphore *sem = pWaitInfo->pSemaphores ? semaphore_handle_lookup(pWaitInfo->pSemaphores[i]) : NULL;
+        PdockerVkSemaphore *sem = pWaitInfo->pSemaphores
+            ? semaphore_handle_lookup_for_device(device, pWaitInfo->pSemaphores[i])
+            : NULL;
         uint64_t value = pWaitInfo->pValues ? pWaitInfo->pValues[i] : 0;
         if (!sem || !sem->executor_tracked || !sem->timeline || sem->semaphore_id == 0) return -EINVAL;
         int n = snprintf(cmd + *off, cap - *off, " %llu %llu",
@@ -6802,7 +6809,11 @@ static int append_semaphore_wait_pairs(char *cmd, size_t cap, size_t *off, const
     return 0;
 }
 
-static int send_executor_semaphore_wait(const VkSemaphoreWaitInfo *pWaitInfo, uint64_t timeout, VkResult *out_result) {
+static int send_executor_semaphore_wait(
+        VkDevice device,
+        const VkSemaphoreWaitInfo *pWaitInfo,
+        uint64_t timeout,
+        VkResult *out_result) {
     if (!pWaitInfo) return -EINVAL;
     size_t cap = 96u + (size_t)pWaitInfo->semaphoreCount * 48u;
     char *cmd = (char *)calloc(1, cap);
@@ -6812,13 +6823,13 @@ static int send_executor_semaphore_wait(const VkSemaphoreWaitInfo *pWaitInfo, ui
                                   wait_any,
                                   (unsigned long long)timeout,
                                   pWaitInfo->semaphoreCount);
-    int rc = (off >= cap) ? -E2BIG : append_semaphore_wait_pairs(cmd, cap, &off, pWaitInfo);
+    int rc = (off >= cap) ? -E2BIG : append_semaphore_wait_pairs(device, cmd, cap, &off, pWaitInfo);
     int result = VK_ERROR_UNKNOWN;
     if (rc == 0) rc = send_executor_text_command(cmd, &result, NULL, NULL);
     if (rc == 0) {
         if (result == VK_SUCCESS) {
             for (uint32_t i = 0; i < pWaitInfo->semaphoreCount; ++i) {
-                PdockerVkSemaphore *sem = semaphore_handle_lookup(pWaitInfo->pSemaphores[i]);
+                PdockerVkSemaphore *sem = semaphore_handle_lookup_for_device(device, pWaitInfo->pSemaphores[i]);
                 if (sem && sem->timeline && sem->value < pWaitInfo->pValues[i]) sem->value = pWaitInfo->pValues[i];
             }
         }
@@ -6853,9 +6864,15 @@ static int send_executor_fence_destroy(PdockerVkFence *fence) {
     return rc == 0 && result != VK_SUCCESS ? -EIO : rc;
 }
 
-static int append_fence_ids(char *cmd, size_t cap, size_t *off, uint32_t fenceCount, const VkFence *pFences) {
+static int append_fence_ids(
+        VkDevice device,
+        char *cmd,
+        size_t cap,
+        size_t *off,
+        uint32_t fenceCount,
+        const VkFence *pFences) {
     for (uint32_t i = 0; i < fenceCount; ++i) {
-        const PdockerVkFence *fence = fence_handle_lookup(pFences[i]);
+        const PdockerVkFence *fence = fence_handle_lookup_for_device(device, pFences[i]);
         if (!fence || fence->fence_id == 0) return -EINVAL;
         int n = snprintf(cmd + *off, cap - *off, " %llu", (unsigned long long)fence->fence_id);
         if (n <= 0 || (size_t)n >= cap - *off) return -E2BIG;
@@ -6867,18 +6884,18 @@ static int append_fence_ids(char *cmd, size_t cap, size_t *off, uint32_t fenceCo
     return 0;
 }
 
-static int send_executor_fence_reset(uint32_t fenceCount, const VkFence *pFences) {
+static int send_executor_fence_reset(VkDevice device, uint32_t fenceCount, const VkFence *pFences) {
     if (fenceCount == 0) return 0;
     size_t cap = 64u + (size_t)fenceCount * 24u;
     char *cmd = (char *)calloc(1, cap);
     if (!cmd) return -ENOMEM;
     size_t off = (size_t)snprintf(cmd, cap, "VULKAN_FENCE_RESET %u", fenceCount);
-    int rc = (off >= cap) ? -E2BIG : append_fence_ids(cmd, cap, &off, fenceCount, pFences);
+    int rc = (off >= cap) ? -E2BIG : append_fence_ids(device, cmd, cap, &off, fenceCount, pFences);
     int result = VK_ERROR_UNKNOWN;
     if (rc == 0) rc = send_executor_text_command(cmd, &result, NULL, NULL);
     if (rc == 0 && result == VK_SUCCESS) {
         for (uint32_t i = 0; i < fenceCount; ++i) {
-            PdockerVkFence *fence = fence_handle_lookup(pFences[i]);
+            PdockerVkFence *fence = fence_handle_lookup_for_device(device, pFences[i]);
             if (fence) fence->signaled = false;
         }
     } else if (rc == 0) {
@@ -6906,6 +6923,7 @@ static int send_executor_fence_status(PdockerVkFence *fence, VkResult *out_resul
 }
 
 static int send_executor_fence_wait(
+        VkDevice device,
         uint32_t fenceCount,
         const VkFence *pFences,
         VkBool32 waitAll,
@@ -6916,7 +6934,7 @@ static int send_executor_fence_wait(
         return 0;
     }
     for (uint32_t i = 0; i < fenceCount; ++i) {
-        const PdockerVkFence *fence = fence_handle_lookup(pFences[i]);
+        const PdockerVkFence *fence = fence_handle_lookup_for_device(device, pFences[i]);
         if (!fence || !fence->executor_tracked) return -ENOENT;
     }
     size_t cap = 96u + (size_t)fenceCount * 24u;
@@ -6926,7 +6944,7 @@ static int send_executor_fence_wait(
                                   waitAll ? 1u : 0u,
                                   (unsigned long long)timeout,
                                   fenceCount);
-    int rc = (off >= cap) ? -E2BIG : append_fence_ids(cmd, cap, &off, fenceCount, pFences);
+    int rc = (off >= cap) ? -E2BIG : append_fence_ids(device, cmd, cap, &off, fenceCount, pFences);
     int result = VK_ERROR_UNKNOWN;
     bool signaled = false;
     if (rc == 0) rc = send_executor_text_command(cmd, &result, &signaled, NULL);
@@ -6934,12 +6952,12 @@ static int send_executor_fence_wait(
         if (result == VK_SUCCESS) {
             if (waitAll) {
                 for (uint32_t i = 0; i < fenceCount; ++i) {
-                    PdockerVkFence *fence = fence_handle_lookup(pFences[i]);
+                    PdockerVkFence *fence = fence_handle_lookup_for_device(device, pFences[i]);
                     if (fence) fence->signaled = true;
                 }
             } else if (signaled) {
                 for (uint32_t i = 0; i < fenceCount; ++i) {
-                    PdockerVkFence *fence = fence_handle_lookup(pFences[i]);
+                    PdockerVkFence *fence = fence_handle_lookup_for_device(device, pFences[i]);
                     VkResult status = VK_NOT_READY;
                     if (fence && send_executor_fence_status(fence, &status) == 0 && status == VK_SUCCESS) {
                         fence->signaled = true;
@@ -37086,7 +37104,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkResetFences(
     VkResult validate_rc = validate_fence_handles(device, fenceCount, pFences);
     if (validate_rc != VK_SUCCESS) return validate_rc;
     if (bridge_available()) {
-        int rc = send_executor_fence_reset(fenceCount, pFences);
+        int rc = send_executor_fence_reset(device, fenceCount, pFences);
         if (rc != 0) return VK_ERROR_DEVICE_LOST;
         for (uint32_t i = 0; i < fenceCount; ++i) {
             PdockerVkFence *fence = fence_handle_lookup_for_device(device, pFences[i]);
@@ -37124,7 +37142,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkWaitForFences(
     if (fences_wait_satisfied(device, fenceCount, pFences, waitAll)) return VK_SUCCESS;
     if (bridge_available()) {
         VkResult result = VK_ERROR_UNKNOWN;
-        int rc = send_executor_fence_wait(fenceCount, pFences, waitAll, timeout, &result);
+        int rc = send_executor_fence_wait(device, fenceCount, pFences, waitAll, timeout, &result);
         if (rc == 0) return result;
     }
     uint64_t start_ns = monotonic_ns();
@@ -37270,7 +37288,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkWaitSemaphores(
     }
     if (executor_waitable) {
         VkResult result = VK_ERROR_UNKNOWN;
-        if (send_executor_semaphore_wait(pWaitInfo, timeout, &result) == 0) return result;
+        if (send_executor_semaphore_wait(device, pWaitInfo, timeout, &result) == 0) return result;
         return VK_ERROR_DEVICE_LOST;
     }
     uint64_t start_ns = monotonic_ns();

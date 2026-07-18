@@ -10,6 +10,29 @@ llama.cpp itself remains unmodified.
 ## Current Ground Truth
 
 
+
+### 2026-07-18 CPU/static Vulkan executor sync-helper owner lane
+
+Executor-backed semaphore and fence wait/reset helper paths now carry the
+calling `VkDevice` through to their text-command serialization helpers.  The
+helper-internal ID list construction uses `semaphore_handle_lookup_for_device`
+and `fence_handle_lookup_for_device` instead of raw global lookup, so reused
+helper paths fail closed before sending executor commands for sync objects owned
+by another logical device.
+
+This closes a lower-level ownership bypass under the already owner-checked
+public `vkWaitSemaphores`, `vkResetFences`, and `vkWaitForFences` entry points.
+It is CPU/static Vulkan pass-through hardening only.  It does not change
+llama.cpp, Dockerfiles, models, prompts, shader bytes, or executor arithmetic.
+
+Evidence: `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`,
+`tests.test_gpu_abi_contract`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_device_owner_rejects_cross_device_memory_resource_misuse`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_device_owner_rejects_cross_device_command_submit_sync`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_device_owner_rejects_cross_device_metadata_render_wsi_handles`,
+`scripts/build-gpu-shim.sh`, `scripts/verify-native-payloads.py`,
+`./gradlew :app:assembleDebug`.
+
 ### 2026-07-18 CPU/static Vulkan object-target metadata owner lane
 
 Private-data, debug-utils, and debug-marker object-target APIs now validate the
