@@ -11502,9 +11502,17 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("enabled_extension_mask", shader_module_pnext_body)
         self.assertIn("Validation caches are execution-neutral metadata", shader_module_pnext_body)
         self.assertNotIn("shader-module-validation-cache-unsupported", shader_module_pnext_body)
-        self.assertNotIn("cache_info->validationCache != VK_NULL_HANDLE", shader_module_pnext_body)
+        self.assertIn("cache_info->validationCache != VK_NULL_HANDLE", shader_module_pnext_body)
+        self.assertIn("validation_cache_handle_live(cache_info->validationCache)", shader_module_pnext_body)
         self.assertIn('unsupported_create_info_pnext_result("vkCreateShaderModule", node)', shader_module_pnext_body)
         self.assertIn("VKAPI_ATTR VkResult VKAPI_CALL vkCreateValidationCacheEXT", icd)
+        for marker in [
+            "static PdockerVkValidationCache *g_validation_caches;",
+            "validation_cache_handle_live",
+            "validation_cache_register",
+            "validation_cache_unregister",
+        ]:
+            self.assertIn(marker, icd)
         self.assertIn("VK_EXT_VALIDATION_CACHE_EXTENSION_NAME", icd)
         self.assertIn("VK_EXT_TOOLING_INFO_EXTENSION_NAME", icd)
         self.assertIn("VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME", icd)

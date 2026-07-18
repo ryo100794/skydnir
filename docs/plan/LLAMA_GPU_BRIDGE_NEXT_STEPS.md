@@ -3297,3 +3297,19 @@ Validation: targeted `tests.test_vulkan_icd_feature_chain` pNext tests,
 full `tests.test_gpu_abi_contract`, full `tests.test_vulkan_icd_feature_chain`,
 `scripts/build-gpu-shim.sh`, `scripts/verify-native-payloads.py`, and
 `./gradlew :app:assembleDebug`.
+
+
+### 2026-07-18 validation-cache live-handle lane
+
+CPU/static Vulkan API hardening now keeps `VK_EXT_validation_cache` handles in a
+local live-handle registry.  Validation-cache data queries, merges, destruction,
+and shader-module validation-cache pNext now reject stale or fabricated handles
+without dereferencing arbitrary application-supplied pointer values.  Null shader
+validation-cache handles remain harmless, but non-null handles must be live when
+the validation-cache extension pNext is used on an enabled device.
+
+The validation cache remains local/no-op metadata; no cache content is forwarded
+to Android Vulkan, no executor ABI fields are added, and no llama.cpp,
+Dockerfile, model, prompt, SPIR-V, or shader behavior is changed.
+
+Validation: `tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_validation_cache_extension_is_local_noop_and_shader_pnext_accepts_cache`, full `tests.test_gpu_abi_contract`, full `tests.test_vulkan_icd_feature_chain`, `scripts/build-gpu-shim.sh`, `scripts/verify-native-payloads.py`, and `./gradlew :app:assembleDebug`.

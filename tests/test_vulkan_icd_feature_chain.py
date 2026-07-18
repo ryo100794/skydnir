@@ -1255,6 +1255,19 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     fprintf(stderr, "validation cache data query was not empty noop\\n");
                     return 5;
                 }}
+                VkValidationCacheEXT invalid_cache = (VkValidationCacheEXT)(uintptr_t)0x1234u;
+                if (vkGetValidationCacheDataEXT(VK_NULL_HANDLE, invalid_cache, &cache_data_size, NULL) == VK_SUCCESS) {{
+                    fprintf(stderr, "validation cache data accepted invalid cache handle\\n");
+                    return 11;
+                }}
+                if (vkMergeValidationCachesEXT(VK_NULL_HANDLE, invalid_cache, 1, &cache) == VK_SUCCESS) {{
+                    fprintf(stderr, "validation cache merge accepted invalid destination handle\\n");
+                    return 12;
+                }}
+                if (vkMergeValidationCachesEXT(VK_NULL_HANDLE, cache, 1, &invalid_cache) == VK_SUCCESS) {{
+                    fprintf(stderr, "validation cache merge accepted invalid source handle\\n");
+                    return 13;
+                }}
                 if (vkMergeValidationCachesEXT(VK_NULL_HANDLE, cache, 1, NULL) == VK_SUCCESS) {{
                     fprintf(stderr, "validation cache merge accepted missing source array\\n");
                     return 6;
@@ -1292,6 +1305,14 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     return 10;
                 }}
                 vkDestroyShaderModule(validation_vk_device, shader, NULL);
+                shader_cache.validationCache = invalid_cache;
+                shader = VK_NULL_HANDLE;
+                if (vkCreateShaderModule(validation_vk_device, &shader_info, NULL, &shader) == VK_SUCCESS) {{
+                    fprintf(stderr, "shader module accepted invalid validation cache handle\\n");
+                    vkDestroyShaderModule(validation_vk_device, shader, NULL);
+                    return 14;
+                }}
+                shader_cache.validationCache = cache;
 
                 VkBaseInStructure unknown;
                 memset(&unknown, 0, sizeof(unknown));

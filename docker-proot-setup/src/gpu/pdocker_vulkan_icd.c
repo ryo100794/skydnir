@@ -1643,7 +1643,7 @@ struct PdockerVkPipelineCache {
 
 #ifdef VK_EXT_VALIDATION_CACHE_EXTENSION_NAME
 struct PdockerVkValidationCache {
-    int unused;
+    struct PdockerVkValidationCache *next;
 };
 #endif
 
@@ -1690,6 +1690,9 @@ static uint64_t g_vulkan_object_generation;
 static uint64_t g_vulkan_query_pool_generation;
 #ifdef VK_EXT_DEBUG_UTILS_EXTENSION_NAME
 static PdockerVkDebugUtilsMessenger *g_debug_utils_messengers;
+#endif
+#ifdef VK_EXT_VALIDATION_CACHE_EXTENSION_NAME
+static PdockerVkValidationCache *g_validation_caches;
 #endif
 
 static bool trace_allocations(void);
@@ -24871,6 +24874,10 @@ static VkResult validate_pipeline_specialization_info_for_transport(
     return VK_SUCCESS;
 }
 
+#ifdef VK_EXT_VALIDATION_CACHE_EXTENSION_NAME
+static bool validation_cache_handle_live(VkValidationCacheEXT validationCache);
+#endif
+
 static VkResult validate_shader_module_create_pnext(
         const void *pNext,
         uint64_t enabled_extension_mask) {
@@ -24884,6 +24891,10 @@ static VkResult validate_shader_module_create_pnext(
                 }
                 const VkShaderModuleValidationCacheCreateInfoEXT *cache_info =
                     (const VkShaderModuleValidationCacheCreateInfoEXT *)node;
+                if (cache_info->validationCache != VK_NULL_HANDLE &&
+                    !validation_cache_handle_live(cache_info->validationCache)) {
+                    return VK_ERROR_INITIALIZATION_FAILED;
+                }
                 /*
                  * Validation caches are execution-neutral metadata.  The bridge
                  * keeps VK_EXT_validation_cache local to the ICD and does not
@@ -34976,6 +34987,36 @@ VKAPI_ATTR VkResult VKAPI_CALL vkMergePipelineCaches(
 }
 
 #ifdef VK_EXT_VALIDATION_CACHE_EXTENSION_NAME
+static bool validation_cache_handle_live(VkValidationCacheEXT validationCache) {
+    PdockerVkValidationCache *target = pdocker_vk_validation_cache_from_handle(validationCache);
+    if (!target) return false;
+    for (PdockerVkValidationCache *cache = g_validation_caches; cache; cache = cache->next) {
+        if (cache == target) return true;
+    }
+    return false;
+}
+
+static void validation_cache_register(PdockerVkValidationCache *cache) {
+    if (!cache) return;
+    cache->next = g_validation_caches;
+    g_validation_caches = cache;
+}
+
+static PdockerVkValidationCache *validation_cache_unregister(VkValidationCacheEXT validationCache) {
+    PdockerVkValidationCache *target = pdocker_vk_validation_cache_from_handle(validationCache);
+    if (!target) return NULL;
+    PdockerVkValidationCache **link = &g_validation_caches;
+    while (*link) {
+        if (*link == target) {
+            *link = target->next;
+            target->next = NULL;
+            return target;
+        }
+        link = &(*link)->next;
+    }
+    return NULL;
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateValidationCacheEXT(
         VkDevice device,
         const VkValidationCacheCreateInfoEXT *pCreateInfo,
@@ -34998,8 +35039,14 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateValidationCacheEXT(
     }
     PdockerVkValidationCache *cache = pdocker_alloc_handle(sizeof(*cache));
     if (!cache) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    validation_cache_register(cache);
     *pValidationCache = pdocker_vk_validation_cache_to_handle(cache);
-    return *pValidationCache ? VK_SUCCESS : VK_ERROR_OUT_OF_HOST_MEMORY;
+    if (!*pValidationCache) {
+        (void)validation_cache_unregister(pdocker_vk_validation_cache_to_handle(cache));
+        free(cache);
+        return VK_ERROR_OUT_OF_HOST_MEMORY;
+    }
+    return VK_SUCCESS;
 }
 
 VKAPI_ATTR void VKAPI_CALL vkDestroyValidationCacheEXT(
@@ -35008,7 +35055,7 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyValidationCacheEXT(
         const VkAllocationCallbacks *pAllocator) {
     (void)device;
     (void)pAllocator;
-    free(pdocker_vk_validation_cache_from_handle(validationCache));
+    free(validation_cache_unregister(validationCache));
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkGetValidationCacheDataEXT(
@@ -35017,7 +35064,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetValidationCacheDataEXT(
         size_t *pDataSize,
         void *pData) {
     (void)device;
-    (void)validationCache;
+    if (!validation_cache_handle_live(validationCache)) return VK_ERROR_INITIALIZATION_FAILED;
     if (!pDataSize) return VK_ERROR_INITIALIZATION_FAILED;
     if (!pData) {
         *pDataSize = 0;
@@ -35033,8 +35080,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkMergeValidationCachesEXT(
         uint32_t srcCacheCount,
         const VkValidationCacheEXT *pSrcCaches) {
     (void)device;
-    (void)dstCache;
+    if (!validation_cache_handle_live(dstCache)) return VK_ERROR_INITIALIZATION_FAILED;
     if (srcCacheCount > 0 && !pSrcCaches) return VK_ERROR_INITIALIZATION_FAILED;
+    for (uint32_t i = 0; i < srcCacheCount; ++i) {
+        if (!validation_cache_handle_live(pSrcCaches[i])) return VK_ERROR_INITIALIZATION_FAILED;
+    }
     return VK_SUCCESS;
 }
 
