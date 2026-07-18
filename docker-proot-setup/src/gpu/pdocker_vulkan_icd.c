@@ -1684,6 +1684,7 @@ typedef struct PdockerVkCommandBuffer {
     uint32_t dynamic_state_count;
     uint32_t dynamic_state_capacity;
     bool vertex_buffer_bound;
+    uint64_t owner_device_id;
     uint64_t requested_feature_mask;
     uint64_t enabled_extension_mask;
     PdockerVkCommandPool *owner_pool;
@@ -1968,6 +1969,17 @@ static bool device_owner_matches_or_unowned(VkDevice device, uint64_t owner_devi
     if (owner_device_id == 0) return true;
     uint64_t object_id = 0;
     return device_handle_object_id(device, &object_id) && object_id == owner_device_id;
+}
+
+static bool queue_owner_matches_or_unowned(const PdockerVkQueue *queue, uint64_t owner_device_id) {
+    if (owner_device_id == 0) return true;
+    return queue && queue->device_object_id != 0 && queue->device_object_id == owner_device_id;
+}
+
+static bool owner_device_ids_match_or_unowned(uint64_t lhs_owner_device_id, uint64_t rhs_owner_device_id) {
+    return lhs_owner_device_id == 0 ||
+           rhs_owner_device_id == 0 ||
+           lhs_owner_device_id == rhs_owner_device_id;
 }
 
 static void memory_register(PdockerVkMemory *memory) {
@@ -2895,6 +2907,25 @@ static PdockerVkCommandBuffer *command_buffer_handle_lookup(VkCommandBuffer comm
     return command_buffer_handle_resolve(commandBuffer, &resolved) ? resolved : NULL;
 }
 
+static PdockerVkCommandPool *command_pool_handle_lookup_for_device(VkDevice device, VkCommandPool commandPool) {
+    PdockerVkCommandPool *resolved = command_pool_handle_lookup(commandPool);
+    return resolved && device_owner_matches_or_unowned(device, resolved->owner_device_id) ? resolved : NULL;
+}
+
+static PdockerVkCommandBuffer *command_buffer_handle_lookup_for_queue(
+        const PdockerVkQueue *queue,
+        VkCommandBuffer commandBuffer) {
+    PdockerVkCommandBuffer *resolved = command_buffer_handle_lookup(commandBuffer);
+    return resolved && queue_owner_matches_or_unowned(queue, resolved->owner_device_id) ? resolved : NULL;
+}
+
+static PdockerVkCommandBuffer *command_buffer_handle_lookup_for_device(
+        VkDevice device,
+        VkCommandBuffer commandBuffer) {
+    PdockerVkCommandBuffer *resolved = command_buffer_handle_lookup(commandBuffer);
+    return resolved && device_owner_matches_or_unowned(device, resolved->owner_device_id) ? resolved : NULL;
+}
+
 static bool command_buffer_belongs_to_pool(
         const PdockerVkCommandBuffer *cmd,
         const PdockerVkCommandPool *pool) {
@@ -2954,6 +2985,16 @@ static PdockerVkFence *fence_handle_lookup(VkFence fence) {
     return fence_handle_resolve(fence, &resolved) ? resolved : NULL;
 }
 
+static PdockerVkFence *fence_handle_lookup_for_device(VkDevice device, VkFence fence) {
+    PdockerVkFence *resolved = fence_handle_lookup(fence);
+    return resolved && device_owner_matches_or_unowned(device, resolved->owner_device_id) ? resolved : NULL;
+}
+
+static PdockerVkFence *fence_handle_lookup_for_queue(const PdockerVkQueue *queue, VkFence fence) {
+    PdockerVkFence *resolved = fence_handle_lookup(fence);
+    return resolved && queue_owner_matches_or_unowned(queue, resolved->owner_device_id) ? resolved : NULL;
+}
+
 static PdockerVkSemaphore *semaphore_handle_target(VkSemaphore semaphore) {
     return pdocker_vk_semaphore_from_handle(semaphore);
 }
@@ -3006,6 +3047,16 @@ static PdockerVkSemaphore *semaphore_handle_lookup(VkSemaphore semaphore) {
     return semaphore_handle_resolve(semaphore, &resolved) ? resolved : NULL;
 }
 
+static PdockerVkSemaphore *semaphore_handle_lookup_for_device(VkDevice device, VkSemaphore semaphore) {
+    PdockerVkSemaphore *resolved = semaphore_handle_lookup(semaphore);
+    return resolved && device_owner_matches_or_unowned(device, resolved->owner_device_id) ? resolved : NULL;
+}
+
+static PdockerVkSemaphore *semaphore_handle_lookup_for_queue(const PdockerVkQueue *queue, VkSemaphore semaphore) {
+    PdockerVkSemaphore *resolved = semaphore_handle_lookup(semaphore);
+    return resolved && queue_owner_matches_or_unowned(queue, resolved->owner_device_id) ? resolved : NULL;
+}
+
 static PdockerVkEvent *event_handle_target(VkEvent event) {
     return pdocker_vk_event_from_handle(event);
 }
@@ -3056,6 +3107,11 @@ static bool event_handle_resolve(VkEvent event, PdockerVkEvent **out_event) {
 static PdockerVkEvent *event_handle_lookup(VkEvent event) {
     PdockerVkEvent *resolved = NULL;
     return event_handle_resolve(event, &resolved) ? resolved : NULL;
+}
+
+static PdockerVkEvent *event_handle_lookup_for_device(VkDevice device, VkEvent event) {
+    PdockerVkEvent *resolved = event_handle_lookup(event);
+    return resolved && device_owner_matches_or_unowned(device, resolved->owner_device_id) ? resolved : NULL;
 }
 
 static PdockerVkQueryPool *query_pool_handle_target(VkQueryPool queryPool) {
@@ -3127,6 +3183,11 @@ static bool query_pool_handle_resolve(VkQueryPool queryPool, PdockerVkQueryPool 
 static PdockerVkQueryPool *query_pool_handle_lookup(VkQueryPool queryPool) {
     PdockerVkQueryPool *resolved = NULL;
     return query_pool_handle_resolve(queryPool, &resolved) ? resolved : NULL;
+}
+
+static PdockerVkQueryPool *query_pool_handle_lookup_for_device(VkDevice device, VkQueryPool queryPool) {
+    PdockerVkQueryPool *resolved = query_pool_handle_lookup(queryPool);
+    return resolved && device_owner_matches_or_unowned(device, resolved->owner_device_id) ? resolved : NULL;
 }
 
 static PdockerVkSurface *surface_handle_target(VkSurfaceKHR surface) {
@@ -28469,14 +28530,14 @@ static bool pdocker_vk_swapchain_image_index_valid(
            image_index < swapchain->image_count;
 }
 
-static bool pdocker_vk_acquire_sync_valid(VkSemaphore semaphore, VkFence fence) {
+static bool pdocker_vk_acquire_sync_valid(VkDevice device, VkSemaphore semaphore, VkFence fence) {
     if (semaphore == VK_NULL_HANDLE && fence == VK_NULL_HANDLE) return false;
     if (semaphore != VK_NULL_HANDLE) {
-        const PdockerVkSemaphore *sem = semaphore_handle_lookup(semaphore);
+        const PdockerVkSemaphore *sem = semaphore_handle_lookup_for_device(device, semaphore);
         if (!sem || sem->timeline || sem->signaled) return false;
     }
     if (fence != VK_NULL_HANDLE) {
-        const PdockerVkFence *f = fence_handle_lookup(fence);
+        const PdockerVkFence *f = fence_handle_lookup_for_device(device, fence);
         if (!f || f->signaled) return false;
     }
     return true;
@@ -28738,7 +28799,6 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAcquireNextImageKHR(
         VkSemaphore semaphore,
         VkFence fence,
         uint32_t *pImageIndex) {
-    (void)device;
     (void)timeout;
     PdockerVkSwapchain *sc = swapchain_handle_lookup(swapchain);
     if (!pImageIndex) return VK_ERROR_INITIALIZATION_FAILED;
@@ -28750,7 +28810,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAcquireNextImageKHR(
         trace_icd_runtime_failure("acquire-next-image-swapchain-invalid", VK_ERROR_OUT_OF_DATE_KHR);
         return VK_ERROR_OUT_OF_DATE_KHR;
     }
-    if (!pdocker_vk_acquire_sync_valid(semaphore, fence)) {
+    if (!pdocker_vk_acquire_sync_valid(device, semaphore, fence)) {
         trace_icd_runtime_failure("acquire-next-image-sync-invalid", VK_ERROR_INITIALIZATION_FAILED);
         return VK_ERROR_INITIALIZATION_FAILED;
     }
@@ -28768,8 +28828,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAcquireNextImageKHR(
     sc->acquired[index] = true;
     sc->next_image = (index + 1u) % sc->image_count;
     *pImageIndex = index;
-    semaphore_complete_signal(semaphore_handle_lookup(semaphore), 0);
-    PdockerVkFence *f = fence_handle_lookup(fence);
+    semaphore_complete_signal(semaphore_handle_lookup_for_device(device, semaphore), 0);
+    PdockerVkFence *f = fence_handle_lookup_for_device(device, fence);
     if (f) f->signaled = true;
     return VK_SUCCESS;
 }
@@ -28857,7 +28917,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueuePresentKHR(
         return VK_ERROR_INITIALIZATION_FAILED;
     }
     for (uint32_t i = 0; i < pPresentInfo->waitSemaphoreCount; ++i) {
-        PdockerVkSemaphore *sem = semaphore_handle_lookup(pPresentInfo->pWaitSemaphores[i]);
+        PdockerVkSemaphore *sem = semaphore_handle_lookup_for_queue(present_queue, pPresentInfo->pWaitSemaphores[i]);
         if (!sem) {
             trace_icd_runtime_failure("queue-present-wait-semaphore-untracked", VK_ERROR_INITIALIZATION_FAILED);
             return VK_ERROR_INITIALIZATION_FAILED;
@@ -28890,7 +28950,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueuePresentKHR(
     }
     if (aggregate != VK_SUCCESS) return aggregate;
     for (uint32_t i = 0; i < pPresentInfo->waitSemaphoreCount; ++i) {
-        semaphore_complete_wait(semaphore_handle_lookup(pPresentInfo->pWaitSemaphores[i]));
+        semaphore_complete_wait(semaphore_handle_lookup_for_queue(present_queue, pPresentInfo->pWaitSemaphores[i]));
     }
     for (uint32_t i = 0; i < pPresentInfo->swapchainCount; ++i) {
         PdockerVkSwapchain *sc = swapchain_handle_lookup(pPresentInfo->pSwapchains[i]);
@@ -28945,9 +29005,10 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyCommandPool(
         VkDevice device,
         VkCommandPool commandPool,
         const VkAllocationCallbacks *pAllocator) {
-    (void)device;
     (void)pAllocator;
-    PdockerVkCommandPool *pool = command_pool_unregister(commandPool);
+    PdockerVkCommandPool *pool = command_pool_handle_lookup_for_device(device, commandPool);
+    if (!pool) return;
+    pool = command_pool_unregister(commandPool);
     if (!pool) return;
     PdockerVkCommandBuffer *cmd = pool->command_buffers;
     while (cmd) {
@@ -28963,8 +29024,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkResetCommandPool(
         VkDevice device,
         VkCommandPool commandPool,
         VkCommandPoolResetFlags flags) {
-    (void)device;
-    PdockerVkCommandPool *pool = command_pool_handle_lookup(commandPool);
+    PdockerVkCommandPool *pool = command_pool_handle_lookup_for_device(device, commandPool);
     if (!pool) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
@@ -28987,8 +29047,7 @@ VKAPI_ATTR void VKAPI_CALL vkTrimCommandPool(
         VkDevice device,
         VkCommandPool commandPool,
         VkCommandPoolTrimFlags flags) {
-    (void)device;
-    if (!command_pool_handle_lookup(commandPool)) return;
+    if (!command_pool_handle_lookup_for_device(device, commandPool)) return;
     if (flags != 0) {
         trace_icd_runtime_failure("command-pool-trim-flags-unsupported",
                                   VK_ERROR_FEATURE_NOT_PRESENT);
@@ -28999,7 +29058,6 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateCommandBuffers(
         VkDevice device,
         const VkCommandBufferAllocateInfo *pAllocateInfo,
         VkCommandBuffer *pCommandBuffers) {
-    (void)device;
     if (!pAllocateInfo ||
         pAllocateInfo->sType != VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO ||
         (pAllocateInfo->commandBufferCount > 0 && !pCommandBuffers)) {
@@ -29009,7 +29067,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateCommandBuffers(
         return unsupported_create_info_pnext_result("vkAllocateCommandBuffers",
                                                    pAllocateInfo->pNext);
     }
-    PdockerVkCommandPool *pool = command_pool_handle_lookup(pAllocateInfo->commandPool);
+    PdockerVkCommandPool *pool = command_pool_handle_lookup_for_device(device, pAllocateInfo->commandPool);
     if (!pool) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
@@ -29032,6 +29090,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateCommandBuffers(
         }
         set_loader_magic_value(cmd);
         cmd->level = pAllocateInfo->level;
+        cmd->owner_device_id = pool->owner_device_id;
         cmd->requested_feature_mask = pool->requested_feature_mask;
         cmd->enabled_extension_mask = pool->enabled_extension_mask;
         command_buffer_register(pool, cmd);
@@ -29045,12 +29104,11 @@ VKAPI_ATTR void VKAPI_CALL vkFreeCommandBuffers(
         VkCommandPool commandPool,
         uint32_t commandBufferCount,
         const VkCommandBuffer *pCommandBuffers) {
-    (void)device;
-    PdockerVkCommandPool *pool = command_pool_handle_lookup(commandPool);
+    PdockerVkCommandPool *pool = command_pool_handle_lookup_for_device(device, commandPool);
     if (!pool || (commandBufferCount > 0 && !pCommandBuffers)) return;
     for (uint32_t i = 0; i < commandBufferCount; ++i) {
         if (pCommandBuffers[i] == VK_NULL_HANDLE) continue;
-        PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(pCommandBuffers[i]);
+        PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup_for_device(device, pCommandBuffers[i]);
         if (!command_buffer_belongs_to_pool(cmd, pool)) continue;
         (void)command_buffer_unregister(pCommandBuffers[i]);
         command_buffer_retire(cmd);
@@ -30849,8 +30907,10 @@ VKAPI_ATTR void VKAPI_CALL vkCmdExecuteCommands(
     for (uint32_t i = 0; i < commandBufferCount; ++i) {
         PdockerVkCommandBuffer *secondary = command_buffer_handle_lookup(pCommandBuffers[i]);
         if (!secondary || secondary->level != VK_COMMAND_BUFFER_LEVEL_SECONDARY ||
+            !owner_device_ids_match_or_unowned(cmd->owner_device_id, secondary->owner_device_id) ||
             !append_secondary_command_buffer(cmd, secondary)) {
             cmd->graphics_unsupported = true;
+            command_buffer_mark_recording_failed(cmd, "execute-commands-cross-device");
             return;
         }
     }
@@ -33212,13 +33272,14 @@ static void pdocker_vk_wait_poll_sleep(uint64_t start_ns, uint64_t timeout_ns) {
 }
 
 static bool fences_wait_satisfied(
+        VkDevice device,
         uint32_t fenceCount,
         const VkFence *pFences,
         VkBool32 waitAll) {
     if (fenceCount == 0) return true;
     bool any = false;
     for (uint32_t i = 0; i < fenceCount; ++i) {
-        PdockerVkFence *fence = fence_handle_lookup(pFences[i]);
+        PdockerVkFence *fence = fence_handle_lookup_for_device(device, pFences[i]);
         if (!fence) return false;
         bool signaled = fence->signaled;
         any = any || signaled;
@@ -33228,11 +33289,12 @@ static bool fences_wait_satisfied(
 }
 
 static VkResult validate_fence_handles(
+        VkDevice device,
         uint32_t fenceCount,
         const VkFence *pFences) {
     if (fenceCount > 0 && !pFences) return VK_ERROR_INITIALIZATION_FAILED;
     for (uint32_t i = 0; i < fenceCount; ++i) {
-        if (pFences[i] == VK_NULL_HANDLE || !fence_handle_lookup(pFences[i])) {
+        if (pFences[i] == VK_NULL_HANDLE || !fence_handle_lookup_for_device(device, pFences[i])) {
             trace_icd_runtime_failure("fence-handle-untracked",
                                       VK_ERROR_INITIALIZATION_FAILED);
             return VK_ERROR_INITIALIZATION_FAILED;
@@ -33241,14 +33303,14 @@ static VkResult validate_fence_handles(
     return VK_SUCCESS;
 }
 
-static bool timeline_semaphore_wait_satisfied(const VkSemaphoreWaitInfo *pWaitInfo) {
+static bool timeline_semaphore_wait_satisfied(VkDevice device, const VkSemaphoreWaitInfo *pWaitInfo) {
     if (!pWaitInfo) return false;
     bool wait_any = (pWaitInfo->flags & VK_SEMAPHORE_WAIT_ANY_BIT) != 0;
     if (pWaitInfo->semaphoreCount == 0) return true;
     bool any = false;
     for (uint32_t i = 0; i < pWaitInfo->semaphoreCount; ++i) {
         PdockerVkSemaphore *sem = pWaitInfo->pSemaphores
-            ? semaphore_handle_lookup(pWaitInfo->pSemaphores[i])
+            ? semaphore_handle_lookup_for_device(device, pWaitInfo->pSemaphores[i])
             : NULL;
         uint64_t value = pWaitInfo->pValues ? pWaitInfo->pValues[i] : 0;
         bool ready = sem && sem->timeline && sem->value >= value;
@@ -33259,13 +33321,14 @@ static bool timeline_semaphore_wait_satisfied(const VkSemaphoreWaitInfo *pWaitIn
 }
 
 static VkResult validate_timeline_semaphore_wait_handles(
+        VkDevice device,
         const VkSemaphoreWaitInfo *pWaitInfo) {
     if (!pWaitInfo) return VK_ERROR_INITIALIZATION_FAILED;
     if (pWaitInfo->semaphoreCount > 0 && (!pWaitInfo->pSemaphores || !pWaitInfo->pValues)) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
     for (uint32_t i = 0; i < pWaitInfo->semaphoreCount; ++i) {
-        PdockerVkSemaphore *sem = semaphore_handle_lookup(pWaitInfo->pSemaphores[i]);
+        PdockerVkSemaphore *sem = semaphore_handle_lookup_for_device(device, pWaitInfo->pSemaphores[i]);
         if (!sem) {
             trace_icd_runtime_failure("semaphore-wait-untracked",
                                       VK_ERROR_INITIALIZATION_FAILED);
@@ -33314,6 +33377,7 @@ static bool append_submit_sync_entry(
 }
 
 static bool collect_legacy_submit_sync_entries(
+        const PdockerVkQueue *queue,
         const VkSubmitInfo *submit,
         const VkTimelineSemaphoreSubmitInfo *timeline,
         VkFence fence,
@@ -33323,7 +33387,7 @@ static bool collect_legacy_submit_sync_entries(
     if (!submit || !entries || !entry_count) return false;
     for (uint32_t i = 0; i < submit->waitSemaphoreCount; ++i) {
         PdockerVkSemaphore *sem = submit->pWaitSemaphores
-            ? semaphore_handle_lookup(submit->pWaitSemaphores[i])
+            ? semaphore_handle_lookup_for_queue(queue, submit->pWaitSemaphores[i])
             : NULL;
         if (submit->pWaitSemaphores && submit->pWaitSemaphores[i] != VK_NULL_HANDLE && !sem) {
             trace_icd_runtime_failure("submit-wait-semaphore-untracked",
@@ -33340,7 +33404,7 @@ static bool collect_legacy_submit_sync_entries(
     }
     for (uint32_t i = 0; i < submit->signalSemaphoreCount; ++i) {
         PdockerVkSemaphore *sem = submit->pSignalSemaphores
-            ? semaphore_handle_lookup(submit->pSignalSemaphores[i])
+            ? semaphore_handle_lookup_for_queue(queue, submit->pSignalSemaphores[i])
             : NULL;
         if (submit->pSignalSemaphores && submit->pSignalSemaphores[i] != VK_NULL_HANDLE && !sem) {
             trace_icd_runtime_failure("submit-signal-semaphore-untracked",
@@ -33354,7 +33418,7 @@ static bool collect_legacy_submit_sync_entries(
             return false;
         }
     }
-    PdockerVkFence *submit_fence = fence_handle_lookup(fence);
+    PdockerVkFence *submit_fence = fence_handle_lookup_for_queue(queue, fence);
     if (fence != VK_NULL_HANDLE && !submit_fence) {
         trace_icd_runtime_failure("submit-fence-untracked",
                                   VK_ERROR_INITIALIZATION_FAILED);
@@ -33371,6 +33435,7 @@ static bool collect_legacy_submit_sync_entries(
 
 
 static bool collect_submit2_submit_sync_entries(
+        const PdockerVkQueue *queue,
         const VkSubmitInfo2 *submit,
         VkFence fence,
         PdockerGpuVulkanGraphicsV619SubmitSyncEntry *entries,
@@ -33381,7 +33446,7 @@ static bool collect_submit2_submit_sync_entries(
         const VkSemaphoreSubmitInfo *info = submit->pWaitSemaphoreInfos
             ? &submit->pWaitSemaphoreInfos[i]
             : NULL;
-        PdockerVkSemaphore *sem = info ? semaphore_handle_lookup(info->semaphore) : NULL;
+        PdockerVkSemaphore *sem = info ? semaphore_handle_lookup_for_queue(queue, info->semaphore) : NULL;
         if (info && info->semaphore != VK_NULL_HANDLE && !sem) {
             trace_icd_runtime_failure("submit2-wait-semaphore-untracked",
                                       VK_ERROR_INITIALIZATION_FAILED);
@@ -33399,7 +33464,7 @@ static bool collect_submit2_submit_sync_entries(
         const VkSemaphoreSubmitInfo *info = submit->pSignalSemaphoreInfos
             ? &submit->pSignalSemaphoreInfos[i]
             : NULL;
-        PdockerVkSemaphore *sem = info ? semaphore_handle_lookup(info->semaphore) : NULL;
+        PdockerVkSemaphore *sem = info ? semaphore_handle_lookup_for_queue(queue, info->semaphore) : NULL;
         if (info && info->semaphore != VK_NULL_HANDLE && !sem) {
             trace_icd_runtime_failure("submit2-signal-semaphore-untracked",
                                       VK_ERROR_INITIALIZATION_FAILED);
@@ -33413,7 +33478,7 @@ static bool collect_submit2_submit_sync_entries(
             return false;
         }
     }
-    PdockerVkFence *submit_fence = fence_handle_lookup(fence);
+    PdockerVkFence *submit_fence = fence_handle_lookup_for_queue(queue, fence);
     if (fence != VK_NULL_HANDLE && !submit_fence) {
         trace_icd_runtime_failure("submit2-fence-untracked",
                                   VK_ERROR_INITIALIZATION_FAILED);
@@ -33783,6 +33848,7 @@ static uint64_t submit_timeline_signal_value(
 }
 
 static VkResult validate_submit_wait_semaphores(
+        const PdockerVkQueue *queue,
         const VkSubmitInfo *submit,
         const VkTimelineSemaphoreSubmitInfo *timeline,
         bool allow_executor_tracked_queue_waits) {
@@ -33791,7 +33857,7 @@ static VkResult validate_submit_wait_semaphores(
     if (timeline_rc != VK_SUCCESS) return timeline_rc;
     for (uint32_t i = 0; i < submit->waitSemaphoreCount; ++i) {
         PdockerVkSemaphore *sem = submit->pWaitSemaphores
-            ? semaphore_handle_lookup(submit->pWaitSemaphores[i])
+            ? semaphore_handle_lookup_for_queue(queue, submit->pWaitSemaphores[i])
             : NULL;
         if (!sem) {
             trace_icd_runtime_failure("submit-wait-semaphore-untracked",
@@ -33812,6 +33878,7 @@ static VkResult validate_submit_wait_semaphores(
 }
 
 static VkResult validate_submit_signal_semaphores(
+        const PdockerVkQueue *queue,
         const VkSubmitInfo *submit,
         const VkTimelineSemaphoreSubmitInfo *timeline) {
     if (!submit) return VK_ERROR_INITIALIZATION_FAILED;
@@ -33819,7 +33886,7 @@ static VkResult validate_submit_signal_semaphores(
     if (timeline_rc != VK_SUCCESS) return timeline_rc;
     for (uint32_t i = 0; i < submit->signalSemaphoreCount; ++i) {
         PdockerVkSemaphore *sem = submit->pSignalSemaphores
-            ? semaphore_handle_lookup(submit->pSignalSemaphores[i])
+            ? semaphore_handle_lookup_for_queue(queue, submit->pSignalSemaphores[i])
             : NULL;
         if (!sem) {
             trace_icd_runtime_failure("submit-signal-semaphore-untracked",
@@ -33877,6 +33944,7 @@ static void free_submit2_command_arrays(VkCommandBuffer **arrays, uint32_t count
 }
 
 static VkResult validate_submit2_wait_semaphores(
+        const PdockerVkQueue *queue,
         const VkSubmitInfo2 *submit,
         bool allow_executor_tracked_queue_waits) {
     VkResult shape_rc = validate_submit2_info_shape(submit);
@@ -33897,7 +33965,7 @@ static VkResult validate_submit2_wait_semaphores(
             trace_icd_runtime_failure("submit2-wait-null-semaphore", VK_ERROR_INITIALIZATION_FAILED);
             return VK_ERROR_INITIALIZATION_FAILED;
         }
-        if (!semaphore_handle_lookup(info->semaphore)) {
+        if (!semaphore_handle_lookup_for_queue(queue, info->semaphore)) {
             trace_icd_runtime_failure("submit2-wait-semaphore-untracked", VK_ERROR_INITIALIZATION_FAILED);
             return VK_ERROR_INITIALIZATION_FAILED;
         }
@@ -33911,7 +33979,7 @@ static VkResult validate_submit2_wait_semaphores(
                                       VK_ERROR_FEATURE_NOT_PRESENT);
             return VK_ERROR_FEATURE_NOT_PRESENT;
         }
-        PdockerVkSemaphore *sem = info ? semaphore_handle_lookup(info->semaphore) : NULL;
+        PdockerVkSemaphore *sem = info ? semaphore_handle_lookup_for_queue(queue, info->semaphore) : NULL;
         uint64_t required_value = sem && sem->timeline ? info->value : 0;
         if (!semaphore_wait_satisfied(sem, required_value)) {
             if (allow_executor_tracked_queue_waits && sem && sem->executor_tracked) {
@@ -33925,7 +33993,7 @@ static VkResult validate_submit2_wait_semaphores(
     return VK_SUCCESS;
 }
 
-static VkResult validate_submit2_signal_semaphores(const VkSubmitInfo2 *submit) {
+static VkResult validate_submit2_signal_semaphores(const PdockerVkQueue *queue, const VkSubmitInfo2 *submit) {
     VkResult shape_rc = validate_submit2_info_shape(submit);
     if (shape_rc != VK_SUCCESS) return shape_rc;
     for (uint32_t i = 0; i < submit->signalSemaphoreInfoCount; ++i) {
@@ -33939,7 +34007,7 @@ static VkResult validate_submit2_signal_semaphores(const VkSubmitInfo2 *submit) 
             trace_icd_runtime_failure("submit2-signal-null-semaphore", VK_ERROR_INITIALIZATION_FAILED);
             return VK_ERROR_INITIALIZATION_FAILED;
         }
-        if (!semaphore_handle_lookup(info->semaphore)) {
+        if (!semaphore_handle_lookup_for_queue(queue, info->semaphore)) {
             trace_icd_runtime_failure("submit2-signal-semaphore-untracked", VK_ERROR_INITIALIZATION_FAILED);
             return VK_ERROR_INITIALIZATION_FAILED;
         }
@@ -33957,7 +34025,7 @@ static VkResult validate_submit2_signal_semaphores(const VkSubmitInfo2 *submit) 
     return VK_SUCCESS;
 }
 
-static VkResult validate_submit2_command_buffers(const VkSubmitInfo2 *submit) {
+static VkResult validate_submit2_command_buffers(const PdockerVkQueue *queue, const VkSubmitInfo2 *submit) {
     VkResult shape_rc = validate_submit2_info_shape(submit);
     if (shape_rc != VK_SUCCESS) return shape_rc;
     for (uint32_t i = 0; i < submit->commandBufferInfoCount; ++i) {
@@ -33969,6 +34037,10 @@ static VkResult validate_submit2_command_buffers(const VkSubmitInfo2 *submit) {
         }
         if (!info->commandBuffer) {
             trace_icd_runtime_failure("submit2-command-null-command-buffer", VK_ERROR_INITIALIZATION_FAILED);
+            return VK_ERROR_INITIALIZATION_FAILED;
+        }
+        if (!command_buffer_handle_lookup_for_queue(queue, info->commandBuffer)) {
+            trace_icd_runtime_failure("submit2-command-buffer-untracked", VK_ERROR_INITIALIZATION_FAILED);
             return VK_ERROR_INITIALIZATION_FAILED;
         }
         if (info->pNext) {
@@ -34720,13 +34792,14 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueBindSparse(
         uint32_t bindInfoCount,
         const VkBindSparseInfo *pBindInfo,
         VkFence fence) {
-    (void)queue;
+    PdockerVkQueue *submit_queue = pdocker_vk_queue_from_handle(queue);
+    if (!submit_queue) return VK_ERROR_INITIALIZATION_FAILED;
     if (bindInfoCount > 0 && !pBindInfo) return VK_ERROR_INITIALIZATION_FAILED;
     if (bindInfoCount != 0) {
         trace_icd_runtime_failure("sparse-binding-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }
-    PdockerVkFence *submit_fence = fence_handle_lookup(fence);
+    PdockerVkFence *submit_fence = fence_handle_lookup_for_queue(submit_queue, fence);
     if (fence != VK_NULL_HANDLE && !submit_fence) return VK_ERROR_INITIALIZATION_FAILED;
     if (submit_fence) {
         submit_fence->signaled = true;
@@ -34751,13 +34824,27 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
             &pSubmits[validate_i], &validate_timeline);
         if (pnext_rc != VK_SUCCESS) return pnext_rc;
         for (uint32_t cmd_i = 0; cmd_i < pSubmits[validate_i].commandBufferCount; ++cmd_i) {
-            if (!command_buffer_handle_lookup(pSubmits[validate_i].pCommandBuffers[cmd_i])) {
+            if (!command_buffer_handle_lookup_for_queue(submit_queue, pSubmits[validate_i].pCommandBuffers[cmd_i])) {
                 return VK_ERROR_INITIALIZATION_FAILED;
             }
         }
     }
-    PdockerVkFence *submit_fence = fence_handle_lookup(fence);
+    PdockerVkFence *submit_fence = fence_handle_lookup_for_queue(submit_queue, fence);
     if (fence != VK_NULL_HANDLE && !submit_fence) return VK_ERROR_INITIALIZATION_FAILED;
+    for (uint32_t validate_i = 0; validate_i < submitCount; ++validate_i) {
+        const VkTimelineSemaphoreSubmitInfo *validate_timeline = NULL;
+        VkResult validate_pnext_rc = submit_timeline_info_from_pnext(
+            &pSubmits[validate_i], &validate_timeline);
+        if (validate_pnext_rc != VK_SUCCESS) return validate_pnext_rc;
+        const bool allow_executor_tracked_queue_waits = bridge_available() &&
+            (g_submit_sync_override_entries || submit_has_executor_tracked_wait_sync(&pSubmits[validate_i]));
+        VkResult semaphore_rc = validate_submit_wait_semaphores(
+            submit_queue, &pSubmits[validate_i], validate_timeline, allow_executor_tracked_queue_waits);
+        if (semaphore_rc != VK_SUCCESS) return semaphore_rc;
+        semaphore_rc = validate_submit_signal_semaphores(
+            submit_queue, &pSubmits[validate_i], validate_timeline);
+        if (semaphore_rc != VK_SUCCESS) return semaphore_rc;
+    }
     if (submit_fence) submit_fence->signaled = false;
     for (uint32_t i = 0; i < submitCount; ++i) {
         VkResult shape_rc = validate_legacy_submit_info_shape(&pSubmits[i]);
@@ -34768,9 +34855,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
         const bool allow_executor_tracked_queue_waits = bridge_available() &&
             (g_submit_sync_override_entries || submit_has_executor_tracked_wait_sync(&pSubmits[i]));
         VkResult semaphore_rc = validate_submit_wait_semaphores(
-            &pSubmits[i], timeline_submit, allow_executor_tracked_queue_waits);
+            submit_queue, &pSubmits[i], timeline_submit, allow_executor_tracked_queue_waits);
         if (semaphore_rc != VK_SUCCESS) return semaphore_rc;
-        semaphore_rc = validate_submit_signal_semaphores(&pSubmits[i], timeline_submit);
+        semaphore_rc = validate_submit_signal_semaphores(submit_queue, &pSubmits[i], timeline_submit);
         if (semaphore_rc != VK_SUCCESS) return semaphore_rc;
         PdockerGpuVulkanGraphicsV619SubmitSyncEntry *submit_sync_entries = NULL;
         submit_sync_entries =
@@ -34792,7 +34879,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
             memcpy(submit_sync_entries, g_submit_sync_override_entries,
                    g_submit_sync_override_count * sizeof(submit_sync_entries[0]));
             submit_sync_count = g_submit_sync_override_count;
-        } else if (!collect_legacy_submit_sync_entries(&pSubmits[i], timeline_submit, fence,
+        } else if (!collect_legacy_submit_sync_entries(submit_queue, &pSubmits[i], timeline_submit, fence,
                                                        submit_sync_entries, &submit_sync_count)) {
             trace_icd_runtime_failure("submit-sync-metadata-overflow", VK_ERROR_FEATURE_NOT_PRESENT);
             RETURN_VK_QUEUE_SUBMIT_WITH_SYNC(VK_ERROR_FEATURE_NOT_PRESENT);
@@ -34830,7 +34917,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
             submit_waits_split_before_command_loop = submit_wait_sync_count > 0;
         }
         for (uint32_t j = 0; j < pSubmits[i].commandBufferCount; ++j) {
-            PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(pSubmits[i].pCommandBuffers[j]);
+            PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup_for_queue(submit_queue, pSubmits[i].pCommandBuffers[j]);
             if (!cmd) RETURN_VK_QUEUE_SUBMIT_WITH_SYNC(VK_ERROR_INITIALIZATION_FAILED);
             if (cmd->recording_failed) {
                 trace_icd_runtime_failure(cmd->recording_failure_reason ? cmd->recording_failure_reason :
@@ -35276,7 +35363,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2(
     }
     if (submitCount == 0) return vkQueueSubmit(queue, 0, NULL, fence);
     if (!pSubmits) return VK_ERROR_INITIALIZATION_FAILED;
-    PdockerVkFence *submit2_fence_handle = fence_handle_lookup(fence);
+    PdockerVkFence *submit2_fence_handle = fence_handle_lookup_for_queue(submit_queue, fence);
     if (fence != VK_NULL_HANDLE && !submit2_fence_handle) return VK_ERROR_INITIALIZATION_FAILED;
     for (uint32_t validate_i = 0; validate_i < submitCount; ++validate_i) {
         const VkSubmitInfo2 *src = &pSubmits[validate_i];
@@ -35287,11 +35374,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2(
         }
         VkResult validate_rc = validate_submit2_info_shape(src);
         if (validate_rc != VK_SUCCESS) return validate_rc;
-        validate_rc = validate_submit2_wait_semaphores(src, bridge_available());
+        validate_rc = validate_submit2_wait_semaphores(submit_queue, src, bridge_available());
         if (validate_rc != VK_SUCCESS) return validate_rc;
-        validate_rc = validate_submit2_command_buffers(src);
+        validate_rc = validate_submit2_command_buffers(submit_queue, src);
         if (validate_rc != VK_SUCCESS) return validate_rc;
-        validate_rc = validate_submit2_signal_semaphores(src);
+        validate_rc = validate_submit2_signal_semaphores(submit_queue, src);
         if (validate_rc != VK_SUCCESS) return validate_rc;
         PdockerGpuVulkanGraphicsV619SubmitSyncEntry *validate_entries =
             (PdockerGpuVulkanGraphicsV619SubmitSyncEntry *)calloc(
@@ -35300,7 +35387,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2(
         if (!validate_entries) return VK_ERROR_OUT_OF_HOST_MEMORY;
         size_t validate_entry_count = 0;
         VkFence validate_fence = (validate_i + 1u == submitCount) ? fence : VK_NULL_HANDLE;
-        if (!collect_submit2_submit_sync_entries(src, validate_fence,
+        if (!collect_submit2_submit_sync_entries(submit_queue, src, validate_fence,
                                                  validate_entries, &validate_entry_count)) {
             free(validate_entries);
             trace_icd_runtime_failure("submit2-sync-metadata-overflow", VK_ERROR_FEATURE_NOT_PRESENT);
@@ -35323,7 +35410,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2(
         }
     }
 
-    PdockerVkFence *submit_fence = fence_handle_lookup(fence);
+    PdockerVkFence *submit_fence = fence_handle_lookup_for_queue(submit_queue, fence);
     if (submit_fence) submit_fence->signaled = false;
     for (uint32_t i = 0; i < submitCount; ++i) {
         const VkSubmitInfo2 *src = &pSubmits[i];
@@ -35338,17 +35425,17 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2(
             free_submit2_command_arrays(submit2_cmd_arrays, submitCount);
             return rc;
         }
-        rc = validate_submit2_wait_semaphores(src, bridge_available());
+        rc = validate_submit2_wait_semaphores(submit_queue, src, bridge_available());
         if (rc != VK_SUCCESS) {
             free_submit2_command_arrays(submit2_cmd_arrays, submitCount);
             return rc;
         }
-        rc = validate_submit2_command_buffers(src);
+        rc = validate_submit2_command_buffers(submit_queue, src);
         if (rc != VK_SUCCESS) {
             free_submit2_command_arrays(submit2_cmd_arrays, submitCount);
             return rc;
         }
-        rc = validate_submit2_signal_semaphores(src);
+        rc = validate_submit2_signal_semaphores(submit_queue, src);
         if (rc != VK_SUCCESS) {
             free_submit2_command_arrays(submit2_cmd_arrays, submitCount);
             return rc;
@@ -35364,7 +35451,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2(
         }
         size_t submit2_sync_count = 0;
         VkFence submit2_fence = (i + 1u == submitCount) ? fence : VK_NULL_HANDLE;
-        if (!collect_submit2_submit_sync_entries(src, submit2_fence,
+        if (!collect_submit2_submit_sync_entries(submit_queue, src, submit2_fence,
                                                  submit2_sync_entries, &submit2_sync_count)) {
             free(submit2_sync_entries);
             trace_icd_runtime_failure("submit2-sync-metadata-overflow", VK_ERROR_FEATURE_NOT_PRESENT);
@@ -35452,9 +35539,10 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyEvent(
         VkDevice device,
         VkEvent event,
         const VkAllocationCallbacks *pAllocator) {
-    (void)device;
     (void)pAllocator;
-    PdockerVkEvent *e = event_unregister(event);
+    PdockerVkEvent *e = event_handle_lookup_for_device(device, event);
+    if (!e) return;
+    e = event_unregister(event);
     if (!e) return;
     (void)send_executor_event_destroy(e);
     event_retire(e);
@@ -35463,8 +35551,7 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyEvent(
 VKAPI_ATTR VkResult VKAPI_CALL vkGetEventStatus(
         VkDevice device,
         VkEvent event) {
-    (void)device;
-    PdockerVkEvent *e = event_handle_lookup(event);
+    PdockerVkEvent *e = event_handle_lookup_for_device(device, event);
     if (!e) return VK_ERROR_INITIALIZATION_FAILED;
     if (e->executor_tracked) {
         VkResult result = VK_EVENT_RESET;
@@ -35477,8 +35564,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetEventStatus(
 VKAPI_ATTR VkResult VKAPI_CALL vkSetEvent(
         VkDevice device,
         VkEvent event) {
-    (void)device;
-    PdockerVkEvent *e = event_handle_lookup(event);
+    PdockerVkEvent *e = event_handle_lookup_for_device(device, event);
     if (!e) return VK_ERROR_INITIALIZATION_FAILED;
     if (e->executor_tracked) {
         VkResult result = VK_ERROR_UNKNOWN;
@@ -35492,8 +35578,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkSetEvent(
 VKAPI_ATTR VkResult VKAPI_CALL vkResetEvent(
         VkDevice device,
         VkEvent event) {
-    (void)device;
-    PdockerVkEvent *e = event_handle_lookup(event);
+    PdockerVkEvent *e = event_handle_lookup_for_device(device, event);
     if (!e) return VK_ERROR_INITIALIZATION_FAILED;
     if (e->executor_tracked) {
         VkResult result = VK_ERROR_UNKNOWN;
@@ -35519,6 +35604,10 @@ static void record_event_command(VkCommandBuffer commandBuffer,
     if (!cmd) return;
     if (!e) {
         command_buffer_mark_recording_failed(cmd, "event-command-null-event");
+        return;
+    }
+    if (!owner_device_ids_match_or_unowned(cmd->owner_device_id, e->owner_device_id)) {
+        command_buffer_mark_recording_failed(cmd, "event-command-cross-device");
         return;
     }
     PdockerVkCommandOp op;
@@ -35572,6 +35661,10 @@ static void record_event_wait_command(VkCommandBuffer commandBuffer,
         resolved[i] = event_handle_lookup(events[i]);
         if (!resolved[i]) {
             command_buffer_mark_recording_failed(cmd, "event-wait-null-event");
+            return;
+        }
+        if (!owner_device_ids_match_or_unowned(cmd->owner_device_id, resolved[i]->owner_device_id)) {
+            command_buffer_mark_recording_failed(cmd, "event-wait-cross-device");
             return;
         }
     }
@@ -36227,6 +36320,10 @@ static void record_query_command(
         command_buffer_mark_recording_failed(cmd, "query-pool-invalid");
         return;
     }
+    if (!owner_device_ids_match_or_unowned(cmd->owner_device_id, pool->owner_device_id)) {
+        command_buffer_mark_recording_failed(cmd, "query-pool-cross-device");
+        return;
+    }
     if (!query_pool_type_supports_command(type, pool->type)) {
         command_buffer_mark_recording_failed(cmd, "query-command-type-mismatch");
         return;
@@ -36290,6 +36387,11 @@ static void record_copy_query_results_command(
         !query_result_copy_buffer_range(flags, queryCount, dstOffset, stride, &copy_bytes) ||
         !validate_buffer_byte_range(dst, dstOffset, copy_bytes)) {
         command_buffer_mark_recording_failed(cmd, "query-copy-invalid");
+        return;
+    }
+    if (!owner_device_ids_match_or_unowned(cmd->owner_device_id, pool->owner_device_id) ||
+        !owner_device_ids_match_or_unowned(cmd->owner_device_id, dst->owner_device_id)) {
+        command_buffer_mark_recording_failed(cmd, "query-copy-cross-device");
         return;
     }
     PdockerVkCommandOp op;
@@ -36375,9 +36477,10 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyQueryPool(
         VkDevice device,
         VkQueryPool queryPool,
         const VkAllocationCallbacks *pAllocator) {
-    (void)device;
     (void)pAllocator;
-    PdockerVkQueryPool *pool = query_pool_unregister(queryPool);
+    PdockerVkQueryPool *pool = query_pool_handle_lookup_for_device(device, queryPool);
+    if (!pool) return;
+    pool = query_pool_unregister(queryPool);
     if (!pool) return;
     query_pool_retire(pool);
 }
@@ -36425,8 +36528,7 @@ VKAPI_ATTR void VKAPI_CALL vkResetQueryPool(
         VkQueryPool queryPool,
         uint32_t firstQuery,
         uint32_t queryCount) {
-    (void)device;
-    reset_query_range(query_pool_handle_lookup(queryPool), firstQuery, queryCount);
+    reset_query_range(query_pool_handle_lookup_for_device(device, queryPool), firstQuery, queryCount);
 }
 
 #ifdef VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME
@@ -36499,8 +36601,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetQueryPoolResults(
         void *pData,
         VkDeviceSize stride,
         VkQueryResultFlags flags) {
-    (void)device;
-    PdockerVkQueryPool *pool = query_pool_handle_lookup(queryPool);
+    PdockerVkQueryPool *pool = query_pool_handle_lookup_for_device(device, queryPool);
     if (!pData || !query_range_valid(pool, firstQuery, queryCount)) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
@@ -36616,9 +36717,10 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyFence(
         VkDevice device,
         VkFence fence,
         const VkAllocationCallbacks *pAllocator) {
-    (void)device;
     (void)pAllocator;
-    PdockerVkFence *f = fence_unregister(fence);
+    PdockerVkFence *f = fence_handle_lookup_for_device(device, fence);
+    if (!f) return;
+    f = fence_unregister(fence);
     if (!f) return;
     (void)send_executor_fence_destroy(f);
     fence_retire(f);
@@ -36628,28 +36730,26 @@ VKAPI_ATTR VkResult VKAPI_CALL vkResetFences(
         VkDevice device,
         uint32_t fenceCount,
         const VkFence *pFences) {
-    (void)device;
-    VkResult validate_rc = validate_fence_handles(fenceCount, pFences);
+    VkResult validate_rc = validate_fence_handles(device, fenceCount, pFences);
     if (validate_rc != VK_SUCCESS) return validate_rc;
     if (bridge_available()) {
         int rc = send_executor_fence_reset(fenceCount, pFences);
         if (rc != 0) return VK_ERROR_DEVICE_LOST;
         for (uint32_t i = 0; i < fenceCount; ++i) {
-            PdockerVkFence *fence = fence_handle_lookup(pFences[i]);
+            PdockerVkFence *fence = fence_handle_lookup_for_device(device, pFences[i]);
             if (fence) fence->signaled = false;
         }
         return VK_SUCCESS;
     }
     for (uint32_t i = 0; i < fenceCount; ++i) {
-        PdockerVkFence *fence = fence_handle_lookup(pFences[i]);
+        PdockerVkFence *fence = fence_handle_lookup_for_device(device, pFences[i]);
         if (fence) fence->signaled = false;
     }
     return VK_SUCCESS;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkGetFenceStatus(VkDevice device, VkFence fence) {
-    (void)device;
-    PdockerVkFence *f = fence_handle_lookup(fence);
+    PdockerVkFence *f = fence_handle_lookup_for_device(device, fence);
     if (!f) return VK_ERROR_INITIALIZATION_FAILED;
     if (f->signaled) return VK_SUCCESS;
     if (f->executor_tracked) {
@@ -36666,10 +36766,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkWaitForFences(
         const VkFence *pFences,
         VkBool32 waitAll,
         uint64_t timeout) {
-    (void)device;
-    VkResult validate_rc = validate_fence_handles(fenceCount, pFences);
+    VkResult validate_rc = validate_fence_handles(device, fenceCount, pFences);
     if (validate_rc != VK_SUCCESS) return validate_rc;
-    if (fences_wait_satisfied(fenceCount, pFences, waitAll)) return VK_SUCCESS;
+    if (fences_wait_satisfied(device, fenceCount, pFences, waitAll)) return VK_SUCCESS;
     if (bridge_available()) {
         VkResult result = VK_ERROR_UNKNOWN;
         int rc = send_executor_fence_wait(fenceCount, pFences, waitAll, timeout, &result);
@@ -36677,7 +36776,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkWaitForFences(
     }
     uint64_t start_ns = monotonic_ns();
     do {
-        if (fences_wait_satisfied(fenceCount, pFences, waitAll)) return VK_SUCCESS;
+        if (fences_wait_satisfied(device, fenceCount, pFences, waitAll)) return VK_SUCCESS;
         if (timeout == 0 || pdocker_vk_wait_deadline_expired(start_ns, timeout)) return VK_TIMEOUT;
         pdocker_vk_wait_poll_sleep(start_ns, timeout);
     } while (true);
@@ -36771,9 +36870,10 @@ VKAPI_ATTR void VKAPI_CALL vkDestroySemaphore(
         VkDevice device,
         VkSemaphore semaphore,
         const VkAllocationCallbacks *pAllocator) {
-    (void)device;
     (void)pAllocator;
-    PdockerVkSemaphore *sem = semaphore_unregister(semaphore);
+    PdockerVkSemaphore *sem = semaphore_handle_lookup_for_device(device, semaphore);
+    if (!sem) return;
+    sem = semaphore_unregister(semaphore);
     if (!sem) return;
     (void)send_executor_semaphore_destroy(sem);
     semaphore_retire(sem);
@@ -36782,8 +36882,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetSemaphoreCounterValue(
         VkDevice device,
         VkSemaphore semaphore,
         uint64_t *pValue) {
-    (void)device;
-    PdockerVkSemaphore *sem = semaphore_handle_lookup(semaphore);
+    PdockerVkSemaphore *sem = semaphore_handle_lookup_for_device(device, semaphore);
     if (!pValue || !sem) return VK_ERROR_INITIALIZATION_FAILED;
     if (!sem->timeline) return VK_ERROR_FEATURE_NOT_PRESENT;
     if (sem->executor_tracked) {
@@ -36803,18 +36902,17 @@ VKAPI_ATTR VkResult VKAPI_CALL vkWaitSemaphores(
         VkDevice device,
         const VkSemaphoreWaitInfo *pWaitInfo,
         uint64_t timeout) {
-    (void)device;
     if (!pWaitInfo) return VK_ERROR_INITIALIZATION_FAILED;
     if (pWaitInfo->pNext) {
         trace_icd_runtime_failure("semaphore-wait-pnext-unsupported",
                                   VK_ERROR_FEATURE_NOT_PRESENT);
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }
-    VkResult validate_rc = validate_timeline_semaphore_wait_handles(pWaitInfo);
+    VkResult validate_rc = validate_timeline_semaphore_wait_handles(device, pWaitInfo);
     if (validate_rc != VK_SUCCESS) return validate_rc;
     bool executor_waitable = bridge_available();
     for (uint32_t i = 0; executor_waitable && i < pWaitInfo->semaphoreCount; ++i) {
-        PdockerVkSemaphore *sem = semaphore_handle_lookup(pWaitInfo->pSemaphores[i]);
+        PdockerVkSemaphore *sem = semaphore_handle_lookup_for_device(device, pWaitInfo->pSemaphores[i]);
         executor_waitable = sem && sem->executor_tracked && sem->timeline;
     }
     if (executor_waitable) {
@@ -36824,7 +36922,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkWaitSemaphores(
     }
     uint64_t start_ns = monotonic_ns();
     do {
-        if (timeline_semaphore_wait_satisfied(pWaitInfo)) return VK_SUCCESS;
+        if (timeline_semaphore_wait_satisfied(device, pWaitInfo)) return VK_SUCCESS;
         if (timeout == 0 || pdocker_vk_wait_deadline_expired(start_ns, timeout)) return VK_TIMEOUT;
         pdocker_vk_wait_poll_sleep(start_ns, timeout);
     } while (true);
@@ -36833,14 +36931,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkWaitSemaphores(
 VKAPI_ATTR VkResult VKAPI_CALL vkSignalSemaphore(
         VkDevice device,
         const VkSemaphoreSignalInfo *pSignalInfo) {
-    (void)device;
     if (!pSignalInfo) return VK_ERROR_INITIALIZATION_FAILED;
     if (pSignalInfo->pNext) {
         trace_icd_runtime_failure("semaphore-signal-pnext-unsupported",
                                   VK_ERROR_FEATURE_NOT_PRESENT);
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }
-    PdockerVkSemaphore *sem = semaphore_handle_lookup(pSignalInfo->semaphore);
+    PdockerVkSemaphore *sem = semaphore_handle_lookup_for_device(device, pSignalInfo->semaphore);
     if (!sem) return VK_ERROR_INITIALIZATION_FAILED;
     if (!sem->timeline) return VK_ERROR_FEATURE_NOT_PRESENT;
     if (sem->executor_tracked) {

@@ -10041,7 +10041,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VKAPI_ATTR void VKAPI_CALL vkResetQueryPool", icd)
         self.assertIn("VKAPI_ATTR void VKAPI_CALL vkResetQueryPoolEXT", icd)
         self.assertIn("MAP_PROC(vkResetQueryPoolEXT)", icd)
-        self.assertIn("reset_query_range(query_pool_handle_lookup(queryPool), firstQuery, queryCount);", icd)
+        self.assertIn("reset_query_range(query_pool_handle_lookup_for_device(device, queryPool), firstQuery, queryCount);", icd)
         reset_body = c_function_body(icd, "reset_query_range")
         self.assertIn("if (!query_range_valid(pool, firstQuery, queryCount)) return;", reset_body)
 
@@ -10099,7 +10099,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("submit_has_executor_tracked_wait_sync(&pSubmits[i])", submit_body)
         self.assertIn("submit_has_executor_tracked_completion_sync(&pSubmits[i], fence)", submit_body)
         self.assertIn("allow_executor_tracked_queue_waits", submit_body)
-        self.assertIn("validate_submit_wait_semaphores(\n            &pSubmits[i], timeline_submit, allow_executor_tracked_queue_waits)", submit_body)
+        self.assertIn("validate_submit_wait_semaphores(\n            submit_queue, &pSubmits[i], timeline_submit, allow_executor_tracked_queue_waits)", submit_body)
         self.assertIn("complete_submit_semaphores(&pSubmits[i], timeline_submit);", submit_body)
         self.assertIn("if (submitCount > 0 && !pSubmits) return VK_ERROR_INITIALIZATION_FAILED;", submit_body)
         self.assertIn("submit_fence->signaled = false;", submit_body)
@@ -10157,7 +10157,7 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, icd)
         self.assertIn("submit_timeline_info_from_pnext(&pSubmits[i], &timeline_submit)", submit_body)
-        self.assertIn("validate_submit_wait_semaphores(\n            &pSubmits[i], timeline_submit, allow_executor_tracked_queue_waits)", submit_body)
+        self.assertIn("validate_submit_wait_semaphores(\n            submit_queue, &pSubmits[i], timeline_submit, allow_executor_tracked_queue_waits)", submit_body)
         self.assertIn("complete_submit_semaphores(&pSubmits[i], timeline_submit)", submit_body)
         queue_submit2_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2", 1)[1].split(
             "VKAPI_ATTR VkResult VKAPI_CALL vkQueueWaitIdle", 1
@@ -10188,13 +10188,13 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("submit2-command-null-command-buffer", submit2_command_body_for_shape)
         self.assertIn("for (uint32_t validate_i = 0; validate_i < submitCount; ++validate_i)", queue_submit2_body)
         self.assertIn("VkResult validate_rc = validate_submit2_info_shape(src);", queue_submit2_body)
-        self.assertIn("validate_rc = validate_submit2_wait_semaphores(src, bridge_available());", queue_submit2_body)
-        self.assertIn("validate_rc = validate_submit2_command_buffers(src);", queue_submit2_body)
-        self.assertIn("validate_rc = validate_submit2_signal_semaphores(src);", queue_submit2_body)
-        self.assertIn("collect_submit2_submit_sync_entries(src, validate_fence", queue_submit2_body)
-        self.assertIn("validate_submit2_wait_semaphores(src, bridge_available())", queue_submit2_body)
-        self.assertIn("validate_submit2_command_buffers(src)", queue_submit2_body)
-        self.assertIn("validate_submit2_signal_semaphores(src)", queue_submit2_body)
+        self.assertIn("validate_rc = validate_submit2_wait_semaphores(submit_queue, src, bridge_available());", queue_submit2_body)
+        self.assertIn("validate_rc = validate_submit2_command_buffers(submit_queue, src);", queue_submit2_body)
+        self.assertIn("validate_rc = validate_submit2_signal_semaphores(submit_queue, src);", queue_submit2_body)
+        self.assertIn("collect_submit2_submit_sync_entries(submit_queue, src, validate_fence", queue_submit2_body)
+        self.assertIn("validate_submit2_wait_semaphores(submit_queue, src, bridge_available())", queue_submit2_body)
+        self.assertIn("validate_submit2_command_buffers(submit_queue, src)", queue_submit2_body)
+        self.assertIn("validate_submit2_signal_semaphores(submit_queue, src)", queue_submit2_body)
         self.assertIn("complete_submit2_semaphores(src)", queue_submit2_body)
         self.assertLess(
             queue_submit2_body.index("for (uint32_t validate_i = 0; validate_i < submitCount; ++validate_i)"),
@@ -10224,7 +10224,7 @@ class GpuAbiContractTest(unittest.TestCase):
             queue_submit2_body.index("VkCommandBuffer **submit2_cmd_arrays = calloc(submitCount"),
             queue_submit2_body.index("submit_fence->signaled = false;"),
         )
-        self.assertIn("collect_submit2_submit_sync_entries(src, submit2_fence", queue_submit2_body)
+        self.assertIn("collect_submit2_submit_sync_entries(submit_queue, src, submit2_fence", queue_submit2_body)
         self.assertIn("set_submit_sync_override(submit2_sync_entries, submit2_sync_count);", queue_submit2_body)
         self.assertIn("clear_submit_sync_override();", queue_submit2_body)
         self.assertLess(queue_submit2_body.index("set_submit_sync_override(submit2_sync_entries, submit2_sync_count);"), queue_submit2_body.index("vkQueueSubmit(queue, 1, &legacy_submit, VK_NULL_HANDLE)"))
@@ -10345,18 +10345,18 @@ class GpuAbiContractTest(unittest.TestCase):
         fence_wait_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkWaitForFences", 1)[1].split(
             "static bool semaphore_create_info_parse_pnext", 1
         )[0]
-        self.assertIn("validate_fence_handles(fenceCount, pFences)", fence_wait_body)
-        self.assertIn("if (fences_wait_satisfied(fenceCount, pFences, waitAll)) return VK_SUCCESS;", fence_wait_body)
+        self.assertIn("validate_fence_handles(device, fenceCount, pFences)", fence_wait_body)
+        self.assertIn("if (fences_wait_satisfied(device, fenceCount, pFences, waitAll)) return VK_SUCCESS;", fence_wait_body)
         self.assertIn("pdocker_vk_wait_deadline_expired(start_ns, timeout)", fence_wait_body)
         self.assertIn("pdocker_vk_wait_poll_sleep(start_ns, timeout);", fence_wait_body)
         self.assertNotIn("return VK_NOT_READY", fence_wait_body)
         semaphore_wait_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkWaitSemaphores", 1)[1].split(
             "VKAPI_ATTR VkResult VKAPI_CALL vkSignalSemaphore", 1
         )[0]
-        self.assertIn("if (timeline_semaphore_wait_satisfied(pWaitInfo)) return VK_SUCCESS;", semaphore_wait_body)
+        self.assertIn("if (timeline_semaphore_wait_satisfied(device, pWaitInfo)) return VK_SUCCESS;", semaphore_wait_body)
         self.assertIn("pdocker_vk_wait_deadline_expired(start_ns, timeout)", semaphore_wait_body)
         self.assertIn("pdocker_vk_wait_poll_sleep(start_ns, timeout);", semaphore_wait_body)
-        self.assertIn("validate_timeline_semaphore_wait_handles(pWaitInfo)", semaphore_wait_body)
+        self.assertIn("validate_timeline_semaphore_wait_handles(device, pWaitInfo)", semaphore_wait_body)
         self.assertIn("return VK_ERROR_FEATURE_NOT_PRESENT;", semaphore_wait_body)
         self.assertNotIn("VK_NOT_READY", semaphore_wait_body)
 
@@ -11680,17 +11680,17 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("*pCommandPool = VK_NULL_HANDLE;", create_pool_body)
         self.assertIn("validate_command_pool_create_info(pCreateInfo)", create_pool_body)
 
-        self.assertIn("command_pool_handle_lookup(commandPool)", reset_pool_body)
+        self.assertIn("command_pool_handle_lookup_for_device(device, commandPool)", reset_pool_body)
         self.assertIn("flags & ~VK_COMMAND_POOL_RESET_RELEASE_RESOURCES_BIT", reset_pool_body)
         self.assertIn("command-pool-reset-flags-unsupported", reset_pool_body)
-        self.assertIn("command_pool_handle_lookup(commandPool)", trim_pool_body)
+        self.assertIn("command_pool_handle_lookup_for_device(device, commandPool)", trim_pool_body)
         self.assertIn("flags != 0", trim_pool_body)
         self.assertIn("command-pool-trim-flags-unsupported", trim_pool_body)
 
         self.assertIn("pAllocateInfo->sType != VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO", allocate_body)
         self.assertIn("pAllocateInfo->pNext", allocate_body)
         self.assertIn('unsupported_create_info_pnext_result("vkAllocateCommandBuffers"', allocate_body)
-        self.assertIn("command_pool_handle_lookup(pAllocateInfo->commandPool)", allocate_body)
+        self.assertIn("command_pool_handle_lookup_for_device(device, pAllocateInfo->commandPool)", allocate_body)
         self.assertIn("pAllocateInfo->level != VK_COMMAND_BUFFER_LEVEL_PRIMARY", allocate_body)
         self.assertIn("pAllocateInfo->level != VK_COMMAND_BUFFER_LEVEL_SECONDARY", allocate_body)
         self.assertIn("command-buffer-level-unsupported", allocate_body)
@@ -11722,8 +11722,8 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertNotIn(forbidden, icd)
 
-        self.assertIn("command_buffer_handle_lookup(pSubmits[validate_i].pCommandBuffers[cmd_i])", queue_submit_body)
-        self.assertIn("command_buffer_handle_lookup(pSubmits[i].pCommandBuffers[j])", queue_submit_body)
+        self.assertIn("command_buffer_handle_lookup_for_queue(submit_queue, pSubmits[validate_i].pCommandBuffers[cmd_i])", queue_submit_body)
+        self.assertIn("command_buffer_handle_lookup_for_queue(submit_queue, pSubmits[i].pCommandBuffers[j])", queue_submit_body)
         self.assertIn("return (PdockerVkCommandBuffer *)commandBuffer;", icd)
         self.assertIn("PdockerVkCommandBuffer *sync_cmd = (PdockerVkCommandBuffer *)calloc(1, sizeof(*sync_cmd));", icd)
 
@@ -13333,8 +13333,21 @@ class GpuAbiContractTest(unittest.TestCase):
             "buffer_view_handle_lookup_for_device(VkDevice device, VkBufferView view)",
             "image_view_handle_lookup_for_device(VkDevice device, VkImageView view)",
             "sampler_handle_lookup_for_device(VkDevice device, VkSampler sampler)",
+            "queue_owner_matches_or_unowned(const PdockerVkQueue *queue, uint64_t owner_device_id)",
+            "owner_device_ids_match_or_unowned(uint64_t lhs_owner_device_id, uint64_t rhs_owner_device_id)",
+            "command_pool_handle_lookup_for_device(VkDevice device, VkCommandPool commandPool)",
+            "command_buffer_handle_lookup_for_queue(",
+            "command_buffer_handle_lookup_for_device(",
+            "fence_handle_lookup_for_device(VkDevice device, VkFence fence)",
+            "fence_handle_lookup_for_queue(const PdockerVkQueue *queue, VkFence fence)",
+            "semaphore_handle_lookup_for_device(VkDevice device, VkSemaphore semaphore)",
+            "semaphore_handle_lookup_for_queue(const PdockerVkQueue *queue, VkSemaphore semaphore)",
+            "event_handle_lookup_for_device(VkDevice device, VkEvent event)",
+            "query_pool_handle_lookup_for_device(VkDevice device, VkQueryPool queryPool)",
         ]:
             self.assertIn(marker, icd)
+        command_buffer_struct = icd.split("typedef struct PdockerVkCommandBuffer {", 1)[1].split("} PdockerVkCommandBuffer;", 1)[0]
+        self.assertIn("uint64_t owner_device_id;", command_buffer_struct)
         create_device_body = c_function_body(icd, "vkCreateDevice")
         self.assertIn("device_register(device);", create_device_body)
         destroy_device_body = c_function_body(icd, "vkDestroyDevice")
@@ -13392,11 +13405,46 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(marker, proc_body)
 
 
+        destroy_command_pool_body = c_function_body(icd, "vkDestroyCommandPool")
+        self.assertIn("command_pool_handle_lookup_for_device(device, commandPool)", destroy_command_pool_body)
+        allocate_command_buffers_body = c_function_body(icd, "vkAllocateCommandBuffers")
+        self.assertIn("command_pool_handle_lookup_for_device(device, pAllocateInfo->commandPool)", allocate_command_buffers_body)
+        queue_submit_body = c_function_body(icd, "vkQueueSubmit")
+        self.assertIn("command_buffer_handle_lookup_for_queue(submit_queue", queue_submit_body)
+        self.assertIn("fence_handle_lookup_for_queue(submit_queue, fence)", queue_submit_body)
+        self.assertIn("validate_submit_wait_semaphores(", queue_submit_body)
+        self.assertIn("submit_queue, &pSubmits", queue_submit_body)
+        self.assertIn("validate_submit_signal_semaphores(submit_queue", queue_submit_body)
+        queue_bind_sparse_body = c_function_body(icd, "vkQueueBindSparse")
+        self.assertIn("pdocker_vk_queue_from_handle(queue)", queue_bind_sparse_body)
+        self.assertIn("fence_handle_lookup_for_queue(submit_queue, fence)", queue_bind_sparse_body)
+        for name, marker in [
+            ("vkDestroyFence", "fence_handle_lookup_for_device(device, fence)"),
+            ("vkGetFenceStatus", "fence_handle_lookup_for_device(device, fence)"),
+            ("vkDestroySemaphore", "semaphore_handle_lookup_for_device(device, semaphore)"),
+            ("vkGetSemaphoreCounterValue", "semaphore_handle_lookup_for_device(device, semaphore)"),
+            ("vkDestroyEvent", "event_handle_lookup_for_device(device, event)"),
+            ("vkSetEvent", "event_handle_lookup_for_device(device, event)"),
+            ("vkDestroyQueryPool", "query_pool_handle_lookup_for_device(device, queryPool)"),
+            ("vkGetQueryPoolResults", "query_pool_handle_lookup_for_device(device, queryPool)"),
+        ]:
+            self.assertIn(marker, c_function_body(icd, name))
+        self.assertIn("event-command-cross-device", c_function_body(icd, "record_event_command"))
+        self.assertIn("event-wait-cross-device", c_function_body(icd, "record_event_wait_command"))
+        self.assertIn("query-pool-cross-device", c_function_body(icd, "record_query_command"))
+        self.assertIn("query-copy-cross-device", c_function_body(icd, "record_copy_query_results_command"))
+        self.assertIn("execute-commands-cross-device", c_function_body(icd, "vkCmdExecuteCommands"))
+
         queue_submit2_body = c_function_body(icd, "vkQueueSubmit2")
         self.assertIn("PdockerVkQueue *submit_queue = pdocker_vk_queue_from_handle(queue);", queue_submit2_body)
         self.assertIn("if (!submit_queue) return VK_ERROR_INITIALIZATION_FAILED;", queue_submit2_body)
         self.assertIn("queue_synchronization2_enabled(submit_queue)", queue_submit2_body)
         self.assertIn("synchronization2-feature-disabled", queue_submit2_body)
+        self.assertIn("fence_handle_lookup_for_queue(submit_queue, fence)", queue_submit2_body)
+        self.assertIn("validate_submit2_wait_semaphores(submit_queue", queue_submit2_body)
+        self.assertIn("validate_submit2_command_buffers(submit_queue", queue_submit2_body)
+        self.assertIn("validate_submit2_signal_semaphores(submit_queue", queue_submit2_body)
+        self.assertIn("collect_submit2_submit_sync_entries(submit_queue", queue_submit2_body)
 
         for name in [
             "vkCmdPipelineBarrier2",
@@ -14227,7 +14275,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("free_submit_info_arrays", icd)
         self.assertIn("vkQueueSubmit(queue, 1, &legacy_submit, VK_NULL_HANDLE)", icd)
         self.assertIn("complete_submit2_semaphores(src)", icd)
-        self.assertIn("collect_submit2_submit_sync_entries(src, submit2_fence", icd)
+        self.assertIn("collect_submit2_submit_sync_entries(submit_queue, src, submit2_fence", icd)
         self.assertIn("set_submit_sync_override(submit2_sync_entries, submit2_sync_count);", icd)
         self.assertIn("clear_submit_sync_override();", icd)
         self.assertLess(icd.index("set_submit_sync_override(submit2_sync_entries, submit2_sync_count);"), icd.index("vkQueueSubmit(queue, 1, &legacy_submit, VK_NULL_HANDLE)"))
@@ -15320,7 +15368,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "submit_timeline_signal_value",
             "validate_submit_wait_semaphores",
             "PdockerGpuVulkanGraphicsV619SubmitSyncEntry *submit_sync_entries = NULL",
-            "collect_legacy_submit_sync_entries(&pSubmits[i], timeline_submit, fence",
+            "collect_legacy_submit_sync_entries(submit_queue, &pSubmits[i], timeline_submit, fence",
             "if (g_submit_sync_override_entries)",
             "calloc(\n                PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS,\n                sizeof(*submit_sync_entries))",
             "RETURN_VK_QUEUE_SUBMIT_WITH_SYNC(VK_ERROR_FEATURE_NOT_PRESENT);",
@@ -15516,15 +15564,15 @@ class GpuAbiContractTest(unittest.TestCase):
         wait_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkWaitForFences", 1)[1].split(
             "static bool semaphore_create_info_parse_pnext", 1
         )[0]
-        self.assertIn("fences_wait_satisfied(fenceCount, pFences, waitAll)", wait_body)
+        self.assertIn("fences_wait_satisfied(device, fenceCount, pFences, waitAll)", wait_body)
         self.assertLess(
-            wait_body.index("fences_wait_satisfied(fenceCount, pFences, waitAll)"),
+            wait_body.index("fences_wait_satisfied(device, fenceCount, pFences, waitAll)"),
             wait_body.index("send_executor_fence_wait(fenceCount, pFences, waitAll, timeout, &result)"),
         )
         reset_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkResetFences", 1)[1].split(
             "VKAPI_ATTR VkResult VKAPI_CALL vkGetFenceStatus", 1
         )[0]
-        self.assertIn("validate_fence_handles(fenceCount, pFences)", reset_body)
+        self.assertIn("validate_fence_handles(device, fenceCount, pFences)", reset_body)
         self.assertIn("if (fence) fence->signaled = false;", reset_body)
 
     def test_vulkan_icd_supports_query_pool_and_timestamp_api(self):
@@ -16531,7 +16579,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "command_pool_register(pool);",
             "*pCommandPool = pdocker_vk_command_pool_to_handle(pool);",
             "command_pool_retire(pool);",
-            "command_pool_handle_lookup(commandPool)",
+            "command_pool_handle_lookup_for_device(device, commandPool)",
             "render_pass_register(rp);",
             "render_pass_handle_lookup(ci->renderPass)",
             "render_pass_retire(render_pass_unregister(renderPass));",
@@ -16605,14 +16653,14 @@ class GpuAbiContractTest(unittest.TestCase):
             "*pSemaphore = pdocker_vk_semaphore_to_handle(sem);",
             "*pEvent = pdocker_vk_event_to_handle(event);",
             "*pQueryPool = pdocker_vk_query_pool_to_handle(pool);",
-            "PdockerVkFence *submit_fence = fence_handle_lookup(fence);",
-            "PdockerVkSemaphore *sem = semaphore_handle_lookup(pSignalInfo->semaphore);",
-            "PdockerVkEvent *e = event_handle_lookup(event);",
-            "PdockerVkQueryPool *pool = query_pool_handle_lookup(queryPool);",
-            "reset_query_range(query_pool_handle_lookup(queryPool), firstQuery, queryCount);",
-            "validate_fence_handles(fenceCount, pFences)",
+            "PdockerVkFence *submit_fence = fence_handle_lookup_for_queue(submit_queue, fence);",
+            "PdockerVkSemaphore *sem = semaphore_handle_lookup_for_device(device, pSignalInfo->semaphore);",
+            "PdockerVkEvent *e = event_handle_lookup_for_device(device, event);",
+            "PdockerVkQueryPool *pool = query_pool_handle_lookup_for_device(device, queryPool);",
+            "reset_query_range(query_pool_handle_lookup_for_device(device, queryPool), firstQuery, queryCount);",
+            "validate_fence_handles(device, fenceCount, pFences)",
             "validate_submit_signal_semaphores",
-            "validate_timeline_semaphore_wait_handles(pWaitInfo)",
+            "validate_timeline_semaphore_wait_handles(device, pWaitInfo)",
             "query-command-stale-pool",
         ]:
             self.assertIn(marker, source)

@@ -10,6 +10,38 @@ llama.cpp itself remains unmodified.
 ## Current Ground Truth
 
 
+### 2026-07-18 CPU/static Vulkan command/sync/query owner lane
+
+Command pools, command buffers, fences, semaphores, events, and query pools now
+enforce their creator-device ownership at the public API boundary.  Device-bound
+entry points resolve these handles through owner-aware lookup helpers; queue
+submission resolves command buffers, fences, and wait/signal semaphores against
+the owning queue's device id.  Wrong-device destructive calls are no-ops, while
+result-returning calls fail closed with `VK_ERROR_INITIALIZATION_FAILED` before
+mutating fence, semaphore, event, or query state.
+
+Command recording paths also reject cross-device captures.  Event commands,
+event waits, query/timestamp commands, query-result copies, and secondary command
+buffer execution now mark the recording command buffer failed when the captured
+object belongs to a different device.  WSI acquire/present sync validation uses
+the same owner-aware semaphore/fence checks.
+
+This is generic Vulkan pass-through hardening.  It does not change llama.cpp,
+Dockerfiles, models, prompts, shader bytes, or executor-side arithmetic.  The
+work remains on the CPU/static correctness lane so the next physical-device run
+can focus on Vulkan pass-through behavior rather than stale or cross-device
+handle aliasing.
+
+Evidence: `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`,
+`tests.test_gpu_abi_contract`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_device_owner_rejects_cross_device_command_submit_sync`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_device_owner_rejects_cross_device_memory_resource_misuse`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_destroy_device_retires_live_device_children_and_queue`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_wsi_surface_swapchain_handles_fail_closed_after_destroy`,
+`scripts/build-gpu-shim.sh`, `scripts/verify-native-payloads.py`,
+`./gradlew :app:assembleDebug`.
+
+
 ### 2026-07-18 CPU/static Vulkan cross-device core resource owner lane
 
 Core resource objects now carry an `owner_device_id` captured from the creating

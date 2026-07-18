@@ -7002,6 +7002,231 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
+    def test_device_owner_rejects_cross_device_command_submit_sync(self):
+        source = textwrap.dedent("""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "__ICD_SOURCE__"
+
+            static VkDevice make_device(void) {
+                VkDeviceCreateInfo info;
+                memset(&info, 0, sizeof(info));
+                info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                VkDevice device = VK_NULL_HANDLE;
+                if (vkCreateDevice((VkPhysicalDevice)&g_device, &info, NULL, &device) != VK_SUCCESS) return VK_NULL_HANDLE;
+                return device;
+            }
+
+            static VkCommandPool make_pool(VkDevice device) {
+                VkCommandPoolCreateInfo info;
+                memset(&info, 0, sizeof(info));
+                info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+                info.queueFamilyIndex = 0;
+                VkCommandPool pool = VK_NULL_HANDLE;
+                if (vkCreateCommandPool(device, &info, NULL, &pool) != VK_SUCCESS) return VK_NULL_HANDLE;
+                return pool;
+            }
+
+            static VkCommandBuffer make_cmd(VkDevice device, VkCommandPool pool, VkCommandBufferLevel level) {
+                VkCommandBufferAllocateInfo info;
+                memset(&info, 0, sizeof(info));
+                info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+                info.commandPool = pool;
+                info.level = level;
+                info.commandBufferCount = 1;
+                VkCommandBuffer cmd = VK_NULL_HANDLE;
+                if (vkAllocateCommandBuffers(device, &info, &cmd) != VK_SUCCESS) return VK_NULL_HANDLE;
+                return cmd;
+            }
+
+            static VkFence make_fence(VkDevice device, VkFenceCreateFlags flags) {
+                VkFenceCreateInfo info;
+                memset(&info, 0, sizeof(info));
+                info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+                info.flags = flags;
+                VkFence fence = VK_NULL_HANDLE;
+                if (vkCreateFence(device, &info, NULL, &fence) != VK_SUCCESS) return VK_NULL_HANDLE;
+                return fence;
+            }
+
+            static VkSemaphore make_binary_semaphore(VkDevice device) {
+                VkSemaphoreCreateInfo info;
+                memset(&info, 0, sizeof(info));
+                info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+                VkSemaphore sem = VK_NULL_HANDLE;
+                if (vkCreateSemaphore(device, &info, NULL, &sem) != VK_SUCCESS) return VK_NULL_HANDLE;
+                return sem;
+            }
+
+            static VkSemaphore make_timeline_semaphore_object(VkDevice device, uint64_t value) {
+                PdockerVkSemaphore *sem = pdocker_alloc_handle(sizeof(*sem));
+                if (!sem) return VK_NULL_HANDLE;
+                memset(sem, 0, sizeof(*sem));
+                sem->timeline = true;
+                sem->value = value;
+                sem->signaled = value > 0;
+                sem->owner_device_id = device_owner_id_or_zero(device);
+                sem->semaphore_id = next_vulkan_object_generation();
+                semaphore_register(sem);
+                return pdocker_vk_semaphore_to_handle(sem);
+            }
+
+            static VkEvent make_event(VkDevice device) {
+                VkEventCreateInfo info;
+                memset(&info, 0, sizeof(info));
+                info.sType = VK_STRUCTURE_TYPE_EVENT_CREATE_INFO;
+                VkEvent event = VK_NULL_HANDLE;
+                if (vkCreateEvent(device, &info, NULL, &event) != VK_SUCCESS) return VK_NULL_HANDLE;
+                return event;
+            }
+
+            static VkQueryPool make_query_pool(VkDevice device) {
+                VkQueryPoolCreateInfo info;
+                memset(&info, 0, sizeof(info));
+                info.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+                info.queryType = VK_QUERY_TYPE_TIMESTAMP;
+                info.queryCount = 1;
+                VkQueryPool pool = VK_NULL_HANDLE;
+                if (vkCreateQueryPool(device, &info, NULL, &pool) != VK_SUCCESS) return VK_NULL_HANDLE;
+                return pool;
+            }
+
+            int main(void) {
+                VkDevice device_a = make_device();
+                VkDevice device_b = make_device();
+                if (!device_a || !device_b || device_a == device_b) return 1;
+                VkQueue queue_b = VK_NULL_HANDLE;
+                vkGetDeviceQueue(device_b, 0, 0, &queue_b);
+                if (!queue_b) return 2;
+                pdocker_vk_queue_from_handle(queue_b)->requested_feature_mask |= PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
+                pdocker_vk_queue_from_handle(queue_b)->enabled_extension_mask |= PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
+
+                VkCommandPool pool_a = make_pool(device_a);
+                VkCommandPool pool_b = make_pool(device_b);
+                VkCommandBuffer cmd_a = make_cmd(device_a, pool_a, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
+                VkCommandBuffer cmd_b = make_cmd(device_b, pool_b, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
+                VkCommandBuffer secondary_b = make_cmd(device_b, pool_b, VK_COMMAND_BUFFER_LEVEL_SECONDARY);
+                if (!pool_a || !pool_b || !cmd_a || !cmd_b || !secondary_b) return 3;
+                if (command_buffer_handle_lookup_for_queue(pdocker_vk_queue_from_handle(queue_b), cmd_a)) return 4;
+
+                if (vkResetCommandPool(device_b, pool_a, 0) != VK_ERROR_INITIALIZATION_FAILED) return 5;
+                VkCommandBuffer wrong_alloc = VK_NULL_HANDLE;
+                VkCommandBufferAllocateInfo alloc_info;
+                memset(&alloc_info, 0, sizeof(alloc_info));
+                alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+                alloc_info.commandPool = pool_a;
+                alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+                alloc_info.commandBufferCount = 1;
+                if (vkAllocateCommandBuffers(device_b, &alloc_info, &wrong_alloc) != VK_ERROR_INITIALIZATION_FAILED) return 6;
+                if (wrong_alloc != VK_NULL_HANDLE) return 7;
+                vkFreeCommandBuffers(device_b, pool_a, 1, &cmd_a);
+                if (!command_buffer_handle_lookup_for_device(device_a, cmd_a)) return 8;
+                vkDestroyCommandPool(device_b, pool_a, NULL);
+                if (!command_pool_handle_lookup_for_device(device_a, pool_a) ||
+                    !command_buffer_handle_lookup_for_device(device_a, cmd_a)) return 9;
+
+                VkFence fence_a = make_fence(device_a, VK_FENCE_CREATE_SIGNALED_BIT);
+                VkFence fence_b = make_fence(device_b, 0);
+                VkSemaphore binary_a = make_binary_semaphore(device_a);
+                VkSemaphore timeline_a = make_timeline_semaphore_object(device_a, 1);
+                if (!fence_a || !fence_b || !binary_a || !timeline_a) return 10;
+                VkSubmitInfo submit;
+                memset(&submit, 0, sizeof(submit));
+                submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+                submit.commandBufferCount = 1;
+                submit.pCommandBuffers = &cmd_a;
+                if (vkQueueSubmit(queue_b, 1, &submit, VK_NULL_HANDLE) != VK_ERROR_INITIALIZATION_FAILED) return 11;
+                submit.commandBufferCount = 0;
+                submit.pCommandBuffers = NULL;
+                submit.signalSemaphoreCount = 1;
+                submit.pSignalSemaphores = &binary_a;
+                if (vkQueueSubmit(queue_b, 1, &submit, VK_NULL_HANDLE) != VK_ERROR_INITIALIZATION_FAILED) return 12;
+                if (semaphore_handle_lookup_for_device(device_a, binary_a)->signaled) return 13;
+                if (vkQueueSubmit(queue_b, 0, NULL, fence_a) != VK_ERROR_INITIALIZATION_FAILED) return 14;
+
+                VkCommandBufferSubmitInfo cmd_submit;
+                VkSubmitInfo2 submit2;
+                memset(&cmd_submit, 0, sizeof(cmd_submit));
+                memset(&submit2, 0, sizeof(submit2));
+                cmd_submit.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
+                cmd_submit.commandBuffer = cmd_a;
+                submit2.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
+                submit2.commandBufferInfoCount = 1;
+                submit2.pCommandBufferInfos = &cmd_submit;
+                if (vkQueueSubmit2(queue_b, 1, &submit2, VK_NULL_HANDLE) != VK_ERROR_INITIALIZATION_FAILED) return 15;
+
+                if (vkResetFences(device_b, 1, &fence_a) != VK_ERROR_INITIALIZATION_FAILED) return 16;
+                if (vkGetFenceStatus(device_a, fence_a) != VK_SUCCESS) return 17;
+                if (vkGetFenceStatus(device_b, fence_a) != VK_ERROR_INITIALIZATION_FAILED) return 18;
+                if (vkWaitForFences(device_b, 1, &fence_a, VK_TRUE, 0) != VK_ERROR_INITIALIZATION_FAILED) return 19;
+                vkDestroyFence(device_b, fence_a, NULL);
+                if (!fence_handle_lookup_for_device(device_a, fence_a)) return 20;
+
+                uint64_t counter = 0;
+                if (vkGetSemaphoreCounterValue(device_b, timeline_a, &counter) != VK_ERROR_INITIALIZATION_FAILED) return 21;
+                VkSemaphoreSignalInfo signal_info;
+                memset(&signal_info, 0, sizeof(signal_info));
+                signal_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SIGNAL_INFO;
+                signal_info.semaphore = timeline_a;
+                signal_info.value = 9;
+                if (vkSignalSemaphore(device_b, &signal_info) != VK_ERROR_INITIALIZATION_FAILED) return 22;
+                if (semaphore_handle_lookup_for_device(device_a, timeline_a)->value != 1) return 23;
+                VkSemaphoreWaitInfo wait_info;
+                memset(&wait_info, 0, sizeof(wait_info));
+                wait_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
+                wait_info.semaphoreCount = 1;
+                wait_info.pSemaphores = &timeline_a;
+                uint64_t wait_value = 1;
+                wait_info.pValues = &wait_value;
+                if (vkWaitSemaphores(device_b, &wait_info, 0) != VK_ERROR_INITIALIZATION_FAILED) return 24;
+                vkDestroySemaphore(device_b, timeline_a, NULL);
+                if (!semaphore_handle_lookup_for_device(device_a, timeline_a)) return 25;
+
+                VkEvent event_a = make_event(device_a);
+                VkEvent event_b = make_event(device_b);
+                if (!event_a || !event_b) return 26;
+                if (vkSetEvent(device_b, event_a) != VK_ERROR_INITIALIZATION_FAILED) return 27;
+                if (vkGetEventStatus(device_a, event_a) != VK_EVENT_RESET) return 28;
+                if (vkResetEvent(device_b, event_a) != VK_ERROR_INITIALIZATION_FAILED) return 29;
+                vkDestroyEvent(device_b, event_a, NULL);
+                if (!event_handle_lookup_for_device(device_a, event_a)) return 30;
+                if (vkBeginCommandBuffer(cmd_a, NULL) != VK_SUCCESS) return 31;
+                vkCmdSetEvent(cmd_a, event_b, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+                if (vkEndCommandBuffer(cmd_a) != VK_ERROR_FEATURE_NOT_PRESENT) return 32;
+
+                VkQueryPool query_a = make_query_pool(device_a);
+                VkQueryPool query_b = make_query_pool(device_b);
+                if (!query_a || !query_b) return 33;
+                PdockerVkQueryPool *query_a_obj = query_pool_handle_lookup_for_device(device_a, query_a);
+                query_a_obj->values[0] = 123;
+                query_a_obj->available[0] = 1;
+                uint64_t query_value = 0;
+                if (vkGetQueryPoolResults(device_b, query_a, 0, 1, sizeof(query_value), &query_value,
+                                          sizeof(query_value), VK_QUERY_RESULT_64_BIT) != VK_ERROR_INITIALIZATION_FAILED) return 34;
+                vkResetQueryPool(device_b, query_a, 0, 1);
+                if (query_a_obj->available[0] != 1 || query_a_obj->values[0] != 123) return 35;
+                if (vkBeginCommandBuffer(cmd_b, NULL) != VK_SUCCESS) return 36;
+                vkCmdWriteTimestamp(cmd_b, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, query_a, 0);
+                if (vkEndCommandBuffer(cmd_b) != VK_ERROR_FEATURE_NOT_PRESENT) return 37;
+                vkDestroyQueryPool(device_b, query_a, NULL);
+                if (!query_pool_handle_lookup_for_device(device_a, query_a)) return 38;
+
+                VkCommandBuffer primary_a2 = make_cmd(device_a, pool_a, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
+                if (!primary_a2) return 39;
+                if (vkBeginCommandBuffer(primary_a2, NULL) != VK_SUCCESS) return 40;
+                vkCmdExecuteCommands(primary_a2, 1, &secondary_b);
+                if (vkEndCommandBuffer(primary_a2) != VK_ERROR_FEATURE_NOT_PRESENT) return 41;
+
+                vkDestroyDevice(device_a, NULL);
+                vkDestroyDevice(device_b, NULL);
+                return 0;
+            }
+            """).replace("__ICD_SOURCE__", str(ICD_SOURCE))
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
     def test_destroy_device_retires_live_device_children_and_queue(self):
         source = textwrap.dedent("""
             #include <stdint.h>
