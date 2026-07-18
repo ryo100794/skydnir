@@ -10,6 +10,32 @@ llama.cpp itself remains unmodified.
 ## Current Ground Truth
 
 
+### 2026-07-18 CPU/static Vulkan device-destroy cleanup lane
+
+`vkDestroyDevice` now drains the live device-object registries before freeing the
+dispatchable device object.  Swapchains, command pools/buffers, descriptor
+update templates, descriptor pools/sets, pipelines, framebuffers, pipeline
+layouts, shader modules, descriptor set layouts, render passes, pipeline caches,
+buffer/image views, samplers, buffers, images, memory, fences, semaphores,
+events, query pools, validation caches, and private-data slots are moved out of
+live lookup or explicitly freed in dependency order.  The singleton queue state
+is cleared when it belongs to the destroyed device, so old queue handles no
+longer pass `pdocker_vk_queue_from_handle` after device teardown.
+
+This closes the highest-risk CPU/static lifecycle hole where stale child handles
+could remain globally live after device destruction.  It is still a singleton
+ICD cleanup lane, not the full per-object device-owner model; cross-device owner
+validation remains a separate follow-up lane.
+
+This is generic Vulkan pass-through hardening.  It does not change llama.cpp,
+Dockerfiles, models, prompts, shader bytes, or executor-side arithmetic.
+
+Evidence: `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`,
+`tests.test_gpu_abi_contract`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_destroy_device_retires_live_device_children_and_queue`,
+`scripts/build-gpu-shim.sh`.
+
+
 ### 2026-07-18 CPU/static Vulkan WSI surface/swapchain live-handle lane
 
 `VkSurfaceKHR` and `VkSwapchainKHR` now use live registries with soft-destroy

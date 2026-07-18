@@ -6842,6 +6842,120 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
+    def test_destroy_device_retires_live_device_children_and_queue(self):
+        source = textwrap.dedent("""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "__ICD_SOURCE__"
+
+            int main(void) {
+                VkDeviceCreateInfo device_info;
+                memset(&device_info, 0, sizeof(device_info));
+                device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                VkDevice device = VK_NULL_HANDLE;
+                if (vkCreateDevice((VkPhysicalDevice)&g_device, &device_info, NULL, &device) != VK_SUCCESS || !device) return 1;
+                VkQueue queue = VK_NULL_HANDLE;
+                vkGetDeviceQueue(device, 0, 0, &queue);
+                if (!queue || !pdocker_vk_queue_from_handle(queue)) return 2;
+
+                VkBufferCreateInfo buffer_info;
+                memset(&buffer_info, 0, sizeof(buffer_info));
+                buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+                buffer_info.size = 256;
+                buffer_info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+                buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+                VkBuffer buffer = VK_NULL_HANDLE;
+                if (vkCreateBuffer(device, &buffer_info, NULL, &buffer) != VK_SUCCESS || !buffer_handle_lookup(buffer)) return 3;
+
+                VkMemoryAllocateInfo memory_info;
+                memset(&memory_info, 0, sizeof(memory_info));
+                memory_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+                memory_info.allocationSize = 4096;
+                memory_info.memoryTypeIndex = 0;
+                VkDeviceMemory memory = VK_NULL_HANDLE;
+                if (vkAllocateMemory(device, &memory_info, NULL, &memory) != VK_SUCCESS) return 4;
+                if (!memory_handle_resolve(memory, NULL)) return 5;
+                if (vkBindBufferMemory(device, buffer, memory, 0) != VK_SUCCESS) return 6;
+
+                VkCommandPoolCreateInfo pool_info;
+                memset(&pool_info, 0, sizeof(pool_info));
+                pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+                pool_info.queueFamilyIndex = 0;
+                VkCommandPool command_pool = VK_NULL_HANDLE;
+                if (vkCreateCommandPool(device, &pool_info, NULL, &command_pool) != VK_SUCCESS ||
+                    !command_pool_handle_lookup(command_pool)) return 7;
+
+                VkFenceCreateInfo fence_info;
+                memset(&fence_info, 0, sizeof(fence_info));
+                fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+                VkFence fence = VK_NULL_HANDLE;
+                if (vkCreateFence(device, &fence_info, NULL, &fence) != VK_SUCCESS || !fence_handle_lookup(fence)) return 8;
+
+                VkSemaphoreCreateInfo sem_info;
+                memset(&sem_info, 0, sizeof(sem_info));
+                sem_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+                VkSemaphore sem = VK_NULL_HANDLE;
+                if (vkCreateSemaphore(device, &sem_info, NULL, &sem) != VK_SUCCESS || !semaphore_handle_lookup(sem)) return 9;
+
+                VkEventCreateInfo event_info;
+                memset(&event_info, 0, sizeof(event_info));
+                event_info.sType = VK_STRUCTURE_TYPE_EVENT_CREATE_INFO;
+                VkEvent event = VK_NULL_HANDLE;
+                if (vkCreateEvent(device, &event_info, NULL, &event) != VK_SUCCESS || !event_handle_lookup(event)) return 10;
+
+                VkQueryPoolCreateInfo query_info;
+                memset(&query_info, 0, sizeof(query_info));
+                query_info.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+                query_info.queryType = VK_QUERY_TYPE_TIMESTAMP;
+                query_info.queryCount = 1;
+                VkQueryPool query_pool = VK_NULL_HANDLE;
+                if (vkCreateQueryPool(device, &query_info, NULL, &query_pool) != VK_SUCCESS ||
+                    !query_pool_handle_lookup(query_pool)) return 11;
+
+                VkPipelineCacheCreateInfo cache_info;
+                memset(&cache_info, 0, sizeof(cache_info));
+                cache_info.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
+                VkPipelineCache cache = VK_NULL_HANDLE;
+                if (vkCreatePipelineCache(device, &cache_info, NULL, &cache) != VK_SUCCESS ||
+                    !pipeline_cache_handle_lookup(cache)) return 12;
+
+                vkDestroyDevice(device, NULL);
+
+                if (device_handle_resolve(device, NULL)) return 20;
+                if (pdocker_vk_queue_from_handle(queue)) return 21;
+                if (buffer_handle_lookup(buffer)) return 22;
+                if (memory_handle_resolve(memory, NULL)) return 23;
+                if (command_pool_handle_lookup(command_pool)) return 24;
+                if (fence_handle_lookup(fence)) return 25;
+                if (semaphore_handle_lookup(sem)) return 26;
+                if (event_handle_lookup(event)) return 27;
+                if (query_pool_handle_lookup(query_pool)) return 28;
+                if (pipeline_cache_handle_lookup(cache)) return 29;
+
+                if (vkQueueSubmit(queue, 0, NULL, VK_NULL_HANDLE) != VK_ERROR_INITIALIZATION_FAILED) return 30;
+                if (vkBindBufferMemory(device, buffer, memory, 0) != VK_ERROR_INITIALIZATION_FAILED) return 31;
+                if (vkGetFenceStatus(device, fence) != VK_ERROR_INITIALIZATION_FAILED) return 32;
+                if (vkGetEventStatus(device, event) != VK_ERROR_INITIALIZATION_FAILED) return 33;
+                size_t cache_size = 123;
+                if (vkGetPipelineCacheData(device, cache, &cache_size, NULL) != VK_ERROR_INITIALIZATION_FAILED) return 34;
+                if (cache_size != 123) return 35;
+
+                vkDestroyBuffer(device, buffer, NULL);
+                vkFreeMemory(device, memory, NULL);
+                vkDestroyCommandPool(device, command_pool, NULL);
+                vkDestroyFence(device, fence, NULL);
+                vkDestroySemaphore(device, sem, NULL);
+                vkDestroyEvent(device, event, NULL);
+                vkDestroyQueryPool(device, query_pool, NULL);
+                vkDestroyPipelineCache(device, cache, NULL);
+                return 0;
+            }
+            """).replace("__ICD_SOURCE__", str(ICD_SOURCE))
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
     def test_device_queue_lookup_shape_is_fail_closed(self):
         source = textwrap.dedent(
             f"""

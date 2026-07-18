@@ -24725,12 +24725,18 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
     return VK_SUCCESS;
 }
 
+static void pdocker_vk_destroy_device_live_objects(VkDevice device);
+
 VKAPI_ATTR void VKAPI_CALL vkDestroyDevice(
         VkDevice device,
         const VkAllocationCallbacks *pAllocator) {
     (void)pAllocator;
     PdockerVkDevice *pdocker_device = device_unregister(device);
     if (!pdocker_device) return;
+    pdocker_vk_destroy_device_live_objects(device);
+    if (g_queue.device_object_id == pdocker_device->object_id) {
+        memset(&g_queue, 0, sizeof(g_queue));
+    }
     free(pdocker_device);
 }
 
@@ -37265,6 +37271,147 @@ VKAPI_ATTR void VKAPI_CALL vkGetPrivateData(
     }
 }
 #endif
+
+
+static void pdocker_vk_destroy_device_live_objects(VkDevice device) {
+    while (g_swapchains) {
+        PdockerVkSwapchain *sc = swapchain_unregister(pdocker_vk_swapchain_to_handle(g_swapchains));
+        if (!sc) break;
+        pdocker_vk_destroy_swapchain_images(device, sc);
+        swapchain_retire(sc);
+    }
+    while (g_command_pools) {
+        PdockerVkCommandPool *pool = command_pool_unregister(pdocker_vk_command_pool_to_handle(g_command_pools));
+        if (!pool) break;
+        while (pool->command_buffers) {
+            PdockerVkCommandBuffer *cmd = command_buffer_unregister((VkCommandBuffer)pool->command_buffers);
+            if (!cmd) break;
+            command_buffer_retire(cmd);
+        }
+        command_pool_retire(pool);
+    }
+    while (g_command_buffers) {
+        PdockerVkCommandBuffer *cmd = command_buffer_unregister((VkCommandBuffer)g_command_buffers);
+        if (!cmd) break;
+        command_buffer_retire(cmd);
+    }
+    while (g_descriptor_update_templates) {
+        PdockerVkDescriptorUpdateTemplate *template_handle = descriptor_update_template_unregister(
+            pdocker_vk_descriptor_update_template_to_handle(g_descriptor_update_templates));
+        if (!template_handle) break;
+        free(template_handle->entries);
+        free(template_handle);
+    }
+    while (g_descriptor_pools) {
+        PdockerVkDescriptorPool *pool = descriptor_pool_unregister(
+            pdocker_vk_descriptor_pool_to_handle(g_descriptor_pools));
+        if (!pool) break;
+        destroy_descriptor_pool_object(pool);
+    }
+    while (g_descriptor_sets) {
+        PdockerVkDescriptorSet *set = descriptor_set_unregister(
+            pdocker_vk_descriptor_set_to_handle(g_descriptor_sets));
+        if (!set) break;
+        destroy_descriptor_set_object(set);
+    }
+    while (g_pipelines) {
+        PdockerVkPipeline *pipeline = pipeline_unregister(pdocker_vk_pipeline_to_handle(g_pipelines));
+        if (!pipeline) break;
+        pipeline_retire(pipeline);
+    }
+    while (g_framebuffers) {
+        PdockerVkFramebuffer *fb = framebuffer_unregister(pdocker_vk_framebuffer_to_handle(g_framebuffers));
+        if (!fb) break;
+        framebuffer_retire(fb);
+    }
+    while (g_pipeline_layouts) {
+        PdockerVkPipelineLayout *layout = pipeline_layout_unregister(
+            pdocker_vk_pipeline_layout_to_handle(g_pipeline_layouts));
+        if (!layout) break;
+        pipeline_layout_retire(layout);
+    }
+    while (g_shader_modules) {
+        PdockerVkShaderModule *shader = shader_module_unregister(
+            pdocker_vk_shader_module_to_handle(g_shader_modules));
+        if (!shader) break;
+        shader_module_retire(shader);
+    }
+    while (g_descriptor_set_layouts) {
+        PdockerVkDescriptorSetLayout *layout = descriptor_set_layout_unregister(
+            pdocker_vk_descriptor_set_layout_to_handle(g_descriptor_set_layouts));
+        if (!layout) break;
+        descriptor_set_layout_retire(layout);
+    }
+    while (g_render_passes) {
+        PdockerVkRenderPass *rp = render_pass_unregister(pdocker_vk_render_pass_to_handle(g_render_passes));
+        if (!rp) break;
+        render_pass_retire(rp);
+    }
+    while (g_pipeline_caches) {
+        PdockerVkPipelineCache *cache = pipeline_cache_unregister(
+            pdocker_vk_pipeline_cache_to_handle(g_pipeline_caches));
+        if (!cache) break;
+        pipeline_cache_retire(cache);
+    }
+    while (g_buffer_views) {
+        PdockerVkBufferView *view = buffer_view_unregister(pdocker_vk_buffer_view_to_handle(g_buffer_views));
+        if (!view) break;
+        buffer_view_retire(view);
+    }
+    while (g_image_views) {
+        PdockerVkImageView *view = image_view_unregister(pdocker_vk_image_view_to_handle(g_image_views));
+        if (!view) break;
+        image_view_retire(view);
+    }
+    while (g_samplers) {
+        PdockerVkSampler *sampler = sampler_unregister(pdocker_vk_sampler_to_handle(g_samplers));
+        if (!sampler) break;
+        sampler_retire(sampler);
+    }
+    while (g_buffers) {
+        PdockerVkBuffer *buffer = buffer_unregister(pdocker_vk_buffer_to_handle(g_buffers));
+        if (!buffer) break;
+        buffer_retire(buffer);
+    }
+    while (g_images) {
+        PdockerVkImage *image = image_unregister(pdocker_vk_image_to_handle(g_images));
+        if (!image) break;
+        image_retire(image);
+    }
+    while (g_memories) {
+        vkFreeMemory(device, pdocker_vk_memory_to_handle(g_memories), NULL);
+    }
+    while (g_fences) {
+        PdockerVkFence *fence = fence_unregister(pdocker_vk_fence_to_handle(g_fences));
+        if (!fence) break;
+        fence_retire(fence);
+    }
+    while (g_semaphores) {
+        PdockerVkSemaphore *sem = semaphore_unregister(pdocker_vk_semaphore_to_handle(g_semaphores));
+        if (!sem) break;
+        semaphore_retire(sem);
+    }
+    while (g_events) {
+        PdockerVkEvent *event = event_unregister(pdocker_vk_event_to_handle(g_events));
+        if (!event) break;
+        event_retire(event);
+    }
+    while (g_query_pools) {
+        PdockerVkQueryPool *pool = query_pool_unregister(pdocker_vk_query_pool_to_handle(g_query_pools));
+        if (!pool) break;
+        query_pool_retire(pool);
+    }
+#ifdef VK_EXT_VALIDATION_CACHE_EXTENSION_NAME
+    while (g_validation_caches) {
+        vkDestroyValidationCacheEXT(device, pdocker_vk_validation_cache_to_handle(g_validation_caches), NULL);
+    }
+#endif
+#ifdef VK_EXT_PRIVATE_DATA_EXTENSION_NAME
+    while (g_private_data_slots) {
+        vkDestroyPrivateDataSlot(device, pdocker_vk_private_data_slot_to_handle(g_private_data_slots), NULL);
+    }
+#endif
+}
 
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetDeviceProcAddr(VkDevice device, const char *pName);
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance instance, const char *pName);

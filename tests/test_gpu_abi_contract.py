@@ -13326,7 +13326,31 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("device_register(device);", create_device_body)
         destroy_device_body = c_function_body(icd, "vkDestroyDevice")
         self.assertIn("device_unregister(device)", destroy_device_body)
+        self.assertIn("pdocker_vk_destroy_device_live_objects(device);", destroy_device_body)
+        self.assertIn("memset(&g_queue, 0, sizeof(g_queue));", destroy_device_body)
         self.assertNotIn("free((void *)device)", destroy_device_body)
+        destroy_live_objects_body = c_function_body(icd, "pdocker_vk_destroy_device_live_objects")
+        for marker in [
+            "while (g_swapchains)",
+            "pdocker_vk_destroy_swapchain_images(device, sc);",
+            "while (g_command_pools)",
+            "command_buffer_retire(cmd);",
+            "while (g_descriptor_update_templates)",
+            "destroy_descriptor_pool_object(pool);",
+            "while (g_pipelines)",
+            "pipeline_retire(pipeline);",
+            "while (g_buffer_views)",
+            "while (g_image_views)",
+            "while (g_buffers)",
+            "while (g_images)",
+            "while (g_memories)",
+            "vkFreeMemory(device, pdocker_vk_memory_to_handle(g_memories), NULL);",
+            "while (g_fences)",
+            "while (g_semaphores)",
+            "while (g_events)",
+            "while (g_query_pools)",
+        ]:
+            self.assertIn(marker, destroy_live_objects_body)
         get_queue_body = c_function_body(icd, "vkGetDeviceQueue")
         self.assertIn("device_handle_resolve(device, &pdocker_device)", get_queue_body)
         self.assertIn("g_queue.requested_feature_mask = pdocker_device->requested_feature_mask;", get_queue_body)
