@@ -8647,7 +8647,7 @@ class GpuAbiContractTest(unittest.TestCase):
         support_helper = c_function_body(icd, "descriptor_set_layout_create_info_supported")
         self.assertNotIn("if (binding->pImmutableSamplers) return false;", support_helper)
         self.assertIn("!descriptor_type_requires_sampler(binding->descriptorType)", support_helper)
-        self.assertIn("sampler_handle_lookup(binding->pImmutableSamplers[array_element])", support_helper)
+        self.assertIn("sampler_handle_lookup_for_device(device, binding->pImmutableSamplers[array_element])", support_helper)
         update_body = icd.split(
             "VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets", 1
         )[1].split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateShaderModule", 1)[0]
@@ -11205,7 +11205,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("zero_vk_out_struct_preserve_chain(pSupport, sizeof(*pSupport), header);", support_body)
         self.assertIn("const PdockerVkDevice *dev = (const PdockerVkDevice *)device;", support_body)
         self.assertIn("uint64_t requested_feature_mask = dev ? dev->requested_feature_mask : 0;", support_body)
-        self.assertIn("descriptor_set_layout_create_info_supported(pCreateInfo, requested_feature_mask)", support_body)
+        self.assertIn("descriptor_set_layout_create_info_supported(device, pCreateInfo, requested_feature_mask)", support_body)
         self.assertIn("fill_descriptor_set_layout_support_pnext((void *)header.pNext, pCreateInfo, requested_feature_mask);", support_body)
         self.assertIn("validate_descriptor_set_layout_pnext(pCreateInfo) != VK_SUCCESS", helper_body)
         self.assertIn("descriptor_layout_flags_supported(pCreateInfo->flags)", helper_body)
@@ -11222,7 +11222,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("binding->descriptorCount > PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS", helper_body)
         self.assertIn("binding->pImmutableSamplers", helper_body)
         self.assertIn("!descriptor_type_requires_sampler(binding->descriptorType)", helper_body)
-        self.assertIn("sampler_handle_lookup(binding->pImmutableSamplers[array_element])", helper_body)
+        self.assertIn("sampler_handle_lookup_for_device(device, binding->pImmutableSamplers[array_element])", helper_body)
         self.assertNotIn("if (binding->pImmutableSamplers) return false;", helper_body)
         self.assertIn("VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_LAYOUT_SUPPORT", pnext_body)
         self.assertIn("p->maxVariableDescriptorCount = descriptor_set_layout_create_info_variable_descriptor_count_limit(", pnext_body)
@@ -11581,7 +11581,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT", icd)
         self.assertIn("const PdockerVkDevice *dev = (const PdockerVkDevice *)device;", descriptor_layout_body)
         self.assertIn("uint64_t requested_feature_mask = dev ? dev->requested_feature_mask : 0;", descriptor_layout_body)
-        self.assertIn("descriptor_set_layout_create_info_supported(pCreateInfo, requested_feature_mask)", descriptor_layout_body)
+        self.assertIn("descriptor_set_layout_create_info_supported(device, pCreateInfo, requested_feature_mask)", descriptor_layout_body)
         self.assertIn('trace_icd_runtime_failure("descriptor-set-layout-unsupported"', descriptor_layout_body)
         self.assertIn("return VK_ERROR_FEATURE_NOT_PRESENT;", descriptor_layout_body)
         self.assertIn("free(layout);", descriptor_layout_body)

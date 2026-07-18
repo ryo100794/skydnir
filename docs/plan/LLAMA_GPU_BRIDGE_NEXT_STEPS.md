@@ -10,6 +10,25 @@ llama.cpp itself remains unmodified.
 ## Current Ground Truth
 
 
+### 2026-07-18 CPU/static Vulkan immutable-sampler owner lane
+
+`descriptor_set_layout_create_info_supported` now receives `VkDevice` and
+validates immutable sampler handles through `sampler_handle_lookup_for_device`.
+`vkGetDescriptorSetLayoutSupport` and `vkCreateDescriptorSetLayout` now share
+the same device-aware preflight, so cross-device immutable samplers are rejected
+before descriptor-set-layout storage is allocated or captured.
+
+This is CPU/static Vulkan pass-through hardening only.  It does not change
+llama.cpp, Dockerfiles, models, prompts, shader bytes, or executor arithmetic.
+
+Evidence: `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`,
+`tests.test_gpu_abi_contract`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_device_owner_rejects_cross_device_memory_resource_misuse`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_image_view_live_handles_fail_closed_after_destroy`,
+`scripts/build-gpu-shim.sh`, `scripts/verify-native-payloads.py`,
+`./gradlew :app:assembleDebug`.
+
+
 ### 2026-07-18 CPU/static Vulkan image-view owner lane
 
 `validate_image_view_create_info_for_transport` now receives the creating

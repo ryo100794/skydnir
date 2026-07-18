@@ -25298,6 +25298,7 @@ static bool descriptor_set_layout_compatible(
 }
 
 static bool descriptor_set_layout_create_info_supported(
+        VkDevice device,
         const VkDescriptorSetLayoutCreateInfo *pCreateInfo,
         uint64_t requested_feature_mask) {
     if (!pCreateInfo) return false;
@@ -25357,7 +25358,7 @@ static bool descriptor_set_layout_create_info_supported(
         if (binding->pImmutableSamplers) {
             if (!descriptor_type_requires_sampler(binding->descriptorType)) return false;
             for (uint32_t array_element = 0; array_element < binding->descriptorCount; ++array_element) {
-                if (!sampler_handle_lookup(binding->pImmutableSamplers[array_element])) {
+                if (!sampler_handle_lookup_for_device(device, binding->pImmutableSamplers[array_element])) {
                     return false;
                 }
             }
@@ -25400,7 +25401,7 @@ VKAPI_ATTR void VKAPI_CALL vkGetDescriptorSetLayoutSupport(
     zero_vk_out_struct_preserve_chain(pSupport, sizeof(*pSupport), header);
     const PdockerVkDevice *dev = (const PdockerVkDevice *)device;
     uint64_t requested_feature_mask = dev ? dev->requested_feature_mask : 0;
-    pSupport->supported = descriptor_set_layout_create_info_supported(pCreateInfo, requested_feature_mask)
+    pSupport->supported = descriptor_set_layout_create_info_supported(device, pCreateInfo, requested_feature_mask)
         ? VK_TRUE
         : VK_FALSE;
     fill_descriptor_set_layout_support_pnext((void *)header.pNext, pCreateInfo, requested_feature_mask);
@@ -25419,7 +25420,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorSetLayout(
     if (!descriptor_layout_flags_supported(pCreateInfo->flags)) return VK_ERROR_FEATURE_NOT_PRESENT;
     const PdockerVkDevice *dev = (const PdockerVkDevice *)device;
     uint64_t requested_feature_mask = dev ? dev->requested_feature_mask : 0;
-    if (!descriptor_set_layout_create_info_supported(pCreateInfo, requested_feature_mask)) {
+    if (!descriptor_set_layout_create_info_supported(device, pCreateInfo, requested_feature_mask)) {
         trace_icd_runtime_failure("descriptor-set-layout-unsupported",
                                   VK_ERROR_FEATURE_NOT_PRESENT);
         return VK_ERROR_FEATURE_NOT_PRESENT;

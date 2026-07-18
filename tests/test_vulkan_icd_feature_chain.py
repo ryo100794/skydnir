@@ -7171,6 +7171,37 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 if (image_view != VK_NULL_HANDLE) return 17;
                 if (vkCreateImageView(device_a, &image_view_info, NULL, &image_view) != VK_SUCCESS || !image_view) return 18;
 
+                VkSamplerCreateInfo sampler_info;
+                memset(&sampler_info, 0, sizeof(sampler_info));
+                sampler_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+                sampler_info.magFilter = VK_FILTER_NEAREST;
+                sampler_info.minFilter = VK_FILTER_NEAREST;
+                sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+                sampler_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+                sampler_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+                sampler_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+                sampler_info.maxLod = 1.0f;
+                VkSampler sampler_b = VK_NULL_HANDLE;
+                if (vkCreateSampler(device_b, &sampler_info, NULL, &sampler_b) != VK_SUCCESS || !sampler_b) return 151;
+                VkDescriptorSetLayoutBinding sampler_binding;
+                memset(&sampler_binding, 0, sizeof(sampler_binding));
+                sampler_binding.binding = 0;
+                sampler_binding.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+                sampler_binding.descriptorCount = 1;
+                sampler_binding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+                sampler_binding.pImmutableSamplers = &sampler_b;
+                VkDescriptorSetLayoutCreateInfo sampler_layout_info;
+                memset(&sampler_layout_info, 0, sizeof(sampler_layout_info));
+                sampler_layout_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+                sampler_layout_info.bindingCount = 1;
+                sampler_layout_info.pBindings = &sampler_binding;
+                VkDescriptorSetLayout sampler_layout = VK_NULL_HANDLE;
+                if (vkCreateDescriptorSetLayout(device_a, &sampler_layout_info, NULL, &sampler_layout) == VK_SUCCESS) return 152;
+                if (sampler_layout != VK_NULL_HANDLE) return 153;
+                if (vkCreateDescriptorSetLayout(device_b, &sampler_layout_info, NULL, &sampler_layout) != VK_SUCCESS || !sampler_layout) return 154;
+                vkDestroyDescriptorSetLayout(device_b, sampler_layout, NULL);
+                vkDestroySampler(device_b, sampler_b, NULL);
+
                 vkDestroyBuffer(device_b, buffer_a, NULL);
                 if (!buffer_handle_lookup_for_device(device_a, buffer_a)) return 19;
                 vkFreeMemory(device_b, memory_a, NULL);
