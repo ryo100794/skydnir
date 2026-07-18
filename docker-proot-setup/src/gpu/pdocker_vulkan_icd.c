@@ -34592,16 +34592,16 @@ static VkResult validate_submit2_command_buffers(const PdockerVkQueue *queue, co
     return VK_SUCCESS;
 }
 
-static void complete_submit2_semaphores(const VkSubmitInfo2 *submit) {
-    if (!submit) return;
+static void complete_submit2_semaphores(const PdockerVkQueue *queue, const VkSubmitInfo2 *submit) {
+    if (!queue || !submit) return;
     for (uint32_t i = 0; i < submit->waitSemaphoreInfoCount; ++i) {
         const VkSemaphoreSubmitInfo *info = submit->pWaitSemaphoreInfos ? &submit->pWaitSemaphoreInfos[i] : NULL;
-        PdockerVkSemaphore *sem = info ? semaphore_handle_lookup(info->semaphore) : NULL;
+        PdockerVkSemaphore *sem = info ? semaphore_handle_lookup_for_queue(queue, info->semaphore) : NULL;
         semaphore_complete_wait(sem);
     }
     for (uint32_t i = 0; i < submit->signalSemaphoreInfoCount; ++i) {
         const VkSemaphoreSubmitInfo *info = submit->pSignalSemaphoreInfos ? &submit->pSignalSemaphoreInfos[i] : NULL;
-        PdockerVkSemaphore *sem = info ? semaphore_handle_lookup(info->semaphore) : NULL;
+        PdockerVkSemaphore *sem = info ? semaphore_handle_lookup_for_queue(queue, info->semaphore) : NULL;
         semaphore_complete_signal(sem, sem && sem->timeline ? info->value : 0);
     }
 }
@@ -36014,7 +36014,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2(
             free_submit2_command_arrays(submit2_cmd_arrays, submitCount);
             return rc;
         }
-        complete_submit2_semaphores(src);
+        complete_submit2_semaphores(submit_queue, src);
     }
     free_submit2_command_arrays(submit2_cmd_arrays, submitCount);
     if (submit_fence) {

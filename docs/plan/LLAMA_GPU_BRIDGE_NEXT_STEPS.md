@@ -10,6 +10,24 @@ llama.cpp itself remains unmodified.
 ## Current Ground Truth
 
 
+### 2026-07-18 CPU/static Vulkan submit2 semaphore completion lane
+
+Submit2 semaphore completion now receives the submitting queue and completes
+wait/signal semaphores through `semaphore_handle_lookup_for_queue` instead of
+raw semaphore lookup.  This keeps the validation and completion phases on the
+same queue/device owner boundary and avoids post-validation accidental mutation
+of a foreign semaphore handle.
+
+This is CPU/static Vulkan pass-through hardening only.  It does not change
+llama.cpp, Dockerfiles, models, prompts, shader bytes, or executor arithmetic.
+
+Evidence: `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`,
+`tests.test_gpu_abi_contract`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_device_owner_rejects_cross_device_command_submit_sync`,
+`scripts/build-gpu-shim.sh`, `scripts/verify-native-payloads.py`,
+`./gradlew :app:assembleDebug`.
+
+
 ### 2026-07-18 CPU/static Vulkan execute-secondary owner-chain lane
 
 `vkCmdExecuteCommands` now validates primary and secondary command-buffer owner

@@ -10280,7 +10280,11 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("validate_submit2_wait_semaphores(submit_queue, src, bridge_available())", queue_submit2_body)
         self.assertIn("validate_submit2_command_buffers(submit_queue, src)", queue_submit2_body)
         self.assertIn("validate_submit2_signal_semaphores(submit_queue, src)", queue_submit2_body)
-        self.assertIn("complete_submit2_semaphores(src)", queue_submit2_body)
+        self.assertIn("static void complete_submit2_semaphores(const PdockerVkQueue *queue, const VkSubmitInfo2 *submit)", icd)
+        complete_submit2_body = c_function_body(icd, "complete_submit2_semaphores")
+        self.assertIn("semaphore_handle_lookup_for_queue(queue, info->semaphore)", complete_submit2_body)
+        self.assertNotIn("semaphore_handle_lookup(info->semaphore)", complete_submit2_body)
+        self.assertIn("complete_submit2_semaphores(submit_queue, src)", queue_submit2_body)
         self.assertLess(
             queue_submit2_body.index("for (uint32_t validate_i = 0; validate_i < submitCount; ++validate_i)"),
             queue_submit2_body.index("submit_fence->signaled = false;"),
@@ -14462,13 +14466,13 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VkDependencyInfo", icd)
         self.assertNotIn("free_submit_info_arrays", icd)
         self.assertIn("vkQueueSubmit(queue, 1, &legacy_submit, VK_NULL_HANDLE)", icd)
-        self.assertIn("complete_submit2_semaphores(src)", icd)
+        self.assertIn("complete_submit2_semaphores(submit_queue, src)", icd)
         self.assertIn("collect_submit2_submit_sync_entries(submit_queue, src, submit2_fence", icd)
         self.assertIn("set_submit_sync_override(submit2_sync_entries, submit2_sync_count);", icd)
         self.assertIn("clear_submit_sync_override();", icd)
         self.assertLess(icd.index("set_submit_sync_override(submit2_sync_entries, submit2_sync_count);"), icd.index("vkQueueSubmit(queue, 1, &legacy_submit, VK_NULL_HANDLE)"))
         self.assertLess(icd.index("vkQueueSubmit(queue, 1, &legacy_submit, VK_NULL_HANDLE)"), icd.index("clear_submit_sync_override();"))
-        self.assertLess(icd.index("clear_submit_sync_override();"), icd.index("complete_submit2_semaphores(src)"))
+        self.assertLess(icd.index("clear_submit_sync_override();"), icd.index("complete_submit2_semaphores(submit_queue, src)"))
         self.assertIn("submit2-flags-unsupported", icd)
         set_event2_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdSetEvent2", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkCmdResetEvent2", 1
