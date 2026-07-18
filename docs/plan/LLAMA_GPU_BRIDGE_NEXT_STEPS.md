@@ -10,6 +10,24 @@ llama.cpp itself remains unmodified.
 ## Current Ground Truth
 
 
+### 2026-07-18 CPU/static Vulkan dedicated-memory owner lane
+
+`VkMemoryDedicatedAllocateInfo` validation and extraction now carry the
+allocating `VkDevice` into dedicated image/buffer resolution. `vkAllocateMemory`
+rejects foreign-device or stale dedicated targets before allocating a memory
+object, and the recorded `dedicated_image` / `dedicated_buffer` pointers are
+extracted with the same device-aware lookup used by validation.
+
+This is CPU/static Vulkan pass-through hardening only.  It does not change
+llama.cpp, Dockerfiles, models, prompts, shader bytes, or executor arithmetic.
+
+Evidence: `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`,
+`tests.test_gpu_abi_contract`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_device_owner_rejects_cross_device_memory_resource_misuse`,
+`scripts/build-gpu-shim.sh`, `scripts/verify-native-payloads.py`,
+`./gradlew :app:assembleDebug`.
+
+
 
 ### 2026-07-18 CPU/static Vulkan dynamic-rendering stale-view lane
 

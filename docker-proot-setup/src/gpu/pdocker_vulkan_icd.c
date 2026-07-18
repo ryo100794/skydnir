@@ -23901,6 +23901,7 @@ VKAPI_ATTR uint64_t VKAPI_CALL vkGetDeviceMemoryOpaqueCaptureAddress(
 }
 
 static void extract_memory_dedicated_allocate_targets(
+        VkDevice device,
         const void *pNext,
         PdockerVkImage **image_out,
         PdockerVkBuffer **buffer_out) {
@@ -23913,10 +23914,10 @@ static void extract_memory_dedicated_allocate_targets(
             const VkMemoryDedicatedAllocateInfo *info =
                 (const VkMemoryDedicatedAllocateInfo *)node;
             if (image_out && info->image != VK_NULL_HANDLE) {
-                *image_out = image_handle_lookup(info->image);
+                *image_out = image_handle_lookup_for_device(device, info->image);
             }
             if (buffer_out && info->buffer != VK_NULL_HANDLE) {
-                *buffer_out = buffer_handle_lookup(info->buffer);
+                *buffer_out = buffer_handle_lookup_for_device(device, info->buffer);
             }
         }
 #endif
@@ -23958,7 +23959,7 @@ static VkResult validate_memory_dedicated_bind(
 
 static bool pdocker_supports_memory_priority_transport(void);
 
-static VkResult validate_memory_allocate_pnext(const void *pNext) {
+static VkResult validate_memory_allocate_pnext(VkDevice device, const void *pNext) {
     for (const void *node = pNext; node;) {
         PdockerVkStructHeader header = read_vk_struct_header(node);
         switch (header.sType) {
@@ -23969,10 +23970,10 @@ static VkResult validate_memory_allocate_pnext(const void *pNext) {
                 bool has_image = info->image != VK_NULL_HANDLE;
                 bool has_buffer = info->buffer != VK_NULL_HANDLE;
                 if (has_image && has_buffer) return VK_ERROR_INITIALIZATION_FAILED;
-                if (has_image && !image_handle_lookup(info->image)) {
+                if (has_image && !image_handle_lookup_for_device(device, info->image)) {
                     return VK_ERROR_INITIALIZATION_FAILED;
                 }
-                if (has_buffer && !buffer_handle_lookup(info->buffer)) {
+                if (has_buffer && !buffer_handle_lookup_for_device(device, info->buffer)) {
                     return VK_ERROR_INITIALIZATION_FAILED;
                 }
                 break;
@@ -24034,11 +24035,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateMemory(
         const VkMemoryAllocateInfo *pAllocateInfo,
         const VkAllocationCallbacks *pAllocator,
         VkDeviceMemory *pMemory) {
-    (void)device;
     (void)pAllocator;
     if (!pAllocateInfo || !pMemory) return VK_ERROR_INITIALIZATION_FAILED;
     *pMemory = VK_NULL_HANDLE;
-    VkResult pnext_rc = validate_memory_allocate_pnext(pAllocateInfo->pNext);
+    VkResult pnext_rc = validate_memory_allocate_pnext(device, pAllocateInfo->pNext);
     if (pnext_rc != VK_SUCCESS) return pnext_rc;
     if (pAllocateInfo->memoryTypeIndex >= 2) return VK_ERROR_FEATURE_NOT_PRESENT;
     if (pAllocateInfo->allocationSize == 0 ||
@@ -24064,7 +24064,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateMemory(
         ? VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
         : (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
     extract_memory_dedicated_allocate_targets(
-        pAllocateInfo->pNext, &memory->dedicated_image, &memory->dedicated_buffer);
+        device, pAllocateInfo->pNext, &memory->dedicated_image, &memory->dedicated_buffer);
     trace_pnext_chain("allocate", pAllocateInfo->pNext);
     if (trace_allocations()) {
         fprintf(stderr,

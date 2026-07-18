@@ -749,12 +749,12 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 flags.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
                 flags.flags = 0;
                 flags.deviceMask = 0;
-                if (validate_memory_allocate_pnext(&flags) != VK_SUCCESS) return 15;
+                if (validate_memory_allocate_pnext(VK_NULL_HANDLE, &flags) != VK_SUCCESS) return 15;
                 flags.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT_KHR;
-                if (validate_memory_allocate_pnext(&flags) == VK_SUCCESS) return 16;
+                if (validate_memory_allocate_pnext(VK_NULL_HANDLE, &flags) == VK_SUCCESS) return 16;
                 flags.flags = 0;
                 flags.deviceMask = 2;
-                if (validate_memory_allocate_pnext(&flags) == VK_SUCCESS) return 17;
+                if (validate_memory_allocate_pnext(VK_NULL_HANDLE, &flags) == VK_SUCCESS) return 17;
 
             #ifdef VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
                 VkBufferCreateInfo buffer_create;
@@ -5357,9 +5357,9 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 memset(&export_info, 0, sizeof(export_info));
                 export_info.sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO;
                 export_info.handleTypes = 0;
-                if (validate_memory_allocate_pnext(&export_info) != VK_SUCCESS) return 10;
+                if (validate_memory_allocate_pnext(VK_NULL_HANDLE, &export_info) != VK_SUCCESS) return 10;
                 export_info.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
-                if (validate_memory_allocate_pnext(&export_info) != VK_ERROR_FEATURE_NOT_PRESENT) return 11;
+                if (validate_memory_allocate_pnext(VK_NULL_HANDLE, &export_info) != VK_ERROR_FEATURE_NOT_PRESENT) return 11;
 
                 VkPhysicalDeviceExternalBufferInfo external_buffer_info;
                 VkExternalBufferProperties external_properties;
@@ -6936,6 +6936,31 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 if (!memory_handle_lookup_for_device(device_a, memory_a)) return 5;
                 if (memory_handle_lookup_for_device(device_b, memory_a)) return 6;
 
+                VkMemoryDedicatedAllocateInfo dedicated;
+                VkMemoryAllocateInfo dedicated_alloc;
+                memset(&dedicated, 0, sizeof(dedicated));
+                memset(&dedicated_alloc, 0, sizeof(dedicated_alloc));
+                dedicated.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO;
+                dedicated.buffer = buffer_b;
+                dedicated_alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+                dedicated_alloc.pNext = &dedicated;
+                dedicated_alloc.allocationSize = 4096;
+                dedicated_alloc.memoryTypeIndex = 0;
+                VkDeviceMemory wrong_dedicated_memory = VK_NULL_HANDLE;
+                if (vkAllocateMemory(device_a, &dedicated_alloc, NULL, &wrong_dedicated_memory) != VK_ERROR_INITIALIZATION_FAILED) return 141;
+                if (wrong_dedicated_memory != VK_NULL_HANDLE) return 142;
+                dedicated.buffer = VK_NULL_HANDLE;
+                dedicated.image = image_b;
+                if (vkAllocateMemory(device_a, &dedicated_alloc, NULL, &wrong_dedicated_memory) != VK_ERROR_INITIALIZATION_FAILED) return 143;
+                if (wrong_dedicated_memory != VK_NULL_HANDLE) return 144;
+                dedicated.image = VK_NULL_HANDLE;
+                dedicated.buffer = buffer_a;
+                VkDeviceMemory same_device_dedicated_memory = VK_NULL_HANDLE;
+                if (vkAllocateMemory(device_a, &dedicated_alloc, NULL, &same_device_dedicated_memory) != VK_SUCCESS) return 145;
+                PdockerVkMemory *same_device_dedicated = memory_handle_lookup_for_device(device_a, same_device_dedicated_memory);
+                if (!same_device_dedicated || same_device_dedicated->dedicated_buffer != buffer_handle_lookup_for_device(device_a, buffer_a) ||
+                    same_device_dedicated->dedicated_image != NULL) return 146;
+
                 VkMemoryRequirements req;
                 memset(&req, 0, sizeof(req));
                 vkGetBufferMemoryRequirements(device_a, buffer_a, &req);
@@ -8260,13 +8285,13 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 memset(&capture, 0, sizeof(capture));
                 capture.sType = VK_STRUCTURE_TYPE_MEMORY_OPAQUE_CAPTURE_ADDRESS_ALLOCATE_INFO;
                 capture.opaqueCaptureAddress = 0;
-                if (validate_memory_allocate_pnext(&capture) != VK_SUCCESS) {{
+                if (validate_memory_allocate_pnext(VK_NULL_HANDLE, &capture) != VK_SUCCESS) {{
                     fprintf(stderr, "zero opaque capture address allocation pNext was rejected\\n");
                     return 2;
                 }}
 
                 capture.opaqueCaptureAddress = 0x1000u;
-                if (validate_memory_allocate_pnext(&capture) != VK_ERROR_FEATURE_NOT_PRESENT) {{
+                if (validate_memory_allocate_pnext(VK_NULL_HANDLE, &capture) != VK_ERROR_FEATURE_NOT_PRESENT) {{
                     fprintf(stderr, "nonzero opaque capture address allocation pNext was accepted\\n");
                     return 3;
                 }}
@@ -8275,12 +8300,12 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 memset(&export_info, 0, sizeof(export_info));
                 export_info.sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO;
                 export_info.handleTypes = 0;
-                if (validate_memory_allocate_pnext(&export_info) != VK_SUCCESS) {{
+                if (validate_memory_allocate_pnext(VK_NULL_HANDLE, &export_info) != VK_SUCCESS) {{
                     fprintf(stderr, "zero export memory handle-types pNext was rejected\\n");
                     return 4;
                 }}
                 export_info.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
-                if (validate_memory_allocate_pnext(&export_info) != VK_ERROR_FEATURE_NOT_PRESENT) {{
+                if (validate_memory_allocate_pnext(VK_NULL_HANDLE, &export_info) != VK_ERROR_FEATURE_NOT_PRESENT) {{
                     fprintf(stderr, "nonzero export memory handle-types pNext was accepted\\n");
                     return 5;
                 }}
@@ -8289,12 +8314,12 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 memset(&priority_info, 0, sizeof(priority_info));
                 priority_info.sType = VK_STRUCTURE_TYPE_MEMORY_PRIORITY_ALLOCATE_INFO_EXT;
                 priority_info.priority = 0.5f;
-                if (validate_memory_allocate_pnext(&priority_info) != VK_ERROR_FEATURE_NOT_PRESENT) {{
+                if (validate_memory_allocate_pnext(VK_NULL_HANDLE, &priority_info) != VK_ERROR_FEATURE_NOT_PRESENT) {{
                     fprintf(stderr, "default memory priority pNext was accepted without transport\\n");
                     return 6;
                 }}
                 priority_info.priority = 1.0f;
-                if (validate_memory_allocate_pnext(&priority_info) != VK_ERROR_FEATURE_NOT_PRESENT) {{
+                if (validate_memory_allocate_pnext(VK_NULL_HANDLE, &priority_info) != VK_ERROR_FEATURE_NOT_PRESENT) {{
                     fprintf(stderr, "non-default memory priority pNext was accepted\\n");
                     return 7;
                 }}
@@ -8312,7 +8337,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 export_info.pNext = &capture;
                 capture.sType = VK_STRUCTURE_TYPE_MEMORY_OPAQUE_CAPTURE_ADDRESS_ALLOCATE_INFO;
                 capture.opaqueCaptureAddress = 0;
-                if (validate_memory_allocate_pnext(&flags) != VK_SUCCESS) {{
+                if (validate_memory_allocate_pnext(VK_NULL_HANDLE, &flags) != VK_SUCCESS) {{
                     fprintf(stderr, "no-op memory allocate flags + export + capture chain was rejected\\n");
                     return 6;
                 }}
@@ -8321,14 +8346,14 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 priority_info.sType = VK_STRUCTURE_TYPE_MEMORY_PRIORITY_ALLOCATE_INFO_EXT;
                 priority_info.priority = 0.5f;
                 priority_info.pNext = &capture;
-                if (validate_memory_allocate_pnext(&flags) != VK_ERROR_FEATURE_NOT_PRESENT) {{
+                if (validate_memory_allocate_pnext(VK_NULL_HANDLE, &flags) != VK_ERROR_FEATURE_NOT_PRESENT) {{
                     fprintf(stderr, "memory priority in allocation chain was accepted without transport\\n");
                     return 9;
                 }}
                 export_info.pNext = &capture;
 
                 flags.deviceMask = 2;
-                if (validate_memory_allocate_pnext(&flags) == VK_SUCCESS) {{
+                if (validate_memory_allocate_pnext(VK_NULL_HANDLE, &flags) == VK_SUCCESS) {{
                     fprintf(stderr, "multi-device memory allocation mask was accepted\\n");
                     return 7;
                 }}
@@ -8336,7 +8361,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 VkBaseInStructure unknown;
                 memset(&unknown, 0, sizeof(unknown));
                 unknown.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-                if (validate_memory_allocate_pnext(&unknown) == VK_SUCCESS) {{
+                if (validate_memory_allocate_pnext(VK_NULL_HANDLE, &unknown) == VK_SUCCESS) {{
                     fprintf(stderr, "unknown memory allocation pNext was accepted\\n");
                     return 8;
                 }}
