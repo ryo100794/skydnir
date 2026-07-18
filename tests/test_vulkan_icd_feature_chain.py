@@ -393,10 +393,10 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 memset(&flags2, 0, sizeof(flags2));
                 flags2.sType = VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO;
                 if (validate_and_fill_pipeline_feedback_pnext(
-                        "unit-maintenance5-flags2", &flags2, 1u, false) != VK_SUCCESS) return 13;
+                        "unit-maintenance5-flags2", &flags2, 1u, false, 0) != VK_SUCCESS) return 13;
                 flags2.flags = (VkPipelineCreateFlags2)1;
                 if (validate_and_fill_pipeline_feedback_pnext(
-                        "unit-maintenance5-flags2", &flags2, 1u, false) == VK_SUCCESS) return 14;
+                        "unit-maintenance5-flags2", &flags2, 1u, false, 0) == VK_SUCCESS) return 14;
 
                 ((PFN_vkCmdBindIndexBuffer2KHR)proc_address("vkCmdBindIndexBuffer2KHR"))(
                     VK_NULL_HANDLE, VK_NULL_HANDLE, 0, VK_WHOLE_SIZE, VK_INDEX_TYPE_UINT32);
@@ -1275,21 +1275,31 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 shader_info.pNext = &shader_cache;
                 shader_info.codeSize = sizeof(shader_words);
                 shader_info.pCode = shader_words;
+                PdockerVkDevice validation_device;
+                memset(&validation_device, 0, sizeof(validation_device));
+                validation_device.enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_EXT_VALIDATION_CACHE;
+                VkDevice validation_vk_device = (VkDevice)&validation_device;
                 VkShaderModule shader = VK_NULL_HANDLE;
-                if (vkCreateShaderModule(VK_NULL_HANDLE, &shader_info, NULL, &shader) != VK_SUCCESS ||
-                    shader == VK_NULL_HANDLE) {{
-                    fprintf(stderr, "shader module rejected local validation cache pNext\\n");
+                if (vkCreateShaderModule(VK_NULL_HANDLE, &shader_info, NULL, &shader) == VK_SUCCESS) {{
+                    fprintf(stderr, "shader module accepted validation cache pNext without extension enable-state\\n");
+                    vkDestroyShaderModule(VK_NULL_HANDLE, shader, NULL);
                     return 8;
                 }}
-                vkDestroyShaderModule(VK_NULL_HANDLE, shader, NULL);
+                shader = VK_NULL_HANDLE;
+                if (vkCreateShaderModule(validation_vk_device, &shader_info, NULL, &shader) != VK_SUCCESS ||
+                    shader == VK_NULL_HANDLE) {{
+                    fprintf(stderr, "shader module rejected enabled local validation cache pNext\\n");
+                    return 10;
+                }}
+                vkDestroyShaderModule(validation_vk_device, shader, NULL);
 
                 VkBaseInStructure unknown;
                 memset(&unknown, 0, sizeof(unknown));
                 unknown.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
                 shader_cache.pNext = &unknown;
-                if (vkCreateShaderModule(VK_NULL_HANDLE, &shader_info, NULL, &shader) == VK_SUCCESS) {{
+                if (vkCreateShaderModule(validation_vk_device, &shader_info, NULL, &shader) == VK_SUCCESS) {{
                     fprintf(stderr, "shader module accepted unknown validation-cache pNext chain\\n");
-                    vkDestroyShaderModule(VK_NULL_HANDLE, shader, NULL);
+                    vkDestroyShaderModule(validation_vk_device, shader, NULL);
                     return 9;
                 }}
                 vkDestroyValidationCacheEXT(VK_NULL_HANDLE, cache, NULL);
@@ -3272,6 +3282,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 robustness.uniformBuffers = VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_DEVICE_DEFAULT;
                 robustness.vertexInputs = VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_DEVICE_DEFAULT;
                 robustness.images = VK_PIPELINE_ROBUSTNESS_IMAGE_BEHAVIOR_DEVICE_DEFAULT;
+                uint64_t feedback_extension_mask = 0;
 
             #ifdef VK_EXT_PIPELINE_CREATION_FEEDBACK_EXTENSION_NAME
                 if (!device_extension_advertised_name(VK_EXT_PIPELINE_CREATION_FEEDBACK_EXTENSION_NAME)) {{
@@ -3288,10 +3299,11 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     fprintf(stderr, "VK_EXT_pipeline_creation_feedback extension enable was rejected\\n");
                     return 8;
                 }}
+                feedback_extension_mask = enabled_device_extension_mask_from_create_info(&extension_info);
             #endif
 
                 if (validate_and_fill_pipeline_feedback_pnext(
-                        "unit-pipeline-robustness", &robustness, 1u, false) != VK_SUCCESS) {{
+                        "unit-pipeline-robustness", &robustness, 1u, false, 0) != VK_SUCCESS) {{
                     fprintf(stderr, "default pipeline robustness was rejected\\n");
                     return 2;
                 }}
@@ -3302,7 +3314,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 }}
                 robustness.storageBuffers = VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_DISABLED;
                 if (validate_and_fill_pipeline_feedback_pnext(
-                        "unit-pipeline-robustness", &robustness, 1u, false) == VK_SUCCESS) {{
+                        "unit-pipeline-robustness", &robustness, 1u, false, 0) == VK_SUCCESS) {{
                     fprintf(stderr, "non-default storage robustness was accepted\\n");
                     return 3;
                 }}
@@ -3314,7 +3326,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 robustness.storageBuffers = VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_DEVICE_DEFAULT;
                 robustness.images = VK_PIPELINE_ROBUSTNESS_IMAGE_BEHAVIOR_ROBUST_IMAGE_ACCESS;
                 if (validate_and_fill_pipeline_feedback_pnext(
-                        "unit-pipeline-robustness", &robustness, 1u, true) == VK_SUCCESS) {{
+                        "unit-pipeline-robustness", &robustness, 1u, true, 0) == VK_SUCCESS) {{
                     fprintf(stderr, "non-default image robustness was accepted\\n");
                     return 4;
                 }}
@@ -3323,7 +3335,12 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 feedback_info.pPipelineCreationFeedback = &feedback;
                 feedback_info.pNext = &robustness;
                 if (validate_and_fill_pipeline_feedback_pnext(
-                        "unit-pipeline-robustness", &feedback_info, 1u, false) != VK_SUCCESS) {{
+                        "unit-pipeline-robustness", &feedback_info, 1u, false, 0) == VK_SUCCESS) {{
+                    fprintf(stderr, "feedback pNext was accepted without enabling its extension\\n");
+                    return 14;
+                }}
+                if (validate_and_fill_pipeline_feedback_pnext(
+                        "unit-pipeline-robustness", &feedback_info, 1u, false, feedback_extension_mask) != VK_SUCCESS) {{
                     fprintf(stderr, "feedback plus default robustness was rejected\\n");
                     return 5;
                 }}
@@ -3342,7 +3359,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 feedback_info.pipelineStageCreationFeedbackCount = 1;
                 feedback_info.pPipelineStageCreationFeedbacks = stage_feedback;
                 if (validate_and_fill_pipeline_feedback_pnext(
-                        "unit-pipeline-feedback", &feedback_info, 1u, false) != VK_SUCCESS) {{
+                        "unit-pipeline-feedback", &feedback_info, 1u, false, feedback_extension_mask) != VK_SUCCESS) {{
                     fprintf(stderr, "pipeline feedback valid stage count was rejected\\n");
                     return 9;
                 }}
@@ -3355,7 +3372,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 }}
                 feedback_info.pipelineStageCreationFeedbackCount = 2;
                 if (validate_and_fill_pipeline_feedback_pnext(
-                        "unit-pipeline-feedback", &feedback_info, 1u, false) == VK_SUCCESS) {{
+                        "unit-pipeline-feedback", &feedback_info, 1u, false, feedback_extension_mask) == VK_SUCCESS) {{
                     fprintf(stderr, "pipeline feedback mismatched stage count was accepted\\n");
                     return 11;
                 }}
@@ -5833,6 +5850,78 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     int rc = expect_device_proc_visible(device, visible[i], 80 + (int)i);
                     if (rc) return rc;
                 }}
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+
+    def test_extension_pnext_requires_matching_device_extension_enable(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            int main(void) {{
+            #ifdef VK_EXT_PRIVATE_DATA_EXTENSION_NAME
+                VkPhysicalDevicePrivateDataFeatures private_features;
+                VkDevicePrivateDataCreateInfo private_create;
+                VkDeviceCreateInfo private_device_info;
+                memset(&private_features, 0, sizeof(private_features));
+                memset(&private_create, 0, sizeof(private_create));
+                memset(&private_device_info, 0, sizeof(private_device_info));
+                private_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIVATE_DATA_FEATURES;
+                private_features.privateData = VK_TRUE;
+                private_create.sType = VK_STRUCTURE_TYPE_DEVICE_PRIVATE_DATA_CREATE_INFO;
+                private_create.privateDataSlotRequestCount = 1;
+                private_device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                private_device_info.pNext = &private_features;
+                if (validate_device_create_pnext_extension_enables(&private_device_info, 0) == VK_SUCCESS) return 10;
+                if (validate_device_create_pnext_extension_enables(&private_device_info, PDOCKER_VK_DEVICE_EXT_EXT_PRIVATE_DATA) != VK_SUCCESS) return 11;
+                private_device_info.pNext = &private_create;
+                if (validate_device_create_pnext_extension_enables(&private_device_info, 0) == VK_SUCCESS) return 12;
+                if (validate_device_create_pnext_extension_enables(&private_device_info, PDOCKER_VK_DEVICE_EXT_EXT_PRIVATE_DATA) != VK_SUCCESS) return 13;
+            #endif
+
+            #ifdef VK_EXT_SUBPASS_MERGE_FEEDBACK_EXTENSION_NAME
+                VkPhysicalDeviceSubpassMergeFeedbackFeaturesEXT subpass_features;
+                VkDeviceCreateInfo subpass_device_info;
+                memset(&subpass_features, 0, sizeof(subpass_features));
+                memset(&subpass_device_info, 0, sizeof(subpass_device_info));
+                subpass_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBPASS_MERGE_FEEDBACK_FEATURES_EXT;
+                subpass_features.subpassMergeFeedback = VK_TRUE;
+                subpass_device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                subpass_device_info.pNext = &subpass_features;
+                if (validate_device_create_pnext_extension_enables(&subpass_device_info, 0) == VK_SUCCESS) return 20;
+                if (validate_device_create_pnext_extension_enables(&subpass_device_info, PDOCKER_VK_DEVICE_EXT_EXT_SUBPASS_MERGE_FEEDBACK) != VK_SUCCESS) return 21;
+
+                VkRenderPassCreationControlEXT control;
+                VkRenderPassCreationFeedbackCreateInfoEXT feedback_info;
+                VkRenderPassCreateInfo2 render_pass_info;
+                bool disallow = false;
+                memset(&control, 0, sizeof(control));
+                memset(&feedback_info, 0, sizeof(feedback_info));
+                memset(&render_pass_info, 0, sizeof(render_pass_info));
+                control.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATION_CONTROL_EXT;
+                feedback_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATION_FEEDBACK_CREATE_INFO_EXT;
+                control.pNext = &feedback_info;
+                render_pass_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO_2;
+                render_pass_info.pNext = &control;
+                if (render_pass_create2_pnext_noop(&render_pass_info, &disallow, 0)) return 22;
+                if (!render_pass_create2_pnext_noop(&render_pass_info, &disallow, PDOCKER_VK_DEVICE_EXT_EXT_SUBPASS_MERGE_FEEDBACK)) return 23;
+            #endif
+
+            #ifdef VK_EXT_VALIDATION_CACHE_EXTENSION_NAME
+                VkShaderModuleValidationCacheCreateInfoEXT cache_info;
+                memset(&cache_info, 0, sizeof(cache_info));
+                cache_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_VALIDATION_CACHE_CREATE_INFO_EXT;
+                if (validate_shader_module_create_pnext(&cache_info, 0) == VK_SUCCESS) return 30;
+                if (validate_shader_module_create_pnext(&cache_info, PDOCKER_VK_DEVICE_EXT_EXT_VALIDATION_CACHE) != VK_SUCCESS) return 31;
+            #endif
                 return 0;
             }}
             """

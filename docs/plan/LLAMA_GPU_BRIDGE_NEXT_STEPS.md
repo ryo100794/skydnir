@@ -3276,3 +3276,24 @@ not specialize for llama.cpp, does not rewrite SPIR-V/shader bytes, and does not
 change Dockerfiles, models, prompts, or executor ABI.
 
 Validation: `env -u PYTHONPATH python3 -m unittest tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_device_procaddr_hides_global_instance_and_physical_dispatch_commands tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_device_proc_and_command_use_gate_extension_features -q`, full `tests.test_gpu_abi_contract`, full `tests.test_vulkan_icd_feature_chain`, `scripts/build-gpu-shim.sh`, `scripts/verify-native-payloads.py`, and `./gradlew :app:assembleDebug`.
+
+
+### 2026-07-18 pNext extension-enable gate lane
+
+CPU/static Vulkan API hardening now applies device extension enable-state to
+pNext-only extension surfaces, not only to function pointers.  Below the
+advertised core API level, extension pNext blocks now fail closed unless the
+created device enabled the matching extension: private-data create-device pNext,
+subpass-merge-feedback create-device and RenderPass2 pNext, pipeline-creation
+feedback pNext on compute/graphics pipeline creation, and validation-cache pNext
+on shader-module creation.  Positive paths still accept the execution-neutral
+metadata once the extension bit is present.
+
+This keeps the bridge API contract aligned with Vulkan loader/application
+expectations without adding hidden shader rewrites, llama.cpp-specific behavior,
+Dockerfile/model/prompt changes, or executor ABI fields.
+
+Validation: targeted `tests.test_vulkan_icd_feature_chain` pNext tests,
+full `tests.test_gpu_abi_contract`, full `tests.test_vulkan_icd_feature_chain`,
+`scripts/build-gpu-shim.sh`, `scripts/verify-native-payloads.py`, and
+`./gradlew :app:assembleDebug`.

@@ -529,6 +529,8 @@ static uint64_t g_generic_dispatch_sequence = 0;
 #define PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_4        (1ull << 20)
 #define PDOCKER_VK_DEVICE_EXT_KHR_COPY_COMMANDS_2      (1ull << 21)
 #define PDOCKER_VK_DEVICE_EXT_KHR_TIMELINE_SEMAPHORE   (1ull << 22)
+#define PDOCKER_VK_DEVICE_EXT_EXT_PIPELINE_CREATION_FEEDBACK (1ull << 23)
+#define PDOCKER_VK_DEVICE_EXT_EXT_SUBPASS_MERGE_FEEDBACK (1ull << 24)
 #define PDOCKER_VK_FEATURE_MULTIVIEW                    (1ull << 20)
 #define PDOCKER_VK_FEATURE_TESSELLATION_SHADER        (1ull << 21)
 #define PDOCKER_VK_FEATURE_GEOMETRY_SHADER             (1ull << 23)
@@ -22962,6 +22964,14 @@ static uint64_t enabled_device_extension_mask_from_create_info(
         } else if (strcmp(name, VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME) == 0) {
             mask |= PDOCKER_VK_DEVICE_EXT_KHR_TIMELINE_SEMAPHORE;
 #endif
+#ifdef VK_EXT_PIPELINE_CREATION_FEEDBACK_EXTENSION_NAME
+        } else if (strcmp(name, VK_EXT_PIPELINE_CREATION_FEEDBACK_EXTENSION_NAME) == 0) {
+            mask |= PDOCKER_VK_DEVICE_EXT_EXT_PIPELINE_CREATION_FEEDBACK;
+#endif
+#ifdef VK_EXT_SUBPASS_MERGE_FEEDBACK_EXTENSION_NAME
+        } else if (strcmp(name, VK_EXT_SUBPASS_MERGE_FEEDBACK_EXTENSION_NAME) == 0) {
+            mask |= PDOCKER_VK_DEVICE_EXT_EXT_SUBPASS_MERGE_FEEDBACK;
+#endif
         }
     }
     return mask;
@@ -22991,6 +23001,48 @@ static VkResult validate_requested_feature_extension_enables(
     if ((requested_feature_mask & PDOCKER_VK_FEATURE_INDEX_TYPE_UINT8) &&
         (enabled_extension_mask & PDOCKER_VK_DEVICE_EXT_INDEX_TYPE_UINT8) == 0) {
         return unsupported_device_feature_request_result("indexTypeUint8 requires VK_EXT_index_type_uint8");
+    }
+    return VK_SUCCESS;
+}
+
+static bool extension_pnext_enabled_or_core(uint64_t enabled_extension_mask,
+                                            uint64_t required_extension_mask,
+                                            VkBool32 core_available) {
+    return core_available ||
+           (enabled_extension_mask & required_extension_mask) == required_extension_mask;
+}
+
+static VkResult validate_device_create_pnext_extension_enables(
+        const VkDeviceCreateInfo *pCreateInfo,
+        uint64_t enabled_extension_mask) {
+    if (!pCreateInfo) return VK_SUCCESS;
+    for (const void *node = pCreateInfo->pNext; node;) {
+        PdockerVkStructHeader header = read_vk_struct_header(node);
+        switch (header.sType) {
+#ifdef VK_EXT_PRIVATE_DATA_EXTENSION_NAME
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIVATE_DATA_FEATURES:
+            case VK_STRUCTURE_TYPE_DEVICE_PRIVATE_DATA_CREATE_INFO:
+                if (!extension_pnext_enabled_or_core(
+                        enabled_extension_mask,
+                        PDOCKER_VK_DEVICE_EXT_EXT_PRIVATE_DATA,
+                        advertised_api_1_3())) {
+                    return unsupported_device_feature_request_result(
+                        "private data pNext requires VK_EXT_private_data below API 1.3");
+                }
+                break;
+#endif
+#ifdef VK_EXT_SUBPASS_MERGE_FEEDBACK_EXTENSION_NAME
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBPASS_MERGE_FEEDBACK_FEATURES_EXT:
+                if ((enabled_extension_mask & PDOCKER_VK_DEVICE_EXT_EXT_SUBPASS_MERGE_FEEDBACK) == 0) {
+                    return unsupported_device_feature_request_result(
+                        "subpass merge feedback pNext requires VK_EXT_subpass_merge_feedback");
+                }
+                break;
+#endif
+            default:
+                break;
+        }
+        node = header.pNext;
     }
     return VK_SUCCESS;
 }
@@ -23079,6 +23131,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
     if (feature_rc != VK_SUCCESS) return feature_rc;
     uint64_t requested_feature_mask = requested_feature_mask_from_device_create_info(pCreateInfo);
     uint64_t enabled_extension_mask = enabled_device_extension_mask_from_create_info(pCreateInfo);
+    VkResult pnext_extension_rc = validate_device_create_pnext_extension_enables(
+        pCreateInfo,
+        enabled_extension_mask);
+    if (pnext_extension_rc != VK_SUCCESS) return pnext_extension_rc;
     VkResult feature_extension_rc = validate_requested_feature_extension_enables(
         requested_feature_mask,
         enabled_extension_mask);
@@ -24684,13 +24740,20 @@ static VkResult validate_and_fill_pipeline_feedback_pnext(
         const char *api_name,
         const void *pNext,
         uint32_t stage_count,
-        bool allow_pipeline_rendering_create_info) {
+        bool allow_pipeline_rendering_create_info,
+        uint64_t enabled_extension_mask) {
     bool saw_feedback = false;
     for (const void *node = pNext; node;) {
         PdockerVkStructHeader header = read_vk_struct_header(node);
         switch (header.sType) {
 #if defined(VK_VERSION_1_3) || defined(VK_EXT_pipeline_creation_feedback)
             case VK_STRUCTURE_TYPE_PIPELINE_CREATION_FEEDBACK_CREATE_INFO: {
+                if (!extension_pnext_enabled_or_core(
+                        enabled_extension_mask,
+                        PDOCKER_VK_DEVICE_EXT_EXT_PIPELINE_CREATION_FEEDBACK,
+                        advertised_api_1_3())) {
+                    return unsupported_create_info_pnext_result(api_name, node);
+                }
                 VkPipelineCreationFeedbackCreateInfo *feedback_info =
                     (VkPipelineCreationFeedbackCreateInfo *)node;
                 if (saw_feedback) {
@@ -24808,12 +24871,17 @@ static VkResult validate_pipeline_specialization_info_for_transport(
     return VK_SUCCESS;
 }
 
-static VkResult validate_shader_module_create_pnext(const void *pNext) {
+static VkResult validate_shader_module_create_pnext(
+        const void *pNext,
+        uint64_t enabled_extension_mask) {
     for (const void *node = pNext; node;) {
         PdockerVkStructHeader header = read_vk_struct_header(node);
         switch (header.sType) {
 #ifdef VK_EXT_VALIDATION_CACHE_EXTENSION_NAME
             case VK_STRUCTURE_TYPE_SHADER_MODULE_VALIDATION_CACHE_CREATE_INFO_EXT: {
+                if ((enabled_extension_mask & PDOCKER_VK_DEVICE_EXT_EXT_VALIDATION_CACHE) == 0) {
+                    return unsupported_create_info_pnext_result("vkCreateShaderModule", node);
+                }
                 const VkShaderModuleValidationCacheCreateInfoEXT *cache_info =
                     (const VkShaderModuleValidationCacheCreateInfoEXT *)node;
                 /*
@@ -24839,10 +24907,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateShaderModule(
         const VkShaderModuleCreateInfo *pCreateInfo,
         const VkAllocationCallbacks *pAllocator,
         VkShaderModule *pShaderModule) {
-    (void)device;
     (void)pAllocator;
     if (!pCreateInfo || !pShaderModule) return VK_ERROR_INITIALIZATION_FAILED;
-    VkResult pnext_rc = validate_shader_module_create_pnext(pCreateInfo->pNext);
+    VkResult pnext_rc = validate_shader_module_create_pnext(
+        pCreateInfo->pNext,
+        ((PdockerVkDevice *)device) ? ((PdockerVkDevice *)device)->enabled_extension_mask : 0);
     if (pnext_rc != VK_SUCCESS) return pnext_rc;
     if (pCreateInfo->flags != 0 || !pCreateInfo->pCode || pCreateInfo->codeSize == 0 ||
         (pCreateInfo->codeSize % sizeof(uint32_t)) != 0) {
@@ -24925,7 +24994,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateComputePipelines(
     for (uint32_t i = 0; i < createInfoCount; ++i) {
         const VkComputePipelineCreateInfo *ci = &pCreateInfos[i];
         VkResult pnext_rc = validate_and_fill_pipeline_feedback_pnext(
-            "vkCreateComputePipelines", ci->pNext, 1u, false);
+            "vkCreateComputePipelines", ci->pNext, 1u, false,
+            ((PdockerVkDevice *)device) ? ((PdockerVkDevice *)device)->enabled_extension_mask : 0);
         if (pnext_rc != VK_SUCCESS) return pnext_rc;
         const bool strict_passthrough =
             env_truthy_default("PDOCKER_GPU_STRICT_PASSTHROUGH", false);
@@ -25301,7 +25371,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
             pipeline->graphics_unsupported = true;
         }
         VkResult pnext_rc = validate_and_fill_pipeline_feedback_pnext(
-            "vkCreateGraphicsPipelines", ci->pNext, ci->stageCount, true);
+            "vkCreateGraphicsPipelines", ci->pNext, ci->stageCount, true,
+            ((PdockerVkDevice *)device) ? ((PdockerVkDevice *)device)->enabled_extension_mask : 0);
         if (pnext_rc != VK_SUCCESS) {
             pdocker_vk_pipeline_destroy(pipeline);
             return pnext_rc;
@@ -26027,7 +26098,8 @@ static bool render_pass_create_pnext_supported(
 
 static bool render_pass_create2_pnext_noop(
         const VkRenderPassCreateInfo2 *info,
-        bool *disallow_merging) {
+        bool *disallow_merging,
+        uint64_t enabled_extension_mask) {
     if (disallow_merging) *disallow_merging = false;
     bool saw_creation_control = false;
     bool saw_creation_feedback = false;
@@ -26036,6 +26108,9 @@ static bool render_pass_create2_pnext_noop(
         switch (header.sType) {
 #ifdef VK_EXT_subpass_merge_feedback
             case VK_STRUCTURE_TYPE_RENDER_PASS_CREATION_CONTROL_EXT: {
+                if ((enabled_extension_mask & PDOCKER_VK_DEVICE_EXT_EXT_SUBPASS_MERGE_FEEDBACK) == 0) {
+                    return false;
+                }
                 if (saw_creation_control) return false;
                 saw_creation_control = true;
                 const VkRenderPassCreationControlEXT *control =
@@ -26048,6 +26123,9 @@ static bool render_pass_create2_pnext_noop(
 #endif
 #ifdef VK_EXT_subpass_merge_feedback
             case VK_STRUCTURE_TYPE_RENDER_PASS_CREATION_FEEDBACK_CREATE_INFO_EXT:
+                if ((enabled_extension_mask & PDOCKER_VK_DEVICE_EXT_EXT_SUBPASS_MERGE_FEEDBACK) == 0) {
+                    return false;
+                }
                 if (saw_creation_feedback) return false;
                 saw_creation_feedback = true;
                 break;
@@ -26160,7 +26238,6 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateRenderPass2(
         const VkRenderPassCreateInfo2 *pCreateInfo,
         const VkAllocationCallbacks *pAllocator,
         VkRenderPass *pRenderPass) {
-    (void)device;
     (void)pAllocator;
     if (!pRenderPass) return VK_ERROR_INITIALIZATION_FAILED;
     PdockerVkRenderPass *rp = pdocker_alloc_handle(sizeof(*rp));
@@ -26169,7 +26246,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateRenderPass2(
     rp->subpass_count = pCreateInfo ? pCreateInfo->subpassCount : 0;
     bool disallow_subpass_merging = false;
     if (pCreateInfo && (pCreateInfo->flags != 0 ||
-                        !render_pass_create2_pnext_noop(pCreateInfo, &disallow_subpass_merging))) {
+                        !render_pass_create2_pnext_noop(
+                            pCreateInfo,
+                            &disallow_subpass_merging,
+                            ((PdockerVkDevice *)device) ? ((PdockerVkDevice *)device)->enabled_extension_mask : 0))) {
         rp->subpass_overflow = true;
     }
     if (rp->attachment_count > PDOCKER_VK_MAX_STORAGE_BUFFERS) {

@@ -2011,7 +2011,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "src_subpass != VK_SUBPASS_EXTERNAL && dst_subpass == VK_SUBPASS_EXTERNAL",
             "src_subpass + 1u == dst_subpass",
             "rp->subpass_dependencies[dst_subpass]",
-            "render_pass_create2_pnext_noop(pCreateInfo, &disallow_subpass_merging)",
+            "render_pass_create2_pnext_noop(",
+            "PDOCKER_VK_DEVICE_EXT_EXT_SUBPASS_MERGE_FEEDBACK",
             "fill_render_pass_create2_feedback(pCreateInfo, pCreateInfo->subpassCount)",
             "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBPASS_MERGE_FEEDBACK_FEATURES_EXT",
             "VK_EXT_SUBPASS_MERGE_FEEDBACK_EXTENSION_NAME",
@@ -11492,9 +11493,13 @@ class GpuAbiContractTest(unittest.TestCase):
             "VKAPI_ATTR void VKAPI_CALL vkDestroyShaderModule", 1
         )[0]
         shader_module_pnext_body = c_function_body(icd, "validate_shader_module_create_pnext")
-        self.assertIn("validate_shader_module_create_pnext(pCreateInfo->pNext)", shader_module_body)
+        self.assertIn("validate_shader_module_create_pnext(", shader_module_body)
+        self.assertIn("pCreateInfo->pNext", shader_module_body)
+        self.assertIn("enabled_extension_mask", shader_module_body)
         self.assertIn("if (pnext_rc != VK_SUCCESS) return pnext_rc;", shader_module_body)
         self.assertIn("VK_STRUCTURE_TYPE_SHADER_MODULE_VALIDATION_CACHE_CREATE_INFO_EXT", shader_module_pnext_body)
+        self.assertIn("PDOCKER_VK_DEVICE_EXT_EXT_VALIDATION_CACHE", shader_module_pnext_body)
+        self.assertIn("enabled_extension_mask", shader_module_pnext_body)
         self.assertIn("Validation caches are execution-neutral metadata", shader_module_pnext_body)
         self.assertNotIn("shader-module-validation-cache-unsupported", shader_module_pnext_body)
         self.assertNotIn("cache_info->validationCache != VK_NULL_HANDLE", shader_module_pnext_body)
@@ -12841,8 +12846,11 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_4",
             "PDOCKER_VK_DEVICE_EXT_KHR_COPY_COMMANDS_2",
             "PDOCKER_VK_DEVICE_EXT_KHR_TIMELINE_SEMAPHORE",
+            "PDOCKER_VK_DEVICE_EXT_EXT_PIPELINE_CREATION_FEEDBACK",
+            "PDOCKER_VK_DEVICE_EXT_EXT_SUBPASS_MERGE_FEEDBACK",
             "enabled_device_extension_mask_from_create_info",
             "validate_requested_feature_extension_enables",
+            "validate_device_create_pnext_extension_enables",
             "device_proc_address_hidden_by_enabled_state",
         ]:
             self.assertIn(marker, icd)
@@ -12889,8 +12897,23 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_4",
             "VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME",
             "PDOCKER_VK_DEVICE_EXT_KHR_TIMELINE_SEMAPHORE",
+            "VK_EXT_PIPELINE_CREATION_FEEDBACK_EXTENSION_NAME",
+            "PDOCKER_VK_DEVICE_EXT_EXT_PIPELINE_CREATION_FEEDBACK",
+            "VK_EXT_SUBPASS_MERGE_FEEDBACK_EXTENSION_NAME",
+            "PDOCKER_VK_DEVICE_EXT_EXT_SUBPASS_MERGE_FEEDBACK",
         ]:
             self.assertIn(marker, enabled_ext_body)
+
+        pnext_ext_body = c_function_body(icd, "validate_device_create_pnext_extension_enables")
+        for marker in [
+            "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIVATE_DATA_FEATURES",
+            "VK_STRUCTURE_TYPE_DEVICE_PRIVATE_DATA_CREATE_INFO",
+            "PDOCKER_VK_DEVICE_EXT_EXT_PRIVATE_DATA",
+            "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBPASS_MERGE_FEEDBACK_FEATURES_EXT",
+            "PDOCKER_VK_DEVICE_EXT_EXT_SUBPASS_MERGE_FEEDBACK",
+            "extension_pnext_enabled_or_core",
+        ]:
+            self.assertIn(marker, pnext_ext_body)
 
         feature_ext_body = c_function_body(icd, "validate_requested_feature_extension_enables")
         for marker in [
@@ -12990,6 +13013,14 @@ class GpuAbiContractTest(unittest.TestCase):
             "vk_icdGetPhysicalDeviceProcAddr",
         ]:
             self.assertIn(marker, deny_device_proc_body)
+
+        pipeline_feedback_body = c_function_body(icd, "validate_and_fill_pipeline_feedback_pnext")
+        for marker in [
+            "PDOCKER_VK_DEVICE_EXT_EXT_PIPELINE_CREATION_FEEDBACK",
+            "extension_pnext_enabled_or_core",
+            "VK_STRUCTURE_TYPE_PIPELINE_CREATION_FEEDBACK_CREATE_INFO",
+        ]:
+            self.assertIn(marker, pipeline_feedback_body)
 
         get_device_proc_body = c_function_body(icd, "vkGetDeviceProcAddr")
         self.assertIn("proc_address_hidden_from_device_procaddr(pName)", get_device_proc_body)
