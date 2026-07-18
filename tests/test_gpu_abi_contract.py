@@ -1814,6 +1814,9 @@ class GpuAbiContractTest(unittest.TestCase):
         bind_image_body = c_function_body(icd, "vkBindImageMemory")
         self.assertIn("swapchain_owned", bind_image_body)
         self.assertIn("swapchain-image-bind-rejected", bind_image_body)
+        self.assertIn("PdockerVkImage *img = image_handle_lookup_for_device(device, image);", bind_image_body)
+        self.assertNotIn("image_handle_lookup(image)", bind_image_body)
+        self.assertNotIn("device_owner_matches_or_unowned(device, img->owner_device_id)", bind_image_body)
 
         runtime_valid_body = c_function_body(icd, "pdocker_vk_headless_swapchain_runtime_valid")
         for marker in [
@@ -11517,7 +11520,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("if (pInfo && pInfo->pNext)", device_image_req_body)
         self.assertIn("device-image-memory-requirements-pnext-unsupported", device_image_req_body)
         self.assertIn("memory_handle_resolve_for_device(device, memory, &m)", bind_buffer_body)
-        self.assertIn("device_owner_matches_or_unowned(device, b->owner_device_id)", bind_buffer_body)
+        self.assertIn("PdockerVkBuffer *b = buffer_handle_lookup_for_device(device, buffer);", bind_buffer_body)
+        self.assertNotIn("buffer_handle_resolve(buffer, &b)", bind_buffer_body)
+        self.assertNotIn("device_owner_matches_or_unowned(device, b->owner_device_id)", bind_buffer_body)
 
 
     def test_vulkan_core_create_infos_reject_unsupported_pnext_and_flags(self):
@@ -13084,7 +13089,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("buffer_retire(buffer_unregister(buffer));", destroy_body)
         self.assertIn("PdockerVkBuffer *b = buffer_handle_lookup_for_device(device, buffer);", requirements_body)
         self.assertIn("pMemoryRequirements->memoryTypeBits = b ? 0x3 : 0;", requirements_body)
-        self.assertIn("buffer_handle_resolve(buffer, &b)", bind_body)
+        self.assertIn("PdockerVkBuffer *b = buffer_handle_lookup_for_device(device, buffer);", bind_body)
+        self.assertNotIn("buffer_handle_resolve(buffer, &b)", bind_body)
         self.assertIn("buffer_handle_lookup_for_device(device, w->pBufferInfo[j].buffer)", update_descriptors_body)
         self.assertIn("buffer_detach_memory(m);", free_memory_body)
         self.assertIn("buffer->destroyed", validate_body)

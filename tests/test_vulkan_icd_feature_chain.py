@@ -7121,11 +7121,15 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 if (vkFlushMappedMemoryRanges(device_a, 1, NULL) == VK_SUCCESS) return 107;
 
                 if (vkBindBufferMemory(device_b, buffer_a, memory_a, 0) != VK_ERROR_INITIALIZATION_FAILED) return 7;
+                if (buffer_handle_lookup_for_device(device_a, buffer_a)->memory != NULL) return 147;
                 if (vkBindBufferMemory(device_a, buffer_a, memory_b, 0) != VK_ERROR_INITIALIZATION_FAILED) return 8;
+                if (buffer_handle_lookup_for_device(device_a, buffer_a)->memory != NULL) return 148;
                 if (vkBindBufferMemory(device_a, buffer_a, memory_a, 0) != VK_SUCCESS) return 9;
 
                 if (vkBindImageMemory(device_b, image_a, memory_a, 0) != VK_ERROR_INITIALIZATION_FAILED) return 10;
+                if (image_handle_lookup_for_device(device_a, image_a)->memory != NULL) return 149;
                 if (vkBindImageMemory(device_a, image_a, memory_b, 0) != VK_ERROR_INITIALIZATION_FAILED) return 11;
+                if (image_handle_lookup_for_device(device_a, image_a)->memory != NULL) return 150;
                 if (vkBindImageMemory(device_a, image_a, memory_a, 0) != VK_SUCCESS) return 12;
 
                 VkBufferViewCreateInfo buffer_view_info;

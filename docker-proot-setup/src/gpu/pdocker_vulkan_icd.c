@@ -23515,11 +23515,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkBindImageMemory(
         VkImage image,
         VkDeviceMemory memory,
         VkDeviceSize memoryOffset) {
-    (void)device;
-    PdockerVkImage *img = image_handle_lookup(image);
+    PdockerVkImage *img = image_handle_lookup_for_device(device, image);
     PdockerVkMemory *mem = NULL;
-    if (!memory_handle_resolve_for_device(device, memory, &mem) || !img ||
-        !device_owner_matches_or_unowned(device, img->owner_device_id)) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!memory_handle_resolve_for_device(device, memory, &mem) || !img) return VK_ERROR_INITIALIZATION_FAILED;
     if (img->swapchain_owned) {
         trace_icd_runtime_failure("swapchain-image-bind-rejected", VK_ERROR_INITIALIZATION_FAILED);
         return VK_ERROR_INITIALIZATION_FAILED;
@@ -24323,11 +24321,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkBindBufferMemory(
         VkBuffer buffer,
         VkDeviceMemory memory,
         VkDeviceSize memoryOffset) {
-    (void)device;
-    PdockerVkBuffer *b = NULL;
+    PdockerVkBuffer *b = buffer_handle_lookup_for_device(device, buffer);
     PdockerVkMemory *m = NULL;
-    if (!memory_handle_resolve_for_device(device, memory, &m) || !buffer_handle_resolve(buffer, &b) ||
-        !device_owner_matches_or_unowned(device, b->owner_device_id)) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!memory_handle_resolve_for_device(device, memory, &m) || !b) return VK_ERROR_INITIALIZATION_FAILED;
     VkResult dedicated_rc = validate_memory_dedicated_bind(
         "memory-dedicated-buffer-bind-mismatch", m, b, NULL, memoryOffset);
     if (dedicated_rc != VK_SUCCESS) return dedicated_rc;

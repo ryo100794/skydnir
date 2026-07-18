@@ -10,6 +10,24 @@ llama.cpp itself remains unmodified.
 ## Current Ground Truth
 
 
+### 2026-07-18 CPU/static Vulkan bind-memory owner lane
+
+`vkBindBufferMemory` and `vkBindImageMemory` now resolve bind targets with
+device-scoped buffer/image lookups before validating memory compatibility. The
+previous paths resolved the target globally and then checked ownership; the new
+paths reject foreign or stale bind targets at the lookup boundary and preserve
+the existing no-mutation behavior on failed cross-device binds.
+
+This is CPU/static Vulkan pass-through hardening only.  It does not change
+llama.cpp, Dockerfiles, models, prompts, shader bytes, or executor arithmetic.
+
+Evidence: `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`,
+`tests.test_gpu_abi_contract`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_device_owner_rejects_cross_device_memory_resource_misuse`,
+`scripts/build-gpu-shim.sh`, `scripts/verify-native-payloads.py`,
+`./gradlew :app:assembleDebug`.
+
+
 ### 2026-07-18 CPU/static Vulkan sync2 barrier owner lane
 
 `vkCmdPipelineBarrier2`, `vkCmdSetEvent2`, and `vkCmdWaitEvents2` now validate and record
