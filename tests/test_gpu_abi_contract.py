@@ -12825,6 +12825,22 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE",
             "PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE_2",
             "PDOCKER_VK_DEVICE_EXT_INDEX_TYPE_UINT8",
+            "PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_3",
+            "PDOCKER_VK_DEVICE_EXT_KHR_DESCRIPTOR_UPDATE_TEMPLATE",
+            "PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_5",
+            "PDOCKER_VK_DEVICE_EXT_KHR_MAP_MEMORY_2",
+            "PDOCKER_VK_DEVICE_EXT_EXT_HOST_QUERY_RESET",
+            "PDOCKER_VK_DEVICE_EXT_EXT_VALIDATION_CACHE",
+            "PDOCKER_VK_DEVICE_EXT_EXT_PRIVATE_DATA",
+            "PDOCKER_VK_DEVICE_EXT_KHR_SWAPCHAIN",
+            "PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_1",
+            "PDOCKER_VK_DEVICE_EXT_KHR_CREATE_RENDERPASS_2",
+            "PDOCKER_VK_DEVICE_EXT_KHR_DEVICE_GROUP",
+            "PDOCKER_VK_DEVICE_EXT_KHR_GET_MEMORY_REQUIREMENTS_2",
+            "PDOCKER_VK_DEVICE_EXT_KHR_BIND_MEMORY_2",
+            "PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_4",
+            "PDOCKER_VK_DEVICE_EXT_KHR_COPY_COMMANDS_2",
+            "PDOCKER_VK_DEVICE_EXT_KHR_TIMELINE_SEMAPHORE",
             "enabled_device_extension_mask_from_create_info",
             "validate_requested_feature_extension_enables",
             "device_proc_address_hidden_by_enabled_state",
@@ -12838,6 +12854,43 @@ class GpuAbiContractTest(unittest.TestCase):
             "device->enabled_extension_mask = enabled_extension_mask;",
         ]:
             self.assertIn(marker, create_device_body)
+
+        enabled_ext_body = c_function_body(icd, "enabled_device_extension_mask_from_create_info")
+        for marker in [
+            "VK_KHR_MAINTENANCE_3_EXTENSION_NAME",
+            "PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_3",
+            "VK_KHR_DESCRIPTOR_UPDATE_TEMPLATE_EXTENSION_NAME",
+            "PDOCKER_VK_DEVICE_EXT_KHR_DESCRIPTOR_UPDATE_TEMPLATE",
+            "VK_KHR_MAINTENANCE_5_EXTENSION_NAME",
+            "PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_5",
+            "VK_KHR_MAP_MEMORY_2_EXTENSION_NAME",
+            "PDOCKER_VK_DEVICE_EXT_KHR_MAP_MEMORY_2",
+            "VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME",
+            "PDOCKER_VK_DEVICE_EXT_EXT_HOST_QUERY_RESET",
+            "VK_EXT_VALIDATION_CACHE_EXTENSION_NAME",
+            "PDOCKER_VK_DEVICE_EXT_EXT_VALIDATION_CACHE",
+            "VK_EXT_PRIVATE_DATA_EXTENSION_NAME",
+            "PDOCKER_VK_DEVICE_EXT_EXT_PRIVATE_DATA",
+            "VK_KHR_SWAPCHAIN_EXTENSION_NAME",
+            "PDOCKER_VK_DEVICE_EXT_KHR_SWAPCHAIN",
+            "VK_KHR_MAINTENANCE_1_EXTENSION_NAME",
+            "PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_1",
+            "VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME",
+            "PDOCKER_VK_DEVICE_EXT_KHR_CREATE_RENDERPASS_2",
+            "VK_KHR_DEVICE_GROUP_EXTENSION_NAME",
+            "PDOCKER_VK_DEVICE_EXT_KHR_DEVICE_GROUP",
+            "VK_KHR_COPY_COMMANDS_2_EXTENSION_NAME",
+            "PDOCKER_VK_DEVICE_EXT_KHR_COPY_COMMANDS_2",
+            "VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME",
+            "PDOCKER_VK_DEVICE_EXT_KHR_GET_MEMORY_REQUIREMENTS_2",
+            "VK_KHR_BIND_MEMORY_2_EXTENSION_NAME",
+            "PDOCKER_VK_DEVICE_EXT_KHR_BIND_MEMORY_2",
+            "VK_KHR_MAINTENANCE_4_EXTENSION_NAME",
+            "PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_4",
+            "VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME",
+            "PDOCKER_VK_DEVICE_EXT_KHR_TIMELINE_SEMAPHORE",
+        ]:
+            self.assertIn(marker, enabled_ext_body)
 
         feature_ext_body = c_function_body(icd, "validate_requested_feature_extension_enables")
         for marker in [
@@ -12863,6 +12916,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "k_device_proc_enabled_state_gates",
             "device_proc_enabled_state_gate_hidden",
             "strcmp(pName, gate->name) == 0",
+            "bool matched = false;",
+            "if (!device_proc_enabled_state_gate_hidden(device, gate)) return false;",
+            "return matched;",
         ]:
             self.assertIn(marker, device_proc_body)
         self.assertIn("typedef struct PdockerVkDeviceProcEnabledStateGate", icd)
@@ -12883,8 +12939,34 @@ class GpuAbiContractTest(unittest.TestCase):
             '"vkCmdDrawIndirectCountAMD", PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT',
             '"vkCmdBindVertexBuffers2EXT", PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE',
             '"vkCmdSetLogicOpEXT", PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2_LOGIC_OP',
+            '"vkGetDescriptorSetLayoutSupportKHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_3',
+            '"vkCreateDescriptorUpdateTemplateKHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_DESCRIPTOR_UPDATE_TEMPLATE',
+            '"vkGetRenderingAreaGranularityKHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_5',
+            '"vkCmdBindIndexBuffer2KHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_5',
+            '"vkMapMemory2KHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_MAP_MEMORY_2',
+            '"vkResetQueryPoolEXT", 0, PDOCKER_VK_DEVICE_EXT_EXT_HOST_QUERY_RESET',
+            '"vkCreateValidationCacheEXT", 0, PDOCKER_VK_DEVICE_EXT_EXT_VALIDATION_CACHE',
+            '"vkCreatePrivateDataSlotEXT", 0, PDOCKER_VK_DEVICE_EXT_EXT_PRIVATE_DATA',
+            '"vkCreateSwapchainKHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_SWAPCHAIN',
+            '"vkGetDeviceGroupPresentCapabilitiesKHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_SWAPCHAIN',
+            '"vkTrimCommandPoolKHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_1',
+            '"vkCreateRenderPass2KHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_CREATE_RENDERPASS_2',
+            '"vkGetDeviceGroupPeerMemoryFeaturesKHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_DEVICE_GROUP',
+            '"vkCmdDispatchBaseKHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_DEVICE_GROUP',
+            '"vkGetBufferMemoryRequirements2KHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_GET_MEMORY_REQUIREMENTS_2',
+            '"vkBindBufferMemory2KHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_BIND_MEMORY_2',
+            '"vkGetDeviceBufferMemoryRequirementsKHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_4',
+            '"vkCmdCopyBuffer2KHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_COPY_COMMANDS_2',
+            '"vkGetDeviceGroupPresentCapabilitiesKHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_DEVICE_GROUP',
+            '"vkGetSemaphoreCounterValueKHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_TIMELINE_SEMAPHORE',
         ]:
             self.assertIn(marker, device_proc_table)
+        for marker in [
+            '"vkGetSemaphoreCounterValue", PDOCKER_VK_FEATURE_TIMELINE_SEMAPHORE, 0',
+            '"vkWaitSemaphores", PDOCKER_VK_FEATURE_TIMELINE_SEMAPHORE, 0',
+            '"vkSignalSemaphore", PDOCKER_VK_FEATURE_TIMELINE_SEMAPHORE, 0',
+        ]:
+            self.assertNotIn(marker, device_proc_table)
 
         get_device_proc_body = c_function_body(icd, "vkGetDeviceProcAddr")
         self.assertIn("device_proc_address_hidden_by_enabled_state(pdocker_device, pName)", get_device_proc_body)

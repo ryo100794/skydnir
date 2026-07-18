@@ -513,6 +513,22 @@ static uint64_t g_generic_dispatch_sequence = 0;
 #define PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE    (1ull << 4)
 #define PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE_2  (1ull << 5)
 #define PDOCKER_VK_DEVICE_EXT_INDEX_TYPE_UINT8          (1ull << 6)
+#define PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_3        (1ull << 7)
+#define PDOCKER_VK_DEVICE_EXT_KHR_DESCRIPTOR_UPDATE_TEMPLATE (1ull << 8)
+#define PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_5        (1ull << 9)
+#define PDOCKER_VK_DEVICE_EXT_KHR_MAP_MEMORY_2         (1ull << 10)
+#define PDOCKER_VK_DEVICE_EXT_EXT_HOST_QUERY_RESET     (1ull << 11)
+#define PDOCKER_VK_DEVICE_EXT_EXT_VALIDATION_CACHE     (1ull << 12)
+#define PDOCKER_VK_DEVICE_EXT_EXT_PRIVATE_DATA         (1ull << 13)
+#define PDOCKER_VK_DEVICE_EXT_KHR_SWAPCHAIN            (1ull << 14)
+#define PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_1        (1ull << 15)
+#define PDOCKER_VK_DEVICE_EXT_KHR_CREATE_RENDERPASS_2  (1ull << 16)
+#define PDOCKER_VK_DEVICE_EXT_KHR_DEVICE_GROUP         (1ull << 17)
+#define PDOCKER_VK_DEVICE_EXT_KHR_GET_MEMORY_REQUIREMENTS_2 (1ull << 18)
+#define PDOCKER_VK_DEVICE_EXT_KHR_BIND_MEMORY_2        (1ull << 19)
+#define PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_4        (1ull << 20)
+#define PDOCKER_VK_DEVICE_EXT_KHR_COPY_COMMANDS_2      (1ull << 21)
+#define PDOCKER_VK_DEVICE_EXT_KHR_TIMELINE_SEMAPHORE   (1ull << 22)
 #define PDOCKER_VK_FEATURE_MULTIVIEW                    (1ull << 20)
 #define PDOCKER_VK_FEATURE_TESSELLATION_SHADER        (1ull << 21)
 #define PDOCKER_VK_FEATURE_GEOMETRY_SHADER             (1ull << 23)
@@ -22896,6 +22912,56 @@ static uint64_t enabled_device_extension_mask_from_create_info(
         } else if (strcmp(name, VK_EXT_INDEX_TYPE_UINT8_EXTENSION_NAME) == 0) {
             mask |= PDOCKER_VK_DEVICE_EXT_INDEX_TYPE_UINT8;
 #endif
+        } else if (strcmp(name, VK_KHR_MAINTENANCE_3_EXTENSION_NAME) == 0) {
+            mask |= PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_3;
+        } else if (strcmp(name, VK_KHR_DESCRIPTOR_UPDATE_TEMPLATE_EXTENSION_NAME) == 0) {
+            mask |= PDOCKER_VK_DEVICE_EXT_KHR_DESCRIPTOR_UPDATE_TEMPLATE;
+#ifdef VK_KHR_MAINTENANCE_5_EXTENSION_NAME
+        } else if (strcmp(name, VK_KHR_MAINTENANCE_5_EXTENSION_NAME) == 0) {
+            mask |= PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_5;
+#endif
+#ifdef VK_KHR_map_memory2
+        } else if (strcmp(name, VK_KHR_MAP_MEMORY_2_EXTENSION_NAME) == 0) {
+            mask |= PDOCKER_VK_DEVICE_EXT_KHR_MAP_MEMORY_2;
+#endif
+#ifdef VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME
+        } else if (strcmp(name, VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME) == 0) {
+            mask |= PDOCKER_VK_DEVICE_EXT_EXT_HOST_QUERY_RESET;
+#endif
+#ifdef VK_EXT_VALIDATION_CACHE_EXTENSION_NAME
+        } else if (strcmp(name, VK_EXT_VALIDATION_CACHE_EXTENSION_NAME) == 0) {
+            mask |= PDOCKER_VK_DEVICE_EXT_EXT_VALIDATION_CACHE;
+#endif
+#ifdef VK_EXT_PRIVATE_DATA_EXTENSION_NAME
+        } else if (strcmp(name, VK_EXT_PRIVATE_DATA_EXTENSION_NAME) == 0) {
+            mask |= PDOCKER_VK_DEVICE_EXT_EXT_PRIVATE_DATA;
+#endif
+        } else if (strcmp(name, VK_KHR_SWAPCHAIN_EXTENSION_NAME) == 0) {
+            mask |= PDOCKER_VK_DEVICE_EXT_KHR_SWAPCHAIN;
+        } else if (strcmp(name, VK_KHR_MAINTENANCE_1_EXTENSION_NAME) == 0) {
+            mask |= PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_1;
+        } else if (strcmp(name, VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME) == 0) {
+            mask |= PDOCKER_VK_DEVICE_EXT_KHR_CREATE_RENDERPASS_2;
+        } else if (strcmp(name, VK_KHR_DEVICE_GROUP_EXTENSION_NAME) == 0) {
+            mask |= PDOCKER_VK_DEVICE_EXT_KHR_DEVICE_GROUP;
+        } else if (strcmp(name, VK_KHR_COPY_COMMANDS_2_EXTENSION_NAME) == 0) {
+            mask |= PDOCKER_VK_DEVICE_EXT_KHR_COPY_COMMANDS_2;
+#ifdef VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME
+        } else if (strcmp(name, VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME) == 0) {
+            mask |= PDOCKER_VK_DEVICE_EXT_KHR_GET_MEMORY_REQUIREMENTS_2;
+#endif
+#ifdef VK_KHR_BIND_MEMORY_2_EXTENSION_NAME
+        } else if (strcmp(name, VK_KHR_BIND_MEMORY_2_EXTENSION_NAME) == 0) {
+            mask |= PDOCKER_VK_DEVICE_EXT_KHR_BIND_MEMORY_2;
+#endif
+#ifdef VK_KHR_MAINTENANCE_4_EXTENSION_NAME
+        } else if (strcmp(name, VK_KHR_MAINTENANCE_4_EXTENSION_NAME) == 0) {
+            mask |= PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_4;
+#endif
+#ifdef VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME
+        } else if (strcmp(name, VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME) == 0) {
+            mask |= PDOCKER_VK_DEVICE_EXT_KHR_TIMELINE_SEMAPHORE;
+#endif
         }
     }
     return mask;
@@ -35812,6 +35878,60 @@ static const PdockerVkDeviceProcEnabledStateGate k_device_proc_enabled_state_gat
     {"vkCmdSetPrimitiveRestartEnableEXT", PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2, PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE_2},
     {"vkCmdSetLogicOpEXT", PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2_LOGIC_OP, PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE_2},
     {"vkCmdSetPatchControlPointsEXT", PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2_PATCH_CONTROL_POINTS, PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE_2},
+    {"vkGetDescriptorSetLayoutSupportKHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_3},
+    {"vkCreateDescriptorUpdateTemplateKHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_DESCRIPTOR_UPDATE_TEMPLATE},
+    {"vkDestroyDescriptorUpdateTemplateKHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_DESCRIPTOR_UPDATE_TEMPLATE},
+    {"vkUpdateDescriptorSetWithTemplateKHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_DESCRIPTOR_UPDATE_TEMPLATE},
+    {"vkGetImageSubresourceLayout2KHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_5},
+    {"vkGetDeviceImageSubresourceLayoutKHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_5},
+    {"vkGetRenderingAreaGranularityKHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_5},
+    {"vkCmdBindIndexBuffer2KHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_5},
+    {"vkMapMemory2KHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_MAP_MEMORY_2},
+    {"vkUnmapMemory2KHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_MAP_MEMORY_2},
+    {"vkResetQueryPoolEXT", 0, PDOCKER_VK_DEVICE_EXT_EXT_HOST_QUERY_RESET},
+    {"vkCreateValidationCacheEXT", 0, PDOCKER_VK_DEVICE_EXT_EXT_VALIDATION_CACHE},
+    {"vkDestroyValidationCacheEXT", 0, PDOCKER_VK_DEVICE_EXT_EXT_VALIDATION_CACHE},
+    {"vkGetValidationCacheDataEXT", 0, PDOCKER_VK_DEVICE_EXT_EXT_VALIDATION_CACHE},
+    {"vkMergeValidationCachesEXT", 0, PDOCKER_VK_DEVICE_EXT_EXT_VALIDATION_CACHE},
+    {"vkCreatePrivateDataSlotEXT", 0, PDOCKER_VK_DEVICE_EXT_EXT_PRIVATE_DATA},
+    {"vkDestroyPrivateDataSlotEXT", 0, PDOCKER_VK_DEVICE_EXT_EXT_PRIVATE_DATA},
+    {"vkSetPrivateDataEXT", 0, PDOCKER_VK_DEVICE_EXT_EXT_PRIVATE_DATA},
+    {"vkGetPrivateDataEXT", 0, PDOCKER_VK_DEVICE_EXT_EXT_PRIVATE_DATA},
+    {"vkCreateSwapchainKHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_SWAPCHAIN},
+    {"vkDestroySwapchainKHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_SWAPCHAIN},
+    {"vkGetSwapchainImagesKHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_SWAPCHAIN},
+    {"vkAcquireNextImageKHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_SWAPCHAIN},
+    {"vkAcquireNextImage2KHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_SWAPCHAIN},
+    {"vkQueuePresentKHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_SWAPCHAIN},
+    {"vkGetDeviceGroupPresentCapabilitiesKHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_SWAPCHAIN},
+    {"vkGetDeviceGroupSurfacePresentModesKHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_SWAPCHAIN},
+    {"vkGetDeviceGroupPresentCapabilitiesKHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_DEVICE_GROUP},
+    {"vkGetDeviceGroupSurfacePresentModesKHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_DEVICE_GROUP},
+    {"vkTrimCommandPoolKHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_1},
+    {"vkCreateRenderPass2KHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_CREATE_RENDERPASS_2},
+    {"vkCmdBeginRenderPass2KHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_CREATE_RENDERPASS_2},
+    {"vkCmdNextSubpass2KHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_CREATE_RENDERPASS_2},
+    {"vkCmdEndRenderPass2KHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_CREATE_RENDERPASS_2},
+    {"vkGetDeviceGroupPeerMemoryFeaturesKHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_DEVICE_GROUP},
+    {"vkCmdSetDeviceMaskKHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_DEVICE_GROUP},
+    {"vkCmdDispatchBaseKHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_DEVICE_GROUP},
+    {"vkGetBufferMemoryRequirements2KHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_GET_MEMORY_REQUIREMENTS_2},
+    {"vkGetImageMemoryRequirements2KHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_GET_MEMORY_REQUIREMENTS_2},
+    {"vkGetImageSparseMemoryRequirements2KHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_GET_MEMORY_REQUIREMENTS_2},
+    {"vkBindBufferMemory2KHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_BIND_MEMORY_2},
+    {"vkBindImageMemory2KHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_BIND_MEMORY_2},
+    {"vkGetDeviceBufferMemoryRequirementsKHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_4},
+    {"vkGetDeviceImageMemoryRequirementsKHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_4},
+    {"vkGetDeviceImageSparseMemoryRequirementsKHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_4},
+    {"vkCmdCopyBuffer2KHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_COPY_COMMANDS_2},
+    {"vkCmdCopyBufferToImage2KHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_COPY_COMMANDS_2},
+    {"vkCmdCopyImageToBuffer2KHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_COPY_COMMANDS_2},
+    {"vkCmdCopyImage2KHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_COPY_COMMANDS_2},
+    {"vkCmdResolveImage2KHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_COPY_COMMANDS_2},
+    {"vkCmdBlitImage2KHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_COPY_COMMANDS_2},
+    {"vkGetSemaphoreCounterValueKHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_TIMELINE_SEMAPHORE},
+    {"vkWaitSemaphoresKHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_TIMELINE_SEMAPHORE},
+    {"vkSignalSemaphoreKHR", 0, PDOCKER_VK_DEVICE_EXT_KHR_TIMELINE_SEMAPHORE},
 };
 
 static bool device_proc_enabled_state_gate_hidden(
@@ -35825,15 +35945,17 @@ static bool device_proc_address_hidden_by_enabled_state(
         const PdockerVkDevice *device,
         const char *pName) {
     if (!device || !pName) return true;
+    bool matched = false;
     for (size_t i = 0;
          i < sizeof(k_device_proc_enabled_state_gates) / sizeof(k_device_proc_enabled_state_gates[0]);
          ++i) {
         const PdockerVkDeviceProcEnabledStateGate *gate = &k_device_proc_enabled_state_gates[i];
         if (strcmp(pName, gate->name) == 0) {
-            return device_proc_enabled_state_gate_hidden(device, gate);
+            matched = true;
+            if (!device_proc_enabled_state_gate_hidden(device, gate)) return false;
         }
     }
-    return false;
+    return matched;
 }
 
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetDeviceProcAddr(VkDevice device, const char *pName) {

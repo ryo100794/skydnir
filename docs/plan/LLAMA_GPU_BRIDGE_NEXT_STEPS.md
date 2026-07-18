@@ -3232,3 +3232,28 @@ pipeline creation.  This keeps the standalone maintenance5 query/alias surface
 truthful without promoting Vulkan 1.4 semantics or adding executor ABI fields.
 
 Validation: `env -u PYTHONPATH python3 -m unittest tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_maintenance5_extension_exposes_query_and_index_buffer2_aliases tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_maintenance5_is_advertised_with_false_only_feature_bit -q`.
+
+
+### 2026-07-18 device procaddr extension-enable gate lane
+
+CPU/static Vulkan pass-through work tightened `vkGetDeviceProcAddr` visibility for
+advertised device-extension commands.  `vkCreateDevice` now records enable-state
+bits for the implemented KHR/EXT device-extension command families beyond the
+older synchronization/dynamic-rendering gates: maintenance1/3/4/5,
+descriptor-update-template, renderpass2, device-group, memory-requirements2,
+bind-memory2, map-memory2, copy-commands2, host-query-reset, validation-cache,
+private-data, swapchain, and timeline-semaphore aliases.  The device procaddr
+path now hides the matching KHR/EXT command names unless the created device
+actually enabled the required extension.  Timeline semaphore KHR aliases require
+`VK_KHR_timeline_semaphore` enable-state for procaddr visibility, while the core
+Vulkan 1.2 command names remain visible and defer feature validity to command
+use-time validation.
+
+This is generic Vulkan API-surface hardening.  It does not specialize for
+llama.cpp, does not rewrite shader bytes, and does not change Dockerfiles,
+models, prompts, or executor ABI.  The remaining adjacent cleanup is to make
+`vkGetDeviceProcAddr` reject instance/physical-device dispatch names explicitly;
+that is tracked separately because it changes a broader loader compatibility
+surface than extension-enable gating.
+
+Validation: `env -u PYTHONPATH python3 -m unittest tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_device_procaddr_requires_enabled_device_extension_for_selected_extension_commands tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_device_proc_and_command_use_gate_extension_features -q` and full `tests.test_gpu_abi_contract`.

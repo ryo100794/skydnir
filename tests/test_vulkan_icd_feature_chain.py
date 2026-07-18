@@ -5612,5 +5612,154 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
+
+    def test_device_procaddr_requires_enabled_device_extension_for_selected_extension_commands(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            static int gate_hidden_for_mask(uint64_t enabled_mask, const char *name) {{
+                PdockerVkDevice device;
+                memset(&device, 0, sizeof(device));
+                device.enabled_extension_mask = enabled_mask;
+                return device_proc_address_hidden_by_enabled_state(&device, name) ? 1 : 0;
+            }}
+
+            static int mask_has_extension(const char *extension_name, uint64_t expected_mask) {{
+                const char *enabled[] = {{ extension_name }};
+                VkDeviceCreateInfo info;
+                memset(&info, 0, sizeof(info));
+                info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                info.enabledExtensionCount = 1;
+                info.ppEnabledExtensionNames = enabled;
+                return (enabled_device_extension_mask_from_create_info(&info) & expected_mask) == expected_mask;
+            }}
+
+            static int expect_gate(const char *extension_name,
+                                   uint64_t expected_mask,
+                                   const char *proc_name,
+                                   int code) {{
+                if (!mask_has_extension(extension_name, expected_mask)) {{
+                    fprintf(stderr, "extension mask not recorded for %s\\n", extension_name);
+                    return code;
+                }}
+                if (!gate_hidden_for_mask(0, proc_name)) {{
+                    fprintf(stderr, "proc %s visible without enabling %s\\n", proc_name, extension_name);
+                    return code + 1;
+                }}
+                if (gate_hidden_for_mask(expected_mask, proc_name)) {{
+                    fprintf(stderr, "proc %s hidden after enabling %s\\n", proc_name, extension_name);
+                    return code + 2;
+                }}
+                return 0;
+            }}
+
+            int main(void) {{
+                int rc = 0;
+                rc = expect_gate(VK_KHR_MAINTENANCE_3_EXTENSION_NAME,
+                                 PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_3,
+                                 "vkGetDescriptorSetLayoutSupportKHR", 10);
+                if (rc) return rc;
+                rc = expect_gate(VK_KHR_DESCRIPTOR_UPDATE_TEMPLATE_EXTENSION_NAME,
+                                 PDOCKER_VK_DEVICE_EXT_KHR_DESCRIPTOR_UPDATE_TEMPLATE,
+                                 "vkCreateDescriptorUpdateTemplateKHR", 20);
+                if (rc) return rc;
+            #ifdef VK_KHR_MAINTENANCE_5_EXTENSION_NAME
+                rc = expect_gate(VK_KHR_MAINTENANCE_5_EXTENSION_NAME,
+                                 PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_5,
+                                 "vkGetRenderingAreaGranularityKHR", 30);
+                if (rc) return rc;
+                rc = expect_gate(VK_KHR_MAINTENANCE_5_EXTENSION_NAME,
+                                 PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_5,
+                                 "vkCmdBindIndexBuffer2KHR", 40);
+                if (rc) return rc;
+            #endif
+            #ifdef VK_KHR_map_memory2
+                rc = expect_gate(VK_KHR_MAP_MEMORY_2_EXTENSION_NAME,
+                                 PDOCKER_VK_DEVICE_EXT_KHR_MAP_MEMORY_2,
+                                 "vkMapMemory2KHR", 50);
+                if (rc) return rc;
+            #endif
+            #ifdef VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME
+                rc = expect_gate(VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME,
+                                 PDOCKER_VK_DEVICE_EXT_EXT_HOST_QUERY_RESET,
+                                 "vkResetQueryPoolEXT", 60);
+                if (rc) return rc;
+            #endif
+            #ifdef VK_EXT_VALIDATION_CACHE_EXTENSION_NAME
+                rc = expect_gate(VK_EXT_VALIDATION_CACHE_EXTENSION_NAME,
+                                 PDOCKER_VK_DEVICE_EXT_EXT_VALIDATION_CACHE,
+                                 "vkCreateValidationCacheEXT", 70);
+                if (rc) return rc;
+            #endif
+            #ifdef VK_EXT_PRIVATE_DATA_EXTENSION_NAME
+                rc = expect_gate(VK_EXT_PRIVATE_DATA_EXTENSION_NAME,
+                                 PDOCKER_VK_DEVICE_EXT_EXT_PRIVATE_DATA,
+                                 "vkCreatePrivateDataSlotEXT", 80);
+                if (rc) return rc;
+            #endif
+                rc = expect_gate(VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+                                 PDOCKER_VK_DEVICE_EXT_KHR_SWAPCHAIN,
+                                 "vkCreateSwapchainKHR", 90);
+                if (rc) return rc;
+                rc = expect_gate(VK_KHR_MAINTENANCE_1_EXTENSION_NAME,
+                                 PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_1,
+                                 "vkTrimCommandPoolKHR", 100);
+                if (rc) return rc;
+                rc = expect_gate(VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME,
+                                 PDOCKER_VK_DEVICE_EXT_KHR_CREATE_RENDERPASS_2,
+                                 "vkCreateRenderPass2KHR", 110);
+                if (rc) return rc;
+                rc = expect_gate(VK_KHR_DEVICE_GROUP_EXTENSION_NAME,
+                                 PDOCKER_VK_DEVICE_EXT_KHR_DEVICE_GROUP,
+                                 "vkGetDeviceGroupPeerMemoryFeaturesKHR", 120);
+                if (rc) return rc;
+                rc = expect_gate(VK_KHR_COPY_COMMANDS_2_EXTENSION_NAME,
+                                 PDOCKER_VK_DEVICE_EXT_KHR_COPY_COMMANDS_2,
+                                 "vkCmdCopyBuffer2KHR", 130);
+                if (rc) return rc;
+            #ifdef VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME
+                rc = expect_gate(VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME,
+                                 PDOCKER_VK_DEVICE_EXT_KHR_GET_MEMORY_REQUIREMENTS_2,
+                                 "vkGetBufferMemoryRequirements2KHR", 140);
+                if (rc) return rc;
+            #endif
+            #ifdef VK_KHR_BIND_MEMORY_2_EXTENSION_NAME
+                rc = expect_gate(VK_KHR_BIND_MEMORY_2_EXTENSION_NAME,
+                                 PDOCKER_VK_DEVICE_EXT_KHR_BIND_MEMORY_2,
+                                 "vkBindBufferMemory2KHR", 150);
+                if (rc) return rc;
+            #endif
+            #ifdef VK_KHR_MAINTENANCE_4_EXTENSION_NAME
+                rc = expect_gate(VK_KHR_MAINTENANCE_4_EXTENSION_NAME,
+                                 PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_4,
+                                 "vkGetDeviceBufferMemoryRequirementsKHR", 160);
+                if (rc) return rc;
+            #endif
+            #ifdef VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME
+                PdockerVkDevice timeline_device;
+                memset(&timeline_device, 0, sizeof(timeline_device));
+                if (device_proc_address_hidden_by_enabled_state(&timeline_device, "vkGetSemaphoreCounterValue")) return 170;
+                if (!device_proc_address_hidden_by_enabled_state(&timeline_device, "vkGetSemaphoreCounterValueKHR")) return 171;
+                timeline_device.enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_TIMELINE_SEMAPHORE;
+                if (device_proc_address_hidden_by_enabled_state(&timeline_device, "vkGetSemaphoreCounterValueKHR")) return 172;
+            #endif
+                PdockerVkDevice present_device;
+                memset(&present_device, 0, sizeof(present_device));
+                if (!device_proc_address_hidden_by_enabled_state(&present_device, "vkGetDeviceGroupPresentCapabilitiesKHR")) return 180;
+                present_device.enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SWAPCHAIN;
+                if (device_proc_address_hidden_by_enabled_state(&present_device, "vkGetDeviceGroupPresentCapabilitiesKHR")) return 181;
+                present_device.enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_DEVICE_GROUP;
+                if (device_proc_address_hidden_by_enabled_state(&present_device, "vkGetDeviceGroupPresentCapabilitiesKHR")) return 182;
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
 if __name__ == "__main__":
     unittest.main()
