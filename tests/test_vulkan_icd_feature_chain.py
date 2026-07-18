@@ -7656,10 +7656,22 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 vkDestroyQueryPool(device_b, query_a, NULL);
                 if (!query_pool_handle_lookup_for_device(device_a, query_a)) return 38;
 
+                if (vkBeginCommandBuffer(secondary_b, NULL) != VK_SUCCESS) return 176;
+                vkCmdWriteTimestamp(secondary_b, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, query_b, 0);
+                if (vkEndCommandBuffer(secondary_b) != VK_SUCCESS) return 177;
+                PdockerVkCommandBuffer *secondary_b_obj = command_buffer_handle_lookup(secondary_b);
+                if (!secondary_b_obj || secondary_b_obj->command_op_count == 0 ||
+                    secondary_b_obj->graphics_command_op_count == 0) return 178;
+
                 VkCommandBuffer primary_a2 = make_cmd(device_a, pool_a, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
                 if (!primary_a2) return 39;
                 if (vkBeginCommandBuffer(primary_a2, NULL) != VK_SUCCESS) return 40;
                 vkCmdExecuteCommands(primary_a2, 1, &secondary_b);
+                PdockerVkCommandBuffer *primary_a2_obj = command_buffer_handle_lookup(primary_a2);
+                if (!primary_a2_obj || !primary_a2_obj->recording_failed ||
+                    !primary_a2_obj->recording_failure_reason ||
+                    strcmp(primary_a2_obj->recording_failure_reason, "execute-commands-cross-device") != 0) return 179;
+                if (primary_a2_obj->command_op_count != 0 || primary_a2_obj->graphics_command_op_count != 0) return 180;
                 if (vkEndCommandBuffer(primary_a2) != VK_ERROR_FEATURE_NOT_PRESENT) return 41;
 
                 vkDestroyDevice(device_a, NULL);

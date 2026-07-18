@@ -3028,6 +3028,14 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("command_buffer_begin_pnext_supported(pBeginInfo)", begin_body)
         self.assertIn('command_buffer_mark_recording_failed(cmd, "command-buffer-begin-pnext-unsupported")', begin_body)
         self.assertIn("command_buffer_begin_inheritance_supported", icd)
+        owner_chain_body = c_function_body(icd, "command_buffer_owner_chain_valid")
+        self.assertIn("cmd->owner_device_id != 0", owner_chain_body)
+        self.assertIn("cmd->owner_pool->owner_device_id == cmd->owner_device_id", owner_chain_body)
+        self.assertIn("command_pool_contains_command_buffer(cmd->owner_pool, cmd)", owner_chain_body)
+        execute_compat_body = c_function_body(icd, "command_buffers_can_execute_secondary")
+        self.assertIn("command_buffer_owner_chain_valid(primary)", execute_compat_body)
+        self.assertIn("command_buffer_owner_chain_valid(secondary)", execute_compat_body)
+        self.assertIn("primary->owner_device_id == secondary->owner_device_id", execute_compat_body)
         self.assertIn("VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_RENDERING_INFO", icd)
         self.assertIn("cmd->dynamic_rendering_active || cmd->inherited_rendering_active", icd)
         self.assertIn("inherit->occlusionQueryEnable || inherit->queryFlags != 0", icd)
@@ -3038,6 +3046,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("op.index += dispatch_base;", icd)
         self.assertIn("op.index += graphics_draw_base;", icd)
         secondary_body = c_function_body(icd, "append_secondary_command_buffer")
+        self.assertIn("command_buffers_can_execute_secondary(dst, src)", secondary_body)
         self.assertIn("PdockerVkDispatchOp copied = src->dispatch_ops[i];", secondary_body)
         self.assertIn("PdockerVkGraphicsDrawSnapshot copied = src->graphics_draw_ops[i];", secondary_body)
         self.assertIn("PdockerVkGraphicsDescriptorBindSnapshot copied = src->graphics_descriptor_bind_ops[i];", secondary_body)
@@ -3059,8 +3068,12 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("src->graphics_descriptor_bind_ops[i].set_snapshot_used[set_i]) return false", secondary_body)
         execute_body = icd[icd.index("VKAPI_ATTR void VKAPI_CALL vkCmdExecuteCommands"):]
         execute_body = execute_body[:execute_body.index("VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets")]
-        self.assertIn("secondary->level != VK_COMMAND_BUFFER_LEVEL_SECONDARY", execute_body)
+        self.assertIn("!command_buffers_can_execute_secondary(cmd, secondary)", execute_body)
         self.assertIn("!append_secondary_command_buffer(cmd, secondary)", execute_body)
+        self.assertLess(
+            execute_body.index("!command_buffers_can_execute_secondary(cmd, secondary)"),
+            execute_body.index("!append_secondary_command_buffer(cmd, secondary)"),
+        )
         self.assertNotIn("cmd->graphics_unsupported = true;\n}", execute_body)
 
 

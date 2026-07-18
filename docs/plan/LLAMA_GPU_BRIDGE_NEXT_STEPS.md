@@ -10,6 +10,25 @@ llama.cpp itself remains unmodified.
 ## Current Ground Truth
 
 
+### 2026-07-18 CPU/static Vulkan execute-secondary owner-chain lane
+
+`vkCmdExecuteCommands` now validates primary and secondary command-buffer owner
+chains before any secondary command content is cloned.  The validation requires
+nonzero device ownership, a live owner command pool, pool/device owner
+consistency, and actual membership in the owner pool.  The append path repeats
+the same guard as defense in depth, while preserving the outward
+`execute-commands-cross-device` failure reason.
+
+This is CPU/static Vulkan pass-through hardening only.  It does not change
+llama.cpp, Dockerfiles, models, prompts, shader bytes, or executor arithmetic.
+
+Evidence: `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`,
+`tests.test_gpu_abi_contract`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_device_owner_rejects_cross_device_command_submit_sync`,
+`scripts/build-gpu-shim.sh`, `scripts/verify-native-payloads.py`,
+`./gradlew :app:assembleDebug`.
+
+
 ### 2026-07-18 CPU/static Vulkan query-command owner lane
 
 Query command recording now resolves query-pool handles through a

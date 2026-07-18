@@ -3137,6 +3137,36 @@ static bool command_buffer_belongs_to_pool(
     return cmd && pool && !cmd->destroyed && !pool->destroyed && cmd->owner_pool == pool;
 }
 
+static bool command_pool_contains_command_buffer(
+        const PdockerVkCommandPool *pool,
+        const PdockerVkCommandBuffer *cmd) {
+    if (!pool || !cmd || pool->destroyed || cmd->destroyed) return false;
+    for (const PdockerVkCommandBuffer *candidate = pool->command_buffers;
+         candidate;
+         candidate = candidate->next_in_pool) {
+        if (candidate == cmd) return true;
+    }
+    return false;
+}
+
+static bool command_buffer_owner_chain_valid(const PdockerVkCommandBuffer *cmd) {
+    return cmd && !cmd->destroyed && cmd->owner_device_id != 0 &&
+        cmd->owner_pool && !cmd->owner_pool->destroyed &&
+        cmd->owner_pool->owner_device_id == cmd->owner_device_id &&
+        command_buffer_belongs_to_pool(cmd, cmd->owner_pool) &&
+        command_pool_contains_command_buffer(cmd->owner_pool, cmd);
+}
+
+static bool command_buffers_can_execute_secondary(
+        const PdockerVkCommandBuffer *primary,
+        const PdockerVkCommandBuffer *secondary) {
+    return command_buffer_owner_chain_valid(primary) &&
+        command_buffer_owner_chain_valid(secondary) &&
+        primary->level == VK_COMMAND_BUFFER_LEVEL_PRIMARY &&
+        secondary->level == VK_COMMAND_BUFFER_LEVEL_SECONDARY &&
+        primary->owner_device_id == secondary->owner_device_id;
+}
+
 
 static PdockerVkFence *fence_handle_target(VkFence fence) {
     return pdocker_vk_fence_from_handle(fence);
@@ -5021,6 +5051,7 @@ static bool command_buffer_has_room_for_secondary(
 static bool append_secondary_command_buffer(
         PdockerVkCommandBuffer *dst,
         const PdockerVkCommandBuffer *src) {
+    if (!command_buffers_can_execute_secondary(dst, src)) return false;
     if (!command_buffer_has_room_for_secondary(dst, src)) return false;
     if (src->graphics_unsupported || src->unsupported_descriptor_set_layout ||
         src->dynamic_rendering_active || src->render_pass_active) {
@@ -31347,8 +31378,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdExecuteCommands(
     }
     for (uint32_t i = 0; i < commandBufferCount; ++i) {
         PdockerVkCommandBuffer *secondary = command_buffer_handle_lookup(pCommandBuffers[i]);
-        if (!secondary || secondary->level != VK_COMMAND_BUFFER_LEVEL_SECONDARY ||
-            !owner_device_ids_match_or_unowned(cmd->owner_device_id, secondary->owner_device_id) ||
+        if (!command_buffers_can_execute_secondary(cmd, secondary) ||
             !append_secondary_command_buffer(cmd, secondary)) {
             cmd->graphics_unsupported = true;
             command_buffer_mark_recording_failed(cmd, "execute-commands-cross-device");
