@@ -270,10 +270,11 @@ typedef struct PdockerVkInstance {
     struct PdockerVkInstance *next;
 } PdockerVkInstance;
 
-typedef struct {
+typedef struct PdockerVkPhysicalDevice {
     VK_LOADER_DATA loader;
     uint64_t object_id;
     uint64_t instance_object_id;
+    struct PdockerVkPhysicalDevice *next;
 } PdockerVkPhysicalDevice;
 
 typedef struct PdockerVkDevice {
@@ -1768,6 +1769,7 @@ struct PdockerVkCommandPool {
 static PdockerVkPhysicalDevice g_device;
 static PdockerVkQueue g_queue;
 static PdockerVkInstance *g_instances;
+static PdockerVkPhysicalDevice *g_physical_devices;
 static PdockerVkDevice *g_devices;
 static PdockerVkMemory *g_memories;
 static PdockerVkBuffer *g_buffers;
@@ -1939,6 +1941,63 @@ static bool instance_handle_object_id(VkInstance instance, uint64_t *out_object_
     return true;
 }
 
+static bool physical_device_handle_resolve(
+        VkPhysicalDevice physicalDevice,
+        PdockerVkPhysicalDevice **out_physical_device) {
+    PdockerVkPhysicalDevice *target = (PdockerVkPhysicalDevice *)physicalDevice;
+    if (out_physical_device) *out_physical_device = NULL;
+    if (!target) return false;
+    if (target == &g_device) {
+        ensure_vulkan_dispatchable_object_ids();
+        if (out_physical_device) *out_physical_device = &g_device;
+        return true;
+    }
+    for (PdockerVkPhysicalDevice *candidate = g_physical_devices;
+         candidate;
+         candidate = candidate->next) {
+        if (candidate == target) {
+            if (out_physical_device) *out_physical_device = candidate;
+            return true;
+        }
+    }
+    return false;
+}
+
+static PdockerVkPhysicalDevice *physical_device_for_instance(
+        const PdockerVkInstance *instance) {
+    if (!instance || instance->object_id == 0) {
+        ensure_vulkan_dispatchable_object_ids();
+        return &g_device;
+    }
+    for (PdockerVkPhysicalDevice *candidate = g_physical_devices;
+         candidate;
+         candidate = candidate->next) {
+        if (candidate->instance_object_id == instance->object_id) return candidate;
+    }
+    PdockerVkPhysicalDevice *physical = calloc(1, sizeof(*physical));
+    if (!physical) return NULL;
+    physical->object_id = next_vulkan_object_generation();
+    physical->instance_object_id = instance->object_id;
+    set_loader_magic_value(physical);
+    physical->next = g_physical_devices;
+    g_physical_devices = physical;
+    return physical;
+}
+
+static void physical_devices_unregister_for_instance(uint64_t instance_object_id) {
+    if (instance_object_id == 0) return;
+    PdockerVkPhysicalDevice **link = &g_physical_devices;
+    while (*link) {
+        PdockerVkPhysicalDevice *physical = *link;
+        if (physical->instance_object_id == instance_object_id) {
+            *link = physical->next;
+            free(physical);
+        } else {
+            link = &physical->next;
+        }
+    }
+}
+
 static void device_register(PdockerVkDevice *device) {
     if (!device) return;
     device->next = g_devices;
@@ -2008,11 +2067,12 @@ static bool owner_device_ids_match_or_unowned(uint64_t lhs_owner_device_id, uint
 static bool physical_device_instance_object_id(
         VkPhysicalDevice physicalDevice,
         uint64_t *out_instance_object_id) {
+    PdockerVkPhysicalDevice *physical = NULL;
     if (out_instance_object_id) *out_instance_object_id = 0;
     if (physicalDevice == VK_NULL_HANDLE) return true;
-    if (physicalDevice != (VkPhysicalDevice)&g_device) return false;
-    if (g_device.instance_object_id == 0) return false;
-    if (out_instance_object_id) *out_instance_object_id = g_device.instance_object_id;
+    if (!physical_device_handle_resolve(physicalDevice, &physical)) return false;
+    if (!physical || physical->instance_object_id == 0) return false;
+    if (out_instance_object_id) *out_instance_object_id = physical->instance_object_id;
     return true;
 }
 
@@ -20689,7 +20749,9 @@ static VkResult unsupported_device_group_request_result(const char *reason) {
     return VK_ERROR_INITIALIZATION_FAILED;
 }
 
-static VkResult validate_device_group_device_create_info(const VkDeviceGroupDeviceCreateInfo *p) {
+static VkResult validate_device_group_device_create_info(
+        const VkDeviceGroupDeviceCreateInfo *p,
+        VkPhysicalDevice parentPhysicalDevice) {
     if (!p) return VK_SUCCESS;
     if (p->physicalDeviceCount == 0) return VK_SUCCESS;
     if (p->physicalDeviceCount != 1) {
@@ -20698,13 +20760,15 @@ static VkResult validate_device_group_device_create_info(const VkDeviceGroupDevi
     if (!p->pPhysicalDevices) {
         return unsupported_device_group_request_result("pPhysicalDevices is null for a non-empty device group");
     }
-    if (p->pPhysicalDevices[0] != (VkPhysicalDevice)&g_device) {
-        return unsupported_device_group_request_result("requested physical device is not the advertised bridge device");
+    if (p->pPhysicalDevices[0] != parentPhysicalDevice) {
+        return unsupported_device_group_request_result("requested physical device does not match the parent physical device");
     }
     return VK_SUCCESS;
 }
 
-static VkResult validate_device_feature_requests(const VkDeviceCreateInfo *pCreateInfo) {
+static VkResult validate_device_feature_requests_for_physical(
+        const VkDeviceCreateInfo *pCreateInfo,
+        VkPhysicalDevice parentPhysicalDevice) {
     if (!pCreateInfo) return VK_ERROR_INITIALIZATION_FAILED;
     const char *unsupported_feature_name = NULL;
     if (!base_feature_request_supported(pCreateInfo->pEnabledFeatures, &unsupported_feature_name)) {
@@ -21029,7 +21093,7 @@ static VkResult validate_device_feature_requests(const VkDeviceCreateInfo *pCrea
                 break;
 #endif
             case VK_STRUCTURE_TYPE_DEVICE_GROUP_DEVICE_CREATE_INFO: {
-                VkResult group_rc = validate_device_group_device_create_info((const VkDeviceGroupDeviceCreateInfo *)node);
+                VkResult group_rc = validate_device_group_device_create_info((const VkDeviceGroupDeviceCreateInfo *)node, parentPhysicalDevice);
                 if (group_rc != VK_SUCCESS) return group_rc;
                 supported = true;
                 break;
@@ -21252,6 +21316,14 @@ static bool device_create_info_extension_enabled(
         if (enabled && strcmp(enabled, name) == 0) return true;
     }
     return false;
+}
+
+
+#if defined(__GNUC__)
+__attribute__((unused))
+#endif
+static VkResult validate_device_feature_requests(const VkDeviceCreateInfo *pCreateInfo) {
+    return validate_device_feature_requests_for_physical(pCreateInfo, (VkPhysicalDevice)&g_device);
 }
 
 static uint64_t requested_feature_mask_from_device_create_info(
@@ -21804,6 +21876,7 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyInstance(
 #endif
     PdockerVkInstance *pdocker_instance = instance_unregister(instance);
     if (!pdocker_instance) return;
+    physical_devices_unregister_for_instance(pdocker_instance->object_id);
     free(pdocker_instance);
 }
 
@@ -21812,10 +21885,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumeratePhysicalDevices(
         uint32_t *pPhysicalDeviceCount,
         VkPhysicalDevice *pPhysicalDevices) {
     PdockerVkInstance *pdocker_instance = NULL;
-    if (instance_handle_resolve(instance, &pdocker_instance) &&
-        pdocker_instance->object_id != 0) {
-        g_device.instance_object_id = pdocker_instance->object_id;
-    } else if (instance != VK_NULL_HANDLE) {
+    if (instance != VK_NULL_HANDLE && !instance_handle_resolve(instance, &pdocker_instance)) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
     if (!pPhysicalDeviceCount) return VK_ERROR_INITIALIZATION_FAILED;
@@ -21824,7 +21894,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumeratePhysicalDevices(
         return VK_SUCCESS;
     }
     if (*pPhysicalDeviceCount < 1) return VK_INCOMPLETE;
-    pPhysicalDevices[0] = (VkPhysicalDevice)&g_device;
+    PdockerVkPhysicalDevice *physical = physical_device_for_instance(pdocker_instance);
+    if (!physical) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    pPhysicalDevices[0] = (VkPhysicalDevice)physical;
     *pPhysicalDeviceCount = 1;
     return VK_SUCCESS;
 }
@@ -21834,10 +21906,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumeratePhysicalDeviceGroups(
         uint32_t *pPhysicalDeviceGroupCount,
         VkPhysicalDeviceGroupProperties *pPhysicalDeviceGroupProperties) {
     PdockerVkInstance *pdocker_instance = NULL;
-    if (instance_handle_resolve(instance, &pdocker_instance) &&
-        pdocker_instance->object_id != 0) {
-        g_device.instance_object_id = pdocker_instance->object_id;
-    } else if (instance != VK_NULL_HANDLE) {
+    if (instance != VK_NULL_HANDLE && !instance_handle_resolve(instance, &pdocker_instance)) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
     if (!pPhysicalDeviceGroupCount) return VK_ERROR_INITIALIZATION_FAILED;
@@ -21846,12 +21915,14 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumeratePhysicalDeviceGroups(
         return VK_SUCCESS;
     }
     if (*pPhysicalDeviceGroupCount < 1) return VK_INCOMPLETE;
+    PdockerVkPhysicalDevice *physical = physical_device_for_instance(pdocker_instance);
+    if (!physical) return VK_ERROR_OUT_OF_HOST_MEMORY;
     PdockerVkStructHeader header = read_vk_struct_header(&pPhysicalDeviceGroupProperties[0]);
     zero_vk_out_struct_preserve_chain(&pPhysicalDeviceGroupProperties[0],
                                       sizeof(pPhysicalDeviceGroupProperties[0]),
                                       header);
     pPhysicalDeviceGroupProperties[0].physicalDeviceCount = 1;
-    pPhysicalDeviceGroupProperties[0].physicalDevices[0] = (VkPhysicalDevice)&g_device;
+    pPhysicalDeviceGroupProperties[0].physicalDevices[0] = (VkPhysicalDevice)physical;
     pPhysicalDeviceGroupProperties[0].subsetAllocation = VK_FALSE;
     *pPhysicalDeviceGroupCount = 1;
     return VK_SUCCESS;
@@ -25279,7 +25350,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
     (void)pAllocator;
     if (!pDevice) return VK_ERROR_INITIALIZATION_FAILED;
     *pDevice = VK_NULL_HANDLE;
-    if (physicalDevice != (VkPhysicalDevice)&g_device) return VK_ERROR_INITIALIZATION_FAILED;
+    PdockerVkPhysicalDevice *physical = NULL;
+    if (!physical_device_handle_resolve(physicalDevice, &physical)) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
     if (!pCreateInfo || pCreateInfo->sType != VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO) {
         trace_icd_runtime_failure("create-device-create-info-invalid", VK_ERROR_INITIALIZATION_FAILED);
         return VK_ERROR_INITIALIZATION_FAILED;
@@ -25289,7 +25363,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
     if (extension_rc != VK_SUCCESS) return extension_rc;
     VkResult queue_rc = validate_device_queue_create_infos(pCreateInfo);
     if (queue_rc != VK_SUCCESS) return queue_rc;
-    VkResult feature_rc = validate_device_feature_requests(pCreateInfo);
+    VkResult feature_rc = validate_device_feature_requests_for_physical(pCreateInfo, physicalDevice);
     if (feature_rc != VK_SUCCESS) return feature_rc;
     uint64_t requested_feature_mask = requested_feature_mask_from_device_create_info(pCreateInfo);
     uint64_t enabled_extension_mask = enabled_device_extension_mask_from_create_info(pCreateInfo);
@@ -25316,8 +25390,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
     PdockerVkDevice *device = calloc(1, sizeof(*device));
     if (!device) return VK_ERROR_OUT_OF_HOST_MEMORY;
     device->object_id = next_vulkan_object_generation();
-    device->instance_object_id = g_device.instance_object_id;
-    device->physical_device_object_id = g_device.object_id;
+    device->instance_object_id = physical->instance_object_id;
+    device->physical_device_object_id = physical->object_id;
     g_queue.object_id = next_vulkan_object_generation();
     g_queue.instance_object_id = device->instance_object_id;
     g_queue.physical_device_object_id = device->physical_device_object_id;

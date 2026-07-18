@@ -7700,11 +7700,13 @@ class GpuAbiContractTest(unittest.TestCase):
             "uint64_t physical_device_object_id;",
             "uint64_t device_object_id;",
             "static bool current_vulkan_dispatch_identity_ids(",
+            "static PdockerVkPhysicalDevice *g_physical_devices;",
+            "physical_device_handle_resolve(",
             "g_queue.instance_object_id",
             "g_queue.physical_device_object_id",
             "g_queue.device_object_id",
-            "device->instance_object_id = g_device.instance_object_id;",
-            "device->physical_device_object_id = g_device.object_id;",
+            "device->instance_object_id = physical->instance_object_id;",
+            "device->physical_device_object_id = physical->object_id;",
             "g_queue.device_object_id = pdocker_device->object_id;",
         ]:
             self.assertIn(marker, icd)
@@ -8730,7 +8732,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VkPhysicalDeviceDynamicRenderingLocalReadFeatures", features_body)
         self.assertIn("p->dynamicRenderingLocalRead = VK_FALSE;", features_body)
 
-        validate_body = c_function_body(icd, "validate_device_feature_requests")
+        validate_body = c_function_body(icd, "validate_device_feature_requests_for_physical")
         self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES", validate_body)
         self.assertIn("supported = !p->dynamicRenderingLocalRead;", validate_body)
         self.assertIn("unsupported_feature_name = \"dynamicRenderingLocalRead\"", validate_body)
@@ -8764,7 +8766,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("p->copySrcLayoutCount = 0;", properties_body)
         self.assertIn("p->copyDstLayoutCount = 0;", properties_body)
 
-        validate_body = c_function_body(icd, "validate_device_feature_requests")
+        validate_body = c_function_body(icd, "validate_device_feature_requests_for_physical")
         self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_IMAGE_COPY_FEATURES", validate_body)
         self.assertIn("supported = !p->hostImageCopy;", validate_body)
 
@@ -8815,7 +8817,7 @@ class GpuAbiContractTest(unittest.TestCase):
 
         features_body = c_function_body(icd, "fill_pnext_features")
         self.assertIn("VkPhysicalDeviceSamplerYcbcrConversionFeatures", features_body)
-        validate_body = c_function_body(icd, "validate_device_feature_requests")
+        validate_body = c_function_body(icd, "validate_device_feature_requests_for_physical")
         self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES", validate_body)
         self.assertIn("supported = !p->samplerYcbcrConversion;", validate_body)
 
@@ -8895,7 +8897,7 @@ class GpuAbiContractTest(unittest.TestCase):
 
         features_body = c_function_body(icd, "fill_pnext_features")
         self.assertIn("VkPhysicalDeviceBufferDeviceAddressFeatures", features_body)
-        validate_body = c_function_body(icd, "validate_device_feature_requests")
+        validate_body = c_function_body(icd, "validate_device_feature_requests_for_physical")
         self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES", validate_body)
         self.assertIn("!p->bufferDeviceAddress && !p->bufferDeviceAddressCaptureReplay && !p->bufferDeviceAddressMultiDevice", validate_body)
 
@@ -8932,7 +8934,7 @@ class GpuAbiContractTest(unittest.TestCase):
         features_body = c_function_body(icd, "fill_pnext_features")
         self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES_EXT", features_body)
         self.assertIn("VkPhysicalDeviceBufferDeviceAddressFeaturesEXT", features_body)
-        validate_body = c_function_body(icd, "validate_device_feature_requests")
+        validate_body = c_function_body(icd, "validate_device_feature_requests_for_physical")
         self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES_EXT", validate_body)
         self.assertIn('unsupported_feature_name = "bufferDeviceAddressEXT"', validate_body)
 
@@ -8968,7 +8970,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("flags2_info->flags != 0", feedback_body)
         self.assertIn("pipeline-create-flags2-nonzero", feedback_body)
 
-        validate_body = c_function_body(icd, "validate_device_feature_requests")
+        validate_body = c_function_body(icd, "validate_device_feature_requests_for_physical")
         self.assertIn("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_5_FEATURES", validate_body)
         self.assertIn("supported = !p->maintenance5;", validate_body)
         self.assertIn("unsupported_feature_name = \"maintenance5\"", validate_body)
@@ -8988,7 +8990,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("p->dynamicRendering = advertised_dynamic_rendering();", vulkan13_feature_block)
         self.assertNotIn("p->privateData = VK_TRUE", vulkan13_feature_block)
 
-        validate_body = c_function_body(icd, "validate_device_feature_requests")
+        validate_body = c_function_body(icd, "validate_device_feature_requests_for_physical")
         vulkan13_block = validate_body.split("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES", 1)[1].split("#endif", 1)[0]
         for marker in [
             "!p->robustImageAccess",
@@ -9024,7 +9026,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("p->maintenance5 =", vulkan14_feature_block)
         self.assertNotIn("p->dynamicRenderingLocalRead =", vulkan14_feature_block)
 
-        validate_body = c_function_body(icd, "validate_device_feature_requests")
+        validate_body = c_function_body(icd, "validate_device_feature_requests_for_physical")
         vulkan14_block = validate_body.split("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES", 1)[1].split("#endif", 1)[0]
         for marker in [
             "!p->globalPriorityQuery",
@@ -10111,7 +10113,7 @@ class GpuAbiContractTest(unittest.TestCase):
         advertised_mask_body = c_function_body(icd, "advertised_feature_mask")
         self.assertIn("mask |= PDOCKER_VK_FEATURE_HOST_QUERY_RESET;", advertised_mask_body)
 
-        validate_body = c_function_body(icd, "validate_device_feature_requests")
+        validate_body = c_function_body(icd, "validate_device_feature_requests_for_physical")
         host_query_request_segment = validate_body.split("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES", 1)[1].split("break;", 1)[0]
         self.assertIn("supported = true;", host_query_request_segment)
         self.assertNotIn("supported = !p->hostQueryReset", host_query_request_segment)
@@ -10568,7 +10570,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("ADD_DEVICE_EXTENSION(VK_EXT_PIPELINE_ROBUSTNESS_EXTENSION_NAME", collector_body)
         self.assertIn("VK_STRUCTURE_TYPE_DEVICE_PRIVATE_DATA_CREATE_INFO", icd)
         self.assertNotIn("p->privateDataSlotRequestCount == 0", icd)
-        self.assertIn("p->pPhysicalDevices[0] != (VkPhysicalDevice)&g_device", icd)
+        self.assertIn("p->pPhysicalDevices[0] != parentPhysicalDevice", icd)
         self.assertIn("VK_ERROR_FEATURE_NOT_PRESENT", icd)
         for marker in [
             "VK_KHR_MAINTENANCE_4_EXTENSION_NAME",
@@ -10693,8 +10695,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("pCreateInfo->sType != VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO", create_body)
         self.assertIn("create-device-create-info-invalid", create_body)
         self.assertIn("validate_device_extensions(pCreateInfo)", create_body)
-        self.assertIn("physicalDevice != (VkPhysicalDevice)&g_device", create_body)
-        self.assertIn("validate_device_feature_requests(pCreateInfo)", create_body)
+        self.assertIn("!physical_device_handle_resolve(physicalDevice, &physical)", create_body)
+        self.assertIn("validate_device_feature_requests_for_physical(pCreateInfo, physicalDevice)", create_body)
         self.assertIn("if (feature_rc != VK_SUCCESS) return feature_rc;", create_body)
         self.assertIn("requested_feature_mask_from_device_create_info(pCreateInfo)", create_body)
         self.assertIn("advertised_feature_mask()", create_body)
@@ -10975,7 +10977,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("*pPhysicalDeviceGroupCount = 1;", group_body)
         self.assertIn("zero_vk_out_struct_preserve_chain(&pPhysicalDeviceGroupProperties[0]", group_body)
         self.assertIn("physicalDeviceCount = 1", group_body)
-        self.assertIn("physicalDevices[0] = (VkPhysicalDevice)&g_device", group_body)
+        self.assertIn("physicalDevices[0] = (VkPhysicalDevice)physical", group_body)
         self.assertIn("subsetAllocation = VK_FALSE", group_body)
         self.assertIn("return VK_INCOMPLETE", group_body)
         self.assertIn("*pPeerMemoryFeatures = 0;", peer_body)
@@ -12547,7 +12549,7 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, collector_body)
 
-        create_device_body = c_function_body(icd, "validate_device_feature_requests")
+        create_device_body = c_function_body(icd, "validate_device_feature_requests_for_physical")
         for marker in [
             "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUSTOM_BORDER_COLOR_FEATURES_EXT",
             "!p->customBorderColors && !p->customBorderColorWithoutFormat",
@@ -12686,7 +12688,7 @@ class GpuAbiContractTest(unittest.TestCase):
             vulkan12_supported_body,
         )
 
-        create_device_body = c_function_body(icd, "validate_device_feature_requests")
+        create_device_body = c_function_body(icd, "validate_device_feature_requests_for_physical")
         self.assertIn("advertised_separate_depth_stencil_layouts()", create_device_body)
         self.assertIn('unsupported_feature_name = "separateDepthStencilLayouts";', create_device_body)
 
