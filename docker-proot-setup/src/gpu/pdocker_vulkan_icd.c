@@ -4893,25 +4893,51 @@ static bool descriptor_binding_has_bound_object(const PdockerVkDescriptorBinding
 static bool copy_rendering_attachment_state(
         PdockerVkRenderingAttachmentState *dst,
         const VkRenderingAttachmentInfo *src,
-        uint64_t owner_device_id) {
-    if (!dst) return false;
+        uint64_t owner_device_id,
+        const char **failure_reason_out) {
+    if (failure_reason_out) *failure_reason_out = NULL;
+    if (!dst) {
+        if (failure_reason_out) *failure_reason_out = "dynamic-rendering-attachment-state-invalid";
+        return false;
+    }
     memset(dst, 0, sizeof(*dst));
     if (!src) return true;
-    if (src->pNext) return false;
+    if (src->pNext) {
+        if (failure_reason_out) *failure_reason_out = "dynamic-rendering-attachment-pnext-unsupported";
+        return false;
+    }
     bool image_view_owner_mismatch = false;
     PdockerVkImageView *image_view = image_view_handle_lookup_for_owner_id_checked(
         owner_device_id, src->imageView, &image_view_owner_mismatch);
-    if (image_view_owner_mismatch ||
-        (src->imageView != VK_NULL_HANDLE && !image_view)) return false;
+    if (image_view_owner_mismatch) {
+        if (failure_reason_out) *failure_reason_out = "dynamic-rendering-attachment-cross-device";
+        return false;
+    }
+    if (src->imageView != VK_NULL_HANDLE && !image_view) {
+        if (failure_reason_out) *failure_reason_out = "dynamic-rendering-attachment-image-view-invalid";
+        return false;
+    }
     PdockerVkImageViewSnapshot image_view_snapshot;
-    if (!snapshot_image_view_state(&image_view_snapshot, image_view)) return false;
+    if (!snapshot_image_view_state(&image_view_snapshot, image_view)) {
+        if (failure_reason_out) *failure_reason_out = "dynamic-rendering-attachment-snapshot-invalid";
+        return false;
+    }
     bool resolve_image_view_owner_mismatch = false;
     PdockerVkImageView *resolve_image_view = image_view_handle_lookup_for_owner_id_checked(
         owner_device_id, src->resolveImageView, &resolve_image_view_owner_mismatch);
-    if (resolve_image_view_owner_mismatch ||
-        (src->resolveImageView != VK_NULL_HANDLE && !resolve_image_view)) return false;
+    if (resolve_image_view_owner_mismatch) {
+        if (failure_reason_out) *failure_reason_out = "dynamic-rendering-attachment-cross-device";
+        return false;
+    }
+    if (src->resolveImageView != VK_NULL_HANDLE && !resolve_image_view) {
+        if (failure_reason_out) *failure_reason_out = "dynamic-rendering-attachment-resolve-image-view-invalid";
+        return false;
+    }
     PdockerVkImageViewSnapshot resolve_image_view_snapshot;
-    if (!snapshot_image_view_state(&resolve_image_view_snapshot, resolve_image_view)) return false;
+    if (!snapshot_image_view_state(&resolve_image_view_snapshot, resolve_image_view)) {
+        if (failure_reason_out) *failure_reason_out = "dynamic-rendering-attachment-snapshot-invalid";
+        return false;
+    }
     dst->image_view = image_view;
     dst->image_view_snapshot = image_view_snapshot;
     dst->image_layout = src->imageLayout;
@@ -29746,6 +29772,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBeginRendering(
         ? pRenderingInfo->colorAttachmentCount
         : 0;
     bool attachment_copy_failed = false;
+    const char *attachment_failure_reason = NULL;
     if (pRenderingInfo) {
         if (!rendering_info_pnext_noop(pRenderingInfo)) {
             cmd->graphics_unsupported = true;
@@ -29768,25 +29795,40 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBeginRendering(
                                                  pRenderingInfo->pColorAttachments
                                                      ? &pRenderingInfo->pColorAttachments[i]
                                                      : NULL,
-                                                 cmd->owner_device_id)) {
+                                                 cmd->owner_device_id,
+                                                 &attachment_failure_reason)) {
                 attachment_copy_failed = true;
                 cmd->graphics_unsupported = true;
-                command_buffer_mark_recording_failed(cmd, "dynamic-rendering-attachment-cross-device");
+                if (!cmd->recording_failed) {
+                    command_buffer_mark_recording_failed(
+                        cmd, attachment_failure_reason ? attachment_failure_reason :
+                             "dynamic-rendering-attachment-invalid");
+                }
             }
         }
         if (!copy_rendering_attachment_state(&cmd->active_depth_attachment,
                                              pRenderingInfo->pDepthAttachment,
-                                             cmd->owner_device_id)) {
+                                             cmd->owner_device_id,
+                                             &attachment_failure_reason)) {
             attachment_copy_failed = true;
             cmd->graphics_unsupported = true;
-            command_buffer_mark_recording_failed(cmd, "dynamic-rendering-attachment-cross-device");
+            if (!cmd->recording_failed) {
+                command_buffer_mark_recording_failed(
+                    cmd, attachment_failure_reason ? attachment_failure_reason :
+                         "dynamic-rendering-attachment-invalid");
+            }
         }
         if (!copy_rendering_attachment_state(&cmd->active_stencil_attachment,
                                              pRenderingInfo->pStencilAttachment,
-                                             cmd->owner_device_id)) {
+                                             cmd->owner_device_id,
+                                             &attachment_failure_reason)) {
             attachment_copy_failed = true;
             cmd->graphics_unsupported = true;
-            command_buffer_mark_recording_failed(cmd, "dynamic-rendering-attachment-cross-device");
+            if (!cmd->recording_failed) {
+                command_buffer_mark_recording_failed(
+                    cmd, attachment_failure_reason ? attachment_failure_reason :
+                         "dynamic-rendering-attachment-invalid");
+            }
         }
     } else {
         memset(&cmd->active_render_area, 0, sizeof(cmd->active_render_area));

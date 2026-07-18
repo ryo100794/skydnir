@@ -2098,14 +2098,24 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, icd)
 
+        self.assertIn("static bool copy_rendering_attachment_state(", icd)
+        self.assertIn("const char **failure_reason_out", icd)
         copy_attachment_body = c_function_body(icd, "copy_rendering_attachment_state")
         image_view_owner_body = c_function_body(icd, "image_view_handle_lookup_for_owner_id_checked")
         self.assertIn("owner_device_ids_match_or_unowned(owner_device_id, resolved->owner_device_id)", image_view_owner_body)
         self.assertIn("if (owner_mismatch_out) *owner_mismatch_out = true;\n        return NULL;", image_view_owner_body)
         self.assertIn("image_view_handle_lookup_for_owner_id_checked(", copy_attachment_body)
         self.assertIn("PdockerVkImageViewSnapshot image_view_snapshot;", copy_attachment_body)
-        self.assertIn("image_view_owner_mismatch ||", copy_attachment_body)
-        self.assertIn("resolve_image_view_owner_mismatch ||", copy_attachment_body)
+        for reason in [
+            "dynamic-rendering-attachment-cross-device",
+            "dynamic-rendering-attachment-pnext-unsupported",
+            "dynamic-rendering-attachment-image-view-invalid",
+            "dynamic-rendering-attachment-resolve-image-view-invalid",
+            "dynamic-rendering-attachment-snapshot-invalid",
+        ]:
+            self.assertIn(reason, copy_attachment_body)
+        self.assertIn("if (image_view_owner_mismatch)", copy_attachment_body)
+        self.assertIn("if (resolve_image_view_owner_mismatch)", copy_attachment_body)
         self.assertIn("dst->image_view = image_view;", copy_attachment_body)
         self.assertIn("dst->image_view_snapshot = image_view_snapshot;", copy_attachment_body)
         self.assertLess(copy_attachment_body.index("image_view_handle_lookup_for_owner_id_checked("),
@@ -2178,7 +2188,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "VKAPI_ATTR void VKAPI_CALL vkCmdBeginRenderPass2", 1
         )[1].split("static void record_vertex_buffer_bindings", 1)[0]
         for marker in [
-            "if (src->pNext) return false;",
+            "if (src->pNext) {",
+            "dynamic-rendering-attachment-pnext-unsupported",
             "if (!src) return true;",
         ]:
             self.assertIn(marker, copy_body)
@@ -2188,6 +2199,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "if (!copy_rendering_attachment_state(&cmd->active_color_attachments[i]",
             "if (!copy_rendering_attachment_state(&cmd->active_depth_attachment",
             "if (!copy_rendering_attachment_state(&cmd->active_stencil_attachment",
+            "if (!cmd->recording_failed)",
+            "attachment_failure_reason ? attachment_failure_reason",
             "bool attachment_copy_failed = false;",
             "attachment_copy_failed = true;",
             "if (attachment_copy_failed)",

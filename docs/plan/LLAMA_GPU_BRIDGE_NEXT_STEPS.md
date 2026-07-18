@@ -10,6 +10,25 @@ llama.cpp itself remains unmodified.
 ## Current Ground Truth
 
 
+### 2026-07-18 CPU/static Vulkan dynamic-rendering attachment reason lane
+
+Dynamic-rendering attachment capture now returns precise failure reasons from
+`copy_rendering_attachment_state` instead of collapsing every attachment-copy
+failure into a cross-device label. Real owner mismatches still report
+`dynamic-rendering-attachment-cross-device`; invalid views, unsupported pNext,
+and snapshot failures report separate reasons. The caller keeps the first
+recording failure reason and avoids later attachment failures overwriting it.
+
+This is CPU/static Vulkan pass-through hardening only.  It does not change
+llama.cpp, Dockerfiles, models, prompts, shader bytes, or executor arithmetic.
+
+Evidence: `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`,
+`tests.test_gpu_abi_contract`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_device_owner_rejects_cross_device_metadata_render_wsi_handles`,
+`scripts/build-gpu-shim.sh`, `scripts/verify-native-payloads.py`,
+`./gradlew :app:assembleDebug`.
+
+
 ### 2026-07-18 CPU/static Vulkan dynamic-rendering attachment owner lane
 
 Dynamic-rendering attachment capture now resolves image views through an
