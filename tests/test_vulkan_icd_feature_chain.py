@@ -441,6 +441,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 index_buffer.size = 64;
                 index_buffer.usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
                 index_buffer.memory = &index_memory;
+                buffer_register(&index_buffer);
                 PdockerVkCommandBuffer cmd;
                 memset(&cmd, 0, sizeof(cmd));
                 vkCmdBindIndexBuffer2KHR((VkCommandBuffer)&cmd,
@@ -2453,6 +2454,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 buffer.size = 1024;
                 buffer.memory = &memory;
                 buffer.memory_offset = 0;
+                buffer_register(&buffer);
 
                 memset(&cmd, 0, sizeof(cmd));
                 vkCmdPipelineBarrier2((VkCommandBuffer)&cmd, NULL);
@@ -4309,6 +4311,120 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     fprintf(stderr, "handleType!=0 external image query returned %d\\n", rc);
                     return 9;
                 }}
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
+    def test_buffer_live_handles_fail_closed_after_destroy(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            int main(void) {{
+                VkBufferCreateInfo buffer_info;
+                memset(&buffer_info, 0, sizeof(buffer_info));
+                buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+                buffer_info.size = 4096;
+                buffer_info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                    VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                    VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                    VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT;
+                buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+                VkBuffer buffer = VK_NULL_HANDLE;
+                if (vkCreateBuffer(VK_NULL_HANDLE, &buffer_info, NULL, &buffer) != VK_SUCCESS ||
+                    buffer == VK_NULL_HANDLE) {{
+                    fprintf(stderr, "buffer create failed\\n");
+                    return 1;
+                }}
+                VkMemoryRequirements req;
+                memset(&req, 0, sizeof(req));
+                vkGetBufferMemoryRequirements(VK_NULL_HANDLE, buffer, &req);
+                if (req.size == 0 || req.alignment == 0) {{
+                    fprintf(stderr, "live buffer requirements were empty\\n");
+                    return 2;
+                }}
+
+                VkMemoryAllocateInfo alloc;
+                memset(&alloc, 0, sizeof(alloc));
+                alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+                alloc.allocationSize = req.size;
+                alloc.memoryTypeIndex = 1;
+                VkDeviceMemory memory = VK_NULL_HANDLE;
+                if (vkAllocateMemory(VK_NULL_HANDLE, &alloc, NULL, &memory) != VK_SUCCESS ||
+                    memory == VK_NULL_HANDLE) {{
+                    fprintf(stderr, "memory allocation failed\\n");
+                    return 3;
+                }}
+                if (vkBindBufferMemory(VK_NULL_HANDLE, buffer, memory, 0) != VK_SUCCESS) {{
+                    fprintf(stderr, "live buffer bind failed\\n");
+                    return 4;
+                }}
+
+                vkDestroyBuffer(VK_NULL_HANDLE, buffer, NULL);
+                memset(&req, 0x7f, sizeof(req));
+                vkGetBufferMemoryRequirements(VK_NULL_HANDLE, buffer, &req);
+                if (req.size != 0) {{
+                    fprintf(stderr, "stale buffer requirements exposed size=%llu\\n",
+                            (unsigned long long)req.size);
+                    return 5;
+                }}
+                if (vkBindBufferMemory(VK_NULL_HANDLE, buffer, memory, 0) == VK_SUCCESS) {{
+                    fprintf(stderr, "stale buffer bind succeeded\\n");
+                    return 6;
+                }}
+
+                VkBufferViewCreateInfo view_info;
+                memset(&view_info, 0, sizeof(view_info));
+                view_info.sType = VK_STRUCTURE_TYPE_BUFFER_VIEW_CREATE_INFO;
+                view_info.buffer = buffer;
+                view_info.format = VK_FORMAT_R8_UINT;
+                view_info.range = VK_WHOLE_SIZE;
+                VkBufferView view = VK_NULL_HANDLE;
+                if (vkCreateBufferView(VK_NULL_HANDLE, &view_info, NULL, &view) == VK_SUCCESS ||
+                    view != VK_NULL_HANDLE) {{
+                    fprintf(stderr, "stale buffer view creation succeeded\\n");
+                    return 7;
+                }}
+
+                VkMemoryDedicatedAllocateInfo dedicated;
+                memset(&dedicated, 0, sizeof(dedicated));
+                dedicated.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO;
+                dedicated.buffer = buffer;
+                alloc.pNext = &dedicated;
+                VkDeviceMemory dedicated_memory = VK_NULL_HANDLE;
+                if (vkAllocateMemory(VK_NULL_HANDLE, &alloc, NULL, &dedicated_memory) == VK_SUCCESS ||
+                    dedicated_memory != VK_NULL_HANDLE) {{
+                    fprintf(stderr, "dedicated allocation accepted stale buffer\\n");
+                    return 8;
+                }}
+
+                PdockerVkCommandBuffer cmd;
+                memset(&cmd, 0, sizeof(cmd));
+                vkCmdBindIndexBuffer((VkCommandBuffer)&cmd, buffer, 0, VK_INDEX_TYPE_UINT16);
+                if (!cmd.recording_failed ||
+                    strcmp(cmd.recording_failure_reason, "graphics-index-buffer-range-invalid") != 0) {{
+                    fprintf(stderr, "stale index buffer did not fail closed: %s\\n",
+                            cmd.recording_failure_reason ? cmd.recording_failure_reason : "<none>");
+                    return 9;
+                }}
+                command_buffer_destroy_record_vectors(&cmd);
+
+                VkBuffer fake_buffer = (VkBuffer)(uintptr_t)0x1234u;
+                vkDestroyBuffer(VK_NULL_HANDLE, fake_buffer, NULL);
+                if (vkBindBufferMemory(VK_NULL_HANDLE, fake_buffer, memory, 0) == VK_SUCCESS) {{
+                    fprintf(stderr, "fake buffer bind succeeded\\n");
+                    return 10;
+                }}
+                vkFreeMemory(VK_NULL_HANDLE, memory, NULL);
+                vkDestroyBuffer(VK_NULL_HANDLE, buffer, NULL);
                 return 0;
             }}
             """

@@ -1419,7 +1419,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "cmd->index_buffer_bound",
             "PdockerVkVertexBindingState",
             "record_vertex_buffer_bindings",
-            "binding->buffer = pdocker_vk_buffer_from_handle(pBuffers[i]);",
+            "binding->buffer = buffer_handle_lookup(pBuffers[i]);",
             "binding->offset = pOffsets[i];",
             "binding->size = pSizes ? pSizes[i] : VK_WHOLE_SIZE;",
             "binding->stride = pStrides ? pStrides[i] : 0;",
@@ -11345,7 +11345,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO", alloc_validator)
         self.assertIn("has_image && has_buffer", alloc_validator)
         self.assertIn("pdocker_vk_image_from_handle(info->image)", alloc_validator)
-        self.assertIn("pdocker_vk_buffer_from_handle(info->buffer)", alloc_validator)
+        self.assertIn("buffer_handle_lookup(info->buffer)", alloc_validator)
         self.assertIn("VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO", alloc_validator)
         self.assertIn("info->flags != 0 || info->deviceMask > 1", alloc_validator)
         self.assertIn("VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO", alloc_validator)
@@ -11403,7 +11403,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("if (pInfo && pInfo->pNext)", device_image_req_body)
         self.assertIn("device-image-memory-requirements-pnext-unsupported", device_image_req_body)
         self.assertIn("memory_handle_resolve(memory, &m)", bind_buffer_body)
-        self.assertIn("if (!memory_handle_resolve(memory, &m) || !b) return VK_ERROR_INITIALIZATION_FAILED;", bind_buffer_body)
+        self.assertIn("if (!memory_handle_resolve(memory, &m) || !buffer_handle_resolve(buffer, &b)) return VK_ERROR_INITIALIZATION_FAILED;", bind_buffer_body)
 
 
     def test_vulkan_core_create_infos_reject_unsupported_pnext_and_flags(self):
@@ -12042,7 +12042,8 @@ class GpuAbiContractTest(unittest.TestCase):
 
         create_body = c_function_body(icd, "vkCreateBufferView")
         destroy_body = c_function_body(icd, "vkDestroyBufferView")
-        self.assertIn("PdockerVkBuffer *buffer = pdocker_vk_buffer_from_handle(pCreateInfo->buffer);", create_body)
+        self.assertIn("PdockerVkBuffer *buffer = NULL;", create_body)
+        self.assertIn("buffer_handle_resolve(pCreateInfo->buffer, &buffer)", create_body)
         self.assertIn("VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT", create_body)
         self.assertIn("VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT", create_body)
         self.assertIn("size_t texel_size = conservative_format_bytes_per_pixel(pCreateInfo->format);", create_body)
@@ -12794,6 +12795,43 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("size > (VkDeviceSize)m->size - offset", map_body)
         self.assertIn("return VK_ERROR_MEMORY_MAP_FAILED;", map_body)
         self.assertNotIn("(void)size;", map_body)
+
+    def test_vulkan_buffer_api_validates_live_handles(self):
+        icd = VULKAN_ICD.read_text()
+        create_body = c_function_body(icd, "vkCreateBuffer")
+        destroy_body = c_function_body(icd, "vkDestroyBuffer")
+        requirements_body = c_function_body(icd, "vkGetBufferMemoryRequirements")
+        bind_body = c_function_body(icd, "vkBindBufferMemory")
+        update_descriptors_body = c_function_body(icd, "vkUpdateDescriptorSets")
+        free_memory_body = c_function_body(icd, "vkFreeMemory")
+        validate_body = icd.split("static bool validate_buffer_backing_range", 1)[1].split("static bool validate_buffer_byte_range", 1)[0]
+        for marker in [
+            "struct PdockerVkBuffer *next;",
+            "static PdockerVkBuffer *g_buffers;",
+            "static PdockerVkBuffer *g_retired_buffers;",
+            "buffer_register(PdockerVkBuffer *buffer)",
+            "buffer_unregister(VkBuffer buffer)",
+            "buffer_handle_resolve(VkBuffer buffer, PdockerVkBuffer **out_buffer)",
+            "buffer_handle_lookup(VkBuffer buffer)",
+            "buffer_detach_memory(const PdockerVkMemory *memory)",
+        ]:
+            self.assertIn(marker, icd)
+        self.assertIn("buffer_register(buffer);", create_body)
+        self.assertIn("buffer_retire(buffer_unregister(buffer));", destroy_body)
+        self.assertIn("buffer_handle_resolve(buffer, &b)", requirements_body)
+        self.assertIn("buffer_handle_resolve(buffer, &b)", bind_body)
+        self.assertIn("buffer_handle_lookup(w->pBufferInfo[j].buffer)", update_descriptors_body)
+        self.assertIn("buffer_detach_memory(m);", free_memory_body)
+        self.assertIn("buffer->destroyed", validate_body)
+        self.assertNotIn("free(pdocker_vk_buffer_from_handle(buffer))", destroy_body)
+        raw_sites = [line for line in icd.splitlines() if "pdocker_vk_buffer_from_handle(" in line]
+        self.assertEqual(
+            raw_sites,
+            [
+                "    PdockerVkBuffer *target = pdocker_vk_buffer_from_handle(buffer);",
+                "    PdockerVkBuffer *target = pdocker_vk_buffer_from_handle(buffer);",
+            ],
+        )
 
     def test_vulkan_storage_input_output16_is_reflected_in_feature_masks(self):
         icd = VULKAN_ICD.read_text()

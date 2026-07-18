@@ -10,6 +10,35 @@ llama.cpp itself remains unmodified.
 ## Current Ground Truth
 
 
+### 2026-07-18 CPU/static Vulkan buffer live-handle lane
+
+`VkBuffer` public API entrances now resolve through a live registry instead of
+trusting raw pointer-like handle values from the application.  `vkCreateBuffer`
+registers the local buffer object, `vkDestroyBuffer` unregisters and retires it
+into a soft-destroy quarantine instead of freeing immediately, and public buffer
+API paths fail closed for fake or stale handles before dereferencing buffer
+fields.  The hardened entrances include buffer requirements, buffer views,
+dedicated-memory pNext validation, bind memory, descriptor buffer writes, vertex
+and index binding, indirect dispatch/draw buffers, buffer/image copies,
+fill/update, buffer barriers, and query-result copy destinations.
+
+`vkFreeMemory` now detaches live and retired buffers from the memory object before
+unmapping/freeing the allocation, preventing stale buffer snapshots from holding
+a freed `PdockerVkMemory *`.  Buffer backing/range helpers reject retired buffers.
+This is deliberately a generic Vulkan pass-through safety lane; it does not
+change llama.cpp, Dockerfiles, models, prompts, or shader bytes.
+
+Current scope note: `VkBuffer` is protected by a registry plus quarantine.
+`VkBufferView` still has its own object-lifetime lane pending; buffer views that
+point at retired buffers fail snapshot/range validation because the parent
+buffer is not freed, but stale buffer-view handles themselves are not yet
+claimed as fully registry-hardened.
+
+Evidence: `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`,
+`tests.test_gpu_abi_contract`, `tests.test_vulkan_icd_feature_chain`,
+`scripts/build-gpu-shim.sh`, `scripts/verify-native-payloads.py`.
+
+
 ### 2026-07-18 CPU/static Vulkan memory live-handle lane
 
 `VkDeviceMemory` now has a live registry used at public API boundaries.
