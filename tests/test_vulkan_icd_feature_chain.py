@@ -10,6 +10,39 @@ ROOT = Path(__file__).resolve().parents[1]
 ICD_SOURCE = ROOT / "docker-proot-setup" / "src" / "gpu" / "pdocker_vulkan_icd.c"
 
 
+COMMAND_BUFFER_STACK_TEST_HELPER = r"""
+static PdockerVkCommandPool g_test_command_pool_storage;
+
+static PdockerVkCommandPool *ensure_test_command_pool(void) {
+    VkCommandPool handle = pdocker_vk_command_pool_to_handle(&g_test_command_pool_storage);
+    PdockerVkCommandPool *pool = command_pool_handle_lookup(handle);
+    if (pool) return pool;
+    memset(&g_test_command_pool_storage, 0, sizeof(g_test_command_pool_storage));
+    command_pool_register(&g_test_command_pool_storage);
+    return &g_test_command_pool_storage;
+}
+
+static void reset_test_command_buffer(
+        PdockerVkCommandBuffer *cmd,
+        uint64_t requested_feature_mask,
+        uint64_t enabled_extension_mask) {
+    if (!cmd) return;
+    PdockerVkCommandBuffer *live = command_buffer_handle_lookup((VkCommandBuffer)cmd);
+    if (live) {
+        (void)command_buffer_unregister((VkCommandBuffer)cmd);
+        clear_recorded_command_ops(live);
+        command_buffer_destroy_record_vectors(live);
+        command_buffer_destroy_descriptor_states(live);
+    }
+    memset(cmd, 0, sizeof(*cmd));
+    set_loader_magic_value(cmd);
+    cmd->requested_feature_mask = requested_feature_mask;
+    cmd->enabled_extension_mask = enabled_extension_mask;
+    command_buffer_register(ensure_test_command_pool(), cmd);
+}
+"""
+
+
 @unittest.skipUnless(shutil.which("gcc"), "gcc is required for the ICD C contract harness")
 class VulkanIcdFeatureChainTest(unittest.TestCase):
     def compile_and_run(self, source: str) -> subprocess.CompletedProcess[str]:
@@ -323,6 +356,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
             #include <stdio.h>
             #include <string.h>
             #include "{ICD_SOURCE}"
+            {COMMAND_BUFFER_STACK_TEST_HELPER}
 
             static int extension_seen(
                     const VkExtensionProperties *extensions,
@@ -443,14 +477,14 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 index_buffer.memory = &index_memory;
                 buffer_register(&index_buffer);
                 PdockerVkCommandBuffer cmd;
-                memset(&cmd, 0, sizeof(cmd));
+                reset_test_command_buffer(&cmd, 0, 0);
                 vkCmdBindIndexBuffer2KHR((VkCommandBuffer)&cmd,
                                          pdocker_vk_buffer_to_handle(&index_buffer),
                                          0, 4, VK_INDEX_TYPE_UINT16);
                 if (!cmd.recording_failed ||
                     strcmp(cmd.recording_failure_reason, "graphics-index-buffer2-maintenance5-extension-disabled") != 0) return 46;
 
-                memset(&cmd, 0, sizeof(cmd));
+                reset_test_command_buffer(&cmd, 0, 0);
                 cmd.enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_5;
                 vkCmdBindIndexBuffer2KHR((VkCommandBuffer)&cmd,
                                          pdocker_vk_buffer_to_handle(&index_buffer),
@@ -1141,6 +1175,95 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+
+
+
+    def test_command_pool_and_buffer_handles_fail_closed_after_free_reset_destroy(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            int main(void) {{
+                VkCommandPoolCreateInfo pool_info;
+                memset(&pool_info, 0, sizeof(pool_info));
+                pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+                pool_info.queueFamilyIndex = 0;
+                pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+
+                VkCommandPool pool = VK_NULL_HANDLE;
+                if (vkCreateCommandPool(VK_NULL_HANDLE, &pool_info, NULL, &pool) != VK_SUCCESS) return 2;
+                PdockerVkCommandPool *tracked_pool = command_pool_handle_lookup(pool);
+                if (!tracked_pool) return 3;
+
+                VkCommandBufferAllocateInfo alloc_info;
+                memset(&alloc_info, 0, sizeof(alloc_info));
+                alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+                alloc_info.commandPool = pool;
+                alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+                alloc_info.commandBufferCount = 1;
+                VkCommandBuffer cmd = VK_NULL_HANDLE;
+                if (vkAllocateCommandBuffers(VK_NULL_HANDLE, &alloc_info, &cmd) != VK_SUCCESS) return 4;
+                PdockerVkCommandBuffer *tracked_cmd = command_buffer_handle_lookup(cmd);
+                if (!command_buffer_belongs_to_pool(tracked_cmd, tracked_pool)) return 5;
+                if (vkBeginCommandBuffer(cmd, NULL) != VK_SUCCESS) return 6;
+                if (vkEndCommandBuffer(cmd) != VK_SUCCESS) return 7;
+
+                VkCommandPool other_pool = VK_NULL_HANDLE;
+                if (vkCreateCommandPool(VK_NULL_HANDLE, &pool_info, NULL, &other_pool) != VK_SUCCESS) return 8;
+                vkFreeCommandBuffers(VK_NULL_HANDLE, other_pool, 1, &cmd);
+                if (!command_buffer_handle_lookup(cmd)) return 9;
+                vkDestroyCommandPool(VK_NULL_HANDLE, other_pool, NULL);
+                if (command_pool_handle_lookup(other_pool)) return 10;
+
+                vkFreeCommandBuffers(VK_NULL_HANDLE, pool, 1, &cmd);
+                if (command_buffer_handle_lookup(cmd)) return 11;
+                if (vkBeginCommandBuffer(cmd, NULL) != VK_ERROR_INITIALIZATION_FAILED) return 12;
+
+                VkCommandBuffer cmd2 = VK_NULL_HANDLE;
+                if (vkAllocateCommandBuffers(VK_NULL_HANDLE, &alloc_info, &cmd2) != VK_SUCCESS) return 13;
+                PdockerVkCommandBuffer *tracked_cmd2 = command_buffer_handle_lookup(cmd2);
+                if (!tracked_cmd2) return 14;
+                tracked_cmd2->compute_pipeline = (PdockerVkPipeline *)(uintptr_t)0x1u;
+                tracked_cmd2->pipeline = tracked_cmd2->compute_pipeline;
+                tracked_cmd2->has_dispatch = true;
+                tracked_cmd2->dispatch_x = 9;
+                tracked_cmd2->dispatch_y = 8;
+                tracked_cmd2->dispatch_z = 7;
+                if (vkResetCommandPool(VK_NULL_HANDLE, pool, VK_COMMAND_POOL_RESET_RELEASE_RESOURCES_BIT) != VK_SUCCESS) return 15;
+                tracked_cmd2 = command_buffer_handle_lookup(cmd2);
+                if (!tracked_cmd2) return 16;
+                if (tracked_cmd2->has_dispatch || tracked_cmd2->compute_pipeline ||
+                    tracked_cmd2->pipeline || tracked_cmd2->dispatch_x ||
+                    tracked_cmd2->dispatch_y || tracked_cmd2->dispatch_z) return 23;
+                if (vkBeginCommandBuffer(cmd2, NULL) != VK_SUCCESS) return 17;
+                if (vkEndCommandBuffer(cmd2) != VK_SUCCESS) return 18;
+
+                g_queue.object_id = 1;
+                g_queue.instance_object_id = 1;
+                g_queue.physical_device_object_id = 1;
+                g_queue.device_object_id = 1;
+                VkSubmitInfo submit;
+                memset(&submit, 0, sizeof(submit));
+                submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+                submit.commandBufferCount = 1;
+                submit.pCommandBuffers = &cmd;
+                if (vkQueueSubmit((VkQueue)&g_queue, 1, &submit, VK_NULL_HANDLE) != VK_ERROR_INITIALIZATION_FAILED) return 19;
+
+                vkDestroyCommandPool(VK_NULL_HANDLE, pool, NULL);
+                if (command_pool_handle_lookup(pool)) return 20;
+                if (command_buffer_handle_lookup(cmd2)) return 21;
+                if (vkBeginCommandBuffer(cmd2, NULL) != VK_ERROR_INITIALIZATION_FAILED) return 22;
+                vkDestroyCommandPool(VK_NULL_HANDLE, pool, NULL);
+                vkFreeCommandBuffers(VK_NULL_HANDLE, pool, 1, &cmd2);
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_maintenance1_extension_exposes_trim_command_pool_alias(self):
         source = textwrap.dedent(
@@ -2725,6 +2848,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
             #include <stdio.h>
             #include <string.h>
             #include "{ICD_SOURCE}"
+            {COMMAND_BUFFER_STACK_TEST_HELPER}
 
             static int reason_is(const PdockerVkCommandBuffer *cmd, const char *reason) {{
                 return cmd && cmd->recording_failed && cmd->recording_failure_reason &&
@@ -2817,12 +2941,12 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 buffer.memory_offset = 0;
                 buffer_register(&buffer);
 
-                memset(&cmd, 0, sizeof(cmd));
+                reset_test_command_buffer(&cmd, 0, 0);
                 vkCmdPipelineBarrier2((VkCommandBuffer)&cmd, NULL);
                 if (!reason_is(&cmd, "synchronization2-feature-disabled")) return 107;
                 if (cmd.command_op_count || cmd.graphics_command_op_count) return 108;
 
-                memset(&cmd, 0, sizeof(cmd));
+                reset_test_command_buffer(&cmd, 0, 0);
                 cmd.requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
                 vkCmdPipelineBarrier2((VkCommandBuffer)&cmd, NULL);
                 if (!reason_is(&cmd, "synchronization2-feature-disabled")) return 109;
@@ -2830,7 +2954,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 VkDependencyInfo dependency_info;
                 memset(&dependency_info, 0, sizeof(dependency_info));
                 dependency_info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-                memset(&cmd, 0, sizeof(cmd));
+                reset_test_command_buffer(&cmd, 0, 0);
                 cmd.requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
                 cmd.enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
                 vkCmdPipelineBarrier2((VkCommandBuffer)&cmd, &dependency_info);
@@ -2838,62 +2962,62 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 if (cmd.command_op_count == 0) return 111;
                 command_buffer_destroy_record_vectors(&cmd);
 
-                memset(&cmd, 0, sizeof(cmd));
+                reset_test_command_buffer(&cmd, 0, 0);
                 vkCmdSetEvent2((VkCommandBuffer)&cmd, pdocker_vk_event_to_handle(&event), NULL);
                 if (!reason_is(&cmd, "synchronization2-feature-disabled")) return 112;
-                memset(&cmd, 0, sizeof(cmd));
+                reset_test_command_buffer(&cmd, 0, 0);
                 vkCmdResetEvent2((VkCommandBuffer)&cmd, pdocker_vk_event_to_handle(&event), 0);
                 if (!reason_is(&cmd, "synchronization2-feature-disabled")) return 113;
-                memset(&cmd, 0, sizeof(cmd));
+                reset_test_command_buffer(&cmd, 0, 0);
                 vkCmdWaitEvents2((VkCommandBuffer)&cmd, 0, NULL, NULL);
                 if (!reason_is(&cmd, "synchronization2-feature-disabled")) return 114;
-                memset(&cmd, 0, sizeof(cmd));
+                reset_test_command_buffer(&cmd, 0, 0);
                 vkCmdWriteTimestamp2((VkCommandBuffer)&cmd, 0, VK_NULL_HANDLE, 0);
                 if (!reason_is(&cmd, "synchronization2-feature-disabled")) return 115;
 
-                memset(&cmd, 0, sizeof(cmd));
+                reset_test_command_buffer(&cmd, 0, 0);
                 vkCmdSetCullMode((VkCommandBuffer)&cmd, VK_CULL_MODE_NONE);
                 if (!reason_is(&cmd, "dynamic-state-feature-not-enabled")) return 123;
-                memset(&cmd, 0, sizeof(cmd));
+                reset_test_command_buffer(&cmd, 0, 0);
                 cmd.requested_feature_mask = PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE;
                 vkCmdSetCullMode((VkCommandBuffer)&cmd, VK_CULL_MODE_NONE);
                 if (cmd.recording_failed || cmd.dynamic_state_count == 0) return 124;
                 command_buffer_destroy_record_vectors(&cmd);
 
-                memset(&cmd, 0, sizeof(cmd));
+                reset_test_command_buffer(&cmd, 0, 0);
                 vkCmdSetRasterizerDiscardEnable((VkCommandBuffer)&cmd, VK_FALSE);
                 if (!reason_is(&cmd, "dynamic-state-feature-not-enabled")) return 125;
-                memset(&cmd, 0, sizeof(cmd));
+                reset_test_command_buffer(&cmd, 0, 0);
                 cmd.requested_feature_mask = PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2;
                 vkCmdSetRasterizerDiscardEnable((VkCommandBuffer)&cmd, VK_FALSE);
                 if (cmd.recording_failed || cmd.dynamic_state_count == 0) return 126;
                 command_buffer_destroy_record_vectors(&cmd);
 
-                memset(&cmd, 0, sizeof(cmd));
+                reset_test_command_buffer(&cmd, 0, 0);
                 cmd.requested_feature_mask = PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2 | PDOCKER_VK_FEATURE_LOGIC_OP;
                 vkCmdSetLogicOpEXT((VkCommandBuffer)&cmd, VK_LOGIC_OP_COPY);
                 if (!reason_is(&cmd, "dynamic-state-feature-not-enabled")) return 127;
-                memset(&cmd, 0, sizeof(cmd));
+                reset_test_command_buffer(&cmd, 0, 0);
                 cmd.requested_feature_mask = PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2_LOGIC_OP;
                 vkCmdSetLogicOpEXT((VkCommandBuffer)&cmd, VK_LOGIC_OP_COPY);
                 if (!reason_is(&cmd, "dynamic-logic-op-feature-not-enabled")) return 128;
-                memset(&cmd, 0, sizeof(cmd));
+                reset_test_command_buffer(&cmd, 0, 0);
                 cmd.requested_feature_mask = PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2_LOGIC_OP | PDOCKER_VK_FEATURE_LOGIC_OP;
                 vkCmdSetLogicOpEXT((VkCommandBuffer)&cmd, VK_LOGIC_OP_COPY);
                 if (cmd.recording_failed || cmd.dynamic_state_count == 0) return 129;
                 command_buffer_destroy_record_vectors(&cmd);
 
-                memset(&cmd, 0, sizeof(cmd));
+                reset_test_command_buffer(&cmd, 0, 0);
                 vkCmdBindVertexBuffers2((VkCommandBuffer)&cmd, 0, 1, (VkBuffer[]){{pdocker_vk_buffer_to_handle(&buffer)}}, (VkDeviceSize[]){{0}}, NULL, NULL);
                 if (!reason_is(&cmd, "graphics-vertex-binding2-feature-disabled")) return 130;
-                memset(&cmd, 0, sizeof(cmd));
+                reset_test_command_buffer(&cmd, 0, 0);
                 cmd.requested_feature_mask = PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE;
                 vkCmdBindVertexBuffers2((VkCommandBuffer)&cmd, 0, 1, (VkBuffer[]){{pdocker_vk_buffer_to_handle(&buffer)}}, (VkDeviceSize[]){{0}}, NULL, NULL);
                 if (cmd.recording_failed || cmd.graphics_vertex_binding_snapshot_count == 0) return 131;
                 command_buffer_destroy_record_vectors(&cmd);
 
             #ifdef VK_EXT_INDEX_TYPE_UINT8_EXTENSION_NAME
-                memset(&cmd, 0, sizeof(cmd));
+                reset_test_command_buffer(&cmd, 0, 0);
                 record_index_buffer_binding((VkCommandBuffer)&cmd,
                                             pdocker_vk_buffer_to_handle(&buffer),
                                             0,
@@ -2902,7 +3026,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                                             false);
                 if (!reason_is(&cmd, "graphics-index-type-uint8-feature-disabled")) return 14;
 
-                memset(&cmd, 0, sizeof(cmd));
+                reset_test_command_buffer(&cmd, 0, 0);
                 cmd.requested_feature_mask = PDOCKER_VK_FEATURE_INDEX_TYPE_UINT8;
                 record_index_buffer_binding((VkCommandBuffer)&cmd,
                                             pdocker_vk_buffer_to_handle(&buffer),
@@ -2914,11 +3038,11 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 command_buffer_destroy_record_vectors(&cmd);
             #endif
 
-                memset(&cmd, 0, sizeof(cmd));
+                reset_test_command_buffer(&cmd, 0, 0);
                 vkCmdBeginRendering((VkCommandBuffer)&cmd, NULL);
                 if (!reason_is(&cmd, "dynamic-rendering-feature-disabled")) return 16;
 
-                memset(&cmd, 0, sizeof(cmd));
+                reset_test_command_buffer(&cmd, 0, 0);
                 record_graphics_draw_command((VkCommandBuffer)&cmd,
                                              1, 1, 0, 0, 0, 0, 0,
                                              false,
@@ -4689,6 +4813,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
             #include <stdio.h>
             #include <string.h>
             #include "{ICD_SOURCE}"
+            {COMMAND_BUFFER_STACK_TEST_HELPER}
 
             int main(void) {{
                 VkBufferCreateInfo buffer_info;
@@ -4770,7 +4895,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 }}
 
                 PdockerVkCommandBuffer cmd;
-                memset(&cmd, 0, sizeof(cmd));
+                reset_test_command_buffer(&cmd, 0, 0);
                 vkCmdBindIndexBuffer((VkCommandBuffer)&cmd, buffer, 0, VK_INDEX_TYPE_UINT16);
                 if (!cmd.recording_failed ||
                     strcmp(cmd.recording_failure_reason, "graphics-index-buffer-range-invalid") != 0) {{
@@ -5279,6 +5404,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
             #include <stdio.h>
             #include <string.h>
             #include "{ICD_SOURCE}"
+            {COMMAND_BUFFER_STACK_TEST_HELPER}
 
             static void init_image_view(PdockerVkImage *image, PdockerVkImageView *view) {{
                 memset(image, 0, sizeof(*image));
@@ -5375,7 +5501,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 VkRenderPassBeginInfo begin_info;
                 PdockerVkCommandBuffer cmd;
                 memset(&begin_info, 0, sizeof(begin_info));
-                memset(&cmd, 0, sizeof(cmd));
+                reset_test_command_buffer(&cmd, 0, 0);
                 begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
                 begin_info.renderPass = rp_handle;
                 begin_info.framebuffer = fb_handle;
@@ -5414,6 +5540,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
             #include <stdio.h>
             #include <string.h>
             #include "{ICD_SOURCE}"
+            {COMMAND_BUFFER_STACK_TEST_HELPER}
 
             static void init_image(PdockerVkImage *image,
                                    uint64_t object_id,
@@ -5557,7 +5684,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     return 4;
                 }}
 
-                memset(&cmd, 0, sizeof(cmd));
+                reset_test_command_buffer(&cmd, 0, 0);
                 if (!populate_render_pass_subpass_rendering_state(&cmd, &rp, fb, area,
                                                                   NULL, 0, 0,
                                                                   VK_SUBPASS_CONTENTS_INLINE)) {{

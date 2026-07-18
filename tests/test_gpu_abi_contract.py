@@ -11670,17 +11670,17 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("*pCommandPool = VK_NULL_HANDLE;", create_pool_body)
         self.assertIn("validate_command_pool_create_info(pCreateInfo)", create_pool_body)
 
-        self.assertIn("pdocker_vk_command_pool_from_handle(commandPool)", reset_pool_body)
+        self.assertIn("command_pool_handle_lookup(commandPool)", reset_pool_body)
         self.assertIn("flags & ~VK_COMMAND_POOL_RESET_RELEASE_RESOURCES_BIT", reset_pool_body)
         self.assertIn("command-pool-reset-flags-unsupported", reset_pool_body)
-        self.assertIn("pdocker_vk_command_pool_from_handle(commandPool)", trim_pool_body)
+        self.assertIn("command_pool_handle_lookup(commandPool)", trim_pool_body)
         self.assertIn("flags != 0", trim_pool_body)
         self.assertIn("command-pool-trim-flags-unsupported", trim_pool_body)
 
         self.assertIn("pAllocateInfo->sType != VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO", allocate_body)
         self.assertIn("pAllocateInfo->pNext", allocate_body)
         self.assertIn('unsupported_create_info_pnext_result("vkAllocateCommandBuffers"', allocate_body)
-        self.assertIn("pdocker_vk_command_pool_from_handle(pAllocateInfo->commandPool)", allocate_body)
+        self.assertIn("command_pool_handle_lookup(pAllocateInfo->commandPool)", allocate_body)
         self.assertIn("pAllocateInfo->level != VK_COMMAND_BUFFER_LEVEL_PRIMARY", allocate_body)
         self.assertIn("pAllocateInfo->level != VK_COMMAND_BUFFER_LEVEL_SECONDARY", allocate_body)
         self.assertIn("command-buffer-level-unsupported", allocate_body)
@@ -11690,6 +11690,32 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('unsupported_create_info_pnext_result("vkCreateEvent", pCreateInfo->pNext)', create_event_body)
         self.assertIn("pCreateInfo->flags != 0", create_event_body)
         self.assertIn("event-flags-unsupported", create_event_body)
+
+
+    def test_vulkan_command_buffers_resolve_public_handles_through_live_registry(self):
+        icd = VULKAN_ICD.read_text()
+        begin_body = c_function_body(icd, "vkBeginCommandBuffer")
+        end_body = c_function_body(icd, "vkEndCommandBuffer")
+        reset_body = c_function_body(icd, "vkResetCommandBuffer")
+        bind_pipeline_body = c_function_body(icd, "vkCmdBindPipeline")
+        queue_submit_body = c_function_body(icd, "vkQueueSubmit")
+
+        for body in [begin_body, end_body, reset_body, bind_pipeline_body]:
+            self.assertIn("command_buffer_handle_lookup(commandBuffer)", body)
+            self.assertNotIn("(PdockerVkCommandBuffer *)commandBuffer", body)
+
+        for forbidden in [
+            "PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer",
+            "(PdockerVkCommandBuffer *)pCommandBuffers[i]",
+            "(PdockerVkCommandBuffer *)pSubmits[i].pCommandBuffers[j]",
+            "(const PdockerVkCommandBuffer *)submit->pCommandBuffers[i]",
+        ]:
+            self.assertNotIn(forbidden, icd)
+
+        self.assertIn("command_buffer_handle_lookup(pSubmits[validate_i].pCommandBuffers[cmd_i])", queue_submit_body)
+        self.assertIn("command_buffer_handle_lookup(pSubmits[i].pCommandBuffers[j])", queue_submit_body)
+        self.assertIn("return (PdockerVkCommandBuffer *)commandBuffer;", icd)
+        self.assertIn("PdockerVkCommandBuffer *sync_cmd = (PdockerVkCommandBuffer *)calloc(1, sizeof(*sync_cmd));", icd)
 
 
     def test_vulkan_image_sampler_object_apis_are_enabled_by_default_and_tracked_for_v5_object_transport(self):
@@ -16448,8 +16474,10 @@ class GpuAbiContractTest(unittest.TestCase):
             "pipeline_cache_handle_lookup(pipelineCache)",
             "pipeline_cache_handle_lookup(dstCache)",
             "pipeline_cache_handle_lookup(pSrcCaches[i])",
+            "command_pool_register(pool);",
             "*pCommandPool = pdocker_vk_command_pool_to_handle(pool);",
-            "free(pdocker_vk_command_pool_from_handle(commandPool));",
+            "command_pool_retire(pool);",
+            "command_pool_handle_lookup(commandPool)",
             "render_pass_register(rp);",
             "render_pass_handle_lookup(ci->renderPass)",
             "render_pass_retire(render_pass_unregister(renderPass));",

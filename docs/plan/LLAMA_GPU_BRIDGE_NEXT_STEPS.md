@@ -10,6 +10,40 @@ llama.cpp itself remains unmodified.
 ## Current Ground Truth
 
 
+### 2026-07-18 CPU/static Vulkan command pool/buffer live-handle lane
+
+`VkCommandPool` and `VkCommandBuffer` now use live registries with ownership
+tracking.  Command-pool creation registers pool objects, pool destroy unregisters
+and retires all owned command buffers before tombstoning the pool, and command
+buffer allocation links each dispatchable command buffer to its owner pool after
+descriptor-state allocation succeeds.  Free/reset paths now resolve handles
+through the live registry and reject fabricated, stale, or wrong-pool command
+buffers without dereferencing application-provided pointer-shaped handles.
+
+Public command-buffer entry points now resolve `VkCommandBuffer` through
+`command_buffer_handle_lookup` before touching recorded state.  This covers
+lifecycle calls, dynamic state, render pass/rendering, transfer/copy/barrier,
+dispatch, query/event recording, secondary command execution, and the legacy
+submit path.  `vkResetCommandPool` now resets per-command-buffer execution state
+through the command-buffer reset path, so stale `has_dispatch`, bound pipeline,
+and dispatch dimensions cannot be resubmitted after a pool reset.
+`vkQueueSubmit` prevalidates command buffers before changing fence state, and
+`vkQueueSubmit2` inherits the same fail-closed behavior through its legacy-submit
+lowering.
+
+This is generic Vulkan pass-through hardening.  It does not change llama.cpp,
+Dockerfiles, models, prompts, shader bytes, or executor-side arithmetic.
+
+Current scope note: device-destroy ownership cleanup, fences/semaphores,
+events/query pools, queue present, and remaining cross-object ownership/refcount
+cleanup remain separate handle-lifetime lanes.
+
+Evidence: `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`,
+`tests.test_gpu_abi_contract`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_command_pool_and_buffer_handles_fail_closed_after_free_reset_destroy`,
+`tests.test_vulkan_icd_sync_harness`, `scripts/build-gpu-shim.sh`.
+
+
 ### 2026-07-18 CPU/static Vulkan pipeline-cache live-handle lane
 
 `VkPipelineCache` now uses a live registry with soft-destroy quarantine.
@@ -23,8 +57,8 @@ smuggling stale host pointers into the bridge.
 This is generic Vulkan pass-through hardening.  It does not change llama.cpp,
 Dockerfiles, models, prompts, shader bytes, or executor-side arithmetic.
 
-Current scope note: command pools/buffers, fences/semaphores, events/query pools,
-and queue submit/present prevalidation remain separate handle-lifetime lanes.
+Current scope note: fences/semaphores, events/query pools, queue present, and
+remaining cross-object ownership/refcount cleanup remain separate handle-lifetime lanes.
 
 Evidence: `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`,
 `tests.test_gpu_abi_contract`,
@@ -83,9 +117,9 @@ uses live pipeline lookup for both bind points before recording state.
 This is generic Vulkan pass-through hardening.  It does not change llama.cpp,
 Dockerfiles, models, prompts, shader bytes, or executor-side arithmetic.
 
-Current scope note: descriptor pools/sets, command pools/buffers, pipeline
-caches, fences/semaphores/events/query pools, and submit/present prevalidation
-remain separate handle-lifetime lanes.
+Current scope note: pipeline caches, fences/semaphores/events/query pools,
+queue present, and remaining cross-object ownership/refcount cleanup remain
+separate handle-lifetime lanes.
 
 Evidence: `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`,
 `tests.test_gpu_abi_contract`,

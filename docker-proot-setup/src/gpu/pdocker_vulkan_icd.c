@@ -311,6 +311,7 @@ typedef struct PdockerVkValidationCache PdockerVkValidationCache;
 typedef struct PdockerVkPrivateDataSlot PdockerVkPrivateDataSlot;
 typedef struct PdockerVkDebugUtilsMessenger PdockerVkDebugUtilsMessenger;
 typedef struct PdockerVkPipeline PdockerVkPipeline;
+typedef struct PdockerVkCommandBuffer PdockerVkCommandBuffer;
 typedef struct PdockerVkCommandPool PdockerVkCommandPool;
 typedef struct PdockerVkFence PdockerVkFence;
 typedef struct PdockerVkSemaphore PdockerVkSemaphore;
@@ -1531,7 +1532,7 @@ typedef struct {
     uint32_t image_count;
 } PdockerVkBarrierOpRange;
 
-typedef struct {
+typedef struct PdockerVkCommandBuffer {
     VK_LOADER_DATA loader;
     PdockerVkPipeline *pipeline;
     PdockerVkPipeline *compute_pipeline;
@@ -1662,6 +1663,10 @@ typedef struct {
     bool vertex_buffer_bound;
     uint64_t requested_feature_mask;
     uint64_t enabled_extension_mask;
+    PdockerVkCommandPool *owner_pool;
+    bool destroyed;
+    struct PdockerVkCommandBuffer *next_global;
+    struct PdockerVkCommandBuffer *next_in_pool;
 } PdockerVkCommandBuffer;
 
 typedef struct {
@@ -1717,6 +1722,9 @@ struct PdockerVkDebugUtilsMessenger {
 struct PdockerVkCommandPool {
     uint64_t requested_feature_mask;
     uint64_t enabled_extension_mask;
+    bool destroyed;
+    PdockerVkCommandBuffer *command_buffers;
+    struct PdockerVkCommandPool *next;
 };
 
 static PdockerVkPhysicalDevice g_device;
@@ -1752,6 +1760,10 @@ static PdockerVkDescriptorSet *g_descriptor_sets;
 static PdockerVkDescriptorSet *g_retired_descriptor_sets;
 static PdockerVkPipelineCache *g_pipeline_caches;
 static PdockerVkPipelineCache *g_retired_pipeline_caches;
+static PdockerVkCommandPool *g_command_pools;
+static PdockerVkCommandPool *g_retired_command_pools;
+static PdockerVkCommandBuffer *g_command_buffers;
+static PdockerVkCommandBuffer *g_retired_command_buffers;
 static unsigned g_shader_dump_counter;
 static PdockerVkMemory *g_guarded_memories[PDOCKER_VK_MAX_GUARDED_MEMORIES];
 static struct sigaction g_previous_sigsegv;
@@ -1768,6 +1780,10 @@ static PdockerVkValidationCache *g_validation_caches;
 #ifdef VK_EXT_PRIVATE_DATA_EXTENSION_NAME
 static PdockerVkPrivateDataSlot *g_private_data_slots;
 #endif
+
+static void clear_recorded_command_ops(PdockerVkCommandBuffer *cmd);
+static void command_buffer_destroy_record_vectors(PdockerVkCommandBuffer *cmd);
+static void command_buffer_destroy_descriptor_states(PdockerVkCommandBuffer *cmd);
 
 static bool trace_allocations(void);
 static bool query_range_valid(
@@ -2646,6 +2662,147 @@ static bool pipeline_cache_handle_resolve(VkPipelineCache pipelineCache, Pdocker
 static PdockerVkPipelineCache *pipeline_cache_handle_lookup(VkPipelineCache pipelineCache) {
     PdockerVkPipelineCache *resolved = NULL;
     return pipeline_cache_handle_resolve(pipelineCache, &resolved) ? resolved : NULL;
+}
+
+
+static PdockerVkCommandPool *command_pool_handle_target(VkCommandPool commandPool) {
+    return pdocker_vk_command_pool_from_handle(commandPool);
+}
+
+static PdockerVkCommandBuffer *command_buffer_handle_target(VkCommandBuffer commandBuffer) {
+    return (PdockerVkCommandBuffer *)commandBuffer;
+}
+
+static void command_pool_register(PdockerVkCommandPool *pool) {
+    if (!pool) return;
+    pool->destroyed = false;
+    pool->next = g_command_pools;
+    g_command_pools = pool;
+}
+
+static PdockerVkCommandPool *command_pool_unregister(VkCommandPool commandPool) {
+    PdockerVkCommandPool *target = command_pool_handle_target(commandPool);
+    if (!target) return NULL;
+    PdockerVkCommandPool **link = &g_command_pools;
+    while (*link) {
+        if (*link == target) {
+            *link = target->next;
+            target->next = NULL;
+            return target;
+        }
+        link = &(*link)->next;
+    }
+    return NULL;
+}
+
+static void command_pool_retire(PdockerVkCommandPool *pool) {
+    if (!pool || pool->destroyed) return;
+    pool->destroyed = true;
+    pool->command_buffers = NULL;
+    pool->next = g_retired_command_pools;
+    g_retired_command_pools = pool;
+}
+
+static bool command_pool_handle_resolve(VkCommandPool commandPool, PdockerVkCommandPool **out_pool) {
+    PdockerVkCommandPool *target = command_pool_handle_target(commandPool);
+    if (out_pool) *out_pool = NULL;
+    if (!target) return false;
+    for (PdockerVkCommandPool *candidate = g_command_pools; candidate; candidate = candidate->next) {
+        if (candidate == target && !candidate->destroyed) {
+            if (out_pool) *out_pool = candidate;
+            return true;
+        }
+    }
+    return false;
+}
+
+static PdockerVkCommandPool *command_pool_handle_lookup(VkCommandPool commandPool) {
+    PdockerVkCommandPool *resolved = NULL;
+    return command_pool_handle_resolve(commandPool, &resolved) ? resolved : NULL;
+}
+
+static void command_buffer_link_to_pool(PdockerVkCommandPool *pool, PdockerVkCommandBuffer *cmd) {
+    if (!pool || !cmd) return;
+    cmd->owner_pool = pool;
+    cmd->next_in_pool = pool->command_buffers;
+    pool->command_buffers = cmd;
+}
+
+static void command_buffer_unlink_from_pool(PdockerVkCommandBuffer *cmd) {
+    if (!cmd || !cmd->owner_pool) return;
+    PdockerVkCommandBuffer **link = &cmd->owner_pool->command_buffers;
+    while (*link) {
+        if (*link == cmd) {
+            *link = cmd->next_in_pool;
+            break;
+        }
+        link = &(*link)->next_in_pool;
+    }
+    cmd->owner_pool = NULL;
+    cmd->next_in_pool = NULL;
+}
+
+static void command_buffer_register(PdockerVkCommandPool *pool, PdockerVkCommandBuffer *cmd) {
+    if (!pool || !cmd) return;
+    cmd->destroyed = false;
+    cmd->next_global = g_command_buffers;
+    g_command_buffers = cmd;
+    command_buffer_link_to_pool(pool, cmd);
+}
+
+static PdockerVkCommandBuffer *command_buffer_unregister(VkCommandBuffer commandBuffer) {
+    PdockerVkCommandBuffer *target = command_buffer_handle_target(commandBuffer);
+    if (!target) return NULL;
+    PdockerVkCommandBuffer **link = &g_command_buffers;
+    while (*link) {
+        if (*link == target) {
+            *link = target->next_global;
+            target->next_global = NULL;
+            command_buffer_unlink_from_pool(target);
+            return target;
+        }
+        link = &(*link)->next_global;
+    }
+    return NULL;
+}
+
+static void command_buffer_retire(PdockerVkCommandBuffer *cmd) {
+    if (!cmd || cmd->destroyed) return;
+    clear_recorded_command_ops(cmd);
+    command_buffer_destroy_record_vectors(cmd);
+    command_buffer_destroy_descriptor_states(cmd);
+    cmd->pipeline = NULL;
+    cmd->compute_pipeline = NULL;
+    cmd->graphics_pipeline = NULL;
+    cmd->owner_pool = NULL;
+    cmd->next_in_pool = NULL;
+    cmd->destroyed = true;
+    cmd->next_global = g_retired_command_buffers;
+    g_retired_command_buffers = cmd;
+}
+
+static bool command_buffer_handle_resolve(VkCommandBuffer commandBuffer, PdockerVkCommandBuffer **out_cmd) {
+    PdockerVkCommandBuffer *target = command_buffer_handle_target(commandBuffer);
+    if (out_cmd) *out_cmd = NULL;
+    if (!target) return false;
+    for (PdockerVkCommandBuffer *candidate = g_command_buffers; candidate; candidate = candidate->next_global) {
+        if (candidate == target && !candidate->destroyed) {
+            if (out_cmd) *out_cmd = candidate;
+            return true;
+        }
+    }
+    return false;
+}
+
+static PdockerVkCommandBuffer *command_buffer_handle_lookup(VkCommandBuffer commandBuffer) {
+    PdockerVkCommandBuffer *resolved = NULL;
+    return command_buffer_handle_resolve(commandBuffer, &resolved) ? resolved : NULL;
+}
+
+static bool command_buffer_belongs_to_pool(
+        const PdockerVkCommandBuffer *cmd,
+        const PdockerVkCommandPool *pool) {
+    return cmd && pool && !cmd->destroyed && !pool->destroyed && cmd->owner_pool == pool;
 }
 
 static bool current_vulkan_dispatch_identity_ids(
@@ -28297,6 +28454,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateCommandPool(
     if (!pool) return VK_ERROR_OUT_OF_HOST_MEMORY;
     pool->requested_feature_mask = device_requested_feature_mask_from_handle(device);
     pool->enabled_extension_mask = device_enabled_extension_mask_from_handle(device);
+    command_pool_register(pool);
     *pCommandPool = pdocker_vk_command_pool_to_handle(pool);
     return VK_SUCCESS;
 }
@@ -28307,7 +28465,16 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyCommandPool(
         const VkAllocationCallbacks *pAllocator) {
     (void)device;
     (void)pAllocator;
-    free(pdocker_vk_command_pool_from_handle(commandPool));
+    PdockerVkCommandPool *pool = command_pool_unregister(commandPool);
+    if (!pool) return;
+    PdockerVkCommandBuffer *cmd = pool->command_buffers;
+    while (cmd) {
+        PdockerVkCommandBuffer *next = cmd->next_in_pool;
+        (void)command_buffer_unregister((VkCommandBuffer)cmd);
+        command_buffer_retire(cmd);
+        cmd = next;
+    }
+    command_pool_retire(pool);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkResetCommandPool(
@@ -28315,13 +28482,21 @@ VKAPI_ATTR VkResult VKAPI_CALL vkResetCommandPool(
         VkCommandPool commandPool,
         VkCommandPoolResetFlags flags) {
     (void)device;
-    if (!pdocker_vk_command_pool_from_handle(commandPool)) {
+    PdockerVkCommandPool *pool = command_pool_handle_lookup(commandPool);
+    if (!pool) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
     if ((flags & ~VK_COMMAND_POOL_RESET_RELEASE_RESOURCES_BIT) != 0) {
         trace_icd_runtime_failure("command-pool-reset-flags-unsupported",
                                   VK_ERROR_FEATURE_NOT_PRESENT);
         return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    VkCommandBufferResetFlags buffer_reset_flags = 0;
+    if ((flags & VK_COMMAND_POOL_RESET_RELEASE_RESOURCES_BIT) != 0) {
+        buffer_reset_flags |= VK_COMMAND_BUFFER_RESET_RELEASE_RESOURCES_BIT;
+    }
+    for (PdockerVkCommandBuffer *cmd = pool->command_buffers; cmd; cmd = cmd->next_in_pool) {
+        (void)vkResetCommandBuffer((VkCommandBuffer)cmd, buffer_reset_flags);
     }
     return VK_SUCCESS;
 }
@@ -28331,7 +28506,7 @@ VKAPI_ATTR void VKAPI_CALL vkTrimCommandPool(
         VkCommandPool commandPool,
         VkCommandPoolTrimFlags flags) {
     (void)device;
-    if (!pdocker_vk_command_pool_from_handle(commandPool)) return;
+    if (!command_pool_handle_lookup(commandPool)) return;
     if (flags != 0) {
         trace_icd_runtime_failure("command-pool-trim-flags-unsupported",
                                   VK_ERROR_FEATURE_NOT_PRESENT);
@@ -28352,7 +28527,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateCommandBuffers(
         return unsupported_create_info_pnext_result("vkAllocateCommandBuffers",
                                                    pAllocateInfo->pNext);
     }
-    PdockerVkCommandPool *pool = pdocker_vk_command_pool_from_handle(pAllocateInfo->commandPool);
+    PdockerVkCommandPool *pool = command_pool_handle_lookup(pAllocateInfo->commandPool);
     if (!pool) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
@@ -28367,11 +28542,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateCommandBuffers(
         if (!cmd || !command_buffer_alloc_descriptor_states(cmd)) {
             if (cmd) free(cmd);
             for (uint32_t j = 0; j < i; ++j) {
-                PdockerVkCommandBuffer *allocated = (PdockerVkCommandBuffer *)pCommandBuffers[j];
-                clear_recorded_command_ops(allocated);
-                command_buffer_destroy_record_vectors(allocated);
-                command_buffer_destroy_descriptor_states(allocated);
-                free((void *)allocated);
+                PdockerVkCommandBuffer *allocated = command_buffer_unregister(pCommandBuffers[j]);
+                command_buffer_retire(allocated);
                 pCommandBuffers[j] = VK_NULL_HANDLE;
             }
             return VK_ERROR_OUT_OF_HOST_MEMORY;
@@ -28380,6 +28552,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateCommandBuffers(
         cmd->level = pAllocateInfo->level;
         cmd->requested_feature_mask = pool->requested_feature_mask;
         cmd->enabled_extension_mask = pool->enabled_extension_mask;
+        command_buffer_register(pool, cmd);
         pCommandBuffers[i] = (VkCommandBuffer)cmd;
     }
     return VK_SUCCESS;
@@ -28391,20 +28564,21 @@ VKAPI_ATTR void VKAPI_CALL vkFreeCommandBuffers(
         uint32_t commandBufferCount,
         const VkCommandBuffer *pCommandBuffers) {
     (void)device;
-    (void)commandPool;
+    PdockerVkCommandPool *pool = command_pool_handle_lookup(commandPool);
+    if (!pool || (commandBufferCount > 0 && !pCommandBuffers)) return;
     for (uint32_t i = 0; i < commandBufferCount; ++i) {
-        PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)pCommandBuffers[i];
-        clear_recorded_command_ops(cmd);
-        command_buffer_destroy_record_vectors(cmd);
-        command_buffer_destroy_descriptor_states(cmd);
-        free((void *)cmd);
+        if (pCommandBuffers[i] == VK_NULL_HANDLE) continue;
+        PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(pCommandBuffers[i]);
+        if (!command_buffer_belongs_to_pool(cmd, pool)) continue;
+        (void)command_buffer_unregister(pCommandBuffers[i]);
+        command_buffer_retire(cmd);
     }
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkBeginCommandBuffer(
         VkCommandBuffer commandBuffer,
         const VkCommandBufferBeginInfo *pBeginInfo) {
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     if (!cmd) return VK_ERROR_INITIALIZATION_FAILED;
     clear_recorded_command_ops(cmd);
     cmd->pipeline = NULL;
@@ -28462,7 +28636,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkBeginCommandBuffer(
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkEndCommandBuffer(VkCommandBuffer commandBuffer) {
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     if (!cmd) return VK_ERROR_INITIALIZATION_FAILED;
     if (cmd->recording_failed) {
         trace_icd_runtime_failure(cmd->recording_failure_reason ? cmd->recording_failure_reason :
@@ -28477,7 +28651,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkResetCommandBuffer(
         VkCommandBuffer commandBuffer,
         VkCommandBufferResetFlags flags) {
     (void)flags;
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     if (!cmd) return VK_ERROR_INITIALIZATION_FAILED;
     clear_recorded_command_ops(cmd);
     command_buffer_destroy_record_vectors(cmd);
@@ -28488,7 +28662,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindPipeline(
         VkCommandBuffer commandBuffer,
         VkPipelineBindPoint pipelineBindPoint,
         VkPipeline pipeline) {
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     if (!cmd) return;
     if (pipelineBindPoint == VK_PIPELINE_BIND_POINT_COMPUTE) {
         cmd->compute_pipeline = pipeline_handle_lookup(pipeline);
@@ -28580,7 +28754,7 @@ static bool rendering_info_pnext_noop(const VkRenderingInfo *info) {
 VKAPI_ATTR void VKAPI_CALL vkCmdBeginRendering(
         VkCommandBuffer commandBuffer,
         const VkRenderingInfo *pRenderingInfo) {
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     if (!cmd) return;
     if ((cmd->requested_feature_mask & PDOCKER_VK_FEATURE_DYNAMIC_RENDERING) == 0) {
         cmd->graphics_unsupported = true;
@@ -28649,7 +28823,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBeginRendering(
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdEndRendering(VkCommandBuffer commandBuffer) {
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     if (!cmd) return;
     if ((cmd->requested_feature_mask & PDOCKER_VK_FEATURE_DYNAMIC_RENDERING) == 0) {
         cmd->graphics_unsupported = true;
@@ -29278,7 +29452,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBeginRenderPass(
         VkCommandBuffer commandBuffer,
         const VkRenderPassBeginInfo *pRenderPassBegin,
         VkSubpassContents contents) {
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     if (!cmd) return;
     cmd->active_clear_value_count = pRenderPassBegin ? pRenderPassBegin->clearValueCount : 0;
     if (cmd->active_clear_value_count > PDOCKER_VK_MAX_STORAGE_BUFFERS) {
@@ -29313,7 +29487,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBeginRenderPass(
 VKAPI_ATTR void VKAPI_CALL vkCmdNextSubpass(
         VkCommandBuffer commandBuffer,
         VkSubpassContents contents) {
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     if (!cmd) return;
     uint32_t next_subpass = cmd->active_subpass + 1u;
     PdockerVkRenderPass *rp = cmd->active_render_pass;
@@ -29342,7 +29516,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdNextSubpass(
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdEndRenderPass(VkCommandBuffer commandBuffer) {
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     if (!cmd) return;
     if (cmd->active_framebuffer && cmd->active_framebuffer->destroyed) {
         cmd->graphics_unsupported = true;
@@ -29371,7 +29545,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBeginRenderPass2(
         VkCommandBuffer commandBuffer,
         const VkRenderPassBeginInfo *pRenderPassBegin,
         const VkSubpassBeginInfo *pSubpassBeginInfo) {
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     if (cmd && pSubpassBeginInfo && pSubpassBeginInfo->pNext) {
         cmd->graphics_unsupported = true;
     }
@@ -29385,7 +29559,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdNextSubpass2(
         VkCommandBuffer commandBuffer,
         const VkSubpassBeginInfo *pSubpassBeginInfo,
         const VkSubpassEndInfo *pSubpassEndInfo) {
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     if (cmd && ((pSubpassBeginInfo && pSubpassBeginInfo->pNext) ||
                 (pSubpassEndInfo && pSubpassEndInfo->pNext))) {
         cmd->graphics_unsupported = true;
@@ -29398,7 +29572,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdNextSubpass2(
 VKAPI_ATTR void VKAPI_CALL vkCmdEndRenderPass2(
         VkCommandBuffer commandBuffer,
         const VkSubpassEndInfo *pSubpassEndInfo) {
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     if (cmd && pSubpassEndInfo && pSubpassEndInfo->pNext) {
         cmd->graphics_unsupported = true;
     }
@@ -29413,7 +29587,7 @@ static void record_vertex_buffer_bindings(
         const VkDeviceSize *pOffsets,
         const VkDeviceSize *pSizes,
         const VkDeviceSize *pStrides) {
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     if (!cmd) return;
     if ((pSizes || pStrides) &&
         !command_buffer_require_graphics_dynamic_state_feature(
@@ -29475,7 +29649,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindVertexBuffers2(
         const VkDeviceSize *pOffsets,
         const VkDeviceSize *pSizes,
         const VkDeviceSize *pStrides) {
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     if (!command_buffer_require_graphics_dynamic_state_feature(
             cmd, VK_DYNAMIC_STATE_VERTEX_INPUT_BINDING_STRIDE,
             "graphics-vertex-binding2-feature-disabled")) {
@@ -29491,7 +29665,7 @@ static void record_index_buffer_binding(
         VkDeviceSize size,
         VkIndexType indexType,
         bool require_maintenance5) {
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     if (!cmd) return;
     if (require_maintenance5 &&
         (cmd->enabled_extension_mask & PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_5) == 0) {
@@ -29593,7 +29767,7 @@ static void record_graphics_draw_command(
         VkBuffer countBuffer,
         VkDeviceSize countOffset,
         uint32_t stride) {
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     if (!cmd) return;
     const bool graphics_rendering_context_active =
         cmd->dynamic_rendering_active || cmd->inherited_rendering_active;
@@ -29830,7 +30004,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetViewport(
         uint32_t firstViewport,
         uint32_t viewportCount,
         const VkViewport *pViewports) {
-    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+    record_graphics_dynamic_state_bytes(command_buffer_handle_lookup(commandBuffer),
                                         VK_DYNAMIC_STATE_VIEWPORT,
                                         firstViewport,
                                         viewportCount,
@@ -29843,7 +30017,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetScissor(
         uint32_t firstScissor,
         uint32_t scissorCount,
         const VkRect2D *pScissors) {
-    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+    record_graphics_dynamic_state_bytes(command_buffer_handle_lookup(commandBuffer),
                                         VK_DYNAMIC_STATE_SCISSOR,
                                         firstScissor,
                                         scissorCount,
@@ -29854,7 +30028,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetScissor(
 VKAPI_ATTR void VKAPI_CALL vkCmdSetLineWidth(
         VkCommandBuffer commandBuffer,
         float lineWidth) {
-    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+    record_graphics_dynamic_state_bytes(command_buffer_handle_lookup(commandBuffer),
                                         VK_DYNAMIC_STATE_LINE_WIDTH,
                                         0, 1, &lineWidth, sizeof(lineWidth));
 }
@@ -29865,7 +30039,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetDepthBias(
         float depthBiasClamp,
         float depthBiasSlopeFactor) {
     float values[3] = {depthBiasConstantFactor, depthBiasClamp, depthBiasSlopeFactor};
-    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+    record_graphics_dynamic_state_bytes(command_buffer_handle_lookup(commandBuffer),
                                         VK_DYNAMIC_STATE_DEPTH_BIAS,
                                         0, 3, values, sizeof(values));
 }
@@ -29873,7 +30047,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetDepthBias(
 VKAPI_ATTR void VKAPI_CALL vkCmdSetBlendConstants(
         VkCommandBuffer commandBuffer,
         const float blendConstants[4]) {
-    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+    record_graphics_dynamic_state_bytes(command_buffer_handle_lookup(commandBuffer),
                                         VK_DYNAMIC_STATE_BLEND_CONSTANTS,
                                         0, 4, blendConstants, blendConstants ? sizeof(float) * 4u : 0);
 }
@@ -29883,7 +30057,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetDepthBounds(
         float minDepthBounds,
         float maxDepthBounds) {
     float values[2] = {minDepthBounds, maxDepthBounds};
-    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+    record_graphics_dynamic_state_bytes(command_buffer_handle_lookup(commandBuffer),
                                         VK_DYNAMIC_STATE_DEPTH_BOUNDS,
                                         0, 2, values, sizeof(values));
 }
@@ -29891,7 +30065,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetDepthBounds(
 VKAPI_ATTR void VKAPI_CALL vkCmdSetDepthBoundsTestEnable(
         VkCommandBuffer commandBuffer,
         VkBool32 depthBoundsTestEnable) {
-    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+    record_graphics_dynamic_state_bytes(command_buffer_handle_lookup(commandBuffer),
                                         VK_DYNAMIC_STATE_DEPTH_BOUNDS_TEST_ENABLE,
                                         0, 1, &depthBoundsTestEnable, sizeof(depthBoundsTestEnable));
 }
@@ -29907,7 +30081,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetStencilCompareMask(
         VkStencilFaceFlags faceMask,
         uint32_t compareMask) {
     uint32_t values[2] = {(uint32_t)faceMask, compareMask};
-    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+    record_graphics_dynamic_state_bytes(command_buffer_handle_lookup(commandBuffer),
                                         VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK,
                                         0, 2, values, sizeof(values));
 }
@@ -29917,7 +30091,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetStencilWriteMask(
         VkStencilFaceFlags faceMask,
         uint32_t writeMask) {
     uint32_t values[2] = {(uint32_t)faceMask, writeMask};
-    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+    record_graphics_dynamic_state_bytes(command_buffer_handle_lookup(commandBuffer),
                                         VK_DYNAMIC_STATE_STENCIL_WRITE_MASK,
                                         0, 2, values, sizeof(values));
 }
@@ -29927,7 +30101,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetStencilReference(
         VkStencilFaceFlags faceMask,
         uint32_t reference) {
     uint32_t values[2] = {(uint32_t)faceMask, reference};
-    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+    record_graphics_dynamic_state_bytes(command_buffer_handle_lookup(commandBuffer),
                                         VK_DYNAMIC_STATE_STENCIL_REFERENCE,
                                         0, 2, values, sizeof(values));
 }
@@ -29936,7 +30110,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetViewportWithCount(
         VkCommandBuffer commandBuffer,
         uint32_t viewportCount,
         const VkViewport *pViewports) {
-    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+    record_graphics_dynamic_state_bytes(command_buffer_handle_lookup(commandBuffer),
                                         VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT,
                                         0,
                                         viewportCount,
@@ -29948,7 +30122,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetScissorWithCount(
         VkCommandBuffer commandBuffer,
         uint32_t scissorCount,
         const VkRect2D *pScissors) {
-    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+    record_graphics_dynamic_state_bytes(command_buffer_handle_lookup(commandBuffer),
                                         VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT,
                                         0,
                                         scissorCount,
@@ -29959,7 +30133,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetScissorWithCount(
 VKAPI_ATTR void VKAPI_CALL vkCmdSetCullMode(
         VkCommandBuffer commandBuffer,
         VkCullModeFlags cullMode) {
-    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+    record_graphics_dynamic_state_bytes(command_buffer_handle_lookup(commandBuffer),
                                         VK_DYNAMIC_STATE_CULL_MODE,
                                         0, 1, &cullMode, sizeof(cullMode));
 }
@@ -29967,7 +30141,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetCullMode(
 VKAPI_ATTR void VKAPI_CALL vkCmdSetFrontFace(
         VkCommandBuffer commandBuffer,
         VkFrontFace frontFace) {
-    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+    record_graphics_dynamic_state_bytes(command_buffer_handle_lookup(commandBuffer),
                                         VK_DYNAMIC_STATE_FRONT_FACE,
                                         0, 1, &frontFace, sizeof(frontFace));
 }
@@ -29975,7 +30149,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetFrontFace(
 VKAPI_ATTR void VKAPI_CALL vkCmdSetPrimitiveTopology(
         VkCommandBuffer commandBuffer,
         VkPrimitiveTopology primitiveTopology) {
-    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+    record_graphics_dynamic_state_bytes(command_buffer_handle_lookup(commandBuffer),
                                         VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY,
                                         0, 1, &primitiveTopology, sizeof(primitiveTopology));
 }
@@ -29983,7 +30157,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetPrimitiveTopology(
 VKAPI_ATTR void VKAPI_CALL vkCmdSetRasterizerDiscardEnable(
         VkCommandBuffer commandBuffer,
         VkBool32 rasterizerDiscardEnable) {
-    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+    record_graphics_dynamic_state_bytes(command_buffer_handle_lookup(commandBuffer),
                                         VK_DYNAMIC_STATE_RASTERIZER_DISCARD_ENABLE,
                                         0, 1, &rasterizerDiscardEnable, sizeof(rasterizerDiscardEnable));
 }
@@ -29991,7 +30165,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetRasterizerDiscardEnable(
 VKAPI_ATTR void VKAPI_CALL vkCmdSetDepthBiasEnable(
         VkCommandBuffer commandBuffer,
         VkBool32 depthBiasEnable) {
-    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+    record_graphics_dynamic_state_bytes(command_buffer_handle_lookup(commandBuffer),
                                         VK_DYNAMIC_STATE_DEPTH_BIAS_ENABLE,
                                         0, 1, &depthBiasEnable, sizeof(depthBiasEnable));
 }
@@ -29999,7 +30173,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetDepthBiasEnable(
 VKAPI_ATTR void VKAPI_CALL vkCmdSetPrimitiveRestartEnable(
         VkCommandBuffer commandBuffer,
         VkBool32 primitiveRestartEnable) {
-    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+    record_graphics_dynamic_state_bytes(command_buffer_handle_lookup(commandBuffer),
                                         VK_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE,
                                         0, 1, &primitiveRestartEnable, sizeof(primitiveRestartEnable));
 }
@@ -30007,7 +30181,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetPrimitiveRestartEnable(
 VKAPI_ATTR void VKAPI_CALL vkCmdSetLogicOpEXT(
         VkCommandBuffer commandBuffer,
         VkLogicOp logicOp) {
-    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+    record_graphics_dynamic_state_bytes(command_buffer_handle_lookup(commandBuffer),
                                         VK_DYNAMIC_STATE_LOGIC_OP_EXT,
                                         0, 1, &logicOp, sizeof(logicOp));
 }
@@ -30015,7 +30189,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetLogicOpEXT(
 VKAPI_ATTR void VKAPI_CALL vkCmdSetPatchControlPointsEXT(
         VkCommandBuffer commandBuffer,
         uint32_t patchControlPoints) {
-    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+    record_graphics_dynamic_state_bytes(command_buffer_handle_lookup(commandBuffer),
                                         VK_DYNAMIC_STATE_PATCH_CONTROL_POINTS_EXT,
                                         0, 1, &patchControlPoints, sizeof(patchControlPoints));
 }
@@ -30023,7 +30197,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetPatchControlPointsEXT(
 VKAPI_ATTR void VKAPI_CALL vkCmdSetDepthTestEnable(
         VkCommandBuffer commandBuffer,
         VkBool32 depthTestEnable) {
-    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+    record_graphics_dynamic_state_bytes(command_buffer_handle_lookup(commandBuffer),
                                         VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE,
                                         0, 1, &depthTestEnable, sizeof(depthTestEnable));
 }
@@ -30031,7 +30205,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetDepthTestEnable(
 VKAPI_ATTR void VKAPI_CALL vkCmdSetDepthWriteEnable(
         VkCommandBuffer commandBuffer,
         VkBool32 depthWriteEnable) {
-    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+    record_graphics_dynamic_state_bytes(command_buffer_handle_lookup(commandBuffer),
                                         VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE,
                                         0, 1, &depthWriteEnable, sizeof(depthWriteEnable));
 }
@@ -30039,7 +30213,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetDepthWriteEnable(
 VKAPI_ATTR void VKAPI_CALL vkCmdSetDepthCompareOp(
         VkCommandBuffer commandBuffer,
         VkCompareOp depthCompareOp) {
-    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+    record_graphics_dynamic_state_bytes(command_buffer_handle_lookup(commandBuffer),
                                         VK_DYNAMIC_STATE_DEPTH_COMPARE_OP,
                                         0, 1, &depthCompareOp, sizeof(depthCompareOp));
 }
@@ -30047,7 +30221,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetDepthCompareOp(
 VKAPI_ATTR void VKAPI_CALL vkCmdSetStencilTestEnable(
         VkCommandBuffer commandBuffer,
         VkBool32 stencilTestEnable) {
-    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+    record_graphics_dynamic_state_bytes(command_buffer_handle_lookup(commandBuffer),
                                         VK_DYNAMIC_STATE_STENCIL_TEST_ENABLE,
                                         0, 1, &stencilTestEnable, sizeof(stencilTestEnable));
 }
@@ -30060,7 +30234,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetStencilOp(
         VkStencilOp depthFailOp,
         VkCompareOp compareOp) {
     uint32_t values[5] = {(uint32_t)faceMask, (uint32_t)failOp, (uint32_t)passOp, (uint32_t)depthFailOp, (uint32_t)compareOp};
-    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+    record_graphics_dynamic_state_bytes(command_buffer_handle_lookup(commandBuffer),
                                         VK_DYNAMIC_STATE_STENCIL_OP,
                                         0, 5, values, sizeof(values));
 }
@@ -30084,7 +30258,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdClearAttachments(
         const VkClearAttachment *pAttachments,
         uint32_t rectCount,
         const VkClearRect *pRects) {
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     if (!cmd) return;
     if (!cmd->dynamic_rendering_active || cmd->inherited_rendering_active ||
         attachmentCount == 0 || rectCount == 0 || !pAttachments || !pRects ||
@@ -30184,14 +30358,14 @@ VKAPI_ATTR void VKAPI_CALL vkCmdExecuteCommands(
         VkCommandBuffer commandBuffer,
         uint32_t commandBufferCount,
         const VkCommandBuffer *pCommandBuffers) {
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     if (!cmd || commandBufferCount == 0) return;
     if (cmd->level != VK_COMMAND_BUFFER_LEVEL_PRIMARY || !pCommandBuffers) {
         cmd->graphics_unsupported = true;
         return;
     }
     for (uint32_t i = 0; i < commandBufferCount; ++i) {
-        PdockerVkCommandBuffer *secondary = (PdockerVkCommandBuffer *)pCommandBuffers[i];
+        PdockerVkCommandBuffer *secondary = command_buffer_handle_lookup(pCommandBuffers[i]);
         if (!secondary || secondary->level != VK_COMMAND_BUFFER_LEVEL_SECONDARY ||
             !append_secondary_command_buffer(cmd, secondary)) {
             cmd->graphics_unsupported = true;
@@ -30210,7 +30384,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
         uint32_t dynamicOffsetCount,
         const uint32_t *pDynamicOffsets) {
     PdockerVkPipelineLayout *pipeline_layout = pipeline_layout_handle_lookup(layout);
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     const bool strict_passthrough =
         env_truthy_default("PDOCKER_GPU_STRICT_PASSTHROUGH", false);
     if (!cmd) return;
@@ -30666,7 +30840,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdDispatch(
         uint32_t groupCountZ) {
     (void)groupCountY;
     (void)groupCountZ;
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     if (cmd) {
         if (command_buffer_reject_dispatch_inside_rendering_scope(cmd)) return;
         cmd->dispatch_x = groupCountX;
@@ -30738,7 +30912,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdDispatchBase(
         uint32_t groupCountX,
         uint32_t groupCountY,
         uint32_t groupCountZ) {
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     if (cmd) {
         if (command_buffer_reject_dispatch_inside_rendering_scope(cmd)) return;
         cmd->dispatch_x = groupCountX;
@@ -30818,7 +30992,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdDispatchBaseKHR(
 VKAPI_ATTR void VKAPI_CALL vkCmdSetDeviceMask(
         VkCommandBuffer commandBuffer,
         uint32_t deviceMask) {
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     if (!cmd) return;
     if (deviceMask != 1u) {
         command_buffer_mark_recording_failed(cmd, "device-mask-unsupported");
@@ -30829,7 +31003,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdDispatchIndirect(
         VkCommandBuffer commandBuffer,
         VkBuffer buffer,
         VkDeviceSize offset) {
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     if (cmd) {
         if (command_buffer_reject_dispatch_inside_rendering_scope(cmd)) return;
         PdockerVkBuffer *indirect_buffer = buffer_handle_lookup(buffer);
@@ -30908,7 +31082,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPushConstants(
         uint32_t offset,
         uint32_t size,
         const void *pValues) {
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     if (!cmd) return;
     const uint32_t max_push_bytes = pdocker_vk_max_push_bytes_for_stage_flags(stageFlags);
     if (offset > max_push_bytes ||
@@ -31467,7 +31641,7 @@ static void record_image_barrier_op(
         VkPipelineStageFlags2 dstStageMask,
         uint32_t srcQueueFamilyIndex,
         uint32_t dstQueueFamilyIndex) {
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     if (!cmd) return;
     const char *failure_reason = image_barrier_recording_failure_reason(
         image, &range, srcQueueFamilyIndex, dstQueueFamilyIndex);
@@ -31519,7 +31693,7 @@ static void record_memory_barrier_op(
         VkAccessFlags2 dstAccessMask,
         VkPipelineStageFlags2 srcStageMask,
         VkPipelineStageFlags2 dstStageMask) {
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     if (!cmd) return;
     if (!command_buffer_reserve_memory_barrier_ops(cmd, 1)) {
         cmd->graphics_unsupported = true;
@@ -31545,7 +31719,7 @@ static void record_buffer_barrier_op(
         VkPipelineStageFlags2 dstStageMask,
         uint32_t srcQueueFamilyIndex,
         uint32_t dstQueueFamilyIndex) {
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     if (!cmd) return;
     const char *failure_reason = buffer_barrier_recording_failure_reason(
         buffer, offset, size, srcQueueFamilyIndex, dstQueueFamilyIndex);
@@ -31677,7 +31851,7 @@ static PdockerVkBarrierOpRange record_legacy_pipeline_barrier_ops(
         const VkBufferMemoryBarrier *pBufferMemoryBarriers,
         uint32_t imageMemoryBarrierCount,
         const VkImageMemoryBarrier *pImageMemoryBarriers) {
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     PdockerVkBarrierOpRange range;
     memset(&range, 0, sizeof(range));
     if (!cmd) return range;
@@ -31736,7 +31910,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier(
         const VkBufferMemoryBarrier *pBufferMemoryBarriers,
         uint32_t imageMemoryBarrierCount,
         const VkImageMemoryBarrier *pImageMemoryBarriers) {
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     if (cmd) {
         if (legacy_pipeline_barrier_inputs_unsupported(srcStageMask,
                                                        dstStageMask,
@@ -31801,7 +31975,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdCopyBuffer(
         VkBuffer dstBuffer,
         uint32_t regionCount,
         const VkBufferCopy *pRegions) {
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     PdockerVkBuffer *src = buffer_handle_lookup(srcBuffer);
     PdockerVkBuffer *dst = buffer_handle_lookup(dstBuffer);
     if (!cmd || !src || !dst || !src->memory || !dst->memory || !pRegions) return;
@@ -31896,7 +32070,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdCopyBufferToImage(
         VkImageLayout dstImageLayout,
         uint32_t regionCount,
         const VkBufferImageCopy *pRegions) {
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     PdockerVkBuffer *src = buffer_handle_lookup(srcBuffer);
     PdockerVkImage *dst = image_handle_lookup(dstImage);
     if (!cmd || !src || !dst || !src->memory || !dst->memory || !pRegions) return;
@@ -31917,7 +32091,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdCopyImageToBuffer(
         VkBuffer dstBuffer,
         uint32_t regionCount,
         const VkBufferImageCopy *pRegions) {
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     PdockerVkImage *src = image_handle_lookup(srcImage);
     PdockerVkBuffer *dst = buffer_handle_lookup(dstBuffer);
     if (!cmd || !src || !dst || !src->memory || !dst->memory || !pRegions) return;
@@ -31983,7 +32157,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdCopyImage(
         VkImageLayout dstImageLayout,
         uint32_t regionCount,
         const VkImageCopy *pRegions) {
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     PdockerVkImage *src = image_handle_lookup(srcImage);
     PdockerVkImage *dst = image_handle_lookup(dstImage);
     if (!cmd || !src || !dst || !src->memory || !dst->memory || !pRegions) return;
@@ -32043,7 +32217,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdClearColorImage(
         const VkClearColorValue *pColor,
         uint32_t rangeCount,
         const VkImageSubresourceRange *pRanges) {
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     PdockerVkImage *img = image_handle_lookup(image);
     if (!cmd || !img || !img->memory || !pColor || !pRanges) return;
     for (uint32_t i = 0; i < rangeCount; ++i) {
@@ -32101,7 +32275,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdResolveImage(
         VkImageLayout dstImageLayout,
         uint32_t regionCount,
         const VkImageResolve *pRegions) {
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     PdockerVkImage *src = image_handle_lookup(srcImage);
     PdockerVkImage *dst = image_handle_lookup(dstImage);
     if (!cmd || !src || !dst || !src->memory || !dst->memory || !pRegions) return;
@@ -32173,7 +32347,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBlitImage(
         uint32_t regionCount,
         const VkImageBlit *pRegions,
         VkFilter filter) {
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     PdockerVkImage *src = image_handle_lookup(srcImage);
     PdockerVkImage *dst = image_handle_lookup(dstImage);
     if (!cmd || !src || !dst || !src->memory || !dst->memory || !pRegions) return;
@@ -32232,7 +32406,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdClearDepthStencilImage(
         const VkClearDepthStencilValue *pDepthStencil,
         uint32_t rangeCount,
         const VkImageSubresourceRange *pRanges) {
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     PdockerVkImage *img = image_handle_lookup(image);
     if (!cmd || !img || !img->memory || !pDepthStencil || !pRanges) return;
     for (uint32_t i = 0; i < rangeCount; ++i) {
@@ -32271,7 +32445,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdCopyBuffer2(
         VkCommandBuffer commandBuffer,
         const VkCopyBufferInfo2 *pCopyBufferInfo) {
     if (!pCopyBufferInfo || !pCopyBufferInfo->pRegions) return;
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     if (copy_commands2_reject_unsupported_pnext(cmd, pCopyBufferInfo->pNext,
                                                 pCopyBufferInfo->pRegions,
                                                 pCopyBufferInfo->regionCount,
@@ -32299,7 +32473,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdCopyImage2(
         VkCommandBuffer commandBuffer,
         const VkCopyImageInfo2 *pCopyImageInfo) {
     if (!pCopyImageInfo || !pCopyImageInfo->pRegions) return;
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     if (copy_commands2_reject_unsupported_pnext(cmd, pCopyImageInfo->pNext,
                                                 pCopyImageInfo->pRegions,
                                                 pCopyImageInfo->regionCount,
@@ -32328,7 +32502,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdCopyBufferToImage2(
         VkCommandBuffer commandBuffer,
         const VkCopyBufferToImageInfo2 *pCopyBufferToImageInfo) {
     if (!pCopyBufferToImageInfo || !pCopyBufferToImageInfo->pRegions) return;
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     if (copy_commands2_reject_unsupported_pnext(cmd, pCopyBufferToImageInfo->pNext,
                                                 pCopyBufferToImageInfo->pRegions,
                                                 pCopyBufferToImageInfo->regionCount,
@@ -32357,7 +32531,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdCopyImageToBuffer2(
         VkCommandBuffer commandBuffer,
         const VkCopyImageToBufferInfo2 *pCopyImageToBufferInfo) {
     if (!pCopyImageToBufferInfo || !pCopyImageToBufferInfo->pRegions) return;
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     if (copy_commands2_reject_unsupported_pnext(cmd, pCopyImageToBufferInfo->pNext,
                                                 pCopyImageToBufferInfo->pRegions,
                                                 pCopyImageToBufferInfo->regionCount,
@@ -32386,7 +32560,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBlitImage2(
         VkCommandBuffer commandBuffer,
         const VkBlitImageInfo2 *pBlitImageInfo) {
     if (!pBlitImageInfo || !pBlitImageInfo->pRegions) return;
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     if (copy_commands2_reject_unsupported_pnext(cmd, pBlitImageInfo->pNext,
                                                 pBlitImageInfo->pRegions,
                                                 pBlitImageInfo->regionCount,
@@ -32415,7 +32589,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdResolveImage2(
         VkCommandBuffer commandBuffer,
         const VkResolveImageInfo2 *pResolveImageInfo) {
     if (!pResolveImageInfo || !pResolveImageInfo->pRegions) return;
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     if (copy_commands2_reject_unsupported_pnext(cmd, pResolveImageInfo->pNext,
                                                 pResolveImageInfo->pRegions,
                                                 pResolveImageInfo->regionCount,
@@ -32446,7 +32620,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdFillBuffer(
         VkDeviceSize dstOffset,
         VkDeviceSize size,
         uint32_t data) {
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     PdockerVkBuffer *dst = buffer_handle_lookup(dstBuffer);
     if (!dst || !dst->memory) return;
     size_t available = buffer_available(dst, dstOffset);
@@ -32478,7 +32652,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdUpdateBuffer(
         VkDeviceSize dstOffset,
         VkDeviceSize dataSize,
         const void *pData) {
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     PdockerVkBuffer *dst = buffer_handle_lookup(dstBuffer);
     if (!dst || !dst->memory || !pData) return;
     size_t available = buffer_available(dst, dstOffset);
@@ -32808,7 +32982,7 @@ static void graphics_submit_sync_frame_bounds(
     if (!submit || !submit->pCommandBuffers) return;
     for (uint32_t i = 0; i < submit->commandBufferCount; ++i) {
         const PdockerVkCommandBuffer *cmd =
-            (const PdockerVkCommandBuffer *)submit->pCommandBuffers[i];
+            command_buffer_handle_lookup(submit->pCommandBuffers[i]);
         if (!command_buffer_needs_graphics_submit_sync_frame(cmd)) continue;
         if (first_graphics_cmd && *first_graphics_cmd == UINT32_MAX) {
             *first_graphics_cmd = i;
@@ -33720,7 +33894,7 @@ static bool submit_has_recorded_work_before_command(
     if (command_index >= submit->commandBufferCount) return false;
     for (uint32_t i = 0; i < command_index && i < submit->commandBufferCount; ++i) {
         if (command_buffer_has_recorded_submit_work(
-                (const PdockerVkCommandBuffer *)submit->pCommandBuffers[i])) {
+                command_buffer_handle_lookup(submit->pCommandBuffers[i]))) {
             return true;
         }
     }
@@ -33734,7 +33908,7 @@ static bool submit_has_recorded_work_after_command(
     if (command_index >= submit->commandBufferCount) return false;
     for (uint32_t i = command_index + 1u; i < submit->commandBufferCount; ++i) {
         if (command_buffer_has_recorded_submit_work(
-                (const PdockerVkCommandBuffer *)submit->pCommandBuffers[i])) {
+                command_buffer_handle_lookup(submit->pCommandBuffers[i]))) {
             return true;
         }
     }
@@ -34021,6 +34195,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
         VkResult pnext_rc = submit_timeline_info_from_pnext(
             &pSubmits[validate_i], &validate_timeline);
         if (pnext_rc != VK_SUCCESS) return pnext_rc;
+        for (uint32_t cmd_i = 0; cmd_i < pSubmits[validate_i].commandBufferCount; ++cmd_i) {
+            if (!command_buffer_handle_lookup(pSubmits[validate_i].pCommandBuffers[cmd_i])) {
+                return VK_ERROR_INITIALIZATION_FAILED;
+            }
+        }
     }
     PdockerVkFence *submit_fence = pdocker_vk_fence_from_handle(fence);
     if (fence != VK_NULL_HANDLE && !submit_fence) return VK_ERROR_INITIALIZATION_FAILED;
@@ -34094,7 +34273,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
             submit_waits_split_before_command_loop = submit_wait_sync_count > 0;
         }
         for (uint32_t j = 0; j < pSubmits[i].commandBufferCount; ++j) {
-            PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)pSubmits[i].pCommandBuffers[j];
+            PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(pSubmits[i].pCommandBuffers[j]);
             if (!cmd) RETURN_VK_QUEUE_SUBMIT_WITH_SYNC(VK_ERROR_INITIALIZATION_FAILED);
             if (cmd->recording_failed) {
                 trace_icd_runtime_failure(cmd->recording_failure_reason ? cmd->recording_failure_reason :
@@ -34769,7 +34948,7 @@ static void record_event_command(VkCommandBuffer commandBuffer,
                                  VkPipelineStageFlags2 stage_mask,
                                  VkDependencyFlags dependency_flags,
                                  const PdockerVkBarrierOpRange *barriers) {
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     PdockerVkEvent *e = pdocker_vk_event_from_handle(event);
     if (!cmd) return;
     if (!e) {
@@ -34807,7 +34986,7 @@ static void record_event_wait_command(VkCommandBuffer commandBuffer,
                                       VkPipelineStageFlags2 dst_stage_mask,
                                       VkDependencyFlags dependency_flags,
                                       const PdockerVkBarrierOpRange *barriers) {
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     if (!cmd) return;
     if (event_count == 0 || !events) {
         command_buffer_mark_recording_failed(cmd, "event-wait-events-missing-events");
@@ -34884,7 +35063,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdWaitEvents(
         const VkBufferMemoryBarrier *pBufferMemoryBarriers,
         uint32_t imageMemoryBarrierCount,
         const VkImageMemoryBarrier *pImageMemoryBarriers) {
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     if (eventCount > 0 && !pEvents) {
         if (cmd) command_buffer_mark_recording_failed(cmd, "event-wait-events-missing-events");
         return;
@@ -35118,7 +35297,7 @@ static const char *pipeline_barrier2_dependency_info_failure_reason(
 VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier2(
         VkCommandBuffer commandBuffer,
         const VkDependencyInfo *pDependencyInfo) {
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     if (!cmd) return;
     if (!command_buffer_require_synchronization2(cmd, "synchronization2-feature-disabled")) return;
     const char *unsupported_reason =
@@ -35170,7 +35349,7 @@ static bool dependency_info_dependency_flags_unsupported(const VkDependencyInfo 
 static PdockerVkBarrierOpRange record_dependency_info_barrier_ops(
         VkCommandBuffer commandBuffer,
         const VkDependencyInfo *info) {
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     PdockerVkBarrierOpRange range;
     memset(&range, 0, sizeof(range));
     if (!cmd) return range;
@@ -35270,7 +35449,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetEvent2(
         VkCommandBuffer commandBuffer,
         VkEvent event,
         const VkDependencyInfo *pDependencyInfo) {
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     if (!command_buffer_require_synchronization2(cmd, "synchronization2-feature-disabled")) return;
     const char *unsupported_reason =
         event_set2_dependency_info_failure_reason(pDependencyInfo);
@@ -35295,7 +35474,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdResetEvent2(
         VkCommandBuffer commandBuffer,
         VkEvent event,
         VkPipelineStageFlags2 stageMask) {
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     if (!command_buffer_require_synchronization2(cmd, "synchronization2-feature-disabled")) return;
     record_event_command(commandBuffer, event, false, stageMask, 0, NULL);
 }
@@ -35305,7 +35484,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdWaitEvents2(
         uint32_t eventCount,
         const VkEvent *pEvents,
         const VkDependencyInfo *pDependencyInfos) {
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     if (!command_buffer_require_synchronization2(cmd, "synchronization2-feature-disabled")) return;
     if (eventCount > 0 && (!pEvents || !pDependencyInfos)) {
         if (cmd) command_buffer_mark_recording_failed(cmd, "event-wait2-missing-arrays");
@@ -35468,7 +35647,7 @@ static void record_query_command(
         uint32_t firstQuery,
         uint32_t queryCount,
         VkPipelineStageFlags2 stageMask) {
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     PdockerVkQueryPool *pool = pdocker_vk_query_pool_from_handle(queryPool);
     if (!cmd || !query_range_valid(pool, firstQuery, queryCount)) return;
     if (!query_pool_type_supports_command(type, pool->type)) {
@@ -35521,7 +35700,7 @@ static void record_copy_query_results_command(
         VkDeviceSize dstOffset,
         VkDeviceSize stride,
         VkQueryResultFlags flags) {
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     PdockerVkQueryPool *pool = pdocker_vk_query_pool_from_handle(queryPool);
     PdockerVkBuffer *dst = buffer_handle_lookup(dstBuffer);
     if (!cmd) return;
@@ -35703,7 +35882,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdWriteTimestamp2(
         VkPipelineStageFlags2 stage,
         VkQueryPool queryPool,
         uint32_t query) {
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     if (!command_buffer_require_synchronization2(cmd, "synchronization2-feature-disabled")) return;
     record_query_command(commandBuffer,
                          PDOCKER_VK_COMMAND_QUERY_TIMESTAMP,

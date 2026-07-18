@@ -10,6 +10,32 @@ ROOT = Path(__file__).resolve().parents[1]
 ICD_SOURCE = ROOT / "docker-proot-setup" / "src" / "gpu" / "pdocker_vulkan_icd.c"
 
 
+COMMAND_BUFFER_LIVE_REGISTRY_HELPER = r"""
+static PdockerVkCommandPool g_sync_test_command_pool;
+
+static PdockerVkCommandPool *sync_test_command_pool(void) {
+    VkCommandPool handle = pdocker_vk_command_pool_to_handle(&g_sync_test_command_pool);
+    PdockerVkCommandPool *pool = command_pool_handle_lookup(handle);
+    if (pool) return pool;
+    memset(&g_sync_test_command_pool, 0, sizeof(g_sync_test_command_pool));
+    command_pool_register(&g_sync_test_command_pool);
+    return &g_sync_test_command_pool;
+}
+
+static PdockerVkCommandBuffer *sync_test_command_buffer_alloc(void) {
+    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)calloc(1, sizeof(*cmd));
+    if (!cmd) return NULL;
+    if (!command_buffer_alloc_descriptor_states(cmd)) {
+        free(cmd);
+        return NULL;
+    }
+    set_loader_magic_value(cmd);
+    command_buffer_register(sync_test_command_pool(), cmd);
+    return cmd;
+}
+"""
+
+
 class VulkanIcdQueryValidationSourceContractTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -140,6 +166,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             #include <string.h>
             #include <unistd.h>
             #include "{ICD_SOURCE}"
+            {COMMAND_BUFFER_LIVE_REGISTRY_HELPER}
 
             int main(void) {{
                 unsetenv("PDOCKER_GPU_QUEUE_SOCKET");
@@ -192,9 +219,10 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             #include <string.h>
             #include <stdlib.h>
             #include "{ICD_SOURCE}"
+            {COMMAND_BUFFER_LIVE_REGISTRY_HELPER}
 
             int main(void) {{
-                PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)calloc(1, sizeof(*cmd));
+                PdockerVkCommandBuffer *cmd = sync_test_command_buffer_alloc();
                 if (!cmd) return 9;
                 cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
                 cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
@@ -244,9 +272,10 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             #include <string.h>
             #include <stdlib.h>
             #include "{ICD_SOURCE}"
+            {COMMAND_BUFFER_LIVE_REGISTRY_HELPER}
 
             int main(void) {{
-                PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)calloc(1, sizeof(*cmd));
+                PdockerVkCommandBuffer *cmd = sync_test_command_buffer_alloc();
                 if (!cmd) return 9;
                 cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
                 cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
@@ -367,6 +396,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             #include <string.h>
             #include <stdlib.h>
             #include "{ICD_SOURCE}"
+            {COMMAND_BUFFER_LIVE_REGISTRY_HELPER}
 
             typedef struct DummyPnext {{
                 VkStructureType sType;
@@ -388,7 +418,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
 
             int main(void) {{
                 unsetenv("PDOCKER_GPU_QUEUE_SOCKET");
-                PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)calloc(1, sizeof(*cmd));
+                PdockerVkCommandBuffer *cmd = sync_test_command_buffer_alloc();
                 if (!cmd) return 9;
                 cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
                 cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
@@ -607,6 +637,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             #include <stdlib.h>
             #include <unistd.h>
             #include "{ICD_SOURCE}"
+            {COMMAND_BUFFER_LIVE_REGISTRY_HELPER}
 
             static void init_color_image(PdockerVkImage *image, PdockerVkMemory *memory,
                                          VkImageLayout layout) {{
@@ -904,6 +935,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             #include <string.h>
             #include <stdlib.h>
             #include "{ICD_SOURCE}"
+            {COMMAND_BUFFER_LIVE_REGISTRY_HELPER}
 
             static int expect_dispatch_scope_failure(PdockerVkCommandBuffer *cmd, const char *expected_reason) {{
                 if (!cmd->recording_failed) {{
@@ -933,7 +965,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             }}
 
             int main(void) {{
-                PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)calloc(1, sizeof(*cmd));
+                PdockerVkCommandBuffer *cmd = sync_test_command_buffer_alloc();
                 if (!cmd) return 9;
                 cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
                 cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
@@ -994,6 +1026,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             #include <stdio.h>
             #include <string.h>
             #include "{ICD_SOURCE}"
+            {COMMAND_BUFFER_LIVE_REGISTRY_HELPER}
 
             static void add_graphics_record(
                     PdockerVkCommandBuffer *cmd,
@@ -1110,6 +1143,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             #include <stdio.h>
             #include <string.h>
             #include "{ICD_SOURCE}"
+            {COMMAND_BUFFER_LIVE_REGISTRY_HELPER}
 
             static int expect_footprint(
                     VkFormat format,
@@ -1225,6 +1259,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             #include <string.h>
             #include <stdlib.h>
             #include "{ICD_SOURCE}"
+            {COMMAND_BUFFER_LIVE_REGISTRY_HELPER}
 
             #ifndef VK_IMAGE_ASPECT_PLANE_0_BIT
             #define VK_IMAGE_ASPECT_PLANE_0_BIT ((VkImageAspectFlagBits)0x00000010)
@@ -1244,6 +1279,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 image->usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
                 image->current_layout = VK_IMAGE_LAYOUT_UNDEFINED;
                 image->layout_generation = 1;
+                image_register(image);
             }}
 
             static void init_image_barrier(VkImageMemoryBarrier2 *barrier,
@@ -1356,7 +1392,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             }}
 
             int main(void) {{
-                PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)calloc(1, sizeof(*cmd));
+                PdockerVkCommandBuffer *cmd = sync_test_command_buffer_alloc();
                 if (!cmd) return 9;
                 cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
                 cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
@@ -1425,6 +1461,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             #include <string.h>
             #include <stdlib.h>
             #include "{ICD_SOURCE}"
+            {COMMAND_BUFFER_LIVE_REGISTRY_HELPER}
 
             #ifndef VK_IMAGE_ASPECT_PLANE_0_BIT
             #define VK_IMAGE_ASPECT_PLANE_0_BIT ((VkImageAspectFlagBits)0x00000010)
@@ -1444,6 +1481,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 image->usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
                 image->current_layout = VK_IMAGE_LAYOUT_UNDEFINED;
                 image->layout_generation = 1;
+                image_register(image);
             }}
 
             static void init_legacy_image_barrier(VkImageMemoryBarrier *barrier,
@@ -1557,7 +1595,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             }}
 
             int main(void) {{
-                PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)calloc(1, sizeof(*cmd));
+                PdockerVkCommandBuffer *cmd = sync_test_command_buffer_alloc();
                 if (!cmd) return 9;
 
                 PdockerVkImage color;
@@ -1616,6 +1654,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             #include <string.h>
             #include <stdlib.h>
             #include "{ICD_SOURCE}"
+            {COMMAND_BUFFER_LIVE_REGISTRY_HELPER}
 
             typedef struct DummyPnext {{
                 VkStructureType sType;
@@ -1652,7 +1691,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             }}
 
             int main(void) {{
-                PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)calloc(1, sizeof(*cmd));
+                PdockerVkCommandBuffer *cmd = sync_test_command_buffer_alloc();
                 if (!cmd) return 9;
                 cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
                 cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
@@ -1790,6 +1829,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             #include <string.h>
             #include <stdlib.h>
             #include "{ICD_SOURCE}"
+            {COMMAND_BUFFER_LIVE_REGISTRY_HELPER}
 
             #ifndef VK_DEPENDENCY_QUEUE_FAMILY_OWNERSHIP_TRANSFER_USE_ALL_STAGES_BIT_KHR
             int main(void) {{
@@ -1834,11 +1874,12 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             }}
 
             int main(void) {{
-                PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)calloc(1, sizeof(*cmd));
+                PdockerVkCommandBuffer *cmd = sync_test_command_buffer_alloc();
                 PdockerVkBuffer *buffer = (PdockerVkBuffer *)calloc(1, sizeof(*buffer));
                 if (!cmd || !buffer) return 99;
                 buffer->object_id = 0x1357u;
                 buffer->size = 4096u;
+                buffer_register(buffer);
 
                 const VkDependencyFlags noop_flag =
                     VK_DEPENDENCY_QUEUE_FAMILY_OWNERSHIP_TRANSFER_USE_ALL_STAGES_BIT_KHR;
@@ -1977,6 +2018,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             #include <string.h>
             #include <stdlib.h>
             #include "{ICD_SOURCE}"
+            {COMMAND_BUFFER_LIVE_REGISTRY_HELPER}
 
             #ifndef VK_DEPENDENCY_QUEUE_FAMILY_OWNERSHIP_TRANSFER_USE_ALL_STAGES_BIT_KHR
             int main(void) {{
@@ -2020,12 +2062,13 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             }}
 
             int main(void) {{
-                PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)calloc(1, sizeof(*cmd));
+                PdockerVkCommandBuffer *cmd = sync_test_command_buffer_alloc();
                 PdockerVkBuffer *buffer = (PdockerVkBuffer *)calloc(1, sizeof(*buffer));
                 PdockerVkImage *image = (PdockerVkImage *)calloc(1, sizeof(*image));
                 if (!cmd || !buffer || !image) return 99;
                 buffer->object_id = 0x2468u;
                 buffer->size = 4096u;
+                buffer_register(buffer);
                 image->object_id = 0x8642u;
                 image->format = VK_FORMAT_R8G8B8A8_UNORM;
                 image->image_type = VK_IMAGE_TYPE_2D;
@@ -2038,6 +2081,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 image->usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
                 image->current_layout = VK_IMAGE_LAYOUT_UNDEFINED;
                 image->layout_generation = 1;
+                image_register(image);
 
                 VkEventCreateInfo event_info;
                 memset(&event_info, 0, sizeof(event_info));
@@ -2175,6 +2219,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             #include <string.h>
             #include <stdlib.h>
             #include "{ICD_SOURCE}"
+            {COMMAND_BUFFER_LIVE_REGISTRY_HELPER}
 
             static void reset_cmd(PdockerVkCommandBuffer *cmd, int sync2) {{
                 memset(cmd, 0, sizeof(*cmd));
@@ -2198,6 +2243,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 image->usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
                 image->current_layout = VK_IMAGE_LAYOUT_UNDEFINED;
                 image->layout_generation = 1;
+                image_register(image);
             }}
 
             static int expect_clean_failure(PdockerVkCommandBuffer *cmd, const char *reason, int code) {{
@@ -2230,12 +2276,13 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             }}
 
             int main(void) {{
-                PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)calloc(1, sizeof(*cmd));
+                PdockerVkCommandBuffer *cmd = sync_test_command_buffer_alloc();
                 PdockerVkBuffer *buffer = (PdockerVkBuffer *)calloc(1, sizeof(*buffer));
                 PdockerVkImage *image = (PdockerVkImage *)calloc(1, sizeof(*image));
                 if (!cmd || !buffer || !image) return 99;
                 buffer->object_id = 0x1234u;
                 buffer->size = 4096u;
+                buffer_register(buffer);
                 init_image(image);
 
                 VkMemoryBarrier memory_barrier;
@@ -2373,6 +2420,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             #include <string.h>
             #include <stdlib.h>
             #include "{ICD_SOURCE}"
+            {COMMAND_BUFFER_LIVE_REGISTRY_HELPER}
 
             static void reset_cmd(PdockerVkCommandBuffer *cmd, int sync2) {{
                 memset(cmd, 0, sizeof(*cmd));
@@ -2396,6 +2444,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 image->usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
                 image->current_layout = VK_IMAGE_LAYOUT_UNDEFINED;
                 image->layout_generation = 1;
+                image_register(image);
             }}
 
             static int expect_clean_failure(PdockerVkCommandBuffer *cmd, const char *reason, int code) {{
@@ -2429,12 +2478,13 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             }}
 
             int main(void) {{
-                PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)calloc(1, sizeof(*cmd));
+                PdockerVkCommandBuffer *cmd = sync_test_command_buffer_alloc();
                 PdockerVkBuffer *buffer = (PdockerVkBuffer *)calloc(1, sizeof(*buffer));
                 PdockerVkImage *image = (PdockerVkImage *)calloc(1, sizeof(*image));
                 if (!cmd || !buffer || !image) return 99;
                 buffer->object_id = 0x1234u;
                 buffer->size = 4096u;
+                buffer_register(buffer);
                 init_image(image);
 
                 VkEventCreateInfo event_info;
@@ -2590,18 +2640,20 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             #include <string.h>
             #include <stdlib.h>
             #include "{ICD_SOURCE}"
+            {COMMAND_BUFFER_LIVE_REGISTRY_HELPER}
 
             int main(void) {{
             #ifndef VK_EXT_external_memory_acquire_unmodified
                 return 0;
             #else
-                PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)calloc(1, sizeof(*cmd));
+                PdockerVkCommandBuffer *cmd = sync_test_command_buffer_alloc();
                 PdockerVkBuffer *buffer = (PdockerVkBuffer *)calloc(1, sizeof(*buffer));
                 if (!cmd || !buffer) return 9;
                 cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
                 cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
                 buffer->object_id = 0x1234u;
                 buffer->size = 4096u;
+                buffer_register(buffer);
 
                 VkExternalMemoryAcquireUnmodifiedEXT acquire;
                 memset(&acquire, 0, sizeof(acquire));
@@ -2670,6 +2722,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             #include <stdio.h>
             #include <string.h>
             #include "{ICD_SOURCE}"
+            {COMMAND_BUFFER_LIVE_REGISTRY_HELPER}
 
             typedef struct DummyPnext {{
                 VkStructureType sType;
@@ -2859,6 +2912,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             #include <stdio.h>
             #include <string.h>
             #include "{ICD_SOURCE}"
+            {COMMAND_BUFFER_LIVE_REGISTRY_HELPER}
 
             static int find_range(PdockerVkImage *image,
                                   VkImageLayout layout,
@@ -3028,9 +3082,10 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             #include <string.h>
             #include <stdlib.h>
             #include "{ICD_SOURCE}"
+            {COMMAND_BUFFER_LIVE_REGISTRY_HELPER}
 
             int main(void) {{
-                PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)calloc(1, sizeof(*cmd));
+                PdockerVkCommandBuffer *cmd = sync_test_command_buffer_alloc();
                 if (!cmd) return 9;
                 cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
                 cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
@@ -3084,6 +3139,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             #include <string.h>
             #include <unistd.h>
             #include "{ICD_SOURCE}"
+            {COMMAND_BUFFER_LIVE_REGISTRY_HELPER}
 
             int main(void) {{
                 unsetenv("PDOCKER_GPU_QUEUE_SOCKET");
@@ -3172,6 +3228,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             #include <string.h>
             #include <unistd.h>
             #include "{ICD_SOURCE}"
+            {COMMAND_BUFFER_LIVE_REGISTRY_HELPER}
 
             static VkSemaphore make_timeline(VkDevice device, uint64_t initial_value) {{
                 VkSemaphore sem = VK_NULL_HANDLE;
@@ -3284,6 +3341,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             #include <string.h>
             #include <stdlib.h>
             #include "{ICD_SOURCE}"
+            {COMMAND_BUFFER_LIVE_REGISTRY_HELPER}
 
             static VkFence make_signaled_fence(void) {{
                 VkFence fence = VK_NULL_HANDLE;
@@ -3430,7 +3488,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 submit.signalSemaphoreInfoCount = 0;
                 submit.pSignalSemaphoreInfos = NULL;
 
-                PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)calloc(1, sizeof(*cmd));
+                PdockerVkCommandBuffer *cmd = sync_test_command_buffer_alloc();
                 if (!cmd) return 18;
                 cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
                 cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
@@ -3475,6 +3533,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             #include <stdio.h>
             #include <string.h>
             #include "{ICD_SOURCE}"
+            {COMMAND_BUFFER_LIVE_REGISTRY_HELPER}
 
             int main(void) {{
                 unsetenv("PDOCKER_GPU_QUEUE_SOCKET");
@@ -3632,6 +3691,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             #include <stdio.h>
             #include <string.h>
             #include "{ICD_SOURCE}"
+            {COMMAND_BUFFER_LIVE_REGISTRY_HELPER}
 
             int main(void) {{
                 unsetenv("PDOCKER_GPU_QUEUE_SOCKET");
