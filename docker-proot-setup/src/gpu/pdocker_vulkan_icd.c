@@ -2991,6 +2991,32 @@ static PdockerVkCommandBuffer *command_buffer_handle_lookup_for_device(
     return resolved && device_owner_matches_or_unowned(device, resolved->owner_device_id) ? resolved : NULL;
 }
 
+static PdockerVkBuffer *buffer_handle_lookup_for_command_buffer(
+        const PdockerVkCommandBuffer *cmd,
+        VkBuffer buffer) {
+    PdockerVkBuffer *resolved = buffer_handle_lookup(buffer);
+    return resolved && cmd && owner_device_ids_match_or_unowned(
+        cmd->owner_device_id, resolved->owner_device_id) ? resolved : NULL;
+}
+
+static PdockerVkImage *image_handle_lookup_for_command_buffer(
+        const PdockerVkCommandBuffer *cmd,
+        VkImage image) {
+    PdockerVkImage *resolved = image_handle_lookup(image);
+    return resolved && cmd && owner_device_ids_match_or_unowned(
+        cmd->owner_device_id, resolved->owner_device_id) ? resolved : NULL;
+}
+
+static bool command_buffer_mark_resource_capture_failed(
+        PdockerVkCommandBuffer *cmd,
+        const char *reason) {
+    if (!cmd) return true;
+    cmd->graphics_unsupported = true;
+    cmd->recording_failed = true;
+    cmd->recording_failure_reason = reason ? reason : "command-resource-capture-invalid";
+    return true;
+}
+
 static bool command_buffer_belongs_to_pool(
         const PdockerVkCommandBuffer *cmd,
         const PdockerVkCommandPool *pool) {
@@ -24166,24 +24192,64 @@ VKAPI_ATTR void VKAPI_CALL vkGetDeviceMemoryCommitment(
     }
 }
 
+static VkResult validate_mapped_memory_ranges(
+        VkDevice device,
+        uint32_t memoryRangeCount,
+        const VkMappedMemoryRange *pMemoryRanges,
+        const char *api_name) {
+    if (memoryRangeCount == 0) return VK_SUCCESS;
+    if (!pMemoryRanges) return VK_ERROR_MEMORY_MAP_FAILED;
+    for (uint32_t i = 0; i < memoryRangeCount; ++i) {
+        const VkMappedMemoryRange *range = &pMemoryRanges[i];
+        if (range->sType != VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE) {
+            trace_icd_runtime_failure(api_name ? api_name : "mapped-memory-range-sType-invalid",
+                                      VK_ERROR_MEMORY_MAP_FAILED);
+            return VK_ERROR_MEMORY_MAP_FAILED;
+        }
+        if (range->pNext) {
+            return unsupported_create_info_pnext_result(
+                api_name ? api_name : "vkMappedMemoryRange", range->pNext);
+        }
+        PdockerVkMemory *memory = NULL;
+        if (!memory_handle_resolve_for_device(device, range->memory, &memory) || !memory) {
+            trace_icd_runtime_failure(api_name ? api_name : "mapped-memory-range-invalid-memory",
+                                      VK_ERROR_MEMORY_MAP_FAILED);
+            return VK_ERROR_MEMORY_MAP_FAILED;
+        }
+        if ((memory->property_flags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) == 0) {
+            trace_icd_runtime_failure(api_name ? api_name : "mapped-memory-range-not-host-visible",
+                                      VK_ERROR_MEMORY_MAP_FAILED);
+            return VK_ERROR_MEMORY_MAP_FAILED;
+        }
+        if (range->offset > (VkDeviceSize)memory->size) {
+            trace_icd_runtime_failure(api_name ? api_name : "mapped-memory-range-offset-invalid",
+                                      VK_ERROR_MEMORY_MAP_FAILED);
+            return VK_ERROR_MEMORY_MAP_FAILED;
+        }
+        if (range->size != VK_WHOLE_SIZE &&
+            range->size > (VkDeviceSize)memory->size - range->offset) {
+            trace_icd_runtime_failure(api_name ? api_name : "mapped-memory-range-size-invalid",
+                                      VK_ERROR_MEMORY_MAP_FAILED);
+            return VK_ERROR_MEMORY_MAP_FAILED;
+        }
+    }
+    return VK_SUCCESS;
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL vkFlushMappedMemoryRanges(
         VkDevice device,
         uint32_t memoryRangeCount,
         const VkMappedMemoryRange *pMemoryRanges) {
-    (void)device;
-    (void)memoryRangeCount;
-    (void)pMemoryRanges;
-    return VK_SUCCESS;
+    return validate_mapped_memory_ranges(
+        device, memoryRangeCount, pMemoryRanges, "vkFlushMappedMemoryRanges");
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkInvalidateMappedMemoryRanges(
         VkDevice device,
         uint32_t memoryRangeCount,
         const VkMappedMemoryRange *pMemoryRanges) {
-    (void)device;
-    (void)memoryRangeCount;
-    (void)pMemoryRanges;
-    return VK_SUCCESS;
+    return validate_mapped_memory_ranges(
+        device, memoryRangeCount, pMemoryRanges, "vkInvalidateMappedMemoryRanges");
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkBindBufferMemory(
@@ -30345,7 +30411,12 @@ static void record_vertex_buffer_bindings(
         uint32_t slot = firstBinding + i;
         PdockerVkVertexBindingState *binding = &cmd->vertex_bindings[slot];
         binding->binding = slot;
-        binding->buffer = buffer_handle_lookup(pBuffers[i]);
+        binding->buffer = buffer_handle_lookup_for_command_buffer(cmd, pBuffers[i]);
+        if (!binding->buffer) {
+            command_buffer_mark_resource_capture_failed(
+                cmd, "graphics-vertex-buffer-cross-device-or-invalid");
+            return;
+        }
         binding->offset = pOffsets[i];
         binding->size = pSizes ? pSizes[i] : VK_WHOLE_SIZE;
         binding->stride = pStrides ? pStrides[i] : 0;
@@ -30405,8 +30476,13 @@ static void record_index_buffer_binding(
             "graphics-index-buffer2-maintenance5-extension-disabled");
         return;
     }
-    PdockerVkBuffer *tracked_buffer = buffer_handle_lookup(buffer);
-    if (!tracked_buffer || size == 0 ||
+    PdockerVkBuffer *tracked_buffer = buffer_handle_lookup_for_command_buffer(cmd, buffer);
+    if (!tracked_buffer) {
+        command_buffer_mark_resource_capture_failed(
+            cmd, "graphics-index-buffer-cross-device-or-invalid");
+        return;
+    }
+    if (size == 0 ||
         (size != VK_WHOLE_SIZE &&
          !validate_buffer_byte_range(tracked_buffer, offset, size))) {
         cmd->graphics_unsupported = true;
@@ -30506,7 +30582,15 @@ static void record_graphics_draw_command(
         cmd->render_pass_active || (indexed && !cmd->index_buffer_bound)) {
         cmd->graphics_unsupported = true;
     }
+    PdockerVkBuffer *tracked_indirect_buffer = NULL;
+    PdockerVkBuffer *tracked_count_buffer = NULL;
     if (indirect) {
+        tracked_indirect_buffer = buffer_handle_lookup_for_command_buffer(cmd, indirectBuffer);
+        if (!tracked_indirect_buffer) {
+            command_buffer_mark_resource_capture_failed(
+                cmd, "graphics-draw-indirect-buffer-cross-device-or-invalid");
+            return;
+        }
         if (vertexCount > 1 &&
             (cmd->requested_feature_mask & PDOCKER_VK_FEATURE_MULTI_DRAW_INDIRECT) == 0) {
             cmd->graphics_unsupported = true;
@@ -30517,11 +30601,18 @@ static void record_graphics_draw_command(
              * fail closed before forwarding a potentially invalid stream. */
             cmd->graphics_unsupported = true;
         }
-        if (countBuffer != VK_NULL_HANDLE &&
-            (cmd->requested_feature_mask & PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT) == 0) {
-            cmd->graphics_unsupported = true;
-            command_buffer_mark_recording_failed(cmd, "graphics-draw-indirect-count-feature-disabled");
-            return;
+        if (countBuffer != VK_NULL_HANDLE) {
+            tracked_count_buffer = buffer_handle_lookup_for_command_buffer(cmd, countBuffer);
+            if (!tracked_count_buffer) {
+                command_buffer_mark_resource_capture_failed(
+                    cmd, "graphics-draw-count-buffer-cross-device-or-invalid");
+                return;
+            }
+            if ((cmd->requested_feature_mask & PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT) == 0) {
+                cmd->graphics_unsupported = true;
+                command_buffer_mark_recording_failed(cmd, "graphics-draw-indirect-count-feature-disabled");
+                return;
+            }
         }
     }
     if (!command_buffer_reserve_graphics_draw_ops(cmd, 1)) {
@@ -30630,9 +30721,9 @@ static void record_graphics_draw_command(
     snapshot->vertex_offset = vertexOffset;
     snapshot->indexed = indexed;
     snapshot->indirect = indirect;
-    snapshot->indirect_buffer = buffer_handle_lookup(indirectBuffer);
+    snapshot->indirect_buffer = tracked_indirect_buffer;
     snapshot->indirect_offset = indirectOffset;
-    snapshot->count_buffer = buffer_handle_lookup(countBuffer);
+    snapshot->count_buffer = tracked_count_buffer;
     snapshot->count_offset = countOffset;
     snapshot->indirect_stride = stride;
     PdockerVkGraphicsCommandRecord graphics_record;
@@ -30663,9 +30754,9 @@ static void record_graphics_draw_command(
     op.draw_vertex_offset = vertexOffset;
     op.draw_indexed = indexed;
     op.draw_indirect = indirect;
-    op.draw_indirect_buffer = buffer_handle_lookup(indirectBuffer);
+    op.draw_indirect_buffer = tracked_indirect_buffer;
     op.draw_indirect_offset = indirectOffset;
-    op.draw_count_buffer = buffer_handle_lookup(countBuffer);
+    op.draw_count_buffer = tracked_count_buffer;
     op.draw_count_offset = countOffset;
     op.draw_indirect_stride = stride;
     (void)append_command_op(cmd, &op);
@@ -31746,10 +31837,11 @@ VKAPI_ATTR void VKAPI_CALL vkCmdDispatchIndirect(
     PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     if (cmd) {
         if (command_buffer_reject_dispatch_inside_rendering_scope(cmd)) return;
-        PdockerVkBuffer *indirect_buffer = buffer_handle_lookup(buffer);
+        PdockerVkBuffer *indirect_buffer = buffer_handle_lookup_for_command_buffer(cmd, buffer);
         if (!indirect_buffer) {
             cmd->unsupported_descriptor_set_layout = true;
-            command_buffer_mark_recording_failed(cmd, "dispatch-indirect-buffer-invalid");
+            command_buffer_mark_recording_failed(
+                cmd, "dispatch-indirect-buffer-cross-device-or-invalid");
             return;
         }
         if ((offset & 3u) != 0) {
@@ -32544,6 +32636,7 @@ static bool legacy_pipeline_barrier_inputs_unsupported(
 
 
 static const char *legacy_pipeline_barrier_recording_failure_reason(
+        const PdockerVkCommandBuffer *cmd,
         uint32_t bufferMemoryBarrierCount,
         const VkBufferMemoryBarrier *pBufferMemoryBarriers,
         uint32_t imageMemoryBarrierCount,
@@ -32551,7 +32644,7 @@ static const char *legacy_pipeline_barrier_recording_failure_reason(
     for (uint32_t i = 0; pBufferMemoryBarriers && i < bufferMemoryBarrierCount; ++i) {
         const VkBufferMemoryBarrier *b = &pBufferMemoryBarriers[i];
         const char *reason = buffer_barrier_recording_failure_reason(
-            buffer_handle_lookup(b->buffer),
+            buffer_handle_lookup_for_command_buffer(cmd, b->buffer),
             b->offset,
             b->size,
             b->srcQueueFamilyIndex,
@@ -32561,7 +32654,7 @@ static const char *legacy_pipeline_barrier_recording_failure_reason(
     for (uint32_t i = 0; pImageMemoryBarriers && i < imageMemoryBarrierCount; ++i) {
         const VkImageMemoryBarrier *b = &pImageMemoryBarriers[i];
         const char *reason = image_barrier_recording_failure_reason(
-            image_handle_lookup(b->image),
+            image_handle_lookup_for_command_buffer(cmd, b->image),
             &b->subresourceRange,
             b->srcQueueFamilyIndex,
             b->dstQueueFamilyIndex);
@@ -32579,6 +32672,7 @@ static bool command_buffer_prevalidate_legacy_barrier_recording(
     if (!cmd) return false;
     const char *recording_failure_reason =
         legacy_pipeline_barrier_recording_failure_reason(
+            cmd,
             bufferMemoryBarrierCount, pBufferMemoryBarriers,
             imageMemoryBarrierCount, pImageMemoryBarriers);
     if (!recording_failure_reason) return true;
@@ -32615,7 +32709,7 @@ static PdockerVkBarrierOpRange record_legacy_pipeline_barrier_ops(
     for (uint32_t i = 0; pBufferMemoryBarriers && i < bufferMemoryBarrierCount; ++i) {
         const VkBufferMemoryBarrier *b = &pBufferMemoryBarriers[i];
         record_buffer_barrier_op(commandBuffer,
-                                 buffer_handle_lookup(b->buffer),
+                                 buffer_handle_lookup_for_command_buffer(cmd, b->buffer),
                                  b->offset,
                                  b->size,
                                  (VkAccessFlags2)b->srcAccessMask,
@@ -32628,7 +32722,7 @@ static PdockerVkBarrierOpRange record_legacy_pipeline_barrier_ops(
     for (uint32_t i = 0; pImageMemoryBarriers && i < imageMemoryBarrierCount; ++i) {
         const VkImageMemoryBarrier *b = &pImageMemoryBarriers[i];
         record_image_barrier_op(commandBuffer,
-                                image_handle_lookup(b->image),
+                                image_handle_lookup_for_command_buffer(cmd, b->image),
                                 b->oldLayout,
                                 b->newLayout,
                                 b->subresourceRange,
@@ -32722,9 +32816,14 @@ VKAPI_ATTR void VKAPI_CALL vkCmdCopyBuffer(
         uint32_t regionCount,
         const VkBufferCopy *pRegions) {
     PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
-    PdockerVkBuffer *src = buffer_handle_lookup(srcBuffer);
-    PdockerVkBuffer *dst = buffer_handle_lookup(dstBuffer);
-    if (!cmd || !src || !dst || !src->memory || !dst->memory || !pRegions) return;
+    if (!cmd || !pRegions) return;
+    PdockerVkBuffer *src = buffer_handle_lookup_for_command_buffer(cmd, srcBuffer);
+    PdockerVkBuffer *dst = buffer_handle_lookup_for_command_buffer(cmd, dstBuffer);
+    if (!src || !dst || !src->memory || !dst->memory) {
+        command_buffer_mark_resource_capture_failed(
+            cmd, "copy-buffer-resource-cross-device-or-invalid");
+        return;
+    }
     for (uint32_t i = 0; i < regionCount; ++i) {
         const VkBufferCopy *r = &pRegions[i];
         void *dst_ptr = buffer_ptr(dst, r->dstOffset, r->size);
@@ -32817,9 +32916,14 @@ VKAPI_ATTR void VKAPI_CALL vkCmdCopyBufferToImage(
         uint32_t regionCount,
         const VkBufferImageCopy *pRegions) {
     PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
-    PdockerVkBuffer *src = buffer_handle_lookup(srcBuffer);
-    PdockerVkImage *dst = image_handle_lookup(dstImage);
-    if (!cmd || !src || !dst || !src->memory || !dst->memory || !pRegions) return;
+    if (!cmd || !pRegions) return;
+    PdockerVkBuffer *src = buffer_handle_lookup_for_command_buffer(cmd, srcBuffer);
+    PdockerVkImage *dst = image_handle_lookup_for_command_buffer(cmd, dstImage);
+    if (!src || !dst || !src->memory || !dst->memory) {
+        command_buffer_mark_resource_capture_failed(
+            cmd, "copy-buffer-to-image-resource-cross-device-or-invalid");
+        return;
+    }
     for (uint32_t i = 0; i < regionCount; ++i) {
         record_image_copy_op(cmd,
                              PDOCKER_VK_IMAGE_COPY_BUFFER_TO_IMAGE,
@@ -32838,9 +32942,14 @@ VKAPI_ATTR void VKAPI_CALL vkCmdCopyImageToBuffer(
         uint32_t regionCount,
         const VkBufferImageCopy *pRegions) {
     PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
-    PdockerVkImage *src = image_handle_lookup(srcImage);
-    PdockerVkBuffer *dst = buffer_handle_lookup(dstBuffer);
-    if (!cmd || !src || !dst || !src->memory || !dst->memory || !pRegions) return;
+    if (!cmd || !pRegions) return;
+    PdockerVkImage *src = image_handle_lookup_for_command_buffer(cmd, srcImage);
+    PdockerVkBuffer *dst = buffer_handle_lookup_for_command_buffer(cmd, dstBuffer);
+    if (!src || !dst || !src->memory || !dst->memory) {
+        command_buffer_mark_resource_capture_failed(
+            cmd, "copy-image-to-buffer-resource-cross-device-or-invalid");
+        return;
+    }
     for (uint32_t i = 0; i < regionCount; ++i) {
         record_image_copy_op(cmd,
                              PDOCKER_VK_IMAGE_COPY_IMAGE_TO_BUFFER,
@@ -32904,9 +33013,14 @@ VKAPI_ATTR void VKAPI_CALL vkCmdCopyImage(
         uint32_t regionCount,
         const VkImageCopy *pRegions) {
     PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
-    PdockerVkImage *src = image_handle_lookup(srcImage);
-    PdockerVkImage *dst = image_handle_lookup(dstImage);
-    if (!cmd || !src || !dst || !src->memory || !dst->memory || !pRegions) return;
+    if (!cmd || !pRegions) return;
+    PdockerVkImage *src = image_handle_lookup_for_command_buffer(cmd, srcImage);
+    PdockerVkImage *dst = image_handle_lookup_for_command_buffer(cmd, dstImage);
+    if (!src || !dst || !src->memory || !dst->memory) {
+        command_buffer_mark_resource_capture_failed(
+            cmd, "copy-image-resource-cross-device-or-invalid");
+        return;
+    }
     for (uint32_t i = 0; i < regionCount; ++i) {
         record_image_to_image_copy_op(cmd, src, dst, srcImageLayout, dstImageLayout, &pRegions[i]);
     }
@@ -32964,8 +33078,13 @@ VKAPI_ATTR void VKAPI_CALL vkCmdClearColorImage(
         uint32_t rangeCount,
         const VkImageSubresourceRange *pRanges) {
     PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
-    PdockerVkImage *img = image_handle_lookup(image);
-    if (!cmd || !img || !img->memory || !pColor || !pRanges) return;
+    if (!cmd || !pColor || !pRanges) return;
+    PdockerVkImage *img = image_handle_lookup_for_command_buffer(cmd, image);
+    if (!img || !img->memory) {
+        command_buffer_mark_resource_capture_failed(
+            cmd, "clear-color-image-resource-cross-device-or-invalid");
+        return;
+    }
     for (uint32_t i = 0; i < rangeCount; ++i) {
         record_clear_color_image_op(cmd, img, imageLayout, pColor, &pRanges[i]);
     }
@@ -33022,9 +33141,14 @@ VKAPI_ATTR void VKAPI_CALL vkCmdResolveImage(
         uint32_t regionCount,
         const VkImageResolve *pRegions) {
     PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
-    PdockerVkImage *src = image_handle_lookup(srcImage);
-    PdockerVkImage *dst = image_handle_lookup(dstImage);
-    if (!cmd || !src || !dst || !src->memory || !dst->memory || !pRegions) return;
+    if (!cmd || !pRegions) return;
+    PdockerVkImage *src = image_handle_lookup_for_command_buffer(cmd, srcImage);
+    PdockerVkImage *dst = image_handle_lookup_for_command_buffer(cmd, dstImage);
+    if (!src || !dst || !src->memory || !dst->memory) {
+        command_buffer_mark_resource_capture_failed(
+            cmd, "resolve-image-resource-cross-device-or-invalid");
+        return;
+    }
     for (uint32_t i = 0; i < regionCount; ++i) {
         record_resolve_image_op(cmd, src, dst, srcImageLayout, dstImageLayout, &pRegions[i]);
     }
@@ -33094,9 +33218,14 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBlitImage(
         const VkImageBlit *pRegions,
         VkFilter filter) {
     PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
-    PdockerVkImage *src = image_handle_lookup(srcImage);
-    PdockerVkImage *dst = image_handle_lookup(dstImage);
-    if (!cmd || !src || !dst || !src->memory || !dst->memory || !pRegions) return;
+    if (!cmd || !pRegions) return;
+    PdockerVkImage *src = image_handle_lookup_for_command_buffer(cmd, srcImage);
+    PdockerVkImage *dst = image_handle_lookup_for_command_buffer(cmd, dstImage);
+    if (!src || !dst || !src->memory || !dst->memory) {
+        command_buffer_mark_resource_capture_failed(
+            cmd, "blit-image-resource-cross-device-or-invalid");
+        return;
+    }
     for (uint32_t i = 0; i < regionCount; ++i) {
         record_blit_image_op(cmd, src, dst, srcImageLayout, dstImageLayout, &pRegions[i], filter);
     }
@@ -33153,8 +33282,13 @@ VKAPI_ATTR void VKAPI_CALL vkCmdClearDepthStencilImage(
         uint32_t rangeCount,
         const VkImageSubresourceRange *pRanges) {
     PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
-    PdockerVkImage *img = image_handle_lookup(image);
-    if (!cmd || !img || !img->memory || !pDepthStencil || !pRanges) return;
+    if (!cmd || !pDepthStencil || !pRanges) return;
+    PdockerVkImage *img = image_handle_lookup_for_command_buffer(cmd, image);
+    if (!img || !img->memory) {
+        command_buffer_mark_resource_capture_failed(
+            cmd, "clear-depth-stencil-image-resource-cross-device-or-invalid");
+        return;
+    }
     for (uint32_t i = 0; i < rangeCount; ++i) {
         record_clear_depth_stencil_image_op(cmd, img, imageLayout, pDepthStencil, &pRanges[i]);
     }
@@ -33197,9 +33331,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdCopyBuffer2(
                                                 pCopyBufferInfo->regionCount,
                                                 sizeof(pCopyBufferInfo->pRegions[0]),
                                                 "copy-buffer2-pnext-unsupported")) return;
-    PdockerVkBuffer *src = buffer_handle_lookup(pCopyBufferInfo->srcBuffer);
-    PdockerVkBuffer *dst = buffer_handle_lookup(pCopyBufferInfo->dstBuffer);
-    if (!cmd || !src || !dst || !src->memory || !dst->memory) return;
+    if (!cmd) return;
     for (uint32_t i = 0; i < pCopyBufferInfo->regionCount; ++i) {
         const VkBufferCopy2 *r2 = &pCopyBufferInfo->pRegions[i];
         VkBufferCopy r = {
@@ -33367,8 +33499,13 @@ VKAPI_ATTR void VKAPI_CALL vkCmdFillBuffer(
         VkDeviceSize size,
         uint32_t data) {
     PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
-    PdockerVkBuffer *dst = buffer_handle_lookup(dstBuffer);
-    if (!dst || !dst->memory) return;
+    if (!cmd) return;
+    PdockerVkBuffer *dst = buffer_handle_lookup_for_command_buffer(cmd, dstBuffer);
+    if (!dst || !dst->memory) {
+        command_buffer_mark_resource_capture_failed(
+            cmd, "fill-buffer-resource-cross-device-or-invalid");
+        return;
+    }
     size_t available = buffer_available(dst, dstOffset);
     size_t bytes = size == VK_WHOLE_SIZE ? available : (size_t)size;
     if (bytes > available) bytes = available;
@@ -33399,8 +33536,13 @@ VKAPI_ATTR void VKAPI_CALL vkCmdUpdateBuffer(
         VkDeviceSize dataSize,
         const void *pData) {
     PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
-    PdockerVkBuffer *dst = buffer_handle_lookup(dstBuffer);
-    if (!dst || !dst->memory || !pData) return;
+    if (!cmd || !pData) return;
+    PdockerVkBuffer *dst = buffer_handle_lookup_for_command_buffer(cmd, dstBuffer);
+    if (!dst || !dst->memory) {
+        command_buffer_mark_resource_capture_failed(
+            cmd, "update-buffer-resource-cross-device-or-invalid");
+        return;
+    }
     size_t available = buffer_available(dst, dstOffset);
     size_t bytes = (size_t)dataSize < available ? (size_t)dataSize : available;
     void *dst_ptr = buffer_ptr(dst, dstOffset, bytes);

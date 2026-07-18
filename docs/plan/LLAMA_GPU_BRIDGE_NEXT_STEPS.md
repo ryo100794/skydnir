@@ -10,6 +10,39 @@ llama.cpp itself remains unmodified.
 ## Current Ground Truth
 
 
+### 2026-07-18 CPU/static Vulkan command-transfer and mapped-memory owner lane
+
+Transfer, copy, clear, fill, update, graphics vertex/index binding, dispatch
+indirect, draw-indirect count-buffer capture, and legacy pipeline-barrier
+recording now resolve buffer/image resources through the owning command buffer's
+device id.  A command buffer that attempts to record a resource created by a
+different device is marked failed immediately and `vkEndCommandBuffer` fails
+closed instead of preserving a cross-device handle capture.
+
+Mapped-memory maintenance is no longer a no-op.
+`vkFlushMappedMemoryRanges` and `vkInvalidateMappedMemoryRanges` now validate
+range-array presence, `VkMappedMemoryRange::sType`, unsupported `pNext`,
+live-memory ownership, host-visible memory type, offset bounds, explicit size
+bounds, and `VK_WHOLE_SIZE` before returning success.
+
+This remains generic Vulkan pass-through hardening on the CPU/static correctness
+lane.  It does not change llama.cpp, Dockerfiles, models, prompts, shader bytes,
+or executor-side arithmetic.  The next device run can therefore focus on actual
+Vulkan pass-through behavior and performance with fewer CPU-side stale-handle
+and cross-device aliasing variables.
+
+Evidence: `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`,
+`tests.test_gpu_abi_contract`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_device_owner_rejects_cross_device_memory_resource_misuse`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_command_recording_rejects_cross_device_transfer_resources`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_device_owner_rejects_cross_device_metadata_render_wsi_handles`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_device_owner_rejects_cross_device_command_submit_sync`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_destroy_device_retires_live_device_children_and_queue`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_wsi_surface_swapchain_handles_fail_closed_after_destroy`,
+`scripts/build-gpu-shim.sh`, `scripts/verify-native-payloads.py`,
+`./gradlew :app:assembleDebug`.
+
+
 ### 2026-07-18 CPU/static Vulkan metadata/render/WSI owner lane
 
 Descriptor-set layouts, descriptor pools/sets, descriptor update templates,

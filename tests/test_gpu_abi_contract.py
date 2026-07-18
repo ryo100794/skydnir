@@ -1419,7 +1419,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "cmd->index_buffer_bound",
             "PdockerVkVertexBindingState",
             "record_vertex_buffer_bindings",
-            "binding->buffer = buffer_handle_lookup(pBuffers[i]);",
+            "binding->buffer = buffer_handle_lookup_for_command_buffer(cmd, pBuffers[i]);",
             "binding->offset = pOffsets[i];",
             "binding->size = pSizes ? pSizes[i] : VK_WHOLE_SIZE;",
             "binding->stride = pStrides ? pStrides[i] : 0;",
@@ -9732,12 +9732,12 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VKAPI_ATTR void VKAPI_CALL vkCmdDispatchIndirect", dispatch_body)
         self.assertIn("op->dispatch_indirect = true;", dispatch_body)
         for marker in [
-            "dispatch-indirect-buffer-invalid",
+            "dispatch-indirect-buffer-cross-device-or-invalid",
             "dispatch-indirect-offset-unaligned",
             "cmd->unsupported_descriptor_set_layout = true;",
         ]:
             self.assertIn(marker, dispatch_body)
-        self.assertLess(dispatch_body.index("dispatch-indirect-buffer-invalid"), dispatch_body.index("cmd->dispatch_x = 0;"))
+        self.assertLess(dispatch_body.index("dispatch-indirect-buffer-cross-device-or-invalid"), dispatch_body.index("cmd->dispatch_x = 0;"))
         self.assertLess(dispatch_body.index("dispatch-indirect-offset-unaligned"), dispatch_body.index("cmd->dispatch_x = 0;"))
         self.assertIn("MAP_PROC(vkCmdDispatchIndirect);", icd)
         self.assertIn("resolve_vulkan_dispatch_group_counts", icd)
@@ -12919,6 +12919,9 @@ class GpuAbiContractTest(unittest.TestCase):
         icd = VULKAN_ICD.read_text()
         allocate_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkAllocateMemory", 1)[1].split("VKAPI_ATTR void VKAPI_CALL vkFreeMemory", 1)[0]
         map_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkMapMemory", 1)[1].split("VKAPI_ATTR void VKAPI_CALL vkUnmapMemory", 1)[0]
+        flush_body = c_function_body(icd, "vkFlushMappedMemoryRanges")
+        invalidate_body = c_function_body(icd, "vkInvalidateMappedMemoryRanges")
+        mapped_range_helper = c_function_body(icd, "validate_mapped_memory_ranges")
         for marker in [
             "struct PdockerVkMemory *next;",
             "static PdockerVkMemory *g_memories;",
@@ -12934,6 +12937,20 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("size > (VkDeviceSize)m->size - offset", map_body)
         self.assertIn("return VK_ERROR_MEMORY_MAP_FAILED;", map_body)
         self.assertNotIn("(void)size;", map_body)
+        self.assertIn("validate_mapped_memory_ranges", icd)
+        self.assertIn("memoryRangeCount == 0", mapped_range_helper)
+        self.assertIn("if (!pMemoryRanges) return VK_ERROR_MEMORY_MAP_FAILED;", mapped_range_helper)
+        self.assertIn("range->sType != VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE", mapped_range_helper)
+        self.assertIn("unsupported_create_info_pnext_result", mapped_range_helper)
+        self.assertIn("memory_handle_resolve_for_device(device, range->memory, &memory)", mapped_range_helper)
+        self.assertIn("range->offset > (VkDeviceSize)memory->size", mapped_range_helper)
+        self.assertIn("range->size != VK_WHOLE_SIZE", mapped_range_helper)
+        self.assertIn("range->size > (VkDeviceSize)memory->size - range->offset", mapped_range_helper)
+        self.assertIn("validate_mapped_memory_ranges(", flush_body)
+        self.assertIn("vkFlushMappedMemoryRanges", flush_body)
+        self.assertIn("validate_mapped_memory_ranges(", invalidate_body)
+        self.assertIn("vkInvalidateMappedMemoryRanges", invalidate_body)
+        self.assertNotIn("(void)pMemoryRanges;", flush_body + invalidate_body)
 
     def test_vulkan_buffer_api_validates_live_handles(self):
         icd = VULKAN_ICD.read_text()

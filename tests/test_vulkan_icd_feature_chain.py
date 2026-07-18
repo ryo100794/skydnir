@@ -6896,16 +6896,20 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 return pdocker_vk_image_to_handle(image);
             }
 
-            static VkDeviceMemory make_memory(VkDevice device) {
+            static VkDeviceMemory make_memory_type(VkDevice device, uint32_t memory_type_index) {
                 VkMemoryAllocateInfo info;
                 memset(&info, 0, sizeof(info));
                 info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
                 info.allocationSize = 4096;
-                info.memoryTypeIndex = 0;
+                info.memoryTypeIndex = memory_type_index;
                 VkDeviceMemory memory = VK_NULL_HANDLE;
                 VkResult rc = vkAllocateMemory(device, &info, NULL, &memory);
-                if (rc != VK_SUCCESS) { fprintf(stderr, "make_memory rc=%d\\n", rc); return VK_NULL_HANDLE; }
+                if (rc != VK_SUCCESS) { fprintf(stderr, "make_memory type=%u rc=%d\\n", memory_type_index, rc); return VK_NULL_HANDLE; }
                 return memory;
+            }
+
+            static VkDeviceMemory make_memory(VkDevice device) {
+                return make_memory_type(device, 0);
             }
 
             int main(void) {
@@ -6919,10 +6923,11 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 VkImage image_b = make_color_image(device_b);
                 VkDeviceMemory memory_a = make_memory(device_a);
                 VkDeviceMemory memory_b = make_memory(device_b);
-                if (!buffer_a || !buffer_b || !image_a || !image_b || !memory_a || !memory_b) {
-                    fprintf(stderr, "created buffer_a=%p buffer_b=%p image_a=%p image_b=%p memory_a=%p memory_b=%p\\n",
+                VkDeviceMemory host_memory_a = make_memory_type(device_a, 1);
+                if (!buffer_a || !buffer_b || !image_a || !image_b || !memory_a || !memory_b || !host_memory_a) {
+                    fprintf(stderr, "created buffer_a=%p buffer_b=%p image_a=%p image_b=%p memory_a=%p memory_b=%p host_memory_a=%p\\n",
                             (void *)buffer_a, (void *)buffer_b, (void *)image_a, (void *)image_b,
-                            (void *)memory_a, (void *)memory_b);
+                            (void *)memory_a, (void *)memory_b, (void *)host_memory_a);
                     return 2;
                 }
 
@@ -6930,6 +6935,24 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 if (buffer_handle_lookup_for_device(device_b, buffer_a)) return 4;
                 if (!memory_handle_lookup_for_device(device_a, memory_a)) return 5;
                 if (memory_handle_lookup_for_device(device_b, memory_a)) return 6;
+
+                VkMappedMemoryRange range;
+                memset(&range, 0, sizeof(range));
+                range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+                range.memory = host_memory_a;
+                range.offset = 0;
+                range.size = 64;
+                if (vkFlushMappedMemoryRanges(device_b, 1, &range) == VK_SUCCESS) return 101;
+                if (vkInvalidateMappedMemoryRanges(device_b, 1, &range) == VK_SUCCESS) return 102;
+                if (vkFlushMappedMemoryRanges(device_a, 1, &range) != VK_SUCCESS) return 103;
+                range.offset = 4097;
+                if (vkFlushMappedMemoryRanges(device_a, 1, &range) == VK_SUCCESS) return 104;
+                range.offset = 0;
+                range.size = 4097;
+                if (vkInvalidateMappedMemoryRanges(device_a, 1, &range) == VK_SUCCESS) return 105;
+                range.size = VK_WHOLE_SIZE;
+                if (vkInvalidateMappedMemoryRanges(device_a, 1, &range) != VK_SUCCESS) return 106;
+                if (vkFlushMappedMemoryRanges(device_a, 1, NULL) == VK_SUCCESS) return 107;
 
                 if (vkBindBufferMemory(device_b, buffer_a, memory_a, 0) != VK_ERROR_INITIALIZATION_FAILED) return 7;
                 if (vkBindBufferMemory(device_a, buffer_a, memory_b, 0) != VK_ERROR_INITIALIZATION_FAILED) return 8;
@@ -6994,6 +7017,197 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 if (!buffer_handle_lookup_for_device(device_b, buffer_b)) return 25;
                 if (!image_handle_lookup_for_device(device_b, image_b)) return 26;
                 if (!memory_handle_lookup_for_device(device_b, memory_b)) return 27;
+                vkDestroyDevice(device_b, NULL);
+                return 0;
+            }
+            """).replace("__ICD_SOURCE__", str(ICD_SOURCE))
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
+    def test_command_recording_rejects_cross_device_transfer_resources(self):
+        source = textwrap.dedent("""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "__ICD_SOURCE__"
+
+            static VkDevice make_device(void) {
+                VkDeviceCreateInfo info;
+                memset(&info, 0, sizeof(info));
+                info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                VkDevice device = VK_NULL_HANDLE;
+                if (vkCreateDevice((VkPhysicalDevice)&g_device, &info, NULL, &device) != VK_SUCCESS) return VK_NULL_HANDLE;
+                return device;
+            }
+
+            static VkCommandPool make_pool(VkDevice device) {
+                VkCommandPoolCreateInfo info;
+                memset(&info, 0, sizeof(info));
+                info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+                info.queueFamilyIndex = 0;
+                VkCommandPool pool = VK_NULL_HANDLE;
+                if (vkCreateCommandPool(device, &info, NULL, &pool) != VK_SUCCESS) return VK_NULL_HANDLE;
+                return pool;
+            }
+
+            static VkCommandBuffer make_cmd(VkDevice device, VkCommandPool pool) {
+                VkCommandBufferAllocateInfo info;
+                memset(&info, 0, sizeof(info));
+                info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+                info.commandPool = pool;
+                info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+                info.commandBufferCount = 1;
+                VkCommandBuffer cmd = VK_NULL_HANDLE;
+                if (vkAllocateCommandBuffers(device, &info, &cmd) != VK_SUCCESS) return VK_NULL_HANDLE;
+                return cmd;
+            }
+
+            static VkDeviceMemory make_memory(VkDevice device) {
+                VkMemoryAllocateInfo info;
+                memset(&info, 0, sizeof(info));
+                info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+                info.allocationSize = 4096;
+                info.memoryTypeIndex = 0;
+                VkDeviceMemory memory = VK_NULL_HANDLE;
+                if (vkAllocateMemory(device, &info, NULL, &memory) != VK_SUCCESS) return VK_NULL_HANDLE;
+                return memory;
+            }
+
+            static VkBuffer make_bound_buffer(VkDevice device) {
+                VkBufferCreateInfo info;
+                memset(&info, 0, sizeof(info));
+                info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+                info.size = 1024;
+                info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                             VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                             VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+                             VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+                             VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
+                             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+                info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+                VkBuffer buffer = VK_NULL_HANDLE;
+                if (vkCreateBuffer(device, &info, NULL, &buffer) != VK_SUCCESS) return VK_NULL_HANDLE;
+                VkDeviceMemory memory = make_memory(device);
+                if (!memory) return VK_NULL_HANDLE;
+                if (vkBindBufferMemory(device, buffer, memory, 0) != VK_SUCCESS) return VK_NULL_HANDLE;
+                return buffer;
+            }
+
+            static VkImage make_bound_image(VkDevice device) {
+                PdockerVkImage *image = pdocker_alloc_handle(sizeof(*image));
+                if (!image) return VK_NULL_HANDLE;
+                memset(image, 0, sizeof(*image));
+                image->object_id = next_vulkan_object_generation();
+                image->owner_device_id = device_owner_id_or_zero(device);
+                image->image_type = VK_IMAGE_TYPE_2D;
+                image->format = VK_FORMAT_R8G8B8A8_UNORM;
+                image->extent = (VkExtent3D){16, 16, 1};
+                image->mip_levels = 1;
+                image->array_layers = 1;
+                image->samples = VK_SAMPLE_COUNT_1_BIT;
+                image->tiling = VK_IMAGE_TILING_OPTIMAL;
+                image->usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                               VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                               VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+                image->sharing_mode = VK_SHARING_MODE_EXCLUSIVE;
+                image->initial_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+                image->current_layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+                image->requirements_size = 4096;
+                image->requirements_alignment = PDOCKER_VK_REQUIREMENT_ALIGNMENT;
+                image->memory_type_bits = 1;
+                image->generation = next_vulkan_object_generation();
+                image_register(image);
+                VkImage handle = pdocker_vk_image_to_handle(image);
+                VkDeviceMemory memory = make_memory(device);
+                if (!memory) return VK_NULL_HANDLE;
+                if (vkBindImageMemory(device, handle, memory, 0) != VK_SUCCESS) return VK_NULL_HANDLE;
+                return handle;
+            }
+
+            #define EXPECT_RECORD_FAIL(stmt, code) do { \
+                VkCommandBuffer cmd = make_cmd(device_b, pool_b); \
+                if (!cmd) return (code); \
+                if (vkBeginCommandBuffer(cmd, NULL) != VK_SUCCESS) return (code) + 1; \
+                stmt; \
+                if (vkEndCommandBuffer(cmd) != VK_ERROR_FEATURE_NOT_PRESENT) return (code) + 2; \
+            } while (0)
+
+            int main(void) {
+                VkDevice device_a = make_device();
+                VkDevice device_b = make_device();
+                if (!device_a || !device_b || device_a == device_b) return 1;
+                VkCommandPool pool_b = make_pool(device_b);
+                if (!pool_b) return 2;
+                VkBuffer buffer_a = make_bound_buffer(device_a);
+                VkBuffer buffer_b = make_bound_buffer(device_b);
+                VkImage image_a = make_bound_image(device_a);
+                VkImage image_b = make_bound_image(device_b);
+                if (!buffer_a || !buffer_b || !image_a || !image_b) return 3;
+
+                VkBufferCopy copy_region;
+                memset(&copy_region, 0, sizeof(copy_region));
+                copy_region.size = 16;
+                EXPECT_RECORD_FAIL(vkCmdCopyBuffer(cmd, buffer_a, buffer_b, 1, &copy_region), 10);
+
+                VkBufferImageCopy bic;
+                memset(&bic, 0, sizeof(bic));
+                bic.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                bic.imageSubresource.layerCount = 1;
+                bic.imageExtent = (VkExtent3D){4, 4, 1};
+                EXPECT_RECORD_FAIL(vkCmdCopyBufferToImage(cmd, buffer_b, image_a, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &bic), 20);
+                EXPECT_RECORD_FAIL(vkCmdCopyImageToBuffer(cmd, image_a, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer_b, 1, &bic), 30);
+
+                VkImageCopy image_copy;
+                memset(&image_copy, 0, sizeof(image_copy));
+                image_copy.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                image_copy.srcSubresource.layerCount = 1;
+                image_copy.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                image_copy.dstSubresource.layerCount = 1;
+                image_copy.extent = (VkExtent3D){4, 4, 1};
+                EXPECT_RECORD_FAIL(vkCmdCopyImage(cmd, image_a, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, image_b, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &image_copy), 40);
+
+                VkClearColorValue color;
+                memset(&color, 0, sizeof(color));
+                VkImageSubresourceRange range;
+                memset(&range, 0, sizeof(range));
+                range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                range.levelCount = 1;
+                range.layerCount = 1;
+                EXPECT_RECORD_FAIL(vkCmdClearColorImage(cmd, image_a, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &color, 1, &range), 50);
+
+                EXPECT_RECORD_FAIL(vkCmdFillBuffer(cmd, buffer_a, 0, 16, 0x7fu), 60);
+                uint32_t payload[4] = {1u, 2u, 3u, 4u};
+                EXPECT_RECORD_FAIL(vkCmdUpdateBuffer(cmd, buffer_a, 0, sizeof(payload), payload), 70);
+
+                VkDeviceSize offset = 0;
+                EXPECT_RECORD_FAIL(vkCmdBindVertexBuffers(cmd, 0, 1, &buffer_a, &offset), 80);
+                EXPECT_RECORD_FAIL(vkCmdBindIndexBuffer(cmd, buffer_a, 0, VK_INDEX_TYPE_UINT32), 90);
+                EXPECT_RECORD_FAIL(vkCmdDispatchIndirect(cmd, buffer_a, 0), 100);
+
+                VkBufferMemoryBarrier bb;
+                memset(&bb, 0, sizeof(bb));
+                bb.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+                bb.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+                bb.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                bb.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                bb.buffer = buffer_a;
+                bb.size = VK_WHOLE_SIZE;
+                EXPECT_RECORD_FAIL(vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL, 1, &bb, 0, NULL), 110);
+
+                VkImageMemoryBarrier ib;
+                memset(&ib, 0, sizeof(ib));
+                ib.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+                ib.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+                ib.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+                ib.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+                ib.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                ib.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                ib.image = image_a;
+                ib.subresourceRange = range;
+                EXPECT_RECORD_FAIL(vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL, 0, NULL, 1, &ib), 120);
+
+                vkDestroyDevice(device_a, NULL);
                 vkDestroyDevice(device_b, NULL);
                 return 0;
             }
