@@ -11387,6 +11387,24 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("validate_pipeline_shader_stage_pnext_for_transport", graphics_body)
         self.assertIn('"vkCreateGraphicsPipelines.stage", stage->pNext', graphics_body)
         self.assertIn("Already validated as DEVICE_DEFAULT-only", graphics_body)
+        for marker in [
+            "pipeline_handle_lookup_for_device_checked(",
+            "pipeline_layout_handle_lookup_for_device_checked(",
+            "render_pass_handle_lookup_for_device_checked(",
+            "shader_module_handle_lookup_for_device_checked(",
+            "graphics-pipeline-base-cross-device",
+            "graphics-pipeline-layout-cross-device",
+            "graphics-pipeline-render-pass-cross-device",
+            "graphics-pipeline-shader-cross-device",
+        ]:
+            self.assertIn(marker, graphics_body)
+        for forbidden in [
+            "pipeline_handle_lookup(ci->basePipelineHandle)",
+            "pipeline_layout_handle_lookup(ci->layout)",
+            "render_pass_handle_lookup(ci->renderPass)",
+            "shader_module_handle_lookup(stage->module)",
+        ]:
+            self.assertNotIn(forbidden, graphics_body)
 
 
     def test_vulkan_pipeline_create_noop_flags_are_transportable_hints(self):
@@ -16782,7 +16800,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "command_pool_retire(pool);",
             "command_pool_handle_lookup_for_device(device, commandPool)",
             "render_pass_register(rp);",
-            "render_pass_handle_lookup(ci->renderPass)",
+            "render_pass_handle_lookup_for_device_checked(",
             "render_pass_retire(render_pass_unregister(renderPass));",
             "*pRenderPass = pdocker_vk_render_pass_to_handle(rp);",
             "fb->render_pass = render_pass_handle_lookup_for_device(device, pCreateInfo->renderPass);",

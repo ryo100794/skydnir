@@ -2408,6 +2408,20 @@ static PdockerVkRenderPass *render_pass_handle_lookup_for_device(VkDevice device
     return resolved && device_owner_matches_or_unowned(device, resolved->owner_device_id) ? resolved : NULL;
 }
 
+static PdockerVkRenderPass *render_pass_handle_lookup_for_device_checked(
+        VkDevice device,
+        VkRenderPass renderPass,
+        bool *owner_mismatch_out) {
+    if (owner_mismatch_out) *owner_mismatch_out = false;
+    PdockerVkRenderPass *resolved = render_pass_handle_lookup(renderPass);
+    if (!resolved) return NULL;
+    if (!device_owner_matches_or_unowned(device, resolved->owner_device_id)) {
+        if (owner_mismatch_out) *owner_mismatch_out = true;
+        return NULL;
+    }
+    return resolved;
+}
+
 static bool render_pass_handle_lookup_for_command_buffer_checked(
         const PdockerVkCommandBuffer *cmd,
         VkRenderPass renderPass,
@@ -2596,6 +2610,20 @@ static PdockerVkShaderModule *shader_module_handle_lookup_for_device(VkDevice de
     return resolved && device_owner_matches_or_unowned(device, resolved->owner_device_id) ? resolved : NULL;
 }
 
+static PdockerVkShaderModule *shader_module_handle_lookup_for_device_checked(
+        VkDevice device,
+        VkShaderModule shaderModule,
+        bool *owner_mismatch_out) {
+    if (owner_mismatch_out) *owner_mismatch_out = false;
+    PdockerVkShaderModule *resolved = shader_module_handle_lookup(shaderModule);
+    if (!resolved) return NULL;
+    if (!device_owner_matches_or_unowned(device, resolved->owner_device_id)) {
+        if (owner_mismatch_out) *owner_mismatch_out = true;
+        return NULL;
+    }
+    return resolved;
+}
+
 static void pipeline_layout_register(PdockerVkPipelineLayout *layout) {
     if (!layout) return;
     layout->destroyed = false;
@@ -2646,6 +2674,20 @@ static PdockerVkPipelineLayout *pipeline_layout_handle_lookup(VkPipelineLayout l
 static PdockerVkPipelineLayout *pipeline_layout_handle_lookup_for_device(VkDevice device, VkPipelineLayout layout) {
     PdockerVkPipelineLayout *resolved = pipeline_layout_handle_lookup(layout);
     return resolved && device_owner_matches_or_unowned(device, resolved->owner_device_id) ? resolved : NULL;
+}
+
+static PdockerVkPipelineLayout *pipeline_layout_handle_lookup_for_device_checked(
+        VkDevice device,
+        VkPipelineLayout layout,
+        bool *owner_mismatch_out) {
+    if (owner_mismatch_out) *owner_mismatch_out = false;
+    PdockerVkPipelineLayout *resolved = pipeline_layout_handle_lookup(layout);
+    if (!resolved) return NULL;
+    if (!device_owner_matches_or_unowned(device, resolved->owner_device_id)) {
+        if (owner_mismatch_out) *owner_mismatch_out = true;
+        return NULL;
+    }
+    return resolved;
 }
 
 static bool pipeline_layout_handle_lookup_for_command_buffer_checked(
@@ -2712,6 +2754,20 @@ static PdockerVkPipeline *pipeline_handle_lookup(VkPipeline pipeline) {
 static PdockerVkPipeline *pipeline_handle_lookup_for_device(VkDevice device, VkPipeline pipeline) {
     PdockerVkPipeline *resolved = pipeline_handle_lookup(pipeline);
     return resolved && device_owner_matches_or_unowned(device, resolved->owner_device_id) ? resolved : NULL;
+}
+
+static PdockerVkPipeline *pipeline_handle_lookup_for_device_checked(
+        VkDevice device,
+        VkPipeline pipeline,
+        bool *owner_mismatch_out) {
+    if (owner_mismatch_out) *owner_mismatch_out = false;
+    PdockerVkPipeline *resolved = pipeline_handle_lookup(pipeline);
+    if (!resolved) return NULL;
+    if (!device_owner_matches_or_unowned(device, resolved->owner_device_id)) {
+        if (owner_mismatch_out) *owner_mismatch_out = true;
+        return NULL;
+    }
+    return resolved;
 }
 
 static PdockerVkPipeline *pipeline_handle_lookup_for_command_buffer(const PdockerVkCommandBuffer *cmd, VkPipeline pipeline) {
@@ -27364,12 +27420,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
         if (!pdocker_vk_pipeline_create_flags_transportable(
                 device, ci->flags, ci->basePipelineHandle, ci->basePipelineIndex,
                 i, createInfoCount)) {
-            PdockerVkPipeline *base_pipeline = ci->basePipelineHandle != VK_NULL_HANDLE
-                ? pipeline_handle_lookup(ci->basePipelineHandle)
-                : NULL;
-            if (base_pipeline &&
-                !owner_device_ids_match_or_unowned(pipeline->owner_device_id,
-                                                   base_pipeline->owner_device_id)) {
+            bool base_owner_mismatch = false;
+            if (ci->basePipelineHandle != VK_NULL_HANDLE) {
+                (void)pipeline_handle_lookup_for_device_checked(
+                    device, ci->basePipelineHandle, &base_owner_mismatch);
+            }
+            if (base_owner_mismatch) {
                 trace_icd_runtime_failure("graphics-pipeline-base-cross-device",
                                           VK_ERROR_INITIALIZATION_FAILED);
                 pdocker_vk_pipeline_destroy(pipeline);
@@ -27400,20 +27456,15 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
             }
         }
         pipeline->dynamic_state_mask = captured_dynamic_state_mask;
-        PdockerVkPipelineLayout *raw_pipeline_layout =
-            pipeline_layout_handle_lookup(ci->layout);
-        if (raw_pipeline_layout &&
-            !owner_device_ids_match_or_unowned(pipeline->owner_device_id,
-                                               raw_pipeline_layout->owner_device_id)) {
+        bool layout_owner_mismatch = false;
+        pipeline->layout = pipeline_layout_handle_lookup_for_device_checked(
+            device, ci->layout, &layout_owner_mismatch);
+        if (layout_owner_mismatch) {
             trace_icd_runtime_failure("graphics-pipeline-layout-cross-device",
                                       VK_ERROR_INITIALIZATION_FAILED);
             pdocker_vk_pipeline_destroy(pipeline);
             return VK_ERROR_INITIALIZATION_FAILED;
         }
-        pipeline->layout = raw_pipeline_layout &&
-            device_owner_matches_or_unowned(device, raw_pipeline_layout->owner_device_id)
-                ? raw_pipeline_layout
-                : NULL;
         if (!pipeline->layout) {
             trace_icd_runtime_failure("graphics-pipeline-layout-invalid",
                                       VK_ERROR_INITIALIZATION_FAILED);
@@ -27421,20 +27472,15 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
             return VK_ERROR_INITIALIZATION_FAILED;
         }
         if (ci->renderPass) {
-            PdockerVkRenderPass *raw_render_pass =
-                render_pass_handle_lookup(ci->renderPass);
-            if (raw_render_pass &&
-                !owner_device_ids_match_or_unowned(pipeline->owner_device_id,
-                                                   raw_render_pass->owner_device_id)) {
+            bool render_pass_owner_mismatch = false;
+            pipeline->render_pass = render_pass_handle_lookup_for_device_checked(
+                device, ci->renderPass, &render_pass_owner_mismatch);
+            if (render_pass_owner_mismatch) {
                 trace_icd_runtime_failure("graphics-pipeline-render-pass-cross-device",
                                           VK_ERROR_INITIALIZATION_FAILED);
                 pdocker_vk_pipeline_destroy(pipeline);
                 return VK_ERROR_INITIALIZATION_FAILED;
             }
-            pipeline->render_pass = raw_render_pass &&
-                device_owner_matches_or_unowned(device, raw_render_pass->owner_device_id)
-                    ? raw_render_pass
-                    : NULL;
         } else {
             pipeline->render_pass = NULL;
         }
@@ -27474,20 +27520,15 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
             pipeline->shader_stage_flags |= stage ? stage->stage : 0;
             pipeline->graphics_stage_flags[stage_i] = stage ? stage->stage : 0;
             if (stage && stage->module != VK_NULL_HANDLE) {
-                PdockerVkShaderModule *raw_shader =
-                    shader_module_handle_lookup(stage->module);
-                if (raw_shader &&
-                    !owner_device_ids_match_or_unowned(pipeline->owner_device_id,
-                                                       raw_shader->owner_device_id)) {
+                bool shader_owner_mismatch = false;
+                pipeline->graphics_stage_modules[stage_i] = shader_module_handle_lookup_for_device_checked(
+                    device, stage->module, &shader_owner_mismatch);
+                if (shader_owner_mismatch) {
                     trace_icd_runtime_failure("graphics-pipeline-shader-cross-device",
                                               VK_ERROR_INITIALIZATION_FAILED);
                     pdocker_vk_pipeline_destroy(pipeline);
                     return VK_ERROR_INITIALIZATION_FAILED;
                 }
-                pipeline->graphics_stage_modules[stage_i] = raw_shader &&
-                    device_owner_matches_or_unowned(device, raw_shader->owner_device_id)
-                        ? raw_shader
-                        : NULL;
             } else {
                 pipeline->graphics_stage_modules[stage_i] = NULL;
             }

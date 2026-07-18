@@ -10,6 +10,25 @@ llama.cpp itself remains unmodified.
 ## Current Ground Truth
 
 
+### 2026-07-18 CPU/static Vulkan graphics-pipeline owner lane
+
+`vkCreateGraphicsPipelines` now resolves base pipeline, pipeline layout,
+render pass, and shader module handles through device-scoped checked helpers.
+The helpers centralize owner validation at the lookup boundary while preserving
+the existing `graphics-pipeline-*-cross-device` and invalid-handle failure
+paths. The graphics-pipeline body no longer performs raw lookups for those
+transported handles directly.
+
+This is CPU/static Vulkan pass-through hardening only.  It does not change
+llama.cpp, Dockerfiles, models, prompts, shader bytes, or executor arithmetic.
+
+Evidence: `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`,
+`tests.test_gpu_abi_contract`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_device_owner_rejects_cross_device_metadata_render_wsi_handles`,
+`scripts/build-gpu-shim.sh`, `scripts/verify-native-payloads.py`,
+`./gradlew :app:assembleDebug`.
+
+
 ### 2026-07-18 CPU/static Vulkan event-command owner lane
 
 Event command recording now resolves `VkEvent` handles through a

@@ -7874,6 +7874,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 VkDescriptorSetLayout layout_b = make_layout(device_b);
                 VkDescriptorPool pool_a = make_pool(device_a);
                 VkShaderModule shader_a = make_shader(device_a);
+                VkShaderModule shader_b = make_shader(device_b);
                 VkPipelineLayout pipeline_layout_a = make_pipeline_layout(device_a, layout_a);
                 VkPipelineLayout pipeline_layout_b = make_pipeline_layout(device_b, layout_b);
                 VkPipelineCache cache_a = VK_NULL_HANDLE;
@@ -7891,6 +7892,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 if (!layout_b) return 302;
                 if (!pool_a) return 303;
                 if (!shader_a) return 304;
+                if (!shader_b) return 314;
                 if (!pipeline_layout_a) return 305;
                 if (!pipeline_layout_b) return 306;
                 if (!cache_a) return 307;
@@ -7963,6 +7965,42 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 VkPipeline graphics_pipeline = VK_NULL_HANDLE;
                 if (vkCreateGraphicsPipelines(device_b, VK_NULL_HANDLE, 1, &gp, NULL, &graphics_pipeline) != VK_ERROR_INITIALIZATION_FAILED) return 401;
                 if (graphics_pipeline != VK_NULL_HANDLE) return 402;
+
+                graphics_stage.module = shader_b;
+                gp.layout = pipeline_layout_a;
+                graphics_pipeline = VK_NULL_HANDLE;
+                if (vkCreateGraphicsPipelines(device_b, VK_NULL_HANDLE, 1, &gp, NULL, &graphics_pipeline) != VK_ERROR_INITIALIZATION_FAILED) return 425;
+                if (graphics_pipeline != VK_NULL_HANDLE) return 426;
+
+                gp.layout = pipeline_layout_b;
+                gp.renderPass = render_pass_a;
+                graphics_pipeline = VK_NULL_HANDLE;
+                if (vkCreateGraphicsPipelines(device_b, VK_NULL_HANDLE, 1, &gp, NULL, &graphics_pipeline) != VK_ERROR_INITIALIZATION_FAILED) return 427;
+                if (graphics_pipeline != VK_NULL_HANDLE) return 428;
+                gp.renderPass = VK_NULL_HANDLE;
+
+                VkPipelineShaderStageCreateInfo graphics_stage_a = graphics_stage;
+                graphics_stage_a.module = shader_a;
+                VkGraphicsPipelineCreateInfo base_gp = gp;
+                base_gp.flags = 0;
+                base_gp.basePipelineHandle = VK_NULL_HANDLE;
+                base_gp.basePipelineIndex = -1;
+                base_gp.layout = pipeline_layout_a;
+                base_gp.pStages = &graphics_stage_a;
+                VkPipeline base_pipeline_a = VK_NULL_HANDLE;
+                if (vkCreateGraphicsPipelines(device_a, VK_NULL_HANDLE, 1, &base_gp, NULL, &base_pipeline_a) != VK_SUCCESS) return 429;
+                if (base_pipeline_a == VK_NULL_HANDLE) return 430;
+                gp.flags = VK_PIPELINE_CREATE_DERIVATIVE_BIT;
+                gp.basePipelineHandle = base_pipeline_a;
+                gp.basePipelineIndex = -1;
+                gp.layout = pipeline_layout_b;
+                gp.pStages = &graphics_stage;
+                graphics_pipeline = VK_NULL_HANDLE;
+                if (vkCreateGraphicsPipelines(device_b, VK_NULL_HANDLE, 1, &gp, NULL, &graphics_pipeline) != VK_ERROR_INITIALIZATION_FAILED) return 431;
+                if (graphics_pipeline != VK_NULL_HANDLE) return 432;
+                gp.flags = 0;
+                gp.basePipelineHandle = VK_NULL_HANDLE;
+                gp.basePipelineIndex = -1;
 
                 VkFramebuffer fb_wrong = VK_NULL_HANDLE;
                 VkFramebufferCreateInfo fb_info;
