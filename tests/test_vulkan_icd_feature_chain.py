@@ -1241,7 +1241,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 surface_info.sType = VK_STRUCTURE_TYPE_HEADLESS_SURFACE_CREATE_INFO_EXT;
                 VkSurfaceKHR surface = VK_NULL_HANDLE;
                 if (vkCreateHeadlessSurfaceEXT(VK_NULL_HANDLE, &surface_info, NULL, &surface) != VK_SUCCESS || !surface) return 2;
-                PdockerVkSurface *surface_obj = surface_handle_lookup(surface);
+                PdockerVkSurface *surface_obj = surface_handle_lookup_for_instance(VK_NULL_HANDLE, surface);
                 if (!surface_obj) return 3;
 
                 VkSwapchainKHR swapchain = make_registered_swapchain(surface_obj);
@@ -1302,15 +1302,113 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 if (vkQueuePresentKHR((VkQueue)&g_queue, &present) != VK_ERROR_INITIALIZATION_FAILED) return 24;
 
                 vkDestroySurfaceKHR(VK_NULL_HANDLE, surface, NULL);
-                if (surface_handle_lookup(surface)) return 25;
+                if (surface_handle_lookup_for_instance(VK_NULL_HANDLE, surface)) return 25;
                 VkDeviceGroupPresentModeFlagsKHR modes = 123;
                 if (vkGetDeviceGroupSurfacePresentModesKHR(VK_NULL_HANDLE, surface, &modes) != VK_ERROR_SURFACE_LOST_KHR) return 26;
                 if (modes != 0) return 27;
-                if (make_registered_swapchain(surface_handle_lookup(surface)) != VK_NULL_HANDLE) return 28;
+                if (make_registered_swapchain(surface_handle_lookup_for_instance(VK_NULL_HANDLE, surface)) != VK_NULL_HANDLE) return 28;
                 return 0;
             }}
             """
         )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_wsi_surface_owner_scope_rejects_cross_instance_device_paths(self):
+        sc = chr(59)
+        amp = chr(38)
+        c_lines = [
+            "#include <stdint.h>",
+            "#include <stdio.h>",
+            "#include <string.h>",
+            "#include \"__ICD_SOURCE__\"",
+            "",
+            "static VkInstance make_instance(void) {",
+            "    VkInstanceCreateInfo info" + sc,
+            "    memset(" + amp + "info, 0, sizeof(info))" + sc,
+            "    info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO" + sc,
+            "    VkInstance instance = VK_NULL_HANDLE" + sc,
+            "    if (vkCreateInstance(" + amp + "info, NULL, " + amp + "instance) != VK_SUCCESS) return VK_NULL_HANDLE" + sc,
+            "    return instance" + sc,
+            "}",
+            "",
+            "static VkDevice make_device_for_instance(VkInstance instance) {",
+            "    uint32_t count = 1" + sc,
+            "    VkPhysicalDevice physical = VK_NULL_HANDLE" + sc,
+            "    if (vkEnumeratePhysicalDevices(instance, " + amp + "count, " + amp + "physical) != VK_SUCCESS) return VK_NULL_HANDLE" + sc,
+            "    if (count != 1) return VK_NULL_HANDLE" + sc,
+            "    if (physical != (VkPhysicalDevice)" + amp + "g_device) return VK_NULL_HANDLE" + sc,
+            "    VkDeviceCreateInfo info" + sc,
+            "    memset(" + amp + "info, 0, sizeof(info))" + sc,
+            "    info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO" + sc,
+            "    VkDevice device = VK_NULL_HANDLE" + sc,
+            "    if (vkCreateDevice(physical, " + amp + "info, NULL, " + amp + "device) != VK_SUCCESS) return VK_NULL_HANDLE" + sc,
+            "    return device" + sc,
+            "}",
+            "",
+            "static VkSurfaceKHR make_surface(VkInstance instance) {",
+            "    VkHeadlessSurfaceCreateInfoEXT info" + sc,
+            "    memset(" + amp + "info, 0, sizeof(info))" + sc,
+            "    info.sType = VK_STRUCTURE_TYPE_HEADLESS_SURFACE_CREATE_INFO_EXT" + sc,
+            "    VkSurfaceKHR surface = VK_NULL_HANDLE" + sc,
+            "    if (vkCreateHeadlessSurfaceEXT(instance, " + amp + "info, NULL, " + amp + "surface) != VK_SUCCESS) return VK_NULL_HANDLE" + sc,
+            "    return surface" + sc,
+            "}",
+            "",
+            "static void fill_swapchain_info(VkSurfaceKHR surface, VkSwapchainCreateInfoKHR *info) {",
+            "    memset(info, 0, sizeof(*info))" + sc,
+            "    info->sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR" + sc,
+            "    info->surface = surface" + sc,
+            "    info->minImageCount = 2" + sc,
+            "    info->imageFormat = VK_FORMAT_R8G8B8A8_UNORM" + sc,
+            "    info->imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR" + sc,
+            "    info->imageExtent = (VkExtent2D){640, 480}" + sc,
+            "    info->imageArrayLayers = 1" + sc,
+            "    info->imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT" + sc,
+            "    info->imageSharingMode = VK_SHARING_MODE_EXCLUSIVE" + sc,
+            "    info->preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR" + sc,
+            "    info->compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR" + sc,
+            "    info->presentMode = VK_PRESENT_MODE_FIFO_KHR" + sc,
+            "}",
+            "",
+            "int main(void) {",
+            "    unsetenv(\"PDOCKER_VULKAN_DISABLE_V5_OBJECT_TRANSPORT\")" + sc,
+            "    VkInstance instance_a = make_instance()" + sc,
+            "    VkInstance instance_b = make_instance()" + sc,
+            "    if (!instance_a) return 1" + sc,
+            "    if (!instance_b) return 2" + sc,
+            "    VkDevice device_a = make_device_for_instance(instance_a)" + sc,
+            "    if (!device_a) return 3" + sc,
+            "    VkSurfaceKHR surface_a = make_surface(instance_a)" + sc,
+            "    if (!surface_a) return 4" + sc,
+            "    if (!surface_handle_lookup_for_instance(instance_a, surface_a)) return 5" + sc,
+            "    if (surface_handle_lookup_for_instance(instance_b, surface_a)) return 6" + sc,
+            "    VkDevice device_b = make_device_for_instance(instance_b)" + sc,
+            "    if (!device_b) return 7" + sc,
+            "    if (!surface_handle_lookup_for_device(device_a, surface_a)) return 8" + sc,
+            "    if (surface_handle_lookup_for_device(device_b, surface_a)) return 9" + sc,
+            "    if (!pdocker_vk_object_handle_owned_by_device(device_a, VK_OBJECT_TYPE_SURFACE_KHR, (uint64_t)surface_a)) return 10" + sc,
+            "    if (pdocker_vk_object_handle_owned_by_device(device_b, VK_OBJECT_TYPE_SURFACE_KHR, (uint64_t)surface_a)) return 11" + sc,
+            "    VkSurfaceCapabilitiesKHR caps" + sc,
+            "    memset(" + amp + "caps, 0, sizeof(caps))" + sc,
+            "    if (vkGetPhysicalDeviceSurfaceCapabilitiesKHR((VkPhysicalDevice)" + amp + "g_device, surface_a, " + amp + "caps) != VK_ERROR_SURFACE_LOST_KHR) return 12" + sc,
+            "    VkSwapchainCreateInfoKHR info" + sc,
+            "    fill_swapchain_info(surface_a, " + amp + "info)" + sc,
+            "    VkSwapchainKHR wrong_swapchain = VK_NULL_HANDLE" + sc,
+            "    if (vkCreateSwapchainKHR(device_b, " + amp + "info, NULL, " + amp + "wrong_swapchain) != VK_ERROR_SURFACE_LOST_KHR) return 13" + sc,
+            "    if (wrong_swapchain != VK_NULL_HANDLE) return 14" + sc,
+            "    vkDestroySurfaceKHR(instance_b, surface_a, NULL)" + sc,
+            "    if (!surface_handle_lookup_for_instance(instance_a, surface_a)) return 15" + sc,
+            "    vkDestroySurfaceKHR(instance_a, surface_a, NULL)" + sc,
+            "    if (surface_handle_lookup_for_instance(instance_a, surface_a)) return 16" + sc,
+            "    vkDestroyDevice(device_b, NULL)" + sc,
+            "    vkDestroyDevice(device_a, NULL)" + sc,
+            "    vkDestroyInstance(instance_b, NULL)" + sc,
+            "    vkDestroyInstance(instance_a, NULL)" + sc,
+            "    return 0" + sc,
+            "}",
+        ]
+        source = chr(10).join(c_lines).replace("__ICD_SOURCE__", str(ICD_SOURCE))
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
@@ -5155,7 +5253,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 reset_test_command_buffer(&cmd, 0, 0);
                 vkCmdBindIndexBuffer((VkCommandBuffer)&cmd, buffer, 0, VK_INDEX_TYPE_UINT16);
                 if (!cmd.recording_failed ||
-                    strcmp(cmd.recording_failure_reason, "graphics-index-buffer-range-invalid") != 0) {{
+                    strcmp(cmd.recording_failure_reason, "graphics-index-buffer-cross-device-or-invalid") != 0) {{
                     fprintf(stderr, "stale index buffer did not fail closed: %s\\n",
                             cmd.recording_failure_reason ? cmd.recording_failure_reason : "<none>");
                     return 9;
@@ -7847,7 +7945,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 surface_info.sType = VK_STRUCTURE_TYPE_HEADLESS_SURFACE_CREATE_INFO_EXT;
                 VkSurfaceKHR surface_handle = VK_NULL_HANDLE;
                 if (vkCreateHeadlessSurfaceEXT(VK_NULL_HANDLE, &surface_info, NULL, &surface_handle) != VK_SUCCESS) return VK_NULL_HANDLE;
-                PdockerVkSurface *surface = surface_handle_lookup(surface_handle);
+                PdockerVkSurface *surface = surface_handle_lookup_for_device(device, surface_handle);
                 if (!surface) return VK_NULL_HANDLE;
                 PdockerVkSwapchain *swapchain = pdocker_alloc_handle(sizeof(*swapchain));
                 if (!swapchain) return VK_NULL_HANDLE;
@@ -9051,8 +9149,8 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 VkShaderModuleValidationCacheCreateInfoEXT cache_info;
                 memset(&cache_info, 0, sizeof(cache_info));
                 cache_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_VALIDATION_CACHE_CREATE_INFO_EXT;
-                if (validate_shader_module_create_pnext(&cache_info, 0) == VK_SUCCESS) return 30;
-                if (validate_shader_module_create_pnext(&cache_info, PDOCKER_VK_DEVICE_EXT_EXT_VALIDATION_CACHE) != VK_SUCCESS) return 31;
+                if (validate_shader_module_create_pnext(VK_NULL_HANDLE, &cache_info, 0) == VK_SUCCESS) return 30;
+                if (validate_shader_module_create_pnext(VK_NULL_HANDLE, &cache_info, PDOCKER_VK_DEVICE_EXT_EXT_VALIDATION_CACHE) != VK_SUCCESS) return 31;
             #endif
                 return 0;
             }}

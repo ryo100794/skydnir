@@ -1712,7 +1712,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertRegex(create_body, r"(pdocker_alloc_handle|calloc|malloc)")
 
         destroy_body = c_function_body(icd, "vkDestroySurfaceKHR")
-        self.assertIn("surface_unregister(surface)", destroy_body)
+        self.assertIn("surface_unregister_for_instance(instance, surface)", destroy_body)
         self.assertIn("surface_retire(s);", destroy_body)
 
         support_body = c_function_body(icd, "vkGetPhysicalDeviceSurfaceSupportKHR")
@@ -1804,6 +1804,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VK_IMAGE_USAGE_SAMPLED_BIT", c_function_body(icd, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR"))
         self.assertIn("bool acquired[PDOCKER_VK_MAX_SWAPCHAIN_IMAGES];", icd)
         self.assertIn("bool swapchain_owned;", icd)
+        self.assertIn("uint64_t owner_instance_id;", icd)
+        self.assertIn("surface_handle_lookup_for_device(device, pCreateInfo->surface)", create_body)
 
         destroy_body = c_function_body(icd, "vkDestroySwapchainKHR")
         self.assertIn("swapchain_retire(sc);", destroy_body)
@@ -16858,10 +16860,12 @@ class GpuAbiContractTest(unittest.TestCase):
             "framebuffer_retire(framebuffer_unregister(framebuffer));",
             "*pFramebuffer = pdocker_vk_framebuffer_to_handle(fb);",
             "surface_register(surface);",
+            "surface->owner_instance_id = owner_instance_id;",
             "*pSurface = pdocker_vk_surface_to_handle(surface);",
             "surface_retire(s);",
-            "pdocker_vk_headless_surface_valid(surface_handle_lookup(surface))",
-            "PdockerVkSurface *surface = surface_handle_lookup(pCreateInfo->surface);",
+            "surface_handle_lookup_for_physical_device(physicalDevice, surface)",
+            "surface_handle_lookup_for_device(device, surface)",
+            "PdockerVkSurface *surface = surface_handle_lookup_for_device(device, pCreateInfo->surface);",
             "swapchain_register(swapchain);",
             "*pSwapchain = pdocker_vk_swapchain_to_handle(swapchain);",
             "swapchain_retire(sc);",

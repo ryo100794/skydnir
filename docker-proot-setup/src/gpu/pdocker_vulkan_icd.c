@@ -693,6 +693,7 @@ struct PdockerVkImageView {
 };
 
 struct PdockerVkSurface {
+    uint64_t owner_instance_id;
     PdockerVkSurfaceKind kind;
     VkExtent2D default_extent;
     uint64_t generation;
@@ -1928,6 +1929,16 @@ static bool instance_handle_resolve(VkInstance instance, PdockerVkInstance **out
     return false;
 }
 
+static bool instance_handle_object_id(VkInstance instance, uint64_t *out_object_id) {
+    PdockerVkInstance *pdocker_instance = NULL;
+    if (out_object_id) *out_object_id = 0;
+    if (instance == VK_NULL_HANDLE) return true;
+    if (!instance_handle_resolve(instance, &pdocker_instance)) return false;
+    if (!pdocker_instance || pdocker_instance->object_id == 0) return false;
+    if (out_object_id) *out_object_id = pdocker_instance->object_id;
+    return true;
+}
+
 static void device_register(PdockerVkDevice *device) {
     if (!device) return;
     device->next = g_devices;
@@ -1992,6 +2003,34 @@ static bool owner_device_ids_match_or_unowned(uint64_t lhs_owner_device_id, uint
     return lhs_owner_device_id == 0 ||
            rhs_owner_device_id == 0 ||
            lhs_owner_device_id == rhs_owner_device_id;
+}
+
+static bool physical_device_instance_object_id(
+        VkPhysicalDevice physicalDevice,
+        uint64_t *out_instance_object_id) {
+    if (out_instance_object_id) *out_instance_object_id = 0;
+    if (physicalDevice == VK_NULL_HANDLE) return true;
+    if (physicalDevice != (VkPhysicalDevice)&g_device) return false;
+    if (g_device.instance_object_id == 0) return false;
+    if (out_instance_object_id) *out_instance_object_id = g_device.instance_object_id;
+    return true;
+}
+
+static bool device_instance_object_id(VkDevice device, uint64_t *out_instance_object_id) {
+    PdockerVkDevice *pdocker_device = NULL;
+    if (out_instance_object_id) *out_instance_object_id = 0;
+    if (device == VK_NULL_HANDLE) return true;
+    if (!device_handle_resolve(device, &pdocker_device)) return false;
+    if (!pdocker_device || pdocker_device->instance_object_id == 0) return false;
+    if (out_instance_object_id) *out_instance_object_id = pdocker_device->instance_object_id;
+    return true;
+}
+
+static bool instance_owner_ids_match_or_unowned(
+        uint64_t expected_instance_object_id,
+        uint64_t owner_instance_object_id) {
+    return owner_instance_object_id == 0 ||
+           expected_instance_object_id == owner_instance_object_id;
 }
 
 static void memory_register(PdockerVkMemory *memory) {
@@ -3478,21 +3517,6 @@ static void surface_register(PdockerVkSurface *surface) {
     g_surfaces = surface;
 }
 
-static PdockerVkSurface *surface_unregister(VkSurfaceKHR surface) {
-    PdockerVkSurface *target = surface_handle_target(surface);
-    if (!target) return NULL;
-    PdockerVkSurface **link = &g_surfaces;
-    while (*link) {
-        if (*link == target) {
-            *link = target->next;
-            target->next = NULL;
-            return target;
-        }
-        link = &(*link)->next;
-    }
-    return NULL;
-}
-
 static void surface_retire(PdockerVkSurface *surface) {
     if (!surface || surface->destroyed) return;
     surface->destroyed = true;
@@ -3516,6 +3540,59 @@ static bool surface_handle_resolve(VkSurfaceKHR surface, PdockerVkSurface **out_
 static PdockerVkSurface *surface_handle_lookup(VkSurfaceKHR surface) {
     PdockerVkSurface *resolved = NULL;
     return surface_handle_resolve(surface, &resolved) ? resolved : NULL;
+}
+
+static PdockerVkSurface *surface_handle_lookup_for_instance(
+        VkInstance instance,
+        VkSurfaceKHR surface) {
+    uint64_t instance_object_id = 0;
+    if (!instance_handle_object_id(instance, &instance_object_id)) return NULL;
+    PdockerVkSurface *resolved = surface_handle_lookup(surface);
+    return resolved && instance_owner_ids_match_or_unowned(
+        instance_object_id, resolved->owner_instance_id) ? resolved : NULL;
+}
+
+static PdockerVkSurface *surface_handle_lookup_for_physical_device(
+        VkPhysicalDevice physicalDevice,
+        VkSurfaceKHR surface) {
+    uint64_t instance_object_id = 0;
+    if (!physical_device_instance_object_id(physicalDevice, &instance_object_id)) return NULL;
+    PdockerVkSurface *resolved = surface_handle_lookup(surface);
+    return resolved && instance_owner_ids_match_or_unowned(
+        instance_object_id, resolved->owner_instance_id) ? resolved : NULL;
+}
+
+static PdockerVkSurface *surface_handle_lookup_for_device(
+        VkDevice device,
+        VkSurfaceKHR surface) {
+    uint64_t instance_object_id = 0;
+    if (!device_instance_object_id(device, &instance_object_id)) return NULL;
+    PdockerVkSurface *resolved = surface_handle_lookup(surface);
+    return resolved && instance_owner_ids_match_or_unowned(
+        instance_object_id, resolved->owner_instance_id) ? resolved : NULL;
+}
+
+static PdockerVkSurface *surface_unregister_for_instance(
+        VkInstance instance,
+        VkSurfaceKHR surface) {
+    uint64_t instance_object_id = 0;
+    if (!instance_handle_object_id(instance, &instance_object_id)) return NULL;
+    PdockerVkSurface *target = surface_handle_target(surface);
+    if (!target) return NULL;
+    PdockerVkSurface **link = &g_surfaces;
+    while (*link) {
+        if (*link == target) {
+            if (!instance_owner_ids_match_or_unowned(
+                    instance_object_id, target->owner_instance_id)) {
+                return NULL;
+            }
+            *link = target->next;
+            target->next = NULL;
+            return target;
+        }
+        link = &(*link)->next;
+    }
+    return NULL;
 }
 
 static PdockerVkSwapchain *swapchain_handle_target(VkSwapchainKHR swapchain) {
@@ -28680,7 +28757,6 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateHeadlessSurfaceEXT(
         const VkHeadlessSurfaceCreateInfoEXT *pCreateInfo,
         const VkAllocationCallbacks *pAllocator,
         VkSurfaceKHR *pSurface) {
-    (void)instance;
     (void)pAllocator;
     if (!pCreateInfo || !pSurface) return VK_ERROR_INITIALIZATION_FAILED;
     *pSurface = VK_NULL_HANDLE;
@@ -28695,9 +28771,14 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateHeadlessSurfaceEXT(
         trace_icd_runtime_failure("headless-surface-flags-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }
+    uint64_t owner_instance_id = 0;
+    if (!instance_handle_object_id(instance, &owner_instance_id)) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
     PdockerVkSurface *surface = pdocker_alloc_handle(sizeof(*surface));
     if (!surface) return VK_ERROR_OUT_OF_HOST_MEMORY;
     memset(surface, 0, sizeof(*surface));
+    surface->owner_instance_id = owner_instance_id;
     surface->kind = PDOCKER_VK_SURFACE_HEADLESS;
     surface->default_extent = (VkExtent2D){640u, 480u};
     surface->generation = next_vulkan_object_generation();
@@ -28710,9 +28791,9 @@ VKAPI_ATTR void VKAPI_CALL vkDestroySurfaceKHR(
         VkInstance instance,
         VkSurfaceKHR surface,
         const VkAllocationCallbacks *pAllocator) {
-    (void)instance;
     (void)pAllocator;
-    PdockerVkSurface *s = surface_unregister(surface);
+    if (!surface_handle_lookup_for_instance(instance, surface)) return;
+    PdockerVkSurface *s = surface_unregister_for_instance(instance, surface);
     if (!s) return;
     surface_retire(s);
 }
@@ -28722,9 +28803,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceSupportKHR(
         uint32_t queueFamilyIndex,
         VkSurfaceKHR surface,
         VkBool32 *pSupported) {
-    (void)physicalDevice;
     if (!pSupported) return VK_ERROR_INITIALIZATION_FAILED;
-    *pSupported = (pdocker_vk_headless_surface_valid(surface_handle_lookup(surface)) &&
+    *pSupported = (pdocker_vk_headless_surface_valid(surface_handle_lookup_for_physical_device(physicalDevice, surface)) &&
                    queueFamilyIndex < PDOCKER_VK_ADVERTISED_QUEUE_FAMILY_COUNT)
         ? VK_TRUE
         : VK_FALSE;
@@ -28735,9 +28815,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
         VkPhysicalDevice physicalDevice,
         VkSurfaceKHR surface,
         VkSurfaceCapabilitiesKHR *pSurfaceCapabilities) {
-    (void)physicalDevice;
     if (!pSurfaceCapabilities) return VK_ERROR_INITIALIZATION_FAILED;
-    if (!pdocker_vk_headless_surface_valid(surface_handle_lookup(surface))) {
+    if (!pdocker_vk_headless_surface_valid(surface_handle_lookup_for_physical_device(physicalDevice, surface))) {
         return VK_ERROR_SURFACE_LOST_KHR;
     }
     memset(pSurfaceCapabilities, 0, sizeof(*pSurfaceCapabilities));
@@ -28764,9 +28843,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceFormatsKHR(
         VkSurfaceKHR surface,
         uint32_t *pSurfaceFormatCount,
         VkSurfaceFormatKHR *pSurfaceFormats) {
-    (void)physicalDevice;
     if (!pSurfaceFormatCount) return VK_ERROR_INITIALIZATION_FAILED;
-    if (!pdocker_vk_headless_surface_valid(surface_handle_lookup(surface))) {
+    if (!pdocker_vk_headless_surface_valid(surface_handle_lookup_for_physical_device(physicalDevice, surface))) {
         *pSurfaceFormatCount = 0;
         return VK_ERROR_SURFACE_LOST_KHR;
     }
@@ -28790,9 +28868,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfacePresentModesKHR(
         VkSurfaceKHR surface,
         uint32_t *pPresentModeCount,
         VkPresentModeKHR *pPresentModes) {
-    (void)physicalDevice;
     if (!pPresentModeCount) return VK_ERROR_INITIALIZATION_FAILED;
-    if (!pdocker_vk_headless_surface_valid(surface_handle_lookup(surface))) {
+    if (!pdocker_vk_headless_surface_valid(surface_handle_lookup_for_physical_device(physicalDevice, surface))) {
         *pPresentModeCount = 0;
         return VK_ERROR_SURFACE_LOST_KHR;
     }
@@ -28826,9 +28903,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetDeviceGroupSurfacePresentModesKHR(
         VkDevice device,
         VkSurfaceKHR surface,
         VkDeviceGroupPresentModeFlagsKHR *pModes) {
-    (void)device;
     if (!pModes) return VK_ERROR_INITIALIZATION_FAILED;
-    if (!pdocker_vk_headless_surface_valid(surface_handle_lookup(surface))) {
+    if (!pdocker_vk_headless_surface_valid(surface_handle_lookup_for_device(device, surface))) {
         *pModes = 0;
         return VK_ERROR_SURFACE_LOST_KHR;
     }
@@ -28841,9 +28917,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDevicePresentRectanglesKHR(
         VkSurfaceKHR surface,
         uint32_t *pRectCount,
         VkRect2D *pRects) {
-    (void)physicalDevice;
     if (!pRectCount) return VK_ERROR_INITIALIZATION_FAILED;
-    PdockerVkSurface *headless_surface = surface_handle_lookup(surface);
+    PdockerVkSurface *headless_surface = surface_handle_lookup_for_physical_device(physicalDevice, surface);
     if (!pdocker_vk_headless_surface_valid(headless_surface)) {
         *pRectCount = 0;
         return VK_ERROR_SURFACE_LOST_KHR;
@@ -29095,7 +29170,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSwapchainKHR(
         trace_icd_runtime_failure("swapchain-flags-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }
-    PdockerVkSurface *surface = surface_handle_lookup(pCreateInfo->surface);
+    PdockerVkSurface *surface = surface_handle_lookup_for_device(device, pCreateInfo->surface);
     if (!pdocker_vk_headless_surface_valid(surface)) return VK_ERROR_SURFACE_LOST_KHR;
     if (pCreateInfo->oldSwapchain != VK_NULL_HANDLE) {
         PdockerVkSwapchain *old_swapchain = swapchain_handle_lookup_for_device(device, pCreateInfo->oldSwapchain);
@@ -30829,6 +30904,12 @@ static void record_graphics_draw_command(
     PdockerVkBuffer *tracked_indirect_buffer = NULL;
     PdockerVkBuffer *tracked_count_buffer = NULL;
     if (indirect) {
+        if (countBuffer != VK_NULL_HANDLE &&
+            (cmd->requested_feature_mask & PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT) == 0) {
+            cmd->graphics_unsupported = true;
+            command_buffer_mark_recording_failed(cmd, "graphics-draw-indirect-count-feature-disabled");
+            return;
+        }
         tracked_indirect_buffer = buffer_handle_lookup_for_command_buffer(cmd, indirectBuffer);
         if (!tracked_indirect_buffer) {
             command_buffer_mark_resource_capture_failed(
@@ -30850,11 +30931,6 @@ static void record_graphics_draw_command(
             if (!tracked_count_buffer) {
                 command_buffer_mark_resource_capture_failed(
                     cmd, "graphics-draw-count-buffer-cross-device-or-invalid");
-                return;
-            }
-            if ((cmd->requested_feature_mask & PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT) == 0) {
-                cmd->graphics_unsupported = true;
-                command_buffer_mark_recording_failed(cmd, "graphics-draw-indirect-count-feature-disabled");
                 return;
             }
         }
@@ -37810,7 +37886,9 @@ static bool pdocker_vk_object_handle_owned_by_device(
 #endif
 #ifdef VK_KHR_SURFACE_EXTENSION_NAME
         case VK_OBJECT_TYPE_SURFACE_KHR:
-            return surface_handle_lookup(PDOCKER_VK_OBJECT_HANDLE_AS(VkSurfaceKHR, object_handle)) != NULL;
+            return surface_handle_lookup_for_device(
+                device,
+                PDOCKER_VK_OBJECT_HANDLE_AS(VkSurfaceKHR, object_handle)) != NULL;
 #endif
         default:
             return false;
