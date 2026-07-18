@@ -4803,6 +4803,67 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
+    def test_buffer_view_live_handles_fail_closed_after_destroy(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            int main(void) {{
+                PdockerVkMemory memory;
+                PdockerVkBuffer buffer;
+                PdockerVkBufferView view;
+                PdockerVkBufferViewSnapshot snapshot;
+                memset(&memory, 0, sizeof(memory));
+                memset(&buffer, 0, sizeof(buffer));
+                memset(&view, 0, sizeof(view));
+                memset(&snapshot, 0, sizeof(snapshot));
+                memory.size = 4096;
+                memory.fd = -1;
+                buffer.object_id = 10;
+                buffer.size = 4096;
+                buffer.usage = VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT;
+                buffer.memory = &memory;
+                view.object_id = 20;
+                view.buffer = &buffer;
+                view.format = VK_FORMAT_R8_UINT;
+                view.offset = 0;
+                view.range = 128;
+                view.generation = 30;
+                buffer_register(&buffer);
+                buffer_view_register(&view);
+                VkBufferView handle = pdocker_vk_buffer_view_to_handle(&view);
+                if (buffer_view_handle_lookup(handle) != &view) {{
+                    fprintf(stderr, "live buffer view lookup failed\\n");
+                    return 1;
+                }}
+                if (!snapshot_buffer_view_state(&snapshot, &view) || !snapshot.valid ||
+                    snapshot.object_id != 20 || snapshot.buffer_snapshot.object_id != 10) {{
+                    fprintf(stderr, "live buffer view snapshot failed\\n");
+                    return 2;
+                }}
+                vkDestroyBufferView(VK_NULL_HANDLE, handle, NULL);
+                if (buffer_view_handle_lookup(handle) != NULL) {{
+                    fprintf(stderr, "destroyed buffer view remained live\\n");
+                    return 3;
+                }}
+                memset(&snapshot, 0, sizeof(snapshot));
+                if (snapshot_buffer_view_state(&snapshot, &view) || snapshot.valid) {{
+                    fprintf(stderr, "destroyed buffer view snapshot succeeded\\n");
+                    return 4;
+                }}
+                vkDestroyBufferView(VK_NULL_HANDLE, handle, NULL);
+                vkDestroyBufferView(VK_NULL_HANDLE, (VkBufferView)(uintptr_t)0x1234u, NULL);
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
     def test_buffer_view_usage2_pnext_accepts_only_noop_texel_usage(self):
         source = textwrap.dedent(
             f"""

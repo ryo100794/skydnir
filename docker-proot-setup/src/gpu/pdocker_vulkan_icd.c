@@ -639,6 +639,8 @@ struct PdockerVkBufferView {
     VkDeviceSize offset;
     VkDeviceSize range;
     uint64_t generation;
+    bool destroyed;
+    struct PdockerVkBufferView *next;
 };
 
 struct PdockerVkImage {
@@ -1700,6 +1702,8 @@ static PdockerVkDevice *g_devices;
 static PdockerVkMemory *g_memories;
 static PdockerVkBuffer *g_buffers;
 static PdockerVkBuffer *g_retired_buffers;
+static PdockerVkBufferView *g_buffer_views;
+static PdockerVkBufferView *g_retired_buffer_views;
 static unsigned g_shader_dump_counter;
 static PdockerVkMemory *g_guarded_memories[PDOCKER_VK_MAX_GUARDED_MEMORIES];
 static struct sigaction g_previous_sigsegv;
@@ -1943,6 +1947,56 @@ static void buffer_detach_memory_from_list(PdockerVkBuffer *buffers, const Pdock
 static void buffer_detach_memory(const PdockerVkMemory *memory) {
     buffer_detach_memory_from_list(g_buffers, memory);
     buffer_detach_memory_from_list(g_retired_buffers, memory);
+}
+
+static void buffer_view_register(PdockerVkBufferView *view) {
+    if (!view) return;
+    view->destroyed = false;
+    view->next = g_buffer_views;
+    g_buffer_views = view;
+}
+
+static PdockerVkBufferView *buffer_view_unregister(VkBufferView view) {
+    PdockerVkBufferView *target = pdocker_vk_buffer_view_from_handle(view);
+    if (!target) return NULL;
+    PdockerVkBufferView **link = &g_buffer_views;
+    while (*link) {
+        if (*link == target) {
+            *link = target->next;
+            target->next = NULL;
+            return target;
+        }
+        link = &(*link)->next;
+    }
+    return NULL;
+}
+
+static void buffer_view_retire(PdockerVkBufferView *view) {
+    if (!view || view->destroyed) return;
+    view->destroyed = true;
+    view->buffer = NULL;
+    view->offset = 0;
+    view->range = 0;
+    view->next = g_retired_buffer_views;
+    g_retired_buffer_views = view;
+}
+
+static bool buffer_view_handle_resolve(VkBufferView view, PdockerVkBufferView **out_view) {
+    PdockerVkBufferView *target = pdocker_vk_buffer_view_from_handle(view);
+    if (out_view) *out_view = NULL;
+    if (!target) return false;
+    for (PdockerVkBufferView *candidate = g_buffer_views; candidate; candidate = candidate->next) {
+        if (candidate == target && !candidate->destroyed) {
+            if (out_view) *out_view = candidate;
+            return true;
+        }
+    }
+    return false;
+}
+
+static PdockerVkBufferView *buffer_view_handle_lookup(VkBufferView view) {
+    PdockerVkBufferView *resolved = NULL;
+    return buffer_view_handle_resolve(view, &resolved) ? resolved : NULL;
 }
 
 static bool current_vulkan_dispatch_identity_ids(
@@ -3182,7 +3236,7 @@ static bool snapshot_buffer_view_state(
     if (!dst) return false;
     memset(dst, 0, sizeof(*dst));
     if (!view) return true;
-    if (!view->buffer) return false;
+    if (view->destroyed || !view->buffer) return false;
     PdockerVkBufferSnapshot buffer_snapshot;
     if (!snapshot_buffer_state(&buffer_snapshot, view->buffer) || !buffer_snapshot.valid) {
         return false;
@@ -14419,34 +14473,57 @@ static int send_generic_vulkan_dispatch_op(
                 const PdockerVkDescriptorBinding *transport_binding = binding;
                 PdockerVkDescriptorBinding texel_transport_binding;
                 PdockerVkBufferView *transport_buffer_view = NULL;
+                uint64_t transport_buffer_view_object_id = 0;
+                uint32_t transport_buffer_view_format = 0;
+                VkDeviceSize transport_buffer_view_offset = 0;
+                VkDeviceSize transport_buffer_view_range = 0;
+                uint64_t transport_buffer_view_generation = 0;
                 PdockerVkBuffer *transport_buffer = binding->buffer;
                 if (descriptor_type_requires_buffer_view(binding->descriptor_type)) {
                     texel_buffer_transport_required = true;
+                    const PdockerVkBufferViewSnapshot *view_snapshot = &binding->buffer_view_snapshot;
                     transport_buffer_view = binding->buffer_view;
-                    if (!transport_buffer_view || !transport_buffer_view->buffer) {
+                    if (!view_snapshot->valid || !view_snapshot->buffer_snapshot.valid ||
+                        !view_snapshot->buffer) {
                         fprintf(stderr,
-                                "pdocker-vulkan-icd: generic dispatch rejected: invalid texel-buffer descriptor dispatch_id=%llu set=%u binding=%u array=%u type=%u view=%p buffer=%p\n",
+                                "pdocker-vulkan-icd: generic dispatch rejected: invalid texel-buffer descriptor dispatch_id=%llu set=%u binding=%u array=%u type=%u view=%p snapshot=%u buffer_snapshot=%u buffer=%p\n",
                                 (unsigned long long)dispatch_id,
                                 set_index,
                                 api_binding,
                                 array_element,
                                 binding->descriptor_type,
                                 (void *)transport_buffer_view,
-                                transport_buffer_view ? (void *)transport_buffer_view->buffer : NULL);
+                                view_snapshot->valid ? 1u : 0u,
+                                view_snapshot->buffer_snapshot.valid ? 1u : 0u,
+                                (void *)view_snapshot->buffer);
                         return -EINVAL;
                     }
                     texel_transport_binding = *binding;
-                    texel_transport_binding.buffer = transport_buffer_view->buffer;
+                    texel_transport_binding.buffer = view_snapshot->buffer;
+                    texel_transport_binding.buffer_snapshot = view_snapshot->buffer_snapshot;
                     texel_transport_binding.buffer_view = NULL;
-                    texel_transport_binding.offset = transport_buffer_view->offset;
-                    texel_transport_binding.base_offset = transport_buffer_view->offset;
-                    texel_transport_binding.range = transport_buffer_view->range;
+                    memset(&texel_transport_binding.buffer_view_snapshot, 0,
+                           sizeof(texel_transport_binding.buffer_view_snapshot));
+                    texel_transport_binding.offset = view_snapshot->offset;
+                    texel_transport_binding.base_offset = view_snapshot->offset;
+                    texel_transport_binding.range = view_snapshot->range;
                     texel_transport_binding.dynamic = false;
                     texel_transport_binding.dynamic_offset = 0;
                     transport_binding = &texel_transport_binding;
-                    transport_buffer = transport_buffer_view->buffer;
+                    transport_buffer = view_snapshot->buffer;
+                    transport_buffer_view_object_id = view_snapshot->object_id;
+                    transport_buffer_view_format = (uint32_t)view_snapshot->format;
+                    transport_buffer_view_offset = view_snapshot->offset;
+                    transport_buffer_view_range = view_snapshot->range;
+                    transport_buffer_view_generation = view_snapshot->generation;
                 }
-                if (!transport_buffer || !transport_buffer->memory) continue;
+                const PdockerVkBufferSnapshot *transport_snapshot = transport_binding->buffer_snapshot.valid
+                    ? &transport_binding->buffer_snapshot
+                    : NULL;
+                PdockerVkMemory *transport_memory = transport_snapshot
+                    ? transport_snapshot->memory
+                    : (transport_buffer ? transport_buffer->memory : NULL);
+                if (!transport_buffer || !transport_memory) continue;
                 descriptor_array_transport_required = descriptor_array_transport_required || array_element != 0;
                 size_t bytes = 0;
                 int shape_rc = validate_descriptor_transport_shape(transport_binding, set_index, api_binding, &bytes);
@@ -14460,7 +14537,7 @@ static int send_generic_vulkan_dispatch_op(
                             array_element,
                             binding->descriptor_type,
                             (void *)transport_buffer,
-                            transport_buffer ? (void *)transport_buffer->memory : NULL,
+                            (void *)transport_memory,
                             (unsigned long long)transport_binding->offset,
                             (unsigned long long)transport_binding->range);
                     return shape_rc;
@@ -14472,9 +14549,18 @@ static int send_generic_vulkan_dispatch_op(
                 api_descriptor_sets[binding_count] = set_index;
                 api_descriptor_array_elements[binding_count] = array_element;
                 bindings[binding_count] = api_binding;
-                PdockerVkMemory *dispatch_memory = transport_buffer->memory;
+                PdockerVkMemory *dispatch_memory = transport_memory;
+                const VkDeviceSize transport_memory_offset = transport_snapshot
+                    ? transport_snapshot->memory_offset
+                    : transport_buffer->memory_offset;
+                const size_t transport_buffer_size = transport_snapshot
+                    ? transport_snapshot->size
+                    : transport_buffer->size;
+                const VkBufferUsageFlags transport_buffer_usage = transport_snapshot
+                    ? transport_snapshot->usage
+                    : transport_buffer->usage;
                 uint64_t dispatch_offset_u64 = 0;
-                if (!checked_add_u64((uint64_t)transport_buffer->memory_offset,
+                if (!checked_add_u64((uint64_t)transport_memory_offset,
                                      (uint64_t)transport_binding->offset,
                                      &dispatch_offset_u64)) {
                     fprintf(stderr,
@@ -14483,7 +14569,7 @@ static int send_generic_vulkan_dispatch_op(
                             set_index,
                             api_binding,
                             array_element,
-                            (unsigned long long)transport_buffer->memory_offset,
+                            (unsigned long long)transport_memory_offset,
                             (unsigned long long)transport_binding->offset);
                     return -EOVERFLOW;
                 }
@@ -14523,20 +14609,20 @@ static int send_generic_vulkan_dispatch_op(
                 sizes[binding_count] = bytes;
                 api_offsets[binding_count] = transport_binding->base_offset;
                 api_ranges[binding_count] = transport_binding->range;
-                api_buffer_sizes[binding_count] = transport_buffer ? transport_buffer->size : 0;
-                api_buffer_usages[binding_count] = transport_buffer ? (uint64_t)transport_buffer->usage : 0;
+                api_buffer_sizes[binding_count] = transport_buffer_size;
+                api_buffer_usages[binding_count] = (uint64_t)transport_buffer_usage;
                 api_descriptor_types[binding_count] = (uint32_t)binding->descriptor_type;
                 api_dynamic_flags[binding_count] = transport_binding->dynamic ? 1u : 0u;
                 api_dynamic_offsets[binding_count] = transport_binding->dynamic_offset;
-                api_memory_offsets[binding_count] = transport_buffer ? transport_buffer->memory_offset : 0;
+                api_memory_offsets[binding_count] = transport_memory_offset;
                 api_memory_sizes[binding_count] = dispatch_memory ? dispatch_memory->size : 0;
                 api_memory_ids[binding_count] = pdocker_vk_memory_object_id(dispatch_memory);
                 api_buffer_ids[binding_count] = pdocker_vk_buffer_object_id(transport_buffer);
-                api_buffer_view_ids[binding_count] = pdocker_vk_buffer_view_object_id(transport_buffer_view);
-                api_buffer_view_formats[binding_count] = transport_buffer_view ? (uint32_t)transport_buffer_view->format : 0u;
-                api_buffer_view_offsets[binding_count] = transport_buffer_view ? transport_buffer_view->offset : 0;
-                api_buffer_view_ranges[binding_count] = transport_buffer_view ? transport_buffer_view->range : 0;
-                api_buffer_view_generations[binding_count] = transport_buffer_view ? transport_buffer_view->generation : 0;
+                api_buffer_view_ids[binding_count] = transport_buffer_view_object_id;
+                api_buffer_view_formats[binding_count] = transport_buffer_view_format;
+                api_buffer_view_offsets[binding_count] = transport_buffer_view_offset;
+                api_buffer_view_ranges[binding_count] = transport_buffer_view_range;
+                api_buffer_view_generations[binding_count] = transport_buffer_view_generation;
                 if (strict_passthrough) {
                     int invariant_rc = validate_strict_descriptor_transport_invariant(
                         dispatch_id,
@@ -20962,6 +21048,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateBufferView(
     view->offset = pCreateInfo->offset;
     view->range = range;
     view->generation = next_vulkan_object_generation();
+    buffer_view_register(view);
     *pView = pdocker_vk_buffer_view_to_handle(view);
     return VK_SUCCESS;
 }
@@ -20972,7 +21059,7 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyBufferView(
         const VkAllocationCallbacks *pAllocator) {
     (void)device;
     (void)pAllocator;
-    free(pdocker_vk_buffer_view_from_handle(bufferView));
+    buffer_view_retire(buffer_view_unregister(bufferView));
 }
 
 static VkResult unsupported_create_info_pnext_result(const char *api_name, const void *pNext) {
@@ -24536,7 +24623,7 @@ VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets(
                     goto fail_closed;
                 }
                 slot->buffer = NULL;
-                slot->buffer_view = pdocker_vk_buffer_view_from_handle(w->pTexelBufferView[j]);
+                slot->buffer_view = buffer_view_handle_lookup(w->pTexelBufferView[j]);
                 slot->image_view = NULL;
                 slot->sampler = NULL;
                 slot->image_layout = VK_IMAGE_LAYOUT_UNDEFINED;

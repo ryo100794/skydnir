@@ -7114,7 +7114,13 @@ class GpuAbiContractTest(unittest.TestCase):
 
         sender = c_function_body(icd, "send_generic_vulkan_dispatch_op")
         self.assertIn("uint64_t *api_buffer_usages = tables->api_buffer_usages;", sender)
-        self.assertIn("api_buffer_usages[binding_count] = transport_buffer ? (uint64_t)transport_buffer->usage : 0;", sender)
+        self.assertIn(
+            "const VkBufferUsageFlags transport_buffer_usage = transport_snapshot\n"
+            "                    ? transport_snapshot->usage\n"
+            "                    : transport_buffer->usage;",
+            sender,
+        )
+        self.assertIn("api_buffer_usages[binding_count] = (uint64_t)transport_buffer_usage;", sender)
         self.assertIn("api_buffer_usages,\n            api_descriptor_types", sender)
 
         frame_sender = c_function_body(icd, "send_generic_vulkan_dispatch_v5_1_op")
@@ -12052,13 +12058,34 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("view->format = pCreateInfo->format;", create_body)
         self.assertIn("view->offset = pCreateInfo->offset;", create_body)
         self.assertIn("view->range = range;", create_body)
-        self.assertIn("free(pdocker_vk_buffer_view_from_handle(bufferView));", destroy_body)
+        self.assertIn("buffer_view_register(view);", create_body)
+        self.assertIn("buffer_view_retire(buffer_view_unregister(bufferView));", destroy_body)
+        self.assertNotIn("free(pdocker_vk_buffer_view_from_handle(bufferView));", destroy_body)
+
+        for marker in [
+            "struct PdockerVkBufferView *next;",
+            "static PdockerVkBufferView *g_buffer_views;",
+            "static PdockerVkBufferView *g_retired_buffer_views;",
+            "buffer_view_register(PdockerVkBufferView *view)",
+            "buffer_view_unregister(VkBufferView view)",
+            "buffer_view_handle_resolve(VkBufferView view, PdockerVkBufferView **out_view)",
+            "buffer_view_handle_lookup(VkBufferView view)",
+        ]:
+            self.assertIn(marker, icd)
 
         update_body = c_function_body(icd, "vkUpdateDescriptorSets")
         self.assertIn("descriptor_type_requires_buffer_view(w->descriptorType)", update_body)
         self.assertIn("w->pTexelBufferView", update_body)
-        self.assertIn("slot->buffer_view = pdocker_vk_buffer_view_from_handle(w->pTexelBufferView[j]);", update_body)
+        self.assertIn("slot->buffer_view = buffer_view_handle_lookup(w->pTexelBufferView[j]);", update_body)
         self.assertIn("descriptor texel-buffer write has invalid buffer view", update_body)
+
+        send_body = c_function_body(icd, "send_generic_vulkan_dispatch_op")
+        self.assertIn("const PdockerVkBufferViewSnapshot *view_snapshot = &binding->buffer_view_snapshot;", send_body)
+        self.assertIn("!view_snapshot->valid || !view_snapshot->buffer_snapshot.valid", send_body)
+        self.assertIn("texel_transport_binding.buffer_snapshot = view_snapshot->buffer_snapshot;", send_body)
+        self.assertIn("api_buffer_view_ids[binding_count] = transport_buffer_view_object_id;", send_body)
+        self.assertNotIn("transport_buffer_view->buffer", send_body)
+        self.assertNotIn("transport_buffer_view->format", send_body)
 
         support_body = c_function_body(icd, "descriptor_type_supported_by_v5_object_transport")
         self.assertNotIn("VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER", support_body)
@@ -16553,8 +16580,10 @@ class GpuAbiContractTest(unittest.TestCase):
             "static void execute_recorded_image_copy_op", 1
         )[0]
         self.assertIn("descriptor absolute offset overflow", dispatch_body)
-        self.assertIn("checked_add_u64((uint64_t)transport_buffer->memory_offset", dispatch_body)
+        self.assertIn("const VkDeviceSize transport_memory_offset = transport_snapshot", dispatch_body)
+        self.assertIn("checked_add_u64((uint64_t)transport_memory_offset", dispatch_body)
         self.assertNotIn("binding->buffer->memory_offset + binding->offset", dispatch_body)
+        self.assertNotIn("transport_buffer->memory_offset + transport_binding->offset", dispatch_body)
         self.assertIn("return true;", overlap_body)
         self.assertIn("!checked_add_u64((uint64_t)a_offset", overlap_body)
         self.assertIn("!checked_add_u64((uint64_t)alias->src_offset", resolve_body)

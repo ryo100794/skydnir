@@ -10,6 +10,31 @@ llama.cpp itself remains unmodified.
 ## Current Ground Truth
 
 
+### 2026-07-18 CPU/static Vulkan buffer-view live-handle lane
+
+`VkBufferView` now has the same public-handle fail-closed pattern as the
+`VkBuffer` lane.  `vkCreateBufferView` registers local buffer-view objects,
+`vkDestroyBufferView` unregisters and retires stale handles into a soft-destroy
+quarantine, and descriptor-update paths resolve texel-buffer view handles
+through the live registry before storing them in descriptor slots.  Generic
+compute dispatch no longer dereferences the raw buffer-view pointer when framing
+texel descriptors; it consumes the recorded `PdockerVkBufferViewSnapshot` plus
+the parent `PdockerVkBufferSnapshot` so stale view handles cannot be revived at
+submit time.
+
+This is generic Vulkan pass-through hardening.  It does not change llama.cpp,
+Dockerfiles, models, prompts, shader bytes, or executor-side arithmetic.
+
+Current scope note: memory ownership is still snapshot-based; full object
+refcount/lifetime coupling across memory, buffers, buffer views, image views,
+images, and samplers remains a separate lane.  The next non-dispatchable object
+classes to harden are `VkImage`, `VkImageView`, and `VkSampler`.
+
+Evidence: `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`,
+`tests.test_gpu_abi_contract`, `tests.test_vulkan_icd_feature_chain`,
+`scripts/build-gpu-shim.sh`, `scripts/verify-native-payloads.py`.
+
+
 ### 2026-07-18 CPU/static Vulkan buffer live-handle lane
 
 `VkBuffer` public API entrances now resolve through a live registry instead of
@@ -29,10 +54,9 @@ This is deliberately a generic Vulkan pass-through safety lane; it does not
 change llama.cpp, Dockerfiles, models, prompts, or shader bytes.
 
 Current scope note: `VkBuffer` is protected by a registry plus quarantine.
-`VkBufferView` still has its own object-lifetime lane pending; buffer views that
-point at retired buffers fail snapshot/range validation because the parent
-buffer is not freed, but stale buffer-view handles themselves are not yet
-claimed as fully registry-hardened.
+`VkBufferView` now has its own live-registry lane above.  Remaining
+non-dispatchable object-lifetime work is concentrated on image/image-view/sampler
+objects and on deeper memory snapshot/refcount coupling.
 
 Evidence: `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`,
 `tests.test_gpu_abi_contract`, `tests.test_vulkan_icd_feature_chain`,
