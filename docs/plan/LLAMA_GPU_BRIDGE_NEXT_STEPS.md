@@ -10,6 +10,28 @@ llama.cpp itself remains unmodified.
 ## Current Ground Truth
 
 
+### 2026-07-18 CPU/static Vulkan sync2 barrier owner lane
+
+`vkCmdPipelineBarrier2`, `vkCmdSetEvent2`, and `vkCmdWaitEvents2` now validate and record
+`VkDependencyInfo` buffer/image barriers through command-buffer-owner lookups.
+The sync2 barrier prevalidation helper carries the command buffer into
+`dependency_info_barrier_recording_failure_reason`, and the recorder uses
+`buffer_handle_lookup_for_command_buffer` / `image_handle_lookup_for_command_buffer`
+before appending barrier operations. Foreign-device barrier resources now fail
+closed before partial command-buffer state or later image-layout mutation can be
+recorded.
+
+This is CPU/static Vulkan pass-through hardening only.  It does not change
+llama.cpp, Dockerfiles, models, prompts, shader bytes, or executor arithmetic.
+
+Evidence: `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`,
+`tests.test_gpu_abi_contract`,
+`tests.test_vulkan_icd_sync_harness.VulkanIcdSyncHarnessTest.test_pipeline_barrier_cross_queue_family_fails_before_partial_recording`,
+`tests.test_vulkan_icd_sync_harness.VulkanIcdSyncHarnessTest.test_event_barrier_cross_queue_family_fails_before_partial_recording`,
+`scripts/build-gpu-shim.sh`, `scripts/verify-native-payloads.py`,
+`./gradlew :app:assembleDebug`.
+
+
 ### 2026-07-18 CPU/static Vulkan dedicated-memory owner lane
 
 `VkMemoryDedicatedAllocateInfo` validation and extraction now carry the

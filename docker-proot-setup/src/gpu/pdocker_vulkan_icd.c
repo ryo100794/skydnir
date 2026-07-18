@@ -36336,12 +36336,13 @@ static const char *event_wait2_dependency_info_failure_reason(
 }
 
 static const char *dependency_info_barrier_recording_failure_reason(
+        const PdockerVkCommandBuffer *cmd,
         const VkDependencyInfo *info) {
     if (!info) return NULL;
     for (uint32_t i = 0; info->pBufferMemoryBarriers && i < info->bufferMemoryBarrierCount; ++i) {
         const VkBufferMemoryBarrier2 *b = &info->pBufferMemoryBarriers[i];
         const char *reason = buffer_barrier_recording_failure_reason(
-            buffer_handle_lookup(b->buffer),
+            buffer_handle_lookup_for_command_buffer(cmd, b->buffer),
             b->offset,
             b->size,
             b->srcQueueFamilyIndex,
@@ -36351,7 +36352,7 @@ static const char *dependency_info_barrier_recording_failure_reason(
     for (uint32_t i = 0; info->pImageMemoryBarriers && i < info->imageMemoryBarrierCount; ++i) {
         const VkImageMemoryBarrier2 *b = &info->pImageMemoryBarriers[i];
         const char *reason = image_barrier_recording_failure_reason(
-            image_handle_lookup(b->image),
+            image_handle_lookup_for_command_buffer(cmd, b->image),
             &b->subresourceRange,
             b->srcQueueFamilyIndex,
             b->dstQueueFamilyIndex);
@@ -36365,7 +36366,7 @@ static bool command_buffer_prevalidate_dependency_info_barrier_recording(
         const VkDependencyInfo *info) {
     if (!cmd) return false;
     const char *recording_failure_reason =
-        dependency_info_barrier_recording_failure_reason(info);
+        dependency_info_barrier_recording_failure_reason(cmd, info);
     if (!recording_failure_reason) return true;
     cmd->graphics_unsupported = true;
     command_buffer_mark_recording_failed(cmd, recording_failure_reason);
@@ -36459,7 +36460,7 @@ static PdockerVkBarrierOpRange record_dependency_info_barrier_ops(
         for (uint32_t i = 0; i < info->bufferMemoryBarrierCount; ++i) {
             const VkBufferMemoryBarrier2 *b = &info->pBufferMemoryBarriers[i];
             record_buffer_barrier_op(commandBuffer,
-                                     buffer_handle_lookup(b->buffer),
+                                     buffer_handle_lookup_for_command_buffer(cmd, b->buffer),
                                      b->offset,
                                      b->size,
                                      b->srcAccessMask,
@@ -36474,7 +36475,7 @@ static PdockerVkBarrierOpRange record_dependency_info_barrier_ops(
         for (uint32_t i = 0; i < info->imageMemoryBarrierCount; ++i) {
             const VkImageMemoryBarrier2 *b = &info->pImageMemoryBarriers[i];
             record_image_barrier_op(commandBuffer,
-                                    image_handle_lookup(b->image),
+                                    image_handle_lookup_for_command_buffer(cmd, b->image),
                                     b->oldLayout,
                                     b->newLayout,
                                     b->subresourceRange,

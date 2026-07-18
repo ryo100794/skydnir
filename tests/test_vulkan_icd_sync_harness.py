@@ -2400,6 +2400,34 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 rc = expect_clean_failure(cmd, "image-barrier-cross-queue-family", 5);
                 if (rc) return rc;
 
+                buffer->owner_device_id = 0x202u;
+                image->owner_device_id = 0x202u;
+                buffer_barrier2.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                buffer_barrier2.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                memset(&dependency, 0, sizeof(dependency));
+                dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+                dependency.bufferMemoryBarrierCount = 1;
+                dependency.pBufferMemoryBarriers = &buffer_barrier2;
+
+                reset_cmd(cmd, 1);
+                cmd->owner_device_id = 0x101u;
+                vkCmdPipelineBarrier2((VkCommandBuffer)cmd, &dependency);
+                rc = expect_clean_failure(cmd, "buffer-barrier-invalid-handle", 6);
+                if (rc) return rc;
+
+                image_barrier2.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                image_barrier2.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                memset(&dependency, 0, sizeof(dependency));
+                dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+                dependency.imageMemoryBarrierCount = 1;
+                dependency.pImageMemoryBarriers = &image_barrier2;
+
+                reset_cmd(cmd, 1);
+                cmd->owner_device_id = 0x101u;
+                vkCmdPipelineBarrier2((VkCommandBuffer)cmd, &dependency);
+                rc = expect_clean_failure(cmd, "image-barrier-invalid-handle", 7);
+                if (rc) return rc;
+
                 free(image);
                 free(buffer);
                 free(cmd);
@@ -2618,6 +2646,46 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 reset_cmd(cmd, 1);
                 vkCmdWaitEvents2((VkCommandBuffer)cmd, 1, events, &dependency);
                 rc = expect_clean_failure(cmd, "image-barrier-cross-queue-family", 7);
+                if (rc) return rc;
+
+                buffer->owner_device_id = 0x202u;
+                image->owner_device_id = 0x202u;
+                buffer_barrier2.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                buffer_barrier2.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                memset(&dependency, 0, sizeof(dependency));
+                dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+                dependency.bufferMemoryBarrierCount = 1;
+                dependency.pBufferMemoryBarriers = &buffer_barrier2;
+
+                reset_cmd(cmd, 1);
+                cmd->owner_device_id = 0x101u;
+                vkCmdSetEvent2((VkCommandBuffer)cmd, event, &dependency);
+                rc = expect_clean_failure(cmd, "buffer-barrier-invalid-handle", 8);
+                if (rc) return rc;
+
+                reset_cmd(cmd, 1);
+                cmd->owner_device_id = 0x101u;
+                vkCmdWaitEvents2((VkCommandBuffer)cmd, 1, events, &dependency);
+                rc = expect_clean_failure(cmd, "buffer-barrier-invalid-handle", 9);
+                if (rc) return rc;
+
+                image_barrier2.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                image_barrier2.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                memset(&dependency, 0, sizeof(dependency));
+                dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+                dependency.imageMemoryBarrierCount = 1;
+                dependency.pImageMemoryBarriers = &image_barrier2;
+
+                reset_cmd(cmd, 1);
+                cmd->owner_device_id = 0x101u;
+                vkCmdSetEvent2((VkCommandBuffer)cmd, event, &dependency);
+                rc = expect_clean_failure(cmd, "image-barrier-invalid-handle", 10);
+                if (rc) return rc;
+
+                reset_cmd(cmd, 1);
+                cmd->owner_device_id = 0x101u;
+                vkCmdWaitEvents2((VkCommandBuffer)cmd, 1, events, &dependency);
+                rc = expect_clean_failure(cmd, "image-barrier-invalid-handle", 11);
                 if (rc) return rc;
 
                 vkDestroyEvent(VK_NULL_HANDLE, event, NULL);
