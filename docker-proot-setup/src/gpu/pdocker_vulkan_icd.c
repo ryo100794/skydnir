@@ -28108,9 +28108,9 @@ static bool command_buffer_begin_inheritance_supported(
         return false;
     }
     if (inherit->renderPass) {
-        PdockerVkRenderPass *rp = render_pass_handle_lookup(inherit->renderPass);
-        if (!rp || !owner_device_ids_match_or_unowned(cmd->owner_device_id, rp->owner_device_id) ||
-            !render_pass_subpass_can_normalize_to_dynamic_rendering(rp, inherit->subpass)) {
+        PdockerVkRenderPass *rp = NULL;
+        if (!render_pass_handle_lookup_for_command_buffer_checked(cmd, inherit->renderPass, &rp) ||
+            !rp || !render_pass_subpass_can_normalize_to_dynamic_rendering(rp, inherit->subpass)) {
             return false;
         }
         cmd->inherited_rendering_active = true;

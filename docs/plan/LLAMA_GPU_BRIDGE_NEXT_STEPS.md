@@ -11,6 +11,24 @@ llama.cpp itself remains unmodified.
 
 
 
+### 2026-07-18 CPU/static Vulkan secondary inheritance owner lane
+
+Secondary command-buffer inheritance now resolves inherited render-pass handles
+through the same checked command-buffer-owner helper used by render-pass command
+recording.  This removes the remaining raw inheritance lookup path from
+`vkBeginCommandBuffer` and keeps secondary-command-buffer render inheritance
+aligned with the fail-closed owner model.
+
+This is CPU/static Vulkan pass-through hardening only.  It does not change
+llama.cpp, Dockerfiles, models, prompts, shader bytes, or executor arithmetic.
+
+Evidence: `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`,
+`tests.test_gpu_abi_contract`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_device_owner_rejects_cross_device_metadata_render_wsi_handles`,
+`scripts/build-gpu-shim.sh`, `scripts/verify-native-payloads.py`,
+`./gradlew :app:assembleDebug`.
+
+
 ### 2026-07-18 CPU/static Vulkan command-buffer owner helper lane
 
 Render-pass begin, dynamic-rendering-adjacent render state, descriptor binding,
