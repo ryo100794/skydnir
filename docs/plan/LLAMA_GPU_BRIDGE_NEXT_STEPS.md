@@ -10,6 +10,35 @@ llama.cpp itself remains unmodified.
 ## Current Ground Truth
 
 
+### 2026-07-18 CPU/static Vulkan WSI surface/swapchain live-handle lane
+
+`VkSurfaceKHR` and `VkSwapchainKHR` now use live registries with soft-destroy
+quarantine.  Headless-surface creation registers surface objects before exposing
+handles, surface destroy unregisters and tombstones them, swapchain creation
+resolves the parent surface and optional old swapchain through live lookup, and
+swapchain destroy unregisters/tombstones the swapchain after retiring its
+owned images.
+
+WSI entry points now fail closed on fabricated or stale handles:
+`vkGetPhysicalDeviceSurface*KHR` paths reject destroyed surfaces,
+`vkGetSwapchainImagesKHR` reports untracked swapchains as initialization
+failures instead of reading caller-shaped pointers, `vkAcquireNextImageKHR`
+rejects stale swapchains before touching output indices, and
+`vkQueuePresentKHR` validates queue, wait semaphores, and every swapchain before
+consuming binary semaphores or marking images presented.  Timeline semaphores
+remain feature-gated, unsignaled binary semaphores still return `VK_NOT_READY`,
+and per-swapchain `pResults[]` is populated on invalid swapchain entries.
+
+This is generic Vulkan pass-through hardening.  It does not change llama.cpp,
+Dockerfiles, models, prompts, shader bytes, or executor-side arithmetic.
+
+Evidence: `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`,
+`tests.test_gpu_abi_contract`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_wsi_surface_swapchain_handles_fail_closed_after_destroy`,
+`scripts/build-gpu-shim.sh`, `scripts/verify-native-payloads.py`,
+`./gradlew :app:assembleDebug`.
+
+
 ### 2026-07-18 CPU/static Vulkan sync/event/query live-handle lane
 
 `VkFence`, `VkSemaphore`, `VkEvent`, and `VkQueryPool` now use the same

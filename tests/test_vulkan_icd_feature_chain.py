@@ -1178,6 +1178,142 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
 
 
 
+    def test_wsi_surface_swapchain_handles_fail_closed_after_destroy(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            static VkSemaphore make_binary_semaphore(void) {{
+                VkSemaphoreCreateInfo info;
+                memset(&info, 0, sizeof(info));
+                info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+                VkSemaphore sem = VK_NULL_HANDLE;
+                if (vkCreateSemaphore(VK_NULL_HANDLE, &info, NULL, &sem) != VK_SUCCESS) return VK_NULL_HANDLE;
+                return sem;
+            }}
+
+            static VkSwapchainKHR make_registered_swapchain(PdockerVkSurface *surface) {{
+                if (!pdocker_vk_headless_surface_valid(surface)) return VK_NULL_HANDLE;
+                PdockerVkSwapchain *swapchain = pdocker_alloc_handle(sizeof(*swapchain));
+                if (!swapchain) return VK_NULL_HANDLE;
+                memset(swapchain, 0, sizeof(*swapchain));
+                swapchain->surface = surface;
+                swapchain->image_format = VK_FORMAT_R8G8B8A8_UNORM;
+                swapchain->image_color_space = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+                swapchain->image_extent = (VkExtent2D){{640, 480}};
+                swapchain->image_usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+                swapchain->present_mode = VK_PRESENT_MODE_FIFO_KHR;
+                swapchain->composite_alpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+                swapchain->pre_transform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+                swapchain->image_count = 2;
+                swapchain->generation = next_vulkan_object_generation();
+                for (uint32_t i = 0; i < swapchain->image_count; ++i) {{
+                    PdockerVkImage *image = pdocker_alloc_handle(sizeof(*image));
+                    PdockerVkMemory *memory = pdocker_alloc_handle(sizeof(*memory));
+                    if (!image || !memory) return VK_NULL_HANDLE;
+                    memset(image, 0, sizeof(*image));
+                    memset(memory, 0, sizeof(*memory));
+                    memory->size = 4096;
+                    image->memory = memory;
+                    image->swapchain_owned = true;
+                    image->current_layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+                    swapchain->images[i] = image;
+                    swapchain->memories[i] = memory;
+                }}
+                swapchain_register(swapchain);
+                return pdocker_vk_swapchain_to_handle(swapchain);
+            }}
+
+            int main(void) {{
+                unsetenv("PDOCKER_VULKAN_DISABLE_V5_OBJECT_TRANSPORT");
+                unsetenv("PDOCKER_VULKAN_ADVERTISEMENT_SOURCE");
+                ensure_vulkan_dispatchable_object_ids();
+                g_queue.object_id = 1;
+                g_queue.instance_object_id = 1;
+                g_queue.physical_device_object_id = 1;
+                g_queue.device_object_id = 1;
+
+                VkHeadlessSurfaceCreateInfoEXT surface_info;
+                memset(&surface_info, 0, sizeof(surface_info));
+                surface_info.sType = VK_STRUCTURE_TYPE_HEADLESS_SURFACE_CREATE_INFO_EXT;
+                VkSurfaceKHR surface = VK_NULL_HANDLE;
+                if (vkCreateHeadlessSurfaceEXT(VK_NULL_HANDLE, &surface_info, NULL, &surface) != VK_SUCCESS || !surface) return 2;
+                PdockerVkSurface *surface_obj = surface_handle_lookup(surface);
+                if (!surface_obj) return 3;
+
+                VkSwapchainKHR swapchain = make_registered_swapchain(surface_obj);
+                if (!swapchain || !swapchain_handle_lookup(swapchain)) return 4;
+                uint32_t image_count = 0;
+                if (vkGetSwapchainImagesKHR(VK_NULL_HANDLE, swapchain, &image_count, NULL) != VK_SUCCESS) return 5;
+                if (image_count != 2) return 6;
+
+                VkSemaphore sem = make_binary_semaphore();
+                if (!sem) return 7;
+                uint32_t image_index = UINT32_MAX;
+                if (vkAcquireNextImageKHR(VK_NULL_HANDLE, swapchain, 0, sem, VK_NULL_HANDLE, &image_index) != VK_SUCCESS) return 8;
+                if (!semaphore_handle_lookup(sem) || !semaphore_handle_lookup(sem)->signaled) return 9;
+                VkPresentInfoKHR present;
+                memset(&present, 0, sizeof(present));
+                present.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+                present.waitSemaphoreCount = 1;
+                present.pWaitSemaphores = &sem;
+                present.swapchainCount = 1;
+                present.pSwapchains = &swapchain;
+                present.pImageIndices = &image_index;
+                VkResult present_result = VK_ERROR_UNKNOWN;
+                present.pResults = &present_result;
+                if (vkQueuePresentKHR((VkQueue)&g_queue, &present) != VK_SUCCESS) return 10;
+                if (present_result != VK_SUCCESS) return 11;
+                if (semaphore_handle_lookup(sem)->signaled) return 12;
+                vkDestroySemaphore(VK_NULL_HANDLE, sem, NULL);
+
+                VkFenceCreateInfo fence_info;
+                memset(&fence_info, 0, sizeof(fence_info));
+                fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+                VkFence fence = VK_NULL_HANDLE;
+                if (vkCreateFence(VK_NULL_HANDLE, &fence_info, NULL, &fence) != VK_SUCCESS || !fence) return 13;
+                vkDestroyFence(VK_NULL_HANDLE, fence, NULL);
+                if (vkAcquireNextImageKHR(VK_NULL_HANDLE, swapchain, 0, VK_NULL_HANDLE, fence, &image_index) != VK_ERROR_INITIALIZATION_FAILED) return 14;
+
+                VkSemaphore stale_sem = make_binary_semaphore();
+                if (!stale_sem) return 15;
+                if (vkAcquireNextImageKHR(VK_NULL_HANDLE, swapchain, 0, stale_sem, VK_NULL_HANDLE, &image_index) != VK_SUCCESS) return 16;
+                vkDestroySemaphore(VK_NULL_HANDLE, stale_sem, NULL);
+                present.pWaitSemaphores = &stale_sem;
+                present.pImageIndices = &image_index;
+                if (vkQueuePresentKHR((VkQueue)&g_queue, &present) != VK_ERROR_INITIALIZATION_FAILED) return 17;
+
+                PdockerVkSwapchain *sc = swapchain_unregister(swapchain);
+                if (!sc) return 18;
+                swapchain_retire(sc);
+                if (swapchain_handle_lookup(swapchain)) return 19;
+                image_count = 99;
+                if (vkGetSwapchainImagesKHR(VK_NULL_HANDLE, swapchain, &image_count, NULL) != VK_ERROR_INITIALIZATION_FAILED) return 20;
+                if (image_count != 0) return 21;
+                VkSemaphore sem_after_destroy = make_binary_semaphore();
+                if (!sem_after_destroy) return 22;
+                if (vkAcquireNextImageKHR(VK_NULL_HANDLE, swapchain, 0, sem_after_destroy, VK_NULL_HANDLE, &image_index) != VK_ERROR_INITIALIZATION_FAILED) return 23;
+                vkDestroySemaphore(VK_NULL_HANDLE, sem_after_destroy, NULL);
+                present.pWaitSemaphores = NULL;
+                present.waitSemaphoreCount = 0;
+                if (vkQueuePresentKHR((VkQueue)&g_queue, &present) != VK_ERROR_INITIALIZATION_FAILED) return 24;
+
+                vkDestroySurfaceKHR(VK_NULL_HANDLE, surface, NULL);
+                if (surface_handle_lookup(surface)) return 25;
+                VkDeviceGroupPresentModeFlagsKHR modes = 123;
+                if (vkGetDeviceGroupSurfacePresentModesKHR(VK_NULL_HANDLE, surface, &modes) != VK_ERROR_SURFACE_LOST_KHR) return 26;
+                if (modes != 0) return 27;
+                if (make_registered_swapchain(surface_handle_lookup(surface)) != VK_NULL_HANDLE) return 28;
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_command_pool_and_buffer_handles_fail_closed_after_free_reset_destroy(self):
         source = textwrap.dedent(
             f"""

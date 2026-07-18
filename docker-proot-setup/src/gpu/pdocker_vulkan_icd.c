@@ -691,6 +691,8 @@ struct PdockerVkSurface {
     PdockerVkSurfaceKind kind;
     VkExtent2D default_extent;
     uint64_t generation;
+    bool destroyed;
+    struct PdockerVkSurface *next;
 };
 
 struct PdockerVkSwapchain {
@@ -708,6 +710,8 @@ struct PdockerVkSwapchain {
     PdockerVkMemory *memories[PDOCKER_VK_MAX_SWAPCHAIN_IMAGES];
     bool acquired[PDOCKER_VK_MAX_SWAPCHAIN_IMAGES];
     uint64_t generation;
+    bool destroyed;
+    struct PdockerVkSwapchain *next;
 };
 
 struct PdockerVkSampler {
@@ -1780,6 +1784,10 @@ static PdockerVkEvent *g_events;
 static PdockerVkEvent *g_retired_events;
 static PdockerVkQueryPool *g_query_pools;
 static PdockerVkQueryPool *g_retired_query_pools;
+static PdockerVkSurface *g_surfaces;
+static PdockerVkSurface *g_retired_surfaces;
+static PdockerVkSwapchain *g_swapchains;
+static PdockerVkSwapchain *g_retired_swapchains;
 static unsigned g_shader_dump_counter;
 static PdockerVkMemory *g_guarded_memories[PDOCKER_VK_MAX_GUARDED_MEMORIES];
 static struct sigaction g_previous_sigsegv;
@@ -3047,6 +3055,108 @@ static bool query_pool_handle_resolve(VkQueryPool queryPool, PdockerVkQueryPool 
 static PdockerVkQueryPool *query_pool_handle_lookup(VkQueryPool queryPool) {
     PdockerVkQueryPool *resolved = NULL;
     return query_pool_handle_resolve(queryPool, &resolved) ? resolved : NULL;
+}
+
+static PdockerVkSurface *surface_handle_target(VkSurfaceKHR surface) {
+    return pdocker_vk_surface_from_handle(surface);
+}
+
+static void surface_register(PdockerVkSurface *surface) {
+    if (!surface) return;
+    surface->destroyed = false;
+    surface->next = g_surfaces;
+    g_surfaces = surface;
+}
+
+static PdockerVkSurface *surface_unregister(VkSurfaceKHR surface) {
+    PdockerVkSurface *target = surface_handle_target(surface);
+    if (!target) return NULL;
+    PdockerVkSurface **link = &g_surfaces;
+    while (*link) {
+        if (*link == target) {
+            *link = target->next;
+            target->next = NULL;
+            return target;
+        }
+        link = &(*link)->next;
+    }
+    return NULL;
+}
+
+static void surface_retire(PdockerVkSurface *surface) {
+    if (!surface || surface->destroyed) return;
+    surface->destroyed = true;
+    surface->next = g_retired_surfaces;
+    g_retired_surfaces = surface;
+}
+
+static bool surface_handle_resolve(VkSurfaceKHR surface, PdockerVkSurface **out_surface) {
+    PdockerVkSurface *target = surface_handle_target(surface);
+    if (out_surface) *out_surface = NULL;
+    if (!target) return false;
+    for (PdockerVkSurface *candidate = g_surfaces; candidate; candidate = candidate->next) {
+        if (candidate == target && !candidate->destroyed) {
+            if (out_surface) *out_surface = candidate;
+            return true;
+        }
+    }
+    return false;
+}
+
+static PdockerVkSurface *surface_handle_lookup(VkSurfaceKHR surface) {
+    PdockerVkSurface *resolved = NULL;
+    return surface_handle_resolve(surface, &resolved) ? resolved : NULL;
+}
+
+static PdockerVkSwapchain *swapchain_handle_target(VkSwapchainKHR swapchain) {
+    return pdocker_vk_swapchain_from_handle(swapchain);
+}
+
+static void swapchain_register(PdockerVkSwapchain *swapchain) {
+    if (!swapchain) return;
+    swapchain->destroyed = false;
+    swapchain->next = g_swapchains;
+    g_swapchains = swapchain;
+}
+
+static PdockerVkSwapchain *swapchain_unregister(VkSwapchainKHR swapchain) {
+    PdockerVkSwapchain *target = swapchain_handle_target(swapchain);
+    if (!target) return NULL;
+    PdockerVkSwapchain **link = &g_swapchains;
+    while (*link) {
+        if (*link == target) {
+            *link = target->next;
+            target->next = NULL;
+            return target;
+        }
+        link = &(*link)->next;
+    }
+    return NULL;
+}
+
+static void swapchain_retire(PdockerVkSwapchain *swapchain) {
+    if (!swapchain || swapchain->destroyed) return;
+    swapchain->destroyed = true;
+    swapchain->next = g_retired_swapchains;
+    g_retired_swapchains = swapchain;
+}
+
+static bool swapchain_handle_resolve(VkSwapchainKHR swapchain, PdockerVkSwapchain **out_swapchain) {
+    PdockerVkSwapchain *target = swapchain_handle_target(swapchain);
+    if (out_swapchain) *out_swapchain = NULL;
+    if (!target) return false;
+    for (PdockerVkSwapchain *candidate = g_swapchains; candidate; candidate = candidate->next) {
+        if (candidate == target && !candidate->destroyed) {
+            if (out_swapchain) *out_swapchain = candidate;
+            return true;
+        }
+    }
+    return false;
+}
+
+static PdockerVkSwapchain *swapchain_handle_lookup(VkSwapchainKHR swapchain) {
+    PdockerVkSwapchain *resolved = NULL;
+    return swapchain_handle_resolve(swapchain, &resolved) ? resolved : NULL;
 }
 
 static bool current_vulkan_dispatch_identity_ids(
@@ -27914,7 +28024,7 @@ static void semaphore_complete_wait(PdockerVkSemaphore *sem);
 static void semaphore_complete_signal(PdockerVkSemaphore *sem, uint64_t value);
 
 static bool pdocker_vk_headless_surface_valid(const PdockerVkSurface *surface) {
-    return surface && surface->kind == PDOCKER_VK_SURFACE_HEADLESS;
+    return surface && !surface->destroyed && surface->kind == PDOCKER_VK_SURFACE_HEADLESS;
 }
 
 static bool pdocker_vk_headless_surface_format_supported(VkFormat format, VkColorSpaceKHR color_space) {
@@ -27967,9 +28077,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateHeadlessSurfaceEXT(
     }
     PdockerVkSurface *surface = pdocker_alloc_handle(sizeof(*surface));
     if (!surface) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    memset(surface, 0, sizeof(*surface));
     surface->kind = PDOCKER_VK_SURFACE_HEADLESS;
     surface->default_extent = (VkExtent2D){640u, 480u};
     surface->generation = next_vulkan_object_generation();
+    surface_register(surface);
     *pSurface = pdocker_vk_surface_to_handle(surface);
     return VK_SUCCESS;
 }
@@ -27980,7 +28092,9 @@ VKAPI_ATTR void VKAPI_CALL vkDestroySurfaceKHR(
         const VkAllocationCallbacks *pAllocator) {
     (void)instance;
     (void)pAllocator;
-    free(pdocker_vk_surface_from_handle(surface));
+    PdockerVkSurface *s = surface_unregister(surface);
+    if (!s) return;
+    surface_retire(s);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceSupportKHR(
@@ -27990,7 +28104,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceSupportKHR(
         VkBool32 *pSupported) {
     (void)physicalDevice;
     if (!pSupported) return VK_ERROR_INITIALIZATION_FAILED;
-    *pSupported = (pdocker_vk_headless_surface_valid(pdocker_vk_surface_from_handle(surface)) &&
+    *pSupported = (pdocker_vk_headless_surface_valid(surface_handle_lookup(surface)) &&
                    queueFamilyIndex < PDOCKER_VK_ADVERTISED_QUEUE_FAMILY_COUNT)
         ? VK_TRUE
         : VK_FALSE;
@@ -28003,7 +28117,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
         VkSurfaceCapabilitiesKHR *pSurfaceCapabilities) {
     (void)physicalDevice;
     if (!pSurfaceCapabilities) return VK_ERROR_INITIALIZATION_FAILED;
-    if (!pdocker_vk_headless_surface_valid(pdocker_vk_surface_from_handle(surface))) {
+    if (!pdocker_vk_headless_surface_valid(surface_handle_lookup(surface))) {
         return VK_ERROR_SURFACE_LOST_KHR;
     }
     memset(pSurfaceCapabilities, 0, sizeof(*pSurfaceCapabilities));
@@ -28032,7 +28146,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceFormatsKHR(
         VkSurfaceFormatKHR *pSurfaceFormats) {
     (void)physicalDevice;
     if (!pSurfaceFormatCount) return VK_ERROR_INITIALIZATION_FAILED;
-    if (!pdocker_vk_headless_surface_valid(pdocker_vk_surface_from_handle(surface))) {
+    if (!pdocker_vk_headless_surface_valid(surface_handle_lookup(surface))) {
         *pSurfaceFormatCount = 0;
         return VK_ERROR_SURFACE_LOST_KHR;
     }
@@ -28058,7 +28172,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfacePresentModesKHR(
         VkPresentModeKHR *pPresentModes) {
     (void)physicalDevice;
     if (!pPresentModeCount) return VK_ERROR_INITIALIZATION_FAILED;
-    if (!pdocker_vk_headless_surface_valid(pdocker_vk_surface_from_handle(surface))) {
+    if (!pdocker_vk_headless_surface_valid(surface_handle_lookup(surface))) {
         *pPresentModeCount = 0;
         return VK_ERROR_SURFACE_LOST_KHR;
     }
@@ -28094,7 +28208,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetDeviceGroupSurfacePresentModesKHR(
         VkDeviceGroupPresentModeFlagsKHR *pModes) {
     (void)device;
     if (!pModes) return VK_ERROR_INITIALIZATION_FAILED;
-    if (!pdocker_vk_headless_surface_valid(pdocker_vk_surface_from_handle(surface))) {
+    if (!pdocker_vk_headless_surface_valid(surface_handle_lookup(surface))) {
         *pModes = 0;
         return VK_ERROR_SURFACE_LOST_KHR;
     }
@@ -28109,7 +28223,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDevicePresentRectanglesKHR(
         VkRect2D *pRects) {
     (void)physicalDevice;
     if (!pRectCount) return VK_ERROR_INITIALIZATION_FAILED;
-    PdockerVkSurface *headless_surface = pdocker_vk_surface_from_handle(surface);
+    PdockerVkSurface *headless_surface = surface_handle_lookup(surface);
     if (!pdocker_vk_headless_surface_valid(headless_surface)) {
         *pRectCount = 0;
         return VK_ERROR_SURFACE_LOST_KHR;
@@ -28228,6 +28342,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceFormats2KHR(
 
 static bool pdocker_vk_headless_swapchain_valid(const PdockerVkSwapchain *swapchain) {
     return swapchain &&
+           !swapchain->destroyed &&
            pdocker_vk_headless_surface_valid(swapchain->surface) &&
            swapchain->image_count >= 2u &&
            swapchain->image_count <= PDOCKER_VK_MAX_SWAPCHAIN_IMAGES;
@@ -28360,10 +28475,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSwapchainKHR(
         trace_icd_runtime_failure("swapchain-flags-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }
-    PdockerVkSurface *surface = pdocker_vk_surface_from_handle(pCreateInfo->surface);
+    PdockerVkSurface *surface = surface_handle_lookup(pCreateInfo->surface);
     if (!pdocker_vk_headless_surface_valid(surface)) return VK_ERROR_SURFACE_LOST_KHR;
     if (pCreateInfo->oldSwapchain != VK_NULL_HANDLE) {
-        PdockerVkSwapchain *old_swapchain = pdocker_vk_swapchain_from_handle(pCreateInfo->oldSwapchain);
+        PdockerVkSwapchain *old_swapchain = swapchain_handle_lookup(pCreateInfo->oldSwapchain);
         if (!pdocker_vk_headless_swapchain_valid(old_swapchain)) {
             trace_icd_runtime_failure("swapchain-old-swapchain-invalid", VK_ERROR_INITIALIZATION_FAILED);
             return VK_ERROR_INITIALIZATION_FAILED;
@@ -28470,6 +28585,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSwapchainKHR(
         swapchain->images[i] = pd_image;
         swapchain->memories[i] = pdocker_vk_memory_from_handle(memory);
     }
+    swapchain_register(swapchain);
     *pSwapchain = pdocker_vk_swapchain_to_handle(swapchain);
     return VK_SUCCESS;
 }
@@ -28479,10 +28595,10 @@ VKAPI_ATTR void VKAPI_CALL vkDestroySwapchainKHR(
         VkSwapchainKHR swapchain,
         const VkAllocationCallbacks *pAllocator) {
     (void)pAllocator;
-    PdockerVkSwapchain *sc = pdocker_vk_swapchain_from_handle(swapchain);
+    PdockerVkSwapchain *sc = swapchain_unregister(swapchain);
     if (!sc) return;
     pdocker_vk_destroy_swapchain_images(device, sc);
-    free(sc);
+    swapchain_retire(sc);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkGetSwapchainImagesKHR(
@@ -28491,8 +28607,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetSwapchainImagesKHR(
         uint32_t *pSwapchainImageCount,
         VkImage *pSwapchainImages) {
     (void)device;
-    PdockerVkSwapchain *sc = pdocker_vk_swapchain_from_handle(swapchain);
+    PdockerVkSwapchain *sc = swapchain_handle_lookup(swapchain);
     if (!pSwapchainImageCount) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!sc) {
+        *pSwapchainImageCount = 0;
+        trace_icd_runtime_failure("swapchain-images-untracked", VK_ERROR_INITIALIZATION_FAILED);
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
     if (!pdocker_vk_headless_swapchain_runtime_valid(sc)) {
         *pSwapchainImageCount = 0;
         trace_icd_runtime_failure("swapchain-images-invalid", VK_ERROR_OUT_OF_DATE_KHR);
@@ -28517,8 +28638,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAcquireNextImageKHR(
         uint32_t *pImageIndex) {
     (void)device;
     (void)timeout;
-    PdockerVkSwapchain *sc = pdocker_vk_swapchain_from_handle(swapchain);
+    PdockerVkSwapchain *sc = swapchain_handle_lookup(swapchain);
     if (!pImageIndex) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!sc) {
+        trace_icd_runtime_failure("acquire-next-image-swapchain-untracked", VK_ERROR_INITIALIZATION_FAILED);
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
     if (!pdocker_vk_headless_swapchain_runtime_valid(sc)) {
         trace_icd_runtime_failure("acquire-next-image-swapchain-invalid", VK_ERROR_OUT_OF_DATE_KHR);
         return VK_ERROR_OUT_OF_DATE_KHR;
@@ -28616,7 +28741,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAcquireNextImage2KHR(
 VKAPI_ATTR VkResult VKAPI_CALL vkQueuePresentKHR(
         VkQueue queue,
         const VkPresentInfoKHR *pPresentInfo) {
-    (void)queue;
+    PdockerVkQueue *present_queue = pdocker_vk_queue_from_handle(queue);
+    if (!present_queue) return VK_ERROR_INITIALIZATION_FAILED;
     if (!pPresentInfo) return VK_ERROR_INITIALIZATION_FAILED;
     if (pPresentInfo->sType != VK_STRUCTURE_TYPE_PRESENT_INFO_KHR) {
         return VK_ERROR_INITIALIZATION_FAILED;
@@ -28630,7 +28756,15 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueuePresentKHR(
     }
     for (uint32_t i = 0; i < pPresentInfo->waitSemaphoreCount; ++i) {
         PdockerVkSemaphore *sem = semaphore_handle_lookup(pPresentInfo->pWaitSemaphores[i]);
-        if (!sem || sem->timeline || !semaphore_wait_satisfied(sem, 0)) {
+        if (!sem) {
+            trace_icd_runtime_failure("queue-present-wait-semaphore-untracked", VK_ERROR_INITIALIZATION_FAILED);
+            return VK_ERROR_INITIALIZATION_FAILED;
+        }
+        if (sem->timeline) {
+            trace_icd_runtime_failure("queue-present-wait-semaphore-timeline", VK_ERROR_FEATURE_NOT_PRESENT);
+            return VK_ERROR_FEATURE_NOT_PRESENT;
+        }
+        if (!semaphore_wait_satisfied(sem, 0)) {
             trace_icd_runtime_failure("queue-present-wait-semaphore-unsignaled", VK_NOT_READY);
             return VK_NOT_READY;
         }
@@ -28642,8 +28776,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueuePresentKHR(
     if (pPresentInfo->swapchainCount == 0) return VK_ERROR_INITIALIZATION_FAILED;
     VkResult aggregate = VK_SUCCESS;
     for (uint32_t i = 0; i < pPresentInfo->swapchainCount; ++i) {
-        PdockerVkSwapchain *sc = pdocker_vk_swapchain_from_handle(pPresentInfo->pSwapchains[i]);
-        VkResult rc = pdocker_vk_present_image_result(sc, pPresentInfo->pImageIndices[i]);
+        PdockerVkSwapchain *sc = swapchain_handle_lookup(pPresentInfo->pSwapchains[i]);
+        VkResult rc = sc ? pdocker_vk_present_image_result(sc, pPresentInfo->pImageIndices[i])
+                         : VK_ERROR_INITIALIZATION_FAILED;
         if (rc == VK_SUCCESS && pdocker_vk_present_target_duplicate(pPresentInfo, i)) {
             trace_icd_runtime_failure("queue-present-duplicate-target", VK_ERROR_OUT_OF_DATE_KHR);
             rc = VK_ERROR_OUT_OF_DATE_KHR;
@@ -28656,7 +28791,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueuePresentKHR(
         semaphore_complete_wait(semaphore_handle_lookup(pPresentInfo->pWaitSemaphores[i]));
     }
     for (uint32_t i = 0; i < pPresentInfo->swapchainCount; ++i) {
-        PdockerVkSwapchain *sc = pdocker_vk_swapchain_from_handle(pPresentInfo->pSwapchains[i]);
+        PdockerVkSwapchain *sc = swapchain_handle_lookup(pPresentInfo->pSwapchains[i]);
         uint32_t image_index = pPresentInfo->pImageIndices[i];
         sc->acquired[image_index] = false;
     }

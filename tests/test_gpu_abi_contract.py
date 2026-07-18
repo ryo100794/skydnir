@@ -1701,7 +1701,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertRegex(create_body, r"(pdocker_alloc_handle|calloc|malloc)")
 
         destroy_body = c_function_body(icd, "vkDestroySurfaceKHR")
-        self.assertRegex(destroy_body, r"(free|pdocker_free)")
+        self.assertIn("surface_unregister(surface)", destroy_body)
+        self.assertIn("surface_retire(s);", destroy_body)
 
         support_body = c_function_body(icd, "vkGetPhysicalDeviceSurfaceSupportKHR")
         self.assertIn("!pSupported", support_body)
@@ -1794,7 +1795,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("bool swapchain_owned;", icd)
 
         destroy_body = c_function_body(icd, "vkDestroySwapchainKHR")
-        self.assertRegex(destroy_body, r"(free|pdocker_free)")
+        self.assertIn("swapchain_retire(sc);", destroy_body)
         self.assertIn("pdocker_vk_destroy_swapchain_images", destroy_body)
         destroy_image_body = c_function_body(icd, "vkDestroyImage")
         self.assertIn("swapchain_owned", destroy_image_body)
@@ -1838,7 +1839,9 @@ class GpuAbiContractTest(unittest.TestCase):
         for marker in [
             "!pSwapchainImageCount",
             "VK_ERROR_INITIALIZATION_FAILED",
+            "swapchain_handle_lookup(swapchain)",
             "pdocker_vk_headless_swapchain_runtime_valid",
+            "swapchain-images-untracked",
             "swapchain-images-invalid",
             "VK_ERROR_OUT_OF_DATE_KHR",
             "pSwapchainImages",
@@ -1852,6 +1855,8 @@ class GpuAbiContractTest(unittest.TestCase):
         for marker in [
             "!pImageIndex",
             "VK_ERROR_INITIALIZATION_FAILED",
+            "swapchain_handle_lookup(swapchain)",
+            "acquire-next-image-swapchain-untracked",
             "pdocker_vk_headless_swapchain_runtime_valid",
             "acquire-next-image-swapchain-invalid",
             "pdocker_vk_acquire_sync_valid",
@@ -1891,6 +1896,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "pPresentInfo->sType != VK_STRUCTURE_TYPE_PRESENT_INFO_KHR",
             "!present_info_pnext_noop(pPresentInfo)",
             "queue-present-pnext-unsupported",
+            "PdockerVkQueue *present_queue = pdocker_vk_queue_from_handle(queue);",
+            "queue-present-wait-semaphore-untracked",
+            "queue-present-wait-semaphore-timeline",
             "queue-present-wait-semaphore-unsignaled",
             "semaphore_wait_satisfied",
             "swapchainCount",
@@ -16491,12 +16499,16 @@ class GpuAbiContractTest(unittest.TestCase):
             "framebuffer_handle_lookup(pRenderPassBegin->framebuffer)",
             "framebuffer_retire(framebuffer_unregister(framebuffer));",
             "*pFramebuffer = pdocker_vk_framebuffer_to_handle(fb);",
+            "surface_register(surface);",
             "*pSurface = pdocker_vk_surface_to_handle(surface);",
-            "pdocker_vk_headless_surface_valid(pdocker_vk_surface_from_handle(surface))",
-            "PdockerVkSurface *surface = pdocker_vk_surface_from_handle(pCreateInfo->surface);",
+            "surface_retire(s);",
+            "pdocker_vk_headless_surface_valid(surface_handle_lookup(surface))",
+            "PdockerVkSurface *surface = surface_handle_lookup(pCreateInfo->surface);",
+            "swapchain_register(swapchain);",
             "*pSwapchain = pdocker_vk_swapchain_to_handle(swapchain);",
-            "PdockerVkSwapchain *old_swapchain = pdocker_vk_swapchain_from_handle(pCreateInfo->oldSwapchain);",
-            "PdockerVkSwapchain *sc = pdocker_vk_swapchain_from_handle(pPresentInfo->pSwapchains[i]);",
+            "swapchain_retire(sc);",
+            "PdockerVkSwapchain *old_swapchain = swapchain_handle_lookup(pCreateInfo->oldSwapchain);",
+            "PdockerVkSwapchain *sc = swapchain_handle_lookup(pPresentInfo->pSwapchains[i]);",
         ]:
             self.assertIn(marker, source)
         for forbidden in [
