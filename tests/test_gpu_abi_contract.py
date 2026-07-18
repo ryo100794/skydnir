@@ -8764,6 +8764,8 @@ class GpuAbiContractTest(unittest.TestCase):
 
     def test_vulkan_debug_marker_ext_is_not_advertised_without_transport(self):
         icd = VULKAN_ICD.read_text()
+        private_data_slot_struct = icd.split("struct PdockerVkPrivateDataSlot {", 1)[1].split("};", 1)[0]
+        self.assertIn("uint64_t owner_device_id;", private_data_slot_struct)
         self.assertIn("VK_EXT_DEBUG_MARKER_EXTENSION_NAME", icd)
         helper_body = c_function_body(icd, "pdocker_supports_debug_marker_transport")
         self.assertIn("return false;", helper_body)
@@ -11568,12 +11570,24 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("Validation caches are execution-neutral metadata", shader_module_pnext_body)
         self.assertNotIn("shader-module-validation-cache-unsupported", shader_module_pnext_body)
         self.assertIn("cache_info->validationCache != VK_NULL_HANDLE", shader_module_pnext_body)
-        self.assertIn("validation_cache_handle_live(cache_info->validationCache)", shader_module_pnext_body)
+        self.assertIn("validation_cache_handle_live_for_device(device, cache_info->validationCache)", shader_module_pnext_body)
         self.assertIn('unsupported_create_info_pnext_result("vkCreateShaderModule", node)', shader_module_pnext_body)
         self.assertIn("VKAPI_ATTR VkResult VKAPI_CALL vkCreateValidationCacheEXT", icd)
+        validation_cache_struct = icd.split("struct PdockerVkValidationCache {", 1)[1].split("};", 1)[0]
+        self.assertIn("uint64_t owner_device_id;", validation_cache_struct)
+        validation_cache_create_body = c_function_body(icd, "vkCreateValidationCacheEXT")
+        validation_cache_destroy_body = c_function_body(icd, "vkDestroyValidationCacheEXT")
+        validation_cache_get_body = c_function_body(icd, "vkGetValidationCacheDataEXT")
+        validation_cache_merge_body = c_function_body(icd, "vkMergeValidationCachesEXT")
+        self.assertIn("cache->owner_device_id = device_owner_id_or_zero(device);", validation_cache_create_body)
+        self.assertIn("validation_cache_handle_lookup_for_device(device, validationCache)", validation_cache_destroy_body)
+        self.assertIn("validation_cache_handle_live_for_device(device, validationCache)", validation_cache_get_body)
+        self.assertIn("validation_cache_handle_live_for_device(device, dstCache)", validation_cache_merge_body)
         for marker in [
             "static PdockerVkValidationCache *g_validation_caches;",
             "validation_cache_handle_live",
+            "validation_cache_handle_live_for_device",
+            "validation_cache_handle_lookup_for_device",
             "validation_cache_register",
             "validation_cache_unregister",
         ]:
@@ -11603,18 +11617,19 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("MAP_PROC(vkGetPrivateData)", icd)
         for marker in [
             "static PdockerVkPrivateDataSlot *g_private_data_slots;",
-            "private_data_slot_handle_live",
+            "private_data_slot_handle_lookup_for_device",
             "private_data_slot_register",
             "private_data_slot_unregister",
         ]:
             self.assertIn(marker, icd)
         private_destroy_body = c_function_body(icd, "vkDestroyPrivateDataSlot")
-        self.assertIn("private_data_slot_unregister(privateDataSlot)", private_destroy_body)
+        self.assertIn("private_data_slot_handle_lookup_for_device(device, privateDataSlot)", private_destroy_body)
+        self.assertIn("private_data_slot_free_object(private_data_slot_unregister(privateDataSlot))", private_destroy_body)
         private_set_body = c_function_body(icd, "vkSetPrivateData")
-        self.assertIn("private_data_slot_handle_live(privateDataSlot)", private_set_body)
+        self.assertIn("private_data_slot_handle_lookup_for_device(device, privateDataSlot)", private_set_body)
         self.assertIn("private-data-slot-invalid", private_set_body)
         private_get_body = c_function_body(icd, "vkGetPrivateData")
-        self.assertIn("private_data_slot_handle_live(privateDataSlot)", private_get_body)
+        self.assertIn("private_data_slot_handle_lookup_for_device(device, privateDataSlot)", private_get_body)
         self.assertIn("pCreateInfo->codeSize % sizeof(uint32_t)", shader_module_body)
         self.assertIn("!pCreateInfo->pCode", shader_module_body)
         query_pool_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateQueryPool", 1)[1].split(

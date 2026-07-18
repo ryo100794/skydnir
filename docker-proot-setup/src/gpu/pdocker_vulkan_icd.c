@@ -1724,6 +1724,7 @@ struct PdockerVkPipelineCache {
 
 #ifdef VK_EXT_VALIDATION_CACHE_EXTENSION_NAME
 struct PdockerVkValidationCache {
+    uint64_t owner_device_id;
     struct PdockerVkValidationCache *next;
 };
 #endif
@@ -1737,6 +1738,7 @@ typedef struct PdockerVkPrivateDataRecord {
 } PdockerVkPrivateDataRecord;
 
 struct PdockerVkPrivateDataSlot {
+    uint64_t owner_device_id;
     PdockerVkPrivateDataRecord *records;
     struct PdockerVkPrivateDataSlot *next;
 };
@@ -26789,10 +26791,13 @@ static VkResult validate_pipeline_specialization_info_for_transport(
 }
 
 #ifdef VK_EXT_VALIDATION_CACHE_EXTENSION_NAME
-static bool validation_cache_handle_live(VkValidationCacheEXT validationCache);
+static bool validation_cache_handle_live_for_device(
+        VkDevice device,
+        VkValidationCacheEXT validationCache);
 #endif
 
 static VkResult validate_shader_module_create_pnext(
+        VkDevice device,
         const void *pNext,
         uint64_t enabled_extension_mask) {
     for (const void *node = pNext; node;) {
@@ -26806,7 +26811,7 @@ static VkResult validate_shader_module_create_pnext(
                 const VkShaderModuleValidationCacheCreateInfoEXT *cache_info =
                     (const VkShaderModuleValidationCacheCreateInfoEXT *)node;
                 if (cache_info->validationCache != VK_NULL_HANDLE &&
-                    !validation_cache_handle_live(cache_info->validationCache)) {
+                    !validation_cache_handle_live_for_device(device, cache_info->validationCache)) {
                     return VK_ERROR_INITIALIZATION_FAILED;
                 }
                 /*
@@ -26835,6 +26840,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateShaderModule(
     (void)pAllocator;
     if (!pCreateInfo || !pShaderModule) return VK_ERROR_INITIALIZATION_FAILED;
     VkResult pnext_rc = validate_shader_module_create_pnext(
+        device,
         pCreateInfo->pNext,
         device_enabled_extension_mask_from_handle(device));
     if (pnext_rc != VK_SUCCESS) return pnext_rc;
@@ -37347,13 +37353,28 @@ VKAPI_ATTR VkResult VKAPI_CALL vkMergePipelineCaches(
 }
 
 #ifdef VK_EXT_VALIDATION_CACHE_EXTENSION_NAME
-static bool validation_cache_handle_live(VkValidationCacheEXT validationCache) {
+static PdockerVkValidationCache *validation_cache_handle_lookup(VkValidationCacheEXT validationCache) {
     PdockerVkValidationCache *target = pdocker_vk_validation_cache_from_handle(validationCache);
-    if (!target) return false;
+    if (!target) return NULL;
     for (PdockerVkValidationCache *cache = g_validation_caches; cache; cache = cache->next) {
-        if (cache == target) return true;
+        if (cache == target) return cache;
     }
-    return false;
+    return NULL;
+}
+
+static PdockerVkValidationCache *validation_cache_handle_lookup_for_device(
+        VkDevice device,
+        VkValidationCacheEXT validationCache) {
+    PdockerVkValidationCache *cache = validation_cache_handle_lookup(validationCache);
+    return cache && device_owner_matches_or_unowned(device, cache->owner_device_id)
+        ? cache
+        : NULL;
+}
+
+static bool validation_cache_handle_live_for_device(
+        VkDevice device,
+        VkValidationCacheEXT validationCache) {
+    return validation_cache_handle_lookup_for_device(device, validationCache) != NULL;
 }
 
 static void validation_cache_register(PdockerVkValidationCache *cache) {
@@ -37382,7 +37403,6 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateValidationCacheEXT(
         const VkValidationCacheCreateInfoEXT *pCreateInfo,
         const VkAllocationCallbacks *pAllocator,
         VkValidationCacheEXT *pValidationCache) {
-    (void)device;
     (void)pAllocator;
     if (!pCreateInfo || !pValidationCache ||
         pCreateInfo->sType != VK_STRUCTURE_TYPE_VALIDATION_CACHE_CREATE_INFO_EXT) {
@@ -37399,6 +37419,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateValidationCacheEXT(
     }
     PdockerVkValidationCache *cache = pdocker_alloc_handle(sizeof(*cache));
     if (!cache) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    cache->owner_device_id = device_owner_id_or_zero(device);
     validation_cache_register(cache);
     *pValidationCache = pdocker_vk_validation_cache_to_handle(cache);
     if (!*pValidationCache) {
@@ -37413,8 +37434,8 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyValidationCacheEXT(
         VkDevice device,
         VkValidationCacheEXT validationCache,
         const VkAllocationCallbacks *pAllocator) {
-    (void)device;
     (void)pAllocator;
+    if (!validation_cache_handle_lookup_for_device(device, validationCache)) return;
     free(validation_cache_unregister(validationCache));
 }
 
@@ -37423,8 +37444,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetValidationCacheDataEXT(
         VkValidationCacheEXT validationCache,
         size_t *pDataSize,
         void *pData) {
-    (void)device;
-    if (!validation_cache_handle_live(validationCache)) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!validation_cache_handle_live_for_device(device, validationCache)) return VK_ERROR_INITIALIZATION_FAILED;
     if (!pDataSize) return VK_ERROR_INITIALIZATION_FAILED;
     if (!pData) {
         *pDataSize = 0;
@@ -37439,11 +37459,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkMergeValidationCachesEXT(
         VkValidationCacheEXT dstCache,
         uint32_t srcCacheCount,
         const VkValidationCacheEXT *pSrcCaches) {
-    (void)device;
-    if (!validation_cache_handle_live(dstCache)) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!validation_cache_handle_live_for_device(device, dstCache)) return VK_ERROR_INITIALIZATION_FAILED;
     if (srcCacheCount > 0 && !pSrcCaches) return VK_ERROR_INITIALIZATION_FAILED;
     for (uint32_t i = 0; i < srcCacheCount; ++i) {
-        if (!validation_cache_handle_live(pSrcCaches[i])) return VK_ERROR_INITIALIZATION_FAILED;
+        if (!validation_cache_handle_live_for_device(device, pSrcCaches[i])) return VK_ERROR_INITIALIZATION_FAILED;
     }
     return VK_SUCCESS;
 }
@@ -37670,13 +37689,22 @@ VKAPI_ATTR void VKAPI_CALL vkSubmitDebugUtilsMessageEXT(
 #endif
 
 #ifdef VK_EXT_PRIVATE_DATA_EXTENSION_NAME
-static bool private_data_slot_handle_live(VkPrivateDataSlot privateDataSlot) {
+static PdockerVkPrivateDataSlot *private_data_slot_handle_lookup(VkPrivateDataSlot privateDataSlot) {
     PdockerVkPrivateDataSlot *target = pdocker_vk_private_data_slot_from_handle(privateDataSlot);
-    if (!target) return false;
+    if (!target) return NULL;
     for (PdockerVkPrivateDataSlot *slot = g_private_data_slots; slot; slot = slot->next) {
-        if (slot == target) return true;
+        if (slot == target) return slot;
     }
-    return false;
+    return NULL;
+}
+
+static PdockerVkPrivateDataSlot *private_data_slot_handle_lookup_for_device(
+        VkDevice device,
+        VkPrivateDataSlot privateDataSlot) {
+    PdockerVkPrivateDataSlot *slot = private_data_slot_handle_lookup(privateDataSlot);
+    return slot && device_owner_matches_or_unowned(device, slot->owner_device_id)
+        ? slot
+        : NULL;
 }
 
 static void private_data_slot_register(PdockerVkPrivateDataSlot *slot) {
@@ -37700,12 +37728,22 @@ static PdockerVkPrivateDataSlot *private_data_slot_unregister(VkPrivateDataSlot 
     return NULL;
 }
 
+static void private_data_slot_free_object(PdockerVkPrivateDataSlot *slot) {
+    if (!slot) return;
+    PdockerVkPrivateDataRecord *record = slot->records;
+    while (record) {
+        PdockerVkPrivateDataRecord *next = record->next;
+        free(record);
+        record = next;
+    }
+    free(slot);
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL vkCreatePrivateDataSlot(
         VkDevice device,
         const VkPrivateDataSlotCreateInfo *pCreateInfo,
         const VkAllocationCallbacks *pAllocator,
         VkPrivateDataSlot *pPrivateDataSlot) {
-    (void)device;
     (void)pAllocator;
     if (pPrivateDataSlot) *pPrivateDataSlot = VK_NULL_HANDLE;
     if (!pCreateInfo || !pPrivateDataSlot ||
@@ -37722,6 +37760,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreatePrivateDataSlot(
     }
     PdockerVkPrivateDataSlot *slot = pdocker_alloc_handle(sizeof(*slot));
     if (!slot) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    slot->owner_device_id = device_owner_id_or_zero(device);
+    slot->records = NULL;
     private_data_slot_register(slot);
     *pPrivateDataSlot = pdocker_vk_private_data_slot_to_handle(slot);
     if (!*pPrivateDataSlot) {
@@ -37736,17 +37776,9 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyPrivateDataSlot(
         VkDevice device,
         VkPrivateDataSlot privateDataSlot,
         const VkAllocationCallbacks *pAllocator) {
-    (void)device;
     (void)pAllocator;
-    PdockerVkPrivateDataSlot *slot = private_data_slot_unregister(privateDataSlot);
-    if (!slot) return;
-    PdockerVkPrivateDataRecord *record = slot->records;
-    while (record) {
-        PdockerVkPrivateDataRecord *next = record->next;
-        free(record);
-        record = next;
-    }
-    free(slot);
+    if (!private_data_slot_handle_lookup_for_device(device, privateDataSlot)) return;
+    private_data_slot_free_object(private_data_slot_unregister(privateDataSlot));
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkSetPrivateData(
@@ -37755,12 +37787,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkSetPrivateData(
         uint64_t objectHandle,
         VkPrivateDataSlot privateDataSlot,
         uint64_t data) {
-    (void)device;
-    if (!private_data_slot_handle_live(privateDataSlot)) {
+    PdockerVkPrivateDataSlot *slot = private_data_slot_handle_lookup_for_device(device, privateDataSlot);
+    if (!slot) {
         trace_icd_runtime_failure("private-data-slot-invalid", VK_ERROR_INITIALIZATION_FAILED);
         return VK_ERROR_INITIALIZATION_FAILED;
     }
-    PdockerVkPrivateDataSlot *slot = pdocker_vk_private_data_slot_from_handle(privateDataSlot);
     if (objectType == VK_OBJECT_TYPE_UNKNOWN || objectHandle == 0) {
         trace_icd_runtime_failure("private-data-object-invalid", VK_ERROR_INITIALIZATION_FAILED);
         return VK_ERROR_INITIALIZATION_FAILED;
@@ -37796,12 +37827,10 @@ VKAPI_ATTR void VKAPI_CALL vkGetPrivateData(
         uint64_t objectHandle,
         VkPrivateDataSlot privateDataSlot,
         uint64_t *pData) {
-    (void)device;
     if (!pData) return;
     *pData = 0;
-    if (!private_data_slot_handle_live(privateDataSlot) ||
-        objectType == VK_OBJECT_TYPE_UNKNOWN || objectHandle == 0) return;
-    PdockerVkPrivateDataSlot *slot = pdocker_vk_private_data_slot_from_handle(privateDataSlot);
+    PdockerVkPrivateDataSlot *slot = private_data_slot_handle_lookup_for_device(device, privateDataSlot);
+    if (!slot || objectType == VK_OBJECT_TYPE_UNKNOWN || objectHandle == 0) return;
     for (const PdockerVkPrivateDataRecord *record = slot->records; record; record = record->next) {
         if (record->object_type == objectType && record->object_handle == objectHandle) {
             *pData = record->data;
@@ -38039,13 +38068,23 @@ static void pdocker_vk_destroy_device_live_objects(VkDevice device, uint64_t des
         query_pool_retire(pool);
     }
 #ifdef VK_EXT_VALIDATION_CACHE_EXTENSION_NAME
-    while (g_validation_caches) {
-        vkDestroyValidationCacheEXT(device, pdocker_vk_validation_cache_to_handle(g_validation_caches), NULL);
+    while (true) {
+        PdockerVkValidationCache *cache = NULL;
+        PDOCKER_VK_FIND_DEVICE_OWNED(g_validation_caches, cache, destroy_owner_id);
+        if (!cache) break;
+        cache = validation_cache_unregister(pdocker_vk_validation_cache_to_handle(cache));
+        if (!cache) break;
+        free(cache);
     }
 #endif
 #ifdef VK_EXT_PRIVATE_DATA_EXTENSION_NAME
-    while (g_private_data_slots) {
-        vkDestroyPrivateDataSlot(device, pdocker_vk_private_data_slot_to_handle(g_private_data_slots), NULL);
+    while (true) {
+        PdockerVkPrivateDataSlot *slot = NULL;
+        PDOCKER_VK_FIND_DEVICE_OWNED(g_private_data_slots, slot, destroy_owner_id);
+        if (!slot) break;
+        slot = private_data_slot_unregister(pdocker_vk_private_data_slot_to_handle(slot));
+        if (!slot) break;
+        private_data_slot_free_object(slot);
     }
 #endif
 }

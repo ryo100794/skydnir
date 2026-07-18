@@ -6981,6 +6981,50 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 vkGetImageSubresourceLayout(device_b, image_a, &subresource, &layout);
                 if (layout.size != 0 || layout.rowPitch != 0 || layout.depthPitch != 0 || layout.arrayPitch != 0) return 28;
 
+#ifdef VK_EXT_VALIDATION_CACHE_EXTENSION_NAME
+                VkValidationCacheCreateInfoEXT validation_cache_info;
+                memset(&validation_cache_info, 0, sizeof(validation_cache_info));
+                validation_cache_info.sType = VK_STRUCTURE_TYPE_VALIDATION_CACHE_CREATE_INFO_EXT;
+                VkValidationCacheEXT validation_cache_a = VK_NULL_HANDLE;
+                if (vkCreateValidationCacheEXT(device_a, &validation_cache_info, NULL, &validation_cache_a) != VK_SUCCESS ||
+                    validation_cache_a == VK_NULL_HANDLE) return 31;
+                size_t validation_cache_size = 99;
+                if (vkGetValidationCacheDataEXT(device_b, validation_cache_a, &validation_cache_size, NULL) == VK_SUCCESS) return 32;
+                if (vkMergeValidationCachesEXT(device_b, validation_cache_a, 1, &validation_cache_a) == VK_SUCCESS) return 33;
+                vkDestroyValidationCacheEXT(device_b, validation_cache_a, NULL);
+                validation_cache_size = 99;
+                if (vkGetValidationCacheDataEXT(device_a, validation_cache_a, &validation_cache_size, NULL) != VK_SUCCESS ||
+                    validation_cache_size != 0) return 34;
+                vkDestroyValidationCacheEXT(device_a, validation_cache_a, NULL);
+                validation_cache_size = 99;
+                if (vkGetValidationCacheDataEXT(device_a, validation_cache_a, &validation_cache_size, NULL) == VK_SUCCESS) return 35;
+#endif
+
+#ifdef VK_EXT_PRIVATE_DATA_EXTENSION_NAME
+                VkPrivateDataSlotCreateInfo slot_info;
+                memset(&slot_info, 0, sizeof(slot_info));
+                slot_info.sType = VK_STRUCTURE_TYPE_PRIVATE_DATA_SLOT_CREATE_INFO;
+                VkPrivateDataSlot private_slot_a = VK_NULL_HANDLE;
+                if (vkCreatePrivateDataSlot(device_a, &slot_info, NULL, &private_slot_a) != VK_SUCCESS ||
+                    private_slot_a == VK_NULL_HANDLE) return 41;
+                if (vkSetPrivateData(device_b, VK_OBJECT_TYPE_BUFFER, (uint64_t)(uintptr_t)buffer_a, private_slot_a, 0x123u) == VK_SUCCESS) return 42;
+                uint64_t private_data = 77;
+                vkGetPrivateData(device_b, VK_OBJECT_TYPE_BUFFER, (uint64_t)(uintptr_t)buffer_a, private_slot_a, &private_data);
+                if (private_data != 0) return 43;
+                if (vkSetPrivateData(device_a, VK_OBJECT_TYPE_BUFFER, (uint64_t)(uintptr_t)buffer_a, private_slot_a, 0x456u) != VK_SUCCESS) return 44;
+                private_data = 0;
+                vkGetPrivateData(device_a, VK_OBJECT_TYPE_BUFFER, (uint64_t)(uintptr_t)buffer_a, private_slot_a, &private_data);
+                if (private_data != 0x456u) return 45;
+                vkDestroyPrivateDataSlot(device_b, private_slot_a, NULL);
+                private_data = 0;
+                vkGetPrivateData(device_a, VK_OBJECT_TYPE_BUFFER, (uint64_t)(uintptr_t)buffer_a, private_slot_a, &private_data);
+                if (private_data != 0x456u) return 46;
+                vkDestroyPrivateDataSlot(device_a, private_slot_a, NULL);
+                private_data = 77;
+                vkGetPrivateData(device_a, VK_OBJECT_TYPE_BUFFER, (uint64_t)(uintptr_t)buffer_a, private_slot_a, &private_data);
+                if (private_data != 0) return 47;
+#endif
+
                 VkMappedMemoryRange range;
                 memset(&range, 0, sizeof(range));
                 range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;

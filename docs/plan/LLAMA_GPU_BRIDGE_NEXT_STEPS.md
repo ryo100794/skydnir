@@ -10,6 +10,36 @@ llama.cpp itself remains unmodified.
 ## Current Ground Truth
 
 
+### 2026-07-18 CPU/static Vulkan validation-cache and private-data owner lane
+
+Validation caches and private-data slots now carry creator-device ownership.
+`vkGetValidationCacheDataEXT`, `vkMergeValidationCachesEXT`,
+`vkDestroyValidationCacheEXT`, `vkSetPrivateData`, `vkGetPrivateData`, and
+`vkDestroyPrivateDataSlot` resolve slot/cache handles through the calling
+logical device.  Shader-module validation-cache pNext handling now rejects a
+cache handle created on another device instead of treating global liveness as
+sufficient.
+
+`vkDestroyDevice` now reclaims only validation caches and private-data slots
+owned by the destroyed device, matching the existing owner-filtered cleanup for
+core resources, sync/query resources, WSI, pipeline, render, and descriptor
+metadata.
+
+This remains CPU/static Vulkan pass-through hardening.  It does not change
+llama.cpp, Dockerfiles, models, prompts, shader bytes, or executor arithmetic.
+
+Evidence: `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`,
+`tests.test_gpu_abi_contract`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_device_owner_rejects_cross_device_memory_resource_misuse`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_device_owner_rejects_cross_device_metadata_render_wsi_handles`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_device_owner_rejects_cross_device_command_submit_sync`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_command_recording_rejects_cross_device_transfer_resources`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_destroy_device_retires_live_device_children_and_queue`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_wsi_surface_swapchain_handles_fail_closed_after_destroy`,
+`scripts/build-gpu-shim.sh`, `scripts/verify-native-payloads.py`,
+`./gradlew :app:assembleDebug`.
+
+
 ### 2026-07-18 CPU/static Vulkan read-only resource-query owner lane
 
 Read-only resource queries now respect creator-device ownership.
