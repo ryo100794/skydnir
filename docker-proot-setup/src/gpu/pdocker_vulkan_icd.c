@@ -2304,6 +2304,20 @@ static PdockerVkImageView *image_view_handle_lookup_for_device(VkDevice device, 
     return resolved && device_owner_matches_or_unowned(device, resolved->owner_device_id) ? resolved : NULL;
 }
 
+static PdockerVkImageView *image_view_handle_lookup_for_owner_id_checked(
+        uint64_t owner_device_id,
+        VkImageView view,
+        bool *owner_mismatch_out) {
+    if (owner_mismatch_out) *owner_mismatch_out = false;
+    PdockerVkImageView *resolved = image_view_handle_lookup(view);
+    if (!resolved) return NULL;
+    if (!owner_device_ids_match_or_unowned(owner_device_id, resolved->owner_device_id)) {
+        if (owner_mismatch_out) *owner_mismatch_out = true;
+        return NULL;
+    }
+    return resolved;
+}
+
 static void sampler_register(PdockerVkSampler *sampler) {
     if (!sampler) return;
     sampler->destroyed = false;
@@ -4884,20 +4898,18 @@ static bool copy_rendering_attachment_state(
     memset(dst, 0, sizeof(*dst));
     if (!src) return true;
     if (src->pNext) return false;
-    PdockerVkImageView *image_view = image_view_handle_lookup(src->imageView);
-    if (src->imageView != VK_NULL_HANDLE && !image_view) return false;
-    if (image_view &&
-        !owner_device_ids_match_or_unowned(owner_device_id, image_view->owner_device_id)) {
-        return false;
-    }
+    bool image_view_owner_mismatch = false;
+    PdockerVkImageView *image_view = image_view_handle_lookup_for_owner_id_checked(
+        owner_device_id, src->imageView, &image_view_owner_mismatch);
+    if (image_view_owner_mismatch ||
+        (src->imageView != VK_NULL_HANDLE && !image_view)) return false;
     PdockerVkImageViewSnapshot image_view_snapshot;
     if (!snapshot_image_view_state(&image_view_snapshot, image_view)) return false;
-    PdockerVkImageView *resolve_image_view = image_view_handle_lookup(src->resolveImageView);
-    if (src->resolveImageView != VK_NULL_HANDLE && !resolve_image_view) return false;
-    if (resolve_image_view &&
-        !owner_device_ids_match_or_unowned(owner_device_id, resolve_image_view->owner_device_id)) {
-        return false;
-    }
+    bool resolve_image_view_owner_mismatch = false;
+    PdockerVkImageView *resolve_image_view = image_view_handle_lookup_for_owner_id_checked(
+        owner_device_id, src->resolveImageView, &resolve_image_view_owner_mismatch);
+    if (resolve_image_view_owner_mismatch ||
+        (src->resolveImageView != VK_NULL_HANDLE && !resolve_image_view)) return false;
     PdockerVkImageViewSnapshot resolve_image_view_snapshot;
     if (!snapshot_image_view_state(&resolve_image_view_snapshot, resolve_image_view)) return false;
     dst->image_view = image_view;

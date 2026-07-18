@@ -10,6 +10,24 @@ llama.cpp itself remains unmodified.
 ## Current Ground Truth
 
 
+### 2026-07-18 CPU/static Vulkan dynamic-rendering attachment owner lane
+
+Dynamic-rendering attachment capture now resolves image views through an
+owner-id-scoped checked helper before snapshotting attachment state.  This keeps
+image-view handle lookup and owner validation together and preserves the
+existing `dynamic-rendering-attachment-cross-device` failure path for both
+invalid and foreign attachment handles.
+
+This is CPU/static Vulkan pass-through hardening only.  It does not change
+llama.cpp, Dockerfiles, models, prompts, shader bytes, or executor arithmetic.
+
+Evidence: `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`,
+`tests.test_gpu_abi_contract`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_device_owner_rejects_cross_device_metadata_render_wsi_handles`,
+`scripts/build-gpu-shim.sh`, `scripts/verify-native-payloads.py`,
+`./gradlew :app:assembleDebug`.
+
+
 ### 2026-07-18 CPU/static Vulkan submit2 semaphore completion lane
 
 Submit2 semaphore completion now receives the submitting queue and completes
