@@ -2099,8 +2099,7 @@ static void memory_register(PdockerVkMemory *memory) {
     g_memories = memory;
 }
 
-static PdockerVkMemory *memory_unregister(VkDeviceMemory memory) {
-    PdockerVkMemory *target = pdocker_vk_memory_from_handle(memory);
+static PdockerVkMemory *memory_unregister_object(PdockerVkMemory *target) {
     if (!target) return NULL;
     PdockerVkMemory **link = &g_memories;
     while (*link) {
@@ -2112,6 +2111,11 @@ static PdockerVkMemory *memory_unregister(VkDeviceMemory memory) {
         link = &(*link)->next;
     }
     return NULL;
+}
+
+static PdockerVkMemory *memory_unregister(VkDeviceMemory memory) __attribute__((unused));
+static PdockerVkMemory *memory_unregister(VkDeviceMemory memory) {
+    return memory_unregister_object(pdocker_vk_memory_from_handle(memory));
 }
 
 static bool memory_handle_resolve(VkDeviceMemory memory, PdockerVkMemory **out_memory) {
@@ -2148,8 +2152,7 @@ static void buffer_register(PdockerVkBuffer *buffer) {
     g_buffers = buffer;
 }
 
-static PdockerVkBuffer *buffer_unregister(VkBuffer buffer) {
-    PdockerVkBuffer *target = pdocker_vk_buffer_from_handle(buffer);
+static PdockerVkBuffer *buffer_unregister_object(PdockerVkBuffer *target) {
     if (!target) return NULL;
     PdockerVkBuffer **link = &g_buffers;
     while (*link) {
@@ -2161,6 +2164,10 @@ static PdockerVkBuffer *buffer_unregister(VkBuffer buffer) {
         link = &(*link)->next;
     }
     return NULL;
+}
+
+static PdockerVkBuffer *buffer_unregister(VkBuffer buffer) {
+    return buffer_unregister_object(pdocker_vk_buffer_from_handle(buffer));
 }
 
 static void buffer_retire(PdockerVkBuffer *buffer) {
@@ -2219,8 +2226,7 @@ static void buffer_view_register(PdockerVkBufferView *view) {
     g_buffer_views = view;
 }
 
-static PdockerVkBufferView *buffer_view_unregister(VkBufferView view) {
-    PdockerVkBufferView *target = pdocker_vk_buffer_view_from_handle(view);
+static PdockerVkBufferView *buffer_view_unregister_object(PdockerVkBufferView *target) {
     if (!target) return NULL;
     PdockerVkBufferView **link = &g_buffer_views;
     while (*link) {
@@ -2232,6 +2238,10 @@ static PdockerVkBufferView *buffer_view_unregister(VkBufferView view) {
         link = &(*link)->next;
     }
     return NULL;
+}
+
+static PdockerVkBufferView *buffer_view_unregister(VkBufferView view) {
+    return buffer_view_unregister_object(pdocker_vk_buffer_view_from_handle(view));
 }
 
 static void buffer_view_retire(PdockerVkBufferView *view) {
@@ -2357,8 +2367,7 @@ static void image_view_register(PdockerVkImageView *view) {
     g_image_views = view;
 }
 
-static PdockerVkImageView *image_view_unregister(VkImageView view) {
-    PdockerVkImageView *target = pdocker_vk_image_view_from_handle(view);
+static PdockerVkImageView *image_view_unregister_object(PdockerVkImageView *target) {
     if (!target) return NULL;
     PdockerVkImageView **link = &g_image_views;
     while (*link) {
@@ -2370,6 +2379,10 @@ static PdockerVkImageView *image_view_unregister(VkImageView view) {
         link = &(*link)->next;
     }
     return NULL;
+}
+
+static PdockerVkImageView *image_view_unregister(VkImageView view) {
+    return image_view_unregister_object(pdocker_vk_image_view_from_handle(view));
 }
 
 static void image_view_retire(PdockerVkImageView *view) {
@@ -2424,8 +2437,7 @@ static void sampler_register(PdockerVkSampler *sampler) {
     g_samplers = sampler;
 }
 
-static PdockerVkSampler *sampler_unregister(VkSampler sampler) {
-    PdockerVkSampler *target = pdocker_vk_sampler_from_handle(sampler);
+static PdockerVkSampler *sampler_unregister_object(PdockerVkSampler *target) {
     if (!target) return NULL;
     PdockerVkSampler **link = &g_samplers;
     while (*link) {
@@ -2437,6 +2449,10 @@ static PdockerVkSampler *sampler_unregister(VkSampler sampler) {
         link = &(*link)->next;
     }
     return NULL;
+}
+
+static PdockerVkSampler *sampler_unregister(VkSampler sampler) {
+    return sampler_unregister_object(pdocker_vk_sampler_from_handle(sampler));
 }
 
 static void sampler_retire(PdockerVkSampler *sampler) {
@@ -22727,7 +22743,7 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyBuffer(
     (void)pAllocator;
     PdockerVkBuffer *target = buffer_handle_lookup_for_device(device, buffer);
     if (!target) return;
-    buffer_retire(buffer_unregister(buffer));
+    buffer_retire(buffer_unregister_object(target));
 }
 
 static VkResult validate_buffer_view_create_pnext_with_extensions(
@@ -22872,7 +22888,7 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyBufferView(
     (void)pAllocator;
     PdockerVkBufferView *target = buffer_view_handle_lookup_for_device(device, bufferView);
     if (!target) return;
-    buffer_view_retire(buffer_view_unregister(bufferView));
+    buffer_view_retire(buffer_view_unregister_object(target));
 }
 
 static VkResult unsupported_create_info_pnext_result(const char *api_name, const void *pNext) {
@@ -23595,7 +23611,7 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyImage(
         trace_icd_runtime_failure("swapchain-image-destroy-ignored", VK_ERROR_INITIALIZATION_FAILED);
         return;
     }
-    image_retire(image_unregister(image));
+    image_retire(image_unregister_object(img));
 }
 
 VKAPI_ATTR void VKAPI_CALL vkGetImageMemoryRequirements(
@@ -23970,7 +23986,7 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyImageView(
     (void)pAllocator;
     PdockerVkImageView *target = image_view_handle_lookup_for_device(device, imageView);
     if (!target) return;
-    image_view_retire(image_view_unregister(imageView));
+    image_view_retire(image_view_unregister_object(target));
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateSampler(
@@ -24023,7 +24039,7 @@ VKAPI_ATTR void VKAPI_CALL vkDestroySampler(
     (void)pAllocator;
     PdockerVkSampler *target = sampler_handle_lookup_for_device(device, sampler);
     if (!target) return;
-    sampler_retire(sampler_unregister(sampler));
+    sampler_retire(sampler_unregister_object(target));
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateSamplerYcbcrConversion(
@@ -24471,7 +24487,7 @@ VKAPI_ATTR void VKAPI_CALL vkFreeMemory(
     (void)pAllocator;
     PdockerVkMemory *m = memory_handle_lookup_for_device(device, memory);
     if (!m) return;
-    m = memory_unregister(memory);
+    m = memory_unregister_object(m);
     if (!m) return;
     buffer_detach_memory(m);
     image_detach_memory(m);
@@ -38403,7 +38419,7 @@ static bool device_destroy_should_reclaim_object(uint64_t destroy_owner_id, uint
 
 static void pdocker_vk_release_memory_object(PdockerVkMemory *memory) {
     if (!memory) return;
-    PdockerVkMemory *m = memory_unregister(pdocker_vk_memory_to_handle(memory));
+    PdockerVkMemory *m = memory_unregister_object(memory);
     if (!m) return;
     buffer_detach_memory(m);
     image_detach_memory(m);

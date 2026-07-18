@@ -12064,10 +12064,12 @@ class GpuAbiContractTest(unittest.TestCase):
             "image_handle_resolve(VkImage image, PdockerVkImage **out_image)",
             "image_handle_lookup(VkImage image)",
             "image_view_register(PdockerVkImageView *view)",
+            "image_view_unregister_object(PdockerVkImageView *target)",
             "image_view_unregister(VkImageView view)",
             "image_view_handle_resolve(VkImageView view, PdockerVkImageView **out_view)",
             "image_view_handle_lookup(VkImageView view)",
             "sampler_register(PdockerVkSampler *sampler)",
+            "sampler_unregister_object(PdockerVkSampler *target)",
             "sampler_unregister(VkSampler sampler)",
             "sampler_handle_resolve(VkSampler sampler, PdockerVkSampler **out_sampler)",
             "sampler_handle_lookup(VkSampler sampler)",
@@ -12076,17 +12078,17 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("image_register(image);", create_image_body)
         destroy_image_body = c_function_body(icd, "vkDestroyImage")
         self.assertIn("image_handle_resolve(image, &img)", destroy_image_body)
-        self.assertIn("image_retire(image_unregister(image));", destroy_image_body)
+        self.assertIn("image_retire(image_unregister_object(img));", destroy_image_body)
         create_view_body = c_function_body(icd, "vkCreateImageView")
         destroy_view_body = c_function_body(icd, "vkDestroyImageView")
         self.assertIn("PdockerVkImage *image = image_handle_lookup_for_device(device, pCreateInfo->image);", create_view_body)
         self.assertIn("if (!image) return VK_ERROR_INITIALIZATION_FAILED;", create_view_body)
         self.assertIn("image_view_register(view);", create_view_body)
-        self.assertIn("image_view_retire(image_view_unregister(imageView));", destroy_view_body)
+        self.assertIn("image_view_retire(image_view_unregister_object(target));", destroy_view_body)
         create_sampler_body = c_function_body(icd, "vkCreateSampler")
         destroy_sampler_body = c_function_body(icd, "vkDestroySampler")
         self.assertIn("sampler_register(sampler);", create_sampler_body)
-        self.assertIn("sampler_retire(sampler_unregister(sampler));", destroy_sampler_body)
+        self.assertIn("sampler_retire(sampler_unregister_object(target));", destroy_sampler_body)
         free_memory_body = c_function_body(icd, "vkFreeMemory")
         self.assertIn("image_detach_memory(m);", free_memory_body)
         update_body = c_function_body(icd, "vkUpdateDescriptorSets")
@@ -12343,7 +12345,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("view->offset = pCreateInfo->offset;", create_body)
         self.assertIn("view->range = range;", create_body)
         self.assertIn("buffer_view_register(view);", create_body)
-        self.assertIn("buffer_view_retire(buffer_view_unregister(bufferView));", destroy_body)
+        self.assertIn("buffer_view_retire(buffer_view_unregister_object(target));", destroy_body)
         self.assertNotIn("free(pdocker_vk_buffer_view_from_handle(bufferView));", destroy_body)
 
         for marker in [
@@ -12351,6 +12353,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "static PdockerVkBufferView *g_buffer_views;",
             "static PdockerVkBufferView *g_retired_buffer_views;",
             "buffer_view_register(PdockerVkBufferView *view)",
+            "buffer_view_unregister_object(PdockerVkBufferView *target)",
             "buffer_view_unregister(VkBufferView view)",
             "buffer_view_handle_resolve(VkBufferView view, PdockerVkBufferView **out_view)",
             "buffer_view_handle_lookup(VkBufferView view)",
@@ -13098,12 +13101,16 @@ class GpuAbiContractTest(unittest.TestCase):
             "struct PdockerVkMemory *next;",
             "static PdockerVkMemory *g_memories;",
             "memory_register(PdockerVkMemory *memory)",
+            "memory_unregister_object(PdockerVkMemory *target)",
             "memory_unregister(VkDeviceMemory memory)",
             "memory_handle_resolve(VkDeviceMemory memory, PdockerVkMemory **out_memory)",
         ]:
             self.assertIn(marker, icd)
         self.assertIn("if (pAllocateInfo->memoryTypeIndex >= 2) return VK_ERROR_FEATURE_NOT_PRESENT;", allocate_body)
         self.assertIn("memory_register(memory);", allocate_body)
+        free_memory_body = c_function_body(icd, "vkFreeMemory")
+        self.assertIn("memory_handle_lookup_for_device(device, memory)", free_memory_body)
+        self.assertIn("m = memory_unregister_object(m);", free_memory_body)
         self.assertIn("if (size != VK_WHOLE_SIZE)", map_body)
         self.assertIn("memory_handle_resolve_for_device(device, memory, &m)", map_body)
         self.assertIn("size > (VkDeviceSize)m->size - offset", map_body)
@@ -13138,6 +13145,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "static PdockerVkBuffer *g_buffers;",
             "static PdockerVkBuffer *g_retired_buffers;",
             "buffer_register(PdockerVkBuffer *buffer)",
+            "buffer_unregister_object(PdockerVkBuffer *target)",
             "buffer_unregister(VkBuffer buffer)",
             "buffer_handle_resolve(VkBuffer buffer, PdockerVkBuffer **out_buffer)",
             "buffer_handle_lookup(VkBuffer buffer)",
@@ -13145,7 +13153,7 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, icd)
         self.assertIn("buffer_register(buffer);", create_body)
-        self.assertIn("buffer_retire(buffer_unregister(buffer));", destroy_body)
+        self.assertIn("buffer_retire(buffer_unregister_object(target));", destroy_body)
         self.assertIn("PdockerVkBuffer *b = buffer_handle_lookup_for_device(device, buffer);", requirements_body)
         self.assertIn("pMemoryRequirements->memoryTypeBits = b ? 0x3 : 0;", requirements_body)
         self.assertIn("PdockerVkBuffer *b = buffer_handle_lookup_for_device(device, buffer);", bind_body)
@@ -13158,7 +13166,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertEqual(
             raw_sites,
             [
-                "    PdockerVkBuffer *target = pdocker_vk_buffer_from_handle(buffer);",
+                "    return buffer_unregister_object(pdocker_vk_buffer_from_handle(buffer));",
                 "    PdockerVkBuffer *target = pdocker_vk_buffer_from_handle(buffer);",
             ],
         )
