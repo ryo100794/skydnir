@@ -10,6 +10,41 @@ llama.cpp itself remains unmodified.
 ## Current Ground Truth
 
 
+### 2026-07-18 CPU/static Vulkan metadata/render/WSI owner lane
+
+Descriptor-set layouts, descriptor pools/sets, descriptor update templates,
+shader modules, pipeline layouts, render passes, framebuffers, pipeline caches,
+and swapchains now carry creator-device ownership and are resolved through
+owner-aware lookup helpers at their public API boundaries.  Wrong-device destroy
+paths remain no-ops, while calls that return a `VkResult` fail closed before
+mutating the foreign object or exposing a derived handle.
+
+The graphics metadata path now rejects cross-device dependencies instead of
+materializing an unsupported placeholder pipeline.  Non-null foreign pipeline
+layouts, shader modules, render passes, and derivative base pipelines fail
+pipeline creation with `VK_ERROR_INITIALIZATION_FAILED`.  Command recording also
+fails closed when descriptor binds, push constants, legacy render-pass begin, or
+dynamic-rendering attachments capture handles owned by a different device.
+`vkDestroyDevice` now drains only metadata objects owned by the destroyed device
+instead of globally emptying unrelated live registries.
+
+This is generic Vulkan pass-through hardening on the CPU/static correctness
+lane.  It does not change llama.cpp, Dockerfiles, models, prompts, shader bytes,
+or executor-side arithmetic.  The next physical-device run can therefore focus
+on actual Vulkan pass-through behavior and performance rather than stale or
+cross-device metadata aliasing.
+
+Evidence: `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`,
+`tests.test_gpu_abi_contract`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_device_owner_rejects_cross_device_metadata_render_wsi_handles`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_device_owner_rejects_cross_device_command_submit_sync`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_device_owner_rejects_cross_device_memory_resource_misuse`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_destroy_device_retires_live_device_children_and_queue`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_wsi_surface_swapchain_handles_fail_closed_after_destroy`,
+`scripts/build-gpu-shim.sh`, `scripts/verify-native-payloads.py`,
+`./gradlew :app:assembleDebug`.
+
+
 ### 2026-07-18 CPU/static Vulkan command/sync/query owner lane
 
 Command pools, command buffers, fences, semaphores, events, and query pools now

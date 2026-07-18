@@ -1279,8 +1279,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "cmd->graphics_dynamic_offset_count = 0;",
             "pipelineBindPoint == VK_PIPELINE_BIND_POINT_COMPUTE",
             "pipelineBindPoint == VK_PIPELINE_BIND_POINT_GRAPHICS",
-            "cmd->compute_pipeline = pipeline_handle_lookup(pipeline);",
-            "cmd->graphics_pipeline = pipeline_handle_lookup(pipeline);",
+            "cmd->compute_pipeline = pipeline_handle_lookup_for_command_buffer(cmd, pipeline);",
+            "cmd->graphics_pipeline = pipeline_handle_lookup_for_command_buffer(cmd, pipeline);",
             "send_vulkan_graphics_v6_frame_with_fds",
             "send_empty_vulkan_graphics_v6_1_validation_frame",
             "send_recorded_vulkan_graphics_v6_1_frame",
@@ -1839,7 +1839,7 @@ class GpuAbiContractTest(unittest.TestCase):
         for marker in [
             "!pSwapchainImageCount",
             "VK_ERROR_INITIALIZATION_FAILED",
-            "swapchain_handle_lookup(swapchain)",
+            "swapchain_handle_lookup_for_device(device, swapchain)",
             "pdocker_vk_headless_swapchain_runtime_valid",
             "swapchain-images-untracked",
             "swapchain-images-invalid",
@@ -1855,7 +1855,7 @@ class GpuAbiContractTest(unittest.TestCase):
         for marker in [
             "!pImageIndex",
             "VK_ERROR_INITIALIZATION_FAILED",
-            "swapchain_handle_lookup(swapchain)",
+            "swapchain_handle_lookup_for_device(device, swapchain)",
             "acquire-next-image-swapchain-untracked",
             "pdocker_vk_headless_swapchain_runtime_valid",
             "acquire-next-image-swapchain-invalid",
@@ -7019,7 +7019,7 @@ class GpuAbiContractTest(unittest.TestCase):
         icd = VULKAN_ICD.read_text()
         bind_body = c_function_body(icd, "vkCmdBindDescriptorSets")
         untracked_set_body = bind_body.split(
-            "PdockerVkDescriptorSet *set = descriptor_set_handle_lookup(pDescriptorSets[set_i]);", 1
+            "PdockerVkDescriptorSet *set = descriptor_set_handle_lookup_for_command_buffer(cmd, pDescriptorSets[set_i]);", 1
         )[1].split(
             "if (pipeline_layout &&", 1
         )[0]
@@ -8612,7 +8612,7 @@ class GpuAbiContractTest(unittest.TestCase):
         update_body = icd.split(
             "VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets", 1
         )[1].split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateShaderModule", 1)[0]
-        self.assertIn("immutable_sampler ? immutable_sampler : sampler_handle_lookup(info->sampler)", update_body)
+        self.assertIn("immutable_sampler ? immutable_sampler : sampler_handle_lookup_for_device(device, info->sampler)", update_body)
         self.assertIn("PdockerVkSampler *immutable_sampler = descriptor_layout_immutable_sampler(", update_body)
         self.assertIn("set->layout, binding, array_element);", update_body)
         self.assertIn("requires_view", update_body)
@@ -9680,7 +9680,7 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         self.assertIn("pCreateInfo->setLayoutCount > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS", create_body)
         self.assertIn("pCreateInfo->setLayoutCount > 0 && !pCreateInfo->pSetLayouts", create_body)
-        self.assertIn("descriptor_set_layout_handle_lookup(pCreateInfo->pSetLayouts[i])", create_body)
+        self.assertIn("descriptor_set_layout_handle_lookup_for_device(device, pCreateInfo->pSetLayouts[i])", create_body)
         self.assertIn("layout->set_layout_count = pCreateInfo->setLayoutCount;", create_body)
         self.assertIn("layout->set_layout_capacity = pCreateInfo->setLayoutCount;", create_body)
         self.assertIn("layout->set_layouts = (PdockerVkDescriptorSetLayout **)calloc(", create_body)
@@ -10990,7 +10990,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("struct PdockerVkDescriptorUpdateTemplate", icd)
         self.assertIn("struct PdockerVkDescriptorUpdateTemplate *next;", icd)
         self.assertIn("static PdockerVkDescriptorUpdateTemplate *g_descriptor_update_templates;", icd)
-        self.assertIn("descriptor_update_template_handle_live", icd)
+        self.assertIn("descriptor_update_template_handle_lookup_for_device", icd)
         self.assertIn("descriptor_update_template_register", icd)
         self.assertIn("descriptor_update_template_unregister", icd)
         self.assertIn("pdocker_vk_descriptor_update_template_to_handle", template_create_body)
@@ -11003,7 +11003,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("memcpy(template_handle->entries", template_create_body)
         self.assertIn("free(template_handle->entries);", template_destroy_body)
         self.assertIn("VkWriteDescriptorSet *writes", template_update_body)
-        self.assertIn("descriptor_update_template_handle_live(descriptorUpdateTemplate)", template_update_body)
+        self.assertIn("descriptor_update_template_handle_lookup_for_device(device, descriptorUpdateTemplate)", template_update_body)
         self.assertIn("descriptor-update-template-handle-invalid", template_update_body)
         self.assertIn("descriptor_set_layout_compatible(template_handle->set_layout, set->layout)", template_update_body)
         self.assertIn("descriptor_linear_slot(set", template_update_body)
@@ -11199,7 +11199,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('unsupported_create_info_pnext_result("vkAllocateDescriptorSets", node)', allocate_pnext_body)
         self.assertIn("pAllocateInfo->sType != VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO", allocate_body)
         self.assertIn("validate_descriptor_set_allocate_pnext(pAllocateInfo)", allocate_body)
-        self.assertIn("descriptor_pool_handle_lookup(pAllocateInfo->descriptorPool)", allocate_body)
+        self.assertIn("descriptor_pool_handle_lookup_for_device(device, pAllocateInfo->descriptorPool)", allocate_body)
         self.assertIn("pool->set_count + pAllocateInfo->descriptorSetCount > pool->max_sets", allocate_body)
         self.assertIn("VK_ERROR_OUT_OF_POOL_MEMORY", allocate_body)
         self.assertIn("descriptor_pool_track_set(pool, set)", allocate_body)
@@ -11226,7 +11226,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("destroy_descriptor_pool_object(descriptor_pool_unregister(descriptorPool))", destroy_body)
         self.assertIn("descriptor_pool_reset_sets(pool);", reset_body)
         self.assertNotIn("(void)descriptorPool;", reset_body)
-        self.assertIn("descriptor_pool_handle_lookup(descriptorPool)", free_body)
+        self.assertIn("descriptor_pool_handle_lookup_for_device(device, descriptorPool)", free_body)
         self.assertIn("VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT", free_body)
         self.assertIn("set->pool && set->pool != pool", free_body)
         self.assertIn("descriptor_pool_free_set(pool, set)", free_body)
@@ -11327,7 +11327,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "flags & ~noop_flags",
             "basePipelineHandle != VK_NULL_HANDLE",
             "basePipelineIndex >= 0",
-            "pipeline_handle_lookup(basePipelineHandle) != NULL",
+            "pipeline_handle_lookup_for_device(device, basePipelineHandle) != NULL",
             "idx < create_info_count && idx != create_info_index",
         ]:
             self.assertIn(marker, helper_body)
@@ -11531,7 +11531,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("layout->set_layouts = (PdockerVkDescriptorSetLayout **)calloc(", pipeline_layout_body)
         self.assertIn("destroy_pipeline_layout_storage(layout);", pipeline_layout_body)
         self.assertNotIn("pCreateInfo->setLayoutCount > PDOCKER_VK_MAX_DESCRIPTOR_SETS", pipeline_layout_body)
-        self.assertIn("descriptor_set_layout_handle_lookup(pCreateInfo->pSetLayouts[i])", pipeline_layout_body)
+        self.assertIn("descriptor_set_layout_handle_lookup_for_device(device, pCreateInfo->pSetLayouts[i])", pipeline_layout_body)
         self.assertIn("pCreateInfo->pushConstantRangeCount > 0 && !pCreateInfo->pPushConstantRanges", pipeline_layout_body)
         self.assertIn("pCreateInfo->pushConstantRangeCount > PDOCKER_VK_MAX_PUSH_CONSTANT_RANGES", pipeline_layout_body)
         self.assertNotIn("unsupported_set_layout_count = true", pipeline_layout_body)
@@ -11552,7 +11552,7 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         self.assertIn("pAllocateInfo->sType != VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO", allocate_sets_body)
         self.assertIn("validate_descriptor_set_allocate_pnext(pAllocateInfo)", allocate_sets_body)
-        self.assertIn("descriptor_pool_handle_lookup(pAllocateInfo->descriptorPool)", allocate_sets_body)
+        self.assertIn("descriptor_pool_handle_lookup_for_device(device, pAllocateInfo->descriptorPool)", allocate_sets_body)
         self.assertIn("descriptor_pool_track_set(pool, set)", allocate_sets_body)
         shader_module_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateShaderModule", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkDestroyShaderModule", 1
@@ -11629,7 +11629,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("pCreateInfo->flags != 0", framebuffer_body)
         self.assertIn("framebuffer-flags-unsupported", framebuffer_body)
         self.assertIn("pCreateInfo->attachmentCount > 0 && !pCreateInfo->pAttachments", framebuffer_body)
-        self.assertIn("image_view_handle_lookup(pCreateInfo->pAttachments[i])", framebuffer_body)
+        self.assertIn("image_view_handle_lookup_for_device(device, pCreateInfo->pAttachments[i])", framebuffer_body)
         self.assertIn("snapshot_image_view_state(&fb->attachment_snapshots[i]", framebuffer_body)
         self.assertIn("free(fb);", framebuffer_body)
         self.assertIn("VK_STRUCTURE_TYPE_FRAMEBUFFER_ATTACHMENTS_CREATE_INFO", framebuffer_pnext_body)
@@ -11918,15 +11918,15 @@ class GpuAbiContractTest(unittest.TestCase):
         free_memory_body = c_function_body(icd, "vkFreeMemory")
         self.assertIn("image_detach_memory(m);", free_memory_body)
         update_body = c_function_body(icd, "vkUpdateDescriptorSets")
-        self.assertIn("image_view_handle_lookup(info->imageView)", update_body)
-        self.assertIn("sampler_handle_lookup(info->sampler)", update_body)
+        self.assertIn("image_view_handle_lookup_for_device(device, info->imageView)", update_body)
+        self.assertIn("sampler_handle_lookup_for_device(device, info->sampler)", update_body)
         descriptor_layout_body = c_function_body(icd, "vkCreateDescriptorSetLayout")
-        self.assertIn("sampler_handle_lookup(binding->pImmutableSamplers[array_element])", descriptor_layout_body)
+        self.assertIn("sampler_handle_lookup_for_device(device, binding->pImmutableSamplers[array_element])", descriptor_layout_body)
         framebuffer_body = c_function_body(icd, "vkCreateFramebuffer")
         populate_attachment_body = c_function_body(icd, "populate_render_pass_attachment_for_rendering")
         populate_subpass_body = c_function_body(icd, "populate_render_pass_subpass_rendering_state")
         self.assertIn("PdockerVkImageViewSnapshot attachment_snapshots[PDOCKER_VK_MAX_STORAGE_BUFFERS];", icd)
-        self.assertIn("image_view_handle_lookup(pCreateInfo->pAttachments[i])", framebuffer_body)
+        self.assertIn("image_view_handle_lookup_for_device(device, pCreateInfo->pAttachments[i])", framebuffer_body)
         self.assertIn("snapshot_image_view_state(&fb->attachment_snapshots[i]", framebuffer_body)
         self.assertIn("dst->image_view_snapshot = *snapshot;", populate_attachment_body)
         self.assertIn("cmd->active_color_attachments[c].resolve_image_view_snapshot", populate_subpass_body)
@@ -12188,7 +12188,7 @@ class GpuAbiContractTest(unittest.TestCase):
         update_body = c_function_body(icd, "vkUpdateDescriptorSets")
         self.assertIn("descriptor_type_requires_buffer_view(w->descriptorType)", update_body)
         self.assertIn("w->pTexelBufferView", update_body)
-        self.assertIn("slot->buffer_view = buffer_view_handle_lookup(w->pTexelBufferView[j]);", update_body)
+        self.assertIn("slot->buffer_view = buffer_view_handle_lookup_for_device(device, w->pTexelBufferView[j]);", update_body)
         self.assertIn("descriptor texel-buffer write has invalid buffer view", update_body)
 
         send_body = c_function_body(icd, "send_generic_vulkan_dispatch_op")
@@ -12959,7 +12959,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("buffer_retire(buffer_unregister(buffer));", destroy_body)
         self.assertIn("buffer_handle_resolve(buffer, &b)", requirements_body)
         self.assertIn("buffer_handle_resolve(buffer, &b)", bind_body)
-        self.assertIn("buffer_handle_lookup(w->pBufferInfo[j].buffer)", update_descriptors_body)
+        self.assertIn("buffer_handle_lookup_for_device(device, w->pBufferInfo[j].buffer)", update_descriptors_body)
         self.assertIn("buffer_detach_memory(m);", free_memory_body)
         self.assertIn("buffer->destroyed", validate_body)
         self.assertNotIn("free(pdocker_vk_buffer_from_handle(buffer))", destroy_body)
@@ -13362,11 +13362,11 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("pdocker_vk_release_memory_object", icd)
         self.assertIn("PDOCKER_VK_FIND_DEVICE_OWNED", icd)
         for marker in [
-            "while (g_swapchains)",
+            "PDOCKER_VK_FIND_DEVICE_OWNED(g_swapchains, sc, destroy_owner_id)",
             "pdocker_vk_destroy_swapchain_images(device, sc);",
             "PDOCKER_VK_FIND_DEVICE_OWNED(g_command_pools, pool, destroy_owner_id);",
             "command_buffer_retire(cmd);",
-            "while (g_descriptor_update_templates)",
+            "PDOCKER_VK_FIND_DEVICE_OWNED(g_descriptor_update_templates, template_handle, destroy_owner_id);",
             "destroy_descriptor_pool_object(pool);",
             "PDOCKER_VK_FIND_DEVICE_OWNED(g_pipelines, pipeline, destroy_owner_id);",
             "pipeline_retire(pipeline);",
@@ -16493,15 +16493,15 @@ class GpuAbiContractTest(unittest.TestCase):
             "pdocker_vk_descriptor_set_from_handle",
             "descriptor_pool_register(pool);",
             "descriptor_pool_retire(pool);",
-            "descriptor_pool_handle_lookup(descriptorPool)",
-            "descriptor_pool_handle_lookup(pAllocateInfo->descriptorPool)",
+            "descriptor_pool_handle_lookup_for_device(device, descriptorPool)",
+            "descriptor_pool_handle_lookup_for_device(device, pAllocateInfo->descriptorPool)",
             "descriptor_set_register(set);",
             "descriptor_set_unregister(pdocker_vk_descriptor_set_to_handle(set));",
             "descriptor_set_retire(set);",
-            "descriptor_set_handle_lookup(pDescriptorSets[set_i])",
-            "descriptor_set_handle_lookup(w->dstSet)",
-            "descriptor_set_handle_lookup(c->srcSet)",
-            "descriptor_set_handle_lookup(descriptorSet)",
+            "descriptor_set_handle_lookup_for_command_buffer(cmd, pDescriptorSets[set_i])",
+            "descriptor_set_handle_lookup_for_device(device, w->dstSet)",
+            "descriptor_set_handle_lookup_for_device(device, c->srcSet)",
+            "descriptor_set_handle_lookup_for_device(device, descriptorSet)",
             "pdocker_vk_descriptor_update_template_from_handle",
             "pdocker_vk_shader_module_from_handle",
             "pdocker_vk_pipeline_layout_from_handle",
@@ -16518,16 +16518,16 @@ class GpuAbiContractTest(unittest.TestCase):
             "command_buffer_mark_recording_failed(cmd, \"compute-pipeline-handle-invalid\")",
             "command_buffer_mark_recording_failed(cmd, \"graphics-pipeline-handle-invalid\")",
             "*pSetLayout = pdocker_vk_descriptor_set_layout_to_handle(layout);",
-            "set->layout = descriptor_set_layout_handle_lookup(pAllocateInfo->pSetLayouts[i]);",
+            "set->layout = descriptor_set_layout_handle_lookup_for_device(device, pAllocateInfo->pSetLayouts[i]);",
             "pDescriptorSets[i] = pdocker_vk_descriptor_set_to_handle(set);",
             "pdocker_vk_descriptor_update_template_to_handle(template_handle)",
             "*pShaderModule = pdocker_vk_shader_module_to_handle(shader);",
-            "pipeline->shader = shader_module_handle_lookup(ci->stage.module);",
-            "pipeline->layout = pipeline_layout_handle_lookup(ci->layout);",
+            "pipeline->shader = shader_module_handle_lookup_for_device(device, ci->stage.module);",
+            "pipeline->layout = pipeline_layout_handle_lookup_for_device(device, ci->layout);",
             "pPipelines[i] = pdocker_vk_pipeline_to_handle(pipeline);",
-            "cmd->compute_pipeline = pipeline_handle_lookup(pipeline);",
-            "PdockerVkPipelineLayout *pipeline_layout = pipeline_layout_handle_lookup(layout);",
-            "PdockerVkDescriptorSet *set = descriptor_set_handle_lookup(pDescriptorSets[set_i]);",
+            "cmd->compute_pipeline = pipeline_handle_lookup_for_command_buffer(cmd, pipeline);",
+            "pipeline_layout = pipeline_layout_handle_lookup(layout);",
+            "PdockerVkDescriptorSet *set = descriptor_set_handle_lookup_for_command_buffer(cmd, pDescriptorSets[set_i]);",
         ]:
             self.assertIn(marker, source)
         for forbidden in [
@@ -16574,8 +16574,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "*pPipelineCache = pdocker_vk_pipeline_cache_to_handle(cache);",
             "pipeline_cache_retire(pipeline_cache_unregister(pipelineCache));",
             "pipeline_cache_handle_lookup(pipelineCache)",
-            "pipeline_cache_handle_lookup(dstCache)",
-            "pipeline_cache_handle_lookup(pSrcCaches[i])",
+            "pipeline_cache_handle_lookup_for_device(device, dstCache)",
+            "pipeline_cache_handle_lookup_for_device(device, pSrcCaches[i])",
             "command_pool_register(pool);",
             "*pCommandPool = pdocker_vk_command_pool_to_handle(pool);",
             "command_pool_retire(pool);",
@@ -16584,7 +16584,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "render_pass_handle_lookup(ci->renderPass)",
             "render_pass_retire(render_pass_unregister(renderPass));",
             "*pRenderPass = pdocker_vk_render_pass_to_handle(rp);",
-            "fb->render_pass = render_pass_handle_lookup(pCreateInfo->renderPass);",
+            "fb->render_pass = render_pass_handle_lookup_for_device(device, pCreateInfo->renderPass);",
             "framebuffer_register(fb);",
             "framebuffer_handle_lookup(pRenderPassBegin->framebuffer)",
             "framebuffer_retire(framebuffer_unregister(framebuffer));",
@@ -16597,8 +16597,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "swapchain_register(swapchain);",
             "*pSwapchain = pdocker_vk_swapchain_to_handle(swapchain);",
             "swapchain_retire(sc);",
-            "PdockerVkSwapchain *old_swapchain = swapchain_handle_lookup(pCreateInfo->oldSwapchain);",
-            "PdockerVkSwapchain *sc = swapchain_handle_lookup(pPresentInfo->pSwapchains[i]);",
+            "PdockerVkSwapchain *old_swapchain = swapchain_handle_lookup_for_device(device, pCreateInfo->oldSwapchain);",
+            "PdockerVkSwapchain *sc = swapchain_handle_lookup_for_queue(present_queue, pPresentInfo->pSwapchains[i]);",
         ]:
             self.assertIn(marker, source)
         for forbidden in [

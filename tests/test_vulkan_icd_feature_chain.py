@@ -7227,6 +7227,381 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
+    def test_device_owner_rejects_cross_device_metadata_render_wsi_handles(self):
+        source = textwrap.dedent("""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "__ICD_SOURCE__"
+
+            static VkDevice make_device(void) {
+                VkDeviceCreateInfo info;
+                memset(&info, 0, sizeof(info));
+                info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                VkDevice device = VK_NULL_HANDLE;
+                if (vkCreateDevice((VkPhysicalDevice)&g_device, &info, NULL, &device) != VK_SUCCESS) return VK_NULL_HANDLE;
+                return device;
+            }
+
+            static VkCommandBuffer make_cmd(VkDevice device) {
+                VkCommandPoolCreateInfo pool_info;
+                memset(&pool_info, 0, sizeof(pool_info));
+                pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+                pool_info.queueFamilyIndex = 0;
+                VkCommandPool pool = VK_NULL_HANDLE;
+                if (vkCreateCommandPool(device, &pool_info, NULL, &pool) != VK_SUCCESS) return VK_NULL_HANDLE;
+                VkCommandBufferAllocateInfo alloc;
+                memset(&alloc, 0, sizeof(alloc));
+                alloc.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+                alloc.commandPool = pool;
+                alloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+                alloc.commandBufferCount = 1;
+                VkCommandBuffer cmd = VK_NULL_HANDLE;
+                if (vkAllocateCommandBuffers(device, &alloc, &cmd) != VK_SUCCESS) return VK_NULL_HANDLE;
+                PdockerVkCommandBuffer *pd_cmd = command_buffer_handle_lookup(cmd);
+                if (pd_cmd) {
+                    pd_cmd->requested_feature_mask |= PDOCKER_VK_FEATURE_DYNAMIC_RENDERING;
+                    pd_cmd->enabled_extension_mask |= PDOCKER_VK_DEVICE_EXT_KHR_DYNAMIC_RENDERING;
+                }
+                return cmd;
+            }
+
+            static VkDescriptorSetLayout make_layout(VkDevice device) {
+                VkDescriptorSetLayoutBinding binding;
+                memset(&binding, 0, sizeof(binding));
+                binding.binding = 0;
+                binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+                binding.descriptorCount = 1;
+                binding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+                VkDescriptorSetLayoutCreateInfo info;
+                memset(&info, 0, sizeof(info));
+                info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+                info.bindingCount = 1;
+                info.pBindings = &binding;
+                VkDescriptorSetLayout layout = VK_NULL_HANDLE;
+                if (vkCreateDescriptorSetLayout(device, &info, NULL, &layout) != VK_SUCCESS) return VK_NULL_HANDLE;
+                return layout;
+            }
+
+            static VkDescriptorPool make_pool(VkDevice device) {
+                VkDescriptorPoolSize size;
+                memset(&size, 0, sizeof(size));
+                size.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+                size.descriptorCount = 2;
+                VkDescriptorPoolCreateInfo info;
+                memset(&info, 0, sizeof(info));
+                info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+                info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+                info.maxSets = 2;
+                info.poolSizeCount = 1;
+                info.pPoolSizes = &size;
+                VkDescriptorPool pool = VK_NULL_HANDLE;
+                if (vkCreateDescriptorPool(device, &info, NULL, &pool) != VK_SUCCESS) return VK_NULL_HANDLE;
+                return pool;
+            }
+
+            static VkShaderModule make_shader(VkDevice device) {
+                const uint32_t shader_words[] = { 0x07230203u, 0x00010000u, 0u, 0u };
+                VkShaderModuleCreateInfo info;
+                memset(&info, 0, sizeof(info));
+                info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+                info.codeSize = sizeof(shader_words);
+                info.pCode = shader_words;
+                VkShaderModule shader = VK_NULL_HANDLE;
+                if (vkCreateShaderModule(device, &info, NULL, &shader) != VK_SUCCESS) return VK_NULL_HANDLE;
+                return shader;
+            }
+
+            static VkPipelineLayout make_pipeline_layout(VkDevice device, VkDescriptorSetLayout layout) {
+                VkPipelineLayoutCreateInfo info;
+                memset(&info, 0, sizeof(info));
+                info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+                info.setLayoutCount = 1;
+                info.pSetLayouts = &layout;
+                VkPipelineLayout pipeline_layout = VK_NULL_HANDLE;
+                if (vkCreatePipelineLayout(device, &info, NULL, &pipeline_layout) != VK_SUCCESS) return VK_NULL_HANDLE;
+                return pipeline_layout;
+            }
+
+            static VkRenderPass make_render_pass(VkDevice device) {
+                VkRenderPassCreateInfo info;
+                memset(&info, 0, sizeof(info));
+                info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+                VkRenderPass render_pass = VK_NULL_HANDLE;
+                if (vkCreateRenderPass(device, &info, NULL, &render_pass) != VK_SUCCESS) return VK_NULL_HANDLE;
+                return render_pass;
+            }
+
+            static VkFramebuffer make_framebuffer(VkDevice device, VkRenderPass render_pass) {
+                VkFramebufferCreateInfo info;
+                memset(&info, 0, sizeof(info));
+                info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+                info.renderPass = render_pass;
+                info.width = 16;
+                info.height = 16;
+                info.layers = 1;
+                VkFramebuffer framebuffer = VK_NULL_HANDLE;
+                if (vkCreateFramebuffer(device, &info, NULL, &framebuffer) != VK_SUCCESS) return VK_NULL_HANDLE;
+                return framebuffer;
+            }
+
+            static VkImage make_color_image(VkDevice device) {
+                PdockerVkImage *image = pdocker_alloc_handle(sizeof(*image));
+                if (!image) return VK_NULL_HANDLE;
+                memset(image, 0, sizeof(*image));
+                image->object_id = next_vulkan_object_generation();
+                image->owner_device_id = device_owner_id_or_zero(device);
+                image->image_type = VK_IMAGE_TYPE_2D;
+                image->format = VK_FORMAT_R8G8B8A8_UNORM;
+                image->extent = (VkExtent3D){16, 16, 1};
+                image->mip_levels = 1;
+                image->array_layers = 1;
+                image->samples = VK_SAMPLE_COUNT_1_BIT;
+                image->tiling = VK_IMAGE_TILING_OPTIMAL;
+                image->usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+                image->sharing_mode = VK_SHARING_MODE_EXCLUSIVE;
+                image->initial_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+                image->current_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+                image->requirements_size = 4096;
+                image->requirements_alignment = PDOCKER_VK_REQUIREMENT_ALIGNMENT;
+                image->memory_type_bits = 1;
+                image->generation = next_vulkan_object_generation();
+                image_register(image);
+                return pdocker_vk_image_to_handle(image);
+            }
+
+            static VkImageView make_color_image_view(VkDevice device, VkImage image) {
+                VkImageViewCreateInfo info;
+                memset(&info, 0, sizeof(info));
+                info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+                info.image = image;
+                info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+                info.format = VK_FORMAT_R8G8B8A8_UNORM;
+                info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                info.subresourceRange.levelCount = 1;
+                info.subresourceRange.layerCount = 1;
+                VkImageView view = VK_NULL_HANDLE;
+                if (vkCreateImageView(device, &info, NULL, &view) != VK_SUCCESS) return VK_NULL_HANDLE;
+                return view;
+            }
+
+            static VkSwapchainKHR make_swapchain(VkDevice device) {
+                VkHeadlessSurfaceCreateInfoEXT surface_info;
+                memset(&surface_info, 0, sizeof(surface_info));
+                surface_info.sType = VK_STRUCTURE_TYPE_HEADLESS_SURFACE_CREATE_INFO_EXT;
+                VkSurfaceKHR surface_handle = VK_NULL_HANDLE;
+                if (vkCreateHeadlessSurfaceEXT(VK_NULL_HANDLE, &surface_info, NULL, &surface_handle) != VK_SUCCESS) return VK_NULL_HANDLE;
+                PdockerVkSurface *surface = surface_handle_lookup(surface_handle);
+                if (!surface) return VK_NULL_HANDLE;
+                PdockerVkSwapchain *swapchain = pdocker_alloc_handle(sizeof(*swapchain));
+                if (!swapchain) return VK_NULL_HANDLE;
+                memset(swapchain, 0, sizeof(*swapchain));
+                swapchain->owner_device_id = device_owner_id_or_zero(device);
+                swapchain->surface = surface;
+                swapchain->image_format = VK_FORMAT_R8G8B8A8_UNORM;
+                swapchain->image_color_space = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+                swapchain->image_extent = (VkExtent2D){640, 480};
+                swapchain->image_usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+                swapchain->present_mode = VK_PRESENT_MODE_FIFO_KHR;
+                swapchain->composite_alpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+                swapchain->pre_transform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+                swapchain->image_count = 2;
+                swapchain->generation = next_vulkan_object_generation();
+                for (uint32_t i = 0; i < swapchain->image_count; ++i) {
+                    PdockerVkImage *image = pdocker_alloc_handle(sizeof(*image));
+                    PdockerVkMemory *memory = pdocker_alloc_handle(sizeof(*memory));
+                    if (!image || !memory) return VK_NULL_HANDLE;
+                    memset(image, 0, sizeof(*image));
+                    memset(memory, 0, sizeof(*memory));
+                    image->owner_device_id = swapchain->owner_device_id;
+                    memory->owner_device_id = swapchain->owner_device_id;
+                    memory->size = 4096;
+                    image->memory = memory;
+                    image->swapchain_owned = true;
+                    image->current_layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+                    swapchain->images[i] = image;
+                    swapchain->memories[i] = memory;
+                }
+                swapchain_register(swapchain);
+                return pdocker_vk_swapchain_to_handle(swapchain);
+            }
+
+            int main(void) {
+                VkDevice device_a = make_device();
+                VkDevice device_b = make_device();
+                if (!device_a || !device_b || device_a == device_b) return 1;
+
+                VkDescriptorSetLayout layout_a = make_layout(device_a);
+                VkDescriptorSetLayout layout_b = make_layout(device_b);
+                VkDescriptorPool pool_a = make_pool(device_a);
+                VkShaderModule shader_a = make_shader(device_a);
+                VkPipelineLayout pipeline_layout_a = make_pipeline_layout(device_a, layout_a);
+                VkPipelineLayout pipeline_layout_b = make_pipeline_layout(device_b, layout_b);
+                VkPipelineCache cache_a = VK_NULL_HANDLE;
+                VkPipelineCacheCreateInfo cache_info;
+                memset(&cache_info, 0, sizeof(cache_info));
+                cache_info.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
+                if (vkCreatePipelineCache(device_a, &cache_info, NULL, &cache_a) != VK_SUCCESS) return 2;
+                VkRenderPass render_pass_a = make_render_pass(device_a);
+                VkFramebuffer framebuffer_a = make_framebuffer(device_a, render_pass_a);
+                VkImage image_a = make_color_image(device_a);
+                VkImageView image_view_a = make_color_image_view(device_a, image_a);
+                VkSwapchainKHR swapchain_a = make_swapchain(device_a);
+                VkCommandBuffer cmd_b = make_cmd(device_b);
+                if (!layout_a) return 301;
+                if (!layout_b) return 302;
+                if (!pool_a) return 303;
+                if (!shader_a) return 304;
+                if (!pipeline_layout_a) return 305;
+                if (!pipeline_layout_b) return 306;
+                if (!cache_a) return 307;
+                if (!render_pass_a) return 308;
+                if (!framebuffer_a) return 309;
+                if (!image_a) return 310;
+                if (!image_view_a) return 311;
+                if (!swapchain_a) return 312;
+                if (!cmd_b) return 313;
+
+                if (descriptor_set_layout_handle_lookup_for_device(device_b, layout_a)) return 4;
+                vkDestroyDescriptorSetLayout(device_b, layout_a, NULL);
+                if (!descriptor_set_layout_handle_lookup_for_device(device_a, layout_a)) return 5;
+                VkPipelineLayout wrong_layout = VK_NULL_HANDLE;
+                VkPipelineLayoutCreateInfo pl_info;
+                memset(&pl_info, 0, sizeof(pl_info));
+                pl_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+                pl_info.setLayoutCount = 1;
+                pl_info.pSetLayouts = &layout_a;
+                if (vkCreatePipelineLayout(device_b, &pl_info, NULL, &wrong_layout) != VK_ERROR_FEATURE_NOT_PRESENT) return 6;
+                if (wrong_layout != VK_NULL_HANDLE) return 7;
+
+                VkDescriptorSet wrong_set = VK_NULL_HANDLE;
+                VkDescriptorSetAllocateInfo alloc;
+                memset(&alloc, 0, sizeof(alloc));
+                alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+                alloc.descriptorPool = pool_a;
+                alloc.descriptorSetCount = 1;
+                alloc.pSetLayouts = &layout_a;
+                if (vkAllocateDescriptorSets(device_b, &alloc, &wrong_set) != VK_ERROR_INITIALIZATION_FAILED) return 8;
+                if (wrong_set != VK_NULL_HANDLE) return 9;
+
+                VkDescriptorUpdateTemplate wrong_template = VK_NULL_HANDLE;
+                VkDescriptorUpdateTemplateCreateInfo template_info;
+                memset(&template_info, 0, sizeof(template_info));
+                template_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_UPDATE_TEMPLATE_CREATE_INFO;
+                template_info.templateType = VK_DESCRIPTOR_UPDATE_TEMPLATE_TYPE_DESCRIPTOR_SET;
+                template_info.descriptorSetLayout = layout_a;
+                if (vkCreateDescriptorUpdateTemplate(device_b, &template_info, NULL, &wrong_template) != VK_ERROR_INITIALIZATION_FAILED) return 10;
+                if (wrong_template != VK_NULL_HANDLE) return 11;
+
+                size_t cache_size = 0;
+                if (vkGetPipelineCacheData(device_b, cache_a, &cache_size, NULL) != VK_ERROR_INITIALIZATION_FAILED) return 12;
+                if (vkMergePipelineCaches(device_b, cache_a, 0, NULL) != VK_ERROR_INITIALIZATION_FAILED) return 13;
+
+                VkComputePipelineCreateInfo cp;
+                memset(&cp, 0, sizeof(cp));
+                cp.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+                cp.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+                cp.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+                cp.stage.module = shader_a;
+                cp.stage.pName = "main";
+                cp.layout = pipeline_layout_b;
+                VkPipeline pipeline = VK_NULL_HANDLE;
+                if (vkCreateComputePipelines(device_b, VK_NULL_HANDLE, 1, &cp, NULL, &pipeline) != VK_ERROR_FEATURE_NOT_PRESENT) return 14;
+                if (pipeline != VK_NULL_HANDLE) return 15;
+
+                VkPipelineShaderStageCreateInfo graphics_stage;
+                memset(&graphics_stage, 0, sizeof(graphics_stage));
+                graphics_stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+                graphics_stage.stage = VK_SHADER_STAGE_VERTEX_BIT;
+                graphics_stage.module = shader_a;
+                graphics_stage.pName = "main";
+                VkGraphicsPipelineCreateInfo gp;
+                memset(&gp, 0, sizeof(gp));
+                gp.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+                gp.stageCount = 1;
+                gp.pStages = &graphics_stage;
+                gp.layout = pipeline_layout_b;
+                VkPipeline graphics_pipeline = VK_NULL_HANDLE;
+                if (vkCreateGraphicsPipelines(device_b, VK_NULL_HANDLE, 1, &gp, NULL, &graphics_pipeline) != VK_ERROR_INITIALIZATION_FAILED) return 401;
+                if (graphics_pipeline != VK_NULL_HANDLE) return 402;
+
+                VkFramebuffer fb_wrong = VK_NULL_HANDLE;
+                VkFramebufferCreateInfo fb_info;
+                memset(&fb_info, 0, sizeof(fb_info));
+                fb_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+                fb_info.renderPass = render_pass_a;
+                fb_info.width = 16;
+                fb_info.height = 16;
+                fb_info.layers = 1;
+                if (vkCreateFramebuffer(device_b, &fb_info, NULL, &fb_wrong) != VK_ERROR_INITIALIZATION_FAILED) return 16;
+                if (fb_wrong != VK_NULL_HANDLE) return 17;
+                vkDestroyRenderPass(device_b, render_pass_a, NULL);
+                if (!render_pass_handle_lookup_for_device(device_a, render_pass_a)) return 18;
+                vkDestroyFramebuffer(device_b, framebuffer_a, NULL);
+                if (!framebuffer_handle_lookup_for_device(device_a, framebuffer_a)) return 19;
+
+                if (vkBeginCommandBuffer(cmd_b, NULL) != VK_SUCCESS) return 20;
+                VkRenderPassBeginInfo begin;
+                memset(&begin, 0, sizeof(begin));
+                begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+                begin.renderPass = render_pass_a;
+                begin.framebuffer = framebuffer_a;
+                begin.renderArea.extent.width = 16;
+                begin.renderArea.extent.height = 16;
+                vkCmdBeginRenderPass(cmd_b, &begin, VK_SUBPASS_CONTENTS_INLINE);
+                if (vkEndCommandBuffer(cmd_b) != VK_ERROR_FEATURE_NOT_PRESENT) return 21;
+
+                if (vkBeginCommandBuffer(cmd_b, NULL) != VK_SUCCESS) return 22;
+                VkRenderingAttachmentInfo color;
+                memset(&color, 0, sizeof(color));
+                color.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+                color.imageView = image_view_a;
+                color.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+                color.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+                color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+                VkRenderingInfo rendering;
+                memset(&rendering, 0, sizeof(rendering));
+                rendering.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+                rendering.renderArea.extent.width = 16;
+                rendering.renderArea.extent.height = 16;
+                rendering.layerCount = 1;
+                rendering.colorAttachmentCount = 1;
+                rendering.pColorAttachments = &color;
+                vkCmdBeginRendering(cmd_b, &rendering);
+                if (vkEndCommandBuffer(cmd_b) != VK_ERROR_FEATURE_NOT_PRESENT) return 23;
+
+                if (vkBeginCommandBuffer(cmd_b, NULL) != VK_SUCCESS) return 403;
+                vkCmdBindDescriptorSets(cmd_b, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout_a, 0, 0, NULL, 0, NULL);
+                if (vkEndCommandBuffer(cmd_b) != VK_ERROR_FEATURE_NOT_PRESENT) return 404;
+
+                if (vkBeginCommandBuffer(cmd_b, NULL) != VK_SUCCESS) return 405;
+                uint32_t push_value = 0x12345678u;
+                vkCmdPushConstants(cmd_b, pipeline_layout_a, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(push_value), &push_value);
+                if (vkEndCommandBuffer(cmd_b) != VK_ERROR_FEATURE_NOT_PRESENT) return 406;
+
+                uint32_t image_count = 0;
+                if (vkGetSwapchainImagesKHR(device_b, swapchain_a, &image_count, NULL) != VK_ERROR_INITIALIZATION_FAILED) return 24;
+                vkDestroySwapchainKHR(device_b, swapchain_a, NULL);
+                if (!swapchain_handle_lookup_for_device(device_a, swapchain_a)) return 25;
+
+                vkDestroyDevice(device_b, NULL);
+                if (!descriptor_set_layout_handle_lookup_for_device(device_a, layout_a)) return 26;
+                if (!descriptor_pool_handle_lookup_for_device(device_a, pool_a)) return 27;
+                if (!shader_module_handle_lookup_for_device(device_a, shader_a)) return 28;
+                if (!pipeline_layout_handle_lookup_for_device(device_a, pipeline_layout_a)) return 29;
+                if (!pipeline_cache_handle_lookup_for_device(device_a, cache_a)) return 30;
+                if (!render_pass_handle_lookup_for_device(device_a, render_pass_a)) return 31;
+                if (!framebuffer_handle_lookup_for_device(device_a, framebuffer_a)) return 32;
+                if (!swapchain_handle_lookup_for_device(device_a, swapchain_a)) return 33;
+
+                vkDestroyDevice(device_a, NULL);
+                return 0;
+            }
+            """).replace("__ICD_SOURCE__", str(ICD_SOURCE))
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
     def test_destroy_device_retires_live_device_children_and_queue(self):
         source = textwrap.dedent("""
             #include <stdint.h>
