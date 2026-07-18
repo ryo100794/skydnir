@@ -3292,8 +3292,7 @@ static void fence_register(PdockerVkFence *fence) {
     g_fences = fence;
 }
 
-static PdockerVkFence *fence_unregister(VkFence fence) {
-    PdockerVkFence *target = fence_handle_target(fence);
+static PdockerVkFence *fence_unregister_object(PdockerVkFence *target) {
     if (!target) return NULL;
     PdockerVkFence **link = &g_fences;
     while (*link) {
@@ -3305,6 +3304,10 @@ static PdockerVkFence *fence_unregister(VkFence fence) {
         link = &(*link)->next;
     }
     return NULL;
+}
+
+static PdockerVkFence *fence_unregister(VkFence fence) {
+    return fence_unregister_object(fence_handle_target(fence));
 }
 
 static void fence_retire(PdockerVkFence *fence) {
@@ -3354,8 +3357,7 @@ static void semaphore_register(PdockerVkSemaphore *sem) {
     g_semaphores = sem;
 }
 
-static PdockerVkSemaphore *semaphore_unregister(VkSemaphore semaphore) {
-    PdockerVkSemaphore *target = semaphore_handle_target(semaphore);
+static PdockerVkSemaphore *semaphore_unregister_object(PdockerVkSemaphore *target) {
     if (!target) return NULL;
     PdockerVkSemaphore **link = &g_semaphores;
     while (*link) {
@@ -3367,6 +3369,10 @@ static PdockerVkSemaphore *semaphore_unregister(VkSemaphore semaphore) {
         link = &(*link)->next;
     }
     return NULL;
+}
+
+static PdockerVkSemaphore *semaphore_unregister(VkSemaphore semaphore) {
+    return semaphore_unregister_object(semaphore_handle_target(semaphore));
 }
 
 static void semaphore_retire(PdockerVkSemaphore *sem) {
@@ -3416,8 +3422,7 @@ static void event_register(PdockerVkEvent *event) {
     g_events = event;
 }
 
-static PdockerVkEvent *event_unregister(VkEvent event) {
-    PdockerVkEvent *target = event_handle_target(event);
+static PdockerVkEvent *event_unregister_object(PdockerVkEvent *target) {
     if (!target) return NULL;
     PdockerVkEvent **link = &g_events;
     while (*link) {
@@ -3429,6 +3434,10 @@ static PdockerVkEvent *event_unregister(VkEvent event) {
         link = &(*link)->next;
     }
     return NULL;
+}
+
+static PdockerVkEvent *event_unregister(VkEvent event) {
+    return event_unregister_object(event_handle_target(event));
 }
 
 static void event_retire(PdockerVkEvent *event) {
@@ -3487,8 +3496,7 @@ static void query_pool_register(PdockerVkQueryPool *pool) {
     g_query_pools = pool;
 }
 
-static PdockerVkQueryPool *query_pool_unregister(VkQueryPool queryPool) {
-    PdockerVkQueryPool *target = query_pool_handle_target(queryPool);
+static PdockerVkQueryPool *query_pool_unregister_object(PdockerVkQueryPool *target) {
     if (!target) return NULL;
     PdockerVkQueryPool **link = &g_query_pools;
     while (*link) {
@@ -3500,6 +3508,10 @@ static PdockerVkQueryPool *query_pool_unregister(VkQueryPool queryPool) {
         link = &(*link)->next;
     }
     return NULL;
+}
+
+static PdockerVkQueryPool *query_pool_unregister(VkQueryPool queryPool) {
+    return query_pool_unregister_object(query_pool_handle_target(queryPool));
 }
 
 static void query_pool_release_resources(PdockerVkQueryPool *pool) {
@@ -3666,8 +3678,7 @@ static void swapchain_register(PdockerVkSwapchain *swapchain) {
     g_swapchains = swapchain;
 }
 
-static PdockerVkSwapchain *swapchain_unregister(VkSwapchainKHR swapchain) {
-    PdockerVkSwapchain *target = swapchain_handle_target(swapchain);
+static PdockerVkSwapchain *swapchain_unregister_object(PdockerVkSwapchain *target) {
     if (!target) return NULL;
     PdockerVkSwapchain **link = &g_swapchains;
     while (*link) {
@@ -3679,6 +3690,10 @@ static PdockerVkSwapchain *swapchain_unregister(VkSwapchainKHR swapchain) {
         link = &(*link)->next;
     }
     return NULL;
+}
+
+static PdockerVkSwapchain *swapchain_unregister(VkSwapchainKHR swapchain) {
+    return swapchain_unregister_object(swapchain_handle_target(swapchain));
 }
 
 static void swapchain_retire(PdockerVkSwapchain *swapchain) {
@@ -29367,7 +29382,7 @@ VKAPI_ATTR void VKAPI_CALL vkDestroySwapchainKHR(
     (void)pAllocator;
     PdockerVkSwapchain *sc = swapchain_handle_lookup_for_device(device, swapchain);
     if (!sc) return;
-    sc = swapchain_unregister(swapchain);
+    sc = swapchain_unregister_object(sc);
     if (!sc) return;
     pdocker_vk_destroy_swapchain_images(device, sc);
     swapchain_retire(sc);
@@ -36286,7 +36301,7 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyEvent(
     (void)pAllocator;
     PdockerVkEvent *e = event_handle_lookup_for_device(device, event);
     if (!e) return;
-    e = event_unregister(event);
+    e = event_unregister_object(e);
     if (!e) return;
     (void)send_executor_event_destroy(e);
     event_retire(e);
@@ -37240,7 +37255,7 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyQueryPool(
     (void)pAllocator;
     PdockerVkQueryPool *pool = query_pool_handle_lookup_for_device(device, queryPool);
     if (!pool) return;
-    pool = query_pool_unregister(queryPool);
+    pool = query_pool_unregister_object(pool);
     if (!pool) return;
     query_pool_retire(pool);
 }
@@ -37480,7 +37495,7 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyFence(
     (void)pAllocator;
     PdockerVkFence *f = fence_handle_lookup_for_device(device, fence);
     if (!f) return;
-    f = fence_unregister(fence);
+    f = fence_unregister_object(f);
     if (!f) return;
     (void)send_executor_fence_destroy(f);
     fence_retire(f);
@@ -37633,7 +37648,7 @@ VKAPI_ATTR void VKAPI_CALL vkDestroySemaphore(
     (void)pAllocator;
     PdockerVkSemaphore *sem = semaphore_handle_lookup_for_device(device, semaphore);
     if (!sem) return;
-    sem = semaphore_unregister(semaphore);
+    sem = semaphore_unregister_object(sem);
     if (!sem) return;
     (void)send_executor_semaphore_destroy(sem);
     semaphore_retire(sem);
