@@ -7949,6 +7949,30 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 if (cmd_b_obj->active_color_attachments[0].image_view_snapshot.valid) return 414;
                 if (vkEndCommandBuffer(cmd_b) != VK_ERROR_FEATURE_NOT_PRESENT) return 23;
 
+                if (vkBeginCommandBuffer(cmd_b, NULL) != VK_SUCCESS) return 415;
+                color.imageView = (VkImageView)(uintptr_t)0x1234u;
+                color.resolveImageView = VK_NULL_HANDLE;
+                vkCmdBeginRendering(cmd_b, &rendering);
+                cmd_b_obj = command_buffer_handle_lookup(cmd_b);
+                if (!cmd_b_obj || !cmd_b_obj->recording_failed) return 416;
+                if (cmd_b_obj->graphics_rendering_op_count != 0) return 417;
+                if (cmd_b_obj->active_color_attachments[0].image_view != NULL) return 418;
+                if (vkEndCommandBuffer(cmd_b) != VK_ERROR_FEATURE_NOT_PRESENT) return 419;
+
+                if (vkBeginCommandBuffer(cmd_b, NULL) != VK_SUCCESS) return 420;
+                color.imageView = VK_NULL_HANDLE;
+                color.resolveImageView = (VkImageView)(uintptr_t)0x5678u;
+                color.resolveMode = VK_RESOLVE_MODE_AVERAGE_BIT;
+                vkCmdBeginRendering(cmd_b, &rendering);
+                cmd_b_obj = command_buffer_handle_lookup(cmd_b);
+                if (!cmd_b_obj || !cmd_b_obj->recording_failed) return 421;
+                if (cmd_b_obj->graphics_rendering_op_count != 0) return 422;
+                if (cmd_b_obj->active_color_attachments[0].resolve_image_view != NULL) return 423;
+                if (vkEndCommandBuffer(cmd_b) != VK_ERROR_FEATURE_NOT_PRESENT) return 424;
+                color.imageView = image_view_a;
+                color.resolveImageView = VK_NULL_HANDLE;
+                color.resolveMode = VK_RESOLVE_MODE_NONE;
+
                 if (vkBeginCommandBuffer(cmd_b, NULL) != VK_SUCCESS) return 403;
                 vkCmdBindDescriptorSets(cmd_b, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout_a, 0, 0, NULL, 0, NULL);
                 if (vkEndCommandBuffer(cmd_b) != VK_ERROR_FEATURE_NOT_PRESENT) return 404;

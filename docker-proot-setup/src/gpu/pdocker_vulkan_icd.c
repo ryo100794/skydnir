@@ -4757,6 +4757,7 @@ static bool copy_rendering_attachment_state(
     if (!src) return true;
     if (src->pNext) return false;
     PdockerVkImageView *image_view = image_view_handle_lookup(src->imageView);
+    if (src->imageView != VK_NULL_HANDLE && !image_view) return false;
     if (image_view &&
         !owner_device_ids_match_or_unowned(owner_device_id, image_view->owner_device_id)) {
         return false;
@@ -4764,6 +4765,7 @@ static bool copy_rendering_attachment_state(
     PdockerVkImageViewSnapshot image_view_snapshot;
     if (!snapshot_image_view_state(&image_view_snapshot, image_view)) return false;
     PdockerVkImageView *resolve_image_view = image_view_handle_lookup(src->resolveImageView);
+    if (src->resolveImageView != VK_NULL_HANDLE && !resolve_image_view) return false;
     if (resolve_image_view &&
         !owner_device_ids_match_or_unowned(owner_device_id, resolve_image_view->owner_device_id)) {
         return false;

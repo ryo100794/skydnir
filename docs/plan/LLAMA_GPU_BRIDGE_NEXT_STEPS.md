@@ -11,6 +11,24 @@ llama.cpp itself remains unmodified.
 
 
 
+### 2026-07-18 CPU/static Vulkan dynamic-rendering stale-view lane
+
+Dynamic-rendering attachment capture now treats non-null but untracked image-view
+handles as invalid instead of silently treating them like `VK_NULL_HANDLE`.
+`copy_rendering_attachment_state` rejects both `imageView` and
+`resolveImageView` when the handle is non-null but cannot be resolved, and it
+still performs owner validation before assigning active attachment state.
+
+This is CPU/static Vulkan pass-through hardening only.  It does not change
+llama.cpp, Dockerfiles, models, prompts, shader bytes, or executor arithmetic.
+
+Evidence: `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`,
+`tests.test_gpu_abi_contract`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_device_owner_rejects_cross_device_metadata_render_wsi_handles`,
+`scripts/build-gpu-shim.sh`, `scripts/verify-native-payloads.py`,
+`./gradlew :app:assembleDebug`.
+
+
 ### 2026-07-18 CPU/static Vulkan secondary inheritance owner lane
 
 Secondary command-buffer inheritance now resolves inherited render-pass handles

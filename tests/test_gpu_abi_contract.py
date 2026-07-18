@@ -2098,6 +2098,8 @@ class GpuAbiContractTest(unittest.TestCase):
         copy_attachment_body = c_function_body(icd, "copy_rendering_attachment_state")
         self.assertIn("PdockerVkImageView *image_view = image_view_handle_lookup(src->imageView);", copy_attachment_body)
         self.assertIn("PdockerVkImageViewSnapshot image_view_snapshot;", copy_attachment_body)
+        self.assertIn("if (src->imageView != VK_NULL_HANDLE && !image_view) return false;", copy_attachment_body)
+        self.assertIn("if (src->resolveImageView != VK_NULL_HANDLE && !resolve_image_view) return false;", copy_attachment_body)
         self.assertIn("dst->image_view = image_view;", copy_attachment_body)
         self.assertIn("dst->image_view_snapshot = image_view_snapshot;", copy_attachment_body)
         self.assertLess(copy_attachment_body.index("owner_device_ids_match_or_unowned(owner_device_id, image_view->owner_device_id)"),
