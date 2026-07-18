@@ -10033,7 +10033,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VKAPI_ATTR void VKAPI_CALL vkResetQueryPool", icd)
         self.assertIn("VKAPI_ATTR void VKAPI_CALL vkResetQueryPoolEXT", icd)
         self.assertIn("MAP_PROC(vkResetQueryPoolEXT)", icd)
-        self.assertIn("reset_query_range(pdocker_vk_query_pool_from_handle(queryPool), firstQuery, queryCount);", icd)
+        self.assertIn("reset_query_range(query_pool_handle_lookup(queryPool), firstQuery, queryCount);", icd)
         reset_body = c_function_body(icd, "reset_query_range")
         self.assertIn("if (!query_range_valid(pool, firstQuery, queryCount)) return;", reset_body)
 
@@ -10337,6 +10337,7 @@ class GpuAbiContractTest(unittest.TestCase):
         fence_wait_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkWaitForFences", 1)[1].split(
             "static bool semaphore_create_info_parse_pnext", 1
         )[0]
+        self.assertIn("validate_fence_handles(fenceCount, pFences)", fence_wait_body)
         self.assertIn("if (fences_wait_satisfied(fenceCount, pFences, waitAll)) return VK_SUCCESS;", fence_wait_body)
         self.assertIn("pdocker_vk_wait_deadline_expired(start_ns, timeout)", fence_wait_body)
         self.assertIn("pdocker_vk_wait_poll_sleep(start_ns, timeout);", fence_wait_body)
@@ -10347,6 +10348,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("if (timeline_semaphore_wait_satisfied(pWaitInfo)) return VK_SUCCESS;", semaphore_wait_body)
         self.assertIn("pdocker_vk_wait_deadline_expired(start_ns, timeout)", semaphore_wait_body)
         self.assertIn("pdocker_vk_wait_poll_sleep(start_ns, timeout);", semaphore_wait_body)
+        self.assertIn("validate_timeline_semaphore_wait_handles(pWaitInfo)", semaphore_wait_body)
         self.assertIn("return VK_ERROR_FEATURE_NOT_PRESENT;", semaphore_wait_body)
         self.assertNotIn("VK_NOT_READY", semaphore_wait_body)
 
@@ -15456,7 +15458,8 @@ class GpuAbiContractTest(unittest.TestCase):
         fence_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkGetFenceStatus", 1)[1].split(
             "VKAPI_ATTR VkResult VKAPI_CALL vkWaitForFences", 1
         )[0]
-        self.assertIn("if (!f || f->signaled) return VK_SUCCESS;", fence_body)
+        self.assertIn("if (!f) return VK_ERROR_INITIALIZATION_FAILED;", fence_body)
+        self.assertIn("if (f->signaled) return VK_SUCCESS;", fence_body)
         self.assertIn("if (f->executor_tracked)", fence_body)
         self.assertNotIn("return (!f || f->signaled) ? VK_SUCCESS : VK_NOT_READY;", fence_body)
 
@@ -15471,6 +15474,7 @@ class GpuAbiContractTest(unittest.TestCase):
         reset_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkResetFences", 1)[1].split(
             "VKAPI_ATTR VkResult VKAPI_CALL vkGetFenceStatus", 1
         )[0]
+        self.assertIn("validate_fence_handles(fenceCount, pFences)", reset_body)
         self.assertIn("if (fence) fence->signaled = false;", reset_body)
 
     def test_vulkan_icd_supports_query_pool_and_timestamp_api(self):
@@ -16535,15 +16539,27 @@ class GpuAbiContractTest(unittest.TestCase):
             "pdocker_vk_semaphore_from_handle",
             "pdocker_vk_event_from_handle",
             "pdocker_vk_query_pool_from_handle",
+            "fence_register(fence);",
+            "semaphore_register(sem);",
+            "event_register(event);",
+            "query_pool_register(pool);",
+            "fence_retire(f);",
+            "semaphore_retire(sem);",
+            "event_retire(e);",
+            "query_pool_retire(pool);",
             "*pFence = pdocker_vk_fence_to_handle(fence);",
             "*pSemaphore = pdocker_vk_semaphore_to_handle(sem);",
             "*pEvent = pdocker_vk_event_to_handle(event);",
             "*pQueryPool = pdocker_vk_query_pool_to_handle(pool);",
-            "PdockerVkFence *submit_fence = pdocker_vk_fence_from_handle(fence);",
-            "PdockerVkSemaphore *sem = pdocker_vk_semaphore_from_handle(pSignalInfo->semaphore);",
-            "PdockerVkEvent *e = pdocker_vk_event_from_handle(event);",
-            "PdockerVkQueryPool *pool = pdocker_vk_query_pool_from_handle(queryPool);",
-            "reset_query_range(pdocker_vk_query_pool_from_handle(queryPool), firstQuery, queryCount);",
+            "PdockerVkFence *submit_fence = fence_handle_lookup(fence);",
+            "PdockerVkSemaphore *sem = semaphore_handle_lookup(pSignalInfo->semaphore);",
+            "PdockerVkEvent *e = event_handle_lookup(event);",
+            "PdockerVkQueryPool *pool = query_pool_handle_lookup(queryPool);",
+            "reset_query_range(query_pool_handle_lookup(queryPool), firstQuery, queryCount);",
+            "validate_fence_handles(fenceCount, pFences)",
+            "validate_submit_signal_semaphores",
+            "validate_timeline_semaphore_wait_handles(pWaitInfo)",
+            "query-command-stale-pool",
         ]:
             self.assertIn(marker, source)
         for forbidden in [

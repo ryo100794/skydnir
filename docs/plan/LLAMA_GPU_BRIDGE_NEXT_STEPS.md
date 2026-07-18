@@ -10,6 +10,34 @@ llama.cpp itself remains unmodified.
 ## Current Ground Truth
 
 
+### 2026-07-18 CPU/static Vulkan sync/event/query live-handle lane
+
+`VkFence`, `VkSemaphore`, `VkEvent`, and `VkQueryPool` now use the same
+live-registry plus soft-destroy quarantine pattern as the other Vulkan handle
+classes.  Create paths register the objects before exposing handles, destroy
+paths unregister and tombstone them, and public entry points resolve through
+`fence_handle_lookup`, `semaphore_handle_lookup`, `event_handle_lookup`, or
+`query_pool_handle_lookup` before reading state.
+
+Fence wait/status/reset no longer treats fabricated or stale handles as already
+signaled.  Timeline semaphore get/wait/signal now rejects untracked handles
+before polling, avoiding fake-handle timeout or infinite-wait behavior.  Event
+status/set/reset rejects stale events, and recorded event commands fail closed at
+submit if the event was destroyed after recording.  Query-pool backing storage is
+validated by `query_range_valid`, query recording marks invalid pools as command
+recording failures, and recorded query operations fail submit if their pool was
+destroyed after recording.  Legacy and submit2 semaphore validation also reject
+null or untracked wait/signal semaphore elements before mutating fences.
+
+This is generic Vulkan pass-through hardening.  It does not change llama.cpp,
+Dockerfiles, models, prompts, shader bytes, or executor-side arithmetic.
+
+Evidence: `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`,
+`tests.test_gpu_abi_contract`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_sync_event_query_handles_fail_closed_after_destroy`,
+`tests.test_vulkan_icd_sync_harness`, `scripts/build-gpu-shim.sh`.
+
+
 ### 2026-07-18 CPU/static Vulkan command pool/buffer live-handle lane
 
 `VkCommandPool` and `VkCommandBuffer` now use live registries with ownership

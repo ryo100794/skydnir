@@ -1265,6 +1265,127 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_sync_event_query_handles_fail_closed_after_destroy(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+            {COMMAND_BUFFER_STACK_TEST_HELPER}
+
+            int main(void) {{
+                unsetenv("PDOCKER_GPU_QUEUE_SOCKET");
+                ensure_vulkan_dispatchable_object_ids();
+                g_queue.object_id = 1;
+                g_queue.instance_object_id = 1;
+                g_queue.physical_device_object_id = 1;
+                g_queue.device_object_id = 1;
+
+                VkFenceCreateInfo fence_info;
+                memset(&fence_info, 0, sizeof(fence_info));
+                fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+                fence_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+                VkFence fence = VK_NULL_HANDLE;
+                if (vkCreateFence(VK_NULL_HANDLE, &fence_info, NULL, &fence) != VK_SUCCESS || !fence) return 2;
+                if (!fence_handle_lookup(fence)) return 3;
+                if (vkGetFenceStatus(VK_NULL_HANDLE, fence) != VK_SUCCESS) return 4;
+                vkDestroyFence(VK_NULL_HANDLE, fence, NULL);
+                if (fence_handle_lookup(fence)) return 5;
+                if (vkGetFenceStatus(VK_NULL_HANDLE, fence) != VK_ERROR_INITIALIZATION_FAILED) return 6;
+                if (vkResetFences(VK_NULL_HANDLE, 1, &fence) != VK_ERROR_INITIALIZATION_FAILED) return 7;
+                if (vkWaitForFences(VK_NULL_HANDLE, 1, &fence, VK_TRUE, 0) != VK_ERROR_INITIALIZATION_FAILED) return 8;
+
+                VkSemaphoreCreateInfo sem_info;
+                memset(&sem_info, 0, sizeof(sem_info));
+                sem_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+                VkSemaphore sem = VK_NULL_HANDLE;
+                if (vkCreateSemaphore(VK_NULL_HANDLE, &sem_info, NULL, &sem) != VK_SUCCESS || !sem) return 9;
+                if (!semaphore_handle_lookup(sem)) return 10;
+                uint64_t counter = 0;
+                if (vkGetSemaphoreCounterValue(VK_NULL_HANDLE, sem, &counter) != VK_ERROR_FEATURE_NOT_PRESENT) return 11;
+                vkDestroySemaphore(VK_NULL_HANDLE, sem, NULL);
+                if (semaphore_handle_lookup(sem)) return 12;
+                if (vkGetSemaphoreCounterValue(VK_NULL_HANDLE, sem, &counter) != VK_ERROR_INITIALIZATION_FAILED) return 13;
+                VkSemaphoreWaitInfo wait_info;
+                memset(&wait_info, 0, sizeof(wait_info));
+                wait_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
+                wait_info.semaphoreCount = 1;
+                wait_info.pSemaphores = &sem;
+                wait_info.pValues = &counter;
+                if (vkWaitSemaphores(VK_NULL_HANDLE, &wait_info, 0) != VK_ERROR_INITIALIZATION_FAILED) return 14;
+                VkSubmitInfo stale_signal_submit;
+                memset(&stale_signal_submit, 0, sizeof(stale_signal_submit));
+                stale_signal_submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+                stale_signal_submit.signalSemaphoreCount = 1;
+                stale_signal_submit.pSignalSemaphores = &sem;
+                if (vkQueueSubmit((VkQueue)&g_queue, 1, &stale_signal_submit, VK_NULL_HANDLE) != VK_ERROR_INITIALIZATION_FAILED) return 30;
+                VkSemaphore null_sem = VK_NULL_HANDLE;
+                stale_signal_submit.pSignalSemaphores = &null_sem;
+                if (vkQueueSubmit((VkQueue)&g_queue, 1, &stale_signal_submit, VK_NULL_HANDLE) != VK_ERROR_INITIALIZATION_FAILED) return 31;
+
+                VkEventCreateInfo event_info;
+                memset(&event_info, 0, sizeof(event_info));
+                event_info.sType = VK_STRUCTURE_TYPE_EVENT_CREATE_INFO;
+                VkEvent event = VK_NULL_HANDLE;
+                if (vkCreateEvent(VK_NULL_HANDLE, &event_info, NULL, &event) != VK_SUCCESS || !event) return 15;
+                if (!event_handle_lookup(event)) return 16;
+                if (vkSetEvent(VK_NULL_HANDLE, event) != VK_SUCCESS) return 17;
+                if (vkGetEventStatus(VK_NULL_HANDLE, event) != VK_EVENT_SET) return 18;
+                PdockerVkCommandBuffer event_cmd;
+                reset_test_command_buffer(&event_cmd, 0, 0);
+                vkCmdSetEvent((VkCommandBuffer)&event_cmd, event, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+                if (event_cmd.recording_failed || event_cmd.command_op_count != 1) return 28;
+                vkDestroyEvent(VK_NULL_HANDLE, event, NULL);
+                if (event_handle_lookup(event)) return 19;
+                if (vkGetEventStatus(VK_NULL_HANDLE, event) != VK_ERROR_INITIALIZATION_FAILED) return 20;
+                if (vkSetEvent(VK_NULL_HANDLE, event) != VK_ERROR_INITIALIZATION_FAILED) return 21;
+                VkCommandBuffer event_cmd_handle = (VkCommandBuffer)&event_cmd;
+                VkSubmitInfo event_submit;
+                memset(&event_submit, 0, sizeof(event_submit));
+                event_submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+                event_submit.commandBufferCount = 1;
+                event_submit.pCommandBuffers = &event_cmd_handle;
+                if (vkQueueSubmit((VkQueue)&g_queue, 1, &event_submit, VK_NULL_HANDLE) != VK_ERROR_INITIALIZATION_FAILED) return 29;
+                command_buffer_destroy_record_vectors(&event_cmd);
+                command_buffer_destroy_descriptor_states(&event_cmd);
+                (void)command_buffer_unregister((VkCommandBuffer)&event_cmd);
+
+                VkQueryPoolCreateInfo query_info;
+                memset(&query_info, 0, sizeof(query_info));
+                query_info.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+                query_info.queryType = VK_QUERY_TYPE_TIMESTAMP;
+                query_info.queryCount = 1;
+                VkQueryPool query_pool = VK_NULL_HANDLE;
+                if (vkCreateQueryPool(VK_NULL_HANDLE, &query_info, NULL, &query_pool) != VK_SUCCESS || !query_pool) return 22;
+                if (!query_pool_handle_lookup(query_pool)) return 23;
+
+                PdockerVkCommandBuffer cmd;
+                reset_test_command_buffer(&cmd, 0, 0);
+                vkCmdWriteTimestamp((VkCommandBuffer)&cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, query_pool, 0);
+                if (cmd.recording_failed || cmd.command_op_count != 1) return 24;
+                vkDestroyQueryPool(VK_NULL_HANDLE, query_pool, NULL);
+                if (query_pool_handle_lookup(query_pool)) return 25;
+
+                VkSubmitInfo submit;
+                VkCommandBuffer cmd_handle = (VkCommandBuffer)&cmd;
+                memset(&submit, 0, sizeof(submit));
+                submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+                submit.commandBufferCount = 1;
+                submit.pCommandBuffers = &cmd_handle;
+                if (vkQueueSubmit((VkQueue)&g_queue, 1, &submit, VK_NULL_HANDLE) != VK_ERROR_INITIALIZATION_FAILED) return 26;
+                uint64_t data = 0;
+                if (vkGetQueryPoolResults(VK_NULL_HANDLE, query_pool, 0, 1, sizeof(data), &data, sizeof(data), VK_QUERY_RESULT_64_BIT) != VK_ERROR_INITIALIZATION_FAILED) return 27;
+                command_buffer_destroy_record_vectors(&cmd);
+                command_buffer_destroy_descriptor_states(&cmd);
+                (void)command_buffer_unregister((VkCommandBuffer)&cmd);
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_maintenance1_extension_exposes_trim_command_pool_alias(self):
         source = textwrap.dedent(
             f"""
