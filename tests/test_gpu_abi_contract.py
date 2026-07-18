@@ -7011,7 +7011,7 @@ class GpuAbiContractTest(unittest.TestCase):
         icd = VULKAN_ICD.read_text()
         bind_body = c_function_body(icd, "vkCmdBindDescriptorSets")
         untracked_set_body = bind_body.split(
-            "PdockerVkDescriptorSet *set = pdocker_vk_descriptor_set_from_handle(pDescriptorSets[set_i]);", 1
+            "PdockerVkDescriptorSet *set = descriptor_set_handle_lookup(pDescriptorSets[set_i]);", 1
         )[1].split(
             "if (pipeline_layout &&", 1
         )[0]
@@ -11189,7 +11189,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('unsupported_create_info_pnext_result("vkAllocateDescriptorSets", node)', allocate_pnext_body)
         self.assertIn("pAllocateInfo->sType != VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO", allocate_body)
         self.assertIn("validate_descriptor_set_allocate_pnext(pAllocateInfo)", allocate_body)
-        self.assertIn("pdocker_vk_descriptor_pool_from_handle(pAllocateInfo->descriptorPool)", allocate_body)
+        self.assertIn("descriptor_pool_handle_lookup(pAllocateInfo->descriptorPool)", allocate_body)
         self.assertIn("pool->set_count + pAllocateInfo->descriptorSetCount > pool->max_sets", allocate_body)
         self.assertIn("VK_ERROR_OUT_OF_POOL_MEMORY", allocate_body)
         self.assertIn("descriptor_pool_track_set(pool, set)", allocate_body)
@@ -11213,10 +11213,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("PdockerVkDescriptorPool *pool;", set_struct)
         self.assertIn("pool->flags = pCreateInfo->flags;", create_body)
         self.assertIn("pool->max_sets = pCreateInfo->maxSets;", create_body)
-        self.assertIn("destroy_descriptor_pool_object(pdocker_vk_descriptor_pool_from_handle(descriptorPool))", destroy_body)
+        self.assertIn("destroy_descriptor_pool_object(descriptor_pool_unregister(descriptorPool))", destroy_body)
         self.assertIn("descriptor_pool_reset_sets(pool);", reset_body)
         self.assertNotIn("(void)descriptorPool;", reset_body)
-        self.assertIn("pdocker_vk_descriptor_pool_from_handle(descriptorPool)", free_body)
+        self.assertIn("descriptor_pool_handle_lookup(descriptorPool)", free_body)
         self.assertIn("VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT", free_body)
         self.assertIn("set->pool && set->pool != pool", free_body)
         self.assertIn("descriptor_pool_free_set(pool, set)", free_body)
@@ -11542,7 +11542,7 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         self.assertIn("pAllocateInfo->sType != VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO", allocate_sets_body)
         self.assertIn("validate_descriptor_set_allocate_pnext(pAllocateInfo)", allocate_sets_body)
-        self.assertIn("pdocker_vk_descriptor_pool_from_handle(pAllocateInfo->descriptorPool)", allocate_sets_body)
+        self.assertIn("descriptor_pool_handle_lookup(pAllocateInfo->descriptorPool)", allocate_sets_body)
         self.assertIn("descriptor_pool_track_set(pool, set)", allocate_sets_body)
         shader_module_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateShaderModule", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkDestroyShaderModule", 1
@@ -16363,6 +16363,17 @@ class GpuAbiContractTest(unittest.TestCase):
         for marker in [
             "pdocker_vk_descriptor_set_layout_from_handle",
             "pdocker_vk_descriptor_set_from_handle",
+            "descriptor_pool_register(pool);",
+            "descriptor_pool_retire(pool);",
+            "descriptor_pool_handle_lookup(descriptorPool)",
+            "descriptor_pool_handle_lookup(pAllocateInfo->descriptorPool)",
+            "descriptor_set_register(set);",
+            "descriptor_set_unregister(pdocker_vk_descriptor_set_to_handle(set));",
+            "descriptor_set_retire(set);",
+            "descriptor_set_handle_lookup(pDescriptorSets[set_i])",
+            "descriptor_set_handle_lookup(w->dstSet)",
+            "descriptor_set_handle_lookup(c->srcSet)",
+            "descriptor_set_handle_lookup(descriptorSet)",
             "pdocker_vk_descriptor_update_template_from_handle",
             "pdocker_vk_shader_module_from_handle",
             "pdocker_vk_pipeline_layout_from_handle",
@@ -16388,7 +16399,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "pPipelines[i] = pdocker_vk_pipeline_to_handle(pipeline);",
             "cmd->compute_pipeline = pipeline_handle_lookup(pipeline);",
             "PdockerVkPipelineLayout *pipeline_layout = pipeline_layout_handle_lookup(layout);",
-            "PdockerVkDescriptorSet *set = pdocker_vk_descriptor_set_from_handle(pDescriptorSets[set_i]);",
+            "PdockerVkDescriptorSet *set = descriptor_set_handle_lookup(pDescriptorSets[set_i]);",
         ]:
             self.assertIn(marker, source)
         for forbidden in [
@@ -16430,7 +16441,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "pdocker_vk_surface_from_handle",
             "pdocker_vk_swapchain_from_handle",
             "*pDescriptorPool = pdocker_vk_descriptor_pool_to_handle(pool);",
-            "destroy_descriptor_pool_object(pdocker_vk_descriptor_pool_from_handle(descriptorPool));",
+            "destroy_descriptor_pool_object(descriptor_pool_unregister(descriptorPool));",
             "*pPipelineCache = pdocker_vk_pipeline_cache_to_handle(cache);",
             "free(pdocker_vk_pipeline_cache_from_handle(pipelineCache));",
             "*pCommandPool = pdocker_vk_command_pool_to_handle(pool);",

@@ -1547,6 +1547,159 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_descriptor_pool_and_set_handles_fail_closed_after_free_reset_destroy(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            static int make_layout(VkDescriptorSetLayout *layout_out) {{
+                VkDescriptorSetLayoutBinding binding;
+                memset(&binding, 0, sizeof(binding));
+                binding.binding = 0;
+                binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+                binding.descriptorCount = 1;
+                binding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+                VkDescriptorSetLayoutCreateInfo info;
+                memset(&info, 0, sizeof(info));
+                info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+                info.bindingCount = 1;
+                info.pBindings = &binding;
+                return vkCreateDescriptorSetLayout(VK_NULL_HANDLE, &info, NULL, layout_out) == VK_SUCCESS ? 0 : 1;
+            }}
+
+            static int make_pool(VkDescriptorPool *pool_out) {{
+                VkDescriptorPoolSize size;
+                memset(&size, 0, sizeof(size));
+                size.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+                size.descriptorCount = 4;
+                VkDescriptorPoolCreateInfo info;
+                memset(&info, 0, sizeof(info));
+                info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+                info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+                info.maxSets = 4;
+                info.poolSizeCount = 1;
+                info.pPoolSizes = &size;
+                return vkCreateDescriptorPool(VK_NULL_HANDLE, &info, NULL, pool_out) == VK_SUCCESS ? 0 : 1;
+            }}
+
+            static int alloc_set(VkDescriptorPool pool, VkDescriptorSetLayout layout, VkDescriptorSet *set_out) {{
+                VkDescriptorSetAllocateInfo info;
+                memset(&info, 0, sizeof(info));
+                info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+                info.descriptorPool = pool;
+                info.descriptorSetCount = 1;
+                info.pSetLayouts = &layout;
+                return vkAllocateDescriptorSets(VK_NULL_HANDLE, &info, set_out) == VK_SUCCESS ? 0 : 1;
+            }}
+
+            static void try_update_stale_set(VkDescriptorSet set) {{
+                VkDescriptorBufferInfo buffer_info;
+                memset(&buffer_info, 0, sizeof(buffer_info));
+                buffer_info.buffer = VK_NULL_HANDLE;
+                buffer_info.offset = 0;
+                buffer_info.range = 16;
+                VkWriteDescriptorSet write;
+                memset(&write, 0, sizeof(write));
+                write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                write.dstSet = set;
+                write.dstBinding = 0;
+                write.descriptorCount = 1;
+                write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+                write.pBufferInfo = &buffer_info;
+                vkUpdateDescriptorSets(VK_NULL_HANDLE, 1, &write, 0, NULL);
+            }}
+
+            int main(void) {{
+                VkDescriptorSetLayout layout = VK_NULL_HANDLE;
+                if (make_layout(&layout) != 0 || !descriptor_set_layout_handle_lookup(layout)) {{
+                    fprintf(stderr, "layout create failed\\n");
+                    return 2;
+                }}
+                VkDescriptorPool pool = VK_NULL_HANDLE;
+                if (make_pool(&pool) != 0 || !descriptor_pool_handle_lookup(pool)) {{
+                    fprintf(stderr, "pool create/register failed\\n");
+                    return 3;
+                }}
+                PdockerVkDescriptorPool *pool_obj = descriptor_pool_handle_lookup(pool);
+
+                VkDescriptorSet set = VK_NULL_HANDLE;
+                if (alloc_set(pool, layout, &set) != 0 || !descriptor_set_handle_lookup(set) ||
+                    pool_obj->set_count != 1) {{
+                    fprintf(stderr, "set allocate/register failed\\n");
+                    return 4;
+                }}
+                PdockerVkDescriptorSet *set_obj = descriptor_set_handle_lookup(set);
+                if (vkFreeDescriptorSets(VK_NULL_HANDLE, pool, 1, &set) != VK_SUCCESS) {{
+                    fprintf(stderr, "free live set failed\\n");
+                    return 5;
+                }}
+                if (descriptor_set_handle_lookup(set) != NULL || !set_obj->destroyed ||
+                    set_obj->pool != NULL || pool_obj->set_count != 0) {{
+                    fprintf(stderr, "freed set remained live or tracked\\n");
+                    return 6;
+                }}
+                try_update_stale_set(set);
+                if (vkFreeDescriptorSets(VK_NULL_HANDLE, pool, 1, &set) == VK_SUCCESS) {{
+                    fprintf(stderr, "free accepted stale set\\n");
+                    return 7;
+                }}
+
+                VkDescriptorSet reset_set = VK_NULL_HANDLE;
+                if (alloc_set(pool, layout, &reset_set) != 0 || !descriptor_set_handle_lookup(reset_set)) {{
+                    fprintf(stderr, "reset set allocate failed\\n");
+                    return 8;
+                }}
+                PdockerVkDescriptorSet *reset_set_obj = descriptor_set_handle_lookup(reset_set);
+                if (vkResetDescriptorPool(VK_NULL_HANDLE, pool, 0) != VK_SUCCESS) {{
+                    fprintf(stderr, "pool reset failed\\n");
+                    return 9;
+                }}
+                if (descriptor_set_handle_lookup(reset_set) != NULL || !reset_set_obj->destroyed ||
+                    reset_set_obj->pool != NULL || pool_obj->set_count != 0) {{
+                    fprintf(stderr, "pool reset left set live/tracked\\n");
+                    return 10;
+                }}
+                try_update_stale_set(reset_set);
+
+                VkDescriptorSet destroy_set = VK_NULL_HANDLE;
+                if (alloc_set(pool, layout, &destroy_set) != 0 || !descriptor_set_handle_lookup(destroy_set)) {{
+                    fprintf(stderr, "destroy set allocate failed\\n");
+                    return 11;
+                }}
+                PdockerVkDescriptorSet *destroy_set_obj = descriptor_set_handle_lookup(destroy_set);
+                vkDestroyDescriptorPool(VK_NULL_HANDLE, pool, NULL);
+                if (descriptor_pool_handle_lookup(pool) != NULL || !pool_obj->destroyed ||
+                    pool_obj->sets != NULL || descriptor_set_handle_lookup(destroy_set) != NULL ||
+                    !destroy_set_obj->destroyed || destroy_set_obj->pool != NULL) {{
+                    fprintf(stderr, "pool destroy left pool/set live\\n");
+                    return 12;
+                }}
+                if (vkResetDescriptorPool(VK_NULL_HANDLE, pool, 0) == VK_SUCCESS) {{
+                    fprintf(stderr, "reset accepted destroyed pool\\n");
+                    return 13;
+                }}
+                VkDescriptorSet bad_set = VK_NULL_HANDLE;
+                if (alloc_set(pool, layout, &bad_set) == 0 || bad_set != VK_NULL_HANDLE) {{
+                    fprintf(stderr, "allocate accepted destroyed pool\\n");
+                    return 14;
+                }}
+                if (vkFreeDescriptorSets(VK_NULL_HANDLE, pool, 1, &destroy_set) == VK_SUCCESS) {{
+                    fprintf(stderr, "free accepted destroyed pool with stale set\\n");
+                    return 15;
+                }}
+                vkDestroyDescriptorPool(VK_NULL_HANDLE, pool, NULL);
+                vkDestroyDescriptorSetLayout(VK_NULL_HANDLE, layout, NULL);
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_conservative_query_instance_extensions_are_advertised_with_aliases(self):
         source = textwrap.dedent(
             f"""

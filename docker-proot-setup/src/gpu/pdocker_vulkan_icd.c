@@ -901,6 +901,7 @@ struct PdockerVkDescriptorSet {
     bool unsupported_descriptor_array;
     bool unsupported_descriptor_type;
     bool has_image_descriptor;
+    struct PdockerVkDescriptorSet *next;
 };
 
 struct PdockerVkDescriptorUpdateTemplate {
@@ -1673,6 +1674,8 @@ struct PdockerVkDescriptorPool {
     PdockerVkDescriptorSet **sets;
     uint32_t set_count;
     uint32_t set_capacity;
+    bool destroyed;
+    struct PdockerVkDescriptorPool *next;
 };
 
 struct PdockerVkPipelineCache {
@@ -1742,6 +1745,10 @@ static PdockerVkPipelineLayout *g_pipeline_layouts;
 static PdockerVkPipelineLayout *g_retired_pipeline_layouts;
 static PdockerVkPipeline *g_pipelines;
 static PdockerVkPipeline *g_retired_pipelines;
+static PdockerVkDescriptorPool *g_descriptor_pools;
+static PdockerVkDescriptorPool *g_retired_descriptor_pools;
+static PdockerVkDescriptorSet *g_descriptor_sets;
+static PdockerVkDescriptorSet *g_retired_descriptor_sets;
 static unsigned g_shader_dump_counter;
 static PdockerVkMemory *g_guarded_memories[PDOCKER_VK_MAX_GUARDED_MEMORIES];
 static struct sigaction g_previous_sigsegv;
@@ -2494,6 +2501,101 @@ static bool pipeline_handle_resolve(VkPipeline pipeline, PdockerVkPipeline **out
 static PdockerVkPipeline *pipeline_handle_lookup(VkPipeline pipeline) {
     PdockerVkPipeline *resolved = NULL;
     return pipeline_handle_resolve(pipeline, &resolved) ? resolved : NULL;
+}
+
+static void descriptor_pool_register(PdockerVkDescriptorPool *pool) {
+    if (!pool) return;
+    pool->destroyed = false;
+    pool->next = g_descriptor_pools;
+    g_descriptor_pools = pool;
+}
+
+static PdockerVkDescriptorPool *descriptor_pool_unregister(VkDescriptorPool descriptorPool) {
+    PdockerVkDescriptorPool *target = pdocker_vk_descriptor_pool_from_handle(descriptorPool);
+    if (!target) return NULL;
+    PdockerVkDescriptorPool **link = &g_descriptor_pools;
+    while (*link) {
+        if (*link == target) {
+            *link = target->next;
+            target->next = NULL;
+            return target;
+        }
+        link = &(*link)->next;
+    }
+    return NULL;
+}
+
+static void descriptor_pool_retire(PdockerVkDescriptorPool *pool) {
+    if (!pool || pool->destroyed) return;
+    pool->destroyed = true;
+    pool->next = g_retired_descriptor_pools;
+    g_retired_descriptor_pools = pool;
+}
+
+static bool descriptor_pool_handle_resolve(VkDescriptorPool descriptorPool, PdockerVkDescriptorPool **out_pool) {
+    PdockerVkDescriptorPool *target = pdocker_vk_descriptor_pool_from_handle(descriptorPool);
+    if (out_pool) *out_pool = NULL;
+    if (!target) return false;
+    for (PdockerVkDescriptorPool *candidate = g_descriptor_pools; candidate; candidate = candidate->next) {
+        if (candidate == target && !candidate->destroyed) {
+            if (out_pool) *out_pool = candidate;
+            return true;
+        }
+    }
+    return false;
+}
+
+static PdockerVkDescriptorPool *descriptor_pool_handle_lookup(VkDescriptorPool descriptorPool) {
+    PdockerVkDescriptorPool *resolved = NULL;
+    return descriptor_pool_handle_resolve(descriptorPool, &resolved) ? resolved : NULL;
+}
+
+static void descriptor_set_register(PdockerVkDescriptorSet *set) {
+    if (!set) return;
+    set->destroyed = false;
+    set->next = g_descriptor_sets;
+    g_descriptor_sets = set;
+}
+
+static PdockerVkDescriptorSet *descriptor_set_unregister(VkDescriptorSet descriptorSet) {
+    PdockerVkDescriptorSet *target = pdocker_vk_descriptor_set_from_handle(descriptorSet);
+    if (!target) return NULL;
+    PdockerVkDescriptorSet **link = &g_descriptor_sets;
+    while (*link) {
+        if (*link == target) {
+            *link = target->next;
+            target->next = NULL;
+            return target;
+        }
+        link = &(*link)->next;
+    }
+    return NULL;
+}
+
+static void descriptor_set_retire(PdockerVkDescriptorSet *set) {
+    if (!set || set->destroyed) return;
+    set->destroyed = true;
+    set->pool = NULL;
+    set->next = g_retired_descriptor_sets;
+    g_retired_descriptor_sets = set;
+}
+
+static bool descriptor_set_handle_resolve(VkDescriptorSet descriptorSet, PdockerVkDescriptorSet **out_set) {
+    PdockerVkDescriptorSet *target = pdocker_vk_descriptor_set_from_handle(descriptorSet);
+    if (out_set) *out_set = NULL;
+    if (!target) return false;
+    for (PdockerVkDescriptorSet *candidate = g_descriptor_sets; candidate; candidate = candidate->next) {
+        if (candidate == target && !candidate->destroyed) {
+            if (out_set) *out_set = candidate;
+            return true;
+        }
+    }
+    return false;
+}
+
+static PdockerVkDescriptorSet *descriptor_set_handle_lookup(VkDescriptorSet descriptorSet) {
+    PdockerVkDescriptorSet *resolved = NULL;
+    return descriptor_set_handle_resolve(descriptorSet, &resolved) ? resolved : NULL;
 }
 
 static bool current_vulkan_dispatch_identity_ids(
@@ -12485,12 +12587,8 @@ static VkResult descriptor_set_allocate_storage_with_counts(
 
 static void destroy_descriptor_set_object(PdockerVkDescriptorSet *set) {
     if (!set) return;
-    set->destroyed = true;
-    set->pool = NULL;
     destroy_descriptor_set_storage(set);
-    if (set->retained_bind_handle_count == 0) {
-        free(set);
-    }
+    descriptor_set_retire(set);
 }
 
 static void descriptor_set_retain_bind_handle(PdockerVkDescriptorSet *set) {
@@ -12509,7 +12607,6 @@ static void descriptor_set_release_bind_handle(PdockerVkDescriptorSet *set) {
     }
     if (set->destroyed && set->retained_bind_handle_count == 0) {
         destroy_descriptor_set_storage(set);
-        free(set);
     }
 }
 
@@ -12576,6 +12673,7 @@ static void descriptor_pool_free_set(
         PdockerVkDescriptorPool *pool,
         PdockerVkDescriptorSet *set) {
     if (!set) return;
+    descriptor_set_unregister(pdocker_vk_descriptor_set_to_handle(set));
     descriptor_pool_untrack_set(pool ? pool : set->pool, set);
     destroy_descriptor_set_object(set);
 }
@@ -12585,8 +12683,10 @@ static void descriptor_pool_reset_sets(PdockerVkDescriptorPool *pool) {
     for (uint32_t i = 0; i < pool->set_count; ++i) {
         PdockerVkDescriptorSet *set = pool->sets ? pool->sets[i] : NULL;
         if (!set) continue;
+        descriptor_set_unregister(pdocker_vk_descriptor_set_to_handle(set));
         set->pool = NULL;
         destroy_descriptor_set_object(set);
+        pool->sets[i] = NULL;
     }
     pool->set_count = 0;
 }
@@ -12595,7 +12695,9 @@ static void destroy_descriptor_pool_object(PdockerVkDescriptorPool *pool) {
     if (!pool) return;
     descriptor_pool_reset_sets(pool);
     free(pool->sets);
-    free(pool);
+    pool->sets = NULL;
+    pool->set_capacity = 0;
+    descriptor_pool_retire(pool);
 }
 
 static int descriptor_set_clone_for_update(
@@ -24646,6 +24748,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorPool(
     if (!pool) return VK_ERROR_OUT_OF_HOST_MEMORY;
     pool->flags = pCreateInfo->flags;
     pool->max_sets = pCreateInfo->maxSets;
+    descriptor_pool_register(pool);
     *pDescriptorPool = pdocker_vk_descriptor_pool_to_handle(pool);
     return VK_SUCCESS;
 }
@@ -24656,7 +24759,7 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyDescriptorPool(
         const VkAllocationCallbacks *pAllocator) {
     (void)device;
     (void)pAllocator;
-    destroy_descriptor_pool_object(pdocker_vk_descriptor_pool_from_handle(descriptorPool));
+    destroy_descriptor_pool_object(descriptor_pool_unregister(descriptorPool));
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkResetDescriptorPool(
@@ -24665,7 +24768,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkResetDescriptorPool(
         VkDescriptorPoolResetFlags flags) {
     (void)device;
     if (flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;
-    PdockerVkDescriptorPool *pool = pdocker_vk_descriptor_pool_from_handle(descriptorPool);
+    PdockerVkDescriptorPool *pool = descriptor_pool_handle_lookup(descriptorPool);
     if (!pool) return VK_ERROR_INITIALIZATION_FAILED;
     descriptor_pool_reset_sets(pool);
     return VK_SUCCESS;
@@ -24728,7 +24831,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateDescriptorSets(
     if (pnext_rc != VK_SUCCESS) return pnext_rc;
     const VkDescriptorSetVariableDescriptorCountAllocateInfo *variable_counts =
         descriptor_set_allocate_variable_counts_info(pAllocateInfo);
-    PdockerVkDescriptorPool *pool = pdocker_vk_descriptor_pool_from_handle(pAllocateInfo->descriptorPool);
+    PdockerVkDescriptorPool *pool = descriptor_pool_handle_lookup(pAllocateInfo->descriptorPool);
     if (!pool) return VK_ERROR_INITIALIZATION_FAILED;
     if (pAllocateInfo->descriptorSetCount > UINT32_MAX - pool->set_count ||
         pool->set_count + pAllocateInfo->descriptorSetCount > pool->max_sets) {
@@ -24744,7 +24847,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateDescriptorSets(
         if (!set) {
             for (uint32_t j = 0; j < i; ++j) {
                 PdockerVkDescriptorSet *previous =
-                    pdocker_vk_descriptor_set_from_handle(pDescriptorSets[j]);
+                    descriptor_set_handle_lookup(pDescriptorSets[j]);
                 descriptor_pool_free_set(pool, previous);
                 pDescriptorSets[j] = VK_NULL_HANDLE;
             }
@@ -24756,7 +24859,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateDescriptorSets(
                 free(set);
                 for (uint32_t j = 0; j < i; ++j) {
                     PdockerVkDescriptorSet *previous =
-                        pdocker_vk_descriptor_set_from_handle(pDescriptorSets[j]);
+                        descriptor_set_handle_lookup(pDescriptorSets[j]);
                     descriptor_pool_free_set(pool, previous);
                     pDescriptorSets[j] = VK_NULL_HANDLE;
                 }
@@ -24767,7 +24870,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateDescriptorSets(
                 free(set);
                 for (uint32_t j = 0; j < i; ++j) {
                     PdockerVkDescriptorSet *previous =
-                        pdocker_vk_descriptor_set_from_handle(pDescriptorSets[j]);
+                        descriptor_set_handle_lookup(pDescriptorSets[j]);
                     descriptor_pool_free_set(pool, previous);
                     pDescriptorSets[j] = VK_NULL_HANDLE;
                 }
@@ -24789,7 +24892,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateDescriptorSets(
                 free(set);
                 for (uint32_t j = 0; j < i; ++j) {
                     PdockerVkDescriptorSet *previous =
-                        pdocker_vk_descriptor_set_from_handle(pDescriptorSets[j]);
+                        descriptor_set_handle_lookup(pDescriptorSets[j]);
                     descriptor_pool_free_set(pool, previous);
                     pDescriptorSets[j] = VK_NULL_HANDLE;
                 }
@@ -24802,7 +24905,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateDescriptorSets(
                 free(set);
                 for (uint32_t j = 0; j < i; ++j) {
                     PdockerVkDescriptorSet *previous =
-                        pdocker_vk_descriptor_set_from_handle(pDescriptorSets[j]);
+                        descriptor_set_handle_lookup(pDescriptorSets[j]);
                     descriptor_pool_free_set(pool, previous);
                     pDescriptorSets[j] = VK_NULL_HANDLE;
                 }
@@ -24817,7 +24920,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateDescriptorSets(
             free(set);
             for (uint32_t j = 0; j < i; ++j) {
                 PdockerVkDescriptorSet *previous =
-                    pdocker_vk_descriptor_set_from_handle(pDescriptorSets[j]);
+                    descriptor_set_handle_lookup(pDescriptorSets[j]);
                 descriptor_pool_free_set(pool, previous);
                 pDescriptorSets[j] = VK_NULL_HANDLE;
             }
@@ -24826,13 +24929,15 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateDescriptorSets(
         descriptor_set_apply_immutable_samplers(set);
         int track_rc = descriptor_pool_track_set(pool, set);
         if (track_rc != 0) {
-            destroy_descriptor_set_object(set);
+            destroy_descriptor_set_storage(set);
+            free(set);
             for (uint32_t j = 0; j < i; ++j) {
-                descriptor_pool_free_set(pool, pdocker_vk_descriptor_set_from_handle(pDescriptorSets[j]));
+                descriptor_pool_free_set(pool, descriptor_set_handle_lookup(pDescriptorSets[j]));
                 pDescriptorSets[j] = VK_NULL_HANDLE;
             }
             return track_rc == -ENOMEM ? VK_ERROR_OUT_OF_HOST_MEMORY : VK_ERROR_INITIALIZATION_FAILED;
         }
+        descriptor_set_register(set);
         pDescriptorSets[i] = pdocker_vk_descriptor_set_to_handle(set);
     }
     return VK_SUCCESS;
@@ -24844,7 +24949,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkFreeDescriptorSets(
         uint32_t descriptorSetCount,
         const VkDescriptorSet *pDescriptorSets) {
     (void)device;
-    PdockerVkDescriptorPool *pool = pdocker_vk_descriptor_pool_from_handle(descriptorPool);
+    PdockerVkDescriptorPool *pool = descriptor_pool_handle_lookup(descriptorPool);
     if (!pool && descriptorSetCount > 0) return VK_ERROR_INITIALIZATION_FAILED;
     if (descriptorSetCount > 0 && !pDescriptorSets) return VK_ERROR_INITIALIZATION_FAILED;
     if (descriptorSetCount > 0 &&
@@ -24852,9 +24957,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkFreeDescriptorSets(
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }
     for (uint32_t i = 0; i < descriptorSetCount; ++i) {
-        PdockerVkDescriptorSet *set =
-            pdocker_vk_descriptor_set_from_handle(pDescriptorSets[i]);
-        if (set && set->pool && set->pool != pool) return VK_ERROR_INITIALIZATION_FAILED;
+        if (pDescriptorSets[i] == VK_NULL_HANDLE) continue;
+        PdockerVkDescriptorSet *set = descriptor_set_handle_lookup(pDescriptorSets[i]);
+        if (!set) return VK_ERROR_INITIALIZATION_FAILED;
+        if (set->pool && set->pool != pool) return VK_ERROR_INITIALIZATION_FAILED;
         descriptor_pool_free_set(pool, set);
     }
     return VK_SUCCESS;
@@ -24951,7 +25057,7 @@ VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets(
             update_rc = -EINVAL;
             goto fail_closed;
         }
-        PdockerVkDescriptorSet *live_set = pdocker_vk_descriptor_set_from_handle(w->dstSet);
+        PdockerVkDescriptorSet *live_set = descriptor_set_handle_lookup(w->dstSet);
         PdockerVkDescriptorSet *set = NULL;
         if (!live_set) {
             update_rc = -EINVAL;
@@ -25220,8 +25326,8 @@ VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets(
             update_rc = -EINVAL;
             goto fail_closed;
         }
-        PdockerVkDescriptorSet *src_live = c ? pdocker_vk_descriptor_set_from_handle(c->srcSet) : NULL;
-        PdockerVkDescriptorSet *dst_live = c ? pdocker_vk_descriptor_set_from_handle(c->dstSet) : NULL;
+        PdockerVkDescriptorSet *src_live = c ? descriptor_set_handle_lookup(c->srcSet) : NULL;
+        PdockerVkDescriptorSet *dst_live = c ? descriptor_set_handle_lookup(c->dstSet) : NULL;
         PdockerVkDescriptorSet *src = NULL;
         PdockerVkDescriptorSet *dst = NULL;
         if (!src_live || !dst_live) {
@@ -25550,7 +25656,7 @@ VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSetWithTemplate(
         VkDescriptorSet descriptorSet,
         VkDescriptorUpdateTemplate descriptorUpdateTemplate,
         const void *pData) {
-    PdockerVkDescriptorSet *set = pdocker_vk_descriptor_set_from_handle(descriptorSet);
+    PdockerVkDescriptorSet *set = descriptor_set_handle_lookup(descriptorSet);
     if (!descriptor_update_template_handle_live(descriptorUpdateTemplate)) {
         trace_icd_runtime_failure("descriptor-update-template-handle-invalid",
                                   VK_ERROR_FEATURE_NOT_PRESENT);
@@ -30156,7 +30262,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
         for (uint32_t set_i = 0; set_i < descriptorSetCount; ++set_i) {
             if (firstSet >= target_set_capacity ||
                 set_i >= target_set_capacity - firstSet) break;
-            PdockerVkDescriptorSet *set = pdocker_vk_descriptor_set_from_handle(pDescriptorSets[set_i]);
+            PdockerVkDescriptorSet *set = descriptor_set_handle_lookup(pDescriptorSets[set_i]);
             uint32_t target_set = firstSet + set_i;
             if (!set || set->destroyed) {
                 cmd->unsupported_descriptor_set_layout = true;

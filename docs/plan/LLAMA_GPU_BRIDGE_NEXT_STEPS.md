@@ -10,6 +10,36 @@ llama.cpp itself remains unmodified.
 ## Current Ground Truth
 
 
+### 2026-07-18 CPU/static Vulkan descriptor pool/set live-handle lane
+
+`VkDescriptorPool` and `VkDescriptorSet` now use live registries with
+soft-destroy quarantine.  `vkCreateDescriptorPool` registers pool objects,
+`vkDestroyDescriptorPool` unregisters and retires pools, and reset/destroy
+paths unregister all owned descriptor sets before tombstoning them.
+`vkAllocateDescriptorSets` resolves the pool through live lookup, registers
+new descriptor sets only after storage allocation and pool tracking succeed,
+and rolls back through live lookup on partial allocation failure.
+
+Public descriptor set entrances now fail closed through `descriptor_set_handle_lookup`:
+`vkFreeDescriptorSets`, `vkUpdateDescriptorSets` write/copy paths,
+`vkUpdateDescriptorSetWithTemplate`, and `vkCmdBindDescriptorSets` no longer
+dereference raw application-provided descriptor-set handles.  Stale sets from
+free, pool reset, or pool destroy are removed from the live registry while
+retained bind snapshots keep their own copied descriptor state.
+
+This is generic Vulkan pass-through hardening.  It does not change llama.cpp,
+Dockerfiles, models, prompts, shader bytes, or executor-side arithmetic.
+
+Current scope note: command pools/buffers, pipeline caches, fences/semaphores,
+events/query pools, and queue submit/present prevalidation remain separate
+handle-lifetime lanes.
+
+Evidence: `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`,
+`tests.test_gpu_abi_contract`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_descriptor_pool_and_set_handles_fail_closed_after_free_reset_destroy`,
+`scripts/build-gpu-shim.sh`.
+
+
 ### 2026-07-18 CPU/static Vulkan shader/layout/pipeline live-handle lane
 
 `VkDescriptorSetLayout`, `VkShaderModule`, `VkPipelineLayout`, and `VkPipeline`
