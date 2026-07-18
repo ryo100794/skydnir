@@ -10,6 +10,24 @@ llama.cpp itself remains unmodified.
 ## Current Ground Truth
 
 
+### 2026-07-18 CPU/static Vulkan query-command owner lane
+
+Query command recording now resolves query-pool handles through a
+command-buffer-scoped checked helper, and query-result copy recording resolves
+both the query pool and destination buffer through checked command-buffer
+helpers. The helpers return the resolved object plus an owner-mismatch flag so
+existing invalid-range and cross-device failure ordering is preserved.
+
+This is CPU/static Vulkan pass-through hardening only.  It does not change
+llama.cpp, Dockerfiles, models, prompts, shader bytes, or executor arithmetic.
+
+Evidence: `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`,
+`tests.test_gpu_abi_contract`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_device_owner_rejects_cross_device_command_submit_sync`,
+`scripts/build-gpu-shim.sh`, `scripts/verify-native-payloads.py`,
+`./gradlew :app:assembleDebug`.
+
+
 ### 2026-07-18 CPU/static Vulkan graphics-pipeline owner lane
 
 `vkCreateGraphicsPipelines` now resolves base pipeline, pipeline layout,

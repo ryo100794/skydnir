@@ -3099,6 +3099,20 @@ static PdockerVkBuffer *buffer_handle_lookup_for_command_buffer(
         cmd->owner_device_id, resolved->owner_device_id) ? resolved : NULL;
 }
 
+static PdockerVkBuffer *buffer_handle_lookup_for_command_buffer_checked(
+        const PdockerVkCommandBuffer *cmd,
+        VkBuffer buffer,
+        bool *owner_mismatch_out) {
+    if (owner_mismatch_out) *owner_mismatch_out = false;
+    PdockerVkBuffer *resolved = buffer_handle_lookup(buffer);
+    if (!resolved) return NULL;
+    if (!cmd || !owner_device_ids_match_or_unowned(cmd->owner_device_id, resolved->owner_device_id)) {
+        if (owner_mismatch_out) *owner_mismatch_out = true;
+        return NULL;
+    }
+    return resolved;
+}
+
 static PdockerVkImage *image_handle_lookup_for_command_buffer(
         const PdockerVkCommandBuffer *cmd,
         VkImage image) {
@@ -3393,6 +3407,20 @@ static PdockerVkQueryPool *query_pool_handle_lookup(VkQueryPool queryPool) {
 static PdockerVkQueryPool *query_pool_handle_lookup_for_device(VkDevice device, VkQueryPool queryPool) {
     PdockerVkQueryPool *resolved = query_pool_handle_lookup(queryPool);
     return resolved && device_owner_matches_or_unowned(device, resolved->owner_device_id) ? resolved : NULL;
+}
+
+static PdockerVkQueryPool *query_pool_handle_lookup_for_command_buffer_checked(
+        const PdockerVkCommandBuffer *cmd,
+        VkQueryPool queryPool,
+        bool *owner_mismatch_out) {
+    if (owner_mismatch_out) *owner_mismatch_out = false;
+    PdockerVkQueryPool *resolved = query_pool_handle_lookup(queryPool);
+    if (!resolved) return NULL;
+    if (!cmd || !owner_device_ids_match_or_unowned(cmd->owner_device_id, resolved->owner_device_id)) {
+        if (owner_mismatch_out) *owner_mismatch_out = true;
+        return NULL;
+    }
+    return resolved;
 }
 
 static PdockerVkSurface *surface_handle_target(VkSurfaceKHR surface) {
@@ -36807,14 +36835,16 @@ static void record_query_command(
         uint32_t queryCount,
         VkPipelineStageFlags2 stageMask) {
     PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
-    PdockerVkQueryPool *pool = query_pool_handle_lookup(queryPool);
     if (!cmd) return;
-    if (!query_range_valid(pool, firstQuery, queryCount)) {
-        command_buffer_mark_recording_failed(cmd, "query-pool-invalid");
+    bool pool_owner_mismatch = false;
+    PdockerVkQueryPool *pool = query_pool_handle_lookup_for_command_buffer_checked(
+        cmd, queryPool, &pool_owner_mismatch);
+    if (pool_owner_mismatch) {
+        command_buffer_mark_recording_failed(cmd, "query-pool-cross-device");
         return;
     }
-    if (!owner_device_ids_match_or_unowned(cmd->owner_device_id, pool->owner_device_id)) {
-        command_buffer_mark_recording_failed(cmd, "query-pool-cross-device");
+    if (!query_range_valid(pool, firstQuery, queryCount)) {
+        command_buffer_mark_recording_failed(cmd, "query-pool-invalid");
         return;
     }
     if (!query_pool_type_supports_command(type, pool->type)) {
@@ -36868,11 +36898,19 @@ static void record_copy_query_results_command(
         VkDeviceSize stride,
         VkQueryResultFlags flags) {
     PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
-    PdockerVkQueryPool *pool = query_pool_handle_lookup(queryPool);
-    PdockerVkBuffer *dst = buffer_handle_lookup(dstBuffer);
     if (!cmd) return;
+    bool pool_owner_mismatch = false;
+    bool dst_owner_mismatch = false;
+    PdockerVkQueryPool *pool = query_pool_handle_lookup_for_command_buffer_checked(
+        cmd, queryPool, &pool_owner_mismatch);
+    PdockerVkBuffer *dst = buffer_handle_lookup_for_command_buffer_checked(
+        cmd, dstBuffer, &dst_owner_mismatch);
     if (!query_result_flags_supported(flags)) {
         command_buffer_mark_recording_failed(cmd, "query-result-flags-unsupported");
+        return;
+    }
+    if (pool_owner_mismatch || dst_owner_mismatch) {
+        command_buffer_mark_recording_failed(cmd, "query-copy-cross-device");
         return;
     }
     VkDeviceSize copy_bytes = 0;
@@ -36880,11 +36918,6 @@ static void record_copy_query_results_command(
         !query_result_copy_buffer_range(flags, queryCount, dstOffset, stride, &copy_bytes) ||
         !validate_buffer_byte_range(dst, dstOffset, copy_bytes)) {
         command_buffer_mark_recording_failed(cmd, "query-copy-invalid");
-        return;
-    }
-    if (!owner_device_ids_match_or_unowned(cmd->owner_device_id, pool->owner_device_id) ||
-        !owner_device_ids_match_or_unowned(cmd->owner_device_id, dst->owner_device_id)) {
-        command_buffer_mark_recording_failed(cmd, "query-copy-cross-device");
         return;
     }
     PdockerVkCommandOp op;

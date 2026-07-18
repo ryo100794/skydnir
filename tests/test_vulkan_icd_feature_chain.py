@@ -7647,6 +7647,11 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 if (query_a_obj->available[0] != 1 || query_a_obj->values[0] != 123) return 35;
                 if (vkBeginCommandBuffer(cmd_b, NULL) != VK_SUCCESS) return 36;
                 vkCmdWriteTimestamp(cmd_b, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, query_a, 0);
+                PdockerVkCommandBuffer *cmd_b_query_obj = command_buffer_handle_lookup(cmd_b);
+                if (!cmd_b_query_obj || !cmd_b_query_obj->recording_failed ||
+                    !cmd_b_query_obj->recording_failure_reason ||
+                    strcmp(cmd_b_query_obj->recording_failure_reason, "query-pool-cross-device") != 0) return 174;
+                if (cmd_b_query_obj->command_op_count != 0 || cmd_b_query_obj->graphics_command_op_count != 0) return 175;
                 if (vkEndCommandBuffer(cmd_b) != VK_ERROR_FEATURE_NOT_PRESENT) return 37;
                 vkDestroyQueryPool(device_b, query_a, NULL);
                 if (!query_pool_handle_lookup_for_device(device_a, query_a)) return 38;
