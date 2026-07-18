@@ -11402,8 +11402,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("device-buffer-memory-requirements-pnext-unsupported", device_buffer_req_body)
         self.assertIn("if (pInfo && pInfo->pNext)", device_image_req_body)
         self.assertIn("device-image-memory-requirements-pnext-unsupported", device_image_req_body)
-        self.assertIn("PdockerVkMemory *m = pdocker_vk_memory_from_handle(memory);", bind_buffer_body)
-        self.assertIn("if (!b || !m) return VK_ERROR_INITIALIZATION_FAILED;", bind_buffer_body)
+        self.assertIn("memory_handle_resolve(memory, &m)", bind_buffer_body)
+        self.assertIn("if (!memory_handle_resolve(memory, &m) || !b) return VK_ERROR_INITIALIZATION_FAILED;", bind_buffer_body)
 
 
     def test_vulkan_core_create_infos_reject_unsupported_pnext_and_flags(self):
@@ -12779,8 +12779,18 @@ class GpuAbiContractTest(unittest.TestCase):
         icd = VULKAN_ICD.read_text()
         allocate_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkAllocateMemory", 1)[1].split("VKAPI_ATTR void VKAPI_CALL vkFreeMemory", 1)[0]
         map_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkMapMemory", 1)[1].split("VKAPI_ATTR void VKAPI_CALL vkUnmapMemory", 1)[0]
+        for marker in [
+            "struct PdockerVkMemory *next;",
+            "static PdockerVkMemory *g_memories;",
+            "memory_register(PdockerVkMemory *memory)",
+            "memory_unregister(VkDeviceMemory memory)",
+            "memory_handle_resolve(VkDeviceMemory memory, PdockerVkMemory **out_memory)",
+        ]:
+            self.assertIn(marker, icd)
         self.assertIn("if (pAllocateInfo->memoryTypeIndex >= 2) return VK_ERROR_FEATURE_NOT_PRESENT;", allocate_body)
+        self.assertIn("memory_register(memory);", allocate_body)
         self.assertIn("if (size != VK_WHOLE_SIZE)", map_body)
+        self.assertIn("memory_handle_resolve(memory, &m)", map_body)
         self.assertIn("size > (VkDeviceSize)m->size - offset", map_body)
         self.assertIn("return VK_ERROR_MEMORY_MAP_FAILED;", map_body)
         self.assertNotIn("(void)size;", map_body)
@@ -12863,7 +12873,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "pMemoryUnmapInfo->sType != VK_STRUCTURE_TYPE_MEMORY_UNMAP_INFO",
             'unsupported_create_info_pnext_result("vkUnmapMemory2", pMemoryUnmapInfo->pNext)',
             "pMemoryUnmapInfo->flags != 0",
-            "pdocker_vk_memory_from_handle(pMemoryUnmapInfo->memory)",
+            "memory_handle_resolve(pMemoryUnmapInfo->memory, NULL)",
             "vkUnmapMemory(device, pMemoryUnmapInfo->memory);",
             "return VK_SUCCESS;",
         ]:

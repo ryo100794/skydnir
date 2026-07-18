@@ -10,6 +10,22 @@ llama.cpp itself remains unmodified.
 ## Current Ground Truth
 
 
+### 2026-07-18 CPU/static Vulkan memory live-handle lane
+
+`VkDeviceMemory` now has a live registry used at public API boundaries.
+`vkAllocateMemory` registers newly allocated memory, `vkFreeMemory` unregisters
+before unmapping/closing/freeing, and public mapping/bind/query paths resolve
+`VkDeviceMemory` through the live list before dereferencing.  Fake or stale
+memory handles now fail closed for `vkMapMemory`, `vkMapMemory2/KHR`,
+`vkUnmapMemory2/KHR`, `vkBindBufferMemory(2)`, `vkBindImageMemory(2)`, and
+`vkGetDeviceMemoryCommitment` reports zero for non-live memory.  Internal raw
+handle conversion remains available for already-owned object snapshots; this lane
+only claims public memory API dereference hardening.
+
+Evidence: `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`,
+`tests.test_gpu_abi_contract`, `tests.test_vulkan_icd_feature_chain`,
+`scripts/build-gpu-shim.sh`.
+
 ### 2026-07-18 CPU/static Vulkan local-handle and extension-gate lane
 
 The Vulkan ICD now treats locally-owned dispatchable and metadata handles as

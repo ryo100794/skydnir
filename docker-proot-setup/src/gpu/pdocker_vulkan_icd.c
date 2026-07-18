@@ -601,6 +601,7 @@ struct PdockerVkMemory {
     unsigned char *dirty_pages;
     PdockerVkBuffer *dedicated_buffer;
     PdockerVkImage *dedicated_image;
+    struct PdockerVkMemory *next;
 };
 
 typedef struct {
@@ -1694,6 +1695,7 @@ static PdockerVkPhysicalDevice g_device;
 static PdockerVkQueue g_queue;
 static PdockerVkInstance *g_instances;
 static PdockerVkDevice *g_devices;
+static PdockerVkMemory *g_memories;
 static unsigned g_shader_dump_counter;
 static PdockerVkMemory *g_guarded_memories[PDOCKER_VK_MAX_GUARDED_MEMORIES];
 static struct sigaction g_previous_sigsegv;
@@ -1833,6 +1835,40 @@ static bool device_handle_resolve(VkDevice device, PdockerVkDevice **out_device)
     for (PdockerVkDevice *candidate = g_devices; candidate; candidate = candidate->next) {
         if (candidate == target) {
             if (out_device) *out_device = candidate;
+            return true;
+        }
+    }
+    return false;
+}
+
+static void memory_register(PdockerVkMemory *memory) {
+    if (!memory) return;
+    memory->next = g_memories;
+    g_memories = memory;
+}
+
+static PdockerVkMemory *memory_unregister(VkDeviceMemory memory) {
+    PdockerVkMemory *target = pdocker_vk_memory_from_handle(memory);
+    if (!target) return NULL;
+    PdockerVkMemory **link = &g_memories;
+    while (*link) {
+        if (*link == target) {
+            *link = target->next;
+            target->next = NULL;
+            return target;
+        }
+        link = &(*link)->next;
+    }
+    return NULL;
+}
+
+static bool memory_handle_resolve(VkDeviceMemory memory, PdockerVkMemory **out_memory) {
+    PdockerVkMemory *target = pdocker_vk_memory_from_handle(memory);
+    if (out_memory) *out_memory = NULL;
+    if (!target) return false;
+    for (PdockerVkMemory *candidate = g_memories; candidate; candidate = candidate->next) {
+        if (candidate == target) {
+            if (out_memory) *out_memory = candidate;
             return true;
         }
     }
@@ -21843,8 +21879,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkBindImageMemory(
         VkDeviceSize memoryOffset) {
     (void)device;
     PdockerVkImage *img = pdocker_vk_image_from_handle(image);
-    PdockerVkMemory *mem = pdocker_vk_memory_from_handle(memory);
-    if (!img || !mem) return VK_ERROR_INITIALIZATION_FAILED;
+    PdockerVkMemory *mem = NULL;
+    if (!memory_handle_resolve(memory, &mem) || !img) return VK_ERROR_INITIALIZATION_FAILED;
     if (img->swapchain_owned) {
         trace_icd_runtime_failure("swapchain-image-bind-rejected", VK_ERROR_INITIALIZATION_FAILED);
         return VK_ERROR_INITIALIZATION_FAILED;
@@ -22446,6 +22482,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateMemory(
         }
     }
     pdocker_vk_heap_usage_add(memory->heap_index, memory->size);
+    memory_register(memory);
     *pMemory = pdocker_vk_memory_to_handle(memory);
     return VK_SUCCESS;
 }
@@ -22456,7 +22493,7 @@ VKAPI_ATTR void VKAPI_CALL vkFreeMemory(
         const VkAllocationCallbacks *pAllocator) {
     (void)device;
     (void)pAllocator;
-    PdockerVkMemory *m = pdocker_vk_memory_from_handle(memory);
+    PdockerVkMemory *m = memory_unregister(memory);
     if (!m) return;
     unregister_guarded_memory(m);
     pdocker_vk_heap_usage_sub(m->heap_index, m->size);
@@ -22477,7 +22514,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkMapMemory(
     (void)device;
     (void)flags;
     if (!memory || !ppData) return VK_ERROR_MEMORY_MAP_FAILED;
-    PdockerVkMemory *m = pdocker_vk_memory_from_handle(memory);
+    PdockerVkMemory *m = NULL;
+    if (!memory_handle_resolve(memory, &m)) return VK_ERROR_MEMORY_MAP_FAILED;
     if (offset > (VkDeviceSize)m->size || offset > (VkDeviceSize)SIZE_MAX) {
         return VK_ERROR_MEMORY_MAP_FAILED;
     }
@@ -22547,7 +22585,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkUnmapMemory2(
         trace_icd_runtime_failure("unmap-memory2-flags-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }
-    if (!pdocker_vk_memory_from_handle(pMemoryUnmapInfo->memory)) {
+    if (!memory_handle_resolve(pMemoryUnmapInfo->memory, NULL)) {
         return VK_ERROR_MEMORY_MAP_FAILED;
     }
     vkUnmapMemory(device, pMemoryUnmapInfo->memory);
@@ -22560,8 +22598,12 @@ VKAPI_ATTR void VKAPI_CALL vkGetDeviceMemoryCommitment(
         VkDeviceMemory memory,
         VkDeviceSize *pCommittedMemoryInBytes) {
     (void)device;
-    PdockerVkMemory *m = pdocker_vk_memory_from_handle(memory);
-    if (pCommittedMemoryInBytes) *pCommittedMemoryInBytes = m ? (VkDeviceSize)m->size : 0;
+    PdockerVkMemory *m = NULL;
+    if (memory_handle_resolve(memory, &m) && pCommittedMemoryInBytes) {
+        *pCommittedMemoryInBytes = (VkDeviceSize)m->size;
+    } else if (pCommittedMemoryInBytes) {
+        *pCommittedMemoryInBytes = 0;
+    }
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkFlushMappedMemoryRanges(
@@ -22591,8 +22633,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkBindBufferMemory(
         VkDeviceSize memoryOffset) {
     (void)device;
     PdockerVkBuffer *b = pdocker_vk_buffer_from_handle(buffer);
-    PdockerVkMemory *m = pdocker_vk_memory_from_handle(memory);
-    if (!b || !m) return VK_ERROR_INITIALIZATION_FAILED;
+    PdockerVkMemory *m = NULL;
+    if (!memory_handle_resolve(memory, &m) || !b) return VK_ERROR_INITIALIZATION_FAILED;
     VkResult dedicated_rc = validate_memory_dedicated_bind(
         "memory-dedicated-buffer-bind-mismatch", m, b, NULL, memoryOffset);
     if (dedicated_rc != VK_SUCCESS) return dedicated_rc;

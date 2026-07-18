@@ -3304,6 +3304,36 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     fprintf(stderr, "vkUnmapMemory2KHR accepted nonzero flags\\n");
                     return 13;
                 }}
+                unmap_info.flags = 0;
+
+                VkDeviceMemory fake_memory = (VkDeviceMemory)(uintptr_t)0x1234u;
+                map_info.memory = fake_memory;
+                map_info.flags = 0;
+                mapped = NULL;
+                if (map2(VK_NULL_HANDLE, &map_info, &mapped) == VK_SUCCESS || mapped != NULL) {{
+                    fprintf(stderr, "vkMapMemory2KHR accepted fake memory handle\\n");
+                    return 14;
+                }}
+                unmap_info.memory = fake_memory;
+                if (unmap2(VK_NULL_HANDLE, &unmap_info) == VK_SUCCESS) {{
+                    fprintf(stderr, "vkUnmapMemory2KHR accepted fake memory handle\\n");
+                    return 15;
+                }}
+                vkFreeMemory(VK_NULL_HANDLE, fake_memory, NULL);
+
+                vkFreeMemory(VK_NULL_HANDLE, memory, NULL);
+                map_info.memory = memory;
+                if (map2(VK_NULL_HANDLE, &map_info, &mapped) == VK_SUCCESS) {{
+                    fprintf(stderr, "vkMapMemory2KHR accepted stale freed memory handle\\n");
+                    return 16;
+                }}
+                VkDeviceSize committed = 99;
+                vkGetDeviceMemoryCommitment(VK_NULL_HANDLE, memory, &committed);
+                if (committed != 0) {{
+                    fprintf(stderr, "stale memory commitment was nonzero: %llu\\n", (unsigned long long)committed);
+                    return 17;
+                }}
+                vkFreeMemory(VK_NULL_HANDLE, memory, NULL);
                 return 0;
             #endif
             }}
