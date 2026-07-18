@@ -10,6 +10,39 @@ llama.cpp itself remains unmodified.
 ## Current Ground Truth
 
 
+### 2026-07-18 CPU/static Vulkan local-handle and extension-gate lane
+
+The Vulkan ICD now treats locally-owned dispatchable and metadata handles as
+live registry entries instead of trusting raw pointer-like values from API
+callers.  Instance proc-address lookup is gated by null-instance/global-command
+semantics and enabled instance extensions.  Device proc-address lookup resolves
+only registered live `VkDevice` handles; stale or fabricated device handles do
+not expose command pointers and `vkDestroyDevice` is a no-op for non-live
+handles.  Local metadata objects (`VkValidationCacheEXT`,
+`VkPrivateDataSlotEXT`, `VkDebugUtilsMessengerEXT`, and
+`VkDescriptorUpdateTemplate`) now unregister before free and fail closed or no-op
+on invalid stale handles without dereferencing caller-provided addresses.
+
+The maintenance5 surface is also gated at the API body, not only at proc-address
+advertisement: `VkBufferUsageFlags2CreateInfo` on buffer and buffer-view create
+paths requires `VK_KHR_maintenance5`, `VkPipelineCreateFlags2CreateInfo` requires
+maintenance5/core 1.4 enablement, direct maintenance5 subresource/granularity
+queries require a live enabled device, and direct `vkCmdBindIndexBuffer2/KHR`
+recording requires the command buffer to carry the maintenance5 enable state.
+`vkGetImageSubresourceLayout2EXT` remains hidden while `VK_EXT_host_image_copy`
+is not advertised.  This is generic Vulkan API fail-closed hardening for
+pass-through; it does not change llama.cpp, Dockerfiles, models, prompts, or
+shader bytes.
+
+Current scope note: this lane hardens dispatchable instance/device handles and
+the listed local metadata handles.  It does not yet claim parent-ownership
+validation for every non-dispatchable child object class; those object-specific
+registries remain a separate pass-through hardening lane.
+
+Evidence: `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`,
+`tests.test_gpu_abi_contract`, `tests.test_vulkan_icd_feature_chain`.
+
+
 ### 2026-07-16 CPU/static Q6 workgroup no-fallback lane
 
 The Q6 workgroup/local-size evidence path now treats missing resolved local size
@@ -3298,6 +3331,25 @@ full `tests.test_gpu_abi_contract`, full `tests.test_vulkan_icd_feature_chain`,
 `scripts/build-gpu-shim.sh`, `scripts/verify-native-payloads.py`, and
 `./gradlew :app:assembleDebug`.
 
+
+
+### 2026-07-18 instance/device local-handle hardening lane
+
+The Vulkan ICD now tracks instance extension enable-state and filters
+`vkGetInstanceProcAddr` / `vk_icdGetPhysicalDeviceProcAddr` accordingly: global
+entry points remain available without an instance, while instance/extension
+entry points fail closed until the matching instance extension was enabled.
+
+ICD-local metadata handles were also hardened to avoid arbitrary non-null handle
+dereference/free behavior. `VK_EXT_private_data` slots, debug-utils messengers,
+and descriptor update templates now use live-handle registries; invalid or stale
+handles are rejected or ignored before dereferencing application-supplied handle
+values. This is generic Vulkan API-surface hardening for pass-through and does
+not modify llama.cpp, Dockerfiles, models, prompts, SPIR-V bytes, or executor
+wire ABI.
+
+Evidence: `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`,
+`tests.test_gpu_abi_contract`, and `tests.test_vulkan_icd_feature_chain`.
 
 ### 2026-07-18 validation-cache live-handle lane
 

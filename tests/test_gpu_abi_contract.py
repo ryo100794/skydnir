@@ -1579,6 +1579,17 @@ class GpuAbiContractTest(unittest.TestCase):
             "MAP_PROC(vkSetDebugUtilsObjectTagEXT)",
         ]:
             self.assertIn(marker, icd)
+        debug_unregister_body = c_function_body(icd, "debug_utils_messenger_unregister")
+        for marker in [
+            "pdocker_vk_debug_utils_messenger_from_handle(messenger)",
+            "PdockerVkDebugUtilsMessenger **link = &g_debug_utils_messengers",
+            "*link = target->next",
+            "return NULL;",
+        ]:
+            self.assertIn(marker, debug_unregister_body)
+        debug_destroy_body = c_function_body(icd, "vkDestroyDebugUtilsMessengerEXT")
+        self.assertIn("debug_utils_messenger_unregister(messenger)", debug_destroy_body)
+        self.assertNotIn("free(target);", debug_destroy_body.split("if (!target) return;", 1)[0])
 
         collector_body = c_function_body(icd, "collect_advertised_device_extensions")
         for marker in [
@@ -2576,8 +2587,11 @@ class GpuAbiContractTest(unittest.TestCase):
         public_bind_body = c_function_body(icd, "vkCmdBindIndexBuffer")
         bind2_body = c_function_body(icd, "vkCmdBindIndexBuffer2")
         bind2_khr_body = c_function_body(icd, "vkCmdBindIndexBuffer2KHR")
-        self.assertIn("record_index_buffer_binding(commandBuffer, buffer, offset, VK_WHOLE_SIZE, indexType)", public_bind_body)
-        self.assertIn("record_index_buffer_binding(commandBuffer, buffer, offset, size, indexType)", bind2_body)
+        self.assertIn("record_index_buffer_binding(commandBuffer, buffer, offset, VK_WHOLE_SIZE, indexType, false)", public_bind_body)
+        self.assertIn("record_index_buffer_binding(commandBuffer, buffer, offset, size, indexType, true)", bind2_body)
+        self.assertIn("require_maintenance5", bind_body)
+        self.assertIn("PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_5", bind_body)
+        self.assertIn("graphics-index-buffer2-maintenance5-extension-disabled", bind_body)
         self.assertIn("vkCmdBindIndexBuffer2(commandBuffer, buffer, offset, size, indexType)", bind2_khr_body)
         for marker in [
             "command_buffer_reserve_graphics_index_buffer_snapshots(cmd, 1)",
@@ -8667,13 +8681,13 @@ class GpuAbiContractTest(unittest.TestCase):
         hidden_body = c_function_body(icd, "proc_address_hidden_by_advertisement")
         self.assertIn("!pdocker_supports_host_image_copy_transport()", hidden_body)
         for hidden_marker in [
+            "vkGetImageSubresourceLayout2EXT",
             "vkCopyMemoryToImageEXT",
             "vkCopyImageToMemoryEXT",
             "vkCopyImageToImageEXT",
             "vkTransitionImageLayoutEXT",
         ]:
             self.assertIn(hidden_marker, hidden_body)
-        self.assertNotIn("vkGetImageSubresourceLayout2EXT", hidden_body)
         proc_body = icd.split("static PFN_vkVoidFunction proc_address", 1)[1].split(
             "VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr", 1
         )[0]
@@ -8773,7 +8787,7 @@ class GpuAbiContractTest(unittest.TestCase):
         allocate_pnext_body = c_function_body(icd, "validate_memory_allocate_pnext")
         self.assertIn("VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO", allocate_pnext_body)
         self.assertIn("info->flags != 0 || info->deviceMask > 1", allocate_pnext_body)
-        buffer_pnext_body = c_function_body(icd, "validate_buffer_create_pnext")
+        buffer_pnext_body = c_function_body(icd, "validate_buffer_create_pnext_with_extensions")
         self.assertIn("VK_STRUCTURE_TYPE_BUFFER_OPAQUE_CAPTURE_ADDRESS_CREATE_INFO", buffer_pnext_body)
         self.assertIn("capture_info->opaqueCaptureAddress != 0", buffer_pnext_body)
         self.assertIn("buffer_usage_supported_for_bridge((VkBufferUsageFlags)usage2_info->usage)", buffer_pnext_body)
@@ -10923,10 +10937,13 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("sparse-binding-unsupported", queue_sparse_body)
         self.assertIn("submit_fence->signaled = true;", queue_sparse_body)
 
-        buffer_view_pnext_body = c_function_body(icd, "validate_buffer_view_create_pnext")
+        buffer_view_pnext_body = c_function_body(icd, "validate_buffer_view_create_pnext_with_extensions")
         self.assertIn("*pView = VK_NULL_HANDLE;", buffer_view_body)
-        self.assertIn("validate_buffer_view_create_pnext(pCreateInfo, buffer, &texel_usage)", buffer_view_body)
+        self.assertIn("validate_buffer_view_create_pnext_with_extensions(", buffer_view_body)
+        self.assertIn("enabled_extension_mask = dev ? dev->enabled_extension_mask : 0", buffer_view_body)
         self.assertIn("VK_STRUCTURE_TYPE_BUFFER_USAGE_FLAGS_2_CREATE_INFO", buffer_view_pnext_body)
+        self.assertIn("PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_5", buffer_view_pnext_body)
+        self.assertIn("buffer-view-usage2-maintenance5-extension-disabled", buffer_view_pnext_body)
         self.assertIn("buffer-view-usage2-unsupported", buffer_view_pnext_body)
         self.assertIn('unsupported_create_info_pnext_result("vkCreateBufferView", node)', buffer_view_pnext_body)
         self.assertNotIn('unsupported_create_info_pnext_result("vkCreateBufferView", pCreateInfo->pNext)', buffer_view_body)
@@ -10941,8 +10958,14 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("sampler-ycbcr-conversion-unsupported", ycbcr_body)
 
         self.assertIn("struct PdockerVkDescriptorUpdateTemplate", icd)
+        self.assertIn("struct PdockerVkDescriptorUpdateTemplate *next;", icd)
+        self.assertIn("static PdockerVkDescriptorUpdateTemplate *g_descriptor_update_templates;", icd)
+        self.assertIn("descriptor_update_template_handle_live", icd)
+        self.assertIn("descriptor_update_template_register", icd)
+        self.assertIn("descriptor_update_template_unregister", icd)
         self.assertIn("pdocker_vk_descriptor_update_template_to_handle", template_create_body)
-        self.assertIn("pdocker_vk_descriptor_update_template_from_handle", template_destroy_body)
+        self.assertIn("descriptor_update_template_register(template_handle)", template_create_body)
+        self.assertIn("descriptor_update_template_unregister(descriptorUpdateTemplate)", template_destroy_body)
         self.assertIn("pCreateInfo->sType != VK_STRUCTURE_TYPE_DESCRIPTOR_UPDATE_TEMPLATE_CREATE_INFO", template_create_body)
         self.assertIn('unsupported_create_info_pnext_result("vkCreateDescriptorUpdateTemplate", pCreateInfo->pNext)', template_create_body)
         self.assertIn("pCreateInfo->templateType != VK_DESCRIPTOR_UPDATE_TEMPLATE_TYPE_DESCRIPTOR_SET", template_create_body)
@@ -10950,6 +10973,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("memcpy(template_handle->entries", template_create_body)
         self.assertIn("free(template_handle->entries);", template_destroy_body)
         self.assertIn("VkWriteDescriptorSet *writes", template_update_body)
+        self.assertIn("descriptor_update_template_handle_live(descriptorUpdateTemplate)", template_update_body)
+        self.assertIn("descriptor-update-template-handle-invalid", template_update_body)
         self.assertIn("descriptor_set_layout_compatible(template_handle->set_layout, set->layout)", template_update_body)
         self.assertIn("descriptor_linear_slot(set", template_update_body)
         self.assertIn("descriptor_layout_binding_number(set->layout, slot)", template_update_body)
@@ -11365,7 +11390,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO", sem_parse_body)
         self.assertIn("info->handleTypes != 0", sem_parse_body)
         self.assertIn("advertised_timeline_semaphore()", sem_create_body)
-        self.assertIn("dev->requested_feature_mask & PDOCKER_VK_FEATURE_TIMELINE_SEMAPHORE", sem_create_body)
+        self.assertIn("device_requested_feature_mask_from_handle(device)", sem_create_body)
+        self.assertIn("requested_feature_mask & PDOCKER_VK_FEATURE_TIMELINE_SEMAPHORE", sem_create_body)
         self.assertIn("timeline-semaphore-feature-not-enabled", sem_create_body)
 
         self.assertIn("validate_buffer_create_pnext(pCreateInfo) != VK_SUCCESS", fill_buffer_req_body)
@@ -11394,11 +11420,13 @@ class GpuAbiContractTest(unittest.TestCase):
         create_buffer_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateBuffer", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkDestroyBuffer", 1
         )[0]
-        buffer_pnext_body = icd.split("static VkResult validate_buffer_create_pnext", 1)[1].split(
-            "VKAPI_ATTR VkResult VKAPI_CALL vkCreateBuffer", 1
+        buffer_pnext_body = icd.split("static VkResult validate_buffer_create_pnext_with_extensions", 1)[1].split(
+            "static VkResult validate_buffer_create_pnext", 1
         )[0]
         buffer_effective_usage_body = c_function_body(icd, "buffer_create_effective_usage")
-        self.assertIn("validate_buffer_create_pnext(pCreateInfo)", create_buffer_body)
+        self.assertIn("pdocker_vk_device_from_handle(device)", create_buffer_body)
+        self.assertIn("enabled_extension_mask = dev ? dev->enabled_extension_mask : 0", create_buffer_body)
+        self.assertIn("validate_buffer_create_pnext_with_extensions(", create_buffer_body)
         self.assertIn("if (pnext_rc != VK_SUCCESS) return pnext_rc;", create_buffer_body)
         self.assertIn("buffer_create_effective_usage(pCreateInfo, &effective_usage)", create_buffer_body)
         self.assertIn("buffer->usage = effective_usage;", create_buffer_body)
@@ -11414,6 +11442,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("usage2_info->usage == 0", buffer_pnext_body)
         self.assertIn("usage2_info->usage & ~(VkBufferUsageFlags2)UINT32_MAX", buffer_pnext_body)
         self.assertIn("buffer-usage2-duplicate", buffer_pnext_body)
+        self.assertIn("PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_5", buffer_pnext_body)
+        self.assertIn("buffer-usage2-maintenance5-extension-disabled", buffer_pnext_body)
         self.assertNotIn("usage2_info->usage != info->usage", buffer_pnext_body)
         self.assertIn("VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_CREATE_INFO_EXT", buffer_pnext_body)
         self.assertIn("address_info->deviceAddress != 0", buffer_pnext_body)
@@ -11536,6 +11566,20 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("MAP_PROC(vkCreatePrivateDataSlot)", icd)
         self.assertIn('MAP_ALIAS("vkCreatePrivateDataSlotEXT", vkCreatePrivateDataSlot)', icd)
         self.assertIn("MAP_PROC(vkGetPrivateData)", icd)
+        for marker in [
+            "static PdockerVkPrivateDataSlot *g_private_data_slots;",
+            "private_data_slot_handle_live",
+            "private_data_slot_register",
+            "private_data_slot_unregister",
+        ]:
+            self.assertIn(marker, icd)
+        private_destroy_body = c_function_body(icd, "vkDestroyPrivateDataSlot")
+        self.assertIn("private_data_slot_unregister(privateDataSlot)", private_destroy_body)
+        private_set_body = c_function_body(icd, "vkSetPrivateData")
+        self.assertIn("private_data_slot_handle_live(privateDataSlot)", private_set_body)
+        self.assertIn("private-data-slot-invalid", private_set_body)
+        private_get_body = c_function_body(icd, "vkGetPrivateData")
+        self.assertIn("private_data_slot_handle_live(privateDataSlot)", private_get_body)
         self.assertIn("pCreateInfo->codeSize % sizeof(uint32_t)", shader_module_body)
         self.assertIn("!pCreateInfo->pCode", shader_module_body)
         query_pool_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateQueryPool", 1)[1].split(
@@ -13027,10 +13071,87 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_VK_DEVICE_EXT_EXT_PIPELINE_CREATION_FEEDBACK",
             "extension_pnext_enabled_or_core",
             "VK_STRUCTURE_TYPE_PIPELINE_CREATION_FEEDBACK_CREATE_INFO",
+            "VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO",
+            "PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_5",
+            "advertised_api_1_4()",
         ]:
             self.assertIn(marker, pipeline_feedback_body)
 
+        instance_struct = icd.split("} PdockerVkInstance;", 1)[0]
+        self.assertIn("uint64_t enabled_extension_mask;", instance_struct)
+        self.assertIn("struct PdockerVkInstance *next;", instance_struct)
+        for marker in [
+            "static PdockerVkInstance *g_instances;",
+            "instance_register(PdockerVkInstance *instance)",
+            "instance_unregister(VkInstance instance)",
+            "instance_handle_resolve(VkInstance instance, PdockerVkInstance **out_instance)",
+        ]:
+            self.assertIn(marker, icd)
+        instance_mask_body = c_function_body(icd, "enabled_instance_extension_mask_from_create_info")
+        for marker in [
+            "PDOCKER_VK_INSTANCE_EXT_KHR_SURFACE",
+            "PDOCKER_VK_INSTANCE_EXT_EXT_HEADLESS_SURFACE",
+            "PDOCKER_VK_INSTANCE_EXT_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2",
+            "PDOCKER_VK_INSTANCE_EXT_EXT_DEBUG_UTILS",
+        ]:
+            self.assertIn(marker, instance_mask_body)
+        create_instance_body = c_function_body(icd, "vkCreateInstance")
+        self.assertIn("instance->enabled_extension_mask = enabled_instance_extension_mask_from_create_info(pCreateInfo);", create_instance_body)
+        get_instance_proc_body = c_function_body(icd, "vkGetInstanceProcAddr")
+        self.assertIn("instance_handle_resolve(instance, &pdocker_instance)", get_instance_proc_body)
+        self.assertIn("instance_proc_address_hidden_by_enabled_state(pdocker_instance, pName)", get_instance_proc_body)
+        instance_hidden_body = c_function_body(icd, "instance_proc_address_hidden_by_enabled_state")
+        self.assertIn("instance_proc_address_is_global(pName)", instance_hidden_body)
+        self.assertIn("instance->enabled_extension_mask", instance_hidden_body)
+        self.assertIn("required_extension_mask", instance_hidden_body)
+        instance_required_body = c_function_body(icd, "instance_proc_address_required_extension_mask")
+        for marker in [
+            "vkCreateHeadlessSurfaceEXT",
+            "vkDestroySurfaceKHR",
+            "vkGetPhysicalDevicePresentRectanglesKHR",
+            "vkGetPhysicalDeviceSurfaceCapabilities2KHR",
+            "vkGetPhysicalDeviceProperties2KHR",
+            "vkEnumeratePhysicalDeviceGroupsKHR",
+            "vkGetPhysicalDeviceExternalBufferPropertiesKHR",
+            "vkGetPhysicalDeviceExternalSemaphorePropertiesKHR",
+            "vkGetPhysicalDeviceExternalFencePropertiesKHR",
+            "vkCreateDebugUtilsMessengerEXT",
+        ]:
+            self.assertIn(marker, instance_required_body)
+        icd_phys_body = c_function_body(icd, "vk_icdGetPhysicalDeviceProcAddr")
+        self.assertIn("return vkGetInstanceProcAddr(instance, pName);", icd_phys_body)
+
+        for marker in [
+            "struct PdockerVkDevice *next;",
+            "static PdockerVkDevice *g_devices;",
+            "device_register(PdockerVkDevice *device)",
+            "device_unregister(VkDevice device)",
+            "device_handle_resolve(VkDevice device, PdockerVkDevice **out_device)",
+        ]:
+            self.assertIn(marker, icd)
+        pdocker_device_body = c_function_body(icd, "pdocker_vk_device_from_handle")
+        self.assertIn("device_handle_resolve(device, &pdocker_device)", pdocker_device_body)
+        self.assertNotIn("g_last_created_device", pdocker_device_body)
+        self.assertIn("device_requested_feature_mask_from_handle(VkDevice device)", icd)
+        self.assertIn("device_enabled_extension_mask_from_handle(VkDevice device)", icd)
+        self.assertIn("device_extension_enabled_or_core(", icd)
+        self.assertNotIn("((PdockerVkDevice *)device)", icd)
+        create_device_body = c_function_body(icd, "vkCreateDevice")
+        self.assertIn("device_register(device);", create_device_body)
+        destroy_device_body = c_function_body(icd, "vkDestroyDevice")
+        self.assertIn("device_unregister(device)", destroy_device_body)
+        self.assertNotIn("free((void *)device)", destroy_device_body)
+        get_queue_body = c_function_body(icd, "vkGetDeviceQueue")
+        self.assertIn("device_handle_resolve(device, &pdocker_device)", get_queue_body)
+        self.assertIn("g_queue.requested_feature_mask = pdocker_device->requested_feature_mask;", get_queue_body)
+        self.assertIn("g_queue.enabled_extension_mask = pdocker_device->enabled_extension_mask;", get_queue_body)
+        get_queue2_body = c_function_body(icd, "vkGetDeviceQueue2")
+        self.assertIn("device_handle_resolve(device, &pdocker_device)", get_queue2_body)
+        self.assertIn("g_queue.requested_feature_mask = pdocker_device->requested_feature_mask;", get_queue2_body)
+        self.assertIn("g_queue.enabled_extension_mask = pdocker_device->enabled_extension_mask;", get_queue2_body)
+
         get_device_proc_body = c_function_body(icd, "vkGetDeviceProcAddr")
+        self.assertIn("device_handle_resolve(device, &pdocker_device)", get_device_proc_body)
         self.assertIn("proc_address_hidden_from_device_procaddr(pName)", get_device_proc_body)
         self.assertIn("device_proc_address_hidden_by_enabled_state(pdocker_device, pName)", get_device_proc_body)
         self.assertIn("return proc_address(pName);", get_device_proc_body)
@@ -13060,11 +13181,9 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn("command_buffer_require_synchronization2", body)
             self.assertIn("synchronization2-feature-disabled", body)
 
-        self.assertIn("g_last_device_requested_feature_mask = requested_feature_mask;", icd)
-        self.assertIn("g_last_device_enabled_extension_mask = enabled_extension_mask;", icd)
-        self.assertIn("g_queue.requested_feature_mask = g_last_device_requested_feature_mask;", icd)
-        self.assertIn("g_queue.enabled_extension_mask = g_last_device_enabled_extension_mask;", icd)
-        self.assertIn("pool->enabled_extension_mask = dev ? dev->enabled_extension_mask : 0;", icd)
+        self.assertNotIn("g_last_device_requested_feature_mask", icd)
+        self.assertNotIn("g_last_device_enabled_extension_mask", icd)
+        self.assertIn("pool->enabled_extension_mask = device_enabled_extension_mask_from_handle(device);", icd)
         self.assertIn("cmd->enabled_extension_mask = pool->enabled_extension_mask;", icd)
 
         index_bind_body = c_function_body(icd, "record_index_buffer_binding")
@@ -13523,16 +13642,22 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("image_tight_layer_stride(img", helper_body)
         layout2_body = c_function_body(icd, "vkGetImageSubresourceLayout2")
         self.assertIn("zero_vk_out_struct_preserve_chain(pLayout, sizeof(*pLayout), header);", layout2_body)
+        self.assertIn("device_extension_enabled_or_core(", layout2_body)
+        self.assertIn("PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_5", layout2_body)
         self.assertIn("pSubresource->sType != VK_STRUCTURE_TYPE_IMAGE_SUBRESOURCE_2", layout2_body)
         self.assertIn("pSubresource->pNext", layout2_body)
         self.assertIn("fill_image_subresource_layout_tight(img", layout2_body)
         device_layout_body = c_function_body(icd, "vkGetDeviceImageSubresourceLayout")
+        self.assertIn("device_extension_enabled_or_core(", device_layout_body)
+        self.assertIn("PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_5", device_layout_body)
         self.assertIn("pInfo->sType != VK_STRUCTURE_TYPE_DEVICE_IMAGE_SUBRESOURCE_INFO", device_layout_body)
         self.assertNotIn("pInfo->pCreateInfo->pNext", device_layout_body)
         self.assertIn("validate_image_create_pnext_for_transport(pInfo->pCreateInfo) != VK_SUCCESS", device_layout_body)
         self.assertIn("image.format = pInfo->pCreateInfo->format;", device_layout_body)
         self.assertIn("image.mip_levels = pInfo->pCreateInfo->mipLevels;", device_layout_body)
         granularity_body = c_function_body(icd, "vkGetRenderingAreaGranularity")
+        self.assertIn("device_extension_enabled_or_core(", granularity_body)
+        self.assertIn("pGranularity->width = 0;", granularity_body)
         self.assertIn("pGranularity->width = 1;", granularity_body)
         self.assertIn("pGranularity->height = 1;", granularity_body)
         self.assertIn("pRenderingAreaInfo->sType != VK_STRUCTURE_TYPE_RENDERING_AREA_INFO", granularity_body)
@@ -13555,7 +13680,7 @@ class GpuAbiContractTest(unittest.TestCase):
             'strcmp(pName, "vkCmdBindIndexBuffer2KHR") == 0',
         ]:
             self.assertNotIn(advertised_alias, hidden_body)
-        self.assertNotIn("vkGetImageSubresourceLayout2EXT", hidden_body)
+        self.assertIn('strcmp(pName, "vkGetImageSubresourceLayout2EXT") == 0', hidden_body)
         for core_name in [
             'strcmp(pName, "vkGetImageSubresourceLayout2") == 0',
             'strcmp(pName, "vkGetDeviceImageSubresourceLayout") == 0',
@@ -14662,7 +14787,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "VKAPI_ATTR void VKAPI_CALL vkDestroyPipeline", 1
         )[0]
         self.assertNotIn("(void)device;", graphics_create_body)
-        self.assertIn("device ? ((PdockerVkDevice *)device)->requested_feature_mask : 0", graphics_create_body)
+        self.assertIn("device_requested_feature_mask_from_handle(device)", graphics_create_body)
         self.assertIn("pipeline->requested_feature_mask & PDOCKER_VK_FEATURE_TESSELLATION_SHADER", graphics_create_body)
         self.assertIn("pipeline->requested_feature_mask & PDOCKER_VK_FEATURE_GEOMETRY_SHADER", graphics_create_body)
         for marker in [

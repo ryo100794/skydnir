@@ -359,8 +359,10 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     (PFN_vkVoidFunction)vkGetRenderingAreaGranularity) return 8;
                 if (proc_address("vkCmdBindIndexBuffer2KHR") !=
                     (PFN_vkVoidFunction)vkCmdBindIndexBuffer2KHR) return 9;
-                if (proc_address("vkGetImageSubresourceLayout2EXT") !=
-                    (PFN_vkVoidFunction)vkGetImageSubresourceLayout2) return 10;
+                if (proc_address("vkGetImageSubresourceLayout2EXT") != NULL) return 10;
+
+                VkDevice m5_device = VK_NULL_HANDLE;
+                if (vkCreateDevice((VkPhysicalDevice)&g_device, &device_info, NULL, &m5_device) != VK_SUCCESS) return 40;
 
                 VkRenderingAreaInfo area;
                 VkExtent2D granularity;
@@ -368,7 +370,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 memset(&granularity, 0, sizeof(granularity));
                 area.sType = VK_STRUCTURE_TYPE_RENDERING_AREA_INFO;
                 ((PFN_vkGetRenderingAreaGranularityKHR)proc_address("vkGetRenderingAreaGranularityKHR"))(
-                    VK_NULL_HANDLE, &area, &granularity);
+                    m5_device, &area, &granularity);
                 if (granularity.width != 1 || granularity.height != 1) return 11;
 
                 VkPhysicalDeviceMaintenance5Properties maintenance5_props;
@@ -393,13 +395,68 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 memset(&flags2, 0, sizeof(flags2));
                 flags2.sType = VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO;
                 if (validate_and_fill_pipeline_feedback_pnext(
-                        "unit-maintenance5-flags2", &flags2, 1u, false, 0) != VK_SUCCESS) return 13;
+                        "unit-maintenance5-flags2", &flags2, 1u, false, 0) == VK_SUCCESS) return 13;
+                if (validate_and_fill_pipeline_feedback_pnext(
+                        "unit-maintenance5-flags2", &flags2, 1u, false,
+                        PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_5) != VK_SUCCESS) return 14;
                 flags2.flags = (VkPipelineCreateFlags2)1;
                 if (validate_and_fill_pipeline_feedback_pnext(
-                        "unit-maintenance5-flags2", &flags2, 1u, false, 0) == VK_SUCCESS) return 14;
+                        "unit-maintenance5-flags2", &flags2, 1u, false,
+                        PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_5) == VK_SUCCESS) return 15;
 
                 ((PFN_vkCmdBindIndexBuffer2KHR)proc_address("vkCmdBindIndexBuffer2KHR"))(
                     VK_NULL_HANDLE, VK_NULL_HANDLE, 0, VK_WHOLE_SIZE, VK_INDEX_TYPE_UINT32);
+
+                VkBufferUsageFlags2CreateInfo usage2;
+                VkBufferCreateInfo buffer_info;
+                memset(&usage2, 0, sizeof(usage2));
+                memset(&buffer_info, 0, sizeof(buffer_info));
+                usage2.sType = VK_STRUCTURE_TYPE_BUFFER_USAGE_FLAGS_2_CREATE_INFO;
+                usage2.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+                buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+                buffer_info.pNext = &usage2;
+                buffer_info.size = 64;
+                buffer_info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+                buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+                VkDeviceCreateInfo no_m5_device_info;
+                memset(&no_m5_device_info, 0, sizeof(no_m5_device_info));
+                no_m5_device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                VkDevice no_m5_device = VK_NULL_HANDLE;
+                if (vkCreateDevice((VkPhysicalDevice)&g_device, &no_m5_device_info, NULL, &no_m5_device) != VK_SUCCESS) return 41;
+                VkBuffer buffer = VK_NULL_HANDLE;
+                if (vkCreateBuffer(no_m5_device, &buffer_info, NULL, &buffer) != VK_ERROR_FEATURE_NOT_PRESENT) return 42;
+                if (buffer != VK_NULL_HANDLE) return 43;
+                vkDestroyDevice(no_m5_device, NULL);
+
+                if (vkCreateBuffer(m5_device, &buffer_info, NULL, &buffer) != VK_SUCCESS || buffer == VK_NULL_HANDLE) return 45;
+                vkDestroyBuffer(m5_device, buffer, NULL);
+                vkDestroyDevice(m5_device, NULL);
+
+                PdockerVkMemory index_memory;
+                PdockerVkBuffer index_buffer;
+                memset(&index_memory, 0, sizeof(index_memory));
+                memset(&index_buffer, 0, sizeof(index_buffer));
+                index_memory.size = 64;
+                index_buffer.size = 64;
+                index_buffer.usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+                index_buffer.memory = &index_memory;
+                PdockerVkCommandBuffer cmd;
+                memset(&cmd, 0, sizeof(cmd));
+                vkCmdBindIndexBuffer2KHR((VkCommandBuffer)&cmd,
+                                         pdocker_vk_buffer_to_handle(&index_buffer),
+                                         0, 4, VK_INDEX_TYPE_UINT16);
+                if (!cmd.recording_failed ||
+                    strcmp(cmd.recording_failure_reason, "graphics-index-buffer2-maintenance5-extension-disabled") != 0) return 46;
+
+                memset(&cmd, 0, sizeof(cmd));
+                cmd.enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_5;
+                vkCmdBindIndexBuffer2KHR((VkCommandBuffer)&cmd,
+                                         pdocker_vk_buffer_to_handle(&index_buffer),
+                                         0, 4, VK_INDEX_TYPE_UINT16);
+                if (cmd.recording_failed || cmd.graphics_index_buffer_snapshot_count != 1) return 47;
+                free(cmd.graphics_index_buffer_snapshots);
+                free(cmd.graphics_command_ops);
             #endif
                 return 0;
             }}
@@ -447,7 +504,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 if (proc_address("vkCopyImageToMemoryEXT") != NULL) return 7;
                 if (proc_address("vkCopyImageToImageEXT") != NULL) return 8;
                 if (proc_address("vkTransitionImageLayoutEXT") != NULL) return 9;
-                if (proc_address("vkGetImageSubresourceLayout2EXT") != (PFN_vkVoidFunction)vkGetImageSubresourceLayout2) return 10;
+                if (proc_address("vkGetImageSubresourceLayout2EXT") != NULL) return 10;
 
                 VkPhysicalDeviceHostImageCopyFeatures features;
                 memset(&features, 0xff, sizeof(features));
@@ -1205,6 +1262,9 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     (PFN_vkDestroyDescriptorUpdateTemplateKHR)proc_address("vkDestroyDescriptorUpdateTemplateKHR");
                 if (create_template(VK_NULL_HANDLE, &template_info, NULL, &update_template) != VK_SUCCESS) return 10;
                 if (update_template == VK_NULL_HANDLE) return 11;
+                VkDescriptorUpdateTemplate bogus_template = (VkDescriptorUpdateTemplate)(uintptr_t)0x1234u;
+                vkUpdateDescriptorSetWithTemplate(VK_NULL_HANDLE, VK_NULL_HANDLE, bogus_template, NULL);
+                destroy_template(VK_NULL_HANDLE, bogus_template, NULL);
                 destroy_template(VK_NULL_HANDLE, update_template, NULL);
                 vkDestroyDescriptorSetLayout(VK_NULL_HANDLE, layout, NULL);
             #endif
@@ -1288,10 +1348,18 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 shader_info.pNext = &shader_cache;
                 shader_info.codeSize = sizeof(shader_words);
                 shader_info.pCode = shader_words;
-                PdockerVkDevice validation_device;
-                memset(&validation_device, 0, sizeof(validation_device));
-                validation_device.enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_EXT_VALIDATION_CACHE;
-                VkDevice validation_vk_device = (VkDevice)&validation_device;
+                const char *validation_enabled[] = {{ VK_EXT_VALIDATION_CACHE_EXTENSION_NAME }};
+                VkDeviceCreateInfo validation_device_info;
+                memset(&validation_device_info, 0, sizeof(validation_device_info));
+                validation_device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                validation_device_info.enabledExtensionCount = 1;
+                validation_device_info.ppEnabledExtensionNames = validation_enabled;
+                VkDevice validation_vk_device = VK_NULL_HANDLE;
+                if (vkCreateDevice((VkPhysicalDevice)&g_device, &validation_device_info, NULL, &validation_vk_device) != VK_SUCCESS ||
+                    validation_vk_device == VK_NULL_HANDLE) {{
+                    fprintf(stderr, "validation cache test device create failed\\n");
+                    return 15;
+                }}
                 VkShaderModule shader = VK_NULL_HANDLE;
                 if (vkCreateShaderModule(VK_NULL_HANDLE, &shader_info, NULL, &shader) == VK_SUCCESS) {{
                     fprintf(stderr, "shader module accepted validation cache pNext without extension enable-state\\n");
@@ -1323,6 +1391,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     vkDestroyShaderModule(validation_vk_device, shader, NULL);
                     return 9;
                 }}
+                vkDestroyDevice(validation_vk_device, NULL);
                 vkDestroyValidationCacheEXT(VK_NULL_HANDLE, cache, NULL);
                 return 0;
             #endif
@@ -1395,6 +1464,74 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 if (proc_address("vkGetPhysicalDeviceExternalFencePropertiesKHR") == NULL) return 37;
                 if (proc_address("vkGetDeviceGroupPeerMemoryFeaturesKHR") == NULL) return 38;
                 if (proc_address("vkCmdSetDeviceMaskKHR") == NULL) return 39;
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_instance_procaddr_filters_null_instance_and_disabled_extensions(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            int main(void) {{
+                if (vkGetInstanceProcAddr(VK_NULL_HANDLE, "vkCreateInstance") == NULL) return 1;
+                if (vkGetInstanceProcAddr(VK_NULL_HANDLE, "vkDestroyInstance") != NULL) return 2;
+                if (vkGetInstanceProcAddr(VK_NULL_HANDLE, "vkCreateHeadlessSurfaceEXT") != NULL) return 3;
+                PdockerVkInstance fake_instance;
+                memset(&fake_instance, 0, sizeof(fake_instance));
+                fake_instance.object_id = 0x1234;
+                fake_instance.enabled_extension_mask = UINT64_MAX;
+                if (vkGetInstanceProcAddr((VkInstance)&fake_instance, "vkCreateInstance") == NULL) return 31;
+                if (vkGetInstanceProcAddr((VkInstance)&fake_instance, "vkDestroySurfaceKHR") != NULL) return 32;
+                if (vk_icdGetPhysicalDeviceProcAddr((VkInstance)&fake_instance, "vkGetPhysicalDeviceProperties2KHR") != NULL) return 33;
+                vkDestroyInstance((VkInstance)&fake_instance, NULL);
+
+                VkInstanceCreateInfo info;
+                memset(&info, 0, sizeof(info));
+                info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+                VkInstance instance = VK_NULL_HANDLE;
+                if (vkCreateInstance(&info, NULL, &instance) != VK_SUCCESS || instance == VK_NULL_HANDLE) return 4;
+                if (vkGetInstanceProcAddr(instance, "vkDestroyInstance") == NULL) return 5;
+                if (vkGetInstanceProcAddr(instance, "vkCreateHeadlessSurfaceEXT") != NULL) return 6;
+                if (vkGetInstanceProcAddr(instance, "vkDestroySurfaceKHR") != NULL) return 7;
+                if (vkGetInstanceProcAddr(instance, "vkGetPhysicalDevicePresentRectanglesKHR") != NULL) return 34;
+            #ifdef VK_EXT_DEBUG_UTILS_EXTENSION_NAME
+                if (vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT") != NULL) return 8;
+            #endif
+                if (vk_icdGetPhysicalDeviceProcAddr(instance, "vkGetPhysicalDeviceProperties2KHR") != NULL) return 9;
+                VkInstance stale_instance = instance;
+                vkDestroyInstance(instance, NULL);
+                if (vkGetInstanceProcAddr(stale_instance, "vkDestroyInstance") != NULL) return 35;
+                vkDestroyInstance(stale_instance, NULL);
+
+                const char *enabled[4];
+                uint32_t enabled_count = 0;
+                enabled[enabled_count++] = VK_KHR_SURFACE_EXTENSION_NAME;
+                enabled[enabled_count++] = VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME;
+                enabled[enabled_count++] = VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME;
+            #ifdef VK_EXT_DEBUG_UTILS_EXTENSION_NAME
+                enabled[enabled_count++] = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
+            #endif
+                memset(&info, 0, sizeof(info));
+                info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+                info.enabledExtensionCount = enabled_count;
+                info.ppEnabledExtensionNames = enabled;
+                instance = VK_NULL_HANDLE;
+                if (vkCreateInstance(&info, NULL, &instance) != VK_SUCCESS || instance == VK_NULL_HANDLE) return 10;
+                if (vkGetInstanceProcAddr(instance, "vkDestroySurfaceKHR") == NULL) return 11;
+                if (vkGetInstanceProcAddr(instance, "vkGetPhysicalDevicePresentRectanglesKHR") == NULL) return 36;
+                if (vkGetInstanceProcAddr(instance, "vkCreateHeadlessSurfaceEXT") == NULL) return 12;
+                if (vk_icdGetPhysicalDeviceProcAddr(instance, "vkGetPhysicalDeviceProperties2KHR") == NULL) return 13;
+            #ifdef VK_EXT_DEBUG_UTILS_EXTENSION_NAME
+                if (vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT") == NULL) return 14;
+            #endif
+                vkDestroyInstance(instance, NULL);
                 return 0;
             }}
             """
@@ -2398,7 +2535,8 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                                             pdocker_vk_buffer_to_handle(&buffer),
                                             0,
                                             VK_WHOLE_SIZE,
-                                            VK_INDEX_TYPE_UINT8_EXT);
+                                            VK_INDEX_TYPE_UINT8_EXT,
+                                            false);
                 if (!reason_is(&cmd, "graphics-index-type-uint8-feature-disabled")) return 14;
 
                 memset(&cmd, 0, sizeof(cmd));
@@ -2407,7 +2545,8 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                                             pdocker_vk_buffer_to_handle(&buffer),
                                             0,
                                             VK_WHOLE_SIZE,
-                                            VK_INDEX_TYPE_UINT8_EXT);
+                                            VK_INDEX_TYPE_UINT8_EXT,
+                                            false);
                 if (cmd.recording_failed) return 15;
                 command_buffer_destroy_record_vectors(&cmd);
             #endif
@@ -2562,6 +2701,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 name_info.objectHandle = 0x1234u;
                 if (vkSetDebugUtilsObjectNameEXT(VK_NULL_HANDLE, &name_info) != VK_ERROR_INITIALIZATION_FAILED) return 13;
 
+                vkDestroyDebugUtilsMessengerEXT(instance, (VkDebugUtilsMessengerEXT)(uintptr_t)0x1234u, NULL);
                 vkDestroyDebugUtilsMessengerEXT(instance, messenger, NULL);
                 vkDestroyDebugUtilsMessengerEXT(instance, VK_NULL_HANDLE, NULL);
                 vkDestroyInstance(instance, NULL);
@@ -2663,6 +2803,14 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 if (vkCreatePrivateDataSlot(VK_NULL_HANDLE, &slot_info, NULL, &invalid_slot) != VK_ERROR_FEATURE_NOT_PRESENT) return 23;
                 if (vkSetPrivateData(VK_NULL_HANDLE, VK_OBJECT_TYPE_BUFFER, 0x1234u, VK_NULL_HANDLE, 1u) != VK_ERROR_INITIALIZATION_FAILED) return 24;
                 if (vkSetPrivateData(VK_NULL_HANDLE, VK_OBJECT_TYPE_UNKNOWN, 0x1234u, slot, 1u) != VK_ERROR_INITIALIZATION_FAILED) return 25;
+
+                VkPrivateDataSlot bogus_slot = (VkPrivateDataSlot)(uintptr_t)0x1234u;
+                if (vkSetPrivateData(VK_NULL_HANDLE, VK_OBJECT_TYPE_BUFFER, 0x1234u, bogus_slot, 1u) != VK_ERROR_INITIALIZATION_FAILED) return 30;
+                data = 0x777u;
+                vkGetPrivateData(VK_NULL_HANDLE, VK_OBJECT_TYPE_BUFFER, 0x1234u, bogus_slot, &data);
+                if (data != 0) return 31;
+                vkDestroyPrivateDataSlot(VK_NULL_HANDLE, bogus_slot, NULL);
+
                 vkDestroyPrivateDataSlot(VK_NULL_HANDLE, slot, NULL);
                 vkDestroyPrivateDataSlot(VK_NULL_HANDLE, VK_NULL_HANDLE, NULL);
                 return 0;
@@ -4462,8 +4610,20 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 usage2.sType = VK_STRUCTURE_TYPE_BUFFER_USAGE_FLAGS_2_CREATE_INFO;
                 usage2.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
 
+                const char *enabled[] = {{ VK_KHR_MAINTENANCE_5_EXTENSION_NAME }};
+                VkDeviceCreateInfo device_info;
+                memset(&device_info, 0, sizeof(device_info));
+                device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                device_info.enabledExtensionCount = 1;
+                device_info.ppEnabledExtensionNames = enabled;
+                VkDevice device = VK_NULL_HANDLE;
+                if (vkCreateDevice((VkPhysicalDevice)&g_device, &device_info, NULL, &device) != VK_SUCCESS ||
+                    device == VK_NULL_HANDLE) {{
+                    fprintf(stderr, "maintenance5 test device create failed\\n");
+                    return 6;
+                }}
                 VkBuffer buffer_handle = VK_NULL_HANDLE;
-                VkResult rc = vkCreateBuffer((VkDevice)(uintptr_t)0x1u, &info, NULL, &buffer_handle);
+                VkResult rc = vkCreateBuffer(device, &info, NULL, &buffer_handle);
                 if (rc != VK_SUCCESS || buffer_handle == VK_NULL_HANDLE) {{
                     fprintf(stderr, "usage2-only buffer create failed rc=%d handle=%p\\n", rc, (void *)buffer_handle);
                     return 2;
@@ -4473,11 +4633,11 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     fprintf(stderr, "effective usage was not stored from usage2: 0x%x\\n", buffer ? buffer->usage : 0u);
                     return 3;
                 }}
-                vkDestroyBuffer((VkDevice)(uintptr_t)0x1u, buffer_handle, NULL);
+                vkDestroyBuffer(device, buffer_handle, NULL);
 
                 usage2.usage = 0;
                 buffer_handle = VK_NULL_HANDLE;
-                rc = vkCreateBuffer((VkDevice)(uintptr_t)0x1u, &info, NULL, &buffer_handle);
+                rc = vkCreateBuffer(device, &info, NULL, &buffer_handle);
                 if (rc == VK_SUCCESS || buffer_handle != VK_NULL_HANDLE) {{
                     fprintf(stderr, "zero usage2 buffer create was accepted rc=%d handle=%p\\n", rc, (void *)buffer_handle);
                     return 4;
@@ -4522,7 +4682,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 usage2.sType = VK_STRUCTURE_TYPE_BUFFER_USAGE_FLAGS_2_CREATE_INFO;
                 usage2.usage = VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT |
                                VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT;
-                if (validate_buffer_view_create_pnext(&view_info, &buffer, &texel_usage) != VK_SUCCESS) {{
+                if (validate_buffer_view_create_pnext_with_extensions(&view_info, &buffer, &texel_usage, PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_5) != VK_SUCCESS) {{
                     fprintf(stderr, "matching usage2 texel subset was rejected\\n");
                     return 2;
                 }}
@@ -4533,20 +4693,20 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 }}
 
                 usage2.usage = VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT;
-                if (validate_buffer_view_create_pnext(&view_info, &buffer, &texel_usage) == VK_SUCCESS) {{
+                if (validate_buffer_view_create_pnext_with_extensions(&view_info, &buffer, &texel_usage, PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_5) == VK_SUCCESS) {{
                     fprintf(stderr, "narrowing usage2 was accepted without a view-usage ABI field\\n");
                     return 4;
                 }}
 
                 usage2.usage = VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT |
                                VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-                if (validate_buffer_view_create_pnext(&view_info, &buffer, &texel_usage) == VK_SUCCESS) {{
+                if (validate_buffer_view_create_pnext_with_extensions(&view_info, &buffer, &texel_usage, PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_5) == VK_SUCCESS) {{
                     fprintf(stderr, "non-texel usage2 bit was accepted\\n");
                     return 5;
                 }}
 
                 usage2.usage = 0;
-                if (validate_buffer_view_create_pnext(&view_info, &buffer, &texel_usage) == VK_SUCCESS) {{
+                if (validate_buffer_view_create_pnext_with_extensions(&view_info, &buffer, &texel_usage, PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_5) == VK_SUCCESS) {{
                     fprintf(stderr, "zero usage2 was accepted\\n");
                     return 6;
                 }}
@@ -4555,7 +4715,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 memset(&unknown, 0, sizeof(unknown));
                 unknown.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
                 view_info.pNext = &unknown;
-                if (validate_buffer_view_create_pnext(&view_info, &buffer, &texel_usage) == VK_SUCCESS) {{
+                if (validate_buffer_view_create_pnext_with_extensions(&view_info, &buffer, &texel_usage, PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_5) == VK_SUCCESS) {{
                     fprintf(stderr, "unknown buffer-view pNext was accepted\\n");
                     return 7;
                 }}
@@ -5810,7 +5970,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
 
             static int expect_device_proc_hidden(VkDevice device, const char *name, int code) {{
                 if (vkGetDeviceProcAddr(device, name) != NULL) {{
-                    fprintf(stderr, "non-device proc %s visible from vkGetDeviceProcAddr\\n", name);
+                    fprintf(stderr, "proc %s unexpectedly visible from vkGetDeviceProcAddr\\n", name);
                     return code;
                 }}
                 return 0;
@@ -5829,7 +5989,24 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 memset(&fake_device, 0, sizeof(fake_device));
                 fake_device.requested_feature_mask = UINT64_MAX;
                 fake_device.enabled_extension_mask = UINT64_MAX;
-                VkDevice device = (VkDevice)&fake_device;
+                if (vkGetDeviceProcAddr((VkDevice)&fake_device, "vkCreateBuffer") != NULL) return 1;
+                if (vkGetDeviceProcAddr((VkDevice)(uintptr_t)0x1234u, "vkCreateBuffer") != NULL) return 2;
+                vkDestroyDevice((VkDevice)&fake_device, NULL);
+                vkDestroyDevice((VkDevice)(uintptr_t)0x1234u, NULL);
+
+                const char *enabled[] = {{
+                    VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+                    VK_KHR_DEVICE_GROUP_EXTENSION_NAME,
+                }};
+                VkDeviceCreateInfo create_info;
+                memset(&create_info, 0, sizeof(create_info));
+                create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                create_info.enabledExtensionCount = (uint32_t)(sizeof(enabled) / sizeof(enabled[0]));
+                create_info.ppEnabledExtensionNames = enabled;
+                VkDevice device = VK_NULL_HANDLE;
+                if (vkCreateDevice((VkPhysicalDevice)&g_device, &create_info, NULL, &device) != VK_SUCCESS ||
+                    device == VK_NULL_HANDLE) return 3;
+
                 const char *hidden[] = {{
                     "vkGetInstanceProcAddr",
                     "vkEnumerateInstanceVersion",
@@ -5871,6 +6048,10 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     int rc = expect_device_proc_visible(device, visible[i], 80 + (int)i);
                     if (rc) return rc;
                 }}
+                VkDevice stale_device = device;
+                vkDestroyDevice(device, NULL);
+                if (vkGetDeviceProcAddr(stale_device, "vkCreateBuffer") != NULL) return 100;
+                vkDestroyDevice(stale_device, NULL);
                 return 0;
             }}
             """
