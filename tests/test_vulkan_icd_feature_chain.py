@@ -1402,6 +1402,151 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_shader_layout_pipeline_handles_fail_closed_after_destroy(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            int main(void) {{
+                VkDescriptorSetLayoutBinding binding;
+                memset(&binding, 0, sizeof(binding));
+                binding.binding = 0;
+                binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+                binding.descriptorCount = 1;
+                binding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+                VkDescriptorSetLayoutCreateInfo dsl_info;
+                memset(&dsl_info, 0, sizeof(dsl_info));
+                dsl_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+                dsl_info.bindingCount = 1;
+                dsl_info.pBindings = &binding;
+                VkDescriptorSetLayout dsl = VK_NULL_HANDLE;
+                if (vkCreateDescriptorSetLayout(VK_NULL_HANDLE, &dsl_info, NULL, &dsl) != VK_SUCCESS ||
+                    dsl == VK_NULL_HANDLE) {{
+                    fprintf(stderr, "descriptor set layout create failed\\n");
+                    return 2;
+                }}
+                PdockerVkDescriptorSetLayout *dsl_obj = descriptor_set_layout_handle_lookup(dsl);
+                if (!dsl_obj || dsl_obj->destroyed) {{
+                    fprintf(stderr, "descriptor set layout was not registered live\\n");
+                    return 3;
+                }}
+
+                VkPipelineLayoutCreateInfo pl_info;
+                memset(&pl_info, 0, sizeof(pl_info));
+                pl_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+                pl_info.setLayoutCount = 1;
+                pl_info.pSetLayouts = &dsl;
+                VkPipelineLayout pl = VK_NULL_HANDLE;
+                if (vkCreatePipelineLayout(VK_NULL_HANDLE, &pl_info, NULL, &pl) != VK_SUCCESS ||
+                    pl == VK_NULL_HANDLE) {{
+                    fprintf(stderr, "pipeline layout create failed\\n");
+                    return 4;
+                }}
+                PdockerVkPipelineLayout *pl_obj = pipeline_layout_handle_lookup(pl);
+                if (!pl_obj || pl_obj->destroyed || pl_obj->set_layout_count != 1 ||
+                    pl_obj->set_layouts[0] != dsl_obj) {{
+                    fprintf(stderr, "pipeline layout did not retain the live descriptor layout\\n");
+                    return 5;
+                }}
+
+                const uint32_t shader_words[] = {{ 0x07230203u, 0x00010000u, 0u, 0u }};
+                VkShaderModuleCreateInfo shader_info;
+                memset(&shader_info, 0, sizeof(shader_info));
+                shader_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+                shader_info.codeSize = sizeof(shader_words);
+                shader_info.pCode = shader_words;
+                VkShaderModule shader = VK_NULL_HANDLE;
+                if (vkCreateShaderModule(VK_NULL_HANDLE, &shader_info, NULL, &shader) != VK_SUCCESS ||
+                    shader == VK_NULL_HANDLE) {{
+                    fprintf(stderr, "shader module create failed\\n");
+                    return 6;
+                }}
+                PdockerVkShaderModule *shader_obj = shader_module_handle_lookup(shader);
+                if (!shader_obj || shader_obj->destroyed || shader_obj->code_size != sizeof(shader_words) ||
+                    !shader_obj->code_map || memcmp(shader_obj->code_map, shader_words, sizeof(shader_words)) != 0) {{
+                    fprintf(stderr, "shader module was not registered live with retained code\\n");
+                    return 7;
+                }}
+
+                VkComputePipelineCreateInfo cp_info;
+                memset(&cp_info, 0, sizeof(cp_info));
+                cp_info.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+                cp_info.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+                cp_info.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+                cp_info.stage.module = shader;
+                cp_info.stage.pName = "main";
+                cp_info.layout = pl;
+                VkPipeline pipeline = VK_NULL_HANDLE;
+                if (vkCreateComputePipelines(VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &cp_info, NULL, &pipeline) != VK_SUCCESS ||
+                    pipeline == VK_NULL_HANDLE) {{
+                    fprintf(stderr, "compute pipeline create failed\\n");
+                    return 8;
+                }}
+                PdockerVkPipeline *pipeline_obj = pipeline_handle_lookup(pipeline);
+                if (!pipeline_obj || pipeline_obj->destroyed || pipeline_obj->shader != shader_obj ||
+                    pipeline_obj->layout != pl_obj || !pipeline_obj->entry_name ||
+                    strcmp(pipeline_obj->entry_name, "main") != 0) {{
+                    fprintf(stderr, "pipeline was not registered with retained shader/layout state\\n");
+                    return 9;
+                }}
+
+                vkDestroyShaderModule(VK_NULL_HANDLE, shader, NULL);
+                if (shader_module_handle_lookup(shader) != NULL || !shader_obj->destroyed ||
+                    shader_obj->code_size != sizeof(shader_words) || !shader_obj->code_map ||
+                    memcmp(shader_obj->code_map, shader_words, sizeof(shader_words)) != 0) {{
+                    fprintf(stderr, "destroyed shader module did not move to retained tombstone\\n");
+                    return 10;
+                }}
+                vkDestroyPipelineLayout(VK_NULL_HANDLE, pl, NULL);
+                if (pipeline_layout_handle_lookup(pl) != NULL || !pl_obj->destroyed ||
+                    pl_obj->set_layout_count != 1 || pl_obj->set_layouts[0] != dsl_obj) {{
+                    fprintf(stderr, "destroyed pipeline layout did not move to retained tombstone\\n");
+                    return 11;
+                }}
+                vkDestroyDescriptorSetLayout(VK_NULL_HANDLE, dsl, NULL);
+                if (descriptor_set_layout_handle_lookup(dsl) != NULL || !dsl_obj->destroyed) {{
+                    fprintf(stderr, "destroyed descriptor set layout remained live\\n");
+                    return 12;
+                }}
+                if (pipeline_handle_lookup(pipeline) != pipeline_obj || pipeline_obj->shader != shader_obj ||
+                    pipeline_obj->layout != pl_obj) {{
+                    fprintf(stderr, "existing pipeline lost retained retired dependencies\\n");
+                    return 13;
+                }}
+
+                VkPipeline bad_pipeline = VK_NULL_HANDLE;
+                if (vkCreateComputePipelines(VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &cp_info, NULL, &bad_pipeline) == VK_SUCCESS ||
+                    bad_pipeline != VK_NULL_HANDLE) {{
+                    fprintf(stderr, "compute pipeline accepted destroyed shader/layout handles\\n");
+                    return 14;
+                }}
+                VkPipelineLayout bad_pl = VK_NULL_HANDLE;
+                if (vkCreatePipelineLayout(VK_NULL_HANDLE, &pl_info, NULL, &bad_pl) == VK_SUCCESS ||
+                    bad_pl != VK_NULL_HANDLE) {{
+                    fprintf(stderr, "pipeline layout accepted destroyed descriptor set layout handle\\n");
+                    return 15;
+                }}
+
+                vkDestroyPipeline(VK_NULL_HANDLE, pipeline, NULL);
+                if (pipeline_handle_lookup(pipeline) != NULL || !pipeline_obj->destroyed) {{
+                    fprintf(stderr, "destroyed pipeline remained live\\n");
+                    return 16;
+                }}
+                vkDestroyPipeline(VK_NULL_HANDLE, pipeline, NULL);
+                vkDestroyShaderModule(VK_NULL_HANDLE, shader, NULL);
+                vkDestroyPipelineLayout(VK_NULL_HANDLE, pl, NULL);
+                vkDestroyDescriptorSetLayout(VK_NULL_HANDLE, dsl, NULL);
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_conservative_query_instance_extensions_are_advertised_with_aliases(self):
         source = textwrap.dedent(
             f"""

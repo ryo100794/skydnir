@@ -10,6 +10,37 @@ llama.cpp itself remains unmodified.
 ## Current Ground Truth
 
 
+### 2026-07-18 CPU/static Vulkan shader/layout/pipeline live-handle lane
+
+`VkDescriptorSetLayout`, `VkShaderModule`, `VkPipelineLayout`, and `VkPipeline`
+now use live registries with soft-destroy quarantine.  Create paths register
+objects before exposing handles, destroy paths unregister and retire objects,
+and public API entrances resolve application-provided handles through live lookup
+before reading object fields.  Destroyed descriptor set layouts can no longer be
+used to create new pipeline layouts; destroyed shader modules or pipeline
+layouts can no longer be used to create new compute pipelines; destroyed
+pipelines can no longer be rebound as live objects.
+
+Shader modules and pipeline layouts are soft-retired instead of immediately
+freeing backing SPIR-V maps or layout arrays.  Existing pipelines retain their
+already-captured shader/layout dependencies without UAF, while new API calls
+still fail closed because the handles are no longer live.  Compute and graphics
+pipeline creation both register resulting pipeline objects, and `vkCmdBindPipeline`
+uses live pipeline lookup for both bind points before recording state.
+
+This is generic Vulkan pass-through hardening.  It does not change llama.cpp,
+Dockerfiles, models, prompts, shader bytes, or executor-side arithmetic.
+
+Current scope note: descriptor pools/sets, command pools/buffers, pipeline
+caches, fences/semaphores/events/query pools, and submit/present prevalidation
+remain separate handle-lifetime lanes.
+
+Evidence: `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`,
+`tests.test_gpu_abi_contract`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_shader_layout_pipeline_handles_fail_closed_after_destroy`,
+`scripts/build-gpu-shim.sh`.
+
+
 ### 2026-07-18 CPU/static Vulkan render-pass/framebuffer live-handle lane
 
 `VkRenderPass` and `VkFramebuffer` now use live registries with soft-destroy

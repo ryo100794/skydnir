@@ -1279,8 +1279,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "cmd->graphics_dynamic_offset_count = 0;",
             "pipelineBindPoint == VK_PIPELINE_BIND_POINT_COMPUTE",
             "pipelineBindPoint == VK_PIPELINE_BIND_POINT_GRAPHICS",
-            "cmd->compute_pipeline = pdocker_vk_pipeline_from_handle(pipeline);",
-            "cmd->graphics_pipeline = pdocker_vk_pipeline_from_handle(pipeline);",
+            "cmd->compute_pipeline = pipeline_handle_lookup(pipeline);",
+            "cmd->graphics_pipeline = pipeline_handle_lookup(pipeline);",
             "send_vulkan_graphics_v6_frame_with_fds",
             "send_empty_vulkan_graphics_v6_1_validation_frame",
             "send_recorded_vulkan_graphics_v6_1_frame",
@@ -3813,7 +3813,7 @@ class GpuAbiContractTest(unittest.TestCase):
 
         destroy_body = c_function_body(icd, "vkDestroyPipeline")
         destroy_helper_body = c_function_body(icd, "pdocker_vk_pipeline_destroy")
-        self.assertIn("pdocker_vk_pipeline_destroy(p);", destroy_body)
+        self.assertIn("pipeline_retire(pipeline_unregister(pipeline));", destroy_body)
         self.assertIn("free(pipeline->specialization_entries);", destroy_helper_body)
         self.assertIn("free(pipeline->specialization_data);", destroy_helper_body)
         self.assertIn("free(pipeline->graphics_stage_specialization_entries[i]);", destroy_helper_body)
@@ -9672,7 +9672,7 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         self.assertIn("pCreateInfo->setLayoutCount > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS", create_body)
         self.assertIn("pCreateInfo->setLayoutCount > 0 && !pCreateInfo->pSetLayouts", create_body)
-        self.assertIn("pdocker_vk_descriptor_set_layout_from_handle(pCreateInfo->pSetLayouts[i])", create_body)
+        self.assertIn("descriptor_set_layout_handle_lookup(pCreateInfo->pSetLayouts[i])", create_body)
         self.assertIn("layout->set_layout_count = pCreateInfo->setLayoutCount;", create_body)
         self.assertIn("layout->set_layout_capacity = pCreateInfo->setLayoutCount;", create_body)
         self.assertIn("layout->set_layouts = (PdockerVkDescriptorSetLayout **)calloc(", create_body)
@@ -11286,7 +11286,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("free(pipeline->entry_name);", destroy_helper_body)
         self.assertIn("free(pipeline->graphics_stage_entry_names[i]);", destroy_helper_body)
         destroy_pipeline_body = c_function_body(icd, "vkDestroyPipeline")
-        self.assertIn("pdocker_vk_pipeline_destroy(p);", destroy_pipeline_body)
+        self.assertIn("pipeline_retire(pipeline_unregister(pipeline));", destroy_pipeline_body)
         self.assertNotIn("snprintf(pipeline->entry_name", compute_body)
 
         pipeline_struct = icd.split("struct PdockerVkPipeline {", 1)[1].split("};", 1)[0]
@@ -11317,7 +11317,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "flags & ~noop_flags",
             "basePipelineHandle != VK_NULL_HANDLE",
             "basePipelineIndex >= 0",
-            "pdocker_vk_pipeline_from_handle(basePipelineHandle) != NULL",
+            "pipeline_handle_lookup(basePipelineHandle) != NULL",
             "idx < create_info_count && idx != create_info_index",
         ]:
             self.assertIn(marker, helper_body)
@@ -11333,6 +11333,11 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('trace_icd_runtime_failure("compute-pipeline-create-info-unsupported"', compute_body)
         self.assertIn('trace_icd_runtime_failure("strict-graphics-pipeline-flags-unsupported"', graphics_body)
         self.assertIn("pipeline->graphics_unsupported = true;", graphics_body)
+        self.assertIn("pipeline_register(pipeline);", graphics_body)
+        self.assertLess(
+            graphics_body.index("pipeline_register(pipeline);"),
+            graphics_body.index("pPipelines[i] = pdocker_vk_pipeline_to_handle(pipeline);"),
+        )
 
 
 
@@ -11516,7 +11521,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("layout->set_layouts = (PdockerVkDescriptorSetLayout **)calloc(", pipeline_layout_body)
         self.assertIn("destroy_pipeline_layout_storage(layout);", pipeline_layout_body)
         self.assertNotIn("pCreateInfo->setLayoutCount > PDOCKER_VK_MAX_DESCRIPTOR_SETS", pipeline_layout_body)
-        self.assertIn("pdocker_vk_descriptor_set_layout_from_handle(pCreateInfo->pSetLayouts[i])", pipeline_layout_body)
+        self.assertIn("descriptor_set_layout_handle_lookup(pCreateInfo->pSetLayouts[i])", pipeline_layout_body)
         self.assertIn("pCreateInfo->pushConstantRangeCount > 0 && !pCreateInfo->pPushConstantRanges", pipeline_layout_body)
         self.assertIn("pCreateInfo->pushConstantRangeCount > PDOCKER_VK_MAX_PUSH_CONSTANT_RANGES", pipeline_layout_body)
         self.assertNotIn("unsupported_set_layout_count = true", pipeline_layout_body)
@@ -16362,16 +16367,27 @@ class GpuAbiContractTest(unittest.TestCase):
             "pdocker_vk_shader_module_from_handle",
             "pdocker_vk_pipeline_layout_from_handle",
             "pdocker_vk_pipeline_from_handle",
+            "descriptor_set_layout_register(layout);",
+            "descriptor_set_layout_retire(descriptor_set_layout_unregister(descriptorSetLayout));",
+            "shader_module_register(shader);",
+            "shader_module_retire(shader_module_unregister(shaderModule));",
+            "pipeline_layout_register(layout);",
+            "pipeline_layout_retire(pipeline_layout_unregister(pipelineLayout));",
+            "pipeline_register(pipeline);",
+            "pipeline_retire(pipeline_unregister(pipeline));",
+            "pipeline_handle_lookup(pipeline)",
+            "command_buffer_mark_recording_failed(cmd, \"compute-pipeline-handle-invalid\")",
+            "command_buffer_mark_recording_failed(cmd, \"graphics-pipeline-handle-invalid\")",
             "*pSetLayout = pdocker_vk_descriptor_set_layout_to_handle(layout);",
-            "set->layout = pdocker_vk_descriptor_set_layout_from_handle(pAllocateInfo->pSetLayouts[i]);",
+            "set->layout = descriptor_set_layout_handle_lookup(pAllocateInfo->pSetLayouts[i]);",
             "pDescriptorSets[i] = pdocker_vk_descriptor_set_to_handle(set);",
             "pdocker_vk_descriptor_update_template_to_handle(template_handle)",
             "*pShaderModule = pdocker_vk_shader_module_to_handle(shader);",
-            "pipeline->shader = pdocker_vk_shader_module_from_handle(ci->stage.module);",
-            "pipeline->layout = pdocker_vk_pipeline_layout_from_handle(ci->layout);",
+            "pipeline->shader = shader_module_handle_lookup(ci->stage.module);",
+            "pipeline->layout = pipeline_layout_handle_lookup(ci->layout);",
             "pPipelines[i] = pdocker_vk_pipeline_to_handle(pipeline);",
-            "cmd->compute_pipeline = pdocker_vk_pipeline_from_handle(pipeline);",
-            "PdockerVkPipelineLayout *pipeline_layout = pdocker_vk_pipeline_layout_from_handle(layout);",
+            "cmd->compute_pipeline = pipeline_handle_lookup(pipeline);",
+            "PdockerVkPipelineLayout *pipeline_layout = pipeline_layout_handle_lookup(layout);",
             "PdockerVkDescriptorSet *set = pdocker_vk_descriptor_set_from_handle(pDescriptorSets[set_i]);",
         ]:
             self.assertIn(marker, source)
