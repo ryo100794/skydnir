@@ -11,6 +11,29 @@ llama.cpp itself remains unmodified.
 
 
 
+### 2026-07-18 CPU/static Vulkan dynamic-rendering attachment capture lane
+
+Dynamic-rendering attachment capture now owner-checks image-view handles before
+mutating the command buffer attachment state.  `copy_rendering_attachment_state`
+resolves image and resolve views into locals, validates owner compatibility, and
+snapshots into local snapshot structures before assigning anything to the active
+attachment record.  Cross-device attachment failures now return from
+`vkCmdBeginRendering` before appending a rendering snapshot or graphics command
+record, so failed command buffers do not retain a foreign image-view pointer in
+active state.
+
+This is CPU/static Vulkan pass-through hardening only.  It does not change
+llama.cpp, Dockerfiles, models, prompts, shader bytes, or executor arithmetic.
+
+Evidence: `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`,
+`tests.test_gpu_abi_contract`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_device_owner_rejects_cross_device_metadata_render_wsi_handles`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_device_owner_rejects_cross_device_command_submit_sync`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_device_owner_rejects_cross_device_memory_resource_misuse`,
+`scripts/build-gpu-shim.sh`, `scripts/verify-native-payloads.py`,
+`./gradlew :app:assembleDebug`.
+
+
 ### 2026-07-18 CPU/static Vulkan queue-submit helper owner lane
 
 Legacy `vkQueueSubmit` helper paths now keep queue/device ownership through the

@@ -2089,11 +2089,23 @@ class GpuAbiContractTest(unittest.TestCase):
             "dst->format = view->format;",
             "dst->subresource_range = view->subresource_range;",
             "dst->samples = view->image->samples;",
-            "snapshot_image_view_state(&dst->image_view_snapshot, dst->image_view)",
-            "snapshot_image_view_state(&dst->resolve_image_view_snapshot, dst->resolve_image_view)",
+            "snapshot_image_view_state(&image_view_snapshot, image_view)",
+            "snapshot_image_view_state(&resolve_image_view_snapshot, resolve_image_view)",
             "collect_graphics_image_view_snapshot_entry",
         ]:
             self.assertIn(marker, icd)
+
+        copy_attachment_body = c_function_body(icd, "copy_rendering_attachment_state")
+        self.assertIn("PdockerVkImageView *image_view = image_view_handle_lookup(src->imageView);", copy_attachment_body)
+        self.assertIn("PdockerVkImageViewSnapshot image_view_snapshot;", copy_attachment_body)
+        self.assertIn("dst->image_view = image_view;", copy_attachment_body)
+        self.assertIn("dst->image_view_snapshot = image_view_snapshot;", copy_attachment_body)
+        self.assertLess(copy_attachment_body.index("owner_device_ids_match_or_unowned(owner_device_id, image_view->owner_device_id)"),
+                        copy_attachment_body.index("dst->image_view = image_view;"))
+        self.assertLess(copy_attachment_body.index("owner_device_ids_match_or_unowned(owner_device_id, resolve_image_view->owner_device_id)"),
+                        copy_attachment_body.index("dst->resolve_image_view = resolve_image_view;"))
+        self.assertNotIn("dst->image_view = image_view_handle_lookup(src->imageView)", copy_attachment_body)
+        self.assertNotIn("dst->resolve_image_view = image_view_handle_lookup(src->resolveImageView)", copy_attachment_body)
 
         collect_snapshot_body = c_function_body(icd, "collect_graphics_image_view_snapshot_entry")
         for marker in [
@@ -2166,8 +2178,16 @@ class GpuAbiContractTest(unittest.TestCase):
             "if (!copy_rendering_attachment_state(&cmd->active_color_attachments[i]",
             "if (!copy_rendering_attachment_state(&cmd->active_depth_attachment",
             "if (!copy_rendering_attachment_state(&cmd->active_stencil_attachment",
+            "bool attachment_copy_failed = false;",
+            "attachment_copy_failed = true;",
+            "if (attachment_copy_failed)",
+            "cmd->dynamic_rendering_active = false;",
+            "cmd->active_color_attachment_count = 0;",
+            "return;",
         ]:
             self.assertIn(marker, begin_rendering_body)
+        self.assertLess(begin_rendering_body.index("if (attachment_copy_failed)"),
+                        begin_rendering_body.index("append_graphics_rendering_snapshot(cmd"))
         self.assertIn("VK_STRUCTURE_TYPE_DEVICE_GROUP_RENDER_PASS_BEGIN_INFO", rendering_info_pnext_body)
         self.assertIn("device_group_render_pass_begin_noop(", rendering_info_pnext_body)
         for marker in [

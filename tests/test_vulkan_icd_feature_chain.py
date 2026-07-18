@@ -7938,6 +7938,15 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 rendering.colorAttachmentCount = 1;
                 rendering.pColorAttachments = &color;
                 vkCmdBeginRendering(cmd_b, &rendering);
+                PdockerVkCommandBuffer *cmd_b_obj = command_buffer_handle_lookup(cmd_b);
+                if (!cmd_b_obj) return 407;
+                if (!cmd_b_obj->recording_failed) return 408;
+                if (cmd_b_obj->dynamic_rendering_active) return 409;
+                if (cmd_b_obj->active_color_attachment_count != 0) return 410;
+                if (cmd_b_obj->graphics_rendering_op_count != 0) return 411;
+                if (cmd_b_obj->graphics_command_op_count != 0) return 412;
+                if (cmd_b_obj->active_color_attachments[0].image_view != NULL) return 413;
+                if (cmd_b_obj->active_color_attachments[0].image_view_snapshot.valid) return 414;
                 if (vkEndCommandBuffer(cmd_b) != VK_ERROR_FEATURE_NOT_PRESENT) return 23;
 
                 if (vkBeginCommandBuffer(cmd_b, NULL) != VK_SUCCESS) return 403;

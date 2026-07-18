@@ -4714,19 +4714,25 @@ static bool copy_rendering_attachment_state(
     memset(dst, 0, sizeof(*dst));
     if (!src) return true;
     if (src->pNext) return false;
-    dst->image_view = image_view_handle_lookup(src->imageView);
-    if (dst->image_view &&
-        !owner_device_ids_match_or_unowned(owner_device_id, dst->image_view->owner_device_id)) {
+    PdockerVkImageView *image_view = image_view_handle_lookup(src->imageView);
+    if (image_view &&
+        !owner_device_ids_match_or_unowned(owner_device_id, image_view->owner_device_id)) {
         return false;
     }
-    if (!snapshot_image_view_state(&dst->image_view_snapshot, dst->image_view)) return false;
+    PdockerVkImageViewSnapshot image_view_snapshot;
+    if (!snapshot_image_view_state(&image_view_snapshot, image_view)) return false;
+    PdockerVkImageView *resolve_image_view = image_view_handle_lookup(src->resolveImageView);
+    if (resolve_image_view &&
+        !owner_device_ids_match_or_unowned(owner_device_id, resolve_image_view->owner_device_id)) {
+        return false;
+    }
+    PdockerVkImageViewSnapshot resolve_image_view_snapshot;
+    if (!snapshot_image_view_state(&resolve_image_view_snapshot, resolve_image_view)) return false;
+    dst->image_view = image_view;
+    dst->image_view_snapshot = image_view_snapshot;
     dst->image_layout = src->imageLayout;
-    dst->resolve_image_view = image_view_handle_lookup(src->resolveImageView);
-    if (dst->resolve_image_view &&
-        !owner_device_ids_match_or_unowned(owner_device_id, dst->resolve_image_view->owner_device_id)) {
-        return false;
-    }
-    if (!snapshot_image_view_state(&dst->resolve_image_view_snapshot, dst->resolve_image_view)) return false;
+    dst->resolve_image_view = resolve_image_view;
+    dst->resolve_image_view_snapshot = resolve_image_view_snapshot;
     dst->resolve_image_layout = src->resolveImageLayout;
     dst->resolve_mode = src->resolveMode;
     dst->load_op = src->loadOp;
@@ -29572,6 +29578,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBeginRendering(
     cmd->active_color_attachment_count = pRenderingInfo
         ? pRenderingInfo->colorAttachmentCount
         : 0;
+    bool attachment_copy_failed = false;
     if (pRenderingInfo) {
         if (!rendering_info_pnext_noop(pRenderingInfo)) {
             cmd->graphics_unsupported = true;
@@ -29595,6 +29602,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBeginRendering(
                                                      ? &pRenderingInfo->pColorAttachments[i]
                                                      : NULL,
                                                  cmd->owner_device_id)) {
+                attachment_copy_failed = true;
                 cmd->graphics_unsupported = true;
                 command_buffer_mark_recording_failed(cmd, "dynamic-rendering-attachment-cross-device");
             }
@@ -29602,12 +29610,14 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBeginRendering(
         if (!copy_rendering_attachment_state(&cmd->active_depth_attachment,
                                              pRenderingInfo->pDepthAttachment,
                                              cmd->owner_device_id)) {
+            attachment_copy_failed = true;
             cmd->graphics_unsupported = true;
             command_buffer_mark_recording_failed(cmd, "dynamic-rendering-attachment-cross-device");
         }
         if (!copy_rendering_attachment_state(&cmd->active_stencil_attachment,
                                              pRenderingInfo->pStencilAttachment,
                                              cmd->owner_device_id)) {
+            attachment_copy_failed = true;
             cmd->graphics_unsupported = true;
             command_buffer_mark_recording_failed(cmd, "dynamic-rendering-attachment-cross-device");
         }
@@ -29616,6 +29626,11 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBeginRendering(
         cmd->active_rendering_flags = 0;
         cmd->active_rendering_layer_count = 0;
         cmd->active_rendering_view_mask = 0;
+    }
+    if (attachment_copy_failed) {
+        cmd->dynamic_rendering_active = false;
+        cmd->active_color_attachment_count = 0;
+        return;
     }
     uint32_t rendering_snapshot_index = UINT32_MAX;
     if (!append_graphics_rendering_snapshot(cmd, &rendering_snapshot_index)) return;
