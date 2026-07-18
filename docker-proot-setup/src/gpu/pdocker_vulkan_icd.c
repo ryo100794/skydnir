@@ -26796,6 +26796,11 @@ static bool validation_cache_handle_live_for_device(
         VkValidationCacheEXT validationCache);
 #endif
 
+static bool pdocker_vk_object_handle_owned_by_device(
+        VkDevice device,
+        VkObjectType object_type,
+        uint64_t object_handle);
+
 static VkResult validate_shader_module_create_pnext(
         VkDevice device,
         const void *pNext,
@@ -37469,7 +37474,129 @@ VKAPI_ATTR VkResult VKAPI_CALL vkMergeValidationCachesEXT(
 
 #endif
 
+#define PDOCKER_VK_OBJECT_HANDLE_AS(type, object_handle) \
+    ({ \
+        type pdocker_vk_object_handle_value; \
+        uint64_t pdocker_vk_object_handle_bits = (uint64_t)(object_handle); \
+        memset(&pdocker_vk_object_handle_value, 0, sizeof(pdocker_vk_object_handle_value)); \
+        memcpy(&pdocker_vk_object_handle_value, \
+               &pdocker_vk_object_handle_bits, \
+               sizeof(pdocker_vk_object_handle_value) < sizeof(pdocker_vk_object_handle_bits) \
+                   ? sizeof(pdocker_vk_object_handle_value) \
+                   : sizeof(pdocker_vk_object_handle_bits)); \
+        pdocker_vk_object_handle_value; \
+    })
+
+static bool pdocker_vk_object_handle_owned_by_device(
+        VkDevice device,
+        VkObjectType object_type,
+        uint64_t object_handle) {
+    if (object_type == VK_OBJECT_TYPE_UNKNOWN || object_handle == 0) return false;
+    if (device == VK_NULL_HANDLE) return true;
+    switch (object_type) {
+        case VK_OBJECT_TYPE_DEVICE:
+            return device_handle_resolve(PDOCKER_VK_OBJECT_HANDLE_AS(VkDevice, object_handle), NULL) &&
+                   PDOCKER_VK_OBJECT_HANDLE_AS(VkDevice, object_handle) == device;
+        case VK_OBJECT_TYPE_QUEUE: {
+            PdockerVkQueue *queue = pdocker_vk_queue_from_handle(PDOCKER_VK_OBJECT_HANDLE_AS(VkQueue, object_handle));
+            return queue_owner_matches_or_unowned(queue, device_owner_id_or_zero(device));
+        }
+        case VK_OBJECT_TYPE_DEVICE_MEMORY:
+            return memory_handle_lookup_for_device(device, PDOCKER_VK_OBJECT_HANDLE_AS(VkDeviceMemory, object_handle)) != NULL;
+        case VK_OBJECT_TYPE_BUFFER:
+            return buffer_handle_lookup_for_device(device, PDOCKER_VK_OBJECT_HANDLE_AS(VkBuffer, object_handle)) != NULL;
+        case VK_OBJECT_TYPE_IMAGE:
+            return image_handle_lookup_for_device(device, PDOCKER_VK_OBJECT_HANDLE_AS(VkImage, object_handle)) != NULL;
+        case VK_OBJECT_TYPE_BUFFER_VIEW:
+            return buffer_view_handle_lookup_for_device(device, PDOCKER_VK_OBJECT_HANDLE_AS(VkBufferView, object_handle)) != NULL;
+        case VK_OBJECT_TYPE_IMAGE_VIEW:
+            return image_view_handle_lookup_for_device(device, PDOCKER_VK_OBJECT_HANDLE_AS(VkImageView, object_handle)) != NULL;
+        case VK_OBJECT_TYPE_SAMPLER:
+            return sampler_handle_lookup_for_device(device, PDOCKER_VK_OBJECT_HANDLE_AS(VkSampler, object_handle)) != NULL;
+        case VK_OBJECT_TYPE_SHADER_MODULE:
+            return shader_module_handle_lookup_for_device(device, PDOCKER_VK_OBJECT_HANDLE_AS(VkShaderModule, object_handle)) != NULL;
+        case VK_OBJECT_TYPE_PIPELINE_LAYOUT:
+            return pipeline_layout_handle_lookup_for_device(device, PDOCKER_VK_OBJECT_HANDLE_AS(VkPipelineLayout, object_handle)) != NULL;
+        case VK_OBJECT_TYPE_RENDER_PASS:
+            return render_pass_handle_lookup_for_device(device, PDOCKER_VK_OBJECT_HANDLE_AS(VkRenderPass, object_handle)) != NULL;
+        case VK_OBJECT_TYPE_PIPELINE:
+            return pipeline_handle_lookup_for_device(device, PDOCKER_VK_OBJECT_HANDLE_AS(VkPipeline, object_handle)) != NULL;
+        case VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT:
+            return descriptor_set_layout_handle_lookup_for_device(device, PDOCKER_VK_OBJECT_HANDLE_AS(VkDescriptorSetLayout, object_handle)) != NULL;
+        case VK_OBJECT_TYPE_DESCRIPTOR_POOL:
+            return descriptor_pool_handle_lookup_for_device(device, PDOCKER_VK_OBJECT_HANDLE_AS(VkDescriptorPool, object_handle)) != NULL;
+        case VK_OBJECT_TYPE_DESCRIPTOR_SET:
+            return descriptor_set_handle_lookup_for_device(device, PDOCKER_VK_OBJECT_HANDLE_AS(VkDescriptorSet, object_handle)) != NULL;
+        case VK_OBJECT_TYPE_FRAMEBUFFER:
+            return framebuffer_handle_lookup_for_device(device, PDOCKER_VK_OBJECT_HANDLE_AS(VkFramebuffer, object_handle)) != NULL;
+        case VK_OBJECT_TYPE_COMMAND_POOL:
+            return command_pool_handle_lookup_for_device(device, PDOCKER_VK_OBJECT_HANDLE_AS(VkCommandPool, object_handle)) != NULL;
+        case VK_OBJECT_TYPE_COMMAND_BUFFER:
+            return command_buffer_handle_lookup_for_device(device, PDOCKER_VK_OBJECT_HANDLE_AS(VkCommandBuffer, object_handle)) != NULL;
+        case VK_OBJECT_TYPE_FENCE:
+            return fence_handle_lookup_for_device(device, PDOCKER_VK_OBJECT_HANDLE_AS(VkFence, object_handle)) != NULL;
+        case VK_OBJECT_TYPE_SEMAPHORE:
+            return semaphore_handle_lookup_for_device(device, PDOCKER_VK_OBJECT_HANDLE_AS(VkSemaphore, object_handle)) != NULL;
+        case VK_OBJECT_TYPE_EVENT:
+            return event_handle_lookup_for_device(device, PDOCKER_VK_OBJECT_HANDLE_AS(VkEvent, object_handle)) != NULL;
+        case VK_OBJECT_TYPE_QUERY_POOL:
+            return query_pool_handle_lookup_for_device(device, PDOCKER_VK_OBJECT_HANDLE_AS(VkQueryPool, object_handle)) != NULL;
+        case VK_OBJECT_TYPE_PIPELINE_CACHE:
+            return pipeline_cache_handle_lookup_for_device(device, PDOCKER_VK_OBJECT_HANDLE_AS(VkPipelineCache, object_handle)) != NULL;
+#ifdef VK_EXT_VALIDATION_CACHE_EXTENSION_NAME
+        case VK_OBJECT_TYPE_VALIDATION_CACHE_EXT:
+            return validation_cache_handle_live_for_device(device, PDOCKER_VK_OBJECT_HANDLE_AS(VkValidationCacheEXT, object_handle));
+#endif
+#ifdef VK_KHR_SWAPCHAIN_EXTENSION_NAME
+        case VK_OBJECT_TYPE_SWAPCHAIN_KHR:
+            return swapchain_handle_lookup_for_device(device, PDOCKER_VK_OBJECT_HANDLE_AS(VkSwapchainKHR, object_handle)) != NULL;
+#endif
+#ifdef VK_KHR_SURFACE_EXTENSION_NAME
+        case VK_OBJECT_TYPE_SURFACE_KHR:
+            return surface_handle_lookup(PDOCKER_VK_OBJECT_HANDLE_AS(VkSurfaceKHR, object_handle)) != NULL;
+#endif
+        default:
+            return false;
+    }
+}
+
 #ifdef VK_EXT_DEBUG_MARKER_EXTENSION_NAME
+static VkObjectType pdocker_vk_object_type_from_debug_report_type(
+        VkDebugReportObjectTypeEXT object_type) {
+    switch (object_type) {
+        case VK_DEBUG_REPORT_OBJECT_TYPE_DEVICE_EXT: return VK_OBJECT_TYPE_DEVICE;
+        case VK_DEBUG_REPORT_OBJECT_TYPE_QUEUE_EXT: return VK_OBJECT_TYPE_QUEUE;
+        case VK_DEBUG_REPORT_OBJECT_TYPE_DEVICE_MEMORY_EXT: return VK_OBJECT_TYPE_DEVICE_MEMORY;
+        case VK_DEBUG_REPORT_OBJECT_TYPE_BUFFER_EXT: return VK_OBJECT_TYPE_BUFFER;
+        case VK_DEBUG_REPORT_OBJECT_TYPE_IMAGE_EXT: return VK_OBJECT_TYPE_IMAGE;
+        case VK_DEBUG_REPORT_OBJECT_TYPE_BUFFER_VIEW_EXT: return VK_OBJECT_TYPE_BUFFER_VIEW;
+        case VK_DEBUG_REPORT_OBJECT_TYPE_IMAGE_VIEW_EXT: return VK_OBJECT_TYPE_IMAGE_VIEW;
+        case VK_DEBUG_REPORT_OBJECT_TYPE_SAMPLER_EXT: return VK_OBJECT_TYPE_SAMPLER;
+        case VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT: return VK_OBJECT_TYPE_SHADER_MODULE;
+        case VK_DEBUG_REPORT_OBJECT_TYPE_PIPELINE_LAYOUT_EXT: return VK_OBJECT_TYPE_PIPELINE_LAYOUT;
+        case VK_DEBUG_REPORT_OBJECT_TYPE_RENDER_PASS_EXT: return VK_OBJECT_TYPE_RENDER_PASS;
+        case VK_DEBUG_REPORT_OBJECT_TYPE_PIPELINE_EXT: return VK_OBJECT_TYPE_PIPELINE;
+        case VK_DEBUG_REPORT_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT_EXT: return VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT;
+        case VK_DEBUG_REPORT_OBJECT_TYPE_DESCRIPTOR_POOL_EXT: return VK_OBJECT_TYPE_DESCRIPTOR_POOL;
+        case VK_DEBUG_REPORT_OBJECT_TYPE_DESCRIPTOR_SET_EXT: return VK_OBJECT_TYPE_DESCRIPTOR_SET;
+        case VK_DEBUG_REPORT_OBJECT_TYPE_FRAMEBUFFER_EXT: return VK_OBJECT_TYPE_FRAMEBUFFER;
+        case VK_DEBUG_REPORT_OBJECT_TYPE_COMMAND_POOL_EXT: return VK_OBJECT_TYPE_COMMAND_POOL;
+        case VK_DEBUG_REPORT_OBJECT_TYPE_COMMAND_BUFFER_EXT: return VK_OBJECT_TYPE_COMMAND_BUFFER;
+        case VK_DEBUG_REPORT_OBJECT_TYPE_FENCE_EXT: return VK_OBJECT_TYPE_FENCE;
+        case VK_DEBUG_REPORT_OBJECT_TYPE_SEMAPHORE_EXT: return VK_OBJECT_TYPE_SEMAPHORE;
+        case VK_DEBUG_REPORT_OBJECT_TYPE_EVENT_EXT: return VK_OBJECT_TYPE_EVENT;
+        case VK_DEBUG_REPORT_OBJECT_TYPE_QUERY_POOL_EXT: return VK_OBJECT_TYPE_QUERY_POOL;
+        case VK_DEBUG_REPORT_OBJECT_TYPE_PIPELINE_CACHE_EXT: return VK_OBJECT_TYPE_PIPELINE_CACHE;
+#ifdef VK_KHR_SURFACE_EXTENSION_NAME
+        case VK_DEBUG_REPORT_OBJECT_TYPE_SURFACE_KHR_EXT: return VK_OBJECT_TYPE_SURFACE_KHR;
+#endif
+#ifdef VK_KHR_SWAPCHAIN_EXTENSION_NAME
+        case VK_DEBUG_REPORT_OBJECT_TYPE_SWAPCHAIN_KHR_EXT: return VK_OBJECT_TYPE_SWAPCHAIN_KHR;
+#endif
+        default: return VK_OBJECT_TYPE_UNKNOWN;
+    }
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL vkDebugMarkerSetObjectNameEXT(
         VkDevice device,
         const VkDebugMarkerObjectNameInfoEXT *pNameInfo) {
@@ -37480,7 +37607,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkDebugMarkerSetObjectNameEXT(
     if (pNameInfo->pNext) {
         return unsupported_create_info_pnext_result("vkDebugMarkerSetObjectNameEXT", pNameInfo->pNext);
     }
-    if (pNameInfo->object == 0) {
+    VkObjectType object_type = pdocker_vk_object_type_from_debug_report_type(pNameInfo->objectType);
+    if (!pdocker_vk_object_handle_owned_by_device(device, object_type, pNameInfo->object)) {
         trace_icd_runtime_failure("debug-marker-object-name-target-invalid", VK_ERROR_INITIALIZATION_FAILED);
         return VK_ERROR_INITIALIZATION_FAILED;
     }
@@ -37497,7 +37625,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkDebugMarkerSetObjectTagEXT(
     if (pTagInfo->pNext) {
         return unsupported_create_info_pnext_result("vkDebugMarkerSetObjectTagEXT", pTagInfo->pNext);
     }
-    if (pTagInfo->object == 0 || (pTagInfo->tagSize > 0 && !pTagInfo->pTag)) {
+    VkObjectType object_type = pdocker_vk_object_type_from_debug_report_type(pTagInfo->objectType);
+    if (!pdocker_vk_object_handle_owned_by_device(device, object_type, pTagInfo->object) ||
+        (pTagInfo->tagSize > 0 && !pTagInfo->pTag)) {
         trace_icd_runtime_failure("debug-marker-object-tag-target-invalid", VK_ERROR_INITIALIZATION_FAILED);
         return VK_ERROR_INITIALIZATION_FAILED;
     }
@@ -37555,7 +37685,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkSetDebugUtilsObjectNameEXT(
     if (pNameInfo->pNext) {
         return unsupported_create_info_pnext_result("vkSetDebugUtilsObjectNameEXT", pNameInfo->pNext);
     }
-    if (pNameInfo->objectType == VK_OBJECT_TYPE_UNKNOWN || pNameInfo->objectHandle == 0) {
+    if (!pdocker_vk_object_handle_owned_by_device(
+            device, pNameInfo->objectType, pNameInfo->objectHandle)) {
         trace_icd_runtime_failure("debug-utils-object-name-target-invalid", VK_ERROR_INITIALIZATION_FAILED);
         return VK_ERROR_INITIALIZATION_FAILED;
     }
@@ -37572,7 +37703,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkSetDebugUtilsObjectTagEXT(
     if (pTagInfo->pNext) {
         return unsupported_create_info_pnext_result("vkSetDebugUtilsObjectTagEXT", pTagInfo->pNext);
     }
-    if (pTagInfo->objectType == VK_OBJECT_TYPE_UNKNOWN || pTagInfo->objectHandle == 0 ||
+    if (!pdocker_vk_object_handle_owned_by_device(
+            device, pTagInfo->objectType, pTagInfo->objectHandle) ||
         (pTagInfo->tagSize > 0 && !pTagInfo->pTag)) {
         trace_icd_runtime_failure("debug-utils-object-tag-target-invalid", VK_ERROR_INITIALIZATION_FAILED);
         return VK_ERROR_INITIALIZATION_FAILED;
@@ -37792,7 +37924,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkSetPrivateData(
         trace_icd_runtime_failure("private-data-slot-invalid", VK_ERROR_INITIALIZATION_FAILED);
         return VK_ERROR_INITIALIZATION_FAILED;
     }
-    if (objectType == VK_OBJECT_TYPE_UNKNOWN || objectHandle == 0) {
+    if (!pdocker_vk_object_handle_owned_by_device(device, objectType, objectHandle)) {
         trace_icd_runtime_failure("private-data-object-invalid", VK_ERROR_INITIALIZATION_FAILED);
         return VK_ERROR_INITIALIZATION_FAILED;
     }
@@ -37830,7 +37962,7 @@ VKAPI_ATTR void VKAPI_CALL vkGetPrivateData(
     if (!pData) return;
     *pData = 0;
     PdockerVkPrivateDataSlot *slot = private_data_slot_handle_lookup_for_device(device, privateDataSlot);
-    if (!slot || objectType == VK_OBJECT_TYPE_UNKNOWN || objectHandle == 0) return;
+    if (!slot || !pdocker_vk_object_handle_owned_by_device(device, objectType, objectHandle)) return;
     for (const PdockerVkPrivateDataRecord *record = slot->records; record; record = record->next) {
         if (record->object_type == objectType && record->object_handle == objectHandle) {
             *pData = record->data;

@@ -7015,6 +7015,10 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 private_data = 0;
                 vkGetPrivateData(device_a, VK_OBJECT_TYPE_BUFFER, (uint64_t)(uintptr_t)buffer_a, private_slot_a, &private_data);
                 if (private_data != 0x456u) return 45;
+                if (vkSetPrivateData(device_a, VK_OBJECT_TYPE_BUFFER, (uint64_t)(uintptr_t)buffer_b, private_slot_a, 0x789u) == VK_SUCCESS) return 48;
+                private_data = 77;
+                vkGetPrivateData(device_a, VK_OBJECT_TYPE_BUFFER, (uint64_t)(uintptr_t)buffer_b, private_slot_a, &private_data);
+                if (private_data != 0) return 49;
                 vkDestroyPrivateDataSlot(device_b, private_slot_a, NULL);
                 private_data = 0;
                 vkGetPrivateData(device_a, VK_OBJECT_TYPE_BUFFER, (uint64_t)(uintptr_t)buffer_a, private_slot_a, &private_data);
@@ -7023,6 +7027,54 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 private_data = 77;
                 vkGetPrivateData(device_a, VK_OBJECT_TYPE_BUFFER, (uint64_t)(uintptr_t)buffer_a, private_slot_a, &private_data);
                 if (private_data != 0) return 47;
+#endif
+
+#ifdef VK_EXT_DEBUG_UTILS_EXTENSION_NAME
+                VkDebugUtilsObjectNameInfoEXT debug_name;
+                memset(&debug_name, 0, sizeof(debug_name));
+                debug_name.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
+                debug_name.objectType = VK_OBJECT_TYPE_BUFFER;
+                debug_name.objectHandle = (uint64_t)(uintptr_t)buffer_a;
+                debug_name.pObjectName = "buffer-a";
+                if (vkSetDebugUtilsObjectNameEXT(device_a, &debug_name) != VK_SUCCESS) return 51;
+                debug_name.objectHandle = (uint64_t)(uintptr_t)buffer_b;
+                if (vkSetDebugUtilsObjectNameEXT(device_a, &debug_name) == VK_SUCCESS) return 52;
+
+                VkDebugUtilsObjectTagInfoEXT debug_tag;
+                memset(&debug_tag, 0, sizeof(debug_tag));
+                debug_tag.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_TAG_INFO_EXT;
+                debug_tag.objectType = VK_OBJECT_TYPE_BUFFER;
+                debug_tag.objectHandle = (uint64_t)(uintptr_t)buffer_a;
+                debug_tag.tagName = 1;
+                debug_tag.tagSize = 0;
+                debug_tag.pTag = NULL;
+                if (vkSetDebugUtilsObjectTagEXT(device_a, &debug_tag) != VK_SUCCESS) return 53;
+                debug_tag.objectHandle = (uint64_t)(uintptr_t)buffer_b;
+                if (vkSetDebugUtilsObjectTagEXT(device_a, &debug_tag) == VK_SUCCESS) return 54;
+#endif
+
+#ifdef VK_EXT_DEBUG_MARKER_EXTENSION_NAME
+                VkDebugMarkerObjectNameInfoEXT marker_name;
+                memset(&marker_name, 0, sizeof(marker_name));
+                marker_name.sType = VK_STRUCTURE_TYPE_DEBUG_MARKER_OBJECT_NAME_INFO_EXT;
+                marker_name.objectType = VK_DEBUG_REPORT_OBJECT_TYPE_BUFFER_EXT;
+                marker_name.object = (uint64_t)(uintptr_t)buffer_a;
+                marker_name.pObjectName = "buffer-a";
+                if (vkDebugMarkerSetObjectNameEXT(device_a, &marker_name) != VK_SUCCESS) return 61;
+                marker_name.object = (uint64_t)(uintptr_t)buffer_b;
+                if (vkDebugMarkerSetObjectNameEXT(device_a, &marker_name) == VK_SUCCESS) return 62;
+
+                VkDebugMarkerObjectTagInfoEXT marker_tag;
+                memset(&marker_tag, 0, sizeof(marker_tag));
+                marker_tag.sType = VK_STRUCTURE_TYPE_DEBUG_MARKER_OBJECT_TAG_INFO_EXT;
+                marker_tag.objectType = VK_DEBUG_REPORT_OBJECT_TYPE_BUFFER_EXT;
+                marker_tag.object = (uint64_t)(uintptr_t)buffer_a;
+                marker_tag.tagName = 1;
+                marker_tag.tagSize = 0;
+                marker_tag.pTag = NULL;
+                if (vkDebugMarkerSetObjectTagEXT(device_a, &marker_tag) != VK_SUCCESS) return 63;
+                marker_tag.object = (uint64_t)(uintptr_t)buffer_b;
+                if (vkDebugMarkerSetObjectTagEXT(device_a, &marker_tag) == VK_SUCCESS) return 64;
 #endif
 
                 VkMappedMemoryRange range;

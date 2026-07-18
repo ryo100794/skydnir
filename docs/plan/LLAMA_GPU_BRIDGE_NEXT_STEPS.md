@@ -10,6 +10,39 @@ llama.cpp itself remains unmodified.
 ## Current Ground Truth
 
 
+### 2026-07-18 CPU/static Vulkan object-target metadata owner lane
+
+Private-data, debug-utils, and debug-marker object-target APIs now validate the
+object handle itself, not only the metadata slot or input shape.
+`vkSetPrivateData` and `vkGetPrivateData` use a generic `VkObjectType` owner
+resolver before recording or returning metadata.  `vkSetDebugUtilsObjectNameEXT`,
+`vkSetDebugUtilsObjectTagEXT`, `vkDebugMarkerSetObjectNameEXT`, and
+`vkDebugMarkerSetObjectTagEXT` use the same resolver; debug-marker report object
+types are first mapped into `VkObjectType`.  Cross-device object targets now fail
+closed instead of allowing an arbitrary non-zero handle to be annotated.
+
+The resolver covers the bridge-owned resource graph: device/queue, memory,
+buffers, images, views, samplers, shader modules, pipeline/layout/cache objects,
+descriptor objects, framebuffer/render-pass objects, command/sync/query objects,
+validation caches, surfaces, and swapchains.  `VK_NULL_HANDLE` device calls keep
+legacy harness compatibility and remain permissive for non-zero known object
+handles; real logical-device calls are owner/lifetime checked.
+
+This is CPU/static Vulkan pass-through hardening only.  It does not change
+llama.cpp, Dockerfiles, models, prompts, shader bytes, or executor arithmetic.
+
+Evidence: `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`,
+`tests.test_gpu_abi_contract`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_device_owner_rejects_cross_device_memory_resource_misuse`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_device_owner_rejects_cross_device_metadata_render_wsi_handles`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_device_owner_rejects_cross_device_command_submit_sync`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_command_recording_rejects_cross_device_transfer_resources`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_destroy_device_retires_live_device_children_and_queue`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_wsi_surface_swapchain_handles_fail_closed_after_destroy`,
+`scripts/build-gpu-shim.sh`, `scripts/verify-native-payloads.py`,
+`./gradlew :app:assembleDebug`.
+
+
 ### 2026-07-18 CPU/static Vulkan validation-cache and private-data owner lane
 
 Validation caches and private-data slots now carry creator-device ownership.
