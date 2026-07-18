@@ -4911,6 +4911,196 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
+    def test_framebuffer_snapshots_attachment_image_views_for_render_pass_normalization(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            static void init_image(PdockerVkImage *image,
+                                   uint64_t object_id,
+                                   VkFormat format,
+                                   VkSampleCountFlagBits samples,
+                                   VkImageAspectFlags aspect) {{
+                memset(image, 0, sizeof(*image));
+                image->object_id = object_id;
+                image->image_type = VK_IMAGE_TYPE_2D;
+                image->format = format;
+                image->extent = (VkExtent3D){{64, 64, 1}};
+                image->mip_levels = 1;
+                image->array_layers = 1;
+                image->samples = samples;
+                image->usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                               VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+                image->requirements_size = 4096;
+                image->current_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+                image->generation = object_id + 1000;
+                image_register(image);
+            }}
+
+            static void init_view(PdockerVkImageView *view,
+                                  uint64_t object_id,
+                                  PdockerVkImage *image,
+                                  VkFormat format,
+                                  VkImageAspectFlags aspect) {{
+                memset(view, 0, sizeof(*view));
+                view->object_id = object_id;
+                view->image = image;
+                view->view_type = VK_IMAGE_VIEW_TYPE_2D;
+                view->format = format;
+                view->subresource_range.aspectMask = aspect;
+                view->subresource_range.baseMipLevel = 0;
+                view->subresource_range.levelCount = 1;
+                view->subresource_range.baseArrayLayer = 0;
+                view->subresource_range.layerCount = 1;
+                view->generation = object_id + 2000;
+                image_view_register(view);
+            }}
+
+            int main(void) {{
+                PdockerVkImage color_image, color_resolve_image, ds_image, ds_resolve_image;
+                PdockerVkImageView color_view, color_resolve_view, ds_view, ds_resolve_view;
+                PdockerVkRenderPass rp;
+                VkImageView attachments[4];
+                VkFramebufferCreateInfo fb_info;
+                VkFramebuffer fb_handle = VK_NULL_HANDLE;
+                PdockerVkFramebuffer *fb = NULL;
+                PdockerVkCommandBuffer cmd;
+                VkRect2D area = {{ {{0, 0}}, {{64, 64}} }};
+
+                init_image(&color_image, 101, VK_FORMAT_R8G8B8A8_UNORM,
+                           VK_SAMPLE_COUNT_4_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
+                init_image(&color_resolve_image, 102, VK_FORMAT_R8G8B8A8_UNORM,
+                           VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
+                init_image(&ds_image, 201, VK_FORMAT_D24_UNORM_S8_UINT,
+                           VK_SAMPLE_COUNT_4_BIT,
+                           VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT);
+                init_image(&ds_resolve_image, 202, VK_FORMAT_D24_UNORM_S8_UINT,
+                           VK_SAMPLE_COUNT_1_BIT,
+                           VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT);
+                init_view(&color_view, 301, &color_image, VK_FORMAT_R8G8B8A8_UNORM,
+                          VK_IMAGE_ASPECT_COLOR_BIT);
+                init_view(&color_resolve_view, 302, &color_resolve_image, VK_FORMAT_R8G8B8A8_UNORM,
+                          VK_IMAGE_ASPECT_COLOR_BIT);
+                init_view(&ds_view, 401, &ds_image, VK_FORMAT_D24_UNORM_S8_UINT,
+                          VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT);
+                init_view(&ds_resolve_view, 402, &ds_resolve_image, VK_FORMAT_D24_UNORM_S8_UINT,
+                          VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT);
+
+                memset(&rp, 0, sizeof(rp));
+                rp.attachment_count = 4;
+                rp.subpass_count = 1;
+                rp.attachments[0].format = VK_FORMAT_R8G8B8A8_UNORM;
+                rp.attachments[0].samples = VK_SAMPLE_COUNT_4_BIT;
+                rp.attachments[0].initial_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+                rp.attachments[0].final_layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+                rp.attachments[1] = rp.attachments[0];
+                rp.attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
+                rp.attachments[2].format = VK_FORMAT_D24_UNORM_S8_UINT;
+                rp.attachments[2].samples = VK_SAMPLE_COUNT_4_BIT;
+                rp.attachments[2].initial_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+                rp.attachments[2].final_layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+                rp.attachments[3] = rp.attachments[2];
+                rp.attachments[3].samples = VK_SAMPLE_COUNT_1_BIT;
+                rp.subpasses[0].color_attachment_count = 1;
+                rp.subpasses[0].color_attachments[0] = 0;
+                rp.subpasses[0].color_layouts[0] = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+                rp.subpasses[0].resolve_attachments[0] = 1;
+                rp.subpasses[0].resolve_layouts[0] = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+                rp.subpasses[0].has_depth_stencil_attachment = true;
+                rp.subpasses[0].depth_stencil_attachment = 2;
+                rp.subpasses[0].depth_stencil_layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+                rp.subpasses[0].has_depth_stencil_resolve_attachment = true;
+                rp.subpasses[0].depth_stencil_resolve_attachment = 3;
+                rp.subpasses[0].depth_stencil_resolve_layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+                rp.subpasses[0].depth_resolve_mode = VK_RESOLVE_MODE_AVERAGE_BIT;
+                rp.subpasses[0].stencil_resolve_mode = VK_RESOLVE_MODE_AVERAGE_BIT;
+
+                memset(&fb_info, 0, sizeof(fb_info));
+                fb_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+                fb_info.renderPass = pdocker_vk_render_pass_to_handle(&rp);
+                fb_info.attachmentCount = 1;
+                VkImageView bogus = (VkImageView)(uintptr_t)0x1234u;
+                fb_info.pAttachments = &bogus;
+                fb_info.width = 64;
+                fb_info.height = 64;
+                fb_info.layers = 1;
+                if (vkCreateFramebuffer(VK_NULL_HANDLE, &fb_info, NULL, &fb_handle) != VK_ERROR_INITIALIZATION_FAILED ||
+                    fb_handle != VK_NULL_HANDLE) {{
+                    fprintf(stderr, "bogus framebuffer attachment was accepted\\n");
+                    return 1;
+                }}
+
+                attachments[0] = pdocker_vk_image_view_to_handle(&color_view);
+                attachments[1] = pdocker_vk_image_view_to_handle(&color_resolve_view);
+                attachments[2] = pdocker_vk_image_view_to_handle(&ds_view);
+                attachments[3] = pdocker_vk_image_view_to_handle(&ds_resolve_view);
+                fb_info.attachmentCount = 4;
+                fb_info.pAttachments = attachments;
+                if (vkCreateFramebuffer(VK_NULL_HANDLE, &fb_info, NULL, &fb_handle) != VK_SUCCESS ||
+                    fb_handle == VK_NULL_HANDLE) {{
+                    fprintf(stderr, "valid framebuffer creation failed\\n");
+                    return 2;
+                }}
+                fb = pdocker_vk_framebuffer_from_handle(fb_handle);
+                if (!fb || !fb->attachment_snapshots[0].valid || !fb->attachment_snapshots[1].valid ||
+                    !fb->attachment_snapshots[2].valid || !fb->attachment_snapshots[3].valid) {{
+                    fprintf(stderr, "framebuffer did not snapshot all attachments\\n");
+                    return 3;
+                }}
+                if (fb->attachment_snapshots[0].object_id != 301 ||
+                    fb->attachment_snapshots[1].samples != VK_SAMPLE_COUNT_1_BIT ||
+                    fb->attachment_snapshots[2].subresource_range.aspectMask !=
+                        (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)) {{
+                    fprintf(stderr, "framebuffer attachment snapshot contents were wrong\\n");
+                    return 4;
+                }}
+
+                memset(&cmd, 0, sizeof(cmd));
+                if (!populate_render_pass_subpass_rendering_state(&cmd, &rp, fb, area,
+                                                                  NULL, 0, 0,
+                                                                  VK_SUBPASS_CONTENTS_INLINE)) {{
+                    fprintf(stderr, "render pass populate failed\\n");
+                    return 5;
+                }}
+                if (!cmd.active_color_attachments[0].image_view_snapshot.valid ||
+                    cmd.active_color_attachments[0].image_view_snapshot.object_id != 301 ||
+                    !cmd.active_color_attachments[0].resolve_image_view_snapshot.valid ||
+                    cmd.active_color_attachments[0].resolve_image_view_snapshot.object_id != 302) {{
+                    fprintf(stderr, "color/resolve snapshots were not propagated\\n");
+                    return 6;
+                }}
+                if (!cmd.active_depth_attachment.image_view_snapshot.valid ||
+                    cmd.active_depth_attachment.image_view_snapshot.object_id != 401 ||
+                    !cmd.active_depth_attachment.resolve_image_view_snapshot.valid ||
+                    cmd.active_depth_attachment.resolve_image_view_snapshot.object_id != 402 ||
+                    !cmd.active_stencil_attachment.image_view_snapshot.valid ||
+                    cmd.active_stencil_attachment.image_view_snapshot.object_id != 401 ||
+                    !cmd.active_stencil_attachment.resolve_image_view_snapshot.valid ||
+                    cmd.active_stencil_attachment.resolve_image_view_snapshot.object_id != 402) {{
+                    fprintf(stderr, "depth/stencil snapshots were not propagated\\n");
+                    return 7;
+                }}
+
+                vkDestroyFramebuffer(VK_NULL_HANDLE, fb_handle, NULL);
+                fb_handle = VK_NULL_HANDLE;
+                vkDestroyImageView(VK_NULL_HANDLE, attachments[0], NULL);
+                fb_info.attachmentCount = 1;
+                fb_info.pAttachments = attachments;
+                if (vkCreateFramebuffer(VK_NULL_HANDLE, &fb_info, NULL, &fb_handle) != VK_ERROR_INITIALIZATION_FAILED ||
+                    fb_handle != VK_NULL_HANDLE) {{
+                    fprintf(stderr, "destroyed framebuffer attachment was accepted\\n");
+                    return 8;
+                }}
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_image_view_live_handles_fail_closed_after_destroy(self):
         source = textwrap.dedent(
             f"""

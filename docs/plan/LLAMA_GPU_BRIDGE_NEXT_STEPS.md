@@ -10,6 +10,31 @@ llama.cpp itself remains unmodified.
 ## Current Ground Truth
 
 
+### 2026-07-18 CPU/static Vulkan framebuffer attachment snapshot lane
+
+Render-pass normalization no longer depends on re-reading raw framebuffer
+attachment image-view fields at submit-building time.  `VkFramebuffer` creation
+now resolves each attachment through the live `VkImageView` registry, snapshots
+the image-view state into `PdockerVkFramebuffer.attachment_snapshots[]`, and
+fails closed when an attachment handle is fabricated, stale, destroyed, or
+otherwise cannot produce a valid image-view snapshot.
+
+The normalized render-pass path copies those framebuffer snapshots into
+`PdockerVkRenderingAttachmentState` for color, resolve, depth, and stencil
+attachments.  Subpass and final-layout transition recording now uses
+`PdockerVkImageViewSnapshot` data for image identity and subresource ranges, and
+command buffers retain a parallel active attachment snapshot table for final
+layout transitions.  Raw image-view pointers remain only as local object identity
+anchors, not as the source of transport/barrier semantics.
+
+This is generic Vulkan pass-through hardening.  It does not change llama.cpp,
+Dockerfiles, models, prompts, shader bytes, or executor-side arithmetic.
+
+Evidence: `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`,
+`tests.test_gpu_abi_contract`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_framebuffer_snapshots_attachment_image_views_for_render_pass_normalization`.
+
+
 ### 2026-07-18 CPU/static Vulkan image/view/sampler live-handle lane
 
 `VkImage`, `VkImageView`, and `VkSampler` now follow the same live-registry and

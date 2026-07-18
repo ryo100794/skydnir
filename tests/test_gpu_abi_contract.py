@@ -2013,7 +2013,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "input_attachment_count != 0 || preserve_attachment_count != 0",
             "append_render_pass_subpass_layout_transitions",
             "append_render_pass_final_layout_transitions",
-            "record_render_pass_attachment_transition",
+            "record_render_pass_attachment_snapshot_transition",
             "view->image->layout_mixed",
             "capture_render_pass_dependencies(",
             "capture_render_pass_dependencies2(",
@@ -2213,7 +2213,7 @@ class GpuAbiContractTest(unittest.TestCase):
     def test_vulkan_render_pass_normalization_synthesizes_layout_barriers(self):
         icd = VULKAN_ICD.read_text()
         transition_body = icd.split(
-            "static bool record_render_pass_attachment_transition", 1
+            "static bool record_render_pass_attachment_snapshot_transition", 1
         )[1].split("static bool render_pass_track_attachment_layout", 1)[0]
         subpass_transition_body = icd.split(
             "static bool append_render_pass_subpass_layout_transitions", 1
@@ -2225,7 +2225,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "static bool render_pass_subpass_can_normalize_to_dynamic_rendering", 1
         )[1].split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateRenderPass", 1)[0]
         for marker in [
-            "view->image->layout_mixed",
+            "snapshot->image->layout_mixed",
+            "snapshot->subresource_range",
             "record_image_barrier_op((VkCommandBuffer)cmd",
             "VK_QUEUE_FAMILY_IGNORED",
             "cmd->image_barrier_op_count == before + 1u",
@@ -2244,6 +2245,11 @@ class GpuAbiContractTest(unittest.TestCase):
             "render_pass_layout_is_read_only(cmd->active_depth_attachment.image_layout)",
             "dependency && dependency->seen",
             "record_memory_barrier_op((VkCommandBuffer)cmd",
+            "record_render_pass_attachment_snapshot_transition",
+            "&attachment->image_view_snapshot",
+            "&attachment->resolve_image_view_snapshot",
+            "ds_snapshot",
+            "resolve_snapshot",
             "render_pass_track_attachment_layout",
             "append_graphics_barrier_record_for_ranges",
         ]:
@@ -2252,7 +2258,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "rp->attachments[a].final_layout",
             "cmd->active_render_pass_attachment_seen[a]",
             "cmd->active_render_pass_attachment_layouts[a]",
-            "cmd->active_render_pass_attachment_views[a]",
+            "cmd->active_render_pass_attachment_view_snapshots[a].valid",
+            "&cmd->active_render_pass_attachment_view_snapshots[a]",
             "rp->end_dependency.seen",
             "record_memory_barrier_op((VkCommandBuffer)cmd",
             "append_graphics_barrier_record_for_ranges",
@@ -11600,6 +11607,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("pCreateInfo->flags != 0", framebuffer_body)
         self.assertIn("framebuffer-flags-unsupported", framebuffer_body)
         self.assertIn("pCreateInfo->attachmentCount > 0 && !pCreateInfo->pAttachments", framebuffer_body)
+        self.assertIn("image_view_handle_lookup(pCreateInfo->pAttachments[i])", framebuffer_body)
+        self.assertIn("snapshot_image_view_state(&fb->attachment_snapshots[i]", framebuffer_body)
+        self.assertIn("free(fb);", framebuffer_body)
         self.assertIn("VK_STRUCTURE_TYPE_FRAMEBUFFER_ATTACHMENTS_CREATE_INFO", framebuffer_pnext_body)
         self.assertIn("info->attachmentImageInfoCount != 0 || info->pAttachmentImageInfos", framebuffer_pnext_body)
         self.assertIn('unsupported_create_info_pnext_result("vkCreateFramebuffer", node)', framebuffer_pnext_body)
@@ -11864,7 +11874,15 @@ class GpuAbiContractTest(unittest.TestCase):
         descriptor_layout_body = c_function_body(icd, "vkCreateDescriptorSetLayout")
         self.assertIn("sampler_handle_lookup(binding->pImmutableSamplers[array_element])", descriptor_layout_body)
         framebuffer_body = c_function_body(icd, "vkCreateFramebuffer")
+        populate_attachment_body = c_function_body(icd, "populate_render_pass_attachment_for_rendering")
+        populate_subpass_body = c_function_body(icd, "populate_render_pass_subpass_rendering_state")
+        self.assertIn("PdockerVkImageViewSnapshot attachment_snapshots[PDOCKER_VK_MAX_STORAGE_BUFFERS];", icd)
         self.assertIn("image_view_handle_lookup(pCreateInfo->pAttachments[i])", framebuffer_body)
+        self.assertIn("snapshot_image_view_state(&fb->attachment_snapshots[i]", framebuffer_body)
+        self.assertIn("dst->image_view_snapshot = *snapshot;", populate_attachment_body)
+        self.assertIn("cmd->active_color_attachments[c].resolve_image_view_snapshot", populate_subpass_body)
+        self.assertIn("cmd->active_depth_attachment.resolve_image_view_snapshot", populate_subpass_body)
+        self.assertIn("cmd->active_stencil_attachment.resolve_image_view_snapshot", populate_subpass_body)
         self.assertNotIn("free(pdocker_vk_image_view_from_handle(imageView));", icd)
         self.assertNotIn("free(pdocker_vk_sampler_from_handle(sampler));", icd)
         self.assertIn("if (!binding->buffer && !binding->buffer_view && !binding->image_view && !binding->sampler) continue;", icd)

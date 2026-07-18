@@ -1175,6 +1175,7 @@ struct PdockerVkFramebuffer {
     PdockerVkRenderPass *render_pass;
     uint32_t attachment_count;
     PdockerVkImageView *attachments[PDOCKER_VK_MAX_STORAGE_BUFFERS];
+    PdockerVkImageViewSnapshot attachment_snapshots[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     uint32_t width;
     uint32_t height;
     uint32_t layers;
@@ -1630,6 +1631,7 @@ typedef struct {
     VkClearValue active_clear_values[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     uint32_t active_clear_value_count;
     PdockerVkImageView *active_render_pass_attachment_views[PDOCKER_VK_MAX_STORAGE_BUFFERS];
+    PdockerVkImageViewSnapshot active_render_pass_attachment_view_snapshots[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     VkImageLayout active_render_pass_attachment_layouts[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     bool active_render_pass_attachment_seen[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     bool graphics_unsupported;
@@ -26990,6 +26992,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateFramebuffer(
         fb->attachments[i] = pCreateInfo->pAttachments
             ? image_view_handle_lookup(pCreateInfo->pAttachments[i])
             : NULL;
+        if (!fb->attachments[i] ||
+            !snapshot_image_view_state(&fb->attachment_snapshots[i], fb->attachments[i]) ||
+            !fb->attachment_snapshots[i].valid) {
+            free(fb);
+            return VK_ERROR_INITIALIZATION_FAILED;
+        }
     }
     fb->width = pCreateInfo->width;
     fb->height = pCreateInfo->height;
@@ -27951,6 +27959,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkBeginCommandBuffer(
     memset(cmd->active_clear_values, 0, sizeof(cmd->active_clear_values));
     cmd->active_clear_value_count = 0;
     memset(cmd->active_render_pass_attachment_views, 0, sizeof(cmd->active_render_pass_attachment_views));
+    memset(cmd->active_render_pass_attachment_view_snapshots, 0, sizeof(cmd->active_render_pass_attachment_view_snapshots));
     memset(cmd->active_render_pass_attachment_layouts, 0, sizeof(cmd->active_render_pass_attachment_layouts));
     memset(cmd->active_render_pass_attachment_seen, 0, sizeof(cmd->active_render_pass_attachment_seen));
     cmd->graphics_unsupported = false;
@@ -28186,10 +28195,12 @@ static bool populate_render_pass_attachment_for_rendering(
         return false;
     }
     PdockerVkImageView *view = fb->attachments[attachment_index];
-    if (!view) return false;
+    const PdockerVkImageViewSnapshot *snapshot = &fb->attachment_snapshots[attachment_index];
+    if (!view || !snapshot->valid) return false;
     const PdockerVkRenderPassAttachmentState *attachment = &rp->attachments[attachment_index];
     memset(dst, 0, sizeof(*dst));
     dst->image_view = view;
+    dst->image_view_snapshot = *snapshot;
     dst->image_layout = layout;
     dst->resolve_image_view = NULL;
     dst->resolve_image_layout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -28322,24 +28333,27 @@ static bool append_graphics_barrier_record_for_ranges(
     return append_graphics_command_record(cmd, &record);
 }
 
-static bool record_render_pass_attachment_transition(
+static bool record_render_pass_attachment_snapshot_transition(
         PdockerVkCommandBuffer *cmd,
-        PdockerVkImageView *view,
+        const PdockerVkImageViewSnapshot *snapshot,
         VkImageLayout old_layout,
         VkImageLayout new_layout,
         VkAccessFlags2 src_access,
         VkAccessFlags2 dst_access,
         VkPipelineStageFlags2 src_stage,
         VkPipelineStageFlags2 dst_stage) {
-    if (!cmd || !view || !view->image || view->image->layout_mixed) return false;
+    if (!cmd || !snapshot || !snapshot->valid || !snapshot->image ||
+        snapshot->image->layout_mixed) {
+        return false;
+    }
     if (old_layout == new_layout) return true;
     if (cmd->image_barrier_op_count >= PDOCKER_VK_MAX_COPY_OPS) return false;
     uint32_t before = cmd->image_barrier_op_count;
     record_image_barrier_op((VkCommandBuffer)cmd,
-                            view->image,
+                            snapshot->image,
                             old_layout,
                             new_layout,
-                            view->subresource_range,
+                            snapshot->subresource_range,
                             src_access,
                             dst_access,
                             src_stage,
@@ -28349,14 +28363,17 @@ static bool record_render_pass_attachment_transition(
     return cmd->image_barrier_op_count == before + 1u;
 }
 
+
 static bool render_pass_track_attachment_layout(
         PdockerVkCommandBuffer *cmd,
         uint32_t attachment_index,
         PdockerVkImageView *view,
+        const PdockerVkImageViewSnapshot *snapshot,
         VkImageLayout layout) {
     if (!cmd || attachment_index >= PDOCKER_VK_MAX_STORAGE_BUFFERS) return false;
-    if (!view || !view->image || view->image->layout_mixed) return false;
+    if (!snapshot || !snapshot->valid || !snapshot->image || snapshot->image->layout_mixed) return false;
     cmd->active_render_pass_attachment_views[attachment_index] = view;
+    cmd->active_render_pass_attachment_view_snapshots[attachment_index] = *snapshot;
     cmd->active_render_pass_attachment_layouts[attachment_index] = layout;
     cmd->active_render_pass_attachment_seen[attachment_index] = true;
     return true;
@@ -28386,8 +28403,8 @@ static bool append_render_pass_subpass_layout_transitions(
             VkImageLayout old_layout = cmd->active_render_pass_attachment_seen[color_index]
                 ? cmd->active_render_pass_attachment_layouts[color_index]
                 : rp->attachments[color_index].initial_layout;
-            if (!record_render_pass_attachment_transition(
-                    cmd, attachment->image_view,
+            if (!record_render_pass_attachment_snapshot_transition(
+                    cmd, &attachment->image_view_snapshot,
                     old_layout,
                     attachment->image_layout,
                     dependency && dependency->seen
@@ -28403,7 +28420,8 @@ static bool append_render_pass_subpass_layout_transitions(
                 return false;
             }
             if (!render_pass_track_attachment_layout(
-                    cmd, color_index, attachment->image_view, attachment->image_layout)) {
+                    cmd, color_index, attachment->image_view,
+                    &attachment->image_view_snapshot, attachment->image_layout)) {
                 return false;
             }
         }
@@ -28412,8 +28430,8 @@ static bool append_render_pass_subpass_layout_transitions(
             VkImageLayout old_layout = cmd->active_render_pass_attachment_seen[resolve_index]
                 ? cmd->active_render_pass_attachment_layouts[resolve_index]
                 : rp->attachments[resolve_index].initial_layout;
-            if (!record_render_pass_attachment_transition(
-                    cmd, attachment->resolve_image_view,
+            if (!record_render_pass_attachment_snapshot_transition(
+                    cmd, &attachment->resolve_image_view_snapshot,
                     old_layout,
                     attachment->resolve_image_layout,
                     dependency && dependency->seen
@@ -28430,6 +28448,7 @@ static bool append_render_pass_subpass_layout_transitions(
             }
             if (!render_pass_track_attachment_layout(
                     cmd, resolve_index, attachment->resolve_image_view,
+                    &attachment->resolve_image_view_snapshot,
                     attachment->resolve_image_layout)) {
                 return false;
             }
@@ -28442,8 +28461,8 @@ static bool append_render_pass_subpass_layout_transitions(
             ? cmd->active_render_pass_attachment_layouts[ds_index]
             : rp->attachments[ds_index].initial_layout;
         if (cmd->active_depth_attachment.image_view &&
-            !record_render_pass_attachment_transition(
-                cmd, cmd->active_depth_attachment.image_view,
+            !record_render_pass_attachment_snapshot_transition(
+                cmd, &cmd->active_depth_attachment.image_view_snapshot,
                 old_layout,
                 cmd->active_depth_attachment.image_layout,
                 dependency && dependency->seen
@@ -28461,8 +28480,8 @@ static bool append_render_pass_subpass_layout_transitions(
         }
         if (cmd->active_stencil_attachment.image_view &&
             cmd->active_stencil_attachment.image_view != cmd->active_depth_attachment.image_view &&
-            !record_render_pass_attachment_transition(
-                cmd, cmd->active_stencil_attachment.image_view,
+            !record_render_pass_attachment_snapshot_transition(
+                cmd, &cmd->active_stencil_attachment.image_view_snapshot,
                 old_layout,
                 cmd->active_stencil_attachment.image_layout,
                 dependency && dependency->seen
@@ -28481,8 +28500,11 @@ static bool append_render_pass_subpass_layout_transitions(
         PdockerVkImageView *ds_view = cmd->active_depth_attachment.image_view
             ? cmd->active_depth_attachment.image_view
             : cmd->active_stencil_attachment.image_view;
+        const PdockerVkImageViewSnapshot *ds_snapshot = cmd->active_depth_attachment.image_view
+            ? &cmd->active_depth_attachment.image_view_snapshot
+            : &cmd->active_stencil_attachment.image_view_snapshot;
         if (ds_view && !render_pass_track_attachment_layout(
-                cmd, ds_index, ds_view, subpass->depth_stencil_layout)) {
+                cmd, ds_index, ds_view, ds_snapshot, subpass->depth_stencil_layout)) {
             return false;
         }
         if (subpass->has_depth_stencil_resolve_attachment &&
@@ -28491,12 +28513,15 @@ static bool append_render_pass_subpass_layout_transitions(
             PdockerVkImageView *resolve_view = cmd->active_depth_attachment.resolve_image_view
                 ? cmd->active_depth_attachment.resolve_image_view
                 : cmd->active_stencil_attachment.resolve_image_view;
+            const PdockerVkImageViewSnapshot *resolve_snapshot = cmd->active_depth_attachment.resolve_image_view
+                ? &cmd->active_depth_attachment.resolve_image_view_snapshot
+                : &cmd->active_stencil_attachment.resolve_image_view_snapshot;
             if (resolve_view) {
                 VkImageLayout resolve_old_layout = cmd->active_render_pass_attachment_seen[resolve_index]
                     ? cmd->active_render_pass_attachment_layouts[resolve_index]
                     : rp->attachments[resolve_index].initial_layout;
-                if (!record_render_pass_attachment_transition(
-                        cmd, resolve_view,
+                if (!record_render_pass_attachment_snapshot_transition(
+                        cmd, resolve_snapshot,
                         resolve_old_layout,
                         subpass->depth_stencil_resolve_layout,
                         dependency && dependency->seen
@@ -28512,7 +28537,7 @@ static bool append_render_pass_subpass_layout_transitions(
                     return false;
                 }
                 if (!render_pass_track_attachment_layout(
-                        cmd, resolve_index, resolve_view,
+                        cmd, resolve_index, resolve_view, resolve_snapshot,
                         subpass->depth_stencil_resolve_layout)) {
                     return false;
                 }
@@ -28538,13 +28563,13 @@ static bool append_render_pass_final_layout_transitions(PdockerVkCommandBuffer *
     uint32_t first = cmd->image_barrier_op_count;
     for (uint32_t a = 0; a < rp->attachment_count && a < PDOCKER_VK_MAX_STORAGE_BUFFERS; ++a) {
         if (!cmd->active_render_pass_attachment_seen[a] ||
-            !cmd->active_render_pass_attachment_views[a]) {
+            !cmd->active_render_pass_attachment_view_snapshots[a].valid) {
             continue;
         }
         VkImageLayout old_layout = cmd->active_render_pass_attachment_layouts[a];
         VkImageLayout final_layout = rp->attachments[a].final_layout;
-        if (!record_render_pass_attachment_transition(
-                cmd, cmd->active_render_pass_attachment_views[a],
+        if (!record_render_pass_attachment_snapshot_transition(
+                cmd, &cmd->active_render_pass_attachment_view_snapshots[a],
                 old_layout,
                 final_layout,
                 render_pass_layout_access_mask(old_layout),
@@ -28590,8 +28615,11 @@ static bool populate_render_pass_subpass_rendering_state(
         }
         if (subpass->resolve_attachments[c] != VK_ATTACHMENT_UNUSED) {
             uint32_t resolve_index = subpass->resolve_attachments[c];
-            if (resolve_index >= fb->attachment_count || !fb->attachments[resolve_index]) return false;
+            if (resolve_index >= fb->attachment_count || !fb->attachments[resolve_index] ||
+                !fb->attachment_snapshots[resolve_index].valid) return false;
             cmd->active_color_attachments[c].resolve_image_view = fb->attachments[resolve_index];
+            cmd->active_color_attachments[c].resolve_image_view_snapshot =
+                fb->attachment_snapshots[resolve_index];
             cmd->active_color_attachments[c].resolve_image_layout = subpass->resolve_layouts[c];
             cmd->active_color_attachments[c].resolve_mode = VK_RESOLVE_MODE_AVERAGE_BIT;
         }
@@ -28614,12 +28642,15 @@ static bool populate_render_pass_subpass_rendering_state(
         }
         if (subpass->has_depth_stencil_resolve_attachment) {
             uint32_t resolve_index = subpass->depth_stencil_resolve_attachment;
-            if (resolve_index >= fb->attachment_count || !fb->attachments[resolve_index]) return false;
+            if (resolve_index >= fb->attachment_count || !fb->attachments[resolve_index] ||
+                !fb->attachment_snapshots[resolve_index].valid) return false;
             VkFormat resolve_format = rp->attachments[resolve_index].format;
             if (!pdocker_vk_format_is_depth_stencil(resolve_format)) return false;
             if (cmd->active_depth_attachment.valid &&
                 subpass->depth_resolve_mode != VK_RESOLVE_MODE_NONE) {
                 cmd->active_depth_attachment.resolve_image_view = fb->attachments[resolve_index];
+                cmd->active_depth_attachment.resolve_image_view_snapshot =
+                    fb->attachment_snapshots[resolve_index];
                 cmd->active_depth_attachment.resolve_image_layout =
                     subpass->depth_stencil_resolve_layout;
                 cmd->active_depth_attachment.resolve_mode = subpass->depth_resolve_mode;
@@ -28627,6 +28658,8 @@ static bool populate_render_pass_subpass_rendering_state(
             if (cmd->active_stencil_attachment.valid &&
                 subpass->stencil_resolve_mode != VK_RESOLVE_MODE_NONE) {
                 cmd->active_stencil_attachment.resolve_image_view = fb->attachments[resolve_index];
+                cmd->active_stencil_attachment.resolve_image_view_snapshot =
+                    fb->attachment_snapshots[resolve_index];
                 cmd->active_stencil_attachment.resolve_image_layout =
                     subpass->depth_stencil_resolve_layout;
                 cmd->active_stencil_attachment.resolve_mode = subpass->stencil_resolve_mode;
@@ -28670,6 +28703,7 @@ static bool append_normalized_render_pass_begin(
     cmd->active_render_pass = rp;
     cmd->active_framebuffer = fb;
     memset(cmd->active_render_pass_attachment_views, 0, sizeof(cmd->active_render_pass_attachment_views));
+    memset(cmd->active_render_pass_attachment_view_snapshots, 0, sizeof(cmd->active_render_pass_attachment_view_snapshots));
     memset(cmd->active_render_pass_attachment_layouts, 0, sizeof(cmd->active_render_pass_attachment_layouts));
     memset(cmd->active_render_pass_attachment_seen, 0, sizeof(cmd->active_render_pass_attachment_seen));
     if (!populate_render_pass_subpass_rendering_state(
@@ -28836,6 +28870,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdEndRenderPass(VkCommandBuffer commandBuffer) {
     cmd->active_clear_value_count = 0;
     memset(cmd->active_clear_values, 0, sizeof(cmd->active_clear_values));
     memset(cmd->active_render_pass_attachment_views, 0, sizeof(cmd->active_render_pass_attachment_views));
+    memset(cmd->active_render_pass_attachment_view_snapshots, 0, sizeof(cmd->active_render_pass_attachment_view_snapshots));
     memset(cmd->active_render_pass_attachment_layouts, 0, sizeof(cmd->active_render_pass_attachment_layouts));
     memset(cmd->active_render_pass_attachment_seen, 0, sizeof(cmd->active_render_pass_attachment_seen));
 }
