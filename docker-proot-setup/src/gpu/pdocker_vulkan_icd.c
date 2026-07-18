@@ -3249,6 +3249,20 @@ static PdockerVkEvent *event_handle_lookup_for_device(VkDevice device, VkEvent e
     return resolved && device_owner_matches_or_unowned(device, resolved->owner_device_id) ? resolved : NULL;
 }
 
+static PdockerVkEvent *event_handle_lookup_for_command_buffer(
+        const PdockerVkCommandBuffer *cmd,
+        VkEvent event,
+        bool *owner_mismatch_out) {
+    if (owner_mismatch_out) *owner_mismatch_out = false;
+    PdockerVkEvent *resolved = event_handle_lookup(event);
+    if (!resolved || !cmd) return NULL;
+    if (!owner_device_ids_match_or_unowned(cmd->owner_device_id, resolved->owner_device_id)) {
+        if (owner_mismatch_out) *owner_mismatch_out = true;
+        return NULL;
+    }
+    return resolved;
+}
+
 static PdockerVkQueryPool *query_pool_handle_target(VkQueryPool queryPool) {
     return pdocker_vk_query_pool_from_handle(queryPool);
 }
@@ -36027,8 +36041,13 @@ static void record_event_command(VkCommandBuffer commandBuffer,
                                  VkDependencyFlags dependency_flags,
                                  const PdockerVkBarrierOpRange *barriers) {
     PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
-    PdockerVkEvent *e = event_handle_lookup(event);
     if (!cmd) return;
+    bool owner_mismatch = false;
+    PdockerVkEvent *e = event_handle_lookup_for_command_buffer(cmd, event, &owner_mismatch);
+    if (owner_mismatch) {
+        command_buffer_mark_recording_failed(cmd, "event-command-cross-device");
+        return;
+    }
     if (!e) {
         command_buffer_mark_recording_failed(cmd, "event-command-null-event");
         return;
@@ -36085,7 +36104,12 @@ static void record_event_wait_command(VkCommandBuffer commandBuffer,
     }
     PdockerVkEvent *resolved[PDOCKER_VK_MAX_EVENT_WAIT_REFS];
     for (uint32_t i = 0; i < event_count; ++i) {
-        resolved[i] = event_handle_lookup(events[i]);
+        bool owner_mismatch = false;
+        resolved[i] = event_handle_lookup_for_command_buffer(cmd, events[i], &owner_mismatch);
+        if (owner_mismatch) {
+            command_buffer_mark_recording_failed(cmd, "event-wait-cross-device");
+            return;
+        }
         if (!resolved[i]) {
             command_buffer_mark_recording_failed(cmd, "event-wait-null-event");
             return;

@@ -7624,6 +7624,15 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 if (vkBeginCommandBuffer(cmd_a, NULL) != VK_SUCCESS) return 31;
                 vkCmdSetEvent(cmd_a, event_b, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
                 if (vkEndCommandBuffer(cmd_a) != VK_ERROR_FEATURE_NOT_PRESENT) return 32;
+                VkCommandBuffer cmd_a_wait = make_cmd(device_a, pool_a, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
+                if (!cmd_a_wait) return 171;
+                if (vkBeginCommandBuffer(cmd_a_wait, NULL) != VK_SUCCESS) return 172;
+                VkEvent wait_events[1] = { event_b };
+                vkCmdWaitEvents(cmd_a_wait, 1, wait_events,
+                                VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                                VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                                0, NULL, 0, NULL, 0, NULL);
+                if (vkEndCommandBuffer(cmd_a_wait) != VK_ERROR_FEATURE_NOT_PRESENT) return 173;
 
                 VkQueryPool query_a = make_query_pool(device_a);
                 VkQueryPool query_b = make_query_pool(device_b);

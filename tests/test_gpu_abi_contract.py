@@ -13563,8 +13563,14 @@ class GpuAbiContractTest(unittest.TestCase):
             ("vkGetQueryPoolResults", "query_pool_handle_lookup_for_device(device, queryPool)"),
         ]:
             self.assertIn(marker, c_function_body(icd, name))
-        self.assertIn("event-command-cross-device", c_function_body(icd, "record_event_command"))
-        self.assertIn("event-wait-cross-device", c_function_body(icd, "record_event_wait_command"))
+        event_command_body = c_function_body(icd, "record_event_command")
+        event_wait_body = c_function_body(icd, "record_event_wait_command")
+        self.assertIn("event-command-cross-device", event_command_body)
+        self.assertIn("event-wait-cross-device", event_wait_body)
+        self.assertIn("event_handle_lookup_for_command_buffer(cmd, event, &owner_mismatch)", event_command_body)
+        self.assertIn("event_handle_lookup_for_command_buffer(cmd, events[i], &owner_mismatch)", event_wait_body)
+        self.assertNotIn("event_handle_lookup(event)", event_command_body)
+        self.assertNotIn("event_handle_lookup(events[i])", event_wait_body)
         self.assertIn("query-pool-cross-device", c_function_body(icd, "record_query_command"))
         self.assertIn("query-copy-cross-device", c_function_body(icd, "record_copy_query_results_command"))
         self.assertIn("execute-commands-cross-device", c_function_body(icd, "vkCmdExecuteCommands"))

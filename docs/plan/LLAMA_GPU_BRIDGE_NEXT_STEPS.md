@@ -10,6 +10,24 @@ llama.cpp itself remains unmodified.
 ## Current Ground Truth
 
 
+### 2026-07-18 CPU/static Vulkan event-command owner lane
+
+Event command recording now resolves `VkEvent` handles through a
+command-buffer-scoped helper. `record_event_command` and
+`record_event_wait_command` no longer perform raw event lookup directly;
+they preserve the existing null-handle and cross-device failure reasons while
+centralizing the owner comparison at the lookup boundary.
+
+This is CPU/static Vulkan pass-through hardening only.  It does not change
+llama.cpp, Dockerfiles, models, prompts, shader bytes, or executor arithmetic.
+
+Evidence: `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`,
+`tests.test_gpu_abi_contract`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_device_owner_rejects_cross_device_command_submit_sync`,
+`scripts/build-gpu-shim.sh`, `scripts/verify-native-payloads.py`,
+`./gradlew :app:assembleDebug`.
+
+
 ### 2026-07-18 CPU/static Vulkan immutable-sampler owner lane
 
 `descriptor_set_layout_create_info_supported` now receives `VkDevice` and
