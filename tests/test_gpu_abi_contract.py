@@ -16672,10 +16672,22 @@ class GpuAbiContractTest(unittest.TestCase):
             "pipeline->layout = pipeline_layout_handle_lookup_for_device(device, ci->layout);",
             "pPipelines[i] = pdocker_vk_pipeline_to_handle(pipeline);",
             "cmd->compute_pipeline = pipeline_handle_lookup_for_command_buffer(cmd, pipeline);",
-            "pipeline_layout = pipeline_layout_handle_lookup(layout);",
+            "pipeline_layout_handle_lookup_for_command_buffer_checked(cmd, layout, &pipeline_layout)",
             "PdockerVkDescriptorSet *set = descriptor_set_handle_lookup_for_command_buffer(cmd, pDescriptorSets[set_i]);",
         ]:
             self.assertIn(marker, source)
+        render_pass_checked = c_function_body(source, "render_pass_handle_lookup_for_command_buffer_checked")
+        framebuffer_checked = c_function_body(source, "framebuffer_handle_lookup_for_command_buffer_checked")
+        pipeline_layout_checked = c_function_body(source, "pipeline_layout_handle_lookup_for_command_buffer_checked")
+        self.assertIn("owner_device_ids_match_or_unowned(cmd->owner_device_id", render_pass_checked)
+        self.assertIn("owner_device_ids_match_or_unowned(cmd->owner_device_id", framebuffer_checked)
+        self.assertIn("owner_device_ids_match_or_unowned(cmd->owner_device_id", pipeline_layout_checked)
+        self.assertIn("render_pass_handle_lookup_for_command_buffer_checked(cmd, begin->renderPass, &rp)", source)
+        self.assertIn("framebuffer_handle_lookup_for_command_buffer_checked(cmd, begin->framebuffer, &fb)", source)
+        self.assertIn("render_pass_handle_lookup_for_command_buffer_checked(", source)
+        self.assertIn("pipeline_layout_handle_lookup_for_command_buffer_checked(cmd, layout, &pipeline_layout)", source)
+        self.assertIn("pipeline_layout_handle_lookup_for_command_buffer_checked(cmd, layout, &captured_layout)", source)
+
         for forbidden in [
             "*pSetLayout = (VkDescriptorSetLayout)layout;",
             "free((void *)descriptorSetLayout);",
@@ -16698,6 +16710,10 @@ class GpuAbiContractTest(unittest.TestCase):
             "PdockerVkPipelineLayout *pipeline_layout = (PdockerVkPipelineLayout *)layout;",
             "PdockerVkDescriptorSet *set = (PdockerVkDescriptorSet *)pDescriptorSets[set_i];",
             "PdockerVkPipelineLayout *captured_layout = (PdockerVkPipelineLayout *)layout;",
+            "pipeline_layout = pipeline_layout_handle_lookup(layout);",
+            "PdockerVkPipelineLayout *captured_layout = pipeline_layout_handle_lookup(layout);",
+            "? render_pass_handle_lookup(pRenderPassBegin->renderPass)",
+            "? framebuffer_handle_lookup(pRenderPassBegin->framebuffer)",
         ]:
             self.assertNotIn(forbidden, source)
 
@@ -16732,7 +16748,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "*pRenderPass = pdocker_vk_render_pass_to_handle(rp);",
             "fb->render_pass = render_pass_handle_lookup_for_device(device, pCreateInfo->renderPass);",
             "framebuffer_register(fb);",
-            "framebuffer_handle_lookup(pRenderPassBegin->framebuffer)",
+            "framebuffer_handle_lookup_for_command_buffer_checked",
             "framebuffer_retire(framebuffer_unregister(framebuffer));",
             "*pFramebuffer = pdocker_vk_framebuffer_to_handle(fb);",
             "surface_register(surface);",

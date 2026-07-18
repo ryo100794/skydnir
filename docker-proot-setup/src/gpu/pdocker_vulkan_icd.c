@@ -2408,6 +2408,20 @@ static PdockerVkRenderPass *render_pass_handle_lookup_for_device(VkDevice device
     return resolved && device_owner_matches_or_unowned(device, resolved->owner_device_id) ? resolved : NULL;
 }
 
+static bool render_pass_handle_lookup_for_command_buffer_checked(
+        const PdockerVkCommandBuffer *cmd,
+        VkRenderPass renderPass,
+        PdockerVkRenderPass **out_rp) {
+    if (out_rp) *out_rp = NULL;
+    PdockerVkRenderPass *resolved = render_pass_handle_lookup(renderPass);
+    if (!resolved) return true;
+    if (!cmd || !owner_device_ids_match_or_unowned(cmd->owner_device_id, resolved->owner_device_id)) {
+        return false;
+    }
+    if (out_rp) *out_rp = resolved;
+    return true;
+}
+
 static void framebuffer_register(PdockerVkFramebuffer *fb) {
     if (!fb) return;
     fb->destroyed = false;
@@ -2462,6 +2476,20 @@ static PdockerVkFramebuffer *framebuffer_handle_lookup(VkFramebuffer framebuffer
 static PdockerVkFramebuffer *framebuffer_handle_lookup_for_device(VkDevice device, VkFramebuffer framebuffer) {
     PdockerVkFramebuffer *resolved = framebuffer_handle_lookup(framebuffer);
     return resolved && device_owner_matches_or_unowned(device, resolved->owner_device_id) ? resolved : NULL;
+}
+
+static bool framebuffer_handle_lookup_for_command_buffer_checked(
+        const PdockerVkCommandBuffer *cmd,
+        VkFramebuffer framebuffer,
+        PdockerVkFramebuffer **out_fb) {
+    if (out_fb) *out_fb = NULL;
+    PdockerVkFramebuffer *resolved = framebuffer_handle_lookup(framebuffer);
+    if (!resolved) return true;
+    if (!cmd || !owner_device_ids_match_or_unowned(cmd->owner_device_id, resolved->owner_device_id)) {
+        return false;
+    }
+    if (out_fb) *out_fb = resolved;
+    return true;
 }
 
 static void descriptor_set_layout_register(PdockerVkDescriptorSetLayout *layout) {
@@ -2618,6 +2646,20 @@ static PdockerVkPipelineLayout *pipeline_layout_handle_lookup(VkPipelineLayout l
 static PdockerVkPipelineLayout *pipeline_layout_handle_lookup_for_device(VkDevice device, VkPipelineLayout layout) {
     PdockerVkPipelineLayout *resolved = pipeline_layout_handle_lookup(layout);
     return resolved && device_owner_matches_or_unowned(device, resolved->owner_device_id) ? resolved : NULL;
+}
+
+static bool pipeline_layout_handle_lookup_for_command_buffer_checked(
+        const PdockerVkCommandBuffer *cmd,
+        VkPipelineLayout layout,
+        PdockerVkPipelineLayout **out_layout) {
+    if (out_layout) *out_layout = NULL;
+    PdockerVkPipelineLayout *resolved = pipeline_layout_handle_lookup(layout);
+    if (!resolved) return true;
+    if (!cmd || !owner_device_ids_match_or_unowned(cmd->owner_device_id, resolved->owner_device_id)) {
+        return false;
+    }
+    if (out_layout) *out_layout = resolved;
+    return true;
 }
 
 static void pipeline_register(PdockerVkPipeline *pipeline) {
@@ -30183,10 +30225,10 @@ static bool append_normalized_render_pass_begin(
         const VkRenderPassBeginInfo *begin,
         VkSubpassContents contents) {
     if (!cmd || !begin) return false;
-    PdockerVkRenderPass *rp = begin ? render_pass_handle_lookup(begin->renderPass) : NULL;
-    PdockerVkFramebuffer *fb = begin ? framebuffer_handle_lookup(begin->framebuffer) : NULL;
-    if ((rp && !owner_device_ids_match_or_unowned(cmd->owner_device_id, rp->owner_device_id)) ||
-        (fb && !owner_device_ids_match_or_unowned(cmd->owner_device_id, fb->owner_device_id))) {
+    PdockerVkRenderPass *rp = NULL;
+    PdockerVkFramebuffer *fb = NULL;
+    if (!render_pass_handle_lookup_for_command_buffer_checked(cmd, begin->renderPass, &rp) ||
+        !framebuffer_handle_lookup_for_command_buffer_checked(cmd, begin->framebuffer, &fb)) {
         cmd->graphics_unsupported = true;
         command_buffer_mark_recording_failed(cmd, "render-pass-begin-cross-device");
         return false;
@@ -30300,16 +30342,11 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBeginRenderPass(
     if (!append_normalized_render_pass_begin(cmd, pRenderPassBegin, contents)) {
         cmd->render_pass_active = true;
         cmd->dynamic_rendering_active = false;
-        cmd->active_render_pass = pRenderPassBegin
-            ? render_pass_handle_lookup(pRenderPassBegin->renderPass)
-            : NULL;
-        cmd->active_framebuffer = pRenderPassBegin
-            ? framebuffer_handle_lookup(pRenderPassBegin->framebuffer)
-            : NULL;
-        if ((cmd->active_render_pass &&
-             !owner_device_ids_match_or_unowned(cmd->owner_device_id, cmd->active_render_pass->owner_device_id)) ||
-            (cmd->active_framebuffer &&
-             !owner_device_ids_match_or_unowned(cmd->owner_device_id, cmd->active_framebuffer->owner_device_id))) {
+        if (pRenderPassBegin &&
+            (!render_pass_handle_lookup_for_command_buffer_checked(
+                 cmd, pRenderPassBegin->renderPass, &cmd->active_render_pass) ||
+             !framebuffer_handle_lookup_for_command_buffer_checked(
+                 cmd, pRenderPassBegin->framebuffer, &cmd->active_framebuffer))) {
             cmd->graphics_unsupported = true;
             command_buffer_mark_recording_failed(cmd, "render-pass-begin-cross-device");
             cmd->active_render_pass = NULL;
@@ -31252,9 +31289,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
     const bool strict_passthrough =
         env_truthy_default("PDOCKER_GPU_STRICT_PASSTHROUGH", false);
     if (!cmd) return;
-    pipeline_layout = pipeline_layout_handle_lookup(layout);
-    if (pipeline_layout &&
-        !owner_device_ids_match_or_unowned(cmd->owner_device_id, pipeline_layout->owner_device_id)) {
+    if (!pipeline_layout_handle_lookup_for_command_buffer_checked(cmd, layout, &pipeline_layout)) {
         cmd->unsupported_descriptor_set_layout = true;
         command_buffer_mark_recording_failed(cmd, "descriptor-bind-cross-device-layout");
         return;
@@ -31964,9 +31999,8 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPushConstants(
         return;
     }
     if (size == 0) return;
-    PdockerVkPipelineLayout *captured_layout = pipeline_layout_handle_lookup(layout);
-    if (captured_layout &&
-        !owner_device_ids_match_or_unowned(cmd->owner_device_id, captured_layout->owner_device_id)) {
+    PdockerVkPipelineLayout *captured_layout = NULL;
+    if (!pipeline_layout_handle_lookup_for_command_buffer_checked(cmd, layout, &captured_layout)) {
         cmd->graphics_unsupported = true;
         command_buffer_mark_recording_failed(cmd, "push-constant-cross-device-layout");
         return;

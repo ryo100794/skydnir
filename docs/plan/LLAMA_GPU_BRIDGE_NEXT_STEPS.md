@@ -11,6 +11,26 @@ llama.cpp itself remains unmodified.
 
 
 
+### 2026-07-18 CPU/static Vulkan command-buffer owner helper lane
+
+Render-pass begin, dynamic-rendering-adjacent render state, descriptor binding,
+and push-constant command paths now use checked command-buffer-owner helpers for
+render-pass, framebuffer, and pipeline-layout handles.  The previous call sites
+performed raw global lookup and then manually rejected foreign objects; the new
+helpers distinguish unknown handles from cross-device handles at the lookup
+boundary and keep the public command-recording paths fail-closed with the
+existing recording-failure reasons.
+
+This is CPU/static Vulkan pass-through hardening only.  It does not change
+llama.cpp, Dockerfiles, models, prompts, shader bytes, or executor arithmetic.
+
+Evidence: `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`,
+`tests.test_gpu_abi_contract`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_device_owner_rejects_cross_device_metadata_render_wsi_handles`,
+`scripts/build-gpu-shim.sh`, `scripts/verify-native-payloads.py`,
+`./gradlew :app:assembleDebug`.
+
+
 ### 2026-07-18 CPU/static Vulkan dynamic-rendering attachment capture lane
 
 Dynamic-rendering attachment capture now owner-checks image-view handles before
