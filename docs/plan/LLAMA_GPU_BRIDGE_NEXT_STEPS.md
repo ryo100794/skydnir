@@ -11,6 +11,30 @@ llama.cpp itself remains unmodified.
 
 
 
+### 2026-07-18 CPU/static Vulkan queue-submit helper owner lane
+
+Legacy `vkQueueSubmit` helper paths now keep queue/device ownership through the
+internal timeline, executor-sync, completion, and graphics-submit-sync decision
+points.  `submit_uses_timeline_wait`, `submit_uses_timeline_signal`,
+`validate_submit_timeline_info`, `complete_submit_semaphores`,
+`submit_has_executor_tracked_*`, `graphics_submit_sync_frame_bounds`, and the
+recorded-work-before/after helpers now resolve semaphores, fences, and command
+buffers through the submitting queue instead of raw global lookup.  This prevents
+foreign-device handles from influencing fallback classification, executor sync
+splitting, or completion mutation after the public submit validation has already
+failed closed.
+
+This is CPU/static Vulkan pass-through hardening only.  It does not change
+llama.cpp, Dockerfiles, models, prompts, shader bytes, or executor arithmetic.
+
+Evidence: `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`,
+`tests.test_gpu_abi_contract`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_device_owner_rejects_cross_device_command_submit_sync`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_device_owner_rejects_cross_device_metadata_render_wsi_handles`,
+`scripts/build-gpu-shim.sh`, `scripts/verify-native-payloads.py`,
+`./gradlew :app:assembleDebug`.
+
+
 ### 2026-07-18 CPU/static Vulkan executor sync-helper owner lane
 
 Executor-backed semaphore and fence wait/reset helper paths now carry the

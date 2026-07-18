@@ -33929,6 +33929,7 @@ static bool command_buffer_needs_graphics_submit_sync_frame(const PdockerVkComma
 }
 
 static void graphics_submit_sync_frame_bounds(
+        const PdockerVkQueue *submit_queue,
         const VkSubmitInfo *submit,
         uint32_t *first_graphics_cmd,
         uint32_t *last_graphics_cmd) {
@@ -33937,7 +33938,7 @@ static void graphics_submit_sync_frame_bounds(
     if (!submit || !submit->pCommandBuffers) return;
     for (uint32_t i = 0; i < submit->commandBufferCount; ++i) {
         const PdockerVkCommandBuffer *cmd =
-            command_buffer_handle_lookup(submit->pCommandBuffers[i]);
+            command_buffer_handle_lookup_for_queue(submit_queue, submit->pCommandBuffers[i]);
         if (!command_buffer_needs_graphics_submit_sync_frame(cmd)) continue;
         if (first_graphics_cmd && *first_graphics_cmd == UINT32_MAX) {
             *first_graphics_cmd = i;
@@ -34154,30 +34155,31 @@ static VkResult validate_legacy_submit_info_shape(const VkSubmitInfo *submit) {
     return VK_SUCCESS;
 }
 
-static bool submit_uses_timeline_wait(const VkSubmitInfo *submit) {
+static bool submit_uses_timeline_wait(const PdockerVkQueue *queue, const VkSubmitInfo *submit) {
     if (!submit || !submit->pWaitSemaphores) return false;
     for (uint32_t i = 0; i < submit->waitSemaphoreCount; ++i) {
-        PdockerVkSemaphore *sem = semaphore_handle_lookup(submit->pWaitSemaphores[i]);
+        PdockerVkSemaphore *sem = semaphore_handle_lookup_for_queue(queue, submit->pWaitSemaphores[i]);
         if (sem && sem->timeline) return true;
     }
     return false;
 }
 
-static bool submit_uses_timeline_signal(const VkSubmitInfo *submit) {
+static bool submit_uses_timeline_signal(const PdockerVkQueue *queue, const VkSubmitInfo *submit) {
     if (!submit || !submit->pSignalSemaphores) return false;
     for (uint32_t i = 0; i < submit->signalSemaphoreCount; ++i) {
-        PdockerVkSemaphore *sem = semaphore_handle_lookup(submit->pSignalSemaphores[i]);
+        PdockerVkSemaphore *sem = semaphore_handle_lookup_for_queue(queue, submit->pSignalSemaphores[i]);
         if (sem && sem->timeline) return true;
     }
     return false;
 }
 
 static VkResult validate_submit_timeline_info(
+        const PdockerVkQueue *queue,
         const VkSubmitInfo *submit,
         const VkTimelineSemaphoreSubmitInfo *timeline) {
     if (!submit) return VK_ERROR_INITIALIZATION_FAILED;
     if (!timeline) {
-        return (submit_uses_timeline_wait(submit) || submit_uses_timeline_signal(submit))
+        return (submit_uses_timeline_wait(queue, submit) || submit_uses_timeline_signal(queue, submit))
             ? VK_ERROR_FEATURE_NOT_PRESENT
             : VK_SUCCESS;
     }
@@ -34195,11 +34197,11 @@ static VkResult validate_submit_timeline_info(
     if (timeline->signalSemaphoreValueCount && !timeline->pSignalSemaphoreValues) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
-    if (submit_uses_timeline_wait(submit) &&
+    if (submit_uses_timeline_wait(queue, submit) &&
         timeline->waitSemaphoreValueCount != submit->waitSemaphoreCount) {
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }
-    if (submit_uses_timeline_signal(submit) &&
+    if (submit_uses_timeline_signal(queue, submit) &&
         timeline->signalSemaphoreValueCount != submit->signalSemaphoreCount) {
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }
@@ -34224,7 +34226,7 @@ static VkResult validate_submit_wait_semaphores(
         const VkTimelineSemaphoreSubmitInfo *timeline,
         bool allow_executor_tracked_queue_waits) {
     if (!submit) return VK_ERROR_INITIALIZATION_FAILED;
-    VkResult timeline_rc = validate_submit_timeline_info(submit, timeline);
+    VkResult timeline_rc = validate_submit_timeline_info(queue, submit, timeline);
     if (timeline_rc != VK_SUCCESS) return timeline_rc;
     for (uint32_t i = 0; i < submit->waitSemaphoreCount; ++i) {
         PdockerVkSemaphore *sem = submit->pWaitSemaphores
@@ -34253,7 +34255,7 @@ static VkResult validate_submit_signal_semaphores(
         const VkSubmitInfo *submit,
         const VkTimelineSemaphoreSubmitInfo *timeline) {
     if (!submit) return VK_ERROR_INITIALIZATION_FAILED;
-    VkResult timeline_rc = validate_submit_timeline_info(submit, timeline);
+    VkResult timeline_rc = validate_submit_timeline_info(queue, submit, timeline);
     if (timeline_rc != VK_SUCCESS) return timeline_rc;
     for (uint32_t i = 0; i < submit->signalSemaphoreCount; ++i) {
         PdockerVkSemaphore *sem = submit->pSignalSemaphores
@@ -34269,18 +34271,19 @@ static VkResult validate_submit_signal_semaphores(
 }
 
 static void complete_submit_semaphores(
+        const PdockerVkQueue *queue,
         const VkSubmitInfo *submit,
         const VkTimelineSemaphoreSubmitInfo *timeline) {
     if (!submit) return;
     for (uint32_t i = 0; i < submit->waitSemaphoreCount; ++i) {
         PdockerVkSemaphore *sem = submit->pWaitSemaphores
-            ? semaphore_handle_lookup(submit->pWaitSemaphores[i])
+            ? semaphore_handle_lookup_for_queue(queue, submit->pWaitSemaphores[i])
             : NULL;
         semaphore_complete_wait(sem);
     }
     for (uint32_t i = 0; i < submit->signalSemaphoreCount; ++i) {
         PdockerVkSemaphore *sem = submit->pSignalSemaphores
-            ? semaphore_handle_lookup(submit->pSignalSemaphores[i])
+            ? semaphore_handle_lookup_for_queue(queue, submit->pSignalSemaphores[i])
             : NULL;
         semaphore_complete_signal(sem, sem && sem->timeline ? submit_timeline_signal_value(timeline, i) : 0);
     }
@@ -34850,23 +34853,26 @@ static bool submit_sync_entries_include_completion(
     return false;
 }
 
-static bool submit_has_executor_tracked_wait_sync(const VkSubmitInfo *submit) {
+static bool submit_has_executor_tracked_wait_sync(const PdockerVkQueue *submit_queue, const VkSubmitInfo *submit) {
     if (!submit || !submit->pWaitSemaphores) return false;
     for (uint32_t i = 0; i < submit->waitSemaphoreCount; ++i) {
-        const PdockerVkSemaphore *sem = semaphore_handle_lookup(submit->pWaitSemaphores[i]);
+        const PdockerVkSemaphore *sem = semaphore_handle_lookup_for_queue(submit_queue, submit->pWaitSemaphores[i]);
         if (sem && sem->executor_tracked) return true;
     }
     return false;
 }
 
-static bool submit_has_executor_tracked_completion_sync(const VkSubmitInfo *submit, VkFence fence) {
+static bool submit_has_executor_tracked_completion_sync(
+        const PdockerVkQueue *submit_queue,
+        const VkSubmitInfo *submit,
+        VkFence fence) {
     if (submit && submit->pSignalSemaphores) {
         for (uint32_t i = 0; i < submit->signalSemaphoreCount; ++i) {
-            const PdockerVkSemaphore *sem = semaphore_handle_lookup(submit->pSignalSemaphores[i]);
+            const PdockerVkSemaphore *sem = semaphore_handle_lookup_for_queue(submit_queue, submit->pSignalSemaphores[i]);
             if (sem && sem->executor_tracked) return true;
         }
     }
-    const PdockerVkFence *submit_fence = fence_handle_lookup(fence);
+    const PdockerVkFence *submit_fence = fence_handle_lookup_for_queue(submit_queue, fence);
     return submit_fence && submit_fence->executor_tracked;
 }
 
@@ -34886,13 +34892,14 @@ static bool command_buffer_has_recorded_submit_work(const PdockerVkCommandBuffer
 }
 
 static bool submit_has_recorded_work_before_command(
+        const PdockerVkQueue *submit_queue,
         const VkSubmitInfo *submit,
         uint32_t command_index) {
     if (!submit || !submit->pCommandBuffers) return false;
     if (command_index >= submit->commandBufferCount) return false;
     for (uint32_t i = 0; i < command_index && i < submit->commandBufferCount; ++i) {
         if (command_buffer_has_recorded_submit_work(
-                command_buffer_handle_lookup(submit->pCommandBuffers[i]))) {
+                command_buffer_handle_lookup_for_queue(submit_queue, submit->pCommandBuffers[i]))) {
             return true;
         }
     }
@@ -34900,13 +34907,14 @@ static bool submit_has_recorded_work_before_command(
 }
 
 static bool submit_has_recorded_work_after_command(
+        const PdockerVkQueue *submit_queue,
         const VkSubmitInfo *submit,
         uint32_t command_index) {
     if (!submit || !submit->pCommandBuffers) return false;
     if (command_index >= submit->commandBufferCount) return false;
     for (uint32_t i = command_index + 1u; i < submit->commandBufferCount; ++i) {
         if (command_buffer_has_recorded_submit_work(
-                command_buffer_handle_lookup(submit->pCommandBuffers[i]))) {
+                command_buffer_handle_lookup_for_queue(submit_queue, submit->pCommandBuffers[i]))) {
             return true;
         }
     }
@@ -35208,7 +35216,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
             &pSubmits[validate_i], &validate_timeline);
         if (validate_pnext_rc != VK_SUCCESS) return validate_pnext_rc;
         const bool allow_executor_tracked_queue_waits = bridge_available() &&
-            (g_submit_sync_override_entries || submit_has_executor_tracked_wait_sync(&pSubmits[validate_i]));
+            (g_submit_sync_override_entries || submit_has_executor_tracked_wait_sync(submit_queue, &pSubmits[validate_i]));
         VkResult semaphore_rc = validate_submit_wait_semaphores(
             submit_queue, &pSubmits[validate_i], validate_timeline, allow_executor_tracked_queue_waits);
         if (semaphore_rc != VK_SUCCESS) return semaphore_rc;
@@ -35224,7 +35232,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
         VkResult pnext_rc = submit_timeline_info_from_pnext(&pSubmits[i], &timeline_submit);
         if (pnext_rc != VK_SUCCESS) return pnext_rc;
         const bool allow_executor_tracked_queue_waits = bridge_available() &&
-            (g_submit_sync_override_entries || submit_has_executor_tracked_wait_sync(&pSubmits[i]));
+            (g_submit_sync_override_entries || submit_has_executor_tracked_wait_sync(submit_queue, &pSubmits[i]));
         VkResult semaphore_rc = validate_submit_wait_semaphores(
             submit_queue, &pSubmits[i], timeline_submit, allow_executor_tracked_queue_waits);
         if (semaphore_rc != VK_SUCCESS) return semaphore_rc;
@@ -35257,19 +35265,19 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
         }
         uint32_t first_graphics_submit_sync_cmd = UINT32_MAX;
         uint32_t last_graphics_submit_sync_cmd = UINT32_MAX;
-        graphics_submit_sync_frame_bounds(&pSubmits[i],
+        graphics_submit_sync_frame_bounds(submit_queue, &pSubmits[i],
                                           &first_graphics_submit_sync_cmd,
                                           &last_graphics_submit_sync_cmd);
         const bool submit_has_graphics_sync_frame = first_graphics_submit_sync_cmd != UINT32_MAX;
         const bool submit_wait_sync_needs_executor = bridge_available() &&
-            (g_submit_sync_override_entries || submit_has_executor_tracked_wait_sync(&pSubmits[i]));
+            (g_submit_sync_override_entries || submit_has_executor_tracked_wait_sync(submit_queue, &pSubmits[i]));
         const bool submit_completion_sync_needs_executor = bridge_available() &&
-            (g_submit_sync_override_entries || submit_has_executor_tracked_completion_sync(&pSubmits[i], fence));
+            (g_submit_sync_override_entries || submit_has_executor_tracked_completion_sync(submit_queue, &pSubmits[i], fence));
         bool submit_waits_split_before_command_loop = false;
         if (submit_wait_sync_needs_executor &&
             submit_sync_entries_include_wait(submit_sync_entries, submit_sync_count) &&
             (!submit_has_graphics_sync_frame ||
-             submit_has_recorded_work_before_command(&pSubmits[i], first_graphics_submit_sync_cmd))) {
+             submit_has_recorded_work_before_command(submit_queue, &pSubmits[i], first_graphics_submit_sync_cmd))) {
             PdockerGpuVulkanGraphicsV619SubmitSyncEntry *submit_wait_sync_entries =
                 (PdockerGpuVulkanGraphicsV619SubmitSyncEntry *)calloc(
                     PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS,
@@ -35401,7 +35409,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                 }
                 size_t deferred_completion_sync_count = 0;
                 if (submit_sync_entries_include_completion(frame_submit_sync_entries, frame_submit_sync_count) &&
-                    (submit_has_recorded_work_after_command(&pSubmits[i], j) ||
+                    (submit_has_recorded_work_after_command(submit_queue, &pSubmits[i], j) ||
                      command_buffer_has_host_side_ops_after(cmd, last_graphics_gpu_op))) {
                     deferred_completion_sync_count = filter_submit_sync_entries_completion_only(
                         frame_submit_sync_entries, frame_submit_sync_count, deferred_completion_sync_entries);
@@ -35711,7 +35719,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
         }
         free(submit_sync_entries);
 #undef RETURN_VK_QUEUE_SUBMIT_WITH_SYNC
-        complete_submit_semaphores(&pSubmits[i], timeline_submit);
+        complete_submit_semaphores(submit_queue, &pSubmits[i], timeline_submit);
     }
     if (submit_fence) {
         submit_fence->signaled = true;

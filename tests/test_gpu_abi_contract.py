@@ -10115,6 +10115,15 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("(void)fence;", submit_body)
         self.assertIn("submit_timeline_info_from_pnext(&pSubmits[i], &timeline_submit)", submit_body)
         self.assertIn("validate_legacy_submit_info_shape(&pSubmits[i])", submit_body)
+        validate_timeline_signature = c_function_signature(icd, "validate_submit_timeline_info")
+        validate_timeline_body = c_function_body(icd, "validate_submit_timeline_info")
+        complete_submit_signature = c_function_signature(icd, "complete_submit_semaphores")
+        complete_submit_body = c_function_body(icd, "complete_submit_semaphores")
+        self.assertIn("const PdockerVkQueue *queue", validate_timeline_signature)
+        self.assertIn("submit_uses_timeline_wait(queue, submit)", validate_timeline_body)
+        self.assertIn("submit_uses_timeline_signal(queue, submit)", validate_timeline_body)
+        self.assertIn("const PdockerVkQueue *queue", complete_submit_signature)
+        self.assertIn("semaphore_handle_lookup_for_queue(queue", complete_submit_body)
         self.assertIn("submit_device_indices_are_single_device", icd)
         self.assertIn("submit_command_buffer_device_masks_are_single_device", icd)
         self.assertIn("VK_STRUCTURE_TYPE_DEVICE_GROUP_SUBMIT_INFO", icd)
@@ -10122,11 +10131,20 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VK_STRUCTURE_TYPE_PROTECTED_SUBMIT_INFO", icd)
         self.assertIn("submit-protected-unsupported", icd)
         self.assertIn('unsupported_create_info_pnext_result("vkQueueSubmit", node)', icd)
-        self.assertIn("submit_has_executor_tracked_wait_sync(&pSubmits[i])", submit_body)
-        self.assertIn("submit_has_executor_tracked_completion_sync(&pSubmits[i], fence)", submit_body)
+        self.assertIn("submit_has_executor_tracked_wait_sync(submit_queue, &pSubmits[i])", submit_body)
+        self.assertIn("submit_has_executor_tracked_completion_sync(submit_queue, &pSubmits[i], fence)", submit_body)
         self.assertIn("allow_executor_tracked_queue_waits", submit_body)
+        wait_exec_signature = c_function_signature(icd, "submit_has_executor_tracked_wait_sync")
+        wait_exec_body = c_function_body(icd, "submit_has_executor_tracked_wait_sync")
+        completion_exec_signature = c_function_signature(icd, "submit_has_executor_tracked_completion_sync")
+        completion_exec_body = c_function_body(icd, "submit_has_executor_tracked_completion_sync")
+        self.assertIn("const PdockerVkQueue *submit_queue", wait_exec_signature)
+        self.assertIn("semaphore_handle_lookup_for_queue(submit_queue", wait_exec_body)
+        self.assertIn("const PdockerVkQueue *submit_queue", completion_exec_signature)
+        self.assertIn("semaphore_handle_lookup_for_queue(submit_queue", completion_exec_body)
+        self.assertIn("fence_handle_lookup_for_queue(submit_queue", completion_exec_body)
         self.assertIn("validate_submit_wait_semaphores(\n            submit_queue, &pSubmits[i], timeline_submit, allow_executor_tracked_queue_waits)", submit_body)
-        self.assertIn("complete_submit_semaphores(&pSubmits[i], timeline_submit);", submit_body)
+        self.assertIn("complete_submit_semaphores(submit_queue, &pSubmits[i], timeline_submit);", submit_body)
         self.assertIn("if (submitCount > 0 && !pSubmits) return VK_ERROR_INITIALIZATION_FAILED;", submit_body)
         self.assertIn("submit_fence->signaled = false;", submit_body)
         self.assertIn("submit_fence->signaled = true;", submit_body)
@@ -10184,7 +10202,7 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(marker, icd)
         self.assertIn("submit_timeline_info_from_pnext(&pSubmits[i], &timeline_submit)", submit_body)
         self.assertIn("validate_submit_wait_semaphores(\n            submit_queue, &pSubmits[i], timeline_submit, allow_executor_tracked_queue_waits)", submit_body)
-        self.assertIn("complete_submit_semaphores(&pSubmits[i], timeline_submit)", submit_body)
+        self.assertIn("complete_submit_semaphores(submit_queue, &pSubmits[i], timeline_submit)", submit_body)
         queue_submit2_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2", 1)[1].split(
             "VKAPI_ATTR VkResult VKAPI_CALL vkQueueWaitIdle", 1
         )[0]
@@ -15486,7 +15504,19 @@ class GpuAbiContractTest(unittest.TestCase):
         submit_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit", 1)[1].split(
             "VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2", 1
         )[0]
-        self.assertIn("graphics_submit_sync_frame_bounds(&pSubmits[i]", submit_body)
+        self.assertIn("graphics_submit_sync_frame_bounds(submit_queue, &pSubmits[i]", submit_body)
+        bounds_signature = c_function_signature(icd, "graphics_submit_sync_frame_bounds")
+        bounds_body = c_function_body(icd, "graphics_submit_sync_frame_bounds")
+        before_signature = c_function_signature(icd, "submit_has_recorded_work_before_command")
+        before_body = c_function_body(icd, "submit_has_recorded_work_before_command")
+        after_signature = c_function_signature(icd, "submit_has_recorded_work_after_command")
+        after_body = c_function_body(icd, "submit_has_recorded_work_after_command")
+        self.assertIn("const PdockerVkQueue *submit_queue", bounds_signature)
+        self.assertIn("command_buffer_handle_lookup_for_queue(submit_queue", bounds_body)
+        self.assertIn("const PdockerVkQueue *submit_queue", before_signature)
+        self.assertIn("command_buffer_handle_lookup_for_queue(submit_queue", before_body)
+        self.assertIn("const PdockerVkQueue *submit_queue", after_signature)
+        self.assertIn("command_buffer_handle_lookup_for_queue(submit_queue", after_body)
         self.assertIn("j == first_graphics_submit_sync_cmd", submit_body)
         self.assertIn("j == last_graphics_submit_sync_cmd", submit_body)
         self.assertNotIn("send_recorded_vulkan_graphics_v6_1_frame(cmd, submit_sync_entries, submit_sync_count)", submit_body)
@@ -17595,7 +17625,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "submit_wait_sync_needs_executor",
             "submit_completion_sync_needs_executor",
             "submit_waits_split_before_command_loop",
-            "submit_has_recorded_work_before_command(&pSubmits[i], first_graphics_submit_sync_cmd)",
+            "submit_has_recorded_work_before_command(submit_queue, &pSubmits[i], first_graphics_submit_sync_cmd)",
             "submit-pre-wait-sync-failed",
             "submit-completion-sync-failed",
         ]:
@@ -17612,7 +17642,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "submit_waits_split_before_command_loop",
             "command_buffer_has_host_side_ops_before(cmd, first_graphics_gpu_op)",
             "submit_sync_entries_include_completion(frame_submit_sync_entries, frame_submit_sync_count)",
-            "submit_has_recorded_work_after_command(&pSubmits[i], j)",
+            "submit_has_recorded_work_after_command(submit_queue, &pSubmits[i], j)",
             "command_buffer_has_host_side_ops_after(cmd, last_graphics_gpu_op)",
             "filter_submit_sync_entries_wait_only(",
             "filter_submit_sync_entries_without_waits(",

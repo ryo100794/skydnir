@@ -7499,6 +7499,21 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 if (vkQueueSubmit(queue_b, 1, &submit, VK_NULL_HANDLE) != VK_ERROR_INITIALIZATION_FAILED) return 12;
                 if (semaphore_handle_lookup_for_device(device_a, binary_a)->signaled) return 13;
                 if (vkQueueSubmit(queue_b, 0, NULL, fence_a) != VK_ERROR_INITIALIZATION_FAILED) return 14;
+                VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+                submit.waitSemaphoreCount = 1;
+                submit.pWaitSemaphores = &timeline_a;
+                submit.pWaitDstStageMask = &wait_stage;
+                submit.signalSemaphoreCount = 0;
+                submit.pSignalSemaphores = NULL;
+                if (vkQueueSubmit(queue_b, 1, &submit, VK_NULL_HANDLE) != VK_ERROR_INITIALIZATION_FAILED) return 120;
+                submit.waitSemaphoreCount = 0;
+                submit.pWaitSemaphores = NULL;
+                submit.pWaitDstStageMask = NULL;
+                submit.signalSemaphoreCount = 1;
+                submit.pSignalSemaphores = &timeline_a;
+                if (vkQueueSubmit(queue_b, 1, &submit, VK_NULL_HANDLE) != VK_ERROR_INITIALIZATION_FAILED) return 121;
+                submit.signalSemaphoreCount = 0;
+                submit.pSignalSemaphores = NULL;
 
                 VkCommandBufferSubmitInfo cmd_submit;
                 VkSubmitInfo2 submit2;
