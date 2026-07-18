@@ -2266,6 +2266,7 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, final_transition_body)
         for marker in [
+            "rp->destroyed",
             "rp->attachment_overflow",
             "rp->subpass_overflow",
             "subpass_index >= rp->subpass_count",
@@ -2279,6 +2280,9 @@ class GpuAbiContractTest(unittest.TestCase):
         next_body = icd.split(
             "VKAPI_ATTR void VKAPI_CALL vkCmdNextSubpass", 1
         )[1].split("VKAPI_ATTR void VKAPI_CALL vkCmdEndRenderPass", 1)[0]
+        end_body = icd.split(
+            "VKAPI_ATTR void VKAPI_CALL vkCmdEndRenderPass", 1
+        )[1].split("VKAPI_ATTR void VKAPI_CALL vkCmdBeginRenderPass2", 1)[0]
         for marker in [
             "uint32_t next_subpass = cmd->active_subpass + 1u;",
             "!render_pass_subpass_can_normalize_to_dynamic_rendering(rp, next_subpass)",
@@ -2287,10 +2291,13 @@ class GpuAbiContractTest(unittest.TestCase):
             "append_render_pass_subpass_layout_transitions(",
             "&rp->subpass_dependencies[next_subpass]",
             "append_graphics_begin_rendering_command(cmd)",
+            "fb->destroyed",
             "cmd->active_subpass = next_subpass;",
             "cmd->active_subpass_contents = contents;",
         ]:
             self.assertIn(marker, next_body)
+        self.assertIn("cmd->active_framebuffer && cmd->active_framebuffer->destroyed", end_body)
+        self.assertIn("cmd->graphics_unsupported = true;", end_body)
         self.assertIn("vkCmdNextSubpass(commandBuffer, pSubpassBeginInfo", icd)
 
     def test_vulkan_render_pass_pipeline_formats_are_completed_from_attachment_refs(self):
@@ -16412,11 +16419,15 @@ class GpuAbiContractTest(unittest.TestCase):
             "free(pdocker_vk_pipeline_cache_from_handle(pipelineCache));",
             "*pCommandPool = pdocker_vk_command_pool_to_handle(pool);",
             "free(pdocker_vk_command_pool_from_handle(commandPool));",
+            "render_pass_register(rp);",
+            "render_pass_handle_lookup(ci->renderPass)",
+            "render_pass_retire(render_pass_unregister(renderPass));",
             "*pRenderPass = pdocker_vk_render_pass_to_handle(rp);",
-            "pipeline->render_pass = pdocker_vk_render_pass_from_handle(ci->renderPass);",
-            "fb->render_pass = pdocker_vk_render_pass_from_handle(pCreateInfo->renderPass);",
+            "fb->render_pass = render_pass_handle_lookup(pCreateInfo->renderPass);",
+            "framebuffer_register(fb);",
+            "framebuffer_handle_lookup(pRenderPassBegin->framebuffer)",
+            "framebuffer_retire(framebuffer_unregister(framebuffer));",
             "*pFramebuffer = pdocker_vk_framebuffer_to_handle(fb);",
-            "free(pdocker_vk_framebuffer_from_handle(framebuffer));",
             "*pSurface = pdocker_vk_surface_to_handle(surface);",
             "pdocker_vk_headless_surface_valid(pdocker_vk_surface_from_handle(surface))",
             "PdockerVkSurface *surface = pdocker_vk_surface_from_handle(pCreateInfo->surface);",
@@ -16450,6 +16461,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "free((void *)commandPool)",
             "free((void *)renderPass)",
             "free((void *)framebuffer)",
+            "free(pdocker_vk_framebuffer_from_handle(framebuffer));",
             "free((void *)surface)",
             "free((void *)swapchain)",
         ]:

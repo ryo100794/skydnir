@@ -10,6 +10,31 @@ llama.cpp itself remains unmodified.
 ## Current Ground Truth
 
 
+### 2026-07-18 CPU/static Vulkan render-pass/framebuffer live-handle lane
+
+`VkRenderPass` and `VkFramebuffer` now use live registries with soft-destroy
+quarantine, matching the memory/buffer/image object hardening pattern.
+`vkCreateRenderPass(2)` registers render-pass objects, `vkDestroyRenderPass`
+unregisters and retires them, `vkCreateFramebuffer` resolves the parent render
+pass through the live registry before accepting attachment snapshots, and
+`vkDestroyFramebuffer` unregisters and retires framebuffer objects.
+
+Graphics pipeline creation, secondary command-buffer inheritance, render-pass
+begin fallback, normalized render-pass begin, next-subpass, and end-render-pass
+paths now fail closed on fabricated, stale, or destroyed render-pass/framebuffer
+handles instead of dereferencing pointer-like handles from the application.
+`vkCmdEndRenderPass` also marks the command buffer unsupported if an active
+framebuffer was destroyed after begin.
+
+This is generic Vulkan pass-through hardening.  It does not change llama.cpp,
+Dockerfiles, models, prompts, shader bytes, or executor-side arithmetic.
+
+Evidence: `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`,
+`tests.test_gpu_abi_contract`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_render_pass_and_framebuffer_live_handles_fail_closed_after_destroy`,
+`scripts/build-gpu-shim.sh`.
+
+
 ### 2026-07-18 CPU/static Vulkan framebuffer attachment snapshot lane
 
 Render-pass normalization no longer depends on re-reading raw framebuffer

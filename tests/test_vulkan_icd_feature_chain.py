@@ -4911,6 +4911,141 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
+    def test_render_pass_and_framebuffer_live_handles_fail_closed_after_destroy(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            static void init_image_view(PdockerVkImage *image, PdockerVkImageView *view) {{
+                memset(image, 0, sizeof(*image));
+                memset(view, 0, sizeof(*view));
+                image->object_id = 701;
+                image->image_type = VK_IMAGE_TYPE_2D;
+                image->format = VK_FORMAT_R8G8B8A8_UNORM;
+                image->extent = (VkExtent3D){{16, 16, 1}};
+                image->mip_levels = 1;
+                image->array_layers = 1;
+                image->samples = VK_SAMPLE_COUNT_1_BIT;
+                image->usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+                image->generation = 1701;
+                image_register(image);
+                view->object_id = 801;
+                view->image = image;
+                view->view_type = VK_IMAGE_VIEW_TYPE_2D;
+                view->format = VK_FORMAT_R8G8B8A8_UNORM;
+                view->subresource_range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                view->subresource_range.levelCount = 1;
+                view->subresource_range.layerCount = 1;
+                view->generation = 1801;
+                image_view_register(view);
+            }}
+
+            int main(void) {{
+                VkAttachmentDescription attachment;
+                VkAttachmentReference color_ref;
+                VkSubpassDescription subpass;
+                VkRenderPassCreateInfo rp_info;
+                VkRenderPass rp_handle = VK_NULL_HANDLE;
+                VkFramebufferCreateInfo fb_info;
+                VkFramebuffer fb_handle = VK_NULL_HANDLE;
+                PdockerVkRenderPass *rp = NULL;
+                PdockerVkFramebuffer *fb = NULL;
+                PdockerVkImage image;
+                PdockerVkImageView view;
+                VkImageView view_handle;
+
+                memset(&attachment, 0, sizeof(attachment));
+                attachment.format = VK_FORMAT_R8G8B8A8_UNORM;
+                attachment.samples = VK_SAMPLE_COUNT_1_BIT;
+                attachment.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+                attachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+                attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+                attachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+                memset(&color_ref, 0, sizeof(color_ref));
+                color_ref.attachment = 0;
+                color_ref.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+                memset(&subpass, 0, sizeof(subpass));
+                subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+                subpass.colorAttachmentCount = 1;
+                subpass.pColorAttachments = &color_ref;
+                memset(&rp_info, 0, sizeof(rp_info));
+                rp_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+                rp_info.attachmentCount = 1;
+                rp_info.pAttachments = &attachment;
+                rp_info.subpassCount = 1;
+                rp_info.pSubpasses = &subpass;
+
+                VkRenderPass bogus_rp = (VkRenderPass)(uintptr_t)0x1234u;
+                if (render_pass_handle_lookup(bogus_rp) != NULL) return 1;
+                vkDestroyRenderPass(VK_NULL_HANDLE, bogus_rp, NULL);
+
+                memset(&fb_info, 0, sizeof(fb_info));
+                fb_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+                fb_info.renderPass = bogus_rp;
+                fb_info.width = 16;
+                fb_info.height = 16;
+                fb_info.layers = 1;
+                fb_handle = (VkFramebuffer)(uintptr_t)0xdeadu;
+                if (vkCreateFramebuffer(VK_NULL_HANDLE, &fb_info, NULL, &fb_handle) != VK_ERROR_INITIALIZATION_FAILED ||
+                    fb_handle != VK_NULL_HANDLE) {{
+                    fprintf(stderr, "bogus render pass accepted by framebuffer create\\n");
+                    return 2;
+                }}
+
+                if (vkCreateRenderPass(VK_NULL_HANDLE, &rp_info, NULL, &rp_handle) != VK_SUCCESS ||
+                    rp_handle == VK_NULL_HANDLE) return 3;
+                rp = render_pass_handle_lookup(rp_handle);
+                if (!rp || rp->destroyed || !render_pass_subpass_can_normalize_to_dynamic_rendering(rp, 0)) return 4;
+
+                init_image_view(&image, &view);
+                view_handle = pdocker_vk_image_view_to_handle(&view);
+                fb_info.renderPass = rp_handle;
+                fb_info.attachmentCount = 1;
+                fb_info.pAttachments = &view_handle;
+                if (vkCreateFramebuffer(VK_NULL_HANDLE, &fb_info, NULL, &fb_handle) != VK_SUCCESS ||
+                    fb_handle == VK_NULL_HANDLE) return 5;
+                fb = framebuffer_handle_lookup(fb_handle);
+                if (!fb || fb->destroyed || fb->render_pass != rp || fb->attachment_count != 1 ||
+                    !fb->attachment_snapshots[0].valid) return 6;
+
+                VkRenderPassBeginInfo begin_info;
+                PdockerVkCommandBuffer cmd;
+                memset(&begin_info, 0, sizeof(begin_info));
+                memset(&cmd, 0, sizeof(cmd));
+                begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+                begin_info.renderPass = rp_handle;
+                begin_info.framebuffer = fb_handle;
+                begin_info.renderArea.extent.width = 16;
+                begin_info.renderArea.extent.height = 16;
+                vkCmdBeginRenderPass((VkCommandBuffer)&cmd, &begin_info, VK_SUBPASS_CONTENTS_INLINE);
+                if (!cmd.dynamic_rendering_active || cmd.graphics_unsupported) return 7;
+
+                vkDestroyFramebuffer(VK_NULL_HANDLE, fb_handle, NULL);
+                if (framebuffer_handle_lookup(fb_handle) != NULL) return 8;
+                vkCmdEndRenderPass((VkCommandBuffer)&cmd);
+                if (!cmd.graphics_unsupported) return 9;
+                vkDestroyFramebuffer(VK_NULL_HANDLE, fb_handle, NULL);
+                vkDestroyFramebuffer(VK_NULL_HANDLE, (VkFramebuffer)(uintptr_t)0x4567u, NULL);
+
+                vkDestroyRenderPass(VK_NULL_HANDLE, rp_handle, NULL);
+                if (render_pass_handle_lookup(rp_handle) != NULL) return 10;
+                if (render_pass_subpass_can_normalize_to_dynamic_rendering(rp, 0)) return 11;
+                fb_handle = (VkFramebuffer)(uintptr_t)0xdeadu;
+                if (vkCreateFramebuffer(VK_NULL_HANDLE, &fb_info, NULL, &fb_handle) != VK_ERROR_INITIALIZATION_FAILED ||
+                    fb_handle != VK_NULL_HANDLE) {{
+                    fprintf(stderr, "destroyed render pass accepted by framebuffer create\\n");
+                    return 12;
+                }}
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_framebuffer_snapshots_attachment_image_views_for_render_pass_normalization(self):
         source = textwrap.dedent(
             f"""
@@ -5017,6 +5152,9 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 rp.subpasses[0].depth_stencil_resolve_layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
                 rp.subpasses[0].depth_resolve_mode = VK_RESOLVE_MODE_AVERAGE_BIT;
                 rp.subpasses[0].stencil_resolve_mode = VK_RESOLVE_MODE_AVERAGE_BIT;
+                rp.object_id = 901;
+                rp.generation = 901;
+                render_pass_register(&rp);
 
                 memset(&fb_info, 0, sizeof(fb_info));
                 fb_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
@@ -5094,6 +5232,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     fprintf(stderr, "destroyed framebuffer attachment was accepted\\n");
                     return 8;
                 }}
+                render_pass_retire(render_pass_unregister(pdocker_vk_render_pass_to_handle(&rp)));
                 return 0;
             }}
             """

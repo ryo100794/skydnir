@@ -1160,7 +1160,9 @@ struct PdockerVkRenderPass {
     PdockerVkSubpassDependencyState end_dependency;
     bool attachment_overflow;
     bool subpass_overflow;
+    bool destroyed;
     uint64_t generation;
+    struct PdockerVkRenderPass *next;
 };
 
 static uint64_t pdocker_vk_pipeline_object_id(const PdockerVkPipeline *pipeline) {
@@ -1179,7 +1181,9 @@ struct PdockerVkFramebuffer {
     uint32_t width;
     uint32_t height;
     uint32_t layers;
+    bool destroyed;
     uint64_t generation;
+    struct PdockerVkFramebuffer *next;
 };
 
 typedef struct {
@@ -1718,6 +1722,10 @@ static PdockerVkImageView *g_image_views;
 static PdockerVkImageView *g_retired_image_views;
 static PdockerVkSampler *g_samplers;
 static PdockerVkSampler *g_retired_samplers;
+static PdockerVkRenderPass *g_render_passes;
+static PdockerVkRenderPass *g_retired_render_passes;
+static PdockerVkFramebuffer *g_framebuffers;
+static PdockerVkFramebuffer *g_retired_framebuffers;
 static unsigned g_shader_dump_counter;
 static PdockerVkMemory *g_guarded_memories[PDOCKER_VK_MAX_GUARDED_MEMORIES];
 static struct sigaction g_previous_sigsegv;
@@ -2184,6 +2192,104 @@ static bool sampler_handle_resolve(VkSampler sampler, PdockerVkSampler **out_sam
 static PdockerVkSampler *sampler_handle_lookup(VkSampler sampler) {
     PdockerVkSampler *resolved = NULL;
     return sampler_handle_resolve(sampler, &resolved) ? resolved : NULL;
+}
+
+static void render_pass_register(PdockerVkRenderPass *rp) {
+    if (!rp) return;
+    rp->destroyed = false;
+    rp->next = g_render_passes;
+    g_render_passes = rp;
+}
+
+static PdockerVkRenderPass *render_pass_unregister(VkRenderPass renderPass) {
+    PdockerVkRenderPass *target = pdocker_vk_render_pass_from_handle(renderPass);
+    if (!target) return NULL;
+    PdockerVkRenderPass **link = &g_render_passes;
+    while (*link) {
+        if (*link == target) {
+            *link = target->next;
+            target->next = NULL;
+            return target;
+        }
+        link = &(*link)->next;
+    }
+    return NULL;
+}
+
+static void render_pass_retire(PdockerVkRenderPass *rp) {
+    if (!rp || rp->destroyed) return;
+    rp->destroyed = true;
+    rp->next = g_retired_render_passes;
+    g_retired_render_passes = rp;
+}
+
+static bool render_pass_handle_resolve(VkRenderPass renderPass, PdockerVkRenderPass **out_rp) {
+    PdockerVkRenderPass *target = pdocker_vk_render_pass_from_handle(renderPass);
+    if (out_rp) *out_rp = NULL;
+    if (!target) return false;
+    for (PdockerVkRenderPass *candidate = g_render_passes; candidate; candidate = candidate->next) {
+        if (candidate == target && !candidate->destroyed) {
+            if (out_rp) *out_rp = candidate;
+            return true;
+        }
+    }
+    return false;
+}
+
+static PdockerVkRenderPass *render_pass_handle_lookup(VkRenderPass renderPass) {
+    PdockerVkRenderPass *resolved = NULL;
+    return render_pass_handle_resolve(renderPass, &resolved) ? resolved : NULL;
+}
+
+static void framebuffer_register(PdockerVkFramebuffer *fb) {
+    if (!fb) return;
+    fb->destroyed = false;
+    fb->next = g_framebuffers;
+    g_framebuffers = fb;
+}
+
+static PdockerVkFramebuffer *framebuffer_unregister(VkFramebuffer framebuffer) {
+    PdockerVkFramebuffer *target = pdocker_vk_framebuffer_from_handle(framebuffer);
+    if (!target) return NULL;
+    PdockerVkFramebuffer **link = &g_framebuffers;
+    while (*link) {
+        if (*link == target) {
+            *link = target->next;
+            target->next = NULL;
+            return target;
+        }
+        link = &(*link)->next;
+    }
+    return NULL;
+}
+
+static void framebuffer_retire(PdockerVkFramebuffer *fb) {
+    if (!fb || fb->destroyed) return;
+    fb->destroyed = true;
+    fb->render_pass = NULL;
+    fb->attachment_count = 0;
+    memset(fb->attachments, 0, sizeof(fb->attachments));
+    memset(fb->attachment_snapshots, 0, sizeof(fb->attachment_snapshots));
+    fb->next = g_retired_framebuffers;
+    g_retired_framebuffers = fb;
+}
+
+static bool framebuffer_handle_resolve(VkFramebuffer framebuffer, PdockerVkFramebuffer **out_fb) {
+    PdockerVkFramebuffer *target = pdocker_vk_framebuffer_from_handle(framebuffer);
+    if (out_fb) *out_fb = NULL;
+    if (!target) return false;
+    for (PdockerVkFramebuffer *candidate = g_framebuffers; candidate; candidate = candidate->next) {
+        if (candidate == target && !candidate->destroyed) {
+            if (out_fb) *out_fb = candidate;
+            return true;
+        }
+    }
+    return false;
+}
+
+static PdockerVkFramebuffer *framebuffer_handle_lookup(VkFramebuffer framebuffer) {
+    PdockerVkFramebuffer *resolved = NULL;
+    return framebuffer_handle_resolve(framebuffer, &resolved) ? resolved : NULL;
 }
 
 static bool current_vulkan_dispatch_identity_ids(
@@ -26000,7 +26106,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
         }
         pipeline->dynamic_state_mask = captured_dynamic_state_mask;
         pipeline->layout = pdocker_vk_pipeline_layout_from_handle(ci->layout);
-        pipeline->render_pass = pdocker_vk_render_pass_from_handle(ci->renderPass);
+        pipeline->render_pass = ci->renderPass ? render_pass_handle_lookup(ci->renderPass) : NULL;
+        if (ci->renderPass && !pipeline->render_pass) {
+            pipeline->graphics_unsupported = true;
+        }
         pipeline->shader_stage_count = ci->stageCount;
         if (ci->stageCount > 0 && !ci->pStages) {
             pipeline->graphics_unsupported = true;
@@ -26612,7 +26721,7 @@ static void capture_render_pass_subpass_state2(
 static bool render_pass_subpass_can_normalize_to_dynamic_rendering(
         const PdockerVkRenderPass *rp,
         uint32_t subpass_index) {
-    if (!rp || rp->attachment_overflow || rp->subpass_overflow ||
+    if (!rp || rp->destroyed || rp->attachment_overflow || rp->subpass_overflow ||
         subpass_index >= rp->subpass_count ||
         subpass_index >= PDOCKER_VK_MAX_STORAGE_BUFFERS) {
         return false;
@@ -26656,7 +26765,7 @@ static bool command_buffer_begin_inheritance_supported(
         return false;
     }
     if (inherit->renderPass) {
-        PdockerVkRenderPass *rp = pdocker_vk_render_pass_from_handle(inherit->renderPass);
+        PdockerVkRenderPass *rp = render_pass_handle_lookup(inherit->renderPass);
         if (!render_pass_subpass_can_normalize_to_dynamic_rendering(rp, inherit->subpass)) {
             return false;
         }
@@ -26864,6 +26973,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateRenderPass(
     }
     rp->object_id = next_vulkan_object_generation();
     rp->generation = rp->object_id;
+    render_pass_register(rp);
     *pRenderPass = pdocker_vk_render_pass_to_handle(rp);
     return VK_SUCCESS;
 }
@@ -26927,6 +27037,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateRenderPass2(
     }
     rp->object_id = next_vulkan_object_generation();
     rp->generation = rp->object_id;
+    render_pass_register(rp);
     *pRenderPass = pdocker_vk_render_pass_to_handle(rp);
     return VK_SUCCESS;
 }
@@ -26937,7 +27048,7 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyRenderPass(
         const VkAllocationCallbacks *pAllocator) {
     (void)device;
     (void)pAllocator;
-    free(pdocker_vk_render_pass_from_handle(renderPass));
+    render_pass_retire(render_pass_unregister(renderPass));
 }
 
 static VkResult validate_framebuffer_create_pnext(const void *pNext) {
@@ -26983,7 +27094,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateFramebuffer(
     }
     PdockerVkFramebuffer *fb = pdocker_alloc_handle(sizeof(*fb));
     if (!fb) return VK_ERROR_OUT_OF_HOST_MEMORY;
-    fb->render_pass = pdocker_vk_render_pass_from_handle(pCreateInfo->renderPass);
+    fb->render_pass = render_pass_handle_lookup(pCreateInfo->renderPass);
+    if (!fb->render_pass) {
+        free(fb);
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
     fb->attachment_count = pCreateInfo->attachmentCount;
     if (fb->attachment_count > PDOCKER_VK_MAX_STORAGE_BUFFERS) {
         fb->attachment_count = PDOCKER_VK_MAX_STORAGE_BUFFERS;
@@ -27003,6 +27118,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateFramebuffer(
     fb->height = pCreateInfo->height;
     fb->layers = pCreateInfo->layers;
     fb->generation = next_vulkan_object_generation();
+    framebuffer_register(fb);
     *pFramebuffer = pdocker_vk_framebuffer_to_handle(fb);
     return VK_SUCCESS;
 }
@@ -27013,7 +27129,7 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyFramebuffer(
         const VkAllocationCallbacks *pAllocator) {
     (void)device;
     (void)pAllocator;
-    free(pdocker_vk_framebuffer_from_handle(framebuffer));
+    framebuffer_retire(framebuffer_unregister(framebuffer));
 }
 
 VKAPI_ATTR void VKAPI_CALL vkGetRenderAreaGranularity(
@@ -28550,7 +28666,7 @@ static bool append_render_pass_subpass_layout_transitions(
 }
 
 static bool append_render_pass_final_layout_transitions(PdockerVkCommandBuffer *cmd) {
-    if (!cmd || !cmd->active_render_pass) return false;
+    if (!cmd || !cmd->active_render_pass || cmd->active_render_pass->destroyed) return false;
     PdockerVkRenderPass *rp = cmd->active_render_pass;
     uint32_t memory_first = cmd->memory_barrier_op_count;
     if (rp->end_dependency.seen) {
@@ -28596,7 +28712,7 @@ static bool populate_render_pass_subpass_rendering_state(
         VkSubpassContents contents) {
     if (!cmd || !rp || !fb || contents != VK_SUBPASS_CONTENTS_INLINE ||
         !render_pass_subpass_can_normalize_to_dynamic_rendering(rp, subpass_index) ||
-        fb->render_pass != rp || fb->attachment_count < rp->attachment_count) {
+        fb->destroyed || fb->render_pass != rp || fb->attachment_count < rp->attachment_count) {
         return false;
     }
     const PdockerVkSubpassState *subpass = &rp->subpasses[subpass_index];
@@ -28698,8 +28814,8 @@ static bool append_normalized_render_pass_begin(
         const VkRenderPassBeginInfo *begin,
         VkSubpassContents contents) {
     if (!cmd || !begin) return false;
-    PdockerVkRenderPass *rp = pdocker_vk_render_pass_from_handle(begin->renderPass);
-    PdockerVkFramebuffer *fb = pdocker_vk_framebuffer_from_handle(begin->framebuffer);
+    PdockerVkRenderPass *rp = begin ? render_pass_handle_lookup(begin->renderPass) : NULL;
+    PdockerVkFramebuffer *fb = begin ? framebuffer_handle_lookup(begin->framebuffer) : NULL;
     cmd->active_render_pass = rp;
     cmd->active_framebuffer = fb;
     memset(cmd->active_render_pass_attachment_views, 0, sizeof(cmd->active_render_pass_attachment_views));
@@ -28810,10 +28926,10 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBeginRenderPass(
         cmd->render_pass_active = true;
         cmd->dynamic_rendering_active = false;
         cmd->active_render_pass = pRenderPassBegin
-            ? pdocker_vk_render_pass_from_handle(pRenderPassBegin->renderPass)
+            ? render_pass_handle_lookup(pRenderPassBegin->renderPass)
             : NULL;
         cmd->active_framebuffer = pRenderPassBegin
-            ? pdocker_vk_framebuffer_from_handle(pRenderPassBegin->framebuffer)
+            ? framebuffer_handle_lookup(pRenderPassBegin->framebuffer)
             : NULL;
         cmd->active_subpass = 0;
         cmd->active_subpass_contents = contents;
@@ -28829,7 +28945,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdNextSubpass(
     uint32_t next_subpass = cmd->active_subpass + 1u;
     PdockerVkRenderPass *rp = cmd->active_render_pass;
     PdockerVkFramebuffer *fb = cmd->active_framebuffer;
-    if (!cmd->dynamic_rendering_active || !rp || !fb ||
+    if (!cmd->dynamic_rendering_active || !rp || !fb || fb->destroyed ||
         contents != VK_SUBPASS_CONTENTS_INLINE ||
         !render_pass_subpass_can_normalize_to_dynamic_rendering(rp, next_subpass)) {
         cmd->active_subpass = next_subpass;
@@ -28855,6 +28971,9 @@ VKAPI_ATTR void VKAPI_CALL vkCmdNextSubpass(
 VKAPI_ATTR void VKAPI_CALL vkCmdEndRenderPass(VkCommandBuffer commandBuffer) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     if (!cmd) return;
+    if (cmd->active_framebuffer && cmd->active_framebuffer->destroyed) {
+        cmd->graphics_unsupported = true;
+    }
     if (!append_graphics_end_rendering_command(cmd)) {
         cmd->graphics_unsupported = true;
     }
