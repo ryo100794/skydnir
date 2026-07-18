@@ -3422,6 +3422,8 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 image_obj_b->requirements_alignment = PDOCKER_VK_REQUIREMENT_ALIGNMENT;
                 image_obj_b->requirements_size = 4096;
                 image_obj_b->memory_type_bits = 0x3;
+                image_register(image_obj_a);
+                image_register(image_obj_b);
                 VkImage image_a = pdocker_vk_image_to_handle(image_obj_a);
                 VkImage image_b = pdocker_vk_image_to_handle(image_obj_b);
                 memset(&dedicated, 0, sizeof(dedicated));
@@ -3438,7 +3440,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     return 9;
                 }}
                 PdockerVkMemory *image_memory_obj = pdocker_vk_memory_from_handle(image_memory);
-                if (!image_memory_obj || image_memory_obj->dedicated_image != pdocker_vk_image_from_handle(image_a) ||
+                if (!image_memory_obj || image_memory_obj->dedicated_image != image_handle_lookup(image_a) ||
                     image_memory_obj->dedicated_buffer != NULL) {{
                     fprintf(stderr, "image dedicated target was not recorded\\n");
                     return 10;
@@ -4803,6 +4805,247 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
+
+    def test_image_live_handles_fail_closed_after_destroy(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            int main(void) {{
+                PdockerVkImage image;
+                PdockerVkMemory memory;
+                memset(&image, 0, sizeof(image));
+                memset(&memory, 0, sizeof(memory));
+                image.object_id = 101;
+                image.format = VK_FORMAT_R8G8B8A8_UNORM;
+                image.extent = (VkExtent3D){{4, 4, 1}};
+                image.mip_levels = 1;
+                image.array_layers = 1;
+                image.samples = VK_SAMPLE_COUNT_1_BIT;
+                image.usage = VK_IMAGE_USAGE_SAMPLED_BIT;
+                image.requirements_size = 1024;
+                image.requirements_alignment = PDOCKER_VK_REQUIREMENT_ALIGNMENT;
+                image.memory_type_bits = 0x3;
+                image.generation = 202;
+                memory.object_id = 303;
+                memory.size = 4096;
+                memory.fd = -1;
+                image_register(&image);
+                memory_register(&memory);
+                VkImage handle = pdocker_vk_image_to_handle(&image);
+                VkDeviceMemory memory_handle = pdocker_vk_memory_to_handle(&memory);
+                if (image_handle_lookup(handle) != &image) {{
+                    fprintf(stderr, "live image lookup failed\\n");
+                    return 1;
+                }}
+                VkMemoryRequirements req;
+                memset(&req, 0, sizeof(req));
+                vkGetImageMemoryRequirements(VK_NULL_HANDLE, handle, &req);
+                if (req.size != 1024 || req.memoryTypeBits != 0x3) {{
+                    fprintf(stderr, "live image requirements failed size=%llu bits=0x%x\\n",
+                            (unsigned long long)req.size, req.memoryTypeBits);
+                    return 2;
+                }}
+                if (vkBindImageMemory(VK_NULL_HANDLE, handle, memory_handle, 0) != VK_SUCCESS) {{
+                    fprintf(stderr, "live image bind failed\\n");
+                    return 3;
+                }}
+                vkDestroyImage(VK_NULL_HANDLE, handle, NULL);
+                if (image_handle_lookup(handle) != NULL) {{
+                    fprintf(stderr, "destroyed image remained live\\n");
+                    return 4;
+                }}
+                memset(&req, 0xff, sizeof(req));
+                vkGetImageMemoryRequirements(VK_NULL_HANDLE, handle, &req);
+                if (req.size != 0 || req.memoryTypeBits != 0) {{
+                    fprintf(stderr, "stale image requirements did not fail closed\\n");
+                    return 5;
+                }}
+                if (vkBindImageMemory(VK_NULL_HANDLE, handle, memory_handle, 0) == VK_SUCCESS) {{
+                    fprintf(stderr, "stale image bind succeeded\\n");
+                    return 6;
+                }}
+                VkImageView view_handle = (VkImageView)(uintptr_t)0xdeadbeefu;
+                VkImageViewCreateInfo view_info;
+                memset(&view_info, 0, sizeof(view_info));
+                view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+                view_info.image = handle;
+                view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+                view_info.format = VK_FORMAT_R8G8B8A8_UNORM;
+                view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                view_info.subresourceRange.levelCount = 1;
+                view_info.subresourceRange.layerCount = 1;
+                if (vkCreateImageView(VK_NULL_HANDLE, &view_info, NULL, &view_handle) == VK_SUCCESS ||
+                    view_handle != VK_NULL_HANDLE) {{
+                    fprintf(stderr, "stale image view create succeeded\\n");
+                    return 7;
+                }}
+#if defined(VK_VERSION_1_1) || defined(VK_KHR_dedicated_allocation)
+                VkMemoryDedicatedAllocateInfo dedicated;
+                VkMemoryAllocateInfo alloc_info;
+                VkDeviceMemory stale_dedicated_memory = (VkDeviceMemory)(uintptr_t)0x1u;
+                memset(&dedicated, 0, sizeof(dedicated));
+                memset(&alloc_info, 0, sizeof(alloc_info));
+                dedicated.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO;
+                dedicated.image = handle;
+                alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+                alloc_info.pNext = &dedicated;
+                alloc_info.allocationSize = 1024;
+                alloc_info.memoryTypeIndex = 0;
+                if (vkAllocateMemory(VK_NULL_HANDLE, &alloc_info, NULL, &stale_dedicated_memory) == VK_SUCCESS ||
+                    stale_dedicated_memory != VK_NULL_HANDLE) {{
+                    fprintf(stderr, "stale dedicated image allocation succeeded\\n");
+                    return 8;
+                }}
+#endif
+                vkDestroyImage(VK_NULL_HANDLE, handle, NULL);
+                vkDestroyImage(VK_NULL_HANDLE, (VkImage)(uintptr_t)0x1234u, NULL);
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
+    def test_image_view_live_handles_fail_closed_after_destroy(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            int main(void) {{
+                PdockerVkImage image;
+                PdockerVkImageView view;
+                PdockerVkImageViewSnapshot snapshot;
+                memset(&image, 0, sizeof(image));
+                memset(&view, 0, sizeof(view));
+                memset(&snapshot, 0, sizeof(snapshot));
+                image.object_id = 111;
+                image.format = VK_FORMAT_R8G8B8A8_UNORM;
+                image.extent = (VkExtent3D){{4, 4, 1}};
+                image.mip_levels = 1;
+                image.array_layers = 1;
+                image.samples = VK_SAMPLE_COUNT_1_BIT;
+                image.generation = 222;
+                view.object_id = 333;
+                view.image = &image;
+                view.view_type = VK_IMAGE_VIEW_TYPE_2D;
+                view.format = VK_FORMAT_R8G8B8A8_UNORM;
+                view.subresource_range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                view.subresource_range.levelCount = 1;
+                view.subresource_range.layerCount = 1;
+                view.generation = 444;
+                image_register(&image);
+                image_view_register(&view);
+                VkImageView handle = pdocker_vk_image_view_to_handle(&view);
+                if (image_view_handle_lookup(handle) != &view) {{
+                    fprintf(stderr, "live image view lookup failed\\n");
+                    return 1;
+                }}
+                if (!snapshot_image_view_state(&snapshot, &view) || !snapshot.valid ||
+                    snapshot.object_id != 333 || snapshot.image != &image || snapshot.samples != VK_SAMPLE_COUNT_1_BIT) {{
+                    fprintf(stderr, "live image view snapshot failed\\n");
+                    return 2;
+                }}
+                vkDestroyImageView(VK_NULL_HANDLE, handle, NULL);
+                if (image_view_handle_lookup(handle) != NULL) {{
+                    fprintf(stderr, "destroyed image view remained live\\n");
+                    return 3;
+                }}
+                memset(&snapshot, 0, sizeof(snapshot));
+                if (snapshot_image_view_state(&snapshot, &view) || snapshot.valid) {{
+                    fprintf(stderr, "destroyed image view snapshot succeeded\\n");
+                    return 4;
+                }}
+                vkDestroyImageView(VK_NULL_HANDLE, handle, NULL);
+                vkDestroyImageView(VK_NULL_HANDLE, (VkImageView)(uintptr_t)0x1234u, NULL);
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
+    def test_sampler_live_handles_fail_closed_after_destroy(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            int main(void) {{
+                PdockerVkSampler sampler;
+                PdockerVkSamplerSnapshot snapshot;
+                memset(&sampler, 0, sizeof(sampler));
+                memset(&snapshot, 0, sizeof(snapshot));
+                sampler.object_id = 555;
+                sampler.mag_filter = VK_FILTER_NEAREST;
+                sampler.min_filter = VK_FILTER_NEAREST;
+                sampler.mipmap_mode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+                sampler.address_mode_u = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+                sampler.address_mode_v = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+                sampler.address_mode_w = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+                sampler.min_lod = 0.0f;
+                sampler.max_lod = 1.0f;
+                sampler.reduction_mode = VK_SAMPLER_REDUCTION_MODE_WEIGHTED_AVERAGE;
+                sampler.generation = 666;
+                sampler_register(&sampler);
+                VkSampler handle = pdocker_vk_sampler_to_handle(&sampler);
+                if (sampler_handle_lookup(handle) != &sampler) {{
+                    fprintf(stderr, "live sampler lookup failed\\n");
+                    return 1;
+                }}
+                if (!snapshot_sampler_state(&snapshot, &sampler) || !snapshot.valid ||
+                    snapshot.object_id != 555 || snapshot.reduction_mode != VK_SAMPLER_REDUCTION_MODE_WEIGHTED_AVERAGE) {{
+                    fprintf(stderr, "live sampler snapshot failed\\n");
+                    return 2;
+                }}
+                vkDestroySampler(VK_NULL_HANDLE, handle, NULL);
+                if (sampler_handle_lookup(handle) != NULL) {{
+                    fprintf(stderr, "destroyed sampler remained live\\n");
+                    return 3;
+                }}
+                memset(&snapshot, 0, sizeof(snapshot));
+                if (snapshot_sampler_state(&snapshot, &sampler) || snapshot.valid) {{
+                    fprintf(stderr, "destroyed sampler snapshot succeeded\\n");
+                    return 4;
+                }}
+                VkDescriptorSetLayoutBinding binding;
+                VkDescriptorSetLayoutCreateInfo layout_info;
+                VkDescriptorSetLayout layout = (VkDescriptorSetLayout)(uintptr_t)0x1u;
+                memset(&binding, 0, sizeof(binding));
+                memset(&layout_info, 0, sizeof(layout_info));
+                binding.binding = 0;
+                binding.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+                binding.descriptorCount = 1;
+                binding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+                binding.pImmutableSamplers = &handle;
+                layout_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+                layout_info.bindingCount = 1;
+                layout_info.pBindings = &binding;
+                if (vkCreateDescriptorSetLayout(VK_NULL_HANDLE, &layout_info, NULL, &layout) == VK_SUCCESS ||
+                    layout != VK_NULL_HANDLE) {{
+                    fprintf(stderr, "stale immutable sampler layout succeeded\\n");
+                    return 5;
+                }}
+                vkDestroySampler(VK_NULL_HANDLE, handle, NULL);
+                vkDestroySampler(VK_NULL_HANDLE, (VkSampler)(uintptr_t)0x1234u, NULL);
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
     def test_buffer_view_live_handles_fail_closed_after_destroy(self):
         source = textwrap.dedent(
             f"""
@@ -5028,6 +5271,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     return 2;
                 }}
                 PdockerVkImage image2d = image_from_info(&info);
+                image_register(&image2d);
                 if (expect_view_result(&image2d, VK_IMAGE_VIEW_TYPE_2D, 0, 1,
                                        VK_SUCCESS, 3)) return 3;
                 if (expect_view_result(&image2d, VK_IMAGE_VIEW_TYPE_3D, 0, 1,
@@ -5052,6 +5296,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     return 7;
                 }}
                 PdockerVkImage cube = image_from_info(&cube_info);
+                image_register(&cube);
                 if (expect_view_result(&cube, VK_IMAGE_VIEW_TYPE_CUBE, 0, 6,
                                        VK_SUCCESS, 8)) return 8;
                 if (expect_view_result(&cube, VK_IMAGE_VIEW_TYPE_CUBE_ARRAY, 0, 12,
@@ -5068,6 +5313,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     return 11;
                 }}
                 PdockerVkImage image3d = image_from_info(&image3d_info);
+                image_register(&image3d);
                 if (expect_view_result(&image3d, VK_IMAGE_VIEW_TYPE_3D, 0, 1,
                                        VK_SUCCESS, 12)) return 12;
                 if (expect_view_result(&image3d, VK_IMAGE_VIEW_TYPE_2D, 0, 1,
@@ -5084,6 +5330,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     return 14;
                 }}
                 PdockerVkImage image3d_sliced = image_from_info(&image3d_sliced_info);
+                image_register(&image3d_sliced);
                 if (expect_view_result(&image3d_sliced, VK_IMAGE_VIEW_TYPE_2D, 3, 1,
                                        VK_SUCCESS, 15)) return 15;
                 if (expect_view_result(&image3d_sliced, VK_IMAGE_VIEW_TYPE_2D_ARRAY, 0, 8,
@@ -5267,6 +5514,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 color_image.array_layers = 1;
                 color_image.samples = VK_SAMPLE_COUNT_1_BIT;
                 color_image.usage = VK_IMAGE_USAGE_SAMPLED_BIT;
+                image_register(&color_image);
 
                 VkImageViewCreateInfo view;
                 memset(&view, 0, sizeof(view));

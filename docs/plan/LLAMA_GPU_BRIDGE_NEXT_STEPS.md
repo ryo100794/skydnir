@@ -10,6 +10,37 @@ llama.cpp itself remains unmodified.
 ## Current Ground Truth
 
 
+### 2026-07-18 CPU/static Vulkan image/view/sampler live-handle lane
+
+`VkImage`, `VkImageView`, and `VkSampler` now follow the same live-registry and
+soft-destroy quarantine pattern used by memory, buffers, and buffer views.
+`vkCreateImage`, `vkCreateImageView`, and `vkCreateSampler` register local
+objects; `vkDestroyImage`, `vkDestroyImageView`, and `vkDestroySampler`
+unregister and retire stale handles without freeing caller-visible pointer-like
+handles.  Public image requirement, subresource-layout, bind-memory, image-view
+creation, dedicated allocation pNext, descriptor immutable sampler, descriptor
+image update, framebuffer attachment, rendering attachment, barrier, and image
+copy/clear/resolve/blit paths now resolve through live handle lookup before
+dereferencing.
+
+`vkFreeMemory` also detaches live and retired images from the memory object, so
+retired image snapshots cannot retain freed memory.  Image-view and sampler
+snapshots reject retired objects, and image-view snapshots also reject retired
+parent images.
+
+This is generic Vulkan pass-through hardening.  It does not change llama.cpp,
+Dockerfiles, models, prompts, shader bytes, or executor-side arithmetic.
+
+Current scope note: non-dispatchable image/sampler object classes are now
+protected at public API boundaries.  Deeper ownership/refcount coupling across
+framebuffer/render-pass attachment snapshots and broader child-object lifetime
+audits remain separate lanes.
+
+Evidence: `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`,
+`tests.test_gpu_abi_contract`, `tests.test_vulkan_icd_feature_chain`,
+`scripts/build-gpu-shim.sh`, `scripts/verify-native-payloads.py`.
+
+
 ### 2026-07-18 CPU/static Vulkan buffer-view live-handle lane
 
 `VkBufferView` now has the same public-handle fail-closed pattern as the
@@ -25,10 +56,10 @@ submit time.
 This is generic Vulkan pass-through hardening.  It does not change llama.cpp,
 Dockerfiles, models, prompts, shader bytes, or executor-side arithmetic.
 
-Current scope note: memory ownership is still snapshot-based; full object
-refcount/lifetime coupling across memory, buffers, buffer views, image views,
-images, and samplers remains a separate lane.  The next non-dispatchable object
-classes to harden are `VkImage`, `VkImageView`, and `VkSampler`.
+Current scope note: memory ownership is still snapshot-based.  The
+image/image-view/sampler live-registry lane above covers the next
+non-dispatchable object classes; deeper cross-object refcount/lifetime coupling
+remains a separate lane.
 
 Evidence: `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`,
 `tests.test_gpu_abi_contract`, `tests.test_vulkan_icd_feature_chain`,

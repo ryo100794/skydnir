@@ -8586,16 +8586,16 @@ class GpuAbiContractTest(unittest.TestCase):
         support_helper = c_function_body(icd, "descriptor_set_layout_create_info_supported")
         self.assertNotIn("if (binding->pImmutableSamplers) return false;", support_helper)
         self.assertIn("!descriptor_type_requires_sampler(binding->descriptorType)", support_helper)
-        self.assertIn("pdocker_vk_sampler_from_handle(binding->pImmutableSamplers[array_element])", support_helper)
+        self.assertIn("sampler_handle_lookup(binding->pImmutableSamplers[array_element])", support_helper)
         update_body = icd.split(
             "VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets", 1
         )[1].split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateShaderModule", 1)[0]
-        self.assertIn("immutable_sampler ? immutable_sampler : pdocker_vk_sampler_from_handle(info->sampler)", update_body)
+        self.assertIn("immutable_sampler ? immutable_sampler : sampler_handle_lookup(info->sampler)", update_body)
         self.assertIn("PdockerVkSampler *immutable_sampler = descriptor_layout_immutable_sampler(", update_body)
         self.assertIn("set->layout, binding, array_element);", update_body)
         self.assertIn("requires_view", update_body)
         self.assertIn("requires_sampler", update_body)
-        self.assertNotIn("slot->sampler = pdocker_vk_sampler_from_handle(info->sampler);", update_body)
+        self.assertNotIn("slot->sampler = sampler_handle_lookup(info->sampler);", update_body)
         self.assertIn("descriptor_set_apply_immutable_samplers(dst);", update_body)
         compat_body = c_function_body(icd, "descriptor_set_layout_compatible")
         self.assertIn("descriptor_layout_immutable_sampler_valid(expected, i, array_element)", compat_body)
@@ -11126,7 +11126,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("binding->descriptorCount > PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS", helper_body)
         self.assertIn("binding->pImmutableSamplers", helper_body)
         self.assertIn("!descriptor_type_requires_sampler(binding->descriptorType)", helper_body)
-        self.assertIn("pdocker_vk_sampler_from_handle(binding->pImmutableSamplers[array_element])", helper_body)
+        self.assertIn("sampler_handle_lookup(binding->pImmutableSamplers[array_element])", helper_body)
         self.assertNotIn("if (binding->pImmutableSamplers) return false;", helper_body)
         self.assertIn("VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_LAYOUT_SUPPORT", pnext_body)
         self.assertIn("p->maxVariableDescriptorCount = descriptor_set_layout_create_info_variable_descriptor_count_limit(", pnext_body)
@@ -11350,7 +11350,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("unsupported_create_info_pnext_result(\"vkAllocateMemory\", node)", alloc_validator)
         self.assertIn("VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO", alloc_validator)
         self.assertIn("has_image && has_buffer", alloc_validator)
-        self.assertIn("pdocker_vk_image_from_handle(info->image)", alloc_validator)
+        self.assertIn("image_handle_lookup(info->image)", alloc_validator)
         self.assertIn("buffer_handle_lookup(info->buffer)", alloc_validator)
         self.assertIn("VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO", alloc_validator)
         self.assertIn("info->flags != 0 || info->deviceMask > 1", alloc_validator)
@@ -11768,7 +11768,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "static VkResult validate_sampler_create_info_for_transport", 1
         )[0]
         self.assertIn("if (info->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;", image_view_validate_body)
-        self.assertIn("PdockerVkImage *image = pdocker_vk_image_from_handle(info->image);", image_view_validate_body)
+        self.assertIn("PdockerVkImage *image = image_handle_lookup(info->image);", image_view_validate_body)
         self.assertIn("validate_image_view_pnext_for_transport(info, image)", image_view_validate_body)
         self.assertIn("if (pnext_rc != VK_SUCCESS) return pnext_rc;", image_view_validate_body)
         self.assertIn("info->format != image->format", image_view_validate_body)
@@ -11822,6 +11822,51 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("img->memory = mem;", icd)
         self.assertIn("view->image = image;", icd)
         self.assertIn("sampler->mag_filter = pCreateInfo->magFilter;", icd)
+        for marker in [
+            "static PdockerVkImage *g_images;",
+            "static PdockerVkImage *g_retired_images;",
+            "static PdockerVkImageView *g_image_views;",
+            "static PdockerVkImageView *g_retired_image_views;",
+            "static PdockerVkSampler *g_samplers;",
+            "static PdockerVkSampler *g_retired_samplers;",
+            "image_register(PdockerVkImage *image)",
+            "image_unregister_object(PdockerVkImage *target)",
+            "image_handle_resolve(VkImage image, PdockerVkImage **out_image)",
+            "image_handle_lookup(VkImage image)",
+            "image_view_register(PdockerVkImageView *view)",
+            "image_view_unregister(VkImageView view)",
+            "image_view_handle_resolve(VkImageView view, PdockerVkImageView **out_view)",
+            "image_view_handle_lookup(VkImageView view)",
+            "sampler_register(PdockerVkSampler *sampler)",
+            "sampler_unregister(VkSampler sampler)",
+            "sampler_handle_resolve(VkSampler sampler, PdockerVkSampler **out_sampler)",
+            "sampler_handle_lookup(VkSampler sampler)",
+        ]:
+            self.assertIn(marker, icd)
+        self.assertIn("image_register(image);", create_image_body)
+        destroy_image_body = c_function_body(icd, "vkDestroyImage")
+        self.assertIn("image_handle_resolve(image, &img)", destroy_image_body)
+        self.assertIn("image_retire(image_unregister(image));", destroy_image_body)
+        create_view_body = c_function_body(icd, "vkCreateImageView")
+        destroy_view_body = c_function_body(icd, "vkDestroyImageView")
+        self.assertIn("PdockerVkImage *image = image_handle_lookup(pCreateInfo->image);", create_view_body)
+        self.assertIn("image_view_register(view);", create_view_body)
+        self.assertIn("image_view_retire(image_view_unregister(imageView));", destroy_view_body)
+        create_sampler_body = c_function_body(icd, "vkCreateSampler")
+        destroy_sampler_body = c_function_body(icd, "vkDestroySampler")
+        self.assertIn("sampler_register(sampler);", create_sampler_body)
+        self.assertIn("sampler_retire(sampler_unregister(sampler));", destroy_sampler_body)
+        free_memory_body = c_function_body(icd, "vkFreeMemory")
+        self.assertIn("image_detach_memory(m);", free_memory_body)
+        update_body = c_function_body(icd, "vkUpdateDescriptorSets")
+        self.assertIn("image_view_handle_lookup(info->imageView)", update_body)
+        self.assertIn("sampler_handle_lookup(info->sampler)", update_body)
+        descriptor_layout_body = c_function_body(icd, "vkCreateDescriptorSetLayout")
+        self.assertIn("sampler_handle_lookup(binding->pImmutableSamplers[array_element])", descriptor_layout_body)
+        framebuffer_body = c_function_body(icd, "vkCreateFramebuffer")
+        self.assertIn("image_view_handle_lookup(pCreateInfo->pAttachments[i])", framebuffer_body)
+        self.assertNotIn("free(pdocker_vk_image_view_from_handle(imageView));", icd)
+        self.assertNotIn("free(pdocker_vk_sampler_from_handle(sampler));", icd)
         self.assertIn("if (!binding->buffer && !binding->buffer_view && !binding->image_view && !binding->sampler) continue;", icd)
         self.assertIn("set->has_image_descriptor = descriptor_set_has_image_descriptor(set);", icd)
         self.assertIn("descriptor_array_transport_required || texel_buffer_transport_required", icd)
@@ -15436,7 +15481,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("uint32_t layout_range_capacity;", icd)
         self.assertIn("image_layout_range_reserve", icd)
         self.assertIn("image_layout_range_cache_readable", icd)
-        self.assertIn("free(img->layout_ranges);", icd)
+        self.assertIn("image_release_owned_ranges(PdockerVkImage *image)", icd)
+        self.assertIn("free(image->layout_ranges);", c_function_body(icd, "image_release_owned_ranges"))
+        self.assertIn("image_release_owned_ranges(image);", c_function_body(icd, "image_retire"))
         self.assertIn("free(image->layout_ranges);", c_function_body(icd, "clear_image_layout_ranges"))
         self.assertIn("image->layout_range_capacity = 0;", c_function_body(icd, "clear_image_layout_ranges"))
         self.assertIn("PdockerVkImageBarrierOp", icd)
