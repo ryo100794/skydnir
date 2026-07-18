@@ -6936,6 +6936,51 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 if (!memory_handle_lookup_for_device(device_a, memory_a)) return 5;
                 if (memory_handle_lookup_for_device(device_b, memory_a)) return 6;
 
+                VkMemoryRequirements req;
+                memset(&req, 0, sizeof(req));
+                vkGetBufferMemoryRequirements(device_a, buffer_a, &req);
+                if (req.size == 0 || req.memoryTypeBits == 0) return 21;
+                memset(&req, 0xff, sizeof(req));
+                vkGetBufferMemoryRequirements(device_b, buffer_a, &req);
+                if (req.size != 0 || req.memoryTypeBits != 0) return 22;
+
+                VkBufferMemoryRequirementsInfo2 buffer_req_info;
+                VkMemoryRequirements2 req2;
+                memset(&buffer_req_info, 0, sizeof(buffer_req_info));
+                memset(&req2, 0, sizeof(req2));
+                buffer_req_info.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_REQUIREMENTS_INFO_2;
+                buffer_req_info.buffer = buffer_a;
+                req2.sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2;
+                vkGetBufferMemoryRequirements2(device_b, &buffer_req_info, &req2);
+                if (req2.memoryRequirements.size != 0 || req2.memoryRequirements.memoryTypeBits != 0) return 23;
+
+                memset(&req, 0, sizeof(req));
+                vkGetImageMemoryRequirements(device_a, image_a, &req);
+                if (req.size == 0 || req.memoryTypeBits == 0) return 24;
+                memset(&req, 0xff, sizeof(req));
+                vkGetImageMemoryRequirements(device_b, image_a, &req);
+                if (req.size != 0 || req.memoryTypeBits != 0) return 25;
+
+                VkImageMemoryRequirementsInfo2 image_req_info;
+                memset(&image_req_info, 0, sizeof(image_req_info));
+                memset(&req2, 0, sizeof(req2));
+                image_req_info.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_REQUIREMENTS_INFO_2;
+                image_req_info.image = image_a;
+                req2.sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2;
+                vkGetImageMemoryRequirements2(device_b, &image_req_info, &req2);
+                if (req2.memoryRequirements.size != 0 || req2.memoryRequirements.memoryTypeBits != 0) return 26;
+
+                VkImageSubresource subresource;
+                memset(&subresource, 0, sizeof(subresource));
+                subresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                VkSubresourceLayout layout;
+                memset(&layout, 0, sizeof(layout));
+                vkGetImageSubresourceLayout(device_a, image_a, &subresource, &layout);
+                if (layout.size == 0 || layout.rowPitch == 0) return 27;
+                memset(&layout, 0xff, sizeof(layout));
+                vkGetImageSubresourceLayout(device_b, image_a, &subresource, &layout);
+                if (layout.size != 0 || layout.rowPitch != 0 || layout.depthPitch != 0 || layout.arrayPitch != 0) return 28;
+
                 VkMappedMemoryRange range;
                 memset(&range, 0, sizeof(range));
                 range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;

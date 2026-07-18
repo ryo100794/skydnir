@@ -11805,6 +11805,9 @@ class GpuAbiContractTest(unittest.TestCase):
         create_image_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateImage", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkDestroyImage", 1
         )[0]
+        image_requirements_body = c_function_body(icd, "vkGetImageMemoryRequirements")
+        self.assertIn("PdockerVkImage *img = image_handle_lookup_for_device(device, image);", image_requirements_body)
+        self.assertIn("pMemoryRequirements->memoryTypeBits = img ? img->memory_type_bits : 0;", image_requirements_body)
         self.assertIn("validate_image_create_info_for_transport(pCreateInfo)", create_image_body)
         self.assertIn("pdocker_vk_effective_single_queue_sharing_mode(pCreateInfo->sharingMode)", create_image_body)
         self.assertNotIn("if (!pdocker_vk_format_bridge_supported(pCreateInfo->format))", create_image_body)
@@ -12974,7 +12977,8 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(marker, icd)
         self.assertIn("buffer_register(buffer);", create_body)
         self.assertIn("buffer_retire(buffer_unregister(buffer));", destroy_body)
-        self.assertIn("buffer_handle_resolve(buffer, &b)", requirements_body)
+        self.assertIn("PdockerVkBuffer *b = buffer_handle_lookup_for_device(device, buffer);", requirements_body)
+        self.assertIn("pMemoryRequirements->memoryTypeBits = b ? 0x3 : 0;", requirements_body)
         self.assertIn("buffer_handle_resolve(buffer, &b)", bind_body)
         self.assertIn("buffer_handle_lookup_for_device(device, w->pBufferInfo[j].buffer)", update_descriptors_body)
         self.assertIn("buffer_detach_memory(m);", free_memory_body)
@@ -13925,6 +13929,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("image_tight_layer_stride(img", icd)
         self.assertIn("pLayout->rowPitch", icd)
         self.assertIn("pLayout->depthPitch", icd)
+        layout_body = c_function_body(icd, "vkGetImageSubresourceLayout")
+        self.assertIn("PdockerVkImage *img = image_handle_lookup_for_device(device, image);", layout_body)
         self.assertIn("MAP_PROC(vkGetImageSubresourceLayout);", icd)
 
     def test_vulkan_icd_exposes_advertised_maintenance5_subresource_query_surface(self):
@@ -13939,6 +13945,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_5", layout2_body)
         self.assertIn("pSubresource->sType != VK_STRUCTURE_TYPE_IMAGE_SUBRESOURCE_2", layout2_body)
         self.assertIn("pSubresource->pNext", layout2_body)
+        self.assertIn("PdockerVkImage *img = image_handle_lookup_for_device(device, image);", layout2_body)
         self.assertIn("fill_image_subresource_layout_tight(img", layout2_body)
         device_layout_body = c_function_body(icd, "vkGetDeviceImageSubresourceLayout")
         self.assertIn("device_extension_enabled_or_core(", device_layout_body)

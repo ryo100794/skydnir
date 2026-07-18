@@ -10,6 +10,33 @@ llama.cpp itself remains unmodified.
 ## Current Ground Truth
 
 
+### 2026-07-18 CPU/static Vulkan read-only resource-query owner lane
+
+Read-only resource queries now respect creator-device ownership.
+`vkGetBufferMemoryRequirements`, `vkGetBufferMemoryRequirements2`,
+`vkGetImageMemoryRequirements`, `vkGetImageMemoryRequirements2`,
+`vkGetImageSubresourceLayout`, and `vkGetImageSubresourceLayout2` resolve their
+resource handles through owner-aware device lookup.  Cross-device query attempts
+return zeroed requirements/layout data rather than exposing size, memory-type,
+or layout metadata from a resource owned by another device.
+
+This closes another CPU/static stale-handle path without modifying llama.cpp,
+Dockerfiles, models, prompts, shader bytes, or executor-side arithmetic.  It is
+part of the generic Vulkan pass-through correctness lane: query APIs should not
+be able to infer or reuse another logical device's resource graph.
+
+Evidence: `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`,
+`tests.test_gpu_abi_contract`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_device_owner_rejects_cross_device_memory_resource_misuse`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_device_owner_rejects_cross_device_metadata_render_wsi_handles`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_device_owner_rejects_cross_device_command_submit_sync`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_command_recording_rejects_cross_device_transfer_resources`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_destroy_device_retires_live_device_children_and_queue`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_wsi_surface_swapchain_handles_fail_closed_after_destroy`,
+`scripts/build-gpu-shim.sh`, `scripts/verify-native-payloads.py`,
+`./gradlew :app:assembleDebug`.
+
+
 ### 2026-07-18 CPU/static Vulkan command-transfer and mapped-memory owner lane
 
 Transfer, copy, clear, fill, update, graphics vertex/index binding, dispatch

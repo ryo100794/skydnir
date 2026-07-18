@@ -23201,9 +23201,8 @@ VKAPI_ATTR void VKAPI_CALL vkGetImageMemoryRequirements(
         VkDevice device,
         VkImage image,
         VkMemoryRequirements *pMemoryRequirements) {
-    (void)device;
     if (!pMemoryRequirements) return;
-    PdockerVkImage *img = image_handle_lookup(image);
+    PdockerVkImage *img = image_handle_lookup_for_device(device, image);
     memset(pMemoryRequirements, 0, sizeof(*pMemoryRequirements));
     pMemoryRequirements->size = img ? img->requirements_size : 0;
     pMemoryRequirements->alignment =
@@ -23283,10 +23282,9 @@ VKAPI_ATTR void VKAPI_CALL vkGetImageSubresourceLayout(
         VkImage image,
         const VkImageSubresource *pSubresource,
         VkSubresourceLayout *pLayout) {
-    (void)device;
     if (!pLayout) return;
     memset(pLayout, 0, sizeof(*pLayout));
-    PdockerVkImage *img = image_handle_lookup(image);
+    PdockerVkImage *img = image_handle_lookup_for_device(device, image);
     fill_image_subresource_layout_tight(img, pSubresource, pLayout);
 }
 
@@ -23306,7 +23304,7 @@ VKAPI_ATTR void VKAPI_CALL vkGetImageSubresourceLayout2(
         pSubresource->pNext) {
         return;
     }
-    PdockerVkImage *img = image_handle_lookup(image);
+    PdockerVkImage *img = image_handle_lookup_for_device(device, image);
     fill_image_subresource_layout_tight(img,
                                         &pSubresource->imageSubresource,
                                         &pLayout->subresourceLayout);
@@ -23658,14 +23656,12 @@ VKAPI_ATTR void VKAPI_CALL vkGetBufferMemoryRequirements(
         VkDevice device,
         VkBuffer buffer,
         VkMemoryRequirements *pMemoryRequirements) {
-    (void)device;
     if (!pMemoryRequirements) return;
-    PdockerVkBuffer *b = NULL;
-    (void)buffer_handle_resolve(buffer, &b);
+    PdockerVkBuffer *b = buffer_handle_lookup_for_device(device, buffer);
     memset(pMemoryRequirements, 0, sizeof(*pMemoryRequirements));
     pMemoryRequirements->size = b ? b->requirements_size : 0;
     pMemoryRequirements->alignment = b && b->requirements_alignment ? b->requirements_alignment : PDOCKER_VK_REQUIREMENT_ALIGNMENT;
-    pMemoryRequirements->memoryTypeBits = 0x3;
+    pMemoryRequirements->memoryTypeBits = b ? 0x3 : 0;
     if (trace_allocations()) {
         fprintf(stderr,
                 "pdocker-vulkan-icd: buffer-requirements size=%llu alignment=%llu typeBits=0x%x\n",
