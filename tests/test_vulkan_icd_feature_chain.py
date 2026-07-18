@@ -6316,7 +6316,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 view.subresourceRange.levelCount = level_count;
                 view.subresourceRange.baseArrayLayer = base_layer;
                 view.subresourceRange.layerCount = layer_count;
-                VkResult rc = validate_image_view_create_info_for_transport(&view, NULL);
+                VkResult rc = validate_image_view_create_info_for_transport(VK_NULL_HANDLE, &view, NULL);
                 if (rc != expected) {{
                     fprintf(stderr, "case %d returned %d expected %d\\n", code, rc, expected);
                     return code;
@@ -6467,12 +6467,12 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 min_lod_view.subresourceRange.levelCount = 1;
                 min_lod_view.subresourceRange.baseArrayLayer = 0;
                 min_lod_view.subresourceRange.layerCount = 1;
-                if (validate_image_view_create_info_for_transport(&min_lod_view, NULL) != VK_SUCCESS) {{
+                if (validate_image_view_create_info_for_transport(VK_NULL_HANDLE, &min_lod_view, NULL) != VK_SUCCESS) {{
                     fprintf(stderr, "no-op image view minLod pNext was rejected\\n");
                     return 26;
                 }}
                 min_lod.minLod = 1.0f;
-                if (validate_image_view_create_info_for_transport(&min_lod_view, NULL) != VK_ERROR_FEATURE_NOT_PRESENT) {{
+                if (validate_image_view_create_info_for_transport(VK_NULL_HANDLE, &min_lod_view, NULL) != VK_ERROR_FEATURE_NOT_PRESENT) {{
                     fprintf(stderr, "nonzero image view minLod pNext was accepted\\n");
                     return 27;
                 }}
@@ -6601,7 +6601,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 view.subresourceRange.levelCount = 1;
                 view.subresourceRange.baseArrayLayer = 0;
                 view.subresourceRange.layerCount = 1;
-                if (validate_image_view_create_info_for_transport(&view, NULL) != VK_ERROR_FORMAT_NOT_SUPPORTED) {{
+                if (validate_image_view_create_info_for_transport(VK_NULL_HANDLE, &view, NULL) != VK_ERROR_FORMAT_NOT_SUPPORTED) {{
                     fprintf(stderr, "plane-aspect image view was accepted as byte-linear color\\n");
                     return 4;
                 }}

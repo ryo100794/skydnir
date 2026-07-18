@@ -10,6 +10,25 @@ llama.cpp itself remains unmodified.
 ## Current Ground Truth
 
 
+### 2026-07-18 CPU/static Vulkan image-view owner lane
+
+`validate_image_view_create_info_for_transport` now receives the creating
+`VkDevice` and resolves `VkImageViewCreateInfo.image` with
+`image_handle_lookup_for_device`. This moves `vkCreateImageView`
+cross-device rejection into preflight validation while preserving the existing
+fail-closed no-view-created behavior.
+
+This is CPU/static Vulkan pass-through hardening only.  It does not change
+llama.cpp, Dockerfiles, models, prompts, shader bytes, or executor arithmetic.
+
+Evidence: `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`,
+`tests.test_gpu_abi_contract`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_device_owner_rejects_cross_device_memory_resource_misuse`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_image_view_type_compatibility_is_fail_closed`,
+`scripts/build-gpu-shim.sh`, `scripts/verify-native-payloads.py`,
+`./gradlew :app:assembleDebug`.
+
+
 ### 2026-07-18 CPU/static Vulkan bind-memory owner lane
 
 `vkBindBufferMemory` and `vkBindImageMemory` now resolve bind targets with

@@ -11939,7 +11939,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "static VkResult validate_sampler_create_info_for_transport", 1
         )[0]
         self.assertIn("if (info->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;", image_view_validate_body)
-        self.assertIn("PdockerVkImage *image = image_handle_lookup(info->image);", image_view_validate_body)
+        self.assertIn("VkDevice device,", image_view_validate_body)
+        self.assertIn("PdockerVkImage *image = image_handle_lookup_for_device(device, info->image);", image_view_validate_body)
+        self.assertNotIn("image_handle_lookup(info->image)", image_view_validate_body)
         self.assertIn("validate_image_view_pnext_for_transport(info, image)", image_view_validate_body)
         self.assertIn("if (pnext_rc != VK_SUCCESS) return pnext_rc;", image_view_validate_body)
         self.assertIn("info->format != image->format", image_view_validate_body)

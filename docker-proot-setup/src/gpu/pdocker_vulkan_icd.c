@@ -23049,11 +23049,12 @@ static VkResult validate_image_view_pnext_for_transport(
 }
 
 static VkResult validate_image_view_create_info_for_transport(
+        VkDevice device,
         const VkImageViewCreateInfo *info,
         VkImageSubresourceRange *normalized_range_out) {
     if (!info) return VK_ERROR_INITIALIZATION_FAILED;
     if (info->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;
-    PdockerVkImage *image = image_handle_lookup(info->image);
+    PdockerVkImage *image = image_handle_lookup_for_device(device, info->image);
     if (!image) return VK_ERROR_INITIALIZATION_FAILED;
     VkResult pnext_rc = validate_image_view_pnext_for_transport(info, image);
     if (pnext_rc != VK_SUCCESS) return pnext_rc;
@@ -23604,7 +23605,6 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateImageView(
         const VkImageViewCreateInfo *pCreateInfo,
         const VkAllocationCallbacks *pAllocator,
         VkImageView *pView) {
-    (void)device;
     (void)pAllocator;
     if (!pCreateInfo || !pView) return VK_ERROR_INITIALIZATION_FAILED;
     *pView = VK_NULL_HANDLE;
@@ -23613,7 +23613,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateImageView(
     }
     VkImageSubresourceRange normalized_range;
     VkResult validate_rc = validate_image_view_create_info_for_transport(
-        pCreateInfo, &normalized_range);
+        device, pCreateInfo, &normalized_range);
     if (validate_rc != VK_SUCCESS) return validate_rc;
     PdockerVkImage *image = image_handle_lookup_for_device(device, pCreateInfo->image);
     if (!image) return VK_ERROR_INITIALIZATION_FAILED;
