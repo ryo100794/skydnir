@@ -1679,7 +1679,8 @@ struct PdockerVkDescriptorPool {
 };
 
 struct PdockerVkPipelineCache {
-    int unused;
+    bool destroyed;
+    struct PdockerVkPipelineCache *next;
 };
 
 #ifdef VK_EXT_VALIDATION_CACHE_EXTENSION_NAME
@@ -1749,6 +1750,8 @@ static PdockerVkDescriptorPool *g_descriptor_pools;
 static PdockerVkDescriptorPool *g_retired_descriptor_pools;
 static PdockerVkDescriptorSet *g_descriptor_sets;
 static PdockerVkDescriptorSet *g_retired_descriptor_sets;
+static PdockerVkPipelineCache *g_pipeline_caches;
+static PdockerVkPipelineCache *g_retired_pipeline_caches;
 static unsigned g_shader_dump_counter;
 static PdockerVkMemory *g_guarded_memories[PDOCKER_VK_MAX_GUARDED_MEMORIES];
 static struct sigaction g_previous_sigsegv;
@@ -2596,6 +2599,53 @@ static bool descriptor_set_handle_resolve(VkDescriptorSet descriptorSet, Pdocker
 static PdockerVkDescriptorSet *descriptor_set_handle_lookup(VkDescriptorSet descriptorSet) {
     PdockerVkDescriptorSet *resolved = NULL;
     return descriptor_set_handle_resolve(descriptorSet, &resolved) ? resolved : NULL;
+}
+
+static void pipeline_cache_register(PdockerVkPipelineCache *cache) {
+    if (!cache) return;
+    cache->destroyed = false;
+    cache->next = g_pipeline_caches;
+    g_pipeline_caches = cache;
+}
+
+static PdockerVkPipelineCache *pipeline_cache_unregister(VkPipelineCache pipelineCache) {
+    PdockerVkPipelineCache *target = pdocker_vk_pipeline_cache_from_handle(pipelineCache);
+    if (!target) return NULL;
+    PdockerVkPipelineCache **link = &g_pipeline_caches;
+    while (*link) {
+        if (*link == target) {
+            *link = target->next;
+            target->next = NULL;
+            return target;
+        }
+        link = &(*link)->next;
+    }
+    return NULL;
+}
+
+static void pipeline_cache_retire(PdockerVkPipelineCache *cache) {
+    if (!cache || cache->destroyed) return;
+    cache->destroyed = true;
+    cache->next = g_retired_pipeline_caches;
+    g_retired_pipeline_caches = cache;
+}
+
+static bool pipeline_cache_handle_resolve(VkPipelineCache pipelineCache, PdockerVkPipelineCache **out_cache) {
+    PdockerVkPipelineCache *target = pdocker_vk_pipeline_cache_from_handle(pipelineCache);
+    if (out_cache) *out_cache = NULL;
+    if (!target) return false;
+    for (PdockerVkPipelineCache *candidate = g_pipeline_caches; candidate; candidate = candidate->next) {
+        if (candidate == target && !candidate->destroyed) {
+            if (out_cache) *out_cache = candidate;
+            return true;
+        }
+    }
+    return false;
+}
+
+static PdockerVkPipelineCache *pipeline_cache_handle_lookup(VkPipelineCache pipelineCache) {
+    PdockerVkPipelineCache *resolved = NULL;
+    return pipeline_cache_handle_resolve(pipelineCache, &resolved) ? resolved : NULL;
 }
 
 static bool current_vulkan_dispatch_identity_ids(
@@ -26031,13 +26081,15 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateComputePipelines(
         const VkComputePipelineCreateInfo *pCreateInfos,
         const VkAllocationCallbacks *pAllocator,
         VkPipeline *pPipelines) {
-    (void)pipelineCache;
     (void)pAllocator;
     if (!pPipelines || (createInfoCount > 0 && !pCreateInfos)) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
     for (uint32_t i = 0; i < createInfoCount; ++i) {
         pPipelines[i] = VK_NULL_HANDLE;
+    }
+    if (pipelineCache != VK_NULL_HANDLE && !pipeline_cache_handle_lookup(pipelineCache)) {
+        return VK_ERROR_INITIALIZATION_FAILED;
     }
     for (uint32_t i = 0; i < createInfoCount; ++i) {
         const VkComputePipelineCreateInfo *ci = &pCreateInfos[i];
@@ -26359,13 +26411,15 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
         const VkGraphicsPipelineCreateInfo *pCreateInfos,
         const VkAllocationCallbacks *pAllocator,
         VkPipeline *pPipelines) {
-    (void)pipelineCache;
     (void)pAllocator;
     if (!pPipelines || (createInfoCount > 0 && !pCreateInfos)) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
     for (uint32_t i = 0; i < createInfoCount; ++i) {
         pPipelines[i] = VK_NULL_HANDLE;
+    }
+    if (pipelineCache != VK_NULL_HANDLE && !pipeline_cache_handle_lookup(pipelineCache)) {
+        return VK_ERROR_INITIALIZATION_FAILED;
     }
     for (uint32_t i = 0; i < createInfoCount; ++i) {
         PdockerVkPipeline *pipeline = pdocker_alloc_handle(sizeof(*pipeline));
@@ -36046,6 +36100,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreatePipelineCache(
     if (!pPipelineCache) return VK_ERROR_INITIALIZATION_FAILED;
     PdockerVkPipelineCache *cache = pdocker_alloc_handle(sizeof(*cache));
     if (!cache) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    pipeline_cache_register(cache);
     *pPipelineCache = pdocker_vk_pipeline_cache_to_handle(cache);
     return VK_SUCCESS;
 }
@@ -36056,7 +36111,7 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyPipelineCache(
         const VkAllocationCallbacks *pAllocator) {
     (void)device;
     (void)pAllocator;
-    free(pdocker_vk_pipeline_cache_from_handle(pipelineCache));
+    pipeline_cache_retire(pipeline_cache_unregister(pipelineCache));
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkGetPipelineCacheData(
@@ -36065,8 +36120,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPipelineCacheData(
         size_t *pDataSize,
         void *pData) {
     (void)device;
-    (void)pipelineCache;
     if (!pDataSize) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!pipeline_cache_handle_lookup(pipelineCache)) return VK_ERROR_INITIALIZATION_FAILED;
     if (!pData) {
         *pDataSize = 0;
         return VK_SUCCESS;
@@ -36081,9 +36136,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkMergePipelineCaches(
         uint32_t srcCacheCount,
         const VkPipelineCache *pSrcCaches) {
     (void)device;
-    (void)dstCache;
-    (void)srcCacheCount;
-    (void)pSrcCaches;
+    if (!pipeline_cache_handle_lookup(dstCache)) return VK_ERROR_INITIALIZATION_FAILED;
+    if (srcCacheCount > 0 && !pSrcCaches) return VK_ERROR_INITIALIZATION_FAILED;
+    for (uint32_t i = 0; i < srcCacheCount; ++i) {
+        if (!pipeline_cache_handle_lookup(pSrcCaches[i])) return VK_ERROR_INITIALIZATION_FAILED;
+    }
     return VK_SUCCESS;
 }
 

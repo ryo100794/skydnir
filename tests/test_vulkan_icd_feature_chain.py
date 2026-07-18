@@ -1700,6 +1700,69 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_pipeline_cache_handles_fail_closed_after_destroy(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            int main(void) {{
+                VkPipelineCacheCreateInfo info;
+                memset(&info, 0, sizeof(info));
+                info.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
+                VkPipelineCache cache = VK_NULL_HANDLE;
+                if (vkCreatePipelineCache(VK_NULL_HANDLE, &info, NULL, &cache) != VK_SUCCESS ||
+                    cache == VK_NULL_HANDLE) {{
+                    fprintf(stderr, "pipeline cache create failed\\n");
+                    return 2;
+                }}
+                PdockerVkPipelineCache *cache_obj = pipeline_cache_handle_lookup(cache);
+                if (!cache_obj || cache_obj->destroyed) {{
+                    fprintf(stderr, "pipeline cache not registered live\\n");
+                    return 3;
+                }}
+                size_t data_size = 99;
+                if (vkGetPipelineCacheData(VK_NULL_HANDLE, cache, &data_size, NULL) != VK_SUCCESS ||
+                    data_size != 0) {{
+                    fprintf(stderr, "pipeline cache data query failed\\n");
+                    return 4;
+                }}
+                if (vkMergePipelineCaches(VK_NULL_HANDLE, cache, 1, &cache) != VK_SUCCESS) {{
+                    fprintf(stderr, "pipeline cache self merge failed\\n");
+                    return 5;
+                }}
+                VkPipelineCache fake_cache = pdocker_vk_pipeline_cache_to_handle((PdockerVkPipelineCache *)(uintptr_t)0x1234000u);
+                if (vkMergePipelineCaches(VK_NULL_HANDLE, cache, 1, &fake_cache) == VK_SUCCESS) {{
+                    fprintf(stderr, "pipeline cache merge accepted fake source\\n");
+                    return 6;
+                }}
+                if (vkGetPipelineCacheData(VK_NULL_HANDLE, fake_cache, &data_size, NULL) == VK_SUCCESS) {{
+                    fprintf(stderr, "pipeline cache data accepted fake cache\\n");
+                    return 7;
+                }}
+                vkDestroyPipelineCache(VK_NULL_HANDLE, cache, NULL);
+                if (pipeline_cache_handle_lookup(cache) != NULL || !cache_obj->destroyed) {{
+                    fprintf(stderr, "destroyed pipeline cache remained live\\n");
+                    return 8;
+                }}
+                if (vkGetPipelineCacheData(VK_NULL_HANDLE, cache, &data_size, NULL) == VK_SUCCESS) {{
+                    fprintf(stderr, "pipeline cache data accepted destroyed cache\\n");
+                    return 9;
+                }}
+                if (vkMergePipelineCaches(VK_NULL_HANDLE, cache, 0, NULL) == VK_SUCCESS) {{
+                    fprintf(stderr, "pipeline cache merge accepted destroyed destination\\n");
+                    return 10;
+                }}
+                vkDestroyPipelineCache(VK_NULL_HANDLE, cache, NULL);
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_conservative_query_instance_extensions_are_advertised_with_aliases(self):
         source = textwrap.dedent(
             f"""

@@ -10,6 +10,28 @@ llama.cpp itself remains unmodified.
 ## Current Ground Truth
 
 
+### 2026-07-18 CPU/static Vulkan pipeline-cache live-handle lane
+
+`VkPipelineCache` now uses a live registry with soft-destroy quarantine.
+`vkCreatePipelineCache` registers cache objects, `vkDestroyPipelineCache`
+unregisters and retires them, and cache metadata operations now reject fabricated
+or destroyed cache handles instead of ignoring them.  `vkCreateComputePipelines`
+and `vkCreateGraphicsPipelines` also validate non-null pipeline-cache handles
+before creating pipeline objects, keeping driver-cache topology metadata from
+smuggling stale host pointers into the bridge.
+
+This is generic Vulkan pass-through hardening.  It does not change llama.cpp,
+Dockerfiles, models, prompts, shader bytes, or executor-side arithmetic.
+
+Current scope note: command pools/buffers, fences/semaphores, events/query pools,
+and queue submit/present prevalidation remain separate handle-lifetime lanes.
+
+Evidence: `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`,
+`tests.test_gpu_abi_contract`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_pipeline_cache_handles_fail_closed_after_destroy`,
+`scripts/build-gpu-shim.sh`.
+
+
 ### 2026-07-18 CPU/static Vulkan descriptor pool/set live-handle lane
 
 `VkDescriptorPool` and `VkDescriptorSet` now use live registries with
