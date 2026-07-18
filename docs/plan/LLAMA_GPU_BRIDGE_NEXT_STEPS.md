@@ -3257,3 +3257,22 @@ that is tracked separately because it changes a broader loader compatibility
 surface than extension-enable gating.
 
 Validation: `env -u PYTHONPATH python3 -m unittest tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_device_procaddr_requires_enabled_device_extension_for_selected_extension_commands tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_device_proc_and_command_use_gate_extension_features -q` and full `tests.test_gpu_abi_contract`.
+
+
+### 2026-07-18 device procaddr dispatch-filter lane
+
+CPU/static Vulkan API hardening now separates the shared proc table from
+`vkGetDeviceProcAddr` device-dispatch visibility.  The internal `proc_address`
+lookup remains the single loader/instance/device symbol table, but
+`vkGetDeviceProcAddr` now rejects global, instance-dispatch, physical-device
+query, WSI physical-device query, debug-utils instance, and ICD-loader entry
+points before applying device-extension enable gates.  Device, queue, and
+command-buffer entry points remain visible subject to the advertised API surface
+and per-device extension-enable gates.
+
+This closes a generic Vulkan loader compatibility gap and avoids returning
+physical-device or instance functions through a device procaddr path.  It does
+not specialize for llama.cpp, does not rewrite SPIR-V/shader bytes, and does not
+change Dockerfiles, models, prompts, or executor ABI.
+
+Validation: `env -u PYTHONPATH python3 -m unittest tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_device_procaddr_hides_global_instance_and_physical_dispatch_commands tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_device_proc_and_command_use_gate_extension_features -q`, full `tests.test_gpu_abi_contract`, full `tests.test_vulkan_icd_feature_chain`, `scripts/build-gpu-shim.sh`, `scripts/verify-native-payloads.py`, and `./gradlew :app:assembleDebug`.

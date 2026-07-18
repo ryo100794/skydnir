@@ -5761,5 +5761,84 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+
+    def test_device_procaddr_hides_global_instance_and_physical_dispatch_commands(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            static int expect_device_proc_hidden(VkDevice device, const char *name, int code) {{
+                if (vkGetDeviceProcAddr(device, name) != NULL) {{
+                    fprintf(stderr, "non-device proc %s visible from vkGetDeviceProcAddr\\n", name);
+                    return code;
+                }}
+                return 0;
+            }}
+
+            static int expect_device_proc_visible(VkDevice device, const char *name, int code) {{
+                if (vkGetDeviceProcAddr(device, name) == NULL) {{
+                    fprintf(stderr, "device proc %s hidden from vkGetDeviceProcAddr\\n", name);
+                    return code;
+                }}
+                return 0;
+            }}
+
+            int main(void) {{
+                PdockerVkDevice fake_device;
+                memset(&fake_device, 0, sizeof(fake_device));
+                fake_device.requested_feature_mask = UINT64_MAX;
+                fake_device.enabled_extension_mask = UINT64_MAX;
+                VkDevice device = (VkDevice)&fake_device;
+                const char *hidden[] = {{
+                    "vkGetInstanceProcAddr",
+                    "vkEnumerateInstanceVersion",
+                    "vkCreateInstance",
+                    "vkDestroyInstance",
+                    "vkEnumeratePhysicalDevices",
+                    "vkEnumeratePhysicalDeviceGroupsKHR",
+                    "vkGetPhysicalDeviceProperties",
+                    "vkGetPhysicalDeviceProperties2KHR",
+                    "vkGetPhysicalDeviceFeatures2KHR",
+                    "vkGetPhysicalDeviceFormatProperties2KHR",
+                    "vkGetPhysicalDeviceQueueFamilyProperties2KHR",
+                    "vkGetPhysicalDeviceExternalBufferPropertiesKHR",
+                    "vkEnumerateDeviceExtensionProperties",
+                    "vkCreateDevice",
+                    "vkCreateHeadlessSurfaceEXT",
+                    "vkDestroySurfaceKHR",
+                    "vkGetPhysicalDeviceSurfaceCapabilitiesKHR",
+                    "vkGetPhysicalDeviceSurfaceCapabilities2KHR",
+                    "vkGetPhysicalDevicePresentRectanglesKHR",
+                    "vkGetPhysicalDeviceToolPropertiesEXT",
+                    "vkCreateDebugUtilsMessengerEXT",
+                    "vk_icdGetPhysicalDeviceProcAddr",
+                }};
+                for (uint32_t i = 0; i < sizeof(hidden) / sizeof(hidden[0]); ++i) {{
+                    int rc = expect_device_proc_hidden(device, hidden[i], 10 + (int)i);
+                    if (rc) return rc;
+                }}
+                const char *visible[] = {{
+                    "vkGetDeviceProcAddr",
+                    "vkDestroyDevice",
+                    "vkGetDeviceQueue",
+                    "vkCreateBuffer",
+                    "vkCreateSwapchainKHR",
+                    "vkGetDeviceGroupSurfacePresentModesKHR",
+                    "vkSetDebugUtilsObjectNameEXT",
+                }};
+                for (uint32_t i = 0; i < sizeof(visible) / sizeof(visible[0]); ++i) {{
+                    int rc = expect_device_proc_visible(device, visible[i], 80 + (int)i);
+                    if (rc) return rc;
+                }}
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
 if __name__ == "__main__":
     unittest.main()

@@ -12968,7 +12968,31 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertNotIn(marker, device_proc_table)
 
+        deny_device_proc_body = c_function_body(icd, "proc_address_hidden_from_device_procaddr")
+        for marker in [
+            "vkGetInstanceProcAddr",
+            "vkEnumerateInstanceVersion",
+            "vkCreateInstance",
+            "vkDestroyInstance",
+            "vkEnumeratePhysicalDevices",
+            "vkEnumeratePhysicalDeviceGroupsKHR",
+            "vkGetPhysicalDeviceProperties",
+            "vkGetPhysicalDeviceProperties2KHR",
+            "vkGetPhysicalDeviceExternalBufferPropertiesKHR",
+            "vkEnumerateDeviceExtensionProperties",
+            "vkCreateDevice",
+            "vkCreateHeadlessSurfaceEXT",
+            "vkDestroySurfaceKHR",
+            "vkGetPhysicalDeviceSurfaceCapabilitiesKHR",
+            "vkGetPhysicalDevicePresentRectanglesKHR",
+            "vkGetPhysicalDeviceToolPropertiesEXT",
+            "vkCreateDebugUtilsMessengerEXT",
+            "vk_icdGetPhysicalDeviceProcAddr",
+        ]:
+            self.assertIn(marker, deny_device_proc_body)
+
         get_device_proc_body = c_function_body(icd, "vkGetDeviceProcAddr")
+        self.assertIn("proc_address_hidden_from_device_procaddr(pName)", get_device_proc_body)
         self.assertIn("device_proc_address_hidden_by_enabled_state(pdocker_device, pName)", get_device_proc_body)
         self.assertIn("return proc_address(pName);", get_device_proc_body)
         proc_body = icd.split("static PFN_vkVoidFunction proc_address", 1)[1].split("#undef MAP_PROC", 1)[0]

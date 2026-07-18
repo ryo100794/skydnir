@@ -35832,6 +35832,69 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance instan
     return proc_address(pName);
 }
 
+static bool proc_address_hidden_from_device_procaddr(const char *pName) {
+    if (!pName) return true;
+    if (strcmp(pName, "vkGetInstanceProcAddr") == 0 ||
+        strcmp(pName, "vkEnumerateInstanceVersion") == 0 ||
+        strcmp(pName, "vkEnumerateInstanceExtensionProperties") == 0 ||
+        strcmp(pName, "vkEnumerateInstanceLayerProperties") == 0 ||
+        strcmp(pName, "vkCreateInstance") == 0 ||
+        strcmp(pName, "vkDestroyInstance") == 0 ||
+        strcmp(pName, "vkEnumeratePhysicalDevices") == 0 ||
+        strcmp(pName, "vkEnumeratePhysicalDeviceGroups") == 0 ||
+        strcmp(pName, "vkEnumeratePhysicalDeviceGroupsKHR") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceProperties") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceProperties2") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceProperties2KHR") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceFeatures") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceFeatures2") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceFeatures2KHR") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceFormatProperties") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceFormatProperties2") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceFormatProperties2KHR") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceImageFormatProperties") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceImageFormatProperties2") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceImageFormatProperties2KHR") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceSparseImageFormatProperties") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceSparseImageFormatProperties2") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceSparseImageFormatProperties2KHR") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceQueueFamilyProperties") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceQueueFamilyProperties2") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceQueueFamilyProperties2KHR") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceMemoryProperties") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceMemoryProperties2") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceMemoryProperties2KHR") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceExternalBufferProperties") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceExternalBufferPropertiesKHR") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceExternalSemaphoreProperties") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceExternalSemaphorePropertiesKHR") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceExternalFenceProperties") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceExternalFencePropertiesKHR") == 0 ||
+        strcmp(pName, "vkEnumerateDeviceExtensionProperties") == 0 ||
+        strcmp(pName, "vkEnumerateDeviceLayerProperties") == 0 ||
+        strcmp(pName, "vkCreateDevice") == 0 ||
+        strcmp(pName, "vkCreateHeadlessSurfaceEXT") == 0 ||
+        strcmp(pName, "vkDestroySurfaceKHR") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceSurfaceSupportKHR") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceSurfaceFormatsKHR") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceSurfacePresentModesKHR") == 0 ||
+        strcmp(pName, "vkGetPhysicalDevicePresentRectanglesKHR") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceSurfaceCapabilities2KHR") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceSurfaceFormats2KHR") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceToolProperties") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceToolPropertiesEXT") == 0 ||
+        strcmp(pName, "vkCreateDebugUtilsMessengerEXT") == 0 ||
+        strcmp(pName, "vkDestroyDebugUtilsMessengerEXT") == 0 ||
+        strcmp(pName, "vkSubmitDebugUtilsMessageEXT") == 0 ||
+        strcmp(pName, "vk_icdNegotiateLoaderICDInterfaceVersion") == 0 ||
+        strcmp(pName, "vk_icdGetInstanceProcAddr") == 0 ||
+        strcmp(pName, "vk_icdGetPhysicalDeviceProcAddr") == 0) {
+        return true;
+    }
+    return false;
+}
+
 typedef struct PdockerVkDeviceProcEnabledStateGate {
     const char *name;
     uint64_t required_feature_mask;
@@ -35960,6 +36023,7 @@ static bool device_proc_address_hidden_by_enabled_state(
 
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetDeviceProcAddr(VkDevice device, const char *pName) {
     PdockerVkDevice *pdocker_device = (PdockerVkDevice *)device;
+    if (proc_address_hidden_from_device_procaddr(pName)) return NULL;
     if (device_proc_address_hidden_by_enabled_state(pdocker_device, pName)) return NULL;
     return proc_address(pName);
 }
