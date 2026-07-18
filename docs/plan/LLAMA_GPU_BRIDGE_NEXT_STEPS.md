@@ -10,6 +10,38 @@ llama.cpp itself remains unmodified.
 ## Current Ground Truth
 
 
+### 2026-07-18 CPU/static Vulkan cross-device core resource owner lane
+
+Core resource objects now carry an `owner_device_id` captured from the creating
+`VkDevice`: memory, buffers, images, buffer views, image views, samplers,
+pipelines, command pools, fences, semaphores, events, and query pools.  The
+first enforced boundary is the high-risk memory/resource graph: memory map/free,
+buffer/image bind, buffer/image view create, and buffer/image/view/sampler destroy
+now use typed `*_for_device` lookup helpers so handles created on one device are
+not accepted through another device.  Wrong-device destroy is a no-op and does
+not retire the real owner device's object.
+
+`vkDestroyDevice` was also made owner-aware for the owner-tagged registries.  It
+captures the device object id before unregistering the dispatchable device and
+only reclaims matching or legacy-unowned objects from owner-tagged lists.  This
+fixes the multi-device case where the previous global drain could either destroy
+a different device's resources or spin forever when an owner-checked free no-oped
+on a foreign list head.
+
+This is Stage 1 of per-object device ownership.  Descriptor/pipeline/render graph
+ownership, command-buffer submit ownership, sync/query command recording ownership,
+and swapchain device ownership remain separate follow-up lanes.
+
+This is generic Vulkan pass-through hardening.  It does not change llama.cpp,
+Dockerfiles, models, prompts, shader bytes, or executor-side arithmetic.
+
+Evidence: `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`,
+`tests.test_gpu_abi_contract`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_device_owner_rejects_cross_device_memory_resource_misuse`,
+`tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_destroy_device_retires_live_device_children_and_queue`,
+`scripts/build-gpu-shim.sh`.
+
+
 ### 2026-07-18 CPU/static Vulkan device-destroy cleanup lane
 
 `vkDestroyDevice` now drains the live device-object registries before freeing the

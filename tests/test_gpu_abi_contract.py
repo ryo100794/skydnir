@@ -11437,8 +11437,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("device-buffer-memory-requirements-pnext-unsupported", device_buffer_req_body)
         self.assertIn("if (pInfo && pInfo->pNext)", device_image_req_body)
         self.assertIn("device-image-memory-requirements-pnext-unsupported", device_image_req_body)
-        self.assertIn("memory_handle_resolve(memory, &m)", bind_buffer_body)
-        self.assertIn("if (!memory_handle_resolve(memory, &m) || !buffer_handle_resolve(buffer, &b)) return VK_ERROR_INITIALIZATION_FAILED;", bind_buffer_body)
+        self.assertIn("memory_handle_resolve_for_device(device, memory, &m)", bind_buffer_body)
+        self.assertIn("device_owner_matches_or_unowned(device, b->owner_device_id)", bind_buffer_body)
 
 
     def test_vulkan_core_create_infos_reject_unsupported_pnext_and_flags(self):
@@ -11907,7 +11907,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("image_retire(image_unregister(image));", destroy_image_body)
         create_view_body = c_function_body(icd, "vkCreateImageView")
         destroy_view_body = c_function_body(icd, "vkDestroyImageView")
-        self.assertIn("PdockerVkImage *image = image_handle_lookup(pCreateInfo->image);", create_view_body)
+        self.assertIn("PdockerVkImage *image = image_handle_lookup_for_device(device, pCreateInfo->image);", create_view_body)
+        self.assertIn("if (!image) return VK_ERROR_INITIALIZATION_FAILED;", create_view_body)
         self.assertIn("image_view_register(view);", create_view_body)
         self.assertIn("image_view_retire(image_view_unregister(imageView));", destroy_view_body)
         create_sampler_body = c_function_body(icd, "vkCreateSampler")
@@ -12159,8 +12160,8 @@ class GpuAbiContractTest(unittest.TestCase):
 
         create_body = c_function_body(icd, "vkCreateBufferView")
         destroy_body = c_function_body(icd, "vkDestroyBufferView")
-        self.assertIn("PdockerVkBuffer *buffer = NULL;", create_body)
-        self.assertIn("buffer_handle_resolve(pCreateInfo->buffer, &buffer)", create_body)
+        self.assertIn("buffer_handle_lookup_for_device(device, pCreateInfo->buffer)", create_body)
+        self.assertIn("if (!buffer) return VK_ERROR_INITIALIZATION_FAILED;", create_body)
         self.assertIn("VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT", create_body)
         self.assertIn("VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT", create_body)
         self.assertIn("size_t texel_size = conservative_format_bytes_per_pixel(pCreateInfo->format);", create_body)
@@ -12929,7 +12930,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("if (pAllocateInfo->memoryTypeIndex >= 2) return VK_ERROR_FEATURE_NOT_PRESENT;", allocate_body)
         self.assertIn("memory_register(memory);", allocate_body)
         self.assertIn("if (size != VK_WHOLE_SIZE)", map_body)
-        self.assertIn("memory_handle_resolve(memory, &m)", map_body)
+        self.assertIn("memory_handle_resolve_for_device(device, memory, &m)", map_body)
         self.assertIn("size > (VkDeviceSize)m->size - offset", map_body)
         self.assertIn("return VK_ERROR_MEMORY_MAP_FAILED;", map_body)
         self.assertNotIn("(void)size;", map_body)
@@ -13049,7 +13050,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "pMemoryUnmapInfo->sType != VK_STRUCTURE_TYPE_MEMORY_UNMAP_INFO",
             'unsupported_create_info_pnext_result("vkUnmapMemory2", pMemoryUnmapInfo->pNext)',
             "pMemoryUnmapInfo->flags != 0",
-            "memory_handle_resolve(pMemoryUnmapInfo->memory, NULL)",
+            "memory_handle_resolve_for_device(device, pMemoryUnmapInfo->memory, NULL)",
             "vkUnmapMemory(device, pMemoryUnmapInfo->memory);",
             "return VK_SUCCESS;",
         ]:
@@ -13322,33 +13323,50 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("device_enabled_extension_mask_from_handle(VkDevice device)", icd)
         self.assertIn("device_extension_enabled_or_core(", icd)
         self.assertNotIn("((PdockerVkDevice *)device)", icd)
+        for marker in [
+            "uint64_t owner_device_id;",
+            "device_owner_id_or_zero(VkDevice device)",
+            "device_owner_matches_or_unowned(VkDevice device, uint64_t owner_device_id)",
+            "memory_handle_lookup_for_device(VkDevice device, VkDeviceMemory memory)",
+            "buffer_handle_lookup_for_device(VkDevice device, VkBuffer buffer)",
+            "image_handle_lookup_for_device(VkDevice device, VkImage image)",
+            "buffer_view_handle_lookup_for_device(VkDevice device, VkBufferView view)",
+            "image_view_handle_lookup_for_device(VkDevice device, VkImageView view)",
+            "sampler_handle_lookup_for_device(VkDevice device, VkSampler sampler)",
+        ]:
+            self.assertIn(marker, icd)
         create_device_body = c_function_body(icd, "vkCreateDevice")
         self.assertIn("device_register(device);", create_device_body)
         destroy_device_body = c_function_body(icd, "vkDestroyDevice")
         self.assertIn("device_unregister(device)", destroy_device_body)
-        self.assertIn("pdocker_vk_destroy_device_live_objects(device);", destroy_device_body)
+        self.assertIn("device_handle_resolve(device, &pdocker_device)", destroy_device_body)
+        self.assertIn("uint64_t destroy_owner_id = pdocker_device->object_id;", destroy_device_body)
+        self.assertIn("pdocker_vk_destroy_device_live_objects(device, destroy_owner_id);", destroy_device_body)
         self.assertIn("memset(&g_queue, 0, sizeof(g_queue));", destroy_device_body)
         self.assertNotIn("free((void *)device)", destroy_device_body)
         destroy_live_objects_body = c_function_body(icd, "pdocker_vk_destroy_device_live_objects")
+        self.assertIn("device_destroy_should_reclaim_object", icd)
+        self.assertIn("pdocker_vk_release_memory_object", icd)
+        self.assertIn("PDOCKER_VK_FIND_DEVICE_OWNED", icd)
         for marker in [
             "while (g_swapchains)",
             "pdocker_vk_destroy_swapchain_images(device, sc);",
-            "while (g_command_pools)",
+            "PDOCKER_VK_FIND_DEVICE_OWNED(g_command_pools, pool, destroy_owner_id);",
             "command_buffer_retire(cmd);",
             "while (g_descriptor_update_templates)",
             "destroy_descriptor_pool_object(pool);",
-            "while (g_pipelines)",
+            "PDOCKER_VK_FIND_DEVICE_OWNED(g_pipelines, pipeline, destroy_owner_id);",
             "pipeline_retire(pipeline);",
-            "while (g_buffer_views)",
-            "while (g_image_views)",
-            "while (g_buffers)",
-            "while (g_images)",
-            "while (g_memories)",
-            "vkFreeMemory(device, pdocker_vk_memory_to_handle(g_memories), NULL);",
-            "while (g_fences)",
-            "while (g_semaphores)",
-            "while (g_events)",
-            "while (g_query_pools)",
+            "PDOCKER_VK_FIND_DEVICE_OWNED(g_buffer_views, view, destroy_owner_id);",
+            "PDOCKER_VK_FIND_DEVICE_OWNED(g_image_views, view, destroy_owner_id);",
+            "PDOCKER_VK_FIND_DEVICE_OWNED(g_buffers, buffer, destroy_owner_id);",
+            "PDOCKER_VK_FIND_DEVICE_OWNED(g_images, image, destroy_owner_id);",
+            "PDOCKER_VK_FIND_DEVICE_OWNED(g_memories, memory, destroy_owner_id);",
+            "pdocker_vk_release_memory_object(memory);",
+            "PDOCKER_VK_FIND_DEVICE_OWNED(g_fences, fence, destroy_owner_id);",
+            "PDOCKER_VK_FIND_DEVICE_OWNED(g_semaphores, sem, destroy_owner_id);",
+            "PDOCKER_VK_FIND_DEVICE_OWNED(g_events, event, destroy_owner_id);",
+            "PDOCKER_VK_FIND_DEVICE_OWNED(g_query_pools, pool, destroy_owner_id);",
         ]:
             self.assertIn(marker, destroy_live_objects_body)
         get_queue_body = c_function_body(icd, "vkGetDeviceQueue")

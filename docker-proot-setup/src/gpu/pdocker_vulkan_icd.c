@@ -589,6 +589,7 @@ static uint64_t g_generic_dispatch_sequence = 0;
 
 struct PdockerVkMemory {
     uint64_t object_id;
+    uint64_t owner_device_id;
     size_t size;
     uint32_t memory_type_index;
     uint32_t heap_index;
@@ -621,6 +622,7 @@ typedef struct {
 
 struct PdockerVkBuffer {
     uint64_t object_id;
+    uint64_t owner_device_id;
     size_t size;
     VkBufferUsageFlags usage;
     VkDeviceSize requirements_size;
@@ -635,6 +637,7 @@ struct PdockerVkBuffer {
 
 struct PdockerVkBufferView {
     uint64_t object_id;
+    uint64_t owner_device_id;
     PdockerVkBuffer *buffer;
     VkFormat format;
     VkDeviceSize offset;
@@ -646,6 +649,7 @@ struct PdockerVkBufferView {
 
 struct PdockerVkImage {
     uint64_t object_id;
+    uint64_t owner_device_id;
     VkImageCreateFlags flags;
     VkImageType image_type;
     VkFormat format;
@@ -677,6 +681,7 @@ struct PdockerVkImage {
 
 struct PdockerVkImageView {
     uint64_t object_id;
+    uint64_t owner_device_id;
     PdockerVkImage *image;
     VkImageViewType view_type;
     VkFormat format;
@@ -716,6 +721,7 @@ struct PdockerVkSwapchain {
 
 struct PdockerVkSampler {
     uint64_t object_id;
+    uint64_t owner_device_id;
     VkFilter mag_filter;
     VkFilter min_filter;
     VkSamplerMipmapMode mipmap_mode;
@@ -986,6 +992,7 @@ struct PdockerVkPipelineLayout {
 
 struct PdockerVkPipeline {
     uint64_t object_id;
+    uint64_t owner_device_id;
     PdockerVkShaderModule *shader;
     PdockerVkPipelineLayout *layout;
     uint64_t requested_feature_mask;
@@ -1081,6 +1088,7 @@ static void pdocker_vk_pipeline_destroy(PdockerVkPipeline *pipeline) {
 }
 
 struct PdockerVkFence {
+    uint64_t owner_device_id;
     bool signaled;
     bool executor_tracked;
     uint64_t fence_id;
@@ -1089,6 +1097,7 @@ struct PdockerVkFence {
 };
 
 typedef struct PdockerVkSemaphore {
+    uint64_t owner_device_id;
     bool signaled;
     bool timeline;
     bool executor_tracked;
@@ -1099,6 +1108,7 @@ typedef struct PdockerVkSemaphore {
 } PdockerVkSemaphore;
 
 struct PdockerVkEvent {
+    uint64_t owner_device_id;
     bool signaled;
     bool executor_tracked;
     uint64_t event_id;
@@ -1107,6 +1117,7 @@ struct PdockerVkEvent {
 };
 
 struct PdockerVkQueryPool {
+    uint64_t owner_device_id;
     VkQueryType type;
     uint32_t query_count;
     uint64_t pool_id;
@@ -1732,6 +1743,7 @@ struct PdockerVkDebugUtilsMessenger {
 #endif
 
 struct PdockerVkCommandPool {
+    uint64_t owner_device_id;
     uint64_t requested_feature_mask;
     uint64_t enabled_extension_mask;
     bool destroyed;
@@ -1937,6 +1949,27 @@ static bool device_handle_resolve(VkDevice device, PdockerVkDevice **out_device)
     return false;
 }
 
+static bool device_handle_object_id(VkDevice device, uint64_t *out_object_id) {
+    PdockerVkDevice *pdocker_device = NULL;
+    if (out_object_id) *out_object_id = 0;
+    if (!device_handle_resolve(device, &pdocker_device)) return false;
+    if (!pdocker_device || pdocker_device->object_id == 0) return false;
+    if (out_object_id) *out_object_id = pdocker_device->object_id;
+    return true;
+}
+
+static uint64_t device_owner_id_or_zero(VkDevice device) {
+    uint64_t object_id = 0;
+    (void)device_handle_object_id(device, &object_id);
+    return object_id;
+}
+
+static bool device_owner_matches_or_unowned(VkDevice device, uint64_t owner_device_id) {
+    if (owner_device_id == 0) return true;
+    uint64_t object_id = 0;
+    return device_handle_object_id(device, &object_id) && object_id == owner_device_id;
+}
+
 static void memory_register(PdockerVkMemory *memory) {
     if (!memory) return;
     memory->next = g_memories;
@@ -1969,6 +2002,20 @@ static bool memory_handle_resolve(VkDeviceMemory memory, PdockerVkMemory **out_m
         }
     }
     return false;
+}
+
+static bool memory_handle_resolve_for_device(VkDevice device, VkDeviceMemory memory, PdockerVkMemory **out_memory) {
+    PdockerVkMemory *resolved = NULL;
+    if (out_memory) *out_memory = NULL;
+    if (!memory_handle_resolve(memory, &resolved)) return false;
+    if (!device_owner_matches_or_unowned(device, resolved->owner_device_id)) return false;
+    if (out_memory) *out_memory = resolved;
+    return true;
+}
+
+static PdockerVkMemory *memory_handle_lookup_for_device(VkDevice device, VkDeviceMemory memory) {
+    PdockerVkMemory *resolved = NULL;
+    return memory_handle_resolve_for_device(device, memory, &resolved) ? resolved : NULL;
 }
 
 static void buffer_register(PdockerVkBuffer *buffer) {
@@ -2019,6 +2066,11 @@ static bool buffer_handle_resolve(VkBuffer buffer, PdockerVkBuffer **out_buffer)
 static PdockerVkBuffer *buffer_handle_lookup(VkBuffer buffer) {
     PdockerVkBuffer *resolved = NULL;
     return buffer_handle_resolve(buffer, &resolved) ? resolved : NULL;
+}
+
+static PdockerVkBuffer *buffer_handle_lookup_for_device(VkDevice device, VkBuffer buffer) {
+    PdockerVkBuffer *resolved = buffer_handle_lookup(buffer);
+    return resolved && device_owner_matches_or_unowned(device, resolved->owner_device_id) ? resolved : NULL;
 }
 
 static void buffer_detach_memory_from_list(PdockerVkBuffer *buffers, const PdockerVkMemory *memory) {
@@ -2087,6 +2139,11 @@ static PdockerVkBufferView *buffer_view_handle_lookup(VkBufferView view) {
     return buffer_view_handle_resolve(view, &resolved) ? resolved : NULL;
 }
 
+static PdockerVkBufferView *buffer_view_handle_lookup_for_device(VkDevice device, VkBufferView view) {
+    PdockerVkBufferView *resolved = buffer_view_handle_lookup(view);
+    return resolved && device_owner_matches_or_unowned(device, resolved->owner_device_id) ? resolved : NULL;
+}
+
 
 static void image_release_owned_ranges(PdockerVkImage *image) {
     if (!image) return;
@@ -2148,6 +2205,11 @@ static bool image_handle_resolve(VkImage image, PdockerVkImage **out_image) {
 static PdockerVkImage *image_handle_lookup(VkImage image) {
     PdockerVkImage *resolved = NULL;
     return image_handle_resolve(image, &resolved) ? resolved : NULL;
+}
+
+static PdockerVkImage *image_handle_lookup_for_device(VkDevice device, VkImage image) {
+    PdockerVkImage *resolved = image_handle_lookup(image);
+    return resolved && device_owner_matches_or_unowned(device, resolved->owner_device_id) ? resolved : NULL;
 }
 
 static void image_detach_memory_from_list(PdockerVkImage *images, const PdockerVkMemory *memory) {
@@ -2213,6 +2275,11 @@ static PdockerVkImageView *image_view_handle_lookup(VkImageView view) {
     return image_view_handle_resolve(view, &resolved) ? resolved : NULL;
 }
 
+static PdockerVkImageView *image_view_handle_lookup_for_device(VkDevice device, VkImageView view) {
+    PdockerVkImageView *resolved = image_view_handle_lookup(view);
+    return resolved && device_owner_matches_or_unowned(device, resolved->owner_device_id) ? resolved : NULL;
+}
+
 static void sampler_register(PdockerVkSampler *sampler) {
     if (!sampler) return;
     sampler->destroyed = false;
@@ -2258,6 +2325,11 @@ static bool sampler_handle_resolve(VkSampler sampler, PdockerVkSampler **out_sam
 static PdockerVkSampler *sampler_handle_lookup(VkSampler sampler) {
     PdockerVkSampler *resolved = NULL;
     return sampler_handle_resolve(sampler, &resolved) ? resolved : NULL;
+}
+
+static PdockerVkSampler *sampler_handle_lookup_for_device(VkDevice device, VkSampler sampler) {
+    PdockerVkSampler *resolved = sampler_handle_lookup(sampler);
+    return resolved && device_owner_matches_or_unowned(device, resolved->owner_device_id) ? resolved : NULL;
 }
 
 static void render_pass_register(PdockerVkRenderPass *rp) {
@@ -22057,6 +22129,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateBuffer(
     PdockerVkBuffer *buffer = pdocker_alloc_handle(sizeof(*buffer));
     if (!buffer) return VK_ERROR_OUT_OF_HOST_MEMORY;
     buffer->object_id = next_vulkan_object_generation();
+    buffer->owner_device_id = device_owner_id_or_zero(device);
     buffer->size = (size_t)pCreateInfo->size;
     buffer->usage = effective_usage;
     buffer->requirements_alignment = PDOCKER_VK_REQUIREMENT_ALIGNMENT;
@@ -22079,6 +22152,8 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyBuffer(
         const VkAllocationCallbacks *pAllocator) {
     (void)device;
     (void)pAllocator;
+    PdockerVkBuffer *target = buffer_handle_lookup_for_device(device, buffer);
+    if (!target) return;
     buffer_retire(buffer_unregister(buffer));
 }
 
@@ -22139,8 +22214,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateBufferView(
     if (!pView) return VK_ERROR_INITIALIZATION_FAILED;
     *pView = VK_NULL_HANDLE;
     if (!pCreateInfo) return VK_ERROR_INITIALIZATION_FAILED;
-    PdockerVkBuffer *buffer = NULL;
-    if (!buffer_handle_resolve(pCreateInfo->buffer, &buffer) || pCreateInfo->flags != 0) {
+    PdockerVkBuffer *buffer = buffer_handle_lookup_for_device(device, pCreateInfo->buffer);
+    if (!buffer) return VK_ERROR_INITIALIZATION_FAILED;
+    if (pCreateInfo->flags != 0) {
         trace_icd_runtime_failure("buffer-view-invalid-create-info", VK_ERROR_FEATURE_NOT_PRESENT);
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }
@@ -22204,6 +22280,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateBufferView(
     PdockerVkBufferView *view = pdocker_alloc_handle(sizeof(*view));
     if (!view) return VK_ERROR_OUT_OF_HOST_MEMORY;
     view->object_id = next_vulkan_object_generation();
+    view->owner_device_id = device_owner_id_or_zero(device);
     view->buffer = buffer;
     view->format = pCreateInfo->format;
     view->offset = pCreateInfo->offset;
@@ -22220,6 +22297,8 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyBufferView(
         const VkAllocationCallbacks *pAllocator) {
     (void)device;
     (void)pAllocator;
+    PdockerVkBufferView *target = buffer_view_handle_lookup_for_device(device, bufferView);
+    if (!target) return;
     buffer_view_retire(buffer_view_unregister(bufferView));
 }
 
@@ -22884,6 +22963,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateImage(
     PdockerVkImage *image = pdocker_alloc_handle(sizeof(*image));
     if (!image) return VK_ERROR_OUT_OF_HOST_MEMORY;
     image->object_id = next_vulkan_object_generation();
+    image->owner_device_id = device_owner_id_or_zero(device);
     image->flags = pCreateInfo->flags;
     image->image_type = pCreateInfo->imageType;
     image->format = pCreateInfo->format;
@@ -22935,7 +23015,8 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyImage(
     (void)device;
     (void)pAllocator;
     PdockerVkImage *img = NULL;
-    if (!image_handle_resolve(image, &img)) return;
+    if (!image_handle_resolve(image, &img) ||
+        !device_owner_matches_or_unowned(device, img->owner_device_id)) return;
     if (img->swapchain_owned) {
         trace_icd_runtime_failure("swapchain-image-destroy-ignored", VK_ERROR_INITIALIZATION_FAILED);
         return;
@@ -23196,7 +23277,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkBindImageMemory(
     (void)device;
     PdockerVkImage *img = image_handle_lookup(image);
     PdockerVkMemory *mem = NULL;
-    if (!memory_handle_resolve(memory, &mem) || !img) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!memory_handle_resolve_for_device(device, memory, &mem) || !img ||
+        !device_owner_matches_or_unowned(device, img->owner_device_id)) return VK_ERROR_INITIALIZATION_FAILED;
     if (img->swapchain_owned) {
         trace_icd_runtime_failure("swapchain-image-bind-rejected", VK_ERROR_INITIALIZATION_FAILED);
         return VK_ERROR_INITIALIZATION_FAILED;
@@ -23294,10 +23376,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateImageView(
     VkResult validate_rc = validate_image_view_create_info_for_transport(
         pCreateInfo, &normalized_range);
     if (validate_rc != VK_SUCCESS) return validate_rc;
-    PdockerVkImage *image = image_handle_lookup(pCreateInfo->image);
+    PdockerVkImage *image = image_handle_lookup_for_device(device, pCreateInfo->image);
+    if (!image) return VK_ERROR_INITIALIZATION_FAILED;
     PdockerVkImageView *view = pdocker_alloc_handle(sizeof(*view));
     if (!view) return VK_ERROR_OUT_OF_HOST_MEMORY;
     view->object_id = next_vulkan_object_generation();
+    view->owner_device_id = device_owner_id_or_zero(device);
     view->image = image;
     view->view_type = pCreateInfo->viewType;
     view->format = pCreateInfo->format;
@@ -23315,6 +23399,8 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyImageView(
         const VkAllocationCallbacks *pAllocator) {
     (void)device;
     (void)pAllocator;
+    PdockerVkImageView *target = image_view_handle_lookup_for_device(device, imageView);
+    if (!target) return;
     image_view_retire(image_view_unregister(imageView));
 }
 
@@ -23337,6 +23423,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSampler(
     PdockerVkSampler *sampler = pdocker_alloc_handle(sizeof(*sampler));
     if (!sampler) return VK_ERROR_OUT_OF_HOST_MEMORY;
     sampler->object_id = next_vulkan_object_generation();
+    sampler->owner_device_id = device_owner_id_or_zero(device);
     sampler->mag_filter = pCreateInfo->magFilter;
     sampler->min_filter = pCreateInfo->minFilter;
     sampler->mipmap_mode = pCreateInfo->mipmapMode;
@@ -23365,6 +23452,8 @@ VKAPI_ATTR void VKAPI_CALL vkDestroySampler(
         const VkAllocationCallbacks *pAllocator) {
     (void)device;
     (void)pAllocator;
+    PdockerVkSampler *target = sampler_handle_lookup_for_device(device, sampler);
+    if (!target) return;
     sampler_retire(sampler_unregister(sampler));
 }
 
@@ -23728,6 +23817,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateMemory(
     PdockerVkMemory *memory = pdocker_alloc_handle(sizeof(*memory));
     if (!memory) return VK_ERROR_OUT_OF_HOST_MEMORY;
     memory->object_id = next_vulkan_object_generation();
+    memory->owner_device_id = device_owner_id_or_zero(device);
     memory->size = (size_t)pAllocateInfo->allocationSize;
     memory->memory_type_index = pAllocateInfo->memoryTypeIndex;
     memory->heap_index = pdocker_vk_heap_index_for_memory_type(memory->memory_type_index);
@@ -23812,7 +23902,9 @@ VKAPI_ATTR void VKAPI_CALL vkFreeMemory(
         const VkAllocationCallbacks *pAllocator) {
     (void)device;
     (void)pAllocator;
-    PdockerVkMemory *m = memory_unregister(memory);
+    PdockerVkMemory *m = memory_handle_lookup_for_device(device, memory);
+    if (!m) return;
+    m = memory_unregister(memory);
     if (!m) return;
     buffer_detach_memory(m);
     image_detach_memory(m);
@@ -23836,7 +23928,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkMapMemory(
     (void)flags;
     if (!memory || !ppData) return VK_ERROR_MEMORY_MAP_FAILED;
     PdockerVkMemory *m = NULL;
-    if (!memory_handle_resolve(memory, &m)) return VK_ERROR_MEMORY_MAP_FAILED;
+    if (!memory_handle_resolve_for_device(device, memory, &m)) return VK_ERROR_MEMORY_MAP_FAILED;
     if (offset > (VkDeviceSize)m->size || offset > (VkDeviceSize)SIZE_MAX) {
         return VK_ERROR_MEMORY_MAP_FAILED;
     }
@@ -23906,7 +23998,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkUnmapMemory2(
         trace_icd_runtime_failure("unmap-memory2-flags-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }
-    if (!memory_handle_resolve(pMemoryUnmapInfo->memory, NULL)) {
+    if (!memory_handle_resolve_for_device(device, pMemoryUnmapInfo->memory, NULL)) {
         return VK_ERROR_MEMORY_MAP_FAILED;
     }
     vkUnmapMemory(device, pMemoryUnmapInfo->memory);
@@ -23920,7 +24012,7 @@ VKAPI_ATTR void VKAPI_CALL vkGetDeviceMemoryCommitment(
         VkDeviceSize *pCommittedMemoryInBytes) {
     (void)device;
     PdockerVkMemory *m = NULL;
-    if (memory_handle_resolve(memory, &m) && pCommittedMemoryInBytes) {
+    if (memory_handle_resolve_for_device(device, memory, &m) && pCommittedMemoryInBytes) {
         *pCommittedMemoryInBytes = (VkDeviceSize)m->size;
     } else if (pCommittedMemoryInBytes) {
         *pCommittedMemoryInBytes = 0;
@@ -23955,7 +24047,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkBindBufferMemory(
     (void)device;
     PdockerVkBuffer *b = NULL;
     PdockerVkMemory *m = NULL;
-    if (!memory_handle_resolve(memory, &m) || !buffer_handle_resolve(buffer, &b)) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!memory_handle_resolve_for_device(device, memory, &m) || !buffer_handle_resolve(buffer, &b) ||
+        !device_owner_matches_or_unowned(device, b->owner_device_id)) return VK_ERROR_INITIALIZATION_FAILED;
     VkResult dedicated_rc = validate_memory_dedicated_bind(
         "memory-dedicated-buffer-bind-mismatch", m, b, NULL, memoryOffset);
     if (dedicated_rc != VK_SUCCESS) return dedicated_rc;
@@ -24725,16 +24818,18 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
     return VK_SUCCESS;
 }
 
-static void pdocker_vk_destroy_device_live_objects(VkDevice device);
+static void pdocker_vk_destroy_device_live_objects(VkDevice device, uint64_t destroy_owner_id);
 
 VKAPI_ATTR void VKAPI_CALL vkDestroyDevice(
         VkDevice device,
         const VkAllocationCallbacks *pAllocator) {
     (void)pAllocator;
-    PdockerVkDevice *pdocker_device = device_unregister(device);
-    if (!pdocker_device) return;
-    pdocker_vk_destroy_device_live_objects(device);
-    if (g_queue.device_object_id == pdocker_device->object_id) {
+    PdockerVkDevice *pdocker_device = NULL;
+    if (!device_handle_resolve(device, &pdocker_device)) return;
+    uint64_t destroy_owner_id = pdocker_device->object_id;
+    (void)device_unregister(device);
+    pdocker_vk_destroy_device_live_objects(device, destroy_owner_id);
+    if (g_queue.device_object_id == destroy_owner_id) {
         memset(&g_queue, 0, sizeof(g_queue));
     }
     free(pdocker_device);
@@ -26649,6 +26744,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateComputePipelines(
         PdockerVkPipeline *pipeline = pdocker_alloc_handle(sizeof(*pipeline));
         if (!pipeline) return VK_ERROR_OUT_OF_HOST_MEMORY;
         pipeline->object_id = next_vulkan_object_generation();
+        pipeline->owner_device_id = device_owner_id_or_zero(device);
         pipeline->shader = shader_module_handle_lookup(ci->stage.module);
         pipeline->layout = pipeline_layout_handle_lookup(ci->layout);
         if (!pipeline->shader || !pipeline->layout) {
@@ -28837,6 +28933,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateCommandPool(
     if (validate_rc != VK_SUCCESS) return validate_rc;
     PdockerVkCommandPool *pool = pdocker_alloc_handle(sizeof(*pool));
     if (!pool) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    pool->owner_device_id = device_owner_id_or_zero(device);
     pool->requested_feature_mask = device_requested_feature_mask_from_handle(device);
     pool->enabled_extension_mask = device_enabled_extension_mask_from_handle(device);
     command_pool_register(pool);
@@ -35338,6 +35435,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateEvent(
     if (!event) return VK_ERROR_OUT_OF_HOST_MEMORY;
     memset(event, 0, sizeof(*event));
     event->signaled = false;
+    event->owner_device_id = device_owner_id_or_zero(device);
     event->event_id = next_vulkan_object_generation();
     if (bridge_available()) {
         if (send_executor_event_create(event) != 0) {
@@ -36237,6 +36335,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateQueryPool(
     }
     PdockerVkQueryPool *pool = pdocker_alloc_handle(sizeof(*pool));
     if (!pool) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    pool->owner_device_id = device_owner_id_or_zero(device);
     pool->type = pCreateInfo->queryType;
     pool->query_count = pCreateInfo->queryCount;
     pool->pool_id = next_vulkan_query_pool_id();
@@ -36499,6 +36598,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateFence(
     if (!fence) return VK_ERROR_OUT_OF_HOST_MEMORY;
     memset(fence, 0, sizeof(*fence));
     fence->signaled = pCreateInfo && (pCreateInfo->flags & VK_FENCE_CREATE_SIGNALED_BIT);
+    fence->owner_device_id = device_owner_id_or_zero(device);
     fence->fence_id = next_vulkan_object_generation();
     if (bridge_available()) {
         uint32_t initial_signaled = fence->signaled ? 1u : 0u;
@@ -36654,6 +36754,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSemaphore(
     sem->timeline = timeline;
     sem->value = initial_value;
     sem->signaled = timeline ? (initial_value > 0) : false;
+    sem->owner_device_id = device_owner_id_or_zero(device);
     sem->semaphore_id = next_vulkan_object_generation();
     if (bridge_available()) {
         if (send_executor_semaphore_create(sem) != 0) {
@@ -37273,15 +37374,48 @@ VKAPI_ATTR void VKAPI_CALL vkGetPrivateData(
 #endif
 
 
-static void pdocker_vk_destroy_device_live_objects(VkDevice device) {
+static bool device_destroy_should_reclaim_object(uint64_t destroy_owner_id, uint64_t object_owner_id) {
+    return destroy_owner_id == 0 || object_owner_id == 0 || object_owner_id == destroy_owner_id;
+}
+
+static void pdocker_vk_release_memory_object(PdockerVkMemory *memory) {
+    if (!memory) return;
+    PdockerVkMemory *m = memory_unregister(pdocker_vk_memory_to_handle(memory));
+    if (!m) return;
+    buffer_detach_memory(m);
+    image_detach_memory(m);
+    unregister_guarded_memory(m);
+    pdocker_vk_heap_usage_sub(m->heap_index, m->size);
+    if (m->map && m->map != MAP_FAILED) munmap(m->map, m->size);
+    if (m->fd >= 0) close(m->fd);
+    free(m->resident_pages);
+    free(m->dirty_pages);
+    free(m);
+}
+
+#define PDOCKER_VK_FIND_DEVICE_OWNED(head, var, owner_id) \
+    do { \
+        (var) = NULL; \
+        for (__typeof__(head) it = (head); it; it = it->next) { \
+            if (device_destroy_should_reclaim_object((owner_id), it->owner_device_id)) { \
+                (var) = it; \
+                break; \
+            } \
+        } \
+    } while (0)
+
+static void pdocker_vk_destroy_device_live_objects(VkDevice device, uint64_t destroy_owner_id) {
     while (g_swapchains) {
         PdockerVkSwapchain *sc = swapchain_unregister(pdocker_vk_swapchain_to_handle(g_swapchains));
         if (!sc) break;
         pdocker_vk_destroy_swapchain_images(device, sc);
         swapchain_retire(sc);
     }
-    while (g_command_pools) {
-        PdockerVkCommandPool *pool = command_pool_unregister(pdocker_vk_command_pool_to_handle(g_command_pools));
+    while (true) {
+        PdockerVkCommandPool *pool = NULL;
+        PDOCKER_VK_FIND_DEVICE_OWNED(g_command_pools, pool, destroy_owner_id);
+        if (!pool) break;
+        pool = command_pool_unregister(pdocker_vk_command_pool_to_handle(pool));
         if (!pool) break;
         while (pool->command_buffers) {
             PdockerVkCommandBuffer *cmd = command_buffer_unregister((VkCommandBuffer)pool->command_buffers);
@@ -37314,8 +37448,11 @@ static void pdocker_vk_destroy_device_live_objects(VkDevice device) {
         if (!set) break;
         destroy_descriptor_set_object(set);
     }
-    while (g_pipelines) {
-        PdockerVkPipeline *pipeline = pipeline_unregister(pdocker_vk_pipeline_to_handle(g_pipelines));
+    while (true) {
+        PdockerVkPipeline *pipeline = NULL;
+        PDOCKER_VK_FIND_DEVICE_OWNED(g_pipelines, pipeline, destroy_owner_id);
+        if (!pipeline) break;
+        pipeline = pipeline_unregister(pdocker_vk_pipeline_to_handle(pipeline));
         if (!pipeline) break;
         pipeline_retire(pipeline);
     }
@@ -37353,51 +37490,81 @@ static void pdocker_vk_destroy_device_live_objects(VkDevice device) {
         if (!cache) break;
         pipeline_cache_retire(cache);
     }
-    while (g_buffer_views) {
-        PdockerVkBufferView *view = buffer_view_unregister(pdocker_vk_buffer_view_to_handle(g_buffer_views));
+    while (true) {
+        PdockerVkBufferView *view = NULL;
+        PDOCKER_VK_FIND_DEVICE_OWNED(g_buffer_views, view, destroy_owner_id);
+        if (!view) break;
+        view = buffer_view_unregister(pdocker_vk_buffer_view_to_handle(view));
         if (!view) break;
         buffer_view_retire(view);
     }
-    while (g_image_views) {
-        PdockerVkImageView *view = image_view_unregister(pdocker_vk_image_view_to_handle(g_image_views));
+    while (true) {
+        PdockerVkImageView *view = NULL;
+        PDOCKER_VK_FIND_DEVICE_OWNED(g_image_views, view, destroy_owner_id);
+        if (!view) break;
+        view = image_view_unregister(pdocker_vk_image_view_to_handle(view));
         if (!view) break;
         image_view_retire(view);
     }
-    while (g_samplers) {
-        PdockerVkSampler *sampler = sampler_unregister(pdocker_vk_sampler_to_handle(g_samplers));
+    while (true) {
+        PdockerVkSampler *sampler = NULL;
+        PDOCKER_VK_FIND_DEVICE_OWNED(g_samplers, sampler, destroy_owner_id);
+        if (!sampler) break;
+        sampler = sampler_unregister(pdocker_vk_sampler_to_handle(sampler));
         if (!sampler) break;
         sampler_retire(sampler);
     }
-    while (g_buffers) {
-        PdockerVkBuffer *buffer = buffer_unregister(pdocker_vk_buffer_to_handle(g_buffers));
+    while (true) {
+        PdockerVkBuffer *buffer = NULL;
+        PDOCKER_VK_FIND_DEVICE_OWNED(g_buffers, buffer, destroy_owner_id);
+        if (!buffer) break;
+        buffer = buffer_unregister(pdocker_vk_buffer_to_handle(buffer));
         if (!buffer) break;
         buffer_retire(buffer);
     }
-    while (g_images) {
-        PdockerVkImage *image = image_unregister(pdocker_vk_image_to_handle(g_images));
+    while (true) {
+        PdockerVkImage *image = NULL;
+        PDOCKER_VK_FIND_DEVICE_OWNED(g_images, image, destroy_owner_id);
+        if (!image) break;
+        image = image_unregister(pdocker_vk_image_to_handle(image));
         if (!image) break;
         image_retire(image);
     }
-    while (g_memories) {
-        vkFreeMemory(device, pdocker_vk_memory_to_handle(g_memories), NULL);
+    while (true) {
+        PdockerVkMemory *memory = NULL;
+        PDOCKER_VK_FIND_DEVICE_OWNED(g_memories, memory, destroy_owner_id);
+        if (!memory) break;
+        pdocker_vk_release_memory_object(memory);
     }
-    while (g_fences) {
-        PdockerVkFence *fence = fence_unregister(pdocker_vk_fence_to_handle(g_fences));
+    while (true) {
+        PdockerVkFence *fence = NULL;
+        PDOCKER_VK_FIND_DEVICE_OWNED(g_fences, fence, destroy_owner_id);
+        if (!fence) break;
+        fence = fence_unregister(pdocker_vk_fence_to_handle(fence));
         if (!fence) break;
         fence_retire(fence);
     }
-    while (g_semaphores) {
-        PdockerVkSemaphore *sem = semaphore_unregister(pdocker_vk_semaphore_to_handle(g_semaphores));
+    while (true) {
+        PdockerVkSemaphore *sem = NULL;
+        PDOCKER_VK_FIND_DEVICE_OWNED(g_semaphores, sem, destroy_owner_id);
+        if (!sem) break;
+        sem = semaphore_unregister(pdocker_vk_semaphore_to_handle(sem));
         if (!sem) break;
         semaphore_retire(sem);
     }
-    while (g_events) {
-        PdockerVkEvent *event = event_unregister(pdocker_vk_event_to_handle(g_events));
+    while (true) {
+        PdockerVkEvent *event = NULL;
+        PDOCKER_VK_FIND_DEVICE_OWNED(g_events, event, destroy_owner_id);
+        if (!event) break;
+        event = event_unregister(pdocker_vk_event_to_handle(event));
         if (!event) break;
         event_retire(event);
     }
-    while (g_query_pools) {
-        PdockerVkQueryPool *pool = query_pool_unregister(pdocker_vk_query_pool_to_handle(g_query_pools));
+    while (true) {
+        PdockerVkQueryPool *pool = NULL;
+        PDOCKER_VK_FIND_DEVICE_OWNED(g_query_pools, pool, destroy_owner_id);
+        if (!pool) break;
+        pool = query_pool_unregister(pdocker_vk_query_pool_to_handle(pool));
         if (!pool) break;
         query_pool_retire(pool);
     }
