@@ -8334,6 +8334,18 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 if (vkCreatePipelineCache(device, &cache_info, NULL, &cache) != VK_SUCCESS ||
                     !pipeline_cache_handle_lookup(cache)) return 12;
 
+                VkBuffer unowned_buffer = VK_NULL_HANDLE;
+                if (vkCreateBuffer(VK_NULL_HANDLE, &buffer_info, NULL, &unowned_buffer) != VK_SUCCESS ||
+                    !buffer_handle_lookup(unowned_buffer)) return 13;
+
+                VkCommandPool unowned_pool = VK_NULL_HANDLE;
+                if (vkCreateCommandPool(VK_NULL_HANDLE, &pool_info, NULL, &unowned_pool) != VK_SUCCESS ||
+                    !command_pool_handle_lookup(unowned_pool)) return 14;
+
+                VkFence unowned_fence = VK_NULL_HANDLE;
+                if (vkCreateFence(VK_NULL_HANDLE, &fence_info, NULL, &unowned_fence) != VK_SUCCESS ||
+                    !fence_handle_lookup(unowned_fence)) return 15;
+
                 vkDestroyDevice(device, NULL);
 
                 if (device_handle_resolve(device, NULL)) return 20;
@@ -8346,6 +8358,9 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 if (event_handle_lookup(event)) return 27;
                 if (query_pool_handle_lookup(query_pool)) return 28;
                 if (pipeline_cache_handle_lookup(cache)) return 29;
+                if (!buffer_handle_lookup(unowned_buffer)) return 36;
+                if (!command_pool_handle_lookup(unowned_pool)) return 37;
+                if (!fence_handle_lookup(unowned_fence)) return 38;
 
                 if (vkQueueSubmit(queue, 0, NULL, VK_NULL_HANDLE) != VK_ERROR_INITIALIZATION_FAILED) return 30;
                 if (vkBindBufferMemory(device, buffer, memory, 0) != VK_ERROR_INITIALIZATION_FAILED) return 31;
@@ -8363,6 +8378,12 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 vkDestroyEvent(device, event, NULL);
                 vkDestroyQueryPool(device, query_pool, NULL);
                 vkDestroyPipelineCache(device, cache, NULL);
+                vkDestroyBuffer(VK_NULL_HANDLE, unowned_buffer, NULL);
+                vkDestroyCommandPool(VK_NULL_HANDLE, unowned_pool, NULL);
+                vkDestroyFence(VK_NULL_HANDLE, unowned_fence, NULL);
+                if (buffer_handle_lookup(unowned_buffer)) return 39;
+                if (command_pool_handle_lookup(unowned_pool)) return 40;
+                if (fence_handle_lookup(unowned_fence)) return 41;
                 return 0;
             }
             """).replace("__ICD_SOURCE__", str(ICD_SOURCE))

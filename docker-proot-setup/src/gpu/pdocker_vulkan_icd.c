@@ -38414,7 +38414,7 @@ VKAPI_ATTR void VKAPI_CALL vkGetPrivateData(
 
 
 static bool device_destroy_should_reclaim_object(uint64_t destroy_owner_id, uint64_t object_owner_id) {
-    return destroy_owner_id == 0 || object_owner_id == 0 || object_owner_id == destroy_owner_id;
+    return destroy_owner_id != 0 && object_owner_id == destroy_owner_id;
 }
 
 static void pdocker_vk_release_memory_object(PdockerVkMemory *memory) {

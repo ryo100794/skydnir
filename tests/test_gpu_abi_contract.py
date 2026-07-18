@@ -13558,6 +13558,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("free((void *)device)", destroy_device_body)
         destroy_live_objects_body = c_function_body(icd, "pdocker_vk_destroy_device_live_objects")
         self.assertIn("device_destroy_should_reclaim_object", icd)
+        reclaim_body = c_function_body(icd, "device_destroy_should_reclaim_object")
+        self.assertIn("destroy_owner_id != 0 && object_owner_id == destroy_owner_id", reclaim_body)
+        self.assertNotIn("object_owner_id == 0", reclaim_body)
         self.assertIn("pdocker_vk_release_memory_object", icd)
         self.assertIn("PDOCKER_VK_FIND_DEVICE_OWNED", icd)
         for marker in [
