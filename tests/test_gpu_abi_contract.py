@@ -139,6 +139,34 @@ VULKAN_ABI_HASH_FIELD_CLASSES = frozenset({
     "entry_payload_hash",
 })
 
+VULKAN_ABI_SIZE_COUNT_FIELD_CLASSES = frozenset({
+    "frame_header_size",
+    "frame_total_size",
+    "fd_transport_count",
+    "shader_payload_size",
+    "table_row_count",
+    "table_entry_size",
+    "table_byte_size",
+    "frame_payload_size",
+    "resource_byte_size",
+    "descriptor_range_size",
+    "transfer_byte_size",
+    "buffer_copy_size",
+    "push_constant_size",
+    "specialization_map_size",
+    "vertex_buffer_range_size",
+    "descriptor_count",
+    "dynamic_offset_count",
+    "image_subresource_count",
+    "attachment_count",
+    "pipeline_state_slice_count",
+    "command_table_slice_count",
+    "graphics_state_count",
+    "draw_parameter_count",
+    "query_count",
+    "sample_mask_word_count",
+})
+
 VULKAN_ABI_OFFSET_RANGE_FIELD_CLASSES = frozenset({
     "frame_table_offset",
     "frame_payload_offset",
@@ -703,6 +731,93 @@ def classify_vulkan_abi_offset_or_range_field(qualified_field):
     return None
 
 
+
+def classify_vulkan_abi_size_or_count_field(qualified_field):
+    struct_name, field_name = qualified_field.rsplit(".", 1)
+    if field_name == "header_size":
+        return "frame_header_size"
+    if field_name == "frame_size":
+        return "frame_total_size"
+    if field_name == "fd_count":
+        return "fd_transport_count"
+    if field_name == "shader_size":
+        return "shader_payload_size"
+    if field_name.endswith("_entry_size"):
+        return "table_entry_size"
+    if field_name.endswith("_table_size"):
+        return "table_byte_size"
+    if field_name in {
+        "specialization_data_size",
+        "entry_name_size",
+        "option_text_size",
+        "push_constant_data_size",
+        "update_payload_data_size",
+        "data_size",
+        "clear_value_size",
+        "specialization_size",
+    }:
+        return "frame_payload_size"
+    if field_name in {"push_size", "range_size"}:
+        return "push_constant_size"
+    if field_name in {"memory_size", "api_buffer_size", "api_memory_size"}:
+        return "resource_byte_size"
+    if field_name == "transfer_size":
+        return "transfer_byte_size"
+    if field_name == "size":
+        if qualified_field == "PDOCKER_GPU_VULKAN_DISPATCH_V4_BINDING_FIELDS.size":
+            return "descriptor_range_size"
+        if "ResourceEntry" in struct_name:
+            return "resource_byte_size"
+        if "Descriptor" in struct_name:
+            return "descriptor_range_size"
+        if "BufferBarrier" in struct_name or "BufferCopy" in struct_name or "FillBuffer" in struct_name:
+            return "buffer_copy_size"
+        if "PushConstant" in struct_name:
+            return "push_constant_size"
+        if "Specialization" in struct_name:
+            return "specialization_map_size"
+        if "VertexBinding" in struct_name:
+            return "vertex_buffer_range_size"
+        return None
+    if not field_name.endswith("_count"):
+        return None
+    if struct_name.endswith("FrameHeader") or struct_name.endswith("HeaderExtension"):
+        return "table_row_count"
+    if field_name in {"level_count", "layer_count", "rendering_layer_count"}:
+        return "image_subresource_count"
+    if field_name in {
+        "descriptor_count",
+        "immutable_sampler_count",
+        "descriptor_set_count",
+        "actual_descriptor_count",
+        "layout_descriptor_count",
+    }:
+        return "descriptor_count"
+    if field_name == "dynamic_offset_count":
+        return "dynamic_offset_count"
+    if field_name in {"vertex_count", "index_count", "instance_count", "draw_count"}:
+        return "draw_parameter_count"
+    if field_name == "query_count":
+        return "query_count"
+    if field_name == "sample_mask_word_count":
+        return "sample_mask_word_count"
+    if field_name in {"attachment_count", "color_attachment_count", "clear_attachment_count"}:
+        return "attachment_count"
+    if field_name in {"viewport_count", "scissor_count"}:
+        return "graphics_state_count"
+    if field_name in {
+        "shader_stage_count",
+        "vertex_binding_count",
+        "vertex_attribute_count",
+    }:
+        if "PipelineEntry" in struct_name:
+            return "pipeline_state_slice_count"
+        if "CommandEntry" in struct_name:
+            return "command_table_slice_count"
+    if field_name in {"dynamic_state_count", "clear_rect_count"}:
+        return "command_table_slice_count"
+    return None
+
 def c_function_signature(source, name):
     signature = re.search(
         rf"(?m)^(?:VKAPI_ATTR\s+)?[A-Za-z_][A-Za-z0-9_\s\*]*?"
@@ -939,6 +1054,73 @@ class GpuAbiContractTest(unittest.TestCase):
                     f"{prefix}_schema_hash",
                     f"{prefix}_table_hash",
                 }
+                missing = required - fields
+                if missing:
+                    unchecked.append((struct_name, field_name, sorted(missing)))
+        self.assertEqual(unchecked, [])
+
+    def test_vulkan_abi_size_and_count_fields_are_classified_and_guarded_before_transport(self):
+        def is_size_or_count(field_name):
+            return field_name == "size" or field_name.endswith("_size") or field_name.endswith("_count")
+
+        observed = vulkan_abi_integer_fields_matching(APP_HEADER.read_text(), is_size_or_count)
+        classified = {field: classify_vulkan_abi_size_or_count_field(field) for field in observed}
+        unknown = {field for field, klass in classified.items() if klass is None}
+        self.assertEqual(unknown, set(), "new Vulkan ABI size/count fields need a sizing classification")
+        self.assertEqual(set(classified.values()) - VULKAN_ABI_SIZE_COUNT_FIELD_CLASSES, set())
+
+        executor = GPU_EXECUTOR.read_text()
+        for marker in [
+            "header->header_size != sizeof(",
+            "header->frame_size < header->header_size",
+            "header->frame_size > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FRAME_BYTES",
+            "header->fd_count > PDOCKER_GPU_MAX_PASSED_FDS",
+            "header->fd_count != received_fd_count",
+            "resource_bytes != header->resource_table_size",
+            "descriptor_bytes != header->descriptor_table_size",
+            "specialization_bytes != header->specialization_table_size",
+            "table_range_valid(",
+            "v5_table_range_valid(",
+            "v5_payload_range_valid(",
+            "frame_ranges_do_not_overlap(",
+            "u64_range_within_size(",
+            "validate_vulkan_dispatch_v52_image_layout_ranges(",
+            "validate_vulkan_graphics_v620_image_layout_ranges(",
+            "validate_vulkan_graphics_v627_buffer_views(",
+            "validate_vulkan_graphics_v628_declared_push_ranges(",
+            "validate_vulkan_graphics_v629_variable_descriptor_counts(",
+            "validate_vulkan_graphics_v6_header_prefix(",
+            "validate_vulkan_graphics_v6_header(",
+            "validate_vulkan_graphics_v6_frame_content(",
+        ]:
+            self.assertTrue(marker in executor, marker)
+
+        for field, expected in {
+            "PdockerGpuVulkanDispatchV5FrameHeader.resource_count": "table_row_count",
+            "PdockerGpuVulkanDispatchV5FrameHeader.resource_entry_size": "table_entry_size",
+            "PdockerGpuVulkanDispatchV5FrameHeader.resource_table_size": "table_byte_size",
+            "PdockerGpuVulkanDispatchV5FrameHeader.push_size": "push_constant_size",
+            "PdockerGpuVulkanDispatchV5ResourceEntry.size": "resource_byte_size",
+            "PdockerGpuVulkanDispatchV5DescriptorEntry.transfer_size": "transfer_byte_size",
+            "PdockerGpuVulkanGraphicsV6CommandEntry.vertex_count": "draw_parameter_count",
+            "PdockerGpuVulkanGraphicsV617QueryCommandEntry.query_count": "query_count",
+            "PdockerGpuVulkanGraphicsV622MultisampleStateEntry.sample_mask_word_count": "sample_mask_word_count",
+            "PdockerGpuVulkanGraphicsV629VariableDescriptorCountEntry.actual_descriptor_count": "descriptor_count",
+        }.items():
+            self.assertEqual(classified[field], expected)
+
+    def test_vulkan_abi_table_size_fields_have_matching_count_and_entry_size(self):
+        structs = vulkan_abi_struct_integer_fields(APP_HEADER.read_text())
+        unchecked = []
+        for struct_name, fields in structs.items():
+            for field_name in fields:
+                if not field_name.endswith("_table_size"):
+                    continue
+                prefix = field_name[:-len("_table_size")]
+                entry_size_field = f"{prefix}_entry_size"
+                if entry_size_field not in fields and prefix.endswith("_entry"):
+                    entry_size_field = f"{prefix}_size"
+                required = {f"{prefix}_count", entry_size_field}
                 missing = required - fields
                 if missing:
                     unchecked.append((struct_name, field_name, sorted(missing)))

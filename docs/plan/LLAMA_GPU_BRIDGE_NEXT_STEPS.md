@@ -9,6 +9,35 @@ llama.cpp itself remains unmodified.
 
 ## Current Ground Truth
 
+### 2026-07-19 CPU/static Vulkan ABI size and count lane
+
+The Vulkan ABI contract test now classifies every integer field named `size`,
+ending in `_size`, or ending in `_count` before that field can be accepted as
+part of the glibc ICD -> APK executor transport. The current classification
+separates frame/header sizing, fd counts, table row counts, table entry sizes,
+table byte sizes, frame payload byte ranges, resource byte sizes, descriptor
+ranges and counts, transfer sizes, buffer-copy sizes, push-constant sizes,
+specialization map sizes, vertex buffer ranges, dynamic offsets, draw/query
+counts, image subresource counts, attachment counts, graphics-state counts, and
+sample-mask word counts.
+
+The same gate pins the executor-side validators that reject malformed frame
+sizes, fd counts, table byte ranges, payload ranges, overlapping frame regions,
+image-layout ranges, buffer-view ranges, push-constant ranges, and variable
+descriptor counts before replay or materialization. Table byte-size fields must
+also have a matching count field and entry-size field, including the existing
+`specialization_entry_table_size` / `specialization_entry_size` ABI naming.
+
+Validation command:
+
+```sh
+env -u PYTHONPATH python3 -m unittest tests.test_gpu_abi_contract
+```
+
+This is CPU/static pass-through ABI hardening only. It does not change
+llama.cpp, Dockerfiles, models, prompts, shader bytes, runtime environment
+variables, or executor arithmetic.
+
 ### 2026-07-19 CPU/static V5/V6 object table identity lane
 
 Vulkan dispatch V5 object-extension validation, V5 native-plan construction,
