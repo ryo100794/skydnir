@@ -9,6 +9,34 @@ llama.cpp itself remains unmodified.
 
 ## Current Ground Truth
 
+### 2026-07-19 CPU/static Vulkan ABI scalar semantics lane
+
+The Vulkan ABI contract test now classifies every remaining transported integer
+field after the id, index, hash, offset/range, and size/count gates have already
+run. This closes the scalar blind spot for ABI version words, command selectors,
+dispatch grid dimensions, reserved-zero fields, object generations, descriptor
+coordinates, draw starts, image extents, subresource coordinates, render/blit
+coordinates, query payloads, clear values, Vulkan enum values, Vulkan flag and
+mask fields, layout values, descriptor types, formats, sampler state, pipeline
+state, dynamic state, sample masks, and sync/query/copy command selectors.
+
+The gate also pins the executor validators that must remain responsible for
+these scalar classes: V5/V6 header validation, image format/usage/aspect checks,
+sample-count checks, sampler scalar validation, image-view and tiling validation,
+attachment op/layout validation, descriptor binding flags, V5.2/V6.20 layout
+range validation, and V6 frame-content validation. A new ABI integer field can
+no longer cross the pass-through transport as an unreviewed scalar.
+
+Validation command:
+
+```sh
+env -u PYTHONPATH python3 -m unittest tests.test_gpu_abi_contract
+```
+
+This is CPU/static pass-through ABI hardening only. It does not change
+llama.cpp, Dockerfiles, models, prompts, shader bytes, runtime environment
+variables, or executor arithmetic.
+
 ### 2026-07-19 CPU/static Vulkan ABI size and count lane
 
 The Vulkan ABI contract test now classifies every integer field named `size`,

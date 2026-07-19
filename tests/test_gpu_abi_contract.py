@@ -167,6 +167,56 @@ VULKAN_ABI_SIZE_COUNT_FIELD_CLASSES = frozenset({
     "sample_mask_word_count",
 })
 
+
+VULKAN_ABI_SCALAR_FIELD_CLASSES = frozenset({
+    "abi_version",
+    "attachment_role_enum",
+    "clear_value_payload",
+    "command_selector",
+    "descriptor_coordinate",
+    "dispatch_grid_dimension",
+    "draw_parameter_start",
+    "dynamic_state_payload_count",
+    "image_extent",
+    "image_offset_coordinate",
+    "image_subresource_coordinate",
+    "object_generation_counter",
+    "query_coordinate",
+    "query_result_payload",
+    "reserved_zero",
+    "sequence_number",
+    "stencil_value_payload",
+    "subpass_index",
+    "table_slice_start",
+    "vk_access_mask",
+    "vk_aspect_mask",
+    "vk_bool32",
+    "vk_buffer_layout_stride",
+    "vk_component_swizzle",
+    "vk_copy_direction_enum",
+    "vk_descriptor_type_enum",
+    "vk_dynamic_state_enum",
+    "vk_filter_enum",
+    "vk_index_type_enum",
+    "vk_flag_bits",
+    "vk_float_bits_payload",
+    "vk_format_enum",
+    "vk_image_type_enum",
+    "vk_image_view_type_enum",
+    "vk_layout_enum",
+    "vk_pipeline_state_enum",
+    "vk_query_enum",
+    "vk_resource_type_enum",
+    "vk_sample_count_enum",
+    "vk_sampler_state_enum",
+    "vk_sharing_mode_enum",
+    "vk_stage_mask",
+    "vk_stencil_mask_payload",
+    "vk_sync_enum",
+    "vk_tiling_enum",
+    "vk_usage_flags",
+})
+
 VULKAN_ABI_OFFSET_RANGE_FIELD_CLASSES = frozenset({
     "frame_table_offset",
     "frame_payload_offset",
@@ -818,6 +868,144 @@ def classify_vulkan_abi_size_or_count_field(qualified_field):
         return "command_table_slice_count"
     return None
 
+
+def classify_vulkan_abi_remaining_scalar_field(qualified_field):
+    struct_name, field_name = qualified_field.rsplit(".", 1)
+    if re.fullmatch(r"reserved[0-9]+", field_name):
+        return "reserved_zero"
+    if field_name in {"abi_major", "abi_minor"}:
+        return "abi_version"
+    if field_name == "command":
+        return "command_selector"
+    if field_name in {"gx", "gy", "gz"}:
+        return "dispatch_grid_dimension"
+    if field_name in {"generation", "layout_generation"}:
+        return "object_generation_counter"
+    if field_name == "sequence":
+        return "sequence_number"
+    if field_name.endswith("_first"):
+        return "table_slice_start"
+    if field_name in {
+        "binding", "descriptor_set", "array_element", "location", "color_attachment",
+        "descriptor_first_set", "first_set", "first_descriptor",
+    }:
+        return "descriptor_coordinate"
+    if field_name == "subpass":
+        return "subpass_index"
+    if field_name == "first_query":
+        return "query_coordinate"
+    if field_name in {"first_vertex", "first_instance"}:
+        return "draw_parameter_start"
+    if field_name == "count" and "DynamicState" in struct_name:
+        return "dynamic_state_payload_count"
+    if field_name in {"value", "status", "available"}:
+        return "query_result_payload"
+    if field_name == "data":
+        return "clear_value_payload"
+    if field_name.startswith("color_uint32_"):
+        return "clear_value_payload"
+    if field_name in {"stencil", "front_reference", "back_reference"}:
+        return "stencil_value_payload"
+    if field_name.endswith("_compare_mask") or field_name.endswith("_write_mask"):
+        return "vk_stencil_mask_payload"
+    if field_name.endswith("_bits"):
+        return "vk_float_bits_payload"
+    if field_name in {
+        "extent_width", "extent_height", "extent_depth",
+        "image_extent_width", "image_extent_height", "image_extent_depth",
+        "rect_extent_width", "rect_extent_height",
+        "render_area_extent_width", "render_area_extent_height",
+        "buffer_row_length", "buffer_image_height",
+    }:
+        return "image_extent"
+    if field_name in {
+        "array_layers", "mip_levels", "base_array_layer", "base_mip_level",
+        "src_base_array_layer", "dst_base_array_layer", "src_mip_level", "dst_mip_level",
+        "mip_level",
+    }:
+        return "image_subresource_coordinate"
+    if re.fullmatch(r"(src_|dst_|image_|rect_|render_area_)?offset[01]?_[xyz]", field_name):
+        return "image_offset_coordinate"
+    if field_name in {"stride", "result_stride"}:
+        return "vk_buffer_layout_stride"
+    if field_name in {"format", "dynamic_rendering_depth_format", "dynamic_rendering_stencil_format"}:
+        return "vk_format_enum"
+    if re.fullmatch(r"color_attachment_format[0-9]+", field_name):
+        return "vk_format_enum"
+    if field_name in {
+        "layout", "old_layout", "new_layout", "initial_layout", "image_layout",
+        "src_layout", "dst_layout", "resolve_layout",
+    }:
+        return "vk_layout_enum"
+    if field_name == "descriptor_type":
+        return "vk_descriptor_type_enum"
+    if field_name == "resource_type":
+        return "vk_resource_type_enum"
+    if field_name == "image_type":
+        return "vk_image_type_enum"
+    if field_name == "view_type":
+        return "vk_image_view_type_enum"
+    if field_name in {"samples", "rasterization_samples"}:
+        return "vk_sample_count_enum"
+    if field_name.startswith("sample_mask"):
+        return "vk_flag_bits"
+    if field_name == "tiling":
+        return "vk_tiling_enum"
+    if field_name == "sharing_mode":
+        return "vk_sharing_mode_enum"
+    if field_name in {"aspect_mask", "src_aspect_mask", "dst_aspect_mask"}:
+        return "vk_aspect_mask"
+    if field_name in {"src_access_mask", "dst_access_mask", "access_flags"}:
+        return "vk_access_mask"
+    if field_name in {"src_stage_mask", "dst_stage_mask", "stage_mask", "stage_flags"}:
+        return "vk_stage_mask"
+    if field_name in {"usage", "memory_property_flags"}:
+        return "vk_usage_flags"
+    if field_name in {"compare_enable", "anisotropy_enable", "unnormalized_coordinates"}:
+        return "vk_bool32"
+    if field_name in {"component_r", "component_g", "component_b", "component_a"}:
+        return "vk_component_swizzle"
+    if field_name in {"min_filter", "mag_filter", "filter"}:
+        return "vk_filter_enum"
+    if field_name in {
+        "mipmap_mode", "address_mode_u", "address_mode_v", "address_mode_w",
+        "compare_op", "border_color", "reduction_mode",
+    }:
+        return "vk_sampler_state_enum"
+    if field_name in {
+        "topology", "polygon_mode", "cull_mode", "front_face", "input_rate",
+        "dynamic_rendering_view_mask",
+    }:
+        return "vk_pipeline_state_enum"
+    if field_name == "index_type":
+        return "vk_index_type_enum"
+    if field_name in {"state_type", "dynamic_state_mask", "command_type"}:
+        return "vk_dynamic_state_enum"
+    if field_name in {
+        "load_op", "store_op", "stencil_load_op", "stencil_store_op", "resolve_mode",
+        "logic_op", "src_color_blend_factor", "dst_color_blend_factor",
+        "src_alpha_blend_factor", "dst_alpha_blend_factor", "color_blend_op", "alpha_blend_op",
+        "depth_compare_op", "front_fail_op", "front_pass_op", "front_depth_fail_op",
+        "front_compare_op", "back_fail_op", "back_pass_op", "back_depth_fail_op",
+        "back_compare_op",
+    }:
+        return "vk_pipeline_state_enum"
+    if field_name == "attachment_role":
+        return "attachment_role_enum"
+    if field_name in {"op", "query_type"}:
+        return "vk_query_enum"
+    if field_name in {"sync_type", "submit_kind"}:
+        return "vk_sync_enum"
+    if field_name == "event_ordinal":
+        return "sequence_number"
+    if field_name == "direction":
+        return "vk_copy_direction_enum"
+    if field_name == "patch_control_points":
+        return "dynamic_state_payload_count"
+    if field_name.endswith("_flags") or field_name == "flags" or field_name.endswith("_mask"):
+        return "vk_flag_bits"
+    return None
+
 def c_function_signature(source, name):
     signature = re.search(
         rf"(?m)^(?:VKAPI_ATTR\s+)?[A-Za-z_][A-Za-z0-9_\s\*]*?"
@@ -1125,6 +1313,75 @@ class GpuAbiContractTest(unittest.TestCase):
                 if missing:
                     unchecked.append((struct_name, field_name, sorted(missing)))
         self.assertEqual(unchecked, [])
+
+
+    def test_vulkan_abi_remaining_scalar_fields_are_semantically_classified(self):
+        def is_offset_or_range(field_name):
+            return (
+                field_name.endswith("_offset")
+                or field_name == "offset"
+                or field_name in {"range", "api_range", "range_offset", "range_size"}
+            )
+
+        def is_size_or_count(field_name):
+            return field_name == "size" or field_name.endswith("_size") or field_name.endswith("_count")
+
+        observed = []
+        for struct_name, fields in vulkan_abi_struct_integer_fields(APP_HEADER.read_text()).items():
+            for field_name in fields:
+                qualified = f"{struct_name}.{field_name}"
+                already_classified = False
+                if field_name.endswith("_id") and qualified in VULKAN_ABI_ID_FIELD_CLASSIFICATIONS:
+                    already_classified = True
+                if field_name.endswith("_index") and qualified in VULKAN_ABI_INDEX_FIELD_CLASSIFICATIONS:
+                    already_classified = True
+                if field_name.endswith("_hash") and classify_vulkan_abi_hash_field(qualified):
+                    already_classified = True
+                if is_offset_or_range(field_name) and classify_vulkan_abi_offset_or_range_field(qualified):
+                    already_classified = True
+                if is_size_or_count(field_name) and classify_vulkan_abi_size_or_count_field(qualified):
+                    already_classified = True
+                if not already_classified:
+                    observed.append(qualified)
+
+        classified = {field: classify_vulkan_abi_remaining_scalar_field(field) for field in observed}
+        unknown = {field for field, klass in classified.items() if klass is None}
+        self.assertEqual(unknown, set(), "new Vulkan ABI scalar fields need semantic classification")
+        self.assertEqual(set(classified.values()) - VULKAN_ABI_SCALAR_FIELD_CLASSES, set())
+
+        executor = GPU_EXECUTOR.read_text()
+        for marker in [
+            "validate_vulkan_dispatch_v5_header(",
+            "validate_vulkan_graphics_v6_header_prefix(",
+            "vulkan_dispatch_image_format_supported(",
+            "vulkan_dispatch_image_usage_supported_by_format(",
+            "vulkan_image_aspect_mask_valid_for_format(",
+            "vulkan_dispatch_sample_count_supported(",
+            "vulkan_sampler_scalar_fields_supported(",
+            "vulkan_dispatch_image_view_type_valid(",
+            "vulkan_dispatch_image_tiling_valid_for_transport(",
+            "vulkan_graphics_attachment_ops_supported(",
+            "vulkan_graphics_attachment_layout_supported(",
+            "vulkan_graphics_descriptor_binding_flags_supported(",
+            "validate_vulkan_dispatch_v52_image_layout_ranges(",
+            "validate_vulkan_graphics_v620_image_layout_ranges(",
+            "validate_vulkan_graphics_v6_frame_content(",
+        ]:
+            self.assertTrue(marker in executor, marker)
+
+        for field, expected in {
+            "PdockerGpuVulkanDispatchV5FrameHeader.abi_major": "abi_version",
+            "PdockerGpuVulkanDispatchV5FrameHeader.command": "command_selector",
+            "PdockerGpuVulkanDispatchV5FrameHeader.gx": "dispatch_grid_dimension",
+            "PdockerGpuVulkanDispatchV54ImageBarrierEntry.aspect_mask": "vk_aspect_mask",
+            "PdockerGpuVulkanDispatchV5ImageEntry.format": "vk_format_enum",
+            "PdockerGpuVulkanDispatchV5ImageEntry.initial_layout": "vk_layout_enum",
+            "PdockerGpuVulkanDispatchV5SamplerEntry.address_mode_u": "vk_sampler_state_enum",
+            "PdockerGpuVulkanGraphicsV6PipelineEntry.color_attachment_format0": "vk_format_enum",
+            "PdockerGpuVulkanGraphicsV67ViewportEntry.width_bits": "vk_float_bits_payload",
+            "PdockerGpuVulkanGraphicsV617QueryResultEntry.available": "query_result_payload",
+        }.items():
+            self.assertEqual(classified[field], expected)
 
     def test_q6_oracle_does_not_collapse_shader_coordinates_to_rows(self):
         source = GPU_EXECUTOR.read_text()
