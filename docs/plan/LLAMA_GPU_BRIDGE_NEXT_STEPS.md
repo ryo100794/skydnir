@@ -9,6 +9,42 @@ llama.cpp itself remains unmodified.
 
 ## Current Ground Truth
 
+### 2026-07-19 CPU/static V5/V6 object table identity lane
+
+Vulkan dispatch V5 object-extension validation, V5 native-plan construction,
+and graphics V6 frame validation now reject duplicate nonzero `image_id`,
+`view_id`, or `sampler_id` entries when the duplicate rows do not describe the
+same API object identity. Image rows must match memory resource index, memory
+offset/size, format, dimensions, mip/layer/sample metadata, usage, creation
+flags, initial layout, and generation. Image-view rows must match their source
+image index, view type, format, component mapping, subresource range, and
+generation. Sampler rows must match all captured sampler state, including
+filtering, address modes, LOD, compare, border, reduction mode, and generation.
+
+The gate runs at the receive/content-validation boundary for V5, again during
+V5 native-plan construction, and in graphics V6 frame validation before per-row
+image/view validation and materialization. This makes split object identity a
+protocol error before any Vulkan object can be reconstructed or replayed.
+
+This is CPU/static pass-through ABI hardening only. It does not change
+llama.cpp, Dockerfiles, models, prompts, shader bytes, or executor arithmetic.
+
+### 2026-07-19 CPU/static remaining Vulkan object identity queue
+
+The next CPU/static pass-through hardening targets are the remaining nonzero ID
+tables that can still express split identity if left unchecked: V5.3 buffer
+views (`buffer_view_id`), graphics V6.27 buffer views (`buffer_view_id`),
+graphics V6 pipeline/layout/render-pass identity rows, and V5.6 compute layout
+metadata when it is used as object identity (`layout_id`,
+`pipeline_layout_id`, and descriptor-set layout ids). These must be validated
+from the protocol schema and source data flow before another device run is used
+as evidence.
+
+The rule is the same as the completed resource/object lanes: a nonzero API
+object id may appear more than once only when every field that defines the API
+object identity is identical, and parent object references resolve to the same
+validated object identity rather than merely the same table index.
+
 ### 2026-07-19 CPU/static V5/V6 resource identity lane
 
 Vulkan dispatch V5 native-plan validation and graphics V6 frame validation now

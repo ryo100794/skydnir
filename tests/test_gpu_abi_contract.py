@@ -3802,6 +3802,59 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, validator if marker != "static int u64_range_within_size" else executor)
 
+    def test_vulkan_object_tables_reject_duplicate_ids_with_split_identity(self):
+        executor = GPU_EXECUTOR.read_text()
+        helper = (
+            c_function_body(executor, "v5_image_fields_identical_for_same_object_id")
+            + c_function_body(executor, "v5_image_view_fields_identical_for_same_object_id")
+            + c_function_body(executor, "v5_sampler_fields_identical_for_same_object_id")
+            + c_function_body(executor, "validate_vulkan_object_table_duplicate_identity")
+        )
+        frame_validator = c_function_body(executor, "validate_vulkan_dispatch_v5_frame_content")
+        build_plan = c_function_body(executor, "build_vulkan_dispatch_v5_native_plan")
+        graphics_validator = c_function_body(executor, "validate_vulkan_graphics_v6_frame_content")
+        for marker in [
+            "image_count > 0 && !images",
+            "image_view_count > 0 && !image_views",
+            "sampler_count > 0 && !samplers",
+            "if (a->image_id == 0) continue;",
+            "b->image_id == a->image_id",
+            "!v5_image_fields_identical_for_same_object_id(a, b)",
+            "a->memory_resource_index == b->memory_resource_index",
+            "a->extent_width == b->extent_width",
+            "a->usage == b->usage",
+            "a->generation == b->generation",
+            "if (a->view_id == 0) continue;",
+            "b->view_id == a->view_id",
+            "!v5_image_view_fields_identical_for_same_object_id(a, b)",
+            "a->image_index == b->image_index",
+            "a->base_mip_level == b->base_mip_level",
+            "if (a->sampler_id == 0) continue;",
+            "b->sampler_id == a->sampler_id",
+            "!v5_sampler_fields_identical_for_same_object_id(a, b)",
+            "a->reduction_mode == b->reduction_mode",
+            "a->max_anisotropy_bits == b->max_anisotropy_bits",
+        ]:
+            self.assertIn(marker, helper)
+        for body in (frame_validator, build_plan, graphics_validator):
+            self.assertIn("validate_vulkan_object_table_duplicate_identity(", body)
+        self.assertGreater(
+            frame_validator.index("validate_vulkan_object_table_duplicate_identity("),
+            frame_validator.index("v5_object_extension_hash(frame, header, objects)"),
+        )
+        self.assertLess(
+            frame_validator.index("validate_vulkan_object_table_duplicate_identity("),
+            frame_validator.index("if (vulkan_dispatch_v5_abi_minor_has_v52_layout_ranges"),
+        )
+        self.assertLess(
+            build_plan.index("validate_vulkan_object_table_duplicate_identity("),
+            build_plan.index("for (size_t i = 0; i < plan->image_count; ++i)"),
+        )
+        self.assertLess(
+            graphics_validator.index("validate_vulkan_object_table_duplicate_identity("),
+            graphics_validator.index("for (uint32_t i = 0; i < header->image_count; ++i)"),
+        )
+
     def test_vulkan_graphics_v6_rejects_duplicate_resource_ids_with_split_fd_identity(self):
         executor = GPU_EXECUTOR.read_text()
         validator = c_function_body(executor, "validate_vulkan_graphics_v6_frame_content")
