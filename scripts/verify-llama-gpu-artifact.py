@@ -1298,6 +1298,70 @@ def _q6_final_store_sample_has_latest_event_identity(sample: dict[str, Any]) -> 
     return hashes_match
 
 
+def _q6_native_vs_writeback_sample_class(sample: Any) -> str:
+    if not isinstance(sample, dict):
+        return "mixed-or-inconclusive"
+    native_matches_expected = sample.get("native_matches_expected")
+    writeback_matches_native = sample.get("writeback_matches_native")
+    writeback_matches_expected = sample.get("writeback_matches_expected")
+    if (
+        native_matches_expected is True
+        and writeback_matches_native is True
+        and writeback_matches_expected is True
+    ):
+        return "pass"
+    if native_matches_expected is False and writeback_matches_native is True:
+        return "native-final-store-or-readback"
+    if native_matches_expected is True and writeback_matches_native is False:
+        return "executor-final-writeback"
+    return "mixed-or-inconclusive"
+
+
+def _q6_native_vs_writeback_split(q6: Any) -> dict[str, Any]:
+    if not isinstance(q6, dict):
+        return {"summary": "not-run", "samples": []}
+    raw = q6.get("q6_native_vs_writeback_split")
+    if not isinstance(raw, dict):
+        return {"summary": "not-run", "samples": []}
+    summary = raw.get("summary")
+    if summary not in {
+        "pass",
+        "native-final-store-or-readback",
+        "executor-final-writeback",
+        "inconclusive",
+        "not-reached",
+        "masked-by-oracle-writeback",
+    }:
+        summary = "inconclusive"
+    samples = raw.get("samples")
+    if not isinstance(samples, list):
+        samples = []
+    computed_class_counts = {
+        "native-final-store-or-readback": 0,
+        "executor-final-writeback": 0,
+        "pass": 0,
+        "mixed-or-inconclusive": 0,
+    }
+    for sample in samples:
+        sample_class = _q6_native_vs_writeback_sample_class(sample)
+        computed_class_counts[sample_class] = computed_class_counts.get(sample_class, 0) + 1
+    if summary in {"pass", "native-final-store-or-readback", "executor-final-writeback"}:
+        if raw.get("oracle_writeback") is not False or not samples:
+            summary = "inconclusive"
+    if summary == "pass" and computed_class_counts["pass"] != len(samples):
+        summary = "inconclusive"
+    if summary == "native-final-store-or-readback" and computed_class_counts["native-final-store-or-readback"] != len(samples):
+        summary = "inconclusive"
+    if summary == "executor-final-writeback" and computed_class_counts["executor-final-writeback"] != len(samples):
+        summary = "inconclusive"
+    return {
+        **raw,
+        "summary": summary,
+        "computed_class_counts": computed_class_counts,
+        "samples": samples,
+    }
+
+
 def _q6_final_store_boundary_sample_class(sample: Any) -> str:
     if not isinstance(sample, dict):
         return "mixed-or-inconclusive"
@@ -1452,6 +1516,25 @@ def _q6_debug_u32_probe_blocker(q6: Any) -> str:
     except (TypeError, ValueError):
         return "q6-debug-u32-probe-invalid"
     return "q6-debug-u32-probe-invalid"
+
+
+def _q6_not_reached(q6: Any) -> bool:
+    if not isinstance(q6, dict) or not q6:
+        return True
+    if str(q6.get("blocker_class") or "") != "not-reached":
+        return False
+    try:
+        event_count = int(q6.get("event_count") or 0)
+        probe_event_count = int(q6.get("q6_probe_event_count") or 0)
+        dispatch_event_count = int(q6.get("q6_dispatch_event_count") or 0)
+    except (TypeError, ValueError):
+        return False
+    return (
+        event_count == 0
+        and probe_event_count == 0
+        and dispatch_event_count == 0
+        and q6.get("q6_dispatch_seen") is not True
+    )
 
 
 def _q6_stage_divergence_evidence(q6: Any) -> dict[str, Any]:
@@ -3095,11 +3178,7 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
                 "runtime_env": nested(data, "gpu", "runtime_env") or {},
             }
         completion_q6_final_store_boundary = _q6_final_store_boundary(q6)
-        completion_q6_native_vs_writeback_split = (
-            q6.get("q6_native_vs_writeback_split")
-            if isinstance(q6.get("q6_native_vs_writeback_split"), dict)
-            else {}
-        )
+        completion_q6_native_vs_writeback_split = _q6_native_vs_writeback_split(q6)
         completion_q6_effective_blocker_class = str(q6.get("blocker_class") or "")
         if completion_q6_native_vs_writeback_split.get("summary") == "native-final-store-or-readback":
             completion_q6_effective_blocker_class = "native-q6-final-store-or-readback"
@@ -3347,18 +3426,14 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
     q6_output_index_probe_summary = str(q6_output_index_probe.get("summary") or "not-run")
     q6_workgroup_env_gap = _q6_workgroup_env_gap(runtime_env_manifest, config_propagation)
     q6_workgroup_evidence_status = _q6_workgroup_evidence_status(q6)
-    q6_native_vs_writeback_split = (
-        q6.get("q6_native_vs_writeback_split")
-        if isinstance(q6.get("q6_native_vs_writeback_split"), dict)
-        else {}
-    )
+    q6_native_vs_writeback_split = _q6_native_vs_writeback_split(q6)
     q6_unexpected_readonly_dispatch_mutations = (
         q6.get("q6_unexpected_readonly_dispatch_mutations")
         if isinstance(q6.get("q6_unexpected_readonly_dispatch_mutations"), list)
         else []
     )
     q6_blocker_class = None
-    if not q6:
+    if _q6_not_reached(q6):
         classification = "q6-not-reached"
         responsibility_boundary = "q6-not-reached"
         next_action = data.get("next_action") or "collect an ngl=1 artifact with Q6_K oracle enabled"
@@ -3567,13 +3642,6 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
                 classification = "q6-native-final-store-or-readback"
                 responsibility_boundary = "q6-native-final-store-readback"
                 q6_blocker_class = "native-q6-final-store-or-readback"
-            elif (
-                q6_output_index_probe_summary in {"fixed-offset", "scatter"}
-                and _q6_store_index_model_valid(q6, q6_output_layout)
-            ):
-                classification = "q6-native-output-layout"
-                responsibility_boundary = "q6-output-layout"
-                q6_blocker_class = "native-q6-output-layout"
             elif (
                 q6_output_layout.get("summary") == "canonical-mismatch-found-elsewhere"
                 and _q6_store_index_model_valid(q6, q6_output_layout)

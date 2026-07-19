@@ -22101,6 +22101,8 @@ class GpuAbiContractTest(unittest.TestCase):
                     "q6_workgroup_diagnostics": {
                         "q6_native_vs_writeback_split": {
                             "summary": "native-final-store-or-readback",
+                            "oracle_writeback": False,
+                            "joined_sample_count": 1,
                             "samples": [
                                 {
                                     "native_gpu_at_dst": 5.0,
@@ -22528,6 +22530,30 @@ class GpuAbiContractTest(unittest.TestCase):
             data = json.loads(result.stdout)
         self.assertIn("specialization_materialize_report", data["missing_required_evidence_fields"])
         self.assertTrue(data["artifact_matches_plan_path"])
+
+    def test_q6_compare_precise_blocker_values_are_verifier_contracts(self):
+        compare = LLAMA_COMPARE.read_text()
+        verifier = LLAMA_GPU_ARTIFACT_VERIFIER.read_text()
+        start = compare.index("q6_blocker_class = (")
+        end = compare.index("\nq6_workgroup_diagnostics = {", start)
+        producer_block = compare[start:end]
+        producer_values = set(re.findall(r'"([A-Za-z0-9_-]+)"', producer_block))
+        intentionally_remapped = {
+            "not-reached",
+            "workgroup-shape",
+            "cleared",
+            "descriptor-effective-range-or-upload",
+            "writeback",
+            "vulkan-device-execution-or-writeback",
+            "inconclusive",
+        }
+        missing = sorted(
+            value for value in producer_values - intentionally_remapped
+            if f'"{value}"' not in verifier
+        )
+        self.assertEqual([], missing)
+        self.assertIn("shader-readonly-mutation-or-barrier-scope", producer_values)
+        self.assertIn('"q6-readonly-dispatch-mutation"', verifier)
 
     def test_q6_compare_emits_stage_divergence_and_probe_arm_audit_split(self):
         compare = LLAMA_COMPARE.read_text()
@@ -23248,6 +23274,8 @@ class GpuAbiContractTest(unittest.TestCase):
                         },
                         "q6_native_vs_writeback_split": {
                             "summary": "native-final-store-or-readback",
+                            "oracle_writeback": False,
+                            "joined_sample_count": 1,
                             "samples": [
                                 {
                                     "native_gpu_at_dst": 5.0,

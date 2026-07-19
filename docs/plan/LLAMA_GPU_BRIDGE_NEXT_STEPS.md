@@ -9,6 +9,44 @@ llama.cpp itself remains unmodified.
 
 ## Current Ground Truth
 
+### 2026-07-19 CPU/static Q6 output-layout precision lane
+
+The verifier no longer upgrades `q6_output_index_probe_summary` values
+`fixed-offset` or `scatter` to hard `q6-native-output-layout` when the producer
+layout summary is still `canonical-mismatch-inconclusive`. Hard output-layout
+classification now requires the compare-produced
+`q6_output_layout_probe.summary=canonical-mismatch-found-elsewhere` evidence;
+fixed/scatter index probes remain preserved as structured evidence but classify
+as `q6-native-output-layout-inconclusive` until the producer evidence reaches
+the hard layout condition.
+
+This is CPU/static evidence-contract hardening only. It does not change
+llama.cpp, Dockerfiles, models, prompts, shader bytes, or executor arithmetic.
+
+### 2026-07-19 CPU/static Q6 native/writeback split evidence lane
+
+The verifier now validates `q6_native_vs_writeback_split` instead of trusting
+its `summary` string. Native final-store/readback and executor writeback split
+claims require `oracle_writeback=false`, non-empty joined samples, and sample
+booleans that recompute to the claimed class for every joined sample. Missing
+or contradictory samples are demoted to `inconclusive` before classification.
+
+This is CPU/static evidence-contract hardening only. It does not change
+llama.cpp, Dockerfiles, models, prompts, shader bytes, or executor arithmetic.
+
+### 2026-07-19 CPU/static Q6 not-reached contract lane
+
+The artifact verifier now recognizes missing/empty `q6_workgroup_diagnostics`
+as `q6-not-reached`, and recognizes compare-produced non-empty diagnostics as
+`q6-not-reached` only when `event_count`, `q6_probe_event_count`, and
+`q6_dispatch_event_count` are all zero, `q6_dispatch_seen` is not true, and
+`blocker_class` is exactly `not-reached`.
+This prevents Q6-not-reached artifacts from being misclassified as writeback or
+oracle evidence gaps simply because compare always emits a diagnostics object.
+
+This is CPU/static evidence-contract hardening only. It does not change
+llama.cpp, Dockerfiles, models, prompts, shader bytes, or executor arithmetic.
+
 ### 2026-07-19 CPU/static Q6 readonly-dispatch blocker lane
 
 The artifact verifier now preserves compare-produced
