@@ -33501,7 +33501,7 @@ static int materialize_vulkan_graphics_v6_attachments(
         out->samplers,
         out->sampler_capacity,
         &out->sampler_count,
-        0);
+        strict_passthrough);
     free(msaa_image_allowed);
     if (rc != 0) return rc;
     if (strict_passthrough) {

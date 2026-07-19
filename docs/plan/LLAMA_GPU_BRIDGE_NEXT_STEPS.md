@@ -9,6 +9,18 @@ llama.cpp itself remains unmodified.
 
 ## Current Ground Truth
 
+### 2026-07-19 CPU/static V6 strict image staging fail-close lane
+
+V6 graphics attachment materialization now passes the active strict-passthrough
+flag into the shared V5 image materializer.  Strict V6 therefore fails before
+entering the non-strict image staging path that widens usage with transfer bits,
+allocates staging buffers, or repacks packed depth/stencil image bytes.  The
+non-strict V6 path keeps the existing staging behavior.
+
+This is generic Vulkan pass-through hardening. It does not change llama.cpp,
+Dockerfiles, models, prompts, shader bytes, runtime defaults, or executor
+arithmetic.
+
 ### 2026-07-19 CPU/static V6 pipeline extension identity lane
 
 V6 graphics duplicate pipeline-id validation now compares not only the base

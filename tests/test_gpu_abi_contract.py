@@ -14066,6 +14066,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("out->sampler_capacity", graphics_body)
         self.assertIn("validate_vulkan_graphics_v6_msaa_images_are_v64_color_resolves(", graphics_body)
         self.assertIn("msaa_image_allowed,", graphics_body)
+        self.assertIn("&out->sampler_count,\n        strict_passthrough);", graphics_body)
+        self.assertNotIn("&out->sampler_count,\n        0);", graphics_body)
         self.assertIn("attachment->samples != VK_SAMPLE_COUNT_1_BIT", graphics_body)
         self.assertIn("return -EOPNOTSUPP;", graphics_body)
         self.assertLess(
