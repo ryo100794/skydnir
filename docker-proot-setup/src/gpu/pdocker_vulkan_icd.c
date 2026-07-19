@@ -2493,8 +2493,7 @@ static void render_pass_register(PdockerVkRenderPass *rp) {
     g_render_passes = rp;
 }
 
-static PdockerVkRenderPass *render_pass_unregister(VkRenderPass renderPass) {
-    PdockerVkRenderPass *target = pdocker_vk_render_pass_from_handle(renderPass);
+static PdockerVkRenderPass *render_pass_unregister_object(PdockerVkRenderPass *target) {
     if (!target) return NULL;
     PdockerVkRenderPass **link = &g_render_passes;
     while (*link) {
@@ -2506,6 +2505,11 @@ static PdockerVkRenderPass *render_pass_unregister(VkRenderPass renderPass) {
         link = &(*link)->next;
     }
     return NULL;
+}
+
+static PdockerVkRenderPass *render_pass_unregister(VkRenderPass renderPass) __attribute__((unused));
+static PdockerVkRenderPass *render_pass_unregister(VkRenderPass renderPass) {
+    return render_pass_unregister_object(pdocker_vk_render_pass_from_handle(renderPass));
 }
 
 static void render_pass_retire(PdockerVkRenderPass *rp) {
@@ -2573,8 +2577,7 @@ static void framebuffer_register(PdockerVkFramebuffer *fb) {
     g_framebuffers = fb;
 }
 
-static PdockerVkFramebuffer *framebuffer_unregister(VkFramebuffer framebuffer) {
-    PdockerVkFramebuffer *target = pdocker_vk_framebuffer_from_handle(framebuffer);
+static PdockerVkFramebuffer *framebuffer_unregister_object(PdockerVkFramebuffer *target) {
     if (!target) return NULL;
     PdockerVkFramebuffer **link = &g_framebuffers;
     while (*link) {
@@ -2586,6 +2589,11 @@ static PdockerVkFramebuffer *framebuffer_unregister(VkFramebuffer framebuffer) {
         link = &(*link)->next;
     }
     return NULL;
+}
+
+static PdockerVkFramebuffer *framebuffer_unregister(VkFramebuffer framebuffer) __attribute__((unused));
+static PdockerVkFramebuffer *framebuffer_unregister(VkFramebuffer framebuffer) {
+    return framebuffer_unregister_object(pdocker_vk_framebuffer_from_handle(framebuffer));
 }
 
 static void framebuffer_retire(PdockerVkFramebuffer *fb) {
@@ -2699,8 +2707,7 @@ static void shader_module_register(PdockerVkShaderModule *shader) {
     g_shader_modules = shader;
 }
 
-static PdockerVkShaderModule *shader_module_unregister(VkShaderModule shaderModule) {
-    PdockerVkShaderModule *target = pdocker_vk_shader_module_from_handle(shaderModule);
+static PdockerVkShaderModule *shader_module_unregister_object(PdockerVkShaderModule *target) {
     if (!target) return NULL;
     PdockerVkShaderModule **link = &g_shader_modules;
     while (*link) {
@@ -2712,6 +2719,11 @@ static PdockerVkShaderModule *shader_module_unregister(VkShaderModule shaderModu
         link = &(*link)->next;
     }
     return NULL;
+}
+
+static PdockerVkShaderModule *shader_module_unregister(VkShaderModule shaderModule) __attribute__((unused));
+static PdockerVkShaderModule *shader_module_unregister(VkShaderModule shaderModule) {
+    return shader_module_unregister_object(pdocker_vk_shader_module_from_handle(shaderModule));
 }
 
 static void shader_module_retire(PdockerVkShaderModule *shader) {
@@ -2765,8 +2777,7 @@ static void pipeline_layout_register(PdockerVkPipelineLayout *layout) {
     g_pipeline_layouts = layout;
 }
 
-static PdockerVkPipelineLayout *pipeline_layout_unregister(VkPipelineLayout layout) {
-    PdockerVkPipelineLayout *target = pdocker_vk_pipeline_layout_from_handle(layout);
+static PdockerVkPipelineLayout *pipeline_layout_unregister_object(PdockerVkPipelineLayout *target) {
     if (!target) return NULL;
     PdockerVkPipelineLayout **link = &g_pipeline_layouts;
     while (*link) {
@@ -2778,6 +2789,11 @@ static PdockerVkPipelineLayout *pipeline_layout_unregister(VkPipelineLayout layo
         link = &(*link)->next;
     }
     return NULL;
+}
+
+static PdockerVkPipelineLayout *pipeline_layout_unregister(VkPipelineLayout layout) __attribute__((unused));
+static PdockerVkPipelineLayout *pipeline_layout_unregister(VkPipelineLayout layout) {
+    return pipeline_layout_unregister_object(pdocker_vk_pipeline_layout_from_handle(layout));
 }
 
 static void pipeline_layout_retire(PdockerVkPipelineLayout *layout) {
@@ -2845,8 +2861,7 @@ static void pipeline_register(PdockerVkPipeline *pipeline) {
     g_pipelines = pipeline;
 }
 
-static PdockerVkPipeline *pipeline_unregister(VkPipeline pipeline) {
-    PdockerVkPipeline *target = pdocker_vk_pipeline_from_handle(pipeline);
+static PdockerVkPipeline *pipeline_unregister_object(PdockerVkPipeline *target) {
     if (!target) return NULL;
     PdockerVkPipeline **link = &g_pipelines;
     while (*link) {
@@ -2858,6 +2873,11 @@ static PdockerVkPipeline *pipeline_unregister(VkPipeline pipeline) {
         link = &(*link)->next;
     }
     return NULL;
+}
+
+static PdockerVkPipeline *pipeline_unregister(VkPipeline pipeline) __attribute__((unused));
+static PdockerVkPipeline *pipeline_unregister(VkPipeline pipeline) {
+    return pipeline_unregister_object(pdocker_vk_pipeline_from_handle(pipeline));
 }
 
 static void pipeline_retire(PdockerVkPipeline *pipeline) {
@@ -3034,8 +3054,7 @@ static void pipeline_cache_register(PdockerVkPipelineCache *cache) {
     g_pipeline_caches = cache;
 }
 
-static PdockerVkPipelineCache *pipeline_cache_unregister(VkPipelineCache pipelineCache) {
-    PdockerVkPipelineCache *target = pdocker_vk_pipeline_cache_from_handle(pipelineCache);
+static PdockerVkPipelineCache *pipeline_cache_unregister_object(PdockerVkPipelineCache *target) {
     if (!target) return NULL;
     PdockerVkPipelineCache **link = &g_pipeline_caches;
     while (*link) {
@@ -3047,6 +3066,11 @@ static PdockerVkPipelineCache *pipeline_cache_unregister(VkPipelineCache pipelin
         link = &(*link)->next;
     }
     return NULL;
+}
+
+static PdockerVkPipelineCache *pipeline_cache_unregister(VkPipelineCache pipelineCache) __attribute__((unused));
+static PdockerVkPipelineCache *pipeline_cache_unregister(VkPipelineCache pipelineCache) {
+    return pipeline_cache_unregister_object(pdocker_vk_pipeline_cache_from_handle(pipelineCache));
 }
 
 static void pipeline_cache_retire(PdockerVkPipelineCache *cache) {
@@ -26009,8 +26033,10 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyPipelineLayout(
         VkPipelineLayout pipelineLayout,
         const VkAllocationCallbacks *pAllocator) {
     (void)pAllocator;
-    if (!pipeline_layout_handle_lookup_for_device(device, pipelineLayout)) return;
-    pipeline_layout_retire(pipeline_layout_unregister(pipelineLayout));
+    PdockerVkPipelineLayout *target =
+        pipeline_layout_handle_lookup_for_device(device, pipelineLayout);
+    if (!target) return;
+    pipeline_layout_retire(pipeline_layout_unregister_object(target));
 }
 
 static VkResult validate_descriptor_pool_create_pnext(const void *pNext) {
@@ -27321,7 +27347,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateShaderModule(
     shader_module_register(shader);
     *pShaderModule = pdocker_vk_shader_module_to_handle(shader);
     if (!*pShaderModule) {
-        shader_module_retire(shader_module_unregister(pdocker_vk_shader_module_to_handle(shader)));
+        shader_module_retire(shader_module_unregister_object(shader));
         return VK_ERROR_OUT_OF_HOST_MEMORY;
     }
     return VK_SUCCESS;
@@ -27332,8 +27358,10 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyShaderModule(
         VkShaderModule shaderModule,
         const VkAllocationCallbacks *pAllocator) {
     (void)pAllocator;
-    if (!shader_module_handle_lookup_for_device(device, shaderModule)) return;
-    shader_module_retire(shader_module_unregister(shaderModule));
+    PdockerVkShaderModule *target =
+        shader_module_handle_lookup_for_device(device, shaderModule);
+    if (!target) return;
+    shader_module_retire(shader_module_unregister_object(target));
 }
 
 static bool pdocker_vk_pipeline_create_flags_transportable(
@@ -28211,8 +28239,9 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyPipeline(
         VkPipeline pipeline,
         const VkAllocationCallbacks *pAllocator) {
     (void)pAllocator;
-    if (!pipeline_handle_lookup_for_device(device, pipeline)) return;
-    pipeline_retire(pipeline_unregister(pipeline));
+    PdockerVkPipeline *target = pipeline_handle_lookup_for_device(device, pipeline);
+    if (!target) return;
+    pipeline_retire(pipeline_unregister_object(target));
 }
 
 static void capture_render_pass_subpass_state(
@@ -28756,8 +28785,9 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyRenderPass(
         VkRenderPass renderPass,
         const VkAllocationCallbacks *pAllocator) {
     (void)pAllocator;
-    if (!render_pass_handle_lookup_for_device(device, renderPass)) return;
-    render_pass_retire(render_pass_unregister(renderPass));
+    PdockerVkRenderPass *target = render_pass_handle_lookup_for_device(device, renderPass);
+    if (!target) return;
+    render_pass_retire(render_pass_unregister_object(target));
 }
 
 static VkResult validate_framebuffer_create_pnext(const void *pNext) {
@@ -28837,8 +28867,10 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyFramebuffer(
         VkFramebuffer framebuffer,
         const VkAllocationCallbacks *pAllocator) {
     (void)pAllocator;
-    if (!framebuffer_handle_lookup_for_device(device, framebuffer)) return;
-    framebuffer_retire(framebuffer_unregister(framebuffer));
+    PdockerVkFramebuffer *target =
+        framebuffer_handle_lookup_for_device(device, framebuffer);
+    if (!target) return;
+    framebuffer_retire(framebuffer_unregister_object(target));
 }
 
 VKAPI_ATTR void VKAPI_CALL vkGetRenderAreaGranularity(
@@ -37794,8 +37826,10 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyPipelineCache(
         VkPipelineCache pipelineCache,
         const VkAllocationCallbacks *pAllocator) {
     (void)pAllocator;
-    if (!pipeline_cache_handle_lookup_for_device(device, pipelineCache)) return;
-    pipeline_cache_retire(pipeline_cache_unregister(pipelineCache));
+    PdockerVkPipelineCache *target =
+        pipeline_cache_handle_lookup_for_device(device, pipelineCache);
+    if (!target) return;
+    pipeline_cache_retire(pipeline_cache_unregister_object(target));
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkGetPipelineCacheData(
@@ -37857,8 +37891,7 @@ static void validation_cache_register(PdockerVkValidationCache *cache) {
     g_validation_caches = cache;
 }
 
-static PdockerVkValidationCache *validation_cache_unregister(VkValidationCacheEXT validationCache) {
-    PdockerVkValidationCache *target = pdocker_vk_validation_cache_from_handle(validationCache);
+static PdockerVkValidationCache *validation_cache_unregister_object(PdockerVkValidationCache *target) {
     if (!target) return NULL;
     PdockerVkValidationCache **link = &g_validation_caches;
     while (*link) {
@@ -37870,6 +37903,11 @@ static PdockerVkValidationCache *validation_cache_unregister(VkValidationCacheEX
         link = &(*link)->next;
     }
     return NULL;
+}
+
+static PdockerVkValidationCache *validation_cache_unregister(VkValidationCacheEXT validationCache) __attribute__((unused));
+static PdockerVkValidationCache *validation_cache_unregister(VkValidationCacheEXT validationCache) {
+    return validation_cache_unregister_object(pdocker_vk_validation_cache_from_handle(validationCache));
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateValidationCacheEXT(
@@ -37897,7 +37935,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateValidationCacheEXT(
     validation_cache_register(cache);
     *pValidationCache = pdocker_vk_validation_cache_to_handle(cache);
     if (!*pValidationCache) {
-        (void)validation_cache_unregister(pdocker_vk_validation_cache_to_handle(cache));
+        (void)validation_cache_unregister_object(cache);
         free(cache);
         return VK_ERROR_OUT_OF_HOST_MEMORY;
     }
@@ -37909,8 +37947,10 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyValidationCacheEXT(
         VkValidationCacheEXT validationCache,
         const VkAllocationCallbacks *pAllocator) {
     (void)pAllocator;
-    if (!validation_cache_handle_lookup_for_device(device, validationCache)) return;
-    free(validation_cache_unregister(validationCache));
+    PdockerVkValidationCache *target =
+        validation_cache_handle_lookup_for_device(device, validationCache);
+    if (!target) return;
+    free(validation_cache_unregister_object(target));
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkGetValidationCacheDataEXT(
@@ -38355,8 +38395,7 @@ static void private_data_slot_register(PdockerVkPrivateDataSlot *slot) {
     g_private_data_slots = slot;
 }
 
-static PdockerVkPrivateDataSlot *private_data_slot_unregister(VkPrivateDataSlot privateDataSlot) {
-    PdockerVkPrivateDataSlot *target = pdocker_vk_private_data_slot_from_handle(privateDataSlot);
+static PdockerVkPrivateDataSlot *private_data_slot_unregister_object(PdockerVkPrivateDataSlot *target) {
     if (!target) return NULL;
     PdockerVkPrivateDataSlot **link = &g_private_data_slots;
     while (*link) {
@@ -38368,6 +38407,11 @@ static PdockerVkPrivateDataSlot *private_data_slot_unregister(VkPrivateDataSlot 
         link = &(*link)->next;
     }
     return NULL;
+}
+
+static PdockerVkPrivateDataSlot *private_data_slot_unregister(VkPrivateDataSlot privateDataSlot) __attribute__((unused));
+static PdockerVkPrivateDataSlot *private_data_slot_unregister(VkPrivateDataSlot privateDataSlot) {
+    return private_data_slot_unregister_object(pdocker_vk_private_data_slot_from_handle(privateDataSlot));
 }
 
 static void private_data_slot_free_object(PdockerVkPrivateDataSlot *slot) {
@@ -38407,7 +38451,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreatePrivateDataSlot(
     private_data_slot_register(slot);
     *pPrivateDataSlot = pdocker_vk_private_data_slot_to_handle(slot);
     if (!*pPrivateDataSlot) {
-        (void)private_data_slot_unregister(pdocker_vk_private_data_slot_to_handle(slot));
+        (void)private_data_slot_unregister_object(slot);
         free(slot);
         return VK_ERROR_OUT_OF_HOST_MEMORY;
     }
@@ -38419,8 +38463,10 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyPrivateDataSlot(
         VkPrivateDataSlot privateDataSlot,
         const VkAllocationCallbacks *pAllocator) {
     (void)pAllocator;
-    if (!private_data_slot_handle_lookup_for_device(device, privateDataSlot)) return;
-    private_data_slot_free_object(private_data_slot_unregister(privateDataSlot));
+    PdockerVkPrivateDataSlot *target =
+        private_data_slot_handle_lookup_for_device(device, privateDataSlot);
+    if (!target) return;
+    private_data_slot_free_object(private_data_slot_unregister_object(target));
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkSetPrivateData(
@@ -38578,7 +38624,7 @@ static void pdocker_vk_destroy_device_live_objects(VkDevice device, uint64_t des
         PdockerVkPipeline *pipeline = NULL;
         PDOCKER_VK_FIND_DEVICE_OWNED(g_pipelines, pipeline, destroy_owner_id);
         if (!pipeline) break;
-        pipeline = pipeline_unregister(pdocker_vk_pipeline_to_handle(pipeline));
+        pipeline = pipeline_unregister_object(pipeline);
         if (!pipeline) break;
         pipeline_retire(pipeline);
     }
@@ -38586,7 +38632,7 @@ static void pdocker_vk_destroy_device_live_objects(VkDevice device, uint64_t des
         PdockerVkFramebuffer *fb = NULL;
         PDOCKER_VK_FIND_DEVICE_OWNED(g_framebuffers, fb, destroy_owner_id);
         if (!fb) break;
-        fb = framebuffer_unregister(pdocker_vk_framebuffer_to_handle(fb));
+        fb = framebuffer_unregister_object(fb);
         if (!fb) break;
         framebuffer_retire(fb);
     }
@@ -38594,7 +38640,7 @@ static void pdocker_vk_destroy_device_live_objects(VkDevice device, uint64_t des
         PdockerVkPipelineLayout *layout = NULL;
         PDOCKER_VK_FIND_DEVICE_OWNED(g_pipeline_layouts, layout, destroy_owner_id);
         if (!layout) break;
-        layout = pipeline_layout_unregister(pdocker_vk_pipeline_layout_to_handle(layout));
+        layout = pipeline_layout_unregister_object(layout);
         if (!layout) break;
         pipeline_layout_retire(layout);
     }
@@ -38602,7 +38648,7 @@ static void pdocker_vk_destroy_device_live_objects(VkDevice device, uint64_t des
         PdockerVkShaderModule *shader = NULL;
         PDOCKER_VK_FIND_DEVICE_OWNED(g_shader_modules, shader, destroy_owner_id);
         if (!shader) break;
-        shader = shader_module_unregister(pdocker_vk_shader_module_to_handle(shader));
+        shader = shader_module_unregister_object(shader);
         if (!shader) break;
         shader_module_retire(shader);
     }
@@ -38618,7 +38664,7 @@ static void pdocker_vk_destroy_device_live_objects(VkDevice device, uint64_t des
         PdockerVkRenderPass *rp = NULL;
         PDOCKER_VK_FIND_DEVICE_OWNED(g_render_passes, rp, destroy_owner_id);
         if (!rp) break;
-        rp = render_pass_unregister(pdocker_vk_render_pass_to_handle(rp));
+        rp = render_pass_unregister_object(rp);
         if (!rp) break;
         render_pass_retire(rp);
     }
@@ -38626,7 +38672,7 @@ static void pdocker_vk_destroy_device_live_objects(VkDevice device, uint64_t des
         PdockerVkPipelineCache *cache = NULL;
         PDOCKER_VK_FIND_DEVICE_OWNED(g_pipeline_caches, cache, destroy_owner_id);
         if (!cache) break;
-        cache = pipeline_cache_unregister(pdocker_vk_pipeline_cache_to_handle(cache));
+        cache = pipeline_cache_unregister_object(cache);
         if (!cache) break;
         pipeline_cache_retire(cache);
     }
@@ -38713,7 +38759,7 @@ static void pdocker_vk_destroy_device_live_objects(VkDevice device, uint64_t des
         PdockerVkValidationCache *cache = NULL;
         PDOCKER_VK_FIND_DEVICE_OWNED(g_validation_caches, cache, destroy_owner_id);
         if (!cache) break;
-        cache = validation_cache_unregister(pdocker_vk_validation_cache_to_handle(cache));
+        cache = validation_cache_unregister_object(cache);
         if (!cache) break;
         free(cache);
     }
@@ -38723,7 +38769,7 @@ static void pdocker_vk_destroy_device_live_objects(VkDevice device, uint64_t des
         PdockerVkPrivateDataSlot *slot = NULL;
         PDOCKER_VK_FIND_DEVICE_OWNED(g_private_data_slots, slot, destroy_owner_id);
         if (!slot) break;
-        slot = private_data_slot_unregister(pdocker_vk_private_data_slot_to_handle(slot));
+        slot = private_data_slot_unregister_object(slot);
         if (!slot) break;
         private_data_slot_free_object(slot);
     }

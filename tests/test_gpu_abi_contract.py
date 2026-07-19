@@ -3913,7 +3913,7 @@ class GpuAbiContractTest(unittest.TestCase):
 
         destroy_body = c_function_body(icd, "vkDestroyPipeline")
         destroy_helper_body = c_function_body(icd, "pdocker_vk_pipeline_destroy")
-        self.assertIn("pipeline_retire(pipeline_unregister(pipeline));", destroy_body)
+        self.assertIn("PdockerVkPipeline *target = pipeline_handle_lookup_for_device(device, pipeline);", destroy_body)
         self.assertIn("free(pipeline->specialization_entries);", destroy_helper_body)
         self.assertIn("free(pipeline->specialization_data);", destroy_helper_body)
         self.assertIn("free(pipeline->graphics_stage_specialization_entries[i]);", destroy_helper_body)
@@ -11427,7 +11427,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("free(pipeline->entry_name);", destroy_helper_body)
         self.assertIn("free(pipeline->graphics_stage_entry_names[i]);", destroy_helper_body)
         destroy_pipeline_body = c_function_body(icd, "vkDestroyPipeline")
-        self.assertIn("pipeline_retire(pipeline_unregister(pipeline));", destroy_pipeline_body)
+        self.assertIn("PdockerVkPipeline *target = pipeline_handle_lookup_for_device(device, pipeline);", destroy_pipeline_body)
         self.assertNotIn("snprintf(pipeline->entry_name", compute_body)
 
         pipeline_struct = icd.split("struct PdockerVkPipeline {", 1)[1].split("};", 1)[0]
@@ -11613,6 +11613,21 @@ class GpuAbiContractTest(unittest.TestCase):
         }
         for fn, marker in destroy_owner_guards.items():
             self.assertIn(marker, c_function_body(icd, fn))
+
+        destroy_object_unregisters = {
+            "vkDestroyShaderModule": "shader_module_unregister_object(target)",
+            "vkDestroyPipelineLayout": "pipeline_layout_unregister_object(target)",
+            "vkDestroyPipeline": "pipeline_unregister_object(target)",
+            "vkDestroyRenderPass": "render_pass_unregister_object(target)",
+            "vkDestroyFramebuffer": "framebuffer_unregister_object(target)",
+            "vkDestroyPipelineCache": "pipeline_cache_unregister_object(target)",
+            "vkDestroyValidationCacheEXT": "validation_cache_unregister_object(target)",
+            "vkDestroyPrivateDataSlot": "private_data_slot_unregister_object(target)",
+        }
+        for fn, marker in destroy_object_unregisters.items():
+            body = c_function_body(icd, fn)
+            self.assertIn(marker, body)
+            self.assertNotIn("_unregister(", body)
 
 
     def test_vulkan_core_create_infos_reject_unsupported_pnext_and_flags(self):
@@ -11806,7 +11821,7 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(marker, icd)
         private_destroy_body = c_function_body(icd, "vkDestroyPrivateDataSlot")
         self.assertIn("private_data_slot_handle_lookup_for_device(device, privateDataSlot)", private_destroy_body)
-        self.assertIn("private_data_slot_free_object(private_data_slot_unregister(privateDataSlot))", private_destroy_body)
+        self.assertIn("private_data_slot_free_object(private_data_slot_unregister_object(target))", private_destroy_body)
         private_set_body = c_function_body(icd, "vkSetPrivateData")
         self.assertIn("private_data_slot_handle_lookup_for_device(device, privateDataSlot)", private_set_body)
         self.assertIn("pdocker_vk_object_handle_owned_by_device(device, objectType, objectHandle)", private_set_body)
@@ -16809,11 +16824,11 @@ class GpuAbiContractTest(unittest.TestCase):
             "descriptor_set_layout_register(layout);",
             "descriptor_set_layout_retire(descriptor_set_layout_unregister_object(layout));",
             "shader_module_register(shader);",
-            "shader_module_retire(shader_module_unregister(shaderModule));",
+            "shader_module_retire(shader_module_unregister_object(target));",
             "pipeline_layout_register(layout);",
-            "pipeline_layout_retire(pipeline_layout_unregister(pipelineLayout));",
+            "pipeline_layout_retire(pipeline_layout_unregister_object(target));",
             "pipeline_register(pipeline);",
-            "pipeline_retire(pipeline_unregister(pipeline));",
+            "PdockerVkPipeline *target = pipeline_handle_lookup_for_device(device, pipeline);",
             "pipeline_handle_lookup(pipeline)",
             "command_buffer_mark_recording_failed(cmd, \"compute-pipeline-handle-invalid\")",
             "command_buffer_mark_recording_failed(cmd, \"graphics-pipeline-handle-invalid\")",
@@ -16888,7 +16903,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "destroy_descriptor_pool_object(descriptor_pool_unregister_object(pool));",
             "pipeline_cache_register(cache);",
             "*pPipelineCache = pdocker_vk_pipeline_cache_to_handle(cache);",
-            "pipeline_cache_retire(pipeline_cache_unregister(pipelineCache));",
+            "pipeline_cache_retire(pipeline_cache_unregister_object(target));",
             "pipeline_cache_handle_lookup(pipelineCache)",
             "pipeline_cache_handle_lookup_for_device(device, dstCache)",
             "pipeline_cache_handle_lookup_for_device(device, pSrcCaches[i])",
@@ -16898,12 +16913,12 @@ class GpuAbiContractTest(unittest.TestCase):
             "command_pool_handle_lookup_for_device(device, commandPool)",
             "render_pass_register(rp);",
             "render_pass_handle_lookup_for_device_checked(",
-            "render_pass_retire(render_pass_unregister(renderPass));",
+            "render_pass_retire(render_pass_unregister_object(target));",
             "*pRenderPass = pdocker_vk_render_pass_to_handle(rp);",
             "fb->render_pass = render_pass_handle_lookup_for_device(device, pCreateInfo->renderPass);",
             "framebuffer_register(fb);",
             "framebuffer_handle_lookup_for_command_buffer_checked",
-            "framebuffer_retire(framebuffer_unregister(framebuffer));",
+            "framebuffer_retire(framebuffer_unregister_object(target));",
             "*pFramebuffer = pdocker_vk_framebuffer_to_handle(fb);",
             "surface_register(surface);",
             "surface->owner_instance_id = owner_instance_id;",
