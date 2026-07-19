@@ -4583,3 +4583,37 @@ class of pass-through regressions where a new handle-like or row-selecting ABI
 field is added without choosing its validation lane first.
 
 Validation: `env -u PYTHONPATH python3 -m unittest tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_abi_id_fields_are_explicitly_classified_before_transport tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_abi_index_fields_are_explicitly_classified_before_transport -q`.
+
+### 2026-07-19 CPU/static Vulkan ABI hash and placement classification gate
+
+The CPU-only pass-through hardening lane now also classifies Vulkan ABI
+integrity and placement fields. `tests/test_gpu_abi_contract.py` scans typed
+V5/V6 structs and the legacy V4 binding macro for `*_hash`, `*_offset`, bare
+`offset`, `range`, `api_range`, `range_offset`, and `range_size` fields. Each
+field must map to a known integrity or placement family before it can cross the
+glibc ICD -> APK executor boundary.
+
+The hash families distinguish schema hashes, table hashes, extension hashes,
+shader payload hashes, frame hashes, payload hashes, resource/descriptor table
+hashes, dispatch reconciliation hashes, object graph hashes, pipeline state
+hashes, specialization hashes, push hashes, option-text hashes, and entry-payload
+hashes. The placement/range families distinguish frame table offsets, frame
+payload offsets, descriptor-window offsets, memory backing offsets, descriptor
+ranges, buffer-view ranges, buffer-copy offsets, dynamic offsets, push-constant
+offsets, specialization map offsets, vertex offsets, query result offsets, and
+push metadata ranges.
+
+The gate pins the executor guard families that must remain present for these
+fields: V5/V6 table and payload range checks, non-overlap checks, table/content
+hash checks, strict descriptor-window range checks, object/materialization range
+checks, graphics replay buffer offset translation, image layout ranges,
+push-constant ranges, and legacy V4 descriptor offset/range reconciliation. V6.1
+header-extension tables remain an explicit legacy exception because their table
+content is guarded by the surrounding frame/extension validation rather than
+per-table hash fields.
+
+This is generic Vulkan pass-through hygiene and does not change llama.cpp,
+Dockerfiles, models, prompts, SPIR-V bytes, runtime ABI, or Android device
+execution.
+
+Validation: `env -u PYTHONPATH python3 -m unittest tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_abi_hash_fields_are_classified_and_guarded_before_transport tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_abi_offset_and_range_fields_are_classified_and_guarded_before_transport tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_abi_extension_table_offsets_have_matching_schema_size_and_hash_fields -q`.

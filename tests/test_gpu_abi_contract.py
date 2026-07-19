@@ -121,6 +121,42 @@ VULKAN_ABI_INDEX_FIELD_CLASSES = frozenset({
     "submit_sync_reference_index",
 })
 
+VULKAN_ABI_HASH_FIELD_CLASSES = frozenset({
+    "schema_hash",
+    "table_hash",
+    "extension_hash",
+    "shader_payload_hash",
+    "frame_hash",
+    "payload_hash",
+    "resource_table_hash",
+    "descriptor_table_hash",
+    "dispatch_command_hash",
+    "object_graph_hash",
+    "pipeline_state_hash",
+    "specialization_payload_hash",
+    "push_payload_hash",
+    "option_text_hash",
+    "entry_payload_hash",
+})
+
+VULKAN_ABI_OFFSET_RANGE_FIELD_CLASSES = frozenset({
+    "frame_table_offset",
+    "frame_payload_offset",
+    "descriptor_window_offset",
+    "memory_backing_offset",
+    "buffer_view_range",
+    "descriptor_range",
+    "buffer_copy_offset",
+    "push_constant_offset",
+    "specialization_map_offset",
+    "vertex_state_offset",
+    "vertex_parameter_offset",
+    "draw_index_offset",
+    "dynamic_offset",
+    "query_result_offset",
+    "push_metadata_range",
+})
+
 # Index fields are not Vulkan object handles, but each one selects a row from a
 # transported table, fd array, command stream, or Vulkan ordinal namespace. Keep
 # this table explicit so a new V5/V6 extension cannot add an unchecked index
@@ -527,7 +563,7 @@ def c_function_body(source, name):
 
 
 
-def vulkan_abi_integer_fields_with_suffix(source, suffix):
+def vulkan_abi_integer_fields_matching(source, predicate):
     fields = set()
     for macro_name in ["PDOCKER_GPU_VULKAN_DISPATCH_V4_BINDING_FIELDS"]:
         macro = re.search(
@@ -537,7 +573,7 @@ def vulkan_abi_integer_fields_with_suffix(source, suffix):
         )
         assert macro is not None, macro_name
         for field_name, field_type in re.findall(r"X\((\w+),\s*(\w+)\)", macro.group("body")):
-            if field_type in {"u32", "u64", "size"} and field_name.endswith(suffix):
+            if field_type in {"u32", "u64", "size"} and predicate(field_name):
                 fields.add(f"{macro_name}.{field_name}")
     for match in re.finditer(
         r"typedef struct\s+(PdockerGpuVulkan\w+)\s*\{(?P<body>.*?)\}\s*\w+\s*;",
@@ -550,9 +586,121 @@ def vulkan_abi_integer_fields_with_suffix(source, suffix):
                 r"\b(?:u?int)(?:8|16|32|64)_t\s+(\w+)\s*(?:\[[^\]]+\])?\s*;",
                 line,
             )
-            if field and field.group(1).endswith(suffix):
+            if field and predicate(field.group(1)):
                 fields.add(f"{struct_name}.{field.group(1)}")
     return fields
+
+
+def vulkan_abi_integer_fields_with_suffix(source, suffix):
+    return vulkan_abi_integer_fields_matching(source, lambda field_name: field_name.endswith(suffix))
+
+
+def vulkan_abi_struct_integer_fields(source):
+    structs = {}
+    for match in re.finditer(
+        r"typedef struct\s+(PdockerGpuVulkan\w+)\s*\{(?P<body>.*?)\}\s*\w+\s*;",
+        source,
+        re.S,
+    ):
+        fields = set()
+        for line in match.group("body").splitlines():
+            field = re.search(
+                r"\b(?:u?int)(?:8|16|32|64)_t\s+(\w+)\s*(?:\[[^\]]+\])?\s*;",
+                line,
+            )
+            if field:
+                fields.add(field.group(1))
+        structs[match.group(1)] = fields
+    return structs
+
+
+def classify_vulkan_abi_hash_field(qualified_field):
+    field_name = qualified_field.rsplit(".", 1)[1]
+    if field_name.endswith("_schema_hash"):
+        return "schema_hash"
+    if field_name.endswith("_table_hash"):
+        return "table_hash"
+    if field_name == "extension_hash":
+        return "extension_hash"
+    if field_name == "shader_hash":
+        return "shader_payload_hash"
+    if field_name == "frame_hash":
+        return "frame_hash"
+    if field_name == "payload_hash":
+        return "payload_hash"
+    if field_name in {"resource_hash", "descriptor_hash"}:
+        return f"{field_name[:-5]}_table_hash"
+    if field_name == "dispatch_hash":
+        return "dispatch_command_hash"
+    if field_name == "object_hash":
+        return "object_graph_hash"
+    if field_name == "pipeline_hash":
+        return "pipeline_state_hash"
+    if field_name == "specialization_hash":
+        return "specialization_payload_hash"
+    if field_name == "push_hash":
+        return "push_payload_hash"
+    if field_name == "option_hash":
+        return "option_text_hash"
+    if field_name in {"data_hash", "push_constant_data_hash", "update_payload_data_hash"}:
+        return "entry_payload_hash"
+    return None
+
+
+def classify_vulkan_abi_offset_or_range_field(qualified_field):
+    struct_name, field_name = qualified_field.rsplit(".", 1)
+    if field_name.endswith("_table_offset"):
+        return "frame_table_offset"
+    if field_name in {
+        "specialization_data_offset",
+        "push_offset",
+        "entry_name_offset",
+        "option_text_offset",
+        "push_constant_data_offset",
+        "data_offset",
+        "payload_offset",
+        "clear_value_offset",
+        "update_payload_data_offset",
+        "specialization_offset",
+    }:
+        return "frame_payload_offset"
+    if field_name in {"api_offset", "api_memory_offset"}:
+        return "descriptor_window_offset"
+    if field_name in {"memory_offset", "external_offset"}:
+        return "memory_backing_offset"
+    if field_name == "buffer_offset" or field_name in {
+        "src_offset",
+        "dst_offset",
+        "indirect_offset",
+        "count_offset",
+        "transfer_offset",
+    }:
+        return "buffer_copy_offset"
+    if field_name == "range" and "BufferViewEntry" in struct_name:
+        return "buffer_view_range"
+    if field_name in {"range", "api_range"}:
+        return "descriptor_range"
+    if field_name in {"range_offset", "range_size"}:
+        return "push_metadata_range"
+    if field_name in {"dynamic_offset", "first_dynamic_offset"}:
+        return "dynamic_offset"
+    if field_name == "result_offset":
+        return "query_result_offset"
+    if field_name == "index_offset":
+        return "draw_index_offset"
+    if field_name == "vertex_offset":
+        return "vertex_parameter_offset"
+    if field_name == "offset" and ("PushConstant" in struct_name or "DynamicOffset" in struct_name):
+        return "push_constant_offset"
+    if field_name == "offset" and "Specialization" in struct_name:
+        return "specialization_map_offset"
+    if field_name == "offset" and ("VertexBinding" in struct_name or "VertexAttribute" in struct_name):
+        return "vertex_state_offset"
+    if field_name == "offset" and "BufferBarrier" in struct_name:
+        return "buffer_copy_offset"
+    if field_name == "offset" and qualified_field == "PDOCKER_GPU_VULKAN_DISPATCH_V4_BINDING_FIELDS.offset":
+        return "descriptor_window_offset"
+    return None
 
 
 def c_function_signature(source, name):
@@ -685,6 +833,116 @@ class GpuAbiContractTest(unittest.TestCase):
             "PdockerGpuVulkanGraphicsV625DescriptorBindEntry.command_index",
         ]:
             self.assertEqual(VULKAN_ABI_INDEX_FIELD_CLASSIFICATIONS[field], "command_reference_index")
+
+    def test_vulkan_abi_hash_fields_are_classified_and_guarded_before_transport(self):
+        observed = vulkan_abi_integer_fields_with_suffix(APP_HEADER.read_text(), "_hash")
+        classified = {field: classify_vulkan_abi_hash_field(field) for field in observed}
+        unknown = {field for field, klass in classified.items() if klass is None}
+        self.assertEqual(unknown, set(), "new Vulkan ABI *_hash fields need a hash-family classification")
+        self.assertEqual(set(classified.values()) - VULKAN_ABI_HASH_FIELD_CLASSES, set())
+
+        executor = GPU_EXECUTOR.read_text()
+        for marker in [
+            "v5_hash_matches(",
+            "v5_object_extension_hash(",
+            "v57_push_constant_extension_hash(",
+            "fnv1a64_update(",
+            "schema_hash !=",
+            "table_hash !=",
+            "extension_hash",
+            "shader_hash == 0",
+            "payload_hash != header->payload_hash",
+            "frame_hash != header->frame_hash",
+            "reconcile_descriptor_hash(",
+            "reconcile_dispatch_hash(",
+        ]:
+            self.assertTrue(marker in executor, marker)
+
+        self.assertEqual(
+            classify_vulkan_abi_hash_field("PdockerGpuVulkanGraphicsV6PipelineEntry.pipeline_hash"),
+            "pipeline_state_hash",
+        )
+        self.assertEqual(
+            classify_vulkan_abi_hash_field("PdockerGpuVulkanDispatchV5FrameHeader.frame_hash"),
+            "frame_hash",
+        )
+        self.assertEqual(
+            classify_vulkan_abi_hash_field("PdockerGpuVulkanGraphicsV611HeaderExtension.update_payload_data_hash"),
+            "entry_payload_hash",
+        )
+
+    def test_vulkan_abi_offset_and_range_fields_are_classified_and_guarded_before_transport(self):
+        def is_offset_or_range(field_name):
+            return (
+                field_name.endswith("_offset")
+                or field_name == "offset"
+                or field_name in {"range", "api_range", "range_offset", "range_size"}
+            )
+
+        observed = vulkan_abi_integer_fields_matching(APP_HEADER.read_text(), is_offset_or_range)
+        classified = {field: classify_vulkan_abi_offset_or_range_field(field) for field in observed}
+        unknown = {field for field, klass in classified.items() if klass is None}
+        self.assertEqual(unknown, set(), "new Vulkan ABI offset/range fields need a placement/range classification")
+        self.assertEqual(set(classified.values()) - VULKAN_ABI_OFFSET_RANGE_FIELD_CLASSES, set())
+
+        executor = GPU_EXECUTOR.read_text()
+        for marker in [
+            "range_within_frame(",
+            "payload_range_valid(",
+            "table_range_valid(",
+            "v5_payload_range_valid(",
+            "v5_table_range_valid(",
+            "frame_ranges_do_not_overlap(",
+            "validate_strict_binding_local_range(",
+            "validate_strict_vulkan_binding_contract(",
+            "u64_range_within_size(",
+            "materialize_vulkan_dispatch_v5_native_plan_bindings(",
+            "vulkan_graphics_replay_buffer_vk_offset_for_range(",
+            "validate_vulkan_dispatch_v52_image_layout_ranges(",
+            "validate_vulkan_graphics_v620_image_layout_ranges(",
+            "validate_vulkan_graphics_v628_declared_push_ranges(",
+            "vulkan_binding_offset_equals_memory_plus_api_offset(",
+            "vulkan_binding_descriptor_range_matches_api_range(",
+        ]:
+            self.assertTrue(marker in executor, marker)
+
+        self.assertEqual(
+            classify_vulkan_abi_offset_or_range_field("PdockerGpuVulkanDispatchV5FrameHeader.resource_table_offset"),
+            "frame_table_offset",
+        )
+        self.assertEqual(
+            classify_vulkan_abi_offset_or_range_field("PdockerGpuVulkanDispatchV5DescriptorEntry.buffer_offset"),
+            "buffer_copy_offset",
+        )
+        self.assertEqual(
+            classify_vulkan_abi_offset_or_range_field("PdockerGpuVulkanGraphicsV61PushConstantMetadataEntry.range_size"),
+            "push_metadata_range",
+        )
+
+    def test_vulkan_abi_extension_table_offsets_have_matching_schema_size_and_hash_fields(self):
+        structs = vulkan_abi_struct_integer_fields(APP_HEADER.read_text())
+        unchecked = []
+        for struct_name, fields in structs.items():
+            if not struct_name.endswith("HeaderExtension"):
+                continue
+            if struct_name in {
+                "PdockerGpuVulkanDispatchV5ObjectHeaderExtension",
+                "PdockerGpuVulkanGraphicsV61HeaderExtension",
+            }:
+                continue
+            for field_name in fields:
+                if not field_name.endswith("_table_offset"):
+                    continue
+                prefix = field_name[:-len("_table_offset")]
+                required = {
+                    f"{prefix}_table_size",
+                    f"{prefix}_schema_hash",
+                    f"{prefix}_table_hash",
+                }
+                missing = required - fields
+                if missing:
+                    unchecked.append((struct_name, field_name, sorted(missing)))
+        self.assertEqual(unchecked, [])
 
     def test_q6_oracle_does_not_collapse_shader_coordinates_to_rows(self):
         source = GPU_EXECUTOR.read_text()
