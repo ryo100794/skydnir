@@ -102,6 +102,130 @@ VULKAN_ABI_ID_FIELD_CLASSIFICATIONS = {
 }
 
 
+VULKAN_ABI_INDEX_FIELD_CLASSES = frozenset({
+    "attachment_reference_index",
+    "command_reference_index",
+    "descriptor_reference_index",
+    "device_reference_index",
+    "draw_parameter_index",
+    "dynamic_state_ordinal",
+    "fd_transport_index",
+    "identity_key_ordinal",
+    "image_reference_index",
+    "image_view_reference_index",
+    "pipeline_reference_index",
+    "queue_family_index",
+    "resource_reference_index",
+    "sampler_reference_index",
+    "shader_stage_reference_index",
+    "submit_sync_reference_index",
+})
+
+# Index fields are not Vulkan object handles, but each one selects a row from a
+# transported table, fd array, command stream, or Vulkan ordinal namespace. Keep
+# this table explicit so a new V5/V6 extension cannot add an unchecked index
+# that bypasses bounds/reference validation.
+VULKAN_ABI_INDEX_FIELD_CLASSIFICATIONS = {
+    "PdockerGpuVulkanDispatchV5FrameHeader.shader_fd_index": "fd_transport_index",
+    "PdockerGpuVulkanDispatchV53BufferViewEntry.descriptor_index": "descriptor_reference_index",
+    "PdockerGpuVulkanDispatchV53BufferViewEntry.resource_index": "resource_reference_index",
+    "PdockerGpuVulkanDispatchV54BufferBarrierEntry.resource_index": "resource_reference_index",
+    "PdockerGpuVulkanDispatchV54BufferBarrierEntry.src_queue_family_index": "queue_family_index",
+    "PdockerGpuVulkanDispatchV54BufferBarrierEntry.dst_queue_family_index": "queue_family_index",
+    "PdockerGpuVulkanDispatchV54ImageBarrierEntry.image_index": "image_reference_index",
+    "PdockerGpuVulkanDispatchV54ImageBarrierEntry.src_queue_family_index": "queue_family_index",
+    "PdockerGpuVulkanDispatchV54ImageBarrierEntry.dst_queue_family_index": "queue_family_index",
+    "PdockerGpuVulkanDispatchV56PipelineLayoutSetEntry.set_index": "identity_key_ordinal",
+    "PdockerGpuVulkanDispatchV56PushConstantRangeEntry.range_index": "identity_key_ordinal",
+    "PdockerGpuVulkanDispatchV52ImageLayoutRangeEntry.image_index": "image_reference_index",
+    "PdockerGpuVulkanDispatchV5ResourceEntry.parent_resource_index": "resource_reference_index",
+    "PdockerGpuVulkanDispatchV5ResourceEntry.fd_index": "fd_transport_index",
+    "PdockerGpuVulkanDispatchV5DescriptorEntry.resource_index": "resource_reference_index",
+    "PdockerGpuVulkanDispatchV5ImageEntry.memory_resource_index": "resource_reference_index",
+    "PdockerGpuVulkanDispatchV5ImageViewEntry.image_index": "image_reference_index",
+    "PdockerGpuVulkanDispatchV5DescriptorObjectEntry.resource_index": "resource_reference_index",
+    "PdockerGpuVulkanDispatchV5DescriptorObjectEntry.image_view_index": "image_view_reference_index",
+    "PdockerGpuVulkanDispatchV5DescriptorObjectEntry.sampler_index": "sampler_reference_index",
+    "PdockerGpuVulkanGraphicsV6ShaderStageEntry.shader_fd_index": "fd_transport_index",
+    "PdockerGpuVulkanGraphicsV6VertexBindingEntry.buffer_resource_index": "resource_reference_index",
+    "PdockerGpuVulkanGraphicsV6AttachmentEntry.image_view_index": "image_view_reference_index",
+    "PdockerGpuVulkanGraphicsV6AttachmentEntry.resolve_image_view_index": "image_view_reference_index",
+    "PdockerGpuVulkanGraphicsV6DynamicStateEntry.first_index": "draw_parameter_index",
+    "PdockerGpuVulkanGraphicsV62SpecializationEntry.shader_stage_index": "shader_stage_reference_index",
+    "PdockerGpuVulkanGraphicsV63DepthStencilStateEntry.pipeline_index": "pipeline_reference_index",
+    "PdockerGpuVulkanGraphicsV64ResolveAttachmentEntry.attachment_index": "attachment_reference_index",
+    "PdockerGpuVulkanGraphicsV65StaticPipelineStateEntry.pipeline_index": "pipeline_reference_index",
+    "PdockerGpuVulkanGraphicsV66ColorBlendStateEntry.pipeline_index": "pipeline_reference_index",
+    "PdockerGpuVulkanGraphicsV66ColorBlendAttachmentEntry.pipeline_index": "pipeline_reference_index",
+    "PdockerGpuVulkanGraphicsV66ColorBlendAttachmentEntry.attachment_index": "attachment_reference_index",
+    "PdockerGpuVulkanGraphicsV67ViewportScissorStateEntry.pipeline_index": "pipeline_reference_index",
+    "PdockerGpuVulkanGraphicsV67ViewportEntry.pipeline_index": "pipeline_reference_index",
+    "PdockerGpuVulkanGraphicsV67ViewportEntry.viewport_index": "dynamic_state_ordinal",
+    "PdockerGpuVulkanGraphicsV67ScissorEntry.pipeline_index": "pipeline_reference_index",
+    "PdockerGpuVulkanGraphicsV67ScissorEntry.scissor_index": "dynamic_state_ordinal",
+    "PdockerGpuVulkanGraphicsV68IndirectDrawEntry.command_index": "command_reference_index",
+    "PdockerGpuVulkanGraphicsV68IndirectDrawEntry.indirect_resource_index": "resource_reference_index",
+    "PdockerGpuVulkanGraphicsV68IndirectDrawEntry.count_resource_index": "resource_reference_index",
+    "PdockerGpuVulkanGraphicsV69BufferCopyEntry.command_index": "command_reference_index",
+    "PdockerGpuVulkanGraphicsV69BufferCopyEntry.src_resource_index": "resource_reference_index",
+    "PdockerGpuVulkanGraphicsV69BufferCopyEntry.dst_resource_index": "resource_reference_index",
+    "PdockerGpuVulkanGraphicsV610BufferImageCopyEntry.command_index": "command_reference_index",
+    "PdockerGpuVulkanGraphicsV610BufferImageCopyEntry.buffer_resource_index": "resource_reference_index",
+    "PdockerGpuVulkanGraphicsV610BufferImageCopyEntry.image_index": "image_reference_index",
+    "PdockerGpuVulkanGraphicsV610ImageCopyEntry.command_index": "command_reference_index",
+    "PdockerGpuVulkanGraphicsV610ImageCopyEntry.src_image_index": "image_reference_index",
+    "PdockerGpuVulkanGraphicsV610ImageCopyEntry.dst_image_index": "image_reference_index",
+    "PdockerGpuVulkanGraphicsV611FillBufferEntry.command_index": "command_reference_index",
+    "PdockerGpuVulkanGraphicsV611FillBufferEntry.dst_resource_index": "resource_reference_index",
+    "PdockerGpuVulkanGraphicsV611UpdateBufferEntry.command_index": "command_reference_index",
+    "PdockerGpuVulkanGraphicsV611UpdateBufferEntry.dst_resource_index": "resource_reference_index",
+    "PdockerGpuVulkanGraphicsV612ClearColorImageEntry.command_index": "command_reference_index",
+    "PdockerGpuVulkanGraphicsV612ClearColorImageEntry.image_index": "image_reference_index",
+    "PdockerGpuVulkanGraphicsV613ClearDepthStencilImageEntry.command_index": "command_reference_index",
+    "PdockerGpuVulkanGraphicsV613ClearDepthStencilImageEntry.image_index": "image_reference_index",
+    "PdockerGpuVulkanGraphicsV614ResolveImageEntry.command_index": "command_reference_index",
+    "PdockerGpuVulkanGraphicsV614ResolveImageEntry.src_image_index": "image_reference_index",
+    "PdockerGpuVulkanGraphicsV614ResolveImageEntry.dst_image_index": "image_reference_index",
+    "PdockerGpuVulkanGraphicsV615BlitImageEntry.command_index": "command_reference_index",
+    "PdockerGpuVulkanGraphicsV615BlitImageEntry.src_image_index": "image_reference_index",
+    "PdockerGpuVulkanGraphicsV615BlitImageEntry.dst_image_index": "image_reference_index",
+    "PdockerGpuVulkanGraphicsV616ClearAttachmentsCommandEntry.command_index": "command_reference_index",
+    "PdockerGpuVulkanGraphicsV617QueryCommandEntry.command_index": "command_reference_index",
+    "PdockerGpuVulkanGraphicsV617QueryCommandEntry.result_fd_index": "fd_transport_index",
+    "PdockerGpuVulkanGraphicsV618CopyQueryResultEntry.command_index": "command_reference_index",
+    "PdockerGpuVulkanGraphicsV618CopyQueryResultEntry.dst_resource_index": "resource_reference_index",
+    "PdockerGpuVulkanGraphicsV618CopyQueryResultEntry.result_fd_index": "fd_transport_index",
+    "PdockerGpuVulkanGraphicsV620ImageLayoutRangeEntry.image_index": "image_reference_index",
+    "PdockerGpuVulkanGraphicsV621SubmitInfoEntry.command_buffer_index": "command_reference_index",
+    "PdockerGpuVulkanGraphicsV621SubmitSyncInfoEntry.submit_sync_index": "submit_sync_reference_index",
+    "PdockerGpuVulkanGraphicsV621SubmitSyncInfoEntry.device_index": "device_reference_index",
+    "PdockerGpuVulkanGraphicsV622MultisampleStateEntry.pipeline_index": "pipeline_reference_index",
+    "PdockerGpuVulkanGraphicsV623TessellationStateEntry.pipeline_index": "pipeline_reference_index",
+    "PdockerGpuVulkanGraphicsV624PipelineLayoutSetEntry.set_index": "identity_key_ordinal",
+    "PdockerGpuVulkanGraphicsV625DescriptorBindEntry.command_index": "command_reference_index",
+    "PdockerGpuVulkanGraphicsV626EventWaitRefEntry.command_index": "command_reference_index",
+    "PdockerGpuVulkanGraphicsV627BufferViewEntry.command_index": "command_reference_index",
+    "PdockerGpuVulkanGraphicsV627BufferViewEntry.descriptor_index": "descriptor_reference_index",
+    "PdockerGpuVulkanGraphicsV627BufferViewEntry.resource_index": "resource_reference_index",
+    "PdockerGpuVulkanGraphicsV628PushConstantRangeEntry.range_index": "identity_key_ordinal",
+    "PdockerGpuVulkanGraphicsV629VariableDescriptorCountEntry.command_index": "command_reference_index",
+    "PdockerGpuVulkanGraphicsV629VariableDescriptorCountEntry.set_index": "identity_key_ordinal",
+    "PdockerGpuVulkanGraphicsV61PushConstantMetadataEntry.command_index": "command_reference_index",
+    "PdockerGpuVulkanGraphicsV61ImageBarrierEntry.command_index": "command_reference_index",
+    "PdockerGpuVulkanGraphicsV61ImageBarrierEntry.image_index": "image_reference_index",
+    "PdockerGpuVulkanGraphicsV61ImageBarrierEntry.src_queue_family_index": "queue_family_index",
+    "PdockerGpuVulkanGraphicsV61ImageBarrierEntry.dst_queue_family_index": "queue_family_index",
+    "PdockerGpuVulkanGraphicsV61MemoryBarrierEntry.command_index": "command_reference_index",
+    "PdockerGpuVulkanGraphicsV61BufferBarrierEntry.command_index": "command_reference_index",
+    "PdockerGpuVulkanGraphicsV61BufferBarrierEntry.resource_index": "resource_reference_index",
+    "PdockerGpuVulkanGraphicsV61BufferBarrierEntry.src_queue_family_index": "queue_family_index",
+    "PdockerGpuVulkanGraphicsV61BufferBarrierEntry.dst_queue_family_index": "queue_family_index",
+    "PdockerGpuVulkanGraphicsV6CommandEntry.pipeline_index": "pipeline_reference_index",
+    "PdockerGpuVulkanGraphicsV6CommandEntry.index_buffer_resource_index": "resource_reference_index",
+    "PdockerGpuVulkanGraphicsV6CommandEntry.first_index": "draw_parameter_index",
+}
+
+
 def load_llama_gpu_artifact_verifier():
     spec = importlib.util.spec_from_file_location("llama_gpu_artifact_verifier", LLAMA_GPU_ARTIFACT_VERIFIER)
     verifier = importlib.util.module_from_spec(spec)
@@ -491,7 +615,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "register_vulkan_runtime_identity_ids",
             "validate_vulkan_graphics_v629_variable_descriptor_counts",
         ]:
-            self.assertIn(marker, executor)
+            self.assertTrue(marker in executor, marker)
 
         for field in [
             "PdockerGpuVulkanDispatchV5ResourceEntry.resource_id",
@@ -518,6 +642,49 @@ class GpuAbiContractTest(unittest.TestCase):
                 VULKAN_ABI_ID_FIELD_CLASSIFICATIONS[field],
                 "native_handle_transport_identity",
             )
+
+    def test_vulkan_abi_index_fields_are_explicitly_classified_before_transport(self):
+        observed = vulkan_abi_integer_fields_with_suffix(APP_HEADER.read_text(), "_index")
+        classified = set(VULKAN_ABI_INDEX_FIELD_CLASSIFICATIONS)
+        self.assertEqual(observed - classified, set(), "new Vulkan ABI *_index fields need explicit classification")
+        self.assertEqual(classified - observed, set(), "stale Vulkan ABI *_index classifications must be removed")
+        self.assertEqual(
+            set(VULKAN_ABI_INDEX_FIELD_CLASSIFICATIONS.values()) - VULKAN_ABI_INDEX_FIELD_CLASSES,
+            set(),
+        )
+
+        executor = GPU_EXECUTOR.read_text()
+        for marker in [
+            "header->shader_fd_index >= header->fd_count",
+            "header->shader_fd_index >= received_fd_count",
+            "memory->fd_index >= passed_fd_count",
+            "resource->parent_resource_index >= header->resource_count",
+            "images[i].memory_resource_index >= header->resource_count",
+            "image_views[i].image_index >= header->image_count",
+            "descriptor->resource_index >= header->resource_count",
+            "stage->shader_fd_index >= received_fd_count",
+            "entry->command_index >= header->command_count",
+            "entry->pipeline_index >= header->pipeline_count",
+            "entry->set_index >= PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS",
+            "vulkan_barrier_queue_family_replayable_for_executor(",
+            "vulkan_graphics_barrier_queue_family_replayable(",
+        ]:
+            self.assertTrue(marker in executor, marker)
+
+        for field in [
+            "PdockerGpuVulkanDispatchV5ResourceEntry.fd_index",
+            "PdockerGpuVulkanGraphicsV617QueryCommandEntry.result_fd_index",
+            "PdockerGpuVulkanGraphicsV618CopyQueryResultEntry.result_fd_index",
+        ]:
+            self.assertEqual(VULKAN_ABI_INDEX_FIELD_CLASSIFICATIONS[field], "fd_transport_index")
+
+        for field in [
+            "PdockerGpuVulkanGraphicsV68IndirectDrawEntry.command_index",
+            "PdockerGpuVulkanGraphicsV69BufferCopyEntry.command_index",
+            "PdockerGpuVulkanGraphicsV610BufferImageCopyEntry.command_index",
+            "PdockerGpuVulkanGraphicsV625DescriptorBindEntry.command_index",
+        ]:
+            self.assertEqual(VULKAN_ABI_INDEX_FIELD_CLASSIFICATIONS[field], "command_reference_index")
 
     def test_q6_oracle_does_not_collapse_shader_coordinates_to_rows(self):
         source = GPU_EXECUTOR.read_text()

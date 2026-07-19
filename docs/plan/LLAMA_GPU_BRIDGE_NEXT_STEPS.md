@@ -4557,25 +4557,29 @@ Dockerfile, model, prompt, SPIR-V, or shader behavior is changed.
 
 Validation: `tests.test_vulkan_icd_feature_chain.VulkanIcdFeatureChainTest.test_validation_cache_extension_is_local_noop_and_shader_pnext_accepts_cache`, full `tests.test_gpu_abi_contract`, full `tests.test_vulkan_icd_feature_chain`, `scripts/build-gpu-shim.sh`, `scripts/verify-native-payloads.py`, and `./gradlew :app:assembleDebug`.
 
-### 2026-07-19 CPU/static Vulkan ABI ID classification gate
+### 2026-07-19 CPU/static Vulkan ABI ID/index classification gate
 
 The CPU-only pass-through hardening lane now has a regression gate for Vulkan
-wire ABI identifier fields. `tests/test_gpu_abi_contract.py` extracts every
-integer field ending in `_id` from the typed Vulkan V5/V6 structs and the
-legacy V4 positional binding macro, then requires a struct-qualified
-classification before the field can cross the glibc ICD -> APK executor
-boundary.
+wire ABI identifier and table-index fields. `tests/test_gpu_abi_contract.py`
+extracts every integer field ending in `_id` or `_index` from the typed Vulkan
+V5/V6 structs, plus legacy V4 positional binding IDs, then requires a
+struct-qualified classification before the field can cross the glibc ICD -> APK
+executor boundary.
 
-The classifications separate correlation IDs, native handle transport IDs,
+The ID classifications separate correlation IDs, native handle transport IDs,
 stable object identities with duplicate-identity guards, composite identity-key
 members, checked references, command/sync targets, and specialization constant
-IDs. The test also pins the executor-side guard families for resource, image,
-image-view, sampler, buffer-view, pipeline, layout, native-handle identity, and
+IDs. The index classifications separate fd arrays, command rows, descriptor
+rows, resource/image/image-view/sampler/pipeline rows, identity-key ordinals,
+queue-family indices, draw parameters, and submit/device references. The test
+also pins the executor-side guard families for resource, image, image-view,
+sampler, buffer-view, pipeline, layout, native-handle identity, fd bounds,
+command/resource/image/pipeline row bounds, queue-family replayability, and
 variable-descriptor-count paths.
 
 This is not a llama.cpp-specific path and does not change llama.cpp, Dockerfiles,
 models, prompts, SPIR-V bytes, or the runtime ABI. It prevents the recurring
-class of pass-through regressions where a new handle-like ABI field is added
-without choosing its validation lane first.
+class of pass-through regressions where a new handle-like or row-selecting ABI
+field is added without choosing its validation lane first.
 
-Validation: `env -u PYTHONPATH python3 -m unittest tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_abi_id_fields_are_explicitly_classified_before_transport -q`.
+Validation: `env -u PYTHONPATH python3 -m unittest tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_abi_id_fields_are_explicitly_classified_before_transport tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_abi_index_fields_are_explicitly_classified_before_transport -q`.
