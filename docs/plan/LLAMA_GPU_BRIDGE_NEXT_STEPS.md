@@ -29,6 +29,26 @@ protocol error before any Vulkan object can be reconstructed or replayed.
 This is CPU/static pass-through ABI hardening only. It does not change
 llama.cpp, Dockerfiles, models, prompts, shader bytes, or executor arithmetic.
 
+### 2026-07-19 CPU/static V6 pipeline and layout identity lane
+
+Graphics V6 now rejects duplicate nonzero `pipeline_id` rows when the pipeline
+entry is not byte-for-byte equivalent at the protocol field level. The direct
+comparison includes the referenced `layout_id` and `render_pass_id`, shader and
+vertex table ranges, fixed-function state, dynamic-rendering formats, all color
+attachment formats, dynamic-state mask, and `pipeline_hash`. Duplicate
+`layout_id` or `render_pass_id` alone remains valid because many pipelines may
+share one layout or render pass.
+
+Dispatch V5.6 compute layout metadata now rejects duplicate identity keys before
+compute layout validation proceeds: descriptor-set layout key
+`(layout_id, binding)`, pipeline-layout set key `(pipeline_layout_id,
+set_index)`, and push-constant range key `(pipeline_layout_id, range_index)`.
+Graphics V6.24/V6.28 already enforce the analogous layout keys, and the static
+contract test now pins those guards so they cannot silently regress.
+
+This is CPU/static pass-through ABI hardening only. It does not change
+llama.cpp, Dockerfiles, models, prompts, shader bytes, or executor arithmetic.
+
 ### 2026-07-19 CPU/static V5.3/V6.27 buffer-view identity lane
 
 Vulkan dispatch V5.3 and graphics V6.27 now reject duplicate nonzero
@@ -49,13 +69,11 @@ arithmetic.
 
 ### 2026-07-19 CPU/static remaining Vulkan object identity queue
 
-The next CPU/static pass-through hardening targets are the remaining nonzero ID
-tables that can still express split identity if left unchecked: graphics V6
-pipeline/layout/render-pass identity rows and V5.6/V6.24 compute or graphics
-layout metadata when it is used as object identity (`layout_id`,
-`pipeline_layout_id`, and descriptor-set layout ids). These must be validated
-from the protocol schema and source data flow before another device run is used
-as evidence.
+The next CPU/static pass-through hardening targets are any newly added nonzero
+Vulkan object-id tables. The currently known resource, image/image-view/sampler,
+buffer-view, pipeline, and layout identity rows have static fail-closed gates or
+pinned pre-existing guards. Future V5/V6 ABI extensions must add the same
+identity-key audit before they can be accepted as pass-through evidence.
 
 The rule is the same as the completed resource/object lanes: a nonzero API
 object id may appear more than once only when every field that defines the API

@@ -3802,6 +3802,72 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, validator if marker != "static int u64_range_within_size" else executor)
 
+    def test_vulkan_layout_metadata_rejects_duplicate_identity_keys(self):
+        executor = GPU_EXECUTOR.read_text()
+        v56_helper = c_function_body(executor, "validate_vulkan_dispatch_v56_layout_identity_keys")
+        build_plan = c_function_body(executor, "build_vulkan_dispatch_v5_native_plan")
+        graphics_validator = c_function_body(executor, "validate_vulkan_graphics_v6_frame_content")
+        v628_validator = c_function_body(executor, "validate_vulkan_graphics_v628_declared_push_ranges")
+        graphics_layout_source = executor[executor.index("if (is_v624) {"):executor.index("if (is_v625) {")]
+        for marker in [
+            "descriptor_set_layout_count > 0 && !descriptor_set_layouts",
+            "pipeline_layout_set_count > 0 && !pipeline_layout_sets",
+            "push_constant_range_count > 0 && !push_constant_ranges",
+            "entry->layout_id == other->layout_id",
+            "entry->binding == other->binding",
+            "entry->pipeline_layout_id == other->pipeline_layout_id",
+            "entry->set_index == other->set_index",
+            "entry->range_index == other->range_index",
+        ]:
+            self.assertIn(marker, v56_helper)
+        self.assertIn("validate_vulkan_dispatch_v56_layout_identity_keys(", build_plan)
+        self.assertLess(
+            build_plan.index("validate_vulkan_dispatch_v56_layout_identity_keys("),
+            build_plan.index("for (size_t i = 0; i < plan->compute_descriptor_set_layout_count; ++i)"),
+        )
+        for marker in [
+            "entry->layout_id != other->layout_id",
+            "entry->binding == other->binding",
+            "entry->pipeline_layout_id == other->pipeline_layout_id",
+            "entry->set_index == other->set_index",
+        ]:
+            self.assertIn(marker, graphics_layout_source)
+        self.assertIn("entry->pipeline_layout_id == other->pipeline_layout_id", v628_validator)
+        self.assertIn("entry->range_index == other->range_index", v628_validator)
+
+    def test_vulkan_graphics_v6_rejects_duplicate_pipeline_ids_with_split_identity(self):
+        executor = GPU_EXECUTOR.read_text()
+        helper = (
+            c_function_body(executor, "v6_pipeline_fields_identical_for_same_object_id")
+            + c_function_body(executor, "validate_vulkan_graphics_v6_duplicate_pipeline_identity")
+        )
+        validator = c_function_body(executor, "validate_vulkan_graphics_v6_frame_content")
+        for marker in [
+            "pipeline_count == 0",
+            "if (a->pipeline_id == 0) continue;",
+            "b->pipeline_id == a->pipeline_id",
+            "!v6_pipeline_fields_identical_for_same_object_id(a, b)",
+            "a->layout_id == b->layout_id",
+            "a->render_pass_id == b->render_pass_id",
+            "a->shader_stage_first == b->shader_stage_first",
+            "a->shader_stage_count == b->shader_stage_count",
+            "a->vertex_binding_first == b->vertex_binding_first",
+            "a->vertex_attribute_count == b->vertex_attribute_count",
+            "a->topology == b->topology",
+            "a->rasterization_samples == b->rasterization_samples",
+            "a->color_attachment_count == b->color_attachment_count",
+            "a->dynamic_rendering_depth_format == b->dynamic_rendering_depth_format",
+            "a->color_attachment_format15 == b->color_attachment_format15",
+            "a->dynamic_state_mask == b->dynamic_state_mask",
+            "a->pipeline_hash == b->pipeline_hash",
+        ]:
+            self.assertIn(marker, helper)
+        self.assertIn("validate_vulkan_graphics_v6_duplicate_pipeline_identity(", validator)
+        self.assertLess(
+            validator.index("validate_vulkan_graphics_v6_duplicate_pipeline_identity("),
+            validator.index("for (uint32_t i = 0; i < header->pipeline_count; ++i)"),
+        )
+
     def test_vulkan_buffer_view_tables_reject_duplicate_ids_with_split_identity(self):
         executor = GPU_EXECUTOR.read_text()
         helper = (

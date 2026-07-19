@@ -24328,6 +24328,117 @@ static int v627_buffer_view_fields_identical_for_same_object_id(
                resource_count, resources, a->resource_index, b->resource_index);
 }
 
+static int v6_pipeline_fields_identical_for_same_object_id(
+        const PdockerGpuVulkanGraphicsV6PipelineEntry *a,
+        const PdockerGpuVulkanGraphicsV6PipelineEntry *b) {
+    if (!a || !b) return 0;
+    return a->pipeline_id == b->pipeline_id &&
+           a->layout_id == b->layout_id &&
+           a->render_pass_id == b->render_pass_id &&
+           a->shader_stage_first == b->shader_stage_first &&
+           a->shader_stage_count == b->shader_stage_count &&
+           a->vertex_binding_first == b->vertex_binding_first &&
+           a->vertex_binding_count == b->vertex_binding_count &&
+           a->vertex_attribute_first == b->vertex_attribute_first &&
+           a->vertex_attribute_count == b->vertex_attribute_count &&
+           a->topology == b->topology &&
+           a->polygon_mode == b->polygon_mode &&
+           a->cull_mode == b->cull_mode &&
+           a->front_face == b->front_face &&
+           a->rasterization_samples == b->rasterization_samples &&
+           a->color_attachment_count == b->color_attachment_count &&
+           a->subpass == b->subpass &&
+           a->depth_stencil_flags == b->depth_stencil_flags &&
+           a->dynamic_rendering_view_mask == b->dynamic_rendering_view_mask &&
+           a->dynamic_rendering_depth_format == b->dynamic_rendering_depth_format &&
+           a->dynamic_rendering_stencil_format == b->dynamic_rendering_stencil_format &&
+           a->color_attachment_format0 == b->color_attachment_format0 &&
+           a->color_attachment_format1 == b->color_attachment_format1 &&
+           a->color_attachment_format2 == b->color_attachment_format2 &&
+           a->color_attachment_format3 == b->color_attachment_format3 &&
+           a->color_attachment_format4 == b->color_attachment_format4 &&
+           a->color_attachment_format5 == b->color_attachment_format5 &&
+           a->color_attachment_format6 == b->color_attachment_format6 &&
+           a->color_attachment_format7 == b->color_attachment_format7 &&
+           a->color_attachment_format8 == b->color_attachment_format8 &&
+           a->color_attachment_format9 == b->color_attachment_format9 &&
+           a->color_attachment_format10 == b->color_attachment_format10 &&
+           a->color_attachment_format11 == b->color_attachment_format11 &&
+           a->color_attachment_format12 == b->color_attachment_format12 &&
+           a->color_attachment_format13 == b->color_attachment_format13 &&
+           a->color_attachment_format14 == b->color_attachment_format14 &&
+           a->color_attachment_format15 == b->color_attachment_format15 &&
+           a->dynamic_state_mask == b->dynamic_state_mask &&
+           a->pipeline_hash == b->pipeline_hash;
+}
+
+static int validate_vulkan_graphics_v6_duplicate_pipeline_identity(
+        uint32_t pipeline_count,
+        const PdockerGpuVulkanGraphicsV6PipelineEntry *pipelines) {
+    if (pipeline_count == 0) return 0;
+    if (!pipelines) return -EINVAL;
+    for (uint32_t i = 0; i < pipeline_count; ++i) {
+        const PdockerGpuVulkanGraphicsV6PipelineEntry *a = &pipelines[i];
+        if (a->pipeline_id == 0) continue;
+        for (uint32_t j = i + 1; j < pipeline_count; ++j) {
+            const PdockerGpuVulkanGraphicsV6PipelineEntry *b = &pipelines[j];
+            if (b->pipeline_id == a->pipeline_id &&
+                !v6_pipeline_fields_identical_for_same_object_id(a, b)) {
+                return -EPROTO;
+            }
+        }
+    }
+    return 0;
+}
+
+static int validate_vulkan_dispatch_v56_layout_identity_keys(
+        size_t descriptor_set_layout_count,
+        const PdockerGpuVulkanDispatchV56DescriptorSetLayoutEntry *descriptor_set_layouts,
+        size_t pipeline_layout_set_count,
+        const PdockerGpuVulkanDispatchV56PipelineLayoutSetEntry *pipeline_layout_sets,
+        size_t push_constant_range_count,
+        const PdockerGpuVulkanDispatchV56PushConstantRangeEntry *push_constant_ranges) {
+    if ((descriptor_set_layout_count > 0 && !descriptor_set_layouts) ||
+        (pipeline_layout_set_count > 0 && !pipeline_layout_sets) ||
+        (push_constant_range_count > 0 && !push_constant_ranges)) {
+        return -EINVAL;
+    }
+    for (size_t i = 0; i < descriptor_set_layout_count; ++i) {
+        const PdockerGpuVulkanDispatchV56DescriptorSetLayoutEntry *entry = &descriptor_set_layouts[i];
+        if (entry->layout_id == 0) continue;
+        for (size_t j = i + 1; j < descriptor_set_layout_count; ++j) {
+            const PdockerGpuVulkanDispatchV56DescriptorSetLayoutEntry *other = &descriptor_set_layouts[j];
+            if (entry->layout_id == other->layout_id &&
+                entry->binding == other->binding) {
+                return -EPROTO;
+            }
+        }
+    }
+    for (size_t i = 0; i < pipeline_layout_set_count; ++i) {
+        const PdockerGpuVulkanDispatchV56PipelineLayoutSetEntry *entry = &pipeline_layout_sets[i];
+        if (entry->pipeline_layout_id == 0) continue;
+        for (size_t j = i + 1; j < pipeline_layout_set_count; ++j) {
+            const PdockerGpuVulkanDispatchV56PipelineLayoutSetEntry *other = &pipeline_layout_sets[j];
+            if (entry->pipeline_layout_id == other->pipeline_layout_id &&
+                entry->set_index == other->set_index) {
+                return -EPROTO;
+            }
+        }
+    }
+    for (size_t i = 0; i < push_constant_range_count; ++i) {
+        const PdockerGpuVulkanDispatchV56PushConstantRangeEntry *entry = &push_constant_ranges[i];
+        if (entry->pipeline_layout_id == 0) continue;
+        for (size_t j = i + 1; j < push_constant_range_count; ++j) {
+            const PdockerGpuVulkanDispatchV56PushConstantRangeEntry *other = &push_constant_ranges[j];
+            if (entry->pipeline_layout_id == other->pipeline_layout_id &&
+                entry->range_index == other->range_index) {
+                return -EPROTO;
+            }
+        }
+    }
+    return 0;
+}
+
 static int v5_image_fields_identical_for_same_object_id(
         const PdockerGpuVulkanDispatchV5ImageEntry *a,
         const PdockerGpuVulkanDispatchV5ImageEntry *b) {
@@ -24710,6 +24821,11 @@ static int build_vulkan_dispatch_v5_native_plan(
                 (plan->compute_push_constant_range_count && !plan->compute_push_constant_ranges)) {
                 return -EPROTO;
             }
+            int layout_identity_rc = validate_vulkan_dispatch_v56_layout_identity_keys(
+                plan->compute_descriptor_set_layout_count, plan->compute_descriptor_set_layouts,
+                plan->compute_pipeline_layout_set_count, plan->compute_pipeline_layout_sets,
+                plan->compute_push_constant_range_count, plan->compute_push_constant_ranges);
+            if (layout_identity_rc != 0) return layout_identity_rc;
             for (size_t i = 0; i < plan->compute_descriptor_set_layout_count; ++i) {
                 const PdockerGpuVulkanDispatchV56DescriptorSetLayoutEntry *entry =
                     &plan->compute_descriptor_set_layouts[i];
@@ -29117,6 +29233,9 @@ static int validate_vulkan_graphics_v6_frame_content(
             }
         }
     }
+    int pipeline_identity_rc = validate_vulkan_graphics_v6_duplicate_pipeline_identity(
+        header->pipeline_count, pipelines);
+    if (pipeline_identity_rc != 0) return pipeline_identity_rc;
     for (uint32_t i = 0; i < header->pipeline_count; ++i) {
         const PdockerGpuVulkanGraphicsV6PipelineEntry *pipeline = &pipelines[i];
         if (!range_add_u32(pipeline->shader_stage_first, pipeline->shader_stage_count, header->shader_stage_count) ||
