@@ -23830,7 +23830,13 @@ VKAPI_ATTR void VKAPI_CALL vkGetImageMemoryRequirements2(
     PdockerVkStructHeader header = read_vk_struct_header(pMemoryRequirements);
     void *pnext = (void *)header.pNext;
     zero_vk_out_struct_preserve_chain(pMemoryRequirements, sizeof(*pMemoryRequirements), header);
-    vkGetImageMemoryRequirements(device, pInfo ? pInfo->image : VK_NULL_HANDLE,
+    if (!pInfo ||
+        pInfo->sType != VK_STRUCTURE_TYPE_IMAGE_MEMORY_REQUIREMENTS_INFO_2 ||
+        pInfo->pNext) {
+        fill_memory_requirements2_pnext(pnext);
+        return;
+    }
+    vkGetImageMemoryRequirements(device, pInfo->image,
                                  &pMemoryRequirements->memoryRequirements);
     fill_memory_requirements2_pnext(pnext);
 }
@@ -24275,10 +24281,16 @@ VKAPI_ATTR void VKAPI_CALL vkGetBufferMemoryRequirements2(
         VkDevice device,
         const VkBufferMemoryRequirementsInfo2 *pInfo,
         VkMemoryRequirements2 *pMemoryRequirements) {
-    if (!pInfo || !pMemoryRequirements) return;
+    if (!pMemoryRequirements) return;
     PdockerVkStructHeader header = read_vk_struct_header(pMemoryRequirements);
     void *pnext = (void *)header.pNext;
     zero_vk_out_struct_preserve_chain(pMemoryRequirements, sizeof(*pMemoryRequirements), header);
+    if (!pInfo ||
+        pInfo->sType != VK_STRUCTURE_TYPE_BUFFER_MEMORY_REQUIREMENTS_INFO_2 ||
+        pInfo->pNext) {
+        fill_memory_requirements2_pnext(pnext);
+        return;
+    }
     vkGetBufferMemoryRequirements(device, pInfo->buffer, &pMemoryRequirements->memoryRequirements);
     fill_memory_requirements2_pnext(pnext);
 }

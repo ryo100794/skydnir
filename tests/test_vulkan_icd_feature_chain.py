@@ -3863,6 +3863,100 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_memory_requirements2_bad_info_zeroes_outputs(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            static void poison_req2(VkMemoryRequirements2 *req2, VkMemoryDedicatedRequirements *dedicated) {{
+                memset(req2, 0xff, sizeof(*req2));
+                memset(dedicated, 0xff, sizeof(*dedicated));
+                dedicated->sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_REQUIREMENTS;
+                dedicated->pNext = NULL;
+                req2->sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2;
+                req2->pNext = dedicated;
+            }}
+
+            static int expect_zero_req2(const VkMemoryRequirements2 *req2,
+                                        const VkMemoryDedicatedRequirements *dedicated,
+                                        int code) {{
+                if (req2->sType != VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2 ||
+                    req2->pNext != dedicated ||
+                    req2->memoryRequirements.size != 0 ||
+                    req2->memoryRequirements.alignment != 0 ||
+                    req2->memoryRequirements.memoryTypeBits != 0 ||
+                    dedicated->sType != VK_STRUCTURE_TYPE_MEMORY_DEDICATED_REQUIREMENTS ||
+                    dedicated->pNext != NULL ||
+                    dedicated->prefersDedicatedAllocation != VK_FALSE ||
+                    dedicated->requiresDedicatedAllocation != VK_FALSE) {{
+                    fprintf(stderr,
+                            "memory requirements2 output was not zeroed for case %d: size=%llu alignment=%llu bits=0x%x prefers=%u requires=%u\\n",
+                            code,
+                            (unsigned long long)req2->memoryRequirements.size,
+                            (unsigned long long)req2->memoryRequirements.alignment,
+                            req2->memoryRequirements.memoryTypeBits,
+                            dedicated->prefersDedicatedAllocation,
+                            dedicated->requiresDedicatedAllocation);
+                    return code;
+                }}
+                return 0;
+            }}
+
+            int main(void) {{
+                VkMemoryRequirements2 req2;
+                VkMemoryDedicatedRequirements dedicated;
+                VkBaseOutStructure bad_pnext;
+                memset(&bad_pnext, 0, sizeof(bad_pnext));
+                bad_pnext.sType = (VkStructureType)0x3fffffff;
+                bad_pnext.pNext = NULL;
+
+                poison_req2(&req2, &dedicated);
+                vkGetBufferMemoryRequirements2(VK_NULL_HANDLE, NULL, &req2);
+                if (expect_zero_req2(&req2, &dedicated, 2)) return 2;
+
+                VkBufferMemoryRequirementsInfo2 buffer_info;
+                memset(&buffer_info, 0, sizeof(buffer_info));
+                buffer_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+                poison_req2(&req2, &dedicated);
+                vkGetBufferMemoryRequirements2(VK_NULL_HANDLE, &buffer_info, &req2);
+                if (expect_zero_req2(&req2, &dedicated, 3)) return 3;
+
+                memset(&buffer_info, 0, sizeof(buffer_info));
+                buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_REQUIREMENTS_INFO_2;
+                buffer_info.pNext = &bad_pnext;
+                buffer_info.buffer = (VkBuffer)(uintptr_t)0x1234u;
+                poison_req2(&req2, &dedicated);
+                vkGetBufferMemoryRequirements2(VK_NULL_HANDLE, &buffer_info, &req2);
+                if (expect_zero_req2(&req2, &dedicated, 4)) return 4;
+
+                poison_req2(&req2, &dedicated);
+                vkGetImageMemoryRequirements2(VK_NULL_HANDLE, NULL, &req2);
+                if (expect_zero_req2(&req2, &dedicated, 5)) return 5;
+
+                VkImageMemoryRequirementsInfo2 image_info;
+                memset(&image_info, 0, sizeof(image_info));
+                image_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+                poison_req2(&req2, &dedicated);
+                vkGetImageMemoryRequirements2(VK_NULL_HANDLE, &image_info, &req2);
+                if (expect_zero_req2(&req2, &dedicated, 6)) return 6;
+
+                memset(&image_info, 0, sizeof(image_info));
+                image_info.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_REQUIREMENTS_INFO_2;
+                image_info.pNext = &bad_pnext;
+                image_info.image = (VkImage)(uintptr_t)0x1234u;
+                poison_req2(&req2, &dedicated);
+                vkGetImageMemoryRequirements2(VK_NULL_HANDLE, &image_info, &req2);
+                if (expect_zero_req2(&req2, &dedicated, 7)) return 7;
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_memory_priority_feature_is_false_only_and_not_advertised_without_transport(self):
         source = textwrap.dedent(
             f"""

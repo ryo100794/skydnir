@@ -11283,11 +11283,15 @@ class GpuAbiContractTest(unittest.TestCase):
             "VKAPI_ATTR void VKAPI_CALL vkGetImageSubresourceLayout", 1
         )[0]
         self.assertIn("zero_vk_out_struct_preserve_chain(pMemoryRequirements, sizeof(*pMemoryRequirements), header);", image_body)
+        self.assertIn("pInfo->sType != VK_STRUCTURE_TYPE_IMAGE_MEMORY_REQUIREMENTS_INFO_2", image_body)
+        self.assertIn("pInfo->pNext", image_body)
         self.assertIn("fill_memory_requirements2_pnext(pnext);", image_body)
         buffer_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkGetBufferMemoryRequirements2", 1)[1].split(
             "VKAPI_ATTR VkResult VKAPI_CALL vkAllocateMemory", 1
         )[0]
         self.assertIn("zero_vk_out_struct_preserve_chain(pMemoryRequirements, sizeof(*pMemoryRequirements), header);", buffer_body)
+        self.assertIn("pInfo->sType != VK_STRUCTURE_TYPE_BUFFER_MEMORY_REQUIREMENTS_INFO_2", buffer_body)
+        self.assertIn("pInfo->pNext", buffer_body)
         self.assertIn("fill_memory_requirements2_pnext(pnext);", buffer_body)
         self.assertNotIn("for (void *node = pMemoryRequirements->pNext", buffer_body)
 
