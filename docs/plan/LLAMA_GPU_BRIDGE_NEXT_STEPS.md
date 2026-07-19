@@ -9,6 +9,19 @@ llama.cpp itself remains unmodified.
 
 ## Current Ground Truth
 
+### 2026-07-19 CPU/static Q6 readonly-dispatch blocker lane
+
+The artifact verifier now preserves compare-produced
+`shader-readonly-mutation-or-barrier-scope` as a precise
+`q6-readonly-dispatch-mutation` classification when
+`q6_unexpected_readonly_dispatch_mutations[]` evidence is present. If the
+blocker string appears without that evidence, the verifier fails closed as
+`q6-readonly-dispatch-mutation-evidence-missing`. This prevents readonly
+mutation evidence from being hidden inside the broad Q6 oracle mismatch bucket.
+
+This is CPU/static evidence-contract hardening only. It does not change
+llama.cpp, Dockerfiles, models, prompts, shader bytes, or executor arithmetic.
+
 ### 2026-07-19 CPU/static Q6 trace count and verifier parity lane
 
 The compare artifact now emits top-level

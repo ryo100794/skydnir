@@ -3352,6 +3352,11 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
         if isinstance(q6.get("q6_native_vs_writeback_split"), dict)
         else {}
     )
+    q6_unexpected_readonly_dispatch_mutations = (
+        q6.get("q6_unexpected_readonly_dispatch_mutations")
+        if isinstance(q6.get("q6_unexpected_readonly_dispatch_mutations"), list)
+        else []
+    )
     q6_blocker_class = None
     if not q6:
         classification = "q6-not-reached"
@@ -3503,6 +3508,14 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
                 classification = q6_debug_u32_probe_blocker
                 responsibility_boundary = "q6-debug-u32-probe"
                 q6_blocker_class = q6_debug_u32_probe_blocker
+            elif q6_unexpected_readonly_dispatch_mutations:
+                classification = "q6-readonly-dispatch-mutation"
+                responsibility_boundary = "q6-readonly-dispatch-mutation"
+                q6_blocker_class = "shader-readonly-mutation-or-barrier-scope"
+            elif q6_blocker_class == "shader-readonly-mutation-or-barrier-scope":
+                classification = "q6-readonly-dispatch-mutation-evidence-missing"
+                responsibility_boundary = "q6-readonly-dispatch-mutation"
+                q6_blocker_class = "shader-readonly-mutation-or-barrier-scope"
             elif (
                 (
                     _q6_store_index_model_required(
@@ -3662,6 +3675,7 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
         "q6_final_store_boundary": q6_final_store_boundary,
         "q6_stage_divergence": q6_stage_divergence,
         "q6_native_vs_writeback_split": q6_native_vs_writeback_split,
+        "q6_unexpected_readonly_dispatch_mutations": q6_unexpected_readonly_dispatch_mutations[:8],
         "q6_effective_blocker_class": (
             q6_blocker_class
             if classification in {
@@ -3676,6 +3690,8 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
                 "q6-native-final-store-or-readback",
                 "q6-native-device-execution-or-final-store",
                 "q6-native-reduction-or-device-execution",
+                "q6-readonly-dispatch-mutation",
+                "q6-readonly-dispatch-mutation-evidence-missing",
                 "q6-probe-writeback-cleared-oracle-missing",
                 "q6-workgroup-shape-blocker",
                 "q6-safe-kernel-diagnostic-only",
@@ -3778,6 +3794,8 @@ def main(argv: list[str]) -> int:
         return 40
     if classification == "q6-writeback-unverified":
         return 41
+    if classification == "q6-readonly-dispatch-mutation-evidence-missing":
+        return 49
     if args.require_q6_match:
         return 0 if classification == "q6-workgroup-cleared-and-oracle-match" else 30
     if args.require_q6_workgroup_clear:
@@ -3793,6 +3811,7 @@ def main(argv: list[str]) -> int:
             "q6-native-final-store-or-readback",
             "q6-native-device-execution-or-final-store",
             "q6-native-reduction-or-device-execution",
+            "q6-readonly-dispatch-mutation",
         } else 31
     if classification == "q6-workgroup-shape-blocker":
         return 32

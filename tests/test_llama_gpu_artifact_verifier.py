@@ -2642,6 +2642,77 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
             set(report["q6_stage_divergence"].get("missing", [])),
         )
 
+    def test_q6_readonly_dispatch_mutation_is_preserved_as_precise_blocker(self):
+        q6 = {
+            "event_count": 1,
+            "workgroup_shape_blocker": False,
+            "latest_status": "mismatch",
+            "blocker_class": "shader-readonly-mutation-or-barrier-scope",
+            "local_size_resolved": [32, 1, 1],
+            "q6_unexpected_readonly_dispatch_mutations": [
+                {
+                    "binding": 1,
+                    "reason": "readonly hash changed after dispatch",
+                    "gpu_after_dispatch_hash": "after",
+                    "fd_before_hash": "before",
+                }
+            ],
+            **q6_store_index_model_reflection(),
+            **q6_verified_writeback(),
+        }
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": passing_config_propagation(),
+                    "q6_workgroup_diagnostics": q6,
+                },
+            },
+        }
+        result = self.run_verifier(payload, "--require-q6-workgroup-clear")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "q6-readonly-dispatch-mutation")
+        self.assertEqual(report["responsibility_boundary"], "q6-readonly-dispatch-mutation")
+        self.assertEqual(
+            report["q6_effective_blocker_class"],
+            "shader-readonly-mutation-or-barrier-scope",
+        )
+        self.assertEqual(1, len(report["q6_unexpected_readonly_dispatch_mutations"]))
+        self.assertFalse(report["correctness_claim_allowed"])
+
+    def test_q6_readonly_dispatch_mutation_blocker_requires_evidence(self):
+        q6 = {
+            "event_count": 1,
+            "workgroup_shape_blocker": False,
+            "latest_status": "mismatch",
+            "blocker_class": "shader-readonly-mutation-or-barrier-scope",
+            "local_size_resolved": [32, 1, 1],
+            **q6_store_index_model_reflection(),
+            **q6_verified_writeback(),
+        }
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": passing_config_propagation(),
+                    "q6_workgroup_diagnostics": q6,
+                },
+            },
+        }
+        result = self.run_verifier(payload, "--require-q6-workgroup-clear")
+        self.assertEqual(result.returncode, 49, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "q6-readonly-dispatch-mutation-evidence-missing")
+        self.assertEqual(report["responsibility_boundary"], "q6-readonly-dispatch-mutation")
+        self.assertEqual(
+            report["q6_effective_blocker_class"],
+            "shader-readonly-mutation-or-barrier-scope",
+        )
+        self.assertEqual([], report["q6_unexpected_readonly_dispatch_mutations"])
+
     def test_q6_final_store_boundary_classifies_executor_writeback(self):
         q6 = {
             "event_count": 1,
