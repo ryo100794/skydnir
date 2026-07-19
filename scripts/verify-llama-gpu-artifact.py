@@ -149,6 +149,40 @@ def _manifest_env_policy_map(manifest: dict[str, Any], key: str) -> dict[str, st
     return policies
 
 
+def _manifest_env_scope_tuple(manifest: dict[str, Any], key: str) -> tuple[tuple[str, str], ...]:
+    values = manifest.get(key)
+    if not isinstance(values, list) or not values:
+        raise RuntimeError(f"llama GPU env manifest field {key!r} must be a non-empty list")
+    allowed_scopes = {
+        "adb-control",
+        "compare-artifact",
+        "compare-input",
+        "container-start-env",
+        "host-selector",
+        "probe-source-control",
+        "workspace-selector",
+    }
+    entries: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for item in values:
+        if not isinstance(item, dict):
+            raise RuntimeError(f"llama GPU env manifest field {key!r} contains a non-object entry")
+        env_name = item.get("env")
+        scope = item.get("scope")
+        reason = item.get("reason")
+        if not isinstance(env_name, str) or not env_name:
+            raise RuntimeError(f"llama GPU env manifest field {key!r} contains an invalid env")
+        if env_name in seen:
+            raise RuntimeError(f"llama GPU env manifest field {key!r} repeats env {env_name}")
+        if not isinstance(scope, str) or scope not in allowed_scopes:
+            raise RuntimeError(f"llama GPU env manifest field {key!r} contains invalid scope for {env_name}")
+        if not isinstance(reason, str) or len(reason.strip()) < 12:
+            raise RuntimeError(f"llama GPU env manifest field {key!r} contains invalid reason for {env_name}")
+        seen.add(env_name)
+        entries.append((env_name, scope))
+    return tuple(entries)
+
+
 LLAMA_GPU_ENV_MANIFEST = _load_env_manifest()
 
 # Shared llama GPU environment manifest.  The compare driver and verifier both
@@ -164,6 +198,9 @@ LLAMA_GPU_Q6_REQUIRED_ENV_OVERLAY = _manifest_string_dict(
 )
 LLAMA_GPU_STRICT_PASSTHROUGH_FORBIDDEN_ENVS = _manifest_string_tuple(
     LLAMA_GPU_ENV_MANIFEST, "strict_passthrough_forbidden_env"
+)
+LLAMA_GPU_WORKFLOW_POLICY_ENVS = _manifest_env_scope_tuple(
+    LLAMA_GPU_ENV_MANIFEST, "workflow_policy_env"
 )
 LLAMA_GPU_CONFIG_PROPAGATION_ENV_FIELDS = _manifest_env_field_tuple(
     LLAMA_GPU_ENV_MANIFEST, "config_propagation_env_fields"
@@ -582,7 +619,7 @@ def _env_value_truthy(value: Any) -> bool:
 
 
 def _runtime_env_truthy(runtime_env_manifest: dict[str, Any], env_name: str) -> bool:
-    for source_name in ("intended_runtime_env", "requested_or_planned_env", "planned_container_env", "host_requested_env"):
+    for source_name in ("intended_runtime_env", "requested_or_planned_env", "planned_container_env", "host_requested_env", "observed_runtime_env"):
         mapping = runtime_env_manifest.get(source_name)
         if isinstance(mapping, dict) and env_name in mapping and _env_value_truthy(mapping.get(env_name)):
             return True
@@ -622,7 +659,7 @@ def _strict_passthrough_forbidden_env_evidence(
     evidence: list[dict[str, Any]] = []
     for env_name in LLAMA_GPU_STRICT_PASSTHROUGH_FORBIDDEN_ENVS:
         sources: list[str] = []
-        for source_name in ("intended_runtime_env", "requested_or_planned_env", "planned_container_env", "host_requested_env"):
+        for source_name in ("intended_runtime_env", "requested_or_planned_env", "planned_container_env", "host_requested_env", "observed_runtime_env"):
             mapping = runtime_env_manifest.get(source_name)
             if isinstance(mapping, dict) and env_name in mapping and _env_value_truthy(mapping.get(env_name)):
                 sources.append(source_name)

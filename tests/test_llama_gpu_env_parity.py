@@ -98,6 +98,7 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
             "compare_probe_env_keys",
         ]:
             env_keys.update(manifest[key])
+        env_keys.update(item["env"] for item in manifest["workflow_policy_env"])
         for key in [
             "pdockerd_runtime_env_defaults",
             "ui_compose_runtime_env_defaults",
@@ -118,6 +119,7 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
             "app_process_only",
             "deprecated_or_invalid",
             "needs_bridge",
+            "process_workflow_only",
             "spirv_probe_transport",
         }
         self.assertEqual(expected_classes, set(classifications))
@@ -136,7 +138,12 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
             set(classifications["app_process_only"]),
             classified - env_keys,
         )
+        self.assertEqual(
+            {item["env"] for item in manifest["workflow_policy_env"]},
+            set(classifications["process_workflow_only"]),
+        )
         self.assertFalse(set(classifications["app_process_only"]) & set(manifest["compare_forward_env_keys"]))
+        self.assertFalse(set(classifications["process_workflow_only"]) & set(manifest["compare_forward_env_keys"]))
         self.assertEqual(
             {
                 item["env"] for item in manifest["abi_dispatch_option_env_fields"]
@@ -312,6 +319,7 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
         self.assertIn('runtime_env_manifest.get("planned_container_env")', verifier)
         self.assertIn('runtime_env_manifest.get("requested_or_planned_env")', verifier)
         self.assertIn('runtime_env_manifest.get("intended_runtime_env")', verifier)
+        self.assertIn('"observed_runtime_env"', verifier)
         self.assertIn('"requested_env_sources"', verifier)
 
     def test_compare_collects_app_owned_logs_when_engine_log_api_is_unavailable(self):

@@ -9,6 +9,35 @@ llama.cpp itself remains unmodified.
 
 ## Current Ground Truth
 
+### 2026-07-19 CPU/static workflow-env and alias-copy policy lane
+
+The llama GPU environment manifest now separately classifies workflow/process
+variables that are not Vulkan ICD-to-executor options.  This covers compare
+script selectors, ADB-control knobs, project-library container startup
+arguments, llama profile/startup diagnostics, Vulkan/OpenCL loader selector
+envs, and binary identity guards.  Host/static tests scan the compare runner,
+Q6 runner, Q6 plan/verifier helpers, and llama project-library startup surfaces
+so a new workflow env cannot appear without an explicit scope and reason.
+
+Strict pass-through evidence now also treats `PDOCKER_VULKAN_ALIAS_COPIES` as a
+forbidden compatibility materialization knob.  The verifier checks
+`observed_runtime_env` in addition to requested/planned env maps, so an env that
+is injected downstream still blocks strict pass-through correctness and
+benchmark claims.
+
+Validation command:
+
+```sh
+python3 -m unittest \
+  tests.test_llama_gpu_env_parity \
+  tests.test_gpu_abi_contract.GpuAbiContractTest.test_llama_gpu_workflow_env_policy_classifies_non_bridge_knobs \
+  tests.test_gpu_abi_contract.GpuAbiContractTest.test_llama_gpu_artifact_verifier_rejects_strict_forbidden_env_from_observed_runtime_env
+```
+
+This is CPU/static policy hardening only. It does not change llama.cpp,
+Dockerfiles, models, prompts, shader bytes, runtime defaults, or executor
+arithmetic.
+
 ### 2026-07-19 CPU/static strict pass-through env policy lane
 
 The llama GPU environment manifest now records a structured

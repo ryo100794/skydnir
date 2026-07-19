@@ -612,8 +612,678 @@
       "PDOCKER_GPU_SPIRV_PROBE_DEBUG_SET",
       "PDOCKER_GPU_SPIRV_PROBE_DEBUG_BINDING",
       "PDOCKER_GPU_SPIRV_PROBE_TARGET_ONLY"
+    ],
+    "process_workflow_only": [
+      "SKYDNIR_PACKAGE",
+      "PDOCKER_PACKAGE",
+      "SKYDNIR_LLAMA_CONTAINER",
+      "PDOCKER_LLAMA_CONTAINER",
+      "PDOCKER_LLAMA_LEGACY_CONTAINERS",
+      "SKYDNIR_LLAMA_IMAGE",
+      "PDOCKER_LLAMA_IMAGE",
+      "PDOCKER_LLAMA_PROJECT",
+      "PDOCKER_MODEL_HOST",
+      "PDOCKER_FAST_WORKSPACE_HOST",
+      "PDOCKER_LLAMA_LOCAL_PORT",
+      "PDOCKER_LLAMA_REMOTE_PORT",
+      "PDOCKER_LLAMA_CPU_CTX",
+      "PDOCKER_LLAMA_GPU_CTX",
+      "PDOCKER_LLAMA_GPU_LAYERS",
+      "PDOCKER_LLAMA_BENCH_PREDICT",
+      "PDOCKER_LLAMA_BENCH_REPEAT",
+      "PDOCKER_LLAMA_BENCH_WARMUP_DISCARD",
+      "PDOCKER_LLAMA_BENCH_MODE",
+      "PDOCKER_LLAMA_BENCH_OUT",
+      "PDOCKER_LLAMA_COMPARE_OUT",
+      "PDOCKER_LLAMA_COMPARE_ARTIFACT_DIR",
+      "PDOCKER_LLAMA_MODEL_PATH",
+      "PDOCKER_LLAMA_MODEL_URL",
+      "PDOCKER_LLAMA_CPU_TPS",
+      "PDOCKER_LLAMA_TRACE_ALLOC",
+      "PDOCKER_LLAMA_CORRECTNESS",
+      "PDOCKER_LLAMA_CORRECTNESS_TIMEOUT_SEC",
+      "PDOCKER_LLAMA_COMPLETION_READY_TIMEOUT_SEC",
+      "PDOCKER_LLAMA_CPU_WAIT_SERVER_TIMEOUT_SEC",
+      "PDOCKER_LLAMA_FORCED_VULKAN_WAIT_SERVER_TIMEOUT_SEC",
+      "PDOCKER_LLAMA_CPU_RESTORE_WAIT_SERVER_TIMEOUT_SEC",
+      "PDOCKER_LLAMA_LOG_TAIL_LINES",
+      "PDOCKER_LLAMA_RESTART_APP_DAEMON",
+      "PDOCKER_LLAMA_MIN_FREE_MB",
+      "PDOCKER_LLAMA_MIN_SWAP_FREE_MB",
+      "PDOCKER_LLAMA_SWAP_ADVISORY_MB",
+      "PDOCKER_LLAMA_WAIT_FOR_MEMORY_SEC",
+      "PDOCKER_LLAMA_WAIT_FOR_MEMORY_INTERVAL_SEC",
+      "PDOCKER_LLAMA_RUNTIME_MIN_FREE_MB",
+      "PDOCKER_LLAMA_RUNTIME_MIN_SWAP_FREE_MB",
+      "PDOCKER_LLAMA_RUNTIME_SWAP_ADVISORY_MB",
+      "PDOCKER_LLAMA_STOP_ON_FAILURE",
+      "PDOCKER_LLAMA_ENGINE_START_TIMEOUT_SEC",
+      "PDOCKER_LLAMA_ENGINE_CREATE_TIMEOUT_SEC",
+      "PDOCKER_LLAMA_ENGINE_CREATE_SETTLE_TIMEOUT_SEC",
+      "PDOCKER_LLAMA_ENGINE_CREATE_POLL_INTERVAL_SEC",
+      "PDOCKER_LLAMA_ENGINE_CLEANUP_TIMEOUT_SEC",
+      "PDOCKER_LLAMA_RUN_AS_TIMEOUT_SEC",
+      "PDOCKER_LLAMA_RUN_AS_CLEANUP_TIMEOUT_SEC",
+      "PDOCKER_LLAMA_OPERATION_NOTIFY_TIMEOUT_SEC",
+      "PDOCKER_LLAMA_WAIT_SERVER_PROGRESS_INTERVAL_SEC",
+      "PDOCKER_LLAMA_WAIT_SERVER_CURL_TIMEOUT_SEC",
+      "PDOCKER_LLAMA_STOP_STALE_TARGET_BEFORE_PREFLIGHT",
+      "PDOCKER_ADB_KEEPALIVE",
+      "PDOCKER_ADB_KEEPALIVE_INTERVAL_SEC",
+      "PDOCKER_ADB_KEEPALIVE_TIMEOUT_SEC",
+      "PDOCKER_ANDROID_SAME_DEVICE_HTTP",
+      "PDOCKER_LLAMA_RUNTIME_ABORT_JSON",
+      "PDOCKER_LLAMA_BRIDGE_BINARY_IDENTITY_JSON",
+      "PDOCKER_LLAMA_POST_READINESS_MEMORY_JSON",
+      "PDOCKER_LLAMA_N_PROBS",
+      "PDOCKER_GPU",
+      "PDOCKER_GPU_AUTO",
+      "PDOCKER_GPU_MODE",
+      "PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER",
+      "PDOCKER_VULKAN_ICD_EXPECTED_MARKER",
+      "LLAMA_ARG_MODEL",
+      "LLAMA_ARG_CTX",
+      "LLAMA_ARG_PORT",
+      "LLAMA_LOG_FILE",
+      "LLAMA_MODEL_URL",
+      "PDOCKER_Q6K_ALLOW_ARCHIVED_PROBE_SOURCE",
+      "LLAMA_ARG_THREADS",
+      "LLAMA_ARG_KV_OFFLOAD",
+      "LLAMA_EXTRA_ARGS",
+      "LLAMA_GPU_PROFILE_REFRESH",
+      "LLAMA_GPU_PROFILE",
+      "LLAMA_GPU_BACKEND",
+      "LLAMA_GPU_DIAGNOSTICS",
+      "LLAMA_CORRECTNESS_FILE",
+      "LLAMA_CORRECTNESS_PROFILE_COPY",
+      "LLAMA_CORRECTNESS_TIMEOUT",
+      "LLAMA_STARTUP_JSON",
+      "LLAMA_CPP_REF",
+      "LLAMA_CPP_BUILD_JOBS",
+      "LLAMA_CPP_BUILD_TYPE",
+      "PDOCKER_DOCUMENTS_HOST",
+      "PDOCKER_DOCUMENTS_MOUNT",
+      "PDOCKER_SHARED_DOCUMENTS_HOST",
+      "PDOCKER_SHARED_DOCUMENTS_MOUNT",
+      "PDOCKER_EXPORT_DIR",
+      "PDOCKER_FAST_WORKDIR",
+      "PDOCKER_VULKAN_ALLOW_KV_OFFLOAD",
+      "PDOCKER_CUDA_COMPAT",
+      "PDOCKER_VULKAN_PASSTHROUGH",
+      "PDOCKER_VULKAN_ICD",
+      "PDOCKER_VULKAN_ICD_KIND",
+      "PDOCKER_VULKAN_ICD_READY",
+      "PDOCKER_OPENCL_PASSTHROUGH",
+      "PDOCKER_OPENCL_ICD",
+      "PDOCKER_OPENCL_ICD_KIND",
+      "PDOCKER_OPENCL_ICD_READY",
+      "PDOCKER_OPENCL_API_VERSION",
+      "PDOCKER_GPU_COMMAND_API",
+      "PDOCKER_GPU_QUEUE_SOCKET",
+      "PDOCKER_GPU_SHARED_DIR",
+      "GGML_VK_VISIBLE_DEVICES",
+      "VK_ICD_FILENAMES",
+      "VK_DRIVER_FILES",
+      "OCL_ICD_VENDORS"
     ]
   },
+  "workflow_policy_env": [
+    {
+      "env": "SKYDNIR_PACKAGE",
+      "scope": "host-selector",
+      "reason": "Public package selector for the compare driver; not a Vulkan bridge option."
+    },
+    {
+      "env": "PDOCKER_PACKAGE",
+      "scope": "host-selector",
+      "reason": "Legacy package selector for the compare driver; not a Vulkan bridge option."
+    },
+    {
+      "env": "SKYDNIR_LLAMA_CONTAINER",
+      "scope": "host-selector",
+      "reason": "Public llama container name selector used before Engine API calls."
+    },
+    {
+      "env": "PDOCKER_LLAMA_CONTAINER",
+      "scope": "host-selector",
+      "reason": "Legacy llama container name selector used before Engine API calls."
+    },
+    {
+      "env": "PDOCKER_LLAMA_LEGACY_CONTAINERS",
+      "scope": "host-selector",
+      "reason": "Cleanup selector for old container names; not forwarded to the bridge."
+    },
+    {
+      "env": "SKYDNIR_LLAMA_IMAGE",
+      "scope": "host-selector",
+      "reason": "Public image selector for the compare driver Engine create payload."
+    },
+    {
+      "env": "PDOCKER_LLAMA_IMAGE",
+      "scope": "host-selector",
+      "reason": "Legacy image selector for the compare driver Engine create payload."
+    },
+    {
+      "env": "PDOCKER_LLAMA_PROJECT",
+      "scope": "host-selector",
+      "reason": "Project path selector used by the compare driver, outside Vulkan dispatch."
+    },
+    {
+      "env": "PDOCKER_MODEL_HOST",
+      "scope": "workspace-selector",
+      "reason": "Host model-directory selector consumed before container start."
+    },
+    {
+      "env": "PDOCKER_FAST_WORKSPACE_HOST",
+      "scope": "workspace-selector",
+      "reason": "Host workspace selector consumed before container start."
+    },
+    {
+      "env": "PDOCKER_LLAMA_LOCAL_PORT",
+      "scope": "compare-input",
+      "reason": "Host HTTP port for benchmark/readiness probes."
+    },
+    {
+      "env": "PDOCKER_LLAMA_REMOTE_PORT",
+      "scope": "compare-input",
+      "reason": "Container HTTP port for benchmark/readiness probes."
+    },
+    {
+      "env": "PDOCKER_LLAMA_CPU_CTX",
+      "scope": "compare-input",
+      "reason": "CPU baseline llama context size for the compare workflow."
+    },
+    {
+      "env": "PDOCKER_LLAMA_GPU_CTX",
+      "scope": "compare-input",
+      "reason": "GPU run llama context size for the compare workflow."
+    },
+    {
+      "env": "PDOCKER_LLAMA_GPU_LAYERS",
+      "scope": "compare-input",
+      "reason": "GPU layer count selector used before container Env construction."
+    },
+    {
+      "env": "PDOCKER_LLAMA_BENCH_PREDICT",
+      "scope": "compare-input",
+      "reason": "HTTP benchmark token count passed to the benchmark helper."
+    },
+    {
+      "env": "PDOCKER_LLAMA_BENCH_REPEAT",
+      "scope": "compare-input",
+      "reason": "HTTP benchmark repeat count passed to the benchmark helper."
+    },
+    {
+      "env": "PDOCKER_LLAMA_BENCH_WARMUP_DISCARD",
+      "scope": "compare-input",
+      "reason": "HTTP benchmark warmup policy passed to the benchmark helper."
+    },
+    {
+      "env": "PDOCKER_LLAMA_BENCH_MODE",
+      "scope": "compare-artifact",
+      "reason": "Mode label passed only to the benchmark helper artifact."
+    },
+    {
+      "env": "PDOCKER_LLAMA_BENCH_OUT",
+      "scope": "compare-artifact",
+      "reason": "Output path passed only to the benchmark helper artifact."
+    },
+    {
+      "env": "PDOCKER_LLAMA_COMPARE_OUT",
+      "scope": "compare-input",
+      "reason": "Final compare artifact path selected by the host workflow."
+    },
+    {
+      "env": "PDOCKER_LLAMA_COMPARE_ARTIFACT_DIR",
+      "scope": "compare-input",
+      "reason": "Optional artifact directory selector for host-side diagnostics."
+    },
+    {
+      "env": "PDOCKER_LLAMA_MODEL_PATH",
+      "scope": "compare-input",
+      "reason": "Model path inserted into container startup environment."
+    },
+    {
+      "env": "PDOCKER_LLAMA_MODEL_URL",
+      "scope": "compare-input",
+      "reason": "Model URL inserted into container startup environment."
+    },
+    {
+      "env": "PDOCKER_LLAMA_CPU_TPS",
+      "scope": "compare-input",
+      "reason": "Optional CPU TPS baseline override for tight GPU loops."
+    },
+    {
+      "env": "PDOCKER_LLAMA_TRACE_ALLOC",
+      "scope": "compare-input",
+      "reason": "Compare-workflow switch for extra allocator diagnostics."
+    },
+    {
+      "env": "PDOCKER_LLAMA_CORRECTNESS",
+      "scope": "compare-input",
+      "reason": "Compare-workflow switch for HTTP prompt sanity probes."
+    },
+    {
+      "env": "PDOCKER_LLAMA_CORRECTNESS_TIMEOUT_SEC",
+      "scope": "compare-input",
+      "reason": "Timeout for compare-workflow prompt sanity probes."
+    },
+    {
+      "env": "PDOCKER_LLAMA_COMPLETION_READY_TIMEOUT_SEC",
+      "scope": "compare-input",
+      "reason": "Timeout for service completion readiness checks."
+    },
+    {
+      "env": "PDOCKER_LLAMA_CPU_WAIT_SERVER_TIMEOUT_SEC",
+      "scope": "compare-input",
+      "reason": "CPU server readiness timeout for the compare workflow."
+    },
+    {
+      "env": "PDOCKER_LLAMA_FORCED_VULKAN_WAIT_SERVER_TIMEOUT_SEC",
+      "scope": "compare-input",
+      "reason": "Forced Vulkan server readiness timeout for the compare workflow."
+    },
+    {
+      "env": "PDOCKER_LLAMA_CPU_RESTORE_WAIT_SERVER_TIMEOUT_SEC",
+      "scope": "compare-input",
+      "reason": "CPU restore readiness timeout for the compare workflow."
+    },
+    {
+      "env": "PDOCKER_LLAMA_LOG_TAIL_LINES",
+      "scope": "compare-input",
+      "reason": "Host-side diagnostic log-tail length."
+    },
+    {
+      "env": "PDOCKER_LLAMA_RESTART_APP_DAEMON",
+      "scope": "compare-input",
+      "reason": "Host-side daemon restart policy for the compare workflow."
+    },
+    {
+      "env": "PDOCKER_LLAMA_MIN_FREE_MB",
+      "scope": "compare-input",
+      "reason": "Preflight memory guard threshold for the compare workflow."
+    },
+    {
+      "env": "PDOCKER_LLAMA_MIN_SWAP_FREE_MB",
+      "scope": "compare-input",
+      "reason": "Optional strict swap preflight threshold for the compare workflow."
+    },
+    {
+      "env": "PDOCKER_LLAMA_SWAP_ADVISORY_MB",
+      "scope": "compare-input",
+      "reason": "Advisory swap-pressure threshold for diagnostics."
+    },
+    {
+      "env": "PDOCKER_LLAMA_WAIT_FOR_MEMORY_SEC",
+      "scope": "compare-input",
+      "reason": "Host-side memory wait budget before starting the run."
+    },
+    {
+      "env": "PDOCKER_LLAMA_WAIT_FOR_MEMORY_INTERVAL_SEC",
+      "scope": "compare-input",
+      "reason": "Host-side memory wait polling interval."
+    },
+    {
+      "env": "PDOCKER_LLAMA_RUNTIME_MIN_FREE_MB",
+      "scope": "compare-input",
+      "reason": "Runtime memory guard threshold after container start."
+    },
+    {
+      "env": "PDOCKER_LLAMA_RUNTIME_MIN_SWAP_FREE_MB",
+      "scope": "compare-input",
+      "reason": "Optional strict runtime swap threshold."
+    },
+    {
+      "env": "PDOCKER_LLAMA_RUNTIME_SWAP_ADVISORY_MB",
+      "scope": "compare-input",
+      "reason": "Runtime advisory swap-pressure threshold."
+    },
+    {
+      "env": "PDOCKER_LLAMA_STOP_ON_FAILURE",
+      "scope": "compare-input",
+      "reason": "Host-side cleanup policy after failed compare runs."
+    },
+    {
+      "env": "PDOCKER_LLAMA_ENGINE_START_TIMEOUT_SEC",
+      "scope": "compare-input",
+      "reason": "Engine startup timeout for host workflow operations."
+    },
+    {
+      "env": "PDOCKER_LLAMA_ENGINE_CREATE_TIMEOUT_SEC",
+      "scope": "compare-input",
+      "reason": "Engine container-create timeout for host workflow operations."
+    },
+    {
+      "env": "PDOCKER_LLAMA_ENGINE_CREATE_SETTLE_TIMEOUT_SEC",
+      "scope": "compare-input",
+      "reason": "Engine create settle timeout after host workflow operations."
+    },
+    {
+      "env": "PDOCKER_LLAMA_ENGINE_CREATE_POLL_INTERVAL_SEC",
+      "scope": "compare-input",
+      "reason": "Polling interval for host Engine create tracking."
+    },
+    {
+      "env": "PDOCKER_LLAMA_ENGINE_CLEANUP_TIMEOUT_SEC",
+      "scope": "compare-input",
+      "reason": "Host cleanup timeout for Engine API operations."
+    },
+    {
+      "env": "PDOCKER_LLAMA_RUN_AS_TIMEOUT_SEC",
+      "scope": "compare-input",
+      "reason": "run-as command timeout for host-side Android probes."
+    },
+    {
+      "env": "PDOCKER_LLAMA_RUN_AS_CLEANUP_TIMEOUT_SEC",
+      "scope": "compare-input",
+      "reason": "run-as cleanup timeout for host-side Android probes."
+    },
+    {
+      "env": "PDOCKER_LLAMA_OPERATION_NOTIFY_TIMEOUT_SEC",
+      "scope": "compare-input",
+      "reason": "Operation-notify timeout for host-side status updates."
+    },
+    {
+      "env": "PDOCKER_LLAMA_WAIT_SERVER_PROGRESS_INTERVAL_SEC",
+      "scope": "compare-input",
+      "reason": "Progress logging interval while waiting for server readiness."
+    },
+    {
+      "env": "PDOCKER_LLAMA_WAIT_SERVER_CURL_TIMEOUT_SEC",
+      "scope": "compare-input",
+      "reason": "HTTP probe timeout while waiting for server readiness."
+    },
+    {
+      "env": "PDOCKER_LLAMA_STOP_STALE_TARGET_BEFORE_PREFLIGHT",
+      "scope": "compare-input",
+      "reason": "Host cleanup switch before memory and readiness preflight."
+    },
+    {
+      "env": "PDOCKER_ADB_KEEPALIVE",
+      "scope": "adb-control",
+      "reason": "ADB session keepalive switch for host workflow scripts."
+    },
+    {
+      "env": "PDOCKER_ADB_KEEPALIVE_INTERVAL_SEC",
+      "scope": "adb-control",
+      "reason": "ADB keepalive interval for host workflow scripts."
+    },
+    {
+      "env": "PDOCKER_ADB_KEEPALIVE_TIMEOUT_SEC",
+      "scope": "adb-control",
+      "reason": "ADB keepalive command timeout for host workflow scripts."
+    },
+    {
+      "env": "PDOCKER_ANDROID_SAME_DEVICE_HTTP",
+      "scope": "adb-control",
+      "reason": "Same-device HTTP mode selector that avoids adb forward."
+    },
+    {
+      "env": "PDOCKER_LLAMA_RUNTIME_ABORT_JSON",
+      "scope": "compare-artifact",
+      "reason": "Temporary runtime-abort artifact path passed to the artifact assembly step."
+    },
+    {
+      "env": "PDOCKER_LLAMA_BRIDGE_BINARY_IDENTITY_JSON",
+      "scope": "compare-artifact",
+      "reason": "Temporary bridge binary identity artifact path passed to assembly."
+    },
+    {
+      "env": "PDOCKER_LLAMA_POST_READINESS_MEMORY_JSON",
+      "scope": "compare-artifact",
+      "reason": "Temporary post-readiness memory artifact path passed to assembly."
+    },
+    {
+      "env": "PDOCKER_LLAMA_N_PROBS",
+      "scope": "compare-input",
+      "reason": "Prompt-probability count for optional correctness diagnostics."
+    },
+    {
+      "env": "PDOCKER_GPU",
+      "scope": "container-start-env",
+      "reason": "Container startup mode selector consumed by project-library scripts."
+    },
+    {
+      "env": "PDOCKER_GPU_AUTO",
+      "scope": "container-start-env",
+      "reason": "Container startup auto-detection selector consumed by project-library scripts."
+    },
+    {
+      "env": "PDOCKER_GPU_MODE",
+      "scope": "container-start-env",
+      "reason": "Container startup GPU mode selector, not an ICD-to-executor option."
+    },
+    {
+      "env": "PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER",
+      "scope": "container-start-env",
+      "reason": "Binary identity guard passed through startup env and verified by compare artifacts."
+    },
+    {
+      "env": "PDOCKER_VULKAN_ICD_EXPECTED_MARKER",
+      "scope": "container-start-env",
+      "reason": "ICD binary identity guard passed through startup env and verified by compare artifacts."
+    },
+    {
+      "env": "LLAMA_ARG_MODEL",
+      "scope": "container-start-env",
+      "reason": "Container entrypoint argument for model path."
+    },
+    {
+      "env": "LLAMA_ARG_CTX",
+      "scope": "container-start-env",
+      "reason": "Container entrypoint argument for context size."
+    },
+    {
+      "env": "LLAMA_ARG_PORT",
+      "scope": "container-start-env",
+      "reason": "Container entrypoint argument for HTTP port."
+    },
+    {
+      "env": "LLAMA_LOG_FILE",
+      "scope": "container-start-env",
+      "reason": "Container entrypoint log-file path."
+    },
+    {
+      "env": "LLAMA_MODEL_URL",
+      "scope": "container-start-env",
+      "reason": "Container entrypoint optional model download URL."
+    },
+    {
+      "env": "PDOCKER_Q6K_ALLOW_ARCHIVED_PROBE_SOURCE",
+      "scope": "probe-source-control",
+      "reason": "Q6 runner escape hatch for archived fixture-only regression runs."
+    },
+    {
+      "env": "LLAMA_ARG_THREADS",
+      "scope": "container-start-env",
+      "reason": "Container entrypoint argument for llama.cpp worker threads."
+    },
+    {
+      "env": "LLAMA_ARG_KV_OFFLOAD",
+      "scope": "container-start-env",
+      "reason": "Container entrypoint guard for llama.cpp KV offload behavior."
+    },
+    {
+      "env": "LLAMA_EXTRA_ARGS",
+      "scope": "container-start-env",
+      "reason": "Container entrypoint extra llama-server arguments."
+    },
+    {
+      "env": "LLAMA_GPU_PROFILE_REFRESH",
+      "scope": "container-start-env",
+      "reason": "Container profile-refresh policy for startup GPU detection."
+    },
+    {
+      "env": "LLAMA_GPU_PROFILE",
+      "scope": "container-start-env",
+      "reason": "Container path for generated GPU profile environment."
+    },
+    {
+      "env": "LLAMA_GPU_BACKEND",
+      "scope": "container-start-env",
+      "reason": "Generated container profile result selecting llama.cpp backend."
+    },
+    {
+      "env": "LLAMA_GPU_DIAGNOSTICS",
+      "scope": "container-start-env",
+      "reason": "Container path for generated GPU diagnostic JSON."
+    },
+    {
+      "env": "LLAMA_CORRECTNESS_FILE",
+      "scope": "container-start-env",
+      "reason": "Container path for llama correctness probe output."
+    },
+    {
+      "env": "LLAMA_CORRECTNESS_PROFILE_COPY",
+      "scope": "container-start-env",
+      "reason": "Container path for copying the correctness GPU profile."
+    },
+    {
+      "env": "LLAMA_CORRECTNESS_TIMEOUT",
+      "scope": "container-start-env",
+      "reason": "Container timeout for llama correctness probes."
+    },
+    {
+      "env": "LLAMA_STARTUP_JSON",
+      "scope": "container-start-env",
+      "reason": "Container path for llama startup diagnostics."
+    },
+    {
+      "env": "LLAMA_CPP_REF",
+      "scope": "compare-input",
+      "reason": "Build argument selector recorded by the project-library compose template."
+    },
+    {
+      "env": "LLAMA_CPP_BUILD_JOBS",
+      "scope": "compare-input",
+      "reason": "Build parallelism selector recorded by the project-library compose template."
+    },
+    {
+      "env": "LLAMA_CPP_BUILD_TYPE",
+      "scope": "compare-input",
+      "reason": "Build type selector recorded by the project-library compose template."
+    },
+    {
+      "env": "PDOCKER_DOCUMENTS_HOST",
+      "scope": "workspace-selector",
+      "reason": "Host Documents folder selector for project-library volume mounting."
+    },
+    {
+      "env": "PDOCKER_DOCUMENTS_MOUNT",
+      "scope": "workspace-selector",
+      "reason": "Container mount-point selector for the Documents volume."
+    },
+    {
+      "env": "PDOCKER_SHARED_DOCUMENTS_HOST",
+      "scope": "workspace-selector",
+      "reason": "Host shared-documents folder selector for project-library volume mounting."
+    },
+    {
+      "env": "PDOCKER_SHARED_DOCUMENTS_MOUNT",
+      "scope": "workspace-selector",
+      "reason": "Container mount-point selector for the shared Documents volume."
+    },
+    {
+      "env": "PDOCKER_EXPORT_DIR",
+      "scope": "workspace-selector",
+      "reason": "Container export directory selector for project-library artifacts."
+    },
+    {
+      "env": "PDOCKER_FAST_WORKDIR",
+      "scope": "workspace-selector",
+      "reason": "Container working-directory selector for fast local workspace use."
+    },
+    {
+      "env": "PDOCKER_VULKAN_ALLOW_KV_OFFLOAD",
+      "scope": "container-start-env",
+      "reason": "Container startup escape hatch for Vulkan KV offload guard policy."
+    },
+    {
+      "env": "PDOCKER_CUDA_COMPAT",
+      "scope": "container-start-env",
+      "reason": "Container startup selector for future CUDA-compatibility detection."
+    },
+    {
+      "env": "PDOCKER_VULKAN_PASSTHROUGH",
+      "scope": "container-start-env",
+      "reason": "Container startup signal for Vulkan passthrough visibility."
+    },
+    {
+      "env": "PDOCKER_VULKAN_ICD",
+      "scope": "container-start-env",
+      "reason": "Container startup path signal for the Skydnir Vulkan ICD."
+    },
+    {
+      "env": "PDOCKER_VULKAN_ICD_KIND",
+      "scope": "container-start-env",
+      "reason": "Container startup identity signal for the Skydnir Vulkan ICD kind."
+    },
+    {
+      "env": "PDOCKER_VULKAN_ICD_READY",
+      "scope": "container-start-env",
+      "reason": "Container startup readiness signal for the Skydnir Vulkan ICD."
+    },
+    {
+      "env": "PDOCKER_OPENCL_PASSTHROUGH",
+      "scope": "container-start-env",
+      "reason": "Container startup signal for future OpenCL passthrough visibility."
+    },
+    {
+      "env": "PDOCKER_OPENCL_ICD",
+      "scope": "container-start-env",
+      "reason": "Container startup path signal for the Skydnir OpenCL ICD."
+    },
+    {
+      "env": "PDOCKER_OPENCL_ICD_KIND",
+      "scope": "container-start-env",
+      "reason": "Container startup identity signal for the Skydnir OpenCL ICD kind."
+    },
+    {
+      "env": "PDOCKER_OPENCL_ICD_READY",
+      "scope": "container-start-env",
+      "reason": "Container startup readiness signal for the Skydnir OpenCL ICD."
+    },
+    {
+      "env": "PDOCKER_OPENCL_API_VERSION",
+      "scope": "container-start-env",
+      "reason": "Container startup diagnostic signal for future OpenCL API level."
+    },
+    {
+      "env": "PDOCKER_GPU_COMMAND_API",
+      "scope": "container-start-env",
+      "reason": "Container startup diagnostic signal for the Skydnir GPU command API."
+    },
+    {
+      "env": "PDOCKER_GPU_QUEUE_SOCKET",
+      "scope": "container-start-env",
+      "reason": "Container startup socket path for app-owned GPU bridge commands."
+    },
+    {
+      "env": "PDOCKER_GPU_SHARED_DIR",
+      "scope": "container-start-env",
+      "reason": "Container startup shared directory path for app-owned GPU bridge commands."
+    },
+    {
+      "env": "GGML_VK_VISIBLE_DEVICES",
+      "scope": "container-start-env",
+      "reason": "Container startup variable cleared for CPU fallback visibility control."
+    },
+    {
+      "env": "VK_ICD_FILENAMES",
+      "scope": "container-start-env",
+      "reason": "Container startup Vulkan ICD file selector consumed by the loader."
+    },
+    {
+      "env": "VK_DRIVER_FILES",
+      "scope": "container-start-env",
+      "reason": "Container startup Vulkan driver file selector consumed by the loader."
+    },
+    {
+      "env": "OCL_ICD_VENDORS",
+      "scope": "container-start-env",
+      "reason": "Container startup OpenCL vendor selector consumed by the loader."
+    }
+  ],
   "unsupported_gpu_work_tokens": [
     "unsupported",
     "kernel-not-implemented-yet",
@@ -690,6 +1360,7 @@
     "PDOCKER_GPU_Q6K_ORACLE_WRITEBACK",
     "PDOCKER_GPU_Q6K_READONLY_OVERLAP_SNAPSHOT",
     "PDOCKER_GPU_Q6K_SAFE_KERNEL",
-    "PDOCKER_GPU_STRICT_DUPLICATE_DESCRIPTOR_NORMALIZATION"
+    "PDOCKER_GPU_STRICT_DUPLICATE_DESCRIPTOR_NORMALIZATION",
+    "PDOCKER_VULKAN_ALIAS_COPIES"
   ]
 }

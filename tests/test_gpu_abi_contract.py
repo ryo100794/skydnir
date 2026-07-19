@@ -23017,7 +23017,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertEqual(set(), q6_required - bridged_envs)
         self.assertEqual(set(), q6_required & strict_forbidden_envs)
         config_propagation_envs = {item["env"] for item in manifest["config_propagation_env_fields"]}
-        self.assertEqual([], sorted(strict_forbidden_envs - config_propagation_envs))
+        container_only_envs = set(classifications["container_env_only"])
+        strict_forbidden_without_config = strict_forbidden_envs - config_propagation_envs
+        self.assertEqual([], sorted(strict_forbidden_without_config - container_only_envs))
+        self.assertIn("PDOCKER_VULKAN_ALIAS_COPIES", strict_forbidden_without_config)
         self.assertEqual(
             [],
             sorted(
@@ -23114,6 +23117,8 @@ class GpuAbiContractTest(unittest.TestCase):
         }
         self.assertLessEqual(set(direct_executor_forbidden_markers), strict_forbidden_envs)
         self.assertIn("PDOCKER_GPU_Q4K_TARGETED_SPECIALIZATION", strict_forbidden_envs)
+        self.assertIn("PDOCKER_VULKAN_ALIAS_COPIES", strict_forbidden_envs)
+        self.assertIn("rejecting PDOCKER_VULKAN_ALIAS_COPIES under strict passthrough", icd)
         for env_name, markers in direct_executor_forbidden_markers.items():
             self.assertIn(env_name, executor_source)
             for marker in markers:
@@ -23122,6 +23127,86 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("q6_required_env_overlay", runner)
         self.assertIn("Static dispatch-option route guard", next_steps)
         self.assertIn("runner/ICD/executor key drift", next_steps)
+
+    def test_llama_gpu_workflow_env_policy_classifies_non_bridge_knobs(self):
+        manifest = json.loads(LLAMA_GPU_ENV_MANIFEST.read_text(encoding="utf-8"))
+        verifier = load_llama_gpu_artifact_verifier()
+        workflow_entries = manifest["workflow_policy_env"]
+        workflow_envs = {item["env"] for item in workflow_entries}
+        self.assertEqual(len(workflow_entries), len(workflow_envs))
+        self.assertEqual(
+            tuple((item["env"], item["scope"]) for item in workflow_entries),
+            verifier.LLAMA_GPU_WORKFLOW_POLICY_ENVS,
+        )
+        allowed_scopes = {
+            "adb-control",
+            "compare-artifact",
+            "compare-input",
+            "container-start-env",
+            "host-selector",
+            "probe-source-control",
+            "workspace-selector",
+        }
+        for item in workflow_entries:
+            self.assertIn(item["scope"], allowed_scopes)
+            self.assertGreaterEqual(len(item["reason"].strip()), 12)
+
+        all_manifest_envs = set()
+        def collect_envs(value):
+            if isinstance(value, str):
+                if re.fullmatch(r"(?:SKYDNIR|PDOCKER|GGML|LLAMA|VK|OCL)_(?:[A-Z0-9]+_)*[A-Z0-9]+", value):
+                    all_manifest_envs.add(value)
+            elif isinstance(value, dict):
+                env = value.get("env")
+                if isinstance(env, str):
+                    all_manifest_envs.add(env)
+                for nested in value.values():
+                    collect_envs(nested)
+            elif isinstance(value, list):
+                for nested in value:
+                    collect_envs(nested)
+        collect_envs(manifest)
+
+        compare_forward_envs = set(manifest["compare_forward_env_keys"])
+        abi_option_envs = {item["env"] for item in manifest["abi_dispatch_option_env_fields"]}
+        strict_forbidden_envs = set(manifest["strict_passthrough_forbidden_env"])
+        self.assertEqual([], sorted(workflow_envs & compare_forward_envs))
+        self.assertEqual([], sorted(workflow_envs & abi_option_envs))
+        self.assertEqual([], sorted(workflow_envs & strict_forbidden_envs))
+
+        for env in [
+            "SKYDNIR_PACKAGE",
+            "SKYDNIR_LLAMA_CONTAINER",
+            "SKYDNIR_LLAMA_IMAGE",
+            "PDOCKER_GPU_MODE",
+            "PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER",
+            "PDOCKER_VULKAN_ICD_EXPECTED_MARKER",
+            "PDOCKER_Q6K_ALLOW_ARCHIVED_PROBE_SOURCE",
+            "LLAMA_ARG_MODEL",
+            "LLAMA_MODEL_URL",
+        ]:
+            self.assertIn(env, workflow_envs)
+
+        env_name = r"(?:SKYDNIR|PDOCKER|GGML|LLAMA|VK|OCL)_(?:[A-Z0-9]+_)*[A-Z0-9]+"
+        patterns = [
+            re.compile(r"\$\{(" + env_name + r")(?:[:+?=-][^}]*)?\}"),
+            re.compile(r'os\.environ\.get\(["\'](' + env_name + r')["\']'),
+            re.compile(r'os\.getenv\(["\'](' + env_name + r')["\']'),
+            re.compile(r"(?m)^\s*(" + env_name + r")="),
+            re.compile(r'["\'](' + env_name + r')='),
+        ]
+        workflow_sources = [
+            LLAMA_COMPARE,
+            ROOT / "scripts" / "android-llama-gpu-q6-workgroup-run.sh",
+            ROOT / "scripts" / "plan-llama-gpu-q6-run.py",
+            ROOT / "scripts" / "verify-llama-gpu-q6-run-against-plan.py",
+        ]
+        discovered = set()
+        for source in workflow_sources:
+            text = source.read_text(encoding="utf-8")
+            for pattern in patterns:
+                discovered.update(match.group(1) for match in pattern.finditer(text))
+        self.assertEqual([], sorted(discovered - all_manifest_envs))
 
     def test_q6_workgroup_runner_fixes_required_env_and_preflight(self):
         runner = (ROOT / "scripts" / "android-llama-gpu-q6-workgroup-run.sh").read_text()
@@ -24405,6 +24490,10 @@ class GpuAbiContractTest(unittest.TestCase):
             tuple(manifest["strict_passthrough_forbidden_env"]),
             verifier.LLAMA_GPU_STRICT_PASSTHROUGH_FORBIDDEN_ENVS,
         )
+        self.assertEqual(
+            tuple((item["env"], item["scope"]) for item in manifest["workflow_policy_env"]),
+            verifier.LLAMA_GPU_WORKFLOW_POLICY_ENVS,
+        )
         self.assertIn("LLAMA_GPU_Q6_REQUIRED_ENV_OVERLAY", LLAMA_GPU_ARTIFACT_VERIFIER.read_text())
         for env_name in verifier.LLAMA_GPU_Q6_REQUIRED_ENV_OVERLAY:
             self.assertIn(env_name, verifier.LLAMA_GPU_COMPARE_FORWARD_ENV_KEYS)
@@ -24460,6 +24549,46 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertFalse(report["correctness_claim_allowed"])
         self.assertFalse(report["benchmark_claim_allowed"])
         self.assertIn("PDOCKER_GPU_Q6K_SAFE_KERNEL", json.dumps(report["config_propagation"]))
+
+    def test_llama_gpu_artifact_verifier_rejects_strict_forbidden_env_from_observed_runtime_env(self):
+        verifier = load_llama_gpu_artifact_verifier()
+        config_checks = []
+        for env, field in verifier.LLAMA_GPU_CONFIG_PROPAGATION_ENV_FIELDS:
+            enabled = env == "PDOCKER_GPU_STRICT_PASSTHROUGH"
+            config_checks.append({
+                "env": env,
+                "executor_field": field,
+                "expected": enabled,
+                "observed_values": [enabled],
+                "status": "pass",
+            })
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "runtime_env_manifest": {
+                    "host_requested_env": {"PDOCKER_GPU_STRICT_PASSTHROUGH": "1"},
+                    "observed_runtime_env": {"PDOCKER_VULKAN_ALIAS_COPIES": "1"},
+                },
+                "diagnostics": {
+                    "runtime_freshness": llama_runtime_freshness_pass(),
+                    "config_propagation": {"summary": "pass", "checks": config_checks},
+                    "q6_workgroup_diagnostics": {
+                        "event_count": 1,
+                        "q6_dispatch_seen": True,
+                        "latest_status": "match",
+                        "q6_writeback_verified_all": True,
+                    },
+                },
+                "correctness": {"summary": {"correctness": "pass"}},
+            },
+            "comparison": {"speedup": 3.0, "target_met": True},
+        }
+        report = verifier.classify(payload)
+        self.assertEqual("strict-passthrough-forbidden-env", report["classification"])
+        self.assertFalse(report["correctness_claim_allowed"])
+        self.assertFalse(report["benchmark_claim_allowed"])
+        self.assertIn("observed_runtime_env", json.dumps(report["strict_passthrough_forbidden_env_evidence"]))
+        self.assertIn("PDOCKER_VULKAN_ALIAS_COPIES", json.dumps(report["strict_passthrough_forbidden_env_evidence"]))
 
     def test_llama_gpu_artifact_verifier_rejects_strict_forbidden_env_even_when_reflected(self):
         verifier = load_llama_gpu_artifact_verifier()
