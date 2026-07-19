@@ -1873,10 +1873,18 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 uint32_t initial_word = 0x12345678u;
                 cache_info.initialDataSize = sizeof(initial_word);
                 cache_info.pInitialData = &initial_word;
-                VkValidationCacheEXT cache = VK_NULL_HANDLE;
+                VkValidationCacheEXT cache = (VkValidationCacheEXT)(uintptr_t)0x1234u;
+                if (vkCreateValidationCacheEXT(VK_NULL_HANDLE, &cache_info, NULL, &cache) != VK_ERROR_INITIALIZATION_FAILED ||
+                    cache != VK_NULL_HANDLE) {{
+                    fprintf(stderr, "validation cache accepted null device or left stale output\\n");
+                    vkDestroyDevice(validation_vk_device, NULL);
+                    return 16;
+                }}
+                cache = VK_NULL_HANDLE;
                 if (vkCreateValidationCacheEXT(validation_vk_device, &cache_info, NULL, &cache) != VK_SUCCESS ||
                     cache == VK_NULL_HANDLE) {{
                     fprintf(stderr, "local validation cache create failed\\n");
+                    vkDestroyDevice(validation_vk_device, NULL);
                     return 4;
                 }}
                 size_t cache_data_size = 99;
@@ -2283,53 +2291,122 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
             #include "{ICD_SOURCE}"
 
             int main(void) {{
+                VkDeviceCreateInfo device_info;
+                memset(&device_info, 0, sizeof(device_info));
+                device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                VkDevice device = VK_NULL_HANDLE;
+                if (vkCreateDevice((VkPhysicalDevice)&g_device, &device_info, NULL, &device) != VK_SUCCESS ||
+                    device == VK_NULL_HANDLE) {{
+                    fprintf(stderr, "pipeline cache test device create failed\\n");
+                    return 11;
+                }}
+
                 VkPipelineCacheCreateInfo info;
                 memset(&info, 0, sizeof(info));
                 info.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
-                VkPipelineCache cache = VK_NULL_HANDLE;
-                if (vkCreatePipelineCache(VK_NULL_HANDLE, &info, NULL, &cache) != VK_SUCCESS ||
+                VkPipelineCache cache = (VkPipelineCache)(uintptr_t)0x1234u;
+                if (vkCreatePipelineCache(VK_NULL_HANDLE, &info, NULL, &cache) != VK_ERROR_INITIALIZATION_FAILED ||
+                    cache != VK_NULL_HANDLE) {{
+                    fprintf(stderr, "pipeline cache accepted null device or left stale output\\n");
+                    vkDestroyDevice(device, NULL);
+                    return 12;
+                }}
+                cache = (VkPipelineCache)(uintptr_t)0x1234u;
+                if (vkCreatePipelineCache(device, NULL, NULL, &cache) != VK_ERROR_INITIALIZATION_FAILED ||
+                    cache != VK_NULL_HANDLE) {{
+                    fprintf(stderr, "pipeline cache accepted null create info or left stale output\\n");
+                    vkDestroyDevice(device, NULL);
+                    return 13;
+                }}
+                info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+                cache = (VkPipelineCache)(uintptr_t)0x1234u;
+                if (vkCreatePipelineCache(device, &info, NULL, &cache) != VK_ERROR_INITIALIZATION_FAILED ||
+                    cache != VK_NULL_HANDLE) {{
+                    fprintf(stderr, "pipeline cache accepted wrong sType or left stale output\\n");
+                    vkDestroyDevice(device, NULL);
+                    return 14;
+                }}
+                info.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
+                VkBaseInStructure unknown;
+                memset(&unknown, 0, sizeof(unknown));
+                unknown.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+                info.pNext = &unknown;
+                if (vkCreatePipelineCache(device, &info, NULL, &cache) != VK_ERROR_FEATURE_NOT_PRESENT) {{
+                    fprintf(stderr, "pipeline cache accepted unsupported pNext\\n");
+                    vkDestroyDevice(device, NULL);
+                    return 15;
+                }}
+                info.pNext = NULL;
+                info.flags = (VkPipelineCacheCreateFlags)1u;
+                if (vkCreatePipelineCache(device, &info, NULL, &cache) != VK_ERROR_FEATURE_NOT_PRESENT) {{
+                    fprintf(stderr, "pipeline cache accepted unsupported flags\\n");
+                    vkDestroyDevice(device, NULL);
+                    return 16;
+                }}
+                info.flags = 0;
+                info.initialDataSize = 4;
+                info.pInitialData = NULL;
+                if (vkCreatePipelineCache(device, &info, NULL, &cache) != VK_ERROR_FEATURE_NOT_PRESENT) {{
+                    fprintf(stderr, "pipeline cache accepted missing initial data\\n");
+                    vkDestroyDevice(device, NULL);
+                    return 17;
+                }}
+                uint32_t initial_word = 0x12345678u;
+                info.pInitialData = &initial_word;
+                cache = VK_NULL_HANDLE;
+                if (vkCreatePipelineCache(device, &info, NULL, &cache) != VK_SUCCESS ||
                     cache == VK_NULL_HANDLE) {{
                     fprintf(stderr, "pipeline cache create failed\\n");
+                    vkDestroyDevice(device, NULL);
                     return 2;
                 }}
                 PdockerVkPipelineCache *cache_obj = pipeline_cache_handle_lookup(cache);
                 if (!cache_obj || cache_obj->destroyed) {{
                     fprintf(stderr, "pipeline cache not registered live\\n");
+                    vkDestroyDevice(device, NULL);
                     return 3;
                 }}
                 size_t data_size = 99;
-                if (vkGetPipelineCacheData(VK_NULL_HANDLE, cache, &data_size, NULL) != VK_SUCCESS ||
+                if (vkGetPipelineCacheData(device, cache, &data_size, NULL) != VK_SUCCESS ||
                     data_size != 0) {{
                     fprintf(stderr, "pipeline cache data query failed\\n");
+                    vkDestroyDevice(device, NULL);
                     return 4;
                 }}
-                if (vkMergePipelineCaches(VK_NULL_HANDLE, cache, 1, &cache) != VK_SUCCESS) {{
+                if (vkMergePipelineCaches(device, cache, 1, &cache) != VK_SUCCESS) {{
                     fprintf(stderr, "pipeline cache self merge failed\\n");
+                    vkDestroyDevice(device, NULL);
                     return 5;
                 }}
                 VkPipelineCache fake_cache = pdocker_vk_pipeline_cache_to_handle((PdockerVkPipelineCache *)(uintptr_t)0x1234000u);
-                if (vkMergePipelineCaches(VK_NULL_HANDLE, cache, 1, &fake_cache) == VK_SUCCESS) {{
+                if (vkMergePipelineCaches(device, cache, 1, &fake_cache) == VK_SUCCESS) {{
                     fprintf(stderr, "pipeline cache merge accepted fake source\\n");
+                    vkDestroyDevice(device, NULL);
                     return 6;
                 }}
-                if (vkGetPipelineCacheData(VK_NULL_HANDLE, fake_cache, &data_size, NULL) == VK_SUCCESS) {{
+                if (vkGetPipelineCacheData(device, fake_cache, &data_size, NULL) == VK_SUCCESS) {{
                     fprintf(stderr, "pipeline cache data accepted fake cache\\n");
+                    vkDestroyDevice(device, NULL);
                     return 7;
                 }}
-                vkDestroyPipelineCache(VK_NULL_HANDLE, cache, NULL);
+                vkDestroyPipelineCache(device, cache, NULL);
                 if (pipeline_cache_handle_lookup(cache) != NULL || !cache_obj->destroyed) {{
                     fprintf(stderr, "destroyed pipeline cache remained live\\n");
+                    vkDestroyDevice(device, NULL);
                     return 8;
                 }}
-                if (vkGetPipelineCacheData(VK_NULL_HANDLE, cache, &data_size, NULL) == VK_SUCCESS) {{
+                if (vkGetPipelineCacheData(device, cache, &data_size, NULL) == VK_SUCCESS) {{
                     fprintf(stderr, "pipeline cache data accepted destroyed cache\\n");
+                    vkDestroyDevice(device, NULL);
                     return 9;
                 }}
-                if (vkMergePipelineCaches(VK_NULL_HANDLE, cache, 0, NULL) == VK_SUCCESS) {{
+                if (vkMergePipelineCaches(device, cache, 0, NULL) == VK_SUCCESS) {{
                     fprintf(stderr, "pipeline cache merge accepted destroyed destination\\n");
+                    vkDestroyDevice(device, NULL);
                     return 10;
                 }}
-                vkDestroyPipelineCache(VK_NULL_HANDLE, cache, NULL);
+                vkDestroyPipelineCache(device, cache, NULL);
+                vkDestroyDevice(device, NULL);
                 return 0;
             }}
             """

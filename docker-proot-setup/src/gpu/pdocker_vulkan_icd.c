@@ -38080,19 +38080,27 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreatePipelineCache(
         const VkPipelineCacheCreateInfo *pCreateInfo,
         const VkAllocationCallbacks *pAllocator,
         VkPipelineCache *pPipelineCache) {
-    (void)device;
-    (void)pCreateInfo;
     (void)pAllocator;
-    if (!pPipelineCache) return VK_ERROR_INITIALIZATION_FAILED;
-    *pPipelineCache = VK_NULL_HANDLE;
-    PdockerVkPipelineCache *cache = pdocker_alloc_handle(sizeof(*cache));
-    if (!cache) return VK_ERROR_OUT_OF_HOST_MEMORY;
-    uint64_t owner_device_id = 0;
-    if (!device_owner_id_or_zero_checked(device, &owner_device_id)) {
-        free(cache);
+    if (pPipelineCache) *pPipelineCache = VK_NULL_HANDLE;
+    if (!pCreateInfo || !pPipelineCache ||
+        pCreateInfo->sType != VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
-
+    if (pCreateInfo->pNext) {
+        return unsupported_create_info_pnext_result("vkCreatePipelineCache", pCreateInfo->pNext);
+    }
+    if (pCreateInfo->flags != 0 ||
+        (pCreateInfo->initialDataSize > 0 && !pCreateInfo->pInitialData)) {
+        trace_icd_runtime_failure("pipeline-cache-create-info-unsupported",
+                                  VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    PdockerVkPipelineCache *cache = pdocker_alloc_handle(sizeof(*cache));
+    if (!cache) return VK_ERROR_OUT_OF_HOST_MEMORY;
     cache->owner_device_id = owner_device_id;
     pipeline_cache_register(cache);
     *pPipelineCache = pdocker_vk_pipeline_cache_to_handle(cache);
@@ -38194,11 +38202,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateValidationCacheEXT(
         const VkAllocationCallbacks *pAllocator,
         VkValidationCacheEXT *pValidationCache) {
     (void)pAllocator;
+    if (pValidationCache) *pValidationCache = VK_NULL_HANDLE;
     if (!pCreateInfo || !pValidationCache ||
         pCreateInfo->sType != VK_STRUCTURE_TYPE_VALIDATION_CACHE_CREATE_INFO_EXT) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
-    *pValidationCache = VK_NULL_HANDLE;
     if (pCreateInfo->pNext) {
         return unsupported_create_info_pnext_result("vkCreateValidationCacheEXT", pCreateInfo->pNext);
     }
@@ -38207,14 +38215,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateValidationCacheEXT(
         trace_icd_runtime_failure("validation-cache-create-info-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }
-    PdockerVkValidationCache *cache = pdocker_alloc_handle(sizeof(*cache));
-    if (!cache) return VK_ERROR_OUT_OF_HOST_MEMORY;
     uint64_t owner_device_id = 0;
-    if (!device_owner_id_or_zero_checked(device, &owner_device_id)) {
-        free(cache);
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
-
+    PdockerVkValidationCache *cache = pdocker_alloc_handle(sizeof(*cache));
+    if (!cache) return VK_ERROR_OUT_OF_HOST_MEMORY;
     cache->owner_device_id = owner_device_id;
     validation_cache_register(cache);
     *pValidationCache = pdocker_vk_validation_cache_to_handle(cache);
