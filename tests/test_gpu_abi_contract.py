@@ -1,5 +1,6 @@
 import hashlib
 import json
+import math
 import importlib.util
 import re
 import subprocess
@@ -169,6 +170,19 @@ def load_q6_output_index_probe_classifier():
     namespace = {}
     exec(compile(source[start:end], str(LLAMA_COMPARE), "exec"), namespace)
     return namespace["classify_q6_output_index_probe"]
+
+
+
+def load_q6_final_store_boundary_builder():
+    source = LLAMA_COMPARE.read_text()
+    namespace = {"math": math}
+    helpers_start = source.index("def finite_number")
+    helpers_end = source.index("\n\ndef build_q6_native_vs_writeback_split", helpers_start)
+    exec(compile(source[helpers_start:helpers_end], str(LLAMA_COMPARE), "exec"), namespace)
+    builder_start = source.index("def build_q6_final_store_boundary():")
+    builder_end = source.index("\n\nq6_final_store_boundary =", builder_start)
+    exec(compile(source[builder_start:builder_end], str(LLAMA_COMPARE), "exec"), namespace)
+    return namespace
 
 
 def load_q6_stage_trace_namespace(probe_manifest_path=None):
@@ -982,6 +996,63 @@ class GpuAbiContractTest(unittest.TestCase):
             [record["stage"] for record in records[:5]],
         )
         self.assertEqual([], report["failures"])
+
+
+    def test_q6_final_store_boundary_keeps_unanimous_failure_direction_with_pass_samples(self):
+        namespace = load_q6_final_store_boundary_builder()
+        namespace.update({
+            "q6_latest_debug_u32_probe": {
+                "summary": "pass",
+                "bindings": [
+                    {
+                        "binding": 5,
+                        "set": 0,
+                        "q6_event_dispatch_id": 77,
+                        "records": [
+                            {
+                                "status": "pass",
+                                "trace_status": "pass",
+                                "trace_writeback_verified": True,
+                                "role_code": 4,
+                                "output_index": 0,
+                                "value_f32": 1.0,
+                            },
+                            {
+                                "status": "pass",
+                                "trace_status": "pass",
+                                "trace_writeback_verified": True,
+                                "role_code": 4,
+                                "output_index": 1,
+                                "value_f32": 8.0,
+                            },
+                        ],
+                    }
+                ],
+            },
+            "q6_output_layout_samples": [
+                {"dst_index": 0, "expected_store_index": 0, "expected": 1.0},
+                {"dst_index": 1, "expected_store_index": 1, "expected": 10.0},
+            ],
+            "q6_row_indexed_writeback_evidence": [
+                {
+                    "f32_after_writeback": [
+                        {"index": 0, "value": 1.0},
+                        {"index": 1, "value": 8.0},
+                    ]
+                }
+            ],
+            "q6_native_spirv_identity": {
+                "source_spirv_hash": "0x274f68a67dfef210",
+                "effective_spirv_hash": "0x274f68a67dfef210",
+            },
+            "q6_store_index_model_valid": True,
+        })
+        result = namespace["build_q6_final_store_boundary"]()
+        self.assertEqual("native-final-store-mismatch", result["summary"])
+        self.assertEqual(2, result["joined_sample_count"])
+        self.assertEqual(1, result["class_counts"]["pass"])
+        self.assertEqual(1, result["class_counts"]["native-final-store-mismatch"])
+        self.assertNotEqual("mixed-sample-classes", result.get("reason"))
 
     def test_q6_final_store_boundary_filters_nonfinal_stage_records(self):
         source = LLAMA_COMPARE.read_text()

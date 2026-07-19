@@ -6013,10 +6013,18 @@ def build_q6_final_store_boundary():
             reason = "missing-final-store-writeback-samples"
         else:
             reason = "no-joined-final-store-layout-and-writeback-samples"
-    elif class_counts["native-final-store-mismatch"] == len(joined):
+    elif (
+        class_counts["native-final-store-mismatch"] > 0
+        and class_counts["executor-writeback-mismatch"] == 0
+        and class_counts["mixed-or-inconclusive"] == 0
+    ):
         summary = "native-final-store-mismatch"
         reason = None
-    elif class_counts["executor-writeback-mismatch"] == len(joined):
+    elif (
+        class_counts["executor-writeback-mismatch"] > 0
+        and class_counts["native-final-store-mismatch"] == 0
+        and class_counts["mixed-or-inconclusive"] == 0
+    ):
         summary = "executor-writeback-mismatch"
         reason = None
     elif class_counts["pass"] == len(joined):
