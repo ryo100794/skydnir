@@ -9,6 +9,21 @@ llama.cpp itself remains unmodified.
 
 ## Current Ground Truth
 
+### 2026-07-19 CPU/static V6 pipeline extension identity lane
+
+V6 graphics duplicate pipeline-id validation now compares not only the base
+`PdockerGpuVulkanGraphicsV6PipelineEntry`, but also pipeline-index keyed
+extension state rows after normalizing the `pipeline_index` field.  The covered
+state includes depth/stencil, static raster state, color blend state and
+attachments, viewport/scissor state and static rectangles, multisample state,
+and tessellation state.  A frame that reuses one API `pipeline_id` while
+attaching different extension-state rows now fails closed during validation
+instead of letting the executor replay a split pipeline identity.
+
+This is generic Vulkan pass-through hardening. It does not change llama.cpp,
+Dockerfiles, models, prompts, shader bytes, runtime defaults, or executor
+arithmetic.
+
 ### 2026-07-19 CPU/static V5 image descriptor identity lane
 
 V5 descriptor reconciliation now includes image descriptor identity in addition

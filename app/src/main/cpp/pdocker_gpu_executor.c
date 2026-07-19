@@ -26677,6 +26677,118 @@ static int register_vulkan_graphics_v630_identity(
         out_handles);
 }
 
+static uint64_t v6_hash_pipeline_indexed_entry_normalized(
+        uint64_t hash,
+        const void *entry,
+        size_t entry_size,
+        size_t pipeline_index_offset) {
+    if (!entry || pipeline_index_offset + sizeof(uint32_t) > entry_size) return hash;
+    const unsigned char *bytes = (const unsigned char *)entry;
+    const uint32_t normalized_pipeline_index = 0;
+    hash = fnv1a64_update(hash, bytes, pipeline_index_offset);
+    hash = fnv1a64_update(hash, &normalized_pipeline_index, sizeof(normalized_pipeline_index));
+    hash = fnv1a64_update(hash,
+                          bytes + pipeline_index_offset + sizeof(uint32_t),
+                          entry_size - pipeline_index_offset - sizeof(uint32_t));
+    return hash;
+}
+
+static uint64_t v6_pipeline_indexed_extension_identity_hash(
+        const VulkanGraphicsV6FrameView *view,
+        uint32_t pipeline_index) {
+    uint64_t hash = 1469598103934665603ull;
+#define HASH_PIPELINE_INDEXED_EXTENSION(tag_value, enabled_expr, table_expr, count_expr, type_name) \
+    do { \
+        const uint32_t tag__ = (uint32_t)(tag_value); \
+        const type_name *table__ = (enabled_expr) ? (table_expr) : NULL; \
+        const uint32_t total__ = (enabled_expr) ? (uint32_t)(count_expr) : 0u; \
+        uint32_t matched__ = 0; \
+        hash = fnv1a64_update(hash, &tag__, sizeof(tag__)); \
+        for (uint32_t i__ = 0; i__ < total__; ++i__) { \
+            if (table__ && table__[i__].pipeline_index == pipeline_index) matched__++; \
+        } \
+        hash = fnv1a64_update(hash, &matched__, sizeof(matched__)); \
+        for (uint32_t i__ = 0; i__ < total__; ++i__) { \
+            if (!table__ || table__[i__].pipeline_index != pipeline_index) continue; \
+            hash = v6_hash_pipeline_indexed_entry_normalized( \
+                hash, &table__[i__], sizeof(table__[i__]), offsetof(type_name, pipeline_index)); \
+        } \
+    } while (0)
+
+    if (!view || !view->header) return hash;
+    HASH_PIPELINE_INDEXED_EXTENSION(63u,
+        view->is_v63 && view->header_v63,
+        view->depth_stencil_states,
+        view->header_v63->v63.depth_stencil_state_count,
+        PdockerGpuVulkanGraphicsV63DepthStencilStateEntry);
+    HASH_PIPELINE_INDEXED_EXTENSION(65u,
+        view->is_v65 && view->header_v65,
+        view->static_pipeline_states,
+        view->header_v65->v65.static_pipeline_state_count,
+        PdockerGpuVulkanGraphicsV65StaticPipelineStateEntry);
+    HASH_PIPELINE_INDEXED_EXTENSION(66u,
+        view->is_v66 && view->header_v66,
+        view->color_blend_states,
+        view->header_v66->v66.color_blend_state_count,
+        PdockerGpuVulkanGraphicsV66ColorBlendStateEntry);
+    HASH_PIPELINE_INDEXED_EXTENSION(661u,
+        view->is_v66 && view->header_v66,
+        view->color_blend_attachments,
+        view->header_v66->v66.color_blend_attachment_count,
+        PdockerGpuVulkanGraphicsV66ColorBlendAttachmentEntry);
+    HASH_PIPELINE_INDEXED_EXTENSION(67u,
+        view->is_v67 && view->header_v67,
+        view->viewport_scissor_states,
+        view->header_v67->v67.viewport_scissor_state_count,
+        PdockerGpuVulkanGraphicsV67ViewportScissorStateEntry);
+    HASH_PIPELINE_INDEXED_EXTENSION(671u,
+        view->is_v67 && view->header_v67,
+        view->viewport_entries,
+        view->header_v67->v67.viewport_count,
+        PdockerGpuVulkanGraphicsV67ViewportEntry);
+    HASH_PIPELINE_INDEXED_EXTENSION(672u,
+        view->is_v67 && view->header_v67,
+        view->scissor_entries,
+        view->header_v67->v67.scissor_count,
+        PdockerGpuVulkanGraphicsV67ScissorEntry);
+    HASH_PIPELINE_INDEXED_EXTENSION(622u,
+        view->is_v622 && view->header_v622,
+        view->multisample_states,
+        view->header_v622->v622.multisample_state_count,
+        PdockerGpuVulkanGraphicsV622MultisampleStateEntry);
+    HASH_PIPELINE_INDEXED_EXTENSION(623u,
+        view->is_v623 && view->header_v623,
+        view->tessellation_states,
+        view->header_v623->v623.tessellation_state_count,
+        PdockerGpuVulkanGraphicsV623TessellationStateEntry);
+#undef HASH_PIPELINE_INDEXED_EXTENSION
+    return hash;
+}
+
+static int validate_vulkan_graphics_v6_duplicate_pipeline_identity_with_extensions(
+        const VulkanGraphicsV6FrameView *view) {
+    if (!view || !view->header || !view->pipelines) return -EINVAL;
+    for (uint32_t i = 0; i < view->header->pipeline_count; ++i) {
+        const PdockerGpuVulkanGraphicsV6PipelineEntry *a = &view->pipelines[i];
+        if (a->pipeline_id == 0) continue;
+        const uint64_t a_extension_hash =
+            v6_pipeline_indexed_extension_identity_hash(view, i);
+        for (uint32_t j = i + 1; j < view->header->pipeline_count; ++j) {
+            const PdockerGpuVulkanGraphicsV6PipelineEntry *b = &view->pipelines[j];
+            if (b->pipeline_id != a->pipeline_id) continue;
+            if (!v6_pipeline_fields_identical_for_same_object_id(a, b)) {
+                return -EPROTO;
+            }
+            const uint64_t b_extension_hash =
+                v6_pipeline_indexed_extension_identity_hash(view, j);
+            if (a_extension_hash != b_extension_hash) {
+                return -EPROTO;
+            }
+        }
+    }
+    return 0;
+}
+
 static int vulkan_graphics_descriptor_image_view_aspect_mask(
         const VulkanGraphicsV6FrameView *view,
         const PdockerGpuVulkanDispatchV5DescriptorObjectEntry *descriptor,
@@ -29388,8 +29500,8 @@ static int validate_vulkan_graphics_v6_frame_content(
             }
         }
     }
-    int pipeline_identity_rc = validate_vulkan_graphics_v6_duplicate_pipeline_identity(
-        header->pipeline_count, pipelines);
+    int pipeline_identity_rc =
+        validate_vulkan_graphics_v6_duplicate_pipeline_identity_with_extensions(&view);
     if (pipeline_identity_rc != 0) return pipeline_identity_rc;
     for (uint32_t i = 0; i < header->pipeline_count; ++i) {
         const PdockerGpuVulkanGraphicsV6PipelineEntry *pipeline = &pipelines[i];

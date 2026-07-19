@@ -4854,7 +4854,10 @@ class GpuAbiContractTest(unittest.TestCase):
         executor = GPU_EXECUTOR.read_text()
         helper = (
             c_function_body(executor, "v6_pipeline_fields_identical_for_same_object_id")
+            + c_function_body(executor, "v6_hash_pipeline_indexed_entry_normalized")
+            + c_function_body(executor, "v6_pipeline_indexed_extension_identity_hash")
             + c_function_body(executor, "validate_vulkan_graphics_v6_duplicate_pipeline_identity")
+            + c_function_body(executor, "validate_vulkan_graphics_v6_duplicate_pipeline_identity_with_extensions")
         )
         validator = c_function_body(executor, "validate_vulkan_graphics_v6_frame_content")
         for marker in [
@@ -4875,11 +4878,24 @@ class GpuAbiContractTest(unittest.TestCase):
             "a->color_attachment_format15 == b->color_attachment_format15",
             "a->dynamic_state_mask == b->dynamic_state_mask",
             "a->pipeline_hash == b->pipeline_hash",
+            "v6_pipeline_indexed_extension_identity_hash(view, i)",
+            "v6_pipeline_indexed_extension_identity_hash(view, j)",
+            "a_extension_hash != b_extension_hash",
+            "HASH_PIPELINE_INDEXED_EXTENSION(63u",
+            "HASH_PIPELINE_INDEXED_EXTENSION(65u",
+            "HASH_PIPELINE_INDEXED_EXTENSION(66u",
+            "HASH_PIPELINE_INDEXED_EXTENSION(661u",
+            "HASH_PIPELINE_INDEXED_EXTENSION(67u",
+            "HASH_PIPELINE_INDEXED_EXTENSION(671u",
+            "HASH_PIPELINE_INDEXED_EXTENSION(672u",
+            "HASH_PIPELINE_INDEXED_EXTENSION(622u",
+            "HASH_PIPELINE_INDEXED_EXTENSION(623u",
+            "offsetof(type_name, pipeline_index)",
         ]:
             self.assertIn(marker, helper)
-        self.assertIn("validate_vulkan_graphics_v6_duplicate_pipeline_identity(", validator)
+        self.assertIn("validate_vulkan_graphics_v6_duplicate_pipeline_identity_with_extensions(&view)", validator)
         self.assertLess(
-            validator.index("validate_vulkan_graphics_v6_duplicate_pipeline_identity("),
+            validator.index("validate_vulkan_graphics_v6_duplicate_pipeline_identity_with_extensions(&view)"),
             validator.index("for (uint32_t i = 0; i < header->pipeline_count; ++i)"),
         )
 
