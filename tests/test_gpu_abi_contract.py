@@ -23061,15 +23061,63 @@ class GpuAbiContractTest(unittest.TestCase):
         runner = (ROOT / "scripts" / "android-llama-gpu-q6-workgroup-run.sh").read_text()
         verifier = LLAMA_GPU_ARTIFACT_VERIFIER.read_text()
         self.assertIn("LLAMA_GPU_STRICT_PASSTHROUGH_FORBIDDEN_ENVS", verifier)
-        for key in [
-            "PDOCKER_GPU_Q6K_COMPAT_REWRITES",
-            "PDOCKER_GPU_Q6K_SAFE_KERNEL",
-            "PDOCKER_GPU_Q6K_ORACLE_WRITEBACK",
-            "PDOCKER_GPU_Q4K_PIPELINE_RETRY_LADDER",
-            "PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC",
-            "PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION",
-        ]:
-            self.assertIn(key, strict_forbidden_envs)
+        executor_source = GPU_EXECUTOR.read_text()
+        direct_executor_forbidden_markers = {
+            "PDOCKER_GPU_ADD_FLOAT16_CAPABILITY_FOR_STORAGE16": [
+                "add_float16_capability_for_storage16",
+                "strict passthrough blocks shader compatibility rewrites",
+            ],
+            "PDOCKER_GPU_DISABLE_OVERLAP_ALIASING": [
+                "materialize_readonly_overlap_snapshots",
+                "strict passthrough blocks data compatibility materialization",
+            ],
+            "PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION": [
+                "disable_pipeline_optimization",
+                "strict passthrough blocks pipeline compatibility knobs",
+            ],
+            "PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC": [
+                "legalize_workgroup_size_from_spec",
+                "strict passthrough blocks shader compatibility rewrites",
+            ],
+            "PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS": [
+                "materialize_specialization_requested",
+                "strict passthrough blocks shader compatibility rewrites",
+            ],
+            "PDOCKER_GPU_Q4K_PIPELINE_RETRY_LADDER": [
+                "q4k_pipeline_retry_enabled",
+                "strict passthrough blocks shader compatibility rewrites",
+            ],
+            "PDOCKER_GPU_Q4K_SAFE_KERNEL": [
+                "q4k_safe_kernel_requested",
+                "strict passthrough blocks shader compatibility rewrites",
+            ],
+            "PDOCKER_GPU_Q6K_COMPAT_REWRITES": [
+                "q6k_compat_rewrites_requested",
+                "strict passthrough blocks shader compatibility rewrites",
+            ],
+            "PDOCKER_GPU_Q6K_ORACLE_WRITEBACK": [
+                "q6k_oracle_writeback",
+                "strict passthrough blocks CPU oracle writeback",
+            ],
+            "PDOCKER_GPU_Q6K_READONLY_OVERLAP_SNAPSHOT": [
+                "q6k_readonly_overlap_snapshot_requested",
+                "strict passthrough blocks data compatibility materialization",
+            ],
+            "PDOCKER_GPU_Q6K_SAFE_KERNEL": [
+                "q6k_safe_kernel_requested",
+                "strict passthrough blocks shader compatibility rewrites",
+            ],
+            "PDOCKER_GPU_STRICT_DUPLICATE_DESCRIPTOR_NORMALIZATION": [
+                "strict_duplicate_descriptor_normalization",
+                "strict passthrough blocks shader compatibility rewrites",
+            ],
+        }
+        self.assertLessEqual(set(direct_executor_forbidden_markers), strict_forbidden_envs)
+        self.assertIn("PDOCKER_GPU_Q4K_TARGETED_SPECIALIZATION", strict_forbidden_envs)
+        for env_name, markers in direct_executor_forbidden_markers.items():
+            self.assertIn(env_name, executor_source)
+            for marker in markers:
+                self.assertIn(marker, executor_source)
         next_steps = LLAMA_GPU_NEXT_STEPS.read_text()
         self.assertIn("q6_required_env_overlay", runner)
         self.assertIn("Static dispatch-option route guard", next_steps)
