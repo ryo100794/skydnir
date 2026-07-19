@@ -4525,7 +4525,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 VkDeviceMemory fake_memory = (VkDeviceMemory)(uintptr_t)0x1234u;
                 map_info.memory = fake_memory;
                 map_info.flags = 0;
-                mapped = NULL;
+                mapped = (void *)(uintptr_t)0x1234u;
                 if (map2(VK_NULL_HANDLE, &map_info, &mapped) == VK_SUCCESS || mapped != NULL) {{
                     fprintf(stderr, "vkMapMemory2KHR accepted fake memory handle\\n");
                     return 14;

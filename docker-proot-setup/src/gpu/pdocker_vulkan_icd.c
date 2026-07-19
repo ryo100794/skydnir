@@ -24711,6 +24711,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkMapMemory(
         void **ppData) {
     (void)device;
     (void)flags;
+    if (ppData) *ppData = NULL;
     if (!memory || !ppData) return VK_ERROR_MEMORY_MAP_FAILED;
     PdockerVkMemory *m = NULL;
     if (!memory_handle_resolve_for_device(device, memory, &m)) return VK_ERROR_MEMORY_MAP_FAILED;
@@ -24752,6 +24753,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkMapMemory2(
         VkDevice device,
         const VkMemoryMapInfo *pMemoryMapInfo,
         void **ppData) {
+    if (ppData) *ppData = NULL;
     if (!pMemoryMapInfo || pMemoryMapInfo->sType != VK_STRUCTURE_TYPE_MEMORY_MAP_INFO || !ppData) {
         return VK_ERROR_MEMORY_MAP_FAILED;
     }

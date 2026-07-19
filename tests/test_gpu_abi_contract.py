@@ -13237,6 +13237,7 @@ class GpuAbiContractTest(unittest.TestCase):
         free_memory_body = c_function_body(icd, "vkFreeMemory")
         self.assertIn("memory_handle_lookup_for_device(device, memory)", free_memory_body)
         self.assertIn("m = memory_unregister_object(m);", free_memory_body)
+        self.assertIn("if (ppData) *ppData = NULL;", map_body)
         self.assertIn("if (size != VK_WHOLE_SIZE)", map_body)
         self.assertIn("memory_handle_resolve_for_device(device, memory, &m)", map_body)
         self.assertIn("size > (VkDeviceSize)m->size - offset", map_body)
@@ -13358,6 +13359,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "VKAPI_ATTR VkResult VKAPI_CALL vkUnmapMemory2", 1
         )[0]
         for marker in [
+            "if (ppData) *ppData = NULL;",
             "pMemoryMapInfo->sType != VK_STRUCTURE_TYPE_MEMORY_MAP_INFO",
             'unsupported_create_info_pnext_result("vkMapMemory2", pMemoryMapInfo->pNext)',
             "pMemoryMapInfo->flags != 0",
