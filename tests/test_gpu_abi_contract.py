@@ -8653,6 +8653,10 @@ class GpuAbiContractTest(unittest.TestCase):
             sender,
         )
         self.assertIn("api_buffer_usages[binding_count] = (uint64_t)transport_buffer_usage;", sender)
+        self.assertIn("api_buffer_usages[binding_count] =\n            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |", sender)
+        self.assertIn("descriptor_hash = fnv1a64_update_u64(descriptor_hash, api_buffer_usages[i]);", sender)
+        self.assertIn("api_buffer_usage", c_function_body(icd, "trace_vulkan_reconcile_evidence"))
+        self.assertIn("api_buffer_usages,\n                                    api_descriptor_types", sender)
         self.assertIn("api_buffer_usages,\n            api_descriptor_types", sender)
 
         frame_sender = c_function_body(icd, "send_generic_vulkan_dispatch_v5_1_op")
@@ -8669,6 +8673,8 @@ class GpuAbiContractTest(unittest.TestCase):
 
         materializer = c_function_body(executor, "materialize_vulkan_dispatch_v5_native_plan_bindings")
         self.assertIn("binding->api_buffer_usage = buffer->usage;", materializer)
+        reconcile_hash = c_function_body(executor, "reconcile_descriptor_hash")
+        self.assertIn("u64 = bindings[i].api_buffer_usage;", reconcile_hash)
 
         graph = c_function_body(executor, "create_strict_vulkan_object_graph")
         self.assertIn("buffers[buffer_index].usage = (VkBufferUsageFlags)bindings[i].api_buffer_usage;", graph)
@@ -24808,6 +24814,7 @@ class GpuAbiContractTest(unittest.TestCase):
                     "api_executor_reconciliation": {
                         "summary": "diagnostic",
                         "proof_strength": "diagnostic",
+                        "hash_algorithm": "sha256",
                         "dispatches": [
                             {
                                 "dispatch_id": "1",
@@ -24897,6 +24904,7 @@ class GpuAbiContractTest(unittest.TestCase):
                     "api_executor_reconciliation": {
                         "summary": "diagnostic",
                         "proof_strength": "diagnostic",
+                        "hash_algorithm": "sha256",
                         "dispatches": [
                             {
                                 "dispatch_id": "1",
@@ -25702,6 +25710,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("strict transport match is missing sender/received hash values", verifier)
         self.assertIn("strict transport sender/received hash mismatch", verifier)
         self.assertIn("transport truncation evidence is not explicitly clear", verifier)
+        self.assertIn("strict transport diagnostic match is non-promoting", verifier)
+        self.assertIn("strict_transport_promoting", verifier)
         self.assertIn("rerun with strict API/executor reconciliation proving SPIR-V", verifier)
 
         compare = LLAMA_COMPARE.read_text()

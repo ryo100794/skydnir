@@ -2307,6 +2307,18 @@ def _api_executor_reconciliation(data: dict[str, Any]) -> dict[str, Any]:
         )
 
     strict_transport_match = reconciliation_has_strict_transport_match(reconciliation)
+    strict_transport_promoting = strict_transport_match and reconciliation_has_promoting_proof(reconciliation)
+    if strict_transport_match and not strict_transport_promoting:
+        add_ambiguous(
+            "gpu.diagnostics.api_executor_reconciliation",
+            "strict transport diagnostic match is non-promoting; promoting reconciliation requires SHA-256/full proof or canonical raw fields",
+            {
+                "summary": raw_summary,
+                "proof_strength": reconciliation.get("proof_strength"),
+                "hash_algorithm": reconciliation.get("hash_algorithm"),
+                "canonical_raw_fields_present": reconciliation.get("canonical_raw_fields_present"),
+            },
+        )
 
     if summary in {"ambiguous", "inconclusive", "duplicate", "unmatched"}:
         add_ambiguous("gpu.diagnostics.api_executor_reconciliation.summary", "ambiguous summary", raw_summary)
@@ -2317,7 +2329,7 @@ def _api_executor_reconciliation(data: dict[str, Any]) -> dict[str, Any]:
         result_summary = "ambiguous"
     elif mismatches:
         result_summary = "mismatch"
-    elif summary == "pass" or strict_transport_match:
+    elif summary == "pass" or strict_transport_promoting:
         result_summary = "pass"
     else:
         result_summary = "ambiguous"

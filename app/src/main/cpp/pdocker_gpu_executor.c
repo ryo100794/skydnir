@@ -7269,6 +7269,8 @@ static uint64_t reconcile_descriptor_hash(
         hash = fnv1a64_update(hash, &u64, sizeof(u64));
         u64 = (uint64_t)bindings[i].api_buffer_size;
         hash = fnv1a64_update(hash, &u64, sizeof(u64));
+        u64 = bindings[i].api_buffer_usage;
+        hash = fnv1a64_update(hash, &u64, sizeof(u64));
         u32 = bindings[i].api_descriptor_type;
         hash = fnv1a64_update(hash, &u32, sizeof(u32));
         u32 = (uint32_t)bindings[i].api_dynamic;

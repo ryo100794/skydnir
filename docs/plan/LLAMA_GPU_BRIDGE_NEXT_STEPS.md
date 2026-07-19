@@ -9,6 +9,31 @@ llama.cpp itself remains unmodified.
 
 ## Current Ground Truth
 
+### 2026-07-19 CPU/static V5 buffer-usage evidence lane
+
+V5 compute dispatch reconciliation now includes API buffer usage in the sender
+descriptor hash, executor descriptor hash, and sender-side JSON evidence.  The
+SPIR-V probe synthetic SSBO also records an explicit storage/transfer buffer
+usage mask before the V5 frame is built, so strict V5 probe dispatches no
+longer fail the usage-widening gate because of a zero-initialized synthetic
+usage field.
+
+This is generic Vulkan pass-through hardening. It does not change llama.cpp,
+Dockerfiles, models, prompts, shader bytes, or executor arithmetic.
+
+### 2026-07-19 CPU/static reconciliation proof-strength lane
+
+The artifact verifier no longer promotes strict-transport reconciliation based
+only on diagnostic FNV-1a hash equality.  A diagnostic `summary` with
+`proof_strength=diagnostic` and `hash_algorithm=fnv1a64` remains useful
+evidence, but it is classified as ambiguous until the artifact also carries
+SHA-256/full proof or canonical raw-field evidence.  This prevents sampled
+transport diagnostics from being mistaken for a pass-through correctness proof.
+
+This is CPU/static verifier hardening. It does not change llama.cpp,
+Dockerfiles, models, prompts, shader bytes, runtime env defaults, or executor
+arithmetic.
+
 ### 2026-07-19 CPU/static V5 default transport lane
 
 Vulkan compute dispatch now treats the V5 framed transport as the default path.

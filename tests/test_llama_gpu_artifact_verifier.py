@@ -946,8 +946,20 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         self.assertEqual(unclear_report["classification"], "api-executor-reconciliation-mismatch")
         self.assertIn("not explicitly clear", json.dumps(unclear_report["api_executor_reconciliation"]["mismatches"]))
 
-    def test_completion_wrong_output_accepts_strict_transport_match_reconciliation(self):
+    def test_completion_wrong_output_rejects_diagnostic_strict_transport_match_reconciliation(self):
         payload = wrong_completion_payload(strict_transport_reconciliation())
+        result = self.run_verifier(payload)
+        self.assertEqual(result.returncode, 45, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["api_executor_reconciliation"]["summary"], "ambiguous")
+        self.assertEqual(report["classification"], "api-executor-reconciliation-ambiguous")
+        self.assertIn("non-promoting", json.dumps(report["api_executor_reconciliation"]["ambiguous"]))
+        self.assert_claims_blocked(report)
+
+    def test_completion_wrong_output_accepts_sha256_strict_transport_match_reconciliation(self):
+        payload = wrong_completion_payload(
+            strict_transport_reconciliation(hash_algorithm="sha256")
+        )
         result = self.run_verifier(payload)
         self.assertNotEqual(result.returncode, 45, result.stdout)
         report = json.loads(result.stdout)

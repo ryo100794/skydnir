@@ -8098,6 +8098,7 @@ static void trace_vulkan_reconcile_evidence(
         const VkDeviceSize *api_offsets,
         const VkDeviceSize *api_ranges,
         const size_t *api_buffer_sizes,
+        const uint64_t *api_buffer_usages,
         const uint32_t *api_descriptor_types,
         const uint32_t *api_dynamic_flags,
         const VkDeviceSize *api_dynamic_offsets,
@@ -8145,7 +8146,7 @@ static void trace_vulkan_reconcile_evidence(
         fprintf(stderr,
                 "%s{\"set\":%u,\"binding\":%u,\"array\":%u,\"offset\":%llu,\"size\":%zu,"
                 "\"api_offset\":%llu,\"api_range\":%llu,"
-                "\"api_buffer_size\":%zu,\"api_descriptor_type\":%u,"
+                "\"api_buffer_size\":%zu,\"api_buffer_usage\":%llu,\"api_descriptor_type\":%u,"
                 "\"api_dynamic\":%u,\"api_dynamic_offset\":%llu,\"api_memory_offset\":%llu,"
                 "\"api_memory_size\":%zu,\"api_memory_property_flags\":%llu,"
                 "\"api_memory_id\":%llu,\"api_buffer_id\":%llu}",
@@ -8158,6 +8159,7 @@ static void trace_vulkan_reconcile_evidence(
                 (unsigned long long)api_offsets[i],
                 (unsigned long long)api_ranges[i],
                 api_buffer_sizes[i],
+                (unsigned long long)api_buffer_usages[i],
                 api_descriptor_types[i],
                 api_dynamic_flags[i],
                 (unsigned long long)api_dynamic_offsets[i],
@@ -16735,6 +16737,10 @@ static int send_generic_vulkan_dispatch_op(
         api_offsets[binding_count] = 0;
         api_ranges[binding_count] = probe.debug_bytes;
         api_buffer_sizes[binding_count] = probe.debug_bytes;
+        api_buffer_usages[binding_count] =
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+            VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+            VK_BUFFER_USAGE_TRANSFER_DST_BIT;
         api_descriptor_types[binding_count] = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         api_dynamic_flags[binding_count] = 0;
         api_dynamic_offsets[binding_count] = 0;
@@ -16852,6 +16858,7 @@ static int send_generic_vulkan_dispatch_op(
         descriptor_hash = fnv1a64_update_u64(descriptor_hash, (uint64_t)api_offsets[i]);
         descriptor_hash = fnv1a64_update_u64(descriptor_hash, (uint64_t)api_ranges[i]);
         descriptor_hash = fnv1a64_update_u64(descriptor_hash, (uint64_t)api_buffer_sizes[i]);
+        descriptor_hash = fnv1a64_update_u64(descriptor_hash, api_buffer_usages[i]);
         descriptor_hash = fnv1a64_update_u32(descriptor_hash, api_descriptor_types[i]);
         descriptor_hash = fnv1a64_update_u32(descriptor_hash, api_dynamic_flags[i]);
         descriptor_hash = fnv1a64_update_u64(descriptor_hash, (uint64_t)api_memory_offsets[i]);
@@ -17013,6 +17020,7 @@ static int send_generic_vulkan_dispatch_op(
                                     api_offsets,
                                     api_ranges,
                                     api_buffer_sizes,
+                                    api_buffer_usages,
                                     api_descriptor_types,
                                     api_dynamic_flags,
                                     api_dynamic_offsets,
