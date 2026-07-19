@@ -22079,7 +22079,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumeratePhysicalDeviceGroups(
 VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceProperties(
         VkPhysicalDevice physicalDevice,
         VkPhysicalDeviceProperties *pProperties) {
-    (void)physicalDevice;
+    if (!pProperties) return;
+    memset(pProperties, 0, sizeof(*pProperties));
+    if (!physical_device_handle_resolve(physicalDevice, NULL)) return;
     fill_physical_device_properties(pProperties);
 }
 
@@ -22089,7 +22091,8 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceProperties2(
     if (!pProperties) return;
     PdockerVkStructHeader header = read_vk_struct_header(pProperties);
     zero_vk_out_struct_preserve_chain(pProperties, sizeof(*pProperties), header);
-    vkGetPhysicalDeviceProperties(physicalDevice, &pProperties->properties);
+    if (!physical_device_handle_resolve(physicalDevice, NULL)) return;
+    fill_physical_device_properties(&pProperties->properties);
     fill_pnext_properties(pProperties->pNext);
 }
 
@@ -22146,7 +22149,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceToolPropertiesEXT(
 VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceFeatures(
         VkPhysicalDevice physicalDevice,
         VkPhysicalDeviceFeatures *pFeatures) {
-    (void)physicalDevice;
+    if (!pFeatures) return;
+    memset(pFeatures, 0, sizeof(*pFeatures));
+    if (!physical_device_handle_resolve(physicalDevice, NULL)) return;
     fill_physical_device_features(pFeatures);
 }
 
@@ -22154,9 +22159,9 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceFeatures2(
         VkPhysicalDevice physicalDevice,
         VkPhysicalDeviceFeatures2 *pFeatures) {
     if (!pFeatures) return;
-    (void)physicalDevice;
     PdockerVkStructHeader header = read_vk_struct_header(pFeatures);
     zero_vk_out_struct_preserve_chain(pFeatures, sizeof(*pFeatures), header);
+    if (!physical_device_handle_resolve(physicalDevice, NULL)) return;
     fill_physical_device_features(&pFeatures->features);
     fill_pnext_features(pFeatures->pNext);
 }
@@ -22165,9 +22170,9 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceFormatProperties(
         VkPhysicalDevice physicalDevice,
         VkFormat format,
         VkFormatProperties *pFormatProperties) {
-    (void)physicalDevice;
     if (!pFormatProperties) return;
     memset(pFormatProperties, 0, sizeof(*pFormatProperties));
+    if (!physical_device_handle_resolve(physicalDevice, NULL)) return;
     if (!pdocker_vk_format_bridge_supported(format)) return;
     pFormatProperties->bufferFeatures = pdocker_vk_format_buffer_features(format);
     pFormatProperties->linearTilingFeatures = 0;
@@ -22219,6 +22224,10 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceFormatProperties2(
     if (!pFormatProperties) return;
     PdockerVkStructHeader header = read_vk_struct_header(pFormatProperties);
     zero_vk_out_struct_preserve_chain(pFormatProperties, sizeof(*pFormatProperties), header);
+    if (!physical_device_handle_resolve(physicalDevice, NULL)) {
+        fill_format_properties2_pnext((void *)header.pNext, NULL);
+        return;
+    }
     vkGetPhysicalDeviceFormatProperties(physicalDevice, format, &pFormatProperties->formatProperties);
     fill_format_properties2_pnext((void *)header.pNext, &pFormatProperties->formatProperties);
 }
@@ -22481,8 +22490,13 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceQueueFamilyProperties(
         VkPhysicalDevice physicalDevice,
         uint32_t *pQueueFamilyPropertyCount,
         VkQueueFamilyProperties *pQueueFamilyProperties) {
-    (void)physicalDevice;
     if (!pQueueFamilyPropertyCount) return;
+    if (!physical_device_handle_resolve(physicalDevice, NULL)) {
+        uint32_t capacity = pQueueFamilyProperties ? *pQueueFamilyPropertyCount : 0;
+        if (pQueueFamilyProperties && capacity > 0) memset(pQueueFamilyProperties, 0, sizeof(*pQueueFamilyProperties) * capacity);
+        *pQueueFamilyPropertyCount = 0;
+        return;
+    }
     if (!pQueueFamilyProperties) {
         *pQueueFamilyPropertyCount = 1;
         return;
@@ -22549,8 +22563,19 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceQueueFamilyProperties2(
         VkPhysicalDevice physicalDevice,
         uint32_t *pQueueFamilyPropertyCount,
         VkQueueFamilyProperties2 *pQueueFamilyProperties) {
-    (void)physicalDevice;
     if (!pQueueFamilyPropertyCount) return;
+    if (!physical_device_handle_resolve(physicalDevice, NULL)) {
+        uint32_t capacity = pQueueFamilyProperties ? *pQueueFamilyPropertyCount : 0;
+        if (pQueueFamilyProperties && capacity > 0) {
+            for (uint32_t i = 0; i < capacity; ++i) {
+                PdockerVkStructHeader header = read_vk_struct_header(&pQueueFamilyProperties[i]);
+                zero_vk_out_struct_preserve_chain(&pQueueFamilyProperties[i], sizeof(pQueueFamilyProperties[i]), header);
+                fill_queue_family_properties2_pnext((void *)header.pNext);
+            }
+        }
+        *pQueueFamilyPropertyCount = 0;
+        return;
+    }
     if (!pQueueFamilyProperties) {
         *pQueueFamilyPropertyCount = 1;
         return;
@@ -22572,9 +22597,9 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceQueueFamilyProperties2(
 VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceMemoryProperties(
         VkPhysicalDevice physicalDevice,
         VkPhysicalDeviceMemoryProperties *pMemoryProperties) {
-    (void)physicalDevice;
     if (!pMemoryProperties) return;
     memset(pMemoryProperties, 0, sizeof(*pMemoryProperties));
+    if (!physical_device_handle_resolve(physicalDevice, NULL)) return;
     pMemoryProperties->memoryTypeCount = 2;
     pMemoryProperties->memoryTypes[0].propertyFlags =
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
@@ -22626,6 +22651,10 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceMemoryProperties2(
     PdockerVkStructHeader header = read_vk_struct_header(pMemoryProperties);
     void *pnext = (void *)header.pNext;
     zero_vk_out_struct_preserve_chain(pMemoryProperties, sizeof(*pMemoryProperties), header);
+    if (!physical_device_handle_resolve(physicalDevice, NULL)) {
+        fill_memory_properties2_pnext(pnext, NULL);
+        return;
+    }
     vkGetPhysicalDeviceMemoryProperties(physicalDevice, &pMemoryProperties->memoryProperties);
     fill_memory_properties2_pnext(pnext, &pMemoryProperties->memoryProperties);
 }

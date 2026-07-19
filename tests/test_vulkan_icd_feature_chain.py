@@ -171,7 +171,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 properties2.pNext = &point_clipping;
                 point_clipping.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_POINT_CLIPPING_PROPERTIES;
                 point_clipping.pNext = NULL;
-                vkGetPhysicalDeviceProperties2(VK_NULL_HANDLE, &properties2);
+                vkGetPhysicalDeviceProperties2((VkPhysicalDevice)physical_device_for_instance(NULL), &properties2);
                 if (point_clipping.pNext != NULL) return 6;
                 if (point_clipping.pointClippingBehavior != VK_POINT_CLIPPING_BEHAVIOR_ALL_CLIP_PLANES) return 7;
 
@@ -247,7 +247,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
                 features2.pNext = &feedback_features;
                 feedback_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBPASS_MERGE_FEEDBACK_FEATURES_EXT;
-                vkGetPhysicalDeviceFeatures2(VK_NULL_HANDLE, &features2);
+                vkGetPhysicalDeviceFeatures2((VkPhysicalDevice)physical_device_for_instance(NULL), &features2);
                 if (feedback_features.subpassMergeFeedback != VK_TRUE) return 5;
 
                 const char *enabled[] = {{ VK_EXT_SUBPASS_MERGE_FEEDBACK_EXTENSION_NAME }};
@@ -315,7 +315,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 properties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
                 properties2.pNext = &maintenance3;
                 maintenance3.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_3_PROPERTIES;
-                vkGetPhysicalDeviceProperties2((VkPhysicalDevice)(uintptr_t)0x1u, &properties2);
+                vkGetPhysicalDeviceProperties2((VkPhysicalDevice)physical_device_for_instance(NULL), &properties2);
                 if (maintenance3.maxPerSetDescriptors == 0) return 8;
                 if (maintenance3.maxMemoryAllocationSize == 0) return 9;
 
@@ -415,7 +415,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 properties2.pNext = &maintenance5_props;
                 maintenance5_props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_5_PROPERTIES;
                 maintenance5_props.pNext = NULL;
-                vkGetPhysicalDeviceProperties2(VK_NULL_HANDLE, &properties2);
+                vkGetPhysicalDeviceProperties2((VkPhysicalDevice)physical_device_for_instance(NULL), &properties2);
                 if (maintenance5_props.sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_5_PROPERTIES ||
                     maintenance5_props.pNext != NULL ||
                     maintenance5_props.earlyFragmentMultisampleCoverageAfterSampleCounting != VK_FALSE ||
@@ -2576,7 +2576,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 properties2.pNext = &driver;
                 driver.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
                 driver.pNext = NULL;
-                vkGetPhysicalDeviceProperties2(VK_NULL_HANDLE, &properties2);
+                vkGetPhysicalDeviceProperties2((VkPhysicalDevice)physical_device_for_instance(NULL), &properties2);
                 if (driver.sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES ||
                     driver.pNext != NULL) return 7;
                 if (strstr(driver.driverName, "skydnir-vulkan-bridge") == NULL) {{
@@ -2640,7 +2640,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 memory2.pNext = &budget;
                 budget.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT;
                 budget.pNext = NULL;
-                vkGetPhysicalDeviceMemoryProperties2(VK_NULL_HANDLE, &memory2);
+                vkGetPhysicalDeviceMemoryProperties2((VkPhysicalDevice)physical_device_for_instance(NULL), &memory2);
                 if (budget.sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT ||
                     budget.pNext != NULL) return 7;
                 if (memory2.memoryProperties.memoryHeapCount < 2) return 8;
@@ -2670,7 +2670,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 memory2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2;
                 memory2.pNext = &budget;
                 budget.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT;
-                vkGetPhysicalDeviceMemoryProperties2(VK_NULL_HANDLE, &memory2);
+                vkGetPhysicalDeviceMemoryProperties2((VkPhysicalDevice)physical_device_for_instance(NULL), &memory2);
                 if (budget.heapUsage[0] != initial_heap0) return 11;
                 if (budget.heapUsage[1] != initial_heap1 + alloc_info.allocationSize) {{
                     fprintf(stderr, "heap 1 usage %llu != expected %llu\\n",
@@ -2685,7 +2685,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 memory2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2;
                 memory2.pNext = &budget;
                 budget.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT;
-                vkGetPhysicalDeviceMemoryProperties2(VK_NULL_HANDLE, &memory2);
+                vkGetPhysicalDeviceMemoryProperties2((VkPhysicalDevice)physical_device_for_instance(NULL), &memory2);
                 if (budget.heapUsage[0] != initial_heap0) return 13;
                 if (budget.heapUsage[1] != initial_heap1) return 14;
                 return 0;
@@ -4603,7 +4603,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 pipeline.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_ROBUSTNESS_PROPERTIES;
                 pipeline.pNext = NULL;
 
-                vkGetPhysicalDeviceProperties2(VK_NULL_HANDLE, &properties2);
+                vkGetPhysicalDeviceProperties2((VkPhysicalDevice)physical_device_for_instance(NULL), &properties2);
                 if (robustness2.pNext != &pipeline || pipeline.pNext != NULL) {{
                     fprintf(stderr, "robustness properties pNext chain was not preserved\\n");
                     return 2;
@@ -6773,7 +6773,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
             static int expect_image_format_rejected(VkFormat format, int code) {{
                 VkFormatProperties format_props;
                 memset(&format_props, 0xff, sizeof(format_props));
-                vkGetPhysicalDeviceFormatProperties(VK_NULL_HANDLE, format, &format_props);
+                vkGetPhysicalDeviceFormatProperties((VkPhysicalDevice)physical_device_for_instance(NULL), format, &format_props);
                 if (format_props.bufferFeatures != 0 ||
                     format_props.linearTilingFeatures != 0 ||
                     format_props.optimalTilingFeatures != 0) {{
@@ -7042,7 +7042,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
 
                 VkPhysicalDeviceProperties device_props;
                 memset(&device_props, 0, sizeof(device_props));
-                vkGetPhysicalDeviceProperties(VK_NULL_HANDLE, &device_props);
+                vkGetPhysicalDeviceProperties((VkPhysicalDevice)physical_device_for_instance(NULL), &device_props);
 
                 int status = 0;
                 if (waitpid(server, &status, 0) != server || !WIFEXITED(status) ||
@@ -8532,6 +8532,61 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 if (buffer_handle_lookup(unowned_buffer)) return 39;
                 if (command_pool_handle_lookup(unowned_pool)) return 40;
                 if (fence_handle_lookup(unowned_fence)) return 41;
+                return 0;
+            }
+            """).replace("__ICD_SOURCE__", str(ICD_SOURCE))
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
+    def test_properties_and_features_reject_invalid_physical_device(self):
+        source = textwrap.dedent("""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "__ICD_SOURCE__"
+
+            int main(void) {
+                VkPhysicalDevice bad = (VkPhysicalDevice)(uintptr_t)0x12345678u;
+                VkPhysicalDeviceProperties props;
+                memset(&props, 0x7f, sizeof(props));
+                vkGetPhysicalDeviceProperties(VK_NULL_HANDLE, &props);
+                if (props.apiVersion != 0 || props.limits.maxImageDimension2D != 0) return 1;
+                memset(&props, 0x7f, sizeof(props));
+                vkGetPhysicalDeviceProperties(bad, &props);
+                if (props.apiVersion != 0 || props.limits.maxImageDimension2D != 0) return 2;
+
+                VkPhysicalDeviceFeatures features;
+                memset(&features, 0x7f, sizeof(features));
+                vkGetPhysicalDeviceFeatures(VK_NULL_HANDLE, &features);
+                if (features.robustBufferAccess != VK_FALSE || features.samplerAnisotropy != VK_FALSE) return 3;
+                memset(&features, 0x7f, sizeof(features));
+                vkGetPhysicalDeviceFeatures(bad, &features);
+                if (features.robustBufferAccess != VK_FALSE || features.samplerAnisotropy != VK_FALSE) return 4;
+
+                VkPhysicalDeviceMemoryProperties memory;
+                memset(&memory, 0x7f, sizeof(memory));
+                vkGetPhysicalDeviceMemoryProperties(VK_NULL_HANDLE, &memory);
+                if (memory.memoryTypeCount != 0 || memory.memoryHeapCount != 0) return 6;
+                memset(&memory, 0x7f, sizeof(memory));
+                vkGetPhysicalDeviceMemoryProperties(bad, &memory);
+                if (memory.memoryTypeCount != 0 || memory.memoryHeapCount != 0) return 7;
+
+                VkFormatProperties format_props;
+                memset(&format_props, 0x7f, sizeof(format_props));
+                vkGetPhysicalDeviceFormatProperties(VK_NULL_HANDLE, VK_FORMAT_R8G8B8A8_UNORM, &format_props);
+                if (format_props.bufferFeatures != 0 || format_props.optimalTilingFeatures != 0) return 8;
+
+                uint32_t q_count = 2;
+                VkQueueFamilyProperties q_props[2];
+                memset(q_props, 0x7f, sizeof(q_props));
+                vkGetPhysicalDeviceQueueFamilyProperties(VK_NULL_HANDLE, &q_count, q_props);
+                if (q_count != 0 || q_props[0].queueFlags != 0 || q_props[1].queueFlags != 0) return 9;
+
+                VkPhysicalDevice physical = (VkPhysicalDevice)physical_device_for_instance(NULL);
+                memset(&props, 0, sizeof(props));
+                vkGetPhysicalDeviceProperties(physical, &props);
+                if (props.apiVersion == 0 || props.limits.maxImageDimension2D == 0) return 5;
                 return 0;
             }
             """).replace("__ICD_SOURCE__", str(ICD_SOURCE))
