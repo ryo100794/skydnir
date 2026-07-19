@@ -9,6 +9,26 @@ llama.cpp itself remains unmodified.
 
 ## Current Ground Truth
 
+### 2026-07-19 CPU/static strict render-pass normalization fail-close lane
+
+Strict graphics pass-through now records whether a graphics pipeline was created
+from a classic `VkRenderPass` and then normalized into dynamic-rendering metadata
+inside the ICD.  Non-strict replay keeps that compatibility normalization, but
+`PDOCKER_GPU_STRICT_PASSTHROUGH=1` fails before frame serialization when such a
+pipeline would cross the bridge.  This prevents strict evidence from claiming a
+true render-pass pass-through while the replay path is still using synthesized
+dynamic-rendering state.
+
+This does not implement full render-pass object replay yet.  The remaining
+generic Vulkan gap is to transport and replay render-pass/subpass state itself,
+including input attachments, preserve attachments, local-read remapping, and
+nontrivial dependency topology.  Until that ABI exists, strict mode must reject
+normalization rather than hide it.
+
+This is generic Vulkan pass-through hardening. It does not change llama.cpp,
+Dockerfiles, models, prompts, shader bytes, runtime defaults, or executor
+arithmetic.
+
 ### 2026-07-19 CPU/static generic descriptor-set-layout create-flag transport lane
 
 Vulkan descriptor-set-layout create flags now have append-only transport lanes

@@ -3549,6 +3549,32 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, pipeline_body)
 
+    def test_vulkan_graphics_strict_rejects_render_pass_pipeline_normalization(self):
+        icd = VULKAN_ICD.read_text()
+        pipeline_struct = icd.split("struct PdockerVkPipeline {", 1)[1].split("};", 1)[0]
+        self.assertIn("bool render_pass_normalized_to_dynamic_rendering;", pipeline_struct)
+        pipeline_body = icd.split(
+            "VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines", 1
+        )[1].split("VKAPI_ATTR void VKAPI_CALL vkDestroyPipeline", 1)[0]
+        self.assertIn("pipeline->render_pass_normalized_to_dynamic_rendering = true;", pipeline_body)
+        self.assertLess(
+            pipeline_body.index("pipeline->render_pass_normalized_to_dynamic_rendering = true;"),
+            pipeline_body.index("pipeline->dynamic_rendering_view_mask = subpass->view_mask;"),
+        )
+        sender_body = c_function_body(icd, "send_recorded_vulkan_graphics_v6_1_frame_range")
+        self.assertIn(
+            "strict_passthrough && pipeline->render_pass_normalized_to_dynamic_rendering",
+            sender_body,
+        )
+        self.assertIn(
+            "V6 strict frame rejected: render pass normalization required",
+            sender_body,
+        )
+        self.assertLess(
+            sender_body.index("strict_passthrough && pipeline->render_pass_normalized_to_dynamic_rendering"),
+            sender_body.index("PdockerGpuVulkanGraphicsV6PipelineEntry *pipeline_entry"),
+        )
+
     def test_vulkan_graphics_pipeline_unsupported_metadata_is_fail_closed(self):
         icd = VULKAN_ICD.read_text()
         pipeline_body = icd.split(
@@ -5313,6 +5339,31 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("need_v67_viewport_scissor_state", icd)
         self.assertIn("VULKAN_GRAPHICS_V6.7", icd)
         self.assertIn("viewport_scissor_state_table_hash", icd)
+        for marker in [
+            "dst->viewport_index = v;",
+            "dst->x_bits = float_bits_u32(src->x);",
+            "dst->y_bits = float_bits_u32(src->y);",
+            "dst->width_bits = float_bits_u32(src->width);",
+            "dst->height_bits = float_bits_u32(src->height);",
+            "dst->min_depth_bits = float_bits_u32(src->minDepth);",
+            "dst->max_depth_bits = float_bits_u32(src->maxDepth);",
+            "dst->offset_x = src->offset.x;",
+            "dst->offset_y = src->offset.y;",
+            "dst->extent_width = src->extent.width;",
+            "dst->extent_height = src->extent.height;",
+        ]:
+            self.assertIn(marker, icd)
+        for marker in [
+            ".x = float_from_u32_bits(src_viewport->x_bits)",
+            ".y = float_from_u32_bits(src_viewport->y_bits)",
+            ".width = float_from_u32_bits(src_viewport->width_bits)",
+            ".height = float_from_u32_bits(src_viewport->height_bits)",
+            ".minDepth = float_from_u32_bits(src_viewport->min_depth_bits)",
+            ".maxDepth = float_from_u32_bits(src_viewport->max_depth_bits)",
+            ".offset = { src_scissor->offset_x, src_scissor->offset_y }",
+            ".extent = { src_scissor->extent_width, src_scissor->extent_height }",
+        ]:
+            self.assertIn(marker, executor)
 
     def test_vulkan_graphics_v610_image_copy_metadata_is_append_only(self):
         abi = APP_HEADER.read_text()
@@ -8296,6 +8347,12 @@ class GpuAbiContractTest(unittest.TestCase):
             "VkDescriptorSetLayoutBindingFlagsCreateInfo binding_flags_ci",
             ".pNext = has_binding_flags ? &binding_flags_ci : NULL",
             "vulkan_graphics_descriptor_binding_flags_enabled(rt, src_binding->binding_flags, src_binding->descriptor_type)",
+            "binding->descriptor_type = descriptor_type;",
+            "binding->descriptor_count = entry->descriptor_count;",
+            "binding->stage_flags = (VkShaderStageFlags)entry->stage_flags;",
+            ".descriptorType = src_binding->descriptor_type",
+            ".descriptorCount = src_binding->descriptor_count",
+            ".stageFlags = src_binding->stage_flags ? src_binding->stage_flags : VK_SHADER_STAGE_ALL_GRAPHICS",
         ]:
             self.assertIn(marker, executor)
         v624_validation_body = executor.split("if (is_v624) {", 1)[1].split(
@@ -8310,6 +8367,12 @@ class GpuAbiContractTest(unittest.TestCase):
         collect_v624_body = c_function_body(icd, "collect_graphics_v624_descriptor_set_layout_metadata")
         self.assertNotIn("PDOCKER_GPU_VULKAN_GRAPHICS_V624_MAX_DESCRIPTOR_BINDINGS_PER_SET", collect_v624_body)
         self.assertNotIn("layout->storage_binding_count >", collect_v624_body)
+        for marker in [
+            "candidate.descriptor_type = (uint32_t)descriptor_type;",
+            "candidate.descriptor_count = descriptor_count;",
+            "candidate.stage_flags = layout->storage_binding_stage_flags[binding];",
+        ]:
+            self.assertIn(marker, collect_v624_body)
         for marker in [
             "uint64_t layout_id;",
             "bool *storage_binding_present",
@@ -11156,6 +11219,20 @@ class GpuAbiContractTest(unittest.TestCase):
             runtime_body.index("vulkan_sampler_scalar_fields_supported(src, &reason)"),
             runtime_body.index("switch ((VkSamplerReductionMode)src->reduction_mode)"),
         )
+
+        icd = VULKAN_ICD.read_text()
+        for marker in [
+            "sampler_entries[i].mag_filter = sampler->mag_filter;",
+            "sampler_entries[i].min_filter = sampler->min_filter;",
+            "sampler_entries[i].mipmap_mode = sampler->mipmap_mode;",
+            "sampler_entries[i].address_mode_u = sampler->address_mode_u;",
+            "sampler_entries[i].mip_lod_bias_bits = float_bits_u32(sampler->mip_lod_bias);",
+            "sampler_entries[i].max_anisotropy_bits = float_bits_u32(sampler->max_anisotropy);",
+            "sampler_entries[i].min_lod_bits = float_bits_u32(sampler->min_lod);",
+            "sampler_entries[i].max_lod_bits = float_bits_u32(sampler->max_lod);",
+            "sampler_entries[i].unnormalized_coordinates = sampler->unnormalized_coordinates;",
+        ]:
+            self.assertIn(marker, icd)
 
         materialize_body = c_function_body(executor, "materialize_vulkan_dispatch_images")
         gate = "vulkan_sampler_entry_supported_by_runtime(rt, src, &sampler_reason)"
@@ -17171,8 +17248,19 @@ class GpuAbiContractTest(unittest.TestCase):
             "enabled_features.alphaToOne",
             "PDOCKER_VK_FEATURE_SAMPLE_RATE_SHADING",
             "PDOCKER_VK_FEATURE_ALPHA_TO_ONE",
+            "msci.minSampleShading = float_from_u32_bits(multisample_state->min_sample_shading_bits);",
+            "sample_mask_words[0] = multisample_state->sample_mask0;",
+            "msci.pSampleMask = sample_mask_words;",
         ]:
             self.assertIn(marker, executor)
+        for marker in [
+            "ms->min_sample_shading_bits = float_bits_u32(pipeline->min_sample_shading);",
+            "ms->sample_mask_word_count = pipeline->sample_mask_word_count;",
+            "ms->sample_mask0 = pipeline->sample_mask_word_count > 0 ? pipeline->sample_mask_words[0] : 0;",
+            "multisample_flags |= PDOCKER_GPU_GRAPHICS_V622_MULTISAMPLE_ALPHA_TO_COVERAGE_ENABLE;",
+            "multisample_flags |= PDOCKER_GPU_GRAPHICS_V622_MULTISAMPLE_ALPHA_TO_ONE_ENABLE;",
+        ]:
+            self.assertIn(marker, icd)
 
 
     def test_vulkan_graphics_msaa_source_store_is_fail_closed_until_msaa_readback_abi(self):
@@ -17460,8 +17548,11 @@ class GpuAbiContractTest(unittest.TestCase):
             "tessellation draw requires patch-list primitive topology",
             "tessellation indexed draw requires patch-list primitive topology",
             "tessellation patch control points exceed Android Vulkan device limit",
+            "tsci.patchControlPoints = tessellation_state->patch_control_points;",
         ]:
             self.assertIn(marker, executor)
+        self.assertIn("ts->patch_control_points = pipeline->patch_control_points;", icd)
+        self.assertNotIn("tsci.patchControlPoints = 3", executor)
 
     def test_vulkan_graphics_v623_runtime_checks_are_after_runtime_init(self):
         executor = GPU_EXECUTOR.read_text()

@@ -1069,6 +1069,7 @@ struct PdockerVkPipeline {
     bool viewport_state_overflow;
     bool scissor_state_overflow;
     bool dynamic_rendering_pipeline;
+    bool render_pass_normalized_to_dynamic_rendering;
     bool dynamic_rendering_format_overflow;
     uint32_t dynamic_rendering_view_mask;
     uint32_t dynamic_rendering_color_attachment_count;
@@ -11073,6 +11074,8 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     size_t descriptor_set_layout_flag_count = 0;
     size_t buffer_view_count = 0;
     uint64_t submit_id = __sync_add_and_fetch(&g_generic_dispatch_sequence, 1);
+    const bool strict_passthrough =
+        env_truthy_default("PDOCKER_GPU_STRICT_PASSTHROUGH", false);
     int rc = 0;
 #define ENSURE_GRAPHICS_V616_CLEAR_TABLES() \
     do { \
@@ -11147,6 +11150,13 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
             goto cleanup;
         }
         PdockerVkPipeline *pipeline = record->pipeline;
+        if (strict_passthrough && pipeline->render_pass_normalized_to_dynamic_rendering) {
+            fprintf(stderr,
+                    "pdocker-vulkan-icd: V6 strict frame rejected: render pass normalization required pipeline_id=%llu\n",
+                    (unsigned long long)pdocker_vk_pipeline_object_id(pipeline));
+            rc = -EOPNOTSUPP;
+            goto cleanup;
+        }
         if (pipeline->graphics_unsupported ||
             pipeline->dynamic_rendering_format_overflow ||
             pipeline->shader_stage_count > PDOCKER_VK_MAX_GRAPHICS_SHADER_STAGES ||
@@ -29028,6 +29038,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
             } else {
                 const PdockerVkSubpassState *subpass = &rp->subpasses[ci->subpass];
                 pipeline->dynamic_rendering_pipeline = true;
+                pipeline->render_pass_normalized_to_dynamic_rendering = true;
                 pipeline->dynamic_rendering_view_mask = subpass->view_mask;
                 pipeline->dynamic_rendering_color_attachment_count = subpass->color_attachment_count;
                 for (uint32_t c = 0; c < subpass->color_attachment_count; ++c) {
