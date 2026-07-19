@@ -8450,6 +8450,126 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
+    def test_device_scoped_creators_reject_invalid_non_null_device(self):
+        source = textwrap.dedent("""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "__ICD_SOURCE__"
+
+            int main(void) {
+                VkDevice bad = (VkDevice)(uintptr_t)0x12345678u;
+
+                VkBufferCreateInfo buffer_info;
+                memset(&buffer_info, 0, sizeof(buffer_info));
+                buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+                buffer_info.size = 256;
+                buffer_info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+                buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+                VkBuffer buffer = (VkBuffer)(uintptr_t)0x1u;
+                if (vkCreateBuffer(bad, &buffer_info, NULL, &buffer) != VK_ERROR_INITIALIZATION_FAILED) return 1;
+                if (buffer != VK_NULL_HANDLE) return 2;
+
+                VkMemoryAllocateInfo memory_info;
+                memset(&memory_info, 0, sizeof(memory_info));
+                memory_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+                memory_info.allocationSize = 4096;
+                memory_info.memoryTypeIndex = 0;
+                VkDeviceMemory memory = (VkDeviceMemory)(uintptr_t)0x2u;
+                if (vkAllocateMemory(bad, &memory_info, NULL, &memory) != VK_ERROR_INITIALIZATION_FAILED) return 3;
+                if (memory != VK_NULL_HANDLE) return 4;
+
+                VkDescriptorSetLayoutBinding binding;
+                memset(&binding, 0, sizeof(binding));
+                binding.binding = 0;
+                binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+                binding.descriptorCount = 1;
+                binding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+                VkDescriptorSetLayoutCreateInfo layout_info;
+                memset(&layout_info, 0, sizeof(layout_info));
+                layout_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+                layout_info.bindingCount = 1;
+                layout_info.pBindings = &binding;
+                VkDescriptorSetLayout set_layout = (VkDescriptorSetLayout)(uintptr_t)0x3u;
+                if (vkCreateDescriptorSetLayout(bad, &layout_info, NULL, &set_layout) != VK_ERROR_INITIALIZATION_FAILED) return 5;
+                if (set_layout != VK_NULL_HANDLE) return 6;
+
+                VkDescriptorPoolSize pool_size;
+                memset(&pool_size, 0, sizeof(pool_size));
+                pool_size.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+                pool_size.descriptorCount = 1;
+                VkDescriptorPoolCreateInfo pool_info;
+                memset(&pool_info, 0, sizeof(pool_info));
+                pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+                pool_info.maxSets = 1;
+                pool_info.poolSizeCount = 1;
+                pool_info.pPoolSizes = &pool_size;
+                VkDescriptorPool pool = (VkDescriptorPool)(uintptr_t)0x4u;
+                if (vkCreateDescriptorPool(bad, &pool_info, NULL, &pool) != VK_ERROR_INITIALIZATION_FAILED) return 7;
+                if (pool != VK_NULL_HANDLE) return 8;
+
+                const uint32_t shader_words[] = {0x07230203u, 0x00010000u, 0u, 0u};
+                VkShaderModuleCreateInfo shader_info;
+                memset(&shader_info, 0, sizeof(shader_info));
+                shader_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+                shader_info.codeSize = sizeof(shader_words);
+                shader_info.pCode = shader_words;
+                VkShaderModule shader = (VkShaderModule)(uintptr_t)0x5u;
+                if (vkCreateShaderModule(bad, &shader_info, NULL, &shader) != VK_ERROR_INITIALIZATION_FAILED) return 9;
+                if (shader != VK_NULL_HANDLE) return 10;
+
+                VkCommandPoolCreateInfo cmd_pool_info;
+                memset(&cmd_pool_info, 0, sizeof(cmd_pool_info));
+                cmd_pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+                cmd_pool_info.queueFamilyIndex = 0;
+                VkCommandPool cmd_pool = (VkCommandPool)(uintptr_t)0x6u;
+                if (vkCreateCommandPool(bad, &cmd_pool_info, NULL, &cmd_pool) != VK_ERROR_INITIALIZATION_FAILED) return 11;
+                if (cmd_pool != VK_NULL_HANDLE) return 12;
+
+                VkFenceCreateInfo fence_info;
+                memset(&fence_info, 0, sizeof(fence_info));
+                fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+                VkFence fence = (VkFence)(uintptr_t)0x7u;
+                if (vkCreateFence(bad, &fence_info, NULL, &fence) != VK_ERROR_INITIALIZATION_FAILED) return 13;
+                if (fence != VK_NULL_HANDLE) return 14;
+
+                VkSemaphoreCreateInfo sem_info;
+                memset(&sem_info, 0, sizeof(sem_info));
+                sem_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+                VkSemaphore sem = (VkSemaphore)(uintptr_t)0x8u;
+                if (vkCreateSemaphore(bad, &sem_info, NULL, &sem) != VK_ERROR_INITIALIZATION_FAILED) return 15;
+                if (sem != VK_NULL_HANDLE) return 16;
+
+                VkEventCreateInfo event_info;
+                memset(&event_info, 0, sizeof(event_info));
+                event_info.sType = VK_STRUCTURE_TYPE_EVENT_CREATE_INFO;
+                VkEvent event = (VkEvent)(uintptr_t)0x9u;
+                if (vkCreateEvent(bad, &event_info, NULL, &event) != VK_ERROR_INITIALIZATION_FAILED) return 17;
+                if (event != VK_NULL_HANDLE) return 18;
+
+                VkQueryPoolCreateInfo query_info;
+                memset(&query_info, 0, sizeof(query_info));
+                query_info.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+                query_info.queryType = VK_QUERY_TYPE_TIMESTAMP;
+                query_info.queryCount = 1;
+                VkQueryPool query_pool = (VkQueryPool)(uintptr_t)0xau;
+                if (vkCreateQueryPool(bad, &query_info, NULL, &query_pool) != VK_ERROR_INITIALIZATION_FAILED) return 19;
+                if (query_pool != VK_NULL_HANDLE) return 20;
+
+                VkPipelineCacheCreateInfo cache_info;
+                memset(&cache_info, 0, sizeof(cache_info));
+                cache_info.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
+                VkPipelineCache cache = (VkPipelineCache)(uintptr_t)0xbu;
+                if (vkCreatePipelineCache(bad, &cache_info, NULL, &cache) != VK_ERROR_INITIALIZATION_FAILED) return 21;
+                if (cache != VK_NULL_HANDLE) return 22;
+
+                return 0;
+            }
+            """).replace("__ICD_SOURCE__", str(ICD_SOURCE))
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
     def test_device_queues_are_per_device_and_do_not_alias(self):
         source = textwrap.dedent("""
             #include <stdint.h>

@@ -2055,6 +2055,12 @@ static uint64_t device_owner_id_or_zero(VkDevice device) {
     return object_id;
 }
 
+static bool device_owner_id_or_zero_checked(VkDevice device, uint64_t *out_object_id) {
+    if (out_object_id) *out_object_id = 0;
+    if (device == VK_NULL_HANDLE) return true;
+    return device_handle_object_id(device, out_object_id);
+}
+
 static bool device_owner_matches_or_unowned(VkDevice device, uint64_t owner_device_id) {
     if (owner_device_id == 0) return true;
     uint64_t object_id = 0;
@@ -22774,6 +22780,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateBuffer(
         const VkAllocationCallbacks *pAllocator,
         VkBuffer *pBuffer) {
     (void)pAllocator;
+    if (pBuffer) *pBuffer = VK_NULL_HANDLE;
     if (!pCreateInfo || !pBuffer) return VK_ERROR_INITIALIZATION_FAILED;
     PdockerVkDevice *dev = pdocker_vk_device_from_handle(device);
     uint64_t enabled_extension_mask = dev ? dev->enabled_extension_mask : 0;
@@ -22812,7 +22819,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateBuffer(
     PdockerVkBuffer *buffer = pdocker_alloc_handle(sizeof(*buffer));
     if (!buffer) return VK_ERROR_OUT_OF_HOST_MEMORY;
     buffer->object_id = next_vulkan_object_generation();
-    buffer->owner_device_id = device_owner_id_or_zero(device);
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id)) {
+        free(buffer);
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+
+    buffer->owner_device_id = owner_device_id;
     buffer->size = (size_t)pCreateInfo->size;
     buffer->usage = effective_usage;
     buffer->requirements_alignment = PDOCKER_VK_REQUIREMENT_ALIGNMENT;
@@ -22963,7 +22976,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateBufferView(
     PdockerVkBufferView *view = pdocker_alloc_handle(sizeof(*view));
     if (!view) return VK_ERROR_OUT_OF_HOST_MEMORY;
     view->object_id = next_vulkan_object_generation();
-    view->owner_device_id = device_owner_id_or_zero(device);
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id)) {
+        free(view);
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+
+    view->owner_device_id = owner_device_id;
     view->buffer = buffer;
     view->format = pCreateInfo->format;
     view->offset = pCreateInfo->offset;
@@ -23647,7 +23666,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateImage(
     PdockerVkImage *image = pdocker_alloc_handle(sizeof(*image));
     if (!image) return VK_ERROR_OUT_OF_HOST_MEMORY;
     image->object_id = next_vulkan_object_generation();
-    image->owner_device_id = device_owner_id_or_zero(device);
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id)) {
+        free(image);
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+
+    image->owner_device_id = owner_device_id;
     image->flags = pCreateInfo->flags;
     image->image_type = pCreateInfo->imageType;
     image->format = pCreateInfo->format;
@@ -24060,7 +24085,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateImageView(
     PdockerVkImageView *view = pdocker_alloc_handle(sizeof(*view));
     if (!view) return VK_ERROR_OUT_OF_HOST_MEMORY;
     view->object_id = next_vulkan_object_generation();
-    view->owner_device_id = device_owner_id_or_zero(device);
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id)) {
+        free(view);
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+
+    view->owner_device_id = owner_device_id;
     view->image = image;
     view->view_type = pCreateInfo->viewType;
     view->format = pCreateInfo->format;
@@ -24102,7 +24133,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSampler(
     PdockerVkSampler *sampler = pdocker_alloc_handle(sizeof(*sampler));
     if (!sampler) return VK_ERROR_OUT_OF_HOST_MEMORY;
     sampler->object_id = next_vulkan_object_generation();
-    sampler->owner_device_id = device_owner_id_or_zero(device);
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id)) {
+        free(sampler);
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+
+    sampler->owner_device_id = owner_device_id;
     sampler->mag_filter = pCreateInfo->magFilter;
     sampler->min_filter = pCreateInfo->minFilter;
     sampler->mipmap_mode = pCreateInfo->mipmapMode;
@@ -24494,7 +24531,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateMemory(
     PdockerVkMemory *memory = pdocker_alloc_handle(sizeof(*memory));
     if (!memory) return VK_ERROR_OUT_OF_HOST_MEMORY;
     memory->object_id = next_vulkan_object_generation();
-    memory->owner_device_id = device_owner_id_or_zero(device);
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id)) {
+        free(memory);
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+
+    memory->owner_device_id = owner_device_id;
     memory->size = (size_t)pAllocateInfo->allocationSize;
     memory->memory_type_index = pAllocateInfo->memoryTypeIndex;
     memory->heap_index = pdocker_vk_heap_index_for_memory_type(memory->memory_type_index);
@@ -25851,7 +25894,7 @@ VKAPI_ATTR void VKAPI_CALL vkGetDescriptorSetLayoutSupport(
     if (!pSupport) return;
     PdockerVkStructHeader header = read_vk_struct_header(pSupport);
     zero_vk_out_struct_preserve_chain(pSupport, sizeof(*pSupport), header);
-    const PdockerVkDevice *dev = (const PdockerVkDevice *)device;
+    const PdockerVkDevice *dev = pdocker_vk_device_from_handle(device);
     uint64_t requested_feature_mask = dev ? dev->requested_feature_mask : 0;
     pSupport->supported = descriptor_set_layout_create_info_supported(device, pCreateInfo, requested_feature_mask)
         ? VK_TRUE
@@ -25870,7 +25913,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorSetLayout(
     VkResult pnext_rc = validate_descriptor_set_layout_pnext(pCreateInfo);
     if (pnext_rc != VK_SUCCESS) return pnext_rc;
     if (!descriptor_layout_flags_supported(pCreateInfo->flags)) return VK_ERROR_FEATURE_NOT_PRESENT;
-    const PdockerVkDevice *dev = (const PdockerVkDevice *)device;
+    const PdockerVkDevice *dev = pdocker_vk_device_from_handle(device);
     uint64_t requested_feature_mask = dev ? dev->requested_feature_mask : 0;
     if (!descriptor_set_layout_create_info_supported(device, pCreateInfo, requested_feature_mask)) {
         trace_icd_runtime_failure("descriptor-set-layout-unsupported",
@@ -25879,7 +25922,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorSetLayout(
     }
     PdockerVkDescriptorSetLayout *layout = pdocker_alloc_handle(sizeof(*layout));
     if (!layout) return VK_ERROR_OUT_OF_HOST_MEMORY;
-    layout->owner_device_id = device_owner_id_or_zero(device);
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id)) {
+        free(layout);
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+
+    layout->owner_device_id = owner_device_id;
     layout->layout_id = next_vulkan_object_generation();
     layout->update_after_bind_pool =
         (pCreateInfo->flags & VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT) != 0;
@@ -26042,7 +26091,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreatePipelineLayout(
     }
     PdockerVkPipelineLayout *layout = pdocker_alloc_handle(sizeof(*layout));
     if (!layout) return VK_ERROR_OUT_OF_HOST_MEMORY;
-    layout->owner_device_id = device_owner_id_or_zero(device);
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id)) {
+        free(layout);
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+
+    layout->owner_device_id = owner_device_id;
     layout->layout_id = next_vulkan_object_generation();
     layout->set_layout_count = pCreateInfo->setLayoutCount;
     layout->set_layout_capacity = pCreateInfo->setLayoutCount;
@@ -26138,7 +26193,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorPool(
     }
     PdockerVkDescriptorPool *pool = pdocker_alloc_handle(sizeof(*pool));
     if (!pool) return VK_ERROR_OUT_OF_HOST_MEMORY;
-    pool->owner_device_id = device_owner_id_or_zero(device);
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id)) {
+        free(pool);
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+
+    pool->owner_device_id = owner_device_id;
     pool->flags = pCreateInfo->flags;
     pool->max_sets = pCreateInfo->maxSets;
     descriptor_pool_register(pool);
@@ -27011,7 +27072,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorUpdateTemplate(
     PdockerVkDescriptorUpdateTemplate *template_handle =
         pdocker_alloc_handle(sizeof(*template_handle));
     if (!template_handle) return VK_ERROR_OUT_OF_HOST_MEMORY;
-    template_handle->owner_device_id = device_owner_id_or_zero(device);
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id)) {
+        free(template_handle);
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+
+    template_handle->owner_device_id = owner_device_id;
     template_handle->template_type = pCreateInfo->templateType;
     template_handle->set_layout = layout;
     template_handle->entry_count = pCreateInfo->descriptorUpdateEntryCount;
@@ -27370,6 +27437,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateShaderModule(
         const VkAllocationCallbacks *pAllocator,
         VkShaderModule *pShaderModule) {
     (void)pAllocator;
+    if (pShaderModule) *pShaderModule = VK_NULL_HANDLE;
     if (!pCreateInfo || !pShaderModule) return VK_ERROR_INITIALIZATION_FAILED;
     VkResult pnext_rc = validate_shader_module_create_pnext(
         device,
@@ -27382,7 +27450,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateShaderModule(
     }
     PdockerVkShaderModule *shader = pdocker_alloc_handle(sizeof(*shader));
     if (!shader) return VK_ERROR_OUT_OF_HOST_MEMORY;
-    shader->owner_device_id = device_owner_id_or_zero(device);
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id)) {
+        free(shader);
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+
+    shader->owner_device_id = owner_device_id;
     shader->code_size = pCreateInfo->codeSize;
     shader->first_word = (pCreateInfo->pCode && pCreateInfo->codeSize >= sizeof(uint32_t))
         ? pCreateInfo->pCode[0]
@@ -27502,7 +27576,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateComputePipelines(
         PdockerVkPipeline *pipeline = pdocker_alloc_handle(sizeof(*pipeline));
         if (!pipeline) return VK_ERROR_OUT_OF_HOST_MEMORY;
         pipeline->object_id = next_vulkan_object_generation();
-        pipeline->owner_device_id = device_owner_id_or_zero(device);
+        uint64_t owner_device_id = 0;
+        if (!device_owner_id_or_zero_checked(device, &owner_device_id)) {
+            free(pipeline);
+            return VK_ERROR_INITIALIZATION_FAILED;
+        }
+
+        pipeline->owner_device_id = owner_device_id;
         pipeline->shader = shader_module_handle_lookup_for_device(device, ci->stage.module);
         pipeline->layout = pipeline_layout_handle_lookup_for_device(device, ci->layout);
         if (!pipeline->shader || !pipeline->layout) {
@@ -27796,7 +27876,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
         PdockerVkPipeline *pipeline = pdocker_alloc_handle(sizeof(*pipeline));
         if (!pipeline) return VK_ERROR_OUT_OF_HOST_MEMORY;
         pipeline->object_id = next_vulkan_object_generation();
-        pipeline->owner_device_id = device_owner_id_or_zero(device);
+        uint64_t owner_device_id = 0;
+        if (!device_owner_id_or_zero_checked(device, &owner_device_id)) {
+            free(pipeline);
+            return VK_ERROR_INITIALIZATION_FAILED;
+        }
+
+        pipeline->owner_device_id = owner_device_id;
         pipeline->graphics = true;
         pipeline->graphics_unsupported = false;
         pipeline->requested_feature_mask =
@@ -28764,7 +28850,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateRenderPass(
             rp, pCreateInfo->dependencyCount, pCreateInfo->pDependencies);
     }
     rp->object_id = next_vulkan_object_generation();
-    rp->owner_device_id = device_owner_id_or_zero(device);
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id)) {
+        free(rp);
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+
+    rp->owner_device_id = owner_device_id;
     rp->generation = rp->object_id;
     render_pass_register(rp);
     *pRenderPass = pdocker_vk_render_pass_to_handle(rp);
@@ -28829,7 +28921,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateRenderPass2(
         fill_render_pass_create2_feedback(pCreateInfo, pCreateInfo->subpassCount);
     }
     rp->object_id = next_vulkan_object_generation();
-    rp->owner_device_id = device_owner_id_or_zero(device);
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id)) {
+        free(rp);
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+
+    rp->owner_device_id = owner_device_id;
     rp->generation = rp->object_id;
     render_pass_register(rp);
     *pRenderPass = pdocker_vk_render_pass_to_handle(rp);
@@ -28888,7 +28986,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateFramebuffer(
     }
     PdockerVkFramebuffer *fb = pdocker_alloc_handle(sizeof(*fb));
     if (!fb) return VK_ERROR_OUT_OF_HOST_MEMORY;
-    fb->owner_device_id = device_owner_id_or_zero(device);
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id)) {
+        free(fb);
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+
+    fb->owner_device_id = owner_device_id;
     fb->render_pass = render_pass_handle_lookup_for_device(device, pCreateInfo->renderPass);
     if (!fb->render_pass) {
         free(fb);
@@ -29437,7 +29541,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSwapchainKHR(
     PdockerVkSwapchain *swapchain = pdocker_alloc_handle(sizeof(*swapchain));
     if (!swapchain) return VK_ERROR_OUT_OF_HOST_MEMORY;
     memset(swapchain, 0, sizeof(*swapchain));
-    swapchain->owner_device_id = device_owner_id_or_zero(device);
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id)) {
+        free(swapchain);
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+
+    swapchain->owner_device_id = owner_device_id;
     swapchain->surface = surface;
     swapchain->image_format = pCreateInfo->imageFormat;
     swapchain->image_color_space = pCreateInfo->imageColorSpace;
@@ -29752,7 +29862,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateCommandPool(
     if (validate_rc != VK_SUCCESS) return validate_rc;
     PdockerVkCommandPool *pool = pdocker_alloc_handle(sizeof(*pool));
     if (!pool) return VK_ERROR_OUT_OF_HOST_MEMORY;
-    pool->owner_device_id = device_owner_id_or_zero(device);
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id)) {
+        free(pool);
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+
+    pool->owner_device_id = owner_device_id;
     pool->requested_feature_mask = device_requested_feature_mask_from_handle(device);
     pool->enabled_extension_mask = device_enabled_extension_mask_from_handle(device);
     command_pool_register(pool);
@@ -36416,7 +36532,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateEvent(
     if (!event) return VK_ERROR_OUT_OF_HOST_MEMORY;
     memset(event, 0, sizeof(*event));
     event->signaled = false;
-    event->owner_device_id = device_owner_id_or_zero(device);
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id)) {
+        free(event);
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+
+    event->owner_device_id = owner_device_id;
     event->event_id = next_vulkan_object_generation();
     if (bridge_available()) {
         if (send_executor_event_create(event) != 0) {
@@ -37328,6 +37450,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateQueryPool(
         VkQueryPool *pQueryPool) {
     (void)device;
     (void)pAllocator;
+    if (pQueryPool) *pQueryPool = VK_NULL_HANDLE;
     if (!pCreateInfo || !pQueryPool || pCreateInfo->queryCount == 0 ||
         pCreateInfo->queryCount > PDOCKER_VK_MAX_QUERY_COUNT) {
         return VK_ERROR_INITIALIZATION_FAILED;
@@ -37347,7 +37470,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateQueryPool(
     }
     PdockerVkQueryPool *pool = pdocker_alloc_handle(sizeof(*pool));
     if (!pool) return VK_ERROR_OUT_OF_HOST_MEMORY;
-    pool->owner_device_id = device_owner_id_or_zero(device);
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id)) {
+        free(pool);
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+
+    pool->owner_device_id = owner_device_id;
     pool->type = pCreateInfo->queryType;
     pool->query_count = pCreateInfo->queryCount;
     pool->pool_id = next_vulkan_query_pool_id();
@@ -37609,7 +37738,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateFence(
     if (!fence) return VK_ERROR_OUT_OF_HOST_MEMORY;
     memset(fence, 0, sizeof(*fence));
     fence->signaled = pCreateInfo && (pCreateInfo->flags & VK_FENCE_CREATE_SIGNALED_BIT);
-    fence->owner_device_id = device_owner_id_or_zero(device);
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id)) {
+        free(fence);
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+
+    fence->owner_device_id = owner_device_id;
     fence->fence_id = next_vulkan_object_generation();
     if (bridge_available()) {
         uint32_t initial_signaled = fence->signaled ? 1u : 0u;
@@ -37736,6 +37871,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSemaphore(
     (void)device;
     (void)pAllocator;
     if (!pSemaphore) return VK_ERROR_INITIALIZATION_FAILED;
+    *pSemaphore = VK_NULL_HANDLE;
     bool timeline = false;
     uint64_t initial_value = 0;
     if (pCreateInfo && pCreateInfo->flags != 0) {
@@ -37763,7 +37899,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSemaphore(
     sem->timeline = timeline;
     sem->value = initial_value;
     sem->signaled = timeline ? (initial_value > 0) : false;
-    sem->owner_device_id = device_owner_id_or_zero(device);
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id)) {
+        free(sem);
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+
+    sem->owner_device_id = owner_device_id;
     sem->semaphore_id = next_vulkan_object_generation();
     if (bridge_available()) {
         if (send_executor_semaphore_create(sem) != 0) {
@@ -37869,9 +38011,16 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreatePipelineCache(
     (void)pCreateInfo;
     (void)pAllocator;
     if (!pPipelineCache) return VK_ERROR_INITIALIZATION_FAILED;
+    *pPipelineCache = VK_NULL_HANDLE;
     PdockerVkPipelineCache *cache = pdocker_alloc_handle(sizeof(*cache));
     if (!cache) return VK_ERROR_OUT_OF_HOST_MEMORY;
-    cache->owner_device_id = device_owner_id_or_zero(device);
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id)) {
+        free(cache);
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+
+    cache->owner_device_id = owner_device_id;
     pipeline_cache_register(cache);
     *pPipelineCache = pdocker_vk_pipeline_cache_to_handle(cache);
     return VK_SUCCESS;
@@ -37987,7 +38136,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateValidationCacheEXT(
     }
     PdockerVkValidationCache *cache = pdocker_alloc_handle(sizeof(*cache));
     if (!cache) return VK_ERROR_OUT_OF_HOST_MEMORY;
-    cache->owner_device_id = device_owner_id_or_zero(device);
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id)) {
+        free(cache);
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+
+    cache->owner_device_id = owner_device_id;
     validation_cache_register(cache);
     *pValidationCache = pdocker_vk_validation_cache_to_handle(cache);
     if (!*pValidationCache) {
@@ -38502,7 +38657,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreatePrivateDataSlot(
     }
     PdockerVkPrivateDataSlot *slot = pdocker_alloc_handle(sizeof(*slot));
     if (!slot) return VK_ERROR_OUT_OF_HOST_MEMORY;
-    slot->owner_device_id = device_owner_id_or_zero(device);
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id)) {
+        free(slot);
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+
+    slot->owner_device_id = owner_device_id;
     slot->records = NULL;
     private_data_slot_register(slot);
     *pPrivateDataSlot = pdocker_vk_private_data_slot_to_handle(slot);

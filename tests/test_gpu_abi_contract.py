@@ -11266,7 +11266,8 @@ class GpuAbiContractTest(unittest.TestCase):
         hidden_body = c_function_body(icd, "proc_address_hidden_by_advertisement")
 
         self.assertIn("zero_vk_out_struct_preserve_chain(pSupport, sizeof(*pSupport), header);", support_body)
-        self.assertIn("const PdockerVkDevice *dev = (const PdockerVkDevice *)device;", support_body)
+        self.assertIn("const PdockerVkDevice *dev = pdocker_vk_device_from_handle(device);", support_body)
+        self.assertNotIn("(const PdockerVkDevice *)device", support_body)
         self.assertIn("uint64_t requested_feature_mask = dev ? dev->requested_feature_mask : 0;", support_body)
         self.assertIn("descriptor_set_layout_create_info_supported(device, pCreateInfo, requested_feature_mask)", support_body)
         self.assertIn("fill_descriptor_set_layout_support_pnext((void *)header.pNext, pCreateInfo, requested_feature_mask);", support_body)
@@ -11680,6 +11681,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('unsupported_create_info_pnext_result("vkCreateBuffer", node)', buffer_pnext_body)
         self.assertIn("node = header.pNext;", buffer_pnext_body)
         self.assertIn("if (pCreateInfo->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;", create_buffer_body)
+        self.assertIn("if (pBuffer) *pBuffer = VK_NULL_HANDLE;", create_buffer_body)
+        self.assertIn("device_owner_id_or_zero_checked(device, &owner_device_id)", create_buffer_body)
         descriptor_layout_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorSetLayout", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkDestroyDescriptorSetLayout", 1
         )[0]
@@ -11688,7 +11691,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("validate_descriptor_set_layout_pnext(pCreateInfo)", descriptor_layout_body)
         self.assertIn("descriptor_layout_flags_supported(pCreateInfo->flags)", descriptor_layout_body)
         self.assertIn("VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT", icd)
-        self.assertIn("const PdockerVkDevice *dev = (const PdockerVkDevice *)device;", descriptor_layout_body)
+        self.assertIn("const PdockerVkDevice *dev = pdocker_vk_device_from_handle(device);", descriptor_layout_body)
+        self.assertNotIn("(const PdockerVkDevice *)device", descriptor_layout_body)
         self.assertIn("uint64_t requested_feature_mask = dev ? dev->requested_feature_mask : 0;", descriptor_layout_body)
         self.assertIn("descriptor_set_layout_create_info_supported(device, pCreateInfo, requested_feature_mask)", descriptor_layout_body)
         self.assertIn('trace_icd_runtime_failure("descriptor-set-layout-unsupported"', descriptor_layout_body)
@@ -11752,6 +11756,8 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         shader_module_pnext_body = c_function_body(icd, "validate_shader_module_create_pnext")
         self.assertIn("validate_shader_module_create_pnext(", shader_module_body)
+        self.assertIn("if (pShaderModule) *pShaderModule = VK_NULL_HANDLE;", shader_module_body)
+        self.assertIn("device_owner_id_or_zero_checked(device, &owner_device_id)", shader_module_body)
         self.assertIn("pCreateInfo->pNext", shader_module_body)
         self.assertIn("enabled_extension_mask", shader_module_body)
         self.assertIn("if (pnext_rc != VK_SUCCESS) return pnext_rc;", shader_module_body)
@@ -11777,10 +11783,14 @@ class GpuAbiContractTest(unittest.TestCase):
         validation_cache_struct = icd.split("struct PdockerVkValidationCache {", 1)[1].split("};", 1)[0]
         self.assertIn("uint64_t owner_device_id;", validation_cache_struct)
         validation_cache_create_body = c_function_body(icd, "vkCreateValidationCacheEXT")
+        pipeline_cache_create_body = c_function_body(icd, "vkCreatePipelineCache")
+        self.assertIn("*pPipelineCache = VK_NULL_HANDLE;", pipeline_cache_create_body)
+        self.assertIn("device_owner_id_or_zero_checked(device, &owner_device_id)", pipeline_cache_create_body)
         validation_cache_destroy_body = c_function_body(icd, "vkDestroyValidationCacheEXT")
         validation_cache_get_body = c_function_body(icd, "vkGetValidationCacheDataEXT")
         validation_cache_merge_body = c_function_body(icd, "vkMergeValidationCachesEXT")
-        self.assertIn("cache->owner_device_id = device_owner_id_or_zero(device);", validation_cache_create_body)
+        self.assertIn("device_owner_id_or_zero_checked(device, &owner_device_id)", validation_cache_create_body)
+        self.assertIn("cache->owner_device_id = owner_device_id;", validation_cache_create_body)
         self.assertIn("validation_cache_handle_lookup_for_device(device, validationCache)", validation_cache_destroy_body)
         self.assertIn("validation_cache_handle_live_for_device(device, validationCache)", validation_cache_get_body)
         self.assertIn("validation_cache_handle_live_for_device(device, dstCache)", validation_cache_merge_body)
@@ -13577,6 +13587,7 @@ class GpuAbiContractTest(unittest.TestCase):
         for marker in [
             "uint64_t owner_device_id;",
             "device_owner_id_or_zero(VkDevice device)",
+            "device_owner_id_or_zero_checked(VkDevice device, uint64_t *out_object_id)",
             "device_owner_matches_or_unowned(VkDevice device, uint64_t owner_device_id)",
             "memory_handle_lookup_for_device(VkDevice device, VkDeviceMemory memory)",
             "buffer_handle_lookup_for_device(VkDevice device, VkBuffer buffer)",
