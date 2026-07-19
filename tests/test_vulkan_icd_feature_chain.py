@@ -3527,6 +3527,8 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 instance_info.ppEnabledExtensionNames = debug_enabled;
                 VkInstance instance = VK_NULL_HANDLE;
                 if (vkCreateInstance(&instance_info, NULL, &instance) != VK_SUCCESS || instance == VK_NULL_HANDLE) return 10;
+                VkInstance instance_b = VK_NULL_HANDLE;
+                if (vkCreateInstance(&instance_info, NULL, &instance_b) != VK_SUCCESS || instance_b == VK_NULL_HANDLE || instance_b == instance) return 31;
 
                 VkDebugUtilsMessengerCreateInfoEXT messenger_info;
                 memset(&messenger_info, 0, sizeof(messenger_info));
@@ -3552,6 +3554,20 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                                              VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT,
                                              &callback_data);
                 if (g_callback_count != 1) return 8;
+                vkSubmitDebugUtilsMessageEXT(instance_b,
+                                             VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT,
+                                             VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT,
+                                             &callback_data);
+                if (g_callback_count != 1) return 32;
+                if (!debug_utils_messenger_handle_lookup_for_instance(instance, messenger)) return 33;
+                if (debug_utils_messenger_handle_lookup_for_instance(instance_b, messenger)) return 34;
+                vkDestroyDebugUtilsMessengerEXT(instance_b, messenger, NULL);
+                if (!debug_utils_messenger_handle_lookup_for_instance(instance, messenger)) return 35;
+                vkSubmitDebugUtilsMessageEXT(instance,
+                                             VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT,
+                                             VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT,
+                                             &callback_data);
+                if (g_callback_count != 2) return 36;
 
                 VkDebugUtilsObjectNameInfoEXT name_info;
                 memset(&name_info, 0, sizeof(name_info));
@@ -3595,7 +3611,10 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 if (vkSetDebugUtilsObjectNameEXT(VK_NULL_HANDLE, &name_info) != VK_ERROR_INITIALIZATION_FAILED) return 13;
 
                 vkDestroyDebugUtilsMessengerEXT(instance, (VkDebugUtilsMessengerEXT)(uintptr_t)0x1234u, NULL);
+                vkDestroyInstance(instance_b, NULL);
+                if (!debug_utils_messenger_handle_lookup_for_instance(instance, messenger)) return 37;
                 vkDestroyDebugUtilsMessengerEXT(instance, messenger, NULL);
+                if (debug_utils_messenger_handle_lookup_for_instance(instance, messenger)) return 38;
                 vkDestroyDebugUtilsMessengerEXT(instance, VK_NULL_HANDLE, NULL);
                 vkDestroyInstance(instance, NULL);
                 return 0;
@@ -8268,6 +8287,15 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 if (vkGetSwapchainImagesKHR(device_b, swapchain_a, &image_count, NULL) != VK_ERROR_INITIALIZATION_FAILED) return 24;
                 vkDestroySwapchainKHR(device_b, swapchain_a, NULL);
                 if (!swapchain_handle_lookup_for_device(device_a, swapchain_a)) return 25;
+
+                vkDestroyShaderModule(device_b, shader_a, NULL);
+                if (!shader_module_handle_lookup_for_device(device_a, shader_a)) return 433;
+                vkDestroyPipelineLayout(device_b, pipeline_layout_a, NULL);
+                if (!pipeline_layout_handle_lookup_for_device(device_a, pipeline_layout_a)) return 434;
+                vkDestroyPipeline(device_b, base_pipeline_a, NULL);
+                if (!pipeline_handle_lookup_for_device(device_a, base_pipeline_a)) return 435;
+                vkDestroyPipelineCache(device_b, cache_a, NULL);
+                if (!pipeline_cache_handle_lookup_for_device(device_a, cache_a)) return 436;
 
                 vkDestroyDevice(device_b, NULL);
                 if (!descriptor_set_layout_handle_lookup_for_device(device_a, layout_a)) return 26;

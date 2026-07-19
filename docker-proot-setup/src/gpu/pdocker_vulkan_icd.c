@@ -1748,6 +1748,7 @@ struct PdockerVkPrivateDataSlot {
 
 #ifdef VK_EXT_DEBUG_UTILS_EXTENSION_NAME
 struct PdockerVkDebugUtilsMessenger {
+    uint64_t owner_instance_id;
     VkInstance instance;
     VkDebugUtilsMessageSeverityFlagsEXT message_severity;
     VkDebugUtilsMessageTypeFlagsEXT message_type;
@@ -21914,10 +21915,12 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyInstance(
         const VkAllocationCallbacks *pAllocator) {
     (void)pAllocator;
 #ifdef VK_EXT_DEBUG_UTILS_EXTENSION_NAME
+    uint64_t debug_owner_instance_id = 0;
+    bool debug_owner_valid = instance_handle_object_id(instance, &debug_owner_instance_id);
     PdockerVkDebugUtilsMessenger **debug_link = &g_debug_utils_messengers;
     while (*debug_link) {
         PdockerVkDebugUtilsMessenger *messenger = *debug_link;
-        if (messenger->instance == instance) {
+        if (debug_owner_valid && messenger->owner_instance_id == debug_owner_instance_id) {
             *debug_link = messenger->next;
             free(messenger);
         } else {
@@ -38126,7 +38129,39 @@ VKAPI_ATTR void VKAPI_CALL vkCmdDebugMarkerInsertEXT(
 #endif
 
 #ifdef VK_EXT_DEBUG_UTILS_EXTENSION_NAME
-static PdockerVkDebugUtilsMessenger *debug_utils_messenger_unregister(
+static bool debug_utils_messenger_owner_matches_instance(
+        VkInstance instance,
+        const PdockerVkDebugUtilsMessenger *messenger) {
+    if (!messenger) return false;
+    uint64_t instance_object_id = 0;
+    if (!instance_handle_object_id(instance, &instance_object_id)) {
+        return false;
+    }
+    return instance_object_id == messenger->owner_instance_id;
+}
+
+static PdockerVkDebugUtilsMessenger *debug_utils_messenger_handle_lookup_for_instance(
+        VkInstance instance,
+        VkDebugUtilsMessengerEXT messenger) __attribute__((unused));
+static PdockerVkDebugUtilsMessenger *debug_utils_messenger_handle_lookup_for_instance(
+        VkInstance instance,
+        VkDebugUtilsMessengerEXT messenger) {
+    PdockerVkDebugUtilsMessenger *target =
+        pdocker_vk_debug_utils_messenger_from_handle(messenger);
+    if (!target) return NULL;
+    for (PdockerVkDebugUtilsMessenger *candidate = g_debug_utils_messengers;
+         candidate;
+         candidate = candidate->next) {
+        if (candidate == target &&
+            debug_utils_messenger_owner_matches_instance(instance, candidate)) {
+            return candidate;
+        }
+    }
+    return NULL;
+}
+
+static PdockerVkDebugUtilsMessenger *debug_utils_messenger_unregister_for_instance(
+        VkInstance instance,
         VkDebugUtilsMessengerEXT messenger) {
     PdockerVkDebugUtilsMessenger *target =
         pdocker_vk_debug_utils_messenger_from_handle(messenger);
@@ -38134,6 +38169,9 @@ static PdockerVkDebugUtilsMessenger *debug_utils_messenger_unregister(
     PdockerVkDebugUtilsMessenger **link = &g_debug_utils_messengers;
     while (*link) {
         if (*link == target) {
+            if (!debug_utils_messenger_owner_matches_instance(instance, target)) {
+                return NULL;
+            }
             *link = target->next;
             target->next = NULL;
             return target;
@@ -38225,7 +38263,6 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDebugUtilsMessengerEXT(
         const VkDebugUtilsMessengerCreateInfoEXT *pCreateInfo,
         const VkAllocationCallbacks *pAllocator,
         VkDebugUtilsMessengerEXT *pMessenger) {
-    (void)instance;
     (void)pAllocator;
     if (pMessenger) *pMessenger = VK_NULL_HANDLE;
     if (!pCreateInfo || !pMessenger ||
@@ -38239,8 +38276,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDebugUtilsMessengerEXT(
         trace_icd_runtime_failure("debug-utils-messenger-create-info-invalid", VK_ERROR_INITIALIZATION_FAILED);
         return VK_ERROR_INITIALIZATION_FAILED;
     }
+    uint64_t owner_instance_id = 0;
+    if (!instance_handle_object_id(instance, &owner_instance_id)) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
     PdockerVkDebugUtilsMessenger *messenger = pdocker_alloc_handle(sizeof(*messenger));
     if (!messenger) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    messenger->owner_instance_id = owner_instance_id;
     messenger->instance = instance;
     messenger->message_severity = pCreateInfo->messageSeverity;
     messenger->message_type = pCreateInfo->messageType;
@@ -38250,8 +38292,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDebugUtilsMessengerEXT(
     g_debug_utils_messengers = messenger;
     *pMessenger = pdocker_vk_debug_utils_messenger_to_handle(messenger);
     if (!*pMessenger) {
-        (void)debug_utils_messenger_unregister(
-            pdocker_vk_debug_utils_messenger_to_handle(messenger));
+        (void)debug_utils_messenger_unregister_for_instance(
+            instance, pdocker_vk_debug_utils_messenger_to_handle(messenger));
         free(messenger);
         return VK_ERROR_OUT_OF_HOST_MEMORY;
     }
@@ -38262,9 +38304,9 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyDebugUtilsMessengerEXT(
         VkInstance instance,
         VkDebugUtilsMessengerEXT messenger,
         const VkAllocationCallbacks *pAllocator) {
-    (void)instance;
     (void)pAllocator;
-    PdockerVkDebugUtilsMessenger *target = debug_utils_messenger_unregister(messenger);
+    PdockerVkDebugUtilsMessenger *target =
+        debug_utils_messenger_unregister_for_instance(instance, messenger);
     if (!target) return;
     free(target);
 }
@@ -38274,12 +38316,12 @@ VKAPI_ATTR void VKAPI_CALL vkSubmitDebugUtilsMessageEXT(
         VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
         VkDebugUtilsMessageTypeFlagsEXT messageTypes,
         const VkDebugUtilsMessengerCallbackDataEXT *pCallbackData) {
-    (void)instance;
     if (!pCallbackData || pCallbackData->sType != VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CALLBACK_DATA_EXT) return;
     if (pCallbackData->pNext) return;
     for (PdockerVkDebugUtilsMessenger *messenger = g_debug_utils_messengers;
          messenger;
          messenger = messenger->next) {
+        if (!debug_utils_messenger_owner_matches_instance(instance, messenger)) continue;
         if (!messenger->callback) continue;
         if ((messenger->message_severity & (VkDebugUtilsMessageSeverityFlagsEXT)messageSeverity) == 0) continue;
         if ((messenger->message_type & messageTypes) == 0) continue;

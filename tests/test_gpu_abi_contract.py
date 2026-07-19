@@ -1590,17 +1590,37 @@ class GpuAbiContractTest(unittest.TestCase):
             "MAP_PROC(vkSetDebugUtilsObjectTagEXT)",
         ]:
             self.assertIn(marker, icd)
-        debug_unregister_body = c_function_body(icd, "debug_utils_messenger_unregister")
+        self.assertIn("uint64_t owner_instance_id;", icd)
+        self.assertNotIn("debug_utils_messenger_unregister(\n        VkDebugUtilsMessengerEXT messenger", icd)
+        debug_create_body = c_function_body(icd, "vkCreateDebugUtilsMessengerEXT")
+        for marker in [
+            "instance_handle_object_id(instance, &owner_instance_id)",
+            "messenger->owner_instance_id = owner_instance_id",
+            "debug_utils_messenger_unregister_for_instance(",
+        ]:
+            self.assertIn(marker, debug_create_body)
+        debug_lookup_body = c_function_body(icd, "debug_utils_messenger_handle_lookup_for_instance")
+        for marker in [
+            "pdocker_vk_debug_utils_messenger_from_handle(messenger)",
+            "debug_utils_messenger_owner_matches_instance(instance, candidate)",
+        ]:
+            self.assertIn(marker, debug_lookup_body)
+        debug_unregister_body = c_function_body(icd, "debug_utils_messenger_unregister_for_instance")
         for marker in [
             "pdocker_vk_debug_utils_messenger_from_handle(messenger)",
             "PdockerVkDebugUtilsMessenger **link = &g_debug_utils_messengers",
+            "debug_utils_messenger_owner_matches_instance(instance, target)",
             "*link = target->next",
             "return NULL;",
         ]:
             self.assertIn(marker, debug_unregister_body)
         debug_destroy_body = c_function_body(icd, "vkDestroyDebugUtilsMessengerEXT")
-        self.assertIn("debug_utils_messenger_unregister(messenger)", debug_destroy_body)
+        self.assertIn("debug_utils_messenger_unregister_for_instance(instance, messenger)", debug_destroy_body)
         self.assertNotIn("free(target);", debug_destroy_body.split("if (!target) return;", 1)[0])
+        debug_submit_body = c_function_body(icd, "vkSubmitDebugUtilsMessageEXT")
+        self.assertIn("debug_utils_messenger_owner_matches_instance(instance, messenger)", debug_submit_body)
+        instance_destroy_body = c_function_body(icd, "vkDestroyInstance")
+        self.assertIn("messenger->owner_instance_id == debug_owner_instance_id", instance_destroy_body)
 
         collector_body = c_function_body(icd, "collect_advertised_device_extensions")
         for marker in [
@@ -11580,6 +11600,19 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("PdockerVkBuffer *b = buffer_handle_lookup_for_device(device, buffer);", bind_buffer_body)
         self.assertNotIn("buffer_handle_resolve(buffer, &b)", bind_buffer_body)
         self.assertNotIn("device_owner_matches_or_unowned(device, b->owner_device_id)", bind_buffer_body)
+
+        destroy_owner_guards = {
+            "vkDestroyShaderModule": "shader_module_handle_lookup_for_device(device, shaderModule)",
+            "vkDestroyPipelineLayout": "pipeline_layout_handle_lookup_for_device(device, pipelineLayout)",
+            "vkDestroyPipeline": "pipeline_handle_lookup_for_device(device, pipeline)",
+            "vkDestroyRenderPass": "render_pass_handle_lookup_for_device(device, renderPass)",
+            "vkDestroyFramebuffer": "framebuffer_handle_lookup_for_device(device, framebuffer)",
+            "vkDestroyPipelineCache": "pipeline_cache_handle_lookup_for_device(device, pipelineCache)",
+            "vkDestroyValidationCacheEXT": "validation_cache_handle_lookup_for_device(device, validationCache)",
+            "vkDestroyPrivateDataSlot": "private_data_slot_handle_lookup_for_device(device, privateDataSlot)",
+        }
+        for fn, marker in destroy_owner_guards.items():
+            self.assertIn(marker, c_function_body(icd, fn))
 
 
     def test_vulkan_core_create_infos_reject_unsupported_pnext_and_flags(self):
