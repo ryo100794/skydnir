@@ -9,6 +9,26 @@ llama.cpp itself remains unmodified.
 
 ## Current Ground Truth
 
+### 2026-07-19 CPU/static strict layout identity fail-close lane
+
+Strict Vulkan replay now rejects any transported image layout that would be
+normalized before executor replay.  The shared identity guard checks whether
+`vulkan_replay_layout_for_executor(layout)` would change the API-visible value
+and fails strict mode before materialization, barrier recording, layout-range
+tracking, or graphics copy/resolve/blit command emission.  This specifically
+prevents `PRESENT_SRC_KHR` and any future executor-only layout substitution from
+being silently treated as pass-through.  Non-strict replay keeps the existing
+compatibility normalization.
+
+The guard is wired into V5 image creation, V5.2 layout ranges, V5.4 image
+barriers, V6.20 graphics layout ranges, V6.1 graphics image barriers, and the
+central strict graphics layout tracker.  Graphics copy, resolve, and blit now
+perform strict layout checks before issuing the Vulkan command.
+
+This is generic Vulkan pass-through hardening. It does not change llama.cpp,
+Dockerfiles, models, prompts, shader bytes, runtime defaults, or executor
+arithmetic.
+
 ### 2026-07-19 CPU/static V6 strict image staging fail-close lane
 
 V6 graphics attachment materialization now passes the active strict-passthrough

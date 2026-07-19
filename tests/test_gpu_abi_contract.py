@@ -6182,7 +6182,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("return VK_QUEUE_FAMILY_IGNORED", normalizer)
         dispatch_barriers = c_function_body(executor, "record_vulkan_dispatch_v54_pre_dispatch_barriers")
         self.assertIn("strict passthrough barrier queue family mismatch", dispatch_barriers)
-        self.assertIn("strict passthrough present layout replay mismatch", dispatch_barriers)
+        self.assertIn("strict passthrough image barrier old layout replay mismatch", dispatch_barriers)
+        self.assertIn("strict passthrough image barrier new layout replay mismatch", dispatch_barriers)
         self.assertIn("dispatch_image_count, strict_passthrough", executor)
         self.assertIn("vulkan_graphics_barrier_queue_family_replayable", validator)
         preflight_barrier_helper = c_function_body(executor, "preflight_vulkan_graphics_v6_dependency_barriers")
@@ -7402,8 +7403,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "object_tables->image_layout_range_count",
             "const PdockerGpuVulkanDispatchV52ImageLayoutRangeEntry *src",
             "vulkan_replay_layout_for_executor((VkImageLayout)src->layout)",
-            "strict passthrough present layout replay mismatch",
-            "strict_passthrough && (VkImageLayout)src->layout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR",
+            "strict passthrough image layout range replay mismatch",
+            "strict_vulkan_graphics_layout_identity_matches",
             "vulkan_replay_image_layout_range_valid",
             "image->layout_range_count",
             "image->has_layout_ranges = 1",
@@ -22621,7 +22622,8 @@ class GpuAbiContractTest(unittest.TestCase):
         barrier_collector = c_function_body(source, "collect_vulkan_graphics_v6_dependency_barriers")
         helper = c_function_body(source, "strict_vulkan_graphics_image_layout_matches")
         self.assertIn("vulkan_replay_image_layout_for_range", helper)
-        self.assertIn("vulkan_replay_layout_for_executor", helper)
+        self.assertIn("strict_vulkan_graphics_layout_identity_matches", helper)
+        self.assertNotIn("expected_layout = vulkan_replay_layout_for_executor(expected_layout);", helper)
         self.assertIn("strict passthrough graphics barrier old layout mismatch", barrier_collector)
         for marker in [
             "strict passthrough graphics clear layout mismatch",
@@ -22635,6 +22637,108 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, graphics_record)
         self.assertIn("strict_passthrough);", graphics_record)
+
+    def test_strict_passthrough_layout_identity_rejects_executor_normalization(self):
+        source = GPU_EXECUTOR.read_text()
+        identity = c_function_body(source, "strict_vulkan_graphics_layout_identity_matches")
+        helper = c_function_body(source, "strict_vulkan_graphics_image_layout_matches")
+
+        self.assertIn(
+            "transported_layout != vulkan_replay_layout_for_executor(transported_layout)",
+            identity,
+        )
+        self.assertIn("return -EOPNOTSUPP;", identity)
+        self.assertIn("strict_vulkan_graphics_layout_identity_matches(", helper)
+        self.assertIn("tracked_layout != expected_layout", helper)
+        self.assertNotIn(
+            "expected_layout = vulkan_replay_layout_for_executor(expected_layout);",
+            helper,
+        )
+
+    def test_strict_passthrough_dispatch_and_graphics_layout_materializers_are_identity_guarded(self):
+        source = GPU_EXECUTOR.read_text()
+        dispatch_images = c_function_body(source, "materialize_vulkan_dispatch_images")
+        dispatch_ranges = c_function_body(source, "materialize_vulkan_dispatch_v52_image_layout_ranges")
+        dispatch_barriers = c_function_body(source, "record_vulkan_dispatch_v54_pre_dispatch_barriers")
+        graphics_ranges = c_function_body(source, "materialize_vulkan_graphics_v620_image_layout_ranges")
+        graphics_attachments = c_function_body(source, "materialize_vulkan_graphics_v6_attachments")
+
+        self.assertIn("strict passthrough image initial layout replay mismatch", dispatch_images)
+        self.assertIn("strict passthrough image initial layout materialization mismatch", dispatch_images)
+        self.assertLess(
+            dispatch_images.index("strict passthrough image initial layout replay mismatch"),
+            dispatch_images.index("vulkan_image_create_initial_layout_for_transport"),
+        )
+        self.assertIn("strict passthrough image layout range replay mismatch", dispatch_ranges)
+        self.assertLess(
+            dispatch_ranges.index("strict_vulkan_graphics_layout_identity_matches"),
+            dispatch_ranges.index("vulkan_replay_layout_for_executor((VkImageLayout)src->layout)"),
+        )
+        self.assertIn("strict passthrough image barrier old layout replay mismatch", dispatch_barriers)
+        self.assertIn("strict passthrough image barrier new layout replay mismatch", dispatch_barriers)
+        self.assertLess(
+            dispatch_barriers.index("strict passthrough image barrier old layout replay mismatch"),
+            dispatch_barriers.index(".oldLayout = vulkan_replay_layout_for_executor"),
+        )
+        self.assertIn(
+            "materialize_vulkan_graphics_v620_image_layout_ranges(\n"
+            "        const VulkanGraphicsV6FrameView *view,\n"
+            "        VulkanGraphicsReplayAttachments *attachments,\n"
+            "        int strict_passthrough)",
+            source,
+        )
+        self.assertIn("strict passthrough graphics image layout range replay mismatch", graphics_ranges)
+        self.assertLess(
+            graphics_ranges.index("strict_vulkan_graphics_layout_identity_matches"),
+            graphics_ranges.index("vulkan_replay_layout_for_executor((VkImageLayout)src->layout)"),
+        )
+        self.assertIn(
+            "materialize_vulkan_graphics_v620_image_layout_ranges(view, out, strict_passthrough)",
+            graphics_attachments,
+        )
+
+    def test_strict_passthrough_graphics_barriers_validate_and_reject_layout_normalization(self):
+        source = GPU_EXECUTOR.read_text()
+        validator = c_function_body(source, "validate_vulkan_graphics_v6_frame_content")
+        dependency = c_function_body(source, "collect_vulkan_graphics_v6_dependency_barriers")
+
+        self.assertIn(
+            "!vulkan_graphics_v620_layout_value_valid(image, (VkImageLayout)barrier->old_layout)",
+            validator,
+        )
+        self.assertIn(
+            "!vulkan_graphics_v620_layout_value_valid(image, (VkImageLayout)barrier->new_layout)",
+            validator,
+        )
+        self.assertIn("strict passthrough graphics barrier old layout replay mismatch", dependency)
+        self.assertIn("strict passthrough graphics barrier new layout replay mismatch", dependency)
+        self.assertLess(
+            dependency.index("strict passthrough graphics barrier old layout replay mismatch"),
+            dependency.index("image_barriers_to_record["),
+        )
+        self.assertLess(
+            dependency.index("strict passthrough graphics barrier new layout replay mismatch"),
+            dependency.index("image_barriers_to_record["),
+        )
+
+    def test_strict_passthrough_graphics_copy_resolve_blit_check_before_vkcmd(self):
+        source = GPU_EXECUTOR.read_text()
+        record = c_function_body(source, "record_vulkan_graphics_v6_command_buffer")
+
+        copy_case = record.split("case PDOCKER_GPU_GRAPHICS_V6_COMMAND_COPY_IMAGE:", 1)[1].split(
+            "case PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESOLVE_IMAGE:", 1
+        )[0]
+        self.assertLess(copy_case.index("strict_vulkan_graphics_image_layout_matches"), copy_case.index("vkCmdCopyImage"))
+
+        resolve_case = record.split("case PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESOLVE_IMAGE:", 1)[1].split(
+            "case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BLIT_IMAGE:", 1
+        )[0]
+        self.assertLess(resolve_case.index("strict_vulkan_graphics_image_layout_matches"), resolve_case.index("vkCmdResolveImage"))
+
+        blit_case = record.split("case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BLIT_IMAGE:", 1)[1].split(
+            "case PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT:", 1
+        )[0]
+        self.assertLess(blit_case.index("strict_vulkan_graphics_image_layout_matches"), blit_case.index("vkCmdBlitImage"))
 
     def test_strict_passthrough_rejects_graphics_staged_image_upload(self):
         source = GPU_EXECUTOR.read_text()

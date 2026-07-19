@@ -4197,6 +4197,20 @@ static VkImageLayout vulkan_replay_layout_for_executor(VkImageLayout transported
     return transported_layout;
 }
 
+static int strict_vulkan_graphics_layout_identity_matches(
+        int strict_passthrough,
+        VkImageLayout transported_layout,
+        const char *domain,
+        const char *message) {
+    if (!strict_passthrough) return 0;
+    if (transported_layout != vulkan_replay_layout_for_executor(transported_layout)) {
+        json_fail(domain ? domain : "vulkan-replay",
+                  message ? message : "strict passthrough image layout replay mismatch");
+        return -EOPNOTSUPP;
+    }
+    return 0;
+}
+
 static VkImageLayout vulkan_image_create_initial_layout_for_transport(
         VkImageLayout transported_layout) {
     (void)vulkan_replay_layout_for_executor(transported_layout);
@@ -4972,9 +4986,19 @@ static int materialize_vulkan_dispatch_images(
                 src, i, msaa_image_allowed, msaa_image_allowed_count)) {
             return -EOPNOTSUPP;
         }
+        VkImageLayout transported_initial_layout = (VkImageLayout)src->initial_layout;
+        int layout_identity_rc = strict_vulkan_graphics_layout_identity_matches(
+            strict_passthrough, transported_initial_layout,
+            "vulkan-dispatch",
+            "strict passthrough image initial layout replay mismatch");
+        if (layout_identity_rc != 0) return layout_identity_rc;
         VkImageLayout create_initial_layout =
-            vulkan_image_create_initial_layout_for_transport(
-                (VkImageLayout)src->initial_layout);
+            vulkan_image_create_initial_layout_for_transport(transported_initial_layout);
+        if (strict_passthrough && create_initial_layout != transported_initial_layout) {
+            json_fail("vulkan-dispatch",
+                      "strict passthrough image initial layout materialization mismatch");
+            return -EOPNOTSUPP;
+        }
         int mem_index = find_image_memory_object(
             memories, *memory_count, src->memory_resource_index);
         if (mem_index < 0) {
@@ -5429,11 +5453,11 @@ static int materialize_vulkan_dispatch_v52_image_layout_ranges(
                                                     (VkImageLayout)src->layout)) {
             return -ERANGE;
         }
-        if (strict_passthrough && (VkImageLayout)src->layout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
-            json_fail("vulkan-dispatch",
-                      "strict passthrough present layout replay mismatch");
-            return -EOPNOTSUPP;
-        }
+        int layout_identity_rc = strict_vulkan_graphics_layout_identity_matches(
+            strict_passthrough, (VkImageLayout)src->layout,
+            "vulkan-dispatch",
+            "strict passthrough image layout range replay mismatch");
+        if (layout_identity_rc != 0) return layout_identity_rc;
         VkImageLayout layout = vulkan_replay_layout_for_executor((VkImageLayout)src->layout);
         int duplicate = 0;
         for (uint32_t existing = 0; existing < image->layout_range_count; ++existing) {
@@ -5662,14 +5686,16 @@ static int record_vulkan_dispatch_v54_pre_dispatch_barriers(
             rc = -EOPNOTSUPP;
             goto cleanup;
         }
-        if (strict_passthrough &&
-            ((VkImageLayout)src->old_layout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR ||
-             (VkImageLayout)src->new_layout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR)) {
-            json_fail("vulkan-dispatch",
-                      "strict passthrough present layout replay mismatch");
-            rc = -EOPNOTSUPP;
-            goto cleanup;
-        }
+        rc = strict_vulkan_graphics_layout_identity_matches(
+            strict_passthrough, (VkImageLayout)src->old_layout,
+            "vulkan-dispatch",
+            "strict passthrough image barrier old layout replay mismatch");
+        if (rc != 0) goto cleanup;
+        rc = strict_vulkan_graphics_layout_identity_matches(
+            strict_passthrough, (VkImageLayout)src->new_layout,
+            "vulkan-dispatch",
+            "strict passthrough image barrier new layout replay mismatch");
+        if (rc != 0) goto cleanup;
         image_barriers[i] = (VkImageMemoryBarrier2){
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
             .srcStageMask = (VkPipelineStageFlags2)src->src_stage_mask,
@@ -29614,7 +29640,11 @@ static int validate_vulkan_graphics_v6_frame_content(
                 barrier->layer_count == VK_REMAINING_ARRAY_LAYERS) {
                 return -EPROTO;
             }
-            if (!vulkan_graphics_v620_image_aspect_valid(image, (VkImageAspectFlags)barrier->aspect_mask) ||
+            if ((!vulkan_graphics_v620_layout_value_valid(image, (VkImageLayout)barrier->old_layout) &&
+                 (VkImageLayout)barrier->old_layout != VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) ||
+                (!vulkan_graphics_v620_layout_value_valid(image, (VkImageLayout)barrier->new_layout) &&
+                 (VkImageLayout)barrier->new_layout != VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) ||
+                !vulkan_graphics_v620_image_aspect_valid(image, (VkImageAspectFlags)barrier->aspect_mask) ||
                 barrier->base_mip_level >= image->mip_levels ||
                 barrier->level_count > image->mip_levels - barrier->base_mip_level ||
                 barrier->base_array_layer >= image->array_layers ||
@@ -33292,7 +33322,8 @@ static int vulkan_replay_image_layout_range_valid(
 
 static int materialize_vulkan_graphics_v620_image_layout_ranges(
         const VulkanGraphicsV6FrameView *view,
-        VulkanGraphicsReplayAttachments *attachments) {
+        VulkanGraphicsReplayAttachments *attachments,
+        int strict_passthrough) {
     if (!view || !attachments) return -EINVAL;
     if (!view->is_v620 || !view->header_v620) return 0;
     for (uint32_t i = 0; i < view->header_v620->v620.image_layout_range_count; ++i) {
@@ -33308,6 +33339,11 @@ static int materialize_vulkan_graphics_v620_image_layout_ranges(
             .layerCount = src->layer_count,
         };
         if (!vulkan_replay_image_layout_range_valid(image, &range)) return -ERANGE;
+        int layout_identity_rc = strict_vulkan_graphics_layout_identity_matches(
+            strict_passthrough, (VkImageLayout)src->layout,
+            "vulkan-graphics-v6-attachment-materialize",
+            "strict passthrough graphics image layout range replay mismatch");
+        if (layout_identity_rc != 0) return layout_identity_rc;
         int grow_rc = ensure_vulkan_replay_image_layout_range_capacity(
             &image->layout_ranges, &image->layout_range_capacity, image->layout_range_count + 1u);
         if (grow_rc != 0) return grow_rc;
@@ -33514,7 +33550,7 @@ static int materialize_vulkan_graphics_v6_attachments(
             }
         }
     }
-    rc = materialize_vulkan_graphics_v620_image_layout_ranges(view, out);
+    rc = materialize_vulkan_graphics_v620_image_layout_ranges(view, out, strict_passthrough);
     if (rc != 0) return rc;
 
     for (uint32_t c = 0; c < view->header->command_count; ++c) {
@@ -36066,10 +36102,14 @@ static int strict_vulkan_graphics_image_layout_matches(
         VkImageLayout expected_layout,
         const char *message) {
     if (!strict_passthrough) return 0;
-    VkImageLayout tracked_layout = VK_IMAGE_LAYOUT_UNDEFINED;
-    int rc = vulkan_replay_image_layout_for_range(image, range, &tracked_layout);
+    int rc = strict_vulkan_graphics_layout_identity_matches(
+        strict_passthrough, expected_layout,
+        "vulkan-graphics-v6-command-record",
+        message);
     if (rc != 0) return rc;
-    expected_layout = vulkan_replay_layout_for_executor(expected_layout);
+    VkImageLayout tracked_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+    rc = vulkan_replay_image_layout_for_range(image, range, &tracked_layout);
+    if (rc != 0) return rc;
     if (tracked_layout != expected_layout) {
         json_fail("vulkan-graphics-v6-command-record", message);
         return -EOPNOTSUPP;
@@ -36384,6 +36424,16 @@ static int collect_vulkan_graphics_v6_dependency_barriers(
             .baseArrayLayer = barrier->base_array_layer,
             .layerCount = barrier->layer_count,
         };
+        rc = strict_vulkan_graphics_layout_identity_matches(
+            strict_passthrough, (VkImageLayout)barrier->old_layout,
+            "vulkan-graphics-v6-command-record",
+            "strict passthrough graphics barrier old layout replay mismatch");
+        if (rc != 0) return rc;
+        rc = strict_vulkan_graphics_layout_identity_matches(
+            strict_passthrough, (VkImageLayout)barrier->new_layout,
+            "vulkan-graphics-v6-command-record",
+            "strict passthrough graphics barrier new layout replay mismatch");
+        if (rc != 0) return rc;
         rc = strict_vulkan_graphics_image_layout_matches(
             strict_passthrough, barrier_image, &barrier_range,
             (VkImageLayout)barrier->old_layout,
@@ -37864,13 +37914,6 @@ begin_rendering_cleanup:
                     .dstOffset = {copy->dst_offset_x, copy->dst_offset_y, copy->dst_offset_z},
                     .extent = {copy->extent_width, copy->extent_height, copy->extent_depth},
                 };
-                vkCmdCopyImage(command_buffer,
-                               src_image->image,
-                               vulkan_replay_layout_for_executor((VkImageLayout)copy->src_layout),
-                               dst_image->image,
-                               vulkan_replay_layout_for_executor((VkImageLayout)copy->dst_layout),
-                               1,
-                               &region);
                 VkImageSubresourceRange src_range = {
                     .aspectMask = (VkImageAspectFlags)copy->src_aspect_mask,
                     .baseMipLevel = copy->src_mip_level,
@@ -37893,6 +37936,13 @@ begin_rendering_cleanup:
                     strict_passthrough, dst_image, &dst_range, (VkImageLayout)copy->dst_layout,
                     "strict passthrough graphics image-copy dst layout mismatch");
                 if (rc != 0) goto cleanup;
+                vkCmdCopyImage(command_buffer,
+                               src_image->image,
+                               vulkan_replay_layout_for_executor((VkImageLayout)copy->src_layout),
+                               dst_image->image,
+                               vulkan_replay_layout_for_executor((VkImageLayout)copy->dst_layout),
+                               1,
+                               &region);
                 rc = vulkan_replay_image_set_layout_for_range(
                     src_image, &src_range, vulkan_replay_layout_for_executor((VkImageLayout)copy->src_layout));
                 if (rc != 0) goto cleanup;
@@ -37932,13 +37982,6 @@ begin_rendering_cleanup:
                     .dstOffset = {resolve->dst_offset_x, resolve->dst_offset_y, resolve->dst_offset_z},
                     .extent = {resolve->extent_width, resolve->extent_height, resolve->extent_depth},
                 };
-                vkCmdResolveImage(command_buffer,
-                                  src_image->image,
-                                  vulkan_replay_layout_for_executor((VkImageLayout)resolve->src_layout),
-                                  dst_image->image,
-                                  vulkan_replay_layout_for_executor((VkImageLayout)resolve->dst_layout),
-                                  1,
-                                  &region);
                 VkImageSubresourceRange src_range = {
                     .aspectMask = (VkImageAspectFlags)resolve->src_aspect_mask,
                     .baseMipLevel = resolve->src_mip_level,
@@ -37961,6 +38004,13 @@ begin_rendering_cleanup:
                     strict_passthrough, dst_image, &dst_range, (VkImageLayout)resolve->dst_layout,
                     "strict passthrough graphics resolve dst layout mismatch");
                 if (rc != 0) goto cleanup;
+                vkCmdResolveImage(command_buffer,
+                                  src_image->image,
+                                  vulkan_replay_layout_for_executor((VkImageLayout)resolve->src_layout),
+                                  dst_image->image,
+                                  vulkan_replay_layout_for_executor((VkImageLayout)resolve->dst_layout),
+                                  1,
+                                  &region);
                 rc = vulkan_replay_image_set_layout_for_range(
                     src_image, &src_range, vulkan_replay_layout_for_executor((VkImageLayout)resolve->src_layout));
                 if (rc != 0) goto cleanup;
@@ -38005,14 +38055,6 @@ begin_rendering_cleanup:
                         {blit->dst_offset1_x, blit->dst_offset1_y, blit->dst_offset1_z},
                     },
                 };
-                vkCmdBlitImage(command_buffer,
-                               src_image->image,
-                               vulkan_replay_layout_for_executor((VkImageLayout)blit->src_layout),
-                               dst_image->image,
-                               vulkan_replay_layout_for_executor((VkImageLayout)blit->dst_layout),
-                               1,
-                               &region,
-                               (VkFilter)blit->filter);
                 VkImageSubresourceRange src_range = {
                     .aspectMask = (VkImageAspectFlags)blit->src_aspect_mask,
                     .baseMipLevel = blit->src_mip_level,
@@ -38035,6 +38077,14 @@ begin_rendering_cleanup:
                     strict_passthrough, dst_image, &dst_range, (VkImageLayout)blit->dst_layout,
                     "strict passthrough graphics blit dst layout mismatch");
                 if (rc != 0) goto cleanup;
+                vkCmdBlitImage(command_buffer,
+                               src_image->image,
+                               vulkan_replay_layout_for_executor((VkImageLayout)blit->src_layout),
+                               dst_image->image,
+                               vulkan_replay_layout_for_executor((VkImageLayout)blit->dst_layout),
+                               1,
+                               &region,
+                               (VkFilter)blit->filter);
                 rc = vulkan_replay_image_set_layout_for_range(
                     src_image, &src_range, vulkan_replay_layout_for_executor((VkImageLayout)blit->src_layout));
                 if (rc != 0) goto cleanup;
