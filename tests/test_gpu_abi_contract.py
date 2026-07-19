@@ -8711,6 +8711,64 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("u32 = b->api_memory_type_index; hash = fnv1a64_update(hash, &u32, sizeof(u32));", cache_key)
         self.assertIn("u32 = b->api_memory_heap_index; hash = fnv1a64_update(hash, &u32, sizeof(u32));", cache_key)
 
+    def test_vulkan_v5_descriptor_reconciliation_hash_has_ordered_field_parity(self):
+        icd_sender = c_function_body(VULKAN_ICD.read_text(), "send_generic_vulkan_dispatch_op")
+        executor_hash = c_function_body(GPU_EXECUTOR.read_text(), "reconcile_descriptor_hash")
+
+        sender_order = [
+            "descriptor_hash = fnv1a64_update_u32(descriptor_hash, api_descriptor_sets[i]);",
+            "descriptor_hash = fnv1a64_update_u32(descriptor_hash, bindings[i]);",
+            "descriptor_hash = fnv1a64_update_u32(descriptor_hash, api_descriptor_array_elements[i]);",
+            "descriptor_hash = fnv1a64_update_u64(descriptor_hash, (uint64_t)offsets[i]);",
+            "descriptor_hash = fnv1a64_update_u64(descriptor_hash, (uint64_t)sizes[i]);",
+            "descriptor_hash = fnv1a64_update_u64(descriptor_hash, (uint64_t)api_offsets[i]);",
+            "descriptor_hash = fnv1a64_update_u64(descriptor_hash, (uint64_t)api_ranges[i]);",
+            "descriptor_hash = fnv1a64_update_u64(descriptor_hash, (uint64_t)api_buffer_sizes[i]);",
+            "descriptor_hash = fnv1a64_update_u64(descriptor_hash, api_buffer_usages[i]);",
+            "descriptor_hash = fnv1a64_update_u32(descriptor_hash, api_descriptor_types[i]);",
+            "buffer_descriptor_v5_access_flags((VkDescriptorType)api_descriptor_types[i])",
+            "descriptor_hash = fnv1a64_update_u32(descriptor_hash, api_dynamic_flags[i]);",
+            "descriptor_hash = fnv1a64_update_u64(descriptor_hash, (uint64_t)api_memory_offsets[i]);",
+            "descriptor_hash = fnv1a64_update_u64(descriptor_hash, (uint64_t)api_memory_sizes[i]);",
+            "descriptor_hash = fnv1a64_update_u64(descriptor_hash, api_memory_property_flags[i]);",
+            "descriptor_hash = fnv1a64_update_u32(descriptor_hash, api_memory_type_indices[i]);",
+            "descriptor_hash = fnv1a64_update_u32(descriptor_hash, api_memory_heap_indices[i]);",
+            "descriptor_hash = fnv1a64_update_u64(descriptor_hash, (uint64_t)api_memory_ids[i]);",
+            "descriptor_hash = fnv1a64_update_u64(descriptor_hash, (uint64_t)api_buffer_ids[i]);",
+        ]
+        last = -1
+        for snippet in sender_order:
+            pos = icd_sender.find(snippet)
+            self.assertGreater(pos, last, snippet)
+            last = pos
+
+        executor_order = [
+            "uint32_t u32 = bindings[i].descriptor_set;",
+            "u32 = bindings[i].binding;",
+            "u32 = bindings[i].api_array_element;",
+            "u64 = (uint64_t)bindings[i].offset;",
+            "u64 = (uint64_t)bindings[i].size;",
+            "u64 = (uint64_t)bindings[i].api_offset;",
+            "u64 = (uint64_t)bindings[i].api_range;",
+            "u64 = (uint64_t)bindings[i].api_buffer_size;",
+            "u64 = bindings[i].api_buffer_usage;",
+            "u32 = bindings[i].api_descriptor_type;",
+            "u32 = bindings[i].access_flags;",
+            "u32 = (uint32_t)bindings[i].api_dynamic;",
+            "u64 = (uint64_t)bindings[i].api_memory_offset;",
+            "u64 = (uint64_t)bindings[i].api_memory_size;",
+            "u64 = bindings[i].api_memory_property_flags;",
+            "u32 = bindings[i].api_memory_type_index;",
+            "u32 = bindings[i].api_memory_heap_index;",
+            "u64 = bindings[i].api_memory_id;",
+            "u64 = bindings[i].api_buffer_id;",
+        ]
+        last = -1
+        for snippet in executor_order:
+            pos = executor_hash.find(snippet)
+            self.assertGreater(pos, last, snippet)
+            last = pos
+
     def test_vulkan_compute_v5_preserves_api_buffer_usage_identity(self):
         icd = VULKAN_ICD.read_text()
         executor = GPU_EXECUTOR.read_text()
