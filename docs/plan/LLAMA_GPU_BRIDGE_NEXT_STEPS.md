@@ -9,7 +9,19 @@ llama.cpp itself remains unmodified.
 
 ## Current Ground Truth
 
+### 2026-07-19 CPU/static Q6 final-store classifier lane
 
+The compare summarizer now promotes existing Q6 final-store boundary evidence
+before falling back to the broad `native-q6-device-execution-or-final-store`
+class.  If `q6_final_store_boundary.summary` is `executor-writeback-mismatch`,
+the blocker is `executor-final-writeback`.  If it is
+`native-final-store-mismatch`, the blocker becomes `native-q6-final-store` only
+when `q6_stage_divergence.summary` is `final-lane0-store-mismatch`; otherwise
+it fails closed as `q6-stage-divergence-evidence-missing`.
+
+This is CPU/static classification hardening only.  It does not recollect device
+artifacts and does not change llama.cpp, Dockerfiles, models, prompts, shader
+bytes, or executor arithmetic.
 
 ### 2026-07-19 CPU/static Vulkan dispatch-option bridge lane
 

@@ -6373,6 +6373,23 @@ q6_blocker_class = (
     else "q6-store-index-model-incomplete"
     if q6_store_index_model_required and not q6_store_index_model_valid
     else "executor-final-writeback"
+    if q6_final_store_boundary.get("summary") == "executor-writeback-mismatch"
+    else "q6-stage-divergence-evidence-missing"
+    if (
+        q6_final_store_boundary.get("summary") == "native-final-store-mismatch"
+        and q6_stage_divergence.get("summary") != "final-lane0-store-mismatch"
+    )
+    else "native-q6-final-store"
+    if q6_final_store_boundary.get("summary") == "native-final-store-mismatch"
+    else "q6-stage-divergence-evidence-missing"
+    if (
+        q6_output_index_probe_summary == "final-store-value"
+        and q6_shader_like_oracle_cleared
+        and q6_stage_divergence.get("summary") != "final-lane0-store-mismatch"
+    )
+    else "native-q6-final-store"
+    if q6_output_index_probe_summary == "final-store-value" and q6_shader_like_oracle_cleared
+    else "executor-final-writeback"
     if q6_native_vs_writeback_split.get("summary") == "executor-final-writeback"
     else "native-q6-final-store-or-readback"
     if q6_native_vs_writeback_split.get("summary") == "native-final-store-or-readback"
