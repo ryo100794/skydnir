@@ -573,6 +573,74 @@ def _config_propagation_failed(
     return summary_failed and not saw_deferred_check
 
 
+def _env_value_truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _runtime_env_truthy(runtime_env_manifest: dict[str, Any], env_name: str) -> bool:
+    for source_name in ("intended_runtime_env", "requested_or_planned_env", "planned_container_env", "host_requested_env"):
+        mapping = runtime_env_manifest.get(source_name)
+        if isinstance(mapping, dict) and env_name in mapping and _env_value_truthy(mapping.get(env_name)):
+            return True
+    return False
+
+
+def _config_check_truthy(config_propagation: dict[str, Any], env_name: str) -> bool:
+    checks = config_propagation.get("checks") or []
+    if not isinstance(checks, list):
+        return False
+    for check in checks:
+        if not isinstance(check, dict) or check.get("env") != env_name:
+            continue
+        if _env_value_truthy(check.get("expected")):
+            return True
+        observed = check.get("observed_values")
+        if isinstance(observed, list) and any(_env_value_truthy(value) for value in observed):
+            return True
+    return False
+
+
+def _strict_passthrough_requested(
+    runtime_env_manifest: dict[str, Any],
+    config_propagation: dict[str, Any],
+) -> bool:
+    return _runtime_env_truthy(runtime_env_manifest, "PDOCKER_GPU_STRICT_PASSTHROUGH") or _config_check_truthy(
+        config_propagation, "PDOCKER_GPU_STRICT_PASSTHROUGH"
+    )
+
+
+def _strict_passthrough_forbidden_env_evidence(
+    runtime_env_manifest: dict[str, Any],
+    config_propagation: dict[str, Any],
+) -> list[dict[str, Any]]:
+    if not _strict_passthrough_requested(runtime_env_manifest, config_propagation):
+        return []
+    evidence: list[dict[str, Any]] = []
+    for env_name in LLAMA_GPU_STRICT_PASSTHROUGH_FORBIDDEN_ENVS:
+        sources: list[str] = []
+        for source_name in ("intended_runtime_env", "requested_or_planned_env", "planned_container_env", "host_requested_env"):
+            mapping = runtime_env_manifest.get(source_name)
+            if isinstance(mapping, dict) and env_name in mapping and _env_value_truthy(mapping.get(env_name)):
+                sources.append(source_name)
+        checks = config_propagation.get("checks") or []
+        if isinstance(checks, list):
+            for check in checks:
+                if not isinstance(check, dict) or check.get("env") != env_name:
+                    continue
+                if _env_value_truthy(check.get("expected")):
+                    sources.append("config_expected")
+                observed = check.get("observed_values")
+                if isinstance(observed, list) and any(_env_value_truthy(value) for value in observed):
+                    sources.append("config_observed")
+        if sources:
+            evidence.append({"env": env_name, "sources": sorted(set(sources))})
+    return evidence
+
+
 def _unsupported_gpu_work_evidence(data: Any, path: str = "$") -> list[dict[str, str]]:
     """Return bounded structured evidence for unsupported GPU work.
 
@@ -3393,6 +3461,26 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
             "required_config_propagation_envs": [
                 env_name for env_name, _field_name in LLAMA_GPU_CONFIG_PROPAGATION_ENV_FIELDS
             ],
+        }
+
+    strict_forbidden_env_evidence = _strict_passthrough_forbidden_env_evidence(
+        runtime_env_manifest,
+        config_propagation,
+    )
+    if strict_forbidden_env_evidence:
+        return _claim_base(
+            "strict-passthrough-forbidden-env",
+            next_action=(
+                data.get("next_action")
+                or "rerun strict pass-through without diagnostic shader, pipeline, data-materialization, or safe-kernel override envs"
+            ),
+            runtime_freshness=runtime_freshness,
+            runtime_env_manifest=runtime_env_manifest,
+            responsibility_boundary="env-policy",
+        ) | {
+            "config_propagation": config_propagation,
+            "strict_passthrough_forbidden_env_evidence": strict_forbidden_env_evidence,
+            "strict_passthrough_forbidden_env": list(LLAMA_GPU_STRICT_PASSTHROUGH_FORBIDDEN_ENVS),
         }
 
     oracle_fail_closed_evidence = _oracle_fail_closed_evidence(data)

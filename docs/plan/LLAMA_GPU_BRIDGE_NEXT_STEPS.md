@@ -22,9 +22,10 @@ disable-optimization policy, and strict duplicate-descriptor normalization.
 The GPU ABI contract test now requires every forwarded compare env to belong to
 an explicit bridge classification and requires every strict-forbidden env to be
 forwarded, classified, and present in config propagation metadata. The verifier
-loads the same manifest field as `LLAMA_GPU_STRICT_PASSTHROUGH_FORBIDDEN_ENVS`,
-so future verifier policy can consume the same source instead of recreating the
-set locally.
+loads the same manifest field as `LLAMA_GPU_STRICT_PASSTHROUGH_FORBIDDEN_ENVS`
+and now rejects strict pass-through artifacts when any forbidden env is requested
+or observed as enabled, even if ordinary config propagation reflection itself
+passed.
 
 Validation command:
 

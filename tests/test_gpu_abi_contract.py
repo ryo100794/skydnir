@@ -24353,6 +24353,10 @@ class GpuAbiContractTest(unittest.TestCase):
             manifest["q6_required_env_overlay"],
             verifier.LLAMA_GPU_Q6_REQUIRED_ENV_OVERLAY,
         )
+        self.assertEqual(
+            tuple(manifest["strict_passthrough_forbidden_env"]),
+            verifier.LLAMA_GPU_STRICT_PASSTHROUGH_FORBIDDEN_ENVS,
+        )
         self.assertIn("LLAMA_GPU_Q6_REQUIRED_ENV_OVERLAY", LLAMA_GPU_ARTIFACT_VERIFIER.read_text())
         for env_name in verifier.LLAMA_GPU_Q6_REQUIRED_ENV_OVERLAY:
             self.assertIn(env_name, verifier.LLAMA_GPU_COMPARE_FORWARD_ENV_KEYS)
@@ -24408,6 +24412,49 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertFalse(report["correctness_claim_allowed"])
         self.assertFalse(report["benchmark_claim_allowed"])
         self.assertIn("PDOCKER_GPU_Q6K_SAFE_KERNEL", json.dumps(report["config_propagation"]))
+
+    def test_llama_gpu_artifact_verifier_rejects_strict_forbidden_env_even_when_reflected(self):
+        verifier = load_llama_gpu_artifact_verifier()
+        config_checks = []
+        forbidden = set(verifier.LLAMA_GPU_STRICT_PASSTHROUGH_FORBIDDEN_ENVS)
+        for env, field in verifier.LLAMA_GPU_CONFIG_PROPAGATION_ENV_FIELDS:
+            enabled = env in {"PDOCKER_GPU_STRICT_PASSTHROUGH", "PDOCKER_GPU_Q6K_SAFE_KERNEL"}
+            config_checks.append({
+                "env": env,
+                "executor_field": field,
+                "expected": enabled,
+                "observed_values": [enabled],
+                "status": "pass",
+            })
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "runtime_env_manifest": {
+                    "host_requested_env": {
+                        "PDOCKER_GPU_STRICT_PASSTHROUGH": "1",
+                        "PDOCKER_GPU_Q6K_SAFE_KERNEL": "1",
+                    }
+                },
+                "diagnostics": {
+                    "runtime_freshness": llama_runtime_freshness_pass(),
+                    "config_propagation": {"summary": "pass", "checks": config_checks},
+                    "q6_workgroup_diagnostics": {
+                        "event_count": 1,
+                        "q6_dispatch_seen": True,
+                        "latest_status": "match",
+                        "q6_writeback_verified_all": True,
+                    },
+                },
+                "correctness": {"summary": {"correctness": "pass"}},
+            },
+            "comparison": {"speedup": 3.0, "target_met": True},
+        }
+        report = verifier.classify(payload)
+        self.assertEqual("strict-passthrough-forbidden-env", report["classification"])
+        self.assertFalse(report["correctness_claim_allowed"])
+        self.assertFalse(report["benchmark_claim_allowed"])
+        self.assertIn("PDOCKER_GPU_Q6K_SAFE_KERNEL", json.dumps(report["strict_passthrough_forbidden_env_evidence"]))
+        self.assertLessEqual(forbidden, set(report["strict_passthrough_forbidden_env"]))
 
     def test_llama_compare_records_completion_readiness_and_runtime_env(self):
         compare = LLAMA_COMPARE.read_text()
