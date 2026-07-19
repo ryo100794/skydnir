@@ -29,14 +29,18 @@
     X(PDOCKER_GPU_WRITEONLY_DIRTY_PROBE, dirty_probe, has_dirty_probe, dirty_probe, 0) \
     X(PDOCKER_GPU_WRITEONLY_DIRTY_WRITEBACK, dirty_writeback, has_dirty_writeback, dirty_writeback, 0) \
     X(PDOCKER_GPU_WRITEONLY_BUFFER_CACHE, writeonly_cache, has_writeonly_buffer_cache, writeonly_buffer_cache, 0) \
+    X(PDOCKER_GPU_UNSAFE_DIRTY_WRITEBACK_CACHE, unsafe_dirty_writeback_cache, has_unsafe_dirty_writeback_cache, unsafe_dirty_writeback_cache, 0) \
     X(PDOCKER_GPU_MUTABLE_BUFFER_CACHE, mutable_cache, has_mutable_buffer_cache, mutable_buffer_cache, 1) \
     X(PDOCKER_GPU_RESIDENT_CACHE, resident_cache, has_resident_cache, resident_cache, 1) \
     X(PDOCKER_GPU_STRICT_GRAPH_CACHE, strict_graph_cache, has_strict_graph_cache, strict_graph_cache, 1) \
+    X(PDOCKER_GPU_DISPATCH_PROFILE_LOG, dispatch_profile_log, has_dispatch_profile_log, dispatch_profile_log, 0) \
+    X(PDOCKER_GPU_CHAIN_COMPAT_FEATURE_STRUCTS, chain_compat_feature_structs, has_chain_compat_feature_structs, chain_compat_feature_structs, 1) \
     X(PDOCKER_GPU_STRICT_PASSTHROUGH, strict_passthrough, has_strict_passthrough, strict_passthrough, 0) \
     X(PDOCKER_GPU_STRICT_RECONCILIATION, strict_reconciliation, has_strict_reconciliation, strict_reconciliation, 0) \
     X(PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING, strict_device_local_staging, has_strict_device_local_staging, strict_device_local_staging, 0) \
     X(PDOCKER_GPU_STRICT_DUPLICATE_DESCRIPTOR_NORMALIZATION, strict_duplicate_descriptor_normalization, has_strict_duplicate_descriptor_normalization, strict_duplicate_descriptor_normalization, 0) \
     X(PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS, rewrite_duplicate_descriptors, has_rewrite_duplicate_descriptors, rewrite_duplicate_descriptors, 1) \
+    X(PDOCKER_GPU_RETRY_MATERIALIZE_SPECIALIZATION, retry_materialize_specialization, has_retry_materialize_specialization, retry_materialize_specialization, 0) \
     X(PDOCKER_GPU_MATERIALIZE_DESCRIPTOR_ALIASES, materialize_descriptor_aliases, has_materialize_descriptor_aliases, materialize_descriptor_aliases, 0) \
     X(PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS, materialize_specialization, has_materialize_specialization_constants, materialize_specialization_constants, 1) \
     X(PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC, legalize_workgroup_size_from_spec, has_legalize_workgroup_size_from_spec, legalize_workgroup_size_from_spec, 1) \
@@ -65,6 +69,7 @@
     X(PDOCKER_GPU_STRICT_GRAPH_CACHE_MAX_BYTES, strict_graph_cache_max, has_strict_graph_cache_max_bytes, strict_graph_cache_max_bytes) \
     X(PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING_MAX_TRANSFER_BYTES, strict_device_local_staging_max_transfer, has_strict_device_local_staging_max_transfer_bytes, strict_device_local_staging_max_transfer_bytes) \
     X(PDOCKER_GPU_WRITEONLY_DIRTY_PROBE_MIN_BYTES, dirty_probe_min, has_dirty_probe_min_bytes, dirty_probe_min_bytes) \
+    X(PDOCKER_GPU_WRITEBACK_FULL_HASH_MAX_BYTES, writeback_full_hash_max, has_writeback_full_hash_max_bytes, writeback_full_hash_max_bytes) \
     X(PDOCKER_GPU_SPIRV_PROBE_DEBUG_BINDING, spirv_probe_debug_binding, has_spirv_probe_debug_binding, spirv_probe_debug_binding)
 
 #define PDOCKER_GPU_VULKAN_STRING_DISPATCH_OPTION_MAX_BYTES 512u

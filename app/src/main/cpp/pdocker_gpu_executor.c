@@ -1386,6 +1386,8 @@ typedef struct {
     int dirty_probe;
     int has_dirty_probe_min_bytes;
     size_t dirty_probe_min_bytes;
+    int has_writeback_full_hash_max_bytes;
+    size_t writeback_full_hash_max_bytes;
     int has_spirv_probe_debug_binding;
     size_t spirv_probe_debug_binding;
     int has_spirv_dump_dir;
@@ -1400,6 +1402,8 @@ typedef struct {
     int dirty_writeback;
     int has_writeonly_buffer_cache;
     int writeonly_buffer_cache;
+    int has_unsafe_dirty_writeback_cache;
+    int unsafe_dirty_writeback_cache;
     int has_mutable_buffer_cache;
     int mutable_buffer_cache;
     int has_mutable_buffer_cache_max_bytes;
@@ -1410,6 +1414,10 @@ typedef struct {
     size_t resident_cache_min_bytes;
     int has_strict_graph_cache;
     int strict_graph_cache;
+    int has_dispatch_profile_log;
+    int dispatch_profile_log;
+    int has_chain_compat_feature_structs;
+    int chain_compat_feature_structs;
     int has_strict_graph_cache_max_bytes;
     size_t strict_graph_cache_max_bytes;
     int has_profile_response;
@@ -1426,6 +1434,8 @@ typedef struct {
     int strict_duplicate_descriptor_normalization;
     int has_rewrite_duplicate_descriptors;
     int rewrite_duplicate_descriptors;
+    int has_retry_materialize_specialization;
+    int retry_materialize_specialization;
     int has_materialize_descriptor_aliases;
     int materialize_descriptor_aliases;
     int has_materialize_specialization_constants;
@@ -6237,6 +6247,34 @@ static int strict_vulkan_reconciliation_requested(const VulkanDispatchOptions *o
     return env_truthy("PDOCKER_GPU_STRICT_RECONCILIATION", 0);
 }
 
+static int dispatch_profile_log_requested(const VulkanDispatchOptions *options) {
+    if (options && options->has_dispatch_profile_log) {
+        return options->dispatch_profile_log;
+    }
+    return env_truthy("PDOCKER_GPU_DISPATCH_PROFILE_LOG", 0);
+}
+
+static int chain_compat_feature_structs_requested(const VulkanDispatchOptions *options) {
+    if (options && options->has_chain_compat_feature_structs) {
+        return options->chain_compat_feature_structs;
+    }
+    return env_truthy("PDOCKER_GPU_CHAIN_COMPAT_FEATURE_STRUCTS", 1);
+}
+
+static int retry_materialize_specialization_requested(const VulkanDispatchOptions *options) {
+    if (options && options->has_retry_materialize_specialization) {
+        return options->retry_materialize_specialization;
+    }
+    return env_truthy("PDOCKER_GPU_RETRY_MATERIALIZE_SPECIALIZATION", 0);
+}
+
+static int unsafe_dirty_writeback_cache_requested(const VulkanDispatchOptions *options) {
+    if (options && options->has_unsafe_dirty_writeback_cache) {
+        return options->unsafe_dirty_writeback_cache;
+    }
+    return env_truthy("PDOCKER_GPU_UNSAFE_DIRTY_WRITEBACK_CACHE", 0);
+}
+
 static void apply_vulkan_feature_policy(VulkanRuntime *rt) {
     if (!rt) return;
     if (env_truthy("PDOCKER_VULKAN_DISABLE_8BIT_STORAGE", 0)) {
@@ -6387,13 +6425,16 @@ static int writeonly_dirty_probe_enabled(void) {
     return env_truthy("PDOCKER_GPU_WRITEONLY_DIRTY_PROBE", 0);
 }
 
-static int writeonly_dirty_writeback_enabled(void) {
+static int writeonly_dirty_writeback_enabled(const VulkanDispatchOptions *options) {
     /*
      * Dirty writeback is a performance optimization, not a correctness
      * primitive.  The current sentinel/cache implementation can miss
      * input-dependent write sets, so keep it behind an explicit unsafe opt-in.
+     * Both the unsafe gate and the writeback switch are accepted as dispatch
+     * options so container-visible knobs do not depend on app-process getenv.
      */
-    if (!env_truthy("PDOCKER_GPU_UNSAFE_DIRTY_WRITEBACK_CACHE", 0)) return 0;
+    if (!unsafe_dirty_writeback_cache_requested(options)) return 0;
+    if (options && options->has_dirty_writeback) return options->dirty_writeback;
     return env_truthy("PDOCKER_GPU_WRITEONLY_DIRTY_WRITEBACK", 0);
 }
 
@@ -6407,7 +6448,10 @@ static size_t writeonly_dirty_probe_min_bytes(void) {
     return PDOCKER_GPU_WRITEONLY_DIRTY_PROBE_DEFAULT_MIN_BYTES;
 }
 
-static size_t writeback_full_hash_max_bytes(void) {
+static size_t writeback_full_hash_max_bytes(const VulkanDispatchOptions *options) {
+    if (options && options->has_writeback_full_hash_max_bytes) {
+        return options->writeback_full_hash_max_bytes;
+    }
     const char *value = getenv("PDOCKER_GPU_WRITEBACK_FULL_HASH_MAX_BYTES");
     if (value && value[0]) {
         char *end = NULL;
@@ -14633,8 +14677,22 @@ static VulkanVectorBuffer *acquire_dispatch_buffer(
     return temporary;
 }
 
-static int init_vulkan_runtime(VulkanRuntime *rt) {
-    if (rt->ready) return 0;
+static int init_vulkan_runtime(VulkanRuntime *rt, const VulkanDispatchOptions *options) {
+    const int requested_chain_compat_feature_structs =
+        chain_compat_feature_structs_requested(options);
+    if (rt->ready) {
+        if (rt->enabled_chain_compat_feature_structs !=
+            (uint8_t)requested_chain_compat_feature_structs) {
+            fprintf(stderr,
+                    "pdocker-gpu-executor: Vulkan runtime already initialized with "
+                    "chain_compat_feature_structs=%u requested=%d; restart executor or keep "
+                    "the container ICD dispatch option stable\n",
+                    (unsigned)rt->enabled_chain_compat_feature_structs,
+                    requested_chain_compat_feature_structs);
+            return -EINVAL;
+        }
+        return 0;
+    }
     double start = now_ms();
     const char *stage = "start";
     VkResult rc = VK_SUCCESS;
@@ -15022,8 +15080,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
         enabled_extended_dynamic_state2.pNext = device_features_pnext;
         device_features_pnext = &enabled_extended_dynamic_state2;
     }
-    const int chain_compat_feature_structs =
-        env_truthy("PDOCKER_GPU_CHAIN_COMPAT_FEATURE_STRUCTS", 1);
+    const int chain_compat_feature_structs = requested_chain_compat_feature_structs;
     const int separate_depth_stencil_layouts_available =
         enabled_separate_depth_stencil_layouts.separateDepthStencilLayouts &&
         (rt->api_version >= VK_API_VERSION_1_2 ||
@@ -15569,7 +15626,7 @@ fail:
 
 static int run_vector_add_arrays_vulkan(const float *a, const float *b, float *out, size_t n, const char *transport) {
     const int was_ready = g_vulkan_runtime.ready;
-    if (init_vulkan_runtime(&g_vulkan_runtime) != 0) return -21;
+    if (init_vulkan_runtime(&g_vulkan_runtime, NULL) != 0) return -21;
     VulkanRuntime *rt = &g_vulkan_runtime;
     const size_t bytes = n * sizeof(float);
     const double init_ms = was_ready ? 0.0 : rt->init_ms;
@@ -16321,7 +16378,7 @@ static int run_vulkan_dispatch_fd(
     }
     if (!entry_name || !entry_name[0]) entry_name = "main";
     const int was_ready = g_vulkan_runtime.ready;
-    if (init_vulkan_runtime(&g_vulkan_runtime) != 0) return -21;
+    if (init_vulkan_runtime(&g_vulkan_runtime, options) != 0) return -21;
     VulkanRuntime *rt = &g_vulkan_runtime;
     if (submit_queue == VK_NULL_HANDLE) submit_queue = rt->queue;
     if (submit_queue == VK_NULL_HANDLE) {
@@ -16337,8 +16394,7 @@ static int run_vulkan_dispatch_fd(
     const uint64_t dispatch_lifecycle_id =
         __sync_add_and_fetch(&g_vulkan_dispatch_lifecycle_sequence, 1);
     const double dispatch_lifecycle_start_ms = now_ms();
-    const int dispatch_lifecycle_log =
-        env_truthy("PDOCKER_GPU_DISPATCH_PROFILE_LOG", 0);
+    const int dispatch_lifecycle_log = dispatch_profile_log_requested(options);
     int dispatch_lifecycle_begin_logged = 0;
     uint64_t dispatch_lifecycle_spirv_hash = 0;
     VkResult rc = VK_SUCCESS;
@@ -16680,9 +16736,9 @@ static int run_vulkan_dispatch_fd(
     const int dirty_probe_enabled = options && options->has_dirty_probe
         ? (strict_passthrough ? 0 : options->dirty_probe)
         : (strict_passthrough ? 0 : writeonly_dirty_probe_enabled());
-    const int dirty_writeback_enabled = options && options->has_dirty_writeback
-        ? (strict_passthrough ? 0 : options->dirty_writeback)
-        : (strict_passthrough ? 0 : writeonly_dirty_writeback_enabled());
+    const int dirty_writeback_enabled = strict_passthrough
+        ? 0
+        : writeonly_dirty_writeback_enabled(options);
     const size_t dirty_probe_min_bytes = options && options->has_dirty_probe_min_bytes
         ? options->dirty_probe_min_bytes
         : writeonly_dirty_probe_min_bytes();
@@ -16699,7 +16755,7 @@ static int run_vulkan_dispatch_fd(
     const int profile_response = options && options->has_profile_response
         ? options->profile_response
         : env_truthy("PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE", 0);
-    const size_t profile_full_hash_max_bytes = writeback_full_hash_max_bytes();
+    const size_t profile_full_hash_max_bytes = writeback_full_hash_max_bytes(options);
     double timing_strict_graph_ms = 0.0;
     double timing_pipeline_lookup_ms = 0.0;
     double timing_pipeline_create_ms = 0.0;
@@ -17748,8 +17804,7 @@ static int run_vulkan_dispatch_fd(
                 &strict_object_graph_cache_bytes,
                 &strict_object_graph_cache_disabled_reason);
         }
-        if ((dispatch_lifecycle_log || profile_response ||
-             getenv("PDOCKER_GPU_DISPATCH_PROFILE_LOG")) && strict_object_graph_cache_enabled) {
+        if ((dispatch_lifecycle_log || profile_response) && strict_object_graph_cache_enabled) {
             fprintf(stderr,
                     "pdocker-gpu-executor: strict graph cache plan: "
                     "{\"component\":\"executor\",\"event\":\"strict-graph-cache-plan\","
@@ -18586,7 +18641,7 @@ static int run_vulkan_dispatch_fd(
             specialization_count > 0 &&
             !specialization_materialized &&
             (!strict_passthrough || q4k_pipeline_retry_enabled) &&
-            (env_truthy("PDOCKER_GPU_RETRY_MATERIALIZE_SPECIALIZATION", 0) ||
+            (retry_materialize_specialization_requested(options) ||
              q4k_pipeline_retry_enabled)) {
             /*
              * Some Android Vulkan drivers reject ggml pipelines only for a
@@ -19760,8 +19815,7 @@ static int run_vulkan_dispatch_fd(
             }
         }
     }
-    if (dispatch_lifecycle_log || profile_response ||
-        getenv("PDOCKER_GPU_DISPATCH_PROFILE_LOG")) {
+    if (dispatch_lifecycle_log || profile_response) {
         fprintf(stderr,
                 "pdocker-gpu-executor: generic dispatch pre-submit: "
                 "{\"component\":\"executor\",\"event\":\"pre-submit\","
@@ -21541,7 +21595,7 @@ static VkSampleCountFlags vulkan_graphics_runtime_format_sample_counts(
         VkFormatFeatureFlags features);
 
 static void print_capabilities(const char *transport) {
-    int vulkan_ready = init_vulkan_runtime(&g_vulkan_runtime) == 0;
+    int vulkan_ready = init_vulkan_runtime(&g_vulkan_runtime, NULL) == 0;
     VulkanRuntime *rt = vulkan_ready ? &g_vulkan_runtime : NULL;
     fprintf(json_out(),
             "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
@@ -21733,7 +21787,7 @@ static void write_vulkan_image_format_caps_report(FILE *out, const VulkanRuntime
 }
 
 static void print_vulkan_advertisement_caps(const char *transport) {
-    int vulkan_ready = init_vulkan_runtime(&g_vulkan_runtime) == 0;
+    int vulkan_ready = init_vulkan_runtime(&g_vulkan_runtime, NULL) == 0;
     VulkanRuntime *rt = vulkan_ready ? &g_vulkan_runtime : NULL;
     const VkPhysicalDeviceLimits *limits = rt ? &rt->physical_properties.limits : NULL;
     FILE *out = json_out();
@@ -22182,7 +22236,7 @@ static int bench_vulkan_storage_image_roundtrip(int count) {
     const uint32_t height = 16;
     const VkDeviceSize bytes = (VkDeviceSize)width * (VkDeviceSize)height * 4u;
     const int was_ready = g_vulkan_runtime.ready;
-    if (init_vulkan_runtime(&g_vulkan_runtime) != 0) return -21;
+    if (init_vulkan_runtime(&g_vulkan_runtime, NULL) != 0) return -21;
     VulkanRuntime *rt = &g_vulkan_runtime;
 
     VkFormatProperties format_props;
@@ -22585,7 +22639,7 @@ static int bench_vulkan_vector_add_resident(int count) {
     fill_inputs(a, b, n);
 
     const int was_ready = g_vulkan_runtime.ready;
-    if (init_vulkan_runtime(&g_vulkan_runtime) != 0) {
+    if (init_vulkan_runtime(&g_vulkan_runtime, NULL) != 0) {
         free(a);
         free(b);
         free(out);
@@ -22852,7 +22906,7 @@ static int bench_vulkan_matmul256_resident(int count) {
     matmul_cpu_ref(a, b, ref, n);
 
     const int was_ready = g_vulkan_runtime.ready;
-    if (init_vulkan_runtime(&g_vulkan_runtime) != 0) {
+    if (init_vulkan_runtime(&g_vulkan_runtime, NULL) != 0) {
         free(a);
         free(b);
         free(out);
@@ -30430,7 +30484,7 @@ static int preflight_vulkan_graphics_v6_runtime_supported(
         const char **reason_out) {
     const char *reason = "unsupported graphics runtime";
     if (reason_out) *reason_out = reason;
-    if (init_vulkan_runtime(&g_vulkan_runtime) != 0) {
+    if (init_vulkan_runtime(&g_vulkan_runtime, NULL) != 0) {
         reason = "vulkan runtime initialization failed";
         if (reason_out) *reason_out = reason;
         return -ENODEV;
@@ -37685,7 +37739,7 @@ static void print_vulkan_event_result(const char *stage, VkResult result, int si
 
 static int handle_vulkan_event_command(const char *cmd) {
     if (!cmd) return -EINVAL;
-    if (init_vulkan_runtime(&g_vulkan_runtime) != 0 || !g_vulkan_runtime.device) {
+    if (init_vulkan_runtime(&g_vulkan_runtime, NULL) != 0 || !g_vulkan_runtime.device) {
         json_fail("vulkan-event", "Vulkan runtime unavailable");
         return -ENODEV;
     }
@@ -37799,7 +37853,7 @@ static void print_vulkan_semaphore_result(const char *stage, VkResult result, ui
 
 static int handle_vulkan_semaphore_command(const char *cmd) {
     if (!cmd) return -EINVAL;
-    if (init_vulkan_runtime(&g_vulkan_runtime) != 0 || !g_vulkan_runtime.device) {
+    if (init_vulkan_runtime(&g_vulkan_runtime, NULL) != 0 || !g_vulkan_runtime.device) {
         json_fail("vulkan-semaphore", "Vulkan runtime unavailable");
         return -ENODEV;
     }
@@ -37978,7 +38032,7 @@ static int handle_vulkan_semaphore_command(const char *cmd) {
 
 static int handle_vulkan_fence_command(const char *cmd) {
     if (!cmd) return -EINVAL;
-    if (init_vulkan_runtime(&g_vulkan_runtime) != 0 || !g_vulkan_runtime.device) {
+    if (init_vulkan_runtime(&g_vulkan_runtime, NULL) != 0 || !g_vulkan_runtime.device) {
         json_fail("vulkan-fence", "Vulkan runtime unavailable");
         return -ENODEV;
     }
@@ -39171,7 +39225,7 @@ static int handle_vulkan_dispatch_v5_frame(int cfd) {
     }
     VkQueue identity_submit_queue = VK_NULL_HANDLE;
     if (vulkan_dispatch_v5_abi_minor_has_v55_identity(header.abi_minor)) {
-        if (init_vulkan_runtime(&g_vulkan_runtime) != 0) {
+        if (init_vulkan_runtime(&g_vulkan_runtime, &options) != 0) {
             json_fail("vulkan-dispatch-v5", "vulkan runtime unavailable for native object identity");
             rc = -ENODEV;
             goto cleanup;

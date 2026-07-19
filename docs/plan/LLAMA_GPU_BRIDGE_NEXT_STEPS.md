@@ -10,6 +10,29 @@ llama.cpp itself remains unmodified.
 ## Current Ground Truth
 
 
+
+### 2026-07-19 CPU/static Vulkan dispatch-option bridge lane
+
+The remaining manifest `needs_bridge` Vulkan tuning keys now travel through the
+ICD-to-executor dispatch option ABI instead of depending on APK-process
+`getenv()` inside the persistent executor.  This covers dispatch lifecycle
+logging, feature-chain compatibility, specialization retry, the unsafe dirty
+writeback gate, and full-hash byte limits.  The executor keeps legacy env
+fallbacks only inside option helper functions for non-ICD/debug command paths.
+
+`PDOCKER_GPU_CHAIN_COMPAT_FEATURE_STRUCTS` is device-creation state, so the
+executor records the value used when the Vulkan runtime is initialized and
+fails closed if a later dispatch requests a different value without restarting
+the executor.
+
+This is CPU/static Vulkan pass-through hardening only.  It does not change
+llama.cpp, Dockerfiles, models, prompts, shader bytes, or executor arithmetic.
+
+Evidence target: `pdocker_gpu_abi.h` in both ABI copies,
+`app/src/main/cpp/pdocker_gpu_executor.c`,
+`scripts/llama-gpu-env-manifest.json`, packaged manifest asset,
+and `tests.test_gpu_abi_contract`.
+
 ### 2026-07-18 CPU/static Vulkan dynamic-rendering attachment reason lane
 
 Dynamic-rendering attachment capture now returns precise failure reasons from
@@ -2492,29 +2515,23 @@ env keys are classified as follows:
 | Class | Env keys | Contract |
 |---|---|---|
 | `container_env_only` | `PDOCKER_VULKAN_HEAP_BYTES`, `PDOCKER_VULKAN_MAX_BUFFER_BYTES`, `GGML_VK_FORCE_MAX_BUFFER_SIZE`, `GGML_VK_FORCE_MAX_ALLOCATION_SIZE`, `GGML_VK_SUBALLOCATION_BLOCK_SIZE`, `PDOCKER_VULKAN_ICD_DEBUG`, `PDOCKER_VULKAN_ICD_TRACE_ALLOC`, `PDOCKER_VULKAN_ALIAS_COPIES`, `PDOCKER_VULKAN_DUMP_SPIRV_DIR`, `PDOCKER_VULKAN_ENABLE_8BIT_STORAGE`, `PDOCKER_VULKAN_ENABLE_16BIT_STORAGE`, `PDOCKER_VULKAN_ENABLE_INT64`, `PDOCKER_VULKAN_ENABLE_SUBGROUP_ARITHMETIC`, `PDOCKER_VULKAN_SUBGROUP_SIZE`, `PDOCKER_VULKAN_ADVERTISEMENT_SOURCE`, `PDOCKER_GPU_VIRTUAL_MEMORY`, `PDOCKER_GPU_VIRTUAL_MEMORY_MIN_BYTES`, `LLAMA_ARG_N_GPU_LAYERS` | Consumed by llama.cpp/container scripts or the glibc ICD before command emission; no executor reflection is expected. |
-| `icd_to_executor_bool_option` | `PDOCKER_VULKAN_DISABLE_8BIT_STORAGE`, `PDOCKER_VULKAN_DISABLE_16BIT_STORAGE`, `PDOCKER_VULKAN_DISABLE_SUBGROUP_ARITHMETIC`, `PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS`, `PDOCKER_GPU_STRICT_DUPLICATE_DESCRIPTOR_NORMALIZATION`, `PDOCKER_GPU_MATERIALIZE_DESCRIPTOR_ALIASES`, `PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS`, `PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION`, `PDOCKER_GPU_STRICT_PASSTHROUGH`, `PDOCKER_GPU_STRICT_RECONCILIATION`, `PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING`, `PDOCKER_GPU_SKIP_UNUSED_DESCRIPTOR_TRANSFERS`, `PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS`, `PDOCKER_GPU_DISABLE_OVERLAP_ALIASING`, `PDOCKER_GPU_CPU_ORACLE`, `PDOCKER_GPU_Q6K_ORACLE_WRITEBACK`, `PDOCKER_GPU_Q6K_SAFE_KERNEL`, `PDOCKER_GPU_Q6K_COMPAT_REWRITES`, `PDOCKER_GPU_Q6K_READONLY_OVERLAP_SNAPSHOT`, `PDOCKER_GPU_Q4K_SAFE_KERNEL`, `PDOCKER_GPU_Q4K_TARGETED_SPECIALIZATION`, `PDOCKER_GPU_Q4K_PIPELINE_RETRY_LADDER`, `PDOCKER_GPU_RESIDENT_CACHE`, `PDOCKER_GPU_MUTABLE_BUFFER_CACHE`, `PDOCKER_GPU_WRITEONLY_BUFFER_CACHE`, `PDOCKER_GPU_WRITEONLY_DIRTY_PROBE`, `PDOCKER_GPU_WRITEONLY_DIRTY_WRITEBACK`, `PDOCKER_GPU_STRICT_GRAPH_CACHE`, `PDOCKER_GPU_ADD_FLOAT16_CAPABILITY_FOR_STORAGE16`, `PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE` | ICD appends a command-token boolean (or the existing `profile=1` token) and executor JSON must expose the effective value. |
-| `icd_to_executor_size_option` | `PDOCKER_GPU_RESIDENT_CACHE_MIN_BYTES`, `PDOCKER_GPU_MUTABLE_BUFFER_CACHE_MAX_BYTES`, `PDOCKER_GPU_STRICT_GRAPH_CACHE_MAX_BYTES`, `PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING_MAX_TRANSFER_BYTES`, `PDOCKER_GPU_SPIRV_PROBE_DEBUG_BINDING`, `PDOCKER_GPU_WRITEONLY_DIRTY_PROBE_MIN_BYTES` | ICD appends a parsed unsigned-size command token; malformed values are ignored rather than guessed. |
+| `icd_to_executor_bool_option` | `PDOCKER_VULKAN_DISABLE_8BIT_STORAGE`, `PDOCKER_VULKAN_DISABLE_16BIT_STORAGE`, `PDOCKER_VULKAN_DISABLE_SUBGROUP_ARITHMETIC`, `PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS`, `PDOCKER_GPU_STRICT_DUPLICATE_DESCRIPTOR_NORMALIZATION`, `PDOCKER_GPU_MATERIALIZE_DESCRIPTOR_ALIASES`, `PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS`, `PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION`, `PDOCKER_GPU_STRICT_PASSTHROUGH`, `PDOCKER_GPU_STRICT_RECONCILIATION`, `PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING`, `PDOCKER_GPU_SKIP_UNUSED_DESCRIPTOR_TRANSFERS`, `PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS`, `PDOCKER_GPU_DISABLE_OVERLAP_ALIASING`, `PDOCKER_GPU_CPU_ORACLE`, `PDOCKER_GPU_Q6K_ORACLE_WRITEBACK`, `PDOCKER_GPU_Q6K_SAFE_KERNEL`, `PDOCKER_GPU_Q6K_COMPAT_REWRITES`, `PDOCKER_GPU_Q6K_READONLY_OVERLAP_SNAPSHOT`, `PDOCKER_GPU_Q4K_SAFE_KERNEL`, `PDOCKER_GPU_Q4K_TARGETED_SPECIALIZATION`, `PDOCKER_GPU_Q4K_PIPELINE_RETRY_LADDER`, `PDOCKER_GPU_RESIDENT_CACHE`, `PDOCKER_GPU_MUTABLE_BUFFER_CACHE`, `PDOCKER_GPU_WRITEONLY_BUFFER_CACHE`, `PDOCKER_GPU_WRITEONLY_DIRTY_PROBE`, `PDOCKER_GPU_WRITEONLY_DIRTY_WRITEBACK`, `PDOCKER_GPU_UNSAFE_DIRTY_WRITEBACK_CACHE`, `PDOCKER_GPU_STRICT_GRAPH_CACHE`, `PDOCKER_GPU_DISPATCH_PROFILE_LOG`, `PDOCKER_GPU_CHAIN_COMPAT_FEATURE_STRUCTS`, `PDOCKER_GPU_RETRY_MATERIALIZE_SPECIALIZATION`, `PDOCKER_GPU_ADD_FLOAT16_CAPABILITY_FOR_STORAGE16`, `PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE` | ICD appends a command-token boolean (or the existing `profile=1` token) and executor consumes the effective value from dispatch options before any legacy fallback. |
+| `icd_to_executor_size_option` | `PDOCKER_GPU_RESIDENT_CACHE_MIN_BYTES`, `PDOCKER_GPU_MUTABLE_BUFFER_CACHE_MAX_BYTES`, `PDOCKER_GPU_STRICT_GRAPH_CACHE_MAX_BYTES`, `PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING_MAX_TRANSFER_BYTES`, `PDOCKER_GPU_SPIRV_PROBE_DEBUG_BINDING`, `PDOCKER_GPU_WRITEONLY_DIRTY_PROBE_MIN_BYTES`, `PDOCKER_GPU_WRITEBACK_FULL_HASH_MAX_BYTES` | ICD appends a parsed unsigned-size command token; malformed values are ignored rather than guessed. |
 | `icd_to_executor_string_option` | `PDOCKER_GPU_FAILED_SPIRV_DIR`, `PDOCKER_GPU_SPIRV_DUMP_DIR` | ICD appends bounded hex-encoded string tokens and the executor consumes those tokens before falling back to APK-process env; malformed or oversized values fail closed before dispatch. |
 | `app_process_only` | `PDOCKER_GPU_DISABLE_ANDROID_VULKAN`, `PDOCKER_GPU_DISABLE_ANDROID_OPENCL`, `PDOCKER_ANDROID_OPENCL_LIBRARY` | Read by the APK/executor process before or outside per-dispatch Vulkan command emission. Forwarding these only into the container is not a reliable override. |
 | `deprecated_or_invalid` | _none in the manifest env set_ | Keep unsupported work tokens out of env classification. |
-| `needs_bridge` | `PDOCKER_GPU_CHAIN_COMPAT_FEATURE_STRUCTS`, `PDOCKER_GPU_DISPATCH_PROFILE_LOG`, `PDOCKER_GPU_RETRY_MATERIALIZE_SPECIALIZATION`, `PDOCKER_GPU_UNSAFE_DIRTY_WRITEBACK_CACHE`, `PDOCKER_GPU_WRITEBACK_FULL_HASH_MAX_BYTES` | Manifest forwarding can make these look requested, but the current executor-side behavior still depends on APK-process `getenv()` or an unreflected default. Do not interpret a run as having honored these until a dispatch option and, for correctness-affecting booleans, JSON reflection exist. |
+| `needs_bridge` | _none in the manifest env set_ | A newly added container-visible Vulkan tuning env must not stay here.  It must be classified as container-only, app-process-only, probe transport, or an explicit ICD-to-executor dispatch option before it is accepted as honored by llama GPU evidence. |
 
-`needs_bridge` priority, highest risk first:
-
-1. `PDOCKER_GPU_RETRY_MATERIALIZE_SPECIALIZATION` and
-   `PDOCKER_GPU_CHAIN_COMPAT_FEATURE_STRUCTS` - can change shader/module
-   creation paths and feature-chain interpretation, so stale executor defaults
-   can invalidate SPIR-V blocker conclusions.
-2. `PDOCKER_GPU_DISPATCH_PROFILE_LOG` and
-   `PDOCKER_GPU_WRITEBACK_FULL_HASH_MAX_BYTES` - affect evidence capture.  A
-   missing bridge may look like missing Q6 evidence rather than a failed knob.
-3. `PDOCKER_GPU_UNSAFE_DIRTY_WRITEBACK_CACHE` - safety gate for dirty-writeback
-   caching; keep it fail-closed until it has an explicit reflected option.
-
-`PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC` is no longer in
-`needs_bridge`: it is a reflected bool dispatch option and remains part of the
-Q6 required overlay.  `PDOCKER_GPU_FAILED_SPIRV_DIR` and
-`PDOCKER_GPU_SPIRV_DUMP_DIR` are bounded string dispatch options; they are
+`PDOCKER_GPU_RETRY_MATERIALIZE_SPECIALIZATION`,
+`PDOCKER_GPU_CHAIN_COMPAT_FEATURE_STRUCTS`, `PDOCKER_GPU_DISPATCH_PROFILE_LOG`,
+`PDOCKER_GPU_WRITEBACK_FULL_HASH_MAX_BYTES`, and
+`PDOCKER_GPU_UNSAFE_DIRTY_WRITEBACK_CACHE` are no longer in `needs_bridge`: they
+are dispatch options.  `PDOCKER_GPU_CHAIN_COMPAT_FEATURE_STRUCTS` is still a
+Vulkan runtime/device-creation choice; once the executor runtime is initialized,
+a different later dispatch value fails closed instead of being silently ignored.
+`PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC` remains a reflected bool
+dispatch option and part of the Q6 required overlay.  `PDOCKER_GPU_FAILED_SPIRV_DIR`
+and `PDOCKER_GPU_SPIRV_DUMP_DIR` are bounded string dispatch options; they are
 diagnostic path controls, not correctness propagation booleans.
 
 String option design: add an ICD-to-executor string option only for bounded

@@ -8077,6 +8077,31 @@ class GpuAbiContractTest(unittest.TestCase):
         )
         self.assertLessEqual(set(q6_overlay), set(manifest["compare_forward_env_keys"]))
 
+    def test_vulkan_executor_bridged_tuning_envs_are_option_scoped(self):
+        executor = GPU_EXECUTOR.read_text()
+        for env in [
+            "PDOCKER_GPU_DISPATCH_PROFILE_LOG",
+            "PDOCKER_GPU_CHAIN_COMPAT_FEATURE_STRUCTS",
+            "PDOCKER_GPU_RETRY_MATERIALIZE_SPECIALIZATION",
+            "PDOCKER_GPU_UNSAFE_DIRTY_WRITEBACK_CACHE",
+        ]:
+            self.assertEqual(1, executor.count(f'env_truthy("{env}",'))
+        self.assertEqual(1, executor.count('getenv("PDOCKER_GPU_WRITEBACK_FULL_HASH_MAX_BYTES")'))
+        for marker in [
+            "dispatch_profile_log_requested(options)",
+            "chain_compat_feature_structs_requested(options)",
+            "retry_materialize_specialization_requested(options)",
+            "unsafe_dirty_writeback_cache_requested(options)",
+            "writeonly_dirty_writeback_enabled(options)",
+            "writeback_full_hash_max_bytes(options)",
+            "requested_chain_compat_feature_structs",
+            "the container ICD dispatch option stable",
+        ]:
+            self.assertIn(marker, executor)
+        self.assertNotIn('getenv("PDOCKER_GPU_DISPATCH_PROFILE_LOG")', executor)
+        self.assertNotIn('getenv("PDOCKER_GPU_RETRY_MATERIALIZE_SPECIALIZATION")', executor)
+        self.assertNotIn('getenv("PDOCKER_GPU_UNSAFE_DIRTY_WRITEBACK_CACHE")', executor)
+
     def test_spirv_probe_replay_uses_existing_v4_binding_transport(self):
         icd = VULKAN_ICD.read_text()
         for marker in [
@@ -15558,7 +15583,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("g_vulkan_runtime.enabled_vulkan11.multiview", replay_preflight_body)
         self.assertNotIn("g_vulkan_runtime.enabled_features.sampleRateShading", replay_preflight_body)
         self.assertNotIn("g_vulkan_runtime.enabled_features.alphaToOne", replay_preflight_body)
-        self.assertIn("init_vulkan_runtime(&g_vulkan_runtime)", runtime_preflight_body)
+        self.assertIn("init_vulkan_runtime(&g_vulkan_runtime, NULL)", runtime_preflight_body)
         self.assertIn("g_vulkan_runtime.enabled_features.geometryShader", runtime_preflight_body)
         self.assertIn("geometry shader replay requires geometryShader", runtime_preflight_body)
         self.assertIn("g_vulkan_runtime.enabled_features.tessellationShader", runtime_preflight_body)
@@ -21639,12 +21664,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertEqual([], sorted(bridged_envs - compare_forward_envs))
 
         q6_required = set(manifest["q6_required_env_overlay"])
-        self.assertEqual(
-            {
-                "PDOCKER_GPU_DISPATCH_PROFILE_LOG",
-            },
-            q6_required - bridged_envs,
-        )
+        self.assertEqual(set(), q6_required - bridged_envs)
         config_propagation_envs = {item["env"] for item in manifest["config_propagation_env_fields"]}
         self.assertEqual(
             [],
