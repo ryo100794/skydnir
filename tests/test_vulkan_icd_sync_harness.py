@@ -12,6 +12,64 @@ ICD_SOURCE = ROOT / "docker-proot-setup" / "src" / "gpu" / "pdocker_vulkan_icd.c
 
 COMMAND_BUFFER_LIVE_REGISTRY_HELPER = r"""
 static PdockerVkCommandPool g_sync_test_command_pool;
+static VkDevice g_sync_test_device_handle = VK_NULL_HANDLE;
+
+static VkDevice sync_test_device(void) {
+    if (g_sync_test_device_handle != VK_NULL_HANDLE) return g_sync_test_device_handle;
+    VkDeviceCreateInfo device_info;
+    memset(&device_info, 0, sizeof(device_info));
+    device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+    VkDevice device = VK_NULL_HANDLE;
+    if (vkCreateDevice((VkPhysicalDevice)&g_device, &device_info, NULL, &device) != VK_SUCCESS) {
+        return VK_NULL_HANDLE;
+    }
+    g_sync_test_device_handle = device;
+    return g_sync_test_device_handle;
+}
+
+static PdockerVkDevice *sync_test_device_object(void) {
+    VkDevice device = sync_test_device();
+    return device == VK_NULL_HANDLE ? NULL : pdocker_vk_device_from_handle(device);
+}
+
+static VkDevice sync_test_device_with_features(uint64_t requested_feature_mask, uint64_t enabled_extension_mask) {
+    VkDevice device = sync_test_device();
+    PdockerVkDevice *dev = sync_test_device_object();
+    if (!dev) return VK_NULL_HANDLE;
+    dev->requested_feature_mask |= requested_feature_mask;
+    dev->enabled_extension_mask |= enabled_extension_mask;
+    return device;
+}
+
+static VkDevice sync_test_bind_global_queue(uint64_t requested_feature_mask, uint64_t enabled_extension_mask) {
+    VkDevice device = sync_test_device_with_features(requested_feature_mask, enabled_extension_mask);
+    PdockerVkDevice *dev = sync_test_device_object();
+    if (!dev || !dev->queue) return VK_NULL_HANDLE;
+    ensure_vulkan_dispatchable_object_ids();
+    g_queue.object_id = dev->queue->object_id;
+    g_queue.instance_object_id = dev->instance_object_id;
+    g_queue.physical_device_object_id = dev->physical_device_object_id;
+    g_queue.device_object_id = dev->object_id;
+    g_queue.requested_feature_mask = dev->requested_feature_mask;
+    g_queue.enabled_extension_mask = dev->enabled_extension_mask;
+    set_loader_magic_value(&g_queue);
+    return device;
+}
+
+static bool sync_test_command_buffer_bind_device(PdockerVkCommandBuffer *cmd) {
+    PdockerVkDevice *dev = sync_test_device_object();
+    if (!cmd || !dev) return false;
+    cmd->owner_device_id = dev->object_id;
+    return true;
+}
+
+static VkEvent sync_test_unowned_event(void) {
+    PdockerVkEvent *event = (PdockerVkEvent *)calloc(1, sizeof(*event));
+    if (!event) return VK_NULL_HANDLE;
+    event->event_id = next_vulkan_object_generation();
+    event_register(event);
+    return pdocker_vk_event_to_handle(event);
+}
 
 static PdockerVkCommandPool *sync_test_command_pool(void) {
     VkCommandPool handle = pdocker_vk_command_pool_to_handle(&g_sync_test_command_pool);
@@ -170,28 +228,26 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
 
             int main(void) {{
                 unsetenv("PDOCKER_GPU_QUEUE_SOCKET");
-                ensure_vulkan_dispatchable_object_ids();
-                g_queue.instance_object_id = 1;
-                g_queue.physical_device_object_id = 1;
-                g_queue.device_object_id = 1;
+                VkDevice device = sync_test_bind_global_queue(0, 0);
+                if (!device) return 100;
                 VkFence fence = VK_NULL_HANDLE;
                 VkFenceCreateInfo create_info;
                 memset(&create_info, 0, sizeof(create_info));
                 create_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
                 create_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-                if (vkCreateFence(VK_NULL_HANDLE, &create_info, NULL, &fence) != VK_SUCCESS || !fence) {{
+                if (vkCreateFence(device, &create_info, NULL, &fence) != VK_SUCCESS || !fence) {{
                     fprintf(stderr, "create signaled fence failed\\n");
                     return 2;
                 }}
-                if (vkWaitForFences(VK_NULL_HANDLE, 1, &fence, VK_TRUE, 0) != VK_SUCCESS) {{
+                if (vkWaitForFences(device, 1, &fence, VK_TRUE, 0) != VK_SUCCESS) {{
                     fprintf(stderr, "initial signaled fence did not wait successfully\\n");
                     return 3;
                 }}
-                if (vkResetFences(VK_NULL_HANDLE, 1, &fence) != VK_SUCCESS) {{
+                if (vkResetFences(device, 1, &fence) != VK_SUCCESS) {{
                     fprintf(stderr, "reset failed\\n");
                     return 4;
                 }}
-                if (vkGetFenceStatus(VK_NULL_HANDLE, fence) != VK_NOT_READY) {{
+                if (vkGetFenceStatus(device, fence) != VK_NOT_READY) {{
                     fprintf(stderr, "reset fence was not reported not-ready\\n");
                     return 5;
                 }}
@@ -199,11 +255,11 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                     fprintf(stderr, "empty queue submit failed\\n");
                     return 6;
                 }}
-                if (vkWaitForFences(VK_NULL_HANDLE, 1, &fence, VK_TRUE, 0) != VK_SUCCESS) {{
+                if (vkWaitForFences(device, 1, &fence, VK_TRUE, 0) != VK_SUCCESS) {{
                     fprintf(stderr, "queue submit fence did not become waitable\\n");
                     return 7;
                 }}
-                vkDestroyFence(VK_NULL_HANDLE, fence, NULL);
+                vkDestroyFence(device, fence, NULL);
                 return 0;
             }}
             """
@@ -277,6 +333,9 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             int main(void) {{
                 PdockerVkCommandBuffer *cmd = sync_test_command_buffer_alloc();
                 if (!cmd) return 9;
+                VkDevice device = sync_test_device_with_features(PDOCKER_VK_FEATURE_SYNCHRONIZATION_2,
+                                                                 PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2);
+                if (!device || !sync_test_command_buffer_bind_device(cmd)) return 10;
                 cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
                 cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
 
@@ -287,7 +346,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 buffer_info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
                 buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
                 VkBuffer buffer = VK_NULL_HANDLE;
-                if (vkCreateBuffer(VK_NULL_HANDLE, &buffer_info, NULL, &buffer) != VK_SUCCESS || !buffer) {{
+                if (vkCreateBuffer(device, &buffer_info, NULL, &buffer) != VK_SUCCESS || !buffer) {{
                     fprintf(stderr, "test buffer creation failed\\n");
                     return 2;
                 }}
@@ -378,7 +437,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                     return 8;
                 }}
 
-                vkDestroyBuffer(VK_NULL_HANDLE, buffer, NULL);
+                vkDestroyBuffer(device, buffer, NULL);
                 free(cmd);
                 return 0;
             }}
@@ -458,7 +517,8 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 memset(&create_info, 0, sizeof(create_info));
                 create_info.sType = VK_STRUCTURE_TYPE_EVENT_CREATE_INFO;
                 VkEvent event = VK_NULL_HANDLE;
-                if (vkCreateEvent(VK_NULL_HANDLE, &create_info, NULL, &event) != VK_SUCCESS || !event) return 6;
+                event = sync_test_unowned_event();
+                if (!event) return 6;
 
                 VkMemoryBarrier2 memory_barrier;
                 memset(&memory_barrier, 0, sizeof(memory_barrier));
@@ -2087,7 +2147,8 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 memset(&event_info, 0, sizeof(event_info));
                 event_info.sType = VK_STRUCTURE_TYPE_EVENT_CREATE_INFO;
                 VkEvent event = VK_NULL_HANDLE;
-                if (vkCreateEvent(VK_NULL_HANDLE, &event_info, NULL, &event) != VK_SUCCESS || !event) return 98;
+                event = sync_test_unowned_event();
+                if (!event) return 98;
                 VkEvent events[1] = {{ event }};
 
                 const VkDependencyFlags noop_flag =
@@ -2519,7 +2580,8 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 memset(&event_info, 0, sizeof(event_info));
                 event_info.sType = VK_STRUCTURE_TYPE_EVENT_CREATE_INFO;
                 VkEvent event = VK_NULL_HANDLE;
-                if (vkCreateEvent(VK_NULL_HANDLE, &event_info, NULL, &event) != VK_SUCCESS || !event) {{
+                event = sync_test_unowned_event();
+                if (!event) {{
                     fprintf(stderr, "event creation failed\n");
                     return 98;
                 }}
@@ -3155,6 +3217,9 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             int main(void) {{
                 PdockerVkCommandBuffer *cmd = sync_test_command_buffer_alloc();
                 if (!cmd) return 9;
+                VkDevice device = sync_test_device_with_features(PDOCKER_VK_FEATURE_SYNCHRONIZATION_2,
+                                                                 PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2);
+                if (!device || !sync_test_command_buffer_bind_device(cmd)) return 10;
                 cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
                 cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
 
@@ -3179,7 +3244,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 query_info.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
                 query_info.queryType = VK_QUERY_TYPE_TIMESTAMP;
                 query_info.queryCount = 2;
-                if (vkCreateQueryPool(VK_NULL_HANDLE, &query_info, NULL, &query_pool) != VK_SUCCESS || !query_pool) {{
+                if (vkCreateQueryPool(device, &query_info, NULL, &query_pool) != VK_SUCCESS || !query_pool) {{
                     fprintf(stderr, "query pool create failed\\n");
                     return 3;
                 }}
@@ -3189,7 +3254,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                             cmd->graphics_command_op_count);
                     return 4;
                 }}
-                vkDestroyQueryPool(VK_NULL_HANDLE, query_pool, NULL);
+                vkDestroyQueryPool(device, query_pool, NULL);
                 free(cmd);
                 return 0;
             }}
@@ -3211,17 +3276,15 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
 
             int main(void) {{
                 unsetenv("PDOCKER_GPU_QUEUE_SOCKET");
-                ensure_vulkan_dispatchable_object_ids();
-                g_queue.instance_object_id = 1;
-                g_queue.physical_device_object_id = 1;
-                g_queue.device_object_id = 1;
+                VkDevice device = sync_test_bind_global_queue(0, 0);
+                if (!device) return 100;
                 VkSemaphore sem_a = VK_NULL_HANDLE;
                 VkSemaphore sem_b = VK_NULL_HANDLE;
                 VkSemaphoreCreateInfo sem_info;
                 memset(&sem_info, 0, sizeof(sem_info));
                 sem_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-                if (vkCreateSemaphore(VK_NULL_HANDLE, &sem_info, NULL, &sem_a) != VK_SUCCESS || !sem_a) return 2;
-                if (vkCreateSemaphore(VK_NULL_HANDLE, &sem_info, NULL, &sem_b) != VK_SUCCESS || !sem_b) return 3;
+                if (vkCreateSemaphore(device, &sem_info, NULL, &sem_a) != VK_SUCCESS || !sem_a) return 2;
+                if (vkCreateSemaphore(device, &sem_info, NULL, &sem_b) != VK_SUCCESS || !sem_b) return 3;
 
                 VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
                 VkSubmitInfo submit;
@@ -3252,7 +3315,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 VkFenceCreateInfo fence_info;
                 memset(&fence_info, 0, sizeof(fence_info));
                 fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-                if (vkCreateFence(VK_NULL_HANDLE, &fence_info, NULL, &fence) != VK_SUCCESS || !fence) return 7;
+                if (vkCreateFence(device, &fence_info, NULL, &fence) != VK_SUCCESS || !fence) return 7;
 
                 memset(&submit, 0, sizeof(submit));
                 submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -3273,14 +3336,14 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                     fprintf(stderr, "binary signal target not signaled\\n");
                     return 10;
                 }}
-                if (vkWaitForFences(VK_NULL_HANDLE, 1, &fence, VK_TRUE, 0) != VK_SUCCESS) {{
+                if (vkWaitForFences(device, 1, &fence, VK_TRUE, 0) != VK_SUCCESS) {{
                     fprintf(stderr, "submit fence not signaled\\n");
                     return 11;
                 }}
 
-                vkDestroyFence(VK_NULL_HANDLE, fence, NULL);
-                vkDestroySemaphore(VK_NULL_HANDLE, sem_a, NULL);
-                vkDestroySemaphore(VK_NULL_HANDLE, sem_b, NULL);
+                vkDestroyFence(device, fence, NULL);
+                vkDestroySemaphore(device, sem_a, NULL);
+                vkDestroySemaphore(device, sem_b, NULL);
                 return 0;
             }}
             """
@@ -3315,14 +3378,8 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
 
             int main(void) {{
                 unsetenv("PDOCKER_GPU_QUEUE_SOCKET");
-                ensure_vulkan_dispatchable_object_ids();
-                g_queue.instance_object_id = 1;
-                g_queue.physical_device_object_id = 1;
-                g_queue.device_object_id = 1;
-                PdockerVkDevice device;
-                memset(&device, 0, sizeof(device));
-                device.requested_feature_mask = PDOCKER_VK_FEATURE_TIMELINE_SEMAPHORE;
-                VkDevice vk_device = (VkDevice)&device;
+                VkDevice vk_device = sync_test_bind_global_queue(0, 0);
+                if (!vk_device) return 21;
                 if (!advertised_timeline_semaphore()) {{
                     if (make_timeline(vk_device, 5) != VK_NULL_HANDLE) {{
                         fprintf(stderr, "timeline semaphore was accepted without advertised support\\n");
@@ -3330,11 +3387,13 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                     }}
                     return 0;
                 }}
+                vk_device = sync_test_bind_global_queue(PDOCKER_VK_FEATURE_TIMELINE_SEMAPHORE, 0);
+                if (!vk_device) return 22;
                 VkSemaphore wait_sem = make_timeline(vk_device, 5);
                 VkSemaphore signal_sem = make_timeline(vk_device, 0);
                 if (!wait_sem || !signal_sem) return 2;
                 uint64_t value = 0;
-                if (vkGetSemaphoreCounterValue(VK_NULL_HANDLE, wait_sem, &value) != VK_SUCCESS || value != 5) {{
+                if (vkGetSemaphoreCounterValue(vk_device, wait_sem, &value) != VK_SUCCESS || value != 5) {{
                     fprintf(stderr, "initial timeline value mismatch value=%llu\\n", (unsigned long long)value);
                     return 3;
                 }}
@@ -3346,7 +3405,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 wait_info.pSemaphores = &wait_sem;
                 uint64_t wait_value = 6;
                 wait_info.pValues = &wait_value;
-                if (vkWaitSemaphores(VK_NULL_HANDLE, &wait_info, 0) != VK_TIMEOUT) {{
+                if (vkWaitSemaphores(vk_device, &wait_info, 0) != VK_TIMEOUT) {{
                     fprintf(stderr, "unsatisfied timeline wait did not time out\\n");
                     return 4;
                 }}
@@ -3355,8 +3414,8 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 signal_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SIGNAL_INFO;
                 signal_info.semaphore = wait_sem;
                 signal_info.value = 6;
-                if (vkSignalSemaphore(VK_NULL_HANDLE, &signal_info) != VK_SUCCESS) return 5;
-                if (vkWaitSemaphores(VK_NULL_HANDLE, &wait_info, 0) != VK_SUCCESS) {{
+                if (vkSignalSemaphore(vk_device, &signal_info) != VK_SUCCESS) return 5;
+                if (vkWaitSemaphores(vk_device, &wait_info, 0) != VK_SUCCESS) {{
                     fprintf(stderr, "satisfied timeline wait failed\\n");
                     return 6;
                 }}
@@ -3384,13 +3443,13 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                     fprintf(stderr, "timeline submit wait/signal failed\\n");
                     return 7;
                 }}
-                if (vkGetSemaphoreCounterValue(VK_NULL_HANDLE, signal_sem, &value) != VK_SUCCESS || value != 9) {{
+                if (vkGetSemaphoreCounterValue(vk_device, signal_sem, &value) != VK_SUCCESS || value != 9) {{
                     fprintf(stderr, "timeline submit signal value mismatch value=%llu\\n", (unsigned long long)value);
                     return 8;
                 }}
 
-                vkDestroySemaphore(VK_NULL_HANDLE, wait_sem, NULL);
-                vkDestroySemaphore(VK_NULL_HANDLE, signal_sem, NULL);
+                vkDestroySemaphore(vk_device, wait_sem, NULL);
+                vkDestroySemaphore(vk_device, signal_sem, NULL);
                 return 0;
             }}
             """
@@ -3411,49 +3470,46 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             #include "{ICD_SOURCE}"
             {COMMAND_BUFFER_LIVE_REGISTRY_HELPER}
 
-            static VkFence make_signaled_fence(void) {{
+            static VkFence make_signaled_fence(VkDevice device) {{
                 VkFence fence = VK_NULL_HANDLE;
                 VkFenceCreateInfo create_info;
                 memset(&create_info, 0, sizeof(create_info));
                 create_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
                 create_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-                if (vkCreateFence(VK_NULL_HANDLE, &create_info, NULL, &fence) != VK_SUCCESS) return VK_NULL_HANDLE;
+                if (vkCreateFence(device, &create_info, NULL, &fence) != VK_SUCCESS) return VK_NULL_HANDLE;
                 return fence;
             }}
 
-            static VkSemaphore make_binary_semaphore(void) {{
+            static VkSemaphore make_binary_semaphore(VkDevice device) {{
                 VkSemaphore semaphore = VK_NULL_HANDLE;
                 VkSemaphoreCreateInfo create_info;
                 memset(&create_info, 0, sizeof(create_info));
                 create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-                if (vkCreateSemaphore(VK_NULL_HANDLE, &create_info, NULL, &semaphore) != VK_SUCCESS) return VK_NULL_HANDLE;
+                if (vkCreateSemaphore(device, &create_info, NULL, &semaphore) != VK_SUCCESS) return VK_NULL_HANDLE;
                 return semaphore;
             }}
 
-            static int expect_submit2_failure_preserves_fence(VkSubmitInfo2 *submit, VkResult expected, int code) {{
-                VkFence fence = make_signaled_fence();
+            static int expect_submit2_failure_preserves_fence(VkDevice device, VkSubmitInfo2 *submit, VkResult expected, int code) {{
+                VkFence fence = make_signaled_fence(device);
                 if (!fence) return code + 100;
                 VkResult rc = vkQueueSubmit2((VkQueue)&g_queue, 1, submit, fence);
                 if (rc != expected) {{
                     fprintf(stderr, "case %d returned %d expected %d\\n", code, rc, expected);
                     return code;
                 }}
-                if (vkGetFenceStatus(VK_NULL_HANDLE, fence) != VK_SUCCESS) {{
+                if (vkGetFenceStatus(device, fence) != VK_SUCCESS) {{
                     fprintf(stderr, "case %d mutated signaled fence during prevalidation\\n", code);
                     return code + 200;
                 }}
-                vkDestroyFence(VK_NULL_HANDLE, fence, NULL);
+                vkDestroyFence(device, fence, NULL);
                 return 0;
             }}
 
             int main(void) {{
                 unsetenv("PDOCKER_GPU_QUEUE_SOCKET");
-                ensure_vulkan_dispatchable_object_ids();
-                g_queue.instance_object_id = 1;
-                g_queue.physical_device_object_id = 1;
-                g_queue.device_object_id = 1;
-                g_queue.requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
-                g_queue.enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
+                VkDevice device = sync_test_bind_global_queue(PDOCKER_VK_FEATURE_SYNCHRONIZATION_2,
+                                                              PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2);
+                if (!device) return 103;
 
                 VkSubmitInfo2 submit;
                 memset(&submit, 0, sizeof(submit));
@@ -3468,39 +3524,39 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 unsupported.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
 
                 submit.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-                int err = expect_submit2_failure_preserves_fence(&submit, VK_ERROR_INITIALIZATION_FAILED, 3);
+                int err = expect_submit2_failure_preserves_fence(device, &submit, VK_ERROR_INITIALIZATION_FAILED, 3);
                 if (err) return err;
                 submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
 
                 submit.pNext = &unsupported;
-                err = expect_submit2_failure_preserves_fence(&submit, VK_ERROR_FEATURE_NOT_PRESENT, 4);
+                err = expect_submit2_failure_preserves_fence(device, &submit, VK_ERROR_FEATURE_NOT_PRESENT, 4);
                 if (err) return err;
                 submit.pNext = NULL;
 
                 submit.flags = (VkSubmitFlags)1u;
-                err = expect_submit2_failure_preserves_fence(&submit, VK_ERROR_FEATURE_NOT_PRESENT, 5);
+                err = expect_submit2_failure_preserves_fence(device, &submit, VK_ERROR_FEATURE_NOT_PRESENT, 5);
                 if (err) return err;
                 submit.flags = 0;
 
                 submit.waitSemaphoreInfoCount = 1;
                 submit.pWaitSemaphoreInfos = NULL;
-                err = expect_submit2_failure_preserves_fence(&submit, VK_ERROR_INITIALIZATION_FAILED, 6);
+                err = expect_submit2_failure_preserves_fence(device, &submit, VK_ERROR_INITIALIZATION_FAILED, 6);
                 if (err) return err;
                 submit.waitSemaphoreInfoCount = 0;
 
                 submit.commandBufferInfoCount = 1;
                 submit.pCommandBufferInfos = NULL;
-                err = expect_submit2_failure_preserves_fence(&submit, VK_ERROR_INITIALIZATION_FAILED, 7);
+                err = expect_submit2_failure_preserves_fence(device, &submit, VK_ERROR_INITIALIZATION_FAILED, 7);
                 if (err) return err;
                 submit.commandBufferInfoCount = 0;
 
                 submit.signalSemaphoreInfoCount = 1;
                 submit.pSignalSemaphoreInfos = NULL;
-                err = expect_submit2_failure_preserves_fence(&submit, VK_ERROR_INITIALIZATION_FAILED, 8);
+                err = expect_submit2_failure_preserves_fence(device, &submit, VK_ERROR_INITIALIZATION_FAILED, 8);
                 if (err) return err;
                 submit.signalSemaphoreInfoCount = 0;
 
-                VkSemaphore semaphore = make_binary_semaphore();
+                VkSemaphore semaphore = make_binary_semaphore(device);
                 if (!semaphore) return 9;
 
                 VkSemaphoreSubmitInfo sem_info;
@@ -3509,22 +3565,22 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 sem_info.semaphore = semaphore;
                 submit.waitSemaphoreInfoCount = 1;
                 submit.pWaitSemaphoreInfos = &sem_info;
-                err = expect_submit2_failure_preserves_fence(&submit, VK_ERROR_INITIALIZATION_FAILED, 10);
+                err = expect_submit2_failure_preserves_fence(device, &submit, VK_ERROR_INITIALIZATION_FAILED, 10);
                 if (err) return err;
 
                 sem_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
                 sem_info.semaphore = VK_NULL_HANDLE;
-                err = expect_submit2_failure_preserves_fence(&submit, VK_ERROR_INITIALIZATION_FAILED, 11);
+                err = expect_submit2_failure_preserves_fence(device, &submit, VK_ERROR_INITIALIZATION_FAILED, 11);
                 if (err) return err;
 
                 sem_info.semaphore = semaphore;
                 sem_info.pNext = &unsupported;
-                err = expect_submit2_failure_preserves_fence(&submit, VK_ERROR_FEATURE_NOT_PRESENT, 12);
+                err = expect_submit2_failure_preserves_fence(device, &submit, VK_ERROR_FEATURE_NOT_PRESENT, 12);
                 if (err) return err;
                 sem_info.pNext = NULL;
 
                 sem_info.deviceIndex = 1;
-                err = expect_submit2_failure_preserves_fence(&submit, VK_ERROR_FEATURE_NOT_PRESENT, 13);
+                err = expect_submit2_failure_preserves_fence(device, &submit, VK_ERROR_FEATURE_NOT_PRESENT, 13);
                 if (err) return err;
                 sem_info.deviceIndex = 0;
                 submit.waitSemaphoreInfoCount = 0;
@@ -3535,22 +3591,22 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 sem_info.semaphore = semaphore;
                 submit.signalSemaphoreInfoCount = 1;
                 submit.pSignalSemaphoreInfos = &sem_info;
-                err = expect_submit2_failure_preserves_fence(&submit, VK_ERROR_INITIALIZATION_FAILED, 14);
+                err = expect_submit2_failure_preserves_fence(device, &submit, VK_ERROR_INITIALIZATION_FAILED, 14);
                 if (err) return err;
 
                 sem_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
                 sem_info.semaphore = VK_NULL_HANDLE;
-                err = expect_submit2_failure_preserves_fence(&submit, VK_ERROR_INITIALIZATION_FAILED, 15);
+                err = expect_submit2_failure_preserves_fence(device, &submit, VK_ERROR_INITIALIZATION_FAILED, 15);
                 if (err) return err;
 
                 sem_info.semaphore = semaphore;
                 sem_info.pNext = &unsupported;
-                err = expect_submit2_failure_preserves_fence(&submit, VK_ERROR_FEATURE_NOT_PRESENT, 16);
+                err = expect_submit2_failure_preserves_fence(device, &submit, VK_ERROR_FEATURE_NOT_PRESENT, 16);
                 if (err) return err;
                 sem_info.pNext = NULL;
 
                 sem_info.deviceIndex = 1;
-                err = expect_submit2_failure_preserves_fence(&submit, VK_ERROR_FEATURE_NOT_PRESENT, 17);
+                err = expect_submit2_failure_preserves_fence(device, &submit, VK_ERROR_FEATURE_NOT_PRESENT, 17);
                 if (err) return err;
                 sem_info.deviceIndex = 0;
                 submit.signalSemaphoreInfoCount = 0;
@@ -3558,6 +3614,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
 
                 PdockerVkCommandBuffer *cmd = sync_test_command_buffer_alloc();
                 if (!cmd) return 18;
+                if (!sync_test_command_buffer_bind_device(cmd)) return 23;
                 cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
                 cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
                 VkCommandBufferSubmitInfo cmd_info;
@@ -3566,26 +3623,26 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 cmd_info.commandBuffer = (VkCommandBuffer)cmd;
                 submit.commandBufferInfoCount = 1;
                 submit.pCommandBufferInfos = &cmd_info;
-                err = expect_submit2_failure_preserves_fence(&submit, VK_ERROR_INITIALIZATION_FAILED, 19);
+                err = expect_submit2_failure_preserves_fence(device, &submit, VK_ERROR_INITIALIZATION_FAILED, 19);
                 if (err) return err;
 
                 cmd_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
                 cmd_info.commandBuffer = VK_NULL_HANDLE;
-                err = expect_submit2_failure_preserves_fence(&submit, VK_ERROR_INITIALIZATION_FAILED, 20);
+                err = expect_submit2_failure_preserves_fence(device, &submit, VK_ERROR_INITIALIZATION_FAILED, 20);
                 if (err) return err;
 
                 cmd_info.commandBuffer = (VkCommandBuffer)cmd;
                 cmd_info.pNext = &unsupported;
-                err = expect_submit2_failure_preserves_fence(&submit, VK_ERROR_FEATURE_NOT_PRESENT, 21);
+                err = expect_submit2_failure_preserves_fence(device, &submit, VK_ERROR_FEATURE_NOT_PRESENT, 21);
                 if (err) return err;
                 cmd_info.pNext = NULL;
 
                 cmd_info.deviceMask = 2;
-                err = expect_submit2_failure_preserves_fence(&submit, VK_ERROR_FEATURE_NOT_PRESENT, 22);
+                err = expect_submit2_failure_preserves_fence(device, &submit, VK_ERROR_FEATURE_NOT_PRESENT, 22);
                 if (err) return err;
 
                 free(cmd);
-                vkDestroySemaphore(VK_NULL_HANDLE, semaphore, NULL);
+                vkDestroySemaphore(device, semaphore, NULL);
                 return 0;
             }}
             """
@@ -3606,6 +3663,15 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             int main(void) {{
                 unsetenv("PDOCKER_GPU_QUEUE_SOCKET");
 
+                VkDeviceCreateInfo device_info;
+                memset(&device_info, 0, sizeof(device_info));
+                device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                VkDevice device = VK_NULL_HANDLE;
+                if (vkCreateDevice((VkPhysicalDevice)&g_device, &device_info, NULL, &device) != VK_SUCCESS || !device) {{
+                    fprintf(stderr, "descriptor staged-path test device create failed\\n");
+                    return 20;
+                }}
+
                 VkDescriptorSetLayoutBinding binding;
                 memset(&binding, 0, sizeof(binding));
                 binding.binding = 5;
@@ -3619,7 +3685,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 layout_info.bindingCount = 1;
                 layout_info.pBindings = &binding;
                 VkDescriptorSetLayout layout = VK_NULL_HANDLE;
-                if (vkCreateDescriptorSetLayout(VK_NULL_HANDLE, &layout_info, NULL, &layout) != VK_SUCCESS || !layout) {{
+                if (vkCreateDescriptorSetLayout(device, &layout_info, NULL, &layout) != VK_SUCCESS || !layout) {{
                     fprintf(stderr, "descriptor layout create failed\\n");
                     return 2;
                 }}
@@ -3629,7 +3695,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
                 pool_info.maxSets = 1;
                 VkDescriptorPool pool = VK_NULL_HANDLE;
-                if (vkCreateDescriptorPool(VK_NULL_HANDLE, &pool_info, NULL, &pool) != VK_SUCCESS || !pool) {{
+                if (vkCreateDescriptorPool(device, &pool_info, NULL, &pool) != VK_SUCCESS || !pool) {{
                     fprintf(stderr, "descriptor pool create failed\\n");
                     return 3;
                 }}
@@ -3641,7 +3707,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 alloc_info.descriptorSetCount = 1;
                 alloc_info.pSetLayouts = &layout;
                 VkDescriptorSet set_handle = VK_NULL_HANDLE;
-                if (vkAllocateDescriptorSets(VK_NULL_HANDLE, &alloc_info, &set_handle) != VK_SUCCESS || !set_handle) {{
+                if (vkAllocateDescriptorSets(device, &alloc_info, &set_handle) != VK_SUCCESS || !set_handle) {{
                     fprintf(stderr, "descriptor set allocate failed\\n");
                     return 4;
                 }}
@@ -3653,7 +3719,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 buffer_info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
                 buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
                 VkBuffer buffer = VK_NULL_HANDLE;
-                if (vkCreateBuffer(VK_NULL_HANDLE, &buffer_info, NULL, &buffer) != VK_SUCCESS || !buffer) {{
+                if (vkCreateBuffer(device, &buffer_info, NULL, &buffer) != VK_SUCCESS || !buffer) {{
                     fprintf(stderr, "buffer create failed\\n");
                     return 5;
                 }}
@@ -3664,11 +3730,11 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 memory_info.allocationSize = 2048;
                 memory_info.memoryTypeIndex = 1;
                 VkDeviceMemory memory = VK_NULL_HANDLE;
-                if (vkAllocateMemory(VK_NULL_HANDLE, &memory_info, NULL, &memory) != VK_SUCCESS || !memory) {{
+                if (vkAllocateMemory(device, &memory_info, NULL, &memory) != VK_SUCCESS || !memory) {{
                     fprintf(stderr, "memory allocate failed\\n");
                     return 6;
                 }}
-                if (vkBindBufferMemory(VK_NULL_HANDLE, buffer, memory, 0) != VK_SUCCESS) {{
+                if (vkBindBufferMemory(device, buffer, memory, 0) != VK_SUCCESS) {{
                     fprintf(stderr, "buffer bind failed\\n");
                     return 7;
                 }}
@@ -3690,7 +3756,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 template_info.templateType = VK_DESCRIPTOR_UPDATE_TEMPLATE_TYPE_DESCRIPTOR_SET;
                 template_info.descriptorSetLayout = layout;
                 VkDescriptorUpdateTemplate update_template = VK_NULL_HANDLE;
-                if (vkCreateDescriptorUpdateTemplate(VK_NULL_HANDLE, &template_info, NULL, &update_template) != VK_SUCCESS || !update_template) {{
+                if (vkCreateDescriptorUpdateTemplate(device, &template_info, NULL, &update_template) != VK_SUCCESS || !update_template) {{
                     fprintf(stderr, "descriptor update template create failed\\n");
                     return 8;
                 }}
@@ -3703,7 +3769,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 payload[1].buffer = buffer;
                 payload[1].offset = 128;
                 payload[1].range = 64;
-                vkUpdateDescriptorSetWithTemplate(VK_NULL_HANDLE, set_handle, update_template, payload);
+                vkUpdateDescriptorSetWithTemplate(device, set_handle, update_template, payload);
 
                 PdockerVkDescriptorSet *set = pdocker_vk_descriptor_set_from_handle(set_handle);
                 int slot = descriptor_layout_slot_for_binding(set ? set->layout : NULL, 5);
@@ -3739,11 +3805,12 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                     return 12;
                 }}
 
-                vkDestroyDescriptorUpdateTemplate(VK_NULL_HANDLE, update_template, NULL);
-                vkFreeMemory(VK_NULL_HANDLE, memory, NULL);
-                vkDestroyBuffer(VK_NULL_HANDLE, buffer, NULL);
-                vkDestroyDescriptorPool(VK_NULL_HANDLE, pool, NULL);
-                vkDestroyDescriptorSetLayout(VK_NULL_HANDLE, layout, NULL);
+                vkDestroyDescriptorUpdateTemplate(device, update_template, NULL);
+                vkFreeMemory(device, memory, NULL);
+                vkDestroyBuffer(device, buffer, NULL);
+                vkDestroyDescriptorPool(device, pool, NULL);
+                vkDestroyDescriptorSetLayout(device, layout, NULL);
+                vkDestroyDevice(device, NULL);
                 return 0;
             }}
             """
@@ -3764,9 +3831,29 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             int main(void) {{
                 unsetenv("PDOCKER_GPU_QUEUE_SOCKET");
 
-                PdockerVkDevice device;
-                memset(&device, 0, sizeof(device));
-                device.requested_feature_mask = PDOCKER_VK_FEATURE_DESCRIPTOR_STORAGE_BUFFER_UPDATE_AFTER_BIND;
+                VkDeviceCreateInfo device_info;
+                memset(&device_info, 0, sizeof(device_info));
+                device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+
+                VkDevice plain_device = VK_NULL_HANDLE;
+                if (vkCreateDevice((VkPhysicalDevice)&g_device, &device_info, NULL, &plain_device) != VK_SUCCESS || !plain_device) {{
+                    fprintf(stderr, "UAB plain test device create failed\\n");
+                    return 20;
+                }}
+                VkDevice feature_device = VK_NULL_HANDLE;
+                if (vkCreateDevice((VkPhysicalDevice)&g_device, &device_info, NULL, &feature_device) != VK_SUCCESS || !feature_device) {{
+                    fprintf(stderr, "UAB feature test device create failed\\n");
+                    vkDestroyDevice(plain_device, NULL);
+                    return 21;
+                }}
+                PdockerVkDevice *feature_device_obj = pdocker_vk_device_from_handle(feature_device);
+                if (!feature_device_obj) {{
+                    fprintf(stderr, "UAB feature test device lookup failed\\n");
+                    vkDestroyDevice(feature_device, NULL);
+                    vkDestroyDevice(plain_device, NULL);
+                    return 22;
+                }}
+                feature_device_obj->requested_feature_mask = PDOCKER_VK_FEATURE_DESCRIPTOR_STORAGE_BUFFER_UPDATE_AFTER_BIND;
 
                 VkDescriptorSetLayoutBinding binding;
                 memset(&binding, 0, sizeof(binding));
@@ -3790,17 +3877,17 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 layout_info.pBindings = &binding;
 
                 VkDescriptorSetLayout layout = VK_NULL_HANDLE;
-                if (vkCreateDescriptorSetLayout(VK_NULL_HANDLE, &layout_info, NULL, &layout) != VK_ERROR_FEATURE_NOT_PRESENT) {{
+                if (vkCreateDescriptorSetLayout(plain_device, &layout_info, NULL, &layout) != VK_ERROR_FEATURE_NOT_PRESENT) {{
                     fprintf(stderr, "UAB layout without requested feature/layout flag unexpectedly succeeded\\n");
                     return 2;
                 }}
-                if (vkCreateDescriptorSetLayout((VkDevice)&device, &layout_info, NULL, &layout) != VK_ERROR_FEATURE_NOT_PRESENT) {{
+                if (vkCreateDescriptorSetLayout(feature_device, &layout_info, NULL, &layout) != VK_ERROR_FEATURE_NOT_PRESENT) {{
                     fprintf(stderr, "UAB layout without layout pool flag unexpectedly succeeded\\n");
                     return 3;
                 }}
 
                 layout_info.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
-                if (vkCreateDescriptorSetLayout((VkDevice)&device, &layout_info, NULL, &layout) != VK_SUCCESS || !layout) {{
+                if (vkCreateDescriptorSetLayout(feature_device, &layout_info, NULL, &layout) != VK_SUCCESS || !layout) {{
                     fprintf(stderr, "UAB layout with feature and layout flag failed\\n");
                     return 4;
                 }}
@@ -3810,7 +3897,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
                 pool_info.maxSets = 1;
                 VkDescriptorPool ordinary_pool = VK_NULL_HANDLE;
-                if (vkCreateDescriptorPool((VkDevice)&device, &pool_info, NULL, &ordinary_pool) != VK_SUCCESS || !ordinary_pool) {{
+                if (vkCreateDescriptorPool(feature_device, &pool_info, NULL, &ordinary_pool) != VK_SUCCESS || !ordinary_pool) {{
                     fprintf(stderr, "ordinary descriptor pool create failed\\n");
                     return 5;
                 }}
@@ -3822,25 +3909,27 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 alloc_info.descriptorSetCount = 1;
                 alloc_info.pSetLayouts = &layout;
                 VkDescriptorSet set_handle = VK_NULL_HANDLE;
-                if (vkAllocateDescriptorSets((VkDevice)&device, &alloc_info, &set_handle) != VK_ERROR_FEATURE_NOT_PRESENT) {{
+                if (vkAllocateDescriptorSets(feature_device, &alloc_info, &set_handle) != VK_ERROR_FEATURE_NOT_PRESENT) {{
                     fprintf(stderr, "UAB set allocated from ordinary pool\\n");
                     return 6;
                 }}
-                vkDestroyDescriptorPool((VkDevice)&device, ordinary_pool, NULL);
+                vkDestroyDescriptorPool(feature_device, ordinary_pool, NULL);
 
                 pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
                 VkDescriptorPool uab_pool = VK_NULL_HANDLE;
-                if (vkCreateDescriptorPool((VkDevice)&device, &pool_info, NULL, &uab_pool) != VK_SUCCESS || !uab_pool) {{
+                if (vkCreateDescriptorPool(feature_device, &pool_info, NULL, &uab_pool) != VK_SUCCESS || !uab_pool) {{
                     fprintf(stderr, "UAB descriptor pool create failed\\n");
                     return 7;
                 }}
                 alloc_info.descriptorPool = uab_pool;
-                if (vkAllocateDescriptorSets((VkDevice)&device, &alloc_info, &set_handle) != VK_SUCCESS || !set_handle) {{
+                if (vkAllocateDescriptorSets(feature_device, &alloc_info, &set_handle) != VK_SUCCESS || !set_handle) {{
                     fprintf(stderr, "UAB set allocation from UAB pool failed\\n");
                     return 8;
                 }}
-                vkDestroyDescriptorPool((VkDevice)&device, uab_pool, NULL);
-                vkDestroyDescriptorSetLayout((VkDevice)&device, layout, NULL);
+                vkDestroyDescriptorPool(feature_device, uab_pool, NULL);
+                vkDestroyDescriptorSetLayout(feature_device, layout, NULL);
+                vkDestroyDevice(feature_device, NULL);
+                vkDestroyDevice(plain_device, NULL);
                 return 0;
             }}
             """

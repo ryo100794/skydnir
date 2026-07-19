@@ -11759,8 +11759,10 @@ class GpuAbiContractTest(unittest.TestCase):
         descriptor_layout_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorSetLayout", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkDestroyDescriptorSetLayout", 1
         )[0]
-        self.assertIn("if (!pCreateInfo || !pSetLayout)", descriptor_layout_body)
+        self.assertIn("if (!pCreateInfo || !pSetLayout ||", descriptor_layout_body)
         self.assertIn("*pSetLayout = VK_NULL_HANDLE;", descriptor_layout_body)
+        self.assertIn("pCreateInfo->sType != VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO", descriptor_layout_body)
+        self.assertIn("device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0", descriptor_layout_body)
         self.assertIn("validate_descriptor_set_layout_pnext(pCreateInfo)", descriptor_layout_body)
         self.assertIn("descriptor_layout_flags_supported(pCreateInfo->flags)", descriptor_layout_body)
         self.assertIn("VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT", icd)
@@ -11809,9 +11811,10 @@ class GpuAbiContractTest(unittest.TestCase):
         descriptor_pool_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorPool", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkDestroyDescriptorPool", 1
         )[0]
-        self.assertIn("if (!pDescriptorPool) return VK_ERROR_INITIALIZATION_FAILED;", descriptor_pool_body)
+        self.assertIn("if (!pCreateInfo || !pDescriptorPool ||", descriptor_pool_body)
         self.assertIn("*pDescriptorPool = VK_NULL_HANDLE;", descriptor_pool_body)
         self.assertIn("pCreateInfo->sType != VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO", descriptor_pool_body)
+        self.assertIn("device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0", descriptor_pool_body)
         self.assertIn("validate_descriptor_pool_create_pnext(pCreateInfo->pNext)", descriptor_pool_body)
         self.assertIn("VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT", descriptor_pool_body)
         self.assertIn("VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT", descriptor_pool_body)
@@ -11830,7 +11833,8 @@ class GpuAbiContractTest(unittest.TestCase):
         shader_module_pnext_body = c_function_body(icd, "validate_shader_module_create_pnext")
         self.assertIn("validate_shader_module_create_pnext(", shader_module_body)
         self.assertIn("if (pShaderModule) *pShaderModule = VK_NULL_HANDLE;", shader_module_body)
-        self.assertIn("device_owner_id_or_zero_checked(device, &owner_device_id)", shader_module_body)
+        self.assertIn("pCreateInfo->sType != VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO", shader_module_body)
+        self.assertIn("device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0", shader_module_body)
         self.assertIn("pCreateInfo->pNext", shader_module_body)
         self.assertIn("enabled_extension_mask", shader_module_body)
         self.assertIn("if (pnext_rc != VK_SUCCESS) return pnext_rc;", shader_module_body)

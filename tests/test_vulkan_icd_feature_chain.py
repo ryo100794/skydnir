@@ -1845,6 +1845,9 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 device_info.enabledExtensionCount = 1;
                 device_info.ppEnabledExtensionNames = enabled;
                 if (validate_device_extensions(&device_info) != VK_SUCCESS) return 5;
+                VkDevice device = VK_NULL_HANDLE;
+                if (vkCreateDevice((VkPhysicalDevice)&g_device, &device_info, NULL, &device) != VK_SUCCESS ||
+                    device == VK_NULL_HANDLE) return 12;
                 if (proc_address("vkCreateDescriptorUpdateTemplateKHR") == NULL) return 6;
                 if (proc_address("vkDestroyDescriptorUpdateTemplateKHR") == NULL) return 7;
                 if (proc_address("vkUpdateDescriptorSetWithTemplateKHR") == NULL) return 8;
@@ -1861,7 +1864,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 layout_info.bindingCount = 1;
                 layout_info.pBindings = &binding;
                 VkDescriptorSetLayout layout = VK_NULL_HANDLE;
-                if (vkCreateDescriptorSetLayout(VK_NULL_HANDLE, &layout_info, NULL, &layout) != VK_SUCCESS) return 9;
+                if (vkCreateDescriptorSetLayout(device, &layout_info, NULL, &layout) != VK_SUCCESS) return 9;
 
                 VkDescriptorUpdateTemplateEntry entry;
                 VkDescriptorUpdateTemplateCreateInfo template_info;
@@ -1883,13 +1886,14 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     (PFN_vkCreateDescriptorUpdateTemplateKHR)proc_address("vkCreateDescriptorUpdateTemplateKHR");
                 PFN_vkDestroyDescriptorUpdateTemplateKHR destroy_template =
                     (PFN_vkDestroyDescriptorUpdateTemplateKHR)proc_address("vkDestroyDescriptorUpdateTemplateKHR");
-                if (create_template(VK_NULL_HANDLE, &template_info, NULL, &update_template) != VK_SUCCESS) return 10;
+                if (create_template(device, &template_info, NULL, &update_template) != VK_SUCCESS) return 10;
                 if (update_template == VK_NULL_HANDLE) return 11;
                 VkDescriptorUpdateTemplate bogus_template = (VkDescriptorUpdateTemplate)(uintptr_t)0x1234u;
-                vkUpdateDescriptorSetWithTemplate(VK_NULL_HANDLE, VK_NULL_HANDLE, bogus_template, NULL);
-                destroy_template(VK_NULL_HANDLE, bogus_template, NULL);
-                destroy_template(VK_NULL_HANDLE, update_template, NULL);
-                vkDestroyDescriptorSetLayout(VK_NULL_HANDLE, layout, NULL);
+                vkUpdateDescriptorSetWithTemplate(device, VK_NULL_HANDLE, bogus_template, NULL);
+                destroy_template(device, bogus_template, NULL);
+                destroy_template(device, update_template, NULL);
+                vkDestroyDescriptorSetLayout(device, layout, NULL);
+                vkDestroyDevice(device, NULL);
             #endif
                 return 0;
             }}
@@ -1920,6 +1924,16 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     fprintf(stderr, "device extension enumeration failed\\n");
                     return 3;
                 }}
+                VkDeviceCreateInfo plain_device_info;
+                memset(&plain_device_info, 0, sizeof(plain_device_info));
+                plain_device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                VkDevice plain_vk_device = VK_NULL_HANDLE;
+                if (vkCreateDevice((VkPhysicalDevice)&g_device, &plain_device_info, NULL, &plain_vk_device) != VK_SUCCESS ||
+                    plain_vk_device == VK_NULL_HANDLE) {{
+                    fprintf(stderr, "plain validation-cache test device create failed\\n");
+                    return 17;
+                }}
+
                 const char *validation_enabled[] = {{ VK_EXT_VALIDATION_CACHE_EXTENSION_NAME }};
                 VkDeviceCreateInfo validation_device_info;
                 memset(&validation_device_info, 0, sizeof(validation_device_info));
@@ -1930,6 +1944,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 if (vkCreateDevice((VkPhysicalDevice)&g_device, &validation_device_info, NULL, &validation_vk_device) != VK_SUCCESS ||
                     validation_vk_device == VK_NULL_HANDLE) {{
                     fprintf(stderr, "validation cache test device create failed\\n");
+                    vkDestroyDevice(plain_vk_device, NULL);
                     return 15;
                 }}
 
@@ -1993,11 +2008,14 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 shader_info.codeSize = sizeof(shader_words);
                 shader_info.pCode = shader_words;
                 VkShaderModule shader = VK_NULL_HANDLE;
-                if (vkCreateShaderModule(VK_NULL_HANDLE, &shader_info, NULL, &shader) == VK_SUCCESS) {{
+                if (vkCreateShaderModule(plain_vk_device, &shader_info, NULL, &shader) == VK_SUCCESS) {{
                     fprintf(stderr, "shader module accepted validation cache pNext without extension enable-state\\n");
-                    vkDestroyShaderModule(VK_NULL_HANDLE, shader, NULL);
+                    vkDestroyShaderModule(plain_vk_device, shader, NULL);
+                    vkDestroyDevice(plain_vk_device, NULL);
+                    vkDestroyDevice(validation_vk_device, NULL);
                     return 8;
                 }}
+                vkDestroyDevice(plain_vk_device, NULL);
                 shader = VK_NULL_HANDLE;
                 if (vkCreateShaderModule(validation_vk_device, &shader_info, NULL, &shader) != VK_SUCCESS ||
                     shader == VK_NULL_HANDLE) {{
@@ -2042,6 +2060,16 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
             #include "{ICD_SOURCE}"
 
             int main(void) {{
+                VkDeviceCreateInfo device_info;
+                memset(&device_info, 0, sizeof(device_info));
+                device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                VkDevice device = VK_NULL_HANDLE;
+                if (vkCreateDevice((VkPhysicalDevice)&g_device, &device_info, NULL, &device) != VK_SUCCESS ||
+                    device == VK_NULL_HANDLE) {{
+                    fprintf(stderr, "test device create failed\\n");
+                    return 17;
+                }}
+
                 VkDescriptorSetLayoutBinding binding;
                 memset(&binding, 0, sizeof(binding));
                 binding.binding = 0;
@@ -2055,7 +2083,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 dsl_info.bindingCount = 1;
                 dsl_info.pBindings = &binding;
                 VkDescriptorSetLayout dsl = VK_NULL_HANDLE;
-                if (vkCreateDescriptorSetLayout(VK_NULL_HANDLE, &dsl_info, NULL, &dsl) != VK_SUCCESS ||
+                if (vkCreateDescriptorSetLayout(device, &dsl_info, NULL, &dsl) != VK_SUCCESS ||
                     dsl == VK_NULL_HANDLE) {{
                     fprintf(stderr, "descriptor set layout create failed\\n");
                     return 2;
@@ -2072,7 +2100,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 pl_info.setLayoutCount = 1;
                 pl_info.pSetLayouts = &dsl;
                 VkPipelineLayout pl = VK_NULL_HANDLE;
-                if (vkCreatePipelineLayout(VK_NULL_HANDLE, &pl_info, NULL, &pl) != VK_SUCCESS ||
+                if (vkCreatePipelineLayout(device, &pl_info, NULL, &pl) != VK_SUCCESS ||
                     pl == VK_NULL_HANDLE) {{
                     fprintf(stderr, "pipeline layout create failed\\n");
                     return 4;
@@ -2091,7 +2119,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 shader_info.codeSize = sizeof(shader_words);
                 shader_info.pCode = shader_words;
                 VkShaderModule shader = VK_NULL_HANDLE;
-                if (vkCreateShaderModule(VK_NULL_HANDLE, &shader_info, NULL, &shader) != VK_SUCCESS ||
+                if (vkCreateShaderModule(device, &shader_info, NULL, &shader) != VK_SUCCESS ||
                     shader == VK_NULL_HANDLE) {{
                     fprintf(stderr, "shader module create failed\\n");
                     return 6;
@@ -2112,7 +2140,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 cp_info.stage.pName = "main";
                 cp_info.layout = pl;
                 VkPipeline pipeline = VK_NULL_HANDLE;
-                if (vkCreateComputePipelines(VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &cp_info, NULL, &pipeline) != VK_SUCCESS ||
+                if (vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &cp_info, NULL, &pipeline) != VK_SUCCESS ||
                     pipeline == VK_NULL_HANDLE) {{
                     fprintf(stderr, "compute pipeline create failed\\n");
                     return 8;
@@ -2125,20 +2153,20 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     return 9;
                 }}
 
-                vkDestroyShaderModule(VK_NULL_HANDLE, shader, NULL);
+                vkDestroyShaderModule(device, shader, NULL);
                 if (shader_module_handle_lookup(shader) != NULL || !shader_obj->destroyed ||
                     shader_obj->code_size != sizeof(shader_words) || !shader_obj->code_map ||
                     memcmp(shader_obj->code_map, shader_words, sizeof(shader_words)) != 0) {{
                     fprintf(stderr, "destroyed shader module did not move to retained tombstone\\n");
                     return 10;
                 }}
-                vkDestroyPipelineLayout(VK_NULL_HANDLE, pl, NULL);
+                vkDestroyPipelineLayout(device, pl, NULL);
                 if (pipeline_layout_handle_lookup(pl) != NULL || !pl_obj->destroyed ||
                     pl_obj->set_layout_count != 1 || pl_obj->set_layouts[0] != dsl_obj) {{
                     fprintf(stderr, "destroyed pipeline layout did not move to retained tombstone\\n");
                     return 11;
                 }}
-                vkDestroyDescriptorSetLayout(VK_NULL_HANDLE, dsl, NULL);
+                vkDestroyDescriptorSetLayout(device, dsl, NULL);
                 if (descriptor_set_layout_handle_lookup(dsl) != NULL || !dsl_obj->destroyed) {{
                     fprintf(stderr, "destroyed descriptor set layout remained live\\n");
                     return 12;
@@ -2150,27 +2178,28 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 }}
 
                 VkPipeline bad_pipeline = VK_NULL_HANDLE;
-                if (vkCreateComputePipelines(VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &cp_info, NULL, &bad_pipeline) == VK_SUCCESS ||
+                if (vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &cp_info, NULL, &bad_pipeline) == VK_SUCCESS ||
                     bad_pipeline != VK_NULL_HANDLE) {{
                     fprintf(stderr, "compute pipeline accepted destroyed shader/layout handles\\n");
                     return 14;
                 }}
                 VkPipelineLayout bad_pl = VK_NULL_HANDLE;
-                if (vkCreatePipelineLayout(VK_NULL_HANDLE, &pl_info, NULL, &bad_pl) == VK_SUCCESS ||
+                if (vkCreatePipelineLayout(device, &pl_info, NULL, &bad_pl) == VK_SUCCESS ||
                     bad_pl != VK_NULL_HANDLE) {{
                     fprintf(stderr, "pipeline layout accepted destroyed descriptor set layout handle\\n");
                     return 15;
                 }}
 
-                vkDestroyPipeline(VK_NULL_HANDLE, pipeline, NULL);
+                vkDestroyPipeline(device, pipeline, NULL);
                 if (pipeline_handle_lookup(pipeline) != NULL || !pipeline_obj->destroyed) {{
                     fprintf(stderr, "destroyed pipeline remained live\\n");
                     return 16;
                 }}
-                vkDestroyPipeline(VK_NULL_HANDLE, pipeline, NULL);
-                vkDestroyShaderModule(VK_NULL_HANDLE, shader, NULL);
-                vkDestroyPipelineLayout(VK_NULL_HANDLE, pl, NULL);
-                vkDestroyDescriptorSetLayout(VK_NULL_HANDLE, dsl, NULL);
+                vkDestroyPipeline(device, pipeline, NULL);
+                vkDestroyShaderModule(device, shader, NULL);
+                vkDestroyPipelineLayout(device, pl, NULL);
+                vkDestroyDescriptorSetLayout(device, dsl, NULL);
+                vkDestroyDevice(device, NULL);
                 return 0;
             }}
             """
@@ -2186,6 +2215,8 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
             #include <string.h>
             #include "{ICD_SOURCE}"
 
+            static VkDevice g_test_device = VK_NULL_HANDLE;
+
             static int make_layout(VkDescriptorSetLayout *layout_out) {{
                 VkDescriptorSetLayoutBinding binding;
                 memset(&binding, 0, sizeof(binding));
@@ -2199,7 +2230,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
                 info.bindingCount = 1;
                 info.pBindings = &binding;
-                return vkCreateDescriptorSetLayout(VK_NULL_HANDLE, &info, NULL, layout_out) == VK_SUCCESS ? 0 : 1;
+                return vkCreateDescriptorSetLayout(g_test_device, &info, NULL, layout_out) == VK_SUCCESS ? 0 : 1;
             }}
 
             static int make_pool(VkDescriptorPool *pool_out) {{
@@ -2214,7 +2245,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 info.maxSets = 4;
                 info.poolSizeCount = 1;
                 info.pPoolSizes = &size;
-                return vkCreateDescriptorPool(VK_NULL_HANDLE, &info, NULL, pool_out) == VK_SUCCESS ? 0 : 1;
+                return vkCreateDescriptorPool(g_test_device, &info, NULL, pool_out) == VK_SUCCESS ? 0 : 1;
             }}
 
             static int alloc_set(VkDescriptorPool pool, VkDescriptorSetLayout layout, VkDescriptorSet *set_out) {{
@@ -2224,7 +2255,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 info.descriptorPool = pool;
                 info.descriptorSetCount = 1;
                 info.pSetLayouts = &layout;
-                return vkAllocateDescriptorSets(VK_NULL_HANDLE, &info, set_out) == VK_SUCCESS ? 0 : 1;
+                return vkAllocateDescriptorSets(g_test_device, &info, set_out) == VK_SUCCESS ? 0 : 1;
             }}
 
             static void try_update_stale_set(VkDescriptorSet set) {{
@@ -2241,10 +2272,19 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 write.descriptorCount = 1;
                 write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
                 write.pBufferInfo = &buffer_info;
-                vkUpdateDescriptorSets(VK_NULL_HANDLE, 1, &write, 0, NULL);
+                vkUpdateDescriptorSets(g_test_device, 1, &write, 0, NULL);
             }}
 
             int main(void) {{
+                VkDeviceCreateInfo device_info;
+                memset(&device_info, 0, sizeof(device_info));
+                device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                if (vkCreateDevice((VkPhysicalDevice)&g_device, &device_info, NULL, &g_test_device) != VK_SUCCESS ||
+                    g_test_device == VK_NULL_HANDLE) {{
+                    fprintf(stderr, "descriptor lifecycle test device create failed\\n");
+                    return 19;
+                }}
+
                 VkDescriptorSetLayout layout = VK_NULL_HANDLE;
                 if (make_layout(&layout) != 0 || !descriptor_set_layout_handle_lookup(layout)) {{
                     fprintf(stderr, "layout create failed\\n");
@@ -2270,18 +2310,18 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     return 16;
                 }}
                 PdockerVkDescriptorPool *other_pool_obj = descriptor_pool_handle_lookup(other_pool);
-                if (vkFreeDescriptorSets(VK_NULL_HANDLE, other_pool, 1, &set) != VK_ERROR_INITIALIZATION_FAILED ||
+                if (vkFreeDescriptorSets(g_test_device, other_pool, 1, &set) != VK_ERROR_INITIALIZATION_FAILED ||
                     descriptor_set_handle_lookup(set) != set_obj || set_obj->pool != pool_obj ||
                     pool_obj->set_count != 1 || other_pool_obj->set_count != 0) {{
                     fprintf(stderr, "wrong-pool free corrupted descriptor ownership\\n");
                     return 17;
                 }}
-                vkDestroyDescriptorPool(VK_NULL_HANDLE, other_pool, NULL);
+                vkDestroyDescriptorPool(g_test_device, other_pool, NULL);
                 if (descriptor_pool_handle_lookup(other_pool) != NULL || !descriptor_set_handle_lookup(set)) {{
                     fprintf(stderr, "other pool destroy corrupted live descriptor set\\n");
                     return 18;
                 }}
-                if (vkFreeDescriptorSets(VK_NULL_HANDLE, pool, 1, &set) != VK_SUCCESS) {{
+                if (vkFreeDescriptorSets(g_test_device, pool, 1, &set) != VK_SUCCESS) {{
                     fprintf(stderr, "free live set failed\\n");
                     return 5;
                 }}
@@ -2291,7 +2331,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     return 6;
                 }}
                 try_update_stale_set(set);
-                if (vkFreeDescriptorSets(VK_NULL_HANDLE, pool, 1, &set) == VK_SUCCESS) {{
+                if (vkFreeDescriptorSets(g_test_device, pool, 1, &set) == VK_SUCCESS) {{
                     fprintf(stderr, "free accepted stale set\\n");
                     return 7;
                 }}
@@ -2302,7 +2342,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     return 8;
                 }}
                 PdockerVkDescriptorSet *reset_set_obj = descriptor_set_handle_lookup(reset_set);
-                if (vkResetDescriptorPool(VK_NULL_HANDLE, pool, 0) != VK_SUCCESS) {{
+                if (vkResetDescriptorPool(g_test_device, pool, 0) != VK_SUCCESS) {{
                     fprintf(stderr, "pool reset failed\\n");
                     return 9;
                 }}
@@ -2319,14 +2359,14 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     return 11;
                 }}
                 PdockerVkDescriptorSet *destroy_set_obj = descriptor_set_handle_lookup(destroy_set);
-                vkDestroyDescriptorPool(VK_NULL_HANDLE, pool, NULL);
+                vkDestroyDescriptorPool(g_test_device, pool, NULL);
                 if (descriptor_pool_handle_lookup(pool) != NULL || !pool_obj->destroyed ||
                     pool_obj->sets != NULL || descriptor_set_handle_lookup(destroy_set) != NULL ||
                     !destroy_set_obj->destroyed || destroy_set_obj->pool != NULL) {{
                     fprintf(stderr, "pool destroy left pool/set live\\n");
                     return 12;
                 }}
-                if (vkResetDescriptorPool(VK_NULL_HANDLE, pool, 0) == VK_SUCCESS) {{
+                if (vkResetDescriptorPool(g_test_device, pool, 0) == VK_SUCCESS) {{
                     fprintf(stderr, "reset accepted destroyed pool\\n");
                     return 13;
                 }}
@@ -2335,12 +2375,13 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     fprintf(stderr, "allocate accepted destroyed pool\\n");
                     return 14;
                 }}
-                if (vkFreeDescriptorSets(VK_NULL_HANDLE, pool, 1, &destroy_set) == VK_SUCCESS) {{
+                if (vkFreeDescriptorSets(g_test_device, pool, 1, &destroy_set) == VK_SUCCESS) {{
                     fprintf(stderr, "free accepted destroyed pool with stale set\\n");
                     return 15;
                 }}
-                vkDestroyDescriptorPool(VK_NULL_HANDLE, pool, NULL);
-                vkDestroyDescriptorSetLayout(VK_NULL_HANDLE, layout, NULL);
+                vkDestroyDescriptorPool(g_test_device, pool, NULL);
+                vkDestroyDescriptorSetLayout(g_test_device, layout, NULL);
+                vkDestroyDevice(g_test_device, NULL);
                 return 0;
             }}
             """
@@ -2946,6 +2987,9 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 create_info.enabledExtensionCount = 1;
                 create_info.ppEnabledExtensionNames = enabled;
                 if (validate_device_extensions(&create_info) != VK_SUCCESS) return 6;
+                VkDevice device = VK_NULL_HANDLE;
+                if (vkCreateDevice((VkPhysicalDevice)&g_device, &create_info, NULL, &device) != VK_SUCCESS ||
+                    device == VK_NULL_HANDLE) return 10;
 
                 const uint32_t shader_words[] = {{
                     0x07230203u, 0x00010000u, 0u, 7u,
@@ -2957,12 +3001,13 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 shader_info.codeSize = sizeof(shader_words);
                 shader_info.pCode = shader_words;
                 VkShaderModule shader = VK_NULL_HANDLE;
-                if (vkCreateShaderModule(VK_NULL_HANDLE, &shader_info, NULL, &shader) != VK_SUCCESS ||
+                if (vkCreateShaderModule(device, &shader_info, NULL, &shader) != VK_SUCCESS ||
                     shader == VK_NULL_HANDLE) return 7;
                 PdockerVkShaderModule *stored = pdocker_vk_shader_module_from_handle(shader);
                 if (!stored || stored->code_size != sizeof(shader_words) || !stored->code_map) return 8;
                 if (memcmp(stored->code_map, shader_words, sizeof(shader_words)) != 0) return 9;
-                vkDestroyShaderModule(VK_NULL_HANDLE, shader, NULL);
+                vkDestroyShaderModule(device, shader, NULL);
+                vkDestroyDevice(device, NULL);
                 return 0;
             #endif
             }}
@@ -4741,11 +4786,24 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
 
 
             int main(void) {{
+                VkDeviceCreateInfo device_info;
+                memset(&device_info, 0, sizeof(device_info));
+                device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                VkDevice device = VK_NULL_HANDLE;
+                if (vkCreateDevice((VkPhysicalDevice)&g_device, &device_info, NULL, &device) != VK_SUCCESS ||
+                    device == VK_NULL_HANDLE) {{
+                    fprintf(stderr, "dedicated memory test device create failed\\n");
+                    return 20;
+                }}
+                PdockerVkDevice *device_obj = pdocker_vk_device_from_handle(device);
+                if (!device_obj) return 21;
+                uint64_t owner_device_id = device_obj->object_id;
+
                 VkBufferCreateInfo binfo = buffer_info(64);
                 VkBuffer buffer_a = VK_NULL_HANDLE;
                 VkBuffer buffer_b = VK_NULL_HANDLE;
-                if (vkCreateBuffer(VK_NULL_HANDLE, &binfo, NULL, &buffer_a) != VK_SUCCESS ||
-                    vkCreateBuffer(VK_NULL_HANDLE, &binfo, NULL, &buffer_b) != VK_SUCCESS) {{
+                if (vkCreateBuffer(device, &binfo, NULL, &buffer_a) != VK_SUCCESS ||
+                    vkCreateBuffer(device, &binfo, NULL, &buffer_b) != VK_SUCCESS) {{
                     fprintf(stderr, "buffer create failed\\n");
                     return 2;
                 }}
@@ -4761,7 +4819,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 alloc.allocationSize = 4096;
                 alloc.memoryTypeIndex = 0;
                 VkDeviceMemory memory = VK_NULL_HANDLE;
-                if (vkAllocateMemory(VK_NULL_HANDLE, &alloc, NULL, &memory) != VK_SUCCESS) {{
+                if (vkAllocateMemory(device, &alloc, NULL, &memory) != VK_SUCCESS) {{
                     fprintf(stderr, "buffer dedicated allocation failed\\n");
                     return 3;
                 }}
@@ -4771,15 +4829,15 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     fprintf(stderr, "buffer dedicated target was not recorded\\n");
                     return 4;
                 }}
-                if (vkBindBufferMemory(VK_NULL_HANDLE, buffer_a, memory, 0) != VK_SUCCESS) {{
+                if (vkBindBufferMemory(device, buffer_a, memory, 0) != VK_SUCCESS) {{
                     fprintf(stderr, "dedicated buffer bind to target failed\\n");
                     return 5;
                 }}
-                if (vkBindBufferMemory(VK_NULL_HANDLE, buffer_a, memory, 16) == VK_SUCCESS) {{
+                if (vkBindBufferMemory(device, buffer_a, memory, 16) == VK_SUCCESS) {{
                     fprintf(stderr, "dedicated buffer accepted nonzero offset\\n");
                     return 6;
                 }}
-                if (vkBindBufferMemory(VK_NULL_HANDLE, buffer_b, memory, 0) == VK_SUCCESS) {{
+                if (vkBindBufferMemory(device, buffer_b, memory, 0) == VK_SUCCESS) {{
                     fprintf(stderr, "dedicated buffer accepted different buffer\\n");
                     return 7;
                 }}
@@ -4791,10 +4849,12 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     return 8;
                 }}
                 image_obj_a->object_id = 101;
+                image_obj_a->owner_device_id = owner_device_id;
                 image_obj_a->requirements_alignment = PDOCKER_VK_REQUIREMENT_ALIGNMENT;
                 image_obj_a->requirements_size = 4096;
                 image_obj_a->memory_type_bits = 0x3;
                 image_obj_b->object_id = 102;
+                image_obj_b->owner_device_id = owner_device_id;
                 image_obj_b->requirements_alignment = PDOCKER_VK_REQUIREMENT_ALIGNMENT;
                 image_obj_b->requirements_size = 4096;
                 image_obj_b->memory_type_bits = 0x3;
@@ -4811,7 +4871,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 alloc.allocationSize = 4096;
                 alloc.memoryTypeIndex = 0;
                 VkDeviceMemory image_memory = VK_NULL_HANDLE;
-                if (vkAllocateMemory(VK_NULL_HANDLE, &alloc, NULL, &image_memory) != VK_SUCCESS) {{
+                if (vkAllocateMemory(device, &alloc, NULL, &image_memory) != VK_SUCCESS) {{
                     fprintf(stderr, "image dedicated allocation failed\\n");
                     return 9;
                 }}
@@ -4821,15 +4881,15 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     fprintf(stderr, "image dedicated target was not recorded\\n");
                     return 10;
                 }}
-                if (vkBindImageMemory(VK_NULL_HANDLE, image_a, image_memory, 0) != VK_SUCCESS) {{
+                if (vkBindImageMemory(device, image_a, image_memory, 0) != VK_SUCCESS) {{
                     fprintf(stderr, "dedicated image bind to target failed\\n");
                     return 11;
                 }}
-                if (vkBindImageMemory(VK_NULL_HANDLE, image_b, image_memory, 0) == VK_SUCCESS) {{
+                if (vkBindImageMemory(device, image_b, image_memory, 0) == VK_SUCCESS) {{
                     fprintf(stderr, "dedicated image accepted different image\\n");
                     return 12;
                 }}
-                if (vkBindBufferMemory(VK_NULL_HANDLE, buffer_a, image_memory, 0) == VK_SUCCESS) {{
+                if (vkBindBufferMemory(device, buffer_a, image_memory, 0) == VK_SUCCESS) {{
                     fprintf(stderr, "dedicated image memory accepted buffer bind\\n");
                     return 13;
                 }}
@@ -5709,6 +5769,16 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
             {COMMAND_BUFFER_STACK_TEST_HELPER}
 
             int main(void) {{
+                VkDeviceCreateInfo device_info;
+                memset(&device_info, 0, sizeof(device_info));
+                device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                VkDevice device = VK_NULL_HANDLE;
+                if (vkCreateDevice((VkPhysicalDevice)&g_device, &device_info, NULL, &device) != VK_SUCCESS ||
+                    device == VK_NULL_HANDLE) {{
+                    fprintf(stderr, "buffer lifecycle test device create failed\\n");
+                    return 20;
+                }}
+
                 VkBufferCreateInfo buffer_info;
                 memset(&buffer_info, 0, sizeof(buffer_info));
                 buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -5720,14 +5790,14 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
                 VkBuffer buffer = VK_NULL_HANDLE;
-                if (vkCreateBuffer(VK_NULL_HANDLE, &buffer_info, NULL, &buffer) != VK_SUCCESS ||
+                if (vkCreateBuffer(device, &buffer_info, NULL, &buffer) != VK_SUCCESS ||
                     buffer == VK_NULL_HANDLE) {{
                     fprintf(stderr, "buffer create failed\\n");
                     return 1;
                 }}
                 VkMemoryRequirements req;
                 memset(&req, 0, sizeof(req));
-                vkGetBufferMemoryRequirements(VK_NULL_HANDLE, buffer, &req);
+                vkGetBufferMemoryRequirements(device, buffer, &req);
                 if (req.size == 0 || req.alignment == 0) {{
                     fprintf(stderr, "live buffer requirements were empty\\n");
                     return 2;
@@ -5739,25 +5809,25 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 alloc.allocationSize = req.size;
                 alloc.memoryTypeIndex = 1;
                 VkDeviceMemory memory = VK_NULL_HANDLE;
-                if (vkAllocateMemory(VK_NULL_HANDLE, &alloc, NULL, &memory) != VK_SUCCESS ||
+                if (vkAllocateMemory(device, &alloc, NULL, &memory) != VK_SUCCESS ||
                     memory == VK_NULL_HANDLE) {{
                     fprintf(stderr, "memory allocation failed\\n");
                     return 3;
                 }}
-                if (vkBindBufferMemory(VK_NULL_HANDLE, buffer, memory, 0) != VK_SUCCESS) {{
+                if (vkBindBufferMemory(device, buffer, memory, 0) != VK_SUCCESS) {{
                     fprintf(stderr, "live buffer bind failed\\n");
                     return 4;
                 }}
 
-                vkDestroyBuffer(VK_NULL_HANDLE, buffer, NULL);
+                vkDestroyBuffer(device, buffer, NULL);
                 memset(&req, 0x7f, sizeof(req));
-                vkGetBufferMemoryRequirements(VK_NULL_HANDLE, buffer, &req);
+                vkGetBufferMemoryRequirements(device, buffer, &req);
                 if (req.size != 0) {{
                     fprintf(stderr, "stale buffer requirements exposed size=%llu\\n",
                             (unsigned long long)req.size);
                     return 5;
                 }}
-                if (vkBindBufferMemory(VK_NULL_HANDLE, buffer, memory, 0) == VK_SUCCESS) {{
+                if (vkBindBufferMemory(device, buffer, memory, 0) == VK_SUCCESS) {{
                     fprintf(stderr, "stale buffer bind succeeded\\n");
                     return 6;
                 }}
@@ -5769,7 +5839,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 view_info.format = VK_FORMAT_R8_UINT;
                 view_info.range = VK_WHOLE_SIZE;
                 VkBufferView view = VK_NULL_HANDLE;
-                if (vkCreateBufferView(VK_NULL_HANDLE, &view_info, NULL, &view) == VK_SUCCESS ||
+                if (vkCreateBufferView(device, &view_info, NULL, &view) == VK_SUCCESS ||
                     view != VK_NULL_HANDLE) {{
                     fprintf(stderr, "stale buffer view creation succeeded\\n");
                     return 7;
@@ -5781,7 +5851,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 dedicated.buffer = buffer;
                 alloc.pNext = &dedicated;
                 VkDeviceMemory dedicated_memory = VK_NULL_HANDLE;
-                if (vkAllocateMemory(VK_NULL_HANDLE, &alloc, NULL, &dedicated_memory) == VK_SUCCESS ||
+                if (vkAllocateMemory(device, &alloc, NULL, &dedicated_memory) == VK_SUCCESS ||
                     dedicated_memory != VK_NULL_HANDLE) {{
                     fprintf(stderr, "dedicated allocation accepted stale buffer\\n");
                     return 8;
@@ -5799,13 +5869,14 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 command_buffer_destroy_record_vectors(&cmd);
 
                 VkBuffer fake_buffer = (VkBuffer)(uintptr_t)0x1234u;
-                vkDestroyBuffer(VK_NULL_HANDLE, fake_buffer, NULL);
-                if (vkBindBufferMemory(VK_NULL_HANDLE, fake_buffer, memory, 0) == VK_SUCCESS) {{
+                vkDestroyBuffer(device, fake_buffer, NULL);
+                if (vkBindBufferMemory(device, fake_buffer, memory, 0) == VK_SUCCESS) {{
                     fprintf(stderr, "fake buffer bind succeeded\\n");
                     return 10;
                 }}
-                vkFreeMemory(VK_NULL_HANDLE, memory, NULL);
-                vkDestroyBuffer(VK_NULL_HANDLE, buffer, NULL);
+                vkFreeMemory(device, memory, NULL);
+                vkDestroyBuffer(device, buffer, NULL);
+                vkDestroyDevice(device, NULL);
                 return 0;
             }}
             """
@@ -6692,41 +6763,54 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
             #include "{ICD_SOURCE}"
 
             int main(void) {{
-                PdockerVkSampler sampler;
-                PdockerVkSamplerSnapshot snapshot;
-                memset(&sampler, 0, sizeof(sampler));
-                memset(&snapshot, 0, sizeof(snapshot));
-                sampler.object_id = 555;
-                sampler.mag_filter = VK_FILTER_NEAREST;
-                sampler.min_filter = VK_FILTER_NEAREST;
-                sampler.mipmap_mode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
-                sampler.address_mode_u = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-                sampler.address_mode_v = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-                sampler.address_mode_w = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-                sampler.min_lod = 0.0f;
-                sampler.max_lod = 1.0f;
-                sampler.reduction_mode = VK_SAMPLER_REDUCTION_MODE_WEIGHTED_AVERAGE;
-                sampler.generation = 666;
-                sampler_register(&sampler);
-                VkSampler handle = pdocker_vk_sampler_to_handle(&sampler);
-                if (sampler_handle_lookup(handle) != &sampler) {{
-                    fprintf(stderr, "live sampler lookup failed\\n");
+                VkDeviceCreateInfo device_info;
+                memset(&device_info, 0, sizeof(device_info));
+                device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                VkDevice device = VK_NULL_HANDLE;
+                if (vkCreateDevice((VkPhysicalDevice)&g_device, &device_info, NULL, &device) != VK_SUCCESS ||
+                    device == VK_NULL_HANDLE) {{
+                    fprintf(stderr, "sampler test device create failed\\n");
+                    return 10;
+                }}
+
+                VkSamplerCreateInfo sampler_info;
+                memset(&sampler_info, 0, sizeof(sampler_info));
+                sampler_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+                sampler_info.magFilter = VK_FILTER_NEAREST;
+                sampler_info.minFilter = VK_FILTER_NEAREST;
+                sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+                sampler_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+                sampler_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+                sampler_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+                sampler_info.minLod = 0.0f;
+                sampler_info.maxLod = 1.0f;
+                VkSampler handle = VK_NULL_HANDLE;
+                if (vkCreateSampler(device, &sampler_info, NULL, &handle) != VK_SUCCESS ||
+                    handle == VK_NULL_HANDLE) {{
+                    fprintf(stderr, "sampler create failed\\n");
                     return 1;
                 }}
-                if (!snapshot_sampler_state(&snapshot, &sampler) || !snapshot.valid ||
-                    snapshot.object_id != 555 || snapshot.reduction_mode != VK_SAMPLER_REDUCTION_MODE_WEIGHTED_AVERAGE) {{
-                    fprintf(stderr, "live sampler snapshot failed\\n");
+                PdockerVkSampler *sampler = sampler_handle_lookup_for_device(device, handle);
+                if (!sampler) {{
+                    fprintf(stderr, "live sampler lookup failed\\n");
                     return 2;
                 }}
-                vkDestroySampler(VK_NULL_HANDLE, handle, NULL);
-                if (sampler_handle_lookup(handle) != NULL) {{
-                    fprintf(stderr, "destroyed sampler remained live\\n");
+                PdockerVkSamplerSnapshot snapshot;
+                memset(&snapshot, 0, sizeof(snapshot));
+                if (!snapshot_sampler_state(&snapshot, sampler) || !snapshot.valid ||
+                    snapshot.reduction_mode != VK_SAMPLER_REDUCTION_MODE_WEIGHTED_AVERAGE) {{
+                    fprintf(stderr, "live sampler snapshot failed\\n");
                     return 3;
                 }}
-                memset(&snapshot, 0, sizeof(snapshot));
-                if (snapshot_sampler_state(&snapshot, &sampler) || snapshot.valid) {{
-                    fprintf(stderr, "destroyed sampler snapshot succeeded\\n");
+                vkDestroySampler(device, handle, NULL);
+                if (sampler_handle_lookup(handle) != NULL) {{
+                    fprintf(stderr, "destroyed sampler remained live\\n");
                     return 4;
+                }}
+                memset(&snapshot, 0, sizeof(snapshot));
+                if (snapshot_sampler_state(&snapshot, sampler) || snapshot.valid) {{
+                    fprintf(stderr, "destroyed sampler snapshot succeeded\\n");
+                    return 5;
                 }}
                 VkDescriptorSetLayoutBinding binding;
                 VkDescriptorSetLayoutCreateInfo layout_info;
@@ -6741,13 +6825,14 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 layout_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
                 layout_info.bindingCount = 1;
                 layout_info.pBindings = &binding;
-                if (vkCreateDescriptorSetLayout(VK_NULL_HANDLE, &layout_info, NULL, &layout) == VK_SUCCESS ||
+                if (vkCreateDescriptorSetLayout(device, &layout_info, NULL, &layout) == VK_SUCCESS ||
                     layout != VK_NULL_HANDLE) {{
                     fprintf(stderr, "stale immutable sampler layout succeeded\\n");
-                    return 5;
+                    return 6;
                 }}
-                vkDestroySampler(VK_NULL_HANDLE, handle, NULL);
-                vkDestroySampler(VK_NULL_HANDLE, (VkSampler)(uintptr_t)0x1234u, NULL);
+                vkDestroySampler(device, handle, NULL);
+                vkDestroySampler(device, (VkSampler)(uintptr_t)0x1234u, NULL);
+                vkDestroyDevice(device, NULL);
                 return 0;
             }}
             """
@@ -7152,7 +7237,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 return info;
             }}
 
-            static int expect_image_format_rejected(VkFormat format, int code) {{
+            static int expect_image_format_rejected(VkDevice device, VkFormat format, int code) {{
                 VkFormatProperties format_props;
                 memset(&format_props, 0xff, sizeof(format_props));
                 vkGetPhysicalDeviceFormatProperties((VkPhysicalDevice)physical_device_for_instance(NULL), format, &format_props);
@@ -7198,11 +7283,12 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 }}
 
                 VkImage image = (VkImage)(uintptr_t)0x1234u;
-                rc = vkCreateImage(VK_NULL_HANDLE, &info, NULL, &image);
-                if (rc != VK_ERROR_FORMAT_NOT_SUPPORTED || image != VK_NULL_HANDLE) {{
+                rc = vkCreateImage(device, &info, NULL, &image);
+                if ((rc != VK_ERROR_FORMAT_NOT_SUPPORTED && rc != VK_ERROR_INITIALIZATION_FAILED) || image != VK_NULL_HANDLE) {{
                     fprintf(stderr, "case %d create image rc=%d image=%p\\n", code, rc, (void *)image);
                     return code + 40;
                 }}
+                vkDestroyDevice(device, NULL);
                 return 0;
             }}
 
@@ -7210,9 +7296,19 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 setenv("PDOCKER_VULKAN_HEAP_BYTES", "2147483648", 1);
                 setenv("PDOCKER_VULKAN_MAX_BUFFER_BYTES", "2147483648", 1);
 
-                if (expect_image_format_rejected(VK_FORMAT_BC1_RGBA_UNORM_BLOCK, 2)) return 2;
+                VkDeviceCreateInfo device_info;
+                memset(&device_info, 0, sizeof(device_info));
+                device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                VkDevice device = VK_NULL_HANDLE;
+                if (vkCreateDevice((VkPhysicalDevice)&g_device, &device_info, NULL, &device) != VK_SUCCESS ||
+                    device == VK_NULL_HANDLE) {{
+                    fprintf(stderr, "non-byte-linear image test device create failed\\n");
+                    return 5;
+                }}
+
+                if (expect_image_format_rejected(device, VK_FORMAT_BC1_RGBA_UNORM_BLOCK, 2)) return 2;
             #ifdef VK_VERSION_1_1
-                if (expect_image_format_rejected(VK_FORMAT_G8_B8R8_2PLANE_420_UNORM, 3)) return 3;
+                if (expect_image_format_rejected(device, VK_FORMAT_G8_B8R8_2PLANE_420_UNORM, 3)) return 3;
             #endif
 
                 PdockerVkImage color_image;
@@ -7243,6 +7339,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     fprintf(stderr, "plane-aspect image view was accepted as byte-linear color\\n");
                     return 4;
                 }}
+                vkDestroyDevice(device, NULL);
                 return 0;
             }}
             """
@@ -7356,11 +7453,11 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     flags,
                     &props);
                 if (rc != VK_SUCCESS) {
-                    fprintf(stderr, "case %d image format query failed: %d\n", code, rc);
+                    fprintf(stderr, "case %d image format query failed: %d\\n", code, rc);
                     return code;
                 }
                 if (props.sampleCounts != expected) {
-                    fprintf(stderr, "case %d sampleCounts=0x%x expected=0x%x\n",
+                    fprintf(stderr, "case %d sampleCounts=0x%x expected=0x%x\\n",
                             code, (unsigned)props.sampleCounts, (unsigned)expected);
                     return code + 100;
                 }
@@ -7368,6 +7465,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
             }
 
             static int expect_create_image(
+                    VkDevice device,
                     VkImageUsageFlags usage,
                     VkSampleCountFlagBits samples,
                     VkResult expected,
@@ -7388,16 +7486,16 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
                 info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
                 VkImage image = (VkImage)(uintptr_t)0x1234u;
-                VkResult rc = vkCreateImage(VK_NULL_HANDLE, &info, NULL, &image);
+                VkResult rc = vkCreateImage(device, &info, NULL, &image);
                 if (rc != expected) {
-                    fprintf(stderr, "case %d create image rc=%d expected=%d\n", code, rc, expected);
+                    fprintf(stderr, "case %d create image rc=%d expected=%d\\n", code, rc, expected);
                     return code;
                 }
                 if (rc == VK_SUCCESS) {
                     if (image == VK_NULL_HANDLE) return code + 100;
-                    vkDestroyImage(VK_NULL_HANDLE, image, NULL);
+                    vkDestroyImage(device, image, NULL);
                 } else if (image != VK_NULL_HANDLE) {
-                    fprintf(stderr, "case %d failed create left image handle %p\n", code, (void *)image);
+                    fprintf(stderr, "case %d failed create left image handle %p\\n", code, (void *)image);
                     return code + 200;
                 }
                 return 0;
@@ -7406,7 +7504,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
             int main(void) {
                 char json[65536];
                 if (build_caps_json(json, sizeof(json)) != 0) {
-                    fprintf(stderr, "caps json overflow\n");
+                    fprintf(stderr, "caps json overflow\\n");
                     return 2;
                 }
                 char dir_template[] = "/tmp/skydnir-msaa-caps-XXXXXX";
@@ -7429,12 +7527,12 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 int status = 0;
                 if (waitpid(server, &status, 0) != server || !WIFEXITED(status) ||
                     WEXITSTATUS(status) != 0) {
-                    fprintf(stderr, "caps server failed status=0x%x\n", status);
+                    fprintf(stderr, "caps server failed status=0x%x\\n", status);
                     return 5;
                 }
 
                 if ((device_props.limits.framebufferColorSampleCounts & VK_SAMPLE_COUNT_4_BIT) == 0) {
-                    fprintf(stderr, "framebuffer color sample counts did not include 4x: 0x%x\n",
+                    fprintf(stderr, "framebuffer color sample counts did not include 4x: 0x%x\\n",
                             (unsigned)device_props.limits.framebufferColorSampleCounts);
                     return 6;
                 }
@@ -7442,8 +7540,18 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     device_props.limits.storageImageSampleCounts != VK_SAMPLE_COUNT_1_BIT ||
                     device_props.limits.framebufferDepthSampleCounts != VK_SAMPLE_COUNT_1_BIT ||
                     device_props.limits.framebufferStencilSampleCounts != VK_SAMPLE_COUNT_1_BIT) {
-                    fprintf(stderr, "non-color-attachment sample-count lanes advertised MSAA\n");
+                    fprintf(stderr, "non-color-attachment sample-count lanes advertised MSAA\\n");
                     return 7;
+                }
+
+                VkDeviceCreateInfo device_info;
+                memset(&device_info, 0, sizeof(device_info));
+                device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                VkDevice device = VK_NULL_HANDLE;
+                if (vkCreateDevice((VkPhysicalDevice)&g_device, &device_info, NULL, &device) != VK_SUCCESS ||
+                    device == VK_NULL_HANDLE) {
+                    fprintf(stderr, "MSAA image-create test device create failed\\n");
+                    return 8;
                 }
 
                 const VkSampleCountFlags msaa = VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_4_BIT;
@@ -7465,14 +7573,15 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 if (expect_query_samples(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, 0,
                                          VK_IMAGE_TYPE_3D, VK_SAMPLE_COUNT_1_BIT, 17)) return 17;
 
-                if (expect_create_image(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+                if (expect_create_image(device, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
                                         VK_SAMPLE_COUNT_4_BIT, VK_SUCCESS, 20)) return 20;
-                if (expect_create_image(VK_IMAGE_USAGE_SAMPLED_BIT,
+                if (expect_create_image(device, VK_IMAGE_USAGE_SAMPLED_BIT,
                                         VK_SAMPLE_COUNT_4_BIT, VK_ERROR_FORMAT_NOT_SUPPORTED, 21)) return 21;
-                if (expect_create_image(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                if (expect_create_image(device, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
                                         VK_SAMPLE_COUNT_4_BIT, VK_ERROR_FORMAT_NOT_SUPPORTED, 22)) return 22;
-                if (expect_create_image(VK_IMAGE_USAGE_SAMPLED_BIT,
+                if (expect_create_image(device, VK_IMAGE_USAGE_SAMPLED_BIT,
                                         VK_SAMPLE_COUNT_1_BIT, VK_SUCCESS, 23)) return 23;
+                vkDestroyDevice(device, NULL);
                 return 0;
             }
             """
@@ -9669,6 +9778,16 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
             }}
 
             int main(void) {{
+                VkDeviceCreateInfo device_info;
+                memset(&device_info, 0, sizeof(device_info));
+                device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                VkDevice device = VK_NULL_HANDLE;
+                if (vkCreateDevice((VkPhysicalDevice)&g_device, &device_info, NULL, &device) != VK_SUCCESS ||
+                    device == VK_NULL_HANDLE) {{
+                    fprintf(stderr, "descriptor sparse test device create failed\\n");
+                    return 90;
+                }}
+
                 VkDescriptorSetLayoutBinding bindings[3];
                 memset(bindings, 0, sizeof(bindings));
                 bindings[0].binding = 9;
@@ -9692,7 +9811,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
 
                 VkDescriptorSetLayout layout_handle = VK_NULL_HANDLE;
                 VkResult rc = vkCreateDescriptorSetLayout(
-                    VK_NULL_HANDLE, &create_info, NULL, &layout_handle);
+                    device, &create_info, NULL, &layout_handle);
                 if (rc != VK_SUCCESS || layout_handle == VK_NULL_HANDLE) {{
                     fprintf(stderr, "vkCreateDescriptorSetLayout failed rc=%d\\n", (int)rc);
                     return 4;
@@ -9716,7 +9835,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     &set, descriptor_set_storage_capacity_for_layout(layout), NULL);
                 if (rc != VK_SUCCESS) {{
                     fprintf(stderr, "descriptor_set_allocate_storage_with_counts failed rc=%d\\n", (int)rc);
-                    vkDestroyDescriptorSetLayout(VK_NULL_HANDLE, layout_handle, NULL);
+                    vkDestroyDescriptorSetLayout(device, layout_handle, NULL);
                     return 14;
                 }}
 
@@ -9755,7 +9874,8 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 }}
 
                 destroy_descriptor_set_storage(&set);
-                vkDestroyDescriptorSetLayout(VK_NULL_HANDLE, layout_handle, NULL);
+                vkDestroyDescriptorSetLayout(device, layout_handle, NULL);
+                vkDestroyDevice(device, NULL);
                 return 0;
             }}
             """
