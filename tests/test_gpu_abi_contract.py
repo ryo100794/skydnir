@@ -9542,8 +9542,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("frame + sizeof(PdockerGpuVulkanDispatchV5FrameHeader)", icd)
         self.assertIn("resource_table_offset", icd)
         self.assertIn("descriptor_table_offset", icd)
-        self.assertIn('env_truthy_default("PDOCKER_VULKAN_USE_V5_FRAME", false)', icd)
+        self.assertIn('env_truthy_default("PDOCKER_VULKAN_USE_V5_FRAME", true)', icd)
         self.assertIn("VULKAN_DISPATCH_V5.1", icd)
+        self.assertIn("legacy text\n     * transport cannot carry the full Vulkan API-visible object identity", icd)
+        self.assertIn("PDOCKER_VULKAN_USE_V5_FRAME=0", icd)
         self.assertNotIn("SPIRV_PROBE_DISPATCH", icd)
 
     def test_strict_passthrough_rejects_copy_alias_transport(self):

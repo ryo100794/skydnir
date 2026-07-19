@@ -9,6 +9,19 @@ llama.cpp itself remains unmodified.
 
 ## Current Ground Truth
 
+### 2026-07-19 CPU/static V5 default transport lane
+
+Vulkan compute dispatch now treats the V5 framed transport as the default path.
+The legacy V4 text transport remains available only as an explicit compatibility
+opt-out through `PDOCKER_VULKAN_USE_V5_FRAME=0`.  This prevents newly preserved
+API-visible identity fields, such as memory property flags, buffer usage,
+descriptor array coordinates, image descriptors, barriers, specialization
+payloads, and long push/entry payloads, from silently falling back to a transport
+format that cannot represent them.
+
+This is generic Vulkan pass-through hardening. It does not change llama.cpp,
+Dockerfiles, models, prompts, shader bytes, or executor arithmetic.
+
 ### 2026-07-19 CPU/static V5 memory-property identity lane
 
 Vulkan dispatch V5 compute resource transport now preserves API memory

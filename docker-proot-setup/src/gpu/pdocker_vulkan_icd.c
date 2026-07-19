@@ -6990,7 +6990,13 @@ static uint64_t fnv1a64_update_u64(uint64_t hash, uint64_t value) {
 }
 
 static bool vulkan_v5_frame_enabled(void) {
-    return env_truthy_default("PDOCKER_VULKAN_USE_V5_FRAME", false);
+    /*
+     * V5 framed transport is the generic pass-through path.  The legacy text
+     * transport cannot carry the full Vulkan API-visible object identity
+     * (for example memory property flags), so keep it only as an explicit
+     * compatibility opt-out via PDOCKER_VULKAN_USE_V5_FRAME=0.
+     */
+    return env_truthy_default("PDOCKER_VULKAN_USE_V5_FRAME", true);
 }
 
 static bool checked_add_size(size_t a, size_t b, size_t *out) {
