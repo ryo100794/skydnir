@@ -277,6 +277,8 @@ typedef struct PdockerVkPhysicalDevice {
     struct PdockerVkPhysicalDevice *next;
 } PdockerVkPhysicalDevice;
 
+typedef struct PdockerVkQueue PdockerVkQueue;
+
 typedef struct PdockerVkDevice {
     VK_LOADER_DATA loader;
     uint64_t object_id;
@@ -284,10 +286,11 @@ typedef struct PdockerVkDevice {
     uint64_t physical_device_object_id;
     uint64_t requested_feature_mask;
     uint64_t enabled_extension_mask;
+    PdockerVkQueue *queue;
     struct PdockerVkDevice *next;
 } PdockerVkDevice;
 
-typedef struct {
+struct PdockerVkQueue {
     VK_LOADER_DATA loader;
     uint64_t object_id;
     uint64_t instance_object_id;
@@ -295,7 +298,9 @@ typedef struct {
     uint64_t device_object_id;
     uint64_t requested_feature_mask;
     uint64_t enabled_extension_mask;
-} PdockerVkQueue;
+    bool destroyed;
+    struct PdockerVkQueue *next;
+};
 
 typedef struct PdockerVkMemory PdockerVkMemory;
 typedef struct PdockerVkBuffer PdockerVkBuffer;
@@ -1769,6 +1774,8 @@ struct PdockerVkCommandPool {
 
 static PdockerVkPhysicalDevice g_device;
 static PdockerVkQueue g_queue;
+static PdockerVkQueue *g_queues;
+static PdockerVkQueue *g_retired_queues;
 static PdockerVkInstance *g_instances;
 static PdockerVkPhysicalDevice *g_physical_devices;
 static PdockerVkDevice *g_devices;
@@ -3848,14 +3855,54 @@ static bool queue_synchronization2_enabled(const PdockerVkQueue *queue) {
         queue->requested_feature_mask, queue->enabled_extension_mask);
 }
 
+static void queue_register(PdockerVkQueue *queue) {
+    if (!queue) return;
+    queue->destroyed = false;
+    queue->next = g_queues;
+    g_queues = queue;
+}
+
+static PdockerVkQueue *queue_unregister_object(PdockerVkQueue *target) {
+    if (!target) return NULL;
+    PdockerVkQueue **link = &g_queues;
+    while (*link) {
+        if (*link == target) {
+            *link = target->next;
+            target->next = NULL;
+            return target;
+        }
+        link = &(*link)->next;
+    }
+    return NULL;
+}
+
+static void queue_retire(PdockerVkQueue *queue) {
+    if (!queue || queue->destroyed) return;
+    queue->destroyed = true;
+    queue->next = g_retired_queues;
+    g_retired_queues = queue;
+}
+
+static bool pdocker_vk_queue_identity_live(const PdockerVkQueue *queue) {
+    return queue && !queue->destroyed && queue->object_id != 0 &&
+           queue->instance_object_id != 0 &&
+           queue->physical_device_object_id != 0 &&
+           queue->device_object_id != 0;
+}
+
 static PdockerVkQueue *pdocker_vk_queue_from_handle(VkQueue queue) {
     PdockerVkQueue *pdocker_queue = (PdockerVkQueue *)queue;
-    return pdocker_queue && pdocker_queue->object_id != 0 &&
-           pdocker_queue->instance_object_id != 0 &&
-           pdocker_queue->physical_device_object_id != 0 &&
-           pdocker_queue->device_object_id != 0
-        ? pdocker_queue
-        : NULL;
+    if (!pdocker_vk_queue_identity_live(pdocker_queue)) return NULL;
+    if (pdocker_queue == &g_queue) return pdocker_queue;
+    for (PdockerVkQueue *candidate = g_queues; candidate; candidate = candidate->next) {
+        if (candidate == pdocker_queue && pdocker_vk_queue_identity_live(candidate)) {
+            return candidate;
+        }
+    }
+    for (PdockerVkQueue *candidate = g_retired_queues; candidate; candidate = candidate->next) {
+        if (candidate == pdocker_queue) return NULL;
+    }
+    return pdocker_queue;
 }
 
 static PdockerVkDevice *pdocker_vk_device_from_handle(VkDevice device) {
@@ -25470,12 +25517,22 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
     device->object_id = next_vulkan_object_generation();
     device->instance_object_id = physical->instance_object_id;
     device->physical_device_object_id = physical->object_id;
-    g_queue.object_id = next_vulkan_object_generation();
-    g_queue.instance_object_id = device->instance_object_id;
-    g_queue.physical_device_object_id = device->physical_device_object_id;
-    g_queue.device_object_id = device->object_id;
     device->requested_feature_mask = requested_feature_mask;
     device->enabled_extension_mask = enabled_extension_mask;
+    PdockerVkQueue *queue = calloc(1, sizeof(*queue));
+    if (!queue) {
+        free(device);
+        return VK_ERROR_OUT_OF_HOST_MEMORY;
+    }
+    queue->object_id = next_vulkan_object_generation();
+    queue->instance_object_id = device->instance_object_id;
+    queue->physical_device_object_id = device->physical_device_object_id;
+    queue->device_object_id = device->object_id;
+    queue->requested_feature_mask = requested_feature_mask;
+    queue->enabled_extension_mask = enabled_extension_mask;
+    set_loader_magic_value(queue);
+    queue_register(queue);
+    device->queue = queue;
     device_register(device);
     if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
         fprintf(stderr,
@@ -25499,6 +25556,11 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyDevice(
     if (!device_handle_resolve(device, &pdocker_device)) return;
     uint64_t destroy_owner_id = pdocker_device->object_id;
     (void)device_unregister(device);
+    PdockerVkQueue *queue = pdocker_device->queue;
+    if (queue && queue->device_object_id == destroy_owner_id) {
+        queue_retire(queue_unregister_object(queue));
+        pdocker_device->queue = NULL;
+    }
     pdocker_vk_destroy_device_live_objects(device, destroy_owner_id);
     if (g_queue.device_object_id == destroy_owner_id) {
         memset(&g_queue, 0, sizeof(g_queue));
@@ -25523,12 +25585,9 @@ VKAPI_ATTR void VKAPI_CALL vkGetDeviceQueue(
         *pQueue = VK_NULL_HANDLE;
         return;
     }
-    g_queue.instance_object_id = pdocker_device->instance_object_id;
-    g_queue.physical_device_object_id = pdocker_device->physical_device_object_id;
-    g_queue.device_object_id = pdocker_device->object_id;
-    g_queue.requested_feature_mask = pdocker_device->requested_feature_mask;
-    g_queue.enabled_extension_mask = pdocker_device->enabled_extension_mask;
-    *pQueue = (VkQueue)&g_queue;
+    *pQueue = pdocker_device->queue && !pdocker_device->queue->destroyed
+        ? (VkQueue)pdocker_device->queue
+        : VK_NULL_HANDLE;
 }
 
 VKAPI_ATTR void VKAPI_CALL vkGetDeviceQueue2(
@@ -25547,12 +25606,9 @@ VKAPI_ATTR void VKAPI_CALL vkGetDeviceQueue2(
         *pQueue = VK_NULL_HANDLE;
         return;
     }
-    g_queue.instance_object_id = pdocker_device->instance_object_id;
-    g_queue.physical_device_object_id = pdocker_device->physical_device_object_id;
-    g_queue.device_object_id = pdocker_device->object_id;
-    g_queue.requested_feature_mask = pdocker_device->requested_feature_mask;
-    g_queue.enabled_extension_mask = pdocker_device->enabled_extension_mask;
-    *pQueue = (VkQueue)&g_queue;
+    *pQueue = pdocker_device->queue && !pdocker_device->queue->destroyed
+        ? (VkQueue)pdocker_device->queue
+        : VK_NULL_HANDLE;
 }
 
 VKAPI_ATTR void VKAPI_CALL vkGetDeviceGroupPeerMemoryFeatures(

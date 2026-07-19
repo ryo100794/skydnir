@@ -7721,15 +7721,18 @@ class GpuAbiContractTest(unittest.TestCase):
             "uint64_t device_object_id;",
             "static bool current_vulkan_dispatch_identity_ids(",
             "static PdockerVkPhysicalDevice *g_physical_devices;",
+            "static PdockerVkQueue *g_queues;",
+            "static PdockerVkQueue *g_retired_queues;",
             "physical_device_handle_resolve(",
-            "g_queue.instance_object_id",
-            "g_queue.physical_device_object_id",
-            "g_queue.device_object_id",
+            "PdockerVkQueue *queue;",
+            "queue->instance_object_id = device->instance_object_id;",
+            "queue->physical_device_object_id = device->physical_device_object_id;",
+            "queue->device_object_id = device->object_id;",
             "device->instance_object_id = physical->instance_object_id;",
             "device->physical_device_object_id = physical->object_id;",
-            "g_queue.device_object_id = pdocker_device->object_id;",
         ]:
             self.assertIn(marker, icd)
+        self.assertNotIn("g_queue.device_object_id = pdocker_device->object_id;", icd)
 
         caps_struct = icd.split("typedef struct {", 1)[1].split("} PdockerVkAdvertisedCaps;", 1)[0]
         for marker in [
@@ -7762,8 +7765,9 @@ class GpuAbiContractTest(unittest.TestCase):
         queue_helper = c_function_body(icd, "pdocker_vk_queue_from_handle")
         for marker in [
             "PdockerVkQueue *pdocker_queue = (PdockerVkQueue *)queue;",
-            "pdocker_queue->object_id != 0",
-            "pdocker_queue->device_object_id != 0",
+            "pdocker_vk_queue_identity_live(pdocker_queue)",
+            "for (PdockerVkQueue *candidate = g_queues",
+            "for (PdockerVkQueue *candidate = g_retired_queues",
         ]:
             self.assertIn(marker, queue_helper)
         submit_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit", 1)[1].split(
@@ -13601,6 +13605,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("device_unregister(device)", destroy_device_body)
         self.assertIn("device_handle_resolve(device, &pdocker_device)", destroy_device_body)
         self.assertIn("uint64_t destroy_owner_id = pdocker_device->object_id;", destroy_device_body)
+        self.assertIn("queue_retire(queue_unregister_object(queue));", destroy_device_body)
+        self.assertIn("pdocker_device->queue = NULL;", destroy_device_body)
         self.assertIn("pdocker_vk_destroy_device_live_objects(device, destroy_owner_id);", destroy_device_body)
         self.assertIn("memset(&g_queue, 0, sizeof(g_queue));", destroy_device_body)
         self.assertNotIn("free((void *)device)", destroy_device_body)
@@ -13634,12 +13640,12 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(marker, destroy_live_objects_body)
         get_queue_body = c_function_body(icd, "vkGetDeviceQueue")
         self.assertIn("device_handle_resolve(device, &pdocker_device)", get_queue_body)
-        self.assertIn("g_queue.requested_feature_mask = pdocker_device->requested_feature_mask;", get_queue_body)
-        self.assertIn("g_queue.enabled_extension_mask = pdocker_device->enabled_extension_mask;", get_queue_body)
+        self.assertIn("*pQueue = pdocker_device->queue && !pdocker_device->queue->destroyed", get_queue_body)
+        self.assertNotIn("g_queue.requested_feature_mask = pdocker_device->requested_feature_mask;", get_queue_body)
         get_queue2_body = c_function_body(icd, "vkGetDeviceQueue2")
         self.assertIn("device_handle_resolve(device, &pdocker_device)", get_queue2_body)
-        self.assertIn("g_queue.requested_feature_mask = pdocker_device->requested_feature_mask;", get_queue2_body)
-        self.assertIn("g_queue.enabled_extension_mask = pdocker_device->enabled_extension_mask;", get_queue2_body)
+        self.assertIn("*pQueue = pdocker_device->queue && !pdocker_device->queue->destroyed", get_queue2_body)
+        self.assertNotIn("g_queue.requested_feature_mask = pdocker_device->requested_feature_mask;", get_queue2_body)
 
         get_device_proc_body = c_function_body(icd, "vkGetDeviceProcAddr")
         self.assertIn("device_handle_resolve(device, &pdocker_device)", get_device_proc_body)

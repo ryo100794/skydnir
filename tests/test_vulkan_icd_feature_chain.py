@@ -8450,6 +8450,69 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
+    def test_device_queues_are_per_device_and_do_not_alias(self):
+        source = textwrap.dedent("""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "__ICD_SOURCE__"
+
+            static VkDevice make_device(void) {
+                VkDeviceCreateInfo info;
+                memset(&info, 0, sizeof(info));
+                info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                VkDevice device = VK_NULL_HANDLE;
+                if (vkCreateDevice((VkPhysicalDevice)&g_device, &info, NULL, &device) != VK_SUCCESS) return VK_NULL_HANDLE;
+                return device;
+            }
+
+            static VkFence make_fence(VkDevice device) {
+                VkFenceCreateInfo info;
+                memset(&info, 0, sizeof(info));
+                info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+                VkFence fence = VK_NULL_HANDLE;
+                if (vkCreateFence(device, &info, NULL, &fence) != VK_SUCCESS) return VK_NULL_HANDLE;
+                return fence;
+            }
+
+            int main(void) {
+                VkDevice device_a = make_device();
+                if (!device_a) return 1;
+                VkQueue queue_a = VK_NULL_HANDLE;
+                vkGetDeviceQueue(device_a, 0, 0, &queue_a);
+                PdockerVkQueue *queue_a_obj = pdocker_vk_queue_from_handle(queue_a);
+                if (!queue_a_obj || queue_a_obj->device_object_id != ((PdockerVkDevice *)device_a)->object_id) return 2;
+                VkFence fence_a = make_fence(device_a);
+                if (!fence_a) return 3;
+
+                VkDevice device_b = make_device();
+                if (!device_b || device_b == device_a) return 4;
+                VkQueue queue_b = VK_NULL_HANDLE;
+                vkGetDeviceQueue(device_b, 0, 0, &queue_b);
+                PdockerVkQueue *queue_b_obj = pdocker_vk_queue_from_handle(queue_b);
+                if (!queue_b_obj || queue_b_obj->device_object_id != ((PdockerVkDevice *)device_b)->object_id) return 5;
+                if (queue_a == queue_b || queue_a_obj == queue_b_obj) return 6;
+                if (pdocker_vk_queue_from_handle(queue_a) != queue_a_obj) return 7;
+                if (queue_a_obj->device_object_id != ((PdockerVkDevice *)device_a)->object_id) return 8;
+
+                if (vkQueueSubmit(queue_a, 0, NULL, fence_a) != VK_SUCCESS) return 9;
+                if (vkGetFenceStatus(device_a, fence_a) != VK_SUCCESS) return 10;
+
+                vkDestroyDevice(device_b, NULL);
+                if (pdocker_vk_queue_from_handle(queue_a) != queue_a_obj) return 11;
+                if (queue_a_obj->device_object_id != ((PdockerVkDevice *)device_a)->object_id) return 12;
+                if (pdocker_vk_queue_from_handle(queue_b) != NULL) return 13;
+                if (vkQueueSubmit(queue_a, 0, NULL, VK_NULL_HANDLE) != VK_SUCCESS) return 14;
+
+                vkDestroyDevice(device_a, NULL);
+                if (pdocker_vk_queue_from_handle(queue_a) != NULL) return 15;
+                return 0;
+            }
+            """).replace("__ICD_SOURCE__", str(ICD_SOURCE))
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
     def test_device_queue_lookup_shape_is_fail_closed(self):
         source = textwrap.dedent(
             f"""
