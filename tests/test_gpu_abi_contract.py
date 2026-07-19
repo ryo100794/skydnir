@@ -11160,7 +11160,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("submit_fence->signaled = true;", queue_sparse_body)
 
         buffer_view_pnext_body = c_function_body(icd, "validate_buffer_view_create_pnext_with_extensions")
-        self.assertIn("*pView = VK_NULL_HANDLE;", buffer_view_body)
+        self.assertIn("if (pView) *pView = VK_NULL_HANDLE;", buffer_view_body)
+        self.assertIn("pCreateInfo->sType != VK_STRUCTURE_TYPE_BUFFER_VIEW_CREATE_INFO", buffer_view_body)
+        self.assertIn("device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0", buffer_view_body)
         self.assertIn("validate_buffer_view_create_pnext_with_extensions(", buffer_view_body)
         self.assertIn("enabled_extension_mask = dev ? dev->enabled_extension_mask : 0", buffer_view_body)
         self.assertIn("VK_STRUCTURE_TYPE_BUFFER_USAGE_FLAGS_2_CREATE_INFO", buffer_view_pnext_body)
@@ -12138,6 +12140,7 @@ class GpuAbiContractTest(unittest.TestCase):
         image_view_validate_body = icd.split("static VkResult validate_image_view_create_info_for_transport", 1)[1].split(
             "static VkResult validate_sampler_create_info_for_transport", 1
         )[0]
+        self.assertIn("info->sType != VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO", image_view_validate_body)
         self.assertIn("if (info->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;", image_view_validate_body)
         self.assertIn("VkDevice device,", image_view_validate_body)
         self.assertIn("PdockerVkImage *image = image_handle_lookup_for_device(device, info->image);", image_view_validate_body)
@@ -12155,17 +12158,27 @@ class GpuAbiContractTest(unittest.TestCase):
         create_view_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateImageView", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkDestroyImageView", 1
         )[0]
+        self.assertIn("if (pView) *pView = VK_NULL_HANDLE;", create_view_body)
+        self.assertIn("device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0", create_view_body)
         self.assertIn("VkImageSubresourceRange normalized_range;", create_view_body)
+        self.assertIn("view->owner_device_id = owner_device_id;", create_view_body)
         self.assertIn("view->subresource_range = normalized_range;", create_view_body)
         sampler_validate_body = icd.split("static VkResult validate_sampler_create_info_for_transport", 1)[1].split(
             "VKAPI_ATTR VkResult VKAPI_CALL vkCreateImage", 1
         )[0]
+        self.assertIn("info->sType != VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO", sampler_validate_body)
         self.assertIn("VK_STRUCTURE_TYPE_SAMPLER_REDUCTION_MODE_CREATE_INFO", sampler_validate_body)
         self.assertIn("VK_SAMPLER_REDUCTION_MODE_WEIGHTED_AVERAGE", sampler_validate_body)
         self.assertIn("sampler-reduction-mode-unsupported", sampler_validate_body)
         self.assertIn('unsupported_image_pnext_result("vkCreateSampler", node)', sampler_validate_body)
         self.assertIn("node = header.pNext;", sampler_validate_body)
         self.assertIn("if (info->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;", sampler_validate_body)
+        create_sampler_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateSampler", 1)[1].split(
+            "VKAPI_ATTR void VKAPI_CALL vkDestroySampler", 1
+        )[0]
+        self.assertIn("if (pSampler) *pSampler = VK_NULL_HANDLE;", create_sampler_body)
+        self.assertIn("device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0", create_sampler_body)
+        self.assertIn("sampler->owner_device_id = owner_device_id;", create_sampler_body)
         self.assertIn("info->anisotropyEnable", sampler_validate_body)
         self.assertIn("requested_feature_mask", sampler_validate_body)
         self.assertIn("info->maxAnisotropy", sampler_validate_body)
