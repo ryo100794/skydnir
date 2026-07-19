@@ -4036,9 +4036,16 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 buffer_info.size = 256;
                 buffer_info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
                 buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-                VkBuffer unowned_buffer = VK_NULL_HANDLE;
-                if (vkCreateBuffer(VK_NULL_HANDLE, &buffer_info, NULL, &unowned_buffer) != VK_SUCCESS ||
-                    unowned_buffer == VK_NULL_HANDLE) return 4;
+                PdockerVkBuffer *unowned_buffer_obj = pdocker_alloc_handle(sizeof(*unowned_buffer_obj));
+                if (!unowned_buffer_obj) return 4;
+                memset(unowned_buffer_obj, 0, sizeof(*unowned_buffer_obj));
+                unowned_buffer_obj->object_id = next_vulkan_object_generation();
+                unowned_buffer_obj->size = 256;
+                unowned_buffer_obj->usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+                unowned_buffer_obj->requirements_size = 256;
+                unowned_buffer_obj->requirements_alignment = PDOCKER_VK_REQUIREMENT_ALIGNMENT;
+                buffer_register(unowned_buffer_obj);
+                VkBuffer unowned_buffer = pdocker_vk_buffer_to_handle(unowned_buffer_obj);
                 if (!buffer_handle_lookup_for_device(VK_NULL_HANDLE, unowned_buffer)) return 5;
                 if (buffer_handle_lookup_for_device(device, unowned_buffer)) return 6;
                 if (pdocker_vk_object_handle_owned_by_device(
@@ -4051,9 +4058,17 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
                 alloc_info.allocationSize = 256;
                 alloc_info.memoryTypeIndex = 1;
-                VkDeviceMemory unowned_memory = VK_NULL_HANDLE;
-                if (vkAllocateMemory(VK_NULL_HANDLE, &alloc_info, NULL, &unowned_memory) != VK_SUCCESS ||
-                    unowned_memory == VK_NULL_HANDLE) return 8;
+                PdockerVkMemory *unowned_memory_obj = pdocker_alloc_handle(sizeof(*unowned_memory_obj));
+                if (!unowned_memory_obj) return 8;
+                memset(unowned_memory_obj, 0, sizeof(*unowned_memory_obj));
+                unowned_memory_obj->object_id = next_vulkan_object_generation();
+                unowned_memory_obj->size = 256;
+                unowned_memory_obj->memory_type_index = 1;
+                unowned_memory_obj->heap_index = pdocker_vk_heap_index_for_memory_type(1);
+                unowned_memory_obj->property_flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+                unowned_memory_obj->fd = -1;
+                memory_register(unowned_memory_obj);
+                VkDeviceMemory unowned_memory = pdocker_vk_memory_to_handle(unowned_memory_obj);
                 if (!memory_handle_lookup_for_device(VK_NULL_HANDLE, unowned_memory)) return 9;
                 if (memory_handle_lookup_for_device(device, unowned_memory)) return 10;
                 if (vkBindBufferMemory(device, unowned_buffer, unowned_memory, 0) != VK_ERROR_INITIALIZATION_FAILED) return 11;
@@ -8839,9 +8854,17 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 if (vkCreatePipelineCache(device, &cache_info, NULL, &cache) != VK_SUCCESS ||
                     !pipeline_cache_handle_lookup(cache)) return 12;
 
-                VkBuffer unowned_buffer = VK_NULL_HANDLE;
-                if (vkCreateBuffer(VK_NULL_HANDLE, &buffer_info, NULL, &unowned_buffer) != VK_SUCCESS ||
-                    !buffer_handle_lookup(unowned_buffer)) return 13;
+                PdockerVkBuffer *unowned_buffer_obj = pdocker_alloc_handle(sizeof(*unowned_buffer_obj));
+                if (!unowned_buffer_obj) return 13;
+                memset(unowned_buffer_obj, 0, sizeof(*unowned_buffer_obj));
+                unowned_buffer_obj->object_id = next_vulkan_object_generation();
+                unowned_buffer_obj->size = 256;
+                unowned_buffer_obj->usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+                unowned_buffer_obj->requirements_size = 256;
+                unowned_buffer_obj->requirements_alignment = PDOCKER_VK_REQUIREMENT_ALIGNMENT;
+                buffer_register(unowned_buffer_obj);
+                VkBuffer unowned_buffer = pdocker_vk_buffer_to_handle(unowned_buffer_obj);
+                if (!buffer_handle_lookup(unowned_buffer)) return 13;
 
                 VkCommandPool unowned_pool = VK_NULL_HANDLE;
                 if (vkCreateCommandPool(VK_NULL_HANDLE, &pool_info, NULL, &unowned_pool) != VK_SUCCESS ||

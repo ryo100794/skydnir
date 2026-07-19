@@ -11628,7 +11628,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("memory_offset != 0", dedicated_bind_body)
         self.assertIn("memory-dedicated-bind-offset-nonzero", dedicated_bind_body)
         self.assertIn("memory-dedicated-buffer-bind-mismatch", bind_buffer_body)
-        self.assertIn("*pMemory = VK_NULL_HANDLE;", allocate_body)
+        self.assertIn("if (pMemory) *pMemory = VK_NULL_HANDLE;", allocate_body)
+        self.assertIn("pAllocateInfo->sType != VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO", allocate_body)
+        self.assertIn("device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0", allocate_body)
         self.assertIn("validate_memory_allocate_pnext(device, pAllocateInfo->pNext)", allocate_body)
         self.assertIn("extract_memory_dedicated_allocate_targets", allocate_body)
         self.assertIn("device, pAllocateInfo->pNext", allocate_body)
@@ -11752,7 +11754,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("node = header.pNext;", buffer_pnext_body)
         self.assertIn("if (pCreateInfo->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;", create_buffer_body)
         self.assertIn("if (pBuffer) *pBuffer = VK_NULL_HANDLE;", create_buffer_body)
-        self.assertIn("device_owner_id_or_zero_checked(device, &owner_device_id)", create_buffer_body)
+        self.assertIn("pCreateInfo->sType != VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO", create_buffer_body)
+        self.assertIn("device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0", create_buffer_body)
         descriptor_layout_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorSetLayout", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkDestroyDescriptorSetLayout", 1
         )[0]
@@ -12120,6 +12123,9 @@ class GpuAbiContractTest(unittest.TestCase):
         image_requirements_body = c_function_body(icd, "vkGetImageMemoryRequirements")
         self.assertIn("PdockerVkImage *img = image_handle_lookup_for_device(device, image);", image_requirements_body)
         self.assertIn("pMemoryRequirements->memoryTypeBits = img ? img->memory_type_bits : 0;", image_requirements_body)
+        self.assertIn("if (pImage) *pImage = VK_NULL_HANDLE;", create_image_body)
+        self.assertIn("pCreateInfo->sType != VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO", create_image_body)
+        self.assertIn("device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0", create_image_body)
         self.assertIn("validate_image_create_info_for_transport(pCreateInfo)", create_image_body)
         self.assertIn("pdocker_vk_effective_single_queue_sharing_mode(pCreateInfo->sharingMode)", create_image_body)
         self.assertNotIn("if (!pdocker_vk_format_bridge_supported(pCreateInfo->format))", create_image_body)

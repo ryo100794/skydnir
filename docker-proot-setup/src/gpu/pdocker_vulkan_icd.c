@@ -22834,7 +22834,14 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateBuffer(
         VkBuffer *pBuffer) {
     (void)pAllocator;
     if (pBuffer) *pBuffer = VK_NULL_HANDLE;
-    if (!pCreateInfo || !pBuffer) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!pCreateInfo || !pBuffer ||
+        pCreateInfo->sType != VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
     PdockerVkDevice *dev = pdocker_vk_device_from_handle(device);
     uint64_t enabled_extension_mask = dev ? dev->enabled_extension_mask : 0;
     VkResult pnext_rc = validate_buffer_create_pnext_with_extensions(
@@ -22872,12 +22879,6 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateBuffer(
     PdockerVkBuffer *buffer = pdocker_alloc_handle(sizeof(*buffer));
     if (!buffer) return VK_ERROR_OUT_OF_HOST_MEMORY;
     buffer->object_id = next_vulkan_object_generation();
-    uint64_t owner_device_id = 0;
-    if (!device_owner_id_or_zero_checked(device, &owner_device_id)) {
-        free(buffer);
-        return VK_ERROR_INITIALIZATION_FAILED;
-    }
-
     buffer->owner_device_id = owner_device_id;
     buffer->size = (size_t)pCreateInfo->size;
     buffer->usage = effective_usage;
@@ -23705,10 +23706,16 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateImage(
         const VkImageCreateInfo *pCreateInfo,
         const VkAllocationCallbacks *pAllocator,
         VkImage *pImage) {
-    (void)device;
     (void)pAllocator;
-    if (!pImage || !pCreateInfo) return VK_ERROR_INITIALIZATION_FAILED;
-    *pImage = VK_NULL_HANDLE;
+    if (pImage) *pImage = VK_NULL_HANDLE;
+    if (!pCreateInfo || !pImage ||
+        pCreateInfo->sType != VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
     if (!vulkan_v5_object_transport_enabled()) {
         return unsupported_image_transport_result("vkCreateImage");
     }
@@ -23721,12 +23728,6 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateImage(
     PdockerVkImage *image = pdocker_alloc_handle(sizeof(*image));
     if (!image) return VK_ERROR_OUT_OF_HOST_MEMORY;
     image->object_id = next_vulkan_object_generation();
-    uint64_t owner_device_id = 0;
-    if (!device_owner_id_or_zero_checked(device, &owner_device_id)) {
-        free(image);
-        return VK_ERROR_INITIALIZATION_FAILED;
-    }
-
     image->owner_device_id = owner_device_id;
     image->flags = pCreateInfo->flags;
     image->image_type = pCreateInfo->imageType;
@@ -24574,8 +24575,15 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateMemory(
         const VkAllocationCallbacks *pAllocator,
         VkDeviceMemory *pMemory) {
     (void)pAllocator;
-    if (!pAllocateInfo || !pMemory) return VK_ERROR_INITIALIZATION_FAILED;
-    *pMemory = VK_NULL_HANDLE;
+    if (pMemory) *pMemory = VK_NULL_HANDLE;
+    if (!pAllocateInfo || !pMemory ||
+        pAllocateInfo->sType != VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
     VkResult pnext_rc = validate_memory_allocate_pnext(device, pAllocateInfo->pNext);
     if (pnext_rc != VK_SUCCESS) return pnext_rc;
     if (pAllocateInfo->memoryTypeIndex >= 2) return VK_ERROR_FEATURE_NOT_PRESENT;
@@ -24594,12 +24602,6 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateMemory(
     PdockerVkMemory *memory = pdocker_alloc_handle(sizeof(*memory));
     if (!memory) return VK_ERROR_OUT_OF_HOST_MEMORY;
     memory->object_id = next_vulkan_object_generation();
-    uint64_t owner_device_id = 0;
-    if (!device_owner_id_or_zero_checked(device, &owner_device_id)) {
-        free(memory);
-        return VK_ERROR_INITIALIZATION_FAILED;
-    }
-
     memory->owner_device_id = owner_device_id;
     memory->size = (size_t)pAllocateInfo->allocationSize;
     memory->memory_type_index = pAllocateInfo->memoryTypeIndex;
