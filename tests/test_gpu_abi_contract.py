@@ -23225,6 +23225,78 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertTrue(report["service_readiness"]["models_ok"])
         self.assertEqual("fail", report["service_readiness"]["completion_status"])
 
+    def test_llama_gpu_artifact_verifier_marks_wrong_output_shader_mutation_before_native_q6(self):
+        verifier = load_llama_gpu_artifact_verifier()
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "served": True,
+                "runtime_env": {"PDOCKER_GPU_MODE": "vulkan-raw"},
+                "service_readiness": {
+                    "schema": "pdocker.llama.service-readiness.v1",
+                    "summary": {"health": "pass", "models": "pass", "completion": "pass"},
+                    "health": {"ok": True, "status": "pass"},
+                    "models": {"ok": True, "status": "pass"},
+                    "completion": {
+                        "ok": True,
+                        "status": "pass",
+                        "passed": False,
+                        "content_excerpt": " Marvel",
+                    },
+                },
+                "diagnostics": {
+                    "runtime_freshness": llama_runtime_freshness_pass(),
+                    "api_executor_reconciliation": {
+                        "summary": "diagnostic",
+                        "proof_strength": "diagnostic",
+                        "dispatches": [
+                            {
+                                "match_status": "diagnostic-match",
+                                "matches": {
+                                    "core_command_hash_comparable": True,
+                                    "core_command_hash": True,
+                                    "spirv_hash": True,
+                                    "descriptor_hash": True,
+                                    "push_hash": True,
+                                    "spec_hash": True,
+                                    "dispatch_hash": True,
+                                },
+                                "transport": {"msg_trunc": False, "msg_ctrunc": False},
+                            }
+                        ],
+                    },
+                    "q6_workgroup_diagnostics": {
+                        "latest_status": "mismatch",
+                        "blocker_class": "native-q6-final-store-or-readback",
+                        "q6_storage16_loads_lowered": True,
+                        "q6_final_store_boundary": {
+                            "summary": "not-run",
+                            "reason": "missing-executed-final-store-trace",
+                        },
+                        "q6_native_vs_writeback_split": {
+                            "summary": "native-final-store-or-readback",
+                            "oracle_writeback": False,
+                            "joined_sample_count": 1,
+                            "samples": [
+                                {
+                                    "native_gpu_at_dst": 5.0,
+                                    "expected": 10.0,
+                                    "fd_after_writeback": 5.0,
+                                    "native_matches_expected": False,
+                                    "writeback_matches_expected": False,
+                                    "writeback_matches_native": True,
+                                }
+                            ],
+                        },
+                    },
+                },
+            },
+        }
+        report = verifier.classify(payload)
+        self.assertEqual("llama-completion-wrong-output", report["classification"])
+        self.assertEqual("vulkan-shader-mutation-diagnostic-only", report["q6_effective_blocker_class"])
+        self.assertIn("q6_storage16_loads_lowered", json.dumps(report["vulkan_shader_passthrough_rewrite_evidence"]))
+
     def test_llama_gpu_artifact_verifier_preserves_q6_evidence_on_wrong_output(self):
         verifier = load_llama_gpu_artifact_verifier()
         payload = {

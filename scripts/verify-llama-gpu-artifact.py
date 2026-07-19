@@ -3033,6 +3033,7 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
     comparison = data.get("comparison") or {}
     runtime_freshness = _runtime_freshness(data)
     runtime_env_manifest = _runtime_env_manifest_record(data)
+    vulkan_passthrough_rewrite_evidence = _vulkan_shader_passthrough_rewrite_evidence(data)
 
     completion_readiness = _service_completion_timeout(data)
     if completion_readiness.get("completion_failed_after_liveness") is True:
@@ -3180,7 +3181,9 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
         completion_q6_final_store_boundary = _q6_final_store_boundary(q6)
         completion_q6_native_vs_writeback_split = _q6_native_vs_writeback_split(q6)
         completion_q6_effective_blocker_class = str(q6.get("blocker_class") or "")
-        if completion_q6_native_vs_writeback_split.get("summary") == "native-final-store-or-readback":
+        if vulkan_passthrough_rewrite_evidence:
+            completion_q6_effective_blocker_class = "vulkan-shader-mutation-diagnostic-only"
+        elif completion_q6_native_vs_writeback_split.get("summary") == "native-final-store-or-readback":
             completion_q6_effective_blocker_class = "native-q6-final-store-or-readback"
         elif completion_q6_final_store_boundary.get("reason") == "missing-executed-final-store-trace":
             completion_q6_effective_blocker_class = "q6-final-store-trace-missing"
@@ -3198,6 +3201,7 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
             "q6_final_store_boundary": completion_q6_final_store_boundary,
             "q6_native_vs_writeback_split": completion_q6_native_vs_writeback_split,
             "q6_effective_blocker_class": completion_q6_effective_blocker_class,
+            "vulkan_shader_passthrough_rewrite_evidence": vulkan_passthrough_rewrite_evidence,
             "runtime_env": nested(data, "gpu", "runtime_env") or {},
         }
 
@@ -3364,8 +3368,6 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
             "generic_spirv_cpu_oracle_mismatches": generic_cpu_oracle_mismatches,
             "config_propagation": config_propagation,
         }
-
-    vulkan_passthrough_rewrite_evidence = _vulkan_shader_passthrough_rewrite_evidence(data)
 
     q6_evidence_reached = False
     if isinstance(q6, dict):
@@ -3536,14 +3538,6 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
             data.get("next_action")
             or "rerun without the Q4_K safe-kernel diagnostic replacement before accepting correctness or benchmark claims"
         )
-    elif vulkan_passthrough_rewrite_evidence and q6.get("latest_status") == "match":
-        classification = "vulkan-shader-mutation-diagnostic-only"
-        responsibility_boundary = "vulkan-shader-identity"
-        q6_blocker_class = "vulkan-shader-mutation-diagnostic-only"
-        next_action = (
-            data.get("next_action")
-            or "rerun with original/effective/executable SPIR-V identity preserved; shader mutations cannot support pass-through correctness or benchmark claims"
-        )
     elif q6_workgroup_evidence_status.get("evidence_failure"):
         classification = "q6-workgroup-shape-blocker"
         responsibility_boundary = "q6-local-size"
@@ -3557,6 +3551,14 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
         else:
             q6_blocker_class = "q6-workgroup-evidence-contradictory"
             next_action = "fix contradictory Q6 workgroup/local-size evidence before interpreting arithmetic/reduction"
+    elif vulkan_passthrough_rewrite_evidence and q6.get("latest_status") == "match":
+        classification = "vulkan-shader-mutation-diagnostic-only"
+        responsibility_boundary = "vulkan-shader-identity"
+        q6_blocker_class = "vulkan-shader-mutation-diagnostic-only"
+        next_action = (
+            data.get("next_action")
+            or "rerun with original/effective/executable SPIR-V identity preserved; shader mutations cannot support pass-through correctness or benchmark claims"
+        )
     elif q6.get("latest_status") == "match":
         classification = "q6-workgroup-cleared-and-oracle-match"
         responsibility_boundary = "q6-oracle-match"

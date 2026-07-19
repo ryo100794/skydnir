@@ -1703,6 +1703,53 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
             ["intended_runtime_env", "requested_or_planned_env", "planned_container_env", "host_requested_env"],
         )
 
+    def test_shader_mutation_evidence_is_recorded_without_masking_native_q6_mismatch_boundaries(self):
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": passing_config_propagation(),
+                    "q6_workgroup_diagnostics": {
+                        "event_count": 1,
+                        "workgroup_shape_blocker": False,
+                        "latest_status": "mismatch",
+                        "local_size_resolved": [32, 1, 1],
+                        "q6_storage16_loads_lowered": True,
+                        "q6_output_layout_probe": {
+                            "summary": "canonical-mismatch-found-elsewhere",
+                            "samples": [
+                                q6_layout_sample_with_store_model(
+                                    257,
+                                    expected=1.25,
+                                    gpu_at_dst=0.5,
+                                    best_index=259,
+                                    best_value=1.25,
+                                    best_abs_error=0.0,
+                                    best_relative_offset=2,
+                                    found_elsewhere=True,
+                                )
+                            ],
+                        },
+                        **q6_store_index_model_reflection(),
+                        **q6_verified_writeback(),
+                    },
+                },
+                "correctness": gpu_correctness_report("fail", required_failures=1, passed=False, content="4"),
+            },
+            "cpu": {"tokens_per_second": 0.1},
+            **speedup_sections(),
+        }
+        result = self.run_verifier(payload, "--require-q6-workgroup-clear")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "q6-native-output-layout")
+        self.assertEqual(report["responsibility_boundary"], "q6-output-layout")
+        self.assertEqual(report["q6_effective_blocker_class"], "native-q6-output-layout")
+        self.assertFalse(report["correctness_claim_allowed"])
+        self.assertFalse(report["benchmark_claim_allowed"])
+        self.assertIn("q6_storage16_loads_lowered", json.dumps(report["vulkan_shader_passthrough_rewrite_evidence"]))
+
     def test_q6_native_output_layout_probe_gets_specific_classification(self):
         payload = {
             "schema": "pdocker.llama.gpu.compare.v1",

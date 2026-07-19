@@ -9,6 +9,22 @@ llama.cpp itself remains unmodified.
 
 ## Current Ground Truth
 
+### 2026-07-19 CPU/static shader-mutation precedence lane
+
+The verifier now records shader mutation evidence as a pass-through purity
+boundary without masking concrete Q6 mismatch diagnostics. Any source/effective/
+executable SPIR-V hash split, compatibility rewrite flag, safe-kernel
+replacement, or CPU-oracle writeback evidence is preserved in
+`vulkan_shader_passthrough_rewrite_evidence`. If an artifact would otherwise
+promote a Q6 `match` to a native pass-through success, the verifier blocks that
+promotion with `vulkan-shader-mutation-diagnostic-only`. Q6 `mismatch` artifacts
+keep their more precise failure boundary, while the reconciled wrong-output path
+still marks the effective blocker as shader-identity when mutation evidence is
+present.
+
+This is CPU/static evidence-contract hardening only. It does not change
+llama.cpp, Dockerfiles, models, prompts, shader bytes, or executor arithmetic.
+
 ### 2026-07-19 CPU/static Q6 output-layout precision lane
 
 The verifier no longer upgrades `q6_output_index_probe_summary` values
