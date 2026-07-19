@@ -23195,11 +23195,16 @@ class GpuAbiContractTest(unittest.TestCase):
             re.compile(r"(?m)^\s*(" + env_name + r")="),
             re.compile(r'["\'](' + env_name + r')='),
         ]
+        llama_library = ROOT / "app" / "src" / "main" / "assets" / "project-library" / "llama-cpp-gpu"
         workflow_sources = [
             LLAMA_COMPARE,
             ROOT / "scripts" / "android-llama-gpu-q6-workgroup-run.sh",
             ROOT / "scripts" / "plan-llama-gpu-q6-run.py",
             ROOT / "scripts" / "verify-llama-gpu-q6-run-against-plan.py",
+            llama_library / "compose.yaml",
+            llama_library / "scripts" / "start-llama-server.sh",
+            llama_library / "scripts" / "pdocker-gpu-profile.sh",
+            llama_library / "scripts" / "pdocker-llama-correctness.sh",
         ]
         discovered = set()
         for source in workflow_sources:
