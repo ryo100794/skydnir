@@ -9,6 +9,20 @@ llama.cpp itself remains unmodified.
 
 ## Current Ground Truth
 
+### 2026-07-19 CPU/static V5 memory-property identity lane
+
+Vulkan dispatch V5 compute resource transport now preserves API memory
+property flags from `PdockerVkMemory::property_flags` instead of synthesizing
+host-visible/coherent flags in the sender.  Descriptor buffer resources,
+image-backed resources, dispatch-indirect buffers, and hidden barrier buffers
+all carry the captured memory property flags into
+`PdockerGpuVulkanDispatchV5ResourceEntry::memory_property_flags`.  The sender
+also includes these flags in strict reconciliation descriptor hashing/evidence,
+matching the executor-side duplicate-resource identity check.
+
+This is generic Vulkan pass-through hardening. It does not change llama.cpp,
+Dockerfiles, models, prompts, shader bytes, or executor arithmetic.
+
 ### 2026-07-19 CPU/static workflow-env and alias-copy policy lane
 
 The llama GPU environment manifest now separately classifies workflow/process

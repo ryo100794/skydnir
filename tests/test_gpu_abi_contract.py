@@ -8593,6 +8593,50 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("free(descriptors->binds[i].sets);", destroy_body)
         self.assertIn("free(descriptors->binds);", destroy_body)
 
+    def test_vulkan_dispatch_v5_preserves_api_memory_property_flags(self):
+        icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
+
+        tables = icd.split("typedef struct {", 1)[1].split("} PdockerVkGenericDispatchTables;", 1)[0]
+        self.assertIn(
+            "uint64_t api_memory_property_flags[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS];",
+            tables,
+        )
+
+        sender = c_function_body(icd, "send_generic_vulkan_dispatch_op")
+        self.assertIn("uint64_t *api_memory_property_flags = tables->api_memory_property_flags;", sender)
+        self.assertIn(
+            "api_memory_property_flags[binding_count] = dispatch_memory ? dispatch_memory->property_flags : 0;",
+            sender,
+        )
+        self.assertIn(
+            "api_memory_property_flags[binding_count] =\n"
+            "            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;",
+            sender,
+        )
+        self.assertIn("api_memory_property_flags,\n                                    api_memory_ids", sender)
+        self.assertIn("api_memory_property_flags,\n            api_memory_ids", sender)
+        self.assertIn("descriptor_hash = fnv1a64_update_u64(descriptor_hash, api_memory_property_flags[i]);", sender)
+
+        frame_sender = c_function_body(icd, "send_generic_vulkan_dispatch_v5_1_op")
+        self.assertIn("const uint64_t *api_memory_property_flags", icd)
+        self.assertIn("!api_memory_property_flags || !api_memory_ids", frame_sender)
+        self.assertIn("resources[memory_index].memory_property_flags = api_memory_property_flags[i];", frame_sender)
+        self.assertIn("resources[memory_index].memory_property_flags = image->memory->property_flags;", frame_sender)
+        self.assertIn("resources[memory_index].memory_property_flags = memory->property_flags;", frame_sender)
+        self.assertNotIn(
+            "resources[memory_index].memory_property_flags =\n"
+            "            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;",
+            frame_sender,
+        )
+
+        graphics_sender = c_function_body(icd, "collect_graphics_memory_resource")
+        self.assertIn("entry->memory_property_flags = memory->property_flags;", graphics_sender)
+        reconcile = c_function_body(icd, "trace_vulkan_reconcile_evidence")
+        self.assertIn("api_memory_property_flags", reconcile)
+        identity = c_function_body(executor, "v5_resource_fields_identical_for_same_object_id")
+        self.assertIn("a->memory_property_flags == b->memory_property_flags", identity)
+
     def test_vulkan_compute_v5_preserves_api_buffer_usage_identity(self):
         icd = VULKAN_ICD.read_text()
         executor = GPU_EXECUTOR.read_text()
