@@ -24152,6 +24152,27 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("transport truncation evidence is not explicitly clear", verifier)
         self.assertIn("rerun with strict API/executor reconciliation proving SPIR-V", verifier)
 
+        compare = LLAMA_COMPARE.read_text()
+        for marker in [
+            '"sender": {',
+            '"received": {',
+            '"core_command_hash": sender.get("core_command_hash")',
+            '"core_command_hash": receive.get("core_command_hash")',
+            '"spirv_hash": sender.get("spirv_hash")',
+            '"spirv_hash": received.get("spirv_hash")',
+            '"descriptor_hash": sender.get("descriptor_hash")',
+            '"descriptor_hash": received.get("descriptor_hash")',
+            '"push_hash": sender.get("push_hash")',
+            '"push_hash": received.get("push_hash")',
+            '"specialization_hash": sender.get("spec_hash")',
+            '"specialization_hash": received.get("specialization_hash")',
+            '"dispatch_hash": sender.get("dispatch_hash")',
+            '"dispatch_hash": received.get("dispatch_hash")',
+            '"msg_trunc": receive.get("msg_trunc")',
+            '"msg_ctrunc": receive.get("msg_ctrunc")',
+        ]:
+            self.assertIn(marker, compare)
+
 
     def test_vulkan_image_view_shape_validation_is_generic_and_fail_closed(self):
         icd = VULKAN_ICD.read_text()
