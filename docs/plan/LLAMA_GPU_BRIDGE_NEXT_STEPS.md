@@ -9,6 +9,26 @@ llama.cpp itself remains unmodified.
 
 ## Current Ground Truth
 
+### 2026-07-19 CPU/static V5 memory type identity lane
+
+V5/V6 resource entries now preserve the producer-side Vulkan memory type index
+and heap index alongside memory property flags.  The ICD captures these values
+from `vkAllocateMemory()`, writes them into descriptor, image, dispatch-indirect,
+hidden-barrier, and graphics memory resources, and includes descriptor memory
+type/heap identity in reconciliation hashes and evidence.  The Android executor
+retains the transported type/heap metadata in native-plan bindings, rejects
+duplicate memory/resource identities that disagree on type/heap, and validates
+strict object-graph aliases against the transported metadata.
+
+Because this changes the base V5 resource entry shape, the executor advertises
+`vulkan_dispatch_v5_resource_schema_hash` and
+`vulkan_dispatch_v5_resource_field_count`; the ICD refuses advertisement data
+whose base resource schema does not match.  This keeps old/new peers from
+silently reinterpreting resource tables.
+
+This is generic Vulkan pass-through hardening. It does not change llama.cpp,
+Dockerfiles, models, prompts, shader bytes, or executor arithmetic.
+
 ### 2026-07-19 CPU/static V5 buffer access-right lane
 
 V5 compute buffer descriptors now transport descriptor access intent instead of

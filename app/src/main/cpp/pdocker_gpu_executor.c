@@ -979,6 +979,8 @@ typedef struct {
     int api_dynamic;
     off_t api_memory_offset;
     size_t api_memory_size;
+    uint32_t api_memory_type_index;
+    uint32_t api_memory_heap_index;
     uint64_t api_memory_id;
     uint64_t api_buffer_id;
     uint64_t api_buffer_view_id;
@@ -3450,6 +3452,8 @@ typedef struct {
     size_t size;
     uint32_t memory_type_bits;
     uint32_t memory_type_index;
+    uint32_t api_memory_type_index;
+    uint32_t api_memory_heap_index;
     VkDeviceMemory memory;
     VkBuffer staging_buffer;
     VkDeviceMemory staging_memory;
@@ -3486,6 +3490,8 @@ typedef struct {
     uint64_t external_offset;
     uint32_t memory_type_bits;
     uint32_t memory_type_index;
+    uint32_t api_memory_type_index;
+    uint32_t api_memory_heap_index;
     int needs_host_map;
     int requires_device_local;
     VkDeviceMemory memory;
@@ -4978,6 +4984,8 @@ static int materialize_vulkan_dispatch_images(
             memories[mem_index].allocation_size = (size_t)mem->size;
             memories[mem_index].external_offset = mem->external_offset;
             memories[mem_index].memory_type_bits = UINT32_MAX;
+            memories[mem_index].api_memory_type_index = mem->memory_type_index;
+            memories[mem_index].api_memory_heap_index = mem->memory_heap_index;
         }
         if (*image_count >= image_capacity) return -E2BIG;
         VulkanDispatchImageObject *dst = &images[(*image_count)++];
@@ -5869,7 +5877,13 @@ static int create_strict_vulkan_object_graph(
             memories[mem_index].fd = buffer_fds[i];
             memories[mem_index].size = compact_descriptor_window ? 0 : bindings[i].api_memory_size;
             memories[mem_index].memory_type_bits = UINT32_MAX;
+            memories[mem_index].api_memory_type_index = bindings[i].api_memory_type_index;
+            memories[mem_index].api_memory_heap_index = bindings[i].api_memory_heap_index;
         } else {
+            if (memories[mem_index].api_memory_type_index != bindings[i].api_memory_type_index ||
+                memories[mem_index].api_memory_heap_index != bindings[i].api_memory_heap_index) {
+                return -EINVAL;
+            }
             if (!compact_descriptor_window && memories[mem_index].size < bindings[i].api_memory_size) {
                 memories[mem_index].size = bindings[i].api_memory_size;
             }
@@ -7288,6 +7302,10 @@ static uint64_t reconcile_descriptor_hash(
         hash = fnv1a64_update(hash, &u64, sizeof(u64));
         u64 = (uint64_t)bindings[i].api_memory_size;
         hash = fnv1a64_update(hash, &u64, sizeof(u64));
+        u32 = bindings[i].api_memory_type_index;
+        hash = fnv1a64_update(hash, &u32, sizeof(u32));
+        u32 = bindings[i].api_memory_heap_index;
+        hash = fnv1a64_update(hash, &u32, sizeof(u32));
         u64 = bindings[i].api_memory_id;
         hash = fnv1a64_update(hash, &u64, sizeof(u64));
         u64 = bindings[i].api_buffer_id;
@@ -21823,6 +21841,8 @@ static void print_vulkan_advertisement_caps(const char *transport) {
             "\"executor_build_marker\":\"%s\","
             "\"vulkan_dispatch_v5_frame\":true,"
             "\"vulkan_dispatch_v5_supported_minors\":[0,1,2,3,4,5,6,7],"
+            "\"vulkan_dispatch_v5_resource_schema_hash\":\"0x%016llx\","
+            "\"vulkan_dispatch_v5_resource_field_count\":%u,"
             "\"vulkan_graphics_v6_supported_minors\":[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30],"
             "\"vulkan_dispatch_v5_abi_minor_image_layout_ranges\":%u,"
             "\"vulkan_dispatch_v5_image_layout_range_schema_hash\":\"0x%016llx\","
@@ -21865,6 +21885,8 @@ static void print_vulkan_advertisement_caps(const char *transport) {
             transport ? transport : "unix-socket-command-queue",
             vulkan_ready ? "true" : "false",
             PDOCKER_GPU_EXECUTOR_BUILD_MARKER,
+            (unsigned long long)PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_SCHEMA_HASH,
+            PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_FIELD_COUNT,
             PDOCKER_GPU_VULKAN_DISPATCH_V52_ABI_MINOR,
             (unsigned long long)PDOCKER_GPU_VULKAN_DISPATCH_V52_IMAGE_LAYOUT_RANGE_SCHEMA_HASH,
             PDOCKER_GPU_VULKAN_DISPATCH_V52_MAX_IMAGE_LAYOUT_RANGES,
@@ -24192,6 +24214,8 @@ static int v5_resource_fields_identical_for_same_object_id(
            a->size == b->size &&
            a->usage == b->usage &&
            a->memory_property_flags == b->memory_property_flags &&
+           a->memory_type_index == b->memory_type_index &&
+           a->memory_heap_index == b->memory_heap_index &&
            a->external_offset == b->external_offset &&
            a->generation == b->generation;
 }
@@ -24240,6 +24264,8 @@ static int validate_vulkan_resource_table_duplicate_identity(
                         a->size != b->size ||
                         a->usage != b->usage ||
                         a->memory_property_flags != b->memory_property_flags ||
+                        a->memory_type_index != b->memory_type_index ||
+                        a->memory_heap_index != b->memory_heap_index ||
                         a->external_offset != b->external_offset ||
                         a->generation != b->generation ||
                         !vulkan_resource_parent_memory_object_id_matches(resource_count, resources, a, b)) {
@@ -24291,6 +24317,8 @@ static int vulkan_buffer_resource_identity_matches_count(
            a->size == b->size &&
            a->usage == b->usage &&
            a->memory_property_flags == b->memory_property_flags &&
+           a->memory_type_index == b->memory_type_index &&
+           a->memory_heap_index == b->memory_heap_index &&
            a->external_offset == b->external_offset &&
            a->generation == b->generation &&
            vulkan_resource_parent_memory_object_id_matches(resource_count, resources, a, b);
@@ -25346,6 +25374,8 @@ static int materialize_vulkan_dispatch_v5_native_plan_bindings(
         binding->api_dynamic = (d->descriptor_flags & PDOCKER_GPU_V5_DESCRIPTOR_FLAG_DYNAMIC) ? 1 : 0;
         binding->api_memory_offset = memory_offset_checked;
         binding->api_memory_size = (size_t)memory->size;
+        binding->api_memory_type_index = memory->memory_type_index;
+        binding->api_memory_heap_index = memory->memory_heap_index;
         binding->api_memory_id = memory->resource_id;
         binding->api_buffer_id = buffer->resource_id;
         if (buffer_view_entry) {

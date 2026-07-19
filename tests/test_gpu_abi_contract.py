@@ -119,6 +119,8 @@ VULKAN_ABI_INDEX_FIELD_CLASSES = frozenset({
     "sampler_reference_index",
     "shader_stage_reference_index",
     "submit_sync_reference_index",
+    "vk_memory_heap_index",
+    "vk_memory_type_index",
 })
 
 VULKAN_ABI_HASH_FIELD_CLASSES = frozenset({
@@ -254,6 +256,8 @@ VULKAN_ABI_INDEX_FIELD_CLASSIFICATIONS = {
     "PdockerGpuVulkanDispatchV52ImageLayoutRangeEntry.image_index": "image_reference_index",
     "PdockerGpuVulkanDispatchV5ResourceEntry.parent_resource_index": "resource_reference_index",
     "PdockerGpuVulkanDispatchV5ResourceEntry.fd_index": "fd_transport_index",
+    "PdockerGpuVulkanDispatchV5ResourceEntry.memory_type_index": "vk_memory_type_index",
+    "PdockerGpuVulkanDispatchV5ResourceEntry.memory_heap_index": "vk_memory_heap_index",
     "PdockerGpuVulkanDispatchV5DescriptorEntry.resource_index": "resource_reference_index",
     "PdockerGpuVulkanDispatchV5ImageEntry.memory_resource_index": "resource_reference_index",
     "PdockerGpuVulkanDispatchV5ImageViewEntry.image_index": "image_reference_index",
@@ -6717,6 +6721,10 @@ class GpuAbiContractTest(unittest.TestCase):
         caps = c_function_body(executor, "print_vulkan_advertisement_caps")
         for marker in [
             "vulkan_dispatch_v5_supported_minors",
+            "vulkan_dispatch_v5_resource_schema_hash",
+            "vulkan_dispatch_v5_resource_field_count",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_SCHEMA_HASH",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_FIELD_COUNT",
             "vulkan_dispatch_v5_abi_minor_push_ops",
             "vulkan_dispatch_v5_push_constant_op_schema_hash",
             "vulkan_dispatch_v5_max_push_constant_ops",
@@ -6784,9 +6792,17 @@ class GpuAbiContractTest(unittest.TestCase):
         for marker in [
             "json_read_u32_membership_array",
             "vulkan_dispatch_v5_supported_minors",
+            "vulkan_dispatch_v5_resource_field_count",
+            "vulkan_dispatch_v5_resource_schema_hash",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_FIELD_COUNT",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_SCHEMA_HASH",
+            "caps->vulkan_dispatch_v5_resource_schema_supported = true;",
             "vulkan_dispatch_v5_supported_minor[PDOCKER_GPU_VULKAN_DISPATCH_V57_ABI_MINOR]",
         ]:
             self.assertIn(marker, caps_parser)
+
+        caps_struct = icd.split("} PdockerVkAdvertisedCaps;", 1)[0].rsplit("typedef struct", 1)[1]
+        self.assertIn("bool vulkan_dispatch_v5_resource_schema_supported;", caps_struct)
 
         generic_sender = c_function_body(icd, "send_generic_vulkan_dispatch_op")
         self.assertIn("op->push_constant_ops", generic_sender)
@@ -8602,11 +8618,23 @@ class GpuAbiContractTest(unittest.TestCase):
             "uint64_t api_memory_property_flags[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS];",
             tables,
         )
+        self.assertIn("uint32_t api_memory_type_indices[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS];", tables)
+        self.assertIn("uint32_t api_memory_heap_indices[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS];", tables)
 
         sender = c_function_body(icd, "send_generic_vulkan_dispatch_op")
         self.assertIn("uint64_t *api_memory_property_flags = tables->api_memory_property_flags;", sender)
+        self.assertIn("uint32_t *api_memory_type_indices = tables->api_memory_type_indices;", sender)
+        self.assertIn("uint32_t *api_memory_heap_indices = tables->api_memory_heap_indices;", sender)
         self.assertIn(
             "api_memory_property_flags[binding_count] = dispatch_memory ? dispatch_memory->property_flags : 0;",
+            sender,
+        )
+        self.assertIn(
+            "api_memory_type_indices[binding_count] = dispatch_memory ? dispatch_memory->memory_type_index : UINT32_MAX;",
+            sender,
+        )
+        self.assertIn(
+            "api_memory_heap_indices[binding_count] = dispatch_memory ? dispatch_memory->heap_index : UINT32_MAX;",
             sender,
         )
         self.assertIn(
@@ -8614,16 +8642,28 @@ class GpuAbiContractTest(unittest.TestCase):
             "            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;",
             sender,
         )
-        self.assertIn("api_memory_property_flags,\n                                    api_memory_ids", sender)
-        self.assertIn("api_memory_property_flags,\n            api_memory_ids", sender)
+        self.assertIn("api_memory_type_indices[binding_count] = 1u;", sender)
+        self.assertIn("api_memory_heap_indices[binding_count] = pdocker_vk_heap_index_for_memory_type(1u);", sender)
+        self.assertIn("api_memory_property_flags,\n                                    api_memory_type_indices", sender)
+        self.assertIn("api_memory_property_flags,\n            api_memory_type_indices", sender)
         self.assertIn("descriptor_hash = fnv1a64_update_u64(descriptor_hash, api_memory_property_flags[i]);", sender)
+        self.assertIn("descriptor_hash = fnv1a64_update_u32(descriptor_hash, api_memory_type_indices[i]);", sender)
+        self.assertIn("descriptor_hash = fnv1a64_update_u32(descriptor_hash, api_memory_heap_indices[i]);", sender)
 
         frame_sender = c_function_body(icd, "send_generic_vulkan_dispatch_v5_1_op")
         self.assertIn("const uint64_t *api_memory_property_flags", icd)
-        self.assertIn("!api_memory_property_flags || !api_memory_ids", frame_sender)
+        self.assertIn("const uint32_t *api_memory_type_indices", icd)
+        self.assertIn("const uint32_t *api_memory_heap_indices", icd)
+        self.assertIn("!api_memory_property_flags || !api_memory_type_indices || !api_memory_heap_indices", frame_sender)
         self.assertIn("resources[memory_index].memory_property_flags = api_memory_property_flags[i];", frame_sender)
+        self.assertIn("resources[memory_index].memory_type_index = api_memory_type_indices[i];", frame_sender)
+        self.assertIn("resources[memory_index].memory_heap_index = api_memory_heap_indices[i];", frame_sender)
         self.assertIn("resources[memory_index].memory_property_flags = image->memory->property_flags;", frame_sender)
+        self.assertIn("resources[memory_index].memory_type_index = image->memory->memory_type_index;", frame_sender)
+        self.assertIn("resources[memory_index].memory_heap_index = image->memory->heap_index;", frame_sender)
         self.assertIn("resources[memory_index].memory_property_flags = memory->property_flags;", frame_sender)
+        self.assertIn("resources[memory_index].memory_type_index = memory->memory_type_index;", frame_sender)
+        self.assertIn("resources[memory_index].memory_heap_index = memory->heap_index;", frame_sender)
         self.assertNotIn(
             "resources[memory_index].memory_property_flags =\n"
             "            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;",
@@ -8632,10 +8672,25 @@ class GpuAbiContractTest(unittest.TestCase):
 
         graphics_sender = c_function_body(icd, "collect_graphics_memory_resource")
         self.assertIn("entry->memory_property_flags = memory->property_flags;", graphics_sender)
+        self.assertIn("entry->memory_type_index = memory->memory_type_index;", graphics_sender)
+        self.assertIn("entry->memory_heap_index = memory->heap_index;", graphics_sender)
         reconcile = c_function_body(icd, "trace_vulkan_reconcile_evidence")
         self.assertIn("api_memory_property_flags", reconcile)
+        self.assertIn("api_memory_type_index", reconcile)
+        self.assertIn("api_memory_heap_index", reconcile)
         identity = c_function_body(executor, "v5_resource_fields_identical_for_same_object_id")
         self.assertIn("a->memory_property_flags == b->memory_property_flags", identity)
+        self.assertIn("a->memory_type_index == b->memory_type_index", identity)
+        self.assertIn("a->memory_heap_index == b->memory_heap_index", identity)
+        binding_struct = executor.split("} VulkanVectorBuffer;", 1)[1].split("} VulkanDispatchBinding;", 1)[0]
+        self.assertIn("uint32_t api_memory_type_index;", binding_struct)
+        self.assertIn("uint32_t api_memory_heap_index;", binding_struct)
+        materializer = c_function_body(executor, "materialize_vulkan_dispatch_v5_native_plan_bindings")
+        self.assertIn("binding->api_memory_type_index = memory->memory_type_index;", materializer)
+        self.assertIn("binding->api_memory_heap_index = memory->memory_heap_index;", materializer)
+        reconcile_hash = c_function_body(executor, "reconcile_descriptor_hash")
+        self.assertIn("u32 = bindings[i].api_memory_type_index;", reconcile_hash)
+        self.assertIn("u32 = bindings[i].api_memory_heap_index;", reconcile_hash)
 
     def test_vulkan_compute_v5_preserves_api_buffer_usage_identity(self):
         icd = VULKAN_ICD.read_text()
@@ -9387,7 +9442,10 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(marker, app)
             self.assertIn(marker, container)
         self.assertIn('#define PDOCKER_GPU_VULKAN_DISPATCH_V5_FRAME_HEADER_FIELD_COUNT 46u', app)
-        self.assertIn('#define PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_FIELD_COUNT 11u', app)
+        self.assertIn('#define PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_FIELD_COUNT 13u', app)
+        self.assertIn('#define PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_FIELD_COUNT 13u', container)
+        self.assertIn('#define PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_SCHEMA_HASH 0x6293f55dbedc7cfbull', app)
+        self.assertIn('#define PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_SCHEMA_HASH 0x6293f55dbedc7cfbull', container)
         self.assertIn('#define PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_FIELD_COUNT 14u', app)
         self.assertIn('#define PDOCKER_GPU_VULKAN_DISPATCH_V5_SPECIALIZATION_FIELD_COUNT 3u', app)
         self.assertIn('#define PDOCKER_GPU_VULKAN_DISPATCH_V5_FRAME_HEADER_OBJECT_FIELD_COUNT 16u', app)

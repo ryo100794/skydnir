@@ -245,7 +245,9 @@ def main() -> int:
         and "PDOCKER_VK_SHADOW_LIMIT_OR_CAP(maxDescriptorSetSampledImages, bridge_per_set_descriptors)" in vulkan_icd_src
         and "PDOCKER_VK_SHADOW_LIMIT_OR_CAP(maxDescriptorSetStorageImages, bridge_per_set_descriptors)" in vulkan_icd_src
         and "PDOCKER_VK_SHADOW_LIMIT_OR_CAP(maxDescriptorSetInputAttachments, bridge_per_set_descriptors)" in vulkan_icd_src
-        and "PDOCKER_VK_MAX_STORAGE_BUFFERS * PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS" in vulkan_icd_src,
+        and "static uint32_t pdocker_vk_max_per_set_descriptors(void)" in vulkan_icd_src
+        and "return PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS;" in vulkan_icd_src
+        and "(uint64_t)pdocker_vk_max_per_set_descriptors() * (uint64_t)PDOCKER_VK_MAX_DESCRIPTOR_SETS" in vulkan_icd_src,
     )
     require(
         "vulkan icd gates sampler anisotropy by executor caps",

@@ -131,7 +131,7 @@
 #define PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_PUSH_OPS PDOCKER_GPU_VULKAN_DISPATCH_V57_ABI_MINOR
 #define PDOCKER_GPU_VULKAN_DISPATCH_V5_COMMAND_DISPATCH 1u
 #define PDOCKER_GPU_VULKAN_DISPATCH_V5_FRAME_HEADER_SCHEMA_HASH 0x3de711f5a527e2f8ull
-#define PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_SCHEMA_HASH 0x5fd531f2d77e9ad1ull
+#define PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_SCHEMA_HASH 0x6293f55dbedc7cfbull
 #define PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_SCHEMA_HASH 0xb262ddf93c2ca096ull
 #define PDOCKER_GPU_VULKAN_DISPATCH_V5_SPECIALIZATION_SCHEMA_HASH 0xae7e0f61a22df66eull
 #define PDOCKER_GPU_VULKAN_DISPATCH_V5_IMAGE_SCHEMA_HASH 0x41f750ec2c5cfc82ull
@@ -247,9 +247,11 @@
     X(size, u64) \
     X(usage, u64) \
     X(memory_property_flags, u64) \
+    X(memory_type_index, u32) \
+    X(memory_heap_index, u32) \
     X(external_offset, u64) \
     X(generation, u64)
-#define PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_FIELD_COUNT 11u
+#define PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_FIELD_COUNT 13u
 
 #define PDOCKER_GPU_V5_DESCRIPTOR_FLAG_DYNAMIC (1u << 0)
 #define PDOCKER_GPU_V5_DESCRIPTOR_FLAG_WHOLE_SIZE (1u << 1)
@@ -876,6 +878,8 @@ typedef struct PdockerGpuVulkanDispatchV5ResourceEntry {
     uint64_t size;
     uint64_t usage;
     uint64_t memory_property_flags;
+    uint32_t memory_type_index;
+    uint32_t memory_heap_index;
     uint64_t external_offset;
     uint64_t generation;
 } PdockerGpuVulkanDispatchV5ResourceEntry;

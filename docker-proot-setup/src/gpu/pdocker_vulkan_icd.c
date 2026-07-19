@@ -8105,6 +8105,8 @@ static void trace_vulkan_reconcile_evidence(
         const VkDeviceSize *api_memory_offsets,
         const size_t *api_memory_sizes,
         const uint64_t *api_memory_property_flags,
+        const uint32_t *api_memory_type_indices,
+        const uint32_t *api_memory_heap_indices,
         const uint64_t *api_memory_ids,
         const uint64_t *api_buffer_ids) {
     if (!reconcile_api_evidence_log_enabled()) return;
@@ -8149,6 +8151,7 @@ static void trace_vulkan_reconcile_evidence(
                 "\"api_buffer_size\":%zu,\"api_buffer_usage\":%llu,\"api_descriptor_type\":%u,"
                 "\"api_dynamic\":%u,\"api_dynamic_offset\":%llu,\"api_memory_offset\":%llu,"
                 "\"api_memory_size\":%zu,\"api_memory_property_flags\":%llu,"
+                "\"api_memory_type_index\":%u,\"api_memory_heap_index\":%u,"
                 "\"api_memory_id\":%llu,\"api_buffer_id\":%llu}",
                 i ? "," : "",
                 api_descriptor_sets[i],
@@ -8166,6 +8169,8 @@ static void trace_vulkan_reconcile_evidence(
                 (unsigned long long)api_memory_offsets[i],
                 api_memory_sizes[i],
                 (unsigned long long)api_memory_property_flags[i],
+                api_memory_type_indices[i],
+                api_memory_heap_indices[i],
                 (unsigned long long)api_memory_ids[i],
                 (unsigned long long)api_buffer_ids[i]);
     }
@@ -8436,6 +8441,8 @@ static int collect_graphics_memory_resource(
     entry->fd_index = (uint32_t)(*fd_count);
     entry->size = (uint64_t)memory->size;
     entry->memory_property_flags = memory->property_flags;
+    entry->memory_type_index = memory->memory_type_index;
+    entry->memory_heap_index = memory->heap_index;
     entry->generation = generation;
     fds[(*fd_count)++] = memory->fd;
     memory_objects[*memory_count] = memory;
@@ -14339,6 +14346,8 @@ typedef struct {
     size_t api_buffer_sizes[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS];
     uint64_t api_buffer_usages[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS];
     uint64_t api_memory_property_flags[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS];
+    uint32_t api_memory_type_indices[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS];
+    uint32_t api_memory_heap_indices[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS];
     uint32_t api_descriptor_types[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS];
     uint32_t api_dynamic_flags[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS];
     VkDeviceSize api_dynamic_offsets[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS];
@@ -14412,6 +14421,8 @@ static int send_generic_vulkan_dispatch_v5_1_op(
         const VkDeviceSize *api_memory_offsets,
         const size_t *api_memory_sizes,
         const uint64_t *api_memory_property_flags,
+        const uint32_t *api_memory_type_indices,
+        const uint32_t *api_memory_heap_indices,
         const uint64_t *api_memory_ids,
         const uint64_t *api_buffer_ids,
         const uint64_t *api_buffer_view_ids,
@@ -14467,7 +14478,8 @@ static int send_generic_vulkan_dispatch_v5_1_op(
          (!api_descriptor_sets || !api_descriptor_array_elements || !bindings || !offsets || !sizes || !api_offsets ||
           !api_ranges || !api_buffer_sizes || !api_buffer_usages || !api_descriptor_types ||
           !api_dynamic_flags || !api_dynamic_offsets || !api_memory_offsets || !api_memory_sizes ||
-          !api_memory_property_flags || !api_memory_ids || !api_buffer_ids || !api_buffer_view_ids ||
+          !api_memory_property_flags || !api_memory_type_indices || !api_memory_heap_indices ||
+          !api_memory_ids || !api_buffer_ids || !api_buffer_view_ids ||
           !api_buffer_view_formats || !api_buffer_view_offsets ||
           !api_buffer_view_ranges || !api_buffer_view_generations)) ||
         !barrier_buffer_objects || !barrier_buffer_resource_indices ||
@@ -14763,6 +14775,8 @@ static int send_generic_vulkan_dispatch_v5_1_op(
         resources[memory_index].memory_offset = 0;
         resources[memory_index].size = (uint64_t)api_memory_sizes[i];
         resources[memory_index].memory_property_flags = api_memory_property_flags[i];
+        resources[memory_index].memory_type_index = api_memory_type_indices[i];
+        resources[memory_index].memory_heap_index = api_memory_heap_indices[i];
         resources[memory_index].external_offset = 0;
         resources[memory_index].generation = dispatch_id;
 
@@ -14895,6 +14909,8 @@ static int send_generic_vulkan_dispatch_v5_1_op(
         resources[memory_index].fd_index = (uint32_t)fd_index;
         resources[memory_index].size = (uint64_t)image->memory->size;
         resources[memory_index].memory_property_flags = image->memory->property_flags;
+        resources[memory_index].memory_type_index = image->memory->memory_type_index;
+        resources[memory_index].memory_heap_index = image->memory->heap_index;
         resources[memory_index].generation = dispatch_id;
         fds[fd_index++] = image->memory->fd;
 
@@ -14943,6 +14959,8 @@ static int send_generic_vulkan_dispatch_v5_1_op(
         resources[memory_index].memory_offset = 0;
         resources[memory_index].size = (uint64_t)memory->size;
         resources[memory_index].memory_property_flags = memory->property_flags;
+        resources[memory_index].memory_type_index = memory->memory_type_index;
+        resources[memory_index].memory_heap_index = memory->heap_index;
         resources[memory_index].external_offset = 0;
         resources[memory_index].generation = dispatch_id;
 
@@ -14998,6 +15016,8 @@ static int send_generic_vulkan_dispatch_v5_1_op(
         resources[memory_index].memory_offset = 0;
         resources[memory_index].size = (uint64_t)memory->size;
         resources[memory_index].memory_property_flags = memory->property_flags;
+        resources[memory_index].memory_type_index = memory->memory_type_index;
+        resources[memory_index].memory_heap_index = memory->heap_index;
         resources[memory_index].external_offset = 0;
         resources[memory_index].generation = dispatch_id;
 
@@ -16258,6 +16278,8 @@ static int send_generic_vulkan_dispatch_op(
     size_t *api_buffer_sizes = tables->api_buffer_sizes;
     uint64_t *api_buffer_usages = tables->api_buffer_usages;
     uint64_t *api_memory_property_flags = tables->api_memory_property_flags;
+    uint32_t *api_memory_type_indices = tables->api_memory_type_indices;
+    uint32_t *api_memory_heap_indices = tables->api_memory_heap_indices;
     uint32_t *api_descriptor_types = tables->api_descriptor_types;
     uint32_t *api_dynamic_flags = tables->api_dynamic_flags;
     VkDeviceSize *api_dynamic_offsets = tables->api_dynamic_offsets;
@@ -16576,6 +16598,8 @@ static int send_generic_vulkan_dispatch_op(
                 api_memory_offsets[binding_count] = transport_memory_offset;
                 api_memory_sizes[binding_count] = dispatch_memory ? dispatch_memory->size : 0;
                 api_memory_property_flags[binding_count] = dispatch_memory ? dispatch_memory->property_flags : 0;
+                api_memory_type_indices[binding_count] = dispatch_memory ? dispatch_memory->memory_type_index : UINT32_MAX;
+                api_memory_heap_indices[binding_count] = dispatch_memory ? dispatch_memory->heap_index : UINT32_MAX;
                 api_memory_ids[binding_count] = pdocker_vk_memory_object_id(dispatch_memory);
                 api_buffer_ids[binding_count] = pdocker_vk_buffer_object_id(transport_buffer);
                 api_buffer_view_ids[binding_count] = transport_buffer_view_object_id;
@@ -16773,6 +16797,8 @@ static int send_generic_vulkan_dispatch_op(
         api_memory_sizes[binding_count] = probe.debug_bytes;
         api_memory_property_flags[binding_count] =
             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+        api_memory_type_indices[binding_count] = 1u;
+        api_memory_heap_indices[binding_count] = pdocker_vk_heap_index_for_memory_type(1u);
         /*
          * The debug SSBO is synthetic, but in strict Vulkan passthrough mode
          * the executor intentionally validates the same object-graph contract
@@ -16892,6 +16918,8 @@ static int send_generic_vulkan_dispatch_op(
         descriptor_hash = fnv1a64_update_u64(descriptor_hash, (uint64_t)api_memory_offsets[i]);
         descriptor_hash = fnv1a64_update_u64(descriptor_hash, (uint64_t)api_memory_sizes[i]);
         descriptor_hash = fnv1a64_update_u64(descriptor_hash, api_memory_property_flags[i]);
+        descriptor_hash = fnv1a64_update_u32(descriptor_hash, api_memory_type_indices[i]);
+        descriptor_hash = fnv1a64_update_u32(descriptor_hash, api_memory_heap_indices[i]);
         descriptor_hash = fnv1a64_update_u64(descriptor_hash, (uint64_t)api_memory_ids[i]);
         descriptor_hash = fnv1a64_update_u64(descriptor_hash, (uint64_t)api_buffer_ids[i]);
     }
@@ -17055,6 +17083,8 @@ static int send_generic_vulkan_dispatch_op(
                                     api_memory_offsets,
                                     api_memory_sizes,
                                     api_memory_property_flags,
+                                    api_memory_type_indices,
+                                    api_memory_heap_indices,
                                     api_memory_ids,
                                     api_buffer_ids);
 #undef PDOCKER_VK_APPENDF
@@ -17172,6 +17202,8 @@ static int send_generic_vulkan_dispatch_op(
             api_memory_offsets,
             api_memory_sizes,
             api_memory_property_flags,
+            api_memory_type_indices,
+            api_memory_heap_indices,
             api_memory_ids,
             api_buffer_ids,
             api_buffer_view_ids,
@@ -18514,6 +18546,7 @@ typedef struct {
     bool vulkan_dispatch_v55_native_objects_supported;
     bool vulkan_dispatch_v56_compute_layouts_supported;
     bool vulkan_dispatch_v57_push_constant_ops_supported;
+    bool vulkan_dispatch_v5_resource_schema_supported;
     bool vulkan_dispatch_v5_supported_minors_valid;
     bool vulkan_dispatch_v5_supported_minor[8];
     bool vulkan_graphics_v6_supported_minors_valid;
@@ -18838,6 +18871,22 @@ static bool parse_executor_advertisement_caps_json(
         return false;
     }
     caps->vulkan_dispatch_v5_supported_minors_valid = true;
+
+    uint32_t v5_resource_field_count = 0;
+    char v5_resource_schema_hash[32];
+    char expected_v5_resource_schema_hash[32];
+    memset(v5_resource_schema_hash, 0, sizeof(v5_resource_schema_hash));
+    snprintf(expected_v5_resource_schema_hash, sizeof(expected_v5_resource_schema_hash), "0x%016llx",
+             (unsigned long long)PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_SCHEMA_HASH);
+    if (!json_read_u32(json, "vulkan_dispatch_v5_resource_field_count", &v5_resource_field_count) ||
+        v5_resource_field_count != PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_FIELD_COUNT ||
+        !json_read_string(json, "vulkan_dispatch_v5_resource_schema_hash",
+                          v5_resource_schema_hash, sizeof(v5_resource_schema_hash)) ||
+        strcmp(v5_resource_schema_hash, expected_v5_resource_schema_hash) != 0) {
+        return false;
+    }
+    caps->vulkan_dispatch_v5_resource_schema_supported = true;
+
     if (!json_read_u32_membership_array(
             json,
             "vulkan_graphics_v6_supported_minors",
