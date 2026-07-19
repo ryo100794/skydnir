@@ -1489,6 +1489,26 @@ def _q6_stage_divergence_evidence(q6: Any) -> dict[str, Any]:
             missing.append("q6_debug_u32_probe.executed_stage_trace_v2_count")
         if final_count <= 0:
             missing.append("q6_debug_u32_probe.executed_final_trace_v2_count")
+    if summary == "pre-reduction-mismatch":
+        required_pre_reduction_true = (
+            "pre_reduction_compared",
+        )
+        missing.extend(field for field in required_pre_reduction_true if raw.get(field) is not True)
+        if raw.get("pre_reduction_matches") is not False:
+            missing.append("pre_reduction_matches")
+        if raw.get("first_divergent_stage") != "pre-reduction":
+            missing.append("first_divergent_stage")
+    if summary == "reduction-mismatch":
+        required_reduction_true = (
+            "pre_reduction_compared",
+            "pre_reduction_matches",
+            "reduction_compared",
+        )
+        missing.extend(field for field in required_reduction_true if raw.get(field) is not True)
+        if raw.get("reduction_matches") is not False:
+            missing.append("reduction_matches")
+        if raw.get("first_divergent_stage") != "reduction":
+            missing.append("first_divergent_stage")
     if summary == "final-lane0-store-mismatch":
         required_final_true = (
             "pre_reduction_compared",

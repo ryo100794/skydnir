@@ -2484,6 +2484,72 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
             report["q6_stage_divergence"].get("missing", []),
         )
 
+
+    def test_q6_stage_divergence_fails_closed_for_malformed_pre_reduction_or_reduction_summary(self):
+        base_q6 = {
+            "event_count": 1,
+            "workgroup_shape_blocker": False,
+            "latest_status": "mismatch",
+            "local_size_resolved": [32, 1, 1],
+            "q6_output_layout_probe": {
+                "summary": "canonical-mismatch-inconclusive",
+                "samples": [
+                    q6_layout_sample_with_store_model(257, expected=1.25, gpu_at_dst=0.5)
+                ],
+            },
+            "q6_final_store_boundary": q6_final_store_boundary(
+                "native-final-store-mismatch",
+                final_value=0.5,
+                expected=1.25,
+                fd_after=0.5,
+            ),
+            **q6_stage_trace_claim_evidence(),
+            **q6_store_index_model_reflection(),
+            **q6_verified_writeback(),
+        }
+        cases = [
+            (
+                {
+                    **q6_stage_divergence_final_lane0(),
+                    "summary": "pre-reduction-mismatch",
+                    "pre_reduction_compared": True,
+                    "pre_reduction_matches": True,
+                    "first_divergent_stage": "final-store",
+                },
+                {"pre_reduction_matches", "first_divergent_stage"},
+            ),
+            (
+                {
+                    **q6_stage_divergence_final_lane0(),
+                    "summary": "reduction-mismatch",
+                    "pre_reduction_compared": True,
+                    "pre_reduction_matches": True,
+                    "reduction_compared": True,
+                    "reduction_matches": True,
+                    "first_divergent_stage": "final-store",
+                },
+                {"reduction_matches", "first_divergent_stage"},
+            ),
+        ]
+        for stage_divergence, expected_missing in cases:
+            q6 = {**base_q6, "q6_stage_divergence": stage_divergence}
+            payload = {
+                "schema": "pdocker.llama.gpu.compare.v1",
+                "gpu": {
+                    "diagnostics": {
+                        "runtime_freshness": runtime_marker(),
+                        "config_propagation": passing_config_propagation(),
+                        "q6_workgroup_diagnostics": q6,
+                    },
+                },
+            }
+            result = self.run_verifier(payload, "--require-q6-workgroup-clear")
+            self.assertEqual(result.returncode, 49, result.stdout)
+            report = json.loads(result.stdout)
+            self.assertEqual(report["classification"], "q6-stage-divergence-evidence-missing")
+            self.assertEqual(report["q6_stage_divergence"]["summary"], "missing-evidence")
+            self.assertLessEqual(expected_missing, set(report["q6_stage_divergence"].get("missing", [])))
+
     def test_q6_final_store_boundary_classifies_executor_writeback(self):
         q6 = {
             "event_count": 1,

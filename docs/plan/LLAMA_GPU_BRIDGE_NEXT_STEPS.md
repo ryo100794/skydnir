@@ -9,6 +9,24 @@ llama.cpp itself remains unmodified.
 
 ## Current Ground Truth
 
+
+
+### 2026-07-19 CPU/static Q6 stage-divergence verifier lane
+
+The artifact verifier now validates `pre-reduction-mismatch` and
+`reduction-mismatch` stage-divergence summaries with the same fail-closed
+strictness previously applied to `final-lane0-store-mismatch`.  A pre-reduction
+summary requires a compared pre-reduction phase, `pre_reduction_matches=false`,
+and `first_divergent_stage=pre-reduction`.  A reduction summary requires a
+cleared pre-reduction phase, a compared reduction phase,
+`reduction_matches=false`, and `first_divergent_stage=reduction`.  Malformed
+artifacts are demoted to `missing-evidence` rather than being accepted as a
+precise Q6 blocker.
+
+This is CPU/static verifier hardening only.  It does not recollect device
+artifacts and does not change llama.cpp, Dockerfiles, models, prompts, shader
+bytes, or executor arithmetic.
+
 ### 2026-07-19 CPU/static Q6 final-store classifier lane
 
 The compare summarizer now promotes existing Q6 final-store boundary evidence
