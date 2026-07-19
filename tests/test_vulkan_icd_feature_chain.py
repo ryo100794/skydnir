@@ -1314,6 +1314,41 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_destroy_instance_retires_owned_headless_surfaces(self):
+        source = textwrap.dedent("""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "__ICD_SOURCE__"
+
+            int main(void) {
+                VkInstanceCreateInfo instance_info;
+                memset(&instance_info, 0, sizeof(instance_info));
+                instance_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+                VkInstance instance = VK_NULL_HANDLE;
+                if (vkCreateInstance(&instance_info, NULL, &instance) != VK_SUCCESS || !instance) return 1;
+
+                VkHeadlessSurfaceCreateInfoEXT surface_info;
+                memset(&surface_info, 0, sizeof(surface_info));
+                surface_info.sType = VK_STRUCTURE_TYPE_HEADLESS_SURFACE_CREATE_INFO_EXT;
+                VkSurfaceKHR surface = VK_NULL_HANDLE;
+                if (vkCreateHeadlessSurfaceEXT(instance, &surface_info, NULL, &surface) != VK_SUCCESS || !surface) return 2;
+                if (!surface_handle_lookup(surface)) return 3;
+                if (!surface_handle_lookup_for_instance(instance, surface)) return 4;
+
+                vkDestroyInstance(instance, NULL);
+                if (surface_handle_lookup(surface)) return 5;
+                if (surface_handle_lookup_for_instance(instance, surface)) return 6;
+
+                vkDestroySurfaceKHR(instance, surface, NULL);
+                if (surface_handle_lookup(surface)) return 7;
+                return 0;
+            }
+            """).replace("__ICD_SOURCE__", str(ICD_SOURCE))
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
     def test_wsi_surface_owner_scope_rejects_cross_instance_device_paths(self):
         sc = chr(59)
         amp = chr(38)

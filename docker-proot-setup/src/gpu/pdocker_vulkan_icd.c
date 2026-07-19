@@ -3741,6 +3741,21 @@ static PdockerVkSurface *surface_unregister_for_instance(
     return NULL;
 }
 
+static void surface_unregister_all_for_instance_id(uint64_t instance_object_id) {
+    if (instance_object_id == 0) return;
+    PdockerVkSurface **link = &g_surfaces;
+    while (*link) {
+        PdockerVkSurface *surface = *link;
+        if (surface->owner_instance_id == instance_object_id) {
+            *link = surface->next;
+            surface->next = NULL;
+            surface_retire(surface);
+        } else {
+            link = &surface->next;
+        }
+    }
+}
+
 static PdockerVkSwapchain *swapchain_handle_target(VkSwapchainKHR swapchain) {
     return pdocker_vk_swapchain_from_handle(swapchain);
 }
@@ -22007,6 +22022,7 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyInstance(
 #endif
     PdockerVkInstance *pdocker_instance = instance_unregister(instance);
     if (!pdocker_instance) return;
+    surface_unregister_all_for_instance_id(pdocker_instance->object_id);
     physical_devices_unregister_for_instance(pdocker_instance->object_id);
     free(pdocker_instance);
 }

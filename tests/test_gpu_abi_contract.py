@@ -1621,6 +1621,11 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("debug_utils_messenger_owner_matches_instance(instance, messenger)", debug_submit_body)
         instance_destroy_body = c_function_body(icd, "vkDestroyInstance")
         self.assertIn("messenger->owner_instance_id == debug_owner_instance_id", instance_destroy_body)
+        self.assertIn("surface_unregister_all_for_instance_id(pdocker_instance->object_id)", instance_destroy_body)
+        surface_sweep_body = c_function_body(icd, "surface_unregister_all_for_instance_id")
+        self.assertIn("PdockerVkSurface **link = &g_surfaces", surface_sweep_body)
+        self.assertIn("surface->owner_instance_id == instance_object_id", surface_sweep_body)
+        self.assertIn("surface_retire(surface);", surface_sweep_body)
 
         collector_body = c_function_body(icd, "collect_advertised_device_extensions")
         for marker in [
@@ -1734,6 +1739,7 @@ class GpuAbiContractTest(unittest.TestCase):
         destroy_body = c_function_body(icd, "vkDestroySurfaceKHR")
         self.assertIn("surface_unregister_for_instance(instance, surface)", destroy_body)
         self.assertIn("surface_retire(s);", destroy_body)
+        self.assertIn("surface_unregister_all_for_instance_id", icd)
 
         support_body = c_function_body(icd, "vkGetPhysicalDeviceSurfaceSupportKHR")
         self.assertIn("!pSupported", support_body)
