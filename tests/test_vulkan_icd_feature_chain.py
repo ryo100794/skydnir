@@ -1544,7 +1544,9 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 alloc_info.commandPool = pool;
                 alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
                 alloc_info.commandBufferCount = 1;
-                VkCommandBuffer cmd = VK_NULL_HANDLE;
+                VkCommandBuffer cmd = (VkCommandBuffer)(uintptr_t)0xdeadu;
+                if (vkAllocateCommandBuffers(VK_NULL_HANDLE, &alloc_info, &cmd) != VK_ERROR_INITIALIZATION_FAILED ||
+                    cmd != VK_NULL_HANDLE) return 29;
                 if (vkAllocateCommandBuffers(device, &alloc_info, &cmd) != VK_SUCCESS) return 4;
                 PdockerVkCommandBuffer *tracked_cmd = command_buffer_handle_lookup(cmd);
                 if (!command_buffer_belongs_to_pool(tracked_cmd, tracked_pool)) return 5;
@@ -8795,6 +8797,9 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 alloc.descriptorPool = pool_a;
                 alloc.descriptorSetCount = 1;
                 alloc.pSetLayouts = &layout_a;
+                wrong_set = (VkDescriptorSet)(uintptr_t)0xdeadu;
+                if (vkAllocateDescriptorSets(VK_NULL_HANDLE, &alloc, &wrong_set) != VK_ERROR_INITIALIZATION_FAILED ||
+                    wrong_set != VK_NULL_HANDLE) return 433;
                 if (vkAllocateDescriptorSets(device_b, &alloc, &wrong_set) != VK_ERROR_INITIALIZATION_FAILED) return 8;
                 if (wrong_set != VK_NULL_HANDLE) return 9;
 

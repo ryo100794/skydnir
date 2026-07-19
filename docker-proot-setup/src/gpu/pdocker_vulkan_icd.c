@@ -26354,6 +26354,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateDescriptorSets(
         !pDescriptorSets) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
+    for (uint32_t i = 0; i < pAllocateInfo->descriptorSetCount; ++i) {
+        pDescriptorSets[i] = VK_NULL_HANDLE;
+    }
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
     VkResult pnext_rc = validate_descriptor_set_allocate_pnext(pAllocateInfo);
     if (pnext_rc != VK_SUCCESS) return pnext_rc;
     const VkDescriptorSetVariableDescriptorCountAllocateInfo *variable_counts =
@@ -26366,9 +26373,6 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateDescriptorSets(
     }
     int reserve_rc = descriptor_pool_reserve_sets(pool, pAllocateInfo->descriptorSetCount);
     if (reserve_rc != 0) return reserve_rc == -ENOMEM ? VK_ERROR_OUT_OF_HOST_MEMORY : VK_ERROR_INITIALIZATION_FAILED;
-    for (uint32_t i = 0; i < pAllocateInfo->descriptorSetCount; ++i) {
-        pDescriptorSets[i] = VK_NULL_HANDLE;
-    }
     for (uint32_t i = 0; i < pAllocateInfo->descriptorSetCount; ++i) {
         PdockerVkDescriptorSet *set = pdocker_alloc_handle(sizeof(*set));
         if (!set) {
@@ -30000,9 +30004,18 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateCommandBuffers(
         (pAllocateInfo->commandBufferCount > 0 && !pCommandBuffers)) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
+    if (pCommandBuffers) {
+        for (uint32_t i = 0; i < pAllocateInfo->commandBufferCount; ++i) {
+            pCommandBuffers[i] = VK_NULL_HANDLE;
+        }
+    }
     if (pAllocateInfo->pNext) {
         return unsupported_create_info_pnext_result("vkAllocateCommandBuffers",
                                                    pAllocateInfo->pNext);
+    }
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0) {
+        return VK_ERROR_INITIALIZATION_FAILED;
     }
     PdockerVkCommandPool *pool = command_pool_handle_lookup_for_device(device, pAllocateInfo->commandPool);
     if (!pool) {

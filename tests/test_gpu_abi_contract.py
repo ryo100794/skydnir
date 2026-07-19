@@ -11400,6 +11400,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("descriptor-allocate-variable-count-unsupported", allocate_pnext_body)
         self.assertIn('unsupported_create_info_pnext_result("vkAllocateDescriptorSets", node)', allocate_pnext_body)
         self.assertIn("pAllocateInfo->sType != VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO", allocate_body)
+        self.assertIn("pDescriptorSets[i] = VK_NULL_HANDLE;", allocate_body)
+        self.assertIn("device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0", allocate_body)
         self.assertIn("validate_descriptor_set_allocate_pnext(pAllocateInfo)", allocate_body)
         self.assertIn("descriptor_pool_handle_lookup_for_device(device, pAllocateInfo->descriptorPool)", allocate_body)
         self.assertIn("pool->set_count + pAllocateInfo->descriptorSetCount > pool->max_sets", allocate_body)
@@ -11832,6 +11834,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "VKAPI_ATTR VkResult VKAPI_CALL vkFreeDescriptorSets", 1
         )[0]
         self.assertIn("pAllocateInfo->sType != VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO", allocate_sets_body)
+        self.assertIn("pDescriptorSets[i] = VK_NULL_HANDLE;", allocate_sets_body)
+        self.assertIn("device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0", allocate_sets_body)
         self.assertIn("validate_descriptor_set_allocate_pnext(pAllocateInfo)", allocate_sets_body)
         self.assertIn("descriptor_pool_handle_lookup_for_device(device, pAllocateInfo->descriptorPool)", allocate_sets_body)
         self.assertIn("descriptor_pool_track_set(pool, set)", allocate_sets_body)
@@ -12028,6 +12032,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("command-pool-trim-flags-unsupported", trim_pool_body)
 
         self.assertIn("pAllocateInfo->sType != VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO", allocate_body)
+        self.assertIn("pCommandBuffers[i] = VK_NULL_HANDLE;", allocate_body)
+        self.assertIn("device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0", allocate_body)
         self.assertIn("pAllocateInfo->pNext", allocate_body)
         self.assertIn('unsupported_create_info_pnext_result("vkAllocateCommandBuffers"', allocate_body)
         self.assertIn("command_pool_handle_lookup_for_device(device, pAllocateInfo->commandPool)", allocate_body)
