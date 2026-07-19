@@ -11465,6 +11465,7 @@ class GpuAbiContractTest(unittest.TestCase):
 
         self.assertIn('"vkCreateComputePipelines", ci->pNext, 1u, false', compute_body)
         self.assertIn("ci->sType != VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO", compute_body)
+        self.assertIn("device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0", compute_body)
         self.assertIn("pdocker_vk_pipeline_create_flags_transportable", compute_body)
         self.assertIn("Pipeline create flags accepted here are execution-neutral hints", compute_body)
         self.assertNotIn("ci->basePipelineHandle != VK_NULL_HANDLE", compute_body)
@@ -11510,6 +11511,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("memcpy(pipeline->graphics_stage_entry_names[stage_i]", graphics_body)
         self.assertIn("pipeline->graphics_stage_entry_name_sizes[stage_i] = graphics_entry_name_len;", graphics_body)
         self.assertNotIn("safe_copy_cstr(pipeline->graphics_stage_entry_names", graphics_body)
+        self.assertIn("device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0", graphics_body)
         self.assertIn("VK_STRUCTURE_TYPE_PIPELINE_CREATION_FEEDBACK_CREATE_INFO", graphics_body)
         self.assertIn("VK_STRUCTURE_TYPE_PIPELINE_ROBUSTNESS_CREATE_INFO", graphics_body)
         self.assertIn("validate_pipeline_shader_stage_pnext_for_transport", graphics_body)

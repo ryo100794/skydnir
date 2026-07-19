@@ -27605,6 +27605,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateComputePipelines(
     for (uint32_t i = 0; i < createInfoCount; ++i) {
         pPipelines[i] = VK_NULL_HANDLE;
     }
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
     if (pipelineCache != VK_NULL_HANDLE && !pipeline_cache_handle_lookup_for_device(device, pipelineCache)) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
@@ -27649,12 +27653,6 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateComputePipelines(
         PdockerVkPipeline *pipeline = pdocker_alloc_handle(sizeof(*pipeline));
         if (!pipeline) return VK_ERROR_OUT_OF_HOST_MEMORY;
         pipeline->object_id = next_vulkan_object_generation();
-        uint64_t owner_device_id = 0;
-        if (!device_owner_id_or_zero_checked(device, &owner_device_id)) {
-            free(pipeline);
-            return VK_ERROR_INITIALIZATION_FAILED;
-        }
-
         pipeline->owner_device_id = owner_device_id;
         pipeline->shader = shader_module_handle_lookup_for_device(device, ci->stage.module);
         pipeline->layout = pipeline_layout_handle_lookup_for_device(device, ci->layout);
@@ -27942,6 +27940,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
     for (uint32_t i = 0; i < createInfoCount; ++i) {
         pPipelines[i] = VK_NULL_HANDLE;
     }
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
     if (pipelineCache != VK_NULL_HANDLE && !pipeline_cache_handle_lookup_for_device(device, pipelineCache)) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
@@ -27949,12 +27951,6 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
         PdockerVkPipeline *pipeline = pdocker_alloc_handle(sizeof(*pipeline));
         if (!pipeline) return VK_ERROR_OUT_OF_HOST_MEMORY;
         pipeline->object_id = next_vulkan_object_generation();
-        uint64_t owner_device_id = 0;
-        if (!device_owner_id_or_zero_checked(device, &owner_device_id)) {
-            free(pipeline);
-            return VK_ERROR_INITIALIZATION_FAILED;
-        }
-
         pipeline->owner_device_id = owner_device_id;
         pipeline->graphics = true;
         pipeline->graphics_unsupported = false;

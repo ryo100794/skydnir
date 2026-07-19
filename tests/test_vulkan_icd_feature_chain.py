@@ -2148,6 +2148,13 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 cp_info.stage.module = shader;
                 cp_info.stage.pName = "main";
                 cp_info.layout = pl;
+                VkPipeline stale_compute_pipeline = (VkPipeline)(uintptr_t)0x1234u;
+                if (vkCreateComputePipelines(VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &cp_info, NULL, &stale_compute_pipeline) !=
+                        VK_ERROR_INITIALIZATION_FAILED ||
+                    stale_compute_pipeline != VK_NULL_HANDLE) {{
+                    fprintf(stderr, "compute pipeline accepted null device or left stale output\\n");
+                    return 19;
+                }}
                 VkPipeline pipeline = VK_NULL_HANDLE;
                 if (vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &cp_info, NULL, &pipeline) != VK_SUCCESS ||
                     pipeline == VK_NULL_HANDLE) {{
@@ -8745,7 +8752,11 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 gp.stageCount = 1;
                 gp.pStages = &graphics_stage;
                 gp.layout = pipeline_layout_b;
-                VkPipeline graphics_pipeline = VK_NULL_HANDLE;
+                VkPipeline graphics_pipeline = (VkPipeline)(uintptr_t)0x1234u;
+                if (vkCreateGraphicsPipelines(VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &gp, NULL, &graphics_pipeline) !=
+                        VK_ERROR_INITIALIZATION_FAILED ||
+                    graphics_pipeline != VK_NULL_HANDLE) return 400;
+                graphics_pipeline = VK_NULL_HANDLE;
                 if (vkCreateGraphicsPipelines(device_b, VK_NULL_HANDLE, 1, &gp, NULL, &graphics_pipeline) != VK_ERROR_INITIALIZATION_FAILED) return 401;
                 if (graphics_pipeline != VK_NULL_HANDLE) return 402;
 
