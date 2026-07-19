@@ -1298,6 +1298,25 @@ def _q6_final_store_sample_has_latest_event_identity(sample: dict[str, Any]) -> 
     return hashes_match
 
 
+def _q6_final_store_boundary_sample_class(sample: Any) -> str:
+    if not isinstance(sample, dict):
+        return "mixed-or-inconclusive"
+    final_matches_expected = sample.get("final_store_matches_expected")
+    writeback_matches_final_store = sample.get("writeback_matches_final_store")
+    writeback_matches_expected = sample.get("writeback_matches_expected")
+    if (
+        final_matches_expected is True
+        and writeback_matches_final_store is True
+        and writeback_matches_expected is True
+    ):
+        return "pass"
+    if final_matches_expected is False and writeback_matches_final_store is True:
+        return "native-final-store-mismatch"
+    if final_matches_expected is True and writeback_matches_final_store is False:
+        return "executor-writeback-mismatch"
+    return "mixed-or-inconclusive"
+
+
 def _q6_final_store_boundary(q6: Any) -> dict[str, Any]:
     if not isinstance(q6, dict):
         return {"summary": "not-run", "samples": []}
@@ -1345,32 +1364,34 @@ def _q6_final_store_boundary(q6: Any) -> dict[str, Any]:
         )
     ):
         summary = "inconclusive"
-    if summary == "pass" and not all(
-        isinstance(sample, dict)
-        and sample.get("final_store_matches_expected") is True
-        and sample.get("writeback_matches_final_store") is True
-        and sample.get("writeback_matches_expected") is True
-        for sample in samples
+    computed_class_counts = {
+        "native-final-store-mismatch": 0,
+        "executor-writeback-mismatch": 0,
+        "pass": 0,
+        "mixed-or-inconclusive": 0,
+    }
+    for sample in samples:
+        sample_class = _q6_final_store_boundary_sample_class(sample)
+        computed_class_counts[sample_class] = computed_class_counts.get(sample_class, 0) + 1
+    if summary == "pass" and computed_class_counts["pass"] != len(samples):
+        summary = "inconclusive"
+    if summary == "native-final-store-mismatch" and not (
+        computed_class_counts["native-final-store-mismatch"] > 0
+        and computed_class_counts["executor-writeback-mismatch"] == 0
+        and computed_class_counts["mixed-or-inconclusive"] == 0
     ):
         summary = "inconclusive"
-    if summary == "native-final-store-mismatch" and not any(
-        isinstance(sample, dict)
-        and sample.get("final_store_matches_expected") is False
-        and sample.get("writeback_matches_final_store") is True
-        for sample in samples
-    ):
-        summary = "inconclusive"
-    if summary == "executor-writeback-mismatch" and not any(
-        isinstance(sample, dict)
-        and sample.get("final_store_matches_expected") is True
-        and sample.get("writeback_matches_final_store") is False
-        for sample in samples
+    if summary == "executor-writeback-mismatch" and not (
+        computed_class_counts["executor-writeback-mismatch"] > 0
+        and computed_class_counts["native-final-store-mismatch"] == 0
+        and computed_class_counts["mixed-or-inconclusive"] == 0
     ):
         summary = "inconclusive"
     return {
         **boundary,
         "summary": summary,
         "joined_sample_count": boundary.get("joined_sample_count"),
+        "computed_class_counts": computed_class_counts,
         "samples": samples,
     }
 
@@ -1456,7 +1477,6 @@ def _q6_stage_divergence_evidence(q6: Any) -> dict[str, Any]:
     valid_summaries = {
         "pass",
         "missing-evidence",
-        "pre-reduction-mismatch",
         "reduction-mismatch",
         "final-lane0-store-mismatch",
     }
@@ -1489,15 +1509,6 @@ def _q6_stage_divergence_evidence(q6: Any) -> dict[str, Any]:
             missing.append("q6_debug_u32_probe.executed_stage_trace_v2_count")
         if final_count <= 0:
             missing.append("q6_debug_u32_probe.executed_final_trace_v2_count")
-    if summary == "pre-reduction-mismatch":
-        required_pre_reduction_true = (
-            "pre_reduction_compared",
-        )
-        missing.extend(field for field in required_pre_reduction_true if raw.get(field) is not True)
-        if raw.get("pre_reduction_matches") is not False:
-            missing.append("pre_reduction_matches")
-        if raw.get("first_divergent_stage") != "pre-reduction":
-            missing.append("first_divergent_stage")
     if summary == "reduction-mismatch":
         required_reduction_true = (
             "pre_reduction_compared",

@@ -854,6 +854,8 @@ class GpuAbiContractTest(unittest.TestCase):
             }
         ])
         self.assertEqual("pass", report["summary"])
+        self.assertEqual(5, report["executed_stage_trace_v2_count"])
+        self.assertEqual(1, report["executed_final_trace_v2_count"])
         self.assertEqual(5, report["bindings"][0]["executed_stage_trace_v2_count"])
         self.assertEqual(1, report["bindings"][0]["executed_final_trace_v2_count"])
         lane_trace = report["bindings"][0]["lane_trace_v1"]
@@ -920,6 +922,8 @@ class GpuAbiContractTest(unittest.TestCase):
             }
         ])
         self.assertEqual("fail", report["summary"])
+        self.assertEqual(0, report["executed_stage_trace_v2_count"])
+        self.assertEqual(0, report["executed_final_trace_v2_count"])
         self.assertEqual([], report["bindings"])
         self.assertIn("q6 lane trace layout stale", "\n".join(report["failures"]))
         self.assertEqual(
@@ -987,6 +991,8 @@ class GpuAbiContractTest(unittest.TestCase):
         }]
         report = parser(bindings)
         self.assertEqual("pass", report["summary"])
+        self.assertEqual(10, report["executed_stage_trace_v2_count"])
+        self.assertEqual(2, report["executed_final_trace_v2_count"])
         self.assertEqual(10, report["bindings"][0]["executed_stage_trace_v2_count"])
         self.assertEqual(2, report["bindings"][0]["executed_final_trace_v2_count"])
         records = report["bindings"][0]["records"]

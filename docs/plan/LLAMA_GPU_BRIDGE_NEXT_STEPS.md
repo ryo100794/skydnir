@@ -9,19 +9,39 @@ llama.cpp itself remains unmodified.
 
 ## Current Ground Truth
 
+### 2026-07-19 CPU/static Q6 trace count and verifier parity lane
 
+The compare artifact now emits top-level
+`q6_debug_u32_probe.executed_stage_trace_v2_count` by summing the
+per-binding stage trace counts already present under `bindings[]`. The verifier
+requires this top-level field before accepting `q6_stage_divergence` claims, so
+this closes the compare/verifier contract gap without recollecting device
+artifacts.
+
+The final-store boundary verifier now recomputes sample class counts from the
+sample booleans and accepts the same non-contradictory mixed evidence as the
+compare summarizer: `pass + native-final-store-mismatch` remains a native
+final-store boundary, and `pass + executor-writeback-mismatch` remains an
+executor writeback boundary. Conflicting native/executor failures still fail
+closed as inconclusive.
+
+This is CPU/static evidence-contract hardening only. It does not change
+llama.cpp, Dockerfiles, models, prompts, shader bytes, or executor arithmetic.
 
 ### 2026-07-19 CPU/static Q6 stage-divergence verifier lane
 
-The artifact verifier now validates `pre-reduction-mismatch` and
-`reduction-mismatch` stage-divergence summaries with the same fail-closed
-strictness previously applied to `final-lane0-store-mismatch`.  A pre-reduction
-summary requires a compared pre-reduction phase, `pre_reduction_matches=false`,
-and `first_divergent_stage=pre-reduction`.  A reduction summary requires a
-cleared pre-reduction phase, a compared reduction phase,
-`reduction_matches=false`, and `first_divergent_stage=reduction`.  Malformed
-artifacts are demoted to `missing-evidence` rather than being accepted as a
-precise Q6 blocker.
+The artifact verifier now validates `reduction-mismatch` stage-divergence
+summaries with the same fail-closed strictness previously applied to
+`final-lane0-store-mismatch`. A reduction summary requires a cleared
+pre-reduction phase, a compared reduction phase, `reduction_matches=false`,
+and `first_divergent_stage=reduction`. Malformed artifacts are demoted to
+`missing-evidence` rather than being accepted as a precise Q6 blocker.
+
+`pre-reduction-mismatch` is not accepted as a current evidence state. The
+compare producer does not perform a real pre-reduction value-vs-oracle
+comparison; its former branch was therefore unreachable once the required lane
+trace evidence was present. That state must stay unsupported until the compare
+artifact contains real pre-reduction value comparison evidence.
 
 This is CPU/static verifier hardening only.  It does not recollect device
 artifacts and does not change llama.cpp, Dockerfiles, models, prompts, shader

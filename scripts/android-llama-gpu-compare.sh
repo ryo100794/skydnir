@@ -5026,6 +5026,7 @@ def parse_q6_final_store_trace_v2(bindings):
         return {
             "schema": "pdocker.q6k.final-store-trace.v2",
             "debug_binding_count": 0,
+            "executed_stage_trace_v2_count": 0,
             "executed_final_trace_v2_count": 0,
             "bindings": [],
             "summary": "fail",
@@ -5189,6 +5190,9 @@ def parse_q6_final_store_trace_v2(bindings):
     return {
         "schema": "pdocker.q6k.final-store-trace.v2",
         "debug_binding_count": len(parsed_bindings),
+        "executed_stage_trace_v2_count": sum(
+            item.get("executed_stage_trace_v2_count", 0) for item in parsed_bindings
+        ),
         "executed_final_trace_v2_count": sum(
             item.get("executed_final_trace_v2_count", 0) for item in parsed_bindings
         ),
@@ -6275,9 +6279,6 @@ def build_q6_stage_divergence():
             if pre_reduction_matches and reduction_matches:
                 summary = "final-lane0-store-mismatch"
                 first_divergent_stage = "final-store"
-            elif not pre_reduction_matches:
-                summary = "pre-reduction-mismatch"
-                first_divergent_stage = "pre-reduction"
             else:
                 summary = "reduction-mismatch"
                 first_divergent_stage = "reduction"
