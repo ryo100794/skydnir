@@ -3144,7 +3144,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 name_info.objectType = VK_DEBUG_REPORT_OBJECT_TYPE_BUFFER_EXT;
                 name_info.object = 0x1234u;
                 name_info.pObjectName = "legacy-buffer-name";
-                if (vkDebugMarkerSetObjectNameEXT(VK_NULL_HANDLE, &name_info) != VK_SUCCESS) return 11;
+                if (vkDebugMarkerSetObjectNameEXT(VK_NULL_HANDLE, &name_info) != VK_ERROR_INITIALIZATION_FAILED) return 11;
 
                 const uint32_t tag = 0x13572468u;
                 VkDebugMarkerObjectTagInfoEXT tag_info;
@@ -3155,7 +3155,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 tag_info.tagName = 7u;
                 tag_info.tagSize = sizeof(tag);
                 tag_info.pTag = &tag;
-                if (vkDebugMarkerSetObjectTagEXT(VK_NULL_HANDLE, &tag_info) != VK_SUCCESS) return 12;
+                if (vkDebugMarkerSetObjectTagEXT(VK_NULL_HANDLE, &tag_info) != VK_ERROR_INITIALIZATION_FAILED) return 12;
 
                 VkDebugMarkerMarkerInfoEXT marker_info;
                 memset(&marker_info, 0, sizeof(marker_info));
@@ -3565,6 +3565,23 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 VkInstance instance_b = VK_NULL_HANDLE;
                 if (vkCreateInstance(&instance_info, NULL, &instance_b) != VK_SUCCESS || instance_b == VK_NULL_HANDLE || instance_b == instance) return 31;
 
+                uint32_t physical_count = 1;
+                VkPhysicalDevice physical = VK_NULL_HANDLE;
+                if (vkEnumeratePhysicalDevices(instance, &physical_count, &physical) != VK_SUCCESS || physical_count != 1 || physical == VK_NULL_HANDLE) return 39;
+                VkDeviceCreateInfo real_device_info;
+                memset(&real_device_info, 0, sizeof(real_device_info));
+                real_device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                VkDevice device = VK_NULL_HANDLE;
+                if (vkCreateDevice(physical, &real_device_info, NULL, &device) != VK_SUCCESS || device == VK_NULL_HANDLE) return 40;
+                VkBufferCreateInfo buffer_info;
+                memset(&buffer_info, 0, sizeof(buffer_info));
+                buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+                buffer_info.size = 256;
+                buffer_info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+                buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+                VkBuffer debug_buffer = VK_NULL_HANDLE;
+                if (vkCreateBuffer(device, &buffer_info, NULL, &debug_buffer) != VK_SUCCESS || debug_buffer == VK_NULL_HANDLE) return 41;
+
                 VkDebugUtilsMessengerCreateInfoEXT messenger_info;
                 memset(&messenger_info, 0, sizeof(messenger_info));
                 messenger_info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
@@ -3608,20 +3625,20 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 memset(&name_info, 0, sizeof(name_info));
                 name_info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
                 name_info.objectType = VK_OBJECT_TYPE_BUFFER;
-                name_info.objectHandle = 0x1234u;
+                name_info.objectHandle = (uint64_t)(uintptr_t)debug_buffer;
                 name_info.pObjectName = "buffer-name";
-                if (vkSetDebugUtilsObjectNameEXT(VK_NULL_HANDLE, &name_info) != VK_SUCCESS) return 9;
+                if (vkSetDebugUtilsObjectNameEXT(device, &name_info) != VK_SUCCESS) return 9;
 
                 const uint32_t tag = 0xcafebabeu;
                 VkDebugUtilsObjectTagInfoEXT tag_info;
                 memset(&tag_info, 0, sizeof(tag_info));
                 tag_info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_TAG_INFO_EXT;
                 tag_info.objectType = VK_OBJECT_TYPE_BUFFER;
-                tag_info.objectHandle = 0x1234u;
+                tag_info.objectHandle = (uint64_t)(uintptr_t)debug_buffer;
                 tag_info.tagName = 1u;
                 tag_info.tagSize = sizeof(tag);
                 tag_info.pTag = &tag;
-                if (vkSetDebugUtilsObjectTagEXT(VK_NULL_HANDLE, &tag_info) != VK_SUCCESS) return 10;
+                if (vkSetDebugUtilsObjectTagEXT(device, &tag_info) != VK_SUCCESS) return 10;
 
                 VkDebugUtilsLabelEXT label;
                 memset(&label, 0, sizeof(label));
@@ -3643,8 +3660,10 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 name_info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
                 name_info.objectType = VK_OBJECT_TYPE_UNKNOWN;
                 name_info.objectHandle = 0x1234u;
-                if (vkSetDebugUtilsObjectNameEXT(VK_NULL_HANDLE, &name_info) != VK_ERROR_INITIALIZATION_FAILED) return 13;
+                if (vkSetDebugUtilsObjectNameEXT(device, &name_info) != VK_ERROR_INITIALIZATION_FAILED) return 13;
 
+                vkDestroyBuffer(device, debug_buffer, NULL);
+                vkDestroyDevice(device, NULL);
                 vkDestroyDebugUtilsMessengerEXT(instance, (VkDebugUtilsMessengerEXT)(uintptr_t)0x1234u, NULL);
                 vkDestroyInstance(instance_b, NULL);
                 if (!debug_utils_messenger_handle_lookup_for_instance(instance, messenger)) return 37;
@@ -3711,29 +3730,52 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 if (proc_address("vkSetPrivateData") != NULL) return 28;
                 if (proc_address("vkSetPrivateDataEXT") == NULL) return 29;
 
+                VkInstanceCreateInfo instance_info;
+                memset(&instance_info, 0, sizeof(instance_info));
+                instance_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+                VkInstance instance = VK_NULL_HANDLE;
+                if (vkCreateInstance(&instance_info, NULL, &instance) != VK_SUCCESS || instance == VK_NULL_HANDLE) return 32;
+                uint32_t physical_count = 1;
+                VkPhysicalDevice physical = VK_NULL_HANDLE;
+                if (vkEnumeratePhysicalDevices(instance, &physical_count, &physical) != VK_SUCCESS || physical_count != 1 || physical == VK_NULL_HANDLE) return 33;
+                VkDeviceCreateInfo real_device_info;
+                memset(&real_device_info, 0, sizeof(real_device_info));
+                real_device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                VkDevice device = VK_NULL_HANDLE;
+                if (vkCreateDevice(physical, &real_device_info, NULL, &device) != VK_SUCCESS || device == VK_NULL_HANDLE) return 34;
+                VkBufferCreateInfo buffer_info;
+                memset(&buffer_info, 0, sizeof(buffer_info));
+                buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+                buffer_info.size = 256;
+                buffer_info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+                buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+                VkBuffer buffer = VK_NULL_HANDLE;
+                if (vkCreateBuffer(device, &buffer_info, NULL, &buffer) != VK_SUCCESS || buffer == VK_NULL_HANDLE) return 35;
+                const uint64_t buffer_handle = (uint64_t)(uintptr_t)buffer;
+
                 VkPrivateDataSlotCreateInfo slot_info;
                 memset(&slot_info, 0, sizeof(slot_info));
                 slot_info.sType = VK_STRUCTURE_TYPE_PRIVATE_DATA_SLOT_CREATE_INFO;
                 VkPrivateDataSlot slot = (VkPrivateDataSlot)(uintptr_t)0xfeedu;
-                if (vkCreatePrivateDataSlot(VK_NULL_HANDLE, &slot_info, NULL, &slot) != VK_SUCCESS || slot == VK_NULL_HANDLE) return 12;
-                if (vkSetPrivateData(VK_NULL_HANDLE, VK_OBJECT_TYPE_BUFFER, 0x1234u, slot, 0xabcdu) != VK_SUCCESS) return 13;
+                if (vkCreatePrivateDataSlot(device, &slot_info, NULL, &slot) != VK_SUCCESS || slot == VK_NULL_HANDLE) return 12;
+                if (vkSetPrivateData(device, VK_OBJECT_TYPE_BUFFER, buffer_handle, slot, 0xabcdu) != VK_SUCCESS) return 13;
                 uint64_t data = 0;
-                vkGetPrivateData(VK_NULL_HANDLE, VK_OBJECT_TYPE_BUFFER, 0x1234u, slot, &data);
+                vkGetPrivateData(device, VK_OBJECT_TYPE_BUFFER, buffer_handle, slot, &data);
                 if (data != 0xabcdu) return 14;
-                if (vkSetPrivateData(VK_NULL_HANDLE, VK_OBJECT_TYPE_BUFFER, 0x1234u, slot, 0xdefu) != VK_SUCCESS) return 15;
-                vkGetPrivateData(VK_NULL_HANDLE, VK_OBJECT_TYPE_BUFFER, 0x1234u, slot, &data);
+                if (vkSetPrivateData(device, VK_OBJECT_TYPE_BUFFER, buffer_handle, slot, 0xdefu) != VK_SUCCESS) return 15;
+                vkGetPrivateData(device, VK_OBJECT_TYPE_BUFFER, buffer_handle, slot, &data);
                 if (data != 0xdefu) return 16;
-                vkGetPrivateData(VK_NULL_HANDLE, VK_OBJECT_TYPE_IMAGE, 0x1234u, slot, &data);
+                vkGetPrivateData(device, VK_OBJECT_TYPE_IMAGE, buffer_handle, slot, &data);
                 if (data != 0) return 17;
-                if (vkSetPrivateData(VK_NULL_HANDLE, VK_OBJECT_TYPE_BUFFER, 0x1234u, slot, 0) != VK_SUCCESS) return 18;
+                if (vkSetPrivateData(device, VK_OBJECT_TYPE_BUFFER, buffer_handle, slot, 0) != VK_SUCCESS) return 18;
                 data = 0x777u;
-                vkGetPrivateData(VK_NULL_HANDLE, VK_OBJECT_TYPE_BUFFER, 0x1234u, slot, &data);
+                vkGetPrivateData(device, VK_OBJECT_TYPE_BUFFER, buffer_handle, slot, &data);
                 if (data != 0) return 19;
 
                 VkPrivateDataSlot invalid_slot = (VkPrivateDataSlot)(uintptr_t)0xfeedu;
                 memset(&slot_info, 0, sizeof(slot_info));
                 slot_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-                if (vkCreatePrivateDataSlot(VK_NULL_HANDLE, &slot_info, NULL, &invalid_slot) != VK_ERROR_INITIALIZATION_FAILED) return 20;
+                if (vkCreatePrivateDataSlot(device, &slot_info, NULL, &invalid_slot) != VK_ERROR_INITIALIZATION_FAILED) return 20;
                 if (invalid_slot != VK_NULL_HANDLE) return 21;
 
                 VkBaseOutStructure unknown;
@@ -3742,24 +3784,27 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 memset(&slot_info, 0, sizeof(slot_info));
                 slot_info.sType = VK_STRUCTURE_TYPE_PRIVATE_DATA_SLOT_CREATE_INFO;
                 slot_info.pNext = &unknown;
-                if (vkCreatePrivateDataSlot(VK_NULL_HANDLE, &slot_info, NULL, &invalid_slot) != VK_ERROR_FEATURE_NOT_PRESENT) return 22;
+                if (vkCreatePrivateDataSlot(device, &slot_info, NULL, &invalid_slot) != VK_ERROR_FEATURE_NOT_PRESENT) return 22;
 
                 memset(&slot_info, 0, sizeof(slot_info));
                 slot_info.sType = VK_STRUCTURE_TYPE_PRIVATE_DATA_SLOT_CREATE_INFO;
                 slot_info.flags = (VkPrivateDataSlotCreateFlags)1u;
-                if (vkCreatePrivateDataSlot(VK_NULL_HANDLE, &slot_info, NULL, &invalid_slot) != VK_ERROR_FEATURE_NOT_PRESENT) return 23;
-                if (vkSetPrivateData(VK_NULL_HANDLE, VK_OBJECT_TYPE_BUFFER, 0x1234u, VK_NULL_HANDLE, 1u) != VK_ERROR_INITIALIZATION_FAILED) return 24;
-                if (vkSetPrivateData(VK_NULL_HANDLE, VK_OBJECT_TYPE_UNKNOWN, 0x1234u, slot, 1u) != VK_ERROR_INITIALIZATION_FAILED) return 25;
+                if (vkCreatePrivateDataSlot(device, &slot_info, NULL, &invalid_slot) != VK_ERROR_FEATURE_NOT_PRESENT) return 23;
+                if (vkSetPrivateData(device, VK_OBJECT_TYPE_BUFFER, buffer_handle, VK_NULL_HANDLE, 1u) != VK_ERROR_INITIALIZATION_FAILED) return 24;
+                if (vkSetPrivateData(device, VK_OBJECT_TYPE_UNKNOWN, buffer_handle, slot, 1u) != VK_ERROR_INITIALIZATION_FAILED) return 25;
 
                 VkPrivateDataSlot bogus_slot = (VkPrivateDataSlot)(uintptr_t)0x1234u;
-                if (vkSetPrivateData(VK_NULL_HANDLE, VK_OBJECT_TYPE_BUFFER, 0x1234u, bogus_slot, 1u) != VK_ERROR_INITIALIZATION_FAILED) return 30;
+                if (vkSetPrivateData(device, VK_OBJECT_TYPE_BUFFER, buffer_handle, bogus_slot, 1u) != VK_ERROR_INITIALIZATION_FAILED) return 30;
                 data = 0x777u;
-                vkGetPrivateData(VK_NULL_HANDLE, VK_OBJECT_TYPE_BUFFER, 0x1234u, bogus_slot, &data);
+                vkGetPrivateData(device, VK_OBJECT_TYPE_BUFFER, buffer_handle, bogus_slot, &data);
                 if (data != 0) return 31;
-                vkDestroyPrivateDataSlot(VK_NULL_HANDLE, bogus_slot, NULL);
+                vkDestroyPrivateDataSlot(device, bogus_slot, NULL);
 
-                vkDestroyPrivateDataSlot(VK_NULL_HANDLE, slot, NULL);
-                vkDestroyPrivateDataSlot(VK_NULL_HANDLE, VK_NULL_HANDLE, NULL);
+                vkDestroyPrivateDataSlot(device, slot, NULL);
+                vkDestroyPrivateDataSlot(device, VK_NULL_HANDLE, NULL);
+                vkDestroyBuffer(device, buffer, NULL);
+                vkDestroyDevice(device, NULL);
+                vkDestroyInstance(instance, NULL);
                 return 0;
             }}
             """

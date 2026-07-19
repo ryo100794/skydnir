@@ -2049,6 +2049,7 @@ static bool device_handle_object_id(VkDevice device, uint64_t *out_object_id) {
     return true;
 }
 
+static uint64_t device_owner_id_or_zero(VkDevice device) __attribute__((unused));
 static uint64_t device_owner_id_or_zero(VkDevice device) {
     uint64_t object_id = 0;
     (void)device_handle_object_id(device, &object_id);
@@ -38228,14 +38229,15 @@ static bool pdocker_vk_object_handle_owned_by_device(
         VkObjectType object_type,
         uint64_t object_handle) {
     if (object_type == VK_OBJECT_TYPE_UNKNOWN || object_handle == 0) return false;
-    if (device == VK_NULL_HANDLE) return true;
+    uint64_t device_owner_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &device_owner_id) || device_owner_id == 0) return false;
     switch (object_type) {
         case VK_OBJECT_TYPE_DEVICE:
             return device_handle_resolve(PDOCKER_VK_OBJECT_HANDLE_AS(VkDevice, object_handle), NULL) &&
                    PDOCKER_VK_OBJECT_HANDLE_AS(VkDevice, object_handle) == device;
         case VK_OBJECT_TYPE_QUEUE: {
             PdockerVkQueue *queue = pdocker_vk_queue_from_handle(PDOCKER_VK_OBJECT_HANDLE_AS(VkQueue, object_handle));
-            return queue_owner_matches_or_unowned(queue, device_owner_id_or_zero(device));
+            return queue_owner_matches_or_unowned(queue, device_owner_id);
         }
         case VK_OBJECT_TYPE_DEVICE_MEMORY:
             return memory_handle_lookup_for_device(device, PDOCKER_VK_OBJECT_HANDLE_AS(VkDeviceMemory, object_handle)) != NULL;
