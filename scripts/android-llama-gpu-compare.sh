@@ -249,6 +249,7 @@ def classification_list(name):
 forward_keys = string_list("compare_forward_env_keys")
 probe_keys = string_list("compare_probe_env_keys")
 app_process_only_env_keys = classification_list("app_process_only")
+process_workflow_only_env_keys = classification_list("process_workflow_only")
 config_fields = manifest.get("config_propagation_env_fields")
 if not isinstance(config_fields, list):
     raise SystemExit(f"invalid config_propagation_env_fields in llama GPU env manifest: {manifest_path}")
@@ -257,7 +258,7 @@ config_keys = [
     for item in config_fields
     if isinstance(item, dict) and isinstance(item.get("env"), str) and item.get("env")
 ]
-manifest_keys = list(dict.fromkeys(forward_keys + config_keys))
+manifest_keys = list(dict.fromkeys(forward_keys + config_keys + process_workflow_only_env_keys))
 host_env = {key: os.environ[key] for key in manifest_keys if key in os.environ}
 record = {
     "schema": "pdocker.llama.gpu.runtime-env-record.v1",
@@ -268,6 +269,7 @@ record = {
         "compare_forward_env_keys": forward_keys,
         "compare_probe_env_keys": probe_keys,
         "app_process_only_env_keys": app_process_only_env_keys,
+        "process_workflow_only_env_keys": process_workflow_only_env_keys,
         "config_propagation_env_keys": config_keys,
     },
     "run_settings": {
@@ -3034,6 +3036,13 @@ manifest_app_process_only_env_keys = (
 )
 if not isinstance(manifest_app_process_only_env_keys, list):
     manifest_app_process_only_env_keys = []
+manifest_process_workflow_only_env_keys = (
+    env_manifest.get("env_bridge_classifications", {}).get("process_workflow_only")
+    if isinstance(env_manifest.get("env_bridge_classifications"), dict)
+    else []
+)
+if not isinstance(manifest_process_workflow_only_env_keys, list):
+    manifest_process_workflow_only_env_keys = []
 manifest_requested_env = runtime_env_record.get("host_requested_env") if isinstance(runtime_env_record, dict) else {}
 if not isinstance(manifest_requested_env, dict):
     manifest_requested_env = {}
@@ -3042,6 +3051,9 @@ runtime_forward_env_keys = [
 ]
 runtime_app_process_only_env_keys = [
     str(key) for key in manifest_app_process_only_env_keys if isinstance(key, str)
+]
+runtime_process_workflow_only_env_keys = [
+    str(key) for key in manifest_process_workflow_only_env_keys if isinstance(key, str)
 ]
 requested_or_planned_env = {str(k): str(v) for k, v in manifest_requested_env.items()}
 requested_or_planned_env.update({str(k): str(v) for k, v in planned_env.items()})
@@ -3066,8 +3078,12 @@ runtime_env_manifest = {
     "compare_forward_env_keys": runtime_forward_env_keys,
     "compare_probe_env_keys": [str(key) for key in manifest_probe_env_keys if isinstance(key, str)],
     "app_process_only_env_keys": runtime_app_process_only_env_keys,
+    "process_workflow_only_env_keys": runtime_process_workflow_only_env_keys,
     "app_process_only_not_host_container_forwarded_keys": sorted(
         key for key in runtime_app_process_only_env_keys if key not in runtime_forward_env_keys
+    ),
+    "process_workflow_only_not_forwarded_keys": sorted(
+        key for key in runtime_process_workflow_only_env_keys if key not in runtime_forward_env_keys
     ),
     "host_requested_env": {str(k): str(v) for k, v in sorted(manifest_requested_env.items())},
     "planned_container_env": {str(k): str(v) for k, v in sorted(planned_env.items())},
