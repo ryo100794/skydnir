@@ -23258,6 +23258,7 @@ class GpuAbiContractTest(unittest.TestCase):
                         "proof_strength": "diagnostic",
                         "dispatches": [
                             {
+                                "dispatch_id": "1",
                                 "match_status": "diagnostic-match",
                                 "matches": {
                                     "core_command_hash_comparable": True,
@@ -23267,6 +23268,22 @@ class GpuAbiContractTest(unittest.TestCase):
                                     "push_hash": True,
                                     "spec_hash": True,
                                     "dispatch_hash": True,
+                                },
+                                "sender": {
+                                    "core_command_hash": "0x1111111111111111",
+                                    "spirv_hash": "0x2222222222222222",
+                                    "descriptor_hash": "0x3333333333333333",
+                                    "push_hash": "0x4444444444444444",
+                                    "specialization_hash": "0x5555555555555555",
+                                    "dispatch_hash": "0x6666666666666666",
+                                },
+                                "received": {
+                                    "core_command_hash": "0x1111111111111111",
+                                    "spirv_hash": "0x2222222222222222",
+                                    "descriptor_hash": "0x3333333333333333",
+                                    "push_hash": "0x4444444444444444",
+                                    "specialization_hash": "0x5555555555555555",
+                                    "dispatch_hash": "0x6666666666666666",
                                 },
                                 "transport": {"msg_trunc": False, "msg_ctrunc": False},
                             }
@@ -23330,6 +23347,7 @@ class GpuAbiContractTest(unittest.TestCase):
                         "proof_strength": "diagnostic",
                         "dispatches": [
                             {
+                                "dispatch_id": "1",
                                 "match_status": "diagnostic-match",
                                 "matches": {
                                     "core_command_hash_comparable": True,
@@ -23339,6 +23357,22 @@ class GpuAbiContractTest(unittest.TestCase):
                                     "push_hash": True,
                                     "spec_hash": True,
                                     "dispatch_hash": True,
+                                },
+                                "sender": {
+                                    "core_command_hash": "0x1111111111111111",
+                                    "spirv_hash": "0x2222222222222222",
+                                    "descriptor_hash": "0x3333333333333333",
+                                    "push_hash": "0x4444444444444444",
+                                    "specialization_hash": "0x5555555555555555",
+                                    "dispatch_hash": "0x6666666666666666",
+                                },
+                                "received": {
+                                    "core_command_hash": "0x1111111111111111",
+                                    "spirv_hash": "0x2222222222222222",
+                                    "descriptor_hash": "0x3333333333333333",
+                                    "push_hash": "0x4444444444444444",
+                                    "specialization_hash": "0x5555555555555555",
+                                    "dispatch_hash": "0x6666666666666666",
                                 },
                                 "transport": {"msg_trunc": False, "msg_ctrunc": False},
                             }
@@ -24110,6 +24144,13 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("reported_effective_spirv_hash = spirv_summary.hash;", source)
         self.assertIn("strict_transport_identity_eligible", verifier)
         self.assertIn("strict-transport-identity-ineligible", verifier)
+        self.assertIn("strict transport match is missing dispatch_id evidence", verifier)
+        self.assertIn("strict transport match is missing transport truncation evidence", verifier)
+        self.assertIn("strict transport match is missing sender/received hash evidence", verifier)
+        self.assertIn("strict transport match is missing sender/received hash values", verifier)
+        self.assertIn("strict transport sender/received hash mismatch", verifier)
+        self.assertIn("transport truncation evidence is not explicitly clear", verifier)
+        self.assertIn("rerun with strict API/executor reconciliation proving SPIR-V", verifier)
 
 
     def test_vulkan_image_view_shape_validation_is_generic_and_fail_closed(self):

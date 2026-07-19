@@ -2065,6 +2065,14 @@ def _api_executor_reconciliation(data: dict[str, Any]) -> dict[str, Any]:
                 return False
             if dispatch.get("match_status") != "diagnostic-match":
                 return False
+            dispatch_id = str(dispatch.get("dispatch_id") or "").strip()
+            if not dispatch_id:
+                add_ambiguous(
+                    f"gpu.diagnostics.api_executor_reconciliation.dispatches[{index}].dispatch_id",
+                    "strict transport match is missing dispatch_id evidence",
+                    dispatch.get("dispatch_id"),
+                )
+                return False
             matches = dispatch.get("matches")
             if not isinstance(matches, dict) or not matches:
                 return False
@@ -2085,15 +2093,63 @@ def _api_executor_reconciliation(data: dict[str, Any]) -> dict[str, Any]:
                     missing_or_false,
                 )
                 return False
+            sender = dispatch.get("sender")
+            received = dispatch.get("received")
+            if not isinstance(sender, dict) or not isinstance(received, dict):
+                add_ambiguous(
+                    f"gpu.diagnostics.api_executor_reconciliation.dispatches[{index}]",
+                    "strict transport match is missing sender/received hash evidence",
+                    {"sender": sender, "received": received},
+                )
+                return False
+            required_hash_fields = (
+                "core_command_hash",
+                "spirv_hash",
+                "descriptor_hash",
+                "push_hash",
+                "specialization_hash",
+                "dispatch_hash",
+            )
+            missing_hash_fields: list[str] = []
+            mismatched_hash_fields: list[str] = []
+            for field in required_hash_fields:
+                sender_hash = _normalized_compact_hash(sender.get(field))
+                received_hash = _normalized_compact_hash(received.get(field))
+                if not sender_hash:
+                    missing_hash_fields.append(f"sender.{field}")
+                if not received_hash:
+                    missing_hash_fields.append(f"received.{field}")
+                if sender_hash and received_hash and sender_hash != received_hash:
+                    mismatched_hash_fields.append(field)
+            if missing_hash_fields:
+                add_ambiguous(
+                    f"gpu.diagnostics.api_executor_reconciliation.dispatches[{index}]",
+                    "strict transport match is missing sender/received hash values",
+                    missing_hash_fields,
+                )
+                return False
+            if mismatched_hash_fields:
+                add_mismatch(
+                    f"gpu.diagnostics.api_executor_reconciliation.dispatches[{index}]",
+                    "strict transport sender/received hash mismatch",
+                    mismatched_hash_fields,
+                )
+                return False
             transport = dispatch.get("transport")
-            if isinstance(transport, dict):
-                if transport.get("msg_trunc") is True or transport.get("msg_ctrunc") is True:
-                    add_mismatch(
-                        f"gpu.diagnostics.api_executor_reconciliation.dispatches[{index}].transport",
-                        "transport was truncated",
-                        transport,
-                    )
-                    return False
+            if not isinstance(transport, dict):
+                add_ambiguous(
+                    f"gpu.diagnostics.api_executor_reconciliation.dispatches[{index}].transport",
+                    "strict transport match is missing transport truncation evidence",
+                    transport,
+                )
+                return False
+            if transport.get("msg_trunc") is not False or transport.get("msg_ctrunc") is not False:
+                add_mismatch(
+                    f"gpu.diagnostics.api_executor_reconciliation.dispatches[{index}].transport",
+                    "transport truncation evidence is not explicitly clear",
+                    transport,
+                )
+                return False
         return True
 
     def compare_hash_pair(path: str, item: dict[str, Any], left_key: str, right_key: str) -> None:
@@ -3049,6 +3105,7 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
     runtime_freshness = _runtime_freshness(data)
     runtime_env_manifest = _runtime_env_manifest_record(data)
     vulkan_passthrough_rewrite_evidence = _vulkan_shader_passthrough_rewrite_evidence(data)
+    api_executor_reconciliation = _api_executor_reconciliation(data)
 
     completion_readiness = _service_completion_timeout(data)
     if completion_readiness.get("completion_failed_after_liveness") is True:
@@ -3113,7 +3170,6 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
                 "q6_workgroup_diagnostics": q6,
                 "runtime_env": nested(data, "gpu", "runtime_env") or {},
             }
-        api_executor_reconciliation = _api_executor_reconciliation(data)
         reconciliation_summary = api_executor_reconciliation.get("summary")
         if reconciliation_summary == "missing":
             return _claim_base(
@@ -3582,6 +3638,15 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
             data.get("next_action")
             or "rerun via scripts/android-llama-gpu-q6-workgroup-run.sh so the manifest q6_required_env_overlay is requested before accepting Q6 correctness or benchmark claims"
         )
+    elif q6.get("latest_status") == "match" and api_executor_reconciliation.get("summary") != "pass":
+        reconciliation_summary = str(api_executor_reconciliation.get("summary") or "missing")
+        classification = f"api-executor-reconciliation-{reconciliation_summary}"
+        responsibility_boundary = "api-executor-reconciliation"
+        q6_blocker_class = classification
+        next_action = (
+            data.get("next_action")
+            or "rerun with strict API/executor reconciliation proving SPIR-V, descriptor, push, specialization, and dispatch identity before accepting Q6 correctness or benchmark claims"
+        )
     elif q6.get("latest_status") == "match":
         classification = "q6-workgroup-cleared-and-oracle-match"
         responsibility_boundary = "q6-oracle-match"
@@ -3788,6 +3853,9 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
                 "q6-probe-writeback-cleared-oracle-missing",
                 "q6-workgroup-shape-blocker",
                 "q6-required-env-overlay-missing",
+                "api-executor-reconciliation-missing",
+                "api-executor-reconciliation-ambiguous",
+                "api-executor-reconciliation-mismatch",
                 "q6-safe-kernel-diagnostic-only",
                 "q6-probe-effective-replay-diagnostic-only",
                 "q6-compat-rewrite-diagnostic-only",
@@ -3806,6 +3874,7 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
         "runtime_env_manifest": runtime_env_manifest,
         "spirv_raw_dump_evidence": diagnostics.get("spirv_raw_dump_evidence") or {},
         "config_propagation": config_propagation,
+        "api_executor_reconciliation": api_executor_reconciliation,
         "api_prompt_sanity": api_prompt_sanity,
         "speedup_fields": speedup_fields,
         "oracle_fail_closed_evidence": [],

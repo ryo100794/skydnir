@@ -491,6 +491,45 @@ def api_executor_reconciliation(
     return result
 
 
+def strict_transport_reconciliation(**extra):
+    sender = {
+        "core_command_hash": "0x1111111111111111",
+        "spirv_hash": "0x2222222222222222",
+        "descriptor_hash": "0x3333333333333333",
+        "push_hash": "0x4444444444444444",
+        "specialization_hash": "0x5555555555555555",
+        "dispatch_hash": "0x6666666666666666",
+    }
+    dispatch = {
+        "dispatch_id": "1",
+        "match_status": "diagnostic-match",
+        "matches": {
+            "core_command_hash_comparable": True,
+            "core_command_hash": True,
+            "spirv_hash": True,
+            "descriptor_hash": True,
+            "push_hash": True,
+            "spec_hash": True,
+            "dispatch_hash": True,
+        },
+        "sender": dict(sender),
+        "received": dict(sender),
+        "transport": {"msg_trunc": False, "msg_ctrunc": False},
+    }
+    dispatch.update(extra.pop("dispatch", {}))
+    result = {
+        "schema": "pdocker.llama.api-executor-reconciliation.v1",
+        "summary": "diagnostic",
+        "proof_strength": "diagnostic",
+        "hash_algorithm": "fnv1a64",
+        "canonical_raw_fields_present": False,
+        "duplicate_dispatch_ids": [],
+        "dispatches": [dispatch],
+    }
+    result.update(extra)
+    return result
+
+
 def generic_spirv_cpu_oracle_event(status="match", spirv_hash="0xac41e8033a67af4a"):
     return {
         "kernel": "generic_spirv",
@@ -873,36 +912,42 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         self.assertIn("unrecognized summary", json.dumps(report["api_executor_reconciliation"]["ambiguous"]))
         self.assert_claims_blocked(report)
 
+    def test_completion_wrong_output_rejects_strict_transport_match_missing_identity_evidence(self):
+        base = strict_transport_reconciliation()
+        missing_dispatch_id = json.loads(json.dumps(base))
+        missing_dispatch_id["dispatches"][0].pop("dispatch_id")
+        dispatch_result = self.run_verifier(wrong_completion_payload(missing_dispatch_id))
+        self.assertEqual(dispatch_result.returncode, 45, dispatch_result.stdout)
+        dispatch_report = json.loads(dispatch_result.stdout)
+        self.assertEqual(dispatch_report["classification"], "api-executor-reconciliation-ambiguous")
+        self.assertIn("missing dispatch_id", json.dumps(dispatch_report["api_executor_reconciliation"]["ambiguous"]))
+
+        missing_transport = json.loads(json.dumps(base))
+        missing_transport["dispatches"][0].pop("transport")
+        transport_result = self.run_verifier(wrong_completion_payload(missing_transport))
+        self.assertEqual(transport_result.returncode, 45, transport_result.stdout)
+        transport_report = json.loads(transport_result.stdout)
+        self.assertEqual(transport_report["classification"], "api-executor-reconciliation-ambiguous")
+        self.assertIn("missing transport truncation evidence", json.dumps(transport_report["api_executor_reconciliation"]["ambiguous"]))
+
+        unclear_transport = json.loads(json.dumps(base))
+        missing_hash = json.loads(json.dumps(base))
+        missing_hash["dispatches"][0]["received"].pop("spirv_hash")
+        hash_result = self.run_verifier(wrong_completion_payload(missing_hash))
+        self.assertEqual(hash_result.returncode, 45, hash_result.stdout)
+        hash_report = json.loads(hash_result.stdout)
+        self.assertEqual(hash_report["classification"], "api-executor-reconciliation-ambiguous")
+        self.assertIn("missing sender/received hash values", json.dumps(hash_report["api_executor_reconciliation"]["ambiguous"]))
+
+        unclear_transport["dispatches"][0]["transport"] = {"msg_trunc": False}
+        unclear_result = self.run_verifier(wrong_completion_payload(unclear_transport))
+        self.assertEqual(unclear_result.returncode, 46, unclear_result.stdout)
+        unclear_report = json.loads(unclear_result.stdout)
+        self.assertEqual(unclear_report["classification"], "api-executor-reconciliation-mismatch")
+        self.assertIn("not explicitly clear", json.dumps(unclear_report["api_executor_reconciliation"]["mismatches"]))
+
     def test_completion_wrong_output_accepts_strict_transport_match_reconciliation(self):
-        payload = wrong_completion_payload(
-            {
-                "schema": "pdocker.llama.api-executor-reconciliation.v1",
-                "summary": "diagnostic",
-                "proof_strength": "diagnostic",
-                "hash_algorithm": "fnv1a64",
-                "canonical_raw_fields_present": False,
-                "duplicate_dispatch_ids": [],
-                "dispatches": [
-                    {
-                        "dispatch_id": "1",
-                        "match_status": "diagnostic-match",
-                        "matches": {
-                            "core_command_hash_comparable": True,
-                            "core_command_hash": True,
-                            "spirv_hash": True,
-                            "descriptor_hash": True,
-                            "push_hash": True,
-                            "spec_hash": True,
-                            "dispatch_hash": True,
-                        },
-                        "transport": {
-                            "msg_trunc": False,
-                            "msg_ctrunc": False,
-                        },
-                    }
-                ],
-            }
-        )
+        payload = wrong_completion_payload(strict_transport_reconciliation())
         result = self.run_verifier(payload)
         self.assertNotEqual(result.returncode, 45, result.stdout)
         report = json.loads(result.stdout)
@@ -1176,6 +1221,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                 "diagnostics": {
                     "runtime_freshness": runtime_marker(),
                     "config_propagation": q6_required_config_propagation(),
+                    "api_executor_reconciliation": api_executor_reconciliation(),
                     "q6_workgroup_diagnostics": {
                         "workgroup_shape_blocker": False,
                         "latest_status": "match",
@@ -1198,6 +1244,34 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         with_cpu = self.run_verifier(payload)
         self.assertEqual(with_cpu.returncode, 0, with_cpu.stdout)
         self.assertTrue(json.loads(with_cpu.stdout)["benchmark_claim_allowed"])
+
+    def test_q6_success_requires_api_executor_reconciliation(self):
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "runtime_env_manifest": q6_required_runtime_env_manifest(),
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": q6_required_config_propagation(),
+                    "q6_workgroup_diagnostics": {
+                        "workgroup_shape_blocker": False,
+                        "latest_status": "match",
+                        **q6_verified_writeback(),
+                    },
+                },
+                "correctness": gpu_correctness_report(),
+            },
+            "cpu": {"tokens_per_second": 0.1},
+            **speedup_sections(),
+        }
+        result = self.run_verifier(payload)
+        self.assertEqual(result.returncode, 44, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "api-executor-reconciliation-missing")
+        self.assertEqual(report["responsibility_boundary"], "api-executor-reconciliation")
+        self.assertEqual(report["q6_effective_blocker_class"], "api-executor-reconciliation-missing")
+        self.assertFalse(report["correctness_claim_allowed"])
+        self.assertFalse(report["benchmark_claim_allowed"])
 
     def test_q6_success_requires_manifest_required_env_overlay(self):
         payload = {
@@ -1328,6 +1402,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                 "diagnostics": {
                     "runtime_freshness": runtime_marker(),
                     "config_propagation": q6_required_config_propagation(),
+                    "api_executor_reconciliation": api_executor_reconciliation(),
                     "generic_spirv_dispatch": {
                         "valid_android_vulkan_events": [
                             generic_spirv_cpu_oracle_event(status="match")

@@ -9,6 +9,25 @@ llama.cpp itself remains unmodified.
 
 ## Current Ground Truth
 
+### 2026-07-19 CPU/static strict-transport reconciliation evidence lane
+
+Diagnostic API-to-executor reconciliation can only promote to verifier `pass`
+when each dispatch carries explicit one-to-one identity evidence. A strict
+transport diagnostic match now requires a non-empty `dispatch_id`, sender and
+received hash values for core command, SPIR-V, descriptors, push constants,
+specialization, and dispatch shape, plus an explicit transport record with both
+`msg_trunc=false` and `msg_ctrunc=false`. Missing identity evidence is
+ambiguous; uncleared truncation evidence is a mismatch.
+
+The normal Q6 success path also requires this API/executor reconciliation to be
+present and passing before it can promote to
+`q6-workgroup-cleared-and-oracle-match`. This prevents a Q6 oracle match from
+claiming correctness or benchmark results without proving the prompt/API work
+mapped to the same executor dispatch identity.
+
+This is CPU/static verifier hardening only. It does not change llama.cpp,
+Dockerfiles, models, prompts, shader bytes, or executor arithmetic.
+
 ### 2026-07-19 CPU/static Q6 required-env overlay lane
 
 The artifact verifier now derives its Q6 required runtime overlay from
