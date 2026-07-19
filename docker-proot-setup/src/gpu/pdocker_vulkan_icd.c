@@ -8108,7 +8108,12 @@ static void trace_vulkan_reconcile_evidence(
         const uint32_t *api_memory_type_indices,
         const uint32_t *api_memory_heap_indices,
         const uint64_t *api_memory_ids,
-        const uint64_t *api_buffer_ids) {
+        const uint64_t *api_buffer_ids,
+        const uint64_t *api_buffer_view_ids,
+        const uint32_t *api_buffer_view_formats,
+        const VkDeviceSize *api_buffer_view_offsets,
+        const VkDeviceSize *api_buffer_view_ranges,
+        const uint64_t *api_buffer_view_generations) {
     if (!reconcile_api_evidence_log_enabled()) return;
     fprintf(stderr,
             "pdocker-vulkan-icd: reconcile api trace: "
@@ -8152,7 +8157,10 @@ static void trace_vulkan_reconcile_evidence(
                 "\"api_dynamic\":%u,\"api_dynamic_offset\":%llu,\"api_memory_offset\":%llu,"
                 "\"api_memory_size\":%zu,\"api_memory_property_flags\":%llu,"
                 "\"api_memory_type_index\":%u,\"api_memory_heap_index\":%u,"
-                "\"api_memory_id\":%llu,\"api_buffer_id\":%llu}",
+                "\"api_memory_id\":%llu,\"api_buffer_id\":%llu,"
+                "\"api_buffer_view_id\":%llu,\"api_buffer_view_format\":%u,"
+                "\"api_buffer_view_offset\":%llu,\"api_buffer_view_range\":%llu,"
+                "\"api_buffer_view_generation\":%llu}",
                 i ? "," : "",
                 api_descriptor_sets[i],
                 bindings[i],
@@ -8172,7 +8180,12 @@ static void trace_vulkan_reconcile_evidence(
                 api_memory_type_indices[i],
                 api_memory_heap_indices[i],
                 (unsigned long long)api_memory_ids[i],
-                (unsigned long long)api_buffer_ids[i]);
+                (unsigned long long)api_buffer_ids[i],
+                (unsigned long long)api_buffer_view_ids[i],
+                api_buffer_view_formats[i],
+                (unsigned long long)api_buffer_view_offsets[i],
+                (unsigned long long)api_buffer_view_ranges[i],
+                (unsigned long long)api_buffer_view_generations[i]);
     }
     fprintf(stderr, "]}\n");
     fflush(stderr);
@@ -16922,6 +16935,11 @@ static int send_generic_vulkan_dispatch_op(
         descriptor_hash = fnv1a64_update_u32(descriptor_hash, api_memory_heap_indices[i]);
         descriptor_hash = fnv1a64_update_u64(descriptor_hash, (uint64_t)api_memory_ids[i]);
         descriptor_hash = fnv1a64_update_u64(descriptor_hash, (uint64_t)api_buffer_ids[i]);
+        descriptor_hash = fnv1a64_update_u64(descriptor_hash, api_buffer_view_ids[i]);
+        descriptor_hash = fnv1a64_update_u32(descriptor_hash, api_buffer_view_formats[i]);
+        descriptor_hash = fnv1a64_update_u64(descriptor_hash, (uint64_t)api_buffer_view_offsets[i]);
+        descriptor_hash = fnv1a64_update_u64(descriptor_hash, (uint64_t)api_buffer_view_ranges[i]);
+        descriptor_hash = fnv1a64_update_u64(descriptor_hash, api_buffer_view_generations[i]);
     }
     if (reconcile_api_evidence_log_enabled()) {
         PDOCKER_VK_APPENDF("append-reconcile-evidence",
@@ -17086,7 +17104,12 @@ static int send_generic_vulkan_dispatch_op(
                                     api_memory_type_indices,
                                     api_memory_heap_indices,
                                     api_memory_ids,
-                                    api_buffer_ids);
+                                    api_buffer_ids,
+                                    api_buffer_view_ids,
+                                    api_buffer_view_formats,
+                                    api_buffer_view_offsets,
+                                    api_buffer_view_ranges,
+                                    api_buffer_view_generations);
 #undef PDOCKER_VK_APPENDF
 #undef PDOCKER_VK_APPEND_FAIL
     const bool lifecycle_log = dispatch_lifecycle_log_enabled();

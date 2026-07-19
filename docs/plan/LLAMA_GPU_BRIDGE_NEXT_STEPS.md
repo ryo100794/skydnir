@@ -9,6 +9,19 @@ llama.cpp itself remains unmodified.
 
 ## Current Ground Truth
 
+### 2026-07-19 CPU/static V5 texel buffer-view identity lane
+
+V5 descriptor reconciliation now includes texel buffer-view identity.  The ICD
+sender hashes and logs `buffer_view_id`, format, offset, range, and generation
+for buffer-view descriptors, and the Android executor hashes the same fields in
+both received descriptor reconciliation and strict graph-cache keys.  This
+prevents texel-buffer descriptors from proving strict transport identity while
+losing the view-level object that determines format interpretation and range.
+
+This is generic Vulkan pass-through hardening. It does not change llama.cpp,
+Dockerfiles, models, prompts, shader bytes, runtime defaults, or executor
+arithmetic.
+
 ### 2026-07-19 CPU/static V5 strict graph identity-complete hash lane
 
 The V5 executor now keeps `memory_property_flags` in native-plan bindings in

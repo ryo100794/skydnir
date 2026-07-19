@@ -8678,6 +8678,11 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("api_memory_property_flags", reconcile)
         self.assertIn("api_memory_type_index", reconcile)
         self.assertIn("api_memory_heap_index", reconcile)
+        self.assertIn("api_buffer_view_id", reconcile)
+        self.assertIn("api_buffer_view_format", reconcile)
+        self.assertIn("api_buffer_view_offset", reconcile)
+        self.assertIn("api_buffer_view_range", reconcile)
+        self.assertIn("api_buffer_view_generation", reconcile)
         identity = c_function_body(executor, "v5_resource_fields_identical_for_same_object_id")
         self.assertIn("a->memory_property_flags == b->memory_property_flags", identity)
         self.assertIn("a->memory_type_index == b->memory_type_index", identity)
@@ -8703,6 +8708,11 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("u64 = bindings[i].api_memory_property_flags;", reconcile_hash)
         self.assertIn("u32 = bindings[i].api_memory_type_index;", reconcile_hash)
         self.assertIn("u32 = bindings[i].api_memory_heap_index;", reconcile_hash)
+        self.assertIn("u64 = bindings[i].api_buffer_view_id;", reconcile_hash)
+        self.assertIn("u32 = bindings[i].api_buffer_view_format;", reconcile_hash)
+        self.assertIn("u64 = bindings[i].api_buffer_view_offset;", reconcile_hash)
+        self.assertIn("u64 = bindings[i].api_buffer_view_range;", reconcile_hash)
+        self.assertIn("u64 = bindings[i].api_buffer_view_generation;", reconcile_hash)
         cache_key = c_function_body(executor, "strict_graph_cache_key")
         self.assertIn("u32 = b->api_array_element; hash = fnv1a64_update(hash, &u32, sizeof(u32));", cache_key)
         self.assertIn("u64 = b->api_buffer_usage; hash = fnv1a64_update(hash, &u64, sizeof(u64));", cache_key)
@@ -8710,6 +8720,11 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("u64 = b->api_memory_property_flags; hash = fnv1a64_update(hash, &u64, sizeof(u64));", cache_key)
         self.assertIn("u32 = b->api_memory_type_index; hash = fnv1a64_update(hash, &u32, sizeof(u32));", cache_key)
         self.assertIn("u32 = b->api_memory_heap_index; hash = fnv1a64_update(hash, &u32, sizeof(u32));", cache_key)
+        self.assertIn("u64 = b->api_buffer_view_id; hash = fnv1a64_update(hash, &u64, sizeof(u64));", cache_key)
+        self.assertIn("u32 = b->api_buffer_view_format; hash = fnv1a64_update(hash, &u32, sizeof(u32));", cache_key)
+        self.assertIn("u64 = b->api_buffer_view_offset; hash = fnv1a64_update(hash, &u64, sizeof(u64));", cache_key)
+        self.assertIn("u64 = b->api_buffer_view_range; hash = fnv1a64_update(hash, &u64, sizeof(u64));", cache_key)
+        self.assertIn("u64 = b->api_buffer_view_generation; hash = fnv1a64_update(hash, &u64, sizeof(u64));", cache_key)
 
     def test_vulkan_v5_descriptor_reconciliation_hash_has_ordered_field_parity(self):
         icd_sender = c_function_body(VULKAN_ICD.read_text(), "send_generic_vulkan_dispatch_op")
@@ -8735,6 +8750,11 @@ class GpuAbiContractTest(unittest.TestCase):
             "descriptor_hash = fnv1a64_update_u32(descriptor_hash, api_memory_heap_indices[i]);",
             "descriptor_hash = fnv1a64_update_u64(descriptor_hash, (uint64_t)api_memory_ids[i]);",
             "descriptor_hash = fnv1a64_update_u64(descriptor_hash, (uint64_t)api_buffer_ids[i]);",
+            "descriptor_hash = fnv1a64_update_u64(descriptor_hash, api_buffer_view_ids[i]);",
+            "descriptor_hash = fnv1a64_update_u32(descriptor_hash, api_buffer_view_formats[i]);",
+            "descriptor_hash = fnv1a64_update_u64(descriptor_hash, (uint64_t)api_buffer_view_offsets[i]);",
+            "descriptor_hash = fnv1a64_update_u64(descriptor_hash, (uint64_t)api_buffer_view_ranges[i]);",
+            "descriptor_hash = fnv1a64_update_u64(descriptor_hash, api_buffer_view_generations[i]);",
         ]
         last = -1
         for snippet in sender_order:
@@ -8762,6 +8782,11 @@ class GpuAbiContractTest(unittest.TestCase):
             "u32 = bindings[i].api_memory_heap_index;",
             "u64 = bindings[i].api_memory_id;",
             "u64 = bindings[i].api_buffer_id;",
+            "u64 = bindings[i].api_buffer_view_id;",
+            "u32 = bindings[i].api_buffer_view_format;",
+            "u64 = bindings[i].api_buffer_view_offset;",
+            "u64 = bindings[i].api_buffer_view_range;",
+            "u64 = bindings[i].api_buffer_view_generation;",
         ]
         last = -1
         for snippet in executor_order:

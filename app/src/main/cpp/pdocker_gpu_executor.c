@@ -7009,6 +7009,11 @@ static uint64_t strict_graph_cache_key(
         u32 = b->api_memory_heap_index; hash = fnv1a64_update(hash, &u32, sizeof(u32));
         u64 = b->api_memory_id; hash = fnv1a64_update(hash, &u64, sizeof(u64));
         u64 = b->api_buffer_id; hash = fnv1a64_update(hash, &u64, sizeof(u64));
+        u64 = b->api_buffer_view_id; hash = fnv1a64_update(hash, &u64, sizeof(u64));
+        u32 = b->api_buffer_view_format; hash = fnv1a64_update(hash, &u32, sizeof(u32));
+        u64 = b->api_buffer_view_offset; hash = fnv1a64_update(hash, &u64, sizeof(u64));
+        u64 = b->api_buffer_view_range; hash = fnv1a64_update(hash, &u64, sizeof(u64));
+        u64 = b->api_buffer_view_generation; hash = fnv1a64_update(hash, &u64, sizeof(u64));
         u32 = binding_read_needed[i]; hash = fnv1a64_update(hash, &u32, sizeof(u32));
         u32 = binding_write_needed[i]; hash = fnv1a64_update(hash, &u32, sizeof(u32));
         size_t cache_memory_bytes = b->api_memory_size;
@@ -7323,6 +7328,16 @@ static uint64_t reconcile_descriptor_hash(
         u64 = bindings[i].api_memory_id;
         hash = fnv1a64_update(hash, &u64, sizeof(u64));
         u64 = bindings[i].api_buffer_id;
+        hash = fnv1a64_update(hash, &u64, sizeof(u64));
+        u64 = bindings[i].api_buffer_view_id;
+        hash = fnv1a64_update(hash, &u64, sizeof(u64));
+        u32 = bindings[i].api_buffer_view_format;
+        hash = fnv1a64_update(hash, &u32, sizeof(u32));
+        u64 = bindings[i].api_buffer_view_offset;
+        hash = fnv1a64_update(hash, &u64, sizeof(u64));
+        u64 = bindings[i].api_buffer_view_range;
+        hash = fnv1a64_update(hash, &u64, sizeof(u64));
+        u64 = bindings[i].api_buffer_view_generation;
         hash = fnv1a64_update(hash, &u64, sizeof(u64));
     }
     return hash;
