@@ -2860,13 +2860,30 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             }} DummyPnext;
 
             int main(void) {{
-                if (vkBindBufferMemory2(VK_NULL_HANDLE, 0, NULL) != VK_SUCCESS) {{
-                    fprintf(stderr, "zero-count buffer bind should accept null array\\n");
+                VkDeviceCreateInfo device_info;
+                memset(&device_info, 0, sizeof(device_info));
+                device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                VkDevice device = VK_NULL_HANDLE;
+                if (vkCreateDevice((VkPhysicalDevice)&g_device, &device_info, NULL, &device) != VK_SUCCESS ||
+                    device == VK_NULL_HANDLE) {{
+                    fprintf(stderr, "bind memory2 test device create failed\\n");
+                    return 1;
+                }}
+                if (vkBindBufferMemory2(VK_NULL_HANDLE, 0, NULL) != VK_ERROR_INITIALIZATION_FAILED) {{
+                    fprintf(stderr, "zero-count buffer bind accepted null device\\n");
                     return 2;
                 }}
-                if (vkBindImageMemory2(VK_NULL_HANDLE, 0, NULL) != VK_SUCCESS) {{
-                    fprintf(stderr, "zero-count image bind should accept null array\\n");
+                if (vkBindImageMemory2(VK_NULL_HANDLE, 0, NULL) != VK_ERROR_INITIALIZATION_FAILED) {{
+                    fprintf(stderr, "zero-count image bind accepted null device\\n");
                     return 3;
+                }}
+                if (vkBindBufferMemory2(device, 0, NULL) != VK_SUCCESS) {{
+                    fprintf(stderr, "zero-count buffer bind rejected live device null array\\n");
+                    return 8;
+                }}
+                if (vkBindImageMemory2(device, 0, NULL) != VK_SUCCESS) {{
+                    fprintf(stderr, "zero-count image bind rejected live device null array\\n");
+                    return 9;
                 }}
                 if (vkBindBufferMemory2(VK_NULL_HANDLE, 1, NULL) != VK_ERROR_INITIALIZATION_FAILED) {{
                     fprintf(stderr, "buffer bind did not reject missing array\\n");
@@ -2885,7 +2902,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 memset(&buffer_info, 0, sizeof(buffer_info));
                 buffer_info.sType = VK_STRUCTURE_TYPE_BIND_BUFFER_MEMORY_INFO;
                 buffer_info.pNext = &unsupported;
-                if (vkBindBufferMemory2(VK_NULL_HANDLE, 1, &buffer_info) != VK_ERROR_FEATURE_NOT_PRESENT) {{
+                if (vkBindBufferMemory2(device, 1, &buffer_info) != VK_ERROR_FEATURE_NOT_PRESENT) {{
                     fprintf(stderr, "buffer bind did not fail closed on unsupported pNext\\n");
                     return 6;
                 }}
@@ -2894,10 +2911,11 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 memset(&image_info, 0, sizeof(image_info));
                 image_info.sType = VK_STRUCTURE_TYPE_BIND_IMAGE_MEMORY_INFO;
                 image_info.pNext = &unsupported;
-                if (vkBindImageMemory2(VK_NULL_HANDLE, 1, &image_info) != VK_ERROR_FEATURE_NOT_PRESENT) {{
+                if (vkBindImageMemory2(device, 1, &image_info) != VK_ERROR_FEATURE_NOT_PRESENT) {{
                     fprintf(stderr, "image bind did not fail closed on unsupported pNext\\n");
                     return 7;
                 }}
+                vkDestroyDevice(device, NULL);
                 return 0;
             }}
             """

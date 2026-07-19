@@ -10515,8 +10515,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("PdockerVkQueue *submit_queue = pdocker_vk_queue_from_handle(queue);", queue_wait_idle)
         self.assertIn("if (!submit_queue) return VK_ERROR_INITIALIZATION_FAILED;", queue_wait_idle)
         self.assertNotIn("(void)queue;", queue_wait_idle)
-        self.assertIn("PdockerVkDevice *dev = pdocker_vk_device_from_handle(device);", device_wait_idle)
-        self.assertIn("if (!dev) return VK_ERROR_INITIALIZATION_FAILED;", device_wait_idle)
+        self.assertIn("device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0", device_wait_idle)
+        self.assertIn("return VK_ERROR_INITIALIZATION_FAILED;", device_wait_idle)
         self.assertNotIn("(void)device;", device_wait_idle)
 
     def test_vulkan_wait_apis_honor_timeout_contract(self):
@@ -10855,11 +10855,17 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("*pPeerMemoryFeatures = 0;", peer_body)
         self.assertIn("deviceMask != 1u", mask_body)
         self.assertIn("op->base_group_x = baseGroupX;", icd)
+        self.assertIn("zero_vk_out_struct_preserve_chain(pDeviceGroupPresentCapabilities", caps_body)
+        self.assertIn("device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0", caps_body)
         self.assertIn("presentMask[0] = 1u", caps_body)
         self.assertIn("VK_DEVICE_GROUP_PRESENT_MODE_LOCAL_BIT_KHR", caps_body)
+        self.assertIn("*pModes = 0;", surface_modes_body)
+        self.assertIn("device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0", surface_modes_body)
         self.assertIn("VK_DEVICE_GROUP_PRESENT_MODE_LOCAL_BIT_KHR", surface_modes_body)
         self.assertIn("VK_ERROR_SURFACE_LOST_KHR", surface_modes_body)
         self.assertIn("VK_INCOMPLETE", rects_body)
+        acquire_body = c_function_body(icd, "vkAcquireNextImageKHR")
+        self.assertIn("*pImageIndex = UINT32_MAX;", acquire_body)
         self.assertIn("headless_surface->default_extent", rects_body)
 
     def test_vulkan_create_renderpass2_extension_is_advertised_and_aliases_are_public(self):
@@ -11317,6 +11323,7 @@ class GpuAbiContractTest(unittest.TestCase):
         image_body = c_function_body(icd, "vkBindImageMemory2")
         for body, api in [(buffer_body, "vkBindBufferMemory2"), (image_body, "vkBindImageMemory2")]:
             self.assertIn("if (bindInfoCount > 0 && !pBindInfos) return VK_ERROR_INITIALIZATION_FAILED;", body)
+            self.assertIn("device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0", body)
             self.assertIn(f'validate_bind_memory_info_pnext("{api}", pBindInfos[i].pNext)', body)
             self.assertIn("if (pnext_rc != VK_SUCCESS) return pnext_rc;", body)
 
@@ -11430,6 +11437,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("destroy_descriptor_pool_object(descriptor_pool_unregister_object(pool))", destroy_body)
         self.assertIn("descriptor_pool_reset_sets(pool);", reset_body)
         self.assertNotIn("(void)descriptorPool;", reset_body)
+        self.assertIn("device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0", free_body)
         self.assertIn("descriptor_pool_handle_lookup_for_device(device, descriptorPool)", free_body)
         self.assertIn("VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT", free_body)
         self.assertIn("set->pool && set->pool != pool", free_body)
@@ -16031,8 +16039,12 @@ class GpuAbiContractTest(unittest.TestCase):
         reset_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkResetFences", 1)[1].split(
             "VKAPI_ATTR VkResult VKAPI_CALL vkGetFenceStatus", 1
         )[0]
+        self.assertIn("device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0", reset_body)
         self.assertIn("validate_fence_handles(device, fenceCount, pFences)", reset_body)
         self.assertIn("if (fence) fence->signaled = false;", reset_body)
+        self.assertIn("device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0", wait_body)
+        semaphore_wait_body = c_function_body(icd, "vkWaitSemaphores")
+        self.assertIn("device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0", semaphore_wait_body)
 
     def test_vulkan_icd_supports_query_pool_and_timestamp_api(self):
         icd = VULKAN_ICD.read_text()

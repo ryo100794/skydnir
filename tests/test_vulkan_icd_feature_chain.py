@@ -920,6 +920,9 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 device_info.enabledExtensionCount = 1;
                 device_info.ppEnabledExtensionNames = enabled;
                 if (validate_device_extensions(&device_info) != VK_SUCCESS) return 5;
+                VkDevice device = VK_NULL_HANDLE;
+                if (vkCreateDevice((VkPhysicalDevice)&g_device, &device_info, NULL, &device) != VK_SUCCESS ||
+                    device == VK_NULL_HANDLE) return 13;
 
                 if (proc_address("vkGetDeviceGroupPeerMemoryFeaturesKHR") !=
                     (PFN_vkVoidFunction)vkGetDeviceGroupPeerMemoryFeatures) return 6;
@@ -945,9 +948,14 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 VkDeviceGroupPresentCapabilitiesKHR present_caps;
                 memset(&present_caps, 0, sizeof(present_caps));
                 present_caps.sType = VK_STRUCTURE_TYPE_DEVICE_GROUP_PRESENT_CAPABILITIES_KHR;
-                if (vkGetDeviceGroupPresentCapabilitiesKHR(VK_NULL_HANDLE, &present_caps) != VK_SUCCESS) return 13;
-                if (present_caps.presentMask[0] != 1u) return 14;
-                if (present_caps.modes != VK_DEVICE_GROUP_PRESENT_MODE_LOCAL_BIT_KHR) return 15;
+                present_caps.presentMask[0] = 99u;
+                present_caps.modes = 99u;
+                if (vkGetDeviceGroupPresentCapabilitiesKHR(VK_NULL_HANDLE, &present_caps) != VK_ERROR_INITIALIZATION_FAILED) return 14;
+                if (present_caps.presentMask[0] != 0u || present_caps.modes != 0u) return 15;
+                present_caps.sType = VK_STRUCTURE_TYPE_DEVICE_GROUP_PRESENT_CAPABILITIES_KHR;
+                if (vkGetDeviceGroupPresentCapabilitiesKHR(device, &present_caps) != VK_SUCCESS) return 16;
+                if (present_caps.presentMask[0] != 1u) return 17;
+                if (present_caps.modes != VK_DEVICE_GROUP_PRESENT_MODE_LOCAL_BIT_KHR) return 18;
 
                 VkHeadlessSurfaceCreateInfoEXT surface_info;
                 memset(&surface_info, 0, sizeof(surface_info));
@@ -956,9 +964,11 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 if (vkCreateHeadlessSurfaceEXT(VK_NULL_HANDLE, &surface_info, NULL, &surface) != VK_SUCCESS) return 16;
                 if (surface == VK_NULL_HANDLE) return 17;
 
-                VkDeviceGroupPresentModeFlagsKHR surface_modes = 0;
-                if (vkGetDeviceGroupSurfacePresentModesKHR(VK_NULL_HANDLE, surface, &surface_modes) != VK_SUCCESS) return 18;
-                if (surface_modes != VK_DEVICE_GROUP_PRESENT_MODE_LOCAL_BIT_KHR) return 19;
+                VkDeviceGroupPresentModeFlagsKHR surface_modes = 99u;
+                if (vkGetDeviceGroupSurfacePresentModesKHR(VK_NULL_HANDLE, surface, &surface_modes) != VK_ERROR_INITIALIZATION_FAILED) return 19;
+                if (surface_modes != 0u) return 20;
+                if (vkGetDeviceGroupSurfacePresentModesKHR(device, surface, &surface_modes) != VK_SUCCESS) return 21;
+                if (surface_modes != VK_DEVICE_GROUP_PRESENT_MODE_LOCAL_BIT_KHR) return 22;
 
                 uint32_t rect_count = 0;
                 if (vkGetPhysicalDevicePresentRectanglesKHR(VK_NULL_HANDLE, surface, &rect_count, NULL) != VK_SUCCESS) return 20;
@@ -975,12 +985,13 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 if (rect_count != 0u) return 27;
 
                 surface_modes = 99u;
-                if (vkGetDeviceGroupSurfacePresentModesKHR(VK_NULL_HANDLE, VK_NULL_HANDLE, &surface_modes) != VK_ERROR_SURFACE_LOST_KHR) return 28;
+                if (vkGetDeviceGroupSurfacePresentModesKHR(device, VK_NULL_HANDLE, &surface_modes) != VK_ERROR_SURFACE_LOST_KHR) return 28;
                 if (surface_modes != 0u) return 29;
                 rect_count = 99u;
                 if (vkGetPhysicalDevicePresentRectanglesKHR(VK_NULL_HANDLE, VK_NULL_HANDLE, &rect_count, NULL) != VK_ERROR_SURFACE_LOST_KHR) return 30;
                 if (rect_count != 0u) return 31;
                 vkDestroySurfaceKHR(VK_NULL_HANDLE, surface, NULL);
+                vkDestroyDevice(device, NULL);
             #endif
                 return 0;
             }}
@@ -1320,7 +1331,9 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 if (image_count != 0) return 21;
                 VkSemaphore sem_after_destroy = make_binary_semaphore(device);
                 if (!sem_after_destroy) return 22;
+                image_index = 123u;
                 if (vkAcquireNextImageKHR(device, swapchain, 0, sem_after_destroy, VK_NULL_HANDLE, &image_index) != VK_ERROR_INITIALIZATION_FAILED) return 23;
+                if (image_index != UINT32_MAX) return 31;
                 vkDestroySemaphore(device, sem_after_destroy, NULL);
                 present.pWaitSemaphores = NULL;
                 present.waitSemaphoreCount = 0;
@@ -1329,7 +1342,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 vkDestroySurfaceKHR(VK_NULL_HANDLE, surface, NULL);
                 if (surface_handle_lookup_for_instance(VK_NULL_HANDLE, surface)) return 25;
                 VkDeviceGroupPresentModeFlagsKHR modes = 123;
-                if (vkGetDeviceGroupSurfacePresentModesKHR(VK_NULL_HANDLE, surface, &modes) != VK_ERROR_SURFACE_LOST_KHR) return 26;
+                if (vkGetDeviceGroupSurfacePresentModesKHR(device, surface, &modes) != VK_ERROR_SURFACE_LOST_KHR) return 26;
                 if (modes != 0) return 27;
                 if (make_registered_swapchain(surface_handle_lookup_for_instance(VK_NULL_HANDLE, surface), queue_obj->device_object_id) != VK_NULL_HANDLE) return 28;
                 vkDestroyDevice(device, NULL);
@@ -1632,6 +1645,17 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 VkQueue queue = VK_NULL_HANDLE;
                 vkGetDeviceQueue(device, 0, 0, &queue);
                 if (queue == VK_NULL_HANDLE) return 33;
+                if (vkDeviceWaitIdle(VK_NULL_HANDLE) != VK_ERROR_INITIALIZATION_FAILED) return 52;
+                if (vkDeviceWaitIdle(device) != VK_SUCCESS) return 53;
+                if (vkResetFences(VK_NULL_HANDLE, 0, NULL) != VK_ERROR_INITIALIZATION_FAILED) return 54;
+                if (vkWaitForFences(VK_NULL_HANDLE, 0, NULL, VK_TRUE, 0) != VK_ERROR_INITIALIZATION_FAILED) return 55;
+                if (vkResetFences(device, 0, NULL) != VK_SUCCESS) return 56;
+                if (vkWaitForFences(device, 0, NULL, VK_TRUE, 0) != VK_SUCCESS) return 57;
+                VkSemaphoreWaitInfo zero_wait_info;
+                memset(&zero_wait_info, 0, sizeof(zero_wait_info));
+                zero_wait_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
+                if (vkWaitSemaphores(VK_NULL_HANDLE, &zero_wait_info, 0) != VK_ERROR_INITIALIZATION_FAILED) return 58;
+                if (vkWaitSemaphores(device, &zero_wait_info, 0) != VK_SUCCESS) return 59;
 
                 VkFenceCreateInfo fence_info;
                 memset(&fence_info, 0, sizeof(fence_info));
@@ -2321,6 +2345,14 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     g_test_device == VK_NULL_HANDLE) {{
                     fprintf(stderr, "descriptor lifecycle test device create failed\\n");
                     return 19;
+                }}
+                if (vkFreeDescriptorSets(VK_NULL_HANDLE, VK_NULL_HANDLE, 0, NULL) != VK_ERROR_INITIALIZATION_FAILED) {{
+                    fprintf(stderr, "free descriptor sets accepted null device zero-count\\n");
+                    return 20;
+                }}
+                if (vkFreeDescriptorSets(g_test_device, VK_NULL_HANDLE, 0, NULL) != VK_SUCCESS) {{
+                    fprintf(stderr, "free descriptor sets rejected valid device zero-count\\n");
+                    return 21;
                 }}
 
                 VkDescriptorSetLayout layout = VK_NULL_HANDLE;
@@ -10059,6 +10091,35 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
+
+    def test_bind_memory2_zero_count_requires_live_device(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            int main(void) {{
+            #if defined(VK_VERSION_1_1) || defined(VK_KHR_BIND_MEMORY_2_EXTENSION_NAME)
+                if (vkBindBufferMemory2(VK_NULL_HANDLE, 0, NULL) != VK_ERROR_INITIALIZATION_FAILED) return 1;
+                if (vkBindImageMemory2(VK_NULL_HANDLE, 0, NULL) != VK_ERROR_INITIALIZATION_FAILED) return 2;
+                VkDeviceCreateInfo device_info;
+                memset(&device_info, 0, sizeof(device_info));
+                device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                VkDevice device = VK_NULL_HANDLE;
+                if (vkCreateDevice((VkPhysicalDevice)&g_device, &device_info, NULL, &device) != VK_SUCCESS ||
+                    device == VK_NULL_HANDLE) return 3;
+                if (vkBindBufferMemory2(device, 0, NULL) != VK_SUCCESS) return 4;
+                if (vkBindImageMemory2(device, 0, NULL) != VK_SUCCESS) return 5;
+                vkDestroyDevice(device, NULL);
+            #endif
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_device_procaddr_requires_enabled_device_extension_for_selected_extension_commands(self):
         source = textwrap.dedent(

@@ -24115,6 +24115,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkBindImageMemory2(
         uint32_t bindInfoCount,
         const VkBindImageMemoryInfo *pBindInfos) {
     if (bindInfoCount > 0 && !pBindInfos) return VK_ERROR_INITIALIZATION_FAILED;
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
     for (uint32_t i = 0; i < bindInfoCount; ++i) {
         VkResult pnext_rc = validate_bind_memory_info_pnext("vkBindImageMemory2", pBindInfos[i].pNext);
         if (pnext_rc != VK_SUCCESS) return pnext_rc;
@@ -24910,6 +24914,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkBindBufferMemory2(
         uint32_t bindInfoCount,
         const VkBindBufferMemoryInfo *pBindInfos) {
     if (bindInfoCount > 0 && !pBindInfos) return VK_ERROR_INITIALIZATION_FAILED;
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
     for (uint32_t i = 0; i < bindInfoCount; ++i) {
         VkResult pnext_rc = validate_bind_memory_info_pnext("vkBindBufferMemory2", pBindInfos[i].pNext);
         if (pnext_rc != VK_SUCCESS) return pnext_rc;
@@ -26480,6 +26488,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkFreeDescriptorSets(
         VkDescriptorPool descriptorPool,
         uint32_t descriptorSetCount,
         const VkDescriptorSet *pDescriptorSets) {
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
     PdockerVkDescriptorPool *pool = descriptor_pool_handle_lookup_for_device(device, descriptorPool);
     if (!pool && descriptorSetCount > 0) return VK_ERROR_INITIALIZATION_FAILED;
     if (descriptorSetCount > 0 && !pDescriptorSets) return VK_ERROR_INITIALIZATION_FAILED;
@@ -29287,12 +29299,15 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfacePresentModesKHR(
 VKAPI_ATTR VkResult VKAPI_CALL vkGetDeviceGroupPresentCapabilitiesKHR(
         VkDevice device,
         VkDeviceGroupPresentCapabilitiesKHR *pDeviceGroupPresentCapabilities) {
-    (void)device;
     if (!pDeviceGroupPresentCapabilities) return VK_ERROR_INITIALIZATION_FAILED;
     PdockerVkStructHeader header = read_vk_struct_header(pDeviceGroupPresentCapabilities);
     zero_vk_out_struct_preserve_chain(pDeviceGroupPresentCapabilities,
                                       sizeof(*pDeviceGroupPresentCapabilities),
                                       header);
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
     pDeviceGroupPresentCapabilities->presentMask[0] = 1u;
     pDeviceGroupPresentCapabilities->modes = VK_DEVICE_GROUP_PRESENT_MODE_LOCAL_BIT_KHR;
     return VK_SUCCESS;
@@ -29303,8 +29318,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetDeviceGroupSurfacePresentModesKHR(
         VkSurfaceKHR surface,
         VkDeviceGroupPresentModeFlagsKHR *pModes) {
     if (!pModes) return VK_ERROR_INITIALIZATION_FAILED;
+    *pModes = 0;
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
     if (!pdocker_vk_headless_surface_valid(surface_handle_lookup_for_device(device, surface))) {
-        *pModes = 0;
         return VK_ERROR_SURFACE_LOST_KHR;
     }
     *pModes = VK_DEVICE_GROUP_PRESENT_MODE_LOCAL_BIT_KHR;
@@ -29737,8 +29756,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAcquireNextImageKHR(
         VkFence fence,
         uint32_t *pImageIndex) {
     (void)timeout;
-    PdockerVkSwapchain *sc = swapchain_handle_lookup_for_device(device, swapchain);
     if (!pImageIndex) return VK_ERROR_INITIALIZATION_FAILED;
+    *pImageIndex = UINT32_MAX;
+    PdockerVkSwapchain *sc = swapchain_handle_lookup_for_device(device, swapchain);
     if (!sc) {
         trace_icd_runtime_failure("acquire-next-image-swapchain-untracked", VK_ERROR_INITIALIZATION_FAILED);
         return VK_ERROR_INITIALIZATION_FAILED;
@@ -36577,9 +36597,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueWaitIdle(VkQueue queue) {
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkDeviceWaitIdle(VkDevice device) {
-    PdockerVkDevice *dev = pdocker_vk_device_from_handle(device);
-    if (!dev) return VK_ERROR_INITIALIZATION_FAILED;
-    (void)dev;
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
     return VK_SUCCESS;
 }
 
@@ -37846,6 +37867,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkResetFences(
         VkDevice device,
         uint32_t fenceCount,
         const VkFence *pFences) {
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
     VkResult validate_rc = validate_fence_handles(device, fenceCount, pFences);
     if (validate_rc != VK_SUCCESS) return validate_rc;
     if (bridge_available()) {
@@ -37882,6 +37907,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkWaitForFences(
         const VkFence *pFences,
         VkBool32 waitAll,
         uint64_t timeout) {
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
     VkResult validate_rc = validate_fence_handles(device, fenceCount, pFences);
     if (validate_rc != VK_SUCCESS) return validate_rc;
     if (fences_wait_satisfied(device, fenceCount, pFences, waitAll)) return VK_SUCCESS;
@@ -38026,6 +38055,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkWaitSemaphores(
         const VkSemaphoreWaitInfo *pWaitInfo,
         uint64_t timeout) {
     if (!pWaitInfo) return VK_ERROR_INITIALIZATION_FAILED;
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
     if (pWaitInfo->pNext) {
         trace_icd_runtime_failure("semaphore-wait-pnext-unsupported",
                                   VK_ERROR_FEATURE_NOT_PRESENT);
