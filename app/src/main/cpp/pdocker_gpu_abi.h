@@ -137,7 +137,7 @@
 #define PDOCKER_GPU_VULKAN_DISPATCH_V5_IMAGE_SCHEMA_HASH 0x41f750ec2c5cfc82ull
 #define PDOCKER_GPU_VULKAN_DISPATCH_V5_IMAGE_VIEW_SCHEMA_HASH 0xfef2d65210c4a660ull
 #define PDOCKER_GPU_VULKAN_DISPATCH_V5_SAMPLER_SCHEMA_HASH 0xe9f589b671d21a2cull
-#define PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_OBJECT_SCHEMA_HASH 0xc7d2cec7923555f7ull
+#define PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_OBJECT_SCHEMA_HASH 0x8326a37ce2e06d03ull
 #define PDOCKER_GPU_VULKAN_DISPATCH_V52_IMAGE_LAYOUT_RANGE_SCHEMA_HASH 0xa61770e90fd06da7ull
 #define PDOCKER_GPU_VULKAN_DISPATCH_V53_BUFFER_VIEW_SCHEMA_HASH 0xfa9323b0e3f0fb42ull
 #define PDOCKER_GPU_VULKAN_DISPATCH_V54_MEMORY_BARRIER_SCHEMA_HASH 0x7b14b7d3d9d0ef31ull
@@ -569,12 +569,13 @@
     X(sampler_index, u32) \
     X(image_layout, u32) \
     X(resource_id, u64) \
+    X(sampler_resource_id, u64) \
     X(buffer_offset, u64) \
     X(range, u64) \
     X(transfer_offset, u64) \
     X(transfer_size, u64) \
     X(dynamic_offset, u64)
-#define PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_OBJECT_FIELD_COUNT 16u
+#define PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_OBJECT_FIELD_COUNT 17u
 
 
 typedef struct PdockerGpuVulkanDispatchV5FrameHeader {
@@ -976,6 +977,7 @@ typedef struct PdockerGpuVulkanDispatchV5DescriptorObjectEntry {
     uint32_t sampler_index;
     uint32_t image_layout;
     uint64_t resource_id;
+    uint64_t sampler_resource_id;
     uint64_t buffer_offset;
     uint64_t range;
     uint64_t transfer_offset;

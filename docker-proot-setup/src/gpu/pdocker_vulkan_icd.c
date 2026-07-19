@@ -10165,6 +10165,10 @@ static int collect_graphics_descriptor_entries(
                         view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE
                             ? binding->image_view_snapshot.object_id
                             : binding->sampler_snapshot.object_id;
+                    descriptor->sampler_resource_id =
+                        sampler_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE
+                            ? binding->sampler_snapshot.object_id
+                            : 0;
                     continue;
                 }
                 if (!descriptor_type_supported_by_v4_transport(binding->descriptor_type)) {
@@ -15230,6 +15234,10 @@ static int send_generic_vulkan_dispatch_v5_1_op(
             image_descriptor_view_indices[i] != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE
                 ? pdocker_vk_image_view_object_id(image_view_objects[image_descriptor_view_indices[i]])
                 : pdocker_vk_sampler_object_id(sampler_objects[image_descriptor_sampler_indices[i]]);
+        descriptors[descriptor_index].sampler_resource_id =
+            image_descriptor_sampler_indices[i] != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE
+                ? pdocker_vk_sampler_object_id(sampler_objects[image_descriptor_sampler_indices[i]])
+                : 0;
     }
     for (uint32_t i = 0; i < specialization_entry_count; ++i) {
         specs[i].constant_id = specialization_entries[i].constantID;

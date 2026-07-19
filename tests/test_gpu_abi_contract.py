@@ -73,6 +73,7 @@ VULKAN_ABI_ID_FIELD_CLASSIFICATIONS = {
     "PdockerGpuVulkanDispatchV5ImageViewEntry.view_id": "object_identity_guarded",
     "PdockerGpuVulkanDispatchV5SamplerEntry.sampler_id": "object_identity_guarded",
     "PdockerGpuVulkanDispatchV5DescriptorObjectEntry.resource_id": "object_reference_checked",
+    "PdockerGpuVulkanDispatchV5DescriptorObjectEntry.sampler_resource_id": "object_reference_checked",
     "PdockerGpuVulkanDispatchV5SpecializationEntry.constant_id": "specialization_constant_identity",
     "PdockerGpuVulkanGraphicsV6FrameHeader.submit_id": "correlation_id",
     "PdockerGpuVulkanGraphicsV6PipelineEntry.pipeline_id": "object_identity_guarded",
@@ -4790,6 +4791,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "vulkan_descriptor_type_requires_image_view(descriptor_type)",
             "vulkan_descriptor_type_requires_sampler(descriptor_type)",
             "descriptor->resource_id != view_entry->view_id",
+            "descriptor->sampler_resource_id != sampler_entry->sampler_id",
             "descriptor->resource_id != sampler_entry->sampler_id",
             "vertex_bindings[i].buffer_resource_index >= header->resource_count",
             "!u64_range_within_size(vertex_bindings[i].offset, vertex_bindings[i].size, buffer->size)",
@@ -7651,6 +7653,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("d->resource_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE", executor)
         self.assertIn("VkDeviceSize descriptor_offset = 0;", executor)
         self.assertIn("vulkan_graphics_replay_buffer_vk_offset_for_range", executor)
+        self.assertIn("d->sampler_resource_id != samplers[d->sampler_index].sampler_id", executor)
         self.assertIn("d->resource_id != samplers[d->sampler_index].sampler_id", executor)
         self.assertIn("VkDescriptorImageInfo *image_infos", executor)
         self.assertIn("writes[write_count].pImageInfo = &image_infos[write_count];", executor)
@@ -8870,6 +8873,45 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("image_descriptors,\n                image_descriptor_count,\n                object_tables", run_body)
         self.assertIn("image_descriptors, image_descriptor_count, object_tables", run_body)
 
+    def test_vulkan_dispatch_v5_combined_image_sampler_carries_pair_identity(self):
+        app = APP_HEADER.read_text()
+        container = CONTAINER_HEADER.read_text()
+        icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
+
+        for header in (app, container):
+            self.assertIn("X(sampler_resource_id, u64)", header)
+            self.assertIn("uint64_t sampler_resource_id;", header)
+            self.assertIn(
+                "#define PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_OBJECT_FIELD_COUNT 17u",
+                header,
+            )
+            self.assertIn(
+                "#define PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_OBJECT_SCHEMA_HASH 0x8326a37ce2e06d03ull",
+                header,
+            )
+
+        self.assertIn("uint64_t sampler_resource_id;", executor)
+        self.assertIn("scratch->sampler_resource_id = 0;", executor)
+        for marker in [
+            "d->sampler_resource_id == 0 ||",
+            "d->sampler_resource_id != plan->samplers[d->sampler_index].sampler_id",
+            "d->sampler_resource_id != samplers[d->sampler_index].sampler_id",
+            "d->sampler_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE ||\n                   d->sampler_resource_id != 0",
+            "imgd->sampler_resource_id = d->sampler_resource_id;",
+            "descriptor->sampler_resource_id != sampler_entry->sampler_id",
+            "} else if (descriptor->sampler_resource_id != 0) {",
+        ]:
+            self.assertIn(marker, executor)
+
+        for marker in [
+            "descriptor->sampler_resource_id =",
+            "descriptors[descriptor_index].sampler_resource_id =",
+            "? binding->sampler_snapshot.object_id",
+            "? pdocker_vk_sampler_object_id(sampler_objects[image_descriptor_sampler_indices[i]])",
+        ]:
+            self.assertIn(marker, icd)
+
     def test_vulkan_compute_v5_preserves_api_buffer_usage_identity(self):
         icd = VULKAN_ICD.read_text()
         executor = GPU_EXECUTOR.read_text()
@@ -9630,7 +9672,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('#define PDOCKER_GPU_VULKAN_DISPATCH_V5_IMAGE_FIELD_COUNT 20u', app)
         self.assertIn('#define PDOCKER_GPU_VULKAN_DISPATCH_V5_IMAGE_VIEW_FIELD_COUNT 15u', app)
         self.assertIn('#define PDOCKER_GPU_VULKAN_DISPATCH_V5_SAMPLER_FIELD_COUNT 19u', app)
-        self.assertIn('#define PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_OBJECT_FIELD_COUNT 16u', app)
+        self.assertIn('#define PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_OBJECT_FIELD_COUNT 17u', app)
         self.assertIn('#define PDOCKER_GPU_VULKAN_DISPATCH_V53_HEADER_EXTENSION_FIELD_COUNT 7u', app)
         self.assertIn('#define PDOCKER_GPU_VULKAN_DISPATCH_V53_BUFFER_VIEW_FIELD_COUNT 8u', app)
         for marker in markers:

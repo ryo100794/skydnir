@@ -9,6 +9,28 @@ llama.cpp itself remains unmodified.
 
 ## Current Ground Truth
 
+### 2026-07-19 CPU/static V5 combined image/sampler pair identity lane
+
+V5 descriptor-object transport now carries sampler object identity separately
+from image-view object identity.  `PdockerGpuVulkanDispatchV5DescriptorObjectEntry`
+adds `sampler_resource_id`; combined image sampler descriptors use
+`resource_id` for the image-view object id and `sampler_resource_id` for the
+sampler object id.  Sampler-only descriptors carry the sampler object id in both
+fields for legacy object-reference compatibility, and descriptors that do not
+use a sampler must keep `sampler_resource_id` zero.
+
+The ICD fills this pair identity for both compute V5 image descriptors and V6
+graphics descriptor snapshots.  The Android executor validates the pair before
+materializing native descriptor bindings, before image descriptor materialization,
+and while validating V6 graphics frames.  A descriptor row that swaps a sampler
+while keeping the same image view, or injects a sampler identity into a
+non-sampler descriptor, now fails closed instead of being replayed under a
+partially proven object identity.
+
+This is generic Vulkan pass-through hardening. It does not change llama.cpp,
+Dockerfiles, models, prompts, shader bytes, runtime defaults, or executor
+arithmetic.
+
 ### 2026-07-19 CPU/static strict layout identity fail-close lane
 
 Strict Vulkan replay now rejects any transported image layout that would be

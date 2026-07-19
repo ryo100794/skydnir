@@ -1004,6 +1004,7 @@ typedef struct {
     uint32_t sampler_index;
     VkImageLayout image_layout;
     uint64_t resource_id;
+    uint64_t sampler_resource_id;
 } VulkanDispatchImageDescriptor;
 
 typedef struct {
@@ -5269,9 +5270,10 @@ static int materialize_vulkan_dispatch_images(
             descriptor_type != VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
             return -EPROTO;
         }
-        if (d->image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE) {
-            if (d->image_view_index >= *view_count) return -EPROTO;
-            if (d->resource_id != 0 &&
+        if (vulkan_descriptor_type_requires_image_view(descriptor_type)) {
+            if (d->image_view_index == PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE ||
+                d->image_view_index >= *view_count) return -EPROTO;
+            if (d->resource_id == 0 ||
                 d->resource_id != views[d->image_view_index].view_id) {
                 return -EPROTO;
             }
@@ -5312,15 +5314,25 @@ static int materialize_vulkan_dispatch_images(
             if (d->access_flags & PDOCKER_GPU_V5_ACCESS_WRITE) {
                 images[image_index].writeback_needed = 1;
             }
-        }
-        if (d->sampler_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE &&
-            d->sampler_index >= *sampler_count) {
+        } else if (d->image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE) {
             return -EPROTO;
         }
-        if (d->sampler_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE &&
-            d->resource_id != 0 &&
-            !vulkan_descriptor_type_requires_image_view(descriptor_type) &&
-            d->resource_id != samplers[d->sampler_index].sampler_id) {
+        if (vulkan_descriptor_type_requires_sampler(descriptor_type)) {
+            if (d->sampler_index == PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE ||
+                d->sampler_index >= *sampler_count) {
+                return -EPROTO;
+            }
+            if (d->sampler_resource_id == 0 ||
+                d->sampler_resource_id != samplers[d->sampler_index].sampler_id) {
+                return -EPROTO;
+            }
+            if (!vulkan_descriptor_type_requires_image_view(descriptor_type) &&
+                (d->resource_id == 0 ||
+                 d->resource_id != samplers[d->sampler_index].sampler_id)) {
+                return -EPROTO;
+            }
+        } else if (d->sampler_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE ||
+                   d->sampler_resource_id != 0) {
             return -EPROTO;
         }
     }
@@ -24759,6 +24771,7 @@ static int vulkan_dispatch_v5_plan_descriptor_object_at(
     scratch->sampler_index = PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE;
     scratch->image_layout = 0;
     scratch->resource_id = legacy->resource_id;
+    scratch->sampler_resource_id = 0;
     scratch->buffer_offset = legacy->buffer_offset;
     scratch->range = legacy->range;
     scratch->transfer_offset = legacy->transfer_offset;
@@ -25176,25 +25189,30 @@ static int build_vulkan_dispatch_v5_native_plan(
             if (vulkan_descriptor_type_requires_image_view(image_descriptor_type)) {
                 if (d->image_view_index == PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE ||
                     d->image_view_index >= plan->image_view_count) return -EPROTO;
-                if (d->resource_id != 0 &&
+                if (d->resource_id == 0 ||
                     d->resource_id != plan->image_views[d->image_view_index].view_id) {
                     return -EPROTO;
                 }
-            } else if (d->image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE &&
-                       d->image_view_index >= plan->image_view_count) {
+            } else if (d->image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE) {
                 return -EPROTO;
             }
             if (vulkan_descriptor_type_requires_sampler(image_descriptor_type)) {
                 if (d->sampler_index == PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE ||
                     d->sampler_index >= plan->sampler_count) return -EPROTO;
-                if (!vulkan_descriptor_type_requires_image_view(image_descriptor_type) &&
-                    d->resource_id != 0 &&
-                    d->resource_id != plan->samplers[d->sampler_index].sampler_id) {
+                if (d->sampler_resource_id == 0 ||
+                    d->sampler_resource_id != plan->samplers[d->sampler_index].sampler_id) {
                     return -EPROTO;
                 }
-            } else if (d->sampler_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE &&
-                       d->sampler_index >= plan->sampler_count) {
-                return -EPROTO;
+                if (!vulkan_descriptor_type_requires_image_view(image_descriptor_type) &&
+                    (d->resource_id == 0 ||
+                     d->resource_id != plan->samplers[d->sampler_index].sampler_id)) {
+                    return -EPROTO;
+                }
+            } else {
+                if (d->sampler_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE ||
+                    d->sampler_resource_id != 0) {
+                    return -EPROTO;
+                }
             }
             plan->image_descriptor_count++;
             continue;
@@ -25366,25 +25384,30 @@ static int materialize_vulkan_dispatch_v5_native_plan_bindings(
             if (vulkan_descriptor_type_requires_image_view(image_descriptor_type)) {
                 if (d->image_view_index == PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE ||
                     d->image_view_index >= plan->image_view_count) return -EPROTO;
-                if (d->resource_id != 0 &&
+                if (d->resource_id == 0 ||
                     d->resource_id != plan->image_views[d->image_view_index].view_id) {
                     return -EPROTO;
                 }
-            } else if (d->image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE &&
-                       d->image_view_index >= plan->image_view_count) {
+            } else if (d->image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE) {
                 return -EPROTO;
             }
             if (vulkan_descriptor_type_requires_sampler(image_descriptor_type)) {
                 if (d->sampler_index == PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE ||
                     d->sampler_index >= plan->sampler_count) return -EPROTO;
-                if (!vulkan_descriptor_type_requires_image_view(image_descriptor_type) &&
-                    d->resource_id != 0 &&
-                    d->resource_id != plan->samplers[d->sampler_index].sampler_id) {
+                if (d->sampler_resource_id == 0 ||
+                    d->sampler_resource_id != plan->samplers[d->sampler_index].sampler_id) {
                     return -EPROTO;
                 }
-            } else if (d->sampler_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE &&
-                       d->sampler_index >= plan->sampler_count) {
-                return -EPROTO;
+                if (!vulkan_descriptor_type_requires_image_view(image_descriptor_type) &&
+                    (d->resource_id == 0 ||
+                     d->resource_id != plan->samplers[d->sampler_index].sampler_id)) {
+                    return -EPROTO;
+                }
+            } else {
+                if (d->sampler_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE ||
+                    d->sampler_resource_id != 0) {
+                    return -EPROTO;
+                }
             }
             if (!image_descriptors || image_descriptor_count >= image_descriptor_capacity) {
                 return -E2BIG;
@@ -25402,6 +25425,7 @@ static int materialize_vulkan_dispatch_v5_native_plan_bindings(
             imgd->sampler_index = d->sampler_index;
             imgd->image_layout = (VkImageLayout)d->image_layout;
             imgd->resource_id = d->resource_id;
+            imgd->sampler_resource_id = d->sampler_resource_id;
             continue;
         }
         if (d->resource_index >= plan->resource_count) return -EPROTO;
@@ -29312,15 +29336,25 @@ static int validate_vulkan_graphics_v6_frame_content(
         } else if (descriptor->sampler_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE) {
             return -EPROTO;
         }
-        if (descriptor->resource_id == 0) return -EPROTO;
-        if (descriptor->image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE) {
+        if (vulkan_descriptor_type_requires_image_view(descriptor_type)) {
             const PdockerGpuVulkanDispatchV5ImageViewEntry *view_entry =
                 &image_views[descriptor->image_view_index];
-            if (descriptor->resource_id != view_entry->view_id) return -EPROTO;
-        } else if (descriptor->sampler_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE) {
+            if (descriptor->resource_id == 0 ||
+                descriptor->resource_id != view_entry->view_id) return -EPROTO;
+        } else if (descriptor->resource_id != 0 &&
+                   !vulkan_descriptor_type_requires_sampler(descriptor_type)) {
+            return -EPROTO;
+        }
+        if (vulkan_descriptor_type_requires_sampler(descriptor_type)) {
             const PdockerGpuVulkanDispatchV5SamplerEntry *sampler_entry =
                 &samplers[descriptor->sampler_index];
-            if (descriptor->resource_id != sampler_entry->sampler_id) return -EPROTO;
+            if (descriptor->sampler_resource_id == 0 ||
+                descriptor->sampler_resource_id != sampler_entry->sampler_id) return -EPROTO;
+            if (!vulkan_descriptor_type_requires_image_view(descriptor_type) &&
+                (descriptor->resource_id == 0 ||
+                 descriptor->resource_id != sampler_entry->sampler_id)) return -EPROTO;
+        } else if (descriptor->sampler_resource_id != 0) {
+            return -EPROTO;
         }
     }
 
