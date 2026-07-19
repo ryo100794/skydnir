@@ -28860,26 +28860,33 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateRenderPass(
         const VkAllocationCallbacks *pAllocator,
         VkRenderPass *pRenderPass) {
     (void)pAllocator;
-    if (!pRenderPass) return VK_ERROR_INITIALIZATION_FAILED;
+    if (pRenderPass) *pRenderPass = VK_NULL_HANDLE;
+    if (!pCreateInfo || !pRenderPass ||
+        pCreateInfo->sType != VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
     PdockerVkRenderPass *rp = pdocker_alloc_handle(sizeof(*rp));
     if (!rp) return VK_ERROR_OUT_OF_HOST_MEMORY;
-    rp->attachment_count = pCreateInfo ? pCreateInfo->attachmentCount : 0;
-    rp->subpass_count = pCreateInfo ? pCreateInfo->subpassCount : 0;
+    rp->attachment_count = pCreateInfo->attachmentCount;
+    rp->subpass_count = pCreateInfo->subpassCount;
     const VkRenderPassMultiviewCreateInfo *multiview = NULL;
-    if (pCreateInfo &&
-        (pCreateInfo->flags != 0 ||
-         !render_pass_create_pnext_supported(pCreateInfo, &multiview))) {
+    if (pCreateInfo->flags != 0 ||
+        !render_pass_create_pnext_supported(pCreateInfo, &multiview)) {
         rp->subpass_overflow = true;
     }
     if (rp->attachment_count > PDOCKER_VK_MAX_STORAGE_BUFFERS) {
         rp->attachment_overflow = true;
         rp->attachment_count = PDOCKER_VK_MAX_STORAGE_BUFFERS;
     }
-    if (rp->attachment_count > 0 && (!pCreateInfo || !pCreateInfo->pAttachments)) {
+    if (rp->attachment_count > 0 && !pCreateInfo->pAttachments) {
         rp->attachment_overflow = true;
         rp->attachment_count = 0;
     }
-    for (uint32_t a = 0; pCreateInfo && a < rp->attachment_count; ++a) {
+    for (uint32_t a = 0; a < rp->attachment_count; ++a) {
         const VkAttachmentDescription *src = &pCreateInfo->pAttachments[a];
         rp->attachments[a].format = src->format;
         rp->attachments[a].samples = src->samples;
@@ -28893,13 +28900,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateRenderPass(
             rp->subpass_overflow = true;
         }
     }
-    if (pCreateInfo && pCreateInfo->subpassCount > PDOCKER_VK_MAX_STORAGE_BUFFERS) {
+    if (pCreateInfo->subpassCount > PDOCKER_VK_MAX_STORAGE_BUFFERS) {
         rp->subpass_overflow = true;
     }
-    uint32_t captured_subpasses = pCreateInfo
-        ? clamp_u32(pCreateInfo->subpassCount, PDOCKER_VK_MAX_STORAGE_BUFFERS)
-        : 0;
-    for (uint32_t sp = 0; pCreateInfo && sp < captured_subpasses; ++sp) {
+    uint32_t captured_subpasses =
+        clamp_u32(pCreateInfo->subpassCount, PDOCKER_VK_MAX_STORAGE_BUFFERS);
+    for (uint32_t sp = 0; sp < captured_subpasses; ++sp) {
         const VkSubpassDescription *src = pCreateInfo->pSubpasses
             ? &pCreateInfo->pSubpasses[sp] : NULL;
         const uint32_t view_mask =
@@ -28914,17 +28920,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateRenderPass(
             view_mask);
         if (!src || src->flags != 0) rp->subpasses[sp].unsupported = true;
     }
-    if (pCreateInfo) {
-        capture_render_pass_dependencies(
-            rp, pCreateInfo->dependencyCount, pCreateInfo->pDependencies);
-    }
+    capture_render_pass_dependencies(
+        rp, pCreateInfo->dependencyCount, pCreateInfo->pDependencies);
     rp->object_id = next_vulkan_object_generation();
-    uint64_t owner_device_id = 0;
-    if (!device_owner_id_or_zero_checked(device, &owner_device_id)) {
-        free(rp);
-        return VK_ERROR_INITIALIZATION_FAILED;
-    }
-
     rp->owner_device_id = owner_device_id;
     rp->generation = rp->object_id;
     render_pass_register(rp);
@@ -28938,28 +28936,36 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateRenderPass2(
         const VkAllocationCallbacks *pAllocator,
         VkRenderPass *pRenderPass) {
     (void)pAllocator;
-    if (!pRenderPass) return VK_ERROR_INITIALIZATION_FAILED;
+    if (pRenderPass) *pRenderPass = VK_NULL_HANDLE;
+    if (!pCreateInfo || !pRenderPass ||
+        pCreateInfo->sType != VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO_2) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
     PdockerVkRenderPass *rp = pdocker_alloc_handle(sizeof(*rp));
     if (!rp) return VK_ERROR_OUT_OF_HOST_MEMORY;
-    rp->attachment_count = pCreateInfo ? pCreateInfo->attachmentCount : 0;
-    rp->subpass_count = pCreateInfo ? pCreateInfo->subpassCount : 0;
+    rp->attachment_count = pCreateInfo->attachmentCount;
+    rp->subpass_count = pCreateInfo->subpassCount;
     bool disallow_subpass_merging = false;
-    if (pCreateInfo && (pCreateInfo->flags != 0 ||
-                        !render_pass_create2_pnext_noop(
-                            pCreateInfo,
-                            &disallow_subpass_merging,
-                            device_enabled_extension_mask_from_handle(device)))) {
+    if (pCreateInfo->flags != 0 ||
+        !render_pass_create2_pnext_noop(
+            pCreateInfo,
+            &disallow_subpass_merging,
+            device_enabled_extension_mask_from_handle(device))) {
         rp->subpass_overflow = true;
     }
     if (rp->attachment_count > PDOCKER_VK_MAX_STORAGE_BUFFERS) {
         rp->attachment_overflow = true;
         rp->attachment_count = PDOCKER_VK_MAX_STORAGE_BUFFERS;
     }
-    if (rp->attachment_count > 0 && (!pCreateInfo || !pCreateInfo->pAttachments)) {
+    if (rp->attachment_count > 0 && !pCreateInfo->pAttachments) {
         rp->attachment_overflow = true;
         rp->attachment_count = 0;
     }
-    for (uint32_t a = 0; pCreateInfo && a < rp->attachment_count; ++a) {
+    for (uint32_t a = 0; a < rp->attachment_count; ++a) {
         const VkAttachmentDescription2 *src = &pCreateInfo->pAttachments[a];
         rp->attachments[a].format = src->format;
         rp->attachments[a].samples = src->samples;
@@ -28973,29 +28979,20 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateRenderPass2(
             rp->subpass_overflow = true;
         }
     }
-    if (pCreateInfo && pCreateInfo->subpassCount > PDOCKER_VK_MAX_STORAGE_BUFFERS) {
+    if (pCreateInfo->subpassCount > PDOCKER_VK_MAX_STORAGE_BUFFERS) {
         rp->subpass_overflow = true;
     }
-    uint32_t captured_subpasses = pCreateInfo
-        ? clamp_u32(pCreateInfo->subpassCount, PDOCKER_VK_MAX_STORAGE_BUFFERS)
-        : 0;
-    for (uint32_t sp = 0; pCreateInfo && sp < captured_subpasses; ++sp) {
+    uint32_t captured_subpasses =
+        clamp_u32(pCreateInfo->subpassCount, PDOCKER_VK_MAX_STORAGE_BUFFERS);
+    for (uint32_t sp = 0; sp < captured_subpasses; ++sp) {
         capture_render_pass_subpass_state2(
             rp, sp, pCreateInfo->pSubpasses ? &pCreateInfo->pSubpasses[sp] : NULL,
             disallow_subpass_merging);
     }
-    if (pCreateInfo) {
-        capture_render_pass_dependencies2(
-            rp, pCreateInfo->dependencyCount, pCreateInfo->pDependencies);
-        fill_render_pass_create2_feedback(pCreateInfo, pCreateInfo->subpassCount);
-    }
+    capture_render_pass_dependencies2(
+        rp, pCreateInfo->dependencyCount, pCreateInfo->pDependencies);
+    fill_render_pass_create2_feedback(pCreateInfo, pCreateInfo->subpassCount);
     rp->object_id = next_vulkan_object_generation();
-    uint64_t owner_device_id = 0;
-    if (!device_owner_id_or_zero_checked(device, &owner_device_id)) {
-        free(rp);
-        return VK_ERROR_INITIALIZATION_FAILED;
-    }
-
     rp->owner_device_id = owner_device_id;
     rp->generation = rp->object_id;
     render_pass_register(rp);
@@ -29041,8 +29038,15 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateFramebuffer(
         const VkAllocationCallbacks *pAllocator,
         VkFramebuffer *pFramebuffer) {
     (void)pAllocator;
-    if (!pCreateInfo || !pFramebuffer) return VK_ERROR_INITIALIZATION_FAILED;
-    *pFramebuffer = VK_NULL_HANDLE;
+    if (pFramebuffer) *pFramebuffer = VK_NULL_HANDLE;
+    if (!pCreateInfo || !pFramebuffer ||
+        pCreateInfo->sType != VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
     VkResult pnext_rc = validate_framebuffer_create_pnext(pCreateInfo->pNext);
     if (pnext_rc != VK_SUCCESS) return pnext_rc;
     if (pCreateInfo->flags != 0) {
@@ -29055,12 +29059,6 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateFramebuffer(
     }
     PdockerVkFramebuffer *fb = pdocker_alloc_handle(sizeof(*fb));
     if (!fb) return VK_ERROR_OUT_OF_HOST_MEMORY;
-    uint64_t owner_device_id = 0;
-    if (!device_owner_id_or_zero_checked(device, &owner_device_id)) {
-        free(fb);
-        return VK_ERROR_INITIALIZATION_FAILED;
-    }
-
     fb->owner_device_id = owner_device_id;
     fb->render_pass = render_pass_handle_lookup_for_device(device, pCreateInfo->renderPass);
     if (!fb->render_pass) {

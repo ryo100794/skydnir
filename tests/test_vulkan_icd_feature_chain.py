@@ -1038,12 +1038,20 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 create_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO_2;
                 create_info.subpassCount = 1;
                 create_info.pSubpasses = &subpass;
-                VkRenderPass render_pass = VK_NULL_HANDLE;
+                VkRenderPass render_pass = (VkRenderPass)(uintptr_t)0xdeadu;
                 PFN_vkCreateRenderPass2KHR create_render_pass2 =
                     (PFN_vkCreateRenderPass2KHR)proc_address("vkCreateRenderPass2KHR");
-                if (create_render_pass2(VK_NULL_HANDLE, &create_info, NULL, &render_pass) != VK_SUCCESS) return 10;
-                if (render_pass == VK_NULL_HANDLE) return 11;
-                vkDestroyRenderPass(VK_NULL_HANDLE, render_pass, NULL);
+                if (create_render_pass2(VK_NULL_HANDLE, &create_info, NULL, &render_pass) !=
+                        VK_ERROR_INITIALIZATION_FAILED ||
+                    render_pass != VK_NULL_HANDLE) return 10;
+
+                VkDevice device = VK_NULL_HANDLE;
+                if (vkCreateDevice((VkPhysicalDevice)&g_device, &device_info, NULL, &device) != VK_SUCCESS ||
+                    device == VK_NULL_HANDLE) return 11;
+                if (create_render_pass2(device, &create_info, NULL, &render_pass) != VK_SUCCESS) return 12;
+                if (render_pass == VK_NULL_HANDLE) return 13;
+                vkDestroyRenderPass(device, render_pass, NULL);
+                vkDestroyDevice(device, NULL);
             #endif
                 return 0;
             }}
@@ -1061,7 +1069,8 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
             #include <string.h>
             #include "{ICD_SOURCE}"
 
-            static VkRenderPass make_depth_resolve_render_pass(VkResolveModeFlagBits depth_mode,
+            static VkRenderPass make_depth_resolve_render_pass(VkDevice device,
+                                                               VkResolveModeFlagBits depth_mode,
                                                                VkResolveModeFlagBits stencil_mode,
                                                                uint32_t resolve_attachment) {{
                 VkAttachmentDescription2 attachments[2];
@@ -1113,7 +1122,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 create_info.pAttachments = attachments;
                 create_info.subpassCount = 1;
                 create_info.pSubpasses = &subpass;
-                if (vkCreateRenderPass2(VK_NULL_HANDLE, &create_info, NULL, &render_pass) != VK_SUCCESS) {{
+                if (vkCreateRenderPass2(device, &create_info, NULL, &render_pass) != VK_SUCCESS) {{
                     return VK_NULL_HANDLE;
                 }}
                 return render_pass;
@@ -1137,37 +1146,45 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     return 3;
                 }}
 
+                VkDeviceCreateInfo device_info;
+                memset(&device_info, 0, sizeof(device_info));
+                device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                VkDevice device = VK_NULL_HANDLE;
+                if (vkCreateDevice((VkPhysicalDevice)&g_device, &device_info, NULL, &device) != VK_SUCCESS ||
+                    device == VK_NULL_HANDLE) return 4;
+
                 VkRenderPass noop = make_depth_resolve_render_pass(
-                    VK_RESOLVE_MODE_NONE, VK_RESOLVE_MODE_NONE, 1);
-                if (noop == VK_NULL_HANDLE) return 4;
+                    device, VK_RESOLVE_MODE_NONE, VK_RESOLVE_MODE_NONE, 1);
+                if (noop == VK_NULL_HANDLE) return 5;
                 PdockerVkRenderPass *noop_rp = pdocker_vk_render_pass_from_handle(noop);
                 if (!noop_rp || !render_pass_subpass_can_normalize_to_dynamic_rendering(noop_rp, 0)) {{
                     fprintf(stderr, "mode-NONE depth/stencil resolve metadata should remain no-op\\n");
-                    return 5;
+                    return 6;
                 }}
-                vkDestroyRenderPass(VK_NULL_HANDLE, noop, NULL);
+                vkDestroyRenderPass(device, noop, NULL);
 
                 VkRenderPass depth = make_depth_resolve_render_pass(
-                    VK_RESOLVE_MODE_AVERAGE_BIT, VK_RESOLVE_MODE_NONE, 1);
-                if (depth == VK_NULL_HANDLE) return 6;
+                    device, VK_RESOLVE_MODE_AVERAGE_BIT, VK_RESOLVE_MODE_NONE, 1);
+                if (depth == VK_NULL_HANDLE) return 7;
                 PdockerVkRenderPass *depth_rp = pdocker_vk_render_pass_from_handle(depth);
                 if (!depth_rp || render_pass_subpass_can_normalize_to_dynamic_rendering(depth_rp, 0) ||
                     !depth_rp->subpasses[0].unsupported) {{
                     fprintf(stderr, "non-NONE depth resolve was not fail-closed\\n");
-                    return 7;
+                    return 8;
                 }}
-                vkDestroyRenderPass(VK_NULL_HANDLE, depth, NULL);
+                vkDestroyRenderPass(device, depth, NULL);
 
                 VkRenderPass invalid_ref = make_depth_resolve_render_pass(
-                    VK_RESOLVE_MODE_AVERAGE_BIT, VK_RESOLVE_MODE_NONE, 99);
-                if (invalid_ref == VK_NULL_HANDLE) return 8;
+                    device, VK_RESOLVE_MODE_AVERAGE_BIT, VK_RESOLVE_MODE_NONE, 99);
+                if (invalid_ref == VK_NULL_HANDLE) return 9;
                 PdockerVkRenderPass *invalid_rp = pdocker_vk_render_pass_from_handle(invalid_ref);
                 if (!invalid_rp || render_pass_subpass_can_normalize_to_dynamic_rendering(invalid_rp, 0) ||
                     !invalid_rp->subpasses[0].unsupported) {{
                     fprintf(stderr, "invalid non-NONE depth resolve ref was not fail-closed\\n");
-                    return 9;
+                    return 10;
                 }}
-                vkDestroyRenderPass(VK_NULL_HANDLE, invalid_ref, NULL);
+                vkDestroyRenderPass(device, invalid_ref, NULL);
+                vkDestroyDevice(device, NULL);
                 return 0;
             }}
             """
@@ -2841,6 +2858,9 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 create_info.enabledExtensionCount = 1;
                 create_info.ppEnabledExtensionNames = enabled;
                 if (validate_device_extensions(&create_info) != VK_SUCCESS) return 6;
+                VkDevice device = VK_NULL_HANDLE;
+                if (vkCreateDevice((VkPhysicalDevice)&g_device, &create_info, NULL, &device) != VK_SUCCESS ||
+                    device == VK_NULL_HANDLE) return 15;
 
                 VkPhysicalDeviceMemoryProperties2 memory2;
                 VkPhysicalDeviceMemoryBudgetPropertiesEXT budget;
@@ -2872,7 +2892,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 alloc_info.allocationSize = 4096;
                 alloc_info.memoryTypeIndex = 1;
                 VkDeviceMemory memory = VK_NULL_HANDLE;
-                if (vkAllocateMemory(VK_NULL_HANDLE, &alloc_info, NULL, &memory) != VK_SUCCESS ||
+                if (vkAllocateMemory(device, &alloc_info, NULL, &memory) != VK_SUCCESS ||
                     memory == VK_NULL_HANDLE) return 10;
 
                 memset(&memory2, 0, sizeof(memory2));
@@ -2889,7 +2909,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     return 12;
                 }}
 
-                vkFreeMemory(VK_NULL_HANDLE, memory, NULL);
+                vkFreeMemory(device, memory, NULL);
                 memset(&memory2, 0, sizeof(memory2));
                 memset(&budget, 0, sizeof(budget));
                 memory2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2;
@@ -2898,6 +2918,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 vkGetPhysicalDeviceMemoryProperties2((VkPhysicalDevice)physical_device_for_instance(NULL), &memory2);
                 if (budget.heapUsage[0] != initial_heap0) return 13;
                 if (budget.heapUsage[1] != initial_heap1) return 14;
+                vkDestroyDevice(device, NULL);
                 return 0;
             #endif
             }}
@@ -4676,15 +4697,25 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     return 4;
                 }}
 
+                VkDeviceCreateInfo device_info;
+                memset(&device_info, 0, sizeof(device_info));
+                device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                VkDevice device = VK_NULL_HANDLE;
+                if (vkCreateDevice((VkPhysicalDevice)&g_device, &device_info, NULL, &device) != VK_SUCCESS ||
+                    device == VK_NULL_HANDLE) {{
+                    fprintf(stderr, "device creation failed\\n");
+                    return 5;
+                }}
+
                 VkMemoryAllocateInfo alloc;
                 memset(&alloc, 0, sizeof(alloc));
                 alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
                 alloc.allocationSize = 4096;
                 alloc.memoryTypeIndex = 1;
                 VkDeviceMemory memory = VK_NULL_HANDLE;
-                if (vkAllocateMemory(VK_NULL_HANDLE, &alloc, NULL, &memory) != VK_SUCCESS) {{
+                if (vkAllocateMemory(device, &alloc, NULL, &memory) != VK_SUCCESS) {{
                     fprintf(stderr, "memory allocation failed\\n");
-                    return 5;
+                    return 6;
                 }}
                 PdockerVkMemory *memory_obj = pdocker_vk_memory_from_handle(memory);
                 if (!memory_obj || !memory_obj->map) {{
@@ -4699,7 +4730,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 map_info.offset = 32;
                 map_info.size = 64;
                 void *mapped = NULL;
-                if (map2(VK_NULL_HANDLE, &map_info, &mapped) != VK_SUCCESS) {{
+                if (map2(device, &map_info, &mapped) != VK_SUCCESS) {{
                     fprintf(stderr, "vkMapMemory2KHR failed\\n");
                     return 7;
                 }}
@@ -4713,13 +4744,13 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 dummy.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
                 map_info.pNext = &dummy;
                 mapped = NULL;
-                if (map2(VK_NULL_HANDLE, &map_info, &mapped) == VK_SUCCESS) {{
+                if (map2(device, &map_info, &mapped) == VK_SUCCESS) {{
                     fprintf(stderr, "vkMapMemory2KHR accepted unknown pNext\\n");
                     return 9;
                 }}
                 map_info.pNext = NULL;
                 map_info.flags = 1;
-                if (map2(VK_NULL_HANDLE, &map_info, &mapped) == VK_SUCCESS) {{
+                if (map2(device, &map_info, &mapped) == VK_SUCCESS) {{
                     fprintf(stderr, "vkMapMemory2KHR accepted nonzero flags\\n");
                     return 10;
                 }}
@@ -4728,18 +4759,18 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 memset(&unmap_info, 0, sizeof(unmap_info));
                 unmap_info.sType = VK_STRUCTURE_TYPE_MEMORY_UNMAP_INFO;
                 unmap_info.memory = memory;
-                if (unmap2(VK_NULL_HANDLE, &unmap_info) != VK_SUCCESS) {{
+                if (unmap2(device, &unmap_info) != VK_SUCCESS) {{
                     fprintf(stderr, "vkUnmapMemory2KHR failed\\n");
                     return 11;
                 }}
                 unmap_info.pNext = &dummy;
-                if (unmap2(VK_NULL_HANDLE, &unmap_info) == VK_SUCCESS) {{
+                if (unmap2(device, &unmap_info) == VK_SUCCESS) {{
                     fprintf(stderr, "vkUnmapMemory2KHR accepted unknown pNext\\n");
                     return 12;
                 }}
                 unmap_info.pNext = NULL;
                 unmap_info.flags = 1;
-                if (unmap2(VK_NULL_HANDLE, &unmap_info) == VK_SUCCESS) {{
+                if (unmap2(device, &unmap_info) == VK_SUCCESS) {{
                     fprintf(stderr, "vkUnmapMemory2KHR accepted nonzero flags\\n");
                     return 13;
                 }}
@@ -4749,30 +4780,31 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 map_info.memory = fake_memory;
                 map_info.flags = 0;
                 mapped = (void *)(uintptr_t)0x1234u;
-                if (map2(VK_NULL_HANDLE, &map_info, &mapped) == VK_SUCCESS || mapped != NULL) {{
+                if (map2(device, &map_info, &mapped) == VK_SUCCESS || mapped != NULL) {{
                     fprintf(stderr, "vkMapMemory2KHR accepted fake memory handle\\n");
                     return 14;
                 }}
                 unmap_info.memory = fake_memory;
-                if (unmap2(VK_NULL_HANDLE, &unmap_info) == VK_SUCCESS) {{
+                if (unmap2(device, &unmap_info) == VK_SUCCESS) {{
                     fprintf(stderr, "vkUnmapMemory2KHR accepted fake memory handle\\n");
                     return 15;
                 }}
-                vkFreeMemory(VK_NULL_HANDLE, fake_memory, NULL);
+                vkFreeMemory(device, fake_memory, NULL);
 
-                vkFreeMemory(VK_NULL_HANDLE, memory, NULL);
+                vkFreeMemory(device, memory, NULL);
                 map_info.memory = memory;
-                if (map2(VK_NULL_HANDLE, &map_info, &mapped) == VK_SUCCESS) {{
+                if (map2(device, &map_info, &mapped) == VK_SUCCESS) {{
                     fprintf(stderr, "vkMapMemory2KHR accepted stale freed memory handle\\n");
                     return 16;
                 }}
                 VkDeviceSize committed = 99;
-                vkGetDeviceMemoryCommitment(VK_NULL_HANDLE, memory, &committed);
+                vkGetDeviceMemoryCommitment(device, memory, &committed);
                 if (committed != 0) {{
                     fprintf(stderr, "stale memory commitment was nonzero: %llu\\n", (unsigned long long)committed);
                     return 17;
                 }}
-                vkFreeMemory(VK_NULL_HANDLE, memory, NULL);
+                vkFreeMemory(device, memory, NULL);
+                vkDestroyDevice(device, NULL);
                 return 0;
             #endif
             }}
@@ -6386,10 +6418,12 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
             #include "{ICD_SOURCE}"
             {COMMAND_BUFFER_STACK_TEST_HELPER}
 
-            static void init_image_view(PdockerVkImage *image, PdockerVkImageView *view) {{
+            static void init_image_view(PdockerVkImage *image, PdockerVkImageView *view,
+                                        uint64_t owner_device_id) {{
                 memset(image, 0, sizeof(*image));
                 memset(view, 0, sizeof(*view));
                 image->object_id = 701;
+                image->owner_device_id = owner_device_id;
                 image->image_type = VK_IMAGE_TYPE_2D;
                 image->format = VK_FORMAT_R8G8B8A8_UNORM;
                 image->extent = (VkExtent3D){{16, 16, 1}};
@@ -6400,6 +6434,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 image->generation = 1701;
                 image_register(image);
                 view->object_id = 801;
+                view->owner_device_id = owner_device_id;
                 view->image = image;
                 view->view_type = VK_IMAGE_VIEW_TYPE_2D;
                 view->format = VK_FORMAT_R8G8B8A8_UNORM;
@@ -6423,6 +6458,9 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 PdockerVkImage image;
                 PdockerVkImageView view;
                 VkImageView view_handle;
+                VkDeviceCreateInfo device_info;
+                VkDevice device = VK_NULL_HANDLE;
+                uint64_t owner_device_id = 0;
 
                 memset(&attachment, 0, sizeof(attachment));
                 attachment.format = VK_FORMAT_R8G8B8A8_UNORM;
@@ -6445,9 +6483,21 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 rp_info.subpassCount = 1;
                 rp_info.pSubpasses = &subpass;
 
+                rp_handle = (VkRenderPass)(uintptr_t)0xbeefu;
+                if (vkCreateRenderPass(VK_NULL_HANDLE, &rp_info, NULL, &rp_handle) !=
+                        VK_ERROR_INITIALIZATION_FAILED ||
+                    rp_handle != VK_NULL_HANDLE) return 1;
+
+                memset(&device_info, 0, sizeof(device_info));
+                device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                if (vkCreateDevice((VkPhysicalDevice)&g_device, &device_info, NULL, &device) != VK_SUCCESS ||
+                    device == VK_NULL_HANDLE) return 2;
+                owner_device_id = device_owner_id_or_zero(device);
+                if (owner_device_id == 0) return 3;
+
                 VkRenderPass bogus_rp = (VkRenderPass)(uintptr_t)0x1234u;
-                if (render_pass_handle_lookup(bogus_rp) != NULL) return 1;
-                vkDestroyRenderPass(VK_NULL_HANDLE, bogus_rp, NULL);
+                if (render_pass_handle_lookup(bogus_rp) != NULL) return 4;
+                vkDestroyRenderPass(device, bogus_rp, NULL);
 
                 memset(&fb_info, 0, sizeof(fb_info));
                 fb_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
@@ -6456,32 +6506,35 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 fb_info.height = 16;
                 fb_info.layers = 1;
                 fb_handle = (VkFramebuffer)(uintptr_t)0xdeadu;
-                if (vkCreateFramebuffer(VK_NULL_HANDLE, &fb_info, NULL, &fb_handle) != VK_ERROR_INITIALIZATION_FAILED ||
+                if (vkCreateFramebuffer(device, &fb_info, NULL, &fb_handle) != VK_ERROR_INITIALIZATION_FAILED ||
                     fb_handle != VK_NULL_HANDLE) {{
                     fprintf(stderr, "bogus render pass accepted by framebuffer create\\n");
                     return 2;
                 }}
 
-                if (vkCreateRenderPass(VK_NULL_HANDLE, &rp_info, NULL, &rp_handle) != VK_SUCCESS ||
+                if (vkCreateRenderPass(device, &rp_info, NULL, &rp_handle) != VK_SUCCESS ||
                     rp_handle == VK_NULL_HANDLE) return 3;
                 rp = render_pass_handle_lookup(rp_handle);
-                if (!rp || rp->destroyed || !render_pass_subpass_can_normalize_to_dynamic_rendering(rp, 0)) return 4;
+                if (!rp || rp->destroyed || rp->owner_device_id != owner_device_id ||
+                    !render_pass_subpass_can_normalize_to_dynamic_rendering(rp, 0)) return 7;
 
-                init_image_view(&image, &view);
+                init_image_view(&image, &view, owner_device_id);
                 view_handle = pdocker_vk_image_view_to_handle(&view);
                 fb_info.renderPass = rp_handle;
                 fb_info.attachmentCount = 1;
                 fb_info.pAttachments = &view_handle;
-                if (vkCreateFramebuffer(VK_NULL_HANDLE, &fb_info, NULL, &fb_handle) != VK_SUCCESS ||
-                    fb_handle == VK_NULL_HANDLE) return 5;
+                if (vkCreateFramebuffer(device, &fb_info, NULL, &fb_handle) != VK_SUCCESS ||
+                    fb_handle == VK_NULL_HANDLE) return 8;
                 fb = framebuffer_handle_lookup(fb_handle);
-                if (!fb || fb->destroyed || fb->render_pass != rp || fb->attachment_count != 1 ||
-                    !fb->attachment_snapshots[0].valid) return 6;
+                if (!fb || fb->destroyed || fb->owner_device_id != owner_device_id ||
+                    fb->render_pass != rp || fb->attachment_count != 1 ||
+                    !fb->attachment_snapshots[0].valid) return 9;
 
                 VkRenderPassBeginInfo begin_info;
                 PdockerVkCommandBuffer cmd;
                 memset(&begin_info, 0, sizeof(begin_info));
                 reset_test_command_buffer(&cmd, 0, 0);
+                cmd.owner_device_id = owner_device_id;
                 begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
                 begin_info.renderPass = rp_handle;
                 begin_info.framebuffer = fb_handle;
@@ -6490,22 +6543,23 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 vkCmdBeginRenderPass((VkCommandBuffer)&cmd, &begin_info, VK_SUBPASS_CONTENTS_INLINE);
                 if (!cmd.dynamic_rendering_active || cmd.graphics_unsupported) return 7;
 
-                vkDestroyFramebuffer(VK_NULL_HANDLE, fb_handle, NULL);
+                vkDestroyFramebuffer(device, fb_handle, NULL);
                 if (framebuffer_handle_lookup(fb_handle) != NULL) return 8;
                 vkCmdEndRenderPass((VkCommandBuffer)&cmd);
                 if (!cmd.graphics_unsupported) return 9;
-                vkDestroyFramebuffer(VK_NULL_HANDLE, fb_handle, NULL);
-                vkDestroyFramebuffer(VK_NULL_HANDLE, (VkFramebuffer)(uintptr_t)0x4567u, NULL);
+                vkDestroyFramebuffer(device, fb_handle, NULL);
+                vkDestroyFramebuffer(device, (VkFramebuffer)(uintptr_t)0x4567u, NULL);
 
-                vkDestroyRenderPass(VK_NULL_HANDLE, rp_handle, NULL);
+                vkDestroyRenderPass(device, rp_handle, NULL);
                 if (render_pass_handle_lookup(rp_handle) != NULL) return 10;
                 if (render_pass_subpass_can_normalize_to_dynamic_rendering(rp, 0)) return 11;
                 fb_handle = (VkFramebuffer)(uintptr_t)0xdeadu;
-                if (vkCreateFramebuffer(VK_NULL_HANDLE, &fb_info, NULL, &fb_handle) != VK_ERROR_INITIALIZATION_FAILED ||
+                if (vkCreateFramebuffer(device, &fb_info, NULL, &fb_handle) != VK_ERROR_INITIALIZATION_FAILED ||
                     fb_handle != VK_NULL_HANDLE) {{
                     fprintf(stderr, "destroyed render pass accepted by framebuffer create\\n");
                     return 12;
                 }}
+                vkDestroyDevice(device, NULL);
                 return 0;
             }}
             """
@@ -6526,9 +6580,11 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                                    uint64_t object_id,
                                    VkFormat format,
                                    VkSampleCountFlagBits samples,
-                                   VkImageAspectFlags aspect) {{
+                                   VkImageAspectFlags aspect,
+                                   uint64_t owner_device_id) {{
                 memset(image, 0, sizeof(*image));
                 image->object_id = object_id;
+                image->owner_device_id = owner_device_id;
                 image->image_type = VK_IMAGE_TYPE_2D;
                 image->format = format;
                 image->extent = (VkExtent3D){{64, 64, 1}};
@@ -6547,9 +6603,11 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                                   uint64_t object_id,
                                   PdockerVkImage *image,
                                   VkFormat format,
-                                  VkImageAspectFlags aspect) {{
+                                  VkImageAspectFlags aspect,
+                                  uint64_t owner_device_id) {{
                 memset(view, 0, sizeof(*view));
                 view->object_id = object_id;
+                view->owner_device_id = owner_device_id;
                 view->image = image;
                 view->view_type = VK_IMAGE_VIEW_TYPE_2D;
                 view->format = format;
@@ -6572,25 +6630,35 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 PdockerVkFramebuffer *fb = NULL;
                 PdockerVkCommandBuffer cmd;
                 VkRect2D area = {{ {{0, 0}}, {{64, 64}} }};
+                VkDeviceCreateInfo device_info;
+                VkDevice device = VK_NULL_HANDLE;
+                uint64_t owner_device_id = 0;
+
+                memset(&device_info, 0, sizeof(device_info));
+                device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                if (vkCreateDevice((VkPhysicalDevice)&g_device, &device_info, NULL, &device) != VK_SUCCESS ||
+                    device == VK_NULL_HANDLE) return 1;
+                owner_device_id = device_owner_id_or_zero(device);
+                if (owner_device_id == 0) return 2;
 
                 init_image(&color_image, 101, VK_FORMAT_R8G8B8A8_UNORM,
-                           VK_SAMPLE_COUNT_4_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
+                           VK_SAMPLE_COUNT_4_BIT, VK_IMAGE_ASPECT_COLOR_BIT, owner_device_id);
                 init_image(&color_resolve_image, 102, VK_FORMAT_R8G8B8A8_UNORM,
-                           VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
+                           VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_ASPECT_COLOR_BIT, owner_device_id);
                 init_image(&ds_image, 201, VK_FORMAT_D24_UNORM_S8_UINT,
                            VK_SAMPLE_COUNT_4_BIT,
-                           VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT);
+                           VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, owner_device_id);
                 init_image(&ds_resolve_image, 202, VK_FORMAT_D24_UNORM_S8_UINT,
                            VK_SAMPLE_COUNT_1_BIT,
-                           VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT);
+                           VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, owner_device_id);
                 init_view(&color_view, 301, &color_image, VK_FORMAT_R8G8B8A8_UNORM,
-                          VK_IMAGE_ASPECT_COLOR_BIT);
+                          VK_IMAGE_ASPECT_COLOR_BIT, owner_device_id);
                 init_view(&color_resolve_view, 302, &color_resolve_image, VK_FORMAT_R8G8B8A8_UNORM,
-                          VK_IMAGE_ASPECT_COLOR_BIT);
+                          VK_IMAGE_ASPECT_COLOR_BIT, owner_device_id);
                 init_view(&ds_view, 401, &ds_image, VK_FORMAT_D24_UNORM_S8_UINT,
-                          VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT);
+                          VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, owner_device_id);
                 init_view(&ds_resolve_view, 402, &ds_resolve_image, VK_FORMAT_D24_UNORM_S8_UINT,
-                          VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT);
+                          VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, owner_device_id);
 
                 memset(&rp, 0, sizeof(rp));
                 rp.attachment_count = 4;
@@ -6621,6 +6689,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 rp.subpasses[0].depth_resolve_mode = VK_RESOLVE_MODE_AVERAGE_BIT;
                 rp.subpasses[0].stencil_resolve_mode = VK_RESOLVE_MODE_AVERAGE_BIT;
                 rp.object_id = 901;
+                rp.owner_device_id = owner_device_id;
                 rp.generation = 901;
                 render_pass_register(&rp);
 
@@ -6633,7 +6702,13 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 fb_info.width = 64;
                 fb_info.height = 64;
                 fb_info.layers = 1;
+                fb_handle = (VkFramebuffer)(uintptr_t)0xdeadu;
                 if (vkCreateFramebuffer(VK_NULL_HANDLE, &fb_info, NULL, &fb_handle) != VK_ERROR_INITIALIZATION_FAILED ||
+                    fb_handle != VK_NULL_HANDLE) {{
+                    fprintf(stderr, "framebuffer create accepted null device or left stale output\\n");
+                    return 3;
+                }}
+                if (vkCreateFramebuffer(device, &fb_info, NULL, &fb_handle) != VK_ERROR_INITIALIZATION_FAILED ||
                     fb_handle != VK_NULL_HANDLE) {{
                     fprintf(stderr, "bogus framebuffer attachment was accepted\\n");
                     return 1;
@@ -6645,7 +6720,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 attachments[3] = pdocker_vk_image_view_to_handle(&ds_resolve_view);
                 fb_info.attachmentCount = 4;
                 fb_info.pAttachments = attachments;
-                if (vkCreateFramebuffer(VK_NULL_HANDLE, &fb_info, NULL, &fb_handle) != VK_SUCCESS ||
+                if (vkCreateFramebuffer(device, &fb_info, NULL, &fb_handle) != VK_SUCCESS ||
                     fb_handle == VK_NULL_HANDLE) {{
                     fprintf(stderr, "valid framebuffer creation failed\\n");
                     return 2;
@@ -6665,6 +6740,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 }}
 
                 reset_test_command_buffer(&cmd, 0, 0);
+                cmd.owner_device_id = owner_device_id;
                 if (!populate_render_pass_subpass_rendering_state(&cmd, &rp, fb, area,
                                                                   NULL, 0, 0,
                                                                   VK_SUBPASS_CONTENTS_INLINE)) {{
@@ -6690,17 +6766,18 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     return 7;
                 }}
 
-                vkDestroyFramebuffer(VK_NULL_HANDLE, fb_handle, NULL);
+                vkDestroyFramebuffer(device, fb_handle, NULL);
                 fb_handle = VK_NULL_HANDLE;
-                vkDestroyImageView(VK_NULL_HANDLE, attachments[0], NULL);
+                vkDestroyImageView(device, attachments[0], NULL);
                 fb_info.attachmentCount = 1;
                 fb_info.pAttachments = attachments;
-                if (vkCreateFramebuffer(VK_NULL_HANDLE, &fb_info, NULL, &fb_handle) != VK_ERROR_INITIALIZATION_FAILED ||
+                if (vkCreateFramebuffer(device, &fb_info, NULL, &fb_handle) != VK_ERROR_INITIALIZATION_FAILED ||
                     fb_handle != VK_NULL_HANDLE) {{
                     fprintf(stderr, "destroyed framebuffer attachment was accepted\\n");
                     return 8;
                 }}
                 render_pass_retire(render_pass_unregister(pdocker_vk_render_pass_to_handle(&rp)));
+                vkDestroyDevice(device, NULL);
                 return 0;
             }}
             """
