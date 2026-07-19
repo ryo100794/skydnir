@@ -3811,6 +3811,7 @@ class GpuAbiContractTest(unittest.TestCase):
             + c_function_body(executor, "validate_vulkan_resource_table_duplicate_identity")
         )
         for marker in [
+            "if (resource_count == 0) return 0;",
             "if (a->resource_id == 0) continue;",
             "b->resource_id != a->resource_id",
             "a->resource_type != b->resource_type",
@@ -6297,6 +6298,7 @@ class GpuAbiContractTest(unittest.TestCase):
         build_plan = c_function_body(executor, "build_vulkan_dispatch_v5_native_plan")
         graph = c_function_body(executor, "create_strict_vulkan_object_graph")
         for marker in [
+            "if (resource_count == 0) return 0;",
             "if (a->resource_id == 0) continue;",
             "b->resource_id != a->resource_id",
             "a->resource_type != b->resource_type",

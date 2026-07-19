@@ -24174,6 +24174,7 @@ static int vulkan_resource_parent_memory_object_id_matches(
 static int validate_vulkan_resource_table_duplicate_identity(
         uint32_t resource_count,
         const PdockerGpuVulkanDispatchV5ResourceEntry *resources) {
+    if (resource_count == 0) return 0;
     if (!resources) return -EINVAL;
     for (uint32_t i = 0; i < resource_count; ++i) {
         const PdockerGpuVulkanDispatchV5ResourceEntry *a = &resources[i];
