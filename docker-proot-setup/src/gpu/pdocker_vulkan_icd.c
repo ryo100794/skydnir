@@ -36586,11 +36586,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateEvent(
         const VkEventCreateInfo *pCreateInfo,
         const VkAllocationCallbacks *pAllocator,
         VkEvent *pEvent) {
-    (void)device;
     (void)pAllocator;
-    if (!pEvent) return VK_ERROR_INITIALIZATION_FAILED;
-    *pEvent = VK_NULL_HANDLE;
-    if (!pCreateInfo || pCreateInfo->sType != VK_STRUCTURE_TYPE_EVENT_CREATE_INFO) {
+    if (pEvent) *pEvent = VK_NULL_HANDLE;
+    if (!pCreateInfo || !pEvent ||
+        pCreateInfo->sType != VK_STRUCTURE_TYPE_EVENT_CREATE_INFO) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
     if (pCreateInfo->pNext) {
@@ -36601,16 +36600,14 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateEvent(
                                   VK_ERROR_FEATURE_NOT_PRESENT);
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
     PdockerVkEvent *event = pdocker_alloc_handle(sizeof(*event));
     if (!event) return VK_ERROR_OUT_OF_HOST_MEMORY;
     memset(event, 0, sizeof(*event));
     event->signaled = false;
-    uint64_t owner_device_id = 0;
-    if (!device_owner_id_or_zero_checked(device, &owner_device_id)) {
-        free(event);
-        return VK_ERROR_INITIALIZATION_FAILED;
-    }
-
     event->owner_device_id = owner_device_id;
     event->event_id = next_vulkan_object_generation();
     if (bridge_available()) {
@@ -37521,10 +37518,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateQueryPool(
         const VkQueryPoolCreateInfo *pCreateInfo,
         const VkAllocationCallbacks *pAllocator,
         VkQueryPool *pQueryPool) {
-    (void)device;
     (void)pAllocator;
     if (pQueryPool) *pQueryPool = VK_NULL_HANDLE;
-    if (!pCreateInfo || !pQueryPool || pCreateInfo->queryCount == 0 ||
+    if (!pCreateInfo || !pQueryPool ||
+        pCreateInfo->sType != VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO ||
+        pCreateInfo->queryCount == 0 ||
         pCreateInfo->queryCount > PDOCKER_VK_MAX_QUERY_COUNT) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
@@ -37541,14 +37539,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateQueryPool(
                                   VK_ERROR_FEATURE_NOT_PRESENT);
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }
-    PdockerVkQueryPool *pool = pdocker_alloc_handle(sizeof(*pool));
-    if (!pool) return VK_ERROR_OUT_OF_HOST_MEMORY;
     uint64_t owner_device_id = 0;
-    if (!device_owner_id_or_zero_checked(device, &owner_device_id)) {
-        free(pool);
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
-
+    PdockerVkQueryPool *pool = pdocker_alloc_handle(sizeof(*pool));
+    if (!pool) return VK_ERROR_OUT_OF_HOST_MEMORY;
     pool->owner_device_id = owner_device_id;
     pool->type = pCreateInfo->queryType;
     pool->query_count = pCreateInfo->queryCount;
@@ -37796,27 +37792,27 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateFence(
         const VkFenceCreateInfo *pCreateInfo,
         const VkAllocationCallbacks *pAllocator,
         VkFence *pFence) {
-    (void)device;
     (void)pAllocator;
-    if (!pFence) return VK_ERROR_INITIALIZATION_FAILED;
-    *pFence = VK_NULL_HANDLE;
-    VkResult pnext_rc = validate_fence_create_pnext(pCreateInfo ? pCreateInfo->pNext : NULL);
+    if (pFence) *pFence = VK_NULL_HANDLE;
+    if (!pCreateInfo || !pFence ||
+        pCreateInfo->sType != VK_STRUCTURE_TYPE_FENCE_CREATE_INFO) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    VkResult pnext_rc = validate_fence_create_pnext(pCreateInfo->pNext);
     if (pnext_rc != VK_SUCCESS) return pnext_rc;
-    if (pCreateInfo && (pCreateInfo->flags & ~VK_FENCE_CREATE_SIGNALED_BIT) != 0) {
+    if ((pCreateInfo->flags & ~VK_FENCE_CREATE_SIGNALED_BIT) != 0) {
         trace_icd_runtime_failure("fence-flags-unsupported",
                                   VK_ERROR_FEATURE_NOT_PRESENT);
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
     PdockerVkFence *fence = pdocker_alloc_handle(sizeof(*fence));
     if (!fence) return VK_ERROR_OUT_OF_HOST_MEMORY;
     memset(fence, 0, sizeof(*fence));
-    fence->signaled = pCreateInfo && (pCreateInfo->flags & VK_FENCE_CREATE_SIGNALED_BIT);
-    uint64_t owner_device_id = 0;
-    if (!device_owner_id_or_zero_checked(device, &owner_device_id)) {
-        free(fence);
-        return VK_ERROR_INITIALIZATION_FAILED;
-    }
-
+    fence->signaled = (pCreateInfo->flags & VK_FENCE_CREATE_SIGNALED_BIT);
     fence->owner_device_id = owner_device_id;
     fence->fence_id = next_vulkan_object_generation();
     if (bridge_available()) {
@@ -37941,21 +37937,27 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSemaphore(
         const VkSemaphoreCreateInfo *pCreateInfo,
         const VkAllocationCallbacks *pAllocator,
         VkSemaphore *pSemaphore) {
-    (void)device;
     (void)pAllocator;
-    if (!pSemaphore) return VK_ERROR_INITIALIZATION_FAILED;
-    *pSemaphore = VK_NULL_HANDLE;
+    if (pSemaphore) *pSemaphore = VK_NULL_HANDLE;
+    if (!pCreateInfo || !pSemaphore ||
+        pCreateInfo->sType != VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
     bool timeline = false;
     uint64_t initial_value = 0;
-    if (pCreateInfo && pCreateInfo->flags != 0) {
+    if (pCreateInfo->flags != 0) {
         trace_icd_runtime_failure("semaphore-flags-unsupported",
                                   VK_ERROR_FEATURE_NOT_PRESENT);
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }
-    if (pCreateInfo && !semaphore_create_info_parse_pnext(pCreateInfo->pNext, &timeline, &initial_value)) {
+    if (!semaphore_create_info_parse_pnext(pCreateInfo->pNext, &timeline, &initial_value)) {
         trace_icd_runtime_failure("semaphore-pnext-unsupported",
                                   VK_ERROR_FEATURE_NOT_PRESENT);
         return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0) {
+        return VK_ERROR_INITIALIZATION_FAILED;
     }
     if (timeline) {
         uint64_t requested_feature_mask = device_requested_feature_mask_from_handle(device);
@@ -37972,12 +37974,6 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSemaphore(
     sem->timeline = timeline;
     sem->value = initial_value;
     sem->signaled = timeline ? (initial_value > 0) : false;
-    uint64_t owner_device_id = 0;
-    if (!device_owner_id_or_zero_checked(device, &owner_device_id)) {
-        free(sem);
-        return VK_ERROR_INITIALIZATION_FAILED;
-    }
-
     sem->owner_device_id = owner_device_id;
     sem->semaphore_id = next_vulkan_object_generation();
     if (bridge_available()) {

@@ -10529,7 +10529,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "semaphore-wait-pnext-unsupported",
             "semaphore-signal-pnext-unsupported",
             "semaphore-flags-unsupported",
-            "pCreateInfo && pCreateInfo->flags != 0",
+            "pCreateInfo->flags != 0",
+            "pCreateInfo->sType != VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO",
             "pSignalInfo->pNext",
         ]:
             self.assertIn(marker, icd)
@@ -11636,11 +11637,13 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VK_STRUCTURE_TYPE_EXPORT_FENCE_CREATE_INFO", fence_validator)
         self.assertIn("info->handleTypes != 0", fence_validator)
         self.assertIn('unsupported_create_info_pnext_result("vkCreateFence", node)', fence_validator)
-        self.assertIn("*pFence = VK_NULL_HANDLE;", fence_body)
-        self.assertIn("validate_fence_create_pnext(pCreateInfo ? pCreateInfo->pNext : NULL)", fence_body)
+        self.assertIn("if (pFence) *pFence = VK_NULL_HANDLE;", fence_body)
+        self.assertIn("pCreateInfo->sType != VK_STRUCTURE_TYPE_FENCE_CREATE_INFO", fence_body)
+        self.assertIn("validate_fence_create_pnext(pCreateInfo->pNext)", fence_body)
         self.assertIn("if (pnext_rc != VK_SUCCESS) return pnext_rc;", fence_body)
         self.assertIn("pCreateInfo->flags & ~VK_FENCE_CREATE_SIGNALED_BIT", fence_body)
-        self.assertIn("fence->signaled = pCreateInfo && (pCreateInfo->flags & VK_FENCE_CREATE_SIGNALED_BIT);", fence_body)
+        self.assertIn("device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0", fence_body)
+        self.assertIn("fence->signaled = (pCreateInfo->flags & VK_FENCE_CREATE_SIGNALED_BIT);", fence_body)
 
         self.assertIn("bool seen_type = false;", sem_parse_body)
         self.assertIn("if (seen_type) return false;", sem_parse_body)
@@ -11648,6 +11651,11 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("if (info->initialValue != 0) return false;", sem_parse_body)
         self.assertIn("VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO", sem_parse_body)
         self.assertIn("info->handleTypes != 0", sem_parse_body)
+        self.assertIn("if (pSemaphore) *pSemaphore = VK_NULL_HANDLE;", sem_create_body)
+        self.assertIn("pCreateInfo->sType != VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO", sem_create_body)
+        self.assertIn("pCreateInfo->flags != 0", sem_create_body)
+        self.assertIn("semaphore_create_info_parse_pnext(pCreateInfo->pNext", sem_create_body)
+        self.assertIn("device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0", sem_create_body)
         self.assertIn("advertised_timeline_semaphore()", sem_create_body)
         self.assertIn("device_requested_feature_mask_from_handle(device)", sem_create_body)
         self.assertIn("requested_feature_mask & PDOCKER_VK_FEATURE_TIMELINE_SEMAPHORE", sem_create_body)
@@ -11918,8 +11926,11 @@ class GpuAbiContractTest(unittest.TestCase):
         query_pool_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateQueryPool", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkDestroyQueryPool", 1
         )[0]
+        self.assertIn("if (pQueryPool) *pQueryPool = VK_NULL_HANDLE;", query_pool_body)
+        self.assertIn("pCreateInfo->sType != VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO", query_pool_body)
         self.assertIn("if (pCreateInfo->pNext)", query_pool_body)
         self.assertIn("if (pCreateInfo->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;", query_pool_body)
+        self.assertIn("device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0", query_pool_body)
         framebuffer_body = c_function_body(icd, "vkCreateFramebuffer")
         framebuffer_pnext_body = c_function_body(icd, "validate_framebuffer_create_pnext")
         self.assertIn("validate_framebuffer_create_pnext(pCreateInfo->pNext)", framebuffer_body)
@@ -11993,11 +12004,12 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("pAllocateInfo->level != VK_COMMAND_BUFFER_LEVEL_SECONDARY", allocate_body)
         self.assertIn("command-buffer-level-unsupported", allocate_body)
 
-        self.assertIn("*pEvent = VK_NULL_HANDLE;", create_event_body)
+        self.assertIn("if (pEvent) *pEvent = VK_NULL_HANDLE;", create_event_body)
         self.assertIn("pCreateInfo->sType != VK_STRUCTURE_TYPE_EVENT_CREATE_INFO", create_event_body)
         self.assertIn('unsupported_create_info_pnext_result("vkCreateEvent", pCreateInfo->pNext)', create_event_body)
         self.assertIn("pCreateInfo->flags != 0", create_event_body)
         self.assertIn("event-flags-unsupported", create_event_body)
+        self.assertIn("device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0", create_event_body)
 
 
     def test_vulkan_command_buffers_resolve_public_handles_through_live_registry(self):

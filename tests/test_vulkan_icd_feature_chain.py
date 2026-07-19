@@ -1562,7 +1562,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
                 submit.commandBufferCount = 1;
                 submit.pCommandBuffers = &cmd;
-                if (vkQueueSubmit((VkQueue)&g_queue, 1, &submit, VK_NULL_HANDLE) != VK_ERROR_INITIALIZATION_FAILED) return 19;
+                if (vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE) != VK_ERROR_INITIALIZATION_FAILED) return 19;
 
                 vkDestroyCommandPool(VK_NULL_HANDLE, pool, NULL);
                 if (command_pool_handle_lookup(pool)) return 20;
@@ -1589,76 +1589,118 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
             int main(void) {{
                 unsetenv("PDOCKER_GPU_QUEUE_SOCKET");
                 ensure_vulkan_dispatchable_object_ids();
-                g_queue.object_id = 1;
-                g_queue.instance_object_id = 1;
-                g_queue.physical_device_object_id = 1;
-                g_queue.device_object_id = 1;
+                VkDeviceCreateInfo device_info;
+                memset(&device_info, 0, sizeof(device_info));
+                device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                VkDevice device = VK_NULL_HANDLE;
+                if (vkCreateDevice((VkPhysicalDevice)&g_device, &device_info, NULL, &device) != VK_SUCCESS ||
+                    device == VK_NULL_HANDLE) return 1;
+                PdockerVkDevice *device_obj = pdocker_vk_device_from_handle(device);
+                if (!device_obj || device_obj->object_id == 0) return 32;
+                VkQueue queue = VK_NULL_HANDLE;
+                vkGetDeviceQueue(device, 0, 0, &queue);
+                if (queue == VK_NULL_HANDLE) return 33;
 
                 VkFenceCreateInfo fence_info;
                 memset(&fence_info, 0, sizeof(fence_info));
                 fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
                 fence_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-                VkFence fence = VK_NULL_HANDLE;
-                if (vkCreateFence(VK_NULL_HANDLE, &fence_info, NULL, &fence) != VK_SUCCESS || !fence) return 2;
+                VkFence fence = (VkFence)(uintptr_t)0x1234u;
+                if (vkCreateFence(VK_NULL_HANDLE, &fence_info, NULL, &fence) != VK_ERROR_INITIALIZATION_FAILED ||
+                    fence != VK_NULL_HANDLE) return 40;
+                fence = (VkFence)(uintptr_t)0x1234u;
+                if (vkCreateFence(device, NULL, NULL, &fence) != VK_ERROR_INITIALIZATION_FAILED ||
+                    fence != VK_NULL_HANDLE) return 41;
+                fence_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+                fence = (VkFence)(uintptr_t)0x1234u;
+                if (vkCreateFence(device, &fence_info, NULL, &fence) != VK_ERROR_INITIALIZATION_FAILED ||
+                    fence != VK_NULL_HANDLE) return 42;
+                fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+                fence = VK_NULL_HANDLE;
+                if (vkCreateFence(device, &fence_info, NULL, &fence) != VK_SUCCESS || !fence) return 2;
                 if (!fence_handle_lookup(fence)) return 3;
-                if (vkGetFenceStatus(VK_NULL_HANDLE, fence) != VK_SUCCESS) return 4;
-                vkDestroyFence(VK_NULL_HANDLE, fence, NULL);
+                if (vkGetFenceStatus(device, fence) != VK_SUCCESS) return 4;
+                vkDestroyFence(device, fence, NULL);
                 if (fence_handle_lookup(fence)) return 5;
-                if (vkGetFenceStatus(VK_NULL_HANDLE, fence) != VK_ERROR_INITIALIZATION_FAILED) return 6;
-                if (vkResetFences(VK_NULL_HANDLE, 1, &fence) != VK_ERROR_INITIALIZATION_FAILED) return 7;
-                if (vkWaitForFences(VK_NULL_HANDLE, 1, &fence, VK_TRUE, 0) != VK_ERROR_INITIALIZATION_FAILED) return 8;
+                if (vkGetFenceStatus(device, fence) != VK_ERROR_INITIALIZATION_FAILED) return 6;
+                if (vkResetFences(device, 1, &fence) != VK_ERROR_INITIALIZATION_FAILED) return 7;
+                if (vkWaitForFences(device, 1, &fence, VK_TRUE, 0) != VK_ERROR_INITIALIZATION_FAILED) return 8;
 
                 VkSemaphoreCreateInfo sem_info;
                 memset(&sem_info, 0, sizeof(sem_info));
                 sem_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-                VkSemaphore sem = VK_NULL_HANDLE;
-                if (vkCreateSemaphore(VK_NULL_HANDLE, &sem_info, NULL, &sem) != VK_SUCCESS || !sem) return 9;
+                VkSemaphore sem = (VkSemaphore)(uintptr_t)0x1234u;
+                if (vkCreateSemaphore(VK_NULL_HANDLE, &sem_info, NULL, &sem) != VK_ERROR_INITIALIZATION_FAILED ||
+                    sem != VK_NULL_HANDLE) return 43;
+                sem = (VkSemaphore)(uintptr_t)0x1234u;
+                if (vkCreateSemaphore(device, NULL, NULL, &sem) != VK_ERROR_INITIALIZATION_FAILED ||
+                    sem != VK_NULL_HANDLE) return 44;
+                sem_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+                sem = (VkSemaphore)(uintptr_t)0x1234u;
+                if (vkCreateSemaphore(device, &sem_info, NULL, &sem) != VK_ERROR_INITIALIZATION_FAILED ||
+                    sem != VK_NULL_HANDLE) return 45;
+                sem_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+                sem = VK_NULL_HANDLE;
+                if (vkCreateSemaphore(device, &sem_info, NULL, &sem) != VK_SUCCESS || !sem) return 9;
                 if (!semaphore_handle_lookup(sem)) return 10;
                 uint64_t counter = 0;
-                if (vkGetSemaphoreCounterValue(VK_NULL_HANDLE, sem, &counter) != VK_ERROR_FEATURE_NOT_PRESENT) return 11;
-                vkDestroySemaphore(VK_NULL_HANDLE, sem, NULL);
+                if (vkGetSemaphoreCounterValue(device, sem, &counter) != VK_ERROR_FEATURE_NOT_PRESENT) return 11;
+                vkDestroySemaphore(device, sem, NULL);
                 if (semaphore_handle_lookup(sem)) return 12;
-                if (vkGetSemaphoreCounterValue(VK_NULL_HANDLE, sem, &counter) != VK_ERROR_INITIALIZATION_FAILED) return 13;
+                if (vkGetSemaphoreCounterValue(device, sem, &counter) != VK_ERROR_INITIALIZATION_FAILED) return 13;
                 VkSemaphoreWaitInfo wait_info;
                 memset(&wait_info, 0, sizeof(wait_info));
                 wait_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
                 wait_info.semaphoreCount = 1;
                 wait_info.pSemaphores = &sem;
                 wait_info.pValues = &counter;
-                if (vkWaitSemaphores(VK_NULL_HANDLE, &wait_info, 0) != VK_ERROR_INITIALIZATION_FAILED) return 14;
+                if (vkWaitSemaphores(device, &wait_info, 0) != VK_ERROR_INITIALIZATION_FAILED) return 14;
                 VkSubmitInfo stale_signal_submit;
                 memset(&stale_signal_submit, 0, sizeof(stale_signal_submit));
                 stale_signal_submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
                 stale_signal_submit.signalSemaphoreCount = 1;
                 stale_signal_submit.pSignalSemaphores = &sem;
-                if (vkQueueSubmit((VkQueue)&g_queue, 1, &stale_signal_submit, VK_NULL_HANDLE) != VK_ERROR_INITIALIZATION_FAILED) return 30;
+                if (vkQueueSubmit(queue, 1, &stale_signal_submit, VK_NULL_HANDLE) != VK_ERROR_INITIALIZATION_FAILED) return 30;
                 VkSemaphore null_sem = VK_NULL_HANDLE;
                 stale_signal_submit.pSignalSemaphores = &null_sem;
-                if (vkQueueSubmit((VkQueue)&g_queue, 1, &stale_signal_submit, VK_NULL_HANDLE) != VK_ERROR_INITIALIZATION_FAILED) return 31;
+                if (vkQueueSubmit(queue, 1, &stale_signal_submit, VK_NULL_HANDLE) != VK_ERROR_INITIALIZATION_FAILED) return 31;
 
                 VkEventCreateInfo event_info;
                 memset(&event_info, 0, sizeof(event_info));
                 event_info.sType = VK_STRUCTURE_TYPE_EVENT_CREATE_INFO;
-                VkEvent event = VK_NULL_HANDLE;
-                if (vkCreateEvent(VK_NULL_HANDLE, &event_info, NULL, &event) != VK_SUCCESS || !event) return 15;
+                VkEvent event = (VkEvent)(uintptr_t)0x1234u;
+                if (vkCreateEvent(VK_NULL_HANDLE, &event_info, NULL, &event) != VK_ERROR_INITIALIZATION_FAILED ||
+                    event != VK_NULL_HANDLE) return 46;
+                event = (VkEvent)(uintptr_t)0x1234u;
+                if (vkCreateEvent(device, NULL, NULL, &event) != VK_ERROR_INITIALIZATION_FAILED ||
+                    event != VK_NULL_HANDLE) return 47;
+                event_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+                event = (VkEvent)(uintptr_t)0x1234u;
+                if (vkCreateEvent(device, &event_info, NULL, &event) != VK_ERROR_INITIALIZATION_FAILED ||
+                    event != VK_NULL_HANDLE) return 48;
+                event_info.sType = VK_STRUCTURE_TYPE_EVENT_CREATE_INFO;
+                event = VK_NULL_HANDLE;
+                if (vkCreateEvent(device, &event_info, NULL, &event) != VK_SUCCESS || !event) return 15;
                 if (!event_handle_lookup(event)) return 16;
-                if (vkSetEvent(VK_NULL_HANDLE, event) != VK_SUCCESS) return 17;
-                if (vkGetEventStatus(VK_NULL_HANDLE, event) != VK_EVENT_SET) return 18;
+                if (vkSetEvent(device, event) != VK_SUCCESS) return 17;
+                if (vkGetEventStatus(device, event) != VK_EVENT_SET) return 18;
                 PdockerVkCommandBuffer event_cmd;
                 reset_test_command_buffer(&event_cmd, 0, 0);
+                event_cmd.owner_device_id = device_obj->object_id;
+                if (event_cmd.owner_pool) event_cmd.owner_pool->owner_device_id = device_obj->object_id;
                 vkCmdSetEvent((VkCommandBuffer)&event_cmd, event, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
                 if (event_cmd.recording_failed || event_cmd.command_op_count != 1) return 28;
-                vkDestroyEvent(VK_NULL_HANDLE, event, NULL);
+                vkDestroyEvent(device, event, NULL);
                 if (event_handle_lookup(event)) return 19;
-                if (vkGetEventStatus(VK_NULL_HANDLE, event) != VK_ERROR_INITIALIZATION_FAILED) return 20;
-                if (vkSetEvent(VK_NULL_HANDLE, event) != VK_ERROR_INITIALIZATION_FAILED) return 21;
+                if (vkGetEventStatus(device, event) != VK_ERROR_INITIALIZATION_FAILED) return 20;
+                if (vkSetEvent(device, event) != VK_ERROR_INITIALIZATION_FAILED) return 21;
                 VkCommandBuffer event_cmd_handle = (VkCommandBuffer)&event_cmd;
                 VkSubmitInfo event_submit;
                 memset(&event_submit, 0, sizeof(event_submit));
                 event_submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
                 event_submit.commandBufferCount = 1;
                 event_submit.pCommandBuffers = &event_cmd_handle;
-                if (vkQueueSubmit((VkQueue)&g_queue, 1, &event_submit, VK_NULL_HANDLE) != VK_ERROR_INITIALIZATION_FAILED) return 29;
+                if (vkQueueSubmit(queue, 1, &event_submit, VK_NULL_HANDLE) != VK_ERROR_INITIALIZATION_FAILED) return 29;
                 command_buffer_destroy_record_vectors(&event_cmd);
                 command_buffer_destroy_descriptor_states(&event_cmd);
                 (void)command_buffer_unregister((VkCommandBuffer)&event_cmd);
@@ -1668,15 +1710,28 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 query_info.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
                 query_info.queryType = VK_QUERY_TYPE_TIMESTAMP;
                 query_info.queryCount = 1;
-                VkQueryPool query_pool = VK_NULL_HANDLE;
-                if (vkCreateQueryPool(VK_NULL_HANDLE, &query_info, NULL, &query_pool) != VK_SUCCESS || !query_pool) return 22;
+                VkQueryPool query_pool = (VkQueryPool)(uintptr_t)0x1234u;
+                if (vkCreateQueryPool(VK_NULL_HANDLE, &query_info, NULL, &query_pool) != VK_ERROR_INITIALIZATION_FAILED ||
+                    query_pool != VK_NULL_HANDLE) return 49;
+                query_pool = (VkQueryPool)(uintptr_t)0x1234u;
+                if (vkCreateQueryPool(device, NULL, NULL, &query_pool) != VK_ERROR_INITIALIZATION_FAILED ||
+                    query_pool != VK_NULL_HANDLE) return 50;
+                query_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+                query_pool = (VkQueryPool)(uintptr_t)0x1234u;
+                if (vkCreateQueryPool(device, &query_info, NULL, &query_pool) != VK_ERROR_INITIALIZATION_FAILED ||
+                    query_pool != VK_NULL_HANDLE) return 51;
+                query_info.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+                query_pool = VK_NULL_HANDLE;
+                if (vkCreateQueryPool(device, &query_info, NULL, &query_pool) != VK_SUCCESS || !query_pool) return 22;
                 if (!query_pool_handle_lookup(query_pool)) return 23;
 
                 PdockerVkCommandBuffer cmd;
                 reset_test_command_buffer(&cmd, 0, 0);
+                cmd.owner_device_id = device_obj->object_id;
+                if (cmd.owner_pool) cmd.owner_pool->owner_device_id = device_obj->object_id;
                 vkCmdWriteTimestamp((VkCommandBuffer)&cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, query_pool, 0);
                 if (cmd.recording_failed || cmd.command_op_count != 1) return 24;
-                vkDestroyQueryPool(VK_NULL_HANDLE, query_pool, NULL);
+                vkDestroyQueryPool(device, query_pool, NULL);
                 if (query_pool_handle_lookup(query_pool)) return 25;
 
                 VkSubmitInfo submit;
@@ -1685,12 +1740,13 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
                 submit.commandBufferCount = 1;
                 submit.pCommandBuffers = &cmd_handle;
-                if (vkQueueSubmit((VkQueue)&g_queue, 1, &submit, VK_NULL_HANDLE) != VK_ERROR_INITIALIZATION_FAILED) return 26;
+                if (vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE) != VK_ERROR_INITIALIZATION_FAILED) return 26;
                 uint64_t data = 0;
-                if (vkGetQueryPoolResults(VK_NULL_HANDLE, query_pool, 0, 1, sizeof(data), &data, sizeof(data), VK_QUERY_RESULT_64_BIT) != VK_ERROR_INITIALIZATION_FAILED) return 27;
+                if (vkGetQueryPoolResults(device, query_pool, 0, 1, sizeof(data), &data, sizeof(data), VK_QUERY_RESULT_64_BIT) != VK_ERROR_INITIALIZATION_FAILED) return 27;
                 command_buffer_destroy_record_vectors(&cmd);
                 command_buffer_destroy_descriptor_states(&cmd);
                 (void)command_buffer_unregister((VkCommandBuffer)&cmd);
+                vkDestroyDevice(device, NULL);
                 return 0;
             }}
             """
@@ -2824,6 +2880,9 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 create_info.enabledExtensionCount = 1;
                 create_info.ppEnabledExtensionNames = enabled;
                 if (validate_device_extensions(&create_info) != VK_SUCCESS) return 9;
+                VkDevice device = VK_NULL_HANDLE;
+                if (vkCreateDevice((VkPhysicalDevice)&g_device, &create_info, NULL, &device) != VK_SUCCESS ||
+                    device == VK_NULL_HANDLE) return 10;
 
                 VkQueryPoolCreateInfo pool_info;
                 memset(&pool_info, 0, sizeof(pool_info));
@@ -2831,10 +2890,11 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 pool_info.queryType = VK_QUERY_TYPE_TIMESTAMP;
                 pool_info.queryCount = 2;
                 VkQueryPool pool = VK_NULL_HANDLE;
-                if (vkCreateQueryPool(VK_NULL_HANDLE, &pool_info, NULL, &pool) != VK_SUCCESS ||
-                    pool == VK_NULL_HANDLE) return 10;
-                vkResetQueryPoolEXT(VK_NULL_HANDLE, pool, 0, 2);
-                vkDestroyQueryPool(VK_NULL_HANDLE, pool, NULL);
+                if (vkCreateQueryPool(device, &pool_info, NULL, &pool) != VK_SUCCESS ||
+                    pool == VK_NULL_HANDLE) return 11;
+                vkResetQueryPoolEXT(device, pool, 0, 2);
+                vkDestroyQueryPool(device, pool, NULL);
+                vkDestroyDevice(device, NULL);
                 return 0;
             #endif
             }}
@@ -3998,12 +4058,12 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 if (memory_handle_lookup_for_device(device, unowned_memory)) return 10;
                 if (vkBindBufferMemory(device, unowned_buffer, unowned_memory, 0) != VK_ERROR_INITIALIZATION_FAILED) return 11;
 
-                VkFenceCreateInfo fence_info;
-                memset(&fence_info, 0, sizeof(fence_info));
-                fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-                VkFence unowned_fence = VK_NULL_HANDLE;
-                if (vkCreateFence(VK_NULL_HANDLE, &fence_info, NULL, &unowned_fence) != VK_SUCCESS ||
-                    unowned_fence == VK_NULL_HANDLE) return 12;
+                PdockerVkFence *unowned_fence_obj = pdocker_alloc_handle(sizeof(*unowned_fence_obj));
+                if (!unowned_fence_obj) return 12;
+                memset(unowned_fence_obj, 0, sizeof(*unowned_fence_obj));
+                unowned_fence_obj->fence_id = next_vulkan_object_generation();
+                fence_register(unowned_fence_obj);
+                VkFence unowned_fence = pdocker_vk_fence_to_handle(unowned_fence_obj);
                 if (!fence_handle_lookup_for_device(VK_NULL_HANDLE, unowned_fence)) return 13;
                 if (fence_handle_lookup_for_queue(queue_obj, unowned_fence)) return 14;
                 if (vkQueueSubmit(queue, 0, NULL, unowned_fence) != VK_ERROR_INITIALIZATION_FAILED) return 15;
@@ -8787,9 +8847,13 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 if (vkCreateCommandPool(VK_NULL_HANDLE, &pool_info, NULL, &unowned_pool) != VK_SUCCESS ||
                     !command_pool_handle_lookup(unowned_pool)) return 14;
 
-                VkFence unowned_fence = VK_NULL_HANDLE;
-                if (vkCreateFence(VK_NULL_HANDLE, &fence_info, NULL, &unowned_fence) != VK_SUCCESS ||
-                    !fence_handle_lookup(unowned_fence)) return 15;
+                PdockerVkFence *unowned_fence_obj = pdocker_alloc_handle(sizeof(*unowned_fence_obj));
+                if (!unowned_fence_obj) return 15;
+                memset(unowned_fence_obj, 0, sizeof(*unowned_fence_obj));
+                unowned_fence_obj->fence_id = next_vulkan_object_generation();
+                fence_register(unowned_fence_obj);
+                VkFence unowned_fence = pdocker_vk_fence_to_handle(unowned_fence_obj);
+                if (!fence_handle_lookup(unowned_fence)) return 15;
 
                 vkDestroyDevice(device, NULL);
 
