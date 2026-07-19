@@ -11191,6 +11191,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("descriptor_update_template_register(template_handle)", template_create_body)
         self.assertIn("descriptor_update_template_unregister_object(template_handle)", template_destroy_body)
         self.assertIn("pCreateInfo->sType != VK_STRUCTURE_TYPE_DESCRIPTOR_UPDATE_TEMPLATE_CREATE_INFO", template_create_body)
+        self.assertIn("device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0", template_create_body)
         self.assertIn('unsupported_create_info_pnext_result("vkCreateDescriptorUpdateTemplate", pCreateInfo->pNext)', template_create_body)
         self.assertIn("pCreateInfo->templateType != VK_DESCRIPTOR_UPDATE_TEMPLATE_TYPE_DESCRIPTOR_SET", template_create_body)
         self.assertIn("descriptor_update_template_entry_layout_valid", template_create_body)
@@ -11796,7 +11797,10 @@ class GpuAbiContractTest(unittest.TestCase):
         pipeline_layout_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreatePipelineLayout", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkDestroyPipelineLayout", 1
         )[0]
-        self.assertIn("if (!pCreateInfo || !pPipelineLayout)", pipeline_layout_body)
+        self.assertIn("if (!pCreateInfo || !pPipelineLayout ||", pipeline_layout_body)
+        self.assertIn("if (pPipelineLayout) *pPipelineLayout = VK_NULL_HANDLE;", pipeline_layout_body)
+        self.assertIn("pCreateInfo->sType != VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO", pipeline_layout_body)
+        self.assertIn("device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0", pipeline_layout_body)
         self.assertIn("if (pCreateInfo->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;", pipeline_layout_body)
         self.assertIn("pCreateInfo->setLayoutCount > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS", pipeline_layout_body)
         self.assertIn("pCreateInfo->setLayoutCount > 0 && !pCreateInfo->pSetLayouts", pipeline_layout_body)

@@ -1886,6 +1886,9 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     (PFN_vkCreateDescriptorUpdateTemplateKHR)proc_address("vkCreateDescriptorUpdateTemplateKHR");
                 PFN_vkDestroyDescriptorUpdateTemplateKHR destroy_template =
                     (PFN_vkDestroyDescriptorUpdateTemplateKHR)proc_address("vkDestroyDescriptorUpdateTemplateKHR");
+                VkDescriptorUpdateTemplate stale_template = (VkDescriptorUpdateTemplate)(uintptr_t)0x1234u;
+                if (create_template(VK_NULL_HANDLE, &template_info, NULL, &stale_template) != VK_ERROR_INITIALIZATION_FAILED ||
+                    stale_template != VK_NULL_HANDLE) return 12;
                 if (create_template(device, &template_info, NULL, &update_template) != VK_SUCCESS) return 10;
                 if (update_template == VK_NULL_HANDLE) return 11;
                 VkDescriptorUpdateTemplate bogus_template = (VkDescriptorUpdateTemplate)(uintptr_t)0x1234u;
@@ -2099,6 +2102,12 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 pl_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
                 pl_info.setLayoutCount = 1;
                 pl_info.pSetLayouts = &dsl;
+                VkPipelineLayout stale_pl = (VkPipelineLayout)(uintptr_t)0x1234u;
+                if (vkCreatePipelineLayout(VK_NULL_HANDLE, &pl_info, NULL, &stale_pl) != VK_ERROR_INITIALIZATION_FAILED ||
+                    stale_pl != VK_NULL_HANDLE) {{
+                    fprintf(stderr, "pipeline layout accepted null device or left stale output\\n");
+                    return 18;
+                }}
                 VkPipelineLayout pl = VK_NULL_HANDLE;
                 if (vkCreatePipelineLayout(device, &pl_info, NULL, &pl) != VK_SUCCESS ||
                     pl == VK_NULL_HANDLE) {{

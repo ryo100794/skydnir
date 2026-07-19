@@ -26145,7 +26145,15 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreatePipelineLayout(
         const VkAllocationCallbacks *pAllocator,
         VkPipelineLayout *pPipelineLayout) {
     (void)pAllocator;
-    if (!pCreateInfo || !pPipelineLayout) return VK_ERROR_INITIALIZATION_FAILED;
+    if (pPipelineLayout) *pPipelineLayout = VK_NULL_HANDLE;
+    if (!pCreateInfo || !pPipelineLayout ||
+        pCreateInfo->sType != VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
     if (pCreateInfo->pNext) return unsupported_create_info_pnext_result("vkCreatePipelineLayout", pCreateInfo->pNext);
     if (pCreateInfo->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;
     if (pCreateInfo->setLayoutCount > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS) {
@@ -26165,12 +26173,6 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreatePipelineLayout(
     }
     PdockerVkPipelineLayout *layout = pdocker_alloc_handle(sizeof(*layout));
     if (!layout) return VK_ERROR_OUT_OF_HOST_MEMORY;
-    uint64_t owner_device_id = 0;
-    if (!device_owner_id_or_zero_checked(device, &owner_device_id)) {
-        free(layout);
-        return VK_ERROR_INITIALIZATION_FAILED;
-    }
-
     layout->owner_device_id = owner_device_id;
     layout->layout_id = next_vulkan_object_generation();
     layout->set_layout_count = pCreateInfo->setLayoutCount;
@@ -27117,6 +27119,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorUpdateTemplate(
         pCreateInfo->sType != VK_STRUCTURE_TYPE_DESCRIPTOR_UPDATE_TEMPLATE_CREATE_INFO) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
     if (pCreateInfo->pNext) {
         return unsupported_create_info_pnext_result("vkCreateDescriptorUpdateTemplate", pCreateInfo->pNext);
     }
@@ -27144,12 +27150,6 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorUpdateTemplate(
     PdockerVkDescriptorUpdateTemplate *template_handle =
         pdocker_alloc_handle(sizeof(*template_handle));
     if (!template_handle) return VK_ERROR_OUT_OF_HOST_MEMORY;
-    uint64_t owner_device_id = 0;
-    if (!device_owner_id_or_zero_checked(device, &owner_device_id)) {
-        free(template_handle);
-        return VK_ERROR_INITIALIZATION_FAILED;
-    }
-
     template_handle->owner_device_id = owner_device_id;
     template_handle->template_type = pCreateInfo->templateType;
     template_handle->set_layout = layout;
