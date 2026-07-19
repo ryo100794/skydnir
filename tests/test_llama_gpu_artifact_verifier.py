@@ -116,17 +116,46 @@ def passing_config_propagation():
     }
 
 
+def q6_required_env_overlay():
+    verifier = load_verifier_module()
+    return dict(verifier.LLAMA_GPU_Q6_REQUIRED_ENV_OVERLAY)
+
+
+def q6_required_runtime_env_manifest(*, omit=()):
+    required = q6_required_env_overlay()
+    for name in omit:
+        required.pop(name, None)
+    return {
+        "schema": "pdocker.llama.gpu.runtime-env-artifact.v1",
+        "host_requested_env": dict(required),
+        "planned_container_env": dict(required),
+        "requested_or_planned_env": dict(required),
+        "intended_runtime_env": dict(required),
+        "observed_runtime_env": dict(required),
+    }
+
+
 def q6_env_gap_config_propagation():
     cfg = passing_config_propagation()
     cfg["summary"] = "pass"
+    required = set(q6_required_env_overlay())
     for check in cfg["checks"]:
-        if check["env"] in {
-            "PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC",
-            "PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS",
-        }:
+        if check["env"] in required:
             check["expected"] = None
             check["observed_values"] = [False]
             check["status"] = "not-requested"
+    return cfg
+
+
+def q6_required_config_propagation():
+    cfg = passing_config_propagation()
+    cfg["summary"] = "pass"
+    required = set(q6_required_env_overlay())
+    for check in cfg["checks"]:
+        if check["env"] in required:
+            check["expected"] = True
+            check["observed_values"] = [True]
+            check["status"] = "pass"
     return cfg
 
 
@@ -1143,9 +1172,10 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         payload = {
             "schema": "pdocker.llama.gpu.compare.v1",
             "gpu": {
+                "runtime_env_manifest": q6_required_runtime_env_manifest(),
                 "diagnostics": {
                     "runtime_freshness": runtime_marker(),
-                    "config_propagation": passing_config_propagation(),
+                    "config_propagation": q6_required_config_propagation(),
                     "q6_workgroup_diagnostics": {
                         "workgroup_shape_blocker": False,
                         "latest_status": "match",
@@ -1168,6 +1198,38 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         with_cpu = self.run_verifier(payload)
         self.assertEqual(with_cpu.returncode, 0, with_cpu.stdout)
         self.assertTrue(json.loads(with_cpu.stdout)["benchmark_claim_allowed"])
+
+    def test_q6_success_requires_manifest_required_env_overlay(self):
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "runtime_env_manifest": q6_required_runtime_env_manifest(omit=("PDOCKER_GPU_STRICT_PASSTHROUGH",)),
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": q6_required_config_propagation(),
+                    "q6_workgroup_diagnostics": {
+                        "workgroup_shape_blocker": False,
+                        "latest_status": "match",
+                        **q6_verified_writeback(),
+                    },
+                },
+                "correctness": gpu_correctness_report(),
+            },
+            "cpu": {"tokens_per_second": 0.1},
+            **speedup_sections(),
+        }
+        result = self.run_verifier(payload)
+        self.assertEqual(result.returncode, 35, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "q6-required-env-overlay-missing")
+        self.assertEqual(report["responsibility_boundary"], "env-propagation")
+        self.assertEqual(report["q6_effective_blocker_class"], "q6-required-env-overlay-missing")
+        self.assertEqual(
+            {"PDOCKER_GPU_STRICT_PASSTHROUGH"},
+            set(report["q6_workgroup_env_gap"]["missing_requested_envs"]),
+        )
+        self.assertFalse(report["correctness_claim_allowed"])
+        self.assertFalse(report["benchmark_claim_allowed"])
 
     def test_generic_spirv_rope_yarn_cpu_oracle_mismatch_blocks_claims(self):
         payload = {
@@ -1262,9 +1324,10 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         payload = {
             "schema": "pdocker.llama.gpu.compare.v1",
             "gpu": {
+                "runtime_env_manifest": q6_required_runtime_env_manifest(),
                 "diagnostics": {
                     "runtime_freshness": runtime_marker(),
-                    "config_propagation": passing_config_propagation(),
+                    "config_propagation": q6_required_config_propagation(),
                     "generic_spirv_dispatch": {
                         "valid_android_vulkan_events": [
                             generic_spirv_cpu_oracle_event(status="match")
@@ -1652,12 +1715,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                 },
                 "correctness": gpu_correctness_report("pass"),
             },
-            "runtime_env_manifest": {
-                "host_requested_env": {
-                    "PDOCKER_GPU_CPU_ORACLE": "1",
-                    "PDOCKER_GPU_Q6K_ORACLE_WRITEBACK": "1",
-                },
-            },
+            "runtime_env_manifest": q6_required_runtime_env_manifest(omit=("PDOCKER_GPU_STRICT_PASSTHROUGH",)),
             **speedup_sections(),
         }
         result = self.run_verifier(payload, "--require-q6-workgroup-clear")
@@ -1667,19 +1725,13 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         self.assertEqual(report["q6_effective_blocker_class"], "q6-workgroup-env-not-requested")
         self.assertIn("android-llama-gpu-q6-workgroup-run.sh", report["next_action"])
         self.assertEqual(
-            {
-                "PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC",
-                "PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS",
-            },
+            {"PDOCKER_GPU_STRICT_PASSTHROUGH"},
             set(report["q6_workgroup_env_gap"]["missing_requested_envs"]),
         )
 
     def test_q6_workgroup_env_gap_accepts_manifest_overlay_planned_env(self):
         verifier = load_verifier_module()
-        required = {
-            "PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC",
-            "PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS",
-        }
+        required = q6_required_env_overlay()
         cfg = q6_env_gap_config_propagation()
         cfg["summary"] = "pass"
         for check in cfg["checks"]:
@@ -1687,13 +1739,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                 check["expected"] = True
                 check["observed_values"] = [True]
                 check["status"] = "pass"
-        runtime_env_manifest = {
-            "host_requested_env": {"PDOCKER_GPU_CPU_ORACLE": "1"},
-            "planned_container_env": {name: "1" for name in required},
-            "requested_or_planned_env": {name: "1" for name in required},
-            "intended_runtime_env": {name: "1" for name in required},
-            "observed_runtime_env": {},
-        }
+        runtime_env_manifest = q6_required_runtime_env_manifest()
         gap = verifier._q6_workgroup_env_gap(runtime_env_manifest, cfg)
         self.assertEqual(gap["summary"], "pass")
         self.assertEqual(gap["missing_requested_envs"], [])

@@ -23072,6 +23072,13 @@ class GpuAbiContractTest(unittest.TestCase):
             for item in manifest["config_propagation_env_fields"]
         ]
         self.assertEqual(list(verifier.LLAMA_GPU_CONFIG_PROPAGATION_ENV_FIELDS), manifest_config_pairs)
+        self.assertEqual(
+            manifest["q6_required_env_overlay"],
+            verifier.LLAMA_GPU_Q6_REQUIRED_ENV_OVERLAY,
+        )
+        self.assertIn("LLAMA_GPU_Q6_REQUIRED_ENV_OVERLAY", LLAMA_GPU_ARTIFACT_VERIFIER.read_text())
+        for env_name in verifier.LLAMA_GPU_Q6_REQUIRED_ENV_OVERLAY:
+            self.assertIn(env_name, verifier.LLAMA_GPU_COMPARE_FORWARD_ENV_KEYS)
         for env_name, _field_name in verifier.LLAMA_GPU_CONFIG_PROPAGATION_ENV_FIELDS:
             self.assertIn(env_name, verifier.LLAMA_GPU_COMPARE_FORWARD_ENV_KEYS)
 

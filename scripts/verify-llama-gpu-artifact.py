@@ -92,6 +92,21 @@ def _manifest_string_tuple(manifest: dict[str, Any], key: str) -> tuple[str, ...
     return tuple(values)
 
 
+def _manifest_string_dict(manifest: dict[str, Any], key: str) -> dict[str, str]:
+    values = manifest.get(key)
+    if not isinstance(values, dict) or not values:
+        raise RuntimeError(f"llama GPU env manifest field {key!r} must be a non-empty object")
+    out: dict[str, str] = {}
+    for env_name, value in values.items():
+        if not isinstance(env_name, str) or not env_name:
+            raise RuntimeError(f"llama GPU env manifest field {key!r} contains an invalid env")
+        value_text = str(value)
+        if not value_text:
+            raise RuntimeError(f"llama GPU env manifest field {key!r} contains an invalid value for {env_name}")
+        out[env_name] = value_text
+    return out
+
+
 def _manifest_env_field_tuple(manifest: dict[str, Any], key: str) -> tuple[tuple[str, str], ...]:
     values = manifest.get(key)
     if not isinstance(values, list) or not values:
@@ -143,6 +158,9 @@ LLAMA_GPU_ENV_MANIFEST = _load_env_manifest()
 LLAMA_GPU_UI_RUNTIME_ENV_KEYS = _manifest_string_tuple(LLAMA_GPU_ENV_MANIFEST, "ui_runtime_env_keys")
 LLAMA_GPU_COMPARE_FORWARD_ENV_KEYS = _manifest_string_tuple(
     LLAMA_GPU_ENV_MANIFEST, "compare_forward_env_keys"
+)
+LLAMA_GPU_Q6_REQUIRED_ENV_OVERLAY = _manifest_string_dict(
+    LLAMA_GPU_ENV_MANIFEST, "q6_required_env_overlay"
 )
 LLAMA_GPU_CONFIG_PROPAGATION_ENV_FIELDS = _manifest_env_field_tuple(
     LLAMA_GPU_ENV_MANIFEST, "config_propagation_env_fields"
@@ -2548,10 +2566,7 @@ def _q6_workgroup_env_gap(
     runtime_env_manifest: dict[str, Any],
     config_propagation: dict[str, Any],
 ) -> dict[str, Any]:
-    required = [
-        "PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC",
-        "PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS",
-    ]
+    required = list(LLAMA_GPU_Q6_REQUIRED_ENV_OVERLAY)
     host_requested = runtime_env_manifest.get("host_requested_env")
     if not isinstance(host_requested, dict):
         host_requested = {}
@@ -3559,6 +3574,14 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
             data.get("next_action")
             or "rerun with original/effective/executable SPIR-V identity preserved; shader mutations cannot support pass-through correctness or benchmark claims"
         )
+    elif q6_workgroup_env_gap.get("summary") == "fail" and q6.get("latest_status") == "match":
+        classification = "q6-required-env-overlay-missing"
+        responsibility_boundary = "env-propagation"
+        q6_blocker_class = "q6-required-env-overlay-missing"
+        next_action = (
+            data.get("next_action")
+            or "rerun via scripts/android-llama-gpu-q6-workgroup-run.sh so the manifest q6_required_env_overlay is requested before accepting Q6 correctness or benchmark claims"
+        )
     elif q6.get("latest_status") == "match":
         classification = "q6-workgroup-cleared-and-oracle-match"
         responsibility_boundary = "q6-oracle-match"
@@ -3764,6 +3787,7 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
                 "q6-readonly-dispatch-mutation-evidence-missing",
                 "q6-probe-writeback-cleared-oracle-missing",
                 "q6-workgroup-shape-blocker",
+                "q6-required-env-overlay-missing",
                 "q6-safe-kernel-diagnostic-only",
                 "q6-probe-effective-replay-diagnostic-only",
                 "q6-compat-rewrite-diagnostic-only",
@@ -3866,6 +3890,8 @@ def main(argv: list[str]) -> int:
         return 41
     if classification == "q6-readonly-dispatch-mutation-evidence-missing":
         return 49
+    if classification == "q6-required-env-overlay-missing":
+        return 35
     if args.require_q6_match:
         return 0 if classification == "q6-workgroup-cleared-and-oracle-match" else 30
     if args.require_q6_workgroup_clear:

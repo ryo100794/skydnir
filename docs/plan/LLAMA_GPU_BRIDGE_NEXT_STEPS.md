@@ -9,6 +9,24 @@ llama.cpp itself remains unmodified.
 
 ## Current Ground Truth
 
+### 2026-07-19 CPU/static Q6 required-env overlay lane
+
+The artifact verifier now derives its Q6 required runtime overlay from
+`scripts/llama-gpu-env-manifest.json::q6_required_env_overlay` instead of a
+local hard-coded list. A Q6 `match` can no longer promote to
+`q6-workgroup-cleared-and-oracle-match` unless the required strict
+pass-through, reconciliation, CPU-oracle, and dispatch-profile overlay was
+requested through the runtime manifest and reflected by the available config
+propagation checks. Missing overlay evidence classifies as
+`q6-required-env-overlay-missing` and blocks correctness and benchmark claims.
+
+This gate sits immediately before the Q6 success promotion, so concrete Q6
+mismatch diagnostics and diagnostic-only shader replacement classifications are
+not masked.
+
+This is CPU/static evidence-contract hardening only. It does not change
+llama.cpp, Dockerfiles, models, prompts, shader bytes, or executor arithmetic.
+
 ### 2026-07-19 CPU/static shader-mutation precedence lane
 
 The verifier now records shader mutation evidence as a pass-through purity
