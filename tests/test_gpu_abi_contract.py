@@ -1829,6 +1829,8 @@ class GpuAbiContractTest(unittest.TestCase):
 
         create_body = c_function_body(icd, "vkCreateSwapchainKHR")
         swapchain_pnext_body = c_function_body(icd, "swapchain_create_pnext_noop")
+        self.assertIn("if (pSwapchain) *pSwapchain = VK_NULL_HANDLE;", create_body)
+        self.assertIn("device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0", create_body)
         for marker in [
             "!pCreateInfo",
             "!pSwapchain",
@@ -11925,6 +11927,10 @@ class GpuAbiContractTest(unittest.TestCase):
             "private_data_slot_unregister",
         ]:
             self.assertIn(marker, icd)
+        private_create_body = c_function_body(icd, "vkCreatePrivateDataSlot")
+        self.assertIn("if (pPrivateDataSlot) *pPrivateDataSlot = VK_NULL_HANDLE;", private_create_body)
+        self.assertIn("pCreateInfo->sType != VK_STRUCTURE_TYPE_PRIVATE_DATA_SLOT_CREATE_INFO", private_create_body)
+        self.assertIn("device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0", private_create_body)
         private_destroy_body = c_function_body(icd, "vkDestroyPrivateDataSlot")
         self.assertIn("private_data_slot_handle_lookup_for_device(device, privateDataSlot)", private_destroy_body)
         self.assertIn("private_data_slot_free_object(private_data_slot_unregister_object(target))", private_destroy_body)

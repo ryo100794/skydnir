@@ -1483,6 +1483,9 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
             "    if (vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical_b, surface_a, " + amp + "caps) != VK_ERROR_SURFACE_LOST_KHR) return 18" + sc,
             "    VkSwapchainCreateInfoKHR info" + sc,
             "    fill_swapchain_info(surface_a, " + amp + "info)" + sc,
+            "    VkSwapchainKHR null_device_swapchain = (VkSwapchainKHR)(uintptr_t)0xdeadu" + sc,
+            "    if (vkCreateSwapchainKHR(VK_NULL_HANDLE, " + amp + "info, NULL, " + amp + "null_device_swapchain) != VK_ERROR_INITIALIZATION_FAILED) return 22" + sc,
+            "    if (null_device_swapchain != VK_NULL_HANDLE) return 23" + sc,
             "    VkSwapchainKHR wrong_swapchain = VK_NULL_HANDLE" + sc,
             "    if (vkCreateSwapchainKHR(device_b, " + amp + "info, NULL, " + amp + "wrong_swapchain) != VK_ERROR_SURFACE_LOST_KHR) return 13" + sc,
             "    if (wrong_swapchain != VK_NULL_HANDLE) return 14" + sc,
@@ -4019,7 +4022,10 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 memset(&slot_info, 0, sizeof(slot_info));
                 slot_info.sType = VK_STRUCTURE_TYPE_PRIVATE_DATA_SLOT_CREATE_INFO;
                 VkPrivateDataSlot slot = (VkPrivateDataSlot)(uintptr_t)0xfeedu;
-                if (vkCreatePrivateDataSlot(device, &slot_info, NULL, &slot) != VK_SUCCESS || slot == VK_NULL_HANDLE) return 12;
+                if (vkCreatePrivateDataSlot(VK_NULL_HANDLE, &slot_info, NULL, &slot) !=
+                        VK_ERROR_INITIALIZATION_FAILED ||
+                    slot != VK_NULL_HANDLE) return 12;
+                if (vkCreatePrivateDataSlot(device, &slot_info, NULL, &slot) != VK_SUCCESS || slot == VK_NULL_HANDLE) return 37;
                 if (vkSetPrivateData(device, VK_OBJECT_TYPE_BUFFER, buffer_handle, slot, 0xabcdu) != VK_SUCCESS) return 13;
                 uint64_t data = 0;
                 vkGetPrivateData(device, VK_OBJECT_TYPE_BUFFER, buffer_handle, slot, &data);
@@ -4065,7 +4071,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 VkQueue queue = VK_NULL_HANDLE;
                 vkGetDeviceQueue(device, 0, 0, &queue);
                 PdockerVkQueue *queue_obj = pdocker_vk_queue_from_handle(queue);
-                if (!queue || !queue_obj) return 36;
+                if (!queue || !queue_obj) return 37;
                 const uint64_t queue_handle = (uint64_t)(uintptr_t)queue;
                 if (vkSetPrivateData(device, VK_OBJECT_TYPE_QUEUE, queue_handle, slot, 0x4242u) != VK_SUCCESS) return 37;
                 data = 0;

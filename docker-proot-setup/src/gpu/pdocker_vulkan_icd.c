@@ -29549,9 +29549,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSwapchainKHR(
         const VkAllocationCallbacks *pAllocator,
         VkSwapchainKHR *pSwapchain) {
     (void)pAllocator;
-    if (!pCreateInfo || !pSwapchain) return VK_ERROR_INITIALIZATION_FAILED;
-    *pSwapchain = VK_NULL_HANDLE;
-    if (pCreateInfo->sType != VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR) {
+    if (pSwapchain) *pSwapchain = VK_NULL_HANDLE;
+    if (!pCreateInfo || !pSwapchain ||
+        pCreateInfo->sType != VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    uint64_t owner_device_id = 0;
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
     if (!vulkan_v5_object_transport_enabled()) {
@@ -29608,12 +29612,6 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSwapchainKHR(
     PdockerVkSwapchain *swapchain = pdocker_alloc_handle(sizeof(*swapchain));
     if (!swapchain) return VK_ERROR_OUT_OF_HOST_MEMORY;
     memset(swapchain, 0, sizeof(*swapchain));
-    uint64_t owner_device_id = 0;
-    if (!device_owner_id_or_zero_checked(device, &owner_device_id)) {
-        free(swapchain);
-        return VK_ERROR_INITIALIZATION_FAILED;
-    }
-
     swapchain->owner_device_id = owner_device_id;
     swapchain->surface = surface;
     swapchain->image_format = pCreateInfo->imageFormat;
@@ -38722,14 +38720,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreatePrivateDataSlot(
         trace_icd_runtime_failure("private-data-slot-flags-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }
-    PdockerVkPrivateDataSlot *slot = pdocker_alloc_handle(sizeof(*slot));
-    if (!slot) return VK_ERROR_OUT_OF_HOST_MEMORY;
     uint64_t owner_device_id = 0;
-    if (!device_owner_id_or_zero_checked(device, &owner_device_id)) {
-        free(slot);
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
-
+    PdockerVkPrivateDataSlot *slot = pdocker_alloc_handle(sizeof(*slot));
+    if (!slot) return VK_ERROR_OUT_OF_HOST_MEMORY;
     slot->owner_device_id = owner_device_id;
     slot->records = NULL;
     private_data_slot_register(slot);
