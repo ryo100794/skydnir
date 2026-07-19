@@ -8683,14 +8683,33 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("a->memory_type_index == b->memory_type_index", identity)
         self.assertIn("a->memory_heap_index == b->memory_heap_index", identity)
         binding_struct = executor.split("} VulkanVectorBuffer;", 1)[1].split("} VulkanDispatchBinding;", 1)[0]
+        self.assertIn("uint64_t api_memory_property_flags;", binding_struct)
         self.assertIn("uint32_t api_memory_type_index;", binding_struct)
         self.assertIn("uint32_t api_memory_heap_index;", binding_struct)
+        strict_memory_struct = executor.split("} VulkanStrictMemoryObject;", 1)[0].rsplit("typedef struct {", 1)[1]
+        self.assertIn("uint64_t api_memory_property_flags;", strict_memory_struct)
+        image_memory_struct = executor.split("} VulkanDispatchImageMemoryObject;", 1)[0].rsplit("typedef struct {", 1)[1]
+        self.assertIn("uint64_t api_memory_property_flags;", image_memory_struct)
         materializer = c_function_body(executor, "materialize_vulkan_dispatch_v5_native_plan_bindings")
+        self.assertIn("binding->api_memory_property_flags = memory->memory_property_flags;", materializer)
         self.assertIn("binding->api_memory_type_index = memory->memory_type_index;", materializer)
         self.assertIn("binding->api_memory_heap_index = memory->memory_heap_index;", materializer)
+        image_materializer = c_function_body(executor, "materialize_vulkan_dispatch_images")
+        self.assertIn("memories[mem_index].api_memory_property_flags = mem->memory_property_flags;", image_materializer)
+        strict_graph = c_function_body(executor, "create_strict_vulkan_object_graph")
+        self.assertIn("memories[mem_index].api_memory_property_flags = bindings[i].api_memory_property_flags;", strict_graph)
+        self.assertIn("memories[mem_index].api_memory_property_flags != bindings[i].api_memory_property_flags", strict_graph)
         reconcile_hash = c_function_body(executor, "reconcile_descriptor_hash")
+        self.assertIn("u64 = bindings[i].api_memory_property_flags;", reconcile_hash)
         self.assertIn("u32 = bindings[i].api_memory_type_index;", reconcile_hash)
         self.assertIn("u32 = bindings[i].api_memory_heap_index;", reconcile_hash)
+        cache_key = c_function_body(executor, "strict_graph_cache_key")
+        self.assertIn("u32 = b->api_array_element; hash = fnv1a64_update(hash, &u32, sizeof(u32));", cache_key)
+        self.assertIn("u64 = b->api_buffer_usage; hash = fnv1a64_update(hash, &u64, sizeof(u64));", cache_key)
+        self.assertIn("u32 = b->access_flags; hash = fnv1a64_update(hash, &u32, sizeof(u32));", cache_key)
+        self.assertIn("u64 = b->api_memory_property_flags; hash = fnv1a64_update(hash, &u64, sizeof(u64));", cache_key)
+        self.assertIn("u32 = b->api_memory_type_index; hash = fnv1a64_update(hash, &u32, sizeof(u32));", cache_key)
+        self.assertIn("u32 = b->api_memory_heap_index; hash = fnv1a64_update(hash, &u32, sizeof(u32));", cache_key)
 
     def test_vulkan_compute_v5_preserves_api_buffer_usage_identity(self):
         icd = VULKAN_ICD.read_text()

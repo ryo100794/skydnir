@@ -9,6 +9,23 @@ llama.cpp itself remains unmodified.
 
 ## Current Ground Truth
 
+### 2026-07-19 CPU/static V5 strict graph identity-complete hash lane
+
+The V5 executor now keeps `memory_property_flags` in native-plan bindings in
+addition to the already transported memory type and heap indices.  Descriptor
+reconciliation hashes now include memory property flags on the executor side,
+matching the ICD sender hash.  Strict object-graph construction rejects aliases
+where the same API memory id carries different memory property/type/heap
+identity, and the strict graph cache key now includes descriptor array element,
+API buffer usage, descriptor access flags, memory property flags, memory type,
+and memory heap.
+
+This closes a CPU/static reflection gap where a frame could preserve metadata in
+the resource table but lose it before executor reconciliation or graph-cache
+reuse.  It is generic Vulkan pass-through hardening and does not change
+llama.cpp, Dockerfiles, models, prompts, shader bytes, runtime defaults, or
+executor arithmetic.
+
 ### 2026-07-19 CPU/static V5 memory type identity lane
 
 V5/V6 resource entries now preserve the producer-side Vulkan memory type index

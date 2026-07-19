@@ -976,6 +976,7 @@ typedef struct {
     uint64_t api_buffer_usage;
     uint32_t api_descriptor_type;
     uint32_t access_flags;
+    uint64_t api_memory_property_flags;
     int api_dynamic;
     off_t api_memory_offset;
     size_t api_memory_size;
@@ -3452,6 +3453,7 @@ typedef struct {
     size_t size;
     uint32_t memory_type_bits;
     uint32_t memory_type_index;
+    uint64_t api_memory_property_flags;
     uint32_t api_memory_type_index;
     uint32_t api_memory_heap_index;
     VkDeviceMemory memory;
@@ -3490,6 +3492,7 @@ typedef struct {
     uint64_t external_offset;
     uint32_t memory_type_bits;
     uint32_t memory_type_index;
+    uint64_t api_memory_property_flags;
     uint32_t api_memory_type_index;
     uint32_t api_memory_heap_index;
     int needs_host_map;
@@ -4984,6 +4987,7 @@ static int materialize_vulkan_dispatch_images(
             memories[mem_index].allocation_size = (size_t)mem->size;
             memories[mem_index].external_offset = mem->external_offset;
             memories[mem_index].memory_type_bits = UINT32_MAX;
+            memories[mem_index].api_memory_property_flags = mem->memory_property_flags;
             memories[mem_index].api_memory_type_index = mem->memory_type_index;
             memories[mem_index].api_memory_heap_index = mem->memory_heap_index;
         }
@@ -5877,10 +5881,12 @@ static int create_strict_vulkan_object_graph(
             memories[mem_index].fd = buffer_fds[i];
             memories[mem_index].size = compact_descriptor_window ? 0 : bindings[i].api_memory_size;
             memories[mem_index].memory_type_bits = UINT32_MAX;
+            memories[mem_index].api_memory_property_flags = bindings[i].api_memory_property_flags;
             memories[mem_index].api_memory_type_index = bindings[i].api_memory_type_index;
             memories[mem_index].api_memory_heap_index = bindings[i].api_memory_heap_index;
         } else {
-            if (memories[mem_index].api_memory_type_index != bindings[i].api_memory_type_index ||
+            if (memories[mem_index].api_memory_property_flags != bindings[i].api_memory_property_flags ||
+                memories[mem_index].api_memory_type_index != bindings[i].api_memory_type_index ||
                 memories[mem_index].api_memory_heap_index != bindings[i].api_memory_heap_index) {
                 return -EINVAL;
             }
@@ -6986,15 +6992,21 @@ static uint64_t strict_graph_cache_key(
         u64 = (uint64_t)i; hash = fnv1a64_update(hash, &u64, sizeof(u64));
         u32 = b->descriptor_set; hash = fnv1a64_update(hash, &u32, sizeof(u32));
         u32 = b->binding; hash = fnv1a64_update(hash, &u32, sizeof(u32));
+        u32 = b->api_array_element; hash = fnv1a64_update(hash, &u32, sizeof(u32));
         u64 = (uint64_t)b->offset; hash = fnv1a64_update(hash, &u64, sizeof(u64));
         u64 = (uint64_t)b->size; hash = fnv1a64_update(hash, &u64, sizeof(u64));
         u64 = (uint64_t)b->api_offset; hash = fnv1a64_update(hash, &u64, sizeof(u64));
         u64 = (uint64_t)b->api_range; hash = fnv1a64_update(hash, &u64, sizeof(u64));
         u64 = (uint64_t)b->api_buffer_size; hash = fnv1a64_update(hash, &u64, sizeof(u64));
+        u64 = b->api_buffer_usage; hash = fnv1a64_update(hash, &u64, sizeof(u64));
         u32 = b->api_descriptor_type; hash = fnv1a64_update(hash, &u32, sizeof(u32));
+        u32 = b->access_flags; hash = fnv1a64_update(hash, &u32, sizeof(u32));
         u32 = (uint32_t)b->api_dynamic; hash = fnv1a64_update(hash, &u32, sizeof(u32));
         u64 = (uint64_t)b->api_memory_offset; hash = fnv1a64_update(hash, &u64, sizeof(u64));
         u64 = (uint64_t)b->api_memory_size; hash = fnv1a64_update(hash, &u64, sizeof(u64));
+        u64 = b->api_memory_property_flags; hash = fnv1a64_update(hash, &u64, sizeof(u64));
+        u32 = b->api_memory_type_index; hash = fnv1a64_update(hash, &u32, sizeof(u32));
+        u32 = b->api_memory_heap_index; hash = fnv1a64_update(hash, &u32, sizeof(u32));
         u64 = b->api_memory_id; hash = fnv1a64_update(hash, &u64, sizeof(u64));
         u64 = b->api_buffer_id; hash = fnv1a64_update(hash, &u64, sizeof(u64));
         u32 = binding_read_needed[i]; hash = fnv1a64_update(hash, &u32, sizeof(u32));
@@ -7301,6 +7313,8 @@ static uint64_t reconcile_descriptor_hash(
         u64 = (uint64_t)bindings[i].api_memory_offset;
         hash = fnv1a64_update(hash, &u64, sizeof(u64));
         u64 = (uint64_t)bindings[i].api_memory_size;
+        hash = fnv1a64_update(hash, &u64, sizeof(u64));
+        u64 = bindings[i].api_memory_property_flags;
         hash = fnv1a64_update(hash, &u64, sizeof(u64));
         u32 = bindings[i].api_memory_type_index;
         hash = fnv1a64_update(hash, &u32, sizeof(u32));
@@ -25374,6 +25388,7 @@ static int materialize_vulkan_dispatch_v5_native_plan_bindings(
         binding->api_dynamic = (d->descriptor_flags & PDOCKER_GPU_V5_DESCRIPTOR_FLAG_DYNAMIC) ? 1 : 0;
         binding->api_memory_offset = memory_offset_checked;
         binding->api_memory_size = (size_t)memory->size;
+        binding->api_memory_property_flags = memory->memory_property_flags;
         binding->api_memory_type_index = memory->memory_type_index;
         binding->api_memory_heap_index = memory->memory_heap_index;
         binding->api_memory_id = memory->resource_id;
