@@ -3355,22 +3355,41 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 device.enabled_extension_mask = 0;
                 if (!device_proc_address_hidden_by_enabled_state(&device, "vkCmdSetPatchControlPointsEXT")) return 122;
 
-                PdockerVkQueue queue;
+                VkDeviceCreateInfo queue_device_info;
+                memset(&queue_device_info, 0, sizeof(queue_device_info));
+                queue_device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                VkDevice queue_device = VK_NULL_HANDLE;
+                if (vkCreateDevice((VkPhysicalDevice)&g_device, &queue_device_info, NULL, &queue_device) != VK_SUCCESS ||
+                    queue_device == VK_NULL_HANDLE) return 132;
+                VkQueue queue = VK_NULL_HANDLE;
+                vkGetDeviceQueue(queue_device, 0, 0, &queue);
+                PdockerVkQueue *queue_obj = pdocker_vk_queue_from_handle(queue);
+                if (!queue_obj) {{
+                    vkDestroyDevice(queue_device, NULL);
+                    return 133;
+                }}
                 PdockerVkFence fence;
-                memset(&queue, 0, sizeof(queue));
-                ensure_vulkan_dispatchable_object_ids();
-                queue.object_id = next_vulkan_object_generation();
-                queue.instance_object_id = 1;
-                queue.physical_device_object_id = 1;
-                queue.device_object_id = 1;
                 memset(&fence, 0, sizeof(fence));
                 fence.signaled = true;
-                if (vkQueueSubmit2((VkQueue)&queue, 0, NULL, (VkFence)&fence) != VK_ERROR_FEATURE_NOT_PRESENT) return 103;
-                if (!fence.signaled) return 104;
-                queue.requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
-                if (vkQueueSubmit2((VkQueue)&queue, 0, NULL, VK_NULL_HANDLE) != VK_ERROR_FEATURE_NOT_PRESENT) return 105;
-                queue.enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
-                if (vkQueueSubmit2((VkQueue)&queue, 0, NULL, VK_NULL_HANDLE) != VK_SUCCESS) return 106;
+                if (vkQueueSubmit2(queue, 0, NULL, (VkFence)&fence) != VK_ERROR_FEATURE_NOT_PRESENT) {{
+                    vkDestroyDevice(queue_device, NULL);
+                    return 103;
+                }}
+                if (!fence.signaled) {{
+                    vkDestroyDevice(queue_device, NULL);
+                    return 104;
+                }}
+                queue_obj->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
+                if (vkQueueSubmit2(queue, 0, NULL, VK_NULL_HANDLE) != VK_ERROR_FEATURE_NOT_PRESENT) {{
+                    vkDestroyDevice(queue_device, NULL);
+                    return 105;
+                }}
+                queue_obj->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
+                if (vkQueueSubmit2(queue, 0, NULL, VK_NULL_HANDLE) != VK_SUCCESS) {{
+                    vkDestroyDevice(queue_device, NULL);
+                    return 106;
+                }}
+                vkDestroyDevice(queue_device, NULL);
 
                 PdockerVkMemory memory;
                 PdockerVkBuffer buffer;
@@ -3803,6 +3822,34 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 vkGetPrivateData(device, VK_OBJECT_TYPE_BUFFER, buffer_handle, bogus_slot, &data);
                 if (data != 0) return 31;
                 vkDestroyPrivateDataSlot(device, bogus_slot, NULL);
+
+                VkQueue queue = VK_NULL_HANDLE;
+                vkGetDeviceQueue(device, 0, 0, &queue);
+                PdockerVkQueue *queue_obj = pdocker_vk_queue_from_handle(queue);
+                if (!queue || !queue_obj) return 36;
+                const uint64_t queue_handle = (uint64_t)(uintptr_t)queue;
+                if (vkSetPrivateData(device, VK_OBJECT_TYPE_QUEUE, queue_handle, slot, 0x4242u) != VK_SUCCESS) return 37;
+                data = 0;
+                vkGetPrivateData(device, VK_OBJECT_TYPE_QUEUE, queue_handle, slot, &data);
+                if (data != 0x4242u) return 38;
+
+                PdockerVkQueue forged_queue;
+                memset(&forged_queue, 0, sizeof(forged_queue));
+                forged_queue.object_id = queue_obj->object_id;
+                forged_queue.instance_object_id = queue_obj->instance_object_id;
+                forged_queue.physical_device_object_id = queue_obj->physical_device_object_id;
+                forged_queue.device_object_id = queue_obj->device_object_id;
+                const uint64_t forged_queue_handle = (uint64_t)(uintptr_t)&forged_queue;
+                if (vkSetPrivateData(device, VK_OBJECT_TYPE_QUEUE, forged_queue_handle, slot, 1u) != VK_ERROR_INITIALIZATION_FAILED) return 39;
+                data = 0x777u;
+                vkGetPrivateData(device, VK_OBJECT_TYPE_QUEUE, forged_queue_handle, slot, &data);
+                if (data != 0) return 40;
+
+                const uint64_t bad_queue_handle = (uint64_t)(uintptr_t)0x12345678u;
+                if (vkSetPrivateData(device, VK_OBJECT_TYPE_QUEUE, bad_queue_handle, slot, 1u) != VK_ERROR_INITIALIZATION_FAILED) return 41;
+                data = 0x777u;
+                vkGetPrivateData(device, VK_OBJECT_TYPE_QUEUE, bad_queue_handle, slot, &data);
+                if (data != 0) return 42;
 
                 vkDestroyPrivateDataSlot(device, slot, NULL);
                 vkDestroyPrivateDataSlot(device, VK_NULL_HANDLE, NULL);
@@ -8922,7 +8969,79 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     vkDestroyDevice(valid_device, NULL);
                     return 14;
                 }}
+                PdockerVkQueue *live_queue = pdocker_vk_queue_from_handle(queue);
+                if (live_queue == NULL) {{
+                    fprintf(stderr, "valid queue handle did not resolve while live\\n");
+                    vkDestroyDevice(valid_device, NULL);
+                    return 15;
+                }}
+                PdockerVkQueue forged_queue;
+                memset(&forged_queue, 0, sizeof(forged_queue));
+                forged_queue.object_id = live_queue->object_id;
+                forged_queue.instance_object_id = live_queue->instance_object_id;
+                forged_queue.physical_device_object_id = live_queue->physical_device_object_id;
+                forged_queue.device_object_id = live_queue->device_object_id;
+                if (pdocker_vk_queue_from_handle((VkQueue)&forged_queue) != NULL) {{
+                    fprintf(stderr, "unregistered forged queue resolved as live\\n");
+                    vkDestroyDevice(valid_device, NULL);
+                    return 16;
+                }}
+                VkQueue bad_queue = (VkQueue)(uintptr_t)0x12345678u;
+                if (pdocker_vk_queue_from_handle(bad_queue) != NULL) {{
+                    fprintf(stderr, "invalid queue pointer resolved as live\\n");
+                    vkDestroyDevice(valid_device, NULL);
+                    return 17;
+                }}
+                if (vkQueueSubmit(bad_queue, 0, NULL, VK_NULL_HANDLE) != VK_ERROR_INITIALIZATION_FAILED) {{
+                    fprintf(stderr, "invalid queue pointer was accepted by submit\\n");
+                    vkDestroyDevice(valid_device, NULL);
+                    return 18;
+                }}
+                if (vkQueueSubmit2(bad_queue, 0, NULL, VK_NULL_HANDLE) != VK_ERROR_INITIALIZATION_FAILED) {{
+                    fprintf(stderr, "invalid queue pointer was accepted by submit2\\n");
+                    vkDestroyDevice(valid_device, NULL);
+                    return 21;
+                }}
+                if (vkQueuePresentKHR(bad_queue, NULL) != VK_ERROR_INITIALIZATION_FAILED) {{
+                    fprintf(stderr, "invalid queue pointer was accepted by present\\n");
+                    vkDestroyDevice(valid_device, NULL);
+                    return 22;
+                }}
+                if (vkQueueWaitIdle(bad_queue) != VK_ERROR_INITIALIZATION_FAILED) {{
+                    fprintf(stderr, "invalid queue pointer was accepted by wait-idle\\n");
+                    vkDestroyDevice(valid_device, NULL);
+                    return 23;
+                }}
+                if (vkQueueBindSparse(bad_queue, 0, NULL, VK_NULL_HANDLE) != VK_ERROR_INITIALIZATION_FAILED) {{
+                    fprintf(stderr, "invalid queue pointer was accepted by bind-sparse\\n");
+                    vkDestroyDevice(valid_device, NULL);
+                    return 24;
+                }}
                 vkDestroyDevice(valid_device, NULL);
+                if (pdocker_vk_queue_from_handle(queue) != NULL) {{
+                    fprintf(stderr, "destroyed queue still resolved as live\\n");
+                    return 19;
+                }}
+                if (vkQueueSubmit(queue, 0, NULL, VK_NULL_HANDLE) != VK_ERROR_INITIALIZATION_FAILED) {{
+                    fprintf(stderr, "destroyed queue was accepted by submit\\n");
+                    return 20;
+                }}
+                if (vkQueueSubmit2(queue, 0, NULL, VK_NULL_HANDLE) != VK_ERROR_INITIALIZATION_FAILED) {{
+                    fprintf(stderr, "destroyed queue was accepted by submit2\\n");
+                    return 25;
+                }}
+                if (vkQueuePresentKHR(queue, NULL) != VK_ERROR_INITIALIZATION_FAILED) {{
+                    fprintf(stderr, "destroyed queue was accepted by present\\n");
+                    return 26;
+                }}
+                if (vkQueueWaitIdle(queue) != VK_ERROR_INITIALIZATION_FAILED) {{
+                    fprintf(stderr, "destroyed queue was accepted by wait-idle\\n");
+                    return 27;
+                }}
+                if (vkQueueBindSparse(queue, 0, NULL, VK_NULL_HANDLE) != VK_ERROR_INITIALIZATION_FAILED) {{
+                    fprintf(stderr, "destroyed queue was accepted by bind-sparse\\n");
+                    return 28;
+                }}
 
                 if (expect_null_queue(NULL, 3)) return 3;
 

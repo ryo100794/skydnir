@@ -3914,17 +3914,19 @@ static bool pdocker_vk_queue_identity_live(const PdockerVkQueue *queue) {
 
 static PdockerVkQueue *pdocker_vk_queue_from_handle(VkQueue queue) {
     PdockerVkQueue *pdocker_queue = (PdockerVkQueue *)queue;
-    if (!pdocker_vk_queue_identity_live(pdocker_queue)) return NULL;
-    if (pdocker_queue == &g_queue) return pdocker_queue;
+    if (!pdocker_queue) return NULL;
+    if (pdocker_queue == &g_queue) {
+        return pdocker_vk_queue_identity_live(&g_queue) ? &g_queue : NULL;
+    }
     for (PdockerVkQueue *candidate = g_queues; candidate; candidate = candidate->next) {
-        if (candidate == pdocker_queue && pdocker_vk_queue_identity_live(candidate)) {
-            return candidate;
+        if (candidate == pdocker_queue) {
+            return pdocker_vk_queue_identity_live(candidate) ? candidate : NULL;
         }
     }
     for (PdockerVkQueue *candidate = g_retired_queues; candidate; candidate = candidate->next) {
         if (candidate == pdocker_queue) return NULL;
     }
-    return pdocker_queue;
+    return NULL;
 }
 
 static PdockerVkDevice *pdocker_vk_device_from_handle(VkDevice device) {

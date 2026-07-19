@@ -7811,11 +7811,17 @@ class GpuAbiContractTest(unittest.TestCase):
         queue_helper = c_function_body(icd, "pdocker_vk_queue_from_handle")
         for marker in [
             "PdockerVkQueue *pdocker_queue = (PdockerVkQueue *)queue;",
-            "pdocker_vk_queue_identity_live(pdocker_queue)",
+            "if (!pdocker_queue) return NULL;",
+            "if (pdocker_queue == &g_queue)",
+            "pdocker_vk_queue_identity_live(&g_queue)",
             "for (PdockerVkQueue *candidate = g_queues",
+            "if (candidate == pdocker_queue)",
+            "pdocker_vk_queue_identity_live(candidate)",
             "for (PdockerVkQueue *candidate = g_retired_queues",
         ]:
             self.assertIn(marker, queue_helper)
+        self.assertNotIn("pdocker_vk_queue_identity_live(pdocker_queue)", queue_helper)
+        self.assertNotIn("return pdocker_queue;", queue_helper)
         submit_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit", 1)[1].split(
             "VKAPI_ATTR VkResult VKAPI_CALL vkWaitForFences", 1
         )[0]
