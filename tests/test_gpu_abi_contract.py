@@ -36,6 +36,72 @@ LLAMA_Q6_PLAN_VERIFIER = ROOT / "scripts" / "verify-llama-gpu-q6-run-against-pla
 Q6_STAGE_TRACE_SPVASM_ANALYZER = ROOT / "scripts" / "maintenance" / "analyze-q6-stage-trace-spvasm.py"
 
 
+VULKAN_ABI_ID_FIELD_CLASSES = frozenset({
+    "correlation_id",
+    "native_handle_transport_identity",
+    "object_identity_guarded",
+    "identity_key_guarded",
+    "object_reference_checked",
+    "command_or_sync_target",
+    "specialization_constant_identity",
+})
+
+# Every Vulkan ABI integer field ending in `_id` must be classified here before
+# it can cross the glibc ICD -> APK executor boundary.  This is deliberately
+# struct-qualified: a new ABI extension must choose whether an id is a stable
+# object identity, a composite identity-key member, a checked reference, or only
+# a correlation id.  That prevents future pass-through work from silently adding
+# handle-like data without a validation lane.
+VULKAN_ABI_ID_FIELD_CLASSIFICATIONS = {
+    "PDOCKER_GPU_VULKAN_DISPATCH_V4_BINDING_FIELDS.api_memory_id": "object_reference_checked",
+    "PDOCKER_GPU_VULKAN_DISPATCH_V4_BINDING_FIELDS.api_buffer_id": "object_reference_checked",
+    "PdockerGpuVulkanDispatchV5FrameHeader.dispatch_id": "correlation_id",
+    "PdockerGpuVulkanDispatchV55HeaderExtension.instance_object_id": "native_handle_transport_identity",
+    "PdockerGpuVulkanDispatchV55HeaderExtension.physical_device_object_id": "native_handle_transport_identity",
+    "PdockerGpuVulkanDispatchV55HeaderExtension.device_object_id": "native_handle_transport_identity",
+    "PdockerGpuVulkanDispatchV55HeaderExtension.queue_object_id": "native_handle_transport_identity",
+    "PdockerGpuVulkanDispatchV56HeaderExtension.pipeline_layout_id": "identity_key_guarded",
+    "PdockerGpuVulkanDispatchV53BufferViewEntry.buffer_view_id": "object_identity_guarded",
+    "PdockerGpuVulkanDispatchV56DescriptorSetLayoutEntry.layout_id": "identity_key_guarded",
+    "PdockerGpuVulkanDispatchV56PipelineLayoutSetEntry.pipeline_layout_id": "identity_key_guarded",
+    "PdockerGpuVulkanDispatchV56PipelineLayoutSetEntry.descriptor_set_layout_id": "object_reference_checked",
+    "PdockerGpuVulkanDispatchV56PushConstantRangeEntry.pipeline_layout_id": "identity_key_guarded",
+    "PdockerGpuVulkanDispatchV57PushConstantOpEntry.pipeline_layout_id": "object_reference_checked",
+    "PdockerGpuVulkanDispatchV5ResourceEntry.resource_id": "object_identity_guarded",
+    "PdockerGpuVulkanDispatchV5DescriptorEntry.resource_id": "object_reference_checked",
+    "PdockerGpuVulkanDispatchV5ImageEntry.image_id": "object_identity_guarded",
+    "PdockerGpuVulkanDispatchV5ImageViewEntry.view_id": "object_identity_guarded",
+    "PdockerGpuVulkanDispatchV5SamplerEntry.sampler_id": "object_identity_guarded",
+    "PdockerGpuVulkanDispatchV5DescriptorObjectEntry.resource_id": "object_reference_checked",
+    "PdockerGpuVulkanDispatchV5SpecializationEntry.constant_id": "specialization_constant_identity",
+    "PdockerGpuVulkanGraphicsV6FrameHeader.submit_id": "correlation_id",
+    "PdockerGpuVulkanGraphicsV6PipelineEntry.pipeline_id": "object_identity_guarded",
+    "PdockerGpuVulkanGraphicsV6PipelineEntry.layout_id": "object_reference_checked",
+    "PdockerGpuVulkanGraphicsV6PipelineEntry.render_pass_id": "object_reference_checked",
+    "PdockerGpuVulkanGraphicsV6AttachmentEntry.resource_id": "object_reference_checked",
+    "PdockerGpuVulkanGraphicsV630HeaderExtension.instance_object_id": "native_handle_transport_identity",
+    "PdockerGpuVulkanGraphicsV630HeaderExtension.physical_device_object_id": "native_handle_transport_identity",
+    "PdockerGpuVulkanGraphicsV630HeaderExtension.device_object_id": "native_handle_transport_identity",
+    "PdockerGpuVulkanGraphicsV630HeaderExtension.queue_object_id": "native_handle_transport_identity",
+    "PdockerGpuVulkanGraphicsV62SpecializationEntry.constant_id": "specialization_constant_identity",
+    "PdockerGpuVulkanGraphicsV617QueryCommandEntry.query_pool_id": "command_or_sync_target",
+    "PdockerGpuVulkanGraphicsV618CopyQueryResultEntry.query_pool_id": "command_or_sync_target",
+    "PdockerGpuVulkanGraphicsV619SubmitSyncEntry.semaphore_id": "command_or_sync_target",
+    "PdockerGpuVulkanGraphicsV619SubmitSyncEntry.fence_id": "command_or_sync_target",
+    "PdockerGpuVulkanGraphicsV624DescriptorSetLayoutEntry.layout_id": "identity_key_guarded",
+    "PdockerGpuVulkanGraphicsV624PipelineLayoutSetEntry.pipeline_layout_id": "identity_key_guarded",
+    "PdockerGpuVulkanGraphicsV624PipelineLayoutSetEntry.descriptor_set_layout_id": "object_reference_checked",
+    "PdockerGpuVulkanGraphicsV625DescriptorBindEntry.pipeline_layout_id": "object_reference_checked",
+    "PdockerGpuVulkanGraphicsV626EventWaitRefEntry.event_id": "command_or_sync_target",
+    "PdockerGpuVulkanGraphicsV627BufferViewEntry.buffer_view_id": "object_identity_guarded",
+    "PdockerGpuVulkanGraphicsV628PushConstantRangeEntry.pipeline_layout_id": "identity_key_guarded",
+    "PdockerGpuVulkanGraphicsV629VariableDescriptorCountEntry.pipeline_layout_id": "object_reference_checked",
+    "PdockerGpuVulkanGraphicsV629VariableDescriptorCountEntry.descriptor_set_layout_id": "object_reference_checked",
+    "PdockerGpuVulkanGraphicsV61PushConstantMetadataEntry.layout_id": "object_reference_checked",
+    "PdockerGpuVulkanGraphicsV6CommandEntry.pipeline_layout_id": "object_reference_checked",
+}
+
+
 def load_llama_gpu_artifact_verifier():
     spec = importlib.util.spec_from_file_location("llama_gpu_artifact_verifier", LLAMA_GPU_ARTIFACT_VERIFIER)
     verifier = importlib.util.module_from_spec(spec)
@@ -335,6 +401,36 @@ def c_function_body(source, name):
     raise AssertionError(f"unterminated function body: {name}")
 
 
+
+
+def vulkan_abi_integer_fields_with_suffix(source, suffix):
+    fields = set()
+    for macro_name in ["PDOCKER_GPU_VULKAN_DISPATCH_V4_BINDING_FIELDS"]:
+        macro = re.search(
+            rf"#define\s+{macro_name}\(X\)\s+\\\n(?P<body>.*?)(?:\n\n|/\*)",
+            source,
+            re.S,
+        )
+        assert macro is not None, macro_name
+        for field_name, field_type in re.findall(r"X\((\w+),\s*(\w+)\)", macro.group("body")):
+            if field_type in {"u32", "u64", "size"} and field_name.endswith(suffix):
+                fields.add(f"{macro_name}.{field_name}")
+    for match in re.finditer(
+        r"typedef struct\s+(PdockerGpuVulkan\w+)\s*\{(?P<body>.*?)\}\s*\w+\s*;",
+        source,
+        re.S,
+    ):
+        struct_name = match.group(1)
+        for line in match.group("body").splitlines():
+            field = re.search(
+                r"\b(?:u?int)(?:8|16|32|64)_t\s+(\w+)\s*(?:\[[^\]]+\])?\s*;",
+                line,
+            )
+            if field and field.group(1).endswith(suffix):
+                fields.add(f"{struct_name}.{field.group(1)}")
+    return fields
+
+
 def c_function_signature(source, name):
     signature = re.search(
         rf"(?m)^(?:VKAPI_ATTR\s+)?[A-Za-z_][A-Za-z0-9_\s\*]*?"
@@ -371,6 +467,57 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertNotIn(forbidden, values)
         self.assertIn("pdocker-gpu-command-v1", values)
         self.assertIn("glibc-shim-command-queue", values)
+
+    def test_vulkan_abi_id_fields_are_explicitly_classified_before_transport(self):
+        observed = vulkan_abi_integer_fields_with_suffix(APP_HEADER.read_text(), "_id")
+        classified = set(VULKAN_ABI_ID_FIELD_CLASSIFICATIONS)
+        self.assertEqual(observed - classified, set(), "new Vulkan ABI *_id fields need explicit classification")
+        self.assertEqual(classified - observed, set(), "stale Vulkan ABI *_id classifications must be removed")
+        self.assertEqual(
+            set(VULKAN_ABI_ID_FIELD_CLASSIFICATIONS.values()) - VULKAN_ABI_ID_FIELD_CLASSES,
+            set(),
+        )
+
+        executor = GPU_EXECUTOR.read_text()
+        for marker in [
+            "validate_vulkan_resource_table_duplicate_identity",
+            "validate_vulkan_object_table_duplicate_identity",
+            "validate_vulkan_dispatch_v53_duplicate_buffer_view_identity",
+            "validate_vulkan_graphics_v6_duplicate_pipeline_identity",
+            "validate_vulkan_dispatch_v56_layout_identity_keys",
+            "validate_vulkan_graphics_v628_declared_push_ranges",
+            "validate_vulkan_dispatch_v55_identity_extension",
+            "validate_vulkan_graphics_v630_identity_extension",
+            "register_vulkan_runtime_identity_ids",
+            "validate_vulkan_graphics_v629_variable_descriptor_counts",
+        ]:
+            self.assertIn(marker, executor)
+
+        for field in [
+            "PdockerGpuVulkanDispatchV5ResourceEntry.resource_id",
+            "PdockerGpuVulkanDispatchV5ImageEntry.image_id",
+            "PdockerGpuVulkanDispatchV5ImageViewEntry.view_id",
+            "PdockerGpuVulkanDispatchV5SamplerEntry.sampler_id",
+            "PdockerGpuVulkanDispatchV53BufferViewEntry.buffer_view_id",
+            "PdockerGpuVulkanGraphicsV6PipelineEntry.pipeline_id",
+            "PdockerGpuVulkanGraphicsV627BufferViewEntry.buffer_view_id",
+        ]:
+            self.assertEqual(VULKAN_ABI_ID_FIELD_CLASSIFICATIONS[field], "object_identity_guarded")
+
+        for field in [
+            "PdockerGpuVulkanDispatchV55HeaderExtension.instance_object_id",
+            "PdockerGpuVulkanDispatchV55HeaderExtension.physical_device_object_id",
+            "PdockerGpuVulkanDispatchV55HeaderExtension.device_object_id",
+            "PdockerGpuVulkanDispatchV55HeaderExtension.queue_object_id",
+            "PdockerGpuVulkanGraphicsV630HeaderExtension.instance_object_id",
+            "PdockerGpuVulkanGraphicsV630HeaderExtension.physical_device_object_id",
+            "PdockerGpuVulkanGraphicsV630HeaderExtension.device_object_id",
+            "PdockerGpuVulkanGraphicsV630HeaderExtension.queue_object_id",
+        ]:
+            self.assertEqual(
+                VULKAN_ABI_ID_FIELD_CLASSIFICATIONS[field],
+                "native_handle_transport_identity",
+            )
 
     def test_q6_oracle_does_not_collapse_shader_coordinates_to_rows(self):
         source = GPU_EXECUTOR.read_text()
