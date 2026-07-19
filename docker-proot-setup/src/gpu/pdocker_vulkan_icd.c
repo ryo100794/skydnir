@@ -13564,6 +13564,21 @@ static bool descriptor_type_requires_buffer_view(VkDescriptorType type) {
            type == VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER;
 }
 
+static uint32_t buffer_descriptor_v5_access_flags(VkDescriptorType type) {
+    switch (type) {
+        case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
+        case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
+        case VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER:
+            return PDOCKER_GPU_V5_ACCESS_READ;
+        case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+        case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC:
+        case VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER:
+            return PDOCKER_GPU_V5_ACCESS_READ | PDOCKER_GPU_V5_ACCESS_WRITE;
+        default:
+            return 0;
+    }
+}
+
 static bool descriptor_image_read_only_layout_valid(VkImageLayout layout) {
     return layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL ||
            layout == VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL;
@@ -14769,7 +14784,17 @@ static int send_generic_vulkan_dispatch_v5_1_op(
             (api_dynamic_flags[i] ? PDOCKER_GPU_V5_DESCRIPTOR_FLAG_DYNAMIC : 0u) |
             (api_ranges[i] == VK_WHOLE_SIZE ? PDOCKER_GPU_V5_DESCRIPTOR_FLAG_WHOLE_SIZE : 0u) |
             (api_descriptor_array_elements[i] ? PDOCKER_GPU_V5_DESCRIPTOR_FLAG_ARRAY_ENTRY : 0u);
-        descriptors[i].access_flags = PDOCKER_GPU_V5_ACCESS_READ | PDOCKER_GPU_V5_ACCESS_WRITE;
+        descriptors[i].access_flags =
+            buffer_descriptor_v5_access_flags((VkDescriptorType)api_descriptor_types[i]);
+        if (descriptors[i].access_flags == 0) {
+            fprintf(stderr,
+                    "pdocker-vulkan-icd: V5.1 frame rejected: unsupported buffer descriptor access type dispatch_id=%llu descriptor=%zu type=%u\n",
+                    (unsigned long long)dispatch_id,
+                    i,
+                    api_descriptor_types[i]);
+            rc = -EOPNOTSUPP;
+            goto cleanup;
+        }
         descriptors[i].resource_index = buffer_index;
         descriptors[i].image_view_index = PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE;
         descriptors[i].sampler_index = PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE;
@@ -16860,6 +16885,9 @@ static int send_generic_vulkan_dispatch_op(
         descriptor_hash = fnv1a64_update_u64(descriptor_hash, (uint64_t)api_buffer_sizes[i]);
         descriptor_hash = fnv1a64_update_u64(descriptor_hash, api_buffer_usages[i]);
         descriptor_hash = fnv1a64_update_u32(descriptor_hash, api_descriptor_types[i]);
+        descriptor_hash = fnv1a64_update_u32(
+            descriptor_hash,
+            buffer_descriptor_v5_access_flags((VkDescriptorType)api_descriptor_types[i]));
         descriptor_hash = fnv1a64_update_u32(descriptor_hash, api_dynamic_flags[i]);
         descriptor_hash = fnv1a64_update_u64(descriptor_hash, (uint64_t)api_memory_offsets[i]);
         descriptor_hash = fnv1a64_update_u64(descriptor_hash, (uint64_t)api_memory_sizes[i]);

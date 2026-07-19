@@ -975,6 +975,7 @@ typedef struct {
     size_t api_buffer_size;
     uint64_t api_buffer_usage;
     uint32_t api_descriptor_type;
+    uint32_t access_flags;
     int api_dynamic;
     off_t api_memory_offset;
     size_t api_memory_size;
@@ -1163,6 +1164,12 @@ static int vulkan_descriptor_type_requires_sampler(VkDescriptorType type) {
 static int vulkan_dispatch_descriptor_type_requires_buffer_view(VkDescriptorType type) {
     return type == VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER ||
            type == VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER;
+}
+
+static uint32_t vulkan_dispatch_binding_effective_access_flags(
+        const VulkanDispatchBinding *binding) {
+    if (binding && binding->access_flags != 0) return binding->access_flags;
+    return PDOCKER_GPU_V5_ACCESS_READ | PDOCKER_GPU_V5_ACCESS_WRITE;
 }
 
 static int vulkan_descriptor_dynamic_offset_alignment_from_api(
@@ -7272,6 +7279,8 @@ static uint64_t reconcile_descriptor_hash(
         u64 = bindings[i].api_buffer_usage;
         hash = fnv1a64_update(hash, &u64, sizeof(u64));
         u32 = bindings[i].api_descriptor_type;
+        hash = fnv1a64_update(hash, &u32, sizeof(u32));
+        u32 = bindings[i].access_flags;
         hash = fnv1a64_update(hash, &u32, sizeof(u32));
         u32 = (uint32_t)bindings[i].api_dynamic;
         hash = fnv1a64_update(hash, &u32, sizeof(u32));
@@ -17540,6 +17549,12 @@ static int run_vulkan_dispatch_fd(
                 binding_read_needed[i] = access->readable;
                 binding_write_needed[i] = access->writable;
             }
+            const uint32_t effective_access_flags =
+                vulkan_dispatch_binding_effective_access_flags(&bindings[i]);
+            binding_read_needed[i] = binding_read_needed[i] &&
+                ((effective_access_flags & PDOCKER_GPU_V5_ACCESS_READ) != 0);
+            binding_write_needed[i] = binding_write_needed[i] &&
+                ((effective_access_flags & PDOCKER_GPU_V5_ACCESS_WRITE) != 0);
             if (safe_kernel_reflection_transfer_pruning) {
                 if ((bindings[i].binding == 0 || bindings[i].binding == 1) &&
                     !binding_read_needed[i]) {
@@ -19401,12 +19416,16 @@ static int run_vulkan_dispatch_fd(
     uint32_t pre_barrier_count = 0;
     for (size_t i = 0; i < binding_count; ++i) {
         if (!active_bindings[i] || !vk_buffers[i] || !vk_buffers[i]->buffer) continue;
+        VkAccessFlags dst_access_mask = 0;
+        if (binding_read_needed[i]) dst_access_mask |= VK_ACCESS_SHADER_READ_BIT;
+        if (binding_write_needed[i]) dst_access_mask |= VK_ACCESS_SHADER_WRITE_BIT;
+        if (dst_access_mask == 0) continue;
         pre_barriers[pre_barrier_count++] = (VkBufferMemoryBarrier){
             .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
             .srcAccessMask = vk_buffers[i]->device_local_staged
                 ? VK_ACCESS_TRANSFER_WRITE_BIT
                 : VK_ACCESS_HOST_WRITE_BIT,
-            .dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+            .dstAccessMask = dst_access_mask,
             .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .buffer = vk_buffers[i]->buffer,
@@ -25323,6 +25342,7 @@ static int materialize_vulkan_dispatch_v5_native_plan_bindings(
         binding->api_buffer_size = (size_t)buffer->size;
         binding->api_buffer_usage = buffer->usage;
         binding->api_descriptor_type = d->descriptor_type;
+        binding->access_flags = d->access_flags;
         binding->api_dynamic = (d->descriptor_flags & PDOCKER_GPU_V5_DESCRIPTOR_FLAG_DYNAMIC) ? 1 : 0;
         binding->api_memory_offset = memory_offset_checked;
         binding->api_memory_size = (size_t)memory->size;

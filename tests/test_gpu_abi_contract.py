@@ -8668,13 +8668,52 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("if (!strict_passthrough) {\n            resources[buffer_index].usage |=", frame_sender)
         self.assertNotIn("allow_strict_compat_mutation", frame_sender)
 
+        access_helper = c_function_body(icd, "buffer_descriptor_v5_access_flags")
+        self.assertIn("case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:", access_helper)
+        self.assertIn("case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:", access_helper)
+        self.assertIn("case VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER:", access_helper)
+        self.assertIn("return PDOCKER_GPU_V5_ACCESS_READ;", access_helper)
+        self.assertIn("case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:", access_helper)
+        self.assertIn("case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC:", access_helper)
+        self.assertIn("case VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER:", access_helper)
+        self.assertIn("return PDOCKER_GPU_V5_ACCESS_READ | PDOCKER_GPU_V5_ACCESS_WRITE;", access_helper)
+        self.assertIn(
+            "descriptors[i].access_flags =\n"
+            "            buffer_descriptor_v5_access_flags((VkDescriptorType)api_descriptor_types[i]);",
+            frame_sender,
+        )
+        self.assertIn("unsupported buffer descriptor access type", frame_sender)
+        self.assertNotIn(
+            "descriptors[i].access_flags = PDOCKER_GPU_V5_ACCESS_READ | PDOCKER_GPU_V5_ACCESS_WRITE;",
+            frame_sender,
+        )
+        self.assertIn(
+            "descriptor_hash = fnv1a64_update_u32(\n"
+            "            descriptor_hash,\n"
+            "            buffer_descriptor_v5_access_flags((VkDescriptorType)api_descriptor_types[i]));",
+            sender,
+        )
+
         binding_struct = executor.split("} VulkanVectorBuffer;", 1)[1].split("} VulkanDispatchBinding;", 1)[0]
         self.assertIn("uint64_t api_buffer_usage;", binding_struct)
+        self.assertIn("uint32_t access_flags;", binding_struct)
 
         materializer = c_function_body(executor, "materialize_vulkan_dispatch_v5_native_plan_bindings")
         self.assertIn("binding->api_buffer_usage = buffer->usage;", materializer)
+        self.assertIn("binding->access_flags = d->access_flags;", materializer)
         reconcile_hash = c_function_body(executor, "reconcile_descriptor_hash")
         self.assertIn("u64 = bindings[i].api_buffer_usage;", reconcile_hash)
+        self.assertIn("u32 = bindings[i].access_flags;", reconcile_hash)
+
+        run_body = c_function_body(executor, "run_vulkan_dispatch_fd")
+        self.assertIn("vulkan_dispatch_binding_effective_access_flags(&bindings[i])", run_body)
+        self.assertIn("effective_access_flags & PDOCKER_GPU_V5_ACCESS_READ", run_body)
+        self.assertIn("effective_access_flags & PDOCKER_GPU_V5_ACCESS_WRITE", run_body)
+        self.assertIn("VkAccessFlags dst_access_mask = 0;", run_body)
+        self.assertIn("if (binding_read_needed[i]) dst_access_mask |= VK_ACCESS_SHADER_READ_BIT;", run_body)
+        self.assertIn("if (binding_write_needed[i]) dst_access_mask |= VK_ACCESS_SHADER_WRITE_BIT;", run_body)
+        self.assertIn(".dstAccessMask = dst_access_mask,", run_body)
+        self.assertNotIn(".dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT", run_body)
 
         graph = c_function_body(executor, "create_strict_vulkan_object_graph")
         self.assertIn("buffers[buffer_index].usage = (VkBufferUsageFlags)bindings[i].api_buffer_usage;", graph)

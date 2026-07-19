@@ -9,6 +9,21 @@ llama.cpp itself remains unmodified.
 
 ## Current Ground Truth
 
+### 2026-07-19 CPU/static V5 buffer access-right lane
+
+V5 compute buffer descriptors now transport descriptor access intent instead of
+marking every buffer read/write.  The sender derives V5 descriptor access flags
+from the original API descriptor type: uniform buffer, dynamic uniform buffer,
+and uniform texel buffer are read-only; storage buffer, dynamic storage buffer,
+and storage texel buffer are read/write.  Unsupported buffer descriptor types
+fail closed before frame emission.  The Android executor stores the transported
+flags in `VulkanDispatchBinding`, includes them in descriptor reconciliation,
+uses them to mask reflection fallback read/write decisions, and builds the
+pre-dispatch shader barrier with only the required read/write access bits.
+
+This is generic Vulkan pass-through hardening. It does not change llama.cpp,
+Dockerfiles, models, prompts, shader bytes, or executor arithmetic.
+
 ### 2026-07-19 CPU/static V5 buffer-usage evidence lane
 
 V5 compute dispatch reconciliation now includes API buffer usage in the sender
