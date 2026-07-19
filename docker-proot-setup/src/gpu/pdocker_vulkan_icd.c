@@ -22113,9 +22113,14 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceToolProperties(
         VkPhysicalDevice physicalDevice,
         uint32_t *pToolCount,
         VkPhysicalDeviceToolProperties *pToolProperties) {
-    (void)physicalDevice;
     const uint32_t available_count = 1;
     if (!pToolCount) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!physical_device_handle_resolve(physicalDevice, NULL)) {
+        uint32_t capacity = pToolProperties ? *pToolCount : 0;
+        if (pToolProperties && capacity > 0) memset(pToolProperties, 0, sizeof(*pToolProperties) * capacity);
+        *pToolCount = 0;
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
     if (!pToolProperties) {
         *pToolCount = available_count;
         return VK_SUCCESS;
@@ -22316,9 +22321,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceImageFormatProperties(
         VkImageUsageFlags usage,
         VkImageCreateFlags flags,
         VkImageFormatProperties *pImageFormatProperties) {
-    (void)physicalDevice;
     if (!pImageFormatProperties) return VK_ERROR_FORMAT_NOT_SUPPORTED;
     memset(pImageFormatProperties, 0, sizeof(*pImageFormatProperties));
+    if (!physical_device_handle_resolve(physicalDevice, NULL)) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
     if (!pdocker_vk_format_bridge_supported(format) ||
         !pdocker_vk_image_usage_supported_by_format(format, usage)) {
         return VK_ERROR_FORMAT_NOT_SUPPORTED;
@@ -25256,8 +25263,14 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(
         const char *pLayerName,
         uint32_t *pPropertyCount,
         VkExtensionProperties *pProperties) {
-    (void)physicalDevice;
     (void)pLayerName;
+    if (!pPropertyCount) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!physical_device_handle_resolve(physicalDevice, NULL)) {
+        uint32_t capacity = pProperties ? *pPropertyCount : 0;
+        if (pProperties && capacity > 0) memset(pProperties, 0, sizeof(*pProperties) * capacity);
+        *pPropertyCount = 0;
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
     VkExtensionProperties available[PDOCKER_VK_MAX_DEVICE_EXTENSIONS];
     uint32_t available_count = collect_advertised_device_extensions(
         available,

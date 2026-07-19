@@ -152,7 +152,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 uint32_t count = 64;
                 VkExtensionProperties extensions[64];
                 memset(extensions, 0, sizeof(extensions));
-                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &count, extensions) != VK_SUCCESS) return 3;
+                if (vkEnumerateDeviceExtensionProperties((VkPhysicalDevice)physical_device_for_instance(NULL), NULL, &count, extensions) != VK_SUCCESS) return 3;
                 if (!extension_seen(extensions, count, VK_KHR_MAINTENANCE_2_EXTENSION_NAME)) return 4;
 
                 const char *enabled[] = {{ VK_KHR_MAINTENANCE_2_EXTENSION_NAME }};
@@ -237,7 +237,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 uint32_t count = 64;
                 VkExtensionProperties extensions[64];
                 memset(extensions, 0, sizeof(extensions));
-                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &count, extensions) != VK_SUCCESS) return 3;
+                if (vkEnumerateDeviceExtensionProperties((VkPhysicalDevice)physical_device_for_instance(NULL), NULL, &count, extensions) != VK_SUCCESS) return 3;
                 if (!extension_seen(extensions, count, VK_EXT_SUBPASS_MERGE_FEEDBACK_EXTENSION_NAME)) return 4;
 
                 VkPhysicalDeviceSubpassMergeFeedbackFeaturesEXT feedback_features;
@@ -293,7 +293,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 uint32_t count = 64;
                 VkExtensionProperties extensions[64];
                 memset(extensions, 0, sizeof(extensions));
-                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &count, extensions) != VK_SUCCESS) return 3;
+                if (vkEnumerateDeviceExtensionProperties((VkPhysicalDevice)physical_device_for_instance(NULL), NULL, &count, extensions) != VK_SUCCESS) return 3;
                 if (!extension_seen(extensions, count, VK_KHR_MAINTENANCE_3_EXTENSION_NAME)) return 4;
 
                 const char *enabled[] = {{ VK_KHR_MAINTENANCE_3_EXTENSION_NAME }};
@@ -374,7 +374,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 uint32_t count = 64;
                 VkExtensionProperties extensions[64];
                 memset(extensions, 0, sizeof(extensions));
-                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &count, extensions) != VK_SUCCESS) return 3;
+                if (vkEnumerateDeviceExtensionProperties((VkPhysicalDevice)physical_device_for_instance(NULL), NULL, &count, extensions) != VK_SUCCESS) return 3;
                 if (!extension_seen(extensions, count, VK_KHR_MAINTENANCE_5_EXTENSION_NAME)) return 4;
 
                 const char *enabled[] = {{ VK_KHR_MAINTENANCE_5_EXTENSION_NAME }};
@@ -524,7 +524,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 uint32_t count = 64;
                 VkExtensionProperties extensions[64];
                 memset(extensions, 0, sizeof(extensions));
-                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &count, extensions) != VK_SUCCESS) return 3;
+                if (vkEnumerateDeviceExtensionProperties((VkPhysicalDevice)physical_device_for_instance(NULL), NULL, &count, extensions) != VK_SUCCESS) return 3;
                 if (extension_seen(extensions, count, VK_EXT_HOST_IMAGE_COPY_EXTENSION_NAME)) return 4;
 
                 const char *enabled[] = {{ VK_EXT_HOST_IMAGE_COPY_EXTENSION_NAME }};
@@ -622,7 +622,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 uint32_t count = 64;
                 VkExtensionProperties extensions[64];
                 memset(extensions, 0, sizeof(extensions));
-                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &count, extensions) != VK_SUCCESS) return 3;
+                if (vkEnumerateDeviceExtensionProperties((VkPhysicalDevice)physical_device_for_instance(NULL), NULL, &count, extensions) != VK_SUCCESS) return 3;
                 if (extension_seen(extensions, count, VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME)) return 4;
 
                 const char *enabled[] = {{ VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME }};
@@ -703,7 +703,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 uint32_t count = 64;
                 VkExtensionProperties extensions[64];
                 memset(extensions, 0, sizeof(extensions));
-                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &count, extensions) != VK_SUCCESS) return 3;
+                if (vkEnumerateDeviceExtensionProperties((VkPhysicalDevice)physical_device_for_instance(NULL), NULL, &count, extensions) != VK_SUCCESS) return 3;
                 if (extension_seen(extensions, count, VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME)) return 4;
 
                 const char *enabled[] = {{ VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME }};
@@ -821,7 +821,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 uint32_t count = 64;
                 VkExtensionProperties extensions[64];
                 memset(extensions, 0, sizeof(extensions));
-                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &count, extensions) != VK_SUCCESS) return 3;
+                if (vkEnumerateDeviceExtensionProperties((VkPhysicalDevice)physical_device_for_instance(NULL), NULL, &count, extensions) != VK_SUCCESS) return 3;
                 if (extension_seen(extensions, count, VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME)) return 4;
 
                 const char *enabled[] = {{ VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME }};
@@ -910,7 +910,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 uint32_t count = 64;
                 VkExtensionProperties extensions[64];
                 memset(extensions, 0, sizeof(extensions));
-                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &count, extensions) != VK_SUCCESS) return 3;
+                if (vkEnumerateDeviceExtensionProperties((VkPhysicalDevice)physical_device_for_instance(NULL), NULL, &count, extensions) != VK_SUCCESS) return 3;
                 if (!extension_seen(extensions, count, VK_KHR_DEVICE_GROUP_EXTENSION_NAME)) return 4;
 
                 const char *enabled[] = {{ VK_KHR_DEVICE_GROUP_EXTENSION_NAME }};
@@ -1013,7 +1013,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 uint32_t count = 64;
                 VkExtensionProperties extensions[64];
                 memset(extensions, 0, sizeof(extensions));
-                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &count, extensions) != VK_SUCCESS) return 3;
+                if (vkEnumerateDeviceExtensionProperties((VkPhysicalDevice)physical_device_for_instance(NULL), NULL, &count, extensions) != VK_SUCCESS) return 3;
                 if (!extension_seen(extensions, count, VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME)) return 4;
 
                 const char *enabled[] = {{ VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME }};
@@ -1713,7 +1713,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 uint32_t count = 64;
                 VkExtensionProperties extensions[64];
                 memset(extensions, 0, sizeof(extensions));
-                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &count, extensions) != VK_SUCCESS) return 3;
+                if (vkEnumerateDeviceExtensionProperties((VkPhysicalDevice)physical_device_for_instance(NULL), NULL, &count, extensions) != VK_SUCCESS) return 3;
                 if (!extension_seen(extensions, count, VK_KHR_MAINTENANCE_1_EXTENSION_NAME)) return 4;
 
                 const char *enabled[] = {{ VK_KHR_MAINTENANCE_1_EXTENSION_NAME }};
@@ -1760,7 +1760,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 uint32_t count = 64;
                 VkExtensionProperties extensions[64];
                 memset(extensions, 0, sizeof(extensions));
-                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &count, extensions) != VK_SUCCESS) return 3;
+                if (vkEnumerateDeviceExtensionProperties((VkPhysicalDevice)physical_device_for_instance(NULL), NULL, &count, extensions) != VK_SUCCESS) return 3;
                 if (!extension_seen(extensions, count, VK_KHR_DESCRIPTOR_UPDATE_TEMPLATE_EXTENSION_NAME)) return 4;
 
                 const char *enabled[] = {{ VK_KHR_DESCRIPTOR_UPDATE_TEMPLATE_EXTENSION_NAME }};
@@ -1840,7 +1840,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     return 2;
                 }}
                 uint32_t extension_count = 0;
-                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &extension_count, NULL) != VK_SUCCESS ||
+                if (vkEnumerateDeviceExtensionProperties((VkPhysicalDevice)physical_device_for_instance(NULL), NULL, &extension_count, NULL) != VK_SUCCESS ||
                     extension_count == 0) {{
                     fprintf(stderr, "device extension enumeration failed\\n");
                     return 3;
@@ -2479,12 +2479,12 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
             #else
                 if (!device_extension_advertised_name(VK_EXT_TOOLING_INFO_EXTENSION_NAME)) return 2;
                 uint32_t extension_count = 0;
-                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &extension_count, NULL) != VK_SUCCESS ||
+                if (vkEnumerateDeviceExtensionProperties((VkPhysicalDevice)physical_device_for_instance(NULL), NULL, &extension_count, NULL) != VK_SUCCESS ||
                     extension_count == 0) return 3;
                 VkExtensionProperties extensions[64];
                 memset(extensions, 0, sizeof(extensions));
                 uint32_t capacity = 64;
-                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &capacity, extensions) != VK_SUCCESS) return 4;
+                if (vkEnumerateDeviceExtensionProperties((VkPhysicalDevice)physical_device_for_instance(NULL), NULL, &capacity, extensions) != VK_SUCCESS) return 4;
                 VkBool32 found = VK_FALSE;
                 for (uint32_t i = 0; i < capacity; ++i) {{
                     if (strcmp(extensions[i].extensionName, VK_EXT_TOOLING_INFO_EXTENSION_NAME) == 0) found = VK_TRUE;
@@ -2495,21 +2495,25 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 if (proc_address("vkGetPhysicalDeviceToolProperties") != NULL) return 15;
                 if (proc_address("vkGetPhysicalDeviceToolPropertiesEXT") == NULL) return 16;
                 if (vkGetPhysicalDeviceToolProperties(VK_NULL_HANDLE, NULL, NULL) != VK_ERROR_INITIALIZATION_FAILED) return 7;
+                uint32_t invalid_tool_count = 1;
+                if (vkGetPhysicalDeviceToolPropertiesEXT(VK_NULL_HANDLE, &invalid_tool_count, NULL) != VK_ERROR_INITIALIZATION_FAILED ||
+                    invalid_tool_count != 0) return 8;
+                VkPhysicalDevice physical = (VkPhysicalDevice)physical_device_for_instance(NULL);
                 uint32_t tool_count = 0;
-                if (vkGetPhysicalDeviceToolPropertiesEXT(VK_NULL_HANDLE, &tool_count, NULL) != VK_SUCCESS ||
-                    tool_count != 1) return 8;
+                if (vkGetPhysicalDeviceToolPropertiesEXT(physical, &tool_count, NULL) != VK_SUCCESS ||
+                    tool_count != 1) return 18;
 
                 VkPhysicalDeviceToolProperties tool;
                 memset(&tool, 0, sizeof(tool));
                 tool.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TOOL_PROPERTIES;
                 uint32_t zero_capacity = 0;
-                if (vkGetPhysicalDeviceToolProperties(VK_NULL_HANDLE, &zero_capacity, &tool) != VK_INCOMPLETE ||
+                if (vkGetPhysicalDeviceToolProperties(physical, &zero_capacity, &tool) != VK_INCOMPLETE ||
                     zero_capacity != 0) return 9;
 
                 memset(&tool, 0, sizeof(tool));
                 tool.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TOOL_PROPERTIES;
                 uint32_t one_capacity = 1;
-                if (vkGetPhysicalDeviceToolPropertiesEXT(VK_NULL_HANDLE, &one_capacity, &tool) != VK_SUCCESS ||
+                if (vkGetPhysicalDeviceToolPropertiesEXT(physical, &one_capacity, &tool) != VK_SUCCESS ||
                     one_capacity != 1) return 10;
                 if (tool.sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TOOL_PROPERTIES) return 11;
                 if (strstr(tool.name, "Skydnir") == NULL) return 12;
@@ -2544,12 +2548,12 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
             #else
                 if (!device_extension_advertised_name(VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME)) return 2;
                 uint32_t extension_count = 0;
-                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &extension_count, NULL) != VK_SUCCESS ||
+                if (vkEnumerateDeviceExtensionProperties((VkPhysicalDevice)physical_device_for_instance(NULL), NULL, &extension_count, NULL) != VK_SUCCESS ||
                     extension_count == 0) return 3;
                 VkExtensionProperties extensions[64];
                 memset(extensions, 0, sizeof(extensions));
                 uint32_t capacity = 64;
-                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &capacity, extensions) != VK_SUCCESS) return 4;
+                if (vkEnumerateDeviceExtensionProperties((VkPhysicalDevice)physical_device_for_instance(NULL), NULL, &capacity, extensions) != VK_SUCCESS) return 4;
                 VkBool32 found = VK_FALSE;
                 for (uint32_t i = 0; i < capacity; ++i) {{
                     if (strcmp(extensions[i].extensionName, VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME) == 0) found = VK_TRUE;
@@ -2608,12 +2612,12 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
             #else
                 if (!device_extension_advertised_name(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME)) return 2;
                 uint32_t extension_count = 0;
-                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &extension_count, NULL) != VK_SUCCESS ||
+                if (vkEnumerateDeviceExtensionProperties((VkPhysicalDevice)physical_device_for_instance(NULL), NULL, &extension_count, NULL) != VK_SUCCESS ||
                     extension_count == 0) return 3;
                 VkExtensionProperties extensions[64];
                 memset(extensions, 0, sizeof(extensions));
                 uint32_t capacity = 64;
-                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &capacity, extensions) != VK_SUCCESS) return 4;
+                if (vkEnumerateDeviceExtensionProperties((VkPhysicalDevice)physical_device_for_instance(NULL), NULL, &capacity, extensions) != VK_SUCCESS) return 4;
                 VkBool32 found = VK_FALSE;
                 for (uint32_t i = 0; i < capacity; ++i) {{
                     if (strcmp(extensions[i].extensionName, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME) == 0) found = VK_TRUE;
@@ -2706,12 +2710,12 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
             #else
                 if (!device_extension_advertised_name(VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME)) return 2;
                 uint32_t extension_count = 0;
-                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &extension_count, NULL) != VK_SUCCESS ||
+                if (vkEnumerateDeviceExtensionProperties((VkPhysicalDevice)physical_device_for_instance(NULL), NULL, &extension_count, NULL) != VK_SUCCESS ||
                     extension_count == 0) return 3;
                 VkExtensionProperties extensions[64];
                 memset(extensions, 0, sizeof(extensions));
                 uint32_t capacity = 64;
-                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &capacity, extensions) != VK_SUCCESS) return 4;
+                if (vkEnumerateDeviceExtensionProperties((VkPhysicalDevice)physical_device_for_instance(NULL), NULL, &capacity, extensions) != VK_SUCCESS) return 4;
                 VkBool32 found = VK_FALSE;
                 for (uint32_t i = 0; i < capacity; ++i) {{
                     if (strcmp(extensions[i].extensionName, VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME) == 0) found = VK_TRUE;
@@ -2766,12 +2770,12 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
             #else
                 if (!device_extension_advertised_name(VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME)) return 2;
                 uint32_t extension_count = 0;
-                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &extension_count, NULL) != VK_SUCCESS ||
+                if (vkEnumerateDeviceExtensionProperties((VkPhysicalDevice)physical_device_for_instance(NULL), NULL, &extension_count, NULL) != VK_SUCCESS ||
                     extension_count == 0) return 3;
                 VkExtensionProperties extensions[64];
                 memset(extensions, 0, sizeof(extensions));
                 uint32_t capacity = 64;
-                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &capacity, extensions) != VK_SUCCESS) return 4;
+                if (vkEnumerateDeviceExtensionProperties((VkPhysicalDevice)physical_device_for_instance(NULL), NULL, &capacity, extensions) != VK_SUCCESS) return 4;
                 VkBool32 found = VK_FALSE;
                 for (uint32_t i = 0; i < capacity; ++i) {{
                     if (strcmp(extensions[i].extensionName, VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME) == 0) found = VK_TRUE;
@@ -2834,7 +2838,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 uint32_t count = 64;
                 VkExtensionProperties extensions[64];
                 memset(extensions, 0, sizeof(extensions));
-                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &count, extensions) != VK_SUCCESS) return 3;
+                if (vkEnumerateDeviceExtensionProperties((VkPhysicalDevice)physical_device_for_instance(NULL), NULL, &count, extensions) != VK_SUCCESS) return 3;
                 if (!extension_seen(extensions, count, VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME)) return 4;
 
                 const char *enabled[] = {{ VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME }};
@@ -2916,7 +2920,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 uint32_t count = 64;
                 VkExtensionProperties extensions[64];
                 memset(extensions, 0, sizeof(extensions));
-                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &count, extensions) != VK_SUCCESS) return 4;
+                if (vkEnumerateDeviceExtensionProperties((VkPhysicalDevice)physical_device_for_instance(NULL), NULL, &count, extensions) != VK_SUCCESS) return 4;
                 if (extension_seen(extensions, count, VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME)) return 5;
                 if (extension_seen(extensions, count, VK_EXT_BORDER_COLOR_SWIZZLE_EXTENSION_NAME)) return 6;
 
@@ -3113,11 +3117,11 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
             int main(void) {{
             #ifdef VK_EXT_DEBUG_MARKER_EXTENSION_NAME
                 uint32_t extension_count = 0;
-                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &extension_count, NULL) != VK_SUCCESS) return 2;
+                if (vkEnumerateDeviceExtensionProperties((VkPhysicalDevice)physical_device_for_instance(NULL), NULL, &extension_count, NULL) != VK_SUCCESS) return 2;
                 VkExtensionProperties extensions[64];
                 memset(extensions, 0, sizeof(extensions));
                 uint32_t capacity = 64;
-                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &capacity, extensions) != VK_SUCCESS) return 3;
+                if (vkEnumerateDeviceExtensionProperties((VkPhysicalDevice)physical_device_for_instance(NULL), NULL, &capacity, extensions) != VK_SUCCESS) return 3;
                 VkBool32 found = VK_FALSE;
                 for (uint32_t i = 0; i < capacity; ++i) {{
                     if (strcmp(extensions[i].extensionName, VK_EXT_DEBUG_MARKER_EXTENSION_NAME) == 0) found = VK_TRUE;
@@ -3715,11 +3719,11 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 if (validate_device_feature_requests(&create_info) != VK_SUCCESS) return 8;
 
                 uint32_t extension_count = 0;
-                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &extension_count, NULL) != VK_SUCCESS) return 9;
+                if (vkEnumerateDeviceExtensionProperties((VkPhysicalDevice)physical_device_for_instance(NULL), NULL, &extension_count, NULL) != VK_SUCCESS) return 9;
                 VkExtensionProperties extensions[64];
                 memset(extensions, 0, sizeof(extensions));
                 uint32_t capacity = 64;
-                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &capacity, extensions) != VK_SUCCESS) return 10;
+                if (vkEnumerateDeviceExtensionProperties((VkPhysicalDevice)physical_device_for_instance(NULL), NULL, &capacity, extensions) != VK_SUCCESS) return 10;
                 VkBool32 found = VK_FALSE;
                 for (uint32_t i = 0; i < capacity; ++i) {{
                     if (strcmp(extensions[i].extensionName, VK_EXT_PRIVATE_DATA_EXTENSION_NAME) == 0) found = VK_TRUE;
@@ -4801,7 +4805,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 VkExtensionProperties extensions[64];
                 memset(extensions, 0, sizeof(extensions));
                 if (vkEnumerateDeviceExtensionProperties(
-                        VK_NULL_HANDLE, NULL, &extension_count, extensions) != VK_SUCCESS) {{
+                        (VkPhysicalDevice)physical_device_for_instance(NULL), NULL, &extension_count, extensions) != VK_SUCCESS) {{
                     fprintf(stderr, "device extension enumeration failed\\n");
                     return 8;
                 }}
@@ -4886,7 +4890,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 VkExtensionProperties extensions[64];
                 memset(extensions, 0, sizeof(extensions));
                 if (vkEnumerateDeviceExtensionProperties(
-                        VK_NULL_HANDLE, NULL, &extension_count, extensions) != VK_SUCCESS) {{
+                        (VkPhysicalDevice)physical_device_for_instance(NULL), NULL, &extension_count, extensions) != VK_SUCCESS) {{
                     fprintf(stderr, "device extension enumeration failed\\n");
                     return 6;
                 }}
@@ -5121,7 +5125,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
 
             int main(void) {{
                 uint32_t count = 0;
-                if (vkEnumerateDeviceExtensionProperties(NULL, NULL, &count, NULL) != VK_SUCCESS) {{
+                if (vkEnumerateDeviceExtensionProperties((VkPhysicalDevice)physical_device_for_instance(NULL), NULL, &count, NULL) != VK_SUCCESS) {{
                     return 2;
                 }}
                 if (count == 0 || count > PDOCKER_VK_MAX_DEVICE_EXTENSIONS) {{
@@ -5131,7 +5135,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 if (count > 1) {{
                     VkExtensionProperties one_property[1];
                     uint32_t one_capacity = 1;
-                    if (vkEnumerateDeviceExtensionProperties(NULL, NULL, &one_capacity, one_property) != VK_INCOMPLETE ||
+                    if (vkEnumerateDeviceExtensionProperties((VkPhysicalDevice)physical_device_for_instance(NULL), NULL, &one_capacity, one_property) != VK_INCOMPLETE ||
                         one_capacity != 1) {{
                         fprintf(stderr, "truncated device extension enumeration did not return VK_INCOMPLETE\\n");
                         return 11;
@@ -5140,7 +5144,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 VkExtensionProperties properties[PDOCKER_VK_MAX_DEVICE_EXTENSIONS];
                 memset(properties, 0, sizeof(properties));
                 uint32_t capacity = PDOCKER_VK_MAX_DEVICE_EXTENSIONS;
-                if (vkEnumerateDeviceExtensionProperties(NULL, NULL, &capacity, properties) != VK_SUCCESS) {{
+                if (vkEnumerateDeviceExtensionProperties((VkPhysicalDevice)physical_device_for_instance(NULL), NULL, &capacity, properties) != VK_SUCCESS) {{
                     return 4;
                 }}
                 if (capacity != count) {{
@@ -5213,6 +5217,8 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 setenv("PDOCKER_VULKAN_HEAP_BYTES", "2147483648", 1);
                 setenv("PDOCKER_VULKAN_MAX_BUFFER_BYTES", "2147483648", 1);
 
+                VkPhysicalDevice physical = (VkPhysicalDevice)physical_device_for_instance(NULL);
+
                 VkPhysicalDeviceImageFormatInfo2 info;
                 VkPhysicalDeviceExternalImageFormatInfo external_info;
                 memset(&info, 0, sizeof(info));
@@ -5236,7 +5242,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 external_properties.pNext = NULL;
 
                 VkResult rc = vkGetPhysicalDeviceImageFormatProperties2(
-                    VK_NULL_HANDLE, &info, &properties);
+                    physical, &info, &properties);
                 if (rc != VK_SUCCESS) {{
                     fprintf(stderr, "handleType=0 external image query failed: %d\\n", rc);
                     return 2;
@@ -5274,7 +5280,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 external_properties.pNext = &cubic_props;
                 cubic_props.sType = VK_STRUCTURE_TYPE_FILTER_CUBIC_IMAGE_VIEW_IMAGE_FORMAT_PROPERTIES_EXT;
                 cubic_props.pNext = NULL;
-                rc = vkGetPhysicalDeviceImageFormatProperties2(VK_NULL_HANDLE, &info, &properties);
+                rc = vkGetPhysicalDeviceImageFormatProperties2(physical, &info, &properties);
                 if (rc != VK_SUCCESS) {{
                     fprintf(stderr, "filter-cubic image-view query pNext failed: %d\\n", rc);
                     return 6;
@@ -5288,7 +5294,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 view_info.imageViewType = (VkImageViewType)0x7fffffff;
                 memset(&properties, 0, sizeof(properties));
                 properties.sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_PROPERTIES_2;
-                rc = vkGetPhysicalDeviceImageFormatProperties2(VK_NULL_HANDLE, &info, &properties);
+                rc = vkGetPhysicalDeviceImageFormatProperties2(physical, &info, &properties);
                 if (rc != VK_ERROR_FORMAT_NOT_SUPPORTED) {{
                     fprintf(stderr, "invalid filter-cubic image-view query returned %d\\n", rc);
                     return 8;
@@ -5298,7 +5304,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 external_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
                 memset(&properties, 0, sizeof(properties));
                 properties.sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_PROPERTIES_2;
-                rc = vkGetPhysicalDeviceImageFormatProperties2(VK_NULL_HANDLE, &info, &properties);
+                rc = vkGetPhysicalDeviceImageFormatProperties2(physical, &info, &properties);
                 if (rc != VK_ERROR_FORMAT_NOT_SUPPORTED) {{
                     fprintf(stderr, "handleType!=0 external image query returned %d\\n", rc);
                     return 9;
@@ -5566,7 +5572,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 uint32_t count = 64;
                 VkExtensionProperties extensions[64];
                 memset(extensions, 0, sizeof(extensions));
-                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &count, extensions) != VK_SUCCESS) return 3;
+                if (vkEnumerateDeviceExtensionProperties((VkPhysicalDevice)physical_device_for_instance(NULL), NULL, &count, extensions) != VK_SUCCESS) return 3;
                 if (extension_seen(extensions, count, VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME)) return 4;
 
                 const char *enabled[] = {{ VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME }};
@@ -5652,7 +5658,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 uint32_t count = 64;
                 VkExtensionProperties extensions[64];
                 memset(extensions, 0, sizeof(extensions));
-                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &count, extensions) != VK_SUCCESS) return 2;
+                if (vkEnumerateDeviceExtensionProperties((VkPhysicalDevice)physical_device_for_instance(NULL), NULL, &count, extensions) != VK_SUCCESS) return 2;
 
             #ifdef VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME
                 if (device_extension_advertised_name(VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME)) return 3;
@@ -6682,17 +6688,18 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     return 23;
                 }}
 
+                VkPhysicalDevice physical = (VkPhysicalDevice)physical_device_for_instance(NULL);
                 VkImageFormatProperties props;
                 memset(&props, 0, sizeof(props));
                 if (vkGetPhysicalDeviceImageFormatProperties(
-                        VK_NULL_HANDLE, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_TYPE_3D,
+                        physical, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_TYPE_3D,
                         VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_SAMPLED_BIT,
                         VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT, &props) != VK_SUCCESS) {{
                     fprintf(stderr, "format query rejected valid 3D 2D-array-compatible flag\\n");
                     return 24;
                 }}
                 if (vkGetPhysicalDeviceImageFormatProperties(
-                        VK_NULL_HANDLE, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_TYPE_2D,
+                        physical, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_TYPE_2D,
                         VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_SAMPLED_BIT,
                         VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT, &props) != VK_ERROR_FORMAT_NOT_SUPPORTED) {{
                     fprintf(stderr, "format query accepted 2D 2D-array-compatible flag\\n");
@@ -6778,10 +6785,11 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     return code;
                 }}
 
+                VkPhysicalDevice physical = (VkPhysicalDevice)physical_device_for_instance(NULL);
                 VkImageFormatProperties image_props;
                 memset(&image_props, 0xff, sizeof(image_props));
                 VkResult rc = vkGetPhysicalDeviceImageFormatProperties(
-                    VK_NULL_HANDLE,
+                    physical,
                     format,
                     VK_IMAGE_TYPE_2D,
                     VK_IMAGE_TILING_OPTIMAL,
@@ -6954,10 +6962,11 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     VkImageType type,
                     VkSampleCountFlags expected,
                     int code) {
+                VkPhysicalDevice physical = (VkPhysicalDevice)physical_device_for_instance(NULL);
                 VkImageFormatProperties props;
                 memset(&props, 0xff, sizeof(props));
                 VkResult rc = vkGetPhysicalDeviceImageFormatProperties(
-                    VK_NULL_HANDLE,
+                    physical,
                     VK_FORMAT_R8G8B8A8_UNORM,
                     type,
                     VK_IMAGE_TILING_OPTIMAL,
@@ -8523,6 +8532,94 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 if (buffer_handle_lookup(unowned_buffer)) return 39;
                 if (command_pool_handle_lookup(unowned_pool)) return 40;
                 if (fence_handle_lookup(unowned_fence)) return 41;
+                return 0;
+            }
+            """).replace("__ICD_SOURCE__", str(ICD_SOURCE))
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
+    def test_image_format_properties_reject_invalid_physical_device(self):
+        source = textwrap.dedent("""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "__ICD_SOURCE__"
+
+            int main(void) {
+                setenv("PDOCKER_VULKAN_HEAP_BYTES", "2147483648", 1);
+                setenv("PDOCKER_VULKAN_MAX_BUFFER_BYTES", "2147483648", 1);
+                VkImageFormatProperties props;
+                memset(&props, 0x7f, sizeof(props));
+                VkResult rc = vkGetPhysicalDeviceImageFormatProperties(
+                    VK_NULL_HANDLE,
+                    VK_FORMAT_R8G8B8A8_UNORM,
+                    VK_IMAGE_TYPE_2D,
+                    VK_IMAGE_TILING_OPTIMAL,
+                    VK_IMAGE_USAGE_SAMPLED_BIT,
+                    0,
+                    &props);
+                if (rc != VK_ERROR_INITIALIZATION_FAILED) return 1;
+                if (props.maxMipLevels != 0 || props.maxArrayLayers != 0 || props.sampleCounts != 0) return 2;
+
+                VkPhysicalDevice bad = (VkPhysicalDevice)(uintptr_t)0x12345678u;
+                memset(&props, 0x7f, sizeof(props));
+                rc = vkGetPhysicalDeviceImageFormatProperties(
+                    bad,
+                    VK_FORMAT_R8G8B8A8_UNORM,
+                    VK_IMAGE_TYPE_2D,
+                    VK_IMAGE_TILING_OPTIMAL,
+                    VK_IMAGE_USAGE_SAMPLED_BIT,
+                    0,
+                    &props);
+                if (rc != VK_ERROR_INITIALIZATION_FAILED) return 3;
+                if (props.maxMipLevels != 0 || props.maxArrayLayers != 0 || props.sampleCounts != 0) return 4;
+
+                VkPhysicalDevice physical = (VkPhysicalDevice)physical_device_for_instance(NULL);
+                memset(&props, 0, sizeof(props));
+                rc = vkGetPhysicalDeviceImageFormatProperties(
+                    physical,
+                    VK_FORMAT_R8G8B8A8_UNORM,
+                    VK_IMAGE_TYPE_2D,
+                    VK_IMAGE_TILING_OPTIMAL,
+                    VK_IMAGE_USAGE_SAMPLED_BIT,
+                    0,
+                    &props);
+                if (rc != VK_SUCCESS) return 5;
+                if (props.maxMipLevels == 0 || props.sampleCounts == 0) return 6;
+                return 0;
+            }
+            """).replace("__ICD_SOURCE__", str(ICD_SOURCE))
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
+    def test_device_extension_properties_reject_invalid_physical_device(self):
+        source = textwrap.dedent("""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "__ICD_SOURCE__"
+
+            int main(void) {
+                uint32_t count = 2;
+                VkExtensionProperties props[2];
+                memset(props, 0x7f, sizeof(props));
+                if (vkEnumerateDeviceExtensionProperties(VK_NULL_HANDLE, NULL, &count, props) != VK_ERROR_INITIALIZATION_FAILED) return 1;
+                if (count != 0) return 2;
+                if (props[0].extensionName[0] != 0 || props[1].extensionName[0] != 0) return 3;
+
+                VkPhysicalDevice bad = (VkPhysicalDevice)(uintptr_t)0x12345678u;
+                count = 2;
+                memset(props, 0x7f, sizeof(props));
+                if (vkEnumerateDeviceExtensionProperties(bad, NULL, &count, props) != VK_ERROR_INITIALIZATION_FAILED) return 4;
+                if (count != 0) return 5;
+                if (props[0].extensionName[0] != 0 || props[1].extensionName[0] != 0) return 6;
+
+                count = 0;
+                VkPhysicalDevice physical = (VkPhysicalDevice)physical_device_for_instance(NULL);
+                if (vkEnumerateDeviceExtensionProperties(physical, NULL, &count, NULL) != VK_SUCCESS) return 7;
+                if (count == 0) return 8;
                 return 0;
             }
             """).replace("__ICD_SOURCE__", str(ICD_SOURCE))
