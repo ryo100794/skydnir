@@ -24122,10 +24122,16 @@ static int checked_size_mul_executor(size_t a, size_t b, size_t *out) {
     return 0;
 }
 
+static int vulkan_resource_index_valid_count(
+        uint32_t resource_count,
+        uint32_t index) {
+    return index < resource_count;
+}
+
 static int v5_resource_index_valid(
         const PdockerGpuVulkanDispatchV5FrameHeader *header,
         uint32_t index) {
-    return header && index < header->resource_count;
+    return header && vulkan_resource_index_valid_count(header->resource_count, index);
 }
 
 static int v5_resource_fields_identical_for_same_object_id(
@@ -24144,14 +24150,14 @@ static int v5_resource_fields_identical_for_same_object_id(
            a->generation == b->generation;
 }
 
-static int v5_resource_parent_memory_object_id_matches(
-        const PdockerGpuVulkanDispatchV5FrameHeader *header,
+static int vulkan_resource_parent_memory_object_id_matches(
+        uint32_t resource_count,
         const PdockerGpuVulkanDispatchV5ResourceEntry *resources,
         const PdockerGpuVulkanDispatchV5ResourceEntry *a,
         const PdockerGpuVulkanDispatchV5ResourceEntry *b) {
-    if (!header || !resources || !a || !b) return 0;
-    if (!v5_resource_index_valid(header, a->parent_resource_index) ||
-        !v5_resource_index_valid(header, b->parent_resource_index)) {
+    if (!resources || !a || !b) return 0;
+    if (!vulkan_resource_index_valid_count(resource_count, a->parent_resource_index) ||
+        !vulkan_resource_index_valid_count(resource_count, b->parent_resource_index)) {
         return 0;
     }
     const PdockerGpuVulkanDispatchV5ResourceEntry *memory_a = &resources[a->parent_resource_index];
@@ -24165,14 +24171,14 @@ static int v5_resource_parent_memory_object_id_matches(
     return v5_resource_fields_identical_for_same_object_id(memory_a, memory_b);
 }
 
-static int validate_vulkan_dispatch_v5_duplicate_resource_identity(
-        const PdockerGpuVulkanDispatchV5FrameHeader *header,
+static int validate_vulkan_resource_table_duplicate_identity(
+        uint32_t resource_count,
         const PdockerGpuVulkanDispatchV5ResourceEntry *resources) {
-    if (!header || !resources) return -EINVAL;
-    for (uint32_t i = 0; i < header->resource_count; ++i) {
+    if (!resources) return -EINVAL;
+    for (uint32_t i = 0; i < resource_count; ++i) {
         const PdockerGpuVulkanDispatchV5ResourceEntry *a = &resources[i];
         if (a->resource_id == 0) continue;
-        for (uint32_t j = i + 1; j < header->resource_count; ++j) {
+        for (uint32_t j = i + 1; j < resource_count; ++j) {
             const PdockerGpuVulkanDispatchV5ResourceEntry *b = &resources[j];
             if (b->resource_id != a->resource_id) continue;
             if (a->resource_type != b->resource_type) return -EPROTO;
@@ -24189,7 +24195,7 @@ static int validate_vulkan_dispatch_v5_duplicate_resource_identity(
                         a->memory_property_flags != b->memory_property_flags ||
                         a->external_offset != b->external_offset ||
                         a->generation != b->generation ||
-                        !v5_resource_parent_memory_object_id_matches(header, resources, a, b)) {
+                        !vulkan_resource_parent_memory_object_id_matches(resource_count, resources, a, b)) {
                         return -EPROTO;
                     }
                     break;
@@ -24204,6 +24210,13 @@ static int validate_vulkan_dispatch_v5_duplicate_resource_identity(
         }
     }
     return 0;
+}
+
+static int validate_vulkan_dispatch_v5_duplicate_resource_identity(
+        const PdockerGpuVulkanDispatchV5FrameHeader *header,
+        const PdockerGpuVulkanDispatchV5ResourceEntry *resources) {
+    if (!header) return -EINVAL;
+    return validate_vulkan_resource_table_duplicate_identity(header->resource_count, resources);
 }
 
 static int vulkan_dispatch_v5_plan_descriptor_object_at(
@@ -28579,6 +28592,8 @@ static int validate_vulkan_graphics_v6_frame_content(
         if (resource->parent_resource_index != PDOCKER_GPU_V5_RESOURCE_PARENT_NONE &&
             resource->parent_resource_index >= header->resource_count) return -EPROTO;
     }
+    int duplicate_identity_rc = validate_vulkan_resource_table_duplicate_identity(header->resource_count, resources);
+    if (duplicate_identity_rc != 0) return duplicate_identity_rc;
     for (uint32_t i = 0; i < header->image_count; ++i) {
         if (images[i].memory_resource_index >= header->resource_count) return -EPROTO;
         const PdockerGpuVulkanDispatchV5ResourceEntry *memory =
