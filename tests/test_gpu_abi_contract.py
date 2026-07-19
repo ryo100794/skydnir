@@ -6252,6 +6252,51 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertRegex(validation, r"(?:layout_value_valid|layout_valid|image_layout_valid)")
         self.assertRegex(validation, r"return\s+-E(?:PROTO|RANGE|OPNOTSUPP);")
 
+    def test_vulkan_dispatch_v5_rejects_duplicate_resource_ids_with_split_fd_identity(self):
+        executor = GPU_EXECUTOR.read_text()
+        helper = (
+            c_function_body(executor, "v5_resource_fields_identical_for_same_object_id")
+            + c_function_body(executor, "v5_resource_parent_memory_object_id_matches")
+            + c_function_body(executor, "validate_vulkan_dispatch_v5_duplicate_resource_identity")
+        )
+        build_plan = c_function_body(executor, "build_vulkan_dispatch_v5_native_plan")
+        graph = c_function_body(executor, "create_strict_vulkan_object_graph")
+        for marker in [
+            "if (a->resource_id == 0) continue;",
+            "b->resource_id != a->resource_id",
+            "a->resource_type != b->resource_type",
+            "case PDOCKER_GPU_V5_RESOURCE_TYPE_MEMORY:",
+            "a->fd_index == b->fd_index",
+            "a->external_offset == b->external_offset",
+            "a->size == b->size",
+            "a->memory_property_flags == b->memory_property_flags",
+            "case PDOCKER_GPU_V5_RESOURCE_TYPE_BUFFER:",
+            "a->memory_offset != b->memory_offset",
+            "a->usage != b->usage",
+            "v5_resource_parent_memory_object_id_matches(header, resources, a, b)",
+            "memory_a->resource_id == 0",
+            "memory_a->resource_id != memory_b->resource_id",
+        ]:
+            self.assertIn(marker, helper)
+        self.assertIn(
+            "validate_vulkan_dispatch_v5_duplicate_resource_identity(header, resources)",
+            build_plan,
+        )
+        self.assertLess(
+            build_plan.index("validate_vulkan_dispatch_v5_duplicate_resource_identity(header, resources)"),
+            build_plan.index("finish_vulkan_dispatch_v5_native_plan_replay_status(plan)"),
+        )
+        handler = c_function_body(executor, "handle_vulkan_dispatch_v5_frame")
+        self.assertLess(
+            handler.index("build_vulkan_dispatch_v5_native_plan("),
+            handler.index("materialize_vulkan_dispatch_v5_native_plan_bindings("),
+        )
+        self.assertNotIn(
+            "validate_vulkan_dispatch_v5_duplicate_resource_identity",
+            graph,
+            "strict object graph must not be the first/only duplicate FD identity gate",
+        )
+
     def test_vulkan_dispatch_v5_tables_materialize_to_existing_run_bindings(self):
         executor = GPU_EXECUTOR.read_text()
         self.assertIn("materialize_vulkan_dispatch_v5_native_plan_bindings", executor)

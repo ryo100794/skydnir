@@ -9,6 +9,25 @@ llama.cpp itself remains unmodified.
 
 ## Current Ground Truth
 
+### 2026-07-19 CPU/static V5 resource identity lane
+
+Vulkan dispatch V5 native-plan validation now rejects duplicate nonzero
+`resource_id` entries that do not describe the same underlying API object.
+For duplicate memory resource ids the executor requires identical FD index,
+external offset, size, flags, memory-property flags, and generation. For
+duplicate buffer resource ids it requires identical buffer coordinates and usage
+and verifies the parent memory by memory object id, not merely by resource-table
+index. Mixed resource types sharing one nonzero id fail closed.
+
+This prevents a malformed or buggy sender from presenting one Vulkan object id
+as multiple FD-backed rows and letting `create_strict_vulkan_object_graph()`
+silently collapse them into a reconstructed object. The gate runs during V5
+native-plan construction before materialization and before strict object-graph
+deduplication.
+
+This is CPU/static pass-through ABI hardening only. It does not change
+llama.cpp, Dockerfiles, models, prompts, shader bytes, or executor arithmetic.
+
 ### 2026-07-19 CPU/static strict-transport reconciliation evidence lane
 
 Diagnostic API-to-executor reconciliation can only promote to verifier `pass`
