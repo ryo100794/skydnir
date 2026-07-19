@@ -9,6 +9,23 @@ llama.cpp itself remains unmodified.
 
 ## Current Ground Truth
 
+### 2026-07-19 CPU/static generic descriptor-set-layout create-flag transport lane
+
+Vulkan descriptor-set-layout create flags now have append-only transport lanes
+instead of being inferred from binding flags.  Compute V5 keeps the existing
+V5.6 descriptor-set-layout schema unchanged and adds V5.8 keyed
+`PdockerGpuVulkanDispatchV58DescriptorSetLayoutFlagEntry` rows by `layout_id`
+with transported `create_flags`.  Graphics V6 keeps the existing V6.24
+descriptor-set-layout schema unchanged and adds V6.31 keyed
+`PdockerGpuVulkanGraphicsV631DescriptorSetLayoutFlagEntry` rows by `layout_id`
+with transported `create_flags`.  The ABI contract covers both the new header
+extension macros and the flag-table schema hashes so old layout tables cannot
+silently grow a create-flag field.
+
+This is generic Vulkan pass-through hardening. It does not change llama.cpp,
+Dockerfiles, models, prompts, shader bytes, runtime defaults, or executor
+arithmetic.
+
 ### 2026-07-19 CPU/static V5 combined image/sampler pair identity lane
 
 V5 descriptor-object transport now carries sampler object identity separately

@@ -63,6 +63,7 @@ VULKAN_ABI_ID_FIELD_CLASSIFICATIONS = {
     "PdockerGpuVulkanDispatchV56HeaderExtension.pipeline_layout_id": "identity_key_guarded",
     "PdockerGpuVulkanDispatchV53BufferViewEntry.buffer_view_id": "object_identity_guarded",
     "PdockerGpuVulkanDispatchV56DescriptorSetLayoutEntry.layout_id": "identity_key_guarded",
+    "PdockerGpuVulkanDispatchV58DescriptorSetLayoutFlagEntry.layout_id": "identity_key_guarded",
     "PdockerGpuVulkanDispatchV56PipelineLayoutSetEntry.pipeline_layout_id": "identity_key_guarded",
     "PdockerGpuVulkanDispatchV56PipelineLayoutSetEntry.descriptor_set_layout_id": "object_reference_checked",
     "PdockerGpuVulkanDispatchV56PushConstantRangeEntry.pipeline_layout_id": "identity_key_guarded",
@@ -90,6 +91,7 @@ VULKAN_ABI_ID_FIELD_CLASSIFICATIONS = {
     "PdockerGpuVulkanGraphicsV619SubmitSyncEntry.semaphore_id": "command_or_sync_target",
     "PdockerGpuVulkanGraphicsV619SubmitSyncEntry.fence_id": "command_or_sync_target",
     "PdockerGpuVulkanGraphicsV624DescriptorSetLayoutEntry.layout_id": "identity_key_guarded",
+    "PdockerGpuVulkanGraphicsV631DescriptorSetLayoutFlagEntry.layout_id": "identity_key_guarded",
     "PdockerGpuVulkanGraphicsV624PipelineLayoutSetEntry.pipeline_layout_id": "identity_key_guarded",
     "PdockerGpuVulkanGraphicsV624PipelineLayoutSetEntry.descriptor_set_layout_id": "object_reference_checked",
     "PdockerGpuVulkanGraphicsV625DescriptorBindEntry.pipeline_layout_id": "object_reference_checked",
@@ -6684,7 +6686,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "const int use_v56_compute_layout = v56_compute_layout_available && binding_alias_count == 0;",
             "object_tables->compute_pipeline_layout_sets",
             "object_tables->compute_descriptor_set_layouts",
-            "incomplete V5.6 compute layout metadata",
+            "incomplete V5.6/V5.8 compute layout metadata",
             "validate_vulkan_compute_descriptor_layout_slot",
             "create-v56-compute-descriptor-set-layout",
             "create-v56-compute-pipeline-layout",
@@ -7170,7 +7172,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "ICD must prove executor V5.2 image-layout-range support before sending abi_minor 2",
         )
         abi_minor_assignment_markers = [
-            "header->abi_minor = need_v57_push_ops",
+            "header->abi_minor = need_v58_descriptor_layout_flags",
             "header->abi_minor = need_v56_compute_layouts",
             "header->abi_minor = need_v55_native_objects",
         ]
@@ -7932,6 +7934,16 @@ class GpuAbiContractTest(unittest.TestCase):
                 "PDOCKER_GPU_VULKAN_DISPATCH_V57_PUSH_CONSTANT_OP_SCHEMA_HASH",
             ),
             (
+                "PDOCKER_GPU_VULKAN_DISPATCH_V58_HEADER_EXTENSION_FIELDS",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V58_HEADER_EXTENSION_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V58_HEADER_EXTENSION_SCHEMA_HASH",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_DISPATCH_V58_DESCRIPTOR_SET_LAYOUT_FLAG_FIELDS",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V58_DESCRIPTOR_SET_LAYOUT_FLAG_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V58_DESCRIPTOR_SET_LAYOUT_FLAG_SCHEMA_HASH",
+            ),
+            (
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_FRAME_HEADER_FIELDS",
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_FRAME_HEADER_FIELD_COUNT",
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_FRAME_HEADER_SCHEMA_HASH",
@@ -8147,6 +8159,16 @@ class GpuAbiContractTest(unittest.TestCase):
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V630_HEADER_EXTENSION_SCHEMA_HASH",
             ),
             (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V631_HEADER_EXTENSION_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V631_HEADER_EXTENSION_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V631_HEADER_EXTENSION_SCHEMA_HASH",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V631_DESCRIPTOR_SET_LAYOUT_FLAG_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V631_DESCRIPTOR_SET_LAYOUT_FLAG_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V631_DESCRIPTOR_SET_LAYOUT_FLAG_SCHEMA_HASH",
+            ),
+            (
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELDS",
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELD_COUNT",
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_SCHEMA_HASH",
@@ -8327,6 +8349,176 @@ class GpuAbiContractTest(unittest.TestCase):
             "find_graphics_v624_pipeline_layout_set_entry",
         ]:
             self.assertIn(marker, icd)
+
+    def test_vulkan_descriptor_set_layout_create_flags_are_append_only_and_transported(self):
+        expected_extension_fields = [
+            ("descriptor_set_layout_flag_count", "u32"),
+            ("descriptor_set_layout_flag_entry_size", "u32"),
+            ("descriptor_set_layout_flag_table_offset", "u64"),
+            ("descriptor_set_layout_flag_table_size", "u64"),
+            ("descriptor_set_layout_flag_schema_hash", "u64"),
+            ("descriptor_set_layout_flag_table_hash", "u64"),
+            ("extension_hash", "u64"),
+        ]
+        expected_flag_fields = [
+            ("layout_id", "u64"),
+            ("create_flags", "u64"),
+        ]
+        for header_path in [APP_HEADER, CONTAINER_HEADER]:
+            with self.subTest(header=str(header_path)):
+                v56_layout_fields, _, _, _ = vulkan_dispatch_v5_schema(
+                    header_path,
+                    "PDOCKER_GPU_VULKAN_DISPATCH_V56_DESCRIPTOR_SET_LAYOUT_FIELDS",
+                    "PDOCKER_GPU_VULKAN_DISPATCH_V56_DESCRIPTOR_SET_LAYOUT_FIELD_COUNT",
+                    "PDOCKER_GPU_VULKAN_DISPATCH_V56_DESCRIPTOR_SET_LAYOUT_SCHEMA_HASH",
+                )
+                v624_layout_fields, _, _, _ = vulkan_dispatch_v5_schema(
+                    header_path,
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V624_DESCRIPTOR_SET_LAYOUT_FIELDS",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V624_DESCRIPTOR_SET_LAYOUT_FIELD_COUNT",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V624_DESCRIPTOR_SET_LAYOUT_SCHEMA_HASH",
+                )
+                v58_extension_fields, _, _, _ = vulkan_dispatch_v5_schema(
+                    header_path,
+                    "PDOCKER_GPU_VULKAN_DISPATCH_V58_HEADER_EXTENSION_FIELDS",
+                    "PDOCKER_GPU_VULKAN_DISPATCH_V58_HEADER_EXTENSION_FIELD_COUNT",
+                    "PDOCKER_GPU_VULKAN_DISPATCH_V58_HEADER_EXTENSION_SCHEMA_HASH",
+                )
+                v58_flag_fields, _, _, _ = vulkan_dispatch_v5_schema(
+                    header_path,
+                    "PDOCKER_GPU_VULKAN_DISPATCH_V58_DESCRIPTOR_SET_LAYOUT_FLAG_FIELDS",
+                    "PDOCKER_GPU_VULKAN_DISPATCH_V58_DESCRIPTOR_SET_LAYOUT_FLAG_FIELD_COUNT",
+                    "PDOCKER_GPU_VULKAN_DISPATCH_V58_DESCRIPTOR_SET_LAYOUT_FLAG_SCHEMA_HASH",
+                )
+                v631_extension_fields, _, _, _ = vulkan_dispatch_v5_schema(
+                    header_path,
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V631_HEADER_EXTENSION_FIELDS",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V631_HEADER_EXTENSION_FIELD_COUNT",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V631_HEADER_EXTENSION_SCHEMA_HASH",
+                )
+                v631_flag_fields, _, _, _ = vulkan_dispatch_v5_schema(
+                    header_path,
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V631_DESCRIPTOR_SET_LAYOUT_FLAG_FIELDS",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V631_DESCRIPTOR_SET_LAYOUT_FLAG_FIELD_COUNT",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V631_DESCRIPTOR_SET_LAYOUT_FLAG_SCHEMA_HASH",
+                )
+                self.assertNotIn(("create_flags", "u64"), v56_layout_fields)
+                self.assertNotIn(("create_flags", "u64"), v624_layout_fields)
+                self.assertIn(("layout_id", "u64"), v56_layout_fields)
+                self.assertIn(("layout_id", "u64"), v624_layout_fields)
+                self.assertEqual(expected_extension_fields, v58_extension_fields)
+                self.assertEqual(expected_flag_fields, v58_flag_fields)
+                self.assertEqual(expected_extension_fields, v631_extension_fields)
+                self.assertEqual(expected_flag_fields, v631_flag_fields)
+
+        executor = GPU_EXECUTOR.read_text()
+        compute_flag_lookup = c_function_body(executor, "vulkan_dispatch_v58_find_descriptor_layout_flags")
+        self.assertIn("entries[i].layout_id == layout_id", compute_flag_lookup)
+        compute_runner = c_function_body(executor, "run_vulkan_dispatch_fd")
+        for marker in [
+            "object_tables->compute_descriptor_set_layout_flag_count > 0",
+            "set_entry->descriptor_set_layout_id",
+            "(VkDescriptorSetLayoutCreateFlags)flag_entry->create_flags",
+            ".flags = set_create_flags",
+        ]:
+            self.assertIn(marker, compute_runner)
+        self.assertLess(
+            compute_runner.index("(VkDescriptorSetLayoutCreateFlags)flag_entry->create_flags"),
+            compute_runner.index(".flags = set_create_flags"),
+        )
+
+        graphics_flag_lookup = c_function_body(executor, "vulkan_graphics_v631_find_descriptor_layout_flags")
+        self.assertIn("entries[i].layout_id == layout_id", graphics_flag_lookup)
+        graphics_flag_apply = c_function_body(executor, "vulkan_graphics_v631_set_replay_descriptor_layout_flags")
+        for marker in [
+            "PdockerGpuVulkanGraphicsV631DescriptorSetLayoutFlagEntry",
+            "view->header_v631->v631.descriptor_set_layout_flag_count",
+            "layout_id",
+            "(VkDescriptorSetLayoutCreateFlags)entry->create_flags",
+            "layout->create_flags = flags",
+        ]:
+            self.assertIn(marker, graphics_flag_apply)
+        graphics_layouts = c_function_body(executor, "materialize_vulkan_graphics_v6_layouts")
+        for marker in [
+            "vulkan_graphics_v631_set_replay_descriptor_layout_flags",
+            "entry->descriptor_set_layout_id",
+            "entry->layout_id",
+            "VkDescriptorSetLayoutCreateFlags set_create_flags = dsl->create_flags",
+            ".flags = set_create_flags",
+        ]:
+            self.assertIn(marker, graphics_layouts)
+        self.assertLess(
+            graphics_layouts.index("VkDescriptorSetLayoutCreateFlags set_create_flags = dsl->create_flags"),
+            graphics_layouts.index(".flags = set_create_flags"),
+        )
+        self.assertNotIn("if (!view->is_v631 && has_update_after_bind)", graphics_layouts)
+        self.assertLess(
+            graphics_layouts.index("VkDescriptorSetLayoutCreateInfo dslci"),
+            graphics_layouts.index("vkCreateDescriptorSetLayout(rt->device, &dslci"),
+        )
+
+        compute_validator = c_function_body(executor, "validate_vulkan_dispatch_v58_descriptor_layout_flags")
+        for marker in [
+            "int referenced = 0;",
+            "pipeline_layout_sets[j].descriptor_set_layout_id == flags[i].layout_id",
+            "descriptor_set_layouts[j].layout_id == flags[i].layout_id",
+            "if (!referenced) return -EPROTO;",
+        ]:
+            self.assertIn(marker, compute_validator)
+
+        generic_caps = c_function_body(executor, "print_capabilities")
+        for marker in [
+            "abi_minor_descriptor_layout_flags",
+            "descriptor_set_layout_flag_schema_hash",
+            "max_descriptor_set_layout_flags",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V58_ABI_MINOR",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V58_DESCRIPTOR_SET_LAYOUT_FLAG_SCHEMA_HASH",
+        ]:
+            self.assertIn(marker, generic_caps)
+        advertisement_caps = c_function_body(executor, "print_vulkan_advertisement_caps")
+        for marker in [
+            "vulkan_dispatch_v5_supported_minors",
+            "[0,1,2,3,4,5,6,7,8]",
+            "vulkan_dispatch_v5_abi_minor_descriptor_layout_flags",
+            "vulkan_dispatch_v5_descriptor_set_layout_flag_schema_hash",
+            "vulkan_dispatch_v5_max_descriptor_set_layout_flags",
+        ]:
+            self.assertIn(marker, advertisement_caps)
+
+        icd = VULKAN_ICD.read_text()
+        sender = c_function_body(icd, "send_generic_vulkan_dispatch_v5_1_op")
+        for marker in [
+            "bool v58_descriptor_layout_flags_required = false;",
+            "pipeline_layout_requires_descriptor_layout_create_flag_transport(\n            compute_pipeline_layout, &v58_descriptor_layout_flags_required)",
+            "const bool v58_descriptor_layout_flags_supported =",
+            "(strict_passthrough || v58_descriptor_layout_flags_required)",
+            "collect_dispatch_v58_pipeline_layout_flags",
+        ]:
+            self.assertIn(marker, sender)
+        graphics_sender = c_function_body(icd, "send_recorded_vulkan_graphics_v6_1_frame_range")
+        for marker in [
+            "bool v631_descriptor_layout_flags_required = false;",
+            "graphics_pipelines_require_descriptor_layout_create_flag_transport",
+            "pipeline_layout_requires_descriptor_layout_create_flag_transport(\n                    snapshot->pipeline_layout, &v631_descriptor_layout_flags_required)",
+            "const bool v631_descriptor_layout_flags_supported =",
+            "descriptor_set_layout_flag_count > 0 || v631_descriptor_layout_flags_required",
+            "collect_graphics_v631_pipeline_layout_flags",
+        ]:
+            self.assertIn(marker, graphics_sender)
+        required_helper = c_function_body(icd, "descriptor_set_layout_requires_create_flag_transport")
+        for marker in [
+            "layout->create_flags != 0 || layout->update_after_bind_pool",
+            "descriptor_layout_binding_update_after_bind(layout, slot)",
+            "return -EPROTO;",
+        ]:
+            self.assertIn(marker, required_helper)
+        caps_parser = c_function_body(icd, "parse_executor_advertisement_caps_json")
+        for marker in [
+            "caps->vulkan_dispatch_v5_supported_minor[PDOCKER_GPU_VULKAN_DISPATCH_V58_ABI_MINOR]",
+            "caps->vulkan_dispatch_v58_descriptor_layout_flags_supported",
+            "v58_minor_ok && v58_minor >= PDOCKER_GPU_VULKAN_DISPATCH_V58_ABI_MINOR",
+        ]:
+            self.assertIn(marker, caps_parser)
 
     def test_vulkan_graphics_v625_descriptor_bind_metadata_abi_is_append_only(self):
         expected_extension_fields = [
@@ -9352,6 +9544,8 @@ class GpuAbiContractTest(unittest.TestCase):
         v6_prefix = c_function_body(executor, "validate_vulkan_graphics_v6_header_prefix")
         self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V630_ABI_MINOR", v6_prefix)
         self.assertIn("sizeof(PdockerGpuVulkanGraphicsV630FrameHeader)", v6_prefix)
+        self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V631_ABI_MINOR", v6_prefix)
+        self.assertIn("sizeof(PdockerGpuVulkanGraphicsV631FrameHeader)", v6_prefix)
         v6_identity = c_function_body(executor, "validate_vulkan_graphics_v630_identity_extension")
         for marker in [
             "PDOCKER_GPU_VULKAN_GRAPHICS_V630_HEADER_EXTENSION_SCHEMA_HASH",
@@ -9365,7 +9559,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "} VulkanGraphicsV6FrameView;", 1
         )[0]
         self.assertIn("const PdockerGpuVulkanGraphicsV630FrameHeader *header_v630;", view_struct)
+        self.assertIn("const PdockerGpuVulkanGraphicsV631FrameHeader *header_v631;", view_struct)
         self.assertIn("int is_v630;", view_struct)
+        self.assertIn("int is_v631;", view_struct)
         v630_register = c_function_body(executor, "register_vulkan_graphics_v630_identity")
         self.assertIn("return register_vulkan_runtime_identity_ids(", v630_register)
         self.assertIn("rt ? rt->graphics_queue : VK_NULL_HANDLE", v630_register)
@@ -9543,11 +9739,15 @@ class GpuAbiContractTest(unittest.TestCase):
         v6_sender = c_function_body(icd, "send_recorded_vulkan_graphics_v6_1_frame_range")
         for marker in [
             "current_vulkan_dispatch_identity_ids(\n        submit_queue,",
+            "PdockerGpuVulkanGraphicsV631FrameHeader *frame_header_v631",
             "PdockerGpuVulkanGraphicsV630FrameHeader *frame_header_v630",
+            "frame_header_v630 = &frame_header_v631->v630;",
             "frame_header_v629 = &frame_header_v630->v629;",
-            "size_t cursor = sizeof(PdockerGpuVulkanGraphicsV630FrameHeader);",
+            "size_t cursor = sizeof(PdockerGpuVulkanGraphicsV631FrameHeader);",
             "need_v630_native_objects",
             "executor_supports_vulkan_graphics_v630_native_objects()",
+            "sizeof(*frame_header_v631)",
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V631_ABI_MINOR",
             "sizeof(*frame_header_v630)",
             "PDOCKER_GPU_VULKAN_GRAPHICS_V630_ABI_MINOR",
             "frame_header_v630->v630.instance_object_id = graphics_instance_object_id;",
@@ -9555,6 +9755,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "frame_header_v630->v630.device_object_id = graphics_device_object_id;",
             "frame_header_v630->v630.queue_object_id = graphics_queue_object_id;",
             "PDOCKER_GPU_VULKAN_GRAPHICS_V630_HEADER_EXTENSION_SCHEMA_HASH",
+            "VULKAN_GRAPHICS_V6.31",
             "VULKAN_GRAPHICS_V6.30",
         ]:
             self.assertIn(marker, v6_sender)
@@ -9707,7 +9908,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "PdockerGpuVulkanDispatchV5DescriptorObjectEntry",
         ]:
             self.assertIn(marker, executor)
-        self.assertIn('\\"supported_minors\\":[0,1,2,3,4,5,6,7]', executor)
+        self.assertIn('\\"supported_minors\\":[0,1,2,3,4,5,6,7,8]', executor)
 
     def test_llama_gpu_env_manifest_covers_abi_dispatch_options(self):
         manifest = json.loads(LLAMA_GPU_ENV_MANIFEST.read_text())
@@ -14310,7 +14511,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("PdockerGpuVulkanDispatchV53BufferViewEntry", icd)
         self.assertIn("PdockerGpuVulkanGraphicsV627BufferViewEntry", icd)
         self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V627_BUFFER_VIEW_SCHEMA_HASH", icd)
-        self.assertIn("size_t cursor = sizeof(PdockerGpuVulkanGraphicsV630FrameHeader);", icd)
+        self.assertIn("size_t cursor = sizeof(PdockerGpuVulkanGraphicsV631FrameHeader);", icd)
         self.assertNotIn("size_t cursor = sizeof(PdockerGpuVulkanGraphicsV626FrameHeader);", icd)
         self.assertIn("executor_supports_vulkan_dispatch_v53_buffer_views", icd)
         self.assertIn("executor_supports_vulkan_graphics_v627_buffer_views", icd)
@@ -14391,7 +14592,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("op->declared_range_count = declared_range_count;", push_body)
         self.assertIn("memcpy(declared_ranges, captured_layout->push_constant_ranges", push_body)
         self.assertIn("PdockerGpuVulkanGraphicsV628PushConstantRangeEntry *push_constant_ranges = NULL", frame_body)
-        self.assertIn("size_t cursor = sizeof(PdockerGpuVulkanGraphicsV630FrameHeader);", frame_body)
+        self.assertIn("size_t cursor = sizeof(PdockerGpuVulkanGraphicsV631FrameHeader);", frame_body)
         self.assertIn("need_v628_push_constant_ranges", frame_body)
         self.assertIn("frame_header_v628->v628.push_constant_range_count", frame_body)
         self.assertIn("APPEND_GRAPHICS_TABLE(push_constant_ranges", frame_body)
@@ -14722,7 +14923,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "sizeof(*variable_descriptor_counts)",
             "free(variable_descriptor_counts);",
             "PdockerGpuVulkanGraphicsV629FrameHeader *frame_header_v629",
-            "size_t cursor = sizeof(PdockerGpuVulkanGraphicsV630FrameHeader);",
+            "size_t cursor = sizeof(PdockerGpuVulkanGraphicsV631FrameHeader);",
             "need_v629_variable_descriptor_counts",
             "collect_graphics_v629_variable_descriptor_counts",
             "executor_supports_vulkan_graphics_v629_variable_descriptor_counts",
@@ -20195,7 +20396,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "PdockerGpuVulkanDispatchV54BufferBarrierEntry *buffer_barrier_entries",
             "PdockerGpuVulkanDispatchV54ImageBarrierEntry *image_barrier_entries",
             "executor_supports_vulkan_dispatch_v54_barriers",
-            "header->abi_minor = need_v57_push_ops",
+            "header->abi_minor = need_v58_descriptor_layout_flags",
             "PDOCKER_GPU_VULKAN_DISPATCH_V56_ABI_MINOR",
             "PDOCKER_GPU_VULKAN_DISPATCH_V55_ABI_MINOR",
             "PDOCKER_GPU_VULKAN_DISPATCH_V54_ABI_MINOR",
@@ -26251,9 +26452,9 @@ class GpuAbiContractTest(unittest.TestCase):
         caps_struct = icd.split("} PdockerVkAdvertisedCaps;", 1)[0].rsplit("typedef struct {", 1)[1]
 
         self.assertIn("vulkan_graphics_v6_supported_minors", caps)
-        self.assertIn("[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30]", caps)
+        self.assertIn("[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31]", caps)
         self.assertIn("bool vulkan_graphics_v6_supported_minors_valid;", caps_struct)
-        self.assertIn("bool vulkan_graphics_v6_supported_minor[31];", caps_struct)
+        self.assertIn("bool vulkan_graphics_v6_supported_minor[32];", caps_struct)
         self.assertIn("json_read_u32_membership_array(\n            json,\n            \"vulkan_graphics_v6_supported_minors\"", parser)
         self.assertIn("caps->vulkan_graphics_v6_supported_minors_valid = true;", parser)
         self.assertIn("caps->vulkan_graphics_v6_supported_minor[PDOCKER_GPU_VULKAN_GRAPHICS_V627_ABI_MINOR]", parser)
@@ -26265,6 +26466,8 @@ class GpuAbiContractTest(unittest.TestCase):
         )
         self.assertIn("caps->vulkan_graphics_v628_push_constant_ranges_supported &&", parser)
         self.assertIn("caps->vulkan_graphics_v629_variable_descriptor_counts_supported &&", parser)
+        self.assertIn("caps->vulkan_graphics_v630_native_objects_supported &&", parser)
+        self.assertIn("caps->vulkan_graphics_v6_supported_minor[PDOCKER_GPU_VULKAN_GRAPHICS_V631_ABI_MINOR]", parser)
 
 
 if __name__ == "__main__":
