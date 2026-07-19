@@ -9,6 +9,21 @@ llama.cpp itself remains unmodified.
 
 ## Current Ground Truth
 
+### 2026-07-19 CPU/static V5 image descriptor identity lane
+
+V5 descriptor reconciliation now includes image descriptor identity in addition
+to buffer descriptor identity.  The ICD sender hashes image descriptor set,
+binding, array element, descriptor type, derived access flags, image-view object
+id, sampler object id, and image layout.  The Android executor recomputes the
+same identity from `VulkanDispatchImageDescriptor` and `VulkanDispatchV5ObjectTables`
+for strict reconciliation, strict duplicate-descriptor normalization gates, and
+reconciliation JSON.  Sender-side evidence also exposes image descriptor rows so
+a missing image-view/sampler/layout identity is visible without trial runs.
+
+This is generic Vulkan pass-through hardening. It does not change llama.cpp,
+Dockerfiles, models, prompts, shader bytes, runtime defaults, or executor
+arithmetic.
+
 ### 2026-07-19 CPU/static V5 texel buffer-view identity lane
 
 V5 descriptor reconciliation now includes texel buffer-view identity.  The ICD

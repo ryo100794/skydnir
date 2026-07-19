@@ -7286,7 +7286,10 @@ static uint64_t reconcile_bytes_hash(const void *data, size_t size) {
 
 static uint64_t reconcile_descriptor_hash(
         const VulkanDispatchBinding *bindings,
-        size_t binding_count) {
+        size_t binding_count,
+        const VulkanDispatchImageDescriptor *image_descriptors,
+        size_t image_descriptor_count,
+        const VulkanDispatchV5ObjectTables *object_tables) {
     uint64_t hash = 1469598103934665603ull;
     hash = fnv1a64_update(hash, &binding_count, sizeof(binding_count));
     for (size_t i = 0; i < binding_count; ++i) {
@@ -7339,6 +7342,39 @@ static uint64_t reconcile_descriptor_hash(
         hash = fnv1a64_update(hash, &u64, sizeof(u64));
         u64 = bindings[i].api_buffer_view_generation;
         hash = fnv1a64_update(hash, &u64, sizeof(u64));
+    }
+    hash = fnv1a64_update(hash, &image_descriptor_count, sizeof(image_descriptor_count));
+    for (size_t i = 0; i < image_descriptor_count; ++i) {
+        const VulkanDispatchImageDescriptor *d = image_descriptors ? &image_descriptors[i] : NULL;
+        uint32_t u32 = d ? d->descriptor_set : UINT32_MAX;
+        uint64_t u64 = 0;
+        hash = fnv1a64_update(hash, &u32, sizeof(u32));
+        u32 = d ? d->binding : UINT32_MAX;
+        hash = fnv1a64_update(hash, &u32, sizeof(u32));
+        u32 = d ? d->api_array_element : UINT32_MAX;
+        hash = fnv1a64_update(hash, &u32, sizeof(u32));
+        u32 = d ? d->api_descriptor_type : UINT32_MAX;
+        hash = fnv1a64_update(hash, &u32, sizeof(u32));
+        u32 = d ? d->access_flags : 0;
+        hash = fnv1a64_update(hash, &u32, sizeof(u32));
+        if (d && object_tables &&
+            d->image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE &&
+            d->image_view_index < object_tables->image_view_count) {
+            u64 = object_tables->image_views[d->image_view_index].view_id;
+        } else {
+            u64 = 0;
+        }
+        hash = fnv1a64_update(hash, &u64, sizeof(u64));
+        if (d && object_tables &&
+            d->sampler_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE &&
+            d->sampler_index < object_tables->sampler_count) {
+            u64 = object_tables->samplers[d->sampler_index].sampler_id;
+        } else {
+            u64 = 0;
+        }
+        hash = fnv1a64_update(hash, &u64, sizeof(u64));
+        u32 = d ? (uint32_t)d->image_layout : UINT32_MAX;
+        hash = fnv1a64_update(hash, &u32, sizeof(u32));
     }
     return hash;
 }
@@ -7402,6 +7438,9 @@ static int strict_reconciliation_has_mismatch(
         const VulkanDispatchOptions *options,
         const VulkanDispatchBinding *bindings,
         size_t binding_count,
+        const VulkanDispatchImageDescriptor *image_descriptors,
+        size_t image_descriptor_count,
+        const VulkanDispatchV5ObjectTables *object_tables,
         uint64_t spirv_hash,
         const VulkanDispatchSpecialization *specializations,
         size_t specialization_count,
@@ -7433,7 +7472,12 @@ static int strict_reconciliation_has_mismatch(
         return 1;
     }
     if (sender->has_descriptor_hash &&
-        sender->descriptor_hash != reconcile_descriptor_hash(bindings, binding_count)) {
+        sender->descriptor_hash != reconcile_descriptor_hash(
+            bindings,
+            binding_count,
+            image_descriptors,
+            image_descriptor_count,
+            object_tables)) {
         if (field_name) *field_name = "descriptor_hash";
         return 1;
     }
@@ -7464,6 +7508,9 @@ static int strict_reconciliation_has_required_transport_match(
         const VulkanDispatchOptions *options,
         const VulkanDispatchBinding *bindings,
         size_t binding_count,
+        const VulkanDispatchImageDescriptor *image_descriptors,
+        size_t image_descriptor_count,
+        const VulkanDispatchV5ObjectTables *object_tables,
         uint64_t spirv_hash,
         const VulkanDispatchSpecialization *specializations,
         size_t specialization_count,
@@ -7503,7 +7550,12 @@ static int strict_reconciliation_has_required_transport_match(
         return 0;
     }
     if (!sender->has_descriptor_hash ||
-        sender->descriptor_hash != reconcile_descriptor_hash(bindings, binding_count)) {
+        sender->descriptor_hash != reconcile_descriptor_hash(
+            bindings,
+            binding_count,
+            image_descriptors,
+            image_descriptor_count,
+            object_tables)) {
         if (field_name) *field_name = "descriptor_hash";
         return 0;
     }
@@ -7535,6 +7587,9 @@ static void write_vulkan_reconciliation_report(
         const VulkanDispatchOptions *options,
         const VulkanDispatchBinding *bindings,
         size_t binding_count,
+        const VulkanDispatchImageDescriptor *image_descriptors,
+        size_t image_descriptor_count,
+        const VulkanDispatchV5ObjectTables *object_tables,
         size_t shader_size,
         uint64_t spirv_hash,
         const VulkanDispatchSpecialization *specializations,
@@ -7553,7 +7608,12 @@ static void write_vulkan_reconciliation_report(
         options && options->has_receive_evidence ? &options->receive_evidence : NULL;
     const PdockerSenderReconcileEvidence *sender =
         options ? &options->sender_reconcile : NULL;
-    const uint64_t descriptor_hash = reconcile_descriptor_hash(bindings, binding_count);
+    const uint64_t descriptor_hash = reconcile_descriptor_hash(
+        bindings,
+        binding_count,
+        image_descriptors,
+        image_descriptor_count,
+        object_tables);
     const uint64_t push_hash = reconcile_bytes_hash(push, push_size);
     const uint64_t spec_hash = pipeline_specialization_hash(
         specializations,
@@ -7596,6 +7656,8 @@ static void write_vulkan_reconciliation_report(
             "\"received\":{"
             "\"shader_bytes\":%zu,"
             "\"spirv_hash\":\"0x%016llx\","
+            "\"buffer_descriptor_count\":%zu,"
+            "\"image_descriptor_count\":%zu,"
             "\"descriptor_count\":%zu,"
             "\"descriptor_hash\":\"0x%016llx\","
             "\"push_bytes\":%zu,"
@@ -7643,6 +7705,8 @@ static void write_vulkan_reconciliation_report(
             shader_size,
             (unsigned long long)spirv_hash,
             binding_count,
+            image_descriptor_count,
+            binding_count + image_descriptor_count,
             (unsigned long long)descriptor_hash,
             push_size,
             (unsigned long long)push_hash,
@@ -17242,6 +17306,9 @@ static int run_vulkan_dispatch_fd(
                 options,
                 bindings,
                 binding_count,
+                image_descriptors,
+                image_descriptor_count,
+                object_tables,
                 original_spirv_hash,
                 specializations,
                 specialization_count,
@@ -17301,6 +17368,9 @@ static int run_vulkan_dispatch_fd(
             options,
             bindings,
             binding_count,
+            image_descriptors,
+            image_descriptor_count,
+            object_tables,
             original_spirv_hash,
             specializations,
             specialization_count,
@@ -20752,6 +20822,7 @@ static int run_vulkan_dispatch_fd(
         fprintf(json_out(), ",");
         write_vulkan_reconciliation_report(json_out(), options,
                                             bindings, binding_count,
+                                            image_descriptors, image_descriptor_count, object_tables,
                                             shader_size,
                                             original_spirv_hash,
                                             specializations,
@@ -21056,6 +21127,7 @@ static int run_vulkan_dispatch_fd(
     fprintf(json_out(), ",");
     write_vulkan_reconciliation_report(json_out(), options,
                                         bindings, binding_count,
+                                        image_descriptors, image_descriptor_count, object_tables,
                                         shader_size,
                                         original_spirv_hash,
                                         specializations,
@@ -21318,6 +21390,7 @@ cleanup:
         fprintf(json_out(), "],");
         write_vulkan_reconciliation_report(json_out(), options,
                                             bindings, binding_count,
+                                            image_descriptors, image_descriptor_count, object_tables,
                                             shader_size,
                                             spirv_summary.hash,
                                             specializations,

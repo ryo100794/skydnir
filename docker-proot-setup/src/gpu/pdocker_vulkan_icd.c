@@ -8113,7 +8113,19 @@ static void trace_vulkan_reconcile_evidence(
         const uint32_t *api_buffer_view_formats,
         const VkDeviceSize *api_buffer_view_offsets,
         const VkDeviceSize *api_buffer_view_ranges,
-        const uint64_t *api_buffer_view_generations) {
+        const uint64_t *api_buffer_view_generations,
+        size_t image_descriptor_count,
+        const uint32_t *image_descriptor_sets,
+        const uint32_t *image_descriptor_bindings,
+        const uint32_t *image_descriptor_array_elements,
+        const uint32_t *image_descriptor_types,
+        const uint32_t *image_descriptor_view_indices,
+        const uint32_t *image_descriptor_sampler_indices,
+        const VkImageLayout *image_descriptor_layouts,
+        size_t image_view_count,
+        PdockerVkImageView *const *image_view_objects,
+        size_t sampler_count,
+        PdockerVkSampler *const *sampler_objects) {
     if (!reconcile_api_evidence_log_enabled()) return;
     fprintf(stderr,
             "pdocker-vulkan-icd: reconcile api trace: "
@@ -8128,7 +8140,8 @@ static void trace_vulkan_reconcile_evidence(
             "\"specialization_hash\":\"0x%016llx\","
             "\"dispatch_x\":%u,\"dispatch_y\":%u,\"dispatch_z\":%u,"
             "\"dispatch_hash\":\"0x%016llx\","
-            "\"binding_count\":%zu,\"descriptor_hash\":\"0x%016llx\","
+            "\"binding_count\":%zu,\"image_descriptor_count\":%zu,"
+            "\"descriptor_hash\":\"0x%016llx\","
             "\"bindings\":[",
             (unsigned long long)dispatch_id,
             raw_command_len,
@@ -8148,6 +8161,7 @@ static void trace_vulkan_reconcile_evidence(
             dispatch_z,
             (unsigned long long)dispatch_hash,
             binding_count,
+            image_descriptor_count,
             (unsigned long long)descriptor_hash);
     for (size_t i = 0; i < binding_count; ++i) {
         fprintf(stderr,
@@ -8186,6 +8200,45 @@ static void trace_vulkan_reconcile_evidence(
                 (unsigned long long)api_buffer_view_offsets[i],
                 (unsigned long long)api_buffer_view_ranges[i],
                 (unsigned long long)api_buffer_view_generations[i]);
+    }
+    fprintf(stderr, "],\"image_descriptors\":[");
+    for (size_t i = 0; i < image_descriptor_count; ++i) {
+        const uint32_t view_index = image_descriptor_view_indices ? image_descriptor_view_indices[i] : PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE;
+        const uint32_t sampler_index = image_descriptor_sampler_indices ? image_descriptor_sampler_indices[i] : PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE;
+        const uint32_t descriptor_type = image_descriptor_types ? image_descriptor_types[i] : 0u;
+        const uint32_t access_flags =
+            descriptor_type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
+                ? (PDOCKER_GPU_V5_ACCESS_READ | PDOCKER_GPU_V5_ACCESS_WRITE)
+                : PDOCKER_GPU_V5_ACCESS_READ;
+        const uint64_t view_id =
+            view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE &&
+            view_index < image_view_count &&
+            image_view_objects
+                ? pdocker_vk_image_view_object_id(image_view_objects[view_index])
+                : 0ull;
+        const uint64_t sampler_id =
+            sampler_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE &&
+            sampler_index < sampler_count &&
+            sampler_objects
+                ? pdocker_vk_sampler_object_id(sampler_objects[sampler_index])
+                : 0ull;
+        fprintf(stderr,
+                "%s{\"set\":%u,\"binding\":%u,\"array\":%u,"
+                "\"api_descriptor_type\":%u,\"access_flags\":%u,"
+                "\"image_view_index\":%u,\"image_view_id\":%llu,"
+                "\"sampler_index\":%u,\"sampler_id\":%llu,"
+                "\"image_layout\":%u}",
+                i ? "," : "",
+                image_descriptor_sets ? image_descriptor_sets[i] : UINT32_MAX,
+                image_descriptor_bindings ? image_descriptor_bindings[i] : UINT32_MAX,
+                image_descriptor_array_elements ? image_descriptor_array_elements[i] : UINT32_MAX,
+                descriptor_type,
+                access_flags,
+                view_index,
+                (unsigned long long)view_id,
+                sampler_index,
+                (unsigned long long)sampler_id,
+                image_descriptor_layouts ? (uint32_t)image_descriptor_layouts[i] : UINT32_MAX);
     }
     fprintf(stderr, "]}\n");
     fflush(stderr);
@@ -16941,6 +16994,31 @@ static int send_generic_vulkan_dispatch_op(
         descriptor_hash = fnv1a64_update_u64(descriptor_hash, (uint64_t)api_buffer_view_ranges[i]);
         descriptor_hash = fnv1a64_update_u64(descriptor_hash, api_buffer_view_generations[i]);
     }
+    descriptor_hash = fnv1a64_update_u64(descriptor_hash, (uint64_t)image_descriptor_count);
+    for (size_t i = 0; i < image_descriptor_count; ++i) {
+        descriptor_hash = fnv1a64_update_u32(descriptor_hash, image_descriptor_sets[i]);
+        descriptor_hash = fnv1a64_update_u32(descriptor_hash, image_descriptor_bindings[i]);
+        descriptor_hash = fnv1a64_update_u32(descriptor_hash, image_descriptor_array_elements[i]);
+        descriptor_hash = fnv1a64_update_u32(descriptor_hash, image_descriptor_types[i]);
+        descriptor_hash = fnv1a64_update_u32(
+            descriptor_hash,
+            image_descriptor_types[i] == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
+                ? (PDOCKER_GPU_V5_ACCESS_READ | PDOCKER_GPU_V5_ACCESS_WRITE)
+                : PDOCKER_GPU_V5_ACCESS_READ);
+        descriptor_hash = fnv1a64_update_u64(
+            descriptor_hash,
+            image_descriptor_view_indices[i] != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE &&
+                    image_descriptor_view_indices[i] < image_view_count
+                ? pdocker_vk_image_view_object_id(image_view_objects[image_descriptor_view_indices[i]])
+                : 0ull);
+        descriptor_hash = fnv1a64_update_u64(
+            descriptor_hash,
+            image_descriptor_sampler_indices[i] != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE &&
+                    image_descriptor_sampler_indices[i] < sampler_count
+                ? pdocker_vk_sampler_object_id(sampler_objects[image_descriptor_sampler_indices[i]])
+                : 0ull);
+        descriptor_hash = fnv1a64_update_u32(descriptor_hash, (uint32_t)image_descriptor_layouts[i]);
+    }
     if (reconcile_api_evidence_log_enabled()) {
         PDOCKER_VK_APPENDF("append-reconcile-evidence",
                            " dispatch_id=%llu sender_core_command_hash=0x%016llx"
@@ -17109,7 +17187,19 @@ static int send_generic_vulkan_dispatch_op(
                                     api_buffer_view_formats,
                                     api_buffer_view_offsets,
                                     api_buffer_view_ranges,
-                                    api_buffer_view_generations);
+                                    api_buffer_view_generations,
+                                    image_descriptor_count,
+                                    image_descriptor_sets,
+                                    image_descriptor_bindings,
+                                    image_descriptor_array_elements,
+                                    image_descriptor_types,
+                                    image_descriptor_view_indices,
+                                    image_descriptor_sampler_indices,
+                                    image_descriptor_layouts,
+                                    image_view_count,
+                                    image_view_objects,
+                                    sampler_count,
+                                    sampler_objects);
 #undef PDOCKER_VK_APPENDF
 #undef PDOCKER_VK_APPEND_FAIL
     const bool lifecycle_log = dispatch_lifecycle_log_enabled();

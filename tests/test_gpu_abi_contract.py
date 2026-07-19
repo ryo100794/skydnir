@@ -8755,6 +8755,15 @@ class GpuAbiContractTest(unittest.TestCase):
             "descriptor_hash = fnv1a64_update_u64(descriptor_hash, (uint64_t)api_buffer_view_offsets[i]);",
             "descriptor_hash = fnv1a64_update_u64(descriptor_hash, (uint64_t)api_buffer_view_ranges[i]);",
             "descriptor_hash = fnv1a64_update_u64(descriptor_hash, api_buffer_view_generations[i]);",
+            "descriptor_hash = fnv1a64_update_u64(descriptor_hash, (uint64_t)image_descriptor_count);",
+            "descriptor_hash = fnv1a64_update_u32(descriptor_hash, image_descriptor_sets[i]);",
+            "descriptor_hash = fnv1a64_update_u32(descriptor_hash, image_descriptor_bindings[i]);",
+            "descriptor_hash = fnv1a64_update_u32(descriptor_hash, image_descriptor_array_elements[i]);",
+            "descriptor_hash = fnv1a64_update_u32(descriptor_hash, image_descriptor_types[i]);",
+            "image_descriptor_types[i] == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE",
+            "pdocker_vk_image_view_object_id(image_view_objects[image_descriptor_view_indices[i]])",
+            "pdocker_vk_sampler_object_id(sampler_objects[image_descriptor_sampler_indices[i]])",
+            "descriptor_hash = fnv1a64_update_u32(descriptor_hash, (uint32_t)image_descriptor_layouts[i]);",
         ]
         last = -1
         for snippet in sender_order:
@@ -8787,12 +8796,62 @@ class GpuAbiContractTest(unittest.TestCase):
             "u64 = bindings[i].api_buffer_view_offset;",
             "u64 = bindings[i].api_buffer_view_range;",
             "u64 = bindings[i].api_buffer_view_generation;",
+            "hash = fnv1a64_update(hash, &image_descriptor_count, sizeof(image_descriptor_count));",
+            "uint32_t u32 = d ? d->descriptor_set : UINT32_MAX;",
+            "u32 = d ? d->binding : UINT32_MAX;",
+            "u32 = d ? d->api_array_element : UINT32_MAX;",
+            "u32 = d ? d->api_descriptor_type : UINT32_MAX;",
+            "u32 = d ? d->access_flags : 0;",
+            "object_tables->image_views[d->image_view_index].view_id",
+            "object_tables->samplers[d->sampler_index].sampler_id",
+            "u32 = d ? (uint32_t)d->image_layout : UINT32_MAX;",
         ]
         last = -1
         for snippet in executor_order:
             pos = executor_hash.find(snippet)
             self.assertGreater(pos, last, snippet)
             last = pos
+
+    def test_vulkan_dispatch_v5_reconciliation_hash_includes_image_descriptor_objects(self):
+        icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
+
+        sender = c_function_body(icd, "send_generic_vulkan_dispatch_op")
+        trace = c_function_body(icd, "trace_vulkan_reconcile_evidence")
+        reconcile = c_function_body(executor, "reconcile_descriptor_hash")
+        mismatch = c_function_body(executor, "strict_reconciliation_has_mismatch")
+        required = c_function_body(executor, "strict_reconciliation_has_required_transport_match")
+        report = c_function_body(executor, "write_vulkan_reconciliation_report")
+        run_body = c_function_body(executor, "run_vulkan_dispatch_fd")
+
+        self.assertIn("descriptor_hash = fnv1a64_update_u64(descriptor_hash, (uint64_t)image_descriptor_count);", sender)
+        self.assertIn("pdocker_vk_image_view_object_id(image_view_objects[image_descriptor_view_indices[i]])", sender)
+        self.assertIn("pdocker_vk_sampler_object_id(sampler_objects[image_descriptor_sampler_indices[i]])", sender)
+        self.assertIn("image_descriptor_view_indices[i] < image_view_count", sender)
+        self.assertIn("image_descriptor_sampler_indices[i] < sampler_count", sender)
+
+        self.assertIn("size_t image_descriptor_count", icd)
+        self.assertIn("image_descriptor_count", trace)
+        self.assertIn("image_descriptors", trace)
+        self.assertIn("pdocker_vk_image_view_object_id(image_view_objects[view_index])", trace)
+        self.assertIn("pdocker_vk_sampler_object_id(sampler_objects[sampler_index])", trace)
+
+        self.assertIn("const VulkanDispatchImageDescriptor *image_descriptors", executor)
+        self.assertIn("const VulkanDispatchV5ObjectTables *object_tables", executor)
+        self.assertIn("hash = fnv1a64_update(hash, &image_descriptor_count, sizeof(image_descriptor_count));", reconcile)
+        self.assertIn("object_tables->image_views[d->image_view_index].view_id", reconcile)
+        self.assertIn("object_tables->samplers[d->sampler_index].sampler_id", reconcile)
+
+        for function_body in (mismatch, required, report):
+            self.assertIn("image_descriptors", function_body)
+            self.assertIn("image_descriptor_count", function_body)
+            self.assertIn("object_tables", function_body)
+            self.assertIn("reconcile_descriptor_hash(\n", function_body)
+
+        self.assertIn("image_descriptor_count", report)
+        self.assertIn("binding_count + image_descriptor_count", report)
+        self.assertIn("image_descriptors,\n                image_descriptor_count,\n                object_tables", run_body)
+        self.assertIn("image_descriptors, image_descriptor_count, object_tables", run_body)
 
     def test_vulkan_compute_v5_preserves_api_buffer_usage_identity(self):
         icd = VULKAN_ICD.read_text()
