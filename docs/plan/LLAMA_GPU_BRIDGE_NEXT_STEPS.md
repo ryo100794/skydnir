@@ -9,6 +9,33 @@ llama.cpp itself remains unmodified.
 
 ## Current Ground Truth
 
+### 2026-07-19 CPU/static strict pass-through env policy lane
+
+The llama GPU environment manifest now records a structured
+`strict_passthrough_forbidden_env` list. It covers the diagnostic and
+compatibility knobs that must not be mixed into a strict pass-through
+correctness or benchmark claim: shader compatibility rewrites, safe-kernel
+replacement, Q4/Q6 targeted workarounds, specialization materialization,
+workgroup legalization, float16 capability insertion, overlap materialization,
+disable-optimization policy, and strict duplicate-descriptor normalization.
+
+The GPU ABI contract test now requires every forwarded compare env to belong to
+an explicit bridge classification and requires every strict-forbidden env to be
+forwarded, classified, and present in config propagation metadata. The verifier
+loads the same manifest field as `LLAMA_GPU_STRICT_PASSTHROUGH_FORBIDDEN_ENVS`,
+so future verifier policy can consume the same source instead of recreating the
+set locally.
+
+Validation command:
+
+```sh
+env -u PYTHONPATH python3 -m unittest tests.test_gpu_abi_contract
+```
+
+This is CPU/static policy hardening only. It does not change llama.cpp,
+Dockerfiles, models, prompts, shader bytes, runtime defaults, or executor
+arithmetic.
+
 ### 2026-07-19 CPU/static Vulkan ABI scalar semantics lane
 
 The Vulkan ABI contract test now classifies every remaining transported integer

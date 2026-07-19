@@ -22995,12 +22995,29 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertEqual(bridged_options["string"], set(classifications["icd_to_executor_string_option"]))
 
         compare_forward_envs = set(manifest["compare_forward_env_keys"])
+        classified_envs = set()
+        duplicate_classifications = []
+        allowed_dual_role_envs = {"PDOCKER_GPU_SPIRV_PROBE_DEBUG_BINDING"}
+        for class_name, envs in classifications.items():
+            for env in envs:
+                if env in classified_envs and env not in allowed_dual_role_envs:
+                    duplicate_classifications.append((env, class_name))
+                classified_envs.add(env)
+        self.assertEqual([], duplicate_classifications)
+        self.assertEqual([], sorted(compare_forward_envs - classified_envs))
+
         bridged_envs = set().union(*bridged_options.values())
         self.assertEqual([], sorted(bridged_envs - compare_forward_envs))
 
+        strict_forbidden_envs = set(manifest["strict_passthrough_forbidden_env"])
+        self.assertEqual([], sorted(strict_forbidden_envs - compare_forward_envs))
+        self.assertEqual([], sorted(strict_forbidden_envs - classified_envs))
+
         q6_required = set(manifest["q6_required_env_overlay"])
         self.assertEqual(set(), q6_required - bridged_envs)
+        self.assertEqual(set(), q6_required & strict_forbidden_envs)
         config_propagation_envs = {item["env"] for item in manifest["config_propagation_env_fields"]}
+        self.assertEqual([], sorted(strict_forbidden_envs - config_propagation_envs))
         self.assertEqual(
             [],
             sorted(
@@ -23042,6 +23059,17 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(marker, executor)
 
         runner = (ROOT / "scripts" / "android-llama-gpu-q6-workgroup-run.sh").read_text()
+        verifier = LLAMA_GPU_ARTIFACT_VERIFIER.read_text()
+        self.assertIn("LLAMA_GPU_STRICT_PASSTHROUGH_FORBIDDEN_ENVS", verifier)
+        for key in [
+            "PDOCKER_GPU_Q6K_COMPAT_REWRITES",
+            "PDOCKER_GPU_Q6K_SAFE_KERNEL",
+            "PDOCKER_GPU_Q6K_ORACLE_WRITEBACK",
+            "PDOCKER_GPU_Q4K_PIPELINE_RETRY_LADDER",
+            "PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC",
+            "PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION",
+        ]:
+            self.assertIn(key, strict_forbidden_envs)
         next_steps = LLAMA_GPU_NEXT_STEPS.read_text()
         self.assertIn("q6_required_env_overlay", runner)
         self.assertIn("Static dispatch-option route guard", next_steps)

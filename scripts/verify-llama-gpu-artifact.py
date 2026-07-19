@@ -162,6 +162,9 @@ LLAMA_GPU_COMPARE_FORWARD_ENV_KEYS = _manifest_string_tuple(
 LLAMA_GPU_Q6_REQUIRED_ENV_OVERLAY = _manifest_string_dict(
     LLAMA_GPU_ENV_MANIFEST, "q6_required_env_overlay"
 )
+LLAMA_GPU_STRICT_PASSTHROUGH_FORBIDDEN_ENVS = _manifest_string_tuple(
+    LLAMA_GPU_ENV_MANIFEST, "strict_passthrough_forbidden_env"
+)
 LLAMA_GPU_CONFIG_PROPAGATION_ENV_FIELDS = _manifest_env_field_tuple(
     LLAMA_GPU_ENV_MANIFEST, "config_propagation_env_fields"
 )
