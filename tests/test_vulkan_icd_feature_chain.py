@@ -1477,9 +1477,14 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 VkCommandPool other_pool = VK_NULL_HANDLE;
                 if (vkCreateCommandPool(VK_NULL_HANDLE, &pool_info, NULL, &other_pool) != VK_SUCCESS) return 8;
                 vkFreeCommandBuffers(VK_NULL_HANDLE, other_pool, 1, &cmd);
-                if (!command_buffer_handle_lookup(cmd)) return 9;
+                if (command_buffer_handle_lookup(cmd) != tracked_cmd) return 9;
+                if (tracked_cmd->owner_pool != tracked_pool) return 24;
+                if (!command_buffer_belongs_to_pool(tracked_cmd, tracked_pool)) return 25;
+                if (!command_pool_contains_command_buffer(tracked_pool, tracked_cmd)) return 26;
                 vkDestroyCommandPool(VK_NULL_HANDLE, other_pool, NULL);
                 if (command_pool_handle_lookup(other_pool)) return 10;
+                if (tracked_cmd->owner_pool != tracked_pool) return 27;
+                if (!command_pool_contains_command_buffer(tracked_pool, tracked_cmd)) return 28;
 
                 vkFreeCommandBuffers(VK_NULL_HANDLE, pool, 1, &cmd);
                 if (command_buffer_handle_lookup(cmd)) return 11;
@@ -2140,6 +2145,23 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     return 4;
                 }}
                 PdockerVkDescriptorSet *set_obj = descriptor_set_handle_lookup(set);
+                VkDescriptorPool other_pool = VK_NULL_HANDLE;
+                if (make_pool(&other_pool) != 0 || !descriptor_pool_handle_lookup(other_pool)) {{
+                    fprintf(stderr, "other pool create/register failed\\n");
+                    return 16;
+                }}
+                PdockerVkDescriptorPool *other_pool_obj = descriptor_pool_handle_lookup(other_pool);
+                if (vkFreeDescriptorSets(VK_NULL_HANDLE, other_pool, 1, &set) != VK_ERROR_INITIALIZATION_FAILED ||
+                    descriptor_set_handle_lookup(set) != set_obj || set_obj->pool != pool_obj ||
+                    pool_obj->set_count != 1 || other_pool_obj->set_count != 0) {{
+                    fprintf(stderr, "wrong-pool free corrupted descriptor ownership\\n");
+                    return 17;
+                }}
+                vkDestroyDescriptorPool(VK_NULL_HANDLE, other_pool, NULL);
+                if (descriptor_pool_handle_lookup(other_pool) != NULL || !descriptor_set_handle_lookup(set)) {{
+                    fprintf(stderr, "other pool destroy corrupted live descriptor set\\n");
+                    return 18;
+                }}
                 if (vkFreeDescriptorSets(VK_NULL_HANDLE, pool, 1, &set) != VK_SUCCESS) {{
                     fprintf(stderr, "free live set failed\\n");
                     return 5;
@@ -7662,11 +7684,20 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 alloc_info.commandBufferCount = 1;
                 if (vkAllocateCommandBuffers(device_b, &alloc_info, &wrong_alloc) != VK_ERROR_INITIALIZATION_FAILED) return 6;
                 if (wrong_alloc != VK_NULL_HANDLE) return 7;
+                PdockerVkCommandPool *pool_a_obj = command_pool_handle_lookup_for_device(device_a, pool_a);
+                PdockerVkCommandBuffer *cmd_a_obj = command_buffer_handle_lookup_for_device(device_a, cmd_a);
+                if (!pool_a_obj || !cmd_a_obj) return 8;
                 vkFreeCommandBuffers(device_b, pool_a, 1, &cmd_a);
-                if (!command_buffer_handle_lookup_for_device(device_a, cmd_a)) return 8;
+                if (command_buffer_handle_lookup_for_device(device_a, cmd_a) != cmd_a_obj) return 8;
+                if (cmd_a_obj->destroyed || cmd_a_obj->owner_pool != pool_a_obj ||
+                    !command_pool_contains_command_buffer(pool_a_obj, cmd_a_obj)) return 65;
                 vkDestroyCommandPool(device_b, pool_a, NULL);
-                if (!command_pool_handle_lookup_for_device(device_a, pool_a) ||
-                    !command_buffer_handle_lookup_for_device(device_a, cmd_a)) return 9;
+                if (command_pool_handle_lookup_for_device(device_a, pool_a) != pool_a_obj ||
+                    command_buffer_handle_lookup_for_device(device_a, cmd_a) != cmd_a_obj) return 9;
+                if (pool_a_obj->destroyed || cmd_a_obj->destroyed ||
+                    cmd_a_obj->owner_pool != pool_a_obj ||
+                    !command_buffer_belongs_to_pool(cmd_a_obj, pool_a_obj) ||
+                    !command_pool_contains_command_buffer(pool_a_obj, cmd_a_obj)) return 66;
 
                 VkFence fence_a = make_fence(device_a, VK_FENCE_CREATE_SIGNALED_BIT);
                 VkFence fence_b = make_fence(device_b, 0);

@@ -11106,7 +11106,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("descriptor_update_template_unregister", icd)
         self.assertIn("pdocker_vk_descriptor_update_template_to_handle", template_create_body)
         self.assertIn("descriptor_update_template_register(template_handle)", template_create_body)
-        self.assertIn("descriptor_update_template_unregister(descriptorUpdateTemplate)", template_destroy_body)
+        self.assertIn("descriptor_update_template_unregister_object(template_handle)", template_destroy_body)
         self.assertIn("pCreateInfo->sType != VK_STRUCTURE_TYPE_DESCRIPTOR_UPDATE_TEMPLATE_CREATE_INFO", template_create_body)
         self.assertIn('unsupported_create_info_pnext_result("vkCreateDescriptorUpdateTemplate", pCreateInfo->pNext)', template_create_body)
         self.assertIn("pCreateInfo->templateType != VK_DESCRIPTOR_UPDATE_TEMPLATE_TYPE_DESCRIPTOR_SET", template_create_body)
@@ -11334,7 +11334,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("PdockerVkDescriptorPool *pool;", set_struct)
         self.assertIn("pool->flags = pCreateInfo->flags;", create_body)
         self.assertIn("pool->max_sets = pCreateInfo->maxSets;", create_body)
-        self.assertIn("destroy_descriptor_pool_object(descriptor_pool_unregister(descriptorPool))", destroy_body)
+        self.assertIn("destroy_descriptor_pool_object(descriptor_pool_unregister_object(pool))", destroy_body)
         self.assertIn("descriptor_pool_reset_sets(pool);", reset_body)
         self.assertNotIn("(void)descriptorPool;", reset_body)
         self.assertIn("descriptor_pool_handle_lookup_for_device(device, descriptorPool)", free_body)
@@ -16763,7 +16763,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "descriptor_pool_handle_lookup_for_device(device, descriptorPool)",
             "descriptor_pool_handle_lookup_for_device(device, pAllocateInfo->descriptorPool)",
             "descriptor_set_register(set);",
-            "descriptor_set_unregister(pdocker_vk_descriptor_set_to_handle(set));",
+            "descriptor_set_unregister_object(set);",
             "descriptor_set_retire(set);",
             "descriptor_set_handle_lookup_for_command_buffer(cmd, pDescriptorSets[set_i])",
             "descriptor_set_handle_lookup_for_device(device, w->dstSet)",
@@ -16774,7 +16774,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "pdocker_vk_pipeline_layout_from_handle",
             "pdocker_vk_pipeline_from_handle",
             "descriptor_set_layout_register(layout);",
-            "descriptor_set_layout_retire(descriptor_set_layout_unregister(descriptorSetLayout));",
+            "descriptor_set_layout_retire(descriptor_set_layout_unregister_object(layout));",
             "shader_module_register(shader);",
             "shader_module_retire(shader_module_unregister(shaderModule));",
             "pipeline_layout_register(layout);",
@@ -16852,7 +16852,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "pdocker_vk_surface_from_handle",
             "pdocker_vk_swapchain_from_handle",
             "*pDescriptorPool = pdocker_vk_descriptor_pool_to_handle(pool);",
-            "destroy_descriptor_pool_object(descriptor_pool_unregister(descriptorPool));",
+            "destroy_descriptor_pool_object(descriptor_pool_unregister_object(pool));",
             "pipeline_cache_register(cache);",
             "*pPipelineCache = pdocker_vk_pipeline_cache_to_handle(cache);",
             "pipeline_cache_retire(pipeline_cache_unregister(pipelineCache));",

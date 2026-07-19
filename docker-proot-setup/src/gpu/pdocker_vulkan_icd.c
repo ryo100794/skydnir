@@ -2642,8 +2642,7 @@ static void descriptor_set_layout_register(PdockerVkDescriptorSetLayout *layout)
     g_descriptor_set_layouts = layout;
 }
 
-static PdockerVkDescriptorSetLayout *descriptor_set_layout_unregister(VkDescriptorSetLayout layout) {
-    PdockerVkDescriptorSetLayout *target = pdocker_vk_descriptor_set_layout_from_handle(layout);
+static PdockerVkDescriptorSetLayout *descriptor_set_layout_unregister_object(PdockerVkDescriptorSetLayout *target) {
     if (!target) return NULL;
     PdockerVkDescriptorSetLayout **link = &g_descriptor_set_layouts;
     while (*link) {
@@ -2655,6 +2654,11 @@ static PdockerVkDescriptorSetLayout *descriptor_set_layout_unregister(VkDescript
         link = &(*link)->next;
     }
     return NULL;
+}
+
+static PdockerVkDescriptorSetLayout *descriptor_set_layout_unregister(VkDescriptorSetLayout layout) __attribute__((unused));
+static PdockerVkDescriptorSetLayout *descriptor_set_layout_unregister(VkDescriptorSetLayout layout) {
+    return descriptor_set_layout_unregister_object(pdocker_vk_descriptor_set_layout_from_handle(layout));
 }
 
 static void descriptor_set_layout_retire(PdockerVkDescriptorSetLayout *layout) {
@@ -2911,8 +2915,7 @@ static void descriptor_pool_register(PdockerVkDescriptorPool *pool) {
     g_descriptor_pools = pool;
 }
 
-static PdockerVkDescriptorPool *descriptor_pool_unregister(VkDescriptorPool descriptorPool) {
-    PdockerVkDescriptorPool *target = pdocker_vk_descriptor_pool_from_handle(descriptorPool);
+static PdockerVkDescriptorPool *descriptor_pool_unregister_object(PdockerVkDescriptorPool *target) {
     if (!target) return NULL;
     PdockerVkDescriptorPool **link = &g_descriptor_pools;
     while (*link) {
@@ -2924,6 +2927,11 @@ static PdockerVkDescriptorPool *descriptor_pool_unregister(VkDescriptorPool desc
         link = &(*link)->next;
     }
     return NULL;
+}
+
+static PdockerVkDescriptorPool *descriptor_pool_unregister(VkDescriptorPool descriptorPool) __attribute__((unused));
+static PdockerVkDescriptorPool *descriptor_pool_unregister(VkDescriptorPool descriptorPool) {
+    return descriptor_pool_unregister_object(pdocker_vk_descriptor_pool_from_handle(descriptorPool));
 }
 
 static void descriptor_pool_retire(PdockerVkDescriptorPool *pool) {
@@ -2963,8 +2971,7 @@ static void descriptor_set_register(PdockerVkDescriptorSet *set) {
     g_descriptor_sets = set;
 }
 
-static PdockerVkDescriptorSet *descriptor_set_unregister(VkDescriptorSet descriptorSet) {
-    PdockerVkDescriptorSet *target = pdocker_vk_descriptor_set_from_handle(descriptorSet);
+static PdockerVkDescriptorSet *descriptor_set_unregister_object(PdockerVkDescriptorSet *target) {
     if (!target) return NULL;
     PdockerVkDescriptorSet **link = &g_descriptor_sets;
     while (*link) {
@@ -2976,6 +2983,11 @@ static PdockerVkDescriptorSet *descriptor_set_unregister(VkDescriptorSet descrip
         link = &(*link)->next;
     }
     return NULL;
+}
+
+static PdockerVkDescriptorSet *descriptor_set_unregister(VkDescriptorSet descriptorSet) __attribute__((unused));
+static PdockerVkDescriptorSet *descriptor_set_unregister(VkDescriptorSet descriptorSet) {
+    return descriptor_set_unregister_object(pdocker_vk_descriptor_set_from_handle(descriptorSet));
 }
 
 static void descriptor_set_retire(PdockerVkDescriptorSet *set) {
@@ -3082,8 +3094,7 @@ static void command_pool_register(PdockerVkCommandPool *pool) {
     g_command_pools = pool;
 }
 
-static PdockerVkCommandPool *command_pool_unregister(VkCommandPool commandPool) {
-    PdockerVkCommandPool *target = command_pool_handle_target(commandPool);
+static PdockerVkCommandPool *command_pool_unregister_object(PdockerVkCommandPool *target) {
     if (!target) return NULL;
     PdockerVkCommandPool **link = &g_command_pools;
     while (*link) {
@@ -3095,6 +3106,11 @@ static PdockerVkCommandPool *command_pool_unregister(VkCommandPool commandPool) 
         link = &(*link)->next;
     }
     return NULL;
+}
+
+static PdockerVkCommandPool *command_pool_unregister(VkCommandPool commandPool) __attribute__((unused));
+static PdockerVkCommandPool *command_pool_unregister(VkCommandPool commandPool) {
+    return command_pool_unregister_object(command_pool_handle_target(commandPool));
 }
 
 static void command_pool_retire(PdockerVkCommandPool *pool) {
@@ -3152,8 +3168,7 @@ static void command_buffer_register(PdockerVkCommandPool *pool, PdockerVkCommand
     command_buffer_link_to_pool(pool, cmd);
 }
 
-static PdockerVkCommandBuffer *command_buffer_unregister(VkCommandBuffer commandBuffer) {
-    PdockerVkCommandBuffer *target = command_buffer_handle_target(commandBuffer);
+static PdockerVkCommandBuffer *command_buffer_unregister_object(PdockerVkCommandBuffer *target) {
     if (!target) return NULL;
     PdockerVkCommandBuffer **link = &g_command_buffers;
     while (*link) {
@@ -3166,6 +3181,11 @@ static PdockerVkCommandBuffer *command_buffer_unregister(VkCommandBuffer command
         link = &(*link)->next_global;
     }
     return NULL;
+}
+
+static PdockerVkCommandBuffer *command_buffer_unregister(VkCommandBuffer commandBuffer) __attribute__((unused));
+static PdockerVkCommandBuffer *command_buffer_unregister(VkCommandBuffer commandBuffer) {
+    return command_buffer_unregister_object(command_buffer_handle_target(commandBuffer));
 }
 
 static void command_buffer_retire(PdockerVkCommandBuffer *cmd) {
@@ -13884,7 +13904,7 @@ static void descriptor_pool_free_set(
         PdockerVkDescriptorPool *pool,
         PdockerVkDescriptorSet *set) {
     if (!set) return;
-    descriptor_set_unregister(pdocker_vk_descriptor_set_to_handle(set));
+    descriptor_set_unregister_object(set);
     descriptor_pool_untrack_set(pool ? pool : set->pool, set);
     destroy_descriptor_set_object(set);
 }
@@ -13894,7 +13914,7 @@ static void descriptor_pool_reset_sets(PdockerVkDescriptorPool *pool) {
     for (uint32_t i = 0; i < pool->set_count; ++i) {
         PdockerVkDescriptorSet *set = pool->sets ? pool->sets[i] : NULL;
         if (!set) continue;
-        descriptor_set_unregister(pdocker_vk_descriptor_set_to_handle(set));
+        descriptor_set_unregister_object(set);
         set->pool = NULL;
         destroy_descriptor_set_object(set);
         pool->sets[i] = NULL;
@@ -25896,8 +25916,9 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyDescriptorSetLayout(
         VkDescriptorSetLayout descriptorSetLayout,
         const VkAllocationCallbacks *pAllocator) {
     (void)pAllocator;
-    if (!descriptor_set_layout_handle_lookup_for_device(device, descriptorSetLayout)) return;
-    descriptor_set_layout_retire(descriptor_set_layout_unregister(descriptorSetLayout));
+    PdockerVkDescriptorSetLayout *layout = descriptor_set_layout_handle_lookup_for_device(device, descriptorSetLayout);
+    if (!layout) return;
+    descriptor_set_layout_retire(descriptor_set_layout_unregister_object(layout));
 }
 
 static void destroy_pipeline_layout_storage(PdockerVkPipelineLayout *layout) {
@@ -26045,8 +26066,9 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyDescriptorPool(
         VkDescriptorPool descriptorPool,
         const VkAllocationCallbacks *pAllocator) {
     (void)pAllocator;
-    if (!descriptor_pool_handle_lookup_for_device(device, descriptorPool)) return;
-    destroy_descriptor_pool_object(descriptor_pool_unregister(descriptorPool));
+    PdockerVkDescriptorPool *pool = descriptor_pool_handle_lookup_for_device(device, descriptorPool);
+    if (!pool) return;
+    destroy_descriptor_pool_object(descriptor_pool_unregister_object(pool));
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkResetDescriptorPool(
@@ -26842,10 +26864,8 @@ static void descriptor_update_template_register(
     g_descriptor_update_templates = template_handle;
 }
 
-static PdockerVkDescriptorUpdateTemplate *descriptor_update_template_unregister(
-        VkDescriptorUpdateTemplate descriptorUpdateTemplate) {
-    PdockerVkDescriptorUpdateTemplate *target =
-        pdocker_vk_descriptor_update_template_from_handle(descriptorUpdateTemplate);
+static PdockerVkDescriptorUpdateTemplate *descriptor_update_template_unregister_object(
+        PdockerVkDescriptorUpdateTemplate *target) {
     if (!target) return NULL;
     PdockerVkDescriptorUpdateTemplate **link = &g_descriptor_update_templates;
     while (*link) {
@@ -26857,6 +26877,14 @@ static PdockerVkDescriptorUpdateTemplate *descriptor_update_template_unregister(
         link = &(*link)->next;
     }
     return NULL;
+}
+
+static PdockerVkDescriptorUpdateTemplate *descriptor_update_template_unregister(
+        VkDescriptorUpdateTemplate descriptorUpdateTemplate) __attribute__((unused));
+static PdockerVkDescriptorUpdateTemplate *descriptor_update_template_unregister(
+        VkDescriptorUpdateTemplate descriptorUpdateTemplate) {
+    return descriptor_update_template_unregister_object(
+        pdocker_vk_descriptor_update_template_from_handle(descriptorUpdateTemplate));
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorUpdateTemplate(
@@ -26923,8 +26951,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorUpdateTemplate(
     *pDescriptorUpdateTemplate =
         pdocker_vk_descriptor_update_template_to_handle(template_handle);
     if (!*pDescriptorUpdateTemplate) {
-        (void)descriptor_update_template_unregister(
-            pdocker_vk_descriptor_update_template_to_handle(template_handle));
+        (void)descriptor_update_template_unregister_object(template_handle);
         free(template_handle->entries);
         free(template_handle);
         return VK_ERROR_OUT_OF_HOST_MEMORY;
@@ -26937,9 +26964,10 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyDescriptorUpdateTemplate(
         VkDescriptorUpdateTemplate descriptorUpdateTemplate,
         const VkAllocationCallbacks *pAllocator) {
     (void)pAllocator;
-    if (!descriptor_update_template_handle_lookup_for_device(device, descriptorUpdateTemplate)) return;
     PdockerVkDescriptorUpdateTemplate *template_handle =
-        descriptor_update_template_unregister(descriptorUpdateTemplate);
+        descriptor_update_template_handle_lookup_for_device(device, descriptorUpdateTemplate);
+    if (!template_handle) return;
+    template_handle = descriptor_update_template_unregister_object(template_handle);
     if (!template_handle) return;
     free(template_handle->entries);
     free(template_handle);
@@ -29648,12 +29676,12 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyCommandPool(
     (void)pAllocator;
     PdockerVkCommandPool *pool = command_pool_handle_lookup_for_device(device, commandPool);
     if (!pool) return;
-    pool = command_pool_unregister(commandPool);
+    pool = command_pool_unregister_object(pool);
     if (!pool) return;
     PdockerVkCommandBuffer *cmd = pool->command_buffers;
     while (cmd) {
         PdockerVkCommandBuffer *next = cmd->next_in_pool;
-        (void)command_buffer_unregister((VkCommandBuffer)cmd);
+        (void)command_buffer_unregister_object(cmd);
         command_buffer_retire(cmd);
         cmd = next;
     }
@@ -29722,7 +29750,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateCommandBuffers(
         if (!cmd || !command_buffer_alloc_descriptor_states(cmd)) {
             if (cmd) free(cmd);
             for (uint32_t j = 0; j < i; ++j) {
-                PdockerVkCommandBuffer *allocated = command_buffer_unregister(pCommandBuffers[j]);
+                PdockerVkCommandBuffer *allocated = command_buffer_unregister_object(command_buffer_handle_target(pCommandBuffers[j]));
                 command_buffer_retire(allocated);
                 pCommandBuffers[j] = VK_NULL_HANDLE;
             }
@@ -29750,7 +29778,7 @@ VKAPI_ATTR void VKAPI_CALL vkFreeCommandBuffers(
         if (pCommandBuffers[i] == VK_NULL_HANDLE) continue;
         PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup_for_device(device, pCommandBuffers[i]);
         if (!command_buffer_belongs_to_pool(cmd, pool)) continue;
-        (void)command_buffer_unregister(pCommandBuffers[i]);
+        (void)command_buffer_unregister_object(cmd);
         command_buffer_retire(cmd);
     }
 }
@@ -38457,10 +38485,10 @@ static void pdocker_vk_destroy_device_live_objects(VkDevice device, uint64_t des
         PdockerVkCommandPool *pool = NULL;
         PDOCKER_VK_FIND_DEVICE_OWNED(g_command_pools, pool, destroy_owner_id);
         if (!pool) break;
-        pool = command_pool_unregister(pdocker_vk_command_pool_to_handle(pool));
+        pool = command_pool_unregister_object(pool);
         if (!pool) break;
         while (pool->command_buffers) {
-            PdockerVkCommandBuffer *cmd = command_buffer_unregister((VkCommandBuffer)pool->command_buffers);
+            PdockerVkCommandBuffer *cmd = command_buffer_unregister_object(pool->command_buffers);
             if (!cmd) break;
             command_buffer_retire(cmd);
         }
@@ -38475,7 +38503,7 @@ static void pdocker_vk_destroy_device_live_objects(VkDevice device, uint64_t des
             }
         }
         if (!cmd) break;
-        cmd = command_buffer_unregister((VkCommandBuffer)cmd);
+        cmd = command_buffer_unregister_object(cmd);
         if (!cmd) break;
         command_buffer_retire(cmd);
     }
@@ -38483,8 +38511,7 @@ static void pdocker_vk_destroy_device_live_objects(VkDevice device, uint64_t des
         PdockerVkDescriptorUpdateTemplate *template_handle = NULL;
         PDOCKER_VK_FIND_DEVICE_OWNED(g_descriptor_update_templates, template_handle, destroy_owner_id);
         if (!template_handle) break;
-        template_handle = descriptor_update_template_unregister(
-            pdocker_vk_descriptor_update_template_to_handle(template_handle));
+        template_handle = descriptor_update_template_unregister_object(template_handle);
         if (!template_handle) break;
         free(template_handle->entries);
         free(template_handle);
@@ -38493,7 +38520,7 @@ static void pdocker_vk_destroy_device_live_objects(VkDevice device, uint64_t des
         PdockerVkDescriptorPool *pool = NULL;
         PDOCKER_VK_FIND_DEVICE_OWNED(g_descriptor_pools, pool, destroy_owner_id);
         if (!pool) break;
-        pool = descriptor_pool_unregister(pdocker_vk_descriptor_pool_to_handle(pool));
+        pool = descriptor_pool_unregister_object(pool);
         if (!pool) break;
         destroy_descriptor_pool_object(pool);
     }
@@ -38501,7 +38528,7 @@ static void pdocker_vk_destroy_device_live_objects(VkDevice device, uint64_t des
         PdockerVkDescriptorSet *set = NULL;
         PDOCKER_VK_FIND_DEVICE_OWNED(g_descriptor_sets, set, destroy_owner_id);
         if (!set) break;
-        set = descriptor_set_unregister(pdocker_vk_descriptor_set_to_handle(set));
+        set = descriptor_set_unregister_object(set);
         if (!set) break;
         destroy_descriptor_set_object(set);
     }
@@ -38541,7 +38568,7 @@ static void pdocker_vk_destroy_device_live_objects(VkDevice device, uint64_t des
         PdockerVkDescriptorSetLayout *layout = NULL;
         PDOCKER_VK_FIND_DEVICE_OWNED(g_descriptor_set_layouts, layout, destroy_owner_id);
         if (!layout) break;
-        layout = descriptor_set_layout_unregister(pdocker_vk_descriptor_set_layout_to_handle(layout));
+        layout = descriptor_set_layout_unregister_object(layout);
         if (!layout) break;
         descriptor_set_layout_retire(layout);
     }
