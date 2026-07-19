@@ -1186,20 +1186,21 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
             #include <string.h>
             #include "{ICD_SOURCE}"
 
-            static VkSemaphore make_binary_semaphore(void) {{
+            static VkSemaphore make_binary_semaphore(VkDevice device) {{
                 VkSemaphoreCreateInfo info;
                 memset(&info, 0, sizeof(info));
                 info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
                 VkSemaphore sem = VK_NULL_HANDLE;
-                if (vkCreateSemaphore(VK_NULL_HANDLE, &info, NULL, &sem) != VK_SUCCESS) return VK_NULL_HANDLE;
+                if (vkCreateSemaphore(device, &info, NULL, &sem) != VK_SUCCESS) return VK_NULL_HANDLE;
                 return sem;
             }}
 
-            static VkSwapchainKHR make_registered_swapchain(PdockerVkSurface *surface) {{
+            static VkSwapchainKHR make_registered_swapchain(PdockerVkSurface *surface, uint64_t owner_device_id) {{
                 if (!pdocker_vk_headless_surface_valid(surface)) return VK_NULL_HANDLE;
                 PdockerVkSwapchain *swapchain = pdocker_alloc_handle(sizeof(*swapchain));
                 if (!swapchain) return VK_NULL_HANDLE;
                 memset(swapchain, 0, sizeof(*swapchain));
+                swapchain->owner_device_id = owner_device_id;
                 swapchain->surface = surface;
                 swapchain->image_format = VK_FORMAT_R8G8B8A8_UNORM;
                 swapchain->image_color_space = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
@@ -1216,7 +1217,9 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     if (!image || !memory) return VK_NULL_HANDLE;
                     memset(image, 0, sizeof(*image));
                     memset(memory, 0, sizeof(*memory));
+                    memory->owner_device_id = owner_device_id;
                     memory->size = 4096;
+                    image->owner_device_id = owner_device_id;
                     image->memory = memory;
                     image->swapchain_owned = true;
                     image->current_layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
@@ -1230,11 +1233,16 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
             int main(void) {{
                 unsetenv("PDOCKER_VULKAN_DISABLE_V5_OBJECT_TRANSPORT");
                 unsetenv("PDOCKER_VULKAN_ADVERTISEMENT_SOURCE");
-                ensure_vulkan_dispatchable_object_ids();
-                g_queue.object_id = 1;
-                g_queue.instance_object_id = 1;
-                g_queue.physical_device_object_id = 1;
-                g_queue.device_object_id = 1;
+                VkDeviceCreateInfo device_info;
+                memset(&device_info, 0, sizeof(device_info));
+                device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                VkDevice device = VK_NULL_HANDLE;
+                if (vkCreateDevice((VkPhysicalDevice)&g_device, &device_info, NULL, &device) != VK_SUCCESS ||
+                    device == VK_NULL_HANDLE) return 29;
+                VkQueue queue = VK_NULL_HANDLE;
+                vkGetDeviceQueue(device, 0, 0, &queue);
+                PdockerVkQueue *queue_obj = pdocker_vk_queue_from_handle(queue);
+                if (!queue_obj || queue_obj->device_object_id == 0) return 30;
 
                 VkHeadlessSurfaceCreateInfoEXT surface_info;
                 memset(&surface_info, 0, sizeof(surface_info));
@@ -1244,16 +1252,16 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 PdockerVkSurface *surface_obj = surface_handle_lookup_for_instance(VK_NULL_HANDLE, surface);
                 if (!surface_obj) return 3;
 
-                VkSwapchainKHR swapchain = make_registered_swapchain(surface_obj);
+                VkSwapchainKHR swapchain = make_registered_swapchain(surface_obj, queue_obj->device_object_id);
                 if (!swapchain || !swapchain_handle_lookup(swapchain)) return 4;
                 uint32_t image_count = 0;
-                if (vkGetSwapchainImagesKHR(VK_NULL_HANDLE, swapchain, &image_count, NULL) != VK_SUCCESS) return 5;
+                if (vkGetSwapchainImagesKHR(device, swapchain, &image_count, NULL) != VK_SUCCESS) return 5;
                 if (image_count != 2) return 6;
 
-                VkSemaphore sem = make_binary_semaphore();
+                VkSemaphore sem = make_binary_semaphore(device);
                 if (!sem) return 7;
                 uint32_t image_index = UINT32_MAX;
-                if (vkAcquireNextImageKHR(VK_NULL_HANDLE, swapchain, 0, sem, VK_NULL_HANDLE, &image_index) != VK_SUCCESS) return 8;
+                if (vkAcquireNextImageKHR(device, swapchain, 0, sem, VK_NULL_HANDLE, &image_index) != VK_SUCCESS) return 8;
                 if (!semaphore_handle_lookup(sem) || !semaphore_handle_lookup(sem)->signaled) return 9;
                 VkPresentInfoKHR present;
                 memset(&present, 0, sizeof(present));
@@ -1265,48 +1273,49 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 present.pImageIndices = &image_index;
                 VkResult present_result = VK_ERROR_UNKNOWN;
                 present.pResults = &present_result;
-                if (vkQueuePresentKHR((VkQueue)&g_queue, &present) != VK_SUCCESS) return 10;
+                if (vkQueuePresentKHR(queue, &present) != VK_SUCCESS) return 10;
                 if (present_result != VK_SUCCESS) return 11;
                 if (semaphore_handle_lookup(sem)->signaled) return 12;
-                vkDestroySemaphore(VK_NULL_HANDLE, sem, NULL);
+                vkDestroySemaphore(device, sem, NULL);
 
                 VkFenceCreateInfo fence_info;
                 memset(&fence_info, 0, sizeof(fence_info));
                 fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
                 VkFence fence = VK_NULL_HANDLE;
-                if (vkCreateFence(VK_NULL_HANDLE, &fence_info, NULL, &fence) != VK_SUCCESS || !fence) return 13;
-                vkDestroyFence(VK_NULL_HANDLE, fence, NULL);
-                if (vkAcquireNextImageKHR(VK_NULL_HANDLE, swapchain, 0, VK_NULL_HANDLE, fence, &image_index) != VK_ERROR_INITIALIZATION_FAILED) return 14;
+                if (vkCreateFence(device, &fence_info, NULL, &fence) != VK_SUCCESS || !fence) return 13;
+                vkDestroyFence(device, fence, NULL);
+                if (vkAcquireNextImageKHR(device, swapchain, 0, VK_NULL_HANDLE, fence, &image_index) != VK_ERROR_INITIALIZATION_FAILED) return 14;
 
-                VkSemaphore stale_sem = make_binary_semaphore();
+                VkSemaphore stale_sem = make_binary_semaphore(device);
                 if (!stale_sem) return 15;
-                if (vkAcquireNextImageKHR(VK_NULL_HANDLE, swapchain, 0, stale_sem, VK_NULL_HANDLE, &image_index) != VK_SUCCESS) return 16;
-                vkDestroySemaphore(VK_NULL_HANDLE, stale_sem, NULL);
+                if (vkAcquireNextImageKHR(device, swapchain, 0, stale_sem, VK_NULL_HANDLE, &image_index) != VK_SUCCESS) return 16;
+                vkDestroySemaphore(device, stale_sem, NULL);
                 present.pWaitSemaphores = &stale_sem;
                 present.pImageIndices = &image_index;
-                if (vkQueuePresentKHR((VkQueue)&g_queue, &present) != VK_ERROR_INITIALIZATION_FAILED) return 17;
+                if (vkQueuePresentKHR(queue, &present) != VK_ERROR_INITIALIZATION_FAILED) return 17;
 
                 PdockerVkSwapchain *sc = swapchain_unregister(swapchain);
                 if (!sc) return 18;
                 swapchain_retire(sc);
                 if (swapchain_handle_lookup(swapchain)) return 19;
                 image_count = 99;
-                if (vkGetSwapchainImagesKHR(VK_NULL_HANDLE, swapchain, &image_count, NULL) != VK_ERROR_INITIALIZATION_FAILED) return 20;
+                if (vkGetSwapchainImagesKHR(device, swapchain, &image_count, NULL) != VK_ERROR_INITIALIZATION_FAILED) return 20;
                 if (image_count != 0) return 21;
-                VkSemaphore sem_after_destroy = make_binary_semaphore();
+                VkSemaphore sem_after_destroy = make_binary_semaphore(device);
                 if (!sem_after_destroy) return 22;
-                if (vkAcquireNextImageKHR(VK_NULL_HANDLE, swapchain, 0, sem_after_destroy, VK_NULL_HANDLE, &image_index) != VK_ERROR_INITIALIZATION_FAILED) return 23;
-                vkDestroySemaphore(VK_NULL_HANDLE, sem_after_destroy, NULL);
+                if (vkAcquireNextImageKHR(device, swapchain, 0, sem_after_destroy, VK_NULL_HANDLE, &image_index) != VK_ERROR_INITIALIZATION_FAILED) return 23;
+                vkDestroySemaphore(device, sem_after_destroy, NULL);
                 present.pWaitSemaphores = NULL;
                 present.waitSemaphoreCount = 0;
-                if (vkQueuePresentKHR((VkQueue)&g_queue, &present) != VK_ERROR_INITIALIZATION_FAILED) return 24;
+                if (vkQueuePresentKHR(queue, &present) != VK_ERROR_INITIALIZATION_FAILED) return 24;
 
                 vkDestroySurfaceKHR(VK_NULL_HANDLE, surface, NULL);
                 if (surface_handle_lookup_for_instance(VK_NULL_HANDLE, surface)) return 25;
                 VkDeviceGroupPresentModeFlagsKHR modes = 123;
                 if (vkGetDeviceGroupSurfacePresentModesKHR(VK_NULL_HANDLE, surface, &modes) != VK_ERROR_SURFACE_LOST_KHR) return 26;
                 if (modes != 0) return 27;
-                if (make_registered_swapchain(surface_handle_lookup_for_instance(VK_NULL_HANDLE, surface)) != VK_NULL_HANDLE) return 28;
+                if (make_registered_swapchain(surface_handle_lookup_for_instance(VK_NULL_HANDLE, surface), queue_obj->device_object_id) != VK_NULL_HANDLE) return 28;
+                vkDestroyDevice(device, NULL);
                 return 0;
             }}
             """
@@ -1845,6 +1854,19 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     fprintf(stderr, "device extension enumeration failed\\n");
                     return 3;
                 }}
+                const char *validation_enabled[] = {{ VK_EXT_VALIDATION_CACHE_EXTENSION_NAME }};
+                VkDeviceCreateInfo validation_device_info;
+                memset(&validation_device_info, 0, sizeof(validation_device_info));
+                validation_device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                validation_device_info.enabledExtensionCount = 1;
+                validation_device_info.ppEnabledExtensionNames = validation_enabled;
+                VkDevice validation_vk_device = VK_NULL_HANDLE;
+                if (vkCreateDevice((VkPhysicalDevice)&g_device, &validation_device_info, NULL, &validation_vk_device) != VK_SUCCESS ||
+                    validation_vk_device == VK_NULL_HANDLE) {{
+                    fprintf(stderr, "validation cache test device create failed\\n");
+                    return 15;
+                }}
+
                 VkValidationCacheCreateInfoEXT cache_info;
                 memset(&cache_info, 0, sizeof(cache_info));
                 cache_info.sType = VK_STRUCTURE_TYPE_VALIDATION_CACHE_CREATE_INFO_EXT;
@@ -1852,35 +1874,35 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 cache_info.initialDataSize = sizeof(initial_word);
                 cache_info.pInitialData = &initial_word;
                 VkValidationCacheEXT cache = VK_NULL_HANDLE;
-                if (vkCreateValidationCacheEXT(VK_NULL_HANDLE, &cache_info, NULL, &cache) != VK_SUCCESS ||
+                if (vkCreateValidationCacheEXT(validation_vk_device, &cache_info, NULL, &cache) != VK_SUCCESS ||
                     cache == VK_NULL_HANDLE) {{
                     fprintf(stderr, "local validation cache create failed\\n");
                     return 4;
                 }}
                 size_t cache_data_size = 99;
-                if (vkGetValidationCacheDataEXT(VK_NULL_HANDLE, cache, &cache_data_size, NULL) != VK_SUCCESS ||
+                if (vkGetValidationCacheDataEXT(validation_vk_device, cache, &cache_data_size, NULL) != VK_SUCCESS ||
                     cache_data_size != 0) {{
                     fprintf(stderr, "validation cache data query was not empty noop\\n");
                     return 5;
                 }}
                 VkValidationCacheEXT invalid_cache = (VkValidationCacheEXT)(uintptr_t)0x1234u;
-                if (vkGetValidationCacheDataEXT(VK_NULL_HANDLE, invalid_cache, &cache_data_size, NULL) == VK_SUCCESS) {{
+                if (vkGetValidationCacheDataEXT(validation_vk_device, invalid_cache, &cache_data_size, NULL) == VK_SUCCESS) {{
                     fprintf(stderr, "validation cache data accepted invalid cache handle\\n");
                     return 11;
                 }}
-                if (vkMergeValidationCachesEXT(VK_NULL_HANDLE, invalid_cache, 1, &cache) == VK_SUCCESS) {{
+                if (vkMergeValidationCachesEXT(validation_vk_device, invalid_cache, 1, &cache) == VK_SUCCESS) {{
                     fprintf(stderr, "validation cache merge accepted invalid destination handle\\n");
                     return 12;
                 }}
-                if (vkMergeValidationCachesEXT(VK_NULL_HANDLE, cache, 1, &invalid_cache) == VK_SUCCESS) {{
+                if (vkMergeValidationCachesEXT(validation_vk_device, cache, 1, &invalid_cache) == VK_SUCCESS) {{
                     fprintf(stderr, "validation cache merge accepted invalid source handle\\n");
                     return 13;
                 }}
-                if (vkMergeValidationCachesEXT(VK_NULL_HANDLE, cache, 1, NULL) == VK_SUCCESS) {{
+                if (vkMergeValidationCachesEXT(validation_vk_device, cache, 1, NULL) == VK_SUCCESS) {{
                     fprintf(stderr, "validation cache merge accepted missing source array\\n");
                     return 6;
                 }}
-                if (vkMergeValidationCachesEXT(VK_NULL_HANDLE, cache, 1, &cache) != VK_SUCCESS) {{
+                if (vkMergeValidationCachesEXT(validation_vk_device, cache, 1, &cache) != VK_SUCCESS) {{
                     fprintf(stderr, "validation cache merge noop failed\\n");
                     return 7;
                 }}
@@ -1896,18 +1918,6 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 shader_info.pNext = &shader_cache;
                 shader_info.codeSize = sizeof(shader_words);
                 shader_info.pCode = shader_words;
-                const char *validation_enabled[] = {{ VK_EXT_VALIDATION_CACHE_EXTENSION_NAME }};
-                VkDeviceCreateInfo validation_device_info;
-                memset(&validation_device_info, 0, sizeof(validation_device_info));
-                validation_device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-                validation_device_info.enabledExtensionCount = 1;
-                validation_device_info.ppEnabledExtensionNames = validation_enabled;
-                VkDevice validation_vk_device = VK_NULL_HANDLE;
-                if (vkCreateDevice((VkPhysicalDevice)&g_device, &validation_device_info, NULL, &validation_vk_device) != VK_SUCCESS ||
-                    validation_vk_device == VK_NULL_HANDLE) {{
-                    fprintf(stderr, "validation cache test device create failed\\n");
-                    return 15;
-                }}
                 VkShaderModule shader = VK_NULL_HANDLE;
                 if (vkCreateShaderModule(VK_NULL_HANDLE, &shader_info, NULL, &shader) == VK_SUCCESS) {{
                     fprintf(stderr, "shader module accepted validation cache pNext without extension enable-state\\n");
@@ -1939,8 +1949,8 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     vkDestroyShaderModule(validation_vk_device, shader, NULL);
                     return 9;
                 }}
+                vkDestroyValidationCacheEXT(validation_vk_device, cache, NULL);
                 vkDestroyDevice(validation_vk_device, NULL);
-                vkDestroyValidationCacheEXT(VK_NULL_HANDLE, cache, NULL);
                 return 0;
             #endif
             }}
@@ -3862,6 +3872,75 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         )
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_owner_zero_objects_do_not_match_real_devices_or_queues(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            int main(void) {{
+                VkDeviceCreateInfo device_info;
+                memset(&device_info, 0, sizeof(device_info));
+                device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                VkDevice device = VK_NULL_HANDLE;
+                if (vkCreateDevice((VkPhysicalDevice)&g_device, &device_info, NULL, &device) != VK_SUCCESS ||
+                    device == VK_NULL_HANDLE) return 2;
+                VkQueue queue = VK_NULL_HANDLE;
+                vkGetDeviceQueue(device, 0, 0, &queue);
+                PdockerVkQueue *queue_obj = pdocker_vk_queue_from_handle(queue);
+                if (!queue_obj || queue_obj->device_object_id == 0) return 3;
+
+                VkBufferCreateInfo buffer_info;
+                memset(&buffer_info, 0, sizeof(buffer_info));
+                buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+                buffer_info.size = 256;
+                buffer_info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+                buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+                VkBuffer unowned_buffer = VK_NULL_HANDLE;
+                if (vkCreateBuffer(VK_NULL_HANDLE, &buffer_info, NULL, &unowned_buffer) != VK_SUCCESS ||
+                    unowned_buffer == VK_NULL_HANDLE) return 4;
+                if (!buffer_handle_lookup_for_device(VK_NULL_HANDLE, unowned_buffer)) return 5;
+                if (buffer_handle_lookup_for_device(device, unowned_buffer)) return 6;
+                if (pdocker_vk_object_handle_owned_by_device(
+                        device,
+                        VK_OBJECT_TYPE_BUFFER,
+                        (uint64_t)(uintptr_t)unowned_buffer)) return 7;
+
+                VkMemoryAllocateInfo alloc_info;
+                memset(&alloc_info, 0, sizeof(alloc_info));
+                alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+                alloc_info.allocationSize = 256;
+                alloc_info.memoryTypeIndex = 1;
+                VkDeviceMemory unowned_memory = VK_NULL_HANDLE;
+                if (vkAllocateMemory(VK_NULL_HANDLE, &alloc_info, NULL, &unowned_memory) != VK_SUCCESS ||
+                    unowned_memory == VK_NULL_HANDLE) return 8;
+                if (!memory_handle_lookup_for_device(VK_NULL_HANDLE, unowned_memory)) return 9;
+                if (memory_handle_lookup_for_device(device, unowned_memory)) return 10;
+                if (vkBindBufferMemory(device, unowned_buffer, unowned_memory, 0) != VK_ERROR_INITIALIZATION_FAILED) return 11;
+
+                VkFenceCreateInfo fence_info;
+                memset(&fence_info, 0, sizeof(fence_info));
+                fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+                VkFence unowned_fence = VK_NULL_HANDLE;
+                if (vkCreateFence(VK_NULL_HANDLE, &fence_info, NULL, &unowned_fence) != VK_SUCCESS ||
+                    unowned_fence == VK_NULL_HANDLE) return 12;
+                if (!fence_handle_lookup_for_device(VK_NULL_HANDLE, unowned_fence)) return 13;
+                if (fence_handle_lookup_for_queue(queue_obj, unowned_fence)) return 14;
+                if (vkQueueSubmit(queue, 0, NULL, unowned_fence) != VK_ERROR_INITIALIZATION_FAILED) return 15;
+
+                vkDestroyFence(VK_NULL_HANDLE, unowned_fence, NULL);
+                vkFreeMemory(VK_NULL_HANDLE, unowned_memory, NULL);
+                vkDestroyBuffer(VK_NULL_HANDLE, unowned_buffer, NULL);
+                vkDestroyDevice(device, NULL);
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_memory_requirements2_bad_info_zeroes_outputs(self):
         source = textwrap.dedent(

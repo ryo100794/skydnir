@@ -2063,20 +2063,18 @@ static bool device_owner_id_or_zero_checked(VkDevice device, uint64_t *out_objec
 }
 
 static bool device_owner_matches_or_unowned(VkDevice device, uint64_t owner_device_id) {
-    if (owner_device_id == 0) return true;
+    if (owner_device_id == 0) return device == VK_NULL_HANDLE;
     uint64_t object_id = 0;
     return device_handle_object_id(device, &object_id) && object_id == owner_device_id;
 }
 
 static bool queue_owner_matches_or_unowned(const PdockerVkQueue *queue, uint64_t owner_device_id) {
-    if (owner_device_id == 0) return true;
+    if (owner_device_id == 0) return !queue || queue->device_object_id == 0;
     return queue && queue->device_object_id != 0 && queue->device_object_id == owner_device_id;
 }
 
 static bool owner_device_ids_match_or_unowned(uint64_t lhs_owner_device_id, uint64_t rhs_owner_device_id) {
-    return lhs_owner_device_id == 0 ||
-           rhs_owner_device_id == 0 ||
-           lhs_owner_device_id == rhs_owner_device_id;
+    return lhs_owner_device_id == rhs_owner_device_id;
 }
 
 static bool physical_device_instance_object_id(
