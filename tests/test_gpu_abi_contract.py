@@ -3802,6 +3802,43 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, validator if marker != "static int u64_range_within_size" else executor)
 
+    def test_vulkan_buffer_view_tables_reject_duplicate_ids_with_split_identity(self):
+        executor = GPU_EXECUTOR.read_text()
+        helper = (
+            c_function_body(executor, "vulkan_buffer_resource_identity_matches_count")
+            + c_function_body(executor, "v53_buffer_view_fields_identical_for_same_object_id")
+            + c_function_body(executor, "validate_vulkan_dispatch_v53_duplicate_buffer_view_identity")
+            + c_function_body(executor, "v627_buffer_view_fields_identical_for_same_object_id")
+        )
+        build_plan = c_function_body(executor, "build_vulkan_dispatch_v5_native_plan")
+        v627_validator = c_function_body(executor, "validate_vulkan_graphics_v627_buffer_views")
+        for marker in [
+            "buffer_view_count == 0",
+            "a->buffer_view_id == 0",
+            "b->buffer_view_id == a->buffer_view_id",
+            "a->format == b->format",
+            "a->buffer_offset == b->buffer_offset",
+            "a->range == b->range",
+            "a->generation == b->generation",
+            "vulkan_buffer_resource_identity_matches_count(",
+            "a->resource_id == 0",
+            "a->resource_id != b->resource_id",
+            "vulkan_resource_parent_memory_object_id_matches(resource_count, resources, a, b)",
+        ]:
+            self.assertIn(marker, helper)
+        self.assertNotIn("a->descriptor_index == b->descriptor_index", helper)
+        self.assertNotIn("a->command_index == b->command_index", helper)
+        self.assertIn("validate_vulkan_dispatch_v53_duplicate_buffer_view_identity(", build_plan)
+        self.assertLess(
+            build_plan.index("validate_vulkan_dispatch_v53_duplicate_buffer_view_identity("),
+            build_plan.index("if (has_v54_barriers)"),
+        )
+        self.assertIn("v627_buffer_view_fields_identical_for_same_object_id(", v627_validator)
+        self.assertLess(
+            v627_validator.index("v627_buffer_view_fields_identical_for_same_object_id("),
+            v627_validator.index("if (seen_descriptors[entry->descriptor_index])"),
+        )
+
     def test_vulkan_object_tables_reject_duplicate_ids_with_split_identity(self):
         executor = GPU_EXECUTOR.read_text()
         helper = (

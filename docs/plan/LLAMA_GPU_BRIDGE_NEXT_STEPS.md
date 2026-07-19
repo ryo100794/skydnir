@@ -29,13 +29,30 @@ protocol error before any Vulkan object can be reconstructed or replayed.
 This is CPU/static pass-through ABI hardening only. It does not change
 llama.cpp, Dockerfiles, models, prompts, shader bytes, or executor arithmetic.
 
+### 2026-07-19 CPU/static V5.3/V6.27 buffer-view identity lane
+
+Vulkan dispatch V5.3 and graphics V6.27 now reject duplicate nonzero
+`buffer_view_id` entries when the duplicate rows describe different buffer-view
+identity. The comparison intentionally excludes placement-only fields such as
+`descriptor_index` and `command_index`, because the same Vulkan buffer view can
+be referenced by multiple descriptors or bind commands. It compares format,
+buffer offset/range, generation, and the backing buffer object identity. Backing
+buffer identity is resolved through the validated resource table by nonzero
+`resource_id` and parent memory identity rather than by table index alone.
+
+The V5.3 gate runs immediately after the buffer-view table is materialized in
+V5 native-plan construction. The V6.27 gate runs inside the buffer-view validator
+after each entry passes basic bounds/type checks and before descriptor-index
+uniqueness is used. This is CPU/static pass-through ABI hardening only. It does
+not change llama.cpp, Dockerfiles, models, prompts, shader bytes, or executor
+arithmetic.
+
 ### 2026-07-19 CPU/static remaining Vulkan object identity queue
 
 The next CPU/static pass-through hardening targets are the remaining nonzero ID
-tables that can still express split identity if left unchecked: V5.3 buffer
-views (`buffer_view_id`), graphics V6.27 buffer views (`buffer_view_id`),
-graphics V6 pipeline/layout/render-pass identity rows, and V5.6 compute layout
-metadata when it is used as object identity (`layout_id`,
+tables that can still express split identity if left unchecked: graphics V6
+pipeline/layout/render-pass identity rows and V5.6/V6.24 compute or graphics
+layout metadata when it is used as object identity (`layout_id`,
 `pipeline_layout_id`, and descriptor-set layout ids). These must be validated
 from the protocol schema and source data flow before another device run is used
 as evidence.

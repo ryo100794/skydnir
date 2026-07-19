@@ -24245,6 +24245,89 @@ static int validate_vulkan_dispatch_v5_duplicate_resource_identity(
     return validate_vulkan_resource_table_duplicate_identity(header->resource_count, resources);
 }
 
+static int vulkan_buffer_resource_identity_matches_count(
+        uint32_t resource_count,
+        const PdockerGpuVulkanDispatchV5ResourceEntry *resources,
+        uint32_t a_index,
+        uint32_t b_index) {
+    if (!resources ||
+        !vulkan_resource_index_valid_count(resource_count, a_index) ||
+        !vulkan_resource_index_valid_count(resource_count, b_index)) {
+        return 0;
+    }
+    if (a_index == b_index) return 1;
+    const PdockerGpuVulkanDispatchV5ResourceEntry *a = &resources[a_index];
+    const PdockerGpuVulkanDispatchV5ResourceEntry *b = &resources[b_index];
+    if (a->resource_type != PDOCKER_GPU_V5_RESOURCE_TYPE_BUFFER ||
+        b->resource_type != PDOCKER_GPU_V5_RESOURCE_TYPE_BUFFER ||
+        a->resource_id == 0 ||
+        a->resource_id != b->resource_id) {
+        return 0;
+    }
+    return a->resource_flags == b->resource_flags &&
+           a->fd_index == b->fd_index &&
+           a->memory_offset == b->memory_offset &&
+           a->size == b->size &&
+           a->usage == b->usage &&
+           a->memory_property_flags == b->memory_property_flags &&
+           a->external_offset == b->external_offset &&
+           a->generation == b->generation &&
+           vulkan_resource_parent_memory_object_id_matches(resource_count, resources, a, b);
+}
+
+static int v53_buffer_view_fields_identical_for_same_object_id(
+        const PdockerGpuVulkanDispatchV53BufferViewEntry *a,
+        const PdockerGpuVulkanDispatchV53BufferViewEntry *b,
+        uint32_t resource_count,
+        const PdockerGpuVulkanDispatchV5ResourceEntry *resources) {
+    if (!a || !b) return 0;
+    return a->format == b->format &&
+           a->reserved0 == b->reserved0 &&
+           a->buffer_view_id == b->buffer_view_id &&
+           a->buffer_offset == b->buffer_offset &&
+           a->range == b->range &&
+           a->generation == b->generation &&
+           vulkan_buffer_resource_identity_matches_count(
+               resource_count, resources, a->resource_index, b->resource_index);
+}
+
+static int validate_vulkan_dispatch_v53_duplicate_buffer_view_identity(
+        size_t buffer_view_count,
+        const PdockerGpuVulkanDispatchV53BufferViewEntry *buffer_views,
+        uint32_t resource_count,
+        const PdockerGpuVulkanDispatchV5ResourceEntry *resources) {
+    if (buffer_view_count == 0) return 0;
+    if (!buffer_views || !resources) return -EINVAL;
+    for (size_t i = 0; i < buffer_view_count; ++i) {
+        const PdockerGpuVulkanDispatchV53BufferViewEntry *a = &buffer_views[i];
+        if (a->buffer_view_id == 0) continue;
+        for (size_t j = i + 1; j < buffer_view_count; ++j) {
+            const PdockerGpuVulkanDispatchV53BufferViewEntry *b = &buffer_views[j];
+            if (b->buffer_view_id == a->buffer_view_id &&
+                !v53_buffer_view_fields_identical_for_same_object_id(
+                    a, b, resource_count, resources)) {
+                return -EPROTO;
+            }
+        }
+    }
+    return 0;
+}
+
+static int v627_buffer_view_fields_identical_for_same_object_id(
+        const PdockerGpuVulkanGraphicsV627BufferViewEntry *a,
+        const PdockerGpuVulkanGraphicsV627BufferViewEntry *b,
+        uint32_t resource_count,
+        const PdockerGpuVulkanDispatchV5ResourceEntry *resources) {
+    if (!a || !b) return 0;
+    return a->format == b->format &&
+           a->buffer_view_id == b->buffer_view_id &&
+           a->buffer_offset == b->buffer_offset &&
+           a->range == b->range &&
+           a->generation == b->generation &&
+           vulkan_buffer_resource_identity_matches_count(
+               resource_count, resources, a->resource_index, b->resource_index);
+}
+
 static int v5_image_fields_identical_for_same_object_id(
         const PdockerGpuVulkanDispatchV5ImageEntry *a,
         const PdockerGpuVulkanDispatchV5ImageEntry *b) {
@@ -24565,6 +24648,9 @@ static int build_vulkan_dispatch_v5_native_plan(
                       header_v53->v53.buffer_view_table_size)
                 : NULL;
             if (plan->buffer_view_count && !plan->buffer_views) return -EPROTO;
+            int buffer_view_identity_rc = validate_vulkan_dispatch_v53_duplicate_buffer_view_identity(
+                plan->buffer_view_count, plan->buffer_views, header->resource_count, resources);
+            if (buffer_view_identity_rc != 0) return buffer_view_identity_rc;
         }
         if (has_v54_barriers) {
             const PdockerGpuVulkanDispatchV54FrameHeader *header_v54 =
@@ -27693,6 +27779,14 @@ static int validate_vulkan_graphics_v627_buffer_views(
             entry->generation == 0 ||
             entry->range == 0 || entry->range == UINT64_MAX) {
             return -EPROTO;
+        }
+        for (uint32_t j = i + 1; j < ext->buffer_view_count; ++j) {
+            const PdockerGpuVulkanGraphicsV627BufferViewEntry *other = &buffer_views[j];
+            if (other->buffer_view_id == entry->buffer_view_id &&
+                !v627_buffer_view_fields_identical_for_same_object_id(
+                    entry, other, view->header->resource_count, view->resources)) {
+                return -EPROTO;
+            }
         }
         if (seen_descriptors[entry->descriptor_index]) return -EPROTO;
         const PdockerGpuVulkanGraphicsV6CommandEntry *command = &view->commands[entry->command_index];
