@@ -11993,6 +11993,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("command-pool-flags-unsupported", command_pool_validate)
         self.assertIn("*pCommandPool = VK_NULL_HANDLE;", create_pool_body)
         self.assertIn("validate_command_pool_create_info(pCreateInfo)", create_pool_body)
+        self.assertIn("device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0", create_pool_body)
 
         self.assertIn("command_pool_handle_lookup_for_device(device, commandPool)", reset_pool_body)
         self.assertIn("flags & ~VK_COMMAND_POOL_RESET_RELEASE_RESOURCES_BIT", reset_pool_body)

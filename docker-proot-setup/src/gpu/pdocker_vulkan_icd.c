@@ -29927,20 +29927,17 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateCommandPool(
         const VkCommandPoolCreateInfo *pCreateInfo,
         const VkAllocationCallbacks *pAllocator,
         VkCommandPool *pCommandPool) {
-    (void)device;
     (void)pAllocator;
+    if (pCommandPool) *pCommandPool = VK_NULL_HANDLE;
     if (!pCommandPool) return VK_ERROR_INITIALIZATION_FAILED;
-    *pCommandPool = VK_NULL_HANDLE;
     VkResult validate_rc = validate_command_pool_create_info(pCreateInfo);
     if (validate_rc != VK_SUCCESS) return validate_rc;
-    PdockerVkCommandPool *pool = pdocker_alloc_handle(sizeof(*pool));
-    if (!pool) return VK_ERROR_OUT_OF_HOST_MEMORY;
     uint64_t owner_device_id = 0;
-    if (!device_owner_id_or_zero_checked(device, &owner_device_id)) {
-        free(pool);
+    if (!device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
-
+    PdockerVkCommandPool *pool = pdocker_alloc_handle(sizeof(*pool));
+    if (!pool) return VK_ERROR_OUT_OF_HOST_MEMORY;
     pool->owner_device_id = owner_device_id;
     pool->requested_feature_mask = device_requested_feature_mask_from_handle(device);
     pool->enabled_extension_mask = device_enabled_extension_mask_from_handle(device);

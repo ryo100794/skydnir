@@ -1500,8 +1500,21 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 pool_info.queueFamilyIndex = 0;
                 pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
 
-                VkCommandPool pool = VK_NULL_HANDLE;
-                if (vkCreateCommandPool(VK_NULL_HANDLE, &pool_info, NULL, &pool) != VK_SUCCESS) return 2;
+                VkDeviceCreateInfo device_info;
+                memset(&device_info, 0, sizeof(device_info));
+                device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                VkDevice device = VK_NULL_HANDLE;
+                if (vkCreateDevice((VkPhysicalDevice)&g_device, &device_info, NULL, &device) != VK_SUCCESS ||
+                    device == VK_NULL_HANDLE) return 29;
+                VkQueue queue = VK_NULL_HANDLE;
+                vkGetDeviceQueue(device, 0, 0, &queue);
+                if (queue == VK_NULL_HANDLE) return 30;
+
+                VkCommandPool pool = (VkCommandPool)(uintptr_t)0x1234u;
+                if (vkCreateCommandPool(VK_NULL_HANDLE, &pool_info, NULL, &pool) != VK_ERROR_INITIALIZATION_FAILED ||
+                    pool != VK_NULL_HANDLE) return 31;
+                pool = VK_NULL_HANDLE;
+                if (vkCreateCommandPool(device, &pool_info, NULL, &pool) != VK_SUCCESS) return 2;
                 PdockerVkCommandPool *tracked_pool = command_pool_handle_lookup(pool);
                 if (!tracked_pool) return 3;
 
@@ -1512,30 +1525,30 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
                 alloc_info.commandBufferCount = 1;
                 VkCommandBuffer cmd = VK_NULL_HANDLE;
-                if (vkAllocateCommandBuffers(VK_NULL_HANDLE, &alloc_info, &cmd) != VK_SUCCESS) return 4;
+                if (vkAllocateCommandBuffers(device, &alloc_info, &cmd) != VK_SUCCESS) return 4;
                 PdockerVkCommandBuffer *tracked_cmd = command_buffer_handle_lookup(cmd);
                 if (!command_buffer_belongs_to_pool(tracked_cmd, tracked_pool)) return 5;
                 if (vkBeginCommandBuffer(cmd, NULL) != VK_SUCCESS) return 6;
                 if (vkEndCommandBuffer(cmd) != VK_SUCCESS) return 7;
 
                 VkCommandPool other_pool = VK_NULL_HANDLE;
-                if (vkCreateCommandPool(VK_NULL_HANDLE, &pool_info, NULL, &other_pool) != VK_SUCCESS) return 8;
-                vkFreeCommandBuffers(VK_NULL_HANDLE, other_pool, 1, &cmd);
+                if (vkCreateCommandPool(device, &pool_info, NULL, &other_pool) != VK_SUCCESS) return 8;
+                vkFreeCommandBuffers(device, other_pool, 1, &cmd);
                 if (command_buffer_handle_lookup(cmd) != tracked_cmd) return 9;
                 if (tracked_cmd->owner_pool != tracked_pool) return 24;
                 if (!command_buffer_belongs_to_pool(tracked_cmd, tracked_pool)) return 25;
                 if (!command_pool_contains_command_buffer(tracked_pool, tracked_cmd)) return 26;
-                vkDestroyCommandPool(VK_NULL_HANDLE, other_pool, NULL);
+                vkDestroyCommandPool(device, other_pool, NULL);
                 if (command_pool_handle_lookup(other_pool)) return 10;
                 if (tracked_cmd->owner_pool != tracked_pool) return 27;
                 if (!command_pool_contains_command_buffer(tracked_pool, tracked_cmd)) return 28;
 
-                vkFreeCommandBuffers(VK_NULL_HANDLE, pool, 1, &cmd);
+                vkFreeCommandBuffers(device, pool, 1, &cmd);
                 if (command_buffer_handle_lookup(cmd)) return 11;
                 if (vkBeginCommandBuffer(cmd, NULL) != VK_ERROR_INITIALIZATION_FAILED) return 12;
 
                 VkCommandBuffer cmd2 = VK_NULL_HANDLE;
-                if (vkAllocateCommandBuffers(VK_NULL_HANDLE, &alloc_info, &cmd2) != VK_SUCCESS) return 13;
+                if (vkAllocateCommandBuffers(device, &alloc_info, &cmd2) != VK_SUCCESS) return 13;
                 PdockerVkCommandBuffer *tracked_cmd2 = command_buffer_handle_lookup(cmd2);
                 if (!tracked_cmd2) return 14;
                 tracked_cmd2->compute_pipeline = (PdockerVkPipeline *)(uintptr_t)0x1u;
@@ -1544,7 +1557,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 tracked_cmd2->dispatch_x = 9;
                 tracked_cmd2->dispatch_y = 8;
                 tracked_cmd2->dispatch_z = 7;
-                if (vkResetCommandPool(VK_NULL_HANDLE, pool, VK_COMMAND_POOL_RESET_RELEASE_RESOURCES_BIT) != VK_SUCCESS) return 15;
+                if (vkResetCommandPool(device, pool, VK_COMMAND_POOL_RESET_RELEASE_RESOURCES_BIT) != VK_SUCCESS) return 15;
                 tracked_cmd2 = command_buffer_handle_lookup(cmd2);
                 if (!tracked_cmd2) return 16;
                 if (tracked_cmd2->has_dispatch || tracked_cmd2->compute_pipeline ||
@@ -1553,10 +1566,6 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 if (vkBeginCommandBuffer(cmd2, NULL) != VK_SUCCESS) return 17;
                 if (vkEndCommandBuffer(cmd2) != VK_SUCCESS) return 18;
 
-                g_queue.object_id = 1;
-                g_queue.instance_object_id = 1;
-                g_queue.physical_device_object_id = 1;
-                g_queue.device_object_id = 1;
                 VkSubmitInfo submit;
                 memset(&submit, 0, sizeof(submit));
                 submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -1564,12 +1573,13 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 submit.pCommandBuffers = &cmd;
                 if (vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE) != VK_ERROR_INITIALIZATION_FAILED) return 19;
 
-                vkDestroyCommandPool(VK_NULL_HANDLE, pool, NULL);
+                vkDestroyCommandPool(device, pool, NULL);
                 if (command_pool_handle_lookup(pool)) return 20;
                 if (command_buffer_handle_lookup(cmd2)) return 21;
                 if (vkBeginCommandBuffer(cmd2, NULL) != VK_ERROR_INITIALIZATION_FAILED) return 22;
-                vkDestroyCommandPool(VK_NULL_HANDLE, pool, NULL);
-                vkFreeCommandBuffers(VK_NULL_HANDLE, pool, 1, &cmd2);
+                vkDestroyCommandPool(device, pool, NULL);
+                vkFreeCommandBuffers(device, pool, 1, &cmd2);
+                vkDestroyDevice(device, NULL);
                 return 0;
             }}
             """
@@ -8866,9 +8876,12 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 VkBuffer unowned_buffer = pdocker_vk_buffer_to_handle(unowned_buffer_obj);
                 if (!buffer_handle_lookup(unowned_buffer)) return 13;
 
-                VkCommandPool unowned_pool = VK_NULL_HANDLE;
-                if (vkCreateCommandPool(VK_NULL_HANDLE, &pool_info, NULL, &unowned_pool) != VK_SUCCESS ||
-                    !command_pool_handle_lookup(unowned_pool)) return 14;
+                PdockerVkCommandPool *unowned_pool_obj = pdocker_alloc_handle(sizeof(*unowned_pool_obj));
+                if (!unowned_pool_obj) return 14;
+                memset(unowned_pool_obj, 0, sizeof(*unowned_pool_obj));
+                command_pool_register(unowned_pool_obj);
+                VkCommandPool unowned_pool = pdocker_vk_command_pool_to_handle(unowned_pool_obj);
+                if (!command_pool_handle_lookup(unowned_pool)) return 14;
 
                 PdockerVkFence *unowned_fence_obj = pdocker_alloc_handle(sizeof(*unowned_fence_obj));
                 if (!unowned_fence_obj) return 15;
