@@ -4320,7 +4320,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-    def test_memory_priority_feature_is_false_only_and_not_advertised_without_transport(self):
+    def test_memory_priority_feature_is_advertised_and_accepts_valid_allocate_hint(self):
         source = textwrap.dedent(
             f"""
             #include <stdint.h>
@@ -4342,8 +4342,8 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     fprintf(stderr, "memory priority feature pNext was not preserved\\n");
                     return 3;
                 }}
-                if (priority_features.memoryPriority != VK_FALSE) {{
-                    fprintf(stderr, "memoryPriority was advertised without priority replay support\\n");
+                if (priority_features.memoryPriority != VK_TRUE) {{
+                    fprintf(stderr, "memoryPriority was not advertised\\n");
                     return 4;
                 }}
 
@@ -4352,8 +4352,8 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
                 priority_features.memoryPriority = VK_TRUE;
                 create_info.pNext = &priority_features;
-                if (validate_device_feature_requests(&create_info) == VK_SUCCESS) {{
-                    fprintf(stderr, "memoryPriority=true was accepted\\n");
+                if (validate_device_feature_requests(&create_info) != VK_SUCCESS) {{
+                    fprintf(stderr, "memoryPriority=true was rejected\\n");
                     return 5;
                 }}
                 priority_features.memoryPriority = VK_FALSE;
@@ -4363,8 +4363,8 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 }}
 
             #ifdef VK_EXT_MEMORY_PRIORITY_EXTENSION_NAME
-                if (device_extension_advertised_name(VK_EXT_MEMORY_PRIORITY_EXTENSION_NAME)) {{
-                    fprintf(stderr, "VK_EXT_memory_priority was advertised without priority transport\\n");
+                if (!device_extension_advertised_name(VK_EXT_MEMORY_PRIORITY_EXTENSION_NAME)) {{
+                    fprintf(stderr, "VK_EXT_memory_priority was not advertised\\n");
                     return 7;
                 }}
                 const char *enabled_extensions[] = {{ VK_EXT_MEMORY_PRIORITY_EXTENSION_NAME }};
@@ -4373,17 +4373,45 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 extension_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
                 extension_info.enabledExtensionCount = 1;
                 extension_info.ppEnabledExtensionNames = enabled_extensions;
-                if (validate_device_extensions(&extension_info) != VK_ERROR_EXTENSION_NOT_PRESENT) {{
-                    fprintf(stderr, "VK_EXT_memory_priority extension enable was accepted without transport\\n");
+                if (validate_device_extensions(&extension_info) != VK_SUCCESS) {{
+                    fprintf(stderr, "VK_EXT_memory_priority extension enable was rejected\\n");
                     return 8;
                 }}
             #endif
+                VkMemoryPriorityAllocateInfoEXT priority_info;
+                memset(&priority_info, 0, sizeof(priority_info));
+                priority_info.sType = VK_STRUCTURE_TYPE_MEMORY_PRIORITY_ALLOCATE_INFO_EXT;
+                priority_info.priority = 0.0f;
+                if (validate_memory_allocate_pnext(VK_NULL_HANDLE, &priority_info) != VK_SUCCESS) {{
+                    fprintf(stderr, "priority=0.0 allocation hint was rejected\\n");
+                    return 9;
+                }}
+                priority_info.priority = 0.5f;
+                if (validate_memory_allocate_pnext(VK_NULL_HANDLE, &priority_info) != VK_SUCCESS) {{
+                    fprintf(stderr, "priority=0.5 allocation hint was rejected\\n");
+                    return 10;
+                }}
+                priority_info.priority = 1.0f;
+                if (validate_memory_allocate_pnext(VK_NULL_HANDLE, &priority_info) != VK_SUCCESS) {{
+                    fprintf(stderr, "priority=1.0 allocation hint was rejected\\n");
+                    return 11;
+                }}
+                priority_info.priority = -0.01f;
+                if (validate_memory_allocate_pnext(VK_NULL_HANDLE, &priority_info) != VK_ERROR_INITIALIZATION_FAILED) {{
+                    fprintf(stderr, "negative memory priority hint was accepted\\n");
+                    return 12;
+                }}
+                priority_info.priority = 1.01f;
+                if (validate_memory_allocate_pnext(VK_NULL_HANDLE, &priority_info) != VK_ERROR_INITIALIZATION_FAILED) {{
+                    fprintf(stderr, "over-one memory priority hint was accepted\\n");
+                    return 13;
+                }}
                 return 0;
             }}
             """
         )
         result = self.compile_and_run(source)
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_robustness_features_are_queryable_false_only(self):
         source = textwrap.dedent(
@@ -9757,14 +9785,24 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 memset(&priority_info, 0, sizeof(priority_info));
                 priority_info.sType = VK_STRUCTURE_TYPE_MEMORY_PRIORITY_ALLOCATE_INFO_EXT;
                 priority_info.priority = 0.5f;
-                if (validate_memory_allocate_pnext(VK_NULL_HANDLE, &priority_info) != VK_ERROR_FEATURE_NOT_PRESENT) {{
-                    fprintf(stderr, "default memory priority pNext was accepted without transport\\n");
+                if (validate_memory_allocate_pnext(VK_NULL_HANDLE, &priority_info) != VK_SUCCESS) {{
+                    fprintf(stderr, "default memory priority pNext was rejected\\n");
                     return 6;
                 }}
                 priority_info.priority = 1.0f;
-                if (validate_memory_allocate_pnext(VK_NULL_HANDLE, &priority_info) != VK_ERROR_FEATURE_NOT_PRESENT) {{
-                    fprintf(stderr, "non-default memory priority pNext was accepted\\n");
+                if (validate_memory_allocate_pnext(VK_NULL_HANDLE, &priority_info) != VK_SUCCESS) {{
+                    fprintf(stderr, "max memory priority pNext was rejected\\n");
                     return 7;
+                }}
+                priority_info.priority = -0.01f;
+                if (validate_memory_allocate_pnext(VK_NULL_HANDLE, &priority_info) != VK_ERROR_INITIALIZATION_FAILED) {{
+                    fprintf(stderr, "negative memory priority pNext was accepted\\n");
+                    return 17;
+                }}
+                priority_info.priority = 1.01f;
+                if (validate_memory_allocate_pnext(VK_NULL_HANDLE, &priority_info) != VK_ERROR_INITIALIZATION_FAILED) {{
+                    fprintf(stderr, "over-one memory priority pNext was accepted\\n");
+                    return 18;
                 }}
 
                 VkMemoryAllocateFlagsInfo flags;
@@ -9789,8 +9827,8 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 priority_info.sType = VK_STRUCTURE_TYPE_MEMORY_PRIORITY_ALLOCATE_INFO_EXT;
                 priority_info.priority = 0.5f;
                 priority_info.pNext = &capture;
-                if (validate_memory_allocate_pnext(VK_NULL_HANDLE, &flags) != VK_ERROR_FEATURE_NOT_PRESENT) {{
-                    fprintf(stderr, "memory priority in allocation chain was accepted without transport\\n");
+                if (validate_memory_allocate_pnext(VK_NULL_HANDLE, &flags) != VK_SUCCESS) {{
+                    fprintf(stderr, "memory priority in allocation chain was rejected\\n");
                     return 9;
                 }}
                 export_info.pNext = &capture;

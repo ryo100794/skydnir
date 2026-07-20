@@ -22389,6 +22389,8 @@ static void fill_physical_device_features(VkPhysicalDeviceFeatures *pFeatures) {
     pFeatures->samplerAnisotropy = advertised_sampler_anisotropy();
 }
 
+static bool pdocker_supports_memory_priority_transport(void);
+
 static void fill_pnext_features(void *pNext) {
     const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
     for (void *node = pNext; node;) {
@@ -22708,7 +22710,7 @@ static void fill_pnext_features(void *pNext) {
                 VkPhysicalDeviceMemoryPriorityFeaturesEXT *p =
                     (VkPhysicalDeviceMemoryPriorityFeaturesEXT *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
-                p->memoryPriority = VK_FALSE;
+                p->memoryPriority = pdocker_supports_memory_priority_transport() ? VK_TRUE : VK_FALSE;
                 break;
             }
 #ifdef VK_EXT_custom_border_color
@@ -23349,7 +23351,7 @@ static VkResult validate_device_feature_requests_for_physical(
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PRIORITY_FEATURES_EXT: {
                 const VkPhysicalDeviceMemoryPriorityFeaturesEXT *p =
                     (const VkPhysicalDeviceMemoryPriorityFeaturesEXT *)node;
-                supported = !p->memoryPriority;
+                supported = !p->memoryPriority || pdocker_supports_memory_priority_transport();
                 if (!supported) unsupported_feature_name = "memoryPriority";
                 break;
             }
@@ -26667,8 +26669,6 @@ static VkResult validate_memory_dedicated_bind(
     return VK_ERROR_INITIALIZATION_FAILED;
 }
 
-static bool pdocker_supports_memory_priority_transport(void);
-
 static VkResult validate_memory_allocate_pnext(VkDevice device, const void *pNext) {
     for (const void *node = pNext; node;) {
         PdockerVkStructHeader header = read_vk_struct_header(node);
@@ -26724,11 +26724,15 @@ static VkResult validate_memory_allocate_pnext(VkDevice device, const void *pNex
             case VK_STRUCTURE_TYPE_MEMORY_PRIORITY_ALLOCATE_INFO_EXT: {
                 const VkMemoryPriorityAllocateInfoEXT *info =
                     (const VkMemoryPriorityAllocateInfoEXT *)node;
-                (void)info;
                 if (!pdocker_supports_memory_priority_transport()) {
                     trace_icd_runtime_failure("memory-priority-unsupported",
                                               VK_ERROR_FEATURE_NOT_PRESENT);
                     return VK_ERROR_FEATURE_NOT_PRESENT;
+                }
+                if (!(info->priority >= 0.0f && info->priority <= 1.0f)) {
+                    trace_icd_runtime_failure("memory-priority-invalid",
+                                              VK_ERROR_INITIALIZATION_FAILED);
+                    return VK_ERROR_INITIALIZATION_FAILED;
                 }
                 break;
             }
@@ -27157,7 +27161,14 @@ static bool pdocker_supports_buffer_device_address_transport(void) {
 }
 
 static bool pdocker_supports_memory_priority_transport(void) {
-    return false;
+    /*
+     * VK_EXT_memory_priority carries allocation residency priority as a hint,
+     * not as executable GPU state. The bridge can consume and validate the
+     * pNext locally without extending the command ABI; unsupported native
+     * executors may ignore the hint without changing allocation contents or
+     * synchronization semantics.
+     */
+    return true;
 }
 
 static bool pdocker_supports_dynamic_rendering_local_read_transport(void) {
