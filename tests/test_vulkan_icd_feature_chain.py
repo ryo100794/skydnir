@@ -5336,7 +5336,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
 
-    def test_shader_demote_feature_is_false_only_and_not_advertised_without_transport(self):
+    def test_shader_demote_extension_is_advertised_with_false_feature(self):
         source = textwrap.dedent(
             f"""
             #include <stdint.h>
@@ -5359,7 +5359,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     return 3;
                 }}
                 if (demote_features.shaderDemoteToHelperInvocation != VK_FALSE) {{
-                    fprintf(stderr, "shaderDemoteToHelperInvocation was advertised without shader-demote support\\n");
+                    fprintf(stderr, "shaderDemoteToHelperInvocation feature should remain false\\n");
                     return 4;
                 }}
 
@@ -5369,13 +5369,14 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 create_info.pNext = &demote_features;
 
             #ifdef VK_EXT_SHADER_DEMOTE_TO_HELPER_INVOCATION_EXTENSION_NAME
-                if (device_extension_advertised_name(VK_EXT_SHADER_DEMOTE_TO_HELPER_INVOCATION_EXTENSION_NAME)) {{
-                    fprintf(stderr, "VK_EXT_shader_demote_to_helper_invocation was advertised without transport\\n");
+                if (!device_extension_advertised_name(VK_EXT_SHADER_DEMOTE_TO_HELPER_INVOCATION_EXTENSION_NAME)) {{
+                    fprintf(stderr, "VK_EXT_shader_demote_to_helper_invocation was not advertised\\n");
                     return 7;
                 }}
                 uint32_t extension_count = 64;
                 VkExtensionProperties extensions[64];
                 memset(extensions, 0, sizeof(extensions));
+                VkBool32 found_demote_extension = VK_FALSE;
                 if (vkEnumerateDeviceExtensionProperties(
                         (VkPhysicalDevice)physical_device_for_instance(NULL), NULL, &extension_count, extensions) != VK_SUCCESS) {{
                     fprintf(stderr, "device extension enumeration failed\\n");
@@ -5384,21 +5385,22 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 for (uint32_t i = 0; i < extension_count; ++i) {{
                     if (strcmp(extensions[i].extensionName,
                                VK_EXT_SHADER_DEMOTE_TO_HELPER_INVOCATION_EXTENSION_NAME) == 0) {{
-                        fprintf(stderr, "VK_EXT_shader_demote_to_helper_invocation appeared in enumeration without transport\\n");
-                        return 9;
+                        found_demote_extension = VK_TRUE;
                     }}
+                }}
+                if (!found_demote_extension) {{
+                    fprintf(stderr, "VK_EXT_shader_demote_to_helper_invocation missing from enumeration\\n");
+                    return 9;
                 }}
                 const char *enabled_extensions[] = {{
                     VK_EXT_SHADER_DEMOTE_TO_HELPER_INVOCATION_EXTENSION_NAME,
                 }};
                 create_info.enabledExtensionCount = 1;
                 create_info.ppEnabledExtensionNames = enabled_extensions;
-                if (validate_device_extensions(&create_info) != VK_ERROR_EXTENSION_NOT_PRESENT) {{
-                    fprintf(stderr, "VK_EXT_shader_demote_to_helper_invocation extension enable was accepted without transport\\n");
+                if (validate_device_extensions(&create_info) != VK_SUCCESS) {{
+                    fprintf(stderr, "VK_EXT_shader_demote_to_helper_invocation extension enable was rejected\\n");
                     return 10;
                 }}
-                create_info.enabledExtensionCount = 0;
-                create_info.ppEnabledExtensionNames = NULL;
             #endif
 
                 demote_features.shaderDemoteToHelperInvocation = VK_TRUE;
@@ -5416,8 +5418,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
             """
         )
         result = self.compile_and_run(source)
-        self.assertEqual(result.returncode, 0, result.stderr)
-
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_dynamic_rendering_local_read_feature_is_false_only_and_not_advertised_without_transport(self):
         source = textwrap.dedent(

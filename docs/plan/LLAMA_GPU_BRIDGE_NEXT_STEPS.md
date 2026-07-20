@@ -4197,15 +4197,16 @@ tessellation multiview false.  `VkPhysicalDeviceVariablePointersFeatures`,
 true request remains fail-closed until the bridge has real transport/replay
 semantics for that feature.
 
-### 2026-07-13 Vulkan shader-demote no-op feature lane
+### 2026-07-20 Vulkan shader-demote false-feature negotiation lane
 
-`vkGetPhysicalDeviceFeatures2` now handles
+`vkGetPhysicalDeviceFeatures2` handles
 `VkPhysicalDeviceShaderDemoteToHelperInvocationFeatures` explicitly and reports
-`shaderDemoteToHelperInvocation = VK_FALSE`.  `vkCreateDevice` accepts the
-feature struct only when false.  A true request remains fail-closed because
-Skydnir does not advertise `VK_EXT_shader_demote_to_helper_invocation` and the
-bridge does not validate or replay shader-demote helper-invocation semantics as
-part of its generic Vulkan transport.
+`shaderDemoteToHelperInvocation = VK_FALSE`.  The ICD advertises and accepts
+`VK_EXT_shader_demote_to_helper_invocation` for standard extension negotiation,
+but `vkCreateDevice` still accepts the feature struct only when false.  A true
+request remains fail-closed because the bridge does not validate or replay
+shader-demote helper-invocation SPIR-V semantics as part of its generic Vulkan
+transport.
 
 ### 2026-07-20 Vulkan memory-priority validated hint lane
 

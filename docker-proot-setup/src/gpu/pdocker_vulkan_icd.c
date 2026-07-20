@@ -27186,7 +27186,13 @@ static bool pdocker_supports_dynamic_rendering_local_read_transport(void) {
 }
 
 static bool pdocker_supports_shader_demote_transport(void) {
-    return false;
+    /*
+     * The extension name is safe to negotiate while the feature bit remains
+     * false.  Actual OpDemoteToHelperInvocation shader semantics stay
+     * fail-closed until SPIR-V capability validation and replay semantics are
+     * represented by the bridge.
+     */
+    return true;
 }
 
 static bool pdocker_supports_debug_marker_transport(void) {
