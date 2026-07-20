@@ -10,6 +10,7 @@ local.properties
 # (and nested __pycache__ directories) ignored rather than inventoried or tracked.
 __pycache__/
 *.py[cod]
+.pytest_cache/
 .coverage*
 tmp/
 docs/test/device-logs/
