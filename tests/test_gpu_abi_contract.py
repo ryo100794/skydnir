@@ -6090,13 +6090,18 @@ class GpuAbiContractTest(unittest.TestCase):
             "clear_attachments_command_table_hash",
             "find_vulkan_graphics_v616_clear_attachments",
             "vulkan_graphics_v616_clear_attachments_match_rendering",
+            "vulkan_graphics_v616_clear_attachments_match_classic_render_pass",
+            "vulkan_graphics_v616_clear_attachment_matches_classic_subpass",
+            "vulkan_graphics_v632_subpass_color_attachment_ref_for_slot",
+            "vulkan_graphics_v632_subpass_depth_stencil_attachment_ref",
             "vulkan_graphics_v616_rect_inside_render_area",
             "active_rendering_command",
+            "classic_begin_command",
             "vkCmdClearAttachments(command_buffer",
             "clear attachments outside rendering",
-            "clear attachments inside classic render pass is not implemented",
             "graphics clear attachments requires V6.16 metadata",
             "graphics clear attachments do not match active rendering",
+            "graphics clear attachments do not match active classic render pass",
         ]:
             self.assertIn(marker, executor)
         for marker in [
