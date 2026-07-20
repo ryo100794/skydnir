@@ -9441,9 +9441,12 @@ static int collect_dispatch_v56_descriptor_set_layout_metadata(
         candidate.stage_flags = layout->storage_binding_stage_flags[slot];
         candidate.binding_flags = descriptor_layout_binding_flags(layout, slot);
         candidate.immutable_sampler_count = immutable_sampler_count;
-        if (candidate.immutable_sampler_count != 0) {
-            return -EOPNOTSUPP;
-        }
+        /*
+         * Compute V5.6 carries immutable-sampler layout shape while the sampler
+         * object identity itself is desugared into descriptor-set snapshots by
+         * descriptor_set_apply_immutable_samplers() / vkUpdateDescriptorSets().
+         * Do not reject the layout solely for immutable sampler presence here.
+         */
         int existing = find_dispatch_v56_descriptor_set_layout_entry(
             entries, *entry_count, candidate.layout_id, candidate.binding);
         if (existing >= 0) {
@@ -10707,6 +10710,16 @@ typedef struct {
     int fds[PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS];
 } PdockerVkGraphicsFrameObjectTables;
 
+static int collect_vulkan_graphics_v632_render_pass_transport(void) {
+    return -EOPNOTSUPP;
+}
+
+static bool strict_vulkan_graphics_v632_render_pass_transport_complete(
+        const PdockerVkPipeline *pipeline) {
+    (void)pipeline;
+    return false;
+}
+
 static int send_recorded_vulkan_graphics_v6_1_frame_range(
         const PdockerVkCommandBuffer *cmd,
         const PdockerVkQueue *submit_queue,
@@ -11267,9 +11280,12 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
             goto cleanup;
         }
         PdockerVkPipeline *pipeline = record->pipeline;
-        if (strict_passthrough && pipeline->render_pass_normalized_to_dynamic_rendering) {
+        if (strict_passthrough && pipeline->render_pass_normalized_to_dynamic_rendering &&
+            !strict_vulkan_graphics_v632_render_pass_transport_complete(pipeline)) {
+            int render_pass_metadata_rc = collect_vulkan_graphics_v632_render_pass_transport();
+            (void)render_pass_metadata_rc;
             fprintf(stderr,
-                    "pdocker-vulkan-icd: V6 strict frame rejected: render pass normalization required pipeline_id=%llu\n",
+                    "pdocker-vulkan-icd: V6 strict frame rejected: render pass normalization required strict-v6-render-pass-metadata-missing pipeline_id=%llu\n",
                     (unsigned long long)pdocker_vk_pipeline_object_id(pipeline));
             rc = -EOPNOTSUPP;
             goto cleanup;
@@ -16689,10 +16705,11 @@ static int validate_strict_compute_v5_layout_synthesis(
             }
             const VkDescriptorType expected_type = set_layout->storage_binding_types[slot];
             for (uint32_t array_element = 0; array_element < descriptor_count; ++array_element) {
-                if (descriptor_layout_immutable_sampler_valid(set_layout, slot, array_element)) {
+                if (descriptor_layout_immutable_sampler_valid(set_layout, slot, array_element) &&
+                    !descriptor_type_requires_sampler(expected_type)) {
                     set_strict_compute_v5_layout_reason(
-                        reason_out, "strict-compute-v5-layout-immutable-sampler-unsupported");
-                    return -EOPNOTSUPP;
+                        reason_out, "strict-compute-v5-layout-immutable-sampler-type-mismatch");
+                    return -EPROTO;
                 }
                 VkDescriptorType transported_type = (VkDescriptorType)0;
                 int rc = find_strict_compute_v5_transported_descriptor_type(
@@ -19248,12 +19265,13 @@ typedef struct {
     bool vulkan_dispatch_v5_supported_minors_valid;
     bool vulkan_dispatch_v5_supported_minor[10];
     bool vulkan_graphics_v6_supported_minors_valid;
-    bool vulkan_graphics_v6_supported_minor[32];
+    bool vulkan_graphics_v6_supported_minor[33];
     bool vulkan_graphics_v627_buffer_views_supported;
     bool vulkan_graphics_v628_push_constant_ranges_supported;
     bool vulkan_graphics_v629_variable_descriptor_counts_supported;
     bool vulkan_graphics_v630_native_objects_supported;
     bool vulkan_graphics_v631_descriptor_layout_flags_supported;
+    bool vulkan_graphics_v632_render_passes_supported;
     uint32_t vulkan_dispatch_v5_abi_minor_image_layout_ranges;
     uint32_t vulkan_dispatch_v5_max_image_layout_ranges;
     uint32_t vulkan_dispatch_v5_abi_minor_buffer_views;
@@ -19282,6 +19300,7 @@ typedef struct {
     uint32_t vulkan_graphics_v6_abi_minor_native_objects;
     uint32_t vulkan_graphics_v6_abi_minor_descriptor_layout_flags;
     uint32_t vulkan_graphics_v6_max_descriptor_set_layout_flags;
+    uint32_t vulkan_graphics_v6_abi_minor_render_passes;
     uint32_t image_format_cap_count;
     PdockerVkAdvertisedFormatCaps image_format_caps[PDOCKER_VK_ADVERTISED_FORMAT_CAP_MAX];
 } PdockerVkAdvertisedCaps;
@@ -19937,6 +19956,10 @@ static bool parse_executor_advertisement_caps_json(
         v631_minor_ok && v631_minor >= PDOCKER_GPU_VULKAN_GRAPHICS_V631_ABI_MINOR &&
         v631_max_ok && v631_max_flags >= PDOCKER_GPU_VULKAN_GRAPHICS_V624_MAX_PIPELINE_LAYOUT_SETS &&
         v631_schema_ok && strcmp(v631_schema_hash, expected_v631_schema_hash) == 0;
+    caps->vulkan_graphics_v6_abi_minor_render_passes = PDOCKER_GPU_VULKAN_GRAPHICS_V632_ABI_MINOR;
+    caps->vulkan_graphics_v632_render_passes_supported =
+        caps->vulkan_graphics_v631_descriptor_layout_flags_supported &&
+        caps->vulkan_graphics_v6_supported_minor[PDOCKER_GPU_VULKAN_GRAPHICS_V632_ABI_MINOR];
 
     caps->image_format_cap_count = 0;
     for (size_t i = 0; i < pdocker_vk_bridge_format_count() &&

@@ -104,6 +104,11 @@ VULKAN_ABI_ID_FIELD_CLASSIFICATIONS = {
     "PdockerGpuVulkanGraphicsV629VariableDescriptorCountEntry.descriptor_set_layout_id": "object_reference_checked",
     "PdockerGpuVulkanGraphicsV61PushConstantMetadataEntry.layout_id": "object_reference_checked",
     "PdockerGpuVulkanGraphicsV6CommandEntry.pipeline_layout_id": "object_reference_checked",
+    "PdockerGpuVulkanGraphicsV632RenderPassEntry.render_pass_id": "object_identity_guarded",
+    "PdockerGpuVulkanGraphicsV632RenderPassAttachmentEntry.render_pass_id": "object_reference_checked",
+    "PdockerGpuVulkanGraphicsV632RenderPassSubpassEntry.render_pass_id": "object_reference_checked",
+    "PdockerGpuVulkanGraphicsV632RenderPassAttachmentRefEntry.render_pass_id": "object_reference_checked",
+    "PdockerGpuVulkanGraphicsV632RenderPassDependencyEntry.render_pass_id": "object_reference_checked",
 }
 
 
@@ -335,6 +340,11 @@ VULKAN_ABI_INDEX_FIELD_CLASSIFICATIONS = {
     "PdockerGpuVulkanDispatchV59VariableDescriptorCountEntry.set_index": "identity_key_ordinal",
     "PdockerGpuVulkanGraphicsV629VariableDescriptorCountEntry.command_index": "command_reference_index",
     "PdockerGpuVulkanGraphicsV629VariableDescriptorCountEntry.set_index": "identity_key_ordinal",
+    "PdockerGpuVulkanGraphicsV632RenderPassAttachmentEntry.attachment_index": "attachment_reference_index",
+    "PdockerGpuVulkanGraphicsV632RenderPassSubpassEntry.subpass_index": "identity_key_ordinal",
+    "PdockerGpuVulkanGraphicsV632RenderPassAttachmentRefEntry.subpass_index": "identity_key_ordinal",
+    "PdockerGpuVulkanGraphicsV632RenderPassAttachmentRefEntry.attachment_index": "attachment_reference_index",
+    "PdockerGpuVulkanGraphicsV632RenderPassDependencyEntry.dependency_index": "identity_key_ordinal",
     "PdockerGpuVulkanGraphicsV61PushConstantMetadataEntry.command_index": "command_reference_index",
     "PdockerGpuVulkanGraphicsV61ImageBarrierEntry.command_index": "command_reference_index",
     "PdockerGpuVulkanGraphicsV61ImageBarrierEntry.image_index": "image_reference_index",
@@ -862,8 +872,14 @@ def classify_vulkan_abi_size_or_count_field(qualified_field):
         return "query_count"
     if field_name == "sample_mask_word_count":
         return "sample_mask_word_count"
-    if field_name in {"attachment_count", "color_attachment_count", "clear_attachment_count"}:
+    if field_name.endswith("_attachment_count") or field_name in {
+        "attachment_count",
+        "color_attachment_count",
+        "clear_attachment_count",
+    }:
         return "attachment_count"
+    if field_name in {"subpass_count", "dependency_count"}:
+        return "command_table_slice_count"
     if field_name in {"viewport_count", "scissor_count"}:
         return "graphics_state_count"
     if field_name in {
@@ -901,8 +917,12 @@ def classify_vulkan_abi_remaining_scalar_field(qualified_field):
         "descriptor_first_set", "first_set", "first_descriptor",
     }:
         return "descriptor_coordinate"
-    if field_name == "subpass":
+    if field_name in {"subpass", "src_subpass", "dst_subpass"}:
         return "subpass_index"
+    if field_name == "pipeline_bind_point":
+        return "vk_pipeline_state_enum"
+    if field_name == "role" and "AttachmentRef" in struct_name:
+        return "attachment_role_enum"
     if field_name == "first_query":
         return "query_coordinate"
     if field_name in {"first_vertex", "first_instance"}:
@@ -944,7 +964,7 @@ def classify_vulkan_abi_remaining_scalar_field(qualified_field):
     if re.fullmatch(r"color_attachment_format[0-9]+", field_name):
         return "vk_format_enum"
     if field_name in {
-        "layout", "old_layout", "new_layout", "initial_layout", "image_layout",
+        "layout", "old_layout", "new_layout", "initial_layout", "final_layout", "image_layout",
         "src_layout", "dst_layout", "resolve_layout",
     }:
         return "vk_layout_enum"
@@ -6720,7 +6740,9 @@ class GpuAbiContractTest(unittest.TestCase):
         collect_v56_layout = c_function_body(icd, "collect_dispatch_v56_descriptor_set_layout_metadata")
         self.assertNotIn("does not yet transport dynamic-offset arrays", collect_v56_layout)
         self.assertNotIn("return -EOPNOTSUPP;\n        }\n        if (!descriptor_type_supported_by_v4_transport", collect_v56_layout)
-        self.assertIn("candidate.immutable_sampler_count != 0", collect_v56_layout)
+        self.assertIn("candidate.immutable_sampler_count = immutable_sampler_count;", collect_v56_layout)
+        self.assertIn("descriptor_set_apply_immutable_samplers() / vkUpdateDescriptorSets()", collect_v56_layout)
+        self.assertNotIn("candidate.immutable_sampler_count != 0", collect_v56_layout)
         self.assertNotIn("PDOCKER_VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT) != 0", collect_v56_layout)
         self.assertIn("collect_dispatch_v59_variable_descriptor_counts", sender)
         exact_write_validator = c_function_body(executor, "validate_vulkan_compute_v56_descriptor_writes")
@@ -6759,7 +6781,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "push + range->offset",
             "VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT",
             "VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT",
-            "entry->immutable_sampler_count != 0",
+            "entry->immutable_sampler_count > entry->descriptor_count",
+            "!vulkan_descriptor_type_requires_sampler(descriptor_type)",
             "vulkan_dispatch_descriptor_type_from_api_exact(entry->descriptor_type",
             "VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC",
             "VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC",
@@ -20660,7 +20683,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "strict-compute-v5-layout-descriptor-array-hole",
             "strict-compute-v5-layout-binding-flags-unsupported",
             "strict-compute-v5-layout-stage-flags-unsupported",
-            "strict-compute-v5-layout-immutable-sampler-unsupported",
+            "strict-compute-v5-layout-immutable-sampler-type-mismatch",
             "strict-compute-v5-layout-descriptorless-shape-unsupported",
             "layout->set_layout_count != synthesized_set_count",
             "has_descriptors ? max_set_index + 1u : 1u",
@@ -26558,9 +26581,9 @@ class GpuAbiContractTest(unittest.TestCase):
         caps_struct = icd.split("} PdockerVkAdvertisedCaps;", 1)[0].rsplit("typedef struct {", 1)[1]
 
         self.assertIn("vulkan_graphics_v6_supported_minors", caps)
-        self.assertIn("[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31]", caps)
+        self.assertIn("[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32]", caps)
         self.assertIn("bool vulkan_graphics_v6_supported_minors_valid;", caps_struct)
-        self.assertIn("bool vulkan_graphics_v6_supported_minor[32];", caps_struct)
+        self.assertIn("bool vulkan_graphics_v6_supported_minor[33];", caps_struct)
         self.assertIn("json_read_u32_membership_array(\n            json,\n            \"vulkan_graphics_v6_supported_minors\"", parser)
         self.assertIn("caps->vulkan_graphics_v6_supported_minors_valid = true;", parser)
         self.assertIn("caps->vulkan_graphics_v6_supported_minor[PDOCKER_GPU_VULKAN_GRAPHICS_V627_ABI_MINOR]", parser)
@@ -26574,6 +26597,136 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("caps->vulkan_graphics_v629_variable_descriptor_counts_supported &&", parser)
         self.assertIn("caps->vulkan_graphics_v630_native_objects_supported &&", parser)
         self.assertIn("caps->vulkan_graphics_v6_supported_minor[PDOCKER_GPU_VULKAN_GRAPHICS_V631_ABI_MINOR]", parser)
+        self.assertIn("caps->vulkan_graphics_v6_supported_minor[PDOCKER_GPU_VULKAN_GRAPHICS_V632_ABI_MINOR]", parser)
+
+
+    def test_vulkan_graphics_v632_render_pass_transport_contract_declares_append_only_schema(self):
+        for path in [APP_HEADER, CONTAINER_HEADER]:
+            source = path.read_text()
+            self.assertIn("#define PDOCKER_GPU_VULKAN_GRAPHICS_V632_ABI_MINOR 32u", source)
+            for marker in [
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V632_HEADER_EXTENSION_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V632_RENDER_PASS_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V632_RENDER_PASS_ATTACHMENT_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V632_RENDER_PASS_SUBPASS_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V632_RENDER_PASS_ATTACHMENT_REF_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V632_RENDER_PASS_DEPENDENCY_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V632_RENDER_PASS_SCHEMA_HASH",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V632_RENDER_PASS_ATTACHMENT_SCHEMA_HASH",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V632_RENDER_PASS_SUBPASS_SCHEMA_HASH",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V632_RENDER_PASS_ATTACHMENT_REF_SCHEMA_HASH",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V632_RENDER_PASS_DEPENDENCY_SCHEMA_HASH",
+                "PdockerGpuVulkanGraphicsV632HeaderExtension",
+                "PdockerGpuVulkanGraphicsV632FrameHeader",
+                "PdockerGpuVulkanGraphicsV632RenderPassEntry",
+                "PdockerGpuVulkanGraphicsV632RenderPassAttachmentEntry",
+                "PdockerGpuVulkanGraphicsV632RenderPassSubpassEntry",
+                "PdockerGpuVulkanGraphicsV632RenderPassAttachmentRefEntry",
+                "PdockerGpuVulkanGraphicsV632RenderPassDependencyEntry",
+            ]:
+                self.assertIn(marker, source)
+
+            header_fields, header_count, header_hash, computed_header_hash = vulkan_dispatch_v5_schema(
+                path,
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V632_HEADER_EXTENSION_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V632_HEADER_EXTENSION_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V632_HEADER_EXTENSION_SCHEMA_HASH",
+            )
+            self.assertEqual(header_count, len(header_fields))
+            self.assertEqual(header_hash, computed_header_hash)
+            self.assertEqual(
+                [name for name, _ in header_fields],
+                [
+                    "render_pass_count",
+                    "render_pass_entry_size",
+                    "render_pass_table_offset",
+                    "render_pass_table_size",
+                    "render_pass_schema_hash",
+                    "render_pass_table_hash",
+                    "render_pass_attachment_count",
+                    "render_pass_attachment_entry_size",
+                    "render_pass_attachment_table_offset",
+                    "render_pass_attachment_table_size",
+                    "render_pass_attachment_schema_hash",
+                    "render_pass_attachment_table_hash",
+                    "render_pass_subpass_count",
+                    "render_pass_subpass_entry_size",
+                    "render_pass_subpass_table_offset",
+                    "render_pass_subpass_table_size",
+                    "render_pass_subpass_schema_hash",
+                    "render_pass_subpass_table_hash",
+                    "render_pass_attachment_ref_count",
+                    "render_pass_attachment_ref_entry_size",
+                    "render_pass_attachment_ref_table_offset",
+                    "render_pass_attachment_ref_table_size",
+                    "render_pass_attachment_ref_schema_hash",
+                    "render_pass_attachment_ref_table_hash",
+                    "render_pass_dependency_count",
+                    "render_pass_dependency_entry_size",
+                    "render_pass_dependency_table_offset",
+                    "render_pass_dependency_table_size",
+                    "render_pass_dependency_schema_hash",
+                    "render_pass_dependency_table_hash",
+                    "extension_hash",
+                ],
+            )
+
+    def test_vulkan_graphics_v632_render_pass_transport_does_not_claim_strict_by_normalization(self):
+        icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
+        sender = c_function_body(icd, "send_recorded_vulkan_graphics_v6_1_frame_range")
+        pipeline_body = icd.split(
+            "VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines", 1
+        )[1].split("VKAPI_ATTR void VKAPI_CALL vkDestroyPipeline", 1)[0]
+        self.assertIn("pipeline->render_pass_normalized_to_dynamic_rendering = true;", pipeline_body)
+        self.assertIn("strict_passthrough && pipeline->render_pass_normalized_to_dynamic_rendering", sender)
+        self.assertIn("V6 strict frame rejected: render pass normalization required", sender)
+        self.assertLess(
+            sender.index("strict_passthrough && pipeline->render_pass_normalized_to_dynamic_rendering"),
+            sender.index("PdockerGpuVulkanGraphicsV6PipelineEntry *pipeline_entry"),
+        )
+        for marker in [
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V632_ABI_MINOR",
+            "collect_vulkan_graphics_v632_render_pass_transport",
+            "strict-v6-render-pass-metadata-missing",
+            "strict_vulkan_graphics_v632_render_pass_transport_complete",
+        ]:
+            self.assertIn(marker, icd + executor)
+        self.assertNotIn("strict render pass passthrough by dynamic-rendering normalization", icd + executor)
+
+    def test_vulkan_graphics_v632_rejects_duplicate_render_pass_ids_with_split_identity(self):
+        executor = GPU_EXECUTOR.read_text()
+        helper = (
+            c_function_body(executor, "v632_render_pass_fields_identical_for_same_object_id")
+            + c_function_body(executor, "v632_render_pass_indexed_extension_identity_hash")
+            + c_function_body(executor, "validate_vulkan_graphics_v632_duplicate_render_pass_identity")
+        )
+        validator = c_function_body(executor, "validate_vulkan_graphics_v6_frame_content")
+        for marker in [
+            "render_pass_count == 0",
+            "if (a->render_pass_id == 0) continue;",
+            "b->render_pass_id == a->render_pass_id",
+            "!v632_render_pass_fields_identical_for_same_object_id(a, b)",
+            "a->attachment_first == b->attachment_first",
+            "a->attachment_count == b->attachment_count",
+            "a->subpass_first == b->subpass_first",
+            "a->subpass_count == b->subpass_count",
+            "a->dependency_first == b->dependency_first",
+            "a->dependency_count == b->dependency_count",
+            "v632_render_pass_indexed_extension_identity_hash(view, i)",
+            "v632_render_pass_indexed_extension_identity_hash(view, j)",
+            "HASH_RENDER_PASS_INDEXED_EXTENSION(6321u",
+            "HASH_RENDER_PASS_INDEXED_EXTENSION(6322u",
+            "HASH_RENDER_PASS_INDEXED_EXTENSION(6323u",
+            "HASH_RENDER_PASS_INDEXED_EXTENSION(6324u",
+            "a_extension_hash != b_extension_hash",
+        ]:
+            self.assertIn(marker, helper)
+        self.assertIn("validate_vulkan_graphics_v632_duplicate_render_pass_identity(&view)", validator)
+        self.assertLess(
+            validator.index("validate_vulkan_graphics_v632_duplicate_render_pass_identity(&view)"),
+            validator.index("validate_vulkan_graphics_v6_duplicate_pipeline_identity_with_extensions(&view)"),
+        )
 
 
 if __name__ == "__main__":

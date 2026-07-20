@@ -16721,7 +16721,6 @@ static int run_vulkan_dispatch_fd(
                 &object_tables->compute_descriptor_set_layouts[i];
             if (entry->layout_id == 0 || entry->descriptor_count == 0 ||
                 entry->descriptor_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS ||
-                entry->immutable_sampler_count != 0 ||
                 !vulkan_graphics_descriptor_binding_flags_supported(entry->binding_flags)) {
                 json_fail("vulkan-dispatch", "unsupported V5.6 compute descriptor set layout metadata");
                 return 64;
@@ -16732,6 +16731,9 @@ static int run_vulkan_dispatch_fd(
                 type_rc = vulkan_dispatch_image_descriptor_type_from_api(entry->descriptor_type, &descriptor_type);
             }
             if (type_rc != 0 ||
+                entry->immutable_sampler_count > entry->descriptor_count ||
+                (entry->immutable_sampler_count != 0 &&
+                 !vulkan_descriptor_type_requires_sampler(descriptor_type)) ||
                 !vulkan_graphics_descriptor_binding_flags_enabled(
                     rt, entry->binding_flags, descriptor_type)) {
                 json_fail("vulkan-dispatch", "unsupported V5.6 compute descriptor type or flags");
@@ -22173,7 +22175,7 @@ static void print_vulkan_advertisement_caps(const char *transport) {
             "\"vulkan_dispatch_v5_supported_minors\":[0,1,2,3,4,5,6,7,8,9],"
             "\"vulkan_dispatch_v5_resource_schema_hash\":\"0x%016llx\","
             "\"vulkan_dispatch_v5_resource_field_count\":%u,"
-            "\"vulkan_graphics_v6_supported_minors\":[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31],"
+            "\"vulkan_graphics_v6_supported_minors\":[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32],"
             "\"vulkan_dispatch_v5_abi_minor_image_layout_ranges\":%u,"
             "\"vulkan_dispatch_v5_image_layout_range_schema_hash\":\"0x%016llx\","
             "\"vulkan_dispatch_v5_max_image_layout_ranges\":%u,"
@@ -23565,6 +23567,7 @@ static int frame_ranges_do_not_overlap(const FrameRange *ranges, size_t count) {
 
 static size_t vulkan_graphics_v6_table_range_count(uint32_t abi_minor) {
     switch (abi_minor) {
+        case PDOCKER_GPU_VULKAN_GRAPHICS_V632_ABI_MINOR: return 61u;
         case PDOCKER_GPU_VULKAN_GRAPHICS_V631_ABI_MINOR: return 56u;
         case PDOCKER_GPU_VULKAN_GRAPHICS_V630_ABI_MINOR: return 55u;
         case PDOCKER_GPU_VULKAN_GRAPHICS_V629_ABI_MINOR: return 55u;
@@ -26408,6 +26411,8 @@ static int validate_vulkan_graphics_v6_header_prefix(
         if (header->header_size != sizeof(PdockerGpuVulkanGraphicsV630FrameHeader)) return -EPROTO;
     } else if (header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V631_ABI_MINOR) {
         if (header->header_size != sizeof(PdockerGpuVulkanGraphicsV631FrameHeader)) return -EPROTO;
+    } else if (header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V632_ABI_MINOR) {
+        if (header->header_size != sizeof(PdockerGpuVulkanGraphicsV632FrameHeader)) return -EPROTO;
     } else {
         return -EPROTO;
     }
@@ -26473,9 +26478,12 @@ static int validate_vulkan_graphics_v6_header(
         (const PdockerGpuVulkanGraphicsV622FrameHeader *)header;
     const PdockerGpuVulkanGraphicsV623FrameHeader *header_v623 =
         (const PdockerGpuVulkanGraphicsV623FrameHeader *)header;
+    const PdockerGpuVulkanGraphicsV632FrameHeader *header_v632 =
+        (const PdockerGpuVulkanGraphicsV632FrameHeader *)header;
+    const int is_v632 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V632_ABI_MINOR;
     const PdockerGpuVulkanGraphicsV631FrameHeader *header_v631 =
-        (const PdockerGpuVulkanGraphicsV631FrameHeader *)header;
-    const int is_v631 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V631_ABI_MINOR;
+        is_v632 ? &header_v632->v631 : (const PdockerGpuVulkanGraphicsV631FrameHeader *)header;
+    const int is_v631 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V631_ABI_MINOR || is_v632;
     const PdockerGpuVulkanGraphicsV630FrameHeader *header_v630 =
         is_v631 ? &header_v631->v630 : (const PdockerGpuVulkanGraphicsV630FrameHeader *)header;
     const PdockerGpuVulkanGraphicsV629FrameHeader *header_v629 =
@@ -26578,6 +26586,11 @@ static int validate_vulkan_graphics_v6_header(
         (is_v628 && header_v628->v628.push_constant_range_count > PDOCKER_GPU_VULKAN_GRAPHICS_V628_MAX_PUSH_CONSTANT_RANGES) ||
         (is_v629 && header_v629->v629.variable_descriptor_count_count > PDOCKER_GPU_VULKAN_GRAPHICS_V629_MAX_VARIABLE_DESCRIPTOR_COUNTS) ||
         (is_v631 && header_v631->v631.descriptor_set_layout_flag_count > PDOCKER_GPU_VULKAN_GRAPHICS_V624_MAX_PIPELINE_LAYOUT_SETS) ||
+        (is_v632 && header_v632->v632.render_pass_count > PDOCKER_GPU_VULKAN_GRAPHICS_V632_MAX_RENDER_PASSES) ||
+        (is_v632 && header_v632->v632.render_pass_attachment_count > PDOCKER_GPU_VULKAN_GRAPHICS_V632_MAX_RENDER_PASS_ATTACHMENTS) ||
+        (is_v632 && header_v632->v632.render_pass_subpass_count > PDOCKER_GPU_VULKAN_GRAPHICS_V632_MAX_RENDER_PASS_SUBPASSES) ||
+        (is_v632 && header_v632->v632.render_pass_attachment_ref_count > PDOCKER_GPU_VULKAN_GRAPHICS_V632_MAX_RENDER_PASS_ATTACHMENT_REFS) ||
+        (is_v632 && header_v632->v632.render_pass_dependency_count > PDOCKER_GPU_VULKAN_GRAPHICS_V632_MAX_RENDER_PASS_DEPENDENCIES) ||
         header->command_count > PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS) {
         return -E2BIG;
     }
@@ -26790,8 +26803,26 @@ static int validate_vulkan_graphics_v6_header(
          header_v631->v631.extension_hash != header_v631->v631.descriptor_set_layout_flag_table_hash)) {
         return -EPROTO;
     }
-    /* V6.31 appends one descriptor-set-layout create-flag table after V6.30. */
-    FrameRange ranges[56] = {
+    if (is_v632 &&
+        (header_v632->v632.render_pass_entry_size != sizeof(PdockerGpuVulkanGraphicsV632RenderPassEntry) ||
+         header_v632->v632.render_pass_schema_hash != PDOCKER_GPU_VULKAN_GRAPHICS_V632_RENDER_PASS_SCHEMA_HASH ||
+         header_v632->v632.render_pass_attachment_entry_size != sizeof(PdockerGpuVulkanGraphicsV632RenderPassAttachmentEntry) ||
+         header_v632->v632.render_pass_attachment_schema_hash != PDOCKER_GPU_VULKAN_GRAPHICS_V632_RENDER_PASS_ATTACHMENT_SCHEMA_HASH ||
+         header_v632->v632.render_pass_subpass_entry_size != sizeof(PdockerGpuVulkanGraphicsV632RenderPassSubpassEntry) ||
+         header_v632->v632.render_pass_subpass_schema_hash != PDOCKER_GPU_VULKAN_GRAPHICS_V632_RENDER_PASS_SUBPASS_SCHEMA_HASH ||
+         header_v632->v632.render_pass_attachment_ref_entry_size != sizeof(PdockerGpuVulkanGraphicsV632RenderPassAttachmentRefEntry) ||
+         header_v632->v632.render_pass_attachment_ref_schema_hash != PDOCKER_GPU_VULKAN_GRAPHICS_V632_RENDER_PASS_ATTACHMENT_REF_SCHEMA_HASH ||
+         header_v632->v632.render_pass_dependency_entry_size != sizeof(PdockerGpuVulkanGraphicsV632RenderPassDependencyEntry) ||
+         header_v632->v632.render_pass_dependency_schema_hash != PDOCKER_GPU_VULKAN_GRAPHICS_V632_RENDER_PASS_DEPENDENCY_SCHEMA_HASH ||
+         header_v632->v632.extension_hash != (header_v632->v632.render_pass_table_hash ^
+                                             header_v632->v632.render_pass_attachment_table_hash ^
+                                             header_v632->v632.render_pass_subpass_table_hash ^
+                                             header_v632->v632.render_pass_attachment_ref_table_hash ^
+                                             header_v632->v632.render_pass_dependency_table_hash))) {
+        return -EPROTO;
+    }
+    /* V6.32 appends classic render-pass metadata tables after V6.31. */
+    FrameRange ranges[61] = {
         {header->resource_table_offset, header->resource_table_size},
         {header->descriptor_table_offset, header->descriptor_table_size},
         {header->image_table_offset, header->image_table_size},
@@ -26892,6 +26923,16 @@ static int validate_vulkan_graphics_v6_header(
          is_v629 ? header_v629->v629.variable_descriptor_count_table_size : 0},
         {is_v631 ? header_v631->v631.descriptor_set_layout_flag_table_offset : 0,
          is_v631 ? header_v631->v631.descriptor_set_layout_flag_table_size : 0},
+        {is_v632 ? header_v632->v632.render_pass_table_offset : 0,
+         is_v632 ? header_v632->v632.render_pass_table_size : 0},
+        {is_v632 ? header_v632->v632.render_pass_attachment_table_offset : 0,
+         is_v632 ? header_v632->v632.render_pass_attachment_table_size : 0},
+        {is_v632 ? header_v632->v632.render_pass_subpass_table_offset : 0,
+         is_v632 ? header_v632->v632.render_pass_subpass_table_size : 0},
+        {is_v632 ? header_v632->v632.render_pass_attachment_ref_table_offset : 0,
+         is_v632 ? header_v632->v632.render_pass_attachment_ref_table_size : 0},
+        {is_v632 ? header_v632->v632.render_pass_dependency_table_offset : 0,
+         is_v632 ? header_v632->v632.render_pass_dependency_table_size : 0},
     };
     if (!table_range_valid(header->resource_table_offset, header->resource_table_size,
                            header->resource_count, header->resource_entry_size,
@@ -27267,6 +27308,39 @@ static int validate_vulkan_graphics_v6_header(
                            header->frame_size, header->header_size)) {
         return -EPROTO;
     }
+    if (is_v632 &&
+        (!table_range_valid(header_v632->v632.render_pass_table_offset,
+                            header_v632->v632.render_pass_table_size,
+                            header_v632->v632.render_pass_count,
+                            header_v632->v632.render_pass_entry_size,
+                            __alignof__(PdockerGpuVulkanGraphicsV632RenderPassEntry),
+                            header->frame_size, header->header_size) ||
+         !table_range_valid(header_v632->v632.render_pass_attachment_table_offset,
+                            header_v632->v632.render_pass_attachment_table_size,
+                            header_v632->v632.render_pass_attachment_count,
+                            header_v632->v632.render_pass_attachment_entry_size,
+                            __alignof__(PdockerGpuVulkanGraphicsV632RenderPassAttachmentEntry),
+                            header->frame_size, header->header_size) ||
+         !table_range_valid(header_v632->v632.render_pass_subpass_table_offset,
+                            header_v632->v632.render_pass_subpass_table_size,
+                            header_v632->v632.render_pass_subpass_count,
+                            header_v632->v632.render_pass_subpass_entry_size,
+                            __alignof__(PdockerGpuVulkanGraphicsV632RenderPassSubpassEntry),
+                            header->frame_size, header->header_size) ||
+         !table_range_valid(header_v632->v632.render_pass_attachment_ref_table_offset,
+                            header_v632->v632.render_pass_attachment_ref_table_size,
+                            header_v632->v632.render_pass_attachment_ref_count,
+                            header_v632->v632.render_pass_attachment_ref_entry_size,
+                            __alignof__(PdockerGpuVulkanGraphicsV632RenderPassAttachmentRefEntry),
+                            header->frame_size, header->header_size) ||
+         !table_range_valid(header_v632->v632.render_pass_dependency_table_offset,
+                            header_v632->v632.render_pass_dependency_table_size,
+                            header_v632->v632.render_pass_dependency_count,
+                            header_v632->v632.render_pass_dependency_entry_size,
+                            __alignof__(PdockerGpuVulkanGraphicsV632RenderPassDependencyEntry),
+                            header->frame_size, header->header_size))) {
+        return -EPROTO;
+    }
     const size_t range_count = vulkan_graphics_v6_table_range_count(header->abi_minor);
     if (range_count == 0 || !frame_ranges_do_not_overlap(ranges, range_count)) {
         return -EPROTO;
@@ -27319,6 +27393,7 @@ typedef struct VulkanGraphicsV6FrameView {
     const PdockerGpuVulkanGraphicsV629FrameHeader *header_v629;
     const PdockerGpuVulkanGraphicsV630FrameHeader *header_v630;
     const PdockerGpuVulkanGraphicsV631FrameHeader *header_v631;
+    const PdockerGpuVulkanGraphicsV632FrameHeader *header_v632;
     const int *passed_fds;
     size_t passed_fd_count;
     int is_v61;
@@ -27352,6 +27427,7 @@ typedef struct VulkanGraphicsV6FrameView {
     int is_v629;
     int is_v630;
     int is_v631;
+    int is_v632;
     const PdockerGpuVulkanDispatchV5ResourceEntry *resources;
     const PdockerGpuVulkanDispatchV5DescriptorObjectEntry *descriptors;
     const PdockerGpuVulkanDispatchV5ImageEntry *images;
@@ -27407,6 +27483,11 @@ typedef struct VulkanGraphicsV6FrameView {
     const PdockerGpuVulkanGraphicsV628PushConstantRangeEntry *push_constant_ranges;
     const PdockerGpuVulkanGraphicsV629VariableDescriptorCountEntry *variable_descriptor_counts;
     const PdockerGpuVulkanGraphicsV631DescriptorSetLayoutFlagEntry *descriptor_set_layout_flags;
+    const PdockerGpuVulkanGraphicsV632RenderPassEntry *render_passes;
+    const PdockerGpuVulkanGraphicsV632RenderPassAttachmentEntry *render_pass_attachments;
+    const PdockerGpuVulkanGraphicsV632RenderPassSubpassEntry *render_pass_subpasses;
+    const PdockerGpuVulkanGraphicsV632RenderPassAttachmentRefEntry *render_pass_attachment_refs;
+    const PdockerGpuVulkanGraphicsV632RenderPassDependencyEntry *render_pass_dependencies;
 } VulkanGraphicsV6FrameView;
 
 static int register_vulkan_graphics_v630_identity(
@@ -27515,6 +27596,104 @@ static uint64_t v6_pipeline_indexed_extension_identity_hash(
     return hash;
 }
 
+
+static int v632_render_pass_fields_identical_for_same_object_id(
+        const PdockerGpuVulkanGraphicsV632RenderPassEntry *a,
+        const PdockerGpuVulkanGraphicsV632RenderPassEntry *b) {
+    if (!a || !b) return 0;
+    return a->render_pass_id == b->render_pass_id &&
+           a->attachment_first == b->attachment_first &&
+           a->attachment_count == b->attachment_count &&
+           a->subpass_first == b->subpass_first &&
+           a->subpass_count == b->subpass_count &&
+           a->dependency_first == b->dependency_first &&
+           a->dependency_count == b->dependency_count &&
+           a->flags == b->flags &&
+           a->reserved0 == b->reserved0;
+}
+
+static uint64_t v632_render_pass_indexed_extension_identity_hash(
+        const VulkanGraphicsV6FrameView *view,
+        uint32_t render_pass_index) {
+    uint64_t hash = 1469598103934665603ull;
+#define HASH_RENDER_PASS_INDEXED_EXTENSION(tag_value, enabled_expr, table_expr, count_expr, type_name) \
+    do { \
+        const uint32_t tag__ = (uint32_t)(tag_value); \
+        const type_name *table__ = (enabled_expr) ? (table_expr) : NULL; \
+        const uint32_t total__ = (enabled_expr) ? (uint32_t)(count_expr) : 0u; \
+        uint32_t matched__ = 0; \
+        hash = fnv1a64_update(hash, &tag__, sizeof(tag__)); \
+        for (uint32_t i__ = 0; i__ < total__; ++i__) { \
+            if (table__ && table__[i__].render_pass_id == view->render_passes[render_pass_index].render_pass_id) matched__++; \
+        } \
+        hash = fnv1a64_update(hash, &matched__, sizeof(matched__)); \
+        for (uint32_t i__ = 0; i__ < total__; ++i__) { \
+            if (!table__ || table__[i__].render_pass_id != view->render_passes[render_pass_index].render_pass_id) continue; \
+            hash = fnv1a64_update(hash, &table__[i__], sizeof(table__[i__])); \
+        } \
+    } while (0)
+
+    if (!view || !view->is_v632 || !view->header_v632 || !view->render_passes) return hash;
+    HASH_RENDER_PASS_INDEXED_EXTENSION(6321u,
+        view->render_pass_attachments,
+        view->render_pass_attachments,
+        view->header_v632->v632.render_pass_attachment_count,
+        PdockerGpuVulkanGraphicsV632RenderPassAttachmentEntry);
+    HASH_RENDER_PASS_INDEXED_EXTENSION(6322u,
+        view->render_pass_subpasses,
+        view->render_pass_subpasses,
+        view->header_v632->v632.render_pass_subpass_count,
+        PdockerGpuVulkanGraphicsV632RenderPassSubpassEntry);
+    HASH_RENDER_PASS_INDEXED_EXTENSION(6323u,
+        view->render_pass_attachment_refs,
+        view->render_pass_attachment_refs,
+        view->header_v632->v632.render_pass_attachment_ref_count,
+        PdockerGpuVulkanGraphicsV632RenderPassAttachmentRefEntry);
+    HASH_RENDER_PASS_INDEXED_EXTENSION(6324u,
+        view->render_pass_dependencies,
+        view->render_pass_dependencies,
+        view->header_v632->v632.render_pass_dependency_count,
+        PdockerGpuVulkanGraphicsV632RenderPassDependencyEntry);
+#undef HASH_RENDER_PASS_INDEXED_EXTENSION
+    return hash;
+}
+
+static int validate_vulkan_graphics_v632_duplicate_render_pass_identity(
+        const VulkanGraphicsV6FrameView *view) {
+    if (!view || !view->header) return -EINVAL;
+    if (!view->is_v632 || !view->header_v632) return 0;
+    if (view->header_v632->v632.render_pass_count == 0) return 0;
+    if (!view->render_passes) return -EINVAL;
+    for (uint32_t i = 0; i < view->header_v632->v632.render_pass_count; ++i) {
+        const PdockerGpuVulkanGraphicsV632RenderPassEntry *a = &view->render_passes[i];
+        if (a->render_pass_id == 0) continue;
+        if (!range_add_u32(a->attachment_first, a->attachment_count,
+                           view->header_v632->v632.render_pass_attachment_count) ||
+            !range_add_u32(a->subpass_first, a->subpass_count,
+                           view->header_v632->v632.render_pass_subpass_count) ||
+            !range_add_u32(a->dependency_first, a->dependency_count,
+                           view->header_v632->v632.render_pass_dependency_count)) {
+            return -EPROTO;
+        }
+        const uint64_t a_extension_hash =
+            v632_render_pass_indexed_extension_identity_hash(view, i);
+        for (uint32_t j = i + 1; j < view->header_v632->v632.render_pass_count; ++j) {
+            const PdockerGpuVulkanGraphicsV632RenderPassEntry *b = &view->render_passes[j];
+            if (b->render_pass_id == a->render_pass_id) {
+                if (!v632_render_pass_fields_identical_for_same_object_id(a, b)) {
+                    return -EPROTO;
+                }
+                const uint64_t b_extension_hash =
+                    v632_render_pass_indexed_extension_identity_hash(view, j);
+                if (a_extension_hash != b_extension_hash) {
+                    return -EPROTO;
+                }
+            }
+        }
+    }
+    return 0;
+}
+
 static int validate_vulkan_graphics_v6_duplicate_pipeline_identity_with_extensions(
         const VulkanGraphicsV6FrameView *view) {
     if (!view || !view->header || !view->pipelines) return -EINVAL;
@@ -27582,7 +27761,8 @@ static int init_vulkan_graphics_v6_frame_view(
         (const PdockerGpuVulkanGraphicsV6FrameHeader *)frame;
     int rc = validate_vulkan_graphics_v6_header(header, passed_fd_count);
     if (rc != 0) return rc;
-    const int is_v631_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V631_ABI_MINOR;
+    const int is_v632_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V632_ABI_MINOR;
+    const int is_v631_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V631_ABI_MINOR || is_v632_header;
     const int is_v630_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V630_ABI_MINOR || is_v631_header;
     const int is_v629_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V629_ABI_MINOR || is_v630_header;
     const int is_v628_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V628_ABI_MINOR || is_v629_header;
@@ -27700,8 +27880,11 @@ static int init_vulkan_graphics_v6_frame_view(
     const PdockerGpuVulkanGraphicsV628FrameHeader *header_v628 = is_v628_header
             ? (const PdockerGpuVulkanGraphicsV628FrameHeader *)frame
             : NULL;
+    const PdockerGpuVulkanGraphicsV632FrameHeader *header_v632 = is_v632_header
+            ? (const PdockerGpuVulkanGraphicsV632FrameHeader *)frame
+            : NULL;
     const PdockerGpuVulkanGraphicsV631FrameHeader *header_v631 = is_v631_header
-            ? (const PdockerGpuVulkanGraphicsV631FrameHeader *)frame
+            ? (is_v632_header ? &header_v632->v631 : (const PdockerGpuVulkanGraphicsV631FrameHeader *)frame)
             : NULL;
     const PdockerGpuVulkanGraphicsV630FrameHeader *header_v630 = is_v630_header
             ? (is_v631_header ? &header_v631->v630 : (const PdockerGpuVulkanGraphicsV630FrameHeader *)frame)
@@ -27742,6 +27925,7 @@ static int init_vulkan_graphics_v6_frame_view(
     view->header_v629 = header_v629;
     view->header_v630 = header_v630;
     view->header_v631 = header_v631;
+    view->header_v632 = header_v632;
     view->passed_fds = passed_fds;
     view->passed_fd_count = passed_fd_count;
     view->is_v61 = header_v61 != NULL;
@@ -27775,6 +27959,7 @@ static int init_vulkan_graphics_v6_frame_view(
     view->is_v629 = header_v629 != NULL;
     view->is_v630 = header_v630 != NULL;
     view->is_v631 = header_v631 != NULL;
+    view->is_v632 = header_v632 != NULL;
     view->resources =
         (const PdockerGpuVulkanDispatchV5ResourceEntry *)graphics_v6_table_ptr(
             frame, header, header->resource_table_offset, header->resource_table_size);
@@ -28157,6 +28342,35 @@ static int init_vulkan_graphics_v6_frame_view(
                 frame, header, header_v631->v631.descriptor_set_layout_flag_table_offset,
                 header_v631->v631.descriptor_set_layout_flag_table_size);
         if (header_v631->v631.descriptor_set_layout_flag_count && !view->descriptor_set_layout_flags) {
+            return -EPROTO;
+        }
+    }
+    if (view->is_v632) {
+        view->render_passes =
+            (const PdockerGpuVulkanGraphicsV632RenderPassEntry *)graphics_v6_table_ptr(
+                frame, header, header_v632->v632.render_pass_table_offset,
+                header_v632->v632.render_pass_table_size);
+        view->render_pass_attachments =
+            (const PdockerGpuVulkanGraphicsV632RenderPassAttachmentEntry *)graphics_v6_table_ptr(
+                frame, header, header_v632->v632.render_pass_attachment_table_offset,
+                header_v632->v632.render_pass_attachment_table_size);
+        view->render_pass_subpasses =
+            (const PdockerGpuVulkanGraphicsV632RenderPassSubpassEntry *)graphics_v6_table_ptr(
+                frame, header, header_v632->v632.render_pass_subpass_table_offset,
+                header_v632->v632.render_pass_subpass_table_size);
+        view->render_pass_attachment_refs =
+            (const PdockerGpuVulkanGraphicsV632RenderPassAttachmentRefEntry *)graphics_v6_table_ptr(
+                frame, header, header_v632->v632.render_pass_attachment_ref_table_offset,
+                header_v632->v632.render_pass_attachment_ref_table_size);
+        view->render_pass_dependencies =
+            (const PdockerGpuVulkanGraphicsV632RenderPassDependencyEntry *)graphics_v6_table_ptr(
+                frame, header, header_v632->v632.render_pass_dependency_table_offset,
+                header_v632->v632.render_pass_dependency_table_size);
+        if ((header_v632->v632.render_pass_count && !view->render_passes) ||
+            (header_v632->v632.render_pass_attachment_count && !view->render_pass_attachments) ||
+            (header_v632->v632.render_pass_subpass_count && !view->render_pass_subpasses) ||
+            (header_v632->v632.render_pass_attachment_ref_count && !view->render_pass_attachment_refs) ||
+            (header_v632->v632.render_pass_dependency_count && !view->render_pass_dependencies)) {
             return -EPROTO;
         }
     }
@@ -30350,6 +30564,9 @@ static int validate_vulkan_graphics_v6_frame_content(
             }
         }
     }
+    int render_pass_identity_rc =
+        validate_vulkan_graphics_v632_duplicate_render_pass_identity(&view);
+    if (render_pass_identity_rc != 0) return render_pass_identity_rc;
     int pipeline_identity_rc =
         validate_vulkan_graphics_v6_duplicate_pipeline_identity_with_extensions(&view);
     if (pipeline_identity_rc != 0) return pipeline_identity_rc;

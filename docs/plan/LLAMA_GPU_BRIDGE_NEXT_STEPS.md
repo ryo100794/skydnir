@@ -9,6 +9,24 @@ llama.cpp itself remains unmodified.
 
 ## Current Ground Truth
 
+### 2026-07-20 CPU/static V6.32 classic render-pass transport foundation
+
+Next graphics ABI work is pinned to an append-only V6.32 sidecar for classic
+`VkRenderPass` metadata instead of extending existing V6 pipeline or attachment
+tables.  The planned contract carries render-pass object rows plus attachment,
+subpass, attachment-reference, and dependency rows with schema hashes and table
+hashes so a renderer can prove generic Vulkan render-pass pass-through without
+claiming strict identity from dynamic-rendering normalization.
+
+Strict mode must continue to reject normalized classic render passes until the
+V6.32 metadata is present and validated, and duplicate `render_pass_id` rows
+must be guarded as a single object identity across the base row and child
+tables.
+
+This is generic Vulkan pass-through hardening. It does not change llama.cpp,
+Dockerfiles, models, prompts, shader bytes, runtime defaults, or executor
+arithmetic.
+
 ### 2026-07-19 CPU/static strict render-pass normalization fail-close lane
 
 Strict graphics pass-through now records whether a graphics pipeline was created
