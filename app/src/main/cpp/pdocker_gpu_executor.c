@@ -39513,6 +39513,252 @@ static int populate_vulkan_graphics_v634_render_pass_clear_values(
     return 0;
 }
 
+typedef struct VulkanGraphicsV634LayoutContext {
+    const PdockerGpuVulkanGraphicsV632RenderPassEntry *render_pass;
+    const PdockerGpuVulkanGraphicsV634FramebufferEntry *framebuffer;
+} VulkanGraphicsV634LayoutContext;
+
+typedef struct VulkanGraphicsV634LayoutTarget {
+    VulkanDispatchImageObject *image;
+    VkImageSubresourceRange range;
+    VkImageLayout layout;
+} VulkanGraphicsV634LayoutTarget;
+
+static int vulkan_graphics_v634_layout_context_for_command(
+        const VulkanGraphicsV6FrameView *view,
+        const PdockerGpuVulkanGraphicsV634RenderPassCommandEntry *entry,
+        VulkanGraphicsV634LayoutContext *context) {
+    if (!view || !entry || !context || !view->is_v634 || !view->header_v632 ||
+        !view->header_v634 || !view->render_passes || !view->framebuffers ||
+        !view->framebuffer_attachments) {
+        return -EINVAL;
+    }
+    memset(context, 0, sizeof(*context));
+    uint32_t framebuffer_index = 0;
+    uint32_t render_pass_index = 0;
+    if (vulkan_graphics_v634_framebuffer_index_for_id(
+            view, entry->framebuffer_id, &framebuffer_index) != 0 ||
+        vulkan_graphics_v633_render_pass_index_for_id(
+            view, entry->render_pass_id, &render_pass_index) != 0) {
+        return -EPROTO;
+    }
+    context->framebuffer = &view->framebuffers[framebuffer_index];
+    context->render_pass = &view->render_passes[render_pass_index];
+    if (context->framebuffer->framebuffer_id != entry->framebuffer_id ||
+        context->framebuffer->render_pass_id != entry->render_pass_id ||
+        context->render_pass->render_pass_id != entry->render_pass_id ||
+        context->framebuffer->attachment_count != context->render_pass->attachment_count ||
+        !range_add_u32(context->framebuffer->attachment_first,
+                       context->framebuffer->attachment_count,
+                       view->header_v634->v634.framebuffer_attachment_count)) {
+        return -EPROTO;
+    }
+    return 0;
+}
+
+static int vulkan_graphics_v634_layout_attachment_for_index(
+        const VulkanGraphicsV6FrameView *view,
+        VulkanGraphicsReplayAttachments *attachments,
+        const VulkanGraphicsV634LayoutContext *context,
+        uint32_t attachment_index,
+        VulkanDispatchImageObject **out_image,
+        VkImageSubresourceRange *out_range) {
+    if (out_image) *out_image = NULL;
+    if (out_range) memset(out_range, 0, sizeof(*out_range));
+    if (!view || !attachments || !context || !context->render_pass ||
+        !context->framebuffer || !out_image || !out_range ||
+        attachment_index >= context->render_pass->attachment_count ||
+        attachment_index >= context->framebuffer->attachment_count) {
+        return -ERANGE;
+    }
+    const uint32_t table_index = context->framebuffer->attachment_first + attachment_index;
+    if (table_index >= view->header_v634->v634.framebuffer_attachment_count) return -ERANGE;
+    const PdockerGpuVulkanGraphicsV634FramebufferAttachmentEntry *fb_attachment =
+        &view->framebuffer_attachments[table_index];
+    if (fb_attachment->framebuffer_id != context->framebuffer->framebuffer_id ||
+        fb_attachment->attachment_index != attachment_index ||
+        fb_attachment->image_view_index >= attachments->view_count) {
+        return -EPROTO;
+    }
+    VulkanDispatchImageViewObject *replay_view =
+        &attachments->views[fb_attachment->image_view_index];
+    if (!replay_view->view || replay_view->image_index >= attachments->image_count ||
+        !attachments->images[replay_view->image_index].image) {
+        return -EPROTO;
+    }
+    *out_image = &attachments->images[replay_view->image_index];
+    *out_range = replay_view->range;
+    return 0;
+}
+
+static int vulkan_graphics_v634_add_layout_target(
+        const VulkanGraphicsV6FrameView *view,
+        VulkanGraphicsReplayAttachments *attachments,
+        const VulkanGraphicsV634LayoutContext *context,
+        uint32_t attachment_index,
+        VkImageAspectFlags aspect_mask,
+        VkImageLayout layout,
+        VulkanGraphicsV634LayoutTarget *targets,
+        uint32_t *target_count,
+        uint32_t target_capacity) {
+    if (!view || !attachments || !context || !targets || !target_count) return -EINVAL;
+    if (attachment_index == VK_ATTACHMENT_UNUSED) return 0;
+    VulkanDispatchImageObject *image = NULL;
+    VkImageSubresourceRange range;
+    int rc = vulkan_graphics_v634_layout_attachment_for_index(
+        view, attachments, context, attachment_index, &image, &range);
+    if (rc != 0) return rc;
+    if (aspect_mask != 0) {
+        if ((range.aspectMask & aspect_mask) != aspect_mask) return -EPROTO;
+        range.aspectMask = aspect_mask;
+    }
+    if (!vulkan_replay_image_layout_range_valid(image, &range) ||
+        !vulkan_image_aspect_mask_valid_for_format(image->format, range.aspectMask)) {
+        return -ERANGE;
+    }
+    layout = vulkan_replay_layout_for_executor(layout);
+    for (uint32_t i = 0; i < *target_count; ++i) {
+        VulkanGraphicsV634LayoutTarget *target = &targets[i];
+        if (target->image != image ||
+            !vulkan_replay_subresource_ranges_overlap(&target->range, &range)) {
+            continue;
+        }
+        if (target->layout != layout) return -EOPNOTSUPP;
+        if (vulkan_replay_subresource_range_contains(&target->range, &range) &&
+            vulkan_replay_subresource_range_contains(&range, &target->range)) {
+            return 0;
+        }
+    }
+    if (*target_count >= target_capacity) return -E2BIG;
+    targets[*target_count] = (VulkanGraphicsV634LayoutTarget){
+        .image = image,
+        .range = range,
+        .layout = layout,
+    };
+    (*target_count)++;
+    return 0;
+}
+
+static int update_vulkan_graphics_v634_framebuffer_initial_layouts(
+        const VulkanGraphicsV6FrameView *view,
+        VulkanGraphicsReplayAttachments *attachments,
+        const PdockerGpuVulkanGraphicsV634RenderPassCommandEntry *entry) {
+    VulkanGraphicsV634LayoutContext context;
+    int rc = vulkan_graphics_v634_layout_context_for_command(view, entry, &context);
+    if (rc != 0) return rc;
+    if (entry->op != PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_BEGIN ||
+        entry->subpass_index != 0) {
+        return -EPROTO;
+    }
+    for (uint32_t i = 0; i < context.render_pass->attachment_count; ++i) {
+        const PdockerGpuVulkanGraphicsV632RenderPassAttachmentEntry *rp_attachment = NULL;
+        VulkanDispatchImageObject *image = NULL;
+        VkImageSubresourceRange range;
+        if (!vulkan_graphics_v632_attachment_for_index(
+                view, context.render_pass, i, &rp_attachment)) {
+            return -EPROTO;
+        }
+        rc = vulkan_graphics_v634_layout_attachment_for_index(
+            view, attachments, &context, i, &image, &range);
+        if (rc != 0) return rc;
+        const VkImageLayout initial_layout = (VkImageLayout)rp_attachment->initial_layout;
+        if (initial_layout == VK_IMAGE_LAYOUT_UNDEFINED) continue;
+        VkImageLayout tracked_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+        rc = vulkan_replay_image_layout_for_range(image, &range, &tracked_layout);
+        if (rc != 0) return rc;
+        if (tracked_layout != vulkan_replay_layout_for_executor(initial_layout)) {
+            json_fail("vulkan-graphics-v6-command-record",
+                      "classic render pass initial attachment layout mismatch");
+            return -EOPNOTSUPP;
+        }
+    }
+    return 0;
+}
+
+static int update_vulkan_graphics_v634_subpass_layouts(
+        const VulkanGraphicsV6FrameView *view,
+        VulkanGraphicsReplayAttachments *attachments,
+        const PdockerGpuVulkanGraphicsV634RenderPassCommandEntry *entry) {
+    VulkanGraphicsV634LayoutContext context;
+    int rc = vulkan_graphics_v634_layout_context_for_command(view, entry, &context);
+    if (rc != 0) return rc;
+    const PdockerGpuVulkanGraphicsV632RenderPassSubpassEntry *subpass =
+        vulkan_graphics_v632_render_pass_subpass_for_index(
+            view, context.render_pass, entry->subpass_index);
+    if (!subpass) return -EPROTO;
+    VulkanGraphicsV634LayoutTarget
+        targets[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_ATTACHMENTS * 4u + 2u];
+    memset(targets, 0, sizeof(targets));
+    uint32_t target_count = 0;
+#define ADD_V634_LAYOUT_TARGET(ref_) \
+    do { \
+        const PdockerGpuVulkanGraphicsV632RenderPassAttachmentRefEntry *target_ref_ = (ref_); \
+        if (!target_ref_) return -EPROTO; \
+        int target_rc_ = vulkan_graphics_v634_add_layout_target( \
+            view, attachments, &context, target_ref_->attachment_index, \
+            (VkImageAspectFlags)target_ref_->aspect_mask, \
+            (VkImageLayout)target_ref_->layout, targets, &target_count, \
+            (uint32_t)(sizeof(targets) / sizeof(targets[0]))); \
+        if (target_rc_ != 0) return target_rc_; \
+    } while (0)
+    for (uint32_t i = 0; i < subpass->input_attachment_count; ++i) {
+        const uint32_t table_index = subpass->input_attachment_first + i;
+        if (table_index >= view->header_v632->v632.render_pass_attachment_ref_count) return -EPROTO;
+        const PdockerGpuVulkanGraphicsV632RenderPassAttachmentRefEntry *ref =
+            &view->render_pass_attachment_refs[table_index];
+        if (ref->role != PDOCKER_GPU_GRAPHICS_V632_ATTACHMENT_REF_INPUT ||
+            ref->render_pass_id != context.render_pass->render_pass_id ||
+            ref->subpass_index != entry->subpass_index) return -EPROTO;
+        ADD_V634_LAYOUT_TARGET(ref);
+    }
+    for (uint32_t i = 0; i < subpass->color_attachment_count; ++i) {
+        const uint32_t table_index = subpass->color_attachment_first + i;
+        if (table_index >= view->header_v632->v632.render_pass_attachment_ref_count) return -EPROTO;
+        const PdockerGpuVulkanGraphicsV632RenderPassAttachmentRefEntry *ref =
+            &view->render_pass_attachment_refs[table_index];
+        if (ref->role != PDOCKER_GPU_GRAPHICS_V632_ATTACHMENT_REF_COLOR ||
+            ref->render_pass_id != context.render_pass->render_pass_id ||
+            ref->subpass_index != entry->subpass_index) return -EPROTO;
+        ADD_V634_LAYOUT_TARGET(ref);
+    }
+    for (uint32_t i = 0; i < subpass->resolve_attachment_count; ++i) {
+        const uint32_t table_index = subpass->resolve_attachment_first + i;
+        if (table_index >= view->header_v632->v632.render_pass_attachment_ref_count) return -EPROTO;
+        const PdockerGpuVulkanGraphicsV632RenderPassAttachmentRefEntry *ref =
+            &view->render_pass_attachment_refs[table_index];
+        if (ref->role != PDOCKER_GPU_GRAPHICS_V632_ATTACHMENT_REF_RESOLVE ||
+            ref->render_pass_id != context.render_pass->render_pass_id ||
+            ref->subpass_index != entry->subpass_index) return -EPROTO;
+        ADD_V634_LAYOUT_TARGET(ref);
+    }
+    const PdockerGpuVulkanGraphicsV632RenderPassAttachmentRefEntry *depth_stencil =
+        vulkan_graphics_v632_subpass_depth_stencil_attachment_ref(
+            view, context.render_pass, subpass);
+    if (depth_stencil) ADD_V634_LAYOUT_TARGET(depth_stencil);
+    const PdockerGpuVulkanGraphicsV633DepthStencilResolveEntry *depth_stencil_resolve =
+        vulkan_graphics_v633_depth_stencil_resolve_for(
+            view, context.render_pass->render_pass_id, entry->subpass_index);
+    if (depth_stencil_resolve &&
+        (depth_stencil_resolve->flags &
+         PDOCKER_GPU_GRAPHICS_V633_DEPTH_STENCIL_RESOLVE_ATTACHMENT_PRESENT)) {
+        rc = vulkan_graphics_v634_add_layout_target(
+            view, attachments, &context,
+            depth_stencil_resolve->attachment_index,
+            (VkImageAspectFlags)depth_stencil_resolve->aspect_mask,
+            (VkImageLayout)depth_stencil_resolve->layout,
+            targets, &target_count,
+            (uint32_t)(sizeof(targets) / sizeof(targets[0])));
+        if (rc != 0) return rc;
+    }
+#undef ADD_V634_LAYOUT_TARGET
+    for (uint32_t i = 0; i < target_count; ++i) {
+        rc = vulkan_replay_image_set_layout_for_range(
+            targets[i].image, &targets[i].range, targets[i].layout);
+        if (rc != 0) return rc;
+    }
+    return 0;
+}
+
 static int update_vulkan_graphics_v634_framebuffer_final_layouts(
         const VulkanGraphicsV6FrameView *view,
         VulkanGraphicsReplayAttachments *attachments,
@@ -39681,13 +39927,32 @@ static int record_vulkan_graphics_v6_command_buffer(
                     .clearValueCount = clear_value_count,
                     .pClearValues = clear_value_count ? clear_values : NULL,
                 };
-                vkCmdBeginRenderPass(command_buffer, &rpbi, vulkan_graphics_v634_replay_subpass_contents(classic_command->contents));
+                rc = update_vulkan_graphics_v634_framebuffer_initial_layouts(
+                    view, attachments, classic_command);
+                if (rc != 0) {
+                    free(clear_values);
+                    goto cleanup;
+                }
+                vkCmdBeginRenderPass(command_buffer, &rpbi,
+                                     vulkan_graphics_v634_replay_subpass_contents(
+                                         classic_command->contents));
+                rc = update_vulkan_graphics_v634_subpass_layouts(
+                    view, attachments, classic_command);
+                if (rc != 0) {
+                    free(clear_values);
+                    goto cleanup;
+                }
                 classic_render_pass_active = 1;
                 free(clear_values);
                 continue;
             }
             if (classic_command->op == PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_NEXT_SUBPASS) {
-                vkCmdNextSubpass(command_buffer, vulkan_graphics_v634_replay_subpass_contents(classic_command->contents));
+                vkCmdNextSubpass(command_buffer,
+                                 vulkan_graphics_v634_replay_subpass_contents(
+                                     classic_command->contents));
+                rc = update_vulkan_graphics_v634_subpass_layouts(
+                    view, attachments, classic_command);
+                if (rc != 0) goto cleanup;
                 continue;
             }
             if (classic_command->op == PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_END) {

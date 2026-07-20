@@ -9,6 +9,45 @@ llama.cpp itself remains unmodified.
 
 ## Current Ground Truth
 
+### 2026-07-20 CPU/static command-order graphics layout state lane
+
+Graphics image descriptors are now validated against a frame-local command-order
+layout tracker before transport. The tracker lazily deep-copies only the layout
+state of images referenced by the frame, applies serialized image barriers to
+the copy, and never mutates the live producer image objects or consumes a global
+object generation. Stale descriptor layouts therefore fail before IPC, while a
+descriptor that follows a valid barrier sees the post-barrier subresource state.
+
+Native classic render-pass implicit transitions are represented in the same
+state machine without synthesizing barriers. BEGIN verifies every non-undefined
+attachment initial layout, then applies input, color, resolve, depth/stencil,
+and depth/stencil-resolve layouts for subpass zero. NEXT_SUBPASS applies the new
+subpass layouts, and END applies attachment final layouts. Aspect masks and
+subresource ranges are preserved; overlapping references with conflicting
+layouts fail closed. The Android executor mirrors these cache-only updates
+around native vkCmdBeginRenderPass/vkCmdNextSubpass/vkCmdEndRenderPass, so a
+legal attachment descriptor bind no longer observes stale pre-pass state.
+
+This is generic Vulkan pass-through state tracking. It does not change
+llama.cpp, Dockerfiles, models, prompts, shader bytes, or arithmetic, and it does
+not add an ABI revision because V6.32-V6.34 already transport the required
+render-pass, subpass, framebuffer, and command data.
+
+Evidence gates for this lane:
+
+- PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -q tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_graphics_sender_tracks_descriptor_layouts_in_command_order tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_native_classic_implicit_layouts_update_both_trackers tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_native_classic_descriptor_bind_does_not_inject_layout_barriers
+- bash scripts/build-gpu-shim.sh
+- bash scripts/build-native-android-ndk.sh
+
+Remaining strict-native replay gaps after this lane:
+
+1. Classic render-pass scope still needs fail-closed producer and executor gates
+   for event commands and dependency barriers. Self-dependencies are not yet
+   transported, so in-pass pipeline barriers cannot currently be proven legal.
+2. Device evidence is still required for a non-normalizable native classic pass
+   with an attachment descriptor bound after BEGIN and NEXT_SUBPASS.
+
+
 ### 2026-07-20 CPU/static native classic descriptor-layout barrier lane
 
 Graphics descriptor binding replay no longer injects implicit image layout

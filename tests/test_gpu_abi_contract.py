@@ -6409,6 +6409,156 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("vkCmdBindDescriptorSets(command_buffer", descriptor_case)
 
 
+    def test_vulkan_graphics_sender_tracks_descriptor_layouts_in_command_order(self):
+        icd = VULKAN_ICD.read_text()
+        collector = c_function_body(icd, "collect_graphics_descriptor_entries")
+        sender = c_function_body(icd, "send_recorded_vulkan_graphics_v6_1_frame_range")
+        get_state = c_function_body(icd, "graphics_image_layout_tracker_get_state")
+        apply_barrier = c_function_body(icd, "graphics_image_layout_tracker_apply_barrier")
+        apply_range = c_function_body(icd, "graphics_image_layout_tracker_apply_range")
+        validate_descriptor = c_function_body(
+            icd, "graphics_image_layout_tracker_validate_descriptor"
+        )
+        release = c_function_body(icd, "graphics_image_layout_tracker_release")
+
+        self.assertIn("PdockerVkGraphicsImageLayoutTracker *layout_tracker", icd)
+        self.assertIn(
+            "graphics_image_layout_tracker_validate_descriptor(", collector
+        )
+        self.assertIn("&binding->image_view_snapshot", collector)
+        self.assertNotIn(
+            "descriptor_image_layout_matches_tracked_state(\n                            binding->image_view",
+            collector,
+        )
+        self.assertIn("PdockerVkGraphicsImageLayoutTracker layout_tracker = {0};", sender)
+        self.assertIn("snapshot, &layout_tracker, (uint32_t)command_count", sender)
+        self.assertIn(
+            "graphics_image_layout_tracker_apply_barrier(&layout_tracker, src)", sender
+        )
+        self.assertIn("graphics_image_layout_tracker_release(&layout_tracker);", sender)
+        self.assertLess(
+            sender.index("dst->new_layout = (uint32_t)src->new_layout;"),
+            sender.index("graphics_image_layout_tracker_apply_barrier(&layout_tracker, src)"),
+        )
+
+        for marker in [
+            "entry->state = *source;",
+            "entry->state.layout_ranges = NULL;",
+            "memcpy(entry->state.layout_ranges, source->layout_ranges",
+            "tracker->count++;",
+        ]:
+            self.assertIn(marker, get_state)
+        for marker in [
+            "normalize_image_subresource_range(state, range, &normalized_range)",
+            "image_subresource_range_is_whole_image(state, &normalized_range)",
+            "update_image_layout_range_cache(state, &normalized_range, layout)",
+        ]:
+            self.assertIn(marker, apply_range)
+        self.assertIn("graphics_image_layout_tracker_apply_range(", apply_barrier)
+        self.assertNotIn("execute_recorded_image_barrier_op", apply_barrier)
+        self.assertNotIn("next_vulkan_object_generation", apply_barrier)
+        self.assertNotIn("next_vulkan_object_generation", apply_range)
+        self.assertIn("view_snapshot->image", validate_descriptor)
+        self.assertIn("view.subresource_range = view_snapshot->subresource_range;", validate_descriptor)
+        self.assertIn("descriptor_image_layout_matches_tracked_state(", validate_descriptor)
+        self.assertIn("clear_image_layout_ranges(&tracker->entries[i].state);", release)
+        self.assertIn("free(tracker->entries);", release)
+
+
+    def test_vulkan_native_classic_implicit_layouts_update_both_trackers(self):
+        icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
+        producer_command = c_function_body(
+            icd, "graphics_image_layout_tracker_apply_classic_command"
+        )
+        producer_subpass = c_function_body(
+            icd, "graphics_image_layout_tracker_apply_classic_subpass"
+        )
+        producer_target = c_function_body(
+            icd, "graphics_image_layout_tracker_add_classic_target"
+        )
+        producer_sender = c_function_body(
+            icd, "send_recorded_vulkan_graphics_v6_1_frame_range"
+        )
+        executor_initial = c_function_body(
+            executor, "update_vulkan_graphics_v634_framebuffer_initial_layouts"
+        )
+        executor_subpass = c_function_body(
+            executor, "update_vulkan_graphics_v634_subpass_layouts"
+        )
+        executor_record = c_function_body(
+            executor, "record_vulkan_graphics_v6_command_buffer"
+        )
+
+        for marker in [
+            "tracker->classic_active",
+            "snapshot->subpass_index != 0",
+            "graphics_image_layout_tracker_require_range_layout(",
+            "graphics_image_layout_tracker_apply_classic_subpass(",
+            "snapshot->subpass_index != tracker->active_classic_subpass + 1u",
+            "render_pass->attachments[i].final_layout",
+            "tracker->classic_active = false;",
+        ]:
+            self.assertIn(marker, producer_command)
+        for marker in [
+            "subpass->input_aspect_masks[i]",
+            "subpass->color_aspect_masks[i]",
+            "subpass->resolve_aspect_masks[i]",
+            "subpass->depth_stencil_aspect_mask",
+            "subpass->depth_stencil_resolve_aspect_mask",
+            "graphics_image_layout_tracker_apply_range(",
+        ]:
+            self.assertIn(marker, producer_subpass)
+        self.assertNotIn("record_image_barrier_op", producer_subpass)
+        self.assertIn("(range.aspectMask & aspect_mask) != aspect_mask", producer_target)
+        self.assertIn("target->layout != layout", producer_target)
+        self.assertIn(
+            "record->rendering_snapshot_index == UINT32_MAX", producer_sender
+        )
+        self.assertIn(
+            "graphics_image_layout_tracker_apply_classic_command(", producer_sender
+        )
+
+        self.assertIn("initial_layout == VK_IMAGE_LAYOUT_UNDEFINED", executor_initial)
+        self.assertIn("vulkan_replay_image_layout_for_range", executor_initial)
+        self.assertIn(
+            "classic render pass initial attachment layout mismatch", executor_initial
+        )
+        for marker in [
+            "PDOCKER_GPU_GRAPHICS_V632_ATTACHMENT_REF_INPUT",
+            "PDOCKER_GPU_GRAPHICS_V632_ATTACHMENT_REF_COLOR",
+            "PDOCKER_GPU_GRAPHICS_V632_ATTACHMENT_REF_RESOLVE",
+            "vulkan_graphics_v632_subpass_depth_stencil_attachment_ref",
+            "vulkan_graphics_v633_depth_stencil_resolve_for",
+            "vulkan_replay_image_set_layout_for_range",
+        ]:
+            self.assertIn(marker, executor_subpass)
+        self.assertNotIn("vkCmdPipelineBarrier", executor_subpass)
+
+        begin_case = executor_record.split(
+            "if (classic_command->op == PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_BEGIN)", 1
+        )[1].split(
+            "if (classic_command->op == PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_NEXT_SUBPASS)", 1
+        )[0]
+        self.assertLess(
+            begin_case.index("update_vulkan_graphics_v634_framebuffer_initial_layouts"),
+            begin_case.index("vkCmdBeginRenderPass"),
+        )
+        self.assertLess(
+            begin_case.index("vkCmdBeginRenderPass"),
+            begin_case.index("update_vulkan_graphics_v634_subpass_layouts"),
+        )
+        next_case = executor_record.split(
+            "if (classic_command->op == PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_NEXT_SUBPASS)", 1
+        )[1].split(
+            "if (classic_command->op == PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_END)", 1
+        )[0]
+        self.assertLess(
+            next_case.index("vkCmdNextSubpass"),
+            next_case.index("update_vulkan_graphics_v634_subpass_layouts"),
+        )
+
+
     def test_vulkan_native_classic_scope_audits_state_binding_paths(self):
         icd = VULKAN_ICD.read_text()
         executor = GPU_EXECUTOR.read_text()
@@ -27695,11 +27845,13 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("!render_pass_subpass_contents_flattenable(contents)", next_subpass_body)
         self.assertNotIn("contents != VK_SUBPASS_CONTENTS_INLINE", next_subpass_body)
         self.assertNotIn("classic render pass secondary command buffer replay is not implemented", preflight_body)
-        self.assertIn("vulkan_graphics_v634_replay_subpass_contents(classic_command->contents)", record_body)
+        self.assertGreaterEqual(
+            record_body.count("vulkan_graphics_v634_replay_subpass_contents("), 2
+        )
         self.assertIn("!vulkan_graphics_v634_subpass_contents_supported(classic_command->contents)", record_body)
         self.assertNotIn("classic_command->contents != (uint32_t)VK_SUBPASS_CONTENTS_INLINE", record_body)
-        self.assertIn("vkCmdBeginRenderPass(command_buffer, &rpbi, vulkan_graphics_v634_replay_subpass_contents", record_body)
-        self.assertIn("vkCmdNextSubpass(command_buffer, vulkan_graphics_v634_replay_subpass_contents", record_body)
+        self.assertIn("vkCmdBeginRenderPass(command_buffer, &rpbi,", record_body)
+        self.assertIn("vkCmdNextSubpass(command_buffer,", record_body)
 
         for marker in [
             "vulkan_graphics_v634_framebuffer_index_for_id",

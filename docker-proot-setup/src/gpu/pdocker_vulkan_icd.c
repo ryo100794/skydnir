@@ -1368,6 +1368,27 @@ typedef struct {
 } PdockerVkImageBarrierOp;
 
 typedef struct {
+    const PdockerVkImage *source;
+    PdockerVkImage state;
+} PdockerVkGraphicsImageLayoutTrackerEntry;
+
+typedef struct {
+    const PdockerVkImage *image;
+    VkImageSubresourceRange range;
+    VkImageLayout layout;
+} PdockerVkGraphicsClassicLayoutTarget;
+
+typedef struct {
+    PdockerVkGraphicsImageLayoutTrackerEntry *entries;
+    size_t count;
+    size_t capacity;
+    const PdockerVkRenderPass *active_classic_render_pass;
+    const PdockerVkFramebuffer *active_classic_framebuffer;
+    uint32_t active_classic_subpass;
+    bool classic_active;
+} PdockerVkGraphicsImageLayoutTracker;
+
+typedef struct {
     PdockerVkPipeline *pipeline;
     PdockerVkDescriptorSet **set_handles;
     PdockerVkDescriptorSet *set_snapshots;
@@ -7230,6 +7251,7 @@ static int send_executor_text_command(
     if (out_value) *out_value = 0;
     int socket_fd = connect_queue();
     if (socket_fd < 0) return socket_fd;
+
     int rc = 0;
     int write_rc = write_exact_fd(socket_fd, command, strlen(command));
     if (write_rc != 0) {
@@ -8904,6 +8926,263 @@ static bool normalize_image_subresource_range(
         const PdockerVkImage *image,
         const VkImageSubresourceRange *range,
         VkImageSubresourceRange *out);
+static bool image_subresource_range_is_whole_image(
+        const PdockerVkImage *image,
+        const VkImageSubresourceRange *range);
+static void clear_image_layout_ranges(PdockerVkImage *image);
+static void update_image_layout_range_cache(
+        PdockerVkImage *image,
+        const VkImageSubresourceRange *normalized_range,
+        VkImageLayout layout);
+static bool pdocker_vk_queue_family_barrier_replayable(
+        uint32_t src_queue_family_index,
+        uint32_t dst_queue_family_index);
+static void graphics_image_layout_tracker_release(
+        PdockerVkGraphicsImageLayoutTracker *tracker);
+static int graphics_image_layout_tracker_apply_barrier(
+        PdockerVkGraphicsImageLayoutTracker *tracker,
+        const PdockerVkImageBarrierOp *op);
+static bool pdocker_vk_image_layout_value_valid_for_transport(
+        const PdockerVkImage *image,
+        VkImageLayout layout);
+static bool image_layout_range_cache_readable(const PdockerVkImage *image);
+static bool descriptor_image_ranges_overlap(
+        const VkImageSubresourceRange *a,
+        const VkImageSubresourceRange *b);
+static bool descriptor_image_range_contains(
+        const VkImageSubresourceRange *outer,
+        const VkImageSubresourceRange *inner);
+static int graphics_image_layout_tracker_get_state(
+        PdockerVkGraphicsImageLayoutTracker *tracker,
+        const PdockerVkImage *source,
+        PdockerVkImage **state_out);
+static int graphics_image_layout_tracker_apply_range(
+        PdockerVkGraphicsImageLayoutTracker *tracker,
+        const PdockerVkImage *source,
+        const VkImageSubresourceRange *range,
+        VkImageLayout layout);
+static int graphics_image_layout_tracker_apply_classic_command(
+        PdockerVkGraphicsImageLayoutTracker *tracker,
+        const PdockerVkClassicRenderPassCommandSnapshot *snapshot);
+static int graphics_image_layout_tracker_add_classic_target(
+        const PdockerVkRenderPass *render_pass,
+        const PdockerVkFramebuffer *framebuffer,
+        uint32_t attachment_index,
+        VkImageAspectFlags aspect_mask,
+        VkImageLayout layout,
+        PdockerVkGraphicsClassicLayoutTarget *targets,
+        size_t *target_count,
+        size_t target_capacity) {
+    if (!render_pass || !framebuffer || !targets || !target_count) return -EINVAL;
+    if (attachment_index == VK_ATTACHMENT_UNUSED) return 0;
+    if (attachment_index >= render_pass->attachment_count ||
+        attachment_index >= framebuffer->attachment_count ||
+        attachment_index >= PDOCKER_VK_MAX_STORAGE_BUFFERS) {
+        return -ERANGE;
+    }
+    const PdockerVkImageViewSnapshot *view_snapshot =
+        &framebuffer->attachment_snapshots[attachment_index];
+    if (!view_snapshot->valid || !view_snapshot->image ||
+        !pdocker_vk_image_layout_value_valid_for_transport(view_snapshot->image, layout)) {
+        return -EPROTO;
+    }
+    VkImageSubresourceRange range = view_snapshot->subresource_range;
+    if (aspect_mask != 0) {
+        if ((range.aspectMask & aspect_mask) != aspect_mask) return -EPROTO;
+        range.aspectMask = aspect_mask;
+    }
+    if (!normalize_image_subresource_range(view_snapshot->image, &range, &range)) {
+        return -ERANGE;
+    }
+    for (size_t i = 0; i < *target_count; ++i) {
+        const PdockerVkGraphicsClassicLayoutTarget *target = &targets[i];
+        if (target->image != view_snapshot->image ||
+            !descriptor_image_ranges_overlap(&target->range, &range)) {
+            continue;
+        }
+        if (target->layout != layout) return -EOPNOTSUPP;
+        if (target->range.aspectMask == range.aspectMask &&
+            target->range.baseMipLevel == range.baseMipLevel &&
+            target->range.levelCount == range.levelCount &&
+            target->range.baseArrayLayer == range.baseArrayLayer &&
+            target->range.layerCount == range.layerCount) {
+            return 0;
+        }
+    }
+    if (*target_count >= target_capacity) return -E2BIG;
+    PdockerVkGraphicsClassicLayoutTarget *target = &targets[(*target_count)++];
+    target->image = view_snapshot->image;
+    target->range = range;
+    target->layout = layout;
+    return 0;
+}
+
+static int graphics_image_layout_tracker_require_range_layout(
+        PdockerVkGraphicsImageLayoutTracker *tracker,
+        const PdockerVkImage *source,
+        const VkImageSubresourceRange *range,
+        VkImageLayout expected_layout) {
+    if (!tracker || !source || !range) return -EINVAL;
+    PdockerVkImage *state = NULL;
+    int rc = graphics_image_layout_tracker_get_state(tracker, source, &state);
+    if (rc != 0) return rc;
+    VkImageSubresourceRange normalized_range;
+    if (!normalize_image_subresource_range(state, range, &normalized_range)) return -ERANGE;
+    if (!state->layout_mixed) {
+        return state->current_layout == expected_layout ? 0 : -EOPNOTSUPP;
+    }
+    if (state->layout_range_overflow || !image_layout_range_cache_readable(state)) {
+        return -EOPNOTSUPP;
+    }
+    bool covered_by_matching_explicit_range = false;
+    for (uint32_t i = 0; i < state->layout_range_count; ++i) {
+        const PdockerVkImageLayoutRange *entry = &state->layout_ranges[i];
+        if (!descriptor_image_ranges_overlap(&entry->range, &normalized_range)) continue;
+        if (entry->layout != expected_layout) return -EOPNOTSUPP;
+        if (descriptor_image_range_contains(&entry->range, &normalized_range)) {
+            covered_by_matching_explicit_range = true;
+        }
+    }
+    if (state->current_layout == expected_layout) return 0;
+    return covered_by_matching_explicit_range ? 0 : -EOPNOTSUPP;
+}
+
+static int graphics_image_layout_tracker_apply_classic_subpass(
+        PdockerVkGraphicsImageLayoutTracker *tracker,
+        const PdockerVkRenderPass *render_pass,
+        const PdockerVkFramebuffer *framebuffer,
+        uint32_t subpass_index) {
+    if (!tracker || !render_pass || !framebuffer ||
+        subpass_index >= render_pass->subpass_count ||
+        subpass_index >= PDOCKER_VK_MAX_STORAGE_BUFFERS) {
+        return -ERANGE;
+    }
+    const PdockerVkSubpassState *subpass = &render_pass->subpasses[subpass_index];
+    if (subpass->input_attachment_count > PDOCKER_VK_MAX_STORAGE_BUFFERS ||
+        subpass->color_attachment_count > PDOCKER_VK_MAX_STORAGE_BUFFERS) {
+        return -E2BIG;
+    }
+    PdockerVkGraphicsClassicLayoutTarget
+        targets[PDOCKER_VK_MAX_STORAGE_BUFFERS * 4u + 2u];
+    memset(targets, 0, sizeof(targets));
+    size_t target_count = 0;
+#define ADD_CLASSIC_TARGET(index_, aspect_, layout_) \
+    do { \
+        int target_rc_ = graphics_image_layout_tracker_add_classic_target( \
+            render_pass, framebuffer, (index_), (aspect_), (layout_), \
+            targets, &target_count, sizeof(targets) / sizeof(targets[0])); \
+        if (target_rc_ != 0) return target_rc_; \
+    } while (0)
+    for (uint32_t i = 0; i < subpass->input_attachment_count; ++i) {
+        ADD_CLASSIC_TARGET(subpass->input_attachments[i],
+                           subpass->input_aspect_masks[i],
+                           subpass->input_layouts[i]);
+    }
+    for (uint32_t i = 0; i < subpass->color_attachment_count; ++i) {
+        ADD_CLASSIC_TARGET(subpass->color_attachments[i],
+                           subpass->color_aspect_masks[i],
+                           subpass->color_layouts[i]);
+        ADD_CLASSIC_TARGET(subpass->resolve_attachments[i],
+                           subpass->resolve_aspect_masks[i],
+                           subpass->resolve_layouts[i]);
+    }
+    if (subpass->has_depth_stencil_attachment) {
+        ADD_CLASSIC_TARGET(subpass->depth_stencil_attachment,
+                           subpass->depth_stencil_aspect_mask,
+                           subpass->depth_stencil_layout);
+    }
+    if (subpass->has_depth_stencil_resolve_attachment) {
+        ADD_CLASSIC_TARGET(subpass->depth_stencil_resolve_attachment,
+                           subpass->depth_stencil_resolve_aspect_mask,
+                           subpass->depth_stencil_resolve_layout);
+    }
+#undef ADD_CLASSIC_TARGET
+    for (size_t i = 0; i < target_count; ++i) {
+        int rc = graphics_image_layout_tracker_apply_range(
+            tracker, targets[i].image, &targets[i].range, targets[i].layout);
+        if (rc != 0) return rc;
+    }
+    return 0;
+}
+
+static int graphics_image_layout_tracker_apply_classic_command(
+        PdockerVkGraphicsImageLayoutTracker *tracker,
+        const PdockerVkClassicRenderPassCommandSnapshot *snapshot) {
+    if (!tracker || !snapshot || !snapshot->render_pass || !snapshot->framebuffer) {
+        return -EINVAL;
+    }
+    const PdockerVkRenderPass *render_pass = snapshot->render_pass;
+    const PdockerVkFramebuffer *framebuffer = snapshot->framebuffer;
+    if (render_pass->destroyed || framebuffer->destroyed ||
+        framebuffer->render_pass != render_pass ||
+        render_pass->attachment_count > PDOCKER_VK_MAX_STORAGE_BUFFERS ||
+        framebuffer->attachment_count < render_pass->attachment_count) {
+        return -EPROTO;
+    }
+    if (snapshot->op == PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_BEGIN) {
+        if (tracker->classic_active || snapshot->subpass_index != 0) return -EPROTO;
+        for (uint32_t i = 0; i < render_pass->attachment_count; ++i) {
+            const PdockerVkImageViewSnapshot *view_snapshot =
+                &framebuffer->attachment_snapshots[i];
+            if (!view_snapshot->valid || !view_snapshot->image) return -EPROTO;
+            VkImageLayout initial_layout = render_pass->attachments[i].initial_layout;
+            if (initial_layout != VK_IMAGE_LAYOUT_UNDEFINED) {
+                int rc = graphics_image_layout_tracker_require_range_layout(
+                    tracker, view_snapshot->image,
+                    &view_snapshot->subresource_range, initial_layout);
+                if (rc != 0) return rc;
+            }
+        }
+        int rc = graphics_image_layout_tracker_apply_classic_subpass(
+            tracker, render_pass, framebuffer, 0);
+        if (rc != 0) return rc;
+        tracker->active_classic_render_pass = render_pass;
+        tracker->active_classic_framebuffer = framebuffer;
+        tracker->active_classic_subpass = 0;
+        tracker->classic_active = true;
+        return 0;
+    }
+    if (!tracker->classic_active ||
+        tracker->active_classic_render_pass != render_pass ||
+        tracker->active_classic_framebuffer != framebuffer) {
+        return -EPROTO;
+    }
+    if (snapshot->op == PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_NEXT_SUBPASS) {
+        if (snapshot->subpass_index != tracker->active_classic_subpass + 1u) {
+            return -EPROTO;
+        }
+        int rc = graphics_image_layout_tracker_apply_classic_subpass(
+            tracker, render_pass, framebuffer, snapshot->subpass_index);
+        if (rc != 0) return rc;
+        tracker->active_classic_subpass = snapshot->subpass_index;
+        return 0;
+    }
+    if (snapshot->op != PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_END ||
+        snapshot->subpass_index != tracker->active_classic_subpass) {
+        return -EPROTO;
+    }
+    for (uint32_t i = 0; i < render_pass->attachment_count; ++i) {
+        const PdockerVkImageViewSnapshot *view_snapshot =
+            &framebuffer->attachment_snapshots[i];
+        if (!view_snapshot->valid || !view_snapshot->image) return -EPROTO;
+        int rc = graphics_image_layout_tracker_apply_range(
+            tracker, view_snapshot->image,
+            &view_snapshot->subresource_range,
+            render_pass->attachments[i].final_layout);
+        if (rc != 0) return rc;
+    }
+    tracker->active_classic_render_pass = NULL;
+    tracker->active_classic_framebuffer = NULL;
+    tracker->active_classic_subpass = 0;
+    tracker->classic_active = false;
+    return 0;
+}
+
+static int graphics_image_layout_tracker_validate_descriptor(
+        PdockerVkGraphicsImageLayoutTracker *tracker,
+        const PdockerVkImageViewSnapshot *view_snapshot,
+        VkDescriptorType descriptor_type,
+        VkImageLayout descriptor_layout);
 
 static int find_graphics_v624_descriptor_set_layout_entry(
         const PdockerGpuVulkanGraphicsV624DescriptorSetLayoutEntry *entries,
@@ -10391,6 +10670,7 @@ static int collect_graphics_descriptor_entries(
         int *fds,
         size_t *fd_count,
         const PdockerVkGraphicsDescriptorBindSnapshot *snapshot,
+        PdockerVkGraphicsImageLayoutTracker *layout_tracker,
         uint32_t command_index,
         uint64_t generation,
         uint32_t *dynamic_descriptor_count_out) {
@@ -10528,6 +10808,14 @@ static int collect_graphics_descriptor_entries(
                     if ((requires_view && !binding->image_view_snapshot.valid) ||
                         (requires_sampler && !binding->sampler_snapshot.valid)) {
                         return -EINVAL;
+                    }
+                    if (requires_view) {
+                        int layout_rc = graphics_image_layout_tracker_validate_descriptor(
+                            layout_tracker,
+                            &binding->image_view_snapshot,
+                            descriptor_type,
+                            binding->image_layout);
+                        if (layout_rc != 0) return layout_rc;
                     }
                     uint32_t view_index = PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE;
                     uint32_t sampler_index = PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE;
@@ -11496,6 +11784,8 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     }
     int socket_fd = connect_queue();
     if (socket_fd < 0) return socket_fd;
+
+    PdockerVkGraphicsImageLayoutTracker layout_tracker = {0};
 
     PdockerVkGraphicsFrameObjectTables *object_tables = NULL;
     PdockerVkGraphicsTransportTables *transport_tables = NULL;
@@ -13246,7 +13536,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
                 image_view_entries, image_view_objects, &image_view_count,
                 sampler_entries, sampler_objects, &sampler_count,
                 buffer_views, &buffer_view_count, &need_v627_buffer_views,
-                fds, &fd_count, snapshot, (uint32_t)command_count,
+                fds, &fd_count, snapshot, &layout_tracker, (uint32_t)command_count,
                 submit_id, &dynamic_descriptor_count);
             if (rc != 0) goto cleanup;
             if (snapshot->dynamic_offset_count != record->dynamic_offset_count) {
@@ -13494,6 +13784,8 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
                 dst->dst_stage_mask = (uint64_t)src->dst_stage_mask;
                 dst->src_queue_family_index = src->src_queue_family_index;
                 dst->dst_queue_family_index = src->dst_queue_family_index;
+                rc = graphics_image_layout_tracker_apply_barrier(&layout_tracker, src);
+                if (rc != 0) goto cleanup;
             }
             if (record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT ||
                 record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT) {
@@ -13846,6 +14138,19 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
             need_v632_render_passes = true;
             need_v633_render_pass_sideband = true;
             need_v634_classic_render_pass_sideband = true;
+        }
+        if (record->classic_render_pass_op != 0 &&
+            record->rendering_snapshot_index == UINT32_MAX) {
+            if (record->classic_render_pass_snapshot_index >=
+                cmd->classic_render_pass_command_op_count) {
+                rc = -EPROTO;
+                goto cleanup;
+            }
+            rc = graphics_image_layout_tracker_apply_classic_command(
+                &layout_tracker,
+                &cmd->classic_render_pass_command_ops[
+                    record->classic_render_pass_snapshot_index]);
+            if (rc != 0) goto cleanup;
         }
         command_count++;
     }
@@ -15061,6 +15366,7 @@ cleanup:
     free(transport_tables);
     free(object_tables);
     free(frame);
+    graphics_image_layout_tracker_release(&layout_tracker);
 #undef APPEND_GRAPHICS_FRAME_BYTES
 #undef REFRESH_GRAPHICS_V6_FRAME_POINTERS
 #undef ENSURE_GRAPHICS_V631_DESCRIPTOR_LAYOUT_FLAGS
@@ -15246,6 +15552,139 @@ static bool descriptor_image_layout_matches_tracked_state(
     }
     if (descriptor_layout == image->current_layout) return true;
     return covered_by_matching_explicit_range;
+}
+
+static void graphics_image_layout_tracker_release(
+        PdockerVkGraphicsImageLayoutTracker *tracker) {
+    if (!tracker) return;
+    for (size_t i = 0; i < tracker->count; ++i) {
+        clear_image_layout_ranges(&tracker->entries[i].state);
+    }
+    free(tracker->entries);
+    memset(tracker, 0, sizeof(*tracker));
+}
+
+static int graphics_image_layout_tracker_get_state(
+        PdockerVkGraphicsImageLayoutTracker *tracker,
+        const PdockerVkImage *source,
+        PdockerVkImage **state_out) {
+    if (!tracker || !source || !state_out) return -EINVAL;
+    *state_out = NULL;
+    for (size_t i = 0; i < tracker->count; ++i) {
+        if (tracker->entries[i].source == source) {
+            *state_out = &tracker->entries[i].state;
+            return 0;
+        }
+    }
+    if (!image_layout_range_cache_readable(source) ||
+        source->layout_range_count > PDOCKER_VK_MAX_IMAGE_LAYOUT_RANGES ||
+        tracker->count >= PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGES) {
+        return -EPROTO;
+    }
+    if (tracker->count == tracker->capacity) {
+        size_t next_capacity = tracker->capacity ? tracker->capacity * 2u : 8u;
+        if (next_capacity > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGES) {
+            next_capacity = PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGES;
+        }
+        if (next_capacity <= tracker->capacity ||
+            next_capacity > SIZE_MAX / sizeof(tracker->entries[0])) {
+            return -E2BIG;
+        }
+        PdockerVkGraphicsImageLayoutTrackerEntry *entries =
+            (PdockerVkGraphicsImageLayoutTrackerEntry *)realloc(
+                tracker->entries, next_capacity * sizeof(tracker->entries[0]));
+        if (!entries) return -ENOMEM;
+        memset(entries + tracker->capacity, 0,
+               (next_capacity - tracker->capacity) * sizeof(entries[0]));
+        tracker->entries = entries;
+        tracker->capacity = next_capacity;
+    }
+    PdockerVkGraphicsImageLayoutTrackerEntry *entry =
+        &tracker->entries[tracker->count];
+    memset(entry, 0, sizeof(*entry));
+    entry->source = source;
+    entry->state = *source;
+    entry->state.next = NULL;
+    entry->state.layout_ranges = NULL;
+    entry->state.layout_range_count = 0;
+    entry->state.layout_range_capacity = 0;
+    if (source->layout_range_count > 0) {
+        entry->state.layout_ranges = (PdockerVkImageLayoutRange *)malloc(
+            (size_t)source->layout_range_count * sizeof(entry->state.layout_ranges[0]));
+        if (!entry->state.layout_ranges) {
+            memset(entry, 0, sizeof(*entry));
+            return -ENOMEM;
+        }
+        memcpy(entry->state.layout_ranges, source->layout_ranges,
+               (size_t)source->layout_range_count * sizeof(entry->state.layout_ranges[0]));
+        entry->state.layout_range_count = source->layout_range_count;
+        entry->state.layout_range_capacity = source->layout_range_count;
+    }
+    tracker->count++;
+    *state_out = &entry->state;
+    return 0;
+}
+
+static int graphics_image_layout_tracker_apply_range(
+        PdockerVkGraphicsImageLayoutTracker *tracker,
+        const PdockerVkImage *source,
+        const VkImageSubresourceRange *range,
+        VkImageLayout layout) {
+    if (!tracker || !source || !range) return -EINVAL;
+    PdockerVkImage *state = NULL;
+    int rc = graphics_image_layout_tracker_get_state(tracker, source, &state);
+    if (rc != 0) return rc;
+    VkImageSubresourceRange normalized_range;
+    if (!normalize_image_subresource_range(state, range, &normalized_range)) {
+        return -ERANGE;
+    }
+    state->layout_generation = state->layout_generation == UINT64_MAX
+        ? 1u
+        : state->layout_generation + 1u;
+    if (image_subresource_range_is_whole_image(state, &normalized_range)) {
+        state->current_layout = layout;
+        state->layout_mixed = false;
+        clear_image_layout_ranges(state);
+        return 0;
+    }
+    state->layout_mixed = true;
+    update_image_layout_range_cache(state, &normalized_range, layout);
+    return state->layout_range_overflow ? -EOPNOTSUPP : 0;
+}
+
+static int graphics_image_layout_tracker_apply_barrier(
+        PdockerVkGraphicsImageLayoutTracker *tracker,
+        const PdockerVkImageBarrierOp *op) {
+    if (!tracker || !op || !op->image) return -EINVAL;
+    if (!pdocker_vk_queue_family_barrier_replayable(
+            op->src_queue_family_index, op->dst_queue_family_index)) {
+        return -EOPNOTSUPP;
+    }
+    return graphics_image_layout_tracker_apply_range(
+        tracker, op->image, &op->range, op->new_layout);
+}
+
+static int graphics_image_layout_tracker_validate_descriptor(
+        PdockerVkGraphicsImageLayoutTracker *tracker,
+        const PdockerVkImageViewSnapshot *view_snapshot,
+        VkDescriptorType descriptor_type,
+        VkImageLayout descriptor_layout) {
+    if (!tracker || !view_snapshot || !view_snapshot->valid || !view_snapshot->image) {
+        return -EINVAL;
+    }
+    PdockerVkImage *state = NULL;
+    int rc = graphics_image_layout_tracker_get_state(
+        tracker, view_snapshot->image, &state);
+    if (rc != 0) return rc;
+    PdockerVkImageView view;
+    memset(&view, 0, sizeof(view));
+    view.image = state;
+    view.view_type = view_snapshot->view_type;
+    view.format = view_snapshot->format;
+    view.components = view_snapshot->components;
+    view.subresource_range = view_snapshot->subresource_range;
+    return descriptor_image_layout_matches_tracked_state(
+        &view, descriptor_type, descriptor_layout) ? 0 : -EOPNOTSUPP;
 }
 
 static bool descriptor_image_aspect_transport_supported(
