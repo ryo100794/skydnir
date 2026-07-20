@@ -184,6 +184,22 @@ class ScriptInventoryAuditTest(unittest.TestCase):
             categories,
         )
 
+    def test_maintenance_readme_lists_all_implementation_scripts(self):
+        maintenance_dir = ROOT / "scripts" / "maintenance"
+        readme = (maintenance_dir / "README.md").read_text(encoding="utf-8")
+        implementation_names = sorted(
+            path.name
+            for path in maintenance_dir.glob("*.py")
+        )
+        self.assertGreater(
+            len(implementation_names),
+            1,
+            "maintenance README guard should cover real implementation scripts",
+        )
+        for name in implementation_names:
+            with self.subTest(name=name):
+                self.assertIn(f"`{name}`", readme)
+
     def test_script_doc_inventory_rejects_stale_category_count(self):
         categories = Counter(entry["category"] for entry in self.inventory["entries"])
         with tempfile.TemporaryDirectory() as tmpdir:

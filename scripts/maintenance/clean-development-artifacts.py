@@ -94,6 +94,23 @@ def tracked_paths(root: Path) -> set[str]:
     return set(run_git(root, ["ls-files"]))
 
 
+def tracked_parent_dirs(paths: Iterable[str]) -> set[str]:
+    """Return every directory that contains at least one tracked file.
+
+    Directory cleanup candidates must be rejected when any tracked descendant is
+    present. Git tracks files, not directories, so checking only `rel in
+    tracked` is insufficient for generated-looking evidence directories such as
+    `docs/test/device-logs/`.
+    """
+
+    result: set[str] = set()
+    for rel in paths:
+        parts = rel.split("/")
+        for index in range(1, len(parts)):
+            result.add("/".join(parts[:index]))
+    return result
+
+
 def repository_root(start: Path) -> Path:
     try:
         completed = subprocess.run(
@@ -113,11 +130,19 @@ def is_under(path: str, prefixes: Iterable[str]) -> bool:
     return any(path == prefix.rstrip("/") or path.startswith(prefix) for prefix in prefixes)
 
 
-def classify(path: Path, root: Path, tracked: set[str], include_evidence: bool) -> Candidate | None:
+def classify(
+    path: Path,
+    root: Path,
+    tracked: set[str],
+    tracked_dirs: set[str],
+    include_evidence: bool,
+) -> Candidate | None:
     rel = path.relative_to(root).as_posix()
     if rel == ".git" or rel.startswith(".git/"):
         return None
     if rel in tracked:
+        return None
+    if path.is_dir() and rel in tracked_dirs:
         return None
     if rel in PROTECTED_IGNORED_EXACT or is_under(rel, PROTECTED_IGNORED_PREFIXES):
         return None
@@ -137,9 +162,10 @@ def classify(path: Path, root: Path, tracked: set[str], include_evidence: bool) 
 
 def collect_candidates(root: Path, include_evidence: bool) -> list[Candidate]:
     tracked = tracked_paths(root)
+    tracked_dirs = tracked_parent_dirs(tracked)
     candidates: dict[str, Candidate] = {}
     for path in root.rglob("*"):
-        candidate = classify(path, root, tracked, include_evidence)
+        candidate = classify(path, root, tracked, tracked_dirs, include_evidence)
         if candidate is not None:
             candidates[candidate.path] = candidate
     # If a parent directory is already a candidate, suppress children from the
