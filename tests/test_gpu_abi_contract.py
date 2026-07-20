@@ -10941,8 +10941,11 @@ class GpuAbiContractTest(unittest.TestCase):
 
         collector_body = c_function_body(icd, "collect_advertised_device_extensions")
         self.assertIn("pdocker_supports_dynamic_rendering_local_read_transport", icd)
+        self.assertIn("return true;", c_function_body(icd, "pdocker_supports_dynamic_rendering_local_read_transport"))
         self.assertIn("if (pdocker_supports_dynamic_rendering_local_read_transport())", collector_body)
         self.assertIn("ADD_DEVICE_EXTENSION(VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME", collector_body)
+        self.assertIn("PDOCKER_VK_DEVICE_EXT_KHR_DYNAMIC_RENDERING_LOCAL_READ", icd)
+        self.assertIn("PDOCKER_VK_FEATURE_DYNAMIC_RENDERING_LOCAL_READ", icd)
 
         features_body = c_function_body(icd, "fill_pnext_features")
         self.assertIn("VkPhysicalDeviceDynamicRenderingLocalReadFeatures", features_body)
@@ -10960,6 +10963,11 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VK_STRUCTURE_TYPE_RENDERING_INPUT_ATTACHMENT_INDEX_INFO", rendering_info_body)
         self.assertIn("indices->pDepthInputAttachmentIndex", rendering_info_body)
         self.assertIn("indices->pStencilInputAttachmentIndex", rendering_info_body)
+        self.assertIn("vkCmdSetRenderingAttachmentLocations", icd)
+        self.assertIn("vkCmdSetRenderingInputAttachmentIndices", icd)
+        self.assertIn("dynamic_rendering_local_read_command_enabled", icd)
+        self.assertIn("dynamic-rendering-local-read-feature-disabled", icd)
+        self.assertIn("VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME) == 0", icd)
 
     def test_vulkan_host_image_copy_ext_is_not_advertised_without_transport(self):
         icd = VULKAN_ICD.read_text()

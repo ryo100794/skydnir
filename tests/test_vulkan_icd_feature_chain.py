@@ -5420,80 +5420,206 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-    def test_dynamic_rendering_local_read_feature_is_false_only_and_not_advertised_without_transport(self):
+    def test_dynamic_rendering_local_read_extension_is_advertised_with_false_feature(self):
         source = textwrap.dedent(
-            f"""
+            r"""
             #include <stdint.h>
             #include <stdio.h>
+            #include <stdlib.h>
             #include <string.h>
-            #include "{ICD_SOURCE}"
+            #include <sys/socket.h>
+            #include <sys/un.h>
+            #include <sys/wait.h>
+            #include <unistd.h>
+            #include "__ICD_SOURCE__"
 
-            int main(void) {{
+            static int write_full(int fd, const char *buf, size_t len) {
+                size_t off = 0;
+                while (off < len) {
+                    ssize_t written = write(fd, buf + off, len - off);
+                    if (written <= 0) return -1;
+                    off += (size_t)written;
+                }
+                return 0;
+            }
+
+            static pid_t start_caps_server(const char *path, const char *response) {
+                int listen_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+                if (listen_fd < 0) return -1;
+                unlink(path);
+                struct sockaddr_un addr;
+                memset(&addr, 0, sizeof(addr));
+                addr.sun_family = AF_UNIX;
+                snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", path);
+                if (bind(listen_fd, (const struct sockaddr *)&addr, sizeof(addr)) != 0 ||
+                    listen(listen_fd, 1) != 0) {
+                    close(listen_fd);
+                    return -1;
+                }
+                pid_t pid = fork();
+                if (pid < 0) {
+                    close(listen_fd);
+                    return -1;
+                }
+                if (pid == 0) {
+                    int client_fd = accept(listen_fd, NULL, NULL);
+                    if (client_fd < 0) _exit(11);
+                    char command[128];
+                    (void)read(client_fd, command, sizeof(command));
+                    int rc = write_full(client_fd, response, strlen(response));
+                    close(client_fd);
+                    close(listen_fd);
+                    _exit(rc == 0 ? 0 : 12);
+                }
+                close(listen_fd);
+                return pid;
+            }
+
+            static int build_caps_json(char *json, size_t size) {
+                size_t off = 0;
+                off += (size_t)snprintf(json + off, size - off,
+                    "{\"schema\":\"skydnir-vulkan-advertisement-caps-v1\","
+                    "\"apiVersion\":%u,\"format_caps_schema\":1,\"format_caps_count\":%zu,"
+                    "\"vulkan_dispatch_v5_resource_field_count\":%u,"
+                    "\"vulkan_dispatch_v5_resource_schema_hash\":\"0x%016llx\","
+                    "\"vulkan_dispatch_v5_supported_minors\":[0,1,2,3,4,5,6,7],"
+                    "\"vulkan_graphics_v6_supported_minors\":[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30],"
+                    "\"image_format_caps\":{",
+                    (unsigned)VK_API_VERSION_1_2,
+                    pdocker_vk_bridge_format_count(),
+                    (unsigned)PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_FIELD_COUNT,
+                    (unsigned long long)PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_SCHEMA_HASH);
+                for (size_t i = 0; i < pdocker_vk_bridge_format_count(); ++i) {
+                    VkFormat format = pdocker_vk_bridge_format_at(i);
+                    off += (size_t)snprintf(json + off, size - off,
+                        "%s\"fmt%dOptimalFeatures\":%u,\"fmt%dSampleCounts\":1",
+                        i ? "," : "",
+                        (int)format,
+                        (unsigned)pdocker_vk_transport_image_features(format),
+                        (int)format);
+                }
+                off += (size_t)snprintf(json + off, size - off,
+                    "},\"dynamicRendering\":1,\"VK_KHR_dynamic_rendering\":1,"
+                    "\"dynamicRenderingUsable\":1}\n");
+                return off < size ? 0 : -1;
+            }
+
+            int main(void) {
+                char json[65536];
+                if (build_caps_json(json, sizeof(json)) != 0) return 1;
+                char dir_template[] = "/tmp/skydnir-local-read-caps-XXXXXX";
+                char *dir = mkdtemp(dir_template);
+                if (!dir) return 2;
+                char socket_path[256];
+                snprintf(socket_path, sizeof(socket_path), "%s/caps.sock", dir);
+                pid_t server = start_caps_server(socket_path, json);
+                if (server <= 0) return 3;
+                setenv("PDOCKER_GPU_QUEUE_SOCKET", socket_path, 1);
+                setenv("PDOCKER_VULKAN_ADVERTISEMENT_SOURCE", "executor", 1);
+
                 VkPhysicalDeviceDynamicRenderingLocalReadFeatures local_read;
                 memset(&local_read, 0xff, sizeof(local_read));
                 local_read.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES;
                 local_read.pNext = NULL;
                 fill_pnext_features(&local_read);
-                if (local_read.sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES) {{
-                    return 2;
-                }}
-                if (local_read.pNext != NULL) {{
-                    return 3;
-                }}
-                if (local_read.dynamicRenderingLocalRead != VK_FALSE) {{
-                    return 4;
-                }}
+                if (local_read.sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES) return 4;
+                if (local_read.pNext != NULL) return 5;
+                if (local_read.dynamicRenderingLocalRead != VK_FALSE) return 6;
 
+            #ifdef VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME
+                if (!device_extension_advertised_name(VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME)) {
+                    fprintf(stderr, "VK_KHR_dynamic_rendering_local_read was not advertised\n");
+                    return 7;
+                }
+                int status = 0;
+                if (waitpid(server, &status, 0) != server || !WIFEXITED(status) ||
+                    WEXITSTATUS(status) != 0) {
+                    fprintf(stderr, "caps server failed status=0x%x\n", status);
+                    return 8;
+                }
+                uint32_t extension_count = 64;
+                VkExtensionProperties extensions[64];
+                VkBool32 found_local_read = VK_FALSE;
+                memset(extensions, 0, sizeof(extensions));
+                if (vkEnumerateDeviceExtensionProperties(
+                        (VkPhysicalDevice)physical_device_for_instance(NULL), NULL, &extension_count, extensions) != VK_SUCCESS) {
+                    fprintf(stderr, "device extension enumeration failed\n");
+                    return 9;
+                }
+                for (uint32_t i = 0; i < extension_count; ++i) {
+                    if (strcmp(extensions[i].extensionName,
+                               VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME) == 0) {
+                        found_local_read = VK_TRUE;
+                    }
+                }
+                if (!found_local_read) {
+                    fprintf(stderr, "VK_KHR_dynamic_rendering_local_read missing from enumeration\n");
+                    return 10;
+                }
+
+                const char *local_only_extensions[] = {
+                    VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME,
+                };
                 VkDeviceCreateInfo create_info;
                 memset(&create_info, 0, sizeof(create_info));
                 create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
                 create_info.pNext = &local_read;
-
-            #ifdef VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME
-                const char *enabled_extensions[] = {{
-                    VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME,
-                }};
                 create_info.enabledExtensionCount = 1;
+                create_info.ppEnabledExtensionNames = local_only_extensions;
+                if (validate_device_extensions(&create_info) != VK_ERROR_EXTENSION_NOT_PRESENT) {
+                    fprintf(stderr, "local-read extension was accepted without dynamic-rendering dependency\n");
+                    return 11;
+                }
+
+                const char *enabled_extensions[] = {
+                    VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
+                    VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME,
+                };
+                create_info.enabledExtensionCount = 2;
                 create_info.ppEnabledExtensionNames = enabled_extensions;
-                if (device_extension_advertised_name(VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME)) {{
-                    fprintf(stderr, "VK_KHR_dynamic_rendering_local_read was advertised without local-read transport\\n");
-                    return 5;
-                }}
-                uint32_t extension_count = 64;
-                VkExtensionProperties extensions[64];
-                memset(extensions, 0, sizeof(extensions));
-                if (vkEnumerateDeviceExtensionProperties(
-                        (VkPhysicalDevice)physical_device_for_instance(NULL), NULL, &extension_count, extensions) != VK_SUCCESS) {{
-                    fprintf(stderr, "device extension enumeration failed\\n");
-                    return 6;
-                }}
-                for (uint32_t i = 0; i < extension_count; ++i) {{
-                    if (strcmp(extensions[i].extensionName,
-                               VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME) == 0) {{
-                        fprintf(stderr, "VK_KHR_dynamic_rendering_local_read appeared in enumeration without transport\\n");
-                        return 7;
-                    }}
-                }}
-                if (validate_device_extensions(&create_info) != VK_ERROR_EXTENSION_NOT_PRESENT) {{
-                    fprintf(stderr, "VK_KHR_dynamic_rendering_local_read extension enable was accepted without transport\\n");
-                    return 8;
-                }}
-                create_info.enabledExtensionCount = 0;
-                create_info.ppEnabledExtensionNames = NULL;
+                if (validate_device_extensions(&create_info) != VK_SUCCESS) {
+                    fprintf(stderr, "local-read extension enable was rejected\n");
+                    return 12;
+                }
+                if (validate_device_create_pnext_extension_enables(
+                        &create_info,
+                        PDOCKER_VK_DEVICE_EXT_KHR_DYNAMIC_RENDERING |
+                        PDOCKER_VK_DEVICE_EXT_KHR_DYNAMIC_RENDERING_LOCAL_READ) != VK_SUCCESS) {
+                    fprintf(stderr, "local-read false pNext was rejected with extension enabled\n");
+                    return 13;
+                }
             #endif
 
                 local_read.dynamicRenderingLocalRead = VK_TRUE;
-                if (validate_device_feature_requests(&create_info) == VK_SUCCESS) {{
-                    return 11;
-                }}
+                if (validate_device_feature_requests(&create_info) == VK_SUCCESS) {
+                    fprintf(stderr, "dynamicRenderingLocalRead=true was accepted\n");
+                    return 14;
+                }
                 local_read.dynamicRenderingLocalRead = VK_FALSE;
-                if (validate_device_feature_requests(&create_info) != VK_SUCCESS) {{
-                    return 12;
-                }}
+                if (validate_device_feature_requests(&create_info) != VK_SUCCESS) {
+                    fprintf(stderr, "dynamicRenderingLocalRead=false was rejected\n");
+                    return 15;
+                }
+
+                PdockerVkDevice dev;
+                memset(&dev, 0, sizeof(dev));
+                dev.enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_DYNAMIC_RENDERING_LOCAL_READ;
+                dev.requested_feature_mask = 0;
+                if (!device_proc_address_hidden_by_enabled_state(
+                        &dev, "vkCmdSetRenderingAttachmentLocationsKHR")) {
+                    fprintf(stderr, "local-read proc was visible without feature\n");
+                    return 16;
+                }
+                dev.requested_feature_mask = PDOCKER_VK_FEATURE_DYNAMIC_RENDERING_LOCAL_READ;
+                if (device_proc_address_hidden_by_enabled_state(
+                        &dev, "vkCmdSetRenderingAttachmentLocationsKHR")) {
+                    fprintf(stderr, "local-read proc stayed hidden with feature+extension mask\n");
+                    return 17;
+                }
                 return 0;
-            }}
+            }
             """
-        )
+        ).replace("__ICD_SOURCE__", str(ICD_SOURCE))
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stderr)
 

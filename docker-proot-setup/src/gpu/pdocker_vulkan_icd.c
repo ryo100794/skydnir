@@ -517,6 +517,7 @@ static uint64_t g_generic_dispatch_sequence = 0;
 #define PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2     (1ull << 22)
 #define PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2_LOGIC_OP (1ull << 49)
 #define PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2_PATCH_CONTROL_POINTS (1ull << 50)
+#define PDOCKER_VK_FEATURE_DYNAMIC_RENDERING_LOCAL_READ (1ull << 51)
 #define PDOCKER_VK_INSTANCE_EXT_KHR_SURFACE                (1ull << 0)
 #define PDOCKER_VK_INSTANCE_EXT_EXT_HEADLESS_SURFACE       (1ull << 1)
 #define PDOCKER_VK_INSTANCE_EXT_KHR_GET_SURFACE_CAPS_2     (1ull << 2)
@@ -551,6 +552,7 @@ static uint64_t g_generic_dispatch_sequence = 0;
 #define PDOCKER_VK_DEVICE_EXT_KHR_TIMELINE_SEMAPHORE   (1ull << 22)
 #define PDOCKER_VK_DEVICE_EXT_EXT_PIPELINE_CREATION_FEEDBACK (1ull << 23)
 #define PDOCKER_VK_DEVICE_EXT_EXT_SUBPASS_MERGE_FEEDBACK (1ull << 24)
+#define PDOCKER_VK_DEVICE_EXT_KHR_DYNAMIC_RENDERING_LOCAL_READ (1ull << 25)
 #define PDOCKER_VK_FEATURE_MULTIVIEW                    (1ull << 20)
 #define PDOCKER_VK_FEATURE_TESSELLATION_SHADER        (1ull << 21)
 #define PDOCKER_VK_FEATURE_GEOMETRY_SHADER             (1ull << 23)
@@ -23562,6 +23564,12 @@ static uint64_t feature_mask_from_pnext_chain(const void *pNext) {
                 if (p->dynamicRendering) mask |= PDOCKER_VK_FEATURE_DYNAMIC_RENDERING;
                 break;
             }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES: {
+                const VkPhysicalDeviceDynamicRenderingLocalReadFeatures *p =
+                    (const VkPhysicalDeviceDynamicRenderingLocalReadFeatures *)node;
+                if (p->dynamicRenderingLocalRead) mask |= PDOCKER_VK_FEATURE_DYNAMIC_RENDERING_LOCAL_READ;
+                break;
+            }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT: {
                 const VkPhysicalDeviceExtendedDynamicStateFeaturesEXT *p = (const VkPhysicalDeviceExtendedDynamicStateFeaturesEXT *)node;
                 if (p->extendedDynamicState) mask |= PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE;
@@ -27182,7 +27190,12 @@ static bool pdocker_supports_memory_priority_transport(void) {
 }
 
 static bool pdocker_supports_dynamic_rendering_local_read_transport(void) {
-    return false;
+    /*
+     * Advertise/accept the extension for standard negotiation and identity
+     * pNext recognition, but keep dynamicRenderingLocalRead=false until the
+     * bridge can transport true input-attachment local-read remapping.
+     */
+    return true;
 }
 
 static bool pdocker_supports_shader_demote_transport(void) {
@@ -27548,6 +27561,8 @@ static bool device_extension_advertised_name(const char *name) {
 
 static VkResult validate_device_extensions(const VkDeviceCreateInfo *pCreateInfo) {
     if (!pCreateInfo) return VK_SUCCESS;
+    bool enabled_dynamic_rendering = false;
+    bool enabled_dynamic_rendering_local_read = false;
     for (uint32_t i = 0; i < pCreateInfo->enabledExtensionCount; ++i) {
         const char *name = pCreateInfo->ppEnabledExtensionNames
             ? pCreateInfo->ppEnabledExtensionNames[i]
@@ -27558,7 +27573,22 @@ static VkResult validate_device_extensions(const VkDeviceCreateInfo *pCreateInfo
                     name ? name : "<null>");
             return VK_ERROR_EXTENSION_NOT_PRESENT;
         }
+        if (name && strcmp(name, VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME) == 0) {
+            enabled_dynamic_rendering = true;
+        }
+#ifdef VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME
+        if (name && strcmp(name, VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME) == 0) {
+            enabled_dynamic_rendering_local_read = true;
+        }
+#endif
     }
+#ifdef VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME
+    if (enabled_dynamic_rendering_local_read && !enabled_dynamic_rendering) {
+        fprintf(stderr,
+                "pdocker-vulkan-icd: create-device rejected VK_KHR_dynamic_rendering_local_read without VK_KHR_dynamic_rendering\n");
+        return VK_ERROR_EXTENSION_NOT_PRESENT;
+    }
+#endif
     return VK_SUCCESS;
 }
 
@@ -27575,6 +27605,10 @@ static uint64_t enabled_device_extension_mask_from_create_info(
             mask |= PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
         } else if (strcmp(name, VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME) == 0) {
             mask |= PDOCKER_VK_DEVICE_EXT_KHR_DYNAMIC_RENDERING;
+#ifdef VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME
+        } else if (strcmp(name, VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME) == 0) {
+            mask |= PDOCKER_VK_DEVICE_EXT_KHR_DYNAMIC_RENDERING_LOCAL_READ;
+#endif
 #ifdef VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME
         } else if (strcmp(name, VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME) == 0) {
             mask |= PDOCKER_VK_DEVICE_EXT_KHR_DRAW_INDIRECT_COUNT;
@@ -27669,6 +27703,10 @@ static VkResult validate_requested_feature_extension_enables(
         (enabled_extension_mask & PDOCKER_VK_DEVICE_EXT_KHR_DYNAMIC_RENDERING) == 0) {
         return unsupported_device_feature_request_result("dynamicRendering requires VK_KHR_dynamic_rendering on API 1.2");
     }
+    if ((requested_feature_mask & PDOCKER_VK_FEATURE_DYNAMIC_RENDERING_LOCAL_READ) &&
+        (enabled_extension_mask & PDOCKER_VK_DEVICE_EXT_KHR_DYNAMIC_RENDERING_LOCAL_READ) == 0) {
+        return unsupported_device_feature_request_result("dynamicRenderingLocalRead requires VK_KHR_dynamic_rendering_local_read");
+    }
     if ((requested_feature_mask & PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE) &&
         (enabled_extension_mask & PDOCKER_VK_DEVICE_EXT_EXTENDED_DYNAMIC_STATE) == 0) {
         return unsupported_device_feature_request_result("extendedDynamicState requires VK_EXT_extended_dynamic_state");
@@ -27720,6 +27758,12 @@ static VkResult validate_device_create_pnext_extension_enables(
                 }
                 break;
 #endif
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES:
+                if ((enabled_extension_mask & PDOCKER_VK_DEVICE_EXT_KHR_DYNAMIC_RENDERING_LOCAL_READ) == 0) {
+                    return unsupported_device_feature_request_result(
+                        "dynamic rendering local read pNext requires VK_KHR_dynamic_rendering_local_read");
+                }
+                break;
             default:
                 break;
         }
@@ -32824,6 +32868,73 @@ VKAPI_ATTR void VKAPI_CALL vkCmdEndRendering(VkCommandBuffer commandBuffer) {
     memset(cmd->active_color_attachments, 0, sizeof(cmd->active_color_attachments));
     memset(&cmd->active_depth_attachment, 0, sizeof(cmd->active_depth_attachment));
     memset(&cmd->active_stencil_attachment, 0, sizeof(cmd->active_stencil_attachment));
+}
+
+
+static bool rendering_input_attachment_indices_noop(
+        const VkRenderingInputAttachmentIndexInfo *indices) {
+    if (!indices) return true;
+    return indices->colorAttachmentCount == 0 &&
+           indices->pColorAttachmentInputIndices == NULL &&
+           indices->pDepthInputAttachmentIndex == NULL &&
+           indices->pStencilInputAttachmentIndex == NULL;
+}
+
+static bool dynamic_rendering_local_read_command_enabled(
+        const PdockerVkCommandBuffer *cmd) {
+    return cmd &&
+           (cmd->requested_feature_mask & PDOCKER_VK_FEATURE_DYNAMIC_RENDERING_LOCAL_READ) != 0 &&
+           (cmd->enabled_extension_mask & PDOCKER_VK_DEVICE_EXT_KHR_DYNAMIC_RENDERING_LOCAL_READ) != 0;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdSetRenderingAttachmentLocations(
+        VkCommandBuffer commandBuffer,
+        const VkRenderingAttachmentLocationInfo *pLocationInfo) {
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
+    if (!cmd) return;
+    if (!dynamic_rendering_local_read_command_enabled(cmd)) {
+        cmd->graphics_unsupported = true;
+        command_buffer_mark_recording_failed(cmd, "dynamic-rendering-local-read-feature-disabled");
+        return;
+    }
+    VkRenderingInfo active_info;
+    memset(&active_info, 0, sizeof(active_info));
+    active_info.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+    active_info.colorAttachmentCount = cmd->active_color_attachment_count;
+    if (!cmd->dynamic_rendering_active ||
+        !rendering_attachment_locations_noop(&active_info, pLocationInfo)) {
+        cmd->graphics_unsupported = true;
+        command_buffer_mark_recording_failed(cmd, "dynamic-rendering-local-read-attachment-location-unsupported");
+    }
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdSetRenderingInputAttachmentIndices(
+        VkCommandBuffer commandBuffer,
+        const VkRenderingInputAttachmentIndexInfo *pInputAttachmentIndexInfo) {
+    PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
+    if (!cmd) return;
+    if (!dynamic_rendering_local_read_command_enabled(cmd)) {
+        cmd->graphics_unsupported = true;
+        command_buffer_mark_recording_failed(cmd, "dynamic-rendering-local-read-feature-disabled");
+        return;
+    }
+    if (!cmd->dynamic_rendering_active ||
+        !rendering_input_attachment_indices_noop(pInputAttachmentIndexInfo)) {
+        cmd->graphics_unsupported = true;
+        command_buffer_mark_recording_failed(cmd, "dynamic-rendering-local-read-input-index-unsupported");
+    }
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdSetRenderingAttachmentLocationsKHR(
+        VkCommandBuffer commandBuffer,
+        const VkRenderingAttachmentLocationInfo *pLocationInfo) {
+    vkCmdSetRenderingAttachmentLocations(commandBuffer, pLocationInfo);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdSetRenderingInputAttachmentIndicesKHR(
+        VkCommandBuffer commandBuffer,
+        const VkRenderingInputAttachmentIndexInfo *pInputAttachmentIndexInfo) {
+    vkCmdSetRenderingInputAttachmentIndices(commandBuffer, pInputAttachmentIndexInfo);
 }
 
 static bool populate_render_pass_attachment_for_rendering(
@@ -41672,7 +41783,9 @@ static bool proc_address_hidden_by_advertisement(const char *pName) {
          strcmp(pName, "vkCmdSetEvent2") == 0 ||
          strcmp(pName, "vkCmdResetEvent2") == 0 ||
          strcmp(pName, "vkCmdWaitEvents2") == 0 ||
-         strcmp(pName, "vkCmdWriteTimestamp2") == 0)) {
+         strcmp(pName, "vkCmdWriteTimestamp2") == 0 ||
+         strcmp(pName, "vkCmdSetRenderingAttachmentLocations") == 0 ||
+         strcmp(pName, "vkCmdSetRenderingInputAttachmentIndices") == 0)) {
         return true;
     }
     if ((strcmp(pName, "vkCmdBeginRendering") == 0 ||
@@ -41765,6 +41878,15 @@ static bool proc_address_hidden_by_advertisement(const char *pName) {
         !advertised_draw_indirect_count_amd()) {
         return true;
     }
+#ifdef VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME
+    if (!pdocker_supports_dynamic_rendering_local_read_transport() &&
+        (strcmp(pName, "vkCmdSetRenderingAttachmentLocations") == 0 ||
+         strcmp(pName, "vkCmdSetRenderingAttachmentLocationsKHR") == 0 ||
+         strcmp(pName, "vkCmdSetRenderingInputAttachmentIndices") == 0 ||
+         strcmp(pName, "vkCmdSetRenderingInputAttachmentIndicesKHR") == 0)) {
+        return true;
+    }
+#endif
 #ifdef VK_EXT_DEBUG_MARKER_EXTENSION_NAME
     if (!pdocker_supports_debug_marker_transport() &&
         (strcmp(pName, "vkDebugMarkerSetObjectNameEXT") == 0 ||
@@ -42028,6 +42150,10 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_ALIAS("vkCmdBeginRenderingKHR", vkCmdBeginRendering);
     MAP_PROC(vkCmdEndRendering);
     MAP_ALIAS("vkCmdEndRenderingKHR", vkCmdEndRendering);
+    MAP_PROC(vkCmdSetRenderingAttachmentLocations);
+    MAP_ALIAS("vkCmdSetRenderingAttachmentLocationsKHR", vkCmdSetRenderingAttachmentLocations);
+    MAP_PROC(vkCmdSetRenderingInputAttachmentIndices);
+    MAP_ALIAS("vkCmdSetRenderingInputAttachmentIndicesKHR", vkCmdSetRenderingInputAttachmentIndices);
     MAP_PROC(vkCmdBeginRenderPass);
     MAP_PROC(vkCmdNextSubpass);
     MAP_PROC(vkCmdEndRenderPass);
@@ -42350,6 +42476,10 @@ static const PdockerVkDeviceProcEnabledStateGate k_device_proc_enabled_state_gat
     {"vkCmdBeginRenderingKHR", PDOCKER_VK_FEATURE_DYNAMIC_RENDERING, PDOCKER_VK_DEVICE_EXT_KHR_DYNAMIC_RENDERING},
     {"vkCmdEndRendering", PDOCKER_VK_FEATURE_DYNAMIC_RENDERING, PDOCKER_VK_DEVICE_EXT_KHR_DYNAMIC_RENDERING},
     {"vkCmdEndRenderingKHR", PDOCKER_VK_FEATURE_DYNAMIC_RENDERING, PDOCKER_VK_DEVICE_EXT_KHR_DYNAMIC_RENDERING},
+    {"vkCmdSetRenderingAttachmentLocations", PDOCKER_VK_FEATURE_DYNAMIC_RENDERING_LOCAL_READ, PDOCKER_VK_DEVICE_EXT_KHR_DYNAMIC_RENDERING_LOCAL_READ},
+    {"vkCmdSetRenderingAttachmentLocationsKHR", PDOCKER_VK_FEATURE_DYNAMIC_RENDERING_LOCAL_READ, PDOCKER_VK_DEVICE_EXT_KHR_DYNAMIC_RENDERING_LOCAL_READ},
+    {"vkCmdSetRenderingInputAttachmentIndices", PDOCKER_VK_FEATURE_DYNAMIC_RENDERING_LOCAL_READ, PDOCKER_VK_DEVICE_EXT_KHR_DYNAMIC_RENDERING_LOCAL_READ},
+    {"vkCmdSetRenderingInputAttachmentIndicesKHR", PDOCKER_VK_FEATURE_DYNAMIC_RENDERING_LOCAL_READ, PDOCKER_VK_DEVICE_EXT_KHR_DYNAMIC_RENDERING_LOCAL_READ},
     {"vkCmdPipelineBarrier2", PDOCKER_VK_FEATURE_SYNCHRONIZATION_2, PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2},
     {"vkCmdPipelineBarrier2KHR", PDOCKER_VK_FEATURE_SYNCHRONIZATION_2, PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2},
     {"vkQueueSubmit2", PDOCKER_VK_FEATURE_SYNCHRONIZATION_2, PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2},
