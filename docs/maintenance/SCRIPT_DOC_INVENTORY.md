@@ -57,7 +57,7 @@ This note connects the stable script inventory in [`../../scripts/README.md`](..
 Scope: repository-local developer artifacts, redundant scratch files, and
 generated work files. This pass intentionally did not touch active Vulkan bridge
 source changes, staged APK/runtime payloads, tracked evidence, or machine-local
-configuration. The cleanup check was re-run after commit `64db8e16` with the
+configuration. The cleanup check was re-run after commit `bf9c7fa8` with the
 guarded cleanup helper, `git clean -nd`, `git clean -ndX`, size scans, docs
 maintenance verification, native-payload verification, and script-inventory
 verification.
@@ -74,8 +74,9 @@ verification.
 
 ### 2026-07-20 follow-up dry-run result
 
-- `scripts/maintenance/clean-development-artifacts.py --apply --json` reported
-  `count: 0`; there were no guarded disposable candidates to delete.
+- `scripts/maintenance/clean-development-artifacts.py --json` reported
+  `mode: dry-run` and `count: 0`; there were no guarded disposable candidates
+  to delete.
 - `git clean -nd` reported no untracked non-ignored repository files.
 - `git clean -ndX` reported only ignored staged payloads and machine-local
   configuration: `app/src/main/assets/pdockerd/`, `app/src/main/assets/xterm/`,
@@ -88,11 +89,14 @@ verification.
 
 ### Size notes
 
-- Repository size after the current cleanup recheck: approximately `371M`
-  (`366.7 MiB` by byte scan).
-- Git object store after `git gc --prune=now`: approximately `165M`
-  (`162.6 MiB` by byte scan).
-- Tracked test evidence: `docs/test` is approximately `38.3 MiB`.
+- Repository size after the current cleanup recheck: approximately `387M`.
+- Git object store during this pass: approximately `181M`. `git gc` was not
+  run as part of this cleanup because object pruning is a separate repository
+  maintenance action.
+- Tracked test evidence: `docs/test` is approximately `40M`.
+- Other size anchors: `vendor` approximately `86M`, `docker-proot-setup`
+  approximately `52M`, `app` approximately `17M`, `tests` approximately
+  `3.6M`, and `scripts` approximately `2.6M`.
 - Large tracked files remaining by design:
   - `vendor/lib/docker-compose` - approximately `59.3 MiB`.
   - `docker-proot-setup/docker-bin/docker` - approximately `38.1 MiB`.
