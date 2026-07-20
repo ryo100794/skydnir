@@ -3428,6 +3428,14 @@ static bool command_buffers_can_execute_secondary(
     return primary->dynamic_rendering_active;
 }
 
+static bool clear_attachment_valid_for_classic_subpass(
+        const PdockerVkRenderPass *rp,
+        uint32_t subpass_index,
+        const VkClearAttachment *attachment);
+static bool command_buffer_validate_inherited_clear_attachments_for_primary(
+        const PdockerVkCommandBuffer *primary,
+        const PdockerVkCommandBuffer *secondary);
+
 
 static PdockerVkFence *fence_handle_target(VkFence fence) {
     return pdocker_vk_fence_from_handle(fence);
@@ -5454,11 +5462,12 @@ static bool append_secondary_command_buffer(
         PdockerVkCommandBuffer *dst,
         const PdockerVkCommandBuffer *src) {
     if (!command_buffers_can_execute_secondary(dst, src)) return false;
-    if (!command_buffer_has_room_for_secondary(dst, src)) return false;
     if (src->graphics_unsupported || src->unsupported_descriptor_set_layout ||
         src->dynamic_rendering_active || src->render_pass_active) {
         return false;
     }
+    if (!command_buffer_validate_inherited_clear_attachments_for_primary(dst, src)) return false;
+    if (!command_buffer_has_room_for_secondary(dst, src)) return false;
     if (!command_buffer_reserve_copy_ops(dst, src->copy_op_count) ||
         !command_buffer_reserve_image_copy_ops(dst, src->image_copy_op_count) ||
         !command_buffer_reserve_image_to_image_copy_ops(dst, src->image_to_image_copy_op_count) ||
@@ -34636,16 +34645,55 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetStencilOp(
                                         0, 5, values, sizeof(values));
 }
 
-static bool clear_attachment_valid_for_active_classic_subpass(
+static bool clear_attachment_aspect_supported(const VkClearAttachment *attachment) {
+    if (!attachment) return false;
+    VkImageAspectFlags aspect = attachment->aspectMask;
+    const VkImageAspectFlags supported =
+        VK_IMAGE_ASPECT_COLOR_BIT | VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+    const bool has_color = (aspect & VK_IMAGE_ASPECT_COLOR_BIT) != 0;
+    const bool has_depth = (aspect & VK_IMAGE_ASPECT_DEPTH_BIT) != 0;
+    const bool has_stencil = (aspect & VK_IMAGE_ASPECT_STENCIL_BIT) != 0;
+    return aspect != 0 && (aspect & ~supported) == 0 &&
+        !(has_color && (has_depth || has_stencil));
+}
+
+static bool clear_attachment_valid_for_active_dynamic_rendering(
         const PdockerVkCommandBuffer *cmd,
         const VkClearAttachment *attachment) {
-    if (!cmd || !attachment || !cmd->render_pass_active || !cmd->active_render_pass ||
-        cmd->active_render_pass->destroyed ||
-        cmd->active_subpass >= cmd->active_render_pass->subpass_count) {
+    if (!cmd || !attachment || !cmd->dynamic_rendering_active ||
+        !clear_attachment_aspect_supported(attachment)) {
         return false;
     }
-    const PdockerVkRenderPass *rp = cmd->active_render_pass;
-    const PdockerVkSubpassState *subpass = &rp->subpasses[cmd->active_subpass];
+    const VkImageAspectFlags aspect = attachment->aspectMask;
+    const bool has_color = (aspect & VK_IMAGE_ASPECT_COLOR_BIT) != 0;
+    const bool has_depth = (aspect & VK_IMAGE_ASPECT_DEPTH_BIT) != 0;
+    const bool has_stencil = (aspect & VK_IMAGE_ASPECT_STENCIL_BIT) != 0;
+    if (has_color) {
+        uint32_t color = attachment->colorAttachment;
+        return color < cmd->active_color_attachment_count &&
+            cmd->active_color_attachments[color].valid &&
+            cmd->active_color_attachments[color].image_view;
+    }
+    if (has_depth && (!cmd->active_depth_attachment.valid ||
+                      !cmd->active_depth_attachment.image_view)) {
+        return false;
+    }
+    if (has_stencil && (!cmd->active_stencil_attachment.valid ||
+                        !cmd->active_stencil_attachment.image_view)) {
+        return false;
+    }
+    return has_depth || has_stencil;
+}
+
+static bool clear_attachment_valid_for_classic_subpass(
+        const PdockerVkRenderPass *rp,
+        uint32_t subpass_index,
+        const VkClearAttachment *attachment) {
+    if (!rp || !attachment || rp->destroyed || subpass_index >= rp->subpass_count ||
+        !clear_attachment_aspect_supported(attachment)) {
+        return false;
+    }
+    const PdockerVkSubpassState *subpass = &rp->subpasses[subpass_index];
     const VkImageAspectFlags aspect = attachment->aspectMask;
     const bool has_color = (aspect & VK_IMAGE_ASPECT_COLOR_BIT) != 0;
     const bool has_depth = (aspect & VK_IMAGE_ASPECT_DEPTH_BIT) != 0;
@@ -34665,6 +34713,27 @@ static bool clear_attachment_valid_for_active_classic_subpass(
     return has_depth || has_stencil;
 }
 
+static bool clear_attachment_valid_for_active_classic_subpass(
+        const PdockerVkCommandBuffer *cmd,
+        const VkClearAttachment *attachment) {
+    if (!cmd || !cmd->render_pass_active || !cmd->active_render_pass) return false;
+    return clear_attachment_valid_for_classic_subpass(
+        cmd->active_render_pass, cmd->active_subpass, attachment);
+}
+
+static VkClearAttachment clear_attachment_from_snapshot(
+        const PdockerVkClearAttachmentSnapshot *snapshot) {
+    VkClearAttachment attachment;
+    memset(&attachment, 0, sizeof(attachment));
+    if (!snapshot) return attachment;
+    attachment.aspectMask = snapshot->aspect_mask;
+    attachment.colorAttachment = snapshot->color_attachment == UINT32_MAX
+        ? 0u
+        : snapshot->color_attachment;
+    attachment.clearValue = snapshot->clear_value;
+    return attachment;
+}
+
 static bool pdocker_vk_rect_inside_render_area(const VkRect2D *rect, const VkRect2D *area) {
     if (!rect || !area || rect->extent.width == 0 || rect->extent.height == 0) return false;
     int64_t rx0 = rect->offset.x;
@@ -34678,6 +34747,63 @@ static bool pdocker_vk_rect_inside_render_area(const VkRect2D *rect, const VkRec
     return rx0 >= ax0 && ry0 >= ay0 && rx1 <= ax1 && ry1 <= ay1;
 }
 
+
+static bool command_buffer_validate_inherited_clear_attachments_for_primary(
+        const PdockerVkCommandBuffer *primary,
+        const PdockerVkCommandBuffer *secondary) {
+    if (!secondary || secondary->clear_attachments_command_op_count == 0) return true;
+    if (!secondary->inherited_rendering_active) return true;
+    if (!primary || !secondary->active_render_pass ||
+        !(primary->dynamic_rendering_active || primary->render_pass_active) ||
+        primary->active_render_pass != secondary->active_render_pass ||
+        primary->active_subpass != secondary->active_subpass) {
+        return false;
+    }
+    if (secondary->active_framebuffer &&
+        primary->active_framebuffer != secondary->active_framebuffer) {
+        return false;
+    }
+    const uint32_t active_layer_count = primary->render_pass_active && primary->active_framebuffer
+        ? (primary->active_framebuffer->layers ? primary->active_framebuffer->layers : 1u)
+        : primary->active_rendering_layer_count;
+    if (active_layer_count == 0) return false;
+    for (uint32_t i = 0; i < secondary->clear_attachments_command_op_count; ++i) {
+        const PdockerVkClearAttachmentsCommandSnapshot *snapshot =
+            &secondary->clear_attachments_command_ops[i];
+        if (snapshot->clear_attachment_first > secondary->clear_attachment_op_count ||
+            snapshot->clear_attachment_count >
+                secondary->clear_attachment_op_count - snapshot->clear_attachment_first ||
+            snapshot->clear_rect_first > secondary->clear_rect_op_count ||
+            snapshot->clear_rect_count >
+                secondary->clear_rect_op_count - snapshot->clear_rect_first) {
+            return false;
+        }
+        for (uint32_t a = 0; a < snapshot->clear_attachment_count; ++a) {
+            const PdockerVkClearAttachmentSnapshot *stored =
+                &secondary->clear_attachment_ops[snapshot->clear_attachment_first + a];
+            VkClearAttachment attachment = clear_attachment_from_snapshot(stored);
+            if (primary->dynamic_rendering_active) {
+                if (!clear_attachment_valid_for_active_dynamic_rendering(primary, &attachment)) {
+                    return false;
+                }
+            } else if (!clear_attachment_valid_for_active_classic_subpass(primary, &attachment)) {
+                return false;
+            }
+        }
+        for (uint32_t r = 0; r < snapshot->clear_rect_count; ++r) {
+            const PdockerVkClearRectSnapshot *rect =
+                &secondary->clear_rect_ops[snapshot->clear_rect_first + r];
+            if (rect->layer_count == 0 ||
+                !pdocker_vk_rect_inside_render_area(&rect->rect, &primary->active_render_area) ||
+                rect->base_array_layer > active_layer_count ||
+                rect->layer_count > active_layer_count - rect->base_array_layer) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 VKAPI_ATTR void VKAPI_CALL vkCmdClearAttachments(
         VkCommandBuffer commandBuffer,
         uint32_t attachmentCount,
@@ -34686,8 +34812,12 @@ VKAPI_ATTR void VKAPI_CALL vkCmdClearAttachments(
         const VkClearRect *pRects) {
     PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     if (!cmd) return;
-    const bool active_clear_scope = cmd->dynamic_rendering_active || cmd->render_pass_active;
-    if (!active_clear_scope || cmd->inherited_rendering_active ||
+    const bool inherited_classic_clear_scope =
+        cmd->inherited_rendering_active && cmd->active_render_pass;
+    const bool active_clear_scope =
+        cmd->dynamic_rendering_active || cmd->render_pass_active || inherited_classic_clear_scope;
+    if (!active_clear_scope ||
+        (cmd->inherited_rendering_active && !cmd->active_render_pass) ||
         attachmentCount == 0 || rectCount == 0 || !pAttachments || !pRects ||
         cmd->graphics_command_op_count >= PDOCKER_VK_MAX_GRAPHICS_COMMAND_OPS) {
         cmd->graphics_unsupported = true;
@@ -34702,53 +34832,47 @@ VKAPI_ATTR void VKAPI_CALL vkCmdClearAttachments(
     }
 
     for (uint32_t i = 0; i < attachmentCount; ++i) {
-        VkImageAspectFlags aspect = pAttachments[i].aspectMask;
-        const VkImageAspectFlags supported =
-            VK_IMAGE_ASPECT_COLOR_BIT | VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
-        bool has_color = (aspect & VK_IMAGE_ASPECT_COLOR_BIT) != 0;
-        bool has_depth = (aspect & VK_IMAGE_ASPECT_DEPTH_BIT) != 0;
-        bool has_stencil = (aspect & VK_IMAGE_ASPECT_STENCIL_BIT) != 0;
-        if (aspect == 0 || (aspect & ~supported) != 0 ||
-            (has_color && (has_depth || has_stencil))) {
+        if (!clear_attachment_aspect_supported(&pAttachments[i])) {
             cmd->graphics_unsupported = true;
             return;
         }
         if (cmd->dynamic_rendering_active) {
-            if (has_color) {
-                uint32_t color = pAttachments[i].colorAttachment;
-                if (color >= cmd->active_color_attachment_count ||
-                    !cmd->active_color_attachments[color].valid ||
-                    !cmd->active_color_attachments[color].image_view) {
-                    cmd->graphics_unsupported = true;
-                    return;
-                }
-            } else {
-                if (has_depth && (!cmd->active_depth_attachment.valid ||
-                                  !cmd->active_depth_attachment.image_view)) {
-                    cmd->graphics_unsupported = true;
-                    return;
-                }
-                if (has_stencil && (!cmd->active_stencil_attachment.valid ||
-                                    !cmd->active_stencil_attachment.image_view)) {
-                    cmd->graphics_unsupported = true;
-                    return;
-                }
+            if (!clear_attachment_valid_for_active_dynamic_rendering(cmd, &pAttachments[i])) {
+                cmd->graphics_unsupported = true;
+                return;
             }
-        } else if (!clear_attachment_valid_for_active_classic_subpass(cmd, &pAttachments[i])) {
+        } else if (cmd->render_pass_active) {
+            if (!clear_attachment_valid_for_active_classic_subpass(cmd, &pAttachments[i])) {
+                cmd->graphics_unsupported = true;
+                return;
+            }
+        } else if (!clear_attachment_valid_for_classic_subpass(
+                       cmd->active_render_pass, cmd->active_subpass, &pAttachments[i])) {
             cmd->graphics_unsupported = true;
             return;
         }
     }
-    const uint32_t active_layer_count = cmd->render_pass_active && cmd->active_framebuffer
-        ? (cmd->active_framebuffer->layers ? cmd->active_framebuffer->layers : 1u)
-        : cmd->active_rendering_layer_count;
-    for (uint32_t r = 0; r < rectCount; ++r) {
-        if (pRects[r].layerCount == 0 ||
-            !pdocker_vk_rect_inside_render_area(&pRects[r].rect, &cmd->active_render_area) ||
-            pRects[r].baseArrayLayer > active_layer_count ||
-            pRects[r].layerCount > active_layer_count - pRects[r].baseArrayLayer) {
-            cmd->graphics_unsupported = true;
-            return;
+    if (inherited_classic_clear_scope) {
+        for (uint32_t r = 0; r < rectCount; ++r) {
+            if (pRects[r].layerCount == 0 ||
+                pRects[r].rect.extent.width == 0 ||
+                pRects[r].rect.extent.height == 0) {
+                cmd->graphics_unsupported = true;
+                return;
+            }
+        }
+    } else {
+        const uint32_t active_layer_count = cmd->render_pass_active && cmd->active_framebuffer
+            ? (cmd->active_framebuffer->layers ? cmd->active_framebuffer->layers : 1u)
+            : cmd->active_rendering_layer_count;
+        for (uint32_t r = 0; r < rectCount; ++r) {
+            if (pRects[r].layerCount == 0 ||
+                !pdocker_vk_rect_inside_render_area(&pRects[r].rect, &cmd->active_render_area) ||
+                pRects[r].baseArrayLayer > active_layer_count ||
+                pRects[r].layerCount > active_layer_count - pRects[r].baseArrayLayer) {
+                cmd->graphics_unsupported = true;
+                return;
+            }
         }
     }
 

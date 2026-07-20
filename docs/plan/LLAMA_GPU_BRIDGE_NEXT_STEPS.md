@@ -9,37 +9,44 @@ llama.cpp itself remains unmodified.
 
 ## Current Ground Truth
 
-### 2026-07-20 CPU/static native classic clear-attachments lane
+### 2026-07-20 CPU/static native classic inherited clear-attachments lane
 
 `vkCmdClearAttachments` now records through the same V6.16 metadata path inside
-primary native classic render-pass scope.  The producer no longer requires
-dynamic rendering for this command: it accepts an active native classic render
-pass, validates color/depth/stencil clear attachments against the current
-classic subpass, validates clear rectangles against the active render area and
-framebuffer layer count, and then serializes the existing V6.16 clear-attachment
-command rows.  The Android executor already validates and replays those rows
-against active classic render-pass state via `vkCmdClearAttachments`, so this
-removes another dynamic-rendering-only producer gate without adding a new ABI.
+primary native classic render-pass scope and inside inherited secondary command
+buffers that declare a classic `VkCommandBufferInheritanceInfo::renderPass`.
+The producer still rejects inherited dynamic-rendering clear attachments because
+that path does not yet persist enough inheritance metadata to validate active
+attachments safely.
 
-Inherited secondary command buffers still fail closed for clear attachments.
-That is intentional until clear-rect/render-area validation can be tied to the
-primary render pass at `vkCmdExecuteCommands` append time.
+For inherited classic secondary command buffers, attachment compatibility is
+validated against the inherited render pass/subpass at record time.  Clear rects
+keep only basic local validation while recording because the active render area
+and framebuffer layer count belong to the primary render pass instance.  During
+`vkCmdExecuteCommands`, `append_secondary_command_buffer()` now applies the
+primary-scope validation before flattening: matching render pass/subpass,
+optional framebuffer equality, clear attachment compatibility against the
+primary active scope, and clear rect/layer bounds against the primary active
+render area and framebuffer/dynamic layer count.
+
+This removes another dynamic-rendering-only producer gate without adding a new
+ABI.  The Android executor already validates and replays V6.16 clear rows
+against active dynamic or classic render-pass state via `vkCmdClearAttachments`.
+This is generic Vulkan pass-through work; it does not change llama.cpp,
+Dockerfiles, models, prompts, shader bytes, or arithmetic.
 
 Evidence gates for this lane:
 
-- `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -q tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_graphics_v616_clear_attachments_abi_is_append_only tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_clear_attachments_accepts_native_classic_render_pass_scope tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_classic_render_pass_native_replay_is_not_dynamic_rendering_only`
+- `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -q tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_graphics_v616_clear_attachments_abi_is_append_only tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_clear_attachments_accepts_native_classic_render_pass_scope tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_secondary_command_buffers_are_index_rebased_not_unconditionally_rejected tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_classic_render_pass_native_replay_is_not_dynamic_rendering_only`
 - `bash scripts/build-gpu-shim.sh`
 
 Remaining strict-native replay gaps after this lane:
 
-1. Inherited-secondary `vkCmdClearAttachments` remains fail-closed until the
-   primary render area/framebuffer layer validation is explicitly applied during
-   secondary append.
-2. Resolve, query, event, and dynamic-state paths still need targeted audits in
+1. Resolve, query, event, and dynamic-state paths still need targeted audits in
    native classic render-pass scope.
-3. Device evidence is still required to prove that a non-normalizable classic
-   render-pass workload with clear attachments reaches the Android executor as
-   native V6.34/V6.16 replay and survives real driver validation.
+2. Device evidence is still required to prove that a non-normalizable classic
+   render-pass workload with inherited secondary clear attachments reaches the
+   Android executor as native V6.34/V6.16 replay and survives real driver
+   validation.
 
 ### 2026-07-20 CPU/static native classic secondary-inheritance lane
 
@@ -68,12 +75,9 @@ Evidence gates for this lane:
 
 Remaining strict-native replay gaps after this lane:
 
-1. Inherited-secondary `vkCmdClearAttachments` remains fail-closed until the
-   primary render area/framebuffer layer validation is explicitly applied during
-   secondary append.
-2. Resolve, query, event, and dynamic-state paths still need targeted audits in
+1. Resolve, query, event, and dynamic-state paths still need targeted audits in
    native classic render-pass scope.
-3. Device evidence is still required to prove that a non-normalizable classic
+2. Device evidence is still required to prove that a non-normalizable classic
    render-pass workload with secondary command buffers reaches the Android
    executor as native V6.34 replay and survives real driver validation.
 

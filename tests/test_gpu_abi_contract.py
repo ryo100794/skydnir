@@ -4486,6 +4486,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("op.index += graphics_draw_base;", icd)
         secondary_body = c_function_body(icd, "append_secondary_command_buffer")
         self.assertIn("command_buffers_can_execute_secondary(dst, src)", secondary_body)
+        self.assertIn("command_buffer_validate_inherited_clear_attachments_for_primary(dst, src)", secondary_body)
         self.assertIn("PdockerVkDispatchOp copied = src->dispatch_ops[i];", secondary_body)
         self.assertIn("PdockerVkGraphicsDrawSnapshot copied = src->graphics_draw_ops[i];", secondary_body)
         self.assertIn("PdockerVkGraphicsDescriptorBindSnapshot copied = src->graphics_descriptor_bind_ops[i];", secondary_body)
@@ -4514,6 +4515,24 @@ class GpuAbiContractTest(unittest.TestCase):
             execute_body.index("!append_secondary_command_buffer(cmd, secondary)"),
         )
         self.assertNotIn("cmd->graphics_unsupported = true;\n}", execute_body)
+        inherited_clear_body = c_function_body(
+            icd, "command_buffer_validate_inherited_clear_attachments_for_primary"
+        )
+        for marker in [
+            "secondary->clear_attachments_command_op_count == 0",
+            "!secondary->inherited_rendering_active",
+            "!secondary->active_render_pass",
+            "primary->active_render_pass != secondary->active_render_pass",
+            "primary->active_subpass != secondary->active_subpass",
+            "secondary->active_framebuffer",
+            "snapshot->clear_attachment_first > secondary->clear_attachment_op_count",
+            "snapshot->clear_rect_first > secondary->clear_rect_op_count",
+            "clear_attachment_valid_for_active_dynamic_rendering(primary, &attachment)",
+            "clear_attachment_valid_for_active_classic_subpass(primary, &attachment)",
+            "pdocker_vk_rect_inside_render_area(&rect->rect, &primary->active_render_area)",
+            "rect->layer_count > active_layer_count - rect->base_array_layer",
+        ]:
+            self.assertIn(marker, inherited_clear_body)
 
 
     def test_vulkan_push_constant_ops_own_payloads_for_graphics_replay(self):
@@ -6224,29 +6243,62 @@ class GpuAbiContractTest(unittest.TestCase):
         clear_body = icd.split(
             "VKAPI_ATTR void VKAPI_CALL vkCmdClearAttachments", 1
         )[1].split("VKAPI_ATTR void VKAPI_CALL vkCmdExecuteCommands", 1)[0]
-        classic_helper = c_function_body(icd, "clear_attachment_valid_for_active_classic_subpass")
+        classic_helper = c_function_body(icd, "clear_attachment_valid_for_classic_subpass")
+        active_classic_helper = c_function_body(icd, "clear_attachment_valid_for_active_classic_subpass")
+        dynamic_helper = c_function_body(icd, "clear_attachment_valid_for_active_dynamic_rendering")
+        append_validate = c_function_body(
+            icd, "command_buffer_validate_inherited_clear_attachments_for_primary"
+        )
         native_state = c_function_body(icd, "prepare_classic_render_pass_tracking_state")
 
         for marker in [
-            "const bool active_clear_scope = cmd->dynamic_rendering_active || cmd->render_pass_active;",
-            "!active_clear_scope || cmd->inherited_rendering_active",
-            "if (cmd->dynamic_rendering_active) {",
+            "const bool inherited_classic_clear_scope =",
+            "cmd->inherited_rendering_active && cmd->active_render_pass",
+            "cmd->dynamic_rendering_active || cmd->render_pass_active || inherited_classic_clear_scope",
+            "(cmd->inherited_rendering_active && !cmd->active_render_pass)",
+            "clear_attachment_valid_for_active_dynamic_rendering(cmd, &pAttachments[i])",
             "clear_attachment_valid_for_active_classic_subpass(cmd, &pAttachments[i])",
+            "clear_attachment_valid_for_classic_subpass(",
+            "if (inherited_classic_clear_scope) {",
+            "pRects[r].rect.extent.width == 0",
             "const uint32_t active_layer_count = cmd->render_pass_active && cmd->active_framebuffer",
             "cmd->active_framebuffer->layers ? cmd->active_framebuffer->layers : 1u",
             "PDOCKER_GPU_GRAPHICS_V6_COMMAND_CLEAR_ATTACHMENTS",
         ]:
             self.assertIn(marker, clear_body)
+        self.assertNotIn("!active_clear_scope || cmd->inherited_rendering_active", clear_body)
         for marker in [
-            "cmd->render_pass_active",
-            "cmd->active_render_pass",
-            "cmd->active_subpass >= cmd->active_render_pass->subpass_count",
+            "subpass_index >= rp->subpass_count",
             "attachment->colorAttachment >= subpass->color_attachment_count",
             "attachment_index != VK_ATTACHMENT_UNUSED",
             "pdocker_vk_format_has_depth(format)",
             "pdocker_vk_format_has_stencil(format)",
         ]:
             self.assertIn(marker, classic_helper)
+        for marker in [
+            "cmd->render_pass_active",
+            "cmd->active_render_pass",
+            "clear_attachment_valid_for_classic_subpass(",
+        ]:
+            self.assertIn(marker, active_classic_helper)
+        for marker in [
+            "cmd->dynamic_rendering_active",
+            "active_color_attachment_count",
+            "active_depth_attachment.valid",
+            "active_stencil_attachment.valid",
+        ]:
+            self.assertIn(marker, dynamic_helper)
+        for marker in [
+            "secondary->clear_attachments_command_op_count == 0",
+            "!secondary->inherited_rendering_active",
+            "!secondary->active_render_pass",
+            "primary->active_render_pass != secondary->active_render_pass",
+            "snapshot->clear_attachment_count >",
+            "snapshot->clear_rect_count >",
+            "clear_attachment_from_snapshot(stored)",
+            "pdocker_vk_rect_inside_render_area(&rect->rect, &primary->active_render_area)",
+        ]:
+            self.assertIn(marker, append_validate)
         for marker in [
             "cmd->active_rendering_layer_count = fb->layers ? fb->layers : 1;",
             "cmd->active_rendering_view_mask = rp->subpasses[subpass_index].view_mask;",
