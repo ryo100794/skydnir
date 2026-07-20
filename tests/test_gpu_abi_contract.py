@@ -369,6 +369,7 @@ VULKAN_ABI_INDEX_FIELD_CLASSIFICATIONS = {
     "PdockerGpuVulkanGraphicsV634RenderPassCommandEntry.subpass_index": "identity_key_ordinal",
     "PdockerGpuVulkanGraphicsV634RenderPassClearValueEntry.command_index": "command_reference_index",
     "PdockerGpuVulkanGraphicsV634RenderPassClearValueEntry.attachment_index": "attachment_reference_index",
+    "PdockerGpuVulkanGraphicsV635EventCommandProvenanceEntry.command_index": "command_reference_index",
     "PdockerGpuVulkanGraphicsV61PushConstantMetadataEntry.command_index": "command_reference_index",
     "PdockerGpuVulkanGraphicsV61ImageBarrierEntry.command_index": "command_reference_index",
     "PdockerGpuVulkanGraphicsV61ImageBarrierEntry.image_index": "image_reference_index",
@@ -928,6 +929,8 @@ def classify_vulkan_abi_remaining_scalar_field(qualified_field):
     if field_name in {"abi_major", "abi_minor"}:
         return "abi_version"
     if field_name == "command":
+        return "command_selector"
+    if field_name == "api_variant" and "EventCommandProvenanceEntry" in struct_name:
         return "command_selector"
     if field_name in {"gx", "gy", "gz"}:
         return "dispatch_grid_dimension"
@@ -6621,7 +6624,7 @@ class GpuAbiContractTest(unittest.TestCase):
         event_set_body = c_function_body(icd, "record_event_command")
         event_wait_body = c_function_body(icd, "record_event_wait_command")
         dynamic_state_body = c_function_body(icd, "record_graphics_dynamic_state_bytes")
-        for body in [query_body, event_set_body, event_wait_body, dynamic_state_body]:
+        for body in [query_body, dynamic_state_body]:
             self.assertNotIn("!cmd->dynamic_rendering_active", body)
             self.assertNotIn("!cmd->render_pass_active", body)
             self.assertNotIn("cmd->dynamic_rendering_active || cmd->render_pass_active", body)
@@ -6637,6 +6640,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT",
             "PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_EVENT",
             "append_graphics_command_record(cmd, &record)",
+            "command_buffer_reject_event_in_render_pass_scope(cmd, signaled)",
         ]:
             self.assertIn(marker, event_set_body)
         for marker in [
@@ -6659,16 +6663,159 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_GPU_GRAPHICS_V6_COMMAND_WRITE_TIMESTAMP",
             "PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_QUERY",
             "PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_QUERY",
-            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT",
-            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_EVENT",
-            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT",
         ]:
             segment = preflight.split(f"case {command}:", 1)[1].split("case PDOCKER_GPU_GRAPHICS_V6_COMMAND_", 1)[0]
             self.assertNotIn("if (rendering_active)", segment)
             self.assertNotIn("active_rendering_command", segment)
-        self.assertIn("classic_render_pass_active", preflight)
+        event_segment = preflight.split(
+            "case PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT:", 1
+        )[1].split(
+            "case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER:", 1
+        )[0]
+        self.assertIn("classic_render_pass_active", event_segment)
+        self.assertIn("preflight_vulkan_graphics_v6_classic_wait_legal", event_segment)
+        self.assertIn("set/reset event is illegal inside a classic render pass", event_segment)
+        self.assertIn("graphics event set/reset dependency flags are not preserved", event_segment)
+        self.assertLess(
+            event_segment.index("preflight_vulkan_graphics_v6_classic_wait_legal"),
+            event_segment.index("preflight_vulkan_graphics_v6_dependency_barriers"),
+        )
+        barrier_segment = preflight.split(
+            "case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER:", 1
+        )[1].split("default:", 1)[0]
+        self.assertIn("classic_render_pass_active", barrier_segment)
+        self.assertIn(
+            "preflight_vulkan_graphics_v634_classic_pipeline_barrier(",
+            barrier_segment,
+        )
+        self.assertNotIn(
+            "classic render pass cannot replay transported self-dependencies",
+            barrier_segment,
+        )
         self.assertIn("classic_begin_command", preflight)
 
+    def test_vulkan_native_classic_scope_enforces_event_sync_legality(self):
+        icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
+
+        render_scope = c_function_body(icd, "command_buffer_in_render_pass_scope")
+        classic_scope = c_function_body(icd, "command_buffer_in_native_classic_render_pass_scope")
+        reject_event = c_function_body(icd, "command_buffer_reject_event_in_render_pass_scope")
+        legacy_wait = c_function_body(icd, "legacy_wait_events_legality_failure_reason")
+        wait2 = c_function_body(icd, "wait_events2_legality_failure_reason")
+        secondary = c_function_body(icd, "append_secondary_command_buffer")
+        secondary_sync = c_function_body(icd, "secondary_sync_commands_legal_for_destination")
+        event_prevalidate = c_function_body(icd, "command_buffer_prevalidate_event_handles")
+        event_reserve = c_function_body(icd, "command_buffer_reserve_event_recording")
+
+        for marker in [
+            "cmd->dynamic_rendering_active",
+            "cmd->render_pass_active",
+            "cmd->inherited_rendering_active",
+        ]:
+            self.assertIn(marker, render_scope)
+        self.assertIn("cmd->active_render_pass != NULL", classic_scope)
+        self.assertIn("command_buffer_mark_recording_failed", reject_event)
+        self.assertIn("cmd->graphics_unsupported = true", reject_event)
+        for marker in [
+            "event_count == 0",
+            "VK_PIPELINE_STAGE_HOST_BIT",
+            "oldLayout != image_barriers[i].newLayout",
+        ]:
+            self.assertIn(marker, legacy_wait)
+        for marker in [
+            "event_count == 0",
+            "wait_events2_dependency_flags_forbidden",
+            "VK_PIPELINE_STAGE_2_HOST_BIT",
+            "barrier->oldLayout != barrier->newLayout",
+        ]:
+            self.assertIn(marker, wait2)
+        for marker in [
+            "PDOCKER_VK_COMMAND_EVENT",
+            "PDOCKER_VK_COMMAND_EVENT_WAIT",
+            "PDOCKER_VK_COMMAND_BARRIER",
+            "event_wait_ref_count == 0",
+            "secondary_wait_record_legal_for_render_pass_scope",
+        ]:
+            self.assertIn(marker, secondary_sync)
+        self.assertLess(
+            secondary.index("secondary_sync_commands_legal_for_destination(dst, src)"),
+            secondary.index("command_buffer_has_room_for_secondary(dst, src)"),
+        )
+        for marker in [
+            "event_handle_lookup_for_command_buffer",
+            "event-wait-null-event",
+            "event-command-null-event",
+            "event-wait-cross-device",
+            "event-command-cross-device",
+        ]:
+            self.assertIn(marker, event_prevalidate)
+        for marker in [
+            "command_buffer_reserve_command_ops",
+            "command_buffer_reserve_graphics_command_ops",
+            "command_buffer_reserve_event_wait_refs",
+            "command_buffer_reserve_memory_barrier_ops",
+            "command_buffer_reserve_buffer_barrier_ops",
+            "command_buffer_reserve_image_barrier_ops",
+        ]:
+            self.assertIn(marker, event_reserve)
+        for function_name, host_marker in [
+            ("vkCmdSetEvent", "VK_PIPELINE_STAGE_HOST_BIT"),
+            ("vkCmdResetEvent", "VK_PIPELINE_STAGE_HOST_BIT"),
+            ("vkCmdResetEvent2", "VK_PIPELINE_STAGE_2_HOST_BIT"),
+        ]:
+            body = c_function_body(icd, function_name)
+            self.assertIn(host_marker, body)
+            self.assertIn("command_buffer_prevalidate_event_handles", body)
+            self.assertIn("command_buffer_reserve_event_recording", body)
+        set2_body = c_function_body(icd, "vkCmdSetEvent2")
+        wait2_body = c_function_body(icd, "vkCmdWaitEvents2")
+        self.assertLess(
+            set2_body.index("command_buffer_prevalidate_event_handles"),
+            set2_body.index("record_dependency_info_barrier_ops"),
+        )
+        self.assertLess(
+            wait2_body.index("command_buffer_prevalidate_event_handles"),
+            wait2_body.index("record_dependency_info_barrier_ops"),
+        )
+        self.assertLess(
+            wait2_body.index("command_buffer_reserve_event_recording"),
+            wait2_body.index("record_dependency_info_barrier_ops"),
+        )
+
+        classic_wait = c_function_body(executor, "preflight_vulkan_graphics_v6_classic_wait_legal")
+        for marker in [
+            "event_count == 0",
+            "VK_PIPELINE_STAGE_2_HOST_BIT",
+            "barrier->src_queue_family_index != barrier->dst_queue_family_index",
+            "barrier->old_layout != barrier->new_layout",
+        ]:
+            self.assertIn(marker, classic_wait)
+        event_stage_guard = c_function_body(
+            executor, "vulkan_graphics_v6_event_set_reset_stage_supported"
+        )
+        self.assertIn("VK_PIPELINE_STAGE_2_HOST_BIT", event_stage_guard)
+        replay_preflight = c_function_body(
+            executor, "preflight_vulkan_graphics_v6_replay_supported"
+        )
+        record_body = c_function_body(
+            executor, "record_vulkan_graphics_v6_command_buffer"
+        )
+        self.assertIn(
+            "vulkan_graphics_v6_event_set_reset_stage_supported", replay_preflight
+        )
+        self.assertIn(
+            "vulkan_graphics_v6_event_set_reset_stage_supported", record_body
+        )
+        native_guard = c_function_body(executor, "guard_vulkan_graphics_v6_wait_native_call")
+        for marker in [
+            "event_count == 0",
+            "vulkan_graphics_v6_wait_events2_forbidden_dependency_flags",
+            "buffer_barriers[i].srcQueueFamilyIndex != buffer_barriers[i].dstQueueFamilyIndex",
+            "image_barriers[i].oldLayout != image_barriers[i].newLayout",
+            "image_barriers[i].srcQueueFamilyIndex != image_barriers[i].dstQueueFamilyIndex",
+        ]:
+            self.assertIn(marker, native_guard)
 
     def test_vulkan_graphics_v611_buffer_write_metadata_is_append_only(self):
         abi = APP_HEADER.read_text()
@@ -6992,7 +7139,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VK_QUEUE_FAMILY_IGNORED", queue_body)
         self.assertIn("src_queue_family_index == dst_queue_family_index", queue_body)
         self.assertIn("has_queue_family_ownership_transfer", legacy_body)
-        self.assertIn("pdocker_vk_dependency_flags_supported_for_queue_family_state", legacy_body)
+        self.assertIn("pdocker_vk_pipeline_barrier_dependency_flags_supported", legacy_body)
         self.assertIn("dependency-info-dependency-flags-unsupported", dependency_body)
         dependency_flags_body = c_function_body(icd, "dependency_info_dependency_flags_unsupported")
         self.assertIn("dependency_info_has_queue_family_ownership_transfer(info)", dependency_flags_body)
@@ -7008,7 +7155,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_ACQUIRE_UNMODIFIED_EXT", helper)
         self.assertIn("return false;", helper)
         legacy_barrier_helper = c_function_body(icd, "legacy_pipeline_barrier_inputs_unsupported")
-        dependency_helper = c_function_body(icd, "dependency_info_unsupported_reason")
+        dependency_helper = c_function_body(icd, "dependency_info_shape_unsupported_reason")
         for body in [legacy_barrier_helper, dependency_helper]:
             self.assertIn("barrier_external_acquire_unmodified_pnext_noop", body)
         self.assertIn("dependency-info-buffer-barrier-pnext-unsupported", dependency_helper)
@@ -7031,7 +7178,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER", icd)
         self.assertIn("pdocker_vk_dependency_flags_supported_for_queue_family_state", icd)
         self.assertIn("dependency_info_has_queue_family_ownership_transfer", icd)
-        self.assertIn("record.flags = pdocker_vk_transport_dependency_flags(dependencyFlags)", icd)
+        self.assertIn(
+            "record.flags = pdocker_vk_pipeline_barrier_transport_dependency_flags(",
+            icd,
+        )
         self.assertIn("record.flags = pdocker_vk_transport_dependency_flags(dependency_flags)", icd)
         self.assertIn("for (uint32_t i = 0; i < eventCount; ++i)", icd)
         self.assertNotIn("event-wait2-barrier-payload-unsupported", icd)
@@ -7095,10 +7245,10 @@ class GpuAbiContractTest(unittest.TestCase):
 
     def test_vulkan_pipeline_barrier2_fail_closed_at_record_time(self):
         icd = VULKAN_ICD.read_text()
+        shape_helper = c_function_body(icd, "dependency_info_shape_unsupported_reason")
         helper = c_function_body(icd, "dependency_info_unsupported_reason")
         for marker in [
             "dependency-info-pnext-unsupported",
-            "dependency-info-dependency-flags-unsupported",
             "dependency-info-memory-barriers-missing",
             "dependency-info-memory-barrier-pnext-unsupported",
             "dependency-info-memory-stage-access-unsupported",
@@ -7109,7 +7259,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "dependency-info-image-barrier-pnext-unsupported",
             "dependency-info-image-stage-access-unsupported",
         ]:
-            self.assertIn(marker, helper)
+            self.assertIn(marker, shape_helper)
+        self.assertIn("dependency_info_shape_unsupported_reason(info)", helper)
+        self.assertIn("dependency-info-dependency-flags-unsupported", helper)
         pipeline_reason = c_function_body(icd, "pipeline_barrier2_dependency_info_failure_reason")
         for marker in [
             "pipeline-barrier2-pnext-unsupported",
@@ -7120,11 +7272,12 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, pipeline_reason)
         body = c_function_body(icd, "vkCmdPipelineBarrier2")
-        self.assertIn("pipeline_barrier2_dependency_info_failure_reason(pDependencyInfo)", body)
+        self.assertIn("pipeline_barrier2_dependency_info_failure_reason(", body)
+        self.assertIn("pDependencyInfo, classic_render_pass_scope", body)
         self.assertIn("command_buffer_mark_recording_failed(cmd, unsupported_reason);", body)
         self.assertNotIn('command_buffer_mark_recording_failed(cmd, "pipeline-barrier2-dependency-flags-unsupported");', body)
         self.assertLess(
-            body.index("pipeline_barrier2_dependency_info_failure_reason(pDependencyInfo)"),
+            body.index("pipeline_barrier2_dependency_info_failure_reason("),
             body.index("record_dependency_info_barrier_ops(commandBuffer, pDependencyInfo)"),
         )
         self.assertLess(
@@ -10504,7 +10657,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "PdockerGpuVulkanGraphicsV630FrameHeader *frame_header_v630",
             "frame_header_v630 = &frame_header_v631->v630;",
             "frame_header_v629 = &frame_header_v630->v629;",
-            "size_t cursor = sizeof(PdockerGpuVulkanGraphicsV634FrameHeader);",
+            "size_t cursor = range_requires_v635_event_command_provenance",
             "need_v630_native_objects",
             "executor_supports_vulkan_graphics_v630_native_objects()",
             "sizeof(*frame_header_v631)",
@@ -15299,7 +15452,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("PdockerGpuVulkanDispatchV53BufferViewEntry", icd)
         self.assertIn("PdockerGpuVulkanGraphicsV627BufferViewEntry", icd)
         self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V627_BUFFER_VIEW_SCHEMA_HASH", icd)
-        self.assertIn("size_t cursor = sizeof(PdockerGpuVulkanGraphicsV634FrameHeader);", icd)
+        self.assertIn("size_t cursor = range_requires_v635_event_command_provenance", icd)
         self.assertNotIn("size_t cursor = sizeof(PdockerGpuVulkanGraphicsV626FrameHeader);", icd)
         self.assertIn("executor_supports_vulkan_dispatch_v53_buffer_views", icd)
         self.assertIn("executor_supports_vulkan_graphics_v627_buffer_views", icd)
@@ -15380,7 +15533,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("op->declared_range_count = declared_range_count;", push_body)
         self.assertIn("memcpy(declared_ranges, captured_layout->push_constant_ranges", push_body)
         self.assertIn("PdockerGpuVulkanGraphicsV628PushConstantRangeEntry *push_constant_ranges = NULL", frame_body)
-        self.assertIn("size_t cursor = sizeof(PdockerGpuVulkanGraphicsV634FrameHeader);", frame_body)
+        self.assertIn("size_t cursor = range_requires_v635_event_command_provenance", frame_body)
         self.assertIn("need_v628_push_constant_ranges", frame_body)
         self.assertIn("frame_header_v628->v628.push_constant_range_count", frame_body)
         self.assertIn("APPEND_GRAPHICS_TABLE(push_constant_ranges", frame_body)
@@ -15713,7 +15866,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "sizeof(*variable_descriptor_counts)",
             "free(variable_descriptor_counts);",
             "PdockerGpuVulkanGraphicsV629FrameHeader *frame_header_v629",
-            "size_t cursor = sizeof(PdockerGpuVulkanGraphicsV634FrameHeader);",
+            "size_t cursor = range_requires_v635_event_command_provenance",
             "need_v629_variable_descriptor_counts",
             "collect_graphics_v629_variable_descriptor_counts",
             "executor_supports_vulkan_graphics_v629_variable_descriptor_counts",
@@ -17252,7 +17405,8 @@ class GpuAbiContractTest(unittest.TestCase):
             wait_events_body.index("record_legacy_pipeline_barrier_ops(commandBuffer"),
         )
         self.assertIn("record_event_wait_command(commandBuffer, eventCount, pEvents,", wait_events_body)
-        self.assertIn("0, &barriers)", wait_events_body)
+        self.assertIn("PDOCKER_GPU_GRAPHICS_V635_EVENT_COMMAND_API_LEGACY,", wait_events_body)
+        self.assertIn("&barriers);", wait_events_body)
         self.assertNotIn("vkCmdPipelineBarrier(commandBuffer,", wait_events_body)
 
     def test_vulkan_event_commands_are_graphics_v6_replayable(self):
@@ -17278,9 +17432,12 @@ class GpuAbiContractTest(unittest.TestCase):
             "command->push_hash = (uint64_t)op->event_dst_stage_mask",
             "op.event_src_stage_mask = stage_mask",
             "op.event_dst_stage_mask = dst_stage_mask",
+            "op.event_api_variant = event_api_variant",
+            "record.event_api_variant = event_api_variant",
             "record.flags = pdocker_vk_transport_dependency_flags(dependency_flags)",
             "normalize_event_stage_mask((VkPipelineStageFlags2)srcStageMask)",
-            "record_event_command(commandBuffer, event, false, stageMask, 0, NULL)",
+            "PDOCKER_GPU_GRAPHICS_V635_EVENT_COMMAND_API_LEGACY",
+            "PDOCKER_GPU_GRAPHICS_V635_EVENT_COMMAND_API_SYNCHRONIZATION2",
         ]:
             self.assertIn(marker, icd)
         serializer_event_payload_body = icd.split(
@@ -17323,9 +17480,11 @@ class GpuAbiContractTest(unittest.TestCase):
             "rt->cmd_reset_event2",
             "rt->cmd_wait_events2",
             "const VkPipelineStageFlags2 src_stage_mask2",
-            "const int legacy_stage_masks",
-            "command->flags == 0",
-            "command->index_offset != 0",
+            "vulkan_graphics_v635_event_api_variant",
+            "const int legacy_api",
+            "event_api_variant == PDOCKER_GPU_GRAPHICS_V635_EVENT_COMMAND_API_LEGACY",
+            "PDOCKER_GPU_GRAPHICS_V635_EVENT_COMMAND_API_SYNCHRONIZATION2",
+            "command->index_offset == 0",
             "dependencyFlags = vulkan_graphics_v6_transport_dependency_flags(command->flags)",
             "has_event_barrier_payload",
             "collect_vulkan_graphics_v6_dependency_barriers",
@@ -17346,8 +17505,9 @@ class GpuAbiContractTest(unittest.TestCase):
         event_replay_body = executor.split("static int record_vulkan_graphics_v6_command_buffer", 1)[1].split(
             "case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER:", 1
         )[0]
-        self.assertNotIn("command->index_offset > UINT32_MAX", event_replay_body)
-        self.assertNotIn("command->push_hash > UINT32_MAX", event_replay_body)
+        self.assertIn("command->index_offset > UINT32_MAX", event_replay_body)
+        self.assertIn("command->push_hash > UINT32_MAX", event_replay_body)
+        self.assertNotIn("legacy_stage_masks", event_replay_body)
 
     def test_vulkan_event_lifecycle_is_executor_backed(self):
         executor = GPU_EXECUTOR.read_text()
@@ -17445,7 +17605,10 @@ class GpuAbiContractTest(unittest.TestCase):
             set_event2_body.index("command_buffer_prevalidate_dependency_info_barrier_recording(cmd, pDependencyInfo)"),
             set_event2_body.index("record_dependency_info_barrier_ops(commandBuffer, pDependencyInfo)"),
         )
-        self.assertIn("record_event_command(commandBuffer, event, true, dependency_info_src_stage_mask(pDependencyInfo), dependency_flags, &barriers)", set_event2_body)
+        self.assertIn("record_event_command(", set_event2_body)
+        self.assertIn("dependency_info_src_stage_mask(pDependencyInfo), dependency_flags,", set_event2_body)
+        self.assertIn("PDOCKER_GPU_GRAPHICS_V635_EVENT_COMMAND_API_SYNCHRONIZATION2,", set_event2_body)
+        self.assertIn("&barriers);", set_event2_body)
         self.assertNotIn("event-set2-barrier-payload-unsupported", set_event2_body)
         self.assertIn("command_buffer_mark_recording_failed", set_event2_body)
         self.assertIn("dependency_info_src_stage_mask", icd)
@@ -17459,14 +17622,16 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("if (!pEvents[i])", wait_events2_body)
         self.assertIn("event_wait2_dependency_info_failure_reason(&pDependencyInfos[i])", wait_events2_body)
         self.assertNotIn("dependency_flags_unsupported(dependency_flags)", wait_events2_body)
-        self.assertIn("event-wait2-dependency-flags-unsupported", icd)
-        self.assertIn("command_buffer_prevalidate_dependency_info_barrier_recording(cmd, &pDependencyInfos[i])", wait_events2_body)
+        self.assertIn("event-wait2-dependency-flags-forbidden", icd)
+        self.assertIn("command_buffer_prevalidate_dependency_info_barrier_recording(", wait_events2_body)
+        self.assertIn("cmd, &pDependencyInfos[i]", wait_events2_body)
         self.assertIn("record_dependency_info_barrier_ops(commandBuffer, &pDependencyInfos[i])", wait_events2_body)
         self.assertLess(
-            wait_events2_body.index("command_buffer_prevalidate_dependency_info_barrier_recording(cmd, &pDependencyInfos[i])"),
+            wait_events2_body.index("command_buffer_prevalidate_dependency_info_barrier_recording("),
             wait_events2_body.index("record_dependency_info_barrier_ops(commandBuffer, &pDependencyInfos[i])"),
         )
         self.assertIn("record_event_wait_command(commandBuffer, 1, &pEvents[i],", wait_events2_body)
+        self.assertIn("PDOCKER_GPU_GRAPHICS_V635_EVENT_COMMAND_API_SYNCHRONIZATION2,", wait_events2_body)
         self.assertNotIn("event-wait2-barrier-payload-unsupported", wait_events2_body)
         self.assertIn("dependency_info_src_stage_mask(&pDependencyInfos[i])", wait_events2_body)
         self.assertIn("dependency_info_dst_stage_mask(&pDependencyInfos[i])", wait_events2_body)
@@ -17479,6 +17644,7 @@ class GpuAbiContractTest(unittest.TestCase):
 
     def test_vulkan_sync2_event_dependency_info_reason_mapping_order_is_precise(self):
         icd = VULKAN_ICD.read_text()
+        dependency_shape_body = c_function_body(icd, "dependency_info_shape_unsupported_reason")
         dependency_reason_body = c_function_body(icd, "dependency_info_unsupported_reason")
         set_event2_reason_body = c_function_body(icd, "event_set2_dependency_info_failure_reason")
         wait_events2_reason_body = c_function_body(icd, "event_wait2_dependency_info_failure_reason")
@@ -17490,24 +17656,26 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
 
         self.assertNotIn("dependency_info_has_unsupported_pnext", icd)
-        self.assertIn('if (!info) return "dependency-info-null";', dependency_reason_body)
-        self.assertIn("info->sType != VK_STRUCTURE_TYPE_DEPENDENCY_INFO", dependency_reason_body)
-        self.assertIn("dependency_info_dependency_flags_unsupported(info)", dependency_reason_body)
+        self.assertIn('if (!info) return "dependency-info-null";', dependency_shape_body)
+        self.assertIn("info->sType != VK_STRUCTURE_TYPE_DEPENDENCY_INFO", dependency_shape_body)
+        self.assertIn("dependency_info_dependency_flags_unsupported(", dependency_reason_body)
+        self.assertIn("info, classic_render_pass_scope", dependency_reason_body)
         self.assertLess(
-            dependency_reason_body.index('if (!info) return "dependency-info-null";'),
-            dependency_reason_body.index("info->sType != VK_STRUCTURE_TYPE_DEPENDENCY_INFO"),
+            dependency_shape_body.index('if (!info) return "dependency-info-null";'),
+            dependency_shape_body.index("info->sType != VK_STRUCTURE_TYPE_DEPENDENCY_INFO"),
         )
         self.assertLess(
-            dependency_reason_body.index("info->sType != VK_STRUCTURE_TYPE_DEPENDENCY_INFO"),
-            dependency_reason_body.index('if (info->pNext) return "dependency-info-pnext-unsupported";'),
+            dependency_shape_body.index("info->sType != VK_STRUCTURE_TYPE_DEPENDENCY_INFO"),
+            dependency_shape_body.index('if (info->pNext) return "dependency-info-pnext-unsupported";'),
         )
         self.assertLess(
-            dependency_reason_body.index('if (info->pNext) return "dependency-info-pnext-unsupported";'),
-            dependency_reason_body.index("dependency_info_dependency_flags_unsupported(info)"),
+            dependency_shape_body.index('if (info->pNext) return "dependency-info-pnext-unsupported";'),
+            dependency_shape_body.index("info->memoryBarrierCount && !info->pMemoryBarriers"),
         )
+        self.assertIn("dependency_info_shape_unsupported_reason(info)", dependency_reason_body)
         self.assertLess(
-            dependency_reason_body.index("dependency_info_dependency_flags_unsupported(info)"),
-            dependency_reason_body.index("info->memoryBarrierCount && !info->pMemoryBarriers"),
+            dependency_reason_body.index("dependency_info_shape_unsupported_reason(info)"),
+            dependency_reason_body.index("dependency_info_dependency_flags_unsupported("),
         )
         for marker in [
             "info->pMemoryBarriers[i].sType != VK_STRUCTURE_TYPE_MEMORY_BARRIER_2",
@@ -17517,21 +17685,17 @@ class GpuAbiContractTest(unittest.TestCase):
             "info->pImageMemoryBarriers[i].sType != VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2",
             "dependency-info-image-barrier-stype-invalid",
         ]:
-            self.assertIn(marker, dependency_reason_body)
+            self.assertIn(marker, dependency_shape_body)
 
         self.assertIn('return "event-set2-dependency-flags-unsupported"', set_event2_reason_body)
         self.assertIn('return "event-set2-dependency-info-unsupported"', set_event2_reason_body)
         self.assertLess(
-            set_event2_reason_body.index('return "event-set2-dependency-flags-unsupported"'),
-            set_event2_reason_body.index('return "event-set2-dependency-info-unsupported"'),
+            set_event2_reason_body.index("dependency_info_shape_unsupported_reason(info)"),
+            set_event2_reason_body.index("info && info->dependencyFlags != 0"),
         )
-        self.assertIn('return "event-wait2-dependency-flags-unsupported"', wait_events2_reason_body)
         self.assertIn('return "event-wait2-pnext-unsupported"', wait_events2_reason_body)
         self.assertIn('return "event-wait2-dependency-info-unsupported"', wait_events2_reason_body)
-        self.assertLess(
-            wait_events2_reason_body.index('return "event-wait2-dependency-flags-unsupported"'),
-            wait_events2_reason_body.index('return "event-wait2-pnext-unsupported"'),
-        )
+        self.assertNotIn("dependency-flags", wait_events2_reason_body)
         self.assertLess(
             wait_events2_reason_body.index('return "event-wait2-pnext-unsupported"'),
             wait_events2_reason_body.index('return "event-wait2-dependency-info-unsupported"'),
@@ -17542,6 +17706,14 @@ class GpuAbiContractTest(unittest.TestCase):
         )
         self.assertLess(
             wait_events2_body.index("event_wait2_dependency_info_failure_reason(&pDependencyInfos[i])"),
+            wait_events2_body.index("wait_events2_legality_failure_reason("),
+        )
+        self.assertLess(
+            wait_events2_body.index("wait_events2_legality_failure_reason("),
+            wait_events2_body.index("command_buffer_prevalidate_dependency_info_barrier_recording("),
+        )
+        self.assertLess(
+            wait_events2_body.index("command_buffer_prevalidate_dependency_info_barrier_recording("),
             wait_events2_body.index("record_dependency_info_barrier_ops(commandBuffer, &pDependencyInfos[i])"),
         )
 
@@ -18897,7 +19069,11 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("submit will fail closed", record_image_barrier_body)
         self.assertIn("legacy_pipeline_barrier_inputs_unsupported(srcStageMask", barrier_body)
         self.assertIn("dependencyFlags", barrier_body)
-        self.assertIn("record.flags = pdocker_vk_transport_dependency_flags(dependencyFlags)", barrier_body)
+        self.assertIn(
+            "record.flags = pdocker_vk_pipeline_barrier_transport_dependency_flags(",
+            barrier_body,
+        )
+        self.assertIn("dependencyFlags, classic_render_pass_scope", barrier_body)
         barrier2_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier2", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkCmdSetEvent2", 1
         )[0]
@@ -18938,7 +19114,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("info->pMemoryBarriers[i].pNext", icd)
         self.assertIn("info->pBufferMemoryBarriers[i].pNext", icd)
         self.assertIn("info->pImageMemoryBarriers[i].pNext", icd)
-        self.assertIn("pipeline_barrier2_dependency_info_failure_reason(pDependencyInfo)", barrier2_body)
+        self.assertIn("pipeline_barrier2_dependency_info_failure_reason(", barrier2_body)
+        self.assertIn("pDependencyInfo, classic_render_pass_scope", barrier2_body)
         self.assertIn("command_buffer_mark_recording_failed(cmd, unsupported_reason);", barrier2_body)
         unsupported_reason_branch = barrier2_body.split("if (unsupported_reason)", 1)[1].split(
             "command_buffer_prevalidate_dependency_info_barrier_recording", 1
@@ -18949,11 +19126,16 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("dependency_info_barrier_recording_failure_reason(cmd, info)", prevalidate_dependency_helper)
         self.assertIn("cmd->graphics_unsupported = true;", prevalidate_dependency_helper)
         self.assertIn("command_buffer_mark_recording_failed(cmd, recording_failure_reason)", prevalidate_dependency_helper)
-        self.assertLess(barrier2_body.index("pipeline_barrier2_dependency_info_failure_reason(pDependencyInfo)"), barrier2_body.index("VkDependencyFlags dependency_flags"))
+        self.assertLess(barrier2_body.index("pipeline_barrier2_dependency_info_failure_reason("), barrier2_body.index("VkDependencyFlags dependency_flags"))
         self.assertLess(barrier2_body.index("command_buffer_prevalidate_dependency_info_barrier_recording(cmd, pDependencyInfo)"), barrier2_body.index("VkDependencyFlags dependency_flags"))
         self.assertIn("VkDependencyFlags dependency_flags", barrier2_body)
-        self.assertIn("pipeline_barrier2_dependency_info_failure_reason(pDependencyInfo)", barrier2_body)
-        self.assertIn("record.flags = pdocker_vk_transport_dependency_flags(dependency_flags)", barrier2_body)
+        self.assertIn("pipeline_barrier2_dependency_info_failure_reason(", barrier2_body)
+        self.assertIn("pDependencyInfo, classic_render_pass_scope", barrier2_body)
+        self.assertIn(
+            "record.flags = pdocker_vk_pipeline_barrier_transport_dependency_flags(",
+            barrier2_body,
+        )
+        self.assertIn("dependency_flags, classic_render_pass_scope", barrier2_body)
         self.assertNotIn("vkCmdPipelineBarrier(commandBuffer", barrier2_body)
         self.assertIn("execute_recorded_image_barrier_op(", icd)
         for field in [
@@ -20945,7 +21127,12 @@ class GpuAbiContractTest(unittest.TestCase):
             'reason = "unsupported dynamic rendering flags";',
         ]:
             self.assertIn(marker, preflight_body)
-        self.assertNotIn("command->flags != 0", preflight_body)
+        preflight_begin = preflight_body.split(
+            "case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_RENDERING:", 1
+        )[1].split(
+            "case PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_RENDERING:", 1
+        )[0]
+        self.assertNotIn("command->flags != 0", preflight_begin)
 
         record_body = c_function_body(executor, "record_vulkan_graphics_v6_command_buffer")
         begin_body = record_body.split(
@@ -27327,7 +27514,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33]", caps)
         self.assertIn("\\\"vulkan_graphics_v6_supported_minors\\\":%s", caps)
         self.assertIn("bool vulkan_graphics_v6_supported_minors_valid;", caps_struct)
-        self.assertIn("bool vulkan_graphics_v6_supported_minor[35];", caps_struct)
+        self.assertIn("bool vulkan_graphics_v6_supported_minor[36];", caps_struct)
         self.assertIn("json_read_u32_membership_array(\n            json,\n            \"vulkan_graphics_v6_supported_minors\"", parser)
         self.assertIn("caps->vulkan_graphics_v6_supported_minors_valid = true;", parser)
         self.assertIn("caps->vulkan_graphics_v6_supported_minor[PDOCKER_GPU_VULKAN_GRAPHICS_V627_ABI_MINOR]", parser)
@@ -27343,6 +27530,15 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("caps->vulkan_graphics_v6_supported_minor[PDOCKER_GPU_VULKAN_GRAPHICS_V631_ABI_MINOR]", parser)
         self.assertIn("caps->vulkan_graphics_v6_supported_minor[PDOCKER_GPU_VULKAN_GRAPHICS_V632_ABI_MINOR]", parser)
         self.assertIn("caps->vulkan_graphics_v6_supported_minor[PDOCKER_GPU_VULKAN_GRAPHICS_V633_ABI_MINOR]", parser)
+        self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V635_ABI_MINOR", parser)
+        v635_capability = parser.split(
+            "caps->vulkan_graphics_v635_event_command_provenance_supported =", 1
+        )[1].split("caps->image_format_cap_count", 1)[0]
+        self.assertNotIn("vulkan_graphics_v6_supported_minor", v635_capability)
+        membership_parser = c_function_body(icd, "json_read_u32_membership_array")
+        self.assertIn("value > UINT32_MAX", membership_parser)
+        self.assertIn("if (value < out_count) out[value] = true;", membership_parser)
+        self.assertNotIn("value >= out_count", membership_parser)
         self.assertIn("vulkan_graphics_v6_abi_minor_render_pass_exact_sideband", parser)
         self.assertIn("vulkan_graphics_v6_subpass_view_mask_schema_hash", parser)
         self.assertIn("vulkan_graphics_v6_depth_stencil_resolve_schema_hash", parser)
@@ -27540,7 +27736,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "collect_vulkan_graphics_v633_render_pass_transport(",
             "need_v633_render_pass_sideband = true;",
             "header->abi_minor = PDOCKER_GPU_VULKAN_GRAPHICS_V633_ABI_MINOR;",
-            "size_t cursor = sizeof(PdockerGpuVulkanGraphicsV634FrameHeader);",
+            "size_t cursor = range_requires_v635_event_command_provenance",
             "APPEND_GRAPHICS_TABLE(render_pass_subpass_view_masks",
             "APPEND_GRAPHICS_TABLE(render_pass_depth_stencil_resolves",
             "APPEND_GRAPHICS_TABLE(render_pass_dependency_view_offsets",
@@ -27603,6 +27799,236 @@ class GpuAbiContractTest(unittest.TestCase):
             "entry->render_pass_id != render_pass_id",
         ]:
             self.assertIn(marker, correlation_dense)
+
+
+    def test_vulkan_graphics_v635_event_command_provenance_abi_is_append_only(self):
+        for path in [APP_HEADER, CONTAINER_HEADER]:
+            source = path.read_text()
+            self.assertIn("#define PDOCKER_GPU_VULKAN_GRAPHICS_V635_ABI_MINOR 35u", source)
+            self.assertIn(
+                "#define PDOCKER_GPU_VULKAN_GRAPHICS_V635_MAX_EVENT_COMMAND_PROVENANCE "
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS",
+                source,
+            )
+            self.assertIn(
+                "#define PDOCKER_GPU_GRAPHICS_V635_EVENT_COMMAND_API_LEGACY 1u",
+                source,
+            )
+            self.assertIn(
+                "#define PDOCKER_GPU_GRAPHICS_V635_EVENT_COMMAND_API_SYNCHRONIZATION2 2u",
+                source,
+            )
+            for marker in [
+                "PdockerGpuVulkanGraphicsV635HeaderExtension",
+                "PdockerGpuVulkanGraphicsV635FrameHeader",
+                "PdockerGpuVulkanGraphicsV634FrameHeader v634;",
+                "PdockerGpuVulkanGraphicsV635HeaderExtension v635;",
+                "PdockerGpuVulkanGraphicsV635EventCommandProvenanceEntry",
+            ]:
+                self.assertIn(marker, source)
+
+            schema_specs = [
+                (
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V635_HEADER_EXTENSION_FIELDS",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V635_HEADER_EXTENSION_FIELD_COUNT",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V635_HEADER_EXTENSION_SCHEMA_HASH",
+                    [
+                        "event_command_provenance_count",
+                        "event_command_provenance_entry_size",
+                        "event_command_provenance_table_offset",
+                        "event_command_provenance_table_size",
+                        "event_command_provenance_schema_hash",
+                        "event_command_provenance_table_hash",
+                        "extension_hash",
+                    ],
+                ),
+                (
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V635_EVENT_COMMAND_PROVENANCE_FIELDS",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V635_EVENT_COMMAND_PROVENANCE_FIELD_COUNT",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V635_EVENT_COMMAND_PROVENANCE_SCHEMA_HASH",
+                    ["command_index", "api_variant"],
+                ),
+            ]
+            for field_macro, count_macro, hash_macro, expected_names in schema_specs:
+                fields, count, declared_hash, computed_hash = vulkan_dispatch_v5_schema(
+                    path, field_macro, count_macro, hash_macro
+                )
+                self.assertEqual(count, len(fields))
+                self.assertEqual(declared_hash, computed_hash)
+                self.assertEqual([name for name, _ in fields], expected_names)
+
+        self.assertEqual(APP_HEADER.read_bytes(), CONTAINER_HEADER.read_bytes())
+
+
+    def test_vulkan_graphics_v635_event_command_provenance_is_explicit_and_fail_closed(self):
+        icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
+        sender = c_function_body(icd, "send_recorded_vulkan_graphics_v6_1_frame_range")
+        parser = c_function_body(icd, "parse_executor_advertisement_caps_json")
+        producer_match = c_function_body(
+            icd, "vulkan_graphics_v635_event_record_matches_command_op"
+        )
+        caps = c_function_body(executor, "print_vulkan_advertisement_caps")
+        prefix = c_function_body(executor, "validate_vulkan_graphics_v6_header_prefix")
+        header_validator = c_function_body(executor, "validate_vulkan_graphics_v6_header")
+        table_ranges = c_function_body(executor, "vulkan_graphics_v6_table_range_count")
+        init_view = c_function_body(executor, "init_vulkan_graphics_v6_frame_view")
+        provenance_lookup = c_function_body(
+            executor, "vulkan_graphics_v635_event_api_variant"
+        )
+        provenance_validator = c_function_body(
+            executor, "validate_vulkan_graphics_v635_event_command_provenance"
+        )
+        frame_validator = c_function_body(executor, "validate_vulkan_graphics_v6_frame_content")
+        replay_preflight = c_function_body(
+            executor, "preflight_vulkan_graphics_v6_replay_supported"
+        )
+        runtime_preflight = c_function_body(
+            executor, "preflight_vulkan_graphics_v6_runtime_supported"
+        )
+        native_record = c_function_body(
+            executor, "record_vulkan_graphics_v6_command_buffer"
+        )
+
+        for marker in [
+            "uint32_t event_api_variant;",
+            "vulkan_graphics_v635_event_record_matches_command_op(",
+            "command_buffer_range_v635_event_command_provenance_count(",
+            "executor_supports_vulkan_graphics_v635_event_command_provenance()",
+        ]:
+            self.assertIn(marker, icd)
+        for marker in [
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT",
+            "PDOCKER_VK_COMMAND_EVENT && op->event_signaled",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_EVENT",
+            "PDOCKER_VK_COMMAND_EVENT && !op->event_signaled",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT",
+            "PDOCKER_VK_COMMAND_EVENT_WAIT",
+            "op->event_api_variant != record->event_api_variant",
+        ]:
+            self.assertIn(marker, producer_match)
+
+        api_sections = {
+            "vkCmdSetEvent": "VKAPI_ATTR void VKAPI_CALL vkCmdResetEvent",
+            "vkCmdResetEvent": "static const char *legacy_wait_events_legality_failure_reason",
+            "vkCmdWaitEvents": "static const char *event_set2_dependency_info_failure_reason",
+            "vkCmdSetEvent2": "VKAPI_ATTR void VKAPI_CALL vkCmdResetEvent2",
+            "vkCmdResetEvent2": "VKAPI_ATTR void VKAPI_CALL vkCmdWaitEvents2",
+            "vkCmdWaitEvents2": "static bool query_range_valid",
+        }
+        for name, end in api_sections.items():
+            body = icd.split(f"VKAPI_ATTR void VKAPI_CALL {name}", 1)[1].split(end, 1)[0]
+            expected = (
+                "PDOCKER_GPU_GRAPHICS_V635_EVENT_COMMAND_API_SYNCHRONIZATION2"
+                if name.endswith("2")
+                else "PDOCKER_GPU_GRAPHICS_V635_EVENT_COMMAND_API_LEGACY"
+            )
+            self.assertIn(expected, body, name)
+
+        for marker in [
+            "expected_v635_event_command_provenance_count",
+            "range_requires_v635_event_command_provenance",
+            "event_command_provenance_count >=",
+            "provenance->command_index = (uint32_t)command_count;",
+            "provenance->api_variant = record->event_api_variant;",
+            "size_t cursor = range_requires_v635_event_command_provenance",
+            "? sizeof(PdockerGpuVulkanGraphicsV635FrameHeader)",
+            ": sizeof(PdockerGpuVulkanGraphicsV634FrameHeader)",
+            "header->abi_minor = PDOCKER_GPU_VULKAN_GRAPHICS_V635_ABI_MINOR;",
+            "APPEND_GRAPHICS_TABLE(event_command_provenance",
+            "frame_header_v635->v635.event_command_provenance_table_hash",
+            "frame_header_v635->v635.extension_hash",
+            "VULKAN_GRAPHICS_V6.35",
+        ]:
+            self.assertIn(marker, sender)
+        self.assertLess(
+            sender.index("!executor_supports_vulkan_graphics_v635_event_command_provenance()"),
+            sender.index("int socket_fd = connect_queue();"),
+        )
+        v635_capability = parser.split(
+            "caps->vulkan_graphics_v635_event_command_provenance_supported =", 1
+        )[1].split("caps->image_format_cap_count", 1)[0]
+        self.assertNotIn("vulkan_graphics_v6_supported_minor", v635_capability)
+        for marker in [
+            "vulkan_graphics_v6_abi_minor_event_command_provenance",
+            "vulkan_graphics_v635_event_command_provenance_supported",
+            "v635_advertised_supported == 1u",
+            "vulkan_graphics_v6_event_command_provenance_header_schema_hash",
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V635_HEADER_EXTENSION_SCHEMA_HASH",
+            "vulkan_graphics_v6_event_command_provenance_schema_hash",
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V635_EVENT_COMMAND_PROVENANCE_SCHEMA_HASH",
+            "vulkan_graphics_v6_max_event_command_provenance",
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V635_MAX_EVENT_COMMAND_PROVENANCE",
+        ]:
+            self.assertIn(marker, parser)
+
+        for marker in [
+            "[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34]",
+            "vulkan_graphics_v6_abi_minor_event_command_provenance",
+            "vulkan_graphics_v6_event_command_provenance_header_schema_hash",
+            "vulkan_graphics_v6_event_command_provenance_schema_hash",
+            "vulkan_graphics_v6_max_event_command_provenance",
+            "vulkan_graphics_v635_event_command_provenance_supported",
+        ]:
+            self.assertIn(marker, caps)
+        self.assertIn(
+            "sizeof(PdockerGpuVulkanGraphicsV635FrameHeader)", prefix
+        )
+        self.assertIn(
+            "case PDOCKER_GPU_VULKAN_GRAPHICS_V635_ABI_MINOR: return 70u;",
+            table_ranges,
+        )
+        for marker in [
+            "event_command_provenance_count >",
+            "event_command_provenance_entry_size !=",
+            "event_command_provenance_schema_hash !=",
+            "event_command_provenance_table_hash",
+            "FrameRange ranges[70]",
+            "event_command_provenance_table_offset",
+            "__alignof__(PdockerGpuVulkanGraphicsV635EventCommandProvenanceEntry)",
+        ]:
+            self.assertIn(marker, header_validator)
+        for marker in [
+            "view->header_v635 = header_v635;",
+            "view->is_v635 = header_v635 != NULL;",
+            "view->event_command_provenance =",
+        ]:
+            self.assertIn(marker, init_view)
+        for marker in [
+            "if (!view->is_v635 || !view->header_v635) return -EOPNOTSUPP;",
+            "entry->command_index < command_index",
+            "api_variant != PDOCKER_GPU_GRAPHICS_V635_EVENT_COMMAND_API_LEGACY",
+            "PDOCKER_GPU_GRAPHICS_V635_EVENT_COMMAND_API_SYNCHRONIZATION2",
+        ]:
+            self.assertIn(marker, provenance_lookup)
+        for marker in [
+            "if (!view->is_v635)",
+            "return -EOPNOTSUPP;",
+            "entry->command_index <=",
+            "!vulkan_graphics_v6_command_is_event(",
+            "entry->api_variant != PDOCKER_GPU_GRAPHICS_V635_EVENT_COMMAND_API_LEGACY",
+            "provenance_index >= provenance_count",
+            "return provenance_index == provenance_count ? 0 : -EPROTO;",
+        ]:
+            self.assertIn(marker, provenance_validator)
+        self.assertIn(
+            "validate_vulkan_graphics_v635_event_command_provenance(&view)",
+            frame_validator,
+        )
+        for body in [replay_preflight, runtime_preflight, native_record]:
+            self.assertIn("vulkan_graphics_v635_event_api_variant(", body)
+        for marker in [
+            "event_api_variant == PDOCKER_GPU_GRAPHICS_V635_EVENT_COMMAND_API_LEGACY",
+            "vkCmdSetEvent(command_buffer",
+            "vkCmdResetEvent(command_buffer",
+            "vkCmdWaitEvents(command_buffer",
+            "rt->cmd_set_event2(command_buffer",
+            "rt->cmd_reset_event2(command_buffer",
+            "rt->cmd_wait_events2(command_buffer",
+        ]:
+            self.assertIn(marker, native_record)
+        self.assertNotIn("vulkan_graphics_v6_wait_requires_synchronization2_transport", executor)
+        self.assertNotIn("legacy_stage_masks", executor)
 
 
     def test_vulkan_graphics_v634_classic_render_pass_receiver_validates_sideband(self):
@@ -27767,7 +28193,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "executor_supports_vulkan_graphics_v634_classic_render_pass_sideband()",
             "need_v634_classic_render_pass_sideband = true;",
             "header->abi_minor = PDOCKER_GPU_VULKAN_GRAPHICS_V634_ABI_MINOR;",
-            "size_t cursor = sizeof(PdockerGpuVulkanGraphicsV634FrameHeader);",
+            "size_t cursor = range_requires_v635_event_command_provenance",
             "APPEND_GRAPHICS_TABLE(framebuffers",
             "APPEND_GRAPHICS_TABLE(framebuffer_attachments",
             "APPEND_GRAPHICS_TABLE(render_pass_commands",
@@ -27792,7 +28218,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "header_v634->v634.framebuffer_entry_size != sizeof(PdockerGpuVulkanGraphicsV634FramebufferEntry)",
             "header_v634->v634.framebuffer_schema_hash != PDOCKER_GPU_VULKAN_GRAPHICS_V634_FRAMEBUFFER_SCHEMA_HASH",
             "header_v634->v634.extension_hash != (header_v634->v634.framebuffer_table_hash ^",
-            "FrameRange ranges[69]",
+            "FrameRange ranges[70]",
             "header_v634->v634.framebuffer_table_offset",
             "__alignof__(PdockerGpuVulkanGraphicsV634FramebufferEntry)",
             "__alignof__(PdockerGpuVulkanGraphicsV634RenderPassCommandEntry)",
@@ -27808,7 +28234,7 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, view_struct)
         for marker in [
-            "const int is_v634_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V634_ABI_MINOR;",
+            "const int is_v634_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V634_ABI_MINOR || is_v635_header;",
             "view->header_v634 = header_v634;",
             "view->is_v634 = header_v634 != NULL;",
             "view->framebuffers =",
@@ -27872,6 +28298,492 @@ class GpuAbiContractTest(unittest.TestCase):
             "if (rc == 0 && active) rc = -EPROTO;",
         ]:
             self.assertIn(marker, sideband_validator)
+
+
+    def test_vulkan_graphics_v634_classic_self_dependency_capability_is_explicit_and_fail_closed(self):
+        icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
+        parser = c_function_body(icd, "parse_executor_advertisement_caps_json")
+        producer_gate = c_function_body(
+            icd,
+            "executor_supports_vulkan_graphics_v634_classic_render_pass_self_dependency",
+        )
+        producer_scope = c_function_body(icd, "pdocker_vk_classic_barrier_scope_legal")
+        caps = c_function_body(executor, "print_vulkan_advertisement_caps")
+
+        # This feature reuses V6.32 dependency metadata and V6.34 classic
+        # render-pass commands.  Its availability is negotiated separately;
+        # it must not silently create another wire minor.
+        for path in [APP_HEADER, CONTAINER_HEADER]:
+            header = path.read_text()
+            self.assertNotIn("V636", header)
+            self.assertNotIn("classic_render_pass_self_dependency", header.lower())
+        self.assertEqual(APP_HEADER.read_bytes(), CONTAINER_HEADER.read_bytes())
+
+        for marker in [
+            "const int classic_render_pass_self_dependency_supported =",
+            "classic_render_pass_sideband_supported &&",
+            "rt->enabled_synchronization2.synchronization2",
+            "vulkan_runtime_sync2_supported(rt)",
+            "rt->cmd_pipeline_barrier2 != NULL",
+            "vulkan_graphics_v634_classic_render_pass_self_dependency_supported",
+            "classic_render_pass_self_dependency_supported ? 1u : 0u",
+        ]:
+            self.assertIn(marker, caps)
+        for marker in [
+            "bool v634_self_dependency_supported = false;",
+            '"vulkan_graphics_v634_classic_render_pass_self_dependency_supported"',
+            "caps->vulkan_graphics_v634_classic_render_pass_self_dependency_supported =",
+            "caps->vulkan_graphics_v634_classic_render_pass_sideband_supported &&",
+            "v634_self_dependency_supported",
+        ]:
+            self.assertIn(marker, parser)
+        self.assertIn("(void)json_read_bool(", parser)
+        for marker in [
+            "caps->executor_valid",
+            "caps->vulkan_graphics_v634_classic_render_pass_sideband_supported",
+            "caps->vulkan_graphics_v634_classic_render_pass_self_dependency_supported",
+        ]:
+            self.assertIn(marker, producer_gate)
+        self.assertIn(
+            "executor_supports_vulkan_graphics_v634_classic_render_pass_self_dependency()",
+            producer_scope,
+        )
+
+    def test_vulkan_graphics_v632_dependency_scopes_remain_u64_and_materialize_exactly(self):
+        icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
+        for path in [APP_HEADER, CONTAINER_HEADER]:
+            fields, count, declared_hash, computed_hash = vulkan_dispatch_v5_schema(
+                path,
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V632_RENDER_PASS_DEPENDENCY_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V632_RENDER_PASS_DEPENDENCY_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V632_RENDER_PASS_DEPENDENCY_SCHEMA_HASH",
+            )
+            self.assertEqual(count, len(fields))
+            self.assertEqual(declared_hash, computed_hash)
+            field_types = dict(fields)
+            for name in [
+                "src_stage_mask",
+                "dst_stage_mask",
+                "src_access_mask",
+                "dst_access_mask",
+            ]:
+                self.assertEqual("u64", field_types[name])
+
+        capture2 = c_function_body(
+            icd, "capture_render_pass_dependency2_stage_access_masks"
+        )
+        for marker in [
+            "if (!dependency->pNext) return true;",
+            "if (!synchronization2_enabled) return false;",
+            "header.sType != VK_STRUCTURE_TYPE_MEMORY_BARRIER_2 || header.pNext",
+            "*src_stage_mask = barrier->srcStageMask;",
+            "*src_access_mask = barrier->srcAccessMask;",
+            "*dst_stage_mask = barrier->dstStageMask;",
+            "*dst_access_mask = barrier->dstAccessMask;",
+        ]:
+            self.assertIn(marker, capture2)
+
+        materialize = c_function_body(
+            executor, "materialize_vulkan_graphics_v634_classic_render_passes"
+        )
+        legacy_fit = c_function_body(
+            executor, "vulkan_graphics_v632_dependency_masks_fit_legacy"
+        )
+        for marker in [
+            "dependency->src_stage_mask <= UINT32_MAX",
+            "dependency->dst_stage_mask <= UINT32_MAX",
+            "dependency->src_access_mask <= UINT32_MAX",
+            "dependency->dst_access_mask <= UINT32_MAX",
+        ]:
+            self.assertIn(marker, legacy_fit)
+        for marker in [
+            "const int synchronization2_dependencies =",
+            "VkMemoryBarrier2 *dependency_memory_barriers = NULL;",
+            "dependency_memory_barriers[d] = (VkMemoryBarrier2)",
+            ".srcStageMask = (VkPipelineStageFlags2)src_dep->src_stage_mask",
+            ".srcAccessMask = (VkAccessFlags2)src_dep->src_access_mask",
+            ".dstStageMask = (VkPipelineStageFlags2)src_dep->dst_stage_mask",
+            ".dstAccessMask = (VkAccessFlags2)src_dep->dst_access_mask",
+            "dependencies[d].pNext = &dependency_memory_barriers[d];",
+            "!vulkan_graphics_v632_dependency_masks_fit_legacy(src_dep)",
+            "src_dep->src_stage_mask == 0 || src_dep->dst_stage_mask == 0",
+            "rc = -EOPNOTSUPP;",
+            "free(dependency_memory_barriers);",
+        ]:
+            self.assertIn(marker, materialize)
+        self.assertLess(
+            materialize.index("if (synchronization2_dependencies)"),
+            materialize.index("vulkan_graphics_v632_dependency_masks_fit_legacy(src_dep)"),
+        )
+
+    def test_vulkan_classic_self_dependency_is_exact_and_not_dynamically_normalized(self):
+        icd = VULKAN_ICD.read_text()
+        capture = c_function_body(icd, "capture_single_subpass_dependency")
+        capture_exact = c_function_body(icd, "capture_render_pass_dependency_exact")
+        capture2 = c_function_body(icd, "capture_render_pass_dependencies2")
+        normalize = c_function_body(
+            icd, "render_pass_subpass_can_normalize_to_dynamic_rendering"
+        )
+
+        self_dependency_branch = capture.split(
+            "if (src_subpass != VK_SUBPASS_EXTERNAL && src_subpass == dst_subpass)", 1
+        )[1].split("if (src_subpass == VK_SUBPASS_EXTERNAL", 1)[0]
+        self.assertIn("rp->has_self_dependency = true;", self_dependency_branch)
+        self.assertIn("return true;", self_dependency_branch)
+        self.assertNotIn("merge_render_pass_dependency_state", self_dependency_branch)
+        self.assertLess(
+            capture.index("rp->has_self_dependency = true;"),
+            capture.index("merge_render_pass_dependency_state"),
+        )
+        for marker in [
+            "dst->src_stage_mask = src_stage_mask;",
+            "dst->src_access_mask = src_access_mask;",
+            "dst->dst_stage_mask = dst_stage_mask;",
+            "dst->dst_access_mask = dst_access_mask;",
+            "dst->dependency_flags = dependency_flags;",
+        ]:
+            self.assertIn(marker, capture_exact)
+        self.assertIn(
+            "capture_render_pass_dependency2_stage_access_masks(", capture2
+        )
+        self.assertIn("capture_render_pass_dependency_exact(", capture2)
+        self.assertIn("capture_single_subpass_dependency(", capture2)
+        self.assertIn("rp->has_self_dependency", normalize)
+        self.assertIn("return false;", normalize)
+
+    def test_vulkan_classic_scope_matchers_are_mirrored_and_fail_closed(self):
+        icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
+
+        producer_normalize = c_function_body(
+            icd, "pdocker_vk_classic_normalize_stage_mask"
+        )
+        executor_normalize = c_function_body(
+            executor, "vulkan_graphics_v6_classic_normalize_stage_mask"
+        )
+        for body in [producer_normalize, executor_normalize]:
+            for marker in [
+                "VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT",
+                "if (!subpass_dependency)",
+                "VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT",
+                "VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT",
+                "VK_PIPELINE_STAGE_2_PRE_RASTERIZATION_SHADERS_BIT",
+                "mask & ~known",
+            ]:
+                self.assertIn(marker, body)
+
+        producer_access = c_function_body(
+            icd, "pdocker_vk_barrier_access_scope_covers"
+        )
+        executor_access = c_function_body(
+            executor, "vulkan_graphics_v6_access_scope_covers"
+        )
+        for body, known_helper, atom_helper in [
+            (
+                producer_access,
+                "pdocker_vk_classic_access_mask_known",
+                "pdocker_vk_classic_access_atoms",
+            ),
+            (
+                executor_access,
+                "vulkan_graphics_v6_classic_access_mask_known",
+                "vulkan_graphics_v6_classic_access_atoms",
+            ),
+        ]:
+            self.assertIn(known_helper, body)
+            self.assertIn(atom_helper, body)
+            self.assertIn("dependency_stage_mask", body)
+            self.assertIn("command_stage_mask", body)
+            self.assertIn("command_atoms & ~dependency_atoms", body)
+
+        for source, atom_helper, compatibility_helper in [
+            (
+                icd,
+                "pdocker_vk_classic_access_atoms",
+                "pdocker_vk_classic_stage_access_supported",
+            ),
+            (
+                executor,
+                "vulkan_graphics_v6_classic_access_atoms",
+                "vulkan_graphics_v6_classic_stage_access_supported",
+            ),
+        ]:
+            atom_body = c_function_body(source, atom_helper)
+            for marker in [
+                "VK_ACCESS_2_SHADER_READ_BIT",
+                "VK_ACCESS_2_SHADER_WRITE_BIT",
+                "VK_ACCESS_2_SHADER_SAMPLED_READ_BIT",
+                "VK_ACCESS_2_SHADER_STORAGE_READ_BIT",
+                "VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT",
+                "VK_ACCESS_2_MEMORY_READ_BIT",
+                "VK_ACCESS_2_MEMORY_WRITE_BIT",
+                "normalized_stage_mask",
+            ]:
+                self.assertIn(marker, atom_body)
+            compatibility_body = c_function_body(source, compatibility_helper)
+            self.assertIn(atom_helper, compatibility_body)
+            self.assertIn("non_memory", compatibility_body)
+
+        producer_match = c_function_body(
+            icd, "pdocker_vk_render_pass_has_covering_self_dependency"
+        )
+        executor_match = c_function_body(
+            executor, "vulkan_graphics_v632_self_dependency_covers_barrier_scope"
+        )
+        for body in [producer_match, executor_match]:
+            self.assertIn("dependency->src_subpass != subpass_index", body)
+            self.assertIn("dependency->dst_subpass != subpass_index", body)
+            self.assertIn("VK_DEPENDENCY_BY_REGION_BIT", body)
+            self.assertIn("VK_DEPENDENCY_VIEW_LOCAL_BIT", body)
+            self.assertIn("src_stage_mask", body)
+            self.assertIn("src_access_mask", body)
+            self.assertIn("dst_stage_mask", body)
+            self.assertIn("dst_access_mask", body)
+        self.assertIn(
+            "pdocker_vk_classic_stage_access_supported", producer_match
+        )
+        self.assertIn("view_mask & (view_mask - 1u)", producer_match)
+        self.assertIn(
+            "vulkan_graphics_v632_render_pass_dependency_semantics_valid",
+            executor_match,
+        )
+        # The return is inside one dependency iteration: scopes from distinct
+        # self-dependencies are not combined to cover one barrier command.
+        self.assertIn("for (uint32_t i = 0; i < rp->dependency_count; ++i)", producer_match)
+        self.assertIn("for (uint32_t d = 0; d < render_pass->dependency_count; ++d)", executor_match)
+
+    def test_vulkan_classic_pipeline_barriers_use_specific_flags_and_legality(self):
+        icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
+        base_flags = c_function_body(icd, "pdocker_vk_supported_dependency_flags")
+        render_pass_flags = c_function_body(
+            icd, "pdocker_vk_render_pass_dependency_flags"
+        )
+        pipeline_flags = c_function_body(
+            icd, "pdocker_vk_pipeline_barrier_dependency_flags_supported"
+        )
+        wait_flags = c_function_body(icd, "wait_events2_dependency_flags_forbidden")
+        executor_classic_flags = c_function_body(
+            executor, "vulkan_graphics_v634_classic_barrier_dependency_flags"
+        )
+
+        self.assertIn("VK_DEPENDENCY_BY_REGION_BIT", base_flags)
+        self.assertIn("VK_DEPENDENCY_DEVICE_GROUP_BIT", base_flags)
+        self.assertNotIn("VK_DEPENDENCY_VIEW_LOCAL_BIT", base_flags)
+        self.assertIn("VK_DEPENDENCY_VIEW_LOCAL_BIT", render_pass_flags)
+        self.assertIn("if (!classic_render_pass_scope", pipeline_flags)
+        self.assertIn("flags & VK_DEPENDENCY_VIEW_LOCAL_BIT", pipeline_flags)
+        self.assertIn(
+            "pdocker_vk_dependency_flags_supported_for_queue_family_state(",
+            pipeline_flags,
+        )
+        for body in [wait_flags, executor_classic_flags]:
+            self.assertIn("VK_DEPENDENCY_VIEW_LOCAL_BIT", body)
+        self.assertIn("VK_DEPENDENCY_FEEDBACK_LOOP_BIT_EXT", wait_flags)
+        self.assertNotIn(
+            "command_buffer_reject_pipeline_barrier_in_native_classic_scope", icd
+        )
+
+        legacy_api = c_function_body(icd, "vkCmdPipelineBarrier")
+        sync2_api = c_function_body(icd, "vkCmdPipelineBarrier2")
+        self.assertIn("pdocker_vk_legacy_classic_barrier_legal(", legacy_api)
+        self.assertIn("record_legacy_pipeline_barrier_ops(commandBuffer", legacy_api)
+        self.assertIn("pdocker_vk_sync2_classic_barrier_legal", sync2_api)
+        self.assertIn("record_dependency_info_barrier_ops(commandBuffer", sync2_api)
+
+        producer_scope = c_function_body(icd, "pdocker_vk_classic_barrier_scope_legal")
+        producer_image = c_function_body(
+            icd, "pdocker_vk_classic_image_barrier_legal_for_context"
+        )
+        for marker in [
+            "buffer_barrier_count != 0",
+            "pdocker_vk_pipeline_barrier_dependency_flags_supported(",
+            "VK_DEPENDENCY_BY_REGION_BIT",
+            "VK_DEPENDENCY_VIEW_LOCAL_BIT",
+            "pdocker_vk_render_pass_has_covering_self_dependency(",
+        ]:
+            self.assertIn(marker, producer_scope)
+        for marker in [
+            "old_layout != new_layout",
+            "src_queue_family_index != dst_queue_family_index",
+            "snapshot->image != image",
+            "pdocker_vk_classic_subpass_attachment_barrier_eligible(",
+        ]:
+            self.assertIn(marker, producer_image)
+
+        executor_scope = c_function_body(
+            executor, "vulkan_graphics_v634_classic_barrier_scope_legal"
+        )
+        executor_preflight = c_function_body(
+            executor, "preflight_vulkan_graphics_v634_classic_pipeline_barrier"
+        )
+        for marker in [
+            "VUID 01178",
+            "VUID 07892",
+            "VUID 07890",
+            "VUID 07891",
+            "VUID 07893",
+            "VUID 07889",
+        ]:
+            self.assertIn(marker, executor_scope)
+        for marker in [
+            "VUID 01181",
+            "VUID 01182",
+            "VUIDs 04073/10758",
+            "vulkan_graphics_v634_classic_barrier_image_attachment_legal(",
+        ]:
+            self.assertIn(marker, executor_preflight)
+
+        preflight = c_function_body(
+            executor, "preflight_vulkan_graphics_v6_replay_supported"
+        )
+        native = c_function_body(executor, "record_vulkan_graphics_v6_command_buffer")
+        self.assertIn(
+            "preflight_vulkan_graphics_v634_classic_pipeline_barrier(", preflight
+        )
+        self.assertNotIn(
+            "classic render pass cannot replay transported self-dependencies",
+            preflight,
+        )
+        self.assertIn(
+            "guard_vulkan_graphics_v634_classic_pipeline_barrier_native_call(",
+            native,
+        )
+        self.assertIn("rt->cmd_pipeline_barrier2(command_buffer, &dependency)", native)
+
+        native_guard = c_function_body(
+            executor,
+            "guard_vulkan_graphics_v634_classic_pipeline_barrier_native_call",
+        )
+        for marker in [
+            "const PdockerGpuVulkanGraphicsV61MemoryBarrierEntry *wire",
+            "const PdockerGpuVulkanGraphicsV61ImageBarrierEntry *wire",
+            "source_index != wire->image_index",
+            "wire->src_stage_mask",
+            "wire->src_access_mask",
+            "wire->dst_stage_mask",
+            "wire->dst_access_mask",
+            "wire->base_mip_level",
+            "wire->level_count",
+            "wire->base_array_layer",
+            "wire->layer_count",
+        ]:
+            self.assertIn(marker, native_guard)
+
+        runtime_features = c_function_body(
+            executor,
+            "vulkan_graphics_v6_classic_runtime_features_supported",
+        )
+        for marker in [
+            "enabled_vulkan11.multiview",
+            "render_pass_dependencies",
+            "memory_barriers",
+            "buffer_barriers",
+            "image_barriers",
+        ]:
+            self.assertIn(marker, runtime_features)
+
+        runtime_stage_features = c_function_body(
+            executor, "vulkan_graphics_v6_stage_features_enabled"
+        )
+        self.assertIn("enabled_features.geometryShader", runtime_stage_features)
+        self.assertIn("enabled_features.tessellationShader", runtime_stage_features)
+
+    def test_vulkan_classic_secondary_barrier_validation_is_deferred_and_atomic(self):
+        icd = VULKAN_ICD.read_text()
+        compatibility = c_function_body(icd, "command_buffers_can_execute_secondary")
+        secondary_sync = c_function_body(
+            icd, "secondary_sync_commands_legal_for_destination"
+        )
+        append = c_function_body(icd, "append_secondary_command_buffer")
+        recorded = c_function_body(
+            icd, "command_buffer_classic_recorded_barrier_legal"
+        )
+        image = c_function_body(
+            icd, "pdocker_vk_classic_image_barrier_legal_for_context"
+        )
+        legacy = c_function_body(icd, "pdocker_vk_legacy_classic_barrier_legal")
+        sync2 = c_function_body(icd, "pdocker_vk_sync2_classic_barrier_legal")
+
+        for marker in [
+            "primary->active_render_pass != secondary->active_render_pass",
+            "primary->active_subpass != secondary->active_subpass",
+            "secondary->active_framebuffer",
+        ]:
+            self.assertIn(marker, compatibility)
+        self.assertIn("command_buffer_classic_recorded_barrier_legal(", secondary_sync)
+        self.assertIn("case PDOCKER_VK_COMMAND_BARRIER", secondary_sync)
+        self.assertLess(
+            append.index("secondary_sync_commands_legal_for_destination(dst, src)"),
+            append.index("command_buffer_has_room_for_secondary(dst, src)"),
+        )
+        self.assertLess(
+            append.index("secondary_sync_commands_legal_for_destination(dst, src)"),
+            append.index("command_buffer_reserve_memory_barrier_ops"),
+        )
+        for body in [legacy, sync2]:
+            self.assertIn("const bool defer_identity =", body)
+            self.assertIn("cmd->level == VK_COMMAND_BUFFER_LEVEL_SECONDARY", body)
+            self.assertIn("cmd->inherited_rendering_active && !cmd->active_framebuffer", body)
+            self.assertIn("defer_identity", body)
+        self.assertIn("allow_deferred_framebuffer_identity", image)
+        self.assertIn("if (!allow_deferred_framebuffer_identity) return false", image)
+        self.assertIn("source->active_render_pass != destination->active_render_pass", recorded)
+        self.assertIn("source->active_subpass != destination->active_subpass", recorded)
+
+    def test_vulkan_legacy_empty_dependency_uses_memory_row_and_waits_remain_independent(self):
+        icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
+        legacy_record = c_function_body(icd, "record_legacy_pipeline_barrier_ops")
+        legacy_api = c_function_body(icd, "vkCmdPipelineBarrier")
+        wait_api = c_function_body(icd, "vkCmdWaitEvents")
+
+        for marker in [
+            "synthesize_empty_execution_scope && memoryBarrierCount == 0",
+            "bufferMemoryBarrierCount == 0 && imageMemoryBarrierCount == 0",
+            "record_memory_barrier_op(commandBuffer",
+            "(VkPipelineStageFlags2)srcStageMask",
+            "(VkPipelineStageFlags2)dstStageMask",
+        ]:
+            self.assertIn(marker, legacy_record)
+        for marker in [
+            "const uint32_t recorded_memory_barrier_count =",
+            "((memoryBarrierCount == 0 && bufferMemoryBarrierCount == 0 &&",
+            "recorded_memory_barrier_count",
+            "record_legacy_pipeline_barrier_ops(commandBuffer",
+        ]:
+            self.assertIn(marker, legacy_api)
+        pipeline_call = legacy_api.split(
+            "record_legacy_pipeline_barrier_ops(commandBuffer", 1
+        )[1].split("memoryBarrierCount", 1)[0]
+        self.assertIn("true", pipeline_call)
+        wait_call = wait_api.split(
+            "record_legacy_pipeline_barrier_ops(commandBuffer", 1
+        )[1].split("memoryBarrierCount", 1)[0]
+        self.assertIn("false", wait_call)
+
+        producer_wait = c_function_body(
+            icd, "secondary_wait_record_legal_for_render_pass_scope"
+        )
+        producer_barrier = c_function_body(
+            icd, "command_buffer_classic_recorded_barrier_legal"
+        )
+        executor_wait = c_function_body(
+            executor, "preflight_vulkan_graphics_v6_classic_wait_legal"
+        )
+        executor_barrier = c_function_body(
+            executor, "preflight_vulkan_graphics_v634_classic_pipeline_barrier"
+        )
+        self.assertNotIn("self_dependency", producer_wait)
+        self.assertIn("pdocker_vk_classic_barrier_scope_legal", producer_barrier)
+        self.assertNotIn("self_dependency", executor_wait)
+        self.assertIn("classic_barrier_scope_legal", executor_barrier)
+        self.assertIn("wait_events2_dependency_flags_forbidden", icd)
+        self.assertIn(
+            "vulkan_graphics_v6_wait_events2_forbidden_dependency_flags", executor
+        )
 
 
     def test_vulkan_graphics_v632_render_pass_transport_is_emitted_as_metadata_extension(self):
@@ -27939,8 +28851,7 @@ class GpuAbiContractTest(unittest.TestCase):
         for marker in [
             "vulkan_graphics_v632_attachment_for_index",
             "vulkan_graphics_v632_attachment_ref_replay_precondition_valid",
-            "dep->src_subpass != VK_SUBPASS_EXTERNAL",
-            "dep->dst_subpass != VK_SUBPASS_EXTERNAL",
+            "vulkan_graphics_v632_render_pass_dependency_semantics_valid(",
             "attachment->samples == 0",
         ]:
             self.assertIn(marker, replay_preconditions)

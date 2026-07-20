@@ -15,6 +15,25 @@ or closes.
 
 ### Vulkan pass-through docs sync 2026-06-14
 
+- [done] **classic render-pass synchronization legality lane**: Producer
+  recording, secondary flattening, executor preflight, and native-call guards
+  reject set/reset events and unsupported pipeline barriers in classic scope
+  without partial mutation. Legal event waits remain available only with a
+  nonzero event count, non-HOST source stages, stable layouts, equal queue
+  families, and command-valid dependency flags. SetEvent2 also rejects
+  non-preserved flags and HOST stages. Evidence: `tests.test_gpu_abi_contract`
+  and `tests.test_vulkan_icd_sync_harness`.
+- [done] **classic render-pass self-dependency replay lane**: The producer and
+  executor reuse V6.32 exact dependencies and V6.34 classic sideband, preserve
+  64-bit synchronization2 scopes, negotiate an explicit fail-closed capability,
+  and accept a barrier only when one self-dependency covers the whole command.
+  Stage/access compatibility, aggregate access aliases, multiview VIEW_LOCAL,
+  attachment/layout identity, feature enablement, secondary atomicity, and
+  exact native-call rows are validated independently on both sides. No new
+  frame ABI minor was added.
+- [done] **event API provenance metadata lane**: V6.35 append-only metadata
+  transports the legacy versus synchronization2 origin of set/reset/wait event
+  commands. Replay never infers provenance from flags or stage-mask values.
 - [done] **image-aspect docs audit**: The Vulkan graphics handoff now states
   that V6.10 image-copy replay is no longer color-only; it covers fd-backed
   single-aspect color/depth/stencil copy regions, including packed
@@ -101,7 +120,7 @@ or closes.
   failure reason, matching the executor's same-family/ignored-only replay contract.
 - [done] **ownership-transfer dependency no-op flag lane**: CPU harness coverage now proves `VK_DEPENDENCY_QUEUE_FAMILY_OWNERSHIP_TRANSFER_USE_ALL_STAGES_BIT_KHR` is stripped from recorded legacy/sync2 memory-only barriers, but fails closed without partial barrier state when paired with buffer queue-family ownership transfer. Evidence: `python3 -m unittest tests.test_vulkan_icd_sync_harness.VulkanIcdSyncHarnessTest.test_pipeline_barrier_noop_dependency_flags_are_stripped_or_rejected_with_ownership -q`.
 - [done] **event barrier prevalidation parity lane**: `vkCmdWaitEvents`, `vkCmdSetEvent2`, and `vkCmdWaitEvents2` now reuse the same CPU-side buffer/image barrier recording prevalidation as pipeline barriers, so mixed memory+bad buffer/image event payloads fail closed with `buffer-barrier-cross-queue-family` or `image-barrier-cross-queue-family` before any barrier table, event wait ref, command op, or graphics op is recorded. Evidence: `python3 -m unittest tests.test_vulkan_icd_sync_harness.VulkanIcdSyncHarnessTest.test_event_barrier_cross_queue_family_fails_before_partial_recording -q`.
-- [done] **event sync2 ownership-transfer dependency no-op parity lane**: `vkCmdSetEvent2` and `vkCmdWaitEvents2` now accept `VK_DEPENDENCY_QUEUE_FAMILY_OWNERSHIP_TRANSFER_USE_ALL_STAGES_BIT_KHR` as CPU-side no-op metadata for memory-only dependency info, strip it from recorded graphics transport flags, and fail closed with precise event dependency-flag reasons before any partial event/barrier state when the same dependency info includes real buffer/image queue-family ownership transfer. Evidence: `python3 -m unittest tests.test_vulkan_icd_sync_harness.VulkanIcdSyncHarnessTest.test_event_barrier_noop_dependency_flags_are_stripped_or_rejected_with_ownership -q`.
+- [done] **event sync2 dependency-flag legality lane**: `vkCmdSetEvent2` rejects every non-zero dependency flag until asymmetric-event metadata is transported; `vkCmdWaitEvents2` rejects command-forbidden flags such as BY_REGION, DEVICE_GROUP, VIEW_LOCAL, and FEEDBACK_LOOP. Both fail before partial barrier/event state. Evidence: `python3 -m unittest tests.test_vulkan_icd_sync_harness.VulkanIcdSyncHarnessTest.test_event_barrier_disallowed_dependency_flags_fail_without_partial_state -q`.
 - [done] **sync2 dependency-info shape gate**: `vkCmdPipelineBarrier2`,
   `vkCmdSetEvent2`, and `vkCmdWaitEvents2` now fail closed on null or malformed
   `VkDependencyInfo`/`Vk*MemoryBarrier2::sType` before any barrier table,

@@ -1135,6 +1135,7 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V632_ABI_MINOR 32u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V633_ABI_MINOR 33u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V634_ABI_MINOR 34u
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V635_ABI_MINOR 35u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_SUBMIT 1u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_FRAME_HEADER_SCHEMA_HASH 0x8787f343f2f4f255ull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_SHADER_STAGE_SCHEMA_HASH 0xc9b21285e5a281b8ull
@@ -1235,6 +1236,8 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V634_FRAMEBUFFER_ATTACHMENT_SCHEMA_HASH 0x7dbdd627fc1615f9ull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V634_RENDER_PASS_COMMAND_SCHEMA_HASH 0x4b4d4a3b1873faa9ull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V634_RENDER_PASS_CLEAR_VALUE_SCHEMA_HASH 0xdc309b9dabe71e6dull
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V635_HEADER_EXTENSION_SCHEMA_HASH 0x43c151a41ba7f2b0ull
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V635_EVENT_COMMAND_PROVENANCE_SCHEMA_HASH 0xe8fd104fb0e0b2e3ull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_FRAME_BYTES (8u * 1024u * 1024u)
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_SHADER_STAGES 16u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_PIPELINES 64u
@@ -1302,6 +1305,7 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V634_MAX_FRAMEBUFFER_ATTACHMENTS (PDOCKER_GPU_VULKAN_GRAPHICS_V634_MAX_FRAMEBUFFERS * PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_ATTACHMENTS)
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V634_MAX_RENDER_PASS_COMMANDS PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V634_MAX_RENDER_PASS_CLEAR_VALUES (PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS * PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_ATTACHMENTS)
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V635_MAX_EVENT_COMMAND_PROVENANCE PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS
 
 
 #define PDOCKER_GPU_GRAPHICS_V63_DEPTH_STENCIL_DEPTH_TEST_ENABLE 0x00000001u
@@ -2342,6 +2346,24 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
 #define PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_BEGIN 1u
 #define PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_NEXT_SUBPASS 2u
 #define PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_END 3u
+
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V635_HEADER_EXTENSION_FIELDS(X) \
+    X(event_command_provenance_count, u32) \
+    X(event_command_provenance_entry_size, u32) \
+    X(event_command_provenance_table_offset, u64) \
+    X(event_command_provenance_table_size, u64) \
+    X(event_command_provenance_schema_hash, u64) \
+    X(event_command_provenance_table_hash, u64) \
+    X(extension_hash, u64)
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V635_HEADER_EXTENSION_FIELD_COUNT 7u
+
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V635_EVENT_COMMAND_PROVENANCE_FIELDS(X) \
+    X(command_index, u32) \
+    X(api_variant, u32)
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V635_EVENT_COMMAND_PROVENANCE_FIELD_COUNT 2u
+
+#define PDOCKER_GPU_GRAPHICS_V635_EVENT_COMMAND_API_LEGACY 1u
+#define PDOCKER_GPU_GRAPHICS_V635_EVENT_COMMAND_API_SYNCHRONIZATION2 2u
 
 
 #define PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR 1u
@@ -4619,6 +4641,26 @@ typedef struct PdockerGpuVulkanGraphicsV634RenderPassClearValueEntry {
     uint32_t value2;
     uint32_t value3;
 } PdockerGpuVulkanGraphicsV634RenderPassClearValueEntry;
+
+typedef struct PdockerGpuVulkanGraphicsV635HeaderExtension {
+    uint32_t event_command_provenance_count;
+    uint32_t event_command_provenance_entry_size;
+    uint64_t event_command_provenance_table_offset;
+    uint64_t event_command_provenance_table_size;
+    uint64_t event_command_provenance_schema_hash;
+    uint64_t event_command_provenance_table_hash;
+    uint64_t extension_hash;
+} PdockerGpuVulkanGraphicsV635HeaderExtension;
+
+typedef struct PdockerGpuVulkanGraphicsV635FrameHeader {
+    PdockerGpuVulkanGraphicsV634FrameHeader v634;
+    PdockerGpuVulkanGraphicsV635HeaderExtension v635;
+} PdockerGpuVulkanGraphicsV635FrameHeader;
+
+typedef struct PdockerGpuVulkanGraphicsV635EventCommandProvenanceEntry {
+    uint32_t command_index;
+    uint32_t api_variant;
+} PdockerGpuVulkanGraphicsV635EventCommandProvenanceEntry;
 
 typedef struct PdockerGpuVulkanGraphicsV61DynamicOffsetEntry {
     uint32_t offset;

@@ -462,223 +462,505 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 const void *pNext;
             }} DummyPnext;
 
-            static int expect_reason(PdockerVkCommandBuffer *cmd, const char *reason) {{
-                if (!cmd->recording_failed) {{
-                    fprintf(stderr, "command buffer did not record failure\\n");
-                    return 0;
+            static PdockerVkCommandBuffer *new_sync2_cmd(void) {{
+                PdockerVkCommandBuffer *cmd = sync_test_command_buffer_alloc();
+                if (!cmd) return NULL;
+                cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
+                cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
+                return cmd;
+            }}
+
+            static int expect_clean_failure(
+                    PdockerVkCommandBuffer *cmd,
+                    const char *reason,
+                    int code) {{
+                if (!cmd || !cmd->recording_failed || !cmd->recording_failure_reason ||
+                    strcmp(cmd->recording_failure_reason, reason) != 0) {{
+                    fprintf(stderr, "case %d got=%s want=%s failed=%d\\n", code,
+                            cmd && cmd->recording_failure_reason
+                                ? cmd->recording_failure_reason : "<null>",
+                            reason, cmd && cmd->recording_failed ? 1 : 0);
+                    return code;
                 }}
-                if (!cmd->recording_failure_reason || strcmp(cmd->recording_failure_reason, reason) != 0) {{
-                    fprintf(stderr, "unexpected reason got=%s want=%s\\n",
-                            cmd->recording_failure_reason ? cmd->recording_failure_reason : "<null>", reason);
-                    return 0;
+                if (cmd->memory_barrier_op_count || cmd->buffer_barrier_op_count ||
+                    cmd->image_barrier_op_count || cmd->event_wait_ref_count ||
+                    cmd->command_op_count || cmd->graphics_command_op_count) {{
+                    fprintf(stderr, "case %d left partial command state\\n", code);
+                    return code + 100;
                 }}
-                return 1;
+                return 0;
             }}
 
             int main(void) {{
                 unsetenv("PDOCKER_GPU_QUEUE_SOCKET");
-                PdockerVkCommandBuffer *cmd = sync_test_command_buffer_alloc();
-                if (!cmd) return 9;
-                cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
-                cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
-
-                DummyPnext unsupported;
-                memset(&unsupported, 0, sizeof(unsupported));
-                unsupported.sType = (VkStructureType)1000060013;
-
-                VkDependencyInfo dependency;
-                memset(&dependency, 0, sizeof(dependency));
-                dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-                dependency.pNext = &unsupported;
-                vkCmdSetEvent2((VkCommandBuffer)cmd, VK_NULL_HANDLE, &dependency);
-                if (!expect_reason(cmd, "event-set2-dependency-info-unsupported")) return 2;
-                if (cmd->command_op_count != 0 || cmd->graphics_command_op_count != 0) {{
-                    fprintf(stderr, "unsupported set-event2 still recorded commands\\n");
-                    return 3;
-                }}
-
-                memset(cmd, 0, sizeof(*cmd));
-                cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
-                cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
-                memset(&dependency, 0, sizeof(dependency));
-                dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-                vkCmdSetEvent2((VkCommandBuffer)cmd, VK_NULL_HANDLE, &dependency);
-                if (!expect_reason(cmd, "event-set2-null-event")) return 4;
-                if (cmd->command_op_count != 0 || cmd->graphics_command_op_count != 0 ||
-                    cmd->memory_barrier_op_count != 0) {{
-                    fprintf(stderr, "null-event set-event2 still recorded commands\\n");
-                    return 5;
-                }}
-
-                memset(cmd, 0, sizeof(*cmd));
-                cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
-                cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
-                VkEventCreateInfo create_info;
-                memset(&create_info, 0, sizeof(create_info));
-                create_info.sType = VK_STRUCTURE_TYPE_EVENT_CREATE_INFO;
-                VkEvent event = VK_NULL_HANDLE;
-                event = sync_test_unowned_event();
-                if (!event) return 6;
+                VkEvent event = sync_test_unowned_event();
+                if (!event) return 90;
 
                 VkMemoryBarrier2 memory_barrier;
                 memset(&memory_barrier, 0, sizeof(memory_barrier));
                 memory_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
                 memory_barrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+                memory_barrier.srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT;
                 memory_barrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+                memory_barrier.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
+
+                VkDependencyInfo dependency;
                 memset(&dependency, 0, sizeof(dependency));
                 dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-                dependency.dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
                 dependency.memoryBarrierCount = 1;
                 dependency.pMemoryBarriers = &memory_barrier;
+
+                PdockerVkCommandBuffer *cmd = new_sync2_cmd();
+                if (!cmd) return 91;
+                DummyPnext unsupported;
+                memset(&unsupported, 0, sizeof(unsupported));
+                unsupported.sType = (VkStructureType)1000060013;
+                dependency.pNext = &unsupported;
                 vkCmdSetEvent2((VkCommandBuffer)cmd, event, &dependency);
-                if (cmd->recording_failed) {{
-                    fprintf(stderr, "barrier-payload set-event2 unexpectedly failed: %s\\n",
-                            cmd->recording_failure_reason ? cmd->recording_failure_reason : "<null>");
+                int rc = expect_clean_failure(cmd, "event-set2-dependency-info-unsupported", 2);
+                if (rc) return rc;
+
+                cmd = new_sync2_cmd();
+                if (!cmd) return 92;
+                dependency.pNext = NULL;
+                dependency.dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+                vkCmdSetEvent2((VkCommandBuffer)cmd, event, &dependency);
+                rc = expect_clean_failure(cmd, "event-set2-dependency-flags-unsupported", 3);
+                if (rc) return rc;
+
+                cmd = new_sync2_cmd();
+                if (!cmd) return 93;
+                dependency.dependencyFlags = 0;
+                memory_barrier.srcStageMask = VK_PIPELINE_STAGE_2_HOST_BIT;
+                vkCmdSetEvent2((VkCommandBuffer)cmd, event, &dependency);
+                rc = expect_clean_failure(cmd, "event-set2-host-stage-unsupported", 4);
+                if (rc) return rc;
+
+                cmd = new_sync2_cmd();
+                if (!cmd) return 94;
+                memory_barrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+                VkEvent invalid_event = (VkEvent)(uintptr_t)0x1234u;
+                vkCmdSetEvent2((VkCommandBuffer)cmd, invalid_event, &dependency);
+                rc = expect_clean_failure(cmd, "event-command-null-event", 20);
+                if (rc) return rc;
+
+                cmd = new_sync2_cmd();
+                if (!cmd) return 97;
+                vkCmdSetEvent((VkCommandBuffer)cmd, event, VK_PIPELINE_STAGE_HOST_BIT);
+                rc = expect_clean_failure(cmd, "event-set-host-stage-unsupported", 21);
+                if (rc) return rc;
+
+                cmd = new_sync2_cmd();
+                if (!cmd) return 98;
+                vkCmdResetEvent((VkCommandBuffer)cmd, event, VK_PIPELINE_STAGE_HOST_BIT);
+                rc = expect_clean_failure(cmd, "event-reset-host-stage-unsupported", 22);
+                if (rc) return rc;
+
+                cmd = new_sync2_cmd();
+                if (!cmd) return 99;
+                vkCmdResetEvent2((VkCommandBuffer)cmd, event, VK_PIPELINE_STAGE_2_HOST_BIT);
+                rc = expect_clean_failure(cmd, "event-reset2-host-stage-unsupported", 23);
+                if (rc) return rc;
+
+                cmd = new_sync2_cmd();
+                if (!cmd) return 94;
+                vkCmdSetEvent2((VkCommandBuffer)cmd, event, &dependency);
+                if (cmd->recording_failed || cmd->command_op_count != 1 ||
+                    cmd->graphics_command_op_count != 1 ||
+                    cmd->memory_barrier_op_count != 1 ||
+                    cmd->command_ops[0].type != PDOCKER_VK_COMMAND_EVENT ||
+                    cmd->command_ops[0].event_api_variant !=
+                        PDOCKER_GPU_GRAPHICS_V635_EVENT_COMMAND_API_SYNCHRONIZATION2 ||
+                    cmd->graphics_command_ops[0].event_api_variant !=
+                        PDOCKER_GPU_GRAPHICS_V635_EVENT_COMMAND_API_SYNCHRONIZATION2 ||
+                    cmd->graphics_command_ops[0].command_type !=
+                        PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT) {{
+                    fprintf(stderr, "valid set-event2 payload was not recorded\\n");
+                    return 5;
+                }}
+
+                VkEvent events[1] = {{ event }};
+                cmd = new_sync2_cmd();
+                if (!cmd) return 95;
+                dependency.dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+                vkCmdWaitEvents2((VkCommandBuffer)cmd, 1, events, &dependency);
+                rc = expect_clean_failure(cmd, "event-wait2-dependency-flags-forbidden", 6);
+                if (rc) return rc;
+
+                cmd = new_sync2_cmd();
+                if (!cmd) return 96;
+                dependency.dependencyFlags = 0;
+                VkEvent mixed_events[2] = {{ event, invalid_event }};
+                VkDependencyInfo mixed_dependencies[2] = {{ dependency, dependency }};
+                vkCmdWaitEvents2(
+                    (VkCommandBuffer)cmd, 2, mixed_events, mixed_dependencies);
+                rc = expect_clean_failure(cmd, "event-wait-null-event", 24);
+                if (rc) return rc;
+
+                cmd = new_sync2_cmd();
+                if (!cmd) return 96;
+                vkCmdWaitEvents2((VkCommandBuffer)cmd, 1, events, &dependency);
+                if (cmd->recording_failed || cmd->command_op_count != 1 ||
+                    cmd->graphics_command_op_count != 1 ||
+                    cmd->memory_barrier_op_count != 1 ||
+                    cmd->event_wait_ref_count != 1 ||
+                    cmd->command_ops[0].type != PDOCKER_VK_COMMAND_EVENT_WAIT ||
+                    cmd->command_ops[0].event_api_variant !=
+                        PDOCKER_GPU_GRAPHICS_V635_EVENT_COMMAND_API_SYNCHRONIZATION2 ||
+                    cmd->graphics_command_ops[0].event_api_variant !=
+                        PDOCKER_GPU_GRAPHICS_V635_EVENT_COMMAND_API_SYNCHRONIZATION2 ||
+                    cmd->graphics_command_ops[0].command_type !=
+                        PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT) {{
+                    fprintf(stderr, "valid wait-events2 payload was not recorded\\n");
                     return 7;
                 }}
-                if (cmd->command_op_count != 1 || cmd->graphics_command_op_count != 1 ||
-                    cmd->memory_barrier_op_count != 1 ||
-                    cmd->command_ops[0].type != PDOCKER_VK_COMMAND_EVENT ||
-                    cmd->graphics_command_ops[0].command_type != PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT ||
-                    cmd->graphics_command_ops[0].flags != VK_DEPENDENCY_BY_REGION_BIT ||
-                    cmd->graphics_command_ops[0].memory_barrier_op_first != 0 ||
-                    cmd->graphics_command_ops[0].memory_barrier_op_count != 1) {{
-                    fprintf(stderr, "barrier-payload set-event2 was not captured ops=%u graphics=%u mem=%u flags=%u first=%u count=%u\\n",
-                            cmd->command_op_count, cmd->graphics_command_op_count,
-                            cmd->memory_barrier_op_count,
-                            cmd->graphics_command_op_count ? cmd->graphics_command_ops[0].flags : 0,
-                            cmd->graphics_command_op_count ? cmd->graphics_command_ops[0].memory_barrier_op_first : 0,
-                            cmd->graphics_command_op_count ? cmd->graphics_command_ops[0].memory_barrier_op_count : 0);
-                    return 8;
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_classic_render_pass_event_sync_legality_and_secondary_flattening(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include <stdlib.h>
+            #include "{ICD_SOURCE}"
+            {COMMAND_BUFFER_LIVE_REGISTRY_HELPER}
+
+            static PdockerVkCommandBuffer *new_cmd(int sync2) {{
+                PdockerVkCommandBuffer *cmd = sync_test_command_buffer_alloc();
+                if (!cmd) return NULL;
+                if (sync2) {{
+                    cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
+                    cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
                 }}
-                if (!command_buffer_needs_graphics_submit_sync_frame(cmd)) {{
-                    fprintf(stderr, "barrier-payload set-event2 did not require executor submit frame\\n");
-                    return 81;
+                return cmd;
+            }}
+
+            static int expect_clean_failure(
+                    PdockerVkCommandBuffer *cmd,
+                    const char *reason,
+                    int code) {{
+                if (!cmd || !cmd->recording_failed || !cmd->recording_failure_reason ||
+                    strcmp(cmd->recording_failure_reason, reason) != 0) {{
+                    fprintf(stderr, "case %d got=%s want=%s failed=%d\\n", code,
+                            cmd && cmd->recording_failure_reason
+                                ? cmd->recording_failure_reason : "<null>",
+                            reason, cmd && cmd->recording_failed ? 1 : 0);
+                    return code;
+                }}
+                if (cmd->memory_barrier_op_count || cmd->buffer_barrier_op_count ||
+                    cmd->image_barrier_op_count || cmd->event_wait_ref_count ||
+                    cmd->command_op_count || cmd->graphics_command_op_count) {{
+                    fprintf(stderr, "case %d left partial command state\\n", code);
+                    return code + 100;
+                }}
+                return 0;
+            }}
+
+            int main(void) {{
+                unsetenv("PDOCKER_GPU_QUEUE_SOCKET");
+                VkEvent event = sync_test_unowned_event();
+                if (!event) return 90;
+                VkEvent events[1] = {{ event }};
+                PdockerVkCommandBuffer *cmd = new_cmd(0);
+                if (!cmd) return 91;
+                cmd->render_pass_active = true;
+                vkCmdSetEvent((VkCommandBuffer)cmd, event,
+                              VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+                int rc = expect_clean_failure(cmd, "event-set-inside-render-pass", 2);
+                if (rc) return rc;
+
+                cmd = new_cmd(0);
+                if (!cmd) return 92;
+                cmd->render_pass_active = true;
+                vkCmdPipelineBarrier((VkCommandBuffer)cmd,
+                                     VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                                     VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                                     0, 0, NULL, 0, NULL, 0, NULL);
+                rc = expect_clean_failure(
+                    cmd, "legacy-pipeline-barrier-classic-self-dependency-unsupported", 3);
+                if (rc) return rc;
+
+                cmd = new_cmd(0);
+                if (!cmd) return 93;
+                cmd->render_pass_active = true;
+                vkCmdWaitEvents((VkCommandBuffer)cmd, 0, NULL,
+                                VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                                VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                                0, NULL, 0, NULL, 0, NULL);
+                rc = expect_clean_failure(cmd, "event-wait-zero-event", 4);
+                if (rc) return rc;
+
+                cmd = new_cmd(0);
+                if (!cmd) return 94;
+                cmd->render_pass_active = true;
+                vkCmdWaitEvents((VkCommandBuffer)cmd, 1, events,
+                                VK_PIPELINE_STAGE_HOST_BIT,
+                                VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                                0, NULL, 0, NULL, 0, NULL);
+                rc = expect_clean_failure(
+                    cmd, "event-wait-host-source-stage-inside-render-pass", 5);
+                if (rc) return rc;
+
+                VkImageMemoryBarrier image_barrier;
+                memset(&image_barrier, 0, sizeof(image_barrier));
+                image_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+                image_barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+                image_barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                cmd = new_cmd(0);
+                if (!cmd) return 95;
+                cmd->render_pass_active = true;
+                vkCmdWaitEvents((VkCommandBuffer)cmd, 1, events,
+                                VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                                VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                                0, NULL, 0, NULL, 1, &image_barrier);
+                rc = expect_clean_failure(
+                    cmd, "event-wait-image-layout-transition-inside-render-pass", 6);
+                if (rc) return rc;
+
+                cmd = new_cmd(0);
+                if (!cmd) return 96;
+                cmd->render_pass_active = true;
+                vkCmdWaitEvents((VkCommandBuffer)cmd, 1, events,
+                                VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                                VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                                0, NULL, 0, NULL, 0, NULL);
+                if (cmd->recording_failed || cmd->command_op_count != 1 ||
+                    cmd->graphics_command_op_count != 1 ||
+                    cmd->event_wait_ref_count != 1 ||
+                    cmd->command_ops[0].type != PDOCKER_VK_COMMAND_EVENT_WAIT ||
+                    cmd->command_ops[0].event_api_variant !=
+                        PDOCKER_GPU_GRAPHICS_V635_EVENT_COMMAND_API_LEGACY ||
+                    cmd->graphics_command_ops[0].event_api_variant !=
+                        PDOCKER_GPU_GRAPHICS_V635_EVENT_COMMAND_API_LEGACY) {{
+                    fprintf(stderr, "legal classic wait was not recorded with legacy provenance\\n");
+                    return 7;
                 }}
 
-                memset(cmd, 0, sizeof(*cmd));
-                cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
-                cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
+                cmd = new_cmd(1);
+                if (!cmd) return 97;
+                cmd->render_pass_active = true;
+                VkDependencyInfo dependency;
                 memset(&dependency, 0, sizeof(dependency));
                 dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
                 dependency.dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
-                vkCmdSetEvent2((VkCommandBuffer)cmd, event, &dependency);
-                if (cmd->recording_failed) {{
-                    fprintf(stderr, "by-region set-event2 unexpectedly failed: %s\\n",
-                            cmd->recording_failure_reason ? cmd->recording_failure_reason : "<null>");
+                vkCmdWaitEvents2((VkCommandBuffer)cmd, 1, events, &dependency);
+                rc = expect_clean_failure(
+                    cmd, "event-wait2-dependency-flags-forbidden", 8);
+                if (rc) return rc;
+
+                PdockerVkCommandBuffer *primary = new_cmd(0);
+                PdockerVkCommandBuffer *secondary = new_cmd(0);
+                if (!primary || !secondary) return 98;
+                PdockerVkCommandPool *pool = sync_test_command_pool();
+                pool->owner_device_id = 0x44u;
+                primary->owner_device_id = 0x44u;
+                secondary->owner_device_id = 0x44u;
+                event_handle_target(event)->owner_device_id = 0x44u;
+                primary->level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+                secondary->level = VK_COMMAND_BUFFER_LEVEL_SECONDARY;
+                primary->render_pass_active = true;
+                vkCmdSetEvent((VkCommandBuffer)secondary, event,
+                              VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+                if (secondary->recording_failed || secondary->command_op_count != 1) {{
+                    fprintf(stderr, "outside secondary setup failed\\n");
                     return 9;
                 }}
-                if (cmd->command_op_count != 1 || cmd->graphics_command_op_count != 1 ||
-                    cmd->command_ops[0].type != PDOCKER_VK_COMMAND_EVENT ||
-                    cmd->graphics_command_ops[0].command_type != PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT ||
-                    cmd->graphics_command_ops[0].flags != VK_DEPENDENCY_BY_REGION_BIT) {{
-                    fprintf(stderr, "by-region set-event2 was not captured as event flags ops=%u graphics=%u flags=%u\\n",
-                            cmd->command_op_count, cmd->graphics_command_op_count,
-                            cmd->graphics_command_op_count ? cmd->graphics_command_ops[0].flags : 0);
+                const uint32_t before_commands = primary->command_op_count;
+                const uint32_t before_graphics = primary->graphics_command_op_count;
+                if (append_secondary_command_buffer(primary, secondary)) {{
+                    fprintf(stderr, "illegal secondary event entered classic primary\\n");
                     return 10;
                 }}
-                if (command_buffer_needs_graphics_submit_sync_frame(cmd)) {{
-                    fprintf(stderr, "by-region-only non-tracked set-event2 should not require executor submit frame\\n");
-                    return 101;
-                }}
-
-                memset(cmd, 0, sizeof(*cmd));
-                cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
-                cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
-                VkEvent events[1] = {{ event }};
-                memset(&dependency, 0, sizeof(dependency));
-                dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-                dependency.dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
-                dependency.memoryBarrierCount = 1;
-                dependency.pMemoryBarriers = &memory_barrier;
-                vkCmdWaitEvents2((VkCommandBuffer)cmd, 1, events, &dependency);
-                if (cmd->recording_failed) {{
-                    fprintf(stderr, "barrier-payload wait-events2 unexpectedly failed: %s\\n",
-                            cmd->recording_failure_reason ? cmd->recording_failure_reason : "<null>");
+                if (primary->command_op_count != before_commands ||
+                    primary->graphics_command_op_count != before_graphics) {{
+                    fprintf(stderr, "failed secondary append partially mutated primary\\n");
                     return 11;
                 }}
-                if (cmd->command_op_count != 1 || cmd->graphics_command_op_count != 1 ||
-                    cmd->memory_barrier_op_count != 1 ||
-                    cmd->command_ops[0].type != PDOCKER_VK_COMMAND_EVENT_WAIT ||
-                    cmd->graphics_command_ops[0].command_type != PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT ||
-                    cmd->graphics_command_ops[0].flags != VK_DEPENDENCY_BY_REGION_BIT ||
-                    cmd->graphics_command_ops[0].memory_barrier_op_first != 0 ||
-                    cmd->graphics_command_ops[0].memory_barrier_op_count != 1) {{
-                    fprintf(stderr, "barrier-payload wait-events2 was not captured ops=%u graphics=%u mem=%u flags=%u first=%u count=%u\\n",
-                            cmd->command_op_count, cmd->graphics_command_op_count,
-                            cmd->memory_barrier_op_count,
-                            cmd->graphics_command_op_count ? cmd->graphics_command_ops[0].flags : 0,
-                            cmd->graphics_command_op_count ? cmd->graphics_command_ops[0].memory_barrier_op_first : 0,
-                            cmd->graphics_command_op_count ? cmd->graphics_command_ops[0].memory_barrier_op_count : 0);
+
+                PdockerVkCommandBuffer *primary2 = new_cmd(1);
+                PdockerVkCommandBuffer *secondary2 = new_cmd(1);
+                if (!primary2 || !secondary2) return 99;
+                primary2->owner_device_id = 0x44u;
+                secondary2->owner_device_id = 0x44u;
+                primary2->level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+                secondary2->level = VK_COMMAND_BUFFER_LEVEL_SECONDARY;
+                vkCmdResetEvent2((VkCommandBuffer)secondary2, event,
+                                 VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+                if (secondary2->recording_failed || secondary2->command_op_count != 1 ||
+                    secondary2->graphics_command_op_count != 1 ||
+                    secondary2->command_ops[0].event_api_variant !=
+                        PDOCKER_GPU_GRAPHICS_V635_EVENT_COMMAND_API_SYNCHRONIZATION2 ||
+                    secondary2->graphics_command_ops[0].event_api_variant !=
+                        PDOCKER_GPU_GRAPHICS_V635_EVENT_COMMAND_API_SYNCHRONIZATION2) {{
+                    fprintf(stderr, "secondary sync2 provenance setup failed\\n");
                     return 12;
                 }}
-                if (!command_buffer_needs_graphics_submit_sync_frame(cmd)) {{
-                    fprintf(stderr, "barrier-payload wait-events2 did not require executor submit frame\\n");
-                    return 121;
-                }}
-
-                memset(cmd, 0, sizeof(*cmd));
-                cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
-                cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
-                VkMemoryBarrier legacy_memory_barrier;
-                memset(&legacy_memory_barrier, 0, sizeof(legacy_memory_barrier));
-                legacy_memory_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-                legacy_memory_barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-                legacy_memory_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-                vkCmdWaitEvents((VkCommandBuffer)cmd, 1, events,
-                                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                                1, &legacy_memory_barrier, 0, NULL, 0, NULL);
-                if (cmd->recording_failed) {{
-                    fprintf(stderr, "legacy barrier-payload wait-events unexpectedly failed: %s\\n",
-                            cmd->recording_failure_reason ? cmd->recording_failure_reason : "<null>");
+                if (!append_secondary_command_buffer(primary2, secondary2)) {{
+                    fprintf(stderr, "legal secondary provenance append failed\\n");
                     return 13;
                 }}
-                if (cmd->command_op_count != 1 || cmd->graphics_command_op_count != 1 ||
-                    cmd->memory_barrier_op_count != 1 ||
-                    cmd->command_ops[0].type != PDOCKER_VK_COMMAND_EVENT_WAIT ||
-                    cmd->graphics_command_ops[0].command_type != PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT ||
-                    cmd->graphics_command_ops[0].memory_barrier_op_first != 0 ||
-                    cmd->graphics_command_ops[0].memory_barrier_op_count != 1 ||
-                    !command_buffer_needs_graphics_submit_sync_frame(cmd)) {{
-                    fprintf(stderr, "legacy barrier-payload wait-events did not record replayable submit frame ops=%u graphics=%u mem=%u need=%d\\n",
-                            cmd->command_op_count, cmd->graphics_command_op_count,
-                            cmd->memory_barrier_op_count,
-                            command_buffer_needs_graphics_submit_sync_frame(cmd) ? 1 : 0);
+                if (primary2->recording_failed || primary2->command_op_count != 1 ||
+                    primary2->graphics_command_op_count != 1 ||
+                    primary2->command_ops[0].event_api_variant !=
+                        PDOCKER_GPU_GRAPHICS_V635_EVENT_COMMAND_API_SYNCHRONIZATION2 ||
+                    primary2->graphics_command_ops[0].event_api_variant !=
+                        PDOCKER_GPU_GRAPHICS_V635_EVENT_COMMAND_API_SYNCHRONIZATION2) {{
+                    fprintf(stderr, "secondary flattening lost sync2 provenance\\n");
                     return 14;
                 }}
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-                memset(cmd, 0, sizeof(*cmd));
-                cmd->requested_feature_mask = PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
-                cmd->enabled_extension_mask = PDOCKER_VK_DEVICE_EXT_KHR_SYNCHRONIZATION_2;
-                VkEvent two_events[2] = {{ event, event }};
-                vkCmdWaitEvents((VkCommandBuffer)cmd, 2, two_events,
-                                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                                1, &legacy_memory_barrier, 0, NULL, 0, NULL);
-                if (cmd->recording_failed) {{
-                    fprintf(stderr, "multi-event legacy barrier wait-events unexpectedly failed: %s\\n",
-                            cmd->recording_failure_reason ? cmd->recording_failure_reason : "<null>");
-                    return 15;
+    def test_classic_self_dependency_scope_matcher_executes_c_code(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include "{ICD_SOURCE}"
+
+            static void init_dependency(
+                    PdockerVkRenderPassDependencyExactState *dep,
+                    VkAccessFlags2 src_access,
+                    VkAccessFlags2 dst_access,
+                    VkDependencyFlags flags) {{
+                memset(dep, 0, sizeof(*dep));
+                dep->src_subpass = 0;
+                dep->dst_subpass = 0;
+                dep->src_stage_mask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+                dep->dst_stage_mask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+                dep->src_access_mask = src_access;
+                dep->dst_access_mask = dst_access;
+                dep->dependency_flags = flags;
+            }}
+
+            static PdockerVkBarrierScopeSummary fragment_scope(
+                    VkAccessFlags2 src_access,
+                    VkAccessFlags2 dst_access) {{
+                PdockerVkBarrierScopeSummary summary;
+                memset(&summary, 0, sizeof(summary));
+                summary.src_stage_mask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+                summary.dst_stage_mask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+                summary.src_access_mask = src_access;
+                summary.dst_access_mask = dst_access;
+                return summary;
+            }}
+
+            int main(void) {{
+                PdockerVkRenderPass rp;
+                memset(&rp, 0, sizeof(rp));
+                rp.subpass_count = 1;
+                rp.dependency_count = 1;
+                rp.has_self_dependency = true;
+                init_dependency(
+                    &rp.dependencies[0],
+                    VK_ACCESS_2_SHADER_READ_BIT,
+                    VK_ACCESS_2_SHADER_WRITE_BIT,
+                    0);
+                PdockerVkBarrierScopeSummary summary = fragment_scope(
+                    VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+                    VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+                if (!pdocker_vk_render_pass_has_covering_self_dependency(
+                        &rp, 0, 0, &summary)) {{
+                    fprintf(stderr, "shader aggregate did not cover specific atoms\\n");
+                    return 2;
                 }}
-                if (cmd->command_op_count != 1 || cmd->graphics_command_op_count != 1 ||
-                    cmd->memory_barrier_op_count != 1 ||
-                    cmd->command_ops[0].type != PDOCKER_VK_COMMAND_EVENT_WAIT ||
-                    cmd->command_ops[0].event_wait_ref_count != 2 ||
-                    cmd->event_wait_ref_count != 2 ||
-                    cmd->graphics_command_ops[0].command_type != PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT ||
-                    cmd->graphics_command_ops[0].memory_barrier_op_first != 0 ||
-                    cmd->graphics_command_ops[0].memory_barrier_op_count != 1 ||
-                    !command_buffer_needs_graphics_submit_sync_frame(cmd)) {{
-                    fprintf(stderr, "multi-event legacy barrier wait-events did not record refs ops=%u graphics=%u mem=%u refs=%u op_refs=%u need=%d\\n",
-                            cmd->command_op_count, cmd->graphics_command_op_count,
-                            cmd->memory_barrier_op_count, cmd->event_wait_ref_count,
-                            cmd->command_op_count ? cmd->command_ops[0].event_wait_ref_count : 0,
-                            command_buffer_needs_graphics_submit_sync_frame(cmd) ? 1 : 0);
-                    return 16;
+
+                init_dependency(
+                    &rp.dependencies[0],
+                    VK_ACCESS_2_SHADER_SAMPLED_READ_BIT |
+                        VK_ACCESS_2_SHADER_STORAGE_READ_BIT,
+                    VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                    0);
+                summary = fragment_scope(
+                    VK_ACCESS_2_SHADER_READ_BIT,
+                    VK_ACCESS_2_SHADER_WRITE_BIT);
+                if (!pdocker_vk_render_pass_has_covering_self_dependency(
+                        &rp, 0, 0, &summary)) {{
+                    fprintf(stderr, "specific atoms did not cover shader aggregate\\n");
+                    return 3;
                 }}
-                vkDestroyEvent(VK_NULL_HANDLE, event, NULL);
-                free(cmd);
+
+                PdockerVkBarrierScopeSummary invalid;
+                memset(&invalid, 0, sizeof(invalid));
+                if (pdocker_vk_barrier_scope_summary_add(
+                        &invalid,
+                        VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
+                        VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                        VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
+                        0)) {{
+                    fprintf(stderr, "invalid stage/access pair was accepted\\n");
+                    return 4;
+                }}
+                memset(&invalid, 0, sizeof(invalid));
+                if (!pdocker_vk_barrier_scope_summary_add(
+                        &invalid,
+                        VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                        VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT,
+                        VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                        0)) {{
+                    fprintf(stderr, "valid fragment color read was rejected\\n");
+                    return 5;
+                }}
+
+                rp.subpasses[0].view_mask = 3;
+                init_dependency(
+                    &rp.dependencies[0],
+                    VK_ACCESS_2_SHADER_READ_BIT,
+                    VK_ACCESS_2_SHADER_WRITE_BIT,
+                    0);
+                summary = fragment_scope(
+                    VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+                    VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+                if (pdocker_vk_render_pass_has_covering_self_dependency(
+                        &rp, 0, VK_DEPENDENCY_VIEW_LOCAL_BIT, &summary)) {{
+                    fprintf(stderr, "command VIEW_LOCAL compensated missing dependency flag\\n");
+                    return 6;
+                }}
+                rp.dependencies[0].dependency_flags = VK_DEPENDENCY_VIEW_LOCAL_BIT;
+                if (!pdocker_vk_render_pass_has_covering_self_dependency(
+                        &rp, 0, VK_DEPENDENCY_VIEW_LOCAL_BIT, &summary)) {{
+                    fprintf(stderr, "valid multiview self-dependency was rejected\\n");
+                    return 7;
+                }}
+
+                rp.subpasses[0].view_mask = 0;
+                rp.dependency_count = 2;
+                init_dependency(
+                    &rp.dependencies[0],
+                    VK_ACCESS_2_SHADER_READ_BIT, 0, 0);
+                init_dependency(
+                    &rp.dependencies[1],
+                    0, VK_ACCESS_2_SHADER_WRITE_BIT, 0);
+                if (pdocker_vk_render_pass_has_covering_self_dependency(
+                        &rp, 0, 0, &summary)) {{
+                    fprintf(stderr, "partial dependencies were incorrectly combined\\n");
+                    return 8;
+                }}
+
+                rp.dependency_count = 1;
+                init_dependency(
+                    &rp.dependencies[0],
+                    VK_ACCESS_2_SHADER_READ_BIT,
+                    VK_ACCESS_2_SHADER_WRITE_BIT,
+                    0);
+                rp.dependencies[0].src_stage_mask =
+                    VK_PIPELINE_STAGE_2_GEOMETRY_SHADER_BIT;
+                if (pdocker_vk_render_pass_has_covering_self_dependency(
+                        &rp, 0, 0, &summary)) {{
+                    fprintf(stderr, "disabled geometry stage was accepted\\n");
+                    return 9;
+                }}
                 return 0;
             }}
             """
@@ -1888,6 +2170,9 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
             #include <stdio.h>
             #include <string.h>
             #include <stdlib.h>
+            #ifndef VK_DEPENDENCY_QUEUE_FAMILY_OWNERSHIP_TRANSFER_USE_ALL_STAGES_BIT_KHR
+            #define VK_DEPENDENCY_QUEUE_FAMILY_OWNERSHIP_TRANSFER_USE_ALL_STAGES_BIT_KHR 0x00000020u
+            #endif
             #include "{ICD_SOURCE}"
             {COMMAND_BUFFER_LIVE_REGISTRY_HELPER}
 
@@ -2070,13 +2355,16 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-    def test_event_barrier_noop_dependency_flags_are_stripped_or_rejected_with_ownership(self):
+    def test_event_barrier_disallowed_dependency_flags_fail_without_partial_state(self):
         source = textwrap.dedent(
             rf"""
             #include <stdint.h>
             #include <stdio.h>
             #include <string.h>
             #include <stdlib.h>
+            #ifndef VK_DEPENDENCY_QUEUE_FAMILY_OWNERSHIP_TRANSFER_USE_ALL_STAGES_BIT_KHR
+            #define VK_DEPENDENCY_QUEUE_FAMILY_OWNERSHIP_TRANSFER_USE_ALL_STAGES_BIT_KHR 0x00000020u
+            #endif
             #include "{ICD_SOURCE}"
             {COMMAND_BUFFER_LIVE_REGISTRY_HELPER}
 
@@ -2172,33 +2460,15 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
 
                 reset_cmd(cmd);
                 vkCmdSetEvent2((VkCommandBuffer)cmd, event, &dependency);
-                if (cmd->recording_failed || cmd->memory_barrier_op_count != 1 ||
-                    cmd->command_op_count != 1 || cmd->graphics_command_op_count != 1 ||
-                    cmd->graphics_command_ops[0].flags != VK_DEPENDENCY_BY_REGION_BIT) {{
-                    fprintf(stderr, "set-event2 noop flag was not accepted/stripped failed=%d mem=%u cmd=%u gfx=%u flags=0x%x\n",
-                            cmd->recording_failed ? 1 : 0,
-                            cmd->memory_barrier_op_count,
-                            cmd->command_op_count,
-                            cmd->graphics_command_op_count,
-                            cmd->graphics_command_op_count ? cmd->graphics_command_ops[0].flags : 0);
-                    return 2;
-                }}
+                int rc = expect_no_partial_failure(
+                    cmd, "event-set2-dependency-flags-unsupported", 2);
+                if (rc) return rc;
 
                 reset_cmd(cmd);
                 vkCmdWaitEvents2((VkCommandBuffer)cmd, 1, events, &dependency);
-                if (cmd->recording_failed || cmd->memory_barrier_op_count != 1 ||
-                    cmd->event_wait_ref_count != 1 ||
-                    cmd->command_op_count != 1 || cmd->graphics_command_op_count != 1 ||
-                    cmd->graphics_command_ops[0].flags != VK_DEPENDENCY_BY_REGION_BIT) {{
-                    fprintf(stderr, "wait-events2 noop flag was not accepted/stripped failed=%d mem=%u refs=%u cmd=%u gfx=%u flags=0x%x\n",
-                            cmd->recording_failed ? 1 : 0,
-                            cmd->memory_barrier_op_count,
-                            cmd->event_wait_ref_count,
-                            cmd->command_op_count,
-                            cmd->graphics_command_op_count,
-                            cmd->graphics_command_op_count ? cmd->graphics_command_ops[0].flags : 0);
-                    return 3;
-                }}
+                rc = expect_no_partial_failure(
+                    cmd, "event-wait2-dependency-flags-forbidden", 3);
+                if (rc) return rc;
 
                 VkBufferMemoryBarrier2 buffer_barrier;
                 memset(&buffer_barrier, 0, sizeof(buffer_barrier));
@@ -2218,12 +2488,12 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
 
                 reset_cmd(cmd);
                 vkCmdSetEvent2((VkCommandBuffer)cmd, event, &dependency);
-                int rc = expect_no_partial_failure(cmd, "event-set2-dependency-flags-unsupported", 4);
+                rc = expect_no_partial_failure(cmd, "event-set2-dependency-flags-unsupported", 4);
                 if (rc) return rc;
 
                 reset_cmd(cmd);
                 vkCmdWaitEvents2((VkCommandBuffer)cmd, 1, events, &dependency);
-                rc = expect_no_partial_failure(cmd, "event-wait2-dependency-flags-unsupported", 5);
+                rc = expect_no_partial_failure(cmd, "event-wait2-dependency-flags-forbidden", 5);
                 if (rc) return rc;
 
                 VkImageMemoryBarrier2 image_barrier;
@@ -2256,7 +2526,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
 
                 reset_cmd(cmd);
                 vkCmdWaitEvents2((VkCommandBuffer)cmd, 1, events, &dependency);
-                rc = expect_no_partial_failure(cmd, "event-wait2-dependency-flags-unsupported", 7);
+                rc = expect_no_partial_failure(cmd, "event-wait2-dependency-flags-forbidden", 7);
                 if (rc) return rc;
 
                 vkDestroyEvent(VK_NULL_HANDLE, event, NULL);

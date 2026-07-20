@@ -9,6 +9,60 @@ llama.cpp itself remains unmodified.
 
 ## Current Ground Truth
 
+### 2026-07-20 CPU/static classic render-pass synchronization completion lane
+
+The bridge now transports legal classic-render-pass pipeline barriers instead of
+rejecting the entire command class. This is generic Vulkan pass-through work and
+does not change llama.cpp, Dockerfiles, models, prompts, shader bytes, or
+arithmetic.
+
+The implementation reuses the existing V6.32 exact render-pass dependency table
+and V6.34 classic command/framebuffer sideband. No new frame ABI minor was
+introduced. Availability is negotiated by the explicit
+vulkan_graphics_v634_classic_render_pass_self_dependency_supported capability;
+a missing or false key remains fail-closed. Effective 64-bit
+VkSubpassDependency2 scopes are preserved through a VkMemoryBarrier2 chained to
+the Android VkSubpassDependency2; legacy materialization is used only when all
+masks narrow safely.
+
+Producer and executor independently require one active-subpass self-dependency
+to cover the complete barrier command. Scopes from multiple partial
+dependencies are never combined. Both sides canonicalize bounded Vulkan access
+aggregates (SHADER_READ, SHADER_WRITE, MEMORY_READ, and MEMORY_WRITE), validate
+every stage/access pair before aggregation, reject disabled explicit
+geometry/tessellation stages, and require VIEW_LOCAL for multiview
+self-dependencies. Buffer barriers, layout transitions, queue-family changes,
+non-graphics stages, framebuffer-space barriers without BY_REGION, and image
+barriers that do not identify an input plus color/depth-stencil attachment in
+the active layout fail before native replay. The immediate executor guard
+compares every materialized memory/image barrier with its exact wire row before
+calling vkCmdPipelineBarrier2.
+
+Event calls remain a separate synchronization lane. V6.35 carries explicit
+legacy-versus-synchronization2 provenance for set, reset, and wait commands;
+selection is never inferred from stage masks or dependency flags. Set/reset
+events fail in rendering scope, while legal waits retain their independent
+render-pass rules. Secondary command-buffer validation occurs before
+destination reservation or mutation.
+
+Evidence gates for this lane:
+
+- python3 -m unittest -q tests.test_gpu_abi_contract
+- python3 -m unittest -q tests.test_vulkan_icd_sync_harness
+- bash scripts/build-gpu-shim.sh
+- bash scripts/build-native-android-ndk.sh
+- focused C execution:
+  tests.test_vulkan_icd_sync_harness.VulkanIcdSyncHarnessTest.test_classic_self_dependency_scope_matcher_executes_c_code
+
+Latest CPU/static result: 491 GPU ABI contract tests passed with two
+environment-dependent skips, 31 Vulkan ICD C sync harness tests passed, and the
+arm64-v8a plus armeabi-v7a producer/executor payload builds completed.
+
+Remaining work is device evidence with Android validation enabled and continued
+coverage of Vulkan extension stage/access types. Unknown extension combinations
+remain deliberately fail-closed until their feature and ABI provenance are
+represented generically.
+
 ### 2026-07-20 CPU/static command-order graphics layout state lane
 
 Graphics image descriptors are now validated against a frame-local command-order
@@ -41,9 +95,9 @@ Evidence gates for this lane:
 
 Remaining strict-native replay gaps after this lane:
 
-1. Classic render-pass scope still needs fail-closed producer and executor gates
-   for event commands and dependency barriers. Self-dependencies are not yet
-   transported, so in-pass pipeline barriers cannot currently be proven legal.
+1. Classic render-pass event/barrier scope now fails closed. Legal in-pass
+   pipeline barriers still require self-dependency enablement and capability
+   negotiation before they can be replayed instead of rejected.
 2. Device evidence is still required for a non-normalizable native classic pass
    with an attachment descriptor bound after BEGIN and NEXT_SUBPASS.
 
@@ -2091,7 +2145,7 @@ Confirmed facts:
 | 2026-07-14 executor usable-cap advertisement lane | The Android Vulkan executor now separates advertised capability states into explicit supported/enabled/loaded/usable predicates for timeline semaphores, synchronization2, dynamic rendering, draw-indirect-count, extended dynamic state, extended dynamic state 2 subfeatures, and uint8 index type. The container ICD stores usable predicates separately instead of overwriting feature or extension availability fields, and advertised features/proc gates prefer unique `*Usable` keys so legacy duplicate JSON keys cannot accidentally promote unsupported API use. A C contract test now feeds conflicting legacy-true/usable-false JSON and verifies the parser remains fail-closed. | `app/src/main/cpp/pdocker_gpu_executor.c`; `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; host tests `tests.test_gpu_abi_contract tests.test_vulkan_icd_feature_chain`; glibc payload build `scripts/build-gpu-shim.sh`; no llama.cpp/Dockerfile/model/prompt changes |
 | 2026-07-15 MSAA sample-count advertisement harness lane | A host C harness now drives executor-style `VULKAN_ADVERTISEMENT_CAPS` through the real ICD socket-query path and proves advertised MSAA sample counts are scoped to the color-attachment image lane. Framebuffer color limits can expose 4x MSAA, but sampled/storage/transfer-only/cube/3D/mixed-use queries and image creation remain single-sample or fail-closed. This records CPU-side producer evidence for the unresolved-MSAA boundary without changing Android replay, llama.cpp, Dockerfiles, models, prompts, or shader bytes. | `tests.test_vulkan_icd_feature_chain`; `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; no llama.cpp/Dockerfile/model/prompt changes |
 | 2026-07-15 cross-queue-family event barrier prevalidation lane | Legacy and synchronization2 pipeline/event barriers now validate buffer/image queue-family ownership-transfer and range failures before emitting any barrier-table, event-wait-ref, command-op, or graphics-op state. Mixed memory+invalid buffer/image barriers fail closed with the specific `buffer-barrier-cross-queue-family` or `image-barrier-cross-queue-family` reason for `vkCmdPipelineBarrier{,2}`, `vkCmdWaitEvents`, `vkCmdSetEvent2`, and `vkCmdWaitEvents2`, preserving the single-virtual-queue contract while true multi-family ownership transfer remains unsupported. This is generic Vulkan synchronization correctness; no Android replay ABI widening, llama.cpp, Dockerfile, model, prompt, or shader bytes changed. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; host tests `tests.test_vulkan_icd_sync_harness tests.test_gpu_abi_contract`; no llama.cpp/Dockerfile/model/prompt changes |
-| 2026-07-15 ownership-transfer dependency no-op flag lane | CPU harnesses now cover `VK_DEPENDENCY_QUEUE_FAMILY_OWNERSHIP_TRANSFER_USE_ALL_STAGES_BIT_KHR`: memory-only legacy/sync2 pipeline barriers and sync2 event set/wait dependency info accept it as no-op metadata and record only supported transport dependency flags, while buffer/image queue-family ownership-transfer plus that flag fails closed before any partial barrier/event state with precise dependency-flag reasons. This is generic Vulkan synchronization hardening; no Android replay ABI widening, llama.cpp, Dockerfile, model, prompt, or shader bytes changed. | `tests.test_vulkan_icd_sync_harness.VulkanIcdSyncHarnessTest.test_pipeline_barrier_noop_dependency_flags_are_stripped_or_rejected_with_ownership`; `tests.test_vulkan_icd_sync_harness.VulkanIcdSyncHarnessTest.test_event_barrier_noop_dependency_flags_are_stripped_or_rejected_with_ownership`; `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; no llama.cpp/Dockerfile/model/prompt changes |
+| 2026-07-15 ownership-transfer dependency no-op flag lane | CPU harnesses cover `VK_DEPENDENCY_QUEUE_FAMILY_OWNERSHIP_TRANSFER_USE_ALL_STAGES_BIT_KHR`: memory-only legacy/sync2 pipeline barriers may strip it as no-op metadata, while event set/wait commands now reject non-preserved command-specific dependency flags before any partial state. Buffer/image cross-family ownership transfer remains fail-closed. This is generic Vulkan synchronization hardening; no Android replay ABI widening, llama.cpp, Dockerfile, model, prompt, or shader bytes changed. | `tests.test_vulkan_icd_sync_harness.VulkanIcdSyncHarnessTest.test_pipeline_barrier_noop_dependency_flags_are_stripped_or_rejected_with_ownership`; `tests.test_vulkan_icd_sync_harness.VulkanIcdSyncHarnessTest.test_event_barrier_disallowed_dependency_flags_fail_without_partial_state`; `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; no llama.cpp/Dockerfile/model/prompt changes |
 | 2026-07-15 sync2 dependency-info shape gate | Synchronization2 dependency payloads now validate `VkDependencyInfo` and nested `VkMemoryBarrier2`/`VkBufferMemoryBarrier2`/`VkImageMemoryBarrier2` `sType` fields before recording any transport state. Null or malformed dependency payloads for `vkCmdPipelineBarrier2`, `vkCmdSetEvent2`, and `vkCmdWaitEvents2` fail closed with deterministic reasons and no partial barrier/command/graphics state. This is generic Vulkan ABI-shape hardening; no Android replay ABI widening, llama.cpp, Dockerfile, model, prompt, or shader bytes changed. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; host tests `tests.test_vulkan_icd_sync_harness.VulkanIcdSyncHarnessTest.test_pipeline_barrier2_records_precise_unsupported_dependency_reasons` and `tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_sync2_event_dependency_info_reason_mapping_order_is_precise`; no Android/device run |
 | 2026-07-15 dispatch/graphics render-scope classifier harness lane | A host C harness now exercises the mixed graphics/compute submit planner directly: compute dispatch inside active rendering is rejected with `graphics-mixed-dispatch-inside-rendering-unimplemented`, while dispatch between two render scopes is accepted by the planner and splits the graphics sequence into two ordered graphics segments around the compute dispatch. This records CPU-side producer evidence for the bounded mixed-submit lane; no Android replay ABI widening, llama.cpp, Dockerfile, model, prompt, or shader bytes changed. | `tests.test_vulkan_icd_sync_harness`; `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; no llama.cpp/Dockerfile/model/prompt changes |
 | 2026-07-15 Q6 probe observation-order manifest guard | Q6 debug-SSBO probe instrumentation now emits explicit `target_store_word_index`, `observation_order=after_target_store`, and `feedback_policy=debug-write-only-no-q6-read-dependency` metadata for every probe write, and the probe-manifest verifier fails closed when those fields are missing, stale, or do not match the structural priority target. This keeps CPU-only static/device handoff evidence anchored to post-store observation rather than a feedback path into the native Q6 value flow. | `scripts/instrument-spirv-noop-probe.py`; `scripts/verify-spirv-probe-manifest.py`; host test `tests.test_gpu_abi_contract.GpuAbiContractTest.test_native_q6_probe_write_instrumentation_validates`; no Android/device run |
