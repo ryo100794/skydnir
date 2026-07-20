@@ -5748,6 +5748,7 @@ static bool append_secondary_command_buffer(
                 break;
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER:
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT:
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_EVENT:
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT:
                 record.memory_barrier_op_first += memory_barrier_base;
                 record.buffer_barrier_op_first += buffer_barrier_base;
@@ -5871,6 +5872,7 @@ fail_secondary_append:
     dst->graphics_draw_op_count = graphics_draw_base;
     dst->graphics_descriptor_bind_op_count = descriptor_bind_base;
     dst->graphics_rendering_op_count = rendering_base;
+    dst->classic_render_pass_command_op_count = classic_render_pass_command_base;
     dst->graphics_vertex_binding_snapshot_count = vertex_binding_snapshot_base;
     dst->graphics_index_buffer_snapshot_count = index_buffer_snapshot_base;
     dst->clear_attachments_command_op_count = clear_attachments_command_base;
@@ -11428,13 +11430,17 @@ static int collect_vulkan_graphics_v634_render_pass_command_transport(
 
 static bool strict_vulkan_graphics_v632_render_pass_transport_complete(
         const PdockerVkPipeline *pipeline) {
-    (void)pipeline;
-    /* V6.32 transports exact render-pass metadata for validation/diagnostics,
-     * but the executor still replays normalized dynamic-rendering commands.
-     * Keep strict passthrough fail-closed until classic VkRenderPass replay is
-     * reconstructed from these tables instead of inferred from normalization.
+    /* Strict passthrough may only accept a classic render-pass pipeline once the
+     * executor advertises the V6.34 sideband that carries the actual
+     * vkCmdBeginRenderPass/vkCmdNextSubpass/vkCmdEndRenderPass stream plus the
+     * framebuffer attachments needed to reconstruct native VkRenderPass and
+     * VkFramebuffer objects.  V6.32/V6.33 metadata alone is diagnostic; V6.34 is
+     * the replay contract that prevents falling back to dynamic-rendering
+     * normalization under a strict pass-through policy.
      */
-    return false;
+    return pipeline && pipeline->render_pass &&
+           executor_supports_vulkan_graphics_v634_classic_render_pass_sideband() &&
+           vulkan_graphics_v633_render_pass_transport_representable(pipeline->render_pass);
 }
 
 static int send_recorded_vulkan_graphics_v6_1_frame_range(

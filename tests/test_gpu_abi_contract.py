@@ -4362,6 +4362,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("record.draw_snapshot_index += graphics_draw_base;", icd)
         self.assertIn("record.push_op_index += push_op_base;", icd)
         self.assertIn("record.memory_barrier_op_first += memory_barrier_base;", icd)
+        self.assertIn("case PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_EVENT:", icd)
+        self.assertIn("dst->classic_render_pass_command_op_count = classic_render_pass_command_base;", icd)
         self.assertIn("record.first_dynamic_offset += dynamic_offset_base;", icd)
         self.assertIn("bool inherited_rendering_active;", icd)
         self.assertIn("command_buffer_begin_pnext_supported", icd)
@@ -27416,15 +27418,20 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(marker, caps)
             self.assertIn(marker, parser)
 
-    def test_vulkan_graphics_v632_strict_render_pass_transport_remains_fail_closed_until_replay_exists(self):
+    def test_vulkan_graphics_v632_strict_render_pass_transport_requires_v634_replay_contract(self):
         icd = VULKAN_ICD.read_text()
         strict = c_function_body(icd, "strict_vulkan_graphics_v632_render_pass_transport_complete")
         sender = c_function_body(icd, "send_recorded_vulkan_graphics_v6_1_frame_range")
 
-        self.assertIn("(void)pipeline;", strict)
-        self.assertIn("return false;", strict)
-        self.assertIn("classic VkRenderPass replay", strict)
-        self.assertNotIn("vulkan_graphics_v632_render_pass_transport_representable(pipeline->render_pass)", strict)
+        for marker in [
+            "executor_supports_vulkan_graphics_v634_classic_render_pass_sideband()",
+            "vulkan_graphics_v633_render_pass_transport_representable(pipeline->render_pass)",
+            "V6.34 sideband",
+            "strict pass-through policy",
+        ]:
+            self.assertIn(marker, strict)
+        self.assertNotIn("(void)pipeline;", strict)
+        self.assertNotIn("return false;", strict)
         self.assertIn("strict-v6-render-pass-metadata-missing", sender)
         self.assertLess(
             sender.index("strict_vulkan_graphics_v632_render_pass_transport_complete(pipeline)"),
@@ -27450,6 +27457,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "collect_vulkan_graphics_v632_render_pass_transport",
             "strict-v6-render-pass-metadata-missing",
             "strict_vulkan_graphics_v632_render_pass_transport_complete",
+            "executor_supports_vulkan_graphics_v634_classic_render_pass_sideband()",
         ]:
             self.assertIn(marker, icd + executor)
         self.assertNotIn("strict render pass passthrough by dynamic-rendering normalization", icd + executor)
