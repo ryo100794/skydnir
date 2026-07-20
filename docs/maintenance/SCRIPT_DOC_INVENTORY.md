@@ -96,7 +96,9 @@ script-inventory verification.
 ### Follow-up cleanup rules
 
 1. Do not run blanket `git clean -Xdf` in this repository. It would remove
-   ignored payloads that are still needed for local APK staging.
+   ignored payloads that are still needed for local APK staging. Use
+   `python3 scripts/maintenance/clean-development-artifacts.py` first; add
+   `--apply` only after reviewing the dry-run output.
 2. Prefer targeted deletion of ignored scratch directories only:
    `__pycache__`, `.pytest_cache`, Gradle/CMake build directories, local
    captures, and ignored ad-hoc evidence files.
@@ -106,3 +108,10 @@ script-inventory verification.
 4. Treat root-level script moves as compatibility changes. Move implementation
    files only behind stable wrapper shims and update `scripts/script-inventory.json`
    before changing paths.
+
+### Maintenance helper
+
+- `scripts/maintenance/clean-development-artifacts.py` provides a guarded
+  dry-run/apply path for repository-local caches and scratch files. It never
+  removes ignored APK/runtime staging payloads or `local.properties`; ignored
+  generated evidence is opt-in via `--include-ignored-evidence`.
