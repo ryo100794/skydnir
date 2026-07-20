@@ -9,6 +9,46 @@ llama.cpp itself remains unmodified.
 
 ## Current Ground Truth
 
+### 2026-07-20 CPU/static V6.33 render-pass exact-sideband receive lane
+
+V6.33 render-pass sideband transport is now wired across the producer, ABI
+contract, Android executor receiver, and host regression tests.  The ICD can
+promote V6.32 render-pass metadata to V6.33 when exact sideband state is
+needed, appending subpass view masks, depth/stencil resolve refs and modes,
+RenderPass2 dependency view offsets, and multiview correlation masks as
+append-only tables.  The executor advertises the V6.33 minor and schema hashes,
+validates the four appended table ranges and hashes, maps them into the frame
+view, includes them in render-pass identity hashing, and fail-closes malformed
+sideband data.
+
+The V6.33 receiver validation now also checks sideband semantics instead of
+only checking that rows are present: subpass rows must reference transported
+V6.32 subpasses, depth/stencil resolve rows must reference valid V6.32
+attachments and depth/stencil subpass refs, resolve attachment sample count,
+format/aspect, and layout must be consistent, dependency view-offset rows must
+reference transported dependencies, and correlation-mask indices must be dense
+per render pass.  Missing raw `.spv` probe evidence is also fail-closed unless
+it is an ignored `docs/test/**/*.spv` blob with matching tracked `.analysis.json`
+hash/size metadata.
+
+This is still CPU/static Vulkan pass-through hardening, not a completion claim.
+Classic `VkRenderPass` replay remains fail-closed in strict mode until the
+executor consumes V6.32/V6.33 render-pass metadata to create/reuse equivalent
+native render-pass objects and a fresh Android artifact proves the full
+glibc-ICD-to-Android-executor path.  It does not change llama.cpp, Dockerfiles,
+models, prompts, shader bytes, runtime defaults, or executor arithmetic.
+
+Evidence gates run for this lane:
+
+- `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -q tests.test_gpu_abi_contract`
+- `bash scripts/build-gpu-shim.sh`
+- `bash scripts/build-native-android-ndk.sh`
+- `PYTHONDONTWRITEBYTECODE=1 python3 scripts/verify-native-payloads.py`
+
+Next implementation target: consume V6.32/V6.33 render-pass metadata in strict
+graphics replay, or keep strict rejection while adding an explicit artifact that
+proves rejection occurs before any normalization can be mistaken for pass-through.
+
 ### 2026-07-20 CPU/static render-pass exact-capture lane
 
 Render-pass pass-through now treats `VkRenderPass` creation metadata as source
@@ -20,13 +60,12 @@ aspect masks, preserve attachments, subpass flags and pipeline bind points,
 legacy multiview correlation masks, dependency order/src/dst/flags/masks, and
 RenderPass2 view offsets.
 
-This closes the producer-side data-loss gap that would otherwise make later
-classic render-pass transport impossible to implement correctly. It does not yet
-make strict classic render-pass replay complete: V6.32 can carry many core
-render-pass rows, but it still lacks exact depth/stencil resolve and full
-multiview sideband state. The next ABI step is an append-only V6.33 extension
-for subpass extras, depth/stencil resolve refs/modes, multiview/correlation
-side tables, and explicit attachment-ref ordinals where needed.
+This closed the producer-side data-loss gap that would otherwise make later
+classic render-pass transport impossible to implement correctly. At that point
+strict classic render-pass replay was still incomplete: V6.32 carried many core
+render-pass rows, but it still lacked exact depth/stencil resolve and full
+multiview sideband state. The V6.33 section above supersedes that immediate ABI
+step; real strict replay consumption remains the next unresolved gap.
 
 This is generic Vulkan pass-through hardening. It does not change llama.cpp,
 Dockerfiles, models, prompts, shader bytes, runtime defaults, or executor

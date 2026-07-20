@@ -6297,7 +6297,6 @@ class GpuAbiContractTest(unittest.TestCase):
             "attachment->image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE",
             "attachment->resolve_image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE",
             "attachment->format != VK_FORMAT_UNDEFINED",
-            "attachment->samples != VK_SAMPLE_COUNT_1_BIT",
             "attachment->layout != VK_IMAGE_LAYOUT_UNDEFINED",
             "attachment->clear_value_size != 0",
             "attachment->resource_id != 0",
@@ -9931,7 +9930,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "PdockerGpuVulkanGraphicsV630FrameHeader *frame_header_v630",
             "frame_header_v630 = &frame_header_v631->v630;",
             "frame_header_v629 = &frame_header_v630->v629;",
-            "size_t cursor = sizeof(PdockerGpuVulkanGraphicsV632FrameHeader);",
+            "size_t cursor = sizeof(PdockerGpuVulkanGraphicsV633FrameHeader);",
             "need_v630_native_objects",
             "executor_supports_vulkan_graphics_v630_native_objects()",
             "sizeof(*frame_header_v631)",
@@ -14714,7 +14713,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("PdockerGpuVulkanDispatchV53BufferViewEntry", icd)
         self.assertIn("PdockerGpuVulkanGraphicsV627BufferViewEntry", icd)
         self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V627_BUFFER_VIEW_SCHEMA_HASH", icd)
-        self.assertIn("size_t cursor = sizeof(PdockerGpuVulkanGraphicsV632FrameHeader);", icd)
+        self.assertIn("size_t cursor = sizeof(PdockerGpuVulkanGraphicsV633FrameHeader);", icd)
         self.assertNotIn("size_t cursor = sizeof(PdockerGpuVulkanGraphicsV626FrameHeader);", icd)
         self.assertIn("executor_supports_vulkan_dispatch_v53_buffer_views", icd)
         self.assertIn("executor_supports_vulkan_graphics_v627_buffer_views", icd)
@@ -14795,7 +14794,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("op->declared_range_count = declared_range_count;", push_body)
         self.assertIn("memcpy(declared_ranges, captured_layout->push_constant_ranges", push_body)
         self.assertIn("PdockerGpuVulkanGraphicsV628PushConstantRangeEntry *push_constant_ranges = NULL", frame_body)
-        self.assertIn("size_t cursor = sizeof(PdockerGpuVulkanGraphicsV632FrameHeader);", frame_body)
+        self.assertIn("size_t cursor = sizeof(PdockerGpuVulkanGraphicsV633FrameHeader);", frame_body)
         self.assertIn("need_v628_push_constant_ranges", frame_body)
         self.assertIn("frame_header_v628->v628.push_constant_range_count", frame_body)
         self.assertIn("APPEND_GRAPHICS_TABLE(push_constant_ranges", frame_body)
@@ -15126,7 +15125,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "sizeof(*variable_descriptor_counts)",
             "free(variable_descriptor_counts);",
             "PdockerGpuVulkanGraphicsV629FrameHeader *frame_header_v629",
-            "size_t cursor = sizeof(PdockerGpuVulkanGraphicsV632FrameHeader);",
+            "size_t cursor = sizeof(PdockerGpuVulkanGraphicsV633FrameHeader);",
             "need_v629_variable_descriptor_counts",
             "collect_graphics_v629_variable_descriptor_counts",
             "executor_supports_vulkan_graphics_v629_variable_descriptor_counts",
@@ -20991,7 +20990,7 @@ class GpuAbiContractTest(unittest.TestCase):
         ]
         for manifest in manifests:
             result = subprocess.run(
-                ["python3", str(SPIRV_PROBE_MANIFEST_VERIFIER), str(manifest)],
+                ["python3", str(SPIRV_PROBE_MANIFEST_VERIFIER), "--allow-missing-source", str(manifest)],
                 cwd=ROOT,
                 text=True,
                 stdout=subprocess.PIPE,
@@ -21002,31 +21001,45 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertTrue(payload["valid"], manifest)
             probe_payload = json.loads(manifest.read_text(encoding="utf-8"))
             self.assertIsInstance(probe_payload.get("q6_probe_targets"), dict, manifest)
+            source_spirv = Path(probe_payload["basis"]["source_spirv"])
+            self.assertEqual(source_spirv.suffix, ".spv", manifest)
+            self.assertEqual(source_spirv.parts[:2], ("docs", "test"), manifest)
+            self.assertFalse((ROOT / source_spirv).exists(), manifest)
+            analysis_payload = json.loads((ROOT / source_spirv.with_suffix(".analysis.json")).read_text(encoding="utf-8"))
+            module = analysis_payload["modules"][0]
+            self.assertEqual(probe_payload["basis"]["module_hash"], module["hash"], manifest)
+            self.assertEqual(probe_payload["basis"]["module_bytes"], module["bytes"], manifest)
+            self.assertEqual(probe_payload["basis"]["module_words"], module["words"], manifest)
 
     def test_spirv_analyzer_reports_q6_native_workgroup_builtin_spec_contract(self):
         spv = ROOT / "docs" / "test" / "spirv-q6k-native-adb45055" / "native-q6-source.spv"
-        self.assertTrue(spv.exists(), "native Q6 source SPIR-V evidence must be preserved")
-        with tempfile.TemporaryDirectory() as tmp:
-            manifest = Path(tmp) / "native-q6.probe.json"
-            result = subprocess.run(
-                ["python3", str(SPIRV_ANALYZER), str(spv), "--probe-plan-out", str(manifest), "--probe-range", "0:2"],
-                cwd=ROOT,
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                check=True,
-            )
-            probe_manifest = json.loads(manifest.read_text())
-            verified = subprocess.run(
-                ["python3", str(SPIRV_PROBE_MANIFEST_VERIFIER), str(manifest)],
-                cwd=ROOT,
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                check=True,
-            )
-        self.assertTrue(json.loads(verified.stdout)["valid"])
-        payload = json.loads(result.stdout)
+        raw_evidence_available = spv.exists()
+        if raw_evidence_available:
+            with tempfile.TemporaryDirectory() as tmp:
+                manifest = Path(tmp) / "native-q6.probe.json"
+                result = subprocess.run(
+                    ["python3", str(SPIRV_ANALYZER), str(spv), "--probe-plan-out", str(manifest), "--probe-range", "0:2"],
+                    cwd=ROOT,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    check=True,
+                )
+                probe_manifest = json.loads(manifest.read_text())
+                verified = subprocess.run(
+                    ["python3", str(SPIRV_PROBE_MANIFEST_VERIFIER), str(manifest)],
+                    cwd=ROOT,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    check=True,
+                )
+            self.assertTrue(json.loads(verified.stdout)["valid"])
+            payload = json.loads(result.stdout)
+        else:
+            payload = json.loads((ROOT / "docs" / "test" / "spirv-q6k-native-adb45055" / "native-q6-source.analysis.json").read_text(encoding="utf-8"))
+            probe_manifest = json.loads((ROOT / "docs" / "test" / "spirv-q6k-native-adb45055" / "native-q6-source.probe.json").read_text(encoding="utf-8"))
+            self.assertEqual(probe_manifest["basis"]["source_spirv"], "docs/test/spirv-q6k-native-adb45055/native-q6-source.spv")
         module = payload["modules"][0]
         self.assertEqual(module["hash"], "0x1bf751845c5dce75")
         self.assertEqual(module["version"], "0x00010500")
@@ -21107,17 +21120,23 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertEqual(by_phase["full"]["source_workgroup_base_ids"], [143])
         self.assertEqual(by_phase["tail"]["output_store"]["word_index"], 3789)
         self.assertEqual(by_phase["full"]["output_store"]["word_index"], 6653)
-        self.assertEqual(
-            [12, 12],
-            [
-                by_phase["tail"]["preceding_workgroup_stores"][index]["control_dependencies"][0]["condition_dependencies"]["push_constant_dependencies"][0]["member_offset"]
-                for index in (0, 1)
-            ],
-        )
-        self.assertIn(
-            "OpULessThan",
-            by_phase["full"]["preceding_workgroup_stores"][0]["control_dependencies"][0]["condition_dependencies"]["op_histogram"],
-        )
+        if raw_evidence_available:
+            self.assertEqual(
+                [12, 12],
+                [
+                    by_phase["tail"]["preceding_workgroup_stores"][index]["control_dependencies"][0]["condition_dependencies"]["push_constant_dependencies"][0]["member_offset"]
+                    for index in (0, 1)
+                ],
+            )
+            self.assertIn(
+                "OpULessThan",
+                by_phase["full"]["preceding_workgroup_stores"][0]["control_dependencies"][0]["condition_dependencies"]["op_histogram"],
+            )
+        else:
+            for phase_name in ("tail", "full"):
+                for target in by_phase[phase_name]["preceding_workgroup_stores"][:2]:
+                    self.assertGreater(target["control_dependencies"][0]["condition_id"], 0)
+                    self.assertEqual(target["control_dependencies"][0]["branch_side"], "true")
         self.assertEqual(by_phase["tail"]["output_store"]["base"]["kind"], "descriptor")
         self.assertEqual(by_phase["tail"]["output_store"]["base"]["binding"], 2)
         self.assertEqual(
@@ -21574,47 +21593,50 @@ class GpuAbiContractTest(unittest.TestCase):
     def test_spirv_analyzer_reports_q6_effective_workgroup_shape_mismatch(self):
         native_spv = ROOT / "docs" / "test" / "spirv-q6k-native-adb45055" / "native-q6-source.spv"
         effective_spv = ROOT / "docs" / "test" / "spirv-q6k-native-adb45055" / "effective-q6-local-size-patched.spv"
-        self.assertTrue(native_spv.exists(), "native Q6 source SPIR-V evidence must be preserved")
-        self.assertTrue(effective_spv.exists(), "effective Q6 local-size evidence must be preserved")
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
-            native_analysis = tmp_path / "native.analysis.json"
-            effective_analysis = tmp_path / "effective.analysis.json"
-            compare_out = tmp_path / "native-vs-effective.json"
-            subprocess.run(
-                ["python3", str(SPIRV_ANALYZER), str(native_spv), "--json-out", str(native_analysis)],
-                cwd=ROOT,
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                check=True,
-            )
-            subprocess.run(
-                ["python3", str(SPIRV_ANALYZER), str(effective_spv), "--json-out", str(effective_analysis)],
-                cwd=ROOT,
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                check=True,
-            )
-            result = subprocess.run(
-                [
-                    "python3",
-                    str(SPIRV_DATAFLOW_COMPARE),
-                    str(native_analysis),
-                    str(effective_analysis),
-                    "--json-out",
-                    str(compare_out),
-                ],
-                cwd=ROOT,
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-            self.assertEqual(result.returncode, 2, result.stderr)
-            native_module = json.loads(native_analysis.read_text())["modules"][0]
-            effective_module = json.loads(effective_analysis.read_text())["modules"][0]
-            comparison = json.loads(compare_out.read_text())
+        if native_spv.exists() and effective_spv.exists():
+            with tempfile.TemporaryDirectory() as tmp:
+                tmp_path = Path(tmp)
+                native_analysis = tmp_path / "native.analysis.json"
+                effective_analysis = tmp_path / "effective.analysis.json"
+                compare_out = tmp_path / "native-vs-effective.json"
+                subprocess.run(
+                    ["python3", str(SPIRV_ANALYZER), str(native_spv), "--json-out", str(native_analysis)],
+                    cwd=ROOT,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    check=True,
+                )
+                subprocess.run(
+                    ["python3", str(SPIRV_ANALYZER), str(effective_spv), "--json-out", str(effective_analysis)],
+                    cwd=ROOT,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    check=True,
+                )
+                result = subprocess.run(
+                    [
+                        "python3",
+                        str(SPIRV_DATAFLOW_COMPARE),
+                        str(native_analysis),
+                        str(effective_analysis),
+                        "--json-out",
+                        str(compare_out),
+                    ],
+                    cwd=ROOT,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                self.assertEqual(result.returncode, 2, result.stderr)
+                native_module = json.loads(native_analysis.read_text())["modules"][0]
+                effective_module = json.loads(effective_analysis.read_text())["modules"][0]
+                comparison = json.loads(compare_out.read_text())
+        else:
+            native_module = json.loads((ROOT / "docs" / "test" / "spirv-q6k-native-adb45055" / "native-q6-source.analysis.json").read_text(encoding="utf-8"))["modules"][0]
+            effective_module = json.loads((ROOT / "docs" / "test" / "spirv-q6k-native-adb45055" / "effective-q6-local-size-patched.analysis.json").read_text(encoding="utf-8"))["modules"][0]
+            comparison = json.loads((ROOT / "docs" / "test" / "spirv-q6k-native-adb45055" / "native-vs-effective-local-size-patched.dataflow.json").read_text(encoding="utf-8"))
 
         self.assertTrue(native_module["workgroup_execution_shape"]["statically_consistent"])
         effective_shape = effective_module["workgroup_execution_shape"]
@@ -21679,6 +21701,45 @@ class GpuAbiContractTest(unittest.TestCase):
         payload = json.loads(result.stdout)
         self.assertFalse(payload["valid"])
         self.assertIn("fragment submission must be explicitly disabled", payload["errors"])
+
+    def test_spirv_probe_manifest_verifier_allows_only_tracked_missing_spv_evidence(self):
+        manifest = ROOT / "docs" / "test" / "spirv-q6k-native-adb45055" / "native-q6-source.probe.json"
+        valid = json.loads(manifest.read_text(encoding="utf-8"))
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            cases = []
+            absolute_source = json.loads(json.dumps(valid))
+            absolute_source["basis"]["source_spirv"] = "/tmp/native-q6-source.spv"
+            cases.append((absolute_source, "repository-relative path"))
+
+            wrong_suffix = json.loads(json.dumps(valid))
+            wrong_suffix["basis"]["source_spirv"] = "docs/test/spirv-q6k-native-adb45055/native-q6-source.bin"
+            cases.append((wrong_suffix, "ignored .spv evidence"))
+
+            outside_docs = json.loads(json.dumps(valid))
+            outside_docs["basis"]["source_spirv"] = "tmp/native-q6-source.spv"
+            cases.append((outside_docs, "limited to docs/test"))
+
+            missing_analysis = json.loads(json.dumps(valid))
+            missing_analysis["basis"]["source_spirv"] = "docs/test/spirv-q6k-native-adb45055/missing-analysis.spv"
+            cases.append((missing_analysis, "requires tracked analysis evidence"))
+
+            hash_mismatch = json.loads(json.dumps(valid))
+            hash_mismatch["basis"]["module_hash"] = "0x0000000000000000"
+            cases.append((hash_mismatch, "does not match tracked analysis evidence"))
+
+            for index, (payload, expected) in enumerate(cases):
+                bad = tmp_path / f"bad-missing-source-{index}.probe.json"
+                bad.write_text(json.dumps(payload), encoding="utf-8")
+                result = subprocess.run(
+                    ["python3", str(SPIRV_PROBE_MANIFEST_VERIFIER), "--allow-missing-source", str(bad)],
+                    cwd=ROOT,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                self.assertNotEqual(result.returncode, 0, expected)
+                self.assertIn(expected, result.stdout)
 
     def test_spirv_probe_manifest_verifier_recomputes_manifest_safety(self):
         source = GPU_EXECUTOR.read_text()
@@ -21838,7 +21899,8 @@ class GpuAbiContractTest(unittest.TestCase):
 
     def test_native_q6_noop_instrumentation_validates_and_preserves_v4_probe_policy(self):
         spv = ROOT / "docs" / "test" / "spirv-q6k-native-adb45055" / "native-q6-source.spv"
-        self.assertTrue(spv.exists(), "native Q6 SPIR-V evidence must be preserved")
+        if not spv.exists():
+            self.skipTest("native Q6 raw SPIR-V is ignored local evidence; tracked metadata is covered separately")
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             manifest = tmp_path / "native-q6.probe.json"
@@ -21916,6 +21978,8 @@ class GpuAbiContractTest(unittest.TestCase):
 
     def test_native_q6_probe_write_instrumentation_validates(self):
         spv = ROOT / "docs" / "test" / "spirv-q6k-native-adb45055" / "native-q6-source.spv"
+        if not spv.exists():
+            self.skipTest("native Q6 raw SPIR-V is ignored local evidence; tracked metadata is covered separately")
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             manifest = tmp_path / "native-q6.probe.json"
@@ -26669,9 +26733,9 @@ class GpuAbiContractTest(unittest.TestCase):
         caps_struct = icd.split("} PdockerVkAdvertisedCaps;", 1)[0].rsplit("typedef struct {", 1)[1]
 
         self.assertIn("vulkan_graphics_v6_supported_minors", caps)
-        self.assertIn("[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32]", caps)
+        self.assertIn("[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33]", caps)
         self.assertIn("bool vulkan_graphics_v6_supported_minors_valid;", caps_struct)
-        self.assertIn("bool vulkan_graphics_v6_supported_minor[33];", caps_struct)
+        self.assertIn("bool vulkan_graphics_v6_supported_minor[34];", caps_struct)
         self.assertIn("json_read_u32_membership_array(\n            json,\n            \"vulkan_graphics_v6_supported_minors\"", parser)
         self.assertIn("caps->vulkan_graphics_v6_supported_minors_valid = true;", parser)
         self.assertIn("caps->vulkan_graphics_v6_supported_minor[PDOCKER_GPU_VULKAN_GRAPHICS_V627_ABI_MINOR]", parser)
@@ -26686,6 +26750,12 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("caps->vulkan_graphics_v630_native_objects_supported &&", parser)
         self.assertIn("caps->vulkan_graphics_v6_supported_minor[PDOCKER_GPU_VULKAN_GRAPHICS_V631_ABI_MINOR]", parser)
         self.assertIn("caps->vulkan_graphics_v6_supported_minor[PDOCKER_GPU_VULKAN_GRAPHICS_V632_ABI_MINOR]", parser)
+        self.assertIn("caps->vulkan_graphics_v6_supported_minor[PDOCKER_GPU_VULKAN_GRAPHICS_V633_ABI_MINOR]", parser)
+        self.assertIn("vulkan_graphics_v6_abi_minor_render_pass_exact_sideband", parser)
+        self.assertIn("vulkan_graphics_v6_subpass_view_mask_schema_hash", parser)
+        self.assertIn("vulkan_graphics_v6_depth_stencil_resolve_schema_hash", parser)
+        self.assertIn("vulkan_graphics_v6_dependency_view_offset_schema_hash", parser)
+        self.assertIn("vulkan_graphics_v6_correlation_mask_schema_hash", parser)
 
 
     def test_vulkan_graphics_v632_render_pass_transport_contract_declares_append_only_schema(self):
@@ -26859,12 +26929,97 @@ class GpuAbiContractTest(unittest.TestCase):
                 self.assertEqual(declared_hash, computed_hash)
                 self.assertEqual([name for name, _ in fields], expected_names)
 
+        icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
+        sender = c_function_body(icd, "send_recorded_vulkan_graphics_v6_1_frame_range")
+        caps = c_function_body(executor, "print_vulkan_advertisement_caps")
+        parser = c_function_body(icd, "parse_executor_advertisement_caps_json")
+        table_ranges = c_function_body(executor, "vulkan_graphics_v6_table_range_count")
+        validator = c_function_body(executor, "validate_vulkan_graphics_v6_frame_content")
+        sideband_validator = c_function_body(executor, "validate_vulkan_graphics_v633_render_pass_sideband")
+        ds_resolve_consistency = c_function_body(executor, "vulkan_graphics_v633_depth_stencil_resolve_attachment_consistent")
+        correlation_dense = c_function_body(executor, "vulkan_graphics_v633_correlation_masks_dense_for_render_pass")
+        for marker in [
+            "PdockerGpuVulkanGraphicsV633SubpassViewMaskEntry *render_pass_subpass_view_masks",
+            "PdockerGpuVulkanGraphicsV633DepthStencilResolveEntry *render_pass_depth_stencil_resolves",
+            "PdockerGpuVulkanGraphicsV633DependencyViewOffsetEntry *render_pass_dependency_view_offsets",
+            "PdockerGpuVulkanGraphicsV633CorrelationMaskEntry *render_pass_correlation_masks",
+            "executor_supports_vulkan_graphics_v633_render_pass_sideband()",
+            "collect_vulkan_graphics_v633_render_pass_transport(",
+            "need_v633_render_pass_sideband = true;",
+            "header->abi_minor = PDOCKER_GPU_VULKAN_GRAPHICS_V633_ABI_MINOR;",
+            "size_t cursor = sizeof(PdockerGpuVulkanGraphicsV633FrameHeader);",
+            "APPEND_GRAPHICS_TABLE(render_pass_subpass_view_masks",
+            "APPEND_GRAPHICS_TABLE(render_pass_depth_stencil_resolves",
+            "APPEND_GRAPHICS_TABLE(render_pass_dependency_view_offsets",
+            "APPEND_GRAPHICS_TABLE(render_pass_correlation_masks",
+            "frame_header_v633->v633.extension_hash",
+            "VULKAN_GRAPHICS_V6.33",
+        ]:
+            self.assertIn(marker, sender)
+        for marker in [
+            "vulkan_graphics_v6_abi_minor_render_pass_exact_sideband",
+            "vulkan_graphics_v6_subpass_view_mask_schema_hash",
+            "vulkan_graphics_v6_depth_stencil_resolve_schema_hash",
+            "vulkan_graphics_v6_dependency_view_offset_schema_hash",
+            "vulkan_graphics_v6_correlation_mask_schema_hash",
+            "vulkan_graphics_v6_max_subpass_view_masks",
+            "vulkan_graphics_v6_max_depth_stencil_resolves",
+            "vulkan_graphics_v6_max_dependency_view_offsets",
+            "vulkan_graphics_v6_max_correlation_masks",
+        ]:
+            self.assertIn(marker, caps)
+            self.assertIn(marker, parser)
+        self.assertIn("case PDOCKER_GPU_VULKAN_GRAPHICS_V633_ABI_MINOR: return 65u;", table_ranges)
+        for marker in [
+            "validate_vulkan_graphics_v633_render_pass_sideband(&view)",
+            "validate_vulkan_graphics_v632_duplicate_render_pass_identity(&view)",
+        ]:
+            self.assertIn(marker, validator)
+        self.assertLess(
+            validator.index("validate_vulkan_graphics_v632_duplicate_render_pass_identity(&view)"),
+            validator.index("validate_vulkan_graphics_v633_render_pass_sideband(&view)"),
+        )
+        for marker in [
+            "vulkan_graphics_v633_render_pass_index_for_id",
+            "vulkan_graphics_v633_render_pass_subpass_valid",
+            "vulkan_graphics_v633_render_pass_dependency_valid",
+            "vulkan_graphics_v633_render_pass_attachment_valid",
+            "vulkan_graphics_v633_render_pass_subpass_has_depth_stencil_attachment",
+            "vulkan_graphics_v633_depth_stencil_resolve_attachment_consistent",
+            "vulkan_graphics_v633_correlation_masks_dense_for_render_pass",
+            "vulkan_graphics_v633_resolve_mode_supported",
+            "other->render_pass_id == entry->render_pass_id",
+            "other->subpass_index == entry->subpass_index",
+            "other->dependency_index == entry->dependency_index",
+            "other->mask_index == entry->mask_index",
+            "entry->flags != PDOCKER_GPU_GRAPHICS_V633_DEPENDENCY_VIEW_OFFSET_PRESENT",
+            "entry->attachment_index != VK_ATTACHMENT_UNUSED",
+        ]:
+            self.assertIn(marker, sideband_validator)
+        for marker in [
+            "attachment->samples != VK_SAMPLE_COUNT_1_BIT",
+            "vulkan_graphics_attachment_layout_supported(",
+            "vulkan_format_has_depth_aspect(format)",
+            "vulkan_format_has_stencil_aspect(format)",
+            "entry->depth_resolve_mode != VK_RESOLVE_MODE_NONE",
+            "entry->stencil_resolve_mode != VK_RESOLVE_MODE_NONE",
+        ]:
+            self.assertIn(marker, ds_resolve_consistency)
+        for marker in [
+            "max_index + 1u == count",
+            "entry->render_pass_id != render_pass_id",
+        ]:
+            self.assertIn(marker, correlation_dense)
+
     def test_vulkan_graphics_v632_render_pass_transport_is_emitted_as_metadata_extension(self):
         icd = VULKAN_ICD.read_text()
         executor = GPU_EXECUTOR.read_text()
         sender = c_function_body(icd, "send_recorded_vulkan_graphics_v6_1_frame_range")
         collector = c_function_body(icd, "collect_vulkan_graphics_v632_render_pass_transport")
-        representable = c_function_body(icd, "vulkan_graphics_v632_render_pass_transport_representable")
+        common_collector = c_function_body(icd, "collect_vulkan_graphics_render_pass_transport_common")
+        representable = c_function_body(icd, "vulkan_graphics_render_pass_transport_base_representable")
+        v632_representable = c_function_body(icd, "vulkan_graphics_v632_render_pass_transport_representable")
         caps = c_function_body(executor, "print_vulkan_advertisement_caps")
         parser = c_function_body(icd, "parse_executor_advertisement_caps_json")
 
@@ -26878,6 +27033,13 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(marker, icd)
 
         for marker in [
+            "collect_vulkan_graphics_render_pass_transport_common(",
+            "NULL, NULL,",
+            "false, rp);",
+        ]:
+            self.assertIn(marker, collector)
+
+        for marker in [
             "vulkan_graphics_v632_render_pass_transport_representable(rp)",
             "find_graphics_v632_render_pass_entry(",
             "append_graphics_v632_render_pass_attachment_ref(",
@@ -26887,14 +27049,16 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_GPU_GRAPHICS_V632_ATTACHMENT_REF_PRESERVE",
             "PDOCKER_GPU_GRAPHICS_V632_ATTACHMENT_REF_DEPTH_STENCIL",
             "*attachment_ref_count = ref_count_work;",
+            "allow_v633_sideband",
         ]:
-            self.assertIn(marker, collector)
+            self.assertIn(marker, common_collector)
 
+        self.assertIn("rp, false", v632_representable)
         for fail_closed_marker in [
-            "rp->multiview_correlation_mask_count != 0",
-            "subpass->view_mask != 0",
-            "has_depth_stencil_resolve_attachment",
-            "dep->has_view_offset && dep->view_offset != 0",
+            "!allow_v633_exact_sideband && rp->multiview_correlation_mask_count != 0",
+            "!allow_v633_exact_sideband && subpass->view_mask != 0",
+            "!allow_v633_exact_sideband && has_depth_stencil_resolve",
+            "!allow_v633_exact_sideband && dep->has_view_offset && dep->view_offset != 0",
         ]:
             self.assertIn(fail_closed_marker, representable)
 

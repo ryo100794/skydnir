@@ -6233,6 +6233,7 @@ static bool executor_supports_vulkan_graphics_v629_variable_descriptor_counts(vo
 static bool executor_supports_vulkan_graphics_v630_native_objects(void);
 static bool executor_supports_vulkan_graphics_v631_descriptor_layout_flags(void);
 static bool executor_supports_vulkan_graphics_v632_render_passes(void);
+static bool executor_supports_vulkan_graphics_v633_render_pass_sideband(void);
 static bool executor_supports_any_vulkan_buffer_views(void);
 
 static VkFormatFeatureFlags pdocker_vk_format_buffer_features(VkFormat format) {
@@ -10734,6 +10735,10 @@ typedef struct {
     PdockerGpuVulkanGraphicsV632RenderPassSubpassEntry render_pass_subpasses[PDOCKER_GPU_VULKAN_GRAPHICS_V632_MAX_RENDER_PASS_SUBPASSES];
     PdockerGpuVulkanGraphicsV632RenderPassAttachmentRefEntry render_pass_attachment_refs[PDOCKER_GPU_VULKAN_GRAPHICS_V632_MAX_RENDER_PASS_ATTACHMENT_REFS];
     PdockerGpuVulkanGraphicsV632RenderPassDependencyEntry render_pass_dependencies[PDOCKER_GPU_VULKAN_GRAPHICS_V632_MAX_RENDER_PASS_DEPENDENCIES];
+    PdockerGpuVulkanGraphicsV633SubpassViewMaskEntry render_pass_subpass_view_masks[PDOCKER_GPU_VULKAN_GRAPHICS_V633_MAX_SUBPASS_VIEW_MASKS];
+    PdockerGpuVulkanGraphicsV633DepthStencilResolveEntry render_pass_depth_stencil_resolves[PDOCKER_GPU_VULKAN_GRAPHICS_V633_MAX_DEPTH_STENCIL_RESOLVES];
+    PdockerGpuVulkanGraphicsV633DependencyViewOffsetEntry render_pass_dependency_view_offsets[PDOCKER_GPU_VULKAN_GRAPHICS_V633_MAX_DEPENDENCY_VIEW_OFFSETS];
+    PdockerGpuVulkanGraphicsV633CorrelationMaskEntry render_pass_correlation_masks[PDOCKER_GPU_VULKAN_GRAPHICS_V633_MAX_CORRELATION_MASKS];
 } PdockerVkGraphicsTransportTables;
 
 typedef struct {
@@ -10759,8 +10764,9 @@ static int find_graphics_v632_render_pass_entry(
     return -ENOENT;
 }
 
-static bool vulkan_graphics_v632_render_pass_transport_representable(
-        const PdockerVkRenderPass *rp) {
+static bool vulkan_graphics_render_pass_transport_base_representable(
+        const PdockerVkRenderPass *rp,
+        bool allow_v633_exact_sideband) {
     if (!rp || rp->destroyed || rp->object_id == 0) return false;
     if (rp->attachment_overflow || rp->subpass_overflow || rp->exact_capture_overflow) return false;
     if (rp->attachment_count > PDOCKER_VK_MAX_STORAGE_BUFFERS ||
@@ -10769,21 +10775,32 @@ static bool vulkan_graphics_v632_render_pass_transport_representable(
         rp->dependency_count > PDOCKER_VK_MAX_RENDER_PASS_DEPENDENCIES) {
         return false;
     }
-    if (rp->multiview_correlation_mask_count != 0) return false;
+    if (!allow_v633_exact_sideband && rp->multiview_correlation_mask_count != 0) return false;
+    if (allow_v633_exact_sideband &&
+        rp->multiview_correlation_mask_count > PDOCKER_GPU_VULKAN_GRAPHICS_V633_MAX_CORRELATION_MASKS) {
+        return false;
+    }
     size_t attachment_ref_count = 0;
+    size_t subpass_view_mask_count = 0;
+    size_t depth_stencil_resolve_count = 0;
+    size_t dependency_view_offset_count = 0;
     for (uint32_t subpass_index = 0; subpass_index < rp->subpass_count; ++subpass_index) {
         const PdockerVkSubpassState *subpass = &rp->subpasses[subpass_index];
-        if (subpass->view_mask != 0) return false;
+        if (!allow_v633_exact_sideband && subpass->view_mask != 0) return false;
+        if (allow_v633_exact_sideband && subpass->view_mask != 0) ++subpass_view_mask_count;
         if (subpass->input_attachment_count > PDOCKER_VK_MAX_STORAGE_BUFFERS ||
             subpass->color_attachment_count > PDOCKER_VK_MAX_STORAGE_BUFFERS ||
             subpass->preserve_attachment_count > PDOCKER_VK_MAX_STORAGE_BUFFERS) {
             return false;
         }
-        if (subpass->has_depth_stencil_resolve_attachment ||
+        const bool has_depth_stencil_resolve =
+            subpass->has_depth_stencil_resolve_attachment ||
             subpass->depth_resolve_mode != VK_RESOLVE_MODE_NONE ||
-            subpass->stencil_resolve_mode != VK_RESOLVE_MODE_NONE) {
+            subpass->stencil_resolve_mode != VK_RESOLVE_MODE_NONE;
+        if (!allow_v633_exact_sideband && has_depth_stencil_resolve) {
             return false;
         }
+        if (allow_v633_exact_sideband && has_depth_stencil_resolve) ++depth_stencil_resolve_count;
         attachment_ref_count += subpass->input_attachment_count;
         attachment_ref_count += subpass->color_attachment_count;
         attachment_ref_count += subpass->color_attachment_count;
@@ -10795,9 +10812,48 @@ static bool vulkan_graphics_v632_render_pass_transport_representable(
     }
     for (uint32_t dependency_index = 0; dependency_index < rp->dependency_count; ++dependency_index) {
         const PdockerVkRenderPassDependencyExactState *dep = &rp->dependencies[dependency_index];
-        if (dep->has_view_offset && dep->view_offset != 0) return false;
+        if (!allow_v633_exact_sideband && dep->has_view_offset && dep->view_offset != 0) return false;
+        if (allow_v633_exact_sideband && dep->has_view_offset) ++dependency_view_offset_count;
+    }
+    if (allow_v633_exact_sideband &&
+        (subpass_view_mask_count > PDOCKER_GPU_VULKAN_GRAPHICS_V633_MAX_SUBPASS_VIEW_MASKS ||
+         depth_stencil_resolve_count > PDOCKER_GPU_VULKAN_GRAPHICS_V633_MAX_DEPTH_STENCIL_RESOLVES ||
+         dependency_view_offset_count > PDOCKER_GPU_VULKAN_GRAPHICS_V633_MAX_DEPENDENCY_VIEW_OFFSETS)) {
+        return false;
     }
     return true;
+}
+
+static bool vulkan_graphics_v632_render_pass_transport_representable(
+        const PdockerVkRenderPass *rp) {
+    return vulkan_graphics_render_pass_transport_base_representable(
+        rp, false);
+}
+
+static bool vulkan_graphics_v633_render_pass_transport_representable(
+        const PdockerVkRenderPass *rp) {
+    return vulkan_graphics_render_pass_transport_base_representable(
+        rp, true);
+}
+
+static bool vulkan_graphics_render_pass_requires_v633_sideband(
+        const PdockerVkRenderPass *rp) {
+    if (!rp) return false;
+    if (rp->multiview_correlation_mask_count != 0) return true;
+    for (uint32_t subpass_index = 0; subpass_index < rp->subpass_count; ++subpass_index) {
+        const PdockerVkSubpassState *subpass = &rp->subpasses[subpass_index];
+        if (subpass->view_mask != 0 ||
+            subpass->has_depth_stencil_resolve_attachment ||
+            subpass->depth_resolve_mode != VK_RESOLVE_MODE_NONE ||
+            subpass->stencil_resolve_mode != VK_RESOLVE_MODE_NONE) {
+            return true;
+        }
+    }
+    for (uint32_t dependency_index = 0; dependency_index < rp->dependency_count; ++dependency_index) {
+        const PdockerVkRenderPassDependencyExactState *dep = &rp->dependencies[dependency_index];
+        if (dep->has_view_offset) return true;
+    }
+    return false;
 }
 
 static int append_graphics_v632_render_pass_attachment_ref(
@@ -10824,7 +10880,7 @@ static int append_graphics_v632_render_pass_attachment_ref(
     return 0;
 }
 
-static int collect_vulkan_graphics_v632_render_pass_transport(
+static int collect_vulkan_graphics_render_pass_transport_common(
         PdockerGpuVulkanGraphicsV632RenderPassEntry *render_passes,
         size_t *render_pass_count,
         PdockerGpuVulkanGraphicsV632RenderPassAttachmentEntry *attachments,
@@ -10835,13 +10891,30 @@ static int collect_vulkan_graphics_v632_render_pass_transport(
         size_t *attachment_ref_count,
         PdockerGpuVulkanGraphicsV632RenderPassDependencyEntry *dependencies,
         size_t *dependency_count,
+        PdockerGpuVulkanGraphicsV633SubpassViewMaskEntry *subpass_view_masks,
+        size_t *subpass_view_mask_count,
+        PdockerGpuVulkanGraphicsV633DepthStencilResolveEntry *depth_stencil_resolves,
+        size_t *depth_stencil_resolve_count,
+        PdockerGpuVulkanGraphicsV633DependencyViewOffsetEntry *dependency_view_offsets,
+        size_t *dependency_view_offset_count,
+        PdockerGpuVulkanGraphicsV633CorrelationMaskEntry *correlation_masks,
+        size_t *correlation_mask_count,
+        bool allow_v633_sideband,
         const PdockerVkRenderPass *rp) {
     if (!render_passes || !render_pass_count || !attachments || !attachment_count ||
         !subpasses || !subpass_count || !attachment_refs || !attachment_ref_count ||
         !dependencies || !dependency_count || !rp) {
         return -EINVAL;
     }
-    if (!vulkan_graphics_v632_render_pass_transport_representable(rp)) {
+    if (allow_v633_sideband && (!subpass_view_masks || !subpass_view_mask_count ||
+        !depth_stencil_resolves || !depth_stencil_resolve_count ||
+        !dependency_view_offsets || !dependency_view_offset_count ||
+        !correlation_masks || !correlation_mask_count)) {
+        return -EINVAL;
+    }
+    if (allow_v633_sideband) {
+        if (!vulkan_graphics_v633_render_pass_transport_representable(rp)) return -EOPNOTSUPP;
+    } else if (!vulkan_graphics_v632_render_pass_transport_representable(rp)) {
         return -EOPNOTSUPP;
     }
     const uint64_t render_pass_id = pdocker_vk_render_pass_object_id(rp);
@@ -10851,6 +10924,9 @@ static int collect_vulkan_graphics_v632_render_pass_transport(
     if (existing >= 0) return 0;
     if (*render_pass_count >= PDOCKER_GPU_VULKAN_GRAPHICS_V632_MAX_RENDER_PASSES) return -E2BIG;
     size_t needed_attachment_refs = 0;
+    size_t needed_subpass_view_masks = 0;
+    size_t needed_depth_stencil_resolves = 0;
+    size_t needed_dependency_view_offsets = 0;
     for (uint32_t subpass_index = 0; subpass_index < rp->subpass_count; ++subpass_index) {
         const PdockerVkSubpassState *subpass = &rp->subpasses[subpass_index];
         needed_attachment_refs += subpass->input_attachment_count;
@@ -10858,11 +10934,29 @@ static int collect_vulkan_graphics_v632_render_pass_transport(
         needed_attachment_refs += subpass->color_attachment_count;
         needed_attachment_refs += subpass->preserve_attachment_count;
         if (subpass->has_depth_stencil_attachment) needed_attachment_refs += 1u;
+        if (allow_v633_sideband && subpass->view_mask != 0) ++needed_subpass_view_masks;
+        if (allow_v633_sideband &&
+            (subpass->has_depth_stencil_resolve_attachment ||
+             subpass->depth_resolve_mode != VK_RESOLVE_MODE_NONE ||
+             subpass->stencil_resolve_mode != VK_RESOLVE_MODE_NONE)) {
+            ++needed_depth_stencil_resolves;
+        }
+    }
+    for (uint32_t dependency_index = 0; dependency_index < rp->dependency_count; ++dependency_index) {
+        const PdockerVkRenderPassDependencyExactState *dep = &rp->dependencies[dependency_index];
+        if (allow_v633_sideband && dep->has_view_offset) ++needed_dependency_view_offsets;
     }
     if (rp->attachment_count > PDOCKER_GPU_VULKAN_GRAPHICS_V632_MAX_RENDER_PASS_ATTACHMENTS - *attachment_count ||
         rp->subpass_count > PDOCKER_GPU_VULKAN_GRAPHICS_V632_MAX_RENDER_PASS_SUBPASSES - *subpass_count ||
         needed_attachment_refs > PDOCKER_GPU_VULKAN_GRAPHICS_V632_MAX_RENDER_PASS_ATTACHMENT_REFS - *attachment_ref_count ||
         rp->dependency_count > PDOCKER_GPU_VULKAN_GRAPHICS_V632_MAX_RENDER_PASS_DEPENDENCIES - *dependency_count) {
+        return -E2BIG;
+    }
+    if (allow_v633_sideband &&
+        (needed_subpass_view_masks > PDOCKER_GPU_VULKAN_GRAPHICS_V633_MAX_SUBPASS_VIEW_MASKS - *subpass_view_mask_count ||
+         needed_depth_stencil_resolves > PDOCKER_GPU_VULKAN_GRAPHICS_V633_MAX_DEPTH_STENCIL_RESOLVES - *depth_stencil_resolve_count ||
+         needed_dependency_view_offsets > PDOCKER_GPU_VULKAN_GRAPHICS_V633_MAX_DEPENDENCY_VIEW_OFFSETS - *dependency_view_offset_count ||
+         rp->multiview_correlation_mask_count > PDOCKER_GPU_VULKAN_GRAPHICS_V633_MAX_CORRELATION_MASKS - *correlation_mask_count)) {
         return -E2BIG;
     }
 
@@ -10943,6 +11037,32 @@ static int collect_vulkan_graphics_v632_render_pass_transport(
             if (rc != 0) return rc;
         }
         dst->flags = (uint32_t)src->flags;
+
+        if (allow_v633_sideband && src->view_mask != 0) {
+            PdockerGpuVulkanGraphicsV633SubpassViewMaskEntry *extra = &subpass_view_masks[(*subpass_view_mask_count)++];
+            memset(extra, 0, sizeof(*extra));
+            extra->render_pass_id = render_pass_id;
+            extra->subpass_index = subpass_index;
+            extra->view_mask = src->view_mask;
+        }
+        if (allow_v633_sideband &&
+            (src->has_depth_stencil_resolve_attachment ||
+             src->depth_resolve_mode != VK_RESOLVE_MODE_NONE ||
+             src->stencil_resolve_mode != VK_RESOLVE_MODE_NONE)) {
+            PdockerGpuVulkanGraphicsV633DepthStencilResolveEntry *extra =
+                &depth_stencil_resolves[(*depth_stencil_resolve_count)++];
+            memset(extra, 0, sizeof(*extra));
+            extra->render_pass_id = render_pass_id;
+            extra->subpass_index = subpass_index;
+            extra->depth_resolve_mode = (uint32_t)src->depth_resolve_mode;
+            extra->stencil_resolve_mode = (uint32_t)src->stencil_resolve_mode;
+            extra->attachment_index = src->depth_stencil_resolve_attachment;
+            extra->layout = (uint32_t)src->depth_stencil_resolve_layout;
+            extra->aspect_mask = (uint32_t)src->depth_stencil_resolve_aspect_mask;
+            if (src->has_depth_stencil_resolve_attachment) {
+                extra->flags |= PDOCKER_GPU_GRAPHICS_V633_DEPTH_STENCIL_RESOLVE_ATTACHMENT_PRESENT;
+            }
+        }
     }
 
     for (uint32_t dependency_index = 0; dependency_index < rp->dependency_count; ++dependency_index) {
@@ -10958,6 +11078,26 @@ static int collect_vulkan_graphics_v632_render_pass_transport(
         dst->dst_stage_mask = (uint64_t)src->dst_stage_mask;
         dst->src_access_mask = (uint64_t)src->src_access_mask;
         dst->dst_access_mask = (uint64_t)src->dst_access_mask;
+        if (allow_v633_sideband && src->has_view_offset) {
+            PdockerGpuVulkanGraphicsV633DependencyViewOffsetEntry *extra =
+                &dependency_view_offsets[(*dependency_view_offset_count)++];
+            memset(extra, 0, sizeof(*extra));
+            extra->render_pass_id = render_pass_id;
+            extra->dependency_index = dependency_index;
+            extra->view_offset_bits = (uint32_t)src->view_offset;
+            extra->flags = PDOCKER_GPU_GRAPHICS_V633_DEPENDENCY_VIEW_OFFSET_PRESENT;
+        }
+    }
+
+    if (allow_v633_sideband) {
+        for (uint32_t mask_index = 0; mask_index < rp->multiview_correlation_mask_count; ++mask_index) {
+            PdockerGpuVulkanGraphicsV633CorrelationMaskEntry *extra =
+                &correlation_masks[(*correlation_mask_count)++];
+            memset(extra, 0, sizeof(*extra));
+            extra->render_pass_id = render_pass_id;
+            extra->mask_index = mask_index;
+            extra->correlation_mask = rp->multiview_correlation_masks[mask_index];
+        }
     }
 
     *attachment_ref_count = ref_count_work;
@@ -10972,6 +11112,64 @@ static int collect_vulkan_graphics_v632_render_pass_transport(
     entry->dependency_count = rp->dependency_count;
     entry->flags = (uint32_t)rp->flags;
     return 0;
+}
+
+static int collect_vulkan_graphics_v632_render_pass_transport(
+        PdockerGpuVulkanGraphicsV632RenderPassEntry *render_passes,
+        size_t *render_pass_count,
+        PdockerGpuVulkanGraphicsV632RenderPassAttachmentEntry *attachments,
+        size_t *attachment_count,
+        PdockerGpuVulkanGraphicsV632RenderPassSubpassEntry *subpasses,
+        size_t *subpass_count,
+        PdockerGpuVulkanGraphicsV632RenderPassAttachmentRefEntry *attachment_refs,
+        size_t *attachment_ref_count,
+        PdockerGpuVulkanGraphicsV632RenderPassDependencyEntry *dependencies,
+        size_t *dependency_count,
+        const PdockerVkRenderPass *rp) {
+    return collect_vulkan_graphics_render_pass_transport_common(
+        render_passes, render_pass_count,
+        attachments, attachment_count,
+        subpasses, subpass_count,
+        attachment_refs, attachment_ref_count,
+        dependencies, dependency_count,
+        NULL, NULL,
+        NULL, NULL,
+        NULL, NULL,
+        NULL, NULL,
+        false, rp);
+}
+
+static int collect_vulkan_graphics_v633_render_pass_transport(
+        PdockerGpuVulkanGraphicsV632RenderPassEntry *render_passes,
+        size_t *render_pass_count,
+        PdockerGpuVulkanGraphicsV632RenderPassAttachmentEntry *attachments,
+        size_t *attachment_count,
+        PdockerGpuVulkanGraphicsV632RenderPassSubpassEntry *subpasses,
+        size_t *subpass_count,
+        PdockerGpuVulkanGraphicsV632RenderPassAttachmentRefEntry *attachment_refs,
+        size_t *attachment_ref_count,
+        PdockerGpuVulkanGraphicsV632RenderPassDependencyEntry *dependencies,
+        size_t *dependency_count,
+        PdockerGpuVulkanGraphicsV633SubpassViewMaskEntry *subpass_view_masks,
+        size_t *subpass_view_mask_count,
+        PdockerGpuVulkanGraphicsV633DepthStencilResolveEntry *depth_stencil_resolves,
+        size_t *depth_stencil_resolve_count,
+        PdockerGpuVulkanGraphicsV633DependencyViewOffsetEntry *dependency_view_offsets,
+        size_t *dependency_view_offset_count,
+        PdockerGpuVulkanGraphicsV633CorrelationMaskEntry *correlation_masks,
+        size_t *correlation_mask_count,
+        const PdockerVkRenderPass *rp) {
+    return collect_vulkan_graphics_render_pass_transport_common(
+        render_passes, render_pass_count,
+        attachments, attachment_count,
+        subpasses, subpass_count,
+        attachment_refs, attachment_ref_count,
+        dependencies, dependency_count,
+        subpass_view_masks, subpass_view_mask_count,
+        depth_stencil_resolves, depth_stencil_resolve_count,
+        dependency_view_offsets, dependency_view_offset_count,
+        correlation_masks, correlation_mask_count,
+        true, rp);
 }
 
 static bool strict_vulkan_graphics_v632_render_pass_transport_complete(
@@ -11073,6 +11271,10 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     PdockerGpuVulkanGraphicsV632RenderPassSubpassEntry *render_pass_subpasses = NULL;
     PdockerGpuVulkanGraphicsV632RenderPassAttachmentRefEntry *render_pass_attachment_refs = NULL;
     PdockerGpuVulkanGraphicsV632RenderPassDependencyEntry *render_pass_dependencies = NULL;
+    PdockerGpuVulkanGraphicsV633SubpassViewMaskEntry *render_pass_subpass_view_masks = NULL;
+    PdockerGpuVulkanGraphicsV633DepthStencilResolveEntry *render_pass_depth_stencil_resolves = NULL;
+    PdockerGpuVulkanGraphicsV633DependencyViewOffsetEntry *render_pass_dependency_view_offsets = NULL;
+    PdockerGpuVulkanGraphicsV633CorrelationMaskEntry *render_pass_correlation_masks = NULL;
     int *fds = NULL;
     if (submit_sync_count > PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS) {
         close(socket_fd);
@@ -11156,6 +11358,10 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     render_pass_subpasses = transport_tables->render_pass_subpasses;
     render_pass_attachment_refs = transport_tables->render_pass_attachment_refs;
     render_pass_dependencies = transport_tables->render_pass_dependencies;
+    render_pass_subpass_view_masks = transport_tables->render_pass_subpass_view_masks;
+    render_pass_depth_stencil_resolves = transport_tables->render_pass_depth_stencil_resolves;
+    render_pass_dependency_view_offsets = transport_tables->render_pass_dependency_view_offsets;
+    render_pass_correlation_masks = transport_tables->render_pass_correlation_masks;
     if (submit_sync_count > 0) {
         memcpy(submit_syncs, submit_sync_entries, submit_sync_count * sizeof(submit_syncs[0]));
     }
@@ -11279,8 +11485,10 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
         close(socket_fd);
         return -ENOMEM;
     }
+    PdockerGpuVulkanGraphicsV633FrameHeader *frame_header_v633 =
+        (PdockerGpuVulkanGraphicsV633FrameHeader *)frame;
     PdockerGpuVulkanGraphicsV632FrameHeader *frame_header_v632 =
-        (PdockerGpuVulkanGraphicsV632FrameHeader *)frame;
+        &frame_header_v633->v632;
     PdockerGpuVulkanGraphicsV631FrameHeader *frame_header_v631 =
         &frame_header_v632->v631;
     PdockerGpuVulkanGraphicsV630FrameHeader *frame_header_v630 =
@@ -11346,7 +11554,8 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     PdockerGpuVulkanGraphicsV6FrameHeader *header = &frame_header->base;
 #define REFRESH_GRAPHICS_V6_FRAME_POINTERS() \
     do { \
-        frame_header_v632 = (PdockerGpuVulkanGraphicsV632FrameHeader *)frame; \
+        frame_header_v633 = (PdockerGpuVulkanGraphicsV633FrameHeader *)frame; \
+        frame_header_v632 = &frame_header_v633->v632; \
         frame_header_v631 = &frame_header_v632->v631; \
         frame_header_v630 = &frame_header_v631->v630; \
         frame_header_v629 = &frame_header_v630->v629; \
@@ -11395,7 +11604,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
      * largest known header before appending variable payloads so a later ABI
      * upgrade cannot overlap data already written into the frame.
      */
-    size_t cursor = sizeof(PdockerGpuVulkanGraphicsV632FrameHeader);
+    size_t cursor = sizeof(PdockerGpuVulkanGraphicsV633FrameHeader);
     size_t fd_count = 0;
     size_t resource_count = 0;
     size_t descriptor_count = 0;
@@ -11479,6 +11688,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     bool need_v630_native_objects = false;
     bool need_v631_descriptor_layout_flags = false;
     bool need_v632_render_passes = false;
+    bool need_v633_render_pass_sideband = false;
     bool v631_descriptor_layout_flags_required = false;
     size_t descriptor_set_layout_flag_count = 0;
     size_t render_pass_count = 0;
@@ -11486,6 +11696,10 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     size_t render_pass_subpass_count = 0;
     size_t render_pass_attachment_ref_count = 0;
     size_t render_pass_dependency_count = 0;
+    size_t render_pass_subpass_view_mask_count = 0;
+    size_t render_pass_depth_stencil_resolve_count = 0;
+    size_t render_pass_dependency_view_offset_count = 0;
+    size_t render_pass_correlation_mask_count = 0;
     size_t buffer_view_count = 0;
     uint64_t submit_id = __sync_add_and_fetch(&g_generic_dispatch_sequence, 1);
     const bool strict_passthrough =
@@ -11565,8 +11779,9 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
         }
         PdockerVkPipeline *pipeline = record->pipeline;
         const bool v632_render_pass_supported = executor_supports_vulkan_graphics_v632_render_passes();
+        const bool v633_render_pass_sideband_supported = executor_supports_vulkan_graphics_v633_render_pass_sideband();
         if (strict_passthrough && pipeline->render_pass_normalized_to_dynamic_rendering &&
-            (!v632_render_pass_supported ||
+            (!(v632_render_pass_supported || v633_render_pass_sideband_supported) ||
              !strict_vulkan_graphics_v632_render_pass_transport_complete(pipeline))) {
             fprintf(stderr,
                     "pdocker-vulkan-icd: V6 strict frame rejected: render pass normalization required strict-v6-render-pass-metadata-missing pipeline_id=%llu\n",
@@ -11574,17 +11789,37 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
             rc = -EOPNOTSUPP;
             goto cleanup;
         }
-        if (pipeline->render_pass && v632_render_pass_supported &&
-            vulkan_graphics_v632_render_pass_transport_representable(pipeline->render_pass)) {
-            rc = collect_vulkan_graphics_v632_render_pass_transport(
-                render_passes, &render_pass_count,
-                render_pass_attachments, &render_pass_attachment_count,
-                render_pass_subpasses, &render_pass_subpass_count,
-                render_pass_attachment_refs, &render_pass_attachment_ref_count,
-                render_pass_dependencies, &render_pass_dependency_count,
-                pipeline->render_pass);
-            if (rc != 0) goto cleanup;
-            need_v632_render_passes = true;
+        if (pipeline->render_pass) {
+            const bool requires_v633_sideband =
+                vulkan_graphics_render_pass_requires_v633_sideband(pipeline->render_pass);
+            if (requires_v633_sideband && v633_render_pass_sideband_supported &&
+                vulkan_graphics_v633_render_pass_transport_representable(pipeline->render_pass)) {
+                rc = collect_vulkan_graphics_v633_render_pass_transport(
+                    render_passes, &render_pass_count,
+                    render_pass_attachments, &render_pass_attachment_count,
+                    render_pass_subpasses, &render_pass_subpass_count,
+                    render_pass_attachment_refs, &render_pass_attachment_ref_count,
+                    render_pass_dependencies, &render_pass_dependency_count,
+                    render_pass_subpass_view_masks, &render_pass_subpass_view_mask_count,
+                    render_pass_depth_stencil_resolves, &render_pass_depth_stencil_resolve_count,
+                    render_pass_dependency_view_offsets, &render_pass_dependency_view_offset_count,
+                    render_pass_correlation_masks, &render_pass_correlation_mask_count,
+                    pipeline->render_pass);
+                if (rc != 0) goto cleanup;
+                need_v632_render_passes = true;
+                need_v633_render_pass_sideband = true;
+            } else if (!requires_v633_sideband && v632_render_pass_supported &&
+                       vulkan_graphics_v632_render_pass_transport_representable(pipeline->render_pass)) {
+                rc = collect_vulkan_graphics_v632_render_pass_transport(
+                    render_passes, &render_pass_count,
+                    render_pass_attachments, &render_pass_attachment_count,
+                    render_pass_subpasses, &render_pass_subpass_count,
+                    render_pass_attachment_refs, &render_pass_attachment_ref_count,
+                    render_pass_dependencies, &render_pass_dependency_count,
+                    pipeline->render_pass);
+                if (rc != 0) goto cleanup;
+                need_v632_render_passes = true;
+            }
         }
         if (pipeline->graphics_unsupported ||
             pipeline->dynamic_rendering_format_overflow ||
@@ -13296,7 +13531,14 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
         executor_supports_vulkan_graphics_v631_descriptor_layout_flags();
     const bool v632_render_pass_supported =
         executor_supports_vulkan_graphics_v632_render_passes();
-    if (need_v632_render_passes && (!graphics_identity_ready || !v632_render_pass_supported)) {
+    const bool v633_render_pass_sideband_supported =
+        executor_supports_vulkan_graphics_v633_render_pass_sideband();
+    if (need_v633_render_pass_sideband && (!graphics_identity_ready || !v633_render_pass_sideband_supported)) {
+        rc = -EOPNOTSUPP;
+        goto cleanup;
+    }
+    if (need_v632_render_passes && (!graphics_identity_ready ||
+        !(v632_render_pass_supported || need_v633_render_pass_sideband))) {
         rc = -EOPNOTSUPP;
         goto cleanup;
     }
@@ -13304,12 +13546,17 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
         (descriptor_set_layout_flag_count > 0 &&
          graphics_identity_ready &&
          v631_descriptor_layout_flags_supported) ||
-        need_v632_render_passes;
+        need_v632_render_passes || need_v633_render_pass_sideband;
     need_v630_native_objects =
         graphics_identity_ready &&
         (executor_supports_vulkan_graphics_v630_native_objects() ||
-         need_v631_descriptor_layout_flags || need_v632_render_passes);
-    if (need_v632_render_passes) {
+         need_v631_descriptor_layout_flags || need_v632_render_passes || need_v633_render_pass_sideband);
+    if (need_v633_render_pass_sideband) {
+        need_v632_render_passes = true;
+        need_v631_descriptor_layout_flags = true;
+        need_v630_native_objects = true;
+        need_v629_variable_descriptor_counts = true;
+    } else if (need_v632_render_passes) {
         need_v631_descriptor_layout_flags = true;
         need_v630_native_objects = true;
         need_v629_variable_descriptor_counts = true;
@@ -13379,7 +13626,10 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     }
 
     memcpy(header->magic, PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAGIC, 8);
-    if (need_v632_render_passes) {
+    if (need_v633_render_pass_sideband) {
+        header->header_size = sizeof(*frame_header_v633);
+        header->abi_minor = PDOCKER_GPU_VULKAN_GRAPHICS_V633_ABI_MINOR;
+    } else if (need_v632_render_passes) {
         header->header_size = sizeof(*frame_header_v632);
         header->abi_minor = PDOCKER_GPU_VULKAN_GRAPHICS_V632_ABI_MINOR;
     } else if (need_v631_descriptor_layout_flags) {
@@ -13735,6 +13985,20 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
         frame_header_v632->v632.render_pass_dependency_entry_size = sizeof(PdockerGpuVulkanGraphicsV632RenderPassDependencyEntry);
         frame_header_v632->v632.render_pass_dependency_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V632_RENDER_PASS_DEPENDENCY_SCHEMA_HASH;
     }
+    if (need_v633_render_pass_sideband) {
+        frame_header_v633->v633.subpass_view_mask_count = (uint32_t)render_pass_subpass_view_mask_count;
+        frame_header_v633->v633.subpass_view_mask_entry_size = sizeof(PdockerGpuVulkanGraphicsV633SubpassViewMaskEntry);
+        frame_header_v633->v633.subpass_view_mask_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V633_SUBPASS_VIEW_MASK_SCHEMA_HASH;
+        frame_header_v633->v633.depth_stencil_resolve_count = (uint32_t)render_pass_depth_stencil_resolve_count;
+        frame_header_v633->v633.depth_stencil_resolve_entry_size = sizeof(PdockerGpuVulkanGraphicsV633DepthStencilResolveEntry);
+        frame_header_v633->v633.depth_stencil_resolve_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V633_DEPTH_STENCIL_RESOLVE_SCHEMA_HASH;
+        frame_header_v633->v633.dependency_view_offset_count = (uint32_t)render_pass_dependency_view_offset_count;
+        frame_header_v633->v633.dependency_view_offset_entry_size = sizeof(PdockerGpuVulkanGraphicsV633DependencyViewOffsetEntry);
+        frame_header_v633->v633.dependency_view_offset_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V633_DEPENDENCY_VIEW_OFFSET_SCHEMA_HASH;
+        frame_header_v633->v633.correlation_mask_count = (uint32_t)render_pass_correlation_mask_count;
+        frame_header_v633->v633.correlation_mask_entry_size = sizeof(PdockerGpuVulkanGraphicsV633CorrelationMaskEntry);
+        frame_header_v633->v633.correlation_mask_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V633_CORRELATION_MASK_SCHEMA_HASH;
+    }
 
     frame_build_phase = "frame-append-tables";
 #define APPEND_GRAPHICS_TABLE(data_, count_, entry_size_, offset_field_, size_field_) \
@@ -14022,6 +14286,24 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
                               frame_header_v632->v632.render_pass_dependency_table_offset,
                               frame_header_v632->v632.render_pass_dependency_table_size);
     }
+    if (need_v633_render_pass_sideband) {
+        APPEND_GRAPHICS_TABLE(render_pass_subpass_view_masks, render_pass_subpass_view_mask_count,
+                              sizeof(render_pass_subpass_view_masks[0]),
+                              frame_header_v633->v633.subpass_view_mask_table_offset,
+                              frame_header_v633->v633.subpass_view_mask_table_size);
+        APPEND_GRAPHICS_TABLE(render_pass_depth_stencil_resolves, render_pass_depth_stencil_resolve_count,
+                              sizeof(render_pass_depth_stencil_resolves[0]),
+                              frame_header_v633->v633.depth_stencil_resolve_table_offset,
+                              frame_header_v633->v633.depth_stencil_resolve_table_size);
+        APPEND_GRAPHICS_TABLE(render_pass_dependency_view_offsets, render_pass_dependency_view_offset_count,
+                              sizeof(render_pass_dependency_view_offsets[0]),
+                              frame_header_v633->v633.dependency_view_offset_table_offset,
+                              frame_header_v633->v633.dependency_view_offset_table_size);
+        APPEND_GRAPHICS_TABLE(render_pass_correlation_masks, render_pass_correlation_mask_count,
+                              sizeof(render_pass_correlation_masks[0]),
+                              frame_header_v633->v633.correlation_mask_table_offset,
+                              frame_header_v633->v633.correlation_mask_table_size);
+    }
 #undef APPEND_GRAPHICS_TABLE
     frame_header->v61.extension_hash = 1469598103934665603ull;
     frame_header->v61.extension_hash = fnv1a64_update_bytes(
@@ -14285,6 +14567,21 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
             frame_header_v632->v632.render_pass_attachment_ref_table_hash ^
             frame_header_v632->v632.render_pass_dependency_table_hash;
     }
+    if (need_v633_render_pass_sideband) {
+        frame_header_v633->v633.subpass_view_mask_table_hash = fnv1a64_bytes(
+            render_pass_subpass_view_masks, (size_t)frame_header_v633->v633.subpass_view_mask_table_size);
+        frame_header_v633->v633.depth_stencil_resolve_table_hash = fnv1a64_bytes(
+            render_pass_depth_stencil_resolves, (size_t)frame_header_v633->v633.depth_stencil_resolve_table_size);
+        frame_header_v633->v633.dependency_view_offset_table_hash = fnv1a64_bytes(
+            render_pass_dependency_view_offsets, (size_t)frame_header_v633->v633.dependency_view_offset_table_size);
+        frame_header_v633->v633.correlation_mask_table_hash = fnv1a64_bytes(
+            render_pass_correlation_masks, (size_t)frame_header_v633->v633.correlation_mask_table_size);
+        frame_header_v633->v633.extension_hash =
+            frame_header_v633->v633.subpass_view_mask_table_hash ^
+            frame_header_v633->v633.depth_stencil_resolve_table_hash ^
+            frame_header_v633->v633.dependency_view_offset_table_hash ^
+            frame_header_v633->v633.correlation_mask_table_hash;
+    }
     header->frame_size = cursor;
     header->payload_hash = fnv1a64_bytes(frame + header->header_size,
                                          cursor - header->header_size);
@@ -14292,6 +14589,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     frame_build_phase = "send-frame";
     rc = send_vulkan_graphics_v6_frame_with_fds(socket_fd, frame, cursor, fds, fd_count);
     graphics_label =
+        need_v633_render_pass_sideband ? "VULKAN_GRAPHICS_V6.33" :
         need_v632_render_passes ? "VULKAN_GRAPHICS_V6.32" :
         need_v631_descriptor_layout_flags ? "VULKAN_GRAPHICS_V6.31" :
         need_v630_native_objects ? "VULKAN_GRAPHICS_V6.30" :
@@ -19634,13 +19932,14 @@ typedef struct {
     bool vulkan_dispatch_v5_supported_minors_valid;
     bool vulkan_dispatch_v5_supported_minor[10];
     bool vulkan_graphics_v6_supported_minors_valid;
-    bool vulkan_graphics_v6_supported_minor[33];
+    bool vulkan_graphics_v6_supported_minor[34];
     bool vulkan_graphics_v627_buffer_views_supported;
     bool vulkan_graphics_v628_push_constant_ranges_supported;
     bool vulkan_graphics_v629_variable_descriptor_counts_supported;
     bool vulkan_graphics_v630_native_objects_supported;
     bool vulkan_graphics_v631_descriptor_layout_flags_supported;
     bool vulkan_graphics_v632_render_passes_supported;
+    bool vulkan_graphics_v633_render_pass_sideband_supported;
     uint32_t vulkan_dispatch_v5_abi_minor_image_layout_ranges;
     uint32_t vulkan_dispatch_v5_max_image_layout_ranges;
     uint32_t vulkan_dispatch_v5_abi_minor_buffer_views;
@@ -19670,6 +19969,11 @@ typedef struct {
     uint32_t vulkan_graphics_v6_abi_minor_descriptor_layout_flags;
     uint32_t vulkan_graphics_v6_max_descriptor_set_layout_flags;
     uint32_t vulkan_graphics_v6_abi_minor_render_passes;
+    uint32_t vulkan_graphics_v6_abi_minor_render_pass_exact_sideband;
+    uint32_t vulkan_graphics_v6_max_subpass_view_masks;
+    uint32_t vulkan_graphics_v6_max_depth_stencil_resolves;
+    uint32_t vulkan_graphics_v6_max_dependency_view_offsets;
+    uint32_t vulkan_graphics_v6_max_correlation_masks;
     uint32_t image_format_cap_count;
     PdockerVkAdvertisedFormatCaps image_format_caps[PDOCKER_VK_ADVERTISED_FORMAT_CAP_MAX];
 } PdockerVkAdvertisedCaps;
@@ -20393,6 +20697,66 @@ static bool parse_executor_advertisement_caps_json(
         v632_ref_schema_ok && strcmp(v632_ref_schema_hash, expected_v632_ref_schema_hash) == 0 &&
         v632_dependency_schema_ok && strcmp(v632_dependency_schema_hash, expected_v632_dependency_schema_hash) == 0;
 
+    uint32_t v633_minor = 0;
+    uint32_t v633_max_subpass_view_masks = 0;
+    uint32_t v633_max_depth_stencil_resolves = 0;
+    uint32_t v633_max_dependency_view_offsets = 0;
+    uint32_t v633_max_correlation_masks = 0;
+    char v633_subpass_view_mask_schema_hash[32];
+    char v633_depth_stencil_resolve_schema_hash[32];
+    char v633_dependency_view_offset_schema_hash[32];
+    char v633_correlation_mask_schema_hash[32];
+    char expected_v633_subpass_view_mask_schema_hash[32];
+    char expected_v633_depth_stencil_resolve_schema_hash[32];
+    char expected_v633_dependency_view_offset_schema_hash[32];
+    char expected_v633_correlation_mask_schema_hash[32];
+    memset(v633_subpass_view_mask_schema_hash, 0, sizeof(v633_subpass_view_mask_schema_hash));
+    memset(v633_depth_stencil_resolve_schema_hash, 0, sizeof(v633_depth_stencil_resolve_schema_hash));
+    memset(v633_dependency_view_offset_schema_hash, 0, sizeof(v633_dependency_view_offset_schema_hash));
+    memset(v633_correlation_mask_schema_hash, 0, sizeof(v633_correlation_mask_schema_hash));
+    snprintf(expected_v633_subpass_view_mask_schema_hash, sizeof(expected_v633_subpass_view_mask_schema_hash), "0x%016llx",
+             (unsigned long long)PDOCKER_GPU_VULKAN_GRAPHICS_V633_SUBPASS_VIEW_MASK_SCHEMA_HASH);
+    snprintf(expected_v633_depth_stencil_resolve_schema_hash, sizeof(expected_v633_depth_stencil_resolve_schema_hash), "0x%016llx",
+             (unsigned long long)PDOCKER_GPU_VULKAN_GRAPHICS_V633_DEPTH_STENCIL_RESOLVE_SCHEMA_HASH);
+    snprintf(expected_v633_dependency_view_offset_schema_hash, sizeof(expected_v633_dependency_view_offset_schema_hash), "0x%016llx",
+             (unsigned long long)PDOCKER_GPU_VULKAN_GRAPHICS_V633_DEPENDENCY_VIEW_OFFSET_SCHEMA_HASH);
+    snprintf(expected_v633_correlation_mask_schema_hash, sizeof(expected_v633_correlation_mask_schema_hash), "0x%016llx",
+             (unsigned long long)PDOCKER_GPU_VULKAN_GRAPHICS_V633_CORRELATION_MASK_SCHEMA_HASH);
+    const bool v633_minor_ok = json_read_u32(json, "vulkan_graphics_v6_abi_minor_render_pass_exact_sideband", &v633_minor);
+    const bool v633_max_subpass_view_masks_ok = json_read_u32(json, "vulkan_graphics_v6_max_subpass_view_masks", &v633_max_subpass_view_masks);
+    const bool v633_max_depth_stencil_resolves_ok = json_read_u32(json, "vulkan_graphics_v6_max_depth_stencil_resolves", &v633_max_depth_stencil_resolves);
+    const bool v633_max_dependency_view_offsets_ok = json_read_u32(json, "vulkan_graphics_v6_max_dependency_view_offsets", &v633_max_dependency_view_offsets);
+    const bool v633_max_correlation_masks_ok = json_read_u32(json, "vulkan_graphics_v6_max_correlation_masks", &v633_max_correlation_masks);
+    const bool v633_subpass_view_mask_schema_ok = json_read_string(
+        json, "vulkan_graphics_v6_subpass_view_mask_schema_hash",
+        v633_subpass_view_mask_schema_hash, sizeof(v633_subpass_view_mask_schema_hash));
+    const bool v633_depth_stencil_resolve_schema_ok = json_read_string(
+        json, "vulkan_graphics_v6_depth_stencil_resolve_schema_hash",
+        v633_depth_stencil_resolve_schema_hash, sizeof(v633_depth_stencil_resolve_schema_hash));
+    const bool v633_dependency_view_offset_schema_ok = json_read_string(
+        json, "vulkan_graphics_v6_dependency_view_offset_schema_hash",
+        v633_dependency_view_offset_schema_hash, sizeof(v633_dependency_view_offset_schema_hash));
+    const bool v633_correlation_mask_schema_ok = json_read_string(
+        json, "vulkan_graphics_v6_correlation_mask_schema_hash",
+        v633_correlation_mask_schema_hash, sizeof(v633_correlation_mask_schema_hash));
+    caps->vulkan_graphics_v6_abi_minor_render_pass_exact_sideband = v633_minor;
+    caps->vulkan_graphics_v6_max_subpass_view_masks = v633_max_subpass_view_masks;
+    caps->vulkan_graphics_v6_max_depth_stencil_resolves = v633_max_depth_stencil_resolves;
+    caps->vulkan_graphics_v6_max_dependency_view_offsets = v633_max_dependency_view_offsets;
+    caps->vulkan_graphics_v6_max_correlation_masks = v633_max_correlation_masks;
+    caps->vulkan_graphics_v633_render_pass_sideband_supported =
+        caps->vulkan_graphics_v632_render_passes_supported &&
+        caps->vulkan_graphics_v6_supported_minor[PDOCKER_GPU_VULKAN_GRAPHICS_V633_ABI_MINOR] &&
+        v633_minor_ok && v633_minor >= PDOCKER_GPU_VULKAN_GRAPHICS_V633_ABI_MINOR &&
+        v633_max_subpass_view_masks_ok && v633_max_subpass_view_masks >= PDOCKER_GPU_VULKAN_GRAPHICS_V633_MAX_SUBPASS_VIEW_MASKS &&
+        v633_max_depth_stencil_resolves_ok && v633_max_depth_stencil_resolves >= PDOCKER_GPU_VULKAN_GRAPHICS_V633_MAX_DEPTH_STENCIL_RESOLVES &&
+        v633_max_dependency_view_offsets_ok && v633_max_dependency_view_offsets >= PDOCKER_GPU_VULKAN_GRAPHICS_V633_MAX_DEPENDENCY_VIEW_OFFSETS &&
+        v633_max_correlation_masks_ok && v633_max_correlation_masks >= PDOCKER_GPU_VULKAN_GRAPHICS_V633_MAX_CORRELATION_MASKS &&
+        v633_subpass_view_mask_schema_ok && strcmp(v633_subpass_view_mask_schema_hash, expected_v633_subpass_view_mask_schema_hash) == 0 &&
+        v633_depth_stencil_resolve_schema_ok && strcmp(v633_depth_stencil_resolve_schema_hash, expected_v633_depth_stencil_resolve_schema_hash) == 0 &&
+        v633_dependency_view_offset_schema_ok && strcmp(v633_dependency_view_offset_schema_hash, expected_v633_dependency_view_offset_schema_hash) == 0 &&
+        v633_correlation_mask_schema_ok && strcmp(v633_correlation_mask_schema_hash, expected_v633_correlation_mask_schema_hash) == 0;
+
     caps->image_format_cap_count = 0;
     for (size_t i = 0; i < pdocker_vk_bridge_format_count() &&
                        caps->image_format_cap_count < PDOCKER_VK_ADVERTISED_FORMAT_CAP_MAX; ++i) {
@@ -20571,6 +20935,13 @@ static bool executor_supports_vulkan_graphics_v632_render_passes(void) {
     const PdockerVkAdvertisedCaps *caps = pdocker_vk_advertised_caps();
     return caps && caps->executor_valid &&
            caps->vulkan_graphics_v632_render_passes_supported;
+}
+
+static bool executor_supports_vulkan_graphics_v633_render_pass_sideband(void) {
+    if (!bridge_available()) return false;
+    const PdockerVkAdvertisedCaps *caps = pdocker_vk_advertised_caps();
+    return caps && caps->executor_valid &&
+           caps->vulkan_graphics_v633_render_pass_sideband_supported;
 }
 
 static bool executor_supports_any_vulkan_buffer_views(void) {

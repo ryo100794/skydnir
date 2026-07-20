@@ -166,7 +166,45 @@ def verify_q6_probe_write_layout(payload: dict, errors: list[str]) -> None:
             fail(errors, f"q6 lane trace layout stale: missing {role} lane_trace_layout in q6-debug probe writes")
 
 
-def verify_manifest(payload: dict) -> list[str]:
+
+def verify_missing_source_is_tracked_evidence(
+        source_spirv: str,
+        basis: dict,
+        module_bytes: object,
+        module_words: object,
+        errors: list[str]) -> None:
+    source_path = Path(source_spirv)
+    if source_path.is_absolute():
+        fail(errors, "basis.source_spirv missing-source allowance requires a repository-relative path")
+        return
+    if source_path.suffix != ".spv":
+        fail(errors, "basis.source_spirv missing-source allowance is limited to ignored .spv evidence")
+        return
+    if len(source_path.parts) < 3 or source_path.parts[0] != "docs" or source_path.parts[1] != "test":
+        fail(errors, "basis.source_spirv missing-source allowance is limited to docs/test SPIR-V evidence")
+        return
+    expected_hash = basis.get("module_hash")
+    if not (isinstance(expected_hash, str) and expected_hash.startswith("0x") and len(expected_hash) == 18):
+        fail(errors, "basis.module_hash must be a 64-bit hex string when source SPIR-V is missing")
+        return
+    analysis_path = source_path.with_suffix(".analysis.json")
+    if not analysis_path.exists():
+        fail(errors, f"missing source SPIR-V requires tracked analysis evidence: {analysis_path}")
+        return
+    try:
+        analysis = json.loads(analysis_path.read_text(encoding="utf-8"))
+        module = (analysis.get("modules") or [])[0]
+    except Exception as exc:  # pragma: no cover - defensive failure path
+        fail(errors, f"tracked analysis evidence is unreadable: {analysis_path}: {exc}")
+        return
+    if module.get("hash") != expected_hash:
+        fail(errors, "basis.module_hash does not match tracked analysis evidence")
+    if isinstance(module_bytes, int) and module.get("bytes") != module_bytes:
+        fail(errors, "basis.module_bytes does not match tracked analysis evidence")
+    if isinstance(module_words, int) and module.get("words") != module_words:
+        fail(errors, "basis.module_words does not match tracked analysis evidence")
+
+def verify_manifest(payload: dict, *, allow_missing_source: bool = False) -> list[str]:
     errors: list[str] = []
     verify_q6_probe_write_layout(payload, errors)
     if payload.get("schema") != SCHEMA:
@@ -198,7 +236,11 @@ def verify_manifest(payload: dict) -> list[str]:
     if isinstance(source_spirv, str) and source_spirv:
         source_path = Path(source_spirv)
         if not source_path.exists():
-            fail(errors, f"basis.source_spirv does not exist: {source_spirv}")
+            if allow_missing_source:
+                verify_missing_source_is_tracked_evidence(
+                    source_spirv, basis, module_bytes, module_words, errors)
+            else:
+                fail(errors, f"basis.source_spirv does not exist: {source_spirv}")
         else:
             data = source_path.read_bytes()
             if isinstance(module_bytes, int) and len(data) != module_bytes:
@@ -628,10 +670,15 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("manifest", type=Path)
     parser.add_argument("--json-out", type=Path)
+    parser.add_argument(
+        "--allow-missing-source",
+        action="store_true",
+        help="Validate manifest metadata without failing when an ignored local source_spirv blob is absent.",
+    )
     args = parser.parse_args()
 
     payload = json.loads(args.manifest.read_text())
-    errors = verify_manifest(payload)
+    errors = verify_manifest(payload, allow_missing_source=args.allow_missing_source)
     result = {
         "schema": "pdocker.spirv.probe-manifest-verification.v1",
         "manifest": str(args.manifest),
