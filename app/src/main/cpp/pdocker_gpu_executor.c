@@ -22220,7 +22220,18 @@ static void print_vulkan_advertisement_caps(const char *transport) {
             "\"vulkan_graphics_v6_native_object_identity_schema_hash\":\"0x%016llx\","
             "\"vulkan_graphics_v6_abi_minor_descriptor_layout_flags\":%u,"
             "\"vulkan_graphics_v6_descriptor_set_layout_flag_schema_hash\":\"0x%016llx\","
-            "\"vulkan_graphics_v6_max_descriptor_set_layout_flags\":%u,",
+            "\"vulkan_graphics_v6_max_descriptor_set_layout_flags\":%u,"
+            "\"vulkan_graphics_v6_abi_minor_render_passes\":%u,"
+            "\"vulkan_graphics_v6_render_pass_schema_hash\":\"0x%016llx\","
+            "\"vulkan_graphics_v6_render_pass_attachment_schema_hash\":\"0x%016llx\","
+            "\"vulkan_graphics_v6_render_pass_subpass_schema_hash\":\"0x%016llx\","
+            "\"vulkan_graphics_v6_render_pass_attachment_ref_schema_hash\":\"0x%016llx\","
+            "\"vulkan_graphics_v6_render_pass_dependency_schema_hash\":\"0x%016llx\","
+            "\"vulkan_graphics_v6_max_render_passes\":%u,"
+            "\"vulkan_graphics_v6_max_render_pass_attachments\":%u,"
+            "\"vulkan_graphics_v6_max_render_pass_subpasses\":%u,"
+            "\"vulkan_graphics_v6_max_render_pass_attachment_refs\":%u,"
+            "\"vulkan_graphics_v6_max_render_pass_dependencies\":%u,",
             PDOCKER_GPU_COMMAND_API,
             PDOCKER_GPU_ABI_VERSION,
             transport ? transport : "unix-socket-command-queue",
@@ -22272,7 +22283,18 @@ static void print_vulkan_advertisement_caps(const char *transport) {
             (unsigned long long)PDOCKER_GPU_VULKAN_GRAPHICS_V630_HEADER_EXTENSION_SCHEMA_HASH,
             PDOCKER_GPU_VULKAN_GRAPHICS_V631_ABI_MINOR,
             (unsigned long long)PDOCKER_GPU_VULKAN_GRAPHICS_V631_DESCRIPTOR_SET_LAYOUT_FLAG_SCHEMA_HASH,
-            PDOCKER_GPU_VULKAN_GRAPHICS_V624_MAX_PIPELINE_LAYOUT_SETS);
+            PDOCKER_GPU_VULKAN_GRAPHICS_V624_MAX_PIPELINE_LAYOUT_SETS,
+            PDOCKER_GPU_VULKAN_GRAPHICS_V632_ABI_MINOR,
+            (unsigned long long)PDOCKER_GPU_VULKAN_GRAPHICS_V632_RENDER_PASS_SCHEMA_HASH,
+            (unsigned long long)PDOCKER_GPU_VULKAN_GRAPHICS_V632_RENDER_PASS_ATTACHMENT_SCHEMA_HASH,
+            (unsigned long long)PDOCKER_GPU_VULKAN_GRAPHICS_V632_RENDER_PASS_SUBPASS_SCHEMA_HASH,
+            (unsigned long long)PDOCKER_GPU_VULKAN_GRAPHICS_V632_RENDER_PASS_ATTACHMENT_REF_SCHEMA_HASH,
+            (unsigned long long)PDOCKER_GPU_VULKAN_GRAPHICS_V632_RENDER_PASS_DEPENDENCY_SCHEMA_HASH,
+            PDOCKER_GPU_VULKAN_GRAPHICS_V632_MAX_RENDER_PASSES,
+            PDOCKER_GPU_VULKAN_GRAPHICS_V632_MAX_RENDER_PASS_ATTACHMENTS,
+            PDOCKER_GPU_VULKAN_GRAPHICS_V632_MAX_RENDER_PASS_SUBPASSES,
+            PDOCKER_GPU_VULKAN_GRAPHICS_V632_MAX_RENDER_PASS_ATTACHMENT_REFS,
+            PDOCKER_GPU_VULKAN_GRAPHICS_V632_MAX_RENDER_PASS_DEPENDENCIES);
     fprintf(out,
             "\"device\":{"
             "\"apiVersion\":%u,"
