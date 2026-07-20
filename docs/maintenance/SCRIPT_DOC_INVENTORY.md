@@ -93,10 +93,35 @@ verification.
   they are not part of this cleanup policy and must not be removed by a
   repository cleanup pass.
 
+### 2026-07-20 local Git metadata cleanup
+
+- A second guarded dry run found only two regenerated Python bytecode cache
+  directories. They were removed, and the post-cleanup dry run reported zero
+  candidates.
+- `git worktree prune` removed one stale worktree record whose target directory
+  no longer existed. The active `rename/skydnir` worktree was unchanged.
+- `docker-proot-setup/` is tracked as ordinary repository content, but the local
+  Git database still contained obsolete submodule configuration and metadata.
+  The obsolete configuration included a credential-bearing URL; the local
+  configuration entries were removed without recording the credential value.
+  Any credential that may have been exposed through local configuration must be
+  revoked or rotated outside this repository.
+- Before deleting the obsolete submodule object database, commits `8c5ea17` and
+  `d1906d3` were audited. Their executable changes are present in the integrated
+  `docker-proot-setup/bin/pdockerd`; the former also contained a stale
+  `CLAUDE.md` note that is not part of the integrated documentation tree. Both
+  patches were preserved locally as a two-message, credential-scanned mbox at
+  `.git/legacy-patches/docker-proot-setup-20260501.mbox`, then the approximately
+  24 MiB obsolete `.git/modules/docker-proot-setup/` database was removed.
+- Tracked evidence, staged APK payloads, active Vulkan outputs, compatibility
+  wrappers, and large Docker/Compose test payloads were retained. Their removal
+  requires a focused consumer and retention-policy change rather than a broad
+  artifact cleanup.
+
 ### Size notes
 
-- Repository size after the current cleanup recheck: approximately `387M`.
-- Git object store during this pass: approximately `181M`. `git gc` was not
+- Repository size after the current cleanup recheck: approximately `369M`.
+- Git object store after local metadata cleanup: approximately `163M`. `git gc` was not
   run as part of this cleanup because object pruning is a separate repository
   maintenance action.
 - Tracked test evidence: `docs/test` is approximately `40M`.
