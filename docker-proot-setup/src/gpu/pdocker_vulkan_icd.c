@@ -13156,30 +13156,37 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
             command->pipeline_index = (uint32_t)pipeline_index;
         }
         if (record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_RENDERING) {
-            if (record->rendering_snapshot_index >= cmd->graphics_rendering_op_count) {
-                rc = -EOPNOTSUPP;
-                goto cleanup;
+            if (record->classic_render_pass_op != 0) {
+                if (!v634_classic_render_pass_sideband_supported) {
+                    rc = -EOPNOTSUPP;
+                    goto cleanup;
+                }
+            } else {
+                if (record->rendering_snapshot_index >= cmd->graphics_rendering_op_count) {
+                    rc = -EOPNOTSUPP;
+                    goto cleanup;
+                }
+                const PdockerVkGraphicsRenderingSnapshot *snapshot =
+                    &cmd->graphics_rendering_ops[record->rendering_snapshot_index];
+                command->attachment_first = (uint32_t)attachment_count;
+                rc = collect_graphics_attachment_entries(
+                    attachments, &attachment_count, resolve_attachments,
+                    &resolve_attachment_count, &need_v64_resolve_attachment, &frame,
+                    &frame_capacity, &cursor, snapshot,
+                    image_entries, image_objects, &image_count,
+                    image_view_entries, image_view_objects, &image_view_count,
+                    resources, &resource_count, memory_objects, memory_resource_indices, &memory_count,
+                    fds, &fd_count, submit_id);
+                if (rc != 0) goto cleanup;
+                REFRESH_GRAPHICS_V6_FRAME_POINTERS();
+                command->attachment_count = (uint32_t)(attachment_count - command->attachment_first);
+                command->render_area_offset_x = snapshot->render_area.offset.x;
+                command->render_area_offset_y = snapshot->render_area.offset.y;
+                command->render_area_extent_width = snapshot->render_area.extent.width;
+                command->render_area_extent_height = snapshot->render_area.extent.height;
+                command->rendering_layer_count = snapshot->layer_count;
+                command->rendering_view_mask = snapshot->view_mask;
             }
-            const PdockerVkGraphicsRenderingSnapshot *snapshot =
-                &cmd->graphics_rendering_ops[record->rendering_snapshot_index];
-            command->attachment_first = (uint32_t)attachment_count;
-            rc = collect_graphics_attachment_entries(
-                attachments, &attachment_count, resolve_attachments,
-                &resolve_attachment_count, &need_v64_resolve_attachment, &frame,
-                &frame_capacity, &cursor, snapshot,
-                image_entries, image_objects, &image_count,
-                image_view_entries, image_view_objects, &image_view_count,
-                resources, &resource_count, memory_objects, memory_resource_indices, &memory_count,
-                fds, &fd_count, submit_id);
-            if (rc != 0) goto cleanup;
-            REFRESH_GRAPHICS_V6_FRAME_POINTERS();
-            command->attachment_count = (uint32_t)(attachment_count - command->attachment_first);
-            command->render_area_offset_x = snapshot->render_area.offset.x;
-            command->render_area_offset_y = snapshot->render_area.offset.y;
-            command->render_area_extent_width = snapshot->render_area.extent.width;
-            command->render_area_extent_height = snapshot->render_area.extent.height;
-            command->rendering_layer_count = snapshot->layer_count;
-            command->rendering_view_mask = snapshot->view_mask;
         } else if (record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_DESCRIPTOR_SETS) {
             if (record->descriptor_bind_snapshot_index >= cmd->graphics_descriptor_bind_op_count) {
                 rc = -EPROTO;
@@ -30718,7 +30725,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
         if (!pipeline->dynamic_rendering_pipeline && pipeline->render_pass) {
             PdockerVkRenderPass *rp = pipeline->render_pass;
             if (!render_pass_subpass_can_normalize_to_dynamic_rendering(rp, ci->subpass)) {
-                pipeline->graphics_unsupported = true;
+                if (!strict_vulkan_graphics_v632_render_pass_transport_complete(pipeline)) {
+                    pipeline->graphics_unsupported = true;
+                }
             } else {
                 const PdockerVkSubpassState *subpass = &rp->subpasses[ci->subpass];
                 pipeline->dynamic_rendering_pipeline = true;
@@ -33493,6 +33502,27 @@ static bool append_graphics_begin_rendering_command(
     return append_graphics_command_record(cmd, &record);
 }
 
+static bool append_graphics_classic_render_pass_marker_command(
+        PdockerVkCommandBuffer *cmd,
+        uint32_t command_type,
+        uint32_t classic_render_pass_op,
+        uint32_t classic_render_pass_snapshot_index) {
+    if (!cmd || classic_render_pass_op == 0 ||
+        classic_render_pass_snapshot_index == UINT32_MAX) {
+        return false;
+    }
+    if (command_type != PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_RENDERING &&
+        command_type != PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_RENDERING) {
+        return false;
+    }
+    PdockerVkGraphicsCommandRecord record;
+    memset(&record, 0, sizeof(record));
+    record.command_type = command_type;
+    record.classic_render_pass_op = classic_render_pass_op;
+    record.classic_render_pass_snapshot_index = classic_render_pass_snapshot_index;
+    return append_graphics_command_record(cmd, &record);
+}
+
 static bool append_graphics_end_rendering_command(
         PdockerVkCommandBuffer *cmd,
         uint32_t classic_render_pass_op,
@@ -33503,6 +33533,82 @@ static bool append_graphics_end_rendering_command(
     record.classic_render_pass_op = classic_render_pass_op;
     record.classic_render_pass_snapshot_index = classic_render_pass_snapshot_index;
     return append_graphics_command_record(cmd, &record);
+}
+
+static bool prepare_classic_render_pass_tracking_state(
+        PdockerVkCommandBuffer *cmd,
+        PdockerVkRenderPass *rp,
+        PdockerVkFramebuffer *fb,
+        VkRect2D render_area,
+        const VkClearValue *clear_values,
+        uint32_t clear_value_count,
+        uint32_t subpass_index,
+        VkSubpassContents contents) {
+    if (!cmd || !rp || !fb || rp->destroyed || fb->destroyed || fb->render_pass != rp ||
+        subpass_index >= rp->subpass_count ||
+        !render_pass_subpass_contents_flattenable(contents) ||
+        clear_value_count > PDOCKER_VK_MAX_STORAGE_BUFFERS ||
+        (clear_value_count > 0 && !clear_values)) {
+        return false;
+    }
+    cmd->active_render_pass = rp;
+    cmd->active_framebuffer = fb;
+    cmd->active_render_area = render_area;
+    cmd->active_subpass = subpass_index;
+    cmd->active_subpass_contents = contents;
+    cmd->active_clear_value_count = clear_value_count;
+    memset(cmd->active_clear_values, 0, sizeof(cmd->active_clear_values));
+    if (clear_value_count > 0) {
+        memcpy(cmd->active_clear_values, clear_values,
+               sizeof(cmd->active_clear_values[0]) * clear_value_count);
+    }
+    memset(cmd->active_color_attachments, 0, sizeof(cmd->active_color_attachments));
+    memset(&cmd->active_depth_attachment, 0, sizeof(cmd->active_depth_attachment));
+    memset(&cmd->active_stencil_attachment, 0, sizeof(cmd->active_stencil_attachment));
+    cmd->active_color_attachment_count = 0;
+    memset(cmd->active_render_pass_attachment_views, 0, sizeof(cmd->active_render_pass_attachment_views));
+    memset(cmd->active_render_pass_attachment_view_snapshots, 0, sizeof(cmd->active_render_pass_attachment_view_snapshots));
+    memset(cmd->active_render_pass_attachment_layouts, 0, sizeof(cmd->active_render_pass_attachment_layouts));
+    memset(cmd->active_render_pass_attachment_seen, 0, sizeof(cmd->active_render_pass_attachment_seen));
+    cmd->dynamic_rendering_active = false;
+    cmd->render_pass_active = true;
+    return true;
+}
+
+static bool append_native_classic_render_pass_begin(
+        PdockerVkCommandBuffer *cmd,
+        const VkRenderPassBeginInfo *begin,
+        VkSubpassContents contents) {
+    if (!cmd || !begin) return false;
+    PdockerVkRenderPass *rp = NULL;
+    PdockerVkFramebuffer *fb = NULL;
+    if (!render_pass_handle_lookup_for_command_buffer_checked(cmd, begin->renderPass, &rp) ||
+        !framebuffer_handle_lookup_for_command_buffer_checked(cmd, begin->framebuffer, &fb)) {
+        cmd->graphics_unsupported = true;
+        command_buffer_mark_recording_failed(cmd, "render-pass-begin-cross-device");
+        return false;
+    }
+    if (!executor_supports_vulkan_graphics_v634_classic_render_pass_sideband() ||
+        !vulkan_graphics_v633_render_pass_transport_representable(rp) ||
+        !prepare_classic_render_pass_tracking_state(
+            cmd, rp, fb, begin->renderArea, begin->pClearValues,
+            begin->clearValueCount, 0, contents)) {
+        cmd->graphics_unsupported = true;
+        return false;
+    }
+    uint32_t classic_snapshot_index = UINT32_MAX;
+    if (!append_classic_render_pass_command_snapshot(
+            cmd, PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_BEGIN, contents,
+            rp, fb, 0, &begin->renderArea, begin->pClearValues,
+            begin->clearValueCount, &classic_snapshot_index) ||
+        !append_graphics_classic_render_pass_marker_command(
+            cmd, PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_RENDERING,
+            PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_BEGIN,
+            classic_snapshot_index)) {
+        cmd->graphics_unsupported = true;
+        return false;
+    }
+    return true;
 }
 
 static bool append_normalized_render_pass_begin(
@@ -33631,14 +33737,24 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBeginRenderPass(
     if (!render_pass_begin_pnext_noop(pRenderPassBegin)) {
         cmd->graphics_unsupported = true;
     }
-    if (!append_normalized_render_pass_begin(cmd, pRenderPassBegin, contents)) {
+    PdockerVkRenderPass *begin_rp = NULL;
+    PdockerVkFramebuffer *begin_fb = NULL;
+    const bool begin_handles_valid = pRenderPassBegin &&
+        render_pass_handle_lookup_for_command_buffer_checked(
+            cmd, pRenderPassBegin->renderPass, &begin_rp) &&
+        framebuffer_handle_lookup_for_command_buffer_checked(
+            cmd, pRenderPassBegin->framebuffer, &begin_fb);
+    if (begin_handles_valid &&
+        render_pass_subpass_can_normalize_to_dynamic_rendering(begin_rp, 0)) {
+        if (!append_normalized_render_pass_begin(cmd, pRenderPassBegin, contents)) {
+            cmd->graphics_unsupported = true;
+        }
+        return;
+    }
+    if (!append_native_classic_render_pass_begin(cmd, pRenderPassBegin, contents)) {
         cmd->render_pass_active = true;
         cmd->dynamic_rendering_active = false;
-        if (pRenderPassBegin &&
-            (!render_pass_handle_lookup_for_command_buffer_checked(
-                 cmd, pRenderPassBegin->renderPass, &cmd->active_render_pass) ||
-             !framebuffer_handle_lookup_for_command_buffer_checked(
-                 cmd, pRenderPassBegin->framebuffer, &cmd->active_framebuffer))) {
+        if (!begin_handles_valid && pRenderPassBegin) {
             cmd->graphics_unsupported = true;
             command_buffer_mark_recording_failed(cmd, "render-pass-begin-cross-device");
             cmd->active_render_pass = NULL;
@@ -33658,21 +33774,32 @@ VKAPI_ATTR void VKAPI_CALL vkCmdNextSubpass(
     uint32_t next_subpass = cmd->active_subpass + 1u;
     PdockerVkRenderPass *rp = cmd->active_render_pass;
     PdockerVkFramebuffer *fb = cmd->active_framebuffer;
-    if (!cmd->dynamic_rendering_active || !rp || !fb || fb->destroyed ||
-        !render_pass_subpass_contents_flattenable(contents) ||
-        !render_pass_subpass_can_normalize_to_dynamic_rendering(rp, next_subpass)) {
+    if (!rp || !fb || fb->destroyed ||
+        !render_pass_subpass_contents_flattenable(contents)) {
         cmd->active_subpass = next_subpass;
         cmd->active_subpass_contents = contents;
         cmd->graphics_unsupported = true;
         return;
     }
-    if (!append_graphics_end_rendering_command(cmd, 0, UINT32_MAX) ||
-        !populate_render_pass_subpass_rendering_state(
-            cmd, rp, fb, cmd->active_render_area,
-            cmd->active_clear_values, cmd->active_clear_value_count,
-            next_subpass, contents) ||
-        !append_render_pass_subpass_layout_transitions(
-            cmd, next_subpass, &rp->subpass_dependencies[next_subpass])) {
+    if (cmd->dynamic_rendering_active) {
+        if (!render_pass_subpass_can_normalize_to_dynamic_rendering(rp, next_subpass) ||
+            !append_graphics_end_rendering_command(cmd, 0, UINT32_MAX) ||
+            !populate_render_pass_subpass_rendering_state(
+                cmd, rp, fb, cmd->active_render_area,
+                cmd->active_clear_values, cmd->active_clear_value_count,
+                next_subpass, contents) ||
+            !append_render_pass_subpass_layout_transitions(
+                cmd, next_subpass, &rp->subpass_dependencies[next_subpass])) {
+            cmd->graphics_unsupported = true;
+            return;
+        }
+    } else if (!cmd->render_pass_active ||
+               !executor_supports_vulkan_graphics_v634_classic_render_pass_sideband() ||
+               !vulkan_graphics_v633_render_pass_transport_representable(rp) ||
+               !prepare_classic_render_pass_tracking_state(
+                    cmd, rp, fb, cmd->active_render_area,
+                    cmd->active_clear_values, cmd->active_clear_value_count,
+                    next_subpass, contents)) {
         cmd->graphics_unsupported = true;
         return;
     }
@@ -33680,9 +33807,14 @@ VKAPI_ATTR void VKAPI_CALL vkCmdNextSubpass(
     if (!append_classic_render_pass_command_snapshot(
             cmd, PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_NEXT_SUBPASS, contents,
             rp, fb, next_subpass, NULL, NULL, 0, &classic_snapshot_index) ||
-        !append_graphics_begin_rendering_command(
-            cmd, PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_NEXT_SUBPASS,
-            classic_snapshot_index)) {
+        !(cmd->dynamic_rendering_active
+            ? append_graphics_begin_rendering_command(
+                cmd, PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_NEXT_SUBPASS,
+                classic_snapshot_index)
+            : append_graphics_classic_render_pass_marker_command(
+                cmd, PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_RENDERING,
+                PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_NEXT_SUBPASS,
+                classic_snapshot_index))) {
         cmd->graphics_unsupported = true;
         return;
     }
@@ -33697,18 +33829,29 @@ VKAPI_ATTR void VKAPI_CALL vkCmdEndRenderPass(VkCommandBuffer commandBuffer) {
         cmd->graphics_unsupported = true;
     }
     uint32_t classic_snapshot_index = UINT32_MAX;
-    if (cmd->dynamic_rendering_active && cmd->active_render_pass && cmd->active_framebuffer &&
+    if ((cmd->dynamic_rendering_active || cmd->render_pass_active) &&
+        cmd->active_render_pass && cmd->active_framebuffer &&
         !append_classic_render_pass_command_snapshot(
             cmd, PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_END,
             cmd->active_subpass_contents, cmd->active_render_pass, cmd->active_framebuffer,
             cmd->active_subpass, NULL, NULL, 0, &classic_snapshot_index)) {
         cmd->graphics_unsupported = true;
     }
-    if (!append_graphics_end_rendering_command(
+    bool appended_end = false;
+    if (cmd->render_pass_active && !cmd->dynamic_rendering_active &&
+        classic_snapshot_index != UINT32_MAX) {
+        appended_end = append_graphics_classic_render_pass_marker_command(
+            cmd, PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_RENDERING,
+            PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_END,
+            classic_snapshot_index);
+    } else {
+        appended_end = append_graphics_end_rendering_command(
             cmd, classic_snapshot_index != UINT32_MAX
                 ? PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_END
                 : 0,
-            classic_snapshot_index)) {
+            classic_snapshot_index);
+    }
+    if (!appended_end) {
         cmd->graphics_unsupported = true;
     }
     if (cmd->dynamic_rendering_active && cmd->active_render_pass &&
@@ -33967,9 +34110,9 @@ static void record_graphics_draw_command(
     PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     if (!cmd) return;
     const bool graphics_rendering_context_active =
-        cmd->dynamic_rendering_active || cmd->inherited_rendering_active;
+        cmd->dynamic_rendering_active || cmd->inherited_rendering_active || cmd->render_pass_active;
     if (!cmd->graphics_pipeline || !graphics_rendering_context_active ||
-        cmd->render_pass_active || (indexed && !cmd->index_buffer_bound)) {
+        (indexed && !cmd->index_buffer_bound)) {
         cmd->graphics_unsupported = true;
     }
     PdockerVkBuffer *tracked_indirect_buffer = NULL;

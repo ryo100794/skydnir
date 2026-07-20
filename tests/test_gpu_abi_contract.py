@@ -3661,7 +3661,10 @@ class GpuAbiContractTest(unittest.TestCase):
             "append_render_pass_subpass_layout_transitions(",
             "&rp->subpass_dependencies[next_subpass]",
             "append_classic_render_pass_command_snapshot(\n            cmd, PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_NEXT_SUBPASS",
-            "append_graphics_begin_rendering_command(\n            cmd, PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_NEXT_SUBPASS",
+            "append_graphics_begin_rendering_command(",
+            "PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_NEXT_SUBPASS",
+            "append_graphics_classic_render_pass_marker_command(",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_RENDERING",
             "fb->destroyed",
             "cmd->active_subpass = next_subpass;",
             "cmd->active_subpass_contents = contents;",
@@ -3670,6 +3673,77 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("cmd->active_framebuffer && cmd->active_framebuffer->destroyed", end_body)
         self.assertIn("cmd->graphics_unsupported = true;", end_body)
         self.assertIn("vkCmdNextSubpass(commandBuffer, pSubpassBeginInfo", icd)
+
+    def test_vulkan_classic_render_pass_native_replay_is_not_dynamic_rendering_only(self):
+        icd = VULKAN_ICD.read_text()
+        sender = c_function_body(icd, "send_recorded_vulkan_graphics_v6_1_frame_range")
+        begin_body = icd.split(
+            "VKAPI_ATTR void VKAPI_CALL vkCmdBeginRenderPass", 1
+        )[1].split("VKAPI_ATTR void VKAPI_CALL vkCmdNextSubpass", 1)[0]
+        next_body = icd.split(
+            "VKAPI_ATTR void VKAPI_CALL vkCmdNextSubpass", 1
+        )[1].split("VKAPI_ATTR void VKAPI_CALL vkCmdEndRenderPass", 1)[0]
+        end_body = icd.split(
+            "VKAPI_ATTR void VKAPI_CALL vkCmdEndRenderPass", 1
+        )[1].split("VKAPI_ATTR void VKAPI_CALL vkCmdBeginRenderPass2", 1)[0]
+        draw_body = c_function_body(icd, "record_graphics_draw_command")
+        pipeline_body = icd.split(
+            "VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines", 1
+        )[1].split("VKAPI_ATTR void VKAPI_CALL vkDestroyPipeline", 1)[0]
+        marker_body = c_function_body(icd, "append_graphics_classic_render_pass_marker_command")
+        native_begin = c_function_body(icd, "append_native_classic_render_pass_begin")
+        native_state = c_function_body(icd, "prepare_classic_render_pass_tracking_state")
+
+        for marker in [
+            "append_native_classic_render_pass_begin(cmd, pRenderPassBegin, contents)",
+            "render_pass_subpass_can_normalize_to_dynamic_rendering(begin_rp, 0)",
+            "begin_handles_valid",
+        ]:
+            self.assertIn(marker, begin_body)
+        for marker in [
+            "executor_supports_vulkan_graphics_v634_classic_render_pass_sideband()",
+            "vulkan_graphics_v633_render_pass_transport_representable(rp)",
+            "prepare_classic_render_pass_tracking_state(",
+            "PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_BEGIN",
+            "append_graphics_classic_render_pass_marker_command(",
+        ]:
+            self.assertIn(marker, native_begin)
+        for marker in [
+            "cmd->dynamic_rendering_active = false;",
+            "cmd->render_pass_active = true;",
+            "fb->render_pass != rp",
+            "subpass_index >= rp->subpass_count",
+        ]:
+            self.assertIn(marker, native_state)
+        for marker in [
+            "!cmd->render_pass_active",
+            "executor_supports_vulkan_graphics_v634_classic_render_pass_sideband()",
+            "prepare_classic_render_pass_tracking_state(",
+            "append_graphics_classic_render_pass_marker_command(",
+            "PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_NEXT_SUBPASS",
+        ]:
+            self.assertIn(marker, next_body)
+        for marker in [
+            "cmd->render_pass_active && !cmd->dynamic_rendering_active",
+            "append_graphics_classic_render_pass_marker_command(",
+            "PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_END",
+        ]:
+            self.assertIn(marker, end_body)
+        for marker in [
+            "record->classic_render_pass_op != 0",
+            "!v634_classic_render_pass_sideband_supported",
+            "collect_vulkan_graphics_v634_render_pass_command_transport(",
+        ]:
+            self.assertIn(marker, sender)
+        self.assertIn(
+            "cmd->dynamic_rendering_active || cmd->inherited_rendering_active || cmd->render_pass_active",
+            draw_body,
+        )
+        self.assertNotIn("cmd->render_pass_active || (indexed", draw_body)
+        self.assertIn("!strict_vulkan_graphics_v632_render_pass_transport_complete(pipeline)", pipeline_body)
+        self.assertIn("record.classic_render_pass_op = classic_render_pass_op;", marker_body)
+        self.assertIn("record.rendering_snapshot_index", c_function_body(icd, "append_graphics_begin_rendering_command"))
+        self.assertNotIn("record.rendering_snapshot_index", marker_body)
 
     def test_vulkan_render_pass_pipeline_formats_are_completed_from_attachment_refs(self):
         icd = VULKAN_ICD.read_text()
