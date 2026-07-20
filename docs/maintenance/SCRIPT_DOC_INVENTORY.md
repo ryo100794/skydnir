@@ -3,7 +3,7 @@
 Snapshot date: 2026-05-19.
 Status: low-risk triage ledger only; no scripts, docs, app code, tests, or native/GPU code are moved by this document.
 
-This note connects the stable script inventory in [`../../scripts/README.md`](../../scripts/README.md) with the documentation cleanup backlog in [`DOCUMENTATION_DEDUP_BACKLOG.md`](DOCUMENTATION_DEDUP_BACKLOG.md). It is intentionally small and records where the flat script layout and fragmented planning/test docs need follow-up.
+This note connects the stable script inventory in [`../../scripts/README.md`](../../scripts/README.md) with the documentation cleanup backlog in [`DOCUMENTATION_DEDUP_BACKLOG.md`](DOCUMENTATION_DEDUP_BACKLOG.md). It is intentionally small and records where the flat script layout and fragmented planning/test docs need follow-up. Development artifact cleanup decisions are recorded here instead of creating another one-off cleanup note.
 
 ## Script categories and next actions
 
@@ -57,18 +57,31 @@ This note connects the stable script inventory in [`../../scripts/README.md`](..
 Scope: repository-local developer artifacts, redundant scratch files, and
 generated work files. This pass intentionally did not touch active Vulkan bridge
 source changes or rebuilt native payloads. The 2026-07-20 cleanup check was
-re-run after commit `27d1c08b` with `git clean -nd`, `git clean -ndX`,
-large-file scans, generated-file scans, and script-inventory verification.
+re-run after commit `27d1c08b` and again after commit `b748b42a` with
+`git clean -nd`, `git clean -ndX`, large-file scans, generated-file scans, and
+script-inventory verification.
 
 ### Current classification
 
 | Class | Paths | Action |
 |---|---|---|
-| Disposable ignored scratch | `__pycache__/`, `*.pyc`, `.pytest_cache/`, `.gradle/`, `build/`, `app/.cxx/`, `app/.externalNativeBuild/`, `captures/`, `tmp/`, ignored generated `docs/test/llama-gpu-*` and `docs/test/llama-cpu-gpu-compare-*` files | Safe cleanup target when untracked. The re-run cleanup check found no untracked disposable scratch files or empty work directories to delete. |
+| Disposable ignored scratch | `__pycache__/`, `*.pyc`, `.pytest_cache/`, `.gradle/`, `build/`, `app/.cxx/`, `app/.externalNativeBuild/`, `captures/`, `tmp/`, ignored generated `docs/test/llama-gpu-*` and `docs/test/llama-cpu-gpu-compare-*` files | Safe cleanup target when untracked. The re-run cleanup checks found no untracked disposable scratch files or empty work directories to delete. |
 | Ignored but build/runtime-staged | `app/src/main/assets/pdockerd/`, `app/src/main/assets/xterm/xterm*.{js,css}`, `app/src/main/jniLibs/*/libcow.so`, `libcrane.so`, `libpdockerpty.so`, `local.properties` | Keep. `git clean -ndX` currently lists only these staged payloads and machine config. They are ignored because they are local/staged payloads or machine config, not because they are always disposable. Deleting them can break the next APK build until restaged. |
 | Tracked evidence | `docs/test/*-latest.*`, `docs/test/runs/**`, `docs/test/device-logs/**`, `docs/test/spirv-q6k-*`, llama GPU comparison artifacts | Keep until a focused evidence-pruning policy exists. These files are generated-looking but are tracked regression/evidence records. |
 | Tracked large development payloads | `vendor/lib/docker`, `vendor/lib/docker-compose`, `docker-proot-setup/docker-bin/docker`, `docker-proot-setup/docker-bin/crane` | Review separately. They are development/test compatibility payloads or staging sources and must not be removed in a broad cleanup pass. |
 | Active generated native outputs | `app/src/main/jniLibs/*/libpdockervulkanicd.so`, `docker-proot-setup/lib/pdocker-vulkan-icd.so` | Keep with the matching source change until the Vulkan bridge commit is validated. |
+
+### 2026-07-20 follow-up dry-run result
+
+- `git clean -nd` reported no untracked non-ignored repository files.
+- `git clean -ndX` reported only ignored staged payloads and machine-local
+  configuration: `app/src/main/assets/pdockerd/`, `app/src/main/assets/xterm/`,
+  staged native `.so` files, and `local.properties`.
+- No repository-local `__pycache__/`, `*.pyc`, `.pytest_cache/`, `captures/`,
+  Gradle build output, or CMake build output was present to remove.
+- `/root/tl` contains unrelated root-workspace files outside this repository;
+  they are not part of this cleanup policy and must not be removed by a
+  repository cleanup pass.
 
 ### Size notes
 
