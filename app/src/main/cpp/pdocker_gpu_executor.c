@@ -39647,7 +39647,7 @@ static int record_vulkan_graphics_v6_command_buffer(
             find_vulkan_graphics_v634_render_pass_command(view, ci);
         if (classic_command) {
             if (!vulkan_graphics_v634_render_pass_command_matches_normalized_type(command, classic_command) ||
-                classic_command->contents != (uint32_t)VK_SUBPASS_CONTENTS_INLINE) {
+                !vulkan_graphics_v634_subpass_contents_supported(classic_command->contents)) {
                 rc = -EPROTO;
                 goto cleanup;
             }

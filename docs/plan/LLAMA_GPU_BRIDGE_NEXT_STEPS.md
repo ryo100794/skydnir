@@ -9,6 +9,43 @@ llama.cpp itself remains unmodified.
 
 ## Current Ground Truth
 
+### 2026-07-20 CPU/static classic render-pass secondary-content flatten lane
+
+Classic render-pass V6.34 replay is now treated as a native replay path rather
+than a dynamic-rendering-only compatibility path when the Android executor
+advertises `vulkan_graphics_v634_classic_render_pass_sideband_supported`.  The
+ICD accepts both `VK_SUBPASS_CONTENTS_INLINE` and
+`VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS` for classic render-pass begin and
+next-subpass capture.  Secondary command buffer contents are still flattened at
+`vkCmdExecuteCommands()` before transport; the V6.34 command row preserves the
+original subpass contents value while the executor records
+`vkCmdBeginRenderPass`/`vkCmdNextSubpass` with INLINE replay semantics.
+
+This removes the previous contradiction where the executor claimed secondary
+classic render-pass contents were flattenable but the producer rejected
+`vkCmdNextSubpass(..., VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS)` before it
+could append a V6.34 command row.  It is generic Vulkan command-stream replay
+hardening; it does not change llama.cpp, Dockerfiles, models, prompts, shader
+bytes, runtime defaults, or executor arithmetic.
+
+Evidence gate for this lane:
+
+- `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -q tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_begin_render_pass_normalizes_subpass_to_dynamic_rendering tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_graphics_v634_classic_render_pass_receiver_validates_sideband`
+
+Remaining strict-native replay gaps after this lane:
+
+1. The ICD still appends V6.34 classic BEGIN/NEXT/END rows through the
+   dynamic-rendering normalization path.  A future strict-native path must append
+   the same V6.34 command rows even when `populate_render_pass_subpass_rendering_state()`
+   cannot normalize the subpass to dynamic rendering.
+2. Graphics pipeline capture still marks non-normalizable classic render-pass
+   pipelines unsupported.  The next widening must distinguish unsupported
+   Vulkan state from transportable native classic render-pass state.
+3. The frame sender still treats `pipeline->graphics_unsupported` as a broad
+   fail-closed gate.  Once exact-native render-pass capture is split out, strict
+   V6.34 frames may pass only when render-pass, framebuffer, command, and
+   pipeline metadata are all transport-complete.
+
 ### 2026-07-20 CPU/static V6.34 classic render-pass replay ABI and receiver lane
 
 The ABI header now reserves append-only V6.34 rows for the missing classic
@@ -30,15 +67,15 @@ framebuffer, BEGIN/NEXT/END command rows must form a valid active render-pass
 state sequence, and clear-value rows must be consumed exactly once by their
 BEGIN command.
 
-This is still a protocol receiver and validation lane, not strict replay
-completion.  The executor must not advertise V6.34 support until the ICD emits
-V6.34 rows, the executor constructs/reuses native `VkFramebuffer` and
-`VkRenderPass` objects, graphics pipelines are created against the native render
-pass, and command replay records classic `vkCmdBeginRenderPass`,
-`vkCmdNextSubpass`, and `vkCmdEndRenderPass` instead of dynamic-rendering
-normalization.  The producer must also continue to fail strict mode for
-normalized classic render passes until V6.34 emission and executor replay are
-wired together.
+This was initially a protocol receiver and validation lane.  It has since been
+superseded by native V6.34 replay materialization in the Android executor:
+transported render-pass/framebuffer tables are consumed to create native
+`VkRenderPass`/`VkFramebuffer` objects, graphics pipelines can be created against
+the transported native render pass, and replay records
+`vkCmdBeginRenderPass`, `vkCmdNextSubpass`, and `vkCmdEndRenderPass` for V6.34
+classic render-pass command rows.  Remaining work is to close unsupported Vulkan
+subfeatures without falling back to silent normalization, not to claim that
+V6.34 is metadata-only.
 
 Evidence gates run for this lane:
 

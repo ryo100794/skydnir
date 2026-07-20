@@ -33341,6 +33341,11 @@ static bool append_render_pass_final_layout_transitions(PdockerVkCommandBuffer *
         first, cmd->image_barrier_op_count - first);
 }
 
+static bool render_pass_subpass_contents_flattenable(VkSubpassContents contents) {
+    return contents == VK_SUBPASS_CONTENTS_INLINE ||
+           contents == VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS;
+}
+
 static bool populate_render_pass_subpass_rendering_state(
         PdockerVkCommandBuffer *cmd,
         PdockerVkRenderPass *rp,
@@ -33350,7 +33355,7 @@ static bool populate_render_pass_subpass_rendering_state(
         uint32_t clear_value_count,
         uint32_t subpass_index,
         VkSubpassContents contents) {
-    if (!cmd || !rp || !fb || contents != VK_SUBPASS_CONTENTS_INLINE ||
+    if (!cmd || !rp || !fb || !render_pass_subpass_contents_flattenable(contents) ||
         !render_pass_subpass_can_normalize_to_dynamic_rendering(rp, subpass_index) ||
         fb->destroyed || fb->render_pass != rp || fb->attachment_count < rp->attachment_count) {
         return false;
@@ -33442,6 +33447,7 @@ static bool append_classic_render_pass_command_snapshot(
         uint32_t *snapshot_index_out) {
     if (snapshot_index_out) *snapshot_index_out = UINT32_MAX;
     if (!cmd || !snapshot_index_out || !rp || !fb || rp->destroyed || fb->destroyed ||
+        !render_pass_subpass_contents_flattenable(contents) ||
         pdocker_vk_render_pass_object_id(rp) == 0 || pdocker_vk_framebuffer_object_id(fb) == 0 ||
         clear_value_count > PDOCKER_VK_MAX_STORAGE_BUFFERS) {
         return false;
@@ -33653,7 +33659,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdNextSubpass(
     PdockerVkRenderPass *rp = cmd->active_render_pass;
     PdockerVkFramebuffer *fb = cmd->active_framebuffer;
     if (!cmd->dynamic_rendering_active || !rp || !fb || fb->destroyed ||
-        contents != VK_SUBPASS_CONTENTS_INLINE ||
+        !render_pass_subpass_contents_flattenable(contents) ||
         !render_pass_subpass_can_normalize_to_dynamic_rendering(rp, next_subpass)) {
         cmd->active_subpass = next_subpass;
         cmd->active_subpass_contents = contents;

@@ -3545,7 +3545,7 @@ class GpuAbiContractTest(unittest.TestCase):
         )[1].split("VKAPI_ATTR void VKAPI_CALL vkCmdNextSubpass", 1)[0]
         for marker in [
             "populate_render_pass_subpass_rendering_state",
-            "contents != VK_SUBPASS_CONTENTS_INLINE",
+            "render_pass_subpass_contents_flattenable(contents)",
             "render_pass_subpass_can_normalize_to_dynamic_rendering(rp, subpass_index)",
             "cmd->active_color_attachment_count = subpass->color_attachment_count;",
             "cmd->active_color_attachments[c]",
@@ -3568,7 +3568,16 @@ class GpuAbiContractTest(unittest.TestCase):
             "cmd->render_pass_active = false;",
         ]:
             self.assertIn(marker, normalize_body)
+        next_body = icd.split(
+            "VKAPI_ATTR void VKAPI_CALL vkCmdNextSubpass", 1
+        )[1].split("VKAPI_ATTR void VKAPI_CALL vkCmdEndRenderPass", 1)[0]
+        snapshot_body = c_function_body(icd, "append_classic_render_pass_command_snapshot")
+        producer_contents = c_function_body(icd, "render_pass_subpass_contents_flattenable")
+        self.assertIn("VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS", producer_contents)
         self.assertIn("append_normalized_render_pass_begin(cmd, pRenderPassBegin, contents)", begin_body)
+        self.assertIn("!render_pass_subpass_contents_flattenable(contents)", next_body)
+        self.assertIn("!render_pass_subpass_contents_flattenable(contents)", snapshot_body)
+        self.assertNotIn("contents != VK_SUBPASS_CONTENTS_INLINE", next_body)
         self.assertNotIn("record.rendering_snapshot_index = UINT32_MAX;", begin_body)
 
     def test_vulkan_render_pass_normalization_synthesizes_layout_barriers(self):
@@ -27293,8 +27302,17 @@ class GpuAbiContractTest(unittest.TestCase):
             "Secondary command buffers are flattened by the ICD",
         ]:
             self.assertIn(marker, replay_contents)
+        producer_contents = c_function_body(icd, "render_pass_subpass_contents_flattenable")
+        next_subpass_body = icd.split(
+            "VKAPI_ATTR void VKAPI_CALL vkCmdNextSubpass", 1
+        )[1].split("VKAPI_ATTR void VKAPI_CALL vkCmdEndRenderPass", 1)[0]
+        self.assertIn("VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS", producer_contents)
+        self.assertIn("!render_pass_subpass_contents_flattenable(contents)", next_subpass_body)
+        self.assertNotIn("contents != VK_SUBPASS_CONTENTS_INLINE", next_subpass_body)
         self.assertNotIn("classic render pass secondary command buffer replay is not implemented", preflight_body)
         self.assertIn("vulkan_graphics_v634_replay_subpass_contents(classic_command->contents)", record_body)
+        self.assertIn("!vulkan_graphics_v634_subpass_contents_supported(classic_command->contents)", record_body)
+        self.assertNotIn("classic_command->contents != (uint32_t)VK_SUBPASS_CONTENTS_INLINE", record_body)
         self.assertIn("vkCmdBeginRenderPass(command_buffer, &rpbi, vulkan_graphics_v634_replay_subpass_contents", record_body)
         self.assertIn("vkCmdNextSubpass(command_buffer, vulkan_graphics_v634_replay_subpass_contents", record_body)
 
