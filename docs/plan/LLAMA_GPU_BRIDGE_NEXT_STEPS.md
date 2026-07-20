@@ -9,6 +9,34 @@ llama.cpp itself remains unmodified.
 
 ## Current Ground Truth
 
+### 2026-07-20 CPU/static native classic descriptor-layout barrier lane
+
+Graphics descriptor binding replay no longer injects implicit image layout
+barriers while a native classic render pass is active.  `vkCmdBindDescriptorSets`
+itself is legal inside a classic render pass, but an executor-side
+`vkCmdPipelineBarrier` inserted between `vkCmdBeginRenderPass` and
+`vkCmdEndRenderPass` is not generically valid unless the render-pass
+self-dependency and framebuffer-space constraints are proven.  The executor now
+compares the replay image layout with the transported descriptor layout before
+creating the barrier.  If they differ while a classic render pass is active, the
+frame fails closed; if they already match, the descriptor bind proceeds without
+adding a layout barrier.  Existing non-classic behavior is preserved.
+
+This is generic Vulkan pass-through hardening.  It does not change llama.cpp,
+Dockerfiles, models, prompts, shader bytes, or arithmetic.
+
+Evidence gates for this lane:
+
+- `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -q tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_native_classic_descriptor_bind_does_not_inject_layout_barriers tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_native_classic_scope_audits_state_binding_paths`
+
+Remaining strict-native replay gaps after this lane:
+
+1. Sender-side graphics descriptor layout validation still needs parity with the
+   compute V5 tracked-layout check, so stale descriptor layouts fail before
+   frame transport instead of only at executor replay.
+2. General `vkCmdPipelineBarrier*` and `vkCmdWaitEvents*` dependency payloads
+   still need classic render-pass scope validation or fail-closed handling.
+
 ### 2026-07-20 CPU/static native classic final-layout cache lane
 
 Native classic render-pass replay now has producer-side final-layout tracking

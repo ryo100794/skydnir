@@ -6368,6 +6368,47 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(marker, snapshot_helper)
 
 
+    def test_vulkan_native_classic_descriptor_bind_does_not_inject_layout_barriers(self):
+        executor = GPU_EXECUTOR.read_text()
+        record_body = c_function_body(executor, "record_vulkan_graphics_v6_command_buffer")
+        descriptor_case = record_body.split(
+            "case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_DESCRIPTOR_SETS:", 1
+        )[1].split(
+            "case PDOCKER_GPU_GRAPHICS_V6_COMMAND_COPY_BUFFER:", 1
+        )[0]
+
+        for marker in [
+            "int classic_render_pass_active = 0;",
+            "vkCmdBeginRenderPass(command_buffer",
+            "classic_render_pass_active = 1;",
+            "vkCmdEndRenderPass(command_buffer);",
+            "classic_render_pass_active = 0;",
+        ]:
+            self.assertIn(marker, record_body)
+
+        for marker in [
+            "const VkImageLayout descriptor_layout = (VkImageLayout)descriptor->image_layout;",
+            "const int descriptor_layout_mismatch = old_layout != descriptor_layout;",
+            "descriptor_layout_mismatch && classic_render_pass_active",
+            "classic render pass descriptor layout transition would require an in-render-pass implicit barrier",
+            "if (!descriptor_layout_mismatch) {",
+            "continue;",
+            ".newLayout = descriptor_layout",
+            "vulkan_replay_image_set_layout_for_range(image, &view_obj->range,",
+            "descriptor_layout);",
+        ]:
+            self.assertIn(marker, descriptor_case)
+        self.assertLess(
+            descriptor_case.index("descriptor_layout_mismatch && classic_render_pass_active"),
+            descriptor_case.index("image_barriers[image_barrier_count++]"),
+        )
+        self.assertLess(
+            descriptor_case.index("if (!descriptor_layout_mismatch) {"),
+            descriptor_case.index("image_barriers[image_barrier_count++]"),
+        )
+        self.assertIn("vkCmdBindDescriptorSets(command_buffer", descriptor_case)
+
+
     def test_vulkan_native_classic_scope_audits_state_binding_paths(self):
         icd = VULKAN_ICD.read_text()
         executor = GPU_EXECUTOR.read_text()

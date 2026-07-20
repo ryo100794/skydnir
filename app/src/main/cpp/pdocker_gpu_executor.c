@@ -39639,6 +39639,7 @@ static int record_vulkan_graphics_v6_command_buffer(
     int bound_pipeline_tessellated = 0;
     int bound_pipeline_dynamic_primitive_topology = 0;
     int bound_pipeline_dynamic_patch_control_points = 0;
+    int classic_render_pass_active = 0;
     VkPrimitiveTopology dynamic_primitive_topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     VkPrimitiveTopology bound_pipeline_static_topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     for (uint32_t ci = 0; ci < view->header->command_count; ++ci) {
@@ -39681,6 +39682,7 @@ static int record_vulkan_graphics_v6_command_buffer(
                     .pClearValues = clear_value_count ? clear_values : NULL,
                 };
                 vkCmdBeginRenderPass(command_buffer, &rpbi, vulkan_graphics_v634_replay_subpass_contents(classic_command->contents));
+                classic_render_pass_active = 1;
                 free(clear_values);
                 continue;
             }
@@ -39690,6 +39692,7 @@ static int record_vulkan_graphics_v6_command_buffer(
             }
             if (classic_command->op == PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_END) {
                 vkCmdEndRenderPass(command_buffer);
+                classic_render_pass_active = 0;
                 rc = update_vulkan_graphics_v634_framebuffer_final_layouts(
                     view, attachments, classic_command);
                 if (rc != 0) goto cleanup;
@@ -40647,11 +40650,22 @@ begin_rendering_cleanup:
                     VkImageLayout old_layout = image->current_layout;
                     int layout_rc = vulkan_replay_image_layout_for_range(image, &view_obj->range, &old_layout);
                     if (layout_rc != 0) { rc = layout_rc; goto cleanup; }
-                    if (strict_passthrough && old_layout != (VkImageLayout)descriptor->image_layout) {
+                    const VkImageLayout descriptor_layout = (VkImageLayout)descriptor->image_layout;
+                    const int descriptor_layout_mismatch = old_layout != descriptor_layout;
+                    if (descriptor_layout_mismatch && classic_render_pass_active) {
+                        json_fail("vulkan-graphics-v6-command-record",
+                                  "classic render pass descriptor layout transition would require an in-render-pass implicit barrier");
+                        rc = -EOPNOTSUPP;
+                        goto cleanup;
+                    }
+                    if (strict_passthrough && descriptor_layout_mismatch) {
                         json_fail("vulkan-graphics-v6-command-record",
                                   "strict passthrough graphics image descriptor layout mismatch");
                         rc = -EOPNOTSUPP;
                         goto cleanup;
+                    }
+                    if (!descriptor_layout_mismatch) {
+                        continue;
                     }
                     VkAccessFlags src_access_mask = 0;
                     VkPipelineStageFlags src_stage_mask = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
@@ -40675,14 +40689,14 @@ begin_rendering_cleanup:
                             ? (VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT)
                             : VK_ACCESS_SHADER_READ_BIT,
                         .oldLayout = old_layout,
-                        .newLayout = (VkImageLayout)descriptor->image_layout,
+                        .newLayout = descriptor_layout,
                         .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
                         .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
                         .image = image->image,
                         .subresourceRange = view_obj->range,
                     };
                     layout_rc = vulkan_replay_image_set_layout_for_range(image, &view_obj->range,
-                                                                         (VkImageLayout)descriptor->image_layout);
+                                                                         descriptor_layout);
                     if (layout_rc != 0) { rc = layout_rc; goto cleanup; }
                 }
                 if (image_barrier_count) {
