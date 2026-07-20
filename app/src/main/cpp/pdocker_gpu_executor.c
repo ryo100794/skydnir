@@ -28385,6 +28385,17 @@ static int vulkan_graphics_v634_render_pass_command_op_supported(uint32_t op) {
            op == PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_END;
 }
 
+static VkSubpassContents vulkan_graphics_v634_replay_subpass_contents(uint32_t contents) {
+    /* Secondary command buffers are flattened by the ICD into the primary
+     * transported command stream during vkCmdExecuteCommands().  The executor
+     * therefore replays the already-rebased command stream inline while keeping
+     * the original VkSubpassContents value in V6.34 sideband for fidelity. */
+    if (contents == (uint32_t)VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS) {
+        return VK_SUBPASS_CONTENTS_INLINE;
+    }
+    return VK_SUBPASS_CONTENTS_INLINE;
+}
+
 static int validate_vulkan_graphics_v634_classic_render_pass_sideband(
         const VulkanGraphicsV6FrameView *view) {
     if (!view || !view->header) return -EINVAL;
@@ -32998,11 +33009,6 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                 reason = "classic render pass sideband does not match normalized command type";
                 if (reason_out) *reason_out = reason;
                 return -EPROTO;
-            }
-            if (classic_command->contents != (uint32_t)VK_SUBPASS_CONTENTS_INLINE) {
-                reason = "classic render pass secondary command buffer replay is not implemented";
-                if (reason_out) *reason_out = reason;
-                return -EOPNOTSUPP;
             }
             if (classic_command->op == PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_BEGIN) {
                 if (rendering_active) {
@@ -39674,12 +39680,12 @@ static int record_vulkan_graphics_v6_command_buffer(
                     .clearValueCount = clear_value_count,
                     .pClearValues = clear_value_count ? clear_values : NULL,
                 };
-                vkCmdBeginRenderPass(command_buffer, &rpbi, (VkSubpassContents)classic_command->contents);
+                vkCmdBeginRenderPass(command_buffer, &rpbi, vulkan_graphics_v634_replay_subpass_contents(classic_command->contents));
                 free(clear_values);
                 continue;
             }
             if (classic_command->op == PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_NEXT_SUBPASS) {
-                vkCmdNextSubpass(command_buffer, (VkSubpassContents)classic_command->contents);
+                vkCmdNextSubpass(command_buffer, vulkan_graphics_v634_replay_subpass_contents(classic_command->contents));
                 continue;
             }
             if (classic_command->op == PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_END) {

@@ -27045,7 +27045,7 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(marker, correlation_dense)
 
 
-    def test_vulkan_graphics_v634_classic_render_pass_receiver_validates_fail_closed(self):
+    def test_vulkan_graphics_v634_classic_render_pass_receiver_validates_sideband(self):
         for path in [APP_HEADER, CONTAINER_HEADER]:
             source = path.read_text()
             self.assertIn("#define PDOCKER_GPU_VULKAN_GRAPHICS_V634_ABI_MINOR 34u", source)
@@ -27179,6 +27179,9 @@ class GpuAbiContractTest(unittest.TestCase):
         sideband_validator = c_function_body(
             executor, "validate_vulkan_graphics_v634_classic_render_pass_sideband"
         )
+        replay_contents = c_function_body(executor, "vulkan_graphics_v634_replay_subpass_contents")
+        preflight_body = c_function_body(executor, "preflight_vulkan_graphics_v6_replay_supported")
+        record_body = c_function_body(executor, "record_vulkan_graphics_v6_command_buffer")
 
         self.assertIn("sizeof(PdockerGpuVulkanGraphicsV634FrameHeader)", prefix)
         self.assertIn("case PDOCKER_GPU_VULKAN_GRAPHICS_V634_ABI_MINOR: return 69u;", table_ranges)
@@ -27268,6 +27271,17 @@ class GpuAbiContractTest(unittest.TestCase):
             frame_validator.index("validate_vulkan_graphics_v634_classic_render_pass_sideband(&view)"),
             frame_validator.index("validate_vulkan_graphics_v6_duplicate_pipeline_identity_with_extensions(&view)"),
         )
+        for marker in [
+            "VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS",
+            "return VK_SUBPASS_CONTENTS_INLINE",
+            "Secondary command buffers are flattened by the ICD",
+        ]:
+            self.assertIn(marker, replay_contents)
+        self.assertNotIn("classic render pass secondary command buffer replay is not implemented", preflight_body)
+        self.assertIn("vulkan_graphics_v634_replay_subpass_contents(classic_command->contents)", record_body)
+        self.assertIn("vkCmdBeginRenderPass(command_buffer, &rpbi, vulkan_graphics_v634_replay_subpass_contents", record_body)
+        self.assertIn("vkCmdNextSubpass(command_buffer, vulkan_graphics_v634_replay_subpass_contents", record_body)
+
         for marker in [
             "vulkan_graphics_v634_framebuffer_index_for_id",
             "v634_framebuffer_fields_identical_for_same_object_id",
