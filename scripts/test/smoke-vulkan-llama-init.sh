@@ -51,9 +51,13 @@ int main(void) {
 
     uint32_t ext_count = 0;
     CHECK(vkEnumerateDeviceExtensionProperties(phys, NULL, &ext_count, NULL), "vkEnumerateDeviceExtensionProperties count");
-    VkExtensionProperties exts[16];
-    if (ext_count > 16) ext_count = 16;
-    CHECK(vkEnumerateDeviceExtensionProperties(phys, NULL, &ext_count, exts), "vkEnumerateDeviceExtensionProperties");
+    VkExtensionProperties exts[64];
+    if (ext_count > 64) ext_count = 64;
+    VkResult ext_rc = vkEnumerateDeviceExtensionProperties(phys, NULL, &ext_count, exts);
+    if (ext_rc != VK_SUCCESS && ext_rc != VK_INCOMPLETE) {
+        fprintf(stderr, "vkEnumerateDeviceExtensionProperties: %d\n", ext_rc);
+        return 2;
+    }
     if (!has_ext(VK_KHR_16BIT_STORAGE_EXTENSION_NAME, exts, ext_count)) {
         fprintf(stderr, "missing %s\n", VK_KHR_16BIT_STORAGE_EXTENSION_NAME);
         return 5;

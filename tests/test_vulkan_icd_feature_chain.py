@@ -7541,11 +7541,15 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 off += (size_t)snprintf(json + off, size - off,
                     "{\"schema\":\"skydnir-vulkan-advertisement-caps-v1\","
                     "\"apiVersion\":%u,\"format_caps_schema\":1,\"format_caps_count\":%zu,"
+                    "\"vulkan_dispatch_v5_resource_field_count\":%u,"
+                    "\"vulkan_dispatch_v5_resource_schema_hash\":\"0x%016llx\","
                     "\"vulkan_dispatch_v5_supported_minors\":[0,1,2,3,4,5,6,7],"
                     "\"vulkan_graphics_v6_supported_minors\":[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30],"
                     "\"image_format_caps\":{",
                     (unsigned)VK_API_VERSION_1_2,
-                    pdocker_vk_bridge_format_count());
+                    pdocker_vk_bridge_format_count(),
+                    (unsigned)PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_FIELD_COUNT,
+                    (unsigned long long)PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_SCHEMA_HASH);
                 for (size_t i = 0; i < pdocker_vk_bridge_format_count(); ++i) {
                     VkFormat format = pdocker_vk_bridge_format_at(i);
                     VkFormatFeatureFlags features = pdocker_vk_transport_image_features(format);
@@ -9826,10 +9830,14 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 off += (size_t)snprintf(json + off, sizeof(json) - off,
                     "{{\"schema\":\"skydnir-vulkan-advertisement-caps-v1\","
                     "\"apiVersion\":4206592,\"format_caps_schema\":1,\"format_caps_count\":%zu,"
+                    "\"vulkan_dispatch_v5_resource_field_count\":%u,"
+                    "\"vulkan_dispatch_v5_resource_schema_hash\":\"0x%016llx\","
                     "\"vulkan_dispatch_v5_supported_minors\":[0,1,2,3,4,5,6,7],"
                     "\"vulkan_graphics_v6_supported_minors\":[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30],"
                     "\"image_format_caps\":{{",
-                    pdocker_vk_bridge_format_count());
+                    pdocker_vk_bridge_format_count(),
+                    (unsigned)PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_FIELD_COUNT,
+                    (unsigned long long)PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_SCHEMA_HASH);
                 for (size_t i = 0; i < pdocker_vk_bridge_format_count(); ++i) {{
                     VkFormat format = pdocker_vk_bridge_format_at(i);
                     off += (size_t)snprintf(json + off, sizeof(json) - off,
@@ -10038,6 +10046,8 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 off += (size_t)snprintf(json + off, size - off,
                     "{{\"schema\":\"skydnir-vulkan-advertisement-caps-v1\","
                     "\"apiVersion\":4206592,\"format_caps_schema\":1,\"format_caps_count\":%zu,"
+                    "\"vulkan_dispatch_v5_resource_field_count\":%u,"
+                    "\"vulkan_dispatch_v5_resource_schema_hash\":\"0x%016llx\","
                     "\"vulkan_dispatch_v5_supported_minors\":[0,1,2,3,4,5,6,7],"
                     "\"vulkan_graphics_v6_supported_minors\":%s,"
                     "\"vulkan_graphics_v6_abi_minor_buffer_views\":%u,"
@@ -10047,7 +10057,10 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     "\"vulkan_graphics_v6_push_constant_range_schema_hash\":\"0x%016llx\","
                     "\"vulkan_graphics_v6_max_push_constant_ranges\":%u,"
                     "\"image_format_caps\":{{",
-                    pdocker_vk_bridge_format_count(), graphics_minors,
+                    pdocker_vk_bridge_format_count(),
+                    (unsigned)PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_FIELD_COUNT,
+                    (unsigned long long)PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_SCHEMA_HASH,
+                    graphics_minors,
                     PDOCKER_GPU_VULKAN_GRAPHICS_V627_ABI_MINOR,
                     (unsigned long long)PDOCKER_GPU_VULKAN_GRAPHICS_V627_BUFFER_VIEW_SCHEMA_HASH,
                     PDOCKER_GPU_VULKAN_GRAPHICS_V627_MAX_BUFFER_VIEWS,

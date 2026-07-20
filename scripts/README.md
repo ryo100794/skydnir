@@ -25,7 +25,7 @@ Every inventory entry now also carries a `migration` object with a proposed dest
 |---|---:|---|
 | `runtime-package-needed` | 1 | Needed to stage runtime/APK payloads or otherwise part of packaging flow. |
 | `build-developer` | 8 | Build, setup, fetch, or developer environment helper. |
-| `test-verification` | 90 | Test, smoke, benchmark, contract, or device verification helper. |
+| `test-verification` | 91 | Test, smoke, benchmark, contract, or device verification helper. |
 | `generated-maintenance` | 3 | Generated-doc/evidence maintenance or manifest data. |
 | `obsolete-suspect` | 1 | Unreferenced or weakly referenced candidate; not deleted without audit. |
 
@@ -193,6 +193,7 @@ remain gitignored and intentionally absent from the inventory.
 | `scripts/verify-no-proot-runtime-truth-artifact.py` | `test-helper` | Host-side verifier for no-proot runtime truth gate artifacts. |
 | `scripts/verify-oom-lmk-survival-gate.py` | `test-helper` | Host-side verification/test driver or static contract gate. |
 | `scripts/verify-project-library.py` | `test-helper` | Host-side verification/test driver or static contract gate. |
+| `scripts/verify-q6-spirv-static-fixtures.py` | `test-helper` | Host-side verifier for static Q6 SPIR-V fixtures and llama GPU bridge diagnostics. |
 | `scripts/verify-refactor-resilience.py` | `test-helper` | Host-side verification/test driver or static contract gate. |
 | `scripts/verify-release-readiness.py` | `test-helper` | Host-side verification/test driver or static contract gate. |
 | `scripts/verify-runtime-single-container-artifact.py` | `test-helper` | Host-side verification/test driver or static contract gate. |

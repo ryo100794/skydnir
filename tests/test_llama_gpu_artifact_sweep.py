@@ -103,6 +103,16 @@ def passing_config_propagation():
 def q6_verified_writeback(hash_value="0x1111111111111111"):
     return {
         "local_size_resolved": [32, 1, 1],
+        "q6_local_size": [32, 1, 1],
+        "local_size_consistent": True,
+        "spirv_local_size": [1, 1, 1],
+        "spirv_local_size_id": [0, 1, 2],
+        "spirv_workgroup_size_spec_id": [0, 1, 2],
+        "specialization_entries": [{"constant_id": 0, "value_u64": 32}],
+        "q6_workgroup_specialization_interpretation": {
+            "do_not_patch_local_size_y_from_spec_id_1": True,
+            "do_not_patch_local_size_z_from_spec_id_2": True,
+        },
         "q6_writeback_verified_all": True,
         "q6_row_indexed_sample_indices": [257],
         "q6_row_indexed_writeback_verified": True,

@@ -1219,6 +1219,19 @@
       }
     },
     {
+      "path": "scripts/verify-q6-spirv-static-fixtures.py",
+      "category": "test-verification",
+      "stability": "test-helper",
+      "role": "Host-side verifier for static Q6 SPIR-V fixtures and llama GPU bridge diagnostics.",
+      "migration": {
+        "target_dir": "scripts/test",
+        "candidate_path": "scripts/test/verify-q6-spirv-static-fixtures.py",
+        "phase": "phase-1-test-helpers-after-manifest-update",
+        "action": "candidate-move-behind-wrapper",
+        "compat_wrapper": "stable verification entrypoints keep wrappers; helper wrappers remain until test manifests and docs stop referencing top-level paths"
+      }
+    },
+    {
       "path": "scripts/verify-refactor-resilience.py",
       "category": "test-verification",
       "stability": "test-helper",
