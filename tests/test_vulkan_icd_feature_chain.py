@@ -3382,7 +3382,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_debug_marker_extension_is_not_advertised_without_transport(self):
+    def test_debug_marker_extension_is_advertised_as_icd_local_metadata(self):
         source = textwrap.dedent(
             f"""
             #include <stdint.h>
@@ -3402,7 +3402,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 for (uint32_t i = 0; i < capacity; ++i) {{
                     if (strcmp(extensions[i].extensionName, VK_EXT_DEBUG_MARKER_EXTENSION_NAME) == 0) found = VK_TRUE;
                 }}
-                if (found || device_extension_advertised_name(VK_EXT_DEBUG_MARKER_EXTENSION_NAME)) return 4;
+                if (!found || !device_extension_advertised_name(VK_EXT_DEBUG_MARKER_EXTENSION_NAME)) return 4;
 
                 const char *enabled[] = {{ VK_EXT_DEBUG_MARKER_EXTENSION_NAME }};
                 VkDeviceCreateInfo device_info;
@@ -3410,32 +3410,36 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
                 device_info.enabledExtensionCount = 1;
                 device_info.ppEnabledExtensionNames = enabled;
-                if (validate_device_extensions(&device_info) != VK_ERROR_EXTENSION_NOT_PRESENT) return 5;
+                if (validate_device_extensions(&device_info) != VK_SUCCESS) return 5;
 
-                if (proc_address("vkDebugMarkerSetObjectNameEXT") != NULL) return 6;
-                if (proc_address("vkDebugMarkerSetObjectTagEXT") != NULL) return 7;
-                if (proc_address("vkCmdDebugMarkerBeginEXT") != NULL) return 8;
-                if (proc_address("vkCmdDebugMarkerEndEXT") != NULL) return 9;
-                if (proc_address("vkCmdDebugMarkerInsertEXT") != NULL) return 10;
+                if (proc_address("vkDebugMarkerSetObjectNameEXT") == NULL) return 6;
+                if (proc_address("vkDebugMarkerSetObjectTagEXT") == NULL) return 7;
+                if (proc_address("vkCmdDebugMarkerBeginEXT") == NULL) return 8;
+                if (proc_address("vkCmdDebugMarkerEndEXT") == NULL) return 9;
+                if (proc_address("vkCmdDebugMarkerInsertEXT") == NULL) return 10;
+
+                VkDevice device = VK_NULL_HANDLE;
+                if (vkCreateDevice((VkPhysicalDevice)&g_device, &device_info, NULL, &device) != VK_SUCCESS ||
+                    device == VK_NULL_HANDLE) return 11;
 
                 VkDebugMarkerObjectNameInfoEXT name_info;
                 memset(&name_info, 0, sizeof(name_info));
                 name_info.sType = VK_STRUCTURE_TYPE_DEBUG_MARKER_OBJECT_NAME_INFO_EXT;
-                name_info.objectType = VK_DEBUG_REPORT_OBJECT_TYPE_BUFFER_EXT;
-                name_info.object = 0x1234u;
-                name_info.pObjectName = "legacy-buffer-name";
-                if (vkDebugMarkerSetObjectNameEXT(VK_NULL_HANDLE, &name_info) != VK_ERROR_INITIALIZATION_FAILED) return 11;
+                name_info.objectType = VK_DEBUG_REPORT_OBJECT_TYPE_DEVICE_EXT;
+                name_info.object = (uint64_t)(uintptr_t)device;
+                name_info.pObjectName = "legacy-device-name";
+                if (vkDebugMarkerSetObjectNameEXT(device, &name_info) != VK_SUCCESS) return 12;
 
                 const uint32_t tag = 0x13572468u;
                 VkDebugMarkerObjectTagInfoEXT tag_info;
                 memset(&tag_info, 0, sizeof(tag_info));
                 tag_info.sType = VK_STRUCTURE_TYPE_DEBUG_MARKER_OBJECT_TAG_INFO_EXT;
-                tag_info.objectType = VK_DEBUG_REPORT_OBJECT_TYPE_BUFFER_EXT;
-                tag_info.object = 0x1234u;
+                tag_info.objectType = VK_DEBUG_REPORT_OBJECT_TYPE_DEVICE_EXT;
+                tag_info.object = (uint64_t)(uintptr_t)device;
                 tag_info.tagName = 7u;
                 tag_info.tagSize = sizeof(tag);
                 tag_info.pTag = &tag;
-                if (vkDebugMarkerSetObjectTagEXT(VK_NULL_HANDLE, &tag_info) != VK_ERROR_INITIALIZATION_FAILED) return 12;
+                if (vkDebugMarkerSetObjectTagEXT(device, &tag_info) != VK_SUCCESS) return 13;
 
                 VkDebugMarkerMarkerInfoEXT marker_info;
                 memset(&marker_info, 0, sizeof(marker_info));
@@ -3447,21 +3451,31 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
 
                 memset(&name_info, 0, sizeof(name_info));
                 name_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-                if (vkDebugMarkerSetObjectNameEXT(VK_NULL_HANDLE, &name_info) != VK_ERROR_INITIALIZATION_FAILED) return 13;
+                if (vkDebugMarkerSetObjectNameEXT(device, &name_info) != VK_ERROR_INITIALIZATION_FAILED) return 14;
+
+                memset(&name_info, 0, sizeof(name_info));
+                name_info.sType = VK_STRUCTURE_TYPE_DEBUG_MARKER_OBJECT_NAME_INFO_EXT;
+                name_info.objectType = VK_DEBUG_REPORT_OBJECT_TYPE_BUFFER_EXT;
+                name_info.object = 0x1234u;
+                name_info.pObjectName = "foreign-buffer-name";
+                if (vkDebugMarkerSetObjectNameEXT(device, &name_info) != VK_ERROR_INITIALIZATION_FAILED) return 15;
+
                 memset(&tag_info, 0, sizeof(tag_info));
                 tag_info.sType = VK_STRUCTURE_TYPE_DEBUG_MARKER_OBJECT_TAG_INFO_EXT;
                 tag_info.objectType = VK_DEBUG_REPORT_OBJECT_TYPE_BUFFER_EXT;
                 tag_info.object = 0x1234u;
                 tag_info.tagSize = 4u;
                 tag_info.pTag = NULL;
-                if (vkDebugMarkerSetObjectTagEXT(VK_NULL_HANDLE, &tag_info) != VK_ERROR_INITIALIZATION_FAILED) return 14;
+                if (vkDebugMarkerSetObjectTagEXT(device, &tag_info) != VK_ERROR_INITIALIZATION_FAILED) return 16;
+
+                vkDestroyDevice(device, NULL);
             #endif
                 return 0;
             }}
             """
         )
         result = self.compile_and_run(source)
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_instance_create_info_shape_is_fail_closed(self):
         source = textwrap.dedent(

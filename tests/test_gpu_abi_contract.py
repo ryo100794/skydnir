@@ -11052,13 +11052,14 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('MAP_ALIAS("vkCreateSamplerYcbcrConversionKHR", vkCreateSamplerYcbcrConversion);', proc_body)
         self.assertIn('MAP_ALIAS("vkDestroySamplerYcbcrConversionKHR", vkDestroySamplerYcbcrConversion);', proc_body)
 
-    def test_vulkan_debug_marker_ext_is_not_advertised_without_transport(self):
+    def test_vulkan_debug_marker_ext_is_advertised_as_icd_local_metadata(self):
         icd = VULKAN_ICD.read_text()
         private_data_slot_struct = icd.split("struct PdockerVkPrivateDataSlot {", 1)[1].split("};", 1)[0]
         self.assertIn("uint64_t owner_device_id;", private_data_slot_struct)
         self.assertIn("VK_EXT_DEBUG_MARKER_EXTENSION_NAME", icd)
         helper_body = c_function_body(icd, "pdocker_supports_debug_marker_transport")
-        self.assertIn("return false;", helper_body)
+        self.assertIn("return true;", helper_body)
+        self.assertIn("debug metadata only", helper_body)
         collector_body = c_function_body(icd, "collect_advertised_device_extensions")
         self.assertIn("pdocker_supports_debug_marker_transport()", collector_body)
         self.assertIn("ADD_DEVICE_EXTENSION(VK_EXT_DEBUG_MARKER_EXTENSION_NAME", collector_body)

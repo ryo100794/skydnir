@@ -27180,7 +27180,12 @@ static bool pdocker_supports_shader_demote_transport(void) {
 }
 
 static bool pdocker_supports_debug_marker_transport(void) {
-    return false;
+    /*
+     * VK_EXT_debug_marker is debug metadata only. Object names/tags are
+     * validated against ICD-owned handles and command markers are accepted as
+     * no-op labels; no executor ABI or Android replay state is required.
+     */
+    return true;
 }
 
 static uint32_t collect_advertised_device_extensions(
