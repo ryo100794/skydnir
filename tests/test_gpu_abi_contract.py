@@ -6368,6 +6368,60 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(marker, snapshot_helper)
 
 
+    def test_vulkan_native_classic_scope_audits_state_binding_paths(self):
+        icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
+
+        producer_bodies = [
+            c_function_body(icd, "vkCmdBindDescriptorSets"),
+            c_function_body(icd, "vkCmdPushConstants"),
+            c_function_body(icd, "record_vertex_buffer_bindings"),
+            c_function_body(icd, "record_index_buffer_binding"),
+        ]
+        for body in producer_bodies:
+            self.assertNotIn("!cmd->dynamic_rendering_active", body)
+            self.assertNotIn("!cmd->render_pass_active", body)
+            self.assertNotIn("cmd->dynamic_rendering_active || cmd->render_pass_active", body)
+        for marker in [
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_DESCRIPTOR_SETS",
+            "append_graphics_command_record(cmd, &record)",
+            "pipelineBindPoint == VK_PIPELINE_BIND_POINT_GRAPHICS",
+            "graphics_descriptor_bind_snapshot_clone_descriptor_state",
+        ]:
+            self.assertIn(marker, producer_bodies[0])
+        for marker in [
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_PUSH_CONSTANTS",
+            "append_graphics_command_record(cmd, &record)",
+            "command_buffer_reserve_push_constant_ops",
+            "record.push_op_index",
+        ]:
+            self.assertIn(marker, producer_bodies[1])
+        for marker in [
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_VERTEX_BUFFERS",
+            "append_graphics_command_record(cmd, &record)",
+            "graphics_vertex_binding_snapshot_count",
+        ]:
+            self.assertIn(marker, producer_bodies[2])
+        for marker in [
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_INDEX_BUFFER",
+            "append_graphics_command_record(cmd, &record)",
+            "graphics_index_buffer_snapshot_count",
+        ]:
+            self.assertIn(marker, producer_bodies[3])
+
+        preflight = c_function_body(executor, "preflight_vulkan_graphics_v6_replay_supported")
+        for command in [
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_VERTEX_BUFFERS",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_INDEX_BUFFER",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_PUSH_CONSTANTS",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_DESCRIPTOR_SETS",
+        ]:
+            segment = preflight.split(f"case {command}:", 1)[1].split("case PDOCKER_GPU_GRAPHICS_V6_COMMAND_", 1)[0]
+            self.assertNotIn("if (rendering_active)", segment)
+            self.assertNotIn("active_rendering_command", segment)
+        self.assertIn("classic_render_pass_active", preflight)
+
+
     def test_vulkan_native_classic_scope_audits_query_event_dynamic_state_paths(self):
         icd = VULKAN_ICD.read_text()
         executor = GPU_EXECUTOR.read_text()

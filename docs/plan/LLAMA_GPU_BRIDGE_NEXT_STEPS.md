@@ -77,9 +77,10 @@ Evidence gates for this lane:
 
 Targeted CPU/static audit status after this lane:
 
-- Query, event, and dynamic-state command paths are now contract-tested as not
-  requiring a dynamic-rendering snapshot while a native classic render pass is
-  active.
+- Query, event, dynamic-state, descriptor binding, push-constant, vertex-buffer
+  binding, and index-buffer binding command paths are now contract-tested as
+  not requiring a dynamic-rendering snapshot while a native classic render pass
+  is active.
 - Explicit `vkCmdResolveImage` remains outside render-pass scope by Vulkan
   command-buffer rules; in-render resolves are represented by render-pass or
   dynamic-rendering resolve attachment metadata, not by `vkCmdResolveImage`.
@@ -118,8 +119,10 @@ Evidence gates for this lane:
 
 Targeted CPU/static audit status after this lane:
 
-- Query, event, and dynamic-state command paths are contract-tested as generic
-  graphics command records that do not require dynamic-rendering snapshots.
+- Query, event, dynamic-state, descriptor binding, push-constant, vertex-buffer
+  binding, and index-buffer binding command paths are contract-tested as
+  generic graphics command records that do not require dynamic-rendering
+  snapshots.
 - Explicit `vkCmdResolveImage` is intentionally outside render-pass scope;
   render-pass resolves remain covered by attachment/sideband metadata.
 
