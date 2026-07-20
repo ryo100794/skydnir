@@ -66,23 +66,29 @@ verification.
 
 | Class | Paths | Action |
 |---|---|---|
-| Disposable ignored scratch | `__pycache__/`, `*.pyc`, `.pytest_cache/`, `.gradle/`, `build/`, `app/.cxx/`, `app/.externalNativeBuild/`, `captures/`, `tmp/`, ignored generated `docs/test/llama-gpu-*` and `docs/test/llama-cpu-gpu-compare-*` files | Safe cleanup target when untracked. The re-run cleanup checks found no untracked disposable scratch files or empty work directories to delete. |
+| Disposable ignored scratch | `__pycache__/`, `*.pyc`, `.pytest_cache/`, `.gradle/`, `build/`, `app/.cxx/`, `app/.externalNativeBuild/`, `captures/`, `tmp/`, ignored generated `docs/test/llama-gpu-*` and `docs/test/llama-cpu-gpu-compare-*` files | Safe cleanup target when untracked. The latest guarded cleanup removed only untracked Python bytecode cache directories and the post-cleanup dry run found no remaining disposable candidates. |
 | Ignored but build/runtime-staged | `app/src/main/assets/pdockerd/`, `app/src/main/assets/xterm/xterm*.{js,css}`, `app/src/main/jniLibs/*/libcow.so`, `libcrane.so`, `libpdockerpty.so`, `local.properties` | Keep. `git clean -ndX` currently lists only these staged payloads and machine config. They are ignored because they are local/staged payloads or machine config, not because they are always disposable. Deleting them can break the next APK build until restaged. |
 | Tracked evidence | `docs/test/*-latest.*`, `docs/test/runs/**`, `docs/test/device-logs/**`, `docs/test/spirv-q6k-*`, llama GPU comparison artifacts | Keep until a focused evidence-pruning policy exists. These files are generated-looking but are tracked regression/evidence records. |
 | Tracked large development payloads | `vendor/lib/docker`, `vendor/lib/docker-compose`, `docker-proot-setup/docker-bin/docker`, `docker-proot-setup/docker-bin/crane` | Review separately. They are development/test compatibility payloads or staging sources and must not be removed in a broad cleanup pass. |
 | Active generated native outputs | `app/src/main/jniLibs/*/libpdockervulkanicd.so`, `docker-proot-setup/lib/pdocker-vulkan-icd.so` | Keep with the matching source change until the Vulkan bridge commit is validated. |
 
-### 2026-07-20 follow-up dry-run result
+### 2026-07-20 follow-up cleanup result
 
-- `scripts/maintenance/clean-development-artifacts.py --json` reported
-  `mode: dry-run` and `count: 0`; there were no guarded disposable candidates
-  to delete.
+- Initial `scripts/maintenance/clean-development-artifacts.py --json` reported
+  three guarded disposable candidates:
+  `scripts/__pycache__/`, `scripts/maintenance/__pycache__/`, and
+  `tests/__pycache__/`.
+- `scripts/maintenance/clean-development-artifacts.py --apply --json` removed
+  those three untracked Python bytecode cache directories.
+- The post-cleanup dry run reported `mode: dry-run` and `count: 0`; there are
+  no remaining guarded disposable candidates.
 - `git clean -nd` reported no untracked non-ignored repository files.
 - `git clean -ndX` reported only ignored staged payloads and machine-local
   configuration: `app/src/main/assets/pdockerd/`, `app/src/main/assets/xterm/`,
   selected staged native `.so` files, and `local.properties`.
-- No repository-local `__pycache__/`, `*.pyc`, `.pytest_cache/`, `captures/`,
-  Gradle build output, or CMake build output was present to remove.
+- After cleanup, no repository-local `__pycache__/`, `*.pyc`,
+  `.pytest_cache/`, `captures/`, Gradle build output, or CMake build output
+  remains as a guarded cleanup candidate.
 - `/root/tl` contains unrelated root-workspace files outside this repository;
   they are not part of this cleanup policy and must not be removed by a
   repository cleanup pass.
