@@ -27031,6 +27031,212 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, correlation_dense)
 
+
+    def test_vulkan_graphics_v634_classic_render_pass_receiver_validates_fail_closed(self):
+        for path in [APP_HEADER, CONTAINER_HEADER]:
+            source = path.read_text()
+            self.assertIn("#define PDOCKER_GPU_VULKAN_GRAPHICS_V634_ABI_MINOR 34u", source)
+            for marker in [
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V634_HEADER_EXTENSION_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V634_FRAMEBUFFER_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V634_FRAMEBUFFER_ATTACHMENT_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V634_RENDER_PASS_COMMAND_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V634_RENDER_PASS_CLEAR_VALUE_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V634_FRAMEBUFFER_SCHEMA_HASH",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V634_FRAMEBUFFER_ATTACHMENT_SCHEMA_HASH",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V634_RENDER_PASS_COMMAND_SCHEMA_HASH",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V634_RENDER_PASS_CLEAR_VALUE_SCHEMA_HASH",
+                "PdockerGpuVulkanGraphicsV634FrameHeader",
+                "PdockerGpuVulkanGraphicsV634FramebufferEntry",
+                "PdockerGpuVulkanGraphicsV634FramebufferAttachmentEntry",
+                "PdockerGpuVulkanGraphicsV634RenderPassCommandEntry",
+                "PdockerGpuVulkanGraphicsV634RenderPassClearValueEntry",
+            ]:
+                self.assertIn(marker, source)
+
+            schema_specs = [
+                (
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V634_HEADER_EXTENSION_FIELDS",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V634_HEADER_EXTENSION_FIELD_COUNT",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V634_HEADER_EXTENSION_SCHEMA_HASH",
+                    [
+                        "framebuffer_count",
+                        "framebuffer_entry_size",
+                        "framebuffer_table_offset",
+                        "framebuffer_table_size",
+                        "framebuffer_schema_hash",
+                        "framebuffer_table_hash",
+                        "framebuffer_attachment_count",
+                        "framebuffer_attachment_entry_size",
+                        "framebuffer_attachment_table_offset",
+                        "framebuffer_attachment_table_size",
+                        "framebuffer_attachment_schema_hash",
+                        "framebuffer_attachment_table_hash",
+                        "render_pass_command_count",
+                        "render_pass_command_entry_size",
+                        "render_pass_command_table_offset",
+                        "render_pass_command_table_size",
+                        "render_pass_command_schema_hash",
+                        "render_pass_command_table_hash",
+                        "render_pass_clear_value_count",
+                        "render_pass_clear_value_entry_size",
+                        "render_pass_clear_value_table_offset",
+                        "render_pass_clear_value_table_size",
+                        "render_pass_clear_value_schema_hash",
+                        "render_pass_clear_value_table_hash",
+                        "extension_hash",
+                    ],
+                ),
+                (
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V634_FRAMEBUFFER_FIELDS",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V634_FRAMEBUFFER_FIELD_COUNT",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V634_FRAMEBUFFER_SCHEMA_HASH",
+                    [
+                        "framebuffer_id",
+                        "render_pass_id",
+                        "attachment_first",
+                        "attachment_count",
+                        "width",
+                        "height",
+                        "layers",
+                        "flags",
+                        "generation",
+                        "reserved0",
+                    ],
+                ),
+                (
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V634_FRAMEBUFFER_ATTACHMENT_FIELDS",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V634_FRAMEBUFFER_ATTACHMENT_FIELD_COUNT",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V634_FRAMEBUFFER_ATTACHMENT_SCHEMA_HASH",
+                    [
+                        "framebuffer_id",
+                        "attachment_index",
+                        "image_view_index",
+                        "image_view_id",
+                        "image_view_generation",
+                        "reserved0",
+                    ],
+                ),
+                (
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V634_RENDER_PASS_COMMAND_FIELDS",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V634_RENDER_PASS_COMMAND_FIELD_COUNT",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V634_RENDER_PASS_COMMAND_SCHEMA_HASH",
+                    [
+                        "command_index",
+                        "op",
+                        "contents",
+                        "flags",
+                        "render_pass_id",
+                        "framebuffer_id",
+                        "subpass_index",
+                        "clear_value_first",
+                        "clear_value_count",
+                        "render_area_offset_x",
+                        "render_area_offset_y",
+                        "render_area_extent_width",
+                        "render_area_extent_height",
+                        "reserved0",
+                    ],
+                ),
+                (
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V634_RENDER_PASS_CLEAR_VALUE_FIELDS",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V634_RENDER_PASS_CLEAR_VALUE_FIELD_COUNT",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V634_RENDER_PASS_CLEAR_VALUE_SCHEMA_HASH",
+                    ["command_index", "attachment_index", "value0", "value1", "value2", "value3"],
+                ),
+            ]
+            for field_macro, count_macro, hash_macro, expected_names in schema_specs:
+                fields, count, declared_hash, computed_hash = vulkan_dispatch_v5_schema(
+                    path, field_macro, count_macro, hash_macro
+                )
+                self.assertEqual(count, len(fields))
+                self.assertEqual(declared_hash, computed_hash)
+                self.assertEqual([name for name, _ in fields], expected_names)
+
+        executor = GPU_EXECUTOR.read_text()
+        caps = c_function_body(executor, "print_vulkan_advertisement_caps")
+        prefix = c_function_body(executor, "validate_vulkan_graphics_v6_header_prefix")
+        header_validator = c_function_body(executor, "validate_vulkan_graphics_v6_header")
+        table_ranges = c_function_body(executor, "vulkan_graphics_v6_table_range_count")
+        view_struct = executor.split("} VulkanGraphicsV6FrameView;", 1)[0].rsplit(
+            "typedef struct VulkanGraphicsV6FrameView {", 1
+        )[1]
+        init_view = c_function_body(executor, "init_vulkan_graphics_v6_frame_view")
+        frame_validator = c_function_body(executor, "validate_vulkan_graphics_v6_frame_content")
+        sideband_validator = c_function_body(
+            executor, "validate_vulkan_graphics_v634_classic_render_pass_sideband"
+        )
+
+        self.assertIn("sizeof(PdockerGpuVulkanGraphicsV634FrameHeader)", prefix)
+        self.assertIn("case PDOCKER_GPU_VULKAN_GRAPHICS_V634_ABI_MINOR: return 69u;", table_ranges)
+        self.assertIn("[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33]", caps)
+        self.assertNotIn("34]", caps)
+        for marker in [
+            "is_v634 ? &header_v634->v633",
+            "header_v634->v634.framebuffer_count > PDOCKER_GPU_VULKAN_GRAPHICS_V634_MAX_FRAMEBUFFERS",
+            "header_v634->v634.framebuffer_entry_size != sizeof(PdockerGpuVulkanGraphicsV634FramebufferEntry)",
+            "header_v634->v634.framebuffer_schema_hash != PDOCKER_GPU_VULKAN_GRAPHICS_V634_FRAMEBUFFER_SCHEMA_HASH",
+            "header_v634->v634.extension_hash != (header_v634->v634.framebuffer_table_hash ^",
+            "FrameRange ranges[69]",
+            "header_v634->v634.framebuffer_table_offset",
+            "__alignof__(PdockerGpuVulkanGraphicsV634FramebufferEntry)",
+            "__alignof__(PdockerGpuVulkanGraphicsV634RenderPassCommandEntry)",
+        ]:
+            self.assertIn(marker, header_validator)
+        for marker in [
+            "const PdockerGpuVulkanGraphicsV634FrameHeader *header_v634;",
+            "int is_v634;",
+            "PdockerGpuVulkanGraphicsV634FramebufferEntry *framebuffers",
+            "PdockerGpuVulkanGraphicsV634FramebufferAttachmentEntry *framebuffer_attachments",
+            "PdockerGpuVulkanGraphicsV634RenderPassCommandEntry *render_pass_commands",
+            "PdockerGpuVulkanGraphicsV634RenderPassClearValueEntry *render_pass_clear_values",
+        ]:
+            self.assertIn(marker, view_struct)
+        for marker in [
+            "const int is_v634_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V634_ABI_MINOR;",
+            "view->header_v634 = header_v634;",
+            "view->is_v634 = header_v634 != NULL;",
+            "view->framebuffers =",
+            "header_v634->v634.render_pass_clear_value_table_offset",
+        ]:
+            self.assertIn(marker, init_view)
+        for marker in [
+            "const PdockerGpuVulkanGraphicsV634FrameHeader *header_v634 = view.header_v634;",
+            "const int is_v634 = view.is_v634;",
+            "framebuffer_table_hash != header_v634->v634.framebuffer_table_hash",
+            "render_pass_clear_value_table_hash != header_v634->v634.render_pass_clear_value_table_hash",
+            "validate_vulkan_graphics_v634_classic_render_pass_sideband(&view)",
+        ]:
+            self.assertIn(marker, frame_validator)
+        self.assertLess(
+            frame_validator.index("validate_vulkan_graphics_v633_render_pass_sideband(&view)"),
+            frame_validator.index("validate_vulkan_graphics_v634_classic_render_pass_sideband(&view)"),
+        )
+        self.assertLess(
+            frame_validator.index("validate_vulkan_graphics_v634_classic_render_pass_sideband(&view)"),
+            frame_validator.index("validate_vulkan_graphics_v6_duplicate_pipeline_identity_with_extensions(&view)"),
+        )
+        for marker in [
+            "vulkan_graphics_v634_framebuffer_index_for_id",
+            "v634_framebuffer_fields_identical_for_same_object_id",
+            "vulkan_graphics_v634_subpass_contents_supported",
+            "vulkan_graphics_v634_render_pass_command_op_supported",
+            "seen_render_pass_command[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS]",
+            "seen_clear = (uint8_t *)calloc",
+            "free(seen_clear)",
+            "attachment->image_view_id != image_view->view_id",
+            "attachment->image_view_generation != image_view->generation",
+            "image->extent_width < fb->width",
+            "entry->op == PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_BEGIN",
+            "entry->op == PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_NEXT_SUBPASS",
+            "entry->op == PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_END",
+            "entry->subpass_index != current_subpass + 1u",
+            "entry->clear_value_first != 0 || entry->clear_value_count != 0",
+            "if (rc == 0 && active) rc = -EPROTO;",
+        ]:
+            self.assertIn(marker, sideband_validator)
+
+
     def test_vulkan_graphics_v632_render_pass_transport_is_emitted_as_metadata_extension(self):
         icd = VULKAN_ICD.read_text()
         executor = GPU_EXECUTOR.read_text()

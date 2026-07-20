@@ -9,7 +9,7 @@ llama.cpp itself remains unmodified.
 
 ## Current Ground Truth
 
-### 2026-07-20 CPU/static V6.34 classic render-pass replay ABI scaffold
+### 2026-07-20 CPU/static V6.34 classic render-pass replay ABI and receiver lane
 
 The ABI header now reserves append-only V6.34 rows for the missing classic
 render-pass replay objects that V6.32/V6.33 deliberately did not cover:
@@ -20,15 +20,31 @@ stay byte-identical and the ABI contract classifies every new handle-like id,
 index, count, enum, extent, generation, and clear-value scalar before it may
 cross the glibc ICD to Android executor boundary.
 
-This is still a protocol scaffold, not strict replay completion.  The executor
-must not advertise V6.34 support until it validates these rows, constructs the
-native `VkFramebuffer`/`VkRenderPass` objects, creates graphics pipelines
-against the native render pass, and records classic render-pass commands rather
-than dynamic-rendering normalization.  The producer must also continue to fail
-strict mode for normalized classic render passes until V6.34 emission and
-executor replay are wired together.
+The Android executor now accepts V6.34 frame headers, validates appended table
+ranges, schema hashes, table hashes, and maps the V6.34 tables into
+`VulkanGraphicsV6FrameView`.  It also fail-closes malformed classic
+render-pass sideband semantics before replay: framebuffer ids must reference
+transported V6.32 render passes, framebuffer attachments must be dense and
+match transported image-view id/generation, render areas must fit the
+framebuffer, BEGIN/NEXT/END command rows must form a valid active render-pass
+state sequence, and clear-value rows must be consumed exactly once by their
+BEGIN command.
 
-Evidence gate: `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -q tests.test_gpu_abi_contract`.
+This is still a protocol receiver and validation lane, not strict replay
+completion.  The executor must not advertise V6.34 support until the ICD emits
+V6.34 rows, the executor constructs/reuses native `VkFramebuffer` and
+`VkRenderPass` objects, graphics pipelines are created against the native render
+pass, and command replay records classic `vkCmdBeginRenderPass`,
+`vkCmdNextSubpass`, and `vkCmdEndRenderPass` instead of dynamic-rendering
+normalization.  The producer must also continue to fail strict mode for
+normalized classic render passes until V6.34 emission and executor replay are
+wired together.
+
+Evidence gates run for this lane:
+
+- `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -q tests.test_gpu_abi_contract`
+- `bash scripts/build-native-android-ndk.sh`
+- `PYTHONDONTWRITEBYTECODE=1 python3 scripts/verify-native-payloads.py`
 
 ### 2026-07-20 CPU/static V6.32 render-pass replay-precondition lane
 
