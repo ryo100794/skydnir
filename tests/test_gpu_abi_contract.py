@@ -3743,7 +3743,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("!strict_vulkan_graphics_v632_render_pass_transport_complete(pipeline)", pipeline_body)
         self.assertIn("record.classic_render_pass_op = classic_render_pass_op;", marker_body)
         self.assertIn("record.rendering_snapshot_index", c_function_body(icd, "append_graphics_begin_rendering_command"))
-        self.assertNotIn("record.rendering_snapshot_index", marker_body)
+        self.assertIn("record.rendering_snapshot_index = UINT32_MAX;", marker_body)
 
     def test_vulkan_render_pass_pipeline_formats_are_completed_from_attachment_refs(self):
         icd = VULKAN_ICD.read_text()
@@ -6304,6 +6304,125 @@ class GpuAbiContractTest(unittest.TestCase):
             "cmd->active_rendering_view_mask = rp->subpasses[subpass_index].view_mask;",
         ]:
             self.assertIn(marker, native_state)
+
+
+    def test_vulkan_native_classic_render_pass_final_layout_cache_commits_after_replay(self):
+        icd = VULKAN_ICD.read_text()
+
+        end_body = icd.split(
+            "VKAPI_ATTR void VKAPI_CALL vkCmdEndRenderPass", 1
+        )[1].split("VKAPI_ATTR void VKAPI_CALL vkCmdBeginRenderPass2", 1)[0]
+        commit_body = c_function_body(icd, "commit_graphics_v6_image_layout_ops_for_range")
+        final_helper = c_function_body(
+            icd, "commit_classic_render_pass_final_layouts_after_graphics_replay"
+        )
+        snapshot_helper = c_function_body(
+            icd, "commit_image_view_snapshot_layout_after_graphics_replay"
+        )
+        classifier = c_function_body(
+            icd, "graphics_record_commits_classic_render_pass_final_layouts_after_replay"
+        )
+
+        self.assertIn(
+            "cmd->dynamic_rendering_active && cmd->active_render_pass &&",
+            end_body,
+        )
+        self.assertIn("append_render_pass_final_layout_transitions(cmd)", end_body)
+        self.assertNotIn(
+            "cmd->render_pass_active && cmd->active_render_pass &&\n        !append_render_pass_final_layout_transitions(cmd)",
+            end_body,
+        )
+
+        for marker in [
+            "record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_RENDERING",
+            "record->rendering_snapshot_index == UINT32_MAX",
+            "record->classic_render_pass_op == PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_END",
+            "record->classic_render_pass_snapshot_index != UINT32_MAX",
+        ]:
+            self.assertIn(marker, classifier)
+        for marker in [
+            "graphics_record_commits_classic_render_pass_final_layouts_after_replay(record)",
+            "commit_classic_render_pass_final_layouts_after_graphics_replay(cmd, record)",
+            "commit_barrier_layouts",
+            "commit_classic_final_layouts",
+            "execute_recorded_image_barrier_op",
+        ]:
+            self.assertIn(marker, commit_body)
+        for marker in [
+            "cmd->classic_render_pass_command_ops[record->classic_render_pass_snapshot_index]",
+            "snapshot->op != PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_END",
+            "rp->attachment_count > fb->attachment_count",
+            "fb->attachment_snapshots[a]",
+            "rp->attachments[a].final_layout",
+            "commit_image_view_snapshot_layout_after_graphics_replay",
+        ]:
+            self.assertIn(marker, final_helper)
+        for marker in [
+            "normalize_image_subresource_range(",
+            "image_subresource_range_is_whole_image(image, &normalized_range)",
+            "image->layout_generation = next_vulkan_object_generation();",
+            "image->current_layout = final_layout;",
+            "clear_image_layout_ranges(image);",
+            "update_image_layout_range_cache(image, &normalized_range, final_layout);",
+        ]:
+            self.assertIn(marker, snapshot_helper)
+
+
+    def test_vulkan_native_classic_scope_audits_query_event_dynamic_state_paths(self):
+        icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
+
+        query_body = c_function_body(icd, "record_query_command")
+        event_set_body = c_function_body(icd, "record_event_command")
+        event_wait_body = c_function_body(icd, "record_event_wait_command")
+        dynamic_state_body = c_function_body(icd, "record_graphics_dynamic_state_bytes")
+        for body in [query_body, event_set_body, event_wait_body, dynamic_state_body]:
+            self.assertNotIn("!cmd->dynamic_rendering_active", body)
+            self.assertNotIn("!cmd->render_pass_active", body)
+            self.assertNotIn("cmd->dynamic_rendering_active || cmd->render_pass_active", body)
+        for marker in [
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_QUERY",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_QUERY",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_QUERY_POOL",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_WRITE_TIMESTAMP",
+            "append_graphics_command_record(cmd, &record)",
+        ]:
+            self.assertIn(marker, query_body)
+        for marker in [
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_EVENT",
+            "append_graphics_command_record(cmd, &record)",
+        ]:
+            self.assertIn(marker, event_set_body)
+        for marker in [
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT",
+            "append_graphics_command_record(cmd, &record)",
+        ]:
+            self.assertIn(marker, event_wait_body)
+        for marker in [
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_DYNAMIC_STATE",
+            "append_graphics_command_record(cmd, &record)",
+            "cmd->dynamic_states[dynamic_state_index] = state;",
+            "dynamic_state_snapshot_release(&cmd->dynamic_states[dynamic_state_index])",
+        ]:
+            self.assertIn(marker, dynamic_state_body)
+
+        preflight = c_function_body(executor, "preflight_vulkan_graphics_v6_replay_supported")
+        for command in [
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_DYNAMIC_STATE",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_QUERY_POOL",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_WRITE_TIMESTAMP",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_QUERY",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_QUERY",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_EVENT",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT",
+        ]:
+            segment = preflight.split(f"case {command}:", 1)[1].split("case PDOCKER_GPU_GRAPHICS_V6_COMMAND_", 1)[0]
+            self.assertNotIn("if (rendering_active)", segment)
+            self.assertNotIn("active_rendering_command", segment)
+        self.assertIn("classic_render_pass_active", preflight)
+        self.assertIn("classic_begin_command", preflight)
 
 
     def test_vulkan_graphics_v611_buffer_write_metadata_is_append_only(self):

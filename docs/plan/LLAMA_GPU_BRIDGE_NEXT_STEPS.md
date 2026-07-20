@@ -9,6 +9,42 @@ llama.cpp itself remains unmodified.
 
 ## Current Ground Truth
 
+### 2026-07-20 CPU/static native classic final-layout cache lane
+
+Native classic render-pass replay now has producer-side final-layout tracking
+that matches the Android executor replay side.  The ICD still avoids injecting
+explicit image barriers into native classic pass-through: Vulkan performs the
+render-pass attachment layout transitions inside the native
+`vkCmdEndRenderPass`.  After the executor graphics frame has replayed
+successfully, `commit_graphics_v6_image_layout_ops_for_range()` recognizes the
+V6.34 classic END marker for a non-normalizable native classic render pass and
+commits each framebuffer attachment's `finalLayout` to the producer image
+layout cache.  Whole-image views update the image `current_layout`; subresource
+views update the range cache.  Native marker rows carry an internal
+`UINT32_MAX` rendering-snapshot sentinel so the producer can distinguish native
+classic END from normalized dynamic-rendering END even when both rows carry
+V6.34 classic command metadata.  Classic render passes that were normalized to
+dynamic rendering continue to use the existing explicit post-rendering barrier
+commit path instead.
+
+This closes the static producer/executor divergence where the executor updated
+classic framebuffer final layouts but the ICD-side descriptor/barrier validators
+could still see the pre-render-pass attachment layout.  It is generic Vulkan
+pass-through work; it does not change llama.cpp, Dockerfiles, models, prompts,
+shader bytes, or arithmetic.
+
+Evidence gates for this lane:
+
+- `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -q tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_native_classic_render_pass_final_layout_cache_commits_after_replay tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_native_classic_scope_audits_query_event_dynamic_state_paths tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_clear_attachments_accepts_native_classic_render_pass_scope`
+- `bash scripts/build-gpu-shim.sh`
+
+Remaining strict-native replay gaps after this lane:
+
+1. Device evidence is still required to prove that a non-normalizable classic
+   render-pass workload reaches the Android executor as native V6.34/V6.16
+   replay, commits final layouts after replay, and survives real driver
+   validation.
+
 ### 2026-07-20 CPU/static native classic inherited clear-attachments lane
 
 `vkCmdClearAttachments` now records through the same V6.16 metadata path inside
@@ -39,11 +75,18 @@ Evidence gates for this lane:
 - `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -q tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_graphics_v616_clear_attachments_abi_is_append_only tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_clear_attachments_accepts_native_classic_render_pass_scope tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_secondary_command_buffers_are_index_rebased_not_unconditionally_rejected tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_classic_render_pass_native_replay_is_not_dynamic_rendering_only`
 - `bash scripts/build-gpu-shim.sh`
 
+Targeted CPU/static audit status after this lane:
+
+- Query, event, and dynamic-state command paths are now contract-tested as not
+  requiring a dynamic-rendering snapshot while a native classic render pass is
+  active.
+- Explicit `vkCmdResolveImage` remains outside render-pass scope by Vulkan
+  command-buffer rules; in-render resolves are represented by render-pass or
+  dynamic-rendering resolve attachment metadata, not by `vkCmdResolveImage`.
+
 Remaining strict-native replay gaps after this lane:
 
-1. Resolve, query, event, and dynamic-state paths still need targeted audits in
-   native classic render-pass scope.
-2. Device evidence is still required to prove that a non-normalizable classic
+1. Device evidence is still required to prove that a non-normalizable classic
    render-pass workload with inherited secondary clear attachments reaches the
    Android executor as native V6.34/V6.16 replay and survives real driver
    validation.
@@ -73,11 +116,16 @@ Evidence gates for this lane:
 - `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -q tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_secondary_command_buffers_are_index_rebased_not_unconditionally_rejected tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_classic_render_pass_native_replay_is_not_dynamic_rendering_only tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_graphics_v632_strict_render_pass_transport_requires_v634_replay_contract`
 - `bash scripts/build-gpu-shim.sh`
 
+Targeted CPU/static audit status after this lane:
+
+- Query, event, and dynamic-state command paths are contract-tested as generic
+  graphics command records that do not require dynamic-rendering snapshots.
+- Explicit `vkCmdResolveImage` is intentionally outside render-pass scope;
+  render-pass resolves remain covered by attachment/sideband metadata.
+
 Remaining strict-native replay gaps after this lane:
 
-1. Resolve, query, event, and dynamic-state paths still need targeted audits in
-   native classic render-pass scope.
-2. Device evidence is still required to prove that a non-normalizable classic
+1. Device evidence is still required to prove that a non-normalizable classic
    render-pass workload with secondary command buffers reaches the Android
    executor as native V6.34 replay and survives real driver validation.
 

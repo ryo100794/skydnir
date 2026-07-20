@@ -33565,6 +33565,7 @@ static bool append_graphics_classic_render_pass_marker_command(
     PdockerVkGraphicsCommandRecord record;
     memset(&record, 0, sizeof(record));
     record.command_type = command_type;
+    record.rendering_snapshot_index = UINT32_MAX;
     record.classic_render_pass_op = classic_render_pass_op;
     record.classic_render_pass_snapshot_index = classic_render_pass_snapshot_index;
     return append_graphics_command_record(cmd, &record);
@@ -38402,6 +38403,70 @@ static bool graphics_record_commits_image_layouts_after_replay(
     }
 }
 
+static bool graphics_record_commits_classic_render_pass_final_layouts_after_replay(
+        const PdockerVkGraphicsCommandRecord *record) {
+    return record &&
+           record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_RENDERING &&
+           record->rendering_snapshot_index == UINT32_MAX &&
+           record->classic_render_pass_op == PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_END &&
+           record->classic_render_pass_snapshot_index != UINT32_MAX;
+}
+
+static bool commit_image_view_snapshot_layout_after_graphics_replay(
+        const PdockerVkImageViewSnapshot *snapshot,
+        VkImageLayout final_layout) {
+    if (!snapshot || !snapshot->valid || !snapshot->image) return false;
+    PdockerVkImage *image = snapshot->image;
+    VkImageSubresourceRange normalized_range;
+    if (!normalize_image_subresource_range(
+            image, &snapshot->subresource_range, &normalized_range)) {
+        image->layout_mixed = true;
+        image->layout_range_overflow = true;
+        return false;
+    }
+    if (!image->layout_mixed && image->current_layout == final_layout &&
+        image_subresource_range_is_whole_image(image, &normalized_range)) {
+        return true;
+    }
+    image->layout_generation = next_vulkan_object_generation();
+    if (image_subresource_range_is_whole_image(image, &normalized_range)) {
+        image->current_layout = final_layout;
+        image->layout_mixed = false;
+        clear_image_layout_ranges(image);
+        return true;
+    }
+    image->layout_mixed = true;
+    update_image_layout_range_cache(image, &normalized_range, final_layout);
+    return !image->layout_range_overflow;
+}
+
+static bool commit_classic_render_pass_final_layouts_after_graphics_replay(
+        PdockerVkCommandBuffer *cmd,
+        const PdockerVkGraphicsCommandRecord *record) {
+    if (!cmd || !graphics_record_commits_classic_render_pass_final_layouts_after_replay(record) ||
+        record->classic_render_pass_snapshot_index >= cmd->classic_render_pass_command_op_count) {
+        return false;
+    }
+    const PdockerVkClassicRenderPassCommandSnapshot *snapshot =
+        &cmd->classic_render_pass_command_ops[record->classic_render_pass_snapshot_index];
+    PdockerVkRenderPass *rp = snapshot->render_pass;
+    PdockerVkFramebuffer *fb = snapshot->framebuffer;
+    if (!rp || !fb || snapshot->op != PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_END ||
+        rp->attachment_count > fb->attachment_count) {
+        return false;
+    }
+    for (uint32_t a = 0; a < rp->attachment_count; ++a) {
+        if (!fb->attachments[a] || !fb->attachment_snapshots[a].valid) {
+            return false;
+        }
+        if (!commit_image_view_snapshot_layout_after_graphics_replay(
+                &fb->attachment_snapshots[a], rp->attachments[a].final_layout)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 static void commit_graphics_v6_image_layout_ops_for_range(
         PdockerVkCommandBuffer *cmd,
         uint32_t sequence_begin,
@@ -38414,12 +38479,23 @@ static void commit_graphics_v6_image_layout_ops_for_range(
                 record, sequence_begin, sequence_end, include_state_preamble)) {
             continue;
         }
-        if (!graphics_record_commits_image_layouts_after_replay(record)) continue;
-        for (uint32_t barrier_index = 0; barrier_index < record->image_barrier_op_count; ++barrier_index) {
-            uint32_t op_index = record->image_barrier_op_first + barrier_index;
-            if (op_index < cmd->image_barrier_op_count) {
-                execute_recorded_image_barrier_op(&cmd->image_barrier_ops[op_index]);
+        const bool commit_barrier_layouts =
+            graphics_record_commits_image_layouts_after_replay(record);
+        const bool commit_classic_final_layouts =
+            graphics_record_commits_classic_render_pass_final_layouts_after_replay(record);
+        if (!commit_barrier_layouts && !commit_classic_final_layouts) continue;
+        if (commit_barrier_layouts) {
+            for (uint32_t barrier_index = 0; barrier_index < record->image_barrier_op_count; ++barrier_index) {
+                uint32_t op_index = record->image_barrier_op_first + barrier_index;
+                if (op_index < cmd->image_barrier_op_count) {
+                    execute_recorded_image_barrier_op(&cmd->image_barrier_ops[op_index]);
+                }
             }
+        }
+        if (commit_classic_final_layouts &&
+            !commit_classic_render_pass_final_layouts_after_graphics_replay(cmd, record)) {
+            cmd->graphics_unsupported = true;
+            command_buffer_mark_recording_failed(cmd, "classic-render-pass-final-layout-cache-update-failed");
         }
     }
 }
