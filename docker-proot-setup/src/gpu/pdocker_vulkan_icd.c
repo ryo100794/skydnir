@@ -33604,6 +33604,9 @@ static bool prepare_classic_render_pass_tracking_state(
     memset(&cmd->active_depth_attachment, 0, sizeof(cmd->active_depth_attachment));
     memset(&cmd->active_stencil_attachment, 0, sizeof(cmd->active_stencil_attachment));
     cmd->active_color_attachment_count = 0;
+    cmd->active_rendering_flags = 0;
+    cmd->active_rendering_layer_count = fb->layers ? fb->layers : 1;
+    cmd->active_rendering_view_mask = rp->subpasses[subpass_index].view_mask;
     memset(cmd->active_render_pass_attachment_views, 0, sizeof(cmd->active_render_pass_attachment_views));
     memset(cmd->active_render_pass_attachment_view_snapshots, 0, sizeof(cmd->active_render_pass_attachment_view_snapshots));
     memset(cmd->active_render_pass_attachment_layouts, 0, sizeof(cmd->active_render_pass_attachment_layouts));
@@ -34633,6 +34636,35 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetStencilOp(
                                         0, 5, values, sizeof(values));
 }
 
+static bool clear_attachment_valid_for_active_classic_subpass(
+        const PdockerVkCommandBuffer *cmd,
+        const VkClearAttachment *attachment) {
+    if (!cmd || !attachment || !cmd->render_pass_active || !cmd->active_render_pass ||
+        cmd->active_render_pass->destroyed ||
+        cmd->active_subpass >= cmd->active_render_pass->subpass_count) {
+        return false;
+    }
+    const PdockerVkRenderPass *rp = cmd->active_render_pass;
+    const PdockerVkSubpassState *subpass = &rp->subpasses[cmd->active_subpass];
+    const VkImageAspectFlags aspect = attachment->aspectMask;
+    const bool has_color = (aspect & VK_IMAGE_ASPECT_COLOR_BIT) != 0;
+    const bool has_depth = (aspect & VK_IMAGE_ASPECT_DEPTH_BIT) != 0;
+    const bool has_stencil = (aspect & VK_IMAGE_ASPECT_STENCIL_BIT) != 0;
+    if (has_color) {
+        if (attachment->colorAttachment >= subpass->color_attachment_count) return false;
+        uint32_t attachment_index = subpass->color_attachments[attachment->colorAttachment];
+        return attachment_index != VK_ATTACHMENT_UNUSED && attachment_index < rp->attachment_count;
+    }
+    if (!subpass->has_depth_stencil_attachment ||
+        subpass->depth_stencil_attachment >= rp->attachment_count) {
+        return false;
+    }
+    VkFormat format = rp->attachments[subpass->depth_stencil_attachment].format;
+    if (has_depth && !pdocker_vk_format_has_depth(format)) return false;
+    if (has_stencil && !pdocker_vk_format_has_stencil(format)) return false;
+    return has_depth || has_stencil;
+}
+
 static bool pdocker_vk_rect_inside_render_area(const VkRect2D *rect, const VkRect2D *area) {
     if (!rect || !area || rect->extent.width == 0 || rect->extent.height == 0) return false;
     int64_t rx0 = rect->offset.x;
@@ -34654,7 +34686,8 @@ VKAPI_ATTR void VKAPI_CALL vkCmdClearAttachments(
         const VkClearRect *pRects) {
     PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     if (!cmd) return;
-    if (!cmd->dynamic_rendering_active || cmd->inherited_rendering_active ||
+    const bool active_clear_scope = cmd->dynamic_rendering_active || cmd->render_pass_active;
+    if (!active_clear_scope || cmd->inherited_rendering_active ||
         attachmentCount == 0 || rectCount == 0 || !pAttachments || !pRects ||
         cmd->graphics_command_op_count >= PDOCKER_VK_MAX_GRAPHICS_COMMAND_OPS) {
         cmd->graphics_unsupported = true;
@@ -34680,32 +34713,40 @@ VKAPI_ATTR void VKAPI_CALL vkCmdClearAttachments(
             cmd->graphics_unsupported = true;
             return;
         }
-        if (has_color) {
-            uint32_t color = pAttachments[i].colorAttachment;
-            if (color >= cmd->active_color_attachment_count ||
-                !cmd->active_color_attachments[color].valid ||
-                !cmd->active_color_attachments[color].image_view) {
-                cmd->graphics_unsupported = true;
-                return;
+        if (cmd->dynamic_rendering_active) {
+            if (has_color) {
+                uint32_t color = pAttachments[i].colorAttachment;
+                if (color >= cmd->active_color_attachment_count ||
+                    !cmd->active_color_attachments[color].valid ||
+                    !cmd->active_color_attachments[color].image_view) {
+                    cmd->graphics_unsupported = true;
+                    return;
+                }
+            } else {
+                if (has_depth && (!cmd->active_depth_attachment.valid ||
+                                  !cmd->active_depth_attachment.image_view)) {
+                    cmd->graphics_unsupported = true;
+                    return;
+                }
+                if (has_stencil && (!cmd->active_stencil_attachment.valid ||
+                                    !cmd->active_stencil_attachment.image_view)) {
+                    cmd->graphics_unsupported = true;
+                    return;
+                }
             }
-        } else {
-            if (has_depth && (!cmd->active_depth_attachment.valid ||
-                              !cmd->active_depth_attachment.image_view)) {
-                cmd->graphics_unsupported = true;
-                return;
-            }
-            if (has_stencil && (!cmd->active_stencil_attachment.valid ||
-                                !cmd->active_stencil_attachment.image_view)) {
-                cmd->graphics_unsupported = true;
-                return;
-            }
+        } else if (!clear_attachment_valid_for_active_classic_subpass(cmd, &pAttachments[i])) {
+            cmd->graphics_unsupported = true;
+            return;
         }
     }
+    const uint32_t active_layer_count = cmd->render_pass_active && cmd->active_framebuffer
+        ? (cmd->active_framebuffer->layers ? cmd->active_framebuffer->layers : 1u)
+        : cmd->active_rendering_layer_count;
     for (uint32_t r = 0; r < rectCount; ++r) {
         if (pRects[r].layerCount == 0 ||
             !pdocker_vk_rect_inside_render_area(&pRects[r].rect, &cmd->active_render_area) ||
-            pRects[r].baseArrayLayer > cmd->active_rendering_layer_count ||
-            pRects[r].layerCount > cmd->active_rendering_layer_count - pRects[r].baseArrayLayer) {
+            pRects[r].baseArrayLayer > active_layer_count ||
+            pRects[r].layerCount > active_layer_count - pRects[r].baseArrayLayer) {
             cmd->graphics_unsupported = true;
             return;
         }

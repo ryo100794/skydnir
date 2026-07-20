@@ -6219,6 +6219,41 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(marker, icd)
 
 
+    def test_vulkan_clear_attachments_accepts_native_classic_render_pass_scope(self):
+        icd = VULKAN_ICD.read_text()
+        clear_body = icd.split(
+            "VKAPI_ATTR void VKAPI_CALL vkCmdClearAttachments", 1
+        )[1].split("VKAPI_ATTR void VKAPI_CALL vkCmdExecuteCommands", 1)[0]
+        classic_helper = c_function_body(icd, "clear_attachment_valid_for_active_classic_subpass")
+        native_state = c_function_body(icd, "prepare_classic_render_pass_tracking_state")
+
+        for marker in [
+            "const bool active_clear_scope = cmd->dynamic_rendering_active || cmd->render_pass_active;",
+            "!active_clear_scope || cmd->inherited_rendering_active",
+            "if (cmd->dynamic_rendering_active) {",
+            "clear_attachment_valid_for_active_classic_subpass(cmd, &pAttachments[i])",
+            "const uint32_t active_layer_count = cmd->render_pass_active && cmd->active_framebuffer",
+            "cmd->active_framebuffer->layers ? cmd->active_framebuffer->layers : 1u",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_CLEAR_ATTACHMENTS",
+        ]:
+            self.assertIn(marker, clear_body)
+        for marker in [
+            "cmd->render_pass_active",
+            "cmd->active_render_pass",
+            "cmd->active_subpass >= cmd->active_render_pass->subpass_count",
+            "attachment->colorAttachment >= subpass->color_attachment_count",
+            "attachment_index != VK_ATTACHMENT_UNUSED",
+            "pdocker_vk_format_has_depth(format)",
+            "pdocker_vk_format_has_stencil(format)",
+        ]:
+            self.assertIn(marker, classic_helper)
+        for marker in [
+            "cmd->active_rendering_layer_count = fb->layers ? fb->layers : 1;",
+            "cmd->active_rendering_view_mask = rp->subpasses[subpass_index].view_mask;",
+        ]:
+            self.assertIn(marker, native_state)
+
+
     def test_vulkan_graphics_v611_buffer_write_metadata_is_append_only(self):
         abi = APP_HEADER.read_text()
         container_abi = CONTAINER_HEADER.read_text()
