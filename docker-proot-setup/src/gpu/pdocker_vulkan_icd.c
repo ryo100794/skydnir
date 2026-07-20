@@ -1257,6 +1257,7 @@ static uint64_t pdocker_vk_render_pass_object_id(const PdockerVkRenderPass *rend
 }
 
 struct PdockerVkFramebuffer {
+    uint64_t object_id;
     uint64_t owner_device_id;
     PdockerVkRenderPass *render_pass;
     uint32_t attachment_count;
@@ -1269,6 +1270,10 @@ struct PdockerVkFramebuffer {
     uint64_t generation;
     struct PdockerVkFramebuffer *next;
 };
+
+static uint64_t pdocker_vk_framebuffer_object_id(const PdockerVkFramebuffer *framebuffer) {
+    return framebuffer ? framebuffer->object_id : 0;
+}
 
 typedef struct {
     PdockerVkBuffer *src;
@@ -1551,6 +1556,17 @@ typedef struct {
 } PdockerVkGraphicsRenderingSnapshot;
 
 typedef struct {
+    uint32_t op;
+    VkSubpassContents contents;
+    PdockerVkRenderPass *render_pass;
+    PdockerVkFramebuffer *framebuffer;
+    uint32_t subpass_index;
+    VkRect2D render_area;
+    VkClearValue clear_values[PDOCKER_VK_MAX_STORAGE_BUFFERS];
+    uint32_t clear_value_count;
+} PdockerVkClassicRenderPassCommandSnapshot;
+
+typedef struct {
     VkImageAspectFlags aspect_mask;
     uint32_t color_attachment;
     VkClearValue clear_value;
@@ -1595,6 +1611,8 @@ typedef struct {
     uint64_t index_offset;
     uint32_t index_type;
     uint32_t command_op_sequence;
+    uint32_t classic_render_pass_op;
+    uint32_t classic_render_pass_snapshot_index;
 } PdockerVkGraphicsCommandRecord;
 
 typedef struct {
@@ -1667,6 +1685,9 @@ typedef struct PdockerVkCommandBuffer {
     PdockerVkGraphicsRenderingSnapshot *graphics_rendering_ops;
     uint32_t graphics_rendering_op_count;
     uint32_t graphics_rendering_op_capacity;
+    PdockerVkClassicRenderPassCommandSnapshot *classic_render_pass_command_ops;
+    uint32_t classic_render_pass_command_op_count;
+    uint32_t classic_render_pass_command_op_capacity;
     PdockerVkVertexBindingState *graphics_vertex_binding_snapshots;
     uint32_t graphics_vertex_binding_snapshot_count;
     uint32_t graphics_vertex_binding_snapshot_capacity;
@@ -4639,6 +4660,7 @@ PDOCKER_DEFINE_COMMAND_BUFFER_RESERVE_VECTOR(command_buffer_reserve_graphics_dyn
 PDOCKER_DEFINE_COMMAND_BUFFER_RESERVE_VECTOR(command_buffer_reserve_dynamic_states, dynamic_states, dynamic_state_count, dynamic_state_capacity, PdockerVkDynamicStateSnapshot, PDOCKER_VK_MAX_GRAPHICS_DYNAMIC_STATES)
 PDOCKER_DEFINE_COMMAND_BUFFER_RESERVE_VECTOR(command_buffer_reserve_graphics_vertex_binding_snapshots, graphics_vertex_binding_snapshots, graphics_vertex_binding_snapshot_count, graphics_vertex_binding_snapshot_capacity, PdockerVkVertexBindingState, PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDING_SNAPSHOTS)
 PDOCKER_DEFINE_COMMAND_BUFFER_RESERVE_VECTOR(command_buffer_reserve_graphics_index_buffer_snapshots, graphics_index_buffer_snapshots, graphics_index_buffer_snapshot_count, graphics_index_buffer_snapshot_capacity, PdockerVkIndexBufferSnapshot, PDOCKER_VK_MAX_GRAPHICS_INDEX_BUFFER_SNAPSHOTS)
+PDOCKER_DEFINE_COMMAND_BUFFER_RESERVE_VECTOR(command_buffer_reserve_classic_render_pass_command_ops, classic_render_pass_command_ops, classic_render_pass_command_op_count, classic_render_pass_command_op_capacity, PdockerVkClassicRenderPassCommandSnapshot, PDOCKER_GPU_VULKAN_GRAPHICS_V634_MAX_RENDER_PASS_COMMANDS)
 #undef PDOCKER_DEFINE_COMMAND_BUFFER_RESERVE_VECTOR
 
 static bool command_buffer_reserve_graphics_draw_ops(PdockerVkCommandBuffer *cmd, uint32_t extra) {
@@ -4953,6 +4975,10 @@ static void command_buffer_destroy_record_vectors(PdockerVkCommandBuffer *cmd) {
     cmd->graphics_rendering_ops = NULL;
     cmd->graphics_rendering_op_count = 0;
     cmd->graphics_rendering_op_capacity = 0;
+    free(cmd->classic_render_pass_command_ops);
+    cmd->classic_render_pass_command_ops = NULL;
+    cmd->classic_render_pass_command_op_count = 0;
+    cmd->classic_render_pass_command_op_capacity = 0;
     free(cmd->graphics_vertex_binding_snapshots);
     cmd->graphics_vertex_binding_snapshots = NULL;
     cmd->graphics_vertex_binding_snapshot_count = 0;
@@ -5347,6 +5373,7 @@ static void clear_recorded_command_ops(PdockerVkCommandBuffer *cmd) {
     cmd->graphics_draw_op_count = 0;
     cmd->graphics_descriptor_bind_op_count = 0;
     cmd->graphics_rendering_op_count = 0;
+    cmd->classic_render_pass_command_op_count = 0;
     cmd->clear_attachments_command_op_count = 0;
     cmd->clear_attachment_op_count = 0;
     cmd->clear_rect_op_count = 0;
@@ -5393,6 +5420,7 @@ static bool command_buffer_has_room_for_secondary(
         src->graphics_draw_op_count <= PDOCKER_VK_MAX_GRAPHICS_DRAW_OPS - dst->graphics_draw_op_count &&
         src->graphics_descriptor_bind_op_count <= PDOCKER_VK_MAX_GRAPHICS_DESCRIPTOR_BIND_OPS - dst->graphics_descriptor_bind_op_count &&
         src->graphics_rendering_op_count <= PDOCKER_VK_MAX_GRAPHICS_RENDERING_OPS - dst->graphics_rendering_op_count &&
+        src->classic_render_pass_command_op_count <= PDOCKER_GPU_VULKAN_GRAPHICS_V634_MAX_RENDER_PASS_COMMANDS - dst->classic_render_pass_command_op_count &&
         src->graphics_vertex_binding_snapshot_count <= PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDING_SNAPSHOTS - dst->graphics_vertex_binding_snapshot_count &&
         src->graphics_index_buffer_snapshot_count <= PDOCKER_VK_MAX_GRAPHICS_INDEX_BUFFER_SNAPSHOTS - dst->graphics_index_buffer_snapshot_count &&
         src->clear_attachments_command_op_count <= PDOCKER_VK_MAX_CLEAR_ATTACHMENTS_COMMANDS - dst->clear_attachments_command_op_count &&
@@ -5429,6 +5457,7 @@ static bool append_secondary_command_buffer(
             dst,
             src->graphics_descriptor_bind_op_count) ||
         !command_buffer_reserve_graphics_rendering_ops(dst, src->graphics_rendering_op_count) ||
+        !command_buffer_reserve_classic_render_pass_command_ops(dst, src->classic_render_pass_command_op_count) ||
         !command_buffer_reserve_graphics_vertex_binding_snapshots(
             dst,
             src->graphics_vertex_binding_snapshot_count) ||
@@ -5464,6 +5493,7 @@ static bool append_secondary_command_buffer(
     uint32_t graphics_draw_base = dst->graphics_draw_op_count;
     uint32_t descriptor_bind_base = dst->graphics_descriptor_bind_op_count;
     uint32_t rendering_base = dst->graphics_rendering_op_count;
+    uint32_t classic_render_pass_command_base = dst->classic_render_pass_command_op_count;
     uint32_t vertex_binding_snapshot_base = dst->graphics_vertex_binding_snapshot_count;
     uint32_t index_buffer_snapshot_base = dst->graphics_index_buffer_snapshot_count;
     uint32_t clear_attachments_command_base = dst->clear_attachments_command_op_count;
@@ -5631,6 +5661,10 @@ static bool append_secondary_command_buffer(
     memcpy(dst->graphics_rendering_ops + dst->graphics_rendering_op_count, src->graphics_rendering_ops,
            sizeof(src->graphics_rendering_ops[0]) * src->graphics_rendering_op_count);
     dst->graphics_rendering_op_count += src->graphics_rendering_op_count;
+    memcpy(dst->classic_render_pass_command_ops + dst->classic_render_pass_command_op_count,
+           src->classic_render_pass_command_ops,
+           sizeof(src->classic_render_pass_command_ops[0]) * src->classic_render_pass_command_op_count);
+    dst->classic_render_pass_command_op_count += src->classic_render_pass_command_op_count;
     if (src->graphics_vertex_binding_snapshot_count > 0) {
         memcpy(dst->graphics_vertex_binding_snapshots + dst->graphics_vertex_binding_snapshot_count,
                src->graphics_vertex_binding_snapshots,
@@ -5684,6 +5718,9 @@ static bool append_secondary_command_buffer(
     for (uint32_t i = 0; i < src->graphics_command_op_count; ++i) {
         PdockerVkGraphicsCommandRecord record = src->graphics_command_ops[i];
         record.command_op_sequence += command_op_base;
+        if (record.classic_render_pass_op != 0) {
+            record.classic_render_pass_snapshot_index += classic_render_pass_command_base;
+        }
         switch (record.command_type) {
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_RENDERING:
                 record.rendering_snapshot_index += rendering_base;
@@ -6234,6 +6271,7 @@ static bool executor_supports_vulkan_graphics_v630_native_objects(void);
 static bool executor_supports_vulkan_graphics_v631_descriptor_layout_flags(void);
 static bool executor_supports_vulkan_graphics_v632_render_passes(void);
 static bool executor_supports_vulkan_graphics_v633_render_pass_sideband(void);
+static bool executor_supports_vulkan_graphics_v634_classic_render_pass_sideband(void);
 static bool executor_supports_any_vulkan_buffer_views(void);
 
 static VkFormatFeatureFlags pdocker_vk_format_buffer_features(VkFormat format) {
@@ -10739,6 +10777,10 @@ typedef struct {
     PdockerGpuVulkanGraphicsV633DepthStencilResolveEntry render_pass_depth_stencil_resolves[PDOCKER_GPU_VULKAN_GRAPHICS_V633_MAX_DEPTH_STENCIL_RESOLVES];
     PdockerGpuVulkanGraphicsV633DependencyViewOffsetEntry render_pass_dependency_view_offsets[PDOCKER_GPU_VULKAN_GRAPHICS_V633_MAX_DEPENDENCY_VIEW_OFFSETS];
     PdockerGpuVulkanGraphicsV633CorrelationMaskEntry render_pass_correlation_masks[PDOCKER_GPU_VULKAN_GRAPHICS_V633_MAX_CORRELATION_MASKS];
+    PdockerGpuVulkanGraphicsV634FramebufferEntry framebuffers[PDOCKER_GPU_VULKAN_GRAPHICS_V634_MAX_FRAMEBUFFERS];
+    PdockerGpuVulkanGraphicsV634FramebufferAttachmentEntry framebuffer_attachments[PDOCKER_GPU_VULKAN_GRAPHICS_V634_MAX_FRAMEBUFFER_ATTACHMENTS];
+    PdockerGpuVulkanGraphicsV634RenderPassCommandEntry render_pass_commands[PDOCKER_GPU_VULKAN_GRAPHICS_V634_MAX_RENDER_PASS_COMMANDS];
+    PdockerGpuVulkanGraphicsV634RenderPassClearValueEntry render_pass_clear_values[PDOCKER_GPU_VULKAN_GRAPHICS_V634_MAX_RENDER_PASS_CLEAR_VALUES];
 } PdockerVkGraphicsTransportTables;
 
 typedef struct {
@@ -11172,6 +11214,218 @@ static int collect_vulkan_graphics_v633_render_pass_transport(
         true, rp);
 }
 
+static int find_graphics_v634_framebuffer_entry(
+        const PdockerGpuVulkanGraphicsV634FramebufferEntry *entries,
+        size_t count,
+        uint64_t framebuffer_id) {
+    if (!entries || framebuffer_id == 0) return -EINVAL;
+    for (size_t i = 0; i < count; ++i) {
+        if (entries[i].framebuffer_id == framebuffer_id) return (int)i;
+    }
+    return -ENOENT;
+}
+
+static int collect_vulkan_graphics_v634_framebuffer_transport(
+        PdockerGpuVulkanGraphicsV634FramebufferEntry *framebuffers,
+        size_t *framebuffer_count,
+        PdockerGpuVulkanGraphicsV634FramebufferAttachmentEntry *framebuffer_attachments,
+        size_t *framebuffer_attachment_count,
+        PdockerGpuVulkanDispatchV5ImageEntry *image_entries,
+        PdockerVkImage **image_objects,
+        size_t *image_count,
+        PdockerGpuVulkanDispatchV5ImageViewEntry *image_view_entries,
+        PdockerVkImageView **image_view_objects,
+        size_t *image_view_count,
+        PdockerGpuVulkanDispatchV5ResourceEntry *resources,
+        size_t *resource_count,
+        PdockerVkMemory **memory_objects,
+        uint32_t *memory_resource_indices,
+        size_t *memory_count,
+        int *fds,
+        size_t *fd_count,
+        const PdockerVkFramebuffer *fb,
+        uint64_t generation) {
+    if (!framebuffers || !framebuffer_count || !framebuffer_attachments ||
+        !framebuffer_attachment_count || !image_entries || !image_objects || !image_count ||
+        !image_view_entries || !image_view_objects || !image_view_count || !resources ||
+        !resource_count || !memory_objects || !memory_resource_indices || !memory_count ||
+        !fds || !fd_count || !fb || fb->destroyed || !fb->render_pass || fb->render_pass->destroyed) {
+        return -EINVAL;
+    }
+    const uint64_t framebuffer_id = pdocker_vk_framebuffer_object_id(fb);
+    const uint64_t render_pass_id = pdocker_vk_render_pass_object_id(fb->render_pass);
+    if (framebuffer_id == 0 || render_pass_id == 0) return -EPROTO;
+    int existing = find_graphics_v634_framebuffer_entry(
+        framebuffers, *framebuffer_count, framebuffer_id);
+    if (existing >= 0) return existing;
+    if (*framebuffer_count >= PDOCKER_GPU_VULKAN_GRAPHICS_V634_MAX_FRAMEBUFFERS) return -E2BIG;
+    if (fb->attachment_count > PDOCKER_VK_MAX_STORAGE_BUFFERS ||
+        fb->attachment_count > PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_ATTACHMENTS ||
+        fb->attachment_count > PDOCKER_GPU_VULKAN_GRAPHICS_V634_MAX_FRAMEBUFFER_ATTACHMENTS - *framebuffer_attachment_count) {
+        return -E2BIG;
+    }
+    const uint32_t attachment_first = (uint32_t)*framebuffer_attachment_count;
+    for (uint32_t i = 0; i < fb->attachment_count; ++i) {
+        PdockerVkImageView *view = fb->attachments[i];
+        const PdockerVkImageViewSnapshot *snapshot = &fb->attachment_snapshots[i];
+        if (!view || !snapshot->valid) return -EPROTO;
+        int view_index = collect_graphics_image_view_snapshot_entry(
+            image_view_entries, image_view_objects, image_view_count,
+            image_entries, image_objects, image_count,
+            resources, resource_count, memory_objects, memory_resource_indices,
+            memory_count, fds, fd_count, view, snapshot, generation);
+        if (view_index < 0) return view_index;
+        PdockerGpuVulkanGraphicsV634FramebufferAttachmentEntry *attachment =
+            &framebuffer_attachments[(*framebuffer_attachment_count)++];
+        memset(attachment, 0, sizeof(*attachment));
+        attachment->framebuffer_id = framebuffer_id;
+        attachment->attachment_index = i;
+        attachment->image_view_index = (uint32_t)view_index;
+        attachment->image_view_id = snapshot->object_id;
+        attachment->image_view_generation = image_view_entries[view_index].generation;
+    }
+    uint32_t framebuffer_index = (uint32_t)(*framebuffer_count)++;
+    PdockerGpuVulkanGraphicsV634FramebufferEntry *entry = &framebuffers[framebuffer_index];
+    memset(entry, 0, sizeof(*entry));
+    entry->framebuffer_id = framebuffer_id;
+    entry->render_pass_id = render_pass_id;
+    entry->attachment_first = attachment_first;
+    entry->attachment_count = fb->attachment_count;
+    entry->width = fb->width;
+    entry->height = fb->height;
+    entry->layers = fb->layers;
+    entry->flags = 0;
+    entry->generation = fb->generation ? fb->generation : generation;
+    return (int)framebuffer_index;
+}
+
+static int collect_vulkan_graphics_v634_render_pass_command_transport(
+        const PdockerVkCommandBuffer *cmd,
+        const PdockerVkGraphicsCommandRecord *record,
+        uint32_t command_index,
+        PdockerGpuVulkanGraphicsV632RenderPassEntry *render_passes,
+        size_t *render_pass_count,
+        PdockerGpuVulkanGraphicsV632RenderPassAttachmentEntry *render_pass_attachments,
+        size_t *render_pass_attachment_count,
+        PdockerGpuVulkanGraphicsV632RenderPassSubpassEntry *render_pass_subpasses,
+        size_t *render_pass_subpass_count,
+        PdockerGpuVulkanGraphicsV632RenderPassAttachmentRefEntry *render_pass_attachment_refs,
+        size_t *render_pass_attachment_ref_count,
+        PdockerGpuVulkanGraphicsV632RenderPassDependencyEntry *render_pass_dependencies,
+        size_t *render_pass_dependency_count,
+        PdockerGpuVulkanGraphicsV633SubpassViewMaskEntry *render_pass_subpass_view_masks,
+        size_t *render_pass_subpass_view_mask_count,
+        PdockerGpuVulkanGraphicsV633DepthStencilResolveEntry *render_pass_depth_stencil_resolves,
+        size_t *render_pass_depth_stencil_resolve_count,
+        PdockerGpuVulkanGraphicsV633DependencyViewOffsetEntry *render_pass_dependency_view_offsets,
+        size_t *render_pass_dependency_view_offset_count,
+        PdockerGpuVulkanGraphicsV633CorrelationMaskEntry *render_pass_correlation_masks,
+        size_t *render_pass_correlation_mask_count,
+        PdockerGpuVulkanGraphicsV634FramebufferEntry *framebuffers,
+        size_t *framebuffer_count,
+        PdockerGpuVulkanGraphicsV634FramebufferAttachmentEntry *framebuffer_attachments,
+        size_t *framebuffer_attachment_count,
+        PdockerGpuVulkanGraphicsV634RenderPassCommandEntry *render_pass_commands,
+        size_t *render_pass_command_count,
+        PdockerGpuVulkanGraphicsV634RenderPassClearValueEntry *render_pass_clear_values,
+        size_t *render_pass_clear_value_count,
+        PdockerGpuVulkanDispatchV5ImageEntry *image_entries,
+        PdockerVkImage **image_objects,
+        size_t *image_count,
+        PdockerGpuVulkanDispatchV5ImageViewEntry *image_view_entries,
+        PdockerVkImageView **image_view_objects,
+        size_t *image_view_count,
+        PdockerGpuVulkanDispatchV5ResourceEntry *resources,
+        size_t *resource_count,
+        PdockerVkMemory **memory_objects,
+        uint32_t *memory_resource_indices,
+        size_t *memory_count,
+        int *fds,
+        size_t *fd_count,
+        uint64_t generation) {
+    if (!cmd || !record || !render_passes || !render_pass_count ||
+        !render_pass_attachments || !render_pass_attachment_count ||
+        !render_pass_subpasses || !render_pass_subpass_count ||
+        !render_pass_attachment_refs || !render_pass_attachment_ref_count ||
+        !render_pass_dependencies || !render_pass_dependency_count ||
+        !render_pass_subpass_view_masks || !render_pass_subpass_view_mask_count ||
+        !render_pass_depth_stencil_resolves || !render_pass_depth_stencil_resolve_count ||
+        !render_pass_dependency_view_offsets || !render_pass_dependency_view_offset_count ||
+        !render_pass_correlation_masks || !render_pass_correlation_mask_count ||
+        !framebuffers || !framebuffer_count || !framebuffer_attachments ||
+        !framebuffer_attachment_count || !render_pass_commands || !render_pass_command_count ||
+        !render_pass_clear_values || !render_pass_clear_value_count) {
+        return -EINVAL;
+    }
+    if (record->classic_render_pass_op == 0) return 0;
+    if (record->classic_render_pass_snapshot_index >= cmd->classic_render_pass_command_op_count) {
+        return -EPROTO;
+    }
+    if (*render_pass_command_count >= PDOCKER_GPU_VULKAN_GRAPHICS_V634_MAX_RENDER_PASS_COMMANDS) {
+        return -E2BIG;
+    }
+    const PdockerVkClassicRenderPassCommandSnapshot *snapshot =
+        &cmd->classic_render_pass_command_ops[record->classic_render_pass_snapshot_index];
+    if (snapshot->op != record->classic_render_pass_op || !snapshot->render_pass ||
+        !snapshot->framebuffer || snapshot->render_pass->destroyed || snapshot->framebuffer->destroyed ||
+        pdocker_vk_render_pass_object_id(snapshot->render_pass) == 0 ||
+        pdocker_vk_framebuffer_object_id(snapshot->framebuffer) == 0 ||
+        snapshot->clear_value_count > PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_ATTACHMENTS ||
+        snapshot->clear_value_count > PDOCKER_GPU_VULKAN_GRAPHICS_V634_MAX_RENDER_PASS_CLEAR_VALUES - *render_pass_clear_value_count) {
+        return -EPROTO;
+    }
+    int rc = collect_vulkan_graphics_v633_render_pass_transport(
+        render_passes, render_pass_count,
+        render_pass_attachments, render_pass_attachment_count,
+        render_pass_subpasses, render_pass_subpass_count,
+        render_pass_attachment_refs, render_pass_attachment_ref_count,
+        render_pass_dependencies, render_pass_dependency_count,
+        render_pass_subpass_view_masks, render_pass_subpass_view_mask_count,
+        render_pass_depth_stencil_resolves, render_pass_depth_stencil_resolve_count,
+        render_pass_dependency_view_offsets, render_pass_dependency_view_offset_count,
+        render_pass_correlation_masks, render_pass_correlation_mask_count,
+        snapshot->render_pass);
+    if (rc != 0) return rc;
+    rc = collect_vulkan_graphics_v634_framebuffer_transport(
+        framebuffers, framebuffer_count, framebuffer_attachments, framebuffer_attachment_count,
+        image_entries, image_objects, image_count, image_view_entries, image_view_objects, image_view_count,
+        resources, resource_count, memory_objects, memory_resource_indices, memory_count, fds, fd_count,
+        snapshot->framebuffer, generation);
+    if (rc < 0) return rc;
+    const uint32_t clear_value_first = (uint32_t)*render_pass_clear_value_count;
+    for (uint32_t i = 0; i < snapshot->clear_value_count; ++i) {
+        PdockerGpuVulkanGraphicsV634RenderPassClearValueEntry *clear_value =
+            &render_pass_clear_values[(*render_pass_clear_value_count)++];
+        uint32_t words[4] = {0, 0, 0, 0};
+        memcpy(words, &snapshot->clear_values[i], sizeof(words));
+        memset(clear_value, 0, sizeof(*clear_value));
+        clear_value->command_index = command_index;
+        clear_value->attachment_index = i;
+        clear_value->value0 = words[0];
+        clear_value->value1 = words[1];
+        clear_value->value2 = words[2];
+        clear_value->value3 = words[3];
+    }
+    PdockerGpuVulkanGraphicsV634RenderPassCommandEntry *entry =
+        &render_pass_commands[(*render_pass_command_count)++];
+    memset(entry, 0, sizeof(*entry));
+    entry->command_index = command_index;
+    entry->op = snapshot->op;
+    entry->contents = (uint32_t)snapshot->contents;
+    entry->render_pass_id = pdocker_vk_render_pass_object_id(snapshot->render_pass);
+    entry->framebuffer_id = pdocker_vk_framebuffer_object_id(snapshot->framebuffer);
+    entry->subpass_index = snapshot->subpass_index;
+    entry->clear_value_first = clear_value_first;
+    entry->clear_value_count = snapshot->clear_value_count;
+    if (snapshot->op == PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_BEGIN) {
+        entry->render_area_offset_x = snapshot->render_area.offset.x;
+        entry->render_area_offset_y = snapshot->render_area.offset.y;
+        entry->render_area_extent_width = snapshot->render_area.extent.width;
+        entry->render_area_extent_height = snapshot->render_area.extent.height;
+    }
+    return 0;
+}
+
 static bool strict_vulkan_graphics_v632_render_pass_transport_complete(
         const PdockerVkPipeline *pipeline) {
     (void)pipeline;
@@ -11275,6 +11529,10 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     PdockerGpuVulkanGraphicsV633DepthStencilResolveEntry *render_pass_depth_stencil_resolves = NULL;
     PdockerGpuVulkanGraphicsV633DependencyViewOffsetEntry *render_pass_dependency_view_offsets = NULL;
     PdockerGpuVulkanGraphicsV633CorrelationMaskEntry *render_pass_correlation_masks = NULL;
+    PdockerGpuVulkanGraphicsV634FramebufferEntry *framebuffers = NULL;
+    PdockerGpuVulkanGraphicsV634FramebufferAttachmentEntry *framebuffer_attachments = NULL;
+    PdockerGpuVulkanGraphicsV634RenderPassCommandEntry *render_pass_commands = NULL;
+    PdockerGpuVulkanGraphicsV634RenderPassClearValueEntry *render_pass_clear_values = NULL;
     int *fds = NULL;
     if (submit_sync_count > PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS) {
         close(socket_fd);
@@ -11362,6 +11620,10 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     render_pass_depth_stencil_resolves = transport_tables->render_pass_depth_stencil_resolves;
     render_pass_dependency_view_offsets = transport_tables->render_pass_dependency_view_offsets;
     render_pass_correlation_masks = transport_tables->render_pass_correlation_masks;
+    framebuffers = transport_tables->framebuffers;
+    framebuffer_attachments = transport_tables->framebuffer_attachments;
+    render_pass_commands = transport_tables->render_pass_commands;
+    render_pass_clear_values = transport_tables->render_pass_clear_values;
     if (submit_sync_count > 0) {
         memcpy(submit_syncs, submit_sync_entries, submit_sync_count * sizeof(submit_syncs[0]));
     }
@@ -11485,8 +11747,10 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
         close(socket_fd);
         return -ENOMEM;
     }
+    PdockerGpuVulkanGraphicsV634FrameHeader *frame_header_v634 =
+        (PdockerGpuVulkanGraphicsV634FrameHeader *)frame;
     PdockerGpuVulkanGraphicsV633FrameHeader *frame_header_v633 =
-        (PdockerGpuVulkanGraphicsV633FrameHeader *)frame;
+        &frame_header_v634->v633;
     PdockerGpuVulkanGraphicsV632FrameHeader *frame_header_v632 =
         &frame_header_v633->v632;
     PdockerGpuVulkanGraphicsV631FrameHeader *frame_header_v631 =
@@ -11554,7 +11818,8 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     PdockerGpuVulkanGraphicsV6FrameHeader *header = &frame_header->base;
 #define REFRESH_GRAPHICS_V6_FRAME_POINTERS() \
     do { \
-        frame_header_v633 = (PdockerGpuVulkanGraphicsV633FrameHeader *)frame; \
+        frame_header_v634 = (PdockerGpuVulkanGraphicsV634FrameHeader *)frame; \
+        frame_header_v633 = &frame_header_v634->v633; \
         frame_header_v632 = &frame_header_v633->v632; \
         frame_header_v631 = &frame_header_v632->v631; \
         frame_header_v630 = &frame_header_v631->v630; \
@@ -11604,7 +11869,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
      * largest known header before appending variable payloads so a later ABI
      * upgrade cannot overlap data already written into the frame.
      */
-    size_t cursor = sizeof(PdockerGpuVulkanGraphicsV633FrameHeader);
+    size_t cursor = sizeof(PdockerGpuVulkanGraphicsV634FrameHeader);
     size_t fd_count = 0;
     size_t resource_count = 0;
     size_t descriptor_count = 0;
@@ -11689,6 +11954,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     bool need_v631_descriptor_layout_flags = false;
     bool need_v632_render_passes = false;
     bool need_v633_render_pass_sideband = false;
+    bool need_v634_classic_render_pass_sideband = false;
     bool v631_descriptor_layout_flags_required = false;
     size_t descriptor_set_layout_flag_count = 0;
     size_t render_pass_count = 0;
@@ -11700,6 +11966,10 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     size_t render_pass_depth_stencil_resolve_count = 0;
     size_t render_pass_dependency_view_offset_count = 0;
     size_t render_pass_correlation_mask_count = 0;
+    size_t framebuffer_count = 0;
+    size_t framebuffer_attachment_count = 0;
+    size_t render_pass_command_count = 0;
+    size_t render_pass_clear_value_count = 0;
     size_t buffer_view_count = 0;
     uint64_t submit_id = __sync_add_and_fetch(&g_generic_dispatch_sequence, 1);
     const bool strict_passthrough =
@@ -12849,6 +13119,9 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
         } \
     } while (0)
 
+    const bool v634_classic_render_pass_sideband_supported =
+        executor_supports_vulkan_graphics_v634_classic_render_pass_sideband();
+
     for (uint32_t i = 0; i < cmd->graphics_command_op_count; ++i) {
         const PdockerVkGraphicsCommandRecord *record = &cmd->graphics_command_ops[i];
         if (!graphics_record_should_serialize_for_range(
@@ -13500,6 +13773,31 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
             command->first_instance = draw->first_instance;
             command->instance_count = draw->instance_count;
         }
+        if (record->classic_render_pass_op != 0 && v634_classic_render_pass_sideband_supported) {
+            rc = collect_vulkan_graphics_v634_render_pass_command_transport(
+                cmd, record, (uint32_t)command_count,
+                render_passes, &render_pass_count,
+                render_pass_attachments, &render_pass_attachment_count,
+                render_pass_subpasses, &render_pass_subpass_count,
+                render_pass_attachment_refs, &render_pass_attachment_ref_count,
+                render_pass_dependencies, &render_pass_dependency_count,
+                render_pass_subpass_view_masks, &render_pass_subpass_view_mask_count,
+                render_pass_depth_stencil_resolves, &render_pass_depth_stencil_resolve_count,
+                render_pass_dependency_view_offsets, &render_pass_dependency_view_offset_count,
+                render_pass_correlation_masks, &render_pass_correlation_mask_count,
+                framebuffers, &framebuffer_count,
+                framebuffer_attachments, &framebuffer_attachment_count,
+                render_pass_commands, &render_pass_command_count,
+                render_pass_clear_values, &render_pass_clear_value_count,
+                image_entries, image_objects, &image_count,
+                image_view_entries, image_view_objects, &image_view_count,
+                resources, &resource_count, memory_objects, memory_resource_indices, &memory_count,
+                fds, &fd_count, submit_id);
+            if (rc != 0) goto cleanup;
+            need_v632_render_passes = true;
+            need_v633_render_pass_sideband = true;
+            need_v634_classic_render_pass_sideband = true;
+        }
         command_count++;
     }
     APPEND_INTERLEAVED_GRAPHICS_BUFFER_COPIES(sequence_end);
@@ -13533,7 +13831,13 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
         executor_supports_vulkan_graphics_v632_render_passes();
     const bool v633_render_pass_sideband_supported =
         executor_supports_vulkan_graphics_v633_render_pass_sideband();
-    if (need_v633_render_pass_sideband && (!graphics_identity_ready || !v633_render_pass_sideband_supported)) {
+    if (need_v634_classic_render_pass_sideband &&
+        (!graphics_identity_ready || !v634_classic_render_pass_sideband_supported)) {
+        rc = -EOPNOTSUPP;
+        goto cleanup;
+    }
+    if (need_v633_render_pass_sideband &&
+        (!graphics_identity_ready || !(v633_render_pass_sideband_supported || need_v634_classic_render_pass_sideband))) {
         rc = -EOPNOTSUPP;
         goto cleanup;
     }
@@ -13546,12 +13850,19 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
         (descriptor_set_layout_flag_count > 0 &&
          graphics_identity_ready &&
          v631_descriptor_layout_flags_supported) ||
-        need_v632_render_passes || need_v633_render_pass_sideband;
+        need_v632_render_passes || need_v633_render_pass_sideband || need_v634_classic_render_pass_sideband;
     need_v630_native_objects =
         graphics_identity_ready &&
         (executor_supports_vulkan_graphics_v630_native_objects() ||
-         need_v631_descriptor_layout_flags || need_v632_render_passes || need_v633_render_pass_sideband);
-    if (need_v633_render_pass_sideband) {
+         need_v631_descriptor_layout_flags || need_v632_render_passes ||
+         need_v633_render_pass_sideband || need_v634_classic_render_pass_sideband);
+    if (need_v634_classic_render_pass_sideband) {
+        need_v633_render_pass_sideband = true;
+        need_v632_render_passes = true;
+        need_v631_descriptor_layout_flags = true;
+        need_v630_native_objects = true;
+        need_v629_variable_descriptor_counts = true;
+    } else if (need_v633_render_pass_sideband) {
         need_v632_render_passes = true;
         need_v631_descriptor_layout_flags = true;
         need_v630_native_objects = true;
@@ -13626,7 +13937,10 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     }
 
     memcpy(header->magic, PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAGIC, 8);
-    if (need_v633_render_pass_sideband) {
+    if (need_v634_classic_render_pass_sideband) {
+        header->header_size = sizeof(*frame_header_v634);
+        header->abi_minor = PDOCKER_GPU_VULKAN_GRAPHICS_V634_ABI_MINOR;
+    } else if (need_v633_render_pass_sideband) {
         header->header_size = sizeof(*frame_header_v633);
         header->abi_minor = PDOCKER_GPU_VULKAN_GRAPHICS_V633_ABI_MINOR;
     } else if (need_v632_render_passes) {
@@ -14000,6 +14314,21 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
         frame_header_v633->v633.correlation_mask_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V633_CORRELATION_MASK_SCHEMA_HASH;
     }
 
+    if (need_v634_classic_render_pass_sideband) {
+        frame_header_v634->v634.framebuffer_count = (uint32_t)framebuffer_count;
+        frame_header_v634->v634.framebuffer_entry_size = sizeof(PdockerGpuVulkanGraphicsV634FramebufferEntry);
+        frame_header_v634->v634.framebuffer_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V634_FRAMEBUFFER_SCHEMA_HASH;
+        frame_header_v634->v634.framebuffer_attachment_count = (uint32_t)framebuffer_attachment_count;
+        frame_header_v634->v634.framebuffer_attachment_entry_size = sizeof(PdockerGpuVulkanGraphicsV634FramebufferAttachmentEntry);
+        frame_header_v634->v634.framebuffer_attachment_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V634_FRAMEBUFFER_ATTACHMENT_SCHEMA_HASH;
+        frame_header_v634->v634.render_pass_command_count = (uint32_t)render_pass_command_count;
+        frame_header_v634->v634.render_pass_command_entry_size = sizeof(PdockerGpuVulkanGraphicsV634RenderPassCommandEntry);
+        frame_header_v634->v634.render_pass_command_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V634_RENDER_PASS_COMMAND_SCHEMA_HASH;
+        frame_header_v634->v634.render_pass_clear_value_count = (uint32_t)render_pass_clear_value_count;
+        frame_header_v634->v634.render_pass_clear_value_entry_size = sizeof(PdockerGpuVulkanGraphicsV634RenderPassClearValueEntry);
+        frame_header_v634->v634.render_pass_clear_value_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V634_RENDER_PASS_CLEAR_VALUE_SCHEMA_HASH;
+    }
+
     frame_build_phase = "frame-append-tables";
 #define APPEND_GRAPHICS_TABLE(data_, count_, entry_size_, offset_field_, size_field_) \
     do { \
@@ -14304,6 +14633,24 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
                               frame_header_v633->v633.correlation_mask_table_offset,
                               frame_header_v633->v633.correlation_mask_table_size);
     }
+    if (need_v634_classic_render_pass_sideband) {
+        APPEND_GRAPHICS_TABLE(framebuffers, framebuffer_count,
+                              sizeof(framebuffers[0]),
+                              frame_header_v634->v634.framebuffer_table_offset,
+                              frame_header_v634->v634.framebuffer_table_size);
+        APPEND_GRAPHICS_TABLE(framebuffer_attachments, framebuffer_attachment_count,
+                              sizeof(framebuffer_attachments[0]),
+                              frame_header_v634->v634.framebuffer_attachment_table_offset,
+                              frame_header_v634->v634.framebuffer_attachment_table_size);
+        APPEND_GRAPHICS_TABLE(render_pass_commands, render_pass_command_count,
+                              sizeof(render_pass_commands[0]),
+                              frame_header_v634->v634.render_pass_command_table_offset,
+                              frame_header_v634->v634.render_pass_command_table_size);
+        APPEND_GRAPHICS_TABLE(render_pass_clear_values, render_pass_clear_value_count,
+                              sizeof(render_pass_clear_values[0]),
+                              frame_header_v634->v634.render_pass_clear_value_table_offset,
+                              frame_header_v634->v634.render_pass_clear_value_table_size);
+    }
 #undef APPEND_GRAPHICS_TABLE
     frame_header->v61.extension_hash = 1469598103934665603ull;
     frame_header->v61.extension_hash = fnv1a64_update_bytes(
@@ -14582,6 +14929,21 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
             frame_header_v633->v633.dependency_view_offset_table_hash ^
             frame_header_v633->v633.correlation_mask_table_hash;
     }
+    if (need_v634_classic_render_pass_sideband) {
+        frame_header_v634->v634.framebuffer_table_hash = fnv1a64_bytes(
+            framebuffers, (size_t)frame_header_v634->v634.framebuffer_table_size);
+        frame_header_v634->v634.framebuffer_attachment_table_hash = fnv1a64_bytes(
+            framebuffer_attachments, (size_t)frame_header_v634->v634.framebuffer_attachment_table_size);
+        frame_header_v634->v634.render_pass_command_table_hash = fnv1a64_bytes(
+            render_pass_commands, (size_t)frame_header_v634->v634.render_pass_command_table_size);
+        frame_header_v634->v634.render_pass_clear_value_table_hash = fnv1a64_bytes(
+            render_pass_clear_values, (size_t)frame_header_v634->v634.render_pass_clear_value_table_size);
+        frame_header_v634->v634.extension_hash =
+            frame_header_v634->v634.framebuffer_table_hash ^
+            frame_header_v634->v634.framebuffer_attachment_table_hash ^
+            frame_header_v634->v634.render_pass_command_table_hash ^
+            frame_header_v634->v634.render_pass_clear_value_table_hash;
+    }
     header->frame_size = cursor;
     header->payload_hash = fnv1a64_bytes(frame + header->header_size,
                                          cursor - header->header_size);
@@ -14589,6 +14951,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     frame_build_phase = "send-frame";
     rc = send_vulkan_graphics_v6_frame_with_fds(socket_fd, frame, cursor, fds, fd_count);
     graphics_label =
+        need_v634_classic_render_pass_sideband ? "VULKAN_GRAPHICS_V6.34" :
         need_v633_render_pass_sideband ? "VULKAN_GRAPHICS_V6.33" :
         need_v632_render_passes ? "VULKAN_GRAPHICS_V6.32" :
         need_v631_descriptor_layout_flags ? "VULKAN_GRAPHICS_V6.31" :
@@ -19932,7 +20295,7 @@ typedef struct {
     bool vulkan_dispatch_v5_supported_minors_valid;
     bool vulkan_dispatch_v5_supported_minor[10];
     bool vulkan_graphics_v6_supported_minors_valid;
-    bool vulkan_graphics_v6_supported_minor[34];
+    bool vulkan_graphics_v6_supported_minor[35];
     bool vulkan_graphics_v627_buffer_views_supported;
     bool vulkan_graphics_v628_push_constant_ranges_supported;
     bool vulkan_graphics_v629_variable_descriptor_counts_supported;
@@ -19940,6 +20303,7 @@ typedef struct {
     bool vulkan_graphics_v631_descriptor_layout_flags_supported;
     bool vulkan_graphics_v632_render_passes_supported;
     bool vulkan_graphics_v633_render_pass_sideband_supported;
+    bool vulkan_graphics_v634_classic_render_pass_sideband_supported;
     uint32_t vulkan_dispatch_v5_abi_minor_image_layout_ranges;
     uint32_t vulkan_dispatch_v5_max_image_layout_ranges;
     uint32_t vulkan_dispatch_v5_abi_minor_buffer_views;
@@ -19974,6 +20338,11 @@ typedef struct {
     uint32_t vulkan_graphics_v6_max_depth_stencil_resolves;
     uint32_t vulkan_graphics_v6_max_dependency_view_offsets;
     uint32_t vulkan_graphics_v6_max_correlation_masks;
+    uint32_t vulkan_graphics_v6_abi_minor_classic_render_pass_sideband;
+    uint32_t vulkan_graphics_v6_max_framebuffers;
+    uint32_t vulkan_graphics_v6_max_framebuffer_attachments;
+    uint32_t vulkan_graphics_v6_max_render_pass_commands;
+    uint32_t vulkan_graphics_v6_max_render_pass_clear_values;
     uint32_t image_format_cap_count;
     PdockerVkAdvertisedFormatCaps image_format_caps[PDOCKER_VK_ADVERTISED_FORMAT_CAP_MAX];
 } PdockerVkAdvertisedCaps;
@@ -20757,6 +21126,70 @@ static bool parse_executor_advertisement_caps_json(
         v633_dependency_view_offset_schema_ok && strcmp(v633_dependency_view_offset_schema_hash, expected_v633_dependency_view_offset_schema_hash) == 0 &&
         v633_correlation_mask_schema_ok && strcmp(v633_correlation_mask_schema_hash, expected_v633_correlation_mask_schema_hash) == 0;
 
+    uint32_t v634_minor = 0;
+    uint32_t v634_max_framebuffers = 0;
+    uint32_t v634_max_framebuffer_attachments = 0;
+    uint32_t v634_max_render_pass_commands = 0;
+    uint32_t v634_max_render_pass_clear_values = 0;
+    uint32_t v634_advertised_supported = 0;
+    char v634_framebuffer_schema_hash[32];
+    char v634_framebuffer_attachment_schema_hash[32];
+    char v634_render_pass_command_schema_hash[32];
+    char v634_render_pass_clear_value_schema_hash[32];
+    char expected_v634_framebuffer_schema_hash[32];
+    char expected_v634_framebuffer_attachment_schema_hash[32];
+    char expected_v634_render_pass_command_schema_hash[32];
+    char expected_v634_render_pass_clear_value_schema_hash[32];
+    memset(v634_framebuffer_schema_hash, 0, sizeof(v634_framebuffer_schema_hash));
+    memset(v634_framebuffer_attachment_schema_hash, 0, sizeof(v634_framebuffer_attachment_schema_hash));
+    memset(v634_render_pass_command_schema_hash, 0, sizeof(v634_render_pass_command_schema_hash));
+    memset(v634_render_pass_clear_value_schema_hash, 0, sizeof(v634_render_pass_clear_value_schema_hash));
+    snprintf(expected_v634_framebuffer_schema_hash, sizeof(expected_v634_framebuffer_schema_hash), "0x%016llx",
+             (unsigned long long)PDOCKER_GPU_VULKAN_GRAPHICS_V634_FRAMEBUFFER_SCHEMA_HASH);
+    snprintf(expected_v634_framebuffer_attachment_schema_hash, sizeof(expected_v634_framebuffer_attachment_schema_hash), "0x%016llx",
+             (unsigned long long)PDOCKER_GPU_VULKAN_GRAPHICS_V634_FRAMEBUFFER_ATTACHMENT_SCHEMA_HASH);
+    snprintf(expected_v634_render_pass_command_schema_hash, sizeof(expected_v634_render_pass_command_schema_hash), "0x%016llx",
+             (unsigned long long)PDOCKER_GPU_VULKAN_GRAPHICS_V634_RENDER_PASS_COMMAND_SCHEMA_HASH);
+    snprintf(expected_v634_render_pass_clear_value_schema_hash, sizeof(expected_v634_render_pass_clear_value_schema_hash), "0x%016llx",
+             (unsigned long long)PDOCKER_GPU_VULKAN_GRAPHICS_V634_RENDER_PASS_CLEAR_VALUE_SCHEMA_HASH);
+    const bool v634_minor_ok = json_read_u32(json, "vulkan_graphics_v6_abi_minor_classic_render_pass_sideband", &v634_minor);
+    const bool v634_max_framebuffers_ok = json_read_u32(json, "vulkan_graphics_v6_max_framebuffers", &v634_max_framebuffers);
+    const bool v634_max_framebuffer_attachments_ok = json_read_u32(json, "vulkan_graphics_v6_max_framebuffer_attachments", &v634_max_framebuffer_attachments);
+    const bool v634_max_render_pass_commands_ok = json_read_u32(json, "vulkan_graphics_v6_max_render_pass_commands", &v634_max_render_pass_commands);
+    const bool v634_max_render_pass_clear_values_ok = json_read_u32(json, "vulkan_graphics_v6_max_render_pass_clear_values", &v634_max_render_pass_clear_values);
+    const bool v634_advertised_supported_ok = json_read_u32(
+        json, "vulkan_graphics_v634_classic_render_pass_sideband_supported", &v634_advertised_supported);
+    const bool v634_framebuffer_schema_ok = json_read_string(
+        json, "vulkan_graphics_v6_framebuffer_schema_hash",
+        v634_framebuffer_schema_hash, sizeof(v634_framebuffer_schema_hash));
+    const bool v634_framebuffer_attachment_schema_ok = json_read_string(
+        json, "vulkan_graphics_v6_framebuffer_attachment_schema_hash",
+        v634_framebuffer_attachment_schema_hash, sizeof(v634_framebuffer_attachment_schema_hash));
+    const bool v634_render_pass_command_schema_ok = json_read_string(
+        json, "vulkan_graphics_v6_render_pass_command_schema_hash",
+        v634_render_pass_command_schema_hash, sizeof(v634_render_pass_command_schema_hash));
+    const bool v634_render_pass_clear_value_schema_ok = json_read_string(
+        json, "vulkan_graphics_v6_render_pass_clear_value_schema_hash",
+        v634_render_pass_clear_value_schema_hash, sizeof(v634_render_pass_clear_value_schema_hash));
+    caps->vulkan_graphics_v6_abi_minor_classic_render_pass_sideband = v634_minor;
+    caps->vulkan_graphics_v6_max_framebuffers = v634_max_framebuffers;
+    caps->vulkan_graphics_v6_max_framebuffer_attachments = v634_max_framebuffer_attachments;
+    caps->vulkan_graphics_v6_max_render_pass_commands = v634_max_render_pass_commands;
+    caps->vulkan_graphics_v6_max_render_pass_clear_values = v634_max_render_pass_clear_values;
+    caps->vulkan_graphics_v634_classic_render_pass_sideband_supported =
+        caps->vulkan_graphics_v633_render_pass_sideband_supported &&
+        caps->vulkan_graphics_v6_supported_minor[PDOCKER_GPU_VULKAN_GRAPHICS_V634_ABI_MINOR] &&
+        v634_advertised_supported_ok && v634_advertised_supported != 0 &&
+        v634_minor_ok && v634_minor >= PDOCKER_GPU_VULKAN_GRAPHICS_V634_ABI_MINOR &&
+        v634_max_framebuffers_ok && v634_max_framebuffers >= PDOCKER_GPU_VULKAN_GRAPHICS_V634_MAX_FRAMEBUFFERS &&
+        v634_max_framebuffer_attachments_ok && v634_max_framebuffer_attachments >= PDOCKER_GPU_VULKAN_GRAPHICS_V634_MAX_FRAMEBUFFER_ATTACHMENTS &&
+        v634_max_render_pass_commands_ok && v634_max_render_pass_commands >= PDOCKER_GPU_VULKAN_GRAPHICS_V634_MAX_RENDER_PASS_COMMANDS &&
+        v634_max_render_pass_clear_values_ok && v634_max_render_pass_clear_values >= PDOCKER_GPU_VULKAN_GRAPHICS_V634_MAX_RENDER_PASS_CLEAR_VALUES &&
+        v634_framebuffer_schema_ok && strcmp(v634_framebuffer_schema_hash, expected_v634_framebuffer_schema_hash) == 0 &&
+        v634_framebuffer_attachment_schema_ok && strcmp(v634_framebuffer_attachment_schema_hash, expected_v634_framebuffer_attachment_schema_hash) == 0 &&
+        v634_render_pass_command_schema_ok && strcmp(v634_render_pass_command_schema_hash, expected_v634_render_pass_command_schema_hash) == 0 &&
+        v634_render_pass_clear_value_schema_ok && strcmp(v634_render_pass_clear_value_schema_hash, expected_v634_render_pass_clear_value_schema_hash) == 0;
+
     caps->image_format_cap_count = 0;
     for (size_t i = 0; i < pdocker_vk_bridge_format_count() &&
                        caps->image_format_cap_count < PDOCKER_VK_ADVERTISED_FORMAT_CAP_MAX; ++i) {
@@ -20942,6 +21375,13 @@ static bool executor_supports_vulkan_graphics_v633_render_pass_sideband(void) {
     const PdockerVkAdvertisedCaps *caps = pdocker_vk_advertised_caps();
     return caps && caps->executor_valid &&
            caps->vulkan_graphics_v633_render_pass_sideband_supported;
+}
+
+static bool executor_supports_vulkan_graphics_v634_classic_render_pass_sideband(void) {
+    if (!bridge_available()) return false;
+    const PdockerVkAdvertisedCaps *caps = pdocker_vk_advertised_caps();
+    return caps && caps->executor_valid &&
+           caps->vulkan_graphics_v634_classic_render_pass_sideband_supported;
 }
 
 static bool executor_supports_any_vulkan_buffer_views(void) {
@@ -31061,7 +31501,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateFramebuffer(
     fb->width = pCreateInfo->width;
     fb->height = pCreateInfo->height;
     fb->layers = pCreateInfo->layers;
-    fb->generation = next_vulkan_object_generation();
+    fb->object_id = next_vulkan_object_generation();
+    fb->generation = fb->object_id;
     framebuffer_register(fb);
     *pFramebuffer = pdocker_vk_framebuffer_to_handle(fb);
     return VK_SUCCESS;
@@ -32839,7 +33280,50 @@ static bool populate_render_pass_subpass_rendering_state(
     return true;
 }
 
-static bool append_graphics_begin_rendering_command(PdockerVkCommandBuffer *cmd) {
+static bool append_classic_render_pass_command_snapshot(
+        PdockerVkCommandBuffer *cmd,
+        uint32_t op,
+        VkSubpassContents contents,
+        PdockerVkRenderPass *rp,
+        PdockerVkFramebuffer *fb,
+        uint32_t subpass_index,
+        const VkRect2D *render_area,
+        const VkClearValue *clear_values,
+        uint32_t clear_value_count,
+        uint32_t *snapshot_index_out) {
+    if (snapshot_index_out) *snapshot_index_out = UINT32_MAX;
+    if (!cmd || !snapshot_index_out || !rp || !fb || rp->destroyed || fb->destroyed ||
+        pdocker_vk_render_pass_object_id(rp) == 0 || pdocker_vk_framebuffer_object_id(fb) == 0 ||
+        clear_value_count > PDOCKER_VK_MAX_STORAGE_BUFFERS) {
+        return false;
+    }
+    if (!command_buffer_reserve_classic_render_pass_command_ops(cmd, 1)) {
+        cmd->graphics_unsupported = true;
+        command_buffer_mark_recording_failed(cmd, "classic-render-pass-command-record-overflow");
+        return false;
+    }
+    uint32_t index = cmd->classic_render_pass_command_op_count++;
+    PdockerVkClassicRenderPassCommandSnapshot *snapshot = &cmd->classic_render_pass_command_ops[index];
+    memset(snapshot, 0, sizeof(*snapshot));
+    snapshot->op = op;
+    snapshot->contents = contents;
+    snapshot->render_pass = rp;
+    snapshot->framebuffer = fb;
+    snapshot->subpass_index = subpass_index;
+    if (render_area) snapshot->render_area = *render_area;
+    snapshot->clear_value_count = clear_value_count;
+    if (clear_value_count > 0 && clear_values) {
+        memcpy(snapshot->clear_values, clear_values,
+               sizeof(snapshot->clear_values[0]) * clear_value_count);
+    }
+    *snapshot_index_out = index;
+    return true;
+}
+
+static bool append_graphics_begin_rendering_command(
+        PdockerVkCommandBuffer *cmd,
+        uint32_t classic_render_pass_op,
+        uint32_t classic_render_pass_snapshot_index) {
     uint32_t rendering_snapshot_index = UINT32_MAX;
     if (!append_graphics_rendering_snapshot(cmd, &rendering_snapshot_index)) return false;
     PdockerVkGraphicsCommandRecord record;
@@ -32849,13 +33333,20 @@ static bool append_graphics_begin_rendering_command(PdockerVkCommandBuffer *cmd)
     record.descriptor_set_count = cmd->active_rendering_layer_count;
     record.dynamic_offset_count = cmd->active_rendering_view_mask;
     record.rendering_snapshot_index = rendering_snapshot_index;
+    record.classic_render_pass_op = classic_render_pass_op;
+    record.classic_render_pass_snapshot_index = classic_render_pass_snapshot_index;
     return append_graphics_command_record(cmd, &record);
 }
 
-static bool append_graphics_end_rendering_command(PdockerVkCommandBuffer *cmd) {
+static bool append_graphics_end_rendering_command(
+        PdockerVkCommandBuffer *cmd,
+        uint32_t classic_render_pass_op,
+        uint32_t classic_render_pass_snapshot_index) {
     PdockerVkGraphicsCommandRecord record;
     memset(&record, 0, sizeof(record));
     record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_RENDERING;
+    record.classic_render_pass_op = classic_render_pass_op;
+    record.classic_render_pass_snapshot_index = classic_render_pass_snapshot_index;
     return append_graphics_command_record(cmd, &record);
 }
 
@@ -32885,7 +33376,14 @@ static bool append_normalized_render_pass_begin(
         return false;
     }
     if (!append_render_pass_subpass_layout_transitions(cmd, 0, &rp->begin_dependency)) return false;
-    if (!append_graphics_begin_rendering_command(cmd)) return false;
+    uint32_t classic_snapshot_index = UINT32_MAX;
+    if (!append_classic_render_pass_command_snapshot(
+            cmd, PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_BEGIN, contents,
+            rp, fb, 0, &begin->renderArea, begin->pClearValues,
+            begin->clearValueCount, &classic_snapshot_index)) return false;
+    if (!append_graphics_begin_rendering_command(
+            cmd, PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_BEGIN,
+            classic_snapshot_index)) return false;
     cmd->dynamic_rendering_active = true;
     cmd->render_pass_active = false;
     cmd->active_subpass = 0;
@@ -33013,14 +33511,23 @@ VKAPI_ATTR void VKAPI_CALL vkCmdNextSubpass(
         cmd->graphics_unsupported = true;
         return;
     }
-    if (!append_graphics_end_rendering_command(cmd) ||
+    if (!append_graphics_end_rendering_command(cmd, 0, UINT32_MAX) ||
         !populate_render_pass_subpass_rendering_state(
             cmd, rp, fb, cmd->active_render_area,
             cmd->active_clear_values, cmd->active_clear_value_count,
             next_subpass, contents) ||
         !append_render_pass_subpass_layout_transitions(
-            cmd, next_subpass, &rp->subpass_dependencies[next_subpass]) ||
-        !append_graphics_begin_rendering_command(cmd)) {
+            cmd, next_subpass, &rp->subpass_dependencies[next_subpass])) {
+        cmd->graphics_unsupported = true;
+        return;
+    }
+    uint32_t classic_snapshot_index = UINT32_MAX;
+    if (!append_classic_render_pass_command_snapshot(
+            cmd, PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_NEXT_SUBPASS, contents,
+            rp, fb, next_subpass, NULL, NULL, 0, &classic_snapshot_index) ||
+        !append_graphics_begin_rendering_command(
+            cmd, PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_NEXT_SUBPASS,
+            classic_snapshot_index)) {
         cmd->graphics_unsupported = true;
         return;
     }
@@ -33034,7 +33541,19 @@ VKAPI_ATTR void VKAPI_CALL vkCmdEndRenderPass(VkCommandBuffer commandBuffer) {
     if (cmd->active_framebuffer && cmd->active_framebuffer->destroyed) {
         cmd->graphics_unsupported = true;
     }
-    if (!append_graphics_end_rendering_command(cmd)) {
+    uint32_t classic_snapshot_index = UINT32_MAX;
+    if (cmd->dynamic_rendering_active && cmd->active_render_pass && cmd->active_framebuffer &&
+        !append_classic_render_pass_command_snapshot(
+            cmd, PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_END,
+            cmd->active_subpass_contents, cmd->active_render_pass, cmd->active_framebuffer,
+            cmd->active_subpass, NULL, NULL, 0, &classic_snapshot_index)) {
+        cmd->graphics_unsupported = true;
+    }
+    if (!append_graphics_end_rendering_command(
+            cmd, classic_snapshot_index != UINT32_MAX
+                ? PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_END
+                : 0,
+            classic_snapshot_index)) {
         cmd->graphics_unsupported = true;
     }
     if (cmd->dynamic_rendering_active && cmd->active_render_pass &&

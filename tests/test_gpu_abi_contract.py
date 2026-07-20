@@ -3559,7 +3559,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "cmd->active_rendering_layer_count = fb->layers ? fb->layers : 1;",
             "cmd->active_rendering_view_mask = subpass->view_mask;",
             "append_render_pass_subpass_layout_transitions(cmd, 0, &rp->begin_dependency)",
-            "append_graphics_begin_rendering_command(cmd)",
+            "append_classic_render_pass_command_snapshot(",
+            "PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_BEGIN",
+            "append_graphics_begin_rendering_command(\n            cmd, PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_BEGIN",
             "record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_RENDERING;",
             "record.rendering_snapshot_index = rendering_snapshot_index;",
             "cmd->dynamic_rendering_active = true;",
@@ -3645,11 +3647,12 @@ class GpuAbiContractTest(unittest.TestCase):
         for marker in [
             "uint32_t next_subpass = cmd->active_subpass + 1u;",
             "!render_pass_subpass_can_normalize_to_dynamic_rendering(rp, next_subpass)",
-            "append_graphics_end_rendering_command(cmd)",
+            "append_graphics_end_rendering_command(cmd, 0, UINT32_MAX)",
             "populate_render_pass_subpass_rendering_state(",
             "append_render_pass_subpass_layout_transitions(",
             "&rp->subpass_dependencies[next_subpass]",
-            "append_graphics_begin_rendering_command(cmd)",
+            "append_classic_render_pass_command_snapshot(\n            cmd, PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_NEXT_SUBPASS",
+            "append_graphics_begin_rendering_command(\n            cmd, PDOCKER_GPU_GRAPHICS_V634_RENDER_PASS_COMMAND_NEXT_SUBPASS",
             "fb->destroyed",
             "cmd->active_subpass = next_subpass;",
             "cmd->active_subpass_contents = contents;",
@@ -4306,10 +4309,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("dynamic rendering multiview is not supported", executor)
         self.assertNotIn("if (src->dynamic_rendering_view_mask != 0) return -EOPNOTSUPP;", executor)
         pipeline_body = c_function_body(executor, "materialize_vulkan_graphics_v6_pipelines")
-        self.assertIn("if (src->dynamic_rendering_view_mask != 0 && !rt->enabled_vulkan11.multiview) {", pipeline_body)
+        self.assertIn("!classic_pipeline && src->dynamic_rendering_view_mask != 0 && !rt->enabled_vulkan11.multiview", pipeline_body)
         self.assertIn("pipeline_rc = -EOPNOTSUPP;", pipeline_body)
         self.assertLess(
-            pipeline_body.index("src->dynamic_rendering_view_mask != 0 && !rt->enabled_vulkan11.multiview"),
+            pipeline_body.index("!classic_pipeline && src->dynamic_rendering_view_mask != 0 && !rt->enabled_vulkan11.multiview"),
             pipeline_body.index("VkPipelineRenderingCreateInfo rendering"),
         )
 
@@ -6090,7 +6093,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "vulkan_graphics_v616_rect_inside_render_area",
             "active_rendering_command",
             "vkCmdClearAttachments(command_buffer",
-            "clear attachments outside dynamic rendering",
+            "clear attachments outside rendering",
+            "clear attachments inside classic render pass is not implemented",
             "graphics clear attachments requires V6.16 metadata",
             "graphics clear attachments do not match active rendering",
         ]:
@@ -9949,7 +9953,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "PdockerGpuVulkanGraphicsV630FrameHeader *frame_header_v630",
             "frame_header_v630 = &frame_header_v631->v630;",
             "frame_header_v629 = &frame_header_v630->v629;",
-            "size_t cursor = sizeof(PdockerGpuVulkanGraphicsV633FrameHeader);",
+            "size_t cursor = sizeof(PdockerGpuVulkanGraphicsV634FrameHeader);",
             "need_v630_native_objects",
             "executor_supports_vulkan_graphics_v630_native_objects()",
             "sizeof(*frame_header_v631)",
@@ -14732,7 +14736,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("PdockerGpuVulkanDispatchV53BufferViewEntry", icd)
         self.assertIn("PdockerGpuVulkanGraphicsV627BufferViewEntry", icd)
         self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V627_BUFFER_VIEW_SCHEMA_HASH", icd)
-        self.assertIn("size_t cursor = sizeof(PdockerGpuVulkanGraphicsV633FrameHeader);", icd)
+        self.assertIn("size_t cursor = sizeof(PdockerGpuVulkanGraphicsV634FrameHeader);", icd)
         self.assertNotIn("size_t cursor = sizeof(PdockerGpuVulkanGraphicsV626FrameHeader);", icd)
         self.assertIn("executor_supports_vulkan_dispatch_v53_buffer_views", icd)
         self.assertIn("executor_supports_vulkan_graphics_v627_buffer_views", icd)
@@ -14813,7 +14817,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("op->declared_range_count = declared_range_count;", push_body)
         self.assertIn("memcpy(declared_ranges, captured_layout->push_constant_ranges", push_body)
         self.assertIn("PdockerGpuVulkanGraphicsV628PushConstantRangeEntry *push_constant_ranges = NULL", frame_body)
-        self.assertIn("size_t cursor = sizeof(PdockerGpuVulkanGraphicsV633FrameHeader);", frame_body)
+        self.assertIn("size_t cursor = sizeof(PdockerGpuVulkanGraphicsV634FrameHeader);", frame_body)
         self.assertIn("need_v628_push_constant_ranges", frame_body)
         self.assertIn("frame_header_v628->v628.push_constant_range_count", frame_body)
         self.assertIn("APPEND_GRAPHICS_TABLE(push_constant_ranges", frame_body)
@@ -15058,7 +15062,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "rt->physical_vulkan12.separateDepthStencilLayouts ||",
             "rt->physical_separate_depth_stencil_layouts.separateDepthStencilLayouts",
             "VK_KHR_SEPARATE_DEPTH_STENCIL_LAYOUTS_EXTENSION_NAME",
-            "const char *enabled_extensions[24];",
+            "const char *enabled_extensions[32];",
             r'\"separateDepthStencilLayouts\":%u',
             r'\"VK_KHR_separate_depth_stencil_layouts\":%u',
             "rt ? rt->enabled_vulkan12.separateDepthStencilLayouts : 0",
@@ -15144,7 +15148,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "sizeof(*variable_descriptor_counts)",
             "free(variable_descriptor_counts);",
             "PdockerGpuVulkanGraphicsV629FrameHeader *frame_header_v629",
-            "size_t cursor = sizeof(PdockerGpuVulkanGraphicsV633FrameHeader);",
+            "size_t cursor = sizeof(PdockerGpuVulkanGraphicsV634FrameHeader);",
             "need_v629_variable_descriptor_counts",
             "collect_graphics_v629_variable_descriptor_counts",
             "executor_supports_vulkan_graphics_v629_variable_descriptor_counts",
@@ -20544,7 +20548,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "static int preflight_vulkan_graphics_v6_runtime_supported", 1
         )[0]
         self.assertIn("PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_RENDERING", needs_rendering_body)
-        self.assertIn("PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW", needs_rendering_body)
+        self.assertIn("PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_RENDERING", needs_rendering_body)
+        self.assertNotIn("PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW", needs_rendering_body)
         self.assertNotIn("PDOCKER_GPU_GRAPHICS_V6_COMMAND_COPY_BUFFER:", needs_rendering_body)
         self.assertIn("preflight_vulkan_graphics_v6_runtime_supported(view, &reason)", executor)
 
@@ -26752,9 +26757,12 @@ class GpuAbiContractTest(unittest.TestCase):
         caps_struct = icd.split("} PdockerVkAdvertisedCaps;", 1)[0].rsplit("typedef struct {", 1)[1]
 
         self.assertIn("vulkan_graphics_v6_supported_minors", caps)
+        self.assertIn("graphics_v6_supported_minors", caps)
+        self.assertIn("[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34]", caps)
         self.assertIn("[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33]", caps)
+        self.assertIn("\\\"vulkan_graphics_v6_supported_minors\\\":%s", caps)
         self.assertIn("bool vulkan_graphics_v6_supported_minors_valid;", caps_struct)
-        self.assertIn("bool vulkan_graphics_v6_supported_minor[34];", caps_struct)
+        self.assertIn("bool vulkan_graphics_v6_supported_minor[35];", caps_struct)
         self.assertIn("json_read_u32_membership_array(\n            json,\n            \"vulkan_graphics_v6_supported_minors\"", parser)
         self.assertIn("caps->vulkan_graphics_v6_supported_minors_valid = true;", parser)
         self.assertIn("caps->vulkan_graphics_v6_supported_minor[PDOCKER_GPU_VULKAN_GRAPHICS_V627_ABI_MINOR]", parser)
@@ -26967,7 +26975,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "collect_vulkan_graphics_v633_render_pass_transport(",
             "need_v633_render_pass_sideband = true;",
             "header->abi_minor = PDOCKER_GPU_VULKAN_GRAPHICS_V633_ABI_MINOR;",
-            "size_t cursor = sizeof(PdockerGpuVulkanGraphicsV633FrameHeader);",
+            "size_t cursor = sizeof(PdockerGpuVulkanGraphicsV634FrameHeader);",
             "APPEND_GRAPHICS_TABLE(render_pass_subpass_view_masks",
             "APPEND_GRAPHICS_TABLE(render_pass_depth_stencil_resolves",
             "APPEND_GRAPHICS_TABLE(render_pass_dependency_view_offsets",
@@ -27169,8 +27177,47 @@ class GpuAbiContractTest(unittest.TestCase):
 
         self.assertIn("sizeof(PdockerGpuVulkanGraphicsV634FrameHeader)", prefix)
         self.assertIn("case PDOCKER_GPU_VULKAN_GRAPHICS_V634_ABI_MINOR: return 69u;", table_ranges)
-        self.assertIn("[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33]", caps)
-        self.assertNotIn("34]", caps)
+        self.assertIn("graphics_v6_supported_minors", caps)
+        self.assertIn("[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34]", caps)
+        self.assertIn("vulkan_graphics_v634_classic_render_pass_sideband_supported", caps)
+        self.assertIn("vulkan_graphics_v6_abi_minor_classic_render_pass_sideband", caps)
+        self.assertIn("vulkan_graphics_v6_framebuffer_schema_hash", caps)
+
+        icd = VULKAN_ICD.read_text()
+        sender = c_function_body(icd, "send_recorded_vulkan_graphics_v6_1_frame_range")
+        parser = c_function_body(icd, "parse_executor_advertisement_caps_json")
+        for helper in [
+            "collect_vulkan_graphics_v634_framebuffer_transport",
+            "collect_vulkan_graphics_v634_render_pass_command_transport",
+        ]:
+            self.assertIn(helper, icd)
+        for marker in [
+            "PdockerGpuVulkanGraphicsV634FramebufferEntry *framebuffers",
+            "PdockerGpuVulkanGraphicsV634FramebufferAttachmentEntry *framebuffer_attachments",
+            "PdockerGpuVulkanGraphicsV634RenderPassCommandEntry *render_pass_commands",
+            "PdockerGpuVulkanGraphicsV634RenderPassClearValueEntry *render_pass_clear_values",
+            "executor_supports_vulkan_graphics_v634_classic_render_pass_sideband()",
+            "need_v634_classic_render_pass_sideband = true;",
+            "header->abi_minor = PDOCKER_GPU_VULKAN_GRAPHICS_V634_ABI_MINOR;",
+            "size_t cursor = sizeof(PdockerGpuVulkanGraphicsV634FrameHeader);",
+            "APPEND_GRAPHICS_TABLE(framebuffers",
+            "APPEND_GRAPHICS_TABLE(framebuffer_attachments",
+            "APPEND_GRAPHICS_TABLE(render_pass_commands",
+            "APPEND_GRAPHICS_TABLE(render_pass_clear_values",
+            "frame_header_v634->v634.extension_hash",
+            "VULKAN_GRAPHICS_V6.34",
+        ]:
+            self.assertIn(marker, sender)
+        for marker in [
+            "uint32_t v634_minor = 0;",
+            "vulkan_graphics_v6_abi_minor_classic_render_pass_sideband",
+            "vulkan_graphics_v634_classic_render_pass_sideband_supported",
+            "v634_advertised_supported_ok && v634_advertised_supported != 0",
+            "caps->vulkan_graphics_v6_supported_minor[PDOCKER_GPU_VULKAN_GRAPHICS_V634_ABI_MINOR]",
+            "v634_framebuffer_schema_ok && strcmp(v634_framebuffer_schema_hash, expected_v634_framebuffer_schema_hash) == 0",
+            "v634_render_pass_clear_value_schema_ok && strcmp(v634_render_pass_clear_value_schema_hash, expected_v634_render_pass_clear_value_schema_hash) == 0",
+        ]:
+            self.assertIn(marker, parser)
         for marker in [
             "is_v634 ? &header_v634->v633",
             "header_v634->v634.framebuffer_count > PDOCKER_GPU_VULKAN_GRAPHICS_V634_MAX_FRAMEBUFFERS",
