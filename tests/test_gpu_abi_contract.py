@@ -113,6 +113,12 @@ VULKAN_ABI_ID_FIELD_CLASSIFICATIONS = {
     "PdockerGpuVulkanGraphicsV633DepthStencilResolveEntry.render_pass_id": "object_reference_checked",
     "PdockerGpuVulkanGraphicsV633DependencyViewOffsetEntry.render_pass_id": "object_reference_checked",
     "PdockerGpuVulkanGraphicsV633CorrelationMaskEntry.render_pass_id": "object_reference_checked",
+    "PdockerGpuVulkanGraphicsV634FramebufferEntry.framebuffer_id": "object_identity_guarded",
+    "PdockerGpuVulkanGraphicsV634FramebufferEntry.render_pass_id": "object_reference_checked",
+    "PdockerGpuVulkanGraphicsV634FramebufferAttachmentEntry.framebuffer_id": "object_reference_checked",
+    "PdockerGpuVulkanGraphicsV634FramebufferAttachmentEntry.image_view_id": "object_reference_checked",
+    "PdockerGpuVulkanGraphicsV634RenderPassCommandEntry.render_pass_id": "object_reference_checked",
+    "PdockerGpuVulkanGraphicsV634RenderPassCommandEntry.framebuffer_id": "object_reference_checked",
 }
 
 
@@ -223,6 +229,7 @@ VULKAN_ABI_SCALAR_FIELD_CLASSES = frozenset({
     "vk_layout_enum",
     "vk_pipeline_state_enum",
     "vk_query_enum",
+    "vk_render_pass_command_enum",
     "vk_resource_type_enum",
     "vk_sample_count_enum",
     "vk_sampler_state_enum",
@@ -230,6 +237,7 @@ VULKAN_ABI_SCALAR_FIELD_CLASSES = frozenset({
     "vk_stage_mask",
     "vk_stencil_mask_payload",
     "vk_sync_enum",
+    "vk_subpass_contents_enum",
     "vk_tiling_enum",
     "vk_usage_flags",
 })
@@ -355,6 +363,12 @@ VULKAN_ABI_INDEX_FIELD_CLASSIFICATIONS = {
     "PdockerGpuVulkanGraphicsV633DepthStencilResolveEntry.attachment_index": "attachment_reference_index",
     "PdockerGpuVulkanGraphicsV633DependencyViewOffsetEntry.dependency_index": "identity_key_ordinal",
     "PdockerGpuVulkanGraphicsV633CorrelationMaskEntry.mask_index": "identity_key_ordinal",
+    "PdockerGpuVulkanGraphicsV634FramebufferAttachmentEntry.attachment_index": "attachment_reference_index",
+    "PdockerGpuVulkanGraphicsV634FramebufferAttachmentEntry.image_view_index": "image_view_reference_index",
+    "PdockerGpuVulkanGraphicsV634RenderPassCommandEntry.command_index": "command_reference_index",
+    "PdockerGpuVulkanGraphicsV634RenderPassCommandEntry.subpass_index": "identity_key_ordinal",
+    "PdockerGpuVulkanGraphicsV634RenderPassClearValueEntry.command_index": "command_reference_index",
+    "PdockerGpuVulkanGraphicsV634RenderPassClearValueEntry.attachment_index": "attachment_reference_index",
     "PdockerGpuVulkanGraphicsV61PushConstantMetadataEntry.command_index": "command_reference_index",
     "PdockerGpuVulkanGraphicsV61ImageBarrierEntry.command_index": "command_reference_index",
     "PdockerGpuVulkanGraphicsV61ImageBarrierEntry.image_index": "image_reference_index",
@@ -886,6 +900,7 @@ def classify_vulkan_abi_size_or_count_field(qualified_field):
         "attachment_count",
         "color_attachment_count",
         "clear_attachment_count",
+        "clear_value_count",
     }:
         return "attachment_count"
     if field_name in {"subpass_count", "dependency_count"}:
@@ -916,7 +931,7 @@ def classify_vulkan_abi_remaining_scalar_field(qualified_field):
         return "command_selector"
     if field_name in {"gx", "gy", "gz"}:
         return "dispatch_grid_dimension"
-    if field_name in {"generation", "layout_generation"}:
+    if field_name in {"generation", "layout_generation"} or field_name.endswith("_generation"):
         return "object_generation_counter"
     if field_name == "sequence":
         return "sequence_number"
@@ -941,7 +956,9 @@ def classify_vulkan_abi_remaining_scalar_field(qualified_field):
         return "dynamic_state_payload_count"
     if field_name in {"value", "status", "available"}:
         return "query_result_payload"
-    if field_name == "data":
+    if field_name == "contents" and "RenderPassCommandEntry" in struct_name:
+        return "vk_subpass_contents_enum"
+    if field_name in {"data", "value0", "value1", "value2", "value3"}:
         return "clear_value_payload"
     if field_name.startswith("color_uint32_"):
         return "clear_value_payload"
@@ -959,13 +976,13 @@ def classify_vulkan_abi_remaining_scalar_field(qualified_field):
         "rect_extent_width", "rect_extent_height",
         "render_area_extent_width", "render_area_extent_height",
         "buffer_row_length", "buffer_image_height",
-    }:
+    } or ("FramebufferEntry" in struct_name and field_name in {"width", "height"}):
         return "image_extent"
     if field_name in {
         "array_layers", "mip_levels", "base_array_layer", "base_mip_level",
         "src_base_array_layer", "dst_base_array_layer", "src_mip_level", "dst_mip_level",
         "mip_level",
-    }:
+    } or ("FramebufferEntry" in struct_name and field_name == "layers"):
         return "image_subresource_coordinate"
     if re.fullmatch(r"(src_|dst_|image_|rect_|render_area_)?offset[01]?_[xyz]", field_name):
         return "image_offset_coordinate"
@@ -1036,6 +1053,8 @@ def classify_vulkan_abi_remaining_scalar_field(qualified_field):
         return "vk_pipeline_state_enum"
     if field_name == "attachment_role":
         return "attachment_role_enum"
+    if field_name == "op" and "RenderPassCommandEntry" in struct_name:
+        return "vk_render_pass_command_enum"
     if field_name in {"op", "query_type"}:
         return "vk_query_enum"
     if field_name in {"sync_type", "submit_kind"}:

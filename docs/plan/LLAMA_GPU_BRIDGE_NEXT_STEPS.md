@@ -9,6 +9,27 @@ llama.cpp itself remains unmodified.
 
 ## Current Ground Truth
 
+### 2026-07-20 CPU/static V6.34 classic render-pass replay ABI scaffold
+
+The ABI header now reserves append-only V6.34 rows for the missing classic
+render-pass replay objects that V6.32/V6.33 deliberately did not cover:
+framebuffer objects, framebuffer attachment references, exact
+`vkCmdBeginRenderPass`/`vkCmdNextSubpass`/`vkCmdEndRenderPass` command rows,
+and raw `VkClearValue` payload rows.  The shared APK/executor and ICD headers
+stay byte-identical and the ABI contract classifies every new handle-like id,
+index, count, enum, extent, generation, and clear-value scalar before it may
+cross the glibc ICD to Android executor boundary.
+
+This is still a protocol scaffold, not strict replay completion.  The executor
+must not advertise V6.34 support until it validates these rows, constructs the
+native `VkFramebuffer`/`VkRenderPass` objects, creates graphics pipelines
+against the native render pass, and records classic render-pass commands rather
+than dynamic-rendering normalization.  The producer must also continue to fail
+strict mode for normalized classic render passes until V6.34 emission and
+executor replay are wired together.
+
+Evidence gate: `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -q tests.test_gpu_abi_contract`.
+
 ### 2026-07-20 CPU/static V6.32 render-pass replay-precondition lane
 
 The Android executor now validates V6.32 classic render-pass metadata as replay
