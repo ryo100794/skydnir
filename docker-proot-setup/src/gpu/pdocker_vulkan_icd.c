@@ -3405,11 +3405,27 @@ static bool command_buffer_owner_chain_valid(const PdockerVkCommandBuffer *cmd) 
 static bool command_buffers_can_execute_secondary(
         const PdockerVkCommandBuffer *primary,
         const PdockerVkCommandBuffer *secondary) {
-    return command_buffer_owner_chain_valid(primary) &&
-        command_buffer_owner_chain_valid(secondary) &&
-        primary->level == VK_COMMAND_BUFFER_LEVEL_PRIMARY &&
-        secondary->level == VK_COMMAND_BUFFER_LEVEL_SECONDARY &&
-        primary->owner_device_id == secondary->owner_device_id;
+    if (!command_buffer_owner_chain_valid(primary) ||
+        !command_buffer_owner_chain_valid(secondary) ||
+        primary->level != VK_COMMAND_BUFFER_LEVEL_PRIMARY ||
+        secondary->level != VK_COMMAND_BUFFER_LEVEL_SECONDARY ||
+        primary->owner_device_id != secondary->owner_device_id) {
+        return false;
+    }
+    if (!secondary->inherited_rendering_active) return true;
+    if (secondary->active_render_pass) {
+        if (!(primary->dynamic_rendering_active || primary->render_pass_active) ||
+            primary->active_render_pass != secondary->active_render_pass ||
+            primary->active_subpass != secondary->active_subpass) {
+            return false;
+        }
+        if (secondary->active_framebuffer &&
+            primary->active_framebuffer != secondary->active_framebuffer) {
+            return false;
+        }
+        return true;
+    }
+    return primary->dynamic_rendering_active;
 }
 
 
@@ -5725,7 +5741,9 @@ static bool append_secondary_command_buffer(
         }
         switch (record.command_type) {
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_RENDERING:
-                record.rendering_snapshot_index += rendering_base;
+                if (record.classic_render_pass_op == 0) {
+                    record.rendering_snapshot_index += rendering_base;
+                }
                 break;
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_CLEAR_ATTACHMENTS:
                 record.descriptor_bind_snapshot_index += clear_attachments_command_base;
@@ -11430,9 +11448,9 @@ static int collect_vulkan_graphics_v634_render_pass_command_transport(
     return 0;
 }
 
-static bool strict_vulkan_graphics_v632_render_pass_transport_complete(
-        const PdockerVkPipeline *pipeline) {
-    /* Strict passthrough may only accept a classic render-pass pipeline once the
+static bool strict_vulkan_graphics_v632_render_pass_transport_complete_for_render_pass(
+        const PdockerVkRenderPass *render_pass) {
+    /* Strict passthrough may only accept a classic render pass once the
      * executor advertises the V6.34 sideband that carries the actual
      * vkCmdBeginRenderPass/vkCmdNextSubpass/vkCmdEndRenderPass stream plus the
      * framebuffer attachments needed to reconstruct native VkRenderPass and
@@ -11440,9 +11458,16 @@ static bool strict_vulkan_graphics_v632_render_pass_transport_complete(
      * the replay contract that prevents falling back to dynamic-rendering
      * normalization under a strict pass-through policy.
      */
-    return pipeline && pipeline->render_pass &&
+    return render_pass &&
            executor_supports_vulkan_graphics_v634_classic_render_pass_sideband() &&
-           vulkan_graphics_v633_render_pass_transport_representable(pipeline->render_pass);
+           vulkan_graphics_v633_render_pass_transport_representable(render_pass);
+}
+
+static bool strict_vulkan_graphics_v632_render_pass_transport_complete(
+        const PdockerVkPipeline *pipeline) {
+    return pipeline && pipeline->render_pass &&
+           strict_vulkan_graphics_v632_render_pass_transport_complete_for_render_pass(
+                pipeline->render_pass);
 }
 
 static int send_recorded_vulkan_graphics_v6_1_frame_range(
@@ -31171,11 +31196,24 @@ static bool command_buffer_begin_inheritance_supported(
     }
     if (inherit->renderPass) {
         PdockerVkRenderPass *rp = NULL;
+        PdockerVkFramebuffer *fb = NULL;
         if (!render_pass_handle_lookup_for_command_buffer_checked(cmd, inherit->renderPass, &rp) ||
-            !rp || !render_pass_subpass_can_normalize_to_dynamic_rendering(rp, inherit->subpass)) {
+            !rp || rp->destroyed || inherit->subpass >= rp->subpass_count) {
+            return false;
+        }
+        if (inherit->framebuffer &&
+            (!framebuffer_handle_lookup_for_command_buffer_checked(cmd, inherit->framebuffer, &fb) ||
+             !fb || fb->destroyed || fb->render_pass != rp)) {
+            return false;
+        }
+        if (!render_pass_subpass_can_normalize_to_dynamic_rendering(rp, inherit->subpass) &&
+            !strict_vulkan_graphics_v632_render_pass_transport_complete_for_render_pass(rp)) {
             return false;
         }
         cmd->inherited_rendering_active = true;
+        cmd->active_render_pass = rp;
+        cmd->active_framebuffer = fb;
+        cmd->active_subpass = inherit->subpass;
     }
     for (const VkBaseInStructure *chain = (const VkBaseInStructure *)inherit->pNext;
          chain;

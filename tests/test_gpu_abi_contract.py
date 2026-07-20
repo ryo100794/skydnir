@@ -4439,6 +4439,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("void **update_payloads", icd)
         self.assertIn("calloc(src->command_op_count, sizeof(*update_payloads))", icd)
         self.assertIn("op.payload = update_payloads[i];", icd)
+        self.assertIn("if (record.classic_render_pass_op == 0) {", icd)
         self.assertIn("record.rendering_snapshot_index += rendering_base;", icd)
         self.assertIn("record.descriptor_bind_snapshot_index += descriptor_bind_base;", icd)
         self.assertIn("record.dynamic_state_index += dynamic_state_base;", icd)
@@ -4464,7 +4465,7 @@ class GpuAbiContractTest(unittest.TestCase):
         execute_compat_body = c_function_body(icd, "command_buffers_can_execute_secondary")
         self.assertIn("command_buffer_owner_chain_valid(primary)", execute_compat_body)
         self.assertIn("command_buffer_owner_chain_valid(secondary)", execute_compat_body)
-        self.assertIn("primary->owner_device_id == secondary->owner_device_id", execute_compat_body)
+        self.assertIn("primary->owner_device_id != secondary->owner_device_id", execute_compat_body)
         self.assertIn("VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_RENDERING_INFO", icd)
         self.assertIn("cmd->dynamic_rendering_active || cmd->inherited_rendering_active", icd)
         self.assertIn("inherit->occlusionQueryEnable || inherit->queryFlags != 0", icd)
@@ -4472,6 +4473,15 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("render_pass_handle_lookup_for_command_buffer_checked(cmd, inherit->renderPass, &rp)", inheritance_body)
         self.assertNotIn("render_pass_handle_lookup(inherit->renderPass)", inheritance_body)
         self.assertIn("render_pass_subpass_can_normalize_to_dynamic_rendering(rp, inherit->subpass)", icd)
+        self.assertIn("strict_vulkan_graphics_v632_render_pass_transport_complete_for_render_pass(rp)", inheritance_body)
+        self.assertIn("cmd->active_render_pass = rp;", inheritance_body)
+        self.assertIn("cmd->active_framebuffer = fb;", inheritance_body)
+        self.assertIn("cmd->active_subpass = inherit->subpass;", inheritance_body)
+        self.assertIn("secondary->inherited_rendering_active", execute_compat_body)
+        self.assertIn("primary->active_render_pass != secondary->active_render_pass", execute_compat_body)
+        self.assertIn("primary->active_subpass != secondary->active_subpass", execute_compat_body)
+        self.assertIn("primary->dynamic_rendering_active || primary->render_pass_active", execute_compat_body)
+        self.assertIn("return primary->dynamic_rendering_active;", execute_compat_body)
         self.assertIn("op.index += dispatch_base;", icd)
         self.assertIn("op.index += graphics_draw_base;", icd)
         secondary_body = c_function_body(icd, "append_secondary_command_buffer")
@@ -27526,12 +27536,16 @@ class GpuAbiContractTest(unittest.TestCase):
 
     def test_vulkan_graphics_v632_strict_render_pass_transport_requires_v634_replay_contract(self):
         icd = VULKAN_ICD.read_text()
-        strict = c_function_body(icd, "strict_vulkan_graphics_v632_render_pass_transport_complete")
+        strict = (
+            c_function_body(icd, "strict_vulkan_graphics_v632_render_pass_transport_complete_for_render_pass")
+            + c_function_body(icd, "strict_vulkan_graphics_v632_render_pass_transport_complete")
+        )
         sender = c_function_body(icd, "send_recorded_vulkan_graphics_v6_1_frame_range")
 
         for marker in [
             "executor_supports_vulkan_graphics_v634_classic_render_pass_sideband()",
-            "vulkan_graphics_v633_render_pass_transport_representable(pipeline->render_pass)",
+            "vulkan_graphics_v633_render_pass_transport_representable(render_pass)",
+            "strict_vulkan_graphics_v632_render_pass_transport_complete_for_render_pass(",
             "V6.34 sideband",
             "strict pass-through policy",
         ]:

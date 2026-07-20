@@ -9,6 +9,41 @@ llama.cpp itself remains unmodified.
 
 ## Current Ground Truth
 
+### 2026-07-20 CPU/static native classic secondary-inheritance lane
+
+Secondary command-buffer inheritance now has a native classic render-pass path.
+A secondary command buffer that declares `VkCommandBufferInheritanceInfo::renderPass`
+is accepted when either the inherited subpass is dynamic-rendering-normalizable
+or the render pass satisfies the strict V6.34 native replay contract.  The ICD
+records the inherited render pass, optional framebuffer, and subpass on the
+secondary command buffer so `vkCmdExecuteCommands` can verify that the primary
+command buffer is executing inside a compatible active rendering scope.
+
+`vkCmdExecuteCommands` now rejects inherited-rendering secondary command buffers
+unless the primary is inside the matching classic render pass/subpass, or inside
+dynamic rendering for dynamic-rendering inheritance.  Secondary command append
+also no longer rebases the `rendering_snapshot_index` for classic render-pass
+marker commands, preventing a `UINT32_MAX` marker index from being treated like
+a dynamic-rendering snapshot.
+
+This is still generic Vulkan pass-through work.  It does not change llama.cpp,
+Dockerfiles, models, prompts, shader bytes, or arithmetic.
+
+Evidence gates for this lane:
+
+- `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -q tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_secondary_command_buffers_are_index_rebased_not_unconditionally_rejected tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_classic_render_pass_native_replay_is_not_dynamic_rendering_only tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_graphics_v632_strict_render_pass_transport_requires_v634_replay_contract`
+- `bash scripts/build-gpu-shim.sh`
+
+Remaining strict-native replay gaps after this lane:
+
+1. Command families recorded inside native classic render-pass scope need a
+   targeted audit.  Draws and secondary inherited draws now accept the native
+   scope; clear attachments, resolve, query, event, and dynamic-state paths must
+   still be proven individually.
+2. Device evidence is still required to prove that a non-normalizable classic
+   render-pass workload with secondary command buffers reaches the Android
+   executor as native V6.34 replay and survives real driver validation.
+
 ### 2026-07-20 CPU/static native classic render-pass capture lane
 
 The ICD now has a normalization-independent capture path for classic render
@@ -40,16 +75,12 @@ Evidence gates run for this lane:
 
 Remaining strict-native replay gaps after this lane:
 
-1. Secondary command-buffer inheritance for classic render-pass scope is still
-   guarded by dynamic-rendering-normalizable inheritance checks.  The next
-   static lane should split inherited native classic render-pass state from
-   dynamic rendering inheritance without accepting unsupported inherited state.
-2. Command families recorded inside native classic render-pass scope need a
+1. Command families recorded inside native classic render-pass scope need a
    targeted audit.  Draws now accept `render_pass_active`, but clear, resolve,
    event, query, and dynamic-state paths must be proven not to require dynamic
    rendering snapshots when the executor can replay native classic render-pass
    commands.
-3. Device evidence is still required to prove that a non-normalizable classic
+2. Device evidence is still required to prove that a non-normalizable classic
    render-pass workload reaches the Android executor as native V6.34 replay and
    survives real driver validation.
 
