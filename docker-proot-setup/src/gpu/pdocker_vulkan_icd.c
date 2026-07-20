@@ -27145,11 +27145,21 @@ static bool pdocker_supports_shader_layout_semantics_transport(void) {
 }
 
 static bool pdocker_supports_custom_border_color_transport(void) {
-    return false;
+    /*
+     * Advertise the extension for standard negotiation and pNext recognition,
+     * but keep customBorderColors=false and reject actual custom border-color
+     * payloads until the sampler ABI carries those values.
+     */
+    return true;
 }
 
 static bool pdocker_supports_border_color_swizzle_transport(void) {
-    return false;
+    /*
+     * VK_EXT_border_color_swizzle depends on VK_EXT_custom_border_color.  The
+     * bridge accepts only semantic identity component mapping with srgb=false,
+     * so no executor ABI field is required yet.
+     */
+    return true;
 }
 
 static bool pdocker_supports_sampler_ycbcr_conversion_transport(void) {

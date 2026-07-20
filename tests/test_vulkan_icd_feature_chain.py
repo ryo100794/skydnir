@@ -3155,7 +3155,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
 
-    def test_sampler_border_color_pnext_is_false_only_and_not_advertised_without_transport(self):
+    def test_sampler_border_color_extensions_are_advertised_with_false_features(self):
         source = textwrap.dedent(
             f"""
             #include <stdint.h>
@@ -3191,14 +3191,14 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
 
             int main(void) {{
             #if defined(VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME) && defined(VK_EXT_BORDER_COLOR_SWIZZLE_EXTENSION_NAME)
-                if (device_extension_advertised_name(VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME)) return 2;
-                if (device_extension_advertised_name(VK_EXT_BORDER_COLOR_SWIZZLE_EXTENSION_NAME)) return 3;
+                if (!device_extension_advertised_name(VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME)) return 2;
+                if (!device_extension_advertised_name(VK_EXT_BORDER_COLOR_SWIZZLE_EXTENSION_NAME)) return 3;
                 uint32_t count = 64;
                 VkExtensionProperties extensions[64];
                 memset(extensions, 0, sizeof(extensions));
                 if (vkEnumerateDeviceExtensionProperties((VkPhysicalDevice)physical_device_for_instance(NULL), NULL, &count, extensions) != VK_SUCCESS) return 4;
-                if (extension_seen(extensions, count, VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME)) return 5;
-                if (extension_seen(extensions, count, VK_EXT_BORDER_COLOR_SWIZZLE_EXTENSION_NAME)) return 6;
+                if (!extension_seen(extensions, count, VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME)) return 5;
+                if (!extension_seen(extensions, count, VK_EXT_BORDER_COLOR_SWIZZLE_EXTENSION_NAME)) return 6;
 
                 const char *enabled[] = {{
                     VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME,
@@ -3209,7 +3209,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
                 create_info.enabledExtensionCount = 2;
                 create_info.ppEnabledExtensionNames = enabled;
-                if (validate_device_extensions(&create_info) != VK_ERROR_EXTENSION_NOT_PRESENT) return 7;
+                if (validate_device_extensions(&create_info) != VK_SUCCESS) return 7;
 
                 VkPhysicalDeviceCustomBorderColorFeaturesEXT custom_features;
                 VkPhysicalDeviceBorderColorSwizzleFeaturesEXT swizzle_features;

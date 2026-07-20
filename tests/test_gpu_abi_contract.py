@@ -14864,7 +14864,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("decl->pipeline_layout_id != meta->layout_id", validate_body)
         self.assertIn("(covered_stage_flags & meta->stage_flags) != meta->stage_flags", validate_body)
 
-    def test_vulkan_sampler_border_color_noop_pnext_is_false_only(self):
+    def test_vulkan_sampler_border_color_extensions_are_false_feature_negotiation(self):
         icd = VULKAN_ICD.read_text()
         sampler_validate_body = c_function_body(icd, "validate_sampler_create_info_for_transport")
         for marker in [
@@ -14904,6 +14904,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("if (pdocker_supports_custom_border_color_transport())", collector_body)
         self.assertIn("pdocker_supports_border_color_swizzle_transport", icd)
         self.assertIn("if (pdocker_supports_border_color_swizzle_transport())", collector_body)
+        self.assertIn("return true;", c_function_body(icd, "pdocker_supports_custom_border_color_transport"))
+        self.assertIn("return true;", c_function_body(icd, "pdocker_supports_border_color_swizzle_transport"))
         for marker in [
             "VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME",
             "VK_EXT_CUSTOM_BORDER_COLOR_SPEC_VERSION",
