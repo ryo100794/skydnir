@@ -3194,18 +3194,30 @@ class GpuAbiContractTest(unittest.TestCase):
         icd = VULKAN_ICD.read_text()
         for marker in [
             "typedef struct {\n    uint32_t color_attachment_count;",
+            "uint32_t input_attachment_count;",
+            "uint32_t preserve_attachment_count;",
+            "uint32_t input_attachments[PDOCKER_VK_MAX_STORAGE_BUFFERS];",
+            "VkImageLayout input_layouts[PDOCKER_VK_MAX_STORAGE_BUFFERS];",
+            "VkImageAspectFlags input_aspect_masks[PDOCKER_VK_MAX_STORAGE_BUFFERS];",
             "uint32_t color_attachments[PDOCKER_VK_MAX_STORAGE_BUFFERS];",
             "VkImageLayout color_layouts[PDOCKER_VK_MAX_STORAGE_BUFFERS];",
+            "VkImageAspectFlags color_aspect_masks[PDOCKER_VK_MAX_STORAGE_BUFFERS];",
             "uint32_t resolve_attachments[PDOCKER_VK_MAX_STORAGE_BUFFERS];",
             "VkImageLayout resolve_layouts[PDOCKER_VK_MAX_STORAGE_BUFFERS];",
+            "VkImageAspectFlags resolve_aspect_masks[PDOCKER_VK_MAX_STORAGE_BUFFERS];",
+            "uint32_t preserve_attachments[PDOCKER_VK_MAX_STORAGE_BUFFERS];",
             "bool has_depth_stencil_attachment;",
             "uint32_t depth_stencil_attachment;",
             "VkImageLayout depth_stencil_layout;",
+            "VkImageAspectFlags depth_stencil_aspect_mask;",
             "bool has_depth_stencil_resolve_attachment;",
             "uint32_t depth_stencil_resolve_attachment;",
             "VkImageLayout depth_stencil_resolve_layout;",
+            "VkImageAspectFlags depth_stencil_resolve_aspect_mask;",
             "VkResolveModeFlagBits depth_resolve_mode;",
             "VkResolveModeFlagBits stencil_resolve_mode;",
+            "VkSubpassDescriptionFlags flags;",
+            "VkPipelineBindPoint pipeline_bind_point;",
             "uint32_t view_mask;",
             "PdockerVkSubpassState subpasses[PDOCKER_VK_MAX_STORAGE_BUFFERS];",
             "bool subpass_overflow;",
@@ -3230,6 +3242,10 @@ class GpuAbiContractTest(unittest.TestCase):
             "view->image->layout_mixed",
             "capture_render_pass_dependencies(",
             "capture_render_pass_dependencies2(",
+            "capture_render_pass_dependency_exact",
+            "PdockerVkRenderPassDependencyExactState dependencies[PDOCKER_VK_MAX_RENDER_PASS_DEPENDENCIES];",
+            "uint32_t multiview_correlation_masks[PDOCKER_VK_MAX_STORAGE_BUFFERS];",
+            "bool exact_capture_overflow;",
             "capture_single_subpass_dependency",
             "VK_SUBPASS_EXTERNAL && dst_subpass == 0",
             "src_subpass != VK_SUBPASS_EXTERNAL && dst_subpass == VK_SUBPASS_EXTERNAL",
@@ -3271,6 +3287,64 @@ class GpuAbiContractTest(unittest.TestCase):
             "pdocker_vk_format_is_depth_stencil",
         ]:
             self.assertIn(marker, icd)
+
+    def test_vulkan_render_pass_exact_capture_keeps_original_create_info_fields(self):
+        icd = VULKAN_ICD.read_text()
+        capture_body = c_function_body(icd, "capture_render_pass_subpass_state")
+        capture2_body = c_function_body(icd, "capture_render_pass_subpass_state2")
+        deps_body = c_function_body(icd, "capture_render_pass_dependencies")
+        deps2_body = c_function_body(icd, "capture_render_pass_dependencies2")
+        deps_exact_body = c_function_body(icd, "capture_render_pass_dependency_exact")
+        create_body = c_function_body(icd, "vkCreateRenderPass")
+        create2_body = c_function_body(icd, "vkCreateRenderPass2")
+        for marker in [
+            "dst->flags = flags;",
+            "dst->pipeline_bind_point = pipeline_bind_point;",
+            "dst->input_attachment_count = input_attachment_count;",
+            "dst->input_attachments[i] = input->attachment;",
+            "dst->input_layouts[i] = input->layout;",
+            "dst->input_aspect_masks[i] = input_aspect_masks ? input_aspect_masks[i] : 0;",
+            "dst->color_aspect_masks[i] = color_aspect_masks ? color_aspect_masks[i] : 0;",
+            "dst->resolve_aspect_masks[i] = resolve_aspect_masks ? resolve_aspect_masks[i] : 0;",
+            "dst->preserve_attachment_count = preserve_attachment_count;",
+            "dst->preserve_attachments[i] = preserve_attachments[i];",
+            "dst->depth_stencil_aspect_mask = depth_stencil_aspect_mask;",
+            "rp->exact_capture_overflow = true;",
+        ]:
+            self.assertIn(marker, capture_body)
+        for marker in [
+            "subpass->pInputAttachments[i].aspectMask",
+            "subpass->pColorAttachments[i].aspectMask",
+            "subpass->pResolveAttachments[i].aspectMask",
+            "subpass->pDepthStencilAttachment->aspectMask",
+            "dst->depth_stencil_resolve_aspect_mask = resolve_ref->aspectMask;",
+            "subpass->pPreserveAttachments ? preserve_refs : NULL",
+        ]:
+            self.assertIn(marker, capture2_body)
+        for marker in [
+            "capture_render_pass_dependency_exact(",
+            "dst->dependency_flags = dependency_flags;",
+            "dst->view_offset = view_offset;",
+            "dst->has_view_offset = has_view_offset;",
+            "rp->dependency_count = dependency_index + 1u;",
+            "multiview->pViewOffsets[i]",
+        ]:
+            self.assertIn(marker, deps_body + deps2_body + deps_exact_body)
+        for marker in [
+            "rp->flags = pCreateInfo->flags;",
+            "rp->attachments[a].flags = src->flags;",
+            "rp->multiview_correlation_mask_count = multiview->correlationMaskCount;",
+            "rp->multiview_correlation_masks[i] = multiview->pCorrelationMasks[i];",
+            "capture_render_pass_dependencies(\n        rp, pCreateInfo->dependencyCount, pCreateInfo->pDependencies, multiview)",
+        ]:
+            self.assertIn(marker, create_body)
+        for marker in [
+            "rp->flags = pCreateInfo->flags;",
+            "rp->attachments[a].flags = src->flags;",
+            "bool render_pass2_pnext_supported = render_pass_create2_pnext_noop(",
+            "!render_pass2_pnext_supported",
+        ]:
+            self.assertIn(marker, create2_body)
 
     def test_vulkan_dynamic_rendering_attachment_records_view_snapshot(self):
         icd = VULKAN_ICD.read_text()
@@ -14041,7 +14115,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("default:", helper_body)
         self.assertIn("return false;", helper_body)
         self.assertIn("const VkRenderPassMultiviewCreateInfo *multiview = NULL;", create_body)
-        self.assertIn("!render_pass_create_pnext_supported(pCreateInfo, &multiview)", create_body)
+        self.assertIn("bool render_pass_pnext_supported = render_pass_create_pnext_supported(pCreateInfo, &multiview)", create_body)
+        self.assertIn("!render_pass_pnext_supported", create_body)
         self.assertIn("multiview->pViewMasks[sp]", create_body)
         self.assertIn("view_mask);", create_body)
         self.assertIn("rp->subpass_overflow = true;", create_body)

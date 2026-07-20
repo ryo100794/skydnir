@@ -384,6 +384,7 @@ PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_surface, VkSurfa
 PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_swapchain, VkSwapchainKHR, PdockerVkSwapchain)
 
 #define PDOCKER_VK_MAX_STORAGE_BUFFERS 16
+#define PDOCKER_VK_MAX_RENDER_PASS_DEPENDENCIES 32u
 #define PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS
 #define PDOCKER_VK_MAX_DESCRIPTOR_BINDING_SLOTS PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS
 #define PDOCKER_VK_MAX_DESCRIPTOR_SETS 8
@@ -1157,22 +1158,35 @@ typedef struct {
     VkAttachmentStoreOp stencil_store_op;
     VkImageLayout initial_layout;
     VkImageLayout final_layout;
+    VkAttachmentDescriptionFlags flags;
 } PdockerVkRenderPassAttachmentState;
 
 typedef struct {
     uint32_t color_attachment_count;
+    uint32_t input_attachment_count;
+    uint32_t preserve_attachment_count;
+    uint32_t input_attachments[PDOCKER_VK_MAX_STORAGE_BUFFERS];
+    VkImageLayout input_layouts[PDOCKER_VK_MAX_STORAGE_BUFFERS];
+    VkImageAspectFlags input_aspect_masks[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     uint32_t color_attachments[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     VkImageLayout color_layouts[PDOCKER_VK_MAX_STORAGE_BUFFERS];
+    VkImageAspectFlags color_aspect_masks[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     uint32_t resolve_attachments[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     VkImageLayout resolve_layouts[PDOCKER_VK_MAX_STORAGE_BUFFERS];
+    VkImageAspectFlags resolve_aspect_masks[PDOCKER_VK_MAX_STORAGE_BUFFERS];
+    uint32_t preserve_attachments[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     bool has_depth_stencil_attachment;
     uint32_t depth_stencil_attachment;
     VkImageLayout depth_stencil_layout;
+    VkImageAspectFlags depth_stencil_aspect_mask;
     bool has_depth_stencil_resolve_attachment;
     uint32_t depth_stencil_resolve_attachment;
     VkImageLayout depth_stencil_resolve_layout;
+    VkImageAspectFlags depth_stencil_resolve_aspect_mask;
     VkResolveModeFlagBits depth_resolve_mode;
     VkResolveModeFlagBits stencil_resolve_mode;
+    VkSubpassDescriptionFlags flags;
+    VkPipelineBindPoint pipeline_bind_point;
     uint32_t view_mask;
     bool unsupported;
 } PdockerVkSubpassState;
@@ -1184,6 +1198,18 @@ typedef struct {
     VkPipelineStageFlags2 dst_stage_mask;
     VkAccessFlags2 dst_access_mask;
 } PdockerVkSubpassDependencyState;
+
+typedef struct {
+    uint32_t src_subpass;
+    uint32_t dst_subpass;
+    VkDependencyFlags dependency_flags;
+    VkPipelineStageFlags2 src_stage_mask;
+    VkAccessFlags2 src_access_mask;
+    VkPipelineStageFlags2 dst_stage_mask;
+    VkAccessFlags2 dst_access_mask;
+    int32_t view_offset;
+    bool has_view_offset;
+} PdockerVkRenderPassDependencyExactState;
 
 typedef struct {
     PdockerVkImageView *image_view;
@@ -1202,15 +1228,21 @@ typedef struct {
 struct PdockerVkRenderPass {
     uint64_t object_id;
     uint64_t owner_device_id;
+    VkRenderPassCreateFlags flags;
     uint32_t attachment_count;
     uint32_t subpass_count;
+    uint32_t dependency_count;
+    uint32_t multiview_correlation_mask_count;
     PdockerVkRenderPassAttachmentState attachments[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     PdockerVkSubpassState subpasses[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     PdockerVkSubpassDependencyState begin_dependency;
     PdockerVkSubpassDependencyState subpass_dependencies[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     PdockerVkSubpassDependencyState end_dependency;
+    PdockerVkRenderPassDependencyExactState dependencies[PDOCKER_VK_MAX_RENDER_PASS_DEPENDENCIES];
+    uint32_t multiview_correlation_masks[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     bool attachment_overflow;
     bool subpass_overflow;
+    bool exact_capture_overflow;
     bool destroyed;
     uint64_t generation;
     struct PdockerVkRenderPass *next;
@@ -28795,12 +28827,58 @@ static bool capture_single_subpass_dependency(
     return false;
 }
 
+static bool capture_render_pass_dependency_exact(
+        PdockerVkRenderPass *rp,
+        uint32_t dependency_index,
+        uint32_t src_subpass,
+        uint32_t dst_subpass,
+        VkPipelineStageFlags2 src_stage_mask,
+        VkAccessFlags2 src_access_mask,
+        VkPipelineStageFlags2 dst_stage_mask,
+        VkAccessFlags2 dst_access_mask,
+        VkDependencyFlags dependency_flags,
+        int32_t view_offset,
+        bool has_view_offset) {
+    if (!rp || dependency_index >= PDOCKER_VK_MAX_RENDER_PASS_DEPENDENCIES) return false;
+    PdockerVkRenderPassDependencyExactState *dst = &rp->dependencies[dependency_index];
+    dst->src_subpass = src_subpass;
+    dst->dst_subpass = dst_subpass;
+    dst->src_stage_mask = src_stage_mask;
+    dst->src_access_mask = src_access_mask;
+    dst->dst_stage_mask = dst_stage_mask;
+    dst->dst_access_mask = dst_access_mask;
+    dst->dependency_flags = dependency_flags;
+    dst->view_offset = view_offset;
+    dst->has_view_offset = has_view_offset;
+    if (dependency_index >= rp->dependency_count) {
+        rp->dependency_count = dependency_index + 1u;
+    }
+    return true;
+}
+
 static void capture_render_pass_dependencies(
         PdockerVkRenderPass *rp,
         uint32_t dependency_count,
-        const VkSubpassDependency *dependencies) {
+        const VkSubpassDependency *dependencies,
+        const VkRenderPassMultiviewCreateInfo *multiview) {
+    if (rp && dependency_count > PDOCKER_VK_MAX_RENDER_PASS_DEPENDENCIES) {
+        rp->exact_capture_overflow = true;
+    }
     for (uint32_t i = 0; rp && dependencies && i < dependency_count; ++i) {
         const VkSubpassDependency *dep = &dependencies[i];
+        const bool has_view_offset = multiview && i < multiview->dependencyCount && multiview->pViewOffsets;
+        const int32_t view_offset = has_view_offset ? multiview->pViewOffsets[i] : 0;
+        if (!capture_render_pass_dependency_exact(
+                rp, i, dep->srcSubpass, dep->dstSubpass,
+                (VkPipelineStageFlags2)dep->srcStageMask,
+                (VkAccessFlags2)dep->srcAccessMask,
+                (VkPipelineStageFlags2)dep->dstStageMask,
+                (VkAccessFlags2)dep->dstAccessMask,
+                dep->dependencyFlags,
+                view_offset,
+                has_view_offset)) {
+            rp->exact_capture_overflow = true;
+        }
         if (!capture_single_subpass_dependency(
                 rp, dep->srcSubpass, dep->dstSubpass,
                 (VkPipelineStageFlags2)dep->srcStageMask,
@@ -28813,6 +28891,7 @@ static void capture_render_pass_dependencies(
     }
     if (rp && dependency_count > 0 && !dependencies) {
         rp->subpass_overflow = true;
+        rp->exact_capture_overflow = true;
     }
 }
 
@@ -28820,8 +28899,25 @@ static void capture_render_pass_dependencies2(
         PdockerVkRenderPass *rp,
         uint32_t dependency_count,
         const VkSubpassDependency2 *dependencies) {
+    if (rp && dependency_count > PDOCKER_VK_MAX_RENDER_PASS_DEPENDENCIES) {
+        rp->exact_capture_overflow = true;
+    }
     for (uint32_t i = 0; rp && dependencies && i < dependency_count; ++i) {
         const VkSubpassDependency2 *dep = &dependencies[i];
+        if (!capture_render_pass_dependency_exact(
+                rp, i, dep->srcSubpass, dep->dstSubpass,
+                (VkPipelineStageFlags2)dep->srcStageMask,
+                (VkAccessFlags2)dep->srcAccessMask,
+                (VkPipelineStageFlags2)dep->dstStageMask,
+                (VkAccessFlags2)dep->dstAccessMask,
+                dep->dependencyFlags,
+                dep->viewOffset,
+                true)) {
+            rp->exact_capture_overflow = true;
+        }
+        if (dep->pNext) {
+            rp->exact_capture_overflow = true;
+        }
         if (dep->pNext ||
             !capture_single_subpass_dependency(
                 rp, dep->srcSubpass, dep->dstSubpass,
@@ -28835,6 +28931,7 @@ static void capture_render_pass_dependencies2(
     }
     if (rp && dependency_count > 0 && !dependencies) {
         rp->subpass_overflow = true;
+        rp->exact_capture_overflow = true;
     }
 }
 
@@ -29388,26 +29485,61 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyPipeline(
 static void capture_render_pass_subpass_state(
         PdockerVkRenderPass *rp,
         uint32_t subpass_index,
+        VkSubpassDescriptionFlags flags,
+        VkPipelineBindPoint pipeline_bind_point,
+        uint32_t input_attachment_count,
+        const VkAttachmentReference *input_attachments,
+        const VkImageAspectFlags *input_aspect_masks,
         uint32_t color_attachment_count,
         const VkAttachmentReference *color_attachments,
+        const VkImageAspectFlags *color_aspect_masks,
         const VkAttachmentReference *resolve_attachments,
+        const VkImageAspectFlags *resolve_aspect_masks,
         const VkAttachmentReference *depth_stencil_attachment,
-        uint32_t input_attachment_count,
+        VkImageAspectFlags depth_stencil_aspect_mask,
         uint32_t preserve_attachment_count,
+        const uint32_t *preserve_attachments,
         uint32_t view_mask) {
     if (!rp || subpass_index >= PDOCKER_VK_MAX_STORAGE_BUFFERS) return;
     PdockerVkSubpassState *dst = &rp->subpasses[subpass_index];
     memset(dst, 0, sizeof(*dst));
+    dst->flags = flags;
+    dst->pipeline_bind_point = pipeline_bind_point;
     dst->view_mask = view_mask;
-    if (input_attachment_count != 0 || preserve_attachment_count != 0) {
+    if (flags != 0 || pipeline_bind_point != VK_PIPELINE_BIND_POINT_GRAPHICS ||
+        input_attachment_count != 0 || preserve_attachment_count != 0) {
+        /* These fields are now retained for pass-through, but the old
+         * dynamic-rendering normalization path cannot replay them exactly. */
         dst->unsupported = true;
+    }
+    if (input_attachment_count > PDOCKER_VK_MAX_STORAGE_BUFFERS) {
+        dst->unsupported = true;
+        rp->exact_capture_overflow = true;
+        input_attachment_count = PDOCKER_VK_MAX_STORAGE_BUFFERS;
+    }
+    if (input_attachment_count > 0 && !input_attachments) {
+        dst->unsupported = true;
+        rp->exact_capture_overflow = true;
+        input_attachment_count = 0;
+    }
+    dst->input_attachment_count = input_attachment_count;
+    for (uint32_t i = 0; i < input_attachment_count; ++i) {
+        const VkAttachmentReference *input = &input_attachments[i];
+        dst->input_attachments[i] = input->attachment;
+        dst->input_layouts[i] = input->layout;
+        dst->input_aspect_masks[i] = input_aspect_masks ? input_aspect_masks[i] : 0;
+        if (input->attachment != VK_ATTACHMENT_UNUSED && input->attachment >= rp->attachment_count) {
+            dst->unsupported = true;
+        }
     }
     if (color_attachment_count > PDOCKER_VK_MAX_STORAGE_BUFFERS) {
         dst->unsupported = true;
+        rp->exact_capture_overflow = true;
         color_attachment_count = PDOCKER_VK_MAX_STORAGE_BUFFERS;
     }
     if (color_attachment_count > 0 && !color_attachments) {
         dst->unsupported = true;
+        rp->exact_capture_overflow = true;
         color_attachment_count = 0;
     }
     dst->color_attachment_count = color_attachment_count;
@@ -29415,8 +29547,10 @@ static void capture_render_pass_subpass_state(
         const VkAttachmentReference *color = &color_attachments[i];
         dst->color_attachments[i] = color->attachment;
         dst->color_layouts[i] = color->layout;
+        dst->color_aspect_masks[i] = color_aspect_masks ? color_aspect_masks[i] : 0;
         dst->resolve_attachments[i] = VK_ATTACHMENT_UNUSED;
         dst->resolve_layouts[i] = VK_IMAGE_LAYOUT_UNDEFINED;
+        dst->resolve_aspect_masks[i] = 0;
         if (color->attachment != VK_ATTACHMENT_UNUSED &&
             (color->attachment >= rp->attachment_count ||
              pdocker_vk_format_is_depth_stencil(rp->attachments[color->attachment].format))) {
@@ -29425,6 +29559,7 @@ static void capture_render_pass_subpass_state(
         if (resolve_attachments && resolve_attachments[i].attachment != VK_ATTACHMENT_UNUSED) {
             dst->resolve_attachments[i] = resolve_attachments[i].attachment;
             dst->resolve_layouts[i] = resolve_attachments[i].layout;
+            dst->resolve_aspect_masks[i] = resolve_aspect_masks ? resolve_aspect_masks[i] : 0;
             if (color->attachment == VK_ATTACHMENT_UNUSED ||
                 resolve_attachments[i].attachment >= rp->attachment_count ||
                 pdocker_vk_format_is_depth_stencil(rp->attachments[resolve_attachments[i].attachment].format)) {
@@ -29432,11 +29567,30 @@ static void capture_render_pass_subpass_state(
             }
         }
     }
+    if (preserve_attachment_count > PDOCKER_VK_MAX_STORAGE_BUFFERS) {
+        dst->unsupported = true;
+        rp->exact_capture_overflow = true;
+        preserve_attachment_count = PDOCKER_VK_MAX_STORAGE_BUFFERS;
+    }
+    if (preserve_attachment_count > 0 && !preserve_attachments) {
+        dst->unsupported = true;
+        rp->exact_capture_overflow = true;
+        preserve_attachment_count = 0;
+    }
+    dst->preserve_attachment_count = preserve_attachment_count;
+    for (uint32_t i = 0; i < preserve_attachment_count; ++i) {
+        dst->preserve_attachments[i] = preserve_attachments[i];
+        if (preserve_attachments[i] != VK_ATTACHMENT_UNUSED &&
+            preserve_attachments[i] >= rp->attachment_count) {
+            dst->unsupported = true;
+        }
+    }
     if (depth_stencil_attachment &&
         depth_stencil_attachment->attachment != VK_ATTACHMENT_UNUSED) {
         dst->has_depth_stencil_attachment = true;
         dst->depth_stencil_attachment = depth_stencil_attachment->attachment;
         dst->depth_stencil_layout = depth_stencil_attachment->layout;
+        dst->depth_stencil_aspect_mask = depth_stencil_aspect_mask;
         if (depth_stencil_attachment->attachment >= rp->attachment_count ||
             !pdocker_vk_format_is_depth_stencil(
                 rp->attachments[depth_stencil_attachment->attachment].format)) {
@@ -29445,9 +29599,11 @@ static void capture_render_pass_subpass_state(
     } else {
         dst->depth_stencil_attachment = VK_ATTACHMENT_UNUSED;
         dst->depth_stencil_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+        dst->depth_stencil_aspect_mask = 0;
     }
     dst->depth_stencil_resolve_attachment = VK_ATTACHMENT_UNUSED;
     dst->depth_stencil_resolve_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+    dst->depth_stencil_resolve_aspect_mask = 0;
     dst->depth_resolve_mode = VK_RESOLVE_MODE_NONE;
     dst->stencil_resolve_mode = VK_RESOLVE_MODE_NONE;
 }
@@ -29458,16 +29614,28 @@ static void capture_render_pass_subpass_state2(
         const VkSubpassDescription2 *subpass,
         bool render_pass_disallow_merging) {
     (void)render_pass_disallow_merging;
+    VkAttachmentReference input_refs[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     VkAttachmentReference color_refs[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     VkAttachmentReference resolve_refs[PDOCKER_VK_MAX_STORAGE_BUFFERS];
+    uint32_t preserve_refs[PDOCKER_VK_MAX_STORAGE_BUFFERS];
+    VkImageAspectFlags input_aspects[PDOCKER_VK_MAX_STORAGE_BUFFERS];
+    VkImageAspectFlags color_aspects[PDOCKER_VK_MAX_STORAGE_BUFFERS];
+    VkImageAspectFlags resolve_aspects[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     VkAttachmentReference depth_stencil_ref;
+    VkImageAspectFlags depth_stencil_aspect = 0;
+    memset(input_refs, 0, sizeof(input_refs));
     memset(color_refs, 0, sizeof(color_refs));
     memset(resolve_refs, 0, sizeof(resolve_refs));
+    memset(preserve_refs, 0, sizeof(preserve_refs));
+    memset(input_aspects, 0, sizeof(input_aspects));
+    memset(color_aspects, 0, sizeof(color_aspects));
+    memset(resolve_aspects, 0, sizeof(resolve_aspects));
     memset(&depth_stencil_ref, 0, sizeof(depth_stencil_ref));
     depth_stencil_ref.attachment = VK_ATTACHMENT_UNUSED;
     if (!subpass) {
         if (rp && subpass_index < PDOCKER_VK_MAX_STORAGE_BUFFERS) {
             rp->subpasses[subpass_index].unsupported = true;
+            rp->exact_capture_overflow = true;
         }
         return;
     }
@@ -29482,10 +29650,12 @@ static void capture_render_pass_subpass_state2(
         if (chain->sType == VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_DEPTH_STENCIL_RESOLVE) {
             if (depth_stencil_resolve) {
                 unsupported = true;
+                if (rp) rp->exact_capture_overflow = true;
             }
             depth_stencil_resolve = (const VkSubpassDescriptionDepthStencilResolve *)chain;
             if (depth_stencil_resolve->pNext) {
                 unsupported = true;
+                if (rp) rp->exact_capture_overflow = true;
             }
 #ifdef VK_EXT_subpass_merge_feedback
         } else if (chain->sType == VK_STRUCTURE_TYPE_RENDER_PASS_SUBPASS_FEEDBACK_CREATE_INFO_EXT) {
@@ -29493,55 +29663,99 @@ static void capture_render_pass_subpass_state2(
                 (const VkRenderPassSubpassFeedbackCreateInfoEXT *)chain;
             if (subpass_feedback) {
                 unsupported = true;
+                if (rp) rp->exact_capture_overflow = true;
             } else {
                 subpass_feedback = feedback;
             }
 #endif
         } else {
             unsupported = true;
+            if (rp) rp->exact_capture_overflow = true;
+        }
+    }
+    uint32_t input_count = subpass->inputAttachmentCount;
+    uint32_t input_copy_count = clamp_u32(input_count, PDOCKER_VK_MAX_STORAGE_BUFFERS);
+    for (uint32_t i = 0; i < input_copy_count; ++i) {
+        if (subpass->pInputAttachments) {
+            if (subpass->pInputAttachments[i].pNext) {
+                unsupported = true;
+                if (rp) rp->exact_capture_overflow = true;
+            }
+            input_refs[i].attachment = subpass->pInputAttachments[i].attachment;
+            input_refs[i].layout = subpass->pInputAttachments[i].layout;
+            input_aspects[i] = subpass->pInputAttachments[i].aspectMask;
+        } else {
+            input_refs[i].attachment = VK_ATTACHMENT_UNUSED;
+            input_refs[i].layout = VK_IMAGE_LAYOUT_UNDEFINED;
         }
     }
     uint32_t color_count = subpass->colorAttachmentCount;
-    uint32_t copy_count = clamp_u32(color_count, PDOCKER_VK_MAX_STORAGE_BUFFERS);
-    for (uint32_t i = 0; i < copy_count; ++i) {
+    uint32_t color_copy_count = clamp_u32(color_count, PDOCKER_VK_MAX_STORAGE_BUFFERS);
+    for (uint32_t i = 0; i < color_copy_count; ++i) {
         if (subpass->pColorAttachments) {
-            if (subpass->pColorAttachments[i].pNext ||
-                subpass->pColorAttachments[i].aspectMask != 0) {
+            if (subpass->pColorAttachments[i].pNext) {
+                unsupported = true;
+                if (rp) rp->exact_capture_overflow = true;
+            }
+            if (subpass->pColorAttachments[i].aspectMask != 0) {
                 unsupported = true;
             }
             color_refs[i].attachment = subpass->pColorAttachments[i].attachment;
             color_refs[i].layout = subpass->pColorAttachments[i].layout;
+            color_aspects[i] = subpass->pColorAttachments[i].aspectMask;
         } else {
             color_refs[i].attachment = VK_ATTACHMENT_UNUSED;
             color_refs[i].layout = VK_IMAGE_LAYOUT_UNDEFINED;
         }
         if (subpass->pResolveAttachments) {
-            if (subpass->pResolveAttachments[i].pNext ||
-                subpass->pResolveAttachments[i].aspectMask != 0) {
+            if (subpass->pResolveAttachments[i].pNext) {
+                unsupported = true;
+                if (rp) rp->exact_capture_overflow = true;
+            }
+            if (subpass->pResolveAttachments[i].aspectMask != 0) {
                 unsupported = true;
             }
             resolve_refs[i].attachment = subpass->pResolveAttachments[i].attachment;
             resolve_refs[i].layout = subpass->pResolveAttachments[i].layout;
+            resolve_aspects[i] = subpass->pResolveAttachments[i].aspectMask;
         } else {
             resolve_refs[i].attachment = VK_ATTACHMENT_UNUSED;
             resolve_refs[i].layout = VK_IMAGE_LAYOUT_UNDEFINED;
         }
     }
+    uint32_t preserve_count = subpass->preserveAttachmentCount;
+    uint32_t preserve_copy_count = clamp_u32(preserve_count, PDOCKER_VK_MAX_STORAGE_BUFFERS);
+    for (uint32_t i = 0; i < preserve_copy_count; ++i) {
+        preserve_refs[i] = subpass->pPreserveAttachments ? subpass->pPreserveAttachments[i] : VK_ATTACHMENT_UNUSED;
+    }
     if (subpass->pDepthStencilAttachment) {
-        if (subpass->pDepthStencilAttachment->pNext ||
-            subpass->pDepthStencilAttachment->aspectMask != 0) {
+        if (subpass->pDepthStencilAttachment->pNext) {
+            unsupported = true;
+            if (rp) rp->exact_capture_overflow = true;
+        }
+        if (subpass->pDepthStencilAttachment->aspectMask != 0) {
             unsupported = true;
         }
         depth_stencil_ref.attachment = subpass->pDepthStencilAttachment->attachment;
         depth_stencil_ref.layout = subpass->pDepthStencilAttachment->layout;
+        depth_stencil_aspect = subpass->pDepthStencilAttachment->aspectMask;
     }
     capture_render_pass_subpass_state(
-        rp, subpass_index, color_count,
+        rp, subpass_index,
+        subpass->flags,
+        subpass->pipelineBindPoint,
+        input_count,
+        subpass->pInputAttachments ? input_refs : NULL,
+        subpass->pInputAttachments ? input_aspects : NULL,
+        color_count,
         subpass->pColorAttachments ? color_refs : NULL,
+        subpass->pColorAttachments ? color_aspects : NULL,
         subpass->pResolveAttachments ? resolve_refs : NULL,
+        subpass->pResolveAttachments ? resolve_aspects : NULL,
         subpass->pDepthStencilAttachment ? &depth_stencil_ref : NULL,
-        subpass->inputAttachmentCount,
-        subpass->preserveAttachmentCount,
+        depth_stencil_aspect,
+        preserve_count,
+        subpass->pPreserveAttachments ? preserve_refs : NULL,
         subpass->viewMask);
     if (depth_stencil_resolve && rp && subpass_index < PDOCKER_VK_MAX_STORAGE_BUFFERS) {
         PdockerVkSubpassState *dst = &rp->subpasses[subpass_index];
@@ -29557,9 +29771,13 @@ static void capture_render_pass_subpass_state2(
         if (depth_stencil_resolve_requested) {
             unsupported = true;
         }
+        if (resolve_ref && resolve_ref->pNext) {
+            unsupported = true;
+            rp->exact_capture_overflow = true;
+        }
         if (resolve_ref && resolve_ref->attachment != VK_ATTACHMENT_UNUSED) {
             const bool resolve_ref_valid =
-                !resolve_ref->pNext && resolve_ref->aspectMask == 0 &&
+                !resolve_ref->pNext &&
                 resolve_ref->attachment < rp->attachment_count &&
                 pdocker_vk_format_is_depth_stencil(
                     rp->attachments[resolve_ref->attachment].format);
@@ -29570,6 +29788,7 @@ static void capture_render_pass_subpass_state2(
                 dst->has_depth_stencil_resolve_attachment = true;
                 dst->depth_stencil_resolve_attachment = resolve_ref->attachment;
                 dst->depth_stencil_resolve_layout = resolve_ref->layout;
+                dst->depth_stencil_resolve_aspect_mask = resolve_ref->aspectMask;
                 dst->depth_resolve_mode = depth_resolve_mode;
                 dst->stencil_resolve_mode = stencil_resolve_mode;
             }
@@ -29801,19 +30020,25 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateRenderPass(
     }
     PdockerVkRenderPass *rp = pdocker_alloc_handle(sizeof(*rp));
     if (!rp) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    rp->flags = pCreateInfo->flags;
     rp->attachment_count = pCreateInfo->attachmentCount;
     rp->subpass_count = pCreateInfo->subpassCount;
     const VkRenderPassMultiviewCreateInfo *multiview = NULL;
-    if (pCreateInfo->flags != 0 ||
-        !render_pass_create_pnext_supported(pCreateInfo, &multiview)) {
+    bool render_pass_pnext_supported = render_pass_create_pnext_supported(pCreateInfo, &multiview);
+    if (pCreateInfo->flags != 0 || !render_pass_pnext_supported) {
         rp->subpass_overflow = true;
+    }
+    if (!render_pass_pnext_supported) {
+        rp->exact_capture_overflow = true;
     }
     if (rp->attachment_count > PDOCKER_VK_MAX_STORAGE_BUFFERS) {
         rp->attachment_overflow = true;
+        rp->exact_capture_overflow = true;
         rp->attachment_count = PDOCKER_VK_MAX_STORAGE_BUFFERS;
     }
     if (rp->attachment_count > 0 && !pCreateInfo->pAttachments) {
         rp->attachment_overflow = true;
+        rp->exact_capture_overflow = true;
         rp->attachment_count = 0;
     }
     for (uint32_t a = 0; a < rp->attachment_count; ++a) {
@@ -29826,12 +30051,18 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateRenderPass(
         rp->attachments[a].stencil_store_op = src->stencilStoreOp;
         rp->attachments[a].initial_layout = src->initialLayout;
         rp->attachments[a].final_layout = src->finalLayout;
+        rp->attachments[a].flags = src->flags;
         if (src->flags != 0) {
             rp->subpass_overflow = true;
         }
     }
     if (pCreateInfo->subpassCount > PDOCKER_VK_MAX_STORAGE_BUFFERS) {
         rp->subpass_overflow = true;
+        rp->exact_capture_overflow = true;
+    }
+    if (pCreateInfo->subpassCount > 0 && !pCreateInfo->pSubpasses) {
+        rp->subpass_overflow = true;
+        rp->exact_capture_overflow = true;
     }
     uint32_t captured_subpasses =
         clamp_u32(pCreateInfo->subpassCount, PDOCKER_VK_MAX_STORAGE_BUFFERS);
@@ -29841,17 +30072,41 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateRenderPass(
         const uint32_t view_mask =
             (multiview && sp < multiview->subpassCount) ? multiview->pViewMasks[sp] : 0;
         capture_render_pass_subpass_state(
-            rp, sp, src ? src->colorAttachmentCount : 0,
-            src ? src->pColorAttachments : NULL,
-            src ? src->pResolveAttachments : NULL,
-            src ? src->pDepthStencilAttachment : NULL,
+            rp, sp,
+            src ? src->flags : 0,
+            src ? src->pipelineBindPoint : VK_PIPELINE_BIND_POINT_GRAPHICS,
             src ? src->inputAttachmentCount : 0,
+            src ? src->pInputAttachments : NULL,
+            NULL,
+            src ? src->colorAttachmentCount : 0,
+            src ? src->pColorAttachments : NULL,
+            NULL,
+            src ? src->pResolveAttachments : NULL,
+            NULL,
+            src ? src->pDepthStencilAttachment : NULL,
+            0,
             src ? src->preserveAttachmentCount : 0,
+            src ? src->pPreserveAttachments : NULL,
             view_mask);
         if (!src || src->flags != 0) rp->subpasses[sp].unsupported = true;
     }
+    if (multiview && multiview->correlationMaskCount > 0) {
+        rp->multiview_correlation_mask_count = multiview->correlationMaskCount;
+        if (rp->multiview_correlation_mask_count > PDOCKER_VK_MAX_STORAGE_BUFFERS) {
+            rp->exact_capture_overflow = true;
+            rp->multiview_correlation_mask_count = PDOCKER_VK_MAX_STORAGE_BUFFERS;
+        }
+        if (multiview->pCorrelationMasks) {
+            for (uint32_t i = 0; i < rp->multiview_correlation_mask_count; ++i) {
+                rp->multiview_correlation_masks[i] = multiview->pCorrelationMasks[i];
+            }
+        } else {
+            rp->exact_capture_overflow = true;
+            rp->multiview_correlation_mask_count = 0;
+        }
+    }
     capture_render_pass_dependencies(
-        rp, pCreateInfo->dependencyCount, pCreateInfo->pDependencies);
+        rp, pCreateInfo->dependencyCount, pCreateInfo->pDependencies, multiview);
     rp->object_id = next_vulkan_object_generation();
     rp->owner_device_id = owner_device_id;
     rp->generation = rp->object_id;
@@ -29877,22 +30132,28 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateRenderPass2(
     }
     PdockerVkRenderPass *rp = pdocker_alloc_handle(sizeof(*rp));
     if (!rp) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    rp->flags = pCreateInfo->flags;
     rp->attachment_count = pCreateInfo->attachmentCount;
     rp->subpass_count = pCreateInfo->subpassCount;
     bool disallow_subpass_merging = false;
-    if (pCreateInfo->flags != 0 ||
-        !render_pass_create2_pnext_noop(
-            pCreateInfo,
-            &disallow_subpass_merging,
-            device_enabled_extension_mask_from_handle(device))) {
+    bool render_pass2_pnext_supported = render_pass_create2_pnext_noop(
+        pCreateInfo,
+        &disallow_subpass_merging,
+        device_enabled_extension_mask_from_handle(device));
+    if (pCreateInfo->flags != 0 || !render_pass2_pnext_supported) {
         rp->subpass_overflow = true;
+    }
+    if (!render_pass2_pnext_supported) {
+        rp->exact_capture_overflow = true;
     }
     if (rp->attachment_count > PDOCKER_VK_MAX_STORAGE_BUFFERS) {
         rp->attachment_overflow = true;
+        rp->exact_capture_overflow = true;
         rp->attachment_count = PDOCKER_VK_MAX_STORAGE_BUFFERS;
     }
     if (rp->attachment_count > 0 && !pCreateInfo->pAttachments) {
         rp->attachment_overflow = true;
+        rp->exact_capture_overflow = true;
         rp->attachment_count = 0;
     }
     for (uint32_t a = 0; a < rp->attachment_count; ++a) {
@@ -29905,12 +30166,21 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateRenderPass2(
         rp->attachments[a].stencil_store_op = src->stencilStoreOp;
         rp->attachments[a].initial_layout = src->initialLayout;
         rp->attachments[a].final_layout = src->finalLayout;
+        rp->attachments[a].flags = src->flags;
+        if (src->pNext) {
+            rp->exact_capture_overflow = true;
+        }
         if (src->pNext || src->flags != 0) {
             rp->subpass_overflow = true;
         }
     }
     if (pCreateInfo->subpassCount > PDOCKER_VK_MAX_STORAGE_BUFFERS) {
         rp->subpass_overflow = true;
+        rp->exact_capture_overflow = true;
+    }
+    if (pCreateInfo->subpassCount > 0 && !pCreateInfo->pSubpasses) {
+        rp->subpass_overflow = true;
+        rp->exact_capture_overflow = true;
     }
     uint32_t captured_subpasses =
         clamp_u32(pCreateInfo->subpassCount, PDOCKER_VK_MAX_STORAGE_BUFFERS);

@@ -9,6 +9,29 @@ llama.cpp itself remains unmodified.
 
 ## Current Ground Truth
 
+### 2026-07-20 CPU/static render-pass exact-capture lane
+
+Render-pass pass-through now treats `VkRenderPass` creation metadata as source
+truth that must not be collapsed into the dynamic-rendering normalization model.
+The ICD keeps the old begin/subpass/end dependency aggregation for legacy
+normalization, but also records exact create-time data separately: render-pass
+and attachment flags, input/color/resolve/depth-stencil attachment reference
+aspect masks, preserve attachments, subpass flags and pipeline bind points,
+legacy multiview correlation masks, dependency order/src/dst/flags/masks, and
+RenderPass2 view offsets.
+
+This closes the producer-side data-loss gap that would otherwise make later
+classic render-pass transport impossible to implement correctly. It does not yet
+make strict classic render-pass replay complete: V6.32 can carry many core
+render-pass rows, but it still lacks exact depth/stencil resolve and full
+multiview sideband state. The next ABI step is an append-only V6.33 extension
+for subpass extras, depth/stencil resolve refs/modes, multiview/correlation
+side tables, and explicit attachment-ref ordinals where needed.
+
+This is generic Vulkan pass-through hardening. It does not change llama.cpp,
+Dockerfiles, models, prompts, shader bytes, runtime defaults, or executor
+arithmetic.
+
 ### 2026-07-20 CPU/static V6.32 classic render-pass transport foundation
 
 Next graphics ABI work is pinned to an append-only V6.32 sidecar for classic
