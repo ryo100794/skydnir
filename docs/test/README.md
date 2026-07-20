@@ -46,7 +46,7 @@ run it, and where the latest result is stored.
 | [`path-micro-profile-cached-latest.md`](path-micro-profile-cached-latest.md) | Latest cached path micro-profile result |
 | [`syscall-usecase-profile-latest.md`](syscall-usecase-profile-latest.md) | Latest seccomp syscall use-case profile result |
 | [`syscall-usecase-profile-syscall-latest.md`](syscall-usecase-profile-syscall-latest.md) | Latest syscall-trace use-case profile result |
-| [`llama-api-prompt-20260509.md`](llama-api-prompt-20260509.md) | 2026-05-09 llama API prompt smoke-test evidence |
+| `llama-api-prompt-20260509.md` | 2026-05-09 llama API prompt smoke-test local evidence; ignored/generated and therefore not a durable tracked link |
 | [`ANDROID_SELFDEBUG.md`](ANDROID_SELFDEBUG.md) | Android single-device localhost Wireless debugging and self-debug workflow, including `scripts/android-selfdebug.sh` |
 | [`DIRECT_SYSCALL_COVERAGE.md`](DIRECT_SYSCALL_COVERAGE.md) | Direct runtime syscall hook inventory and fast/static coverage gate |
 | [`APK_MEMORY_PAGER_PROBE.md`](APK_MEMORY_PAGER_PROBE.md) | SDK28 compat APK syscall probe for the opt-in memory pager |

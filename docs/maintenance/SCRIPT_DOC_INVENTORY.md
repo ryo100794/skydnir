@@ -51,3 +51,43 @@ This note connects the stable script inventory in [`../../scripts/README.md`](..
 2. Run `python3 scripts/verify-script-inventory.py` after script inventory edits.
 3. Run `python3 scripts/verify-docs-maintenance.py` after adding durable documentation.
 4. Do not delete weakly referenced scripts or test evidence without a focused audit, replacement command, and link/producer check.
+
+## 2026-07-20 development-artifact cleanup pass
+
+Scope: repository-local developer artifacts, redundant scratch files, and
+generated work files. This pass intentionally did not touch active Vulkan bridge
+source changes or rebuilt native payloads.
+
+### Current classification
+
+| Class | Paths | Action |
+|---|---|---|
+| Disposable ignored scratch | `__pycache__/`, `*.pyc`, `.pytest_cache/`, `.gradle/`, `build/`, `app/.cxx/`, `app/.externalNativeBuild/`, `captures/`, `tmp/`, ignored generated `docs/test/llama-gpu-*` and `docs/test/llama-cpu-gpu-compare-*` files | Safe cleanup target when untracked. The local worktree currently has no such cache directories left after the cleanup pass. |
+| Ignored but build/runtime-staged | `app/src/main/assets/pdockerd/`, `app/src/main/assets/xterm/xterm*.{js,css}`, `app/src/main/jniLibs/*/libcow.so`, `libcrane.so`, `libpdockerpty.so`, `local.properties` | Keep. These are ignored because they are local/staged payloads or machine config, not because they are always disposable. Deleting them can break the next APK build until restaged. |
+| Tracked evidence | `docs/test/*-latest.*`, `docs/test/runs/**`, `docs/test/device-logs/**`, `docs/test/spirv-q6k-*`, llama GPU comparison artifacts | Keep until a focused evidence-pruning policy exists. These files are generated-looking but are tracked regression/evidence records. |
+| Tracked large development payloads | `vendor/lib/docker`, `vendor/lib/docker-compose`, `docker-proot-setup/docker-bin/docker`, `docker-proot-setup/docker-bin/crane` | Review separately. They are development/test compatibility payloads or staging sources and must not be removed in a broad cleanup pass. |
+| Active generated native outputs | `app/src/main/jniLibs/*/libpdockervulkanicd.so`, `docker-proot-setup/lib/pdocker-vulkan-icd.so` | Keep with the matching source change until the Vulkan bridge commit is validated. |
+
+### Size notes
+
+- Repository size after ignored `docs/test` cleanup: approximately `666M`.
+- Large tracked files remaining by design:
+  - `vendor/lib/docker-compose` - approximately `60M`.
+  - `docker-proot-setup/docker-bin/docker` - approximately `39M`.
+  - `vendor/lib/docker` - approximately `26M`.
+  - `docker-proot-setup/docker-bin/crane` and staged `libcrane.so` - approximately `9.9M` each.
+  - `docs/test/spirv-q6k-native-adb45055/*.analysis.json` - approximately `6.2M` each.
+
+### Follow-up cleanup rules
+
+1. Do not run blanket `git clean -Xdf` in this repository. It would remove
+   ignored payloads that are still needed for local APK staging.
+2. Prefer targeted deletion of ignored scratch directories only:
+   `__pycache__`, `.pytest_cache`, Gradle/CMake build directories, local
+   captures, and ignored ad-hoc evidence files.
+3. Treat tracked `docs/test` artifacts as evidence, not trash. Pruning requires
+   an evidence-retention change that updates producers, consumers, and indexes
+   in the same commit.
+4. Treat root-level script moves as compatibility changes. Move implementation
+   files only behind stable wrapper shims and update `scripts/script-inventory.json`
+   before changing paths.
