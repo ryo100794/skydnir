@@ -56,10 +56,11 @@ This note connects the stable script inventory in [`../../scripts/README.md`](..
 
 Scope: repository-local developer artifacts, redundant scratch files, and
 generated work files. This pass intentionally did not touch active Vulkan bridge
-source changes or rebuilt native payloads. The 2026-07-20 cleanup check was
-re-run after commit `27d1c08b` and again after commit `b748b42a` with
-`git clean -nd`, `git clean -ndX`, large-file scans, generated-file scans, and
-script-inventory verification.
+source changes, staged APK/runtime payloads, tracked evidence, or machine-local
+configuration. The cleanup check was re-run after commit `64db8e16` with the
+guarded cleanup helper, `git clean -nd`, `git clean -ndX`, size scans, docs
+maintenance verification, native-payload verification, and script-inventory
+verification.
 
 ### Current classification
 
@@ -73,10 +74,12 @@ script-inventory verification.
 
 ### 2026-07-20 follow-up dry-run result
 
+- `scripts/maintenance/clean-development-artifacts.py --apply --json` reported
+  `count: 0`; there were no guarded disposable candidates to delete.
 - `git clean -nd` reported no untracked non-ignored repository files.
 - `git clean -ndX` reported only ignored staged payloads and machine-local
   configuration: `app/src/main/assets/pdockerd/`, `app/src/main/assets/xterm/`,
-  staged native `.so` files, and `local.properties`.
+  selected staged native `.so` files, and `local.properties`.
 - No repository-local `__pycache__/`, `*.pyc`, `.pytest_cache/`, `captures/`,
   Gradle build output, or CMake build output was present to remove.
 - `/root/tl` contains unrelated root-workspace files outside this repository;
@@ -85,13 +88,16 @@ script-inventory verification.
 
 ### Size notes
 
-- Repository size after the current cleanup recheck: approximately `670M`.
+- Repository size after the current cleanup recheck: approximately `371M`
+  (`366.7 MiB` by byte scan).
+- Git object store after `git gc --prune=now`: approximately `165M`
+  (`162.6 MiB` by byte scan).
+- Tracked test evidence: `docs/test` is approximately `38.3 MiB`.
 - Large tracked files remaining by design:
-  - `vendor/lib/docker-compose` - approximately `60M`.
-  - `docker-proot-setup/docker-bin/docker` - approximately `39M`.
-  - `vendor/lib/docker` - approximately `26M`.
-  - `docker-proot-setup/docker-bin/crane` and staged `libcrane.so` - approximately `9.9M` each.
-  - `docs/test/spirv-q6k-native-adb45055/*.analysis.json` - approximately `6.2M` each.
+  - `vendor/lib/docker-compose` - approximately `59.3 MiB`.
+  - `docker-proot-setup/docker-bin/docker` - approximately `38.1 MiB`.
+  - `vendor/lib/docker` - approximately `25.9 MiB`.
+  - `docker-proot-setup/docker-bin/crane` and staged `libcrane.so` - approximately `9.9 MiB` each.
 
 ### Follow-up cleanup rules
 
