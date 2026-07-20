@@ -1133,6 +1133,7 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V630_ABI_MINOR 30u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V631_ABI_MINOR 31u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V632_ABI_MINOR 32u
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V633_ABI_MINOR 33u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_SUBMIT 1u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_FRAME_HEADER_SCHEMA_HASH 0x8787f343f2f4f255ull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_SHADER_STAGE_SCHEMA_HASH 0xc9b21285e5a281b8ull
@@ -1223,6 +1224,11 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V632_RENDER_PASS_SUBPASS_SCHEMA_HASH 0x278444e51281498aull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V632_RENDER_PASS_ATTACHMENT_REF_SCHEMA_HASH 0x19aed036145d1d4eull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V632_RENDER_PASS_DEPENDENCY_SCHEMA_HASH 0x17818081e445d750ull
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V633_HEADER_EXTENSION_SCHEMA_HASH 0x106aa4dc5ef7d444ull
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V633_SUBPASS_VIEW_MASK_SCHEMA_HASH 0x1dc55923b60d3486ull
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V633_DEPTH_STENCIL_RESOLVE_SCHEMA_HASH 0xd8456ba96b41dc13ull
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V633_DEPENDENCY_VIEW_OFFSET_SCHEMA_HASH 0x79b1baf5e4c8d171ull
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V633_CORRELATION_MASK_SCHEMA_HASH 0xa4b93ab9d5bc875cull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_FRAME_BYTES (8u * 1024u * 1024u)
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_SHADER_STAGES 16u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_PIPELINES 64u
@@ -1282,6 +1288,10 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V632_MAX_RENDER_PASS_SUBPASSES (PDOCKER_GPU_VULKAN_GRAPHICS_V632_MAX_RENDER_PASSES * 16u)
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V632_MAX_RENDER_PASS_ATTACHMENT_REFS (PDOCKER_GPU_VULKAN_GRAPHICS_V632_MAX_RENDER_PASS_SUBPASSES * PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_ATTACHMENTS)
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V632_MAX_RENDER_PASS_DEPENDENCIES (PDOCKER_GPU_VULKAN_GRAPHICS_V632_MAX_RENDER_PASSES * 32u)
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V633_MAX_SUBPASS_VIEW_MASKS PDOCKER_GPU_VULKAN_GRAPHICS_V632_MAX_RENDER_PASS_SUBPASSES
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V633_MAX_DEPTH_STENCIL_RESOLVES PDOCKER_GPU_VULKAN_GRAPHICS_V632_MAX_RENDER_PASS_SUBPASSES
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V633_MAX_DEPENDENCY_VIEW_OFFSETS PDOCKER_GPU_VULKAN_GRAPHICS_V632_MAX_RENDER_PASS_DEPENDENCIES
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V633_MAX_CORRELATION_MASKS (PDOCKER_GPU_VULKAN_GRAPHICS_V632_MAX_RENDER_PASSES * PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_ATTACHMENTS)
 
 
 #define PDOCKER_GPU_GRAPHICS_V63_DEPTH_STENCIL_DEPTH_TEST_ENABLE 0x00000001u
@@ -2179,6 +2189,69 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
 #define PDOCKER_GPU_GRAPHICS_V632_ATTACHMENT_REF_RESOLVE 3u
 #define PDOCKER_GPU_GRAPHICS_V632_ATTACHMENT_REF_DEPTH_STENCIL 4u
 #define PDOCKER_GPU_GRAPHICS_V632_ATTACHMENT_REF_PRESERVE 5u
+
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V633_HEADER_EXTENSION_FIELDS(X) \
+    X(subpass_view_mask_count, u32) \
+    X(subpass_view_mask_entry_size, u32) \
+    X(subpass_view_mask_table_offset, u64) \
+    X(subpass_view_mask_table_size, u64) \
+    X(subpass_view_mask_schema_hash, u64) \
+    X(subpass_view_mask_table_hash, u64) \
+    X(depth_stencil_resolve_count, u32) \
+    X(depth_stencil_resolve_entry_size, u32) \
+    X(depth_stencil_resolve_table_offset, u64) \
+    X(depth_stencil_resolve_table_size, u64) \
+    X(depth_stencil_resolve_schema_hash, u64) \
+    X(depth_stencil_resolve_table_hash, u64) \
+    X(dependency_view_offset_count, u32) \
+    X(dependency_view_offset_entry_size, u32) \
+    X(dependency_view_offset_table_offset, u64) \
+    X(dependency_view_offset_table_size, u64) \
+    X(dependency_view_offset_schema_hash, u64) \
+    X(dependency_view_offset_table_hash, u64) \
+    X(correlation_mask_count, u32) \
+    X(correlation_mask_entry_size, u32) \
+    X(correlation_mask_table_offset, u64) \
+    X(correlation_mask_table_size, u64) \
+    X(correlation_mask_schema_hash, u64) \
+    X(correlation_mask_table_hash, u64) \
+    X(extension_hash, u64)
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V633_HEADER_EXTENSION_FIELD_COUNT 25u
+
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V633_SUBPASS_VIEW_MASK_FIELDS(X) \
+    X(render_pass_id, u64) \
+    X(subpass_index, u32) \
+    X(view_mask, u32)
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V633_SUBPASS_VIEW_MASK_FIELD_COUNT 3u
+
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V633_DEPTH_STENCIL_RESOLVE_FIELDS(X) \
+    X(render_pass_id, u64) \
+    X(subpass_index, u32) \
+    X(depth_resolve_mode, u32) \
+    X(stencil_resolve_mode, u32) \
+    X(attachment_index, u32) \
+    X(layout, u32) \
+    X(aspect_mask, u32) \
+    X(flags, u32) \
+    X(reserved0, u32)
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V633_DEPTH_STENCIL_RESOLVE_FIELD_COUNT 9u
+
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V633_DEPENDENCY_VIEW_OFFSET_FIELDS(X) \
+    X(render_pass_id, u64) \
+    X(dependency_index, u32) \
+    X(view_offset_bits, u32) \
+    X(flags, u32) \
+    X(reserved0, u32)
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V633_DEPENDENCY_VIEW_OFFSET_FIELD_COUNT 5u
+
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V633_CORRELATION_MASK_FIELDS(X) \
+    X(render_pass_id, u64) \
+    X(mask_index, u32) \
+    X(correlation_mask, u32)
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V633_CORRELATION_MASK_FIELD_COUNT 3u
+
+#define PDOCKER_GPU_GRAPHICS_V633_DEPTH_STENCIL_RESOLVE_ATTACHMENT_PRESENT 0x00000001u
+#define PDOCKER_GPU_GRAPHICS_V633_DEPENDENCY_VIEW_OFFSET_PRESENT 0x00000001u
 
 
 #define PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR 1u
@@ -4310,6 +4383,71 @@ typedef struct PdockerGpuVulkanGraphicsV632RenderPassDependencyEntry {
     uint64_t dst_access_mask;
     uint32_t reserved0;
 } PdockerGpuVulkanGraphicsV632RenderPassDependencyEntry;
+
+typedef struct PdockerGpuVulkanGraphicsV633HeaderExtension {
+    uint32_t subpass_view_mask_count;
+    uint32_t subpass_view_mask_entry_size;
+    uint64_t subpass_view_mask_table_offset;
+    uint64_t subpass_view_mask_table_size;
+    uint64_t subpass_view_mask_schema_hash;
+    uint64_t subpass_view_mask_table_hash;
+    uint32_t depth_stencil_resolve_count;
+    uint32_t depth_stencil_resolve_entry_size;
+    uint64_t depth_stencil_resolve_table_offset;
+    uint64_t depth_stencil_resolve_table_size;
+    uint64_t depth_stencil_resolve_schema_hash;
+    uint64_t depth_stencil_resolve_table_hash;
+    uint32_t dependency_view_offset_count;
+    uint32_t dependency_view_offset_entry_size;
+    uint64_t dependency_view_offset_table_offset;
+    uint64_t dependency_view_offset_table_size;
+    uint64_t dependency_view_offset_schema_hash;
+    uint64_t dependency_view_offset_table_hash;
+    uint32_t correlation_mask_count;
+    uint32_t correlation_mask_entry_size;
+    uint64_t correlation_mask_table_offset;
+    uint64_t correlation_mask_table_size;
+    uint64_t correlation_mask_schema_hash;
+    uint64_t correlation_mask_table_hash;
+    uint64_t extension_hash;
+} PdockerGpuVulkanGraphicsV633HeaderExtension;
+
+typedef struct PdockerGpuVulkanGraphicsV633FrameHeader {
+    PdockerGpuVulkanGraphicsV632FrameHeader v632;
+    PdockerGpuVulkanGraphicsV633HeaderExtension v633;
+} PdockerGpuVulkanGraphicsV633FrameHeader;
+
+typedef struct PdockerGpuVulkanGraphicsV633SubpassViewMaskEntry {
+    uint64_t render_pass_id;
+    uint32_t subpass_index;
+    uint32_t view_mask;
+} PdockerGpuVulkanGraphicsV633SubpassViewMaskEntry;
+
+typedef struct PdockerGpuVulkanGraphicsV633DepthStencilResolveEntry {
+    uint64_t render_pass_id;
+    uint32_t subpass_index;
+    uint32_t depth_resolve_mode;
+    uint32_t stencil_resolve_mode;
+    uint32_t attachment_index;
+    uint32_t layout;
+    uint32_t aspect_mask;
+    uint32_t flags;
+    uint32_t reserved0;
+} PdockerGpuVulkanGraphicsV633DepthStencilResolveEntry;
+
+typedef struct PdockerGpuVulkanGraphicsV633DependencyViewOffsetEntry {
+    uint64_t render_pass_id;
+    uint32_t dependency_index;
+    uint32_t view_offset_bits;
+    uint32_t flags;
+    uint32_t reserved0;
+} PdockerGpuVulkanGraphicsV633DependencyViewOffsetEntry;
+
+typedef struct PdockerGpuVulkanGraphicsV633CorrelationMaskEntry {
+    uint64_t render_pass_id;
+    uint32_t mask_index;
+    uint32_t correlation_mask;
+} PdockerGpuVulkanGraphicsV633CorrelationMaskEntry;
 
 typedef struct PdockerGpuVulkanGraphicsV61DynamicOffsetEntry {
     uint32_t offset;

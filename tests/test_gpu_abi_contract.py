@@ -109,6 +109,10 @@ VULKAN_ABI_ID_FIELD_CLASSIFICATIONS = {
     "PdockerGpuVulkanGraphicsV632RenderPassSubpassEntry.render_pass_id": "object_reference_checked",
     "PdockerGpuVulkanGraphicsV632RenderPassAttachmentRefEntry.render_pass_id": "object_reference_checked",
     "PdockerGpuVulkanGraphicsV632RenderPassDependencyEntry.render_pass_id": "object_reference_checked",
+    "PdockerGpuVulkanGraphicsV633SubpassViewMaskEntry.render_pass_id": "object_reference_checked",
+    "PdockerGpuVulkanGraphicsV633DepthStencilResolveEntry.render_pass_id": "object_reference_checked",
+    "PdockerGpuVulkanGraphicsV633DependencyViewOffsetEntry.render_pass_id": "object_reference_checked",
+    "PdockerGpuVulkanGraphicsV633CorrelationMaskEntry.render_pass_id": "object_reference_checked",
 }
 
 
@@ -211,6 +215,7 @@ VULKAN_ABI_SCALAR_FIELD_CLASSES = frozenset({
     "vk_filter_enum",
     "vk_index_type_enum",
     "vk_flag_bits",
+    "signed_integer_bits_payload",
     "vk_float_bits_payload",
     "vk_format_enum",
     "vk_image_type_enum",
@@ -345,6 +350,11 @@ VULKAN_ABI_INDEX_FIELD_CLASSIFICATIONS = {
     "PdockerGpuVulkanGraphicsV632RenderPassAttachmentRefEntry.subpass_index": "identity_key_ordinal",
     "PdockerGpuVulkanGraphicsV632RenderPassAttachmentRefEntry.attachment_index": "attachment_reference_index",
     "PdockerGpuVulkanGraphicsV632RenderPassDependencyEntry.dependency_index": "identity_key_ordinal",
+    "PdockerGpuVulkanGraphicsV633SubpassViewMaskEntry.subpass_index": "identity_key_ordinal",
+    "PdockerGpuVulkanGraphicsV633DepthStencilResolveEntry.subpass_index": "identity_key_ordinal",
+    "PdockerGpuVulkanGraphicsV633DepthStencilResolveEntry.attachment_index": "attachment_reference_index",
+    "PdockerGpuVulkanGraphicsV633DependencyViewOffsetEntry.dependency_index": "identity_key_ordinal",
+    "PdockerGpuVulkanGraphicsV633CorrelationMaskEntry.mask_index": "identity_key_ordinal",
     "PdockerGpuVulkanGraphicsV61PushConstantMetadataEntry.command_index": "command_reference_index",
     "PdockerGpuVulkanGraphicsV61ImageBarrierEntry.command_index": "command_reference_index",
     "PdockerGpuVulkanGraphicsV61ImageBarrierEntry.image_index": "image_reference_index",
@@ -939,6 +949,8 @@ def classify_vulkan_abi_remaining_scalar_field(qualified_field):
         return "stencil_value_payload"
     if field_name.endswith("_compare_mask") or field_name.endswith("_write_mask"):
         return "vk_stencil_mask_payload"
+    if field_name == "view_offset_bits":
+        return "signed_integer_bits_payload"
     if field_name.endswith("_bits"):
         return "vk_float_bits_payload"
     if field_name in {
@@ -1014,6 +1026,7 @@ def classify_vulkan_abi_remaining_scalar_field(qualified_field):
         return "vk_dynamic_state_enum"
     if field_name in {
         "load_op", "store_op", "stencil_load_op", "stencil_store_op", "resolve_mode",
+        "depth_resolve_mode", "stencil_resolve_mode",
         "logic_op", "src_color_blend_factor", "dst_color_blend_factor",
         "src_alpha_blend_factor", "dst_alpha_blend_factor", "color_blend_op", "alpha_blend_op",
         "depth_compare_op", "front_fail_op", "front_pass_op", "front_depth_fail_op",
@@ -26745,6 +26758,106 @@ class GpuAbiContractTest(unittest.TestCase):
                     "extension_hash",
                 ],
             )
+
+    def test_vulkan_graphics_v633_render_pass_exact_sideband_contract_declares_append_only_schema(self):
+        for path in [APP_HEADER, CONTAINER_HEADER]:
+            source = path.read_text()
+            self.assertIn("#define PDOCKER_GPU_VULKAN_GRAPHICS_V633_ABI_MINOR 33u", source)
+            for marker in [
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V633_HEADER_EXTENSION_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V633_SUBPASS_VIEW_MASK_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V633_DEPTH_STENCIL_RESOLVE_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V633_DEPENDENCY_VIEW_OFFSET_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V633_CORRELATION_MASK_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V633_HEADER_EXTENSION_SCHEMA_HASH",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V633_SUBPASS_VIEW_MASK_SCHEMA_HASH",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V633_DEPTH_STENCIL_RESOLVE_SCHEMA_HASH",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V633_DEPENDENCY_VIEW_OFFSET_SCHEMA_HASH",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V633_CORRELATION_MASK_SCHEMA_HASH",
+                "PdockerGpuVulkanGraphicsV633HeaderExtension",
+                "PdockerGpuVulkanGraphicsV633FrameHeader",
+                "PdockerGpuVulkanGraphicsV633SubpassViewMaskEntry",
+                "PdockerGpuVulkanGraphicsV633DepthStencilResolveEntry",
+                "PdockerGpuVulkanGraphicsV633DependencyViewOffsetEntry",
+                "PdockerGpuVulkanGraphicsV633CorrelationMaskEntry",
+            ]:
+                self.assertIn(marker, source)
+
+            schema_specs = [
+                (
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V633_HEADER_EXTENSION_FIELDS",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V633_HEADER_EXTENSION_FIELD_COUNT",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V633_HEADER_EXTENSION_SCHEMA_HASH",
+                    [
+                        "subpass_view_mask_count",
+                        "subpass_view_mask_entry_size",
+                        "subpass_view_mask_table_offset",
+                        "subpass_view_mask_table_size",
+                        "subpass_view_mask_schema_hash",
+                        "subpass_view_mask_table_hash",
+                        "depth_stencil_resolve_count",
+                        "depth_stencil_resolve_entry_size",
+                        "depth_stencil_resolve_table_offset",
+                        "depth_stencil_resolve_table_size",
+                        "depth_stencil_resolve_schema_hash",
+                        "depth_stencil_resolve_table_hash",
+                        "dependency_view_offset_count",
+                        "dependency_view_offset_entry_size",
+                        "dependency_view_offset_table_offset",
+                        "dependency_view_offset_table_size",
+                        "dependency_view_offset_schema_hash",
+                        "dependency_view_offset_table_hash",
+                        "correlation_mask_count",
+                        "correlation_mask_entry_size",
+                        "correlation_mask_table_offset",
+                        "correlation_mask_table_size",
+                        "correlation_mask_schema_hash",
+                        "correlation_mask_table_hash",
+                        "extension_hash",
+                    ],
+                ),
+                (
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V633_SUBPASS_VIEW_MASK_FIELDS",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V633_SUBPASS_VIEW_MASK_FIELD_COUNT",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V633_SUBPASS_VIEW_MASK_SCHEMA_HASH",
+                    ["render_pass_id", "subpass_index", "view_mask"],
+                ),
+                (
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V633_DEPTH_STENCIL_RESOLVE_FIELDS",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V633_DEPTH_STENCIL_RESOLVE_FIELD_COUNT",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V633_DEPTH_STENCIL_RESOLVE_SCHEMA_HASH",
+                    [
+                        "render_pass_id",
+                        "subpass_index",
+                        "depth_resolve_mode",
+                        "stencil_resolve_mode",
+                        "attachment_index",
+                        "layout",
+                        "aspect_mask",
+                        "flags",
+                        "reserved0",
+                    ],
+                ),
+                (
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V633_DEPENDENCY_VIEW_OFFSET_FIELDS",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V633_DEPENDENCY_VIEW_OFFSET_FIELD_COUNT",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V633_DEPENDENCY_VIEW_OFFSET_SCHEMA_HASH",
+                    ["render_pass_id", "dependency_index", "view_offset_bits", "flags", "reserved0"],
+                ),
+                (
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V633_CORRELATION_MASK_FIELDS",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V633_CORRELATION_MASK_FIELD_COUNT",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V633_CORRELATION_MASK_SCHEMA_HASH",
+                    ["render_pass_id", "mask_index", "correlation_mask"],
+                ),
+            ]
+            for field_macro, count_macro, hash_macro, expected_names in schema_specs:
+                fields, count, declared_hash, computed_hash = vulkan_dispatch_v5_schema(
+                    path, field_macro, count_macro, hash_macro
+                )
+                self.assertEqual(count, len(fields))
+                self.assertEqual(declared_hash, computed_hash)
+                self.assertEqual([name for name, _ in fields], expected_names)
 
     def test_vulkan_graphics_v632_render_pass_transport_is_emitted_as_metadata_extension(self):
         icd = VULKAN_ICD.read_text()
