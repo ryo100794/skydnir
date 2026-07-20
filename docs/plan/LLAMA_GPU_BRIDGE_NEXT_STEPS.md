@@ -9,6 +9,25 @@ llama.cpp itself remains unmodified.
 
 ## Current Ground Truth
 
+### 2026-07-20 CPU/static V6.32 render-pass replay-precondition lane
+
+The Android executor now validates V6.32 classic render-pass metadata as replay
+preconditions before it validates V6.33 sideband rows.  The new guard checks
+transported attachment rows, attachment-reference roles, attachment index
+resolution, optional `VK_ATTACHMENT_UNUSED` handling, role-specific layouts,
+format/aspect compatibility, sample-count presence, subpass references, and
+`VK_SUBPASS_EXTERNAL` dependency bounds.  This does not create native
+`VkRenderPass` objects yet, but it moves the executor from metadata-only
+acceptance toward a real replay contract: malformed V6.32 rows now fail before
+any future render-pass replay implementation can consume them.
+
+Strict classic render-pass replay is still intentionally fail-closed.  The next
+implementation step remains native render-pass object construction/reuse from
+V6.32/V6.33 metadata and command replay that does not rely on ICD-side
+dynamic-rendering normalization.
+
+Evidence gate: `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -q tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_graphics_v632_render_pass_transport_is_emitted_as_metadata_extension`; native executor build `bash scripts/build-native-android-ndk.sh`.
+
 ### 2026-07-20 CPU/static V6.33 render-pass exact-sideband receive lane
 
 V6.33 render-pass sideband transport is now wired across the producer, ABI

@@ -27022,6 +27022,9 @@ class GpuAbiContractTest(unittest.TestCase):
         v632_representable = c_function_body(icd, "vulkan_graphics_v632_render_pass_transport_representable")
         caps = c_function_body(executor, "print_vulkan_advertisement_caps")
         parser = c_function_body(icd, "parse_executor_advertisement_caps_json")
+        frame_validator = c_function_body(executor, "validate_vulkan_graphics_v6_frame_content")
+        replay_preconditions = c_function_body(executor, "validate_vulkan_graphics_v632_render_pass_replay_preconditions")
+        attachment_ref_precondition = c_function_body(executor, "vulkan_graphics_v632_attachment_ref_replay_precondition_valid")
 
         for marker in [
             "PdockerGpuVulkanGraphicsV632RenderPassEntry render_passes",
@@ -27061,6 +27064,31 @@ class GpuAbiContractTest(unittest.TestCase):
             "!allow_v633_exact_sideband && dep->has_view_offset && dep->view_offset != 0",
         ]:
             self.assertIn(fail_closed_marker, representable)
+
+        for marker in [
+            "validate_vulkan_graphics_v632_render_pass_replay_preconditions(&view)",
+            "validate_vulkan_graphics_v633_render_pass_sideband(&view)",
+        ]:
+            self.assertIn(marker, frame_validator)
+        self.assertLess(
+            frame_validator.index("validate_vulkan_graphics_v632_render_pass_replay_preconditions(&view)"),
+            frame_validator.index("validate_vulkan_graphics_v633_render_pass_sideband(&view)"),
+        )
+        for marker in [
+            "vulkan_graphics_v632_attachment_for_index",
+            "vulkan_graphics_v632_attachment_ref_replay_precondition_valid",
+            "dep->src_subpass != VK_SUBPASS_EXTERNAL",
+            "dep->dst_subpass != VK_SUBPASS_EXTERNAL",
+            "attachment->samples == 0",
+        ]:
+            self.assertIn(marker, replay_preconditions)
+        for marker in [
+            "vulkan_graphics_v632_attachment_ref_role_supported(ref->role)",
+            "vulkan_graphics_v632_attachment_aspect_supported(attachment, ref->aspect_mask)",
+            "vulkan_graphics_attachment_layout_supported(ref->role, ref->layout)",
+            "ref->layout == VK_IMAGE_LAYOUT_UNDEFINED",
+        ]:
+            self.assertIn(marker, attachment_ref_precondition)
 
         for marker in [
             "executor_supports_vulkan_graphics_v632_render_passes()",

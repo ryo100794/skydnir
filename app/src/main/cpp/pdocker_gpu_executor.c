@@ -27784,6 +27784,8 @@ static uint64_t v632_render_pass_indexed_extension_identity_hash(
     return hash;
 }
 
+static int vulkan_graphics_attachment_layout_supported(uint32_t role, uint32_t layout);
+
 static int validate_vulkan_graphics_v632_duplicate_render_pass_identity(
         const VulkanGraphicsV6FrameView *view) {
     if (!view || !view->header) return -EINVAL;
@@ -27815,6 +27817,139 @@ static int validate_vulkan_graphics_v632_duplicate_render_pass_identity(
                     return -EPROTO;
                 }
             }
+        }
+    }
+    return 0;
+}
+
+static int vulkan_graphics_v633_render_pass_index_for_id(
+        const VulkanGraphicsV6FrameView *view,
+        uint64_t render_pass_id,
+        uint32_t *out_index);
+static int vulkan_graphics_v633_render_pass_subpass_valid(
+        const VulkanGraphicsV6FrameView *view,
+        const PdockerGpuVulkanGraphicsV632RenderPassEntry *render_pass,
+        uint32_t subpass_index);
+static int vulkan_graphics_v633_render_pass_dependency_valid(
+        const VulkanGraphicsV6FrameView *view,
+        const PdockerGpuVulkanGraphicsV632RenderPassEntry *render_pass,
+        uint32_t dependency_index);
+
+static int vulkan_graphics_v632_attachment_for_index(
+        const VulkanGraphicsV6FrameView *view,
+        const PdockerGpuVulkanGraphicsV632RenderPassEntry *render_pass,
+        uint32_t attachment_index,
+        const PdockerGpuVulkanGraphicsV632RenderPassAttachmentEntry **out_attachment) {
+    if (out_attachment) *out_attachment = NULL;
+    if (!view || !view->header_v632 || !view->render_pass_attachments || !render_pass) return 0;
+    if (attachment_index >= render_pass->attachment_count) return 0;
+    const uint32_t table_index = render_pass->attachment_first + attachment_index;
+    if (table_index >= view->header_v632->v632.render_pass_attachment_count) return 0;
+    const PdockerGpuVulkanGraphicsV632RenderPassAttachmentEntry *attachment =
+        &view->render_pass_attachments[table_index];
+    if (attachment->render_pass_id != render_pass->render_pass_id ||
+        attachment->attachment_index != attachment_index ||
+        attachment->reserved0 != 0) {
+        return 0;
+    }
+    if (out_attachment) *out_attachment = attachment;
+    return 1;
+}
+
+static int vulkan_graphics_v632_attachment_aspect_supported(
+        const PdockerGpuVulkanGraphicsV632RenderPassAttachmentEntry *attachment,
+        uint32_t aspect_mask) {
+    if (!attachment) return 0;
+    if (aspect_mask == 0) return 1;
+    const VkFormat format = (VkFormat)attachment->format;
+    if ((aspect_mask & VK_IMAGE_ASPECT_COLOR_BIT) != 0 &&
+        vulkan_format_bytes_per_pixel_for_aspect(format, VK_IMAGE_ASPECT_COLOR_BIT) == 0) return 0;
+    if ((aspect_mask & VK_IMAGE_ASPECT_DEPTH_BIT) != 0 &&
+        !vulkan_format_has_depth_aspect(format)) return 0;
+    if ((aspect_mask & VK_IMAGE_ASPECT_STENCIL_BIT) != 0 &&
+        !vulkan_format_has_stencil_aspect(format)) return 0;
+    if ((aspect_mask & ~(uint32_t)(VK_IMAGE_ASPECT_COLOR_BIT |
+                                   VK_IMAGE_ASPECT_DEPTH_BIT |
+                                   VK_IMAGE_ASPECT_STENCIL_BIT)) != 0) return 0;
+    return 1;
+}
+
+static int vulkan_graphics_v632_attachment_ref_role_supported(uint32_t role) {
+    return role == PDOCKER_GPU_GRAPHICS_V632_ATTACHMENT_REF_INPUT ||
+           role == PDOCKER_GPU_GRAPHICS_V632_ATTACHMENT_REF_COLOR ||
+           role == PDOCKER_GPU_GRAPHICS_V632_ATTACHMENT_REF_RESOLVE ||
+           role == PDOCKER_GPU_GRAPHICS_V632_ATTACHMENT_REF_DEPTH_STENCIL ||
+           role == PDOCKER_GPU_GRAPHICS_V632_ATTACHMENT_REF_PRESERVE;
+}
+
+static int vulkan_graphics_v632_attachment_ref_replay_precondition_valid(
+        const VulkanGraphicsV6FrameView *view,
+        const PdockerGpuVulkanGraphicsV632RenderPassEntry *render_pass,
+        const PdockerGpuVulkanGraphicsV632RenderPassAttachmentRefEntry *ref) {
+    if (!view || !render_pass || !ref) return 0;
+    if (ref->render_pass_id != render_pass->render_pass_id ||
+        ref->reserved0 != 0 ||
+        !vulkan_graphics_v632_attachment_ref_role_supported(ref->role)) {
+        return 0;
+    }
+    if (!vulkan_graphics_v633_render_pass_subpass_valid(view, render_pass, ref->subpass_index)) {
+        return 0;
+    }
+    if (ref->role == PDOCKER_GPU_GRAPHICS_V632_ATTACHMENT_REF_PRESERVE) {
+        return ref->attachment_index != VK_ATTACHMENT_UNUSED &&
+               ref->layout == VK_IMAGE_LAYOUT_UNDEFINED &&
+               ref->aspect_mask == 0;
+    }
+    if (ref->attachment_index == VK_ATTACHMENT_UNUSED) {
+        return ref->layout == VK_IMAGE_LAYOUT_UNDEFINED && ref->aspect_mask == 0;
+    }
+    const PdockerGpuVulkanGraphicsV632RenderPassAttachmentEntry *attachment = NULL;
+    if (!vulkan_graphics_v632_attachment_for_index(view, render_pass,
+                                                    ref->attachment_index,
+                                                    &attachment)) {
+        return 0;
+    }
+    return vulkan_graphics_v632_attachment_aspect_supported(attachment, ref->aspect_mask) &&
+           vulkan_graphics_attachment_layout_supported(ref->role, ref->layout);
+}
+
+static int validate_vulkan_graphics_v632_render_pass_replay_preconditions(
+        const VulkanGraphicsV6FrameView *view) {
+    if (!view || !view->header) return -EINVAL;
+    if (!view->is_v632) return 0;
+    if (!view->header_v632 || !view->render_passes) return -EINVAL;
+    for (uint32_t i = 0; i < view->header_v632->v632.render_pass_count; ++i) {
+        const PdockerGpuVulkanGraphicsV632RenderPassEntry *render_pass = &view->render_passes[i];
+        if (render_pass->render_pass_id == 0 || render_pass->reserved0 != 0) return -EPROTO;
+        for (uint32_t a = 0; a < render_pass->attachment_count; ++a) {
+            const PdockerGpuVulkanGraphicsV632RenderPassAttachmentEntry *attachment = NULL;
+            if (!vulkan_graphics_v632_attachment_for_index(view, render_pass, a, &attachment)) return -EPROTO;
+            if (attachment->samples == 0) return -EPROTO;
+        }
+        for (uint32_t s = 0; s < render_pass->subpass_count; ++s) {
+            if (!vulkan_graphics_v633_render_pass_subpass_valid(view, render_pass, s)) return -EPROTO;
+        }
+        for (uint32_t d = 0; d < render_pass->dependency_count; ++d) {
+            if (!vulkan_graphics_v633_render_pass_dependency_valid(view, render_pass, d)) return -EPROTO;
+            const uint32_t table_index = render_pass->dependency_first + d;
+            const PdockerGpuVulkanGraphicsV632RenderPassDependencyEntry *dep =
+                &view->render_pass_dependencies[table_index];
+            if (dep->reserved0 != 0) return -EPROTO;
+            if (dep->src_subpass != VK_SUBPASS_EXTERNAL && dep->src_subpass >= render_pass->subpass_count) return -EPROTO;
+            if (dep->dst_subpass != VK_SUBPASS_EXTERNAL && dep->dst_subpass >= render_pass->subpass_count) return -EPROTO;
+        }
+    }
+    for (uint32_t i = 0; i < view->header_v632->v632.render_pass_attachment_ref_count; ++i) {
+        const PdockerGpuVulkanGraphicsV632RenderPassAttachmentRefEntry *ref =
+            &view->render_pass_attachment_refs[i];
+        uint32_t render_pass_index = 0;
+        if (vulkan_graphics_v633_render_pass_index_for_id(view, ref->render_pass_id,
+                                                          &render_pass_index) != 0) {
+            return -EPROTO;
+        }
+        if (!vulkan_graphics_v632_attachment_ref_replay_precondition_valid(
+                view, &view->render_passes[render_pass_index], ref)) {
+            return -EPROTO;
         }
     }
     return 0;
@@ -31045,6 +31180,9 @@ static int validate_vulkan_graphics_v6_frame_content(
     int render_pass_identity_rc =
         validate_vulkan_graphics_v632_duplicate_render_pass_identity(&view);
     if (render_pass_identity_rc != 0) return render_pass_identity_rc;
+    int render_pass_replay_preconditions_rc =
+        validate_vulkan_graphics_v632_render_pass_replay_preconditions(&view);
+    if (render_pass_replay_preconditions_rc != 0) return render_pass_replay_preconditions_rc;
     int render_pass_sideband_rc =
         validate_vulkan_graphics_v633_render_pass_sideband(&view);
     if (render_pass_sideband_rc != 0) return render_pass_sideband_rc;
