@@ -6,6 +6,7 @@ local.properties
 *.iml
 .idea/
 .DS_Store
+Thumbs.db
 # Editor and interrupted-patch scratch files must never become repository artifacts.
 *~
 *.swp
