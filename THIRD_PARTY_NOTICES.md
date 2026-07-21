@@ -1,6 +1,6 @@
 # Third-party licenses and distribution notes
 
-Snapshot date: 2026-05-18.
+Snapshot date: 2026-07-21.
 
 This inventory covers externally sourced code and binary payloads bundled by
 Skydnir. The current default APK set is usable for distribution when
@@ -8,7 +8,7 @@ the notice asset is included and upstream license texts/notices are preserved.
 
 | Component | Where used | License | Distribution condition | Status |
 |---|---|---|---|---|
-| Docker CLI | `vendor/lib/docker`, test/compatibility tool only; not packaged in the APK | Apache-2.0 | If redistributed separately, include license/notice and preserve Docker upstream notices. | OK: excluded from app payload. |
+| Docker CLI | `docker-proot-setup/docker-bin/docker`, test/compatibility tool only; not packaged in the APK | Apache-2.0 | If redistributed separately, include license/notice and preserve Docker upstream notices. | OK: excluded from app payload. |
 | Docker Compose plugin | `vendor/lib/docker-compose`, test/compatibility tool only; not packaged in the APK | Apache-2.0 | If redistributed separately, include license/notice and preserve Docker Compose upstream notices. | OK: excluded from app payload. |
 | go-containerregistry / crane | `docker-proot-setup/docker-bin/crane`, packaged as `libcrane.so` | Apache-2.0 | Include license notice. | OK with notice asset. |
 | xterm.js | `app/src/main/assets/xterm/xterm.js`, `xterm.css` | MIT | Include copyright and license notice. | OK with notice asset. |

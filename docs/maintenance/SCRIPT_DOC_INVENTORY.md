@@ -69,7 +69,7 @@ verification.
 | Disposable ignored scratch | `__pycache__/`, `*.pyc`, `.pytest_cache/`, `.gradle/`, `build/`, `app/.cxx/`, `app/.externalNativeBuild/`, `captures/`, `tmp/`, ignored generated `docs/test/llama-gpu-*` and `docs/test/llama-cpu-gpu-compare-*` files | Safe cleanup target when untracked. The latest guarded cleanup removed only untracked Python bytecode cache directories and the post-cleanup dry run found no remaining disposable candidates. |
 | Ignored but build/runtime-staged | `app/src/main/assets/pdockerd/`, `app/src/main/assets/xterm/xterm*.{js,css}`, `app/src/main/jniLibs/*/libcow.so`, `libcrane.so`, `libpdockerpty.so`, `local.properties` | Keep. `git clean -ndX` currently lists only these staged payloads and machine config. They are ignored because they are local/staged payloads or machine config, not because they are always disposable. Deleting them can break the next APK build until restaged. |
 | Tracked evidence | `docs/test/*-latest.*`, `docs/test/runs/**`, `docs/test/device-logs/**`, `docs/test/spirv-q6k-*`, llama GPU comparison artifacts | Keep until a focused evidence-pruning policy exists. These files are generated-looking but are tracked regression/evidence records. |
-| Tracked large development payloads | `vendor/lib/docker`, `vendor/lib/docker-compose`, `docker-proot-setup/docker-bin/docker`, `docker-proot-setup/docker-bin/crane` | Review separately. They are development/test compatibility payloads or staging sources and must not be removed in a broad cleanup pass. |
+| Tracked large development payloads | `vendor/lib/docker-compose`, `docker-proot-setup/docker-bin/docker`, `docker-proot-setup/docker-bin/crane` | Review separately. They are development/test compatibility payloads or staging sources and must not be removed in a broad cleanup pass. |
 | Active generated native outputs | `app/src/main/jniLibs/*/libpdockervulkanicd.so`, `docker-proot-setup/lib/pdocker-vulkan-icd.so` | Keep with the matching source change until the Vulkan bridge commit is validated. |
 
 ### 2026-07-20 follow-up cleanup result
@@ -118,20 +118,32 @@ verification.
   requires a focused consumer and retention-policy change rather than a broad
   artifact cleanup.
 
+### 2026-07-21 redundant development payload cleanup
+
+- Removed the tracked `vendor/lib/docker` stripped binary. It duplicated the
+  same upstream Docker CLI build already retained at
+  `docker-proot-setup/docker-bin/docker` (matching Go and ELF build IDs), while
+  all active test callers use the latter path.
+- Kept `vendor/lib/docker-compose`; it is the active test-only Compose plugin
+  paired with the retained Docker CLI and has no duplicate replacement.
+- Kept ignored APK staging payloads, tracked regression evidence, and all active
+  Vulkan bridge source and native outputs.
+- The guarded cleanup apply pass found no untracked caches or scratch files to
+  remove.
+
 ### Size notes
 
-- Repository size after the current cleanup recheck: approximately `369M`.
+- Repository size after the current cleanup recheck: approximately `346M`.
 - Git object store after local metadata cleanup: approximately `163M`. `git gc` was not
   run as part of this cleanup because object pruning is a separate repository
   maintenance action.
 - Tracked test evidence: `docs/test` is approximately `40M`.
-- Other size anchors: `vendor` approximately `86M`, `docker-proot-setup`
+- Other size anchors: `vendor` approximately `60M`, `docker-proot-setup`
   approximately `52M`, `app` approximately `17M`, `tests` approximately
   `3.6M`, and `scripts` approximately `2.6M`.
 - Large tracked files remaining by design:
   - `vendor/lib/docker-compose` - approximately `59.3 MiB`.
   - `docker-proot-setup/docker-bin/docker` - approximately `38.1 MiB`.
-  - `vendor/lib/docker` - approximately `25.9 MiB`.
   - `docker-proot-setup/docker-bin/crane` and staged `libcrane.so` - approximately `9.9 MiB` each.
 
 ### Follow-up cleanup rules
