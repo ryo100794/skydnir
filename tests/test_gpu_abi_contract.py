@@ -2275,15 +2275,15 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("has_v4_binding_field_count", executor)
         self.assertIn("!options.sender_reconcile.has_v4_binding_schema", executor)
         self.assertIn("!options.sender_reconcile.has_v4_binding_field_count", executor)
-        self.assertIn(
-            "options.sender_reconcile.v4_binding_schema !=\n"
-            "                        PDOCKER_GPU_VULKAN_DISPATCH_V4_BINDING_SCHEMA_HASH",
+        self.assertRegex(
             executor,
+            r"options\.sender_reconcile\.v4_binding_schema\s*!=\s*"
+            r"PDOCKER_GPU_VULKAN_DISPATCH_V4_BINDING_SCHEMA_HASH",
         )
-        self.assertIn(
-            "options.sender_reconcile.v4_binding_field_count !=\n"
-            "                        PDOCKER_GPU_VULKAN_DISPATCH_V4_BINDING_FIELD_COUNT",
+        self.assertRegex(
             executor,
+            r"options\.sender_reconcile\.v4_binding_field_count\s*!=\s*"
+            r"PDOCKER_GPU_VULKAN_DISPATCH_V4_BINDING_FIELD_COUNT",
         )
 
     def test_vulkan_icd_exposes_dynamic_rendering_and_graphics_fail_closed_scaffold(self):
@@ -4605,21 +4605,175 @@ class GpuAbiContractTest(unittest.TestCase):
 
     def test_vulkan_graphics_v6_describe_response_is_nonterminal(self):
         icd = VULKAN_ICD.read_text()
-        response_helpers = icd.split("static bool dispatch_response_is_graphics_transport", 1)[1].split("typedef struct {", 1)[0]
-        response_reader = icd.split("static int read_dispatch_response_status", 1)[1].split("typedef struct {", 1)[0]
-        self.assertIn('\\"stage\\":\\"vulkan-graphics-v6-describe\\"', response_reader)
-        self.assertIn("dispatch_response_is_graphics_transport", response_helpers)
-        self.assertIn("dispatch_response_is_graphics_terminal_success", response_helpers)
-        self.assertIn('\\"stage\\":\\"vulkan-graphics-v6-replay\\"', response_helpers)
-        self.assertIn('\\"execution_implemented\\":true', response_helpers)
-        graphics_branch = response_reader.split("if (graphics_transport)", 1)[1].split(
-            "if (strstr(line, \"\\\"stage\\\":\\\"vulkan-graphics-v6-describe\\\"\") != NULL)", 1
+        stage_matcher = c_function_body(icd, "dispatch_response_has_stage")
+        terminal_helper = c_function_body(icd, "dispatch_response_is_terminal_success")
+        response_reader = c_function_body(icd, "read_dispatch_response_status")
+        self.assertIn(r'\"stage\":\"%s\"', stage_matcher)
+        self.assertIn("dispatch_response_has_stage(line, terminal_stage)", terminal_helper)
+        self.assertIn(r'\"execution_implemented\":true', terminal_helper)
+        self.assertIn("parse_executor_json_u64_key_exact", terminal_helper)
+        terminal_branch = response_reader.split("if (terminal_response_required)", 1)[1].split(
+            'if (strstr(line, "\\\"stage\\\":\\\"vulkan-graphics-v6-describe\\\"") != NULL)', 1
         )[0]
-        self.assertIn('\\"valid\\":false', graphics_branch)
-        self.assertIn("dispatch_response_is_graphics_terminal_success(line)", graphics_branch)
-        self.assertIn("saw_nonterminal = true;", graphics_branch)
-        self.assertIn("continue;", graphics_branch)
+        self.assertIn(r'\"valid\":false', terminal_branch)
+        self.assertIn("dispatch_response_is_terminal_success(\n                    line, terminal_stage, expected_submit_id)", terminal_branch)
+        self.assertIn("dispatch_response_has_stage(line, terminal_stage)", terminal_branch)
+        self.assertIn("rc = -EPROTO;", terminal_branch)
+        self.assertIn("saw_nonterminal = true;", terminal_branch)
+        self.assertIn("continue;", terminal_branch)
         self.assertIn("rc = saw_nonterminal ? -EPROTO : -EIO;", response_reader)
+        graphics_sender = c_function_body(icd, "send_recorded_vulkan_graphics_v6_1_frame_range")
+        self.assertIn('"vulkan-graphics-v6-replay"', graphics_sender)
+
+    def test_vulkan_socket_transport_is_cloexec_sigpipe_and_partial_send_safe(self):
+        icd = VULKAN_ICD.read_text()
+        create_socket = c_function_body(icd, "create_unix_stream_socket_cloexec")
+        connect_submit = c_function_body(icd, "connect_submit_queue")
+        write_exact = c_function_body(icd, "write_exact_fd")
+        sendmsg_exact = c_function_body(icd, "sendmsg_exact_with_fds")
+        v5_sender = c_function_body(icd, "send_vulkan_dispatch_v5_frame_with_fds")
+        v6_sender = c_function_body(icd, "send_vulkan_graphics_v6_frame_with_fds")
+        capability_query = c_function_body(icd, "query_executor_advertisement_caps_line")
+
+        self.assertIn("SOCK_CLOEXEC", create_socket)
+        self.assertIn("FD_CLOEXEC", create_socket)
+        self.assertIn("if (queue->destroyed) return -EINVAL;", connect_submit)
+        self.assertIn("queue_transport_close(mutable_queue);", connect_submit)
+        self.assertIn("MSG_NOSIGNAL", write_exact)
+        self.assertIn("sendmsg(fd, &msg, MSG_NOSIGNAL)", sendmsg_exact)
+        self.assertIn("while (sent < 0 && errno == EINTR)", sendmsg_exact)
+        self.assertIn("if ((size_t)sent < size)", sendmsg_exact)
+        self.assertIn("without resending the ancillary data", sendmsg_exact)
+        self.assertIn("sendmsg_exact_with_fds(", v5_sender)
+        self.assertIn("sendmsg_exact_with_fds(", v6_sender)
+        self.assertIn("write_exact_fd(socket_fd, command", capability_query)
+        self.assertRegex(
+            icd,
+            r"static int query_executor_advertisement_caps_line\(\s*"
+            r"const PdockerGpuEndpointKey \*endpoint,",
+        )
+        self.assertEqual(1, icd.count("sendmsg("))
+
+    def test_gpu_executor_frames_before_lock_and_closes_poisoned_response_streams(self):
+        executor = GPU_EXECUTOR.read_text()
+        begin = c_function_body(executor, "executor_request_begin")
+        buffer_write = c_function_body(executor, "executor_response_buffer_write")
+        lock = c_function_body(executor, "executor_request_lock")
+        end = c_function_body(executor, "executor_request_end")
+        graphics = c_function_body(executor, "handle_vulkan_graphics_v6_frame")
+        dispatch_v5 = c_function_body(executor, "handle_vulkan_dispatch_v5_frame")
+        client = c_function_body(executor, "serve_socket_client_main")
+        configure = c_function_body(executor, "configure_executor_client_socket")
+
+        self.assertIn("static _Thread_local FILE *g_json_out", executor)
+        self.assertNotIn("open_memstream", executor)
+        self.assertIn("funopen(", begin)
+        self.assertIn("executor_response_buffer_write", begin)
+        self.assertIn("return request->buffer_error;", begin)
+        self.assertIn("PDOCKER_GPU_MAX_BUFFERED_RESPONSE_BYTES - request->size", buffer_write)
+        self.assertIn("request->buffer_error = -EFBIG", buffer_write)
+        self.assertIn("request->buffer_error = -ENOMEM", buffer_write)
+        self.assertNotIn("pthread_mutex_lock", begin)
+        self.assertIn("pthread_mutex_lock(&g_executor_request_mutex)", lock)
+        self.assertIn("g_executor_context_poisoned", lock)
+        self.assertLess(
+            graphics.index("read_exact_bytes(cfd, frame + sizeof(header), remaining)"),
+            graphics.index("executor_request_lock()"),
+        )
+        self.assertLess(
+            dispatch_v5.index("recv_vulkan_dispatch_v5_frame("),
+            dispatch_v5.index("executor_request_lock()"),
+        )
+        self.assertLess(
+            dispatch_v5.index("executor_request_lock()"),
+            dispatch_v5.index("run_vulkan_dispatch_fd("),
+        )
+        self.assertLess(
+            end.index("pthread_mutex_unlock(&g_executor_request_mutex)"),
+            end.index("fwrite(request->buffer"),
+        )
+        self.assertIn("fwrite(request->buffer", end)
+        self.assertIn("fflush(request->socket_out) != 0", end)
+        self.assertIn("g_executor_context_poisoned = 1", end)
+        self.assertNotIn("SO_RCVTIMEO", configure)
+        self.assertIn("SO_SNDTIMEO", configure)
+        self.assertLess(
+            client.index("wait_for_executor_request_start(cfd)"),
+            client.index("set_executor_receive_timeout("),
+        )
+        self.assertIn("set_executor_receive_timeout(cfd, 0)", client)
+        self.assertIn("if (executor_request_begin(out) != 0) break;", client)
+        self.assertIn("response_rc != 0", client)
+
+    def test_vulkan_advertisement_cache_is_endpoint_keyed_thread_safe_and_fork_aware(self):
+        icd = VULKAN_ICD.read_text()
+        snapshot = c_function_body(icd, "snapshot_gpu_endpoint")
+        query = c_function_body(icd, "query_executor_advertisement_caps_line")
+        get_caps = c_function_body(icd, "pdocker_vk_get_advertised_caps")
+        select_endpoint = c_function_body(icd, "advertised_caps_cache_select_endpoint_locked")
+        atfork_child = c_function_body(icd, "gpu_endpoint_atfork_child")
+        wrapper = c_function_body(icd, "pdocker_vk_advertised_caps")
+        queue_connect = c_function_body(icd, "connect_submit_queue")
+        queue_finish = c_function_body(icd, "finish_submit_queue_request")
+
+        self.assertIn("socket_device", icd)
+        self.assertIn("socket_inode", icd)
+        self.assertIn("transport_generation", icd)
+        self.assertIn("pthread_once", snapshot)
+        self.assertIn("S_ISSOCK", snapshot)
+        self.assertIn("next_gpu_endpoint_generation_locked", snapshot)
+        self.assertIn("pthread_atfork", icd)
+        self.assertNotIn("invalidate_gpu_endpoint_if_current", icd)
+        self.assertIn("connect_queue_path(endpoint->path)", query)
+        self.assertIn("while (r < 0 && errno == EINTR)", query)
+        self.assertIn("!saw_newline", query)
+        self.assertIn("snapshot_gpu_endpoint(&after)", query)
+        self.assertIn("!gpu_endpoint_key_equal(endpoint, &after)", query)
+        self.assertIn("PDOCKER_VK_CAPS_CACHE_QUERYING", icd)
+        self.assertIn("PDOCKER_VK_CAPS_CACHE_READY_POSITIVE", icd)
+        self.assertIn("PDOCKER_VK_CAPS_CACHE_READY_NEGATIVE", icd)
+        self.assertIn("g_advertised_caps_cond", icd)
+        self.assertIn("pthread_cond_wait", get_caps)
+        self.assertIn("pthread_cond_broadcast", get_caps)
+        self.assertIn("advertised_caps_negative_retry_after_ns", get_caps)
+        self.assertIn("query_rc == -ESTALE", get_caps)
+        self.assertIn("flight_id", select_endpoint)
+        self.assertIn("advertised_caps_cache_atfork_child_reset", atfork_child)
+        self.assertRegex(
+            icd,
+            r"static bool pdocker_vk_get_advertised_caps\(\s*"
+            r"PdockerVkAdvertisedCaps \*out\)",
+        )
+        self.assertIn("g_advertised_caps_snapshot", wrapper)
+        self.assertIn("mutable_queue->transport_generation != endpoint.generation", queue_connect)
+        self.assertNotIn("invalidate_gpu_endpoint_if_current", queue_finish)
+        self.assertIn("queue_transport_close(mutable_queue)", queue_finish)
+        self.assertNotIn("invalidate_gpu_endpoint_if_current", queue_connect)
+        self.assertIn("return duplicate_cloexec_fd(mutable_queue->transport_fd);", queue_connect)
+        self.assertNotIn("static bool queried", icd)
+
+    def test_vulkan_dispatch_v5_persistent_transport_has_negotiated_terminal_boundary(self):
+        icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
+        caps = c_function_body(executor, "print_vulkan_advertisement_caps")
+        parser = c_function_body(icd, "parse_executor_advertisement_caps_json")
+        handler = c_function_body(executor, "handle_vulkan_dispatch_v5_frame")
+        terminal = c_function_body(executor, "write_vulkan_dispatch_v5_terminal_success")
+        sender = c_function_body(icd, "send_generic_vulkan_dispatch_op")
+        self.assertIn(r'\"vulkan_dispatch_v5_terminal_response_supported\":true', caps)
+        self.assertIn('"vulkan_dispatch_v5_terminal_response_supported"', parser)
+        self.assertIn("caps->vulkan_dispatch_v5_terminal_response_supported", parser)
+        self.assertIn("executor_supports_vulkan_dispatch_v5_terminal_response", icd)
+        self.assertIn(r'\"stage\":\"vulkan-dispatch-v5-complete\"', terminal)
+        self.assertIn(r'\"execution_implemented\":true', terminal)
+        self.assertIn(r'\"submit_id\":%llu', terminal)
+        self.assertLess(handler.index("run_vulkan_dispatch_fd("), handler.index("write_vulkan_dispatch_v5_terminal_success(header.dispatch_id)"))
+        self.assertIn("persistent_v5_transport", sender)
+        self.assertIn("connect_submit_queue(submit_queue)", sender)
+        self.assertIn('persistent_v5_transport ? "vulkan-dispatch-v5-complete" : NULL', sender)
+        self.assertIn("persistent_v5_transport ? dispatch_id : 0", sender)
+        self.assertIn("connect_queue()", sender)
+        self.assertIn("Legacy V1-V4 text dispatch has no terminal response delimiter", sender)
 
     def test_vulkan_dispatch_v5_socket_path_is_magic_framed_not_line_framed(self):
         executor = GPU_EXECUTOR.read_text()
@@ -4631,9 +4785,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("recv_vulkan_dispatch_v5_frame", executor)
         self.assertIn("read_exact_bytes(cfd, frame + header_out->header_size", executor)
         self.assertIn("run_vulkan_dispatch_fd(\n        passed_fds[header.shader_fd_index], binding_fds", executor)
-        serve_loop = executor.split("for (;;) {\n            int graphics_v6_prefix = connection_starts_with_graphics_v6_magic", 1)[1].split(
-            "if (nread == -EMSGSIZE)", 1
-        )[0]
+        serve_loop = c_function_body(executor, "serve_socket_client_main")
         self.assertIn("handle_vulkan_graphics_v6_frame(cfd)", serve_loop)
         self.assertIn("handle_vulkan_dispatch_v5_frame(cfd)", serve_loop)
         self.assertIn("recv_command_with_fds(cfd, cmd", serve_loop)
@@ -4656,6 +4808,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "frame_ranges_do_not_overlap",
             "handle_vulkan_graphics_v6_frame",
             "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_SUBMIT",
+            "header->frame_size > PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_FRAME_BYTES",
             "header->frame_size > (uint64_t)SIZE_MAX",
             "PDOCKER_GPU_VULKAN_GRAPHICS_V6_SHADER_STAGE_SCHEMA_HASH",
             "PDOCKER_GPU_VULKAN_GRAPHICS_V6_PIPELINE_SCHEMA_HASH",
@@ -7431,9 +7584,7 @@ class GpuAbiContractTest(unittest.TestCase):
 
     def test_vulkan_dispatch_v5_1_object_transport_uses_native_plan_materializer_before_execution(self):
         executor = GPU_EXECUTOR.read_text()
-        handler = executor.split("static int handle_vulkan_dispatch_v5_frame", 1)[1].split(
-            "static int serve_socket", 1
-        )[0]
+        handler = c_function_body(executor, "handle_vulkan_dispatch_v5_frame")
         native_plan = "build_vulkan_dispatch_v5_native_plan"
         conversion = "materialize_vulkan_dispatch_v5_native_plan_bindings"
         self.assertIn(native_plan, handler)
@@ -7447,9 +7598,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("rc = dispatch_rc < 0 ? dispatch_rc : -EIO;", handler)
         self.assertIn("return rc;", handler)
         self.assertNotIn("(void)run_vulkan_dispatch_fd(", handler)
-        serve = c_function_body(executor, "serve_socket")
+        serve = c_function_body(executor, "serve_socket_client_main")
         self.assertIn("int v5_rc = handle_vulkan_dispatch_v5_frame(cfd);", serve)
-        self.assertIn("if (v5_rc != 0) break;", serve)
+        self.assertIn("int response_rc = executor_request_end();", serve)
+        self.assertIn("if (v5_rc != 0 || response_rc != 0) break;", serve)
         self.assertNotIn("(void)handle_vulkan_dispatch_v5_frame(cfd);", serve)
         self.assertNotIn("object materialization is pending", handler)
         self.assertLess(handler.index(native_plan), handler.index(conversion))
@@ -21648,9 +21800,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("PDOCKER_GPU_VULKAN_STRING_DISPATCH_OPTIONS", icd)
         self.assertIn("%s_hex=%s", icd)
         self.assertIn("invalid %s dispatch_id", icd)
-        self.assertIn("generic dispatch response status", icd)
-        self.assertIn("response_errno", icd)
-        self.assertIn("line_bytes", icd)
+        self.assertIn('socket_fd, "VULKAN_DISPATCH_TEXT", NULL, 0', icd)
+        self.assertIn("pdocker-vulkan-icd: %s dispatch response: %s", icd)
+        self.assertIn("read_dispatch_response_status", icd)
         self.assertIn("scm_rights_fd_count_seen", source)
         manifest = json.loads(LLAMA_GPU_ENV_MANIFEST.read_text())
         self.assertIn(
@@ -24555,10 +24707,14 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("dispatch_indirect_options = (char *)malloc(dispatch_indirect_option_size + 1u);", icd)
         self.assertIn("free(dispatch_indirect_options);", icd)
         self.assertIn("effective_option_text_size > SIZE_MAX - separator_len - (size_t)suffix_len - 1u", icd)
-        self.assertIn("per-call/per-thread state, never shared globally", icd)
-        self.assertIn("growth is geometric and capped", icd)
-        self.assertIn("if (next_cap < line_cap)", icd)
-        self.assertIn("rc = -EOVERFLOW", icd)
+        strict_text_reader = c_function_body(icd, "read_executor_text_response_line")
+        self.assertIn("bool line_terminated = false;", strict_text_reader)
+        self.assertIn("line_terminated = true;", strict_text_reader)
+        self.assertIn("line[0] != '{'", strict_text_reader)
+        self.assertIn("line[off - 2u] != '}'", strict_text_reader)
+        legacy_sender = c_function_body(icd, "send_generic_vulkan_dispatch_op")
+        self.assertIn('socket_fd, "VULKAN_DISPATCH_TEXT", NULL, 0', legacy_sender)
+        self.assertNotIn("response_read_calls", legacy_sender)
         self.assertIn("advertised_subgroup_size", icd)
         self.assertIn("parsed_env_subgroup_size", icd)
         self.assertIn("PDOCKER_VULKAN_SUBGROUP_SIZE", icd)
@@ -27031,12 +27187,10 @@ class GpuAbiContractTest(unittest.TestCase):
             "indexTypeUint8Usable",
         ]:
             self.assertIn(f'json_read_u32(json, "{usable_key}", &value)', parse_body)
-        query_body = icd.split("static int query_executor_advertisement_caps_line", 1)[1].split(
-            "static const PdockerVkAdvertisedCaps *pdocker_vk_advertised_caps", 1
-        )[0]
+        query_body = c_function_body(icd, "query_executor_advertisement_caps_line")
         self.assertIn("bool saw_newline = false;", query_body)
-        self.assertIn("!saw_newline && off + 1 >= line_cap", query_body)
-        self.assertIn("-EOVERFLOW", query_body)
+        self.assertIn("if (rc == 0 && !saw_newline)", query_body)
+        self.assertIn("off + 1 >= line_cap ? -EOVERFLOW : -EPROTO", query_body)
         advertised_image_body = icd.split("static VkFormatFeatureFlags pdocker_vk_advertised_image_features(VkFormat format) {", 1)[1].split(
             "static VkSampleCountFlags pdocker_vk_advertised_sample_counts", 1
         )[0]
@@ -27943,7 +28097,7 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(marker, sender)
         self.assertLess(
             sender.index("!executor_supports_vulkan_graphics_v635_event_command_provenance()"),
-            sender.index("int socket_fd = connect_queue();"),
+            sender.index("connect_submit_queue(submit_queue)"),
         )
         v635_capability = parser.split(
             "caps->vulkan_graphics_v635_event_command_provenance_supported =", 1

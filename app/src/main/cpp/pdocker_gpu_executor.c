@@ -8,6 +8,9 @@
  * The executor validates the Android-side GPU command boundary that later
  * backs a glibc-facing pdocker shim/command queue.
  */
+#ifndef _BSD_SOURCE
+#define _BSD_SOURCE 1
+#endif
 #include <EGL/egl.h>
 #include <GLES3/gl31.h>
 #include <vulkan/vulkan.h>
@@ -41,6 +44,7 @@
 #include <errno.h>
 #include <limits.h>
 #include <math.h>
+#include <pthread.h>
 #include <signal.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -51,9 +55,14 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
+#include <sys/time.h>
 #include <fcntl.h>
 #include <time.h>
 #include <unistd.h>
+
+#ifndef MSG_CMSG_CLOEXEC
+#define MSG_CMSG_CLOEXEC 0
+#endif
 
 #ifndef VK_KHR_8BIT_STORAGE_EXTENSION_NAME
 #define VK_KHR_8BIT_STORAGE_EXTENSION_NAME "VK_KHR_8bit_storage"
@@ -737,11 +746,171 @@ static const uint32_t kMatmul256Spv[] = {
     0x00010038,
 };
 
-static FILE *g_json_out = NULL;
+static _Thread_local FILE *g_json_out = NULL;
+static pthread_mutex_t g_executor_request_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t g_executor_client_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_executor_client_cond = PTHREAD_COND_INITIALIZER;
+static size_t g_executor_active_clients = 0;
 static uint64_t g_vulkan_dispatch_lifecycle_sequence = 0;
+static EGLDisplay g_executor_server_display = EGL_NO_DISPLAY;
+static EGLSurface g_executor_server_surface = EGL_NO_SURFACE;
+static EGLContext g_executor_server_context = EGL_NO_CONTEXT;
+static int g_executor_context_poisoned = 0;
+
+#define PDOCKER_GPU_MAX_ACTIVE_CLIENTS 32u
+#define PDOCKER_GPU_SOCKET_TIMEOUT_SECONDS 30
+#define PDOCKER_GPU_MAX_BUFFERED_RESPONSE_BYTES (8u * 1024u * 1024u)
+
+typedef struct {
+    FILE *socket_out;
+    FILE *buffer_out;
+    char *buffer;
+    size_t size;
+    size_t capacity;
+    int buffer_error;
+    int lock_held;
+    int egl_bound;
+} ExecutorRequestContext;
+
+static _Thread_local ExecutorRequestContext g_executor_request_context;
 
 static FILE *json_out(void) {
     return g_json_out ? g_json_out : stdout;
+}
+
+static int executor_response_buffer_write(
+        void *opaque,
+        const char *data,
+        int length) {
+    ExecutorRequestContext *request = (ExecutorRequestContext *)opaque;
+    if (!request || (!data && length > 0) || length < 0) {
+        errno = EINVAL;
+        return -1;
+    }
+    if (request->buffer_error != 0) {
+        errno = -request->buffer_error;
+        return -1;
+    }
+    size_t bytes = (size_t)length;
+    if (bytes > PDOCKER_GPU_MAX_BUFFERED_RESPONSE_BYTES - request->size) {
+        request->buffer_error = -EFBIG;
+        errno = EFBIG;
+        return -1;
+    }
+    size_t required = request->size + bytes;
+    if (required > request->capacity) {
+        size_t next_capacity = request->capacity ? request->capacity : 4096u;
+        while (next_capacity < required) {
+            if (next_capacity > PDOCKER_GPU_MAX_BUFFERED_RESPONSE_BYTES / 2u) {
+                next_capacity = PDOCKER_GPU_MAX_BUFFERED_RESPONSE_BYTES;
+                break;
+            }
+            next_capacity *= 2u;
+        }
+        char *next = (char *)realloc(request->buffer, next_capacity);
+        if (!next) {
+            request->buffer_error = -ENOMEM;
+            errno = ENOMEM;
+            return -1;
+        }
+        request->buffer = next;
+        request->capacity = next_capacity;
+    }
+    if (bytes > 0) memcpy(request->buffer + request->size, data, bytes);
+    request->size = required;
+    return length;
+}
+
+static int executor_request_begin(FILE *out) {
+    ExecutorRequestContext *request = &g_executor_request_context;
+    memset(request, 0, sizeof(*request));
+    request->socket_out = out;
+    request->buffer_out = funopen(
+        request, NULL, executor_response_buffer_write, NULL, NULL);
+    if (!request->buffer_out) {
+        request->buffer_error = -(errno ? errno : EIO);
+        return request->buffer_error;
+    }
+    if (setvbuf(request->buffer_out, NULL, _IONBF, 0) != 0) {
+        int err = errno ? errno : EIO;
+        fclose(request->buffer_out);
+        request->buffer_out = NULL;
+        request->buffer_error = -err;
+        return request->buffer_error;
+    }
+    g_json_out = request->buffer_out;
+    return 0;
+}
+
+static int executor_request_lock(void) {
+    ExecutorRequestContext *request = &g_executor_request_context;
+    if (request->lock_held) return 0;
+    int lock_rc = pthread_mutex_lock(&g_executor_request_mutex);
+    if (lock_rc != 0) return -lock_rc;
+    request->lock_held = 1;
+    if (g_executor_context_poisoned) {
+        request->lock_held = 0;
+        (void)pthread_mutex_unlock(&g_executor_request_mutex);
+        return -EIO;
+    }
+    if (g_executor_server_context != EGL_NO_CONTEXT) {
+        request->egl_bound = eglMakeCurrent(
+            g_executor_server_display,
+            g_executor_server_surface,
+            g_executor_server_surface,
+            g_executor_server_context) ? 1 : 0;
+        if (!request->egl_bound) {
+            fprintf(stderr,
+                    "pdocker-gpu-executor: worker eglMakeCurrent failed error=0x%x\n",
+                    (unsigned)eglGetError());
+            request->lock_held = 0;
+            (void)pthread_mutex_unlock(&g_executor_request_mutex);
+            return -EIO;
+        }
+    }
+    return 0;
+}
+
+static int executor_request_end(void) {
+    ExecutorRequestContext *request = &g_executor_request_context;
+    int rc = 0;
+    if (request->egl_bound) {
+        if (!eglMakeCurrent(
+                g_executor_server_display,
+                EGL_NO_SURFACE,
+                EGL_NO_SURFACE,
+                EGL_NO_CONTEXT)) {
+            fprintf(stderr,
+                    "pdocker-gpu-executor: worker EGL unbind failed error=0x%x\n",
+                    (unsigned)eglGetError());
+            g_executor_context_poisoned = 1;
+            rc = -EIO;
+        }
+        request->egl_bound = 0;
+    }
+    if (request->buffer_out && fflush(request->buffer_out) != 0) rc = -EIO;
+    if (request->buffer_error != 0) rc = request->buffer_error;
+    g_json_out = NULL;
+    if (request->lock_held) {
+        request->lock_held = 0;
+        if (pthread_mutex_unlock(&g_executor_request_mutex) != 0) rc = -EIO;
+    }
+
+    if (request->buffer_out) {
+        if (fclose(request->buffer_out) != 0) rc = -EIO;
+        request->buffer_out = NULL;
+        if (request->socket_out) {
+            if (request->size > 0 && request->buffer_error == 0 &&
+                fwrite(request->buffer, 1, request->size, request->socket_out) !=
+                    request->size) {
+                rc = -EIO;
+            }
+            if (fflush(request->socket_out) != 0) rc = -EIO;
+        }
+    }
+    free(request->buffer);
+    memset(request, 0, sizeof(*request));
+    return rc;
 }
 
 static double now_ms(void) {
@@ -22208,6 +22377,8 @@ static void print_vulkan_advertisement_caps(const char *transport) {
             "\"vulkan_ready\":%s,"
             "\"executor_build_marker\":\"%s\","
             "\"vulkan_dispatch_v5_frame\":true,"
+            "\"vulkan_dispatch_v5_terminal_response_supported\":true,"
+            "\"persistent_multiplexed_connections_supported\":true,"
             "\"vulkan_dispatch_v5_supported_minors\":[0,1,2,3,4,5,6,7,8,9],"
             "\"vulkan_dispatch_v5_resource_schema_hash\":\"0x%016llx\","
             "\"vulkan_dispatch_v5_resource_field_count\":%u,"
@@ -26335,6 +26506,25 @@ static int materialize_vulkan_dispatch_v5_native_plan_bindings(
     return 0;
 }
 
+static int ensure_received_fds_cloexec(int *fds, size_t count) {
+    if (!fds && count > 0) return -EINVAL;
+    for (size_t i = 0; i < count; ++i) {
+        if (fds[i] < 0) continue;
+        int flags = fcntl(fds[i], F_GETFD);
+        if (flags >= 0 && (flags & FD_CLOEXEC) != 0) continue;
+        if (flags >= 0 && fcntl(fds[i], F_SETFD, flags | FD_CLOEXEC) == 0) continue;
+        int err = errno ? errno : EIO;
+        for (size_t j = 0; j < count; ++j) {
+            if (fds[j] >= 0) {
+                close(fds[j]);
+                fds[j] = -1;
+            }
+        }
+        return -err;
+    }
+    return 0;
+}
+
 static int recv_vulkan_dispatch_v5_header_with_fds(
         int cfd,
         PdockerGpuVulkanDispatchV5FrameHeader *header,
@@ -26354,7 +26544,7 @@ static int recv_vulkan_dispatch_v5_header_with_fds(
     msg.msg_iovlen = 1;
     msg.msg_control = control;
     msg.msg_controllen = sizeof(control);
-    ssize_t n = recvmsg(cfd, &msg, MSG_WAITALL);
+    ssize_t n = recvmsg(cfd, &msg, MSG_WAITALL | MSG_CMSG_CLOEXEC);
     if (n <= 0) return n < 0 ? -errno : 0;
     for (struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
          cmsg;
@@ -26378,6 +26568,11 @@ static int recv_vulkan_dispatch_v5_header_with_fds(
         }
         *fd_count = 0;
         return -EMSGSIZE;
+    }
+    int cloexec_rc = ensure_received_fds_cloexec(passed_fds, *fd_count);
+    if (cloexec_rc != 0) {
+        *fd_count = 0;
+        return cloexec_rc;
     }
     return validate_vulkan_dispatch_v5_header(header, *fd_count);
 }
@@ -26534,6 +26729,7 @@ static int validate_vulkan_graphics_v6_header_prefix(
         return -EPROTO;
     }
     if (header->frame_size < header->header_size ||
+        header->frame_size > PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_FRAME_BYTES ||
         header->frame_size > (uint64_t)SIZE_MAX) {
         return -EMSGSIZE;
     }
@@ -44893,7 +45089,7 @@ static int recv_vulkan_graphics_v6_header_with_fds(
     msg.msg_iovlen = 1;
     msg.msg_control = control;
     msg.msg_controllen = sizeof(control);
-    ssize_t n = recvmsg(cfd, &msg, MSG_WAITALL);
+    ssize_t n = recvmsg(cfd, &msg, MSG_WAITALL | MSG_CMSG_CLOEXEC);
     if (n <= 0) return n < 0 ? -errno : 0;
     for (struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
          cmsg;
@@ -44910,6 +45106,11 @@ static int recv_vulkan_graphics_v6_header_with_fds(
     if ((size_t)n != sizeof(*header) ||
         (msg.msg_flags & (MSG_TRUNC | MSG_CTRUNC)) != 0) {
         return -EMSGSIZE;
+    }
+    int cloexec_rc = ensure_received_fds_cloexec(passed_fds, *fd_count);
+    if (cloexec_rc != 0) {
+        *fd_count = 0;
+        return cloexec_rc;
     }
     return validate_vulkan_graphics_v6_header_prefix(header, *fd_count);
 }
@@ -44969,6 +45170,11 @@ static int handle_vulkan_graphics_v6_frame(int cfd) {
         json_fail("vulkan-graphics-v6", strerror(-rc));
         goto fail_close;
     }
+    rc = executor_request_lock();
+    if (rc != 0) {
+        json_fail("executor-request-lock", strerror(-rc));
+        goto fail_close;
+    }
     describe_vulkan_graphics_v6_frame(json_out(), &view);
     (void)run_vulkan_graphics_v6_frame(&view);
     free(frame);
@@ -44983,6 +45189,24 @@ fail_close:
         if (passed_fds[i] >= 0) close(passed_fds[i]);
     }
     return -1;
+}
+
+static int write_vulkan_dispatch_v5_terminal_success(uint64_t submit_id) {
+    FILE *out = json_out();
+    if (!out) return -EIO;
+    int written = fprintf(
+        out,
+        "{\"executor\":\"pdocker-gpu-executor\","
+        "\"api\":\"%s\",\"abi_version\":\"%s\","
+        "\"command\":\"VULKAN_DISPATCH_V5_COMPLETE\","
+        "\"stage\":\"vulkan-dispatch-v5-complete\","
+        "\"valid\":true,\"execution_implemented\":true,"
+        "\"submit_id\":%llu}\n",
+        PDOCKER_GPU_COMMAND_API,
+        PDOCKER_GPU_ABI_VERSION,
+        (unsigned long long)submit_id);
+    if (written < 0 || fflush(out) != 0) return -EIO;
+    return 0;
 }
 
 static int handle_vulkan_dispatch_v5_frame(int cfd) {
@@ -45002,6 +45226,11 @@ static int handle_vulkan_dispatch_v5_frame(int cfd) {
         cfd, &frame, &header, passed_fds, PDOCKER_GPU_MAX_PASSED_FDS, &passed_fd_count);
     if (rc != 0) {
         json_fail("vulkan-dispatch-v5", strerror(-rc));
+        goto cleanup;
+    }
+    rc = executor_request_lock();
+    if (rc != 0) {
+        json_fail("executor-request-lock", strerror(-rc));
         goto cleanup;
     }
     VulkanDispatchV5NativePlan native_plan;
@@ -45196,6 +45425,10 @@ static int handle_vulkan_dispatch_v5_frame(int cfd) {
         rc = dispatch_rc < 0 ? dispatch_rc : -EIO;
         goto cleanup;
     }
+    /* run_vulkan_dispatch_fd may emit one or more diagnostic success events.
+     * This final protocol event is the only success delimiter that permits a
+     * framed V5 connection to carry the next request without response bleed. */
+    rc = write_vulkan_dispatch_v5_terminal_success(header.dispatch_id);
 cleanup:
     free(option_copy);
     free(entry_name);
@@ -45218,100 +45451,613 @@ static int recv_command_with_fds(
         size_t max_fds,
         size_t *fd_count,
         PdockerReceiveEvidence *evidence) {
-    if (!cmd || cmd_size == 0 || !passed_fds || !fd_count) return -EINVAL;
+    if (!cmd || cmd_size < 2 || !passed_fds || !fd_count) return -EINVAL;
     *fd_count = 0;
     if (evidence) memset(evidence, 0, sizeof(*evidence));
     for (size_t i = 0; i < max_fds; ++i) passed_fds[i] = -1;
+
+    char first = 0;
     char control[CMSG_SPACE(sizeof(int) * PDOCKER_GPU_MAX_PASSED_FDS)];
-    struct iovec iov;
+    struct iovec iov = {.iov_base = &first, .iov_len = 1};
     struct msghdr msg;
     memset(control, 0, sizeof(control));
-    memset(&iov, 0, sizeof(iov));
     memset(&msg, 0, sizeof(msg));
-    iov.iov_base = cmd;
-    iov.iov_len = cmd_size - 1;
     msg.msg_iov = &iov;
     msg.msg_iovlen = 1;
     msg.msg_control = control;
     msg.msg_controllen = sizeof(control);
-    ssize_t n = recvmsg(cfd, &msg, 0);
-    if (n <= 0) return (int)n;
-    if ((size_t)n >= cmd_size) {
-        if (evidence) {
-            evidence->valid = 1;
-            evidence->raw_command_bytes = (size_t)n;
-            evidence->raw_command_hash = reconcile_bytes_hash(cmd, cmd_size ? cmd_size - 1 : 0);
-            evidence->msg_flags = msg.msg_flags | MSG_TRUNC;
-            evidence->msg_trunc = 1;
-            evidence->msg_ctrunc = (msg.msg_flags & MSG_CTRUNC) ? 1 : 0;
+
+    ssize_t n;
+    do {
+        n = recvmsg(cfd, &msg, MSG_CMSG_CLOEXEC);
+    } while (n < 0 && errno == EINTR);
+    if (n <= 0) return n < 0 ? -errno : 0;
+    if (n != 1 || (msg.msg_flags & (MSG_TRUNC | MSG_CTRUNC)) != 0) {
+        for (struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
+             cmsg;
+             cmsg = CMSG_NXTHDR(&msg, cmsg)) {
+            if (cmsg->cmsg_level != SOL_SOCKET ||
+                cmsg->cmsg_type != SCM_RIGHTS) continue;
+            size_t count =
+                (cmsg->cmsg_len - CMSG_LEN(0)) / sizeof(int);
+            int *received = (int *)CMSG_DATA(cmsg);
+            for (size_t i = 0; i < count; ++i) {
+                if (received[i] >= 0) close(received[i]);
+            }
         }
         return -EMSGSIZE;
     }
+
+    size_t seen_fds = 0;
+    for (struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
+         cmsg;
+         cmsg = CMSG_NXTHDR(&msg, cmsg)) {
+        if (cmsg->cmsg_level != SOL_SOCKET ||
+            cmsg->cmsg_type != SCM_RIGHTS ||
+            cmsg->cmsg_len < CMSG_LEN(sizeof(int))) {
+            continue;
+        }
+        size_t count =
+            (cmsg->cmsg_len - CMSG_LEN(0)) / sizeof(int);
+        int *received = (int *)CMSG_DATA(cmsg);
+        seen_fds += count;
+        for (size_t i = 0; i < count; ++i) {
+            if (*fd_count < max_fds) {
+                passed_fds[(*fd_count)++] = received[i];
+            } else if (received[i] >= 0) {
+                close(received[i]);
+            }
+        }
+    }
+    if (evidence) {
+        evidence->scm_rights_fd_count_seen = seen_fds;
+        evidence->scm_rights_fd_count_copied = *fd_count;
+        evidence->msg_flags = msg.msg_flags;
+    }
+    int cloexec_rc = ensure_received_fds_cloexec(passed_fds, *fd_count);
+    if (cloexec_rc != 0) {
+        *fd_count = 0;
+        return cloexec_rc;
+    }
+
+    size_t off = 0;
+    cmd[off++] = first;
+    while (cmd[off - 1] != '\n') {
+        if (off + 1 >= cmd_size) {
+            for (size_t i = 0; i < *fd_count; ++i) {
+                if (passed_fds[i] >= 0) {
+                    close(passed_fds[i]);
+                    passed_fds[i] = -1;
+                }
+            }
+            *fd_count = 0;
+            return -EMSGSIZE;
+        }
+        char ch = 0;
+        do {
+            n = recv(cfd, &ch, 1, 0);
+        } while (n < 0 && errno == EINTR);
+        if (n < 0) {
+            int err = errno;
+            for (size_t i = 0; i < *fd_count; ++i) {
+                if (passed_fds[i] >= 0) {
+                    close(passed_fds[i]);
+                    passed_fds[i] = -1;
+                }
+            }
+            *fd_count = 0;
+            return -err;
+        }
+        if (n == 0) {
+            for (size_t i = 0; i < *fd_count; ++i) {
+                if (passed_fds[i] >= 0) {
+                    close(passed_fds[i]);
+                    passed_fds[i] = -1;
+                }
+            }
+            *fd_count = 0;
+            return -EPROTO;
+        }
+        cmd[off++] = ch;
+    }
+    cmd[off] = '\0';
+
     if (evidence) {
         evidence->valid = 1;
-        evidence->raw_command_bytes = (size_t)n;
-        evidence->raw_command_hash = reconcile_bytes_hash(cmd, (size_t)n);
-        evidence->msg_flags = msg.msg_flags;
-        evidence->msg_trunc = (msg.msg_flags & MSG_TRUNC) ? 1 : 0;
-        evidence->msg_ctrunc = (msg.msg_flags & MSG_CTRUNC) ? 1 : 0;
+        evidence->raw_command_bytes = off;
+        evidence->raw_command_hash = reconcile_bytes_hash(cmd, off);
     }
-    cmd[n] = '\0';
     cmd[strcspn(cmd, "\r\n")] = '\0';
     if (evidence) {
         evidence->command_bytes = strlen(cmd);
-        evidence->command_hash = reconcile_bytes_hash(cmd, evidence->command_bytes);
+        evidence->command_hash =
+            reconcile_bytes_hash(cmd, evidence->command_bytes);
         const char *reconcile_tail = strstr(cmd, " dispatch_id=");
         if (reconcile_tail) {
             evidence->core_command_hash_comparable = 1;
-            evidence->core_command_bytes = (size_t)(reconcile_tail - cmd);
-            evidence->core_command_hash =
-                reconcile_bytes_hash(cmd, evidence->core_command_bytes);
+            evidence->core_command_bytes =
+                (size_t)(reconcile_tail - cmd);
+            evidence->core_command_hash = reconcile_bytes_hash(
+                cmd, evidence->core_command_bytes);
         } else {
             evidence->core_command_hash_comparable = 0;
             evidence->core_command_bytes = evidence->command_bytes;
             evidence->core_command_hash = evidence->command_hash;
         }
     }
-    for (struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
-         cmsg != NULL;
-         cmsg = CMSG_NXTHDR(&msg, cmsg)) {
-        if (cmsg->cmsg_level == SOL_SOCKET && cmsg->cmsg_type == SCM_RIGHTS &&
-            cmsg->cmsg_len >= CMSG_LEN(sizeof(int))) {
-            size_t bytes = cmsg->cmsg_len - CMSG_LEN(0);
-            size_t count = bytes / sizeof(int);
-            if (evidence) evidence->scm_rights_fd_count_seen += count;
-            int *received = (int *)CMSG_DATA(cmsg);
-            size_t copy = count;
-            if (copy > max_fds) copy = max_fds;
-            for (size_t i = 0; i < copy; ++i) {
-                passed_fds[i] = received[i];
-            }
-            for (size_t i = copy; i < count; ++i) {
-                if (received[i] >= 0) {
-                    close(received[i]);
-                }
-            }
-            *fd_count = copy;
+    return (int)off;
+}
+
+static int set_executor_receive_timeout(int fd, int seconds) {
+    if (fd < 0 || seconds < 0) return -EINVAL;
+    const struct timeval timeout = {
+        .tv_sec = seconds,
+        .tv_usec = 0,
+    };
+    if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) != 0) {
+        return -errno;
+    }
+    return 0;
+}
+
+static int configure_executor_client_socket(int fd) {
+    if (fd < 0) return -EINVAL;
+    int flags = fcntl(fd, F_GETFD);
+    if (flags < 0 || fcntl(fd, F_SETFD, flags | FD_CLOEXEC) != 0) {
+        return -errno;
+    }
+    const struct timeval send_timeout = {
+        .tv_sec = PDOCKER_GPU_SOCKET_TIMEOUT_SECONDS,
+        .tv_usec = 0,
+    };
+    if (setsockopt(
+            fd, SOL_SOCKET, SO_SNDTIMEO,
+            &send_timeout, sizeof(send_timeout)) != 0) {
+        return -errno;
+    }
+    return set_executor_receive_timeout(fd, 0);
+}
+
+static int wait_for_executor_request_start(int fd) {
+    if (fd < 0) return -EINVAL;
+    char first = 0;
+    for (;;) {
+        ssize_t n = recv(fd, &first, 1, MSG_PEEK);
+        if (n > 0) return 1;
+        if (n == 0) return 0;
+        if (errno == EINTR) continue;
+        return -errno;
+    }
+}
+
+static int duplicate_executor_socket_cloexec(int fd) {
+    int duplicate = -1;
+#ifdef F_DUPFD_CLOEXEC
+    duplicate = fcntl(fd, F_DUPFD_CLOEXEC, 0);
+    if (duplicate >= 0) return duplicate;
+    if (errno != EINVAL) return -errno;
+#endif
+    duplicate = dup(fd);
+    if (duplicate < 0) return -errno;
+    int flags = fcntl(duplicate, F_GETFD);
+    if (flags < 0 || fcntl(duplicate, F_SETFD, flags | FD_CLOEXEC) != 0) {
+        int err = errno;
+        close(duplicate);
+        return -err;
+    }
+    return duplicate;
+}
+
+static int executor_client_slot_acquire(void) {
+    int lock_rc = pthread_mutex_lock(&g_executor_client_mutex);
+    if (lock_rc != 0) return -lock_rc;
+    int rc = 0;
+    if (g_executor_active_clients >= PDOCKER_GPU_MAX_ACTIVE_CLIENTS) {
+        rc = -EAGAIN;
+    } else {
+        g_executor_active_clients++;
+    }
+    (void)pthread_mutex_unlock(&g_executor_client_mutex);
+    return rc;
+}
+
+static void executor_client_slot_release(void) {
+    if (pthread_mutex_lock(&g_executor_client_mutex) != 0) return;
+    if (g_executor_active_clients > 0) g_executor_active_clients--;
+    if (g_executor_active_clients == 0) {
+        (void)pthread_cond_broadcast(&g_executor_client_cond);
+    }
+    (void)pthread_mutex_unlock(&g_executor_client_mutex);
+}
+
+static void executor_wait_for_clients(void) {
+    if (pthread_mutex_lock(&g_executor_client_mutex) != 0) return;
+    while (g_executor_active_clients > 0) {
+        (void)pthread_cond_wait(
+            &g_executor_client_cond, &g_executor_client_mutex);
+    }
+    (void)pthread_mutex_unlock(&g_executor_client_mutex);
+}
+
+static void *serve_socket_client_main(void *opaque) {
+    int cfd = (int)(intptr_t)opaque;
+    int out_fd = duplicate_executor_socket_cloexec(cfd);
+    FILE *out = out_fd >= 0 ? fdopen(out_fd, "w") : NULL;
+    if (!out) {
+        if (out_fd >= 0) close(out_fd);
+        close(cfd);
+        executor_client_slot_release();
+        return NULL;
+    }
+    setvbuf(out, NULL, _IONBF, 0);
+    char cmd[PDOCKER_GPU_MAX_COMMAND_BYTES];
+    RegisteredVectorBuffer registered;
+    memset(&registered, 0, sizeof(registered));
+    for (;;) {
+        int request_start_rc = wait_for_executor_request_start(cfd);
+        if (request_start_rc < 0) {
+            if (executor_request_begin(out) != 0) break;
+            json_fail("request-start", strerror(-request_start_rc));
+            (void)executor_request_end();
             break;
         }
-    }
-    if (evidence) evidence->scm_rights_fd_count_copied = *fd_count;
-    if (msg.msg_flags & (MSG_TRUNC | MSG_CTRUNC)) {
-        fprintf(stderr,
-                "pdocker-gpu-executor: recvmsg control/data truncated flags=0x%x raw_bytes=%zu fds=%zu\n",
-                msg.msg_flags,
-                (size_t)n,
-                *fd_count);
-        for (size_t i = 0; i < *fd_count; ++i) {
-            if (passed_fds[i] >= 0) {
-                close(passed_fds[i]);
-                passed_fds[i] = -1;
-            }
+        if (request_start_rc == 0) break;
+        int timeout_rc = set_executor_receive_timeout(
+            cfd, PDOCKER_GPU_SOCKET_TIMEOUT_SECONDS);
+        if (timeout_rc != 0) {
+            if (executor_request_begin(out) != 0) break;
+            json_fail("request-timeout", strerror(-timeout_rc));
+            (void)executor_request_end();
+            break;
         }
-        *fd_count = 0;
-        return -EMSGSIZE;
+        int graphics_v6_prefix = connection_starts_with_graphics_v6_magic(cfd);
+        if (graphics_v6_prefix < 0) {
+            if (executor_request_begin(out) != 0) break;
+            json_fail("recvmsg", strerror(-graphics_v6_prefix));
+            (void)executor_request_end();
+            break;
+        }
+        if (graphics_v6_prefix > 0) {
+            if (executor_request_begin(out) != 0) break;
+            int graphics_rc = handle_vulkan_graphics_v6_frame(cfd);
+            int response_rc = executor_request_end();
+            if (graphics_rc != 0 || response_rc != 0) break;
+            if (set_executor_receive_timeout(cfd, 0) != 0) break;
+            continue;
+        }
+        int v5_prefix = connection_starts_with_v5_magic(cfd);
+        if (v5_prefix < 0) {
+            if (executor_request_begin(out) != 0) break;
+            json_fail("recvmsg", strerror(-v5_prefix));
+            (void)executor_request_end();
+            break;
+        }
+        if (v5_prefix > 0) {
+            if (executor_request_begin(out) != 0) break;
+            int v5_rc = handle_vulkan_dispatch_v5_frame(cfd);
+            int response_rc = executor_request_end();
+            if (v5_rc != 0 || response_rc != 0) break;
+            if (set_executor_receive_timeout(cfd, 0) != 0) break;
+            continue;
+        }
+        int passed_fds[PDOCKER_GPU_MAX_PASSED_FDS];
+        size_t passed_fd_count = 0;
+        PdockerReceiveEvidence receive_evidence;
+        int nread = recv_command_with_fds(cfd, cmd, sizeof(cmd),
+                                          passed_fds,
+                                          PDOCKER_GPU_MAX_PASSED_FDS,
+                                          &passed_fd_count,
+                                          &receive_evidence);
+        if (nread == -EMSGSIZE) {
+            if (executor_request_begin(out) != 0) break;
+            json_fail("recvmsg", "message truncated (MSG_TRUNC/MSG_CTRUNC)");
+            (void)executor_request_end();
+            break;
+        }
+        if (nread < 0) {
+            if (executor_request_begin(out) != 0) break;
+            json_fail("recvmsg", strerror(-nread));
+            (void)executor_request_end();
+            break;
+        }
+        if (nread == 0) break;
+        if (executor_request_begin(out) != 0) break;
+        int request_lock_rc = executor_request_lock();
+        if (request_lock_rc != 0) {
+            json_fail("executor-request-lock", strerror(-request_lock_rc));
+            for (size_t i = 0;
+                 i < passed_fd_count && i < PDOCKER_GPU_MAX_PASSED_FDS;
+                 ++i) {
+                if (passed_fds[i] >= 0) close(passed_fds[i]);
+            }
+            (void)executor_request_end();
+            break;
+        }
+        if (strcmp(cmd, "CAPABILITIES") == 0) {
+            print_capabilities("unix-socket-command-queue");
+        } else if (strcmp(cmd, "VULKAN_ADVERTISEMENT_CAPS") == 0) {
+            print_vulkan_advertisement_caps("unix-socket-command-queue");
+        } else if (strcmp(cmd, "NOOP") == 0) {
+            print_noop();
+        } else if (strcmp(cmd, "VECTOR_ADD") == 0) {
+            (void)run_vector_add();
+        } else if (strncmp(cmd, "VECTOR_ADD_FD ", 14) == 0) {
+            size_t n = (size_t)strtoull(cmd + 14, NULL, 10);
+            (void)run_vector_add_fd(passed_fds[0], n, GPU_API_AUTO);
+            passed_fds[0] = -1;
+        } else if (strncmp(cmd, "REGISTER_VECTOR_FD ", 19) == 0) {
+            size_t n = (size_t)strtoull(cmd + 19, NULL, 10);
+            (void)register_vector_buffer(&registered, passed_fds[0], n);
+            passed_fds[0] = -1;
+        } else if (strcmp(cmd, "VECTOR_ADD_REGISTERED") == 0) {
+            (void)run_registered_vector_add(&registered);
+        } else if (strncmp(cmd, "OPENCL_VECTOR_ADD_3FD ", 22) == 0) {
+            size_t n = (size_t)strtoull(cmd + 22, NULL, 10);
+            if (passed_fd_count < 3) {
+                json_fail("fd", "OPENCL_VECTOR_ADD_3FD requires three fds");
+            } else {
+                (void)run_vector_add_3fd(passed_fds[0], passed_fds[1], passed_fds[2], n, GPU_API_OPENCL);
+                passed_fds[0] = passed_fds[1] = passed_fds[2] = -1;
+            }
+        } else if (strncmp(cmd, "VULKAN_VECTOR_ADD_3FD ", 22) == 0) {
+            size_t n = (size_t)strtoull(cmd + 22, NULL, 10);
+            if (passed_fd_count < 3) {
+                json_fail("fd", "VULKAN_VECTOR_ADD_3FD requires three fds");
+            } else {
+                (void)run_vector_add_3fd(passed_fds[0], passed_fds[1], passed_fds[2], n, GPU_API_VULKAN);
+                passed_fds[0] = passed_fds[1] = passed_fds[2] = -1;
+            }
+        } else if (strncmp(cmd, "VECTOR_ADD_3FD ", 15) == 0) {
+            size_t n = (size_t)strtoull(cmd + 15, NULL, 10);
+            if (passed_fd_count < 3) {
+                json_fail("fd", "VECTOR_ADD_3FD requires three fds");
+            } else {
+                (void)run_vector_add_3fd(passed_fds[0], passed_fds[1], passed_fds[2], n, GPU_API_AUTO);
+                passed_fds[0] = passed_fds[1] = passed_fds[2] = -1;
+            }
+        } else if (strncmp(cmd, "VULKAN_EVENT_", 13) == 0) {
+            (void)handle_vulkan_event_command(cmd);
+        } else if (strncmp(cmd, "VULKAN_SEMAPHORE_", 17) == 0) {
+            (void)handle_vulkan_semaphore_command(cmd);
+        } else if (strncmp(cmd, "VULKAN_FENCE_", 13) == 0) {
+            (void)handle_vulkan_fence_command(cmd);
+        } else if (strncmp(cmd, "VULKAN_DISPATCH_V2 ", 19) == 0 ||
+                   strncmp(cmd, "VULKAN_DISPATCH_V3 ", 19) == 0 ||
+                   strncmp(cmd, "VULKAN_DISPATCH_V4 ", 19) == 0) {
+            const int dispatch_v3 = strncmp(cmd, "VULKAN_DISPATCH_V3 ", 19) == 0;
+            const int dispatch_v4 = strncmp(cmd, "VULKAN_DISPATCH_V4 ", 19) == 0;
+            char *save = NULL;
+            char *cursor = cmd + 19;
+            char *tok = strtok_r(cursor, " ", &save);
+            size_t shader_size = tok ? (size_t)strtoull(tok, NULL, 10) : 0;
+            tok = strtok_r(NULL, " ", &save);
+            size_t binding_count = tok ? (size_t)strtoull(tok, NULL, 10) : 0;
+            tok = strtok_r(NULL, " ", &save);
+            size_t push_size = tok ? (size_t)strtoull(tok, NULL, 10) : 0;
+            tok = strtok_r(NULL, " ", &save);
+            uint32_t gx = tok ? (uint32_t)strtoul(tok, NULL, 10) : 0;
+            tok = strtok_r(NULL, " ", &save);
+            uint32_t gy = tok ? (uint32_t)strtoul(tok, NULL, 10) : 0;
+            tok = strtok_r(NULL, " ", &save);
+            uint32_t gz = tok ? (uint32_t)strtoul(tok, NULL, 10) : 0;
+            tok = strtok_r(NULL, " ", &save);
+            const char *push_hex = tok ? tok : "-";
+            tok = strtok_r(NULL, " ", &save);
+            const char *entry_hex = tok ? tok : "-";
+            tok = strtok_r(NULL, " ", &save);
+            size_t specialization_count = tok ? (size_t)strtoull(tok, NULL, 10) : 0;
+            tok = strtok_r(NULL, " ", &save);
+            size_t specialization_data_size = tok ? (size_t)strtoull(tok, NULL, 10) : 0;
+            tok = strtok_r(NULL, " ", &save);
+            const char *specialization_hex = tok ? tok : "-";
+            uint8_t push[PDOCKER_GPU_MAX_PUSH_BYTES];
+            char entry_name[PDOCKER_GPU_MAX_VULKAN_ENTRY_NAME];
+            uint8_t specialization_data[PDOCKER_GPU_MAX_VULKAN_SPECIALIZATION_BYTES];
+            VulkanDispatchSpecialization specializations[PDOCKER_GPU_MAX_VULKAN_SPECIALIZATION_ENTRIES];
+            VulkanDispatchBinding *bindings = NULL;
+            VulkanDispatchOptions options;
+            memset(push, 0, sizeof(push));
+            memset(entry_name, 0, sizeof(entry_name));
+            memset(specialization_data, 0, sizeof(specialization_data));
+            memset(specializations, 0, sizeof(specializations));
+            memset(&options, 0, sizeof(options));
+            options.has_receive_evidence = receive_evidence.valid;
+            options.receive_evidence = receive_evidence;
+            int parse_ok = 1;
+            if (binding_count == 0 || binding_count > PDOCKER_GPU_VULKAN_TEXT_DISPATCH_MAX_BINDINGS ||
+                push_size > PDOCKER_GPU_MAX_PUSH_BYTES ||
+                specialization_count > PDOCKER_GPU_MAX_VULKAN_SPECIALIZATION_ENTRIES ||
+                specialization_data_size > PDOCKER_GPU_MAX_VULKAN_SPECIALIZATION_BYTES ||
+                passed_fd_count < 1 + binding_count) {
+                parse_ok = 0;
+            }
+            if (parse_ok) {
+                bindings = (VulkanDispatchBinding *)calloc(binding_count, sizeof(*bindings));
+                if (!bindings) parse_ok = 0;
+            }
+            if (parse_ok && push_size > 0) {
+                int decoded = hex_decode(push_hex, push, sizeof(push));
+                if (decoded < 0 || (size_t)decoded != push_size) parse_ok = 0;
+            } else if (parse_ok && strcmp(push_hex, "-") != 0) {
+                parse_ok = 0;
+            }
+            if (parse_ok && strcmp(entry_hex, "-") != 0) {
+                int decoded = hex_decode(entry_hex, (uint8_t *)entry_name, sizeof(entry_name) - 1);
+                if (decoded <= 0 || (size_t)decoded >= sizeof(entry_name)) parse_ok = 0;
+                else entry_name[decoded] = '\0';
+            } else if (parse_ok) {
+                snprintf(entry_name, sizeof(entry_name), "main");
+            }
+            if (parse_ok && specialization_data_size > 0) {
+                int decoded = hex_decode(specialization_hex, specialization_data, sizeof(specialization_data));
+                if (decoded < 0 || (size_t)decoded != specialization_data_size) parse_ok = 0;
+            } else if (parse_ok && strcmp(specialization_hex, "-") != 0) {
+                parse_ok = 0;
+            }
+            for (size_t i = 0; parse_ok && i < specialization_count; ++i) {
+                tok = strtok_r(NULL, " ", &save);
+                if (!tok) { parse_ok = 0; break; }
+                specializations[i].constant_id = (uint32_t)strtoul(tok, NULL, 10);
+                tok = strtok_r(NULL, " ", &save);
+                if (!tok) { parse_ok = 0; break; }
+                specializations[i].offset = (uint32_t)strtoul(tok, NULL, 10);
+                tok = strtok_r(NULL, " ", &save);
+                if (!tok) { parse_ok = 0; break; }
+                specializations[i].size = (size_t)strtoull(tok, NULL, 10);
+            }
+            for (size_t i = 0; parse_ok && i < binding_count; ++i) {
+                if (dispatch_v4) {
+                    tok = strtok_r(NULL, " ", &save);
+                    if (!tok) { parse_ok = 0; break; }
+                    bindings[i].descriptor_set = (uint32_t)strtoul(tok, NULL, 10);
+                }
+                tok = strtok_r(NULL, " ", &save);
+                if (!tok) { parse_ok = 0; break; }
+                bindings[i].binding = (uint32_t)strtoul(tok, NULL, 10);
+                tok = strtok_r(NULL, " ", &save);
+                if (!tok) { parse_ok = 0; break; }
+                bindings[i].offset = (off_t)strtoll(tok, NULL, 10);
+                tok = strtok_r(NULL, " ", &save);
+                if (!tok) { parse_ok = 0; break; }
+                bindings[i].size = (size_t)strtoull(tok, NULL, 10);
+                tok = strtok_r(NULL, " ", &save);
+                if (!tok) { parse_ok = 0; break; }
+                bindings[i].api_offset = (off_t)strtoll(tok, NULL, 10);
+                bindings[i].api_base_offset = bindings[i].api_offset;
+                tok = strtok_r(NULL, " ", &save);
+                if (!tok) { parse_ok = 0; break; }
+                bindings[i].api_range = (size_t)strtoull(tok, NULL, 10);
+                tok = strtok_r(NULL, " ", &save);
+                if (!tok) { parse_ok = 0; break; }
+                bindings[i].api_buffer_size = (size_t)strtoull(tok, NULL, 10);
+                tok = strtok_r(NULL, " ", &save);
+                if (!tok) { parse_ok = 0; break; }
+                bindings[i].api_descriptor_type = (uint32_t)strtoul(tok, NULL, 10);
+                tok = strtok_r(NULL, " ", &save);
+                if (!tok) { parse_ok = 0; break; }
+                bindings[i].api_dynamic = (int)strtol(tok, NULL, 10);
+                tok = strtok_r(NULL, " ", &save);
+                if (!tok) { parse_ok = 0; break; }
+                bindings[i].api_memory_offset = (off_t)strtoll(tok, NULL, 10);
+                if (dispatch_v3 || dispatch_v4) {
+                    tok = strtok_r(NULL, " ", &save);
+                    if (!tok) { parse_ok = 0; break; }
+                    bindings[i].api_memory_size = (size_t)strtoull(tok, NULL, 10);
+                    tok = strtok_r(NULL, " ", &save);
+                    if (!tok) { parse_ok = 0; break; }
+                    bindings[i].api_memory_id = (uint64_t)strtoull(tok, NULL, 10);
+                    tok = strtok_r(NULL, " ", &save);
+                    if (!tok) { parse_ok = 0; break; }
+                    bindings[i].api_buffer_id = (uint64_t)strtoull(tok, NULL, 10);
+                }
+            }
+            while (parse_ok && (tok = strtok_r(NULL, " ", &save)) != NULL) {
+                if (parse_vulkan_dispatch_option(&options, tok) != 0) {
+                    parse_ok = 0;
+                }
+            }
+            if (parse_ok && dispatch_v4 &&
+                (!options.sender_reconcile.has_v4_binding_schema ||
+                 options.sender_reconcile.v4_binding_schema !=
+                    PDOCKER_GPU_VULKAN_DISPATCH_V4_BINDING_SCHEMA_HASH)) {
+                parse_ok = 0;
+            }
+            if (parse_ok && dispatch_v4 &&
+                (!options.sender_reconcile.has_v4_binding_field_count ||
+                 options.sender_reconcile.v4_binding_field_count !=
+                    PDOCKER_GPU_VULKAN_DISPATCH_V4_BINDING_FIELD_COUNT)) {
+                parse_ok = 0;
+            }
+            if (!parse_ok) {
+                json_fail("vulkan-dispatch", "invalid command");
+            } else {
+                (void)run_vulkan_dispatch_fd(passed_fds[0], &passed_fds[1], bindings, binding_count,
+                                             NULL, 0, NULL,
+                                             shader_size, entry_name,
+                                             specializations, specialization_count,
+                                             specialization_data, specialization_data_size,
+                                             &options,
+                                             push, push_size, gx, gy, gz,
+                                             options.has_base_group ? options.base_group_x : 0,
+                                             options.has_base_group ? options.base_group_y : 0,
+                                             options.has_base_group ? options.base_group_z : 0,
+                                             VK_NULL_HANDLE);
+            }
+            free(bindings);
+        } else if (strncmp(cmd, "VULKAN_DISPATCH_V1 ", 19) == 0) {
+            char *save = NULL;
+            char *cursor = cmd + 19;
+            char *tok = strtok_r(cursor, " ", &save);
+            size_t shader_size = tok ? (size_t)strtoull(tok, NULL, 10) : 0;
+            tok = strtok_r(NULL, " ", &save);
+            size_t binding_count = tok ? (size_t)strtoull(tok, NULL, 10) : 0;
+            tok = strtok_r(NULL, " ", &save);
+            size_t push_size = tok ? (size_t)strtoull(tok, NULL, 10) : 0;
+            tok = strtok_r(NULL, " ", &save);
+            uint32_t gx = tok ? (uint32_t)strtoul(tok, NULL, 10) : 0;
+            tok = strtok_r(NULL, " ", &save);
+            uint32_t gy = tok ? (uint32_t)strtoul(tok, NULL, 10) : 0;
+            tok = strtok_r(NULL, " ", &save);
+            uint32_t gz = tok ? (uint32_t)strtoul(tok, NULL, 10) : 0;
+            tok = strtok_r(NULL, " ", &save);
+            const char *push_hex = tok ? tok : "-";
+            uint8_t push[PDOCKER_GPU_MAX_PUSH_BYTES];
+            VulkanDispatchBinding *bindings = NULL;
+            memset(push, 0, sizeof(push));
+            int parse_ok = 1;
+            if (binding_count == 0 || binding_count > PDOCKER_GPU_VULKAN_TEXT_DISPATCH_MAX_BINDINGS ||
+                push_size > PDOCKER_GPU_MAX_PUSH_BYTES ||
+                passed_fd_count < 1 + binding_count) {
+                parse_ok = 0;
+            }
+            if (parse_ok) {
+                bindings = (VulkanDispatchBinding *)calloc(binding_count, sizeof(*bindings));
+                if (!bindings) parse_ok = 0;
+            }
+            if (parse_ok && push_size > 0) {
+                int decoded = hex_decode(push_hex, push, sizeof(push));
+                if (decoded < 0 || (size_t)decoded != push_size) parse_ok = 0;
+            } else if (parse_ok && strcmp(push_hex, "-") != 0) {
+                parse_ok = 0;
+            }
+            for (size_t i = 0; parse_ok && i < binding_count; ++i) {
+                tok = strtok_r(NULL, " ", &save);
+                if (!tok) { parse_ok = 0; break; }
+                bindings[i].binding = (uint32_t)strtoul(tok, NULL, 10);
+                tok = strtok_r(NULL, " ", &save);
+                if (!tok) { parse_ok = 0; break; }
+                bindings[i].offset = (off_t)strtoll(tok, NULL, 10);
+                tok = strtok_r(NULL, " ", &save);
+                if (!tok) { parse_ok = 0; break; }
+                bindings[i].size = (size_t)strtoull(tok, NULL, 10);
+            }
+            if (!parse_ok) {
+                json_fail("vulkan-dispatch", "invalid command");
+            } else {
+                (void)run_vulkan_dispatch_fd(passed_fds[0], &passed_fds[1], bindings, binding_count,
+                                             NULL, 0, NULL,
+                                             shader_size, "main",
+                                             NULL, 0, NULL, 0,
+                                             NULL,
+                                             push, push_size, gx, gy, gz, 0, 0, 0,
+                                             VK_NULL_HANDLE);
+            }
+            free(bindings);
+        } else {
+            json_fail("command", "unknown command");
+        }
+        for (size_t i = 0; i < passed_fd_count && i < PDOCKER_GPU_MAX_PASSED_FDS; ++i) {
+            if (passed_fds[i] >= 0) close(passed_fds[i]);
+        }
+        int response_rc = executor_request_end();
+        if (response_rc != 0) break;
+        if (set_executor_receive_timeout(cfd, 0) != 0) break;
     }
-    return (int)n;
+    clear_registered_vector_buffer(&registered);
+    fclose(out);
+    close(cfd);
+    executor_client_slot_release();
+    return NULL;
 }
 
 static int serve_socket(const char *path) {
@@ -45352,6 +46098,20 @@ static int serve_socket(const char *path) {
         unlink(path);
         return init_rc;
     }
+    if (!eglMakeCurrent(
+            ctx.display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT)) {
+        fprintf(stderr,
+                "pdocker-gpu-executor: failed to release server EGL context error=0x%x\n",
+                (unsigned)eglGetError());
+        destroy_gpu_context(&ctx);
+        close(sfd);
+        unlink(path);
+        return 70;
+    }
+    g_executor_server_display = ctx.display;
+    g_executor_server_surface = ctx.surface;
+    g_executor_server_context = ctx.context;
+
     fprintf(stderr, "pdocker-gpu-executor: serving %s api=%s\n", path, PDOCKER_GPU_COMMAND_API);
     for (;;) {
         int cfd = accept(sfd, NULL, NULL);
@@ -45360,350 +46120,47 @@ static int serve_socket(const char *path) {
             perror("accept");
             break;
         }
-        FILE *out = fdopen(dup(cfd), "w");
-        if (!out) {
+        int client_rc = configure_executor_client_socket(cfd);
+        if (client_rc == 0) client_rc = executor_client_slot_acquire();
+        if (client_rc != 0) {
             close(cfd);
             continue;
         }
-        setvbuf(out, NULL, _IONBF, 0);
-        char cmd[PDOCKER_GPU_MAX_COMMAND_BYTES];
-        RegisteredVectorBuffer registered;
-        memset(&registered, 0, sizeof(registered));
-        for (;;) {
-            int graphics_v6_prefix = connection_starts_with_graphics_v6_magic(cfd);
-            if (graphics_v6_prefix < 0) {
-                g_json_out = out;
-                json_fail("recvmsg", strerror(-graphics_v6_prefix));
-                g_json_out = NULL;
-                break;
-            }
-            if (graphics_v6_prefix > 0) {
-                g_json_out = out;
-                int graphics_rc = handle_vulkan_graphics_v6_frame(cfd);
-                g_json_out = NULL;
-                if (graphics_rc != 0) break;
-                continue;
-            }
-            int v5_prefix = connection_starts_with_v5_magic(cfd);
-            if (v5_prefix < 0) {
-                g_json_out = out;
-                json_fail("recvmsg", strerror(-v5_prefix));
-                g_json_out = NULL;
-                break;
-            }
-            if (v5_prefix > 0) {
-                g_json_out = out;
-                int v5_rc = handle_vulkan_dispatch_v5_frame(cfd);
-                g_json_out = NULL;
-                if (v5_rc != 0) break;
-                continue;
-            }
-            int passed_fds[PDOCKER_GPU_MAX_PASSED_FDS];
-            size_t passed_fd_count = 0;
-            PdockerReceiveEvidence receive_evidence;
-            int nread = recv_command_with_fds(cfd, cmd, sizeof(cmd),
-                                              passed_fds,
-                                              PDOCKER_GPU_MAX_PASSED_FDS,
-                                              &passed_fd_count,
-                                              &receive_evidence);
-            if (nread == -EMSGSIZE) {
-                g_json_out = out;
-                json_fail("recvmsg", "message truncated (MSG_TRUNC/MSG_CTRUNC)");
-                g_json_out = NULL;
-                break;
-            }
-            if (nread < 0) {
-                g_json_out = out;
-                json_fail("recvmsg", strerror(-nread));
-                g_json_out = NULL;
-                break;
-            }
-            if (nread == 0) break;
-            g_json_out = out;
-            if (strcmp(cmd, "CAPABILITIES") == 0) {
-                print_capabilities("unix-socket-command-queue");
-            } else if (strcmp(cmd, "VULKAN_ADVERTISEMENT_CAPS") == 0) {
-                print_vulkan_advertisement_caps("unix-socket-command-queue");
-            } else if (strcmp(cmd, "NOOP") == 0) {
-                print_noop();
-            } else if (strcmp(cmd, "VECTOR_ADD") == 0) {
-                (void)run_vector_add();
-            } else if (strncmp(cmd, "VECTOR_ADD_FD ", 14) == 0) {
-                size_t n = (size_t)strtoull(cmd + 14, NULL, 10);
-                (void)run_vector_add_fd(passed_fds[0], n, GPU_API_AUTO);
-                passed_fds[0] = -1;
-            } else if (strncmp(cmd, "REGISTER_VECTOR_FD ", 19) == 0) {
-                size_t n = (size_t)strtoull(cmd + 19, NULL, 10);
-                (void)register_vector_buffer(&registered, passed_fds[0], n);
-                passed_fds[0] = -1;
-            } else if (strcmp(cmd, "VECTOR_ADD_REGISTERED") == 0) {
-                (void)run_registered_vector_add(&registered);
-            } else if (strncmp(cmd, "OPENCL_VECTOR_ADD_3FD ", 22) == 0) {
-                size_t n = (size_t)strtoull(cmd + 22, NULL, 10);
-                if (passed_fd_count < 3) {
-                    json_fail("fd", "OPENCL_VECTOR_ADD_3FD requires three fds");
-                } else {
-                    (void)run_vector_add_3fd(passed_fds[0], passed_fds[1], passed_fds[2], n, GPU_API_OPENCL);
-                    passed_fds[0] = passed_fds[1] = passed_fds[2] = -1;
-                }
-            } else if (strncmp(cmd, "VULKAN_VECTOR_ADD_3FD ", 22) == 0) {
-                size_t n = (size_t)strtoull(cmd + 22, NULL, 10);
-                if (passed_fd_count < 3) {
-                    json_fail("fd", "VULKAN_VECTOR_ADD_3FD requires three fds");
-                } else {
-                    (void)run_vector_add_3fd(passed_fds[0], passed_fds[1], passed_fds[2], n, GPU_API_VULKAN);
-                    passed_fds[0] = passed_fds[1] = passed_fds[2] = -1;
-                }
-            } else if (strncmp(cmd, "VECTOR_ADD_3FD ", 15) == 0) {
-                size_t n = (size_t)strtoull(cmd + 15, NULL, 10);
-                if (passed_fd_count < 3) {
-                    json_fail("fd", "VECTOR_ADD_3FD requires three fds");
-                } else {
-                    (void)run_vector_add_3fd(passed_fds[0], passed_fds[1], passed_fds[2], n, GPU_API_AUTO);
-                    passed_fds[0] = passed_fds[1] = passed_fds[2] = -1;
-                }
-            } else if (strncmp(cmd, "VULKAN_EVENT_", 13) == 0) {
-                (void)handle_vulkan_event_command(cmd);
-            } else if (strncmp(cmd, "VULKAN_SEMAPHORE_", 17) == 0) {
-                (void)handle_vulkan_semaphore_command(cmd);
-            } else if (strncmp(cmd, "VULKAN_FENCE_", 13) == 0) {
-                (void)handle_vulkan_fence_command(cmd);
-            } else if (strncmp(cmd, "VULKAN_DISPATCH_V2 ", 19) == 0 ||
-                       strncmp(cmd, "VULKAN_DISPATCH_V3 ", 19) == 0 ||
-                       strncmp(cmd, "VULKAN_DISPATCH_V4 ", 19) == 0) {
-                const int dispatch_v3 = strncmp(cmd, "VULKAN_DISPATCH_V3 ", 19) == 0;
-                const int dispatch_v4 = strncmp(cmd, "VULKAN_DISPATCH_V4 ", 19) == 0;
-                char *save = NULL;
-                char *cursor = cmd + 19;
-                char *tok = strtok_r(cursor, " ", &save);
-                size_t shader_size = tok ? (size_t)strtoull(tok, NULL, 10) : 0;
-                tok = strtok_r(NULL, " ", &save);
-                size_t binding_count = tok ? (size_t)strtoull(tok, NULL, 10) : 0;
-                tok = strtok_r(NULL, " ", &save);
-                size_t push_size = tok ? (size_t)strtoull(tok, NULL, 10) : 0;
-                tok = strtok_r(NULL, " ", &save);
-                uint32_t gx = tok ? (uint32_t)strtoul(tok, NULL, 10) : 0;
-                tok = strtok_r(NULL, " ", &save);
-                uint32_t gy = tok ? (uint32_t)strtoul(tok, NULL, 10) : 0;
-                tok = strtok_r(NULL, " ", &save);
-                uint32_t gz = tok ? (uint32_t)strtoul(tok, NULL, 10) : 0;
-                tok = strtok_r(NULL, " ", &save);
-                const char *push_hex = tok ? tok : "-";
-                tok = strtok_r(NULL, " ", &save);
-                const char *entry_hex = tok ? tok : "-";
-                tok = strtok_r(NULL, " ", &save);
-                size_t specialization_count = tok ? (size_t)strtoull(tok, NULL, 10) : 0;
-                tok = strtok_r(NULL, " ", &save);
-                size_t specialization_data_size = tok ? (size_t)strtoull(tok, NULL, 10) : 0;
-                tok = strtok_r(NULL, " ", &save);
-                const char *specialization_hex = tok ? tok : "-";
-                uint8_t push[PDOCKER_GPU_MAX_PUSH_BYTES];
-                char entry_name[PDOCKER_GPU_MAX_VULKAN_ENTRY_NAME];
-                uint8_t specialization_data[PDOCKER_GPU_MAX_VULKAN_SPECIALIZATION_BYTES];
-                VulkanDispatchSpecialization specializations[PDOCKER_GPU_MAX_VULKAN_SPECIALIZATION_ENTRIES];
-                VulkanDispatchBinding *bindings = NULL;
-                VulkanDispatchOptions options;
-                memset(push, 0, sizeof(push));
-                memset(entry_name, 0, sizeof(entry_name));
-                memset(specialization_data, 0, sizeof(specialization_data));
-                memset(specializations, 0, sizeof(specializations));
-                memset(&options, 0, sizeof(options));
-                options.has_receive_evidence = receive_evidence.valid;
-                options.receive_evidence = receive_evidence;
-                int parse_ok = 1;
-                if (binding_count == 0 || binding_count > PDOCKER_GPU_VULKAN_TEXT_DISPATCH_MAX_BINDINGS ||
-                    push_size > PDOCKER_GPU_MAX_PUSH_BYTES ||
-                    specialization_count > PDOCKER_GPU_MAX_VULKAN_SPECIALIZATION_ENTRIES ||
-                    specialization_data_size > PDOCKER_GPU_MAX_VULKAN_SPECIALIZATION_BYTES ||
-                    passed_fd_count < 1 + binding_count) {
-                    parse_ok = 0;
-                }
-                if (parse_ok) {
-                    bindings = (VulkanDispatchBinding *)calloc(binding_count, sizeof(*bindings));
-                    if (!bindings) parse_ok = 0;
-                }
-                if (parse_ok && push_size > 0) {
-                    int decoded = hex_decode(push_hex, push, sizeof(push));
-                    if (decoded < 0 || (size_t)decoded != push_size) parse_ok = 0;
-                } else if (parse_ok && strcmp(push_hex, "-") != 0) {
-                    parse_ok = 0;
-                }
-                if (parse_ok && strcmp(entry_hex, "-") != 0) {
-                    int decoded = hex_decode(entry_hex, (uint8_t *)entry_name, sizeof(entry_name) - 1);
-                    if (decoded <= 0 || (size_t)decoded >= sizeof(entry_name)) parse_ok = 0;
-                    else entry_name[decoded] = '\0';
-                } else if (parse_ok) {
-                    snprintf(entry_name, sizeof(entry_name), "main");
-                }
-                if (parse_ok && specialization_data_size > 0) {
-                    int decoded = hex_decode(specialization_hex, specialization_data, sizeof(specialization_data));
-                    if (decoded < 0 || (size_t)decoded != specialization_data_size) parse_ok = 0;
-                } else if (parse_ok && strcmp(specialization_hex, "-") != 0) {
-                    parse_ok = 0;
-                }
-                for (size_t i = 0; parse_ok && i < specialization_count; ++i) {
-                    tok = strtok_r(NULL, " ", &save);
-                    if (!tok) { parse_ok = 0; break; }
-                    specializations[i].constant_id = (uint32_t)strtoul(tok, NULL, 10);
-                    tok = strtok_r(NULL, " ", &save);
-                    if (!tok) { parse_ok = 0; break; }
-                    specializations[i].offset = (uint32_t)strtoul(tok, NULL, 10);
-                    tok = strtok_r(NULL, " ", &save);
-                    if (!tok) { parse_ok = 0; break; }
-                    specializations[i].size = (size_t)strtoull(tok, NULL, 10);
-                }
-                for (size_t i = 0; parse_ok && i < binding_count; ++i) {
-                    if (dispatch_v4) {
-                        tok = strtok_r(NULL, " ", &save);
-                        if (!tok) { parse_ok = 0; break; }
-                        bindings[i].descriptor_set = (uint32_t)strtoul(tok, NULL, 10);
-                    }
-                    tok = strtok_r(NULL, " ", &save);
-                    if (!tok) { parse_ok = 0; break; }
-                    bindings[i].binding = (uint32_t)strtoul(tok, NULL, 10);
-                    tok = strtok_r(NULL, " ", &save);
-                    if (!tok) { parse_ok = 0; break; }
-                    bindings[i].offset = (off_t)strtoll(tok, NULL, 10);
-                    tok = strtok_r(NULL, " ", &save);
-                    if (!tok) { parse_ok = 0; break; }
-                    bindings[i].size = (size_t)strtoull(tok, NULL, 10);
-                    tok = strtok_r(NULL, " ", &save);
-                    if (!tok) { parse_ok = 0; break; }
-                    bindings[i].api_offset = (off_t)strtoll(tok, NULL, 10);
-                    bindings[i].api_base_offset = bindings[i].api_offset;
-                    tok = strtok_r(NULL, " ", &save);
-                    if (!tok) { parse_ok = 0; break; }
-                    bindings[i].api_range = (size_t)strtoull(tok, NULL, 10);
-                    tok = strtok_r(NULL, " ", &save);
-                    if (!tok) { parse_ok = 0; break; }
-                    bindings[i].api_buffer_size = (size_t)strtoull(tok, NULL, 10);
-                    tok = strtok_r(NULL, " ", &save);
-                    if (!tok) { parse_ok = 0; break; }
-                    bindings[i].api_descriptor_type = (uint32_t)strtoul(tok, NULL, 10);
-                    tok = strtok_r(NULL, " ", &save);
-                    if (!tok) { parse_ok = 0; break; }
-                    bindings[i].api_dynamic = (int)strtol(tok, NULL, 10);
-                    tok = strtok_r(NULL, " ", &save);
-                    if (!tok) { parse_ok = 0; break; }
-                    bindings[i].api_memory_offset = (off_t)strtoll(tok, NULL, 10);
-                    if (dispatch_v3 || dispatch_v4) {
-                        tok = strtok_r(NULL, " ", &save);
-                        if (!tok) { parse_ok = 0; break; }
-                        bindings[i].api_memory_size = (size_t)strtoull(tok, NULL, 10);
-                        tok = strtok_r(NULL, " ", &save);
-                        if (!tok) { parse_ok = 0; break; }
-                        bindings[i].api_memory_id = (uint64_t)strtoull(tok, NULL, 10);
-                        tok = strtok_r(NULL, " ", &save);
-                        if (!tok) { parse_ok = 0; break; }
-                        bindings[i].api_buffer_id = (uint64_t)strtoull(tok, NULL, 10);
-                    }
-                }
-                while (parse_ok && (tok = strtok_r(NULL, " ", &save)) != NULL) {
-                    if (parse_vulkan_dispatch_option(&options, tok) != 0) {
-                        parse_ok = 0;
-                    }
-                }
-                if (parse_ok && dispatch_v4 &&
-                    (!options.sender_reconcile.has_v4_binding_schema ||
-                     options.sender_reconcile.v4_binding_schema !=
-                        PDOCKER_GPU_VULKAN_DISPATCH_V4_BINDING_SCHEMA_HASH)) {
-                    parse_ok = 0;
-                }
-                if (parse_ok && dispatch_v4 &&
-                    (!options.sender_reconcile.has_v4_binding_field_count ||
-                     options.sender_reconcile.v4_binding_field_count !=
-                        PDOCKER_GPU_VULKAN_DISPATCH_V4_BINDING_FIELD_COUNT)) {
-                    parse_ok = 0;
-                }
-                if (!parse_ok) {
-                    json_fail("vulkan-dispatch", "invalid command");
-                } else {
-                    (void)run_vulkan_dispatch_fd(passed_fds[0], &passed_fds[1], bindings, binding_count,
-                                                 NULL, 0, NULL,
-                                                 shader_size, entry_name,
-                                                 specializations, specialization_count,
-                                                 specialization_data, specialization_data_size,
-                                                 &options,
-                                                 push, push_size, gx, gy, gz,
-                                                 options.has_base_group ? options.base_group_x : 0,
-                                                 options.has_base_group ? options.base_group_y : 0,
-                                                 options.has_base_group ? options.base_group_z : 0,
-                                                 VK_NULL_HANDLE);
-                }
-                free(bindings);
-            } else if (strncmp(cmd, "VULKAN_DISPATCH_V1 ", 19) == 0) {
-                char *save = NULL;
-                char *cursor = cmd + 19;
-                char *tok = strtok_r(cursor, " ", &save);
-                size_t shader_size = tok ? (size_t)strtoull(tok, NULL, 10) : 0;
-                tok = strtok_r(NULL, " ", &save);
-                size_t binding_count = tok ? (size_t)strtoull(tok, NULL, 10) : 0;
-                tok = strtok_r(NULL, " ", &save);
-                size_t push_size = tok ? (size_t)strtoull(tok, NULL, 10) : 0;
-                tok = strtok_r(NULL, " ", &save);
-                uint32_t gx = tok ? (uint32_t)strtoul(tok, NULL, 10) : 0;
-                tok = strtok_r(NULL, " ", &save);
-                uint32_t gy = tok ? (uint32_t)strtoul(tok, NULL, 10) : 0;
-                tok = strtok_r(NULL, " ", &save);
-                uint32_t gz = tok ? (uint32_t)strtoul(tok, NULL, 10) : 0;
-                tok = strtok_r(NULL, " ", &save);
-                const char *push_hex = tok ? tok : "-";
-                uint8_t push[PDOCKER_GPU_MAX_PUSH_BYTES];
-                VulkanDispatchBinding *bindings = NULL;
-                memset(push, 0, sizeof(push));
-                int parse_ok = 1;
-                if (binding_count == 0 || binding_count > PDOCKER_GPU_VULKAN_TEXT_DISPATCH_MAX_BINDINGS ||
-                    push_size > PDOCKER_GPU_MAX_PUSH_BYTES ||
-                    passed_fd_count < 1 + binding_count) {
-                    parse_ok = 0;
-                }
-                if (parse_ok) {
-                    bindings = (VulkanDispatchBinding *)calloc(binding_count, sizeof(*bindings));
-                    if (!bindings) parse_ok = 0;
-                }
-                if (parse_ok && push_size > 0) {
-                    int decoded = hex_decode(push_hex, push, sizeof(push));
-                    if (decoded < 0 || (size_t)decoded != push_size) parse_ok = 0;
-                } else if (parse_ok && strcmp(push_hex, "-") != 0) {
-                    parse_ok = 0;
-                }
-                for (size_t i = 0; parse_ok && i < binding_count; ++i) {
-                    tok = strtok_r(NULL, " ", &save);
-                    if (!tok) { parse_ok = 0; break; }
-                    bindings[i].binding = (uint32_t)strtoul(tok, NULL, 10);
-                    tok = strtok_r(NULL, " ", &save);
-                    if (!tok) { parse_ok = 0; break; }
-                    bindings[i].offset = (off_t)strtoll(tok, NULL, 10);
-                    tok = strtok_r(NULL, " ", &save);
-                    if (!tok) { parse_ok = 0; break; }
-                    bindings[i].size = (size_t)strtoull(tok, NULL, 10);
-                }
-                if (!parse_ok) {
-                    json_fail("vulkan-dispatch", "invalid command");
-                } else {
-                    (void)run_vulkan_dispatch_fd(passed_fds[0], &passed_fds[1], bindings, binding_count,
-                                                 NULL, 0, NULL,
-                                                 shader_size, "main",
-                                                 NULL, 0, NULL, 0,
-                                                 NULL,
-                                                 push, push_size, gx, gy, gz, 0, 0, 0,
-                                                 VK_NULL_HANDLE);
-                }
-                free(bindings);
-            } else {
-                json_fail("command", "unknown command");
-            }
-            for (size_t i = 0; i < passed_fd_count && i < PDOCKER_GPU_MAX_PASSED_FDS; ++i) {
-                if (passed_fds[i] >= 0) close(passed_fds[i]);
-            }
-            g_json_out = NULL;
+
+        pthread_attr_t attributes;
+        int thread_rc = pthread_attr_init(&attributes);
+        int attributes_initialized = thread_rc == 0;
+        if (thread_rc == 0) {
+            thread_rc = pthread_attr_setdetachstate(
+                &attributes, PTHREAD_CREATE_DETACHED);
         }
-        clear_registered_vector_buffer(&registered);
-        fclose(out);
-        close(cfd);
+        pthread_t client_thread;
+        if (thread_rc == 0) {
+            thread_rc = pthread_create(
+                &client_thread,
+                &attributes,
+                serve_socket_client_main,
+                (void *)(intptr_t)cfd);
+        }
+        if (attributes_initialized &&
+            pthread_attr_destroy(&attributes) != 0 &&
+            thread_rc == 0) {
+            fprintf(stderr, "pdocker-gpu-executor: pthread_attr_destroy failed\n");
+        }
+        if (thread_rc != 0) {
+            errno = thread_rc;
+            perror("pthread_create");
+            close(cfd);
+            executor_client_slot_release();
+            continue;
+        }
     }
-    destroy_gpu_context(&ctx);
     close(sfd);
+    executor_wait_for_clients();
+    g_executor_server_context = EGL_NO_CONTEXT;
+    g_executor_server_surface = EGL_NO_SURFACE;
+    g_executor_server_display = EGL_NO_DISPLAY;
+    destroy_gpu_context(&ctx);
     unlink(path);
     return 70;
 }

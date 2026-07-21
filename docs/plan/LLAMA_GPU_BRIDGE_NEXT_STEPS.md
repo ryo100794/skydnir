@@ -9,6 +9,90 @@ llama.cpp itself remains unmodified.
 
 ## Current Ground Truth
 
+### 2026-07-21 endpoint-atomic capability and framed-response safety lane
+
+Capability discovery is now single-flight and keyed by the executor Unix-socket
+identity (`pid`, path, device, and inode). Concurrent Vulkan callers share one
+advertisement request. Positive results are cached for that identity; malformed
+or incompatible protocol replies are negative-cached until the identity
+changes; transient transport failures use a bounded retry delay. The response
+is accepted only when the endpoint identity still matches after the complete
+newline-terminated JSON object has been received, so a daemon replacement
+cannot splice capabilities from two executor generations.
+
+Executor replies are fail-closed. Text dispatch terminals require one complete
+newline-terminated object, a unique exact unsigned request ID, and the expected
+operation. Truncation, duplicate IDs, trailing numeric junk, and wrong request
+correlation are protocol errors. Binary V6 requests reject oversized frame
+lengths before allocation. Executor-side buffered JSON output uses an 8 MiB
+bounded `funopen` sink and never falls back to writing a partially constructed
+response directly to the client stream.
+
+A failed queue stream now invalidates only that queue-owned connection. It does
+not rotate the process-wide endpoint generation or disturb established streams
+owned by other queues. The remaining lifecycle requirement is an immutable
+endpoint/capability snapshot owned by each live physical-device/device/queue
+chain; until that is landed, a daemon replacement could still change feature
+decisions made by later calls on an already enumerated object.
+
+Host evidence includes strict-response C harnesses, a 16-thread negative-cache
+single-flight harness, queue-local recovery coverage, both glibc ABI builds, and
+the combined GPU ABI/synchronization suite. Connected-device validation remains
+required after the immutable live-object snapshot and absolute-deadline work.
+
+The next transport completion gates are explicit:
+
+1. Freeze endpoint identity, advertised capabilities, bridge availability, and
+   advertisement-source selection when a physical device is materialized.
+   Devices and queues retain that same immutable snapshot; command buffers
+   borrow it from their live device. No live object may re-query a mutable
+   process-global/TLS capability view.
+2. Pin every queue and request-scoped device operation to that endpoint. A
+   replacement executor makes existing devices lost; it never migrates an old
+   queue onto capabilities that were not used by `vkCreateDevice`.
+3. Use one monotonic absolute deadline across nonblocking connect, all short
+   writes (including `SCM_RIGHTS`), all response reads, and terminal parsing.
+   Partial progress and `EINTR` must not extend the deadline.
+4. Map allocation failure to `VK_ERROR_OUT_OF_HOST_MEMORY`, unsupported local
+   representation to `VK_ERROR_FEATURE_NOT_PRESENT`, and transport/protocol or
+   endpoint loss to `VK_ERROR_DEVICE_LOST`. Preserve a validated executor
+   `VkResult` exactly.
+5. Make fence/semaphore waits honor the caller's original absolute timeout and
+   never fall back to infinite local polling after executor transport loss.
+6. Close all registered owner, duplicate, and transient transport descriptors
+   in the forked child before an inherited fd number can be reused.
+
+### 2026-07-21 CPU/static queue-persistent command transport lane
+
+Container-side Vulkan compute V5 and graphics V6 frames now reuse one accepted
+Unix stream for the lifetime of each virtual `VkQueue`. The queue owns the
+connected descriptor, while each request uses a CLOEXEC duplicate so existing
+local cleanup paths cannot accidentally destroy the owner. Queue destruction
+closes the owner; PID or socket-path changes force reconnect; and any transport
+or response failure discards the stream so a later submit never guesses at
+binary frame alignment. Text-only device/event/fence control remains
+request-scoped because it is not submit hot-path work.
+
+The Android executor already loops over multiple magic-framed requests on one
+accepted connection, so this change removes the previous client-side
+one-connect-per-dispatch behavior without introducing a second protocol or a
+shared-memory ring. A ring is now conditional on profiling after connection
+reuse. V6.9-V6.11 already carry buffer/image copies plus fill/update operations;
+the older plan entry that listed copy recording as the next missing step was
+stale.
+
+Evidence gates for this lane:
+
+- `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -q tests.test_gpu_abi_contract`
+- `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests.test_vulkan_icd_sync_harness.VulkanIcdSyncHarnessTest.test_submit_queue_transport_reuses_one_connection_and_invalidates_on_failure`
+- `bash scripts/build-gpu-shim.sh`
+
+The host C harness uses a real Unix listener and a forked server to prove that
+two successful requests arrive on one accepted connection, a failed request
+closes the owner, and the next request opens a fresh connection. Device
+profiling remains required before deciding whether reusable buffer handles are
+sufficient or an additional shared-memory command ring is justified.
+
 ### 2026-07-20 CPU/static classic render-pass synchronization completion lane
 
 The bridge now transports legal classic-render-pass pipeline barriers instead of

@@ -2258,16 +2258,32 @@ Tasks:
    previous `ggml_backend_buffer_get_alloc_size` range assertion. The latest
    front blocker is now the later Android `vkQueueSubmit`
    `VK_ERROR_FEATURE_NOT_PRESENT` path during prompt processing.
-6. **[active] Add persistent GPU command-ring transport.**
-   Replace per-dispatch socket commands with shared ring descriptors, reusable
-   buffer handles, fences, and error records under `/run/pdocker-gpu`. Latest
-   8B Qwen3 Q4_K_M resident-cache probe: `served=true`, CPU 0.4153 tok/s,
+6. **[active] Complete persistent GPU command transport.**
+   V5 compute and V6 graphics frames now reuse one accepted Unix stream per
+   virtual `VkQueue` instead of opening one connection per dispatch/submit.
+   The queue owns the connection, request cleanup closes only a CLOEXEC
+   duplicate, device destruction closes the owner, fork/socket-path changes
+   reconnect, and any send/read/protocol failure discards the stream rather
+   than guessing at frame resynchronization. The executor already processes
+   multiple magic-framed requests per accepted connection. A shared-memory
+   command ring is no longer assumed to be the first fix; profile this
+   persistent framed baseline before adding a more complex ring. Capability
+   discovery is now endpoint-keyed single-flight, malformed protocol replies
+   are negative-cached per endpoint identity, complete text terminals use exact
+   request correlation, V6 frame lengths are bounded before allocation, and a
+   failed queue stream no longer invalidates unrelated queues. Next correctness
+   slice: pin one immutable endpoint/capability snapshot to each enumerated
+   physical-device/device/queue chain, reject incompatible daemon replacement
+   as `VK_ERROR_DEVICE_LOST`, and apply one absolute deadline across connect,
+   request transmission, and terminal response.
+
+   Latest 8B Qwen3 Q4_K_M resident-cache probe: `served=true`, CPU 0.4153 tok/s,
    GPU 0.3668 tok/s, speedup 0.883x, `target_met=false`. The executor-side
-   resident cache now retains one 510,504,960-byte generic-dispatch binding,
-   but the dominant cost has moved to `vkCmdCopyBuffer` transfer-only traffic.
-   Next action: record copy-buffer operations in `pdocker-vulkan-icd.so`
-   command buffers, execute them during `vkQueueSubmit`, then add reusable
-   bridge buffer handles for repeated large copy sources. Current slice:
+   resident cache retains one 510,504,960-byte generic-dispatch binding, and
+   copy-buffer/image/fill/update operations are already recorded and replayed
+   by the V6.9-V6.11 command stream. The next transport step is reusable bridge
+   object/buffer registration for repeated large sources, followed by a ring
+   only if measured socket framing remains material. Current slice:
    `PDOCKER_VULKAN_ALIAS_COPIES=1` is opt-in for the llama compare flow and
    lets dispatch binding 0 read from the original copied source fd/offset when
    a copy alias fully covers the descriptor range. The executor also caches
@@ -2398,12 +2414,13 @@ Scaffold completed:
 
 Next implementation slice:
 
-- Replace the temporary socket command transport with a persistent shared-memory
-  command ring, multi-buffer table, and fence/error protocol. The socket path
-  and single registered vector buffer are now useful for measuring and
-  debugging, but only as scaffolds.
-- Keep persistent transport semantics. Benchmarks show one-connection-per-GPU
-  command adds measurable overhead and is the wrong shape for LLM workloads.
+- Keep the queue-owned persistent magic-framed socket as the measured baseline;
+  one-connection-per-command is no longer the active implementation.
+- Add a reusable multi-buffer/object table and fence/error protocol. Introduce
+  a shared-memory command ring only if profiling shows framing or system-call
+  cost remains material after connection reuse; do not duplicate transport
+  ownership merely because the older plan called the socket a scaffold.
+- Preserve persistent transport semantics across compute and graphics frames.
 - Keep container-visible paths under `/run/pdocker-gpu`; do not expose Android
   app-data absolute paths to container code.
 - Add queue lifecycle under the Skydnir daemon so container processes never call Android

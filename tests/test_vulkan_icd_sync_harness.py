@@ -191,6 +191,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                         "-Wextra",
                         "-Wno-unused-function",
                         "-Wno-missing-field-initializers",
+                        "-pthread",
                         "-o",
                         str(exe),
                         str(src),
@@ -215,6 +216,498 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 stderr=subprocess.PIPE,
                 check=False,
             )
+
+    def test_submit_queue_transport_reuses_one_connection_and_invalidates_on_failure(self):
+        source = textwrap.dedent(
+            f"""
+            #include <errno.h>
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include <sys/socket.h>
+            #include <sys/un.h>
+            #include <sys/wait.h>
+            #include <unistd.h>
+            #include "{ICD_SOURCE}"
+
+            static int read_byte(int fd, char expected) {{
+                char value = 0;
+                ssize_t n;
+                do {{ n = read(fd, &value, 1); }} while (n < 0 && errno == EINTR);
+                return n == 1 && value == expected;
+            }}
+
+            static int expect_eof(int fd) {{
+                char value = 0;
+                ssize_t n;
+                do {{ n = read(fd, &value, 1); }} while (n < 0 && errno == EINTR);
+                return n == 0;
+            }}
+
+            static int accept_connection(int listen_fd) {{
+                int fd;
+                do {{ fd = accept(listen_fd, NULL, NULL); }} while (fd < 0 && errno == EINTR);
+                return fd;
+            }}
+
+            int main(void) {{
+                char path[sizeof(((struct sockaddr_un *)0)->sun_path)];
+                snprintf(path, sizeof(path), "/tmp/skydnir-vk-queue-%ld.sock", (long)getpid());
+                int listen_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+                if (listen_fd < 0) return 2;
+                unlink(path);
+                struct sockaddr_un address;
+                memset(&address, 0, sizeof(address));
+                address.sun_family = AF_UNIX;
+                snprintf(address.sun_path, sizeof(address.sun_path), "%s", path);
+                if (bind(listen_fd, (struct sockaddr *)&address, sizeof(address)) != 0 ||
+                    listen(listen_fd, 4) != 0) return 3;
+                if (setenv("PDOCKER_GPU_QUEUE_SOCKET", path, 1) != 0) return 4;
+
+                pid_t child = fork();
+                if (child < 0) return 5;
+                if (child == 0) {{
+                    alarm(10);
+                    int first = accept_connection(listen_fd);
+                    if (first < 0 || !read_byte(first, 'A') || !read_byte(first, 'B') ||
+                        !expect_eof(first)) _exit(11);
+                    close(first);
+                    int failed = accept_connection(listen_fd);
+                    if (failed < 0 || !read_byte(failed, 'C') || !expect_eof(failed)) _exit(12);
+                    close(failed);
+                    int recovered = accept_connection(listen_fd);
+                    if (recovered < 0 || !read_byte(recovered, 'D') || !expect_eof(recovered)) _exit(13);
+                    close(recovered);
+                    close(listen_fd);
+                    _exit(0);
+                }}
+
+                alarm(10);
+                PdockerVkQueue queue;
+                memset(&queue, 0, sizeof(queue));
+                queue.transport_fd = -1;
+
+                int first = connect_submit_queue(&queue);
+                if (first < 0 || write(first, "A", 1) != 1) return 20;
+                int owner = queue.transport_fd;
+                int owner_flags = fcntl(owner, F_GETFD);
+                int request_flags = fcntl(first, F_GETFD);
+                if (owner_flags < 0 || request_flags < 0 ||
+                    (owner_flags & FD_CLOEXEC) == 0 ||
+                    (request_flags & FD_CLOEXEC) == 0) return 21;
+                finish_submit_queue_request(&queue, first, 0);
+                if (owner < 0 || queue.transport_fd != owner) return 22;
+
+                int second = connect_submit_queue(&queue);
+                if (second < 0 || second == owner || queue.transport_fd != owner ||
+                    write(second, "B", 1) != 1) return 23;
+                finish_submit_queue_request(&queue, second, 0);
+                if (queue.transport_fd != owner) return 24;
+
+                char overlong[sizeof(queue.transport_path) + 16];
+                memset(overlong, 'x', sizeof(overlong));
+                overlong[0] = '/';
+                overlong[sizeof(overlong) - 1] = '\0';
+                if (setenv("PDOCKER_GPU_QUEUE_SOCKET", overlong, 1) != 0 ||
+                    connect_submit_queue(&queue) != -ENAMETOOLONG ||
+                    queue.transport_fd != -1) return 25;
+                if (setenv("PDOCKER_GPU_QUEUE_SOCKET", path, 1) != 0) return 26;
+
+                int failed = connect_submit_queue(&queue);
+                if (failed < 0 || write(failed, "C", 1) != 1) return 27;
+                uint64_t generation_before_failure =
+                    g_gpu_endpoint_current.generation;
+                finish_submit_queue_request(&queue, failed, -EIO);
+                if (queue.transport_fd != -1) return 28;
+                if (g_gpu_endpoint_current.generation !=
+                    generation_before_failure) return 33;
+
+                int recovered = connect_submit_queue(&queue);
+                if (recovered < 0 || write(recovered, "D", 1) != 1) return 29;
+                finish_submit_queue_request(&queue, recovered, 0);
+                if (queue.transport_fd < 0) return 30;
+                queue_transport_close(&queue);
+                queue.destroyed = true;
+                if (connect_submit_queue(&queue) != -EINVAL) return 31;
+
+                int status = 0;
+                if (waitpid(child, &status, 0) != child || !WIFEXITED(status) ||
+                    WEXITSTATUS(status) != 0) return 32;
+                close(listen_fd);
+                unlink(path);
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_persistent_v5_response_reader_consumes_each_terminal_boundary(self):
+        source = textwrap.dedent(
+            f"""
+            #include <errno.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include <sys/socket.h>
+            #include <unistd.h>
+            #include "{ICD_SOURCE}"
+
+            static int write_all_test(int fd, const char *text) {{
+                size_t left = strlen(text);
+                while (left > 0) {{
+                    ssize_t n = write(fd, text, left);
+                    if (n < 0 && errno == EINTR) continue;
+                    if (n <= 0) return -1;
+                    text += (size_t)n;
+                    left -= (size_t)n;
+                }}
+                return 0;
+            }}
+
+            int main(void) {{
+                int pair[2];
+                if (socketpair(AF_UNIX, SOCK_STREAM, 0, pair) != 0) return 2;
+                const char responses[] =
+                    "{{\\\"stage\\\":\\\"profile-a\\\",\\\"valid\\\":true}}\\n"
+                    "{{\\\"stage\\\":\\\"vulkan-dispatch-v5-complete\\\","
+                    "\\\"valid\\\":true,\\\"execution_implemented\\\":true,"
+                    "\\\"submit_id\\\":101}}\\n"
+                    "{{\\\"stage\\\":\\\"profile-b\\\",\\\"valid\\\":true}}\\n"
+                    "{{\\\"stage\\\":\\\"vulkan-dispatch-v5-complete\\\","
+                    "\\\"valid\\\":true,\\\"execution_implemented\\\":true,"
+                    "\\\"submit_id\\\":102}}\\n";
+                if (write_all_test(pair[1], responses) != 0 ||
+                    shutdown(pair[1], SHUT_WR) != 0) return 3;
+                if (read_dispatch_response_status(
+                        pair[0], "VULKAN_DISPATCH_V5.1",
+                        "vulkan-dispatch-v5-complete", 101) != 0) return 4;
+                if (read_dispatch_response_status(
+                        pair[0], "VULKAN_DISPATCH_V5.1",
+                        "vulkan-dispatch-v5-complete", 102) != 0) return 5;
+                char extra = 0;
+                ssize_t n;
+                do {{ n = read(pair[0], &extra, 1); }} while (n < 0 && errno == EINTR);
+                close(pair[0]);
+                close(pair[1]);
+                if (n != 0) return 6;
+
+                if (socketpair(AF_UNIX, SOCK_STREAM, 0, pair) != 0) return 7;
+                const char wrong_terminal[] =
+                    "{{\\\"stage\\\":\\\"vulkan-dispatch-v5-complete\\\","
+                    "\\\"valid\\\":true,\\\"execution_implemented\\\":true,"
+                    "\\\"submit_id\\\":1010}}\\n";
+                if (write_all_test(pair[1], wrong_terminal) != 0 ||
+                    shutdown(pair[1], SHUT_WR) != 0) return 8;
+                if (read_dispatch_response_status(
+                        pair[0], "VULKAN_DISPATCH_V5.1",
+                        "vulkan-dispatch-v5-complete", 101) != -EPROTO) return 9;
+                close(pair[0]);
+                close(pair[1]);
+
+                if (socketpair(AF_UNIX, SOCK_STREAM, 0, pair) != 0) return 10;
+                const char truncated[] =
+                    "{{\\\"stage\\\":\\\"vulkan-dispatch-v5-complete\\\","
+                    "\\\"valid\\\":true,\\\"execution_implemented\\\":true,"
+                    "\\\"submit_id\\\":101}}";
+                if (write_all_test(pair[1], truncated) != 0 ||
+                    shutdown(pair[1], SHUT_WR) != 0) return 11;
+                if (read_dispatch_response_status(
+                        pair[0], "VULKAN_DISPATCH_V5.1",
+                        "vulkan-dispatch-v5-complete", 101) != -EPROTO) return 12;
+                close(pair[0]);
+                close(pair[1]);
+
+                if (socketpair(AF_UNIX, SOCK_STREAM, 0, pair) != 0) return 13;
+                const char malformed_id[] =
+                    "{{\\\"stage\\\":\\\"vulkan-dispatch-v5-complete\\\","
+                    "\\\"valid\\\":true,\\\"execution_implemented\\\":true,"
+                    "\\\"submit_id\\\":101junk}}\\n";
+                if (write_all_test(pair[1], malformed_id) != 0 ||
+                    shutdown(pair[1], SHUT_WR) != 0) return 14;
+                if (read_dispatch_response_status(
+                        pair[0], "VULKAN_DISPATCH_V5.1",
+                        "vulkan-dispatch-v5-complete", 101) != -EPROTO) return 15;
+                close(pair[0]);
+                close(pair[1]);
+
+                if (socketpair(AF_UNIX, SOCK_STREAM, 0, pair) != 0) return 16;
+                const char duplicate_id[] =
+                    "{{\\\"stage\\\":\\\"vulkan-dispatch-v5-complete\\\","
+                    "\\\"valid\\\":true,\\\"execution_implemented\\\":true,"
+                    "\\\"submit_id\\\":101,\\\"submit_id\\\":101}}\\n";
+                if (write_all_test(pair[1], duplicate_id) != 0 ||
+                    shutdown(pair[1], SHUT_WR) != 0) return 17;
+                if (read_dispatch_response_status(
+                        pair[0], "VULKAN_DISPATCH_V5.1",
+                        "vulkan-dispatch-v5-complete", 101) != -EPROTO) return 18;
+                close(pair[0]);
+                close(pair[1]);
+
+                if (socketpair(AF_UNIX, SOCK_STREAM, 0, pair) != 0) return 19;
+                const char truncated_text[] = "{{\\\"valid\\\":true}}";
+                if (write_all_test(pair[1], truncated_text) != 0 ||
+                    shutdown(pair[1], SHUT_WR) != 0) return 20;
+                char *text_line = NULL;
+                size_t text_size = 0;
+                if (read_executor_text_response_line(
+                        pair[0], &text_line, &text_size) != -EPROTO) return 21;
+                free(text_line);
+                close(pair[0]);
+                close(pair[1]);
+
+                if (socketpair(AF_UNIX, SOCK_STREAM, 0, pair) != 0) return 22;
+                const char complete_text[] = "{{\\\"valid\\\":true}}\\n";
+                if (write_all_test(pair[1], complete_text) != 0 ||
+                    shutdown(pair[1], SHUT_WR) != 0) return 23;
+                text_line = NULL;
+                text_size = 0;
+                if (read_executor_text_response_line(
+                        pair[0], &text_line, &text_size) != 0 ||
+                    !text_line || text_size != strlen(complete_text)) return 24;
+                free(text_line);
+                close(pair[0]);
+                close(pair[1]);
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_advertisement_negative_cache_is_single_flight(self):
+        source = textwrap.dedent(
+            f"""
+            #include <errno.h>
+            #include <poll.h>
+            #include <pthread.h>
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include <sys/socket.h>
+            #include <sys/un.h>
+            #include <sys/wait.h>
+            #include <unistd.h>
+            #include "{ICD_SOURCE}"
+
+            enum {{ THREAD_COUNT = 16 }};
+            static pthread_barrier_t start_barrier;
+            static int worker_results[THREAD_COUNT];
+
+            static int make_listener(const char *path) {{
+                int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+                if (fd < 0) return -1;
+                unlink(path);
+                struct sockaddr_un address;
+                memset(&address, 0, sizeof(address));
+                address.sun_family = AF_UNIX;
+                snprintf(address.sun_path, sizeof(address.sun_path), "%s", path);
+                if (bind(fd, (struct sockaddr *)&address, sizeof(address)) != 0 ||
+                    listen(fd, THREAD_COUNT) != 0) {{
+                    close(fd);
+                    return -1;
+                }}
+                return fd;
+            }}
+
+            static void *query_worker(void *opaque) {{
+                intptr_t index = (intptr_t)opaque;
+                int barrier_rc = pthread_barrier_wait(&start_barrier);
+                if (barrier_rc != 0 && barrier_rc != PTHREAD_BARRIER_SERIAL_THREAD) {{
+                    worker_results[index] = 2;
+                    return NULL;
+                }}
+                PdockerVkAdvertisedCaps caps;
+                worker_results[index] =
+                    pdocker_vk_get_advertised_caps(&caps) ? 3 : 0;
+                return NULL;
+            }}
+
+            static int read_command(int fd) {{
+                char ch = 0;
+                size_t bytes = 0;
+                while (bytes < 128) {{
+                    ssize_t n = read(fd, &ch, 1);
+                    if (n < 0 && errno == EINTR) continue;
+                    if (n <= 0) return -1;
+                    ++bytes;
+                    if (ch == '\\n') return 0;
+                }}
+                return -1;
+            }}
+
+            int main(void) {{
+                char path[sizeof(((struct sockaddr_un *)0)->sun_path)];
+                snprintf(path, sizeof(path),
+                         "/tmp/skydnir-vk-caps-flight-%ld.sock", (long)getpid());
+                int listen_fd = make_listener(path);
+                if (listen_fd < 0 || setenv("PDOCKER_GPU_QUEUE_SOCKET", path, 1) != 0)
+                    return 2;
+
+                pid_t server = fork();
+                if (server < 0) return 3;
+                if (server == 0) {{
+                    alarm(10);
+                    int client = accept(listen_fd, NULL, NULL);
+                    if (client < 0 || read_command(client) != 0) _exit(10);
+                    const char malformed[] =
+                        "{{\\\"schema\\\":\\\"skydnir-vulkan-advertisement-caps-v1\\\"}}\\n";
+                    size_t left = sizeof(malformed) - 1u;
+                    const char *cursor = malformed;
+                    while (left > 0) {{
+                        ssize_t n = write(client, cursor, left);
+                        if (n < 0 && errno == EINTR) continue;
+                        if (n <= 0) _exit(11);
+                        cursor += (size_t)n;
+                        left -= (size_t)n;
+                    }}
+                    close(client);
+                    struct pollfd pfd = {{.fd = listen_fd, .events = POLLIN}};
+                    int poll_rc = poll(&pfd, 1, 800);
+                    close(listen_fd);
+                    _exit(poll_rc == 0 ? 0 : 12);
+                }}
+                close(listen_fd);
+
+                if (pthread_barrier_init(&start_barrier, NULL, THREAD_COUNT + 1) != 0)
+                    return 4;
+                pthread_t threads[THREAD_COUNT];
+                for (intptr_t i = 0; i < THREAD_COUNT; ++i) {{
+                    if (pthread_create(&threads[i], NULL, query_worker, (void *)i) != 0)
+                        return 5;
+                }}
+                int barrier_rc = pthread_barrier_wait(&start_barrier);
+                if (barrier_rc != 0 && barrier_rc != PTHREAD_BARRIER_SERIAL_THREAD)
+                    return 6;
+                for (size_t i = 0; i < THREAD_COUNT; ++i) {{
+                    if (pthread_join(threads[i], NULL) != 0 || worker_results[i] != 0)
+                        return 7;
+                }}
+                PdockerVkAdvertisedCaps cached;
+                if (pdocker_vk_get_advertised_caps(&cached)) return 8;
+
+                int status = 0;
+                if (waitpid(server, &status, 0) != server || !WIFEXITED(status) ||
+                    WEXITSTATUS(status) != 0) return 9;
+                pthread_barrier_destroy(&start_barrier);
+                unlink(path);
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_endpoint_generation_tracks_path_inode_and_fork(self):
+        source = textwrap.dedent(
+            f"""
+            #include <errno.h>
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include <sys/socket.h>
+            #include <sys/un.h>
+            #include <sys/wait.h>
+            #include <unistd.h>
+            #include "{ICD_SOURCE}"
+
+            static int make_listener(const char *path) {{
+                int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+                if (fd < 0) return -1;
+                unlink(path);
+                struct sockaddr_un address;
+                memset(&address, 0, sizeof(address));
+                address.sun_family = AF_UNIX;
+                snprintf(address.sun_path, sizeof(address.sun_path), "%s", path);
+                if (bind(fd, (struct sockaddr *)&address, sizeof(address)) != 0 ||
+                    listen(fd, 2) != 0) {{
+                    close(fd);
+                    return -1;
+                }}
+                return fd;
+            }}
+
+            int main(void) {{
+                char path_a[sizeof(((struct sockaddr_un *)0)->sun_path)];
+                char path_b[sizeof(((struct sockaddr_un *)0)->sun_path)];
+                snprintf(path_a, sizeof(path_a), "/tmp/skydnir-vk-endpoint-a-%ld.sock", (long)getpid());
+                snprintf(path_b, sizeof(path_b), "/tmp/skydnir-vk-endpoint-b-%ld.sock", (long)getpid());
+                int listener_a = make_listener(path_a);
+                int listener_b = make_listener(path_b);
+                if (listener_a < 0 || listener_b < 0) return 2;
+
+                if (setenv("PDOCKER_GPU_QUEUE_SOCKET", path_a, 1) != 0) return 3;
+                PdockerGpuEndpointKey a1, a2, b1, a_rebound;
+                if (snapshot_gpu_endpoint(&a1) != 0 ||
+                    snapshot_gpu_endpoint(&a2) != 0 ||
+                    !gpu_endpoint_key_equal(&a1, &a2) ||
+                    !a1.socket_identity_valid) return 4;
+
+                if (setenv("PDOCKER_GPU_QUEUE_SOCKET", path_b, 1) != 0 ||
+                    snapshot_gpu_endpoint(&b1) != 0 ||
+                    b1.generation == a1.generation ||
+                    strcmp(b1.path, path_b) != 0) return 5;
+
+                close(listener_a);
+                listener_a = make_listener(path_a);
+                if (listener_a < 0 ||
+                    setenv("PDOCKER_GPU_QUEUE_SOCKET", path_a, 1) != 0 ||
+                    snapshot_gpu_endpoint(&a_rebound) != 0 ||
+                    a_rebound.generation == a1.generation ||
+                    a_rebound.socket_inode == a1.socket_inode) return 6;
+
+                pid_t child = fork();
+                if (child < 0) return 7;
+                if (child == 0) {{
+                    alarm(5);
+                    PdockerGpuEndpointKey child_key;
+                    if (snapshot_gpu_endpoint(&child_key) != 0 ||
+                        child_key.pid == a_rebound.pid ||
+                        child_key.generation == a_rebound.generation) _exit(8);
+                    _exit(0);
+                }}
+                int status = 0;
+                if (waitpid(child, &status, 0) != child ||
+                    !WIFEXITED(status) || WEXITSTATUS(status) != 0) return 9;
+
+                close(listener_a);
+                close(listener_b);
+                unlink(path_a);
+                unlink(path_b);
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_socket_transport_survives_peer_close_without_sigpipe(self):
+        source = textwrap.dedent(
+            f"""
+            #include <errno.h>
+            #include <signal.h>
+            #include <sys/socket.h>
+            #include <unistd.h>
+            #include "{ICD_SOURCE}"
+
+            int main(void) {{
+                int pair[2];
+                if (socketpair(AF_UNIX, SOCK_STREAM, 0, pair) != 0) return 2;
+                if (signal(SIGPIPE, SIG_DFL) == SIG_ERR) return 3;
+                close(pair[1]);
+                int rc = write_exact_fd(pair[0], "x", 1);
+                if (rc != -EPIPE && rc != -ECONNRESET) return 4;
+
+                int passed_fd = dup(STDIN_FILENO);
+                if (passed_fd < 0) return 5;
+                rc = sendmsg_exact_with_fds(pair[0], "y", 1, &passed_fd, 1);
+                close(passed_fd);
+                close(pair[0]);
+                return (rc == -EPIPE || rc == -ECONNRESET) ? 0 : 6;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_local_fence_reset_wait_and_submit_state_machine_executes_c_code(self):
         source = textwrap.dedent(

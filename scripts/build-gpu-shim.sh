@@ -77,7 +77,7 @@ build_arch() {
     chmod 0755 "$out"
     verify_elf_arch "$arch" "$out"
 
-    "$cc" -O2 -fPIC -shared -Wall -Wextra \
+    "$cc" -O2 -fPIC -shared -Wall -Wextra -pthread \
         -Wl,-Bsymbolic \
         -o "$icd_out" \
         "$SRC_DIR/pdocker_vulkan_icd.c"

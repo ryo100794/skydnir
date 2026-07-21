@@ -11,6 +11,7 @@
 #include <stdbool.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <stdint.h>
 #include <signal.h>
 #include <stdarg.h>
@@ -26,6 +27,10 @@
 #include <time.h>
 #include <unistd.h>
 #include <vulkan/vulkan.h>
+
+#ifndef MSG_NOSIGNAL
+#define MSG_NOSIGNAL 0
+#endif
 
 #ifndef VK_DEPENDENCY_DEVICE_GROUP_BIT
 #define VK_DEPENDENCY_DEVICE_GROUP_BIT ((VkDependencyFlagBits)0x00000004)
@@ -304,9 +309,38 @@ struct PdockerVkQueue {
     uint64_t device_object_id;
     uint64_t requested_feature_mask;
     uint64_t enabled_extension_mask;
+    /*
+     * Vulkan queue operations are externally synchronized by the API.  Keep
+     * one executor stream per virtual queue so consecutive binary V5/V6
+     * frames reuse the same accepted connection without a process-global lock.
+     * Every public request still receives a dup() that existing cleanup paths
+     * may close independently; the owning descriptor is closed with the queue.
+     */
+    int transport_fd;
+    pid_t transport_pid;
+    uint64_t transport_generation;
+    char transport_path[sizeof(((struct sockaddr_un *)0)->sun_path)];
     bool destroyed;
     struct PdockerVkQueue *next;
 };
+
+typedef struct {
+    pid_t pid;
+    uint64_t generation;
+    bool socket_identity_valid;
+    dev_t socket_device;
+    ino_t socket_inode;
+    char path[sizeof(((struct sockaddr_un *)0)->sun_path)];
+} PdockerGpuEndpointKey;
+
+static pthread_mutex_t g_gpu_endpoint_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t g_advertised_caps_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_advertised_caps_cond = PTHREAD_COND_INITIALIZER;
+static pthread_once_t g_gpu_endpoint_atfork_once = PTHREAD_ONCE_INIT;
+static void advertised_caps_cache_atfork_child_reset(void);
+static bool g_gpu_endpoint_current_valid;
+static uint64_t g_gpu_endpoint_next_generation = 1;
+static PdockerGpuEndpointKey g_gpu_endpoint_current;
 
 typedef struct PdockerVkMemory PdockerVkMemory;
 typedef struct PdockerVkBuffer PdockerVkBuffer;
@@ -1996,6 +2030,8 @@ static uint64_t next_vulkan_object_generation(void) {
 static void ensure_vulkan_dispatchable_object_ids(void) {
     static int initialized;
     if (__sync_lock_test_and_set(&initialized, 1)) return;
+    /* Static storage starts descriptors at zero, which is a live fd. */
+    g_queue.transport_fd = -1;
     g_device.object_id = next_vulkan_object_generation();
     if (g_device.instance_object_id == 0) {
         g_device.instance_object_id = next_vulkan_object_generation();
@@ -4043,6 +4079,15 @@ static bool queue_synchronization2_enabled(const PdockerVkQueue *queue) {
         queue->requested_feature_mask, queue->enabled_extension_mask);
 }
 
+static void queue_transport_close(PdockerVkQueue *queue) {
+    if (!queue) return;
+    if (queue->transport_fd >= 0) close(queue->transport_fd);
+    queue->transport_fd = -1;
+    queue->transport_pid = 0;
+    queue->transport_generation = 0;
+    queue->transport_path[0] = '\0';
+}
+
 static void queue_register(PdockerVkQueue *queue) {
     if (!queue) return;
     queue->destroyed = false;
@@ -4066,6 +4111,7 @@ static PdockerVkQueue *queue_unregister_object(PdockerVkQueue *target) {
 
 static void queue_retire(PdockerVkQueue *queue) {
     if (!queue || queue->destroyed) return;
+    queue_transport_close(queue);
     queue->destroyed = true;
     queue->next = g_retired_queues;
     g_retired_queues = queue;
@@ -6463,6 +6509,8 @@ static VkSampleCountFlags pdocker_vk_advertised_sample_counts(VkFormat format);
 static bool executor_supports_vulkan_dispatch_v53_buffer_views(void);
 static bool executor_supports_vulkan_dispatch_v58_descriptor_layout_flags(void);
 static bool executor_supports_vulkan_dispatch_v59_variable_descriptor_counts(void);
+static bool executor_supports_vulkan_dispatch_v5_terminal_response(void);
+static bool executor_supports_persistent_multiplexed_connections(void);
 static bool executor_supports_vulkan_graphics_v627_buffer_views(void);
 static bool executor_supports_vulkan_graphics_v628_push_constant_ranges(void);
 static bool executor_supports_vulkan_graphics_v629_variable_descriptor_counts(void);
@@ -7133,6 +7181,14 @@ static int create_shared_fd(size_t bytes) {
     snprintf(path, sizeof(path), "%s/pdocker-vulkan-memory-XXXXXX", dir);
     int fd = mkstemp(path);
     if (fd < 0) return -1;
+    int fd_flags = fcntl(fd, F_GETFD);
+    if (fd_flags < 0 || fcntl(fd, F_SETFD, fd_flags | FD_CLOEXEC) != 0) {
+        int err = errno;
+        close(fd);
+        unlink(path);
+        errno = err;
+        return -1;
+    }
     unlink(path);
     if (ftruncate(fd, (off_t)bytes) != 0) {
         int err = errno;
@@ -7149,12 +7205,123 @@ static bool bridge_available(void) {
     return access("/run/pdocker-gpu/pdocker-gpu.sock", F_OK) == 0;
 }
 
-static int connect_queue(void) {
+static const char *queue_socket_path(void) {
     const char *path = getenv("PDOCKER_GPU_QUEUE_SOCKET");
-    if (!path || !path[0]) path = "/run/pdocker-gpu/pdocker-gpu.sock";
-    if (strlen(path) >= sizeof(((struct sockaddr_un *)0)->sun_path)) return -ENAMETOOLONG;
-    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    return path && path[0] ? path : "/run/pdocker-gpu/pdocker-gpu.sock";
+}
+
+static int create_unix_stream_socket_cloexec(void) {
+    int fd = -1;
+#ifdef SOCK_CLOEXEC
+    fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if (fd < 0 && errno != EINVAL && errno != EPROTONOSUPPORT) return -errno;
+#endif
+    if (fd < 0) fd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (fd < 0) return -errno;
+
+    /* Keep this verification even when SOCK_CLOEXEC is available.  It makes
+     * the fork/exec ownership invariant explicit on older Android kernels and
+     * on libc implementations that accept but fail to apply the type flag. */
+    int flags = fcntl(fd, F_GETFD);
+    if (flags < 0 ||
+        ((flags & FD_CLOEXEC) == 0 &&
+         fcntl(fd, F_SETFD, flags | FD_CLOEXEC) != 0)) {
+        int err = errno;
+        close(fd);
+        return -err;
+    }
+    return fd;
+}
+
+static bool gpu_endpoint_identity_equal(
+        const PdockerGpuEndpointKey *a,
+        const PdockerGpuEndpointKey *b) {
+    if (!a || !b) return false;
+    return a->pid == b->pid &&
+           strcmp(a->path, b->path) == 0 &&
+           a->socket_identity_valid == b->socket_identity_valid &&
+           (!a->socket_identity_valid ||
+            (a->socket_device == b->socket_device &&
+             a->socket_inode == b->socket_inode));
+}
+
+static bool gpu_endpoint_key_equal(
+        const PdockerGpuEndpointKey *a,
+        const PdockerGpuEndpointKey *b) {
+    return gpu_endpoint_identity_equal(a, b) &&
+           a->generation == b->generation;
+}
+
+static uint64_t next_gpu_endpoint_generation_locked(void) {
+    uint64_t generation = g_gpu_endpoint_next_generation++;
+    if (generation == 0) generation = g_gpu_endpoint_next_generation++;
+    if (g_gpu_endpoint_next_generation == 0) g_gpu_endpoint_next_generation = 1;
+    return generation;
+}
+
+static void gpu_endpoint_atfork_prepare(void) {
+    (void)pthread_mutex_lock(&g_gpu_endpoint_mutex);
+    (void)pthread_mutex_lock(&g_advertised_caps_mutex);
+}
+
+static void gpu_endpoint_atfork_parent(void) {
+    (void)pthread_mutex_unlock(&g_advertised_caps_mutex);
+    (void)pthread_mutex_unlock(&g_gpu_endpoint_mutex);
+}
+
+static void gpu_endpoint_atfork_child(void) {
+    g_gpu_endpoint_current_valid = false;
+    memset(&g_gpu_endpoint_current, 0, sizeof(g_gpu_endpoint_current));
+    if (g_gpu_endpoint_next_generation == 0) g_gpu_endpoint_next_generation = 1;
+    advertised_caps_cache_atfork_child_reset();
+    (void)pthread_mutex_unlock(&g_advertised_caps_mutex);
+    (void)pthread_mutex_unlock(&g_gpu_endpoint_mutex);
+}
+
+static void register_gpu_endpoint_atfork(void) {
+    (void)pthread_atfork(
+        gpu_endpoint_atfork_prepare,
+        gpu_endpoint_atfork_parent,
+        gpu_endpoint_atfork_child);
+}
+
+static int snapshot_gpu_endpoint(PdockerGpuEndpointKey *out) {
+    if (!out) return -EINVAL;
+    (void)pthread_once(&g_gpu_endpoint_atfork_once, register_gpu_endpoint_atfork);
+
+    PdockerGpuEndpointKey observed;
+    memset(&observed, 0, sizeof(observed));
+    observed.pid = getpid();
+    const char *path = queue_socket_path();
+    size_t path_len = strlen(path);
+    if (path_len >= sizeof(observed.path)) return -ENAMETOOLONG;
+    memcpy(observed.path, path, path_len + 1u);
+
+    struct stat st;
+    if (stat(observed.path, &st) == 0 && S_ISSOCK(st.st_mode)) {
+        observed.socket_identity_valid = true;
+        observed.socket_device = st.st_dev;
+        observed.socket_inode = st.st_ino;
+    }
+
+    int lock_rc = pthread_mutex_lock(&g_gpu_endpoint_mutex);
+    if (lock_rc != 0) return -lock_rc;
+    if (!g_gpu_endpoint_current_valid ||
+        !gpu_endpoint_identity_equal(&observed, &g_gpu_endpoint_current)) {
+        observed.generation = next_gpu_endpoint_generation_locked();
+        g_gpu_endpoint_current = observed;
+        g_gpu_endpoint_current_valid = true;
+    }
+    *out = g_gpu_endpoint_current;
+    (void)pthread_mutex_unlock(&g_gpu_endpoint_mutex);
+    return 0;
+}
+
+static int connect_queue_path(const char *path) {
+    if (!path || !path[0]) return -EINVAL;
+    if (strlen(path) >= sizeof(((struct sockaddr_un *)0)->sun_path)) return -ENAMETOOLONG;
+    int fd = create_unix_stream_socket_cloexec();
+    if (fd < 0) return fd;
     struct sockaddr_un addr;
     memset(&addr, 0, sizeof(addr));
     addr.sun_family = AF_UNIX;
@@ -7167,10 +7334,86 @@ static int connect_queue(void) {
     return fd;
 }
 
+static int connect_queue(void) {
+    PdockerGpuEndpointKey endpoint;
+    int rc = snapshot_gpu_endpoint(&endpoint);
+    if (rc != 0) return rc;
+    return connect_queue_path(endpoint.path);
+}
+
+static int duplicate_cloexec_fd(int fd) {
+    if (fd < 0) return -EBADF;
+    int duplicate = -1;
+#ifdef F_DUPFD_CLOEXEC
+    duplicate = fcntl(fd, F_DUPFD_CLOEXEC, 0);
+    if (duplicate >= 0) return duplicate;
+    if (errno != EINVAL) return -errno;
+#endif
+    duplicate = dup(fd);
+    if (duplicate < 0) return -errno;
+    int flags = fcntl(duplicate, F_GETFD);
+    if (flags < 0 || fcntl(duplicate, F_SETFD, flags | FD_CLOEXEC) != 0) {
+        int err = errno;
+        close(duplicate);
+        return -err;
+    }
+    return duplicate;
+}
+
+static int connect_submit_queue(const PdockerVkQueue *queue) {
+    if (!queue) return connect_queue();
+    if (queue->destroyed) return -EINVAL;
+    PdockerVkQueue *mutable_queue = (PdockerVkQueue *)queue;
+    PdockerGpuEndpointKey endpoint;
+    int endpoint_rc = snapshot_gpu_endpoint(&endpoint);
+    if (endpoint_rc != 0) {
+        queue_transport_close(mutable_queue);
+        return endpoint_rc;
+    }
+    if (mutable_queue->transport_fd >= 0 &&
+        (mutable_queue->transport_pid != endpoint.pid ||
+         mutable_queue->transport_generation != endpoint.generation ||
+         strcmp(mutable_queue->transport_path, endpoint.path) != 0)) {
+        queue_transport_close(mutable_queue);
+    }
+    if (mutable_queue->transport_fd < 0) {
+        int fd = connect_queue_path(endpoint.path);
+        if (fd < 0) return fd;
+        mutable_queue->transport_fd = fd;
+        mutable_queue->transport_pid = endpoint.pid;
+        mutable_queue->transport_generation = endpoint.generation;
+        snprintf(mutable_queue->transport_path,
+                 sizeof(mutable_queue->transport_path), "%s", endpoint.path);
+    }
+    /* Queue operations are externally synchronized by Vulkan.  A transient
+     * dup failure (for example EMFILE) does not corrupt the established owner
+     * stream, so preserve it and let the caller report the local failure. */
+    return duplicate_cloexec_fd(mutable_queue->transport_fd);
+}
+
+static void finish_submit_queue_request(
+        const PdockerVkQueue *queue,
+        int request_fd,
+        int request_rc) {
+    if (request_fd >= 0) close(request_fd);
+    if (request_rc != 0 && queue && !queue->destroyed) {
+        /* A short write, truncated frame, or incomplete response may leave the
+         * byte stream out of frame alignment.  Drop the owning descriptor so
+         * the next submit reconnects rather than attempting to resynchronize
+         * by guessing at bytes. */
+        /* Stream corruption is queue-local. Endpoint generations represent
+         * observed socket identity changes only; globally invalidating here
+         * would discard unrelated healthy queues and capability snapshots. */
+        PdockerVkQueue *mutable_queue = (PdockerVkQueue *)queue;
+        queue_transport_close(mutable_queue);
+    }
+}
+
 static int read_executor_text_response_line(int fd, char **out_line, size_t *out_len) {
     const size_t max_line = 4096u;
     size_t line_cap = 256u;
     size_t off = 0;
+    bool line_terminated = false;
     if (!out_line || !out_len) return -EINVAL;
     *out_line = NULL;
     *out_len = 0;
@@ -7202,18 +7445,24 @@ static int read_executor_text_response_line(int fd, char **out_line, size_t *out
         }
         if (r == 0) break;
         line[off++] = ch;
-        if (ch == '\n') break;
+        if (ch == '\n') {
+            line_terminated = true;
+            break;
+        }
     }
     if (off + 1u >= max_line) {
         free(line);
         return -EMSGSIZE;
     }
     line[off] = '\0';
+    if (!line_terminated || off < 3u || line[0] != '{' || line[off - 2u] != '}') {
+        free(line);
+        return -EPROTO;
+    }
     *out_line = line;
     *out_len = off;
     return 0;
 }
-
 
 
 static void hex_encode(const uint8_t *src, size_t src_size, char *dst, size_t dst_size) {
@@ -7354,13 +7603,65 @@ static int write_exact_fd(int fd, const void *data, size_t size) {
     const unsigned char *p = (const unsigned char *)data;
     size_t off = 0;
     while (off < size) {
-        ssize_t n = write(fd, p + off, size - off);
+        ssize_t n = send(fd, p + off, size - off, MSG_NOSIGNAL);
         if (n < 0) {
             if (errno == EINTR) continue;
             return -errno;
         }
         if (n == 0) return -EPIPE;
         off += (size_t)n;
+    }
+    return 0;
+}
+
+static int sendmsg_exact_with_fds(int fd,
+                                  const void *data,
+                                  size_t size,
+                                  const int *fds,
+                                  size_t fd_count) {
+    if (fd < 0 || (!data && size > 0) || size == 0 ||
+        fd_count > PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS ||
+        (fd_count > 0 && !fds)) {
+        return -EINVAL;
+    }
+
+    char control[CMSG_SPACE(sizeof(int) * PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS)];
+    struct iovec iov = {
+        .iov_base = (void *)data,
+        .iov_len = size,
+    };
+    struct msghdr msg;
+    memset(control, 0, sizeof(control));
+    memset(&msg, 0, sizeof(msg));
+    msg.msg_iov = &iov;
+    msg.msg_iovlen = 1;
+    if (fd_count > 0) {
+        msg.msg_control = control;
+        msg.msg_controllen = sizeof(control);
+        struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
+        if (!cmsg) return -EIO;
+        cmsg->cmsg_level = SOL_SOCKET;
+        cmsg->cmsg_type = SCM_RIGHTS;
+        cmsg->cmsg_len = CMSG_LEN(sizeof(int) * fd_count);
+        memcpy(CMSG_DATA(cmsg), fds, sizeof(int) * fd_count);
+        msg.msg_controllen = CMSG_SPACE(sizeof(int) * fd_count);
+    }
+
+    ssize_t sent;
+    do {
+        sent = sendmsg(fd, &msg, MSG_NOSIGNAL);
+    } while (sent < 0 && errno == EINTR);
+    if (sent < 0) return -errno;
+    if (sent == 0) return -EPIPE;
+    if ((size_t)sent > size) return -EIO;
+
+    /* SCM_RIGHTS is attached only to the first successful sendmsg.  Complete
+     * a short stream write without resending the ancillary data, otherwise
+     * the executor would receive duplicate descriptors. */
+    if ((size_t)sent < size) {
+        return write_exact_fd(fd,
+                              (const unsigned char *)data + (size_t)sent,
+                              size - (size_t)sent);
     }
     return 0;
 }
@@ -7376,17 +7677,35 @@ static int parse_executor_json_result(const char *line, int fallback) {
     return (int)value;
 }
 
-static uint64_t parse_executor_json_u64_key(const char *line, const char *key, uint64_t fallback) {
-    if (!line || !key) return fallback;
+static bool parse_executor_json_u64_key_exact(
+        const char *line,
+        const char *key,
+        uint64_t *out_value) {
+    if (!line || !key || !key[0] || !out_value) return false;
     char pattern[64];
-    snprintf(pattern, sizeof(pattern), "\"%s\":", key);
-    const char *p = strstr(line, pattern);
-    if (!p) return fallback;
-    p += strlen(pattern);
+    int pattern_length = snprintf(pattern, sizeof(pattern), "\"%s\":", key);
+    if (pattern_length <= 0 || (size_t)pattern_length >= sizeof(pattern)) return false;
+    const char *field = strstr(line, pattern);
+    if (!field || strstr(field + (size_t)pattern_length, pattern) != NULL) return false;
+    const char *digits = field + (size_t)pattern_length;
+    if (*digits < '0' || *digits > '9') return false;
+    if (*digits == '0' && digits[1] >= '0' && digits[1] <= '9') return false;
+    errno = 0;
     char *end = NULL;
-    unsigned long long value = strtoull(p, &end, 10);
-    if (end == p) return fallback;
-    return (uint64_t)value;
+    unsigned long long value = strtoull(digits, &end, 10);
+    if (errno == ERANGE || end == digits) return false;
+    while (*end == ' ' || *end == '\t' || *end == '\r') ++end;
+    if (*end != ',' && *end != '}') return false;
+    *out_value = (uint64_t)value;
+    return true;
+}
+
+static uint64_t parse_executor_json_u64_key(
+        const char *line,
+        const char *key,
+        uint64_t fallback) {
+    uint64_t value = 0;
+    return parse_executor_json_u64_key_exact(line, key, &value) ? value : fallback;
 }
 
 static int send_executor_text_command(
@@ -7770,18 +8089,41 @@ static int send_executor_fence_signal(PdockerVkFence *fence) {
     return rc == 0 && result != VK_SUCCESS ? -EIO : rc;
 }
 
-static bool dispatch_response_is_graphics_transport(const char *transport_name) {
-    return transport_name && strstr(transport_name, "VULKAN_GRAPHICS_V6") != NULL;
+static bool dispatch_response_has_stage(
+        const char *line,
+        const char *stage) {
+    if (!line || !stage || !stage[0]) return false;
+    char stage_marker[160];
+    int n = snprintf(stage_marker, sizeof(stage_marker),
+                     "\"stage\":\"%s\"", stage);
+    return n > 0 && (size_t)n < sizeof(stage_marker) &&
+        strstr(line, stage_marker) != NULL;
 }
 
-static bool dispatch_response_is_graphics_terminal_success(const char *line) {
-    return line &&
-           strstr(line, "\"stage\":\"vulkan-graphics-v6-replay\"") != NULL &&
-           strstr(line, "\"valid\":true") != NULL &&
-           strstr(line, "\"execution_implemented\":true") != NULL;
+static bool dispatch_response_is_terminal_success(
+        const char *line,
+        const char *terminal_stage,
+        uint64_t expected_submit_id) {
+    if (!dispatch_response_has_stage(line, terminal_stage) ||
+        strstr(line, "\"valid\":true") == NULL ||
+        strstr(line, "\"execution_implemented\":true") == NULL) {
+        return false;
+    }
+    if (expected_submit_id != 0) {
+        uint64_t submit_id = 0;
+        if (!parse_executor_json_u64_key_exact(line, "submit_id", &submit_id) ||
+            submit_id != expected_submit_id) {
+            return false;
+        }
+    }
+    return true;
 }
 
-static int read_dispatch_response_status(int socket_fd, const char *transport_name) {
+static int read_dispatch_response_status(
+        int socket_fd,
+        const char *transport_name,
+        const char *terminal_stage,
+        uint64_t expected_submit_id) {
     const size_t max_response = 1024 * 1024;
     char stack_line[4096];
     char *heap_line = NULL;
@@ -7789,12 +8131,13 @@ static int read_dispatch_response_status(int socket_fd, const char *transport_na
     size_t line_cap = sizeof(stack_line);
     size_t total_read = 0;
     bool saw_nonterminal = false;
-    bool graphics_transport = dispatch_response_is_graphics_transport(transport_name);
+    const bool terminal_response_required = terminal_stage && terminal_stage[0];
     int rc = -EIO;
 
-    for (unsigned line_index = 0; line_index < 16 && total_read < max_response; ++line_index) {
+    for (unsigned line_index = 0; line_index < 64 && total_read < max_response; ++line_index) {
         size_t line_off = 0;
         int read_rc = 0;
+        bool line_terminated = false;
         while (line_off + 1 < max_response - total_read) {
             if (line_off + 1 >= line_cap) {
                 size_t next_cap = line_cap * 2;
@@ -7824,7 +8167,10 @@ static int read_dispatch_response_status(int socket_fd, const char *transport_na
             if (r == 0) break;
             line[line_off++] = ch;
             total_read++;
-            if (ch == '\n') break;
+            if (ch == '\n') {
+                line_terminated = true;
+                break;
+            }
         }
         line[line_off] = '\0';
         if (read_rc != 0) {
@@ -7835,6 +8181,11 @@ static int read_dispatch_response_status(int socket_fd, const char *transport_na
             rc = saw_nonterminal ? -EPROTO : -EIO;
             break;
         }
+        if (!line_terminated || line_off < 3 ||
+            line[0] != '{' || line[line_off - 2] != '}') {
+            rc = -EPROTO;
+            break;
+        }
         if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG") ||
             env_truthy_default("PDOCKER_GPU_DISPATCH_PROFILE_LOG", false)) {
             fprintf(stderr,
@@ -7843,15 +8194,9 @@ static int read_dispatch_response_status(int socket_fd, const char *transport_na
                     line);
             if (line[line_off - 1] != '\n') fprintf(stderr, "\n");
         }
-        if (graphics_transport) {
+        if (terminal_response_required) {
             if (strstr(line, "\"valid\":false") != NULL) {
-                /*
-                 * A failed graphics replay is the highest-value diagnostic for
-                 * Android-side Vulkan passthrough.  Do not hide it behind
-                 * PDOCKER_VULKAN_ICD_DEBUG: without this line the container log
-                 * only shows a generic vkQueueSubmit failure and the actual
-                 * executor stage/error is lost when ADB drops.
-                 */
+                /* Preserve the executor's exact failing stage in container logs. */
                 fprintf(stderr,
                         "pdocker-vulkan-icd: %s dispatch failure response: %s",
                         transport_name ? transport_name : "generic",
@@ -7860,10 +8205,18 @@ static int read_dispatch_response_status(int socket_fd, const char *transport_na
                 rc = -EIO;
                 break;
             }
-            if (dispatch_response_is_graphics_terminal_success(line)) {
+            if (dispatch_response_is_terminal_success(
+                    line, terminal_stage, expected_submit_id)) {
                 rc = 0;
                 break;
             }
+            if (dispatch_response_has_stage(line, terminal_stage)) {
+                /* One request is in flight per persistent stream. A terminal
+                 * response for another correlation ID is stream corruption. */
+                rc = -EPROTO;
+                break;
+            }
+            /* Diagnostic success events are not protocol delimiters. */
             saw_nonterminal = true;
             continue;
         }
@@ -8596,28 +8949,17 @@ static int send_vulkan_dispatch_v5_frame_with_fds(
         !fds || fd_count == 0 || fd_count > PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS) {
         return -EINVAL;
     }
-    char control[CMSG_SPACE(sizeof(int) * PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS)];
-    struct iovec iov;
-    struct msghdr msg;
-    memset(control, 0, sizeof(control));
-    memset(&iov, 0, sizeof(iov));
-    memset(&msg, 0, sizeof(msg));
-    iov.iov_base = (void *)frame;
-    iov.iov_len = sizeof(PdockerGpuVulkanDispatchV5FrameHeader);
-    msg.msg_iov = &iov;
-    msg.msg_iovlen = 1;
-    msg.msg_control = control;
-    msg.msg_controllen = sizeof(control);
-    struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
-    cmsg->cmsg_level = SOL_SOCKET;
-    cmsg->cmsg_type = SCM_RIGHTS;
-    cmsg->cmsg_len = CMSG_LEN(sizeof(int) * fd_count);
-    memcpy(CMSG_DATA(cmsg), fds, sizeof(int) * fd_count);
-    msg.msg_controllen = CMSG_SPACE(sizeof(int) * fd_count);
-    if (sendmsg(socket_fd, &msg, 0) < 0) return -errno;
-    return write_exact_fd(socket_fd,
-                          frame + sizeof(PdockerGpuVulkanDispatchV5FrameHeader),
-                          frame_size - sizeof(PdockerGpuVulkanDispatchV5FrameHeader));
+    int rc = sendmsg_exact_with_fds(
+        socket_fd,
+        frame,
+        sizeof(PdockerGpuVulkanDispatchV5FrameHeader),
+        fds,
+        fd_count);
+    if (rc != 0) return rc;
+    return write_exact_fd(
+        socket_fd,
+        frame + sizeof(PdockerGpuVulkanDispatchV5FrameHeader),
+        frame_size - sizeof(PdockerGpuVulkanDispatchV5FrameHeader));
 }
 
 
@@ -8631,30 +8973,17 @@ static int send_vulkan_graphics_v6_frame_with_fds(
         fd_count > PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS || (fd_count > 0 && !fds)) {
         return -EINVAL;
     }
-    char control[CMSG_SPACE(sizeof(int) * PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS)];
-    struct iovec iov;
-    struct msghdr msg;
-    memset(control, 0, sizeof(control));
-    memset(&iov, 0, sizeof(iov));
-    memset(&msg, 0, sizeof(msg));
-    iov.iov_base = (void *)frame;
-    iov.iov_len = sizeof(PdockerGpuVulkanGraphicsV6FrameHeader);
-    msg.msg_iov = &iov;
-    msg.msg_iovlen = 1;
-    if (fd_count > 0) {
-        msg.msg_control = control;
-        msg.msg_controllen = sizeof(control);
-        struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
-        cmsg->cmsg_level = SOL_SOCKET;
-        cmsg->cmsg_type = SCM_RIGHTS;
-        cmsg->cmsg_len = CMSG_LEN(sizeof(int) * fd_count);
-        memcpy(CMSG_DATA(cmsg), fds, sizeof(int) * fd_count);
-        msg.msg_controllen = CMSG_SPACE(sizeof(int) * fd_count);
-    }
-    if (sendmsg(socket_fd, &msg, 0) < 0) return -errno;
-    return write_exact_fd(socket_fd,
-                          frame + sizeof(PdockerGpuVulkanGraphicsV6FrameHeader),
-                          frame_size - sizeof(PdockerGpuVulkanGraphicsV6FrameHeader));
+    int rc = sendmsg_exact_with_fds(
+        socket_fd,
+        frame,
+        sizeof(PdockerGpuVulkanGraphicsV6FrameHeader),
+        fds,
+        fd_count);
+    if (rc != 0) return rc;
+    return write_exact_fd(
+        socket_fd,
+        frame + sizeof(PdockerGpuVulkanGraphicsV6FrameHeader),
+        frame_size - sizeof(PdockerGpuVulkanGraphicsV6FrameHeader));
 }
 
 static uint32_t float_bits_u32(float value) {
@@ -8664,8 +8993,13 @@ static uint32_t float_bits_u32(float value) {
 }
 
 
-static int send_empty_vulkan_graphics_v6_1_validation_frame(void) {
-    int socket_fd = connect_queue();
+static int send_empty_vulkan_graphics_v6_1_validation_frame(
+        const PdockerVkQueue *submit_queue) {
+    const bool persistent_transport =
+        executor_supports_persistent_multiplexed_connections();
+    int socket_fd = persistent_transport
+        ? connect_submit_queue(submit_queue)
+        : connect_queue();
     if (socket_fd < 0) return socket_fd;
     PdockerGpuVulkanGraphicsV61FrameHeader frame;
     memset(&frame, 0, sizeof(frame));
@@ -8716,8 +9050,14 @@ static int send_empty_vulkan_graphics_v6_1_validation_frame(void) {
     header->frame_hash = fnv1a64_bytes(&frame, sizeof(frame));
     int rc = send_vulkan_graphics_v6_frame_with_fds(
         socket_fd, (const unsigned char *)&frame, sizeof(frame), NULL, 0);
-    if (rc == 0) rc = read_dispatch_response_status(socket_fd, "VULKAN_GRAPHICS_V6.1");
-    close(socket_fd);
+    if (rc == 0) rc = read_dispatch_response_status(
+        socket_fd, "VULKAN_GRAPHICS_V6.1", "vulkan-graphics-v6-replay",
+        header->submit_id);
+    if (persistent_transport) {
+        finish_submit_queue_request(submit_queue, socket_fd, rc);
+    } else {
+        close(socket_fd);
+    }
     return rc;
 }
 
@@ -11989,7 +12329,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
         command_buffer_has_executor_frame_content_in_sequence_range(
             cmd, sequence_begin, sequence_end);
     if (!cmd || (!has_executor_frame_content_in_range && submit_sync_count == 0)) {
-        return send_empty_vulkan_graphics_v6_1_validation_frame();
+        return send_empty_vulkan_graphics_v6_1_validation_frame(submit_queue);
     }
     size_t expected_v635_event_command_provenance_count = 0;
     int provenance_preflight_rc =
@@ -12003,7 +12343,11 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
         !executor_supports_vulkan_graphics_v635_event_command_provenance()) {
         return -EOPNOTSUPP;
     }
-    int socket_fd = connect_queue();
+    const bool persistent_transport =
+        executor_supports_persistent_multiplexed_connections();
+    int socket_fd = persistent_transport
+        ? connect_submit_queue(submit_queue)
+        : connect_queue();
     if (socket_fd < 0) return socket_fd;
 
     PdockerVkGraphicsImageLayoutTracker layout_tracker = {0};
@@ -15640,7 +15984,8 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
         need_v62_specialization ? "VULKAN_GRAPHICS_V6.2" : "VULKAN_GRAPHICS_V6.1";
     if (rc == 0) {
         frame_build_phase = "read-response";
-        rc = read_dispatch_response_status(socket_fd, graphics_label);
+        rc = read_dispatch_response_status(
+            socket_fd, graphics_label, "vulkan-graphics-v6-replay", submit_id);
     }
 
 cleanup:
@@ -15673,7 +16018,11 @@ cleanup:
 #undef ENSURE_GRAPHICS_V629_VARIABLE_DESCRIPTOR_COUNTS
 #undef ENSURE_GRAPHICS_V624_LAYOUT_TABLES
 #undef ENSURE_GRAPHICS_V616_CLEAR_TABLES
-    close(socket_fd);
+    if (persistent_transport) {
+        finish_submit_queue_request(submit_queue, socket_fd, rc);
+    } else {
+        close(socket_fd);
+    }
     return rc;
 }
 
@@ -19635,7 +19984,28 @@ static int send_generic_vulkan_dispatch_op(
         fflush(stderr);
     }
 
-    int socket_fd = connect_queue();
+    const bool pending_compute_barriers = pre_barriers &&
+        (pre_barriers->memory_count || pre_barriers->buffer_count || pre_barriers->image_count);
+    const bool requires_v5_frame =
+        strict_passthrough || descriptorless_compute_dispatch ||
+        descriptor_array_transport_required || variable_descriptor_count_transport_required ||
+        texel_buffer_transport_required ||
+        image_descriptor_count > 0 || pending_compute_barriers ||
+        specialization_transport_required || push_requires_v5_frame ||
+        entry_name_requires_v5_frame ||
+        binding_count > PDOCKER_GPU_VULKAN_TEXT_DISPATCH_MAX_BINDINGS || op->dispatch_indirect;
+    const bool use_v5_frame =
+        (vulkan_v5_frame_enabled() || requires_v5_frame) && !copy_alias_enabled();
+    const bool persistent_v5_transport =
+        use_v5_frame &&
+        executor_supports_vulkan_dispatch_v5_terminal_response() &&
+        executor_supports_persistent_multiplexed_connections();
+    /* Legacy V1-V4 text dispatch has no terminal response delimiter.  It must
+     * remain request-scoped; only negotiated framed V5 traffic may reuse the
+     * queue stream. */
+    int socket_fd = persistent_v5_transport
+        ? connect_submit_queue(submit_queue)
+        : connect_queue();
     if (socket_fd < 0) {
         if (lifecycle_log) {
             fprintf(stderr,
@@ -19651,16 +20021,6 @@ static int send_generic_vulkan_dispatch_op(
         pdocker_vk_command_text_destroy(&command);
         return socket_fd;
     }
-    const bool pending_compute_barriers = pre_barriers &&
-        (pre_barriers->memory_count || pre_barriers->buffer_count || pre_barriers->image_count);
-    const bool requires_v5_frame =
-        strict_passthrough || descriptorless_compute_dispatch ||
-        descriptor_array_transport_required || variable_descriptor_count_transport_required ||
-        texel_buffer_transport_required ||
-        image_descriptor_count > 0 || pending_compute_barriers ||
-        specialization_transport_required || push_requires_v5_frame ||
-        entry_name_requires_v5_frame ||
-        binding_count > PDOCKER_GPU_VULKAN_TEXT_DISPATCH_MAX_BINDINGS || op->dispatch_indirect;
     if (requires_v5_frame && copy_alias_enabled()) {
         fprintf(stderr,
                 "pdocker-vulkan-icd: generic dispatch rejected: "
@@ -19680,7 +20040,7 @@ static int send_generic_vulkan_dispatch_op(
         close(socket_fd);
         return -EOPNOTSUPP;
     }
-    if ((vulkan_v5_frame_enabled() || requires_v5_frame) && !copy_alias_enabled()) {
+    if (use_v5_frame) {
         const char *option_text = "";
         size_t option_text_size = 0;
         if (raw_command_len > core_command_len + 1u &&
@@ -19764,7 +20124,13 @@ static int send_generic_vulkan_dispatch_op(
             op->pipeline ? op->pipeline->layout : NULL,
             descriptor_hash,
             dispatch_hash);
-        if (rc == 0) rc = read_dispatch_response_status(socket_fd, "VULKAN_DISPATCH_V5.1");
+        if (rc == 0) {
+            rc = read_dispatch_response_status(
+                socket_fd,
+                "VULKAN_DISPATCH_V5.1",
+                persistent_v5_transport ? "vulkan-dispatch-v5-complete" : NULL,
+                persistent_v5_transport ? dispatch_id : 0);
+        }
         if (lifecycle_log) {
             fprintf(stderr,
                     "pdocker-vulkan-icd: generic dispatch lifecycle: "
@@ -19775,7 +20141,11 @@ static int send_generic_vulkan_dispatch_op(
                     monotonic_ms() - lifecycle_start_ms);
             fflush(stderr);
         }
-        close(socket_fd);
+        if (persistent_v5_transport) {
+            finish_submit_queue_request(submit_queue, socket_fd, rc);
+        } else {
+            close(socket_fd);
+        }
         close_spirv_probe_replay(&probe);
         pdocker_vk_command_text_destroy(&command);
         return rc;
@@ -19789,108 +20159,15 @@ static int send_generic_vulkan_dispatch_op(
         pdocker_vk_command_text_destroy(&command);
         return -EOPNOTSUPP;
     }
-    char control[CMSG_SPACE(sizeof(int) * PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS)];
-    struct iovec iov;
-    struct msghdr msg;
-    memset(control, 0, sizeof(control));
-    memset(&iov, 0, sizeof(iov));
-    memset(&msg, 0, sizeof(msg));
-    iov.iov_base = command.data;
-    iov.iov_len = raw_command_len;
-    msg.msg_iov = &iov;
-    msg.msg_iovlen = 1;
-    msg.msg_control = control;
-    msg.msg_controllen = sizeof(control);
-    struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
-    cmsg->cmsg_level = SOL_SOCKET;
-    cmsg->cmsg_type = SCM_RIGHTS;
-    cmsg->cmsg_len = CMSG_LEN(sizeof(int) * (1 + binding_count));
-    memcpy(CMSG_DATA(cmsg), fds, sizeof(int) * (1 + binding_count));
-    msg.msg_controllen = CMSG_SPACE(sizeof(int) * (1 + binding_count));
-
-    int rc = 0;
-    if (sendmsg(socket_fd, &msg, 0) < 0) {
-        rc = -errno;
-    } else {
-        /*
-         * Executor responses are normally tiny.  Keep the hot path allocation
-         * free, but allow large diagnostic JSON events without truncating the
-         * evidence we need for llama GPU bisection.
-         *
-         * Ownership policy:
-         * - stack_line is used for the common case.
-         * - heap_line is per-call/per-thread state, never shared globally.
-         * - growth is geometric and capped, so a malformed executor cannot
-         *   force unbounded allocation or an alloc/free storm.
-         * - the old heap block is freed only after the replacement is ready,
-         *   leaving line valid on ENOMEM.
-         */
-        const size_t max_response = 1024 * 1024;
-        char stack_line[4096];
-        size_t line_cap = sizeof(stack_line);
-        size_t line_off = 0;
-        char *heap_line = NULL;
-        char *line = stack_line;
-        ssize_t response_last_read = 0;
-        int response_errno = 0;
-        size_t response_read_calls = 0;
-        while (line_off + 1 < max_response) {
-            if (line_off + 1 >= line_cap) {
-                size_t next_cap = line_cap * 2;
-                if (next_cap < line_cap) {
-                    rc = -EOVERFLOW;
-                    break;
-                }
-                if (next_cap > max_response) next_cap = max_response;
-                char *next = (char *)malloc(next_cap);
-                if (!next) {
-                    rc = -ENOMEM;
-                    break;
-                }
-                memcpy(next, line, line_off);
-                free(heap_line);
-                heap_line = next;
-                line = heap_line;
-                line_cap = next_cap;
-            }
-            char ch;
-            ssize_t r = read(socket_fd, &ch, 1);
-            response_read_calls++;
-            response_last_read = r;
-            if (r < 0) response_errno = errno;
-            if (r <= 0) break;
-            line[line_off++] = ch;
-            if (ch == '\n') break;
-        }
-        line[line_off] = '\0';
-        if (rc == 0 && line_off + 1 >= max_response) rc = -EMSGSIZE;
-        if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG") ||
-            env_truthy_default("PDOCKER_GPU_DISPATCH_PROFILE_LOG", false)) {
-            fprintf(stderr, "pdocker-vulkan-icd: generic dispatch response: %s", line);
-            if (line_off == 0 || line[line_off - 1] != '\n') fprintf(stderr, "\n");
-        }
-        if (rc == 0 && strstr(line, "\"valid\":true") == NULL) rc = -EIO;
-        if (line_off == 0 || rc != 0 || getenv("PDOCKER_VULKAN_ICD_DEBUG") ||
-            env_truthy_default("PDOCKER_GPU_DISPATCH_PROFILE_LOG", false)) {
-            fprintf(stderr,
-                    "pdocker-vulkan-icd: generic dispatch response status: "
-                    "{\"component\":\"icd\",\"event\":\"response-status\","
-                    "\"dispatch_id\":%llu,\"spirv_hash\":\"0x%016llx\","
-                    "\"rc\":%d,\"line_bytes\":%zu,\"read_calls\":%zu,"
-                    "\"last_read\":%zd,\"response_errno\":%d,"
-                    "\"raw_command_len\":%zu,\"raw_command_hash\":\"0x%016llx\"}\n",
-                    (unsigned long long)dispatch_id,
-                    (unsigned long long)shader_hash,
-                    rc,
-                    line_off,
-                    response_read_calls,
-                    response_last_read,
-                    response_errno,
-                    raw_command_len,
-                    (unsigned long long)raw_command_hash);
-            fflush(stderr);
-        }
-        free(heap_line);
+    int rc = sendmsg_exact_with_fds(
+        socket_fd,
+        command.data,
+        raw_command_len,
+        fds,
+        1 + binding_count);
+    if (rc == 0) {
+        rc = read_dispatch_response_status(
+            socket_fd, "VULKAN_DISPATCH_TEXT", NULL, 0);
     }
     if (lifecycle_log) {
         fprintf(stderr,
@@ -21079,6 +21356,8 @@ typedef struct {
     bool vulkan_dispatch_v57_push_constant_ops_supported;
     bool vulkan_dispatch_v58_descriptor_layout_flags_supported;
     bool vulkan_dispatch_v59_variable_descriptor_counts_supported;
+    bool vulkan_dispatch_v5_terminal_response_supported;
+    bool persistent_multiplexed_connections_supported;
     bool vulkan_dispatch_v5_resource_schema_supported;
     bool vulkan_dispatch_v5_supported_minors_valid;
     bool vulkan_dispatch_v5_supported_minor[10];
@@ -21138,6 +21417,29 @@ typedef struct {
     uint32_t image_format_cap_count;
     PdockerVkAdvertisedFormatCaps image_format_caps[PDOCKER_VK_ADVERTISED_FORMAT_CAP_MAX];
 } PdockerVkAdvertisedCaps;
+
+typedef enum {
+    PDOCKER_VK_CAPS_CACHE_EMPTY = 0,
+    PDOCKER_VK_CAPS_CACHE_QUERYING,
+    PDOCKER_VK_CAPS_CACHE_READY_POSITIVE,
+    PDOCKER_VK_CAPS_CACHE_READY_NEGATIVE,
+} PdockerVkAdvertisedCapsCacheState;
+
+typedef struct {
+    PdockerVkAdvertisedCapsCacheState state;
+    PdockerGpuEndpointKey endpoint;
+    PdockerVkAdvertisedCaps caps;
+    int error;
+    uint64_t retry_after_ns;
+    uint64_t flight_id;
+} PdockerVkAdvertisedCapsCache;
+
+static PdockerVkAdvertisedCapsCache g_advertised_caps_cache;
+static _Thread_local PdockerVkAdvertisedCaps g_advertised_caps_snapshot;
+
+static void advertised_caps_cache_atfork_child_reset(void) {
+    memset(&g_advertised_caps_cache, 0, sizeof(g_advertised_caps_cache));
+}
 
 static const char *json_find_value(const char *json, const char *key) {
     if (!json || !key || !key[0]) return NULL;
@@ -21311,6 +21613,15 @@ static bool parse_executor_advertisement_caps_json(
     if (!json_read_string(json, "deviceName", caps->device_name, sizeof(caps->device_name))) {
         snprintf(caps->device_name, sizeof(caps->device_name), "executor Vulkan device");
     }
+    /* Optional and fail-closed so a newer ICD remains safe with an older executor. */
+    (void)json_read_bool(
+        json,
+        "vulkan_dispatch_v5_terminal_response_supported",
+        &caps->vulkan_dispatch_v5_terminal_response_supported);
+    (void)json_read_bool(
+        json,
+        "persistent_multiplexed_connections_supported",
+        &caps->persistent_multiplexed_connections_supported);
 
     json_read_u32(json, "maxPushConstantsSize", &caps->limits.maxPushConstantsSize);
     json_read_u32(json, "maxComputeSharedMemorySize", &caps->limits.maxComputeSharedMemorySize);
@@ -22101,23 +22412,30 @@ static bool parse_executor_advertisement_caps_json(
            caps->image_format_cap_count == expected_format_cap_count;
 }
 
-static int query_executor_advertisement_caps_line(char *line, size_t line_cap) {
-    if (!line || line_cap == 0) return -EINVAL;
+static int query_executor_advertisement_caps_line(
+        const PdockerGpuEndpointKey *endpoint,
+        char *line,
+        size_t line_cap) {
+    if (!endpoint || !endpoint->path[0] || !line || line_cap == 0) return -EINVAL;
     line[0] = '\0';
-    int socket_fd = connect_queue();
+    int socket_fd = connect_queue_path(endpoint->path);
     if (socket_fd < 0) return socket_fd;
     const char command[] = "VULKAN_ADVERTISEMENT_CAPS\n";
-    ssize_t sent = write(socket_fd, command, sizeof(command) - 1);
-    int rc = 0;
-    if (sent < 0 || (size_t)sent != sizeof(command) - 1) {
-        rc = sent < 0 ? -errno : -EIO;
-    } else {
+    int rc = write_exact_fd(socket_fd, command, sizeof(command) - 1);
+    if (rc == 0) {
         size_t off = 0;
         bool saw_newline = false;
         while (off + 1 < line_cap) {
             char ch;
-            ssize_t r = read(socket_fd, &ch, 1);
-            if (r <= 0) break;
+            ssize_t r;
+            do {
+                r = read(socket_fd, &ch, 1);
+            } while (r < 0 && errno == EINTR);
+            if (r < 0) {
+                rc = -errno;
+                break;
+            }
+            if (r == 0) break;
             line[off++] = ch;
             if (ch == '\n') {
                 saw_newline = true;
@@ -22125,32 +22443,156 @@ static int query_executor_advertisement_caps_line(char *line, size_t line_cap) {
             }
         }
         line[off] = '\0';
-        if (off == 0) rc = -EIO;
-        if (rc == 0 && !saw_newline && off + 1 >= line_cap) rc = -EOVERFLOW;
-        if (rc == 0 && strstr(line, "\"schema\":\"skydnir-vulkan-advertisement-caps-v1\"") == NULL) {
+        if (rc == 0 && off == 0) rc = -EIO;
+        if (rc == 0 && !saw_newline) {
+            rc = off + 1 >= line_cap ? -EOVERFLOW : -EPROTO;
+        }
+        if (rc == 0 &&
+            (off < 3 || line[0] != '{' || line[off - 2] != '}')) {
+            rc = -EPROTO;
+        }
+        if (rc == 0 &&
+            strstr(line, "\"schema\":\"skydnir-vulkan-advertisement-caps-v1\"") == NULL) {
             rc = -EPROTO;
         }
     }
     close(socket_fd);
+    if (rc == 0) {
+        PdockerGpuEndpointKey after;
+        int snapshot_rc = snapshot_gpu_endpoint(&after);
+        if (snapshot_rc != 0) return snapshot_rc;
+        if (!gpu_endpoint_key_equal(endpoint, &after)) return -ESTALE;
+    }
     return rc;
 }
 
-static const PdockerVkAdvertisedCaps *pdocker_vk_advertised_caps(void) {
-    static PdockerVkAdvertisedCaps caps;
-    static bool queried = false;
-    if (queried) return &caps;
-    queried = true;
-    char line[PDOCKER_VK_ADVERTISEMENT_CAPS_LINE_MAX];
-    int rc = query_executor_advertisement_caps_line(line, sizeof(line));
-    if (rc == 0 && parse_executor_advertisement_caps_json(line, &caps)) {
-        caps.loaded = true;
-        caps.executor_valid = true;
-    } else {
-        memset(&caps, 0, sizeof(caps));
-        caps.loaded = true;
-        caps.executor_valid = false;
+static uint64_t advertised_caps_negative_retry_after_ns(int error) {
+    if (error == -EPROTO || error == -EINVAL || error == -EOPNOTSUPP) {
+        /* A schema/protocol incompatibility is stable for one endpoint
+         * identity. It is invalidated immediately when the socket changes. */
+        return UINT64_MAX;
     }
-    return &caps;
+    const uint64_t now = monotonic_ns();
+    const uint64_t backoff = 250000000ull;
+    return now > UINT64_MAX - backoff ? UINT64_MAX : now + backoff;
+}
+
+static void advertised_caps_cache_select_endpoint_locked(
+        const PdockerGpuEndpointKey *endpoint) {
+    if (!endpoint) return;
+    if (g_advertised_caps_cache.state != PDOCKER_VK_CAPS_CACHE_EMPTY &&
+        gpu_endpoint_key_equal(
+            endpoint, &g_advertised_caps_cache.endpoint)) {
+        return;
+    }
+    uint64_t next_flight = g_advertised_caps_cache.flight_id + 1u;
+    if (next_flight == 0) next_flight = 1;
+    memset(&g_advertised_caps_cache, 0, sizeof(g_advertised_caps_cache));
+    g_advertised_caps_cache.state = PDOCKER_VK_CAPS_CACHE_EMPTY;
+    g_advertised_caps_cache.endpoint = *endpoint;
+    g_advertised_caps_cache.flight_id = next_flight;
+    (void)pthread_cond_broadcast(&g_advertised_caps_cond);
+}
+
+static bool pdocker_vk_get_advertised_caps(PdockerVkAdvertisedCaps *out) {
+    if (!out) return false;
+    memset(out, 0, sizeof(*out));
+    out->loaded = true;
+
+    for (unsigned attempt = 0; attempt < 8u; ++attempt) {
+        PdockerGpuEndpointKey endpoint;
+        if (snapshot_gpu_endpoint(&endpoint) != 0) return false;
+
+        int lock_rc = pthread_mutex_lock(&g_advertised_caps_mutex);
+        if (lock_rc != 0) return false;
+        advertised_caps_cache_select_endpoint_locked(&endpoint);
+
+        if (g_advertised_caps_cache.state ==
+                PDOCKER_VK_CAPS_CACHE_READY_POSITIVE) {
+            *out = g_advertised_caps_cache.caps;
+            (void)pthread_mutex_unlock(&g_advertised_caps_mutex);
+            return out->executor_valid;
+        }
+        if (g_advertised_caps_cache.state ==
+                PDOCKER_VK_CAPS_CACHE_READY_NEGATIVE) {
+            uint64_t now = monotonic_ns();
+            if (g_advertised_caps_cache.retry_after_ns == UINT64_MAX ||
+                now < g_advertised_caps_cache.retry_after_ns) {
+                (void)pthread_mutex_unlock(&g_advertised_caps_mutex);
+                return false;
+            }
+            g_advertised_caps_cache.state = PDOCKER_VK_CAPS_CACHE_EMPTY;
+        }
+        if (g_advertised_caps_cache.state == PDOCKER_VK_CAPS_CACHE_QUERYING) {
+            int wait_rc = pthread_cond_wait(
+                &g_advertised_caps_cond, &g_advertised_caps_mutex);
+            (void)pthread_mutex_unlock(&g_advertised_caps_mutex);
+            if (wait_rc != 0) return false;
+            continue;
+        }
+
+        uint64_t flight_id = g_advertised_caps_cache.flight_id + 1u;
+        if (flight_id == 0) flight_id = 1;
+        g_advertised_caps_cache.flight_id = flight_id;
+        g_advertised_caps_cache.state = PDOCKER_VK_CAPS_CACHE_QUERYING;
+        g_advertised_caps_cache.endpoint = endpoint;
+        (void)pthread_mutex_unlock(&g_advertised_caps_mutex);
+
+        char line[PDOCKER_VK_ADVERTISEMENT_CAPS_LINE_MAX];
+        PdockerVkAdvertisedCaps queried_caps;
+        memset(&queried_caps, 0, sizeof(queried_caps));
+        int query_rc = query_executor_advertisement_caps_line(
+            &endpoint, line, sizeof(line));
+        bool valid = query_rc == 0 &&
+            parse_executor_advertisement_caps_json(line, &queried_caps);
+        if (query_rc == 0 && !valid) query_rc = -EPROTO;
+        queried_caps.loaded = true;
+        queried_caps.executor_valid = valid;
+
+        lock_rc = pthread_mutex_lock(&g_advertised_caps_mutex);
+        if (lock_rc != 0) return false;
+        bool owns_flight =
+            g_advertised_caps_cache.state == PDOCKER_VK_CAPS_CACHE_QUERYING &&
+            g_advertised_caps_cache.flight_id == flight_id &&
+            gpu_endpoint_key_equal(
+                &endpoint, &g_advertised_caps_cache.endpoint);
+        if (!owns_flight) {
+            (void)pthread_mutex_unlock(&g_advertised_caps_mutex);
+            continue;
+        }
+        if (query_rc == -ESTALE) {
+            g_advertised_caps_cache.state = PDOCKER_VK_CAPS_CACHE_EMPTY;
+            (void)pthread_cond_broadcast(&g_advertised_caps_cond);
+            (void)pthread_mutex_unlock(&g_advertised_caps_mutex);
+            continue;
+        }
+        if (valid) {
+            g_advertised_caps_cache.caps = queried_caps;
+            g_advertised_caps_cache.error = 0;
+            g_advertised_caps_cache.retry_after_ns = 0;
+            g_advertised_caps_cache.state =
+                PDOCKER_VK_CAPS_CACHE_READY_POSITIVE;
+            *out = queried_caps;
+        } else {
+            memset(&g_advertised_caps_cache.caps, 0,
+                   sizeof(g_advertised_caps_cache.caps));
+            g_advertised_caps_cache.caps.loaded = true;
+            g_advertised_caps_cache.error = query_rc;
+            g_advertised_caps_cache.retry_after_ns =
+                advertised_caps_negative_retry_after_ns(query_rc);
+            g_advertised_caps_cache.state =
+                PDOCKER_VK_CAPS_CACHE_READY_NEGATIVE;
+        }
+        (void)pthread_cond_broadcast(&g_advertised_caps_cond);
+        (void)pthread_mutex_unlock(&g_advertised_caps_mutex);
+        return valid;
+    }
+    return false;
+}
+
+static const PdockerVkAdvertisedCaps *pdocker_vk_advertised_caps(void) {
+    (void)pdocker_vk_get_advertised_caps(&g_advertised_caps_snapshot);
+    return &g_advertised_caps_snapshot;
 }
 
 static bool executor_supports_vulkan_dispatch_v52_image_layout_ranges(void) {
@@ -22207,6 +22649,20 @@ static bool executor_supports_vulkan_dispatch_v59_variable_descriptor_counts(voi
     const PdockerVkAdvertisedCaps *caps = pdocker_vk_advertised_caps();
     return caps && caps->executor_valid &&
            caps->vulkan_dispatch_v59_variable_descriptor_counts_supported;
+}
+
+static bool executor_supports_vulkan_dispatch_v5_terminal_response(void) {
+    if (!bridge_available()) return false;
+    const PdockerVkAdvertisedCaps *caps = pdocker_vk_advertised_caps();
+    return caps && caps->executor_valid &&
+           caps->vulkan_dispatch_v5_terminal_response_supported;
+}
+
+static bool executor_supports_persistent_multiplexed_connections(void) {
+    if (!bridge_available()) return false;
+    const PdockerVkAdvertisedCaps *caps = pdocker_vk_advertised_caps();
+    return caps && caps->executor_valid &&
+           caps->persistent_multiplexed_connections_supported;
 }
 
 static bool executor_supports_vulkan_graphics_v627_buffer_views(void) {
@@ -28785,6 +29241,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
     queue->device_object_id = device->object_id;
     queue->requested_feature_mask = requested_feature_mask;
     queue->enabled_extension_mask = enabled_extension_mask;
+    queue->transport_fd = -1;
     set_loader_magic_value(queue);
     queue_register(queue);
     device->queue = queue;
@@ -28818,7 +29275,9 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyDevice(
     }
     pdocker_vk_destroy_device_live_objects(device, destroy_owner_id);
     if (g_queue.device_object_id == destroy_owner_id) {
+        queue_transport_close(&g_queue);
         memset(&g_queue, 0, sizeof(g_queue));
+        g_queue.transport_fd = -1;
     }
     free(pdocker_device);
 }
