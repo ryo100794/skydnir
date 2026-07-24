@@ -1,6 +1,6 @@
 # Test Documents
 
-Snapshot date: 2026-05-20.
+Snapshot date: 2026-07-24.
 
 ## Purpose
 
@@ -99,18 +99,17 @@ run it, and where the latest result is stored.
   design, check density, random/stress process, and build-set artifacts.
 - Use [`compat-audit-latest.md`](compat-audit-latest.md) as the latest generated
   compatibility snapshot.
-- Use [`EVIDENCE_INDEX.md`](EVIDENCE_INDEX.md) to interpret `latest` artifacts
-  and to decide whether a host-only, planned-gap, historical, or device-gated
-  record can promote anything.
+- Use [`EVIDENCE_INDEX.md`](EVIDENCE_INDEX.md) to interpret `latest` artifacts,
+  decide whether a host-only, planned-gap, historical, or device-gated record
+  can promote anything, and manage high-churn llama/GPU artifact ownership and
+  `latest` pointer retention. Do not hand-edit benchmark or artifact JSON in
+  documentation ownership changes.
 - Use [`STORAGE_EVIDENCE_INDEX.md`](STORAGE_EVIDENCE_INDEX.md) before pruning,
   moving, or reclassifying storage/COW/SAF/archive evidence artifacts.
 - Use [`LLAMA_BENCHMARKS.md`](LLAMA_BENCHMARKS.md) as the human-readable
   benchmark history, with JSON files kept as machine-readable artifacts.
 - Use [`LLAMA_GPU_DEVICE_RUNBOOK_20260513.md`](LLAMA_GPU_DEVICE_RUNBOOK_20260513.md)
   for connected-device llama/GPU procedure and non-promoting capture rules.
-- Use [`EVIDENCE_INDEX.md`](EVIDENCE_INDEX.md) for high-churn llama/GPU artifact
-  ownership and `latest` pointer retention; do not hand-edit benchmark or
-  artifact JSON in documentation ownership changes.
 - Fixed release-candidate build evidence lives under
   [`../release/builds/`](../release/builds/) so immutable release records do not
   mix with mutable `latest` test outputs.
