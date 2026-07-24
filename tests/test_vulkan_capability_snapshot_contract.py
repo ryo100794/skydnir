@@ -503,5 +503,168 @@ class VulkanCapabilitySnapshotLifecycleHarnessTest(unittest.TestCase):
             self.assertEqual(0, result.returncode, result.stdout + result.stderr)
 
 
+    def test_distinct_snapshots_drive_feature_extension_and_limit_helpers(self) -> None:
+        source = CSource(ICD_SOURCE.read_text(encoding="utf-8"))
+        helper_sources = "\n\n".join(
+            source.function(name)
+            for name in (
+                "snapshot_executor_caps",
+                "executor_advertisement_caps_if_enabled",
+                "executor_advertised_storage8_or",
+                "advertised_storage_buffer_storage_class",
+                "capability_snapshot_max_buffer_size",
+                "advertised_subgroup_size",
+            )
+        )
+        harness = textwrap.dedent(
+            """
+            #include <stdbool.h>
+            #include <stdint.h>
+            #include <stdio.h>
+
+            typedef uint32_t VkBool32;
+            typedef uint64_t VkDeviceSize;
+            #define VK_FALSE ((VkBool32)0u)
+            #define VK_TRUE ((VkBool32)1u)
+
+            typedef struct PdockerVkAdvertisedCaps {
+                bool executor_valid;
+                bool ext_storage_buffer_storage_class;
+            } PdockerVkAdvertisedCaps;
+
+            typedef struct PdockerVkCapabilitySnapshot {
+                bool bridge_available;
+                bool executor_advertisement_selected;
+                PdockerVkAdvertisedCaps *advertised_caps;
+                VkBool32 effective_storage8;
+                uint32_t effective_subgroup_size;
+                VkDeviceSize max_buffer_size;
+            } PdockerVkCapabilitySnapshot;
+
+            typedef struct LegacyDeviceState {
+                const PdockerVkCapabilitySnapshot *capability_snapshot;
+            } LegacyDeviceState;
+
+            static const PdockerVkCapabilitySnapshot *g_legacy_snapshot;
+            static LegacyDeviceState g_device;
+
+            static const PdockerVkCapabilitySnapshot *legacy_physical_snapshot(void) {
+                return g_legacy_snapshot;
+            }
+            """
+        )
+        harness += "\n" + helper_sources + "\n"
+        harness += textwrap.dedent(
+            """
+            static unsigned verify_pair(
+                    const PdockerVkCapabilitySnapshot *first,
+                    const PdockerVkCapabilitySnapshot *second) {
+                unsigned failures = 0;
+                if (executor_advertised_storage8_or(first, VK_TRUE) != VK_FALSE ||
+                    executor_advertised_storage8_or(second, VK_FALSE) != VK_TRUE) {
+                    failures |= 1u;
+                }
+                if (advertised_storage_buffer_storage_class(first) != VK_FALSE ||
+                    advertised_storage_buffer_storage_class(second) != VK_TRUE) {
+                    failures |= 2u;
+                }
+                if (capability_snapshot_max_buffer_size(first) != 4096u ||
+                    capability_snapshot_max_buffer_size(second) != 65536u) {
+                    failures |= 4u;
+                }
+                if (advertised_subgroup_size(first) != 8u ||
+                    advertised_subgroup_size(second) != 32u) {
+                    failures |= 8u;
+                }
+                return failures;
+            }
+
+            int main(void) {
+                PdockerVkAdvertisedCaps first_caps = {
+                    .executor_valid = true,
+                    .ext_storage_buffer_storage_class = false,
+                };
+                PdockerVkAdvertisedCaps second_caps = {
+                    .executor_valid = true,
+                    .ext_storage_buffer_storage_class = true,
+                };
+                const PdockerVkCapabilitySnapshot first = {
+                    .bridge_available = true,
+                    .executor_advertisement_selected = true,
+                    .advertised_caps = &first_caps,
+                    .effective_storage8 = VK_FALSE,
+                    .effective_subgroup_size = 8u,
+                    .max_buffer_size = 4096u,
+                };
+                const PdockerVkCapabilitySnapshot second = {
+                    .bridge_available = true,
+                    .executor_advertisement_selected = true,
+                    .advertised_caps = &second_caps,
+                    .effective_storage8 = VK_TRUE,
+                    .effective_subgroup_size = 32u,
+                    .max_buffer_size = 65536u,
+                };
+
+                /* Poison legacy/global state with the opposite snapshot. */
+                g_legacy_snapshot = &second;
+                g_device.capability_snapshot = &second;
+                unsigned failures = verify_pair(&first, &second);
+
+                g_legacy_snapshot = &first;
+                g_device.capability_snapshot = &first;
+                failures |= verify_pair(&first, &second) << 8;
+
+                if (legacy_physical_snapshot() != &first ||
+                    g_device.capability_snapshot != &first) {
+                    failures |= 1u << 16;
+                }
+                if (failures != 0) {
+                    fprintf(stderr, "snapshot-isolation-mask=0x%x\\n", failures);
+                    return 1;
+                }
+                return 0;
+            }
+            """
+        )
+        with tempfile.TemporaryDirectory(prefix="vulkan-capability-isolation-") as tmp:
+            source_path = Path(tmp) / "snapshot_isolation.c"
+            binary_path = Path(tmp) / "snapshot_isolation"
+            source_path.write_text(harness, encoding="utf-8")
+            compiled = subprocess.run(
+                [
+                    "gcc",
+                    "-std=gnu11",
+                    "-O2",
+                    "-Wall",
+                    "-Wextra",
+                    "-Werror",
+                    "-o",
+                    str(binary_path),
+                    str(source_path),
+                ],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            self.assertEqual(
+                0,
+                compiled.returncode,
+                "gcc failed while compiling snapshot isolation harness\n"
+                + compiled.stdout
+                + compiled.stderr,
+            )
+            result = subprocess.run(
+                [str(binary_path)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

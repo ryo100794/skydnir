@@ -64,21 +64,20 @@ Additional P0 truthfulness fixes are part of this lane:
 Current host evidence:
 
 - 21 persistent-query contract tests pass;
-- 10 immutable capability-snapshot tests pass;
+- 11 immutable capability-snapshot tests pass, including a compiled two-snapshot
+  isolation harness that poisons legacy/global state;
 - 5 transport deadline/descriptor-ownership tests pass;
 - 5 updated ABI query/capability contracts pass;
 - arm64 and armhf glibc ICD strict builds pass with
   -Wall -Wextra -Werror.
 
-The remaining P0 order is:
+The host P0 gates in the original order are complete: the compiled C
+synchronization harness passed and both Android ABIs were rebuilt and passed
+payload-freshness checks at commit `08bba0e7`. The remaining P0 order is now:
 
-1. finish the complete host C synchronization harness and remove only
-   demonstrably stale source-shape assertions;
-2. rebuild and freshness-check the arm64-v8a and armeabi-v7a executor and ICD
-   artifacts from these exact sources;
-3. run generic Vulkan device evidence for query, synchronization2, WSI, idle,
+1. run generic Vulkan device evidence for query, synchronization2, WSI, idle,
    and sticky device loss;
-4. run the unchanged llama.cpp midpoint. Any failure must be classified against
+2. run the unchanged llama.cpp midpoint. Any failure must be classified against
    the generic Vulkan call/data flow before another implementation change.
 
 This work remains generic Vulkan pass-through. It does not modify llama.cpp,
@@ -5691,7 +5690,8 @@ ambiguous native wait.
 
 Host evidence for the final synchronization-identity quarantine tree is:
 
-- the ten focused generic Vulkan contract modules: 108 tests passed;
+- the ten focused generic Vulkan contract modules: 109 tests passed after the
+  compiled two-snapshot isolation case was added;
 - `tests.test_vulkan_p0_submit_completion_contract`: 16 tests passed;
 - `tests.test_vulkan_wsi_sync_contract`: 11 tests passed;
 - `tests.test_vulkan_strict_response_contract`: 17 tests passed;
