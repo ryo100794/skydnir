@@ -46,6 +46,7 @@
 #include <math.h>
 #include <pthread.h>
 #include <signal.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -1780,9 +1781,11 @@ typedef struct {
     VkQueue queue;
     uint32_t queue_family;
     VkQueueFlags queue_family_flags;
+    uint32_t queue_family_timestamp_valid_bits;
     VkQueue graphics_queue;
     uint32_t graphics_queue_family;
     VkQueueFlags graphics_queue_family_flags;
+    uint32_t graphics_queue_family_timestamp_valid_bits;
     VkShaderModule shader;
     VkShaderModule matmul_shader;
     VkDescriptorSetLayout set_layout;
@@ -1863,10 +1866,12 @@ typedef struct {
     PFN_vkCmdSetEvent2 cmd_set_event2;
     PFN_vkCmdResetEvent2 cmd_reset_event2;
     PFN_vkCmdWaitEvents2 cmd_wait_events2;
+    PFN_vkCmdWriteTimestamp2 cmd_write_timestamp2;
     PFN_vkQueueSubmit2 queue_submit2;
     PFN_vkGetSemaphoreCounterValue get_semaphore_counter_value;
     PFN_vkWaitSemaphores wait_semaphores;
     PFN_vkSignalSemaphore signal_semaphore;
+    PFN_vkResetQueryPool reset_query_pool;
     VkPhysicalDeviceSubgroupProperties subgroup_properties;
     double init_ms;
 } VulkanRuntime;
@@ -2707,9 +2712,9 @@ static uint32_t vulkan_runtime_sync2_supported(const VulkanRuntime *rt) {
 }
 
 static uint32_t vulkan_runtime_sync2_loaded(const VulkanRuntime *rt) {
-    /* vkCmdWriteTimestamp2 is transported as a query timestamp and replayed with vkCmdWriteTimestamp. */
     return (rt && rt->queue_submit2 && rt->cmd_pipeline_barrier2 &&
-            rt->cmd_set_event2 && rt->cmd_reset_event2 && rt->cmd_wait_events2) ? 1u : 0u;
+            rt->cmd_set_event2 && rt->cmd_reset_event2 && rt->cmd_wait_events2 &&
+            rt->cmd_write_timestamp2) ? 1u : 0u;
 }
 
 static uint32_t vulkan_runtime_dynamic_rendering_supported(const VulkanRuntime *rt) {
@@ -15215,6 +15220,8 @@ static int init_vulkan_runtime(VulkanRuntime *rt, const VulkanDispatchOptions *o
     }
     if (rt->queue_family == UINT32_MAX) { stage = "queue-family-compute"; goto fail; }
     rt->queue_family_flags = families[rt->queue_family].queueFlags;
+    rt->queue_family_timestamp_valid_bits =
+        families[rt->queue_family].timestampValidBits;
     if (families[rt->queue_family].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
         rt->graphics_queue_family = rt->queue_family;
     } else {
@@ -15227,6 +15234,8 @@ static int init_vulkan_runtime(VulkanRuntime *rt, const VulkanDispatchOptions *o
     }
     if (rt->graphics_queue_family != UINT32_MAX) {
         rt->graphics_queue_family_flags = families[rt->graphics_queue_family].queueFlags;
+        rt->graphics_queue_family_timestamp_valid_bits =
+            families[rt->graphics_queue_family].timestampValidBits;
     }
     float priority = 1.0f;
     VkDeviceQueueCreateInfo qcis[2];
@@ -15292,6 +15301,10 @@ static int init_vulkan_runtime(VulkanRuntime *rt, const VulkanDispatchOptions *o
     enabled_vulkan12.shaderInt8 =
         rt->physical_vulkan12.shaderInt8 || rt->physical_float16_int8.shaderInt8;
     enabled_vulkan12.timelineSemaphore = rt->physical_vulkan12.timelineSemaphore;
+    enabled_vulkan12.hostQueryReset =
+        rt->api_version >= VK_API_VERSION_1_2
+            ? rt->physical_vulkan12.hostQueryReset
+            : VK_FALSE;
     enabled_vulkan12.drawIndirectCount = rt->physical_vulkan12.drawIndirectCount;
     enabled_vulkan12.samplerFilterMinmax = rt->physical_vulkan12.samplerFilterMinmax;
     enabled_vulkan12.separateDepthStencilLayouts =
@@ -15407,6 +15420,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt, const VulkanDispatchOptions *o
          enabled_vulkan12.shaderFloat16 ||
          enabled_vulkan12.shaderInt8 ||
          enabled_vulkan12.timelineSemaphore ||
+         enabled_vulkan12.hostQueryReset ||
          enabled_vulkan12.drawIndirectCount ||
          enabled_vulkan12.samplerFilterMinmax ||
          enabled_vulkan12.separateDepthStencilLayouts ||
@@ -15780,6 +15794,14 @@ static int init_vulkan_runtime(VulkanRuntime *rt, const VulkanDispatchOptions *o
         rt->cmd_wait_events2 =
             (PFN_vkCmdWaitEvents2)vkGetDeviceProcAddr(rt->device, "vkCmdWaitEvents2KHR");
     }
+    if (rt->enabled_synchronization2.synchronization2) {
+        rt->cmd_write_timestamp2 =
+            (PFN_vkCmdWriteTimestamp2)vkGetDeviceProcAddr(rt->device, "vkCmdWriteTimestamp2");
+        if (!rt->cmd_write_timestamp2) {
+            rt->cmd_write_timestamp2 =
+                (PFN_vkCmdWriteTimestamp2)vkGetDeviceProcAddr(rt->device, "vkCmdWriteTimestamp2KHR");
+        }
+    }
     rt->queue_submit2 =
         (PFN_vkQueueSubmit2)vkGetDeviceProcAddr(rt->device, "vkQueueSubmit2");
     if (!rt->queue_submit2) {
@@ -15804,6 +15826,8 @@ static int init_vulkan_runtime(VulkanRuntime *rt, const VulkanDispatchOptions *o
         rt->signal_semaphore =
             (PFN_vkSignalSemaphore)vkGetDeviceProcAddr(rt->device, "vkSignalSemaphoreKHR");
     }
+    rt->reset_query_pool =
+        (PFN_vkResetQueryPool)vkGetDeviceProcAddr(rt->device, "vkResetQueryPool");
     rt->cmd_begin_rendering =
         (PFN_vkCmdBeginRenderingKHR)vkGetDeviceProcAddr(rt->device, "vkCmdBeginRenderingKHR");
     if (!rt->cmd_begin_rendering) {
@@ -16756,7 +16780,11 @@ static int run_vulkan_dispatch_fd(
         uint32_t base_x,
         uint32_t base_y,
         uint32_t base_z,
-        VkQueue submit_queue) {
+        VkQueue submit_queue,
+        VkResult *out_exact_result,
+        bool *out_execution_implemented) {
+    if (out_exact_result) *out_exact_result = VK_ERROR_UNKNOWN;
+    if (out_execution_implemented) *out_execution_implemented = false;
     if (shader_fd < 0 ||
         (binding_count > 0 && (!buffer_fds || !bindings)) ||
         binding_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS || shader_size == 0 ||
@@ -16805,6 +16833,7 @@ static int run_vulkan_dispatch_fd(
     int dispatch_lifecycle_begin_logged = 0;
     uint64_t dispatch_lifecycle_spirv_hash = 0;
     VkResult rc = VK_SUCCESS;
+    bool native_enqueued = false;
     int ret = -21;
     int oracle_fail_closed = 0;
     int io_rc = 0;
@@ -20405,6 +20434,7 @@ static int run_vulkan_dispatch_fd(
         ret = 75;
         goto cleanup;
     }
+    native_enqueued = true;
     fail_stage = "wait-generic-fence";
     const uint64_t dispatch_timeout_ns =
         env_timeout_ns("PDOCKER_GPU_DISPATCH_TIMEOUT_MS", 30000, 1000, 600000);
@@ -22076,6 +22106,27 @@ cleanup:
     free(alias_temp_buffers);
     free(temp_buffers);
     free(shader_code);
+    if (out_execution_implemented) {
+        *out_execution_implemented = native_enqueued;
+    }
+    if (out_exact_result) {
+        if (ret == 0) {
+            *out_exact_result = VK_SUCCESS;
+        } else if (native_enqueued) {
+            /* Any failure after a successful native enqueue leaves host-visible
+             * writeback/completion ambiguous.  The authoritative terminal must
+             * poison the logical device rather than invite a duplicate retry. */
+            *out_exact_result = VK_ERROR_DEVICE_LOST;
+        } else if (rc != VK_SUCCESS) {
+            *out_exact_result = rc;
+        } else if (ret == 75) {
+            *out_exact_result = VK_ERROR_OUT_OF_HOST_MEMORY;
+        } else if (ret == 76) {
+            *out_exact_result = VK_ERROR_FEATURE_NOT_PRESENT;
+        } else {
+            *out_exact_result = VK_ERROR_DEVICE_LOST;
+        }
+    }
     return ret;
 }
 
@@ -22366,6 +22417,19 @@ static void print_vulkan_advertisement_caps(const char *transport) {
         ? "[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34]"
         : "[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33]";
     const VkPhysicalDeviceLimits *limits = rt ? &rt->physical_properties.limits : NULL;
+    uint32_t queue_timestamp_valid_bits =
+        rt ? rt->queue_family_timestamp_valid_bits : 0;
+    if (rt && rt->graphics_queue_family != UINT32_MAX &&
+        rt->graphics_queue_family != rt->queue_family) {
+        uint32_t graphics_bits =
+            rt->graphics_queue_family_timestamp_valid_bits;
+        queue_timestamp_valid_bits =
+            queue_timestamp_valid_bits < graphics_bits
+                ? queue_timestamp_valid_bits : graphics_bits;
+    }
+    if (!limits || !limits->timestampComputeAndGraphics) {
+        queue_timestamp_valid_bits = 0;
+    }
     FILE *out = json_out();
     fprintf(out,
             "{\"executor\":\"pdocker-gpu-executor\","
@@ -22572,6 +22636,9 @@ static void print_vulkan_advertisement_caps(const char *transport) {
             "},\"limits\":{"
             "\"maxPushConstantsSize\":%u,"
             "\"maxComputeSharedMemorySize\":%u,"
+            "\"timestampComputeAndGraphics\":%u,"
+            "\"timestampPeriod\":%.9g,"
+            "\"queueTimestampValidBits\":%u,"
             "\"maxSamplerAnisotropy\":%.9g,"
             "\"maxPerStageDescriptorSamplers\":%u,"
             "\"maxPerStageDescriptorSampledImages\":%u,"
@@ -22598,6 +22665,9 @@ static void print_vulkan_advertisement_caps(const char *transport) {
             "\"lineWidthGranularity\":%.9g},",
             limits ? limits->maxPushConstantsSize : 0,
             limits ? limits->maxComputeSharedMemorySize : 0,
+            limits ? limits->timestampComputeAndGraphics : 0,
+            limits ? limits->timestampPeriod : 0.0f,
+            queue_timestamp_valid_bits,
             limits ? limits->maxSamplerAnisotropy : 1.0f,
             limits ? limits->maxPerStageDescriptorSamplers : 0,
             limits ? limits->maxPerStageDescriptorSampledImages : 0,
@@ -22696,6 +22766,7 @@ static void print_vulkan_advertisement_caps(const char *transport) {
             "\"samplerAnisotropy\":%u,"
             "\"samplerFilterMinmax\":%u,"
             "\"separateDepthStencilLayouts\":%u,"
+            "\"hostQueryReset\":%u,"
             "\"storage16\":{"
             "\"storageBuffer16BitAccess\":%u,"
             "\"uniformAndStorageBuffer16BitAccess\":%u,"
@@ -22741,6 +22812,7 @@ static void print_vulkan_advertisement_caps(const char *transport) {
             rt ? rt->physical_vulkan12.samplerFilterMinmax : 0,
             rt ? (rt->physical_vulkan12.separateDepthStencilLayouts ||
                   rt->physical_separate_depth_stencil_layouts.separateDepthStencilLayouts) : 0,
+            rt ? rt->enabled_vulkan12.hostQueryReset : 0,
             rt ? rt->physical_storage16.storageBuffer16BitAccess : 0,
             rt ? rt->physical_storage16.uniformAndStorageBuffer16BitAccess : 0,
             rt ? rt->physical_storage16.storagePushConstant16 : 0,
@@ -23773,16 +23845,168 @@ static int parse_count(const char *s, int fallback) {
     return (int)n;
 }
 
+typedef struct {
+    struct timespec expires_at;
+    int active;
+} ExecutorRequestDeadline;
+
+static _Thread_local ExecutorRequestDeadline g_executor_request_deadline;
+
+static int set_executor_receive_timeout_timeval(
+        int fd,
+        const struct timeval *timeout) {
+    if (fd < 0 || !timeout || timeout->tv_sec < 0 || timeout->tv_usec < 0 ||
+        timeout->tv_usec >= 1000000) {
+        return -EINVAL;
+    }
+    if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, timeout, sizeof(*timeout)) != 0) {
+        return -errno;
+    }
+    return 0;
+}
+
+static int set_executor_receive_timeout(int fd, int seconds) {
+    if (fd < 0 || seconds < 0) return -EINVAL;
+    const struct timeval timeout = {
+        .tv_sec = seconds,
+        .tv_usec = 0,
+    };
+    return set_executor_receive_timeout_timeval(fd, &timeout);
+}
+
+static void executor_request_deadline_clear(void) {
+    memset(&g_executor_request_deadline, 0, sizeof(g_executor_request_deadline));
+}
+
+static int executor_request_deadline_start(uint64_t timeout_ns) {
+    executor_request_deadline_clear();
+    if (timeout_ns == 0) return -EINVAL;
+
+    struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) return -errno;
+
+    uint64_t whole_seconds = timeout_ns / 1000000000ull;
+    long extra_nanoseconds = (long)(timeout_ns % 1000000000ull);
+    if (whole_seconds > (uint64_t)INT_MAX) return -EOVERFLOW;
+    time_t added_seconds = (time_t)whole_seconds;
+    long expires_nanoseconds = now.tv_nsec + extra_nanoseconds;
+    if (expires_nanoseconds >= 1000000000l) {
+        expires_nanoseconds -= 1000000000l;
+        added_seconds++;
+    }
+    if (now.tv_sec > (time_t)(LONG_MAX - (long)added_seconds)) {
+        return -EOVERFLOW;
+    }
+    g_executor_request_deadline.expires_at.tv_sec = now.tv_sec + added_seconds;
+    g_executor_request_deadline.expires_at.tv_nsec = expires_nanoseconds;
+    g_executor_request_deadline.active = 1;
+    return 0;
+}
+
+static int executor_request_deadline_remaining(struct timeval *timeout) {
+    if (!timeout || !g_executor_request_deadline.active) return -EINVAL;
+    struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) return -errno;
+
+    time_t seconds = g_executor_request_deadline.expires_at.tv_sec - now.tv_sec;
+    long nanoseconds =
+        g_executor_request_deadline.expires_at.tv_nsec - now.tv_nsec;
+    if (nanoseconds < 0) {
+        nanoseconds += 1000000000l;
+        seconds--;
+    }
+    if (seconds < 0 || (seconds == 0 && nanoseconds == 0)) {
+        return -ETIMEDOUT;
+    }
+
+    /* SO_RCVTIMEO treats zero as infinite, so round a positive remainder up
+     * to the next microsecond. A post-receive monotonic check below prevents
+     * that rounding from extending the absolute request deadline. */
+    long microseconds = (nanoseconds + 999l) / 1000l;
+    if (microseconds >= 1000000l) {
+        seconds++;
+        microseconds -= 1000000l;
+    }
+    timeout->tv_sec = seconds;
+    timeout->tv_usec = microseconds;
+    return 0;
+}
+
+static int executor_request_deadline_check(void) {
+    struct timeval unused;
+    return executor_request_deadline_remaining(&unused);
+}
+
+static int apply_executor_request_receive_deadline(int fd) {
+    struct timeval remaining;
+    int rc = executor_request_deadline_remaining(&remaining);
+    if (rc != 0) return rc;
+    return set_executor_receive_timeout_timeval(fd, &remaining);
+}
+
+static ssize_t recv_with_executor_request_deadline(
+        int fd,
+        void *buffer,
+        size_t bytes,
+        int flags) {
+    for (;;) {
+        int rc = apply_executor_request_receive_deadline(fd);
+        if (rc == -EINTR) continue;
+        if (rc != 0) return rc;
+        ssize_t n = recv(fd, buffer, bytes, flags);
+        if (n < 0 && errno == EINTR) continue;
+        if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            rc = executor_request_deadline_check();
+            if (rc == 0) continue;
+            return rc;
+        }
+        if (n < 0) return -errno;
+        if (n > 0) {
+            rc = executor_request_deadline_check();
+            if (rc != 0) return rc;
+        }
+        return n;
+    }
+}
+
+static ssize_t recvmsg_with_executor_request_deadline(
+        int fd,
+        struct msghdr *message,
+        int flags) {
+    if (!message) return -EINVAL;
+    const socklen_t original_name_length = message->msg_namelen;
+    const size_t original_control_length = message->msg_controllen;
+    for (;;) {
+        /* recvmsg() writes these output fields even when a signal or timeout
+         * interrupts the operation. Restore the caller capacity before every
+         * retry so ancillary data is not truncated by an earlier attempt. */
+        message->msg_namelen = original_name_length;
+        message->msg_controllen = original_control_length;
+        message->msg_flags = 0;
+        int rc = apply_executor_request_receive_deadline(fd);
+        if (rc == -EINTR) continue;
+        if (rc != 0) return rc;
+        ssize_t n = recvmsg(fd, message, flags);
+        if (n < 0 && errno == EINTR) continue;
+        if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            rc = executor_request_deadline_check();
+            if (rc == 0) continue;
+            return rc;
+        }
+        if (n < 0) return -errno;
+        /* The caller checks the deadline after harvesting SCM_RIGHTS so a
+         * receive which completes at expiry cannot leak installed fds. */
+        return n;
+    }
+}
 
 static int read_exact_bytes(int fd, void *buf, size_t bytes) {
     unsigned char *out = (unsigned char *)buf;
     size_t off = 0;
     while (off < bytes) {
-        ssize_t r = read(fd, out + off, bytes - off);
-        if (r < 0) {
-            if (errno == EINTR) continue;
-            return -errno;
-        }
+        ssize_t r = recv_with_executor_request_deadline(
+            fd, out + off, bytes - off, 0);
+        if (r < 0) return (int)r;
         if (r == 0) return -ECONNRESET;
         off += (size_t)r;
     }
@@ -26525,14 +26749,27 @@ static int ensure_received_fds_cloexec(int *fds, size_t count) {
     return 0;
 }
 
+static void close_received_fds(int *fds, size_t *count) {
+    if (!count) return;
+    if (fds) {
+        for (size_t i = 0; i < *count; ++i) {
+            if (fds[i] >= 0) {
+                close(fds[i]);
+                fds[i] = -1;
+            }
+        }
+    }
+    *count = 0;
+}
+
 static int recv_vulkan_dispatch_v5_header_with_fds(
         int cfd,
         PdockerGpuVulkanDispatchV5FrameHeader *header,
         int *passed_fds,
         size_t max_fds,
         size_t *fd_count) {
+    if (fd_count) *fd_count = 0;
     if (!header || !passed_fds || !fd_count) return -EINVAL;
-    *fd_count = 0;
     for (size_t i = 0; i < max_fds; ++i) passed_fds[i] = -1;
     char control[CMSG_SPACE(sizeof(int) * PDOCKER_GPU_MAX_PASSED_FDS)];
     struct iovec iov = {.iov_base = header, .iov_len = sizeof(*header)};
@@ -26544,12 +26781,18 @@ static int recv_vulkan_dispatch_v5_header_with_fds(
     msg.msg_iovlen = 1;
     msg.msg_control = control;
     msg.msg_controllen = sizeof(control);
-    ssize_t n = recvmsg(cfd, &msg, MSG_WAITALL | MSG_CMSG_CLOEXEC);
-    if (n <= 0) return n < 0 ? -errno : 0;
+    ssize_t n = recvmsg_with_executor_request_deadline(
+        cfd, &msg, MSG_WAITALL | MSG_CMSG_CLOEXEC);
+    if (n <= 0) return (int)n;
     for (struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
          cmsg;
          cmsg = CMSG_NXTHDR(&msg, cmsg)) {
         if (cmsg->cmsg_level != SOL_SOCKET || cmsg->cmsg_type != SCM_RIGHTS) continue;
+        if (cmsg->cmsg_len < CMSG_LEN(0) ||
+            (cmsg->cmsg_len - CMSG_LEN(0)) % sizeof(int) != 0) {
+            msg.msg_flags |= MSG_CTRUNC;
+            continue;
+        }
         size_t bytes = cmsg->cmsg_len - CMSG_LEN(0);
         size_t count = bytes / sizeof(int);
         int *fds = (int *)CMSG_DATA(cmsg);
@@ -26558,15 +26801,14 @@ static int recv_vulkan_dispatch_v5_header_with_fds(
             else close(fds[i]);
         }
     }
-    if ((size_t)n != sizeof(*header) ||
+    int deadline_rc = executor_request_deadline_check();
+    if (deadline_rc != 0) {
+        close_received_fds(passed_fds, fd_count);
+        return deadline_rc;
+    }
+    if ((size_t)n > sizeof(*header) ||
         (msg.msg_flags & (MSG_TRUNC | MSG_CTRUNC)) != 0) {
-        for (size_t i = 0; i < *fd_count && i < max_fds; ++i) {
-            if (passed_fds[i] >= 0) {
-                close(passed_fds[i]);
-                passed_fds[i] = -1;
-            }
-        }
-        *fd_count = 0;
+        close_received_fds(passed_fds, fd_count);
         return -EMSGSIZE;
     }
     int cloexec_rc = ensure_received_fds_cloexec(passed_fds, *fd_count);
@@ -26574,7 +26816,19 @@ static int recv_vulkan_dispatch_v5_header_with_fds(
         *fd_count = 0;
         return cloexec_rc;
     }
-    return validate_vulkan_dispatch_v5_header(header, *fd_count);
+    if ((size_t)n < sizeof(*header)) {
+        int read_rc = read_exact_bytes(
+            cfd, (unsigned char *)header + (size_t)n, sizeof(*header) - (size_t)n);
+        if (read_rc != 0) {
+            close_received_fds(passed_fds, fd_count);
+            return read_rc;
+        }
+    }
+    int validate_rc = validate_vulkan_dispatch_v5_header(header, *fd_count);
+    if (validate_rc != 0) {
+        close_received_fds(passed_fds, fd_count);
+    }
+    return validate_rc;
 }
 
 
@@ -26585,20 +26839,28 @@ static int recv_vulkan_dispatch_v5_frame(
         PdockerGpuVulkanDispatchV5FrameHeader *header_out,
         int *passed_fds,
         size_t max_fds,
-        size_t *fd_count) {
-    if (!frame_out || !header_out || !passed_fds || !fd_count) return -EINVAL;
-    *frame_out = NULL;
+        size_t *fd_count,
+        bool *out_frame_received) {
+    if (frame_out) *frame_out = NULL;
+    if (fd_count) *fd_count = 0;
+    if (out_frame_received) *out_frame_received = false;
+    if (!frame_out || !header_out || !passed_fds || !fd_count ||
+        !out_frame_received) return -EINVAL;
     int rc = recv_vulkan_dispatch_v5_header_with_fds(
         cfd, header_out, passed_fds, max_fds, fd_count);
     if (rc != 0) return rc;
     unsigned char *frame = (unsigned char *)calloc(1, (size_t)header_out->frame_size);
-    if (!frame) return -ENOMEM;
+    if (!frame) {
+        close_received_fds(passed_fds, fd_count);
+        return -ENOMEM;
+    }
     memcpy(frame, header_out, sizeof(*header_out));
     if (header_out->header_size > sizeof(*header_out)) {
         size_t extension_bytes = (size_t)(header_out->header_size - sizeof(*header_out));
         rc = read_exact_bytes(cfd, frame + sizeof(*header_out), extension_bytes);
         if (rc != 0) {
             free(frame);
+            close_received_fds(passed_fds, fd_count);
             return rc;
         }
     }
@@ -26606,11 +26868,14 @@ static int recv_vulkan_dispatch_v5_frame(
     rc = read_exact_bytes(cfd, frame + header_out->header_size, remaining);
     if (rc != 0) {
         free(frame);
+        close_received_fds(passed_fds, fd_count);
         return rc;
     }
+    *out_frame_received = true;
     rc = validate_vulkan_dispatch_v5_frame_content(frame, passed_fds, *fd_count);
     if (rc != 0) {
         free(frame);
+        close_received_fds(passed_fds, fd_count);
         return rc;
     }
     *frame_out = frame;
@@ -26619,25 +26884,19 @@ static int recv_vulkan_dispatch_v5_frame(
 
 static int connection_starts_with_v5_magic(int cfd) {
     char first = 0;
-    for (;;) {
-        ssize_t n = recv(cfd, &first, 1, MSG_PEEK);
-        if (n == 0) return 0;
-        if (n < 0) {
-            if (errno == EINTR) continue;
-            return -errno;
-        }
-        break;
-    }
+    ssize_t n = recv_with_executor_request_deadline(cfd, &first, 1, MSG_PEEK);
+    if (n <= 0) return (int)n;
     if (first != PDOCKER_GPU_VULKAN_DISPATCH_V5_MAGIC[0]) return 0;
     char magic[8];
-    ssize_t n;
-    do {
-        n = recv(cfd, magic, sizeof(magic), MSG_PEEK | MSG_WAITALL);
-    } while (n < 0 && errno == EINTR);
-    if (n == 0) return 0;
-    if (n < 0) return -errno;
-    if ((size_t)n != sizeof(magic)) return 0;
-    return memcmp(magic, PDOCKER_GPU_VULKAN_DISPATCH_V5_MAGIC, sizeof(magic)) == 0;
+    for (;;) {
+        n = recv_with_executor_request_deadline(
+            cfd, magic, sizeof(magic), MSG_PEEK | MSG_WAITALL);
+        if (n <= 0) return (int)n;
+        if ((size_t)n == sizeof(magic)) {
+            return memcmp(
+                magic, PDOCKER_GPU_VULKAN_DISPATCH_V5_MAGIC, sizeof(magic)) == 0;
+        }
+    }
 }
 
 static int validate_vulkan_graphics_v6_header_prefix(
@@ -38673,13 +38932,27 @@ static int vulkan_graphics_replay_buffer_vk_offset_for_indirect_draw(
 }
 
 
+struct VulkanExecutorQueryPoolEntry;
+
+static int retain_executor_query_pool_for_replay(
+        uint64_t query_pool_id,
+        VkDevice expected_device,
+        struct VulkanExecutorQueryPoolEntry **out_entry,
+        VkQueryPool *out_pool,
+        VkQueryType *out_query_type,
+        uint32_t *out_query_count,
+        VkQueryPipelineStatisticFlags *out_pipeline_statistics);
+
+static void release_executor_query_pool_entry(
+        struct VulkanExecutorQueryPoolEntry *entry);
+
 typedef struct VulkanGraphicsReplayQueryPool {
     uint64_t query_pool_id;
-    uint32_t result_fd_index;
-    uint32_t result_stride;
     uint32_t query_count;
     VkQueryType query_type;
+    VkQueryPipelineStatisticFlags pipeline_statistics;
     VkQueryPool pool;
+    struct VulkanExecutorQueryPoolEntry *registry_entry;
 } VulkanGraphicsReplayQueryPool;
 
 typedef struct VulkanGraphicsReplayQueries {
@@ -38713,26 +38986,103 @@ find_vulkan_graphics_v618_copy_query_result(
 
 static int find_vulkan_graphics_replay_query_pool(
         const VulkanGraphicsReplayQueries *queries,
-        uint64_t query_pool_id,
-        uint32_t result_fd_index) {
-    if (!queries) return -EINVAL;
+        uint64_t query_pool_id) {
+    if (!queries || query_pool_id == 0) return -EINVAL;
     for (uint32_t i = 0; i < queries->pool_count; ++i) {
-        if (queries->pools[i].query_pool_id == query_pool_id &&
-            queries->pools[i].result_fd_index == result_fd_index) return (int)i;
+        if (queries->pools[i].query_pool_id == query_pool_id) return (int)i;
     }
     return -ENOENT;
 }
 
 static void destroy_vulkan_graphics_replay_queries(
-        VkDevice device,
         VulkanGraphicsReplayQueries *queries) {
     if (!queries) return;
-    if (device) {
-        for (uint32_t i = 0; i < queries->pool_count; ++i) {
-            if (queries->pools[i].pool) vkDestroyQueryPool(device, queries->pools[i].pool, NULL);
+    for (uint32_t i = 0; i < queries->pool_count; ++i) {
+        if (queries->pools[i].registry_entry) {
+            release_executor_query_pool_entry(queries->pools[i].registry_entry);
         }
     }
     memset(queries, 0, sizeof(*queries));
+}
+
+static int retain_vulkan_graphics_replay_query_pool(
+        VulkanRuntime *rt,
+        VulkanGraphicsReplayQueries *queries,
+        uint64_t query_pool_id,
+        VulkanGraphicsReplayQueryPool **out_pool) {
+    if (!rt || !rt->device || !queries || !out_pool || query_pool_id == 0) {
+        return -EINVAL;
+    }
+    *out_pool = NULL;
+    int found = find_vulkan_graphics_replay_query_pool(queries, query_pool_id);
+    if (found >= 0) {
+        *out_pool = &queries->pools[(uint32_t)found];
+        return 0;
+    }
+    if (found != -ENOENT) return found;
+    if (queries->pool_count >= PDOCKER_GPU_VULKAN_GRAPHICS_V617_MAX_QUERY_COMMANDS) {
+        return -E2BIG;
+    }
+    VulkanGraphicsReplayQueryPool *pool = &queries->pools[queries->pool_count];
+    memset(pool, 0, sizeof(*pool));
+    int rc = retain_executor_query_pool_for_replay(
+        query_pool_id, rt->device, &pool->registry_entry, &pool->pool,
+        &pool->query_type, &pool->query_count, &pool->pipeline_statistics);
+    if (rc != 0) {
+        memset(pool, 0, sizeof(*pool));
+        return rc;
+    }
+    pool->query_pool_id = query_pool_id;
+    queries->pool_count++;
+    *out_pool = pool;
+    return 0;
+}
+
+static int validate_vulkan_graphics_query_range(
+        const VulkanGraphicsReplayQueryPool *pool,
+        uint32_t first_query,
+        uint32_t query_count) {
+    if (!pool || !pool->registry_entry || !pool->pool || query_count == 0 ||
+        first_query >= pool->query_count ||
+        query_count > pool->query_count - first_query) {
+        return -EPROTO;
+    }
+    return 0;
+}
+
+static int validate_vulkan_graphics_query_command_pool(
+        const PdockerGpuVulkanGraphicsV617QueryCommandEntry *entry,
+        const VulkanGraphicsReplayQueryPool *pool) {
+    if (!entry || !pool || entry->query_pool_id != pool->query_pool_id) return -EPROTO;
+    int rc = validate_vulkan_graphics_query_range(
+        pool, entry->first_query, entry->query_count);
+    if (rc != 0) return rc;
+    switch (entry->op) {
+        case PDOCKER_GPU_GRAPHICS_V617_QUERY_OP_RESET:
+            return 0;
+        case PDOCKER_GPU_GRAPHICS_V617_QUERY_OP_WRITE_TIMESTAMP:
+            return pool->query_type == VK_QUERY_TYPE_TIMESTAMP && entry->query_count == 1
+                ? 0 : -EPROTO;
+        case PDOCKER_GPU_GRAPHICS_V617_QUERY_OP_BEGIN:
+        case PDOCKER_GPU_GRAPHICS_V617_QUERY_OP_END:
+            return (pool->query_type == VK_QUERY_TYPE_OCCLUSION ||
+                    pool->query_type == VK_QUERY_TYPE_PIPELINE_STATISTICS) &&
+                   entry->query_count == 1
+                ? 0 : -EPROTO;
+        default:
+            return -EPROTO;
+    }
+}
+
+static int validate_vulkan_graphics_copy_query_pool(
+        const PdockerGpuVulkanGraphicsV618CopyQueryResultEntry *entry,
+        const VulkanGraphicsReplayQueryPool *pool) {
+    if (!entry || !pool || entry->query_pool_id != pool->query_pool_id ||
+        (VkQueryType)entry->query_type != pool->query_type) {
+        return -EPROTO;
+    }
+    return validate_vulkan_graphics_query_range(
+        pool, entry->first_query, entry->query_count);
 }
 
 static int materialize_vulkan_graphics_v617_queries(
@@ -38741,78 +39091,38 @@ static int materialize_vulkan_graphics_v617_queries(
         VulkanGraphicsReplayQueries *queries) {
     if (!rt || !rt->device || !view || !queries) return -EINVAL;
     memset(queries, 0, sizeof(*queries));
-    if (!view->is_v617 || !view->header_v617) return 0;
-    for (uint32_t i = 0; i < view->header_v617->v617.query_command_count; ++i) {
-        if (!view->query_commands) return -EPROTO;
-        const PdockerGpuVulkanGraphicsV617QueryCommandEntry *entry = &view->query_commands[i];
-        int found = find_vulkan_graphics_replay_query_pool(queries, entry->query_pool_id, entry->result_fd_index);
-        VulkanGraphicsReplayQueryPool *pool = NULL;
-        if (found < 0) {
-            if (queries->pool_count >= PDOCKER_GPU_VULKAN_GRAPHICS_V617_MAX_QUERY_COMMANDS) return -E2BIG;
-            pool = &queries->pools[queries->pool_count++];
-            memset(pool, 0, sizeof(*pool));
-            pool->query_pool_id = entry->query_pool_id;
-            pool->result_fd_index = entry->result_fd_index;
-            pool->result_stride = entry->result_stride;
-            pool->query_type = VK_QUERY_TYPE_MAX_ENUM;
-        } else {
-            pool = &queries->pools[(uint32_t)found];
-            if (pool->result_stride != entry->result_stride) return -EPROTO;
+    if (view->is_v617 && view->header_v617) {
+        if (view->header_v617->v617.query_command_count != 0 && !view->query_commands) {
+            return -EPROTO;
         }
-        VkQueryType entry_type = VK_QUERY_TYPE_MAX_ENUM;
-        if (entry->op == PDOCKER_GPU_GRAPHICS_V617_QUERY_OP_WRITE_TIMESTAMP) {
-            entry_type = VK_QUERY_TYPE_TIMESTAMP;
-        } else if (entry->op == PDOCKER_GPU_GRAPHICS_V617_QUERY_OP_BEGIN ||
-                   entry->op == PDOCKER_GPU_GRAPHICS_V617_QUERY_OP_END) {
-            entry_type = VK_QUERY_TYPE_OCCLUSION;
-        }
-        if (entry_type != VK_QUERY_TYPE_MAX_ENUM) {
-            if (pool->query_type == VK_QUERY_TYPE_MAX_ENUM) {
-                pool->query_type = entry_type;
-            } else if (pool->query_type != entry_type) {
-                return -EPROTO;
-            }
-        }
-        uint64_t needed = 0;
-        if (checked_u64_add3((uint64_t)entry->first_query, (uint64_t)entry->query_count, 0, &needed) != 0 ||
-            needed > UINT32_MAX || needed > PDOCKER_GPU_VULKAN_GRAPHICS_V617_MAX_QUERY_COMMANDS) return -E2BIG;
-        if ((uint32_t)needed > pool->query_count) pool->query_count = (uint32_t)needed;
-    }
-    if (view->is_v618 && view->header_v618 && view->copy_query_results) {
-        for (uint32_t i = 0; i < view->header_v618->v618.copy_query_result_count; ++i) {
-            const PdockerGpuVulkanGraphicsV618CopyQueryResultEntry *entry = &view->copy_query_results[i];
-            int found = find_vulkan_graphics_replay_query_pool(queries, entry->query_pool_id, entry->result_fd_index);
+        for (uint32_t i = 0; i < view->header_v617->v617.query_command_count; ++i) {
+            const PdockerGpuVulkanGraphicsV617QueryCommandEntry *entry =
+                &view->query_commands[i];
             VulkanGraphicsReplayQueryPool *pool = NULL;
-            if (found < 0) {
-                if (queries->pool_count >= PDOCKER_GPU_VULKAN_GRAPHICS_V617_MAX_QUERY_COMMANDS) return -E2BIG;
-                pool = &queries->pools[queries->pool_count++];
-                memset(pool, 0, sizeof(*pool));
-                pool->query_pool_id = entry->query_pool_id;
-                pool->result_fd_index = entry->result_fd_index;
-                pool->result_stride = 0;
-                pool->query_type = (VkQueryType)entry->query_type;
-            } else {
-                pool = &queries->pools[(uint32_t)found];
-                if (pool->query_type != VK_QUERY_TYPE_MAX_ENUM && pool->query_type != (VkQueryType)entry->query_type) return -EPROTO;
-                pool->query_type = (VkQueryType)entry->query_type;
-            }
-            uint64_t needed = 0;
-            if (checked_u64_add3((uint64_t)entry->first_query, (uint64_t)entry->query_count, 0, &needed) != 0 ||
-                needed > UINT32_MAX || needed > PDOCKER_GPU_VULKAN_GRAPHICS_V617_MAX_QUERY_COMMANDS) return -E2BIG;
-            if ((uint32_t)needed > pool->query_count) pool->query_count = (uint32_t)needed;
+            int rc = retain_vulkan_graphics_replay_query_pool(
+                rt, queries, entry->query_pool_id, &pool);
+            if (rc != 0) return rc;
+            rc = validate_vulkan_graphics_query_command_pool(entry, pool);
+            if (rc != 0) return rc;
         }
     }
-    for (uint32_t i = 0; i < queries->pool_count; ++i) {
-        VulkanGraphicsReplayQueryPool *pool = &queries->pools[i];
-        if (pool->query_count == 0) return -EPROTO;
-        if (pool->query_type == VK_QUERY_TYPE_MAX_ENUM) pool->query_type = VK_QUERY_TYPE_TIMESTAMP;
-        VkQueryPoolCreateInfo info = {
-            .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
-            .queryType = pool->query_type,
-            .queryCount = pool->query_count,
-        };
-        VkResult vrc = vkCreateQueryPool(rt->device, &info, NULL, &pool->pool);
-        if (vrc != VK_SUCCESS) return -EIO;
+    if (view->is_v618 && view->header_v618) {
+        if (view->header_v618->v618.copy_query_result_count != 0 &&
+            !view->copy_query_results) {
+            return -EPROTO;
+        }
+        for (uint32_t i = 0;
+             i < view->header_v618->v618.copy_query_result_count;
+             ++i) {
+            const PdockerGpuVulkanGraphicsV618CopyQueryResultEntry *entry =
+                &view->copy_query_results[i];
+            VulkanGraphicsReplayQueryPool *pool = NULL;
+            int rc = retain_vulkan_graphics_replay_query_pool(
+                rt, queries, entry->query_pool_id, &pool);
+            if (rc != 0) return rc;
+            rc = validate_vulkan_graphics_copy_query_pool(entry, pool);
+            if (rc != 0) return rc;
+        }
     }
     return 0;
 }
@@ -38830,7 +39140,7 @@ static int writeback_vulkan_graphics_v617_query_results(
     }
     for (uint32_t i = 0; i < view->header_v617->v617.query_command_count; ++i) {
         const PdockerGpuVulkanGraphicsV617QueryCommandEntry *entry = &view->query_commands[i];
-        int pool_index = find_vulkan_graphics_replay_query_pool(queries, entry->query_pool_id, entry->result_fd_index);
+        int pool_index = find_vulkan_graphics_replay_query_pool(queries, entry->query_pool_id);
         if (pool_index < 0) return pool_index;
         if (entry->result_fd_index >= view->passed_fd_count || view->passed_fds[entry->result_fd_index] < 0 ||
             entry->result_stride < sizeof(PdockerGpuVulkanGraphicsV617QueryResultEntry)) return -EPROTO;
@@ -41540,6 +41850,34 @@ static int update_vulkan_graphics_v634_framebuffer_final_layouts(
     return 0;
 }
 
+static int vulkan_graphics_timestamp_requires_synchronization2(
+        uint64_t transported_stage_mask) {
+    return transported_stage_mask == 0 ||
+           transported_stage_mask > UINT32_MAX ||
+           (transported_stage_mask & (transported_stage_mask - 1u)) != 0;
+}
+
+static int vulkan_graphics_record_query_timestamp2(
+        VulkanRuntime *rt,
+        VkCommandBuffer command_buffer,
+        const PdockerGpuVulkanGraphicsV617QueryCommandEntry *query,
+        VkQueryPool query_pool) {
+    if (!rt || !command_buffer || !query || !query_pool) return -EINVAL;
+    if (!vulkan_graphics_timestamp_requires_synchronization2(query->stage_mask)) {
+        return -EINVAL;
+    }
+    if (!rt->enabled_synchronization2.synchronization2 ||
+        !rt->cmd_write_timestamp2) {
+        return -EOPNOTSUPP;
+    }
+
+    const VkPipelineStageFlags2 transported_stage_mask =
+        (VkPipelineStageFlags2)query->stage_mask;
+    rt->cmd_write_timestamp2(
+        command_buffer, transported_stage_mask, query_pool, query->first_query);
+    return 0;
+}
+
 static int record_vulkan_graphics_v6_command_buffer(
         VulkanRuntime *rt,
         const VulkanGraphicsV6FrameView *view,
@@ -42902,7 +43240,7 @@ begin_rendering_cleanup:
                     find_vulkan_graphics_v617_query_command(view, ci);
                 if (!query || query->result_fd_index >= view->passed_fd_count) { rc = -EPROTO; goto cleanup; }
                 int pool_index = find_vulkan_graphics_replay_query_pool(
-                    queries, query->query_pool_id, query->result_fd_index);
+                    queries, query->query_pool_id);
                 if (pool_index < 0) { rc = pool_index; goto cleanup; }
                 const VulkanGraphicsReplayQueryPool *pool = &queries->pools[(uint32_t)pool_index];
                 if (!pool->pool || query->first_query > pool->query_count ||
@@ -42917,11 +43255,18 @@ begin_rendering_cleanup:
                     vkCmdEndQuery(command_buffer, pool->pool, query->first_query);
                 } else if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_QUERY_POOL) {
                     vkCmdResetQueryPool(command_buffer, pool->pool, query->first_query, query->query_count);
+                } else if (vulkan_graphics_timestamp_requires_synchronization2(
+                               query->stage_mask)) {
+                    rc = vulkan_graphics_record_query_timestamp2(
+                        rt, command_buffer, query, pool->pool);
+                    if (rc != 0) goto cleanup;
                 } else {
-                    VkPipelineStageFlagBits stage = query->stage_mask
-                        ? (VkPipelineStageFlagBits)(query->stage_mask & 0xffffffffu)
-                        : VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
-                    vkCmdWriteTimestamp(command_buffer, stage, pool->pool, query->first_query);
+                    /* VkPipelineStageFlagBits is a non-zero, single-bit 32-bit
+                     * value. Keep that representable subset on the legacy API. */
+                    VkPipelineStageFlagBits stage =
+                        (VkPipelineStageFlagBits)(uint32_t)query->stage_mask;
+                    vkCmdWriteTimestamp(command_buffer, stage, pool->pool,
+                                        query->first_query);
                 }
                 break;
             }
@@ -42930,7 +43275,7 @@ begin_rendering_cleanup:
                     find_vulkan_graphics_v618_copy_query_result(view, ci);
                 if (!copy || copy->result_fd_index >= view->passed_fd_count) { rc = -EPROTO; goto cleanup; }
                 int pool_index = find_vulkan_graphics_replay_query_pool(
-                    queries, copy->query_pool_id, copy->result_fd_index);
+                    queries, copy->query_pool_id);
                 if (pool_index < 0) { rc = pool_index; goto cleanup; }
                 const VulkanGraphicsReplayQueryPool *pool = &queries->pools[(uint32_t)pool_index];
                 int buffer_index = find_vulkan_graphics_replay_buffer(buffers, copy->dst_resource_index);
@@ -43564,6 +43909,8 @@ cleanup:
 typedef struct {
     uint8_t used;
     uint8_t timeline;
+    uint8_t destroy_pending;
+    uint8_t completion_unknown;
     uint64_t id;
     uint64_t last_value;
     VkSemaphore semaphore;
@@ -43574,12 +43921,255 @@ typedef struct {
 typedef struct {
     uint8_t used;
     uint8_t signaled;
+    uint8_t destroy_pending;
+    uint8_t completion_unknown;
     uint64_t id;
     VkFence fence;
 } VulkanExecutorSubmitFenceEntry;
 
 static VulkanExecutorSubmitSyncEntry g_submit_sync_registry[PDOCKER_GPU_EXECUTOR_SUBMIT_SYNC_REGISTRY_SLOTS];
 static VulkanExecutorSubmitFenceEntry g_submit_fence_registry[PDOCKER_GPU_EXECUTOR_SUBMIT_FENCE_REGISTRY_SLOTS];
+
+
+#define PDOCKER_GPU_EXECUTOR_QUERY_POOL_REGISTRY_SLOTS 256u
+
+typedef struct VulkanExecutorQueryPoolEntry {
+    uint8_t used;
+    uint8_t destroy_pending;
+    uint16_t reserved0;
+    uint32_t in_flight_refs;
+    uint64_t query_pool_id;
+    VkDevice device;
+    VkQueryPool pool;
+    VkQueryType query_type;
+    uint32_t query_count;
+    VkQueryPipelineStatisticFlags pipeline_statistics;
+} VulkanExecutorQueryPoolEntry;
+
+static pthread_mutex_t g_query_pool_registry_mutex = PTHREAD_MUTEX_INITIALIZER;
+static VulkanExecutorQueryPoolEntry
+    g_query_pool_registry[PDOCKER_GPU_EXECUTOR_QUERY_POOL_REGISTRY_SLOTS];
+static uint64_t g_query_pool_id_generation;
+
+static VulkanExecutorQueryPoolEntry *find_executor_query_pool_entry_locked(
+        uint64_t query_pool_id) {
+    if (query_pool_id == 0) return NULL;
+    for (uint32_t i = 0; i < PDOCKER_GPU_EXECUTOR_QUERY_POOL_REGISTRY_SLOTS; ++i) {
+        VulkanExecutorQueryPoolEntry *entry = &g_query_pool_registry[i];
+        if (entry->used && entry->query_pool_id == query_pool_id) return entry;
+    }
+    return NULL;
+}
+
+static uint64_t executor_query_pool_id_seed(void) {
+    uint64_t seed = 0;
+    int random_fd = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
+    if (random_fd >= 0) {
+        size_t offset = 0;
+        while (offset < sizeof(seed)) {
+            ssize_t received = read(
+                random_fd, (unsigned char *)&seed + offset, sizeof(seed) - offset);
+            if (received < 0 && errno == EINTR) continue;
+            if (received <= 0) break;
+            offset += (size_t)received;
+        }
+        close(random_fd);
+    }
+    if (seed == 0) {
+        struct timespec monotonic;
+        struct timespec realtime;
+        memset(&monotonic, 0, sizeof(monotonic));
+        memset(&realtime, 0, sizeof(realtime));
+        (void)clock_gettime(CLOCK_MONOTONIC, &monotonic);
+        (void)clock_gettime(CLOCK_REALTIME, &realtime);
+        seed = ((uint64_t)(uint32_t)getpid() << 32) ^
+               (uint64_t)monotonic.tv_sec ^
+               ((uint64_t)(uint32_t)monotonic.tv_nsec << 1) ^
+               ((uint64_t)realtime.tv_sec << 17) ^
+               (uint64_t)(uintptr_t)&g_query_pool_registry;
+        seed ^= seed >> 30;
+        seed *= UINT64_C(0xbf58476d1ce4e5b9);
+        seed ^= seed >> 27;
+        seed *= UINT64_C(0x94d049bb133111eb);
+        seed ^= seed >> 31;
+    }
+    return seed ? seed : UINT64_C(1);
+}
+
+static uint64_t next_executor_query_pool_id_locked(void) {
+    if (g_query_pool_id_generation == 0) {
+        g_query_pool_id_generation = executor_query_pool_id_seed();
+    }
+    for (uint32_t attempt = 0;
+         attempt < PDOCKER_GPU_EXECUTOR_QUERY_POOL_REGISTRY_SLOTS + 2u;
+         ++attempt) {
+        g_query_pool_id_generation++;
+        if (g_query_pool_id_generation == 0) g_query_pool_id_generation++;
+        if (!find_executor_query_pool_entry_locked(g_query_pool_id_generation)) {
+            return g_query_pool_id_generation;
+        }
+    }
+    return 0;
+}
+
+static int register_executor_query_pool(
+        VkDevice device,
+        VkQueryPool pool,
+        const VkQueryPoolCreateInfo *create_info,
+        uint64_t *out_query_pool_id) {
+    if (!device || !pool || !create_info || !out_query_pool_id) return -EINVAL;
+    *out_query_pool_id = 0;
+    int lock_rc = pthread_mutex_lock(&g_query_pool_registry_mutex);
+    if (lock_rc != 0) return -lock_rc;
+    VulkanExecutorQueryPoolEntry *free_entry = NULL;
+    for (uint32_t i = 0; i < PDOCKER_GPU_EXECUTOR_QUERY_POOL_REGISTRY_SLOTS; ++i) {
+        if (!g_query_pool_registry[i].used) {
+            free_entry = &g_query_pool_registry[i];
+            break;
+        }
+    }
+    uint64_t query_pool_id = free_entry ? next_executor_query_pool_id_locked() : 0;
+    if (free_entry && query_pool_id != 0) {
+        memset(free_entry, 0, sizeof(*free_entry));
+        free_entry->used = 1;
+        free_entry->query_pool_id = query_pool_id;
+        free_entry->device = device;
+        free_entry->pool = pool;
+        free_entry->query_type = create_info->queryType;
+        free_entry->query_count = create_info->queryCount;
+        free_entry->pipeline_statistics = create_info->pipelineStatistics;
+        *out_query_pool_id = query_pool_id;
+    }
+    int unlock_rc = pthread_mutex_unlock(&g_query_pool_registry_mutex);
+    if (unlock_rc != 0) return -unlock_rc;
+    return *out_query_pool_id ? 0 : -E2BIG;
+}
+
+static VulkanExecutorQueryPoolEntry *retain_executor_query_pool_entry(
+        uint64_t query_pool_id) {
+    if (query_pool_id == 0) return NULL;
+    if (pthread_mutex_lock(&g_query_pool_registry_mutex) != 0) return NULL;
+    VulkanExecutorQueryPoolEntry *entry =
+        find_executor_query_pool_entry_locked(query_pool_id);
+    if (!entry || entry->destroy_pending || !entry->device || !entry->pool ||
+        entry->in_flight_refs == UINT32_MAX) {
+        entry = NULL;
+    } else {
+        entry->in_flight_refs++;
+    }
+    (void)pthread_mutex_unlock(&g_query_pool_registry_mutex);
+    return entry;
+}
+
+static int retain_executor_query_pool_for_replay(
+        uint64_t query_pool_id,
+        VkDevice expected_device,
+        struct VulkanExecutorQueryPoolEntry **out_entry,
+        VkQueryPool *out_pool,
+        VkQueryType *out_query_type,
+        uint32_t *out_query_count,
+        VkQueryPipelineStatisticFlags *out_pipeline_statistics) {
+    if (!expected_device || !out_entry || !out_pool || !out_query_type ||
+        !out_query_count || !out_pipeline_statistics) {
+        return -EINVAL;
+    }
+    *out_entry = NULL;
+    *out_pool = VK_NULL_HANDLE;
+    *out_query_type = VK_QUERY_TYPE_MAX_ENUM;
+    *out_query_count = 0;
+    *out_pipeline_statistics = 0;
+    VulkanExecutorQueryPoolEntry *entry =
+        retain_executor_query_pool_entry(query_pool_id);
+    if (!entry) return -ENOENT;
+    if (entry->device != expected_device || !entry->pool ||
+        entry->query_count == 0) {
+        release_executor_query_pool_entry(entry);
+        return -EPROTO;
+    }
+    *out_entry = entry;
+    *out_pool = entry->pool;
+    *out_query_type = entry->query_type;
+    *out_query_count = entry->query_count;
+    *out_pipeline_statistics = entry->pipeline_statistics;
+    return 0;
+}
+
+static void release_executor_query_pool_entry(
+        VulkanExecutorQueryPoolEntry *entry) {
+    if (!entry) return;
+    VkDevice destroy_device = VK_NULL_HANDLE;
+    VkQueryPool destroy_pool = VK_NULL_HANDLE;
+    if (pthread_mutex_lock(&g_query_pool_registry_mutex) != 0) return;
+    if (entry->used && entry->in_flight_refs > 0) {
+        entry->in_flight_refs--;
+        if (entry->in_flight_refs == 0 && entry->destroy_pending) {
+            destroy_device = entry->device;
+            destroy_pool = entry->pool;
+            memset(entry, 0, sizeof(*entry));
+        }
+    }
+    (void)pthread_mutex_unlock(&g_query_pool_registry_mutex);
+    if (destroy_device && destroy_pool) {
+        vkDestroyQueryPool(destroy_device, destroy_pool, NULL);
+    }
+}
+
+static int destroy_executor_query_pool(uint64_t query_pool_id) {
+    VkDevice destroy_device = VK_NULL_HANDLE;
+    VkQueryPool destroy_pool = VK_NULL_HANDLE;
+    int lock_rc = pthread_mutex_lock(&g_query_pool_registry_mutex);
+    if (lock_rc != 0) return -lock_rc;
+    VulkanExecutorQueryPoolEntry *entry =
+        find_executor_query_pool_entry_locked(query_pool_id);
+    if (!entry || entry->destroy_pending) {
+        (void)pthread_mutex_unlock(&g_query_pool_registry_mutex);
+        return -ENOENT;
+    }
+    entry->destroy_pending = 1;
+    if (entry->in_flight_refs == 0) {
+        destroy_device = entry->device;
+        destroy_pool = entry->pool;
+        memset(entry, 0, sizeof(*entry));
+    }
+    int unlock_rc = pthread_mutex_unlock(&g_query_pool_registry_mutex);
+    if (unlock_rc != 0) return -unlock_rc;
+    if (destroy_device && destroy_pool) {
+        vkDestroyQueryPool(destroy_device, destroy_pool, NULL);
+    }
+    return 0;
+}
+
+static void cleanup_executor_query_pool_registry(void) {
+    VkDevice devices[PDOCKER_GPU_EXECUTOR_QUERY_POOL_REGISTRY_SLOTS];
+    VkQueryPool pools[PDOCKER_GPU_EXECUTOR_QUERY_POOL_REGISTRY_SLOTS];
+    uint32_t cleanup_count = 0;
+    memset(devices, 0, sizeof(devices));
+    memset(pools, 0, sizeof(pools));
+    if (pthread_mutex_lock(&g_query_pool_registry_mutex) != 0) return;
+    for (uint32_t i = 0; i < PDOCKER_GPU_EXECUTOR_QUERY_POOL_REGISTRY_SLOTS; ++i) {
+        VulkanExecutorQueryPoolEntry *entry = &g_query_pool_registry[i];
+        if (!entry->used) continue;
+        if (entry->in_flight_refs != 0) {
+            fprintf(stderr,
+                    "pdocker-gpu-executor: forcing query-pool cleanup id=%llu refs=%u\n",
+                    (unsigned long long)entry->query_pool_id,
+                    entry->in_flight_refs);
+        }
+        if (entry->device && entry->pool) {
+            devices[cleanup_count] = entry->device;
+            pools[cleanup_count] = entry->pool;
+            cleanup_count++;
+        }
+        memset(entry, 0, sizeof(*entry));
+    }
+    (void)pthread_mutex_unlock(&g_query_pool_registry_mutex);
+    if (g_vulkan_runtime.ready && g_vulkan_runtime.device) {
+        (void)vkDeviceWaitIdle(g_vulkan_runtime.device);
+    }
+    for (uint32_t i = 0; i < cleanup_count; ++i) {
+        vkDestroyQueryPool(devices[i], pools[i], NULL);
+    }
+}
 
 static VulkanExecutorSubmitSyncEntry *find_executor_submit_sync_entry(uint64_t id) {
     if (id == 0) return NULL;
@@ -43607,38 +44197,20 @@ static VulkanExecutorSubmitSyncEntry *allocate_executor_submit_sync_entry(uint64
 static int resolve_executor_submit_sync_semaphore(
         VulkanRuntime *rt,
         const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *sync,
-        int create_if_missing,
         VkSemaphore *out) {
     if (!rt || !sync || !out || sync->semaphore_id == 0) return -EINVAL;
     *out = VK_NULL_HANDLE;
-    const int timeline = (sync->flags & PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_TIMELINE) != 0;
-    VulkanExecutorSubmitSyncEntry *entry = find_executor_submit_sync_entry(sync->semaphore_id);
-    if (entry) {
-        if ((int)entry->timeline != timeline) return -EPROTO;
-        *out = entry->semaphore;
-        return *out ? 0 : -EPROTO;
+    const int timeline =
+        (sync->flags &
+         PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_TIMELINE) != 0;
+    VulkanExecutorSubmitSyncEntry *entry =
+        find_executor_submit_sync_entry(sync->semaphore_id);
+    if (!entry || entry->destroy_pending || entry->completion_unknown) {
+        return -ENOENT;
     }
-    if (!create_if_missing) return -ENOENT;
-    if (timeline && !rt->enabled_vulkan12.timelineSemaphore) return -EOPNOTSUPP;
-    entry = allocate_executor_submit_sync_entry(sync->semaphore_id);
-    if (!entry) return -E2BIG;
-    entry->timeline = (uint8_t)timeline;
-    VkSemaphoreTypeCreateInfo type_info;
-    memset(&type_info, 0, sizeof(type_info));
-    type_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
-    type_info.semaphoreType = timeline ? VK_SEMAPHORE_TYPE_TIMELINE : VK_SEMAPHORE_TYPE_BINARY;
-    type_info.initialValue = 0;
-    VkSemaphoreCreateInfo create_info;
-    memset(&create_info, 0, sizeof(create_info));
-    create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-    create_info.pNext = timeline ? &type_info : NULL;
-    VkResult vrc = vkCreateSemaphore(rt->device, &create_info, NULL, &entry->semaphore);
-    if (vrc != VK_SUCCESS) {
-        memset(entry, 0, sizeof(*entry));
-        return -EIO;
-    }
+    if ((int)entry->timeline != timeline) return -EPROTO;
     *out = entry->semaphore;
-    return 0;
+    return *out ? 0 : -EPROTO;
 }
 
 
@@ -43692,33 +44264,57 @@ static VulkanExecutorSubmitFenceEntry *allocate_executor_submit_fence_entry(uint
 static int resolve_executor_submit_sync_fence(
         VulkanRuntime *rt,
         const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *sync,
-        int create_if_missing,
         VkFence *out,
         VulkanExecutorSubmitFenceEntry **out_entry) {
     if (!rt || !sync || !out || sync->fence_id == 0) return -EINVAL;
     *out = VK_NULL_HANDLE;
     if (out_entry) *out_entry = NULL;
-    VulkanExecutorSubmitFenceEntry *entry = find_executor_submit_fence_entry(sync->fence_id);
-    if (entry) {
-        *out = entry->fence;
-        if (out_entry) *out_entry = entry;
-        return *out ? 0 : -EPROTO;
-    }
-    if (!create_if_missing) return -ENOENT;
-    entry = allocate_executor_submit_fence_entry(sync->fence_id);
-    if (!entry) return -E2BIG;
-    VkFenceCreateInfo create_info;
-    memset(&create_info, 0, sizeof(create_info));
-    create_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    VkResult vrc = vkCreateFence(rt->device, &create_info, NULL, &entry->fence);
-    if (vrc != VK_SUCCESS) {
-        memset(entry, 0, sizeof(*entry));
-        return -EIO;
+    VulkanExecutorSubmitFenceEntry *entry =
+        find_executor_submit_fence_entry(sync->fence_id);
+    if (!entry || entry->destroy_pending || entry->completion_unknown) {
+        return -ENOENT;
     }
     *out = entry->fence;
     if (out_entry) *out_entry = entry;
-    return 0;
+    return *out ? 0 : -EPROTO;
 }
+
+
+static void quarantine_executor_submit_sync_identities(
+        const VulkanGraphicsV6FrameView *view,
+        VulkanExecutorSubmitFenceEntry *submit_fence_entry) {
+    if (submit_fence_entry) {
+        submit_fence_entry->completion_unknown = 1;
+        submit_fence_entry->signaled = 0;
+    }
+    if (!view || !view->is_v619 || !view->header_v619 ||
+        !view->submit_syncs) {
+        return;
+    }
+    for (uint32_t i = 0;
+         i < view->header_v619->v619.submit_sync_count;
+         ++i) {
+        const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *sync =
+            &view->submit_syncs[i];
+        if (sync->sync_type ==
+                PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_FENCE) {
+            VulkanExecutorSubmitFenceEntry *entry =
+                find_executor_submit_fence_entry(sync->fence_id);
+            if (entry) {
+                entry->completion_unknown = 1;
+                entry->signaled = 0;
+            }
+        } else if (sync->sync_type ==
+                       PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_WAIT ||
+                   sync->sync_type ==
+                       PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_SIGNAL) {
+            VulkanExecutorSubmitSyncEntry *entry =
+                find_executor_submit_sync_entry(sync->semaphore_id);
+            if (entry) entry->completion_unknown = 1;
+        }
+    }
+}
+
 
 
 static void print_vulkan_fence_result(const char *stage, VkResult result, int signaled) {
@@ -43752,6 +44348,327 @@ static int parse_u32_token(const char **cursor, uint32_t *out) {
     if (value > UINT32_MAX) return -ERANGE;
     *out = (uint32_t)value;
     return 0;
+}
+
+
+static int parse_query_u64_token(const char **cursor, uint64_t *out) {
+    if (!cursor || !*cursor || !out) return -EINVAL;
+    const char *token = *cursor;
+    while (*token == ' ' || *token == '\t') token++;
+    if (*token < '0' || *token > '9') return -EINVAL;
+    errno = 0;
+    char *end = NULL;
+    unsigned long long value = strtoull(token, &end, 10);
+    if (errno == ERANGE || end == token) return -ERANGE;
+    if (*end != '\0' && *end != ' ' && *end != '\t' &&
+        *end != '\r' && *end != '\n') {
+        return -EINVAL;
+    }
+    *out = (uint64_t)value;
+    *cursor = end;
+    return 0;
+}
+
+static int parse_query_u32_token(const char **cursor, uint32_t *out) {
+    uint64_t value = 0;
+    int rc = parse_query_u64_token(cursor, &value);
+    if (rc != 0) return rc;
+    if (value > UINT32_MAX) return -ERANGE;
+    *out = (uint32_t)value;
+    return 0;
+}
+
+static int query_command_at_end(const char *cursor) {
+    if (!cursor) return 0;
+    while (*cursor == ' ' || *cursor == '\t' ||
+           *cursor == '\r' || *cursor == '\n') {
+        cursor++;
+    }
+    return *cursor == '\0';
+}
+
+static int vulkan_query_type_supported_by_control_plane(uint32_t query_type) {
+    switch ((VkQueryType)query_type) {
+        case VK_QUERY_TYPE_OCCLUSION:
+        case VK_QUERY_TYPE_PIPELINE_STATISTICS:
+        case VK_QUERY_TYPE_TIMESTAMP:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static int vulkan_query_result_flags_supported_by_control_plane(
+        uint32_t flags) {
+    const VkQueryResultFlags supported =
+        VK_QUERY_RESULT_64_BIT |
+        VK_QUERY_RESULT_WAIT_BIT |
+        VK_QUERY_RESULT_WITH_AVAILABILITY_BIT |
+        VK_QUERY_RESULT_PARTIAL_BIT;
+    return (((VkQueryResultFlags)flags) & ~supported) == 0;
+}
+
+static void print_vulkan_query_pool_result(
+        const char *stage,
+        VkResult result,
+        uint64_t query_pool_id) {
+    FILE *out = json_out();
+    fprintf(out,
+            "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
+            "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+            "\"executor_build_marker\":\"" PDOCKER_GPU_EXECUTOR_BUILD_MARKER "\","
+            "\"stage\":\"%s\",\"valid\":true,\"result\":%d,\"query_pool_id\":%llu}\n",
+            PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
+            PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
+            stage ? stage : "vulkan-query-pool",
+            (int)result,
+            (unsigned long long)query_pool_id);
+    fflush(out);
+}
+
+static void print_vulkan_idle_result(
+        const char *stage,
+        VkResult result) {
+    FILE *out = json_out();
+    fprintf(out,
+            "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
+            "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+            "\"executor_build_marker\":\"" PDOCKER_GPU_EXECUTOR_BUILD_MARKER "\","
+            "\"stage\":\"%s\",\"valid\":true,\"result\":%d}\n",
+            PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
+            PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
+            stage ? stage : "vulkan-idle",
+            (int)result);
+    fflush(out);
+}
+
+static int handle_vulkan_idle_command(
+        const char *cmd,
+        size_t passed_fd_count) {
+    if (!cmd || passed_fd_count != 0) {
+        json_fail("vulkan-idle", "invalid idle command");
+        return -EINVAL;
+    }
+    if (strcmp(cmd, "VULKAN_QUEUE_WAIT_IDLE") != 0 &&
+        strcmp(cmd, "VULKAN_DEVICE_WAIT_IDLE") != 0) {
+        json_fail("vulkan-idle", "unknown idle command");
+        return -EINVAL;
+    }
+    if (init_vulkan_runtime(&g_vulkan_runtime, NULL) != 0 ||
+        !g_vulkan_runtime.device) {
+        print_vulkan_idle_result(
+            strcmp(cmd, "VULKAN_QUEUE_WAIT_IDLE") == 0
+                ? "vulkan-queue-wait-idle"
+                : "vulkan-device-wait-idle",
+            VK_ERROR_DEVICE_LOST);
+        return 0;
+    }
+
+    VulkanRuntime *rt = &g_vulkan_runtime;
+    if (strcmp(cmd, "VULKAN_DEVICE_WAIT_IDLE") == 0) {
+        VkResult device_result = vkDeviceWaitIdle(rt->device);
+        print_vulkan_idle_result(
+            "vulkan-device-wait-idle", device_result);
+        return 0;
+    }
+
+    if (rt->queue == VK_NULL_HANDLE) {
+        print_vulkan_idle_result(
+            "vulkan-queue-wait-idle", VK_ERROR_DEVICE_LOST);
+        return 0;
+    }
+    VkResult result = vkQueueWaitIdle(rt->queue);
+    /*
+     * The one virtual queue can lower compute and graphics submissions onto
+     * distinct native queue families. Idle therefore covers both native
+     * queues while preserving the first VkResult failure.
+     */
+    if (result == VK_SUCCESS &&
+        rt->graphics_queue != VK_NULL_HANDLE &&
+        rt->graphics_queue != rt->queue) {
+        result = vkQueueWaitIdle(rt->graphics_queue);
+    }
+    print_vulkan_idle_result("vulkan-queue-wait-idle", result);
+    return 0;
+}
+
+static int handle_vulkan_query_pool_command(
+        const char *cmd,
+        int *passed_fds,
+        size_t passed_fd_count) {
+    if (!cmd || (passed_fd_count > 0 && !passed_fds)) return -EINVAL;
+    if (init_vulkan_runtime(&g_vulkan_runtime, NULL) != 0 ||
+        !g_vulkan_runtime.device) {
+        json_fail("vulkan-query-pool", "Vulkan runtime unavailable");
+        return -ENODEV;
+    }
+    VulkanRuntime *rt = &g_vulkan_runtime;
+
+    static const char create_prefix[] = "VULKAN_QUERY_POOL_CREATE ";
+    if (strncmp(cmd, create_prefix, sizeof(create_prefix) - 1u) == 0) {
+        const char *cursor = cmd + sizeof(create_prefix) - 1u;
+        uint32_t query_type = 0;
+        uint32_t query_count = 0;
+        uint32_t pipeline_statistics = 0;
+        if (passed_fd_count != 0 ||
+            parse_query_u32_token(&cursor, &query_type) != 0 ||
+            parse_query_u32_token(&cursor, &query_count) != 0 ||
+            parse_query_u32_token(&cursor, &pipeline_statistics) != 0 ||
+            !query_command_at_end(cursor) || query_count == 0 ||
+            !vulkan_query_type_supported_by_control_plane(query_type) ||
+            (((VkQueryType)query_type == VK_QUERY_TYPE_PIPELINE_STATISTICS) !=
+             (pipeline_statistics != 0))) {
+            json_fail("vulkan-query-pool-create", "invalid query-pool create command");
+            return -EINVAL;
+        }
+        VkQueryPoolCreateInfo create_info;
+        memset(&create_info, 0, sizeof(create_info));
+        create_info.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+        create_info.queryType = (VkQueryType)query_type;
+        create_info.queryCount = query_count;
+        create_info.pipelineStatistics =
+            (VkQueryPipelineStatisticFlags)pipeline_statistics;
+        VkQueryPool pool = VK_NULL_HANDLE;
+        VkResult vrc = vkCreateQueryPool(rt->device, &create_info, NULL, &pool);
+        uint64_t query_pool_id = 0;
+        if (vrc == VK_SUCCESS) {
+            int registry_rc = register_executor_query_pool(
+                rt->device, pool, &create_info, &query_pool_id);
+            if (registry_rc != 0) {
+                vkDestroyQueryPool(rt->device, pool, NULL);
+                pool = VK_NULL_HANDLE;
+                vrc = VK_ERROR_TOO_MANY_OBJECTS;
+            }
+        }
+        print_vulkan_query_pool_result(
+            "vulkan-query-pool-create", vrc, query_pool_id);
+        return 0;
+    }
+
+    static const char destroy_prefix[] = "VULKAN_QUERY_POOL_DESTROY ";
+    if (strncmp(cmd, destroy_prefix, sizeof(destroy_prefix) - 1u) == 0) {
+        const char *cursor = cmd + sizeof(destroy_prefix) - 1u;
+        uint64_t query_pool_id = 0;
+        if (passed_fd_count != 0 ||
+            parse_query_u64_token(&cursor, &query_pool_id) != 0 ||
+            !query_command_at_end(cursor) || query_pool_id == 0) {
+            json_fail("vulkan-query-pool-destroy", "invalid query-pool destroy command");
+            return -EINVAL;
+        }
+        int destroy_rc = destroy_executor_query_pool(query_pool_id);
+        print_vulkan_query_pool_result(
+            "vulkan-query-pool-destroy",
+            destroy_rc == 0 ? VK_SUCCESS : VK_ERROR_UNKNOWN,
+            query_pool_id);
+        return 0;
+    }
+
+    static const char reset_prefix[] = "VULKAN_QUERY_POOL_RESET ";
+    if (strncmp(cmd, reset_prefix, sizeof(reset_prefix) - 1u) == 0) {
+        const char *cursor = cmd + sizeof(reset_prefix) - 1u;
+        uint64_t query_pool_id = 0;
+        uint32_t first_query = 0;
+        uint32_t query_count = 0;
+        if (passed_fd_count != 0 ||
+            parse_query_u64_token(&cursor, &query_pool_id) != 0 ||
+            parse_query_u32_token(&cursor, &first_query) != 0 ||
+            parse_query_u32_token(&cursor, &query_count) != 0 ||
+            !query_command_at_end(cursor) || query_pool_id == 0 ||
+            query_count == 0) {
+            json_fail("vulkan-query-pool-reset", "invalid query-pool reset command");
+            return -EINVAL;
+        }
+        VulkanExecutorQueryPoolEntry *entry =
+            retain_executor_query_pool_entry(query_pool_id);
+        if (!entry) {
+            print_vulkan_query_pool_result(
+                "vulkan-query-pool-reset", VK_ERROR_UNKNOWN, query_pool_id);
+            return 0;
+        }
+        VkResult result = VK_SUCCESS;
+        if (first_query >= entry->query_count ||
+            query_count > entry->query_count - first_query) {
+            result = VK_ERROR_UNKNOWN;
+        } else if (!rt->enabled_vulkan12.hostQueryReset || !rt->reset_query_pool) {
+            result = VK_ERROR_FEATURE_NOT_PRESENT;
+        } else {
+            rt->reset_query_pool(
+                entry->device, entry->pool, first_query, query_count);
+        }
+        release_executor_query_pool_entry(entry);
+        print_vulkan_query_pool_result(
+            "vulkan-query-pool-reset", result, query_pool_id);
+        return 0;
+    }
+
+    static const char get_results_prefix[] =
+        "VULKAN_QUERY_POOL_GET_RESULTS ";
+    if (strncmp(cmd, get_results_prefix,
+                sizeof(get_results_prefix) - 1u) == 0) {
+        const char *cursor = cmd + sizeof(get_results_prefix) - 1u;
+        uint64_t query_pool_id = 0;
+        uint32_t first_query = 0;
+        uint32_t query_count = 0;
+        uint64_t data_size_u64 = 0;
+        uint64_t stride_u64 = 0;
+        uint32_t flags = 0;
+        if (passed_fd_count != 1 || passed_fds[0] < 0 ||
+            parse_query_u64_token(&cursor, &query_pool_id) != 0 ||
+            parse_query_u32_token(&cursor, &first_query) != 0 ||
+            parse_query_u32_token(&cursor, &query_count) != 0 ||
+            parse_query_u64_token(&cursor, &data_size_u64) != 0 ||
+            parse_query_u64_token(&cursor, &stride_u64) != 0 ||
+            parse_query_u32_token(&cursor, &flags) != 0 ||
+            !query_command_at_end(cursor) || query_pool_id == 0 ||
+            query_count == 0 || data_size_u64 == 0 ||
+            data_size_u64 > SIZE_MAX ||
+            !vulkan_query_result_flags_supported_by_control_plane(flags)) {
+            json_fail("vulkan-query-pool-get-results", "invalid query-pool results command");
+            return -EINVAL;
+        }
+        VulkanExecutorQueryPoolEntry *entry =
+            retain_executor_query_pool_entry(query_pool_id);
+        if (!entry) {
+            print_vulkan_query_pool_result(
+                "vulkan-query-pool-get-results", VK_ERROR_UNKNOWN,
+                query_pool_id);
+            return 0;
+        }
+        VkResult result = VK_ERROR_UNKNOWN;
+        size_t data_size = (size_t)data_size_u64;
+        if (first_query >= entry->query_count ||
+            query_count > entry->query_count - first_query) {
+            result = VK_ERROR_UNKNOWN;
+        } else {
+            struct stat fd_stat;
+            if (fstat(passed_fds[0], &fd_stat) != 0 || fd_stat.st_size < 0 ||
+                (uint64_t)fd_stat.st_size < data_size_u64) {
+                release_executor_query_pool_entry(entry);
+                json_fail("vulkan-query-pool-get-results", "query result fd is too small");
+                return -EINVAL;
+            }
+            void *mapping = mmap(
+                NULL, data_size, PROT_READ | PROT_WRITE, MAP_SHARED,
+                passed_fds[0], 0);
+            if (mapping == MAP_FAILED) {
+                result = VK_ERROR_OUT_OF_HOST_MEMORY;
+            } else {
+                result = vkGetQueryPoolResults(
+                    entry->device, entry->pool,
+                    first_query, query_count,
+                    data_size, mapping, (VkDeviceSize)stride_u64,
+                    (VkQueryResultFlags)flags);
+                (void)munmap(mapping, data_size);
+            }
+        }
+        release_executor_query_pool_entry(entry);
+        print_vulkan_query_pool_result(
+            "vulkan-query-pool-get-results", result, query_pool_id);
+        return 0;
+    }
+
+    json_fail("vulkan-query-pool", "unknown query-pool command");
+    return -EINVAL;
 }
 
 static int collect_executor_fences_from_command(
@@ -43926,6 +44843,11 @@ static int handle_vulkan_semaphore_command(const char *cmd) {
             return -EOPNOTSUPP;
         }
         VulkanExecutorSubmitSyncEntry *entry = find_executor_submit_sync_entry(id);
+        if (entry && (entry->destroy_pending || entry->completion_unknown)) {
+            print_vulkan_semaphore_result(
+                "vulkan-semaphore-create", VK_ERROR_DEVICE_LOST, 0);
+            return -EIO;
+        }
         if (!entry) entry = allocate_executor_submit_sync_entry(id);
         if (!entry) {
             json_fail("vulkan-semaphore-create", "semaphore registry full");
@@ -43965,8 +44887,17 @@ static int handle_vulkan_semaphore_command(const char *cmd) {
             return -EINVAL;
         }
         VulkanExecutorSubmitSyncEntry *entry = find_executor_submit_sync_entry(id);
-        if (entry && entry->semaphore) vkDestroySemaphore(rt->device, entry->semaphore, NULL);
-        if (entry) memset(entry, 0, sizeof(*entry));
+        if (entry && entry->completion_unknown) {
+            /* Logical destruction is acknowledged, but the native identity
+             * remains quarantined because an unresolved queue operation may
+             * still reference it. */
+            entry->destroy_pending = 1;
+        } else {
+            if (entry && entry->semaphore) {
+                vkDestroySemaphore(rt->device, entry->semaphore, NULL);
+            }
+            if (entry) memset(entry, 0, sizeof(*entry));
+        }
         print_vulkan_semaphore_result("vulkan-semaphore-destroy", VK_SUCCESS, 0);
         return 0;
     }
@@ -44098,6 +45029,11 @@ static int handle_vulkan_fence_command(const char *cmd) {
             return -EINVAL;
         }
         VulkanExecutorSubmitFenceEntry *entry = find_executor_submit_fence_entry(id);
+        if (entry && (entry->destroy_pending || entry->completion_unknown)) {
+            print_vulkan_fence_result(
+                "vulkan-fence-create", VK_ERROR_DEVICE_LOST, 0);
+            return -EIO;
+        }
         if (!entry) entry = allocate_executor_submit_fence_entry(id);
         if (!entry) {
             json_fail("vulkan-fence-create", "fence registry full");
@@ -44127,8 +45063,14 @@ static int handle_vulkan_fence_command(const char *cmd) {
             return -EINVAL;
         }
         VulkanExecutorSubmitFenceEntry *entry = find_executor_submit_fence_entry(id);
-        if (entry && entry->fence) vkDestroyFence(rt->device, entry->fence, NULL);
-        if (entry) memset(entry, 0, sizeof(*entry));
+        if (entry && entry->completion_unknown) {
+            entry->destroy_pending = 1;
+        } else {
+            if (entry && entry->fence) {
+                vkDestroyFence(rt->device, entry->fence, NULL);
+            }
+            if (entry) memset(entry, 0, sizeof(*entry));
+        }
         print_vulkan_fence_result("vulkan-fence-destroy", VK_SUCCESS, 0);
         return 0;
     }
@@ -44184,6 +45126,13 @@ static int handle_vulkan_fence_command(const char *cmd) {
         if (rc != 0) {
             json_fail("vulkan-fence-reset", "unknown fence");
             return rc;
+        }
+        for (uint32_t i = 0; i < fence_count; ++i) {
+            if (entries[i]->completion_unknown || entries[i]->destroy_pending) {
+                print_vulkan_fence_result(
+                    "vulkan-fence-reset", VK_ERROR_DEVICE_LOST, 0);
+                return -EIO;
+            }
         }
         VkResult vrc = vkResetFences(rt->device, fence_count, fences);
         if (vrc == VK_SUCCESS) {
@@ -44282,13 +45231,267 @@ static uint32_t vulkan_graphics_v621_submit_sync_device_index(
     return 0;
 }
 
+static int vulkan_graphics_v619_frame_is_sync_only(
+        const VulkanGraphicsV6FrameView *view) {
+    return view && view->header && view->is_v619 && view->header_v619 &&
+           view->header->command_count == 0 &&
+           view->header_v619->v619.submit_sync_count > 0;
+}
+
+/*
+ * V6.19 synchronization-only frames carry queue dependencies but no command
+ * buffer work. They must be enqueued exactly like a native zero-command
+ * submit: the registered semaphore/fence objects outlive this request, so no
+ * executor-local completion fence or queue-idle wait is necessary. In
+ * particular, a wait-only submit is allowed to remain pending after this
+ * function returns; a later signal submit can then satisfy it without the
+ * executor deadlocking itself.
+ */
+static int submit_vulkan_graphics_v619_sync_only(
+        VulkanRuntime *rt,
+        const VulkanGraphicsV6FrameView *view,
+        VkQueue submit_queue,
+        VulkanGraphicsSubmitDiag *diag) {
+    reset_vulkan_graphics_submit_diag(diag);
+    if (!rt || !view || !view->header || !rt->device || !submit_queue ||
+        !vulkan_graphics_v619_frame_is_sync_only(view) ||
+        !view->submit_syncs) {
+        if (diag) {
+            diag->stage = "validate-sync-only-submit";
+            diag->vk_result = VK_ERROR_UNKNOWN;
+            diag->native_rc = -EPROTO;
+        }
+        return -EPROTO;
+    }
+
+    const PdockerGpuVulkanGraphicsV621SubmitInfoEntry *submit_info = NULL;
+    if (view->is_v621 && view->header_v621 && view->submit_infos &&
+        view->header_v621->v621.submit_info_count > 0) {
+        submit_info = &view->submit_infos[0];
+    }
+    /* Reject an explicitly requested Submit2 operation before resolving or
+     * resetting any registry object. Protocol/capability failures must not
+     * partially mutate semaphore or fence state. */
+    if (submit_info &&
+        submit_info->submit_kind == PDOCKER_GPU_GRAPHICS_V621_SUBMIT_KIND_SUBMIT2 &&
+        !rt->queue_submit2) {
+        if (diag) {
+            diag->stage = "queue-submit2-unavailable";
+            diag->vk_result = VK_ERROR_FEATURE_NOT_PRESENT;
+            diag->native_rc = -ENOTSUP;
+        }
+        return -ENOTSUP;
+    }
+
+    VkSemaphore wait_semaphores[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+    VkSemaphore signal_semaphores[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+    VkPipelineStageFlags wait_stages[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+    VkPipelineStageFlags2 wait_stage_masks2[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+    VkPipelineStageFlags2 signal_stage_masks2[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+    uint32_t wait_device_indices[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+    uint32_t signal_device_indices[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+    uint64_t wait_values[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+    uint64_t signal_values[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+    uint32_t wait_count = 0;
+    uint32_t signal_count = 0;
+    int timeline_used = 0;
+    VkFence submit_fence = VK_NULL_HANDLE;
+    VulkanExecutorSubmitFenceEntry *submit_fence_entry = NULL;
+    const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *fence_sync = NULL;
+
+    memset(wait_semaphores, 0, sizeof(wait_semaphores));
+    memset(signal_semaphores, 0, sizeof(signal_semaphores));
+    memset(wait_stages, 0, sizeof(wait_stages));
+    memset(wait_stage_masks2, 0, sizeof(wait_stage_masks2));
+    memset(signal_stage_masks2, 0, sizeof(signal_stage_masks2));
+    memset(wait_device_indices, 0, sizeof(wait_device_indices));
+    memset(signal_device_indices, 0, sizeof(signal_device_indices));
+    memset(wait_values, 0, sizeof(wait_values));
+    memset(signal_values, 0, sizeof(signal_values));
+
+    for (uint32_t i = 0; i < view->header_v619->v619.submit_sync_count; ++i) {
+        const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *sync =
+            &view->submit_syncs[i];
+        int rc = 0;
+        switch (sync->sync_type) {
+            case PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_WAIT:
+                if (wait_count >= PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS) {
+                    rc = -E2BIG;
+                    break;
+                }
+                if (diag) diag->stage = "resolve-wait-semaphore";
+                rc = resolve_executor_submit_sync_semaphore(
+                    rt, sync, &wait_semaphores[wait_count]);
+                if (rc == 0) {
+                    wait_stage_masks2[wait_count] =
+                        vulkan_submit_stage_mask2_or_all(sync->stage_mask);
+                    wait_stages[wait_count] =
+                        vulkan_legacy_submit_stage_mask_from_stage2(
+                            wait_stage_masks2[wait_count]);
+                    wait_values[wait_count] = sync->value;
+                    wait_device_indices[wait_count] =
+                        vulkan_graphics_v621_submit_sync_device_index(view, i);
+                    if (sync->flags & PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_TIMELINE) {
+                        timeline_used = 1;
+                    }
+                    wait_count++;
+                }
+                break;
+            case PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_SIGNAL:
+                if (signal_count >= PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS) {
+                    rc = -E2BIG;
+                    break;
+                }
+                if (diag) diag->stage = "resolve-signal-semaphore";
+                rc = resolve_executor_submit_sync_semaphore(
+                    rt, sync, &signal_semaphores[signal_count]);
+                if (rc == 0) {
+                    signal_stage_masks2[signal_count] =
+                        vulkan_submit_stage_mask2_or_all(sync->stage_mask);
+                    signal_values[signal_count] = sync->value;
+                    signal_device_indices[signal_count] =
+                        vulkan_graphics_v621_submit_sync_device_index(view, i);
+                    if (sync->flags & PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_TIMELINE) {
+                        timeline_used = 1;
+                    }
+                    signal_count++;
+                }
+                break;
+            case PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_FENCE:
+                if (fence_sync) {
+                    rc = -E2BIG;
+                } else {
+                    fence_sync = sync;
+                }
+                break;
+            default:
+                rc = -EPROTO;
+                break;
+        }
+        if (rc != 0) {
+            if (diag) {
+                diag->vk_result =
+                    rc == -EOPNOTSUPP ? VK_ERROR_FEATURE_NOT_PRESENT :
+                    rc == -E2BIG ? VK_ERROR_TOO_MANY_OBJECTS : VK_ERROR_UNKNOWN;
+                diag->native_rc = rc;
+                diag->wait_count = wait_count;
+                diag->signal_count = signal_count;
+                diag->timeline_used = timeline_used;
+            }
+            return rc;
+        }
+    }
+
+    if (fence_sync) {
+        if (diag) diag->stage = "resolve-fence";
+        int rc = resolve_executor_submit_sync_fence(
+            rt, fence_sync, &submit_fence, &submit_fence_entry);
+        if (rc != 0) {
+            if (diag) {
+                diag->vk_result =
+                    rc == -E2BIG ? VK_ERROR_TOO_MANY_OBJECTS : VK_ERROR_UNKNOWN;
+                diag->native_rc = rc;
+                diag->wait_count = wait_count;
+                diag->signal_count = signal_count;
+                diag->timeline_used = timeline_used;
+            }
+            return rc;
+        }
+        if (diag) diag->stage = "reset-fence";
+        VkResult reset_result = vkResetFences(rt->device, 1, &submit_fence);
+        if (reset_result != VK_SUCCESS) {
+            if (diag) {
+                diag->vk_result = reset_result;
+                diag->native_rc = -EIO;
+                diag->wait_count = wait_count;
+                diag->signal_count = signal_count;
+                diag->timeline_used = timeline_used;
+            }
+            return -EIO;
+        }
+        if (submit_fence_entry) submit_fence_entry->signaled = 0;
+    }
+
+    VkResult submit_result = VK_SUCCESS;
+    const int use_submit2 =
+        rt->queue_submit2 &&
+        (!submit_info ||
+         submit_info->submit_kind == PDOCKER_GPU_GRAPHICS_V621_SUBMIT_KIND_SUBMIT2);
+    if (use_submit2) {
+        VkSemaphoreSubmitInfo wait_infos[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+        VkSemaphoreSubmitInfo signal_infos[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+        memset(wait_infos, 0, sizeof(wait_infos));
+        memset(signal_infos, 0, sizeof(signal_infos));
+        for (uint32_t i = 0; i < wait_count; ++i) {
+            wait_infos[i].sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+            wait_infos[i].semaphore = wait_semaphores[i];
+            wait_infos[i].value = wait_values[i];
+            wait_infos[i].stageMask = wait_stage_masks2[i];
+            wait_infos[i].deviceIndex = wait_device_indices[i];
+        }
+        for (uint32_t i = 0; i < signal_count; ++i) {
+            signal_infos[i].sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+            signal_infos[i].semaphore = signal_semaphores[i];
+            signal_infos[i].value = signal_values[i];
+            signal_infos[i].stageMask = signal_stage_masks2[i];
+            signal_infos[i].deviceIndex = signal_device_indices[i];
+        }
+        const VkSubmitInfo2 submit = {
+            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+            .flags = submit_info ? submit_info->submit_flags : 0,
+            .waitSemaphoreInfoCount = wait_count,
+            .pWaitSemaphoreInfos = wait_count ? wait_infos : NULL,
+            .commandBufferInfoCount = 0,
+            .pCommandBufferInfos = NULL,
+            .signalSemaphoreInfoCount = signal_count,
+            .pSignalSemaphoreInfos = signal_count ? signal_infos : NULL,
+        };
+        if (diag) diag->stage = "queue-submit2-sync-only";
+        submit_result = rt->queue_submit2(submit_queue, 1, &submit, submit_fence);
+    } else {
+        VkTimelineSemaphoreSubmitInfo timeline_info;
+        memset(&timeline_info, 0, sizeof(timeline_info));
+        timeline_info.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+        timeline_info.waitSemaphoreValueCount = wait_count;
+        timeline_info.pWaitSemaphoreValues = wait_count ? wait_values : NULL;
+        timeline_info.signalSemaphoreValueCount = signal_count;
+        timeline_info.pSignalSemaphoreValues = signal_count ? signal_values : NULL;
+        const VkSubmitInfo submit = {
+            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+            .pNext = timeline_used ? &timeline_info : NULL,
+            .waitSemaphoreCount = wait_count,
+            .pWaitSemaphores = wait_count ? wait_semaphores : NULL,
+            .pWaitDstStageMask = wait_count ? wait_stages : NULL,
+            .commandBufferCount = 0,
+            .pCommandBuffers = NULL,
+            .signalSemaphoreCount = signal_count,
+            .pSignalSemaphores = signal_count ? signal_semaphores : NULL,
+        };
+        if (diag) diag->stage = "queue-submit-sync-only";
+        submit_result = vkQueueSubmit(submit_queue, 1, &submit, submit_fence);
+    }
+
+    if (diag) {
+        diag->vk_result = submit_result;
+        diag->native_rc = submit_result == VK_SUCCESS ? 0 : -EIO;
+        diag->wait_count = wait_count;
+        diag->signal_count = signal_count;
+        diag->timeline_used = timeline_used;
+    }
+    /* Do not wait or update completion shadows here. The native registry owns
+     * every referenced object, and status/counter commands observe completion. */
+    return submit_result == VK_SUCCESS ? 0 : -EIO;
+}
+
 static int submit_vulkan_graphics_v6_command_buffer(
         VulkanRuntime *rt,
         const VulkanGraphicsV6FrameView *view,
         VkCommandBuffer command_buffer,
         VkQueue submit_queue,
-        VulkanGraphicsSubmitDiag *diag) {
+        VulkanGraphicsSubmitDiag *diag,
+        bool *out_native_enqueued) {
     reset_vulkan_graphics_submit_diag(diag);
+    if (out_native_enqueued) *out_native_enqueued = false;
     if (!rt || !view || !view->header || !command_buffer || !rt->device || !submit_queue) return -EINVAL;
     const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *fence_sync = NULL;
     if (view->is_v619 && view->header_v619 && view->submit_syncs) {
@@ -44304,7 +45507,7 @@ static int submit_vulkan_graphics_v6_command_buffer(
     VulkanExecutorSubmitFenceEntry *submit_fence_entry = NULL;
     if (fence_sync) {
         if (diag) diag->stage = "resolve-fence";
-        int rc = resolve_executor_submit_sync_fence(rt, fence_sync, 1, &submit_fence, &submit_fence_entry);
+        int rc = resolve_executor_submit_sync_fence(rt, fence_sync, &submit_fence, &submit_fence_entry);
         if (rc != 0) {
             if (diag) {
                 diag->native_rc = rc;
@@ -44367,7 +45570,7 @@ static int submit_vulkan_graphics_v6_command_buffer(
                     vrc = VK_ERROR_TOO_MANY_OBJECTS;
                     goto submit_fail;
                 }
-                int rc = resolve_executor_submit_sync_semaphore(rt, sync, 0, &wait_semaphores[wait_count]);
+                int rc = resolve_executor_submit_sync_semaphore(rt, sync, &wait_semaphores[wait_count]);
                 if (rc != 0) { submit_fail_rc = rc; vrc = VK_ERROR_FEATURE_NOT_PRESENT; goto submit_fail; }
                 wait_stage_masks2[wait_count] = vulkan_submit_stage_mask2_or_all(sync->stage_mask);
                 wait_stages[wait_count] =
@@ -44383,7 +45586,7 @@ static int submit_vulkan_graphics_v6_command_buffer(
                     vrc = VK_ERROR_TOO_MANY_OBJECTS;
                     goto submit_fail;
                 }
-                int rc = resolve_executor_submit_sync_semaphore(rt, sync, 1, &signal_semaphores[signal_count]);
+                int rc = resolve_executor_submit_sync_semaphore(rt, sync, &signal_semaphores[signal_count]);
                 if (rc != 0) { submit_fail_rc = rc; vrc = VK_ERROR_FEATURE_NOT_PRESENT; goto submit_fail; }
                 signal_stage_masks2[signal_count] = vulkan_submit_stage_mask2_or_all(sync->stage_mask);
                 signal_values[signal_count] = sync->value;
@@ -44474,36 +45677,39 @@ static int submit_vulkan_graphics_v6_command_buffer(
         vrc = vkQueueSubmit(submit_queue, 1, &submit, submit_fence);
     }
     if (vrc != VK_SUCCESS) goto submit_fail;
+    /*
+     * From this point onward a retry may duplicate native execution. Publish
+     * enqueue state before any internal completion wait or writeback work.
+     */
+    if (out_native_enqueued) *out_native_enqueued = true;
     const uint64_t timeout_ns =
         env_timeout_ns("PDOCKER_GPU_GRAPHICS_SUBMIT_TIMEOUT_MS", 30000, 1000, 600000);
     if (diag) diag->stage = "wait-submit-fence";
     vrc = vkWaitForFences(rt->device, 1, &submit_fence, VK_TRUE, timeout_ns);
-    if (vrc == VK_TIMEOUT) {
-        /* The submit succeeded, so replay descriptors, buffers, images,
-         * pipelines, command buffers, and the fence may still be referenced by
-         * the graphics queue.  The caller always tears down replay state after
-         * this function returns; wait the queue idle first so timeout handling
-         * cannot turn into an in-flight Vulkan object use-after-free.
+    if (vrc != VK_SUCCESS) {
+        /* The queue submit already succeeded. A successful idle wait proves
+         * completion and permits writeback; no internal wait result is a legal
+         * vkQueueSubmit result. If completion cannot be proven, expose sticky
+         * device loss rather than a retryable timeout/OOM and do not destroy
+         * potentially in-flight replay objects first.
          */
-        if (diag) diag->stage = "wait-submit-timeout-queue-idle";
+        if (diag) diag->stage = "wait-submit-recovery-queue-idle";
         VkResult idle_rc = vkQueueWaitIdle(submit_queue);
-        if (local_fence) vkDestroyFence(rt->device, local_fence, NULL);
         if (idle_rc != VK_SUCCESS) {
+            quarantine_executor_submit_sync_identities(
+                view, submit_fence_entry);
+            /* Native execution may still reference the command buffer, its
+             * replay objects, and this private fence. There is no Vulkan
+             * result that proves those lifetimes ended, so deliberately
+             * retain the fence and let the caller retain the complete replay
+             * graph until the executor process is replaced. */
             if (diag) {
-                diag->vk_result = idle_rc;
+                diag->vk_result = VK_ERROR_DEVICE_LOST;
                 diag->native_rc = -EIO;
             }
             return -EIO;
         }
-        if (diag) {
-            diag->vk_result = VK_TIMEOUT;
-            diag->native_rc = -ETIMEDOUT;
-        }
-        return -ETIMEDOUT;
-    }
-    if (vrc != VK_SUCCESS) {
-        if (local_fence) vkDestroyFence(rt->device, local_fence, NULL);
-        return -EIO;
+        vrc = VK_SUCCESS;
     }
     if (submit_fence_entry) submit_fence_entry->signaled = 1;
     if (view->is_v619 && view->header_v619 && view->submit_syncs) {
@@ -44527,7 +45733,14 @@ submit_fail:
     }
     return submit_fail_rc ? submit_fail_rc : (vrc == VK_ERROR_TOO_MANY_OBJECTS ? -E2BIG : -EIO);
 }
-static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
+static int run_vulkan_graphics_v6_frame(
+        const VulkanGraphicsV6FrameView *view,
+        VkResult *out_exact_result,
+        bool *out_exact_result_valid,
+        bool *out_native_enqueued) {
+    if (out_exact_result) *out_exact_result = VK_ERROR_UNKNOWN;
+    if (out_exact_result_valid) *out_exact_result_valid = false;
+    if (out_native_enqueued) *out_native_enqueued = false;
     const int strict_passthrough = env_truthy("PDOCKER_GPU_STRICT_PASSTHROUGH", 0);
     const char *reason = NULL;
     int rc = preflight_vulkan_graphics_v6_replay_supported(view, &reason);
@@ -44553,7 +45766,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
                 "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,\"executor_build_marker\":\"" PDOCKER_GPU_EXECUTOR_BUILD_MARKER "\","
                 "\"stage\":\"vulkan-graphics-v6-replay\",\"valid\":true,"
                 "\"execution_implemented\":true,\"no_op\":true,"
-                "\"command_count\":0,\"submit_id\":%llu}\n",
+                "\"result\":0,\"command_count\":0,\"submit_id\":%llu}\n",
                 PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
                 PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
                 (unsigned long long)view->header->submit_id);
@@ -44583,6 +45796,62 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
         identity_submit_queue = identity_handles.queue;
     }
     if (identity_submit_queue == VK_NULL_HANDLE) identity_submit_queue = g_vulkan_runtime.graphics_queue;
+    if (vulkan_graphics_v619_frame_is_sync_only(view)) {
+        VulkanGraphicsSubmitDiag submit_diag;
+        rc = submit_vulkan_graphics_v619_sync_only(
+            &g_vulkan_runtime, view, identity_submit_queue, &submit_diag);
+        FILE *out = json_out();
+        if (rc != 0) {
+            fprintf(out,
+                    "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
+                    "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+                    "\"executor_build_marker\":\"" PDOCKER_GPU_EXECUTOR_BUILD_MARKER "\","
+                    "\"stage\":\"vulkan-graphics-v6-queue-submit\",\"valid\":false,"
+                    "\"execution_implemented\":false,\"sync_only\":true,"
+                    "\"error\":\"%s\",\"submit_stage\":\"%s\",\"vk_result\":%d,"
+                    "\"native_rc\":%d,\"wait_count\":%u,\"signal_count\":%u,"
+                    "\"timeline_used\":%d,\"submit_id\":%llu}\n",
+                    PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
+                    PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
+                    strerror(-rc), submit_diag.stage ? submit_diag.stage : "unknown",
+                    (int)submit_diag.vk_result, submit_diag.native_rc,
+                    submit_diag.wait_count, submit_diag.signal_count,
+                    submit_diag.timeline_used,
+                    (unsigned long long)view->header->submit_id);
+        } else {
+            fprintf(out,
+                    "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
+                    "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+                    "\"executor_build_marker\":\"" PDOCKER_GPU_EXECUTOR_BUILD_MARKER "\","
+                    "\"stage\":\"vulkan-graphics-v6-queue-submit\",\"valid\":true,"
+                    "\"execution_implemented\":true,\"sync_only\":true,"
+                    "\"vk_result\":%d,\"wait_count\":%u,\"signal_count\":%u,"
+                    "\"timeline_used\":%d,\"submit_id\":%llu}\n",
+                    PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
+                    PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
+                    (int)submit_diag.vk_result, submit_diag.wait_count,
+                    submit_diag.signal_count, submit_diag.timeline_used,
+                    (unsigned long long)view->header->submit_id);
+        }
+        /*
+         * Native success and failure converge on one correlated terminal
+         * record. The persistent stream remains framed and the ICD receives
+         * the exact VkResult rather than inferring it from connection state.
+         */
+        fprintf(out,
+                "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
+                "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+                "\"executor_build_marker\":\"" PDOCKER_GPU_EXECUTOR_BUILD_MARKER "\","
+                "\"stage\":\"vulkan-graphics-v6-replay\",\"valid\":true,"
+                "\"execution_implemented\":true,\"sync_only\":true,"
+                "\"result\":%d,\"command_count\":0,\"submit_id\":%llu}\n",
+                PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
+                PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
+                (int)submit_diag.vk_result,
+                (unsigned long long)view->header->submit_id);
+        fflush(out);
+        return 0;
+    }
     VulkanGraphicsReplayPipeline replay_pipelines[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_PIPELINES];
     VulkanGraphicsReplayLayouts replay_layouts;
     VulkanGraphicsReplayAttachments replay_attachments;
@@ -44647,7 +45916,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
                     PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
                     strerror(-rc));
             fflush(out);
-            destroy_vulkan_graphics_replay_queries(g_vulkan_runtime.device, &replay_queries);
+            destroy_vulkan_graphics_replay_queries(&replay_queries);
             cleanup_vulkan_graphics_v6_replay_state(
                 g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count,
                 &replay_layouts, &replay_attachments, &classic_targets,
@@ -44682,7 +45951,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
                 PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
                 strerror(-rc));
         fflush(out);
-        destroy_vulkan_graphics_replay_queries(g_vulkan_runtime.device, &replay_queries);
+        destroy_vulkan_graphics_replay_queries(&replay_queries);
         cleanup_vulkan_graphics_v6_replay_state(
             g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count,
             &replay_layouts, &replay_attachments, &classic_targets,
@@ -44715,7 +45984,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
                 PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
                 strerror(-rc));
         fflush(out);
-        destroy_vulkan_graphics_replay_queries(g_vulkan_runtime.device, &replay_queries);
+        destroy_vulkan_graphics_replay_queries(&replay_queries);
         cleanup_vulkan_graphics_v6_replay_state(
             g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count,
             &replay_layouts, &replay_attachments, &classic_targets,
@@ -44749,7 +46018,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
                     PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
                     strerror(-rc));
             fflush(out);
-            destroy_vulkan_graphics_replay_queries(g_vulkan_runtime.device, &replay_queries);
+            destroy_vulkan_graphics_replay_queries(&replay_queries);
             cleanup_vulkan_graphics_v6_replay_state(
                 g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count,
                 &replay_layouts, &replay_attachments, &classic_targets,
@@ -44783,7 +46052,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
                 PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
                 strerror(-rc));
         fflush(out);
-        destroy_vulkan_graphics_replay_queries(g_vulkan_runtime.device, &replay_queries);
+        destroy_vulkan_graphics_replay_queries(&replay_queries);
         cleanup_vulkan_graphics_v6_replay_state(
             g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count,
             &replay_layouts, &replay_attachments, &classic_targets,
@@ -44817,7 +46086,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
                 PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
                 strerror(-rc));
         fflush(out);
-        destroy_vulkan_graphics_replay_queries(g_vulkan_runtime.device, &replay_queries);
+        destroy_vulkan_graphics_replay_queries(&replay_queries);
         cleanup_vulkan_graphics_v6_replay_state(
             g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count,
             &replay_layouts, &replay_attachments, &classic_targets,
@@ -44849,7 +46118,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
                 PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
                 strerror(-rc));
         fflush(out);
-        destroy_vulkan_graphics_replay_queries(g_vulkan_runtime.device, &replay_queries);
+        destroy_vulkan_graphics_replay_queries(&replay_queries);
         cleanup_vulkan_graphics_v6_replay_state(
             g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count,
             &replay_layouts, &replay_attachments, &classic_targets,
@@ -44885,7 +46154,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
                 PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
                 strerror(-rc));
         fflush(out);
-        destroy_vulkan_graphics_replay_queries(g_vulkan_runtime.device, &replay_queries);
+        destroy_vulkan_graphics_replay_queries(&replay_queries);
         cleanup_vulkan_graphics_v6_replay_state(
             g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count,
             &replay_layouts, &replay_attachments, &classic_targets,
@@ -44907,8 +46176,11 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
 
     VulkanGraphicsSubmitDiag submit_diag;
     rc = submit_vulkan_graphics_v6_command_buffer(
-        &g_vulkan_runtime, view, replay_command_buffer, identity_submit_queue, &submit_diag);
+        &g_vulkan_runtime, view, replay_command_buffer, identity_submit_queue,
+        &submit_diag, out_native_enqueued);
     if (rc != 0) {
+        if (out_exact_result) *out_exact_result = submit_diag.vk_result;
+        if (out_exact_result_valid) *out_exact_result_valid = true;
         out = json_out();
         fprintf(out,
                 "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
@@ -44926,9 +46198,26 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
                 submit_diag.timeline_used,
                 (unsigned long long)view->header->submit_id);
         fflush(out);
+        if (out_native_enqueued && *out_native_enqueued) {
+            /* Completion is unproven after a successful native enqueue.
+             * Freeing any replay object here can race the driver. Fail closed
+             * by retaining the whole replay graph; the correlated terminal
+             * poisons the logical device and executor replacement reclaims
+             * the process-owned objects. */
+            out = json_out();
+            fprintf(out,
+                    "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\","
+                    "\"abi_version\":\"%s\",\"stage\":"
+                    "\"vulkan-graphics-v6-inflight-retained\",\"valid\":false,"
+                    "\"execution_implemented\":true,\"submit_id\":%llu}\n",
+                    PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
+                    (unsigned long long)view->header->submit_id);
+            fflush(out);
+            return rc;
+        }
         free_vulkan_graphics_v6_replay_command_buffer(
             g_vulkan_runtime.device, replay_command_pool, &replay_command_buffer);
-        destroy_vulkan_graphics_replay_queries(g_vulkan_runtime.device, &replay_queries);
+        destroy_vulkan_graphics_replay_queries(&replay_queries);
         cleanup_vulkan_graphics_v6_replay_state(
             g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count,
             &replay_layouts, &replay_attachments, &classic_targets,
@@ -44962,7 +46251,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
         fflush(out);
         free_vulkan_graphics_v6_replay_command_buffer(
             g_vulkan_runtime.device, replay_command_pool, &replay_command_buffer);
-        destroy_vulkan_graphics_replay_queries(g_vulkan_runtime.device, &replay_queries);
+        destroy_vulkan_graphics_replay_queries(&replay_queries);
         cleanup_vulkan_graphics_v6_replay_state(
             g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count,
             &replay_layouts, &replay_attachments, &classic_targets,
@@ -45001,7 +46290,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
                 PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
                 strerror(-rc));
         fflush(out);
-        destroy_vulkan_graphics_replay_queries(g_vulkan_runtime.device, &replay_queries);
+        destroy_vulkan_graphics_replay_queries(&replay_queries);
         cleanup_vulkan_graphics_v6_replay_state(
             g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count,
             &replay_layouts, &replay_attachments, &classic_targets,
@@ -45034,7 +46323,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
                 PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
                 strerror(-rc));
         fflush(out);
-        destroy_vulkan_graphics_replay_queries(g_vulkan_runtime.device, &replay_queries);
+        destroy_vulkan_graphics_replay_queries(&replay_queries);
         cleanup_vulkan_graphics_v6_replay_state(
             g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count,
             &replay_layouts, &replay_attachments, &classic_targets,
@@ -45052,7 +46341,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
             (unsigned long long)view->header->submit_id);
     fflush(out);
 
-    destroy_vulkan_graphics_replay_queries(g_vulkan_runtime.device, &replay_queries);
+    destroy_vulkan_graphics_replay_queries(&replay_queries);
     cleanup_vulkan_graphics_v6_replay_state(
         g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count,
         &replay_layouts, &replay_attachments, &classic_targets,
@@ -45062,7 +46351,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
             "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
             "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,\"executor_build_marker\":\"" PDOCKER_GPU_EXECUTOR_BUILD_MARKER "\","
             "\"stage\":\"vulkan-graphics-v6-replay\",\"valid\":true,"
-            "\"execution_implemented\":true,\"submit_id\":%llu}\n",
+            "\"execution_implemented\":true,\"result\":0,\"submit_id\":%llu}\n",
             PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
             PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
             (unsigned long long)view->header->submit_id);
@@ -45075,9 +46364,13 @@ static int recv_vulkan_graphics_v6_header_with_fds(
         PdockerGpuVulkanGraphicsV6FrameHeader *header,
         int *passed_fds,
         size_t max_fds,
-        size_t *fd_count) {
-    if (!header || !passed_fds || !fd_count) return -EINVAL;
-    *fd_count = 0;
+        size_t *fd_count,
+        bool *out_header_received) {
+    if (fd_count) *fd_count = 0;
+    if (out_header_received) *out_header_received = false;
+    if (!header || !passed_fds || !fd_count || !out_header_received) {
+        return -EINVAL;
+    }
     for (size_t i = 0; i < max_fds; ++i) passed_fds[i] = -1;
     char control[CMSG_SPACE(sizeof(int) * PDOCKER_GPU_MAX_PASSED_FDS)];
     struct iovec iov = {.iov_base = header, .iov_len = sizeof(*header)};
@@ -45089,12 +46382,18 @@ static int recv_vulkan_graphics_v6_header_with_fds(
     msg.msg_iovlen = 1;
     msg.msg_control = control;
     msg.msg_controllen = sizeof(control);
-    ssize_t n = recvmsg(cfd, &msg, MSG_WAITALL | MSG_CMSG_CLOEXEC);
-    if (n <= 0) return n < 0 ? -errno : 0;
+    ssize_t n = recvmsg_with_executor_request_deadline(
+        cfd, &msg, MSG_WAITALL | MSG_CMSG_CLOEXEC);
+    if (n <= 0) return (int)n;
     for (struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
          cmsg;
          cmsg = CMSG_NXTHDR(&msg, cmsg)) {
         if (cmsg->cmsg_level != SOL_SOCKET || cmsg->cmsg_type != SCM_RIGHTS) continue;
+        if (cmsg->cmsg_len < CMSG_LEN(0) ||
+            (cmsg->cmsg_len - CMSG_LEN(0)) % sizeof(int) != 0) {
+            msg.msg_flags |= MSG_CTRUNC;
+            continue;
+        }
         size_t bytes = cmsg->cmsg_len - CMSG_LEN(0);
         size_t count = bytes / sizeof(int);
         int *fds = (int *)CMSG_DATA(cmsg);
@@ -45103,8 +46402,14 @@ static int recv_vulkan_graphics_v6_header_with_fds(
             else close(fds[i]);
         }
     }
-    if ((size_t)n != sizeof(*header) ||
+    int deadline_rc = executor_request_deadline_check();
+    if (deadline_rc != 0) {
+        close_received_fds(passed_fds, fd_count);
+        return deadline_rc;
+    }
+    if ((size_t)n > sizeof(*header) ||
         (msg.msg_flags & (MSG_TRUNC | MSG_CTRUNC)) != 0) {
+        close_received_fds(passed_fds, fd_count);
         return -EMSGSIZE;
     }
     int cloexec_rc = ensure_received_fds_cloexec(passed_fds, *fd_count);
@@ -45112,47 +46417,95 @@ static int recv_vulkan_graphics_v6_header_with_fds(
         *fd_count = 0;
         return cloexec_rc;
     }
-    return validate_vulkan_graphics_v6_header_prefix(header, *fd_count);
+    if ((size_t)n < sizeof(*header)) {
+        int read_rc = read_exact_bytes(
+            cfd, (unsigned char *)header + (size_t)n, sizeof(*header) - (size_t)n);
+        if (read_rc != 0) {
+            close_received_fds(passed_fds, fd_count);
+            return read_rc;
+        }
+    }
+    *out_header_received = true;
+    int validate_rc = validate_vulkan_graphics_v6_header_prefix(header, *fd_count);
+    if (validate_rc != 0) {
+        close_received_fds(passed_fds, fd_count);
+    }
+    return validate_rc;
 }
 
 static int connection_starts_with_graphics_v6_magic(int cfd) {
     char first = 0;
-    for (;;) {
-        ssize_t n = recv(cfd, &first, 1, MSG_PEEK);
-        if (n == 0) return 0;
-        if (n < 0) {
-            if (errno == EINTR) continue;
-            return -errno;
-        }
-        break;
-    }
+    ssize_t n = recv_with_executor_request_deadline(cfd, &first, 1, MSG_PEEK);
+    if (n <= 0) return (int)n;
     if (first != PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAGIC[0]) return 0;
     char magic[8];
-    ssize_t n;
-    do {
-        n = recv(cfd, magic, sizeof(magic), MSG_PEEK | MSG_WAITALL);
-    } while (n < 0 && errno == EINTR);
-    if (n == 0) return 0;
-    if (n < 0) return -errno;
-    if ((size_t)n != sizeof(magic)) return 0;
-    return memcmp(magic, PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAGIC, sizeof(magic)) == 0;
+    for (;;) {
+        n = recv_with_executor_request_deadline(
+            cfd, magic, sizeof(magic), MSG_PEEK | MSG_WAITALL);
+        if (n <= 0) return (int)n;
+        if ((size_t)n == sizeof(magic)) {
+            return memcmp(
+                magic, PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAGIC, sizeof(magic)) == 0;
+        }
+    }
+}
+
+static int write_vulkan_graphics_v6_terminal(
+        uint64_t submit_id,
+        VkResult result,
+        bool execution_implemented,
+        const char *error) {
+    FILE *out = json_out();
+    if (!out) return -EIO;
+    int written;
+    if (error && error[0]) {
+        written = fprintf(
+            out,
+            "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
+            "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+            "\"executor_build_marker\":\"" PDOCKER_GPU_EXECUTOR_BUILD_MARKER "\","
+            "\"stage\":\"vulkan-graphics-v6-replay\",\"valid\":true,"
+            "\"execution_implemented\":%s,\"result\":%d,"
+            "\"submit_id\":%llu,\"error\":\"%s\"}\n",
+            PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
+            PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
+            execution_implemented ? "true" : "false",
+            (int)result, (unsigned long long)submit_id, error);
+    } else {
+        written = fprintf(
+            out,
+            "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
+            "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+            "\"executor_build_marker\":\"" PDOCKER_GPU_EXECUTOR_BUILD_MARKER "\","
+            "\"stage\":\"vulkan-graphics-v6-replay\",\"valid\":true,"
+            "\"execution_implemented\":%s,\"result\":%d,"
+            "\"submit_id\":%llu}\n",
+            PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
+            PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
+            execution_implemented ? "true" : "false",
+            (int)result, (unsigned long long)submit_id);
+    }
+    return written < 0 || fflush(out) != 0 ? -EIO : 0;
 }
 
 static int handle_vulkan_graphics_v6_frame(int cfd) {
     int passed_fds[PDOCKER_GPU_MAX_PASSED_FDS];
     size_t passed_fd_count = 0;
     PdockerGpuVulkanGraphicsV6FrameHeader header;
+    bool header_received = false;
     unsigned char *frame = NULL;
     VulkanGraphicsV6FrameView view;
     memset(&view, 0, sizeof(view));
     int rc = recv_vulkan_graphics_v6_header_with_fds(
-        cfd, &header, passed_fds, PDOCKER_GPU_MAX_PASSED_FDS, &passed_fd_count);
+        cfd, &header, passed_fds, PDOCKER_GPU_MAX_PASSED_FDS,
+        &passed_fd_count, &header_received);
     if (rc != 0) {
         json_fail("vulkan-graphics-v6", strerror(-rc));
         goto fail_close;
     }
     frame = (unsigned char *)malloc((size_t)header.frame_size);
     if (!frame) {
+        rc = -ENOMEM;
         json_fail("vulkan-graphics-v6", "out of memory");
         goto fail_close;
     }
@@ -45165,7 +46518,8 @@ static int handle_vulkan_graphics_v6_frame(int cfd) {
             goto fail_close;
         }
     }
-    rc = validate_vulkan_graphics_v6_frame_content(frame, passed_fds, passed_fd_count, &view);
+    rc = validate_vulkan_graphics_v6_frame_content(
+        frame, passed_fds, passed_fd_count, &view);
     if (rc != 0) {
         json_fail("vulkan-graphics-v6", strerror(-rc));
         goto fail_close;
@@ -45176,22 +46530,56 @@ static int handle_vulkan_graphics_v6_frame(int cfd) {
         goto fail_close;
     }
     describe_vulkan_graphics_v6_frame(json_out(), &view);
-    (void)run_vulkan_graphics_v6_frame(&view);
+    VkResult exact_result = VK_ERROR_UNKNOWN;
+    bool exact_result_valid = false;
+    bool native_enqueued = false;
+    rc = run_vulkan_graphics_v6_frame(
+        &view, &exact_result, &exact_result_valid, &native_enqueued);
+    if (rc != 0) {
+        VkResult result = exact_result_valid
+            ? exact_result
+            : native_enqueued
+                ? VK_ERROR_DEVICE_LOST
+                : rc == -ENOMEM
+                    ? VK_ERROR_OUT_OF_HOST_MEMORY
+                    : (rc == -EOPNOTSUPP || rc == -ENOTSUP)
+                        ? VK_ERROR_FEATURE_NOT_PRESENT
+                        : VK_ERROR_DEVICE_LOST;
+        (void)write_vulkan_graphics_v6_terminal(
+            view.header->submit_id, result, native_enqueued,
+            strerror(-rc));
+    }
     free(frame);
     frame = NULL;
-    for (size_t i = 0; i < passed_fd_count && i < PDOCKER_GPU_MAX_PASSED_FDS; ++i) {
+    for (size_t i = 0;
+         i < passed_fd_count && i < PDOCKER_GPU_MAX_PASSED_FDS;
+         ++i) {
         if (passed_fds[i] >= 0) close(passed_fds[i]);
     }
     return 0;
+
 fail_close:
+    if (header_received) {
+        VkResult result = rc == -ENOMEM
+            ? VK_ERROR_OUT_OF_HOST_MEMORY
+            : VK_ERROR_DEVICE_LOST;
+        (void)write_vulkan_graphics_v6_terminal(
+            header.submit_id, result, false,
+            rc < 0 ? strerror(-rc) : "invalid Vulkan graphics frame");
+    }
     free(frame);
-    for (size_t i = 0; i < passed_fd_count && i < PDOCKER_GPU_MAX_PASSED_FDS; ++i) {
+    for (size_t i = 0;
+         i < passed_fd_count && i < PDOCKER_GPU_MAX_PASSED_FDS;
+         ++i) {
         if (passed_fds[i] >= 0) close(passed_fds[i]);
     }
     return -1;
 }
 
-static int write_vulkan_dispatch_v5_terminal_success(uint64_t submit_id) {
+static int write_vulkan_dispatch_v5_terminal(
+        uint64_t dispatch_id,
+        VkResult result,
+        bool execution_implemented) {
     FILE *out = json_out();
     if (!out) return -EIO;
     int written = fprintf(
@@ -45200,11 +46588,13 @@ static int write_vulkan_dispatch_v5_terminal_success(uint64_t submit_id) {
         "\"api\":\"%s\",\"abi_version\":\"%s\","
         "\"command\":\"VULKAN_DISPATCH_V5_COMPLETE\","
         "\"stage\":\"vulkan-dispatch-v5-complete\","
-        "\"valid\":true,\"execution_implemented\":true,"
-        "\"submit_id\":%llu}\n",
+        "\"valid\":true,\"execution_implemented\":%s,"
+        "\"result\":%d,\"submit_id\":%llu}\n",
         PDOCKER_GPU_COMMAND_API,
         PDOCKER_GPU_ABI_VERSION,
-        (unsigned long long)submit_id);
+        execution_implemented ? "true" : "false",
+        (int)result,
+        (unsigned long long)dispatch_id);
     if (written < 0 || fflush(out) != 0) return -EIO;
     return 0;
 }
@@ -45222,8 +46612,12 @@ static int handle_vulkan_dispatch_v5_frame(int cfd) {
     int *binding_fds = NULL;
     size_t binding_capacity = 0;
     size_t image_descriptor_capacity = 0;
+    bool frame_received = false;
+    bool execution_implemented = false;
+    VkResult terminal_result = VK_ERROR_UNKNOWN;
     int rc = recv_vulkan_dispatch_v5_frame(
-        cfd, &frame, &header, passed_fds, PDOCKER_GPU_MAX_PASSED_FDS, &passed_fd_count);
+        cfd, &frame, &header, passed_fds, PDOCKER_GPU_MAX_PASSED_FDS,
+        &passed_fd_count, &frame_received);
     if (rc != 0) {
         json_fail("vulkan-dispatch-v5", strerror(-rc));
         goto cleanup;
@@ -45246,6 +46640,8 @@ static int handle_vulkan_dispatch_v5_frame(int cfd) {
             native_plan.v5_native_replay_incompatible_reason
                 ? native_plan.v5_native_replay_incompatible_reason
                 : "v5 native replay materialization required");
+        rc = -EOPNOTSUPP;
+        terminal_result = VK_ERROR_FEATURE_NOT_PRESENT;
         goto cleanup;
     }
     VulkanDispatchV5ObjectTables object_tables;
@@ -45259,6 +46655,7 @@ static int handle_vulkan_dispatch_v5_frame(int cfd) {
     binding_fds = (int *)calloc(binding_capacity, sizeof(*binding_fds));
     if (!bindings || !image_descriptors || !binding_fds) {
         json_fail("vulkan-dispatch-v5", "out of memory allocating descriptor tables");
+        rc = -ENOMEM;
         goto cleanup;
     }
     for (size_t i = 0; i < binding_capacity; ++i) {
@@ -45420,16 +46817,35 @@ static int handle_vulkan_dispatch_v5_frame(int cfd) {
         options.has_base_group ? options.base_group_x : 0,
         options.has_base_group ? options.base_group_y : 0,
         options.has_base_group ? options.base_group_z : 0,
-        identity_submit_queue);
+        identity_submit_queue, &terminal_result, &execution_implemented);
     if (dispatch_rc != 0) {
         rc = dispatch_rc < 0 ? dispatch_rc : -EIO;
+        if (terminal_result == VK_ERROR_UNKNOWN) {
+            terminal_result = VK_ERROR_DEVICE_LOST;
+        }
         goto cleanup;
     }
-    /* run_vulkan_dispatch_fd may emit one or more diagnostic success events.
-     * This final protocol event is the only success delimiter that permits a
-     * framed V5 connection to carry the next request without response bleed. */
-    rc = write_vulkan_dispatch_v5_terminal_success(header.dispatch_id);
+    terminal_result = VK_SUCCESS;
 cleanup:
+    /* A fully consumed V5 frame gets exactly one correlated terminal.  Earlier
+     * diagnostic JSON objects are never request delimiters.  A malformed full
+     * frame and any post-enqueue ambiguity are authoritative device loss. */
+    if (frame_received) {
+        if (terminal_result == VK_ERROR_UNKNOWN) {
+            terminal_result = execution_implemented
+                ? VK_ERROR_DEVICE_LOST
+                : rc == -ENOMEM
+                    ? VK_ERROR_OUT_OF_HOST_MEMORY
+                    : rc == -EOPNOTSUPP || rc == -ENOTSUP
+                        ? VK_ERROR_FEATURE_NOT_PRESENT
+                        : VK_ERROR_DEVICE_LOST;
+        }
+        int terminal_rc = write_vulkan_dispatch_v5_terminal(
+            header.dispatch_id, terminal_result, execution_implemented);
+        if (terminal_rc != 0) rc = terminal_rc;
+        else if (terminal_result == VK_SUCCESS) rc = 0;
+        else rc = -EREMOTEIO;
+    }
     free(option_copy);
     free(entry_name);
     free(specs);
@@ -45451,9 +46867,9 @@ static int recv_command_with_fds(
         size_t max_fds,
         size_t *fd_count,
         PdockerReceiveEvidence *evidence) {
-    if (!cmd || cmd_size < 2 || !passed_fds || !fd_count) return -EINVAL;
-    *fd_count = 0;
+    if (fd_count) *fd_count = 0;
     if (evidence) memset(evidence, 0, sizeof(*evidence));
+    if (!cmd || cmd_size < 2 || !passed_fds || !fd_count) return -EINVAL;
     for (size_t i = 0; i < max_fds; ++i) passed_fds[i] = -1;
 
     char first = 0;
@@ -45467,24 +46883,36 @@ static int recv_command_with_fds(
     msg.msg_control = control;
     msg.msg_controllen = sizeof(control);
 
-    ssize_t n;
-    do {
-        n = recvmsg(cfd, &msg, MSG_CMSG_CLOEXEC);
-    } while (n < 0 && errno == EINTR);
-    if (n <= 0) return n < 0 ? -errno : 0;
+    ssize_t n = recvmsg_with_executor_request_deadline(
+        cfd, &msg, MSG_CMSG_CLOEXEC);
+    if (n <= 0) return (int)n;
+    if (evidence) {
+        evidence->msg_flags = msg.msg_flags;
+        evidence->msg_trunc = (msg.msg_flags & MSG_TRUNC) != 0;
+        evidence->msg_ctrunc = (msg.msg_flags & MSG_CTRUNC) != 0;
+    }
     if (n != 1 || (msg.msg_flags & (MSG_TRUNC | MSG_CTRUNC)) != 0) {
+        size_t truncated_seen_fds = 0;
         for (struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
              cmsg;
              cmsg = CMSG_NXTHDR(&msg, cmsg)) {
             if (cmsg->cmsg_level != SOL_SOCKET ||
-                cmsg->cmsg_type != SCM_RIGHTS) continue;
+                cmsg->cmsg_type != SCM_RIGHTS ||
+                cmsg->cmsg_len < CMSG_LEN(0)) continue;
             size_t count =
                 (cmsg->cmsg_len - CMSG_LEN(0)) / sizeof(int);
+            truncated_seen_fds += count;
             int *received = (int *)CMSG_DATA(cmsg);
             for (size_t i = 0; i < count; ++i) {
                 if (received[i] >= 0) close(received[i]);
             }
         }
+        if (evidence) {
+            evidence->scm_rights_fd_count_seen = truncated_seen_fds;
+            evidence->scm_rights_fd_count_copied = 0;
+        }
+        int truncated_deadline_rc = executor_request_deadline_check();
+        if (truncated_deadline_rc != 0) return truncated_deadline_rc;
         return -EMSGSIZE;
     }
 
@@ -45514,6 +46942,11 @@ static int recv_command_with_fds(
         evidence->scm_rights_fd_count_copied = *fd_count;
         evidence->msg_flags = msg.msg_flags;
     }
+    int deadline_rc = executor_request_deadline_check();
+    if (deadline_rc != 0) {
+        close_received_fds(passed_fds, fd_count);
+        return deadline_rc;
+    }
     int cloexec_rc = ensure_received_fds_cloexec(passed_fds, *fd_count);
     if (cloexec_rc != 0) {
         *fd_count = 0;
@@ -45524,41 +46957,31 @@ static int recv_command_with_fds(
     cmd[off++] = first;
     while (cmd[off - 1] != '\n') {
         if (off + 1 >= cmd_size) {
-            for (size_t i = 0; i < *fd_count; ++i) {
-                if (passed_fds[i] >= 0) {
-                    close(passed_fds[i]);
-                    passed_fds[i] = -1;
-                }
-            }
-            *fd_count = 0;
+            close_received_fds(passed_fds, fd_count);
             return -EMSGSIZE;
         }
-        char ch = 0;
-        do {
-            n = recv(cfd, &ch, 1, 0);
-        } while (n < 0 && errno == EINTR);
+        size_t capacity = cmd_size - off - 1u;
+        n = recv_with_executor_request_deadline(
+            cfd, cmd + off, capacity, MSG_PEEK);
         if (n < 0) {
-            int err = errno;
-            for (size_t i = 0; i < *fd_count; ++i) {
-                if (passed_fds[i] >= 0) {
-                    close(passed_fds[i]);
-                    passed_fds[i] = -1;
-                }
-            }
-            *fd_count = 0;
-            return -err;
+            close_received_fds(passed_fds, fd_count);
+            return (int)n;
         }
         if (n == 0) {
-            for (size_t i = 0; i < *fd_count; ++i) {
-                if (passed_fds[i] >= 0) {
-                    close(passed_fds[i]);
-                    passed_fds[i] = -1;
-                }
-            }
-            *fd_count = 0;
+            close_received_fds(passed_fds, fd_count);
             return -EPROTO;
         }
-        cmd[off++] = ch;
+        size_t available = (size_t)n;
+        char *newline = (char *)memchr(cmd + off, '\n', available);
+        size_t consume = newline
+            ? (size_t)(newline - (cmd + off)) + 1u
+            : available;
+        int read_rc = read_exact_bytes(cfd, cmd + off, consume);
+        if (read_rc != 0) {
+            close_received_fds(passed_fds, fd_count);
+            return read_rc;
+        }
+        off += consume;
     }
     cmd[off] = '\0';
 
@@ -45586,18 +47009,6 @@ static int recv_command_with_fds(
         }
     }
     return (int)off;
-}
-
-static int set_executor_receive_timeout(int fd, int seconds) {
-    if (fd < 0 || seconds < 0) return -EINVAL;
-    const struct timeval timeout = {
-        .tv_sec = seconds,
-        .tv_usec = 0,
-    };
-    if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) != 0) {
-        return -errno;
-    }
-    return 0;
 }
 
 static int configure_executor_client_socket(int fd) {
@@ -45694,6 +47105,7 @@ static void *serve_socket_client_main(void *opaque) {
     RegisteredVectorBuffer registered;
     memset(&registered, 0, sizeof(registered));
     for (;;) {
+        executor_request_deadline_clear();
         int request_start_rc = wait_for_executor_request_start(cfd);
         if (request_start_rc < 0) {
             if (executor_request_begin(out) != 0) break;
@@ -45702,8 +47114,8 @@ static void *serve_socket_client_main(void *opaque) {
             break;
         }
         if (request_start_rc == 0) break;
-        int timeout_rc = set_executor_receive_timeout(
-            cfd, PDOCKER_GPU_SOCKET_TIMEOUT_SECONDS);
+        int timeout_rc = executor_request_deadline_start(
+            (uint64_t)PDOCKER_GPU_SOCKET_TIMEOUT_SECONDS * 1000000000ull);
         if (timeout_rc != 0) {
             if (executor_request_begin(out) != 0) break;
             json_fail("request-timeout", strerror(-timeout_rc));
@@ -45762,7 +47174,13 @@ static void *serve_socket_client_main(void *opaque) {
         }
         if (nread == 0) break;
         if (executor_request_begin(out) != 0) break;
-        int request_lock_rc = executor_request_lock();
+        const int query_get_results_request =
+            strncmp(cmd, "VULKAN_QUERY_POOL_GET_RESULTS ", 30) == 0;
+        /* Native WAIT_BIT may block indefinitely by Vulkan contract.  Query
+         * pool registry retention provides object lifetime, so do not hold the
+         * global GPU/EGL request lock and stall unrelated submit threads. */
+        int request_lock_rc = query_get_results_request
+            ? 0 : executor_request_lock();
         if (request_lock_rc != 0) {
             json_fail("executor-request-lock", strerror(-request_lock_rc));
             for (size_t i = 0;
@@ -45815,12 +47233,18 @@ static void *serve_socket_client_main(void *opaque) {
                 (void)run_vector_add_3fd(passed_fds[0], passed_fds[1], passed_fds[2], n, GPU_API_AUTO);
                 passed_fds[0] = passed_fds[1] = passed_fds[2] = -1;
             }
+        } else if (strcmp(cmd, "VULKAN_QUEUE_WAIT_IDLE") == 0 ||
+                   strcmp(cmd, "VULKAN_DEVICE_WAIT_IDLE") == 0) {
+            (void)handle_vulkan_idle_command(cmd, passed_fd_count);
         } else if (strncmp(cmd, "VULKAN_EVENT_", 13) == 0) {
             (void)handle_vulkan_event_command(cmd);
         } else if (strncmp(cmd, "VULKAN_SEMAPHORE_", 17) == 0) {
             (void)handle_vulkan_semaphore_command(cmd);
         } else if (strncmp(cmd, "VULKAN_FENCE_", 13) == 0) {
             (void)handle_vulkan_fence_command(cmd);
+        } else if (strncmp(cmd, "VULKAN_QUERY_POOL_", 18) == 0) {
+            (void)handle_vulkan_query_pool_command(
+                cmd, passed_fds, passed_fd_count);
         } else if (strncmp(cmd, "VULKAN_DISPATCH_V2 ", 19) == 0 ||
                    strncmp(cmd, "VULKAN_DISPATCH_V3 ", 19) == 0 ||
                    strncmp(cmd, "VULKAN_DISPATCH_V4 ", 19) == 0) {
@@ -45981,7 +47405,7 @@ static void *serve_socket_client_main(void *opaque) {
                                              options.has_base_group ? options.base_group_x : 0,
                                              options.has_base_group ? options.base_group_y : 0,
                                              options.has_base_group ? options.base_group_z : 0,
-                                             VK_NULL_HANDLE);
+                                             VK_NULL_HANDLE, NULL, NULL);
             }
             free(bindings);
         } else if (strncmp(cmd, "VULKAN_DISPATCH_V1 ", 19) == 0) {
@@ -46040,7 +47464,7 @@ static void *serve_socket_client_main(void *opaque) {
                                              NULL, 0, NULL, 0,
                                              NULL,
                                              push, push_size, gx, gy, gz, 0, 0, 0,
-                                             VK_NULL_HANDLE);
+                                             VK_NULL_HANDLE, NULL, NULL);
             }
             free(bindings);
         } else {
@@ -46157,6 +47581,7 @@ static int serve_socket(const char *path) {
     }
     close(sfd);
     executor_wait_for_clients();
+    cleanup_executor_query_pool_registry();
     g_executor_server_context = EGL_NO_CONTEXT;
     g_executor_server_surface = EGL_NO_SURFACE;
     g_executor_server_display = EGL_NO_DISPLAY;
@@ -46166,6 +47591,9 @@ static int serve_socket(const char *path) {
 }
 
 int main(int argc, char **argv) {
+    if (atexit(cleanup_executor_query_pool_registry) != 0) {
+        fprintf(stderr, "pdocker-gpu-executor: failed to register query-pool cleanup\n");
+    }
     if (argc > 1 && strcmp(argv[1], "--capabilities") == 0) {
         print_capabilities("self-test-now; unix-socket-command-queue");
         return 0;

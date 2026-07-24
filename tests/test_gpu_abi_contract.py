@@ -13182,19 +13182,28 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn("zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);", segment)
 
 
-    def test_vulkan_host_query_reset_is_advertised_and_device_enableable(self):
+
+    def test_vulkan_host_query_reset_shadows_executor_and_is_device_enableable(self):
         icd = VULKAN_ICD.read_text()
         self.assertIn("#define PDOCKER_VK_FEATURE_HOST_QUERY_RESET", icd)
 
         pnext_body = c_function_body(icd, "fill_pnext_features")
         host_query_segment = pnext_body.split("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES", 1)[1].split("break;", 1)[0]
         self.assertIn("VkPhysicalDeviceHostQueryResetFeatures *p", host_query_segment)
-        self.assertIn("p->hostQueryReset = VK_TRUE;", host_query_segment)
+        self.assertIn("p->hostQueryReset = advertised_host_query_reset(snapshot);", host_query_segment)
         vulkan12_segment = pnext_body.split("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES", 1)[1].split("case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES", 1)[0]
-        self.assertGreaterEqual(vulkan12_segment.count("p->hostQueryReset = VK_TRUE;"), 2)
+        self.assertGreaterEqual(
+            vulkan12_segment.count(
+                "p->hostQueryReset = advertised_host_query_reset(snapshot);"
+            ),
+            2,
+        )
 
         vulkan12_supported_body = c_function_body(icd, "vulkan12_feature_request_supported")
-        self.assertIn("supported.hostQueryReset = VK_TRUE;", vulkan12_supported_body)
+        self.assertIn(
+            "supported.hostQueryReset = advertised_host_query_reset(snapshot);",
+            vulkan12_supported_body,
+        )
         self.assertIn(
             "PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, hostQueryReset);",
             vulkan12_supported_body,
@@ -13203,31 +13212,38 @@ class GpuAbiContractTest(unittest.TestCase):
         feature_mask_body = c_function_body(icd, "feature_mask_from_pnext_chain")
         self.assertIn("if (p->hostQueryReset) mask |= PDOCKER_VK_FEATURE_HOST_QUERY_RESET;", feature_mask_body)
         advertised_mask_body = c_function_body(icd, "advertised_feature_mask")
+        self.assertIn("if (advertised_host_query_reset(snapshot))", advertised_mask_body)
         self.assertIn("mask |= PDOCKER_VK_FEATURE_HOST_QUERY_RESET;", advertised_mask_body)
 
         validate_body = c_function_body(icd, "validate_device_feature_requests_for_physical")
         host_query_request_segment = validate_body.split("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES", 1)[1].split("break;", 1)[0]
-        self.assertIn("supported = true;", host_query_request_segment)
-        self.assertNotIn("supported = !p->hostQueryReset", host_query_request_segment)
-        self.assertNotIn('unsupported_feature_name = "hostQueryReset"', host_query_request_segment)
+        self.assertIn(
+            "supported = !p->hostQueryReset || advertised_host_query_reset(snapshot);",
+            host_query_request_segment,
+        )
+        self.assertIn(
+            'unsupported_feature_name = "hostQueryReset"',
+            host_query_request_segment,
+        )
+
+        collector_body = c_function_body(icd, "collect_advertised_device_extensions")
+        host_extension_segment = collector_body.split(
+            "#ifdef VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME", 1
+        )[1].split("#endif", 1)[0]
+        self.assertIn("if (advertised_host_query_reset(snapshot))", host_extension_segment)
+        self.assertIn("ADD_DEVICE_EXTENSION(VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME", host_extension_segment)
 
         self.assertIn("VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME", icd)
         self.assertIn("VK_EXT_MEMORY_BUDGET_EXTENSION_NAME", icd)
         self.assertIn("VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME", icd)
         self.assertIn("VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME", icd)
-        self.assertIn("ADD_DEVICE_EXTENSION(VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME", icd)
-        self.assertIn("ADD_DEVICE_EXTENSION(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME", icd)
-        self.assertIn("ADD_DEVICE_EXTENSION(VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME", icd)
-        self.assertIn("ADD_DEVICE_EXTENSION(VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME", icd)
         self.assertIn("VKAPI_ATTR void VKAPI_CALL vkResetQueryPool", icd)
         self.assertIn("VKAPI_ATTR void VKAPI_CALL vkResetQueryPoolEXT", icd)
         self.assertIn("MAP_PROC(vkResetQueryPoolEXT)", icd)
-        self.assertIn("reset_query_range(query_pool_handle_lookup_for_device(device, queryPool), firstQuery, queryCount);", icd)
-        reset_body = c_function_body(icd, "reset_query_range")
-        self.assertIn("if (!query_range_valid(pool, firstQuery, queryCount)) return;", reset_body)
-
-
-
+        reset_body = c_function_body(icd, "vkResetQueryPool")
+        self.assertIn("send_executor_query_pool_reset(", reset_body)
+        self.assertIn("query-pool-reset-transport", reset_body)
+        self.assertIn("query-pool-reset-native", reset_body)
     def test_vulkan_command_recording_overflow_fails_closed(self):
         icd = VULKAN_ICD.read_text()
         for marker in [
@@ -14580,13 +14596,21 @@ class GpuAbiContractTest(unittest.TestCase):
         for body in [compute_body, graphics_body]:
             self.assertIn("pdocker_vk_pipeline_create_flags_transportable", body)
             self.assertIn("ci->flags, ci->basePipelineHandle, ci->basePipelineIndex", body)
-            self.assertIn('env_truthy_default("PDOCKER_GPU_STRICT_PASSTHROUGH", false)', body)
+            self.assertIn("capability_snapshot->strict_passthrough", body)
             self.assertIn("strict_passthrough && ci->flags != 0", body)
         self.assertIn('trace_icd_runtime_failure("strict-compute-pipeline-flags-unsupported"', compute_body)
         self.assertIn('trace_icd_runtime_failure("compute-pipeline-create-info-unsupported"', compute_body)
         self.assertIn('trace_icd_runtime_failure("strict-graphics-pipeline-flags-unsupported"', graphics_body)
         self.assertIn("pipeline->graphics_unsupported = true;", graphics_body)
+        self.assertIn("if (pipeline->graphics_unsupported)", graphics_body)
+        self.assertIn('"graphics-pipeline-create-info-unsupported"', graphics_body)
+        self.assertIn("pdocker_vk_pipeline_destroy(pipeline);", graphics_body)
+        self.assertIn("return VK_ERROR_FEATURE_NOT_PRESENT;", graphics_body)
         self.assertIn("pipeline_register(pipeline);", graphics_body)
+        self.assertLess(
+            graphics_body.index("if (pipeline->graphics_unsupported)"),
+            graphics_body.index("pipeline_register(pipeline);"),
+        )
         self.assertLess(
             graphics_body.index("pipeline_register(pipeline);"),
             graphics_body.index("pPipelines[i] = pdocker_vk_pipeline_to_handle(pipeline);"),
@@ -14595,7 +14619,7 @@ class GpuAbiContractTest(unittest.TestCase):
 
 
         bind_body = c_function_body(icd, "vkCmdBindDescriptorSets")
-        self.assertIn('env_truthy_default("PDOCKER_GPU_STRICT_PASSTHROUGH", false)', bind_body)
+        self.assertIn("cmd->capability_snapshot->strict_passthrough", bind_body)
         self.assertIn("strict_passthrough && !pipeline_layout", bind_body)
         self.assertIn("strict-compute-descriptor-bind-untracked-layout", bind_body)
         self.assertLess(
@@ -17870,6 +17894,7 @@ class GpuAbiContractTest(unittest.TestCase):
         )
 
 
+
     def test_vulkan_graphics_v617_query_timestamp_abi_is_append_only(self):
         abi = APP_HEADER.read_text()
         container_abi = CONTAINER_HEADER.read_text()
@@ -17901,19 +17926,26 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn("PDOCKER_GPU_GRAPHICS_V6_COMMAND_COPY_QUERY_POOL_RESULTS", source)
             self.assertIn("query_pool_id", source)
             self.assertIn("result_fd_index", source)
+
         for marker in [
             "PDOCKER_GPU_VULKAN_GRAPHICS_V617_ABI_MINOR",
             "sizeof(PdockerGpuVulkanGraphicsV617FrameHeader)",
             "header_v617->v617.query_command_count",
             "PdockerGpuVulkanGraphicsV617QueryCommandEntry",
             "PdockerGpuVulkanGraphicsV617QueryResultEntry",
-            "FrameRange ranges[",
             "query_command_schema_hash",
             "query_result_schema_hash",
             "view->query_commands",
             "find_vulkan_graphics_v617_query_command",
             "VulkanGraphicsReplayQueries",
             "materialize_vulkan_graphics_v617_queries",
+            "retain_vulkan_graphics_replay_query_pool",
+            "retain_executor_query_pool_for_replay",
+            "release_executor_query_pool_entry",
+            "VulkanExecutorQueryPoolEntry",
+            "g_query_pool_registry",
+            "register_executor_query_pool",
+            "destroy_executor_query_pool",
             "vkCreateQueryPool",
             "vkCmdBeginQuery",
             "vkCmdEndQuery",
@@ -17922,33 +17954,44 @@ class GpuAbiContractTest(unittest.TestCase):
             "vkGetQueryPoolResults",
             "VK_QUERY_TYPE_OCCLUSION",
             "vulkan-graphics-v6-query-writeback",
-            "if (!view->is_v617 || !view->header_v617) return 0;",
-            "if (!view->query_commands) return -EPROTO;",
+            "if (!view || !view->is_v617 || !view->header_v617 || !view->query_commands) return NULL;",
+            "if (view->header_v617->v617.query_command_count != 0 && !view->query_commands)",
             "case PDOCKER_GPU_GRAPHICS_V6_COMMAND_COPY_QUERY_POOL_RESULTS:",
             "header_v618->v618.copy_query_result_table_offset",
             "copy_query_result_table_hash",
+            "VULKAN_QUERY_POOL_CREATE ",
+            "VULKAN_QUERY_POOL_DESTROY ",
+            "VULKAN_QUERY_POOL_RESET ",
+            "VULKAN_QUERY_POOL_GET_RESULTS ",
         ]:
             self.assertIn(marker, executor)
+
         for marker in [
             "uint64_t pool_id;",
             "int result_fd;",
             "PdockerGpuVulkanGraphicsV617QueryResultEntry *result_entries",
-            "next_vulkan_query_pool_id",
-            "create_shared_fd(pool->result_size)",
-            "mmap(NULL, pool->result_size",
-            "pool->result_entries[q].available",
+            "create_shared_fd(snapshot, pool->result_size)",
             "munmap(pool->result_entries",
             "need_v617_query",
             "query_command_table_hash",
             "result_fd_index",
             "pool->result_fd",
+            "pool->executor_tracked = true;",
+            "send_executor_query_pool_create",
+            "send_executor_query_pool_destroy",
+            "send_executor_query_pool_reset",
+            "send_executor_query_pool_get_results",
+            "VULKAN_QUERY_POOL_CREATE %u %u %u",
+            "VULKAN_QUERY_POOL_DESTROY %llu",
+            "VULKAN_QUERY_POOL_RESET %llu %u %u",
+            "VULKAN_QUERY_POOL_GET_RESULTS %llu %u %u %llu %llu %u",
             "PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_QUERY_POOL",
             "PDOCKER_GPU_GRAPHICS_V6_COMMAND_WRITE_TIMESTAMP",
             "PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_QUERY",
             "PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_QUERY",
         ]:
             self.assertIn(marker, icd)
-
+        self.assertNotIn("next_vulkan_query_pool_id", icd)
     def test_vulkan_graphics_image_layout_range_v620_abi_scaffold(self):
         abi = APP_HEADER.read_text()
         container_abi = CONTAINER_HEADER.read_text()
@@ -18993,7 +19036,11 @@ class GpuAbiContractTest(unittest.TestCase):
         create_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateSemaphore", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkDestroySemaphore", 1
         )[0]
-        self.assertIn("bridge_available()", create_body)
+        self.assertIn(
+            "capability_snapshot_bridge_available(sem->capability_snapshot)",
+            create_body,
+        )
+        self.assertNotIn("if (bridge_available())", create_body)
         self.assertIn("send_executor_semaphore_create(sem)", create_body)
         semaphore_pairs_body = c_function_body(icd, "append_semaphore_wait_pairs")
         semaphore_pairs_signature = c_function_signature(icd, "append_semaphore_wait_pairs")
@@ -19087,6 +19134,13 @@ class GpuAbiContractTest(unittest.TestCase):
             wait_body.index("fences_wait_satisfied(device, fenceCount, pFences, waitAll)"),
             wait_body.index("send_executor_fence_wait(device, fenceCount, pFences, waitAll, timeout, &result)"),
         )
+        self.assertIn('trace_icd_runtime_failure("fence-wait-transport", VK_ERROR_DEVICE_LOST)', wait_body)
+        self.assertIn("return VK_ERROR_DEVICE_LOST;", wait_body)
+        bridge_segment = wait_body.split(
+            "if (capability_snapshot_bridge_available(device_capability_snapshot(device)))", 1
+        )[1].split("uint64_t start_ns = monotonic_ns();", 1)[0]
+        self.assertNotIn("pdocker_vk_wait_poll_sleep", bridge_segment)
+        self.assertNotIn("fences_wait_satisfied", bridge_segment)
         reset_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkResetFences", 1)[1].split(
             "VKAPI_ATTR VkResult VKAPI_CALL vkGetFenceStatus", 1
         )[0]
@@ -19097,8 +19151,10 @@ class GpuAbiContractTest(unittest.TestCase):
         semaphore_wait_body = c_function_body(icd, "vkWaitSemaphores")
         self.assertIn("device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0", semaphore_wait_body)
 
+
     def test_vulkan_icd_supports_query_pool_and_timestamp_api(self):
         icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
         self.assertIn("struct PdockerVkQueryPool", icd)
         self.assertIn("PDOCKER_VK_MAX_QUERY_COUNT", icd)
         for marker in [
@@ -19106,6 +19162,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_VK_COMMAND_QUERY_END",
             "PDOCKER_VK_COMMAND_QUERY_RESET",
             "PDOCKER_VK_COMMAND_QUERY_TIMESTAMP",
+            "PDOCKER_VK_COMMAND_COPY_QUERY_RESULTS",
         ]:
             self.assertIn(marker, icd)
         for name in [
@@ -19114,6 +19171,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "vkCmdBeginQuery",
             "vkCmdEndQuery",
             "vkCmdResetQueryPool",
+            "vkCmdCopyQueryPoolResults",
             "vkResetQueryPool",
             "vkGetQueryPoolResults",
             "vkCmdWriteTimestamp",
@@ -19129,27 +19187,66 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VK_QUERY_RESULT_WITH_AVAILABILITY_BIT", icd)
         self.assertIn("VK_QUERY_RESULT_WAIT_BIT", icd)
         self.assertIn("VK_QUERY_RESULT_PARTIAL_BIT", icd)
-        self.assertIn("execute_recorded_query_op(op)", icd)
-        self.assertIn("pool->result_entries[q].available", icd)
-        self.assertIn("monotonic_ns()", icd)
-        self.assertIn("timestampComputeAndGraphics = VK_TRUE;", icd)
-        self.assertIn("timestampPeriod = 1.0f;", icd)
-        self.assertIn("timestampValidBits = 64;", icd)
-        host_body = icd.split("static bool command_op_is_host_transfer_or_layout_op", 1)[1].split(
-            "static VkResult execute_recorded_host_transfer_or_layout_op", 1
-        )[0]
-        replay_body = icd.split("static VkResult execute_recorded_host_transfer_or_layout_op", 1)[1].split(
-            "static bool graphics_mixed_submit_plan", 1
-        )[0]
+
+        for marker in [
+            "send_executor_query_pool_create",
+            "send_executor_query_pool_destroy",
+            "send_executor_query_pool_reset",
+            "send_executor_query_pool_get_results",
+            "destroy_query_pool_executor_and_retire",
+            "pool->executor_tracked = true;",
+            "query-pool-create-transport",
+            "query-pool-results-transport",
+        ]:
+            self.assertIn(marker, icd)
+        self.assertNotIn("execute_recorded_query_op", icd)
+        self.assertNotIn("monotonic_ns()", c_function_body(icd, "vkGetQueryPoolResults"))
+
+        properties_body = c_function_body(icd, "fill_physical_device_properties")
+        self.assertIn(
+            "caps ? caps->limits.timestampComputeAndGraphics : VK_FALSE",
+            properties_body,
+        )
+        self.assertIn(
+            "caps ? caps->limits.timestampPeriod : 0.0f",
+            properties_body,
+        )
+        queue_body = c_function_body(icd, "vkGetPhysicalDeviceQueueFamilyProperties")
+        queue2_body = c_function_body(icd, "vkGetPhysicalDeviceQueueFamilyProperties2")
+        self.assertIn("advertised_timestamp_valid_bits(physical->capability_snapshot)", queue_body)
+        self.assertIn("advertised_timestamp_valid_bits(physical->capability_snapshot)", queue2_body)
+
+        route_body = c_function_body(icd, "command_op_requires_graphics_executor_frame")
+        record_route_body = c_function_body(icd, "graphics_record_requires_submit_frame")
         for marker in [
             "case PDOCKER_VK_COMMAND_QUERY_BEGIN:",
             "case PDOCKER_VK_COMMAND_QUERY_END:",
             "case PDOCKER_VK_COMMAND_QUERY_RESET:",
             "case PDOCKER_VK_COMMAND_QUERY_TIMESTAMP:",
+            "case PDOCKER_VK_COMMAND_COPY_QUERY_RESULTS:",
         ]:
-            self.assertIn(marker, host_body)
-            self.assertIn(marker, replay_body)
+            self.assertIn(marker, route_body)
+        for marker in [
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_QUERY",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_QUERY",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_QUERY_POOL",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_WRITE_TIMESTAMP",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_COPY_QUERY_POOL_RESULTS",
+        ]:
+            self.assertIn(marker, record_route_body)
+        host_body = c_function_body(icd, "command_op_is_host_transfer_or_layout_op")
+        replay_body = c_function_body(icd, "execute_recorded_host_transfer_or_layout_op")
+        self.assertNotIn("PDOCKER_VK_COMMAND_QUERY_BEGIN", host_body)
+        self.assertNotIn("PDOCKER_VK_COMMAND_QUERY_TIMESTAMP", replay_body)
+        self.assertIn("query-command-bypassed-executor", icd)
 
+        for marker in [
+            '\\"timestampComputeAndGraphics\\\":%u',
+            '\\"timestampPeriod\\\":%.9g',
+            '\\"queueTimestampValidBits\\\":%u',
+            '\\"hostQueryReset\\\":%u',
+        ]:
+            self.assertIn(marker, executor)
     def test_vulkan_icd_tracks_image_layout_barriers_and_transfer_layouts(self):
         icd = VULKAN_ICD.read_text()
         self.assertIn("VkImageLayout current_layout;", icd)
@@ -20537,9 +20634,9 @@ class GpuAbiContractTest(unittest.TestCase):
 
     def test_vulkan_copy_query_results_destination_range_is_guarded(self):
         source = VULKAN_ICD.read_text()
-        helper_body = source.split("static bool query_result_copy_buffer_range", 1)[1].split("static void reset_query_range", 1)[0]
-        graphics_body = source.split("PDOCKER_GPU_GRAPHICS_V6_COMMAND_COPY_QUERY_POOL_RESULTS", 1)[1].split("PdockerGpuVulkanGraphicsV618CopyQueryResultEntry", 1)[0]
-        record_body = source.split("static void record_copy_query_results_command", 1)[1].split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateQueryPool", 1)[0]
+        helper_body = c_function_body(source, "query_result_copy_buffer_range")
+        graphics_body = c_function_body(source, "send_recorded_vulkan_graphics_v6_1_frame_range")
+        record_body = c_function_body(source, "record_copy_query_results_command")
         flags_body = c_function_body(source, "query_result_flags_supported")
         query_body = c_function_body(source, "vkGetQueryPoolResults")
         self.assertIn("const VkQueryResultFlags supported = VK_QUERY_RESULT_64_BIT", flags_body)
@@ -20550,7 +20647,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("!query_result_flags_supported(flags) || queryCount == 0 || stride == 0", helper_body)
         self.assertIn("query-result-flags-unsupported", record_body)
         self.assertIn("command_buffer_mark_recording_failed(cmd, \"query-result-flags-unsupported\")", record_body)
-        self.assertIn("trace_icd_runtime_failure(\"query-result-flags-unsupported\", VK_ERROR_FEATURE_NOT_PRESENT)", query_body)
+        self.assertIn("trace_icd_runtime_failure(", query_body)
+        self.assertIn('"query-result-flags-unsupported", VK_ERROR_FEATURE_NOT_PRESENT', query_body)
         self.assertIn("return VK_ERROR_FEATURE_NOT_PRESENT;", query_body)
         self.assertIn("VK_QUERY_RESULT_WITH_AVAILABILITY_BIT", helper_body)
         self.assertIn("checked_mul_u64((uint64_t)(queryCount - 1u), (uint64_t)stride, &last_offset)", helper_body)
@@ -27093,7 +27191,10 @@ class GpuAbiContractTest(unittest.TestCase):
             "json_read_float",
             "json_read_float_array2",
             "json_read_string",
-            "pdocker_vk_advertised_caps",
+            "PdockerVkCapabilitySnapshot",
+            "pdocker_vk_get_advertised_caps_for_endpoint",
+            "capability_snapshot_create",
+            "snapshot_executor_caps",
             "executor_valid",
             "storage16.storageBuffer16BitAccess",
             "storage8.storageBuffer8BitAccess",
@@ -27145,7 +27246,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "advertised_extended_dynamic_state",
             "advertised_api_version",
             "advertised_api_1_3",
-            "executor_advertisement_source_enabled",
+            "snapshot->executor_advertisement_selected",
             "PDOCKER_VULKAN_ADVERTISEMENT_SOURCE",
             'strcmp(source, "executor") == 0',
             "executor_advertisement_caps_if_enabled",
@@ -27158,7 +27259,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("PDOCKER_VK_ADVERTISEMENT_CAPS_LINE_MAX 32768u", icd)
         self.assertIn("char line[PDOCKER_VK_ADVERTISEMENT_CAPS_LINE_MAX];", icd)
         self.assertIn('const char command[] = "VULKAN_ADVERTISEMENT_CAPS\\n";', icd)
-        self.assertIn("pFormatProperties->optimalTilingFeatures = pdocker_vk_advertised_image_features(format);", icd)
+        self.assertIn("pFormatProperties->optimalTilingFeatures = pdocker_vk_advertised_image_features(snapshot, format);", icd)
         self.assertIn('\\"schema\\":\\"skydnir-vulkan-advertisement-caps-v1\\"', icd)
         parse_body = icd.split("static bool parse_executor_advertisement_caps_json", 1)[1].split(
             "static int query_executor_advertisement_caps_line", 1
@@ -27191,17 +27292,17 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("bool saw_newline = false;", query_body)
         self.assertIn("if (rc == 0 && !saw_newline)", query_body)
         self.assertIn("off + 1 >= line_cap ? -EOVERFLOW : -EPROTO", query_body)
-        advertised_image_body = icd.split("static VkFormatFeatureFlags pdocker_vk_advertised_image_features(VkFormat format) {", 1)[1].split(
+        advertised_image_body = icd.split("static VkFormatFeatureFlags pdocker_vk_advertised_image_features(const PdockerVkCapabilitySnapshot *snapshot, VkFormat format) {", 1)[1].split(
             "static VkSampleCountFlags pdocker_vk_advertised_sample_counts", 1
         )[0]
-        self.assertIn("if (executor_advertisement_source_enabled())", advertised_image_body)
+        self.assertIn("if (snapshot && snapshot->executor_advertisement_selected)", advertised_image_body)
         self.assertIn("if (!caps || !caps->executor_valid) return 0;", advertised_image_body)
         self.assertIn("if (!cap) return 0;", advertised_image_body)
         self.assertIn("return pdocker_vk_format_image_features(format);", advertised_image_body)
-        advertised_sample_body = icd.split("static VkSampleCountFlags pdocker_vk_advertised_sample_counts(VkFormat format) {", 1)[1].split(
+        advertised_sample_body = icd.split("static VkSampleCountFlags pdocker_vk_advertised_sample_counts(const PdockerVkCapabilitySnapshot *snapshot, VkFormat format) {", 1)[1].split(
             "static VkBool32 executor_advertised_shader_int64_or", 1
         )[0]
-        self.assertIn("if (executor_advertisement_source_enabled())", advertised_sample_body)
+        self.assertIn("if (snapshot && snapshot->executor_advertisement_selected)", advertised_sample_body)
         self.assertIn("if (!caps || !caps->executor_valid) return 0;", advertised_sample_body)
         self.assertIn("if (!cap) return 0;", advertised_sample_body)
         self.assertIn("return cap->sample_counts & PDOCKER_VK_SUPPORTED_SAMPLE_COUNTS;", advertised_sample_body)
@@ -27223,15 +27324,15 @@ class GpuAbiContractTest(unittest.TestCase):
         fill_props = icd.split("static void fill_physical_device_properties", 1)[1].split(
             "pProperties->apiVersion", 1
         )[0]
-        self.assertIn("trace_executor_advertisement_caps_once();", fill_props)
+        self.assertIn("trace_executor_advertisement_caps_once(snapshot);", fill_props)
         properties_body = icd.split("static void fill_physical_device_properties", 1)[1].split(
             "static VkSubgroupFeatureFlags advertised_subgroup_operations", 1
         )[0]
-        self.assertIn("const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();", properties_body)
+        self.assertIn("const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled(snapshot);", properties_body)
         self.assertIn("caps && caps->api_version ? caps->api_version : pdocker_api_version()", properties_body)
         self.assertIn("caps->device_type", properties_body)
         self.assertIn("caps->limits.maxComputeSharedMemorySize", properties_body)
-        self.assertIn("pProperties->limits.maxSamplerAnisotropy = advertised_max_sampler_anisotropy();", properties_body)
+        self.assertIn("pProperties->limits.maxSamplerAnisotropy = advertised_max_sampler_anisotropy(snapshot);", properties_body)
         self.assertIn("caps->limits.maxStorageBufferRange < transport_max_storage_range", properties_body)
         for marker in [
             "const uint32_t bridge_per_stage_descriptors = PDOCKER_VK_MAX_STORAGE_BUFFERS;",
@@ -27258,30 +27359,30 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS", icd)
         self.assertNotIn("maxPerSetDescriptors = 1024", icd)
         self.assertIn("p->maxPerSetDescriptors = pdocker_vk_max_per_set_descriptors();", icd)
-        self.assertIn("advertised_descriptor_update_after_bind_limit(caps_ ? caps_->descriptor_indexing_properties.maxDescriptorSetUpdateAfterBindSamplers : 0, per_set_cap_)", icd)
-        self.assertIn("advertised_descriptor_update_after_bind_limit(caps_ ? caps_->descriptor_indexing_properties.maxDescriptorSetUpdateAfterBindSampledImages : 0, per_set_cap_)", icd)
-        self.assertIn("advertised_descriptor_update_after_bind_limit(caps_ ? caps_->descriptor_indexing_properties.maxDescriptorSetUpdateAfterBindStorageBuffers : 0, per_stage_cap_)", icd)
+        self.assertIn("advertised_descriptor_update_after_bind_limit(snapshot, caps_ ? caps_->descriptor_indexing_properties.maxDescriptorSetUpdateAfterBindSamplers : 0, per_set_cap_)", icd)
+        self.assertIn("advertised_descriptor_update_after_bind_limit(snapshot, caps_ ? caps_->descriptor_indexing_properties.maxDescriptorSetUpdateAfterBindSampledImages : 0, per_set_cap_)", icd)
+        self.assertIn("advertised_descriptor_update_after_bind_limit(snapshot, caps_ ? caps_->descriptor_indexing_properties.maxDescriptorSetUpdateAfterBindStorageBuffers : 0, per_stage_cap_)", icd)
         self.assertIn("(p_)->maxDescriptorSetUpdateAfterBindInputAttachments = 0;", icd)
         pnext_body = icd.split("static void fill_pnext_features", 1)[1].split(
             "static uint64_t feature_mask_from_base_features", 1
         )[0]
-        self.assertIn("const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();", pnext_body)
+        self.assertIn("const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled(snapshot);", pnext_body)
         self.assertIn("caps->storage16.uniformAndStorageBuffer16BitAccess", pnext_body)
         self.assertIn("caps->storage8.uniformAndStorageBuffer8BitAccess", pnext_body)
         self.assertIn("caps->float16_int8.shaderFloat16", pnext_body)
-        self.assertIn("p->timelineSemaphore = advertised_timeline_semaphore();", pnext_body)
-        self.assertIn("p->drawIndirectCount = advertised_draw_indirect_count() && advertised_draw_indexed_indirect_count();", pnext_body)
-        self.assertIn("p->synchronization2 = advertised_synchronization2();", pnext_body)
-        self.assertIn("p->dynamicRendering = advertised_dynamic_rendering();", pnext_body)
+        self.assertIn("p->timelineSemaphore = advertised_timeline_semaphore(snapshot);", pnext_body)
+        self.assertIn("p->drawIndirectCount = advertised_draw_indirect_count(snapshot) && advertised_draw_indexed_indirect_count(snapshot);", pnext_body)
+        self.assertIn("p->synchronization2 = advertised_synchronization2(snapshot);", pnext_body)
+        self.assertIn("p->dynamicRendering = advertised_dynamic_rendering(snapshot);", pnext_body)
         self.assertIn("p->multiview = caps->multiview;", pnext_body)
-        self.assertIn("pFeatures->tessellationShader = advertised_tessellation_shader();", icd)
-        self.assertIn("pFeatures->wideLines = advertised_wide_lines();", icd)
-        self.assertIn("pFeatures->independentBlend = advertised_independent_blend();", icd)
-        self.assertIn("pFeatures->depthClamp = advertised_depth_clamp();", icd)
-        self.assertIn("pFeatures->fillModeNonSolid = advertised_fill_mode_non_solid();", icd)
-        self.assertIn("pFeatures->multiDrawIndirect = advertised_multi_draw_indirect();", icd)
-        self.assertIn("pFeatures->drawIndirectFirstInstance = advertised_draw_indirect_first_instance();", icd)
-        self.assertIn("pFeatures->samplerAnisotropy = advertised_sampler_anisotropy();", icd)
+        self.assertIn("pFeatures->tessellationShader = advertised_tessellation_shader(snapshot);", icd)
+        self.assertIn("pFeatures->wideLines = advertised_wide_lines(snapshot);", icd)
+        self.assertIn("pFeatures->independentBlend = advertised_independent_blend(snapshot);", icd)
+        self.assertIn("pFeatures->depthClamp = advertised_depth_clamp(snapshot);", icd)
+        self.assertIn("pFeatures->fillModeNonSolid = advertised_fill_mode_non_solid(snapshot);", icd)
+        self.assertIn("pFeatures->multiDrawIndirect = advertised_multi_draw_indirect(snapshot);", icd)
+        self.assertIn("pFeatures->drawIndirectFirstInstance = advertised_draw_indirect_first_instance(snapshot);", icd)
+        self.assertIn("pFeatures->samplerAnisotropy = advertised_sampler_anisotropy(snapshot);", icd)
         self.assertIn("PDOCKER_VK_FEATURE_DEPTH_CLAMP", icd)
         self.assertIn("PDOCKER_VK_FEATURE_FILL_MODE_NON_SOLID", icd)
         self.assertIn("PDOCKER_VK_FEATURE_MULTI_DRAW_INDIRECT", icd)
@@ -27289,38 +27390,38 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("PDOCKER_VK_FEATURE_SAMPLER_ANISOTROPY", icd)
         self.assertIn("if (features->samplerAnisotropy) mask |= PDOCKER_VK_FEATURE_SAMPLER_ANISOTROPY;", icd)
         self.assertIn("if (features->independentBlend) mask |= PDOCKER_VK_FEATURE_INDEPENDENT_BLEND;", icd)
-        self.assertIn("if (advertised_sampler_anisotropy()) mask |= PDOCKER_VK_FEATURE_SAMPLER_ANISOTROPY;", icd)
-        self.assertIn("if (advertised_independent_blend()) mask |= PDOCKER_VK_FEATURE_INDEPENDENT_BLEND;", icd)
+        self.assertIn("if (advertised_sampler_anisotropy(snapshot)) mask |= PDOCKER_VK_FEATURE_SAMPLER_ANISOTROPY;", icd)
+        self.assertIn("if (advertised_independent_blend(snapshot)) mask |= PDOCKER_VK_FEATURE_INDEPENDENT_BLEND;", icd)
         self.assertIn("depth-clamp pipeline replay requires depthClamp", GPU_EXECUTOR.read_text())
         self.assertIn("non-solid polygon-mode pipeline replay requires fillModeNonSolid", GPU_EXECUTOR.read_text())
         self.assertIn("multi indirect draw replay requires multiDrawIndirect", GPU_EXECUTOR.read_text())
         self.assertIn("indirect draw replay requires drawIndirectFirstInstance", GPU_EXECUTOR.read_text())
         self.assertIn("non-identical color blend attachment replay requires independentBlend", GPU_EXECUTOR.read_text())
         self.assertIn("dynamic-line-width-feature-not-enabled", icd)
-        self.assertIn("!advertised_line_width_supported(pipeline->line_width)", icd)
-        self.assertIn("p->extendedDynamicState = advertised_extended_dynamic_state();", pnext_body)
-        self.assertIn("p->extendedDynamicState2 = advertised_extended_dynamic_state2();", pnext_body)
-        self.assertIn("p->extendedDynamicState2LogicOp = advertised_extended_dynamic_state2_logic_op();", pnext_body)
-        self.assertIn("p->extendedDynamicState2PatchControlPoints = advertised_extended_dynamic_state2_patch_control_points();", pnext_body)
+        self.assertIn("!advertised_line_width_supported(capability_snapshot, pipeline->line_width)", icd)
+        self.assertIn("p->extendedDynamicState = advertised_extended_dynamic_state(snapshot);", pnext_body)
+        self.assertIn("p->extendedDynamicState2 = advertised_extended_dynamic_state2(snapshot);", pnext_body)
+        self.assertIn("p->extendedDynamicState2LogicOp = advertised_extended_dynamic_state2_logic_op(snapshot);", pnext_body)
+        self.assertIn("p->extendedDynamicState2PatchControlPoints = advertised_extended_dynamic_state2_patch_control_points(snapshot);", pnext_body)
         collector_body = c_function_body(icd, "collect_advertised_device_extensions")
         enum_body = c_function_body(icd, "vkEnumerateDeviceExtensionProperties")
         validation_body = c_function_body(icd, "device_extension_advertised_name")
-        self.assertIn("caps ? caps->ext_16bit_storage : advertised_storage16()", collector_body)
-        self.assertIn("caps ? caps->ext_8bit_storage : advertised_storage8()", collector_body)
-        self.assertIn("caps ? caps->ext_shader_float16_int8 : advertised_storage8()", collector_body)
-        self.assertIn("advertised_storage_buffer_storage_class()", collector_body)
-        self.assertIn("advertised_timeline_semaphore()", collector_body)
-        self.assertIn("advertised_synchronization2()", collector_body)
-        self.assertIn("advertised_dynamic_rendering()", collector_body)
-        self.assertIn("advertised_load_store_op_none()", collector_body)
+        self.assertIn("caps ? caps->ext_16bit_storage : advertised_storage16(snapshot)", collector_body)
+        self.assertIn("caps ? caps->ext_8bit_storage : advertised_storage8(snapshot)", collector_body)
+        self.assertIn("caps ? caps->ext_shader_float16_int8 : advertised_storage8(snapshot)", collector_body)
+        self.assertIn("advertised_storage_buffer_storage_class(snapshot)", collector_body)
+        self.assertIn("advertised_timeline_semaphore(snapshot)", collector_body)
+        self.assertIn("advertised_synchronization2(snapshot)", collector_body)
+        self.assertIn("advertised_dynamic_rendering(snapshot)", collector_body)
+        self.assertIn("advertised_load_store_op_none(snapshot)", collector_body)
         self.assertIn("VK_KHR_LOAD_STORE_OP_NONE_EXTENSION_NAME", collector_body)
         self.assertIn("VK_EXT_LOAD_STORE_OP_NONE_EXTENSION_NAME", collector_body)
-        self.assertIn("advertised_extended_dynamic_state()", collector_body)
-        self.assertIn("advertised_extended_dynamic_state2_any()", collector_body)
+        self.assertIn("advertised_extended_dynamic_state(snapshot)", collector_body)
+        self.assertIn("advertised_extended_dynamic_state2_any(snapshot)", collector_body)
         self.assertIn("VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME", collector_body)
         self.assertIn("VK_AMD_DRAW_INDIRECT_COUNT_EXTENSION_NAME", collector_body)
-        self.assertIn("advertised_draw_indirect_count_khr()", collector_body)
-        self.assertIn("advertised_draw_indirect_count_amd()", collector_body)
+        self.assertIn("advertised_draw_indirect_count_khr(snapshot)", collector_body)
+        self.assertIn("advertised_draw_indirect_count_amd(snapshot)", collector_body)
         self.assertIn("collect_advertised_device_extensions(", enum_body)
         self.assertIn("collect_advertised_device_extensions(", validation_body)
         self.assertIn("VK_KHR_draw_indirect_count", icd)
@@ -27339,23 +27440,23 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("caps->extended_dynamic_state2_usable.extendedDynamicState2", icd)
         self.assertIn("caps->extended_dynamic_state2_usable.extendedDynamicState2LogicOp", icd)
         self.assertIn("caps->extended_dynamic_state2_usable.extendedDynamicState2PatchControlPoints", icd)
-        self.assertIn("advertised_extended_dynamic_state2_patch_control_points()", icd)
+        self.assertIn("advertised_extended_dynamic_state2_patch_control_points(snapshot)", icd)
         self.assertIn("vkCmdSetPatchControlPointsEXT", icd)
         self.assertNotIn("!caps || caps->ext_extended_dynamic_state", icd)
         proc_gate_body = icd.split("static bool proc_address_hidden_by_advertisement", 1)[1].split(
             "static PFN_vkVoidFunction proc_address", 1
         )[0]
         proc_body = icd.split("static PFN_vkVoidFunction proc_address", 1)[1].split("#define MAP_PROC", 1)[0]
-        self.assertIn("proc_address_hidden_by_advertisement(pName)", proc_body)
+        self.assertIn("proc_address_hidden_by_advertisement(snapshot, pName)", proc_body)
         for marker in [
-            "!advertised_dynamic_rendering()",
-            "!advertised_synchronization2()",
-            "!advertised_timeline_semaphore()",
-            "!advertised_extended_dynamic_state()",
-            "!advertised_extended_dynamic_state2_logic_op()",
-            "!advertised_draw_indirect_count_khr()",
-            "!advertised_draw_indirect_count_amd()",
-            "!advertised_api_1_3()",
+            "!advertised_dynamic_rendering(snapshot)",
+            "!advertised_synchronization2(snapshot)",
+            "!advertised_timeline_semaphore(snapshot)",
+            "!advertised_extended_dynamic_state(snapshot)",
+            "!advertised_extended_dynamic_state2_logic_op(snapshot)",
+            "!advertised_draw_indirect_count_khr(snapshot)",
+            "!advertised_draw_indirect_count_amd(snapshot)",
+            "!advertised_api_1_3(snapshot)",
             "vkGetDeviceBufferMemoryRequirements",
             "vkGetPhysicalDeviceToolProperties",
             "vkCreatePrivateDataSlot",
@@ -27389,7 +27490,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "vkCmdEndRenderPass2KHR",
         ]:
             self.assertNotIn(advertised_device_alias, proc_gate_body)
-        self.assertIn("advertised_draw_indirect_count() && advertised_draw_indexed_indirect_count()", proc_gate_body)
+        self.assertIn("advertised_draw_indirect_count(snapshot) && advertised_draw_indexed_indirect_count(snapshot)", proc_gate_body)
         self.assertIn("PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT", icd)
         self.assertIn("if (p->drawIndirectCount) mask |= PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT;", icd)
         self.assertIn("mask |= PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT;", icd)

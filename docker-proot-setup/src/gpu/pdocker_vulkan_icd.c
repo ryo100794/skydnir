@@ -11,6 +11,8 @@
 #include <stdbool.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
+#include <poll.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <signal.h>
@@ -274,10 +276,14 @@ typedef struct VkRenderPassSubpassFeedbackCreateInfoEXT {
 } VkRenderPassSubpassFeedbackCreateInfoEXT;
 #endif
 
+typedef struct PdockerVkCapabilitySnapshot PdockerVkCapabilitySnapshot;
+typedef struct PdockerVkAdvertisedCaps PdockerVkAdvertisedCaps;
+
 typedef struct PdockerVkInstance {
     VK_LOADER_DATA loader;
     uint64_t object_id;
     uint64_t enabled_extension_mask;
+    PdockerVkCapabilitySnapshot *capability_snapshot;
     struct PdockerVkInstance *next;
 } PdockerVkInstance;
 
@@ -285,6 +291,7 @@ typedef struct PdockerVkPhysicalDevice {
     VK_LOADER_DATA loader;
     uint64_t object_id;
     uint64_t instance_object_id;
+    PdockerVkCapabilitySnapshot *capability_snapshot;
     struct PdockerVkPhysicalDevice *next;
 } PdockerVkPhysicalDevice;
 
@@ -297,6 +304,8 @@ typedef struct PdockerVkDevice {
     uint64_t physical_device_object_id;
     uint64_t requested_feature_mask;
     uint64_t enabled_extension_mask;
+    PdockerVkCapabilitySnapshot *capability_snapshot;
+    uint32_t device_lost;
     PdockerVkQueue *queue;
     struct PdockerVkDevice *next;
 } PdockerVkDevice;
@@ -309,6 +318,7 @@ struct PdockerVkQueue {
     uint64_t device_object_id;
     uint64_t requested_feature_mask;
     uint64_t enabled_extension_mask;
+    PdockerVkCapabilitySnapshot *capability_snapshot;
     /*
      * Vulkan queue operations are externally synchronized by the API.  Keep
      * one executor stream per virtual queue so consecutive binary V5/V6
@@ -333,14 +343,77 @@ typedef struct {
     char path[sizeof(((struct sockaddr_un *)0)->sun_path)];
 } PdockerGpuEndpointKey;
 
+struct PdockerVkCapabilitySnapshot {
+    uint32_t refcount;
+    PdockerGpuEndpointKey endpoint;
+    bool bridge_available;
+    bool executor_advertisement_selected;
+    PdockerVkAdvertisedCaps *advertised_caps;
+    VkBool32 effective_shader_int64;
+    VkBool32 effective_storage16;
+    VkBool32 effective_storage8;
+    VkBool32 effective_descriptor_partially_bound;
+    VkBool32 effective_descriptor_variable_count;
+    VkBool32 effective_descriptor_update_unused_while_pending;
+    bool descriptor_update_after_bind_enabled;
+    bool storage16_disabled;
+    bool storage8_disabled;
+    bool strict_passthrough;
+    bool add_float16_capability_for_storage16;
+    bool graphics_validate_producer;
+    bool copy_alias_enabled;
+    bool dispatch_profile_response;
+    bool guarded_memory_enabled;
+    size_t guarded_memory_min_bytes;
+    size_t host_page_size;
+    char *shared_directory;
+    char *spirv_probe_manifest_path;
+    char *spirv_probe_shader_path;
+    bool spirv_probe_expected_source_hash_valid;
+    bool spirv_probe_effective_hash_valid;
+    bool spirv_probe_debug_bytes_valid;
+    bool spirv_probe_debug_set_valid;
+    bool spirv_probe_debug_binding_valid;
+    bool spirv_probe_target_only;
+    uint64_t spirv_probe_expected_source_hash;
+    uint64_t spirv_probe_effective_hash;
+    size_t spirv_probe_debug_bytes;
+    uint32_t spirv_probe_debug_set;
+    uint32_t spirv_probe_debug_binding;
+    char *dispatch_option_suffix;
+    size_t dispatch_option_suffix_len;
+    VkSubgroupFeatureFlags effective_subgroup_operations;
+    VkShaderStageFlags effective_subgroup_stages;
+    uint32_t effective_subgroup_size;
+    VkDeviceSize heap_size;
+    VkDeviceSize max_buffer_size;
+    bool v5_object_transport_enabled;
+    bool v5_frame_enabled;
+};
+
 static pthread_mutex_t g_gpu_endpoint_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t g_physical_device_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t g_advertised_caps_mutex = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t g_advertised_caps_cond = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t g_advertised_caps_cond_initial = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t g_advertised_caps_cond_initial_spare =
+    PTHREAD_COND_INITIALIZER;
+static pthread_cond_t *g_advertised_caps_cond_current =
+    &g_advertised_caps_cond_initial;
+static pthread_cond_t *g_advertised_caps_cond_spare =
+    &g_advertised_caps_cond_initial_spare;
 static pthread_once_t g_gpu_endpoint_atfork_once = PTHREAD_ONCE_INIT;
+static int g_gpu_endpoint_atfork_status = EAGAIN;
+static void register_gpu_endpoint_atfork(void);
+static int advertised_caps_cond_prepare_spare_locked(void);
 static void advertised_caps_cache_atfork_child_reset(void);
 static bool g_gpu_endpoint_current_valid;
 static uint64_t g_gpu_endpoint_next_generation = 1;
 static PdockerGpuEndpointKey g_gpu_endpoint_current;
+
+static PdockerVkCapabilitySnapshot *capability_snapshot_create(void);
+static PdockerVkCapabilitySnapshot *capability_snapshot_retain(
+        PdockerVkCapabilitySnapshot *snapshot);
+static void capability_snapshot_release(PdockerVkCapabilitySnapshot *snapshot);
 
 typedef struct PdockerVkMemory PdockerVkMemory;
 typedef struct PdockerVkBuffer PdockerVkBuffer;
@@ -369,6 +442,36 @@ typedef struct PdockerVkQueryPool PdockerVkQueryPool;
 typedef struct PdockerVkRenderPass PdockerVkRenderPass;
 typedef struct PdockerVkFramebuffer PdockerVkFramebuffer;
 typedef struct PdockerVkSurface PdockerVkSurface;
+typedef struct PdockerVkPresentCompletion PdockerVkPresentCompletion;
+
+#define PDOCKER_VK_MAX_SWAPCHAIN_IMAGES 4u
+
+struct PdockerVkSwapchain {
+    uint64_t owner_device_id;
+    PdockerVkSurface *surface;
+    VkFormat image_format;
+    VkColorSpaceKHR image_color_space;
+    VkExtent2D image_extent;
+    VkImageUsageFlags image_usage;
+    VkPresentModeKHR present_mode;
+    VkCompositeAlphaFlagBitsKHR composite_alpha;
+    VkSurfaceTransformFlagBitsKHR pre_transform;
+    uint32_t image_count;
+    uint32_t next_image;
+    PdockerVkImage *images[PDOCKER_VK_MAX_SWAPCHAIN_IMAGES];
+    PdockerVkMemory *memories[PDOCKER_VK_MAX_SWAPCHAIN_IMAGES];
+    bool acquired[PDOCKER_VK_MAX_SWAPCHAIN_IMAGES];
+    bool present_pending[PDOCKER_VK_MAX_SWAPCHAIN_IMAGES];
+    PdockerVkPresentCompletion
+        *present_completion[PDOCKER_VK_MAX_SWAPCHAIN_IMAGES];
+    uint64_t generation;
+    /* Once supplied as oldSwapchain it is retired even if replacement
+     * creation later fails.  Already-acquired images remain presentable. */
+    bool retired;
+    bool destroyed;
+    struct PdockerVkSwapchain *next;
+};
+
 typedef struct PdockerVkSwapchain PdockerVkSwapchain;
 
 #if defined(VK_USE_64_BIT_PTR_DEFINES) && (VK_USE_64_BIT_PTR_DEFINES == 1)
@@ -454,7 +557,6 @@ PDOCKER_VK_DEFINE_NON_DISPATCHABLE_HANDLE_CONVERTERS(pdocker_vk_swapchain, VkSwa
 #define PDOCKER_VK_MAX_GRAPHICS_INDEX_BUFFER_SNAPSHOTS PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS
 #define PDOCKER_VK_MAX_GRAPHICS_VERTEX_ATTRIBUTES 32
 #define PDOCKER_VK_MAX_GRAPHICS_DYNAMIC_STATES 64
-#define PDOCKER_VK_MAX_SWAPCHAIN_IMAGES 4u
 #define PDOCKER_VK_HEADLESS_SURFACE_MIN_WIDTH 1u
 #define PDOCKER_VK_HEADLESS_SURFACE_MIN_HEIGHT 1u
 #define PDOCKER_VK_HEADLESS_SURFACE_MAX_WIDTH 4096u
@@ -748,26 +850,6 @@ struct PdockerVkSurface {
     uint64_t generation;
     bool destroyed;
     struct PdockerVkSurface *next;
-};
-
-struct PdockerVkSwapchain {
-    uint64_t owner_device_id;
-    PdockerVkSurface *surface;
-    VkFormat image_format;
-    VkColorSpaceKHR image_color_space;
-    VkExtent2D image_extent;
-    VkImageUsageFlags image_usage;
-    VkPresentModeKHR present_mode;
-    VkCompositeAlphaFlagBitsKHR composite_alpha;
-    VkSurfaceTransformFlagBitsKHR pre_transform;
-    uint32_t image_count;
-    uint32_t next_image;
-    PdockerVkImage *images[PDOCKER_VK_MAX_SWAPCHAIN_IMAGES];
-    PdockerVkMemory *memories[PDOCKER_VK_MAX_SWAPCHAIN_IMAGES];
-    bool acquired[PDOCKER_VK_MAX_SWAPCHAIN_IMAGES];
-    uint64_t generation;
-    bool destroyed;
-    struct PdockerVkSwapchain *next;
 };
 
 struct PdockerVkSampler {
@@ -1149,6 +1231,7 @@ static void pdocker_vk_pipeline_destroy(PdockerVkPipeline *pipeline) {
 
 struct PdockerVkFence {
     uint64_t owner_device_id;
+    const PdockerVkCapabilitySnapshot *capability_snapshot;
     bool signaled;
     bool executor_tracked;
     uint64_t fence_id;
@@ -1156,8 +1239,19 @@ struct PdockerVkFence {
     struct PdockerVkFence *next;
 };
 
+/* One native completion fence represents the queue operation created by a
+ * single vkQueuePresentKHR call. Multiple swapchains/images in that call may
+ * share it. refs is protected by g_wsi_mutex and counts image references plus
+ * temporary acquire/destroy observers. */
+struct PdockerVkPresentCompletion {
+    PdockerVkFence fence;
+    uint32_t refs;
+    bool native_complete;
+};
+
 typedef struct PdockerVkSemaphore {
     uint64_t owner_device_id;
+    const PdockerVkCapabilitySnapshot *capability_snapshot;
     bool signaled;
     bool timeline;
     bool executor_tracked;
@@ -1169,6 +1263,7 @@ typedef struct PdockerVkSemaphore {
 
 struct PdockerVkEvent {
     uint64_t owner_device_id;
+    const PdockerVkCapabilitySnapshot *capability_snapshot;
     bool signaled;
     bool executor_tracked;
     uint64_t event_id;
@@ -1178,15 +1273,14 @@ struct PdockerVkEvent {
 
 struct PdockerVkQueryPool {
     uint64_t owner_device_id;
+    const PdockerVkCapabilitySnapshot *capability_snapshot;
     VkQueryType type;
     uint32_t query_count;
     uint64_t pool_id;
     int result_fd;
     size_t result_size;
-    uint64_t *values;
-    uint8_t *available;
-    uint8_t *active;
     PdockerGpuVulkanGraphicsV617QueryResultEntry *result_entries;
+    bool executor_tracked;
     bool destroyed;
     struct PdockerVkQueryPool *next;
 };
@@ -1832,6 +1926,8 @@ typedef struct PdockerVkCommandBuffer {
     uint32_t dynamic_state_capacity;
     bool vertex_buffer_bound;
     uint64_t owner_device_id;
+    /* Borrowed from the owning device; device teardown retires commands first. */
+    const PdockerVkCapabilitySnapshot *capability_snapshot;
     uint64_t requested_feature_mask;
     uint64_t enabled_extension_mask;
     PdockerVkCommandPool *owner_pool;
@@ -1952,16 +2048,110 @@ static PdockerVkEvent *g_events;
 static PdockerVkEvent *g_retired_events;
 static PdockerVkQueryPool *g_query_pools;
 static PdockerVkQueryPool *g_retired_query_pools;
+static pthread_mutex_t g_query_pool_mutex = PTHREAD_MUTEX_INITIALIZER;
 static PdockerVkSurface *g_surfaces;
 static PdockerVkSurface *g_retired_surfaces;
 static PdockerVkSwapchain *g_swapchains;
 static PdockerVkSwapchain *g_retired_swapchains;
+/* Serializes the headless presentation-engine image lifecycle.  Queue
+ * submission remains externally synchronized as required by Vulkan. */
+static pthread_mutex_t g_wsi_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_wsi_cond_initial;
+static pthread_cond_t g_wsi_cond_initial_spare;
+static pthread_cond_t *g_wsi_cond_current = &g_wsi_cond_initial;
+static pthread_cond_t *g_wsi_cond_spare = &g_wsi_cond_initial_spare;
+static pthread_once_t g_wsi_cond_once = PTHREAD_ONCE_INIT;
+static int g_wsi_cond_init_result = EINVAL;
+
+static int pdocker_vk_wsi_cond_init_object(pthread_cond_t *condition) {
+    if (!condition) return EINVAL;
+    pthread_condattr_t attr;
+    int rc = pthread_condattr_init(&attr);
+    const bool attr_initialized = rc == 0;
+    if (rc == 0) rc = pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
+    if (rc == 0) rc = pthread_cond_init(condition, &attr);
+    if (attr_initialized) (void)pthread_condattr_destroy(&attr);
+    return rc;
+}
+
+static void pdocker_vk_wsi_cond_init_once(void) {
+    g_wsi_cond_init_result =
+        pdocker_vk_wsi_cond_init_object(&g_wsi_cond_initial);
+    if (g_wsi_cond_init_result == 0) {
+        g_wsi_cond_init_result =
+            pdocker_vk_wsi_cond_init_object(
+                &g_wsi_cond_initial_spare);
+    }
+}
+
+static int pdocker_vk_wsi_cond_ensure(void) {
+    int rc = pthread_once(&g_wsi_cond_once, pdocker_vk_wsi_cond_init_once);
+    return rc == 0 ? g_wsi_cond_init_result : rc;
+}
+
+static int pdocker_vk_wsi_cond_prepare_spare_locked(void) {
+    /*
+     * The child hook consumes the preinitialized spare without invoking any
+     * pthread constructor. A child that was forked again before entering a
+     * Vulkan API can therefore arrive here with no current generation. This
+     * ordinary, mutex-protected API path is allowed to allocate and restores
+     * both generations without ever reusing the inherited condition object.
+     */
+    if (!g_wsi_cond_current) {
+        pthread_cond_t *replacement =
+            (pthread_cond_t *)malloc(sizeof(*replacement));
+        if (!replacement) return ENOMEM;
+        int rc = pdocker_vk_wsi_cond_init_object(replacement);
+        if (rc != 0) {
+            free(replacement);
+            return rc;
+        }
+        g_wsi_cond_current = replacement;
+    }
+    if (g_wsi_cond_spare) return 0;
+    pthread_cond_t *replacement =
+        (pthread_cond_t *)malloc(sizeof(*replacement));
+    if (!replacement) return ENOMEM;
+    int rc = pdocker_vk_wsi_cond_init_object(replacement);
+    if (rc != 0) {
+        free(replacement);
+        return rc;
+    }
+    g_wsi_cond_spare = replacement;
+    return 0;
+}
+
+static int pdocker_vk_wsi_lock(void) {
+    int rc = pthread_once(
+        &g_gpu_endpoint_atfork_once,
+        register_gpu_endpoint_atfork);
+    if (rc != 0) return rc;
+    if (g_gpu_endpoint_atfork_status != 0) {
+        return g_gpu_endpoint_atfork_status;
+    }
+    rc = pdocker_vk_wsi_cond_ensure();
+    if (rc != 0) return rc;
+    rc = pthread_mutex_lock(&g_wsi_mutex);
+    if (rc != 0) return rc;
+    rc = pdocker_vk_wsi_cond_prepare_spare_locked();
+    if (rc != 0) (void)pthread_mutex_unlock(&g_wsi_mutex);
+    return rc;
+}
+
+static void pdocker_vk_wsi_cond_atfork_child_reset(void) {
+    /*
+     * active/spare were both initialized before pthread_atfork registration.
+     * Pointer switching is the only child-side operation; the inherited active
+     * condition (and any vanished waiters) is never reused or destroyed.
+     */
+    g_wsi_cond_current = g_wsi_cond_spare;
+    g_wsi_cond_spare = NULL;
+}
 static unsigned g_shader_dump_counter;
 static PdockerVkMemory *g_guarded_memories[PDOCKER_VK_MAX_GUARDED_MEMORIES];
 static struct sigaction g_previous_sigsegv;
 static bool g_guarded_sigsegv_installed;
 static uint64_t g_vulkan_object_generation;
-static uint64_t g_vulkan_query_pool_generation;
 static PdockerVkDescriptorUpdateTemplate *g_descriptor_update_templates;
 #ifdef VK_EXT_DEBUG_UTILS_EXTENSION_NAME
 static PdockerVkDebugUtilsMessenger *g_debug_utils_messengers;
@@ -1978,6 +2168,7 @@ static void command_buffer_destroy_record_vectors(PdockerVkCommandBuffer *cmd);
 static void command_buffer_destroy_descriptor_states(PdockerVkCommandBuffer *cmd);
 
 static bool trace_allocations(void);
+static void trace_icd_runtime_failure(const char *stage, int rc);
 static bool query_range_valid(
         const PdockerVkQueryPool *pool,
         uint32_t firstQuery,
@@ -1987,7 +2178,15 @@ static bool query_result_copy_buffer_range(VkQueryResultFlags flags,
                                            VkDeviceSize dstOffset,
                                            VkDeviceSize stride,
                                            VkDeviceSize *out_bytes);
-static VkResult execute_recorded_query_op(PdockerVkCommandOp *op);
+static VkResult send_executor_wsi_acquire_signal(
+        VkDevice device,
+        VkSemaphore semaphore,
+        VkFence fence);
+static VkResult send_executor_wsi_present_wait(
+        const PdockerVkQueue *queue,
+        uint32_t wait_semaphore_count,
+        const VkSemaphore *wait_semaphores,
+        PdockerVkPresentCompletion *completion);
 static void trace_image_layout_mismatch(
         const char *stage,
         const PdockerVkImage *image,
@@ -2013,14 +2212,9 @@ static bool env_truthy_default(const char *name, bool default_value) {
     return true;
 }
 
-static bool vulkan_v5_object_transport_enabled(void) {
-    /*
-     * Image, image-view, and sampler handles are part of the Vulkan object
-     * graph.  Treat V5 object transport as the default correctness path, while
-     * keeping a deliberate kill switch for device triage.
-     */
-    return env_truthy_default("PDOCKER_VULKAN_ENABLE_V5_OBJECT_TRANSPORT", true) &&
-           !env_truthy_default("PDOCKER_VULKAN_DISABLE_V5_OBJECT_TRANSPORT", false);
+static bool vulkan_v5_object_transport_enabled(
+        const PdockerVkCapabilitySnapshot *snapshot) {
+    return snapshot && snapshot->v5_object_transport_enabled;
 }
 
 static uint64_t next_vulkan_object_generation(void) {
@@ -2088,10 +2282,11 @@ static bool physical_device_handle_resolve(
         PdockerVkPhysicalDevice **out_physical_device) {
     PdockerVkPhysicalDevice *target = (PdockerVkPhysicalDevice *)physicalDevice;
     if (out_physical_device) *out_physical_device = NULL;
-    if (!target) return false;
+    if (!target || pthread_mutex_lock(&g_physical_device_mutex) != 0) return false;
     if (target == &g_device) {
         ensure_vulkan_dispatchable_object_ids();
         if (out_physical_device) *out_physical_device = &g_device;
+        (void)pthread_mutex_unlock(&g_physical_device_mutex);
         return true;
     }
     for (PdockerVkPhysicalDevice *candidate = g_physical_devices;
@@ -2099,45 +2294,68 @@ static bool physical_device_handle_resolve(
          candidate = candidate->next) {
         if (candidate == target) {
             if (out_physical_device) *out_physical_device = candidate;
+            (void)pthread_mutex_unlock(&g_physical_device_mutex);
             return true;
         }
     }
+    (void)pthread_mutex_unlock(&g_physical_device_mutex);
     return false;
 }
 
 static PdockerVkPhysicalDevice *physical_device_for_instance(
         const PdockerVkInstance *instance) {
+    if (pthread_mutex_lock(&g_physical_device_mutex) != 0) return NULL;
     if (!instance || instance->object_id == 0) {
         ensure_vulkan_dispatchable_object_ids();
-        return &g_device;
+        PdockerVkPhysicalDevice *result =
+            g_device.capability_snapshot ? &g_device : NULL;
+        (void)pthread_mutex_unlock(&g_physical_device_mutex);
+        return result;
+    }
+    if (!instance->capability_snapshot) {
+        (void)pthread_mutex_unlock(&g_physical_device_mutex);
+        return NULL;
     }
     for (PdockerVkPhysicalDevice *candidate = g_physical_devices;
          candidate;
          candidate = candidate->next) {
-        if (candidate->instance_object_id == instance->object_id) return candidate;
+        if (candidate->instance_object_id == instance->object_id) {
+            (void)pthread_mutex_unlock(&g_physical_device_mutex);
+            return candidate;
+        }
     }
     PdockerVkPhysicalDevice *physical = calloc(1, sizeof(*physical));
-    if (!physical) return NULL;
+    if (!physical) {
+        (void)pthread_mutex_unlock(&g_physical_device_mutex);
+        return NULL;
+    }
     physical->object_id = next_vulkan_object_generation();
     physical->instance_object_id = instance->object_id;
+    physical->capability_snapshot =
+        capability_snapshot_retain(instance->capability_snapshot);
     set_loader_magic_value(physical);
     physical->next = g_physical_devices;
     g_physical_devices = physical;
+    (void)pthread_mutex_unlock(&g_physical_device_mutex);
     return physical;
 }
 
 static void physical_devices_unregister_for_instance(uint64_t instance_object_id) {
-    if (instance_object_id == 0) return;
+    if (instance_object_id == 0 ||
+        pthread_mutex_lock(&g_physical_device_mutex) != 0) return;
     PdockerVkPhysicalDevice **link = &g_physical_devices;
     while (*link) {
         PdockerVkPhysicalDevice *physical = *link;
         if (physical->instance_object_id == instance_object_id) {
             *link = physical->next;
+            capability_snapshot_release(physical->capability_snapshot);
+            physical->capability_snapshot = NULL;
             free(physical);
         } else {
             link = &physical->next;
         }
     }
+    (void)pthread_mutex_unlock(&g_physical_device_mutex);
 }
 
 static void device_register(PdockerVkDevice *device) {
@@ -3329,6 +3547,7 @@ static void command_buffer_unlink_from_pool(PdockerVkCommandBuffer *cmd) {
     }
     cmd->owner_pool = NULL;
     cmd->next_in_pool = NULL;
+    cmd->capability_snapshot = NULL;
 }
 
 static void command_buffer_register(PdockerVkCommandPool *pool, PdockerVkCommandBuffer *cmd) {
@@ -3369,6 +3588,7 @@ static void command_buffer_retire(PdockerVkCommandBuffer *cmd) {
     cmd->graphics_pipeline = NULL;
     cmd->owner_pool = NULL;
     cmd->next_in_pool = NULL;
+    cmd->capability_snapshot = NULL;
     cmd->destroyed = true;
     cmd->next_global = g_retired_command_buffers;
     g_retired_command_buffers = cmd;
@@ -3591,6 +3811,7 @@ static void fence_retire(PdockerVkFence *fence) {
     if (!fence || fence->destroyed) return;
     fence->destroyed = true;
     fence->executor_tracked = false;
+    fence->capability_snapshot = NULL;
     fence->next = g_retired_fences;
     g_retired_fences = fence;
 }
@@ -3656,6 +3877,7 @@ static void semaphore_retire(PdockerVkSemaphore *sem) {
     if (!sem || sem->destroyed) return;
     sem->destroyed = true;
     sem->executor_tracked = false;
+    sem->capability_snapshot = NULL;
     sem->next = g_retired_semaphores;
     g_retired_semaphores = sem;
 }
@@ -3721,6 +3943,7 @@ static void event_retire(PdockerVkEvent *event) {
     if (!event || event->destroyed) return;
     event->destroyed = true;
     event->executor_tracked = false;
+    event->capability_snapshot = NULL;
     event->next = g_retired_events;
     g_retired_events = event;
 }
@@ -3766,25 +3989,31 @@ static PdockerVkQueryPool *query_pool_handle_target(VkQueryPool queryPool) {
     return pdocker_vk_query_pool_from_handle(queryPool);
 }
 
-static void query_pool_register(PdockerVkQueryPool *pool) {
-    if (!pool) return;
+static bool query_pool_register(PdockerVkQueryPool *pool) {
+    if (!pool || pthread_mutex_lock(&g_query_pool_mutex) != 0) return false;
     pool->destroyed = false;
     pool->next = g_query_pools;
     g_query_pools = pool;
+    (void)pthread_mutex_unlock(&g_query_pool_mutex);
+    return true;
 }
 
-static PdockerVkQueryPool *query_pool_unregister_object(PdockerVkQueryPool *target) {
-    if (!target) return NULL;
+static PdockerVkQueryPool *query_pool_unregister_object(
+        PdockerVkQueryPool *target) {
+    if (!target || pthread_mutex_lock(&g_query_pool_mutex) != 0) return NULL;
+    PdockerVkQueryPool *removed = NULL;
     PdockerVkQueryPool **link = &g_query_pools;
     while (*link) {
         if (*link == target) {
+            removed = target;
             *link = target->next;
             target->next = NULL;
-            return target;
+            break;
         }
         link = &(*link)->next;
     }
-    return NULL;
+    (void)pthread_mutex_unlock(&g_query_pool_mutex);
+    return removed;
 }
 
 static PdockerVkQueryPool *query_pool_unregister(VkQueryPool queryPool) {
@@ -3793,12 +4022,6 @@ static PdockerVkQueryPool *query_pool_unregister(VkQueryPool queryPool) {
 
 static void query_pool_release_resources(PdockerVkQueryPool *pool) {
     if (!pool) return;
-    free(pool->values);
-    free(pool->available);
-    free(pool->active);
-    pool->values = NULL;
-    pool->available = NULL;
-    pool->active = NULL;
     if (pool->result_entries) {
         munmap(pool->result_entries, pool->result_size);
         pool->result_entries = NULL;
@@ -3813,22 +4036,53 @@ static void query_pool_release_resources(PdockerVkQueryPool *pool) {
 static void query_pool_retire(PdockerVkQueryPool *pool) {
     if (!pool || pool->destroyed) return;
     query_pool_release_resources(pool);
+    pool->capability_snapshot = NULL;
+    pool->executor_tracked = false;
     pool->destroyed = true;
-    pool->next = g_retired_query_pools;
-    g_retired_query_pools = pool;
+    if (pthread_mutex_lock(&g_query_pool_mutex) == 0) {
+        pool->next = g_retired_query_pools;
+        g_retired_query_pools = pool;
+        (void)pthread_mutex_unlock(&g_query_pool_mutex);
+    } else {
+        pool->next = NULL;
+    }
 }
 
-static bool query_pool_handle_resolve(VkQueryPool queryPool, PdockerVkQueryPool **out_pool) {
+static bool query_pool_handle_resolve(
+        VkQueryPool queryPool,
+        PdockerVkQueryPool **out_pool) {
     PdockerVkQueryPool *target = query_pool_handle_target(queryPool);
     if (out_pool) *out_pool = NULL;
-    if (!target) return false;
-    for (PdockerVkQueryPool *candidate = g_query_pools; candidate; candidate = candidate->next) {
+    if (!target || pthread_mutex_lock(&g_query_pool_mutex) != 0) return false;
+    bool found = false;
+    for (PdockerVkQueryPool *candidate = g_query_pools;
+         candidate; candidate = candidate->next) {
         if (candidate == target && !candidate->destroyed) {
             if (out_pool) *out_pool = candidate;
-            return true;
+            found = true;
+            break;
         }
     }
-    return false;
+    (void)pthread_mutex_unlock(&g_query_pool_mutex);
+    return found;
+}
+
+static PdockerVkQueryPool *query_pool_find_owned(uint64_t owner_device_id) {
+    if (owner_device_id == 0 ||
+        pthread_mutex_lock(&g_query_pool_mutex) != 0) {
+        return NULL;
+    }
+    PdockerVkQueryPool *found = NULL;
+    for (PdockerVkQueryPool *candidate = g_query_pools;
+         candidate; candidate = candidate->next) {
+        if (!candidate->destroyed &&
+            candidate->owner_device_id == owner_device_id) {
+            found = candidate;
+            break;
+        }
+    }
+    (void)pthread_mutex_unlock(&g_query_pool_mutex);
+    return found;
 }
 
 static PdockerVkQueryPool *query_pool_handle_lookup(VkQueryPool queryPool) {
@@ -3984,10 +4238,6 @@ static PdockerVkSwapchain *swapchain_unregister_object(PdockerVkSwapchain *targe
     return NULL;
 }
 
-static PdockerVkSwapchain *swapchain_unregister(VkSwapchainKHR swapchain) {
-    return swapchain_unregister_object(swapchain_handle_target(swapchain));
-}
-
 static void swapchain_retire(PdockerVkSwapchain *swapchain) {
     if (!swapchain || swapchain->destroyed) return;
     swapchain->destroyed = true;
@@ -4046,10 +4296,6 @@ static bool current_vulkan_dispatch_identity_ids(
     if (device_object_id) *device_object_id = identity_queue->device_object_id;
     if (queue_object_id) *queue_object_id = identity_queue->object_id;
     return true;
-}
-
-static uint64_t next_vulkan_query_pool_id(void) {
-    return __sync_add_and_fetch(&g_vulkan_query_pool_generation, 1);
 }
 
 static uint32_t clamp_u32(uint32_t value, uint32_t limit) {
@@ -4112,6 +4358,8 @@ static PdockerVkQueue *queue_unregister_object(PdockerVkQueue *target) {
 static void queue_retire(PdockerVkQueue *queue) {
     if (!queue || queue->destroyed) return;
     queue_transport_close(queue);
+    capability_snapshot_release(queue->capability_snapshot);
+    queue->capability_snapshot = NULL;
     queue->destroyed = true;
     queue->next = g_retired_queues;
     g_retired_queues = queue;
@@ -4149,6 +4397,41 @@ static PdockerVkDevice *pdocker_vk_device_from_handle(VkDevice device) {
            pdocker_device->physical_device_object_id != 0
         ? pdocker_device
         : NULL;
+}
+
+static PdockerVkDevice *pdocker_vk_device_from_object_id(
+        uint64_t object_id) {
+    if (object_id == 0) return NULL;
+    for (PdockerVkDevice *candidate = g_devices;
+         candidate; candidate = candidate->next) {
+        if (candidate->object_id == object_id) return candidate;
+    }
+    return NULL;
+}
+
+static bool pdocker_vk_device_is_lost(
+        const PdockerVkDevice *device) {
+    return device &&
+           __atomic_load_n(&device->device_lost, __ATOMIC_ACQUIRE) != 0;
+}
+
+static void pdocker_vk_mark_device_lost(
+        PdockerVkDevice *device,
+        const char *stage,
+        VkResult cause) {
+    if (!device) return;
+    uint32_t previous = __atomic_exchange_n(
+        &device->device_lost, 1u, __ATOMIC_ACQ_REL);
+    if (previous == 0) {
+        trace_icd_runtime_failure(
+            stage ? stage : "device-lost", cause);
+    }
+}
+
+static const PdockerVkCapabilitySnapshot *device_capability_snapshot(
+        VkDevice device) {
+    const PdockerVkDevice *pdocker_device = pdocker_vk_device_from_handle(device);
+    return pdocker_device ? pdocker_device->capability_snapshot : NULL;
 }
 
 static uint64_t device_requested_feature_mask_from_handle(VkDevice device) {
@@ -6151,43 +6434,21 @@ static void maybe_dump_spirv(const VkShaderModuleCreateInfo *info) {
     }
 }
 
-static VkBool32 executor_advertised_shader_int64_or(VkBool32 legacy);
-static VkBool32 executor_advertised_storage16_or(VkBool32 legacy);
-static VkBool32 executor_advertised_storage8_or(VkBool32 legacy);
-static VkBool32 advertised_storage_buffer_storage_class(void);
+static VkBool32 executor_advertised_shader_int64_or(const PdockerVkCapabilitySnapshot *snapshot, VkBool32 legacy);
+static VkBool32 executor_advertised_storage16_or(const PdockerVkCapabilitySnapshot *snapshot, VkBool32 legacy);
+static VkBool32 executor_advertised_storage8_or(const PdockerVkCapabilitySnapshot *snapshot, VkBool32 legacy);
+static VkBool32 advertised_storage_buffer_storage_class(const PdockerVkCapabilitySnapshot *snapshot);
 
-static VkBool32 advertised_shader_int64(void) {
-    /*
-     * llama.cpp/ggml can select different shader variants from advertised
-     * features. Until the executor proves the Android device supports the same
-     * SPIR-V path, keep expensive/fragile features opt-in instead of optimistic.
-     */
-    VkBool32 legacy = env_truthy_default("PDOCKER_VULKAN_ENABLE_INT64", false) ? VK_TRUE : VK_FALSE;
-    return executor_advertised_shader_int64_or(legacy);
+static VkBool32 advertised_shader_int64(const PdockerVkCapabilitySnapshot *snapshot) {
+    return executor_advertised_shader_int64_or(snapshot, VK_FALSE);
 }
 
-static VkBool32 advertised_storage16(void) {
-    /*
-     * llama.cpp currently expects 16-bit storage to load useful Vulkan paths on
-     * this device. Keep it enabled by default, but allow tuning runs to clamp it
-     * off when investigating Android executor capability mismatches.
-     */
-    if (env_disabled("PDOCKER_VULKAN_DISABLE_16BIT_STORAGE")) return VK_FALSE;
-    VkBool32 legacy = env_truthy_default("PDOCKER_VULKAN_ENABLE_16BIT_STORAGE", true) ? VK_TRUE : VK_FALSE;
-    return executor_advertised_storage16_or(legacy);
+static VkBool32 advertised_storage16(const PdockerVkCapabilitySnapshot *snapshot) {
+    return executor_advertised_storage16_or(snapshot, VK_FALSE);
 }
 
-static VkBool32 advertised_storage8(void) {
-    /*
-     * ggml Vulkan can emit int8/8-bit-storage kernels for quantized weights.
-     * Android devices that report both storageBuffer8BitAccess and shaderInt8
-     * need the container-visible ICD to advertise both bits together; otherwise
-     * llama.cpp can still hand the bridge an Int8/Storage8 SPIR-V module while
-     * the executor device was created without those requested features.
-     */
-    if (env_disabled("PDOCKER_VULKAN_DISABLE_8BIT_STORAGE")) return VK_FALSE;
-    VkBool32 legacy = env_truthy_default("PDOCKER_VULKAN_ENABLE_8BIT_STORAGE", true) ? VK_TRUE : VK_FALSE;
-    return executor_advertised_storage8_or(legacy);
+static VkBool32 advertised_storage8(const PdockerVkCapabilitySnapshot *snapshot) {
+    return executor_advertised_storage8_or(snapshot, VK_FALSE);
 }
 
 static VkDeviceSize pdocker_vulkan_heap_size(void) {
@@ -6504,32 +6765,32 @@ static bool pdocker_vk_format_bridge_supported(VkFormat format) {
      VK_SAMPLE_COUNT_8_BIT | VK_SAMPLE_COUNT_16_BIT | \
      VK_SAMPLE_COUNT_32_BIT | VK_SAMPLE_COUNT_64_BIT)
 
-static VkFormatFeatureFlags pdocker_vk_advertised_image_features(VkFormat format);
-static VkSampleCountFlags pdocker_vk_advertised_sample_counts(VkFormat format);
-static bool executor_supports_vulkan_dispatch_v53_buffer_views(void);
-static bool executor_supports_vulkan_dispatch_v58_descriptor_layout_flags(void);
-static bool executor_supports_vulkan_dispatch_v59_variable_descriptor_counts(void);
-static bool executor_supports_vulkan_dispatch_v5_terminal_response(void);
-static bool executor_supports_persistent_multiplexed_connections(void);
-static bool executor_supports_vulkan_graphics_v627_buffer_views(void);
-static bool executor_supports_vulkan_graphics_v628_push_constant_ranges(void);
-static bool executor_supports_vulkan_graphics_v629_variable_descriptor_counts(void);
-static bool executor_supports_vulkan_graphics_v630_native_objects(void);
-static bool executor_supports_vulkan_graphics_v631_descriptor_layout_flags(void);
-static bool executor_supports_vulkan_graphics_v632_render_passes(void);
-static bool executor_supports_vulkan_graphics_v633_render_pass_sideband(void);
-static bool executor_supports_vulkan_graphics_v634_classic_render_pass_sideband(void);
-static bool executor_supports_vulkan_graphics_v634_classic_render_pass_self_dependency(void);
-static bool executor_supports_vulkan_graphics_v635_event_command_provenance(void);
-static bool executor_supports_any_vulkan_buffer_views(void);
+static VkFormatFeatureFlags pdocker_vk_advertised_image_features(const PdockerVkCapabilitySnapshot *snapshot, VkFormat format);
+static VkSampleCountFlags pdocker_vk_advertised_sample_counts(const PdockerVkCapabilitySnapshot *snapshot, VkFormat format);
+static bool executor_supports_vulkan_dispatch_v53_buffer_views(const PdockerVkCapabilitySnapshot *snapshot);
+static bool executor_supports_vulkan_dispatch_v58_descriptor_layout_flags(const PdockerVkCapabilitySnapshot *snapshot);
+static bool executor_supports_vulkan_dispatch_v59_variable_descriptor_counts(const PdockerVkCapabilitySnapshot *snapshot);
+static bool executor_supports_vulkan_dispatch_v5_terminal_response(const PdockerVkCapabilitySnapshot *snapshot);
+static bool executor_supports_persistent_multiplexed_connections(const PdockerVkCapabilitySnapshot *snapshot);
+static bool executor_supports_vulkan_graphics_v627_buffer_views(const PdockerVkCapabilitySnapshot *snapshot);
+static bool executor_supports_vulkan_graphics_v628_push_constant_ranges(const PdockerVkCapabilitySnapshot *snapshot);
+static bool executor_supports_vulkan_graphics_v629_variable_descriptor_counts(const PdockerVkCapabilitySnapshot *snapshot);
+static bool executor_supports_vulkan_graphics_v630_native_objects(const PdockerVkCapabilitySnapshot *snapshot);
+static bool executor_supports_vulkan_graphics_v631_descriptor_layout_flags(const PdockerVkCapabilitySnapshot *snapshot);
+static bool executor_supports_vulkan_graphics_v632_render_passes(const PdockerVkCapabilitySnapshot *snapshot);
+static bool executor_supports_vulkan_graphics_v633_render_pass_sideband(const PdockerVkCapabilitySnapshot *snapshot);
+static bool executor_supports_vulkan_graphics_v634_classic_render_pass_sideband(const PdockerVkCapabilitySnapshot *snapshot);
+static bool executor_supports_vulkan_graphics_v634_classic_render_pass_self_dependency(const PdockerVkCapabilitySnapshot *snapshot);
+static bool executor_supports_vulkan_graphics_v635_event_command_provenance(const PdockerVkCapabilitySnapshot *snapshot);
+static bool executor_supports_any_vulkan_buffer_views(const PdockerVkCapabilitySnapshot *snapshot);
 
-static VkFormatFeatureFlags pdocker_vk_format_buffer_features(VkFormat format) {
+static VkFormatFeatureFlags pdocker_vk_format_buffer_features(const PdockerVkCapabilitySnapshot *snapshot, VkFormat format) {
     if (!pdocker_vk_format_bridge_supported(format) ||
         pdocker_vk_format_is_depth_stencil(format)) {
         return 0;
     }
     VkFormatFeatureFlags features = VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT;
-    if (executor_supports_any_vulkan_buffer_views()) {
+    if (executor_supports_any_vulkan_buffer_views(snapshot)) {
         features |= VK_FORMAT_FEATURE_UNIFORM_TEXEL_BUFFER_BIT |
                     VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_BIT;
     }
@@ -6561,7 +6822,7 @@ static VkFormatFeatureFlags pdocker_vk_format_image_features(VkFormat format) {
     return features;
 }
 
-static bool pdocker_vk_resolve_image_executor_eligible(const PdockerVkImageResolveOp *op) {
+static bool pdocker_vk_resolve_image_executor_eligible(const PdockerVkCapabilitySnapshot *snapshot, const PdockerVkImageResolveOp *op) {
     if (!op || !op->src || !op->dst || !op->src->memory || !op->dst->memory) return false;
     if (op->src->format != op->dst->format ||
         op->src->samples == VK_SAMPLE_COUNT_1_BIT ||
@@ -6585,7 +6846,7 @@ static bool pdocker_vk_resolve_image_executor_eligible(const PdockerVkImageResol
         conservative_format_bytes_per_pixel_for_aspect(op->src->format, VK_IMAGE_ASPECT_COLOR_BIT) == 0) {
         return false;
     }
-    const VkFormatFeatureFlags features = pdocker_vk_advertised_image_features(op->src->format);
+    const VkFormatFeatureFlags features = pdocker_vk_advertised_image_features(snapshot, op->src->format);
     if ((features & (VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT |
                      VK_FORMAT_FEATURE_TRANSFER_SRC_BIT |
                      VK_FORMAT_FEATURE_TRANSFER_DST_BIT)) !=
@@ -6636,7 +6897,7 @@ static bool pdocker_vk_resolve_image_host_fallback_eligible(const PdockerVkImage
     return false;
 }
 
-static bool pdocker_vk_blit_image_executor_eligible(const PdockerVkImageBlitOp *op) {
+static bool pdocker_vk_blit_image_executor_eligible(const PdockerVkCapabilitySnapshot *snapshot, const PdockerVkImageBlitOp *op) {
     if (!op || !op->src || !op->dst || !op->src->memory || !op->dst->memory) return false;
     if (op->src->samples != VK_SAMPLE_COUNT_1_BIT ||
         op->dst->samples != VK_SAMPLE_COUNT_1_BIT ||
@@ -6649,8 +6910,8 @@ static bool pdocker_vk_blit_image_executor_eligible(const PdockerVkImageBlitOp *
         (op->filter != VK_FILTER_NEAREST && op->filter != VK_FILTER_LINEAR)) {
         return false;
     }
-    const VkFormatFeatureFlags src_features = pdocker_vk_advertised_image_features(op->src->format);
-    const VkFormatFeatureFlags dst_features = pdocker_vk_advertised_image_features(op->dst->format);
+    const VkFormatFeatureFlags src_features = pdocker_vk_advertised_image_features(snapshot, op->src->format);
+    const VkFormatFeatureFlags dst_features = pdocker_vk_advertised_image_features(snapshot, op->dst->format);
     if ((src_features & VK_FORMAT_FEATURE_BLIT_SRC_BIT) == 0 ||
         (dst_features & VK_FORMAT_FEATURE_BLIT_DST_BIT) == 0) {
         return false;
@@ -6715,6 +6976,7 @@ static bool pdocker_vk_image_create_flags_supported_for_transport(VkImageCreateF
 }
 
 static bool pdocker_vk_image_usage_supported_by_format(
+        const PdockerVkCapabilitySnapshot *snapshot,
         VkFormat format,
         VkImageUsageFlags usage) {
     const VkImageUsageFlags supported_usage =
@@ -6732,7 +6994,7 @@ static bool pdocker_vk_image_usage_supported_by_format(
     const VkFormatFeatureFlags required =
         pdocker_vk_image_usage_required_features(format, usage);
     const VkFormatFeatureFlags advertised =
-        pdocker_vk_advertised_image_features(format);
+        pdocker_vk_advertised_image_features(snapshot, format);
     return required != 0 && (advertised & required) == required;
 }
 
@@ -6951,27 +7213,18 @@ static VkDeviceSize estimate_image_requirement_size(const VkImageCreateInfo *inf
     return aligned;
 }
 
-static VkDeviceSize pdocker_vulkan_max_buffer_size(void) {
+static VkDeviceSize pdocker_vulkan_max_buffer_size_for_heap(VkDeviceSize heap) {
     const char *env = getenv("PDOCKER_VULKAN_MAX_BUFFER_BYTES");
     if (env && env[0]) {
         char *end = NULL;
         unsigned long long value = strtoull(env, &end, 10);
         if (end && *end == '\0' && value >= 16ull * 1024ull * 1024ull) {
-            return (VkDeviceSize)value;
+            VkDeviceSize requested = (VkDeviceSize)value;
+            return requested < heap ? requested : heap;
         }
     }
-    const VkDeviceSize heap = pdocker_vulkan_heap_size();
     const VkDeviceSize bridge_default = (VkDeviceSize)(2ull * 1024ull * 1024ull * 1024ull);
     return heap < bridge_default ? heap : bridge_default;
-}
-
-static VkDeviceSize pdocker_vulkan_host_heap_size(void) {
-    VkDeviceSize heap = pdocker_vulkan_heap_size();
-    VkDeviceSize host_heap = heap / 2;
-    const VkDeviceSize min_heap = (VkDeviceSize)(256ull * 1024ull * 1024ull);
-    if (host_heap < min_heap) host_heap = min_heap;
-    if (host_heap > heap) host_heap = heap;
-    return host_heap;
 }
 
 static bool trace_allocations(void) {
@@ -6995,30 +7248,24 @@ static void trace_icd_runtime_marker_once(const char *stage) {
             stage ? stage : "loaded");
 }
 
-static bool copy_alias_enabled(void) {
-    return env_truthy_default("PDOCKER_VULKAN_ALIAS_COPIES", false);
+static bool copy_alias_enabled(
+        const PdockerVkCapabilitySnapshot *snapshot) {
+    return snapshot && snapshot->copy_alias_enabled;
 }
 
-static size_t guarded_page_size(void) {
-    long page = sysconf(_SC_PAGESIZE);
-    return page > 0 ? (size_t)page : 4096u;
+static size_t guarded_page_size(
+        const PdockerVkCapabilitySnapshot *snapshot) {
+    return snapshot && snapshot->host_page_size
+        ? snapshot->host_page_size : 4096u;
 }
 
-static size_t guarded_memory_threshold(void) {
-    const char *env = getenv("PDOCKER_GPU_VIRTUAL_MEMORY_MIN_BYTES");
-    if (env && env[0]) {
-        char *end = NULL;
-        unsigned long long value = strtoull(env, &end, 10);
-        if (end && *end == '\0' && value > 0) return (size_t)value;
-    }
-    return PDOCKER_VK_GUARDED_DEFAULT_MIN_BYTES;
-}
-
-static bool guarded_memory_enabled(size_t size, VkMemoryPropertyFlags flags) {
+static bool guarded_memory_enabled(
+        const PdockerVkCapabilitySnapshot *snapshot,
+        size_t size,
+        VkMemoryPropertyFlags flags) {
     (void)flags;
-    const char *mode = getenv("PDOCKER_GPU_VIRTUAL_MEMORY");
-    if (!mode || strcmp(mode, "guarded") != 0) return false;
-    return size >= guarded_memory_threshold();
+    return snapshot && snapshot->guarded_memory_enabled &&
+           size >= snapshot->guarded_memory_min_bytes;
 }
 
 static void chain_previous_sigsegv(int sig, siginfo_t *info, void *context) {
@@ -7164,7 +7411,9 @@ static void *pdocker_alloc_handle(size_t size) {
     return calloc(1, size ? size : sizeof(PdockerHandle));
 }
 
-static int create_shared_fd(size_t bytes) {
+static int create_shared_fd(
+        const PdockerVkCapabilitySnapshot *snapshot,
+        size_t bytes) {
 #ifdef __NR_memfd_create
     int memfd = (int)syscall(__NR_memfd_create, "pdocker-vulkan-memory", MFD_CLOEXEC);
     if (memfd >= 0) {
@@ -7175,8 +7424,8 @@ static int create_shared_fd(size_t bytes) {
         return -1;
     }
 #endif
-    const char *dir = getenv("PDOCKER_GPU_SHARED_DIR");
-    if (!dir || !dir[0]) dir = "/tmp";
+    const char *dir = snapshot && snapshot->shared_directory
+        ? snapshot->shared_directory : "/tmp";
     char path[512];
     snprintf(path, sizeof(path), "%s/pdocker-vulkan-memory-XXXXXX", dir);
     int fd = mkstemp(path);
@@ -7262,32 +7511,57 @@ static uint64_t next_gpu_endpoint_generation_locked(void) {
 static void gpu_endpoint_atfork_prepare(void) {
     (void)pthread_mutex_lock(&g_gpu_endpoint_mutex);
     (void)pthread_mutex_lock(&g_advertised_caps_mutex);
+    (void)pthread_mutex_lock(&g_query_pool_mutex);
+    (void)pthread_mutex_lock(&g_wsi_mutex);
+    /*
+     * Replenish child-consumable generations before every fork. Allocation
+     * occurs in the parent-side prepare hook, never in the child hook. If
+     * allocation fails, the child consumes NULL and the first ordinary API
+     * call restores both generations or fails closed without inherited-cond
+     * reuse.
+     */
+    (void)advertised_caps_cond_prepare_spare_locked();
+    (void)pdocker_vk_wsi_cond_prepare_spare_locked();
 }
 
 static void gpu_endpoint_atfork_parent(void) {
+    (void)pthread_mutex_unlock(&g_wsi_mutex);
+    (void)pthread_mutex_unlock(&g_query_pool_mutex);
     (void)pthread_mutex_unlock(&g_advertised_caps_mutex);
     (void)pthread_mutex_unlock(&g_gpu_endpoint_mutex);
 }
 
 static void gpu_endpoint_atfork_child(void) {
     g_gpu_endpoint_current_valid = false;
-    memset(&g_gpu_endpoint_current, 0, sizeof(g_gpu_endpoint_current));
     if (g_gpu_endpoint_next_generation == 0) g_gpu_endpoint_next_generation = 1;
     advertised_caps_cache_atfork_child_reset();
+    pdocker_vk_wsi_cond_atfork_child_reset();
+    (void)pthread_mutex_unlock(&g_wsi_mutex);
+    (void)pthread_mutex_unlock(&g_query_pool_mutex);
     (void)pthread_mutex_unlock(&g_advertised_caps_mutex);
     (void)pthread_mutex_unlock(&g_gpu_endpoint_mutex);
 }
 
 static void register_gpu_endpoint_atfork(void) {
-    (void)pthread_atfork(
-        gpu_endpoint_atfork_prepare,
-        gpu_endpoint_atfork_parent,
-        gpu_endpoint_atfork_child);
+    int rc = pdocker_vk_wsi_cond_ensure();
+    if (rc == 0) {
+        rc = pthread_atfork(
+            gpu_endpoint_atfork_prepare,
+            gpu_endpoint_atfork_parent,
+            gpu_endpoint_atfork_child);
+    }
+    g_gpu_endpoint_atfork_status = rc;
 }
 
 static int snapshot_gpu_endpoint(PdockerGpuEndpointKey *out) {
     if (!out) return -EINVAL;
-    (void)pthread_once(&g_gpu_endpoint_atfork_once, register_gpu_endpoint_atfork);
+    int once_rc = pthread_once(
+        &g_gpu_endpoint_atfork_once,
+        register_gpu_endpoint_atfork);
+    if (once_rc != 0) return -once_rc;
+    if (g_gpu_endpoint_atfork_status != 0) {
+        return -g_gpu_endpoint_atfork_status;
+    }
 
     PdockerGpuEndpointKey observed;
     memset(&observed, 0, sizeof(observed));
@@ -7334,11 +7608,34 @@ static int connect_queue_path(const char *path) {
     return fd;
 }
 
-static int connect_queue(void) {
-    PdockerGpuEndpointKey endpoint;
-    int rc = snapshot_gpu_endpoint(&endpoint);
+static int capability_snapshot_endpoint_status(
+        const PdockerVkCapabilitySnapshot *snapshot) {
+    if (!snapshot || !snapshot->bridge_available) return -ENODEV;
+    if (snapshot->endpoint.pid != getpid()) return -ESTALE;
+    struct stat current;
+    if (stat(snapshot->endpoint.path, &current) != 0 ||
+        !S_ISSOCK(current.st_mode)) {
+        return -ESTALE;
+    }
+    if (!snapshot->endpoint.socket_identity_valid) return -ESTALE;
+    return current.st_dev == snapshot->endpoint.socket_device &&
+           current.st_ino == snapshot->endpoint.socket_inode
+        ? 0
+        : -ESTALE;
+}
+
+static int connect_queue_for_snapshot(
+        const PdockerVkCapabilitySnapshot *snapshot) {
+    int rc = capability_snapshot_endpoint_status(snapshot);
     if (rc != 0) return rc;
-    return connect_queue_path(endpoint.path);
+    int fd = connect_queue_path(snapshot->endpoint.path);
+    if (fd < 0) return fd;
+    rc = capability_snapshot_endpoint_status(snapshot);
+    if (rc != 0) {
+        close(fd);
+        return rc;
+    }
+    return fd;
 }
 
 static int duplicate_cloexec_fd(int fd) {
@@ -7361,29 +7658,31 @@ static int duplicate_cloexec_fd(int fd) {
 }
 
 static int connect_submit_queue(const PdockerVkQueue *queue) {
-    if (!queue) return connect_queue();
-    if (queue->destroyed) return -EINVAL;
+    if (!queue || queue->destroyed || !queue->capability_snapshot) return -EINVAL;
     PdockerVkQueue *mutable_queue = (PdockerVkQueue *)queue;
-    PdockerGpuEndpointKey endpoint;
-    int endpoint_rc = snapshot_gpu_endpoint(&endpoint);
+    int endpoint_rc = capability_snapshot_endpoint_status(
+        queue->capability_snapshot);
     if (endpoint_rc != 0) {
         queue_transport_close(mutable_queue);
         return endpoint_rc;
     }
+    const PdockerGpuEndpointKey *endpoint =
+        &queue->capability_snapshot->endpoint;
     if (mutable_queue->transport_fd >= 0 &&
-        (mutable_queue->transport_pid != endpoint.pid ||
-         mutable_queue->transport_generation != endpoint.generation ||
-         strcmp(mutable_queue->transport_path, endpoint.path) != 0)) {
+        (mutable_queue->transport_pid != endpoint->pid ||
+         mutable_queue->transport_generation != endpoint->generation ||
+         strcmp(mutable_queue->transport_path, endpoint->path) != 0)) {
         queue_transport_close(mutable_queue);
+        return -ESTALE;
     }
     if (mutable_queue->transport_fd < 0) {
-        int fd = connect_queue_path(endpoint.path);
+        int fd = connect_queue_for_snapshot(queue->capability_snapshot);
         if (fd < 0) return fd;
         mutable_queue->transport_fd = fd;
-        mutable_queue->transport_pid = endpoint.pid;
-        mutable_queue->transport_generation = endpoint.generation;
+        mutable_queue->transport_pid = endpoint->pid;
+        mutable_queue->transport_generation = endpoint->generation;
         snprintf(mutable_queue->transport_path,
-                 sizeof(mutable_queue->transport_path), "%s", endpoint.path);
+                 sizeof(mutable_queue->transport_path), "%s", endpoint->path);
     }
     /* Queue operations are externally synchronized by Vulkan.  A transient
      * dup failure (for example EMFILE) does not corrupt the established owner
@@ -7409,6 +7708,66 @@ static void finish_submit_queue_request(
     }
 }
 
+#define PDOCKER_VK_EXECUTOR_RESPONSE_TIMEOUT_SECONDS 30
+
+static int pdocker_vk_executor_response_deadline_start(
+        struct timespec *deadline) {
+    if (!deadline || clock_gettime(CLOCK_MONOTONIC, deadline) != 0) {
+        return -EIO;
+    }
+    if (deadline->tv_sec > (time_t)(INT64_MAX -
+                                    PDOCKER_VK_EXECUTOR_RESPONSE_TIMEOUT_SECONDS)) {
+        deadline->tv_sec = (time_t)INT64_MAX;
+        deadline->tv_nsec = 999999999L;
+    } else {
+        deadline->tv_sec += PDOCKER_VK_EXECUTOR_RESPONSE_TIMEOUT_SECONDS;
+    }
+    return 0;
+}
+
+static int pdocker_vk_read_response_byte_before_deadline(
+        int fd,
+        char *out,
+        const struct timespec *deadline) {
+    if (fd < 0 || !out || !deadline) return -EINVAL;
+    for (;;) {
+        struct timespec now;
+        if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) return -EIO;
+        int64_t sec = (int64_t)deadline->tv_sec - (int64_t)now.tv_sec;
+        int64_t nsec = (int64_t)deadline->tv_nsec - (int64_t)now.tv_nsec;
+        if (nsec < 0) {
+            nsec += 1000000000ll;
+            sec--;
+        }
+        if (sec < 0 || (sec == 0 && nsec <= 0)) return -ETIMEDOUT;
+        int64_t timeout_ms =
+            sec > (int64_t)INT_MAX / 1000ll
+                ? INT_MAX
+                : sec * 1000ll + (nsec + 999999ll) / 1000000ll;
+        if (timeout_ms <= 0) timeout_ms = 1;
+        if (timeout_ms > INT_MAX) timeout_ms = INT_MAX;
+        struct pollfd pfd = {
+            .fd = fd,
+            .events = POLLIN,
+        };
+        int poll_rc = poll(&pfd, 1, (int)timeout_ms);
+        if (poll_rc < 0) {
+            if (errno == EINTR) continue;
+            return -errno;
+        }
+        if (poll_rc == 0) return -ETIMEDOUT;
+        if ((pfd.revents & (POLLERR | POLLNVAL)) != 0) return -EIO;
+        ssize_t read_rc = read(fd, out, 1);
+        if (read_rc < 0) {
+            if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
+                continue;
+            }
+            return -errno;
+        }
+        return read_rc == 0 ? 0 : 1;
+    }
+}
+
 static int read_executor_text_response_line(int fd, char **out_line, size_t *out_len) {
     const size_t max_line = 4096u;
     size_t line_cap = 256u;
@@ -7418,7 +7777,14 @@ static int read_executor_text_response_line(int fd, char **out_line, size_t *out
     *out_line = NULL;
     *out_len = 0;
     char *line = (char *)malloc(line_cap);
-    if (!line) return -ENOMEM;
+    if (!line) return -EIO;
+    struct timespec response_deadline;
+    int deadline_rc =
+        pdocker_vk_executor_response_deadline_start(&response_deadline);
+    if (deadline_rc != 0) {
+        free(line);
+        return deadline_rc;
+    }
     while (off + 1u < max_line) {
         if (off + 1u >= line_cap) {
             size_t next_cap = line_cap * 2u;
@@ -7430,20 +7796,23 @@ static int read_executor_text_response_line(int fd, char **out_line, size_t *out
             char *next = (char *)realloc(line, next_cap);
             if (!next) {
                 free(line);
-                return -ENOMEM;
+                return -EIO;
             }
             line = next;
             line_cap = next_cap;
         }
         char ch;
-        ssize_t r = read(fd, &ch, 1);
-        if (r < 0) {
-            if (errno == EINTR) continue;
-            int err = errno;
+        int read_rc = pdocker_vk_read_response_byte_before_deadline(
+            fd, &ch, &response_deadline);
+        if (read_rc < 0) {
             free(line);
-            return -err;
+            return read_rc == -ENOMEM ? -EIO : read_rc;
         }
-        if (r == 0) break;
+        if (read_rc == 0) break;
+        if (ch == '\0') {
+            free(line);
+            return -EPROTO;
+        }
         line[off++] = ch;
         if (ch == '\n') {
             line_terminated = true;
@@ -7518,14 +7887,9 @@ static uint64_t fnv1a64_update_u64(uint64_t hash, uint64_t value) {
     return fnv1a64_update_bytes(hash, &value, sizeof(value));
 }
 
-static bool vulkan_v5_frame_enabled(void) {
-    /*
-     * V5 framed transport is the generic pass-through path.  The legacy text
-     * transport cannot carry the full Vulkan API-visible object identity
-     * (for example memory property flags), so keep it only as an explicit
-     * compatibility opt-out via PDOCKER_VULKAN_USE_V5_FRAME=0.
-     */
-    return env_truthy_default("PDOCKER_VULKAN_USE_V5_FRAME", true);
+static bool vulkan_v5_frame_enabled(
+        const PdockerVkCapabilitySnapshot *snapshot) {
+    return snapshot && snapshot->v5_frame_enabled;
 }
 
 static bool checked_add_size(size_t a, size_t b, size_t *out) {
@@ -7666,62 +8030,374 @@ static int sendmsg_exact_with_fds(int fd,
     return 0;
 }
 
-static int parse_executor_json_result(const char *line, int fallback) {
-    if (!line) return fallback;
-    const char *p = strstr(line, "\"result\":");
-    if (!p) return fallback;
-    p += strlen("\"result\":");
-    char *end = NULL;
-    long value = strtol(p, &end, 10);
-    if (end == p) return fallback;
-    return (int)value;
+typedef enum {
+    PDOCKER_EXECUTOR_JSON_INVALID = 0,
+    PDOCKER_EXECUTOR_JSON_STRING,
+    PDOCKER_EXECUTOR_JSON_NUMBER,
+    PDOCKER_EXECUTOR_JSON_TRUE,
+    PDOCKER_EXECUTOR_JSON_FALSE,
+    PDOCKER_EXECUTOR_JSON_NULL,
+    PDOCKER_EXECUTOR_JSON_CONTAINER,
+} PdockerExecutorJsonValueKind;
+
+typedef struct {
+    PdockerExecutorJsonValueKind kind;
+    const char *start;
+    size_t length;
+} PdockerExecutorJsonValue;
+
+static const char *executor_json_skip_ws(
+        const char *cursor,
+        const char *end) {
+    while (cursor && cursor < end &&
+           (*cursor == ' ' || *cursor == '\t' ||
+            *cursor == '\r' || *cursor == '\n')) {
+        ++cursor;
+    }
+    return cursor;
+}
+
+static bool executor_json_skip_string(
+        const char **cursor_inout,
+        const char *end) {
+    if (!cursor_inout || !*cursor_inout || *cursor_inout >= end ||
+        **cursor_inout != '"') {
+        return false;
+    }
+    const char *cursor = *cursor_inout + 1;
+    while (cursor < end) {
+        unsigned char ch = (unsigned char)*cursor++;
+        if (ch == '"') {
+            *cursor_inout = cursor;
+            return true;
+        }
+        if (ch < 0x20u) return false;
+        if (ch != '\\') continue;
+        if (cursor >= end) return false;
+        char escape = *cursor++;
+        if (escape == 'u') {
+            for (unsigned i = 0; i < 4; ++i) {
+                if (cursor >= end ||
+                    !((*cursor >= '0' && *cursor <= '9') ||
+                      (*cursor >= 'a' && *cursor <= 'f') ||
+                      (*cursor >= 'A' && *cursor <= 'F'))) {
+                    return false;
+                }
+                ++cursor;
+            }
+        } else if (escape != '"' && escape != '\\' && escape != '/' &&
+                   escape != 'b' && escape != 'f' && escape != 'n' &&
+                   escape != 'r' && escape != 't') {
+            return false;
+        }
+    }
+    return false;
+}
+
+static bool executor_json_skip_number(
+        const char **cursor_inout,
+        const char *end) {
+    if (!cursor_inout || !*cursor_inout) return false;
+    const char *cursor = *cursor_inout;
+    if (cursor < end && *cursor == '-') ++cursor;
+    if (cursor >= end) return false;
+    if (*cursor == '0') {
+        ++cursor;
+        if (cursor < end && *cursor >= '0' && *cursor <= '9') return false;
+    } else {
+        if (*cursor < '1' || *cursor > '9') return false;
+        do {
+            ++cursor;
+        } while (cursor < end && *cursor >= '0' && *cursor <= '9');
+    }
+    if (cursor < end && *cursor == '.') {
+        ++cursor;
+        if (cursor >= end || *cursor < '0' || *cursor > '9') return false;
+        do {
+            ++cursor;
+        } while (cursor < end && *cursor >= '0' && *cursor <= '9');
+    }
+    if (cursor < end && (*cursor == 'e' || *cursor == 'E')) {
+        ++cursor;
+        if (cursor < end && (*cursor == '+' || *cursor == '-')) ++cursor;
+        if (cursor >= end || *cursor < '0' || *cursor > '9') return false;
+        do {
+            ++cursor;
+        } while (cursor < end && *cursor >= '0' && *cursor <= '9');
+    }
+    *cursor_inout = cursor;
+    return true;
+}
+
+static bool executor_json_skip_value(
+        const char **cursor_inout,
+        const char *end,
+        unsigned depth) {
+    if (!cursor_inout || !*cursor_inout || depth > 32u) return false;
+    const char *cursor = executor_json_skip_ws(*cursor_inout, end);
+    if (!cursor || cursor >= end) return false;
+    if (*cursor == '"') {
+        if (!executor_json_skip_string(&cursor, end)) return false;
+        *cursor_inout = cursor;
+        return true;
+    }
+    if (*cursor == '-' || (*cursor >= '0' && *cursor <= '9')) {
+        if (!executor_json_skip_number(&cursor, end)) return false;
+        *cursor_inout = cursor;
+        return true;
+    }
+    const char opening = *cursor;
+    if (opening == '{' || opening == '[') {
+        const bool object = opening == '{';
+        const char closing = object ? '}' : ']';
+        ++cursor;
+        cursor = executor_json_skip_ws(cursor, end);
+        if (cursor < end && *cursor == closing) {
+            *cursor_inout = cursor + 1;
+            return true;
+        }
+        for (;;) {
+            if (object) {
+                if (!executor_json_skip_string(&cursor, end)) return false;
+                cursor = executor_json_skip_ws(cursor, end);
+                if (cursor >= end || *cursor++ != ':') return false;
+            }
+            if (!executor_json_skip_value(&cursor, end, depth + 1u)) {
+                return false;
+            }
+            cursor = executor_json_skip_ws(cursor, end);
+            if (cursor >= end) return false;
+            if (*cursor == closing) {
+                *cursor_inout = cursor + 1;
+                return true;
+            }
+            if (*cursor++ != ',') return false;
+            cursor = executor_json_skip_ws(cursor, end);
+            if (cursor >= end || *cursor == closing) return false;
+        }
+    }
+    if ((size_t)(end - cursor) >= 4u &&
+        (memcmp(cursor, "true", 4u) == 0 ||
+         memcmp(cursor, "null", 4u) == 0)) {
+        *cursor_inout = cursor + 4;
+        return true;
+    }
+    if ((size_t)(end - cursor) >= 5u &&
+        memcmp(cursor, "false", 5u) == 0) {
+        *cursor_inout = cursor + 5;
+        return true;
+    }
+    return false;
+}
+
+static bool executor_json_top_level_member_exact(
+        const char *line,
+        const char *wanted_key,
+        PdockerExecutorJsonValue *out_value) {
+    if (!line || !wanted_key || !wanted_key[0]) return false;
+    const char *end = line + strlen(line);
+    const char *cursor = executor_json_skip_ws(line, end);
+    while (end > cursor &&
+           (end[-1] == ' ' || end[-1] == '\t' ||
+            end[-1] == '\r' || end[-1] == '\n')) {
+        --end;
+    }
+    if (cursor >= end || *cursor++ != '{') return false;
+    cursor = executor_json_skip_ws(cursor, end);
+    bool found = false;
+    PdockerExecutorJsonValue found_value;
+    memset(&found_value, 0, sizeof(found_value));
+    if (cursor < end && *cursor == '}') {
+        ++cursor;
+        cursor = executor_json_skip_ws(cursor, end);
+        return false;
+    }
+    for (;;) {
+        if (cursor >= end || *cursor != '"') return false;
+        const char *key_quote = cursor;
+        if (!executor_json_skip_string(&cursor, end)) return false;
+        const char *key_start = key_quote + 1;
+        size_t key_length = (size_t)(cursor - key_quote - 2);
+        bool key_has_escape =
+            memchr(key_start, '\\', key_length) != NULL;
+        if (key_has_escape) return false;
+        cursor = executor_json_skip_ws(cursor, end);
+        if (cursor >= end || *cursor++ != ':') return false;
+        cursor = executor_json_skip_ws(cursor, end);
+        if (cursor >= end) return false;
+        const char *value_start = cursor;
+        PdockerExecutorJsonValueKind kind = PDOCKER_EXECUTOR_JSON_INVALID;
+        if (*cursor == '"') kind = PDOCKER_EXECUTOR_JSON_STRING;
+        else if (*cursor == '-' || (*cursor >= '0' && *cursor <= '9')) {
+            kind = PDOCKER_EXECUTOR_JSON_NUMBER;
+        } else if ((size_t)(end - cursor) >= 4u &&
+                   memcmp(cursor, "true", 4u) == 0) {
+            kind = PDOCKER_EXECUTOR_JSON_TRUE;
+        } else if ((size_t)(end - cursor) >= 5u &&
+                   memcmp(cursor, "false", 5u) == 0) {
+            kind = PDOCKER_EXECUTOR_JSON_FALSE;
+        } else if ((size_t)(end - cursor) >= 4u &&
+                   memcmp(cursor, "null", 4u) == 0) {
+            kind = PDOCKER_EXECUTOR_JSON_NULL;
+        } else if (*cursor == '{' || *cursor == '[') {
+            kind = PDOCKER_EXECUTOR_JSON_CONTAINER;
+        }
+        if (kind == PDOCKER_EXECUTOR_JSON_INVALID ||
+            !executor_json_skip_value(&cursor, end, 0u)) {
+            return false;
+        }
+        const char *value_end = cursor;
+        size_t wanted_length = strlen(wanted_key);
+        if (!key_has_escape && key_length == wanted_length &&
+            memcmp(key_start, wanted_key, wanted_length) == 0) {
+            if (found) return false;
+            found = true;
+            found_value.kind = kind;
+            found_value.start = value_start;
+            found_value.length = (size_t)(value_end - value_start);
+        }
+        cursor = executor_json_skip_ws(cursor, end);
+        if (cursor >= end) return false;
+        if (*cursor == '}') {
+            ++cursor;
+            cursor = executor_json_skip_ws(cursor, end);
+            if (cursor != end) return false;
+            if (found && out_value) *out_value = found_value;
+            return found;
+        }
+        if (*cursor++ != ',') return false;
+        cursor = executor_json_skip_ws(cursor, end);
+        if (cursor >= end || *cursor == '}') return false;
+    }
+}
+
+static bool executor_json_object_valid(const char *line) {
+    if (!line) return false;
+    const char *end = line + strlen(line);
+    const char *cursor = executor_json_skip_ws(line, end);
+    while (end > cursor &&
+           (end[-1] == ' ' || end[-1] == '\t' ||
+            end[-1] == '\r' || end[-1] == '\n')) {
+        --end;
+    }
+    if (cursor >= end || *cursor != '{') return false;
+    if (!executor_json_skip_value(&cursor, end, 0u)) return false;
+    cursor = executor_json_skip_ws(cursor, end);
+    return cursor == end;
+}
+
+static bool executor_json_bool_key_exact(
+        const char *line,
+        const char *key,
+        bool expected) {
+    PdockerExecutorJsonValue value;
+    if (!executor_json_top_level_member_exact(line, key, &value)) return false;
+    return value.kind == (expected
+        ? PDOCKER_EXECUTOR_JSON_TRUE
+        : PDOCKER_EXECUTOR_JSON_FALSE);
 }
 
 static bool parse_executor_json_u64_key_exact(
         const char *line,
         const char *key,
         uint64_t *out_value) {
-    if (!line || !key || !key[0] || !out_value) return false;
-    char pattern[64];
-    int pattern_length = snprintf(pattern, sizeof(pattern), "\"%s\":", key);
-    if (pattern_length <= 0 || (size_t)pattern_length >= sizeof(pattern)) return false;
-    const char *field = strstr(line, pattern);
-    if (!field || strstr(field + (size_t)pattern_length, pattern) != NULL) return false;
-    const char *digits = field + (size_t)pattern_length;
-    if (*digits < '0' || *digits > '9') return false;
-    if (*digits == '0' && digits[1] >= '0' && digits[1] <= '9') return false;
+    if (!out_value) return false;
+    PdockerExecutorJsonValue value;
+    if (!executor_json_top_level_member_exact(line, key, &value) ||
+        value.kind != PDOCKER_EXECUTOR_JSON_NUMBER ||
+        value.length == 0 || value.length >= 32u ||
+        value.start[0] == '-' ||
+        memchr(value.start, '.', value.length) != NULL ||
+        memchr(value.start, 'e', value.length) != NULL ||
+        memchr(value.start, 'E', value.length) != NULL) {
+        return false;
+    }
+    char number[32];
+    memcpy(number, value.start, value.length);
+    number[value.length] = '\0';
     errno = 0;
-    char *end = NULL;
-    unsigned long long value = strtoull(digits, &end, 10);
-    if (errno == ERANGE || end == digits) return false;
-    while (*end == ' ' || *end == '\t' || *end == '\r') ++end;
-    if (*end != ',' && *end != '}') return false;
-    *out_value = (uint64_t)value;
+    char *parsed_end = NULL;
+    unsigned long long parsed = strtoull(number, &parsed_end, 10);
+    if (errno == ERANGE || !parsed_end ||
+        parsed_end != number + value.length) {
+        return false;
+    }
+    *out_value = (uint64_t)parsed;
     return true;
 }
 
-static uint64_t parse_executor_json_u64_key(
+static bool parse_executor_json_i32_key_exact(
         const char *line,
         const char *key,
-        uint64_t fallback) {
-    uint64_t value = 0;
-    return parse_executor_json_u64_key_exact(line, key, &value) ? value : fallback;
+        int32_t *out_value) {
+    if (!out_value) return false;
+    PdockerExecutorJsonValue value;
+    if (!executor_json_top_level_member_exact(line, key, &value) ||
+        value.kind != PDOCKER_EXECUTOR_JSON_NUMBER ||
+        value.length == 0 || value.length >= 24u ||
+        memchr(value.start, '.', value.length) != NULL ||
+        memchr(value.start, 'e', value.length) != NULL ||
+        memchr(value.start, 'E', value.length) != NULL) {
+        return false;
+    }
+    char number[24];
+    memcpy(number, value.start, value.length);
+    number[value.length] = '\0';
+    errno = 0;
+    char *parsed_end = NULL;
+    long parsed = strtol(number, &parsed_end, 10);
+    if (errno == ERANGE || !parsed_end ||
+        parsed_end != number + value.length ||
+        parsed < INT32_MIN || parsed > INT32_MAX) {
+        return false;
+    }
+    *out_value = (int32_t)parsed;
+    return true;
 }
 
-static int send_executor_text_command(
+static bool executor_json_string_key_equals_exact(
+        const char *line,
+        const char *key,
+        const char *expected) {
+    if (!expected) return false;
+    PdockerExecutorJsonValue value;
+    if (!executor_json_top_level_member_exact(line, key, &value) ||
+        value.kind != PDOCKER_EXECUTOR_JSON_STRING) {
+        return false;
+    }
+    size_t expected_length = strlen(expected);
+    return value.length == expected_length + 2u &&
+           memcmp(value.start + 1, expected, expected_length) == 0;
+}
+
+static int send_executor_text_command_with_fds(
+        const PdockerVkCapabilitySnapshot *snapshot,
         const char *command,
+        const int *passed_fds,
+        size_t passed_fd_count,
         int *out_result,
         bool *out_signaled,
-        uint64_t *out_value) {
-    if (!command || !command[0]) return -EINVAL;
+        uint64_t *out_value,
+        uint64_t *out_query_pool_id,
+        const char *expected_stage,
+        uint64_t expected_query_pool_id) {
+    if (!command || !command[0] ||
+        passed_fd_count > PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS ||
+        (passed_fd_count > 0 && !passed_fds)) {
+        return -EINVAL;
+    }
     if (out_result) *out_result = VK_ERROR_UNKNOWN;
     if (out_signaled) *out_signaled = false;
     if (out_value) *out_value = 0;
-    int socket_fd = connect_queue();
+    if (out_query_pool_id) *out_query_pool_id = 0;
+    int socket_fd = connect_queue_for_snapshot(snapshot);
     if (socket_fd < 0) return socket_fd;
 
     int rc = 0;
-    int write_rc = write_exact_fd(socket_fd, command, strlen(command));
+    int write_rc = passed_fd_count > 0
+        ? sendmsg_exact_with_fds(socket_fd, command, strlen(command),
+                                 passed_fds, passed_fd_count)
+        : write_exact_fd(socket_fd, command, strlen(command));
     if (write_rc != 0) {
         rc = write_rc;
     } else {
@@ -7729,20 +8405,64 @@ static int send_executor_text_command(
         size_t off = 0;
         rc = read_executor_text_response_line(socket_fd, &line, &off);
         if (rc == 0) {
-            if (!line) {
-                rc = -EIO;
+            if (!line || !executor_json_object_valid(line) ||
+                !executor_json_bool_key_exact(line, "valid", true)) {
+                rc = -EPROTO;
                 goto text_response_done;
             }
             if (getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
                 fprintf(stderr, "pdocker-vulkan-icd: executor response: %s", line);
                 if (off == 0 || line[off - 1] != '\n') fprintf(stderr, "\n");
             }
-            if (strstr(line, "\"valid\":true") == NULL) {
-                rc = -EIO;
-            } else {
-                if (out_result) *out_result = parse_executor_json_result(line, VK_SUCCESS);
-                if (out_signaled) *out_signaled = strstr(line, "\"signaled\":true") != NULL;
-                if (out_value) *out_value = parse_executor_json_u64_key(line, "value", 0);
+
+            int32_t strict_result = VK_ERROR_UNKNOWN;
+            if (!parse_executor_json_i32_key_exact(
+                    line, "result", &strict_result)) {
+                rc = -EPROTO;
+                goto text_response_done;
+            }
+            if (expected_stage &&
+                !executor_json_string_key_equals_exact(
+                    line, "stage", expected_stage)) {
+                rc = -EPROTO;
+                goto text_response_done;
+            }
+            if (out_result) *out_result = strict_result;
+
+            if (out_signaled) {
+                if (!executor_json_bool_key_exact(
+                        line, "signaled", true) &&
+                    !executor_json_bool_key_exact(
+                        line, "signaled", false)) {
+                    rc = -EPROTO;
+                    goto text_response_done;
+                }
+                *out_signaled =
+                    executor_json_bool_key_exact(line, "signaled", true);
+            }
+            if (out_value &&
+                !parse_executor_json_u64_key_exact(
+                    line, "value", out_value)) {
+                rc = -EPROTO;
+                goto text_response_done;
+            }
+
+            const bool require_query_pool_id =
+                out_query_pool_id != NULL ||
+                expected_query_pool_id != 0;
+            if (require_query_pool_id) {
+                uint64_t strict_query_pool_id = 0;
+                if (!parse_executor_json_u64_key_exact(
+                        line, "query_pool_id",
+                        &strict_query_pool_id) ||
+                    (expected_query_pool_id != 0 &&
+                     strict_query_pool_id != expected_query_pool_id)) {
+                    rc = -EPROTO;
+                    goto text_response_done;
+                }
+                if (out_query_pool_id) {
+                    *out_query_pool_id = strict_query_pool_id;
+                }
             }
         }
 text_response_done:
@@ -7752,15 +8472,206 @@ text_response_done:
     return rc;
 }
 
+static bool executor_text_command_expected_stage(
+        const char *command,
+        char *stage,
+        size_t stage_capacity) {
+    static const char prefix[] = "VULKAN_";
+    static const char stage_prefix[] = "vulkan-";
+    if (!command || !stage ||
+        stage_capacity <= sizeof(stage_prefix) ||
+        strncmp(command, prefix, sizeof(prefix) - 1u) != 0) {
+        return false;
+    }
+    size_t output = 0;
+    memcpy(stage, stage_prefix, sizeof(stage_prefix) - 1u);
+    output += sizeof(stage_prefix) - 1u;
+    const char *cursor = command + sizeof(prefix) - 1u;
+    if (*cursor == '\0' || *cursor == ' ' || *cursor == '\n') return false;
+    while (*cursor && *cursor != ' ' && *cursor != '\n' &&
+           *cursor != '\r' && *cursor != '\t') {
+        unsigned char ch = (unsigned char)*cursor++;
+        if (output + 1u >= stage_capacity) return false;
+        if (ch == '_') {
+            stage[output++] = '-';
+        } else if (ch >= 'A' && ch <= 'Z') {
+            stage[output++] = (char)(ch - 'A' + 'a');
+        } else if ((ch >= 'a' && ch <= 'z') ||
+                   (ch >= '0' && ch <= '9') || ch == '-') {
+            stage[output++] = (char)ch;
+        } else {
+            return false;
+        }
+    }
+    stage[output] = '\0';
+    return true;
+}
 
+static int send_executor_text_command(
+        const PdockerVkCapabilitySnapshot *snapshot,
+        const char *command,
+        int *out_result,
+        bool *out_signaled,
+        uint64_t *out_value) {
+    char expected_stage[128];
+    if (!executor_text_command_expected_stage(
+            command, expected_stage, sizeof(expected_stage))) {
+        return -EINVAL;
+    }
+    return send_executor_text_command_with_fds(
+        snapshot, command, NULL, 0,
+        out_result, out_signaled, out_value, NULL,
+        expected_stage, 0);
+}
+
+static int send_executor_idle_command(
+        const PdockerVkCapabilitySnapshot *snapshot,
+        const char *command,
+        const char *expected_stage,
+        VkResult *out_result) {
+    if (!snapshot || !command || !expected_stage || !out_result) {
+        return -EINVAL;
+    }
+    int native_result = VK_ERROR_UNKNOWN;
+    int rc = send_executor_text_command_with_fds(
+        snapshot, command, NULL, 0,
+        &native_result, NULL, NULL, NULL,
+        expected_stage, 0);
+    if (rc == 0) *out_result = (VkResult)native_result;
+    return rc;
+}
+
+static int send_executor_query_pool_create(
+        const PdockerVkCapabilitySnapshot *snapshot,
+        const VkQueryPoolCreateInfo *create_info,
+        VkResult *out_result,
+        uint64_t *out_query_pool_id) {
+    if (!snapshot || !create_info || !out_result || !out_query_pool_id) return -EINVAL;
+    *out_result = VK_ERROR_UNKNOWN;
+    *out_query_pool_id = 0;
+    char command[192];
+    int length = snprintf(
+        command, sizeof(command),
+        "VULKAN_QUERY_POOL_CREATE %u %u %u\n",
+        (unsigned)create_info->queryType,
+        create_info->queryCount,
+        (unsigned)create_info->pipelineStatistics);
+    if (length <= 0 || (size_t)length >= sizeof(command)) return -EOVERFLOW;
+    int native_result = VK_ERROR_UNKNOWN;
+    int rc = send_executor_text_command_with_fds(
+        snapshot, command, NULL, 0,
+        &native_result, NULL, NULL, out_query_pool_id,
+        "vulkan-query-pool-create", 0);
+    if (rc != 0) return rc;
+    *out_result = (VkResult)native_result;
+    if (*out_result == VK_SUCCESS && *out_query_pool_id == 0) return -EPROTO;
+    if (*out_result != VK_SUCCESS) *out_query_pool_id = 0;
+    return 0;
+}
+
+static int send_executor_query_pool_destroy(PdockerVkQueryPool *pool) {
+    if (!pool || !pool->capability_snapshot || !pool->executor_tracked ||
+        pool->pool_id == 0) {
+        return -EINVAL;
+    }
+    char command[128];
+    int length = snprintf(
+        command, sizeof(command),
+        "VULKAN_QUERY_POOL_DESTROY %llu\n",
+        (unsigned long long)pool->pool_id);
+    if (length <= 0 || (size_t)length >= sizeof(command)) return -EOVERFLOW;
+    int native_result = VK_ERROR_UNKNOWN;
+    uint64_t response_pool_id = 0;
+    int rc = send_executor_text_command_with_fds(
+        pool->capability_snapshot, command, NULL, 0,
+        &native_result, NULL, NULL, &response_pool_id,
+        "vulkan-query-pool-destroy", pool->pool_id);
+    if (rc != 0) return rc;
+    return native_result == VK_SUCCESS ? 0 : -EIO;
+}
+
+static int send_executor_query_pool_reset(
+        PdockerVkQueryPool *pool,
+        uint32_t first_query,
+        uint32_t query_count,
+        VkResult *out_result) {
+    if (!pool || !pool->capability_snapshot || !pool->executor_tracked ||
+        pool->pool_id == 0 || !out_result) {
+        return -EINVAL;
+    }
+    char command[160];
+    int length = snprintf(
+        command, sizeof(command),
+        "VULKAN_QUERY_POOL_RESET %llu %u %u\n",
+        (unsigned long long)pool->pool_id, first_query, query_count);
+    if (length <= 0 || (size_t)length >= sizeof(command)) return -EOVERFLOW;
+    int native_result = VK_ERROR_UNKNOWN;
+    uint64_t response_pool_id = 0;
+    int rc = send_executor_text_command_with_fds(
+        pool->capability_snapshot, command, NULL, 0,
+        &native_result, NULL, NULL, &response_pool_id,
+        "vulkan-query-pool-reset", pool->pool_id);
+    if (rc == 0) *out_result = (VkResult)native_result;
+    return rc;
+}
+
+static int send_executor_query_pool_get_results(
+        PdockerVkQueryPool *pool,
+        uint32_t first_query,
+        uint32_t query_count,
+        size_t data_size,
+        VkDeviceSize stride,
+        VkQueryResultFlags flags,
+        int result_fd,
+        VkResult *out_result) {
+    if (!pool || !pool->capability_snapshot || !pool->executor_tracked ||
+        pool->pool_id == 0 || result_fd < 0 || data_size == 0 || !out_result) {
+        return -EINVAL;
+    }
+    char command[256];
+    int length = snprintf(
+        command, sizeof(command),
+        "VULKAN_QUERY_POOL_GET_RESULTS %llu %u %u %llu %llu %u\n",
+        (unsigned long long)pool->pool_id,
+        first_query,
+        query_count,
+        (unsigned long long)data_size,
+        (unsigned long long)stride,
+        (unsigned)flags);
+    if (length <= 0 || (size_t)length >= sizeof(command)) return -EOVERFLOW;
+    int native_result = VK_ERROR_UNKNOWN;
+    uint64_t response_pool_id = 0;
+    int rc = send_executor_text_command_with_fds(
+        pool->capability_snapshot, command, &result_fd, 1,
+        &native_result, NULL, NULL, &response_pool_id,
+        "vulkan-query-pool-get-results", pool->pool_id);
+    if (rc == 0) *out_result = (VkResult)native_result;
+    return rc;
+}
+
+
+static void destroy_query_pool_executor_and_retire(
+        PdockerVkQueryPool *pool) {
+    if (!pool) return;
+    if (pool->executor_tracked) {
+        int transport_rc = send_executor_query_pool_destroy(pool);
+        if (transport_rc != 0) {
+            trace_icd_runtime_failure(
+                "query-pool-destroy-transport", VK_ERROR_DEVICE_LOST);
+        }
+        pool->executor_tracked = false;
+    }
+    query_pool_retire(pool);
+}
 
 static int send_executor_event_create(PdockerVkEvent *event) {
+    const PdockerVkCapabilitySnapshot *snapshot = event ? event->capability_snapshot : NULL;
     if (!event || event->event_id == 0) return -EINVAL;
     char cmd[128];
     snprintf(cmd, sizeof(cmd), "VULKAN_EVENT_CREATE %llu\n", (unsigned long long)event->event_id);
     int result = VK_ERROR_UNKNOWN;
     bool signaled = false;
-    int rc = send_executor_text_command(cmd, &result, &signaled, NULL);
+    int rc = send_executor_text_command(snapshot, cmd, &result, &signaled, NULL);
     if (rc == 0 && result == VK_SUCCESS) {
         event->executor_tracked = true;
         event->signaled = signaled;
@@ -7769,16 +8680,18 @@ static int send_executor_event_create(PdockerVkEvent *event) {
 }
 
 static int send_executor_event_destroy(PdockerVkEvent *event) {
+    const PdockerVkCapabilitySnapshot *snapshot = event ? event->capability_snapshot : NULL;
     if (!event || !event->executor_tracked || event->event_id == 0) return 0;
     char cmd[128];
     snprintf(cmd, sizeof(cmd), "VULKAN_EVENT_DESTROY %llu\n", (unsigned long long)event->event_id);
     int result = VK_ERROR_UNKNOWN;
-    int rc = send_executor_text_command(cmd, &result, NULL, NULL);
+    int rc = send_executor_text_command(snapshot, cmd, &result, NULL, NULL);
     event->executor_tracked = false;
     return rc == 0 && result != VK_SUCCESS ? -EIO : rc;
 }
 
 static int send_executor_event_status(PdockerVkEvent *event, VkResult *out_result) {
+    const PdockerVkCapabilitySnapshot *snapshot = event ? event->capability_snapshot : NULL;
     if (!event || !event->executor_tracked || event->event_id == 0) {
         if (out_result) *out_result = event && event->signaled ? VK_EVENT_SET : VK_EVENT_RESET;
         return 0;
@@ -7787,7 +8700,7 @@ static int send_executor_event_status(PdockerVkEvent *event, VkResult *out_resul
     snprintf(cmd, sizeof(cmd), "VULKAN_EVENT_STATUS %llu\n", (unsigned long long)event->event_id);
     int result = VK_ERROR_UNKNOWN;
     bool signaled = false;
-    int rc = send_executor_text_command(cmd, &result, &signaled, NULL);
+    int rc = send_executor_text_command(snapshot, cmd, &result, &signaled, NULL);
     if (rc == 0) {
         event->signaled = signaled;
         if (out_result) *out_result = (VkResult)result;
@@ -7796,12 +8709,13 @@ static int send_executor_event_status(PdockerVkEvent *event, VkResult *out_resul
 }
 
 static int send_executor_event_set(PdockerVkEvent *event, VkResult *out_result) {
+    const PdockerVkCapabilitySnapshot *snapshot = event ? event->capability_snapshot : NULL;
     if (!event || !event->executor_tracked || event->event_id == 0) return -ENOENT;
     char cmd[128];
     snprintf(cmd, sizeof(cmd), "VULKAN_EVENT_SET %llu\n", (unsigned long long)event->event_id);
     int result = VK_ERROR_UNKNOWN;
     bool signaled = false;
-    int rc = send_executor_text_command(cmd, &result, &signaled, NULL);
+    int rc = send_executor_text_command(snapshot, cmd, &result, &signaled, NULL);
     if (rc == 0) {
         event->signaled = signaled;
         if (out_result) *out_result = (VkResult)result;
@@ -7810,12 +8724,13 @@ static int send_executor_event_set(PdockerVkEvent *event, VkResult *out_result) 
 }
 
 static int send_executor_event_reset(PdockerVkEvent *event, VkResult *out_result) {
+    const PdockerVkCapabilitySnapshot *snapshot = event ? event->capability_snapshot : NULL;
     if (!event || !event->executor_tracked || event->event_id == 0) return -ENOENT;
     char cmd[128];
     snprintf(cmd, sizeof(cmd), "VULKAN_EVENT_RESET %llu\n", (unsigned long long)event->event_id);
     int result = VK_ERROR_UNKNOWN;
     bool signaled = false;
-    int rc = send_executor_text_command(cmd, &result, &signaled, NULL);
+    int rc = send_executor_text_command(snapshot, cmd, &result, &signaled, NULL);
     if (rc == 0) {
         event->signaled = signaled;
         if (out_result) *out_result = (VkResult)result;
@@ -7824,6 +8739,7 @@ static int send_executor_event_reset(PdockerVkEvent *event, VkResult *out_result
 }
 
 static int send_executor_semaphore_create(PdockerVkSemaphore *sem) {
+    const PdockerVkCapabilitySnapshot *snapshot = sem ? sem->capability_snapshot : NULL;
     if (!sem || sem->semaphore_id == 0) return -EINVAL;
     char cmd[160];
     snprintf(cmd, sizeof(cmd), "VULKAN_SEMAPHORE_CREATE %llu %u %llu\n",
@@ -7832,7 +8748,7 @@ static int send_executor_semaphore_create(PdockerVkSemaphore *sem) {
              (unsigned long long)sem->value);
     int result = VK_ERROR_UNKNOWN;
     uint64_t value = 0;
-    int rc = send_executor_text_command(cmd, &result, NULL, &value);
+    int rc = send_executor_text_command(snapshot, cmd, &result, NULL, &value);
     if (rc == 0 && result == VK_SUCCESS) {
         sem->executor_tracked = true;
         if (sem->timeline) sem->value = value;
@@ -7842,16 +8758,18 @@ static int send_executor_semaphore_create(PdockerVkSemaphore *sem) {
 }
 
 static int send_executor_semaphore_destroy(PdockerVkSemaphore *sem) {
+    const PdockerVkCapabilitySnapshot *snapshot = sem ? sem->capability_snapshot : NULL;
     if (!sem || !sem->executor_tracked || sem->semaphore_id == 0) return 0;
     char cmd[128];
     snprintf(cmd, sizeof(cmd), "VULKAN_SEMAPHORE_DESTROY %llu\n", (unsigned long long)sem->semaphore_id);
     int result = VK_ERROR_UNKNOWN;
-    int rc = send_executor_text_command(cmd, &result, NULL, NULL);
+    int rc = send_executor_text_command(snapshot, cmd, &result, NULL, NULL);
     sem->executor_tracked = false;
     return rc == 0 && result != VK_SUCCESS ? -EIO : rc;
 }
 
 static int send_executor_semaphore_counter(PdockerVkSemaphore *sem, uint64_t *out_value, VkResult *out_result) {
+    const PdockerVkCapabilitySnapshot *snapshot = sem ? sem->capability_snapshot : NULL;
     if (!sem || !sem->executor_tracked || sem->semaphore_id == 0) {
         if (out_value) *out_value = sem ? sem->value : 0;
         if (out_result) *out_result = sem && sem->timeline ? VK_SUCCESS : VK_ERROR_FEATURE_NOT_PRESENT;
@@ -7861,7 +8779,7 @@ static int send_executor_semaphore_counter(PdockerVkSemaphore *sem, uint64_t *ou
     snprintf(cmd, sizeof(cmd), "VULKAN_SEMAPHORE_COUNTER %llu\n", (unsigned long long)sem->semaphore_id);
     int result = VK_ERROR_UNKNOWN;
     uint64_t value = 0;
-    int rc = send_executor_text_command(cmd, &result, NULL, &value);
+    int rc = send_executor_text_command(snapshot, cmd, &result, NULL, &value);
     if (rc == 0) {
         if (result == VK_SUCCESS) sem->value = value;
         if (out_value) *out_value = value;
@@ -7871,6 +8789,7 @@ static int send_executor_semaphore_counter(PdockerVkSemaphore *sem, uint64_t *ou
 }
 
 static int send_executor_semaphore_signal(PdockerVkSemaphore *sem, uint64_t value, VkResult *out_result) {
+    const PdockerVkCapabilitySnapshot *snapshot = sem ? sem->capability_snapshot : NULL;
     if (!sem || !sem->executor_tracked || sem->semaphore_id == 0) return -ENOENT;
     char cmd[160];
     snprintf(cmd, sizeof(cmd), "VULKAN_SEMAPHORE_SIGNAL %llu %llu\n",
@@ -7878,7 +8797,7 @@ static int send_executor_semaphore_signal(PdockerVkSemaphore *sem, uint64_t valu
              (unsigned long long)value);
     int result = VK_ERROR_UNKNOWN;
     uint64_t observed = 0;
-    int rc = send_executor_text_command(cmd, &result, NULL, &observed);
+    int rc = send_executor_text_command(snapshot, cmd, &result, NULL, &observed);
     if (rc == 0) {
         if (result == VK_SUCCESS) {
             sem->value = observed;
@@ -7919,6 +8838,7 @@ static int send_executor_semaphore_wait(
         const VkSemaphoreWaitInfo *pWaitInfo,
         uint64_t timeout,
         VkResult *out_result) {
+    const PdockerVkCapabilitySnapshot *snapshot = device_capability_snapshot(device);
     if (!pWaitInfo) return -EINVAL;
     size_t cap = 96u + (size_t)pWaitInfo->semaphoreCount * 48u;
     char *cmd = (char *)calloc(1, cap);
@@ -7930,7 +8850,7 @@ static int send_executor_semaphore_wait(
                                   pWaitInfo->semaphoreCount);
     int rc = (off >= cap) ? -E2BIG : append_semaphore_wait_pairs(device, cmd, cap, &off, pWaitInfo);
     int result = VK_ERROR_UNKNOWN;
-    if (rc == 0) rc = send_executor_text_command(cmd, &result, NULL, NULL);
+    if (rc == 0) rc = send_executor_text_command(snapshot, cmd, &result, NULL, NULL);
     if (rc == 0) {
         if (result == VK_SUCCESS) {
             for (uint32_t i = 0; i < pWaitInfo->semaphoreCount; ++i) {
@@ -7945,13 +8865,14 @@ static int send_executor_semaphore_wait(
 }
 
 static int send_executor_fence_create(PdockerVkFence *fence, uint32_t initial_signaled) {
+    const PdockerVkCapabilitySnapshot *snapshot = fence ? fence->capability_snapshot : NULL;
     if (!fence || fence->fence_id == 0) return -EINVAL;
     char cmd[128];
     snprintf(cmd, sizeof(cmd), "VULKAN_FENCE_CREATE %llu %u\n",
              (unsigned long long)fence->fence_id, initial_signaled ? 1u : 0u);
     int result = VK_ERROR_UNKNOWN;
     bool signaled = false;
-    int rc = send_executor_text_command(cmd, &result, &signaled, NULL);
+    int rc = send_executor_text_command(snapshot, cmd, &result, &signaled, NULL);
     if (rc == 0 && result == VK_SUCCESS) {
         fence->executor_tracked = true;
         fence->signaled = signaled;
@@ -7960,11 +8881,12 @@ static int send_executor_fence_create(PdockerVkFence *fence, uint32_t initial_si
 }
 
 static int send_executor_fence_destroy(PdockerVkFence *fence) {
+    const PdockerVkCapabilitySnapshot *snapshot = fence ? fence->capability_snapshot : NULL;
     if (!fence || !fence->executor_tracked || fence->fence_id == 0) return 0;
     char cmd[128];
     snprintf(cmd, sizeof(cmd), "VULKAN_FENCE_DESTROY %llu\n", (unsigned long long)fence->fence_id);
     int result = VK_ERROR_UNKNOWN;
-    int rc = send_executor_text_command(cmd, &result, NULL, NULL);
+    int rc = send_executor_text_command(snapshot, cmd, &result, NULL, NULL);
     fence->executor_tracked = false;
     return rc == 0 && result != VK_SUCCESS ? -EIO : rc;
 }
@@ -7990,6 +8912,7 @@ static int append_fence_ids(
 }
 
 static int send_executor_fence_reset(VkDevice device, uint32_t fenceCount, const VkFence *pFences) {
+    const PdockerVkCapabilitySnapshot *snapshot = device_capability_snapshot(device);
     if (fenceCount == 0) return 0;
     size_t cap = 64u + (size_t)fenceCount * 24u;
     char *cmd = (char *)calloc(1, cap);
@@ -7997,7 +8920,7 @@ static int send_executor_fence_reset(VkDevice device, uint32_t fenceCount, const
     size_t off = (size_t)snprintf(cmd, cap, "VULKAN_FENCE_RESET %u", fenceCount);
     int rc = (off >= cap) ? -E2BIG : append_fence_ids(device, cmd, cap, &off, fenceCount, pFences);
     int result = VK_ERROR_UNKNOWN;
-    if (rc == 0) rc = send_executor_text_command(cmd, &result, NULL, NULL);
+    if (rc == 0) rc = send_executor_text_command(snapshot, cmd, &result, NULL, NULL);
     if (rc == 0 && result == VK_SUCCESS) {
         for (uint32_t i = 0; i < fenceCount; ++i) {
             PdockerVkFence *fence = fence_handle_lookup_for_device(device, pFences[i]);
@@ -8010,19 +8933,42 @@ static int send_executor_fence_reset(VkDevice device, uint32_t fenceCount, const
     return rc;
 }
 
+static int send_executor_fence_status_raw(
+        const PdockerVkCapabilitySnapshot *snapshot,
+        uint64_t fence_id,
+        VkResult *out_result,
+        bool *out_signaled) {
+    if (!snapshot || fence_id == 0 || !out_result || !out_signaled) {
+        return -EINVAL;
+    }
+    char cmd[128];
+    snprintf(
+        cmd, sizeof(cmd), "VULKAN_FENCE_STATUS %llu\n",
+        (unsigned long long)fence_id);
+    int result = VK_ERROR_UNKNOWN;
+    bool signaled = false;
+    int rc = send_executor_text_command(
+        snapshot, cmd, &result, &signaled, NULL);
+    if (rc == 0) {
+        *out_result = (VkResult)result;
+        *out_signaled = signaled;
+    }
+    return rc;
+}
+
 static int send_executor_fence_status(PdockerVkFence *fence, VkResult *out_result) {
+    const PdockerVkCapabilitySnapshot *snapshot = fence ? fence->capability_snapshot : NULL;
     if (!fence || !fence->executor_tracked || fence->fence_id == 0) {
         if (out_result) *out_result = (!fence || fence->signaled) ? VK_SUCCESS : VK_NOT_READY;
         return 0;
     }
-    char cmd[128];
-    snprintf(cmd, sizeof(cmd), "VULKAN_FENCE_STATUS %llu\n", (unsigned long long)fence->fence_id);
-    int result = VK_ERROR_UNKNOWN;
+    VkResult result = VK_ERROR_UNKNOWN;
     bool signaled = false;
-    int rc = send_executor_text_command(cmd, &result, &signaled, NULL);
+    int rc = send_executor_fence_status_raw(
+        snapshot, fence->fence_id, &result, &signaled);
     if (rc == 0) {
         fence->signaled = signaled;
-        if (out_result) *out_result = (VkResult)result;
+        if (out_result) *out_result = result;
     }
     return rc;
 }
@@ -8034,6 +8980,7 @@ static int send_executor_fence_wait(
         VkBool32 waitAll,
         uint64_t timeout,
         VkResult *out_result) {
+    const PdockerVkCapabilitySnapshot *snapshot = device_capability_snapshot(device);
     if (fenceCount == 0) {
         if (out_result) *out_result = VK_SUCCESS;
         return 0;
@@ -8052,7 +8999,7 @@ static int send_executor_fence_wait(
     int rc = (off >= cap) ? -E2BIG : append_fence_ids(device, cmd, cap, &off, fenceCount, pFences);
     int result = VK_ERROR_UNKNOWN;
     bool signaled = false;
-    if (rc == 0) rc = send_executor_text_command(cmd, &result, &signaled, NULL);
+    if (rc == 0) rc = send_executor_text_command(snapshot, cmd, &result, &signaled, NULL);
     if (rc == 0) {
         if (result == VK_SUCCESS) {
             if (waitAll) {
@@ -8077,45 +9024,72 @@ static int send_executor_fence_wait(
 }
 
 static int send_executor_fence_signal(PdockerVkFence *fence) {
+    const PdockerVkCapabilitySnapshot *snapshot = fence ? fence->capability_snapshot : NULL;
     if (!fence || !fence->executor_tracked || fence->fence_id == 0) return 0;
     char cmd[128];
     snprintf(cmd, sizeof(cmd), "VULKAN_FENCE_SIGNAL %llu\n",
              (unsigned long long)fence->fence_id);
     int result = VK_ERROR_UNKNOWN;
-    int rc = send_executor_text_command(cmd, &result, NULL, NULL);
+    int rc = send_executor_text_command(snapshot, cmd, &result, NULL, NULL);
     if (rc == 0 && result == VK_SUCCESS) {
         fence->signaled = true;
     }
     return rc == 0 && result != VK_SUCCESS ? -EIO : rc;
 }
 
+typedef enum PdockerVkDispatchExecutionState {
+    PDOCKER_VK_DISPATCH_NOT_ENQUEUED = 0,
+    PDOCKER_VK_DISPATCH_ENQUEUED = 1,
+    PDOCKER_VK_DISPATCH_AMBIGUOUS = 2,
+} PdockerVkDispatchExecutionState;
+
+/* Generic dispatch calls can run concurrently on distinct application
+ * threads. Keep the last outcome request-local without adding shared queue
+ * state or changing the stable internal sender signatures. */
+static _Thread_local PdockerVkDispatchExecutionState
+    g_generic_dispatch_execution_state = PDOCKER_VK_DISPATCH_NOT_ENQUEUED;
+
+static bool pdocker_vk_generic_dispatch_may_have_executed(void) {
+    return g_generic_dispatch_execution_state !=
+        PDOCKER_VK_DISPATCH_NOT_ENQUEUED;
+}
+
 static bool dispatch_response_has_stage(
         const char *line,
         const char *stage) {
-    if (!line || !stage || !stage[0]) return false;
-    char stage_marker[160];
-    int n = snprintf(stage_marker, sizeof(stage_marker),
-                     "\"stage\":\"%s\"", stage);
-    return n > 0 && (size_t)n < sizeof(stage_marker) &&
-        strstr(line, stage_marker) != NULL;
+    return line && stage && stage[0] &&
+           executor_json_string_key_equals_exact(line, "stage", stage);
 }
 
 static bool dispatch_response_is_terminal_success(
         const char *line,
         const char *terminal_stage,
-        uint64_t expected_submit_id) {
-    if (!dispatch_response_has_stage(line, terminal_stage) ||
-        strstr(line, "\"valid\":true") == NULL ||
-        strstr(line, "\"execution_implemented\":true") == NULL) {
+        uint64_t expected_submit_id,
+        VkResult *out_result) {
+    int32_t exact_result = 0;
+    if (out_result) *out_result = VK_ERROR_UNKNOWN;
+    const bool execution_implemented = executor_json_bool_key_exact(
+        line, "execution_implemented", true);
+    const bool execution_not_implemented = executor_json_bool_key_exact(
+        line, "execution_implemented", false);
+    if (!executor_json_object_valid(line) ||
+        !dispatch_response_has_stage(line, terminal_stage) ||
+        !executor_json_bool_key_exact(line, "valid", true) ||
+        execution_implemented == execution_not_implemented ||
+        !parse_executor_json_i32_key_exact(
+            line, "result", &exact_result) ||
+        (!execution_implemented && exact_result == VK_SUCCESS)) {
         return false;
     }
     if (expected_submit_id != 0) {
         uint64_t submit_id = 0;
-        if (!parse_executor_json_u64_key_exact(line, "submit_id", &submit_id) ||
+        if (!parse_executor_json_u64_key_exact(
+                line, "submit_id", &submit_id) ||
             submit_id != expected_submit_id) {
             return false;
         }
     }
+    if (out_result) *out_result = (VkResult)exact_result;
     return true;
 }
 
@@ -8123,18 +9097,29 @@ static int read_dispatch_response_status(
         int socket_fd,
         const char *transport_name,
         const char *terminal_stage,
-        uint64_t expected_submit_id) {
+        uint64_t expected_submit_id,
+        VkResult *out_terminal_result,
+        bool *out_terminal_received) {
     const size_t max_response = 1024 * 1024;
+    if (out_terminal_result) *out_terminal_result = VK_ERROR_UNKNOWN;
+    if (out_terminal_received) *out_terminal_received = false;
     char stack_line[4096];
     char *heap_line = NULL;
     char *line = stack_line;
     size_t line_cap = sizeof(stack_line);
     size_t total_read = 0;
     bool saw_nonterminal = false;
-    const bool terminal_response_required = terminal_stage && terminal_stage[0];
+    const bool terminal_response_required =
+        terminal_stage && terminal_stage[0];
     int rc = -EIO;
+    struct timespec response_deadline;
+    int deadline_rc =
+        pdocker_vk_executor_response_deadline_start(&response_deadline);
+    if (deadline_rc != 0) return deadline_rc;
 
-    for (unsigned line_index = 0; line_index < 64 && total_read < max_response; ++line_index) {
+    for (unsigned line_index = 0;
+         line_index < 64 && total_read < max_response;
+         ++line_index) {
         size_t line_off = 0;
         int read_rc = 0;
         bool line_terminated = false;
@@ -8148,7 +9133,10 @@ static int read_dispatch_response_status(
                 if (next_cap > max_response) next_cap = max_response;
                 char *next = (char *)malloc(next_cap);
                 if (!next) {
-                    read_rc = -ENOMEM;
+                    /* The request has already been sent. Completion is
+                     * ambiguous, so this is a transport failure rather than a
+                     * retry-safe host allocation failure. */
+                    read_rc = -EIO;
                     break;
                 }
                 memcpy(next, line, line_off);
@@ -8158,13 +9146,17 @@ static int read_dispatch_response_status(
                 line_cap = next_cap;
             }
             char ch;
-            ssize_t r = read(socket_fd, &ch, 1);
-            if (r < 0) {
-                if (errno == EINTR) continue;
-                read_rc = -errno;
+            int byte_rc = pdocker_vk_read_response_byte_before_deadline(
+                socket_fd, &ch, &response_deadline);
+            if (byte_rc < 0) {
+                read_rc = byte_rc == -ENOMEM ? -EIO : byte_rc;
                 break;
             }
-            if (r == 0) break;
+            if (byte_rc == 0) break;
+            if (ch == '\0') {
+                read_rc = -EPROTO;
+                break;
+            }
             line[line_off++] = ch;
             total_read++;
             if (ch == '\n') {
@@ -8182,12 +9174,14 @@ static int read_dispatch_response_status(
             break;
         }
         if (!line_terminated || line_off < 3 ||
-            line[0] != '{' || line[line_off - 2] != '}') {
+            line[0] != '{' || line[line_off - 2] != '}' ||
+            !executor_json_object_valid(line)) {
             rc = -EPROTO;
             break;
         }
         if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG") ||
-            env_truthy_default("PDOCKER_GPU_DISPATCH_PROFILE_LOG", false)) {
+            env_truthy_default(
+                "PDOCKER_GPU_DISPATCH_PROFILE_LOG", false)) {
             fprintf(stderr,
                     "pdocker-vulkan-icd: %s dispatch response: %s",
                     transport_name ? transport_name : "generic",
@@ -8195,43 +9189,59 @@ static int read_dispatch_response_status(
             if (line[line_off - 1] != '\n') fprintf(stderr, "\n");
         }
         if (terminal_response_required) {
-            if (strstr(line, "\"valid\":false") != NULL) {
-                /* Preserve the executor's exact failing stage in container logs. */
-                fprintf(stderr,
-                        "pdocker-vulkan-icd: %s dispatch failure response: %s",
-                        transport_name ? transport_name : "generic",
-                        line);
-                if (line[line_off - 1] != '\n') fprintf(stderr, "\n");
-                rc = -EIO;
-                break;
-            }
-            if (dispatch_response_is_terminal_success(
-                    line, terminal_stage, expected_submit_id)) {
-                rc = 0;
-                break;
-            }
             if (dispatch_response_has_stage(line, terminal_stage)) {
-                /* One request is in flight per persistent stream. A terminal
-                 * response for another correlation ID is stream corruption. */
-                rc = -EPROTO;
+                VkResult terminal_result = VK_ERROR_UNKNOWN;
+                if (dispatch_response_is_terminal_success(
+                        line, terminal_stage, expected_submit_id,
+                        &terminal_result)) {
+                    if (strcmp(terminal_stage,
+                               "vulkan-dispatch-v5-complete") == 0) {
+                        g_generic_dispatch_execution_state =
+                            executor_json_bool_key_exact(
+                                line, "execution_implemented", true)
+                                ? PDOCKER_VK_DISPATCH_ENQUEUED
+                                : PDOCKER_VK_DISPATCH_NOT_ENQUEUED;
+                    }
+                    if (out_terminal_result) {
+                        *out_terminal_result = terminal_result;
+                    }
+                    if (out_terminal_received) {
+                        *out_terminal_received = true;
+                    }
+                    rc = terminal_result == VK_SUCCESS
+                        ? 0
+                        : -EREMOTEIO;
+                } else {
+                    fprintf(stderr,
+                            "pdocker-vulkan-icd: %s invalid terminal response: %s",
+                            transport_name ? transport_name : "generic",
+                            line);
+                    if (line[line_off - 1] != '\n') fprintf(stderr, "\n");
+                    rc = -EPROTO;
+                }
                 break;
             }
-            /* Diagnostic success events are not protocol delimiters. */
+            /* Diagnostic events are not request delimiters. */
             saw_nonterminal = true;
             continue;
         }
-        if (strstr(line, "\"stage\":\"vulkan-graphics-v6-describe\"") != NULL) {
+        if (dispatch_response_has_stage(
+                line, "vulkan-graphics-v6-describe")) {
             saw_nonterminal = true;
             continue;
         }
-        if (strstr(line, "\"valid\":true") != NULL) {
+        if (executor_json_bool_key_exact(line, "valid", true)) {
             rc = 0;
             break;
         }
-        rc = -EIO;
+        rc = -EPROTO;
         break;
     }
     if (total_read >= max_response) rc = -EMSGSIZE;
+    /* Allocation failure here occurs after the request frame was sent. Native
+     * enqueue status is uncertain, so callers must not roll back as a safe
+     * pre-submit host allocation failure. */
+    if (rc == -ENOMEM) rc = -EIO;
     free(heap_line);
     return rc;
 }
@@ -8425,7 +9435,9 @@ static int verify_spirv_probe_manifest_runtime_guard(
     return 0;
 }
 
-static int prepare_spirv_probe_replay(PdockerVkSpirvProbeReplay *probe,
+static int prepare_spirv_probe_replay(
+                                      const PdockerVkCapabilitySnapshot *snapshot,
+                                      PdockerVkSpirvProbeReplay *probe,
                                       uint64_t source_shader_hash,
                                       size_t binding_count,
                                       const uint32_t *descriptor_sets,
@@ -8434,18 +9446,18 @@ static int prepare_spirv_probe_replay(PdockerVkSpirvProbeReplay *probe,
     memset(probe, 0, sizeof(*probe));
     probe->shader_fd = -1;
     probe->debug_fd = -1;
-    probe->manifest_path = getenv("PDOCKER_GPU_SPIRV_PROBE_MANIFEST");
-    probe->shader_path = getenv("PDOCKER_GPU_SPIRV_PROBE_SHADER");
+    probe->manifest_path = snapshot ? snapshot->spirv_probe_manifest_path : NULL;
+    probe->shader_path = snapshot ? snapshot->spirv_probe_shader_path : NULL;
     if (!probe->shader_path || !probe->shader_path[0]) return 0;
 
-    if (!parse_u64_env_base0("PDOCKER_GPU_SPIRV_PROBE_EXPECTED_HASH",
-                             &probe->expected_source_hash)) {
+    if (!snapshot || !snapshot->spirv_probe_expected_source_hash_valid) {
         fprintf(stderr,
                 "pdocker-vulkan-icd: SPIR-V probe replay rejected: missing PDOCKER_GPU_SPIRV_PROBE_EXPECTED_HASH\n");
         return -EINVAL;
     }
+    probe->expected_source_hash = snapshot->spirv_probe_expected_source_hash;
     if (probe->expected_source_hash != source_shader_hash) {
-        if (env_truthy_default("PDOCKER_GPU_SPIRV_PROBE_TARGET_ONLY", false)) {
+        if (snapshot->spirv_probe_target_only) {
             if (trace_allocations() || env_truthy_default("PDOCKER_GPU_DISPATCH_PROFILE_LOG", false)) {
                 fprintf(stderr,
                         "pdocker-vulkan-icd: SPIR-V probe replay skipped non-target shader expected=0x%016llx actual=0x%016llx manifest=%s\n",
@@ -8463,24 +9475,24 @@ static int prepare_spirv_probe_replay(PdockerVkSpirvProbeReplay *probe,
         return -ENOEXEC;
     }
     uint64_t expected_effective_hash = 0;
-    if (!parse_u64_env_base0("PDOCKER_GPU_SPIRV_PROBE_EFFECTIVE_HASH",
-                             &expected_effective_hash)) {
+    if (!snapshot->spirv_probe_effective_hash_valid) {
         fprintf(stderr,
                 "pdocker-vulkan-icd: SPIR-V probe replay rejected: missing PDOCKER_GPU_SPIRV_PROBE_EFFECTIVE_HASH\n");
         return -EINVAL;
     }
-    if (!parse_size_env_base0("PDOCKER_GPU_SPIRV_PROBE_DEBUG_BYTES",
-                              &probe->debug_bytes) ||
+    expected_effective_hash = snapshot->spirv_probe_effective_hash;
+    probe->debug_bytes = snapshot->spirv_probe_debug_bytes;
+    if (!snapshot->spirv_probe_debug_bytes_valid ||
         probe->debug_bytes == 0 ||
         probe->debug_bytes > 16ull * 1024ull * 1024ull) {
         fprintf(stderr,
                 "pdocker-vulkan-icd: SPIR-V probe replay rejected: invalid PDOCKER_GPU_SPIRV_PROBE_DEBUG_BYTES\n");
         return -EINVAL;
     }
-    if (!parse_u32_env_base0("PDOCKER_GPU_SPIRV_PROBE_DEBUG_SET",
-                             &probe->debug_set) ||
-        !parse_u32_env_base0("PDOCKER_GPU_SPIRV_PROBE_DEBUG_BINDING",
-                             &probe->debug_binding) ||
+    probe->debug_set = snapshot->spirv_probe_debug_set;
+    probe->debug_binding = snapshot->spirv_probe_debug_binding;
+    if (!snapshot->spirv_probe_debug_set_valid ||
+        !snapshot->spirv_probe_debug_binding_valid ||
         probe->debug_set >= PDOCKER_VK_MAX_DESCRIPTOR_SETS ||
         probe->debug_binding >= PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS) {
         fprintf(stderr,
@@ -8554,7 +9566,7 @@ static int prepare_spirv_probe_replay(PdockerVkSpirvProbeReplay *probe,
         return -ENOEXEC;
     }
 
-    probe->debug_fd = create_shared_fd(probe->debug_bytes);
+    probe->debug_fd = create_shared_fd(snapshot, probe->debug_bytes);
     if (probe->debug_fd < 0) {
         int rc = -errno;
         close_spirv_probe_replay(probe);
@@ -8996,10 +10008,10 @@ static uint32_t float_bits_u32(float value) {
 static int send_empty_vulkan_graphics_v6_1_validation_frame(
         const PdockerVkQueue *submit_queue) {
     const bool persistent_transport =
-        executor_supports_persistent_multiplexed_connections();
+        executor_supports_persistent_multiplexed_connections(submit_queue ? submit_queue->capability_snapshot : NULL);
     int socket_fd = persistent_transport
         ? connect_submit_queue(submit_queue)
-        : connect_queue();
+        : connect_queue_for_snapshot(submit_queue ? submit_queue->capability_snapshot : NULL);
     if (socket_fd < 0) return socket_fd;
     PdockerGpuVulkanGraphicsV61FrameHeader frame;
     memset(&frame, 0, sizeof(frame));
@@ -9052,7 +10064,7 @@ static int send_empty_vulkan_graphics_v6_1_validation_frame(
         socket_fd, (const unsigned char *)&frame, sizeof(frame), NULL, 0);
     if (rc == 0) rc = read_dispatch_response_status(
         socket_fd, "VULKAN_GRAPHICS_V6.1", "vulkan-graphics-v6-replay",
-        header->submit_id);
+        header->submit_id, NULL, NULL);
     if (persistent_transport) {
         finish_submit_queue_request(submit_queue, socket_fd, rc);
     } else {
@@ -9724,22 +10736,23 @@ static bool graphics_v624_pipeline_layout_set_entries_equal(
            a->descriptor_set_layout_id == b->descriptor_set_layout_id;
 }
 
-static uint32_t pdocker_vk_max_push_bytes(void);
+static uint32_t pdocker_vk_max_push_bytes(const PdockerVkCapabilitySnapshot *snapshot);
 
-static uint32_t pdocker_vk_max_push_bytes_for_stage_flags(VkShaderStageFlags stage_flags) {
+static uint32_t pdocker_vk_max_push_bytes_for_stage_flags(const PdockerVkCapabilitySnapshot *snapshot, VkShaderStageFlags stage_flags) {
     (void)stage_flags;
-    return pdocker_vk_max_push_bytes();
+    return pdocker_vk_max_push_bytes(snapshot);
 }
 
-static bool pdocker_vk_push_constant_range_valid(const VkPushConstantRange *range) {
+static bool pdocker_vk_push_constant_range_valid(const PdockerVkCapabilitySnapshot *snapshot, const VkPushConstantRange *range) {
     if (!range || range->stageFlags == 0 || range->size == 0) return false;
     if ((range->offset & 3u) != 0 || (range->size & 3u) != 0) return false;
     if ((uint64_t)range->size > UINT32_MAX - (uint64_t)range->offset) return false;
     uint32_t end = range->offset + range->size;
-    return end <= pdocker_vk_max_push_bytes_for_stage_flags(range->stageFlags);
+    return end <= pdocker_vk_max_push_bytes_for_stage_flags(snapshot, range->stageFlags);
 }
 
 static bool pdocker_vk_push_constant_ranges_cover_stage_span(
+        const PdockerVkCapabilitySnapshot *snapshot,
         const VkPushConstantRange *ranges,
         uint32_t range_count,
         VkShaderStageFlags stage_flags,
@@ -9755,7 +10768,7 @@ static bool pdocker_vk_push_constant_ranges_cover_stage_span(
         uint32_t best_end = cursor;
         for (uint32_t i = 0; i < range_count; ++i) {
             const VkPushConstantRange *range = &ranges[i];
-            if (!pdocker_vk_push_constant_range_valid(range)) continue;
+            if (!pdocker_vk_push_constant_range_valid(snapshot, range)) continue;
             if ((range->stageFlags & stage_flags) != stage_flags) continue;
             if (range->offset > cursor) continue;
             uint32_t range_end = range->offset + range->size;
@@ -9794,6 +10807,7 @@ static bool graphics_v628_push_constant_range_entries_equal(
 }
 
 static int collect_graphics_v628_push_constant_range_entries(
+        const PdockerVkCapabilitySnapshot *snapshot,
         PdockerGpuVulkanGraphicsV628PushConstantRangeEntry *entries,
         size_t *entry_count,
         uint64_t pipeline_layout_id,
@@ -9804,7 +10818,7 @@ static int collect_graphics_v628_push_constant_range_entries(
     if (pipeline_layout_id == 0 || !ranges) return -EPROTO;
     if (range_count > PDOCKER_VK_MAX_PUSH_CONSTANT_RANGES) return -E2BIG;
     for (uint32_t i = 0; i < range_count; ++i) {
-        if (!pdocker_vk_push_constant_range_valid(&ranges[i])) return -EPROTO;
+        if (!pdocker_vk_push_constant_range_valid(snapshot, &ranges[i])) return -EPROTO;
         PdockerGpuVulkanGraphicsV628PushConstantRangeEntry candidate;
         memset(&candidate, 0, sizeof(candidate));
         candidate.pipeline_layout_id = pipeline_layout_id;
@@ -9829,6 +10843,7 @@ static int collect_graphics_v628_push_constant_range_entries(
 }
 
 static int collect_graphics_v628_pipeline_layout_push_constant_ranges(
+        const PdockerVkCapabilitySnapshot *snapshot,
         PdockerGpuVulkanGraphicsV628PushConstantRangeEntry *entries,
         size_t *entry_count,
         const PdockerVkPipelineLayout *layout) {
@@ -9836,11 +10851,12 @@ static int collect_graphics_v628_pipeline_layout_push_constant_ranges(
     if (layout->push_constant_range_count > PDOCKER_VK_MAX_PUSH_CONSTANT_RANGES) return -E2BIG;
     if (layout->push_constant_range_count > 0 && !layout->push_constant_ranges) return -EPROTO;
     return collect_graphics_v628_push_constant_range_entries(
-        entries, entry_count, layout->layout_id,
+        snapshot, entries, entry_count, layout->layout_id,
         layout->push_constant_ranges, layout->push_constant_range_count);
 }
 
 static int collect_graphics_v628_push_constant_ranges(
+        const PdockerVkCapabilitySnapshot *snapshot,
         PdockerGpuVulkanGraphicsV628PushConstantRangeEntry *entries,
         size_t *entry_count,
         PdockerVkPipeline *const *pipeline_objects,
@@ -9850,7 +10866,7 @@ static int collect_graphics_v628_push_constant_ranges(
         const PdockerVkPipeline *pipeline = pipeline_objects[i];
         if (!pipeline || !pipeline->layout) continue;
         int rc = collect_graphics_v628_pipeline_layout_push_constant_ranges(
-            entries, entry_count, pipeline->layout);
+            snapshot, entries, entry_count, pipeline->layout);
         if (rc != 0) return rc;
     }
     return 0;
@@ -9941,6 +10957,7 @@ static int collect_graphics_v629_variable_descriptor_counts(
 }
 
 static int collect_graphics_v624_descriptor_set_layout_metadata(
+        const PdockerVkCapabilitySnapshot *capability_snapshot,
         PdockerGpuVulkanGraphicsV624DescriptorSetLayoutEntry *entries,
         size_t *entry_count,
         const PdockerVkDescriptorSetLayout *layout) {
@@ -9958,7 +10975,7 @@ static int collect_graphics_v624_descriptor_set_layout_metadata(
         if (!descriptor_type_supported_by_v4_transport(descriptor_type) &&
             !descriptor_type_supported_by_v5_object_transport(descriptor_type) &&
             !(descriptor_type_requires_buffer_view(descriptor_type) &&
-              executor_supports_vulkan_graphics_v627_buffer_views())) {
+              executor_supports_vulkan_graphics_v627_buffer_views(capability_snapshot))) {
             return -EOPNOTSUPP;
         }
         uint32_t descriptor_count = layout->storage_binding_counts[binding];
@@ -10004,6 +11021,7 @@ static int collect_graphics_v624_descriptor_set_layout_metadata(
 }
 
 static int collect_graphics_v624_pipeline_layout_metadata(
+        const PdockerVkCapabilitySnapshot *capability_snapshot,
         PdockerGpuVulkanGraphicsV624DescriptorSetLayoutEntry *descriptor_set_layouts,
         size_t *descriptor_set_layout_count,
         PdockerGpuVulkanGraphicsV624PipelineLayoutSetEntry *pipeline_layout_sets,
@@ -10023,7 +11041,7 @@ static int collect_graphics_v624_pipeline_layout_metadata(
         const PdockerVkDescriptorSetLayout *set_layout = layout->set_layouts[set_index];
         if (!set_layout || set_layout->layout_id == 0) return -EPROTO;
         int rc = collect_graphics_v624_descriptor_set_layout_metadata(
-            descriptor_set_layouts, descriptor_set_layout_count, set_layout);
+            capability_snapshot, descriptor_set_layouts, descriptor_set_layout_count, set_layout);
         if (rc != 0) return rc;
         PdockerGpuVulkanGraphicsV624PipelineLayoutSetEntry candidate;
         memset(&candidate, 0, sizeof(candidate));
@@ -10049,6 +11067,7 @@ static int collect_graphics_v624_pipeline_layout_metadata(
 }
 
 static int collect_graphics_v624_layout_metadata(
+        const PdockerVkCapabilitySnapshot *capability_snapshot,
         PdockerGpuVulkanGraphicsV624DescriptorSetLayoutEntry *descriptor_set_layouts,
         size_t *descriptor_set_layout_count,
         PdockerGpuVulkanGraphicsV624PipelineLayoutSetEntry *pipeline_layout_sets,
@@ -10063,7 +11082,7 @@ static int collect_graphics_v624_layout_metadata(
         const PdockerVkPipeline *pipeline = pipeline_objects[i];
         if (!pipeline || !pipeline->layout) continue;
         int rc = collect_graphics_v624_pipeline_layout_metadata(
-            descriptor_set_layouts, descriptor_set_layout_count,
+            capability_snapshot, descriptor_set_layouts, descriptor_set_layout_count,
             pipeline_layout_sets, pipeline_layout_set_count,
             pipeline->layout);
         if (rc != 0) return rc;
@@ -10274,6 +11293,7 @@ static bool dispatch_v56_push_constant_range_entries_equal(
 }
 
 static int collect_dispatch_v56_descriptor_set_layout_metadata(
+        const PdockerVkCapabilitySnapshot *capability_snapshot,
         PdockerGpuVulkanDispatchV56DescriptorSetLayoutEntry *entries,
         size_t *entry_count,
         const PdockerVkDescriptorSetLayout *layout) {
@@ -10288,7 +11308,7 @@ static int collect_dispatch_v56_descriptor_set_layout_metadata(
         if (!descriptor_type_supported_by_v4_transport(descriptor_type) &&
             !descriptor_type_supported_by_v5_object_transport(descriptor_type) &&
             !(descriptor_type_requires_buffer_view(descriptor_type) &&
-              executor_supports_vulkan_dispatch_v53_buffer_views())) {
+              executor_supports_vulkan_dispatch_v53_buffer_views(capability_snapshot))) {
             return -EOPNOTSUPP;
         }
         const uint32_t descriptor_count = layout->storage_binding_counts[slot];
@@ -10335,6 +11355,7 @@ static int collect_dispatch_v56_descriptor_set_layout_metadata(
 }
 
 static int collect_dispatch_v56_pipeline_layout_metadata(
+        const PdockerVkCapabilitySnapshot *capability_snapshot,
         PdockerGpuVulkanDispatchV56DescriptorSetLayoutEntry *descriptor_set_layouts,
         size_t *descriptor_set_layout_count,
         PdockerGpuVulkanDispatchV56PipelineLayoutSetEntry *pipeline_layout_sets,
@@ -10354,7 +11375,7 @@ static int collect_dispatch_v56_pipeline_layout_metadata(
         const PdockerVkDescriptorSetLayout *set_layout = layout->set_layouts[set_index];
         if (!set_layout || set_layout->layout_id == 0) return -EPROTO;
         int rc = collect_dispatch_v56_descriptor_set_layout_metadata(
-            descriptor_set_layouts, descriptor_set_layout_count, set_layout);
+            capability_snapshot, descriptor_set_layouts, descriptor_set_layout_count, set_layout);
         if (rc != 0) return rc;
         PdockerGpuVulkanDispatchV56PipelineLayoutSetEntry candidate;
         memset(&candidate, 0, sizeof(candidate));
@@ -10551,6 +11572,7 @@ static int collect_dispatch_v59_variable_descriptor_counts(
 }
 
 static int collect_dispatch_v56_pipeline_layout_push_constant_ranges(
+        const PdockerVkCapabilitySnapshot *snapshot,
         PdockerGpuVulkanDispatchV56PushConstantRangeEntry *entries,
         size_t *entry_count,
         const PdockerVkPipelineLayout *layout) {
@@ -10560,7 +11582,7 @@ static int collect_dispatch_v56_pipeline_layout_push_constant_ranges(
     if (layout->push_constant_range_count > 0 && !layout->push_constant_ranges) return -EPROTO;
     for (uint32_t i = 0; i < layout->push_constant_range_count; ++i) {
         const VkPushConstantRange *range = &layout->push_constant_ranges[i];
-        if (!pdocker_vk_push_constant_range_valid(range)) return -EPROTO;
+        if (!pdocker_vk_push_constant_range_valid(snapshot, range)) return -EPROTO;
         PdockerGpuVulkanDispatchV56PushConstantRangeEntry candidate;
         memset(&candidate, 0, sizeof(candidate));
         candidate.pipeline_layout_id = layout->layout_id;
@@ -11134,6 +12156,7 @@ static int collect_graphics_attachment_entries(
 }
 
 static int collect_graphics_descriptor_entries(
+        const PdockerVkCapabilitySnapshot *capability_snapshot,
         PdockerGpuVulkanDispatchV5DescriptorObjectEntry *descriptors,
         size_t *descriptor_count,
         PdockerGpuVulkanDispatchV5ResourceEntry *resources,
@@ -11224,7 +12247,7 @@ static int collect_graphics_descriptor_entries(
                         return -EOPNOTSUPP;
                     }
                     if (descriptor_type_requires_buffer_view(descriptor_type)) {
-                        if (!executor_supports_vulkan_graphics_v627_buffer_views() ||
+                        if (!executor_supports_vulkan_graphics_v627_buffer_views(capability_snapshot) ||
                             !buffer_view_entries || !buffer_view_count || !need_v627_buffer_views ||
                             !binding->buffer_view_snapshot.valid ||
                             !binding->buffer_view_snapshot.buffer_snapshot.valid) {
@@ -11500,10 +12523,16 @@ static bool command_op_requires_graphics_executor_frame(
     switch (op->type) {
         case PDOCKER_VK_COMMAND_RESOLVE_IMAGE:
             return op->index < cmd->image_resolve_op_count &&
-                   pdocker_vk_resolve_image_executor_eligible(&cmd->image_resolve_ops[op->index]);
+                   pdocker_vk_resolve_image_executor_eligible(cmd->capability_snapshot, &cmd->image_resolve_ops[op->index]);
         case PDOCKER_VK_COMMAND_BLIT_IMAGE:
             return op->index < cmd->image_blit_op_count &&
-                   pdocker_vk_blit_image_executor_eligible(&cmd->image_blit_ops[op->index]);
+                   pdocker_vk_blit_image_executor_eligible(cmd->capability_snapshot, &cmd->image_blit_ops[op->index]);
+        case PDOCKER_VK_COMMAND_QUERY_BEGIN:
+        case PDOCKER_VK_COMMAND_QUERY_END:
+        case PDOCKER_VK_COMMAND_QUERY_RESET:
+        case PDOCKER_VK_COMMAND_QUERY_TIMESTAMP:
+        case PDOCKER_VK_COMMAND_COPY_QUERY_RESULTS:
+            return true;
         default:
             return false;
     }
@@ -12236,6 +13265,7 @@ static int collect_vulkan_graphics_v634_render_pass_command_transport(
 }
 
 static bool strict_vulkan_graphics_v632_render_pass_transport_complete_for_render_pass(
+        const PdockerVkCapabilitySnapshot *capability_snapshot,
         const PdockerVkRenderPass *render_pass) {
     /* Strict passthrough may only accept a classic render pass once the
      * executor advertises the V6.34 sideband that carries the actual
@@ -12246,15 +13276,16 @@ static bool strict_vulkan_graphics_v632_render_pass_transport_complete_for_rende
      * normalization under a strict pass-through policy.
      */
     return render_pass &&
-           executor_supports_vulkan_graphics_v634_classic_render_pass_sideband() &&
+           executor_supports_vulkan_graphics_v634_classic_render_pass_sideband(capability_snapshot) &&
            vulkan_graphics_v633_render_pass_transport_representable(render_pass);
 }
 
 static bool strict_vulkan_graphics_v632_render_pass_transport_complete(
+        const PdockerVkCapabilitySnapshot *capability_snapshot,
         const PdockerVkPipeline *pipeline) {
     return pipeline && pipeline->render_pass &&
            strict_vulkan_graphics_v632_render_pass_transport_complete_for_render_pass(
-                pipeline->render_pass);
+                capability_snapshot, pipeline->render_pass);
 }
 
 static bool vulkan_graphics_v635_event_command_type(uint32_t command_type) {
@@ -12323,7 +13354,14 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
         size_t submit_sync_count,
         uint32_t sequence_begin,
         uint32_t sequence_end,
-        bool include_state_preamble) {
+        bool include_state_preamble,
+        VkResult *out_terminal_result,
+        bool *out_terminal_received) {
+    if (out_terminal_result) *out_terminal_result = VK_ERROR_UNKNOWN;
+    if (out_terminal_received) *out_terminal_received = false;
+    const PdockerVkCapabilitySnapshot *capability_snapshot =
+        cmd ? cmd->capability_snapshot : NULL;
+    VkResult terminal_result = VK_ERROR_UNKNOWN;
     if (sequence_begin > sequence_end) return -EINVAL;
     bool has_executor_frame_content_in_range =
         command_buffer_has_executor_frame_content_in_sequence_range(
@@ -12340,14 +13378,14 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     const bool range_requires_v635_event_command_provenance =
         expected_v635_event_command_provenance_count > 0;
     if (range_requires_v635_event_command_provenance &&
-        !executor_supports_vulkan_graphics_v635_event_command_provenance()) {
+        !executor_supports_vulkan_graphics_v635_event_command_provenance(capability_snapshot)) {
         return -EOPNOTSUPP;
     }
     const bool persistent_transport =
-        executor_supports_persistent_multiplexed_connections();
+        executor_supports_persistent_multiplexed_connections(submit_queue ? submit_queue->capability_snapshot : NULL);
     int socket_fd = persistent_transport
         ? connect_submit_queue(submit_queue)
-        : connect_queue();
+        : connect_queue_for_snapshot(submit_queue ? submit_queue->capability_snapshot : NULL);
     if (socket_fd < 0) return socket_fd;
 
     PdockerVkGraphicsImageLayoutTracker layout_tracker = {0};
@@ -12879,8 +13917,8 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     size_t event_command_provenance_count = 0;
     size_t buffer_view_count = 0;
     uint64_t submit_id = __sync_add_and_fetch(&g_generic_dispatch_sequence, 1);
-    const bool strict_passthrough =
-        env_truthy_default("PDOCKER_GPU_STRICT_PASSTHROUGH", false);
+    const bool strict_passthrough = capability_snapshot &&
+        capability_snapshot->strict_passthrough;
     int rc = 0;
 #define ENSURE_GRAPHICS_V616_CLEAR_TABLES() \
     do { \
@@ -12955,11 +13993,11 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
             goto cleanup;
         }
         PdockerVkPipeline *pipeline = record->pipeline;
-        const bool v632_render_pass_supported = executor_supports_vulkan_graphics_v632_render_passes();
-        const bool v633_render_pass_sideband_supported = executor_supports_vulkan_graphics_v633_render_pass_sideband();
+        const bool v632_render_pass_supported = executor_supports_vulkan_graphics_v632_render_passes(capability_snapshot);
+        const bool v633_render_pass_sideband_supported = executor_supports_vulkan_graphics_v633_render_pass_sideband(capability_snapshot);
         if (strict_passthrough && pipeline->render_pass_normalized_to_dynamic_rendering &&
             (!(v632_render_pass_supported || v633_render_pass_sideband_supported) ||
-             !strict_vulkan_graphics_v632_render_pass_transport_complete(pipeline))) {
+             !strict_vulkan_graphics_v632_render_pass_transport_complete(capability_snapshot, pipeline))) {
             fprintf(stderr,
                     "pdocker-vulkan-icd: V6 strict frame rejected: render pass normalization required strict-v6-render-pass-metadata-missing pipeline_id=%llu\n",
                     (unsigned long long)pdocker_vk_pipeline_object_id(pipeline));
@@ -13373,14 +14411,14 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
         ENSURE_GRAPHICS_V624_LAYOUT_TABLES();
         frame_build_phase = "layout-metadata-collect";
         rc = collect_graphics_v624_layout_metadata(
-            descriptor_set_layouts, &descriptor_set_layout_count,
+            capability_snapshot, descriptor_set_layouts, &descriptor_set_layout_count,
             pipeline_layout_sets, &pipeline_layout_set_count,
             pipeline_objects, pipeline_count);
         if (rc != 0) goto cleanup;
         rc = graphics_pipelines_require_descriptor_layout_create_flag_transport(
             pipeline_objects, pipeline_count, &v631_descriptor_layout_flags_required);
         if (rc != 0) goto cleanup;
-        if (executor_supports_vulkan_graphics_v631_descriptor_layout_flags()) {
+        if (executor_supports_vulkan_graphics_v631_descriptor_layout_flags(capability_snapshot)) {
             ENSURE_GRAPHICS_V631_DESCRIPTOR_LAYOUT_FLAGS();
             rc = collect_graphics_v631_layout_flags(
                 descriptor_set_layout_flags, &descriptor_set_layout_flag_count,
@@ -13390,7 +14428,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     }
     need_v624_layout_metadata = descriptor_set_layout_count > 0 || pipeline_layout_set_count > 0;
     rc = collect_graphics_v628_push_constant_ranges(
-        push_constant_ranges, &push_constant_range_count, pipeline_objects, pipeline_count);
+        capability_snapshot, push_constant_ranges, &push_constant_range_count, pipeline_objects, pipeline_count);
     if (rc != 0) goto cleanup;
     need_v628_push_constant_ranges = push_constant_range_count > 0;
 
@@ -13678,7 +14716,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
                 const PdockerVkImageResolveOp *resolve__ = &cmd->image_resolve_ops[op__->index]; \
                 VkExtent3D src_extent__; \
                 VkExtent3D dst_extent__; \
-                if (!pdocker_vk_resolve_image_executor_eligible(resolve__) || \
+                if (!pdocker_vk_resolve_image_executor_eligible(cmd->capability_snapshot, resolve__) || \
                     resolve__->src->format != resolve__->dst->format || \
                     resolve__->src->samples == VK_SAMPLE_COUNT_1_BIT || \
                     resolve__->dst->samples != VK_SAMPLE_COUNT_1_BIT || \
@@ -13759,7 +14797,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
                 const PdockerVkImageBlitOp *blit__ = &cmd->image_blit_ops[op__->index]; \
                 VkExtent3D src_extent__; \
                 VkExtent3D dst_extent__; \
-                if (!pdocker_vk_blit_image_executor_eligible(blit__) || \
+                if (!pdocker_vk_blit_image_executor_eligible(cmd->capability_snapshot, blit__) || \
                     blit__->src->samples != VK_SAMPLE_COUNT_1_BIT || \
                     blit__->dst->samples != VK_SAMPLE_COUNT_1_BIT || \
                     blit__->region.srcSubresource.aspectMask != VK_IMAGE_ASPECT_COLOR_BIT || \
@@ -14027,7 +15065,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     } while (0)
 
     const bool v634_classic_render_pass_sideband_supported =
-        executor_supports_vulkan_graphics_v634_classic_render_pass_sideband();
+        executor_supports_vulkan_graphics_v634_classic_render_pass_sideband(capability_snapshot);
 
     for (uint32_t i = 0; i < cmd->graphics_command_op_count; ++i) {
         const PdockerVkGraphicsCommandRecord *record = &cmd->graphics_command_ops[i];
@@ -14104,7 +15142,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
             command->first_dynamic_offset = record->first_dynamic_offset;
             command->dynamic_offset_count = record->dynamic_offset_count;
             rc = collect_graphics_descriptor_entries(
-                descriptors, &descriptor_count, resources, &resource_count,
+                cmd->capability_snapshot, descriptors, &descriptor_count, resources, &resource_count,
                 memory_objects, memory_resource_indices, &memory_count,
                 buffer_objects, buffer_resource_indices, &buffer_count,
                 image_entries, image_objects, &image_count,
@@ -14137,14 +15175,14 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
             if (snapshot->pipeline_layout) {
                 ENSURE_GRAPHICS_V624_LAYOUT_TABLES();
                 rc = collect_graphics_v624_pipeline_layout_metadata(
-                    descriptor_set_layouts, &descriptor_set_layout_count,
+                    capability_snapshot, descriptor_set_layouts, &descriptor_set_layout_count,
                     pipeline_layout_sets, &pipeline_layout_set_count,
                     snapshot->pipeline_layout);
                 if (rc != 0) goto cleanup;
                 rc = pipeline_layout_requires_descriptor_layout_create_flag_transport(
                     snapshot->pipeline_layout, &v631_descriptor_layout_flags_required);
                 if (rc != 0) goto cleanup;
-                if (executor_supports_vulkan_graphics_v631_descriptor_layout_flags()) {
+                if (executor_supports_vulkan_graphics_v631_descriptor_layout_flags(capability_snapshot)) {
                     ENSURE_GRAPHICS_V631_DESCRIPTOR_LAYOUT_FLAGS();
                     rc = collect_graphics_v631_pipeline_layout_flags(
                         descriptor_set_layout_flags, &descriptor_set_layout_flag_count,
@@ -14152,7 +15190,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
                     if (rc != 0) goto cleanup;
                 }
                 rc = collect_graphics_v628_pipeline_layout_push_constant_ranges(
-                    push_constant_ranges, &push_constant_range_count,
+                    cmd->capability_snapshot, push_constant_ranges, &push_constant_range_count,
                     snapshot->pipeline_layout);
                 if (rc != 0) goto cleanup;
                 ENSURE_GRAPHICS_V629_VARIABLE_DESCRIPTOR_COUNTS();
@@ -14251,7 +15289,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
                 goto cleanup;
             }
             const PdockerVkPushConstantOpSnapshot *push = &cmd->push_constant_ops[record->push_op_index];
-            const uint32_t max_push_bytes = pdocker_vk_max_push_bytes();
+            const uint32_t max_push_bytes = pdocker_vk_max_push_bytes(submit_queue ? submit_queue->capability_snapshot : NULL);
             if (push->offset > max_push_bytes ||
                 push->size > max_push_bytes - push->offset) {
                 rc = -ERANGE;
@@ -14273,7 +15311,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
             meta->range_offset = push->offset;
             meta->range_size = push->size;
             rc = collect_graphics_v628_push_constant_range_entries(
-                push_constant_ranges, &push_constant_range_count, push->layout_id,
+                cmd->capability_snapshot, push_constant_ranges, &push_constant_range_count, push->layout_id,
                 push->declared_ranges, push->declared_range_count);
             if (rc != 0) goto cleanup;
             need_v628_push_constant_ranges = push_constant_range_count > 0;
@@ -14787,11 +15825,11 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
         &graphics_instance_object_id, &graphics_physical_device_object_id,
         &graphics_device_object_id, &graphics_queue_object_id);
     const bool v631_descriptor_layout_flags_supported =
-        executor_supports_vulkan_graphics_v631_descriptor_layout_flags();
+        executor_supports_vulkan_graphics_v631_descriptor_layout_flags(capability_snapshot);
     const bool v632_render_pass_supported =
-        executor_supports_vulkan_graphics_v632_render_passes();
+        executor_supports_vulkan_graphics_v632_render_passes(capability_snapshot);
     const bool v633_render_pass_sideband_supported =
-        executor_supports_vulkan_graphics_v633_render_pass_sideband();
+        executor_supports_vulkan_graphics_v633_render_pass_sideband(capability_snapshot);
     if (need_v635_event_command_provenance && !graphics_identity_ready) {
         rc = -EOPNOTSUPP;
         goto cleanup;
@@ -14824,7 +15862,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
         need_v632_render_passes || need_v633_render_pass_sideband || need_v634_classic_render_pass_sideband;
     need_v630_native_objects =
         graphics_identity_ready &&
-        (executor_supports_vulkan_graphics_v630_native_objects() ||
+        (executor_supports_vulkan_graphics_v630_native_objects(capability_snapshot) ||
          need_v631_descriptor_layout_flags || need_v632_render_passes ||
          need_v633_render_pass_sideband || need_v634_classic_render_pass_sideband);
     if (need_v634_classic_render_pass_sideband) {
@@ -14855,14 +15893,14 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     bool need_v620_image_layout_range = image_layout_range_count > 0;
     bool need_v621_submit2_metadata = submit_info_count > 0 || submit_sync_info_count > 0;
     if (need_v629_variable_descriptor_counts) {
-        if (!executor_supports_vulkan_graphics_v629_variable_descriptor_counts()) {
+        if (!executor_supports_vulkan_graphics_v629_variable_descriptor_counts(capability_snapshot)) {
             rc = -EOPNOTSUPP;
             goto cleanup;
         }
         need_v628_push_constant_ranges = true;
     }
     if (need_v628_push_constant_ranges) {
-        if (!executor_supports_vulkan_graphics_v628_push_constant_ranges()) {
+        if (!executor_supports_vulkan_graphics_v628_push_constant_ranges(capability_snapshot)) {
             rc = -EOPNOTSUPP;
             goto cleanup;
         }
@@ -15985,7 +17023,9 @@ static int send_recorded_vulkan_graphics_v6_1_frame_range(
     if (rc == 0) {
         frame_build_phase = "read-response";
         rc = read_dispatch_response_status(
-            socket_fd, graphics_label, "vulkan-graphics-v6-replay", submit_id);
+            socket_fd, graphics_label, "vulkan-graphics-v6-replay", submit_id,
+            &terminal_result, out_terminal_received);
+        if (out_terminal_result) *out_terminal_result = terminal_result;
     }
 
 cleanup:
@@ -16032,7 +17072,21 @@ static int send_recorded_vulkan_graphics_v6_1_frame(
         const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *submit_sync_entries,
         size_t submit_sync_count) {
     return send_recorded_vulkan_graphics_v6_1_frame_range(
-        cmd, submit_queue, submit_sync_entries, submit_sync_count, 0, UINT32_MAX, false);
+        cmd, submit_queue, submit_sync_entries, submit_sync_count,
+        0, UINT32_MAX, false, NULL, NULL);
+}
+
+static int send_recorded_vulkan_graphics_v6_1_frame_result(
+        const PdockerVkCommandBuffer *cmd,
+        const PdockerVkQueue *submit_queue,
+        const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *submit_sync_entries,
+        size_t submit_sync_count,
+        VkResult *out_terminal_result,
+        bool *out_terminal_received) {
+    return send_recorded_vulkan_graphics_v6_1_frame_range(
+        cmd, submit_queue, submit_sync_entries, submit_sync_count,
+        0, UINT32_MAX, false, out_terminal_result,
+        out_terminal_received);
 }
 
 static int find_image_table_index(PdockerVkImage *const *images,
@@ -16970,12 +18024,12 @@ static bool descriptor_linear_slot(
     return true;
 }
 
-static bool executor_supports_vulkan_dispatch_v52_image_layout_ranges(void);
-static bool executor_supports_vulkan_dispatch_v53_buffer_views(void);
-static bool executor_supports_vulkan_dispatch_v54_barriers(void);
-static bool executor_supports_vulkan_dispatch_v55_native_objects(void);
-static bool executor_supports_vulkan_dispatch_v56_compute_layouts(void);
-static bool executor_supports_vulkan_dispatch_v57_push_constant_ops(void);
+static bool executor_supports_vulkan_dispatch_v52_image_layout_ranges(const PdockerVkCapabilitySnapshot *snapshot);
+static bool executor_supports_vulkan_dispatch_v53_buffer_views(const PdockerVkCapabilitySnapshot *snapshot);
+static bool executor_supports_vulkan_dispatch_v54_barriers(const PdockerVkCapabilitySnapshot *snapshot);
+static bool executor_supports_vulkan_dispatch_v55_native_objects(const PdockerVkCapabilitySnapshot *snapshot);
+static bool executor_supports_vulkan_dispatch_v56_compute_layouts(const PdockerVkCapabilitySnapshot *snapshot);
+static bool executor_supports_vulkan_dispatch_v57_push_constant_ops(const PdockerVkCapabilitySnapshot *snapshot);
 
 typedef struct {
     int fds[PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS];
@@ -17094,6 +18148,8 @@ static int send_generic_vulkan_dispatch_v5_1_op(
         const PdockerVkPipelineLayout *compute_pipeline_layout,
         uint64_t descriptor_hash,
         uint64_t dispatch_hash) {
+    const PdockerVkCapabilitySnapshot *capability_snapshot =
+        submit_queue ? submit_queue->capability_snapshot : NULL;
     (void)descriptor_hash;
     PdockerGpuVulkanDispatchV5ResourceEntry *resources = NULL;
     PdockerGpuVulkanDispatchV5DescriptorObjectEntry *descriptors = NULL;
@@ -17140,8 +18196,8 @@ static int send_generic_vulkan_dispatch_v5_1_op(
                 (const void *)entry_name);
         return -EINVAL;
     }
-    const bool strict_passthrough =
-        env_truthy_default("PDOCKER_GPU_STRICT_PASSTHROUGH", false);
+    const bool strict_passthrough = capability_snapshot &&
+        capability_snapshot->strict_passthrough;
     if (binding_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS ||
         image_descriptor_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS ||
         image_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGES ||
@@ -17289,7 +18345,7 @@ static int send_generic_vulkan_dispatch_v5_1_op(
         fd_count > PDOCKER_GPU_TRANSPORT_MAX_PASSED_FDS) {
         return -E2BIG;
     }
-    if (push_size > pdocker_vk_max_push_bytes() ||
+    if (push_size > pdocker_vk_max_push_bytes(submit_queue ? submit_queue->capability_snapshot : NULL) ||
         (specialization_entry_count > 0 && !specialization_entries) ||
         (specialization_data_size > 0 && !specialization_data)) {
         fprintf(stderr,
@@ -17918,7 +18974,7 @@ static int send_generic_vulkan_dispatch_v5_1_op(
             goto cleanup;
         }
         const bool vulkan_dispatch_v54_barriers_supported =
-            executor_supports_vulkan_dispatch_v54_barriers();
+            executor_supports_vulkan_dispatch_v54_barriers(capability_snapshot);
         if (!vulkan_dispatch_v54_barriers_supported) {
             fprintf(stderr,
                     "pdocker-vulkan-icd: V5.4 frame rejected: executor does not advertise barrier support dispatch_id=%llu\n",
@@ -18026,10 +19082,10 @@ static int send_generic_vulkan_dispatch_v5_1_op(
         submit_queue,
         &instance_object_id, &physical_device_object_id, &device_object_id, &queue_object_id);
     const bool need_v55_native_objects =
-        identity_ready && executor_supports_vulkan_dispatch_v55_native_objects();
+        identity_ready && executor_supports_vulkan_dispatch_v55_native_objects(capability_snapshot);
     const bool need_v56_compute_layouts =
         compute_pipeline_layout != NULL && need_v55_native_objects &&
-        executor_supports_vulkan_dispatch_v56_compute_layouts();
+        executor_supports_vulkan_dispatch_v56_compute_layouts(capability_snapshot);
     if (strict_passthrough && compute_pipeline_layout != NULL && !need_v56_compute_layouts) {
         fprintf(stderr,
                 "pdocker-vulkan-icd: strict V5.6 frame rejected: executor does not advertise compute layout replay support dispatch_id=%llu\n",
@@ -18047,7 +19103,7 @@ static int send_generic_vulkan_dispatch_v5_1_op(
         }
     }
     const bool v58_descriptor_layout_flags_supported =
-        executor_supports_vulkan_dispatch_v58_descriptor_layout_flags();
+        executor_supports_vulkan_dispatch_v58_descriptor_layout_flags(capability_snapshot);
     const bool need_v58_descriptor_layout_flags =
         need_v56_compute_layouts && v58_descriptor_layout_flags_supported;
     if (need_v56_compute_layouts &&
@@ -18071,7 +19127,7 @@ static int send_generic_vulkan_dispatch_v5_1_op(
         }
     }
     const bool v59_variable_descriptor_counts_supported =
-        executor_supports_vulkan_dispatch_v59_variable_descriptor_counts();
+        executor_supports_vulkan_dispatch_v59_variable_descriptor_counts(capability_snapshot);
     const bool need_v59_variable_descriptor_counts =
         need_v56_compute_layouts && v59_variable_descriptor_counts_required;
     if (need_v59_variable_descriptor_counts && !v59_variable_descriptor_counts_supported) {
@@ -18090,6 +19146,7 @@ static int send_generic_vulkan_dispatch_v5_1_op(
     size_t push_constant_range_count = 0;
     if (need_v56_compute_layouts) {
         int layout_rc = collect_dispatch_v56_pipeline_layout_metadata(
+            submit_queue ? submit_queue->capability_snapshot : NULL,
             descriptor_set_layout_entries, &descriptor_set_layout_count,
             pipeline_layout_set_entries, &pipeline_layout_set_count,
             compute_pipeline_layout);
@@ -18123,6 +19180,7 @@ static int send_generic_vulkan_dispatch_v5_1_op(
             }
         }
         layout_rc = collect_dispatch_v56_pipeline_layout_push_constant_ranges(
+            submit_queue ? submit_queue->capability_snapshot : NULL,
             push_constant_range_entries, &push_constant_range_count,
             compute_pipeline_layout);
         if (layout_rc != 0) {
@@ -18132,7 +19190,7 @@ static int send_generic_vulkan_dispatch_v5_1_op(
     }
     const bool need_v57_push_ops =
         need_v56_compute_layouts && push_constant_op_count > 0 &&
-        executor_supports_vulkan_dispatch_v57_push_constant_ops();
+        executor_supports_vulkan_dispatch_v57_push_constant_ops(capability_snapshot);
     if (strict_passthrough && push_constant_op_count > 0 && !need_v57_push_ops) {
         fprintf(stderr,
                 "pdocker-vulkan-icd: strict V5.7 frame rejected: executor does not advertise push-op replay support dispatch_id=%llu ops=%u\n",
@@ -18194,7 +19252,7 @@ static int send_generic_vulkan_dispatch_v5_1_op(
     const bool need_v53_buffer_views = buffer_view_count > 0 || need_v54_barriers_or_identity;
     const bool need_v52_image_layout_ranges = image_layout_range_count > 0 || need_v53_buffer_views;
     const bool vulkan_dispatch_v53_buffer_views_supported =
-        executor_supports_vulkan_dispatch_v53_buffer_views();
+        executor_supports_vulkan_dispatch_v53_buffer_views(capability_snapshot);
     if (need_v53_buffer_views && !vulkan_dispatch_v53_buffer_views_supported) {
         fprintf(stderr,
                 "pdocker-vulkan-icd: V5.3 frame rejected: executor does not advertise buffer-view support dispatch_id=%llu\n",
@@ -18203,7 +19261,7 @@ static int send_generic_vulkan_dispatch_v5_1_op(
         goto cleanup;
     }
     const bool vulkan_dispatch_v52_image_layout_ranges_supported =
-        executor_supports_vulkan_dispatch_v52_image_layout_ranges();
+        executor_supports_vulkan_dispatch_v52_image_layout_ranges(capability_snapshot);
     if (need_v52_image_layout_ranges && !vulkan_dispatch_v52_image_layout_ranges_supported) {
         fprintf(stderr,
                 "pdocker-vulkan-icd: V5.2 frame rejected: executor does not advertise image layout range support dispatch_id=%llu\n",
@@ -18630,7 +19688,9 @@ static int send_generic_vulkan_dispatch_v5_1_op(
     header->frame_size = cursor;
     header->frame_hash = fnv1a64_bytes(frame, cursor);
 
-    rc = send_vulkan_dispatch_v5_frame_with_fds(socket_fd, frame, cursor, fds, fd_count);
+    g_generic_dispatch_execution_state = PDOCKER_VK_DISPATCH_AMBIGUOUS;
+    rc = send_vulkan_dispatch_v5_frame_with_fds(
+        socket_fd, frame, cursor, fds, fd_count);
 cleanup:
     free(dispatch_indirect_options);
     free(frame);
@@ -18653,8 +19713,8 @@ static bool image_mip_extent(const PdockerVkImage *image,
                              uint32_t mip_level,
                              VkExtent3D *out);
 static bool descriptor_type_supported_by_v5_object_transport(VkDescriptorType type);
-static VkSubgroupFeatureFlags advertised_subgroup_operations(void);
-static uint32_t advertised_subgroup_size(void);
+static VkSubgroupFeatureFlags advertised_subgroup_operations(const PdockerVkCapabilitySnapshot *snapshot);
+static uint32_t advertised_subgroup_size(const PdockerVkCapabilitySnapshot *snapshot);
 static bool checked_add_u64(uint64_t a, uint64_t b, uint64_t *out);
 static bool resolve_copy_alias(PdockerVkBuffer *buffer,
                                VkDeviceSize offset,
@@ -19059,7 +20119,12 @@ static int send_generic_vulkan_dispatch_op(
         const PdockerVkQueue *submit_queue,
         const PdockerVkCommandBuffer *barrier_cmd,
         const PdockerVkBarrierOpRange *pre_barriers,
-        uint32_t pre_barrier_dependency_flags) {
+        uint32_t pre_barrier_dependency_flags,
+        VkResult *out_terminal_result,
+        bool *out_terminal_received) {
+    g_generic_dispatch_execution_state = PDOCKER_VK_DISPATCH_NOT_ENQUEUED;
+    if (out_terminal_result) *out_terminal_result = VK_ERROR_UNKNOWN;
+    if (out_terminal_received) *out_terminal_received = false;
     if (!op || !op->pipeline || !op->pipeline->shader) {
         fprintf(stderr,
                 "pdocker-vulkan-icd: generic dispatch rejected: invalid op op=%p pipeline=%p shader=%p\n",
@@ -19077,9 +20142,10 @@ static int send_generic_vulkan_dispatch_op(
                 (void *)shader);
         return -EINVAL;
     }
-    const bool strict_passthrough =
-        env_truthy_default("PDOCKER_GPU_STRICT_PASSTHROUGH", false);
-    if (strict_passthrough && copy_alias_enabled()) {
+    const PdockerVkCapabilitySnapshot *snapshot =
+        submit_queue ? submit_queue->capability_snapshot : NULL;
+    const bool strict_passthrough = snapshot && snapshot->strict_passthrough;
+    if (strict_passthrough && copy_alias_enabled(snapshot)) {
         fprintf(stderr,
                 "pdocker-vulkan-icd: rejecting PDOCKER_VULKAN_ALIAS_COPIES under strict passthrough\n");
         return -EINVAL;
@@ -19383,7 +20449,7 @@ static int send_generic_vulkan_dispatch_op(
                 }
                 VkDeviceSize dispatch_offset = (VkDeviceSize)dispatch_offset_u64;
                 bool alias_hit = false;
-                if (copy_alias_enabled()) {
+                if (copy_alias_enabled(snapshot)) {
                     alias_hit = resolve_copy_alias(transport_buffer, transport_binding->offset, bytes,
                                                    &dispatch_memory, &dispatch_offset);
                 }
@@ -19511,7 +20577,7 @@ static int send_generic_vulkan_dispatch_op(
         op->pipeline->layout->push_constant_size > push_size) {
         push_size = op->pipeline->layout->push_constant_size;
     }
-    const uint32_t max_push_bytes = pdocker_vk_max_push_bytes();
+    const uint32_t max_push_bytes = pdocker_vk_max_push_bytes(submit_queue ? submit_queue->capability_snapshot : NULL);
     if (push_size > max_push_bytes || (push_size > 0 && !op->push_constants)) {
         fprintf(stderr,
                 "pdocker-vulkan-icd: generic dispatch rejected: push constants too large dispatch_id=%llu push_size=%u max=%u\n",
@@ -19582,7 +20648,8 @@ static int send_generic_vulkan_dispatch_op(
     const char *spec_token = "-";
 
     PdockerVkSpirvProbeReplay probe;
-    int probe_rc = prepare_spirv_probe_replay(&probe,
+    int probe_rc = prepare_spirv_probe_replay(snapshot,
+                                              &probe,
                                               source_shader_hash,
                                               binding_count,
                                               api_descriptor_sets,
@@ -19812,86 +20879,9 @@ static int send_generic_vulkan_dispatch_op(
                            (unsigned long long)source_shader_hash,
                            (unsigned long long)shader_hash_to_send);
     }
-    typedef struct {
-        const char *env;
-        const char *option;
-        bool default_value;
-    } PdockerVkBoolBridgeOption;
-    static const PdockerVkBoolBridgeOption bool_bridge_options[] = {
-#define PDOCKER_VK_BOOL_BRIDGE_OPTION(env_name, option_name, has_field, value_field, default_value) \
-        {#env_name, #option_name, (default_value) != 0},
-        PDOCKER_GPU_VULKAN_BOOL_DISPATCH_OPTIONS(PDOCKER_VK_BOOL_BRIDGE_OPTION)
-#undef PDOCKER_VK_BOOL_BRIDGE_OPTION
-#define PDOCKER_VK_BOOL_BRIDGE_OPTION_NO_HAS(env_name, option_name, value_field, default_value) \
-        {#env_name, #option_name, (default_value) != 0},
-        PDOCKER_GPU_VULKAN_BOOL_DISPATCH_OPTIONS_NO_HAS(PDOCKER_VK_BOOL_BRIDGE_OPTION_NO_HAS)
-#undef PDOCKER_VK_BOOL_BRIDGE_OPTION_NO_HAS
-    };
-    for (size_t i = 0; i < sizeof(bool_bridge_options) / sizeof(bool_bridge_options[0]); ++i) {
-        const PdockerVkBoolBridgeOption *option = &bool_bridge_options[i];
-        if (!getenv(option->env)) continue;
-        PDOCKER_VK_APPENDF("append-bool-option",
-                           " %s=%u",
-                           option->option,
-                           env_truthy_default(option->env, option->default_value) ? 1u : 0u);
-    }
-
-    typedef struct {
-        const char *env;
-        const char *option;
-    } PdockerVkU64BridgeOption;
-    static const PdockerVkU64BridgeOption u64_bridge_options[] = {
-#define PDOCKER_VK_U64_BRIDGE_OPTION(env_name, option_name, has_field, value_field) \
-        {#env_name, #option_name},
-        PDOCKER_GPU_VULKAN_SIZE_DISPATCH_OPTIONS(PDOCKER_VK_U64_BRIDGE_OPTION)
-#undef PDOCKER_VK_U64_BRIDGE_OPTION
-    };
-    for (size_t i = 0; i < sizeof(u64_bridge_options) / sizeof(u64_bridge_options[0]); ++i) {
-        const PdockerVkU64BridgeOption *option = &u64_bridge_options[i];
-        const char *value = getenv(option->env);
-        if (!value || !value[0]) continue;
-        char *end = NULL;
-        unsigned long long parsed = strtoull(value, &end, 10);
-        if (!end || *end != '\0') continue;
-        PDOCKER_VK_APPENDF("append-u64-option",
-                           " %s=%llu",
-                           option->option,
-                           parsed);
-    }
-    typedef struct {
-        const char *env;
-        const char *option;
-    } PdockerVkStringBridgeOption;
-    static const PdockerVkStringBridgeOption string_bridge_options[] = {
-#define PDOCKER_VK_STRING_BRIDGE_OPTION(env_name, option_name, has_field, value_field) \
-        {#env_name, #option_name},
-        PDOCKER_GPU_VULKAN_STRING_DISPATCH_OPTIONS(PDOCKER_VK_STRING_BRIDGE_OPTION)
-#undef PDOCKER_VK_STRING_BRIDGE_OPTION
-    };
-    for (size_t i = 0; i < sizeof(string_bridge_options) / sizeof(string_bridge_options[0]); ++i) {
-        const PdockerVkStringBridgeOption *option = &string_bridge_options[i];
-        const char *value = getenv(option->env);
-        if (!value || !value[0]) continue;
-        const size_t value_len = strlen(value);
-        if (value_len >= PDOCKER_GPU_VULKAN_STRING_DISPATCH_OPTION_MAX_BYTES ||
-            strpbrk(value, "\r\n") != NULL) {
-            fprintf(stderr,
-                    "pdocker-vulkan-icd: generic dispatch rejected: invalid %s dispatch_id=%llu\n",
-                    option->env,
-                    (unsigned long long)dispatch_id);
-            close_spirv_probe_replay(&probe);
-            pdocker_vk_command_text_destroy(&command);
-            return -EINVAL;
-        }
-        char value_hex[PDOCKER_GPU_VULKAN_STRING_DISPATCH_OPTION_MAX_BYTES * 2u + 1u];
-        hex_encode((const uint8_t *)value, value_len, value_hex, sizeof(value_hex));
-        PDOCKER_VK_APPENDF("append-string-option",
-                           " %s_hex=%s",
-                           option->option,
-                           value_hex);
-    }
-    if (trace_allocations() || env_truthy_default("PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE", false)) {
-        PDOCKER_VK_APPENDF("append-profile-option", " profile=1");
+    if (snapshot && snapshot->dispatch_option_suffix_len > 0) {
+        PDOCKER_VK_APPENDF("append-snapshot-options", "%s",
+                           snapshot->dispatch_option_suffix);
     }
     PDOCKER_VK_APPENDF("append-requested-feature-mask",
                        " requested_feature_mask=%llu",
@@ -19995,17 +20985,17 @@ static int send_generic_vulkan_dispatch_op(
         entry_name_requires_v5_frame ||
         binding_count > PDOCKER_GPU_VULKAN_TEXT_DISPATCH_MAX_BINDINGS || op->dispatch_indirect;
     const bool use_v5_frame =
-        (vulkan_v5_frame_enabled() || requires_v5_frame) && !copy_alias_enabled();
+        (vulkan_v5_frame_enabled(submit_queue ? submit_queue->capability_snapshot : NULL) || requires_v5_frame) && !copy_alias_enabled(snapshot);
     const bool persistent_v5_transport =
         use_v5_frame &&
-        executor_supports_vulkan_dispatch_v5_terminal_response() &&
-        executor_supports_persistent_multiplexed_connections();
+        executor_supports_vulkan_dispatch_v5_terminal_response(submit_queue ? submit_queue->capability_snapshot : NULL) &&
+        executor_supports_persistent_multiplexed_connections(submit_queue ? submit_queue->capability_snapshot : NULL);
     /* Legacy V1-V4 text dispatch has no terminal response delimiter.  It must
      * remain request-scoped; only negotiated framed V5 traffic may reuse the
      * queue stream. */
     int socket_fd = persistent_v5_transport
         ? connect_submit_queue(submit_queue)
-        : connect_queue();
+        : connect_queue_for_snapshot(submit_queue ? submit_queue->capability_snapshot : NULL);
     if (socket_fd < 0) {
         if (lifecycle_log) {
             fprintf(stderr,
@@ -20021,7 +21011,7 @@ static int send_generic_vulkan_dispatch_op(
         pdocker_vk_command_text_destroy(&command);
         return socket_fd;
     }
-    if (requires_v5_frame && copy_alias_enabled()) {
+    if (requires_v5_frame && copy_alias_enabled(snapshot)) {
         fprintf(stderr,
                 "pdocker-vulkan-icd: generic dispatch rejected: "
                 "V5 framed transport is required but copy-alias text fallback is enabled "
@@ -20051,6 +21041,8 @@ static int send_generic_vulkan_dispatch_op(
                 option_text_size--;
             }
         }
+        VkResult terminal_result = VK_ERROR_UNKNOWN;
+        bool terminal_received = false;
         int rc = send_generic_vulkan_dispatch_v5_1_op(
             socket_fd,
             dispatch_id,
@@ -20128,9 +21120,12 @@ static int send_generic_vulkan_dispatch_op(
             rc = read_dispatch_response_status(
                 socket_fd,
                 "VULKAN_DISPATCH_V5.1",
-                persistent_v5_transport ? "vulkan-dispatch-v5-complete" : NULL,
-                persistent_v5_transport ? dispatch_id : 0);
+                "vulkan-dispatch-v5-complete",
+                dispatch_id,
+                &terminal_result, &terminal_received);
         }
+        if (out_terminal_result) *out_terminal_result = terminal_result;
+        if (out_terminal_received) *out_terminal_received = terminal_received;
         if (lifecycle_log) {
             fprintf(stderr,
                     "pdocker-vulkan-icd: generic dispatch lifecycle: "
@@ -20150,7 +21145,7 @@ static int send_generic_vulkan_dispatch_op(
         pdocker_vk_command_text_destroy(&command);
         return rc;
     }
-    if ((vulkan_v5_frame_enabled() || requires_v5_frame) && copy_alias_enabled()) {
+    if ((vulkan_v5_frame_enabled(submit_queue ? submit_queue->capability_snapshot : NULL) || requires_v5_frame) && copy_alias_enabled(snapshot)) {
         fprintf(stderr,
                 "pdocker-vulkan-icd: V5.1 frame required but disabled for this dispatch "
                 "because PDOCKER_VULKAN_ALIAS_COPIES is active\n");
@@ -20159,6 +21154,7 @@ static int send_generic_vulkan_dispatch_op(
         pdocker_vk_command_text_destroy(&command);
         return -EOPNOTSUPP;
     }
+    g_generic_dispatch_execution_state = PDOCKER_VK_DISPATCH_AMBIGUOUS;
     int rc = sendmsg_exact_with_fds(
         socket_fd,
         command.data,
@@ -20167,7 +21163,10 @@ static int send_generic_vulkan_dispatch_op(
         1 + binding_count);
     if (rc == 0) {
         rc = read_dispatch_response_status(
-            socket_fd, "VULKAN_DISPATCH_TEXT", NULL, 0);
+            socket_fd, "VULKAN_DISPATCH_TEXT", NULL, 0, NULL, NULL);
+        if (rc == 0) {
+            g_generic_dispatch_execution_state = PDOCKER_VK_DISPATCH_ENQUEUED;
+        }
     }
     if (lifecycle_log) {
         fprintf(stderr,
@@ -20185,7 +21184,17 @@ static int send_generic_vulkan_dispatch_op(
     return rc;
 }
 
-static int send_generic_vulkan_dispatch(PdockerVkCommandBuffer *cmd, const PdockerVkQueue *submit_queue) {
+static int send_generic_vulkan_dispatch(
+        PdockerVkCommandBuffer *cmd,
+        const PdockerVkQueue *submit_queue,
+        VkResult *out_terminal_result,
+        bool *out_terminal_received) {
+    /* Descriptor/push snapshot allocation can fail before the op sender is
+     * entered. Reset request-local execution state here so a previous
+     * ENQUEUED result cannot poison an exact pre-send OOM. */
+    g_generic_dispatch_execution_state = PDOCKER_VK_DISPATCH_NOT_ENQUEUED;
+    if (out_terminal_result) *out_terminal_result = VK_ERROR_UNKNOWN;
+    if (out_terminal_received) *out_terminal_received = false;
     if (!cmd) return -EINVAL;
     PdockerVkDispatchOp op;
     memset(&op, 0, sizeof(op));
@@ -20217,7 +21226,9 @@ static int send_generic_vulkan_dispatch(PdockerVkCommandBuffer *cmd, const Pdock
         dispatch_op_destroy_descriptor_state(&op);
         return -ENOMEM;
     }
-    int rc = send_generic_vulkan_dispatch_op(&op, submit_queue, NULL, NULL, 0);
+    int rc = send_generic_vulkan_dispatch_op(
+        &op, submit_queue, NULL, NULL, 0,
+        out_terminal_result, out_terminal_received);
     dispatch_op_destroy_descriptor_state(&op);
     return rc;
 }
@@ -20435,8 +21446,10 @@ static void add_copy_alias(PdockerVkBuffer *dst,
     alias->size = size;
 }
 
-static bool copy_alias_candidate(PdockerVkMemory *src_memory) {
-    return copy_alias_enabled() && src_memory &&
+static bool copy_alias_candidate(
+        const PdockerVkCapabilitySnapshot *snapshot,
+        PdockerVkMemory *src_memory) {
+    return copy_alias_enabled(snapshot) && src_memory &&
            src_memory->size >= PDOCKER_VK_ALIAS_MIN_SOURCE_BYTES;
 }
 
@@ -20450,7 +21463,10 @@ typedef struct {
     VkDeviceSize skipped_bytes;
 } PdockerVkCopyStats;
 
-static void execute_recorded_copy_op(PdockerVkCopyOp *op, PdockerVkCopyStats *stats) {
+static void execute_recorded_copy_op(
+        const PdockerVkCapabilitySnapshot *snapshot,
+        PdockerVkCopyOp *op,
+        PdockerVkCopyStats *stats) {
     if (!op) return;
     if (stats) stats->op_count++;
     void *dst_ptr = buffer_ptr(op->dst, op->region.dstOffset, op->region.size);
@@ -20476,7 +21492,7 @@ static void execute_recorded_copy_op(PdockerVkCopyOp *op, PdockerVkCopyStats *st
         (void)resolve_copy_alias(op->src, op->region.srcOffset, op->region.size,
                                  &alias_memory, &alias_offset);
     }
-    if (copy_alias_candidate(alias_memory)) {
+    if (copy_alias_candidate(snapshot, alias_memory)) {
         add_copy_alias(op->dst, op->region.dstOffset, op->region.size,
                        alias_memory, alias_offset);
         if (stats) {
@@ -20903,9 +21919,10 @@ static int32_t blit_axis_sample(int32_t src0,
 }
 
 static void execute_recorded_blit_image_op(
+        const PdockerVkCapabilitySnapshot *snapshot,
         PdockerVkImageBlitOp *op,
         PdockerVkCopyStats *stats) {
-    if (!pdocker_vk_blit_image_executor_eligible(op) ||
+    if (!pdocker_vk_blit_image_executor_eligible(snapshot, op) ||
         op->region.srcSubresource.aspectMask != VK_IMAGE_ASPECT_COLOR_BIT ||
         op->region.dstSubresource.aspectMask != VK_IMAGE_ASPECT_COLOR_BIT ||
         op->region.srcSubresource.layerCount == 0 ||
@@ -21149,7 +22166,7 @@ static void execute_recorded_copy_ops(PdockerVkCommandBuffer *cmd) {
     PdockerVkCopyStats stats;
     memset(&stats, 0, sizeof(stats));
     for (uint32_t i = 0; i < cmd->copy_op_count; ++i) {
-        execute_recorded_copy_op(&cmd->copy_ops[i], &stats);
+        execute_recorded_copy_op(cmd->capability_snapshot, &cmd->copy_ops[i], &stats);
     }
     if (trace_allocations() && stats.op_count > 0) {
         fprintf(stderr,
@@ -21299,7 +22316,7 @@ typedef struct {
     VkSampleCountFlags sample_counts;
 } PdockerVkAdvertisedFormatCaps;
 
-typedef struct {
+struct PdockerVkAdvertisedCaps {
     bool loaded;
     bool executor_valid;
     uint32_t api_version;
@@ -21309,6 +22326,8 @@ typedef struct {
     char device_name[VK_MAX_PHYSICAL_DEVICE_NAME_SIZE];
     VkPhysicalDeviceLimits limits;
     VkPhysicalDeviceFeatures features;
+    VkBool32 host_query_reset;
+    uint32_t queue_timestamp_valid_bits;
     VkBool32 multiview;
     VkPhysicalDevice16BitStorageFeatures storage16;
     VkPhysicalDevice8BitStorageFeatures storage8;
@@ -21416,7 +22435,7 @@ typedef struct {
     uint32_t vulkan_graphics_v6_max_event_command_provenance;
     uint32_t image_format_cap_count;
     PdockerVkAdvertisedFormatCaps image_format_caps[PDOCKER_VK_ADVERTISED_FORMAT_CAP_MAX];
-} PdockerVkAdvertisedCaps;
+};
 
 typedef enum {
     PDOCKER_VK_CAPS_CACHE_EMPTY = 0,
@@ -21435,10 +22454,54 @@ typedef struct {
 } PdockerVkAdvertisedCapsCache;
 
 static PdockerVkAdvertisedCapsCache g_advertised_caps_cache;
-static _Thread_local PdockerVkAdvertisedCaps g_advertised_caps_snapshot;
+
+static int advertised_caps_cond_prepare_spare_locked(void) {
+    /* See pdocker_vk_wsi_cond_prepare_spare_locked(): only an ordinary
+     * mutex-protected API path creates post-fork condition generations. */
+    if (!g_advertised_caps_cond_current) {
+        pthread_cond_t *replacement =
+            (pthread_cond_t *)malloc(sizeof(*replacement));
+        if (!replacement) return ENOMEM;
+        int rc = pthread_cond_init(replacement, NULL);
+        if (rc != 0) {
+            free(replacement);
+            return rc;
+        }
+        g_advertised_caps_cond_current = replacement;
+    }
+    if (g_advertised_caps_cond_spare) return 0;
+    pthread_cond_t *replacement =
+        (pthread_cond_t *)malloc(sizeof(*replacement));
+    if (!replacement) return ENOMEM;
+    int rc = pthread_cond_init(replacement, NULL);
+    if (rc != 0) {
+        free(replacement);
+        return rc;
+    }
+    g_advertised_caps_cond_spare = replacement;
+    return 0;
+}
+
+static int advertised_caps_lock(void) {
+    int rc = pthread_once(
+        &g_gpu_endpoint_atfork_once,
+        register_gpu_endpoint_atfork);
+    if (rc != 0) return rc;
+    if (g_gpu_endpoint_atfork_status != 0) {
+        return g_gpu_endpoint_atfork_status;
+    }
+    rc = pthread_mutex_lock(&g_advertised_caps_mutex);
+    if (rc != 0) return rc;
+    rc = advertised_caps_cond_prepare_spare_locked();
+    if (rc != 0) (void)pthread_mutex_unlock(&g_advertised_caps_mutex);
+    return rc;
+}
 
 static void advertised_caps_cache_atfork_child_reset(void) {
-    memset(&g_advertised_caps_cache, 0, sizeof(g_advertised_caps_cache));
+    g_advertised_caps_cache.state = PDOCKER_VK_CAPS_CACHE_EMPTY;
+    g_advertised_caps_cache.flight_id = 0;
+    g_advertised_caps_cond_current = g_advertised_caps_cond_spare;
+    g_advertised_caps_cond_spare = NULL;
 }
 
 static const char *json_find_value(const char *json, const char *key) {
@@ -21625,6 +22688,9 @@ static bool parse_executor_advertisement_caps_json(
 
     json_read_u32(json, "maxPushConstantsSize", &caps->limits.maxPushConstantsSize);
     json_read_u32(json, "maxComputeSharedMemorySize", &caps->limits.maxComputeSharedMemorySize);
+    json_read_u32(json, "timestampComputeAndGraphics", &caps->limits.timestampComputeAndGraphics);
+    json_read_float(json, "timestampPeriod", &caps->limits.timestampPeriod);
+    json_read_u32(json, "queueTimestampValidBits", &caps->queue_timestamp_valid_bits);
     json_read_float(json, "maxSamplerAnisotropy", &caps->limits.maxSamplerAnisotropy);
     json_read_u32(json, "maxPerStageDescriptorSamplers", &caps->limits.maxPerStageDescriptorSamplers);
     json_read_u32(json, "maxPerStageDescriptorSampledImages", &caps->limits.maxPerStageDescriptorSampledImages);
@@ -21667,6 +22733,7 @@ static bool parse_executor_advertisement_caps_json(
     json_read_u32(json, "samplerAnisotropy", &caps->features.samplerAnisotropy);
     json_read_u32(json, "samplerFilterMinmax", &caps->sampler_filter_minmax);
     json_read_u32(json, "separateDepthStencilLayouts", &caps->separate_depth_stencil_layouts);
+    json_read_u32(json, "hostQueryReset", &caps->host_query_reset);
     json_read_u32(json, "multiview", &caps->multiview);
     json_read_u32(json, "storageBuffer16BitAccess", &caps->storage16.storageBuffer16BitAccess);
     json_read_u32(json, "uniformAndStorageBuffer16BitAccess", &caps->storage16.uniformAndStorageBuffer16BitAccess);
@@ -22491,19 +23558,25 @@ static void advertised_caps_cache_select_endpoint_locked(
     g_advertised_caps_cache.state = PDOCKER_VK_CAPS_CACHE_EMPTY;
     g_advertised_caps_cache.endpoint = *endpoint;
     g_advertised_caps_cache.flight_id = next_flight;
-    (void)pthread_cond_broadcast(&g_advertised_caps_cond);
+    (void)pthread_cond_broadcast(g_advertised_caps_cond_current);
 }
 
-static bool pdocker_vk_get_advertised_caps(PdockerVkAdvertisedCaps *out) {
+static bool pdocker_vk_get_advertised_caps_for_endpoint(
+        const PdockerGpuEndpointKey *frozen_endpoint,
+        PdockerVkAdvertisedCaps *out) {
     if (!out) return false;
     memset(out, 0, sizeof(*out));
     out->loaded = true;
 
     for (unsigned attempt = 0; attempt < 8u; ++attempt) {
         PdockerGpuEndpointKey endpoint;
-        if (snapshot_gpu_endpoint(&endpoint) != 0) return false;
+        if (frozen_endpoint) {
+            endpoint = *frozen_endpoint;
+        } else if (snapshot_gpu_endpoint(&endpoint) != 0) {
+            return false;
+        }
 
-        int lock_rc = pthread_mutex_lock(&g_advertised_caps_mutex);
+        int lock_rc = advertised_caps_lock();
         if (lock_rc != 0) return false;
         advertised_caps_cache_select_endpoint_locked(&endpoint);
 
@@ -22525,7 +23598,7 @@ static bool pdocker_vk_get_advertised_caps(PdockerVkAdvertisedCaps *out) {
         }
         if (g_advertised_caps_cache.state == PDOCKER_VK_CAPS_CACHE_QUERYING) {
             int wait_rc = pthread_cond_wait(
-                &g_advertised_caps_cond, &g_advertised_caps_mutex);
+                g_advertised_caps_cond_current, &g_advertised_caps_mutex);
             (void)pthread_mutex_unlock(&g_advertised_caps_mutex);
             if (wait_rc != 0) return false;
             continue;
@@ -22549,7 +23622,7 @@ static bool pdocker_vk_get_advertised_caps(PdockerVkAdvertisedCaps *out) {
         queried_caps.loaded = true;
         queried_caps.executor_valid = valid;
 
-        lock_rc = pthread_mutex_lock(&g_advertised_caps_mutex);
+        lock_rc = advertised_caps_lock();
         if (lock_rc != 0) return false;
         bool owns_flight =
             g_advertised_caps_cache.state == PDOCKER_VK_CAPS_CACHE_QUERYING &&
@@ -22562,7 +23635,7 @@ static bool pdocker_vk_get_advertised_caps(PdockerVkAdvertisedCaps *out) {
         }
         if (query_rc == -ESTALE) {
             g_advertised_caps_cache.state = PDOCKER_VK_CAPS_CACHE_EMPTY;
-            (void)pthread_cond_broadcast(&g_advertised_caps_cond);
+            (void)pthread_cond_broadcast(g_advertised_caps_cond_current);
             (void)pthread_mutex_unlock(&g_advertised_caps_mutex);
             continue;
         }
@@ -22583,177 +23656,558 @@ static bool pdocker_vk_get_advertised_caps(PdockerVkAdvertisedCaps *out) {
             g_advertised_caps_cache.state =
                 PDOCKER_VK_CAPS_CACHE_READY_NEGATIVE;
         }
-        (void)pthread_cond_broadcast(&g_advertised_caps_cond);
+        (void)pthread_cond_broadcast(g_advertised_caps_cond_current);
         (void)pthread_mutex_unlock(&g_advertised_caps_mutex);
         return valid;
     }
     return false;
 }
 
-static const PdockerVkAdvertisedCaps *pdocker_vk_advertised_caps(void) {
-    (void)pdocker_vk_get_advertised_caps(&g_advertised_caps_snapshot);
-    return &g_advertised_caps_snapshot;
+#if defined(__GNUC__)
+__attribute__((unused))
+#endif
+static bool pdocker_vk_get_advertised_caps(
+        PdockerVkAdvertisedCaps *out) {
+    return pdocker_vk_get_advertised_caps_for_endpoint(NULL, out);
 }
 
-static bool executor_supports_vulkan_dispatch_v52_image_layout_ranges(void) {
-    if (!bridge_available()) return false;
-    const PdockerVkAdvertisedCaps *caps = pdocker_vk_advertised_caps();
+static PdockerVkCapabilitySnapshot *capability_snapshot_retain(
+        PdockerVkCapabilitySnapshot *snapshot) {
+    if (snapshot) (void)__sync_add_and_fetch(&snapshot->refcount, 1u);
+    return snapshot;
+}
+
+static void capability_snapshot_release(PdockerVkCapabilitySnapshot *snapshot) {
+    if (snapshot && __sync_sub_and_fetch(&snapshot->refcount, 1u) == 0) {
+        free(snapshot->advertised_caps);
+        snapshot->advertised_caps = NULL;
+        free(snapshot->shared_directory);
+        snapshot->shared_directory = NULL;
+        free(snapshot->spirv_probe_manifest_path);
+        snapshot->spirv_probe_manifest_path = NULL;
+        free(snapshot->spirv_probe_shader_path);
+        snapshot->spirv_probe_shader_path = NULL;
+        free(snapshot->dispatch_option_suffix);
+        snapshot->dispatch_option_suffix = NULL;
+        snapshot->dispatch_option_suffix_len = 0;
+        free(snapshot);
+    }
+}
+
+
+typedef struct {
+    const char *env;
+    const char *option;
+    bool default_value;
+} PdockerVkBoolBridgeOption;
+
+static const PdockerVkBoolBridgeOption g_bool_bridge_options[] = {
+#define PDOCKER_VK_BOOL_BRIDGE_OPTION(env_name, option_name, has_field, value_field, default_value) \
+    {#env_name, #option_name, (default_value) != 0},
+    PDOCKER_GPU_VULKAN_BOOL_DISPATCH_OPTIONS(PDOCKER_VK_BOOL_BRIDGE_OPTION)
+#undef PDOCKER_VK_BOOL_BRIDGE_OPTION
+#define PDOCKER_VK_BOOL_BRIDGE_OPTION_NO_HAS(env_name, option_name, value_field, default_value) \
+    {#env_name, #option_name, (default_value) != 0},
+    PDOCKER_GPU_VULKAN_BOOL_DISPATCH_OPTIONS_NO_HAS(PDOCKER_VK_BOOL_BRIDGE_OPTION_NO_HAS)
+#undef PDOCKER_VK_BOOL_BRIDGE_OPTION_NO_HAS
+};
+
+typedef struct {
+    const char *env;
+    const char *option;
+} PdockerVkBridgeOption;
+
+static const PdockerVkBridgeOption g_u64_bridge_options[] = {
+#define PDOCKER_VK_U64_BRIDGE_OPTION(env_name, option_name, has_field, value_field) \
+    {#env_name, #option_name},
+    PDOCKER_GPU_VULKAN_SIZE_DISPATCH_OPTIONS(PDOCKER_VK_U64_BRIDGE_OPTION)
+#undef PDOCKER_VK_U64_BRIDGE_OPTION
+};
+
+static const PdockerVkBridgeOption g_string_bridge_options[] = {
+#define PDOCKER_VK_STRING_BRIDGE_OPTION(env_name, option_name, has_field, value_field) \
+    {#env_name, #option_name},
+    PDOCKER_GPU_VULKAN_STRING_DISPATCH_OPTIONS(PDOCKER_VK_STRING_BRIDGE_OPTION)
+#undef PDOCKER_VK_STRING_BRIDGE_OPTION
+};
+
+static int capture_dispatch_option_suffix(
+        PdockerVkCapabilitySnapshot *snapshot) {
+    if (!snapshot) return -EINVAL;
+    PdockerVkCommandText suffix = {0};
+    for (size_t i = 0;
+         i < sizeof(g_bool_bridge_options) / sizeof(g_bool_bridge_options[0]);
+         ++i) {
+        const PdockerVkBoolBridgeOption *option = &g_bool_bridge_options[i];
+        if (!getenv(option->env)) continue;
+        int rc = pdocker_vk_command_text_appendf(
+            &suffix, " %s=%u", option->option,
+            env_truthy_default(option->env, option->default_value) ? 1u : 0u);
+        if (rc != 0) {
+            pdocker_vk_command_text_destroy(&suffix);
+            return rc;
+        }
+    }
+    for (size_t i = 0;
+         i < sizeof(g_u64_bridge_options) / sizeof(g_u64_bridge_options[0]);
+         ++i) {
+        const PdockerVkBridgeOption *option = &g_u64_bridge_options[i];
+        const char *value = getenv(option->env);
+        if (!value || !value[0]) continue;
+        char *end = NULL;
+        unsigned long long parsed = strtoull(value, &end, 10);
+        if (!end || *end != '\0') continue;
+        int rc = pdocker_vk_command_text_appendf(
+            &suffix, " %s=%llu", option->option, parsed);
+        if (rc != 0) {
+            pdocker_vk_command_text_destroy(&suffix);
+            return rc;
+        }
+    }
+    for (size_t i = 0;
+         i < sizeof(g_string_bridge_options) / sizeof(g_string_bridge_options[0]);
+         ++i) {
+        const PdockerVkBridgeOption *option = &g_string_bridge_options[i];
+        const char *value = getenv(option->env);
+        if (!value || !value[0]) continue;
+        const size_t value_len = strlen(value);
+        if (value_len >= PDOCKER_GPU_VULKAN_STRING_DISPATCH_OPTION_MAX_BYTES ||
+            strpbrk(value, "\r\n") != NULL) {
+            pdocker_vk_command_text_destroy(&suffix);
+            return -EINVAL;
+        }
+        char value_hex[PDOCKER_GPU_VULKAN_STRING_DISPATCH_OPTION_MAX_BYTES * 2u + 1u];
+        hex_encode((const uint8_t *)value, value_len, value_hex, sizeof(value_hex));
+        int rc = pdocker_vk_command_text_appendf(
+            &suffix, " %s_hex=%s", option->option, value_hex);
+        if (rc != 0) {
+            pdocker_vk_command_text_destroy(&suffix);
+            return rc;
+        }
+    }
+    if (snapshot->dispatch_profile_response) {
+        int rc = pdocker_vk_command_text_appendf(&suffix, " profile=1");
+        if (rc != 0) {
+            pdocker_vk_command_text_destroy(&suffix);
+            return rc;
+        }
+    }
+    snapshot->dispatch_option_suffix = suffix.data;
+    snapshot->dispatch_option_suffix_len = suffix.len;
+    return 0;
+}
+
+static PdockerVkCapabilitySnapshot *capability_snapshot_create(void) {
+    for (unsigned attempt = 0; attempt < 8u; ++attempt) {
+        PdockerGpuEndpointKey endpoint;
+        if (snapshot_gpu_endpoint(&endpoint) != 0) return NULL;
+        const bool frozen_bridge_available = bridge_available();
+        const char *source = getenv("PDOCKER_VULKAN_ADVERTISEMENT_SOURCE");
+        const bool executor_source = source && strcmp(source, "executor") == 0;
+        PdockerVkAdvertisedCaps caps;
+        memset(&caps, 0, sizeof(caps));
+        (void)pdocker_vk_get_advertised_caps_for_endpoint(&endpoint, &caps);
+
+        PdockerGpuEndpointKey after;
+        if (snapshot_gpu_endpoint(&after) != 0) return NULL;
+        if (!gpu_endpoint_key_equal(&endpoint, &after)) continue;
+
+        PdockerVkCapabilitySnapshot *snapshot = calloc(1, sizeof(*snapshot));
+        if (!snapshot) return NULL;
+        snapshot->refcount = 1u;
+        snapshot->endpoint = endpoint;
+        snapshot->bridge_available = frozen_bridge_available;
+        snapshot->executor_advertisement_selected = executor_source;
+        snapshot->advertised_caps = malloc(sizeof(*snapshot->advertised_caps));
+        if (!snapshot->advertised_caps) {
+            free(snapshot);
+            return NULL;
+        }
+        *snapshot->advertised_caps = caps;
+
+        const bool executor_caps_selected =
+            frozen_bridge_available && executor_source && caps.executor_valid;
+        const bool storage16_disabled =
+            env_disabled("PDOCKER_VULKAN_DISABLE_16BIT_STORAGE");
+        const bool storage8_disabled =
+            env_disabled("PDOCKER_VULKAN_DISABLE_8BIT_STORAGE");
+        snapshot->storage16_disabled = storage16_disabled;
+        snapshot->storage8_disabled = storage8_disabled;
+        snapshot->strict_passthrough =
+            env_truthy_default("PDOCKER_GPU_STRICT_PASSTHROUGH", false);
+        snapshot->add_float16_capability_for_storage16 =
+            env_truthy_default(
+                "PDOCKER_GPU_ADD_FLOAT16_CAPABILITY_FOR_STORAGE16", false);
+        snapshot->graphics_validate_producer =
+            env_truthy_default(
+                "PDOCKER_VULKAN_GRAPHICS_V6_VALIDATE_PRODUCER", false);
+        snapshot->copy_alias_enabled =
+            env_truthy_default("PDOCKER_VULKAN_ALIAS_COPIES", false);
+        snapshot->dispatch_profile_response =
+            trace_allocations() ||
+            env_truthy_default("PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE", false);
+        const char *virtual_memory_mode = getenv("PDOCKER_GPU_VIRTUAL_MEMORY");
+        snapshot->guarded_memory_enabled = virtual_memory_mode &&
+            strcmp(virtual_memory_mode, "guarded") == 0;
+        snapshot->guarded_memory_min_bytes = PDOCKER_VK_GUARDED_DEFAULT_MIN_BYTES;
+        const char *virtual_memory_min =
+            getenv("PDOCKER_GPU_VIRTUAL_MEMORY_MIN_BYTES");
+        if (virtual_memory_min && virtual_memory_min[0]) {
+            char *end = NULL;
+            unsigned long long parsed = strtoull(virtual_memory_min, &end, 10);
+            if (end && *end == '\0' && parsed > 0 && parsed <= SIZE_MAX) {
+                snapshot->guarded_memory_min_bytes = (size_t)parsed;
+            }
+        }
+        long host_page_size = sysconf(_SC_PAGESIZE);
+        snapshot->host_page_size = host_page_size > 0
+            ? (size_t)host_page_size : 4096u;
+        const char *shared_directory = getenv("PDOCKER_GPU_SHARED_DIR");
+        if (!shared_directory || !shared_directory[0]) shared_directory = "/tmp";
+        snapshot->shared_directory = strdup(shared_directory);
+        if (!snapshot->shared_directory) {
+            capability_snapshot_release(snapshot);
+            return NULL;
+        }
+        const char *probe_manifest = getenv("PDOCKER_GPU_SPIRV_PROBE_MANIFEST");
+        const char *probe_shader = getenv("PDOCKER_GPU_SPIRV_PROBE_SHADER");
+        if (probe_manifest && probe_manifest[0]) {
+            snapshot->spirv_probe_manifest_path = strdup(probe_manifest);
+        }
+        if (probe_shader && probe_shader[0]) {
+            snapshot->spirv_probe_shader_path = strdup(probe_shader);
+        }
+        if ((probe_manifest && probe_manifest[0] &&
+             !snapshot->spirv_probe_manifest_path) ||
+            (probe_shader && probe_shader[0] &&
+             !snapshot->spirv_probe_shader_path)) {
+            capability_snapshot_release(snapshot);
+            return NULL;
+        }
+        snapshot->spirv_probe_expected_source_hash_valid =
+            parse_u64_env_base0("PDOCKER_GPU_SPIRV_PROBE_EXPECTED_HASH",
+                                &snapshot->spirv_probe_expected_source_hash);
+        snapshot->spirv_probe_effective_hash_valid =
+            parse_u64_env_base0("PDOCKER_GPU_SPIRV_PROBE_EFFECTIVE_HASH",
+                                &snapshot->spirv_probe_effective_hash);
+        snapshot->spirv_probe_debug_bytes_valid =
+            parse_size_env_base0("PDOCKER_GPU_SPIRV_PROBE_DEBUG_BYTES",
+                                 &snapshot->spirv_probe_debug_bytes);
+        snapshot->spirv_probe_debug_set_valid =
+            parse_u32_env_base0("PDOCKER_GPU_SPIRV_PROBE_DEBUG_SET",
+                                &snapshot->spirv_probe_debug_set);
+        snapshot->spirv_probe_debug_binding_valid =
+            parse_u32_env_base0("PDOCKER_GPU_SPIRV_PROBE_DEBUG_BINDING",
+                                &snapshot->spirv_probe_debug_binding);
+        snapshot->spirv_probe_target_only =
+            env_truthy_default("PDOCKER_GPU_SPIRV_PROBE_TARGET_ONLY", false);
+        snapshot->effective_shader_int64 = executor_caps_selected
+            ? (caps.features.shaderInt64 ? VK_TRUE : VK_FALSE)
+            : (env_truthy_default("PDOCKER_VULKAN_ENABLE_INT64", false)
+                ? VK_TRUE : VK_FALSE);
+        snapshot->effective_storage16 = storage16_disabled
+            ? VK_FALSE
+            : (executor_caps_selected
+                ? (caps.storage16.storageBuffer16BitAccess ? VK_TRUE : VK_FALSE)
+                : (env_truthy_default("PDOCKER_VULKAN_ENABLE_16BIT_STORAGE", true)
+                    ? VK_TRUE : VK_FALSE));
+        snapshot->effective_storage8 = storage8_disabled
+            ? VK_FALSE
+            : (executor_caps_selected
+                ? ((caps.storage8.storageBuffer8BitAccess && caps.float16_int8.shaderInt8)
+                    ? VK_TRUE : VK_FALSE)
+                : (env_truthy_default("PDOCKER_VULKAN_ENABLE_8BIT_STORAGE", true)
+                    ? VK_TRUE : VK_FALSE));
+        snapshot->effective_descriptor_partially_bound =
+            executor_caps_selected &&
+            !env_disabled("PDOCKER_VULKAN_DISABLE_DESCRIPTOR_PARTIALLY_BOUND") &&
+            caps.descriptor_indexing.descriptorBindingPartiallyBound
+                ? VK_TRUE : VK_FALSE;
+        snapshot->effective_descriptor_variable_count =
+            executor_caps_selected &&
+            !env_disabled("PDOCKER_VULKAN_DISABLE_DESCRIPTOR_VARIABLE_DESCRIPTOR_COUNT") &&
+            caps.descriptor_indexing.descriptorBindingVariableDescriptorCount &&
+            caps.vulkan_dispatch_v59_variable_descriptor_counts_supported &&
+            caps.vulkan_graphics_v629_variable_descriptor_counts_supported
+                ? VK_TRUE : VK_FALSE;
+        snapshot->effective_descriptor_update_unused_while_pending =
+            executor_caps_selected &&
+            !env_disabled("PDOCKER_VULKAN_DISABLE_DESCRIPTOR_UPDATE_UNUSED_WHILE_PENDING") &&
+            caps.descriptor_indexing.descriptorBindingUpdateUnusedWhilePending
+                ? VK_TRUE : VK_FALSE;
+        snapshot->descriptor_update_after_bind_enabled =
+            executor_caps_selected &&
+            !env_disabled("PDOCKER_VULKAN_DISABLE_DESCRIPTOR_UPDATE_AFTER_BIND");
+
+        uint32_t subgroup_size_override = 0;
+        const char *subgroup_size_env = getenv("PDOCKER_VULKAN_SUBGROUP_SIZE");
+        if (subgroup_size_env && subgroup_size_env[0]) {
+            char *end = NULL;
+            unsigned long parsed = strtoul(subgroup_size_env, &end, 10);
+            if (end != subgroup_size_env && *end == '\0' && parsed >= 1 && parsed <= 128) {
+                subgroup_size_override = (uint32_t)parsed;
+            }
+        }
+        if (executor_caps_selected && caps.subgroup.subgroupSize) {
+            snapshot->effective_subgroup_size =
+                subgroup_size_override && subgroup_size_override < caps.subgroup.subgroupSize
+                    ? subgroup_size_override
+                    : caps.subgroup.subgroupSize;
+        } else {
+            snapshot->effective_subgroup_size = subgroup_size_override
+                ? subgroup_size_override : 32u;
+        }
+        snapshot->effective_subgroup_stages =
+            executor_caps_selected && caps.subgroup.supportedStages
+                ? ((caps.subgroup.supportedStages & VK_SHADER_STAGE_COMPUTE_BIT)
+                    ? caps.subgroup.supportedStages : VK_SHADER_STAGE_COMPUTE_BIT)
+                : VK_SHADER_STAGE_COMPUTE_BIT;
+        if (executor_caps_selected) {
+            snapshot->effective_subgroup_operations = caps.subgroup.supportedOperations
+                ? caps.subgroup.supportedOperations : VK_SUBGROUP_FEATURE_BASIC_BIT;
+        } else if (env_truthy_default(
+                       "PDOCKER_VULKAN_ENABLE_SUBGROUP_ARITHMETIC", false)) {
+            snapshot->effective_subgroup_operations =
+                VK_SUBGROUP_FEATURE_BASIC_BIT |
+                VK_SUBGROUP_FEATURE_ARITHMETIC_BIT |
+                VK_SUBGROUP_FEATURE_BALLOT_BIT |
+                VK_SUBGROUP_FEATURE_SHUFFLE_BIT |
+                VK_SUBGROUP_FEATURE_VOTE_BIT;
+        } else {
+            snapshot->effective_subgroup_operations = VK_SUBGROUP_FEATURE_BASIC_BIT;
+        }
+        if (env_disabled("PDOCKER_VULKAN_DISABLE_SUBGROUP_ARITHMETIC")) {
+            snapshot->effective_subgroup_operations &=
+                ~VK_SUBGROUP_FEATURE_ARITHMETIC_BIT;
+            if (!snapshot->effective_subgroup_operations) {
+                snapshot->effective_subgroup_operations = VK_SUBGROUP_FEATURE_BASIC_BIT;
+            }
+        }
+        snapshot->heap_size = pdocker_vulkan_heap_size();
+        snapshot->max_buffer_size =
+            pdocker_vulkan_max_buffer_size_for_heap(snapshot->heap_size);
+        snapshot->v5_object_transport_enabled =
+            env_truthy_default("PDOCKER_VULKAN_ENABLE_V5_OBJECT_TRANSPORT", true) &&
+            !env_truthy_default("PDOCKER_VULKAN_DISABLE_V5_OBJECT_TRANSPORT", false);
+        snapshot->v5_frame_enabled =
+            env_truthy_default("PDOCKER_VULKAN_USE_V5_FRAME", true);
+        int dispatch_policy_rc = capture_dispatch_option_suffix(snapshot);
+        if (dispatch_policy_rc != 0) {
+            capability_snapshot_release(snapshot);
+            errno = -dispatch_policy_rc;
+            return NULL;
+        }
+        return snapshot;
+    }
+    errno = ESTALE;
+    return NULL;
+}
+
+static bool capability_snapshot_bridge_available(
+        const PdockerVkCapabilitySnapshot *snapshot) {
+    return snapshot && snapshot->bridge_available;
+}
+
+static VkDeviceSize capability_snapshot_heap_size(
+        const PdockerVkCapabilitySnapshot *snapshot) {
+    return snapshot ? snapshot->heap_size : 0;
+}
+
+static VkDeviceSize capability_snapshot_max_buffer_size(
+        const PdockerVkCapabilitySnapshot *snapshot) {
+    return snapshot ? snapshot->max_buffer_size : 0;
+}
+
+static VkDeviceSize capability_snapshot_host_heap_size(
+        const PdockerVkCapabilitySnapshot *snapshot) {
+    if (!snapshot) return 0;
+    VkDeviceSize heap = capability_snapshot_heap_size(snapshot);
+    VkDeviceSize host_heap = heap / 2;
+    const VkDeviceSize min_heap = (VkDeviceSize)(256ull * 1024ull * 1024ull);
+    if (host_heap < min_heap) host_heap = min_heap;
+    return host_heap > heap ? heap : host_heap;
+}
+
+static const PdockerVkAdvertisedCaps *snapshot_executor_caps(
+        const PdockerVkCapabilitySnapshot *snapshot) {
+    return snapshot && snapshot->bridge_available &&
+           snapshot->advertised_caps &&
+           snapshot->advertised_caps->executor_valid
+        ? snapshot->advertised_caps
+        : NULL;
+}
+
+static const PdockerVkAdvertisedCaps *executor_advertisement_caps_if_enabled(
+        const PdockerVkCapabilitySnapshot *snapshot) {
+    return snapshot && snapshot->executor_advertisement_selected
+        ? snapshot_executor_caps(snapshot)
+        : NULL;
+}
+
+static bool executor_supports_vulkan_dispatch_v52_image_layout_ranges(
+        const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = snapshot_executor_caps(snapshot);
     return caps && caps->executor_valid &&
            caps->vulkan_dispatch_v52_image_layout_ranges_supported;
 }
 
-static bool executor_supports_vulkan_dispatch_v53_buffer_views(void) {
-    if (!bridge_available()) return false;
-    const PdockerVkAdvertisedCaps *caps = pdocker_vk_advertised_caps();
+static bool executor_supports_vulkan_dispatch_v53_buffer_views(
+        const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = snapshot_executor_caps(snapshot);
     return caps && caps->executor_valid &&
            caps->vulkan_dispatch_v53_buffer_views_supported;
 }
 
-static bool executor_supports_vulkan_dispatch_v54_barriers(void) {
-    if (!bridge_available()) return false;
-    const PdockerVkAdvertisedCaps *caps = pdocker_vk_advertised_caps();
+static bool executor_supports_vulkan_dispatch_v54_barriers(
+        const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = snapshot_executor_caps(snapshot);
     return caps && caps->executor_valid &&
            caps->vulkan_dispatch_v54_barriers_supported;
 }
 
-static bool executor_supports_vulkan_dispatch_v55_native_objects(void) {
-    if (!bridge_available()) return false;
-    const PdockerVkAdvertisedCaps *caps = pdocker_vk_advertised_caps();
+static bool executor_supports_vulkan_dispatch_v55_native_objects(
+        const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = snapshot_executor_caps(snapshot);
     return caps && caps->executor_valid &&
            caps->vulkan_dispatch_v55_native_objects_supported;
 }
 
-static bool executor_supports_vulkan_dispatch_v56_compute_layouts(void) {
-    if (!bridge_available()) return false;
-    const PdockerVkAdvertisedCaps *caps = pdocker_vk_advertised_caps();
+static bool executor_supports_vulkan_dispatch_v56_compute_layouts(
+        const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = snapshot_executor_caps(snapshot);
     return caps && caps->executor_valid &&
            caps->vulkan_dispatch_v56_compute_layouts_supported;
 }
 
-static bool executor_supports_vulkan_dispatch_v57_push_constant_ops(void) {
-    if (!bridge_available()) return false;
-    const PdockerVkAdvertisedCaps *caps = pdocker_vk_advertised_caps();
+static bool executor_supports_vulkan_dispatch_v57_push_constant_ops(
+        const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = snapshot_executor_caps(snapshot);
     return caps && caps->executor_valid &&
            caps->vulkan_dispatch_v57_push_constant_ops_supported;
 }
 
-static bool executor_supports_vulkan_dispatch_v58_descriptor_layout_flags(void) {
-    if (!bridge_available()) return false;
-    const PdockerVkAdvertisedCaps *caps = pdocker_vk_advertised_caps();
+static bool executor_supports_vulkan_dispatch_v58_descriptor_layout_flags(
+        const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = snapshot_executor_caps(snapshot);
     return caps && caps->executor_valid &&
            caps->vulkan_dispatch_v58_descriptor_layout_flags_supported;
 }
 
-static bool executor_supports_vulkan_dispatch_v59_variable_descriptor_counts(void) {
-    if (!bridge_available()) return false;
-    const PdockerVkAdvertisedCaps *caps = pdocker_vk_advertised_caps();
+static bool executor_supports_vulkan_dispatch_v59_variable_descriptor_counts(
+        const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = snapshot_executor_caps(snapshot);
     return caps && caps->executor_valid &&
            caps->vulkan_dispatch_v59_variable_descriptor_counts_supported;
 }
 
-static bool executor_supports_vulkan_dispatch_v5_terminal_response(void) {
-    if (!bridge_available()) return false;
-    const PdockerVkAdvertisedCaps *caps = pdocker_vk_advertised_caps();
+static bool executor_supports_vulkan_dispatch_v5_terminal_response(
+        const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = snapshot_executor_caps(snapshot);
     return caps && caps->executor_valid &&
            caps->vulkan_dispatch_v5_terminal_response_supported;
 }
 
-static bool executor_supports_persistent_multiplexed_connections(void) {
-    if (!bridge_available()) return false;
-    const PdockerVkAdvertisedCaps *caps = pdocker_vk_advertised_caps();
+static bool executor_supports_persistent_multiplexed_connections(
+        const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = snapshot_executor_caps(snapshot);
     return caps && caps->executor_valid &&
            caps->persistent_multiplexed_connections_supported;
 }
 
-static bool executor_supports_vulkan_graphics_v627_buffer_views(void) {
-    if (!bridge_available()) return false;
-    const PdockerVkAdvertisedCaps *caps = pdocker_vk_advertised_caps();
+static bool pdocker_vk_wsi_transport_supported(
+        const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = snapshot_executor_caps(snapshot);
+    return capability_snapshot_bridge_available(snapshot) &&
+           snapshot->v5_object_transport_enabled &&
+           snapshot->v5_frame_enabled &&
+           caps && caps->executor_valid &&
+           caps->vulkan_dispatch_v5_terminal_response_supported &&
+           caps->vulkan_graphics_v6_supported_minors_valid &&
+           caps->vulkan_graphics_v6_supported_minor[
+               PDOCKER_GPU_VULKAN_GRAPHICS_V619_ABI_MINOR];
+}
+
+static bool executor_supports_vulkan_graphics_v627_buffer_views(
+        const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = snapshot_executor_caps(snapshot);
     return caps && caps->executor_valid &&
            caps->vulkan_graphics_v627_buffer_views_supported;
 }
 
-static bool executor_supports_vulkan_graphics_v628_push_constant_ranges(void) {
-    if (!bridge_available()) return false;
-    const PdockerVkAdvertisedCaps *caps = pdocker_vk_advertised_caps();
+static bool executor_supports_vulkan_graphics_v628_push_constant_ranges(
+        const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = snapshot_executor_caps(snapshot);
     return caps && caps->executor_valid &&
            caps->vulkan_graphics_v628_push_constant_ranges_supported;
 }
 
-static bool executor_supports_vulkan_graphics_v629_variable_descriptor_counts(void) {
-    if (!bridge_available()) return false;
-    const PdockerVkAdvertisedCaps *caps = pdocker_vk_advertised_caps();
+static bool executor_supports_vulkan_graphics_v629_variable_descriptor_counts(
+        const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = snapshot_executor_caps(snapshot);
     return caps && caps->executor_valid &&
            caps->vulkan_graphics_v629_variable_descriptor_counts_supported;
 }
 
-static bool executor_supports_vulkan_graphics_v630_native_objects(void) {
-    if (!bridge_available()) return false;
-    const PdockerVkAdvertisedCaps *caps = pdocker_vk_advertised_caps();
+static bool executor_supports_vulkan_graphics_v630_native_objects(
+        const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = snapshot_executor_caps(snapshot);
     return caps && caps->executor_valid &&
            caps->vulkan_graphics_v630_native_objects_supported;
 }
 
-static bool executor_supports_vulkan_graphics_v631_descriptor_layout_flags(void) {
-    if (!bridge_available()) return false;
-    const PdockerVkAdvertisedCaps *caps = pdocker_vk_advertised_caps();
+static bool executor_supports_vulkan_graphics_v631_descriptor_layout_flags(
+        const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = snapshot_executor_caps(snapshot);
     return caps && caps->executor_valid &&
            caps->vulkan_graphics_v631_descriptor_layout_flags_supported;
 }
 
-static bool executor_supports_vulkan_graphics_v632_render_passes(void) {
-    if (!bridge_available()) return false;
-    const PdockerVkAdvertisedCaps *caps = pdocker_vk_advertised_caps();
+static bool executor_supports_vulkan_graphics_v632_render_passes(
+        const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = snapshot_executor_caps(snapshot);
     return caps && caps->executor_valid &&
            caps->vulkan_graphics_v632_render_passes_supported;
 }
 
-static bool executor_supports_vulkan_graphics_v633_render_pass_sideband(void) {
-    if (!bridge_available()) return false;
-    const PdockerVkAdvertisedCaps *caps = pdocker_vk_advertised_caps();
+static bool executor_supports_vulkan_graphics_v633_render_pass_sideband(
+        const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = snapshot_executor_caps(snapshot);
     return caps && caps->executor_valid &&
            caps->vulkan_graphics_v633_render_pass_sideband_supported;
 }
 
-static bool executor_supports_vulkan_graphics_v634_classic_render_pass_sideband(void) {
-    if (!bridge_available()) return false;
-    const PdockerVkAdvertisedCaps *caps = pdocker_vk_advertised_caps();
+static bool executor_supports_vulkan_graphics_v634_classic_render_pass_sideband(
+        const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = snapshot_executor_caps(snapshot);
     return caps && caps->executor_valid &&
            caps->vulkan_graphics_v634_classic_render_pass_sideband_supported;
 }
 
-static bool executor_supports_vulkan_graphics_v634_classic_render_pass_self_dependency(void) {
-    if (!bridge_available()) return false;
-    const PdockerVkAdvertisedCaps *caps = pdocker_vk_advertised_caps();
+static bool executor_supports_vulkan_graphics_v634_classic_render_pass_self_dependency(
+        const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = snapshot_executor_caps(snapshot);
     return caps && caps->executor_valid &&
            caps->vulkan_graphics_v634_classic_render_pass_sideband_supported &&
            caps->vulkan_graphics_v634_classic_render_pass_self_dependency_supported;
 }
 
-static bool executor_supports_vulkan_graphics_v635_event_command_provenance(void) {
-    if (!bridge_available()) return false;
-    const PdockerVkAdvertisedCaps *caps = pdocker_vk_advertised_caps();
+static bool executor_supports_vulkan_graphics_v635_event_command_provenance(
+        const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = snapshot_executor_caps(snapshot);
     return caps && caps->executor_valid &&
            caps->vulkan_graphics_v635_event_command_provenance_supported;
 }
 
-static bool executor_supports_any_vulkan_buffer_views(void) {
-    return executor_supports_vulkan_dispatch_v53_buffer_views() ||
-           executor_supports_vulkan_graphics_v627_buffer_views();
+static bool executor_supports_any_vulkan_buffer_views(
+        const PdockerVkCapabilitySnapshot *snapshot) {
+    return executor_supports_vulkan_dispatch_v53_buffer_views(snapshot) ||
+           executor_supports_vulkan_graphics_v627_buffer_views(snapshot);
 }
 
-static bool executor_advertisement_source_enabled(void) {
-    const char *source = getenv("PDOCKER_VULKAN_ADVERTISEMENT_SOURCE");
-    return source && strcmp(source, "executor") == 0;
-}
-
-static const PdockerVkAdvertisedCaps *executor_advertisement_caps_if_enabled(void) {
-    if (!executor_advertisement_source_enabled()) return NULL;
-    const PdockerVkAdvertisedCaps *caps = pdocker_vk_advertised_caps();
-    return caps && caps->executor_valid ? caps : NULL;
-}
-
-static uint32_t pdocker_vk_max_push_bytes(void) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+static uint32_t pdocker_vk_max_push_bytes(
+        const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps =
+        executor_advertisement_caps_if_enabled(snapshot);
     return caps && caps->limits.maxPushConstantsSize
         ? caps->limits.maxPushConstantsSize
         : PDOCKER_VK_MAX_PUSH_BYTES;
@@ -22771,9 +24225,9 @@ static const PdockerVkAdvertisedFormatCaps *pdocker_vk_find_advertised_format_ca
     return NULL;
 }
 
-static VkFormatFeatureFlags pdocker_vk_advertised_image_features(VkFormat format) {
-    if (executor_advertisement_source_enabled()) {
-        const PdockerVkAdvertisedCaps *caps = pdocker_vk_advertised_caps();
+static VkFormatFeatureFlags pdocker_vk_advertised_image_features(const PdockerVkCapabilitySnapshot *snapshot, VkFormat format) {
+    if (snapshot && snapshot->executor_advertisement_selected) {
+        const PdockerVkAdvertisedCaps *caps = snapshot_executor_caps(snapshot);
         if (!caps || !caps->executor_valid) return 0;
         const PdockerVkAdvertisedFormatCaps *cap =
             pdocker_vk_find_advertised_format_caps(caps, format);
@@ -22783,9 +24237,9 @@ static VkFormatFeatureFlags pdocker_vk_advertised_image_features(VkFormat format
     return pdocker_vk_format_image_features(format);
 }
 
-static VkSampleCountFlags pdocker_vk_advertised_sample_counts(VkFormat format) {
-    if (executor_advertisement_source_enabled()) {
-        const PdockerVkAdvertisedCaps *caps = pdocker_vk_advertised_caps();
+static VkSampleCountFlags pdocker_vk_advertised_sample_counts(const PdockerVkCapabilitySnapshot *snapshot, VkFormat format) {
+    if (snapshot && snapshot->executor_advertisement_selected) {
+        const PdockerVkAdvertisedCaps *caps = snapshot_executor_caps(snapshot);
         if (!caps || !caps->executor_valid) return 0;
         const PdockerVkAdvertisedFormatCaps *cap =
             pdocker_vk_find_advertised_format_caps(caps, format);
@@ -22811,11 +24265,12 @@ static bool pdocker_vk_msaa_color_attachment_request(
 }
 
 static VkSampleCountFlags pdocker_vk_image_sample_counts_for_request(
+        const PdockerVkCapabilitySnapshot *snapshot,
         VkFormat format,
         VkImageType type,
         VkImageUsageFlags usage,
         VkImageCreateFlags flags) {
-    VkSampleCountFlags advertised = pdocker_vk_advertised_sample_counts(format);
+    VkSampleCountFlags advertised = pdocker_vk_advertised_sample_counts(snapshot, format);
     if (!advertised) return 0;
     if (pdocker_vk_msaa_color_attachment_request(format, type, usage, flags)) {
         return advertised & PDOCKER_VK_SUPPORTED_SAMPLE_COUNTS;
@@ -22823,53 +24278,58 @@ static VkSampleCountFlags pdocker_vk_image_sample_counts_for_request(
     return VK_SAMPLE_COUNT_1_BIT;
 }
 
-static VkSampleCountFlags pdocker_vk_advertised_color_attachment_sample_counts(void) {
+static VkSampleCountFlags pdocker_vk_advertised_color_attachment_sample_counts(const PdockerVkCapabilitySnapshot *snapshot) {
     VkSampleCountFlags counts = 0;
     for (size_t i = 0; i < pdocker_vk_bridge_format_count(); ++i) {
         VkFormat format = pdocker_vk_bridge_format_at(i);
         if (pdocker_vk_format_is_depth_stencil(format)) continue;
-        VkFormatFeatureFlags features = pdocker_vk_advertised_image_features(format);
+        VkFormatFeatureFlags features = pdocker_vk_advertised_image_features(snapshot, format);
         if ((features & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT) == 0) continue;
-        counts |= pdocker_vk_advertised_sample_counts(format);
+        counts |= pdocker_vk_advertised_sample_counts(snapshot, format);
     }
     counts &= PDOCKER_VK_SUPPORTED_SAMPLE_COUNTS;
     return counts ? counts : VK_SAMPLE_COUNT_1_BIT;
 }
 
-static VkBool32 executor_advertised_shader_int64_or(VkBool32 legacy) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
-    if (!caps) return legacy;
-    return caps->features.shaderInt64 ? VK_TRUE : VK_FALSE;
+static VkBool32 executor_advertised_shader_int64_or(const PdockerVkCapabilitySnapshot *snapshot, VkBool32 legacy) {
+    return snapshot ? snapshot->effective_shader_int64 : legacy;
 }
 
-static VkBool32 executor_advertised_storage16_or(VkBool32 legacy) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
-    if (!caps) return legacy;
-    if (env_disabled("PDOCKER_VULKAN_DISABLE_16BIT_STORAGE")) return VK_FALSE;
-    return caps->storage16.storageBuffer16BitAccess ? VK_TRUE : VK_FALSE;
+static VkBool32 executor_advertised_storage16_or(const PdockerVkCapabilitySnapshot *snapshot, VkBool32 legacy) {
+    return snapshot ? snapshot->effective_storage16 : legacy;
 }
 
-static VkBool32 executor_advertised_storage8_or(VkBool32 legacy) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
-    if (!caps) return legacy;
-    if (env_disabled("PDOCKER_VULKAN_DISABLE_8BIT_STORAGE")) return VK_FALSE;
-    return (caps->storage8.storageBuffer8BitAccess && caps->float16_int8.shaderInt8)
-        ? VK_TRUE
-        : VK_FALSE;
+static VkBool32 executor_advertised_storage8_or(const PdockerVkCapabilitySnapshot *snapshot, VkBool32 legacy) {
+    return snapshot ? snapshot->effective_storage8 : legacy;
 }
 
-static VkBool32 advertised_storage_buffer_storage_class(void) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+static VkBool32 advertised_storage_buffer_storage_class(const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled(snapshot);
     return (caps && caps->ext_storage_buffer_storage_class) ? VK_TRUE : VK_FALSE;
 }
 
-static VkBool32 advertised_timeline_semaphore(void) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+static VkBool32 advertised_timeline_semaphore(const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled(snapshot);
     return (caps && caps->timeline_semaphore_usable) ? VK_TRUE : VK_FALSE;
 }
 
-static VkBool32 advertised_geometry_shader(void) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+static VkBool32 advertised_host_query_reset(
+        const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps =
+        executor_advertisement_caps_if_enabled(snapshot);
+    return (caps && caps->host_query_reset) ? VK_TRUE : VK_FALSE;
+}
+
+static uint32_t advertised_timestamp_valid_bits(
+        const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps =
+        executor_advertisement_caps_if_enabled(snapshot);
+    if (!caps || !caps->limits.timestampComputeAndGraphics) return 0;
+    return caps->queue_timestamp_valid_bits;
+}
+
+static VkBool32 advertised_geometry_shader(const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled(snapshot);
     if (!caps || !caps->features.geometryShader) return VK_FALSE;
     return (caps->limits.maxGeometryShaderInvocations &&
             caps->limits.maxGeometryInputComponents &&
@@ -22880,53 +24340,53 @@ static VkBool32 advertised_geometry_shader(void) {
         : VK_FALSE;
 }
 
-static VkBool32 advertised_tessellation_shader(void) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+static VkBool32 advertised_tessellation_shader(const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled(snapshot);
     return (caps && caps->features.tessellationShader) ? VK_TRUE : VK_FALSE;
 }
 
-static VkBool32 advertised_sample_rate_shading(void) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+static VkBool32 advertised_sample_rate_shading(const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled(snapshot);
     return (caps && caps->features.sampleRateShading) ? VK_TRUE : VK_FALSE;
 }
 
-static VkBool32 advertised_depth_clamp(void) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+static VkBool32 advertised_depth_clamp(const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled(snapshot);
     return (caps && caps->features.depthClamp) ? VK_TRUE : VK_FALSE;
 }
 
-static VkBool32 advertised_fill_mode_non_solid(void) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+static VkBool32 advertised_fill_mode_non_solid(const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled(snapshot);
     return (caps && caps->features.fillModeNonSolid) ? VK_TRUE : VK_FALSE;
 }
 
-static VkBool32 advertised_multi_draw_indirect(void) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+static VkBool32 advertised_multi_draw_indirect(const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled(snapshot);
     return (caps && caps->features.multiDrawIndirect) ? VK_TRUE : VK_FALSE;
 }
 
-static VkBool32 advertised_draw_indirect_first_instance(void) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+static VkBool32 advertised_draw_indirect_first_instance(const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled(snapshot);
     return (caps && caps->features.drawIndirectFirstInstance) ? VK_TRUE : VK_FALSE;
 }
 
-static VkBool32 advertised_alpha_to_one(void) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+static VkBool32 advertised_alpha_to_one(const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled(snapshot);
     return (caps && caps->features.alphaToOne) ? VK_TRUE : VK_FALSE;
 }
 
-static VkBool32 advertised_logic_op(void) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+static VkBool32 advertised_logic_op(const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled(snapshot);
     return (caps && caps->features.logicOp) ? VK_TRUE : VK_FALSE;
 }
 
-static VkBool32 advertised_independent_blend(void) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+static VkBool32 advertised_independent_blend(const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled(snapshot);
     return (caps && caps->features.independentBlend) ? VK_TRUE : VK_FALSE;
 }
 
-static VkBool32 advertised_depth_bias_clamp(void) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+static VkBool32 advertised_depth_bias_clamp(const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled(snapshot);
     return (caps && caps->features.depthBiasClamp) ? VK_TRUE : VK_FALSE;
 }
 
@@ -22938,28 +24398,28 @@ static bool advertised_line_width_limits_valid(const PdockerVkAdvertisedCaps *ca
            caps->limits.lineWidthGranularity > 0.0f;
 }
 
-static VkBool32 advertised_wide_lines(void) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+static VkBool32 advertised_wide_lines(const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled(snapshot);
     return (caps && caps->features.wideLines && advertised_line_width_limits_valid(caps))
         ? VK_TRUE
         : VK_FALSE;
 }
 
-static bool advertised_line_width_supported(float line_width) {
+static bool advertised_line_width_supported(const PdockerVkCapabilitySnapshot *snapshot, float line_width) {
     if (line_width == 1.0f) return true;
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
-    return advertised_wide_lines() &&
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled(snapshot);
+    return advertised_wide_lines(snapshot) &&
            line_width >= caps->limits.lineWidthRange[0] &&
            line_width <= caps->limits.lineWidthRange[1];
 }
 
-static VkBool32 advertised_depth_bounds(void) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+static VkBool32 advertised_depth_bounds(const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled(snapshot);
     return (caps && caps->features.depthBounds) ? VK_TRUE : VK_FALSE;
 }
 
-static float advertised_max_sampler_anisotropy(void) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+static float advertised_max_sampler_anisotropy(const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled(snapshot);
     if (!caps || !caps->features.samplerAnisotropy || caps->limits.maxSamplerAnisotropy < 1.0f) {
         return 1.0f;
     }
@@ -22967,41 +24427,22 @@ static float advertised_max_sampler_anisotropy(void) {
 }
 
 
-static VkBool32 advertised_descriptor_binding_partially_bound(void) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
-    if (!caps || env_disabled("PDOCKER_VULKAN_DISABLE_DESCRIPTOR_PARTIALLY_BOUND")) {
-        return VK_FALSE;
-    }
-    return caps->descriptor_indexing.descriptorBindingPartiallyBound
-        ? VK_TRUE
-        : VK_FALSE;
+static VkBool32 advertised_descriptor_binding_partially_bound(const PdockerVkCapabilitySnapshot *snapshot) {
+    return snapshot ? snapshot->effective_descriptor_partially_bound : VK_FALSE;
 }
 
-static VkBool32 advertised_descriptor_binding_variable_descriptor_count(void) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
-    if (!caps || env_disabled("PDOCKER_VULKAN_DISABLE_DESCRIPTOR_VARIABLE_DESCRIPTOR_COUNT")) {
-        return VK_FALSE;
-    }
-    return caps->descriptor_indexing.descriptorBindingVariableDescriptorCount &&
-           caps->vulkan_dispatch_v59_variable_descriptor_counts_supported &&
-           caps->vulkan_graphics_v629_variable_descriptor_counts_supported
-        ? VK_TRUE
-        : VK_FALSE;
+static VkBool32 advertised_descriptor_binding_variable_descriptor_count(const PdockerVkCapabilitySnapshot *snapshot) {
+    return snapshot ? snapshot->effective_descriptor_variable_count : VK_FALSE;
 }
 
 static uint32_t pdocker_vk_max_per_set_descriptors(void);
 
-static VkBool32 advertised_descriptor_binding_update_unused_while_pending(void) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
-    if (!caps || env_disabled("PDOCKER_VULKAN_DISABLE_DESCRIPTOR_UPDATE_UNUSED_WHILE_PENDING")) {
-        return VK_FALSE;
-    }
-    return caps->descriptor_indexing.descriptorBindingUpdateUnusedWhilePending
-        ? VK_TRUE
-        : VK_FALSE;
+static VkBool32 advertised_descriptor_binding_update_unused_while_pending(const PdockerVkCapabilitySnapshot *snapshot) {
+    return snapshot ? snapshot->effective_descriptor_update_unused_while_pending : VK_FALSE;
 }
 
-static VkBool32 advertised_descriptor_indexing_aggregate(void) {
+static VkBool32 advertised_descriptor_indexing_aggregate(const PdockerVkCapabilitySnapshot *snapshot) {
+    (void)snapshot;
     /*
      * Keep the Vulkan 1.2 aggregate descriptorIndexing feature false until
      * the bridge supports the complete descriptor-indexing minimum surface.
@@ -23016,8 +24457,9 @@ static uint32_t pdocker_vk_clamp_nonzero_limit(uint32_t value, uint32_t cap) {
 }
 
 static bool advertised_descriptor_update_after_bind_native_feature_any(
+        const PdockerVkCapabilitySnapshot *snapshot,
         const PdockerVkAdvertisedCaps *caps) {
-    return caps && !env_disabled("PDOCKER_VULKAN_DISABLE_DESCRIPTOR_UPDATE_AFTER_BIND") &&
+    return snapshot && snapshot->descriptor_update_after_bind_enabled && caps &&
            (caps->descriptor_indexing.descriptorBindingUniformBufferUpdateAfterBind ||
             caps->descriptor_indexing.descriptorBindingSampledImageUpdateAfterBind ||
             caps->descriptor_indexing.descriptorBindingStorageImageUpdateAfterBind ||
@@ -23026,9 +24468,9 @@ static bool advertised_descriptor_update_after_bind_native_feature_any(
             caps->descriptor_indexing.descriptorBindingStorageTexelBufferUpdateAfterBind);
 }
 
-static uint32_t advertised_max_update_after_bind_descriptors_in_all_pools(void) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
-    if (!advertised_descriptor_update_after_bind_native_feature_any(caps)) return 0;
+static uint32_t advertised_max_update_after_bind_descriptors_in_all_pools(const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled(snapshot);
+    if (!advertised_descriptor_update_after_bind_native_feature_any(snapshot, caps)) return 0;
     const uint64_t bridge_all_pools =
         (uint64_t)pdocker_vk_max_per_set_descriptors() * (uint64_t)PDOCKER_VK_MAX_DESCRIPTOR_SETS;
     const uint32_t bridge_cap = bridge_all_pools > UINT32_MAX
@@ -23039,24 +24481,25 @@ static uint32_t advertised_max_update_after_bind_descriptors_in_all_pools(void) 
         bridge_cap);
 }
 
-static VkBool32 advertised_descriptor_update_after_bind_limit_enabled(void) {
-    return advertised_max_update_after_bind_descriptors_in_all_pools() > 0
+static VkBool32 advertised_descriptor_update_after_bind_limit_enabled(const PdockerVkCapabilitySnapshot *snapshot) {
+    return advertised_max_update_after_bind_descriptors_in_all_pools(snapshot) > 0
         ? VK_TRUE
         : VK_FALSE;
 }
 
 static uint32_t advertised_descriptor_update_after_bind_limit(
+        const PdockerVkCapabilitySnapshot *snapshot,
         uint32_t native_value,
         uint32_t bridge_cap) {
-    if (!advertised_descriptor_update_after_bind_limit_enabled()) return 0;
+    if (!advertised_descriptor_update_after_bind_limit_enabled(snapshot)) return 0;
     return pdocker_vk_clamp_nonzero_limit(native_value, bridge_cap);
 }
 
 #define PDOCKER_VK_FILL_DESCRIPTOR_INDEXING_PROPERTY_FIELDS(p_) do { \
-    const PdockerVkAdvertisedCaps *caps_ = executor_advertisement_caps_if_enabled(); \
+    const PdockerVkAdvertisedCaps *caps_ = executor_advertisement_caps_if_enabled(snapshot); \
     const uint32_t per_stage_cap_ = PDOCKER_VK_MAX_STORAGE_BUFFERS; \
     const uint32_t per_set_cap_ = pdocker_vk_max_per_set_descriptors(); \
-    (p_)->maxUpdateAfterBindDescriptorsInAllPools = advertised_max_update_after_bind_descriptors_in_all_pools(); \
+    (p_)->maxUpdateAfterBindDescriptorsInAllPools = advertised_max_update_after_bind_descriptors_in_all_pools(snapshot); \
     (p_)->shaderUniformBufferArrayNonUniformIndexingNative = VK_FALSE; \
     (p_)->shaderSampledImageArrayNonUniformIndexingNative = VK_FALSE; \
     (p_)->shaderStorageBufferArrayNonUniformIndexingNative = VK_FALSE; \
@@ -23064,127 +24507,127 @@ static uint32_t advertised_descriptor_update_after_bind_limit(
     (p_)->shaderInputAttachmentArrayNonUniformIndexingNative = VK_FALSE; \
     (p_)->robustBufferAccessUpdateAfterBind = VK_FALSE; \
     (p_)->quadDivergentImplicitLod = caps_ && caps_->descriptor_indexing_properties.quadDivergentImplicitLod ? VK_TRUE : VK_FALSE; \
-    (p_)->maxPerStageDescriptorUpdateAfterBindSamplers = advertised_descriptor_update_after_bind_limit(caps_ ? caps_->descriptor_indexing_properties.maxPerStageDescriptorUpdateAfterBindSamplers : 0, per_stage_cap_); \
-    (p_)->maxPerStageDescriptorUpdateAfterBindUniformBuffers = advertised_descriptor_update_after_bind_limit(caps_ ? caps_->descriptor_indexing_properties.maxPerStageDescriptorUpdateAfterBindUniformBuffers : 0, per_stage_cap_); \
-    (p_)->maxPerStageDescriptorUpdateAfterBindStorageBuffers = advertised_descriptor_update_after_bind_limit(caps_ ? caps_->descriptor_indexing_properties.maxPerStageDescriptorUpdateAfterBindStorageBuffers : 0, per_stage_cap_); \
-    (p_)->maxPerStageDescriptorUpdateAfterBindSampledImages = advertised_descriptor_update_after_bind_limit(caps_ ? caps_->descriptor_indexing_properties.maxPerStageDescriptorUpdateAfterBindSampledImages : 0, per_stage_cap_); \
-    (p_)->maxPerStageDescriptorUpdateAfterBindStorageImages = advertised_descriptor_update_after_bind_limit(caps_ ? caps_->descriptor_indexing_properties.maxPerStageDescriptorUpdateAfterBindStorageImages : 0, per_stage_cap_); \
+    (p_)->maxPerStageDescriptorUpdateAfterBindSamplers = advertised_descriptor_update_after_bind_limit(snapshot, caps_ ? caps_->descriptor_indexing_properties.maxPerStageDescriptorUpdateAfterBindSamplers : 0, per_stage_cap_); \
+    (p_)->maxPerStageDescriptorUpdateAfterBindUniformBuffers = advertised_descriptor_update_after_bind_limit(snapshot, caps_ ? caps_->descriptor_indexing_properties.maxPerStageDescriptorUpdateAfterBindUniformBuffers : 0, per_stage_cap_); \
+    (p_)->maxPerStageDescriptorUpdateAfterBindStorageBuffers = advertised_descriptor_update_after_bind_limit(snapshot, caps_ ? caps_->descriptor_indexing_properties.maxPerStageDescriptorUpdateAfterBindStorageBuffers : 0, per_stage_cap_); \
+    (p_)->maxPerStageDescriptorUpdateAfterBindSampledImages = advertised_descriptor_update_after_bind_limit(snapshot, caps_ ? caps_->descriptor_indexing_properties.maxPerStageDescriptorUpdateAfterBindSampledImages : 0, per_stage_cap_); \
+    (p_)->maxPerStageDescriptorUpdateAfterBindStorageImages = advertised_descriptor_update_after_bind_limit(snapshot, caps_ ? caps_->descriptor_indexing_properties.maxPerStageDescriptorUpdateAfterBindStorageImages : 0, per_stage_cap_); \
     (p_)->maxPerStageDescriptorUpdateAfterBindInputAttachments = 0; \
-    (p_)->maxPerStageUpdateAfterBindResources = advertised_descriptor_update_after_bind_limit(caps_ ? caps_->descriptor_indexing_properties.maxPerStageUpdateAfterBindResources : 0, per_set_cap_); \
-    (p_)->maxDescriptorSetUpdateAfterBindSamplers = advertised_descriptor_update_after_bind_limit(caps_ ? caps_->descriptor_indexing_properties.maxDescriptorSetUpdateAfterBindSamplers : 0, per_set_cap_); \
-    (p_)->maxDescriptorSetUpdateAfterBindUniformBuffers = advertised_descriptor_update_after_bind_limit(caps_ ? caps_->descriptor_indexing_properties.maxDescriptorSetUpdateAfterBindUniformBuffers : 0, per_stage_cap_); \
+    (p_)->maxPerStageUpdateAfterBindResources = advertised_descriptor_update_after_bind_limit(snapshot, caps_ ? caps_->descriptor_indexing_properties.maxPerStageUpdateAfterBindResources : 0, per_set_cap_); \
+    (p_)->maxDescriptorSetUpdateAfterBindSamplers = advertised_descriptor_update_after_bind_limit(snapshot, caps_ ? caps_->descriptor_indexing_properties.maxDescriptorSetUpdateAfterBindSamplers : 0, per_set_cap_); \
+    (p_)->maxDescriptorSetUpdateAfterBindUniformBuffers = advertised_descriptor_update_after_bind_limit(snapshot, caps_ ? caps_->descriptor_indexing_properties.maxDescriptorSetUpdateAfterBindUniformBuffers : 0, per_stage_cap_); \
     (p_)->maxDescriptorSetUpdateAfterBindUniformBuffersDynamic = 0; \
-    (p_)->maxDescriptorSetUpdateAfterBindStorageBuffers = advertised_descriptor_update_after_bind_limit(caps_ ? caps_->descriptor_indexing_properties.maxDescriptorSetUpdateAfterBindStorageBuffers : 0, per_stage_cap_); \
+    (p_)->maxDescriptorSetUpdateAfterBindStorageBuffers = advertised_descriptor_update_after_bind_limit(snapshot, caps_ ? caps_->descriptor_indexing_properties.maxDescriptorSetUpdateAfterBindStorageBuffers : 0, per_stage_cap_); \
     (p_)->maxDescriptorSetUpdateAfterBindStorageBuffersDynamic = 0; \
-    (p_)->maxDescriptorSetUpdateAfterBindSampledImages = advertised_descriptor_update_after_bind_limit(caps_ ? caps_->descriptor_indexing_properties.maxDescriptorSetUpdateAfterBindSampledImages : 0, per_set_cap_); \
-    (p_)->maxDescriptorSetUpdateAfterBindStorageImages = advertised_descriptor_update_after_bind_limit(caps_ ? caps_->descriptor_indexing_properties.maxDescriptorSetUpdateAfterBindStorageImages : 0, per_set_cap_); \
+    (p_)->maxDescriptorSetUpdateAfterBindSampledImages = advertised_descriptor_update_after_bind_limit(snapshot, caps_ ? caps_->descriptor_indexing_properties.maxDescriptorSetUpdateAfterBindSampledImages : 0, per_set_cap_); \
+    (p_)->maxDescriptorSetUpdateAfterBindStorageImages = advertised_descriptor_update_after_bind_limit(snapshot, caps_ ? caps_->descriptor_indexing_properties.maxDescriptorSetUpdateAfterBindStorageImages : 0, per_set_cap_); \
     (p_)->maxDescriptorSetUpdateAfterBindInputAttachments = 0; \
 } while (0)
 
-static VkBool32 advertised_descriptor_binding_uniform_buffer_update_after_bind(void) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
-    if (!caps || env_disabled("PDOCKER_VULKAN_DISABLE_DESCRIPTOR_UPDATE_AFTER_BIND") ||
-        !advertised_descriptor_update_after_bind_limit_enabled()) return VK_FALSE;
+static VkBool32 advertised_descriptor_binding_uniform_buffer_update_after_bind(const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled(snapshot);
+    if (!caps || !snapshot || !snapshot->descriptor_update_after_bind_enabled ||
+        !advertised_descriptor_update_after_bind_limit_enabled(snapshot)) return VK_FALSE;
     return caps->descriptor_indexing.descriptorBindingUniformBufferUpdateAfterBind ? VK_TRUE : VK_FALSE;
 }
 
-static VkBool32 advertised_descriptor_binding_sampled_image_update_after_bind(void) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
-    if (!caps || env_disabled("PDOCKER_VULKAN_DISABLE_DESCRIPTOR_UPDATE_AFTER_BIND") ||
-        !advertised_descriptor_update_after_bind_limit_enabled()) return VK_FALSE;
+static VkBool32 advertised_descriptor_binding_sampled_image_update_after_bind(const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled(snapshot);
+    if (!caps || !snapshot || !snapshot->descriptor_update_after_bind_enabled ||
+        !advertised_descriptor_update_after_bind_limit_enabled(snapshot)) return VK_FALSE;
     return caps->descriptor_indexing.descriptorBindingSampledImageUpdateAfterBind ? VK_TRUE : VK_FALSE;
 }
 
-static VkBool32 advertised_descriptor_binding_storage_image_update_after_bind(void) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
-    if (!caps || env_disabled("PDOCKER_VULKAN_DISABLE_DESCRIPTOR_UPDATE_AFTER_BIND") ||
-        !advertised_descriptor_update_after_bind_limit_enabled()) return VK_FALSE;
+static VkBool32 advertised_descriptor_binding_storage_image_update_after_bind(const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled(snapshot);
+    if (!caps || !snapshot || !snapshot->descriptor_update_after_bind_enabled ||
+        !advertised_descriptor_update_after_bind_limit_enabled(snapshot)) return VK_FALSE;
     return caps->descriptor_indexing.descriptorBindingStorageImageUpdateAfterBind ? VK_TRUE : VK_FALSE;
 }
 
-static VkBool32 advertised_descriptor_binding_storage_buffer_update_after_bind(void) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
-    if (!caps || env_disabled("PDOCKER_VULKAN_DISABLE_DESCRIPTOR_UPDATE_AFTER_BIND") ||
-        !advertised_descriptor_update_after_bind_limit_enabled()) return VK_FALSE;
+static VkBool32 advertised_descriptor_binding_storage_buffer_update_after_bind(const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled(snapshot);
+    if (!caps || !snapshot || !snapshot->descriptor_update_after_bind_enabled ||
+        !advertised_descriptor_update_after_bind_limit_enabled(snapshot)) return VK_FALSE;
     return caps->descriptor_indexing.descriptorBindingStorageBufferUpdateAfterBind ? VK_TRUE : VK_FALSE;
 }
 
-static VkBool32 advertised_descriptor_binding_uniform_texel_buffer_update_after_bind(void) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
-    if (!caps || env_disabled("PDOCKER_VULKAN_DISABLE_DESCRIPTOR_UPDATE_AFTER_BIND") ||
-        !advertised_descriptor_update_after_bind_limit_enabled()) return VK_FALSE;
+static VkBool32 advertised_descriptor_binding_uniform_texel_buffer_update_after_bind(const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled(snapshot);
+    if (!caps || !snapshot || !snapshot->descriptor_update_after_bind_enabled ||
+        !advertised_descriptor_update_after_bind_limit_enabled(snapshot)) return VK_FALSE;
     return caps->descriptor_indexing.descriptorBindingUniformTexelBufferUpdateAfterBind ? VK_TRUE : VK_FALSE;
 }
 
-static VkBool32 advertised_descriptor_binding_storage_texel_buffer_update_after_bind(void) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
-    if (!caps || env_disabled("PDOCKER_VULKAN_DISABLE_DESCRIPTOR_UPDATE_AFTER_BIND") ||
-        !advertised_descriptor_update_after_bind_limit_enabled()) return VK_FALSE;
+static VkBool32 advertised_descriptor_binding_storage_texel_buffer_update_after_bind(const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled(snapshot);
+    if (!caps || !snapshot || !snapshot->descriptor_update_after_bind_enabled ||
+        !advertised_descriptor_update_after_bind_limit_enabled(snapshot)) return VK_FALSE;
     return caps->descriptor_indexing.descriptorBindingStorageTexelBufferUpdateAfterBind ? VK_TRUE : VK_FALSE;
 }
 
-static VkBool32 advertised_sampler_anisotropy(void) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+static VkBool32 advertised_sampler_anisotropy(const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled(snapshot);
     return (caps && caps->features.samplerAnisotropy && caps->limits.maxSamplerAnisotropy >= 1.0f)
         ? VK_TRUE
         : VK_FALSE;
 }
 
-static VkBool32 advertised_sampler_filter_minmax(void) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+static VkBool32 advertised_sampler_filter_minmax(const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled(snapshot);
     return (caps && caps->sampler_filter_minmax) ? VK_TRUE : VK_FALSE;
 }
 
-static VkBool32 advertised_separate_depth_stencil_layouts(void) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+static VkBool32 advertised_separate_depth_stencil_layouts(const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled(snapshot);
     if (!caps || !caps->separate_depth_stencil_layouts) return VK_FALSE;
     return (caps->api_version >= VK_API_VERSION_1_2 || caps->ext_separate_depth_stencil_layouts)
         ? VK_TRUE
         : VK_FALSE;
 }
 
-static VkBool32 advertised_synchronization2(void) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+static VkBool32 advertised_synchronization2(const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled(snapshot);
     return (caps && caps->synchronization2_usable) ? VK_TRUE : VK_FALSE;
 }
 
-static VkBool32 advertised_dynamic_rendering(void) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+static VkBool32 advertised_dynamic_rendering(const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled(snapshot);
     return (caps && caps->dynamic_rendering_usable) ? VK_TRUE : VK_FALSE;
 }
 
-static VkBool32 advertised_load_store_op_none(void) {
-    return advertised_dynamic_rendering();
+static VkBool32 advertised_load_store_op_none(const PdockerVkCapabilitySnapshot *snapshot) {
+    return advertised_dynamic_rendering(snapshot);
 }
 
-static VkBool32 advertised_draw_indirect_count(void) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+static VkBool32 advertised_draw_indirect_count(const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled(snapshot);
     return (caps && caps->draw_indirect_count_usable) ? VK_TRUE : VK_FALSE;
 }
 
-static VkBool32 advertised_draw_indexed_indirect_count(void) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+static VkBool32 advertised_draw_indexed_indirect_count(const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled(snapshot);
     return (caps && caps->draw_indexed_indirect_count_usable) ? VK_TRUE : VK_FALSE;
 }
 
-static VkBool32 advertised_draw_indirect_count_khr(void) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+static VkBool32 advertised_draw_indirect_count_khr(const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled(snapshot);
     return (caps && caps->ext_draw_indirect_count_khr &&
             caps->draw_indirect_count_usable && caps->draw_indexed_indirect_count_usable)
         ? VK_TRUE
         : VK_FALSE;
 }
 
-static VkBool32 advertised_draw_indirect_count_amd(void) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+static VkBool32 advertised_draw_indirect_count_amd(const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled(snapshot);
     return (caps && caps->ext_draw_indirect_count_amd &&
             caps->draw_indirect_count_usable && caps->draw_indexed_indirect_count_usable)
         ? VK_TRUE
         : VK_FALSE;
 }
 
-static VkBool32 advertised_extended_dynamic_state(void) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+static VkBool32 advertised_extended_dynamic_state(const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled(snapshot);
 #ifdef VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME
     return (caps && caps->extended_dynamic_state_usable) ? VK_TRUE : VK_FALSE;
 #else
@@ -23192,8 +24635,8 @@ static VkBool32 advertised_extended_dynamic_state(void) {
 #endif
 }
 
-static VkBool32 advertised_extended_dynamic_state2(void) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+static VkBool32 advertised_extended_dynamic_state2(const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled(snapshot);
 #ifdef VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME
     return (caps && caps->extended_dynamic_state2_usable.extendedDynamicState2) ? VK_TRUE : VK_FALSE;
 #else
@@ -23201,8 +24644,8 @@ static VkBool32 advertised_extended_dynamic_state2(void) {
 #endif
 }
 
-static VkBool32 advertised_extended_dynamic_state2_logic_op(void) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+static VkBool32 advertised_extended_dynamic_state2_logic_op(const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled(snapshot);
 #ifdef VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME
     return (caps && caps->extended_dynamic_state2_usable.extendedDynamicState2LogicOp) ? VK_TRUE : VK_FALSE;
 #else
@@ -23210,8 +24653,8 @@ static VkBool32 advertised_extended_dynamic_state2_logic_op(void) {
 #endif
 }
 
-static VkBool32 advertised_extended_dynamic_state2_patch_control_points(void) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+static VkBool32 advertised_extended_dynamic_state2_patch_control_points(const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled(snapshot);
 #ifdef VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME
     return (caps && caps->extended_dynamic_state2_usable.extendedDynamicState2PatchControlPoints) ? VK_TRUE : VK_FALSE;
 #else
@@ -23219,32 +24662,32 @@ static VkBool32 advertised_extended_dynamic_state2_patch_control_points(void) {
 #endif
 }
 
-static VkBool32 advertised_extended_dynamic_state2_any(void) {
-    return (advertised_extended_dynamic_state2() ||
-            advertised_extended_dynamic_state2_logic_op() ||
-            advertised_extended_dynamic_state2_patch_control_points()) ? VK_TRUE : VK_FALSE;
+static VkBool32 advertised_extended_dynamic_state2_any(const PdockerVkCapabilitySnapshot *snapshot) {
+    return (advertised_extended_dynamic_state2(snapshot) ||
+            advertised_extended_dynamic_state2_logic_op(snapshot) ||
+            advertised_extended_dynamic_state2_patch_control_points(snapshot)) ? VK_TRUE : VK_FALSE;
 }
 
-static uint32_t advertised_api_version(void) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+static uint32_t advertised_api_version(const PdockerVkCapabilitySnapshot *snapshot) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled(snapshot);
     uint32_t version = (caps && caps->api_version) ? caps->api_version : pdocker_api_version();
     uint32_t maximum = pdocker_api_version();
     return version > maximum ? maximum : version;
 }
 
-static VkBool32 advertised_api_1_3(void) {
-    return advertised_api_version() >= VK_MAKE_VERSION(1, 3, 0) ? VK_TRUE : VK_FALSE;
+static VkBool32 advertised_api_1_3(const PdockerVkCapabilitySnapshot *snapshot) {
+    return advertised_api_version(snapshot) >= VK_MAKE_VERSION(1, 3, 0) ? VK_TRUE : VK_FALSE;
 }
 
-static VkBool32 advertised_api_1_4(void) {
-    return advertised_api_version() >= VK_MAKE_VERSION(1, 4, 0) ? VK_TRUE : VK_FALSE;
+static VkBool32 advertised_api_1_4(const PdockerVkCapabilitySnapshot *snapshot) {
+    return advertised_api_version(snapshot) >= VK_MAKE_VERSION(1, 4, 0) ? VK_TRUE : VK_FALSE;
 }
 
-static void trace_executor_advertisement_caps_once(void) {
+static void trace_executor_advertisement_caps_once(const PdockerVkCapabilitySnapshot *snapshot) {
     static int traced = 0;
     if (traced || !getenv("PDOCKER_VULKAN_ICD_DEBUG")) return;
     traced = 1;
-    const PdockerVkAdvertisedCaps *caps = pdocker_vk_advertised_caps();
+    const PdockerVkAdvertisedCaps *caps = snapshot_executor_caps(snapshot);
     if (caps && caps->executor_valid) {
         fprintf(stderr,
                 "pdocker-vulkan-icd: executor advertisement caps shadow: "
@@ -23282,10 +24725,10 @@ static void trace_executor_advertisement_caps_once(void) {
     }
 }
 
-static void fill_physical_device_properties(VkPhysicalDeviceProperties *pProperties) {
+static void fill_physical_device_properties(const PdockerVkCapabilitySnapshot *snapshot, VkPhysicalDeviceProperties *pProperties) {
     if (!pProperties) return;
-    trace_executor_advertisement_caps_once();
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+    trace_executor_advertisement_caps_once(snapshot);
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled(snapshot);
     memset(pProperties, 0, sizeof(*pProperties));
     pProperties->apiVersion = caps && caps->api_version ? caps->api_version : pdocker_api_version();
     if (pProperties->apiVersion > VK_API_VERSION_1_2) {
@@ -23302,14 +24745,14 @@ static void fill_physical_device_properties(VkPhysicalDeviceProperties *pPropert
      */
     pProperties->deviceType = caps
         ? caps->device_type
-        : (bridge_available() ? VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+        : (snapshot && snapshot->bridge_available ? VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
                               : VK_PHYSICAL_DEVICE_TYPE_CPU);
     if (caps) {
         snprintf(pProperties->deviceName, sizeof(pProperties->deviceName),
                  "skydnir Vulkan bridge (%.200s)", caps->device_name);
     } else {
         snprintf(pProperties->deviceName, sizeof(pProperties->deviceName),
-                 "pdocker Vulkan bridge (%s)", bridge_available() ? "queue" : "offline");
+                 "pdocker Vulkan bridge (%s)", snapshot && snapshot->bridge_available ? "queue" : "offline");
     }
     pProperties->limits.maxComputeSharedMemorySize =
         caps && caps->limits.maxComputeSharedMemorySize
@@ -23347,7 +24790,7 @@ static void fill_physical_device_properties(VkPhysicalDeviceProperties *pPropert
         caps && caps->limits.maxPushConstantsSize
             ? caps->limits.maxPushConstantsSize
             : 256;
-    VkDeviceSize max_buffer = pdocker_vulkan_max_buffer_size();
+    VkDeviceSize max_buffer = capability_snapshot_max_buffer_size(snapshot);
     uint32_t transport_max_storage_range =
         max_buffer > UINT32_MAX ? UINT32_MAX : (uint32_t)max_buffer;
     pProperties->limits.maxStorageBufferRange =
@@ -23357,7 +24800,7 @@ static void fill_physical_device_properties(VkPhysicalDeviceProperties *pPropert
                 : transport_max_storage_range)
             : transport_max_storage_range;
     pProperties->limits.maxTexelBufferElements =
-        executor_supports_vulkan_dispatch_v53_buffer_views()
+        executor_supports_vulkan_dispatch_v53_buffer_views(snapshot)
             ? (pProperties->limits.maxStorageBufferRange / 4u)
             : 0u;
     pProperties->limits.maxGeometryShaderInvocations =
@@ -23370,7 +24813,7 @@ static void fill_physical_device_properties(VkPhysicalDeviceProperties *pPropert
         caps ? caps->limits.maxGeometryOutputVertices : 0;
     pProperties->limits.maxGeometryTotalOutputComponents =
         caps ? caps->limits.maxGeometryTotalOutputComponents : 0;
-    if (advertised_wide_lines()) {
+    if (advertised_wide_lines(snapshot)) {
         pProperties->limits.lineWidthRange[0] = caps->limits.lineWidthRange[0];
         pProperties->limits.lineWidthRange[1] = caps->limits.lineWidthRange[1];
         pProperties->limits.lineWidthGranularity = caps->limits.lineWidthGranularity;
@@ -23389,7 +24832,7 @@ static void fill_physical_device_properties(VkPhysicalDeviceProperties *pPropert
     pProperties->limits.maxFramebufferHeight = 4096;
     pProperties->limits.maxFramebufferLayers = 256;
     pProperties->limits.framebufferColorSampleCounts =
-        pdocker_vk_advertised_color_attachment_sample_counts();
+        pdocker_vk_advertised_color_attachment_sample_counts(snapshot);
     pProperties->limits.framebufferDepthSampleCounts = VK_SAMPLE_COUNT_1_BIT;
     pProperties->limits.framebufferStencilSampleCounts = VK_SAMPLE_COUNT_1_BIT;
     pProperties->limits.framebufferNoAttachmentsSampleCounts = VK_SAMPLE_COUNT_1_BIT;
@@ -23399,7 +24842,7 @@ static void fill_physical_device_properties(VkPhysicalDeviceProperties *pPropert
     pProperties->limits.sampledImageStencilSampleCounts = VK_SAMPLE_COUNT_1_BIT;
     pProperties->limits.storageImageSampleCounts = VK_SAMPLE_COUNT_1_BIT;
     pProperties->limits.maxSampleMaskWords = 1;
-    pProperties->limits.maxSamplerAnisotropy = advertised_max_sampler_anisotropy();
+    pProperties->limits.maxSamplerAnisotropy = advertised_max_sampler_anisotropy(snapshot);
     pProperties->limits.maxColorAttachments = 8;
     pProperties->limits.maxBoundDescriptorSets =
         caps && caps->limits.maxBoundDescriptorSets &&
@@ -23431,76 +24874,36 @@ static void fill_physical_device_properties(VkPhysicalDeviceProperties *pPropert
     pProperties->limits.minTexelBufferOffsetAlignment = PDOCKER_VK_MIN_STORAGE_BUFFER_OFFSET_ALIGNMENT;
     pProperties->limits.minMemoryMapAlignment = 64;
     pProperties->limits.nonCoherentAtomSize = 64;
-    pProperties->limits.timestampComputeAndGraphics = VK_TRUE;
-    pProperties->limits.timestampPeriod = 1.0f;
+    pProperties->limits.timestampComputeAndGraphics =
+        caps ? caps->limits.timestampComputeAndGraphics : VK_FALSE;
+    pProperties->limits.timestampPeriod =
+        caps ? caps->limits.timestampPeriod : 0.0f;
     if (trace_allocations()) {
         fprintf(stderr,
                 "pdocker-vulkan-icd: advertised limits maxBuffer=%llu maxStorageRange=%u subgroupSize=%u subgroupOps=0x%x shaderInt64=%u storage16=%u storage8=%u\n",
                 (unsigned long long)max_buffer,
                 (unsigned)pProperties->limits.maxStorageBufferRange,
-                (unsigned)advertised_subgroup_size(),
-                (unsigned)advertised_subgroup_operations(),
-                (unsigned)advertised_shader_int64(),
-                (unsigned)advertised_storage16(),
-                (unsigned)advertised_storage8());
+                (unsigned)advertised_subgroup_size(snapshot),
+                (unsigned)advertised_subgroup_operations(snapshot),
+                (unsigned)advertised_shader_int64(snapshot),
+                (unsigned)advertised_storage16(snapshot),
+                (unsigned)advertised_storage8(snapshot));
     }
 }
 
-static VkSubgroupFeatureFlags advertised_subgroup_operations(void) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
-    if (caps) {
-        VkSubgroupFeatureFlags ops = caps->subgroup.supportedOperations
-            ? caps->subgroup.supportedOperations
-            : VK_SUBGROUP_FEATURE_BASIC_BIT;
-        if (env_disabled("PDOCKER_VULKAN_DISABLE_SUBGROUP_ARITHMETIC")) {
-            ops &= ~VK_SUBGROUP_FEATURE_ARITHMETIC_BIT;
-            if (!ops) ops = VK_SUBGROUP_FEATURE_BASIC_BIT;
-        }
-        return ops;
-    }
-    if (env_disabled("PDOCKER_VULKAN_DISABLE_SUBGROUP_ARITHMETIC")) {
-        return VK_SUBGROUP_FEATURE_BASIC_BIT;
-    }
-    if (!env_truthy_default("PDOCKER_VULKAN_ENABLE_SUBGROUP_ARITHMETIC", false)) {
-        return VK_SUBGROUP_FEATURE_BASIC_BIT;
-    }
-    return VK_SUBGROUP_FEATURE_BASIC_BIT |
-           VK_SUBGROUP_FEATURE_ARITHMETIC_BIT |
-           VK_SUBGROUP_FEATURE_BALLOT_BIT |
-           VK_SUBGROUP_FEATURE_SHUFFLE_BIT |
-           VK_SUBGROUP_FEATURE_VOTE_BIT;
+static VkSubgroupFeatureFlags advertised_subgroup_operations(
+        const PdockerVkCapabilitySnapshot *snapshot) {
+    return snapshot ? snapshot->effective_subgroup_operations : 0;
 }
 
-static uint32_t parsed_env_subgroup_size(void) {
-    const char *value = getenv("PDOCKER_VULKAN_SUBGROUP_SIZE");
-    if (value && value[0]) {
-        char *end = NULL;
-        unsigned long parsed = strtoul(value, &end, 10);
-        if (end != value && parsed >= 1 && parsed <= 128) {
-            return (uint32_t)parsed;
-        }
-    }
-    return 0;
+static uint32_t advertised_subgroup_size(
+        const PdockerVkCapabilitySnapshot *snapshot) {
+    return snapshot ? snapshot->effective_subgroup_size : 0;
 }
 
-static uint32_t advertised_subgroup_size(void) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
-    const uint32_t env_size = parsed_env_subgroup_size();
-    if (caps && caps->subgroup.subgroupSize) {
-        /*
-         * Executor caps are the upper bound from the real Android driver.
-         * The env knob is a narrowing override only; never use it to widen
-         * advertised subgroup behavior beyond the executor-observed device.
-         */
-        if (env_size && env_size < caps->subgroup.subgroupSize) return env_size;
-        return caps->subgroup.subgroupSize;
-    }
-    if (env_size) return env_size;
-    return 32;
-}
-
-static VkShaderStageFlags advertised_subgroup_stages(void) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+static VkShaderStageFlags advertised_subgroup_stages(const PdockerVkCapabilitySnapshot *snapshot) {
+    if (snapshot) return snapshot->effective_subgroup_stages;
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled(snapshot);
     if (caps && caps->subgroup.supportedStages) {
         return caps->subgroup.supportedStages & VK_SHADER_STAGE_COMPUTE_BIT
             ? caps->subgroup.supportedStages
@@ -23513,7 +24916,7 @@ static uint32_t pdocker_vk_max_per_set_descriptors(void) {
     return PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS;
 }
 
-static void fill_pnext_properties(void *pNext) {
+static void fill_pnext_properties(const PdockerVkCapabilitySnapshot *snapshot, void *pNext) {
     for (void *node = pNext; node;) {
         PdockerVkStructHeader header = read_vk_struct_header(node);
         switch (header.sType) {
@@ -23556,14 +24959,14 @@ static void fill_pnext_properties(void *pNext) {
                 VkPhysicalDeviceMaintenance3Properties *p = (VkPhysicalDeviceMaintenance3Properties *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
                 p->maxPerSetDescriptors = pdocker_vk_max_per_set_descriptors();
-                p->maxMemoryAllocationSize = pdocker_vulkan_max_buffer_size();
+                p->maxMemoryAllocationSize = capability_snapshot_max_buffer_size(snapshot);
                 break;
             }
 #if defined(VK_VERSION_1_3) || defined(VK_KHR_maintenance4)
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_PROPERTIES: {
                 VkPhysicalDeviceMaintenance4Properties *p = (VkPhysicalDeviceMaintenance4Properties *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
-                p->maxBufferSize = pdocker_vulkan_max_buffer_size();
+                p->maxBufferSize = capability_snapshot_max_buffer_size(snapshot);
                 break;
             }
 #endif
@@ -23584,9 +24987,9 @@ static void fill_pnext_properties(void *pNext) {
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES: {
                 VkPhysicalDeviceSubgroupProperties *p = (VkPhysicalDeviceSubgroupProperties *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
-                p->subgroupSize = advertised_subgroup_size();
-                p->supportedStages = advertised_subgroup_stages();
-                p->supportedOperations = advertised_subgroup_operations();
+                p->subgroupSize = advertised_subgroup_size(snapshot);
+                p->supportedStages = advertised_subgroup_stages(snapshot);
+                p->supportedOperations = advertised_subgroup_operations(snapshot);
                 p->quadOperationsInAllStages = VK_FALSE;
                 break;
             }
@@ -23605,14 +25008,14 @@ static void fill_pnext_properties(void *pNext) {
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_PROPERTIES: {
                 VkPhysicalDeviceVulkan11Properties *p = (VkPhysicalDeviceVulkan11Properties *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
-                p->subgroupSize = advertised_subgroup_size();
-                p->subgroupSupportedStages = advertised_subgroup_stages();
-                p->subgroupSupportedOperations = advertised_subgroup_operations();
+                p->subgroupSize = advertised_subgroup_size(snapshot);
+                p->subgroupSupportedStages = advertised_subgroup_stages(snapshot);
+                p->subgroupSupportedOperations = advertised_subgroup_operations(snapshot);
                 p->subgroupQuadOperationsInAllStages = VK_FALSE;
                 p->maxMultiviewViewCount = 1;
                 p->maxMultiviewInstanceIndex = 1;
                 p->maxPerSetDescriptors = pdocker_vk_max_per_set_descriptors();
-                p->maxMemoryAllocationSize = pdocker_vulkan_max_buffer_size();
+                p->maxMemoryAllocationSize = capability_snapshot_max_buffer_size(snapshot);
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES: {
@@ -23715,30 +25118,30 @@ static void fill_pnext_properties(void *pNext) {
     }
 }
 
-static void fill_physical_device_features(VkPhysicalDeviceFeatures *pFeatures) {
+static void fill_physical_device_features(const PdockerVkCapabilitySnapshot *snapshot, VkPhysicalDeviceFeatures *pFeatures) {
     if (!pFeatures) return;
     memset(pFeatures, 0, sizeof(*pFeatures));
-    pFeatures->shaderInt64 = advertised_shader_int64();
-    pFeatures->geometryShader = advertised_geometry_shader();
-    pFeatures->tessellationShader = advertised_tessellation_shader();
-    pFeatures->sampleRateShading = advertised_sample_rate_shading();
-    pFeatures->alphaToOne = advertised_alpha_to_one();
-    pFeatures->logicOp = advertised_logic_op();
-    pFeatures->independentBlend = advertised_independent_blend();
-    pFeatures->wideLines = advertised_wide_lines();
-    pFeatures->depthClamp = advertised_depth_clamp();
-    pFeatures->fillModeNonSolid = advertised_fill_mode_non_solid();
-    pFeatures->multiDrawIndirect = advertised_multi_draw_indirect();
-    pFeatures->drawIndirectFirstInstance = advertised_draw_indirect_first_instance();
-    pFeatures->depthBiasClamp = advertised_depth_bias_clamp();
-    pFeatures->depthBounds = advertised_depth_bounds();
-    pFeatures->samplerAnisotropy = advertised_sampler_anisotropy();
+    pFeatures->shaderInt64 = advertised_shader_int64(snapshot);
+    pFeatures->geometryShader = advertised_geometry_shader(snapshot);
+    pFeatures->tessellationShader = advertised_tessellation_shader(snapshot);
+    pFeatures->sampleRateShading = advertised_sample_rate_shading(snapshot);
+    pFeatures->alphaToOne = advertised_alpha_to_one(snapshot);
+    pFeatures->logicOp = advertised_logic_op(snapshot);
+    pFeatures->independentBlend = advertised_independent_blend(snapshot);
+    pFeatures->wideLines = advertised_wide_lines(snapshot);
+    pFeatures->depthClamp = advertised_depth_clamp(snapshot);
+    pFeatures->fillModeNonSolid = advertised_fill_mode_non_solid(snapshot);
+    pFeatures->multiDrawIndirect = advertised_multi_draw_indirect(snapshot);
+    pFeatures->drawIndirectFirstInstance = advertised_draw_indirect_first_instance(snapshot);
+    pFeatures->depthBiasClamp = advertised_depth_bias_clamp(snapshot);
+    pFeatures->depthBounds = advertised_depth_bounds(snapshot);
+    pFeatures->samplerAnisotropy = advertised_sampler_anisotropy(snapshot);
 }
 
 static bool pdocker_supports_memory_priority_transport(void);
 
-static void fill_pnext_features(void *pNext) {
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+static void fill_pnext_features(const PdockerVkCapabilitySnapshot *snapshot, void *pNext) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled(snapshot);
     for (void *node = pNext; node;) {
         PdockerVkStructHeader header = read_vk_struct_header(node);
         switch (header.sType) {
@@ -23746,14 +25149,14 @@ static void fill_pnext_features(void *pNext) {
                 VkPhysicalDeviceVulkan11Features *p = (VkPhysicalDeviceVulkan11Features *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
                 if (caps) {
-                    bool disabled = env_disabled("PDOCKER_VULKAN_DISABLE_16BIT_STORAGE");
+                    bool disabled = !snapshot || snapshot->storage16_disabled;
                     p->storageBuffer16BitAccess = disabled ? VK_FALSE : caps->storage16.storageBuffer16BitAccess;
                     p->uniformAndStorageBuffer16BitAccess = disabled ? VK_FALSE : caps->storage16.uniformAndStorageBuffer16BitAccess;
                     p->storagePushConstant16 = disabled ? VK_FALSE : caps->storage16.storagePushConstant16;
                     p->storageInputOutput16 = disabled ? VK_FALSE : caps->storage16.storageInputOutput16;
                     p->multiview = caps->multiview;
                 } else {
-                    VkBool32 storage16 = advertised_storage16();
+                    VkBool32 storage16 = advertised_storage16(snapshot);
                     p->storageBuffer16BitAccess = storage16;
                     p->uniformAndStorageBuffer16BitAccess = VK_FALSE;
                     p->storagePushConstant16 = VK_FALSE;
@@ -23797,13 +25200,13 @@ static void fill_pnext_features(void *pNext) {
                 VkPhysicalDevice16BitStorageFeatures *p = (VkPhysicalDevice16BitStorageFeatures *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
                 if (caps) {
-                    bool disabled = env_disabled("PDOCKER_VULKAN_DISABLE_16BIT_STORAGE");
+                    bool disabled = !snapshot || snapshot->storage16_disabled;
                     p->storageBuffer16BitAccess = disabled ? VK_FALSE : caps->storage16.storageBuffer16BitAccess;
                     p->uniformAndStorageBuffer16BitAccess = disabled ? VK_FALSE : caps->storage16.uniformAndStorageBuffer16BitAccess;
                     p->storagePushConstant16 = disabled ? VK_FALSE : caps->storage16.storagePushConstant16;
                     p->storageInputOutput16 = disabled ? VK_FALSE : caps->storage16.storageInputOutput16;
                 } else {
-                    VkBool32 storage16 = advertised_storage16();
+                    VkBool32 storage16 = advertised_storage16(snapshot);
                     p->storageBuffer16BitAccess = storage16;
                     p->uniformAndStorageBuffer16BitAccess = VK_FALSE;
                     p->storagePushConstant16 = VK_FALSE;
@@ -23815,50 +25218,50 @@ static void fill_pnext_features(void *pNext) {
                 VkPhysicalDeviceVulkan12Features *p = (VkPhysicalDeviceVulkan12Features *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
                 if (caps) {
-                    bool disabled = env_disabled("PDOCKER_VULKAN_DISABLE_8BIT_STORAGE");
+                    bool disabled = !snapshot || snapshot->storage8_disabled;
                     p->storageBuffer8BitAccess = disabled ? VK_FALSE : caps->storage8.storageBuffer8BitAccess;
                     p->uniformAndStorageBuffer8BitAccess = disabled ? VK_FALSE : caps->storage8.uniformAndStorageBuffer8BitAccess;
                     p->storagePushConstant8 = disabled ? VK_FALSE : caps->storage8.storagePushConstant8;
                     p->shaderFloat16 = caps->float16_int8.shaderFloat16;
                     p->shaderInt8 = disabled ? VK_FALSE : caps->float16_int8.shaderInt8;
-                    p->descriptorBindingUpdateUnusedWhilePending = advertised_descriptor_binding_update_unused_while_pending();
-                    p->descriptorBindingUniformBufferUpdateAfterBind = advertised_descriptor_binding_uniform_buffer_update_after_bind();
-                    p->descriptorBindingSampledImageUpdateAfterBind = advertised_descriptor_binding_sampled_image_update_after_bind();
-                    p->descriptorBindingStorageImageUpdateAfterBind = advertised_descriptor_binding_storage_image_update_after_bind();
-                    p->descriptorBindingStorageBufferUpdateAfterBind = advertised_descriptor_binding_storage_buffer_update_after_bind();
-                    p->descriptorBindingUniformTexelBufferUpdateAfterBind = advertised_descriptor_binding_uniform_texel_buffer_update_after_bind();
-                    p->descriptorBindingStorageTexelBufferUpdateAfterBind = advertised_descriptor_binding_storage_texel_buffer_update_after_bind();
-                    p->descriptorBindingPartiallyBound = advertised_descriptor_binding_partially_bound();
-                    p->descriptorBindingVariableDescriptorCount = advertised_descriptor_binding_variable_descriptor_count();
-                    p->descriptorIndexing = advertised_descriptor_indexing_aggregate();
-                    p->samplerFilterMinmax = advertised_sampler_filter_minmax();
-                    p->separateDepthStencilLayouts = advertised_separate_depth_stencil_layouts();
-                    p->hostQueryReset = VK_TRUE;
+                    p->descriptorBindingUpdateUnusedWhilePending = advertised_descriptor_binding_update_unused_while_pending(snapshot);
+                    p->descriptorBindingUniformBufferUpdateAfterBind = advertised_descriptor_binding_uniform_buffer_update_after_bind(snapshot);
+                    p->descriptorBindingSampledImageUpdateAfterBind = advertised_descriptor_binding_sampled_image_update_after_bind(snapshot);
+                    p->descriptorBindingStorageImageUpdateAfterBind = advertised_descriptor_binding_storage_image_update_after_bind(snapshot);
+                    p->descriptorBindingStorageBufferUpdateAfterBind = advertised_descriptor_binding_storage_buffer_update_after_bind(snapshot);
+                    p->descriptorBindingUniformTexelBufferUpdateAfterBind = advertised_descriptor_binding_uniform_texel_buffer_update_after_bind(snapshot);
+                    p->descriptorBindingStorageTexelBufferUpdateAfterBind = advertised_descriptor_binding_storage_texel_buffer_update_after_bind(snapshot);
+                    p->descriptorBindingPartiallyBound = advertised_descriptor_binding_partially_bound(snapshot);
+                    p->descriptorBindingVariableDescriptorCount = advertised_descriptor_binding_variable_descriptor_count(snapshot);
+                    p->descriptorIndexing = advertised_descriptor_indexing_aggregate(snapshot);
+                    p->samplerFilterMinmax = advertised_sampler_filter_minmax(snapshot);
+                    p->separateDepthStencilLayouts = advertised_separate_depth_stencil_layouts(snapshot);
+                    p->hostQueryReset = advertised_host_query_reset(snapshot);
                 } else {
-                    VkBool32 storage8 = advertised_storage8();
+                    VkBool32 storage8 = advertised_storage8(snapshot);
                     p->storageBuffer8BitAccess = storage8;
                     p->uniformAndStorageBuffer8BitAccess = VK_FALSE;
                     p->storagePushConstant8 = VK_FALSE;
                     p->shaderFloat16 = VK_FALSE;
                     p->shaderInt8 = storage8;
-                    p->descriptorBindingUpdateUnusedWhilePending = advertised_descriptor_binding_update_unused_while_pending();
-                    p->descriptorBindingUniformBufferUpdateAfterBind = advertised_descriptor_binding_uniform_buffer_update_after_bind();
-                    p->descriptorBindingSampledImageUpdateAfterBind = advertised_descriptor_binding_sampled_image_update_after_bind();
-                    p->descriptorBindingStorageImageUpdateAfterBind = advertised_descriptor_binding_storage_image_update_after_bind();
-                    p->descriptorBindingStorageBufferUpdateAfterBind = advertised_descriptor_binding_storage_buffer_update_after_bind();
-                    p->descriptorBindingUniformTexelBufferUpdateAfterBind = advertised_descriptor_binding_uniform_texel_buffer_update_after_bind();
-                    p->descriptorBindingStorageTexelBufferUpdateAfterBind = advertised_descriptor_binding_storage_texel_buffer_update_after_bind();
-                    p->descriptorBindingPartiallyBound = advertised_descriptor_binding_partially_bound();
-                    p->descriptorBindingVariableDescriptorCount = advertised_descriptor_binding_variable_descriptor_count();
-                    p->descriptorIndexing = advertised_descriptor_indexing_aggregate();
-                    p->samplerFilterMinmax = advertised_sampler_filter_minmax();
-                    p->separateDepthStencilLayouts = advertised_separate_depth_stencil_layouts();
-                    p->hostQueryReset = VK_TRUE;
+                    p->descriptorBindingUpdateUnusedWhilePending = advertised_descriptor_binding_update_unused_while_pending(snapshot);
+                    p->descriptorBindingUniformBufferUpdateAfterBind = advertised_descriptor_binding_uniform_buffer_update_after_bind(snapshot);
+                    p->descriptorBindingSampledImageUpdateAfterBind = advertised_descriptor_binding_sampled_image_update_after_bind(snapshot);
+                    p->descriptorBindingStorageImageUpdateAfterBind = advertised_descriptor_binding_storage_image_update_after_bind(snapshot);
+                    p->descriptorBindingStorageBufferUpdateAfterBind = advertised_descriptor_binding_storage_buffer_update_after_bind(snapshot);
+                    p->descriptorBindingUniformTexelBufferUpdateAfterBind = advertised_descriptor_binding_uniform_texel_buffer_update_after_bind(snapshot);
+                    p->descriptorBindingStorageTexelBufferUpdateAfterBind = advertised_descriptor_binding_storage_texel_buffer_update_after_bind(snapshot);
+                    p->descriptorBindingPartiallyBound = advertised_descriptor_binding_partially_bound(snapshot);
+                    p->descriptorBindingVariableDescriptorCount = advertised_descriptor_binding_variable_descriptor_count(snapshot);
+                    p->descriptorIndexing = advertised_descriptor_indexing_aggregate(snapshot);
+                    p->samplerFilterMinmax = advertised_sampler_filter_minmax(snapshot);
+                    p->separateDepthStencilLayouts = advertised_separate_depth_stencil_layouts(snapshot);
+                    p->hostQueryReset = advertised_host_query_reset(snapshot);
                 }
                 p->bufferDeviceAddress = VK_FALSE;
                 p->vulkanMemoryModel = VK_FALSE;
-                p->timelineSemaphore = advertised_timeline_semaphore();
-                p->drawIndirectCount = advertised_draw_indirect_count() && advertised_draw_indexed_indirect_count();
+                p->timelineSemaphore = advertised_timeline_semaphore(snapshot);
+                p->drawIndirectCount = advertised_draw_indirect_count(snapshot) && advertised_draw_indexed_indirect_count(snapshot);
                 break;
             }
 #ifdef VK_VERSION_1_3
@@ -23879,12 +25282,12 @@ static void fill_pnext_features(void *pNext) {
                 VkPhysicalDevice8BitStorageFeatures *p = (VkPhysicalDevice8BitStorageFeatures *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
                 if (caps) {
-                    bool disabled = env_disabled("PDOCKER_VULKAN_DISABLE_8BIT_STORAGE");
+                    bool disabled = !snapshot || snapshot->storage8_disabled;
                     p->storageBuffer8BitAccess = disabled ? VK_FALSE : caps->storage8.storageBuffer8BitAccess;
                     p->uniformAndStorageBuffer8BitAccess = disabled ? VK_FALSE : caps->storage8.uniformAndStorageBuffer8BitAccess;
                     p->storagePushConstant8 = disabled ? VK_FALSE : caps->storage8.storagePushConstant8;
                 } else {
-                    p->storageBuffer8BitAccess = advertised_storage8();
+                    p->storageBuffer8BitAccess = advertised_storage8(snapshot);
                     p->uniformAndStorageBuffer8BitAccess = VK_FALSE;
                     p->storagePushConstant8 = VK_FALSE;
                 }
@@ -23909,31 +25312,31 @@ static void fill_pnext_features(void *pNext) {
                 VkPhysicalDeviceShaderFloat16Int8Features *p = (VkPhysicalDeviceShaderFloat16Int8Features *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
                 if (caps) {
-                    bool storage8_disabled = env_disabled("PDOCKER_VULKAN_DISABLE_8BIT_STORAGE");
+                    bool storage8_disabled = !snapshot || snapshot->storage8_disabled;
                     p->shaderFloat16 = caps->float16_int8.shaderFloat16;
                     p->shaderInt8 = storage8_disabled ? VK_FALSE : caps->float16_int8.shaderInt8;
                 } else {
                     p->shaderFloat16 = VK_FALSE;
-                    p->shaderInt8 = advertised_storage8();
+                    p->shaderInt8 = advertised_storage8(snapshot);
                 }
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES: {
                 VkPhysicalDeviceSynchronization2Features *p = (VkPhysicalDeviceSynchronization2Features *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
-                p->synchronization2 = advertised_synchronization2();
+                p->synchronization2 = advertised_synchronization2(snapshot);
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES: {
                 VkPhysicalDeviceTimelineSemaphoreFeatures *p = (VkPhysicalDeviceTimelineSemaphoreFeatures *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
-                p->timelineSemaphore = advertised_timeline_semaphore();
+                p->timelineSemaphore = advertised_timeline_semaphore(snapshot);
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES: {
                 VkPhysicalDeviceDynamicRenderingFeatures *p = (VkPhysicalDeviceDynamicRenderingFeatures *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
-                p->dynamicRendering = advertised_dynamic_rendering();
+                p->dynamicRendering = advertised_dynamic_rendering(snapshot);
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES: {
@@ -23963,15 +25366,15 @@ static void fill_pnext_features(void *pNext) {
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT: {
                 VkPhysicalDeviceExtendedDynamicStateFeaturesEXT *p = (VkPhysicalDeviceExtendedDynamicStateFeaturesEXT *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
-                p->extendedDynamicState = advertised_extended_dynamic_state();
+                p->extendedDynamicState = advertised_extended_dynamic_state(snapshot);
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_2_FEATURES_EXT: {
                 VkPhysicalDeviceExtendedDynamicState2FeaturesEXT *p = (VkPhysicalDeviceExtendedDynamicState2FeaturesEXT *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
-                p->extendedDynamicState2 = advertised_extended_dynamic_state2();
-                p->extendedDynamicState2LogicOp = advertised_extended_dynamic_state2_logic_op();
-                p->extendedDynamicState2PatchControlPoints = advertised_extended_dynamic_state2_patch_control_points();
+                p->extendedDynamicState2 = advertised_extended_dynamic_state2(snapshot);
+                p->extendedDynamicState2LogicOp = advertised_extended_dynamic_state2_logic_op(snapshot);
+                p->extendedDynamicState2PatchControlPoints = advertised_extended_dynamic_state2_patch_control_points(snapshot);
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INDEX_TYPE_UINT8_FEATURES_EXT: {
@@ -23985,15 +25388,15 @@ static void fill_pnext_features(void *pNext) {
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES: {
                 VkPhysicalDeviceDescriptorIndexingFeatures *p = (VkPhysicalDeviceDescriptorIndexingFeatures *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
-                p->descriptorBindingUpdateUnusedWhilePending = advertised_descriptor_binding_update_unused_while_pending();
-                p->descriptorBindingUniformBufferUpdateAfterBind = advertised_descriptor_binding_uniform_buffer_update_after_bind();
-                p->descriptorBindingSampledImageUpdateAfterBind = advertised_descriptor_binding_sampled_image_update_after_bind();
-                p->descriptorBindingStorageImageUpdateAfterBind = advertised_descriptor_binding_storage_image_update_after_bind();
-                p->descriptorBindingStorageBufferUpdateAfterBind = advertised_descriptor_binding_storage_buffer_update_after_bind();
-                p->descriptorBindingUniformTexelBufferUpdateAfterBind = advertised_descriptor_binding_uniform_texel_buffer_update_after_bind();
-                p->descriptorBindingStorageTexelBufferUpdateAfterBind = advertised_descriptor_binding_storage_texel_buffer_update_after_bind();
-                p->descriptorBindingPartiallyBound = advertised_descriptor_binding_partially_bound();
-                p->descriptorBindingVariableDescriptorCount = advertised_descriptor_binding_variable_descriptor_count();
+                p->descriptorBindingUpdateUnusedWhilePending = advertised_descriptor_binding_update_unused_while_pending(snapshot);
+                p->descriptorBindingUniformBufferUpdateAfterBind = advertised_descriptor_binding_uniform_buffer_update_after_bind(snapshot);
+                p->descriptorBindingSampledImageUpdateAfterBind = advertised_descriptor_binding_sampled_image_update_after_bind(snapshot);
+                p->descriptorBindingStorageImageUpdateAfterBind = advertised_descriptor_binding_storage_image_update_after_bind(snapshot);
+                p->descriptorBindingStorageBufferUpdateAfterBind = advertised_descriptor_binding_storage_buffer_update_after_bind(snapshot);
+                p->descriptorBindingUniformTexelBufferUpdateAfterBind = advertised_descriptor_binding_uniform_texel_buffer_update_after_bind(snapshot);
+                p->descriptorBindingStorageTexelBufferUpdateAfterBind = advertised_descriptor_binding_storage_texel_buffer_update_after_bind(snapshot);
+                p->descriptorBindingPartiallyBound = advertised_descriptor_binding_partially_bound(snapshot);
+                p->descriptorBindingVariableDescriptorCount = advertised_descriptor_binding_variable_descriptor_count(snapshot);
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SCALAR_BLOCK_LAYOUT_FEATURES: {
@@ -24037,13 +25440,13 @@ static void fill_pnext_features(void *pNext) {
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SEPARATE_DEPTH_STENCIL_LAYOUTS_FEATURES: {
                 VkPhysicalDeviceSeparateDepthStencilLayoutsFeatures *p = (VkPhysicalDeviceSeparateDepthStencilLayoutsFeatures *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
-                p->separateDepthStencilLayouts = advertised_separate_depth_stencil_layouts();
+                p->separateDepthStencilLayouts = advertised_separate_depth_stencil_layouts(snapshot);
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES: {
                 VkPhysicalDeviceHostQueryResetFeatures *p = (VkPhysicalDeviceHostQueryResetFeatures *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
-                p->hostQueryReset = VK_TRUE;
+                p->hostQueryReset = advertised_host_query_reset(snapshot);
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIVATE_DATA_FEATURES: {
@@ -24188,14 +25591,15 @@ static void fill_pnext_features(void *pNext) {
     F(variableMultisampleRate) \
     F(inheritedQueries)
 
-static uint64_t advertised_feature_mask(void);
+static uint64_t advertised_feature_mask(const PdockerVkCapabilitySnapshot *snapshot);
 
 static bool base_feature_request_supported(
+        const PdockerVkCapabilitySnapshot *snapshot,
         const VkPhysicalDeviceFeatures *requested,
         const char **unsupported_feature_name) {
     if (!requested) return true;
     VkPhysicalDeviceFeatures supported;
-    fill_physical_device_features(&supported);
+    fill_physical_device_features(snapshot, &supported);
 #define CHECK_BASE_FEATURE(field) do { \
         if (requested->field && !supported.field) { \
             if (unsupported_feature_name) *unsupported_feature_name = #field; \
@@ -24215,13 +25619,14 @@ static bool base_feature_request_supported(
     } while (0)
 
 static bool vulkan11_feature_request_supported(
+        const PdockerVkCapabilitySnapshot *snapshot,
         const VkPhysicalDeviceVulkan11Features *requested,
         const char **unsupported_feature_name) {
     if (!requested) return true;
     VkPhysicalDeviceVulkan11Features supported;
     memset(&supported, 0, sizeof(supported));
     supported.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
-    fill_pnext_features(&supported);
+    fill_pnext_features(snapshot, &supported);
     PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, storageBuffer16BitAccess);
     PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, uniformAndStorageBuffer16BitAccess);
     PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, storagePushConstant16);
@@ -24238,13 +25643,14 @@ static bool vulkan11_feature_request_supported(
 }
 
 static bool storage16_feature_request_supported(
+        const PdockerVkCapabilitySnapshot *snapshot,
         const VkPhysicalDevice16BitStorageFeatures *requested,
         const char **unsupported_feature_name) {
     if (!requested) return true;
     VkPhysicalDevice16BitStorageFeatures supported;
     memset(&supported, 0, sizeof(supported));
     supported.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES;
-    fill_pnext_features(&supported);
+    fill_pnext_features(snapshot, &supported);
     PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, storageBuffer16BitAccess);
     PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, uniformAndStorageBuffer16BitAccess);
     PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, storagePushConstant16);
@@ -24253,13 +25659,14 @@ static bool storage16_feature_request_supported(
 }
 
 static bool storage8_feature_request_supported(
+        const PdockerVkCapabilitySnapshot *snapshot,
         const VkPhysicalDevice8BitStorageFeatures *requested,
         const char **unsupported_feature_name) {
     if (!requested) return true;
     VkPhysicalDevice8BitStorageFeatures supported;
     memset(&supported, 0, sizeof(supported));
     supported.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES;
-    fill_pnext_features(&supported);
+    fill_pnext_features(snapshot, &supported);
     PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, storageBuffer8BitAccess);
     PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, uniformAndStorageBuffer8BitAccess);
     PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, storagePushConstant8);
@@ -24267,38 +25674,40 @@ static bool storage8_feature_request_supported(
 }
 
 static bool shader_float16_int8_feature_request_supported(
+        const PdockerVkCapabilitySnapshot *snapshot,
         const VkPhysicalDeviceShaderFloat16Int8Features *requested,
         const char **unsupported_feature_name) {
     if (!requested) return true;
     VkPhysicalDeviceShaderFloat16Int8Features supported;
     memset(&supported, 0, sizeof(supported));
     supported.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES;
-    fill_pnext_features(&supported);
+    fill_pnext_features(snapshot, &supported);
     PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, shaderFloat16);
     PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, shaderInt8);
     return true;
 }
 
 static bool vulkan12_feature_request_supported(
+        const PdockerVkCapabilitySnapshot *snapshot,
         const VkPhysicalDeviceVulkan12Features *requested,
         const char **unsupported_feature_name) {
     if (!requested) return true;
     VkPhysicalDeviceVulkan12Features supported;
     memset(&supported, 0, sizeof(supported));
     supported.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
-    fill_pnext_features(&supported);
-    supported.descriptorBindingUpdateUnusedWhilePending = advertised_descriptor_binding_update_unused_while_pending();
-    supported.descriptorBindingUniformBufferUpdateAfterBind = advertised_descriptor_binding_uniform_buffer_update_after_bind();
-    supported.descriptorBindingSampledImageUpdateAfterBind = advertised_descriptor_binding_sampled_image_update_after_bind();
-    supported.descriptorBindingStorageImageUpdateAfterBind = advertised_descriptor_binding_storage_image_update_after_bind();
-    supported.descriptorBindingStorageBufferUpdateAfterBind = advertised_descriptor_binding_storage_buffer_update_after_bind();
-    supported.descriptorBindingUniformTexelBufferUpdateAfterBind = advertised_descriptor_binding_uniform_texel_buffer_update_after_bind();
-    supported.descriptorBindingStorageTexelBufferUpdateAfterBind = advertised_descriptor_binding_storage_texel_buffer_update_after_bind();
-    supported.descriptorBindingPartiallyBound = advertised_descriptor_binding_partially_bound();
-    supported.descriptorBindingVariableDescriptorCount = advertised_descriptor_binding_variable_descriptor_count();
-    supported.descriptorIndexing = advertised_descriptor_indexing_aggregate();
-    supported.samplerFilterMinmax = advertised_sampler_filter_minmax();
-    supported.separateDepthStencilLayouts = advertised_separate_depth_stencil_layouts();
+    fill_pnext_features(snapshot, &supported);
+    supported.descriptorBindingUpdateUnusedWhilePending = advertised_descriptor_binding_update_unused_while_pending(snapshot);
+    supported.descriptorBindingUniformBufferUpdateAfterBind = advertised_descriptor_binding_uniform_buffer_update_after_bind(snapshot);
+    supported.descriptorBindingSampledImageUpdateAfterBind = advertised_descriptor_binding_sampled_image_update_after_bind(snapshot);
+    supported.descriptorBindingStorageImageUpdateAfterBind = advertised_descriptor_binding_storage_image_update_after_bind(snapshot);
+    supported.descriptorBindingStorageBufferUpdateAfterBind = advertised_descriptor_binding_storage_buffer_update_after_bind(snapshot);
+    supported.descriptorBindingUniformTexelBufferUpdateAfterBind = advertised_descriptor_binding_uniform_texel_buffer_update_after_bind(snapshot);
+    supported.descriptorBindingStorageTexelBufferUpdateAfterBind = advertised_descriptor_binding_storage_texel_buffer_update_after_bind(snapshot);
+    supported.descriptorBindingPartiallyBound = advertised_descriptor_binding_partially_bound(snapshot);
+    supported.descriptorBindingVariableDescriptorCount = advertised_descriptor_binding_variable_descriptor_count(snapshot);
+    supported.descriptorIndexing = advertised_descriptor_indexing_aggregate(snapshot);
+    supported.samplerFilterMinmax = advertised_sampler_filter_minmax(snapshot);
+    supported.separateDepthStencilLayouts = advertised_separate_depth_stencil_layouts(snapshot);
     PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, samplerMirrorClampToEdge);
     PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, drawIndirectCount);
     PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, storageBuffer8BitAccess);
@@ -24335,7 +25744,7 @@ static bool vulkan12_feature_request_supported(
     PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, uniformBufferStandardLayout);
     PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, shaderSubgroupExtendedTypes);
     PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, separateDepthStencilLayouts);
-    supported.hostQueryReset = VK_TRUE;
+    supported.hostQueryReset = advertised_host_query_reset(snapshot);
     PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, hostQueryReset);
     PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, timelineSemaphore);
     PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, bufferDeviceAddress);
@@ -24351,21 +25760,22 @@ static bool vulkan12_feature_request_supported(
 }
 
 static bool descriptor_indexing_feature_request_supported(
+        const PdockerVkCapabilitySnapshot *snapshot,
         const VkPhysicalDeviceDescriptorIndexingFeatures *requested,
         const char **unsupported_feature_name) {
     if (!requested) return true;
     VkPhysicalDeviceDescriptorIndexingFeatures supported;
     memset(&supported, 0, sizeof(supported));
     supported.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
-    supported.descriptorBindingUpdateUnusedWhilePending = advertised_descriptor_binding_update_unused_while_pending();
-    supported.descriptorBindingUniformBufferUpdateAfterBind = advertised_descriptor_binding_uniform_buffer_update_after_bind();
-    supported.descriptorBindingSampledImageUpdateAfterBind = advertised_descriptor_binding_sampled_image_update_after_bind();
-    supported.descriptorBindingStorageImageUpdateAfterBind = advertised_descriptor_binding_storage_image_update_after_bind();
-    supported.descriptorBindingStorageBufferUpdateAfterBind = advertised_descriptor_binding_storage_buffer_update_after_bind();
-    supported.descriptorBindingUniformTexelBufferUpdateAfterBind = advertised_descriptor_binding_uniform_texel_buffer_update_after_bind();
-    supported.descriptorBindingStorageTexelBufferUpdateAfterBind = advertised_descriptor_binding_storage_texel_buffer_update_after_bind();
-    supported.descriptorBindingPartiallyBound = advertised_descriptor_binding_partially_bound();
-    supported.descriptorBindingVariableDescriptorCount = advertised_descriptor_binding_variable_descriptor_count();
+    supported.descriptorBindingUpdateUnusedWhilePending = advertised_descriptor_binding_update_unused_while_pending(snapshot);
+    supported.descriptorBindingUniformBufferUpdateAfterBind = advertised_descriptor_binding_uniform_buffer_update_after_bind(snapshot);
+    supported.descriptorBindingSampledImageUpdateAfterBind = advertised_descriptor_binding_sampled_image_update_after_bind(snapshot);
+    supported.descriptorBindingStorageImageUpdateAfterBind = advertised_descriptor_binding_storage_image_update_after_bind(snapshot);
+    supported.descriptorBindingStorageBufferUpdateAfterBind = advertised_descriptor_binding_storage_buffer_update_after_bind(snapshot);
+    supported.descriptorBindingUniformTexelBufferUpdateAfterBind = advertised_descriptor_binding_uniform_texel_buffer_update_after_bind(snapshot);
+    supported.descriptorBindingStorageTexelBufferUpdateAfterBind = advertised_descriptor_binding_storage_texel_buffer_update_after_bind(snapshot);
+    supported.descriptorBindingPartiallyBound = advertised_descriptor_binding_partially_bound(snapshot);
+    supported.descriptorBindingVariableDescriptorCount = advertised_descriptor_binding_variable_descriptor_count(snapshot);
 #define CHECK_DESCRIPTOR_INDEXING_FEATURE(field) PDOCKER_VK_REJECT_UNSUPPORTED_FEATURE_FIELD(requested, &supported, field)
     CHECK_DESCRIPTOR_INDEXING_FEATURE(shaderInputAttachmentArrayDynamicIndexing);
     CHECK_DESCRIPTOR_INDEXING_FEATURE(shaderUniformTexelBufferArrayDynamicIndexing);
@@ -24430,8 +25840,14 @@ static VkResult validate_device_feature_requests_for_physical(
         const VkDeviceCreateInfo *pCreateInfo,
         VkPhysicalDevice parentPhysicalDevice) {
     if (!pCreateInfo) return VK_ERROR_INITIALIZATION_FAILED;
+    PdockerVkPhysicalDevice *physical = NULL;
+    if (!physical_device_handle_resolve(parentPhysicalDevice, &physical) ||
+        !physical || !physical->capability_snapshot) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    const PdockerVkCapabilitySnapshot *snapshot = physical->capability_snapshot;
     const char *unsupported_feature_name = NULL;
-    if (!base_feature_request_supported(pCreateInfo->pEnabledFeatures, &unsupported_feature_name)) {
+    if (!base_feature_request_supported(snapshot, pCreateInfo->pEnabledFeatures, &unsupported_feature_name)) {
         return unsupported_device_feature_request_result(unsupported_feature_name);
     }
     for (const void *node = pCreateInfo->pNext; node;) {
@@ -24440,11 +25856,11 @@ static VkResult validate_device_feature_requests_for_physical(
         switch (header.sType) {
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2: {
                 const VkPhysicalDeviceFeatures2 *p = (const VkPhysicalDeviceFeatures2 *)node;
-                supported = base_feature_request_supported(&p->features, &unsupported_feature_name);
+                supported = base_feature_request_supported(snapshot, &p->features, &unsupported_feature_name);
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES:
-                supported = vulkan11_feature_request_supported((const VkPhysicalDeviceVulkan11Features *)node, &unsupported_feature_name);
+                supported = vulkan11_feature_request_supported(snapshot, (const VkPhysicalDeviceVulkan11Features *)node, &unsupported_feature_name);
                 break;
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES: {
                 const VkPhysicalDeviceMultiviewFeatures *p =
@@ -24452,7 +25868,7 @@ static VkResult validate_device_feature_requests_for_physical(
                 VkPhysicalDeviceVulkan11Features supported11;
                 memset(&supported11, 0, sizeof(supported11));
                 supported11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
-                fill_pnext_features(&supported11);
+                fill_pnext_features(snapshot, &supported11);
                 supported = (!p->multiview || supported11.multiview) &&
                             !p->multiviewGeometryShader &&
                             !p->multiviewTessellationShader;
@@ -24481,10 +25897,10 @@ static VkResult validate_device_feature_requests_for_physical(
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES:
-                supported = storage16_feature_request_supported((const VkPhysicalDevice16BitStorageFeatures *)node, &unsupported_feature_name);
+                supported = storage16_feature_request_supported(snapshot, (const VkPhysicalDevice16BitStorageFeatures *)node, &unsupported_feature_name);
                 break;
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES:
-                supported = vulkan12_feature_request_supported((const VkPhysicalDeviceVulkan12Features *)node, &unsupported_feature_name);
+                supported = vulkan12_feature_request_supported(snapshot, (const VkPhysicalDeviceVulkan12Features *)node, &unsupported_feature_name);
                 break;
 #ifdef VK_VERSION_1_3
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES: {
@@ -24539,7 +25955,7 @@ static VkResult validate_device_feature_requests_for_physical(
             }
 #endif
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES:
-                supported = storage8_feature_request_supported((const VkPhysicalDevice8BitStorageFeatures *)node, &unsupported_feature_name);
+                supported = storage8_feature_request_supported(snapshot, (const VkPhysicalDevice8BitStorageFeatures *)node, &unsupported_feature_name);
                 break;
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_INT64_FEATURES: {
                 const VkPhysicalDeviceShaderAtomicInt64Features *p =
@@ -24556,23 +25972,23 @@ static VkResult validate_device_feature_requests_for_physical(
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES:
-                supported = shader_float16_int8_feature_request_supported((const VkPhysicalDeviceShaderFloat16Int8Features *)node, &unsupported_feature_name);
+                supported = shader_float16_int8_feature_request_supported(snapshot, (const VkPhysicalDeviceShaderFloat16Int8Features *)node, &unsupported_feature_name);
                 break;
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES: {
                 const VkPhysicalDeviceSynchronization2Features *p = (const VkPhysicalDeviceSynchronization2Features *)node;
-                supported = !p->synchronization2 || advertised_synchronization2();
+                supported = !p->synchronization2 || advertised_synchronization2(snapshot);
                 if (!supported) unsupported_feature_name = "synchronization2";
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES: {
                 const VkPhysicalDeviceTimelineSemaphoreFeatures *p = (const VkPhysicalDeviceTimelineSemaphoreFeatures *)node;
-                supported = !p->timelineSemaphore || advertised_timeline_semaphore();
+                supported = !p->timelineSemaphore || advertised_timeline_semaphore(snapshot);
                 if (!supported) unsupported_feature_name = "timelineSemaphore";
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES: {
                 const VkPhysicalDeviceDynamicRenderingFeatures *p = (const VkPhysicalDeviceDynamicRenderingFeatures *)node;
-                supported = !p->dynamicRendering || advertised_dynamic_rendering();
+                supported = !p->dynamicRendering || advertised_dynamic_rendering(snapshot);
                 if (!supported) unsupported_feature_name = "dynamicRendering";
                 break;
             }
@@ -24603,32 +26019,32 @@ static VkResult validate_device_feature_requests_for_physical(
 #endif
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT: {
                 const VkPhysicalDeviceExtendedDynamicStateFeaturesEXT *p = (const VkPhysicalDeviceExtendedDynamicStateFeaturesEXT *)node;
-                supported = !p->extendedDynamicState || advertised_extended_dynamic_state();
+                supported = !p->extendedDynamicState || advertised_extended_dynamic_state(snapshot);
                 if (!supported) unsupported_feature_name = "extendedDynamicState";
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_2_FEATURES_EXT: {
                 const VkPhysicalDeviceExtendedDynamicState2FeaturesEXT *p = (const VkPhysicalDeviceExtendedDynamicState2FeaturesEXT *)node;
-                supported = (!p->extendedDynamicState2 || advertised_extended_dynamic_state2()) &&
-                            (!p->extendedDynamicState2LogicOp || advertised_extended_dynamic_state2_logic_op()) &&
-                            (!p->extendedDynamicState2PatchControlPoints || advertised_extended_dynamic_state2_patch_control_points());
+                supported = (!p->extendedDynamicState2 || advertised_extended_dynamic_state2(snapshot)) &&
+                            (!p->extendedDynamicState2LogicOp || advertised_extended_dynamic_state2_logic_op(snapshot)) &&
+                            (!p->extendedDynamicState2PatchControlPoints || advertised_extended_dynamic_state2_patch_control_points(snapshot));
                 if (!supported) unsupported_feature_name = "extendedDynamicState2";
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INDEX_TYPE_UINT8_FEATURES_EXT: {
                 const VkPhysicalDeviceIndexTypeUint8FeaturesEXT *p = (const VkPhysicalDeviceIndexTypeUint8FeaturesEXT *)node;
-                supported = !p->indexTypeUint8 || (advertised_feature_mask() & PDOCKER_VK_FEATURE_INDEX_TYPE_UINT8) != 0;
+                supported = !p->indexTypeUint8 || (advertised_feature_mask(snapshot) & PDOCKER_VK_FEATURE_INDEX_TYPE_UINT8) != 0;
                 if (!supported) unsupported_feature_name = "indexTypeUint8";
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES: {
                 const VkPhysicalDeviceMaintenance4Features *p = (const VkPhysicalDeviceMaintenance4Features *)node;
-                supported = !p->maintenance4 || (advertised_feature_mask() & PDOCKER_VK_FEATURE_MAINTENANCE_4) != 0;
+                supported = !p->maintenance4 || (advertised_feature_mask(snapshot) & PDOCKER_VK_FEATURE_MAINTENANCE_4) != 0;
                 if (!supported) unsupported_feature_name = "maintenance4";
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES:
-                supported = descriptor_indexing_feature_request_supported((const VkPhysicalDeviceDescriptorIndexingFeatures *)node, &unsupported_feature_name);
+                supported = descriptor_indexing_feature_request_supported(snapshot, (const VkPhysicalDeviceDescriptorIndexingFeatures *)node, &unsupported_feature_name);
                 break;
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SCALAR_BLOCK_LAYOUT_FEATURES: {
                 const VkPhysicalDeviceScalarBlockLayoutFeatures *p = (const VkPhysicalDeviceScalarBlockLayoutFeatures *)node;
@@ -24677,14 +26093,14 @@ static VkResult validate_device_feature_requests_for_physical(
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SEPARATE_DEPTH_STENCIL_LAYOUTS_FEATURES: {
                 const VkPhysicalDeviceSeparateDepthStencilLayoutsFeatures *p = (const VkPhysicalDeviceSeparateDepthStencilLayoutsFeatures *)node;
-                supported = !p->separateDepthStencilLayouts || advertised_separate_depth_stencil_layouts();
+                supported = !p->separateDepthStencilLayouts || advertised_separate_depth_stencil_layouts(snapshot);
                 if (!supported) unsupported_feature_name = "separateDepthStencilLayouts";
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES: {
                 const VkPhysicalDeviceHostQueryResetFeatures *p = (const VkPhysicalDeviceHostQueryResetFeatures *)node;
-                (void)p;
-                supported = true;
+                supported = !p->hostQueryReset || advertised_host_query_reset(snapshot);
+                if (!supported) unsupported_feature_name = "hostQueryReset";
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIVATE_DATA_FEATURES: {
@@ -25006,13 +26422,13 @@ static uint64_t requested_feature_mask_from_device_create_info(
     return mask;
 }
 
-static uint64_t advertised_feature_mask(void) {
+static uint64_t advertised_feature_mask(const PdockerVkCapabilitySnapshot *snapshot) {
     uint64_t mask = 0;
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
-    if (advertised_shader_int64()) mask |= PDOCKER_VK_FEATURE_SHADER_INT64;
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled(snapshot);
+    if (advertised_shader_int64(snapshot)) mask |= PDOCKER_VK_FEATURE_SHADER_INT64;
     if (caps) {
-        bool storage16_disabled = env_disabled("PDOCKER_VULKAN_DISABLE_16BIT_STORAGE");
-        bool storage8_disabled = env_disabled("PDOCKER_VULKAN_DISABLE_8BIT_STORAGE");
+        bool storage16_disabled = !snapshot || snapshot->storage16_disabled;
+        bool storage8_disabled = !snapshot || snapshot->storage8_disabled;
         if (!storage16_disabled && caps->storage16.storageBuffer16BitAccess) {
             mask |= PDOCKER_VK_FEATURE_STORAGE_BUFFER_16;
         }
@@ -25043,56 +26459,58 @@ static uint64_t advertised_feature_mask(void) {
         if (caps->index_type_uint8_usable) {
             mask |= PDOCKER_VK_FEATURE_INDEX_TYPE_UINT8;
         }
-        if (advertised_descriptor_binding_update_unused_while_pending()) {
+        if (advertised_descriptor_binding_update_unused_while_pending(snapshot)) {
             mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_UPDATE_UNUSED_WHILE_PENDING;
         }
-        if (advertised_descriptor_binding_uniform_buffer_update_after_bind()) {
+        if (advertised_descriptor_binding_uniform_buffer_update_after_bind(snapshot)) {
             mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_UNIFORM_BUFFER_UPDATE_AFTER_BIND;
         }
-        if (advertised_descriptor_binding_sampled_image_update_after_bind()) {
+        if (advertised_descriptor_binding_sampled_image_update_after_bind(snapshot)) {
             mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_SAMPLED_IMAGE_UPDATE_AFTER_BIND;
         }
-        if (advertised_descriptor_binding_storage_image_update_after_bind()) {
+        if (advertised_descriptor_binding_storage_image_update_after_bind(snapshot)) {
             mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_STORAGE_IMAGE_UPDATE_AFTER_BIND;
         }
-        if (advertised_descriptor_binding_storage_buffer_update_after_bind()) {
+        if (advertised_descriptor_binding_storage_buffer_update_after_bind(snapshot)) {
             mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_STORAGE_BUFFER_UPDATE_AFTER_BIND;
         }
-        if (advertised_descriptor_binding_uniform_texel_buffer_update_after_bind()) {
+        if (advertised_descriptor_binding_uniform_texel_buffer_update_after_bind(snapshot)) {
             mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_UNIFORM_TEXEL_BUFFER_UPDATE_AFTER_BIND;
         }
-        if (advertised_descriptor_binding_storage_texel_buffer_update_after_bind()) {
+        if (advertised_descriptor_binding_storage_texel_buffer_update_after_bind(snapshot)) {
             mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_STORAGE_TEXEL_BUFFER_UPDATE_AFTER_BIND;
         }
-        if (advertised_descriptor_binding_partially_bound()) {
+        if (advertised_descriptor_binding_partially_bound(snapshot)) {
             mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_PARTIALLY_BOUND;
         }
-        if (advertised_descriptor_binding_variable_descriptor_count()) {
+        if (advertised_descriptor_binding_variable_descriptor_count(snapshot)) {
             mask |= PDOCKER_VK_FEATURE_DESCRIPTOR_VARIABLE_COUNT;
         }
         if (caps->multiview) mask |= PDOCKER_VK_FEATURE_MULTIVIEW;
-        if (advertised_geometry_shader()) mask |= PDOCKER_VK_FEATURE_GEOMETRY_SHADER;
+        if (advertised_geometry_shader(snapshot)) mask |= PDOCKER_VK_FEATURE_GEOMETRY_SHADER;
         if (caps->features.tessellationShader) mask |= PDOCKER_VK_FEATURE_TESSELLATION_SHADER;
-        if (advertised_sample_rate_shading()) mask |= PDOCKER_VK_FEATURE_SAMPLE_RATE_SHADING;
-        if (advertised_alpha_to_one()) mask |= PDOCKER_VK_FEATURE_ALPHA_TO_ONE;
-        if (advertised_logic_op()) mask |= PDOCKER_VK_FEATURE_LOGIC_OP;
-        if (advertised_independent_blend()) mask |= PDOCKER_VK_FEATURE_INDEPENDENT_BLEND;
-        if (advertised_wide_lines()) mask |= PDOCKER_VK_FEATURE_WIDE_LINES;
-        if (advertised_depth_clamp()) mask |= PDOCKER_VK_FEATURE_DEPTH_CLAMP;
-        if (advertised_fill_mode_non_solid()) mask |= PDOCKER_VK_FEATURE_FILL_MODE_NON_SOLID;
-        if (advertised_multi_draw_indirect()) mask |= PDOCKER_VK_FEATURE_MULTI_DRAW_INDIRECT;
-        if (advertised_draw_indirect_first_instance()) mask |= PDOCKER_VK_FEATURE_DRAW_INDIRECT_FIRST_INSTANCE;
-        if (advertised_depth_bias_clamp()) mask |= PDOCKER_VK_FEATURE_DEPTH_BIAS_CLAMP;
-        if (advertised_depth_bounds()) mask |= PDOCKER_VK_FEATURE_DEPTH_BOUNDS;
-        if (advertised_sampler_anisotropy()) mask |= PDOCKER_VK_FEATURE_SAMPLER_ANISOTROPY;
-        if (advertised_sampler_filter_minmax()) mask |= PDOCKER_VK_FEATURE_SAMPLER_FILTER_MINMAX;
-        if (advertised_separate_depth_stencil_layouts()) {
+        if (advertised_sample_rate_shading(snapshot)) mask |= PDOCKER_VK_FEATURE_SAMPLE_RATE_SHADING;
+        if (advertised_alpha_to_one(snapshot)) mask |= PDOCKER_VK_FEATURE_ALPHA_TO_ONE;
+        if (advertised_logic_op(snapshot)) mask |= PDOCKER_VK_FEATURE_LOGIC_OP;
+        if (advertised_independent_blend(snapshot)) mask |= PDOCKER_VK_FEATURE_INDEPENDENT_BLEND;
+        if (advertised_wide_lines(snapshot)) mask |= PDOCKER_VK_FEATURE_WIDE_LINES;
+        if (advertised_depth_clamp(snapshot)) mask |= PDOCKER_VK_FEATURE_DEPTH_CLAMP;
+        if (advertised_fill_mode_non_solid(snapshot)) mask |= PDOCKER_VK_FEATURE_FILL_MODE_NON_SOLID;
+        if (advertised_multi_draw_indirect(snapshot)) mask |= PDOCKER_VK_FEATURE_MULTI_DRAW_INDIRECT;
+        if (advertised_draw_indirect_first_instance(snapshot)) mask |= PDOCKER_VK_FEATURE_DRAW_INDIRECT_FIRST_INSTANCE;
+        if (advertised_depth_bias_clamp(snapshot)) mask |= PDOCKER_VK_FEATURE_DEPTH_BIAS_CLAMP;
+        if (advertised_depth_bounds(snapshot)) mask |= PDOCKER_VK_FEATURE_DEPTH_BOUNDS;
+        if (advertised_sampler_anisotropy(snapshot)) mask |= PDOCKER_VK_FEATURE_SAMPLER_ANISOTROPY;
+        if (advertised_sampler_filter_minmax(snapshot)) mask |= PDOCKER_VK_FEATURE_SAMPLER_FILTER_MINMAX;
+        if (advertised_separate_depth_stencil_layouts(snapshot)) {
             mask |= PDOCKER_VK_FEATURE_SEPARATE_DEPTH_STENCIL_LAYOUTS;
         }
-        mask |= PDOCKER_VK_FEATURE_HOST_QUERY_RESET;
+        if (advertised_host_query_reset(snapshot)) {
+            mask |= PDOCKER_VK_FEATURE_HOST_QUERY_RESET;
+        }
     } else {
-        if (advertised_storage16()) mask |= PDOCKER_VK_FEATURE_STORAGE_BUFFER_16;
-        if (advertised_storage8()) {
+        if (advertised_storage16(snapshot)) mask |= PDOCKER_VK_FEATURE_STORAGE_BUFFER_16;
+        if (advertised_storage8(snapshot)) {
             mask |= PDOCKER_VK_FEATURE_STORAGE_BUFFER_8;
             mask |= PDOCKER_VK_FEATURE_SHADER_INT8;
         }
@@ -25100,26 +26518,28 @@ static uint64_t advertised_feature_mask(void) {
 #ifdef VK_KHR_MAINTENANCE_4_EXTENSION_NAME
     mask |= PDOCKER_VK_FEATURE_MAINTENANCE_4;
 #endif
-    if (advertised_synchronization2()) mask |= PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
-    if (advertised_timeline_semaphore()) mask |= PDOCKER_VK_FEATURE_TIMELINE_SEMAPHORE;
-    if (advertised_dynamic_rendering()) mask |= PDOCKER_VK_FEATURE_DYNAMIC_RENDERING;
-    if (advertised_draw_indirect_count() && advertised_draw_indexed_indirect_count()) {
+    if (advertised_synchronization2(snapshot)) mask |= PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
+    if (advertised_timeline_semaphore(snapshot)) mask |= PDOCKER_VK_FEATURE_TIMELINE_SEMAPHORE;
+    if (advertised_dynamic_rendering(snapshot)) mask |= PDOCKER_VK_FEATURE_DYNAMIC_RENDERING;
+    if (advertised_draw_indirect_count(snapshot) && advertised_draw_indexed_indirect_count(snapshot)) {
         mask |= PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT;
     }
-    mask |= PDOCKER_VK_FEATURE_HOST_QUERY_RESET;
+    if (advertised_host_query_reset(snapshot)) {
+        mask |= PDOCKER_VK_FEATURE_HOST_QUERY_RESET;
+    }
 #ifdef VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME
-    if (advertised_extended_dynamic_state()) {
+    if (advertised_extended_dynamic_state(snapshot)) {
         mask |= PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE;
     }
 #endif
 #ifdef VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME
-    if (advertised_extended_dynamic_state2()) {
+    if (advertised_extended_dynamic_state2(snapshot)) {
         mask |= PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2;
     }
-    if (advertised_extended_dynamic_state2_logic_op()) {
+    if (advertised_extended_dynamic_state2_logic_op(snapshot)) {
         mask |= PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2_LOGIC_OP;
     }
-    if (advertised_extended_dynamic_state2_patch_control_points()) {
+    if (advertised_extended_dynamic_state2_patch_control_points(snapshot)) {
         mask |= PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE_2_PATCH_CONTROL_POINTS;
     }
 #endif
@@ -25515,6 +26935,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateInstance(
     if (!instance) return VK_ERROR_OUT_OF_HOST_MEMORY;
     instance->object_id = next_vulkan_object_generation();
     instance->enabled_extension_mask = enabled_instance_extension_mask_from_create_info(pCreateInfo);
+    instance->capability_snapshot = capability_snapshot_create();
+    if (!instance->capability_snapshot) {
+        const VkResult error = errno == ENOMEM
+            ? VK_ERROR_OUT_OF_HOST_MEMORY : VK_ERROR_INITIALIZATION_FAILED;
+        free(instance);
+        return error;
+    }
     instance_register(instance);
     set_loader_magic_value(instance);
     *pInstance = (VkInstance)instance;
@@ -25546,6 +26973,8 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyInstance(
     if (!pdocker_instance) return;
     surface_unregister_all_for_instance_id(pdocker_instance->object_id);
     physical_devices_unregister_for_instance(pdocker_instance->object_id);
+    capability_snapshot_release(pdocker_instance->capability_snapshot);
+    pdocker_instance->capability_snapshot = NULL;
     free(pdocker_instance);
 }
 
@@ -25559,6 +26988,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumeratePhysicalDevices(
     }
     if (!pPhysicalDeviceCount) return VK_ERROR_INITIALIZATION_FAILED;
     if (!pPhysicalDevices) {
+        if (!physical_device_for_instance(pdocker_instance)) {
+            return VK_ERROR_OUT_OF_HOST_MEMORY;
+        }
         *pPhysicalDeviceCount = 1;
         return VK_SUCCESS;
     }
@@ -25580,6 +27012,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumeratePhysicalDeviceGroups(
     }
     if (!pPhysicalDeviceGroupCount) return VK_ERROR_INITIALIZATION_FAILED;
     if (!pPhysicalDeviceGroupProperties) {
+        if (!physical_device_for_instance(pdocker_instance)) {
+            return VK_ERROR_OUT_OF_HOST_MEMORY;
+        }
         *pPhysicalDeviceGroupCount = 1;
         return VK_SUCCESS;
     }
@@ -25602,8 +27037,9 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceProperties(
         VkPhysicalDeviceProperties *pProperties) {
     if (!pProperties) return;
     memset(pProperties, 0, sizeof(*pProperties));
-    if (!physical_device_handle_resolve(physicalDevice, NULL)) return;
-    fill_physical_device_properties(pProperties);
+    PdockerVkPhysicalDevice *physical = NULL;
+    if (!physical_device_handle_resolve(physicalDevice, &physical)) return;
+    fill_physical_device_properties(physical->capability_snapshot, pProperties);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceProperties2(
@@ -25612,9 +27048,10 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceProperties2(
     if (!pProperties) return;
     PdockerVkStructHeader header = read_vk_struct_header(pProperties);
     zero_vk_out_struct_preserve_chain(pProperties, sizeof(*pProperties), header);
-    if (!physical_device_handle_resolve(physicalDevice, NULL)) return;
-    fill_physical_device_properties(&pProperties->properties);
-    fill_pnext_properties(pProperties->pNext);
+    PdockerVkPhysicalDevice *physical = NULL;
+    if (!physical_device_handle_resolve(physicalDevice, &physical)) return;
+    fill_physical_device_properties(physical->capability_snapshot, &pProperties->properties);
+    fill_pnext_properties(physical->capability_snapshot, pProperties->pNext);
 }
 
 #ifdef VK_EXT_TOOLING_INFO_EXTENSION_NAME
@@ -25639,7 +27076,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceToolProperties(
         VkPhysicalDeviceToolProperties *pToolProperties) {
     const uint32_t available_count = 1;
     if (!pToolCount) return VK_ERROR_INITIALIZATION_FAILED;
-    if (!physical_device_handle_resolve(physicalDevice, NULL)) {
+    PdockerVkPhysicalDevice *physical = NULL;
+    if (!physical_device_handle_resolve(physicalDevice, &physical)) {
         uint32_t capacity = pToolProperties ? *pToolCount : 0;
         if (pToolProperties && capacity > 0) memset(pToolProperties, 0, sizeof(*pToolProperties) * capacity);
         *pToolCount = 0;
@@ -25672,8 +27110,9 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceFeatures(
         VkPhysicalDeviceFeatures *pFeatures) {
     if (!pFeatures) return;
     memset(pFeatures, 0, sizeof(*pFeatures));
-    if (!physical_device_handle_resolve(physicalDevice, NULL)) return;
-    fill_physical_device_features(pFeatures);
+    PdockerVkPhysicalDevice *physical = NULL;
+    if (!physical_device_handle_resolve(physicalDevice, &physical)) return;
+    fill_physical_device_features(physical->capability_snapshot, pFeatures);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceFeatures2(
@@ -25682,9 +27121,10 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceFeatures2(
     if (!pFeatures) return;
     PdockerVkStructHeader header = read_vk_struct_header(pFeatures);
     zero_vk_out_struct_preserve_chain(pFeatures, sizeof(*pFeatures), header);
-    if (!physical_device_handle_resolve(physicalDevice, NULL)) return;
-    fill_physical_device_features(&pFeatures->features);
-    fill_pnext_features(pFeatures->pNext);
+    PdockerVkPhysicalDevice *physical = NULL;
+    if (!physical_device_handle_resolve(physicalDevice, &physical)) return;
+    fill_physical_device_features(physical->capability_snapshot, &pFeatures->features);
+    fill_pnext_features(physical->capability_snapshot, pFeatures->pNext);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceFormatProperties(
@@ -25693,11 +27133,13 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceFormatProperties(
         VkFormatProperties *pFormatProperties) {
     if (!pFormatProperties) return;
     memset(pFormatProperties, 0, sizeof(*pFormatProperties));
-    if (!physical_device_handle_resolve(physicalDevice, NULL)) return;
+    PdockerVkPhysicalDevice *physical = NULL;
+    if (!physical_device_handle_resolve(physicalDevice, &physical)) return;
+    const PdockerVkCapabilitySnapshot *snapshot = physical->capability_snapshot;
     if (!pdocker_vk_format_bridge_supported(format)) return;
-    pFormatProperties->bufferFeatures = pdocker_vk_format_buffer_features(format);
+    pFormatProperties->bufferFeatures = pdocker_vk_format_buffer_features(snapshot, format);
     pFormatProperties->linearTilingFeatures = 0;
-    pFormatProperties->optimalTilingFeatures = pdocker_vk_advertised_image_features(format);
+    pFormatProperties->optimalTilingFeatures = pdocker_vk_advertised_image_features(snapshot, format);
 }
 
 static void fill_format_properties2_pnext(void *pNext, const VkFormatProperties *legacy) {
@@ -25843,34 +27285,24 @@ static void fill_image_format_properties2_pnext(void *pNext) {
     }
 }
 
-VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceImageFormatProperties(
-        VkPhysicalDevice physicalDevice,
+static VkResult get_image_format_properties_for_snapshot(
+        const PdockerVkCapabilitySnapshot *snapshot,
         VkFormat format,
         VkImageType type,
         VkImageTiling tiling,
         VkImageUsageFlags usage,
         VkImageCreateFlags flags,
-        VkImageFormatProperties *pImageFormatProperties) {
-    if (!pImageFormatProperties) return VK_ERROR_FORMAT_NOT_SUPPORTED;
-    memset(pImageFormatProperties, 0, sizeof(*pImageFormatProperties));
-    if (!physical_device_handle_resolve(physicalDevice, NULL)) {
-        return VK_ERROR_INITIALIZATION_FAILED;
-    }
+        VkImageFormatProperties *properties) {
+    if (!snapshot || !properties) return VK_ERROR_FORMAT_NOT_SUPPORTED;
+    memset(properties, 0, sizeof(*properties));
     if (!pdocker_vk_format_bridge_supported(format) ||
-        !pdocker_vk_image_usage_supported_by_format(format, usage)) {
-        return VK_ERROR_FORMAT_NOT_SUPPORTED;
-    }
-    if (tiling != VK_IMAGE_TILING_OPTIMAL) return VK_ERROR_FORMAT_NOT_SUPPORTED;
-    if (type != VK_IMAGE_TYPE_1D && type != VK_IMAGE_TYPE_2D && type != VK_IMAGE_TYPE_3D) {
-        return VK_ERROR_FORMAT_NOT_SUPPORTED;
-    }
-    if (!pdocker_vk_image_create_flags_supported_for_transport(flags)) {
-        return VK_ERROR_FORMAT_NOT_SUPPORTED;
-    }
-    if ((flags & VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT) && type != VK_IMAGE_TYPE_2D) {
-        return VK_ERROR_FORMAT_NOT_SUPPORTED;
-    }
-    if ((flags & VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT) && type != VK_IMAGE_TYPE_3D) {
+        !pdocker_vk_image_usage_supported_by_format(snapshot, format, usage) ||
+        tiling != VK_IMAGE_TILING_OPTIMAL ||
+        (type != VK_IMAGE_TYPE_1D && type != VK_IMAGE_TYPE_2D &&
+         type != VK_IMAGE_TYPE_3D) ||
+        !pdocker_vk_image_create_flags_supported_for_transport(flags) ||
+        ((flags & VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT) && type != VK_IMAGE_TYPE_2D) ||
+        ((flags & VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT) && type != VK_IMAGE_TYPE_3D)) {
         return VK_ERROR_FORMAT_NOT_SUPPORTED;
     }
     VkExtent3D max_extent = {4096u, 4096u, 1u};
@@ -25881,22 +27313,40 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceImageFormatProperties(
         max_extent = (VkExtent3D){256u, 256u, 256u};
         max_layers = 1u;
     }
-    pImageFormatProperties->maxExtent = max_extent;
-    pImageFormatProperties->maxMipLevels = pdocker_vk_image_max_mip_levels(max_extent);
-    pImageFormatProperties->maxArrayLayers = max_layers;
-    VkSampleCountFlags sample_counts = pdocker_vk_image_sample_counts_for_request(
-        format, type, usage, flags);
-    if (!sample_counts) return VK_ERROR_FORMAT_NOT_SUPPORTED;
-    pImageFormatProperties->sampleCounts = sample_counts;
-    VkDeviceSize max_buffer = pdocker_vulkan_max_buffer_size();
-    VkDeviceSize heap = pdocker_vulkan_heap_size();
-    VkDeviceSize max_resource = max_buffer < heap ? max_buffer : heap;
-    const VkDeviceSize vulkan_min_resource_size = (VkDeviceSize)1u << 31;
-    if (max_resource < vulkan_min_resource_size) {
+    properties->maxExtent = max_extent;
+    properties->maxMipLevels = pdocker_vk_image_max_mip_levels(max_extent);
+    properties->maxArrayLayers = max_layers;
+    properties->sampleCounts = pdocker_vk_image_sample_counts_for_request(
+        snapshot, format, type, usage, flags);
+    if (!properties->sampleCounts) return VK_ERROR_FORMAT_NOT_SUPPORTED;
+    VkDeviceSize max_resource = capability_snapshot_max_buffer_size(snapshot);
+    VkDeviceSize heap = capability_snapshot_heap_size(snapshot);
+    if (max_resource > heap) max_resource = heap;
+    if (max_resource < ((VkDeviceSize)1u << 31)) {
         return VK_ERROR_FORMAT_NOT_SUPPORTED;
     }
-    pImageFormatProperties->maxResourceSize = max_resource;
+    properties->maxResourceSize = max_resource;
     return VK_SUCCESS;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceImageFormatProperties(
+        VkPhysicalDevice physicalDevice,
+        VkFormat format,
+        VkImageType type,
+        VkImageTiling tiling,
+        VkImageUsageFlags usage,
+        VkImageCreateFlags flags,
+        VkImageFormatProperties *pImageFormatProperties) {
+    if (!pImageFormatProperties) return VK_ERROR_FORMAT_NOT_SUPPORTED;
+    PdockerVkPhysicalDevice *physical = NULL;
+    if (!physical_device_handle_resolve(physicalDevice, &physical) ||
+        !physical->capability_snapshot) {
+        memset(pImageFormatProperties, 0, sizeof(*pImageFormatProperties));
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    return get_image_format_properties_for_snapshot(
+        physical->capability_snapshot, format, type, tiling, usage, flags,
+        pImageFormatProperties);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceImageFormatProperties2(
@@ -26012,7 +27462,8 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceQueueFamilyProperties(
         uint32_t *pQueueFamilyPropertyCount,
         VkQueueFamilyProperties *pQueueFamilyProperties) {
     if (!pQueueFamilyPropertyCount) return;
-    if (!physical_device_handle_resolve(physicalDevice, NULL)) {
+    PdockerVkPhysicalDevice *physical = NULL;
+    if (!physical_device_handle_resolve(physicalDevice, &physical)) {
         uint32_t capacity = pQueueFamilyProperties ? *pQueueFamilyPropertyCount : 0;
         if (pQueueFamilyProperties && capacity > 0) memset(pQueueFamilyProperties, 0, sizeof(*pQueueFamilyProperties) * capacity);
         *pQueueFamilyPropertyCount = 0;
@@ -26026,7 +27477,8 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceQueueFamilyProperties(
         memset(&pQueueFamilyProperties[0], 0, sizeof(pQueueFamilyProperties[0]));
         pQueueFamilyProperties[0].queueFlags = pdocker_vk_advertised_queue_flags();
         pQueueFamilyProperties[0].queueCount = PDOCKER_VK_ADVERTISED_QUEUE_COUNT;
-        pQueueFamilyProperties[0].timestampValidBits = 64;
+        pQueueFamilyProperties[0].timestampValidBits =
+            advertised_timestamp_valid_bits(physical->capability_snapshot);
         pQueueFamilyProperties[0].minImageTransferGranularity.width = 1;
         pQueueFamilyProperties[0].minImageTransferGranularity.height = 1;
         pQueueFamilyProperties[0].minImageTransferGranularity.depth = 1;
@@ -26085,7 +27537,8 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceQueueFamilyProperties2(
         uint32_t *pQueueFamilyPropertyCount,
         VkQueueFamilyProperties2 *pQueueFamilyProperties) {
     if (!pQueueFamilyPropertyCount) return;
-    if (!physical_device_handle_resolve(physicalDevice, NULL)) {
+    PdockerVkPhysicalDevice *physical = NULL;
+    if (!physical_device_handle_resolve(physicalDevice, &physical)) {
         uint32_t capacity = pQueueFamilyProperties ? *pQueueFamilyPropertyCount : 0;
         if (pQueueFamilyProperties && capacity > 0) {
             for (uint32_t i = 0; i < capacity; ++i) {
@@ -26106,7 +27559,8 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceQueueFamilyProperties2(
         zero_vk_out_struct_preserve_chain(&pQueueFamilyProperties[0], sizeof(pQueueFamilyProperties[0]), header);
         pQueueFamilyProperties[0].queueFamilyProperties.queueFlags = pdocker_vk_advertised_queue_flags();
         pQueueFamilyProperties[0].queueFamilyProperties.queueCount = PDOCKER_VK_ADVERTISED_QUEUE_COUNT;
-        pQueueFamilyProperties[0].queueFamilyProperties.timestampValidBits = 64;
+        pQueueFamilyProperties[0].queueFamilyProperties.timestampValidBits =
+            advertised_timestamp_valid_bits(physical->capability_snapshot);
         pQueueFamilyProperties[0].queueFamilyProperties.minImageTransferGranularity.width = 1;
         pQueueFamilyProperties[0].queueFamilyProperties.minImageTransferGranularity.height = 1;
         pQueueFamilyProperties[0].queueFamilyProperties.minImageTransferGranularity.depth = 1;
@@ -26120,7 +27574,9 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceMemoryProperties(
         VkPhysicalDeviceMemoryProperties *pMemoryProperties) {
     if (!pMemoryProperties) return;
     memset(pMemoryProperties, 0, sizeof(*pMemoryProperties));
-    if (!physical_device_handle_resolve(physicalDevice, NULL)) return;
+    PdockerVkPhysicalDevice *physical = NULL;
+    if (!physical_device_handle_resolve(physicalDevice, &physical)) return;
+    const PdockerVkCapabilitySnapshot *snapshot = physical->capability_snapshot;
     pMemoryProperties->memoryTypeCount = 2;
     pMemoryProperties->memoryTypes[0].propertyFlags =
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
@@ -26130,9 +27586,9 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceMemoryProperties(
         VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
     pMemoryProperties->memoryTypes[1].heapIndex = 1;
     pMemoryProperties->memoryHeapCount = 2;
-    pMemoryProperties->memoryHeaps[0].size = pdocker_vulkan_heap_size();
+    pMemoryProperties->memoryHeaps[0].size = capability_snapshot_heap_size(snapshot);
     pMemoryProperties->memoryHeaps[0].flags = VK_MEMORY_HEAP_DEVICE_LOCAL_BIT;
-    pMemoryProperties->memoryHeaps[1].size = pdocker_vulkan_host_heap_size();
+    pMemoryProperties->memoryHeaps[1].size = capability_snapshot_host_heap_size(snapshot);
     pMemoryProperties->memoryHeaps[1].flags = 0;
 }
 
@@ -26364,6 +27820,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateBuffer(
         return VK_ERROR_INITIALIZATION_FAILED;
     }
     PdockerVkDevice *dev = pdocker_vk_device_from_handle(device);
+    const PdockerVkCapabilitySnapshot *snapshot = device_capability_snapshot(device);
     uint64_t enabled_extension_mask = dev ? dev->enabled_extension_mask : 0;
     VkResult pnext_rc = validate_buffer_create_pnext_with_extensions(
         pCreateInfo,
@@ -26388,12 +27845,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateBuffer(
                                   VK_ERROR_FEATURE_NOT_PRESENT);
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }
-    if (pCreateInfo->size == 0 || pCreateInfo->size > pdocker_vulkan_max_buffer_size()) {
+    if (pCreateInfo->size == 0 || pCreateInfo->size > capability_snapshot_max_buffer_size(snapshot)) {
         if (trace_allocations()) {
             fprintf(stderr,
                     "pdocker-vulkan-icd: create-buffer rejected size=%llu max=%llu\n",
                     (unsigned long long)pCreateInfo->size,
-                    (unsigned long long)pdocker_vulkan_max_buffer_size());
+                    (unsigned long long)capability_snapshot_max_buffer_size(snapshot));
         }
         return VK_ERROR_OUT_OF_DEVICE_MEMORY;
     }
@@ -26488,6 +27945,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateBufferView(
         return VK_ERROR_INITIALIZATION_FAILED;
     }
     uint64_t owner_device_id = 0;
+    const PdockerVkCapabilitySnapshot *snapshot = device_capability_snapshot(device);
     if (!device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
@@ -26506,7 +27964,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateBufferView(
         &texel_usage,
         enabled_extension_mask);
     if (pnext_rc != VK_SUCCESS) return pnext_rc;
-    if (!executor_supports_any_vulkan_buffer_views()) {
+    if (!executor_supports_any_vulkan_buffer_views(snapshot)) {
         trace_icd_runtime_failure("buffer-view-transport-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }
@@ -26514,7 +27972,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateBufferView(
         trace_icd_runtime_failure("buffer-view-usage-missing", VK_ERROR_FEATURE_NOT_PRESENT);
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }
-    VkFormatFeatureFlags buffer_features = pdocker_vk_format_buffer_features(pCreateInfo->format);
+    VkFormatFeatureFlags buffer_features = pdocker_vk_format_buffer_features(snapshot, pCreateInfo->format);
     VkFormatFeatureFlags required_features = 0;
     if (texel_usage & VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT) {
         required_features |= VK_FORMAT_FEATURE_UNIFORM_TEXEL_BUFFER_BIT;
@@ -26549,7 +28007,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateBufferView(
         trace_icd_runtime_failure("buffer-view-range-invalid", VK_ERROR_FEATURE_NOT_PRESENT);
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }
-    VkDeviceSize max_texel_elements = pdocker_vulkan_max_buffer_size() / (VkDeviceSize)texel_size;
+    VkDeviceSize max_texel_elements = capability_snapshot_max_buffer_size(device_capability_snapshot(device)) / (VkDeviceSize)texel_size;
     if (max_texel_elements == 0 || range / (VkDeviceSize)texel_size > max_texel_elements) {
         trace_icd_runtime_failure("buffer-view-texel-count-exceeds-limit", VK_ERROR_FEATURE_NOT_PRESENT);
         return VK_ERROR_FEATURE_NOT_PRESENT;
@@ -26907,7 +28365,9 @@ static bool pdocker_vk_image_view_type_supported_for_transport(
     }
 }
 
-static VkResult validate_image_create_info_for_transport(const VkImageCreateInfo *info) {
+static VkResult validate_image_create_info_for_transport(
+        const PdockerVkCapabilitySnapshot *snapshot,
+        const VkImageCreateInfo *info) {
     if (!info) return VK_ERROR_INITIALIZATION_FAILED;
     if (!pdocker_vk_sharing_mode_is_single_advertised_family(
             info->sharingMode, info->queueFamilyIndexCount, info->pQueueFamilyIndices)) {
@@ -26927,14 +28387,9 @@ static VkResult validate_image_create_info_for_transport(const VkImageCreateInfo
     VkResult pnext_rc = validate_image_create_pnext_for_transport(info);
     if (pnext_rc != VK_SUCCESS) return pnext_rc;
     VkImageFormatProperties props;
-    VkResult rc = vkGetPhysicalDeviceImageFormatProperties(
-        (VkPhysicalDevice)&g_device,
-        info->format,
-        info->imageType,
-        info->tiling,
-        info->usage,
-        info->flags,
-        &props);
+    VkResult rc = get_image_format_properties_for_snapshot(
+        snapshot, info->format, info->imageType, info->tiling, info->usage,
+        info->flags, &props);
     if (rc != VK_SUCCESS) return rc;
     if (pdocker_vk_sample_count_value(info->samples) == 0 ||
         (info->samples & props.sampleCounts) == 0) {
@@ -27124,6 +28579,7 @@ static bool pdocker_vk_component_mapping_is_identity(VkComponentMapping componen
 }
 
 static VkResult validate_sampler_create_info_for_transport(
+        const PdockerVkCapabilitySnapshot *snapshot,
         const VkSamplerCreateInfo *info,
         uint64_t requested_feature_mask,
         VkSamplerReductionMode *reduction_mode_out) {
@@ -27211,7 +28667,7 @@ static VkResult validate_sampler_create_info_for_transport(
                                       VK_ERROR_FEATURE_NOT_PRESENT);
             return VK_ERROR_FEATURE_NOT_PRESENT;
         }
-        float max_anisotropy = advertised_max_sampler_anisotropy();
+        float max_anisotropy = advertised_max_sampler_anisotropy(snapshot);
         if (info->maxAnisotropy < 1.0f || info->maxAnisotropy > max_anisotropy) {
             trace_icd_runtime_failure("sampler-anisotropy-limit-unsupported",
                                       VK_ERROR_FEATURE_NOT_PRESENT);
@@ -27237,13 +28693,14 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateImage(
     if (!device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
-    if (!vulkan_v5_object_transport_enabled()) {
+    const PdockerVkCapabilitySnapshot *snapshot = device_capability_snapshot(device);
+    if (!vulkan_v5_object_transport_enabled(snapshot)) {
         return unsupported_image_transport_result("vkCreateImage");
     }
-    VkResult validate_rc = validate_image_create_info_for_transport(pCreateInfo);
+    VkResult validate_rc = validate_image_create_info_for_transport(snapshot, pCreateInfo);
     if (validate_rc != VK_SUCCESS) return validate_rc;
     VkDeviceSize requirements_size = estimate_image_requirement_size(pCreateInfo);
-    if (requirements_size == 0 || requirements_size > pdocker_vulkan_max_buffer_size()) {
+    if (requirements_size == 0 || requirements_size > capability_snapshot_max_buffer_size(snapshot)) {
         return VK_ERROR_OUT_OF_DEVICE_MEMORY;
     }
     PdockerVkImage *image = pdocker_alloc_handle(sizeof(*image));
@@ -27416,7 +28873,7 @@ VKAPI_ATTR void VKAPI_CALL vkGetImageSubresourceLayout2(
     PdockerVkStructHeader header = read_vk_struct_header(pLayout);
     zero_vk_out_struct_preserve_chain(pLayout, sizeof(*pLayout), header);
     if (!device_extension_enabled_or_core(
-            device, PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_5, advertised_api_1_4())) {
+            device, PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_5, advertised_api_1_4(device_capability_snapshot(device)))) {
         return;
     }
     if (!pSubresource || pSubresource->sType != VK_STRUCTURE_TYPE_IMAGE_SUBRESOURCE_2 ||
@@ -27497,7 +28954,7 @@ VKAPI_ATTR void VKAPI_CALL vkGetDeviceImageSubresourceLayout(
     PdockerVkStructHeader header = read_vk_struct_header(pLayout);
     zero_vk_out_struct_preserve_chain(pLayout, sizeof(*pLayout), header);
     if (!device_extension_enabled_or_core(
-            device, PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_5, advertised_api_1_4())) {
+            device, PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_5, advertised_api_1_4(device_capability_snapshot(device)))) {
         return;
     }
     if (!pInfo || pInfo->sType != VK_STRUCTURE_TYPE_DEVICE_IMAGE_SUBRESOURCE_INFO ||
@@ -27533,7 +28990,7 @@ VKAPI_ATTR void VKAPI_CALL vkGetRenderingAreaGranularity(
     pGranularity->width = 0;
     pGranularity->height = 0;
     if (!device_extension_enabled_or_core(
-            device, PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_5, advertised_api_1_4())) {
+            device, PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_5, advertised_api_1_4(device_capability_snapshot(device)))) {
         return;
     }
     pGranularity->width = 1;
@@ -27664,7 +29121,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateImageView(
     if (!device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
-    if (!vulkan_v5_object_transport_enabled()) {
+    if (!vulkan_v5_object_transport_enabled(device_capability_snapshot(device))) {
         return unsupported_image_transport_result("vkCreateImageView");
     }
     VkImageSubresourceRange normalized_range;
@@ -27711,13 +29168,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSampler(
     if (!device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
-    if (!vulkan_v5_object_transport_enabled()) {
+    if (!vulkan_v5_object_transport_enabled(device_capability_snapshot(device))) {
         return unsupported_image_transport_result("vkCreateSampler");
     }
     uint64_t requested_feature_mask = device_requested_feature_mask_from_handle(device);
     VkSamplerReductionMode reduction_mode = VK_SAMPLER_REDUCTION_MODE_WEIGHTED_AVERAGE;
     VkResult validate_rc = validate_sampler_create_info_for_transport(
-        pCreateInfo, requested_feature_mask, &reduction_mode);
+        device_capability_snapshot(device), pCreateInfo, requested_feature_mask, &reduction_mode);
     if (validate_rc != VK_SUCCESS) return validate_rc;
     PdockerVkSampler *sampler = pdocker_alloc_handle(sizeof(*sampler));
     if (!sampler) return VK_ERROR_OUT_OF_HOST_MEMORY;
@@ -27818,6 +29275,7 @@ VKAPI_ATTR void VKAPI_CALL vkGetBufferMemoryRequirements2(
 }
 
 static void fill_buffer_create_memory_requirements(
+        const PdockerVkCapabilitySnapshot *snapshot,
         const VkBufferCreateInfo *pCreateInfo,
         VkMemoryRequirements *pMemoryRequirements) {
     if (!pMemoryRequirements) return;
@@ -27827,7 +29285,7 @@ static void fill_buffer_create_memory_requirements(
         !buffer_create_effective_usage(pCreateInfo, &effective_usage) ||
         pCreateInfo->flags != 0 ||
         pCreateInfo->size == 0 ||
-        pCreateInfo->size > pdocker_vulkan_max_buffer_size()) {
+        pCreateInfo->size > capability_snapshot_max_buffer_size(snapshot)) {
         return;
     }
     pMemoryRequirements->size = align_device_size(pCreateInfo->size, PDOCKER_VK_REQUIREMENT_ALIGNMENT);
@@ -27836,16 +29294,17 @@ static void fill_buffer_create_memory_requirements(
 }
 
 static void fill_image_create_memory_requirements(
+        const PdockerVkCapabilitySnapshot *snapshot,
         const VkImageCreateInfo *pCreateInfo,
         VkMemoryRequirements *pMemoryRequirements) {
     if (!pMemoryRequirements) return;
     memset(pMemoryRequirements, 0, sizeof(*pMemoryRequirements));
     if (!pCreateInfo) return;
-    VkResult validate_rc = validate_image_create_info_for_transport(pCreateInfo);
+    VkResult validate_rc = validate_image_create_info_for_transport(snapshot, pCreateInfo);
     VkDeviceSize requirements_size = validate_rc == VK_SUCCESS
         ? estimate_image_requirement_size(pCreateInfo)
         : 0;
-    if (requirements_size == 0 || requirements_size > pdocker_vulkan_max_buffer_size()) {
+    if (requirements_size == 0 || requirements_size > capability_snapshot_max_buffer_size(snapshot)) {
         return;
     }
     pMemoryRequirements->size = requirements_size;
@@ -27868,7 +29327,8 @@ VKAPI_ATTR void VKAPI_CALL vkGetDeviceBufferMemoryRequirements(
         fill_memory_requirements2_pnext(pnext);
         return;
     }
-    fill_buffer_create_memory_requirements(pInfo ? pInfo->pCreateInfo : NULL,
+    fill_buffer_create_memory_requirements(device_capability_snapshot(device),
+                                           pInfo ? pInfo->pCreateInfo : NULL,
                                            &pMemoryRequirements->memoryRequirements);
     fill_memory_requirements2_pnext(pnext);
 }
@@ -27889,7 +29349,8 @@ VKAPI_ATTR void VKAPI_CALL vkGetDeviceImageMemoryRequirements(
         return;
     }
     if (!pInfo || pInfo->planeAspect == 0) {
-        fill_image_create_memory_requirements(pInfo ? pInfo->pCreateInfo : NULL,
+        fill_image_create_memory_requirements(device_capability_snapshot(device),
+                                              pInfo ? pInfo->pCreateInfo : NULL,
                                               &pMemoryRequirements->memoryRequirements);
     }
     fill_memory_requirements2_pnext(pnext);
@@ -28111,17 +29572,18 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateMemory(
     if (!device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
+    const PdockerVkCapabilitySnapshot *snapshot = device_capability_snapshot(device);
     VkResult pnext_rc = validate_memory_allocate_pnext(device, pAllocateInfo->pNext);
     if (pnext_rc != VK_SUCCESS) return pnext_rc;
     if (pAllocateInfo->memoryTypeIndex >= 2) return VK_ERROR_FEATURE_NOT_PRESENT;
     if (pAllocateInfo->allocationSize == 0 ||
         pAllocateInfo->allocationSize > (VkDeviceSize)SIZE_MAX ||
-        pAllocateInfo->allocationSize > pdocker_vulkan_max_buffer_size()) {
+        pAllocateInfo->allocationSize > capability_snapshot_max_buffer_size(snapshot)) {
         if (trace_allocations()) {
             fprintf(stderr,
                     "pdocker-vulkan-icd: allocate rejected size=%llu max=%llu type=%u\n",
                     (unsigned long long)pAllocateInfo->allocationSize,
-                    (unsigned long long)pdocker_vulkan_max_buffer_size(),
+                    (unsigned long long)capability_snapshot_max_buffer_size(snapshot),
                     pAllocateInfo->memoryTypeIndex);
         }
         return VK_ERROR_OUT_OF_DEVICE_MEMORY;
@@ -28146,9 +29608,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateMemory(
                 memory->memory_type_index,
                 (unsigned)memory->property_flags);
     }
-    const bool guarded = guarded_memory_enabled(memory->size, memory->property_flags);
+    const bool guarded = guarded_memory_enabled(snapshot, memory->size, memory->property_flags);
     if (guarded) {
-        memory->page_size = guarded_page_size();
+        memory->page_size = guarded_page_size(snapshot);
         if (memory->page_size == 0 || memory->size > SIZE_MAX - (memory->page_size - 1)) {
             free(memory);
             return VK_ERROR_OUT_OF_HOST_MEMORY;
@@ -28163,7 +29625,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateMemory(
             return VK_ERROR_OUT_OF_HOST_MEMORY;
         }
     }
-    memory->fd = create_shared_fd(memory->size);
+    memory->fd = create_shared_fd(snapshot, memory->size);
     if (memory->fd < 0) {
         free(memory->resident_pages);
         free(memory->dirty_pages);
@@ -28562,6 +30024,7 @@ static bool pdocker_supports_debug_marker_transport(void) {
 }
 
 static uint32_t collect_advertised_device_extensions(
+        const PdockerVkCapabilitySnapshot *snapshot,
         VkExtensionProperties *properties,
         uint32_t capacity) {
     uint32_t count = 0;
@@ -28571,17 +30034,17 @@ static uint32_t collect_advertised_device_extensions(
         } \
         count++; \
     } while (0)
-    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
-    if (caps ? caps->ext_16bit_storage : advertised_storage16()) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled(snapshot);
+    if (caps ? caps->ext_16bit_storage : advertised_storage16(snapshot)) {
         ADD_DEVICE_EXTENSION(VK_KHR_16BIT_STORAGE_EXTENSION_NAME, VK_KHR_16BIT_STORAGE_SPEC_VERSION);
     }
-    if (caps ? caps->ext_8bit_storage : advertised_storage8()) {
+    if (caps ? caps->ext_8bit_storage : advertised_storage8(snapshot)) {
         ADD_DEVICE_EXTENSION(VK_KHR_8BIT_STORAGE_EXTENSION_NAME, VK_KHR_8BIT_STORAGE_SPEC_VERSION);
     }
-    if (caps ? caps->ext_shader_float16_int8 : advertised_storage8()) {
+    if (caps ? caps->ext_shader_float16_int8 : advertised_storage8(snapshot)) {
         ADD_DEVICE_EXTENSION(VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME, VK_KHR_SHADER_FLOAT16_INT8_SPEC_VERSION);
     }
-    if (advertised_storage_buffer_storage_class()) {
+    if (advertised_storage_buffer_storage_class(snapshot)) {
         ADD_DEVICE_EXTENSION(VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_EXTENSION_NAME,
                              VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_SPEC_VERSION);
     }
@@ -28653,7 +30116,7 @@ static uint32_t collect_advertised_device_extensions(
     }
 #endif
 #ifdef VK_KHR_SEPARATE_DEPTH_STENCIL_LAYOUTS_EXTENSION_NAME
-    if (caps && caps->ext_separate_depth_stencil_layouts && advertised_separate_depth_stencil_layouts()) {
+    if (caps && caps->ext_separate_depth_stencil_layouts && advertised_separate_depth_stencil_layouts(snapshot)) {
         ADD_DEVICE_EXTENSION(VK_KHR_SEPARATE_DEPTH_STENCIL_LAYOUTS_EXTENSION_NAME,
                              VK_KHR_SEPARATE_DEPTH_STENCIL_LAYOUTS_SPEC_VERSION);
     }
@@ -28665,7 +30128,7 @@ static uint32_t collect_advertised_device_extensions(
                          VK_EXT_SUBPASS_MERGE_FEEDBACK_SPEC_VERSION);
 #endif
 #ifdef VK_EXT_SAMPLER_FILTER_MINMAX_EXTENSION_NAME
-    if (advertised_sampler_filter_minmax()) {
+    if (advertised_sampler_filter_minmax(snapshot)) {
         ADD_DEVICE_EXTENSION(VK_EXT_SAMPLER_FILTER_MINMAX_EXTENSION_NAME,
                              VK_EXT_SAMPLER_FILTER_MINMAX_SPEC_VERSION);
     }
@@ -28741,15 +30204,15 @@ static uint32_t collect_advertised_device_extensions(
     }
 #endif
     ADD_DEVICE_EXTENSION(VK_KHR_COPY_COMMANDS_2_EXTENSION_NAME, VK_KHR_COPY_COMMANDS_2_SPEC_VERSION);
-    if (advertised_synchronization2()) {
+    if (advertised_synchronization2(snapshot)) {
         ADD_DEVICE_EXTENSION(VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME, VK_KHR_SYNCHRONIZATION_2_SPEC_VERSION);
     }
 #ifdef VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME
-    if (advertised_timeline_semaphore()) {
+    if (advertised_timeline_semaphore(snapshot)) {
         ADD_DEVICE_EXTENSION(VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME, VK_KHR_TIMELINE_SEMAPHORE_SPEC_VERSION);
     }
 #endif
-    if (advertised_dynamic_rendering()) {
+    if (advertised_dynamic_rendering(snapshot)) {
         ADD_DEVICE_EXTENSION(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME, VK_KHR_DYNAMIC_RENDERING_SPEC_VERSION);
 #ifdef VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME
         if (pdocker_supports_dynamic_rendering_local_read_transport()) {
@@ -28758,7 +30221,7 @@ static uint32_t collect_advertised_device_extensions(
         }
 #endif
     }
-    if (advertised_load_store_op_none()) {
+    if (advertised_load_store_op_none(snapshot)) {
         ADD_DEVICE_EXTENSION(VK_KHR_LOAD_STORE_OP_NONE_EXTENSION_NAME, VK_KHR_LOAD_STORE_OP_NONE_SPEC_VERSION);
         ADD_DEVICE_EXTENSION(VK_EXT_LOAD_STORE_OP_NONE_EXTENSION_NAME, VK_EXT_LOAD_STORE_OP_NONE_SPEC_VERSION);
     }
@@ -28775,25 +30238,25 @@ static uint32_t collect_advertised_device_extensions(
                          VK_KHR_DEDICATED_ALLOCATION_SPEC_VERSION);
 #endif
 #ifdef VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME
-    if (advertised_draw_indirect_count_khr()) {
+    if (advertised_draw_indirect_count_khr(snapshot)) {
         ADD_DEVICE_EXTENSION(VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME,
                              VK_KHR_DRAW_INDIRECT_COUNT_SPEC_VERSION);
     }
 #endif
 #ifdef VK_AMD_DRAW_INDIRECT_COUNT_EXTENSION_NAME
-    if (advertised_draw_indirect_count_amd()) {
+    if (advertised_draw_indirect_count_amd(snapshot)) {
         ADD_DEVICE_EXTENSION(VK_AMD_DRAW_INDIRECT_COUNT_EXTENSION_NAME,
                              VK_AMD_DRAW_INDIRECT_COUNT_SPEC_VERSION);
     }
 #endif
 #ifdef VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME
-    if (advertised_extended_dynamic_state()) {
+    if (advertised_extended_dynamic_state(snapshot)) {
         ADD_DEVICE_EXTENSION(VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME,
                              VK_EXT_EXTENDED_DYNAMIC_STATE_SPEC_VERSION);
     }
 #endif
 #ifdef VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME
-    if (advertised_extended_dynamic_state2_any()) {
+    if (advertised_extended_dynamic_state2_any(snapshot)) {
         ADD_DEVICE_EXTENSION(VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME,
                              VK_EXT_EXTENDED_DYNAMIC_STATE_2_SPEC_VERSION);
     }
@@ -28817,7 +30280,10 @@ static uint32_t collect_advertised_device_extensions(
     }
 #endif
 #ifdef VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME
-    ADD_DEVICE_EXTENSION(VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME, VK_EXT_HOST_QUERY_RESET_SPEC_VERSION);
+    if (advertised_host_query_reset(snapshot)) {
+        ADD_DEVICE_EXTENSION(VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME,
+                             VK_EXT_HOST_QUERY_RESET_SPEC_VERSION);
+    }
 #endif
 #ifdef VK_EXT_SHADER_DEMOTE_TO_HELPER_INVOCATION_EXTENSION_NAME
     if (pdocker_supports_shader_demote_transport()) {
@@ -28860,7 +30326,9 @@ static uint32_t collect_advertised_device_extensions(
 #ifdef VK_EXT_PRIVATE_DATA_EXTENSION_NAME
     ADD_DEVICE_EXTENSION(VK_EXT_PRIVATE_DATA_EXTENSION_NAME, VK_EXT_PRIVATE_DATA_SPEC_VERSION);
 #endif
-    ADD_DEVICE_EXTENSION(VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_SWAPCHAIN_SPEC_VERSION);
+    if (pdocker_vk_wsi_transport_supported(snapshot)) {
+        ADD_DEVICE_EXTENSION(VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_SWAPCHAIN_SPEC_VERSION);
+    }
 #undef ADD_DEVICE_EXTENSION
     return count;
 }
@@ -28872,7 +30340,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(
         VkExtensionProperties *pProperties) {
     (void)pLayerName;
     if (!pPropertyCount) return VK_ERROR_INITIALIZATION_FAILED;
-    if (!physical_device_handle_resolve(physicalDevice, NULL)) {
+    PdockerVkPhysicalDevice *physical = NULL;
+    if (!physical_device_handle_resolve(physicalDevice, &physical)) {
         uint32_t capacity = pProperties ? *pPropertyCount : 0;
         if (pProperties && capacity > 0) memset(pProperties, 0, sizeof(*pProperties) * capacity);
         *pPropertyCount = 0;
@@ -28880,7 +30349,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(
     }
     VkExtensionProperties available[PDOCKER_VK_MAX_DEVICE_EXTENSIONS];
     uint32_t available_count = collect_advertised_device_extensions(
-        available,
+        physical->capability_snapshot, available,
         (uint32_t)(sizeof(available) / sizeof(available[0])));
     if (available_count > (uint32_t)(sizeof(available) / sizeof(available[0]))) {
         available_count = (uint32_t)(sizeof(available) / sizeof(available[0]));
@@ -28888,11 +30357,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(
     return copy_extension_properties(available, available_count, pPropertyCount, pProperties);
 }
 
-static bool device_extension_advertised_name(const char *name) {
+static bool device_extension_advertised_name(const PdockerVkCapabilitySnapshot *snapshot, const char *name) {
     if (!name) return false;
     VkExtensionProperties available[PDOCKER_VK_MAX_DEVICE_EXTENSIONS];
     uint32_t available_count = collect_advertised_device_extensions(
-        available,
+        snapshot, available,
         (uint32_t)(sizeof(available) / sizeof(available[0])));
     if (available_count > (uint32_t)(sizeof(available) / sizeof(available[0]))) {
         available_count = (uint32_t)(sizeof(available) / sizeof(available[0]));
@@ -28903,7 +30372,7 @@ static bool device_extension_advertised_name(const char *name) {
     return false;
 }
 
-static VkResult validate_device_extensions(const VkDeviceCreateInfo *pCreateInfo) {
+static VkResult validate_device_extensions(const PdockerVkCapabilitySnapshot *snapshot, const VkDeviceCreateInfo *pCreateInfo) {
     if (!pCreateInfo) return VK_SUCCESS;
     bool enabled_dynamic_rendering = false;
     bool enabled_dynamic_rendering_local_read = false;
@@ -28911,7 +30380,7 @@ static VkResult validate_device_extensions(const VkDeviceCreateInfo *pCreateInfo
         const char *name = pCreateInfo->ppEnabledExtensionNames
             ? pCreateInfo->ppEnabledExtensionNames[i]
             : NULL;
-        if (!device_extension_advertised_name(name)) {
+        if (!device_extension_advertised_name(snapshot, name)) {
             fprintf(stderr,
                     "pdocker-vulkan-icd: create-device rejected unadvertised extension %s\n",
                     name ? name : "<null>");
@@ -29076,6 +30545,7 @@ static bool extension_pnext_enabled_or_core(uint64_t enabled_extension_mask,
 }
 
 static VkResult validate_device_create_pnext_extension_enables(
+        const PdockerVkCapabilitySnapshot *snapshot,
         const VkDeviceCreateInfo *pCreateInfo,
         uint64_t enabled_extension_mask) {
     if (!pCreateInfo) return VK_SUCCESS;
@@ -29088,7 +30558,7 @@ static VkResult validate_device_create_pnext_extension_enables(
                 if (!extension_pnext_enabled_or_core(
                         enabled_extension_mask,
                         PDOCKER_VK_DEVICE_EXT_EXT_PRIVATE_DATA,
-                        advertised_api_1_3())) {
+                        advertised_api_1_3(snapshot))) {
                     return unsupported_device_feature_request_result(
                         "private data pNext requires VK_EXT_private_data below API 1.3");
                 }
@@ -29178,6 +30648,24 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceLayerProperties(
     return VK_SUCCESS;
 }
 
+static const PdockerVkCapabilitySnapshot *legacy_physical_snapshot(void) {
+    if (g_device.capability_snapshot) return g_device.capability_snapshot;
+    PdockerVkCapabilitySnapshot *created = capability_snapshot_create();
+    if (!created) return NULL;
+    if (pthread_mutex_lock(&g_physical_device_mutex) != 0) {
+        capability_snapshot_release(created);
+        return NULL;
+    }
+    if (!g_device.capability_snapshot) {
+        g_device.capability_snapshot = created;
+        created = NULL;
+    }
+    const PdockerVkCapabilitySnapshot *snapshot = g_device.capability_snapshot;
+    (void)pthread_mutex_unlock(&g_physical_device_mutex);
+    capability_snapshot_release(created);
+    return snapshot;
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
         VkPhysicalDevice physicalDevice,
         const VkDeviceCreateInfo *pCreateInfo,
@@ -29190,12 +30678,17 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
     if (!physical_device_handle_resolve(physicalDevice, &physical)) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
+    const PdockerVkCapabilitySnapshot *snapshot = physical->capability_snapshot;
+    if (!snapshot && physical == &g_device) {
+        snapshot = legacy_physical_snapshot();
+    }
+    if (!snapshot) return VK_ERROR_INITIALIZATION_FAILED;
     if (!pCreateInfo || pCreateInfo->sType != VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO) {
         trace_icd_runtime_failure("create-device-create-info-invalid", VK_ERROR_INITIALIZATION_FAILED);
         return VK_ERROR_INITIALIZATION_FAILED;
     }
     trace_device_create_features(pCreateInfo);
-    VkResult extension_rc = validate_device_extensions(pCreateInfo);
+    VkResult extension_rc = validate_device_extensions(snapshot, pCreateInfo);
     if (extension_rc != VK_SUCCESS) return extension_rc;
     VkResult queue_rc = validate_device_queue_create_infos(pCreateInfo);
     if (queue_rc != VK_SUCCESS) return queue_rc;
@@ -29204,14 +30697,14 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
     uint64_t requested_feature_mask = requested_feature_mask_from_device_create_info(pCreateInfo);
     uint64_t enabled_extension_mask = enabled_device_extension_mask_from_create_info(pCreateInfo);
     VkResult pnext_extension_rc = validate_device_create_pnext_extension_enables(
-        pCreateInfo,
+        snapshot, pCreateInfo,
         enabled_extension_mask);
     if (pnext_extension_rc != VK_SUCCESS) return pnext_extension_rc;
     VkResult feature_extension_rc = validate_requested_feature_extension_enables(
         requested_feature_mask,
         enabled_extension_mask);
     if (feature_extension_rc != VK_SUCCESS) return feature_extension_rc;
-    uint64_t supported_feature_mask = advertised_feature_mask();
+    uint64_t supported_feature_mask = advertised_feature_mask(snapshot);
     uint64_t unsupported_feature_mask = 0;
     if (!requested_features_supported(requested_feature_mask, supported_feature_mask,
                                       &unsupported_feature_mask)) {
@@ -29230,8 +30723,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
     device->physical_device_object_id = physical->object_id;
     device->requested_feature_mask = requested_feature_mask;
     device->enabled_extension_mask = enabled_extension_mask;
+    device->capability_snapshot = capability_snapshot_retain(physical->capability_snapshot);
     PdockerVkQueue *queue = calloc(1, sizeof(*queue));
     if (!queue) {
+        capability_snapshot_release(device->capability_snapshot);
+        device->capability_snapshot = NULL;
         free(device);
         return VK_ERROR_OUT_OF_HOST_MEMORY;
     }
@@ -29241,6 +30737,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
     queue->device_object_id = device->object_id;
     queue->requested_feature_mask = requested_feature_mask;
     queue->enabled_extension_mask = enabled_extension_mask;
+    queue->capability_snapshot = capability_snapshot_retain(physical->capability_snapshot);
     queue->transport_fd = -1;
     set_loader_magic_value(queue);
     queue_register(queue);
@@ -29258,7 +30755,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
     return VK_SUCCESS;
 }
 
-static void pdocker_vk_destroy_device_live_objects(VkDevice device, uint64_t destroy_owner_id);
+static bool pdocker_vk_destroy_device_live_objects(VkDevice device, uint64_t destroy_owner_id);
 
 VKAPI_ATTR void VKAPI_CALL vkDestroyDevice(
         VkDevice device,
@@ -29267,18 +30764,30 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyDevice(
     PdockerVkDevice *pdocker_device = NULL;
     if (!device_handle_resolve(device, &pdocker_device)) return;
     uint64_t destroy_owner_id = pdocker_device->object_id;
+    /* Keep the device and queue identities live while child objects are
+     * drained. Swapchain image memory and hidden present fences resolve
+     * ownership/capabilities through those identities during cleanup. */
+    if (!pdocker_vk_destroy_device_live_objects(device, destroy_owner_id)) {
+        /*
+         * Cleanup could not prove hidden WSI completion safety. Keep the
+         * device, queue, capability snapshot, and remaining child graph alive
+         * so no globally registered object contains a dangling owner.
+         */
+        return;
+    }
     (void)device_unregister(device);
     PdockerVkQueue *queue = pdocker_device->queue;
     if (queue && queue->device_object_id == destroy_owner_id) {
         queue_retire(queue_unregister_object(queue));
         pdocker_device->queue = NULL;
     }
-    pdocker_vk_destroy_device_live_objects(device, destroy_owner_id);
     if (g_queue.device_object_id == destroy_owner_id) {
         queue_transport_close(&g_queue);
         memset(&g_queue, 0, sizeof(g_queue));
         g_queue.transport_fd = -1;
     }
+    capability_snapshot_release(pdocker_device->capability_snapshot);
+    pdocker_device->capability_snapshot = NULL;
     free(pdocker_device);
 }
 
@@ -29468,6 +30977,7 @@ static bool descriptor_set_layout_create_info_supported(
         VkDevice device,
         const VkDescriptorSetLayoutCreateInfo *pCreateInfo,
         uint64_t requested_feature_mask) {
+    const PdockerVkCapabilitySnapshot *snapshot = device_capability_snapshot(device);
     if (!pCreateInfo || pCreateInfo->sType != VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO) return false;
     if (validate_descriptor_set_layout_pnext(pCreateInfo) != VK_SUCCESS) return false;
     if (!descriptor_layout_flags_supported(pCreateInfo->flags)) return false;
@@ -29479,11 +30989,11 @@ static bool descriptor_set_layout_create_info_supported(
         const VkDescriptorSetLayoutBinding *binding = &pCreateInfo->pBindings[i];
         bool v4_descriptor = descriptor_type_supported_by_v4_transport(binding->descriptorType);
         bool v5_object_descriptor =
-            vulkan_v5_object_transport_enabled() &&
+            vulkan_v5_object_transport_enabled(snapshot) &&
             descriptor_type_supported_by_v5_object_transport(binding->descriptorType);
         bool texel_buffer_descriptor =
             descriptor_type_requires_buffer_view(binding->descriptorType) &&
-            executor_supports_any_vulkan_buffer_views();
+            executor_supports_any_vulkan_buffer_views(snapshot);
         if (!v4_descriptor && !v5_object_descriptor && !texel_buffer_descriptor) return false;
         if (binding->binding >= PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS) return false;
         for (uint32_t previous = 0; previous < i; ++previous) {
@@ -29593,6 +31103,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorSetLayout(
     if (pnext_rc != VK_SUCCESS) return pnext_rc;
     if (!descriptor_layout_flags_supported(pCreateInfo->flags)) return VK_ERROR_FEATURE_NOT_PRESENT;
     const PdockerVkDevice *dev = pdocker_vk_device_from_handle(device);
+    const PdockerVkCapabilitySnapshot *snapshot = dev ? dev->capability_snapshot : NULL;
     uint64_t requested_feature_mask = dev ? dev->requested_feature_mask : 0;
     if (!descriptor_set_layout_create_info_supported(device, pCreateInfo, requested_feature_mask)) {
         trace_icd_runtime_failure("descriptor-set-layout-unsupported",
@@ -29641,11 +31152,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorSetLayout(
         const VkDescriptorSetLayoutBinding *binding = &pCreateInfo->pBindings[best_index];
         bool v4_descriptor = descriptor_type_supported_by_v4_transport(binding->descriptorType);
         bool v5_object_descriptor =
-            vulkan_v5_object_transport_enabled() &&
+            vulkan_v5_object_transport_enabled(snapshot) &&
             descriptor_type_supported_by_v5_object_transport(binding->descriptorType);
         bool texel_buffer_descriptor =
             descriptor_type_requires_buffer_view(binding->descriptorType) &&
-            executor_supports_any_vulkan_buffer_views();
+            executor_supports_any_vulkan_buffer_views(snapshot);
         if (!v4_descriptor && !v5_object_descriptor && !texel_buffer_descriptor) {
             layout->unsupported_descriptor_type = true;
             fprintf(stderr,
@@ -29744,6 +31255,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreatePipelineLayout(
         const VkPipelineLayoutCreateInfo *pCreateInfo,
         const VkAllocationCallbacks *pAllocator,
         VkPipelineLayout *pPipelineLayout) {
+    const PdockerVkCapabilitySnapshot *snapshot = device_capability_snapshot(device);
     (void)pAllocator;
     if (pPipelineLayout) *pPipelineLayout = VK_NULL_HANDLE;
     if (!pCreateInfo || !pPipelineLayout ||
@@ -29801,7 +31313,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreatePipelineLayout(
     }
     for (uint32_t i = 0; i < layout->push_constant_range_count; ++i) {
         const VkPushConstantRange *range = &pCreateInfo->pPushConstantRanges[i];
-        if (!pdocker_vk_push_constant_range_valid(range)) {
+        if (!pdocker_vk_push_constant_range_valid(snapshot, range)) {
             destroy_pipeline_layout_storage(layout);
             free(layout);
             return VK_ERROR_FEATURE_NOT_PRESENT;
@@ -30204,7 +31716,7 @@ VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets(
         bool v4_descriptor = descriptor_type_supported_by_v4_transport(w->descriptorType);
         bool texel_buffer_descriptor = descriptor_type_requires_buffer_view(w->descriptorType);
         bool v5_object_descriptor =
-            vulkan_v5_object_transport_enabled() &&
+            vulkan_v5_object_transport_enabled(device_capability_snapshot(device)) &&
             descriptor_type_supported_by_v5_object_transport(w->descriptorType);
         if (!v4_descriptor && !v5_object_descriptor && !texel_buffer_descriptor) {
             set->unsupported_descriptor_type = true;
@@ -30591,6 +32103,7 @@ fail_closed:
 }
 
 static bool descriptor_update_template_payload_size(
+        const PdockerVkCapabilitySnapshot *snapshot,
         VkDescriptorType type,
         size_t *payload_size_out) {
     if (!payload_size_out) return false;
@@ -30599,11 +32112,10 @@ static bool descriptor_update_template_payload_size(
         return true;
     }
     if (descriptor_type_requires_buffer_view(type)) {
-        if (!executor_supports_any_vulkan_buffer_views()) return false;
         *payload_size_out = sizeof(VkBufferView);
         return true;
     }
-    if (vulkan_v5_object_transport_enabled() &&
+    if (vulkan_v5_object_transport_enabled(snapshot) &&
         descriptor_type_supported_by_v5_object_transport(type)) {
         *payload_size_out = sizeof(VkDescriptorImageInfo);
         return true;
@@ -30628,11 +32140,12 @@ static bool descriptor_update_template_entry_range_valid(
 }
 
 static bool descriptor_update_template_entry_layout_valid(
+        const PdockerVkCapabilitySnapshot *snapshot,
         const PdockerVkDescriptorSetLayout *layout,
         const VkDescriptorUpdateTemplateEntry *entry) {
     if (!layout || !entry) return false;
     size_t payload_size = 0;
-    if (!descriptor_update_template_payload_size(entry->descriptorType, &payload_size) ||
+    if (!descriptor_update_template_payload_size(snapshot, entry->descriptorType, &payload_size) ||
         !descriptor_update_template_entry_range_valid(entry, payload_size)) {
         return false;
     }
@@ -30749,7 +32262,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorUpdateTemplate(
     if (!layout) return VK_ERROR_INITIALIZATION_FAILED;
     for (uint32_t i = 0; i < pCreateInfo->descriptorUpdateEntryCount; ++i) {
         if (!descriptor_update_template_entry_layout_valid(
-                layout, &pCreateInfo->pDescriptorUpdateEntries[i])) {
+                device_capability_snapshot(device), layout, &pCreateInfo->pDescriptorUpdateEntries[i])) {
             trace_icd_runtime_failure("descriptor-update-template-entry-unsupported",
                                       VK_ERROR_FEATURE_NOT_PRESENT);
             return VK_ERROR_FEATURE_NOT_PRESENT;
@@ -30853,7 +32366,7 @@ VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSetWithTemplate(
     for (uint32_t entry_i = 0; entry_i < template_handle->entry_count; ++entry_i) {
         const VkDescriptorUpdateTemplateEntry *entry = &template_handle->entries[entry_i];
         size_t payload_size = 0;
-        if (!descriptor_update_template_payload_size(entry->descriptorType, &payload_size) ||
+        if (!descriptor_update_template_payload_size(device_capability_snapshot(device), entry->descriptorType, &payload_size) ||
             !descriptor_update_template_entry_range_valid(entry, payload_size)) {
             free(writes);
             trace_icd_runtime_failure("descriptor-update-template-entry-invalid-at-update",
@@ -30928,6 +32441,7 @@ static VkResult validate_and_fill_pipeline_feedback_pnext(
         const void *pNext,
         uint32_t stage_count,
         bool allow_pipeline_rendering_create_info,
+        const PdockerVkCapabilitySnapshot *snapshot,
         uint64_t enabled_extension_mask) {
     bool saw_feedback = false;
     for (const void *node = pNext; node;) {
@@ -30938,7 +32452,7 @@ static VkResult validate_and_fill_pipeline_feedback_pnext(
                 if (!extension_pnext_enabled_or_core(
                         enabled_extension_mask,
                         PDOCKER_VK_DEVICE_EXT_EXT_PIPELINE_CREATION_FEEDBACK,
-                        advertised_api_1_3())) {
+                        advertised_api_1_3(snapshot))) {
                     return unsupported_create_info_pnext_result(api_name, node);
                 }
                 VkPipelineCreationFeedbackCreateInfo *feedback_info =
@@ -30982,7 +32496,7 @@ static VkResult validate_and_fill_pipeline_feedback_pnext(
                 if (!extension_pnext_enabled_or_core(
                         enabled_extension_mask,
                         PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_5,
-                        advertised_api_1_4())) {
+                        advertised_api_1_4(snapshot))) {
                     return unsupported_create_info_pnext_result(api_name, node);
                 }
                 const VkPipelineCreateFlags2CreateInfo *flags2_info =
@@ -31126,6 +32640,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateShaderModule(
     if (!device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
+    const PdockerVkCapabilitySnapshot *snapshot = device_capability_snapshot(device);
+    if (!snapshot) return VK_ERROR_INITIALIZATION_FAILED;
     VkResult pnext_rc = validate_shader_module_create_pnext(
         device,
         pCreateInfo->pNext,
@@ -31143,7 +32659,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateShaderModule(
         ? pCreateInfo->pCode[0]
         : 0;
     maybe_dump_spirv(pCreateInfo);
-    shader->code_fd = create_shared_fd(shader->code_size);
+    shader->code_fd = create_shared_fd(snapshot, shader->code_size);
     if (shader->code_fd < 0) {
         free(shader);
         return VK_ERROR_OUT_OF_HOST_MEMORY;
@@ -31217,6 +32733,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateComputePipelines(
     if (!device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
+    const PdockerVkCapabilitySnapshot *capability_snapshot =
+        device_capability_snapshot(device);
+    if (!capability_snapshot) return VK_ERROR_INITIALIZATION_FAILED;
     if (pipelineCache != VK_NULL_HANDLE && !pipeline_cache_handle_lookup_for_device(device, pipelineCache)) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
@@ -31224,10 +32743,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateComputePipelines(
         const VkComputePipelineCreateInfo *ci = &pCreateInfos[i];
         VkResult pnext_rc = validate_and_fill_pipeline_feedback_pnext(
             "vkCreateComputePipelines", ci->pNext, 1u, false,
+            capability_snapshot,
             device_enabled_extension_mask_from_handle(device));
         if (pnext_rc != VK_SUCCESS) return pnext_rc;
-        const bool strict_passthrough =
-            env_truthy_default("PDOCKER_GPU_STRICT_PASSTHROUGH", false);
+        const bool strict_passthrough = capability_snapshot &&
+            capability_snapshot->strict_passthrough;
         if (strict_passthrough && ci->flags != 0) {
             trace_icd_runtime_failure("strict-compute-pipeline-flags-unsupported",
                                       VK_ERROR_FEATURE_NOT_PRESENT);
@@ -31274,7 +32794,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateComputePipelines(
             return VK_ERROR_FEATURE_NOT_PRESENT;
         }
         if (strict_passthrough && pipeline->layout->push_constant_range_count > 0u &&
-            !executor_supports_vulkan_dispatch_v56_compute_layouts()) {
+            !executor_supports_vulkan_dispatch_v56_compute_layouts(capability_snapshot)) {
             if (pipeline->layout->push_constant_range_count > 1u) {
                 trace_icd_runtime_failure("strict-compute-pipeline-push-range-layout-unsupported",
                                           VK_ERROR_FEATURE_NOT_PRESENT);
@@ -31292,7 +32812,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateComputePipelines(
         }
         pipeline->requested_feature_mask =
             device_requested_feature_mask_from_handle(device);
-        if (env_truthy_default("PDOCKER_GPU_ADD_FLOAT16_CAPABILITY_FOR_STORAGE16", false)) {
+        if (capability_snapshot &&
+            capability_snapshot->add_float16_capability_for_storage16) {
             /*
              * Keep strict executor validation aligned with the explicit
              * Android-driver compatibility lowering.  The lowering only adds
@@ -32114,10 +33635,10 @@ static bool pdocker_vk_classic_barrier_scope_legal(
         uint32_t buffer_barrier_count) {
     if (!cmd || !summary ||
         !command_buffer_in_native_classic_render_pass_scope(cmd) ||
-        !executor_supports_vulkan_graphics_v634_classic_render_pass_self_dependency() ||
+        !executor_supports_vulkan_graphics_v634_classic_render_pass_self_dependency(cmd->capability_snapshot) ||
         !cmd->active_render_pass ||
         !strict_vulkan_graphics_v632_render_pass_transport_complete_for_render_pass(
-            cmd->active_render_pass) ||
+            cmd->capability_snapshot, cmd->active_render_pass) ||
         cmd->active_subpass >= cmd->active_render_pass->subpass_count ||
         buffer_barrier_count != 0 ||
         !pdocker_vk_pipeline_barrier_dependency_flags_supported(
@@ -32424,6 +33945,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
         const VkGraphicsPipelineCreateInfo *pCreateInfos,
         const VkAllocationCallbacks *pAllocator,
         VkPipeline *pPipelines) {
+    const PdockerVkCapabilitySnapshot *capability_snapshot =
+        device_capability_snapshot(device);
     (void)pAllocator;
     if (!pPipelines || (createInfoCount > 0 && !pCreateInfos)) {
         return VK_ERROR_INITIALIZATION_FAILED;
@@ -32449,8 +33972,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
             device_requested_feature_mask_from_handle(device);
         pipeline->line_width = 1.0f;
         const VkGraphicsPipelineCreateInfo *ci = &pCreateInfos[i];
-        const bool strict_passthrough =
-            env_truthy_default("PDOCKER_GPU_STRICT_PASSTHROUGH", false);
+        const bool strict_passthrough = capability_snapshot &&
+            capability_snapshot->strict_passthrough;
         if (strict_passthrough && ci->flags != 0) {
             trace_icd_runtime_failure("strict-graphics-pipeline-flags-unsupported",
                                       VK_ERROR_FEATURE_NOT_PRESENT);
@@ -32536,6 +34059,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
         }
         VkResult pnext_rc = validate_and_fill_pipeline_feedback_pnext(
             "vkCreateGraphicsPipelines", ci->pNext, ci->stageCount, true,
+            capability_snapshot,
             device_enabled_extension_mask_from_handle(device));
         if (pnext_rc != VK_SUCCESS) {
             pdocker_vk_pipeline_destroy(pipeline);
@@ -32665,7 +34189,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
             }
             if (pipeline->line_width != 1.0f &&
                 ((pipeline->requested_feature_mask & PDOCKER_VK_FEATURE_WIDE_LINES) == 0 ||
-                 !advertised_line_width_supported(pipeline->line_width))) {
+                 !advertised_line_width_supported(capability_snapshot, pipeline->line_width))) {
                 pipeline->graphics_unsupported = true;
             }
         }
@@ -32883,7 +34407,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
         if (!pipeline->dynamic_rendering_pipeline && pipeline->render_pass) {
             PdockerVkRenderPass *rp = pipeline->render_pass;
             if (!render_pass_subpass_can_normalize_to_dynamic_rendering(rp, ci->subpass)) {
-                if (!strict_vulkan_graphics_v632_render_pass_transport_complete(pipeline)) {
+                if (!strict_vulkan_graphics_v632_render_pass_transport_complete(capability_snapshot, pipeline)) {
                     pipeline->graphics_unsupported = true;
                 }
             } else {
@@ -32932,6 +34456,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
             for (uint32_t a = 0; a < pipeline->vertex_attribute_count; ++a) {
                 pipeline->vertex_attributes[a] = ci->pVertexInputState->pVertexAttributeDescriptions[a];
             }
+        }
+        if (pipeline->graphics_unsupported) {
+            trace_icd_runtime_failure(
+                "graphics-pipeline-create-info-unsupported",
+                VK_ERROR_FEATURE_NOT_PRESENT);
+            pdocker_vk_pipeline_destroy(pipeline);
+            return VK_ERROR_FEATURE_NOT_PRESENT;
         }
         pipeline_register(pipeline);
         pPipelines[i] = pdocker_vk_pipeline_to_handle(pipeline);
@@ -33341,7 +34872,7 @@ static bool command_buffer_begin_inheritance_supported(
             return false;
         }
         if (!render_pass_subpass_can_normalize_to_dynamic_rendering(rp, inherit->subpass) &&
-            !strict_vulkan_graphics_v632_render_pass_transport_complete_for_render_pass(rp)) {
+            !strict_vulkan_graphics_v632_render_pass_transport_complete_for_render_pass(cmd->capability_snapshot, rp)) {
             return false;
         }
         cmd->inherited_rendering_active = true;
@@ -34167,17 +35698,418 @@ static bool pdocker_vk_swapchain_image_index_valid(
            image_index < swapchain->image_count;
 }
 
-static bool pdocker_vk_acquire_sync_valid(VkDevice device, VkSemaphore semaphore, VkFence fence) {
-    if (semaphore == VK_NULL_HANDLE && fence == VK_NULL_HANDLE) return false;
+static VkResult pdocker_vk_acquire_sync_valid(
+        PdockerVkDevice *device,
+        VkSemaphore semaphore,
+        VkFence fence) {
+    if (!device ||
+        (semaphore == VK_NULL_HANDLE && fence == VK_NULL_HANDLE)) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    VkDevice device_handle = (VkDevice)device;
     if (semaphore != VK_NULL_HANDLE) {
-        const PdockerVkSemaphore *sem = semaphore_handle_lookup_for_device(device, semaphore);
-        if (!sem || sem->timeline || sem->signaled) return false;
+        const PdockerVkSemaphore *sem =
+            semaphore_handle_lookup_for_device(device_handle, semaphore);
+        /* Binary semaphore state is intentionally not inferred from the ICD
+         * shadow.  The application owns the Vulkan unsignaled precondition;
+         * completion itself is submitted against this executor identity. */
+        if (!sem || sem->timeline || !sem->executor_tracked) {
+            return VK_ERROR_INITIALIZATION_FAILED;
+        }
     }
     if (fence != VK_NULL_HANDLE) {
-        const PdockerVkFence *f = fence_handle_lookup_for_device(device, fence);
-        if (!f || f->signaled) return false;
+        PdockerVkFence *native_fence =
+            fence_handle_lookup_for_device(device_handle, fence);
+        VkResult status = VK_ERROR_UNKNOWN;
+        if (!native_fence || !native_fence->executor_tracked) {
+            return VK_ERROR_INITIALIZATION_FAILED;
+        }
+        if (send_executor_fence_status(native_fence, &status) != 0) {
+            pdocker_vk_mark_device_lost(
+                device, "acquire-next-image-fence-status-transport",
+                VK_ERROR_DEVICE_LOST);
+            return VK_ERROR_DEVICE_LOST;
+        }
+        if (status == VK_ERROR_DEVICE_LOST) {
+            pdocker_vk_mark_device_lost(
+                device, "acquire-next-image-fence-status-native", status);
+            return VK_ERROR_DEVICE_LOST;
+        }
+        return status == VK_NOT_READY
+            ? VK_SUCCESS
+            : VK_ERROR_INITIALIZATION_FAILED;
     }
+    return VK_SUCCESS;
+}
+
+static PdockerVkPresentCompletion *
+pdocker_vk_present_completion_create(
+        PdockerVkDevice *device,
+        VkResult *out_result) {
+    if (out_result) *out_result = VK_ERROR_INITIALIZATION_FAILED;
+    if (!device || !device->capability_snapshot) return NULL;
+    PdockerVkPresentCompletion *completion =
+        (PdockerVkPresentCompletion *)calloc(1, sizeof(*completion));
+    if (!completion) {
+        if (out_result) *out_result = VK_ERROR_OUT_OF_HOST_MEMORY;
+        return NULL;
+    }
+    completion->fence.owner_device_id = device->object_id;
+    completion->fence.capability_snapshot = device->capability_snapshot;
+    completion->fence.fence_id = next_vulkan_object_generation();
+    if (send_executor_fence_create(&completion->fence, 0u) != 0 ||
+        !completion->fence.executor_tracked) {
+        free(completion);
+        if (out_result) *out_result = VK_ERROR_DEVICE_LOST;
+        return NULL;
+    }
+    if (out_result) *out_result = VK_SUCCESS;
+    return completion;
+}
+
+static bool pdocker_vk_present_completion_destroy(
+        PdockerVkPresentCompletion *completion,
+        bool destroy_executor_object) {
+    if (!completion) return true;
+    if (destroy_executor_object &&
+        send_executor_fence_destroy(&completion->fence) != 0) {
+        PdockerVkDevice *device =
+            pdocker_vk_device_from_object_id(completion->fence.owner_device_id);
+        if (device) {
+            pdocker_vk_mark_device_lost(
+                device, "present-completion-fence-destroy",
+                VK_ERROR_DEVICE_LOST);
+        }
+        /* Keep the identity record alive after an ambiguous transport result.
+         * Freeing it would make a later native completion reference dangling. */
+        return false;
+    }
+    free(completion);
     return true;
+}
+
+static VkResult pdocker_vk_wait_present_completion_fence(
+        PdockerVkPresentCompletion *completion,
+        uint64_t timeout) {
+    if (!completion || !completion->fence.executor_tracked ||
+        completion->fence.fence_id == 0) {
+        return VK_ERROR_DEVICE_LOST;
+    }
+    char command[192];
+    int length = snprintf(
+        command, sizeof(command), "VULKAN_FENCE_WAIT 1 %llu 1 %llu\n",
+        (unsigned long long)timeout,
+        (unsigned long long)completion->fence.fence_id);
+    if (length <= 0 || (size_t)length >= sizeof(command)) {
+        return VK_ERROR_DEVICE_LOST;
+    }
+    int native_result = VK_ERROR_UNKNOWN;
+    bool signaled = false;
+    int rc = send_executor_text_command(
+        completion->fence.capability_snapshot,
+        command, &native_result, &signaled, NULL);
+    if (rc != 0) return VK_ERROR_DEVICE_LOST;
+    if (native_result == VK_SUCCESS) {
+        if (!signaled) {
+            /* A successful wait must report a completed fence. Treat a
+             * contradictory response as transport/protocol loss, never as
+             * permission to recycle the presented image. */
+            return VK_ERROR_DEVICE_LOST;
+        }
+        /* Internal present completion state is published only while holding
+         * g_wsi_mutex in pdocker_vk_present_completion_observe_locked().
+         * Do not mutate the embedded fence shadow from concurrent waiters. */
+        return VK_SUCCESS;
+    }
+    if (native_result == VK_TIMEOUT || native_result == VK_NOT_READY) {
+        return (VkResult)native_result;
+    }
+    return native_result == VK_ERROR_DEVICE_LOST
+        ? VK_ERROR_DEVICE_LOST
+        : (VkResult)native_result;
+}
+
+static VkResult pdocker_vk_wait_present_completion_any(
+        PdockerVkPresentCompletion *const *completions,
+        size_t completion_count,
+        uint64_t timeout,
+        bool *out_completed) {
+    if (!completions || completion_count == 0 ||
+        completion_count > PDOCKER_VK_MAX_SWAPCHAIN_IMAGES ||
+        !out_completed) {
+        return VK_ERROR_DEVICE_LOST;
+    }
+    memset(out_completed, 0, completion_count * sizeof(*out_completed));
+    const PdockerVkCapabilitySnapshot *snapshot =
+        completions[0] ? completions[0]->fence.capability_snapshot : NULL;
+    size_t capacity = 96u + completion_count * 24u;
+    char *command = (char *)calloc(1, capacity);
+    if (!command) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    size_t offset = (size_t)snprintf(
+        command, capacity, "VULKAN_FENCE_WAIT 0 %llu %zu",
+        (unsigned long long)timeout, completion_count);
+    VkResult result = VK_SUCCESS;
+    for (size_t i = 0; i < completion_count; ++i) {
+        PdockerVkPresentCompletion *completion = completions[i];
+        if (!completion || !completion->fence.executor_tracked ||
+            completion->fence.fence_id == 0 ||
+            completion->fence.capability_snapshot != snapshot ||
+            offset >= capacity) {
+            result = VK_ERROR_DEVICE_LOST;
+            break;
+        }
+        int written = snprintf(
+            command + offset, capacity - offset, " %llu",
+            (unsigned long long)completion->fence.fence_id);
+        if (written <= 0 || (size_t)written >= capacity - offset) {
+            result = VK_ERROR_DEVICE_LOST;
+            break;
+        }
+        offset += (size_t)written;
+    }
+    if (result == VK_SUCCESS) {
+        if (offset + 2u > capacity) {
+            result = VK_ERROR_DEVICE_LOST;
+        } else {
+            command[offset++] = '\n';
+            command[offset] = '\0';
+        }
+    }
+    int native_result = VK_ERROR_UNKNOWN;
+    bool any_signaled = false;
+    if (result == VK_SUCCESS) {
+        int rc = send_executor_text_command(
+            snapshot, command, &native_result, &any_signaled, NULL);
+        if (rc != 0) {
+            result = VK_ERROR_DEVICE_LOST;
+        } else if (native_result == VK_TIMEOUT ||
+                   native_result == VK_NOT_READY) {
+            result = (VkResult)native_result;
+        } else if (native_result != VK_SUCCESS || !any_signaled) {
+            result = VK_ERROR_DEVICE_LOST;
+        }
+    }
+    free(command);
+    if (result != VK_SUCCESS) return result;
+
+    bool observed_any = false;
+    for (size_t i = 0; i < completion_count; ++i) {
+        VkResult status = VK_ERROR_UNKNOWN;
+        bool signaled = false;
+        if (send_executor_fence_status_raw(
+                completions[i]->fence.capability_snapshot,
+                completions[i]->fence.fence_id,
+                &status, &signaled) != 0) {
+            return VK_ERROR_DEVICE_LOST;
+        }
+        if (status == VK_SUCCESS && signaled) {
+            out_completed[i] = true;
+            observed_any = true;
+        } else if (status != VK_NOT_READY || signaled) {
+            /* vkGetFenceStatus semantics require success iff signaled. */
+            return VK_ERROR_DEVICE_LOST;
+        }
+    }
+    return observed_any ? VK_SUCCESS : VK_ERROR_DEVICE_LOST;
+}
+
+static void pdocker_vk_present_completion_observe_locked(
+        PdockerVkPresentCompletion *completion) {
+    if (!completion || completion->native_complete) return;
+    completion->native_complete = true;
+    for (PdockerVkSwapchain *swapchain = g_swapchains;
+         swapchain;
+         swapchain = swapchain->next) {
+        for (uint32_t i = 0;
+             i < swapchain->image_count &&
+             i < PDOCKER_VK_MAX_SWAPCHAIN_IMAGES;
+             ++i) {
+            if (swapchain->present_completion[i] != completion) continue;
+            swapchain->present_completion[i] = NULL;
+            swapchain->present_pending[i] = false;
+            swapchain->acquired[i] = false;
+            if (completion->refs > 0) completion->refs--;
+        }
+    }
+    (void)pthread_cond_broadcast(g_wsi_cond_current);
+}
+
+static uint64_t pdocker_vk_remaining_timeout_ns(
+        uint64_t original_timeout,
+        uint64_t absolute_deadline_ns) {
+    if (original_timeout == UINT64_MAX) return UINT64_MAX;
+    if (original_timeout == 0) return 0;
+    struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0 || now.tv_sec < 0) {
+        return 0;
+    }
+    uint64_t now_ns =
+        (uint64_t)now.tv_sec * 1000000000ull + (uint64_t)now.tv_nsec;
+    return now_ns >= absolute_deadline_ns
+        ? 0
+        : absolute_deadline_ns - now_ns;
+}
+
+static bool pdocker_vk_swapchain_find_available_locked(
+        PdockerVkSwapchain *swapchain,
+        uint32_t *out_index) {
+    if (out_index) *out_index = UINT32_MAX;
+    if (!swapchain || !out_index) return false;
+    for (uint32_t attempt = 0; attempt < swapchain->image_count; ++attempt) {
+        uint32_t candidate =
+            (swapchain->next_image + attempt) % swapchain->image_count;
+        if (!swapchain->acquired[candidate] &&
+            !swapchain->present_pending[candidate] &&
+            !swapchain->present_completion[candidate]) {
+            *out_index = candidate;
+            return true;
+        }
+    }
+    return false;
+}
+
+static VkResult pdocker_vk_swapchain_acquire_wait(
+        PdockerVkSwapchain *swapchain,
+        uint64_t timeout,
+        uint32_t *out_index) {
+    if (!swapchain || !out_index) return VK_ERROR_INITIALIZATION_FAILED;
+    *out_index = UINT32_MAX;
+
+    uint64_t deadline_ns = 0;
+    struct timespec absolute_deadline;
+    memset(&absolute_deadline, 0, sizeof(absolute_deadline));
+    if (timeout != 0 && timeout != UINT64_MAX) {
+        if (clock_gettime(CLOCK_MONOTONIC, &absolute_deadline) != 0 ||
+            absolute_deadline.tv_sec < 0) {
+            return VK_ERROR_DEVICE_LOST;
+        }
+        uint64_t start_ns =
+            (uint64_t)absolute_deadline.tv_sec * 1000000000ull +
+            (uint64_t)absolute_deadline.tv_nsec;
+        deadline_ns = timeout > UINT64_MAX - start_ns
+            ? UINT64_MAX
+            : start_ns + timeout;
+        const uint64_t time_t_limit_ns =
+            sizeof(time_t) >= sizeof(int64_t)
+                ? UINT64_MAX
+                : (uint64_t)INT32_MAX * 1000000000ull + 999999999ull;
+        if (deadline_ns > time_t_limit_ns) deadline_ns = time_t_limit_ns;
+        absolute_deadline.tv_sec = (time_t)(deadline_ns / 1000000000ull);
+        absolute_deadline.tv_nsec = (long)(deadline_ns % 1000000000ull);
+    }
+
+    for (;;) {
+        if (pdocker_vk_wsi_lock() != 0) return VK_ERROR_DEVICE_LOST;
+        if (!pdocker_vk_headless_swapchain_runtime_valid(swapchain) ||
+            swapchain->retired) {
+            (void)pthread_mutex_unlock(&g_wsi_mutex);
+            return VK_ERROR_OUT_OF_DATE_KHR;
+        }
+        uint32_t index = UINT32_MAX;
+        if (pdocker_vk_swapchain_find_available_locked(swapchain, &index)) {
+            swapchain->acquired[index] = true;
+            swapchain->next_image = (index + 1u) % swapchain->image_count;
+            *out_index = index;
+            (void)pthread_mutex_unlock(&g_wsi_mutex);
+            return VK_SUCCESS;
+        }
+
+        PdockerVkPresentCompletion
+            *completions[PDOCKER_VK_MAX_SWAPCHAIN_IMAGES] = {0};
+        size_t completion_count = 0;
+        for (uint32_t i = 0;
+             i < swapchain->image_count &&
+             i < PDOCKER_VK_MAX_SWAPCHAIN_IMAGES;
+             ++i) {
+            PdockerVkPresentCompletion *completion =
+                swapchain->present_pending[i]
+                    ? swapchain->present_completion[i]
+                    : NULL;
+            if (!completion) continue;
+            bool duplicate = false;
+            for (size_t j = 0; j < completion_count; ++j) {
+                if (completions[j] == completion) {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (!duplicate) {
+                completion->refs++;
+                completions[completion_count++] = completion;
+            }
+        }
+        if (completion_count == 0) {
+            if (timeout == 0) {
+                (void)pthread_mutex_unlock(&g_wsi_mutex);
+                return VK_NOT_READY;
+            }
+            int wait_rc = timeout == UINT64_MAX
+                ? pthread_cond_wait(
+                    g_wsi_cond_current, &g_wsi_mutex)
+                : pthread_cond_timedwait(
+                    g_wsi_cond_current, &g_wsi_mutex, &absolute_deadline);
+            (void)pthread_mutex_unlock(&g_wsi_mutex);
+            if (wait_rc == ETIMEDOUT) return VK_TIMEOUT;
+            if (wait_rc != 0) return VK_ERROR_DEVICE_LOST;
+            continue;
+        }
+        (void)pthread_mutex_unlock(&g_wsi_mutex);
+
+        uint64_t remaining = pdocker_vk_remaining_timeout_ns(
+            timeout, deadline_ns);
+        /*
+         * The native fence wait and the local WSI condition cannot be waited
+         * atomically. Use one frame-sized bounded slice so a new present set
+         * or acquire rollback can rebuild the native wait-any set without
+         * sleeping or consuming the caller's entire timeout on stale fences.
+         */
+        const uint64_t recheck_slice_ns = 16000000ull;
+        uint64_t native_wait_timeout =
+            remaining == UINT64_MAX || remaining > recheck_slice_ns
+                ? recheck_slice_ns
+                : remaining;
+        bool completed[PDOCKER_VK_MAX_SWAPCHAIN_IMAGES] = {0};
+        VkResult wait_result = pdocker_vk_wait_present_completion_any(
+            completions, completion_count, native_wait_timeout, completed);
+
+        if (pdocker_vk_wsi_lock() != 0) {
+            /* Retained references cannot be released safely without the
+             * protecting mutex. Fail closed and intentionally leak them. */
+            return VK_ERROR_DEVICE_LOST;
+        }
+        bool destroy[PDOCKER_VK_MAX_SWAPCHAIN_IMAGES] = {0};
+        for (size_t i = 0; i < completion_count; ++i) {
+            if (wait_result == VK_SUCCESS && completed[i]) {
+                pdocker_vk_present_completion_observe_locked(completions[i]);
+            }
+            if (completions[i]->refs > 0) completions[i]->refs--;
+            destroy[i] =
+                completions[i]->refs == 0 &&
+                completions[i]->native_complete;
+        }
+        (void)pthread_mutex_unlock(&g_wsi_mutex);
+        for (size_t i = 0; i < completion_count; ++i) {
+            if (destroy[i]) {
+                (void)pdocker_vk_present_completion_destroy(
+                    completions[i], true);
+            }
+        }
+        if (wait_result == VK_SUCCESS) continue;
+        if (wait_result == VK_TIMEOUT || wait_result == VK_NOT_READY) {
+            /*
+             * remaining was sampled before the native wait. Recompute it
+             * before retrying so an image that becomes available after the
+             * caller's finite deadline cannot be returned as VK_SUCCESS.
+             */
+            uint64_t remaining_after_wait =
+                pdocker_vk_remaining_timeout_ns(timeout, deadline_ns);
+            if (remaining_after_wait != 0) continue;
+            return timeout == 0 ? VK_NOT_READY : VK_TIMEOUT;
+        }
+        return wait_result == VK_ERROR_OUT_OF_HOST_MEMORY
+            ? VK_ERROR_OUT_OF_HOST_MEMORY
+            : VK_ERROR_DEVICE_LOST;
+    }
 }
 
 static VkResult pdocker_vk_present_image_result(
@@ -34186,7 +36118,11 @@ static VkResult pdocker_vk_present_image_result(
     if (!pdocker_vk_swapchain_image_index_valid(swapchain, image_index)) {
         return VK_ERROR_OUT_OF_DATE_KHR;
     }
-    if (!swapchain->acquired[image_index]) return VK_NOT_READY;
+    if (!swapchain->acquired[image_index] ||
+        swapchain->present_pending[image_index] ||
+        swapchain->present_completion[image_index]) {
+        return VK_NOT_READY;
+    }
     const PdockerVkImage *image = swapchain->images[image_index];
     if (image->layout_mixed || image->layout_range_overflow ||
         image->current_layout != VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
@@ -34264,11 +36200,51 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSwapchainKHR(
         pCreateInfo->sType != VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
-    uint64_t owner_device_id = 0;
-    if (!device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0) {
-        return VK_ERROR_INITIALIZATION_FAILED;
+    PdockerVkDevice *pdocker_device =
+        pdocker_vk_device_from_handle(device);
+    if (!pdocker_device) return VK_ERROR_INITIALIZATION_FAILED;
+    PdockerVkSwapchain *old_swapchain = NULL;
+    if (pCreateInfo->oldSwapchain != VK_NULL_HANDLE) {
+        if (pdocker_vk_wsi_lock() != 0) {
+            pdocker_vk_mark_device_lost(
+                pdocker_device, "swapchain-old-retire-lock",
+                VK_ERROR_DEVICE_LOST);
+            return VK_ERROR_DEVICE_LOST;
+        }
+        old_swapchain =
+            swapchain_handle_lookup_for_device(
+                device, pCreateInfo->oldSwapchain);
+        if (!pdocker_vk_headless_swapchain_valid(old_swapchain) ||
+            old_swapchain->retired) {
+            (void)pthread_mutex_unlock(&g_wsi_mutex);
+            trace_icd_runtime_failure(
+                "swapchain-old-swapchain-invalid",
+                VK_ERROR_INITIALIZATION_FAILED);
+            return VK_ERROR_INITIALIZATION_FAILED;
+        }
+        /*
+         * Lookup, validation, and retirement are one registry transaction.
+         * Vulkan retires a valid oldSwapchain even if later creation fails.
+         */
+        old_swapchain->retired = true;
+        (void)pthread_cond_broadcast(g_wsi_cond_current);
+        (void)pthread_mutex_unlock(&g_wsi_mutex);
     }
-    if (!vulkan_v5_object_transport_enabled()) {
+    /* oldSwapchain retirement is a call-scoped side effect even when the
+     * logical device was already lost before this creation attempt. */
+    if (pdocker_vk_device_is_lost(pdocker_device)) {
+        return VK_ERROR_DEVICE_LOST;
+    }
+    uint64_t owner_device_id = pdocker_device->object_id;
+    const PdockerVkCapabilitySnapshot *wsi_snapshot =
+        pdocker_device->capability_snapshot;
+    if (!pdocker_vk_wsi_transport_supported(wsi_snapshot)) {
+        trace_icd_runtime_failure(
+            "swapchain-native-wsi-transport-unavailable",
+            VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    if (!vulkan_v5_object_transport_enabled(wsi_snapshot)) {
         return unsupported_image_transport_result("vkCreateSwapchainKHR");
     }
     if (!swapchain_create_pnext_noop(pCreateInfo)) {
@@ -34279,18 +36255,14 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSwapchainKHR(
         trace_icd_runtime_failure("swapchain-flags-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }
-    PdockerVkSurface *surface = surface_handle_lookup_for_device(device, pCreateInfo->surface);
+    PdockerVkSurface *surface =
+        surface_handle_lookup_for_device(device, pCreateInfo->surface);
     if (!pdocker_vk_headless_surface_valid(surface)) return VK_ERROR_SURFACE_LOST_KHR;
-    if (pCreateInfo->oldSwapchain != VK_NULL_HANDLE) {
-        PdockerVkSwapchain *old_swapchain = swapchain_handle_lookup_for_device(device, pCreateInfo->oldSwapchain);
-        if (!pdocker_vk_headless_swapchain_valid(old_swapchain)) {
-            trace_icd_runtime_failure("swapchain-old-swapchain-invalid", VK_ERROR_INITIALIZATION_FAILED);
-            return VK_ERROR_INITIALIZATION_FAILED;
-        }
-        if (old_swapchain->surface != surface) {
-            trace_icd_runtime_failure("swapchain-old-surface-mismatch", VK_ERROR_SURFACE_LOST_KHR);
-            return VK_ERROR_SURFACE_LOST_KHR;
-        }
+    if (old_swapchain && old_swapchain->surface != surface) {
+        trace_icd_runtime_failure(
+            "swapchain-old-surface-mismatch",
+            VK_ERROR_SURFACE_LOST_KHR);
+        return VK_ERROR_SURFACE_LOST_KHR;
     }
     if (!pdocker_vk_headless_surface_format_supported(pCreateInfo->imageFormat,
                                                       pCreateInfo->imageColorSpace)) {
@@ -34390,7 +36362,16 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSwapchainKHR(
         swapchain->images[i] = pd_image;
         swapchain->memories[i] = memory_handle_lookup_for_device(device, memory);
     }
+    if (pdocker_vk_wsi_lock() != 0) {
+        pdocker_vk_destroy_swapchain_images(device, swapchain);
+        free(swapchain);
+        pdocker_vk_mark_device_lost(
+            pdocker_device, "swapchain-register-lock",
+            VK_ERROR_DEVICE_LOST);
+        return VK_ERROR_DEVICE_LOST;
+    }
     swapchain_register(swapchain);
+    (void)pthread_mutex_unlock(&g_wsi_mutex);
     *pSwapchain = pdocker_vk_swapchain_to_handle(swapchain);
     return VK_SUCCESS;
 }
@@ -34400,12 +36381,126 @@ VKAPI_ATTR void VKAPI_CALL vkDestroySwapchainKHR(
         VkSwapchainKHR swapchain,
         const VkAllocationCallbacks *pAllocator) {
     (void)pAllocator;
-    PdockerVkSwapchain *sc = swapchain_handle_lookup_for_device(device, swapchain);
-    if (!sc) return;
-    sc = swapchain_unregister_object(sc);
-    if (!sc) return;
-    pdocker_vk_destroy_swapchain_images(device, sc);
-    swapchain_retire(sc);
+    PdockerVkDevice *pdocker_device =
+        pdocker_vk_device_from_handle(device);
+    PdockerVkPresentCompletion
+        *completions[PDOCKER_VK_MAX_SWAPCHAIN_IMAGES] = {0};
+    size_t completion_count = 0;
+
+    if (pdocker_vk_wsi_lock() != 0) return;
+    PdockerVkSwapchain *sc =
+        swapchain_handle_lookup_for_device(device, swapchain);
+    if (!sc) {
+        (void)pthread_mutex_unlock(&g_wsi_mutex);
+        return;
+    }
+    for (uint32_t i = 0;
+         i < sc->image_count && i < PDOCKER_VK_MAX_SWAPCHAIN_IMAGES;
+         ++i) {
+        PdockerVkPresentCompletion *completion =
+            sc->present_completion[i];
+        if (!completion) continue;
+        bool already_retained = false;
+        for (size_t j = 0; j < completion_count; ++j) {
+            if (completions[j] == completion) {
+                already_retained = true;
+                break;
+            }
+        }
+        if (!already_retained) {
+            completion->refs++;
+            completions[completion_count++] = completion;
+        }
+    }
+    (void)pthread_mutex_unlock(&g_wsi_mutex);
+
+    VkResult wait_results[PDOCKER_VK_MAX_SWAPCHAIN_IMAGES];
+    for (size_t i = 0; i < completion_count; ++i) {
+        wait_results[i] = pdocker_vk_wait_present_completion_fence(
+            completions[i], UINT64_MAX);
+    }
+
+    if (pdocker_vk_wsi_lock() != 0) {
+        if (pdocker_device) {
+            pdocker_vk_mark_device_lost(
+                pdocker_device, "destroy-swapchain-relock",
+                VK_ERROR_DEVICE_LOST);
+        }
+        /* The retained references are intentionally leaked: mutating them
+         * without their mutex could free an in-flight native completion. */
+        return;
+    }
+    bool wait_failed = false;
+    for (size_t i = 0; i < completion_count; ++i) {
+        if (wait_results[i] == VK_SUCCESS) {
+            pdocker_vk_present_completion_observe_locked(completions[i]);
+        } else {
+            wait_failed = true;
+            if (pdocker_device) {
+                pdocker_vk_mark_device_lost(
+                    pdocker_device, "destroy-swapchain-present-completion",
+                    VK_ERROR_DEVICE_LOST);
+            }
+        }
+    }
+    bool destroy_completion[PDOCKER_VK_MAX_SWAPCHAIN_IMAGES] = {0};
+    if (wait_failed) {
+        /* vkDestroySwapchainKHR has no result channel. Preserve the registered
+         * swapchain and every unresolved image/memory reference; poisoning the
+         * device is safer than freeing a native present target still in use. */
+        for (size_t i = 0; i < completion_count; ++i) {
+            if (completions[i]->refs > 0) completions[i]->refs--;
+            destroy_completion[i] =
+                wait_results[i] == VK_SUCCESS &&
+                completions[i]->refs == 0;
+        }
+        (void)pthread_cond_broadcast(g_wsi_cond_current);
+        (void)pthread_mutex_unlock(&g_wsi_mutex);
+        for (size_t i = 0; i < completion_count; ++i) {
+            if (!destroy_completion[i]) continue;
+            if (!pdocker_vk_present_completion_destroy(
+                    completions[i], true) && pdocker_device) {
+                pdocker_vk_mark_device_lost(
+                    pdocker_device, "destroy-swapchain-completion-destroy",
+                    VK_ERROR_DEVICE_LOST);
+            }
+        }
+        return;
+    }
+
+    sc = swapchain_handle_lookup_for_device(device, swapchain);
+    if (sc) sc = swapchain_unregister_object(sc);
+    if (sc) {
+        for (uint32_t i = 0;
+             i < sc->image_count && i < PDOCKER_VK_MAX_SWAPCHAIN_IMAGES;
+             ++i) {
+            PdockerVkPresentCompletion *completion =
+                sc->present_completion[i];
+            if (!completion) continue;
+            sc->present_completion[i] = NULL;
+            sc->present_pending[i] = false;
+            sc->acquired[i] = false;
+            if (completion->refs > 0) completion->refs--;
+        }
+        pdocker_vk_destroy_swapchain_images(device, sc);
+        swapchain_retire(sc);
+        (void)pthread_cond_broadcast(g_wsi_cond_current);
+    }
+    for (size_t i = 0; i < completion_count; ++i) {
+        if (completions[i]->refs > 0) completions[i]->refs--;
+        destroy_completion[i] = completions[i]->refs == 0;
+    }
+    (void)pthread_mutex_unlock(&g_wsi_mutex);
+
+    for (size_t i = 0; i < completion_count; ++i) {
+        if (!destroy_completion[i]) continue;
+        if (!pdocker_vk_present_completion_destroy(
+                completions[i], true) && pdocker_device) {
+            pdocker_vk_mark_device_lost(
+                pdocker_device, "destroy-swapchain-completion-destroy",
+                VK_ERROR_DEVICE_LOST);
+        }
+    }
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkGetSwapchainImagesKHR(
@@ -34413,26 +36508,42 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetSwapchainImagesKHR(
         VkSwapchainKHR swapchain,
         uint32_t *pSwapchainImageCount,
         VkImage *pSwapchainImages) {
-    PdockerVkSwapchain *sc = swapchain_handle_lookup_for_device(device, swapchain);
     if (!pSwapchainImageCount) return VK_ERROR_INITIALIZATION_FAILED;
+    if (pdocker_vk_wsi_lock() != 0) {
+        *pSwapchainImageCount = 0;
+        return VK_ERROR_DEVICE_LOST;
+    }
+    PdockerVkSwapchain *sc =
+        swapchain_handle_lookup_for_device(device, swapchain);
+    VkResult result = VK_SUCCESS;
     if (!sc) {
         *pSwapchainImageCount = 0;
-        trace_icd_runtime_failure("swapchain-images-untracked", VK_ERROR_INITIALIZATION_FAILED);
-        return VK_ERROR_INITIALIZATION_FAILED;
-    }
-    if (!pdocker_vk_headless_swapchain_runtime_valid(sc)) {
+        result = VK_ERROR_INITIALIZATION_FAILED;
+    } else if (!pdocker_vk_headless_swapchain_runtime_valid(sc)) {
         *pSwapchainImageCount = 0;
-        trace_icd_runtime_failure("swapchain-images-invalid", VK_ERROR_OUT_OF_DATE_KHR);
-        return VK_ERROR_OUT_OF_DATE_KHR;
-    }
-    if (!pSwapchainImages) {
+        result = VK_ERROR_OUT_OF_DATE_KHR;
+    } else if (!pSwapchainImages) {
         *pSwapchainImageCount = sc->image_count;
-        return VK_SUCCESS;
+    } else {
+        uint32_t count = *pSwapchainImageCount < sc->image_count
+            ? *pSwapchainImageCount
+            : sc->image_count;
+        for (uint32_t i = 0; i < count; ++i) {
+            pSwapchainImages[i] =
+                pdocker_vk_image_to_handle(sc->images[i]);
+        }
+        *pSwapchainImageCount = count;
+        result = count < sc->image_count ? VK_INCOMPLETE : VK_SUCCESS;
     }
-    uint32_t count = *pSwapchainImageCount < sc->image_count ? *pSwapchainImageCount : sc->image_count;
-    for (uint32_t i = 0; i < count; ++i) pSwapchainImages[i] = pdocker_vk_image_to_handle(sc->images[i]);
-    *pSwapchainImageCount = count;
-    return count < sc->image_count ? VK_INCOMPLETE : VK_SUCCESS;
+    (void)pthread_mutex_unlock(&g_wsi_mutex);
+    if (result == VK_ERROR_INITIALIZATION_FAILED) {
+        trace_icd_runtime_failure(
+            "swapchain-images-untracked", result);
+    } else if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+        trace_icd_runtime_failure(
+            "swapchain-images-invalid", result);
+    }
+    return result;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkAcquireNextImageKHR(
@@ -34442,40 +36553,93 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAcquireNextImageKHR(
         VkSemaphore semaphore,
         VkFence fence,
         uint32_t *pImageIndex) {
-    (void)timeout;
     if (!pImageIndex) return VK_ERROR_INITIALIZATION_FAILED;
     *pImageIndex = UINT32_MAX;
-    PdockerVkSwapchain *sc = swapchain_handle_lookup_for_device(device, swapchain);
+    PdockerVkDevice *pdocker_device =
+        pdocker_vk_device_from_handle(device);
+    if (!pdocker_device) return VK_ERROR_INITIALIZATION_FAILED;
+    if (pdocker_vk_device_is_lost(pdocker_device)) {
+        return VK_ERROR_DEVICE_LOST;
+    }
+    const PdockerVkCapabilitySnapshot *wsi_snapshot =
+        pdocker_device->capability_snapshot;
+    if (!pdocker_vk_wsi_transport_supported(wsi_snapshot)) {
+        trace_icd_runtime_failure(
+            "acquire-next-image-native-wsi-unavailable",
+            VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    if (pdocker_vk_wsi_lock() != 0) {
+        pdocker_vk_mark_device_lost(
+            pdocker_device, "acquire-next-image-lookup-lock",
+            VK_ERROR_DEVICE_LOST);
+        return VK_ERROR_DEVICE_LOST;
+    }
+    PdockerVkSwapchain *sc =
+        swapchain_handle_lookup_for_device(device, swapchain);
+    const bool swapchain_valid =
+        pdocker_vk_headless_swapchain_runtime_valid(sc) &&
+        !sc->retired;
+    (void)pthread_mutex_unlock(&g_wsi_mutex);
     if (!sc) {
-        trace_icd_runtime_failure("acquire-next-image-swapchain-untracked", VK_ERROR_INITIALIZATION_FAILED);
+        trace_icd_runtime_failure(
+            "acquire-next-image-swapchain-untracked",
+            VK_ERROR_INITIALIZATION_FAILED);
         return VK_ERROR_INITIALIZATION_FAILED;
     }
-    if (!pdocker_vk_headless_swapchain_runtime_valid(sc)) {
-        trace_icd_runtime_failure("acquire-next-image-swapchain-invalid", VK_ERROR_OUT_OF_DATE_KHR);
+    if (!swapchain_valid) {
+        trace_icd_runtime_failure(
+            "acquire-next-image-swapchain-invalid",
+            VK_ERROR_OUT_OF_DATE_KHR);
         return VK_ERROR_OUT_OF_DATE_KHR;
     }
-    if (!pdocker_vk_acquire_sync_valid(device, semaphore, fence)) {
-        trace_icd_runtime_failure("acquire-next-image-sync-invalid", VK_ERROR_INITIALIZATION_FAILED);
-        return VK_ERROR_INITIALIZATION_FAILED;
+    VkResult sync_validate_result =
+        pdocker_vk_acquire_sync_valid(
+            pdocker_device, semaphore, fence);
+    if (sync_validate_result != VK_SUCCESS) {
+        trace_icd_runtime_failure(
+            "acquire-next-image-sync-invalid",
+            sync_validate_result);
+        return sync_validate_result;
     }
+
     uint32_t index = UINT32_MAX;
-    for (uint32_t attempt = 0; attempt < sc->image_count; ++attempt) {
-        uint32_t candidate = (sc->next_image + attempt) % sc->image_count;
-        if (!sc->acquired[candidate]) {
-            index = candidate;
-            break;
+    VkResult acquire_result =
+        pdocker_vk_swapchain_acquire_wait(sc, timeout, &index);
+    if (acquire_result == VK_ERROR_DEVICE_LOST) {
+        pdocker_vk_mark_device_lost(
+            pdocker_device, "acquire-next-image-wait",
+            acquire_result);
+    }
+    if (acquire_result != VK_SUCCESS) return acquire_result;
+
+    VkResult native_result =
+        send_executor_wsi_acquire_signal(device, semaphore, fence);
+    if (native_result != VK_SUCCESS) {
+        if (pdocker_vk_wsi_lock() != 0) {
+            pdocker_vk_mark_device_lost(
+                pdocker_device,
+                "acquire-next-image-rollback-lock",
+                VK_ERROR_DEVICE_LOST);
+            return VK_ERROR_DEVICE_LOST;
         }
+        if (index < sc->image_count) sc->acquired[index] = false;
+        (void)pthread_cond_broadcast(g_wsi_cond_current);
+        (void)pthread_mutex_unlock(&g_wsi_mutex);
+        if (native_result == VK_ERROR_DEVICE_LOST) {
+            pdocker_vk_mark_device_lost(
+                pdocker_device,
+                "acquire-next-image-native-signal-failed",
+                native_result);
+        } else {
+            trace_icd_runtime_failure(
+                "acquire-next-image-native-signal-failed",
+                native_result);
+        }
+        return native_result;
     }
-    if (index == UINT32_MAX) {
-        return timeout == 0 ? VK_NOT_READY : VK_TIMEOUT;
-    }
-    sc->acquired[index] = true;
-    sc->next_image = (index + 1u) % sc->image_count;
     *pImageIndex = index;
-    semaphore_complete_signal(semaphore_handle_lookup_for_device(device, semaphore), 0);
-    PdockerVkFence *f = fence_handle_lookup_for_device(device, fence);
-    if (f) f->signaled = true;
-    return VK_SUCCESS;
+    return native_result;
 }
 
 static bool acquire_next_image2_pnext_noop(const VkAcquireNextImageInfoKHR *info) {
@@ -34549,60 +36713,159 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueuePresentKHR(
         const VkPresentInfoKHR *pPresentInfo) {
     PdockerVkQueue *present_queue = pdocker_vk_queue_from_handle(queue);
     if (!present_queue) return VK_ERROR_INITIALIZATION_FAILED;
-    if (!pPresentInfo) return VK_ERROR_INITIALIZATION_FAILED;
-    if (pPresentInfo->sType != VK_STRUCTURE_TYPE_PRESENT_INFO_KHR) {
+    PdockerVkDevice *pdocker_device =
+        pdocker_vk_device_from_object_id(present_queue->device_object_id);
+    if (!pdocker_device) return VK_ERROR_INITIALIZATION_FAILED;
+    if (pdocker_vk_device_is_lost(pdocker_device)) {
+        return VK_ERROR_DEVICE_LOST;
+    }
+    if (!pdocker_vk_wsi_transport_supported(
+            present_queue->capability_snapshot)) {
+        trace_icd_runtime_failure(
+            "queue-present-native-wsi-unavailable",
+            VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    if (!pPresentInfo ||
+        pPresentInfo->sType != VK_STRUCTURE_TYPE_PRESENT_INFO_KHR) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
     if (!present_info_pnext_noop(pPresentInfo)) {
-        trace_icd_runtime_failure("queue-present-pnext-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
+        trace_icd_runtime_failure(
+            "queue-present-pnext-unsupported",
+            VK_ERROR_FEATURE_NOT_PRESENT);
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }
-    if (pPresentInfo->waitSemaphoreCount > 0 && !pPresentInfo->pWaitSemaphores) {
+    if ((pPresentInfo->waitSemaphoreCount > 0 &&
+         !pPresentInfo->pWaitSemaphores) ||
+        pPresentInfo->swapchainCount == 0 ||
+        !pPresentInfo->pSwapchains ||
+        !pPresentInfo->pImageIndices) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
     for (uint32_t i = 0; i < pPresentInfo->waitSemaphoreCount; ++i) {
-        PdockerVkSemaphore *sem = semaphore_handle_lookup_for_queue(present_queue, pPresentInfo->pWaitSemaphores[i]);
-        if (!sem) {
-            trace_icd_runtime_failure("queue-present-wait-semaphore-untracked", VK_ERROR_INITIALIZATION_FAILED);
+        PdockerVkSemaphore *sem = semaphore_handle_lookup_for_queue(
+            present_queue, pPresentInfo->pWaitSemaphores[i]);
+        if (!sem || !sem->executor_tracked) {
             return VK_ERROR_INITIALIZATION_FAILED;
         }
-        if (sem->timeline) {
-            trace_icd_runtime_failure("queue-present-wait-semaphore-timeline", VK_ERROR_FEATURE_NOT_PRESENT);
-            return VK_ERROR_FEATURE_NOT_PRESENT;
-        }
-        if (!semaphore_wait_satisfied(sem, 0)) {
-            trace_icd_runtime_failure("queue-present-wait-semaphore-unsignaled", VK_NOT_READY);
-            return VK_NOT_READY;
-        }
+        if (sem->timeline) return VK_ERROR_FEATURE_NOT_PRESENT;
     }
-    if (pPresentInfo->swapchainCount > 0 &&
-        (!pPresentInfo->pSwapchains || !pPresentInfo->pImageIndices)) {
-        return VK_ERROR_INITIALIZATION_FAILED;
-    }
-    if (pPresentInfo->swapchainCount == 0) return VK_ERROR_INITIALIZATION_FAILED;
+
+    bool structural_failure = false;
     VkResult aggregate = VK_SUCCESS;
+    if (pdocker_vk_wsi_lock() != 0) {
+        pdocker_vk_mark_device_lost(
+            pdocker_device, "queue-present-validate-lock",
+            VK_ERROR_DEVICE_LOST);
+        return VK_ERROR_DEVICE_LOST;
+    }
     for (uint32_t i = 0; i < pPresentInfo->swapchainCount; ++i) {
-        PdockerVkSwapchain *sc = swapchain_handle_lookup_for_queue(present_queue, pPresentInfo->pSwapchains[i]);
-        VkResult rc = sc ? pdocker_vk_present_image_result(sc, pPresentInfo->pImageIndices[i])
-                         : VK_ERROR_INITIALIZATION_FAILED;
-        if (rc == VK_SUCCESS && pdocker_vk_present_target_duplicate(pPresentInfo, i)) {
-            trace_icd_runtime_failure("queue-present-duplicate-target", VK_ERROR_OUT_OF_DATE_KHR);
-            rc = VK_ERROR_OUT_OF_DATE_KHR;
+        PdockerVkSwapchain *sc = swapchain_handle_lookup_for_queue(
+            present_queue, pPresentInfo->pSwapchains[i]);
+        uint32_t image_index = pPresentInfo->pImageIndices[i];
+        VkResult rc;
+        if (!sc || image_index >= sc->image_count ||
+            !sc->acquired[image_index] ||
+            sc->present_pending[image_index] ||
+            sc->present_completion[image_index]) {
+            structural_failure = true;
+            rc = VK_ERROR_INITIALIZATION_FAILED;
+        } else {
+            rc = pdocker_vk_present_image_result(sc, image_index);
+            if (pdocker_vk_present_target_duplicate(pPresentInfo, i)) {
+                rc = VK_ERROR_OUT_OF_DATE_KHR;
+            }
         }
         if (pPresentInfo->pResults) pPresentInfo->pResults[i] = rc;
         if (aggregate == VK_SUCCESS && rc != VK_SUCCESS) aggregate = rc;
     }
-    if (aggregate != VK_SUCCESS) return aggregate;
+    (void)pthread_mutex_unlock(&g_wsi_mutex);
+    if (structural_failure) return VK_ERROR_INITIALIZATION_FAILED;
+
+    /*
+     * OUT_OF_DATE/SURFACE_LOST is a presentation result, not permission to
+     * skip the queue operation. Every present, including a zero-wait present,
+     * is lowered to a native queue operation with an internal completion
+     * fence. Images remain PRESENT_PENDING until acquire observes that fence.
+     */
+    VkResult completion_create_result = VK_SUCCESS;
+    PdockerVkPresentCompletion *completion =
+        pdocker_vk_present_completion_create(
+            pdocker_device, &completion_create_result);
+    if (!completion) {
+        if (completion_create_result == VK_ERROR_DEVICE_LOST) {
+            pdocker_vk_mark_device_lost(
+                pdocker_device, "queue-present-completion-create",
+                completion_create_result);
+        }
+        return completion_create_result;
+    }
+
+    VkResult native_result = send_executor_wsi_present_wait(
+        present_queue,
+        pPresentInfo->waitSemaphoreCount,
+        pPresentInfo->pWaitSemaphores,
+        completion);
+    if (native_result != VK_SUCCESS) {
+        if (pPresentInfo->pResults) {
+            for (uint32_t i = 0; i < pPresentInfo->swapchainCount; ++i) {
+                pPresentInfo->pResults[i] = native_result;
+            }
+        }
+        const bool executor_object_safe_to_destroy =
+            native_result != VK_ERROR_DEVICE_LOST;
+        pdocker_vk_present_completion_destroy(
+            completion, executor_object_safe_to_destroy);
+        if (native_result == VK_ERROR_DEVICE_LOST) {
+            pdocker_vk_mark_device_lost(
+                pdocker_device, "queue-present-native-wait-failed",
+                native_result);
+        }
+        return native_result;
+    }
     for (uint32_t i = 0; i < pPresentInfo->waitSemaphoreCount; ++i) {
-        semaphore_complete_wait(semaphore_handle_lookup_for_queue(present_queue, pPresentInfo->pWaitSemaphores[i]));
+        semaphore_complete_wait(semaphore_handle_lookup_for_queue(
+            present_queue, pPresentInfo->pWaitSemaphores[i]));
     }
+
+    if (pdocker_vk_wsi_lock() != 0) {
+        /* The native operation is already queued. Do not destroy its fence
+         * while it may still be in use; poison the logical device instead. */
+        pdocker_vk_mark_device_lost(
+            pdocker_device, "queue-present-pending-lock",
+            VK_ERROR_DEVICE_LOST);
+        return VK_ERROR_DEVICE_LOST;
+    }
+    bool pending_failure = false;
     for (uint32_t i = 0; i < pPresentInfo->swapchainCount; ++i) {
-        PdockerVkSwapchain *sc = swapchain_handle_lookup_for_queue(present_queue, pPresentInfo->pSwapchains[i]);
-        if (!sc) return VK_ERROR_INITIALIZATION_FAILED;
+        if (pdocker_vk_present_target_duplicate(pPresentInfo, i)) continue;
+        PdockerVkSwapchain *sc = swapchain_handle_lookup_for_queue(
+            present_queue, pPresentInfo->pSwapchains[i]);
         uint32_t image_index = pPresentInfo->pImageIndices[i];
-        sc->acquired[image_index] = false;
+        if (!sc || image_index >= sc->image_count ||
+            !sc->acquired[image_index] ||
+            sc->present_pending[image_index] ||
+            sc->present_completion[image_index]) {
+            pending_failure = true;
+            continue;
+        }
+        sc->present_pending[image_index] = true;
+        sc->present_completion[image_index] = completion;
+        completion->refs++;
     }
-    return VK_SUCCESS;
+    const bool completion_attached = completion->refs > 0;
+    (void)pthread_cond_broadcast(g_wsi_cond_current);
+    (void)pthread_mutex_unlock(&g_wsi_mutex);
+    if (pending_failure || !completion_attached) {
+        /* Enqueue has happened but ownership tracking diverged. Continuing
+         * could expose an image before native completion. */
+        pdocker_vk_mark_device_lost(
+            pdocker_device, "queue-present-pending-state",
+            VK_ERROR_DEVICE_LOST);
+        return VK_ERROR_DEVICE_LOST;
+    }
+    return aggregate;
 }
 
 static VkResult validate_command_pool_create_info(const VkCommandPoolCreateInfo *pCreateInfo) {
@@ -34748,6 +37011,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateCommandBuffers(
         set_loader_magic_value(cmd);
         cmd->level = pAllocateInfo->level;
         cmd->owner_device_id = pool->owner_device_id;
+        const PdockerVkDevice *owner_device = pdocker_vk_device_from_handle(device);
+        cmd->capability_snapshot = owner_device
+            ? owner_device->capability_snapshot
+            : NULL;
         cmd->requested_feature_mask = pool->requested_feature_mask;
         cmd->enabled_extension_mask = pool->enabled_extension_mask;
         command_buffer_register(pool, cmd);
@@ -35785,7 +38052,7 @@ static bool append_native_classic_render_pass_begin(
         command_buffer_mark_recording_failed(cmd, "render-pass-begin-cross-device");
         return false;
     }
-    if (!executor_supports_vulkan_graphics_v634_classic_render_pass_sideband() ||
+    if (!executor_supports_vulkan_graphics_v634_classic_render_pass_sideband(cmd->capability_snapshot) ||
         !vulkan_graphics_v633_render_pass_transport_representable(rp) ||
         !prepare_classic_render_pass_tracking_state(
             cmd, rp, fb, begin->renderArea, begin->pClearValues,
@@ -35991,7 +38258,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdNextSubpass(
             return;
         }
     } else if (!cmd->render_pass_active ||
-               !executor_supports_vulkan_graphics_v634_classic_render_pass_sideband() ||
+               !executor_supports_vulkan_graphics_v634_classic_render_pass_sideband(cmd->capability_snapshot) ||
                !vulkan_graphics_v633_render_pass_transport_representable(rp) ||
                !prepare_classic_render_pass_tracking_state(
                     cmd, rp, fb, cmd->active_render_area,
@@ -36367,7 +38634,7 @@ static void record_graphics_draw_command(
         return;
     }
     uint32_t snapshot_push_size = cmd->push_constant_size;
-    const uint32_t max_push_bytes = pdocker_vk_max_push_bytes();
+    const uint32_t max_push_bytes = pdocker_vk_max_push_bytes(cmd ? cmd->capability_snapshot : NULL);
     if (snapshot_push_size > max_push_bytes) {
         snapshot_push_size = max_push_bytes;
     }
@@ -37092,8 +39359,8 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
         const uint32_t *pDynamicOffsets) {
     PdockerVkPipelineLayout *pipeline_layout = NULL;
     PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
-    const bool strict_passthrough =
-        env_truthy_default("PDOCKER_GPU_STRICT_PASSTHROUGH", false);
+    const bool strict_passthrough = cmd && cmd->capability_snapshot &&
+        cmd->capability_snapshot->strict_passthrough;
     if (!cmd) return;
     if (!pipeline_layout_handle_lookup_for_command_buffer_checked(cmd, layout, &pipeline_layout)) {
         cmd->unsupported_descriptor_set_layout = true;
@@ -37454,6 +39721,11 @@ static bool graphics_record_requires_submit_frame(uint32_t command_type) {
         case PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW:
         case PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW_INDEXED:
         case PDOCKER_GPU_GRAPHICS_V6_COMMAND_CLEAR_ATTACHMENTS:
+        case PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_QUERY_POOL:
+        case PDOCKER_GPU_GRAPHICS_V6_COMMAND_WRITE_TIMESTAMP:
+        case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_QUERY:
+        case PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_QUERY:
+        case PDOCKER_GPU_GRAPHICS_V6_COMMAND_COPY_QUERY_POOL_RESULTS:
             return true;
         default:
             return false;
@@ -37535,7 +39807,8 @@ static bool command_buffer_reject_dispatch_inside_rendering_scope(
 static void validate_strict_compute_push_constant_state_before_dispatch(
         PdockerVkCommandBuffer *cmd) {
     if (!cmd || !cmd->compute_pipeline || !cmd->compute_pipeline->layout) return;
-    if (!env_truthy_default("PDOCKER_GPU_STRICT_PASSTHROUGH", false)) return;
+    if (!cmd->capability_snapshot ||
+        !cmd->capability_snapshot->strict_passthrough) return;
     const uint32_t required = cmd->compute_pipeline->layout->push_constant_size;
     if (required == 0) return;
     if (!cmd->push_constants || cmd->push_constant_size < required) {
@@ -37797,7 +40070,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPushConstants(
         const void *pValues) {
     PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup(commandBuffer);
     if (!cmd) return;
-    const uint32_t max_push_bytes = pdocker_vk_max_push_bytes_for_stage_flags(stageFlags);
+    const uint32_t max_push_bytes = pdocker_vk_max_push_bytes_for_stage_flags(cmd->capability_snapshot, stageFlags);
     if (offset > max_push_bytes ||
         (uint64_t)size > (uint64_t)max_push_bytes - (uint64_t)offset) {
         cmd->graphics_unsupported = true;
@@ -37823,7 +40096,8 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPushConstants(
         return;
     }
     memcpy(payload, pValues, size);
-    if (env_truthy_default("PDOCKER_GPU_STRICT_PASSTHROUGH", false) &&
+    if (cmd->capability_snapshot &&
+        cmd->capability_snapshot->strict_passthrough &&
         (stageFlags & VK_SHADER_STAGE_COMPUTE_BIT) != 0) {
         if (!captured_layout) {
             free(payload);
@@ -37835,7 +40109,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPushConstants(
         if (captured_layout->push_constant_range_count == 0u ||
             !captured_layout->push_constant_ranges ||
             !pdocker_vk_push_constant_ranges_cover_stage_span(
-                captured_layout->push_constant_ranges,
+                cmd->capability_snapshot, captured_layout->push_constant_ranges,
                 captured_layout->push_constant_range_count,
                 stageFlags,
                 offset,
@@ -39940,17 +42214,158 @@ static size_t filter_submit_sync_entries_completion_only(
     return out_count;
 }
 
-static int send_vulkan_submit_sync_only_frame(
+static int send_vulkan_submit_sync_only_frame_result(
         const PdockerVkQueue *submit_queue,
         const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *entries,
-        size_t entry_count) {
-    if (entry_count == 0) return 0;
+        size_t entry_count,
+        VkResult *out_terminal_result,
+        bool *out_terminal_received) {
+    if (out_terminal_result) *out_terminal_result = VK_ERROR_UNKNOWN;
+    if (out_terminal_received) *out_terminal_received = false;
+    if (entry_count == 0) {
+        if (out_terminal_result) *out_terminal_result = VK_SUCCESS;
+        if (out_terminal_received) *out_terminal_received = true;
+        return 0;
+    }
     if (!entries) return -EINVAL;
-    PdockerVkCommandBuffer *sync_cmd = (PdockerVkCommandBuffer *)calloc(1, sizeof(*sync_cmd));
+    PdockerVkCommandBuffer *sync_cmd =
+        (PdockerVkCommandBuffer *)calloc(1, sizeof(*sync_cmd));
     if (!sync_cmd) return -ENOMEM;
-    int rc = send_recorded_vulkan_graphics_v6_1_frame(sync_cmd, submit_queue, entries, entry_count);
+    int rc = send_recorded_vulkan_graphics_v6_1_frame_result(
+        sync_cmd, submit_queue, entries, entry_count,
+        out_terminal_result, out_terminal_received);
     free(sync_cmd);
     return rc;
+}
+
+static VkResult pdocker_vk_executor_submit_result(int rc) {
+    if (rc == 0) return VK_SUCCESS;
+    if (rc == -ENOMEM) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    if (rc == -EOPNOTSUPP || rc == -ENOTSUP) {
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    /* The executor terminal response is authoritative.  A missing, malformed,
+     * or disconnected response makes native completion unknowable, so do not
+     * fabricate success from ICD shadow state. */
+    return VK_ERROR_DEVICE_LOST;
+}
+
+static VkResult pdocker_vk_generic_dispatch_result(
+        int rc, VkResult terminal_result, bool terminal_received) {
+    if (!pdocker_vk_generic_dispatch_may_have_executed()) {
+        return terminal_received
+            ? terminal_result
+            : pdocker_vk_executor_submit_result(rc);
+    }
+    /* Once a frame may have reached the native queue, any failed or missing
+     * terminal is non-retryable. The executor already maps post-enqueue V5
+     * failures to DEVICE_LOST; retain that invariant in the ICD. */
+    return rc == 0 && terminal_received && terminal_result == VK_SUCCESS
+        ? VK_SUCCESS
+        : VK_ERROR_DEVICE_LOST;
+}
+
+static VkResult send_executor_wsi_acquire_signal(
+        VkDevice device,
+        VkSemaphore semaphore,
+        VkFence fence) {
+    PdockerVkDevice *pdocker_device = NULL;
+    if (!device_handle_resolve(device, &pdocker_device) ||
+        !pdocker_device || !pdocker_device->queue ||
+        !pdocker_vk_wsi_transport_supported(pdocker_device->capability_snapshot)) {
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+
+    PdockerGpuVulkanGraphicsV619SubmitSyncEntry entries[2];
+    memset(entries, 0, sizeof(entries));
+    size_t entry_count = 0;
+    if (semaphore != VK_NULL_HANDLE) {
+        const PdockerVkSemaphore *sem =
+            semaphore_handle_lookup_for_device(device, semaphore);
+        if (!sem || sem->timeline || !sem->executor_tracked ||
+            !append_submit_sync_entry(
+                entries, &entry_count,
+                PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_SIGNAL,
+                sem, 0, 0, NULL)) {
+            return VK_ERROR_INITIALIZATION_FAILED;
+        }
+    }
+    if (fence != VK_NULL_HANDLE) {
+        const PdockerVkFence *native_fence =
+            fence_handle_lookup_for_device(device, fence);
+        if (!native_fence || !native_fence->executor_tracked ||
+            !append_submit_sync_entry(
+                entries, &entry_count,
+                PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_FENCE,
+                NULL, 0, 0, native_fence)) {
+            return VK_ERROR_INITIALIZATION_FAILED;
+        }
+    }
+    if (entry_count == 0) return VK_ERROR_INITIALIZATION_FAILED;
+    VkResult terminal_result = VK_ERROR_UNKNOWN;
+    bool terminal_received = false;
+    int rc = send_vulkan_submit_sync_only_frame_result(
+        pdocker_device->queue, entries, entry_count, &terminal_result,
+        &terminal_received);
+    return terminal_received
+        ? terminal_result
+        : pdocker_vk_executor_submit_result(rc);
+}
+
+static VkResult send_executor_wsi_present_wait(
+        const PdockerVkQueue *queue,
+        uint32_t wait_semaphore_count,
+        const VkSemaphore *wait_semaphores,
+        PdockerVkPresentCompletion *completion) {
+    if (!queue || !completion ||
+        !completion->fence.executor_tracked ||
+        !pdocker_vk_wsi_transport_supported(queue->capability_snapshot)) {
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    if ((wait_semaphore_count > 0 && !wait_semaphores) ||
+        wait_semaphore_count >=
+            PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+
+    const size_t capacity = (size_t)wait_semaphore_count + 1u;
+    PdockerGpuVulkanGraphicsV619SubmitSyncEntry *entries =
+        (PdockerGpuVulkanGraphicsV619SubmitSyncEntry *)calloc(
+            capacity, sizeof(*entries));
+    if (!entries) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    size_t entry_count = 0;
+    VkResult result = VK_SUCCESS;
+    for (uint32_t i = 0; i < wait_semaphore_count; ++i) {
+        const PdockerVkSemaphore *sem =
+            semaphore_handle_lookup_for_queue(queue, wait_semaphores[i]);
+        if (!sem || sem->timeline || !sem->executor_tracked ||
+            !append_submit_sync_entry(
+                entries, &entry_count,
+                PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_WAIT,
+                sem, 0, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, NULL)) {
+            result = VK_ERROR_INITIALIZATION_FAILED;
+            break;
+        }
+    }
+    if (result == VK_SUCCESS &&
+        !append_submit_sync_entry(
+            entries, &entry_count,
+            PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_FENCE,
+            NULL, 0, 0, &completion->fence)) {
+        result = VK_ERROR_INITIALIZATION_FAILED;
+    }
+    if (result == VK_SUCCESS) {
+        VkResult terminal_result = VK_ERROR_UNKNOWN;
+        bool terminal_received = false;
+        int rc = send_vulkan_submit_sync_only_frame_result(
+            queue, entries, entry_count, &terminal_result,
+            &terminal_received);
+        result = terminal_received
+            ? terminal_result
+            : pdocker_vk_executor_submit_result(rc);
+    }
+    free(entries);
+    return result;
 }
 
 static bool submit_device_indices_are_single_device(
@@ -40384,11 +42799,6 @@ static bool command_op_is_host_transfer_or_layout_op(PdockerVkCommandOpType type
         case PDOCKER_VK_COMMAND_CLEAR_DEPTH_STENCIL_IMAGE:
         case PDOCKER_VK_COMMAND_EVENT:
         case PDOCKER_VK_COMMAND_EVENT_WAIT:
-        case PDOCKER_VK_COMMAND_QUERY_BEGIN:
-        case PDOCKER_VK_COMMAND_QUERY_END:
-        case PDOCKER_VK_COMMAND_QUERY_RESET:
-        case PDOCKER_VK_COMMAND_QUERY_TIMESTAMP:
-        case PDOCKER_VK_COMMAND_COPY_QUERY_RESULTS:
         case PDOCKER_VK_COMMAND_IMAGE_BARRIER:
         case PDOCKER_VK_COMMAND_BARRIER:
         case PDOCKER_VK_COMMAND_FILL:
@@ -40441,7 +42851,7 @@ static VkResult execute_recorded_host_transfer_or_layout_op(
     if (!cmd || !op) return VK_SUCCESS;
     switch (op->type) {
         case PDOCKER_VK_COMMAND_COPY:
-            if (op->index < cmd->copy_op_count) execute_recorded_copy_op(&cmd->copy_ops[op->index], stats);
+            if (op->index < cmd->copy_op_count) execute_recorded_copy_op(cmd->capability_snapshot, &cmd->copy_ops[op->index], stats);
             break;
         case PDOCKER_VK_COMMAND_IMAGE_COPY:
             if (op->index < cmd->image_copy_op_count) execute_recorded_image_copy_op(&cmd->image_copy_ops[op->index], stats);
@@ -40456,7 +42866,7 @@ static VkResult execute_recorded_host_transfer_or_layout_op(
             if (op->index < cmd->image_resolve_op_count) execute_recorded_resolve_image_op(&cmd->image_resolve_ops[op->index], stats);
             break;
         case PDOCKER_VK_COMMAND_BLIT_IMAGE:
-            if (op->index < cmd->image_blit_op_count) execute_recorded_blit_image_op(&cmd->image_blit_ops[op->index], stats);
+            if (op->index < cmd->image_blit_op_count) execute_recorded_blit_image_op(cmd->capability_snapshot, &cmd->image_blit_ops[op->index], stats);
             break;
         case PDOCKER_VK_COMMAND_CLEAR_DEPTH_STENCIL_IMAGE:
             if (op->index < cmd->depth_stencil_clear_op_count) execute_recorded_clear_depth_stencil_image_op(&cmd->depth_stencil_clear_ops[op->index], stats);
@@ -40470,17 +42880,6 @@ static VkResult execute_recorded_host_transfer_or_layout_op(
             if (wait_rc != VK_SUCCESS) return wait_rc;
             break;
         }
-        case PDOCKER_VK_COMMAND_QUERY_BEGIN:
-        case PDOCKER_VK_COMMAND_QUERY_END:
-        case PDOCKER_VK_COMMAND_QUERY_RESET:
-        case PDOCKER_VK_COMMAND_QUERY_TIMESTAMP:
-            {
-                VkResult query_rc = execute_recorded_query_op(op);
-                if (query_rc != VK_SUCCESS) return query_rc;
-            }
-            break;
-        case PDOCKER_VK_COMMAND_COPY_QUERY_RESULTS:
-            break;
         case PDOCKER_VK_COMMAND_IMAGE_BARRIER:
             if (op->index < cmd->image_barrier_op_count) execute_recorded_image_barrier_op(&cmd->image_barrier_ops[op->index]);
             break;
@@ -40774,6 +43173,7 @@ static VkResult execute_recorded_dispatch_command_op(
         const PdockerVkBarrierOpRange *pre_barriers,
         uint32_t pre_barrier_dependency_flags,
         uint32_t *dispatches) {
+    g_generic_dispatch_execution_state = PDOCKER_VK_DISPATCH_NOT_ENQUEUED;
     if (!cmd || !op || op->type != PDOCKER_VK_COMMAND_DISPATCH) return VK_SUCCESS;
     if (op->index >= cmd->dispatch_op_count) return VK_SUCCESS;
     PdockerVkDispatchOp *dispatch = &cmd->dispatch_ops[op->index];
@@ -40782,7 +43182,11 @@ static VkResult execute_recorded_dispatch_command_op(
         trace_icd_runtime_failure("dispatch-missing-shader", VK_ERROR_FEATURE_NOT_PRESENT);
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }
-    int generic_rc = send_generic_vulkan_dispatch_op(dispatch, submit_queue, cmd, pre_barriers, pre_barrier_dependency_flags);
+    VkResult terminal_result = VK_ERROR_UNKNOWN;
+    bool terminal_received = false;
+    int generic_rc = send_generic_vulkan_dispatch_op(
+        dispatch, submit_queue, cmd, pre_barriers,
+        pre_barrier_dependency_flags, &terminal_result, &terminal_received);
     if (generic_rc != 0) {
         trace_icd_runtime_failure("generic-dispatch-op", generic_rc);
         if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
@@ -40798,7 +43202,11 @@ static VkResult execute_recorded_dispatch_command_op(
                     dispatch->dispatch_z,
                     dispatch->push_constant_size);
         }
-        return VK_ERROR_FEATURE_NOT_PRESENT;
+        /* A correlated V5 terminal carries the executor's exact VkResult.
+         * Socket loss, timeout, or malformed/missing terminal JSON has no
+         * authoritative result and therefore poisons the logical device. */
+        return pdocker_vk_generic_dispatch_result(
+            generic_rc, terminal_result, terminal_received);
     }
     if (dispatches) (*dispatches)++;
     return VK_SUCCESS;
@@ -41041,7 +43449,9 @@ static int send_graphics_sequence_segment(
         const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *submit_sync_entries,
         size_t submit_sync_count,
         bool first_segment,
-        bool last_segment) {
+        bool last_segment,
+        VkResult *out_terminal_result,
+        bool *out_terminal_received) {
     PdockerGpuVulkanGraphicsV619SubmitSyncEntry *segment_sync_entries =
         (PdockerGpuVulkanGraphicsV619SubmitSyncEntry *)calloc(
             PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS,
@@ -41051,7 +43461,9 @@ static int send_graphics_sequence_segment(
         submit_sync_entries, submit_sync_count,
         first_segment, last_segment, segment_sync_entries);
     int rc = send_recorded_vulkan_graphics_v6_1_frame_range(
-        cmd, submit_queue, segment_sync_entries, segment_sync_count, sequence_begin, sequence_end, !first_segment);
+        cmd, submit_queue, segment_sync_entries, segment_sync_count,
+        sequence_begin, sequence_end, !first_segment,
+        out_terminal_result, out_terminal_received);
     free(segment_sync_entries);
     return rc;
 }
@@ -41062,7 +43474,11 @@ static int execute_graphics_mixed_gpu_sequence(
         uint32_t first_gpu_op,
         uint32_t last_gpu_op,
         const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *submit_sync_entries,
-        size_t submit_sync_count) {
+        size_t submit_sync_count,
+        VkResult *out_terminal_result,
+        bool *out_terminal_received) {
+    if (out_terminal_result) *out_terminal_result = VK_ERROR_UNKNOWN;
+    if (out_terminal_received) *out_terminal_received = false;
     if (!cmd || first_gpu_op == UINT32_MAX || last_gpu_op == UINT32_MAX ||
         first_gpu_op > last_gpu_op) {
         return -EINVAL;
@@ -41090,13 +43506,23 @@ static int execute_graphics_mixed_gpu_sequence(
             int graphics_rc = send_graphics_sequence_segment(
                 cmd, submit_queue, segment_begin, op_index + 1u,
                 submit_sync_entries, submit_sync_count,
-                segment_index == 1u, segment_index == segment_total);
+                segment_index == 1u, segment_index == segment_total,
+                out_terminal_result, out_terminal_received);
             if (graphics_rc != 0) return graphics_rc;
             commit_graphics_v6_image_layout_ops_for_range(
                 cmd, segment_begin, op_index + 1u, segment_index != 1u);
         }
-        VkResult dispatch_rc = execute_recorded_dispatch_command_op(cmd, op, submit_queue, NULL, 0, NULL);
-        if (dispatch_rc != VK_SUCCESS) return -EOPNOTSUPP;
+        VkResult dispatch_rc = execute_recorded_dispatch_command_op(
+            cmd, op, submit_queue, NULL, 0, NULL);
+        if (dispatch_rc != VK_SUCCESS) {
+            if (out_terminal_result) *out_terminal_result = dispatch_rc;
+            if (out_terminal_received) *out_terminal_received = true;
+            return dispatch_rc == VK_ERROR_FEATURE_NOT_PRESENT
+                ? -EOPNOTSUPP
+                : dispatch_rc == VK_ERROR_OUT_OF_HOST_MEMORY
+                    ? -ENOMEM
+                    : -EIO;
+        }
         segment_begin = op_index + 1u;
     }
     if (command_buffer_has_executor_frame_content_in_sequence_range(
@@ -41105,7 +43531,8 @@ static int execute_graphics_mixed_gpu_sequence(
         int graphics_rc = send_graphics_sequence_segment(
             cmd, submit_queue, segment_begin, sequence_end,
             submit_sync_entries, submit_sync_count,
-            segment_index == 1u, segment_index == segment_total);
+            segment_index == 1u, segment_index == segment_total,
+            out_terminal_result, out_terminal_received);
         if (graphics_rc != 0) return graphics_rc;
         commit_graphics_v6_image_layout_ops_for_range(
             cmd, segment_begin, sequence_end, segment_index != 1u);
@@ -41149,6 +43576,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueBindSparse(
         VkFence fence) {
     PdockerVkQueue *submit_queue = pdocker_vk_queue_from_handle(queue);
     if (!submit_queue) return VK_ERROR_INITIALIZATION_FAILED;
+    PdockerVkDevice *pdocker_device =
+        pdocker_vk_device_from_object_id(submit_queue->device_object_id);
+    if (!pdocker_device) return VK_ERROR_INITIALIZATION_FAILED;
+    if (pdocker_vk_device_is_lost(pdocker_device)) {
+        return VK_ERROR_DEVICE_LOST;
+    }
     if (bindInfoCount > 0 && !pBindInfo) return VK_ERROR_INITIALIZATION_FAILED;
     if (bindInfoCount != 0) {
         trace_icd_runtime_failure("sparse-binding-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
@@ -41157,8 +43590,15 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueBindSparse(
     PdockerVkFence *submit_fence = fence_handle_lookup_for_queue(submit_queue, fence);
     if (fence != VK_NULL_HANDLE && !submit_fence) return VK_ERROR_INITIALIZATION_FAILED;
     if (submit_fence) {
+        int fence_signal_rc = send_executor_fence_signal(submit_fence);
+        if (fence_signal_rc != 0) {
+            submit_fence->signaled = false;
+            pdocker_vk_mark_device_lost(
+                pdocker_device, "queue-bind-sparse-fence-signal",
+                VK_ERROR_DEVICE_LOST);
+            return VK_ERROR_DEVICE_LOST;
+        }
         submit_fence->signaled = true;
-        (void)send_executor_fence_signal(submit_fence);
     }
     return VK_SUCCESS;
 }
@@ -41170,6 +43610,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
         VkFence fence) {
     PdockerVkQueue *submit_queue = pdocker_vk_queue_from_handle(queue);
     if (!submit_queue) return VK_ERROR_INITIALIZATION_FAILED;
+    PdockerVkDevice *pdocker_device =
+        pdocker_vk_device_from_object_id(submit_queue->device_object_id);
+    if (!pdocker_device) return VK_ERROR_INITIALIZATION_FAILED;
+    if (pdocker_vk_device_is_lost(pdocker_device)) {
+        return VK_ERROR_DEVICE_LOST;
+    }
     if (submitCount > 0 && !pSubmits) return VK_ERROR_INITIALIZATION_FAILED;
     for (uint32_t validate_i = 0; validate_i < submitCount; ++validate_i) {
         VkResult shape_rc = validate_legacy_submit_info_shape(&pSubmits[validate_i]);
@@ -41191,7 +43637,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
         VkResult validate_pnext_rc = submit_timeline_info_from_pnext(
             &pSubmits[validate_i], &validate_timeline);
         if (validate_pnext_rc != VK_SUCCESS) return validate_pnext_rc;
-        const bool allow_executor_tracked_queue_waits = bridge_available() &&
+        const bool allow_executor_tracked_queue_waits =
+            capability_snapshot_bridge_available(submit_queue->capability_snapshot) &&
             (g_submit_sync_override_entries || submit_has_executor_tracked_wait_sync(submit_queue, &pSubmits[validate_i]));
         VkResult semaphore_rc = validate_submit_wait_semaphores(
             submit_queue, &pSubmits[validate_i], validate_timeline, allow_executor_tracked_queue_waits);
@@ -41201,13 +43648,21 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
         if (semaphore_rc != VK_SUCCESS) return semaphore_rc;
     }
     if (submit_fence) submit_fence->signaled = false;
+    /*
+     * One public vkQueueSubmit call can be lowered into multiple executor and
+     * host-side operations. Once any operation has become externally visible,
+     * no later allocation/protocol failure may be returned as retry-safe:
+     * replaying the original call could execute an earlier segment twice.
+     */
+    bool queue_submit_irreversible = false;
     for (uint32_t i = 0; i < submitCount; ++i) {
         VkResult shape_rc = validate_legacy_submit_info_shape(&pSubmits[i]);
         if (shape_rc != VK_SUCCESS) return shape_rc;
         const VkTimelineSemaphoreSubmitInfo *timeline_submit = NULL;
         VkResult pnext_rc = submit_timeline_info_from_pnext(&pSubmits[i], &timeline_submit);
         if (pnext_rc != VK_SUCCESS) return pnext_rc;
-        const bool allow_executor_tracked_queue_waits = bridge_available() &&
+        const bool allow_executor_tracked_queue_waits =
+            capability_snapshot_bridge_available(submit_queue->capability_snapshot) &&
             (g_submit_sync_override_entries || submit_has_executor_tracked_wait_sync(submit_queue, &pSubmits[i]));
         VkResult semaphore_rc = validate_submit_wait_semaphores(
             submit_queue, &pSubmits[i], timeline_submit, allow_executor_tracked_queue_waits);
@@ -41219,11 +43674,27 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
             (PdockerGpuVulkanGraphicsV619SubmitSyncEntry *)calloc(
                 PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS,
                 sizeof(*submit_sync_entries));
-        if (!submit_sync_entries) return VK_ERROR_OUT_OF_HOST_MEMORY;
+        if (!submit_sync_entries) {
+            if (queue_submit_irreversible) {
+                pdocker_vk_mark_device_lost(
+                    pdocker_device, "queue-submit-post-execution-allocation",
+                    VK_ERROR_DEVICE_LOST);
+                return VK_ERROR_DEVICE_LOST;
+            }
+            return VK_ERROR_OUT_OF_HOST_MEMORY;
+        }
 #define RETURN_VK_QUEUE_SUBMIT_WITH_SYNC(rc_) \
         do { \
+            VkResult return_rc_ = (rc_); \
+            if (return_rc_ != VK_SUCCESS && queue_submit_irreversible) { \
+                return_rc_ = VK_ERROR_DEVICE_LOST; \
+            } \
+            if (return_rc_ == VK_ERROR_DEVICE_LOST) { \
+                pdocker_vk_mark_device_lost( \
+                    pdocker_device, "queue-submit-executor", return_rc_); \
+            } \
             free(submit_sync_entries); \
-            return (rc_); \
+            return return_rc_; \
         } while (0)
         size_t submit_sync_count = 0;
         if (g_submit_sync_override_entries) {
@@ -41245,9 +43716,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                                           &first_graphics_submit_sync_cmd,
                                           &last_graphics_submit_sync_cmd);
         const bool submit_has_graphics_sync_frame = first_graphics_submit_sync_cmd != UINT32_MAX;
-        const bool submit_wait_sync_needs_executor = bridge_available() &&
+        const bool submit_wait_sync_needs_executor =
+            capability_snapshot_bridge_available(submit_queue->capability_snapshot) &&
             (g_submit_sync_override_entries || submit_has_executor_tracked_wait_sync(submit_queue, &pSubmits[i]));
-        const bool submit_completion_sync_needs_executor = bridge_available() &&
+        const bool submit_completion_sync_needs_executor =
+            capability_snapshot_bridge_available(submit_queue->capability_snapshot) &&
             (g_submit_sync_override_entries || submit_has_executor_tracked_completion_sync(submit_queue, &pSubmits[i], fence));
         bool submit_waits_split_before_command_loop = false;
         if (submit_wait_sync_needs_executor &&
@@ -41261,15 +43734,28 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
             if (!submit_wait_sync_entries) RETURN_VK_QUEUE_SUBMIT_WITH_SYNC(VK_ERROR_OUT_OF_HOST_MEMORY);
             size_t submit_wait_sync_count = filter_submit_sync_entries_wait_only(
                 submit_sync_entries, submit_sync_count, submit_wait_sync_entries);
-            int submit_wait_sync_rc = send_vulkan_submit_sync_only_frame(
-                submit_queue, submit_wait_sync_entries, submit_wait_sync_count);
+            VkResult submit_wait_terminal = VK_ERROR_UNKNOWN;
+            bool submit_wait_terminal_received = false;
+            int submit_wait_sync_rc =
+                send_vulkan_submit_sync_only_frame_result(
+                    submit_queue, submit_wait_sync_entries,
+                    submit_wait_sync_count, &submit_wait_terminal,
+                    &submit_wait_terminal_received);
             free(submit_wait_sync_entries);
-            if (submit_wait_sync_rc != 0) {
-                trace_icd_runtime_failure("submit-pre-wait-sync-failed",
-                                          VK_ERROR_FEATURE_NOT_PRESENT);
-                RETURN_VK_QUEUE_SUBMIT_WITH_SYNC(VK_ERROR_FEATURE_NOT_PRESENT);
+            if (submit_wait_sync_rc != 0 ||
+                !submit_wait_terminal_received ||
+                submit_wait_terminal != VK_SUCCESS) {
+                VkResult submit_wait_result =
+                    submit_wait_terminal_received
+                        ? submit_wait_terminal
+                        : pdocker_vk_executor_submit_result(
+                            submit_wait_sync_rc);
+                trace_icd_runtime_failure(
+                    "submit-pre-wait-sync-failed", submit_wait_result);
+                RETURN_VK_QUEUE_SUBMIT_WITH_SYNC(submit_wait_result);
             }
             submit_waits_split_before_command_loop = submit_wait_sync_count > 0;
+            if (submit_wait_sync_count > 0) queue_submit_irreversible = true;
         }
         for (uint32_t j = 0; j < pSubmits[i].commandBufferCount; ++j) {
             PdockerVkCommandBuffer *cmd = command_buffer_handle_lookup_for_queue(submit_queue, pSubmits[i].pCommandBuffers[j]);
@@ -41286,7 +43772,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                 RETURN_VK_QUEUE_SUBMIT_WITH_SYNC(VK_ERROR_FEATURE_NOT_PRESENT);
             }
             if (cmd->graphics_unsupported) {
-                if (env_truthy_default("PDOCKER_VULKAN_GRAPHICS_V6_VALIDATE_PRODUCER", false)) {
+                if (cmd->capability_snapshot &&
+                    cmd->capability_snapshot->graphics_validate_producer) {
                     PdockerGpuVulkanGraphicsV619SubmitSyncEntry *frame_submit_sync_entries =
                         (PdockerGpuVulkanGraphicsV619SubmitSyncEntry *)calloc(
                             PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS,
@@ -41298,6 +43785,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                         j == last_graphics_submit_sync_cmd,
                         frame_submit_sync_entries);
                     set_submit2_metadata_command_index(j);
+                    /* This diagnostic producer has no enqueue-state output.
+                     * Entering its transport is therefore an irreversible
+                     * boundary even when the terminal is lost. */
+                    queue_submit_irreversible = true;
                     int graphics_rc = send_recorded_vulkan_graphics_v6_1_frame(
                         cmd, submit_queue, frame_submit_sync_entries, frame_submit_sync_count);
                     set_submit2_metadata_command_index(PDOCKER_GPU_GRAPHICS_V621_COMMAND_BUFFER_INDEX_NONE);
@@ -41401,24 +43892,46 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                 }
                 PdockerVkCopyStats mixed_stats;
                 memset(&mixed_stats, 0, sizeof(mixed_stats));
-                int pre_wait_sync_rc = send_vulkan_submit_sync_only_frame(
-                    submit_queue, pre_wait_sync_entries, pre_wait_sync_count);
-                if (pre_wait_sync_rc != 0) {
-                    trace_icd_runtime_failure("graphics-v6-pre-wait-sync-failed",
-                                              VK_ERROR_FEATURE_NOT_PRESENT);
+                VkResult pre_wait_terminal = VK_ERROR_UNKNOWN;
+                bool pre_wait_terminal_received = false;
+                int pre_wait_sync_rc =
+                    send_vulkan_submit_sync_only_frame_result(
+                        submit_queue, pre_wait_sync_entries,
+                        pre_wait_sync_count, &pre_wait_terminal,
+                        &pre_wait_terminal_received);
+                if (pre_wait_sync_rc != 0 ||
+                    !pre_wait_terminal_received ||
+                    pre_wait_terminal != VK_SUCCESS) {
+                    VkResult pre_wait_result =
+                        pre_wait_terminal_received
+                            ? pre_wait_terminal
+                            : pdocker_vk_executor_submit_result(
+                                pre_wait_sync_rc);
+                    trace_icd_runtime_failure(
+                        "graphics-v6-pre-wait-sync-failed", pre_wait_result);
                     FREE_MIXED_SUBMIT_SYNC_ENTRIES();
-                    RETURN_VK_QUEUE_SUBMIT_WITH_SYNC(VK_ERROR_FEATURE_NOT_PRESENT);
+                    RETURN_VK_QUEUE_SUBMIT_WITH_SYNC(pre_wait_result);
                 }
+                if (pre_wait_sync_count > 0) queue_submit_irreversible = true;
+                queue_submit_irreversible = true;
                 VkResult mixed_host_rc = execute_graphics_mixed_host_side_ops(
                     cmd, submit_queue, first_graphics_gpu_op, last_graphics_gpu_op, true, &mixed_stats);
                 if (mixed_host_rc != VK_SUCCESS) {
                     FREE_MIXED_SUBMIT_SYNC_ENTRIES();
                     RETURN_VK_QUEUE_SUBMIT_WITH_SYNC(mixed_host_rc);
                 }
+                queue_submit_irreversible = true;
                 set_submit2_metadata_command_index(j);
+                /* The mixed GPU helper can lower one logical range into more
+                 * than one executor frame. Treat entry as irreversible so a
+                 * later segment failure can never invite replay. */
+                queue_submit_irreversible = true;
+                VkResult graphics_terminal = VK_ERROR_UNKNOWN;
+                bool graphics_terminal_received = false;
                 int graphics_rc = execute_graphics_mixed_gpu_sequence(
                     cmd, submit_queue, first_graphics_gpu_op, last_graphics_gpu_op,
-                    frame_submit_sync_entries, frame_submit_sync_count);
+                    frame_submit_sync_entries, frame_submit_sync_count,
+                    &graphics_terminal, &graphics_terminal_received);
                 set_submit2_metadata_command_index(PDOCKER_GPU_GRAPHICS_V621_COMMAND_BUFFER_INDEX_NONE);
                 if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
                     fprintf(stderr,
@@ -41428,24 +43941,47 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                             (unsigned long long)mixed_stats.memmove_bytes);
                 }
                 if (graphics_rc != 0) {
-                    trace_icd_runtime_failure("graphics-v6-submit-failed",
-                                              VK_ERROR_FEATURE_NOT_PRESENT);
+                    VkResult graphics_result = graphics_terminal_received
+                        ? graphics_terminal
+                        : pdocker_vk_executor_submit_result(graphics_rc);
+                    trace_icd_runtime_failure(
+                        "graphics-v6-submit-failed", graphics_result);
                     FREE_MIXED_SUBMIT_SYNC_ENTRIES();
-                    RETURN_VK_QUEUE_SUBMIT_WITH_SYNC(VK_ERROR_FEATURE_NOT_PRESENT);
+                    RETURN_VK_QUEUE_SUBMIT_WITH_SYNC(graphics_result);
                 }
+                queue_submit_irreversible = true;
+                queue_submit_irreversible = true;
                 mixed_host_rc = execute_graphics_mixed_host_side_ops(
                     cmd, submit_queue, first_graphics_gpu_op, last_graphics_gpu_op, false, &mixed_stats);
                 if (mixed_host_rc != VK_SUCCESS) {
                     FREE_MIXED_SUBMIT_SYNC_ENTRIES();
                     RETURN_VK_QUEUE_SUBMIT_WITH_SYNC(mixed_host_rc);
                 }
-                int deferred_sync_rc = send_vulkan_submit_sync_only_frame(
-                    submit_queue, deferred_completion_sync_entries, deferred_completion_sync_count);
-                if (deferred_sync_rc != 0) {
-                    trace_icd_runtime_failure("graphics-v6-deferred-completion-sync-failed",
-                                              VK_ERROR_FEATURE_NOT_PRESENT);
+                queue_submit_irreversible = true;
+                VkResult deferred_terminal = VK_ERROR_UNKNOWN;
+                bool deferred_terminal_received = false;
+                int deferred_sync_rc =
+                    send_vulkan_submit_sync_only_frame_result(
+                        submit_queue, deferred_completion_sync_entries,
+                        deferred_completion_sync_count,
+                        &deferred_terminal,
+                        &deferred_terminal_received);
+                if (deferred_sync_rc != 0 ||
+                    !deferred_terminal_received ||
+                    deferred_terminal != VK_SUCCESS) {
+                    VkResult deferred_result =
+                        deferred_terminal_received
+                            ? deferred_terminal
+                            : pdocker_vk_executor_submit_result(
+                                deferred_sync_rc);
+                    trace_icd_runtime_failure(
+                        "graphics-v6-deferred-completion-sync-failed",
+                        deferred_result);
                     FREE_MIXED_SUBMIT_SYNC_ENTRIES();
-                    RETURN_VK_QUEUE_SUBMIT_WITH_SYNC(VK_ERROR_FEATURE_NOT_PRESENT);
+                    RETURN_VK_QUEUE_SUBMIT_WITH_SYNC(deferred_result);
+                }
+                if (deferred_completion_sync_count > 0) {
+                    queue_submit_irreversible = true;
                 }
                 FREE_MIXED_SUBMIT_SYNC_ENTRIES();
 #undef FREE_MIXED_SUBMIT_SYNC_ENTRIES
@@ -41471,7 +44007,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                     switch (op->type) {
                         case PDOCKER_VK_COMMAND_COPY:
                             if (op->index < cmd->copy_op_count) {
-                                execute_recorded_copy_op(&cmd->copy_ops[op->index], &stats);
+                                execute_recorded_copy_op(cmd->capability_snapshot, &cmd->copy_ops[op->index], &stats);
                             }
                             break;
                         case PDOCKER_VK_COMMAND_IMAGE_COPY:
@@ -41501,6 +44037,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                         case PDOCKER_VK_COMMAND_BLIT_IMAGE:
                             if (op->index < cmd->image_blit_op_count) {
                                 execute_recorded_blit_image_op(
+                                    cmd->capability_snapshot,
                                     &cmd->image_blit_ops[op->index], &stats);
                             }
                             break;
@@ -41533,13 +44070,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                         case PDOCKER_VK_COMMAND_QUERY_END:
                         case PDOCKER_VK_COMMAND_QUERY_RESET:
                         case PDOCKER_VK_COMMAND_QUERY_TIMESTAMP:
-                            {
-                                VkResult query_rc = execute_recorded_query_op(op);
-                                if (query_rc != VK_SUCCESS) RETURN_VK_QUEUE_SUBMIT_WITH_SYNC(query_rc);
-                            }
-                            break;
                         case PDOCKER_VK_COMMAND_COPY_QUERY_RESULTS:
-                            break;
+                            trace_icd_runtime_failure(
+                                "query-command-bypassed-executor",
+                                VK_ERROR_FEATURE_NOT_PRESENT);
+                            RETURN_VK_QUEUE_SUBMIT_WITH_SYNC(
+                                VK_ERROR_FEATURE_NOT_PRESENT);
                         case PDOCKER_VK_COMMAND_GRAPHICS_DRAW:
                             trace_icd_runtime_failure("graphics-draw-unimplemented",
                                                       VK_ERROR_FEATURE_NOT_PRESENT);
@@ -41564,6 +44100,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                             break;
                         case PDOCKER_VK_COMMAND_DISPATCH: {
                             VkResult dispatch_rc = execute_recorded_dispatch_command_op(cmd, op, submit_queue, &pending_compute_barriers, pending_compute_dependency_flags, &dispatches);
+                            if (pdocker_vk_generic_dispatch_may_have_executed()) {
+                                queue_submit_irreversible = true;
+                            }
                             if (dispatch_rc != VK_SUCCESS) RETURN_VK_QUEUE_SUBMIT_WITH_SYNC(dispatch_rc);
                             execute_recorded_image_barriers_in_range(cmd, &pending_compute_barriers);
                             break;
@@ -41579,6 +44118,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                             }
                             break;
                     }
+                    queue_submit_irreversible = true;
                     if (op->type == PDOCKER_VK_COMMAND_DISPATCH) {
                         reset_barrier_op_range(&pending_compute_barriers);
                         pending_compute_dependency_flags = 0;
@@ -41607,6 +44147,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                 continue;
             }
             execute_recorded_copy_ops(cmd);
+            if (cmd->copy_op_count > 0) queue_submit_irreversible = true;
             if (!cmd->has_dispatch) {
                 if (trace_allocations()) {
                     fprintf(stderr, "pdocker-vulkan-icd: queue-submit transfer-only command buffer\n");
@@ -41626,8 +44167,15 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                 if (all_generic) {
                     for (uint32_t op_index = 0; op_index < cmd->dispatch_op_count; ++op_index) {
                         PdockerVkDispatchOp *op = &cmd->dispatch_ops[op_index];
-                        int generic_rc = send_generic_vulkan_dispatch_op(op, submit_queue, NULL, NULL, 0);
+                        VkResult terminal_result = VK_ERROR_UNKNOWN;
+                        bool terminal_received = false;
+                        int generic_rc = send_generic_vulkan_dispatch_op(
+                            op, submit_queue, NULL, NULL, 0,
+                            &terminal_result, &terminal_received);
                         if (generic_rc != 0) {
+                            if (pdocker_vk_generic_dispatch_may_have_executed()) {
+                                queue_submit_irreversible = true;
+                            }
                             trace_icd_runtime_failure("generic-dispatch-list", generic_rc);
                             if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
                                 fprintf(stderr,
@@ -41642,8 +44190,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                                         op->dispatch_z,
                                         op->push_constant_size);
                             }
-                            RETURN_VK_QUEUE_SUBMIT_WITH_SYNC(VK_ERROR_FEATURE_NOT_PRESENT);
+                            RETURN_VK_QUEUE_SUBMIT_WITH_SYNC(
+                                pdocker_vk_generic_dispatch_result(
+                                    generic_rc, terminal_result, terminal_received));
                         }
+                        queue_submit_irreversible = true;
                     }
                     if ((trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) &&
                         cmd->dispatch_op_count > 1) {
@@ -41655,8 +44206,17 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                 }
             }
             if (cmd->compute_pipeline && cmd->compute_pipeline->shader && cmd->compute_pipeline->shader->code_size > sizeof(uint32_t)) {
-                int generic_rc = send_generic_vulkan_dispatch(cmd, submit_queue);
-                if (generic_rc == 0) continue;
+                VkResult terminal_result = VK_ERROR_UNKNOWN;
+                bool terminal_received = false;
+                int generic_rc = send_generic_vulkan_dispatch(
+                    cmd, submit_queue, &terminal_result, &terminal_received);
+                if (generic_rc == 0) {
+                    queue_submit_irreversible = true;
+                    continue;
+                }
+                if (pdocker_vk_generic_dispatch_may_have_executed()) {
+                    queue_submit_irreversible = true;
+                }
                 trace_icd_runtime_failure("generic-dispatch-single", generic_rc);
                 if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
                     fprintf(stderr,
@@ -41669,7 +44229,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                             cmd->dispatch_z,
                             cmd->push_constant_size);
                 }
-                RETURN_VK_QUEUE_SUBMIT_WITH_SYNC(VK_ERROR_FEATURE_NOT_PRESENT);
+                RETURN_VK_QUEUE_SUBMIT_WITH_SYNC(
+                    pdocker_vk_generic_dispatch_result(
+                        generic_rc, terminal_result, terminal_received));
             }
             trace_icd_runtime_failure("vulkan-dispatch-legacy-vector-add-fallback-rejected",
                                       VK_ERROR_FEATURE_NOT_PRESENT);
@@ -41684,22 +44246,49 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
             if (!submit_completion_sync_entries) RETURN_VK_QUEUE_SUBMIT_WITH_SYNC(VK_ERROR_OUT_OF_HOST_MEMORY);
             size_t submit_completion_sync_count = filter_submit_sync_entries_completion_only(
                 submit_sync_entries, submit_sync_count, submit_completion_sync_entries);
-            int submit_completion_sync_rc = send_vulkan_submit_sync_only_frame(
-                submit_queue, submit_completion_sync_entries, submit_completion_sync_count);
+            VkResult completion_terminal = VK_ERROR_UNKNOWN;
+            bool completion_terminal_received = false;
+            int submit_completion_sync_rc =
+                send_vulkan_submit_sync_only_frame_result(
+                    submit_queue, submit_completion_sync_entries,
+                    submit_completion_sync_count,
+                    &completion_terminal,
+                    &completion_terminal_received);
             free(submit_completion_sync_entries);
-            if (submit_completion_sync_rc != 0) {
-                trace_icd_runtime_failure("submit-completion-sync-failed",
-                                          VK_ERROR_FEATURE_NOT_PRESENT);
-                RETURN_VK_QUEUE_SUBMIT_WITH_SYNC(VK_ERROR_FEATURE_NOT_PRESENT);
+            if (submit_completion_sync_rc != 0 ||
+                !completion_terminal_received ||
+                completion_terminal != VK_SUCCESS) {
+                VkResult completion_result =
+                    completion_terminal_received
+                        ? completion_terminal
+                        : pdocker_vk_executor_submit_result(
+                            submit_completion_sync_rc);
+                trace_icd_runtime_failure(
+                    "submit-completion-sync-failed", completion_result);
+                RETURN_VK_QUEUE_SUBMIT_WITH_SYNC(completion_result);
+            }
+            if (submit_completion_sync_count > 0) {
+                queue_submit_irreversible = true;
             }
         }
         free(submit_sync_entries);
 #undef RETURN_VK_QUEUE_SUBMIT_WITH_SYNC
         complete_submit_semaphores(submit_queue, &pSubmits[i], timeline_submit);
+        if (pSubmits[i].waitSemaphoreCount > 0 ||
+            pSubmits[i].signalSemaphoreCount > 0) {
+            queue_submit_irreversible = true;
+        }
     }
     if (submit_fence) {
+        int fence_signal_rc = send_executor_fence_signal(submit_fence);
+        if (fence_signal_rc != 0) {
+            submit_fence->signaled = false;
+            pdocker_vk_mark_device_lost(
+                pdocker_device, "queue-submit-fence-signal",
+                VK_ERROR_DEVICE_LOST);
+            return VK_ERROR_DEVICE_LOST;
+        }
         submit_fence->signaled = true;
-        (void)send_executor_fence_signal(submit_fence);
     }
     return VK_SUCCESS;
 }
@@ -41729,7 +44318,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2(
         }
         VkResult validate_rc = validate_submit2_info_shape(src);
         if (validate_rc != VK_SUCCESS) return validate_rc;
-        validate_rc = validate_submit2_wait_semaphores(submit_queue, src, bridge_available());
+        validate_rc = validate_submit2_wait_semaphores(
+            submit_queue, src,
+            capability_snapshot_bridge_available(submit_queue->capability_snapshot));
         if (validate_rc != VK_SUCCESS) return validate_rc;
         validate_rc = validate_submit2_command_buffers(submit_queue, src);
         if (validate_rc != VK_SUCCESS) return validate_rc;
@@ -41780,7 +44371,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2(
             free_submit2_command_arrays(submit2_cmd_arrays, submitCount);
             return rc;
         }
-        rc = validate_submit2_wait_semaphores(submit_queue, src, bridge_available());
+        rc = validate_submit2_wait_semaphores(
+            submit_queue, src,
+            capability_snapshot_bridge_available(submit_queue->capability_snapshot));
         if (rc != VK_SUCCESS) {
             free_submit2_command_arrays(submit2_cmd_arrays, submitCount);
             return rc;
@@ -41842,16 +44435,70 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2(
 VKAPI_ATTR VkResult VKAPI_CALL vkQueueWaitIdle(VkQueue queue) {
     PdockerVkQueue *submit_queue = pdocker_vk_queue_from_handle(queue);
     if (!submit_queue) return VK_ERROR_INITIALIZATION_FAILED;
-    (void)submit_queue;
-    return VK_SUCCESS;
+    PdockerVkDevice *device =
+        pdocker_vk_device_from_object_id(submit_queue->device_object_id);
+    if (!device) return VK_ERROR_INITIALIZATION_FAILED;
+    if (pdocker_vk_device_is_lost(device)) return VK_ERROR_DEVICE_LOST;
+
+    VkResult native_result = VK_ERROR_UNKNOWN;
+    int transport_rc = send_executor_idle_command(
+        submit_queue->capability_snapshot,
+        "VULKAN_QUEUE_WAIT_IDLE\n",
+        "vulkan-queue-wait-idle",
+        &native_result);
+    if (transport_rc != 0) {
+        pdocker_vk_mark_device_lost(
+            device, "queue-wait-idle-transport",
+            VK_ERROR_DEVICE_LOST);
+        return VK_ERROR_DEVICE_LOST;
+    }
+    if (native_result != VK_SUCCESS &&
+        native_result != VK_ERROR_DEVICE_LOST) {
+        pdocker_vk_mark_device_lost(
+            device, "queue-wait-idle-protocol",
+            VK_ERROR_DEVICE_LOST);
+        return VK_ERROR_DEVICE_LOST;
+    }
+    if (native_result == VK_ERROR_DEVICE_LOST) {
+        pdocker_vk_mark_device_lost(
+            device, "queue-wait-idle-native", native_result);
+    }
+    return native_result;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkDeviceWaitIdle(VkDevice device) {
-    uint64_t owner_device_id = 0;
-    if (!device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0) {
-        return VK_ERROR_INITIALIZATION_FAILED;
+    PdockerVkDevice *pdocker_device =
+        pdocker_vk_device_from_handle(device);
+    if (!pdocker_device) return VK_ERROR_INITIALIZATION_FAILED;
+    if (pdocker_vk_device_is_lost(pdocker_device)) {
+        return VK_ERROR_DEVICE_LOST;
     }
-    return VK_SUCCESS;
+
+    VkResult native_result = VK_ERROR_UNKNOWN;
+    int transport_rc = send_executor_idle_command(
+        pdocker_device->capability_snapshot,
+        "VULKAN_DEVICE_WAIT_IDLE\n",
+        "vulkan-device-wait-idle",
+        &native_result);
+    if (transport_rc != 0) {
+        pdocker_vk_mark_device_lost(
+            pdocker_device, "device-wait-idle-transport",
+            VK_ERROR_DEVICE_LOST);
+        return VK_ERROR_DEVICE_LOST;
+    }
+    if (native_result != VK_SUCCESS &&
+        native_result != VK_ERROR_DEVICE_LOST) {
+        pdocker_vk_mark_device_lost(
+            pdocker_device, "device-wait-idle-protocol",
+            VK_ERROR_DEVICE_LOST);
+        return VK_ERROR_DEVICE_LOST;
+    }
+    if (native_result == VK_ERROR_DEVICE_LOST) {
+        pdocker_vk_mark_device_lost(
+            pdocker_device, "device-wait-idle-native",
+            native_result);
+    }
+    return native_result;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateEvent(
@@ -41882,8 +44529,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateEvent(
     memset(event, 0, sizeof(*event));
     event->signaled = false;
     event->owner_device_id = owner_device_id;
+    event->capability_snapshot = device_capability_snapshot(device);
     event->event_id = next_vulkan_object_generation();
-    if (bridge_available()) {
+    if (capability_snapshot_bridge_available(event->capability_snapshot)) {
         if (send_executor_event_create(event) != 0) {
             free(event);
             return VK_ERROR_INITIALIZATION_FAILED;
@@ -42882,9 +45530,8 @@ static bool query_range_valid(
         uint32_t queryCount) {
     return pool &&
            !pool->destroyed &&
-           pool->values &&
-           pool->available &&
-           pool->active &&
+           pool->executor_tracked &&
+           pool->pool_id != 0 &&
            firstQuery <= pool->query_count &&
            queryCount <= pool->query_count - firstQuery;
 }
@@ -42937,73 +45584,14 @@ static bool query_pool_type_supports_command(
     }
 }
 
-static bool query_control_flags_supported(VkQueryControlFlags flags) {
+static bool query_control_flags_supported(
+        const PdockerVkCapabilitySnapshot *snapshot,
+        VkQueryControlFlags flags) {
     if ((flags & ~VK_QUERY_CONTROL_PRECISE_BIT) != 0) return false;
     if ((flags & VK_QUERY_CONTROL_PRECISE_BIT) == 0) return true;
     VkPhysicalDeviceFeatures features;
-    fill_physical_device_features(&features);
+    fill_physical_device_features(snapshot, &features);
     return features.occlusionQueryPrecise == VK_TRUE;
-}
-
-static void reset_query_range(
-        PdockerVkQueryPool *pool,
-        uint32_t firstQuery,
-        uint32_t queryCount) {
-    if (!query_range_valid(pool, firstQuery, queryCount)) return;
-    for (uint32_t i = 0; i < queryCount; ++i) {
-        uint32_t q = firstQuery + i;
-        pool->values[q] = 0;
-        pool->available[q] = 0;
-        pool->active[q] = 0;
-        if (pool->result_entries) {
-            pool->result_entries[q].value = 0;
-            pool->result_entries[q].available = 0;
-            pool->result_entries[q].status = 0;
-        }
-    }
-}
-
-static VkResult execute_recorded_query_op(PdockerVkCommandOp *op) {
-    if (!op || !op->query_pool ||
-        !query_range_valid(op->query_pool, op->query_index, op->query_count)) {
-        trace_icd_runtime_failure("query-command-stale-pool",
-                                  VK_ERROR_INITIALIZATION_FAILED);
-        return VK_ERROR_INITIALIZATION_FAILED;
-    }
-    PdockerVkQueryPool *pool = op->query_pool;
-    switch (op->type) {
-        case PDOCKER_VK_COMMAND_QUERY_BEGIN:
-            pool->active[op->query_index] = 1;
-            pool->available[op->query_index] = 0;
-            break;
-        case PDOCKER_VK_COMMAND_QUERY_END:
-            pool->active[op->query_index] = 0;
-            pool->values[op->query_index] = monotonic_ns();
-            pool->available[op->query_index] = 1;
-            if (pool->result_entries) {
-                pool->result_entries[op->query_index].value = pool->values[op->query_index];
-                pool->result_entries[op->query_index].available = 1;
-                pool->result_entries[op->query_index].status = VK_SUCCESS;
-            }
-            break;
-        case PDOCKER_VK_COMMAND_QUERY_RESET:
-            reset_query_range(pool, op->query_index, op->query_count);
-            break;
-        case PDOCKER_VK_COMMAND_QUERY_TIMESTAMP:
-            (void)op->query_stage_mask;
-            pool->values[op->query_index] = monotonic_ns();
-            pool->available[op->query_index] = 1;
-            pool->active[op->query_index] = 0;
-            if (pool->result_entries) {
-                pool->result_entries[op->query_index].value = pool->values[op->query_index];
-                pool->result_entries[op->query_index].available = 1;
-                pool->result_entries[op->query_index].status = VK_SUCCESS;
-            }
-            break;
-        default:
-            break;
-    }
-    return VK_SUCCESS;
 }
 
 static void record_query_command(
@@ -43031,7 +45619,7 @@ static void record_query_command(
         return;
     }
     if (type == PDOCKER_VK_COMMAND_QUERY_BEGIN &&
-        !query_control_flags_supported((VkQueryControlFlags)stageMask)) {
+        !query_control_flags_supported(cmd->capability_snapshot, (VkQueryControlFlags)stageMask)) {
         command_buffer_mark_recording_failed(cmd, "query-control-flags-unsupported");
         return;
     }
@@ -43129,7 +45717,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateQueryPool(
         pCreateInfo->queryCount > PDOCKER_VK_MAX_QUERY_COUNT) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
-    if (pCreateInfo->pNext) return unsupported_create_info_pnext_result("vkCreateQueryPool", pCreateInfo->pNext);
+    if (pCreateInfo->pNext) {
+        return unsupported_create_info_pnext_result(
+            "vkCreateQueryPool", pCreateInfo->pNext);
+    }
     if (pCreateInfo->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;
     if (pCreateInfo->pipelineStatistics != 0) {
         trace_icd_runtime_failure("query-pipeline-statistics-unsupported",
@@ -43142,44 +45733,82 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateQueryPool(
                                   VK_ERROR_FEATURE_NOT_PRESENT);
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }
-    uint64_t owner_device_id = 0;
-    if (!device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0) {
-        return VK_ERROR_INITIALIZATION_FAILED;
+    PdockerVkDevice *pdocker_device =
+        pdocker_vk_device_from_handle(device);
+    if (!pdocker_device) return VK_ERROR_INITIALIZATION_FAILED;
+    if (pdocker_vk_device_is_lost(pdocker_device)) {
+        return VK_ERROR_DEVICE_LOST;
     }
+    uint64_t owner_device_id = pdocker_device->object_id;
+    const PdockerVkCapabilitySnapshot *snapshot =
+        device_capability_snapshot(device);
+    if (!snapshot || !capability_snapshot_bridge_available(snapshot)) {
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+
     PdockerVkQueryPool *pool = pdocker_alloc_handle(sizeof(*pool));
     if (!pool) return VK_ERROR_OUT_OF_HOST_MEMORY;
     pool->owner_device_id = owner_device_id;
+    pool->capability_snapshot = snapshot;
     pool->type = pCreateInfo->queryType;
     pool->query_count = pCreateInfo->queryCount;
-    pool->pool_id = next_vulkan_query_pool_id();
     pool->result_fd = -1;
-    pool->result_size = (size_t)pool->query_count * sizeof(PdockerGpuVulkanGraphicsV617QueryResultEntry);
-    pool->values = calloc(pool->query_count, sizeof(pool->values[0]));
-    pool->available = calloc(pool->query_count, sizeof(pool->available[0]));
-    pool->active = calloc(pool->query_count, sizeof(pool->active[0]));
-    if (pool->result_size && pool->result_size / sizeof(PdockerGpuVulkanGraphicsV617QueryResultEntry) == pool->query_count) {
-        pool->result_fd = create_shared_fd(pool->result_size);
-        if (pool->result_fd >= 0) {
-            void *mapped = mmap(NULL, pool->result_size, PROT_READ | PROT_WRITE, MAP_SHARED, pool->result_fd, 0);
-            if (mapped != MAP_FAILED) {
-                pool->result_entries = (PdockerGpuVulkanGraphicsV617QueryResultEntry *)mapped;
-                memset(pool->result_entries, 0, pool->result_size);
-            } else {
-                close(pool->result_fd);
-                pool->result_fd = -1;
-            }
-        }
-    }
-    if (!pool->values || !pool->available || !pool->active || !pool->result_entries) {
-        free(pool->values);
-        free(pool->available);
-        free(pool->active);
-        if (pool->result_entries) munmap(pool->result_entries, pool->result_size);
-        if (pool->result_fd >= 0) close(pool->result_fd);
+    if (!checked_mul_size(
+            (size_t)pool->query_count,
+            sizeof(PdockerGpuVulkanGraphicsV617QueryResultEntry),
+            &pool->result_size) || pool->result_size == 0) {
         free(pool);
         return VK_ERROR_OUT_OF_HOST_MEMORY;
     }
-    query_pool_register(pool);
+    pool->result_fd = create_shared_fd(snapshot, pool->result_size);
+    if (pool->result_fd >= 0) {
+        void *mapped = mmap(NULL, pool->result_size,
+                            PROT_READ | PROT_WRITE, MAP_SHARED,
+                            pool->result_fd, 0);
+        if (mapped != MAP_FAILED) {
+            pool->result_entries =
+                (PdockerGpuVulkanGraphicsV617QueryResultEntry *)mapped;
+            memset(pool->result_entries, 0, pool->result_size);
+        } else {
+            close(pool->result_fd);
+            pool->result_fd = -1;
+        }
+    }
+    if (!pool->result_entries) {
+        query_pool_release_resources(pool);
+        free(pool);
+        return VK_ERROR_OUT_OF_HOST_MEMORY;
+    }
+
+    VkResult native_result = VK_ERROR_UNKNOWN;
+    uint64_t executor_pool_id = 0;
+    int transport_rc = send_executor_query_pool_create(
+        snapshot, pCreateInfo, &native_result, &executor_pool_id);
+    if (transport_rc != 0 || native_result != VK_SUCCESS ||
+        executor_pool_id == 0) {
+        query_pool_release_resources(pool);
+        free(pool);
+        if (transport_rc == -ENOMEM) return VK_ERROR_OUT_OF_HOST_MEMORY;
+        if (transport_rc != 0 || executor_pool_id == 0) {
+            pdocker_vk_mark_device_lost(
+                pdocker_device, "query-pool-create-transport",
+                VK_ERROR_DEVICE_LOST);
+            return VK_ERROR_DEVICE_LOST;
+        }
+        if (native_result == VK_ERROR_DEVICE_LOST) {
+            pdocker_vk_mark_device_lost(
+                pdocker_device, "query-pool-create-native",
+                native_result);
+        }
+        return native_result;
+    }
+
+    pool->pool_id = executor_pool_id;
+    pool->executor_tracked = true;
+    if (!query_pool_register(pool)) {
+        destroy_query_pool_executor_and_retire(pool);
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
     *pQueryPool = pdocker_vk_query_pool_to_handle(pool);
     return VK_SUCCESS;
 }
@@ -43189,11 +45818,12 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyQueryPool(
         VkQueryPool queryPool,
         const VkAllocationCallbacks *pAllocator) {
     (void)pAllocator;
-    PdockerVkQueryPool *pool = query_pool_handle_lookup_for_device(device, queryPool);
+    PdockerVkQueryPool *pool =
+        query_pool_handle_lookup_for_device(device, queryPool);
     if (!pool) return;
     pool = query_pool_unregister_object(pool);
     if (!pool) return;
-    query_pool_retire(pool);
+    destroy_query_pool_executor_and_retire(pool);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdBeginQuery(
@@ -43239,7 +45869,30 @@ VKAPI_ATTR void VKAPI_CALL vkResetQueryPool(
         VkQueryPool queryPool,
         uint32_t firstQuery,
         uint32_t queryCount) {
-    reset_query_range(query_pool_handle_lookup_for_device(device, queryPool), firstQuery, queryCount);
+    PdockerVkDevice *pdocker_device =
+        pdocker_vk_device_from_handle(device);
+    if (!pdocker_device ||
+        pdocker_vk_device_is_lost(pdocker_device)) {
+        return;
+    }
+    PdockerVkQueryPool *pool =
+        query_pool_handle_lookup_for_device(device, queryPool);
+    if (!query_range_valid(pool, firstQuery, queryCount) ||
+        queryCount == 0) {
+        return;
+    }
+    VkResult native_result = VK_ERROR_UNKNOWN;
+    int transport_rc = send_executor_query_pool_reset(
+        pool, firstQuery, queryCount, &native_result);
+    if (transport_rc != 0) {
+        pdocker_vk_mark_device_lost(
+            pdocker_device, "query-pool-reset-transport",
+            VK_ERROR_DEVICE_LOST);
+    } else if (native_result != VK_SUCCESS) {
+        pdocker_vk_mark_device_lost(
+            pdocker_device, "query-pool-reset-native",
+            native_result);
+    }
 }
 
 #ifdef VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME
@@ -43293,16 +45946,6 @@ VKAPI_ATTR void VKAPI_CALL vkCmdCopyQueryPoolResults(
                                       dstBuffer, dstOffset, stride, flags);
 }
 
-static void write_query_result_scalar(uint8_t *dst, bool result64, uint64_t value) {
-    if (result64) {
-        uint64_t v = value;
-        memcpy(dst, &v, sizeof(v));
-    } else {
-        uint32_t v = value > UINT32_MAX ? UINT32_MAX : (uint32_t)value;
-        memcpy(dst, &v, sizeof(v));
-    }
-}
-
 VKAPI_ATTR VkResult VKAPI_CALL vkGetQueryPoolResults(
         VkDevice device,
         VkQueryPool queryPool,
@@ -43312,61 +45955,75 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetQueryPoolResults(
         void *pData,
         VkDeviceSize stride,
         VkQueryResultFlags flags) {
-    PdockerVkQueryPool *pool = query_pool_handle_lookup_for_device(device, queryPool);
+    PdockerVkDevice *pdocker_device =
+        pdocker_vk_device_from_handle(device);
+    if (!pdocker_device) return VK_ERROR_INITIALIZATION_FAILED;
+    if (pdocker_vk_device_is_lost(pdocker_device)) {
+        return VK_ERROR_DEVICE_LOST;
+    }
+    PdockerVkQueryPool *pool =
+        query_pool_handle_lookup_for_device(device, queryPool);
     if (!pData || !query_range_valid(pool, firstQuery, queryCount)) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
     if (!query_result_flags_supported(flags)) {
-        trace_icd_runtime_failure("query-result-flags-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
+        trace_icd_runtime_failure(
+            "query-result-flags-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }
-    bool result64 = (flags & VK_QUERY_RESULT_64_BIT) != 0;
-    bool with_availability = (flags & VK_QUERY_RESULT_WITH_AVAILABILITY_BIT) != 0;
-    bool wait = (flags & VK_QUERY_RESULT_WAIT_BIT) != 0;
-    bool partial = (flags & VK_QUERY_RESULT_PARTIAL_BIT) != 0;
-    size_t scalar_size = result64 ? sizeof(uint64_t) : sizeof(uint32_t);
-    size_t item_size = scalar_size + (with_availability ? scalar_size : 0);
-    if (queryCount > 1 && stride < item_size) return VK_INCOMPLETE;
-    uint8_t *bytes = (uint8_t *)pData;
-    VkResult rc = VK_SUCCESS;
-    for (uint32_t i = 0; i < queryCount; ++i) {
-        uint64_t offset64 = 0;
-        if (!checked_mul_u64((uint64_t)i, (uint64_t)stride, &offset64) ||
-            offset64 > (uint64_t)SIZE_MAX) {
+    if (queryCount == 0) return VK_SUCCESS;
+
+    size_t scalar_size = (flags & VK_QUERY_RESULT_64_BIT)
+        ? sizeof(uint64_t) : sizeof(uint32_t);
+    size_t item_size = scalar_size;
+    if ((flags & VK_QUERY_RESULT_WITH_AVAILABILITY_BIT) != 0) {
+        if (!checked_add_size(item_size, scalar_size, &item_size)) {
             return VK_INCOMPLETE;
-        }
-        size_t offset = (size_t)offset64;
-        if (offset > dataSize || item_size > dataSize - offset) {
-            return VK_INCOMPLETE;
-        }
-        uint32_t q = firstQuery + i;
-        if (pool->result_entries && pool->result_entries[q].available) {
-            pool->values[q] = pool->result_entries[q].value;
-            pool->available[q] = 1;
-            pool->active[q] = 0;
-        }
-        if (!pool->available[q] && wait) {
-            pool->values[q] = monotonic_ns();
-            pool->available[q] = 1;
-            pool->active[q] = 0;
-            if (pool->result_entries) {
-                pool->result_entries[q].value = pool->values[q];
-                pool->result_entries[q].available = 1;
-                pool->result_entries[q].status = VK_SUCCESS;
-            }
-        }
-        if (!pool->available[q] && !partial) {
-            rc = VK_NOT_READY;
-            continue;
-        }
-        write_query_result_scalar(bytes + offset, result64, pool->values[q]);
-        if (with_availability) {
-            write_query_result_scalar(bytes + offset + scalar_size,
-                                      result64,
-                                      pool->available[q] ? 1 : 0);
         }
     }
-    return rc;
+    if (queryCount > 1 && stride < item_size) return VK_INCOMPLETE;
+    uint64_t last_offset = 0;
+    if (!checked_mul_u64(
+            (uint64_t)(queryCount - 1u), (uint64_t)stride,
+            &last_offset) ||
+        last_offset > SIZE_MAX || item_size > dataSize ||
+        (size_t)last_offset > dataSize - item_size) {
+        return VK_INCOMPLETE;
+    }
+    if (dataSize == 0) return VK_INCOMPLETE;
+
+    int result_fd = create_shared_fd(pool->capability_snapshot, dataSize);
+    if (result_fd < 0) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    void *mapping = mmap(NULL, dataSize, PROT_READ | PROT_WRITE,
+                         MAP_SHARED, result_fd, 0);
+    if (mapping == MAP_FAILED) {
+        close(result_fd);
+        return VK_ERROR_OUT_OF_HOST_MEMORY;
+    }
+    /* Preserve bytes that native Vulkan is permitted to leave untouched. */
+    memcpy(mapping, pData, dataSize);
+
+    VkResult native_result = VK_ERROR_UNKNOWN;
+    int transport_rc = send_executor_query_pool_get_results(
+        pool, firstQuery, queryCount, dataSize, stride, flags,
+        result_fd, &native_result);
+    if (transport_rc == 0) memcpy(pData, mapping, dataSize);
+    munmap(mapping, dataSize);
+    close(result_fd);
+
+    if (transport_rc == -ENOMEM) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    if (transport_rc != 0) {
+        pdocker_vk_mark_device_lost(
+            pdocker_device, "query-pool-results-transport",
+            VK_ERROR_DEVICE_LOST);
+        return VK_ERROR_DEVICE_LOST;
+    }
+    if (native_result == VK_ERROR_DEVICE_LOST) {
+        pdocker_vk_mark_device_lost(
+            pdocker_device, "query-pool-results-native",
+            native_result);
+    }
+    return native_result;
 }
 
 static VkResult validate_fence_create_pnext(const void *pNext) {
@@ -43417,8 +46074,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateFence(
     memset(fence, 0, sizeof(*fence));
     fence->signaled = (pCreateInfo->flags & VK_FENCE_CREATE_SIGNALED_BIT);
     fence->owner_device_id = owner_device_id;
+    fence->capability_snapshot = device_capability_snapshot(device);
     fence->fence_id = next_vulkan_object_generation();
-    if (bridge_available()) {
+    if (capability_snapshot_bridge_available(fence->capability_snapshot)) {
         uint32_t initial_signaled = fence->signaled ? 1u : 0u;
         if (send_executor_fence_create(fence, initial_signaled) != 0) {
             free(fence);
@@ -43453,7 +46111,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkResetFences(
     }
     VkResult validate_rc = validate_fence_handles(device, fenceCount, pFences);
     if (validate_rc != VK_SUCCESS) return validate_rc;
-    if (bridge_available()) {
+    if (capability_snapshot_bridge_available(device_capability_snapshot(device))) {
         int rc = send_executor_fence_reset(device, fenceCount, pFences);
         if (rc != 0) return VK_ERROR_DEVICE_LOST;
         for (uint32_t i = 0; i < fenceCount; ++i) {
@@ -43470,12 +46128,27 @@ VKAPI_ATTR VkResult VKAPI_CALL vkResetFences(
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkGetFenceStatus(VkDevice device, VkFence fence) {
+    PdockerVkDevice *pdocker_device =
+        pdocker_vk_device_from_handle(device);
+    if (!pdocker_device) return VK_ERROR_INITIALIZATION_FAILED;
+    if (pdocker_vk_device_is_lost(pdocker_device)) {
+        return VK_ERROR_DEVICE_LOST;
+    }
     PdockerVkFence *f = fence_handle_lookup_for_device(device, fence);
     if (!f) return VK_ERROR_INITIALIZATION_FAILED;
     if (f->signaled) return VK_SUCCESS;
     if (f->executor_tracked) {
         VkResult result = VK_ERROR_UNKNOWN;
-        if (send_executor_fence_status(f, &result) == 0) return result;
+        if (send_executor_fence_status(f, &result) == 0) {
+            if (result == VK_ERROR_DEVICE_LOST) {
+                pdocker_vk_mark_device_lost(
+                    pdocker_device, "fence-status-native", result);
+            }
+            return result;
+        }
+        pdocker_vk_mark_device_lost(
+            pdocker_device, "fence-status-transport",
+            VK_ERROR_DEVICE_LOST);
         return VK_ERROR_DEVICE_LOST;
     }
     return VK_NOT_READY;
@@ -43487,17 +46160,31 @@ VKAPI_ATTR VkResult VKAPI_CALL vkWaitForFences(
         const VkFence *pFences,
         VkBool32 waitAll,
         uint64_t timeout) {
-    uint64_t owner_device_id = 0;
-    if (!device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0) {
-        return VK_ERROR_INITIALIZATION_FAILED;
+    PdockerVkDevice *pdocker_device =
+        pdocker_vk_device_from_handle(device);
+    if (!pdocker_device) return VK_ERROR_INITIALIZATION_FAILED;
+    if (pdocker_vk_device_is_lost(pdocker_device)) {
+        return VK_ERROR_DEVICE_LOST;
     }
     VkResult validate_rc = validate_fence_handles(device, fenceCount, pFences);
     if (validate_rc != VK_SUCCESS) return validate_rc;
     if (fences_wait_satisfied(device, fenceCount, pFences, waitAll)) return VK_SUCCESS;
-    if (bridge_available()) {
+    if (capability_snapshot_bridge_available(device_capability_snapshot(device))) {
         VkResult result = VK_ERROR_UNKNOWN;
-        int rc = send_executor_fence_wait(device, fenceCount, pFences, waitAll, timeout, &result);
-        if (rc == 0) return result;
+        int rc = send_executor_fence_wait(
+            device, fenceCount, pFences, waitAll, timeout, &result);
+        if (rc == 0) {
+            if (result == VK_ERROR_DEVICE_LOST) {
+                pdocker_vk_mark_device_lost(
+                    pdocker_device, "fence-wait-native", result);
+            }
+            return result;
+        }
+        if (rc == -ENOMEM) return VK_ERROR_OUT_OF_HOST_MEMORY;
+        pdocker_vk_mark_device_lost(
+            pdocker_device, "fence-wait-transport",
+            VK_ERROR_DEVICE_LOST);
+        return VK_ERROR_DEVICE_LOST;
     }
     uint64_t start_ns = monotonic_ns();
     do {
@@ -43567,12 +46254,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSemaphore(
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }
     uint64_t owner_device_id = 0;
+    const PdockerVkCapabilitySnapshot *snapshot = device_capability_snapshot(device);
     if (!device_owner_id_or_zero_checked(device, &owner_device_id) || owner_device_id == 0) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
     if (timeline) {
         uint64_t requested_feature_mask = device_requested_feature_mask_from_handle(device);
-        if (!advertised_timeline_semaphore() ||
+        if (!advertised_timeline_semaphore(snapshot) ||
             (requested_feature_mask & PDOCKER_VK_FEATURE_TIMELINE_SEMAPHORE) == 0) {
             trace_icd_runtime_failure("timeline-semaphore-feature-not-enabled",
                                       VK_ERROR_FEATURE_NOT_PRESENT);
@@ -43586,8 +46274,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSemaphore(
     sem->value = initial_value;
     sem->signaled = timeline ? (initial_value > 0) : false;
     sem->owner_device_id = owner_device_id;
+    sem->capability_snapshot = device_capability_snapshot(device);
     sem->semaphore_id = next_vulkan_object_generation();
-    if (bridge_available()) {
+    if (capability_snapshot_bridge_available(sem->capability_snapshot)) {
         if (send_executor_semaphore_create(sem) != 0) {
             free(sem);
             return VK_ERROR_INITIALIZATION_FAILED;
@@ -43646,7 +46335,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkWaitSemaphores(
     }
     VkResult validate_rc = validate_timeline_semaphore_wait_handles(device, pWaitInfo);
     if (validate_rc != VK_SUCCESS) return validate_rc;
-    bool executor_waitable = bridge_available();
+    bool executor_waitable =
+        capability_snapshot_bridge_available(device_capability_snapshot(device));
     for (uint32_t i = 0; executor_waitable && i < pWaitInfo->semaphoreCount; ++i) {
         PdockerVkSemaphore *sem = semaphore_handle_lookup_for_device(device, pWaitInfo->pSemaphores[i]);
         executor_waitable = sem && sem->executor_tracked && sem->timeline;
@@ -43959,8 +46649,16 @@ static bool pdocker_vk_object_handle_owned_by_device(
             return validation_cache_handle_live_for_device(device, PDOCKER_VK_OBJECT_HANDLE_AS(VkValidationCacheEXT, object_handle));
 #endif
 #ifdef VK_KHR_SWAPCHAIN_EXTENSION_NAME
-        case VK_OBJECT_TYPE_SWAPCHAIN_KHR:
-            return swapchain_handle_lookup_for_device(device, PDOCKER_VK_OBJECT_HANDLE_AS(VkSwapchainKHR, object_handle)) != NULL;
+        case VK_OBJECT_TYPE_SWAPCHAIN_KHR: {
+            if (pdocker_vk_wsi_lock() != 0) return false;
+            bool valid =
+                swapchain_handle_lookup_for_device(
+                    device,
+                    PDOCKER_VK_OBJECT_HANDLE_AS(
+                        VkSwapchainKHR, object_handle)) != NULL;
+            (void)pthread_mutex_unlock(&g_wsi_mutex);
+            return valid;
+        }
 #endif
 #ifdef VK_KHR_SURFACE_EXTENSION_NAME
         case VK_OBJECT_TYPE_SURFACE_KHR:
@@ -44465,15 +47163,176 @@ static void pdocker_vk_release_memory_object(PdockerVkMemory *memory) {
         } \
     } while (0)
 
-static void pdocker_vk_destroy_device_live_objects(VkDevice device, uint64_t destroy_owner_id) {
+static bool pdocker_vk_cleanup_device_swapchains(
+        VkDevice device,
+        PdockerVkDevice *pdocker_device,
+        uint64_t destroy_owner_id) {
     while (true) {
+        PdockerVkPresentCompletion
+            *completions[PDOCKER_VK_MAX_SWAPCHAIN_IMAGES] = {0};
+        VkResult wait_results[PDOCKER_VK_MAX_SWAPCHAIN_IMAGES] = {0};
+        size_t completion_count = 0;
+
+        if (pdocker_vk_wsi_lock() != 0) {
+            pdocker_vk_mark_device_lost(
+                pdocker_device, "destroy-device-swapchain-lock",
+                VK_ERROR_DEVICE_LOST);
+            /* Leave the entire child-object graph allocated. Continuing
+             * without the WSI mutex could free images still referenced by a
+             * registered swapchain or a hidden native completion. */
+            return false;
+        }
         PdockerVkSwapchain *sc = NULL;
         PDOCKER_VK_FIND_DEVICE_OWNED(g_swapchains, sc, destroy_owner_id);
-        if (!sc) break;
-        sc = swapchain_unregister(pdocker_vk_swapchain_to_handle(sc));
-        if (!sc) break;
+        if (!sc) {
+            (void)pthread_mutex_unlock(&g_wsi_mutex);
+            return true;
+        }
+        for (uint32_t i = 0;
+             i < sc->image_count && i < PDOCKER_VK_MAX_SWAPCHAIN_IMAGES;
+             ++i) {
+            PdockerVkPresentCompletion *completion =
+                sc->present_completion[i];
+            if (!completion) continue;
+            bool already_retained = false;
+            for (size_t j = 0; j < completion_count; ++j) {
+                if (completions[j] == completion) {
+                    already_retained = true;
+                    break;
+                }
+            }
+            if (!already_retained) {
+                completion->refs++;
+                completions[completion_count++] = completion;
+            }
+        }
+        sc = swapchain_unregister_object(sc);
+        if (!sc) {
+            (void)pthread_mutex_unlock(&g_wsi_mutex);
+            pdocker_vk_mark_device_lost(
+                pdocker_device, "destroy-device-swapchain-unregister",
+                VK_ERROR_DEVICE_LOST);
+            return false;
+        }
+        if (completion_count == 0) {
+            pdocker_vk_destroy_swapchain_images(device, sc);
+            swapchain_retire(sc);
+            (void)pthread_cond_broadcast(g_wsi_cond_current);
+            (void)pthread_mutex_unlock(&g_wsi_mutex);
+            continue;
+        }
+        (void)pthread_mutex_unlock(&g_wsi_mutex);
+
+        /* Native executor waits may block indefinitely and must never hold
+         * the registry mutex. The observer refs retained above keep shared
+         * completion records alive while other swapchains are inspected. */
+        for (size_t i = 0; i < completion_count; ++i) {
+            wait_results[i] = pdocker_vk_wait_present_completion_fence(
+                completions[i], UINT64_MAX);
+        }
+
+        if (pdocker_vk_wsi_lock() != 0) {
+            pdocker_vk_mark_device_lost(
+                pdocker_device, "destroy-device-swapchain-relock",
+                VK_ERROR_DEVICE_LOST);
+            /* sc, its images, and all observer refs are intentionally leaked;
+             * mutating them without the mutex could race a shared completion. */
+            return false;
+        }
+        bool wait_failed = false;
+        for (size_t i = 0; i < completion_count; ++i) {
+            if (wait_results[i] != VK_SUCCESS) {
+                wait_failed = true;
+                break;
+            }
+        }
+        if (wait_failed) {
+            /* The swapchain was removed only to make it private during the
+             * native wait. Restore it before observing any successful shared
+             * completions. An unresolved completion may still reference its
+             * image/memory, so the complete child graph must stay registered
+             * and the device identity must remain live. */
+            swapchain_register(sc);
+            bool destroy_completed[PDOCKER_VK_MAX_SWAPCHAIN_IMAGES] = {0};
+            for (size_t i = 0; i < completion_count; ++i) {
+                if (wait_results[i] == VK_SUCCESS) {
+                    pdocker_vk_present_completion_observe_locked(completions[i]);
+                } else {
+                    pdocker_vk_mark_device_lost(
+                        pdocker_device,
+                        "destroy-device-swapchain-present-completion",
+                        VK_ERROR_DEVICE_LOST);
+                }
+                if (completions[i]->refs > 0) completions[i]->refs--;
+                destroy_completed[i] =
+                    wait_results[i] == VK_SUCCESS &&
+                    completions[i]->refs == 0;
+            }
+            (void)pthread_cond_broadcast(g_wsi_cond_current);
+            (void)pthread_mutex_unlock(&g_wsi_mutex);
+            for (size_t i = 0; i < completion_count; ++i) {
+                if (!destroy_completed[i]) continue;
+                if (!pdocker_vk_present_completion_destroy(
+                        completions[i], true)) {
+                    pdocker_vk_mark_device_lost(
+                        pdocker_device,
+                        "destroy-device-present-completion-destroy",
+                        VK_ERROR_DEVICE_LOST);
+                }
+            }
+            return false;
+        }
+
+        for (size_t i = 0; i < completion_count; ++i) {
+            pdocker_vk_present_completion_observe_locked(completions[i]);
+        }
+        for (uint32_t i = 0;
+             i < sc->image_count && i < PDOCKER_VK_MAX_SWAPCHAIN_IMAGES;
+             ++i) {
+            PdockerVkPresentCompletion *completion =
+                sc->present_completion[i];
+            if (!completion) continue;
+            sc->present_completion[i] = NULL;
+            sc->present_pending[i] = false;
+            sc->acquired[i] = false;
+            if (completion->refs > 0) completion->refs--;
+        }
         pdocker_vk_destroy_swapchain_images(device, sc);
         swapchain_retire(sc);
+        (void)pthread_cond_broadcast(g_wsi_cond_current);
+
+        bool destroy_completion[PDOCKER_VK_MAX_SWAPCHAIN_IMAGES] = {0};
+        for (size_t i = 0; i < completion_count; ++i) {
+            if (completions[i]->refs > 0) completions[i]->refs--;
+            destroy_completion[i] = completions[i]->refs == 0;
+        }
+        (void)pthread_mutex_unlock(&g_wsi_mutex);
+
+        bool destroy_failed = false;
+        for (size_t i = 0; i < completion_count; ++i) {
+            if (!destroy_completion[i]) continue;
+            if (!pdocker_vk_present_completion_destroy(
+                    completions[i], true)) {
+                /* The helper deliberately retains the local identity after an
+                 * ambiguous native destroy; keep the device and remaining
+                 * child identities alive rather than claiming full cleanup. */
+                pdocker_vk_mark_device_lost(
+                    pdocker_device,
+                    "destroy-device-present-completion-destroy",
+                    VK_ERROR_DEVICE_LOST);
+                destroy_failed = true;
+            }
+        }
+        if (destroy_failed) return false;
+    }
+}
+
+static bool pdocker_vk_destroy_device_live_objects(VkDevice device, uint64_t destroy_owner_id) {
+    PdockerVkDevice *pdocker_device =
+        pdocker_vk_device_from_handle(device);
+    if (!pdocker_vk_cleanup_device_swapchains(
+            device, pdocker_device, destroy_owner_id)) {
+        return false;
     }
     while (true) {
         PdockerVkCommandPool *pool = NULL;
@@ -44653,12 +47512,12 @@ static void pdocker_vk_destroy_device_live_objects(VkDevice device, uint64_t des
         event_retire(event);
     }
     while (true) {
-        PdockerVkQueryPool *pool = NULL;
-        PDOCKER_VK_FIND_DEVICE_OWNED(g_query_pools, pool, destroy_owner_id);
+        PdockerVkQueryPool *pool =
+            query_pool_find_owned(destroy_owner_id);
         if (!pool) break;
         pool = query_pool_unregister(pdocker_vk_query_pool_to_handle(pool));
         if (!pool) break;
-        query_pool_retire(pool);
+        destroy_query_pool_executor_and_retire(pool);
     }
 #ifdef VK_EXT_VALIDATION_CACHE_EXTENSION_NAME
     while (true) {
@@ -44680,18 +47539,21 @@ static void pdocker_vk_destroy_device_live_objects(VkDevice device, uint64_t des
         private_data_slot_free_object(slot);
     }
 #endif
+    return true;
 }
 
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetDeviceProcAddr(VkDevice device, const char *pName);
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance instance, const char *pName);
 
-static bool proc_address_hidden_by_advertisement(const char *pName) {
+static bool proc_address_hidden_by_advertisement(
+        const PdockerVkCapabilitySnapshot *snapshot,
+        const char *pName) {
     if (!pName) return true;
-    if (!advertised_api_1_4() &&
+    if (!advertised_api_1_4(snapshot) &&
         strcmp(pName, "vkCmdBindIndexBuffer2") == 0) {
         return true;
     }
-    if (!advertised_api_1_3() &&
+    if (!advertised_api_1_3(snapshot) &&
         (strcmp(pName, "vkGetDeviceBufferMemoryRequirements") == 0 ||
          strcmp(pName, "vkGetDeviceImageMemoryRequirements") == 0 ||
          strcmp(pName, "vkGetDeviceImageSparseMemoryRequirements") == 0 ||
@@ -44742,7 +47604,7 @@ static bool proc_address_hidden_by_advertisement(const char *pName) {
          strcmp(pName, "vkCmdBeginRenderingKHR") == 0 ||
          strcmp(pName, "vkCmdEndRendering") == 0 ||
          strcmp(pName, "vkCmdEndRenderingKHR") == 0) &&
-        !advertised_dynamic_rendering()) {
+        !advertised_dynamic_rendering(snapshot)) {
         return true;
     }
     if ((strcmp(pName, "vkCmdPipelineBarrier2") == 0 ||
@@ -44757,7 +47619,7 @@ static bool proc_address_hidden_by_advertisement(const char *pName) {
          strcmp(pName, "vkCmdWaitEvents2KHR") == 0 ||
          strcmp(pName, "vkCmdWriteTimestamp2") == 0 ||
          strcmp(pName, "vkCmdWriteTimestamp2KHR") == 0) &&
-        !advertised_synchronization2()) {
+        !advertised_synchronization2(snapshot)) {
         return true;
     }
     if ((strcmp(pName, "vkGetSemaphoreCounterValue") == 0 ||
@@ -44766,7 +47628,7 @@ static bool proc_address_hidden_by_advertisement(const char *pName) {
          strcmp(pName, "vkWaitSemaphoresKHR") == 0 ||
          strcmp(pName, "vkSignalSemaphore") == 0 ||
          strcmp(pName, "vkSignalSemaphoreKHR") == 0) &&
-        !advertised_timeline_semaphore()) {
+        !advertised_timeline_semaphore(snapshot)) {
         return true;
     }
     if ((strcmp(pName, "vkCmdBindVertexBuffers2") == 0 ||
@@ -44793,7 +47655,7 @@ static bool proc_address_hidden_by_advertisement(const char *pName) {
          strcmp(pName, "vkCmdSetStencilTestEnableEXT") == 0 ||
          strcmp(pName, "vkCmdSetStencilOp") == 0 ||
          strcmp(pName, "vkCmdSetStencilOpEXT") == 0) &&
-        !advertised_extended_dynamic_state()) {
+        !advertised_extended_dynamic_state(snapshot)) {
         return true;
     }
     if ((strcmp(pName, "vkCmdSetRasterizerDiscardEnable") == 0 ||
@@ -44802,30 +47664,30 @@ static bool proc_address_hidden_by_advertisement(const char *pName) {
          strcmp(pName, "vkCmdSetDepthBiasEnableEXT") == 0 ||
          strcmp(pName, "vkCmdSetPrimitiveRestartEnable") == 0 ||
          strcmp(pName, "vkCmdSetPrimitiveRestartEnableEXT") == 0) &&
-        !advertised_extended_dynamic_state2()) {
+        !advertised_extended_dynamic_state2(snapshot)) {
         return true;
     }
     if (strcmp(pName, "vkCmdSetLogicOpEXT") == 0 &&
-        !advertised_extended_dynamic_state2_logic_op()) {
+        !advertised_extended_dynamic_state2_logic_op(snapshot)) {
         return true;
     }
     if (strcmp(pName, "vkCmdSetPatchControlPointsEXT") == 0 &&
-        !advertised_extended_dynamic_state2_patch_control_points()) {
+        !advertised_extended_dynamic_state2_patch_control_points(snapshot)) {
         return true;
     }
     if ((strcmp(pName, "vkCmdDrawIndirectCount") == 0 ||
          strcmp(pName, "vkCmdDrawIndexedIndirectCount") == 0) &&
-        !(advertised_draw_indirect_count() && advertised_draw_indexed_indirect_count())) {
+        !(advertised_draw_indirect_count(snapshot) && advertised_draw_indexed_indirect_count(snapshot))) {
         return true;
     }
     if ((strcmp(pName, "vkCmdDrawIndirectCountKHR") == 0 ||
          strcmp(pName, "vkCmdDrawIndexedIndirectCountKHR") == 0) &&
-        !advertised_draw_indirect_count_khr()) {
+        !advertised_draw_indirect_count_khr(snapshot)) {
         return true;
     }
     if ((strcmp(pName, "vkCmdDrawIndirectCountAMD") == 0 ||
          strcmp(pName, "vkCmdDrawIndexedIndirectCountAMD") == 0) &&
-        !advertised_draw_indirect_count_amd()) {
+        !advertised_draw_indirect_count_amd(snapshot)) {
         return true;
     }
 #ifdef VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME
@@ -44876,8 +47738,10 @@ static bool proc_address_hidden_by_advertisement(const char *pName) {
     return false;
 }
 
-static PFN_vkVoidFunction proc_address(const char *pName) {
-    if (!pName || proc_address_hidden_by_advertisement(pName)) return NULL;
+static PFN_vkVoidFunction proc_address(
+        const PdockerVkCapabilitySnapshot *snapshot,
+        const char *pName) {
+    if (!pName || proc_address_hidden_by_advertisement(snapshot, pName)) return NULL;
 #define MAP_PROC(name) if (strcmp(pName, #name) == 0) return (PFN_vkVoidFunction)name
 #define MAP_ALIAS(alias, name) if (strcmp(pName, (alias)) == 0) return (PFN_vkVoidFunction)name
     MAP_PROC(vkGetInstanceProcAddr);
@@ -45346,10 +48210,10 @@ static bool instance_proc_address_hidden_by_enabled_state(
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance instance, const char *pName) {
     PdockerVkInstance *pdocker_instance = NULL;
     if (instance != VK_NULL_HANDLE && !instance_handle_resolve(instance, &pdocker_instance)) {
-        return instance_proc_address_is_global(pName) ? proc_address(pName) : NULL;
+        return instance_proc_address_is_global(pName) ? proc_address(NULL, pName) : NULL;
     }
     if (instance_proc_address_hidden_by_enabled_state(pdocker_instance, pName)) return NULL;
-    return proc_address(pName);
+    return proc_address(NULL, pName);
 }
 
 static bool proc_address_hidden_from_device_procaddr(const char *pName) {
@@ -45550,7 +48414,7 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetDeviceProcAddr(VkDevice device, co
     if (!device_handle_resolve(device, &pdocker_device)) return NULL;
     if (proc_address_hidden_from_device_procaddr(pName)) return NULL;
     if (device_proc_address_hidden_by_enabled_state(pdocker_device, pName)) return NULL;
-    return proc_address(pName);
+    return proc_address(pdocker_device->capability_snapshot, pName);
 }
 
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vk_icdGetInstanceProcAddr(VkInstance instance, const char *pName) {

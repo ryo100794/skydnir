@@ -1,6 +1,6 @@
 # llama.cpp GPU Bridge Next Steps
 
-Snapshot date: 2026-06-03.
+Snapshot date: 2026-07-23.
 
 This document is the handoff plan for continuing the llama.cpp GPU bridge work
 with a smaller or faster coding model.  It assumes the repository is on or
@@ -8,6 +8,82 @@ after commit `14b14fc` (`Add SPIR-V dataflow comparison tool`) and that
 llama.cpp itself remains unmodified.
 
 ## Current Ground Truth
+
+
+### 2026-07-23 persistent native query and P0 truthfulness lane
+
+The generic Vulkan bridge now owns query pools in the Android executor rather
+than recreating native pools at each submitted frame. vkCreateQueryPool,
+destroy, host reset, and result retrieval use an explicit executor control
+plane. Graphics V6.17/V6.18 replay retains the same executor-issued nonzero pool
+identity across submissions for reset, timestamp, begin/end, and copy-results
+commands. Native VkResult values are preserved, result bytes travel through a
+bounded shared descriptor, and VK_QUERY_RESULT_WAIT_BIT no longer fabricates
+availability from the container clock. A blocking native query-result wait does
+not hold the executor-wide request mutex, while registry references defer native
+destruction until in-flight replay completes.
+
+Timestamp and host-query-reset capabilities are executor-derived. The ICD
+shadows timestampComputeAndGraphics, timestampPeriod,
+queueTimestampValidBits, and hostQueryReset from the immutable capability
+snapshot. It no longer advertises the host reset feature, feature mask, or
+extension when the executor did not enable it. Query control responses require
+an exact stage, one signed 32-bit result, and one matching nonzero pool ID;
+duplicates, wrong IDs, malformed numbers, and zero successful create IDs fail
+closed.
+
+The endpoint and policy snapshot requirement from the 2026-07-21 lane is now
+implemented. Instance, physical-device, device, queue, command-buffer, and
+owned runtime objects use the frozen endpoint/capability view. SCM_RIGHTS and
+framed request reads share one monotonic deadline, close received descriptors
+on every failure path, and keep persistent queue ownership separate from
+request duplicates.
+
+Additional P0 truthfulness fixes are part of this lane:
+
+- executor fence-wait transport failure returns VK_ERROR_DEVICE_LOST; it no
+  longer falls back to stale local polling;
+- a graphics pipeline whose state cannot be represented by the transport fails
+  in vkCreateGraphicsPipelines; it is never returned as a valid handle only to
+  fail later at submit;
+- synchronization2 timestamp replay preserves the complete 64-bit
+  VkPipelineStageFlags2 value. Stage zero remains NONE, a representable legacy
+  single-bit stage uses vkCmdWriteTimestamp, and every other valid stage uses
+  vkCmdWriteTimestamp2 (or its KHR alias);
+- headless acquire and present use the same executor-owned semaphore/fence
+  identities as queue submit. They lower onto the negotiated V6.19 native
+  submit-sync ABI instead of inventing a second WSI opcode or completing
+  synchronization in ICD shadow state;
+- acquire distinguishes zero, finite, and infinite timeouts, and oldSwapchain
+  retirement occurs only after successful replacement;
+- vkQueueWaitIdle and vkDeviceWaitIdle call the Android executor, strictly
+  validate the response, and preserve the native VkResult;
+- failed void host query reset marks the logical device lost. Query-result and
+  idle APIs observe that sticky state before attempting more executor I/O.
+
+Current host evidence:
+
+- 21 persistent-query contract tests pass;
+- 10 immutable capability-snapshot tests pass;
+- 5 transport deadline/descriptor-ownership tests pass;
+- 5 updated ABI query/capability contracts pass;
+- arm64 and armhf glibc ICD strict builds pass with
+  -Wall -Wextra -Werror.
+
+The remaining P0 order is:
+
+1. finish the complete host C synchronization harness and remove only
+   demonstrably stale source-shape assertions;
+2. rebuild and freshness-check the arm64-v8a and armeabi-v7a executor and ICD
+   artifacts from these exact sources;
+3. run generic Vulkan device evidence for query, synchronization2, WSI, idle,
+   and sticky device loss;
+4. run the unchanged llama.cpp midpoint. Any failure must be classified against
+   the generic Vulkan call/data flow before another implementation change.
+
+This work remains generic Vulkan pass-through. It does not modify llama.cpp,
+Dockerfiles, models, prompts, shader modules, or arithmetic.
+
 
 ### 2026-07-21 endpoint-atomic capability and framed-response safety lane
 
@@ -5513,3 +5589,139 @@ Dockerfiles, models, prompts, SPIR-V bytes, runtime ABI, or Android device
 execution.
 
 Validation: `env -u PYTHONPATH python3 -m unittest tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_abi_hash_fields_are_classified_and_guarded_before_transport tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_abi_offset_and_range_fields_are_classified_and_guarded_before_transport tests.test_gpu_abi_contract.GpuAbiContractTest.test_vulkan_abi_extension_table_offsets_have_matching_schema_size_and_hash_fields -q`.
+
+
+### 2026-07-23 exact submit completion and WSI lifetime lane
+
+Generic Vulkan pass-through hardening now treats transport acknowledgement,
+native enqueue, native completion, and logical shadow state as separate events.
+
+For V6 graphics submission, the Android executor records native enqueue
+immediately after vkQueueSubmit/vkQueueSubmit2 succeeds, before its internal
+fence wait and before writeback. An internal wait failure is not exposed as a
+retryable queue-submit timeout or OOM: a successful queue-idle recovery proves
+completion and permits writeback; an unprovable completion becomes exact sticky
+VK_ERROR_DEVICE_LOST. Every complete V6 header receives one correlated
+vulkan-graphics-v6-replay terminal containing its submit ID and exact
+VkResult. Post-send allocation failure is transport ambiguity, not retry-safe
+host OOM.
+
+Generic V5 dispatch now follows the same terminal rule. Every fully received
+frame emits exactly one correlated vulkan-dispatch-v5-complete record with the
+exact native VkResult and execution_implemented state. The ICD requires that
+terminal for persistent and non-persistent V5 transport alike; a missing,
+malformed, or mismatched response is sticky device loss rather than an errno
+approximation or fabricated completion.
+
+The glibc ICD now tracks one queue_submit_irreversible state across every
+logical submit in a public vkQueueSubmit call. Split wait frames, mixed
+host/GPU ranges, multiple GPU segments, generic dispatches, deferred completion
+signals, later submits, and final fence signalling cannot return a recoverable
+error after an earlier side effect. Such failures poison the logical device
+instead of inviting duplicate replay.
+
+Headless WSI now keeps presented images unavailable until a hidden native fence
+is observed complete. Acquire builds a unique native wait-any set from all
+pending completions, retains completion references under the WSI mutex, waits
+outside the mutex in bounded 16 ms slices, and rebuilds the set against one
+absolute monotonic caller deadline. The deadline is resampled after every native
+wait. Native success with signaled:false, malformed response, or ambiguous
+destroy is device loss; no shared completion waiter mutates the embedded fence
+shadow outside the WSI mutex.
+
+Swapchain registry lookup, registration, unregistration, image enumeration, and
+oldSwapchain retirement use the WSI registry mutex. Device teardown now
+detaches a swapchain under that mutex, retains each unique shared completion,
+waits native fences outside the mutex, then safely observes/detaches/releases
+under the mutex. Exact completed identities are destroyed only after the last
+reference; ambiguous identities are retained. If cleanup cannot prove safety,
+vkDestroyDevice keeps the device, queue, capability snapshot, and remaining
+child graph alive rather than leaving globally registered children with
+dangling owners.
+
+Post-fork condition variables use preinitialized active/spare generations for
+both WSI and advertised-capability single-flight state. The child hook only
+switches pointers and consumes the spare; it does not allocate, initialize,
+destroy, or overwrite pthread objects. The parent prepare hook replenishes a
+spare before every fork, and the first ordinary child API can reconstruct both
+generations after allocation failure or repeated child-side forks. Failed
+pthread_atfork registration remains observable and all dependent APIs fail
+closed.
+
+Host evidence at this checkpoint:
+
+- focused protocol/WSI/query/timestamp/capability/deadline suite: 101 tests,
+  all passed;
+- focused P0 + WSI teardown + persistent-reader suite: 25 tests, all passed;
+- arm64 and armhf glibc ICD compile with -Wall -Wextra -Werror;
+- arm64-v8a and armeabi-v7a Android executor builds completed;
+- git diff --check passed.
+
+The full compiled synchronization harness, canonical payload rebuild/freshness
+checks, and device-side generic Vulkan plus unchanged llama.cpp midpoint remain
+release gates. This lane does not modify llama.cpp, Dockerfiles, models,
+prompts, shader bytes, or application-specific shader policy.
+
+### 2026-07-23 generic Vulkan terminal, in-flight quarantine, and teardown evidence
+
+The generic V5 dispatch response path now preserves the exact terminal
+`VkResult` together with a three-state execution outcome:
+`NOT_ENQUEUED`, `ENQUEUED`, or `AMBIGUOUS`. The state is reset to
+`NOT_ENQUEUED` before descriptor and push-data clone allocations, so an
+allocation failure before transport cannot inherit `ENQUEUED` from a previous
+thread-local dispatch. Crossing the frame-send boundary changes the state to
+`AMBIGUOUS`; only a valid correlated terminal record resolves it to
+`ENQUEUED` or `NOT_ENQUEUED`. This keeps pre-enqueue host failures retry-safe
+while preventing replay after a dispatch may have reached the executor.
+
+For V6 submission, an unknown completion no longer releases only the immediate
+local fence while leaving registered synchronization identities reusable. The
+executor retains the complete in-flight replay graph and quarantines every
+registered fence and wait/signal semaphore identity referenced by the V6.19
+frame. Quarantined identities cannot be resolved, recreated, reset, or destroyed
+as if completion were known. Destruction is recorded as pending without issuing
+a native destroy against an object that may still be in use; process replacement
+remains the fail-closed reclamation boundary.
+
+Headless WSI follows the same ownership rule. If swapchain/image completion
+cannot be proved during destroy or device cleanup, the registered swapchain,
+image, hidden-completion, and owner graph is retained. The implementation does
+not detach globally visible children and then free their device owner after an
+ambiguous native wait.
+
+Host evidence for the final synchronization-identity quarantine tree is:
+
+- the ten focused generic Vulkan contract modules: 108 tests passed;
+- `tests.test_vulkan_p0_submit_completion_contract`: 16 tests passed;
+- `tests.test_vulkan_wsi_sync_contract`: 11 tests passed;
+- `tests.test_vulkan_strict_response_contract`: 17 tests passed;
+- the compiled `tests.test_vulkan_icd_sync_harness`: 36 tests passed in
+  738.541 seconds;
+- strict arm64 and armhf glibc ICD compilation passed with `-Werror`;
+- the arm64-v8a and armeabi-v7a Android executor and glibc ICD payloads were
+  rebuilt from the final sources;
+- `scripts/verify-native-payloads.py`, the Gradle packaged-payload freshness
+  gate, source/output timestamp checks, and the arm64 ICD copy comparison all
+  passed;
+- all 90 generated C harness sources in
+  `tests.test_vulkan_icd_feature_chain` compile against the immutable
+  capability-snapshot APIs, and representative runtime cases for KHR/EXT
+  buffer-device-address rejection, Maintenance 5 aliases, cross-device query
+  ownership, and destroyed WSI handles passed;
+- the feature-chain test driver now includes compiler stdout and stderr in a
+  failed assertion instead of reporting an opaque subprocess error.
+
+The broader legacy `tests.test_gpu_abi_contract` differential is unchanged after
+the final edit: both the working tree and isolated HEAD baseline ran 495 tests
+and reported the same 68 failures, 3 errors, and 2 skipped cases. The failure
+name sets are identical, so this generic Vulkan change introduced zero additional
+failures in that legacy suite; it does not make the baseline green, and the
+existing failures remain tracked validation debt. The lightweight regression
+runner also reached and passed the runtime Docker/Compose/API contract; its
+overall run remains red only because the pre-existing device-produced
+`docs/test/apk-memory-pager-managed-latest.json` artifact is absent. No synthetic
+replacement was created.
+
+No Android-device execution, generic device Vulkan validation, or unchanged
+llama.cpp midpoint validation is claimed by this subsection. This work changes
+no llama.cpp source, Dockerfile, model, prompt, or shader payload.

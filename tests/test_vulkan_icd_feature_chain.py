@@ -50,24 +50,31 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
             src = Path(tmpdir) / "icd_feature_chain_harness.c"
             exe = Path(tmpdir) / "icd_feature_chain_harness"
             src.write_text(source, encoding="utf-8")
-            subprocess.run(
-                [
-                    "gcc",
-                    "-O2",
-                    "-Wall",
-                    "-Wextra",
-                    "-Wno-unused-function",
-                    "-Wno-missing-field-initializers",
-                    "-o",
-                    str(exe),
-                    str(src),
-                ],
-                cwd=ROOT,
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                check=True,
-            )
+            try:
+                subprocess.run(
+                    [
+                        "gcc",
+                        "-O2",
+                        "-Wall",
+                        "-Wextra",
+                        "-Wno-unused-function",
+                        "-Wno-missing-field-initializers",
+                        "-o",
+                        str(exe),
+                        str(src),
+                    ],
+                    cwd=ROOT,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    check=True,
+                )
+            except subprocess.CalledProcessError as exc:
+                self.fail(
+                    "gcc failed while compiling ICD feature-chain harness\n"
+                    + (exc.stdout or "")
+                    + (exc.stderr or "")
+                )
             return subprocess.run(
                 [str(exe)],
                 cwd=ROOT,
@@ -148,7 +155,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
 
             int main(void) {{
             #ifdef VK_KHR_MAINTENANCE_2_EXTENSION_NAME
-                if (!device_extension_advertised_name(VK_KHR_MAINTENANCE_2_EXTENSION_NAME)) return 2;
+                if (!device_extension_advertised_name(legacy_physical_snapshot(), VK_KHR_MAINTENANCE_2_EXTENSION_NAME)) return 2;
                 uint32_t count = 64;
                 VkExtensionProperties extensions[64];
                 memset(extensions, 0, sizeof(extensions));
@@ -161,7 +168,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
                 device_info.enabledExtensionCount = 1;
                 device_info.ppEnabledExtensionNames = enabled;
-                if (validate_device_extensions(&device_info) != VK_SUCCESS) return 5;
+                if (validate_device_extensions(legacy_physical_snapshot(), &device_info) != VK_SUCCESS) return 5;
 
                 VkPhysicalDevicePointClippingProperties point_clipping;
                 VkPhysicalDeviceProperties2 properties2;
@@ -233,7 +240,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
 
             int main(void) {{
             #ifdef VK_EXT_SUBPASS_MERGE_FEEDBACK_EXTENSION_NAME
-                if (!device_extension_advertised_name(VK_EXT_SUBPASS_MERGE_FEEDBACK_EXTENSION_NAME)) return 2;
+                if (!device_extension_advertised_name(legacy_physical_snapshot(), VK_EXT_SUBPASS_MERGE_FEEDBACK_EXTENSION_NAME)) return 2;
                 uint32_t count = 64;
                 VkExtensionProperties extensions[64];
                 memset(extensions, 0, sizeof(extensions));
@@ -258,7 +265,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 device_info.ppEnabledExtensionNames = enabled;
                 feedback_features.subpassMergeFeedback = VK_TRUE;
                 device_info.pNext = &feedback_features;
-                if (validate_device_extensions(&device_info) != VK_SUCCESS) return 6;
+                if (validate_device_extensions(legacy_physical_snapshot(), &device_info) != VK_SUCCESS) return 6;
                 if (validate_device_feature_requests(&device_info) != VK_SUCCESS) return 7;
             #endif
                 return 0;
@@ -289,7 +296,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
 
             int main(void) {{
             #ifdef VK_KHR_MAINTENANCE_3_EXTENSION_NAME
-                if (!device_extension_advertised_name(VK_KHR_MAINTENANCE_3_EXTENSION_NAME)) return 2;
+                if (!device_extension_advertised_name(legacy_physical_snapshot(), VK_KHR_MAINTENANCE_3_EXTENSION_NAME)) return 2;
                 uint32_t count = 64;
                 VkExtensionProperties extensions[64];
                 memset(extensions, 0, sizeof(extensions));
@@ -302,9 +309,9 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
                 create_info.enabledExtensionCount = 1;
                 create_info.ppEnabledExtensionNames = enabled;
-                if (validate_device_extensions(&create_info) != VK_SUCCESS) return 5;
+                if (validate_device_extensions(legacy_physical_snapshot(), &create_info) != VK_SUCCESS) return 5;
 
-                PFN_vkVoidFunction raw = proc_address("vkGetDescriptorSetLayoutSupportKHR");
+                PFN_vkVoidFunction raw = proc_address(legacy_physical_snapshot(), "vkGetDescriptorSetLayoutSupportKHR");
                 if (raw == NULL) return 6;
                 if (raw != (PFN_vkVoidFunction)vkGetDescriptorSetLayoutSupport) return 7;
 
@@ -370,7 +377,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
 
             int main(void) {{
             #ifdef VK_KHR_MAINTENANCE_5_EXTENSION_NAME
-                if (!device_extension_advertised_name(VK_KHR_MAINTENANCE_5_EXTENSION_NAME)) return 2;
+                if (!device_extension_advertised_name(legacy_physical_snapshot(), VK_KHR_MAINTENANCE_5_EXTENSION_NAME)) return 2;
                 uint32_t count = 64;
                 VkExtensionProperties extensions[64];
                 memset(extensions, 0, sizeof(extensions));
@@ -383,17 +390,17 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
                 device_info.enabledExtensionCount = 1;
                 device_info.ppEnabledExtensionNames = enabled;
-                if (validate_device_extensions(&device_info) != VK_SUCCESS) return 5;
+                if (validate_device_extensions(legacy_physical_snapshot(), &device_info) != VK_SUCCESS) return 5;
 
-                if (proc_address("vkGetImageSubresourceLayout2KHR") !=
+                if (proc_address(legacy_physical_snapshot(), "vkGetImageSubresourceLayout2KHR") !=
                     (PFN_vkVoidFunction)vkGetImageSubresourceLayout2) return 6;
-                if (proc_address("vkGetDeviceImageSubresourceLayoutKHR") !=
+                if (proc_address(legacy_physical_snapshot(), "vkGetDeviceImageSubresourceLayoutKHR") !=
                     (PFN_vkVoidFunction)vkGetDeviceImageSubresourceLayout) return 7;
-                if (proc_address("vkGetRenderingAreaGranularityKHR") !=
+                if (proc_address(legacy_physical_snapshot(), "vkGetRenderingAreaGranularityKHR") !=
                     (PFN_vkVoidFunction)vkGetRenderingAreaGranularity) return 8;
-                if (proc_address("vkCmdBindIndexBuffer2KHR") !=
+                if (proc_address(legacy_physical_snapshot(), "vkCmdBindIndexBuffer2KHR") !=
                     (PFN_vkVoidFunction)vkCmdBindIndexBuffer2KHR) return 9;
-                if (proc_address("vkGetImageSubresourceLayout2EXT") != NULL) return 10;
+                if (proc_address(legacy_physical_snapshot(), "vkGetImageSubresourceLayout2EXT") != NULL) return 10;
 
                 VkDevice m5_device = VK_NULL_HANDLE;
                 if (vkCreateDevice((VkPhysicalDevice)&g_device, &device_info, NULL, &m5_device) != VK_SUCCESS) return 40;
@@ -403,7 +410,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 memset(&area, 0, sizeof(area));
                 memset(&granularity, 0, sizeof(granularity));
                 area.sType = VK_STRUCTURE_TYPE_RENDERING_AREA_INFO;
-                ((PFN_vkGetRenderingAreaGranularityKHR)proc_address("vkGetRenderingAreaGranularityKHR"))(
+                ((PFN_vkGetRenderingAreaGranularityKHR)proc_address(legacy_physical_snapshot(), "vkGetRenderingAreaGranularityKHR"))(
                     m5_device, &area, &granularity);
                 if (granularity.width != 1 || granularity.height != 1) return 11;
 
@@ -429,16 +436,16 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 memset(&flags2, 0, sizeof(flags2));
                 flags2.sType = VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO;
                 if (validate_and_fill_pipeline_feedback_pnext(
-                        "unit-maintenance5-flags2", &flags2, 1u, false, 0) == VK_SUCCESS) return 13;
+                        "unit-maintenance5-flags2", &flags2, 1u, false, legacy_physical_snapshot(), 0) == VK_SUCCESS) return 13;
                 if (validate_and_fill_pipeline_feedback_pnext(
-                        "unit-maintenance5-flags2", &flags2, 1u, false,
+                        "unit-maintenance5-flags2", &flags2, 1u, false, legacy_physical_snapshot(),
                         PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_5) != VK_SUCCESS) return 14;
                 flags2.flags = (VkPipelineCreateFlags2)1;
                 if (validate_and_fill_pipeline_feedback_pnext(
-                        "unit-maintenance5-flags2", &flags2, 1u, false,
+                        "unit-maintenance5-flags2", &flags2, 1u, false, legacy_physical_snapshot(),
                         PDOCKER_VK_DEVICE_EXT_KHR_MAINTENANCE_5) == VK_SUCCESS) return 15;
 
-                ((PFN_vkCmdBindIndexBuffer2KHR)proc_address("vkCmdBindIndexBuffer2KHR"))(
+                ((PFN_vkCmdBindIndexBuffer2KHR)proc_address(legacy_physical_snapshot(), "vkCmdBindIndexBuffer2KHR"))(
                     VK_NULL_HANDLE, VK_NULL_HANDLE, 0, VK_WHOLE_SIZE, VK_INDEX_TYPE_UINT32);
 
                 VkBufferUsageFlags2CreateInfo usage2;
@@ -520,7 +527,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
 
             int main(void) {{
             #ifdef VK_EXT_HOST_IMAGE_COPY_EXTENSION_NAME
-                if (device_extension_advertised_name(VK_EXT_HOST_IMAGE_COPY_EXTENSION_NAME)) return 2;
+                if (device_extension_advertised_name(legacy_physical_snapshot(), VK_EXT_HOST_IMAGE_COPY_EXTENSION_NAME)) return 2;
                 uint32_t count = 64;
                 VkExtensionProperties extensions[64];
                 memset(extensions, 0, sizeof(extensions));
@@ -533,19 +540,19 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
                 device_info.enabledExtensionCount = 1;
                 device_info.ppEnabledExtensionNames = enabled;
-                if (validate_device_extensions(&device_info) != VK_ERROR_EXTENSION_NOT_PRESENT) return 5;
+                if (validate_device_extensions(legacy_physical_snapshot(), &device_info) != VK_ERROR_EXTENSION_NOT_PRESENT) return 5;
 
-                if (proc_address("vkCopyMemoryToImageEXT") != NULL) return 6;
-                if (proc_address("vkCopyImageToMemoryEXT") != NULL) return 7;
-                if (proc_address("vkCopyImageToImageEXT") != NULL) return 8;
-                if (proc_address("vkTransitionImageLayoutEXT") != NULL) return 9;
-                if (proc_address("vkGetImageSubresourceLayout2EXT") != NULL) return 10;
+                if (proc_address(legacy_physical_snapshot(), "vkCopyMemoryToImageEXT") != NULL) return 6;
+                if (proc_address(legacy_physical_snapshot(), "vkCopyImageToMemoryEXT") != NULL) return 7;
+                if (proc_address(legacy_physical_snapshot(), "vkCopyImageToImageEXT") != NULL) return 8;
+                if (proc_address(legacy_physical_snapshot(), "vkTransitionImageLayoutEXT") != NULL) return 9;
+                if (proc_address(legacy_physical_snapshot(), "vkGetImageSubresourceLayout2EXT") != NULL) return 10;
 
                 VkPhysicalDeviceHostImageCopyFeatures features;
                 memset(&features, 0xff, sizeof(features));
                 features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_IMAGE_COPY_FEATURES;
                 features.pNext = NULL;
-                fill_pnext_features(&features);
+                fill_pnext_features(legacy_physical_snapshot(), &features);
                 if (features.sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_IMAGE_COPY_FEATURES ||
                     features.pNext != NULL || features.hostImageCopy != VK_FALSE) return 11;
 
@@ -567,7 +574,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 props.pCopySrcLayouts = src_layouts;
                 props.copyDstLayoutCount = 2;
                 props.pCopyDstLayouts = dst_layouts;
-                fill_pnext_properties(&props);
+                fill_pnext_properties(legacy_physical_snapshot(), &props);
                 if (props.sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_IMAGE_COPY_PROPERTIES ||
                     props.pNext != NULL ||
                     props.copySrcLayoutCount != 0 || props.copyDstLayoutCount != 0 ||
@@ -618,7 +625,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
 
             int main(void) {{
             #ifdef VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME
-                if (device_extension_advertised_name(VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME)) return 2;
+                if (device_extension_advertised_name(legacy_physical_snapshot(), VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME)) return 2;
                 uint32_t count = 64;
                 VkExtensionProperties extensions[64];
                 memset(extensions, 0, sizeof(extensions));
@@ -631,16 +638,16 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
                 device_info.enabledExtensionCount = 1;
                 device_info.ppEnabledExtensionNames = enabled;
-                if (validate_device_extensions(&device_info) != VK_ERROR_EXTENSION_NOT_PRESENT) return 5;
+                if (validate_device_extensions(legacy_physical_snapshot(), &device_info) != VK_ERROR_EXTENSION_NOT_PRESENT) return 5;
 
-                if (proc_address("vkCreateSamplerYcbcrConversionKHR") != NULL) return 6;
-                if (proc_address("vkDestroySamplerYcbcrConversionKHR") != NULL) return 7;
+                if (proc_address(legacy_physical_snapshot(), "vkCreateSamplerYcbcrConversionKHR") != NULL) return 6;
+                if (proc_address(legacy_physical_snapshot(), "vkDestroySamplerYcbcrConversionKHR") != NULL) return 7;
 
                 VkPhysicalDeviceSamplerYcbcrConversionFeatures features;
                 memset(&features, 0xff, sizeof(features));
                 features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES;
                 features.pNext = NULL;
-                fill_pnext_features(&features);
+                fill_pnext_features(legacy_physical_snapshot(), &features);
                 if (features.sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES ||
                     features.pNext != NULL ||
                     features.samplerYcbcrConversion != VK_FALSE) return 8;
@@ -699,7 +706,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
 
             int main(void) {{
             #ifdef VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME
-                if (device_extension_advertised_name(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME)) return 2;
+                if (device_extension_advertised_name(legacy_physical_snapshot(), VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME)) return 2;
                 uint32_t count = 64;
                 VkExtensionProperties extensions[64];
                 memset(extensions, 0, sizeof(extensions));
@@ -712,18 +719,18 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
                 device_info.enabledExtensionCount = 1;
                 device_info.ppEnabledExtensionNames = enabled;
-                if (validate_device_extensions(&device_info) != VK_ERROR_EXTENSION_NOT_PRESENT) return 5;
+                if (validate_device_extensions(legacy_physical_snapshot(), &device_info) != VK_ERROR_EXTENSION_NOT_PRESENT) return 5;
 
-                if (proc_address("vkGetBufferDeviceAddressKHR") != NULL) return 6;
-                if (proc_address("vkGetBufferOpaqueCaptureAddressKHR") != NULL) return 7;
-                if (proc_address("vkGetDeviceMemoryOpaqueCaptureAddressKHR") != NULL) return 8;
-                if (proc_address("vkGetBufferDeviceAddressEXT") != NULL) return 9;
+                if (proc_address(legacy_physical_snapshot(), "vkGetBufferDeviceAddressKHR") != NULL) return 6;
+                if (proc_address(legacy_physical_snapshot(), "vkGetBufferOpaqueCaptureAddressKHR") != NULL) return 7;
+                if (proc_address(legacy_physical_snapshot(), "vkGetDeviceMemoryOpaqueCaptureAddressKHR") != NULL) return 8;
+                if (proc_address(legacy_physical_snapshot(), "vkGetBufferDeviceAddressEXT") != NULL) return 9;
 
                 VkPhysicalDeviceBufferDeviceAddressFeatures features;
                 memset(&features, 0xff, sizeof(features));
                 features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
                 features.pNext = NULL;
-                fill_pnext_features(&features);
+                fill_pnext_features(legacy_physical_snapshot(), &features);
                 if (features.sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES ||
                     features.pNext != NULL ||
                     features.bufferDeviceAddress != VK_FALSE ||
@@ -817,7 +824,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
 
             int main(void) {{
             #ifdef VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME
-                if (device_extension_advertised_name(VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME)) return 2;
+                if (device_extension_advertised_name(legacy_physical_snapshot(), VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME)) return 2;
                 uint32_t count = 64;
                 VkExtensionProperties extensions[64];
                 memset(extensions, 0, sizeof(extensions));
@@ -830,15 +837,15 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
                 device_info.enabledExtensionCount = 1;
                 device_info.ppEnabledExtensionNames = enabled;
-                if (validate_device_extensions(&device_info) != VK_ERROR_EXTENSION_NOT_PRESENT) return 5;
+                if (validate_device_extensions(legacy_physical_snapshot(), &device_info) != VK_ERROR_EXTENSION_NOT_PRESENT) return 5;
 
-                if (proc_address("vkGetBufferDeviceAddressEXT") != NULL) return 6;
+                if (proc_address(legacy_physical_snapshot(), "vkGetBufferDeviceAddressEXT") != NULL) return 6;
 
                 VkPhysicalDeviceBufferDeviceAddressFeaturesEXT features;
                 memset(&features, 0xff, sizeof(features));
                 features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES_EXT;
                 features.pNext = NULL;
-                fill_pnext_features(&features);
+                fill_pnext_features(legacy_physical_snapshot(), &features);
                 if (features.sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES_EXT ||
                     features.pNext != NULL ||
                     features.bufferDeviceAddress != VK_FALSE ||
@@ -906,7 +913,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
 
             int main(void) {{
             #ifdef VK_KHR_DEVICE_GROUP_EXTENSION_NAME
-                if (!device_extension_advertised_name(VK_KHR_DEVICE_GROUP_EXTENSION_NAME)) return 2;
+                if (!device_extension_advertised_name(legacy_physical_snapshot(), VK_KHR_DEVICE_GROUP_EXTENSION_NAME)) return 2;
                 uint32_t count = 64;
                 VkExtensionProperties extensions[64];
                 memset(extensions, 0, sizeof(extensions));
@@ -919,30 +926,30 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
                 device_info.enabledExtensionCount = 1;
                 device_info.ppEnabledExtensionNames = enabled;
-                if (validate_device_extensions(&device_info) != VK_SUCCESS) return 5;
+                if (validate_device_extensions(legacy_physical_snapshot(), &device_info) != VK_SUCCESS) return 5;
                 VkDevice device = VK_NULL_HANDLE;
                 if (vkCreateDevice((VkPhysicalDevice)&g_device, &device_info, NULL, &device) != VK_SUCCESS ||
                     device == VK_NULL_HANDLE) return 13;
 
-                if (proc_address("vkGetDeviceGroupPeerMemoryFeaturesKHR") !=
+                if (proc_address(legacy_physical_snapshot(), "vkGetDeviceGroupPeerMemoryFeaturesKHR") !=
                     (PFN_vkVoidFunction)vkGetDeviceGroupPeerMemoryFeatures) return 6;
-                if (proc_address("vkCmdSetDeviceMaskKHR") !=
+                if (proc_address(legacy_physical_snapshot(), "vkCmdSetDeviceMaskKHR") !=
                     (PFN_vkVoidFunction)vkCmdSetDeviceMask) return 7;
-                if (proc_address("vkCmdDispatchBaseKHR") !=
+                if (proc_address(legacy_physical_snapshot(), "vkCmdDispatchBaseKHR") !=
                     (PFN_vkVoidFunction)vkCmdDispatchBaseKHR) return 8;
-                if (proc_address("vkGetDeviceGroupPresentCapabilitiesKHR") !=
+                if (proc_address(legacy_physical_snapshot(), "vkGetDeviceGroupPresentCapabilitiesKHR") !=
                     (PFN_vkVoidFunction)vkGetDeviceGroupPresentCapabilitiesKHR) return 9;
-                if (proc_address("vkGetDeviceGroupSurfacePresentModesKHR") !=
+                if (proc_address(legacy_physical_snapshot(), "vkGetDeviceGroupSurfacePresentModesKHR") !=
                     (PFN_vkVoidFunction)vkGetDeviceGroupSurfacePresentModesKHR) return 10;
-                if (proc_address("vkGetPhysicalDevicePresentRectanglesKHR") !=
+                if (proc_address(legacy_physical_snapshot(), "vkGetPhysicalDevicePresentRectanglesKHR") !=
                     (PFN_vkVoidFunction)vkGetPhysicalDevicePresentRectanglesKHR) return 11;
 
                 VkPeerMemoryFeatureFlags peer = 0xffffffffu;
-                ((PFN_vkGetDeviceGroupPeerMemoryFeaturesKHR)proc_address("vkGetDeviceGroupPeerMemoryFeaturesKHR"))(
+                ((PFN_vkGetDeviceGroupPeerMemoryFeaturesKHR)proc_address(legacy_physical_snapshot(), "vkGetDeviceGroupPeerMemoryFeaturesKHR"))(
                     VK_NULL_HANDLE, 0, 0, 0, &peer);
                 if (peer != 0) return 12;
-                ((PFN_vkCmdSetDeviceMaskKHR)proc_address("vkCmdSetDeviceMaskKHR"))(VK_NULL_HANDLE, 1);
-                ((PFN_vkCmdDispatchBaseKHR)proc_address("vkCmdDispatchBaseKHR"))(
+                ((PFN_vkCmdSetDeviceMaskKHR)proc_address(legacy_physical_snapshot(), "vkCmdSetDeviceMaskKHR"))(VK_NULL_HANDLE, 1);
+                ((PFN_vkCmdDispatchBaseKHR)proc_address(legacy_physical_snapshot(), "vkCmdDispatchBaseKHR"))(
                     VK_NULL_HANDLE, 1, 2, 3, 4, 5, 6);
 
                 VkDeviceGroupPresentCapabilitiesKHR present_caps;
@@ -1020,7 +1027,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
 
             int main(void) {{
             #ifdef VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME
-                if (!device_extension_advertised_name(VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME)) return 2;
+                if (!device_extension_advertised_name(legacy_physical_snapshot(), VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME)) return 2;
                 uint32_t count = 64;
                 VkExtensionProperties extensions[64];
                 memset(extensions, 0, sizeof(extensions));
@@ -1033,12 +1040,12 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
                 device_info.enabledExtensionCount = 1;
                 device_info.ppEnabledExtensionNames = enabled;
-                if (validate_device_extensions(&device_info) != VK_SUCCESS) return 5;
+                if (validate_device_extensions(legacy_physical_snapshot(), &device_info) != VK_SUCCESS) return 5;
 
-                if (proc_address("vkCreateRenderPass2KHR") != (PFN_vkVoidFunction)vkCreateRenderPass2) return 6;
-                if (proc_address("vkCmdBeginRenderPass2KHR") != (PFN_vkVoidFunction)vkCmdBeginRenderPass2) return 7;
-                if (proc_address("vkCmdNextSubpass2KHR") != (PFN_vkVoidFunction)vkCmdNextSubpass2) return 8;
-                if (proc_address("vkCmdEndRenderPass2KHR") != (PFN_vkVoidFunction)vkCmdEndRenderPass2) return 9;
+                if (proc_address(legacy_physical_snapshot(), "vkCreateRenderPass2KHR") != (PFN_vkVoidFunction)vkCreateRenderPass2) return 6;
+                if (proc_address(legacy_physical_snapshot(), "vkCmdBeginRenderPass2KHR") != (PFN_vkVoidFunction)vkCmdBeginRenderPass2) return 7;
+                if (proc_address(legacy_physical_snapshot(), "vkCmdNextSubpass2KHR") != (PFN_vkVoidFunction)vkCmdNextSubpass2) return 8;
+                if (proc_address(legacy_physical_snapshot(), "vkCmdEndRenderPass2KHR") != (PFN_vkVoidFunction)vkCmdEndRenderPass2) return 9;
 
                 VkSubpassDescription2 subpass;
                 VkRenderPassCreateInfo2 create_info;
@@ -1051,7 +1058,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 create_info.pSubpasses = &subpass;
                 VkRenderPass render_pass = (VkRenderPass)(uintptr_t)0xdeadu;
                 PFN_vkCreateRenderPass2KHR create_render_pass2 =
-                    (PFN_vkCreateRenderPass2KHR)proc_address("vkCreateRenderPass2KHR");
+                    (PFN_vkCreateRenderPass2KHR)proc_address(legacy_physical_snapshot(), "vkCreateRenderPass2KHR");
                 if (create_render_pass2(VK_NULL_HANDLE, &create_info, NULL, &render_pass) !=
                         VK_ERROR_INITIALIZATION_FAILED ||
                     render_pass != VK_NULL_HANDLE) return 10;
@@ -1141,7 +1148,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
 
             int main(void) {{
             #ifdef VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME
-                if (device_extension_advertised_name(VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME)) {{
+                if (device_extension_advertised_name(legacy_physical_snapshot(), VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME)) {{
                     fprintf(stderr, "VK_KHR_depth_stencil_resolve must remain unadvertised before support is coherent\\n");
                     return 2;
                 }}
@@ -1150,7 +1157,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 memset(&props, 0xff, sizeof(props));
                 props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_STENCIL_RESOLVE_PROPERTIES;
                 props.pNext = NULL;
-                fill_pnext_properties(&props);
+                fill_pnext_properties(legacy_physical_snapshot(), &props);
                 if (props.supportedDepthResolveModes != VK_RESOLVE_MODE_NONE ||
                     props.supportedStencilResolveModes != VK_RESOLVE_MODE_NONE) {{
                     fprintf(stderr, "depth/stencil resolve properties advertised executable resolve modes\\n");
@@ -1206,7 +1213,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
 
 
 
-    def test_wsi_surface_swapchain_handles_fail_closed_after_destroy(self):
+    def test_wsi_surface_swapchain_registry_and_children_fail_closed_after_destroy(self):
         source = textwrap.dedent(
             f"""
             #include <stdint.h>
@@ -1247,10 +1254,18 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     memset(memory, 0, sizeof(*memory));
                     memory->owner_device_id = owner_device_id;
                     memory->size = 4096;
+                    memory->fd = -1;
+                    memory_register(memory);
+                    image->object_id = next_vulkan_object_generation();
                     image->owner_device_id = owner_device_id;
                     image->memory = memory;
                     image->swapchain_owned = true;
                     image->current_layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+                    image->requirements_size = 4096;
+                    image->requirements_alignment = PDOCKER_VK_REQUIREMENT_ALIGNMENT;
+                    image->memory_type_bits = 1;
+                    image->generation = next_vulkan_object_generation();
+                    image_register(image);
                     swapchain->images[i] = image;
                     swapchain->memories[i] = memory;
                 }}
@@ -1286,59 +1301,25 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 if (vkGetSwapchainImagesKHR(device, swapchain, &image_count, NULL) != VK_SUCCESS) return 5;
                 if (image_count != 2) return 6;
 
-                VkSemaphore sem = make_binary_semaphore(device);
-                if (!sem) return 7;
-                uint32_t image_index = UINT32_MAX;
-                if (vkAcquireNextImageKHR(device, swapchain, 0, sem, VK_NULL_HANDLE, &image_index) != VK_SUCCESS) return 8;
-                if (!semaphore_handle_lookup(sem) || !semaphore_handle_lookup(sem)->signaled) return 9;
-                VkPresentInfoKHR present;
-                memset(&present, 0, sizeof(present));
-                present.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-                present.waitSemaphoreCount = 1;
-                present.pWaitSemaphores = &sem;
-                present.swapchainCount = 1;
-                present.pSwapchains = &swapchain;
-                present.pImageIndices = &image_index;
-                VkResult present_result = VK_ERROR_UNKNOWN;
-                present.pResults = &present_result;
-                if (vkQueuePresentKHR(queue, &present) != VK_SUCCESS) return 10;
-                if (present_result != VK_SUCCESS) return 11;
-                if (semaphore_handle_lookup(sem)->signaled) return 12;
-                vkDestroySemaphore(device, sem, NULL);
-
-                VkFenceCreateInfo fence_info;
-                memset(&fence_info, 0, sizeof(fence_info));
-                fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-                VkFence fence = VK_NULL_HANDLE;
-                if (vkCreateFence(device, &fence_info, NULL, &fence) != VK_SUCCESS || !fence) return 13;
-                vkDestroyFence(device, fence, NULL);
-                if (vkAcquireNextImageKHR(device, swapchain, 0, VK_NULL_HANDLE, fence, &image_index) != VK_ERROR_INITIALIZATION_FAILED) return 14;
-
-                VkSemaphore stale_sem = make_binary_semaphore(device);
-                if (!stale_sem) return 15;
-                if (vkAcquireNextImageKHR(device, swapchain, 0, stale_sem, VK_NULL_HANDLE, &image_index) != VK_SUCCESS) return 16;
-                vkDestroySemaphore(device, stale_sem, NULL);
-                present.pWaitSemaphores = &stale_sem;
-                present.pImageIndices = &image_index;
-                if (vkQueuePresentKHR(queue, &present) != VK_ERROR_INITIALIZATION_FAILED) return 17;
-
-                PdockerVkSwapchain *sc = swapchain_unregister(swapchain);
-                if (!sc) return 18;
-                swapchain_retire(sc);
+                PdockerVkSwapchain *registered = swapchain_handle_lookup(swapchain);
+                if (!registered) return 18;
+                VkImage child_images[2] = {{
+                    pdocker_vk_image_to_handle(registered->images[0]),
+                    pdocker_vk_image_to_handle(registered->images[1]),
+                }};
+                VkDeviceMemory child_memories[2] = {{
+                    pdocker_vk_memory_to_handle(registered->memories[0]),
+                    pdocker_vk_memory_to_handle(registered->memories[1]),
+                }};
+                vkDestroySwapchainKHR(device, swapchain, NULL);
                 if (swapchain_handle_lookup(swapchain)) return 19;
+                for (uint32_t i = 0; i < 2; ++i) {{
+                    if (image_handle_lookup(child_images[i])) return 31 + (int)i;
+                    if (memory_handle_resolve(child_memories[i], NULL)) return 33 + (int)i;
+                }}
                 image_count = 99;
                 if (vkGetSwapchainImagesKHR(device, swapchain, &image_count, NULL) != VK_ERROR_INITIALIZATION_FAILED) return 20;
                 if (image_count != 0) return 21;
-                VkSemaphore sem_after_destroy = make_binary_semaphore(device);
-                if (!sem_after_destroy) return 22;
-                image_index = 123u;
-                if (vkAcquireNextImageKHR(device, swapchain, 0, sem_after_destroy, VK_NULL_HANDLE, &image_index) != VK_ERROR_INITIALIZATION_FAILED) return 23;
-                if (image_index != UINT32_MAX) return 31;
-                vkDestroySemaphore(device, sem_after_destroy, NULL);
-                present.pWaitSemaphores = NULL;
-                present.waitSemaphoreCount = 0;
-                if (vkQueuePresentKHR(queue, &present) != VK_ERROR_INITIALIZATION_FAILED) return 24;
-
                 vkDestroySurfaceKHR(VK_NULL_HANDLE, surface, NULL);
                 if (surface_handle_lookup_for_instance(VK_NULL_HANDLE, surface)) return 25;
                 VkDeviceGroupPresentModeFlagsKHR modes = 123;
@@ -1830,7 +1811,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
 
             int main(void) {{
             #ifdef VK_KHR_MAINTENANCE_1_EXTENSION_NAME
-                if (!device_extension_advertised_name(VK_KHR_MAINTENANCE_1_EXTENSION_NAME)) return 2;
+                if (!device_extension_advertised_name(legacy_physical_snapshot(), VK_KHR_MAINTENANCE_1_EXTENSION_NAME)) return 2;
                 uint32_t count = 64;
                 VkExtensionProperties extensions[64];
                 memset(extensions, 0, sizeof(extensions));
@@ -1843,9 +1824,9 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
                 device_info.enabledExtensionCount = 1;
                 device_info.ppEnabledExtensionNames = enabled;
-                if (validate_device_extensions(&device_info) != VK_SUCCESS) return 5;
+                if (validate_device_extensions(legacy_physical_snapshot(), &device_info) != VK_SUCCESS) return 5;
 
-                PFN_vkVoidFunction raw = proc_address("vkTrimCommandPoolKHR");
+                PFN_vkVoidFunction raw = proc_address(legacy_physical_snapshot(), "vkTrimCommandPoolKHR");
                 if (raw == NULL) return 6;
                 if (raw != (PFN_vkVoidFunction)vkTrimCommandPool) return 7;
                 ((PFN_vkTrimCommandPoolKHR)raw)(VK_NULL_HANDLE, VK_NULL_HANDLE, 0);
@@ -1877,7 +1858,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
 
             int main(void) {{
             #ifdef VK_KHR_DESCRIPTOR_UPDATE_TEMPLATE_EXTENSION_NAME
-                if (!device_extension_advertised_name(VK_KHR_DESCRIPTOR_UPDATE_TEMPLATE_EXTENSION_NAME)) return 2;
+                if (!device_extension_advertised_name(legacy_physical_snapshot(), VK_KHR_DESCRIPTOR_UPDATE_TEMPLATE_EXTENSION_NAME)) return 2;
                 uint32_t count = 64;
                 VkExtensionProperties extensions[64];
                 memset(extensions, 0, sizeof(extensions));
@@ -1890,13 +1871,13 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
                 device_info.enabledExtensionCount = 1;
                 device_info.ppEnabledExtensionNames = enabled;
-                if (validate_device_extensions(&device_info) != VK_SUCCESS) return 5;
+                if (validate_device_extensions(legacy_physical_snapshot(), &device_info) != VK_SUCCESS) return 5;
                 VkDevice device = VK_NULL_HANDLE;
                 if (vkCreateDevice((VkPhysicalDevice)&g_device, &device_info, NULL, &device) != VK_SUCCESS ||
                     device == VK_NULL_HANDLE) return 12;
-                if (proc_address("vkCreateDescriptorUpdateTemplateKHR") == NULL) return 6;
-                if (proc_address("vkDestroyDescriptorUpdateTemplateKHR") == NULL) return 7;
-                if (proc_address("vkUpdateDescriptorSetWithTemplateKHR") == NULL) return 8;
+                if (proc_address(legacy_physical_snapshot(), "vkCreateDescriptorUpdateTemplateKHR") == NULL) return 6;
+                if (proc_address(legacy_physical_snapshot(), "vkDestroyDescriptorUpdateTemplateKHR") == NULL) return 7;
+                if (proc_address(legacy_physical_snapshot(), "vkUpdateDescriptorSetWithTemplateKHR") == NULL) return 8;
 
                 VkDescriptorSetLayoutBinding binding;
                 VkDescriptorSetLayoutCreateInfo layout_info;
@@ -1929,9 +1910,9 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 template_info.descriptorSetLayout = layout;
                 VkDescriptorUpdateTemplate update_template = VK_NULL_HANDLE;
                 PFN_vkCreateDescriptorUpdateTemplateKHR create_template =
-                    (PFN_vkCreateDescriptorUpdateTemplateKHR)proc_address("vkCreateDescriptorUpdateTemplateKHR");
+                    (PFN_vkCreateDescriptorUpdateTemplateKHR)proc_address(legacy_physical_snapshot(), "vkCreateDescriptorUpdateTemplateKHR");
                 PFN_vkDestroyDescriptorUpdateTemplateKHR destroy_template =
-                    (PFN_vkDestroyDescriptorUpdateTemplateKHR)proc_address("vkDestroyDescriptorUpdateTemplateKHR");
+                    (PFN_vkDestroyDescriptorUpdateTemplateKHR)proc_address(legacy_physical_snapshot(), "vkDestroyDescriptorUpdateTemplateKHR");
                 VkDescriptorUpdateTemplate stale_template = (VkDescriptorUpdateTemplate)(uintptr_t)0x1234u;
                 if (create_template(VK_NULL_HANDLE, &template_info, NULL, &stale_template) != VK_ERROR_INITIALIZATION_FAILED ||
                     stale_template != VK_NULL_HANDLE) return 12;
@@ -1963,7 +1944,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
             #ifndef VK_EXT_VALIDATION_CACHE_EXTENSION_NAME
                 return 0;
             #else
-                if (!device_extension_advertised_name(VK_EXT_VALIDATION_CACHE_EXTENSION_NAME)) {{
+                if (!device_extension_advertised_name(legacy_physical_snapshot(), VK_EXT_VALIDATION_CACHE_EXTENSION_NAME)) {{
                     fprintf(stderr, "validation cache extension was not advertised\\n");
                     return 2;
                 }}
@@ -2645,15 +2626,15 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 info.ppEnabledExtensionNames = enabled;
                 if (validate_instance_extensions(&info) != VK_SUCCESS) return 30;
 
-                if (proc_address("vkGetPhysicalDeviceProperties2KHR") == NULL) return 31;
-                if (proc_address("vkGetPhysicalDeviceFeatures2KHR") == NULL) return 32;
-                if (proc_address("vkGetPhysicalDeviceSparseImageFormatProperties2KHR") == NULL) return 33;
-                if (proc_address("vkEnumeratePhysicalDeviceGroupsKHR") == NULL) return 34;
-                if (proc_address("vkGetPhysicalDeviceExternalBufferPropertiesKHR") == NULL) return 35;
-                if (proc_address("vkGetPhysicalDeviceExternalSemaphorePropertiesKHR") == NULL) return 36;
-                if (proc_address("vkGetPhysicalDeviceExternalFencePropertiesKHR") == NULL) return 37;
-                if (proc_address("vkGetDeviceGroupPeerMemoryFeaturesKHR") == NULL) return 38;
-                if (proc_address("vkCmdSetDeviceMaskKHR") == NULL) return 39;
+                if (proc_address(legacy_physical_snapshot(), "vkGetPhysicalDeviceProperties2KHR") == NULL) return 31;
+                if (proc_address(legacy_physical_snapshot(), "vkGetPhysicalDeviceFeatures2KHR") == NULL) return 32;
+                if (proc_address(legacy_physical_snapshot(), "vkGetPhysicalDeviceSparseImageFormatProperties2KHR") == NULL) return 33;
+                if (proc_address(legacy_physical_snapshot(), "vkEnumeratePhysicalDeviceGroupsKHR") == NULL) return 34;
+                if (proc_address(legacy_physical_snapshot(), "vkGetPhysicalDeviceExternalBufferPropertiesKHR") == NULL) return 35;
+                if (proc_address(legacy_physical_snapshot(), "vkGetPhysicalDeviceExternalSemaphorePropertiesKHR") == NULL) return 36;
+                if (proc_address(legacy_physical_snapshot(), "vkGetPhysicalDeviceExternalFencePropertiesKHR") == NULL) return 37;
+                if (proc_address(legacy_physical_snapshot(), "vkGetDeviceGroupPeerMemoryFeaturesKHR") == NULL) return 38;
+                if (proc_address(legacy_physical_snapshot(), "vkCmdSetDeviceMaskKHR") == NULL) return 39;
                 return 0;
             }}
             """
@@ -2741,7 +2722,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
             #ifndef VK_EXT_TOOLING_INFO_EXTENSION_NAME
                 return 0;
             #else
-                if (!device_extension_advertised_name(VK_EXT_TOOLING_INFO_EXTENSION_NAME)) return 2;
+                if (!device_extension_advertised_name(legacy_physical_snapshot(), VK_EXT_TOOLING_INFO_EXTENSION_NAME)) return 2;
                 uint32_t extension_count = 0;
                 if (vkEnumerateDeviceExtensionProperties((VkPhysicalDevice)physical_device_for_instance(NULL), NULL, &extension_count, NULL) != VK_SUCCESS ||
                     extension_count == 0) return 3;
@@ -2756,8 +2737,8 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 if (!found) return 5;
 
                 if (!vkGetPhysicalDeviceToolProperties || !vkGetPhysicalDeviceToolPropertiesEXT) return 6;
-                if (proc_address("vkGetPhysicalDeviceToolProperties") != NULL) return 15;
-                if (proc_address("vkGetPhysicalDeviceToolPropertiesEXT") == NULL) return 16;
+                if (proc_address(legacy_physical_snapshot(), "vkGetPhysicalDeviceToolProperties") != NULL) return 15;
+                if (proc_address(legacy_physical_snapshot(), "vkGetPhysicalDeviceToolPropertiesEXT") == NULL) return 16;
                 if (vkGetPhysicalDeviceToolProperties(VK_NULL_HANDLE, NULL, NULL) != VK_ERROR_INITIALIZATION_FAILED) return 7;
                 uint32_t invalid_tool_count = 1;
                 if (vkGetPhysicalDeviceToolPropertiesEXT(VK_NULL_HANDLE, &invalid_tool_count, NULL) != VK_ERROR_INITIALIZATION_FAILED ||
@@ -2789,7 +2770,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
                 create_info.enabledExtensionCount = 1;
                 create_info.ppEnabledExtensionNames = enabled;
-                if (validate_device_extensions(&create_info) != VK_SUCCESS) return 14;
+                if (validate_device_extensions(legacy_physical_snapshot(), &create_info) != VK_SUCCESS) return 14;
                 return 0;
             #endif
             }}
@@ -2810,7 +2791,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
             #ifndef VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME
                 return 0;
             #else
-                if (!device_extension_advertised_name(VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME)) return 2;
+                if (!device_extension_advertised_name(legacy_physical_snapshot(), VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME)) return 2;
                 uint32_t extension_count = 0;
                 if (vkEnumerateDeviceExtensionProperties((VkPhysicalDevice)physical_device_for_instance(NULL), NULL, &extension_count, NULL) != VK_SUCCESS ||
                     extension_count == 0) return 3;
@@ -2830,7 +2811,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
                 create_info.enabledExtensionCount = 1;
                 create_info.ppEnabledExtensionNames = enabled;
-                if (validate_device_extensions(&create_info) != VK_SUCCESS) return 6;
+                if (validate_device_extensions(legacy_physical_snapshot(), &create_info) != VK_SUCCESS) return 6;
 
                 VkPhysicalDeviceProperties2 properties2;
                 VkPhysicalDeviceDriverProperties driver;
@@ -2874,7 +2855,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
             #ifndef VK_EXT_MEMORY_BUDGET_EXTENSION_NAME
                 return 0;
             #else
-                if (!device_extension_advertised_name(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME)) return 2;
+                if (!device_extension_advertised_name(legacy_physical_snapshot(), VK_EXT_MEMORY_BUDGET_EXTENSION_NAME)) return 2;
                 uint32_t extension_count = 0;
                 if (vkEnumerateDeviceExtensionProperties((VkPhysicalDevice)physical_device_for_instance(NULL), NULL, &extension_count, NULL) != VK_SUCCESS ||
                     extension_count == 0) return 3;
@@ -2894,7 +2875,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
                 create_info.enabledExtensionCount = 1;
                 create_info.ppEnabledExtensionNames = enabled;
-                if (validate_device_extensions(&create_info) != VK_SUCCESS) return 6;
+                if (validate_device_extensions(legacy_physical_snapshot(), &create_info) != VK_SUCCESS) return 6;
                 VkDevice device = VK_NULL_HANDLE;
                 if (vkCreateDevice((VkPhysicalDevice)&g_device, &create_info, NULL, &device) != VK_SUCCESS ||
                     device == VK_NULL_HANDLE) return 15;
@@ -2976,7 +2957,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
             #ifndef VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME
                 return 0;
             #else
-                if (!device_extension_advertised_name(VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME)) return 2;
+                if (!device_extension_advertised_name(legacy_physical_snapshot(), VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME)) return 2;
                 uint32_t extension_count = 0;
                 if (vkEnumerateDeviceExtensionProperties((VkPhysicalDevice)physical_device_for_instance(NULL), NULL, &extension_count, NULL) != VK_SUCCESS ||
                     extension_count == 0) return 3;
@@ -2990,12 +2971,12 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 }}
                 if (!found) return 5;
                 if (!vkResetQueryPool || !vkResetQueryPoolEXT) return 6;
-                if (proc_address("vkResetQueryPoolEXT") != (PFN_vkVoidFunction)vkResetQueryPoolEXT) return 7;
+                if (proc_address(legacy_physical_snapshot(), "vkResetQueryPoolEXT") != (PFN_vkVoidFunction)vkResetQueryPoolEXT) return 7;
 
                 VkPhysicalDeviceHostQueryResetFeatures features;
                 memset(&features, 0, sizeof(features));
                 features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES;
-                fill_pnext_features(&features);
+                fill_pnext_features(legacy_physical_snapshot(), &features);
                 if (features.hostQueryReset != VK_TRUE) return 8;
 
                 const char *enabled[] = {{ VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME }};
@@ -3004,7 +2985,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
                 create_info.enabledExtensionCount = 1;
                 create_info.ppEnabledExtensionNames = enabled;
-                if (validate_device_extensions(&create_info) != VK_SUCCESS) return 9;
+                if (validate_device_extensions(legacy_physical_snapshot(), &create_info) != VK_SUCCESS) return 9;
                 VkDevice device = VK_NULL_HANDLE;
                 if (vkCreateDevice((VkPhysicalDevice)&g_device, &create_info, NULL, &device) != VK_SUCCESS ||
                     device == VK_NULL_HANDLE) return 10;
@@ -3040,7 +3021,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
             #ifndef VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME
                 return 0;
             #else
-                if (!device_extension_advertised_name(VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME)) return 2;
+                if (!device_extension_advertised_name(legacy_physical_snapshot(), VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME)) return 2;
                 uint32_t extension_count = 0;
                 if (vkEnumerateDeviceExtensionProperties((VkPhysicalDevice)physical_device_for_instance(NULL), NULL, &extension_count, NULL) != VK_SUCCESS ||
                     extension_count == 0) return 3;
@@ -3060,7 +3041,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
                 create_info.enabledExtensionCount = 1;
                 create_info.ppEnabledExtensionNames = enabled;
-                if (validate_device_extensions(&create_info) != VK_SUCCESS) return 6;
+                if (validate_device_extensions(legacy_physical_snapshot(), &create_info) != VK_SUCCESS) return 6;
                 VkDevice device = VK_NULL_HANDLE;
                 if (vkCreateDevice((VkPhysicalDevice)&g_device, &create_info, NULL, &device) != VK_SUCCESS ||
                     device == VK_NULL_HANDLE) return 10;
@@ -3110,7 +3091,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
 
             int main(void) {{
             #ifdef VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME
-                if (!device_extension_advertised_name(VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME)) return 2;
+                if (!device_extension_advertised_name(legacy_physical_snapshot(), VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME)) return 2;
                 uint32_t count = 64;
                 VkExtensionProperties extensions[64];
                 memset(extensions, 0, sizeof(extensions));
@@ -3123,13 +3104,13 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
                 create_info.enabledExtensionCount = 1;
                 create_info.ppEnabledExtensionNames = enabled;
-                if (validate_device_extensions(&create_info) != VK_SUCCESS) return 5;
+                if (validate_device_extensions(legacy_physical_snapshot(), &create_info) != VK_SUCCESS) return 5;
 
                 VkPhysicalDeviceFloatControlsProperties props;
                 memset(&props, 0xff, sizeof(props));
                 props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT_CONTROLS_PROPERTIES;
                 props.pNext = NULL;
-                fill_pnext_properties(&props);
+                fill_pnext_properties(legacy_physical_snapshot(), &props);
                 if (props.sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT_CONTROLS_PROPERTIES) return 6;
                 if (props.pNext != NULL) return 7;
                 if (props.denormBehaviorIndependence != VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE) return 8;
@@ -3141,7 +3122,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 memset(&vulkan12_props, 0xff, sizeof(vulkan12_props));
                 vulkan12_props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES;
                 vulkan12_props.pNext = NULL;
-                fill_pnext_properties(&vulkan12_props);
+                fill_pnext_properties(legacy_physical_snapshot(), &vulkan12_props);
                 if (vulkan12_props.denormBehaviorIndependence != VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE) return 12;
                 if (vulkan12_props.roundingModeIndependence != VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE) return 13;
                 if (vulkan12_props.shaderSignedZeroInfNanPreserveFloat32 != VK_FALSE) return 14;
@@ -3191,8 +3172,8 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
 
             int main(void) {{
             #if defined(VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME) && defined(VK_EXT_BORDER_COLOR_SWIZZLE_EXTENSION_NAME)
-                if (!device_extension_advertised_name(VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME)) return 2;
-                if (!device_extension_advertised_name(VK_EXT_BORDER_COLOR_SWIZZLE_EXTENSION_NAME)) return 3;
+                if (!device_extension_advertised_name(legacy_physical_snapshot(), VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME)) return 2;
+                if (!device_extension_advertised_name(legacy_physical_snapshot(), VK_EXT_BORDER_COLOR_SWIZZLE_EXTENSION_NAME)) return 3;
                 uint32_t count = 64;
                 VkExtensionProperties extensions[64];
                 memset(extensions, 0, sizeof(extensions));
@@ -3209,7 +3190,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
                 create_info.enabledExtensionCount = 2;
                 create_info.ppEnabledExtensionNames = enabled;
-                if (validate_device_extensions(&create_info) != VK_SUCCESS) return 7;
+                if (validate_device_extensions(legacy_physical_snapshot(), &create_info) != VK_SUCCESS) return 7;
 
                 VkPhysicalDeviceCustomBorderColorFeaturesEXT custom_features;
                 VkPhysicalDeviceBorderColorSwizzleFeaturesEXT swizzle_features;
@@ -3218,7 +3199,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 custom_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUSTOM_BORDER_COLOR_FEATURES_EXT;
                 custom_features.pNext = &swizzle_features;
                 swizzle_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BORDER_COLOR_SWIZZLE_FEATURES_EXT;
-                fill_pnext_features(&custom_features);
+                fill_pnext_features(legacy_physical_snapshot(), &custom_features);
                 if (custom_features.customBorderColors != VK_FALSE) return 8;
                 if (custom_features.customBorderColorWithoutFormat != VK_FALSE) return 9;
                 if (swizzle_features.borderColorSwizzle != VK_FALSE) return 10;
@@ -3228,7 +3209,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 memset(&custom_props, 0xff, sizeof(custom_props));
                 custom_props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUSTOM_BORDER_COLOR_PROPERTIES_EXT;
                 custom_props.pNext = NULL;
-                fill_pnext_properties(&custom_props);
+                fill_pnext_properties(legacy_physical_snapshot(), &custom_props);
                 if (custom_props.maxCustomBorderColorSamplers != 0) return 12;
 
                 memset(&custom_features, 0, sizeof(custom_features));
@@ -3266,17 +3247,17 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 mapping_info.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
                 mapping_info.srgb = VK_FALSE;
                 sampler_info.pNext = &custom_info;
-                if (validate_sampler_create_info_for_transport(&sampler_info, 0, NULL) != VK_SUCCESS) return 18;
+                if (validate_sampler_create_info_for_transport(legacy_physical_snapshot(), &sampler_info, 0, NULL) != VK_SUCCESS) return 18;
                 sampler_info.borderColor = VK_BORDER_COLOR_FLOAT_CUSTOM_EXT;
-                if (validate_sampler_create_info_for_transport(&sampler_info, 0, NULL) == VK_SUCCESS) return 19;
+                if (validate_sampler_create_info_for_transport(legacy_physical_snapshot(), &sampler_info, 0, NULL) == VK_SUCCESS) return 19;
                 sampler_info.borderColor = VK_BORDER_COLOR_INT_CUSTOM_EXT;
-                if (validate_sampler_create_info_for_transport(&sampler_info, 0, NULL) == VK_SUCCESS) return 20;
+                if (validate_sampler_create_info_for_transport(legacy_physical_snapshot(), &sampler_info, 0, NULL) == VK_SUCCESS) return 20;
                 sampler_info.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
                 mapping_info.components.r = VK_COMPONENT_SWIZZLE_G;
-                if (validate_sampler_create_info_for_transport(&sampler_info, 0, NULL) == VK_SUCCESS) return 21;
+                if (validate_sampler_create_info_for_transport(legacy_physical_snapshot(), &sampler_info, 0, NULL) == VK_SUCCESS) return 21;
                 mapping_info.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
                 mapping_info.srgb = VK_TRUE;
-                if (validate_sampler_create_info_for_transport(&sampler_info, 0, NULL) == VK_SUCCESS) return 22;
+                if (validate_sampler_create_info_for_transport(legacy_physical_snapshot(), &sampler_info, 0, NULL) == VK_SUCCESS) return 22;
             #endif
                 return 0;
             }}
@@ -3322,14 +3303,14 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 reduction_info.sType = VK_STRUCTURE_TYPE_SAMPLER_REDUCTION_MODE_CREATE_INFO;
                 reduction_info.reductionMode = VK_SAMPLER_REDUCTION_MODE_MIN;
                 VkSamplerReductionMode reduction_mode = VK_SAMPLER_REDUCTION_MODE_WEIGHTED_AVERAGE;
-                if (validate_sampler_create_info_for_transport(&sampler_info, mask, &reduction_mode) != VK_SUCCESS) return 3;
+                if (validate_sampler_create_info_for_transport(legacy_physical_snapshot(), &sampler_info, mask, &reduction_mode) != VK_SUCCESS) return 3;
                 if (reduction_mode != VK_SAMPLER_REDUCTION_MODE_MIN) return 4;
             #ifdef VK_KHR_SAMPLER_MIRROR_CLAMP_TO_EDGE_EXTENSION_NAME
-                if (device_extension_advertised_name(VK_KHR_SAMPLER_MIRROR_CLAMP_TO_EDGE_EXTENSION_NAME)) return 5;
+                if (device_extension_advertised_name(legacy_physical_snapshot(), VK_KHR_SAMPLER_MIRROR_CLAMP_TO_EDGE_EXTENSION_NAME)) return 5;
             #endif
                 sampler_info.pNext = NULL;
                 sampler_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE;
-                if (validate_sampler_create_info_for_transport(&sampler_info, mask, NULL) == VK_SUCCESS) return 6;
+                if (validate_sampler_create_info_for_transport(legacy_physical_snapshot(), &sampler_info, mask, NULL) == VK_SUCCESS) return 6;
             #endif
                 return 0;
             }}
@@ -3352,7 +3333,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 memset(&feedback, 0xff, sizeof(feedback));
                 feedback.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBPASS_MERGE_FEEDBACK_FEATURES_EXT;
                 feedback.pNext = NULL;
-                fill_pnext_features(&feedback);
+                fill_pnext_features(legacy_physical_snapshot(), &feedback);
                 if (feedback.sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBPASS_MERGE_FEEDBACK_FEATURES_EXT) {{
                     return 2;
                 }}
@@ -3402,7 +3383,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 for (uint32_t i = 0; i < capacity; ++i) {{
                     if (strcmp(extensions[i].extensionName, VK_EXT_DEBUG_MARKER_EXTENSION_NAME) == 0) found = VK_TRUE;
                 }}
-                if (!found || !device_extension_advertised_name(VK_EXT_DEBUG_MARKER_EXTENSION_NAME)) return 4;
+                if (!found || !device_extension_advertised_name(legacy_physical_snapshot(), VK_EXT_DEBUG_MARKER_EXTENSION_NAME)) return 4;
 
                 const char *enabled[] = {{ VK_EXT_DEBUG_MARKER_EXTENSION_NAME }};
                 VkDeviceCreateInfo device_info;
@@ -3410,13 +3391,13 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
                 device_info.enabledExtensionCount = 1;
                 device_info.ppEnabledExtensionNames = enabled;
-                if (validate_device_extensions(&device_info) != VK_SUCCESS) return 5;
+                if (validate_device_extensions(legacy_physical_snapshot(), &device_info) != VK_SUCCESS) return 5;
 
-                if (proc_address("vkDebugMarkerSetObjectNameEXT") == NULL) return 6;
-                if (proc_address("vkDebugMarkerSetObjectTagEXT") == NULL) return 7;
-                if (proc_address("vkCmdDebugMarkerBeginEXT") == NULL) return 8;
-                if (proc_address("vkCmdDebugMarkerEndEXT") == NULL) return 9;
-                if (proc_address("vkCmdDebugMarkerInsertEXT") == NULL) return 10;
+                if (proc_address(legacy_physical_snapshot(), "vkDebugMarkerSetObjectNameEXT") == NULL) return 6;
+                if (proc_address(legacy_physical_snapshot(), "vkDebugMarkerSetObjectTagEXT") == NULL) return 7;
+                if (proc_address(legacy_physical_snapshot(), "vkCmdDebugMarkerBeginEXT") == NULL) return 8;
+                if (proc_address(legacy_physical_snapshot(), "vkCmdDebugMarkerEndEXT") == NULL) return 9;
+                if (proc_address(legacy_physical_snapshot(), "vkCmdDebugMarkerInsertEXT") == NULL) return 10;
 
                 VkDevice device = VK_NULL_HANDLE;
                 if (vkCreateDevice((VkPhysicalDevice)&g_device, &device_info, NULL, &device) != VK_SUCCESS ||
@@ -4004,7 +3985,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 memset(&private_features, 0xff, sizeof(private_features));
                 private_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIVATE_DATA_FEATURES;
                 private_features.pNext = NULL;
-                fill_pnext_features(&private_features);
+                fill_pnext_features(legacy_physical_snapshot(), &private_features);
                 if (private_features.sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIVATE_DATA_FEATURES) return 2;
                 if (private_features.pNext != NULL) return 3;
                 if (private_features.privateData != VK_TRUE) return 4;
@@ -4037,11 +4018,11 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 for (uint32_t i = 0; i < capacity; ++i) {{
                     if (strcmp(extensions[i].extensionName, VK_EXT_PRIVATE_DATA_EXTENSION_NAME) == 0) found = VK_TRUE;
                 }}
-                if (!found || !device_extension_advertised_name(VK_EXT_PRIVATE_DATA_EXTENSION_NAME)) return 11;
-                if (proc_address("vkCreatePrivateDataSlot") != NULL) return 26;
-                if (proc_address("vkCreatePrivateDataSlotEXT") == NULL) return 27;
-                if (proc_address("vkSetPrivateData") != NULL) return 28;
-                if (proc_address("vkSetPrivateDataEXT") == NULL) return 29;
+                if (!found || !device_extension_advertised_name(legacy_physical_snapshot(), VK_EXT_PRIVATE_DATA_EXTENSION_NAME)) return 11;
+                if (proc_address(legacy_physical_snapshot(), "vkCreatePrivateDataSlot") != NULL) return 26;
+                if (proc_address(legacy_physical_snapshot(), "vkCreatePrivateDataSlotEXT") == NULL) return 27;
+                if (proc_address(legacy_physical_snapshot(), "vkSetPrivateData") != NULL) return 28;
+                if (proc_address(legacy_physical_snapshot(), "vkSetPrivateDataEXT") == NULL) return 29;
 
                 VkInstanceCreateInfo instance_info;
                 memset(&instance_info, 0, sizeof(instance_info));
@@ -4347,7 +4328,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 memset(&priority_features, 0xff, sizeof(priority_features));
                 priority_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PRIORITY_FEATURES_EXT;
                 priority_features.pNext = NULL;
-                fill_pnext_features(&priority_features);
+                fill_pnext_features(legacy_physical_snapshot(), &priority_features);
                 if (priority_features.sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PRIORITY_FEATURES_EXT) {{
                     fprintf(stderr, "memory priority feature sType was not preserved\\n");
                     return 2;
@@ -4377,7 +4358,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 }}
 
             #ifdef VK_EXT_MEMORY_PRIORITY_EXTENSION_NAME
-                if (!device_extension_advertised_name(VK_EXT_MEMORY_PRIORITY_EXTENSION_NAME)) {{
+                if (!device_extension_advertised_name(legacy_physical_snapshot(), VK_EXT_MEMORY_PRIORITY_EXTENSION_NAME)) {{
                     fprintf(stderr, "VK_EXT_memory_priority was not advertised\\n");
                     return 7;
                 }}
@@ -4387,7 +4368,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 extension_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
                 extension_info.enabledExtensionCount = 1;
                 extension_info.ppEnabledExtensionNames = enabled_extensions;
-                if (validate_device_extensions(&extension_info) != VK_SUCCESS) {{
+                if (validate_device_extensions(legacy_physical_snapshot(), &extension_info) != VK_SUCCESS) {{
                     fprintf(stderr, "VK_EXT_memory_priority extension enable was rejected\\n");
                     return 8;
                 }}
@@ -4450,7 +4431,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 robustness2.pNext = &image_robustness;
                 image_robustness.pNext = &pipeline_robustness;
                 pipeline_robustness.pNext = NULL;
-                fill_pnext_features(&robustness2);
+                fill_pnext_features(legacy_physical_snapshot(), &robustness2);
                 if (robustness2.pNext != &image_robustness ||
                     image_robustness.pNext != &pipeline_robustness ||
                     pipeline_robustness.pNext != NULL) {{
@@ -4473,14 +4454,14 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     return 4;
                 }}
             #ifdef VK_EXT_ROBUSTNESS_2_EXTENSION_NAME
-                if (!device_extension_advertised_name(VK_EXT_ROBUSTNESS_2_EXTENSION_NAME)) {{
+                if (!device_extension_advertised_name(legacy_physical_snapshot(), VK_EXT_ROBUSTNESS_2_EXTENSION_NAME)) {{
                     fprintf(stderr, "VK_EXT_robustness2 was not advertised\\n");
                     return 14;
                 }}
                 const char *robustness2_extensions[] = {{ VK_EXT_ROBUSTNESS_2_EXTENSION_NAME }};
                 create_info.enabledExtensionCount = 1;
                 create_info.ppEnabledExtensionNames = robustness2_extensions;
-                if (validate_device_extensions(&create_info) != VK_SUCCESS) {{
+                if (validate_device_extensions(legacy_physical_snapshot(), &create_info) != VK_SUCCESS) {{
                     fprintf(stderr, "VK_EXT_robustness2 extension enable was rejected\\n");
                     return 15;
                 }}
@@ -4492,14 +4473,14 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 create_info.ppEnabledExtensionNames = NULL;
             #endif
             #ifdef VK_EXT_IMAGE_ROBUSTNESS_EXTENSION_NAME
-                if (!device_extension_advertised_name(VK_EXT_IMAGE_ROBUSTNESS_EXTENSION_NAME)) {{
+                if (!device_extension_advertised_name(legacy_physical_snapshot(), VK_EXT_IMAGE_ROBUSTNESS_EXTENSION_NAME)) {{
                     fprintf(stderr, "VK_EXT_image_robustness was not advertised\\n");
                     return 11;
                 }}
                 const char *image_robustness_extensions[] = {{ VK_EXT_IMAGE_ROBUSTNESS_EXTENSION_NAME }};
                 create_info.enabledExtensionCount = 1;
                 create_info.ppEnabledExtensionNames = image_robustness_extensions;
-                if (validate_device_extensions(&create_info) != VK_SUCCESS) {{
+                if (validate_device_extensions(legacy_physical_snapshot(), &create_info) != VK_SUCCESS) {{
                     fprintf(stderr, "VK_EXT_image_robustness extension enable was rejected\\n");
                     return 12;
                 }}
@@ -4511,14 +4492,14 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 create_info.ppEnabledExtensionNames = NULL;
             #endif
             #ifdef VK_EXT_PIPELINE_ROBUSTNESS_EXTENSION_NAME
-                if (!device_extension_advertised_name(VK_EXT_PIPELINE_ROBUSTNESS_EXTENSION_NAME)) {{
+                if (!device_extension_advertised_name(legacy_physical_snapshot(), VK_EXT_PIPELINE_ROBUSTNESS_EXTENSION_NAME)) {{
                     fprintf(stderr, "VK_EXT_pipeline_robustness was not advertised\\n");
                     return 8;
                 }}
                 const char *pipeline_robustness_extensions[] = {{ VK_EXT_PIPELINE_ROBUSTNESS_EXTENSION_NAME }};
                 create_info.enabledExtensionCount = 1;
                 create_info.ppEnabledExtensionNames = pipeline_robustness_extensions;
-                if (validate_device_extensions(&create_info) != VK_SUCCESS) {{
+                if (validate_device_extensions(legacy_physical_snapshot(), &create_info) != VK_SUCCESS) {{
                     fprintf(stderr, "VK_EXT_pipeline_robustness extension enable was rejected\\n");
                     return 9;
                 }}
@@ -4574,7 +4555,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 uniform_layout.pNext = &subgroup_types;
                 subgroup_types.pNext = NULL;
 
-                fill_pnext_features(&scalar);
+                fill_pnext_features(legacy_physical_snapshot(), &scalar);
                 if (scalar.pNext != &memory_model || memory_model.pNext != &uniform_layout ||
                     uniform_layout.pNext != &subgroup_types || subgroup_types.pNext != NULL) {{
                     fprintf(stderr, "shader layout pNext chain was not preserved\\n");
@@ -4601,8 +4582,8 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 const char *scalar_extensions[] = {{ VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME }};
                 create_info.enabledExtensionCount = 1;
                 create_info.ppEnabledExtensionNames = scalar_extensions;
-                if (device_extension_advertised_name(VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME) ||
-                    validate_device_extensions(&create_info) != VK_ERROR_EXTENSION_NOT_PRESENT) {{
+                if (device_extension_advertised_name(legacy_physical_snapshot(), VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME) ||
+                    validate_device_extensions(legacy_physical_snapshot(), &create_info) != VK_ERROR_EXTENSION_NOT_PRESENT) {{
                     fprintf(stderr, "VK_EXT_scalar_block_layout was accepted without transport\\n");
                     return 5;
                 }}
@@ -4611,8 +4592,8 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 const char *uniform_extensions[] = {{ VK_KHR_UNIFORM_BUFFER_STANDARD_LAYOUT_EXTENSION_NAME }};
                 create_info.enabledExtensionCount = 1;
                 create_info.ppEnabledExtensionNames = uniform_extensions;
-                if (device_extension_advertised_name(VK_KHR_UNIFORM_BUFFER_STANDARD_LAYOUT_EXTENSION_NAME) ||
-                    validate_device_extensions(&create_info) != VK_ERROR_EXTENSION_NOT_PRESENT) {{
+                if (device_extension_advertised_name(legacy_physical_snapshot(), VK_KHR_UNIFORM_BUFFER_STANDARD_LAYOUT_EXTENSION_NAME) ||
+                    validate_device_extensions(legacy_physical_snapshot(), &create_info) != VK_ERROR_EXTENSION_NOT_PRESENT) {{
                     fprintf(stderr, "VK_KHR_uniform_buffer_standard_layout was accepted without transport\\n");
                     return 6;
                 }}
@@ -4621,8 +4602,8 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 const char *subgroup_extensions[] = {{ VK_KHR_SHADER_SUBGROUP_EXTENDED_TYPES_EXTENSION_NAME }};
                 create_info.enabledExtensionCount = 1;
                 create_info.ppEnabledExtensionNames = subgroup_extensions;
-                if (device_extension_advertised_name(VK_KHR_SHADER_SUBGROUP_EXTENDED_TYPES_EXTENSION_NAME) ||
-                    validate_device_extensions(&create_info) != VK_ERROR_EXTENSION_NOT_PRESENT) {{
+                if (device_extension_advertised_name(legacy_physical_snapshot(), VK_KHR_SHADER_SUBGROUP_EXTENDED_TYPES_EXTENSION_NAME) ||
+                    validate_device_extensions(legacy_physical_snapshot(), &create_info) != VK_ERROR_EXTENSION_NOT_PRESENT) {{
                     fprintf(stderr, "VK_KHR_shader_subgroup_extended_types was accepted without transport\\n");
                     return 7;
                 }}
@@ -4631,8 +4612,8 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 const char *memory_model_extensions[] = {{ VK_KHR_VULKAN_MEMORY_MODEL_EXTENSION_NAME }};
                 create_info.enabledExtensionCount = 1;
                 create_info.ppEnabledExtensionNames = memory_model_extensions;
-                if (device_extension_advertised_name(VK_KHR_VULKAN_MEMORY_MODEL_EXTENSION_NAME) ||
-                    validate_device_extensions(&create_info) != VK_ERROR_EXTENSION_NOT_PRESENT) {{
+                if (device_extension_advertised_name(legacy_physical_snapshot(), VK_KHR_VULKAN_MEMORY_MODEL_EXTENSION_NAME) ||
+                    validate_device_extensions(legacy_physical_snapshot(), &create_info) != VK_ERROR_EXTENSION_NOT_PRESENT) {{
                     fprintf(stderr, "VK_KHR_vulkan_memory_model was accepted without transport\\n");
                     return 8;
                 }}
@@ -4686,7 +4667,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 separate.pNext = &host_query;
                 host_query.pNext = NULL;
 
-                fill_pnext_features(&separate);
+                fill_pnext_features(legacy_physical_snapshot(), &separate);
                 if (separate.pNext != &host_query || host_query.pNext != NULL) {{
                     fprintf(stderr, "separate depth/stencil pNext chain was not preserved\\n");
                     return 2;
@@ -4717,7 +4698,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                     fprintf(stderr, "separate depth/stencil request was not reflected in feature mask\\n");
                     return 7;
                 }}
-                if ((advertised_feature_mask() & PDOCKER_VK_FEATURE_SEPARATE_DEPTH_STENCIL_LAYOUTS) != 0) {{
+                if ((advertised_feature_mask(legacy_physical_snapshot()) & PDOCKER_VK_FEATURE_SEPARATE_DEPTH_STENCIL_LAYOUTS) != 0) {{
                     fprintf(stderr, "separate depth/stencil advertised feature mask without caps\\n");
                     return 8;
                 }}
@@ -4725,7 +4706,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 VkPhysicalDeviceVulkan12Features core12;
                 memset(&core12, 0, sizeof(core12));
                 core12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
-                fill_pnext_features(&core12);
+                fill_pnext_features(legacy_physical_snapshot(), &core12);
                 if (core12.separateDepthStencilLayouts != VK_FALSE) {{
                     fprintf(stderr, "core12 separate depth/stencil advertised without caps\\n");
                     return 9;
@@ -4738,7 +4719,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 }}
 
             #ifdef VK_KHR_SEPARATE_DEPTH_STENCIL_LAYOUTS_EXTENSION_NAME
-                if (device_extension_advertised_name(VK_KHR_SEPARATE_DEPTH_STENCIL_LAYOUTS_EXTENSION_NAME)) {{
+                if (device_extension_advertised_name(legacy_physical_snapshot(), VK_KHR_SEPARATE_DEPTH_STENCIL_LAYOUTS_EXTENSION_NAME)) {{
                     fprintf(stderr, "VK_KHR_separate_depth_stencil_layouts advertised without executor caps\\n");
                     return 11;
                 }}
@@ -4763,18 +4744,18 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
             #ifndef VK_KHR_map_memory2
                 return 0;
             #else
-                if (proc_address("vkMapMemory2") != NULL ||
-                    proc_address("vkUnmapMemory2") != NULL) {{
+                if (proc_address(legacy_physical_snapshot(), "vkMapMemory2") != NULL ||
+                    proc_address(legacy_physical_snapshot(), "vkUnmapMemory2") != NULL) {{
                     fprintf(stderr, "core map-memory2 names visible below Vulkan 1.4\\n");
                     return 2;
                 }}
-                PFN_vkMapMemory2KHR map2 = (PFN_vkMapMemory2KHR)proc_address("vkMapMemory2KHR");
-                PFN_vkUnmapMemory2KHR unmap2 = (PFN_vkUnmapMemory2KHR)proc_address("vkUnmapMemory2KHR");
+                PFN_vkMapMemory2KHR map2 = (PFN_vkMapMemory2KHR)proc_address(legacy_physical_snapshot(), "vkMapMemory2KHR");
+                PFN_vkUnmapMemory2KHR unmap2 = (PFN_vkUnmapMemory2KHR)proc_address(legacy_physical_snapshot(), "vkUnmapMemory2KHR");
                 if (!map2 || !unmap2) {{
                     fprintf(stderr, "KHR map-memory2 aliases were not exposed\\n");
                     return 3;
                 }}
-                if (!device_extension_advertised_name(VK_KHR_MAP_MEMORY_2_EXTENSION_NAME)) {{
+                if (!device_extension_advertised_name(legacy_physical_snapshot(), VK_KHR_MAP_MEMORY_2_EXTENSION_NAME)) {{
                     fprintf(stderr, "VK_KHR_map_memory2 was not advertised\\n");
                     return 4;
                 }}
@@ -5054,7 +5035,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 uint64_t feedback_extension_mask = 0;
 
             #ifdef VK_EXT_PIPELINE_CREATION_FEEDBACK_EXTENSION_NAME
-                if (!device_extension_advertised_name(VK_EXT_PIPELINE_CREATION_FEEDBACK_EXTENSION_NAME)) {{
+                if (!device_extension_advertised_name(legacy_physical_snapshot(), VK_EXT_PIPELINE_CREATION_FEEDBACK_EXTENSION_NAME)) {{
                     fprintf(stderr, "VK_EXT_pipeline_creation_feedback was not advertised\\n");
                     return 7;
                 }}
@@ -5064,7 +5045,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 extension_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
                 extension_info.enabledExtensionCount = 1;
                 extension_info.ppEnabledExtensionNames = enabled_extensions;
-                if (validate_device_extensions(&extension_info) != VK_SUCCESS) {{
+                if (validate_device_extensions(legacy_physical_snapshot(), &extension_info) != VK_SUCCESS) {{
                     fprintf(stderr, "VK_EXT_pipeline_creation_feedback extension enable was rejected\\n");
                     return 8;
                 }}
@@ -5072,7 +5053,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
             #endif
 
                 if (validate_and_fill_pipeline_feedback_pnext(
-                        "unit-pipeline-robustness", &robustness, 1u, false, 0) != VK_SUCCESS) {{
+                        "unit-pipeline-robustness", &robustness, 1u, false, legacy_physical_snapshot(), 0) != VK_SUCCESS) {{
                     fprintf(stderr, "default pipeline robustness was rejected\\n");
                     return 2;
                 }}
@@ -5083,7 +5064,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 }}
                 robustness.storageBuffers = VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_DISABLED;
                 if (validate_and_fill_pipeline_feedback_pnext(
-                        "unit-pipeline-robustness", &robustness, 1u, false, 0) == VK_SUCCESS) {{
+                        "unit-pipeline-robustness", &robustness, 1u, false, legacy_physical_snapshot(), 0) == VK_SUCCESS) {{
                     fprintf(stderr, "non-default storage robustness was accepted\\n");
                     return 3;
                 }}
@@ -5095,7 +5076,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 robustness.storageBuffers = VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_DEVICE_DEFAULT;
                 robustness.images = VK_PIPELINE_ROBUSTNESS_IMAGE_BEHAVIOR_ROBUST_IMAGE_ACCESS;
                 if (validate_and_fill_pipeline_feedback_pnext(
-                        "unit-pipeline-robustness", &robustness, 1u, true, 0) == VK_SUCCESS) {{
+                        "unit-pipeline-robustness", &robustness, 1u, true, legacy_physical_snapshot(), 0) == VK_SUCCESS) {{
                     fprintf(stderr, "non-default image robustness was accepted\\n");
                     return 4;
                 }}
@@ -5104,12 +5085,12 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 feedback_info.pPipelineCreationFeedback = &feedback;
                 feedback_info.pNext = &robustness;
                 if (validate_and_fill_pipeline_feedback_pnext(
-                        "unit-pipeline-robustness", &feedback_info, 1u, false, 0) == VK_SUCCESS) {{
+                        "unit-pipeline-robustness", &feedback_info, 1u, false, legacy_physical_snapshot(), 0) == VK_SUCCESS) {{
                     fprintf(stderr, "feedback pNext was accepted without enabling its extension\\n");
                     return 14;
                 }}
                 if (validate_and_fill_pipeline_feedback_pnext(
-                        "unit-pipeline-robustness", &feedback_info, 1u, false, feedback_extension_mask) != VK_SUCCESS) {{
+                        "unit-pipeline-robustness", &feedback_info, 1u, false, legacy_physical_snapshot(), feedback_extension_mask) != VK_SUCCESS) {{
                     fprintf(stderr, "feedback plus default robustness was rejected\\n");
                     return 5;
                 }}
@@ -5128,7 +5109,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 feedback_info.pipelineStageCreationFeedbackCount = 1;
                 feedback_info.pPipelineStageCreationFeedbacks = stage_feedback;
                 if (validate_and_fill_pipeline_feedback_pnext(
-                        "unit-pipeline-feedback", &feedback_info, 1u, false, feedback_extension_mask) != VK_SUCCESS) {{
+                        "unit-pipeline-feedback", &feedback_info, 1u, false, legacy_physical_snapshot(), feedback_extension_mask) != VK_SUCCESS) {{
                     fprintf(stderr, "pipeline feedback valid stage count was rejected\\n");
                     return 9;
                 }}
@@ -5141,7 +5122,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 }}
                 feedback_info.pipelineStageCreationFeedbackCount = 2;
                 if (validate_and_fill_pipeline_feedback_pnext(
-                        "unit-pipeline-feedback", &feedback_info, 1u, false, feedback_extension_mask) == VK_SUCCESS) {{
+                        "unit-pipeline-feedback", &feedback_info, 1u, false, legacy_physical_snapshot(), feedback_extension_mask) == VK_SUCCESS) {{
                     fprintf(stderr, "pipeline feedback mismatched stage count was accepted\\n");
                     return 11;
                 }}
@@ -5236,7 +5217,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 atomic64.pNext = &imageless;
                 imageless.pNext = NULL;
 
-                fill_pnext_features(&multiview);
+                fill_pnext_features(legacy_physical_snapshot(), &multiview);
                 if (multiview.pNext != &variable_pointers || variable_pointers.pNext != &protected_memory ||
                     protected_memory.pNext != &shader_draw || shader_draw.pNext != &atomic64 ||
                     atomic64.pNext != &imageless || imageless.pNext != NULL) {{
@@ -5269,8 +5250,8 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 const char *variable_pointer_extensions[] = {{ VK_KHR_VARIABLE_POINTERS_EXTENSION_NAME }};
                 create_info.enabledExtensionCount = 1;
                 create_info.ppEnabledExtensionNames = variable_pointer_extensions;
-                if (device_extension_advertised_name(VK_KHR_VARIABLE_POINTERS_EXTENSION_NAME) ||
-                    validate_device_extensions(&create_info) != VK_ERROR_EXTENSION_NOT_PRESENT) {{
+                if (device_extension_advertised_name(legacy_physical_snapshot(), VK_KHR_VARIABLE_POINTERS_EXTENSION_NAME) ||
+                    validate_device_extensions(legacy_physical_snapshot(), &create_info) != VK_ERROR_EXTENSION_NOT_PRESENT) {{
                     fprintf(stderr, "VK_KHR_variable_pointers was accepted without transport\\n");
                     return 11;
                 }}
@@ -5279,8 +5260,8 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 const char *shader_draw_extensions[] = {{ VK_KHR_SHADER_DRAW_PARAMETERS_EXTENSION_NAME }};
                 create_info.enabledExtensionCount = 1;
                 create_info.ppEnabledExtensionNames = shader_draw_extensions;
-                if (device_extension_advertised_name(VK_KHR_SHADER_DRAW_PARAMETERS_EXTENSION_NAME) ||
-                    validate_device_extensions(&create_info) != VK_ERROR_EXTENSION_NOT_PRESENT) {{
+                if (device_extension_advertised_name(legacy_physical_snapshot(), VK_KHR_SHADER_DRAW_PARAMETERS_EXTENSION_NAME) ||
+                    validate_device_extensions(legacy_physical_snapshot(), &create_info) != VK_ERROR_EXTENSION_NOT_PRESENT) {{
                     fprintf(stderr, "VK_KHR_shader_draw_parameters was accepted without transport\\n");
                     return 12;
                 }}
@@ -5289,8 +5270,8 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 const char *atomic64_extensions[] = {{ VK_KHR_SHADER_ATOMIC_INT64_EXTENSION_NAME }};
                 create_info.enabledExtensionCount = 1;
                 create_info.ppEnabledExtensionNames = atomic64_extensions;
-                if (device_extension_advertised_name(VK_KHR_SHADER_ATOMIC_INT64_EXTENSION_NAME) ||
-                    validate_device_extensions(&create_info) != VK_ERROR_EXTENSION_NOT_PRESENT) {{
+                if (device_extension_advertised_name(legacy_physical_snapshot(), VK_KHR_SHADER_ATOMIC_INT64_EXTENSION_NAME) ||
+                    validate_device_extensions(legacy_physical_snapshot(), &create_info) != VK_ERROR_EXTENSION_NOT_PRESENT) {{
                     fprintf(stderr, "VK_KHR_shader_atomic_int64 was accepted without transport\\n");
                     return 13;
                 }}
@@ -5299,8 +5280,8 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 const char *imageless_extensions[] = {{ VK_KHR_IMAGELESS_FRAMEBUFFER_EXTENSION_NAME }};
                 create_info.enabledExtensionCount = 1;
                 create_info.ppEnabledExtensionNames = imageless_extensions;
-                if (device_extension_advertised_name(VK_KHR_IMAGELESS_FRAMEBUFFER_EXTENSION_NAME) ||
-                    validate_device_extensions(&create_info) != VK_ERROR_EXTENSION_NOT_PRESENT) {{
+                if (device_extension_advertised_name(legacy_physical_snapshot(), VK_KHR_IMAGELESS_FRAMEBUFFER_EXTENSION_NAME) ||
+                    validate_device_extensions(legacy_physical_snapshot(), &create_info) != VK_ERROR_EXTENSION_NOT_PRESENT) {{
                     fprintf(stderr, "VK_KHR_imageless_framebuffer was accepted without transport\\n");
                     return 14;
                 }}
@@ -5349,7 +5330,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 memset(&demote_features, 0xff, sizeof(demote_features));
                 demote_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DEMOTE_TO_HELPER_INVOCATION_FEATURES;
                 demote_features.pNext = NULL;
-                fill_pnext_features(&demote_features);
+                fill_pnext_features(legacy_physical_snapshot(), &demote_features);
                 if (demote_features.sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DEMOTE_TO_HELPER_INVOCATION_FEATURES) {{
                     fprintf(stderr, "shader demote feature sType was not preserved\\n");
                     return 2;
@@ -5369,7 +5350,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 create_info.pNext = &demote_features;
 
             #ifdef VK_EXT_SHADER_DEMOTE_TO_HELPER_INVOCATION_EXTENSION_NAME
-                if (!device_extension_advertised_name(VK_EXT_SHADER_DEMOTE_TO_HELPER_INVOCATION_EXTENSION_NAME)) {{
+                if (!device_extension_advertised_name(legacy_physical_snapshot(), VK_EXT_SHADER_DEMOTE_TO_HELPER_INVOCATION_EXTENSION_NAME)) {{
                     fprintf(stderr, "VK_EXT_shader_demote_to_helper_invocation was not advertised\\n");
                     return 7;
                 }}
@@ -5397,7 +5378,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 }};
                 create_info.enabledExtensionCount = 1;
                 create_info.ppEnabledExtensionNames = enabled_extensions;
-                if (validate_device_extensions(&create_info) != VK_SUCCESS) {{
+                if (validate_device_extensions(legacy_physical_snapshot(), &create_info) != VK_SUCCESS) {{
                     fprintf(stderr, "VK_EXT_shader_demote_to_helper_invocation extension enable was rejected\\n");
                     return 10;
                 }}
@@ -5521,13 +5502,13 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 memset(&local_read, 0xff, sizeof(local_read));
                 local_read.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES;
                 local_read.pNext = NULL;
-                fill_pnext_features(&local_read);
+                fill_pnext_features(legacy_physical_snapshot(), &local_read);
                 if (local_read.sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES) return 4;
                 if (local_read.pNext != NULL) return 5;
                 if (local_read.dynamicRenderingLocalRead != VK_FALSE) return 6;
 
             #ifdef VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME
-                if (!device_extension_advertised_name(VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME)) {
+                if (!device_extension_advertised_name(legacy_physical_snapshot(), VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME)) {
                     fprintf(stderr, "VK_KHR_dynamic_rendering_local_read was not advertised\n");
                     return 7;
                 }
@@ -5566,7 +5547,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 create_info.pNext = &local_read;
                 create_info.enabledExtensionCount = 1;
                 create_info.ppEnabledExtensionNames = local_only_extensions;
-                if (validate_device_extensions(&create_info) != VK_ERROR_EXTENSION_NOT_PRESENT) {
+                if (validate_device_extensions(legacy_physical_snapshot(), &create_info) != VK_ERROR_EXTENSION_NOT_PRESENT) {
                     fprintf(stderr, "local-read extension was accepted without dynamic-rendering dependency\n");
                     return 11;
                 }
@@ -5577,11 +5558,11 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 };
                 create_info.enabledExtensionCount = 2;
                 create_info.ppEnabledExtensionNames = enabled_extensions;
-                if (validate_device_extensions(&create_info) != VK_SUCCESS) {
+                if (validate_device_extensions(legacy_physical_snapshot(), &create_info) != VK_SUCCESS) {
                     fprintf(stderr, "local-read extension enable was rejected\n");
                     return 12;
                 }
-                if (validate_device_create_pnext_extension_enables(
+                if (validate_device_create_pnext_extension_enables(legacy_physical_snapshot(),
                         &create_info,
                         PDOCKER_VK_DEVICE_EXT_KHR_DYNAMIC_RENDERING |
                         PDOCKER_VK_DEVICE_EXT_KHR_DYNAMIC_RENDERING_LOCAL_READ) != VK_SUCCESS) {
@@ -5633,7 +5614,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
 
             int main(void) {{
             #ifdef VK_KHR_MAINTENANCE_5_EXTENSION_NAME
-                if (!device_extension_advertised_name(VK_KHR_MAINTENANCE_5_EXTENSION_NAME)) {{
+                if (!device_extension_advertised_name(legacy_physical_snapshot(), VK_KHR_MAINTENANCE_5_EXTENSION_NAME)) {{
                     fprintf(stderr, "maintenance5 extension was not advertised\\n");
                     return 2;
                 }}
@@ -5641,7 +5622,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 memset(&maintenance5, 0xff, sizeof(maintenance5));
                 maintenance5.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_5_FEATURES;
                 maintenance5.pNext = NULL;
-                fill_pnext_features(&maintenance5);
+                fill_pnext_features(legacy_physical_snapshot(), &maintenance5);
                 if (maintenance5.sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_5_FEATURES ||
                     maintenance5.pNext != NULL || maintenance5.maintenance5 != VK_FALSE) {{
                     fprintf(stderr, "maintenance5 query was not false-only\\n");
@@ -5667,7 +5648,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 memset(&vulkan13, 0xff, sizeof(vulkan13));
                 vulkan13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
                 vulkan13.pNext = NULL;
-                fill_pnext_features(&vulkan13);
+                fill_pnext_features(legacy_physical_snapshot(), &vulkan13);
                 if (vulkan13.sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES ||
                     vulkan13.pNext != NULL ||
                     vulkan13.robustImageAccess != VK_FALSE ||
@@ -5708,7 +5689,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 memset(&vulkan14, 0xff, sizeof(vulkan14));
                 vulkan14.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES;
                 vulkan14.pNext = NULL;
-                fill_pnext_features(&vulkan14);
+                fill_pnext_features(legacy_physical_snapshot(), &vulkan14);
                 if (vulkan14.sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES ||
                     vulkan14.pNext != NULL ||
                     vulkan14.globalPriorityQuery != VK_FALSE ||
@@ -5854,7 +5835,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 int has_storage8 = 0;
                 int has_float16_int8 = 0;
                 for (uint32_t i = 0; i < capacity; ++i) {{
-                    if (!device_extension_advertised_name(properties[i].extensionName)) {{
+                    if (!device_extension_advertised_name(legacy_physical_snapshot(), properties[i].extensionName)) {{
                         fprintf(stderr, "enumerated extension was not accepted: %s\\n", properties[i].extensionName);
                         return 6;
                     }}
@@ -5871,19 +5852,19 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
                 create_info.enabledExtensionCount = capacity;
                 create_info.ppEnabledExtensionNames = enabled;
-                if (validate_device_extensions(&create_info) != VK_SUCCESS) {{
+                if (validate_device_extensions(legacy_physical_snapshot(), &create_info) != VK_SUCCESS) {{
                     fprintf(stderr, "validate_device_extensions rejected its own enumerated list\\n");
                     return 7;
                 }}
                 const char *bad_enabled[] = {{ "VK_SKYDNIR_not_advertised_test_extension" }};
                 create_info.enabledExtensionCount = 1;
                 create_info.ppEnabledExtensionNames = bad_enabled;
-                if (validate_device_extensions(&create_info) != VK_ERROR_EXTENSION_NOT_PRESENT) {{
+                if (validate_device_extensions(legacy_physical_snapshot(), &create_info) != VK_ERROR_EXTENSION_NOT_PRESENT) {{
                     fprintf(stderr, "validate_device_extensions accepted a non-advertised extension\\n");
                     return 8;
                 }}
             #ifdef VK_KHR_MAINTENANCE_5_EXTENSION_NAME
-                if (!device_extension_advertised_name(VK_KHR_MAINTENANCE_5_EXTENSION_NAME)) {{
+                if (!device_extension_advertised_name(legacy_physical_snapshot(), VK_KHR_MAINTENANCE_5_EXTENSION_NAME)) {{
                     fprintf(stderr, "maintenance5 should be advertised for implemented query/bind aliases\\n");
                     return 9;
                 }}
@@ -6204,15 +6185,15 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
 
             int main(void) {{
             #ifdef VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME
-                if (!device_extension_advertised_name(VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME)) return 20;
-                if (proc_address("vkGetImageSparseMemoryRequirements2KHR") == NULL) return 21;
+                if (!device_extension_advertised_name(legacy_physical_snapshot(), VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME)) return 20;
+                if (proc_address(legacy_physical_snapshot(), "vkGetImageSparseMemoryRequirements2KHR") == NULL) return 21;
             #endif
             #ifdef VK_KHR_MAINTENANCE_4_EXTENSION_NAME
-                if (!device_extension_advertised_name(VK_KHR_MAINTENANCE_4_EXTENSION_NAME)) return 22;
-                if (proc_address("vkGetDeviceBufferMemoryRequirements") != NULL) return 23;
-                if (proc_address("vkGetDeviceBufferMemoryRequirementsKHR") == NULL) return 24;
-                if (proc_address("vkGetDeviceImageMemoryRequirementsKHR") == NULL) return 25;
-                if (proc_address("vkGetDeviceImageSparseMemoryRequirementsKHR") == NULL) return 26;
+                if (!device_extension_advertised_name(legacy_physical_snapshot(), VK_KHR_MAINTENANCE_4_EXTENSION_NAME)) return 22;
+                if (proc_address(legacy_physical_snapshot(), "vkGetDeviceBufferMemoryRequirements") != NULL) return 23;
+                if (proc_address(legacy_physical_snapshot(), "vkGetDeviceBufferMemoryRequirementsKHR") == NULL) return 24;
+                if (proc_address(legacy_physical_snapshot(), "vkGetDeviceImageMemoryRequirementsKHR") == NULL) return 25;
+                if (proc_address(legacy_physical_snapshot(), "vkGetDeviceImageSparseMemoryRequirementsKHR") == NULL) return 26;
             #endif
                 VkBufferCreateInfo buffer_info;
                 memset(&buffer_info, 0, sizeof(buffer_info));
@@ -6278,7 +6259,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
 
             int main(void) {{
             #ifdef VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME
-                if (device_extension_advertised_name(VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME)) return 2;
+                if (device_extension_advertised_name(legacy_physical_snapshot(), VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME)) return 2;
                 uint32_t count = 64;
                 VkExtensionProperties extensions[64];
                 memset(extensions, 0, sizeof(extensions));
@@ -6291,7 +6272,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
                 device_info.enabledExtensionCount = 1;
                 device_info.ppEnabledExtensionNames = enabled;
-                if (validate_device_extensions(&device_info) != VK_ERROR_EXTENSION_NOT_PRESENT) return 5;
+                if (validate_device_extensions(legacy_physical_snapshot(), &device_info) != VK_ERROR_EXTENSION_NOT_PRESENT) return 5;
 
                 VkBufferCreateInfo buffer_info;
                 VkExternalMemoryBufferCreateInfo buffer_external;
@@ -6371,7 +6352,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 if (vkEnumerateDeviceExtensionProperties((VkPhysicalDevice)physical_device_for_instance(NULL), NULL, &count, extensions) != VK_SUCCESS) return 2;
 
             #ifdef VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME
-                if (device_extension_advertised_name(VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME)) return 3;
+                if (device_extension_advertised_name(legacy_physical_snapshot(), VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME)) return 3;
                 if (extension_seen(extensions, count, VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME)) return 4;
                 const char *semaphore_enabled[] = {{ VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME }};
                 VkDeviceCreateInfo semaphore_device_info;
@@ -6379,7 +6360,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 semaphore_device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
                 semaphore_device_info.enabledExtensionCount = 1;
                 semaphore_device_info.ppEnabledExtensionNames = semaphore_enabled;
-                if (validate_device_extensions(&semaphore_device_info) != VK_ERROR_EXTENSION_NOT_PRESENT) return 5;
+                if (validate_device_extensions(legacy_physical_snapshot(), &semaphore_device_info) != VK_ERROR_EXTENSION_NOT_PRESENT) return 5;
 
                 VkExportSemaphoreCreateInfo semaphore_export;
                 memset(&semaphore_export, 0, sizeof(semaphore_export));
@@ -6406,7 +6387,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
             #endif
 
             #ifdef VK_KHR_EXTERNAL_FENCE_EXTENSION_NAME
-                if (device_extension_advertised_name(VK_KHR_EXTERNAL_FENCE_EXTENSION_NAME)) return 12;
+                if (device_extension_advertised_name(legacy_physical_snapshot(), VK_KHR_EXTERNAL_FENCE_EXTENSION_NAME)) return 12;
                 if (extension_seen(extensions, count, VK_KHR_EXTERNAL_FENCE_EXTENSION_NAME)) return 13;
                 const char *fence_enabled[] = {{ VK_KHR_EXTERNAL_FENCE_EXTENSION_NAME }};
                 VkDeviceCreateInfo fence_device_info;
@@ -6414,7 +6395,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 fence_device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
                 fence_device_info.enabledExtensionCount = 1;
                 fence_device_info.ppEnabledExtensionNames = fence_enabled;
-                if (validate_device_extensions(&fence_device_info) != VK_ERROR_EXTENSION_NOT_PRESENT) return 14;
+                if (validate_device_extensions(legacy_physical_snapshot(), &fence_device_info) != VK_ERROR_EXTENSION_NOT_PRESENT) return 14;
 
                 VkExportFenceCreateInfo fence_export;
                 memset(&fence_export, 0, sizeof(fence_export));
@@ -7363,7 +7344,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 setenv("PDOCKER_VULKAN_MAX_BUFFER_BYTES", "2147483648", 1);
 
                 VkImageCreateInfo info = base_image_info();
-                if (validate_image_create_info_for_transport(&info) != VK_SUCCESS) {{
+                if (validate_image_create_info_for_transport(legacy_physical_snapshot(), &info) != VK_SUCCESS) {{
                     fprintf(stderr, "ordinary 2D image create was rejected\\n");
                     return 2;
                 }}
@@ -7380,7 +7361,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 bad_cube.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
                 bad_cube.extent.height = 32;
                 bad_cube.arrayLayers = 6;
-                if (validate_image_create_info_for_transport(&bad_cube) != VK_ERROR_FORMAT_NOT_SUPPORTED) {{
+                if (validate_image_create_info_for_transport(legacy_physical_snapshot(), &bad_cube) != VK_ERROR_FORMAT_NOT_SUPPORTED) {{
                     fprintf(stderr, "non-square cube-compatible image was accepted\\n");
                     return 6;
                 }}
@@ -7388,7 +7369,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 VkImageCreateInfo cube_info = base_image_info();
                 cube_info.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
                 cube_info.arrayLayers = 12;
-                if (validate_image_create_info_for_transport(&cube_info) != VK_SUCCESS) {{
+                if (validate_image_create_info_for_transport(legacy_physical_snapshot(), &cube_info) != VK_SUCCESS) {{
                     fprintf(stderr, "valid cube-compatible image was rejected\\n");
                     return 7;
                 }}
@@ -7405,7 +7386,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 image3d_info.imageType = VK_IMAGE_TYPE_3D;
                 image3d_info.extent.depth = 4;
                 image3d_info.arrayLayers = 1;
-                if (validate_image_create_info_for_transport(&image3d_info) != VK_SUCCESS) {{
+                if (validate_image_create_info_for_transport(legacy_physical_snapshot(), &image3d_info) != VK_SUCCESS) {{
                     fprintf(stderr, "valid 3D image was rejected\\n");
                     return 11;
                 }}
@@ -7422,7 +7403,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 image3d_sliced_info.extent.depth = 8;
                 image3d_sliced_info.mipLevels = 2;
                 image3d_sliced_info.arrayLayers = 1;
-                if (validate_image_create_info_for_transport(&image3d_sliced_info) != VK_SUCCESS) {{
+                if (validate_image_create_info_for_transport(legacy_physical_snapshot(), &image3d_sliced_info) != VK_SUCCESS) {{
                     fprintf(stderr, "valid 3D 2D-array-compatible image was rejected\\n");
                     return 14;
                 }}
@@ -7452,7 +7433,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
 
                 VkImageCreateInfo bad_2d_array_flag = base_image_info();
                 bad_2d_array_flag.flags = VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT;
-                if (validate_image_create_info_for_transport(&bad_2d_array_flag) != VK_ERROR_FORMAT_NOT_SUPPORTED) {{
+                if (validate_image_create_info_for_transport(legacy_physical_snapshot(), &bad_2d_array_flag) != VK_ERROR_FORMAT_NOT_SUPPORTED) {{
                     fprintf(stderr, "2D image with 2D-array-compatible flag was accepted\\n");
                     return 23;
                 }}
@@ -7578,7 +7559,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 }}
 
                 VkImageCreateInfo info = image_info_for_format(format);
-                rc = validate_image_create_info_for_transport(&info);
+                rc = validate_image_create_info_for_transport(legacy_physical_snapshot(), &info);
                 if (rc != VK_ERROR_FORMAT_NOT_SUPPORTED) {{
                     fprintf(stderr, "case %d validate image create returned %d\\n", code, rc);
                     return code + 30;
@@ -8550,15 +8531,27 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 return event;
             }
 
-            static VkQueryPool make_query_pool(VkDevice device) {
-                VkQueryPoolCreateInfo info;
-                memset(&info, 0, sizeof(info));
-                info.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
-                info.queryType = VK_QUERY_TYPE_TIMESTAMP;
-                info.queryCount = 1;
-                VkQueryPool pool = VK_NULL_HANDLE;
-                if (vkCreateQueryPool(device, &info, NULL, &pool) != VK_SUCCESS) return VK_NULL_HANDLE;
-                return pool;
+            static VkQueryPool make_query_ownership_sentinel(VkDevice device) {
+                /* Use a valid-looking executor identity without a native peer.
+                 * If any cross-device path incorrectly gets past ownership
+                 * validation, transport fails and poisons device_b; every such
+                 * call below asserts that device_b remains healthy. Public query
+                 * creation/transport is covered by the dedicated query suite. */
+                PdockerVkQueryPool *pool = pdocker_alloc_handle(sizeof(*pool));
+                if (!pool) return VK_NULL_HANDLE;
+                memset(pool, 0, sizeof(*pool));
+                pool->owner_device_id = device_owner_id_or_zero(device);
+                pool->capability_snapshot = device_capability_snapshot(device);
+                pool->type = VK_QUERY_TYPE_TIMESTAMP;
+                pool->query_count = 1;
+                pool->pool_id = next_vulkan_object_generation();
+                pool->result_fd = -1;
+                pool->executor_tracked = true;
+                if (!query_pool_register(pool)) {
+                    free(pool);
+                    return VK_NULL_HANDLE;
+                }
+                return pdocker_vk_query_pool_to_handle(pool);
             }
 
             int main(void) {
@@ -8697,17 +8690,27 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                                 0, NULL, 0, NULL, 0, NULL);
                 if (vkEndCommandBuffer(cmd_a_wait) != VK_ERROR_FEATURE_NOT_PRESENT) return 173;
 
-                VkQueryPool query_a = make_query_pool(device_a);
-                VkQueryPool query_b = make_query_pool(device_b);
-                if (!query_a || !query_b) return 33;
+                VkQueryPool query_a = make_query_ownership_sentinel(device_a);
+                if (!query_a) return 33;
                 PdockerVkQueryPool *query_a_obj = query_pool_handle_lookup_for_device(device_a, query_a);
-                query_a_obj->values[0] = 123;
-                query_a_obj->available[0] = 1;
+                if (!query_a_obj) return 177;
+                const uint64_t query_pool_id_before = query_a_obj->pool_id;
+                const int query_result_fd_before = query_a_obj->result_fd;
+                const size_t query_result_size_before = query_a_obj->result_size;
+                PdockerGpuVulkanGraphicsV617QueryResultEntry *const
+                    query_result_entries_before = query_a_obj->result_entries;
+                const bool query_executor_tracked_before = query_a_obj->executor_tracked;
                 uint64_t query_value = 0;
                 if (vkGetQueryPoolResults(device_b, query_a, 0, 1, sizeof(query_value), &query_value,
                                           sizeof(query_value), VK_QUERY_RESULT_64_BIT) != VK_ERROR_INITIALIZATION_FAILED) return 34;
+                if (pdocker_vk_device_is_lost(pdocker_vk_device_from_handle(device_b))) return 181;
                 vkResetQueryPool(device_b, query_a, 0, 1);
-                if (query_a_obj->available[0] != 1 || query_a_obj->values[0] != 123) return 35;
+                if (pdocker_vk_device_is_lost(pdocker_vk_device_from_handle(device_b))) return 182;
+                if (query_a_obj->pool_id != query_pool_id_before ||
+                    query_a_obj->result_fd != query_result_fd_before ||
+                    query_a_obj->result_size != query_result_size_before ||
+                    query_a_obj->result_entries != query_result_entries_before ||
+                    query_a_obj->executor_tracked != query_executor_tracked_before) return 35;
                 if (vkBeginCommandBuffer(cmd_b, NULL) != VK_SUCCESS) return 36;
                 vkCmdWriteTimestamp(cmd_b, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, query_a, 0);
                 PdockerVkCommandBuffer *cmd_b_query_obj = command_buffer_handle_lookup(cmd_b);
@@ -8718,13 +8721,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 if (vkEndCommandBuffer(cmd_b) != VK_ERROR_FEATURE_NOT_PRESENT) return 37;
                 vkDestroyQueryPool(device_b, query_a, NULL);
                 if (!query_pool_handle_lookup_for_device(device_a, query_a)) return 38;
-
-                if (vkBeginCommandBuffer(secondary_b, NULL) != VK_SUCCESS) return 176;
-                vkCmdWriteTimestamp(secondary_b, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, query_b, 0);
-                if (vkEndCommandBuffer(secondary_b) != VK_SUCCESS) return 177;
-                PdockerVkCommandBuffer *secondary_b_obj = command_buffer_handle_lookup(secondary_b);
-                if (!secondary_b_obj || secondary_b_obj->command_op_count == 0 ||
-                    secondary_b_obj->graphics_command_op_count == 0) return 178;
+                if (pdocker_vk_device_is_lost(pdocker_vk_device_from_handle(device_b))) return 183;
 
                 VkCommandBuffer primary_a2 = make_cmd(device_a, pool_a, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
                 if (!primary_a2) return 39;
@@ -10177,7 +10174,7 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 PdockerGpuVulkanGraphicsV624DescriptorSetLayoutEntry entries[8];
                 size_t entry_count = 0;
                 memset(entries, 0, sizeof(entries));
-                int collect_rc = collect_graphics_v624_descriptor_set_layout_metadata(
+                int collect_rc = collect_graphics_v624_descriptor_set_layout_metadata(legacy_physical_snapshot(),
                     entries, &entry_count, layout);
                 if (collect_rc != 0) {{
                     fprintf(stderr, "collect layout metadata failed rc=%d\\n", collect_rc);
@@ -10584,11 +10581,11 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 private_create.privateDataSlotRequestCount = 1;
                 private_device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
                 private_device_info.pNext = &private_features;
-                if (validate_device_create_pnext_extension_enables(&private_device_info, 0) == VK_SUCCESS) return 10;
-                if (validate_device_create_pnext_extension_enables(&private_device_info, PDOCKER_VK_DEVICE_EXT_EXT_PRIVATE_DATA) != VK_SUCCESS) return 11;
+                if (validate_device_create_pnext_extension_enables(legacy_physical_snapshot(), &private_device_info, 0) == VK_SUCCESS) return 10;
+                if (validate_device_create_pnext_extension_enables(legacy_physical_snapshot(), &private_device_info, PDOCKER_VK_DEVICE_EXT_EXT_PRIVATE_DATA) != VK_SUCCESS) return 11;
                 private_device_info.pNext = &private_create;
-                if (validate_device_create_pnext_extension_enables(&private_device_info, 0) == VK_SUCCESS) return 12;
-                if (validate_device_create_pnext_extension_enables(&private_device_info, PDOCKER_VK_DEVICE_EXT_EXT_PRIVATE_DATA) != VK_SUCCESS) return 13;
+                if (validate_device_create_pnext_extension_enables(legacy_physical_snapshot(), &private_device_info, 0) == VK_SUCCESS) return 12;
+                if (validate_device_create_pnext_extension_enables(legacy_physical_snapshot(), &private_device_info, PDOCKER_VK_DEVICE_EXT_EXT_PRIVATE_DATA) != VK_SUCCESS) return 13;
             #endif
 
             #ifdef VK_EXT_SUBPASS_MERGE_FEEDBACK_EXTENSION_NAME
@@ -10600,8 +10597,8 @@ class VulkanIcdFeatureChainTest(unittest.TestCase):
                 subpass_features.subpassMergeFeedback = VK_TRUE;
                 subpass_device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
                 subpass_device_info.pNext = &subpass_features;
-                if (validate_device_create_pnext_extension_enables(&subpass_device_info, 0) == VK_SUCCESS) return 20;
-                if (validate_device_create_pnext_extension_enables(&subpass_device_info, PDOCKER_VK_DEVICE_EXT_EXT_SUBPASS_MERGE_FEEDBACK) != VK_SUCCESS) return 21;
+                if (validate_device_create_pnext_extension_enables(legacy_physical_snapshot(), &subpass_device_info, 0) == VK_SUCCESS) return 20;
+                if (validate_device_create_pnext_extension_enables(legacy_physical_snapshot(), &subpass_device_info, PDOCKER_VK_DEVICE_EXT_EXT_SUBPASS_MERGE_FEEDBACK) != VK_SUCCESS) return 21;
 
                 VkRenderPassCreationControlEXT control;
                 VkRenderPassCreationFeedbackCreateInfoEXT feedback_info;

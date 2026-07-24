@@ -152,10 +152,10 @@ class VulkanIcdQueryValidationSourceContractTest(unittest.TestCase):
     def test_precise_occlusion_query_flag_is_rejected_unless_advertised(self):
         helper = self.section(
             "static bool query_control_flags_supported",
-            "static void reset_query_range",
+            "static void record_query_command",
         )
         self.assertIn("VK_QUERY_CONTROL_PRECISE_BIT", helper)
-        self.assertIn("fill_physical_device_features(&features);", helper)
+        self.assertIn("fill_physical_device_features(snapshot, &features);", helper)
         self.assertIn("features.occlusionQueryPrecise == VK_TRUE", helper)
 
         record = self.compact(
@@ -166,7 +166,7 @@ class VulkanIcdQueryValidationSourceContractTest(unittest.TestCase):
         )
         self.assertIn(
             "type == PDOCKER_VK_COMMAND_QUERY_BEGIN && "
-            "!query_control_flags_supported((VkQueryControlFlags)stageMask)",
+            "!query_control_flags_supported(cmd->capability_snapshot, (VkQueryControlFlags)stageMask)",
             record,
         )
         self.assertIn(
@@ -269,14 +269,13 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 if (child == 0) {{
                     alarm(10);
                     int first = accept_connection(listen_fd);
-                    if (first < 0 || !read_byte(first, 'A') || !read_byte(first, 'B') ||
+                    if (first < 0 || !read_byte(first, 'A') ||
+                        !read_byte(first, 'B') || !read_byte(first, 'C') ||
                         !expect_eof(first)) _exit(11);
                     close(first);
-                    int failed = accept_connection(listen_fd);
-                    if (failed < 0 || !read_byte(failed, 'C') || !expect_eof(failed)) _exit(12);
-                    close(failed);
                     int recovered = accept_connection(listen_fd);
-                    if (recovered < 0 || !read_byte(recovered, 'D') || !expect_eof(recovered)) _exit(13);
+                    if (recovered < 0 || !read_byte(recovered, 'D') ||
+                        !expect_eof(recovered)) _exit(13);
                     close(recovered);
                     close(listen_fd);
                     _exit(0);
@@ -286,6 +285,12 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 PdockerVkQueue queue;
                 memset(&queue, 0, sizeof(queue));
                 queue.transport_fd = -1;
+                PdockerVkCapabilitySnapshot snapshot;
+                memset(&snapshot, 0, sizeof(snapshot));
+                snapshot.bridge_available = true;
+                if (snapshot_gpu_endpoint(&snapshot.endpoint) != 0 ||
+                    !snapshot.endpoint.socket_identity_valid) return 19;
+                queue.capability_snapshot = &snapshot;
 
                 int first = connect_submit_queue(&queue);
                 if (first < 0 || write(first, "A", 1) != 1) return 20;
@@ -304,15 +309,11 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 finish_submit_queue_request(&queue, second, 0);
                 if (queue.transport_fd != owner) return 24;
 
-                char overlong[sizeof(queue.transport_path) + 16];
-                memset(overlong, 'x', sizeof(overlong));
-                overlong[0] = '/';
-                overlong[sizeof(overlong) - 1] = '\0';
-                if (setenv("PDOCKER_GPU_QUEUE_SOCKET", overlong, 1) != 0 ||
-                    connect_submit_queue(&queue) != -ENAMETOOLONG ||
-                    queue.transport_fd != -1) return 25;
-                if (setenv("PDOCKER_GPU_QUEUE_SOCKET", path, 1) != 0) return 26;
-
+                /*
+                 * A live queue is pinned to its immutable endpoint snapshot.
+                 * Mutable environment changes are covered by the separate
+                 * endpoint-generation test and must not migrate this queue.
+                 */
                 int failed = connect_submit_queue(&queue);
                 if (failed < 0 || write(failed, "C", 1) != 1) return 27;
                 uint64_t generation_before_failure =
@@ -371,19 +372,21 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                     "{{\\\"stage\\\":\\\"profile-a\\\",\\\"valid\\\":true}}\\n"
                     "{{\\\"stage\\\":\\\"vulkan-dispatch-v5-complete\\\","
                     "\\\"valid\\\":true,\\\"execution_implemented\\\":true,"
+                    "\\\"result\\\":0,"
                     "\\\"submit_id\\\":101}}\\n"
                     "{{\\\"stage\\\":\\\"profile-b\\\",\\\"valid\\\":true}}\\n"
                     "{{\\\"stage\\\":\\\"vulkan-dispatch-v5-complete\\\","
                     "\\\"valid\\\":true,\\\"execution_implemented\\\":true,"
+                    "\\\"result\\\":0,"
                     "\\\"submit_id\\\":102}}\\n";
                 if (write_all_test(pair[1], responses) != 0 ||
                     shutdown(pair[1], SHUT_WR) != 0) return 3;
                 if (read_dispatch_response_status(
                         pair[0], "VULKAN_DISPATCH_V5.1",
-                        "vulkan-dispatch-v5-complete", 101) != 0) return 4;
+                        "vulkan-dispatch-v5-complete", 101, NULL, NULL) != 0) return 4;
                 if (read_dispatch_response_status(
                         pair[0], "VULKAN_DISPATCH_V5.1",
-                        "vulkan-dispatch-v5-complete", 102) != 0) return 5;
+                        "vulkan-dispatch-v5-complete", 102, NULL, NULL) != 0) return 5;
                 char extra = 0;
                 ssize_t n;
                 do {{ n = read(pair[0], &extra, 1); }} while (n < 0 && errno == EINTR);
@@ -395,12 +398,13 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 const char wrong_terminal[] =
                     "{{\\\"stage\\\":\\\"vulkan-dispatch-v5-complete\\\","
                     "\\\"valid\\\":true,\\\"execution_implemented\\\":true,"
+                    "\\\"result\\\":0,"
                     "\\\"submit_id\\\":1010}}\\n";
                 if (write_all_test(pair[1], wrong_terminal) != 0 ||
                     shutdown(pair[1], SHUT_WR) != 0) return 8;
                 if (read_dispatch_response_status(
                         pair[0], "VULKAN_DISPATCH_V5.1",
-                        "vulkan-dispatch-v5-complete", 101) != -EPROTO) return 9;
+                        "vulkan-dispatch-v5-complete", 101, NULL, NULL) != -EPROTO) return 9;
                 close(pair[0]);
                 close(pair[1]);
 
@@ -408,12 +412,13 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 const char truncated[] =
                     "{{\\\"stage\\\":\\\"vulkan-dispatch-v5-complete\\\","
                     "\\\"valid\\\":true,\\\"execution_implemented\\\":true,"
+                    "\\\"result\\\":0,"
                     "\\\"submit_id\\\":101}}";
                 if (write_all_test(pair[1], truncated) != 0 ||
                     shutdown(pair[1], SHUT_WR) != 0) return 11;
                 if (read_dispatch_response_status(
                         pair[0], "VULKAN_DISPATCH_V5.1",
-                        "vulkan-dispatch-v5-complete", 101) != -EPROTO) return 12;
+                        "vulkan-dispatch-v5-complete", 101, NULL, NULL) != -EPROTO) return 12;
                 close(pair[0]);
                 close(pair[1]);
 
@@ -421,12 +426,13 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 const char malformed_id[] =
                     "{{\\\"stage\\\":\\\"vulkan-dispatch-v5-complete\\\","
                     "\\\"valid\\\":true,\\\"execution_implemented\\\":true,"
+                    "\\\"result\\\":0,"
                     "\\\"submit_id\\\":101junk}}\\n";
                 if (write_all_test(pair[1], malformed_id) != 0 ||
                     shutdown(pair[1], SHUT_WR) != 0) return 14;
                 if (read_dispatch_response_status(
                         pair[0], "VULKAN_DISPATCH_V5.1",
-                        "vulkan-dispatch-v5-complete", 101) != -EPROTO) return 15;
+                        "vulkan-dispatch-v5-complete", 101, NULL, NULL) != -EPROTO) return 15;
                 close(pair[0]);
                 close(pair[1]);
 
@@ -434,12 +440,13 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 const char duplicate_id[] =
                     "{{\\\"stage\\\":\\\"vulkan-dispatch-v5-complete\\\","
                     "\\\"valid\\\":true,\\\"execution_implemented\\\":true,"
+                    "\\\"result\\\":0,"
                     "\\\"submit_id\\\":101,\\\"submit_id\\\":101}}\\n";
                 if (write_all_test(pair[1], duplicate_id) != 0 ||
                     shutdown(pair[1], SHUT_WR) != 0) return 17;
                 if (read_dispatch_response_status(
                         pair[0], "VULKAN_DISPATCH_V5.1",
-                        "vulkan-dispatch-v5-complete", 101) != -EPROTO) return 18;
+                        "vulkan-dispatch-v5-complete", 101, NULL, NULL) != -EPROTO) return 18;
                 close(pair[0]);
                 close(pair[1]);
 
@@ -1612,7 +1619,8 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 op.dispatch_y = 1;
                 op.dispatch_z = 1;
 
-                int rc = send_generic_vulkan_dispatch_op(&op, NULL, NULL, NULL, 0);
+                int rc = send_generic_vulkan_dispatch_op(
+                    &op, NULL, NULL, NULL, 0, NULL, NULL);
                 close(shader.code_fd);
                 return rc;
             }}
@@ -3985,7 +3993,7 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-    def test_compute_only_barrier_and_query_do_not_mark_command_buffer_as_graphics(self):
+    def test_compute_only_barrier_stays_local_but_query_uses_executor_frame(self):
         source = textwrap.dedent(
             f"""
             #include <stdint.h>
@@ -4019,23 +4027,26 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                     return 2;
                 }}
 
-                VkQueryPool query_pool = VK_NULL_HANDLE;
-                VkQueryPoolCreateInfo query_info;
-                memset(&query_info, 0, sizeof(query_info));
-                query_info.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
-                query_info.queryType = VK_QUERY_TYPE_TIMESTAMP;
-                query_info.queryCount = 2;
-                if (vkCreateQueryPool(device, &query_info, NULL, &query_pool) != VK_SUCCESS || !query_pool) {{
-                    fprintf(stderr, "query pool create failed\\n");
-                    return 3;
-                }}
-                vkCmdWriteTimestamp((VkCommandBuffer)cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, query_pool, 0);
-                if (command_buffer_needs_graphics_submit_sync_frame(cmd)) {{
-                    fprintf(stderr, "compute-only query incorrectly requires graphics submit count=%u\\n",
+                PdockerVkDevice *dev = sync_test_device_object();
+                PdockerVkQueryPool query_pool;
+                memset(&query_pool, 0, sizeof(query_pool));
+                query_pool.owner_device_id = dev->object_id;
+                query_pool.capability_snapshot = dev->capability_snapshot;
+                query_pool.type = VK_QUERY_TYPE_TIMESTAMP;
+                query_pool.query_count = 2;
+                query_pool.pool_id = 17;
+                query_pool.result_fd = -1;
+                query_pool.executor_tracked = true;
+                if (!query_pool_register(&query_pool)) return 3;
+                vkCmdWriteTimestamp((VkCommandBuffer)cmd,
+                                    VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                                    pdocker_vk_query_pool_to_handle(&query_pool), 0);
+                if (!command_buffer_needs_graphics_submit_sync_frame(cmd)) {{
+                    fprintf(stderr, "query transport frame was not required count=%u\\n",
                             cmd->graphics_command_op_count);
                     return 4;
                 }}
-                vkDestroyQueryPool(device, query_pool, NULL);
+                if (!query_pool_unregister_object(&query_pool)) return 5;
                 free(cmd);
                 return 0;
             }}
@@ -4161,7 +4172,11 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
                 unsetenv("PDOCKER_GPU_QUEUE_SOCKET");
                 VkDevice vk_device = sync_test_bind_global_queue(0, 0);
                 if (!vk_device) return 21;
-                if (!advertised_timeline_semaphore()) {{
+                PdockerVkDevice *initial_device =
+                    pdocker_vk_device_from_handle(vk_device);
+                if (!initial_device ||
+                    !advertised_timeline_semaphore(
+                        initial_device->capability_snapshot)) {{
                     if (make_timeline(vk_device, 5) != VK_NULL_HANDLE) {{
                         fprintf(stderr, "timeline semaphore was accepted without advertised support\\n");
                         return 20;
