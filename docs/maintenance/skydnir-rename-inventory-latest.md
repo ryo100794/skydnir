@@ -6,51 +6,51 @@ This generated ledger classifies tracked `pdocker`-family names before
 any public Skydnir rename work proceeds.  It is intentionally an
 inventory, not a replacement script.
 
-- Entries: `20717`
-- Skipped binary files: `22`
+- Entries: `39894`
+- Skipped binary files: `23`
 
 ## Counts by Token
 
 | Token | Count |
 |---|---:|
-| `PDOCKER` | 4212 |
+| `PDOCKER` | 12400 |
 | `PDocker` | 12 |
-| `Pdocker` | 1263 |
+| `Pdocker` | 9222 |
 | `pDocker` | 10 |
-| `pdocker` | 13400 |
-| `pdocker-android` | 84 |
-| `pdockerd` | 1736 |
+| `pdocker` | 16372 |
+| `pdocker-android` | 105 |
+| `pdockerd` | 1773 |
 
 ## Counts by Category
 
 | Category | Count |
 |---|---:|
-| `android_ui_or_package_surface` | 173 |
-| `artifact_schema` | 912 |
+| `android_ui_or_package_surface` | 174 |
+| `artifact_schema` | 7564 |
 | `cli_command` | 29 |
-| `config_path` | 137 |
-| `daemon_binary_or_service` | 533 |
-| `documentation_reference` | 177 |
-| `environment_variable` | 2827 |
-| `historical_evidence` | 11601 |
-| `internal_reference` | 1935 |
-| `socket_or_storage_path` | 758 |
-| `test_fixture` | 1635 |
+| `config_path` | 138 |
+| `daemon_binary_or_service` | 542 |
+| `documentation_reference` | 188 |
+| `environment_variable` | 8601 |
+| `historical_evidence` | 11767 |
+| `internal_reference` | 3778 |
+| `socket_or_storage_path` | 838 |
+| `test_fixture` | 6275 |
 
 ## Counts by Phase
 
 | Phase | Count |
 |---|---:|
-| `do-not-rewrite-history` | 12513 |
-| `phase-0-guard` | 1635 |
-| `phase-1-or-historical-context` | 177 |
-| `phase-1-ui-copy-or-phase-4-package` | 173 |
+| `do-not-rewrite-history` | 19331 |
+| `phase-0-guard` | 6275 |
+| `phase-1-or-historical-context` | 188 |
+| `phase-1-ui-copy-or-phase-4-package` | 174 |
 | `phase-2-cli-alias` | 29 |
-| `phase-2-daemon-alias` | 533 |
-| `phase-3-config-migration` | 137 |
-| `phase-4-or-later-migration-required` | 758 |
-| `phase-5-dual-read-required` | 2827 |
-| `phase-5-internal-namespace` | 1935 |
+| `phase-2-daemon-alias` | 542 |
+| `phase-3-config-migration` | 138 |
+| `phase-4-or-later-migration-required` | 838 |
+| `phase-5-dual-read-required` | 8601 |
+| `phase-5-internal-namespace` | 3778 |
 
 ## Next Action
 
