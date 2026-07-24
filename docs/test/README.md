@@ -36,7 +36,7 @@ run it, and where the latest result is stored.
 | [`SAF_DIRECT_OUTPUT_GATE.md`](SAF_DIRECT_OUTPUT_GATE.md) | Documents/SAF direct-output promotion gate and fail-closed artifact contract |
 | [`OOM_LMK_SURVIVAL_GATE.md`](OOM_LMK_SURVIVAL_GATE.md) | OOM/LMK survival, telemetry, and non-promoting planned-gap evidence contract |
 | [`LLAMA_GPU_DEVICE_RUNBOOK_20260513.md`](LLAMA_GPU_DEVICE_RUNBOOK_20260513.md) | Connected-device llama GPU runbook and non-promoting artifact capture procedure |
-| [`VULKAN_ICD_DEVICE_SOCKET_GATE.md`](VULKAN_ICD_DEVICE_SOCKET_GATE.md) | Device-gated glibc Vulkan ICD to app GPU executor socket evidence contract |
+| [`VULKAN_ICD_DEVICE_SOCKET_GATE.md`](VULKAN_ICD_DEVICE_SOCKET_GATE.md) | Device-gated glibc Vulkan ICD contract for storage-image transport and generic Query/sync2/idle/headless-WSI P0 paths |
 | [`REFACTOR_RESILIENCE.md`](REFACTOR_RESILIENCE.md) | Refactor-resilience testing contract for external behavior |
 | [`compat-audit-latest.md`](compat-audit-latest.md) | Latest recorded compatibility audit result |
 | [`file-io-bench-latest.md`](file-io-bench-latest.md) | Latest file I/O benchmark result |
@@ -71,8 +71,8 @@ run it, and where the latest result is stored.
 - `scripts/test/smoke-vulkan-icd-bridge.sh` — Lightweight Vulkan ICD dispatch
   smoke through the pdocker GPU executor socket; planned-skip when the local
   executor Vulkan preflight is unavailable.
-- `scripts/test/android-vulkan-icd-device-socket-smoke.sh` — Connected-device runner for the glibc ICD -> app GPU executor socket promotion gate.
-- `scripts/test/verify-vulkan-icd-device-socket-artifact.py` — Verifies pass and planned-skip Vulkan ICD device-socket artifacts.
+- `scripts/test/android-vulkan-icd-device-socket-smoke.sh` — Connected-device runner for storage-image transport plus generic Query/sync2/idle/headless-WSI P0 promotion evidence.
+- `scripts/test/verify-vulkan-icd-device-socket-artifact.py` — Fail-closed verifier for detailed pass evidence and structured planned-skip Vulkan device-socket artifacts.
 - `scripts/test/smoke-vulkan-icd-storage-image.sh` — Host-side storage-image
   object-transport smoke. Real-device promotion requires
   `VULKAN_ICD_DEVICE_SOCKET_GATE.md`, not the host Vulkan loader.

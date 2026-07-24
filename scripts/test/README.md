@@ -6,8 +6,8 @@ docs, CI, and manual commands unless a deliberate migration says otherwise.
 
 | Implementation | Stable wrapper |
 |---|---|
-| `android-vulkan-icd-device-socket-smoke.sh` | connected-device Vulkan ICD socket gate runner |
-| `verify-vulkan-icd-device-socket-artifact.py` | verifier for Vulkan ICD socket gate artifacts |
+| `android-vulkan-icd-device-socket-smoke.sh` | connected-device glibc ICD gate for storage-image transport plus generic Query/sync2/idle/headless-WSI P0 paths |
+| `verify-vulkan-icd-device-socket-artifact.py` | fail-closed verifier for detailed Vulkan ICD socket gate evidence and planned-skip artifacts |
 | `smoke-opencl-bridge.sh` | [`../smoke-opencl-bridge.sh`](../smoke-opencl-bridge.sh) |
 | `smoke-vulkan-icd-bridge.sh` | [`../smoke-vulkan-icd-bridge.sh`](../smoke-vulkan-icd-bridge.sh) |
 | `smoke-vulkan-icd-storage-image.sh` | [`../smoke-vulkan-icd-storage-image.sh`](../smoke-vulkan-icd-storage-image.sh) |
